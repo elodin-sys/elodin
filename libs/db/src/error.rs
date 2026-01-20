@@ -53,6 +53,8 @@ pub enum Error {
     SchemaMismatch,
     #[error("missing db_state file at {0}")]
     MissingDbState(PathBuf),
+    #[error("fix_timestamps: {0}")]
+    FixTimestamps(String),
 }
 
 impl From<impeller2_stellar::Error> for Error {

@@ -56,6 +56,7 @@ pub mod append_log;
 mod arrow;
 pub mod axum;
 mod error;
+pub mod fix_timestamps;
 mod msg_log;
 pub(crate) mod time_series;
 mod vtable_stream;
@@ -283,7 +284,9 @@ pub struct DB {
     pub path: PathBuf,
     pub default_stream_time_step: AtomicU64,
     pub last_updated: AtomicCell<Timestamp>,
-    pub earliest_timestamp: Timestamp,
+    pub earliest_timestamp: AtomicCell<Timestamp>,
+    // Wall-clock timestamp at the moment the DB start anchor was set.
+    db_start_wall_clock: AtomicCell<Timestamp>,
 }
 
 #[derive(Default)]
@@ -310,12 +313,15 @@ impl DB {
         info!(?path, "created db");
 
         std::fs::create_dir_all(&path)?;
+        let now = Timestamp::now();
         let default_stream_time_step = AtomicU64::new(time_step.as_nanos() as u64);
+        let mut db_config = DbConfig {
+            default_stream_time_step: time_step,
+            ..Default::default()
+        };
+        db_config.set_time_start_timestamp_micros(now.0);
         let state = State {
-            db_config: DbConfig {
-                default_stream_time_step: time_step,
-                ..Default::default()
-            },
+            db_config,
             ..Default::default()
         };
         let db = DB {
@@ -326,7 +332,8 @@ impl DB {
             vtable_gen: AtomicCell::new(0),
             default_stream_time_step,
             last_updated: AtomicCell::new(Timestamp(i64::MIN)),
-            earliest_timestamp: Timestamp::now(),
+            earliest_timestamp: AtomicCell::new(now),
+            db_start_wall_clock: AtomicCell::new(now),
         };
         db.save_db_state()?;
         Ok(db)
@@ -392,6 +399,39 @@ impl DB {
         }
         File::open(&self.path)?.sync_all()?;
         Ok(())
+    }
+
+    /// Truncate all component data and message logs, clearing all data while preserving schemas and metadata.
+    ///
+    /// This effectively resets the database to an empty state, ready for fresh data.
+    /// The vtable generation is incremented to signal that clients should refresh their views.
+    pub fn truncate(&self) {
+        self.with_state(|state| {
+            state.truncate_all();
+        });
+        self.last_updated.store(Timestamp(i64::MIN));
+        self.vtable_gen.fetch_add(1, atomic::Ordering::SeqCst);
+    }
+
+    /// Set the earliest timestamp for this database.
+    ///
+    /// This is typically called during initialization to set the starting timestamp
+    /// for the simulation. If not called, defaults to the current system time.
+    pub fn set_earliest_timestamp(&self, timestamp: Timestamp) -> Result<(), Error> {
+        self.with_state_mut(|state| {
+            state.db_config.set_time_start_timestamp_micros(timestamp.0);
+        });
+        self.earliest_timestamp.store(timestamp);
+        self.db_start_wall_clock.store(Timestamp::now());
+        self.save_db_state()
+    }
+
+    pub fn apply_implicit_timestamp(&self) -> Timestamp {
+        let start = self.earliest_timestamp.latest();
+        let base = self.db_start_wall_clock.latest();
+        let now = Timestamp::now();
+        let delta = now.0.saturating_sub(base.0);
+        Timestamp(start.0.saturating_add(delta))
     }
 
     pub fn copy_native(&self, target_db_path: impl AsRef<Path>) -> Result<PathBuf, Error> {
@@ -480,7 +520,11 @@ impl DB {
 
             trace!("Opening component file {}", path.display());
             let schema = ComponentSchema::read(schema_path)?;
-            let component = Component::open(&path, component_id, schema.clone())?;
+            let name = component_metadata
+                .get(&component_id)
+                .map(|m| m.name.clone())
+                .unwrap_or_else(|| component_id.to_string());
+            let component = Component::open(&path, component_id, name, schema.clone())?;
 
             // Check if this component is a timestamp source - if so, exclude from time calculations
             let is_timestamp_source = component_metadata
@@ -525,17 +569,24 @@ impl DB {
 
         info!(db.path = ?path, "opened db");
         let db_state = DbConfig::read(db_state_path)?;
+        let now = Timestamp::now();
         let state = State {
             components,
             component_metadata,
             msg_logs,
+            db_config: db_state.clone(),
             ..Default::default()
         };
-        let earliest_timestamp = if start_timestamp == i64::MAX {
-            Timestamp::now()
-        } else {
-            Timestamp(start_timestamp)
-        };
+        let earliest_timestamp = db_state
+            .time_start_timestamp_micros()
+            .map(Timestamp)
+            .unwrap_or_else(|| {
+                if start_timestamp == i64::MAX {
+                    now
+                } else {
+                    Timestamp(start_timestamp)
+                }
+            });
         Ok(DB {
             state: RwLock::new(state),
             snapshot_barrier: SnapshotBarrier::new(),
@@ -546,7 +597,8 @@ impl DB {
                 db_state.default_stream_time_step.as_nanos() as u64
             ),
             last_updated: AtomicCell::new(Timestamp(last_updated)),
-            earliest_timestamp,
+            earliest_timestamp: AtomicCell::new(earliest_timestamp),
+            db_start_wall_clock: AtomicCell::new(now),
         })
     }
 
@@ -626,7 +678,7 @@ impl DB {
                     stream_id,
                     Duration::from_nanos(behavior.timestep),
                     match behavior.initial_timestamp {
-                        InitialTimestamp::Earliest => self.earliest_timestamp,
+                        InitialTimestamp::Earliest => self.earliest_timestamp.latest(),
                         InitialTimestamp::Latest => self.last_updated.latest(),
                         InitialTimestamp::Manual(timestamp) => timestamp,
                     },
@@ -679,15 +731,22 @@ impl State {
             return Ok(());
         }
         info!(component.id = ?component_id.0, is_timestamp_source, "inserting");
+        // Check if custom metadata was previously set (e.g., via SetComponentMetadata)
+        // If so, use the existing name; otherwise fall back to the component ID
+        let name = self
+            .component_metadata
+            .get(&component_id)
+            .map(|m| m.name.clone())
+            .unwrap_or_else(|| component_id.to_string());
         let mut component_metadata = ComponentMetadata {
             component_id,
-            name: component_id.to_string(),
+            name: name.clone(),
             metadata: Default::default(),
         };
         if is_timestamp_source {
             component_metadata.set_timestamp_source(true);
         }
-        let component = Component::create(db_path, component_id, schema, Timestamp::now())?;
+        let component = Component::create(db_path, component_id, name, schema, Timestamp::now())?;
         if !self.component_metadata.contains_key(&component_id) {
             self.set_component_metadata(component_metadata, db_path)?;
         }
@@ -718,6 +777,10 @@ impl State {
         }
         info!(component.name= ?metadata.name, component.id = ?metadata.component_id.0, "setting component metadata");
         metadata.write(component_metadata_path)?;
+        // Sync the name to the Component for better warning messages
+        if let Some(component) = self.components.get(&metadata.component_id) {
+            component.set_name(metadata.name.clone());
+        }
         self.component_metadata
             .insert(metadata.component_id, metadata);
         Ok(())
@@ -750,6 +813,16 @@ impl State {
         let msg_log = self.get_or_insert_msg_log(id, db_path)?;
         msg_log.set_metadata(metadata)?;
         Ok(())
+    }
+
+    /// Truncate all components and message logs, clearing all data while preserving schemas and metadata.
+    pub fn truncate_all(&self) {
+        for component in self.components.values() {
+            component.truncate();
+        }
+        for msg_log in self.msg_logs.values() {
+            msg_log.truncate();
+        }
     }
 }
 
@@ -901,6 +974,7 @@ impl Component {
     pub fn create(
         db_path: &Path,
         component_id: ComponentId,
+        name: String,
         schema: ComponentSchema,
         start_timestamp: Timestamp,
     ) -> Result<Self, Error> {
@@ -912,6 +986,7 @@ impl Component {
         }
         let time_series = TimeSeries::create(
             component_path.clone(),
+            name,
             start_timestamp,
             schema.size() as u64,
         )?;
@@ -925,9 +1000,10 @@ impl Component {
     pub fn open(
         path: impl AsRef<Path>,
         component_id: ComponentId,
+        name: String,
         schema: ComponentSchema,
     ) -> Result<Self, Error> {
-        let time_series = TimeSeries::open(path)?;
+        let time_series = TimeSeries::open(path, name)?;
         Ok(Component {
             component_id,
             time_series,
@@ -954,6 +1030,18 @@ impl Component {
     fn sync_all(&self) -> Result<(), Error> {
         self.time_series.sync_all()
     }
+
+    /// Truncate the component, clearing all time-series data while preserving the schema.
+    pub fn truncate(&self) {
+        self.time_series.truncate();
+    }
+
+    /// Update the human-readable name for this component.
+    ///
+    /// This is used to provide better context in warning messages.
+    pub fn set_name(&self, name: String) {
+        self.time_series.set_name(name);
+    }
 }
 
 struct DBSink<'a> {
@@ -979,7 +1067,7 @@ impl Decomponentize for DBSink<'_> {
             return Err(Error::ComponentNotFound(component_id));
         };
         let time_series_empty = component.time_series.index().is_empty();
-        // In auto-timestamp mode (no explicit timestamp provided), concurrent writers
+        // When timestamps are auto-generated (no explicit timestamp provided), concurrent writers
         // may occasionally observe a slightly newer last timestamp and reject with
         // TimeTravel. In that case, clamp the timestamp to last+1 and retry.
         if let Err(err) = component.time_series.push_buf(timestamp, value_buf) {
@@ -992,7 +1080,7 @@ impl Decomponentize for DBSink<'_> {
                             // ensure strictly non-decreasing order
                             timestamp = Timestamp(last_ts.0.saturating_add(1));
                         } else {
-                            timestamp = Timestamp::now();
+                            timestamp = self.table_received;
                         }
                         match component.time_series.push_buf(timestamp, value_buf) {
                             Ok(()) => break,
@@ -1377,7 +1465,7 @@ async fn handle_packet<A: AsyncWrite + 'static>(
             tx.send_msg(&db.db_config()).await?;
         }
         Packet::Msg(m) if m.id == GetEarliestTimestamp::ID => {
-            tx.send_msg(&EarliestTimestamp(db.earliest_timestamp))
+            tx.send_msg(&EarliestTimestamp(db.earliest_timestamp.latest()))
                 .await?;
         }
         Packet::Msg(m) if m.id == GetDbSettings::ID => {
@@ -1392,7 +1480,7 @@ async fn handle_packet<A: AsyncWrite + 'static>(
                     snapshot_barrier: &db.snapshot_barrier,
                     last_updated: &db.last_updated,
                     sunk_new_time_series: false,
-                    table_received: Timestamp::now(),
+                    table_received: db.apply_implicit_timestamp(),
                 };
                 table.sink(&state.vtable_registry, &mut sink)??;
                 if sink.sunk_new_time_series {
@@ -1548,7 +1636,7 @@ async fn handle_packet<A: AsyncWrite + 'static>(
             })?;
         }
         Packet::Msg(m) => {
-            let timestamp = m.timestamp.unwrap_or(Timestamp::now());
+            let timestamp = m.timestamp.unwrap_or_else(|| db.apply_implicit_timestamp());
             db.push_msg(timestamp, m.id, &m.buf)?
         }
         _ => {}
@@ -1743,7 +1831,7 @@ fn handle_stream<A: AsyncWrite + 'static>(
                 stream.id,
                 Duration::from_nanos(fixed_rate.timestep),
                 match fixed_rate.initial_timestamp {
-                    InitialTimestamp::Earliest => db.earliest_timestamp,
+                    InitialTimestamp::Earliest => db.earliest_timestamp.latest(),
                     InitialTimestamp::Latest => db.last_updated.latest(),
                     InitialTimestamp::Manual(timestamp) => timestamp,
                 },

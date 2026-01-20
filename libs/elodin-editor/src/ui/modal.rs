@@ -4,9 +4,9 @@ use bevy::{
         world::World,
     },
     prelude::In,
-    window::Window,
+    window::{PrimaryWindow, Window},
 };
-use bevy_egui::{EguiContexts, egui};
+use bevy_egui::{EguiContexts, EguiTextureHandle, egui};
 
 // Modal system for displaying dialogs and messages.
 //
@@ -49,7 +49,7 @@ use bevy_egui::{EguiContexts, egui};
 // use bevy::prelude::*;
 // use crate::ui::{DialogEvent, DialogAction};
 //
-// fn handle_dialog_events(mut dialog_events: EventReader<DialogEvent>) {
+// fn handle_dialog_events(mut dialog_events: MessageReader<DialogEvent>) {
 //     for event in dialog_events.read() {
 //         match &event.action {
 //             DialogAction::Close => {
@@ -80,8 +80,8 @@ use bevy_egui::{EguiContexts, egui};
 // ```
 
 use crate::ui::{
-    Dialog, DialogAction, DialogButton, DialogEvent, InspectorAnchor, SettingModal,
-    SettingModalState, colors::get_scheme, images, utils::MarginSides,
+    Dialog, DialogAction, DialogButton, DialogEvent, FocusedWindow, SettingModal,
+    SettingModalState, colors::get_scheme, images, tiles::WindowState, utils::MarginSides,
 };
 use bevy::prelude::*;
 
@@ -92,7 +92,9 @@ pub struct ModalWithSettings<'w, 's> {
     contexts: EguiContexts<'w, 's>,
     images: Local<'s, images::Images>,
     window: Query<'w, 's, &'static Window>,
-    inspector_anchor: Res<'w, InspectorAnchor>,
+    window_states: Query<'w, 's, &'static WindowState>,
+    focused_window: Res<'w, FocusedWindow>,
+    primary_window: Query<'w, 's, Entity, With<PrimaryWindow>>,
     setting_modal_state: Res<'w, SettingModalState>,
 }
 
@@ -127,18 +129,28 @@ impl RootWidgetSystem for ModalWithSettings<'_, '_> {
         let mut contexts = state_mut.contexts;
         let images = state_mut.images;
         let window = state_mut.window;
-        let inspector_anchor = state_mut.inspector_anchor;
+        let window_states = state_mut.window_states;
+        let focused_window = state_mut.focused_window;
+        let primary_window = state_mut.primary_window;
         let setting_modal_state = state_mut.setting_modal_state;
 
         let modal_size = egui::vec2(400.0, 480.0);
 
-        let modal_rect = if let Some(inspector_anchor) = inspector_anchor.0 {
+        let target_window = focused_window.0.or_else(|| primary_window.iter().next());
+        let inspector_anchor = target_window
+            .and_then(|entity| window_states.get(entity).ok())
+            .and_then(|state| state.ui_state.inspector_anchor.0);
+
+        let modal_rect = if let Some(inspector_anchor) = inspector_anchor {
             egui::Rect::from_min_size(
                 egui::pos2(inspector_anchor.x - modal_size.x, inspector_anchor.y),
                 modal_size,
             )
         } else {
-            let window = window.iter().next().unwrap();
+            let window = target_window
+                .and_then(|entity| window.get(entity).ok())
+                .or_else(|| window.iter().next())
+                .expect("no window available");
             egui::Rect::from_center_size(
                 egui::pos2(
                     window.resolution.width() / 2.0,
@@ -149,7 +161,7 @@ impl RootWidgetSystem for ModalWithSettings<'_, '_> {
         };
 
         if let Some(setting_modal_state) = setting_modal_state.0.clone() {
-            let close_icon = contexts.add_image(images.icon_close.clone_weak());
+            let close_icon = contexts.add_image(EguiTextureHandle::Weak(images.icon_close.id()));
 
             egui::Window::new("SETTING_MODAL")
                 .title_bar(false)
@@ -180,7 +192,7 @@ impl RootWidgetSystem for ModalWithSettings<'_, '_> {
 #[derive(SystemParam)]
 pub struct ModalDialog<'w, 's> {
     setting_modal_state: ResMut<'w, SettingModalState>,
-    dialog_events: EventWriter<'w, DialogEvent>,
+    dialog_events: MessageWriter<'w, DialogEvent>,
     _phantom: std::marker::PhantomData<&'s ()>,
 }
 

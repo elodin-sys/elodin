@@ -403,9 +403,12 @@ class World(WorldBuilder):
         max_ticks: Optional[int] = None,
         optimize: bool = False,
         is_canceled: Optional[callable] = None,
+        pre_step: Optional[callable] = None,
         post_step: Optional[callable] = None,
         db_path: Optional[str] = None,
         interactive: bool = True,
+        start_timestamp: Optional[int] = None,
+        log_level: Optional[str] = None,
     ):
         current_frame = inspect.currentframe()
         if current_frame is None:
@@ -421,9 +424,12 @@ class World(WorldBuilder):
             max_ticks,
             optimize,
             is_canceled,
+            pre_step,
             post_step,
             db_path,
             interactive,
+            start_timestamp,
+            log_level,
         )
         locals = frame.f_locals
         if not interactive and addr is not None:

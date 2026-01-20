@@ -8,9 +8,9 @@ use crate::{
 };
 use bevy::{
     asset::Assets,
+    camera::{Camera, OrthographicProjection, Projection, ScalingMode},
     ecs::{
         entity::Entity,
-        event::EventReader,
         prelude::Resource,
         query::With,
         system::{Commands, Local, Query, Res, SystemParam},
@@ -22,7 +22,6 @@ use bevy::{
     },
     math::{DVec2, Rect, Vec2},
     prelude::{Component, ResMut},
-    render::camera::{Camera, OrthographicProjection, Projection, ScalingMode},
     window::{PrimaryWindow, Window},
 };
 use bevy_egui::egui::{self, Align, CornerRadius, Frame, Layout, Margin, RichText, Stroke};
@@ -36,14 +35,16 @@ use std::{
 };
 
 use crate::{
-    Offset, SelectedObject, SelectedTimeRange, TimeRangeBehavior,
+    Offset, SelectedTimeRange, TimeRangeBehavior,
     plugins::LogicalKeyState,
     ui::{
+        SelectedObject,
         colors::{ColorExt, get_scheme, with_opacity},
         plot::{
             CollectedGraphData, GraphState, Line,
             gpu::{LineBundle, LineConfig, LineUniform},
         },
+        tiles::WindowState,
         time_label::{PrettyDuration, time_label},
         timeline::DurationExt,
         utils::format_num,
@@ -76,18 +77,18 @@ pub struct PlotWidget<'w, 's> {
     current_timestamp: Res<'w, CurrentTimestamp>,
     time_range_behavior: ResMut<'w, TimeRangeBehavior>,
     line_query: Query<'w, 's, &'static LineHandle>,
-    selected_object: ResMut<'w, SelectedObject>,
+    window_states: Query<'w, 's, &'static mut WindowState>,
 }
 
 impl WidgetSystem for PlotWidget<'_, '_> {
-    type Args = (Entity, egui::TextureId);
+    type Args = (Entity, egui::TextureId, Entity);
     type Output = ();
 
     fn ui_system(
         world: &mut bevy::prelude::World,
         state: &mut bevy::ecs::system::SystemState<Self>,
         ui: &mut egui::Ui,
-        (id, scrub_icon): Self::Args,
+        (id, scrub_icon, target_window): Self::Args,
     ) -> Self::Output {
         let PlotWidget {
             collected_graph_data,
@@ -99,7 +100,7 @@ impl WidgetSystem for PlotWidget<'_, '_> {
             current_timestamp,
             mut time_range_behavior,
             line_query,
-            mut selected_object,
+            mut window_states,
         } = state.get_mut(world);
 
         let Ok(mut graph_state) = graphs_state.get_mut(id) else {
@@ -134,13 +135,16 @@ impl WidgetSystem for PlotWidget<'_, '_> {
             line_handles: &line_query,
             collected_graph_data: &collected_graph_data,
         };
+        let Ok(mut window_state) = window_states.get_mut(target_window) else {
+            return;
+        };
         plot.render(
             ui,
             data_source,
             &mut graph_state,
             &scrub_icon,
             id,
-            selected_object.as_mut(),
+            &mut window_state.ui_state.selected_object,
             &mut time_range_behavior,
         );
     }
@@ -595,27 +599,24 @@ impl TimeseriesPlot {
                 self.rect.min.y + 6.0,
             );
 
-            egui::Area::new(egui::Id::new((
-                "plot_lock_btn",
-                (graph_state as *const _) as usize,
-            )))
-            .order(egui::Order::Foreground)
-            .fixed_pos(lock_pos)
-            .show(ui.ctx(), |ui| {
-                let old_pad = ui.spacing().button_padding;
-                ui.style_mut().spacing.button_padding = egui::vec2(2.0, 2.0);
-                let icon = if graph_state.locked {
-                    ICON_LOCK
-                } else {
-                    ICON_LOCK_OPEN_RIGHT
-                };
-                let resp = icon_button(ui, icon);
-                if resp.clicked() {
-                    graph_state.locked = !graph_state.locked;
-                }
-                resp.on_hover_text(if graph_state.locked { "Unlock" } else { "Lock" });
-                ui.style_mut().spacing.button_padding = old_pad;
-            });
+            egui::Area::new(egui::Id::new(("plot_lock_btn", graph_entity)))
+                .order(egui::Order::Foreground)
+                .fixed_pos(lock_pos)
+                .show(ui.ctx(), |ui| {
+                    let old_pad = ui.spacing().button_padding;
+                    ui.style_mut().spacing.button_padding = egui::vec2(2.0, 2.0);
+                    let icon = if graph_state.locked {
+                        ICON_LOCK
+                    } else {
+                        ICON_LOCK_OPEN_RIGHT
+                    };
+                    let resp = icon_button(ui, icon);
+                    if resp.clicked() {
+                        graph_state.locked = !graph_state.locked;
+                    }
+                    resp.on_hover_text(if graph_state.locked { "Unlock" } else { "Lock" });
+                    ui.style_mut().spacing.button_padding = old_pad;
+                });
         }
 
         response.context_menu(|ui| {
@@ -641,7 +642,6 @@ impl TimeseriesPlot {
                     start: Offset::Fixed(start),
                     end: Offset::Fixed(end),
                 };
-                ui.close_menu();
             }
         });
 
@@ -1235,7 +1235,7 @@ pub fn sync_locked_graphs(
 
 pub fn zoom_graph(
     mut query: Query<(&mut GraphState, &Camera)>,
-    mut scroll_events: EventReader<MouseWheel>,
+    mut scroll_events: MessageReader<MouseWheel>,
     windows: Query<(Entity, &Window)>,
     primary_window: Query<Entity, With<PrimaryWindow>>,
     key_state: Res<LogicalKeyState>,
@@ -1472,7 +1472,9 @@ pub fn reset_graph(
     }
 }
 
-fn scroll_offsets_from_events(scroll_events: &mut EventReader<MouseWheel>) -> HashMap<Entity, f32> {
+fn scroll_offsets_from_events(
+    scroll_events: &mut MessageReader<MouseWheel>,
+) -> HashMap<Entity, f32> {
     let pixels_per_line = SCROLL_PIXELS_PER_LINE;
     let mut offsets: HashMap<Entity, f32> = HashMap::new();
     for ev in scroll_events.read() {

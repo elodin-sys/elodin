@@ -37,7 +37,9 @@ fn parse_schematic_elem(node: &KdlNode, src: &str) -> Result<SchematicElem, KdlS
     match node.name().value() {
         "tabs" | "hsplit" | "vsplit" | "viewport" | "graph" | "component_monitor"
         | "action_pane" | "query_table" | "query_plot" | "inspector" | "hierarchy"
-        | "schematic_tree" | "dashboard" => Ok(SchematicElem::Panel(parse_panel(node, src)?)),
+        | "schematic_tree" | "data_overview" | "dashboard" => {
+            Ok(SchematicElem::Panel(parse_panel(node, src)?))
+        }
         "window" => Ok(SchematicElem::Window(parse_window(node, src)?)),
         "theme" => Ok(SchematicElem::Theme(parse_theme(node, src)?)),
         "object_3d" => Ok(SchematicElem::Object3d(parse_object_3d(node, src)?)),
@@ -132,6 +134,21 @@ fn parse_theme(node: &KdlNode, _src: &str) -> Result<ThemeConfig, KdlSchematicEr
     Ok(ThemeConfig { mode, scheme })
 }
 
+fn parse_name(node: &KdlNode) -> Option<String> {
+    node.get("name")
+        .and_then(|v| v.as_string())
+        .map(|s| s.to_string())
+}
+
+fn require_name(node: &KdlNode, src: &str) -> Result<String, KdlSchematicError> {
+    parse_name(node).ok_or_else(|| KdlSchematicError::MissingProperty {
+        property: "name".to_string(),
+        node: node.name().to_string(),
+        src: src.to_string(),
+        span: node.span(),
+    })
+}
+
 fn parse_window_rect(node: &KdlNode, src: &str) -> Result<WindowRect, KdlSchematicError> {
     if node.entries().len() != 4 {
         return Err(KdlSchematicError::InvalidValue {
@@ -193,7 +210,8 @@ fn parse_panel(node: &KdlNode, kdl_src: &str) -> Result<Panel, KdlSchematicError
         "query_plot" => parse_query_plot(node, kdl_src),
         "inspector" => Ok(Panel::Inspector),
         "hierarchy" => Ok(Panel::Hierarchy),
-        "schematic_tree" => Ok(Panel::SchematicTree),
+        "schematic_tree" => Ok(Panel::SchematicTree(parse_name(node))),
+        "data_overview" => Ok(Panel::DataOverview(parse_name(node))),
         "dashboard" => parse_dashboard(node),
         _ => Err(KdlSchematicError::UnknownNode {
             node_type: node.name().to_string(),
@@ -229,10 +247,7 @@ fn parse_split(
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
 
-    let name = node
-        .get("name")
-        .and_then(|v| v.as_string())
-        .map(|s| s.to_string());
+    let name = parse_name(node);
 
     let split = Split {
         panels,
@@ -256,10 +271,7 @@ fn parse_viewport(node: &KdlNode, kdl_src: &str) -> Result<Panel, KdlSchematicEr
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
 
-    let name = node
-        .get("name")
-        .and_then(|v| v.as_string())
-        .map(|s| s.to_string());
+    let name = parse_name(node);
     let show_grid = node
         .get("show_grid")
         .and_then(|v| v.as_bool())
@@ -275,7 +287,15 @@ fn parse_viewport(node: &KdlNode, kdl_src: &str) -> Result<Panel, KdlSchematicEr
     let pos = node
         .get("pos")
         .and_then(|v| v.as_string())
-        .map(|s| s.to_string());
+        .map(|s| s.to_string())
+        .and_then(|s| {
+            let trimmed = s.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_string())
+            }
+        });
 
     let look_at = node
         .get("look_at")
@@ -327,10 +347,7 @@ fn parse_graph(node: &KdlNode, src: &str) -> Result<Panel, KdlSchematicError> {
         })?
         .to_string();
 
-    let name = node
-        .get("name")
-        .and_then(|v| v.as_string())
-        .map(|s| s.to_string());
+    let name = parse_name(node);
 
     let graph_type = node
         .get("type")
@@ -373,6 +390,7 @@ fn parse_graph(node: &KdlNode, src: &str) -> Result<Panel, KdlSchematicError> {
 }
 
 fn parse_component_monitor(node: &KdlNode, src: &str) -> Result<Panel, KdlSchematicError> {
+    let name = parse_name(node);
     let component_name = node
         .get("component_name")
         .and_then(|v| v.as_string())
@@ -385,22 +403,12 @@ fn parse_component_monitor(node: &KdlNode, src: &str) -> Result<Panel, KdlSchema
 
     Ok(Panel::ComponentMonitor(ComponentMonitor {
         component_name: component_name.to_string(),
+        name,
     }))
 }
 
 fn parse_action_pane(node: &KdlNode, src: &str) -> Result<Panel, KdlSchematicError> {
-    let label = node
-        .entries()
-        .iter()
-        .find(|e| e.name().is_none())
-        .and_then(|e| e.value().as_string())
-        .ok_or_else(|| KdlSchematicError::MissingProperty {
-            property: "label".to_string(),
-            node: "action_pane".to_string(),
-            src: src.to_string(),
-            span: node.span(),
-        })?
-        .to_string();
+    let name = require_name(node, src)?;
 
     let lua = node
         .get("lua")
@@ -413,10 +421,11 @@ fn parse_action_pane(node: &KdlNode, src: &str) -> Result<Panel, KdlSchematicErr
         })?
         .to_string();
 
-    Ok(Panel::ActionPane(ActionPane { label, lua }))
+    Ok(Panel::ActionPane(ActionPane { name, lua }))
 }
 
 fn parse_query_table(node: &KdlNode) -> Result<Panel, KdlSchematicError> {
+    let name = parse_name(node);
     let query = node
         .entries()
         .iter()
@@ -435,21 +444,15 @@ fn parse_query_table(node: &KdlNode) -> Result<Panel, KdlSchematicError> {
         })
         .unwrap_or(QueryType::EQL);
 
-    Ok(Panel::QueryTable(QueryTable { query, query_type }))
+    Ok(Panel::QueryTable(QueryTable {
+        name,
+        query,
+        query_type,
+    }))
 }
 
 fn parse_query_plot(node: &KdlNode, src: &str) -> Result<Panel, KdlSchematicError> {
-    let label = node
-        .entries()
-        .iter()
-        .find(|e| e.name().is_none())
-        .ok_or_else(|| KdlSchematicError::MissingProperty {
-            property: "label".to_string(),
-            node: "query_plot".to_string(),
-            src: src.to_string(),
-            span: node.span(),
-        })?
-        .to_string();
+    let name = require_name(node, src)?;
 
     let query = node
         .get("query")
@@ -486,7 +489,7 @@ fn parse_query_plot(node: &KdlNode, src: &str) -> Result<Panel, KdlSchematicErro
         .unwrap_or(QueryType::EQL);
 
     Ok(Panel::QueryPlot(QueryPlot {
-        label,
+        name,
         query,
         refresh_interval,
         auto_refresh,
@@ -788,10 +791,7 @@ fn parse_vector_arrow(node: &KdlNode, src: &str) -> Result<VectorArrow3d, KdlSch
         }
     };
 
-    let name = node
-        .get("name")
-        .and_then(|v| v.as_string())
-        .map(|s| s.to_string());
+    let name = parse_name(node);
 
     let body_frame = node
         .get("body_frame")
@@ -1244,10 +1244,7 @@ fn parse_dashboard_node(node: &KdlNode) -> Result<DashboardNode<()>, KdlSchemati
         .map(|f| f as f32)
         .unwrap_or(16.0);
 
-    let label = node
-        .get("label")
-        .and_then(|v| v.as_string())
-        .map(|s| s.to_string());
+    let name = parse_name(node);
 
     let mut margin = UiRect::default();
     let mut padding = UiRect::default();
@@ -1282,7 +1279,7 @@ fn parse_dashboard_node(node: &KdlNode) -> Result<DashboardNode<()>, KdlSchemati
     }
 
     Ok(DashboardNode {
-        label,
+        name,
         display,
         box_sizing,
         position_type,
@@ -1861,7 +1858,7 @@ object_3d "a.world_pos" {
     #[test]
     fn test_parse_dashboard_with_font_and_color() {
         let kdl = r#"
-dashboard label="Styled Dashboard" {
+dashboard name="Styled Dashboard" {
     node display="flex" flex_direction="column" text="Hello World" font_size=24.0  {
         text_color color="blue"
         node width="100px" height="50px" text="Child Text" font_size=12.0 {
@@ -1874,7 +1871,7 @@ dashboard label="Styled Dashboard" {
 
         assert_eq!(schematic.elems.len(), 1);
         if let SchematicElem::Panel(Panel::Dashboard(dashboard)) = &schematic.elems[0] {
-            assert_eq!(dashboard.root.label, Some("Styled Dashboard".to_string()));
+            assert_eq!(dashboard.root.name, Some("Styled Dashboard".to_string()));
             assert_eq!(dashboard.root.children.len(), 1);
 
             let node = &dashboard.root.children[0];
@@ -1896,7 +1893,7 @@ dashboard label="Styled Dashboard" {
     #[test]
     fn test_parse_dashboard() {
         let kdl = r#"
-dashboard label="Test Dashboard" {
+dashboard name="Test Dashboard" {
     node display="flex" flex_direction="column" {
         text "Hello World"
         node width="100px" height="50px" {
@@ -1909,7 +1906,7 @@ dashboard label="Test Dashboard" {
 
         assert_eq!(schematic.elems.len(), 1);
         if let SchematicElem::Panel(Panel::Dashboard(dashboard)) = &schematic.elems[0] {
-            assert_eq!(dashboard.root.label, Some("Test Dashboard".to_string()));
+            assert_eq!(dashboard.root.name, Some("Test Dashboard".to_string()));
             assert_eq!(dashboard.root.children.len(), 1);
 
             let node = &dashboard.root.children[0];

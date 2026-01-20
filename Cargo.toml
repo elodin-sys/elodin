@@ -58,7 +58,7 @@ members = [
 exclude = ["fsw/sensor-fw", "fsw/blackbox", "docs/memserve"]
 
 [workspace.package]
-version = "0.15.6-alpha.0"
+version = "0.16.0-alpha.5"
 edition = "2024"
 repository = "https://github.com/elodin-sys/elodin"
 
@@ -99,5 +99,5 @@ inherits = "release"
 debug = true
 
 [patch.crates-io]
-bevy_editor_cam = { git = "https://github.com/shanecelis/bevy_editor_cam.git", branch = "feat/system-set-0.6.0" }
-big_space = { git = "https://github.com/elodin-sys/big_space.git", branch = "no_prop_rot_v0.16" }
+bevy_editor_cam = { git = "https://github.com/aevyrie/bevy_editor_cam", rev = "1ae39bda1aa8d547dec4b26747e466ad5b2ab9ab" }
+big_space = { git = "https://github.com/elodin-sys/big_space.git", branch = "no_prop_rot_v0.17" }

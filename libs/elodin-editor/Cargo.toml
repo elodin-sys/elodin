@@ -15,24 +15,25 @@ debug = ["big_space/debug"]
 # math
 nox.path = "../nox"
 nox.default-features = false
-egui_material_icons = "0.3"
+egui_material_icons = "0.5"
 
 # bevy
-bevy.version = "0.16"
-bevy_render.version = "0.16"
-bevy_color.version = "0.16"
-bevy_egui.version = "0.35.1"
-egui.version = "0.31"
+bevy.version = "0.17"
+bevy_render.version = "0.17"
+bevy_color.version = "0.17"
+bevy_egui.version = "0.38.0"
+bevy_picking = "0.17"
+egui.version = "0.33.3"
 egui.features = ["rayon"]
-egui_tiles = "0.12"
-egui_table = "0.3"
+egui_tiles = "0.14"
+egui_table = "0.5"
 winit.version = "0.30.12"
 winit.features = ["rwh_05"]
 raw-window-handle = "0.5"
-bevy_infinite_grid = "0.15"
-big_space.version = "0.5"
-bevy_editor_cam = "0.6"
-bevy_framepace = "0.19"
+bevy_infinite_grid = "0.17"
+big_space = "0.5"
+bevy_editor_cam = "0.7"
+bevy_framepace = "0.20"
 
 # rand
 fastrand.version = "2"
@@ -98,9 +99,9 @@ peg = "0.8.5"
 
 # eql
 eql.path = "../db/eql"
-bevy-inspector-egui.version = "0.32"
+bevy-inspector-egui.version = "0.35"
 bevy-inspector-egui.optional = true
-bevy_defer = "0.14"
+bevy_defer = "0.15"
 
 
 [target.'cfg(target_family = "wasm")'.dependencies]

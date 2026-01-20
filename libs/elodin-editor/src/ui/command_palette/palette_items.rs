@@ -7,6 +7,7 @@ use std::{
 
 use bevy::{
     asset::{AssetServer, Assets},
+    camera::visibility::Visibility,
     ecs::{
         query::With,
         system::{Commands, InRef, IntoSystem, Query, Res, ResMut, System},
@@ -15,7 +16,6 @@ use bevy::{
     log::{error, info, warn},
     pbr::{StandardMaterial, wireframe::WireframeConfig},
     prelude::{Deref, DerefMut, Entity, In, Mut, Resource, Transform},
-    render::view::Visibility,
     window::PrimaryWindow,
 };
 use bevy_editor_cam::controller::{component::EditorCam, motion::CurrentMotion};
@@ -133,6 +133,10 @@ impl PalettePage {
         self.prompt = Some(prompt.to_string());
         self
     }
+
+    pub fn into_event(self) -> PaletteEvent {
+        self.into()
+    }
 }
 
 pub struct PaletteItem {
@@ -173,7 +177,7 @@ impl LabelSource {
     pub fn get(&mut self, world: &mut World, filter: &str) -> String {
         match self {
             LabelSource::Label(l) => l.clone(),
-            LabelSource::System(system) => system.run(filter, world),
+            LabelSource::System(system) => system.run(filter, world).expect("Missing label"),
         }
     }
 }
@@ -292,7 +296,7 @@ fn collect_viewport_entries(
         Tile::Pane(tiles::Pane::Viewport(viewport)) => {
             if let Some(camera) = viewport.camera {
                 entries.push(ViewportEntry {
-                    label: viewport_display_label(&viewport.label, window_label),
+                    label: viewport_display_label(&viewport.name, window_label),
                     camera,
                 });
             }
@@ -329,16 +333,16 @@ pub struct TileParam<'w, 's> {
 }
 
 impl<'w, 's> TileParam<'w, 's> {
-    pub fn target(&mut self, target: Option<Entity>) -> Option<Mut<'_, tiles::TileState>> {
+    pub fn target_state(&mut self, target: Option<Entity>) -> Option<Mut<'_, tiles::WindowState>> {
         let target_id = target
             .or(self.focused_window.0)
             .or_else(|| self.primary_window.iter().next());
-        target_id.and_then(|target_id| {
-            self.windows_state
-                .get_mut(target_id)
-                .ok()
-                .map(|s| s.map_unchanged(|s| &mut s.tile_state))
-        })
+        target_id.and_then(|target_id| self.windows_state.get_mut(target_id).ok())
+    }
+
+    pub fn target(&mut self, target: Option<Entity>) -> Option<Mut<'_, tiles::TileState>> {
+        self.target_state(target)
+            .map(|s| s.map_unchanged(|s| &mut s.tile_state))
     }
 }
 
@@ -379,10 +383,10 @@ pub fn create_action(tile_id: Option<TileId>) -> PaletteItem {
                                                     PaletteEvent::Exit
                                                 },
                                             ).default()])
-                                            .into()
+                                            .into_event()
                                         },
                                     ).default()])
-                                    .into()
+                                    .into_event()
                                 }),
                                 PaletteItem::new(
                                     LabelSource::placeholder("Enter a lua command (i.e client:send_table)"),
@@ -402,13 +406,13 @@ pub fn create_action(tile_id: Option<TileId>) -> PaletteItem {
                                 )
                                 .default(),
                             ]).prompt("Enter a lua command to send")
-                            .into()
+                            .into_event()
                         },
                     )
                     .default(),
                 ])
                 .prompt("Enter a label for the action button")
-                .into()
+                .into_event()
     })
 }
 
@@ -419,7 +423,7 @@ pub fn create_graph(tile_id: Option<TileId>) -> PaletteItem {
         move |_: In<String>, context: Res<EqlContext>| {
             PalettePage::new(graph_parts(&context.0.component_parts, tile_id))
                 .prompt("Select a component to graph")
-                .into()
+                .into_event()
         },
     )
 }
@@ -487,7 +491,7 @@ pub fn create_monitor(tile_id: Option<TileId>) -> PaletteItem {
         move |_: In<String>, eql: Res<EqlContext>| {
             PalettePage::new(monitor_parts(&eql.0.component_parts, tile_id))
                 .prompt("Select a component to monitor")
-                .into()
+                .into_event()
         },
     )
 }
@@ -534,7 +538,7 @@ fn reset_cameras() -> PaletteItem {
                     VIEWPORT_LABEL,
                     |_: In<String>| PaletteEvent::Exit,
                 )])
-                .into();
+                .into_event();
             }
 
             let all_cameras: Vec<_> = entries.iter().map(|entry| entry.camera).collect();
@@ -619,7 +623,7 @@ pub fn create_window() -> PaletteItem {
             .default(),
         ])
         .prompt("Enter a title for the new window")
-        .into()
+        .into_event()
     })
 }
 
@@ -646,34 +650,6 @@ pub fn create_query_plot(tile_id: Option<TileId>) -> PaletteItem {
                 return PaletteEvent::Error("Secondary window unavailable".to_string());
             };
             tile_state.create_query_plot_tile(tile_id);
-            PaletteEvent::Exit
-        },
-    )
-}
-
-pub fn create_hierarchy(tile_id: Option<TileId>) -> PaletteItem {
-    PaletteItem::new(
-        "Create Hierarchy",
-        TILES_LABEL,
-        move |_: In<String>, mut tile_param: TileParam, palette_state: Res<CommandPaletteState>| {
-            let Some(mut tile_state) = tile_param.target(palette_state.target_window) else {
-                return PaletteEvent::Error("Secondary window unavailable".to_string());
-            };
-            tile_state.create_hierarchy_tile(tile_id);
-            PaletteEvent::Exit
-        },
-    )
-}
-
-pub fn create_inspector(tile_id: Option<TileId>) -> PaletteItem {
-    PaletteItem::new(
-        "Create Inspector",
-        TILES_LABEL,
-        move |_: In<String>, mut tile_param: TileParam, palette_state: Res<CommandPaletteState>| {
-            let Some(mut tile_state) = tile_param.target(palette_state.target_window) else {
-                return PaletteEvent::Error("Secondary window unavailable".to_string());
-            };
-            tile_state.create_inspector_tile(tile_id);
             PaletteEvent::Exit
         },
     )
@@ -760,7 +736,7 @@ pub fn create_video_stream(tile_id: Option<TileId>) -> PaletteItem {
                 )
                 .default(),
             ])
-            .into()
+            .into_event()
         },
     )
 }
@@ -871,13 +847,13 @@ fn set_time_range_behavior() -> PaletteItem {
                         .default(),
                     ])
                     .prompt("Enter the end offset")
-                    .into()
+                    .into_event()
                 },
             )
             .default(),
         ])
         .prompt("Enter the start offset")
-        .into()
+        .into_event()
     })
 }
 
@@ -954,7 +930,7 @@ fn goto_tick() -> PaletteItem {
             .default(),
         ])
         .prompt("Enter the tick to jump to")
-        .into()
+        .into_event()
     })
 }
 
@@ -962,7 +938,7 @@ pub fn save_schematic_as() -> PaletteItem {
     PaletteItem::new(
         "Save Schematic As...",
         PRESETS_LABEL,
-        |_name: In<String>| PalettePage::new(vec![save_schematic_inner()]).into(),
+        |_name: In<String>| PalettePage::new(vec![save_schematic_inner()]).into_event(),
     )
 }
 
@@ -1143,7 +1119,7 @@ fn save_db_native_prompt_page() -> PalettePage {
 
 pub fn save_db_native() -> PaletteItem {
     PaletteItem::new("Save DB", PRESETS_LABEL, |_name: In<String>| {
-        save_db_native_prompt_page().into()
+        save_db_native_prompt_page().into_event()
     })
 }
 
@@ -1320,7 +1296,7 @@ pub fn set_color_scheme() -> PaletteItem {
                 },
             ));
         }
-        PalettePage::new(items).into()
+        PalettePage::new(items).into_event()
     })
 }
 
@@ -1353,7 +1329,7 @@ pub fn set_color_scheme_mode() -> PaletteItem {
                 },
             ));
         }
-        PalettePage::new(items).into()
+        PalettePage::new(items).into_event()
     })
 }
 
@@ -1400,7 +1376,7 @@ fn create_object_3d_with_color(eql: String, expr: eql::Expr, mesh: Mesh) -> Pale
         .default(),
     ])
     .prompt("Enter color for mesh")
-    .into()
+    .into_event()
 }
 
 fn parse_color(
@@ -1473,7 +1449,7 @@ pub fn create_3d_object() -> PaletteItem {
                                         ).default()
                                     ])
                                     .prompt("Enter GLTF path")
-                                    .into()
+                                    .into_event()
                                 }
                             },
                         ),
@@ -1501,7 +1477,7 @@ pub fn create_3d_object() -> PaletteItem {
                                         ).default()
                                     ])
                                     .prompt("Enter sphere radius")
-                                    .into()
+                                    .into_event()
                                 }
                             },
                         ),
@@ -1539,7 +1515,7 @@ pub fn create_3d_object() -> PaletteItem {
                                         ).default()
                                     ])
                                     .prompt("Enter cylinder dimensions")
-                                    .into()
+                                    .into_event()
                                 }
                             },
                         ),
@@ -1577,7 +1553,7 @@ pub fn create_3d_object() -> PaletteItem {
                                         ).default()
                                     ])
                                     .prompt("Enter cuboid dimensions")
-                                    .into()
+                                    .into_event()
                                 }
                             },
                         ),
@@ -1618,18 +1594,18 @@ pub fn create_3d_object() -> PaletteItem {
                                         .default()
                                     ])
                                     .prompt("Enter plane size")
-                                    .into()
+                                    .into_event()
                                 }
                             },
                         ),
                     ])
                     .prompt("Choose 3D object visualization type")
-                    .into()
+                    .into_event()
                 },
             ).default()
         ])
         .prompt("Enter EQL expression for 3D object positioning")
-        .into()
+        .into_event()
     })
 }
 
@@ -1642,11 +1618,10 @@ pub fn create_tiles(tile_id: TileId) -> PalettePage {
         create_query_table(Some(tile_id)),
         create_query_plot(Some(tile_id)),
         create_video_stream(Some(tile_id)),
-        create_hierarchy(Some(tile_id)),
         create_schematic_tree(Some(tile_id)),
-        create_dashboard(Some(tile_id)),
+        // Disabled: dashboard flow never shipped and the UX isn't expected yet.
+        // create_dashboard(Some(tile_id)),
         create_data_overview(Some(tile_id)),
-        create_inspector(Some(tile_id)),
     ])
 }
 
@@ -1713,13 +1688,13 @@ impl Default for PalettePage {
             create_query_table(None),
             create_query_plot(None),
             create_video_stream(None),
-            create_hierarchy(None),
-            create_inspector(None),
             create_schematic_tree(None),
-            create_dashboard(None),
+            // Disabled: dashboard flow never shipped and the UX isn't expected yet.
+            // create_dashboard(None),
             create_data_overview(None),
             create_3d_object(),
-            save_db_native(),
+            // Disabled: Save DB is flaky on Linux and we're unsure it's a useful feature.
+            // save_db_native(),
             save_schematic(),
             save_schematic_as(),
             save_schematic_db(),

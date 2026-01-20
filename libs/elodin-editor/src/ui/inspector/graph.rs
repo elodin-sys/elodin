@@ -130,6 +130,7 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
         ui.separator();
 
         if let Ok(mut query_plot) = query_plot {
+            query_plot.data.name = graph_state.label.clone();
             egui::Frame::NONE
                 .inner_margin(egui::Margin::symmetric(0, 8))
                 .show(ui, |ui| {
@@ -221,25 +222,18 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
                     }
                     let color_id = ui.auto_id_with("color");
                     let btn_resp = ui.add(EButton::new("Set Color"));
+
                     if btn_resp.clicked() {
-                        ui.memory_mut(|m| m.toggle_popup(color_id));
+                        egui::Popup::toggle_id(ui.ctx(), color_id);
                     }
 
-                    if ui.memory(|mem| mem.is_popup_open(color_id)) {
-                        let prev_color = query_plot.data.color.into_color32();
-                        let mut color = prev_color;
-                        let popup_response =
-                            color_popup(ui, &mut color, color_id, btn_resp.rect.min);
-                        if !btn_resp.clicked()
-                            && (ui.input(|i| i.key_pressed(egui::Key::Escape))
-                                || popup_response.clicked_elsewhere())
-                        {
-                            ui.memory_mut(|mem| mem.close_popup());
-                        }
-                        if color != prev_color {
-                            query_plot.data.color = impeller2_wkt::Color::from_color32(color);
-                            query_plot.auto_color = false;
-                        }
+                    let prev_color = query_plot.data.color.into_color32();
+                    let mut color = prev_color;
+                    if let Some(_) = color_popup(ui, &mut color, color_id, &btn_resp)
+                        && color != prev_color
+                    {
+                        query_plot.data.color = impeller2_wkt::Color::from_color32(color);
+                        query_plot.auto_color = false;
                     }
                 });
         } else {
@@ -337,18 +331,12 @@ fn component_value(
                 *enabled = !*enabled;
             }
             let color_id = ui.auto_id_with("color");
+
             if value_toggle.secondary_clicked() {
-                ui.memory_mut(|mem| mem.toggle_popup(color_id));
+                egui::Popup::toggle_id(ui.ctx(), color_id);
             }
-            if ui.memory(|mem| mem.is_popup_open(color_id)) {
-                let popup_response = color_popup(ui, color, color_id, value_toggle.rect.min);
-                if !value_toggle.secondary_clicked()
-                    && (ui.input(|i| i.key_pressed(egui::Key::Escape))
-                        || popup_response.clicked_elsewhere())
-                {
-                    ui.memory_mut(|mem| mem.close_popup());
-                }
-            }
+
+            color_popup(ui, color, color_id, &value_toggle);
         }
     });
 }

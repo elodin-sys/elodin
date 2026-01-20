@@ -7,7 +7,7 @@ use bevy::{
     prelude::{Entity, Query, Resource, With},
     window::PrimaryWindow,
 };
-use bevy_egui::EguiContexts;
+use bevy_egui::{EguiContexts, EguiTextureHandle};
 use egui::{Margin, Modifiers, epaint::Shadow};
 use palette_items::PaletteItem;
 
@@ -70,7 +70,7 @@ impl CommandPaletteState {
     ) {
         self.open_for_window(
             target_window,
-            PaletteItem::new("", "", move |_: In<String>| page().into()),
+            PaletteItem::new("", "", move |_: In<String>| page().into_event()),
         );
     }
 
@@ -162,7 +162,7 @@ impl RootWidgetSystem for CommandPalette<'_, '_> {
         };
         if let Some(mut item) = auto_open_item {
             item.system.initialize(world);
-            let event = item.system.run(filter, world);
+            let event = item.system.run(filter, world).expect("Missing event");
             let mut state_mut = state.get_mut(world);
             state_mut.command_palette_state.handle_event(event);
         }
@@ -212,12 +212,12 @@ impl RootWidgetSystem for PaletteWindow<'_, '_> {
             let images = state_mut.images;
 
             let icons = CommandPaletteIcons {
-                link: contexts.add_image(images.icon_link.clone_weak()),
+                link: contexts.add_image(EguiTextureHandle::Weak(images.icon_link.id())),
             };
             (icons, auto_open_none, just_opened)
         };
 
-        let screen_rect = ctx.screen_rect();
+        let screen_rect = ctx.content_rect();
         let palette_width = (screen_rect.width() / 2.0).clamp(500.0, 900.0);
         let palette_size = egui::vec2(palette_width, screen_rect.height() - 128.0);
         let palette_min = egui::pos2(screen_rect.center().x - palette_width / 2.0, 64.0);
@@ -487,7 +487,11 @@ impl WidgetSystem for PaletteItems<'_> {
                         });
 
                         if btn.clicked() || (i == selected_index && hit_enter) {
-                            return Some(item.system.run(filter.clone(), world));
+                            return Some(
+                                item.system
+                                    .run(filter.clone(), world)
+                                    .expect("System run failed"),
+                            );
                         }
                     }
                     None
@@ -636,7 +640,7 @@ impl PaletteItemWidget {
                     .image(image_id, image_rect, default_uv, self.text_color);
 
                 let layout_job = self.label_with_matched_chars(font_id.clone());
-                let galley = ui.fonts(|f| f.layout_job(layout_job));
+                let galley = ui.fonts_mut(|f| f.layout_job(layout_job));
                 ui.painter().galley(
                     egui::pos2(image_rect.right_top().x + 8.0, image_rect.right_top().y),
                     galley,
@@ -644,7 +648,7 @@ impl PaletteItemWidget {
                 );
             } else {
                 let layout_job = self.label_with_matched_chars(font_id.clone());
-                let galley = ui.fonts(|f| f.layout_job(layout_job));
+                let galley = ui.fonts_mut(|f| f.layout_job(layout_job));
                 ui.painter()
                     .galley(inner_rect.left_top(), galley, self.text_color);
             }

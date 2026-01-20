@@ -31,7 +31,7 @@ use crate::{
     object_3d::Object3DState,
     plugins::navigation_gizmo::RenderLayerAlloc,
     ui::{
-        DEFAULT_SECONDARY_RECT, HdrEnabled, SelectedObject,
+        DEFAULT_SECONDARY_RECT, HdrEnabled,
         colors::{self, EColor},
         dashboard::{NodeUpdaterParams, spawn_dashboard},
         data_overview::DataOverviewPane,
@@ -54,13 +54,21 @@ enum PanelContext {
     Secondary(WindowId),
 }
 
+fn tabs_parent_for_panels(tile_state: &TileState, panel_count: usize) -> Option<TileId> {
+    if panel_count > 0 {
+        tile_state.tree.root()
+    } else {
+        None
+    }
+}
+
 #[derive(Component)]
 pub struct SyncedViewport;
 
 #[derive(SystemParam)]
 pub struct LoadSchematicParams<'w, 's> {
     pub commands: Commands<'w, 's>,
-    primary_window: Single<'w, Entity, With<PrimaryWindow>>,
+    primary_window: Single<'w, 's, Entity, With<PrimaryWindow>>,
     pub asset_server: Res<'w, AssetServer>,
     pub meshes: ResMut<'w, Assets<Mesh>>,
     pub materials: ResMut<'w, Assets<StandardMaterial>>,
@@ -68,7 +76,6 @@ pub struct LoadSchematicParams<'w, 's> {
     pub hdr_enabled: ResMut<'w, HdrEnabled>,
     pub schema_reg: Res<'w, ComponentSchemaRegistry>,
     pub eql: Res<'w, EqlContext>,
-    pub selected_object: ResMut<'w, SelectedObject>,
     pub node_updater_params: NodeUpdaterParams<'w, 's>,
     cameras: Query<'w, 's, &'static mut Camera>,
     objects_3d: Query<'w, 's, Entity, With<Object3DState>>,
@@ -237,11 +244,7 @@ impl LoadSchematicParams<'_, '_> {
                 .2;
             std::mem::take(&mut window_state.tile_state)
         };
-        main_state.clear(
-            &mut self.commands,
-            &mut self.selected_object,
-            &mut self.render_layer_alloc,
-        );
+        main_state.clear(&mut self.commands, &mut self.render_layer_alloc);
         self.hdr_enabled.0 = false;
         for entity in self.objects_3d.iter() {
             self.commands.entity(entity).despawn();
@@ -259,10 +262,17 @@ impl LoadSchematicParams<'_, '_> {
         let theme_mode_str = theme_mode.as_deref();
         let mut main_window_descriptor = None;
 
+        let panel_count = schematic
+            .elems
+            .iter()
+            .filter(|elem| matches!(elem, impeller2_wkt::SchematicElem::Panel(_)))
+            .count();
+        let tabs_parent = tabs_parent_for_panels(&main_state, panel_count);
+
         for elem in &schematic.elems {
             match elem {
                 impeller2_wkt::SchematicElem::Panel(p) => {
-                    self.spawn_panel(&mut main_state, p, None, PanelContext::Main);
+                    self.spawn_panel(&mut main_state, p, tabs_parent, PanelContext::Main);
                 }
                 impeller2_wkt::SchematicElem::Object3d(object_3d) => {
                     self.spawn_object_3d(object_3d.clone());
@@ -314,14 +324,14 @@ impl LoadSchematicParams<'_, '_> {
             #[cfg(not(target_os = "macos"))]
             {
                 if let Some(screen) = window_state.descriptor.screen.as_ref() {
-                    self.commands.send_event(WindowRelayout::Screen {
+                    self.commands.write_message(WindowRelayout::Screen {
                         window: primary_window,
                         screen: *screen,
                     });
                 }
 
                 if let Some(rect) = window_state.descriptor.screen_rect.as_ref() {
-                    self.commands.send_event(WindowRelayout::Rect {
+                    self.commands.write_message(WindowRelayout::Rect {
                         window: primary_window,
                         rect: *rect,
                     });
@@ -371,12 +381,21 @@ impl LoadSchematicParams<'_, '_> {
                             let id = WindowId::default();
                             let mut tile_state =
                                 TileState::new(Id::new(("secondary_tab_tree", id.0)));
+                            let panel_count = sec_schematic
+                                .elems
+                                .iter()
+                                .filter(|elem| {
+                                    matches!(elem, impeller2_wkt::SchematicElem::Panel(_))
+                                })
+                                .count();
+                            let tabs_parent = tabs_parent_for_panels(&tile_state, panel_count);
+
                             for elem in &sec_schematic.elems {
                                 if let impeller2_wkt::SchematicElem::Panel(panel) = elem {
                                     self.spawn_panel(
                                         &mut tile_state,
                                         panel,
-                                        None,
+                                        tabs_parent,
                                         PanelContext::Secondary(id),
                                     );
                                 }
@@ -404,6 +423,7 @@ impl LoadSchematicParams<'_, '_> {
                                 descriptor,
                                 tile_state,
                                 graph_entities,
+                                ui_state: Default::default(),
                             };
                             self.commands.spawn((id, state));
                         }
@@ -551,15 +571,41 @@ impl LoadSchematicParams<'_, '_> {
                 tile_id
             }
             Panel::Tabs(tabs) => {
-                let tile_id = tile_state.insert_tile(
-                    Tile::Container(Container::new_tabs(vec![])),
-                    parent_id,
-                    false,
-                );
+                let mut tile_id = None;
+                let mut parent_for_children = parent_id;
+                let mut reuse_parent = false;
 
-                tabs.iter().for_each(|panel| {
-                    self.spawn_panel(tile_state, panel, tile_id, context);
-                });
+                if matches!(context, PanelContext::Secondary(_))
+                    && let Some(parent_id) = parent_id
+                    && tile_state.tree.root() == Some(parent_id)
+                    && let Some(Tile::Container(Container::Tabs(root_tabs))) =
+                        tile_state.tree.tiles.get(parent_id)
+                {
+                    let has_non_sidebar = root_tabs.children.iter().any(|child_id| {
+                        !crate::ui::tiles::sidebar::tile_is_sidebar(
+                            &tile_state.tree.tiles,
+                            *child_id,
+                        )
+                    });
+                    if !has_non_sidebar {
+                        reuse_parent = true;
+                        tile_id = Some(parent_id);
+                        parent_for_children = Some(parent_id);
+                    }
+                }
+
+                if !reuse_parent {
+                    tile_id = tile_state.insert_tile(
+                        Tile::Container(Container::new_tabs(vec![])),
+                        parent_id,
+                        false,
+                    );
+                    parent_for_children = tile_id;
+                }
+
+                for panel in tabs.iter() {
+                    self.spawn_panel(tile_state, panel, parent_for_children, context);
+                }
                 tile_id
             }
             Panel::Graph(graph) => {
@@ -648,7 +694,11 @@ impl LoadSchematicParams<'_, '_> {
                 tile_state.insert_tile(Tile::Pane(Pane::Graph(graph)), parent_id, false)
             }
             Panel::ComponentMonitor(monitor) => {
-                let pane = MonitorPane::new("Monitor".to_string(), monitor.component_name.clone());
+                let label = monitor
+                    .name
+                    .clone()
+                    .unwrap_or_else(|| monitor.component_name.clone());
+                let pane = MonitorPane::new(label, monitor.component_name.clone());
                 tile_state.insert_tile(Tile::Pane(Pane::Monitor(pane)), parent_id, false)
             }
             Panel::QueryTable(data) => {
@@ -659,40 +709,55 @@ impl LoadSchematicParams<'_, '_> {
                         ..Default::default()
                     })
                     .id();
-                let pane = super::query_table::QueryTablePane { entity };
+                let label = data
+                    .name
+                    .clone()
+                    .filter(|name| !name.trim().is_empty())
+                    .unwrap_or_else(|| "Query".to_string());
+                let pane = super::query_table::QueryTablePane {
+                    entity,
+                    name: label,
+                };
                 tile_state.insert_tile(Tile::Pane(Pane::QueryTable(pane)), parent_id, false)
             }
             Panel::ActionPane(action) => {
                 let entity = self
                     .commands
                     .spawn(super::actions::ActionTile {
-                        button_name: action.label.clone(),
+                        button_name: action.name.clone(),
                         lua: action.lua.clone(),
                         status: Default::default(),
                     })
                     .id();
                 let pane = super::tiles::ActionTilePane {
                     entity,
-                    label: "Action".to_string(),
+                    name: action.name.clone(),
                 };
                 tile_state.insert_tile(Tile::Pane(Pane::ActionTile(pane)), parent_id, false)
             }
-            Panel::Inspector => {
-                tile_state.insert_tile(Tile::Pane(Pane::Inspector), parent_id, false)
-            }
-            Panel::Hierarchy => {
-                tile_state.insert_tile(Tile::Pane(Pane::Hierarchy), parent_id, false)
-            }
-            Panel::SchematicTree => {
+            Panel::Inspector | Panel::Hierarchy => None,
+            Panel::SchematicTree(name) => {
                 let entity = self.commands.spawn(super::TreeWidgetState::default()).id();
-                let pane = TreePane { entity };
+                let label = name.clone().unwrap_or_else(|| "Tree".to_string());
+                let pane = TreePane {
+                    entity,
+                    name: label,
+                };
                 tile_state.insert_tile(Tile::Pane(Pane::SchematicTree(pane)), parent_id, false)
+            }
+            Panel::DataOverview(name) => {
+                let mut pane = DataOverviewPane::default();
+                if let Some(name) = name.clone() {
+                    pane.name = name;
+                }
+                let pane = Pane::DataOverview(pane);
+                tile_state.insert_tile(Tile::Pane(pane), parent_id, false)
             }
             Panel::QueryPlot(plot) => {
                 let graph_bundle = GraphBundle::new(
                     &mut self.render_layer_alloc,
                     BTreeMap::default(),
-                    plot.label.clone(),
+                    plot.name.clone(),
                 );
                 let auto_color = plot.color.into_color32() == colors::get_scheme().highlight;
                 let entity = self
@@ -700,7 +765,6 @@ impl LoadSchematicParams<'_, '_> {
                     .spawn(QueryPlotData {
                         data: plot.clone(),
                         auto_color,
-                        // Set last_refresh to None so the query executes immediately on first render
                         last_refresh: None,
                         ..Default::default()
                     })
@@ -714,7 +778,12 @@ impl LoadSchematicParams<'_, '_> {
                 tile_state.insert_tile(Tile::Pane(pane), parent_id, false)
             }
             Panel::Dashboard(dashboard) => {
-                let Ok(dashboard) = spawn_dashboard(
+                let label = dashboard
+                    .root
+                    .name
+                    .clone()
+                    .unwrap_or_else(|| "Dashboard".to_string());
+                let Ok(dashboard_entity) = spawn_dashboard(
                     dashboard,
                     &self.eql.0,
                     &mut self.commands,
@@ -727,8 +796,8 @@ impl LoadSchematicParams<'_, '_> {
                 };
                 tile_state.insert_tile(
                     Tile::Pane(Pane::Dashboard(DashboardPane {
-                        entity: dashboard,
-                        label: "dashboard".to_string(),
+                        entity: dashboard_entity,
+                        name: label,
                     })),
                     parent_id,
                     false,
@@ -740,6 +809,10 @@ impl LoadSchematicParams<'_, '_> {
     /// Create a default Data Overview panel when no schematic is found.
     /// This provides immediate visibility into the database contents.
     pub fn load_default_data_overview(&mut self) {
+        if self.eql.0.component_parts.is_empty() {
+            return;
+        }
+
         let primary_window = *self.primary_window;
         let mut window_state = self
             .window_states
@@ -747,18 +820,53 @@ impl LoadSchematicParams<'_, '_> {
             .expect("no primary window")
             .2;
 
-        // Only add if the tile tree is empty
-        if window_state.tile_state.is_empty() {
-            // Create a structure that matches how schematics work:
-            // Root → Tabs container → Pane
-            //
-            // egui_tiles only shows tab bars for NESTED Tabs containers, not the root.
-            // So we create a tabs container explicitly (like Panel::Tabs does)
-            // and add our pane inside it.
+        // Only add if the tile tree is empty (no non-sidebar content)
+        if !window_state.tile_state.is_empty() {
+            return;
+        }
+
+        let target_id = {
+            let tree = &window_state.tile_state.tree;
+            tree.root()
+                .and_then(|root_id| match tree.tiles.get(root_id) {
+                    Some(Tile::Container(Container::Linear(linear))) => {
+                        let center_idx = linear.children.len() / 2;
+                        linear.children.get(center_idx).copied()
+                    }
+                    _ => Some(root_id),
+                })
+        };
+
+        let mut central_tabs_id = None;
+        if let Some(target_id) = target_id {
+            match window_state.tile_state.tree.tiles.get(target_id) {
+                Some(Tile::Container(Container::Tabs(_))) => central_tabs_id = Some(target_id),
+                Some(Tile::Container(_)) => {
+                    let tabs_container = Tile::Container(Container::new_tabs(vec![]));
+                    central_tabs_id =
+                        window_state
+                            .tile_state
+                            .insert_tile(tabs_container, Some(target_id), false);
+                }
+                _ => {}
+            }
+        }
+
+        if central_tabs_id.is_none() {
             let tabs_container = Tile::Container(Container::new_tabs(vec![]));
-            if let Some(tabs_id) = window_state
+            central_tabs_id = window_state
                 .tile_state
-                .insert_tile(tabs_container, None, false)
+                .insert_tile(tabs_container, None, false);
+        }
+
+        // The central tabs container is effectively invisible; nest a new Tabs container
+        // so the tab bar (+) is visible, then add Data Overview inside it.
+        if let Some(central_tabs_id) = central_tabs_id {
+            let tabs_container = Tile::Container(Container::new_tabs(vec![]));
+            if let Some(tabs_id) =
+                window_state
+                    .tile_state
+                    .insert_tile(tabs_container, Some(central_tabs_id), false)
             {
                 let pane = Pane::DataOverview(DataOverviewPane::default());
                 if let Some(tile_id) =

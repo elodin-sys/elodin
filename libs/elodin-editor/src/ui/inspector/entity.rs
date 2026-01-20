@@ -163,6 +163,9 @@ fn inspector_item_value_ui(
     value: ElementValueMut<'_>,
     size: egui::Vec2,
 ) -> egui::Response {
+    if !size.x.is_finite() || !size.y.is_finite() || size.x <= 0.0 || size.y <= 0.0 {
+        return ui.allocate_response(egui::Vec2::ZERO, egui::Sense::hover());
+    }
     let label_color = get_scheme().text_secondary;
     ui.allocate_ui_with_layout(
         size,
@@ -226,6 +229,11 @@ fn inspector_item_multi(
     create_graph: &mut bool,
     line_width: f32,
 ) -> egui::Response {
+    let line_width = if line_width.is_finite() && line_width > 0.0 {
+        line_width
+    } else {
+        return ui.allocate_response(egui::Vec2::ZERO, egui::Sense::hover());
+    };
     let element_names = element_names
         .split(',')
         .filter(|s| !s.is_empty())
@@ -247,12 +255,18 @@ fn inspector_item_multi(
         let line_height = ui.spacing().interact_size.y * 1.4;
 
         let item_width_min = ui.spacing().interact_size.x * 2.4;
-        let items_per_line = (line_width / item_width_min).floor();
+        let mut items_per_line = (line_width / item_width_min).floor();
+        if !items_per_line.is_finite() || items_per_line < 1.0 {
+            items_per_line = 1.0;
+        }
 
         let necessary_spacing = (items_per_line - 1.0) * item_spacing.x;
-        let item_width = (line_width - necessary_spacing) / items_per_line;
+        let mut item_width = (line_width - necessary_spacing) / items_per_line;
+        if !item_width.is_finite() || item_width <= 1.0 {
+            item_width = item_width_min.max(1.0);
+        }
 
-        let desired_size = egui::vec2(item_width - 1.0, line_height);
+        let desired_size = egui::vec2((item_width - 1.0).max(0.0), line_height);
 
         ui.horizontal_wrapped(|ui| {
             ui.style_mut().spacing.item_spacing = item_spacing;

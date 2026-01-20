@@ -6,22 +6,22 @@ use crate::plugins::editor_cam_touch;
 use bevy::{
     DefaultPlugins,
     asset::{UnapprovedPathMode, embedded_asset},
+    camera::RenderTarget,
     diagnostic::{DiagnosticsPlugin, FrameTimeDiagnosticsPlugin},
+    ecs::system::NonSendMarker,
+    light::DirectionalLightShadowMap,
     log::LogPlugin,
     math::{DQuat, DVec3},
-    pbr::{
-        DirectionalLightShadowMap,
-        wireframe::{WireframeConfig, WireframePlugin},
-    },
+    pbr::wireframe::{WireframeConfig, WireframePlugin},
     prelude::*,
-    render::camera::RenderTarget,
     window::{PresentMode, PrimaryWindow, WindowRef, WindowResolution},
-    winit::WinitSettings,
+    winit::{WINIT_WINDOWS, WinitSettings},
 };
 use bevy_editor_cam::{SyncCameraPosition, controller::component::EditorCam};
 #[cfg(feature = "inspector")]
 use bevy_egui::EguiContext;
 use bevy_egui::{EguiContextSettings, EguiGlobalSettings, EguiPlugin};
+use bevy_picking::PickingSettings;
 use bevy_render::alpha::AlphaMode;
 use big_space::{FloatingOrigin, FloatingOriginSettings, GridCell};
 use impeller2::types::{ComponentId, OwnedPacket};
@@ -37,7 +37,7 @@ use object_3d::create_object_3d_entity;
 use plugins::gizmos::GizmoPlugin;
 use plugins::navigation_gizmo::{NavigationGizmoPlugin, RenderLayerAlloc};
 use ui::{
-    SelectedObject, UI_ORDER_BASE,
+    UI_ORDER_BASE,
     colors::{ColorExt, get_scheme},
     create_egui_context,
     inspector::viewport::set_viewport_pos,
@@ -116,7 +116,7 @@ pub struct PositionSync;
 impl EditorPlugin {
     pub fn new(width: f32, height: f32) -> Self {
         Self {
-            window_resolution: WindowResolution::new(width, height),
+            window_resolution: WindowResolution::new(width as u32, height as u32),
         }
     }
 }
@@ -182,6 +182,13 @@ impl Plugin for EditorPlugin {
                     .disable::<LogPlugin>()
                     .build(),
             )
+            // Note: we added this because bevy 0.17.3 changed it's behavior
+            // which broke bevy_editor_cam. See here:
+            // https://github.com/aevyrie/bevy_editor_cam/issues/61
+            .insert_resource(PickingSettings {
+                is_window_picking_enabled: false,
+                ..Default::default()
+            })
             .insert_resource(winit_settings)
             .init_resource::<tiles::ViewportContainsPointer>()
             .add_plugins(bevy_framepace::FramepacePlugin)
@@ -279,7 +286,7 @@ impl Plugin for EditorPlugin {
 fn setup_egui_inspector(mut commands: Commands) {
     let window = Window {
         title: "World Inspector".to_string(),
-        resolution: WindowResolution::new(640.0, 480.0),
+        resolution: WindowResolution::new(640, 480),
         ..Default::default()
     };
 
@@ -422,125 +429,138 @@ struct SetupTitlebar;
 #[cfg(target_os = "macos")]
 fn setup_titlebar(
     windows: Query<Entity, Without<SetupTitlebar>>,
-    winit_windows: NonSend<bevy::winit::WinitWindows>,
     mut commands: Commands,
+    _non_send_marker: NonSendMarker,
 ) {
     use objc2::rc::Retained;
     use objc2::{ClassType, msg_send, msg_send_id};
     use objc2_app_kit::{NSColor, NSToolbar, NSWindow, NSWindowStyleMask, NSWindowToolbarStyle};
 
-    for id in &windows {
-        let Some(window) = winit_windows.get_window(id) else {
-            continue;
-        };
-        window.set_blur(true);
-        use raw_window_handle::HasRawWindowHandle;
-        let handle = window.raw_window_handle();
-        let raw_window_handle::RawWindowHandle::AppKit(handle) = handle else {
-            error!("non AppKit window on macOS");
-            continue;
-        };
-        let window: *mut NSWindow = handle.ns_window.cast();
-        if window.is_null() {
-            continue;
+    WINIT_WINDOWS.with_borrow(|winit_windows| {
+        for id in &windows {
+            let Some(window) = winit_windows.get_window(id) else {
+                continue;
+            };
+            window.set_blur(true);
+            use raw_window_handle::HasRawWindowHandle;
+            let handle = window.raw_window_handle();
+            let raw_window_handle::RawWindowHandle::AppKit(handle) = handle else {
+                error!("non AppKit window on macOS");
+                continue;
+            };
+            let window: *mut NSWindow = handle.ns_window.cast();
+            if window.is_null() {
+                continue;
+            }
+            unsafe {
+                let window = &*window;
+
+                // Create a simple toolbar without delegate for now
+                // The delegate isn't strictly necessary for basic toolbar functionality
+                use objc2_foundation::NSString;
+                let identifier = NSString::from_str("MainToolbar");
+                let toolbar: Retained<NSToolbar> = msg_send_id![
+                    msg_send_id![NSToolbar::class(), alloc],
+                    initWithIdentifier: &*identifier
+                ];
+
+                // Keep the native titlebar visible and readable.
+                window.setTitlebarAppearsTransparent(false);
+                let color = NSColor::windowBackgroundColor();
+                window.setBackgroundColor(Some(&color));
+
+                window.setStyleMask(
+                    NSWindowStyleMask::FullSizeContentView
+                        | NSWindowStyleMask::Resizable
+                        | NSWindowStyleMask::Titled
+                        | NSWindowStyleMask::Closable
+                        | NSWindowStyleMask::Miniaturizable
+                        | NSWindowStyleMask::UnifiedTitleAndToolbar,
+                );
+                window.setToolbarStyle(NSWindowToolbarStyle::UnifiedCompact);
+                // Keep the native title visible in the toolbar/titlebar area.
+                let _: () = msg_send![window, setTitleVisibility: 0u64]; // NSWindowTitleVisible = 0
+                window.setToolbar(Some(&toolbar));
+                commands.entity(id).insert(SetupTitlebar);
+            }
         }
-        unsafe {
-            let window = &*window;
-
-            // Create a simple toolbar without delegate for now
-            // The delegate isn't strictly necessary for basic toolbar functionality
-            use objc2_foundation::NSString;
-            let identifier = NSString::from_str("MainToolbar");
-            let toolbar: Retained<NSToolbar> = msg_send_id![
-                msg_send_id![NSToolbar::class(), alloc],
-                initWithIdentifier: &*identifier
-            ];
-
-            // Keep the native titlebar visible and readable.
-            window.setTitlebarAppearsTransparent(false);
-            let color = NSColor::windowBackgroundColor();
-            window.setBackgroundColor(Some(&color));
-
-            window.setStyleMask(
-                NSWindowStyleMask::FullSizeContentView
-                    | NSWindowStyleMask::Resizable
-                    | NSWindowStyleMask::Titled
-                    | NSWindowStyleMask::Closable
-                    | NSWindowStyleMask::Miniaturizable
-                    | NSWindowStyleMask::UnifiedTitleAndToolbar,
-            );
-            window.setToolbarStyle(NSWindowToolbarStyle::UnifiedCompact);
-            // Keep the native title visible in the toolbar/titlebar area.
-            let _: () = msg_send![window, setTitleVisibility: 0u64]; // NSWindowTitleVisible = 0
-            window.setToolbar(Some(&toolbar));
-            commands.entity(id).insert(SetupTitlebar);
-        }
-    }
+    });
 }
 
 fn handle_drag_resize(
     windows: Query<(Entity, &Window, &bevy::window::PrimaryWindow)>,
-    winit_windows: NonSend<bevy::winit::WinitWindows>,
     mouse_buttons: Res<ButtonInput<MouseButton>>,
     mut just_set_cursor: Local<bool>,
+    _non_send_marker: NonSendMarker,
 ) {
-    for (id, window, _) in &windows {
-        let Some(cursor_pos) = window.physical_cursor_position() else {
-            continue;
-        };
-        let size = window.physical_size().as_vec2();
-        let window = winit_windows.get_window(id).unwrap();
-        const RESIZE_ZONE: f32 = 5.0;
-        let resize_west = cursor_pos.x < RESIZE_ZONE;
-        let resize_east = cursor_pos.x > size.x - RESIZE_ZONE;
-        let resize_north = cursor_pos.y < RESIZE_ZONE;
-        let resize_south = cursor_pos.y > size.y - RESIZE_ZONE;
-        if cursor_pos.y < 45.0
-            && !resize_north
-            && !resize_east
-            && !resize_west
-            && mouse_buttons.pressed(MouseButton::Left)
-        {
-            let _ = window.drag_window();
-        }
-        let resize_dir = match (resize_west, resize_east, resize_north, resize_south) {
-            (true, _, true, _) => Some(winit::window::ResizeDirection::NorthWest),
-            (_, true, true, _) => Some(winit::window::ResizeDirection::NorthEast),
-
-            (true, _, _, true) => Some(winit::window::ResizeDirection::SouthWest),
-            (_, true, _, true) => Some(winit::window::ResizeDirection::SouthEast),
-            (true, _, _, _) => Some(winit::window::ResizeDirection::West),
-            (_, true, _, _) => Some(winit::window::ResizeDirection::East),
-            (_, _, true, _) => Some(winit::window::ResizeDirection::North),
-            (_, _, _, true) => Some(winit::window::ResizeDirection::South),
-            _ => None,
-        };
-        if let Some(resize_dir) = resize_dir {
-            if mouse_buttons.pressed(MouseButton::Left) {
-                let _ = window.drag_resize_window(resize_dir);
+    WINIT_WINDOWS.with_borrow(|winit_windows| {
+        for (id, window, _) in &windows {
+            let Some(cursor_pos) = window.physical_cursor_position() else {
+                continue;
+            };
+            let size = window.physical_size().as_vec2();
+            let window = winit_windows.get_window(id).unwrap();
+            const RESIZE_ZONE: f32 = 5.0;
+            let resize_west = cursor_pos.x < RESIZE_ZONE;
+            let resize_east = cursor_pos.x > size.x - RESIZE_ZONE;
+            let resize_north = cursor_pos.y < RESIZE_ZONE;
+            let resize_south = cursor_pos.y > size.y - RESIZE_ZONE;
+            if cursor_pos.y < 45.0
+                && !resize_north
+                && !resize_east
+                && !resize_west
+                && mouse_buttons.pressed(MouseButton::Left)
+            {
+                let _ = window.drag_window();
             }
-            window.set_cursor(winit::window::CursorIcon::from(resize_dir));
-            *just_set_cursor = true
-        } else if *just_set_cursor {
-            *just_set_cursor = false;
-            window.set_cursor(winit::window::CursorIcon::Default);
+            let resize_dir = match (resize_west, resize_east, resize_north, resize_south) {
+                (true, _, true, _) => Some(winit::window::ResizeDirection::NorthWest),
+                (_, true, true, _) => Some(winit::window::ResizeDirection::NorthEast),
+
+                (true, _, _, true) => Some(winit::window::ResizeDirection::SouthWest),
+                (_, true, _, true) => Some(winit::window::ResizeDirection::SouthEast),
+                (true, _, _, _) => Some(winit::window::ResizeDirection::West),
+                (_, true, _, _) => Some(winit::window::ResizeDirection::East),
+                (_, _, true, _) => Some(winit::window::ResizeDirection::North),
+                (_, _, _, true) => Some(winit::window::ResizeDirection::South),
+                _ => None,
+            };
+            if let Some(resize_dir) = resize_dir {
+                if mouse_buttons.pressed(MouseButton::Left) {
+                    let _ = window.drag_resize_window(resize_dir);
+                }
+                window.set_cursor(winit::window::CursorIcon::from(resize_dir));
+                *just_set_cursor = true
+            } else if *just_set_cursor {
+                *just_set_cursor = false;
+                window.set_cursor(winit::window::CursorIcon::Default);
+            }
         }
-    }
+    });
 }
 
 fn setup_window_icon(
-    _windows: Query<(Entity, &bevy::window::PrimaryWindow)>,
-    // this is load bearing, because it ensures that there is at
-    // least one window spawned
-    _winit_windows: NonSend<bevy::winit::WinitWindows>,
+    windows: Query<(Entity, &bevy::window::PrimaryWindow)>,
+    _non_send_marker: NonSendMarker,
 ) {
-    #[cfg(target_os = "macos")]
-    set_icon_mac();
+    // There was an API change for WINIT_WINDOWS in bevy 0.17. The pre-0.17
+    // code had the following comment:
+    //
+    // "this is load bearing, because it ensures that there is at least one
+    // window spawned"
+    //
+    // We're not certain why it was originally necessary, or if this port
+    // accomplishes the same goal, but keeping it in the spirit of Chesterton's
+    // Fence.
+    WINIT_WINDOWS.with_borrow(|_winit_windows| {
+        #[cfg(target_os = "macos")]
+        set_icon_mac();
 
-    if !_windows.is_empty() {
-        #[cfg(target_os = "windows")]
-        set_icon_windows();
-    }
+        if !windows.is_empty() {
+            #[cfg(target_os = "windows")]
+            set_icon_windows();
+        }
+    });
 }
 
 #[cfg(target_os = "windows")]
@@ -909,7 +929,6 @@ pub fn setup_clear_state(mut packet_handlers: ResMut<PacketHandlers>, mut comman
 fn clear_state_new_connection(
     PacketHandlerInput { packet, .. }: PacketHandlerInput,
     mut entity_map: ResMut<EntityMap>,
-    mut selected_object: ResMut<SelectedObject>,
     mut render_layer_alloc: ResMut<RenderLayerAlloc>,
     mut value_map: Query<&mut ComponentValueMap>,
     mut graph_data: ResMut<CollectedGraphData>,
@@ -956,7 +975,7 @@ fn clear_state_new_connection(
     primary_state
         .1
         .tile_state
-        .clear(&mut commands, &mut selected_object, &mut render_layer_alloc);
+        .clear(&mut commands, &mut render_layer_alloc);
     for (entity, secondary) in &windows_state {
         if entity == primary_id {
             // We don't despawn the primary window ever.

@@ -184,7 +184,7 @@ last_print = [0.0]
 _rc_channels_buffer = np.full(MAX_RC_CHANNELS, 1500, dtype=np.uint16)
 
 
-def sitl_post_step(tick: int, ctx: el.PostStepContext):
+def sitl_post_step(tick: int, ctx: el.StepContext):
     """
     Post-step callback for lockstep SITL synchronization.
 
@@ -229,6 +229,7 @@ def sitl_post_step(tick: int, ctx: el.PostStepContext):
                 pass  # Expected during initial warmup
         print(f"[SITL] Warmup complete ({warmup_count} responses at {config.pid_rate:.0f}Hz)")
         print("[SITL] Bridge ready")
+        ctx.truncate()  # Clears all data, resets tick to 0
 
     if start_time[0] is None:
         start_time[0] = time.time()
@@ -305,7 +306,7 @@ def sitl_post_step(tick: int, ctx: el.PostStepContext):
         s.max_motor = max(s.max_motor, np.max(s.motors))
 
         # Write motor commands back to Elodin-DB for physics simulation
-        # This uses the PostStepContext for direct DB access (no TCP overhead)
+        # This uses the StepContext for direct DB access (no TCP overhead)
         ctx.write_component("drone.motor_command", s.motors)
     except TimeoutError:
         pass  # Timeouts expected during bootgrace

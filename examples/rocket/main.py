@@ -521,10 +521,10 @@ w.schematic(
             }
             vsplit {
                 // EQL-derived aerodynamic angles and velocity magnitude 
-                query_plot Angle-of-Attack-EQL query="((rocket.v_body[0] * -1.0) / rocket.v_body.norm().clip(0.000000001, 999999)).arccos().degrees() * (rocket.v_body[2] * -1.0).sign()" type="eql" auto_refresh=#true
+                query_plot name="Angle-of-Attack-EQL" query="((rocket.v_body[0] * -1.0) / rocket.v_body.norm().clip(0.000000001, 999999)).arccos().degrees() * (rocket.v_body[2] * -1.0).sign()" type="eql" auto_refresh=#true
 
                 // Velocity magnitude using norm() formula
-                query_plot Velocity-Magnitude query="rocket.v_body.norm()" type="eql" auto_refresh=#true
+                query_plot name="Velocity-Magnitude" query="rocket.v_body.norm()" type="eql" auto_refresh=#true
             }
         }
     }

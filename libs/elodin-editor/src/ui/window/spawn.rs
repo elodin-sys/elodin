@@ -1,12 +1,13 @@
 use std::collections::HashMap;
 
 use bevy::{
-    core_pipeline::core_2d::Camera2d,
+    camera::{Camera2d, RenderTarget},
+    ecs::system::NonSendMarker,
     log::info,
     prelude::*,
-    render::camera::RenderTarget,
     ui::UiTargetCamera,
     window::{EnabledButtons, Window, WindowPosition, WindowRef, WindowResolution},
+    winit::WINIT_WINDOWS,
 };
 use bevy_egui::EguiContextSettings;
 use egui_tiles::Tile;
@@ -24,14 +25,16 @@ pub fn sync_windows(
     mut windows_state: Query<(Entity, &WindowId, &mut WindowState, Option<&mut Window>)>,
     mut cameras: Query<&mut Camera>,
     children: Query<&Children>,
-    winit_windows: NonSend<bevy::winit::WinitWindows>,
     mut existing_map: Local<HashMap<WindowId, Entity>>,
+    _non_send_marker: NonSendMarker,
 ) {
-    let screens_any = winit_windows
-        .windows
-        .values()
-        .next()
-        .map(|w| collect_sorted_screens(w));
+    let screens_any = WINIT_WINDOWS.with_borrow(|winit_windows| {
+        winit_windows
+            .windows
+            .values()
+            .next()
+            .map(|w| collect_sorted_screens(w))
+    });
     if screens_any.is_none() {
         warn!("No screen info available; windows will use default sizing/position");
     }
@@ -87,13 +90,13 @@ pub fn sync_windows(
             let y =
                 screen_pos.y + ((rect.y as f64 / 100.0) * screen_size.height as f64).round() as i32;
             (
-                WindowResolution::new(width_px as f32, height_px as f32),
+                WindowResolution::new(width_px as u32, height_px as u32),
                 Some(WindowPosition::At(IVec2::new(x, y))),
                 Some(screen_idx),
             )
         } else {
             (
-                WindowResolution::new(640.0, 480.0),
+                WindowResolution::new(640, 480),
                 None,
                 state.descriptor.screen,
             )
@@ -134,14 +137,14 @@ pub fn sync_windows(
         commands.entity(entity).insert(camera);
 
         if let Some(screen) = state.descriptor.screen.as_ref() {
-            commands.send_event(WindowRelayout::Screen {
+            commands.write_message(WindowRelayout::Screen {
                 window: window_entity,
                 screen: *screen,
             });
         }
 
         if let Some(rect) = state.descriptor.screen_rect.as_ref() {
-            commands.send_event(WindowRelayout::Rect {
+            commands.write_message(WindowRelayout::Rect {
                 window: window_entity,
                 rect: *rect,
             });

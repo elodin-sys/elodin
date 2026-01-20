@@ -52,7 +52,7 @@ The Elodin simulation world.
     Load a GLB asset as an Elodin Scene Archetype.
     - `url`: the URL or filepath of the GLB asset
 
-- `run(system, sim_time_step, run_time_step, default_playback_speed, max_ticks, optimize)` -> None
+- `run(system, sim_time_step, run_time_step, default_playback_speed, max_ticks, optimize, is_canceled, pre_step, post_step, db_path, interactive, start_timestamp)` -> None
 
     Run the simulation.
     - `system` : [elodin.System], the systems to run, can be supplied as a list of systems delineated by pipes.
@@ -61,9 +61,173 @@ The Elodin simulation world.
     - `default_playback_speed` : `float`, optional, the default playback speed of the Elodin client when running this simulation, defaults to 1.0 (real-time).
     - `max_ticks` : `integer`, optional, the maximum number of ticks to run the simulation for before stopping.
     - `optimize` : `bool`, optional flag to enable runtime optimizations for the simulation code, defaults to `False`. If optimizations are enabled, the simulation will start slower but run faster.
+    - `is_canceled` : `Callable[[], bool]`, optional, a polling function checked during the simulation loop. If it returns `True`, the simulation exits gracefully. Useful for integrating with external control systems (e.g., a GUI stop button, or a watchdog timeout).
+    - `pre_step` : `Callable[[int, StepContext], None]`, optional, a callback function called **before** each simulation tick. Receives the tick number and a [elodin.StepContext] for direct database access. Useful for injecting external data (e.g., from hardware-in-the-loop systems) before the physics step runs.
+    - `post_step` : `Callable[[int, StepContext], None]`, optional, a callback function called **after** each simulation tick. Receives the tick number and a [elodin.StepContext] for direct database access. Useful for reading simulation results and sending data to external systems (e.g., SITL flight controllers).
+    - `db_path` : `string`, optional, the path to the database directory. If not provided, a temporary database is created.
+    - `interactive` : `bool`, optional, controls simulation behavior after reaching `max_ticks`, defaults to `True`. When `True`, the simulation pauses but remains running for continued interaction in the Elodin editor. When `False`, the simulation terminates completely after reaching `max_ticks`.
+    - `start_timestamp` : `int`, optional, the starting timestamp for the simulation in microseconds. If `None` (default), uses the current system time (epoch-based). Set to `0` for zero-based timing where the simulation starts at `t=0`.
+    - `log_level` : `str`, optional, log level for the embedded Elodin-DB instance (`error`, `warn`, `info`, `debug`, `trace`). Defaults to `info` unless `RUST_LOG` is set.
 
 ### _class_ `elodin.EntityId`
 Integer reference identifier for entities in Elodin.
+
+### _class_ `elodin.StepContext`
+
+Context object passed to `pre_step` and `post_step` callbacks, providing direct database read/write access. This enables Software-In-The-Loop (SITL) and Hardware-In-The-Loop (HITL) workflows where external systems need to exchange data with the simulation at each tick.
+
+`StepContext` provides direct database access within the same process, avoiding the overhead of a separate TCP connection. This is essential for high-frequency lockstep synchronization with external flight controllers or sensor systems.
+
+#### Properties
+
+- `tick` -> `int`
+
+    The current simulation tick count (0-indexed).
+
+- `timestamp` -> `int`
+
+    The current simulation timestamp in microseconds since epoch. This value is calculated as `start_timestamp + (tick * sim_time_step)`.
+
+#### Methods
+
+- `read_component(pair_name)` -> `numpy.ndarray`
+
+    Read the latest component data from the database.
+
+    - `pair_name` : `string`, the full component name in "entity.component" format (e.g., `"drone.accel"`, `"drone.world_pos"`)
+
+    Returns a NumPy array containing the component data. The array dtype matches the component schema and is always 1D; reshape if needed.
+
+    Raises `RuntimeError` if the component doesn't exist or has no data.
+
+- `write_component(pair_name, data, timestamp=None)` -> None
+
+    Write component data to the database.
+
+    - `pair_name` : `string`, the full component name in "entity.component" format (e.g., `"drone.motor_command"`)
+    - `data` : `numpy.ndarray`, the component data to write
+    - `timestamp` : `int`, optional, the timestamp (microseconds since epoch) to write at. If `None`, uses the current simulation timestamp.
+
+    Raises `RuntimeError` if the component doesn't exist, or `ValueError` if the data size doesn't match the component schema.
+
+    {% alert(kind="warning") %}
+    Timestamps must be monotonically increasing per component. Writing with a timestamp less than the last write will raise a `TimeTravel` error.
+    {% end %}
+
+- `component_batch_operation(reads=[], writes=None, write_timestamps=None)` -> `dict[str, numpy.ndarray]`
+
+    Perform multiple component reads and writes in a single database operation. This is more efficient than calling `read_component`/`write_component` multiple times, as it only acquires the database lock once for all operations.
+
+    - `reads` : `list[str]`, list of component names to read (e.g., `["drone.accel", "drone.gyro"]`)
+    - `writes` : `dict[str, numpy.ndarray]`, optional, dict mapping component names to numpy arrays to write
+    - `write_timestamps` : `dict[str, int]`, optional, dict mapping component names to timestamps (microseconds since epoch). Components not in this dict use the current simulation timestamp.
+
+    Returns a dict mapping read component names to their numpy array values.
+
+    {% alert(kind="notice") %}
+    Use batch operations when reading or writing multiple components in a single callback for better performance at high tick rates.
+    {% end %}
+
+- `truncate()` -> None
+
+    Truncate all component data and message logs in the database, resetting the tick counter to 0. This clears all stored time-series data while preserving component schemas and metadata.
+
+    Use this to control the freshness of the database and ensure reliable data from a known tick. Common use case: clearing warmup data before starting the actual simulation run.
+
+    After `truncate()`, any subsequent `write_component()` calls in the same callback will write at the start timestamp (tick 0), preventing `TimeTravel` errors on the next tick.
+
+- `stop_recipes()` -> None
+
+    Gracefully terminate all s10-managed recipes (external processes).
+
+    This signals all processes managed by s10 (registered via `world.recipe()`) to shut down gracefully. The processes receive SIGTERM and have approximately 2 seconds to clean up before being force-killed.
+
+    Use this to ensure clean shutdown of external processes (like Betaflight SITL) before the simulation exits, preventing memory corruption or resource leaks.
+
+    This is a no-op if no recipes were registered or if running with `--no-s10`.
+
+    {% alert(kind="notice") %}
+    Call `stop_recipes()` before the simulation exits to allow external processes time to clean up. You may want to add a brief delay (e.g., `time.sleep(0.5)`) after calling this method to ensure the processes have finished shutting down.
+    {% end %}
+
+#### Example: SITL Integration
+
+This example demonstrates a typical Software-In-The-Loop workflow where a flight controller receives sensor data and returns motor commands:
+
+```python
+import elodin as el
+import numpy as np
+import time
+
+# External flight controller interface (e.g., Betaflight SITL)
+flight_controller = FlightControllerBridge()
+MAX_TICKS = 10000
+
+def sitl_post_step(tick: int, ctx: el.StepContext):
+    """Post-step callback for lockstep SITL synchronization."""
+
+    # Read sensor data from the physics simulation using batch operation
+    sensor_data = ctx.component_batch_operation(
+        reads=["drone.accel", "drone.gyro", "drone.world_pos"]
+    )
+
+    accel = sensor_data["drone.accel"]
+    gyro = sensor_data["drone.gyro"]
+    position = sensor_data["drone.world_pos"]
+
+    # Send sensor data to flight controller, receive motor commands
+    motors = flight_controller.step(
+        accel=accel,
+        gyro=gyro,
+        timestamp=ctx.timestamp
+    )
+
+    # Write motor commands back to the simulation
+    ctx.write_component("drone.motor_command", motors)
+
+    # Print status every 1000 ticks
+    if tick % 1000 == 0:
+        print(f"Tick {tick}: motors={motors}, pos={position}")
+
+    # Graceful shutdown before simulation ends
+    if tick >= MAX_TICKS - 1:
+        ctx.stop_recipes()  # Signal s10 processes to terminate
+        time.sleep(0.5)     # Allow time for graceful shutdown
+
+# Run simulation with SITL callback
+world.run(
+    system,
+    sim_time_step=1/1000.0,  # 1kHz for flight controller
+    max_ticks=MAX_TICKS,
+    post_step=sitl_post_step,
+    db_path="sitl_data",
+    interactive=False,  # Headless mode
+)
+```
+
+For writing data at custom timestamps (e.g., logging historical sensor readings):
+
+```python
+def log_with_timestamps(tick: int, ctx: el.StepContext):
+    # Write current data at simulation timestamp (default)
+    ctx.write_component("drone.motor_command", motors)
+
+    # Write historical data at a specific timestamp
+    historical_ts = ctx.timestamp - 100_000  # 100ms ago (microseconds)
+    ctx.write_component("drone.sensor_log", sensor_data, timestamp=historical_ts)
+
+    # Batch write with per-component timestamps
+    ctx.component_batch_operation(
+        writes={
+            "drone.data_a": data_a,
+            "drone.data_b": data_b,
+        },
+        write_timestamps={
+            "drone.data_b": custom_timestamp,  # Custom timestamp for data_b
+            # data_a uses current simulation timestamp
+        }
+    )
+```
 
 ### _class_ `elodin.Panel`
 A configuration object for creating a panel view in the Elodin Client UI.
@@ -859,6 +1023,7 @@ viewport pos="aircraft.world_pos.translate(1, 0, 0.5).translate_world(0, 0, 10)"
 
 [elodin.World]: #class-elodin-world
 [elodin.EntityId]: #class-elodin-entityid
+[elodin.StepContext]: #class-elodin-stepcontext
 [elodin.Panel]: #class-elodin-panel
 [elodin.GraphEntity]: #class-elodin-graphentity
 [elodin.Mesh]: #class-elodin-mesh
