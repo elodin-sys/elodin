@@ -286,10 +286,11 @@ impl WorldBuilder {
                 let recipes = self.recipes.clone();
                 // Create a cancel token that can be used to gracefully stop s10 recipes
                 // from within the simulation callbacks (e.g., post_step)
-                let recipe_cancel_token = if !no_s10 && !recipes.is_empty() {
+                // Also store the thread handle so we can join it before Python cleanup
+                let (recipe_cancel_token, s10_thread_handle) = if !no_s10 && !recipes.is_empty() {
                     let token = CancelToken::new();
                     let s10_token = token.clone();
-                    std::thread::spawn(move || {
+                    let handle = std::thread::spawn(move || {
                         let rt = tokio::runtime::Builder::new_current_thread()
                             .enable_all() // Enable IO, time, and signal drivers for process spawning
                             .build()
@@ -308,9 +309,9 @@ impl WorldBuilder {
                         ))
                         .unwrap();
                     });
-                    Some(token)
+                    (Some(token), Some(handle))
                 } else {
-                    None
+                    (None, None)
                 };
                 let exec = exec.compile(client.clone())?;
                 if let Some(port) = liveness_port {
@@ -323,9 +324,9 @@ impl WorldBuilder {
                 };
                 // Clone cancel tokens for each closure that needs it
                 let pre_step_cancel_token = recipe_cancel_token.clone();
-                let post_step_cancel_token = recipe_cancel_token;
+                let post_step_cancel_token = recipe_cancel_token.clone();
                 py.allow_threads(|| {
-                    stellarator::run(|| {
+                    let result = stellarator::run(|| {
                         nox_ecs::impeller2_server::Server::new(
                             // Here we start the DB with an address.
                             elodin_db::Server::new(db_path, addr).unwrap(),
@@ -413,8 +414,24 @@ impl WorldBuilder {
                             interactive,
                             start_timestamp.map(Timestamp),
                         )
-                    })?;
+                    });
 
+                    // Clean up s10 thread before exiting py.allow_threads() to prevent
+                    // race conditions between s10's tokio runtime cleanup and Python's
+                    // garbage collector. This fixes "corrupted double-linked list" errors.
+                    if let Some(token) = recipe_cancel_token {
+                        tracing::debug!("Cancelling s10 recipes...");
+                        token.cancel();
+                    }
+                    if let Some(handle) = s10_thread_handle {
+                        tracing::debug!("Waiting for s10 thread to finish...");
+                        match handle.join() {
+                            Ok(_) => tracing::debug!("s10 thread joined successfully"),
+                            Err(e) => tracing::warn!("s10 thread panicked: {:?}", e),
+                        }
+                    }
+
+                    result?;
                     Ok(None)
                 })
             }
