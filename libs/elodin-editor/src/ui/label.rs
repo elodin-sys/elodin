@@ -79,7 +79,7 @@ impl ELabel {
                 font_id,
                 self.text_color,
             );
-            let galley = ui.fonts(|f| f.layout_job(layout_job));
+            let galley = ui.fonts_mut(|f| f.layout_job(layout_job));
             let text_galley_rect = egui::Align2::LEFT_CENTER.anchor_rect(
                 egui::Rect::from_min_size(text_rect.left_center(), galley.size()),
             );

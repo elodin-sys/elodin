@@ -3,16 +3,18 @@ use std::fmt::Write;
 use std::path::PathBuf;
 
 use bevy::{
+    camera::{RenderTarget, Viewport},
     ecs::{
         query::QueryData,
-        system::{SystemParam, SystemState},
+        system::{NonSendMarker, SystemParam, SystemState},
     },
     // platform::collections::{HashMap, HashSet},
     input::keyboard::Key,
     log::{error, info},
     prelude::*,
-    render::camera::{RenderTarget, Viewport},
+    render::view::Hdr,
     window::{Monitor, NormalizedWindowRef, PrimaryWindow, WindowFocused},
+    winit::WINIT_WINDOWS,
 };
 use bevy_defer::AsyncPlugin;
 use bevy_egui::{
@@ -217,7 +219,7 @@ pub fn shortcuts(
 
 pub fn update_focused_window(
     mut focused_window: ResMut<FocusedWindow>,
-    mut focus_events: EventReader<WindowFocused>,
+    mut focus_events: MessageReader<WindowFocused>,
 ) {
     for event in focus_events.read() {
         if event.focused {
@@ -277,7 +279,7 @@ impl Plugin for UiPlugin {
             .init_resource::<timeline_slider::UITick>()
             .init_resource::<timeline::StreamTickOrigin>()
             .init_resource::<command_palette::CommandPaletteState>()
-            .add_event::<DialogEvent>()
+            .add_message::<DialogEvent>()
             .add_systems(Update, timeline_slider::sync_ui_tick.before(render_layout))
             .add_systems(Update, actions::spawn_lua_actor)
             .add_systems(Update, update_focused_window)
@@ -336,7 +338,7 @@ pub enum DialogAction {
     Custom(String), // Custom action identifier
 }
 
-#[derive(Clone, Debug, Event)]
+#[derive(Clone, Debug, Message)]
 pub struct DialogEvent {
     pub action: DialogAction,
     pub id: String,
@@ -487,29 +489,31 @@ pub fn render_layout(
 /// Runs as a one-off system to capture the window descriptor. Does not run
 /// every frameñ.
 pub(crate) fn capture_window_screens_oneoff(
-    winit_windows: NonSend<bevy::winit::WinitWindows>,
     mut window_query: Query<(Entity, &Window, &mut tiles::WindowState)>,
     screens: Query<(Entity, &Monitor)>,
+    _non_send_marker: NonSendMarker,
 ) {
-    for (entity, window_component, mut state) in &mut window_query {
-        let winit_window = winit_windows.get_window(entity);
-        let mut updated = false;
-        if let Some(window) = winit_window {
-            let screens_sorted = collect_sorted_screens(window);
-            updated = state.update_descriptor_from_winit_window(window, &screens_sorted);
-            let screen_seen = state.descriptor.screen;
-            // Fallback: best-effort detection if current_monitor is not reliable.
-            if (!updated || screen_seen.is_none())
-                && let Some(idx) = detect_window_screen(window, &screens_sorted)
-            {
-                state.descriptor.screen = Some(idx);
-                updated = true;
+    WINIT_WINDOWS.with_borrow(|winit_windows| {
+        for (entity, window_component, mut state) in &mut window_query {
+            let winit_window = winit_windows.get_window(entity);
+            let mut updated = false;
+            if let Some(window) = winit_window {
+                let screens_sorted = collect_sorted_screens(window);
+                updated = state.update_descriptor_from_winit_window(window, &screens_sorted);
+                let screen_seen = state.descriptor.screen;
+                // Fallback: best-effort detection if current_monitor is not reliable.
+                if (!updated || screen_seen.is_none())
+                    && let Some(idx) = detect_window_screen(window, &screens_sorted)
+                {
+                    state.descriptor.screen = Some(idx);
+                    updated = true;
+                }
+            }
+            if !updated {
+                state.update_descriptor_from_window(window_component, &screens);
             }
         }
-        if !updated {
-            state.update_descriptor_from_window(window_component, &screens);
-        }
-    }
+    });
 }
 
 fn fix_visibility_hierarchy(
@@ -798,8 +802,17 @@ fn sync_camera_grid_cell(
         }
     }
 }
-fn sync_hdr(hdr_enabled: Res<HdrEnabled>, mut query: Query<&mut Camera>) {
-    for mut cam in query.iter_mut() {
-        cam.hdr = hdr_enabled.0;
+
+fn sync_hdr(
+    hdr_enabled: Res<HdrEnabled>,
+    mut commands: Commands,
+    cameras: Query<(Entity, Has<Hdr>), With<Camera>>,
+) {
+    for (entity, has_hdr) in cameras.iter() {
+        if hdr_enabled.0 && !has_hdr {
+            commands.entity(entity).insert(Hdr);
+        } else if !hdr_enabled.0 && has_hdr {
+            commands.entity(entity).remove::<Hdr>();
+        }
     }
 }

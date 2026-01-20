@@ -222,7 +222,7 @@ impl Cli {
 #[derive(Resource)]
 struct BevyCancelToken(CancelToken);
 
-fn check_cancel_token(token: Res<BevyCancelToken>, mut exit: EventWriter<AppExit>) {
+fn check_cancel_token(token: Res<BevyCancelToken>, mut exit: MessageWriter<AppExit>) {
     if token.0.is_cancelled() {
         exit.write(AppExit::Success);
     }
@@ -230,7 +230,7 @@ fn check_cancel_token(token: Res<BevyCancelToken>, mut exit: EventWriter<AppExit
 
 fn on_window_resize(
     mut window_state_file: ResMut<WindowStateFile>,
-    mut resize_reader: EventReader<WindowResized>,
+    mut resize_reader: MessageReader<WindowResized>,
     query: Query<Entity, With<PrimaryWindow>>,
 ) {
     if let Some(e) = resize_reader.read().last() {

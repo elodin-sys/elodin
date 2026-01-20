@@ -1,5 +1,5 @@
+use bevy::camera::RenderTarget;
 use bevy::prelude::Entity;
-use bevy::render::camera::RenderTarget;
 use bevy::window::WindowRef;
 
 pub fn window_entity_from_target(target: &RenderTarget, primary_window: Entity) -> Option<Entity> {

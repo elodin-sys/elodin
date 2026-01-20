@@ -7,8 +7,9 @@ use bevy::{
     log::{info, warn},
     prelude::*,
     window::{PrimaryWindow, WindowCloseRequested},
+    winit::WINIT_WINDOWS,
 };
-use bevy_defer::{AccessError, AsyncAccess, AsyncCommandsExtension, AsyncWorld};
+use bevy_defer::{AccessError, AsyncCommandsExtension, AsyncWorld};
 use impeller2_wkt::WindowRect;
 #[cfg(target_os = "macos")]
 use winit::dpi::LogicalPosition;
@@ -21,9 +22,9 @@ use winit::{
 use crate::ui::tiles::{WindowId, WindowRelayout, WindowState};
 
 pub fn handle_window_close(
-    mut events: EventReader<WindowCloseRequested>,
+    mut events: MessageReader<WindowCloseRequested>,
     primary: Query<&WindowId, With<PrimaryWindow>>,
-    mut exit: EventWriter<AppExit>,
+    mut exit: MessageWriter<AppExit>,
 ) {
     for evt in events.read() {
         let entity = evt.window;
@@ -42,9 +43,11 @@ pub async fn wait_for_winit_window(
     timeout: Duration,
 ) -> Result<bool, AccessError> {
     let start = std::time::Instant::now();
-    let winit_windows_async = AsyncWorld.non_send_resource::<bevy::winit::WinitWindows>();
     while start.elapsed() < timeout {
-        if winit_windows_async.get(|winit_windows| winit_windows.get_window(window_id).is_some())? {
+        let window_ready = AsyncWorld.run(|_world| {
+            WINIT_WINDOWS.with_borrow(|winit_windows| winit_windows.get_window(window_id).is_some())
+        });
+        if window_ready {
             return Ok(true);
         }
         AsyncWorld.yield_now().await;
@@ -63,9 +66,8 @@ pub async fn apply_physical_screen_rect(
         return Ok(());
     }
 
-    let target = AsyncWorld.run(
-        |world| -> Option<(LogicalPosition<f64>, LogicalSize<f64>)> {
-            let winit_windows = world.get_non_send_resource::<bevy::winit::WinitWindows>()?;
+    let target = AsyncWorld.run(|_world| {
+        WINIT_WINDOWS.with_borrow(|winit_windows| {
             let any_window = winit_windows.windows.values().next()?;
             let screens = collect_sorted_screens(any_window);
             log_screens("macos.load.screens", &screens);
@@ -100,8 +102,8 @@ pub async fn apply_physical_screen_rect(
                 LogicalPosition::new(clamped_x, clamped_y),
                 LogicalSize::new(req_w, req_h),
             ))
-        },
-    );
+        })
+    });
 
     let Some((pos, size)) = target else {
         warn!(
@@ -111,9 +113,8 @@ pub async fn apply_physical_screen_rect(
         return Ok(());
     };
 
-    AsyncWorld
-        .non_send_resource::<bevy::winit::WinitWindows>()
-        .get(|winit_windows| {
+    AsyncWorld.run(|_world| {
+        WINIT_WINDOWS.with_borrow(|winit_windows| {
             let Some(window) = winit_windows.get_window(window_entity) else {
                 warn!(%window_entity, "apply_physical_screen_rect: winit window not found");
                 return;
@@ -144,7 +145,8 @@ pub async fn apply_physical_screen_rect(
 
             let _ = window.request_inner_size(physical_size);
             window.set_outer_position(physical_pos);
-        })?;
+        })
+    });
     info!(
         window = %window_entity,
         target_screen = screen_index,
@@ -169,67 +171,70 @@ async fn apply_window_screen(entity: Entity, screen: usize) -> Result<(), bevy_d
     let mut state = window_states
         .entity(entity)
         .get_mut(|state| state.clone())?;
-    let winit_windows_async = AsyncWorld.non_send_resource::<bevy::winit::WinitWindows>();
-    let target_monitor_maybe = winit_windows_async.get(|winit_windows| {
-        let Some(window) = winit_windows.get_window(entity) else {
-            error!(%entity, "No winit window in apply window screen");
-            return None;
-        };
-
-        let screens = collect_sorted_screens(window);
-
-        if window_on_target_screen(&mut state, window, &screens) {
-            if crate::ui::platform::LINUX_MULTI_WINDOW {
-                exit_fullscreen(window);
-                force_windowed(window);
-            } else if window.fullscreen().is_some() {
-                exit_fullscreen(window);
-            }
-            return None;
-        }
-
-        if let Some(target_monitor) = screens.get(screen).cloned() {
-            assign_window_to_screen(window, target_monitor.clone());
-            Some(target_monitor)
-        } else {
-            warn!(
-                screen,
-                path = ?state.descriptor.path,
-                "screen out of range; skipping screen assignment"
-            );
-            state.descriptor.screen = None;
-            warn!(%entity, "screen out of range");
-            None
-        }
-    })?;
-    if let Some(target_monitor) = target_monitor_maybe {
-        let success =
-            wait_for_window_to_change_screens(entity, screen, Duration::from_millis(1000)).await?;
-        winit_windows_async.get(|winit_windows| {
+    let target_monitor_maybe = AsyncWorld.run(|_world| {
+        WINIT_WINDOWS.with_borrow(|winit_windows| {
             let Some(window) = winit_windows.get_window(entity) else {
-                error!(%entity, "No winit window in apply screen");
-                return;
+                error!(%entity, "No winit window in apply window screen");
+                return None;
             };
+
             let screens = collect_sorted_screens(window);
-            let detected_screen = detect_window_screen(window, &screens);
-            let on_target = detected_screen == Some(screen);
-            if success || on_target {
+
+            if window_on_target_screen(&mut state, window, &screens) {
                 if crate::ui::platform::LINUX_MULTI_WINDOW {
                     exit_fullscreen(window);
                     force_windowed(window);
                 } else if window.fullscreen().is_some() {
                     exit_fullscreen(window);
                 }
-            } else {
-                recenter_window_on_screen(window, &target_monitor);
+                return None;
             }
-        })?;
+
+            if let Some(target_monitor) = screens.get(screen).cloned() {
+                assign_window_to_screen(window, target_monitor.clone());
+                Some(target_monitor)
+            } else {
+                warn!(
+                    screen,
+                    path = ?state.descriptor.path,
+                    "screen out of range; skipping screen assignment"
+                );
+                state.descriptor.screen = None;
+                warn!(%entity, "screen out of range");
+                None
+            }
+        })
+    });
+    if let Some(target_monitor) = target_monitor_maybe {
+        let success =
+            wait_for_window_to_change_screens(entity, screen, Duration::from_millis(1000)).await?;
+        AsyncWorld.run(|_world| {
+            WINIT_WINDOWS.with_borrow(|winit_windows| {
+                let Some(window) = winit_windows.get_window(entity) else {
+                    error!(%entity, "No winit window in apply screen");
+                    return;
+                };
+                let screens = collect_sorted_screens(window);
+                let detected_screen = detect_window_screen(window, &screens);
+                let on_target = detected_screen == Some(screen);
+                if success || on_target {
+                    if crate::ui::platform::LINUX_MULTI_WINDOW {
+                        exit_fullscreen(window);
+                        force_windowed(window);
+                    } else if window.fullscreen().is_some() {
+                        exit_fullscreen(window);
+                    }
+                } else {
+                    recenter_window_on_screen(window, &target_monitor);
+                }
+            })
+        });
     }
     Ok(())
 }
 
 pub fn handle_window_relayout_events(
-    mut relayout_events: EventReader<WindowRelayout>,
+    mut relayout_events: MessageReader<WindowRelayout>,
     mut commands: Commands,
     mut per_window: Local<HashMap<Entity, Vec<WindowRelayout>>>,
 ) {
@@ -263,7 +268,8 @@ pub fn handle_window_relayout_events(
                             let window_states = AsyncWorld.query::<&WindowState>();
                             if let Ok(Some(rect)) = window_states
                                 .entity(window)
-                                .get(|state| state.descriptor.screen_rect)
+                                // TODO: Can got back to .get() when bevy_defer is updated past 0.15.1.
+                                .get_mut(|state| state.descriptor.screen_rect)
                             {
                                 apply_physical_screen_rect(window, screen, rect).await.ok();
                                 continue;
@@ -280,7 +286,8 @@ pub fn handle_window_relayout_events(
                             if let Some(screen) = AsyncWorld
                                 .query::<&WindowState>()
                                 .entity(window)
-                                .get(|state| state.descriptor.screen)
+                                // TODO: Can got back to .get() when bevy_defer is updated past 0.15.1.
+                                .get_mut(|state| state.descriptor.screen)
                                 .ok()
                                 .flatten()
                             {
@@ -317,9 +324,9 @@ async fn apply_window_rect(
     );
 
     let window_states = AsyncWorld.query::<&WindowState>();
-    let state = window_states.entity(entity).get(|state| state.clone())?;
-
-    let winit_windows_async = AsyncWorld.non_send_resource::<bevy::winit::WinitWindows>();
+    let state = window_states
+        .entity(entity)
+        .get_mut(|state| state.clone())?;
 
     let is_full_rect = crate::ui::platform::LINUX_MULTI_WINDOW
         && rect.x == 0
@@ -331,60 +338,62 @@ async fn apply_window_rect(
     let mut wait = true;
     while wait && start.elapsed() < timeout {
         AsyncWorld.yield_now().await;
-        wait = winit_windows_async.get(|winit_windows| {
-            let Some(window) = winit_windows.get_window(entity) else {
-                error!(%entity, "No winit window in apply rect");
-                return true;
-            };
+        wait = AsyncWorld.run(|_world| {
+            WINIT_WINDOWS.with_borrow(|winit_windows| {
+                let Some(window) = winit_windows.get_window(entity) else {
+                    error!(%entity, "No winit window in apply rect");
+                    return true;
+                };
 
-            if rect.width == 0 && rect.height == 0 {
-                linux_request_minimize(window);
-                info!("Applied minimize rect");
-                return false;
-            }
+                if rect.width == 0 && rect.height == 0 {
+                    linux_request_minimize(window);
+                    info!("Applied minimize rect");
+                    return false;
+                }
 
-            let screen_handle = if let Some(idx) = state.descriptor.screen {
-                let screens = collect_sorted_screens(window);
-                screens
-                    .get(idx)
-                    .cloned()
-                    .or_else(|| window.current_monitor())
-            } else {
-                window.current_monitor()
-            };
+                let screen_handle = if let Some(idx) = state.descriptor.screen {
+                    let screens = collect_sorted_screens(window);
+                    screens
+                        .get(idx)
+                        .cloned()
+                        .or_else(|| window.current_monitor())
+                } else {
+                    window.current_monitor()
+                };
 
-            let Some(screen_handle) = screen_handle else {
-                warn!("No screen handle available; retrying");
-                return true;
-            };
+                let Some(screen_handle) = screen_handle else {
+                    warn!("No screen handle available; retrying");
+                    return true;
+                };
 
-            let scale_factor = window.scale_factor().max(0.0001);
-            let scale_with_monitor = screen_handle.scale_factor().max(0.0001);
-            let LogicalSize { width, height } = screen_physical_size(&screen_handle);
-            let screen_width = width.max(1.0);
-            let screen_height = height.max(1.0);
-            let req_x = (rect.x as f64 / 100.0) * screen_width;
-            let req_y = (rect.y as f64 / 100.0) * screen_height;
-            let req_w = (rect.width as f64 / 100.0) * screen_width;
-            let req_h = (rect.height as f64 / 100.0) * screen_height;
+                let scale_factor = window.scale_factor().max(0.0001);
+                let scale_with_monitor = screen_handle.scale_factor().max(0.0001);
+                let LogicalSize { width, height } = screen_physical_size(&screen_handle);
+                let screen_width = width.max(1.0);
+                let screen_height = height.max(1.0);
+                let req_x = (rect.x as f64 / 100.0) * screen_width;
+                let req_y = (rect.y as f64 / 100.0) * screen_height;
+                let req_w = (rect.width as f64 / 100.0) * screen_width;
+                let req_h = (rect.height as f64 / 100.0) * screen_height;
 
-            let pos_x = req_x + screen_handle.position().x as f64;
-            let pos_y = req_y + screen_handle.position().y as f64;
-            let size = PhysicalSize::new(
-                (req_w * scale_factor).round() as u32,
-                (req_h * scale_factor).round() as u32,
-            );
-            let pos = winit::dpi::PhysicalPosition::new(
-                (pos_x * scale_with_monitor).round(),
-                (pos_y * scale_with_monitor).round(),
-            );
-            window.set_outer_position(pos);
-            let _ = window.request_inner_size(size);
-            if is_full_rect {
-                info!("Applied full-screen rect via positioning");
-            }
-            false
-        })?;
+                let pos_x = req_x + screen_handle.position().x as f64;
+                let pos_y = req_y + screen_handle.position().y as f64;
+                let size = PhysicalSize::new(
+                    (req_w * scale_factor).round() as u32,
+                    (req_h * scale_factor).round() as u32,
+                );
+                let pos = winit::dpi::PhysicalPosition::new(
+                    (pos_x * scale_with_monitor).round(),
+                    (pos_y * scale_with_monitor).round(),
+                );
+                window.set_outer_position(pos);
+                let _ = window.request_inner_size(size);
+                if is_full_rect {
+                    info!("Applied full-screen rect via positioning");
+                }
+                false
+            })
+        });
     }
     Ok(())
 }
@@ -395,7 +404,6 @@ async fn wait_for_window_to_change_screens(
     target_screen: usize,
     timeout: Duration,
 ) -> Result<bool, AccessError> {
-    let winit_windows_async = AsyncWorld.non_send_resource::<bevy::winit::WinitWindows>();
     let start = std::time::Instant::now();
     loop {
         if start.elapsed() > timeout {
@@ -409,20 +417,23 @@ async fn wait_for_window_to_change_screens(
 
         AsyncWorld.yield_now().await;
 
-        if winit_windows_async.get(|winit_windows| {
-            let Some(window) = winit_windows.get_window(entity) else {
-                warn!(%entity, "No winit window when waiting for screen change");
-                return false;
-            };
-            let screens = collect_sorted_screens(window);
-            let screen = detect_window_screen(window, &screens);
-            if screen == Some(target_screen) {
-                info!(window = %entity, %target_screen, "Window now on target screen");
-                true
-            } else {
-                false
-            }
-        })? {
+        let on_target = AsyncWorld.run(|_world| {
+            WINIT_WINDOWS.with_borrow(|winit_windows| {
+                let Some(window) = winit_windows.get_window(entity) else {
+                    warn!(%entity, "No winit window when waiting for screen change");
+                    return false;
+                };
+                let screens = collect_sorted_screens(window);
+                let screen = detect_window_screen(window, &screens);
+                if screen == Some(target_screen) {
+                    info!(window = %entity, %target_screen, "Window now on target screen");
+                    true
+                } else {
+                    false
+                }
+            })
+        });
+        if on_target {
             return Ok(true);
         }
     }

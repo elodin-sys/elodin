@@ -1,8 +1,9 @@
 use bevy::ecs::system::{SystemParam, SystemState};
 use bevy::prelude::*;
 use bevy::{
+    camera::Projection,
+    camera::visibility::Visibility,
     ecs::{entity::Entity, system::Query},
-    render::{camera::Projection, view::Visibility},
 };
 use bevy_egui::egui::{self, Align};
 use bevy_infinite_grid::InfiniteGrid;
