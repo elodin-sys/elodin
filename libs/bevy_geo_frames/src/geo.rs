@@ -307,92 +307,6 @@ impl GeoFrame {
         DVec3::new(v_bevy.x as f64, v_bevy.y as f64, v_bevy.z as f64)
     }
 
-    /// Converts ENU (East-North-Up) coordinates to a 3D position on a sphere in Bevy coordinates
-    ///
-    /// This function takes ENU coordinates relative to a reference point and converts them
-    /// to a position on a sphere suitable for rendering in Bevy.
-    ///
-    /// ## Inputs:
-    /// - e = east coordinate [m] from reference point
-    /// - n = north coordinate [m] from reference point
-    /// - u = up coordinate [m] from reference point
-    /// - lat0 = reference latitude [rad] of the reference point
-    /// - lon0 = reference longitude [rad] of the reference point
-    /// - alt0 = reference altitude [m] of the reference point
-    /// - r_ellips = reference ellipsoid (e.g., Ellipsoid::WGS84)
-    /// - sphere_scale = scale factor to convert meters to Bevy units (e.g., 1.0 for 1:1, 0.001 for mm to m)
-    ///
-    /// ## Outputs:
-    /// - (x, y, z) tuple suitable for Bevy's Vec3 representing position on the sphere
-    ///   - Coordinates are in Bevy units (scaled by sphere_scale)
-    ///   - X points right (East)
-    ///   - Y points up
-    ///   - Z points forward (negative North in typical Bevy convention)
-    ///
-    /// ## Example:
-    /// ```rust
-    /// use bevy::prelude::*;
-    /// use bevy::math::f64::DVec3;
-    /// use map_3d::{Ellipsoid};
-    /// use bevy_geo_frames::{GeoPosition, GeoOrigin, GeoContext, GeoFrame};
-    /// use std::f64::consts::PI;
-    ///
-    /// // Reference point: New York (40.7°N, -73.9°W, 0m altitude)
-    /// let lat0 = 40.7_f64.to_radians();
-    /// let lon0 = -73.9_f64.to_radians();
-    /// let alt0 = 0.0;
-    /// let context = GeoOrigin::new_from_degrees(lat0, lon0, alt0).into();
-    ///
-    /// // ENU coordinates: 100m east, 50m north, 10m up from reference
-    /// let v = GeoPosition(GeoFrame::ENU, DVec3::new(100.0, 50.0, 10.0)).to_bevy_sphere(
-    ///     &context,
-    /// );
-    /// // In Bevy: Vec3::new(x as f32, y as f32, z as f32)
-    /// ```
-    // pub fn to_bevy_sphere(
-    //     &self,
-    //     v: DVec3,
-    //     ctx: &GeoContext,
-    // ) -> DVec3 {
-    //     todo!()
-        // let scale = ctx.origin.scale_factor();
-        // let w = GeoFrame::ECEF.convert_to(v, ctx);
-        // w.yzx()
-
-        // // Convert into the local EUS offset first.
-        // let local_eus = self.to_eus(v, ctx);
-        // let local = DVec3::new(local_eus.x, local_eus.y, local_eus.z);
-
-        // // Rotate local offsets into sphere presentation: yaw by longitude, then pitch by (latitude - 90°).
-        // let pitch = ctx.origin.latitude - std::f64::consts::FRAC_PI_2;
-        // let (sin_pitch, cos_pitch) = pitch.sin_cos();
-        // let (sin_lon, cos_lon) = ctx.origin.longitude.sin_cos();
-
-        // let local_pitched = DVec3::new(
-        //     local.x,
-        //     cos_pitch * local.y - sin_pitch * local.z,
-        //     sin_pitch * local.y + cos_pitch * local.z,
-        // );
-        // let local_rotated = DVec3::new(
-        //     cos_lon * local_pitched.x + sin_lon * local_pitched.z,
-        //     local_pitched.y,
-        //     -sin_lon * local_pitched.x + cos_lon * local_pitched.z,
-        // );
-
-        // let origin_local = DVec3::new(0.0, scale, 0.0);
-        // let origin_pitched = DVec3::new(
-        //     origin_local.x,
-        //     cos_pitch * origin_local.y - sin_pitch * origin_local.z,
-        //     sin_pitch * origin_local.y + cos_pitch * origin_local.z,
-        // );
-        // let origin_rotated = DVec3::new(
-        //     cos_lon * origin_pitched.x + sin_lon * origin_pitched.z,
-        //     origin_pitched.y,
-        //     -sin_lon * origin_pitched.x + cos_lon * origin_pitched.z,
-        // );
-
-        // origin_rotated + local_rotated
-    // }
     fn to_eus(self, v: DVec3, ctx: &GeoContext) -> DVec3 {
         match self {
             // GeoFrame::EUS => v,
@@ -712,13 +626,6 @@ mod tests {
         };
     }
 
-    fn assert_vec3_close(label: &str, a: Vec3, b: Vec3, eps: f32) {
-        assert!(
-            (a - b).length() <= eps,
-            "{label}: got {a:?}, expected {b:?}"
-        );
-    }
-
     #[test]
     fn enu_to_eus_axes() {
         let ctx = dummy_ctx();
@@ -938,19 +845,19 @@ mod tests {
 
         for (frame, expected_plane, expected_sphere) in cases {
             let plane = GeoPosition(frame, v).to_bevy(&ctx_plane).as_vec3();
-            assert_vec3_close(
-                &format!("{frame:?} plane (equator)"),
+            assert_approx_eq!(
                 plane,
                 expected_plane,
                 eps,
+                format!("{frame:?} plane (equator)")
             );
 
             let sphere = GeoPosition(frame, v).to_bevy(&ctx_sphere).as_vec3();
-            assert_vec3_close(
-                &format!("{frame:?} sphere (equator)"),
+            assert_approx_eq!(
                 sphere,
                 expected_sphere,
                 eps,
+                format!("{frame:?} sphere (equator)")
             );
         }
     }
@@ -958,14 +865,10 @@ mod tests {
     #[test]
     fn present_plane_and_sphere_at_north_pole() {
         let radius = 1.0;
-        let ctx_plane: GeoContext = GeoOrigin::new_from_degrees(90.0, 0.0, 0.0)
+        let ctx_plane: GeoContext = GeoOrigin::new_from_degrees(90.0, 270.0, 0.0)
             .with_ellipsoid(Ellipsoid::Sphere { radius })
             .into();
-        let ctx_plane = ctx_plane.with_present(Present::Plane);
-        let ctx_sphere: GeoContext = GeoOrigin::new_from_degrees(90.0, 0.0, 0.0)
-            .with_ellipsoid(Ellipsoid::Sphere { radius })
-            .into();
-        let ctx_sphere = ctx_sphere.with_present(Present::Sphere);
+        let ctx_sphere = ctx_plane.clone().with_present(Present::Sphere);
         let v = DVec3::new(1.0, 2.0, 3.0);
         let eps = 1e-4;
 
@@ -984,7 +887,7 @@ mod tests {
             ),
             (
                 GeoFrame::ECEF,
-                Vec3::new(2.0, 2.0, 1.0),
+                Vec3::new(1.0, 3.0, -2.0),
             ),
             // (
             //     GeoFrame::ECI,
@@ -998,19 +901,23 @@ mod tests {
 
         for (frame, expected_plane) in cases {
             let plane = GeoPosition(frame, v).to_bevy(&ctx_plane).as_vec3();
-            assert_vec3_close(
-                &format!("{frame:?} plane (north pole)"),
+            assert_approx_eq!(
                 plane,
                 expected_plane,
                 eps,
+                format!("{frame:?} plane (north pole)")
             );
 
             let sphere = GeoPosition(frame, v).to_bevy(&ctx_sphere).as_vec3();
-            assert_vec3_close(
-                &format!("{frame:?} sphere (north pole)"),
+            assert_approx_eq!(
                 sphere,
-                expected_plane + Vec3::Y,
+                if frame == GeoFrame::ECEF {
+                    expected_plane
+                } else {
+                    expected_plane + Vec3::Y
+                },
                 eps,
+                format!("{frame:?} sphere (north pole)")
             );
         }
     }
@@ -1021,11 +928,7 @@ mod tests {
         let ctx_plane: GeoContext = GeoOrigin::new_from_degrees(90.0, 180.0, 0.0)
             .with_ellipsoid(Ellipsoid::Sphere { radius })
             .into();
-        let ctx_plane = ctx_plane.with_present(Present::Plane);
-        let ctx_sphere: GeoContext = GeoOrigin::new_from_degrees(90.0, 180.0, 0.0)
-            .with_ellipsoid(Ellipsoid::Sphere { radius })
-            .into();
-        let ctx_sphere = ctx_sphere.with_present(Present::Sphere);
+        let ctx_sphere = ctx_plane.clone().with_present(Present::Sphere);
         let v = DVec3::new(1.0, 2.0, 3.0);
         let eps = 1e-4;
 
@@ -1044,7 +947,7 @@ mod tests {
             ),
             (
                 GeoFrame::ECEF,
-                Vec3::new(2.0, 2.0, 1.0),
+                Vec3::new(1.0, 3.0, -2.0),
             ),
             // (
             //     GeoFrame::ECI,
@@ -1058,19 +961,23 @@ mod tests {
 
         for (frame, expected_plane) in cases {
             let plane = GeoPosition(frame, v).to_bevy(&ctx_plane).as_vec3();
-            assert_vec3_close(
-                &format!("{frame:?} plane (north pole)"),
+            assert_approx_eq!(
                 plane,
                 expected_plane,
                 eps,
+                format!("{frame:?} plane (north pole)")
             );
 
             let sphere = GeoPosition(frame, v).to_bevy(&ctx_sphere).as_vec3();
-            assert_vec3_close(
-                &format!("{frame:?} sphere (north pole)"),
+            assert_approx_eq!(
                 sphere,
-                Vec3::new(-expected_plane.x, expected_plane.y + radius as f32, -expected_plane.z),
+                if frame == GeoFrame::ECEF {
+                    expected_plane
+                } else {
+                    Vec3::new(expected_plane.z, expected_plane.y + radius as f32, -expected_plane.x)
+                },
                 eps,
+                format!("{frame:?} sphere (north pole)")
             );
         }
     }
@@ -1104,25 +1011,29 @@ mod tests {
             ),
             (
                 GeoFrame::ECEF,
-                Vec3::new(2.0, 2.0, 1.0),
+                Vec3::new(1.0, 3.0, -2.0),
             ),
         ];
 
         for (frame, expected_plane) in cases {
             let plane = GeoPosition(frame, v).to_bevy(&ctx_plane).as_vec3();
-            assert_vec3_close(
-                &format!("{frame:?} plane (south pole)"),
+            assert_approx_eq!(
                 plane,
                 expected_plane,
                 eps,
+                format!("{frame:?} plane (south pole)")
             );
 
             let sphere = GeoPosition(frame, v).to_bevy(&ctx_sphere).as_vec3();
-            assert_vec3_close(
-                &format!("{frame:?} sphere (south pole)"),
+            assert_approx_eq!(
                 sphere,
-                Vec3::new(expected_plane.x, -expected_plane.y - radius as f32, -expected_plane.z),
+                if frame == GeoFrame::ECEF {
+                    expected_plane
+                } else {
+                    Vec3::new(expected_plane.z, -expected_plane.y - radius as f32, expected_plane.x)
+                },
                 eps,
+                format!("{frame:?} sphere (south pole)")
             );
         }
     }
