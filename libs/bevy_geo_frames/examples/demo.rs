@@ -256,18 +256,18 @@ fn draw_frame_axes(
 
     for (transform, geo_trans) in &q {
         let frame = geo_trans.0;
-        
-        // Get the basis matrix - columns are the frame's basis vectors in EUS world space
-        let basis_mat = bevy_R_(&frame,&ctx) *, frame.basis_to_eus_mat3(&ctx);
-        
-        // Extract the three basis vectors (columns of the matrix)
-        // These represent the first, second, and third component directions
+
+        // Get the basis matrix - columns are the frame's basis vectors in EUS world space.
+        let basis_mat = GeoFrame::bevy_R_(&frame, &ctx);
+
+        // Extract the three basis vectors (columns of the matrix).
+        // These represent the first, second, and third component directions.
         // The basis vectors are already in EUS world space, so we use them directly
-        // without applying the object's rotation so the axes stay fixed in world space
-        let axis1 = basis_mat.x_axis; // First component (Red)
-        let axis2 = basis_mat.y_axis; // Second component (Green)
-        let axis3 = basis_mat.z_axis; // Third component (Blue)
-        
+        // without applying the object's rotation so the axes stay fixed in world space.
+        let axis1 = basis_mat.x_axis.as_vec3(); // First component (Red)
+        let axis2 = basis_mat.y_axis.as_vec3(); // Second component (Green)
+        let axis3 = basis_mat.z_axis.as_vec3(); // Third component (Blue)
+
         let pos = transform.translation;
         
         // Draw lines for each axis in RGB colors
@@ -302,10 +302,7 @@ fn draw_frame_zero_gizmo(
         return;
     };
     let zero = GeoPosition(geo_pos.0, DVec3::ZERO);
-    let pos = match ctx.present {
-        Present::Plane => zero.to_bevy_plane(&ctx),
-        Present::Sphere => zero.to_bevy_sphere(&ctx),
-    };
+    let pos = zero.to_bevy(&ctx);
     gizmos.cuboid(
         Transform::from_translation(pos.as_vec3()).with_scale(Vec3::splat(0.3)),
         Color::srgb(1.0, 0.0, 0.0),

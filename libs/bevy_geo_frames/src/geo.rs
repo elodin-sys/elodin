@@ -1,4 +1,4 @@
-use bevy::math::{DMat3, DVec3};
+use bevy::math::{DMat3, DVec3, DMat4};
 use bevy::prelude::*;
 use bevy::transform::TransformSystem;
 use map_3d::{ecef2enu, enu2ecef, Ellipsoid};
@@ -195,11 +195,42 @@ impl GeoContext {
 
 impl GeoFrame {
 
-    /// Provides the matrix ${bevy}_R_{from}$.
+    /// Provides the transformation matrix ${bevy}_M_{from}$ of the coordinate frame.
+    pub fn bevy_M_(from: &Self, context: &GeoContext) -> DMat4 {
+        let R = Self::bevy_R_(from, context);
+        let O = Self::bevy_O_(from, context);
+        // DMat4::from_mat3_translation(R, O);
+        DMat4::from_cols(R.x_axis.extend(0.0),
+                         R.y_axis.extend(0.0),
+                         R.z_axis.extend(0.0),
+                         O.extend(1.0))
+    }
+
+    /// Provides the origin vector ${bevy}_O_{from}$ of the coordinate frame.
+    pub fn bevy_O_(from: &Self, context: &GeoContext) -> DVec3 {
+        match context.present {
+            Present::Plane => DVec3::ZERO,
+            Present::Sphere => {
+                match from {
+                    GeoFrame::ENU | GeoFrame::NED => {
+                        let bevy_R_enu = Self::bevy_R_(&GeoFrame::ENU, context);
+                        approx_radius(&context.origin.ellipsoid) * bevy_R_enu.z_axis
+                    }
+                    // For these, a fully correct basis would require time-dependent
+                    // Earth orientation.
+                    GeoFrame::ECEF => {
+                        DVec3::ZERO
+                    }
+                }
+            }
+        }
+    }
+
+    /// Provides the rotation matrix ${bevy}_R_{from}$.
     pub fn bevy_R_(from: &Self, context: &GeoContext) -> DMat3 {
+        let bevy_R_ecef = DMat3::from_cols(DVec3::X, DVec3::NEG_Z, DVec3::Y);
         match context.present {
             Present::Plane => match from {
-                // GeoFrame::EUS => DMat3::IDENTITY,
                 GeoFrame::ENU => {
                     // Columns are frame basis vectors expressed in EUS.
                     // ENU: e_hat = +X, n_hat = -Z, u_hat = +Y
@@ -212,11 +243,10 @@ impl GeoFrame {
                 // For these, a fully correct basis would require time-dependent
                 // Earth orientation.
                 GeoFrame::ECEF => {
-                    DMat3::from_cols(DVec3::X, DVec3::Z, DVec3::NEG_Y)
+                    bevy_R_ecef
                 }
             }
             Present::Sphere => {
-                let bevy_R_ecef = DMat3::from_cols(DVec3::X, DVec3::Z, DVec3::NEG_Y);
                 bevy_R_ecef * Self::ecef_R_(from, &context.origin)
             }
         }
@@ -235,10 +265,6 @@ impl GeoFrame {
             GeoFrame::ECEF => DMat3::IDENTITY,
             GeoFrame::ENU => ecef_R_enu,
             GeoFrame::NED => ecef_R_enu * Self::enu_R_ned(),
-            // GeoFrame::EUS => todo!(),
-            // For these, a fully correct basis would require time-dependent
-            // Earth orientation.
-            // GeoFrame::ECI | GeoFrame::GCRF => todo!("{from:?} not ready"),
         }
     }
 
@@ -537,7 +563,7 @@ pub struct GeoPosition(pub GeoFrame, pub DVec3);
 
 impl GeoPosition {
     pub fn to_bevy(&self, context: &GeoContext) -> DVec3 {
-        GeoFrame::bevy_R_(&self.0, context) * self.1
+        GeoFrame::bevy_M_(&self.0, context).transform_point3(self.1)
     }
 
 }
@@ -795,8 +821,8 @@ mod tests {
                 GeoOrigin::new_from_degrees(0.0, 0.0, 0.0),
                 [
                     // (GeoFrame::EUS, Vec3::ZERO, Vec3::ZERO),
-                    (GeoFrame::ENU, Vec3::ZERO, Vec3::new(0.0, 0.0, 1.0)),
-                    (GeoFrame::NED, Vec3::ZERO, Vec3::new(0.0, 0.0, 1.0)),
+                    (GeoFrame::ENU, Vec3::ZERO, Vec3::new(1.0, 0.0, 0.0)),
+                    (GeoFrame::NED, Vec3::ZERO, Vec3::new(1.0, 0.0, 0.0)),
                     (GeoFrame::ECEF, Vec3::ZERO, Vec3::ZERO),
                     // (GeoFrame::ECI, Vec3::new(0.0, -1.0, 0.0), Vec3::ZERO),
                     // (GeoFrame::GCRF, Vec3::new(0.0, -1.0, 0.0), Vec3::ZERO),
@@ -831,13 +857,13 @@ mod tests {
         let eps = 1e-5;
 
         for (label, origin, expectations) in origins {
-            let ctx: GeoContext = origin
+            let ctx_plane: GeoContext = origin
                 .with_ellipsoid(Ellipsoid::Sphere { radius: 1.0 })
                 .into();
+            let ctx_sphere = ctx_plane.clone().with_present(Present::Sphere);
             for (frame, expected_plane, expected_sphere) in expectations {
-                // let zero = GeoPosition(frame, DVec3::ZERO);
-                let zero = GeoPosition(frame, -DVec3::ZERO);
-                let plane = zero.to_bevy_plane(&ctx).as_vec3();
+                let zero = GeoPosition(frame, DVec3::ZERO);
+                let plane = zero.to_bevy(&ctx_plane).as_vec3();
                 // assert_approx_eq(
                 //     &format!("{frame:?} plane zero ({label})"),
                 //     plane,
@@ -851,7 +877,7 @@ mod tests {
                     format!("{frame:?} plane zero ({label})")
                 );
 
-                let sphere = zero.to_bevy_sphere(&ctx).as_vec3();
+                let sphere = zero.to_bevy(&ctx_sphere).as_vec3();
                 assert_approx_eq!(
                     sphere,
                     expected_sphere,
@@ -866,9 +892,14 @@ mod tests {
     #[test]
     fn present_plane_and_sphere_at_equator_origin() {
         let radius = 1.0;
-        let ctx: GeoContext = GeoOrigin::new_from_degrees(0.0, 0.0, 0.0)
+        let ctx_plane: GeoContext = GeoOrigin::new_from_degrees(0.0, 0.0, 0.0)
             .with_ellipsoid(Ellipsoid::Sphere { radius })
             .into();
+        let ctx_plane = ctx_plane.with_present(Present::Plane);
+        let ctx_sphere: GeoContext = GeoOrigin::new_from_degrees(0.0, 0.0, 0.0)
+            .with_ellipsoid(Ellipsoid::Sphere { radius })
+            .into();
+        let ctx_sphere = ctx_sphere.with_present(Present::Sphere);
         let v = DVec3::new(1.0, 2.0, 3.0);
         let eps = 1e-4;
 
@@ -906,7 +937,7 @@ mod tests {
         ];
 
         for (frame, expected_plane, expected_sphere) in cases {
-            let plane = frame.to_bevy_pos(v, &ctx);
+            let plane = GeoPosition(frame, v).to_bevy(&ctx_plane).as_vec3();
             assert_vec3_close(
                 &format!("{frame:?} plane (equator)"),
                 plane,
@@ -914,8 +945,7 @@ mod tests {
                 eps,
             );
 
-            let sphere_d = GeoPosition(frame, v).to_bevy_sphere(&ctx);
-            let sphere = Vec3::new(sphere_d.x as f32, sphere_d.y as f32, sphere_d.z as f32);
+            let sphere = GeoPosition(frame, v).to_bevy(&ctx_sphere).as_vec3();
             assert_vec3_close(
                 &format!("{frame:?} sphere (equator)"),
                 sphere,
@@ -928,9 +958,14 @@ mod tests {
     #[test]
     fn present_plane_and_sphere_at_north_pole() {
         let radius = 1.0;
-        let ctx: GeoContext = GeoOrigin::new_from_degrees(90.0, 0.0, 0.0)
+        let ctx_plane: GeoContext = GeoOrigin::new_from_degrees(90.0, 0.0, 0.0)
             .with_ellipsoid(Ellipsoid::Sphere { radius })
             .into();
+        let ctx_plane = ctx_plane.with_present(Present::Plane);
+        let ctx_sphere: GeoContext = GeoOrigin::new_from_degrees(90.0, 0.0, 0.0)
+            .with_ellipsoid(Ellipsoid::Sphere { radius })
+            .into();
+        let ctx_sphere = ctx_sphere.with_present(Present::Sphere);
         let v = DVec3::new(1.0, 2.0, 3.0);
         let eps = 1e-4;
 
@@ -962,7 +997,7 @@ mod tests {
         ];
 
         for (frame, expected_plane) in cases {
-            let plane = frame.to_bevy_pos(v, &ctx);
+            let plane = GeoPosition(frame, v).to_bevy(&ctx_plane).as_vec3();
             assert_vec3_close(
                 &format!("{frame:?} plane (north pole)"),
                 plane,
@@ -970,8 +1005,7 @@ mod tests {
                 eps,
             );
 
-            let sphere_d = GeoPosition(frame, v).to_bevy_sphere(&ctx);
-            let sphere = Vec3::new(sphere_d.x as f32, sphere_d.y as f32, sphere_d.z as f32);
+            let sphere = GeoPosition(frame, v).to_bevy(&ctx_sphere).as_vec3();
             assert_vec3_close(
                 &format!("{frame:?} sphere (north pole)"),
                 sphere,
@@ -984,9 +1018,14 @@ mod tests {
     #[test]
     fn present_plane_and_sphere_at_north_pole_180() {
         let radius = 1.0;
-        let ctx: GeoContext = GeoOrigin::new_from_degrees(90.0, 180.0, 0.0)
+        let ctx_plane: GeoContext = GeoOrigin::new_from_degrees(90.0, 180.0, 0.0)
             .with_ellipsoid(Ellipsoid::Sphere { radius })
             .into();
+        let ctx_plane = ctx_plane.with_present(Present::Plane);
+        let ctx_sphere: GeoContext = GeoOrigin::new_from_degrees(90.0, 180.0, 0.0)
+            .with_ellipsoid(Ellipsoid::Sphere { radius })
+            .into();
+        let ctx_sphere = ctx_sphere.with_present(Present::Sphere);
         let v = DVec3::new(1.0, 2.0, 3.0);
         let eps = 1e-4;
 
@@ -1018,7 +1057,7 @@ mod tests {
         ];
 
         for (frame, expected_plane) in cases {
-            let plane = frame.to_bevy_pos(v, &ctx);
+            let plane = GeoPosition(frame, v).to_bevy(&ctx_plane).as_vec3();
             assert_vec3_close(
                 &format!("{frame:?} plane (north pole)"),
                 plane,
@@ -1026,7 +1065,7 @@ mod tests {
                 eps,
             );
 
-            let sphere = GeoPosition(frame, v).to_bevy_sphere(&ctx).as_vec3();
+            let sphere = GeoPosition(frame, v).to_bevy(&ctx_sphere).as_vec3();
             assert_vec3_close(
                 &format!("{frame:?} sphere (north pole)"),
                 sphere,
@@ -1039,9 +1078,14 @@ mod tests {
     #[test]
     fn present_plane_and_sphere_at_south_pole() {
         let radius = 1.0;
-        let ctx: GeoContext = GeoOrigin::new_from_degrees(-90.0, 0.0, 0.0)
+        let ctx_plane: GeoContext = GeoOrigin::new_from_degrees(-90.0, 0.0, 0.0)
             .with_ellipsoid(Ellipsoid::Sphere { radius })
             .into();
+        let ctx_plane = ctx_plane.with_present(Present::Plane);
+        let ctx_sphere: GeoContext = GeoOrigin::new_from_degrees(-90.0, 0.0, 0.0)
+            .with_ellipsoid(Ellipsoid::Sphere { radius })
+            .into();
+        let ctx_sphere = ctx_sphere.with_present(Present::Sphere);
         let v = DVec3::new(1.0, 2.0, 3.0);
         let eps = 1e-4;
 
@@ -1065,7 +1109,7 @@ mod tests {
         ];
 
         for (frame, expected_plane) in cases {
-            let plane = frame.to_bevy_pos(v, &ctx);
+            let plane = GeoPosition(frame, v).to_bevy(&ctx_plane).as_vec3();
             assert_vec3_close(
                 &format!("{frame:?} plane (south pole)"),
                 plane,
@@ -1073,14 +1117,13 @@ mod tests {
                 eps,
             );
 
-            // let sphere_d = frame.to_bevy_sphere(v, &ctx);
-            // let sphere = Vec3::new(sphere_d.x as f32, sphere_d.y as f32, sphere_d.z as f32);
-            // assert_vec3_close(
-            //     &format!("{frame:?} sphere (south pole)"),
-            //     sphere,
-            //     Vec3::new(expected_plane.x, -expected_plane.y - radius as f32, -expected_plane.z),
-            //     eps,
-            // );
+            let sphere = GeoPosition(frame, v).to_bevy(&ctx_sphere).as_vec3();
+            assert_vec3_close(
+                &format!("{frame:?} sphere (south pole)"),
+                sphere,
+                Vec3::new(expected_plane.x, -expected_plane.y - radius as f32, -expected_plane.z),
+                eps,
+            );
         }
     }
 }
