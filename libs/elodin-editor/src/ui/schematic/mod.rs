@@ -8,6 +8,7 @@ use crate::{
         colors::EColor,
         inspector, plot, query_plot, query_table,
         tiles::{self, Pane},
+        window::compute_window_title,
     },
     vector_arrow::ViewportArrow,
 };
@@ -277,6 +278,7 @@ impl SchematicParam<'_, '_> {
                 egui_tiles::Container::Linear(linear) => {
                     let mut panels = Vec::new();
                     let mut shares = HashMap::new();
+                    let name = state.get_container_title(tile_id).map(|s| s.to_string());
 
                     for child_id in &linear.children {
                         if tiles::sidebar::tile_is_sidebar(tiles, *child_id) {
@@ -294,9 +296,8 @@ impl SchematicParam<'_, '_> {
 
                     match panels.len() {
                         0 => None,
-                        1 => Some(panels.remove(0)),
+                        1 if name.is_none() => Some(panels.remove(0)),
                         _ => {
-                            let name = state.get_container_title(tile_id).map(|s| s.to_string());
                             let split = Split {
                                 panels,
                                 shares,
@@ -360,8 +361,13 @@ pub fn tiles_to_schematic(
     let mut name_counts: HashMap<String, usize> = HashMap::new();
     for (state, window_id) in &param.windows_state {
         let mut file_name: Option<String> = None;
+        let mut window_title: Option<String> = None;
 
         if !window_id.is_primary() {
+            let computed_title = compute_window_title(state);
+            if computed_title != "Panel" {
+                window_title = Some(computed_title);
+            }
             let base_stem = preferred_secondary_stem(state);
             let unique_stem = ensure_unique_stem(&mut name_counts, &base_stem);
             file_name = Some(format!("{unique_stem}.kdl"));
@@ -376,14 +382,14 @@ pub fn tiles_to_schematic(
             if let Some(file_name) = &file_name {
                 secondary.0.push(SecondarySchematic {
                     file_name: file_name.clone(),
-                    title: state.descriptor.title.clone(),
+                    title: window_title.clone(),
                     schematic: window_schematic,
                 });
             }
         }
 
         window_elems.push(SchematicElem::Window(WindowSchematic {
-            title: None,
+            title: window_title.clone(),
             path: file_name,
             screen: state.descriptor.screen.map(|idx| idx as u32),
             screen_rect: state.descriptor.screen_rect,
