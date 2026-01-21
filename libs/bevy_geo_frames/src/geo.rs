@@ -1,5 +1,5 @@
 #![allow(non_snake_case)]
-use bevy::math::{DMat3, DMat4, DVec3, DQuat};
+use bevy::math::{DMat3, DMat4, DQuat, DVec3};
 use bevy::prelude::*;
 use bevy::transform::TransformSystem;
 use map_3d::Ellipsoid;
@@ -126,7 +126,7 @@ impl Default for GeoContext {
 
 impl From<GeoOrigin> for GeoContext {
     fn from(origin: GeoOrigin) -> Self {
-        GeoContext{
+        GeoContext {
             origin,
             ..default()
         }
@@ -297,16 +297,16 @@ impl GeoFrame {
         // $ \begin{bmatrix} x \\ y \\ z \end{bmatrix} = R_3[-(\pi/2 + \lambda)]~R_1[-(\pi/2 - \varphi)]\begin{bmatrix} E \\ N \\ U \end{bmatrix}
         //
         // Implementing on inspection results in this code:
-        // 
+        //
         // let ecef_R_enu = DMat3::from_rotation_z(-(FRAC_PI_2 + origin.longitude))
         //      * DMat3::from_rotation_x(-(FRAC_PI_2 - origin.latitude));
         //
         // However, the matrix implementions differ. Essentially the signs are
         // flipped in the rotation matrices.
-        // 
+        //
         // `DMat3::from_rotation_x(-\theta) = R_1[\theta]`
         let ecef_R_enu = DMat3::from_rotation_z(FRAC_PI_2 + origin.longitude)
-             * DMat3::from_rotation_x(FRAC_PI_2 - origin.latitude);
+            * DMat3::from_rotation_x(FRAC_PI_2 - origin.latitude);
         match from {
             GeoFrame::ECEF => DMat3::IDENTITY,
             GeoFrame::ENU => ecef_R_enu,
@@ -362,12 +362,7 @@ impl GeoVelocity {
     pub fn from_bevy(frame: &GeoFrame, v_bevy: impl Into<DVec3>, context: &GeoContext) -> Self {
         let v = v_bevy.into();
         let w = GeoFrame::bevy_R_(frame, context).transpose() * v;
-        GeoVelocity(
-            *frame,
-            GeoFrame::bevy_R_(frame, context)
-                .transpose()
-                * w,
-        )
+        GeoVelocity(*frame, GeoFrame::bevy_R_(frame, context).transpose() * w)
     }
 }
 
@@ -401,9 +396,7 @@ impl Plugin for GeoFramePlugin {
             // Then convert to Bevy before transform propagation
             .add_systems(
                 PostUpdate,
-                (
-                    apply_geo_translation, apply_geo_rotation
-                )
+                (apply_geo_translation, apply_geo_rotation)
                     .chain()
                     .before(TransformSystem::TransformPropagate),
             );
@@ -436,7 +429,6 @@ pub fn integrate_geo_orientation(
     }
 
     for (mut geo_rot, ang) in &mut q {
-
         let rot0_R_ang0 = geo_rot.0._R_(&ang.0, &ctx);
         if geo_rot.0 != ang.0 {
             // We're punting.
@@ -448,20 +440,22 @@ pub fn integrate_geo_orientation(
     }
 }
 
-/// System: convert `GeoPosition` into `Transform.translation`
-/// right before Bevy propagates transforms through the hierarchy.
+/// System: convert `GeoPosition` into `Transform.translation` right before Bevy
+/// propagates transforms through the hierarchy.
 pub fn apply_geo_translation(
     ctx: ResMut<GeoContext>,
-    mut q: Query<(&GeoPosition, &mut Transform)>,
+    mut q: Query<(&GeoPosition, &mut Transform), Changed<GeoPosition>>,
 ) {
     for (geo, mut transform) in &mut q {
-        // let pos_in_render = render.convert_to(geo.1, geo.0, ctx_ref);
         transform.translation = geo.to_bevy(&ctx).as_vec3();
     }
 }
 
 /// System: convert `GeoRotation` into `Transform.rotation`.
-pub fn apply_geo_rotation(ctx: Res<GeoContext>, mut q: Query<(&GeoRotation, &mut Transform), Changed<GeoRotation>>) {
+pub fn apply_geo_rotation(
+    ctx: Res<GeoContext>,
+    mut q: Query<(&GeoRotation, &mut Transform), Changed<GeoRotation>>,
+) {
     for (geo_rot, mut transform) in &mut q {
         let frame = geo_rot.0;
         let local_rot = geo_rot.1;
@@ -478,7 +472,6 @@ mod tests {
         GeoContext::default()
     }
 
-
     #[inline]
     fn enu_to_ned(v_enu: DVec3) -> DVec3 {
         DVec3::new(v_enu.y, v_enu.x, -v_enu.z)
@@ -488,7 +481,6 @@ mod tests {
     fn ned_to_enu(v_ned: DVec3) -> DVec3 {
         DVec3::new(v_ned.y, v_ned.x, -v_ned.z)
     }
-
 
     fn convert_pos(to: GeoFrame, from: GeoFrame, v: DVec3, ctx: &GeoContext) -> DVec3 {
         to._M_(&from, ctx).transform_point3(v)
@@ -644,19 +636,9 @@ mod tests {
             "bevy_R_ecef z-axis"
         );
 
-        assert_approx_eq!(
-            ecef_R_enu_s * DVec3::X,
-            DVec3::Y,
-            1e-9,
-            "ecef_R_enu x-axis"
-        );
+        assert_approx_eq!(ecef_R_enu_s * DVec3::X, DVec3::Y, 1e-9, "ecef_R_enu x-axis");
 
-        assert_approx_eq!(
-            ecef_R_enu_s * DVec3::Y,
-            DVec3::Z,
-            1e-9,
-            "ecef_R_enu y-axis"
-        );
+        assert_approx_eq!(ecef_R_enu_s * DVec3::Y, DVec3::Z, 1e-9, "ecef_R_enu y-axis");
 
         // The next two assertions show that we do not entirely comport with
         // what map_3d does.
@@ -679,18 +661,8 @@ mod tests {
             1e-9,
             "convert_pos ecef _M_ z-axis"
         );
-        assert_approx_eq!(
-            ecef_R_enu_s * DVec3::Y,
-            DVec3::Z,
-            1e-9,
-            "ecef_R_enu y-axis"
-        );
-        assert_approx_eq!(
-            ecef_R_enu_s * DVec3::Z,
-            DVec3::X,
-            1e-9,
-            "ecef_R_enu z-axis"
-        );
+        assert_approx_eq!(ecef_R_enu_s * DVec3::Y, DVec3::Z, 1e-9, "ecef_R_enu y-axis");
+        assert_approx_eq!(ecef_R_enu_s * DVec3::Z, DVec3::X, 1e-9, "ecef_R_enu z-axis");
 
         assert_approx_eq!(
             bevy_R_enu_s * DVec3::X,
@@ -698,18 +670,8 @@ mod tests {
             1e-9,
             "bevy_R_enu x-axis"
         );
-        assert_approx_eq!(
-            bevy_R_enu_s * DVec3::Y,
-            DVec3::Y,
-            1e-9,
-            "bevy_R_enu y-axis"
-        );
-        assert_approx_eq!(
-            bevy_R_enu_s * DVec3::Z,
-            DVec3::X,
-            1e-9,
-            "bevy_R_enu z-axis"
-        );
+        assert_approx_eq!(bevy_R_enu_s * DVec3::Y, DVec3::Y, 1e-9, "bevy_R_enu y-axis");
+        assert_approx_eq!(bevy_R_enu_s * DVec3::Z, DVec3::X, 1e-9, "bevy_R_enu z-axis");
     }
 
     #[test]

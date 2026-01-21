@@ -255,22 +255,28 @@ fn transform_frame_at_position(
 }
 
 /// Draw gizmos at the world origin to show Bevy axes.
-fn draw_origin_gizmos(
-    mut gizmos: Gizmos,
-    ctx: Res<GeoContext>,
-    current_frame: Res<CurrentFrame>,
-) {
+fn draw_origin_gizmos(mut gizmos: Gizmos, ctx: Res<GeoContext>, current_frame: Res<CurrentFrame>) {
     let bevy_M_frame = GeoFrame::bevy_M_(&current_frame.frame, &ctx);
-    let origin = bevy_M_frame
-        .transform_point3(DVec3::ZERO)
-        .as_vec3();
+    let origin = bevy_M_frame.transform_point3(DVec3::ZERO).as_vec3();
 
     // X axis (East)
-    gizmos.line(origin, origin + bevy_M_frame.x_axis.xyz().as_vec3(), Color::srgb(1.0, 0.0, 0.0));
+    gizmos.line(
+        origin,
+        origin + bevy_M_frame.x_axis.xyz().as_vec3(),
+        Color::srgb(1.0, 0.0, 0.0),
+    );
     // Y axis (Up)
-    gizmos.line(origin, origin + bevy_M_frame.y_axis.xyz().as_vec3(), Color::srgb(0.0, 1.0, 0.0));
+    gizmos.line(
+        origin,
+        origin + bevy_M_frame.y_axis.xyz().as_vec3(),
+        Color::srgb(0.0, 1.0, 0.0),
+    );
     // Z axis (South)
-    gizmos.line(origin, origin + bevy_M_frame.z_axis.xyz().as_vec3(), Color::srgb(0.0, 0.0, 1.0));
+    gizmos.line(
+        origin,
+        origin + bevy_M_frame.z_axis.xyz().as_vec3(),
+        Color::srgb(0.0, 0.0, 1.0),
+    );
 
     // // A little cube-ish marker at the origin
     // gizmos.cuboid(
