@@ -1,11 +1,10 @@
+//! Support for the big_space crate.
 #![allow(non_snake_case)]
 use crate::*;
-use bevy::math::{DMat3, DMat4, DQuat, DVec3};
 use bevy::prelude::*;
-use bevy::transform::TransformSystem;
-use map_3d::Ellipsoid;
 // use ::big_space::{FloatingOrigin, FloatingOriginSettings, grid::cell::GridCell};
-use ::big_space::{precision::GridPrecision, FloatingOrigin, FloatingOriginSettings, GridCell};
+// use ::big_space::{precision::GridPrecision, FloatingOrigin, FloatingOriginSettings, GridCell};
+use ::big_space::{precision::GridPrecision, FloatingOriginSettings, GridCell};
 
 /// Add the big_space systems.
 pub fn plugin<P: GridPrecision>(app: &mut App) {
@@ -13,7 +12,7 @@ pub fn plugin<P: GridPrecision>(app: &mut App) {
         PostUpdate,
         (apply_little_transforms::<P>, crate::apply_geo_rotation)
             .chain()
-            .before(TransformSystem::TransformPropagate),
+            .before(TransformSystems::Propagate),
     );
 
     // Note: There is not a public `SystemSet` to anchor our
@@ -27,6 +26,8 @@ pub fn plugin<P: GridPrecision>(app: &mut App) {
     );
 }
 
+/// Applies the same transforms as [crate::apply_transforms] but excludes
+/// components with a [GridCell].
 pub fn apply_little_transforms<P: GridPrecision>(
     ctx: ResMut<GeoContext>,
     mut q: Query<(&GeoPosition, &mut Transform), (Changed<GeoPosition>, Without<GridCell<P>>)>,

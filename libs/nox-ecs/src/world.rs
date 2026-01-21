@@ -11,26 +11,12 @@ use impeller2::{
     types::{ComponentView, EntityId},
 };
 use impeller2_wkt::ComponentMetadata;
+use bevy_geo_frames::GeoFrame;
 
 use crate::*;
 
 // 16.67 ms
 pub const DEFAULT_TIME_STEP: Duration = Duration::from_nanos(1_000_000_000 / 120);
-
-/// Coordinate frame convention for the world
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub enum FrameConvention {
-    /// East-North-Up: +X=East, +Y=North, +Z=Up
-    ENU,
-    /// North-East-Down: +X=North, +Y=East, +Z=Down
-    NED,
-    /// Earth-Centered Earth-Fixed
-    ECEF,
-    /// Earth-Centered Inertial
-    ECI,
-    /// Geocentric Celestial Reference Frame (inertial)
-    GCRF,
-}
 
 pub type Buffers<B = Vec<u8>> = BTreeMap<ComponentId, Column<B>>;
 
@@ -68,7 +54,7 @@ pub struct WorldMetadata {
     pub max_tick: u64,
     pub schematic_path: Option<PathBuf>,
     pub schematic: Option<String>,
-    pub frame: FrameConvention,
+    pub frame: GeoFrame,
 }
 
 impl MetadataExt for World {}
@@ -86,7 +72,7 @@ impl Default for WorldMetadata {
             max_tick: u64::MAX,
             schematic: None,
             schematic_path: None,
-            frame: FrameConvention::ENU, // Default for internal use only
+            frame: GeoFrame::ENU, // Default for internal use only
         }
     }
 }

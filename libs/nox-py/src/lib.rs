@@ -94,30 +94,30 @@ pub enum Frame {
     ENU,
     NED,
     ECEF,
-    ECI,
-    GCRF,
+    // ECI,
+    // GCRF,
 }
 
-impl From<Frame> for nox_ecs::FrameConvention {
+impl From<Frame> for bevy_geo_frames::GeoFrame {
     fn from(frame: Frame) -> Self {
         match frame {
-            Frame::ENU => nox_ecs::FrameConvention::ENU,
-            Frame::NED => nox_ecs::FrameConvention::NED,
-            Frame::ECEF => nox_ecs::FrameConvention::ECEF,
-            Frame::ECI => nox_ecs::FrameConvention::ECI,
-            Frame::GCRF => nox_ecs::FrameConvention::GCRF,
+            Frame::ENU => bevy_geo_frames::GeoFrame::ENU,
+            Frame::NED => bevy_geo_frames::GeoFrame::NED,
+            Frame::ECEF => bevy_geo_frames::GeoFrame::ECEF,
+            // Frame::ECI => bevy_geo_frames::GeoFrame::ECI,
+            // Frame::GCRF => bevy_geo_frames::GeoFrame::GCRF,
         }
     }
 }
 
-impl From<nox_ecs::FrameConvention> for Frame {
-    fn from(frame: nox_ecs::FrameConvention) -> Self {
+impl From<bevy_geo_frames::GeoFrame> for Frame {
+    fn from(frame: bevy_geo_frames::GeoFrame) -> Self {
         match frame {
-            nox_ecs::FrameConvention::ENU => Frame::ENU,
-            nox_ecs::FrameConvention::NED => Frame::NED,
-            nox_ecs::FrameConvention::ECEF => Frame::ECEF,
-            nox_ecs::FrameConvention::ECI => Frame::ECI,
-            nox_ecs::FrameConvention::GCRF => Frame::GCRF,
+            bevy_geo_frames::GeoFrame::ENU => Frame::ENU,
+            bevy_geo_frames::GeoFrame::NED => Frame::NED,
+            bevy_geo_frames::GeoFrame::ECEF => Frame::ECEF,
+            // bevy_geo_frames::GeoFrame::ECI => Frame::ECI,
+            // bevy_geo_frames::GeoFrame::GCRF => Frame::GCRF,
         }
     }
 }
