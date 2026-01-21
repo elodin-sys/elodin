@@ -410,6 +410,7 @@ impl Plugin for GeoFramePlugin {
         }
         #[cfg(feature = "inspector")]
         app
+            .register_type_data::<f32, bevy_inspector_egui::inspector_egui_impls::InspectorEguiImpl>()
             .register_type_data::<f64, bevy_inspector_egui::inspector_egui_impls::InspectorEguiImpl>();
         app
             .register_type::<GeoPosition>()
@@ -418,14 +419,15 @@ impl Plugin for GeoFramePlugin {
             .register_type::<GeoAngularVelocity>()
             .insert_resource(ctx)
             // Integrate in frame space each Update
-            .add_systems(Update, (integrate_geo_motion, integrate_geo_orientation));
+            .add_systems(Update, (integrate_geo_motion,
+                                  integrate_geo_orientation,
+                                  touch_geo_on_context_change));
         if self.apply_transforms {
             // Then convert to Bevy before transform propagation
             #[cfg(not(feature = "big_space"))]
             app.add_systems(
                 PostUpdate,
                 (
-                    touch_geo_on_context_change,
                     apply_transforms,
                     apply_geo_rotation,
                 )

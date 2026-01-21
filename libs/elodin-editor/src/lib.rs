@@ -227,7 +227,7 @@ impl Plugin for EditorPlugin {
                 PreUpdate,
                 (
                     set_floating_origin,
-                    (sync_pos, sync_object_3d, set_viewport_pos),
+                    (sync_pos, bevy_geo_frames::big_space::apply_big_translation::<i128>, sync_object_3d, set_viewport_pos),
                 )
                     .chain()
                     .in_set(PositionSync),
@@ -252,7 +252,10 @@ impl Plugin for EditorPlugin {
             .init_resource::<SyncedObject3d>()
             .init_resource::<ui::data_overview::ComponentTimeRanges>()
             .add_plugins(object_3d::Object3DPlugin)
-            .add_plugins(GeoFramePlugin::default());
+            .add_plugins(GeoFramePlugin {
+                apply_transforms: false,
+                ..default()
+            });
         if cfg!(target_os = "windows") || cfg!(target_os = "linux") {
             app.add_systems(Update, handle_drag_resize);
         }

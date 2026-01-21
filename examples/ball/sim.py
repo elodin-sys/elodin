@@ -30,7 +30,7 @@ def world(seed: int = 0) -> el.World:
                 inspector
             }
         }
-        object_3d ball.world_pos {
+        object_3d frame="ENU" ball.world_pos {
             sphere radius=0.2 {
                 color orange
             }
