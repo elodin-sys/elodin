@@ -14,6 +14,20 @@ struct FrameDemo;
 #[derive(Component)]
 struct GridMarker;
 
+/// Tracks the currently selected frame for gizmo placement.
+#[derive(Resource, Clone, Copy)]
+struct CurrentFrame {
+    frame: GeoFrame,
+}
+
+impl Default for CurrentFrame {
+    fn default() -> Self {
+        Self {
+            frame: GeoFrame::ENU,
+        }
+    }
+}
+
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
@@ -38,8 +52,9 @@ fn main() {
         )
         .add_systems(Update, draw_origin_gizmos)
         .add_systems(Update, draw_frame_zero_gizmo)
-        .add_systems(Update, draw_frame_axes)
+        // .add_systems(Update, draw_frame_axes)
         .add_systems(Update, draw_radius_sphere)
+        .init_resource::<CurrentFrame>()
         .run();
 }
 
@@ -172,6 +187,7 @@ fn toggle_present_mode(
 fn frame_switch_input(
     keys: Res<ButtonInput<KeyCode>>,
     mut q: Query<&mut GeoPosition, With<FrameDemo>>,
+    mut current_frame: ResMut<CurrentFrame>,
 ) {
     let mut target_frame: Option<GeoFrame> = None;
 
@@ -188,6 +204,7 @@ fn frame_switch_input(
             geo.0 = frame;
             info!(?frame, "Switched demo cuboid to frame");
         }
+        current_frame.frame = frame;
     }
 }
 
@@ -200,6 +217,7 @@ fn transform_frame_at_position(
     keys: Res<ButtonInput<KeyCode>>,
     ctx: Res<GeoContext>,
     mut q: Query<(&Transform, &mut GeoPosition), With<FrameDemo>>,
+    mut current_frame: ResMut<CurrentFrame>,
 ) {
     let mut target_frame: Option<GeoFrame> = None;
 
@@ -222,6 +240,7 @@ fn transform_frame_at_position(
             // Update the frame and position
             geo_trans.0 = frame;
             geo_trans.1 = pos_in_frame;
+            current_frame.frame = frame;
 
             info!(
                 ?frame,
@@ -236,22 +255,28 @@ fn transform_frame_at_position(
 }
 
 /// Draw gizmos at the world origin to show Bevy axes.
-fn draw_origin_gizmos(mut gizmos: Gizmos) {
-    let origin = Vec3::ZERO;
-    let len = 10.0;
+fn draw_origin_gizmos(
+    mut gizmos: Gizmos,
+    ctx: Res<GeoContext>,
+    current_frame: Res<CurrentFrame>,
+) {
+    let bevy_M_frame = GeoFrame::bevy_M_(&current_frame.frame, &ctx);
+    let origin = bevy_M_frame
+        .transform_point3(DVec3::ZERO)
+        .as_vec3();
 
     // X axis (East)
-    gizmos.line(origin, origin + Vec3::X * len, Color::srgb(1.0, 0.0, 0.0));
+    gizmos.line(origin, origin + bevy_M_frame.x_axis.xyz().as_vec3(), Color::srgb(1.0, 0.0, 0.0));
     // Y axis (Up)
-    gizmos.line(origin, origin + Vec3::Y * len, Color::srgb(0.0, 1.0, 0.0));
+    gizmos.line(origin, origin + bevy_M_frame.y_axis.xyz().as_vec3(), Color::srgb(0.0, 1.0, 0.0));
     // Z axis (South)
-    gizmos.line(origin, origin + Vec3::Z * len, Color::srgb(0.0, 0.0, 1.0));
+    gizmos.line(origin, origin + bevy_M_frame.z_axis.xyz().as_vec3(), Color::srgb(0.0, 0.0, 1.0));
 
-    // A little cube-ish marker at the origin
-    gizmos.cuboid(
-        Transform::from_translation(origin).with_scale(Vec3::splat(0.5)),
-        Color::srgb(1.0, 1.0, 1.0),
-    );
+    // // A little cube-ish marker at the origin
+    // gizmos.cuboid(
+    //     Transform::from_translation(origin).with_scale(Vec3::splat(0.5)),
+    //     Color::srgb(1.0, 1.0, 1.0),
+    // );
 }
 
 /// Draw RGB axes on the object showing the frame's coordinate directions.
