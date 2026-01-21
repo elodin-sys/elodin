@@ -281,7 +281,7 @@ impl GeoFrame {
         // let ecef_R_enu = DMat3::from_rotation_z(-(FRAC_PI_2 + origin.longitude))
         //      * DMat3::from_rotation_x(-(FRAC_PI_2 - origin.latitude));
         //
-        // However, the matrix implementions differ. Essentially the signs are
+        // However, the matrix implementations differ. Essentially the signs are
         // flipped in the rotation matrices.
         //
         // `DMat3::from_rotation_x(-\theta) = R_1[\theta]`
