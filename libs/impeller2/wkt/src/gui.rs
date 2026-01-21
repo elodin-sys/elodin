@@ -664,6 +664,8 @@ impl Object3DMesh {
 pub struct Object3D<T = ()> {
     pub eql: String,
     pub mesh: Object3DMesh,
+    #[serde(default)]
+    pub frame: Option<bevy_geo_frames::GeoFrame>,
     pub aux: T,
 }
 
@@ -672,6 +674,7 @@ impl<T> Object3D<T> {
         Object3D {
             eql: self.eql.clone(),
             mesh: self.mesh.clone(),
+            frame: self.frame,
             aux: f(&self.aux),
         }
     }

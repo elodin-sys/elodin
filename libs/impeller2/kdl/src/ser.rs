@@ -331,6 +331,12 @@ fn serialize_object_3d<T>(obj: &Object3D<T>) -> KdlNode {
     // Add the EQL query as the first unnamed entry
     node.entries_mut().push(KdlEntry::new(obj.eql.clone()));
 
+    // Add frame attribute if not default (Bevy)
+    if let Some(frame) = obj.frame {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("frame", <&str>::from(frame)));
+    }
+
     let mut children = KdlDocument::new();
     children
         .nodes_mut()
@@ -769,6 +775,8 @@ fn is_ui_rect_default(ui_rect: &UiRect) -> bool {
 
 #[cfg(test)]
 mod tests {
+
+    use bevy_geo_frames::GeoFrame;
     use super::*;
     use crate::parse_schematic;
 
@@ -1096,6 +1104,55 @@ graph "value" {
         } else {
             panic!("Expected object_3d");
         }
+    }
+
+    #[test]
+    fn test_serialize_object_3d_with_frame() {
+        let mut schematic = Schematic::default();
+        schematic.elems.push(SchematicElem::Object3d(Object3D {
+            eql: "ball.world_pos".to_string(),
+            mesh: Object3DMesh::Mesh {
+                mesh: Mesh::Sphere { radius: 0.2 },
+                material: Material::with_color(Color::ORANGE),
+            },
+            frame: GeoFrame::NED,
+            aux: (),
+        }));
+
+        let serialized = serialize_schematic(&schematic);
+        assert!(
+            serialized.contains("frame=NED") || serialized.contains(r#"frame="NED""#),
+            "serialized output should contain frame=NED, got:\n{serialized}"
+        );
+
+        let parsed = parse_schematic(&serialized).unwrap();
+        assert_eq!(parsed.elems.len(), 1);
+        if let SchematicElem::Object3d(obj) = &parsed.elems[0] {
+            assert_eq!(obj.eql, "ball.world_pos");
+            assert!(matches!(obj.frame, GeoFrame::NED));
+        } else {
+            panic!("Expected object_3d");
+        }
+    }
+
+    #[test]
+    fn test_serialize_object_3d_default_frame_not_serialized() {
+        let mut schematic = Schematic::default();
+        schematic.elems.push(SchematicElem::Object3d(Object3D {
+            eql: "entity.world_pos".to_string(),
+            mesh: Object3DMesh::Mesh {
+                mesh: Mesh::Sphere { radius: 0.5 },
+                material: Material::with_color(Color::WHITE),
+            },
+            frame: GeoFrame::Bevy, // Default frame
+            aux: (),
+        }));
+
+        let serialized = serialize_schematic(&schematic);
+        assert!(
+            !serialized.contains("frame="),
+            "default Bevy frame should not be serialized, got:\n{serialized}"
+        );
     }
 
     #[test]

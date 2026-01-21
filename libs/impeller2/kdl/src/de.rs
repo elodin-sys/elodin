@@ -1,7 +1,9 @@
 use crate::color_names::color_from_name;
 use impeller2_wkt::{
-    ArrowThickness, Color, Schematic, SchematicElem, ThemeConfig, VectorArrow3d, WindowSchematic,
+    ArrowThickness, Color, Schematic, SchematicElem, ThemeConfig, VectorArrow3d,
+    WindowSchematic,
 };
+use bevy_geo_frames::GeoFrame;
 use kdl::{KdlDocument, KdlNode};
 use std::collections::HashMap;
 use std::str::FromStr;
@@ -513,6 +515,11 @@ fn parse_object_3d(node: &KdlNode, src: &str) -> Result<Object3D, KdlSchematicEr
         })?
         .to_string();
 
+    let frame = node
+        .get("frame")
+        .and_then(|v| v.as_string())
+        .and_then(|s| GeoFrame::from_str(s).ok());
+
     let mesh = if let Some(children) = node.children() {
         parse_object_3d_mesh(children.nodes().first(), src)?
     } else {
@@ -524,7 +531,12 @@ fn parse_object_3d(node: &KdlNode, src: &str) -> Result<Object3D, KdlSchematicEr
         });
     };
 
-    Ok(Object3D { eql, mesh, aux: () })
+    Ok(Object3D {
+        eql,
+        mesh,
+        frame,
+        aux: (),
+    })
 }
 
 fn parse_object_3d_mesh(
@@ -1513,6 +1525,61 @@ object_3d "a.world_pos" {
             } else {
                 panic!("Expected mesh object");
             }
+        } else {
+            panic!("Expected object_3d");
+        }
+    }
+
+    #[test]
+    fn test_parse_object_3d_with_ned_frame() {
+        let kdl = r#"
+object_3d frame="NED" "ball.world_pos" {
+    sphere radius=0.2 {
+        color orange
+    }
+}
+"#;
+        let schematic = parse_schematic(kdl).unwrap();
+
+        assert_eq!(schematic.elems.len(), 1);
+        if let SchematicElem::Object3d(obj) = &schematic.elems[0] {
+            assert_eq!(obj.eql, "ball.world_pos");
+            assert!(matches!(obj.frame, GeoFrame::NED));
+        } else {
+            panic!("Expected object_3d");
+        }
+    }
+
+    #[test]
+    fn test_parse_object_3d_with_enu_frame() {
+        let kdl = r#"
+object_3d "entity.world_pos" frame="ENU" {
+    glb path="model.glb"
+}
+"#;
+        let schematic = parse_schematic(kdl).unwrap();
+
+        assert_eq!(schematic.elems.len(), 1);
+        if let SchematicElem::Object3d(obj) = &schematic.elems[0] {
+            assert_eq!(obj.eql, "entity.world_pos");
+            assert!(matches!(obj.frame, GeoFrame::ENU));
+        } else {
+            panic!("Expected object_3d");
+        }
+    }
+
+    #[test]
+    fn test_parse_object_3d_default_frame() {
+        let kdl = r#"
+object_3d "a.world_pos" {
+    sphere radius=0.5
+}
+"#;
+        let schematic = parse_schematic(kdl).unwrap();
+
+        assert_eq!(schematic.elems.len(), 1);
+        if let SchematicElem::Object3d(obj) = &schematic.elems[0] {
+            assert!(matches!(obj.frame, GeoFrame::Bevy));
         } else {
             panic!("Expected object_3d");
         }

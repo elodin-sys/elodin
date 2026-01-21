@@ -23,6 +23,7 @@ use bevy_egui::EguiContext;
 use bevy_egui::{EguiContextSettings, EguiGlobalSettings, EguiPlugin};
 use bevy_picking::PickingSettings;
 use bevy_render::alpha::AlphaMode;
+use bevy_geo_frames::GeoFramePlugin;
 use big_space::{FloatingOrigin, FloatingOriginSettings, GridCell};
 use impeller2::types::{ComponentId, OwnedPacket};
 use impeller2::types::{Msg, Timestamp};
@@ -45,6 +46,7 @@ use ui::{
     tiles,
     utils::FriendlyEpoch,
 };
+use bevy_geo_frames::{GeoPosition, GeoRotation};
 
 pub mod object_3d;
 mod offset_parse;
@@ -249,7 +251,8 @@ impl Plugin for EditorPlugin {
             .init_resource::<EqlContext>()
             .init_resource::<SyncedObject3d>()
             .init_resource::<ui::data_overview::ComponentTimeRanges>()
-            .add_plugins(object_3d::Object3DPlugin);
+            .add_plugins(object_3d::Object3DPlugin)
+            .add_plugins(GeoFramePlugin::default());
         if cfg!(target_os = "windows") || cfg!(target_os = "linux") {
             app.add_systems(Update, handle_drag_resize);
         }
@@ -697,6 +700,9 @@ pub fn setup_cell(
 pub trait WorldPosExt {
     fn bevy_pos(&self) -> DVec3;
     fn bevy_att(&self) -> DQuat;
+
+    fn pos(&self) -> DVec3;
+    fn att(&self) -> DQuat;
 }
 
 impl WorldPosExt for WorldPos {
@@ -705,12 +711,22 @@ impl WorldPosExt for WorldPos {
         DVec3::new(x, z, -y)
     }
 
+    fn pos(&self) -> DVec3 {
+        let [x, y, z] = self.pos.parts().map(Tensor::into_buf);
+        DVec3::new(x, y, z)
+    }
+
     fn bevy_att(&self) -> DQuat {
         let [i, j, k, w] = self.att.parts().map(Tensor::into_buf);
         let x = i;
         let y = k;
         let z = -j;
         DQuat::from_xyzw(x, y, z, w)
+    }
+
+    fn att(&self) -> DQuat {
+        let [i, j, k, w] = self.att.parts().map(Tensor::into_buf);
+        DQuat::from_xyzw(i, j, k, w)
     }
 }
 
@@ -731,14 +747,25 @@ pub fn sync_paused(
 }
 
 pub fn sync_pos(
-    mut query: Query<(&mut Transform, &mut GridCell<i128>, &WorldPos)>,
+    mut query: Query<(&mut Transform, Option<&mut GeoPosition>, Option<&mut GeoRotation>, &mut GridCell<i128>, &WorldPos)>,
     floating_origin: Res<FloatingOriginSettings>,
 ) {
     // return;
     query
         .iter_mut()
-        .for_each(|(mut transform, mut grid_cell, world_pos)| {
+        .for_each(|(mut transform, mut geo_pos, mut geo_rot, mut grid_cell, world_pos)| {
             // Converts from Z-up to Y-up
+            if let Some(ref mut geo_pos) = geo_pos {
+                geo_pos.1 = world_pos.pos();
+            }
+            if let Some(ref mut geo_rot) = geo_rot {
+                geo_rot.1 = world_pos.att();
+            }
+            if geo_pos.is_some() && geo_rot.is_some() {
+                // We don't need to continue if both are operant.
+                return;
+            }
+
             let pos = world_pos.bevy_pos();
             let att = world_pos.bevy_att();
             let (new_grid_cell, translation) = floating_origin.translation_to_grid(pos);
@@ -903,6 +930,7 @@ fn sync_object_3d(
                 eql,
                 mesh: mesh_source,
                 aux: (),
+                frame: None,
             },
             expr,
             &ctx.0,

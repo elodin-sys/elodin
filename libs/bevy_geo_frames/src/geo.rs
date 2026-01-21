@@ -16,7 +16,7 @@ pub fn radius(ellipsoid: &Ellipsoid, latitude: f64) -> f64 {
     map_3d::get_radius_normal(latitude, ellipsoid)
 }
 
-#[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Default, Debug, Clone, Copy, PartialEq, Eq, Reflect)]
 /// How should these coordinates be presented.
 pub enum Present {
     #[default]
@@ -38,7 +38,8 @@ pub enum Present {
 /// Units: meters, seconds.
 /// Bevy world: +X=East, +Y=Up, +Z=South (so North = -Z).
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Reflect)]
+#[cfg_attr(feature = "strum", derive(strum_macros::IntoStaticStr, strum_macros::EnumString))]
 pub enum GeoFrame {
     /// East-North-Up: +X=East, +Y=North, +Z=Up
     ENU,
@@ -63,7 +64,7 @@ pub enum GeoFrame {
 /// Where the Bevy world origin lives on Earth.
 ///
 /// Used to turn ECEF positions into local ENU, then ENU → Bevy.
-#[derive(Default, Debug, Clone, Copy)]
+#[derive(Default, Debug, Clone, Copy, Reflect)]
 pub struct GeoOrigin {
     /// Geodetic latitude [rad]
     pub latitude: f64,
@@ -71,6 +72,7 @@ pub struct GeoOrigin {
     pub longitude: f64,
     /// Altitude above mean radius [m]
     pub altitude: f64,
+    #[reflect(ignore)]
     /// Planet/body shape model (currently used primarily for reference radius).
     pub ellipsoid: Ellipsoid,
 }
@@ -98,7 +100,7 @@ impl GeoOrigin {
 /// Global geospatial context:
 /// * origin (for ENU/ECEF)
 /// * Earth rotation model (for ECI/GCRF <-> ECEF).
-#[derive(Resource, Debug, Clone)]
+#[derive(Resource, Debug, Clone, Reflect)]
 pub struct GeoContext {
     /// The geographic origin of the coordinate system on Earth.
     pub origin: GeoOrigin,
@@ -321,7 +323,8 @@ impl GeoFrame {
 /// Per-entity geo position:
 ///   0: which frame the coords are in
 ///   1: position in that frame (ENU, NED, ECEF).
-#[derive(Component)]
+#[derive(Debug, Component, Reflect, Clone)]
+#[reflect(Component)]
 pub struct GeoPosition(pub GeoFrame, pub DVec3);
 
 impl GeoPosition {
@@ -345,7 +348,8 @@ impl GeoPosition {
 /// Per-entity geo velocity:
 ///   0: frame
 ///   1: velocity in that frame (m/s).
-#[derive(Component)]
+#[derive(Debug, Component, Reflect, Clone)]
+#[reflect(Component)]
 pub struct GeoVelocity(pub GeoFrame, pub DVec3);
 
 impl GeoVelocity {
@@ -366,11 +370,13 @@ impl GeoVelocity {
 /// Per-entity geo orientation:
 ///   0: frame the quaternion is expressed in
 ///   1: rotation from local -> that frame
-#[derive(Component)]
+#[derive(Debug, Component, Reflect, Clone)]
+#[reflect(Component)]
 pub struct GeoRotation(pub GeoFrame, pub DQuat);
 
 /// Per-entity angular velocity in some frame, in rad/s.
-#[derive(Component)]
+#[derive(Debug, Component, Reflect, Clone)]
+#[reflect(Component)]
 pub struct GeoAngularVelocity(pub GeoFrame, pub DVec3);
 
 /// Plugin wiring: sets up `GeoContext` and systems that run
@@ -402,7 +408,15 @@ impl Plugin for GeoFramePlugin {
         if let Some(origin) = self.origin {
             ctx.origin = origin;
         }
-        app.insert_resource(ctx)
+        #[cfg(feature = "inspector")]
+        app
+            .register_type_data::<f64, bevy_inspector_egui::inspector_egui_impls::InspectorEguiImpl>();
+        app
+            .register_type::<GeoPosition>()
+            .register_type::<GeoRotation>()
+            .register_type::<GeoVelocity>()
+            .register_type::<GeoAngularVelocity>()
+            .insert_resource(ctx)
             // Integrate in frame space each Update
             .add_systems(Update, (integrate_geo_motion, integrate_geo_orientation));
         if self.apply_transforms {

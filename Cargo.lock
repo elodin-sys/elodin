@@ -1788,11 +1788,14 @@ name = "bevy_geo_frames"
 version = "0.1.0"
 dependencies = [
  "bevy",
+ "bevy-inspector-egui",
  "bevy_editor_cam",
  "bevy_infinite_grid",
  "big_space",
  "map_3d",
  "serde",
+ "strum 0.27.2",
+ "strum_macros 0.27.2",
 ]
 
 [[package]]
@@ -5159,6 +5162,7 @@ dependencies = [
  "bevy_editor_cam",
  "bevy_egui",
  "bevy_framepace",
+ "bevy_geo_frames",
  "bevy_infinite_grid",
  "bevy_picking",
  "bevy_render",
@@ -7312,6 +7316,7 @@ dependencies = [
 name = "impeller2-kdl"
 version = "0.16.0-alpha.5"
 dependencies = [
+ "bevy_geo_frames",
  "impeller2",
  "impeller2-wkt",
  "kdl",
@@ -7344,6 +7349,7 @@ name = "impeller2-wkt"
 version = "0.16.0-alpha.5"
 dependencies = [
  "bevy",
+ "bevy_geo_frames",
  "compact_str",
  "impeller2",
  "mlua",
