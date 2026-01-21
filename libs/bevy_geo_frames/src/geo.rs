@@ -400,8 +400,8 @@ impl Plugin for GeoFramePlugin {
             ctx.origin = origin;
         }
         app.insert_resource(ctx)
-        // Integrate in frame space each Update
-           .add_systems(Update, (integrate_geo_motion, integrate_geo_orientation));
+            // Integrate in frame space each Update
+            .add_systems(Update, (integrate_geo_motion, integrate_geo_orientation));
         if self.apply_transforms {
             // Then convert to Bevy before transform propagation
             #[cfg(not(feature = "big_space"))]

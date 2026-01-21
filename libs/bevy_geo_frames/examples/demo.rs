@@ -1,9 +1,10 @@
+use bevy::color::palettes::css;
 use bevy::math::primitives::{Cuboid, Plane3d};
 use bevy::math::{DQuat, DVec3};
 use bevy::prelude::*;
 use bevy_editor_cam::prelude::*;
 use bevy_geo_frames::*;
-use bevy_infinite_grid::{InfiniteGridBundle, InfiniteGridPlugin};
+use bevy_infinite_grid::{InfiniteGridBundle, InfiniteGridPlugin, InfiniteGridSettings};
 use map_3d::Ellipsoid;
 
 /// Marker for the demo cuboid we switch frames on.
@@ -31,8 +32,7 @@ impl Default for CurrentFrame {
 fn main() {
     let mut app = App::new();
 
-    app
-        .add_plugins(DefaultPlugins)
+    app.add_plugins(DefaultPlugins)
         .add_plugins(DefaultEditorCamPlugins)
         .add_plugins(InfiniteGridPlugin)
         .add_plugins(GeoFramePlugin {
@@ -58,15 +58,13 @@ fn main() {
         .add_systems(Update, draw_radius_sphere)
         .init_resource::<CurrentFrame>();
 
-
     #[cfg(feature = "big_space")]
-    app
-        .add_plugins(::big_space::FloatingOriginPlugin::<i128>::new(16_000., 100.))
-
-        .add_plugins(::big_space::debug::FloatingOriginDebugPlugin::<i128>::default())
-        .add_plugins(bevy_geo_frames::big_space::plugin::<i128>);
-    app
-        .run();
+    app.add_plugins(::big_space::FloatingOriginPlugin::<i128>::new(
+        16_000., 100.,
+    ))
+    .add_plugins(::big_space::debug::FloatingOriginDebugPlugin::<i128>::default())
+    .add_plugins(bevy_geo_frames::big_space::plugin::<i128>);
+    app.run();
 }
 
 fn setup(
@@ -75,16 +73,18 @@ fn setup(
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     // Camera with editor controls
-    let camera_id = commands.spawn((
-        Camera3d::default(),
-        Transform::from_xyz(30.0, 20.0, 30.0).looking_at(Vec3::ZERO, Vec3::Y),
-        EditorCam::default(),
-    )).id();
+    let camera_id = commands
+        .spawn((
+            Camera3d::default(),
+            Transform::from_xyz(30.0, 20.0, 30.0).looking_at(Vec3::ZERO, Vec3::Y),
+            EditorCam::default(),
+        ))
+        .id();
     #[cfg(feature = "big_space")]
-    commands.entity(camera_id)
-            .insert((::big_space::FloatingOrigin,
-                     ::big_space::GridCell::<i128>::default(),
-            ));
+    commands.entity(camera_id).insert((
+        ::big_space::FloatingOrigin,
+        ::big_space::GridCell::<i128>::default(),
+    ));
 
     // Light
     commands.spawn((
@@ -100,7 +100,13 @@ fn setup(
     let _ground_mat = materials.add(Color::srgb(0.1, 0.1, 0.1));
 
     // Infinite grid (visible in Plane mode).
-    commands.spawn((InfiniteGridBundle::default(), GridMarker));
+    commands
+        .spawn((InfiniteGridBundle::default(), GridMarker))
+        .insert(InfiniteGridSettings {
+            x_axis_color: css::PINK.into(),
+            z_axis_color: css::DARK_CYAN.into(),
+            ..default()
+        });
 
     // Demo cuboid
     let cuboid_mesh = meshes.add(Cuboid::new(1.0, 2.0, 3.0));
@@ -109,28 +115,29 @@ fn setup(
     // Position in ENU frame to start: 20 m east, 0 m north, 1 m up
     let enu_pos = DVec3::new(0.0, 0.0, 0.0);
 
-    let cube_id = commands.spawn((
-        Mesh3d(cuboid_mesh),
-        MeshMaterial3d(cuboid_mat),
-        Transform::default(),
-        GeoPosition(GeoFrame::ENU, enu_pos),
-        GeoVelocity(GeoFrame::ENU, DVec3::new(0.1, 0.0, 0.0)),
-        GeoRotation(GeoFrame::ENU, DQuat::IDENTITY),
-        GeoAngularVelocity(
-            GeoFrame::ENU,
-            // DVec3::new(0.0, 0.0, 10.0_f32.to_radians()),
-            // DVec3::new(10.0, 0.0, 0.0),
-            // DVec3::new(0.0, 1.0, 0.0),
-            DVec3::new(0.0, 0.0, 1.0),
-        ),
-        FrameDemo,
-    )).id();
+    let cube_id = commands
+        .spawn((
+            Mesh3d(cuboid_mesh),
+            MeshMaterial3d(cuboid_mat),
+            Transform::default(),
+            GeoPosition(GeoFrame::ENU, enu_pos),
+            GeoVelocity(GeoFrame::ENU, DVec3::new(0.1, 0.0, 0.0)),
+            GeoRotation(GeoFrame::ENU, DQuat::IDENTITY),
+            GeoAngularVelocity(
+                GeoFrame::ENU,
+                // DVec3::new(0.0, 0.0, 10.0_f32.to_radians()),
+                // DVec3::new(10.0, 0.0, 0.0),
+                // DVec3::new(0.0, 1.0, 0.0),
+                DVec3::new(0.0, 0.0, 1.0),
+            ),
+            FrameDemo,
+        ))
+        .id();
 
     #[cfg(feature = "big_space")]
-    commands.entity(cube_id)
-            .insert((
-                     ::big_space::GridCell::<i128>::default(),
-            ));
+    commands
+        .entity(cube_id)
+        .insert((::big_space::GridCell::<i128>::default(),));
 }
 
 /// Marker component for the position display text.
@@ -280,23 +287,24 @@ fn transform_frame_at_position(
 fn draw_origin_gizmos(mut gizmos: Gizmos, ctx: Res<GeoContext>, current_frame: Res<CurrentFrame>) {
     let bevy_M_frame = GeoFrame::bevy_M_(&current_frame.frame, &ctx);
     let origin = bevy_M_frame.transform_point3(DVec3::ZERO).as_vec3();
+    let l = 5.0;
 
     // X axis (East)
     gizmos.line(
         origin,
-        origin + bevy_M_frame.x_axis.xyz().as_vec3(),
+        origin + l * bevy_M_frame.x_axis.xyz().as_vec3(),
         Color::srgb(1.0, 0.0, 0.0),
     );
     // Y axis (Up)
     gizmos.line(
         origin,
-        origin + bevy_M_frame.y_axis.xyz().as_vec3(),
+        origin + l * bevy_M_frame.y_axis.xyz().as_vec3(),
         Color::srgb(0.0, 1.0, 0.0),
     );
     // Z axis (South)
     gizmos.line(
         origin,
-        origin + bevy_M_frame.z_axis.xyz().as_vec3(),
+        origin + l * bevy_M_frame.z_axis.xyz().as_vec3(),
         Color::srgb(0.0, 0.0, 1.0),
     );
 

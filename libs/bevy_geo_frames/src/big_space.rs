@@ -1,16 +1,17 @@
 #![allow(non_snake_case)]
+use crate::*;
 use bevy::math::{DMat3, DMat4, DQuat, DVec3};
 use bevy::prelude::*;
 use bevy::transform::TransformSystem;
 use map_3d::Ellipsoid;
-use crate::*;
 // use ::big_space::{FloatingOrigin, FloatingOriginSettings, grid::cell::GridCell};
 use ::big_space::{precision::GridPrecision, FloatingOrigin, FloatingOriginSettings, GridCell};
 
 pub fn plugin<P: GridPrecision>(app: &mut App) {
     app.add_systems(
         PostUpdate,
-        (apply_little_transforms::<P>, crate::apply_geo_rotation).chain()
+        (apply_little_transforms::<P>, crate::apply_geo_rotation)
+            .chain()
             .before(TransformSystem::TransformPropagate),
     );
 
@@ -21,11 +22,9 @@ pub fn plugin<P: GridPrecision>(app: &mut App) {
 
     app.add_systems(
         PostUpdate,
-        apply_big_translation::<P>
-            //.before(RootGlobalTransformUpdates)
+        apply_big_translation::<P>, //.before(RootGlobalTransformUpdates)
     );
 }
-
 
 pub fn apply_little_transforms<P: GridPrecision>(
     ctx: ResMut<GeoContext>,
