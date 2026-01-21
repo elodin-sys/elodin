@@ -1,7 +1,6 @@
 #![allow(non_snake_case)]
 use bevy::math::{DMat3, DMat4, DQuat, DVec3};
 use bevy::prelude::*;
-use bevy::transform::TransformSystem;
 use map_3d::Ellipsoid;
 
 /// Earth sidereal spin
@@ -155,25 +154,13 @@ impl GeoFrame {
     pub fn bevy_M_(from: &Self, context: &GeoContext) -> DMat4 {
         let R = Self::bevy_R_(from, context);
         let O = Self::bevy_O_(from, context);
-        // DMat4::from_mat3_translation(R, O);
-        DMat4::from_cols(
-            R.x_axis.extend(0.0),
-            R.y_axis.extend(0.0),
-            R.z_axis.extend(0.0),
-            O.extend(1.0),
-        )
+        DMat4::from_mat3_translation(R, O)
     }
 
     pub fn _M_(&self, from: &GeoFrame, context: &GeoContext) -> DMat4 {
         let R = self._R_(from, context);
         let O = self._O_(from, context);
-        // DMat4::from_mat3_translation(R, O);
-        DMat4::from_cols(
-            R.x_axis.extend(0.0),
-            R.y_axis.extend(0.0),
-            R.z_axis.extend(0.0),
-            O.extend(1.0),
-        )
+        DMat4::from_mat3_translation(R, O)
     }
 
     /// Provides the origin vector ${bevy}_O_{from}$ of the coordinate frame.
@@ -273,13 +260,7 @@ impl GeoFrame {
     pub fn ecef_M_(from: &Self, context: &GeoContext) -> DMat4 {
         let R = Self::ecef_R_(from, &context.origin);
         let O = Self::ecef_O_(from, context);
-        // DMat4::from_mat3_translation(R, O);
-        DMat4::from_cols(
-            R.x_axis.extend(0.0),
-            R.y_axis.extend(0.0),
-            R.z_axis.extend(0.0),
-            O.extend(1.0),
-        )
+        DMat4::from_mat3_translation(R, O)
     }
 
     /// Provides the matrix ${ecef}_R_{self}$.
@@ -409,7 +390,7 @@ impl Plugin for GeoFramePlugin {
                 PostUpdate,
                 (touch_geo_on_context_change, apply_transforms, apply_geo_rotation)
                     .chain()
-                    .before(TransformSystem::TransformPropagate),
+                    .before(TransformSystems::Propagate),
             );
 
             // We ought not to do this here because it relies on the generic

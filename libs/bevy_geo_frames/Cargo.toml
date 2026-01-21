@@ -8,10 +8,10 @@ name = "bevy_geo_frames"
 path = "src/lib.rs"
 
 [dependencies]
-bevy = "0.16"
+bevy = "0.17"
 big_space = { version = "0.5.0", optional = true }
 map_3d = "0.1.5"
 
 [dev-dependencies]
-bevy_editor_cam = "0.6"
-bevy_infinite_grid = "0.15"
+bevy_editor_cam = "0.7"
+bevy_infinite_grid = "0.17"
