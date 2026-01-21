@@ -646,7 +646,7 @@ def start_sitl_process() -> subprocess.Popen | None:
     return _sitl_process
 
 
-def sitl_post_step(tick: int, ctx: el.PostStepContext):
+def sitl_post_step(tick: int, ctx: el.StepContext):
     """
     Post-step callback for SITL integration.
 
@@ -766,7 +766,7 @@ _hitl_init_done = [False]
 _hitl_last_print_time = [0.0]
 
 
-def hitl_post_step(tick: int, ctx: el.PostStepContext):
+def hitl_post_step(tick: int, ctx: el.StepContext):
     """
     Post-step callback for HITL mode.
 
