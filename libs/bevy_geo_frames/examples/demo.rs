@@ -1,5 +1,5 @@
 use bevy::math::primitives::{Cuboid, Plane3d};
-use bevy::math::DVec3;
+use bevy::math::{DQuat, DVec3};
 use bevy::prelude::*;
 use bevy_editor_cam::prelude::*;
 use bevy_geo_frames::*;
@@ -84,11 +84,13 @@ fn setup(
         Transform::default(),
         GeoPosition(GeoFrame::ENU, enu_pos),
         GeoVelocity(GeoFrame::ENU, DVec3::new(0.1, 0.0, 0.0)),
-        GeoRotation(GeoFrame::ENU, Quat::IDENTITY),
+        GeoRotation(GeoFrame::ENU, DQuat::IDENTITY),
         GeoAngularVelocity(
             GeoFrame::ENU,
-            // Vec3::new(0.0, 0.0, 10.0_f32.to_radians()),
-            Vec3::new(10.0, 0.0, 0.0),
+            // DVec3::new(0.0, 0.0, 10.0_f32.to_radians()),
+            // DVec3::new(10.0, 0.0, 0.0),
+            // DVec3::new(0.0, 1.0, 0.0),
+            DVec3::new(0.0, 0.0, 1.0),
         ),
         FrameDemo,
     ));

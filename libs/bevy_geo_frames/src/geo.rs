@@ -1,8 +1,8 @@
 #![allow(non_snake_case)]
-use bevy::math::{DMat3, DMat4, DVec3};
+use bevy::math::{DMat3, DMat4, DVec3, DQuat};
 use bevy::prelude::*;
 use bevy::transform::TransformSystem;
-use map_3d::{ecef2enu, Ellipsoid};
+use map_3d::Ellipsoid;
 /// Earth sidereal spin
 pub const EARTH_SIDEREAL_SPIN: f64 = 7.292_115_0e-5;
 
@@ -11,6 +11,11 @@ pub const DEFAULT_RENDER: GeoFrame = GeoFrame::ECEF;
 /// Return the approximate radius of the ellipsoid.
 pub fn approx_radius(ellipsoid: &Ellipsoid) -> f64 {
     ellipsoid.parameters().0
+}
+
+/// Return the approximate radius of the ellipsoid.
+pub fn radius(ellipsoid: &Ellipsoid, latitude: f64) -> f64 {
+    map_3d::get_radius_normal(latitude, ellipsoid)
 }
 
 #[derive(Default, Debug, Clone, Copy, PartialEq, Eq)]
@@ -45,7 +50,8 @@ pub enum GeoFrame {
     /// +Y through (lat=0, lon=90°E) equator
     /// +Z through North Pole
     ECEF,
-    // Leaving out these time-dependent
+    // Leaving out these time-dependent coordinate frames for the moment.
+
     // /// Earth-Centered Inertial
     // /// +X to vernal equinox, +Y 90°E, +Z North Pole
     // ECI,
@@ -71,7 +77,6 @@ pub struct GeoOrigin {
 }
 
 impl GeoOrigin {
-    /// Simple spherical Earth model (good enough for games).
     /// Uses default Earth radius.
     pub fn new_from_degrees(latitude_deg: f64, longitude_deg: f64, altitude: f64) -> Self {
         let latitude = latitude_deg.to_radians();
@@ -93,7 +98,7 @@ impl GeoOrigin {
 /// Global geospatial context:
 /// * origin (for ENU/ECEF)
 /// * Earth rotation model (for ECI/GCRF <-> ECEF).
-#[derive(Resource, Debug, Clone, Copy)]
+#[derive(Resource, Debug, Clone)]
 pub struct GeoContext {
     pub origin: GeoOrigin,
     /// Earth rotation angle at t=0 [rad]; 0 means ECI/ECEF axes aligned at startup.
@@ -121,9 +126,10 @@ impl Default for GeoContext {
 
 impl From<GeoOrigin> for GeoContext {
     fn from(origin: GeoOrigin) -> Self {
-        let mut ctx = GeoContext::default();
-        ctx.origin = origin;
-        ctx
+        GeoContext{
+            origin,
+            ..default()
+        }
     }
 }
 
@@ -138,44 +144,10 @@ impl GeoContext {
         self
     }
 
-    /// Rotation matrix Rz(angle) about +Z axis:
-    /// x' = cosθ x - sinθ y
-    /// y' = sinθ x + cosθ y
-    /// z' = z
-    pub(crate) fn rot_z(angle: f64) -> DMat3 {
-        let (s, c) = angle.sin_cos();
-        DMat3::from_cols(
-            DVec3::new(c, s, 0.0),  // image of x-axis
-            DVec3::new(-s, c, 0.0), // image of y-axis
-            DVec3::new(0.0, 0.0, 1.0),
-        )
-    }
-
     /// Convert ECI -> ECEF at simulation time t [s].
-    ///
-    /// ECEF = Rz(theta) * ECI, with theta = theta0 + ω⊕ t.
-    pub fn eci_to_ecef(&self, r_eci: DVec3) -> DVec3 {
+    pub fn eci_R_ecef(&self) -> DMat3 {
         let theta = self.theta0_rad + self.earth_rot_rate_rad_per_s * self.time;
-        Self::rot_z(theta) * r_eci
-    }
-
-    /// Convert ECEF -> ECI at simulation time `self.time`.
-    pub fn ecef_to_eci(&self, r_ecef: DVec3) -> DVec3 {
-        let theta = self.theta0_rad + self.earth_rot_rate_rad_per_s * self.time;
-        Self::rot_z(-theta) * r_ecef
-    }
-    /// ECEF -> local ENU at the origin.
-    pub fn ecef_to_enu(&self, r_ecef: DVec3) -> DVec3 {
-        let (e, n, u) = ecef2enu(
-            r_ecef.x,
-            r_ecef.y,
-            r_ecef.z,
-            self.origin.latitude,
-            self.origin.longitude,
-            self.origin.altitude,
-            &self.origin.ellipsoid,
-        );
-        DVec3::new(e, n, u)
+        DMat3::from_rotation_z(theta)
     }
 }
 
@@ -347,6 +319,7 @@ impl GeoFrame {
         DMat3::from_cols(DVec3::Y, DVec3::X, DVec3::NEG_Z)
     }
 
+    #[allow(dead_code)]
     #[inline]
     fn ned_R_enu() -> DMat3 {
         DMat3::from_cols(DVec3::Y, DVec3::X, DVec3::NEG_Z)
@@ -381,15 +354,32 @@ impl GeoPosition {
 #[derive(Component)]
 pub struct GeoVelocity(pub GeoFrame, pub DVec3);
 
+impl GeoVelocity {
+    pub fn to_bevy(&self, context: &GeoContext) -> DVec3 {
+        GeoFrame::bevy_R_(&self.0, context) * self.1
+    }
+
+    pub fn from_bevy(frame: &GeoFrame, v_bevy: impl Into<DVec3>, context: &GeoContext) -> Self {
+        let v = v_bevy.into();
+        let w = GeoFrame::bevy_R_(frame, context).transpose() * v;
+        GeoVelocity(
+            *frame,
+            GeoFrame::bevy_R_(frame, context)
+                .transpose()
+                * w,
+        )
+    }
+}
+
 /// Per-entity geo orientation:
 ///   0: frame the quaternion is expressed in
 ///   1: rotation from local -> that frame
 #[derive(Component)]
-pub struct GeoRotation(pub GeoFrame, pub Quat);
+pub struct GeoRotation(pub GeoFrame, pub DQuat);
 
 /// Per-entity angular velocity in some frame, in rad/s.
 #[derive(Component)]
-pub struct GeoAngularVelocity(pub GeoFrame, pub Vec3);
+pub struct GeoAngularVelocity(pub GeoFrame, pub DVec3);
 
 #[derive(Default)]
 /// Plugin wiring: sets up `GeoContext` and systems that run
@@ -401,7 +391,7 @@ pub struct GeoFramePlugin {
 
 impl Plugin for GeoFramePlugin {
     fn build(&self, app: &mut App) {
-        let mut ctx = self.context.unwrap_or_default();
+        let mut ctx = self.context.clone().unwrap_or_default();
         if let Some(origin) = self.origin {
             ctx.origin = origin;
         }
@@ -412,7 +402,7 @@ impl Plugin for GeoFramePlugin {
             .add_systems(
                 PostUpdate,
                 (
-                    apply_geo_translation, //apply_geo_rotation
+                    apply_geo_translation, apply_geo_rotation
                 )
                     .chain()
                     .before(TransformSystem::TransformPropagate),
@@ -437,28 +427,23 @@ pub fn integrate_geo_motion(
 /// Integrate `GeoRotation` in *frame space* using `GeoAngularVelocity`.
 pub fn integrate_geo_orientation(
     time: Res<Time>,
+    ctx: ResMut<GeoContext>,
     mut q: Query<(&mut GeoRotation, &GeoAngularVelocity)>,
 ) {
-    let dt = time.delta_secs();
+    let dt = time.delta_secs_f64();
     if dt == 0.0 {
         return;
     }
 
     for (mut geo_rot, ang) in &mut q {
+
+        let rot0_R_ang0 = geo_rot.0._R_(&ang.0, &ctx);
         if geo_rot.0 != ang.0 {
+            // We're punting.
             continue;
         }
-
-        let omega = ang.1; // rad/s in that frame
-        let speed = omega.length();
-        if speed == 0.0 {
-            continue;
-        }
-
-        let axis = omega / speed;
-        let angle = speed * dt; // radians this frame
-
-        let delta = Quat::from_axis_angle(axis, angle);
+        let omega = rot0_R_ang0 * ang.1;
+        let delta = DQuat::from_scaled_axis(omega * dt);
         geo_rot.1 = delta * geo_rot.1;
     }
 }
@@ -469,23 +454,21 @@ pub fn apply_geo_translation(
     ctx: ResMut<GeoContext>,
     mut q: Query<(&GeoPosition, &mut Transform)>,
 ) {
-    let ctx_ref: &GeoContext = &*ctx;
     for (geo, mut transform) in &mut q {
         // let pos_in_render = render.convert_to(geo.1, geo.0, ctx_ref);
-        transform.translation = geo.to_bevy(ctx_ref).as_vec3();
+        transform.translation = geo.to_bevy(&ctx).as_vec3();
     }
 }
 
 /// System: convert `GeoRotation` into `Transform.rotation`.
-// pub fn apply_geo_rotation(ctx: Res<GeoContext>, mut q: Query<(&GeoRotation, &mut Transform)>) {
-//     for (geo_rot, mut transform) in &mut q {
-//         let frame = geo_rot.0;
-//         let local_rot = geo_rot.1;
-
-//         let frame_to_eus = todo!(); // frame.basis_to_eus_quat(&ctx);
-//                                     // transform.rotation = frame_to_eus * local_rot;
-//     }
-// }
+pub fn apply_geo_rotation(ctx: Res<GeoContext>, mut q: Query<(&GeoRotation, &mut Transform), Changed<GeoRotation>>) {
+    for (geo_rot, mut transform) in &mut q {
+        let frame = geo_rot.0;
+        let local_rot = geo_rot.1;
+        let bevy_R_geo0 = DQuat::from_mat3(&GeoFrame::bevy_R_(&frame, &ctx));
+        transform.rotation = (bevy_R_geo0 * local_rot).as_quat();
+    }
+}
 
 #[cfg(test)]
 mod tests {
