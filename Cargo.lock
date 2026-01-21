@@ -1792,6 +1792,7 @@ dependencies = [
  "bevy_infinite_grid",
  "big_space",
  "map_3d",
+ "serde",
 ]
 
 [[package]]

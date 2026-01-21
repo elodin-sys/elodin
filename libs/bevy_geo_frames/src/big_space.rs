@@ -7,6 +7,7 @@ use map_3d::Ellipsoid;
 // use ::big_space::{FloatingOrigin, FloatingOriginSettings, grid::cell::GridCell};
 use ::big_space::{precision::GridPrecision, FloatingOrigin, FloatingOriginSettings, GridCell};
 
+/// Add the big_space systems.
 pub fn plugin<P: GridPrecision>(app: &mut App) {
     app.add_systems(
         PostUpdate,

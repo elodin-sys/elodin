@@ -11,6 +11,11 @@ path = "src/lib.rs"
 bevy = "0.17"
 big_space = { version = "0.5.0", optional = true }
 map_3d = "0.1.5"
+serde = { version = "1", features = ["derive"], optional = true }
+
+[features]
+serde = ["dep:serde"]
+big_space = ["dep:big_space"]
 
 [dev-dependencies]
 bevy_editor_cam = "0.7"

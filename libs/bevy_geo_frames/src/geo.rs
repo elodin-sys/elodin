@@ -37,7 +37,8 @@ pub enum Present {
 ///
 /// Units: meters, seconds.
 /// Bevy world: +X=East, +Y=Up, +Z=South (so North = -Z).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum GeoFrame {
     /// East-North-Up: +X=East, +Y=North, +Z=Up
     ENU,
@@ -87,6 +88,7 @@ impl GeoOrigin {
         }
     }
 
+    /// Provide an ellipsoid.
     pub fn with_ellipsoid(mut self, shape: Ellipsoid) -> Self {
         self.ellipsoid = shape;
         self
@@ -98,6 +100,7 @@ impl GeoOrigin {
 /// * Earth rotation model (for ECI/GCRF <-> ECEF).
 #[derive(Resource, Debug, Clone)]
 pub struct GeoContext {
+    /// The geographic origin of the coordinate system on Earth.
     pub origin: GeoOrigin,
     /// Earth rotation angle at t=0 [rad]; 0 means ECI/ECEF axes aligned at startup.
     pub theta0_rad: f64,
@@ -132,11 +135,13 @@ impl From<GeoOrigin> for GeoContext {
 }
 
 impl GeoContext {
+    /// Provide an initial rotation angle.
     pub fn with_rotation_angle(mut self, theta0_rad: f64) -> Self {
         self.theta0_rad = theta0_rad;
         self
     }
 
+    /// Provide a presentation mode.
     pub fn with_present(mut self, present: Present) -> Self {
         self.present = present;
         self
@@ -150,13 +155,16 @@ impl GeoContext {
 }
 
 impl GeoFrame {
-    /// Provides the transformation matrix ${bevy}_M_{from}$ of the coordinate frame.
+    /// Provides the transformation matrix ${bevy}_M_{from}$ from a coordinate
+    /// frame.
     pub fn bevy_M_(from: &Self, context: &GeoContext) -> DMat4 {
         let R = Self::bevy_R_(from, context);
         let O = Self::bevy_O_(from, context);
         DMat4::from_mat3_translation(R, O)
     }
 
+    /// The general tranformation matrix for ${self}_M_{from}$ of the two
+    /// coordinate frames.
     pub fn _M_(&self, from: &GeoFrame, context: &GeoContext) -> DMat4 {
         let R = self._R_(from, context);
         let O = self._O_(from, context);
@@ -223,6 +231,8 @@ impl GeoFrame {
         }
     }
 
+    /// The general rotation matrix for ${self}_R_{from}$ of the two
+    /// coordinate frames.
     pub fn _R_(&self, from: &GeoFrame, context: &GeoContext) -> DMat3 {
         use GeoFrame::*;
         match (*from, *self) {
@@ -257,6 +267,8 @@ impl GeoFrame {
         }
     }
 
+    /// The tranformation matrix for $ecef_M_{from}$ of the two
+    /// coordinate frames.
     pub fn ecef_M_(from: &Self, context: &GeoContext) -> DMat4 {
         let R = Self::ecef_R_(from, &context.origin);
         let O = Self::ecef_O_(from, context);
@@ -313,10 +325,12 @@ impl GeoFrame {
 pub struct GeoPosition(pub GeoFrame, pub DVec3);
 
 impl GeoPosition {
+    /// Convert position to Bevy.
     pub fn to_bevy(&self, context: &GeoContext) -> DVec3 {
         GeoFrame::bevy_M_(&self.0, context).transform_point3(self.1)
     }
 
+    /// Convert position from Bevy.
     pub fn from_bevy(frame: GeoFrame, v_bevy: impl Into<DVec3>, context: &GeoContext) -> Self {
         let v = v_bevy.into();
         GeoPosition(
@@ -335,10 +349,13 @@ impl GeoPosition {
 pub struct GeoVelocity(pub GeoFrame, pub DVec3);
 
 impl GeoVelocity {
+
+    /// Convert vector to Bevy.
     pub fn to_bevy(&self, context: &GeoContext) -> DVec3 {
         GeoFrame::bevy_R_(&self.0, context) * self.1
     }
 
+    /// Convert vector from Bevy.
     pub fn from_bevy(frame: &GeoFrame, v_bevy: impl Into<DVec3>, context: &GeoContext) -> Self {
         let v = v_bevy.into();
         let w = GeoFrame::bevy_R_(frame, context).transpose() * v;
@@ -359,8 +376,13 @@ pub struct GeoAngularVelocity(pub GeoFrame, pub DVec3);
 /// Plugin wiring: sets up `GeoContext` and systems that run
 /// *before* transform propagation.
 pub struct GeoFramePlugin {
+    /// An initial [GeoContext]
     pub context: Option<GeoContext>,
+    /// An initial [GeoOrigin]
     pub origin: Option<GeoOrigin>,
+    /// Add systems that apply the transforms.
+    ///
+    /// In some cases these will need to be setup manually.
     pub apply_transforms: bool,
 }
 
@@ -443,6 +465,8 @@ pub fn integrate_geo_orientation(
     }
 }
 
+/// When the [GeoContext] changes, touch all the [GeoPosition] and [GeoRotation]
+/// objects so they will be updated.
 pub fn touch_geo_on_context_change(
     ctx: Res<GeoContext>,
     mut pos_query: Query<&mut GeoPosition>,
