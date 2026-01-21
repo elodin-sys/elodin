@@ -86,10 +86,7 @@ pub fn handle_window_destroyed(
     }
 }
 
-fn cleanup_secondary_window(
-    entity: Entity,
-    cleanup: &mut WindowCleanup,
-) {
+fn cleanup_secondary_window(entity: Entity, cleanup: &mut WindowCleanup) {
     if let Ok((_, _, mut window_state)) = cleanup.window_states.get_mut(entity) {
         window_state
             .tile_state
