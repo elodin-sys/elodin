@@ -3,10 +3,9 @@ use bevy::math::{DMat3, DMat4, DQuat, DVec3};
 use bevy::prelude::*;
 use bevy::transform::TransformSystem;
 use map_3d::Ellipsoid;
+
 /// Earth sidereal spin
 pub const EARTH_SIDEREAL_SPIN: f64 = 7.292_115_0e-5;
-
-pub const DEFAULT_RENDER: GeoFrame = GeoFrame::ECEF;
 
 /// Return the approximate radius of the ellipsoid.
 pub fn approx_radius(ellipsoid: &Ellipsoid) -> f64 {
@@ -376,12 +375,22 @@ pub struct GeoRotation(pub GeoFrame, pub DQuat);
 #[derive(Component)]
 pub struct GeoAngularVelocity(pub GeoFrame, pub DVec3);
 
-#[derive(Default)]
 /// Plugin wiring: sets up `GeoContext` and systems that run
 /// *before* transform propagation.
 pub struct GeoFramePlugin {
     pub context: Option<GeoContext>,
     pub origin: Option<GeoOrigin>,
+    pub apply_transforms: bool,
+}
+
+impl Default for GeoFramePlugin {
+    fn default() -> Self {
+        GeoFramePlugin {
+            context: None,
+            origin: None,
+            apply_transforms: true,
+        }
+    }
 }
 
 impl Plugin for GeoFramePlugin {
@@ -391,15 +400,21 @@ impl Plugin for GeoFramePlugin {
             ctx.origin = origin;
         }
         app.insert_resource(ctx)
-            // Integrate in frame space each Update
-            .add_systems(Update, (integrate_geo_motion, integrate_geo_orientation))
+        // Integrate in frame space each Update
+           .add_systems(Update, (integrate_geo_motion, integrate_geo_orientation));
+        if self.apply_transforms {
             // Then convert to Bevy before transform propagation
-            .add_systems(
+            #[cfg(not(feature = "big_space"))]
+            app.add_systems(
                 PostUpdate,
-                (apply_geo_translation, apply_geo_rotation)
+                (apply_transforms, apply_geo_rotation)
                     .chain()
                     .before(TransformSystem::TransformPropagate),
             );
+
+            #[cfg(feature = "big_space")]
+            app.add_plugins(crate::big_space::plugin);
+        }
     }
 }
 
@@ -442,7 +457,7 @@ pub fn integrate_geo_orientation(
 
 /// System: convert `GeoPosition` into `Transform.translation` right before Bevy
 /// propagates transforms through the hierarchy.
-pub fn apply_geo_translation(
+pub fn apply_transforms(
     ctx: ResMut<GeoContext>,
     mut q: Query<(&GeoPosition, &mut Transform), Changed<GeoPosition>>,
 ) {

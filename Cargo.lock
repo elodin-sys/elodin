@@ -1790,6 +1790,7 @@ dependencies = [
  "bevy",
  "bevy_editor_cam",
  "bevy_infinite_grid",
+ "big_space",
  "map_3d",
 ]
 
