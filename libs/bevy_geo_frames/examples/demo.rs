@@ -1,3 +1,4 @@
+#![allow(non_snake_case)]
 use bevy::color::palettes::css;
 use bevy::math::primitives::{Cuboid, Plane3d};
 use bevy::math::{DQuat, DVec3};
@@ -49,6 +50,7 @@ fn main() {
                 frame_switch_input,
                 transform_frame_at_position,
                 update_position_display,
+                update_origin_with_arrow_keys,
                 toggle_present_mode,
             ),
         )
@@ -73,7 +75,7 @@ fn setup(
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     // Camera with editor controls
-    let camera_id = commands
+    let _camera_id = commands
         .spawn((
             Camera3d::default(),
             Transform::from_xyz(30.0, 20.0, 30.0).looking_at(Vec3::ZERO, Vec3::Y),
@@ -81,7 +83,7 @@ fn setup(
         ))
         .id();
     #[cfg(feature = "big_space")]
-    commands.entity(camera_id).insert((
+    commands.entity(_camera_id).insert((
         ::big_space::FloatingOrigin,
         ::big_space::GridCell::<i128>::default(),
     ));
@@ -115,28 +117,28 @@ fn setup(
     // Position in ENU frame to start: 20 m east, 0 m north, 1 m up
     let enu_pos = DVec3::new(0.0, 0.0, 0.0);
 
-    let cube_id = commands
+    let _cube_id = commands
         .spawn((
             Mesh3d(cuboid_mesh),
             MeshMaterial3d(cuboid_mat),
             Transform::default(),
             GeoPosition(GeoFrame::ENU, enu_pos),
-            GeoVelocity(GeoFrame::ENU, DVec3::new(0.1, 0.0, 0.0)),
+            // GeoVelocity(GeoFrame::ENU, DVec3::new(0.1, 0.0, 0.0)),
             GeoRotation(GeoFrame::ENU, DQuat::IDENTITY),
-            GeoAngularVelocity(
-                GeoFrame::ENU,
-                // DVec3::new(0.0, 0.0, 10.0_f32.to_radians()),
-                // DVec3::new(10.0, 0.0, 0.0),
-                // DVec3::new(0.0, 1.0, 0.0),
-                DVec3::new(0.0, 0.0, 1.0),
-            ),
+            // GeoAngularVelocity(
+            //     GeoFrame::ENU,
+            //     // DVec3::new(0.0, 0.0, 10.0_f32.to_radians()),
+            //     // DVec3::new(10.0, 0.0, 0.0),
+            //     // DVec3::new(0.0, 1.0, 0.0),
+            //     DVec3::new(0.0, 0.0, 1.0),
+            // ),
             FrameDemo,
         ))
         .id();
 
     #[cfg(feature = "big_space")]
     commands
-        .entity(cube_id)
+        .entity(_cube_id)
         .insert((::big_space::GridCell::<i128>::default(),));
 }
 
@@ -161,27 +163,63 @@ fn setup_ui(mut commands: Commands) {
 fn update_position_display(
     q: Query<(&GeoPosition, &Transform), With<FrameDemo>>,
     mut text_query: Query<&mut Text, With<PositionDisplay>>,
+    ctx: Res<GeoContext>,
 ) {
     if let Ok((geo_trans, transform)) = q.single() {
         let frame = geo_trans.0;
         let pos_in_frame = geo_trans.1;
         let pos_in_bevy = transform.translation;
+        let lat_deg = ctx.origin.latitude.to_degrees();
+        let lon_deg = ctx.origin.longitude.to_degrees();
 
         let frame_name = format!("{:?}", frame);
         let text = format!(
-            "Frame: {}\nPosition in frame: ({:.2}, {:.2}, {:.2})\nPosition in Bevy: ({:.2}, {:.2}, {:.2})",
+            "Frame: {}\nPosition in frame: ({:.2}, {:.2}, {:.2})\nPosition in Bevy: ({:.2}, {:.2}, {:.2})\nOrigin lat/lon: ({:.2}, {:.2})",
             frame_name,
             pos_in_frame.x,
             pos_in_frame.y,
             pos_in_frame.z,
             pos_in_bevy.x,
             pos_in_bevy.y,
-            pos_in_bevy.z
+            pos_in_bevy.z,
+            lat_deg,
+            lon_deg
         );
 
         if let Ok(mut text_component) = text_query.single_mut() {
             *text_component = Text::new(text);
         }
+    }
+}
+
+fn update_origin_with_arrow_keys(
+    keys: Res<ButtonInput<KeyCode>>,
+    time: Res<Time>,
+    mut ctx: ResMut<GeoContext>,
+) {
+    let dt = time.delta_secs_f64();
+    let rate_rad_per_sec = 10.0_f64.to_radians();
+
+    if keys.pressed(KeyCode::ArrowLeft) {
+        ctx.origin.longitude -= rate_rad_per_sec * dt;
+    }
+    if keys.pressed(KeyCode::ArrowRight) {
+        ctx.origin.longitude += rate_rad_per_sec * dt;
+    }
+    if keys.pressed(KeyCode::ArrowUp) {
+        ctx.origin.latitude += rate_rad_per_sec * dt;
+    }
+    if keys.pressed(KeyCode::ArrowDown) {
+        ctx.origin.latitude -= rate_rad_per_sec * dt;
+    }
+
+    let half_pi = std::f64::consts::FRAC_PI_2;
+    ctx.origin.latitude = ctx.origin.latitude.clamp(-half_pi, half_pi);
+
+    if ctx.origin.longitude > std::f64::consts::PI {
+        ctx.origin.longitude -= 2.0 * std::f64::consts::PI;
+    } else if ctx.origin.longitude < -std::f64::consts::PI {
+        ctx.origin.longitude += 2.0 * std::f64::consts::PI;
     }
 }
 
@@ -315,6 +353,7 @@ fn draw_origin_gizmos(mut gizmos: Gizmos, ctx: Res<GeoContext>, current_frame: R
     // );
 }
 
+#[allow(dead_code)]
 /// Draw RGB axes on the object showing the frame's coordinate directions.
 /// Red = first component, Green = second component, Blue = third component.
 fn draw_frame_axes(

@@ -407,7 +407,7 @@ impl Plugin for GeoFramePlugin {
             #[cfg(not(feature = "big_space"))]
             app.add_systems(
                 PostUpdate,
-                (apply_transforms, apply_geo_rotation)
+                (touch_geo_on_context_change, apply_transforms, apply_geo_rotation)
                     .chain()
                     .before(TransformSystem::TransformPropagate),
             );
@@ -457,6 +457,24 @@ pub fn integrate_geo_orientation(
         geo_rot.1 = delta * geo_rot.1;
     }
 }
+
+pub fn touch_geo_on_context_change(
+    ctx: Res<GeoContext>,
+    mut pos_query: Query<&mut GeoPosition>,
+    mut rot_query: Query<&mut GeoRotation>,
+) {
+    if !ctx.is_changed() {
+        return;
+    }
+
+    for mut pos in &mut pos_query {
+        pos.set_changed();
+    }
+    for mut rot in &mut rot_query {
+        rot.set_changed();
+    }
+}
+
 
 /// System: convert `GeoPosition` into `Transform.translation` right before Bevy
 /// propagates transforms through the hierarchy.
