@@ -4,9 +4,10 @@ use std::{collections::HashMap, time::Duration};
 use bevy::log::error;
 use bevy::{
     app::AppExit,
+    camera::RenderTarget,
     log::{info, warn},
     prelude::*,
-    window::{PrimaryWindow, WindowCloseRequested},
+    window::{PrimaryWindow, WindowCloseRequested, WindowDestroyed, WindowRef},
     winit::WINIT_WINDOWS,
 };
 use bevy_defer::{AccessError, AsyncCommandsExtension, AsyncWorld};
@@ -46,17 +47,68 @@ pub fn handle_window_close(
             exit.write(AppExit::Success);
             continue;
         }
+        cleanup_secondary_window(
+            entity,
+            &mut window_states,
+            &mut render_layer_alloc,
+            &mut focused_window,
+            &mut commands,
+        );
+    }
+}
 
-        if let Ok((_, _, mut window_state)) = window_states.get_mut(entity) {
-            window_state
-                .tile_state
-                .clear(&mut commands, &mut render_layer_alloc);
-            window_state.graph_entities.clear();
+pub fn handle_window_destroyed(
+    mut events: MessageReader<WindowDestroyed>,
+    primary: Query<&WindowId, With<PrimaryWindow>>,
+    mut window_states: Query<(Entity, &WindowId, &mut WindowState)>,
+    mut render_layer_alloc: ResMut<RenderLayerAlloc>,
+    mut focused_window: ResMut<FocusedWindow>,
+    cameras: Query<(Entity, &Camera)>,
+    mut commands: Commands,
+    mut exit: MessageWriter<AppExit>,
+) {
+    for evt in events.read() {
+        let entity = evt.window;
+        if primary
+            .get(entity)
+            .map(|window_id| window_id.is_primary())
+            .unwrap_or(false)
+        {
+            exit.write(AppExit::Success);
+            continue;
         }
 
-        if focused_window.0 == Some(entity) {
-            focused_window.0 = None;
+        cleanup_secondary_window(
+            entity,
+            &mut window_states,
+            &mut render_layer_alloc,
+            &mut focused_window,
+            &mut commands,
+        );
+
+        for (camera_entity, camera) in cameras.iter() {
+            if matches!(camera.target, RenderTarget::Window(WindowRef::Entity(target)) if target == entity)
+            {
+                commands.entity(camera_entity).despawn();
+            }
         }
+    }
+}
+
+fn cleanup_secondary_window(
+    entity: Entity,
+    window_states: &mut Query<(Entity, &WindowId, &mut WindowState)>,
+    render_layer_alloc: &mut RenderLayerAlloc,
+    focused_window: &mut FocusedWindow,
+    commands: &mut Commands,
+) {
+    if let Ok((_, _, mut window_state)) = window_states.get_mut(entity) {
+        window_state.tile_state.clear(commands, render_layer_alloc);
+        window_state.graph_entities.clear();
+    }
+
+    if focused_window.0 == Some(entity) {
+        focused_window.0 = None;
     }
 }
 
