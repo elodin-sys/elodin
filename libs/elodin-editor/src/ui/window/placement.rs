@@ -19,11 +19,21 @@ use winit::{
     window::Window as WinitWindow,
 };
 
-use crate::ui::tiles::{WindowId, WindowRelayout, WindowState};
+use crate::{
+    plugins::navigation_gizmo::RenderLayerAlloc,
+    ui::{
+        FocusedWindow,
+        tiles::{WindowId, WindowRelayout, WindowState},
+    },
+};
 
 pub fn handle_window_close(
     mut events: MessageReader<WindowCloseRequested>,
     primary: Query<&WindowId, With<PrimaryWindow>>,
+    mut window_states: Query<(Entity, &WindowId, &mut WindowState)>,
+    mut render_layer_alloc: ResMut<RenderLayerAlloc>,
+    mut focused_window: ResMut<FocusedWindow>,
+    mut commands: Commands,
     mut exit: MessageWriter<AppExit>,
 ) {
     for evt in events.read() {
@@ -34,6 +44,18 @@ pub fn handle_window_close(
             .unwrap_or(false)
         {
             exit.write(AppExit::Success);
+            continue;
+        }
+
+        if let Ok((_, _, mut window_state)) = window_states.get_mut(entity) {
+            window_state
+                .tile_state
+                .clear(&mut commands, &mut render_layer_alloc);
+            window_state.graph_entities.clear();
+        }
+
+        if focused_window.0 == Some(entity) {
+            focused_window.0 = None;
         }
     }
 }
