@@ -8261,6 +8261,7 @@ dependencies = [
 [[package]]
 name = "map_3d"
 version = "0.1.5"
+source = "git+https://github.com/shanecelis/map_3d.git?branch=feat%2Fsphere#7562c48516badfd840b2c80f2c5d38fe9d26f097"
 
 [[package]]
 name = "matchers"
