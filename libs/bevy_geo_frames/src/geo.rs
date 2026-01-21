@@ -412,8 +412,11 @@ impl Plugin for GeoFramePlugin {
                     .before(TransformSystem::TransformPropagate),
             );
 
-            #[cfg(feature = "big_space")]
-            app.add_plugins(crate::big_space::plugin);
+            // We ought not to do this here because it relies on the generic
+            // parameter.
+
+            // #[cfg(feature = "big_space")]
+            // app.add_plugins(crate::big_space::plugin::<i128>);
         }
     }
 }

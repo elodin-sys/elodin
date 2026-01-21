@@ -29,7 +29,9 @@ impl Default for CurrentFrame {
 }
 
 fn main() {
-    App::new()
+    let mut app = App::new();
+
+    app
         .add_plugins(DefaultPlugins)
         .add_plugins(DefaultEditorCamPlugins)
         .add_plugins(InfiniteGridPlugin)
@@ -54,7 +56,16 @@ fn main() {
         .add_systems(Update, draw_frame_zero_gizmo)
         // .add_systems(Update, draw_frame_axes)
         .add_systems(Update, draw_radius_sphere)
-        .init_resource::<CurrentFrame>()
+        .init_resource::<CurrentFrame>();
+
+
+    #[cfg(feature = "big_space")]
+    app
+        .add_plugins(::big_space::FloatingOriginPlugin::<i128>::new(16_000., 100.))
+
+        .add_plugins(::big_space::debug::FloatingOriginDebugPlugin::<i128>::default())
+        .add_plugins(bevy_geo_frames::big_space::plugin::<i128>);
+    app
         .run();
 }
 
@@ -64,11 +75,16 @@ fn setup(
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
     // Camera with editor controls
-    commands.spawn((
+    let camera_id = commands.spawn((
         Camera3d::default(),
         Transform::from_xyz(30.0, 20.0, 30.0).looking_at(Vec3::ZERO, Vec3::Y),
         EditorCam::default(),
-    ));
+    )).id();
+    #[cfg(feature = "big_space")]
+    commands.entity(camera_id)
+            .insert((::big_space::FloatingOrigin,
+                     ::big_space::GridCell::<i128>::default(),
+            ));
 
     // Light
     commands.spawn((
@@ -93,7 +109,7 @@ fn setup(
     // Position in ENU frame to start: 20 m east, 0 m north, 1 m up
     let enu_pos = DVec3::new(0.0, 0.0, 0.0);
 
-    commands.spawn((
+    let cube_id = commands.spawn((
         Mesh3d(cuboid_mesh),
         MeshMaterial3d(cuboid_mat),
         Transform::default(),
@@ -108,7 +124,13 @@ fn setup(
             DVec3::new(0.0, 0.0, 1.0),
         ),
         FrameDemo,
-    ));
+    )).id();
+
+    #[cfg(feature = "big_space")]
+    commands.entity(cube_id)
+            .insert((
+                     ::big_space::GridCell::<i128>::default(),
+            ));
 }
 
 /// Marker component for the position display text.

@@ -5,32 +5,42 @@ use bevy::transform::TransformSystem;
 use map_3d::Ellipsoid;
 use crate::*;
 // use ::big_space::{FloatingOrigin, FloatingOriginSettings, grid::cell::GridCell};
-use ::big_space::{FloatingOrigin, FloatingOriginSettings, GridCell};
+use ::big_space::{precision::GridPrecision, FloatingOrigin, FloatingOriginSettings, GridCell};
 
-pub fn plugin(app: &mut App) {
+pub fn plugin<P: GridPrecision>(app: &mut App) {
     app.add_systems(
         PostUpdate,
-        crate::apply_geo_rotation
+        (apply_little_transforms::<P>, crate::apply_geo_rotation).chain()
             .before(TransformSystem::TransformPropagate),
     );
 
     // Note: There is not a public `SystemSet` to anchor our
-    // apply_geo_translation to--at least not in our homebrew branch. There is a
+    // apply_big_translation to--at least not in our homebrew branch. There is a
     // `SystemSet` in the current big_space release. Till then we'll ask the
     // user to attach their own translation.
 
-    // app.add_systems(
-    //     PostUpdate,
-    //     apply_geo_translation
-    //         .before(RootGlobalTransformUpdates)
-    // );
+    app.add_systems(
+        PostUpdate,
+        apply_big_translation::<P>
+            //.before(RootGlobalTransformUpdates)
+    );
+}
+
+
+pub fn apply_little_transforms<P: GridPrecision>(
+    ctx: ResMut<GeoContext>,
+    mut q: Query<(&GeoPosition, &mut Transform), (Changed<GeoPosition>, Without<GridCell<P>>)>,
+) {
+    for (geo, mut transform) in &mut q {
+        transform.translation = geo.to_bevy(&ctx).as_vec3();
+    }
 }
 
 /// System: convert `GeoPosition` into `Transform.translation` right before Bevy
 /// propagates transforms through the hierarchy.
-pub fn apply_geo_translation(
+pub fn apply_big_translation<P: GridPrecision>(
     ctx: ResMut<GeoContext>,
-    mut q: Query<(&GeoPosition, &mut Transform, &mut GridCell<i128>), Changed<GeoPosition>>,
+    mut q: Query<(&GeoPosition, &mut Transform, &mut GridCell<P>), Changed<GeoPosition>>,
     floating_origin: Res<FloatingOriginSettings>,
 ) {
     for (geo, mut transform, mut grid_cell) in &mut q {
