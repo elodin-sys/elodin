@@ -28,7 +28,7 @@ def world(seed: int = 0) -> el.World:
         """
         hsplit {
             tabs {
-                viewport name=Viewport frame="NED" pos="(0,0,0,0, 8,2,4)" look_at="(0,0,0,0, 0,0,3)" hdr=#true show_grid=#true active=#true
+                viewport name=Viewport frame="NED" pos="(0,0,0,0, 2,8,-4)" look_at="(0,0,0,0, 0,0,-3)" hdr=#true show_grid=#true active=#true
                 inspector
             }
         }
@@ -42,6 +42,10 @@ def world(seed: int = 0) -> el.World:
         }
         vector_arrow frame="NED" "ball.world_vel[3],ball.world_vel[4],ball.world_vel[5]" origin="ball.world_pos" scale=1.0 name="Ball Velocity" show_name=#true label_position="0.3m" {
             color yalk 100
+        }
+
+        vector_arrow frame="NED" "(0,0,2)" origin="ball.world_pos" scale=1.0 show_name=#true {
+            color red 100
         }
         object_3d frame="NED" "(0,0,0,1, 0,0,0)" {
             plane width=2000 depth=2000 {

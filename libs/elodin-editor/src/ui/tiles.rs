@@ -1329,15 +1329,25 @@ impl ViewportPane {
             ))
             .id();
 
-        let parent = commands
-            .spawn((
-                GlobalTransform::default(),
-                Transform::from_translation(Vec3::new(5.0, 5.0, 10.0))
-                    .looking_at(Vec3::ZERO, Vec3::Y),
-                impeller2_wkt::WorldPos::default(),
-                Name::new("viewport"),
-            ))
-            .id();
+        let transform = 
+            Transform::from_translation(Vec3::new(5.0, 5.0, 10.0))
+                .looking_at(Vec3::ZERO, Vec3::Y);
+        let mut parent_cmd = commands.spawn((
+            GlobalTransform::default(),
+            transform.clone(),
+            impeller2_wkt::WorldPos::default(),
+            Name::new("viewport"),
+        ));
+
+        // Add GeoPosition and GeoRotation if frame is specified
+        if let Some(frame) = viewport.frame {
+            parent_cmd.insert((
+                bevy_geo_frames::GeoPosition(frame, transform.translation.as_dvec3()),
+                bevy_geo_frames::GeoRotation(frame, transform.rotation.as_dquat()),
+            ));
+        }
+
+        let parent = parent_cmd.id();
         let pos = viewport
             .pos
             .as_ref()

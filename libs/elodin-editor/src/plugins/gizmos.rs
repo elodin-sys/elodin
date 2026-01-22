@@ -23,6 +23,7 @@ use impeller2_wkt::{
     BodyAxes, Color as WktColor, ComponentValue as WktComponentValue, LabelPosition, VectorArrow3d,
 };
 use std::collections::{HashMap, HashSet};
+use bevy_geo_frames::{GeoContext, GeoPosition, GeoRotation, GeoFrame};
 
 use crate::{
     MainCamera, WorldPosExt,
@@ -163,6 +164,7 @@ pub fn evaluate_vector_arrow(
     state: &VectorArrowState,
     entity_map: &EntityMap,
     component_values: &Query<'_, '_, &'static WktComponentValue>,
+    geo_context: &GeoContext,
 ) -> Option<EvaluatedVectorArrow> {
     let Some(vector_expr) = &state.vector_expr else {
         return None;
@@ -194,12 +196,23 @@ pub fn evaluate_vector_arrow(
             return None;
         };
         if let Some(world_pos) = origin_value.as_world_pos() {
-            start_world = world_pos.bevy_pos();
-            rotation = world_pos.bevy_att();
+            if let Some(frame) = arrow.frame {
+                start_world = GeoPosition(frame, world_pos.pos()).to_bevy(&geo_context);
+                rotation = GeoRotation(frame, world_pos.att()).to_bevy(&geo_context);
+            } else {
+                start_world = world_pos.bevy_pos();
+                rotation = world_pos.bevy_att();
+            }
         } else if let Some(origin) = component_value_tail_to_vec3(&origin_value) {
-            start_world = origin;
+            if let Some(frame) = arrow.frame {
+                start_world = GeoPosition(frame, origin).to_bevy(&geo_context);
+            } else {
+                start_world = origin;
+            }
         }
     }
+
+    direction = GeoFrame::bevy_R_(&arrow.frame.unwrap_or(GeoFrame::ENU), &geo_context) * direction;
 
     if arrow.body_frame {
         direction = rotation * direction;
@@ -230,6 +243,7 @@ fn render_vector_arrow(
     viewport_arrows: Query<&ViewportArrow>,
     mut logged_missing: Local<HashSet<Entity>>,
     mut logged_small: Local<HashSet<Entity>>,
+    geo_context: Res<GeoContext>,
 ) {
     let main_camera_data: Vec<_> = main_cameras.iter().collect();
     let mut camera_index: HashMap<Entity, usize> = HashMap::new();
@@ -249,7 +263,7 @@ fn render_vector_arrow(
             continue;
         }
 
-        let Some(result) = evaluate_vector_arrow(arrow, &state, &entity_map, &component_values)
+        let Some(result) = evaluate_vector_arrow(arrow, &state, &entity_map, &component_values, &geo_context)
         else {
             if logged_missing.insert(entity) {
                 info!(

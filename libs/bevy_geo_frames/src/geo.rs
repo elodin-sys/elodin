@@ -345,6 +345,25 @@ impl GeoPosition {
     }
 }
 
+impl GeoRotation {
+
+    /// Convert orientation to Bevy.
+    pub fn to_bevy(&self, context: &GeoContext) -> DQuat {
+        let frame = self.0;
+        let local_rot = self.1;
+        DQuat::from_mat3(&GeoFrame::bevy_R_(&frame, &context)) * local_rot
+    }
+
+    /// Convert orientation from Bevy.
+    pub fn from_bevy(frame: GeoFrame, v_bevy: impl Into<DQuat>, context: &GeoContext) -> Self {
+        let v = v_bevy.into();
+        GeoRotation(
+            frame,
+            DQuat::from_mat3(&GeoFrame::bevy_R_(&frame, context)).inverse()*v,
+        )
+    }
+}
+
 /// Per-entity geo velocity:
 ///   0: frame
 ///   1: velocity in that frame (m/s).
@@ -517,10 +536,7 @@ pub fn apply_geo_rotation(
     mut q: Query<(&GeoRotation, &mut Transform), Changed<GeoRotation>>,
 ) {
     for (geo_rot, mut transform) in &mut q {
-        let frame = geo_rot.0;
-        let local_rot = geo_rot.1;
-        let bevy_R_geo0 = DQuat::from_mat3(&GeoFrame::bevy_R_(&frame, &ctx));
-        transform.rotation = (bevy_R_geo0 * local_rot).as_quat();
+        transform.rotation = geo_rot.to_bevy(&ctx).as_quat();
     }
 }
 
