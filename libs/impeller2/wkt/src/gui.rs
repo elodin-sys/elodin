@@ -215,6 +215,8 @@ pub struct Viewport<T = ()> {
     pub pos: Option<String>,
     pub look_at: Option<String>,
     #[serde(default)]
+    pub frame: Option<bevy_geo_frames::GeoFrame>,
+    #[serde(default)]
     pub local_arrows: Vec<VectorArrow3d>,
     pub aux: T,
 }
@@ -230,6 +232,7 @@ impl<T> Viewport<T> {
             name: self.name.clone(),
             pos: self.pos.clone(),
             look_at: self.look_at.clone(),
+            frame: self.frame,
             local_arrows: self.local_arrows.clone(),
             aux: f(&self.aux),
         }
@@ -247,6 +250,7 @@ impl Default for Viewport {
             name: None,
             pos: None,
             look_at: None,
+            frame: None,
             local_arrows: Vec::new(),
             aux: (),
         }
@@ -305,6 +309,8 @@ pub struct Line3d<T = ()> {
     pub line_width: f32,
     pub color: Color,
     pub perspective: bool,
+    #[serde(default)]
+    pub frame: Option<bevy_geo_frames::GeoFrame>,
     pub aux: T,
 }
 
@@ -315,6 +321,7 @@ impl<T> Line3d<T> {
             line_width: self.line_width,
             color: self.color,
             perspective: self.perspective,
+            frame: self.frame,
             aux: f(&self.aux),
         }
     }
@@ -346,6 +353,8 @@ pub struct VectorArrow3d<T = ()> {
     pub thickness: ArrowThickness,
     #[serde(default = "VectorArrow3d::<T>::default_label_position")]
     pub label_position: LabelPosition,
+    #[serde(default)]
+    pub frame: Option<bevy_geo_frames::GeoFrame>,
     pub aux: T,
 }
 
@@ -501,6 +510,7 @@ impl<T> VectorArrow3d<T> {
             show_name: self.show_name,
             thickness: self.thickness,
             label_position: self.label_position.clone(),
+            frame: self.frame,
             aux: f(&self.aux),
         }
     }

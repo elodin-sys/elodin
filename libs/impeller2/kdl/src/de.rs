@@ -312,6 +312,11 @@ fn parse_viewport(node: &KdlNode, kdl_src: &str) -> Result<Panel, KdlSchematicEr
             }
         });
 
+    let frame = node
+        .get("frame")
+        .and_then(|v| v.as_string())
+        .and_then(|s| GeoFrame::from_str(s).ok());
+
     let mut local_arrows = Vec::new();
     if let Some(children) = node.children() {
         for child in children.nodes() {
@@ -330,6 +335,7 @@ fn parse_viewport(node: &KdlNode, kdl_src: &str) -> Result<Panel, KdlSchematicEr
         name,
         pos,
         look_at,
+        frame,
         local_arrows,
         aux: (),
     }))
@@ -720,11 +726,17 @@ fn parse_line_3d(node: &KdlNode, src: &str) -> Result<Line3d, KdlSchematicError>
         .and_then(|v| v.as_bool())
         .unwrap_or(true);
 
+    let frame = node
+        .get("frame")
+        .and_then(|v| v.as_string())
+        .and_then(|s| GeoFrame::from_str(s).ok());
+
     Ok(Line3d {
         eql,
         line_width,
         color,
         perspective,
+        frame,
         aux: (),
     })
 }
@@ -893,6 +905,11 @@ fn parse_vector_arrow(node: &KdlNode, src: &str) -> Result<VectorArrow3d, KdlSch
 
     let color = parse_color_from_node_or_children(node, None).unwrap_or(Color::WHITE);
 
+    let frame = node
+        .get("frame")
+        .and_then(|v| v.as_string())
+        .and_then(|s| GeoFrame::from_str(s).ok());
+
     Ok(VectorArrow3d {
         vector,
         origin,
@@ -904,6 +921,7 @@ fn parse_vector_arrow(node: &KdlNode, src: &str) -> Result<VectorArrow3d, KdlSch
         show_name,
         thickness,
         label_position,
+        frame,
         aux: (),
     })
 }
@@ -1544,7 +1562,7 @@ object_3d frame="NED" "ball.world_pos" {
         assert_eq!(schematic.elems.len(), 1);
         if let SchematicElem::Object3d(obj) = &schematic.elems[0] {
             assert_eq!(obj.eql, "ball.world_pos");
-            assert!(matches!(obj.frame, GeoFrame::NED));
+            assert!(matches!(obj.frame, Some(GeoFrame::NED)));
         } else {
             panic!("Expected object_3d");
         }
@@ -1562,7 +1580,7 @@ object_3d "entity.world_pos" frame="ENU" {
         assert_eq!(schematic.elems.len(), 1);
         if let SchematicElem::Object3d(obj) = &schematic.elems[0] {
             assert_eq!(obj.eql, "entity.world_pos");
-            assert!(matches!(obj.frame, GeoFrame::ENU));
+            assert!(matches!(obj.frame, Some(GeoFrame::ENU)));
         } else {
             panic!("Expected object_3d");
         }
@@ -1579,9 +1597,51 @@ object_3d "a.world_pos" {
 
         assert_eq!(schematic.elems.len(), 1);
         if let SchematicElem::Object3d(obj) = &schematic.elems[0] {
-            assert!(matches!(obj.frame, GeoFrame::Bevy));
+            assert!(obj.frame.is_none());
         } else {
             panic!("Expected object_3d");
+        }
+    }
+
+    #[test]
+    fn test_parse_viewport_with_frame() {
+        let kdl = r#"viewport name="main" frame="NED" pos="(0,0,0,0, 8,2,4)" look_at="(0,0,0,0, 0,0,3)""#;
+        let schematic = parse_schematic(kdl).unwrap();
+
+        assert_eq!(schematic.elems.len(), 1);
+        if let SchematicElem::Panel(Panel::Viewport(viewport)) = &schematic.elems[0] {
+            assert_eq!(viewport.name, Some("main".to_string()));
+            assert!(matches!(viewport.frame, Some(GeoFrame::NED)));
+        } else {
+            panic!("Expected viewport panel");
+        }
+    }
+
+    #[test]
+    fn test_parse_line_3d_with_frame() {
+        let kdl = r#"line_3d frame="NED" "ball.world_pos" line_width=2.0"#;
+        let schematic = parse_schematic(kdl).unwrap();
+
+        assert_eq!(schematic.elems.len(), 1);
+        if let SchematicElem::Line3d(line) = &schematic.elems[0] {
+            assert_eq!(line.eql, "ball.world_pos");
+            assert!(matches!(line.frame, Some(GeoFrame::NED)));
+        } else {
+            panic!("Expected line_3d");
+        }
+    }
+
+    #[test]
+    fn test_parse_vector_arrow_with_frame() {
+        let kdl = r#"vector_arrow frame="ENU" "ball.velocity" origin="ball.world_pos""#;
+        let schematic = parse_schematic(kdl).unwrap();
+
+        assert_eq!(schematic.elems.len(), 1);
+        if let SchematicElem::VectorArrow(arrow) = &schematic.elems[0] {
+            assert_eq!(arrow.vector, "ball.velocity");
+            assert!(matches!(arrow.frame, Some(GeoFrame::ENU)));
+        } else {
+            panic!("Expected vector_arrow");
         }
     }
 

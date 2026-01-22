@@ -126,6 +126,11 @@ fn serialize_viewport<T>(viewport: &Viewport<T>) -> KdlNode {
             .push(KdlEntry::new_prop("look_at", look_at.clone()));
     }
 
+    if let Some(frame) = viewport.frame {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("frame", <&str>::from(frame)));
+    }
+
     if viewport.hdr {
         node.entries_mut().push(KdlEntry::new_prop("hdr", true));
     }
@@ -433,6 +438,11 @@ fn serialize_line_3d<T>(line: &Line3d<T>) -> KdlNode {
             .push(KdlEntry::new_prop("line_width", line.line_width as f64));
     }
 
+    if let Some(frame) = line.frame {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("frame", <&str>::from(frame)));
+    }
+
     serialize_color_to_node(&mut node, &line.color);
 
     if !line.perspective {
@@ -496,6 +506,11 @@ fn serialize_vector_arrow<T>(arrow: &VectorArrow3d<T>) -> KdlNode {
                 format!("{:.2}m", length),
             ));
         }
+    }
+
+    if let Some(frame) = arrow.frame {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("frame", <&str>::from(frame)));
     }
 
     serialize_color_to_node(&mut node, &arrow.color);
@@ -823,6 +838,7 @@ mod tests {
                 hdr: false,
                 pos: None,
                 look_at: None,
+                frame: None,
                 local_arrows: Vec::new(),
                 aux: (),
             })));
@@ -855,6 +871,7 @@ mod tests {
                 hdr: true,
                 pos: Some("(0,0,0,0, 1,2,3)".to_string()),
                 look_at: Some("(0,0,0,0, 0,0,0)".to_string()),
+                frame: None,
                 local_arrows: Vec::new(),
                 aux: (),
             })));
@@ -1115,7 +1132,7 @@ graph "value" {
                 mesh: Mesh::Sphere { radius: 0.2 },
                 material: Material::with_color(Color::ORANGE),
             },
-            frame: GeoFrame::NED,
+            frame: Some(GeoFrame::NED),
             aux: (),
         }));
 
@@ -1129,7 +1146,7 @@ graph "value" {
         assert_eq!(parsed.elems.len(), 1);
         if let SchematicElem::Object3d(obj) = &parsed.elems[0] {
             assert_eq!(obj.eql, "ball.world_pos");
-            assert!(matches!(obj.frame, GeoFrame::NED));
+            assert!(matches!(obj.frame, Some(GeoFrame::NED)));
         } else {
             panic!("Expected object_3d");
         }
@@ -1144,14 +1161,86 @@ graph "value" {
                 mesh: Mesh::Sphere { radius: 0.5 },
                 material: Material::with_color(Color::WHITE),
             },
-            frame: GeoFrame::Bevy, // Default frame
+            frame: None, // Default (no frame)
             aux: (),
         }));
 
         let serialized = serialize_schematic(&schematic);
         assert!(
             !serialized.contains("frame="),
-            "default Bevy frame should not be serialized, got:\n{serialized}"
+            "default None frame should not be serialized, got:\n{serialized}"
+        );
+    }
+
+    #[test]
+    fn test_serialize_viewport_with_frame() {
+        let mut schematic = Schematic::default();
+        schematic
+            .elems
+            .push(SchematicElem::Panel(Panel::Viewport(Viewport {
+                name: Some("main".to_string()),
+                fov: 45.0,
+                active: false,
+                show_grid: false,
+                show_arrows: true,
+                hdr: false,
+                pos: Some("(0,0,0,0, 8,2,4)".to_string()),
+                look_at: None,
+                frame: Some(GeoFrame::NED),
+                local_arrows: Vec::new(),
+                aux: (),
+            })));
+
+        let serialized = serialize_schematic(&schematic);
+        assert!(
+            serialized.contains("frame=NED") || serialized.contains(r#"frame="NED""#),
+            "serialized output should contain frame=NED, got:\n{serialized}"
+        );
+    }
+
+    #[test]
+    fn test_serialize_line_3d_with_frame() {
+        let mut schematic = Schematic::default();
+        schematic.elems.push(SchematicElem::Line3d(Line3d {
+            eql: "ball.world_pos".to_string(),
+            line_width: 2.0,
+            color: Color::WHITE,
+            perspective: true,
+            frame: Some(GeoFrame::ENU),
+            aux: (),
+        }));
+
+        let serialized = serialize_schematic(&schematic);
+        assert!(
+            serialized.contains("frame=ENU") || serialized.contains(r#"frame="ENU""#),
+            "serialized output should contain frame=ENU, got:\n{serialized}"
+        );
+    }
+
+    #[test]
+    fn test_serialize_vector_arrow_with_frame() {
+        let mut schematic = Schematic::default();
+        schematic
+            .elems
+            .push(SchematicElem::VectorArrow(VectorArrow3d {
+                vector: "ball.velocity".to_string(),
+                origin: Some("ball.world_pos".to_string()),
+                scale: 1.0,
+                name: None,
+                color: Color::WHITE,
+                body_frame: false,
+                normalize: false,
+                show_name: true,
+                thickness: ArrowThickness::default(),
+                label_position: LabelPosition::None,
+                frame: Some(GeoFrame::ECEF),
+                aux: (),
+            }));
+
+        let serialized = serialize_schematic(&schematic);
+        assert!(
+            serialized.contains("frame=ECEF") || serialized.contains(r#"frame="ECEF""#),
+            "serialized output should contain frame=ECEF, got:\n{serialized}"
         );
     }
 
@@ -1168,6 +1257,7 @@ graph "value" {
                 hdr: false,
                 pos: None,
                 look_at: None,
+                frame: None,
                 local_arrows: Vec::new(),
                 aux: (),
             }),
@@ -1215,6 +1305,7 @@ graph "value" {
             line_width: 2.0,
             color: Color::MINT,
             perspective: false,
+            frame: None,
             aux: (),
         }));
 
@@ -1248,6 +1339,7 @@ graph "value" {
                 show_name: false,
                 thickness: ArrowThickness::new(1.23456),
                 label_position: LabelPosition::None,
+                frame: None,
                 aux: (),
             }));
 
