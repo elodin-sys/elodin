@@ -686,27 +686,31 @@ pub fn tabs_are_sidebar_only(tiles: &Tiles<Pane>, tabs: &egui_tiles::Tabs) -> bo
             .all(|child| tile_is_sidebar(tiles, *child))
 }
 
-/// Check if a Tabs container is just a "passthrough" wrapper around another single Tabs.
-/// Such wrappers should be invisible - we want to show the inner Tabs' content directly.
-pub fn is_passthrough_tabs(tiles: &Tiles<Pane>, tile_id: TileId) -> bool {
-    let Some(Tile::Container(Container::Tabs(tabs))) = tiles.get(tile_id) else {
+/// Check if this tile is the sole Tabs child of a passthrough Tabs parent.
+/// In that case, its tab title should be hidden.
+fn is_sole_tabs_child_of_passthrough(tiles: &Tiles<Pane>, tile_id: TileId) -> bool {
+    // Only applies to Tabs containers
+    if !matches!(tiles.get(tile_id), Some(Tile::Container(Container::Tabs(_)))) {
         return false;
-    };
+    }
 
-    // Get non-sidebar children
-    let non_sidebar_children: Vec<_> = tabs
-        .children
-        .iter()
-        .copied()
-        .filter(|&child_id| !tile_is_sidebar(tiles, child_id))
-        .collect();
+    // Find if any Tabs container has this tile as its sole non-sidebar child
+    for (_, tile) in tiles.iter() {
+        if let Tile::Container(Container::Tabs(parent_tabs)) = tile {
+            let non_sidebar_children: Vec<_> = parent_tabs
+                .children
+                .iter()
+                .copied()
+                .filter(|&child_id| !tile_is_sidebar(tiles, child_id))
+                .collect();
 
-    // It's a passthrough if there's exactly one non-sidebar child and it's a Tabs container
-    non_sidebar_children.len() == 1
-        && matches!(
-            tiles.get(non_sidebar_children[0]),
-            Some(Tile::Container(Container::Tabs(_)))
-        )
+            // If this parent has exactly one non-sidebar child and it's our tile
+            if non_sidebar_children.len() == 1 && non_sidebar_children[0] == tile_id {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 pub fn tab_title_visible(tiles: &Tiles<Pane>, tile_id: TileId) -> bool {
@@ -714,8 +718,8 @@ pub fn tab_title_visible(tiles: &Tiles<Pane>, tile_id: TileId) -> bool {
     if tile_is_sidebar(tiles, tile_id) {
         return false;
     }
-    // Hide passthrough Tabs wrappers (Tabs containing only one Tabs child)
-    if is_passthrough_tabs(tiles, tile_id) {
+    // Hide Tabs that are the sole child of a passthrough Tabs parent
+    if is_sole_tabs_child_of_passthrough(tiles, tile_id) {
         return false;
     }
     true
