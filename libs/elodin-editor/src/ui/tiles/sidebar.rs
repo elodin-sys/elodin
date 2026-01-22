@@ -686,13 +686,62 @@ pub fn tabs_are_sidebar_only(tiles: &Tiles<Pane>, tabs: &egui_tiles::Tabs) -> bo
             .all(|child| tile_is_sidebar(tiles, *child))
 }
 
+/// Check if a Tabs container is just a "passthrough" wrapper around another single Tabs.
+/// Such wrappers should be invisible - we want to show the inner Tabs' content directly.
+pub fn is_passthrough_tabs(tiles: &Tiles<Pane>, tile_id: TileId) -> bool {
+    let Some(Tile::Container(Container::Tabs(tabs))) = tiles.get(tile_id) else {
+        return false;
+    };
+
+    // Get non-sidebar children
+    let non_sidebar_children: Vec<_> = tabs
+        .children
+        .iter()
+        .copied()
+        .filter(|&child_id| !tile_is_sidebar(tiles, child_id))
+        .collect();
+
+    // It's a passthrough if there's exactly one non-sidebar child and it's a Tabs container
+    non_sidebar_children.len() == 1
+        && matches!(
+            tiles.get(non_sidebar_children[0]),
+            Some(Tile::Container(Container::Tabs(_)))
+        )
+}
+
 pub fn tab_title_visible(tiles: &Tiles<Pane>, tile_id: TileId) -> bool {
-    !tile_is_sidebar(tiles, tile_id)
+    // Hide sidebars
+    if tile_is_sidebar(tiles, tile_id) {
+        return false;
+    }
+    // Hide passthrough Tabs wrappers (Tabs containing only one Tabs child)
+    if is_passthrough_tabs(tiles, tile_id) {
+        return false;
+    }
+    true
 }
 
 pub fn tab_add_visible(tiles: &Tiles<Pane>, tabs: &egui_tiles::Tabs) -> bool {
     let active_is_sidebar = tabs
         .active
         .is_some_and(|active| tile_is_sidebar(tiles, active));
-    !(active_is_sidebar || tabs_are_sidebar_only(tiles, tabs))
+    if active_is_sidebar || tabs_are_sidebar_only(tiles, tabs) {
+        return false;
+    }
+    // Also hide "+" for passthrough Tabs (one non-sidebar child that is itself a Tabs)
+    let non_sidebar_children: Vec<_> = tabs
+        .children
+        .iter()
+        .copied()
+        .filter(|&child_id| !tile_is_sidebar(tiles, child_id))
+        .collect();
+    if non_sidebar_children.len() == 1 {
+        if matches!(
+            tiles.get(non_sidebar_children[0]),
+            Some(Tile::Container(Container::Tabs(_)))
+        ) {
+            return false;
+        }
+    }
+    true
 }
