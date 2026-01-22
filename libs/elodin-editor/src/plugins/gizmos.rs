@@ -413,20 +413,23 @@ fn render_vector_arrow(
         // Calculate and cache label offset from arrow root for the UI system.
         // Store as offset from arrow start so UI can use arrow's GlobalTransform.
         if arrow.show_name && result.name.is_some() {
+            // Use proportional separation (10% of arrow length) with min/max bounds
+            // to handle both very small and very large arrows gracefully
+            let separation = (length * 0.1).clamp(0.005, 0.08);
             let total_offset = match result.label_position {
                 LabelPosition::Proportionate(label_position) => {
                     // Place the label near the arrow tip by biasing toward the end of the vector
                     let label_t = label_position.max(0.8);
                     let label_offset = direction_world * label_t;
                     // Keep a small separation to avoid overlapping the head
-                    label_offset + dir_norm * 0.08
+                    label_offset + dir_norm * separation
                 }
                 LabelPosition::Absolute(length) => {
-                    direction_world.normalize() * length + dir_norm * 0.08
+                    direction_world.normalize() * length + dir_norm * separation
                 }
                 LabelPosition::None => {
-                    let length = 0.1; // meters
-                    direction_world.normalize() * length + dir_norm * 0.08
+                    // Position at the arrow tip with proportional separation
+                    direction_world + dir_norm * separation
                 }
             };
             // Store just the offset from the arrow root
@@ -482,13 +485,13 @@ fn spawn_arrow_visual(
     render_layers: RenderLayers,
 ) -> ArrowVisual {
     let shaft_material = materials.add(StandardMaterial {
-        base_color: color.with_alpha(0.65),
+        base_color: color,
         unlit: true,
         alpha_mode: AlphaMode::Blend,
         ..Default::default()
     });
     let head_material = materials.add(StandardMaterial {
-        base_color: lighten_color(color, 1.2).with_alpha(0.65),
+        base_color: lighten_color(color, 1.2),
         unlit: true,
         alpha_mode: AlphaMode::Blend,
         ..Default::default()
