@@ -268,8 +268,7 @@ class CrazyflieConfig:
         return np.cross(self.motor_positions, self.motor_thrust_directions)
 
     @classmethod
-    @property
-    def GLOBAL(cls) -> "CrazyflieConfig":
+    def get_global(cls) -> "CrazyflieConfig":
         """Get the global configuration instance."""
         if cls._GLOBAL is None:
             raise ValueError("No global config set. Call config.set_as_global() first.")

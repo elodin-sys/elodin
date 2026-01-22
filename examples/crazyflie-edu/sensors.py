@@ -191,7 +191,7 @@ def advance_sensor_tick(tick: SensorTick) -> SensorTick:
 @el.map
 def update_gyro_bias(tick: SensorTick, bias: GyroBias, noise_enabled: NoiseEnabled) -> GyroBias:
     """Update gyro bias with random walk drift."""
-    config = Config.GLOBAL
+    config = Config.get_global()
     dt = config.fast_loop_time_step
 
     # Only drift if noise is enabled
@@ -218,7 +218,7 @@ def gyro_sensor(
     body_angular_vel = pos.angular().inverse() @ vel.angular()
 
     # Add noise if enabled
-    if Config.GLOBAL.sensor_noise:
+    if Config.get_global().sensor_noise:
         body_angular_vel = gyro_noise.sample(body_angular_vel, bias, tick, noise_enabled)
 
     return body_angular_vel
@@ -255,7 +255,7 @@ def accel_sensor(
     body_accel_g = body_specific_force / g
 
     # Add noise if enabled
-    if Config.GLOBAL.sensor_noise:
+    if Config.get_global().sensor_noise:
         body_accel_g = accel_noise.sample(body_accel_g, bias, tick, noise_enabled)
 
     return body_accel_g

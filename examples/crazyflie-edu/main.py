@@ -89,7 +89,7 @@ def cleanup_stale_sitl():
         pass
 
 
-# Only cleanup when running directly (not with elodin run)
+# Only cleanup when running directly
 if "run" in sys.argv:
     cleanup_stale_sitl()
 
@@ -465,7 +465,7 @@ class Control(el.Archetype):
 @el.map
 def update_sim_time(time: SimTime) -> SimTime:
     """Advance simulation time."""
-    config = CrazyflieConfig.GLOBAL
+    config = CrazyflieConfig.get_global()
     return time + config.dt
 
 
@@ -476,7 +476,7 @@ def update_sim_time(time: SimTime) -> SimTime:
 
 def create_world() -> tuple[el.World, el.EntityId]:
     """Create the simulation world with a Crazyflie drone."""
-    config = CrazyflieConfig.GLOBAL
+    config = CrazyflieConfig.get_global()
     w = el.World()
 
     # Spawn the drone entity
@@ -659,7 +659,7 @@ def sitl_post_step(tick: int, ctx: el.StepContext):
     """
     global _keyboard_controller, _sitl_bridge
 
-    config = CrazyflieConfig.GLOBAL
+    config = CrazyflieConfig.get_global()
     sim_time = tick * config.dt
 
     # Initialize on first tick
@@ -688,7 +688,7 @@ def sitl_post_step(tick: int, ctx: el.StepContext):
                 def get_state(self):
                     from keyboard_controller import ControllerState
 
-                    return ControllerState(is_armed=True, button_blue=True)
+                    return ControllerState(is_armed=False, button_blue=False)
 
             _keyboard_controller = DummyController()
 
@@ -778,7 +778,7 @@ def hitl_post_step(tick: int, ctx: el.StepContext):
     """
     global _keyboard_controller, _hitl_bridge
 
-    config = CrazyflieConfig.GLOBAL
+    config = CrazyflieConfig.get_global()
     sim_time = tick * config.dt
 
     # Initialize on first tick

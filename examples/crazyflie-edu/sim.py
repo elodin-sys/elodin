@@ -141,7 +141,7 @@ def motor_dynamics(
     Note: Safety/arming logic is handled in user_code.c, not here.
     The simulation applies whatever PWM values are provided.
     """
-    config = Config.GLOBAL
+    config = Config.get_global()
     dt = config.fast_loop_time_step
 
     # PWM threshold - below this, motors are considered OFF
@@ -187,7 +187,7 @@ def body_thrust(thrust: Thrust, torque: Torque) -> BodyThrust:
     2. Yaw torque (reaction torque from spinning motors)
     3. Roll/pitch torque (differential thrust)
     """
-    config = Config.GLOBAL
+    config = Config.get_global()
 
     thrust_dir = config.motor_thrust_directions
     torque_axes = config.motor_torque_axes
@@ -215,7 +215,7 @@ def drag(v: el.WorldVel) -> BodyDrag:
 
     Uses a linear drag model: F_drag = -k * v
     """
-    config = Config.GLOBAL
+    config = Config.get_global()
     return -config.drag_coefficient * v.linear()
 
 
@@ -325,7 +325,7 @@ def create_physics_system() -> el.System:
 
     Combines 6-DOF integration with ground constraints.
     """
-    config = Config.GLOBAL
+    config = Config.get_global()
 
     effectors = create_effector_system()
 
@@ -358,7 +358,7 @@ def pwm_from_speed(desired_speed_rad_s: float) -> int:
     Returns:
         PWM command (0-65535)
     """
-    config = Config.GLOBAL
+    config = Config.get_global()
 
     # Convert rad/s to RPM
     desired_rpm = desired_speed_rad_s * 60.0 / (2.0 * np.pi)
@@ -384,7 +384,7 @@ def speed_from_force(desired_force_n: float) -> float:
     Returns:
         Motor angular velocity in rad/s
     """
-    config = Config.GLOBAL
+    config = Config.get_global()
 
     if desired_force_n <= 0:
         return 0.0
@@ -408,5 +408,5 @@ def force_from_speed(speed_rad_s: float) -> float:
     Returns:
         Thrust force in Newtons
     """
-    config = Config.GLOBAL
+    config = Config.get_global()
     return config.thrust_constant * speed_rad_s**2
