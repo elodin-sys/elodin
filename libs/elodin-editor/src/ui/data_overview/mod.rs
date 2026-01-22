@@ -294,16 +294,22 @@ impl WidgetSystem for DataOverviewWidget<'_, '_> {
                                     }
                                 }
                             }
+
+                            // Transition to Phase 2 when ALL Phase 1 queries complete
+                            if time_ranges.pending_queries == 0
+                                && time_ranges.completed_queries >= time_ranges.total_queries
+                            {
+                                time_ranges.state =
+                                    TimeRangeQueryState::QueryingSparklines(Instant::now());
+                                time_ranges.current_batch = 0;
+                                time_ranges.completed_queries = 0;
+                            }
                             true
                         },
                     );
                 }
-            } else {
-                // All Phase 1 batches complete, transition to Phase 2
-                params.time_ranges.state = TimeRangeQueryState::QueryingSparklines(Instant::now());
-                params.time_ranges.current_batch = 0;
-                params.time_ranges.completed_queries = 0;
             }
+            // Note: Phase 2 transition now happens inside the query handler when all queries complete
         }
 
         // Phase 2: Query sparkline data in batches
@@ -317,7 +323,7 @@ impl WidgetSystem for DataOverviewWidget<'_, '_> {
                 .min(params.time_ranges.tables_to_query.len());
 
             if batch_start >= params.time_ranges.tables_to_query.len() {
-                // All Phase 2 batches complete
+                // All Phase 2 batches started and completed, transition to Ready
                 params.time_ranges.state = TimeRangeQueryState::Ready;
             } else {
                 // Start next batch
@@ -373,9 +379,6 @@ impl WidgetSystem for DataOverviewWidget<'_, '_> {
                                     }
                                 }
                             }
-
-                            // Note: State transition to Ready happens in the main loop
-                            // when all batches are complete (batch_start >= tables_to_query.len())
                             true
                         },
                     );
@@ -475,20 +478,18 @@ impl WidgetSystem for DataOverviewWidget<'_, '_> {
                 format!("Components: {} (loading...)", summaries.len())
             }
             TimeRangeQueryState::QueryingTimeRanges(_) => {
-                let done = params.time_ranges.total_queries - params.time_ranges.pending_queries;
                 format!(
                     "Components: {} (scanning {}/{}...)",
                     summaries.len(),
-                    done,
+                    params.time_ranges.completed_queries,
                     params.time_ranges.total_queries
                 )
             }
             TimeRangeQueryState::QueryingSparklines(_) => {
-                let done = params.time_ranges.total_queries - params.time_ranges.pending_queries;
                 format!(
                     "Components: {} (loading data {}/{}...)",
                     summaries.len(),
-                    done,
+                    params.time_ranges.completed_queries,
                     params.time_ranges.total_queries
                 )
             }
@@ -830,10 +831,13 @@ fn process_time_range_and_count(
 /// Returns Vec of series, where each series is a Vec of values (one per row)
 fn extract_values_from_array(array: &dyn Array) -> Option<Vec<Vec<f64>>> {
     use arrow::array::{
-        FixedSizeListArray, Float32Array, Int32Array, Int64Array, UInt32Array, UInt64Array,
+        BooleanArray, FixedSizeListArray, Float32Array, Int8Array, Int16Array, Int32Array,
+        Int64Array, ListArray, UInt8Array, UInt16Array, UInt32Array, UInt64Array,
     };
 
     // Handle FixedSizeListArray (vector/matrix types) - return each element as a separate series
+    // NOTE: We use f64::NAN for null rows to preserve array indices, ensuring 1:1
+    // correspondence with the timestamp array.
     if let Some(list_array) = array.as_any().downcast_ref::<FixedSizeListArray>() {
         let values_array = list_array.values();
         let list_size = list_array.value_length() as usize;
@@ -851,6 +855,10 @@ fn extract_values_from_array(array: &dyn Array) -> Option<Vec<Vec<f64>>> {
 
         for row in 0..num_rows {
             if list_array.is_null(row) {
+                // Push NAN for each element to preserve index alignment with timestamps
+                for s in series.iter_mut() {
+                    s.push(f64::NAN);
+                }
                 continue;
             }
             let start = row * list_size;
@@ -864,86 +872,90 @@ fn extract_values_from_array(array: &dyn Array) -> Option<Vec<Vec<f64>>> {
         return Some(series);
     }
 
+    // Handle ListArray (variable-size lists) - use first element of each row as a single series
+    // For variable-size lists, we can't split into multiple series since sizes vary per row.
+    // Instead, extract the first element of each list to create a single series.
+    if let Some(list_array) = array.as_any().downcast_ref::<ListArray>() {
+        let values_array = list_array.values();
+        let num_rows = list_array.len();
+
+        // Extract inner values as a flat array
+        let inner_series = extract_values_from_array(values_array.as_ref())?;
+        let inner_values = inner_series.into_iter().next()?;
+
+        // For each row, take the first element (or NAN if empty/null)
+        let mut series = Vec::with_capacity(num_rows);
+        for row in 0..num_rows {
+            if list_array.is_null(row) {
+                series.push(f64::NAN);
+                continue;
+            }
+            let start = list_array.value_offsets()[row] as usize;
+            let end = list_array.value_offsets()[row + 1] as usize;
+            if start < end && start < inner_values.len() {
+                series.push(inner_values[start]);
+            } else {
+                series.push(f64::NAN);
+            }
+        }
+
+        return Some(vec![series]);
+    }
+
     // Handle scalar numeric types - return as single series
     // NOTE: We use f64::NAN for null values to preserve array indices.
     // This ensures 1:1 correspondence with the timestamp array, allowing
     // sparklines to show gaps where data is missing.
-    let values: Option<Vec<f64>> = if let Some(vals) = array.as_any().downcast_ref::<Float64Array>()
-    {
-        Some(
-            (0..vals.len())
-                .map(|i| {
-                    if vals.is_null(i) {
-                        f64::NAN
-                    } else {
-                        vals.value(i)
-                    }
-                })
-                .collect(),
-        )
-    } else if let Some(vals) = array.as_any().downcast_ref::<Float32Array>() {
-        Some(
-            (0..vals.len())
-                .map(|i| {
-                    if vals.is_null(i) {
-                        f64::NAN
-                    } else {
-                        vals.value(i) as f64
-                    }
-                })
-                .collect(),
-        )
-    } else if let Some(vals) = array.as_any().downcast_ref::<Int64Array>() {
-        Some(
-            (0..vals.len())
-                .map(|i| {
-                    if vals.is_null(i) {
-                        f64::NAN
-                    } else {
-                        vals.value(i) as f64
-                    }
-                })
-                .collect(),
-        )
-    } else if let Some(vals) = array.as_any().downcast_ref::<Int32Array>() {
-        Some(
-            (0..vals.len())
-                .map(|i| {
-                    if vals.is_null(i) {
-                        f64::NAN
-                    } else {
-                        vals.value(i) as f64
-                    }
-                })
-                .collect(),
-        )
-    } else if let Some(vals) = array.as_any().downcast_ref::<UInt64Array>() {
-        Some(
-            (0..vals.len())
-                .map(|i| {
-                    if vals.is_null(i) {
-                        f64::NAN
-                    } else {
-                        vals.value(i) as f64
-                    }
-                })
-                .collect(),
-        )
-    } else {
-        array.as_any().downcast_ref::<UInt32Array>().map(|vals| {
-            (0..vals.len())
-                .map(|i| {
-                    if vals.is_null(i) {
-                        f64::NAN
-                    } else {
-                        vals.value(i) as f64
-                    }
-                })
-                .collect()
-        })
-    };
 
-    values.map(|v| vec![v])
+    // Helper macro to extract values from a typed array
+    macro_rules! extract_numeric {
+        ($array:expr, $type:ty) => {
+            if let Some(vals) = $array.as_any().downcast_ref::<$type>() {
+                return Some(vec![
+                    (0..vals.len())
+                        .map(|i| {
+                            if vals.is_null(i) {
+                                f64::NAN
+                            } else {
+                                vals.value(i) as f64
+                            }
+                        })
+                        .collect(),
+                ]);
+            }
+        };
+    }
+
+    // Try all numeric types
+    extract_numeric!(array, Float64Array);
+    extract_numeric!(array, Float32Array);
+    extract_numeric!(array, Int64Array);
+    extract_numeric!(array, Int32Array);
+    extract_numeric!(array, Int16Array);
+    extract_numeric!(array, Int8Array);
+    extract_numeric!(array, UInt64Array);
+    extract_numeric!(array, UInt32Array);
+    extract_numeric!(array, UInt16Array);
+    extract_numeric!(array, UInt8Array);
+
+    // Handle boolean as 0.0/1.0
+    if let Some(vals) = array.as_any().downcast_ref::<BooleanArray>() {
+        return Some(vec![
+            (0..vals.len())
+                .map(|i| {
+                    if vals.is_null(i) {
+                        f64::NAN
+                    } else if vals.value(i) {
+                        1.0
+                    } else {
+                        0.0
+                    }
+                })
+                .collect(),
+        ]);
+    }
+
+    None
 }
 
 /// Process sparkline data result from SQL query
@@ -987,7 +999,7 @@ fn process_sparkline_result(
 
     // Extract values from the data column (may be multiple series for vector types)
     let Some(value_series) = extract_values_from_array(value_array.as_ref()) else {
-        return; // Failed to extract values - skip silently
+        return;
     };
 
     if value_series.is_empty() || value_series[0].is_empty() {
