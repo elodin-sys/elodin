@@ -249,7 +249,11 @@ fn analyze_database(db_path: &Path, prefix: Option<String>) -> Result<DatabaseIn
                     // No timestamps in this component
                 }
                 Err(e) => {
-                    eprintln!("Warning: Failed to read timestamps from {}: {}", path.display(), e);
+                    eprintln!(
+                        "Warning: Failed to read timestamps from {}: {}",
+                        path.display(),
+                        e
+                    );
                 }
             }
         }
@@ -419,10 +423,11 @@ fn get_example_component_name(db_path: &Path) -> Result<Option<String>, Error> {
     Ok(None)
 }
 
-/// Apply a prefix to a component name using dash separator
+/// Apply a prefix to a component name using underscore separator
+/// This ensures consistency with snake_case table naming conventions
 fn apply_prefix(name: &str, prefix: Option<&str>) -> String {
     match prefix {
-        Some(p) if !p.is_empty() => format!("{}-{}", p, name),
+        Some(p) if !p.is_empty() => format!("{}_{}", p, name),
         _ => name.to_string(),
     }
 }
@@ -681,11 +686,11 @@ mod tests {
     fn test_apply_prefix() {
         assert_eq!(
             apply_prefix("rocket.velocity", Some("sim")),
-            "sim-rocket.velocity"
+            "sim_rocket.velocity"
         );
         assert_eq!(
             apply_prefix("rocket.velocity", Some("truth")),
-            "truth-rocket.velocity"
+            "truth_rocket.velocity"
         );
         assert_eq!(apply_prefix("rocket.velocity", None), "rocket.velocity");
         assert_eq!(apply_prefix("rocket.velocity", Some("")), "rocket.velocity");
@@ -703,25 +708,25 @@ mod tests {
         assert_ne!(id1, id2);
 
         // ID should be deterministic
-        assert_eq!(id2, ComponentId::new("sim-rocket.velocity"));
+        assert_eq!(id2, ComponentId::new("sim_rocket.velocity"));
     }
 
     #[test]
-    fn test_dash_preserves_hierarchy() {
+    fn test_underscore_preserves_hierarchy() {
         // Original: "drone.rate_pid_state" has hierarchy drone -> rate_pid_state
-        // With prefix: "sim-drone.rate_pid_state" has hierarchy sim-drone -> rate_pid_state
-        // The dash separates the prefix from the original hierarchy
+        // With prefix: "sim_drone.rate_pid_state" has hierarchy sim_drone -> rate_pid_state
+        // The underscore separates the prefix from the original entity name
 
         let original = "drone.rate_pid_state";
         let prefixed = apply_prefix(original, Some("sim"));
 
-        assert_eq!(prefixed, "sim-drone.rate_pid_state");
+        assert_eq!(prefixed, "sim_drone.rate_pid_state");
 
         // The original hierarchy (entity.component) is preserved
         // Only the entity name gets the prefix
         let parts: Vec<&str> = prefixed.split('.').collect();
         assert_eq!(parts.len(), 2);
-        assert_eq!(parts[0], "sim-drone"); // entity with prefix
+        assert_eq!(parts[0], "sim_drone"); // entity with prefix
         assert_eq!(parts[1], "rate_pid_state"); // component unchanged
     }
 
@@ -796,8 +801,8 @@ mod tests {
         assert!(output_path.join("db_state").exists());
 
         // Verify components were renamed correctly
-        let sim_velocity_id = ComponentId::new("sim-rocket.velocity");
-        let truth_position_id = ComponentId::new("truth-rocket.position");
+        let sim_velocity_id = ComponentId::new("sim_rocket.velocity");
+        let truth_position_id = ComponentId::new("truth_rocket.position");
 
         assert!(output_path.join(sim_velocity_id.to_string()).exists());
         assert!(output_path.join(truth_position_id.to_string()).exists());
@@ -809,7 +814,7 @@ mod tests {
                 .join("metadata"),
         )
         .unwrap();
-        assert_eq!(sim_metadata.name, "sim-rocket.velocity");
+        assert_eq!(sim_metadata.name, "sim_rocket.velocity");
         assert_eq!(sim_metadata.component_id, sim_velocity_id);
 
         let truth_metadata = ComponentMetadata::read(
@@ -818,7 +823,7 @@ mod tests {
                 .join("metadata"),
         )
         .unwrap();
-        assert_eq!(truth_metadata.name, "truth-rocket.position");
+        assert_eq!(truth_metadata.name, "truth_rocket.position");
         assert_eq!(truth_metadata.component_id, truth_position_id);
     }
 
