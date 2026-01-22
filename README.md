@@ -67,6 +67,10 @@ python3 examples/rocket/main.py run
 
 Open the Elodin editor in a new nix develop shell and connect to the local server
 
+```sh
+elodin editor
+```
+
 ---
 
 ## Python SDK Development Setup (Nix-based continued)
