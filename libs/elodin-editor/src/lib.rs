@@ -753,32 +753,26 @@ pub fn sync_pos(
     mut query: Query<(&mut Transform, Option<&mut GeoPosition>, Option<&mut GeoRotation>, &mut GridCell<i128>, &WorldPos)>,
     floating_origin: Res<FloatingOriginSettings>,
 ) {
-    // return;
     query
         .iter_mut()
         .for_each(|(mut transform, mut geo_pos, mut geo_rot, mut grid_cell, world_pos)| {
-            // Converts from Z-up to Y-up
             if let Some(ref mut geo_pos) = geo_pos {
                 geo_pos.1 = world_pos.pos();
             }
             if let Some(ref mut geo_rot) = geo_rot {
                 geo_rot.1 = world_pos.att();
             }
-            if geo_pos.is_some() && geo_rot.is_some() {
-                // We don't need to continue if both are operant.
-                return;
-            }
+            if geo_pos.is_none() || geo_rot.is_none() {
+                // We only update the transform here if both geo_pos and geo_rot
+                // aren't present. Otherwise it's fully determined by them.
 
-            let pos = world_pos.bevy_pos();
-            let att = world_pos.bevy_att();
-            let (new_grid_cell, translation) = floating_origin.translation_to_grid(pos);
-            *grid_cell = new_grid_cell;
-            // Preserve the existing scale when updating position and rotation
-            let existing_scale = transform.scale;
-            *transform = bevy::prelude::Transform {
-                translation,
-                rotation: att.as_quat(),
-                scale: existing_scale,
+                let pos = world_pos.bevy_pos();
+                let att = world_pos.bevy_att();
+                let (new_grid_cell, translation) = floating_origin.translation_to_grid(pos);
+                *grid_cell = new_grid_cell;
+                // Preserve the existing scale when updating position and rotation
+                transform.rotation = att.as_quat();
+                transform.translation = translation;
             }
         });
 }
@@ -895,22 +889,16 @@ fn sync_object_3d(
         let parent = path.path.first().unwrap();
 
         let glb = entity_map
-            .get(&ComponentId::new(&format!(
-                "{}.asset_handle_glb",
-                parent.name
-            )))
+            .get(&ComponentId::from_pair(&parent.name,
+                "asset_handle_glb"))
             .and_then(|e| glbs.get(*e).ok());
         let mesh = entity_map
-            .get(&ComponentId::new(&format!(
-                "{}.asset_handle_mesh",
-                parent.name
-            )))
+            .get(&ComponentId::from_pair(&parent.name,
+                "asset_handle_mesh"))
             .and_then(|e| meshes.get(*e).ok());
         let material = entity_map
-            .get(&ComponentId::new(&format!(
-                "{}.asset_handle_material",
-                parent.name
-            )))
+            .get(&ComponentId::from_pair(&parent.name,
+                "asset_handle_material"))
             .and_then(|e| materials.get(*e).ok());
 
         let mesh_source = match (glb, mesh, material) {

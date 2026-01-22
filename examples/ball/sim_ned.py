@@ -44,9 +44,6 @@ def world(seed: int = 0) -> el.World:
             color yalk 100
         }
 
-        vector_arrow frame="NED" "(0,0,2)" origin="ball.world_pos" scale=1.0 show_name=#true {
-            color red 100
-        }
         object_3d frame="NED" "(0,0,0,1, 0,0,0)" {
             plane width=2000 depth=2000 {
                 color 32 128 32 125
