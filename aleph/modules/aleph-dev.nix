@@ -51,7 +51,7 @@ in {
       nvidia-jetpack.l4t-multimedia
       nvidia-jetpack.l4t-camera
     ];
-    NVCC_PREPEND_FLAGS = "--compiler-bindir ${pkgs.gcc11}/bin/gcc";
+    NVCC_PREPEND_FLAGS = "--compiler-bindir ${pkgs.gcc13}/bin/gcc";
     CONTAINER_HOST = "unix:///run/podman/podman.sock";
     GST_PLUGIN_PATH = lib.makeSearchPathOutput "lib" "lib/gstreamer-1.0" [
       gst_all_1.gstreamer
