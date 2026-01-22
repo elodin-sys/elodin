@@ -42,3 +42,4 @@ eeprom.bin
 examples/rocket-barrowman/motor_cache/
 examples/rocket-barrowman/*.log
 **/rocket.glb
+dbs

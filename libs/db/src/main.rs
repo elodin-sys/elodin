@@ -28,6 +28,8 @@ enum Commands {
         about = "Fix monotonic timestamps in a database"
     )]
     FixTimestamps(FixTimestampsArgs),
+    #[command(about = "Merge two databases into one with optional prefixes")]
+    Merge(MergeArgs),
 }
 
 #[derive(clap::Args, Clone, Debug)]
@@ -82,6 +84,24 @@ struct FixTimestampsArgs {
 enum ReferenceClockArg {
     WallClock,
     Monotonic,
+}
+
+#[derive(clap::Args, Clone, Debug)]
+pub struct MergeArgs {
+    #[clap(help = "Path to the first source database")]
+    pub db1: PathBuf,
+    #[clap(help = "Path to the second source database")]
+    pub db2: PathBuf,
+    #[clap(long, short, help = "Path for the merged output database")]
+    pub output: PathBuf,
+    #[clap(long, help = "Prefix to apply to first database components")]
+    pub prefix1: Option<String>,
+    #[clap(long, help = "Prefix to apply to second database components")]
+    pub prefix2: Option<String>,
+    #[clap(long, help = "Show what would be merged without creating output")]
+    pub dry_run: bool,
+    #[clap(long, short, help = "Skip confirmation prompt")]
+    pub yes: bool,
 }
 
 #[derive(ValueEnum, Clone, Copy, Debug)]
@@ -221,5 +241,15 @@ async fn main() -> miette::Result<()> {
             };
             elodin_db::fix_timestamps::run(path, dry_run, yes, reference, prune).into_diagnostic()
         }
+        Commands::Merge(MergeArgs {
+            db1,
+            db2,
+            output,
+            prefix1,
+            prefix2,
+            dry_run,
+            yes,
+        }) => elodin_db::merge::run(db1, db2, output, prefix1, prefix2, dry_run, yes)
+            .into_diagnostic(),
     }
 }

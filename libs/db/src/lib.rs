@@ -57,6 +57,7 @@ mod arrow;
 pub mod axum;
 mod error;
 pub mod fix_timestamps;
+pub mod merge;
 mod msg_log;
 pub(crate) mod time_series;
 mod vtable_stream;
