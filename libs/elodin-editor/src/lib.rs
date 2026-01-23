@@ -952,6 +952,8 @@ fn clear_state_new_connection(
     component_time_ranges.tables_to_query.clear();
     component_time_ranges.pending_queries = 0;
     component_time_ranges.total_queries = 0;
+    component_time_ranges.completed_queries = 0;
+    component_time_ranges.current_batch = 0;
     component_time_ranges.state = ui::data_overview::TimeRangeQueryState::NotStarted;
     entity_map.0.retain(|_, entity| {
         if let Ok(mut entity_commands) = commands.get_entity(*entity) {
