@@ -354,7 +354,14 @@ pub fn run(
     fs::rename(&tmp_output, &output)?;
     sync_dir(&parent_dir)?;
 
+    // Report final statistics
+    let total_components = stats1.components_copied + stats2.components_copied;
+    let total_msg_logs = stats1.msg_logs_copied + stats2.msg_logs_copied;
     println!("\nSuccessfully merged databases to {}", output.display());
+    println!(
+        "  {} components, {} message logs copied",
+        total_components, total_msg_logs
+    );
     Ok(())
 }
 
