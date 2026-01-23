@@ -35,7 +35,7 @@
     "sha256": "sha256-5OIjSK1grV/nz3hHkeZKRb7dXIQAokNcChGCtzlfBKs="
   },
   "nvidia-oot": {
-    "url": "https://nv-tegra.nvidia.com/linux-nv-oot.git",
+    "url": "https://gitlab.com/nvidia/nv-tegra/linux-nv-oot.git",
     "rev": "efa698bed82f27e403537b7ecf82743e696d17ef",
     "sha256": "1x5czgiclfkgi999rld7dg57qffw1qjhawvyj1hjkmqrdr2r4nb3"
   }

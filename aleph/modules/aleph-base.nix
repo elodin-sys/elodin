@@ -25,6 +25,8 @@
   ];
   # Always create podman group, even if podman isn't enabled.
   users.groups.podman = {};
+  # Tegra udev rules expect certain groups to exist
+  users.groups.debug = {};
   environment.etc."elodin-version" = let
     cargoToml = builtins.fromTOML (builtins.readFile ../../Cargo.toml);
     version = cargoToml.workspace.package.version;

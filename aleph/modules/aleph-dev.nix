@@ -37,14 +37,14 @@ in {
   nixpkgs.config = {
     allowUnfree = true;
     cudaSupport = true;
-    cudaCapabilities = ["7.2" "8.7"];
+    # cudaCapabilities = ["7.2" "8.7"];
   };
 
   environment.variables = with pkgs; {
     LD_LIBRARY_PATH = lib.makeLibraryPath [
       stdenv.cc.cc.lib
-      cudaPackages.cudatoolkit
-      cudaPackages.cudnn
+      pkgs.nvidia-jetpack.cudaPackages.cudatoolkit
+      pkgs.nvidia-jetpack.cudaPackages.cudnn
       gst_all_1.gstreamer
       nvidia-jetpack.l4t-cuda
       nvidia-jetpack.l4t-gstreamer
@@ -100,7 +100,7 @@ in {
     aravis
     nvidia-jetpack.l4t-gstreamer
     nvidia-jetpack.l4t-multimedia
-    cudaPackages.cuda_nvcc
+    nvidia-jetpack.cudaPackages.cuda_nvcc
     nvidia-jetpack.samples.cuda-test
     nvidia-jetpack.samples.cudnn-test
     (python312.withPackages pythonPackages)

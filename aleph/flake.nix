@@ -7,7 +7,7 @@
     fallback = true;
   };
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.05";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.11";
     nixpkgs-unstable.url = "github:nixos/nixpkgs/nixos-unstable";
     jetpack.url = "github:anduril/jetpack-nixos/6e7aa572e435136a26bcf475d70aafdeef117e2d";
     rust-overlay.url = "github:oxalica/rust-overlay";
@@ -28,7 +28,6 @@
     rustToolchain = p: p.rust-bin.fromRustupToolchainFile ../rust-toolchain.toml;
     gitJSONOverlay = builtins.fromJSON (builtins.readFile ./gitrepos.json);
     gitReposOverlay = final: prev: {
-      cudaPackages = prev.cudaPackages_12; # CUDA 12 for JP6
       nvidia-jetpack = prev.nvidia-jetpack6.overrideScope (jetpackFinal: jetpackPrev: {
         gitRepos =
           jetpackPrev.gitRepos
@@ -77,6 +76,7 @@
       nixpkgs.overlays = [
         jetpack.overlays.default
         overlay
+        (final: _: { inherit (final.nvidia-jetpack) cudaPackages; })
       ];
       system.stateVersion = "25.05";
       i18n.supportedLocales = [(config.i18n.defaultLocale + "/UTF-8")];
