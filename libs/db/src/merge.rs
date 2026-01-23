@@ -66,6 +66,20 @@ pub fn run(
     // We always shift forward (never backward past 0) to avoid negative timestamps
     let (db1_offset, db2_offset) = match (align1, align2) {
         (Some(a1), Some(a2)) => {
+            // Validate alignment values are finite numbers
+            if !a1.is_finite() {
+                return Err(Error::Io(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    format!("--align1 must be a finite number, got: {}", a1),
+                )));
+            }
+            if !a2.is_finite() {
+                return Err(Error::Io(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    format!("--align2 must be a finite number, got: {}", a2),
+                )));
+            }
+
             // Convert from seconds to microseconds
             let a1_micros = (a1 * 1_000_000.0) as i64;
             let a2_micros = (a2 * 1_000_000.0) as i64;
@@ -1722,5 +1736,83 @@ mod tests {
         assert_eq!(truth_timestamps[0], 35_000_000); // 5s + 30s
         assert_eq!(truth_timestamps[1], 45_000_000); // 15s + 30s (boost, now aligned)
         assert_eq!(truth_timestamps[2], 55_000_000); // 25s + 30s
+    }
+
+    #[test]
+    fn test_alignment_rejects_nan_and_infinity() {
+        let temp = TempDir::new().unwrap();
+        let db1_path = temp.path().join("db1");
+        let db2_path = temp.path().join("db2");
+
+        create_test_db(&db1_path, &[]).unwrap();
+        create_test_db(&db2_path, &[]).unwrap();
+
+        // Test NaN in align1
+        let output_path = temp.path().join("merged_nan1");
+        let result = run(
+            db1_path.clone(),
+            db2_path.clone(),
+            output_path,
+            None,
+            None,
+            false,
+            true,
+            Some(f64::NAN),
+            Some(100.0),
+        );
+        assert!(result.is_err());
+        let err_msg = format!("{:?}", result.unwrap_err());
+        assert!(err_msg.contains("finite"), "Expected 'finite' in error: {}", err_msg);
+
+        // Test NaN in align2
+        let output_path = temp.path().join("merged_nan2");
+        let result = run(
+            db1_path.clone(),
+            db2_path.clone(),
+            output_path,
+            None,
+            None,
+            false,
+            true,
+            Some(100.0),
+            Some(f64::NAN),
+        );
+        assert!(result.is_err());
+        let err_msg = format!("{:?}", result.unwrap_err());
+        assert!(err_msg.contains("finite"), "Expected 'finite' in error: {}", err_msg);
+
+        // Test positive infinity in align1
+        let output_path = temp.path().join("merged_inf1");
+        let result = run(
+            db1_path.clone(),
+            db2_path.clone(),
+            output_path,
+            None,
+            None,
+            false,
+            true,
+            Some(f64::INFINITY),
+            Some(100.0),
+        );
+        assert!(result.is_err());
+        let err_msg = format!("{:?}", result.unwrap_err());
+        assert!(err_msg.contains("finite"), "Expected 'finite' in error: {}", err_msg);
+
+        // Test negative infinity in align2
+        let output_path = temp.path().join("merged_neginf2");
+        let result = run(
+            db1_path.clone(),
+            db2_path.clone(),
+            output_path,
+            None,
+            None,
+            false,
+            true,
+            Some(100.0),
+            Some(f64::NEG_INFINITY),
+        );
+        assert!(result.is_err());
+        let err_msg = format!("{:?}", result.unwrap_err());
+        assert!(err_msg.contains("finite"), "Expected 'finite' in error: {}", err_msg);
     }
 }
