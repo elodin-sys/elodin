@@ -686,43 +686,8 @@ pub fn tabs_are_sidebar_only(tiles: &Tiles<Pane>, tabs: &egui_tiles::Tabs) -> bo
             .all(|child| tile_is_sidebar(tiles, *child))
 }
 
-/// Check if this tile is the sole Tabs child of a passthrough Tabs parent.
-/// In that case, its tab title should be hidden.
-fn is_sole_tabs_child_of_passthrough(tiles: &Tiles<Pane>, tile_id: TileId) -> bool {
-    // Only applies to Tabs containers
-    if !matches!(tiles.get(tile_id), Some(Tile::Container(Container::Tabs(_)))) {
-        return false;
-    }
-
-    // Find if any Tabs container has this tile as its sole non-sidebar child
-    for (_, tile) in tiles.iter() {
-        if let Tile::Container(Container::Tabs(parent_tabs)) = tile {
-            let non_sidebar_children: Vec<_> = parent_tabs
-                .children
-                .iter()
-                .copied()
-                .filter(|&child_id| !tile_is_sidebar(tiles, child_id))
-                .collect();
-
-            // If this parent has exactly one non-sidebar child and it's our tile
-            if non_sidebar_children.len() == 1 && non_sidebar_children[0] == tile_id {
-                return true;
-            }
-        }
-    }
-    false
-}
-
 pub fn tab_title_visible(tiles: &Tiles<Pane>, tile_id: TileId) -> bool {
-    // Hide sidebars
-    if tile_is_sidebar(tiles, tile_id) {
-        return false;
-    }
-    // Hide Tabs that are the sole child of a passthrough Tabs parent
-    if is_sole_tabs_child_of_passthrough(tiles, tile_id) {
-        return false;
-    }
-    true
+    !tile_is_sidebar(tiles, tile_id)
 }
 
 pub fn tab_add_visible(tiles: &Tiles<Pane>, tabs: &egui_tiles::Tabs) -> bool {
@@ -732,20 +697,20 @@ pub fn tab_add_visible(tiles: &Tiles<Pane>, tabs: &egui_tiles::Tabs) -> bool {
     if active_is_sidebar || tabs_are_sidebar_only(tiles, tabs) {
         return false;
     }
-    // Also hide "+" for passthrough Tabs (one non-sidebar child that is itself a Tabs)
+    // Hide "+" for Tabs containing only one Tabs child (wrapper Tabs)
     let non_sidebar_children: Vec<_> = tabs
         .children
         .iter()
         .copied()
         .filter(|&child_id| !tile_is_sidebar(tiles, child_id))
         .collect();
-    if non_sidebar_children.len() == 1 {
-        if matches!(
+    if non_sidebar_children.len() == 1
+        && matches!(
             tiles.get(non_sidebar_children[0]),
             Some(Tile::Container(Container::Tabs(_)))
-        ) {
-            return false;
-        }
+        )
+    {
+        return false;
     }
     true
 }
