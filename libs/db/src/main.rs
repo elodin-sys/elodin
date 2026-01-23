@@ -34,6 +34,11 @@ enum Commands {
     Prune(PruneArgs),
     #[command(about = "Clear all data from a database, preserving schemas")]
     Truncate(TruncateArgs),
+    #[command(
+        name = "time-align",
+        about = "Align component timestamps to a target timestamp"
+    )]
+    TimeAlign(TimeAlignArgs),
 }
 
 #[derive(clap::Args, Clone, Debug)]
@@ -92,6 +97,22 @@ struct TruncateArgs {
     #[clap(help = "Path to the database directory")]
     path: PathBuf,
     #[clap(long, help = "Show what would be truncated without modifying")]
+    dry_run: bool,
+    #[clap(long, short, help = "Skip confirmation prompt")]
+    yes: bool,
+}
+
+#[derive(clap::Args, Clone, Debug)]
+struct TimeAlignArgs {
+    #[clap(help = "Path to the database directory")]
+    path: PathBuf,
+    #[clap(long, help = "Target timestamp (seconds) to align first sample to")]
+    timestamp: f64,
+    #[clap(long, help = "Align all components")]
+    all: bool,
+    #[clap(long, help = "Specific component name to align")]
+    component: Option<String>,
+    #[clap(long, help = "Show what would be changed without modifying")]
     dry_run: bool,
     #[clap(long, short, help = "Skip confirmation prompt")]
     yes: bool,
@@ -284,5 +305,14 @@ async fn main() -> miette::Result<()> {
         Commands::Truncate(TruncateArgs { path, dry_run, yes }) => {
             elodin_db::truncate::run(path, dry_run, yes).into_diagnostic()
         }
+        Commands::TimeAlign(TimeAlignArgs {
+            path,
+            timestamp,
+            all,
+            component,
+            dry_run,
+            yes,
+        }) => elodin_db::time_align::run(path, timestamp, all, component, dry_run, yes)
+            .into_diagnostic(),
     }
 }

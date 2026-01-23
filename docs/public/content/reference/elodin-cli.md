@@ -81,6 +81,7 @@ This document contains the help content for the `elodin-db` command-line program
 * [`elodin-db merge`↴](#elodin-db-merge)
 * [`elodin-db prune`↴](#elodin-db-prune)
 * [`elodin-db truncate`↴](#elodin-db-truncate)
+* [`elodin-db time-align`↴](#elodin-db-time-align)
 
 ## `elodin-db run`
 
@@ -308,4 +309,58 @@ elodin-db truncate ./my-database
 
 # Truncate without confirmation prompt
 elodin-db truncate -y ./my-database
+```
+
+
+## `elodin-db time-align`
+
+Align component timestamps to a target timestamp. This is useful when a database contains components that were recorded at the same real-world moment but have different timestamp offsets.
+
+**Usage:** `elodin-db time-align [OPTIONS] --timestamp <TIMESTAMP> <PATH>`
+
+###### **Arguments**
+
+* `<PATH>` — Path to the database directory
+
+###### **Options**
+
+* `--timestamp <SECONDS>` — Target timestamp (in seconds) to align the first sample to (required)
+
+* `--all` — Align all components in the database
+
+* `--component <NAME>` — Align only a specific component by name
+
+* `--dry-run` — Show what would be changed without modifying the database
+
+* `-y`, `--yes` — Skip the confirmation prompt
+
+###### **Component Selection**
+
+You must specify either `--all` or `--component`:
+- `--all` aligns every component in the database, shifting each so its first timestamp matches the target
+- `--component <NAME>` aligns only the named component
+
+###### **How It Works**
+
+For each selected component, the command:
+1. Finds the first (minimum) timestamp in the component
+2. Calculates the offset needed to shift that timestamp to the target
+3. Applies the offset to all timestamps in the component
+
+Each component is aligned independently, so if two components have different starting timestamps, they will both end up with their first timestamp at the target, but the relative timing within each component is preserved.
+
+###### **Example**
+
+```bash
+# Preview alignment of all components to t=0
+elodin-db time-align --timestamp 0.0 --all --dry-run ./my-database
+
+# Align all components to start at t=0
+elodin-db time-align --timestamp 0.0 --all -y ./my-database
+
+# Align a specific component to t=0
+elodin-db time-align --timestamp 0.0 --component "rocket.velocity" -y ./my-database
+
+# Align all components to start at t=10.5 seconds
+elodin-db time-align --timestamp 10.5 --all -y ./my-database
 ```

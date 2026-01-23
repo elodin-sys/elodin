@@ -63,7 +63,10 @@ pub fn run(db_path: PathBuf, dry_run: bool, auto_confirm: bool) -> Result<(), Er
         return Ok(());
     }
 
-    println!("Truncating will clear all {} data entries while preserving:", total_data_entries);
+    println!(
+        "Truncating will clear all {} data entries while preserving:",
+        total_data_entries
+    );
     println!("  - Component schemas");
     println!("  - Component metadata");
     println!("  - Message log metadata");
