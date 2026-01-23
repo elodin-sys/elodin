@@ -1756,12 +1756,17 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
             }
 
             ui.add_space(-3.0 * x_margin);
+            let is_hovered = response.hovered() || response.has_focus();
             let close_response = ui.add(
                 EImageButton::new(self.icons.close)
                     .scale(1.3, 1.3)
-                    .image_tint(match tab_state {
-                        TabState::Inactive => with_opacity(scheme.text_primary, 0.5),
-                        TabState::Selected => scheme.text_primary,
+                    .image_tint(if is_hovered {
+                        match tab_state {
+                            TabState::Inactive => with_opacity(scheme.text_primary, 0.5),
+                            TabState::Selected => scheme.text_primary,
+                        }
+                    } else {
+                        colors::TRANSPARENT
                     })
                     .bg_color(colors::TRANSPARENT)
                     .hovered_bg_color(colors::TRANSPARENT),
