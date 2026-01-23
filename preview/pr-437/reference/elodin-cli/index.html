@@ -569,6 +569,35 @@
                             
                         </li>
                         
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-437/reference/elodin-cli/#elodin-db-truncate">elodin-db truncate</a>
+                            
+                            <ul>
+                                
+                                <li>
+                                    <a href="https://docs.elodin.systems/preview/pr-437/reference/elodin-cli/#arguments-7">Arguments</a>
+                                </li>
+                                
+                                <li>
+                                    <a href="https://docs.elodin.systems/preview/pr-437/reference/elodin-cli/#options-6">Options</a>
+                                </li>
+                                
+                                <li>
+                                    <a href="https://docs.elodin.systems/preview/pr-437/reference/elodin-cli/#what-is-preserved">What is Preserved</a>
+                                </li>
+                                
+                                <li>
+                                    <a href="https://docs.elodin.systems/preview/pr-437/reference/elodin-cli/#what-is-removed">What is Removed</a>
+                                </li>
+                                
+                                <li>
+                                    <a href="https://docs.elodin.systems/preview/pr-437/reference/elodin-cli/#example-3">Example</a>
+                                </li>
+                                
+                            </ul>
+                            
+                        </li>
+                        
                     </ul>
                     
                 </li>
@@ -633,6 +662,7 @@
 <li><a href="https://docs.elodin.systems/preview/pr-437/reference/elodin-cli/#elodin-db-fix-timestamps"><code>elodin-db fix-timestamps</code>↴</a></li>
 <li><a href="https://docs.elodin.systems/preview/pr-437/reference/elodin-cli/#elodin-db-merge"><code>elodin-db merge</code>↴</a></li>
 <li><a href="https://docs.elodin.systems/preview/pr-437/reference/elodin-cli/#elodin-db-prune"><code>elodin-db prune</code>↴</a></li>
+<li><a href="https://docs.elodin.systems/preview/pr-437/reference/elodin-cli/#elodin-db-truncate"><code>elodin-db truncate</code>↴</a></li>
 </ul>
 <h2 id="elodin-db-run"><code>elodin-db run</code></h2>
 <p>Run the Elodin database server</p>
@@ -808,6 +838,44 @@
 </span><span class="z-source z-shell z-bash">
 </span><span class="z-source z-shell z-bash"><span class="z-comment z-line z-number-sign z-shell"><span class="z-punctuation z-definition z-comment z-begin z-shell">#</span></span><span class="z-comment z-line z-number-sign z-shell"> Prune empty components</span><span class="z-comment z-line z-number-sign z-shell">
 </span></span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">elodin-db</span></span><span class="z-meta z-function-call z-arguments z-shell"> prune<span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> -</span>y</span> ./my-database</span>
+</span></code></pre>
+<h2 id="elodin-db-truncate"><code>elodin-db truncate</code></h2>
+<p>Clear all data from a database while preserving component schemas and metadata. This effectively resets the database to an empty state, ready for fresh data collection.</p>
+<p><strong>Usage:</strong> <code>elodin-db truncate [OPTIONS] &lt;PATH&gt;</code></p>
+<h6 id="arguments-7"><strong>Arguments</strong></h6>
+<ul>
+<li><code>&lt;PATH&gt;</code> — Path to the database directory</li>
+</ul>
+<h6 id="options-6"><strong>Options</strong></h6>
+<ul>
+<li>
+<p><code>--dry-run</code> — Show what would be truncated without modifying the database</p>
+</li>
+<li>
+<p><code>-y</code>, <code>--yes</code> — Skip the confirmation prompt</p>
+</li>
+</ul>
+<h6 id="what-is-preserved"><strong>What is Preserved</strong></h6>
+<p>When truncating a database, the following are preserved:</p>
+<ul>
+<li>Component schemas (data type definitions)</li>
+<li>Component metadata (names, IDs)</li>
+<li>Message log metadata</li>
+</ul>
+<h6 id="what-is-removed"><strong>What is Removed</strong></h6>
+<ul>
+<li>All time-series data entries</li>
+<li>All message log entries</li>
+</ul>
+<h6 id="example-3"><strong>Example</strong></h6>
+<pre data-lang="bash" class="language-bash z-code"><code class="language-bash" data-lang="bash"><span class="z-source z-shell z-bash"><span class="z-comment z-line z-number-sign z-shell"><span class="z-punctuation z-definition z-comment z-begin z-shell">#</span></span><span class="z-comment z-line z-number-sign z-shell"> Preview what would be truncated</span><span class="z-comment z-line z-number-sign z-shell">
+</span></span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">elodin-db</span></span><span class="z-meta z-function-call z-arguments z-shell"> truncate<span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> --</span>dry-run</span> ./my-database</span>
+</span><span class="z-source z-shell z-bash">
+</span><span class="z-source z-shell z-bash"><span class="z-comment z-line z-number-sign z-shell"><span class="z-punctuation z-definition z-comment z-begin z-shell">#</span></span><span class="z-comment z-line z-number-sign z-shell"> Truncate all data (requires confirmation)</span><span class="z-comment z-line z-number-sign z-shell">
+</span></span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">elodin-db</span></span><span class="z-meta z-function-call z-arguments z-shell"> truncate ./my-database</span>
+</span><span class="z-source z-shell z-bash">
+</span><span class="z-source z-shell z-bash"><span class="z-comment z-line z-number-sign z-shell"><span class="z-punctuation z-definition z-comment z-begin z-shell">#</span></span><span class="z-comment z-line z-number-sign z-shell"> Truncate without confirmation prompt</span><span class="z-comment z-line z-number-sign z-shell">
+</span></span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">elodin-db</span></span><span class="z-meta z-function-call z-arguments z-shell"> truncate<span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> -</span>y</span> ./my-database</span>
 </span></code></pre>
 
                   
