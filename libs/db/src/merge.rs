@@ -1762,7 +1762,11 @@ mod tests {
         );
         assert!(result.is_err());
         let err_msg = format!("{:?}", result.unwrap_err());
-        assert!(err_msg.contains("finite"), "Expected 'finite' in error: {}", err_msg);
+        assert!(
+            err_msg.contains("finite"),
+            "Expected 'finite' in error: {}",
+            err_msg
+        );
 
         // Test NaN in align2
         let output_path = temp.path().join("merged_nan2");
@@ -1779,7 +1783,11 @@ mod tests {
         );
         assert!(result.is_err());
         let err_msg = format!("{:?}", result.unwrap_err());
-        assert!(err_msg.contains("finite"), "Expected 'finite' in error: {}", err_msg);
+        assert!(
+            err_msg.contains("finite"),
+            "Expected 'finite' in error: {}",
+            err_msg
+        );
 
         // Test positive infinity in align1
         let output_path = temp.path().join("merged_inf1");
@@ -1796,7 +1804,11 @@ mod tests {
         );
         assert!(result.is_err());
         let err_msg = format!("{:?}", result.unwrap_err());
-        assert!(err_msg.contains("finite"), "Expected 'finite' in error: {}", err_msg);
+        assert!(
+            err_msg.contains("finite"),
+            "Expected 'finite' in error: {}",
+            err_msg
+        );
 
         // Test negative infinity in align2
         let output_path = temp.path().join("merged_neginf2");
@@ -1813,6 +1825,10 @@ mod tests {
         );
         assert!(result.is_err());
         let err_msg = format!("{:?}", result.unwrap_err());
-        assert!(err_msg.contains("finite"), "Expected 'finite' in error: {}", err_msg);
+        assert!(
+            err_msg.contains("finite"),
+            "Expected 'finite' in error: {}",
+            err_msg
+        );
     }
 }
