@@ -59,6 +59,7 @@ mod error;
 pub mod fix_timestamps;
 pub mod merge;
 mod msg_log;
+pub mod prune;
 pub(crate) mod time_series;
 mod vtable_stream;
 

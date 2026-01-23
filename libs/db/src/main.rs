@@ -1,6 +1,6 @@
 use std::{io::Write, net::SocketAddr, path::PathBuf};
 
-use clap::{ArgAction, Parser, Subcommand, ValueEnum};
+use clap::{Parser, Subcommand, ValueEnum};
 use elodin_db::Server;
 use impeller2::vtable;
 use miette::IntoDiagnostic;
@@ -30,6 +30,8 @@ enum Commands {
     FixTimestamps(FixTimestampsArgs),
     #[command(about = "Merge two databases into one with optional prefixes")]
     Merge(MergeArgs),
+    #[command(about = "Remove empty components from a database")]
+    Prune(PruneArgs),
 }
 
 #[derive(clap::Args, Clone, Debug)]
@@ -65,19 +67,22 @@ struct FixTimestampsArgs {
     #[clap(long, short, help = "Skip confirmation prompt")]
     yes: bool,
     #[clap(
-        long = "no-prune",
-        action = ArgAction::SetFalse,
-        default_value_t = true,
-        help = "Do not prune empty components"
-    )]
-    prune: bool,
-    #[clap(
         long,
         value_enum,
         default_value = "wall-clock",
         help = "Clock to use as reference when computing offsets"
     )]
     reference: ReferenceClockArg,
+}
+
+#[derive(clap::Args, Clone, Debug)]
+struct PruneArgs {
+    #[clap(help = "Path to the database directory")]
+    path: PathBuf,
+    #[clap(long, help = "Show what would be pruned without modifying")]
+    dry_run: bool,
+    #[clap(long, short, help = "Skip confirmation prompt")]
+    yes: bool,
 }
 
 #[derive(ValueEnum, Clone, Debug)]
@@ -238,7 +243,6 @@ async fn main() -> miette::Result<()> {
             path,
             dry_run,
             yes,
-            prune,
             reference,
         }) => {
             let reference = match reference {
@@ -249,7 +253,10 @@ async fn main() -> miette::Result<()> {
                     elodin_db::fix_timestamps::ReferenceClock::Monotonic
                 }
             };
-            elodin_db::fix_timestamps::run(path, dry_run, yes, reference, prune).into_diagnostic()
+            elodin_db::fix_timestamps::run(path, dry_run, yes, reference).into_diagnostic()
+        }
+        Commands::Prune(PruneArgs { path, dry_run, yes }) => {
+            elodin_db::prune::run(path, dry_run, yes).into_diagnostic()
         }
         Commands::Merge(MergeArgs {
             db1,
