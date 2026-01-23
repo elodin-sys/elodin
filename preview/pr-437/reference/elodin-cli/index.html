@@ -627,6 +627,43 @@
                             
                         </li>
                         
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-437/reference/elodin-cli/#elodin-db-drop">elodin-db drop</a>
+                            
+                            <ul>
+                                
+                                <li>
+                                    <a href="https://docs.elodin.systems/preview/pr-437/reference/elodin-cli/#arguments-9">Arguments</a>
+                                </li>
+                                
+                                <li>
+                                    <a href="https://docs.elodin.systems/preview/pr-437/reference/elodin-cli/#options-8">Options</a>
+                                </li>
+                                
+                                <li>
+                                    <a href="https://docs.elodin.systems/preview/pr-437/reference/elodin-cli/#matching-modes">Matching Modes</a>
+                                </li>
+                                
+                                <li>
+                                    <a href="https://docs.elodin.systems/preview/pr-437/reference/elodin-cli/#fuzzy-matching">Fuzzy Matching</a>
+                                </li>
+                                
+                                <li>
+                                    <a href="https://docs.elodin.systems/preview/pr-437/reference/elodin-cli/#glob-pattern-matching">Glob Pattern Matching</a>
+                                </li>
+                                
+                                <li>
+                                    <a href="https://docs.elodin.systems/preview/pr-437/reference/elodin-cli/#safety">Safety</a>
+                                </li>
+                                
+                                <li>
+                                    <a href="https://docs.elodin.systems/preview/pr-437/reference/elodin-cli/#example-5">Example</a>
+                                </li>
+                                
+                            </ul>
+                            
+                        </li>
+                        
                     </ul>
                     
                 </li>
@@ -693,6 +730,7 @@
 <li><a href="https://docs.elodin.systems/preview/pr-437/reference/elodin-cli/#elodin-db-prune"><code>elodin-db prune</code>↴</a></li>
 <li><a href="https://docs.elodin.systems/preview/pr-437/reference/elodin-cli/#elodin-db-truncate"><code>elodin-db truncate</code>↴</a></li>
 <li><a href="https://docs.elodin.systems/preview/pr-437/reference/elodin-cli/#elodin-db-time-align"><code>elodin-db time-align</code>↴</a></li>
+<li><a href="https://docs.elodin.systems/preview/pr-437/reference/elodin-cli/#elodin-db-drop"><code>elodin-db drop</code>↴</a></li>
 </ul>
 <h2 id="elodin-db-run"><code>elodin-db run</code></h2>
 <p>Run the Elodin database server</p>
@@ -958,6 +996,80 @@
 </span><span class="z-source z-shell z-bash">
 </span><span class="z-source z-shell z-bash"><span class="z-comment z-line z-number-sign z-shell"><span class="z-punctuation z-definition z-comment z-begin z-shell">#</span></span><span class="z-comment z-line z-number-sign z-shell"> Align all components to start at t=10.5 seconds</span><span class="z-comment z-line z-number-sign z-shell">
 </span></span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">elodin-db</span></span><span class="z-meta z-function-call z-arguments z-shell"> time-align<span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> --</span>timestamp</span> 10.5<span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> --</span>all</span><span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> -</span>y</span> ./my-database</span>
+</span></code></pre>
+<h2 id="elodin-db-drop"><code>elodin-db drop</code></h2>
+<p>Drop (delete) components from a database. Supports fuzzy name matching, glob patterns, and bulk removal with confirmation before deletion.</p>
+<p><strong>Usage:</strong> <code>elodin-db drop [OPTIONS] &lt;PATH&gt;</code></p>
+<h6 id="arguments-9"><strong>Arguments</strong></h6>
+<ul>
+<li><code>&lt;PATH&gt;</code> — Path to the database directory</li>
+</ul>
+<h6 id="options-8"><strong>Options</strong></h6>
+<ul>
+<li>
+<p><code>--component &lt;NAME&gt;</code> — Component name to match using fuzzy matching. All matching components will be dropped.</p>
+</li>
+<li>
+<p><code>--pattern &lt;PATTERN&gt;</code> — Glob pattern to match component names. Supports <code>*</code> (any characters) and <code>?</code> (single character).</p>
+</li>
+<li>
+<p><code>--all</code> — Drop all components in the database</p>
+</li>
+<li>
+<p><code>--dry-run</code> — Show what would be dropped without modifying the database</p>
+</li>
+<li>
+<p><code>-y</code>, <code>--yes</code> — Skip the confirmation prompt</p>
+</li>
+</ul>
+<h6 id="matching-modes"><strong>Matching Modes</strong></h6>
+<p>You must specify exactly one of <code>--component</code>, <code>--pattern</code>, or <code>--all</code>:</p>
+<table><thead><tr><th>Option</th><th>Behavior</th></tr></thead><tbody>
+<tr><td><code>--component</code></td><td>Fuzzy match against component names (e.g., "rocket.vel" matches "rocket.velocity")</td></tr>
+<tr><td><code>--pattern</code></td><td>Glob pattern match (e.g., "rocket.*" matches all components starting with "rocket.")</td></tr>
+<tr><td><code>--all</code></td><td>Drop all components in the database</td></tr>
+</tbody></table>
+<h6 id="fuzzy-matching"><strong>Fuzzy Matching</strong></h6>
+<p>When using <code>--component</code>, the command uses fuzzy matching to find components:</p>
+<ul>
+<li>Case-insensitive matching (unless pattern contains uppercase)</li>
+<li>Matches partial strings (e.g., "vel" matches "velocity")</li>
+<li>Results are ranked by match score, best matches first</li>
+</ul>
+<h6 id="glob-pattern-matching"><strong>Glob Pattern Matching</strong></h6>
+<p>When using <code>--pattern</code>, the following wildcards are supported:</p>
+<ul>
+<li><code>*</code> — matches any sequence of characters</li>
+<li><code>?</code> — matches exactly one character</li>
+</ul>
+<p>Examples:</p>
+<ul>
+<li><code>rocket.*</code> — matches "rocket.velocity", "rocket.position", etc.</li>
+<li><code>*.velocity</code> — matches "rocket.velocity", "drone.velocity", etc.</li>
+<li><code>comp?</code> — matches "comp1", "comp2", but not "comp10"</li>
+</ul>
+<h6 id="safety"><strong>Safety</strong></h6>
+<p>This command permanently deletes data and cannot be undone. The command:</p>
+<ul>
+<li>Shows all matching components and their entry counts before deletion</li>
+<li>Requires explicit confirmation (unless <code>-y</code> is passed)</li>
+<li>Supports <code>--dry-run</code> to preview what would be deleted</li>
+</ul>
+<h6 id="example-5"><strong>Example</strong></h6>
+<pre data-lang="bash" class="language-bash z-code"><code class="language-bash" data-lang="bash"><span class="z-source z-shell z-bash"><span class="z-comment z-line z-number-sign z-shell"><span class="z-punctuation z-definition z-comment z-begin z-shell">#</span></span><span class="z-comment z-line z-number-sign z-shell"> Preview what would be dropped using fuzzy match</span><span class="z-comment z-line z-number-sign z-shell">
+</span></span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">elodin-db</span></span><span class="z-meta z-function-call z-arguments z-shell"> drop<span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> --</span>component</span> <span class="z-string z-quoted z-double z-shell"><span class="z-punctuation z-definition z-string z-begin z-shell">&quot;</span>rocket.vel<span class="z-punctuation z-definition z-string z-end z-shell">&quot;</span></span><span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> --</span>dry-run</span> ./my-database</span>
+</span><span class="z-source z-shell z-bash">
+</span><span class="z-source z-shell z-bash"><span class="z-comment z-line z-number-sign z-shell"><span class="z-punctuation z-definition z-comment z-begin z-shell">#</span></span><span class="z-comment z-line z-number-sign z-shell"> Drop components matching fuzzy pattern (with confirmation)</span><span class="z-comment z-line z-number-sign z-shell">
+</span></span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">elodin-db</span></span><span class="z-meta z-function-call z-arguments z-shell"> drop<span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> --</span>component</span> <span class="z-string z-quoted z-double z-shell"><span class="z-punctuation z-definition z-string z-begin z-shell">&quot;</span>rocket<span class="z-punctuation z-definition z-string z-end z-shell">&quot;</span></span> ./my-database</span>
+</span><span class="z-source z-shell z-bash">
+</span><span class="z-source z-shell z-bash"><span class="z-comment z-line z-number-sign z-shell"><span class="z-punctuation z-definition z-comment z-begin z-shell">#</span></span><span class="z-comment z-line z-number-sign z-shell"> Drop components matching glob pattern</span><span class="z-comment z-line z-number-sign z-shell">
+</span></span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">elodin-db</span></span><span class="z-meta z-function-call z-arguments z-shell"> drop<span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> --</span>pattern</span> <span class="z-string z-quoted z-double z-shell"><span class="z-punctuation z-definition z-string z-begin z-shell">&quot;</span>rocket.*<span class="z-punctuation z-definition z-string z-end z-shell">&quot;</span></span><span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> -</span>y</span> ./my-database</span>
+</span><span class="z-source z-shell z-bash">
+</span><span class="z-source z-shell z-bash"><span class="z-comment z-line z-number-sign z-shell"><span class="z-punctuation z-definition z-comment z-begin z-shell">#</span></span><span class="z-comment z-line z-number-sign z-shell"> Drop all velocity components</span><span class="z-comment z-line z-number-sign z-shell">
+</span></span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">elodin-db</span></span><span class="z-meta z-function-call z-arguments z-shell"> drop<span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> --</span>pattern</span> <span class="z-string z-quoted z-double z-shell"><span class="z-punctuation z-definition z-string z-begin z-shell">&quot;</span>*.velocity<span class="z-punctuation z-definition z-string z-end z-shell">&quot;</span></span><span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> -</span>y</span> ./my-database</span>
+</span><span class="z-source z-shell z-bash">
+</span><span class="z-source z-shell z-bash"><span class="z-comment z-line z-number-sign z-shell"><span class="z-punctuation z-definition z-comment z-begin z-shell">#</span></span><span class="z-comment z-line z-number-sign z-shell"> Drop all components (dangerous!)</span><span class="z-comment z-line z-number-sign z-shell">
+</span></span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">elodin-db</span></span><span class="z-meta z-function-call z-arguments z-shell"> drop<span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> --</span>all</span><span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> -</span>y</span> ./my-database</span>
 </span></code></pre>
 
                   
