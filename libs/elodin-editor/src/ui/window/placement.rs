@@ -536,7 +536,8 @@ fn window_on_target_screen(
         return false;
     };
     if let Some(current) = window.current_monitor()
-        && screens_match(&current, &screens[target_screen])
+        && let Some(screen) = screens.get(target_screen)
+        && screens_match(&current, screen)
     {
         info!(
             current_screen = target_screen,

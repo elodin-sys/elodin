@@ -116,7 +116,15 @@ pub fn sync_schematic(
         }) else {
             return;
         };
-        params.load_schematic(&schematic, None);
+        match config.schematic_path() {
+            Some(p) => {
+                let base_file = impeller2_kdl::env::schematic_file(Path::new(p));
+                params.load_schematic(&schematic, base_file.parent());
+            }
+            None => {
+                params.load_schematic(&schematic, None);
+            }
+        }
         return;
     }
 
@@ -213,8 +221,8 @@ pub fn load_schematic_file(
     });
     if let Ok(kdl) = std::fs::read_to_string(&resolved_path) {
         let schematic = impeller2_wkt::Schematic::from_kdl(&kdl)?;
-        let base_dir_owned = resolved_path.parent().map(|p| p.to_path_buf());
-        params.load_schematic(&schematic, base_dir_owned.as_deref());
+        let base_dir_maybe = resolved_path.parent();
+        params.load_schematic(&schematic, base_dir_maybe);
         live_reload_rx.record_loaded(&resolved_path);
     }
     Ok(())
