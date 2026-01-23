@@ -1662,13 +1662,13 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
         if ui.is_rect_visible(rect) && !state.is_being_dragged {
             let scheme = get_scheme();
             let bg_color = match tab_state {
-                TabState::Selected => scheme.text_primary,
+                TabState::Selected => scheme.bg_secondary,
                 TabState::Inactive => scheme.bg_secondary,
             };
 
             let text_color = match tab_state {
-                TabState::Selected => scheme.bg_secondary,
-                TabState::Inactive => with_opacity(scheme.text_primary, 0.6),
+                TabState::Selected => scheme.text_primary,
+                TabState::Inactive => scheme.text_secondary,
             };
 
             ui.painter().rect_filled(rect, 0.0, bg_color);
@@ -1760,8 +1760,8 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
                 EImageButton::new(self.icons.close)
                     .scale(1.3, 1.3)
                     .image_tint(match tab_state {
-                        TabState::Inactive => scheme.text_primary,
-                        TabState::Selected => scheme.bg_primary,
+                        TabState::Inactive => scheme.text_secondary,
+                        TabState::Selected => scheme.text_primary,
                     })
                     .bg_color(colors::TRANSPARENT)
                     .hovered_bg_color(colors::TRANSPARENT),
