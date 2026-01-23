@@ -132,17 +132,24 @@ pub fn run(
     let db1_info = analyze_database(&db1, prefix1.clone())?;
     let db2_info = analyze_database(&db2, prefix2.clone())?;
 
-    // Check for potential collisions if both prefixes are the same (including both None)
-    if prefix1 == prefix2 {
-        let collision_check = check_for_collisions(&db1, &db2)?;
-        if !collision_check.is_empty() {
-            eprintln!("Warning: Potential component name collisions detected:");
-            for name in &collision_check {
-                eprintln!("  - {}", name);
+    // Check for potential collisions (including cross-prefix collisions)
+    let collision_check = check_for_collisions(&db1, &db2, prefix1.as_deref(), prefix2.as_deref())?;
+    if !collision_check.is_empty() {
+        eprintln!("Warning: Potential component name collisions detected:");
+        for (name1, name2, resulting_name) in &collision_check {
+            if name1 == name2 {
+                // Same name in both databases
+                eprintln!("  - \"{}\" exists in both databases", name1);
+            } else {
+                // Cross-prefix collision
+                eprintln!(
+                    "  - \"{}\" (DB1) and \"{}\" (DB2) both become \"{}\"",
+                    name1, name2, resulting_name
+                );
             }
-            if prefix1.is_none() {
-                eprintln!("\nConsider using --prefix1 and --prefix2 to avoid collisions.");
-            }
+        }
+        if prefix1.is_none() && prefix2.is_none() {
+            eprintln!("\nConsider using --prefix1 and --prefix2 to avoid collisions.");
         }
     }
 
@@ -555,14 +562,31 @@ fn print_database_info(info: &DatabaseInfo, label: &str) {
 }
 
 /// Check for potential collisions between two databases
-fn check_for_collisions(db1: &Path, db2: &Path) -> Result<Vec<String>, Error> {
+/// Check for component name collisions after applying prefixes.
+/// Returns a list of (original_name1, original_name2, resulting_name) tuples for collisions.
+/// When both names are the same, it indicates the same component exists in both databases.
+fn check_for_collisions(
+    db1: &Path,
+    db2: &Path,
+    prefix1: Option<&str>,
+    prefix2: Option<&str>,
+) -> Result<Vec<(String, String, String)>, Error> {
     let names1 = collect_component_names(db1)?;
     let names2 = collect_component_names(db2)?;
 
-    let mut collisions = Vec::new();
+    // Build a map of prefixed_name -> original_name for DB1
+    let mut prefixed_names1: HashMap<String, String> = HashMap::new();
     for name in &names1 {
-        if names2.contains(name) {
-            collisions.push(name.clone());
+        let prefixed = apply_prefix(name, prefix1);
+        prefixed_names1.insert(prefixed, name.clone());
+    }
+
+    // Check each DB2 component against DB1's prefixed names
+    let mut collisions = Vec::new();
+    for name2 in &names2 {
+        let prefixed2 = apply_prefix(name2, prefix2);
+        if let Some(original_name1) = prefixed_names1.get(&prefixed2) {
+            collisions.push((original_name1.clone(), name2.clone(), prefixed2));
         }
     }
     Ok(collisions)
@@ -1014,7 +1038,6 @@ fn copy_index_with_offset(src_index: &Path, dst_index: &Path, offset: i64) -> Re
         src_file.seek(SeekFrom::Start(0))?;
         let mut dst_file = File::create(dst_index)?;
         let mut buf = [0u8; 64];
-        src_file.seek(SeekFrom::Start(0))?;
         loop {
             let n = src_file.read(&mut buf)?;
             if n == 0 {
@@ -1046,6 +1069,19 @@ fn copy_index_with_offset(src_index: &Path, dst_index: &Path, offset: i64) -> Re
 
     // Calculate how much timestamp data to process
     let data_len = committed_len.saturating_sub(HEADER_SIZE);
+
+    // Validate that data_len is a multiple of 8 (each timestamp is 8 bytes)
+    // If not, the index file is malformed and we should report an error rather than
+    // silently corrupting the output by leaving trailing bytes without offset applied
+    if !data_len.is_multiple_of(8) {
+        return Err(Error::Io(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!(
+                "Malformed index file: data length {} is not a multiple of 8 bytes (timestamp size)",
+                data_len
+            ),
+        )));
+    }
 
     // Process timestamps in chunks to avoid OOM
     let mut remaining = data_len;
@@ -1381,6 +1417,67 @@ mod tests {
         assert!(names.contains(&"drone.motor".to_string()));
     }
 
+    #[test]
+    fn test_check_for_collisions_same_prefix() {
+        let temp = TempDir::new().unwrap();
+        let db1_path = temp.path().join("db1");
+        let db2_path = temp.path().join("db2");
+
+        // Same component name in both databases, same prefix (both None)
+        create_test_db(&db1_path, &[("rocket.velocity", b"")]).unwrap();
+        create_test_db(&db2_path, &[("rocket.velocity", b"")]).unwrap();
+
+        let collisions = check_for_collisions(&db1_path, &db2_path, None, None).unwrap();
+        assert_eq!(collisions.len(), 1);
+        assert_eq!(
+            collisions[0],
+            (
+                "rocket.velocity".to_string(),
+                "rocket.velocity".to_string(),
+                "rocket.velocity".to_string()
+            )
+        );
+    }
+
+    #[test]
+    fn test_check_for_collisions_cross_prefix() {
+        let temp = TempDir::new().unwrap();
+        let db1_path = temp.path().join("db1");
+        let db2_path = temp.path().join("db2");
+
+        // DB1: "bar" with prefix "foo" becomes "foo_bar"
+        // DB2: "foo_bar" with no prefix stays "foo_bar"
+        // This should be detected as a collision
+        create_test_db(&db1_path, &[("bar", b"")]).unwrap();
+        create_test_db(&db2_path, &[("foo_bar", b"")]).unwrap();
+
+        let collisions = check_for_collisions(&db1_path, &db2_path, Some("foo"), None).unwrap();
+        assert_eq!(collisions.len(), 1);
+        assert_eq!(
+            collisions[0],
+            (
+                "bar".to_string(),
+                "foo_bar".to_string(),
+                "foo_bar".to_string()
+            )
+        );
+    }
+
+    #[test]
+    fn test_check_for_collisions_no_collision_with_different_prefixes() {
+        let temp = TempDir::new().unwrap();
+        let db1_path = temp.path().join("db1");
+        let db2_path = temp.path().join("db2");
+
+        // Same name but different prefixes - no collision
+        create_test_db(&db1_path, &[("rocket.velocity", b"")]).unwrap();
+        create_test_db(&db2_path, &[("rocket.velocity", b"")]).unwrap();
+
+        let collisions =
+            check_for_collisions(&db1_path, &db2_path, Some("sim"), Some("truth")).unwrap();
+        assert!(collisions.is_empty());
+    }
+
     /// Helper to create an index file with timestamps
     fn create_index_file(path: &Path, start_ts: i64, timestamps: &[i64]) {
         use std::io::Write;
@@ -1502,6 +1599,37 @@ mod tests {
         let (new_start_ts, new_timestamps) = read_index_file(&dst_index);
         assert_eq!(new_start_ts, start_ts);
         assert_eq!(new_timestamps, timestamps);
+    }
+
+    #[test]
+    fn test_copy_index_rejects_malformed_data_length() {
+        use std::io::Write;
+        let temp = TempDir::new().unwrap();
+        let src_index = temp.path().join("src_index");
+        let dst_index = temp.path().join("dst_index");
+
+        // Create a malformed index file where data_len is not a multiple of 8
+        let header_size = 24usize;
+        let malformed_data_len = 11; // Not a multiple of 8
+        let committed_len = (header_size + malformed_data_len) as u64;
+
+        let mut data = vec![0u8; header_size + malformed_data_len];
+        data[0..8].copy_from_slice(&committed_len.to_le_bytes());
+        data[8..16].copy_from_slice(&0u64.to_le_bytes()); // head_len = 0
+        data[16..24].copy_from_slice(&1000i64.to_le_bytes()); // start_ts
+
+        let mut file = File::create(&src_index).unwrap();
+        file.write_all(&data).unwrap();
+
+        // Attempt to copy with an offset should fail with an error about malformed data
+        let result = copy_index_with_offset(&src_index, &dst_index, 1000);
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(
+            err_msg.contains("not a multiple of 8"),
+            "Expected error about data length, got: {}",
+            err_msg
+        );
     }
 
     #[test]
