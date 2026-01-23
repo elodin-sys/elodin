@@ -8,8 +8,9 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
+use crate::utils::component_label;
 use crate::{Error, MetadataExt};
-use impeller2_wkt::{ComponentMetadata, DbConfig};
+use impeller2_wkt::DbConfig;
 
 const HEADER_SIZE: usize = 24; // committed_len (8) + head_len (8) + extra (8)
 
@@ -354,29 +355,4 @@ fn apply_offset(index_path: &Path, offset: i64, count: usize) -> Result<(), std:
     file.sync_all()?;
 
     Ok(())
-}
-
-fn read_component_name(metadata_path: &Path) -> Result<String, std::io::Error> {
-    let metadata = <ComponentMetadata as MetadataExt>::read(metadata_path)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-    Ok(metadata.name)
-}
-
-fn component_label(path: &Path) -> String {
-    let fallback = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("<unknown>")
-        .to_string();
-    let metadata_path = path.join("metadata");
-    let name = if metadata_path.exists() {
-        read_component_name(&metadata_path).unwrap_or_else(|_| fallback.clone())
-    } else {
-        fallback.clone()
-    };
-    if name == fallback {
-        name
-    } else {
-        format!("{name} ({fallback})")
-    }
 }

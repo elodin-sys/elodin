@@ -6,8 +6,8 @@ use std::fs::{self, File};
 use std::io::{Read, Write as IoWrite};
 use std::path::{Path, PathBuf};
 
-use crate::{Error, MetadataExt};
-use impeller2_wkt::ComponentMetadata;
+use crate::Error;
+use crate::utils::component_label;
 
 const HEADER_SIZE: usize = 24; // committed_len (8) + head_len (8) + extra (8)
 
@@ -134,33 +134,4 @@ fn is_component_empty(index_path: &Path) -> Result<bool, std::io::Error> {
     let count = data_len / 8; // Each timestamp is 8 bytes
 
     Ok(count == 0)
-}
-
-/// Get a human-readable label for a component path.
-fn component_label(path: &Path) -> String {
-    let fallback = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("<unknown>")
-        .to_string();
-
-    let metadata_path = path.join("metadata");
-    let name = if metadata_path.exists() {
-        read_component_name(&metadata_path).unwrap_or_else(|_| fallback.clone())
-    } else {
-        fallback.clone()
-    };
-
-    if name == fallback {
-        name
-    } else {
-        format!("{name} ({fallback})")
-    }
-}
-
-/// Read a component's name from its metadata file.
-fn read_component_name(metadata_path: &Path) -> Result<String, std::io::Error> {
-    let metadata = <ComponentMetadata as MetadataExt>::read(metadata_path)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-    Ok(metadata.name)
 }

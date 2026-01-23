@@ -61,6 +61,7 @@ pub mod merge;
 mod msg_log;
 pub mod prune;
 pub(crate) mod time_series;
+pub mod utils;
 mod vtable_stream;
 
 /// Analyzes a VTable to find byte ranges that are used as timestamp sources.
