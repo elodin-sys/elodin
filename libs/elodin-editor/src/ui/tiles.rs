@@ -1530,6 +1530,7 @@ pub enum TreeAction {
     AddSidebars,
     DeleteTab(TileId),
     SelectTile(TileId),
+    OpenInspector(TileId),
     RenameContainer(TileId, String),
     RenamePane(TileId, String),
 }
@@ -1798,6 +1799,8 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
     ) -> egui::Response {
         if button_response.middle_clicked() && !self.read_only {
             self.tree_actions.push(TreeAction::DeleteTab(tile_id));
+        } else if button_response.double_clicked() {
+            self.tree_actions.push(TreeAction::OpenInspector(tile_id));
         } else if button_response.clicked() {
             self.tree_actions.push(TreeAction::SelectTile(tile_id));
         }
@@ -2547,6 +2550,35 @@ impl WidgetSystem for TileLayout<'_, '_> {
                     }
 
                     TreeAction::SelectTile(tile_id) => {
+                        tile_state.tree.make_active(|id, _| id == tile_id);
+
+                        if let Some(egui_tiles::Tile::Pane(pane)) =
+                            tile_state.tree.tiles.get(tile_id)
+                        {
+                            match pane {
+                                Pane::Graph(graph) => {
+                                    ui_state.selected_object =
+                                        SelectedObject::Graph { graph_id: graph.id };
+                                }
+                                Pane::QueryPlot(plot) => {
+                                    ui_state.selected_object = SelectedObject::Graph {
+                                        graph_id: plot.entity,
+                                    };
+                                }
+                                Pane::Viewport(viewport) => {
+                                    if let Some(camera) = viewport.camera {
+                                        ui_state.selected_object =
+                                            SelectedObject::Viewport { camera };
+                                    }
+                                }
+                                _ => {}
+                            }
+                            if let Some(kind) = pane.sidebar_kind() {
+                                unmask_sidebar_by_kind(tile_state, kind);
+                            }
+                        }
+                    }
+                    TreeAction::OpenInspector(tile_id) => {
                         tile_state.tree.make_active(|id, _| id == tile_id);
 
                         if let Some(egui_tiles::Tile::Pane(pane)) =
