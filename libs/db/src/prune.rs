@@ -129,8 +129,8 @@ fn is_component_empty(index_path: &Path) -> Result<bool, std::io::Error> {
     let mut header = [0u8; HEADER_SIZE];
     file.read_exact(&mut header)?;
 
-    let committed_len = u64::from_le_bytes(header[0..8].try_into().unwrap());
-    let data_len = committed_len as usize - HEADER_SIZE;
+    let committed_len = u64::from_le_bytes(header[0..8].try_into().unwrap()) as usize;
+    let data_len = committed_len.saturating_sub(HEADER_SIZE);
     let count = data_len / 8; // Each timestamp is 8 bytes
 
     Ok(count == 0)
