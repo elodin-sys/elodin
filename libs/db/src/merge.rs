@@ -41,8 +41,10 @@ struct DatabaseInfo {
 /// * `prefix2` - Optional prefix for second database components
 /// * `dry_run` - If true, only show what would be done without creating output
 /// * `auto_confirm` - If true, skip the confirmation prompt
-/// * `align1` - Optional alignment timestamp (seconds) in DB1 - defines output timeline
-/// * `align2` - Optional alignment timestamp (seconds) in DB2 - will be shifted to align with align1
+/// * `align1` - Optional alignment timestamp (seconds) for an event in DB1
+/// * `align2` - Optional alignment timestamp (seconds) for the same event in DB2.
+///              The database with the earlier anchor is shifted forward to align with the later one.
+///              This ensures timestamps never go negative (important for monotonic datasets).
 ///
 /// # Returns
 /// * `Ok(())` if successful
@@ -287,33 +289,31 @@ pub fn run(
     }
     fs::create_dir_all(&tmp_output)?;
 
-    // Merge databases with their respective offsets
-    // One of the offsets will be 0, the other will be positive (shift forward)
-    print!("Merging {}... ", db1.display());
-    io::stdout().flush()?;
-    let db1_offset_opt = if db1_offset != 0 {
-        Some(db1_offset)
-    } else {
-        None
-    };
-    let stats1 = merge_database(&db1, &tmp_output, prefix1.as_deref(), db1_offset_opt)?;
-    println!("done ({} components)", stats1.components_copied);
+    // Perform the merge, cleaning up on failure
+    let result = do_merge(
+        &db1,
+        &db2,
+        &tmp_output,
+        prefix1.as_deref(),
+        prefix2.as_deref(),
+        db1_offset,
+        db2_offset,
+    );
 
-    print!("Merging {}... ", db2.display());
-    io::stdout().flush()?;
-    let db2_offset_opt = if db2_offset != 0 {
-        Some(db2_offset)
-    } else {
-        None
-    };
-    let stats2 = merge_database(&db2, &tmp_output, prefix2.as_deref(), db2_offset_opt)?;
-    println!("done ({} components)", stats2.components_copied);
+    // If merge failed, clean up the temporary directory
+    if result.is_err() {
+        eprintln!("Merge failed, cleaning up temporary directory...");
+        if let Err(cleanup_err) = fs::remove_dir_all(&tmp_output) {
+            eprintln!(
+                "Warning: Failed to clean up temporary directory {}: {}",
+                tmp_output.display(),
+                cleanup_err
+            );
+        }
+        return result.map(|_| ());
+    }
 
-    // Merge db_state
-    print!("Writing db_state... ");
-    io::stdout().flush()?;
-    merge_db_state(&db1, &db2, &tmp_output, db1_offset_opt, db2_offset_opt)?;
-    println!("done");
+    let (stats1, stats2) = result?;
 
     // Report any message log conflicts
     let all_conflicts: Vec<_> = stats1
@@ -335,6 +335,48 @@ pub fn run(
 
     println!("\nSuccessfully merged databases to {}", output.display());
     Ok(())
+}
+
+/// Helper function that performs the actual merge operations.
+/// Returns the merge stats on success, or an error on failure.
+fn do_merge(
+    db1: &Path,
+    db2: &Path,
+    tmp_output: &Path,
+    prefix1: Option<&str>,
+    prefix2: Option<&str>,
+    db1_offset: i64,
+    db2_offset: i64,
+) -> Result<(MergeStats, MergeStats), Error> {
+    // Merge databases with their respective offsets
+    // One of the offsets will be 0, the other will be positive (shift forward)
+    print!("Merging {}... ", db1.display());
+    io::stdout().flush()?;
+    let db1_offset_opt = if db1_offset != 0 {
+        Some(db1_offset)
+    } else {
+        None
+    };
+    let stats1 = merge_database(db1, tmp_output, prefix1, db1_offset_opt)?;
+    println!("done ({} components)", stats1.components_copied);
+
+    print!("Merging {}... ", db2.display());
+    io::stdout().flush()?;
+    let db2_offset_opt = if db2_offset != 0 {
+        Some(db2_offset)
+    } else {
+        None
+    };
+    let stats2 = merge_database(db2, tmp_output, prefix2, db2_offset_opt)?;
+    println!("done ({} components)", stats2.components_copied);
+
+    // Merge db_state
+    print!("Writing db_state... ");
+    io::stdout().flush()?;
+    merge_db_state(db1, db2, tmp_output, db1_offset_opt, db2_offset_opt)?;
+    println!("done");
+
+    Ok((stats1, stats2))
 }
 
 /// Analyze a database and return information about it
@@ -882,11 +924,14 @@ fn copy_file_native(src: &Path, dst: &Path) -> Result<(), Error> {
 /// AppendLog files are sparse files with 8GB logical size but only `committed_len`
 /// bytes of actual data. This function reads only the committed portion to avoid
 /// expanding the sparse file to its full logical size during copy.
+///
+/// Uses chunked I/O to avoid allocating large buffers for big databases.
 fn copy_append_log_file(src: &Path, dst: &Path) -> Result<(), Error> {
     use std::io::{Read, Seek, SeekFrom, Write};
 
     const HEADER_SIZE: usize = 24;
     const COMMITTED_LEN_SIZE: usize = 8;
+    const CHUNK_SIZE: usize = 64 * 1024; // 64KB chunks
 
     let mut src_file = File::open(src)?;
 
@@ -895,12 +940,17 @@ fn copy_append_log_file(src: &Path, dst: &Path) -> Result<(), Error> {
     let bytes_read = src_file.read(&mut committed_len_bytes)?;
 
     if bytes_read < COMMITTED_LEN_SIZE {
-        // File is too small to have a valid header, copy as-is
+        // File is too small to have a valid header, copy as-is using small buffer
         src_file.seek(SeekFrom::Start(0))?;
-        let mut data = Vec::new();
-        src_file.read_to_end(&mut data)?;
         let mut dst_file = File::create(dst)?;
-        dst_file.write_all(&data)?;
+        let mut buf = [0u8; CHUNK_SIZE];
+        loop {
+            let n = src_file.read(&mut buf)?;
+            if n == 0 {
+                break;
+            }
+            dst_file.write_all(&buf[..n])?;
+        }
         dst_file.sync_all()?;
         if let Some(parent) = dst.parent() {
             sync_dir(parent)?;
@@ -913,14 +963,19 @@ fn copy_append_log_file(src: &Path, dst: &Path) -> Result<(), Error> {
     // Sanity check: committed_len should be at least HEADER_SIZE
     let committed_len = committed_len.max(HEADER_SIZE);
 
-    // Read only the committed portion
+    // Copy only the committed portion using chunked I/O
     src_file.seek(SeekFrom::Start(0))?;
-    let mut data = vec![0u8; committed_len];
-    src_file.read_exact(&mut data)?;
-
-    // Write to destination
     let mut dst_file = File::create(dst)?;
-    dst_file.write_all(&data)?;
+    let mut remaining = committed_len;
+    let mut buf = vec![0u8; CHUNK_SIZE];
+
+    while remaining > 0 {
+        let to_read = remaining.min(CHUNK_SIZE);
+        src_file.read_exact(&mut buf[..to_read])?;
+        dst_file.write_all(&buf[..to_read])?;
+        remaining -= to_read;
+    }
+
     dst_file.sync_all()?;
 
     if let Some(parent) = dst.parent() {
@@ -971,6 +1026,7 @@ fn sync_dir(path: &Path) -> io::Result<()> {
 /// 2. All timestamp entries in the data section
 ///
 /// Uses saturating arithmetic to prevent overflow.
+/// Uses chunked I/O to avoid OOM on large databases.
 ///
 /// IMPORTANT: AppendLog files are sparse files with 8GB logical size but only
 /// `committed_len` bytes of actual data. We must read only the committed portion
@@ -979,6 +1035,9 @@ fn copy_index_with_offset(src_index: &Path, dst_index: &Path, offset: i64) -> Re
     use std::io::{Read, Seek, SeekFrom, Write};
 
     const HEADER_SIZE: usize = 24;
+    // Process timestamps in chunks of 8KB (1024 timestamps per chunk)
+    const CHUNK_TIMESTAMPS: usize = 1024;
+    const CHUNK_SIZE: usize = CHUNK_TIMESTAMPS * 8;
 
     let mut src_file = File::open(src_index)?;
 
@@ -989,10 +1048,16 @@ fn copy_index_with_offset(src_index: &Path, dst_index: &Path, offset: i64) -> Re
     if bytes_read < HEADER_SIZE {
         // File is too small, just copy what we have
         src_file.seek(SeekFrom::Start(0))?;
-        let mut data = Vec::new();
-        src_file.read_to_end(&mut data)?;
         let mut dst_file = File::create(dst_index)?;
-        dst_file.write_all(&data)?;
+        let mut buf = [0u8; 64];
+        src_file.seek(SeekFrom::Start(0))?;
+        loop {
+            let n = src_file.read(&mut buf)?;
+            if n == 0 {
+                break;
+            }
+            dst_file.write_all(&buf[..n])?;
+        }
         dst_file.sync_all()?;
         if let Some(parent) = dst_index.parent() {
             sync_dir(parent)?;
@@ -1006,34 +1071,39 @@ fn copy_index_with_offset(src_index: &Path, dst_index: &Path, offset: i64) -> Re
     // Sanity check: committed_len should be at least HEADER_SIZE
     let committed_len = committed_len.max(HEADER_SIZE);
 
-    // Read only the committed portion of the file
-    src_file.seek(SeekFrom::Start(0))?;
-    let mut data = vec![0u8; committed_len];
-    src_file.read_exact(&mut data)?;
-
     // Apply offset to start_timestamp in header (bytes 16-24)
-    let start_ts = i64::from_le_bytes(data[16..24].try_into().unwrap());
+    let start_ts = i64::from_le_bytes(header[16..24].try_into().unwrap());
     let new_start_ts = start_ts.saturating_add(offset);
-    data[16..24].copy_from_slice(&new_start_ts.to_le_bytes());
+    header[16..24].copy_from_slice(&new_start_ts.to_le_bytes());
 
-    // Calculate number of timestamps in the data section
+    // Create destination and write modified header
+    let mut dst_file = File::create(dst_index)?;
+    dst_file.write_all(&header)?;
+
+    // Calculate how much timestamp data to process
     let data_len = committed_len.saturating_sub(HEADER_SIZE);
-    let num_timestamps = data_len / 8;
 
-    // Apply offset to all timestamps in the data section
-    for i in 0..num_timestamps {
-        let offset_in_file = HEADER_SIZE + i * 8;
-        if offset_in_file + 8 > data.len() {
-            break;
+    // Process timestamps in chunks to avoid OOM
+    let mut remaining = data_len;
+    let mut buf = vec![0u8; CHUNK_SIZE];
+
+    while remaining > 0 {
+        let to_read = remaining.min(CHUNK_SIZE);
+        src_file.read_exact(&mut buf[..to_read])?;
+
+        // Apply offset to each timestamp in the chunk
+        let num_timestamps = to_read / 8;
+        for i in 0..num_timestamps {
+            let start = i * 8;
+            let ts = i64::from_le_bytes(buf[start..start + 8].try_into().unwrap());
+            let new_ts = ts.saturating_add(offset);
+            buf[start..start + 8].copy_from_slice(&new_ts.to_le_bytes());
         }
-        let ts = i64::from_le_bytes(data[offset_in_file..offset_in_file + 8].try_into().unwrap());
-        let new_ts = ts.saturating_add(offset);
-        data[offset_in_file..offset_in_file + 8].copy_from_slice(&new_ts.to_le_bytes());
+
+        dst_file.write_all(&buf[..to_read])?;
+        remaining -= to_read;
     }
 
-    // Write only the committed data to destination
-    let mut dst_file = File::create(dst_index)?;
-    dst_file.write_all(&data)?;
     dst_file.sync_all()?;
 
     // Sync parent directory

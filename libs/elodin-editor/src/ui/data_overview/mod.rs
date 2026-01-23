@@ -865,6 +865,9 @@ fn extract_values_from_array(array: &dyn Array) -> Option<Vec<Vec<f64>>> {
             for (elem_idx, s) in series.iter_mut().enumerate() {
                 if start + elem_idx < inner_values.len() {
                     s.push(inner_values[start + elem_idx]);
+                } else {
+                    // Push NAN for missing data to preserve index alignment with timestamps
+                    s.push(f64::NAN);
                 }
             }
         }
