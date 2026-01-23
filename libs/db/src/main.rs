@@ -39,6 +39,8 @@ enum Commands {
         about = "Align component timestamps to a target timestamp"
     )]
     TimeAlign(TimeAlignArgs),
+    #[command(about = "Drop (delete) components from a database")]
+    Drop(DropArgs),
 }
 
 #[derive(clap::Args, Clone, Debug)]
@@ -113,6 +115,25 @@ struct TimeAlignArgs {
     #[clap(long, help = "Specific component name to align")]
     component: Option<String>,
     #[clap(long, help = "Show what would be changed without modifying")]
+    dry_run: bool,
+    #[clap(long, short, help = "Skip confirmation prompt")]
+    yes: bool,
+}
+
+#[derive(clap::Args, Clone, Debug)]
+struct DropArgs {
+    #[clap(help = "Path to the database directory")]
+    path: PathBuf,
+    #[clap(long, help = "Component name to match (fuzzy)")]
+    component: Option<String>,
+    #[clap(
+        long,
+        help = "Glob pattern to match component names (e.g., 'rocket.*')"
+    )]
+    pattern: Option<String>,
+    #[clap(long, help = "Drop all components")]
+    all: bool,
+    #[clap(long, help = "Show what would be dropped without modifying")]
     dry_run: bool,
     #[clap(long, short, help = "Skip confirmation prompt")]
     yes: bool,
@@ -314,5 +335,40 @@ async fn main() -> miette::Result<()> {
             yes,
         }) => elodin_db::time_align::run(path, timestamp, all, component, dry_run, yes)
             .into_diagnostic(),
+        Commands::Drop(DropArgs {
+            path,
+            component,
+            pattern,
+            all,
+            dry_run,
+            yes,
+        }) => {
+            // Validate that exactly one matching mode is specified
+            let mode_count = [component.is_some(), pattern.is_some(), all]
+                .iter()
+                .filter(|&&x| x)
+                .count();
+
+            if mode_count == 0 {
+                return Err(miette::miette!(
+                    "Must specify one of --component, --pattern, or --all"
+                ));
+            }
+            if mode_count > 1 {
+                return Err(miette::miette!(
+                    "Cannot combine --component, --pattern, and --all. Specify only one."
+                ));
+            }
+
+            let match_mode = if let Some(name) = component {
+                elodin_db::drop::MatchMode::Fuzzy(name)
+            } else if let Some(pat) = pattern {
+                elodin_db::drop::MatchMode::Pattern(pat)
+            } else {
+                elodin_db::drop::MatchMode::All
+            };
+
+            elodin_db::drop::run(path, match_mode, dry_run, yes).into_diagnostic()
+        }
     }
 }

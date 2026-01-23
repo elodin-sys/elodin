@@ -5059,6 +5059,7 @@ dependencies = [
  "directories",
  "fastrand 2.3.0",
  "futures-lite",
+ "fuzzy-matcher",
  "hifitime",
  "hostname",
  "impeller2",

@@ -55,6 +55,7 @@ pub use error::Error;
 pub mod append_log;
 mod arrow;
 pub mod axum;
+pub mod drop;
 mod error;
 pub mod fix_timestamps;
 pub mod merge;

@@ -82,6 +82,7 @@ This document contains the help content for the `elodin-db` command-line program
 * [`elodin-db prune`↴](#elodin-db-prune)
 * [`elodin-db truncate`↴](#elodin-db-truncate)
 * [`elodin-db time-align`↴](#elodin-db-time-align)
+* [`elodin-db drop`↴](#elodin-db-drop)
 
 ## `elodin-db run`
 
@@ -363,4 +364,81 @@ elodin-db time-align --timestamp 0.0 --component "rocket.velocity" -y ./my-datab
 
 # Align all components to start at t=10.5 seconds
 elodin-db time-align --timestamp 10.5 --all -y ./my-database
+```
+
+
+## `elodin-db drop`
+
+Drop (delete) components from a database. Supports fuzzy name matching, glob patterns, and bulk removal with confirmation before deletion.
+
+**Usage:** `elodin-db drop [OPTIONS] <PATH>`
+
+###### **Arguments**
+
+* `<PATH>` — Path to the database directory
+
+###### **Options**
+
+* `--component <NAME>` — Component name to match using fuzzy matching. All matching components will be dropped.
+
+* `--pattern <PATTERN>` — Glob pattern to match component names. Supports `*` (any characters) and `?` (single character).
+
+* `--all` — Drop all components in the database
+
+* `--dry-run` — Show what would be dropped without modifying the database
+
+* `-y`, `--yes` — Skip the confirmation prompt
+
+###### **Matching Modes**
+
+You must specify exactly one of `--component`, `--pattern`, or `--all`:
+
+| Option | Behavior |
+|--------|----------|
+| `--component` | Fuzzy match against component names (e.g., "rocket.vel" matches "rocket.velocity") |
+| `--pattern` | Glob pattern match (e.g., "rocket.*" matches all components starting with "rocket.") |
+| `--all` | Drop all components in the database |
+
+###### **Fuzzy Matching**
+
+When using `--component`, the command uses fuzzy matching to find components:
+- Case-insensitive matching (unless pattern contains uppercase)
+- Matches partial strings (e.g., "vel" matches "velocity")
+- Results are ranked by match score, best matches first
+
+###### **Glob Pattern Matching**
+
+When using `--pattern`, the following wildcards are supported:
+- `*` — matches any sequence of characters
+- `?` — matches exactly one character
+
+Examples:
+- `rocket.*` — matches "rocket.velocity", "rocket.position", etc.
+- `*.velocity` — matches "rocket.velocity", "drone.velocity", etc.
+- `comp?` — matches "comp1", "comp2", but not "comp10"
+
+###### **Safety**
+
+This command permanently deletes data and cannot be undone. The command:
+- Shows all matching components and their entry counts before deletion
+- Requires explicit confirmation (unless `-y` is passed)
+- Supports `--dry-run` to preview what would be deleted
+
+###### **Example**
+
+```bash
+# Preview what would be dropped using fuzzy match
+elodin-db drop --component "rocket.vel" --dry-run ./my-database
+
+# Drop components matching fuzzy pattern (with confirmation)
+elodin-db drop --component "rocket" ./my-database
+
+# Drop components matching glob pattern
+elodin-db drop --pattern "rocket.*" -y ./my-database
+
+# Drop all velocity components
+elodin-db drop --pattern "*.velocity" -y ./my-database
+
+# Drop all components (dangerous!)
+elodin-db drop --all -y ./my-database
 ```
