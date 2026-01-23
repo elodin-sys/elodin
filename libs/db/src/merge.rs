@@ -9,7 +9,7 @@ use std::fs::{self, File};
 use std::io::{self, Write as IoWrite};
 use std::path::{Path, PathBuf};
 
-use crate::{Error, MetadataExt};
+use crate::{Error, MetadataExt, copy_dir_native, copy_file_native, sync_dir};
 use impeller2::types::ComponentId;
 use impeller2_wkt::{ComponentMetadata, DbConfig};
 
@@ -902,23 +902,6 @@ fn merge_db_state(
     merged_config.write(target.join("db_state"))?;
     Ok(())
 }
-
-/// Copy a file using reflink if available.
-///
-/// WARNING: This copies the entire file including sparse regions.
-/// For AppendLog files (index, data), use `copy_append_log_file` instead.
-fn copy_file_native(src: &Path, dst: &Path) -> Result<(), Error> {
-    let metadata = fs::metadata(src)?;
-    reflink_copy::reflink_or_copy(src, dst)?;
-    fs::set_permissions(dst, metadata.permissions())?;
-    let file = File::open(dst)?;
-    file.sync_all()?;
-    if let Some(parent) = dst.parent() {
-        sync_dir(parent)?;
-    }
-    Ok(())
-}
-
 /// Copy an AppendLog file (index or data), reading only the committed portion.
 ///
 /// AppendLog files are sparse files with 8GB logical size but only `committed_len`
@@ -983,39 +966,6 @@ fn copy_append_log_file(src: &Path, dst: &Path) -> Result<(), Error> {
     }
 
     Ok(())
-}
-
-/// Recursively copy a directory
-fn copy_dir_native(src: &Path, dst: &Path) -> Result<(), Error> {
-    fs::create_dir_all(dst)?;
-    for entry in fs::read_dir(src)? {
-        let entry = entry?;
-        let file_type = entry.file_type()?;
-        let src_path = entry.path();
-        let dst_path = dst.join(entry.file_name());
-        if file_type.is_dir() {
-            copy_dir_native(&src_path, &dst_path)?;
-        } else if file_type.is_file() {
-            copy_file_native(&src_path, &dst_path)?;
-        }
-    }
-    let metadata = fs::metadata(src)?;
-    fs::set_permissions(dst, metadata.permissions())?;
-    Ok(())
-}
-
-/// Sync a directory to ensure durability
-fn sync_dir(path: &Path) -> io::Result<()> {
-    #[cfg(target_family = "unix")]
-    {
-        let dir = File::open(path)?;
-        dir.sync_all()
-    }
-    #[cfg(not(target_family = "unix"))]
-    {
-        let _ = path;
-        Ok(())
-    }
 }
 
 /// Copy an index file while applying a timestamp offset.

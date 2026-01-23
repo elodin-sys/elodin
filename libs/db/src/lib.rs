@@ -227,7 +227,7 @@ impl<'a> Drop for SnapshotGuard<'a> {
     }
 }
 
-fn sync_dir(path: &Path) -> io::Result<()> {
+pub(crate) fn sync_dir(path: &Path) -> io::Result<()> {
     #[cfg(target_family = "unix")]
     {
         let dir = File::open(path)?;
@@ -240,7 +240,7 @@ fn sync_dir(path: &Path) -> io::Result<()> {
     }
 }
 
-fn copy_file_native(src: &Path, dst: &Path) -> Result<(), Error> {
+pub(crate) fn copy_file_native(src: &Path, dst: &Path) -> Result<(), Error> {
     let metadata = fs::metadata(src)?;
     reflink_copy::reflink_or_copy(src, dst)?;
     fs::set_permissions(dst, metadata.permissions())?;
@@ -252,7 +252,7 @@ fn copy_file_native(src: &Path, dst: &Path) -> Result<(), Error> {
     Ok(())
 }
 
-fn copy_dir_native(src: &Path, dst: &Path) -> Result<(), Error> {
+pub(crate) fn copy_dir_native(src: &Path, dst: &Path) -> Result<(), Error> {
     fs::create_dir_all(dst)?;
     for entry in fs::read_dir(src)? {
         let entry = entry?;
