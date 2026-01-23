@@ -64,7 +64,7 @@ pub(crate) mod sidebar;
 
 use sidebar::{
     SidebarKind, SidebarMaskState, apply_share_updates, collect_sidebar_gutter_updates,
-    tab_add_visible, tab_title_visible, tile_is_sidebar,
+    fix_invalid_drops, tab_add_visible, tab_title_visible, tile_is_sidebar,
 };
 
 pub(crate) fn plugin(app: &mut App) {
@@ -2257,6 +2257,10 @@ impl WidgetSystem for TileLayout<'_, '_> {
                 target_window,
             };
             tree.ui(&mut behavior, ui);
+
+            // Fix any invalid drops (non-sidebar tiles dropped into sidebar containers)
+            fix_invalid_drops(&mut tree);
+
             let empty_overlay_rect = if show_empty_overlay {
                 main_content_rect(&tree).or_else(|| Some(ui.max_rect()))
             } else {

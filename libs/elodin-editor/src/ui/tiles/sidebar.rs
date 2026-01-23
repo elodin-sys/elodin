@@ -714,3 +714,103 @@ pub fn tab_add_visible(tiles: &Tiles<Pane>, tabs: &egui_tiles::Tabs) -> bool {
     }
     true
 }
+
+/// Find the main content container (the first non-sidebar Tabs container in the root Linear).
+fn find_main_content_tabs(tree: &egui_tiles::Tree<Pane>) -> Option<TileId> {
+    let root = tree.root()?;
+    let Some(Tile::Container(Container::Linear(linear))) = tree.tiles.get(root) else {
+        // If root is directly a Tabs, use it
+        if matches!(
+            tree.tiles.get(root),
+            Some(Tile::Container(Container::Tabs(_)))
+        ) {
+            return Some(root);
+        }
+        return None;
+    };
+
+    for &child_id in &linear.children {
+        if !tile_is_sidebar(&tree.tiles, child_id) {
+            if let Some(Tile::Container(Container::Tabs(_))) = tree.tiles.get(child_id) {
+                return Some(child_id);
+            }
+        }
+    }
+    None
+}
+
+/// Find all sidebar container IDs (containers that only contain sidebar panes).
+fn find_sidebar_containers(tree: &egui_tiles::Tree<Pane>) -> Vec<TileId> {
+    tree.tiles
+        .iter()
+        .filter_map(|(tile_id, tile)| {
+            if matches!(tile, Tile::Container(_)) && tile_is_sidebar(&tree.tiles, *tile_id) {
+                Some(*tile_id)
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+/// Find non-sidebar tiles that are direct children of sidebar containers.
+fn find_misplaced_tiles(tree: &egui_tiles::Tree<Pane>) -> Vec<(TileId, TileId)> {
+    let mut misplaced = Vec::new();
+    let sidebar_containers = find_sidebar_containers(tree);
+
+    for container_id in sidebar_containers {
+        let children: Vec<TileId> = match tree.tiles.get(container_id) {
+            Some(Tile::Container(Container::Tabs(tabs))) => tabs.children.clone(),
+            Some(Tile::Container(Container::Linear(linear))) => linear.children.clone(),
+            _ => continue,
+        };
+
+        for child_id in children {
+            if !tile_is_sidebar(&tree.tiles, child_id) {
+                misplaced.push((child_id, container_id));
+            }
+        }
+    }
+    misplaced
+}
+
+/// Fix invalid drops by moving non-sidebar tiles out of sidebar containers.
+/// Returns true if any fixes were made.
+pub fn fix_invalid_drops(tree: &mut egui_tiles::Tree<Pane>) -> bool {
+    let misplaced = find_misplaced_tiles(tree);
+    if misplaced.is_empty() {
+        return false;
+    }
+
+    let Some(main_tabs_id) = find_main_content_tabs(tree) else {
+        return false;
+    };
+
+    let mut fixed = false;
+    for (tile_id, old_parent_id) in misplaced {
+        // Remove from old parent
+        if let Some(Tile::Container(container)) = tree.tiles.get_mut(old_parent_id) {
+            match container {
+                Container::Tabs(tabs) => {
+                    tabs.children.retain(|&id| id != tile_id);
+                }
+                Container::Linear(linear) => {
+                    linear.children.retain(|&id| id != tile_id);
+                }
+                Container::Grid(_) => continue,
+            }
+        }
+
+        // Add to main content Tabs
+        if let Some(Tile::Container(Container::Tabs(main_tabs))) = tree.tiles.get_mut(main_tabs_id)
+        {
+            if !main_tabs.children.contains(&tile_id) {
+                main_tabs.children.push(tile_id);
+                main_tabs.active = Some(tile_id);
+                fixed = true;
+            }
+        }
+    }
+
+    fixed
+}
