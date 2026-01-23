@@ -1668,7 +1668,7 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
 
             let text_color = match tab_state {
                 TabState::Selected => scheme.text_primary,
-                TabState::Inactive => scheme.text_secondary,
+                TabState::Inactive => with_opacity(scheme.text_primary, 0.5),
             };
 
             ui.painter().rect_filled(rect, 0.0, bg_color);
@@ -1760,7 +1760,7 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
                 EImageButton::new(self.icons.close)
                     .scale(1.3, 1.3)
                     .image_tint(match tab_state {
-                        TabState::Inactive => scheme.text_secondary,
+                        TabState::Inactive => with_opacity(scheme.text_primary, 0.5),
                         TabState::Selected => scheme.text_primary,
                     })
                     .bg_color(colors::TRANSPARENT)
