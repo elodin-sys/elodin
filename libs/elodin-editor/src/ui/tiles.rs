@@ -1471,7 +1471,7 @@ impl TileState {
     pub fn new(tree_id: Id) -> Self {
         Self {
             tree: egui_tiles::Tree::new_tabs(tree_id, vec![]),
-            tree_actions: smallvec![TreeAction::AddSidebars],
+            tree_actions: smallvec![],
             graphs: HashMap::new(),
             container_titles: HashMap::new(),
             sidebar_state: SidebarMaskState::default(),
@@ -1481,7 +1481,7 @@ impl TileState {
 
     fn reset_tree(&mut self) {
         self.tree = egui_tiles::Tree::new_tabs(self.tree_id, vec![]);
-        self.tree_actions = smallvec![TreeAction::AddSidebars];
+        self.tree_actions = smallvec![];
         self.sidebar_state = SidebarMaskState::default();
     }
 }
