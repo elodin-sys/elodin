@@ -107,10 +107,7 @@ pub struct MergeArgs {
     pub dry_run: bool,
     #[clap(long, short, help = "Skip confirmation prompt")]
     pub yes: bool,
-    #[clap(
-        long,
-        help = "Alignment timestamp (seconds) for an event in DB1"
-    )]
+    #[clap(long, help = "Alignment timestamp (seconds) for an event in DB1")]
     pub align1: Option<f64>,
     #[clap(
         long,

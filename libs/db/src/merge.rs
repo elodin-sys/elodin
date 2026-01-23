@@ -43,8 +43,8 @@ struct DatabaseInfo {
 /// * `auto_confirm` - If true, skip the confirmation prompt
 /// * `align1` - Optional alignment timestamp (seconds) for an event in DB1
 /// * `align2` - Optional alignment timestamp (seconds) for the same event in DB2.
-///              The database with the earlier anchor is shifted forward to align with the later one.
-///              This ensures timestamps never go negative (important for monotonic datasets).
+///   The database with the earlier anchor is shifted forward to align with the later one.
+///   This ensures timestamps never go negative (important for monotonic datasets).
 ///
 /// # Returns
 /// * `Ok(())` if successful
