@@ -80,6 +80,7 @@ This document contains the help content for the `elodin-db` command-line program
 * [`elodin-db fix-timestamps`↴](#elodin-db-fix-timestamps)
 * [`elodin-db merge`↴](#elodin-db-merge)
 * [`elodin-db prune`↴](#elodin-db-prune)
+* [`elodin-db truncate`↴](#elodin-db-truncate)
 
 ## `elodin-db run`
 
@@ -265,4 +266,46 @@ elodin-db prune --dry-run ./my-database
 
 # Prune empty components
 elodin-db prune -y ./my-database
+```
+
+
+## `elodin-db truncate`
+
+Clear all data from a database while preserving component schemas and metadata. This effectively resets the database to an empty state, ready for fresh data collection.
+
+**Usage:** `elodin-db truncate [OPTIONS] <PATH>`
+
+###### **Arguments**
+
+* `<PATH>` — Path to the database directory
+
+###### **Options**
+
+* `--dry-run` — Show what would be truncated without modifying the database
+
+* `-y`, `--yes` — Skip the confirmation prompt
+
+###### **What is Preserved**
+
+When truncating a database, the following are preserved:
+- Component schemas (data type definitions)
+- Component metadata (names, IDs)
+- Message log metadata
+
+###### **What is Removed**
+
+- All time-series data entries
+- All message log entries
+
+###### **Example**
+
+```bash
+# Preview what would be truncated
+elodin-db truncate --dry-run ./my-database
+
+# Truncate all data (requires confirmation)
+elodin-db truncate ./my-database
+
+# Truncate without confirmation prompt
+elodin-db truncate -y ./my-database
 ```

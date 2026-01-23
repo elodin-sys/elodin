@@ -32,6 +32,8 @@ enum Commands {
     Merge(MergeArgs),
     #[command(about = "Remove empty components from a database")]
     Prune(PruneArgs),
+    #[command(about = "Clear all data from a database, preserving schemas")]
+    Truncate(TruncateArgs),
 }
 
 #[derive(clap::Args, Clone, Debug)]
@@ -80,6 +82,16 @@ struct PruneArgs {
     #[clap(help = "Path to the database directory")]
     path: PathBuf,
     #[clap(long, help = "Show what would be pruned without modifying")]
+    dry_run: bool,
+    #[clap(long, short, help = "Skip confirmation prompt")]
+    yes: bool,
+}
+
+#[derive(clap::Args, Clone, Debug)]
+struct TruncateArgs {
+    #[clap(help = "Path to the database directory")]
+    path: PathBuf,
+    #[clap(long, help = "Show what would be truncated without modifying")]
     dry_run: bool,
     #[clap(long, short, help = "Skip confirmation prompt")]
     yes: bool,
@@ -269,5 +281,8 @@ async fn main() -> miette::Result<()> {
             db1, db2, output, prefix1, prefix2, dry_run, yes, align1, align2,
         )
         .into_diagnostic(),
+        Commands::Truncate(TruncateArgs { path, dry_run, yes }) => {
+            elodin_db::truncate::run(path, dry_run, yes).into_diagnostic()
+        }
     }
 }
