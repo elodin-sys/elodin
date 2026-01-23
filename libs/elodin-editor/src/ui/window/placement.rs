@@ -4,9 +4,11 @@ use std::{collections::HashMap, time::Duration};
 use bevy::log::error;
 use bevy::{
     app::AppExit,
+    camera::RenderTarget,
+    ecs::system::SystemParam,
     log::{info, warn},
     prelude::*,
-    window::{PrimaryWindow, WindowCloseRequested},
+    window::{PrimaryWindow, WindowCloseRequested, WindowDestroyed, WindowRef},
     winit::WINIT_WINDOWS,
 };
 use bevy_defer::{AccessError, AsyncCommandsExtension, AsyncWorld};
@@ -19,22 +21,81 @@ use winit::{
     window::Window as WinitWindow,
 };
 
-use crate::ui::tiles::{WindowId, WindowRelayout, WindowState};
+use crate::{
+    plugins::navigation_gizmo::RenderLayerAlloc,
+    ui::{
+        FocusedWindow,
+        tiles::{WindowId, WindowRelayout, WindowState},
+    },
+};
+
+#[derive(SystemParam)]
+pub struct WindowCleanup<'w, 's> {
+    primary: Query<'w, 's, &'static WindowId, With<PrimaryWindow>>,
+    window_states: Query<'w, 's, (Entity, &'static WindowId, &'static mut WindowState)>,
+    render_layer_alloc: ResMut<'w, RenderLayerAlloc>,
+    focused_window: ResMut<'w, FocusedWindow>,
+    commands: Commands<'w, 's>,
+    exit: MessageWriter<'w, AppExit>,
+}
 
 pub fn handle_window_close(
     mut events: MessageReader<WindowCloseRequested>,
-    primary: Query<&WindowId, With<PrimaryWindow>>,
-    mut exit: MessageWriter<AppExit>,
+    mut cleanup: WindowCleanup,
 ) {
     for evt in events.read() {
         let entity = evt.window;
-        if primary
+        if cleanup
+            .primary
             .get(entity)
             .map(|window_id| window_id.is_primary())
             .unwrap_or(false)
         {
-            exit.write(AppExit::Success);
+            cleanup.exit.write(AppExit::Success);
+            continue;
         }
+        cleanup_secondary_window(entity, &mut cleanup);
+    }
+}
+
+pub fn handle_window_destroyed(
+    mut events: MessageReader<WindowDestroyed>,
+    mut cleanup: WindowCleanup,
+    cameras: Query<(Entity, &Camera)>,
+) {
+    for evt in events.read() {
+        let entity = evt.window;
+        if cleanup
+            .primary
+            .get(entity)
+            .map(|window_id| window_id.is_primary())
+            .unwrap_or(false)
+        {
+            cleanup.exit.write(AppExit::Success);
+            continue;
+        }
+
+        cleanup_secondary_window(entity, &mut cleanup);
+
+        for (camera_entity, camera) in cameras.iter() {
+            if matches!(camera.target, RenderTarget::Window(WindowRef::Entity(target)) if target == entity)
+            {
+                cleanup.commands.entity(camera_entity).despawn();
+            }
+        }
+    }
+}
+
+fn cleanup_secondary_window(entity: Entity, cleanup: &mut WindowCleanup) {
+    if let Ok((_, _, mut window_state)) = cleanup.window_states.get_mut(entity) {
+        window_state
+            .tile_state
+            .clear(&mut cleanup.commands, &mut cleanup.render_layer_alloc);
+        window_state.graph_entities.clear();
+    }
+
+    if cleanup.focused_window.0 == Some(entity) {
+        cleanup.focused_window.0 = None;
     }
 }
 

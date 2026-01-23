@@ -892,6 +892,12 @@ impl TileState {
                 Tile::Pane(Pane::VideoStream(pane)) => {
                     commands.entity(pane.entity).despawn();
                 }
+                Tile::Pane(Pane::ActionTile(pane)) => {
+                    commands.entity(pane.entity).despawn();
+                }
+                Tile::Pane(Pane::QueryTable(pane)) => {
+                    commands.entity(pane.entity).despawn();
+                }
                 Tile::Pane(Pane::QueryPlot(pane)) => {
                     commands.entity(pane.entity).despawn();
                 }
