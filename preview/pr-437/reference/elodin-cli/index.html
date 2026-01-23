@@ -598,6 +598,35 @@
                             
                         </li>
                         
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-437/reference/elodin-cli/#elodin-db-time-align">elodin-db time-align</a>
+                            
+                            <ul>
+                                
+                                <li>
+                                    <a href="https://docs.elodin.systems/preview/pr-437/reference/elodin-cli/#arguments-8">Arguments</a>
+                                </li>
+                                
+                                <li>
+                                    <a href="https://docs.elodin.systems/preview/pr-437/reference/elodin-cli/#options-7">Options</a>
+                                </li>
+                                
+                                <li>
+                                    <a href="https://docs.elodin.systems/preview/pr-437/reference/elodin-cli/#component-selection">Component Selection</a>
+                                </li>
+                                
+                                <li>
+                                    <a href="https://docs.elodin.systems/preview/pr-437/reference/elodin-cli/#how-it-works">How It Works</a>
+                                </li>
+                                
+                                <li>
+                                    <a href="https://docs.elodin.systems/preview/pr-437/reference/elodin-cli/#example-4">Example</a>
+                                </li>
+                                
+                            </ul>
+                            
+                        </li>
+                        
                     </ul>
                     
                 </li>
@@ -663,6 +692,7 @@
 <li><a href="https://docs.elodin.systems/preview/pr-437/reference/elodin-cli/#elodin-db-merge"><code>elodin-db merge</code>↴</a></li>
 <li><a href="https://docs.elodin.systems/preview/pr-437/reference/elodin-cli/#elodin-db-prune"><code>elodin-db prune</code>↴</a></li>
 <li><a href="https://docs.elodin.systems/preview/pr-437/reference/elodin-cli/#elodin-db-truncate"><code>elodin-db truncate</code>↴</a></li>
+<li><a href="https://docs.elodin.systems/preview/pr-437/reference/elodin-cli/#elodin-db-time-align"><code>elodin-db time-align</code>↴</a></li>
 </ul>
 <h2 id="elodin-db-run"><code>elodin-db run</code></h2>
 <p>Run the Elodin database server</p>
@@ -876,6 +906,58 @@
 </span><span class="z-source z-shell z-bash">
 </span><span class="z-source z-shell z-bash"><span class="z-comment z-line z-number-sign z-shell"><span class="z-punctuation z-definition z-comment z-begin z-shell">#</span></span><span class="z-comment z-line z-number-sign z-shell"> Truncate without confirmation prompt</span><span class="z-comment z-line z-number-sign z-shell">
 </span></span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">elodin-db</span></span><span class="z-meta z-function-call z-arguments z-shell"> truncate<span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> -</span>y</span> ./my-database</span>
+</span></code></pre>
+<h2 id="elodin-db-time-align"><code>elodin-db time-align</code></h2>
+<p>Align component timestamps to a target timestamp. This is useful when a database contains components that were recorded at the same real-world moment but have different timestamp offsets.</p>
+<p><strong>Usage:</strong> <code>elodin-db time-align [OPTIONS] --timestamp &lt;TIMESTAMP&gt; &lt;PATH&gt;</code></p>
+<h6 id="arguments-8"><strong>Arguments</strong></h6>
+<ul>
+<li><code>&lt;PATH&gt;</code> — Path to the database directory</li>
+</ul>
+<h6 id="options-7"><strong>Options</strong></h6>
+<ul>
+<li>
+<p><code>--timestamp &lt;SECONDS&gt;</code> — Target timestamp (in seconds) to align the first sample to (required)</p>
+</li>
+<li>
+<p><code>--all</code> — Align all components in the database</p>
+</li>
+<li>
+<p><code>--component &lt;NAME&gt;</code> — Align only a specific component by name</p>
+</li>
+<li>
+<p><code>--dry-run</code> — Show what would be changed without modifying the database</p>
+</li>
+<li>
+<p><code>-y</code>, <code>--yes</code> — Skip the confirmation prompt</p>
+</li>
+</ul>
+<h6 id="component-selection"><strong>Component Selection</strong></h6>
+<p>You must specify either <code>--all</code> or <code>--component</code>:</p>
+<ul>
+<li><code>--all</code> aligns every component in the database, shifting each so its first timestamp matches the target</li>
+<li><code>--component &lt;NAME&gt;</code> aligns only the named component</li>
+</ul>
+<h6 id="how-it-works"><strong>How It Works</strong></h6>
+<p>For each selected component, the command:</p>
+<ol>
+<li>Finds the first (minimum) timestamp in the component</li>
+<li>Calculates the offset needed to shift that timestamp to the target</li>
+<li>Applies the offset to all timestamps in the component</li>
+</ol>
+<p>Each component is aligned independently, so if two components have different starting timestamps, they will both end up with their first timestamp at the target, but the relative timing within each component is preserved.</p>
+<h6 id="example-4"><strong>Example</strong></h6>
+<pre data-lang="bash" class="language-bash z-code"><code class="language-bash" data-lang="bash"><span class="z-source z-shell z-bash"><span class="z-comment z-line z-number-sign z-shell"><span class="z-punctuation z-definition z-comment z-begin z-shell">#</span></span><span class="z-comment z-line z-number-sign z-shell"> Preview alignment of all components to t=0</span><span class="z-comment z-line z-number-sign z-shell">
+</span></span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">elodin-db</span></span><span class="z-meta z-function-call z-arguments z-shell"> time-align<span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> --</span>timestamp</span> 0.0<span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> --</span>all</span><span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> --</span>dry-run</span> ./my-database</span>
+</span><span class="z-source z-shell z-bash">
+</span><span class="z-source z-shell z-bash"><span class="z-comment z-line z-number-sign z-shell"><span class="z-punctuation z-definition z-comment z-begin z-shell">#</span></span><span class="z-comment z-line z-number-sign z-shell"> Align all components to start at t=0</span><span class="z-comment z-line z-number-sign z-shell">
+</span></span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">elodin-db</span></span><span class="z-meta z-function-call z-arguments z-shell"> time-align<span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> --</span>timestamp</span> 0.0<span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> --</span>all</span><span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> -</span>y</span> ./my-database</span>
+</span><span class="z-source z-shell z-bash">
+</span><span class="z-source z-shell z-bash"><span class="z-comment z-line z-number-sign z-shell"><span class="z-punctuation z-definition z-comment z-begin z-shell">#</span></span><span class="z-comment z-line z-number-sign z-shell"> Align a specific component to t=0</span><span class="z-comment z-line z-number-sign z-shell">
+</span></span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">elodin-db</span></span><span class="z-meta z-function-call z-arguments z-shell"> time-align<span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> --</span>timestamp</span> 0.0<span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> --</span>component</span> <span class="z-string z-quoted z-double z-shell"><span class="z-punctuation z-definition z-string z-begin z-shell">&quot;</span>rocket.velocity<span class="z-punctuation z-definition z-string z-end z-shell">&quot;</span></span><span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> -</span>y</span> ./my-database</span>
+</span><span class="z-source z-shell z-bash">
+</span><span class="z-source z-shell z-bash"><span class="z-comment z-line z-number-sign z-shell"><span class="z-punctuation z-definition z-comment z-begin z-shell">#</span></span><span class="z-comment z-line z-number-sign z-shell"> Align all components to start at t=10.5 seconds</span><span class="z-comment z-line z-number-sign z-shell">
+</span></span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">elodin-db</span></span><span class="z-meta z-function-call z-arguments z-shell"> time-align<span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> --</span>timestamp</span> 10.5<span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> --</span>all</span><span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> -</span>y</span> ./my-database</span>
 </span></code></pre>
 
                   
