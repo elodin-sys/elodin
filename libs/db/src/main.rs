@@ -102,6 +102,16 @@ pub struct MergeArgs {
     pub dry_run: bool,
     #[clap(long, short, help = "Skip confirmation prompt")]
     pub yes: bool,
+    #[clap(
+        long,
+        help = "Alignment timestamp (seconds) in DB1 - defines the output timeline"
+    )]
+    pub align1: Option<f64>,
+    #[clap(
+        long,
+        help = "Alignment timestamp (seconds) in DB2 - will be shifted to align with align1"
+    )]
+    pub align2: Option<f64>,
 }
 
 #[derive(ValueEnum, Clone, Copy, Debug)]
@@ -249,7 +259,11 @@ async fn main() -> miette::Result<()> {
             prefix2,
             dry_run,
             yes,
-        }) => elodin_db::merge::run(db1, db2, output, prefix1, prefix2, dry_run, yes)
-            .into_diagnostic(),
+            align1,
+            align2,
+        }) => elodin_db::merge::run(
+            db1, db2, output, prefix1, prefix2, dry_run, yes, align1, align2,
+        )
+        .into_diagnostic(),
     }
 }

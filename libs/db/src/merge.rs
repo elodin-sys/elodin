@@ -41,10 +41,13 @@ struct DatabaseInfo {
 /// * `prefix2` - Optional prefix for second database components
 /// * `dry_run` - If true, only show what would be done without creating output
 /// * `auto_confirm` - If true, skip the confirmation prompt
+/// * `align1` - Optional alignment timestamp (seconds) in DB1 - defines output timeline
+/// * `align2` - Optional alignment timestamp (seconds) in DB2 - will be shifted to align with align1
 ///
 /// # Returns
 /// * `Ok(())` if successful
 /// * `Err(Error)` if the operation fails
+#[allow(clippy::too_many_arguments)]
 pub fn run(
     db1: PathBuf,
     db2: PathBuf,
@@ -53,7 +56,36 @@ pub fn run(
     prefix2: Option<String>,
     dry_run: bool,
     auto_confirm: bool,
+    align1: Option<f64>,
+    align2: Option<f64>,
 ) -> Result<(), Error> {
+    // Validate alignment arguments: both must be provided or neither
+    // Returns (db1_offset, db2_offset) - one will be 0, the other will be positive
+    // We always shift forward (never backward past 0) to avoid negative timestamps
+    let (db1_offset, db2_offset) = match (align1, align2) {
+        (Some(a1), Some(a2)) => {
+            // Convert from seconds to microseconds
+            let a1_micros = (a1 * 1_000_000.0) as i64;
+            let a2_micros = (a2 * 1_000_000.0) as i64;
+
+            // Always shift forward: the dataset with the earlier anchor gets shifted
+            // to align with the later anchor
+            if a1_micros >= a2_micros {
+                // DB1's anchor is later or equal - shift DB2 forward to match
+                (0i64, a1_micros - a2_micros)
+            } else {
+                // DB2's anchor is later - shift DB1 forward to match
+                (a2_micros - a1_micros, 0i64)
+            }
+        }
+        (None, None) => (0, 0),
+        _ => {
+            return Err(Error::Io(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "Both --align1 and --align2 must be provided together, or neither",
+            )));
+        }
+    };
     // Validate source databases exist
     if !db1.exists() {
         return Err(Error::MissingDbState(db1));
@@ -132,6 +164,93 @@ pub fn run(
         println!("      You can create a new schematic for the combined data.");
     }
 
+    // Show time alignment information if specified
+    if let (Some(a1), Some(a2)) = (align1, align2) {
+        let db1_offset_secs = db1_offset as f64 / 1_000_000.0;
+        let db2_offset_secs = db2_offset as f64 / 1_000_000.0;
+
+        println!("\nTime Alignment:");
+        println!("  DB1 anchor: {:.3}s", a1);
+        println!("  DB2 anchor: {:.3}s", a2);
+
+        // Show which database is being shifted (always forward, never backward)
+        if db1_offset > 0 {
+            println!(
+                "  Shifting DB1 forward by {:.3}s to align with DB2",
+                db1_offset_secs
+            );
+        } else if db2_offset > 0 {
+            println!(
+                "  Shifting DB2 forward by {:.3}s to align with DB1",
+                db2_offset_secs
+            );
+        } else {
+            println!("  No shift needed (anchors are equal)");
+        }
+
+        // Show time range transformation for DB1
+        if let Some((start, end)) = db1_info.time_range {
+            let start_secs = start as f64 / 1_000_000.0;
+            let end_secs = end as f64 / 1_000_000.0;
+            if db1_offset > 0 {
+                let new_start_secs = start_secs + db1_offset_secs;
+                let new_end_secs = end_secs + db1_offset_secs;
+                println!(
+                    "  DB1 time range: {:.3}s - {:.3}s -> {:.3}s - {:.3}s (shifted forward)",
+                    start_secs, end_secs, new_start_secs, new_end_secs
+                );
+            } else {
+                println!(
+                    "  DB1 time range: {:.3}s - {:.3}s (unchanged)",
+                    start_secs, end_secs
+                );
+            }
+        }
+
+        // Show time range transformation for DB2
+        if let Some((start, end)) = db2_info.time_range {
+            let start_secs = start as f64 / 1_000_000.0;
+            let end_secs = end as f64 / 1_000_000.0;
+            if db2_offset > 0 {
+                let new_start_secs = start_secs + db2_offset_secs;
+                let new_end_secs = end_secs + db2_offset_secs;
+                println!(
+                    "  DB2 time range: {:.3}s - {:.3}s -> {:.3}s - {:.3}s (shifted forward)",
+                    start_secs, end_secs, new_start_secs, new_end_secs
+                );
+            } else {
+                println!(
+                    "  DB2 time range: {:.3}s - {:.3}s (unchanged)",
+                    start_secs, end_secs
+                );
+            }
+        }
+
+        // Warn if anchor is outside the dataset's time range
+        if let Some((start, end)) = db1_info.time_range {
+            let a1_micros = (a1 * 1_000_000.0) as i64;
+            if a1_micros < start || a1_micros > end {
+                eprintln!(
+                    "\nWarning: DB1 anchor ({:.3}s) is outside its time range ({:.3}s - {:.3}s)",
+                    a1,
+                    start as f64 / 1_000_000.0,
+                    end as f64 / 1_000_000.0
+                );
+            }
+        }
+        if let Some((start, end)) = db2_info.time_range {
+            let a2_micros = (a2 * 1_000_000.0) as i64;
+            if a2_micros < start || a2_micros > end {
+                eprintln!(
+                    "\nWarning: DB2 anchor ({:.3}s) is outside its time range ({:.3}s - {:.3}s)",
+                    a2,
+                    start as f64 / 1_000_000.0,
+                    end as f64 / 1_000_000.0
+                );
+            }
+        }
+    }
+
     if dry_run {
         println!("\nDRY RUN - no changes will be made");
         return Ok(());
@@ -150,8 +269,10 @@ pub fn run(
     }
 
     // Create output directory structure
+    // Note: Path::new("merged").parent() returns Some("") not None, so we check for empty
     let parent_dir = output
         .parent()
+        .filter(|p| !p.as_os_str().is_empty())
         .map(Path::to_path_buf)
         .unwrap_or_else(|| PathBuf::from("."));
     fs::create_dir_all(&parent_dir)?;
@@ -166,21 +287,32 @@ pub fn run(
     }
     fs::create_dir_all(&tmp_output)?;
 
-    // Merge databases
+    // Merge databases with their respective offsets
+    // One of the offsets will be 0, the other will be positive (shift forward)
     print!("Merging {}... ", db1.display());
     io::stdout().flush()?;
-    let stats1 = merge_database(&db1, &tmp_output, prefix1.as_deref())?;
+    let db1_offset_opt = if db1_offset != 0 {
+        Some(db1_offset)
+    } else {
+        None
+    };
+    let stats1 = merge_database(&db1, &tmp_output, prefix1.as_deref(), db1_offset_opt)?;
     println!("done ({} components)", stats1.components_copied);
 
     print!("Merging {}... ", db2.display());
     io::stdout().flush()?;
-    let stats2 = merge_database(&db2, &tmp_output, prefix2.as_deref())?;
+    let db2_offset_opt = if db2_offset != 0 {
+        Some(db2_offset)
+    } else {
+        None
+    };
+    let stats2 = merge_database(&db2, &tmp_output, prefix2.as_deref(), db2_offset_opt)?;
     println!("done ({} components)", stats2.components_copied);
 
     // Merge db_state
     print!("Writing db_state... ");
     io::stdout().flush()?;
-    merge_db_state(&db1, &db2, &tmp_output)?;
+    merge_db_state(&db1, &db2, &tmp_output, db1_offset_opt, db2_offset_opt)?;
     println!("done");
 
     // Report any message log conflicts
@@ -433,7 +565,18 @@ fn apply_prefix(name: &str, prefix: Option<&str>) -> String {
 }
 
 /// Merge a single source database into the target directory
-fn merge_database(source: &Path, target: &Path, prefix: Option<&str>) -> Result<MergeStats, Error> {
+///
+/// # Arguments
+/// * `source` - Path to the source database
+/// * `target` - Path to the target (output) database directory
+/// * `prefix` - Optional prefix to apply to component names
+/// * `timestamp_offset` - Optional offset (in microseconds) to apply to all timestamps
+fn merge_database(
+    source: &Path,
+    target: &Path,
+    prefix: Option<&str>,
+    timestamp_offset: Option<i64>,
+) -> Result<MergeStats, Error> {
     let mut stats = MergeStats::default();
 
     // Process each component directory
@@ -448,7 +591,7 @@ fn merge_database(source: &Path, target: &Path, prefix: Option<&str>) -> Result<
 
         // Handle message logs separately
         if dir_name == "msgs" {
-            merge_message_logs(&path, &target.join("msgs"), &mut stats)?;
+            merge_message_logs(&path, &target.join("msgs"), &mut stats, timestamp_offset)?;
             continue;
         }
 
@@ -463,7 +606,7 @@ fn merge_database(source: &Path, target: &Path, prefix: Option<&str>) -> Result<
         }
 
         // Copy component with prefix
-        copy_component_with_prefix(&path, target, prefix)?;
+        copy_component_with_prefix(&path, target, prefix, timestamp_offset)?;
         stats.components_copied += 1;
     }
 
@@ -471,10 +614,17 @@ fn merge_database(source: &Path, target: &Path, prefix: Option<&str>) -> Result<
 }
 
 /// Copy a component directory with a new prefixed name
+///
+/// # Arguments
+/// * `src_component_dir` - Path to the source component directory
+/// * `target_db_dir` - Path to the target database directory
+/// * `prefix` - Optional prefix to apply to the component name
+/// * `timestamp_offset` - Optional offset (in microseconds) to apply to timestamps
 fn copy_component_with_prefix(
     src_component_dir: &Path,
     target_db_dir: &Path,
     prefix: Option<&str>,
+    timestamp_offset: Option<i64>,
 ) -> Result<(), Error> {
     // Read existing metadata
     let metadata_path = src_component_dir.join("metadata");
@@ -515,16 +665,23 @@ fn copy_component_with_prefix(
         copy_file_native(&schema_src, &new_component_dir.join("schema"))?;
     }
 
-    // Copy index file (unchanged)
+    // Copy index file - apply timestamp offset if provided
+    // Use sparse-aware copy to avoid expanding 8GB sparse files
     let index_src = src_component_dir.join("index");
     if index_src.exists() {
-        copy_file_native(&index_src, &new_component_dir.join("index"))?;
+        let index_dst = new_component_dir.join("index");
+        if let Some(offset) = timestamp_offset {
+            copy_index_with_offset(&index_src, &index_dst, offset)?;
+        } else {
+            copy_append_log_file(&index_src, &index_dst)?;
+        }
     }
 
-    // Copy data file (unchanged)
+    // Copy data file (unchanged - data values are not timestamps)
+    // Use sparse-aware copy to avoid expanding 8GB sparse files
     let data_src = src_component_dir.join("data");
     if data_src.exists() {
-        copy_file_native(&data_src, &new_component_dir.join("data"))?;
+        copy_append_log_file(&data_src, &new_component_dir.join("data"))?;
     }
 
     // Write updated metadata with new name and component_id
@@ -552,10 +709,17 @@ fn copy_component_with_prefix(
 }
 
 /// Merge message logs from source to target
+///
+/// # Arguments
+/// * `source_msgs` - Path to the source msgs directory
+/// * `target_msgs` - Path to the target msgs directory
+/// * `stats` - Mutable reference to merge statistics
+/// * `timestamp_offset` - Optional offset (in microseconds) to apply to timestamps
 fn merge_message_logs(
     source_msgs: &Path,
     target_msgs: &Path,
     stats: &mut MergeStats,
+    timestamp_offset: Option<i64>,
 ) -> Result<(), Error> {
     if !source_msgs.exists() {
         return Ok(());
@@ -581,8 +745,8 @@ fn merge_message_logs(
             continue;
         }
 
-        // Copy the message log directory
-        copy_dir_native(&path, &target_msg_dir)?;
+        // Copy the message log directory, applying timestamp offset to index if needed
+        copy_msg_log_with_offset(&path, &target_msg_dir, timestamp_offset)?;
         stats.msg_logs_copied += 1;
     }
 
@@ -590,8 +754,62 @@ fn merge_message_logs(
     Ok(())
 }
 
+/// Copy a message log directory, optionally applying a timestamp offset to the index
+fn copy_msg_log_with_offset(
+    src: &Path,
+    dst: &Path,
+    timestamp_offset: Option<i64>,
+) -> Result<(), Error> {
+    fs::create_dir_all(dst)?;
+
+    for entry in fs::read_dir(src)? {
+        let entry = entry?;
+        let file_type = entry.file_type()?;
+        let src_path = entry.path();
+        let dst_path = dst.join(entry.file_name());
+        let file_name = entry.file_name();
+        let file_name_str = file_name.to_string_lossy();
+
+        if file_type.is_dir() {
+            copy_dir_native(&src_path, &dst_path)?;
+        } else if file_type.is_file() {
+            // Apply offset to index file if timestamp_offset is provided
+            // Use sparse-aware copy for AppendLog files (index, data)
+            if file_name_str == "index" {
+                if let Some(offset) = timestamp_offset {
+                    copy_index_with_offset(&src_path, &dst_path, offset)?;
+                } else {
+                    copy_append_log_file(&src_path, &dst_path)?;
+                }
+            } else if file_name_str == "data" {
+                // Data files are also AppendLog sparse files
+                copy_append_log_file(&src_path, &dst_path)?;
+            } else {
+                copy_file_native(&src_path, &dst_path)?;
+            }
+        }
+    }
+
+    let metadata = fs::metadata(src)?;
+    fs::set_permissions(dst, metadata.permissions())?;
+    Ok(())
+}
+
 /// Merge db_state from both databases, pruning schematics
-fn merge_db_state(db1: &Path, db2: &Path, target: &Path) -> Result<(), Error> {
+///
+/// # Arguments
+/// * `db1` - Path to the first database
+/// * `db2` - Path to the second database
+/// * `target` - Path to the target (output) database
+/// * `db1_offset` - Optional offset (in microseconds) applied to DB1's timestamps
+/// * `db2_offset` - Optional offset (in microseconds) applied to DB2's timestamps
+fn merge_db_state(
+    db1: &Path,
+    db2: &Path,
+    target: &Path,
+    db1_offset: Option<i64>,
+    db2_offset: Option<i64>,
+) -> Result<(), Error> {
     let config1 = DbConfig::read(db1.join("db_state"))?;
     let config2 = DbConfig::read(db2.join("db_state"))?;
 
@@ -609,9 +827,22 @@ fn merge_db_state(db1: &Path, db2: &Path, target: &Path) -> Result<(), Error> {
     merged_config.metadata.remove("schematic.path");
     merged_config.metadata.remove("schematic.content");
 
-    // Use earliest time.start_timestamp from both
-    let ts1 = config1.time_start_timestamp_micros();
-    let ts2 = config2.time_start_timestamp_micros();
+    // Use earliest time.start_timestamp from both (after applying offsets)
+    let ts1 = config1.time_start_timestamp_micros().map(|t1| {
+        if let Some(offset) = db1_offset {
+            t1.saturating_add(offset)
+        } else {
+            t1
+        }
+    });
+    let ts2 = config2.time_start_timestamp_micros().map(|t2| {
+        if let Some(offset) = db2_offset {
+            t2.saturating_add(offset)
+        } else {
+            t2
+        }
+    });
+
     match (ts1, ts2) {
         (Some(t1), Some(t2)) => {
             merged_config.set_time_start_timestamp_micros(t1.min(t2));
@@ -630,7 +861,10 @@ fn merge_db_state(db1: &Path, db2: &Path, target: &Path) -> Result<(), Error> {
     Ok(())
 }
 
-/// Copy a file using reflink if available
+/// Copy a file using reflink if available.
+///
+/// WARNING: This copies the entire file including sparse regions.
+/// For AppendLog files (index, data), use `copy_append_log_file` instead.
 fn copy_file_native(src: &Path, dst: &Path) -> Result<(), Error> {
     let metadata = fs::metadata(src)?;
     reflink_copy::reflink_or_copy(src, dst)?;
@@ -640,6 +874,59 @@ fn copy_file_native(src: &Path, dst: &Path) -> Result<(), Error> {
     if let Some(parent) = dst.parent() {
         sync_dir(parent)?;
     }
+    Ok(())
+}
+
+/// Copy an AppendLog file (index or data), reading only the committed portion.
+///
+/// AppendLog files are sparse files with 8GB logical size but only `committed_len`
+/// bytes of actual data. This function reads only the committed portion to avoid
+/// expanding the sparse file to its full logical size during copy.
+fn copy_append_log_file(src: &Path, dst: &Path) -> Result<(), Error> {
+    use std::io::{Read, Seek, SeekFrom, Write};
+
+    const HEADER_SIZE: usize = 24;
+    const COMMITTED_LEN_SIZE: usize = 8;
+
+    let mut src_file = File::open(src)?;
+
+    // Read committed_len from header (first 8 bytes)
+    let mut committed_len_bytes = [0u8; COMMITTED_LEN_SIZE];
+    let bytes_read = src_file.read(&mut committed_len_bytes)?;
+
+    if bytes_read < COMMITTED_LEN_SIZE {
+        // File is too small to have a valid header, copy as-is
+        src_file.seek(SeekFrom::Start(0))?;
+        let mut data = Vec::new();
+        src_file.read_to_end(&mut data)?;
+        let mut dst_file = File::create(dst)?;
+        dst_file.write_all(&data)?;
+        dst_file.sync_all()?;
+        if let Some(parent) = dst.parent() {
+            sync_dir(parent)?;
+        }
+        return Ok(());
+    }
+
+    let committed_len = u64::from_le_bytes(committed_len_bytes) as usize;
+
+    // Sanity check: committed_len should be at least HEADER_SIZE
+    let committed_len = committed_len.max(HEADER_SIZE);
+
+    // Read only the committed portion
+    src_file.seek(SeekFrom::Start(0))?;
+    let mut data = vec![0u8; committed_len];
+    src_file.read_exact(&mut data)?;
+
+    // Write to destination
+    let mut dst_file = File::create(dst)?;
+    dst_file.write_all(&data)?;
+    dst_file.sync_all()?;
+
+    if let Some(parent) = dst.parent() {
+        sync_dir(parent)?;
+    }
+
     Ok(())
 }
 
@@ -674,6 +961,87 @@ fn sync_dir(path: &Path) -> io::Result<()> {
         let _ = path;
         Ok(())
     }
+}
+
+/// Copy an index file while applying a timestamp offset.
+///
+/// This reads only the committed portion of the source index file (not the entire
+/// sparse file), applies the offset to:
+/// 1. The start_timestamp in the header (bytes 16-24)
+/// 2. All timestamp entries in the data section
+///
+/// Uses saturating arithmetic to prevent overflow.
+///
+/// IMPORTANT: AppendLog files are sparse files with 8GB logical size but only
+/// `committed_len` bytes of actual data. We must read only the committed portion
+/// to avoid expanding the sparse file to its full logical size.
+fn copy_index_with_offset(src_index: &Path, dst_index: &Path, offset: i64) -> Result<(), Error> {
+    use std::io::{Read, Seek, SeekFrom, Write};
+
+    const HEADER_SIZE: usize = 24;
+
+    let mut src_file = File::open(src_index)?;
+
+    // First, read just the header to get committed_len
+    let mut header = [0u8; HEADER_SIZE];
+    let bytes_read = src_file.read(&mut header)?;
+
+    if bytes_read < HEADER_SIZE {
+        // File is too small, just copy what we have
+        src_file.seek(SeekFrom::Start(0))?;
+        let mut data = Vec::new();
+        src_file.read_to_end(&mut data)?;
+        let mut dst_file = File::create(dst_index)?;
+        dst_file.write_all(&data)?;
+        dst_file.sync_all()?;
+        if let Some(parent) = dst_index.parent() {
+            sync_dir(parent)?;
+        }
+        return Ok(());
+    }
+
+    // Get committed_len - this tells us how much actual data exists
+    let committed_len = u64::from_le_bytes(header[0..8].try_into().unwrap()) as usize;
+
+    // Sanity check: committed_len should be at least HEADER_SIZE
+    let committed_len = committed_len.max(HEADER_SIZE);
+
+    // Read only the committed portion of the file
+    src_file.seek(SeekFrom::Start(0))?;
+    let mut data = vec![0u8; committed_len];
+    src_file.read_exact(&mut data)?;
+
+    // Apply offset to start_timestamp in header (bytes 16-24)
+    let start_ts = i64::from_le_bytes(data[16..24].try_into().unwrap());
+    let new_start_ts = start_ts.saturating_add(offset);
+    data[16..24].copy_from_slice(&new_start_ts.to_le_bytes());
+
+    // Calculate number of timestamps in the data section
+    let data_len = committed_len.saturating_sub(HEADER_SIZE);
+    let num_timestamps = data_len / 8;
+
+    // Apply offset to all timestamps in the data section
+    for i in 0..num_timestamps {
+        let offset_in_file = HEADER_SIZE + i * 8;
+        if offset_in_file + 8 > data.len() {
+            break;
+        }
+        let ts = i64::from_le_bytes(data[offset_in_file..offset_in_file + 8].try_into().unwrap());
+        let new_ts = ts.saturating_add(offset);
+        data[offset_in_file..offset_in_file + 8].copy_from_slice(&new_ts.to_le_bytes());
+    }
+
+    // Write only the committed data to destination
+    let mut dst_file = File::create(dst_index)?;
+    dst_file.write_all(&data)?;
+    dst_file.sync_all()?;
+
+    // Sync parent directory
+    if let Some(parent) = dst_index.parent() {
+        sync_dir(parent)?;
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]
@@ -793,6 +1161,8 @@ mod tests {
             Some("truth".to_string()),
             false,
             true, // auto-confirm
+            None, // align1
+            None, // align2
         )
         .unwrap();
 
@@ -847,6 +1217,8 @@ mod tests {
             None,
             false,
             true,
+            None, // align1
+            None, // align2
         )
         .unwrap();
 
@@ -887,6 +1259,8 @@ mod tests {
             None,
             false,
             true,
+            None, // align1
+            None, // align2
         )
         .unwrap();
 
@@ -915,6 +1289,8 @@ mod tests {
             Some("b".to_string()),
             true, // dry_run
             true,
+            None, // align1
+            None, // align2
         )
         .unwrap();
 
@@ -934,7 +1310,17 @@ mod tests {
         fs::create_dir_all(&output_path).unwrap();
 
         // Should fail because output exists
-        let result = run(db1_path, db2_path, output_path, None, None, false, true);
+        let result = run(
+            db1_path,
+            db2_path,
+            output_path,
+            None,
+            None,
+            false,
+            true,
+            None,
+            None,
+        );
 
         assert!(result.is_err());
     }
@@ -959,5 +1345,362 @@ mod tests {
         assert!(names.contains(&"rocket.velocity".to_string()));
         assert!(names.contains(&"rocket.position".to_string()));
         assert!(names.contains(&"drone.motor".to_string()));
+    }
+
+    /// Helper to create an index file with timestamps
+    fn create_index_file(path: &Path, start_ts: i64, timestamps: &[i64]) {
+        use std::io::Write;
+
+        let header_size = 24usize;
+        let data_len = timestamps.len() * 8;
+        let committed_len = (header_size + data_len) as u64;
+
+        let mut data = vec![0u8; header_size + data_len];
+
+        // Header: committed_len (8) + head_len (8) + start_timestamp (8)
+        data[0..8].copy_from_slice(&committed_len.to_le_bytes());
+        data[8..16].copy_from_slice(&0u64.to_le_bytes()); // head_len = 0
+        data[16..24].copy_from_slice(&start_ts.to_le_bytes());
+
+        // Timestamps
+        for (i, ts) in timestamps.iter().enumerate() {
+            let offset = header_size + i * 8;
+            data[offset..offset + 8].copy_from_slice(&ts.to_le_bytes());
+        }
+
+        let mut file = File::create(path).unwrap();
+        file.write_all(&data).unwrap();
+    }
+
+    /// Helper to read timestamps from an index file
+    fn read_index_file(path: &Path) -> (i64, Vec<i64>) {
+        use std::io::Read;
+
+        let mut file = File::open(path).unwrap();
+        let mut data = Vec::new();
+        file.read_to_end(&mut data).unwrap();
+
+        let committed_len = u64::from_le_bytes(data[0..8].try_into().unwrap()) as usize;
+        let start_ts = i64::from_le_bytes(data[16..24].try_into().unwrap());
+
+        let header_size = 24;
+        let data_len = committed_len.saturating_sub(header_size);
+        let num_timestamps = data_len / 8;
+
+        let mut timestamps = Vec::new();
+        for i in 0..num_timestamps {
+            let offset = header_size + i * 8;
+            if offset + 8 <= data.len() {
+                let ts = i64::from_le_bytes(data[offset..offset + 8].try_into().unwrap());
+                timestamps.push(ts);
+            }
+        }
+
+        (start_ts, timestamps)
+    }
+
+    #[test]
+    fn test_copy_index_with_positive_offset() {
+        let temp = TempDir::new().unwrap();
+        let src_index = temp.path().join("src_index");
+        let dst_index = temp.path().join("dst_index");
+
+        // Create source index with monotonic timestamps (small values)
+        let start_ts = 0i64;
+        let timestamps = vec![100_000i64, 200_000, 300_000]; // 0.1s, 0.2s, 0.3s
+        create_index_file(&src_index, start_ts, &timestamps);
+
+        // Apply positive offset (shift forward to wall-clock time)
+        let offset = 1_000_000_000_000i64; // 1 million seconds in microseconds
+        copy_index_with_offset(&src_index, &dst_index, offset).unwrap();
+
+        // Read and verify
+        let (new_start_ts, new_timestamps) = read_index_file(&dst_index);
+        assert_eq!(new_start_ts, start_ts + offset);
+        assert_eq!(new_timestamps.len(), 3);
+        assert_eq!(new_timestamps[0], 100_000 + offset);
+        assert_eq!(new_timestamps[1], 200_000 + offset);
+        assert_eq!(new_timestamps[2], 300_000 + offset);
+    }
+
+    #[test]
+    fn test_copy_index_with_negative_offset() {
+        let temp = TempDir::new().unwrap();
+        let src_index = temp.path().join("src_index");
+        let dst_index = temp.path().join("dst_index");
+
+        // Create source index with wall-clock timestamps (large values)
+        let start_ts = 1_705_000_000_000_000i64; // ~Jan 2024 in microseconds
+        let timestamps = vec![
+            1_705_000_000_100_000i64,
+            1_705_000_000_200_000,
+            1_705_000_000_300_000,
+        ];
+        create_index_file(&src_index, start_ts, &timestamps);
+
+        // Apply negative offset (shift backward to monotonic time)
+        let offset = -1_705_000_000_000_000i64;
+        copy_index_with_offset(&src_index, &dst_index, offset).unwrap();
+
+        // Read and verify
+        let (new_start_ts, new_timestamps) = read_index_file(&dst_index);
+        assert_eq!(new_start_ts, 0);
+        assert_eq!(new_timestamps.len(), 3);
+        assert_eq!(new_timestamps[0], 100_000);
+        assert_eq!(new_timestamps[1], 200_000);
+        assert_eq!(new_timestamps[2], 300_000);
+    }
+
+    #[test]
+    fn test_copy_index_with_zero_offset() {
+        let temp = TempDir::new().unwrap();
+        let src_index = temp.path().join("src_index");
+        let dst_index = temp.path().join("dst_index");
+
+        let start_ts = 1000i64;
+        let timestamps = vec![1000i64, 2000, 3000];
+        create_index_file(&src_index, start_ts, &timestamps);
+
+        // Apply zero offset (no change)
+        copy_index_with_offset(&src_index, &dst_index, 0).unwrap();
+
+        // Read and verify - should be unchanged
+        let (new_start_ts, new_timestamps) = read_index_file(&dst_index);
+        assert_eq!(new_start_ts, start_ts);
+        assert_eq!(new_timestamps, timestamps);
+    }
+
+    #[test]
+    fn test_alignment_validation_both_required() {
+        let temp = TempDir::new().unwrap();
+        let db1_path = temp.path().join("db1");
+        let db2_path = temp.path().join("db2");
+        let output_path = temp.path().join("merged");
+
+        create_test_db(&db1_path, &[]).unwrap();
+        create_test_db(&db2_path, &[]).unwrap();
+
+        // Should fail if only align1 is provided
+        let result = run(
+            db1_path.clone(),
+            db2_path.clone(),
+            output_path.clone(),
+            None,
+            None,
+            false,
+            true,
+            Some(100.0), // align1
+            None,        // align2 missing
+        );
+        assert!(result.is_err());
+
+        // Should fail if only align2 is provided
+        let output_path2 = temp.path().join("merged2");
+        let result = run(
+            db1_path,
+            db2_path,
+            output_path2,
+            None,
+            None,
+            false,
+            true,
+            None,        // align1 missing
+            Some(100.0), // align2
+        );
+        assert!(result.is_err());
+    }
+
+    /// Helper to create a test database with timestamps in the index
+    fn create_test_db_with_timestamps(
+        dir: &Path,
+        components: &[(&str, i64, &[i64])], // (name, start_ts, timestamps)
+    ) -> Result<(), Error> {
+        fs::create_dir_all(dir)?;
+
+        // Create db_state with start timestamp
+        let min_start = components
+            .iter()
+            .map(|(_, start, _)| *start)
+            .min()
+            .unwrap_or(0);
+        let mut config = DbConfig {
+            recording: false,
+            default_stream_time_step: std::time::Duration::from_millis(10),
+            metadata: HashMap::new(),
+        };
+        config.set_time_start_timestamp_micros(min_start);
+        config.write(dir.join("db_state"))?;
+
+        // Create components
+        for (name, start_ts, timestamps) in components {
+            let component_id = ComponentId::new(name);
+            let component_dir = dir.join(component_id.to_string());
+            fs::create_dir_all(&component_dir)?;
+
+            // Write metadata
+            let metadata = ComponentMetadata {
+                component_id,
+                name: name.to_string(),
+                metadata: HashMap::new(),
+            };
+            metadata.write(component_dir.join("metadata"))?;
+
+            // Write minimal schema (F64 scalar)
+            let schema_data = [10u8, 0, 0, 0, 0, 0, 0, 0, 0];
+            fs::write(component_dir.join("schema"), &schema_data)?;
+
+            // Write index with timestamps
+            create_index_file(&component_dir.join("index"), *start_ts, timestamps);
+
+            // Write data file with matching size
+            let element_size = 8u64;
+            let header_size = 24;
+            let data_len = timestamps.len() * 8;
+            let committed_len = (header_size + data_len) as u64;
+            let mut data_file = vec![0u8; header_size + data_len];
+            data_file[0..8].copy_from_slice(&committed_len.to_le_bytes());
+            data_file[16..24].copy_from_slice(&element_size.to_le_bytes());
+            fs::write(component_dir.join("data"), &data_file)?;
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_merge_with_alignment_db1_shifted() {
+        // Test case: Both datasets are monotonic (0-based)
+        // DB1 has "boost" event at 15s, DB2 has "boost" event at 45s
+        // Since align1 (15s) < align2 (45s), DB1 should be shifted forward by 30s
+        let temp = TempDir::new().unwrap();
+        let db1_path = temp.path().join("db1");
+        let db2_path = temp.path().join("db2");
+        let output_path = temp.path().join("merged");
+
+        // Create DB1 with monotonic timestamps - "boost" at 15s
+        create_test_db_with_timestamps(
+            &db1_path,
+            &[(
+                "sim.velocity",
+                0,
+                &[5_000_000, 15_000_000, 25_000_000], // 5s, 15s (boost), 25s
+            )],
+        )
+        .unwrap();
+
+        // Create DB2 with monotonic timestamps - "boost" at 45s
+        create_test_db_with_timestamps(
+            &db2_path,
+            &[(
+                "truth.velocity",
+                0,
+                &[35_000_000, 45_000_000, 55_000_000], // 35s, 45s (boost), 55s
+            )],
+        )
+        .unwrap();
+
+        // Merge with alignment: align DB1's 15s with DB2's 45s
+        // Since align1 < align2, DB1 gets shifted forward by 30s
+        run(
+            db1_path,
+            db2_path,
+            output_path.clone(),
+            Some("sim".to_string()),
+            Some("truth".to_string()),
+            false,
+            true,
+            Some(15.0), // align1: boost at 15s in DB1
+            Some(45.0), // align2: boost at 45s in DB2
+        )
+        .unwrap();
+
+        // Verify DB1 (sim) was shifted forward by 30s
+        let sim_id = ComponentId::new("sim_sim.velocity");
+        let sim_index = output_path.join(sim_id.to_string()).join("index");
+        let (sim_start_ts, sim_timestamps) = read_index_file(&sim_index);
+
+        // Original: 0, [5s, 15s, 25s] -> After +30s shift: 30s, [35s, 45s, 55s]
+        assert_eq!(sim_start_ts, 30_000_000); // 0 + 30s
+        assert_eq!(sim_timestamps[0], 35_000_000); // 5s + 30s
+        assert_eq!(sim_timestamps[1], 45_000_000); // 15s + 30s (boost, now aligned)
+        assert_eq!(sim_timestamps[2], 55_000_000); // 25s + 30s
+
+        // Verify DB2 (truth) was NOT shifted
+        let truth_id = ComponentId::new("truth_truth.velocity");
+        let truth_index = output_path.join(truth_id.to_string()).join("index");
+        let (truth_start_ts, truth_timestamps) = read_index_file(&truth_index);
+
+        assert_eq!(truth_start_ts, 0);
+        assert_eq!(truth_timestamps[0], 35_000_000);
+        assert_eq!(truth_timestamps[1], 45_000_000); // boost event (reference)
+        assert_eq!(truth_timestamps[2], 55_000_000);
+    }
+
+    #[test]
+    fn test_merge_with_alignment_db2_shifted() {
+        // Test case: Both datasets are monotonic (0-based)
+        // DB1 has "boost" event at 45s, DB2 has "boost" event at 15s
+        // Since align1 (45s) > align2 (15s), DB2 should be shifted forward by 30s
+        let temp = TempDir::new().unwrap();
+        let db1_path = temp.path().join("db1");
+        let db2_path = temp.path().join("db2");
+        let output_path = temp.path().join("merged");
+
+        // Create DB1 with monotonic timestamps - "boost" at 45s
+        create_test_db_with_timestamps(
+            &db1_path,
+            &[(
+                "sim.velocity",
+                0,
+                &[35_000_000, 45_000_000, 55_000_000], // 35s, 45s (boost), 55s
+            )],
+        )
+        .unwrap();
+
+        // Create DB2 with monotonic timestamps - "boost" at 15s
+        create_test_db_with_timestamps(
+            &db2_path,
+            &[(
+                "truth.velocity",
+                0,
+                &[5_000_000, 15_000_000, 25_000_000], // 5s, 15s (boost), 25s
+            )],
+        )
+        .unwrap();
+
+        // Merge with alignment: align DB1's 45s with DB2's 15s
+        // Since align1 > align2, DB2 gets shifted forward by 30s
+        run(
+            db1_path,
+            db2_path,
+            output_path.clone(),
+            Some("sim".to_string()),
+            Some("truth".to_string()),
+            false,
+            true,
+            Some(45.0), // align1: boost at 45s in DB1
+            Some(15.0), // align2: boost at 15s in DB2
+        )
+        .unwrap();
+
+        // Verify DB1 (sim) was NOT shifted
+        let sim_id = ComponentId::new("sim_sim.velocity");
+        let sim_index = output_path.join(sim_id.to_string()).join("index");
+        let (sim_start_ts, sim_timestamps) = read_index_file(&sim_index);
+
+        assert_eq!(sim_start_ts, 0);
+        assert_eq!(sim_timestamps[0], 35_000_000);
+        assert_eq!(sim_timestamps[1], 45_000_000); // boost event (reference)
+        assert_eq!(sim_timestamps[2], 55_000_000);
+
+        // Verify DB2 (truth) was shifted forward by 30s
+        let truth_id = ComponentId::new("truth_truth.velocity");
+        let truth_index = output_path.join(truth_id.to_string()).join("index");
+        let (truth_start_ts, truth_timestamps) = read_index_file(&truth_index);
+
+        // Original: 0, [5s, 15s, 25s] -> After +30s shift: 30s, [35s, 45s, 55s]
+        assert_eq!(truth_start_ts, 30_000_000); // 0 + 30s
+        assert_eq!(truth_timestamps[0], 35_000_000); // 5s + 30s
+        assert_eq!(truth_timestamps[1], 45_000_000); // 15s + 30s (boost, now aligned)
+        assert_eq!(truth_timestamps[2], 55_000_000); // 25s + 30s
     }
 }
