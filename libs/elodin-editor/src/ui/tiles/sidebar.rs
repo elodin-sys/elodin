@@ -29,8 +29,8 @@ pub struct SidebarMaskState {
 impl Default for SidebarMaskState {
     fn default() -> Self {
         Self {
-            hierarchy_masked: true,
-            inspector_masked: true,
+            hierarchy_masked: false,
+            inspector_masked: false,
             last_hierarchy_share: Some(0.2),
             last_inspector_share: Some(0.2),
         }

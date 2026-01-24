@@ -2012,6 +2012,59 @@ impl<'w, 's> TileSystem<'w, 's> {
         is_empty_tile_tree: bool,
         read_only: bool,
     ) {
+        const SIDEBAR_WIDTH: f32 = 127.0;
+
+        let target_window = target.unwrap_or_else(|| {
+            world
+                .query_filtered::<Entity, With<PrimaryWindow>>()
+                .single(world)
+                .expect("Primary window not found")
+        });
+
+        // Left sidebar - Hierarchy
+        egui::SidePanel::left("hierarchy_sidebar")
+            .exact_width(SIDEBAR_WIDTH)
+            .resizable(false)
+            .frame(Frame {
+                fill: get_scheme().bg_primary,
+                ..Default::default()
+            })
+            .show_inside(ui, |ui| {
+                let hierarchy_icons = Hierarchy {
+                    search: icons.search,
+                    entity: icons.entity,
+                    chevron: icons.chevron,
+                };
+                ui.add_widget_with::<HierarchyContent>(
+                    world,
+                    "hierarchy_sidebar_content",
+                    (hierarchy_icons, target_window),
+                );
+            });
+
+        // Right sidebar - Inspector
+        egui::SidePanel::right("inspector_sidebar")
+            .exact_width(SIDEBAR_WIDTH)
+            .resizable(false)
+            .frame(Frame {
+                fill: get_scheme().bg_primary,
+                ..Default::default()
+            })
+            .show_inside(ui, |ui| {
+                let inspector_icons = InspectorIcons {
+                    chart: icons.chart,
+                    subtract: icons.subtract,
+                    setting: icons.setting,
+                    search: icons.search,
+                };
+                ui.add_widget_with::<InspectorContent>(
+                    world,
+                    "inspector_sidebar_content",
+                    (inspector_icons, true, target_window),
+                );
+            });
+
+        // Central panel - TileLayout
         let show_empty_overlay = is_empty_tile_tree && !read_only;
         ui.add_widget_with::<TileLayout>(
             world,
