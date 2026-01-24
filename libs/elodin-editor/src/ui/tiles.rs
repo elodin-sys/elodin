@@ -1573,13 +1573,6 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
         tile_id: egui_tiles::TileId,
         state: &egui_tiles::TabState,
     ) -> egui::Response {
-        if !tab_title_visible(tiles, tile_id) {
-            let min_width = self.tab_title_spacing(ui.visuals()) * 2.0;
-            let (_, rect) = ui.allocate_space(vec2(min_width, ui.available_height()));
-            let response = ui.interact(rect, id, egui::Sense::click_and_drag());
-            return self.on_tab_button(tiles, tile_id, response);
-        }
-
         let tab_state = if state.active {
             TabState::Selected
         } else {
@@ -1595,20 +1588,14 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
             .data(|d| d.get_temp::<bool>(edit_flag_id))
             .unwrap_or(false);
 
-        let title_str: String = if is_container {
-            if let Some(custom) = ui.ctx().data(|d| d.get_temp::<String>(persist_id)) {
-                custom
-            } else if let Some(t) = self.container_titles.get(&tile_id) {
+        // Get title: check for custom/edited title first, then container titles, then pane title
+        let title_str: String = if let Some(custom) = ui.ctx().data(|d| d.get_temp::<String>(persist_id)) {
+            custom
+        } else if is_container {
+            if let Some(t) = self.container_titles.get(&tile_id) {
                 t.clone()
             } else {
                 match tiles.get(tile_id) {
-                    Some(egui_tiles::Tile::Container(Container::Tabs(_))) => {
-                        // Hide Tabs containers without custom name (wrapper Tabs)
-                        let min_width = self.tab_title_spacing(ui.visuals()) * 2.0;
-                        let (_, rect) = ui.allocate_space(vec2(min_width, ui.available_height()));
-                        let response = ui.interact(rect, id, egui::Sense::click_and_drag());
-                        return self.on_tab_button(tiles, tile_id, response);
-                    }
                     Some(egui_tiles::Tile::Container(c)) => format!("{:?}", c.kind()),
                     _ => "Container".to_owned(),
                 }
@@ -1815,10 +1802,10 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
 
     fn simplification_options(&self) -> egui_tiles::SimplificationOptions {
         egui_tiles::SimplificationOptions {
-            prune_empty_tabs: false,
+            prune_empty_tabs: true,
             all_panes_must_have_tabs: true,
             join_nested_linear_containers: true,
-            prune_single_child_tabs: false, // Keep tabs container even with single child
+            prune_single_child_tabs: true, // Keep tabs container even with single child
             ..Default::default()
         }
     }
@@ -2368,7 +2355,38 @@ impl WidgetSystem for TileLayout<'_, '_> {
                             state_mut.commands.entity(pane.entity).despawn();
                         };
 
+                        // Find a sibling to select if the deleted tile was active
+                        let sibling_to_select = tile_state
+                            .tree
+                            .tiles
+                            .iter()
+                            .find_map(|(parent_id, tile)| {
+                                if let Tile::Container(Container::Tabs(tabs)) = tile {
+                                    if tabs.active == Some(tile_id)
+                                        && tabs.children.contains(&tile_id)
+                                    {
+                                        // Find a sibling that's not the one being deleted
+                                        let sibling = tabs
+                                            .children
+                                            .iter()
+                                            .find(|&&child| child != tile_id)
+                                            .copied();
+                                        return sibling.map(|s| (*parent_id, s));
+                                    }
+                                }
+                                None
+                            });
+
                         tile_state.tree.remove_recursively(tile_id);
+
+                        // Select the sibling if we found one
+                        if let Some((parent_id, sibling_id)) = sibling_to_select {
+                            if let Some(Tile::Container(Container::Tabs(tabs))) =
+                                tile_state.tree.tiles.get_mut(parent_id)
+                            {
+                                tabs.set_active(sibling_id);
+                            }
+                        }
 
                         if let Some(graph_id) = tile_state.graphs.get(&tile_id) {
                             state_mut.commands.entity(*graph_id).despawn();
