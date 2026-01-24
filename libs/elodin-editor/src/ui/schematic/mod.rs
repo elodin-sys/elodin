@@ -92,7 +92,7 @@ impl SchematicParam<'_, '_> {
             Pane::Dashboard(dashboard) => Some(dashboard.name.clone()),
             Pane::SchematicTree(pane) => Some(pane.name.clone()),
             Pane::DataOverview(pane) => Some(pane.name.clone()),
-            Pane::VideoStream(_) | Pane::Hierarchy | Pane::Inspector => None,
+            Pane::VideoStream(_) => None,
         }
     }
 
@@ -252,7 +252,6 @@ impl SchematicParam<'_, '_> {
                         }
                         Some(Panel::Dashboard(Box::new(dashboard)))
                     }
-                    _ => None,
                 }
             }
 
@@ -261,9 +260,6 @@ impl SchematicParam<'_, '_> {
                 egui_tiles::Container::Tabs(t) => {
                     let mut tabs = vec![];
                     for child_id in &t.children {
-                        if tiles::sidebar::tile_is_sidebar(tiles, *child_id) {
-                            continue;
-                        }
                         if let Some(tab) = self.get_panel_from_state(state, *child_id) {
                             tabs.push(tab)
                         }
@@ -281,9 +277,6 @@ impl SchematicParam<'_, '_> {
                     let name = state.get_container_title(tile_id).map(|s| s.to_string());
 
                     for child_id in &linear.children {
-                        if tiles::sidebar::tile_is_sidebar(tiles, *child_id) {
-                            continue;
-                        }
                         if let Some(panel) = self.get_panel_from_state(state, *child_id) {
                             if let Some((_, share)) =
                                 linear.shares.iter().find(|(id, _)| *id == child_id)

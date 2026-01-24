@@ -589,13 +589,8 @@ impl LoadSchematicParams<'_, '_> {
                     && let Some(Tile::Container(Container::Tabs(root_tabs))) =
                         tile_state.tree.tiles.get(parent_id)
                 {
-                    let has_non_sidebar = root_tabs.children.iter().any(|child_id| {
-                        !crate::ui::tiles::sidebar::tile_is_sidebar(
-                            &tile_state.tree.tiles,
-                            *child_id,
-                        )
-                    });
-                    if !has_non_sidebar {
+                    // Reuse parent if root tabs are empty
+                    if root_tabs.children.is_empty() {
                         reuse_parent = true;
                         tile_id = Some(parent_id);
                         parent_for_children = Some(parent_id);
@@ -743,6 +738,7 @@ impl LoadSchematicParams<'_, '_> {
                 };
                 tile_state.insert_tile(Tile::Pane(Pane::ActionTile(pane)), parent_id, false)
             }
+            // Inspector and Hierarchy are now fixed sidebars, not tile panels
             Panel::Inspector | Panel::Hierarchy => None,
             Panel::SchematicTree(name) => {
                 let entity = self.commands.spawn(super::TreeWidgetState::default()).id();
