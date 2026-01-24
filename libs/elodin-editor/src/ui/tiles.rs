@@ -1768,6 +1768,12 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
                 egui::Stroke::new(1.0, scheme.border_primary),
             );
 
+            // Draw separator lines on both sides of each tab
+            ui.painter().vline(
+                rect.left(),
+                rect.y_range(),
+                egui::Stroke::new(1.0, scheme.border_primary),
+            );
             ui.painter().vline(
                 rect.right(),
                 rect.y_range(),
