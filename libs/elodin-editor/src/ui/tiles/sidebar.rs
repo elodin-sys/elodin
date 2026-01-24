@@ -686,10 +686,6 @@ pub fn tabs_are_sidebar_only(tiles: &Tiles<Pane>, tabs: &egui_tiles::Tabs) -> bo
             .all(|child| tile_is_sidebar(tiles, *child))
 }
 
-pub fn tab_title_visible(tiles: &Tiles<Pane>, tile_id: TileId) -> bool {
-    !tile_is_sidebar(tiles, tile_id)
-}
-
 pub fn tab_add_visible(tiles: &Tiles<Pane>, tabs: &egui_tiles::Tabs) -> bool {
     let active_is_sidebar = tabs
         .active

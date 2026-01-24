@@ -64,7 +64,7 @@ pub(crate) mod sidebar;
 
 use sidebar::{
     SidebarKind, SidebarMaskState, apply_share_updates, collect_sidebar_gutter_updates,
-    tab_add_visible, tab_title_visible, tile_is_sidebar,
+    tab_add_visible, tile_is_sidebar,
 };
 
 pub(crate) fn plugin(app: &mut App) {
@@ -1589,20 +1589,21 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
             .unwrap_or(false);
 
         // Get title: check for custom/edited title first, then container titles, then pane title
-        let title_str: String = if let Some(custom) = ui.ctx().data(|d| d.get_temp::<String>(persist_id)) {
-            custom
-        } else if is_container {
-            if let Some(t) = self.container_titles.get(&tile_id) {
-                t.clone()
-            } else {
-                match tiles.get(tile_id) {
-                    Some(egui_tiles::Tile::Container(c)) => format!("{:?}", c.kind()),
-                    _ => "Container".to_owned(),
+        let title_str: String =
+            if let Some(custom) = ui.ctx().data(|d| d.get_temp::<String>(persist_id)) {
+                custom
+            } else if is_container {
+                if let Some(t) = self.container_titles.get(&tile_id) {
+                    t.clone()
+                } else {
+                    match tiles.get(tile_id) {
+                        Some(egui_tiles::Tile::Container(c)) => format!("{:?}", c.kind()),
+                        _ => "Container".to_owned(),
+                    }
                 }
-            }
-        } else {
-            self.tab_title_for_tile(tiles, tile_id).text().to_string()
-        };
+            } else {
+                self.tab_title_for_tile(tiles, tile_id).text().to_string()
+            };
 
         let mut font_id = egui::TextStyle::Button.resolve(ui.style());
         font_id.size = 11.0;
@@ -2362,36 +2363,32 @@ impl WidgetSystem for TileLayout<'_, '_> {
                         };
 
                         // Find a sibling to select if the deleted tile was active
-                        let sibling_to_select = tile_state
-                            .tree
-                            .tiles
-                            .iter()
-                            .find_map(|(parent_id, tile)| {
-                                if let Tile::Container(Container::Tabs(tabs)) = tile {
-                                    if tabs.active == Some(tile_id)
-                                        && tabs.children.contains(&tile_id)
-                                    {
-                                        // Find a sibling that's not the one being deleted
-                                        let sibling = tabs
-                                            .children
-                                            .iter()
-                                            .find(|&&child| child != tile_id)
-                                            .copied();
-                                        return sibling.map(|s| (*parent_id, s));
-                                    }
+                        let sibling_to_select =
+                            tile_state.tree.tiles.iter().find_map(|(parent_id, tile)| {
+                                if let Tile::Container(Container::Tabs(tabs)) = tile
+                                    && tabs.active == Some(tile_id)
+                                    && tabs.children.contains(&tile_id)
+                                {
+                                    // Find a sibling that's not the one being deleted
+                                    let sibling = tabs
+                                        .children
+                                        .iter()
+                                        .find(|&&child| child != tile_id)
+                                        .copied();
+                                    sibling.map(|s| (*parent_id, s))
+                                } else {
+                                    None
                                 }
-                                None
                             });
 
                         tile_state.tree.remove_recursively(tile_id);
 
                         // Select the sibling if we found one
-                        if let Some((parent_id, sibling_id)) = sibling_to_select {
-                            if let Some(Tile::Container(Container::Tabs(tabs))) =
+                        if let Some((parent_id, sibling_id)) = sibling_to_select
+                            && let Some(Tile::Container(Container::Tabs(tabs))) =
                                 tile_state.tree.tiles.get_mut(parent_id)
-                            {
-                                tabs.set_active(sibling_id);
-                            }
+                        {
+                            tabs.set_active(sibling_id);
                         }
 
                         if let Some(graph_id) = tile_state.graphs.get(&tile_id) {
