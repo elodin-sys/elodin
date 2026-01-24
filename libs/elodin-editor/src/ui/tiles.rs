@@ -2256,6 +2256,21 @@ impl WidgetSystem for TileLayout<'_, '_> {
                 target_window,
             };
             tree.ui(&mut behavior, ui);
+
+            // Ensure all Tabs containers have an active tab after drag/drop operations
+            for (_id, tile) in tree.tiles.iter_mut() {
+                if let Tile::Container(Container::Tabs(tabs)) = tile {
+                    if !tabs.children.is_empty() {
+                        // If no active tab or active tab is not in children, select the first child
+                        let needs_active = tabs.active.is_none()
+                            || !tabs.children.contains(&tabs.active.unwrap());
+                        if needs_active {
+                            tabs.active = tabs.children.first().copied();
+                        }
+                    }
+                }
+            }
+
             let empty_overlay_rect = if show_empty_overlay {
                 main_content_rect(&tree).or_else(|| Some(ui.max_rect()))
             } else {
