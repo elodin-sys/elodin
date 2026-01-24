@@ -1822,7 +1822,9 @@ impl<'w, 's> TileSystem<'w, 's> {
         is_empty_tile_tree: bool,
         read_only: bool,
     ) {
-        const SIDEBAR_WIDTH: f32 = 127.0;
+        const SIDEBAR_DEFAULT_WIDTH: f32 = 200.0;
+        const SIDEBAR_MIN_WIDTH: f32 = 100.0;
+        const SIDEBAR_MAX_WIDTH: f32 = 400.0;
 
         let target_window = target.unwrap_or_else(|| {
             world
@@ -1833,8 +1835,9 @@ impl<'w, 's> TileSystem<'w, 's> {
 
         // Left sidebar - Hierarchy
         egui::SidePanel::left("hierarchy_sidebar")
-            .exact_width(SIDEBAR_WIDTH)
-            .resizable(false)
+            .default_width(SIDEBAR_DEFAULT_WIDTH)
+            .width_range(SIDEBAR_MIN_WIDTH..=SIDEBAR_MAX_WIDTH)
+            .resizable(true)
             .frame(Frame {
                 fill: get_scheme().bg_primary,
                 ..Default::default()
@@ -1854,8 +1857,9 @@ impl<'w, 's> TileSystem<'w, 's> {
 
         // Right sidebar - Inspector
         egui::SidePanel::right("inspector_sidebar")
-            .exact_width(SIDEBAR_WIDTH)
-            .resizable(false)
+            .default_width(SIDEBAR_DEFAULT_WIDTH)
+            .width_range(SIDEBAR_MIN_WIDTH..=SIDEBAR_MAX_WIDTH)
+            .resizable(true)
             .frame(Frame {
                 fill: get_scheme().bg_primary,
                 ..Default::default()
