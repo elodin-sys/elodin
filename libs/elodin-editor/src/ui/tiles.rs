@@ -1790,9 +1790,7 @@ impl<'w, 's> TileSystem<'w, 's> {
         let is_empty_tile_tree = params
             .window_states
             .get(target_id)
-            .map(|(_, _, s)| {
-                s.tile_state.tree_actions.is_empty() && !s.tile_state.has_content()
-            })
+            .map(|(_, _, s)| s.tile_state.tree_actions.is_empty() && !s.tile_state.has_content())
             .ok()?;
 
         let icons = TileIcons {
@@ -2188,8 +2186,8 @@ impl WidgetSystem for TileLayout<'_, '_> {
                     && !tabs.children.is_empty()
                 {
                     // If no active tab or active tab is not in children, select the first child
-                    let needs_active = tabs.active.is_none()
-                        || !tabs.children.contains(&tabs.active.unwrap());
+                    let needs_active =
+                        tabs.active.is_none() || !tabs.children.contains(&tabs.active.unwrap());
                     if needs_active {
                         tabs.active = tabs.children.first().copied();
                     }
