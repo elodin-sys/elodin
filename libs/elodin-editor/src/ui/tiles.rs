@@ -963,7 +963,7 @@ impl Pane {
         ui: &mut Ui,
         icons: &TileIcons,
         world: &mut World,
-        tree_actions: &mut SmallVec<[TreeAction; 4]>,
+        _tree_actions: &mut SmallVec<[TreeAction; 4]>,
         target_window: Entity,
     ) -> egui_tiles::UiResponse {
         let content_rect = ui.available_rect_before_wrap();
@@ -1333,8 +1333,6 @@ struct TreeBehavior<'w> {
     target_window: Entity,
     inspector_visible: bool,
 }
-
-type ShareUpdate = (TileId, TileId, TileId, f32, f32);
 
 #[derive(Clone)]
 pub enum TreeAction {
@@ -2190,8 +2188,8 @@ impl WidgetSystem for TileLayout<'_, '_> {
                     && !tabs.children.is_empty()
                 {
                     // If no active tab or active tab is not in children, select the first child
-                    let needs_active =
-                        tabs.active.is_none() || !tabs.children.contains(&tabs.active.unwrap());
+                    let needs_active = tabs.active.is_none()
+                        || !tabs.children.contains(&tabs.active.unwrap());
                     if needs_active {
                         tabs.active = tabs.children.first().copied();
                     }
