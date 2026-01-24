@@ -1765,6 +1765,11 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
 
             ui.painter().hline(
                 rect.x_range(),
+                rect.top(),
+                egui::Stroke::new(1.0, scheme.border_primary),
+            );
+            ui.painter().hline(
+                rect.x_range(),
                 rect.bottom(),
                 egui::Stroke::new(1.0, scheme.border_primary),
             );
