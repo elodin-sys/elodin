@@ -345,24 +345,18 @@ pub fn handle_time_series(
             let Some(last_timestamp) = timestamps.last() else {
                 return;
             };
-
             if last_timestamp >= &range.end {
                 return;
             }
+            range.start = *last_timestamp;
 
-            // Advance PAST the last timestamp to avoid infinite loops
-            // We need to request data starting AFTER the last received timestamp
-            let next_start = Timestamp(last_timestamp.0 + 1);
-
-            if next_start >= range.end {
+            if range.start >= range.end {
                 return;
             }
-            
-            range.start = next_start;
 
-            // Note: We intentionally do NOT return early when timestamps.len() < CHUNK_LEN
-            // A partial chunk does not mean we've reached the end of data - there may be
-            // more data at later timestamps. We continue requesting until last_timestamp >= range.end.
+            if timestamps.len() < CHUNK_LEN {
+                return;
+            }
             let range = next_range(range, plot_data, &lines);
 
             let packet_id = fastrand::u16(..).to_le_bytes();
