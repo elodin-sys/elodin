@@ -1362,6 +1362,7 @@ fn create_object_3d_with_color(eql: String, expr: eql::Expr, mesh: Mesh) -> Pale
                         eql: eql.clone(),
                         mesh: mesh_source,
                         aux: (),
+                        frame: None,
                     },
                     expr.clone(),
                     &eql_ctx.0,
@@ -1436,7 +1437,7 @@ pub fn create_3d_object() -> PaletteItem {
 
                                                 crate::object_3d::create_object_3d_entity(
                                                     &mut commands,
-                                                    Object3D { eql: eql.clone(), mesh: obj, aux: () },
+                                                    Object3D { eql: eql.clone(), mesh: obj, aux: (), frame: None },
                                                     expr.clone(),
                                                     &eql_ctx.0,
                                                     &mut material_assets,

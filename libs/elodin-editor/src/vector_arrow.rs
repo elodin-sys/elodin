@@ -57,9 +57,5 @@ fn tail_to_vec3(mut iter: impl DoubleEndedIterator<Item = f64>) -> Option<DVec3>
     let z = iter.next_back()?;
     let y = iter.next_back()?;
     let x = iter.next_back()?;
-    let world = WorldPos {
-        att: Quaternion::identity(),
-        pos: Vector3::new(x, y, z),
-    };
-    Some(world.bevy_pos())
+    Some(DVec3::new(x,y,z))
 }

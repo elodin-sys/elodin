@@ -76,7 +76,7 @@ Run simulations like any Python script:
 # sim.py
 import elodin as el
 
-w = el.World()
+w = el.World(frame=el.Frame.ENU)
 # ... build simulation ...
 w.run(system, sim_time_step=1/120.0)
 ```
@@ -316,7 +316,7 @@ This feature is useful for:
 ### World
 Container for all components and systems:
 ```python
-w = el.World()
+w = el.World(frame=el.Frame.ENU)
 ```
 
 ### Hierarchical Components & Archetypes
@@ -587,7 +587,7 @@ sys = gravity_effector | el.six_dof()
 import elodin as el
 import jax.numpy as jnp
 
-w = el.World()
+w = el.World(frame=el.Frame.GCRF)
 
 # Spawn three bodies - names become component hierarchy roots
 w.spawn(el.Body(
@@ -635,7 +635,7 @@ from jaxmarl import make
 
 # Define Elodin simulation for drone swarm
 def build_drone_swarm():
-    w = el.World()
+    w = el.World(frame=el.Frame.ENU)
     
     # Spawn multiple drones
     for i in range(4):

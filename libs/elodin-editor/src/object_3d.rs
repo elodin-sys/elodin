@@ -1,7 +1,9 @@
 use bevy::ecs::hierarchy::ChildOf;
 use bevy::log::warn_once;
+use bevy::math::{DQuat, DVec3};
 use bevy::prelude::Mesh;
 use bevy::prelude::*;
+use bevy_geo_frames::{GeoPosition, GeoRotation};
 use bevy_render::alpha::AlphaMode;
 use big_space::GridCell;
 use eql::Expr;
@@ -725,6 +727,8 @@ pub fn create_object_3d_entity(
         _ => (None, None),
     };
 
+    let geo_frame = data.frame;
+
     let entity_id = commands
         .spawn((
             Object3DState {
@@ -743,6 +747,14 @@ pub fn create_object_3d_entity(
             Name::new("object_3d"),
         ))
         .id();
+
+    // Add GeoPosition and GeoRotation components if a geo frame is specified
+    if let Some(frame) = geo_frame {
+        commands.entity(entity_id).insert((
+            GeoPosition(frame, DVec3::ZERO),
+            GeoRotation(frame, DQuat::IDENTITY),
+        ));
+    }
 
     if let Some(ellipse) = spawn_mesh(
         commands,

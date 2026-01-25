@@ -8,7 +8,7 @@ publish = false
 
 [features]
 cargo-clippy = []
-inspector = ["dep:bevy-inspector-egui"]
+inspector = ["dep:bevy-inspector-egui", "bevy_geo_frames/inspector"]
 debug = ["big_space/debug"]
 
 [dependencies]
@@ -19,10 +19,12 @@ egui_material_icons = "0.5"
 
 # bevy
 bevy.version = "0.17"
+# bevy.features = [ "reflect_auto_register" ]
 bevy_render.version = "0.17"
 bevy_color.version = "0.17"
 bevy_egui.version = "0.38.0"
 bevy_picking = "0.17"
+bevy_geo_frames.path = "../bevy_geo_frames"
 egui.version = "0.33.3"
 egui.features = ["rayon"]
 egui_tiles = "0.14"

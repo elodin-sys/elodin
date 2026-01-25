@@ -77,3 +77,6 @@ zerocopy.version = "0.8.2"
 env_logger = "0.11.8"
 convert_case = "0.8.0"
 signal-hook = "0.3.18"
+
+bevy_geo_frames.path = "../bevy_geo_frames"
+bevy_geo_frames.features = ["serde", "big_space"]
