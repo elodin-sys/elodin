@@ -380,13 +380,15 @@ impl RootWidgetSystem for MainLayout<'_, '_> {
         #[cfg(not(target_family = "wasm"))]
         world.add_root_widget::<status_bar::StatusBar>("status_bar");
 
-        #[allow(unused_mut)]
-        let mut frame = egui::Frame::new();
         #[cfg(target_os = "macos")]
-        {
+        let frame = {
             // Leave room for the native titlebar controls on the primary window.
-            frame.inner_margin.top = 32;
-        }
+            let mut f = egui::Frame::new();
+            f.inner_margin.top = 32;
+            f
+        };
+        #[cfg(not(target_os = "macos"))]
+        let frame = egui::Frame::new();
 
         egui::CentralPanel::default().frame(frame).show(ctx, |ui| {
             ui.add_widget::<timeline::TimelinePanel>(world, "timeline_panel");

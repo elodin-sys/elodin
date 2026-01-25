@@ -1691,7 +1691,7 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
             prune_empty_tabs: true,
             all_panes_must_have_tabs: true,
             join_nested_linear_containers: true,
-            prune_single_child_tabs: true, // Keep tabs container even with single child
+            prune_single_child_tabs: true,
             ..Default::default()
         }
     }
