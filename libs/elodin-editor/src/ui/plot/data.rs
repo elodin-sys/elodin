@@ -14,7 +14,7 @@ use impeller2_bevy::{
     CommandsExt, ComponentSchemaRegistry, ComponentValueMap, CurrentStreamId, EntityMap,
     PacketGrantR, PacketHandlerInput, PacketHandlers,
 };
-use impeller2_wkt::{CurrentTimestamp, EarliestTimestamp, GetTimeSeries};
+use impeller2_wkt::{CurrentTimestamp, EarliestTimestamp, GetTimeSeries, PlotOverviewQuery};
 use itertools::{Itertools, MinMaxResult};
 use nodit::NoditMap;
 use nodit::interval::ii;
@@ -35,12 +35,18 @@ use crate::{SelectedTimeRange, TimeRangeBehavior};
 
 use super::PlotBounds;
 
+/// Maximum points to request for overview data (LTTB downsampled)
+/// Must be <= CHUNK_LEN to fit within a single GPU buffer shard
+pub const OVERVIEW_MAX_POINTS: usize = CHUNK_LEN;
+
 #[derive(Clone, Debug)]
 pub struct PlotDataComponent {
     pub label: String,
     pub element_names: Vec<String>,
     pub lines: BTreeMap<usize, Handle<Line>>,
     request_states: HashMap<Timestamp, RequestState>,
+    /// Whether the overview data has been requested for each line element
+    overview_requested: HashMap<usize, bool>,
 }
 
 #[derive(Clone, Debug)]
@@ -59,6 +65,7 @@ impl PlotDataComponent {
             element_names,
             lines: BTreeMap::new(),
             request_states: HashMap::new(),
+            overview_requested: HashMap::new(),
         }
     }
 
@@ -338,18 +345,24 @@ pub fn handle_time_series(
             let Some(last_timestamp) = timestamps.last() else {
                 return;
             };
+
             if last_timestamp >= &range.end {
                 return;
             }
-            range.start = *last_timestamp;
 
-            if range.start >= range.end {
+            // Advance PAST the last timestamp to avoid infinite loops
+            // We need to request data starting AFTER the last received timestamp
+            let next_start = Timestamp(last_timestamp.0 + 1);
+
+            if next_start >= range.end {
                 return;
             }
+            
+            range.start = next_start;
 
-            if timestamps.len() < CHUNK_LEN {
-                return;
-            }
+            // Note: We intentionally do NOT return early when timestamps.len() < CHUNK_LEN
+            // A partial chunk does not mean we've reached the end of data - there may be
+            // more data at later timestamps. We continue requesting until last_timestamp >= range.end.
             let range = next_range(range, plot_data, &lines);
 
             let packet_id = fastrand::u16(..).to_le_bytes();
@@ -393,13 +406,25 @@ pub fn handle_time_series(
 
 pub fn queue_timestamp_read(
     selected_range: Res<SelectedTimeRange>,
+    _current_timestamp: Res<CurrentTimestamp>,
     mut commands: Commands,
     mut graph_data: ResMut<CollectedGraphData>,
     mut lines: ResMut<Assets<Line>>,
+    earliest_timestamp: Res<EarliestTimestamp>,
 ) {
     if selected_range.0.end.0 == i64::MIN || selected_range.0.start.0 == i64::MAX {
         return;
     }
+
+    // Simple volume-based decision: use overview for large time ranges (> 10 minutes)
+    // This covers two use cases:
+    // 1. Live telemetry: data span is small (< 10 minutes) -> direct chunked loading  
+    // 2. Historical datasets: data span is large (> 10 minutes) -> use LTTB overview first
+    const TEN_MINUTES_MICROS: i64 = 600_000_000; // 10 minutes in microseconds
+    let range_duration = selected_range.0.end.0.saturating_sub(selected_range.0.start.0);
+    // let use_overview = range_duration > TEN_MINUTES_MICROS;
+    let use_overview = false;
+
     for (&component_id, component) in graph_data.components.iter_mut() {
         let mut line = component
             .lines
@@ -409,6 +434,56 @@ pub fn queue_timestamp_read(
         if let Some(last_queried) = line.as_ref().and_then(|l| l.last_queried.as_ref())
             && last_queried.elapsed() <= Duration::from_millis(250)
         {
+            continue;
+        }
+
+        if use_overview {
+            // Request overview for each element that hasn't been requested yet
+            let num_elements = component.element_names.len().max(1);
+
+            for element_index in 0..num_elements {
+                if component
+                    .overview_requested
+                    .get(&element_index)
+                    .copied()
+                    .unwrap_or(false)
+                {
+                    continue;
+                }
+
+                // Mark as requested
+                component.overview_requested.insert(element_index, true);
+
+                let packet_id = fastrand::u16(..).to_le_bytes();
+                
+                let query = PlotOverviewQuery {
+                    id: packet_id,
+                    component_id,
+                    range: selected_range.0.clone(),
+                    max_points: OVERVIEW_MAX_POINTS as u32,
+                    element_index,
+                };
+                let earliest = earliest_timestamp.0;
+
+                commands.send_req_with_handler(
+                    query,
+                    packet_id,
+                    move |pkt: InRef<OwnedPacket<PacketGrantR>>,
+                          mut collected_graph_data: ResMut<CollectedGraphData>,
+                          mut lines: ResMut<Assets<Line>>| {
+                        handle_overview_response(
+                            pkt,
+                            &mut collected_graph_data,
+                            &mut lines,
+                            component_id,
+                            element_index,
+                            earliest,
+                        );
+                    },
+                );
+            }
+            // When using overview mode, skip the regular gap-filling logic
+            // Overview provides downsampled data for the full range at once
             continue;
         }
 
@@ -490,6 +565,64 @@ pub fn queue_timestamp_read(
         } else {
             process_range(selected_range.0.clone());
         }
+    }
+}
+
+/// Handle the response from a PlotOverviewQuery.
+/// This inserts downsampled data into the LineTree for quick rendering.
+fn handle_overview_response(
+    pkt: InRef<OwnedPacket<PacketGrantR>>,
+    collected_graph_data: &mut CollectedGraphData,
+    lines: &mut Assets<Line>,
+    component_id: ComponentId,
+    element_index: usize,
+    earliest_timestamp: Timestamp,
+) {
+    let OwnedPacket::TimeSeries(time_series) = &*pkt else {
+        return;
+    };
+
+    let Ok(timestamps) = time_series.timestamps() else {
+        return;
+    };
+    let Ok(buf) = time_series.data() else {
+        return;
+    };
+
+    if timestamps.is_empty() {
+        return;
+    }
+
+    let Some(plot_data) = collected_graph_data.get_component_mut(&component_id) else {
+        return;
+    };
+
+    // Get or create the line for this element
+    let line = plot_data.lines.entry(element_index).or_insert_with(|| {
+        let label = plot_data
+            .element_names
+            .get(element_index)
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| format!("[{element_index}]"));
+        lines.add(Line {
+            label,
+            ..Default::default()
+        })
+    });
+
+    let Some(line) = lines.get_mut(line) else {
+        return;
+    };
+
+    // The response contains f32 values
+    let Ok(values) = <[f32]>::try_ref_from_bytes(buf) else {
+        return;
+    };
+
+    // Create a chunk with the overview data
+    if let Some(chunk) = Chunk::from_iter(timestamps, earliest_timestamp, values.iter().copied()) {
+        line.data.insert(chunk);
     }
 }
 
@@ -907,6 +1040,45 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
                 xs.add_summary(&x.summary);
                 xs
             })
+    }
+
+    /// Compute robust percentile-based bounds that filter out extreme outliers.
+    /// Returns (p1, p99) percentile values from the data, which excludes the most extreme 1% on each end.
+    pub fn percentile_bounds(&self, range: Range<Timestamp>, p_low: f32, p_high: f32) -> Option<(D, D)>
+    where
+        D: PartialOrd + Copy,
+    {
+        // Collect all values from chunks in range
+        let mut values: Vec<D> = self
+            .range_iter(range)
+            .flat_map(|chunk| chunk.data.cpu().iter().copied())
+            .filter(|v| {
+                // Filter out non-finite f32 values if D is f32
+                // This is a bit of a hack but works for our use case
+                let bytes = std::mem::size_of::<D>();
+                if bytes == 4 {
+                    // Likely f32
+                    let v_f32: f32 = unsafe { std::mem::transmute_copy(v) };
+                    v_f32.is_finite()
+                } else {
+                    true
+                }
+            })
+            .collect();
+
+        if values.is_empty() {
+            return None;
+        }
+
+        // Sort for percentile calculation
+        values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+
+        let len = values.len();
+        let low_idx = ((p_low / 100.0) * len as f32) as usize;
+        let high_idx = ((p_high / 100.0) * len as f32) as usize;
+        let high_idx = high_idx.min(len - 1);
+
+        Some((values[low_idx], values[high_idx]))
     }
 
     pub fn last(&self) -> Option<&Chunk<D>> {

@@ -56,9 +56,9 @@ pub fn lttb_downsample(data: &[DataPoint], target_points: usize) -> Vec<DataPoin
             let mut sum_value = 0.0f64;
             let count = (next_bucket_end - next_bucket_start) as f64;
 
-            for j in next_bucket_start..next_bucket_end {
-                sum_time += data[j].time;
-                sum_value += data[j].value;
+            for point in data.iter().take(next_bucket_end).skip(next_bucket_start) {
+                sum_time += point.time;
+                sum_value += point.value;
             }
 
             (sum_time as f64 / count, sum_value / count)
@@ -73,9 +73,12 @@ pub fn lttb_downsample(data: &[DataPoint], target_points: usize) -> Vec<DataPoin
         let mut max_area = -1.0f64;
         let mut max_area_index = bucket_start;
 
-        for j in bucket_start..bucket_end {
-            let point = &data[j];
-
+        for (j, point) in data
+            .iter()
+            .enumerate()
+            .take(bucket_end)
+            .skip(bucket_start)
+        {
             // Calculate triangle area using the cross product formula
             // Area = 0.5 * |x1(y2 - y3) + x2(y3 - y1) + x3(y1 - y2)|
             let area = ((a.time as f64 - avg_time) * (point.value - a.value)
@@ -98,7 +101,22 @@ pub fn lttb_downsample(data: &[DataPoint], target_points: usize) -> Vec<DataPoin
     result
 }
 
+/// Compute percentile value from a slice of f64 values.
+/// Returns None if the slice is empty or contains only non-finite values.
+fn percentile(sorted_values: &[f64], p: f64) -> Option<f64> {
+    if sorted_values.is_empty() {
+        return None;
+    }
+    let idx = ((p / 100.0) * (sorted_values.len() - 1) as f64) as usize;
+    let idx = idx.min(sorted_values.len() - 1);
+    Some(sorted_values[idx])
+}
+
 /// Downsample time and value arrays using LTTB.
+///
+/// This function includes outlier filtering: values outside the 0.1-99.9 percentile
+/// range are clamped to the nearest bound. This prevents corrupt sensor data from
+/// distorting the visualization while preserving the overall signal shape.
 ///
 /// # Arguments
 /// * `times` - Timestamp array (microseconds since epoch)
@@ -112,16 +130,24 @@ pub fn lttb_downsample_arrays(
     values: &[f64],
     target_points: usize,
 ) -> (Vec<i64>, Vec<f64>) {
-    assert_eq!(times.len(), values.len(), "times and values must have same length");
+    assert_eq!(
+        times.len(),
+        values.len(),
+        "times and values must have same length"
+    );
 
     if times.is_empty() {
         return (vec![], vec![]);
     }
 
+    // First, filter outliers using percentile-based clamping
+    // This prevents corrupt data (e.g., sensor errors) from distorting the visualization
+    let filtered_values = filter_outliers(values);
+
     // Convert to DataPoints
     let data: Vec<DataPoint> = times
         .iter()
-        .zip(values.iter())
+        .zip(filtered_values.iter())
         .map(|(&time, &value)| DataPoint { time, value })
         .collect();
 
@@ -133,6 +159,45 @@ pub fn lttb_downsample_arrays(
     let values: Vec<f64> = downsampled.iter().map(|p| p.value).collect();
 
     (times, values)
+}
+
+/// Filter outliers by clamping values outside the 0.1-99.9 percentile range.
+/// Non-finite values (NaN, Inf) are replaced with the median.
+fn filter_outliers(values: &[f64]) -> Vec<f64> {
+    if values.is_empty() {
+        return vec![];
+    }
+
+    // Collect and sort finite values for percentile calculation
+    let mut sorted: Vec<f64> = values.iter().copied().filter(|v| v.is_finite()).collect();
+
+    if sorted.is_empty() {
+        // All values are non-finite, return zeros
+        return vec![0.0; values.len()];
+    }
+
+    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+
+    // Compute percentile bounds (0.1 and 99.9 percentiles)
+    let p_low = percentile(&sorted, 0.1).unwrap_or(sorted[0]);
+    let p_high = percentile(&sorted, 99.9).unwrap_or(sorted[sorted.len() - 1]);
+    let median = percentile(&sorted, 50.0).unwrap_or(0.0);
+
+    // Clamp outliers and replace non-finite values
+    values
+        .iter()
+        .map(|&v| {
+            if !v.is_finite() {
+                median
+            } else if v < p_low {
+                p_low
+            } else if v > p_high {
+                p_high
+            } else {
+                v
+            }
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -158,8 +223,14 @@ mod tests {
     #[test]
     fn test_lttb_small_input() {
         let data = vec![
-            DataPoint { time: 0, value: 1.0 },
-            DataPoint { time: 1, value: 2.0 },
+            DataPoint {
+                time: 0,
+                value: 1.0,
+            },
+            DataPoint {
+                time: 1,
+                value: 2.0,
+            },
         ];
 
         let result = lttb_downsample(&data, 10);

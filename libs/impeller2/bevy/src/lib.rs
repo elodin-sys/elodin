@@ -663,7 +663,9 @@ impl CommandsExt for Commands<'_, '_> {
                 }
                 other => {
                     let desc = match other {
-                        OwnedPacket::Msg(m) => format!("wrong msg type: got id={:?}, expected id={:?}", m.id, R::ID),
+                        OwnedPacket::Msg(m) => {
+                            format!("wrong msg type: got id={:?}, expected id={:?}", m.id, R::ID)
+                        }
                         OwnedPacket::Table(_) => "wrong msg type: got Table".to_string(),
                         OwnedPacket::TimeSeries(_) => "wrong msg type: got TimeSeries".to_string(),
                     };

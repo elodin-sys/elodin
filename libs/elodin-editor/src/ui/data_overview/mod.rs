@@ -354,8 +354,6 @@ impl WidgetSystem for DataOverviewWidget<'_, '_> {
                 .min(params.time_ranges.tables_to_query.len());
 
             if batch_start >= params.time_ranges.tables_to_query.len() {
-                // All Phase 2 batches started and completed, transition to Ready
-                eprintln!("Phase 2 complete: all {} sparklines loaded", params.time_ranges.tables_to_query.len());
                 params.time_ranges.state = TimeRangeQueryState::Ready;
             } else {
                 // Start next batch
@@ -1051,20 +1049,19 @@ fn process_sparkline_result(
 
     // For SparklineQuery, values are always Float64
     // Fall back to extract_values_from_array for backward compatibility with SQLQuery
-    let values: Vec<f64> = if let Some(float_array) =
-        value_array.as_any().downcast_ref::<Float64Array>()
-    {
-        float_array.values().to_vec()
-    } else {
-        // Fallback for complex types (backward compat with old SQLQuery results)
-        let Some(value_series) = extract_values_from_array(value_array.as_ref()) else {
-            return;
+    let values: Vec<f64> =
+        if let Some(float_array) = value_array.as_any().downcast_ref::<Float64Array>() {
+            float_array.values().to_vec()
+        } else {
+            // Fallback for complex types (backward compat with old SQLQuery results)
+            let Some(value_series) = extract_values_from_array(value_array.as_ref()) else {
+                return;
+            };
+            if value_series.is_empty() || value_series[0].is_empty() {
+                return;
+            }
+            value_series[0].clone()
         };
-        if value_series.is_empty() || value_series[0].is_empty() {
-            return;
-        }
-        value_series[0].clone()
-    };
 
     let point_count = timestamps.len();
 

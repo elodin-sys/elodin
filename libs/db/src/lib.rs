@@ -1566,9 +1566,8 @@ async fn handle_packet<A: AsyncWrite + 'static>(
             // Find the component matching this table name
             let result = db.with_state(|state| {
                 for component in state.components.values() {
-                    let component_metadata = state
-                        .component_metadata
-                        .get(&component.component_id)?;
+                    let component_metadata =
+                        state.component_metadata.get(&component.component_id)?;
                     let component_name = crate::arrow::sanitize_sql_table_name(
                         &component_metadata.name.to_case(convert_case::Case::Snake),
                     );
@@ -1661,7 +1660,11 @@ async fn handle_packet<A: AsyncWrite + 'static>(
                                     }
                                     PrimType::I8 => (value_bytes[offset] as i8) as f64,
                                     PrimType::Bool => {
-                                        if value_bytes[offset] != 0 { 1.0 } else { 0.0 }
+                                        if value_bytes[offset] != 0 {
+                                            1.0
+                                        } else {
+                                            0.0
+                                        }
                                     }
                                 }
                             })
@@ -1688,7 +1691,11 @@ async fn handle_packet<A: AsyncWrite + 'static>(
                     let value_array = Float64Array::from(ds_values);
 
                     let schema = Arc::new(Schema::new(vec![
-                        Field::new("time", DataType::Timestamp(TimeUnit::Microsecond, None), false),
+                        Field::new(
+                            "time",
+                            DataType::Timestamp(TimeUnit::Microsecond, None),
+                            false,
+                        ),
                         Field::new("value", DataType::Float64, true),
                     ]));
 
@@ -1696,7 +1703,7 @@ async fn handle_packet<A: AsyncWrite + 'static>(
                         schema.clone(),
                         vec![Arc::new(time_array), Arc::new(value_array)],
                     )
-                    .map_err(|e| Error::Arrow(e))?;
+                    .map_err(Error::Arrow)?;
 
                     // Serialize to Arrow IPC
                     let mut buf = vec![];
@@ -1716,7 +1723,11 @@ async fn handle_packet<A: AsyncWrite + 'static>(
                     use ::arrow::record_batch::RecordBatch;
 
                     let schema = Arc::new(Schema::new(vec![
-                        Field::new("time", DataType::Timestamp(TimeUnit::Microsecond, None), false),
+                        Field::new(
+                            "time",
+                            DataType::Timestamp(TimeUnit::Microsecond, None),
+                            false,
+                        ),
                         Field::new("value", DataType::Float64, true),
                     ]));
 
@@ -1737,6 +1748,127 @@ async fn handle_packet<A: AsyncWrite + 'static>(
 
             // Send completion marker
             tx.send_msg(&ArrowIPC { batch: None }).await?;
+        }
+        Packet::Msg(m) if m.id == PlotOverviewQuery::ID => {
+            let query = m.parse::<PlotOverviewQuery>()?;
+            let PlotOverviewQuery {
+                id: request_id,
+                component_id,
+                range,
+                max_points,
+                element_index,
+            } = query;
+
+            let component = db.with_state(|state| {
+                let Some(component) = state.components.get(&component_id) else {
+                    return Err(Error::ComponentNotFound(component_id));
+                };
+                Ok(component.clone())
+            })?;
+
+            // Get the data for the requested range
+            // The range is already in Timestamp format from the query
+            let (timestamps, data) = match component.get_range(&range) {
+                Some(result) => result,
+                None => {
+                    // Range out of bounds - send empty result
+                    tx.send_time_series(request_id, &[], &[]).await?;
+                    return Ok(());
+                }
+            };
+
+            let num_points = timestamps.len();
+            if num_points == 0 {
+                tx.send_time_series(request_id, &[], &[]).await?;
+                return Ok(());
+            }
+
+            // Extract values for the specified element_index
+            let element_size = component.time_series.element_size();
+            let dim: usize = component.schema.dim.iter().product();
+            let scalar_size = element_size / dim.max(1);
+            let element_offset = element_index * scalar_size;
+
+            // Convert timestamps to i64 for LTTB (Timestamp wraps i64)
+            let times: Vec<i64> = timestamps.iter().map(|t| t.0).collect();
+
+            // Extract values as f64 for the specified element
+            let values: Vec<f64> = (0..num_points)
+                .map(|i| {
+                    let offset = i * element_size + element_offset;
+                    if offset + scalar_size > data.len() {
+                        return f64::NAN;
+                    }
+                    match component.schema.prim_type {
+                        PrimType::F64 => {
+                            let bytes: [u8; 8] =
+                                data[offset..offset + 8].try_into().unwrap_or([0u8; 8]);
+                            f64::from_le_bytes(bytes)
+                        }
+                        PrimType::F32 => {
+                            let bytes: [u8; 4] =
+                                data[offset..offset + 4].try_into().unwrap_or([0u8; 4]);
+                            f32::from_le_bytes(bytes) as f64
+                        }
+                        PrimType::U64 => {
+                            let bytes: [u8; 8] =
+                                data[offset..offset + 8].try_into().unwrap_or([0u8; 8]);
+                            u64::from_le_bytes(bytes) as f64
+                        }
+                        PrimType::U32 => {
+                            let bytes: [u8; 4] =
+                                data[offset..offset + 4].try_into().unwrap_or([0u8; 4]);
+                            u32::from_le_bytes(bytes) as f64
+                        }
+                        PrimType::U16 => {
+                            let bytes: [u8; 2] =
+                                data[offset..offset + 2].try_into().unwrap_or([0u8; 2]);
+                            u16::from_le_bytes(bytes) as f64
+                        }
+                        PrimType::U8 => data[offset] as f64,
+                        PrimType::I64 => {
+                            let bytes: [u8; 8] =
+                                data[offset..offset + 8].try_into().unwrap_or([0u8; 8]);
+                            i64::from_le_bytes(bytes) as f64
+                        }
+                        PrimType::I32 => {
+                            let bytes: [u8; 4] =
+                                data[offset..offset + 4].try_into().unwrap_or([0u8; 4]);
+                            i32::from_le_bytes(bytes) as f64
+                        }
+                        PrimType::I16 => {
+                            let bytes: [u8; 2] =
+                                data[offset..offset + 2].try_into().unwrap_or([0u8; 2]);
+                            i16::from_le_bytes(bytes) as f64
+                        }
+                        PrimType::I8 => (data[offset] as i8) as f64,
+                        PrimType::Bool => {
+                            if data[offset] != 0 {
+                                1.0
+                            } else {
+                                0.0
+                            }
+                        }
+                    }
+                })
+                .collect();
+
+            // Apply LTTB downsampling
+            let (ds_times, ds_values) =
+                crate::arrow::lttb::lttb_downsample_arrays(&times, &values, max_points as usize);
+
+            // Convert back to the format expected by the client
+            let ds_timestamps: Vec<Timestamp> = ds_times.iter().map(|t| Timestamp(*t)).collect();
+
+            // Convert f64 values back to the original type's byte representation
+            // For simplicity, we'll send as f32 since that's what the plot panel uses internally
+            let ds_data: Vec<u8> = ds_values
+                .iter()
+                .flat_map(|v| (*v as f32).to_le_bytes())
+                .collect();
+
+            tx.send_time_series(request_id, &ds_timestamps, &ds_data)
+                .await?;
         }
         Packet::Msg(m) if m.id == SetMsgMetadata::ID => {
             let _snapshot_guard = db.snapshot_barrier.enter_writer();

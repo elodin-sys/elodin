@@ -1036,6 +1036,7 @@ pub fn auto_y_bounds(
         if graph_state.auto_y_range {
             let mut y_min: Option<f32> = None;
             let mut y_max: Option<f32> = None;
+
             for (entity, _) in graph_state.enabled_lines.values() {
                 let Ok(handle) = line_handles.get(*entity) else {
                     continue;
@@ -1044,23 +1045,34 @@ pub fn auto_y_bounds(
                     continue;
                 };
                 if let gpu::LineMut::Timeseries(line) = line {
-                    let summary = line.data.range_summary(selected_range.0.clone());
-                    if let Some(min) = summary.min {
+                    // Always use percentile bounds for robust Y-axis calculation
+                    // This filters out extreme outliers (corrupt data, sensor errors)
+                    // without requiring hard-coded "reasonable" thresholds
+                    let (line_min, line_max) = line.data
+                        .percentile_bounds(selected_range.0.clone(), 1.0, 99.0)
+                        .unwrap_or_else(|| {
+                            // Fall back to summary if percentile calculation fails
+                            let summary = line.data.range_summary(selected_range.0.clone());
+                            (summary.min.unwrap_or(0.0), summary.max.unwrap_or(1.0))
+                        });
+
+                    if line_min.is_finite() {
                         if let Some(v) = &mut y_min {
-                            *v = v.min(min);
+                            *v = v.min(line_min);
                         } else {
-                            y_min = Some(min)
+                            y_min = Some(line_min)
                         }
                     }
-                    if let Some(max) = summary.max {
+                    if line_max.is_finite() {
                         if let Some(v) = &mut y_max {
-                            *v = v.max(max);
+                            *v = v.max(line_max);
                         } else {
-                            y_max = Some(max)
+                            y_max = Some(line_max)
                         }
                     }
                 }
             }
+
             graph_state.y_range =
                 y_min.unwrap_or_default() as f64..y_max.unwrap_or_default() as f64;
         }
@@ -1537,8 +1549,9 @@ impl PlotBounds {
             baseline.end.0.saturating_sub(earliest_timestamp.0) as f64,
         );
 
-        let min_y = sigfig_round(min_y, 2);
-        let max_y = sigfig_round(max_y, 2);
+        // Don't use sigfig_round here - it can round min and max to the same value
+        // when they're close together (e.g., 101.02 and 101.20 both round to 110)
+        // Instead, use the raw values and let the rendering handle display formatting
         Self::new(min_x, min_y, max_x, max_y)
     }
 

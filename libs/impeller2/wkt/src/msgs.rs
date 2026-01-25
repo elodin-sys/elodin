@@ -435,6 +435,33 @@ impl Request for SparklineQuery {
     type Reply<B: IoBuf + Clone> = ArrowIPC<'static>;
 }
 
+/// Query for plot overview data with server-side LTTB downsampling.
+/// Used for initial load of large historical datasets in the plot panel.
+/// Returns downsampled time series data optimized for visualization.
+#[derive(Clone, Serialize, Deserialize, Debug)]
+pub struct PlotOverviewQuery {
+    /// Packet ID for request/response correlation
+    pub id: PacketId,
+    /// The component ID to query
+    pub component_id: ComponentId,
+    /// Time range to query
+    pub range: Range<Timestamp>,
+    /// Maximum number of points to return per element (will use LTTB downsampling if data exceeds this)
+    pub max_points: u32,
+    /// Which element of a vector component to query (0 for scalar components)
+    pub element_index: usize,
+}
+
+impl Msg for PlotOverviewQuery {
+    const ID: PacketId = [224, 32];
+}
+
+impl_user_data_msg!(PlotOverviewQuery);
+
+impl Request for PlotOverviewQuery {
+    type Reply<B: IoBuf + Clone> = OwnedTimeSeries<B>;
+}
+
 #[derive(Clone, Serialize, Deserialize, Debug)]
 #[repr(transparent)]
 pub struct ArrowIPC<'a> {
