@@ -497,7 +497,6 @@ impl RequestIdAlloc {
         // Skip request ID 0, which is reserved for streaming messages
         if self.0 == 0 {
             self.0 = 1;
-            eprintln!("RequestIdAlloc: wrapped around to 1");
         }
         self.0
     }

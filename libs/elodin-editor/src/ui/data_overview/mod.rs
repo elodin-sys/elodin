@@ -358,13 +358,6 @@ impl WidgetSystem for DataOverviewWidget<'_, '_> {
             } else {
                 // Start next batch
                 let batch_size = batch_end - batch_start;
-                eprintln!(
-                    "Phase 2 Batch {}: sparklines {}-{} ({} queries)",
-                    params.time_ranges.current_batch + 1,
-                    batch_start,
-                    batch_end - 1,
-                    batch_size
-                );
                 params.time_ranges.pending_queries = batch_size;
                 params.time_ranges.current_batch += 1;
 
