@@ -63,7 +63,6 @@ where
                 return Err(e);
             }
         }
-        eprintln!("TCP tx loop ended (channel closed)");
         Ok::<_, miette::Error>(())
     };
     (rx, tx).race().await

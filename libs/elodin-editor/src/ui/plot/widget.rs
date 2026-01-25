@@ -476,12 +476,12 @@ impl TimeseriesPlot {
                                     egui::StrokeKind::Middle,
                                 );
                                 ui.add_space(6.);
-                                ui.label(RichText::new(line_data.label.clone()).size(11.0));
-                                let value = line
-                                    .data
-                                    .get_nearest(timestamp)
-                                    .map(|(_time, x)| format!("{:.2}", x))
-                                    .unwrap_or_else(|| "N/A".to_string());
+                            ui.label(RichText::new(line_data.label.clone()).size(11.0));
+                            let value = line
+                                .data
+                                .get_nearest(timestamp)
+                                .map(|(_time, x)| format_num(*x as f64))
+                                .unwrap_or_else(|| "N/A".to_string());
                                 ui.with_layout(Layout::top_down_justified(Align::RIGHT), |ui| {
                                     ui.add_space(3.0);
                                     ui.label(RichText::new(value).size(11.0));
@@ -554,7 +554,7 @@ impl TimeseriesPlot {
                                     ui.add_space(6.);
                                     ui.label(RichText::new(query_label.clone()).size(11.0));
                                     let value = nearest_value
-                                        .map(|v| format!("{:.2}", v))
+                                        .map(|v| format_num(v as f64))
                                         .unwrap_or_else(|| "N/A".to_string());
                                     ui.with_layout(Layout::top_down_justified(Align::RIGHT), |ui| {
                                         ui.add_space(3.0);
@@ -1655,7 +1655,9 @@ impl PlotBounds {
     }
 
     pub fn screen_pos_to_value(&self, screen_rect: egui::Rect, pos: egui::Pos2) -> DVec2 {
-        let offset = (pos - screen_rect.min).as_dvec2();
+        let offset = pos - screen_rect.min;
+        // Flip y because screen y increases downward but plot y increases upward
+        let offset = DVec2::new(offset.x as f64, (screen_rect.height() - offset.y) as f64);
         let screen_to_value = self.size() / screen_rect.size().as_dvec2();
         self.min() + offset * screen_to_value
     }

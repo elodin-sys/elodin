@@ -30,8 +30,8 @@ const SPARKLINE_MAX_POINTS: usize = 10000;
 
 /// Maximum concurrent queries to avoid RequestId overflow and queue overflow.
 /// RequestId is u8 (max 255), and the BBQ queue can fill if too many large responses arrive.
-/// Reduced to 20 to ensure responses are processed before the queue overflows.
-const MAX_CONCURRENT_QUERIES: usize = 20;
+/// Reduced to 120 to ensure responses are processed before the queue overflows.
+const MAX_CONCURRENT_QUERIES: usize = 120;
 
 /// A single series of data points (one field/element of a component)
 #[derive(Clone, Debug, Default)]
