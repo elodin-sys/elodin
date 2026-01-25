@@ -1,7 +1,7 @@
 pub mod data;
 pub use data::{
-    BufferShardAlloc, CHUNK_COUNT, CHUNK_LEN, CollectedGraphData, Line, PlotDataComponent, XYLine,
-    collect_garbage, queue_timestamp_read, setup_pkt_handler,
+    BufferShardAlloc, CHUNK_COUNT, CHUNK_LEN, CollectedGraphData, Line, OVERVIEW_MAX_POINTS,
+    PlotDataComponent, XYLine, collect_garbage, queue_timestamp_read, setup_pkt_handler,
 };
 
 pub mod gpu;

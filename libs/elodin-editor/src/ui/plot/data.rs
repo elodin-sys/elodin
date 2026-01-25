@@ -422,8 +422,7 @@ pub fn queue_timestamp_read(
     // 2. Historical datasets: data span is large (> 10 minutes) -> use LTTB overview first
     const TEN_MINUTES_MICROS: i64 = 600_000_000; // 10 minutes in microseconds
     let range_duration = selected_range.0.end.0.saturating_sub(selected_range.0.start.0);
-    // let use_overview = range_duration > TEN_MINUTES_MICROS;
-    let use_overview = false;
+    let use_overview = range_duration > TEN_MINUTES_MICROS;
 
     for (&component_id, component) in graph_data.components.iter_mut() {
         let mut line = component

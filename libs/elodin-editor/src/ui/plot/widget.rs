@@ -41,7 +41,7 @@ use crate::{
         SelectedObject,
         colors::{ColorExt, get_scheme, with_opacity},
         plot::{
-            CollectedGraphData, GraphState, Line,
+            CollectedGraphData, GraphState, Line, OVERVIEW_MAX_POINTS,
             gpu::{LineBundle, LineConfig, LineUniform},
         },
         tiles::WindowState,
@@ -1045,16 +1045,21 @@ pub fn auto_y_bounds(
                     continue;
                 };
                 if let gpu::LineMut::Timeseries(line) = line {
-                    // Always use percentile bounds for robust Y-axis calculation
-                    // This filters out extreme outliers (corrupt data, sensor errors)
-                    // without requiring hard-coded "reasonable" thresholds
-                    let (line_min, line_max) = line.data
-                        .percentile_bounds(selected_range.0.clone(), 1.0, 99.0)
-                        .unwrap_or_else(|| {
-                            // Fall back to summary if percentile calculation fails
-                            let summary = line.data.range_summary(selected_range.0.clone());
-                            (summary.min.unwrap_or(0.0), summary.max.unwrap_or(1.0))
-                        });
+                    // For small datasets (live streaming), use fast range_summary
+                    // For large datasets (historical/overview), use percentile_bounds to filter outliers
+                    let summary = line.data.range_summary(selected_range.0.clone());
+
+                    let (line_min, line_max) = if summary.len > OVERVIEW_MAX_POINTS {
+                        // Large dataset - use percentile bounds to filter outliers
+                        // This is expensive but necessary for historical data with corrupt values
+                        line.data
+                            .percentile_bounds(selected_range.0.clone(), 1.0, 99.0)
+                            .unwrap_or((summary.min.unwrap_or(0.0), summary.max.unwrap_or(1.0)))
+                    } else {
+                        // Small dataset (live streaming) - use fast summary
+                        // Fresh data from sensors doesn't have the outlier problem
+                        (summary.min.unwrap_or(0.0), summary.max.unwrap_or(1.0))
+                    };
 
                     if line_min.is_finite() {
                         if let Some(v) = &mut y_min {
