@@ -1162,14 +1162,9 @@ pub async fn handle_conn(stream: TcpStream, db: Arc<DB>) {
     let rx = PacketStream::new(rx);
     let tx = Arc::new(Mutex::new(PacketSink::new(tx)));
     match handle_conn_inner(tx, rx, db).await {
-        Ok(_) => {
-            eprintln!("DB: connection ended normally");
-        }
-        Err(err) if err.is_stream_closed() => {
-            eprintln!("DB: connection closed (stream closed): {:?}", err);
-        }
+        Ok(_) => {}
+        Err(err) if err.is_stream_closed() => {}
         Err(err) => {
-            eprintln!("DB: connection error: {:?}", err);
             warn!(?err, "error handling stream")
         }
     }

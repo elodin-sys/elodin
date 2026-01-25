@@ -400,7 +400,6 @@ pub fn handle_time_series(
 
 pub fn queue_timestamp_read(
     selected_range: Res<SelectedTimeRange>,
-    _current_timestamp: Res<CurrentTimestamp>,
     mut commands: Commands,
     mut graph_data: ResMut<CollectedGraphData>,
     mut lines: ResMut<Assets<Line>>,
