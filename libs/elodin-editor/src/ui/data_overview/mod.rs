@@ -16,7 +16,7 @@ use bevy_egui::egui::{self, Color32, Pos2, Rect, Sense, Stroke, Vec2};
 use convert_case::{Case, Casing};
 use impeller2::types::{ComponentId, Timestamp};
 use impeller2_bevy::CommandsExt;
-use impeller2_wkt::{ArrowIPC, ErrorResponse, SQLQuery};
+use impeller2_wkt::{ArrowIPC, ErrorResponse, SQLQuery, SparklineQuery};
 
 use crate::{EqlContext, SelectedTimeRange, ui::widgets::WidgetSystem};
 
@@ -26,10 +26,12 @@ use super::{PaneName, colors::get_scheme};
 use eql;
 
 /// Maximum number of points per series in each sparkline
-const SPARKLINE_MAX_POINTS: usize = 2000;
+const SPARKLINE_MAX_POINTS: usize = 10000;
 
-/// Maximum concurrent queries to avoid RequestId overflow (RequestId is u8, max 255)
-const MAX_CONCURRENT_QUERIES: usize = 200;
+/// Maximum concurrent queries to avoid RequestId overflow and queue overflow.
+/// RequestId is u8 (max 255), and the BBQ queue can fill if too many large responses arrive.
+/// Reduced to 20 to ensure responses are processed before the queue overflows.
+const MAX_CONCURRENT_QUERIES: usize = 20;
 
 /// A single series of data points (one field/element of a component)
 #[derive(Clone, Debug, Default)]
@@ -177,12 +179,26 @@ fn hue_to_rgb(p: f32, q: f32, mut t: f32) -> f32 {
 }
 
 /// Convert component name to SQL table name using the same conversion as the database.
-/// The database uses `to_case(Case::Snake)` followed by replacing '.' with '_'.
+/// The database uses `to_case(Case::Snake)` followed by replacing invalid SQL characters.
 fn component_to_table_name(full_component_name: &str) -> String {
     // Full component name is like "GpsPosMessage1.VACC"
     // Table name is like "gps_pos_message_1_vacc"
     // Must match the conversion in libs/db/src/arrow/mod.rs
-    full_component_name.to_case(Case::Snake).replace('.', "_")
+    sanitize_sql_table_name(&full_component_name.to_case(Case::Snake))
+}
+
+/// Sanitize a string to be a valid SQL table name.
+/// Replaces invalid characters with underscores.
+fn sanitize_sql_table_name(name: &str) -> String {
+    name.chars()
+        .map(|c| {
+            if c.is_alphanumeric() || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect()
 }
 
 /// Widget for rendering the Data Overview panel
@@ -274,24 +290,38 @@ impl WidgetSystem for DataOverviewWidget<'_, '_> {
                         SQLQuery(query),
                         move |In(res): In<Result<ArrowIPC<'static>, ErrorResponse>>,
                               mut time_ranges: ResMut<ComponentTimeRanges>| {
-                            time_ranges.pending_queries =
-                                time_ranges.pending_queries.saturating_sub(1);
-                            time_ranges.completed_queries += 1;
-
-                            if let Ok(ipc) = res {
-                                let mut decoder = arrow::ipc::reader::StreamDecoder::new();
-                                if let Some(batch_data) = ipc.batch {
-                                    let mut buffer =
-                                        arrow::buffer::Buffer::from(batch_data.into_owned());
-                                    if let Some(batch) =
-                                        decoder.decode(&mut buffer).ok().and_then(|b| b)
-                                    {
-                                        process_time_range_and_count(
-                                            &table_name_clone,
-                                            &batch,
-                                            &mut time_ranges,
-                                        );
+                            // Only process data batches; completion markers (batch: None) are ignored
+                            // since the handler is removed immediately after processing data.
+                            // This prevents request ID collisions when IDs wrap around.
+                            match res {
+                                Ok(ipc) => {
+                                    if let Some(batch_data) = ipc.batch {
+                                        // Data batch - process it
+                                        let mut decoder = arrow::ipc::reader::StreamDecoder::new();
+                                        let mut buffer =
+                                            arrow::buffer::Buffer::from(batch_data.into_owned());
+                                        if let Some(batch) =
+                                            decoder.decode(&mut buffer).ok().and_then(|b| b)
+                                        {
+                                            process_time_range_and_count(
+                                                &table_name_clone,
+                                                &batch,
+                                                &mut time_ranges,
+                                            );
+                                        }
+                                        // Decrement pending_queries now that we have the data
+                                        time_ranges.pending_queries =
+                                            time_ranges.pending_queries.saturating_sub(1);
+                                        time_ranges.completed_queries += 1;
                                     }
+                                    // If batch is None (completion marker), just ignore it
+                                    // The handler will be removed either way
+                                }
+                                Err(_) => {
+                                    // Error response - query is done
+                                    time_ranges.pending_queries =
+                                        time_ranges.pending_queries.saturating_sub(1);
+                                    time_ranges.completed_queries += 1;
                                 }
                             }
 
@@ -304,6 +334,7 @@ impl WidgetSystem for DataOverviewWidget<'_, '_> {
                                 time_ranges.current_batch = 0;
                                 time_ranges.completed_queries = 0;
                             }
+                            // Always return true to remove handler immediately, freeing the request ID
                             true
                         },
                     );
@@ -324,10 +355,18 @@ impl WidgetSystem for DataOverviewWidget<'_, '_> {
 
             if batch_start >= params.time_ranges.tables_to_query.len() {
                 // All Phase 2 batches started and completed, transition to Ready
+                eprintln!("Phase 2 complete: all {} sparklines loaded", params.time_ranges.tables_to_query.len());
                 params.time_ranges.state = TimeRangeQueryState::Ready;
             } else {
                 // Start next batch
                 let batch_size = batch_end - batch_start;
+                eprintln!(
+                    "Phase 2 Batch {}: sparklines {}-{} ({} queries)",
+                    params.time_ranges.current_batch + 1,
+                    batch_start,
+                    batch_end - 1,
+                    batch_size
+                );
                 params.time_ranges.pending_queries = batch_size;
                 params.time_ranges.current_batch += 1;
 
@@ -335,50 +374,58 @@ impl WidgetSystem for DataOverviewWidget<'_, '_> {
                 {
                     let table_name_clone = table_name.clone();
 
-                    // Build smart sparkline query based on row count
-                    let row_count = params
-                        .time_ranges
-                        .row_counts
-                        .get(table_name)
-                        .copied()
-                        .unwrap_or(0);
-
-                    let sparkline_query = if row_count <= SPARKLINE_MAX_POINTS {
-                        // Small dataset: fetch all data
-                        format!("SELECT * FROM {} ORDER BY time", table_name)
-                    } else {
-                        // Large dataset: use ROW_NUMBER() for server-side downsampling
-                        let step = (row_count / SPARKLINE_MAX_POINTS).max(1);
-                        format!(
-                            "SELECT * FROM (SELECT *, ROW_NUMBER() OVER (ORDER BY time) as rn FROM {}) sub WHERE sub.rn % {} = 1 ORDER BY time",
-                            table_name, step
-                        )
+                    // Use SparklineQuery with server-side LTTB downsampling.
+                    // The server extracts just time + first scalar value and applies LTTB,
+                    // returning at most SPARKLINE_MAX_POINTS data points.
+                    // This is resilient to any data size - even millions of rows.
+                    let query = SparklineQuery {
+                        table_name: table_name.clone(),
+                        max_points: SPARKLINE_MAX_POINTS as u32,
                     };
 
                     params.commands.send_req_reply(
-                        SQLQuery(sparkline_query),
+                        query,
                         move |In(res): In<Result<ArrowIPC<'static>, ErrorResponse>>,
                               mut time_ranges: ResMut<ComponentTimeRanges>| {
-                            time_ranges.pending_queries =
-                                time_ranges.pending_queries.saturating_sub(1);
-                            time_ranges.completed_queries += 1;
-
-                            if let Ok(ipc) = res {
-                                let mut decoder = arrow::ipc::reader::StreamDecoder::new();
-                                if let Some(batch_data) = ipc.batch {
-                                    let mut buffer =
-                                        arrow::buffer::Buffer::from(batch_data.into_owned());
-                                    if let Some(batch) =
-                                        decoder.decode(&mut buffer).ok().and_then(|b| b)
-                                    {
-                                        process_sparkline_result(
-                                            &table_name_clone,
-                                            &batch,
-                                            &mut time_ranges.sparklines,
-                                        );
+                            // Only process data batches; completion markers (batch: None) are ignored
+                            // since the handler is removed immediately after processing data.
+                            // This prevents request ID collisions when IDs wrap around.
+                            match res {
+                                Ok(ipc) => {
+                                    if let Some(batch_data) = ipc.batch {
+                                        // Data batch - process it (already downsampled by server)
+                                        let mut decoder = arrow::ipc::reader::StreamDecoder::new();
+                                        let mut buffer =
+                                            arrow::buffer::Buffer::from(batch_data.into_owned());
+                                        if let Some(batch) =
+                                            decoder.decode(&mut buffer).ok().and_then(|b| b)
+                                        {
+                                            process_sparkline_result(
+                                                &table_name_clone,
+                                                &batch,
+                                                &mut time_ranges.sparklines,
+                                            );
+                                        }
+                                        // Decrement pending_queries now that we have the data
+                                        time_ranges.pending_queries =
+                                            time_ranges.pending_queries.saturating_sub(1);
+                                        time_ranges.completed_queries += 1;
                                     }
+                                    // If batch is None (completion marker), just ignore it
+                                    // The handler will be removed either way
+                                }
+                                Err(e) => {
+                                    // Error response - query is done
+                                    eprintln!(
+                                        "Sparkline {}: query error: {}",
+                                        table_name_clone, e.description
+                                    );
+                                    time_ranges.pending_queries =
+                                        time_ranges.pending_queries.saturating_sub(1);
+                                    time_ranges.completed_queries += 1;
                                 }
                             }
+                            // Always return true to remove handler immediately, freeing the request ID
                             true
                         },
                     );
@@ -961,8 +1008,10 @@ fn extract_values_from_array(array: &dyn Array) -> Option<Vec<Vec<f64>>> {
     None
 }
 
-/// Process sparkline data result from SQL query
-/// Note: Server-side downsampling via ROW_NUMBER() is already applied, so we just parse the data directly
+/// Process sparkline data result from SparklineQuery.
+/// The server has already applied LTTB downsampling and returns a simple schema:
+/// - time: TimestampMicrosecond
+/// - value: Float64 (first scalar element from vector types)
 fn process_sparkline_result(
     table_name: &str,
     batch: &RecordBatch,
@@ -980,11 +1029,11 @@ fn process_sparkline_result(
         return; // Missing time column - skip silently
     };
 
-    // Find first non-time, non-rn column for data (skip 'rn' from ROW_NUMBER query)
+    // Find the value column (from SparklineQuery it's always "value")
     let value_idx = schema
         .fields()
         .iter()
-        .position(|f| f.name() != "time" && f.name() != "rn");
+        .position(|f| f.name() == "value" || (f.name() != "time" && f.name() != "rn"));
     let Some(value_idx) = value_idx else {
         return; // Missing data column - skip silently
     };
@@ -1000,46 +1049,46 @@ fn process_sparkline_result(
         return; // Non-timestamp time column - skip silently
     };
 
-    // Extract values from the data column (may be multiple series for vector types)
-    let Some(value_series) = extract_values_from_array(value_array.as_ref()) else {
-        return;
+    // For SparklineQuery, values are always Float64
+    // Fall back to extract_values_from_array for backward compatibility with SQLQuery
+    let values: Vec<f64> = if let Some(float_array) =
+        value_array.as_any().downcast_ref::<Float64Array>()
+    {
+        float_array.values().to_vec()
+    } else {
+        // Fallback for complex types (backward compat with old SQLQuery results)
+        let Some(value_series) = extract_values_from_array(value_array.as_ref()) else {
+            return;
+        };
+        if value_series.is_empty() || value_series[0].is_empty() {
+            return;
+        }
+        value_series[0].clone()
     };
-
-    if value_series.is_empty() || value_series[0].is_empty() {
-        return;
-    }
 
     let point_count = timestamps.len();
 
-    // Build points for each series and track global Y range
-    // No downsampling needed - server already handled it via ROW_NUMBER()
+    // Build points - server already did LTTB downsampling, no client-side downsampling needed
     let mut y_min = f64::INFINITY;
     let mut y_max = f64::NEG_INFINITY;
+    let mut points = Vec::with_capacity(point_count);
 
-    let series: Vec<SparklineSeries> = value_series
-        .iter()
-        .map(|values| {
-            let mut points = Vec::with_capacity(point_count);
-
-            // Iterate timestamps and values together - they have 1:1 correspondence
-            // since extract_values_from_array preserves array indices using NAN for nulls
-            for (i, &value) in values.iter().enumerate() {
-                if timestamps.is_null(i) {
-                    continue;
-                }
-                // Skip NAN values - this creates gaps in the sparkline where data is missing
-                if value.is_nan() {
-                    continue;
-                }
-                let time = timestamps.value(i);
-                points.push((time, value));
-                y_min = y_min.min(value);
-                y_max = y_max.max(value);
-            }
-
-            SparklineSeries { points }
-        })
-        .collect();
+    for (i, &value) in values.iter().enumerate() {
+        if i >= timestamps.len() {
+            break;
+        }
+        if timestamps.is_null(i) {
+            continue;
+        }
+        // Skip NAN values - this creates gaps in the sparkline where data is missing
+        if value.is_nan() {
+            continue;
+        }
+        let time = timestamps.value(i);
+        points.push((time, value));
+        y_min = y_min.min(value);
+        y_max = y_max.max(value);
+    }
 
     // Ensure we have some Y range for flat lines
     if (y_max - y_min).abs() < 1e-10 {
@@ -1050,7 +1099,7 @@ fn process_sparkline_result(
     sparklines.insert(
         table_name.to_string(),
         SparklineData {
-            series,
+            series: vec![SparklineSeries { points }],
             y_min,
             y_max,
             raw_point_count: point_count,

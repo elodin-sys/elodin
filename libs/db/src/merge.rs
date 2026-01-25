@@ -43,8 +43,8 @@ struct DatabaseInfo {
 /// * `auto_confirm` - If true, skip the confirmation prompt
 /// * `align1` - Optional alignment timestamp (seconds) for an event in DB1
 /// * `align2` - Optional alignment timestamp (seconds) for the same event in DB2.
-///   The database with the earlier anchor is shifted forward to align with the later one.
-///   This ensures timestamps never go negative (important for monotonic datasets).
+///   DB2 is shifted so that its anchor aligns with DB1's anchor. The shift may be
+///   forward (positive) or backward (negative).
 ///
 /// # Returns
 /// * `Ok(())` if successful
@@ -62,8 +62,7 @@ pub fn run(
     align2: Option<f64>,
 ) -> Result<(), Error> {
     // Validate alignment arguments: both must be provided or neither
-    // Returns (db1_offset, db2_offset) - one will be 0, the other will be positive
-    // We always shift forward (never backward past 0) to avoid negative timestamps
+    // DB2 is shifted to align with DB1. The offset may be positive (forward) or negative (backward).
     let (db1_offset, db2_offset) = match (align1, align2) {
         (Some(a1), Some(a2)) => {
             // Validate alignment values are finite numbers
@@ -84,15 +83,11 @@ pub fn run(
             let a1_micros = (a1 * 1_000_000.0) as i64;
             let a2_micros = (a2 * 1_000_000.0) as i64;
 
-            // Always shift forward: the dataset with the earlier anchor gets shifted
-            // to align with the later anchor
-            if a1_micros >= a2_micros {
-                // DB1's anchor is later or equal - shift DB2 forward to match
-                (0i64, a1_micros - a2_micros)
-            } else {
-                // DB2's anchor is later - shift DB1 forward to match
-                (a2_micros - a1_micros, 0i64)
-            }
+            // Shift DB2 to align with DB1
+            // offset = where we want it (align1) - where it is (align2)
+            // This may be positive (shift forward) or negative (shift backward)
+            let db2_offset = a1_micros - a2_micros;
+            (0i64, db2_offset)
         }
         (None, None) => (0, 0),
         _ => {
@@ -189,58 +184,61 @@ pub fn run(
 
     // Show time alignment information if specified
     if let (Some(a1), Some(a2)) = (align1, align2) {
-        let db1_offset_secs = db1_offset as f64 / 1_000_000.0;
         let db2_offset_secs = db2_offset as f64 / 1_000_000.0;
 
         println!("\nTime Alignment:");
         println!("  DB1 anchor: {:.3}s", a1);
         println!("  DB2 anchor: {:.3}s", a2);
 
-        // Show which database is being shifted (always forward, never backward)
-        if db1_offset > 0 {
-            println!(
-                "  Shifting DB1 forward by {:.3}s to align with DB2",
-                db1_offset_secs
-            );
-        } else if db2_offset > 0 {
+        // Show the shift direction for DB2 (DB1 is never shifted)
+        if db2_offset > 0 {
             println!(
                 "  Shifting DB2 forward by {:.3}s to align with DB1",
                 db2_offset_secs
+            );
+        } else if db2_offset < 0 {
+            println!(
+                "  Shifting DB2 backward by {:.3}s to align with DB1",
+                db2_offset_secs.abs()
             );
         } else {
             println!("  No shift needed (anchors are equal)");
         }
 
-        // Show time range transformation for DB1
+        // Show time range transformation for DB1 (always unchanged)
         if let Some((start, end)) = db1_info.time_range {
             let start_secs = start as f64 / 1_000_000.0;
             let end_secs = end as f64 / 1_000_000.0;
-            if db1_offset > 0 {
-                let new_start_secs = start_secs + db1_offset_secs;
-                let new_end_secs = end_secs + db1_offset_secs;
-                println!(
-                    "  DB1 time range: {:.3}s - {:.3}s -> {:.3}s - {:.3}s (shifted forward)",
-                    start_secs, end_secs, new_start_secs, new_end_secs
-                );
-            } else {
-                println!(
-                    "  DB1 time range: {:.3}s - {:.3}s (unchanged)",
-                    start_secs, end_secs
-                );
-            }
+            println!(
+                "  DB1 time range: {:.3}s - {:.3}s (unchanged)",
+                start_secs, end_secs
+            );
         }
 
         // Show time range transformation for DB2
         if let Some((start, end)) = db2_info.time_range {
             let start_secs = start as f64 / 1_000_000.0;
             let end_secs = end as f64 / 1_000_000.0;
-            if db2_offset > 0 {
+            if db2_offset != 0 {
                 let new_start_secs = start_secs + db2_offset_secs;
                 let new_end_secs = end_secs + db2_offset_secs;
+                let direction = if db2_offset > 0 {
+                    "forward"
+                } else {
+                    "backward"
+                };
                 println!(
-                    "  DB2 time range: {:.3}s - {:.3}s -> {:.3}s - {:.3}s (shifted forward)",
-                    start_secs, end_secs, new_start_secs, new_end_secs
+                    "  DB2 time range: {:.3}s - {:.3}s -> {:.3}s - {:.3}s (shifted {})",
+                    start_secs, end_secs, new_start_secs, new_end_secs, direction
                 );
+
+                // Warn if the shift would create negative timestamps
+                if new_start_secs < 0.0 {
+                    eprintln!(
+                        "\nWarning: This alignment will create negative timestamps in DB2 (new start: {:.3}s)",
+                        new_start_secs
+                    );
+                }
             } else {
                 println!(
                     "  DB2 time range: {:.3}s - {:.3}s (unchanged)",
@@ -1736,10 +1734,10 @@ mod tests {
     }
 
     #[test]
-    fn test_merge_with_alignment_db1_shifted() {
-        // Test case: Both datasets are monotonic (0-based)
-        // DB1 has "boost" event at 15s, DB2 has "boost" event at 45s
-        // Since align1 (15s) < align2 (45s), DB1 should be shifted forward by 30s
+    fn test_merge_with_alignment_db2_shifted_backward() {
+        // Test case: DB1 has "boost" event at 15s, DB2 has "boost" event at 45s
+        // DB2 is shifted backward by 30s to align with DB1's anchor
+        // offset = align1 - align2 = 15 - 45 = -30s
         let temp = TempDir::new().unwrap();
         let db1_path = temp.path().join("db1");
         let db2_path = temp.path().join("db2");
@@ -1767,8 +1765,8 @@ mod tests {
         )
         .unwrap();
 
-        // Merge with alignment: align DB1's 15s with DB2's 45s
-        // Since align1 < align2, DB1 gets shifted forward by 30s
+        // Merge with alignment: align DB2's 45s with DB1's 15s
+        // DB2 gets shifted backward by 30s (offset = 15 - 45 = -30s)
         run(
             db1_path,
             db2_path,
@@ -1782,33 +1780,33 @@ mod tests {
         )
         .unwrap();
 
-        // Verify DB1 (sim) was shifted forward by 30s
+        // Verify DB1 (sim) was NOT shifted (DB1 is never shifted)
         let sim_id = ComponentId::new("sim_sim.velocity");
         let sim_index = output_path.join(sim_id.to_string()).join("index");
         let (sim_start_ts, sim_timestamps) = read_index_file(&sim_index);
 
-        // Original: 0, [5s, 15s, 25s] -> After +30s shift: 30s, [35s, 45s, 55s]
-        assert_eq!(sim_start_ts, 30_000_000); // 0 + 30s
-        assert_eq!(sim_timestamps[0], 35_000_000); // 5s + 30s
-        assert_eq!(sim_timestamps[1], 45_000_000); // 15s + 30s (boost, now aligned)
-        assert_eq!(sim_timestamps[2], 55_000_000); // 25s + 30s
+        assert_eq!(sim_start_ts, 0);
+        assert_eq!(sim_timestamps[0], 5_000_000);
+        assert_eq!(sim_timestamps[1], 15_000_000); // boost event (reference)
+        assert_eq!(sim_timestamps[2], 25_000_000);
 
-        // Verify DB2 (truth) was NOT shifted
+        // Verify DB2 (truth) was shifted backward by 30s
         let truth_id = ComponentId::new("truth_truth.velocity");
         let truth_index = output_path.join(truth_id.to_string()).join("index");
         let (truth_start_ts, truth_timestamps) = read_index_file(&truth_index);
 
-        assert_eq!(truth_start_ts, 0);
-        assert_eq!(truth_timestamps[0], 35_000_000);
-        assert_eq!(truth_timestamps[1], 45_000_000); // boost event (reference)
-        assert_eq!(truth_timestamps[2], 55_000_000);
+        // Original: 0, [35s, 45s, 55s] -> After -30s shift: -30s, [5s, 15s, 25s]
+        assert_eq!(truth_start_ts, -30_000_000); // 0 - 30s
+        assert_eq!(truth_timestamps[0], 5_000_000); // 35s - 30s
+        assert_eq!(truth_timestamps[1], 15_000_000); // 45s - 30s (boost, now aligned)
+        assert_eq!(truth_timestamps[2], 25_000_000); // 55s - 30s
     }
 
     #[test]
-    fn test_merge_with_alignment_db2_shifted() {
-        // Test case: Both datasets are monotonic (0-based)
-        // DB1 has "boost" event at 45s, DB2 has "boost" event at 15s
-        // Since align1 (45s) > align2 (15s), DB2 should be shifted forward by 30s
+    fn test_merge_with_alignment_db2_shifted_forward() {
+        // Test case: DB1 has "boost" event at 45s, DB2 has "boost" event at 15s
+        // DB2 is shifted forward by 30s to align with DB1's anchor
+        // offset = align1 - align2 = 45 - 15 = +30s
         let temp = TempDir::new().unwrap();
         let db1_path = temp.path().join("db1");
         let db2_path = temp.path().join("db2");
@@ -1836,8 +1834,8 @@ mod tests {
         )
         .unwrap();
 
-        // Merge with alignment: align DB1's 45s with DB2's 15s
-        // Since align1 > align2, DB2 gets shifted forward by 30s
+        // Merge with alignment: align DB2's 15s with DB1's 45s
+        // DB2 gets shifted forward by 30s (offset = 45 - 15 = +30s)
         run(
             db1_path,
             db2_path,
@@ -1851,7 +1849,7 @@ mod tests {
         )
         .unwrap();
 
-        // Verify DB1 (sim) was NOT shifted
+        // Verify DB1 (sim) was NOT shifted (DB1 is never shifted)
         let sim_id = ComponentId::new("sim_sim.velocity");
         let sim_index = output_path.join(sim_id.to_string()).join("index");
         let (sim_start_ts, sim_timestamps) = read_index_file(&sim_index);
@@ -1871,6 +1869,84 @@ mod tests {
         assert_eq!(truth_timestamps[0], 35_000_000); // 5s + 30s
         assert_eq!(truth_timestamps[1], 45_000_000); // 15s + 30s (boost, now aligned)
         assert_eq!(truth_timestamps[2], 55_000_000); // 25s + 30s
+    }
+
+    #[test]
+    fn test_merge_wall_clock_to_monotonic() {
+        // Test case: User's actual use case
+        // DB1 (sitl): Monotonic timestamps starting at 0s (0s - 70s)
+        // DB2 (real): Wall-clock timestamps (4884937s - 4885007s)
+        // User wants to align DB2's start with DB1's start
+        // offset = 0 - 4884937 = -4884937s (shift backward)
+        let temp = TempDir::new().unwrap();
+        let db1_path = temp.path().join("sitl");
+        let db2_path = temp.path().join("real");
+        let output_path = temp.path().join("merged");
+
+        // Create DB1 (sitl) with monotonic timestamps starting at 0
+        create_test_db_with_timestamps(
+            &db1_path,
+            &[(
+                "velocity",
+                0,
+                &[0, 10_000_000, 20_000_000], // 0s, 10s, 20s
+            )],
+        )
+        .unwrap();
+
+        // Create DB2 (real) with wall-clock timestamps
+        // Using smaller values for test (4884937000000 = 4884937s in microseconds)
+        let wall_clock_start = 4_884_937_000_000i64; // ~56 days in microseconds
+        create_test_db_with_timestamps(
+            &db2_path,
+            &[(
+                "velocity",
+                wall_clock_start,
+                &[
+                    wall_clock_start,
+                    wall_clock_start + 10_000_000,
+                    wall_clock_start + 20_000_000,
+                ],
+            )],
+        )
+        .unwrap();
+
+        // Merge with alignment: align DB2's start (4884937s) with DB1's start (0s)
+        // DB2 gets shifted backward by 4884937s
+        run(
+            db1_path,
+            db2_path,
+            output_path.clone(),
+            Some("sitl".to_string()),
+            Some("real".to_string()),
+            false,
+            true,
+            Some(0.0),       // align1: start of DB1
+            Some(4884937.0), // align2: start of DB2 (in seconds)
+        )
+        .unwrap();
+
+        // Verify DB1 (sitl) was NOT shifted
+        let sitl_id = ComponentId::new("sitl_velocity");
+        let sitl_index = output_path.join(sitl_id.to_string()).join("index");
+        let (sitl_start_ts, sitl_timestamps) = read_index_file(&sitl_index);
+
+        assert_eq!(sitl_start_ts, 0);
+        assert_eq!(sitl_timestamps[0], 0);
+        assert_eq!(sitl_timestamps[1], 10_000_000);
+        assert_eq!(sitl_timestamps[2], 20_000_000);
+
+        // Verify DB2 (real) was shifted backward to start at 0
+        let real_id = ComponentId::new("real_velocity");
+        let real_index = output_path.join(real_id.to_string()).join("index");
+        let (real_start_ts, real_timestamps) = read_index_file(&real_index);
+
+        // Original: 4884937s start, timestamps at 4884937s, 4884947s, 4884957s
+        // After shift: 0s start, timestamps at 0s, 10s, 20s
+        assert_eq!(real_start_ts, 0);
+        assert_eq!(real_timestamps[0], 0);
+        assert_eq!(real_timestamps[1], 10_000_000);
+        assert_eq!(real_timestamps[2], 20_000_000);
     }
 
     #[test]

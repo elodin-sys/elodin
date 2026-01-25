@@ -1,3 +1,4 @@
+use convert_case::Casing;
 use datafusion::common::HashSet;
 use futures_lite::StreamExt;
 use impeller2::registry::VTableRegistry;
@@ -1161,9 +1162,14 @@ pub async fn handle_conn(stream: TcpStream, db: Arc<DB>) {
     let rx = PacketStream::new(rx);
     let tx = Arc::new(Mutex::new(PacketSink::new(tx)));
     match handle_conn_inner(tx, rx, db).await {
-        Ok(_) => {}
-        Err(err) if err.is_stream_closed() => {}
+        Ok(_) => {
+            eprintln!("DB: connection ended normally");
+        }
+        Err(err) if err.is_stream_closed() => {
+            eprintln!("DB: connection closed (stream closed): {:?}", err);
+        }
         Err(err) => {
+            eprintln!("DB: connection error: {:?}", err);
             warn!(?err, "error handling stream")
         }
     }
@@ -1190,14 +1196,14 @@ async fn handle_conn_inner<A: AsyncRead + AsyncWrite + 'static>(
             Ok(_) => {}
             Err(err) if err.is_stream_closed() => {}
             Err(err) => {
-                debug!(?err, "error handling packet");
-                if let Err(err) = pkt_tx
+                warn!(?err, "error handling packet - will send ErrorResponse");
+                if let Err(send_err) = pkt_tx
                     .send_msg(&ErrorResponse {
                         description: err.to_string(),
                     })
                     .await
                 {
-                    warn!(?err, "error sending err resp");
+                    warn!(?send_err, "error sending err resp");
                 }
             }
         }
@@ -1502,8 +1508,14 @@ async fn handle_packet<A: AsyncWrite + 'static>(
         }
         Packet::Msg(m) if m.id == SQLQuery::ID => {
             let SQLQuery(query) = m.parse::<SQLQuery>()?;
+            let query_preview = if query.len() > 80 {
+                format!("{}...", &query[..80])
+            } else {
+                query.clone()
+            };
             let db = db.clone();
             let (tokio_tx, rx) = thingbuf::mpsc::channel::<Vec<u8>>(4);
+            let query_for_error = query.clone();
             let res = stellarator::struc_con::tokio(move |_| async move {
                 let mut ctx = db.as_session_context()?;
                 db.insert_views(&mut ctx).await?;
@@ -1528,7 +1540,202 @@ async fn handle_packet<A: AsyncWrite + 'static>(
                 })
                 .await?;
             }
-            res.await??;
+            match res.await {
+                Ok(Ok(())) => {
+                    // Query completed successfully
+                }
+                Ok(Err(e)) => {
+                    warn!(?e, query = %query_for_error, "SQL query execution error");
+                    return Err(e);
+                }
+                Err(e) => {
+                    warn!(?e, query = %query_preview, "SQL query join error");
+                    return Err(Error::from(e));
+                }
+            }
+            if let Err(e) = tx.send_msg(&ArrowIPC { batch: None }).await {
+                warn!(?e, query = %query_preview, "Failed to send ArrowIPC completion marker");
+                return Err(e);
+            }
+        }
+        Packet::Msg(m) if m.id == SparklineQuery::ID => {
+            let query = m.parse::<SparklineQuery>()?;
+            let table_name = query.table_name;
+            let max_points = query.max_points as usize;
+
+            // Find the component matching this table name
+            let result = db.with_state(|state| {
+                for component in state.components.values() {
+                    let component_metadata = state
+                        .component_metadata
+                        .get(&component.component_id)?;
+                    let component_name = crate::arrow::sanitize_sql_table_name(
+                        &component_metadata.name.to_case(convert_case::Case::Snake),
+                    );
+
+                    if component_name == table_name {
+                        // Get the raw data as byte slices
+                        let time_bytes = component.time_series.index().data();
+                        let value_bytes = component.time_series.data().data();
+
+                        // Get the number of data points
+                        let timestamp_size = std::mem::size_of::<Timestamp>();
+                        let num_points = time_bytes.len() / timestamp_size;
+
+                        if num_points == 0 {
+                            return Some((vec![], vec![]));
+                        }
+
+                        // Convert timestamps to i64 array
+                        let times: Vec<i64> = (0..num_points)
+                            .map(|i| {
+                                let offset = i * timestamp_size;
+                                let bytes: [u8; 8] = time_bytes[offset..offset + 8]
+                                    .try_into()
+                                    .unwrap_or([0u8; 8]);
+                                i64::from_le_bytes(bytes)
+                            })
+                            .collect();
+
+                        // Extract scalar values from the data column
+                        // For vector types, we take just the first element
+                        let element_size = component.time_series.element_size();
+                        let dim: usize = component.schema.dim.iter().product();
+                        let scalar_size = element_size / dim.max(1);
+
+                        let values: Vec<f64> = (0..num_points)
+                            .map(|i| {
+                                let offset = i * element_size;
+                                if offset + scalar_size > value_bytes.len() {
+                                    return f64::NAN;
+                                }
+                                match component.schema.prim_type {
+                                    PrimType::F64 => {
+                                        let bytes: [u8; 8] = value_bytes[offset..offset + 8]
+                                            .try_into()
+                                            .unwrap_or([0u8; 8]);
+                                        f64::from_le_bytes(bytes)
+                                    }
+                                    PrimType::F32 => {
+                                        let bytes: [u8; 4] = value_bytes[offset..offset + 4]
+                                            .try_into()
+                                            .unwrap_or([0u8; 4]);
+                                        f32::from_le_bytes(bytes) as f64
+                                    }
+                                    PrimType::U64 => {
+                                        let bytes: [u8; 8] = value_bytes[offset..offset + 8]
+                                            .try_into()
+                                            .unwrap_or([0u8; 8]);
+                                        u64::from_le_bytes(bytes) as f64
+                                    }
+                                    PrimType::U32 => {
+                                        let bytes: [u8; 4] = value_bytes[offset..offset + 4]
+                                            .try_into()
+                                            .unwrap_or([0u8; 4]);
+                                        u32::from_le_bytes(bytes) as f64
+                                    }
+                                    PrimType::U16 => {
+                                        let bytes: [u8; 2] = value_bytes[offset..offset + 2]
+                                            .try_into()
+                                            .unwrap_or([0u8; 2]);
+                                        u16::from_le_bytes(bytes) as f64
+                                    }
+                                    PrimType::U8 => value_bytes[offset] as f64,
+                                    PrimType::I64 => {
+                                        let bytes: [u8; 8] = value_bytes[offset..offset + 8]
+                                            .try_into()
+                                            .unwrap_or([0u8; 8]);
+                                        i64::from_le_bytes(bytes) as f64
+                                    }
+                                    PrimType::I32 => {
+                                        let bytes: [u8; 4] = value_bytes[offset..offset + 4]
+                                            .try_into()
+                                            .unwrap_or([0u8; 4]);
+                                        i32::from_le_bytes(bytes) as f64
+                                    }
+                                    PrimType::I16 => {
+                                        let bytes: [u8; 2] = value_bytes[offset..offset + 2]
+                                            .try_into()
+                                            .unwrap_or([0u8; 2]);
+                                        i16::from_le_bytes(bytes) as f64
+                                    }
+                                    PrimType::I8 => (value_bytes[offset] as i8) as f64,
+                                    PrimType::Bool => {
+                                        if value_bytes[offset] != 0 { 1.0 } else { 0.0 }
+                                    }
+                                }
+                            })
+                            .collect();
+
+                        return Some((times, values));
+                    }
+                }
+                None
+            });
+
+            match result {
+                Some((times, values)) => {
+                    // Apply LTTB downsampling
+                    let (ds_times, ds_values) =
+                        crate::arrow::lttb::lttb_downsample_arrays(&times, &values, max_points);
+
+                    // Build Arrow RecordBatch
+                    use ::arrow::array::{Float64Array, TimestampMicrosecondArray};
+                    use ::arrow::datatypes::{DataType, Field, Schema, TimeUnit};
+                    use ::arrow::record_batch::RecordBatch;
+
+                    let time_array = TimestampMicrosecondArray::from(ds_times);
+                    let value_array = Float64Array::from(ds_values);
+
+                    let schema = Arc::new(Schema::new(vec![
+                        Field::new("time", DataType::Timestamp(TimeUnit::Microsecond, None), false),
+                        Field::new("value", DataType::Float64, true),
+                    ]));
+
+                    let batch = RecordBatch::try_new(
+                        schema.clone(),
+                        vec![Arc::new(time_array), Arc::new(value_array)],
+                    )
+                    .map_err(|e| Error::Arrow(e))?;
+
+                    // Serialize to Arrow IPC
+                    let mut buf = vec![];
+                    let mut writer =
+                        ::arrow::ipc::writer::StreamWriter::try_new(&mut buf, &schema)?;
+                    writer.write(&batch)?;
+                    writer.finish()?;
+
+                    tx.send_msg(&ArrowIPC {
+                        batch: Some(Cow::Owned(buf)),
+                    })
+                    .await?;
+                }
+                None => {
+                    // Table not found - send empty result
+                    use ::arrow::datatypes::{DataType, Field, Schema, TimeUnit};
+                    use ::arrow::record_batch::RecordBatch;
+
+                    let schema = Arc::new(Schema::new(vec![
+                        Field::new("time", DataType::Timestamp(TimeUnit::Microsecond, None), false),
+                        Field::new("value", DataType::Float64, true),
+                    ]));
+
+                    let batch = RecordBatch::new_empty(schema.clone());
+
+                    let mut buf = vec![];
+                    let mut writer =
+                        ::arrow::ipc::writer::StreamWriter::try_new(&mut buf, &schema)?;
+                    writer.write(&batch)?;
+                    writer.finish()?;
+
+                    tx.send_msg(&ArrowIPC {
+                        batch: Some(Cow::Owned(buf)),
+                    })
+                    .await?;
+                }
+            }
+
+            // Send completion marker
             tx.send_msg(&ArrowIPC { batch: None }).await?;
         }
         Packet::Msg(m) if m.id == SetMsgMetadata::ID => {

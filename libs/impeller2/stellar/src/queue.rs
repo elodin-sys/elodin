@@ -42,7 +42,13 @@ where
         loop {
             let grant_r = incoming_packet_tx.wait_grant(10 * 1024 * 1024).await;
             let grant_r = PacketGrantW::new(grant_r);
-            let slice = rx.recv(grant_r).await.into_diagnostic()?;
+            let slice = match rx.recv(grant_r).await.into_diagnostic() {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!("TCP rx error: {}", e);
+                    return Err(e);
+                }
+            };
             let len = slice.range().len();
             slice.into_inner().commit(len + 4);
         }
@@ -52,8 +58,12 @@ where
             let Some(pkt) = pkt else {
                 continue;
             };
-            tx.send(pkt).await.0.into_diagnostic()?;
+            if let Err(e) = tx.send(pkt).await.0.into_diagnostic() {
+                eprintln!("TCP tx error: {}", e);
+                return Err(e);
+            }
         }
+        eprintln!("TCP tx loop ended (channel closed)");
         Ok::<_, miette::Error>(())
     };
     (rx, tx).race().await

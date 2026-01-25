@@ -216,7 +216,7 @@ Merge two databases into one with optional prefixes. This enables viewing simula
 
 * `--align1 <SECONDS>` — Alignment timestamp (in seconds) for an event in DB1
 
-* `--align2 <SECONDS>` — Alignment timestamp (in seconds) for the same event in DB2. When both alignment options are provided, the database with the earlier anchor is shifted forward to align timestamps.
+* `--align2 <SECONDS>` — Alignment timestamp (in seconds) for the same event in DB2. DB2 is shifted to align its anchor with DB1's anchor.
 
 ###### **Component Naming**
 
@@ -226,7 +226,16 @@ When prefixes are applied, component names are transformed using an underscore s
 
 ###### **Time Alignment**
 
-The `--align1` and `--align2` options allow you to align two databases based on a common event (e.g., launch, ignition). Both options must be provided together. The database with the earlier anchor timestamp is shifted forward so that both anchors occur at the same time in the merged output.
+The `--align1` and `--align2` options allow you to align two databases based on a common event (e.g., launch, ignition, or simply the start of recording). Both options must be provided together.
+
+When alignment is specified:
+- **DB1 is never shifted** - it serves as the reference
+- **DB2 is shifted** to align its anchor (`--align2`) with DB1's anchor (`--align1`)
+- The shift can be **forward** (positive offset) or **backward** (negative offset)
+
+This is particularly useful for aligning:
+- A simulation database (monotonic timestamps starting at 0) with real-world telemetry (wall-clock timestamps)
+- Two recordings of the same event captured with different clock sources
 
 ###### **Example**
 
@@ -235,9 +244,17 @@ The `--align1` and `--align2` options allow you to align two databases based on 
 elodin-db merge ./sim-db ./flight-db -o ./merged-db --prefix1 sim --prefix2 truth
 
 # Merge with time alignment (align "launch" event at 15s in sim with 45s in flight)
+# DB2 (flight) is shifted backward by 30s to align
 elodin-db merge ./sim-db ./flight-db -o ./merged-db \
   --prefix1 sim --prefix2 truth \
   --align1 15.0 --align2 45.0
+
+# Align wall-clock timestamps to monotonic (start DB2 at 0)
+# DB2 starts at 4884937s, align with DB1's start at 0s
+# DB2 is shifted backward by ~4.8M seconds
+elodin-db merge ./sitl-db ./real-db -o ./merged-db \
+  --prefix1 sitl --prefix2 real \
+  --align1 0.0 --align2 4884937.0
 
 # Preview merge without creating output
 elodin-db merge ./sim-db ./flight-db -o ./merged-db --dry-run

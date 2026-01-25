@@ -165,7 +165,7 @@ pub struct MergeArgs {
     pub align1: Option<f64>,
     #[clap(
         long,
-        help = "Alignment timestamp (seconds) for the same event in DB2. The DB with the earlier anchor is shifted forward to align."
+        help = "Alignment timestamp (seconds) for the same event in DB2. DB2 is shifted to align with DB1."
     )]
     pub align2: Option<f64>,
 }

@@ -28,9 +28,24 @@ use std::{
 use tracing::{error, info, warn};
 use zerocopy::{Immutable, IntoBytes};
 
+/// Sanitize a string to be a valid SQL table name.
+/// Replaces invalid characters (like '.', '>', '<', '-', etc.) with underscores.
+pub fn sanitize_sql_table_name(name: &str) -> String {
+    name.chars()
+        .map(|c| {
+            if c.is_alphanumeric() || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
+
 use crate::{Component, DB, Error, append_log::AppendLog};
 
 mod fft;
+pub mod lttb;
 use fft::{FftUDF, FrequencyDomainUDF};
 
 impl<T: IntoBytes + Immutable> AppendLog<T> {
@@ -270,10 +285,9 @@ impl DB {
                     .component_metadata
                     .get(&component.component_id)
                     .unwrap();
-                let component_name = component_metadata
-                    .name
-                    .to_case(convert_case::Case::Snake)
-                    .replace(".", "_");
+                let component_name = sanitize_sql_table_name(
+                    &component_metadata.name.to_case(convert_case::Case::Snake),
+                );
                 let name = component_name.clone();
                 let mem_table = component.as_mem_table(&component_name);
                 ctx.register_table(name, Arc::new(mem_table))?;

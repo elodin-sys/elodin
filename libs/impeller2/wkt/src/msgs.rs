@@ -415,6 +415,26 @@ impl Msg for SQLQuery {
 
 impl_user_data_msg!(SQLQuery);
 
+/// Query for sparkline data with server-side LTTB downsampling.
+/// Returns downsampled time series data optimized for visualization.
+#[derive(Clone, Serialize, Deserialize, Debug)]
+pub struct SparklineQuery {
+    /// The table name to query (sanitized component name)
+    pub table_name: String,
+    /// Maximum number of points to return (will use LTTB downsampling if data exceeds this)
+    pub max_points: u32,
+}
+
+impl Msg for SparklineQuery {
+    const ID: PacketId = [224, 31];
+}
+
+impl_user_data_msg!(SparklineQuery);
+
+impl Request for SparklineQuery {
+    type Reply<B: IoBuf + Clone> = ArrowIPC<'static>;
+}
+
 #[derive(Clone, Serialize, Deserialize, Debug)]
 #[repr(transparent)]
 pub struct ArrowIPC<'a> {
