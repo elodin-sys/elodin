@@ -666,14 +666,7 @@ mod tests {
         create_test_db(&db_path, &[]).unwrap();
 
         // Should fail with both --all and --component
-        let result = run(
-            db_path,
-            0.0,
-            true,
-            Some("comp1".to_string()),
-            false,
-            true,
-        );
+        let result = run(db_path, 0.0, true, Some("comp1".to_string()), false, true);
         assert!(result.is_err());
         let err_msg = result.unwrap_err().to_string();
         assert!(err_msg.contains("Cannot specify both"));

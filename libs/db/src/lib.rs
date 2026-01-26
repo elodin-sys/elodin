@@ -1602,71 +1602,14 @@ async fn handle_packet<A: AsyncWrite + 'static>(
                         let dim: usize = component.schema.dim.iter().product();
                         let scalar_size = element_size / dim.max(1);
 
+                        let prim_type = component.schema.prim_type;
                         let values: Vec<f64> = (0..num_points)
                             .map(|i| {
                                 let offset = i * element_size;
                                 if offset + scalar_size > value_bytes.len() {
                                     return f64::NAN;
                                 }
-                                match component.schema.prim_type {
-                                    PrimType::F64 => {
-                                        let bytes: [u8; 8] = value_bytes[offset..offset + 8]
-                                            .try_into()
-                                            .unwrap_or([0u8; 8]);
-                                        f64::from_le_bytes(bytes)
-                                    }
-                                    PrimType::F32 => {
-                                        let bytes: [u8; 4] = value_bytes[offset..offset + 4]
-                                            .try_into()
-                                            .unwrap_or([0u8; 4]);
-                                        f32::from_le_bytes(bytes) as f64
-                                    }
-                                    PrimType::U64 => {
-                                        let bytes: [u8; 8] = value_bytes[offset..offset + 8]
-                                            .try_into()
-                                            .unwrap_or([0u8; 8]);
-                                        u64::from_le_bytes(bytes) as f64
-                                    }
-                                    PrimType::U32 => {
-                                        let bytes: [u8; 4] = value_bytes[offset..offset + 4]
-                                            .try_into()
-                                            .unwrap_or([0u8; 4]);
-                                        u32::from_le_bytes(bytes) as f64
-                                    }
-                                    PrimType::U16 => {
-                                        let bytes: [u8; 2] = value_bytes[offset..offset + 2]
-                                            .try_into()
-                                            .unwrap_or([0u8; 2]);
-                                        u16::from_le_bytes(bytes) as f64
-                                    }
-                                    PrimType::U8 => value_bytes[offset] as f64,
-                                    PrimType::I64 => {
-                                        let bytes: [u8; 8] = value_bytes[offset..offset + 8]
-                                            .try_into()
-                                            .unwrap_or([0u8; 8]);
-                                        i64::from_le_bytes(bytes) as f64
-                                    }
-                                    PrimType::I32 => {
-                                        let bytes: [u8; 4] = value_bytes[offset..offset + 4]
-                                            .try_into()
-                                            .unwrap_or([0u8; 4]);
-                                        i32::from_le_bytes(bytes) as f64
-                                    }
-                                    PrimType::I16 => {
-                                        let bytes: [u8; 2] = value_bytes[offset..offset + 2]
-                                            .try_into()
-                                            .unwrap_or([0u8; 2]);
-                                        i16::from_le_bytes(bytes) as f64
-                                    }
-                                    PrimType::I8 => (value_bytes[offset] as i8) as f64,
-                                    PrimType::Bool => {
-                                        if value_bytes[offset] != 0 {
-                                            1.0
-                                        } else {
-                                            0.0
-                                        }
-                                    }
-                                }
+                                crate::utils::read_prim_as_f64(prim_type, value_bytes, offset)
                             })
                             .collect();
 
@@ -1807,63 +1750,14 @@ async fn handle_packet<A: AsyncWrite + 'static>(
             let times: Vec<i64> = timestamps.iter().map(|t| t.0).collect();
 
             // Extract values as f64 for the specified element
+            let prim_type = component.schema.prim_type;
             let values: Vec<f64> = (0..num_points)
                 .map(|i| {
                     let offset = i * element_size + element_offset;
                     if offset + scalar_size > data.len() {
                         return f64::NAN;
                     }
-                    match component.schema.prim_type {
-                        PrimType::F64 => {
-                            let bytes: [u8; 8] =
-                                data[offset..offset + 8].try_into().unwrap_or([0u8; 8]);
-                            f64::from_le_bytes(bytes)
-                        }
-                        PrimType::F32 => {
-                            let bytes: [u8; 4] =
-                                data[offset..offset + 4].try_into().unwrap_or([0u8; 4]);
-                            f32::from_le_bytes(bytes) as f64
-                        }
-                        PrimType::U64 => {
-                            let bytes: [u8; 8] =
-                                data[offset..offset + 8].try_into().unwrap_or([0u8; 8]);
-                            u64::from_le_bytes(bytes) as f64
-                        }
-                        PrimType::U32 => {
-                            let bytes: [u8; 4] =
-                                data[offset..offset + 4].try_into().unwrap_or([0u8; 4]);
-                            u32::from_le_bytes(bytes) as f64
-                        }
-                        PrimType::U16 => {
-                            let bytes: [u8; 2] =
-                                data[offset..offset + 2].try_into().unwrap_or([0u8; 2]);
-                            u16::from_le_bytes(bytes) as f64
-                        }
-                        PrimType::U8 => data[offset] as f64,
-                        PrimType::I64 => {
-                            let bytes: [u8; 8] =
-                                data[offset..offset + 8].try_into().unwrap_or([0u8; 8]);
-                            i64::from_le_bytes(bytes) as f64
-                        }
-                        PrimType::I32 => {
-                            let bytes: [u8; 4] =
-                                data[offset..offset + 4].try_into().unwrap_or([0u8; 4]);
-                            i32::from_le_bytes(bytes) as f64
-                        }
-                        PrimType::I16 => {
-                            let bytes: [u8; 2] =
-                                data[offset..offset + 2].try_into().unwrap_or([0u8; 2]);
-                            i16::from_le_bytes(bytes) as f64
-                        }
-                        PrimType::I8 => (data[offset] as i8) as f64,
-                        PrimType::Bool => {
-                            if data[offset] != 0 {
-                                1.0
-                            } else {
-                                0.0
-                            }
-                        }
-                    }
+                    crate::utils::read_prim_as_f64(prim_type, data, offset)
                 })
                 .collect();
 
