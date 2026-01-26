@@ -1896,107 +1896,36 @@ impl<'w, 's> TileSystem<'w, 's> {
                 });
         }
 
-        // Central panel with toolbar and TileLayout
         let show_empty_overlay = is_empty_tile_tree && !read_only;
 
         egui_material_icons::initialize(ui.ctx());
 
-        // Sidebar toggle toolbar
-        egui::TopBottomPanel::top("sidebar_toggle_toolbar")
-            .exact_height(32.0)
-            .frame(Frame {
-                fill: get_scheme().bg_secondary,
-                stroke: egui::Stroke::new(1.0, get_scheme().border_primary),
-                inner_margin: egui::Margin::symmetric(8, 0),
-                ..Default::default()
-            })
-            .show_inside(ui, |ui| {
-                ui.horizontal_centered(|ui| {
-                    // Add flexible space to push buttons to the right
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        let old_pad = ui.spacing().button_padding;
-                        ui.style_mut().spacing.button_padding = egui::vec2(2.0, 2.0);
+        let toolbar_action = render_sidebar_toolbar(ui, left_sidebar_visible, right_sidebar_visible);
 
-                        // Set icon color to match theme text color
-                        let icon_color = get_scheme().text_primary;
-                        ui.visuals_mut().widgets.inactive.fg_stroke.color = icon_color;
-                        ui.visuals_mut().widgets.hovered.fg_stroke.color = icon_color;
-                        ui.visuals_mut().widgets.active.fg_stroke.color = icon_color;
-
-                        // Right sidebar toggle button (rendered first because right-to-left)
-                        let right_icon = if right_sidebar_visible {
-                            ICON_RIGHT_PANEL_CLOSE
-                        } else {
-                            ICON_RIGHT_PANEL_OPEN
-                        };
-                        let right_resp = icon_button(ui, right_icon);
-                        if right_resp.clicked() {
-                            let mut query = world.query::<&mut WindowState>();
-                            if let Ok(mut window_state) = query.get_mut(world, target_window) {
-                                window_state.ui_state.right_sidebar_visible =
-                                    !window_state.ui_state.right_sidebar_visible;
-                            }
+        if let Some(action) = toolbar_action {
+            let mut query = world.query::<&mut WindowState>();
+            if let Ok(mut window_state) = query.get_mut(world, target_window) {
+                match action {
+                    ToolbarAction::LeftSidebar => {
+                        window_state.ui_state.left_sidebar_visible =
+                            !window_state.ui_state.left_sidebar_visible;
+                    }
+                    ToolbarAction::RightSidebar => {
+                        window_state.ui_state.right_sidebar_visible =
+                            !window_state.ui_state.right_sidebar_visible;
+                    }
+                    ToolbarAction::Theme => {
+                        let current = colors::current_selection();
+                        let is_dark = current.mode.eq_ignore_ascii_case("dark");
+                        let new_mode = if is_dark { "light" } else { "dark" };
+                        if colors::scheme_supports_mode(&current.scheme, new_mode) {
+                            colors::apply_scheme_and_mode(&current.scheme, new_mode);
+                            super::theme::set_theme(ui.ctx());
                         }
-                        right_resp.on_hover_text(if right_sidebar_visible {
-                            "Hide right sidebar"
-                        } else {
-                            "Show right sidebar"
-                        });
-
-                        ui.add_space(4.0);
-
-                        // Left sidebar toggle button
-                        let left_icon = if left_sidebar_visible {
-                            ICON_LEFT_PANEL_CLOSE
-                        } else {
-                            ICON_LEFT_PANEL_OPEN
-                        };
-                        let left_resp = icon_button(ui, left_icon);
-                        if left_resp.clicked() {
-                            let mut query = world.query::<&mut WindowState>();
-                            if let Ok(mut window_state) = query.get_mut(world, target_window) {
-                                window_state.ui_state.left_sidebar_visible =
-                                    !window_state.ui_state.left_sidebar_visible;
-                            }
-                        }
-                        left_resp.on_hover_text(if left_sidebar_visible {
-                            "Hide left sidebar"
-                        } else {
-                            "Show left sidebar"
-                        });
-
-                        ui.add_space(8.0);
-
-                        // Theme toggle button
-                        let current_mode = colors::current_selection().mode;
-                        let is_dark = current_mode.eq_ignore_ascii_case("dark");
-                        let theme_icon = if is_dark {
-                            ICON_LIGHT_MODE
-                        } else {
-                            ICON_DARK_MODE
-                        };
-                        let theme_resp = icon_button(ui, theme_icon);
-                        if theme_resp.clicked() {
-                            let current = colors::current_selection();
-                            let new_mode = if is_dark { "light" } else { "dark" };
-                            if colors::scheme_supports_mode(&current.scheme, new_mode) {
-                                colors::apply_scheme_and_mode(&current.scheme, new_mode);
-                                // Update egui context style with new theme colors
-                                super::theme::set_theme(ui.ctx());
-                            }
-                        }
-                        theme_resp.on_hover_text(if is_dark {
-                            "Switch to light mode"
-                        } else {
-                            "Switch to dark mode"
-                        });
-
-                        ui.style_mut().spacing.button_padding = old_pad;
-                    });
-                });
-            });
-
-        // TileLayout
+                    }
+                }
+            }
+        }
         ui.add_widget_with::<TileLayout>(
             world,
             "tile_layout",
@@ -2814,6 +2743,97 @@ impl WidgetSystem for TileLayout<'_, '_> {
             });
         }
     }
+}
+
+enum ToolbarAction {
+    LeftSidebar,
+    RightSidebar,
+    Theme,
+}
+
+fn render_sidebar_toolbar(
+    ui: &mut egui::Ui,
+    left_visible: bool,
+    right_visible: bool,
+) -> Option<ToolbarAction> {
+    let mut action = None;
+
+    egui::TopBottomPanel::top("sidebar_toggle_toolbar")
+        .exact_height(32.0)
+        .frame(Frame {
+            fill: get_scheme().bg_secondary,
+            stroke: egui::Stroke::new(1.0, get_scheme().border_primary),
+            inner_margin: egui::Margin::symmetric(8, 0),
+            ..Default::default()
+        })
+        .show_inside(ui, |ui| {
+            ui.horizontal_centered(|ui| {
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let old_pad = ui.spacing().button_padding;
+                    ui.style_mut().spacing.button_padding = egui::vec2(2.0, 2.0);
+
+                    let icon_color = get_scheme().text_primary;
+                    ui.visuals_mut().widgets.inactive.fg_stroke.color = icon_color;
+                    ui.visuals_mut().widgets.hovered.fg_stroke.color = icon_color;
+                    ui.visuals_mut().widgets.active.fg_stroke.color = icon_color;
+
+                    let right_icon = if right_visible {
+                        ICON_RIGHT_PANEL_CLOSE
+                    } else {
+                        ICON_RIGHT_PANEL_OPEN
+                    };
+                    let right_resp = icon_button(ui, right_icon);
+                    if right_resp.clicked() {
+                        action = Some(ToolbarAction::RightSidebar);
+                    }
+                    right_resp.on_hover_text(if right_visible {
+                        "Hide right sidebar"
+                    } else {
+                        "Show right sidebar"
+                    });
+
+                    ui.add_space(4.0);
+
+                    let left_icon = if left_visible {
+                        ICON_LEFT_PANEL_CLOSE
+                    } else {
+                        ICON_LEFT_PANEL_OPEN
+                    };
+                    let left_resp = icon_button(ui, left_icon);
+                    if left_resp.clicked() {
+                        action = Some(ToolbarAction::LeftSidebar);
+                    }
+                    left_resp.on_hover_text(if left_visible {
+                        "Hide left sidebar"
+                    } else {
+                        "Show left sidebar"
+                    });
+
+                    ui.add_space(8.0);
+
+                    let current_mode = colors::current_selection().mode;
+                    let is_dark = current_mode.eq_ignore_ascii_case("dark");
+                    let theme_icon = if is_dark {
+                        ICON_LIGHT_MODE
+                    } else {
+                        ICON_DARK_MODE
+                    };
+                    let theme_resp = icon_button(ui, theme_icon);
+                    if theme_resp.clicked() {
+                        action = Some(ToolbarAction::Theme);
+                    }
+                    theme_resp.on_hover_text(if is_dark {
+                        "Switch to light mode"
+                    } else {
+                        "Switch to dark mode"
+                    });
+
+                    ui.style_mut().spacing.button_padding = old_pad;
+                });
+            });
+        });
+
+    action
 }
 
 pub fn shortcuts(
