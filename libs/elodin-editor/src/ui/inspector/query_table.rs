@@ -10,7 +10,6 @@ use impeller2_wkt::{ArrowIPC, EarliestTimestamp, ErrorResponse, LastUpdated, Que
 use crate::{
     EqlContext, SelectedTimeRange,
     ui::{
-        button::EButton,
         colors::get_scheme,
         inspector::{eql_autocomplete, query},
         query_table::{QueryTableData, QueryTableState},
@@ -108,15 +107,12 @@ impl WidgetSystem for InspectorQueryTable<'_, '_> {
         if query_type == QueryType::EQL {
             eql_autocomplete(ui, context, &query_res, &mut table.data.query);
         }
-        let enter_key =
-            query_res.lost_focus() && ui.ctx().input(|i| i.key_pressed(egui::Key::Enter));
-        ui.add_space(8.0);
 
-        if ui
-            .add_sized([ui.available_width(), 32.0], EButton::highlight("RUN"))
-            .clicked()
-            || enter_key
-        {
+        // Execute query when Enter is pressed (singleline input loses focus on Enter)
+        let enter_pressed =
+            query_res.lost_focus() && ui.ctx().input(|i| i.key_pressed(egui::Key::Enter));
+
+        if enter_pressed && !table.data.query.is_empty() {
             table.state = QueryTableState::Requested(Instant::now());
             let query = match table.data.query_type {
                 QueryType::SQL => table.data.query.to_string(),
