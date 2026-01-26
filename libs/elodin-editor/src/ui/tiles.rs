@@ -1850,11 +1850,10 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
     ) -> egui::Response {
         if button_response.middle_clicked() && !self.read_only {
             self.tree_actions.push(TreeAction::DeleteTab(tile_id));
-        } else if button_response.double_clicked() {
-            self.tree_actions.push(TreeAction::OpenInspector(tile_id));
         } else if button_response.clicked() {
             self.tree_actions.push(TreeAction::SelectTile(tile_id));
         }
+        // Note: double-click is handled in tab_ui for renaming.
         button_response
     }
 
