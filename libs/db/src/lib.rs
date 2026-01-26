@@ -1191,14 +1191,14 @@ async fn handle_conn_inner<A: AsyncRead + AsyncWrite + 'static>(
             Ok(_) => {}
             Err(err) if err.is_stream_closed() => {}
             Err(err) => {
-                warn!(?err, "error handling packet - will send ErrorResponse");
-                if let Err(send_err) = pkt_tx
+                debug!(?err, "error handling packet");
+                if let Err(err) = pkt_tx
                     .send_msg(&ErrorResponse {
                         description: err.to_string(),
                     })
                     .await
                 {
-                    warn!(?send_err, "error sending err resp");
+                    warn!(?err, "error sending err resp");
                 }
             }
         }
@@ -1503,14 +1503,8 @@ async fn handle_packet<A: AsyncWrite + 'static>(
         }
         Packet::Msg(m) if m.id == SQLQuery::ID => {
             let SQLQuery(query) = m.parse::<SQLQuery>()?;
-            let query_preview = if query.chars().count() > 80 {
-                format!("{}...", query.chars().take(80).collect::<String>())
-            } else {
-                query.clone()
-            };
             let db = db.clone();
             let (tokio_tx, rx) = thingbuf::mpsc::channel::<Vec<u8>>(4);
-            let query_for_error = query.clone();
             let res = stellarator::struc_con::tokio(move |_| async move {
                 let mut ctx = db.as_session_context()?;
                 db.insert_views(&mut ctx).await?;
@@ -1535,23 +1529,8 @@ async fn handle_packet<A: AsyncWrite + 'static>(
                 })
                 .await?;
             }
-            match res.await {
-                Ok(Ok(())) => {
-                    // Query completed successfully
-                }
-                Ok(Err(e)) => {
-                    warn!(?e, query = %query_for_error, "SQL query execution error");
-                    return Err(e);
-                }
-                Err(e) => {
-                    warn!(?e, query = %query_preview, "SQL query join error");
-                    return Err(Error::from(e));
-                }
-            }
-            if let Err(e) = tx.send_msg(&ArrowIPC { batch: None }).await {
-                warn!(?e, query = %query_preview, "Failed to send ArrowIPC completion marker");
-                return Err(e);
-            }
+            res.await??;
+            tx.send_msg(&ArrowIPC { batch: None }).await?;
         }
         Packet::Msg(m) if m.id == SparklineQuery::ID => {
             let query = m.parse::<SparklineQuery>()?;

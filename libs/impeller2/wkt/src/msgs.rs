@@ -426,7 +426,7 @@ pub struct SparklineQuery {
 }
 
 impl Msg for SparklineQuery {
-    const ID: PacketId = [224, 31];
+    const ID: PacketId = [224, 36];
 }
 
 impl_user_data_msg!(SparklineQuery);
