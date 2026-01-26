@@ -4,7 +4,6 @@
 //! with a user-provided target timestamp. This solves the problem where components
 //! written at the same real-world moment have different timestamp offsets.
 
-use std::collections::HashMap;
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write as IoWrite};
 use std::path::{Path, PathBuf};
@@ -189,9 +188,6 @@ fn collect_components(
 ) -> Result<Vec<ComponentInfo>, Error> {
     let mut components = Vec::new();
 
-    // Build a map of component names to their paths for name-based lookup
-    let mut name_to_path: HashMap<String, PathBuf> = HashMap::new();
-
     for entry in fs::read_dir(db_path)? {
         let entry = entry?;
         let path = entry.path();
@@ -222,8 +218,6 @@ fn collect_components(
         } else {
             component_label(&path)
         };
-
-        name_to_path.insert(name.clone(), path.clone());
 
         // If filtering by name, skip non-matching components
         if let Some(target_name) = component_name
