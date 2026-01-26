@@ -111,6 +111,8 @@ pub struct TileIcons {
     pub viewport: egui::TextureId,
     pub container: egui::TextureId,
     pub entity: egui::TextureId,
+    pub sidebar_left: egui::TextureId,
+    pub sidebar_right: egui::TextureId,
 }
 
 #[derive(Clone)]
@@ -1809,6 +1811,10 @@ impl<'w, 's> TileSystem<'w, 's> {
             viewport: contexts.add_image(EguiTextureHandle::Weak(images.icon_viewport.id())),
             container: contexts.add_image(EguiTextureHandle::Weak(images.icon_container.id())),
             entity: contexts.add_image(EguiTextureHandle::Weak(images.icon_entity.id())),
+            sidebar_left: contexts
+                .add_image(EguiTextureHandle::Weak(images.icon_side_bar_left.id())),
+            sidebar_right: contexts
+                .add_image(EguiTextureHandle::Weak(images.icon_side_bar_right.id())),
         };
 
         Some((icons, is_empty_tile_tree, read_only))
@@ -1833,53 +1839,143 @@ impl<'w, 's> TileSystem<'w, 's> {
                 .expect("Primary window not found")
         });
 
-        // Left sidebar - Hierarchy
-        egui::SidePanel::left("hierarchy_sidebar")
-            .default_width(SIDEBAR_DEFAULT_WIDTH)
-            .width_range(SIDEBAR_MIN_WIDTH..=SIDEBAR_MAX_WIDTH)
-            .resizable(true)
-            .frame(Frame {
-                fill: get_scheme().bg_primary,
-                ..Default::default()
-            })
-            .show_inside(ui, |ui| {
-                let hierarchy_icons = Hierarchy {
-                    search: icons.search,
-                    entity: icons.entity,
-                    chevron: icons.chevron,
-                };
-                ui.add_widget_with::<HierarchyContent>(
-                    world,
-                    "hierarchy_sidebar_content",
-                    (hierarchy_icons, target_window),
-                );
-            });
+        // Get sidebar visibility state
+        let (left_sidebar_visible, right_sidebar_visible) = {
+            let mut query = world.query::<&WindowState>();
+            if let Ok(window_state) = query.get(world, target_window) {
+                (
+                    window_state.ui_state.left_sidebar_visible,
+                    window_state.ui_state.right_sidebar_visible,
+                )
+            } else {
+                (true, true)
+            }
+        };
 
-        // Right sidebar - Inspector
-        egui::SidePanel::right("inspector_sidebar")
-            .default_width(SIDEBAR_DEFAULT_WIDTH)
-            .width_range(SIDEBAR_MIN_WIDTH..=SIDEBAR_MAX_WIDTH)
-            .resizable(true)
-            .frame(Frame {
-                fill: get_scheme().bg_primary,
-                ..Default::default()
-            })
-            .show_inside(ui, |ui| {
-                let inspector_icons = InspectorIcons {
-                    chart: icons.chart,
-                    subtract: icons.subtract,
-                    setting: icons.setting,
-                    search: icons.search,
-                };
-                ui.add_widget_with::<InspectorContent>(
-                    world,
-                    "inspector_sidebar_content",
-                    (inspector_icons, true, target_window),
-                );
-            });
+        // Left sidebar - Hierarchy (only if visible)
+        if left_sidebar_visible {
+            egui::SidePanel::left("hierarchy_sidebar")
+                .default_width(SIDEBAR_DEFAULT_WIDTH)
+                .width_range(SIDEBAR_MIN_WIDTH..=SIDEBAR_MAX_WIDTH)
+                .resizable(true)
+                .frame(Frame {
+                    fill: get_scheme().bg_primary,
+                    ..Default::default()
+                })
+                .show_inside(ui, |ui| {
+                    let hierarchy_icons = Hierarchy {
+                        search: icons.search,
+                        entity: icons.entity,
+                        chevron: icons.chevron,
+                    };
+                    ui.add_widget_with::<HierarchyContent>(
+                        world,
+                        "hierarchy_sidebar_content",
+                        (hierarchy_icons, target_window),
+                    );
+                });
+        }
 
-        // Central panel - TileLayout
+        // Right sidebar - Inspector (only if visible)
+        if right_sidebar_visible {
+            egui::SidePanel::right("inspector_sidebar")
+                .default_width(SIDEBAR_DEFAULT_WIDTH)
+                .width_range(SIDEBAR_MIN_WIDTH..=SIDEBAR_MAX_WIDTH)
+                .resizable(true)
+                .frame(Frame {
+                    fill: get_scheme().bg_primary,
+                    ..Default::default()
+                })
+                .show_inside(ui, |ui| {
+                    let inspector_icons = InspectorIcons {
+                        chart: icons.chart,
+                        subtract: icons.subtract,
+                        setting: icons.setting,
+                        search: icons.search,
+                    };
+                    ui.add_widget_with::<InspectorContent>(
+                        world,
+                        "inspector_sidebar_content",
+                        (inspector_icons, true, target_window),
+                    );
+                });
+        }
+
+        // Central panel with toolbar and TileLayout
         let show_empty_overlay = is_empty_tile_tree && !read_only;
+
+        // Sidebar toggle toolbar
+        let toolbar_icons = icons.clone();
+        egui::TopBottomPanel::top("sidebar_toggle_toolbar")
+            .exact_height(32.0)
+            .frame(Frame {
+                fill: get_scheme().bg_secondary,
+                stroke: egui::Stroke::new(1.0, get_scheme().border_primary),
+                inner_margin: egui::Margin::symmetric(8, 0),
+                ..Default::default()
+            })
+            .show_inside(ui, |ui| {
+                ui.horizontal_centered(|ui| {
+                    // Add flexible space to push buttons to the right
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        // Right sidebar toggle button (rendered first because right-to-left)
+                        let right_btn_tint = if right_sidebar_visible {
+                            get_scheme().text_primary
+                        } else {
+                            colors::with_opacity(get_scheme().text_primary, 0.4)
+                        };
+                        let right_resp = ui.add(
+                            EImageButton::new(toolbar_icons.sidebar_right)
+                                .scale(1.4, 1.4)
+                                .image_tint(right_btn_tint),
+                        );
+                        if right_resp.clicked() {
+                            let mut query = world.query::<&mut WindowState>();
+                            if let Ok(mut window_state) = query.get_mut(world, target_window) {
+                                window_state.ui_state.right_sidebar_visible =
+                                    !window_state.ui_state.right_sidebar_visible;
+                            }
+                        }
+                        if right_resp.hovered() {
+                            right_resp.on_hover_text(if right_sidebar_visible {
+                                "Hide right sidebar"
+                            } else {
+                                "Show right sidebar"
+                            });
+                        }
+
+                        ui.add_space(4.0);
+
+                        // Left sidebar toggle button
+                        let left_btn_tint = if left_sidebar_visible {
+                            get_scheme().text_primary
+                        } else {
+                            colors::with_opacity(get_scheme().text_primary, 0.4)
+                        };
+                        let left_resp = ui.add(
+                            EImageButton::new(toolbar_icons.sidebar_left)
+                                .scale(1.4, 1.4)
+                                .image_tint(left_btn_tint),
+                        );
+                        if left_resp.clicked() {
+                            let mut query = world.query::<&mut WindowState>();
+                            if let Ok(mut window_state) = query.get_mut(world, target_window) {
+                                window_state.ui_state.left_sidebar_visible =
+                                    !window_state.ui_state.left_sidebar_visible;
+                            }
+                        }
+                        if left_resp.hovered() {
+                            left_resp.on_hover_text(if left_sidebar_visible {
+                                "Hide left sidebar"
+                            } else {
+                                "Show left sidebar"
+                            });
+                        }
+                    });
+                });
+            });
+
+        // TileLayout
         ui.add_widget_with::<TileLayout>(
             world,
             "tile_layout",

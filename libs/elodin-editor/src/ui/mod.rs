@@ -177,11 +177,25 @@ pub struct EntityFilter(pub String);
 #[derive(Resource, Default, Clone, Debug)]
 pub struct InspectorAnchor(pub Option<egui::Pos2>);
 
-#[derive(Default, Clone, Debug)]
+#[derive(Clone, Debug)]
 pub struct WindowUiState {
     pub selected_object: SelectedObject,
     pub entity_filter: EntityFilter,
     pub inspector_anchor: InspectorAnchor,
+    pub left_sidebar_visible: bool,
+    pub right_sidebar_visible: bool,
+}
+
+impl Default for WindowUiState {
+    fn default() -> Self {
+        Self {
+            selected_object: SelectedObject::default(),
+            entity_filter: EntityFilter::default(),
+            inspector_anchor: InspectorAnchor::default(),
+            left_sidebar_visible: true,
+            right_sidebar_visible: true,
+        }
+    }
 }
 
 #[derive(Component, Clone)]
