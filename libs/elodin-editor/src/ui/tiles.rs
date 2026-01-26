@@ -1653,14 +1653,18 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
 
         // Check for rename signal from context menu
         let rename_signal_id = egui::Id::new(("start_renaming_signal", tile_id));
-        if !self.read_only && !is_editing {
-            if ui.ctx().data(|d| d.get_temp::<bool>(rename_signal_id)).unwrap_or(false) {
-                ui.ctx().data_mut(|d| d.remove::<bool>(rename_signal_id));
-                ui.ctx()
-                    .data_mut(|d| d.insert_temp(edit_buf_id, title_str.clone()));
-                ui.ctx().data_mut(|d| d.insert_temp(edit_flag_id, true));
-                is_editing = true;
-            }
+        if !self.read_only
+            && !is_editing
+            && ui
+                .ctx()
+                .data(|d| d.get_temp::<bool>(rename_signal_id))
+                .unwrap_or(false)
+        {
+            ui.ctx().data_mut(|d| d.remove::<bool>(rename_signal_id));
+            ui.ctx()
+                .data_mut(|d| d.insert_temp(edit_buf_id, title_str.clone()));
+            ui.ctx().data_mut(|d| d.insert_temp(edit_flag_id, true));
+            is_editing = true;
         }
 
         if ui.is_rect_visible(rect) && !state.is_being_dragged {
@@ -2667,10 +2671,7 @@ impl WidgetSystem for TileLayout<'_, '_> {
                     TreeAction::StartRenaming(tile_id) => {
                         // Signal that this tile should start editing next frame
                         ui.ctx().data_mut(|d| {
-                            d.insert_temp(
-                                egui::Id::new(("start_renaming_signal", tile_id)),
-                                true,
-                            )
+                            d.insert_temp(egui::Id::new(("start_renaming_signal", tile_id)), true)
                         });
                     }
                     TreeAction::AddActionTile(parent_tile_id, button_name, lua_code) => {
