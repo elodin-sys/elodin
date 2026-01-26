@@ -1843,7 +1843,7 @@ impl<'w, 's> TileSystem<'w, 's> {
                     window_state.ui_state.right_sidebar_visible,
                 )
             } else {
-                (true, true)
+                (false, false)
             }
         };
 
@@ -1915,6 +1915,12 @@ impl<'w, 's> TileSystem<'w, 's> {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         let old_pad = ui.spacing().button_padding;
                         ui.style_mut().spacing.button_padding = egui::vec2(2.0, 2.0);
+
+                        // Set icon color to match theme text color
+                        let icon_color = get_scheme().text_primary;
+                        ui.visuals_mut().widgets.inactive.fg_stroke.color = icon_color;
+                        ui.visuals_mut().widgets.hovered.fg_stroke.color = icon_color;
+                        ui.visuals_mut().widgets.active.fg_stroke.color = icon_color;
 
                         // Right sidebar toggle button (rendered first because right-to-left)
                         let right_icon = if right_sidebar_visible {
