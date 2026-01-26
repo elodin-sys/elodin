@@ -1471,18 +1471,18 @@ impl TileState {
     pub fn new(tree_id: Id) -> Self {
         Self {
             tree: egui_tiles::Tree::new_tabs(tree_id, vec![]),
-            tree_actions: smallvec![],
+            tree_actions: smallvec![TreeAction::AddSidebars],
             graphs: HashMap::new(),
             container_titles: HashMap::new(),
-            sidebar_state: SidebarMaskState::default(),
+            sidebar_state: SidebarMaskState::default(), // Sidebars start masked (hidden)
             tree_id,
         }
     }
 
     fn reset_tree(&mut self) {
         self.tree = egui_tiles::Tree::new_tabs(self.tree_id, vec![]);
-        self.tree_actions = smallvec![];
-        self.sidebar_state = SidebarMaskState::default();
+        self.tree_actions = smallvec![TreeAction::AddSidebars];
+        self.sidebar_state = SidebarMaskState::default(); // Sidebars start masked (hidden)
     }
 }
 
@@ -1689,7 +1689,7 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
 
                 let resp = ui
                     .scope(|ui| {
-                        ui.visuals_mut().override_text_color = Some(Color32::BLACK);
+                        ui.visuals_mut().override_text_color = Some(scheme.text_primary);
                         ui.put(
                             edit_rect,
                             egui::TextEdit::singleline(&mut buf)
@@ -1815,7 +1815,7 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
             ui.style_mut().visuals.widgets.inactive.fg_stroke =
                 egui::Stroke::new(1.0, scheme.text_primary.opacity(0.5));
 
-            egui::Frame::none()
+            egui::Frame::NONE
                 .inner_margin(egui::Margin::same(10))
                 .show(ui, |ui| {
                     ui.set_min_width(140.0);
