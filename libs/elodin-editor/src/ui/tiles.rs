@@ -2601,7 +2601,7 @@ impl WidgetSystem for TileLayout<'_, '_> {
                         let entity = state_mut.commands.spawn(QueryTableData::default()).id();
                         let pane = Pane::QueryTable(QueryTablePane {
                             entity,
-                            name: "Query".to_string(),
+                            name: "Query Table".to_string(),
                         });
                         if let Some(tile_id) =
                             tile_state.insert_tile(Tile::Pane(pane), parent_tile_id, true)
