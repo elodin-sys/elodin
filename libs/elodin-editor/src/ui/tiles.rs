@@ -1899,7 +1899,8 @@ impl<'w, 's> TileSystem<'w, 's> {
         // Central panel with toolbar and TileLayout
         let show_empty_overlay = is_empty_tile_tree && !read_only;
 
-        // Sidebar toggle toolbar
+        egui_material_icons::initialize(ui.ctx());
+
         // Sidebar toggle toolbar
         egui::TopBottomPanel::top("sidebar_toggle_toolbar")
             .exact_height(32.0)
