@@ -15,6 +15,7 @@ use bevy_egui::{
 };
 use egui::UiBuilder;
 use egui::response::Flags;
+use egui_material_icons::{icon_button, icons::*};
 use egui_tiles::{Container, Tile, TileId, Tiles};
 use impeller2_wkt::{Dashboard, Graph, Viewport, WindowRect};
 use smallvec::{SmallVec, smallvec};
@@ -111,8 +112,6 @@ pub struct TileIcons {
     pub viewport: egui::TextureId,
     pub container: egui::TextureId,
     pub entity: egui::TextureId,
-    pub sidebar_left: egui::TextureId,
-    pub sidebar_right: egui::TextureId,
 }
 
 #[derive(Clone)]
@@ -1811,10 +1810,6 @@ impl<'w, 's> TileSystem<'w, 's> {
             viewport: contexts.add_image(EguiTextureHandle::Weak(images.icon_viewport.id())),
             container: contexts.add_image(EguiTextureHandle::Weak(images.icon_container.id())),
             entity: contexts.add_image(EguiTextureHandle::Weak(images.icon_entity.id())),
-            sidebar_left: contexts
-                .add_image(EguiTextureHandle::Weak(images.icon_side_bar_left.id())),
-            sidebar_right: contexts
-                .add_image(EguiTextureHandle::Weak(images.icon_side_bar_right.id())),
         };
 
         Some((icons, is_empty_tile_tree, read_only))
@@ -1905,7 +1900,7 @@ impl<'w, 's> TileSystem<'w, 's> {
         let show_empty_overlay = is_empty_tile_tree && !read_only;
 
         // Sidebar toggle toolbar
-        let toolbar_icons = icons.clone();
+        // Sidebar toggle toolbar
         egui::TopBottomPanel::top("sidebar_toggle_toolbar")
             .exact_height(32.0)
             .frame(Frame {
@@ -1918,17 +1913,16 @@ impl<'w, 's> TileSystem<'w, 's> {
                 ui.horizontal_centered(|ui| {
                     // Add flexible space to push buttons to the right
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        let old_pad = ui.spacing().button_padding;
+                        ui.style_mut().spacing.button_padding = egui::vec2(2.0, 2.0);
+
                         // Right sidebar toggle button (rendered first because right-to-left)
-                        let right_btn_tint = if right_sidebar_visible {
-                            get_scheme().text_primary
+                        let right_icon = if right_sidebar_visible {
+                            ICON_RIGHT_PANEL_CLOSE
                         } else {
-                            colors::with_opacity(get_scheme().text_primary, 0.4)
+                            ICON_RIGHT_PANEL_OPEN
                         };
-                        let right_resp = ui.add(
-                            EImageButton::new(toolbar_icons.sidebar_right)
-                                .scale(1.4, 1.4)
-                                .image_tint(right_btn_tint),
-                        );
+                        let right_resp = icon_button(ui, right_icon);
                         if right_resp.clicked() {
                             let mut query = world.query::<&mut WindowState>();
                             if let Ok(mut window_state) = query.get_mut(world, target_window) {
@@ -1936,27 +1930,21 @@ impl<'w, 's> TileSystem<'w, 's> {
                                     !window_state.ui_state.right_sidebar_visible;
                             }
                         }
-                        if right_resp.hovered() {
-                            right_resp.on_hover_text(if right_sidebar_visible {
-                                "Hide right sidebar"
-                            } else {
-                                "Show right sidebar"
-                            });
-                        }
+                        right_resp.on_hover_text(if right_sidebar_visible {
+                            "Hide right sidebar"
+                        } else {
+                            "Show right sidebar"
+                        });
 
                         ui.add_space(4.0);
 
                         // Left sidebar toggle button
-                        let left_btn_tint = if left_sidebar_visible {
-                            get_scheme().text_primary
+                        let left_icon = if left_sidebar_visible {
+                            ICON_LEFT_PANEL_CLOSE
                         } else {
-                            colors::with_opacity(get_scheme().text_primary, 0.4)
+                            ICON_LEFT_PANEL_OPEN
                         };
-                        let left_resp = ui.add(
-                            EImageButton::new(toolbar_icons.sidebar_left)
-                                .scale(1.4, 1.4)
-                                .image_tint(left_btn_tint),
-                        );
+                        let left_resp = icon_button(ui, left_icon);
                         if left_resp.clicked() {
                             let mut query = world.query::<&mut WindowState>();
                             if let Ok(mut window_state) = query.get_mut(world, target_window) {
@@ -1964,13 +1952,37 @@ impl<'w, 's> TileSystem<'w, 's> {
                                     !window_state.ui_state.left_sidebar_visible;
                             }
                         }
-                        if left_resp.hovered() {
-                            left_resp.on_hover_text(if left_sidebar_visible {
-                                "Hide left sidebar"
-                            } else {
-                                "Show left sidebar"
-                            });
+                        left_resp.on_hover_text(if left_sidebar_visible {
+                            "Hide left sidebar"
+                        } else {
+                            "Show left sidebar"
+                        });
+
+                        ui.add_space(8.0);
+
+                        // Theme toggle button
+                        let current_mode = colors::current_selection().mode;
+                        let is_dark = current_mode.eq_ignore_ascii_case("dark");
+                        let theme_icon = if is_dark {
+                            ICON_LIGHT_MODE
+                        } else {
+                            ICON_DARK_MODE
+                        };
+                        let theme_resp = icon_button(ui, theme_icon);
+                        if theme_resp.clicked() {
+                            let current = colors::current_selection();
+                            let new_mode = if is_dark { "light" } else { "dark" };
+                            if colors::scheme_supports_mode(&current.scheme, new_mode) {
+                                colors::apply_scheme_and_mode(&current.scheme, new_mode);
+                            }
                         }
+                        theme_resp.on_hover_text(if is_dark {
+                            "Switch to light mode"
+                        } else {
+                            "Switch to dark mode"
+                        });
+
+                        ui.style_mut().spacing.button_padding = old_pad;
                     });
                 });
             });
