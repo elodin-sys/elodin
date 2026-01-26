@@ -505,14 +505,6 @@ fn handle_drag_resize(
             let resize_east = cursor_pos.x > size.x - RESIZE_ZONE;
             let resize_north = cursor_pos.y < RESIZE_ZONE;
             let resize_south = cursor_pos.y > size.y - RESIZE_ZONE;
-            if cursor_pos.y < 45.0
-                && !resize_north
-                && !resize_east
-                && !resize_west
-                && mouse_buttons.pressed(MouseButton::Left)
-            {
-                let _ = window.drag_window();
-            }
             let resize_dir = match (resize_west, resize_east, resize_north, resize_south) {
                 (true, _, true, _) => Some(winit::window::ResizeDirection::NorthWest),
                 (_, true, true, _) => Some(winit::window::ResizeDirection::NorthEast),

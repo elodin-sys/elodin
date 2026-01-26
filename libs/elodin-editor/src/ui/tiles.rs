@@ -892,6 +892,12 @@ impl TileState {
                 Tile::Pane(Pane::VideoStream(pane)) => {
                     commands.entity(pane.entity).despawn();
                 }
+                Tile::Pane(Pane::ActionTile(pane)) => {
+                    commands.entity(pane.entity).despawn();
+                }
+                Tile::Pane(Pane::QueryTable(pane)) => {
+                    commands.entity(pane.entity).despawn();
+                }
                 Tile::Pane(Pane::QueryPlot(pane)) => {
                     commands.entity(pane.entity).despawn();
                 }
@@ -1596,6 +1602,13 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
                 t.clone()
             } else {
                 match tiles.get(tile_id) {
+                    Some(egui_tiles::Tile::Container(Container::Tabs(_))) => {
+                        // Hide Tabs containers without custom name (wrapper Tabs)
+                        let min_width = self.tab_title_spacing(ui.visuals()) * 2.0;
+                        let (_, rect) = ui.allocate_space(vec2(min_width, ui.available_height()));
+                        let response = ui.interact(rect, id, egui::Sense::click_and_drag());
+                        return self.on_tab_button(tiles, tile_id, response);
+                    }
                     Some(egui_tiles::Tile::Container(c)) => format!("{:?}", c.kind()),
                     _ => "Container".to_owned(),
                 }

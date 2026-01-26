@@ -694,5 +694,23 @@ pub fn tab_add_visible(tiles: &Tiles<Pane>, tabs: &egui_tiles::Tabs) -> bool {
     let active_is_sidebar = tabs
         .active
         .is_some_and(|active| tile_is_sidebar(tiles, active));
-    !(active_is_sidebar || tabs_are_sidebar_only(tiles, tabs))
+    if active_is_sidebar || tabs_are_sidebar_only(tiles, tabs) {
+        return false;
+    }
+    // Hide "+" for Tabs containing only one Tabs child (wrapper Tabs)
+    let non_sidebar_children: Vec<_> = tabs
+        .children
+        .iter()
+        .copied()
+        .filter(|&child_id| !tile_is_sidebar(tiles, child_id))
+        .collect();
+    if non_sidebar_children.len() == 1
+        && matches!(
+            tiles.get(non_sidebar_children[0]),
+            Some(Tile::Container(Container::Tabs(_)))
+        )
+    {
+        return false;
+    }
+    true
 }
