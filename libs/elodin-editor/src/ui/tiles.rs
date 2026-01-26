@@ -2264,14 +2264,14 @@ impl WidgetSystem for TileLayout<'_, '_> {
 
             // Ensure all Tabs containers have an active tab after drag/drop operations
             for (_id, tile) in tree.tiles.iter_mut() {
-                if let Tile::Container(Container::Tabs(tabs)) = tile {
-                    if !tabs.children.is_empty() {
-                        // If no active tab or active tab is not in children, select the first child
-                        let needs_active = tabs.active.is_none()
-                            || !tabs.children.contains(&tabs.active.unwrap());
-                        if needs_active {
-                            tabs.active = tabs.children.first().copied();
-                        }
+                if let Tile::Container(Container::Tabs(tabs)) = tile
+                    && !tabs.children.is_empty()
+                {
+                    // If no active tab or active tab is not in children, select the first child
+                    let needs_active =
+                        tabs.active.is_none() || !tabs.children.contains(&tabs.active.unwrap());
+                    if needs_active {
+                        tabs.active = tabs.children.first().copied();
                     }
                 }
             }

@@ -377,6 +377,7 @@ impl RootWidgetSystem for MainLayout<'_, '_> {
         #[cfg(not(target_family = "wasm"))]
         world.add_root_widget::<status_bar::StatusBar>("status_bar");
 
+        #[allow(unused_mut)]
         let mut frame = egui::Frame::new();
         #[cfg(target_os = "macos")]
         {
