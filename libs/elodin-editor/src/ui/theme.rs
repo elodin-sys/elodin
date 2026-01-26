@@ -8,7 +8,7 @@ use crate::ui::colors::{self, get_scheme, with_opacity};
 
 use super::colors::ColorExt;
 
-pub fn set_theme(context: &mut egui::Context) {
+pub fn set_theme(context: &egui::Context) {
     let mut style = (*context.style()).clone();
     let scheme = colors::get_scheme();
 

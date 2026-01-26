@@ -1980,6 +1980,8 @@ impl<'w, 's> TileSystem<'w, 's> {
                             let new_mode = if is_dark { "light" } else { "dark" };
                             if colors::scheme_supports_mode(&current.scheme, new_mode) {
                                 colors::apply_scheme_and_mode(&current.scheme, new_mode);
+                                // Update egui context style with new theme colors
+                                super::theme::set_theme(ui.ctx());
                             }
                         }
                         theme_resp.on_hover_text(if is_dark {
