@@ -180,7 +180,7 @@ pub struct TimeseriesPlot {
 }
 
 pub const MARGIN: egui::Margin = egui::Margin {
-    left: 60,
+    left: 100,
     right: 0,
     top: 35,
     bottom: 35,
@@ -201,6 +201,33 @@ pub const MODAL_MARGIN: f32 = 20.0;
 
 pub const ZOOM_SENSITIVITY: f32 = 0.001;
 pub const SCROLL_PIXELS_PER_LINE: f32 = 100.0;
+
+/// Percentage of the Y range to add as padding on each side (5% = 0.05)
+pub const Y_AXIS_PADDING_PERCENT: f64 = 0.05;
+
+/// Calculate padded Y bounds with appropriate buffer based on magnitude.
+/// - For a range of values, adds a percentage-based padding on each side.
+/// - When min == max (flat line), uses magnitude-relative padding.
+pub fn calculate_padded_y_bounds(min_y: f64, max_y: f64) -> (f64, f64) {
+    let range = max_y - min_y;
+
+    if range.abs() < f64::EPSILON {
+        // min == max (flat line): use magnitude-relative padding
+        let magnitude = min_y.abs();
+        let padding = if magnitude < f64::EPSILON {
+            // Value is zero: use a small default range
+            1.0
+        } else {
+            // Use 10% of the magnitude as padding on each side
+            magnitude * 0.1
+        };
+        (min_y - padding, max_y + padding)
+    } else {
+        // Normal range: add percentage-based padding on each side
+        let padding = range * Y_AXIS_PADDING_PERCENT;
+        (min_y - padding, max_y + padding)
+    }
+}
 
 pub fn get_inner_rect(rect: egui::Rect) -> egui::Rect {
     rect.shrink4(MARGIN)
@@ -1078,8 +1105,11 @@ pub fn auto_y_bounds(
                 }
             }
 
-            graph_state.y_range =
-                y_min.unwrap_or_default() as f64..y_max.unwrap_or_default() as f64;
+            let (padded_min, padded_max) = calculate_padded_y_bounds(
+                y_min.unwrap_or_default() as f64,
+                y_max.unwrap_or_default() as f64,
+            );
+            graph_state.y_range = padded_min..padded_max;
         }
     }
 }
