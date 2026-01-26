@@ -2197,18 +2197,20 @@ impl WidgetSystem for TileLayout<'_, '_> {
         };
 
         let (tree, mut tree_actions, empty_overlay_rect, overlay_icons) = {
-            let (tab_diffs, container_titles, mut tree) = {
+            let (tab_diffs, container_titles, mut tree, inspector_visible) = {
                 let mut state_mut = state.get_mut(world);
                 let Some(mut window_state) = state_mut.tile_param.target_state(Some(target_window))
                 else {
                     return;
                 };
+                let inspector_visible = window_state.ui_state.right_sidebar_visible;
                 let tile_state = &mut window_state.tile_state;
                 let empty_tree = egui_tiles::Tree::empty(tile_state.tree_id);
                 (
                     std::mem::take(&mut tile_state.tree_actions),
                     tile_state.container_titles.clone(),
                     std::mem::replace(&mut tile_state.tree, empty_tree),
+                    inspector_visible,
                 )
             };
             let overlay_icons = icons.clone();
@@ -2220,7 +2222,7 @@ impl WidgetSystem for TileLayout<'_, '_> {
                 container_titles,
                 read_only,
                 target_window,
-                inspector_visible: !sidebar_state.inspector_masked,
+                inspector_visible,
             };
             tree.ui(&mut behavior, ui);
 
@@ -2512,9 +2514,6 @@ impl WidgetSystem for TileLayout<'_, '_> {
                                 }
                                 _ => {}
                             }
-                            if let Some(kind) = pane.sidebar_kind() {
-                                unmask_sidebar_by_kind(tile_state, kind);
-                            }
                         }
                     }
                     TreeAction::OpenInspector(tile_id) => {
@@ -2541,16 +2540,11 @@ impl WidgetSystem for TileLayout<'_, '_> {
                                 }
                                 _ => {}
                             }
-                            if let Some(kind) = pane.sidebar_kind() {
-                                unmask_sidebar_by_kind(tile_state, kind);
-                            }
-                            unmask_sidebar_by_kind(tile_state, SidebarKind::Inspector);
+                            ui_state.right_sidebar_visible = true;
                         }
                     }
                     TreeAction::HideInspector => {
-                        tile_state
-                            .sidebar_state
-                            .set_masked(SidebarKind::Inspector, true);
+                        ui_state.right_sidebar_visible = false;
                     }
                     TreeAction::StartRenaming(tile_id) => {
                         // Signal that this tile should start editing next frame
