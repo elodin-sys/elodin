@@ -61,6 +61,9 @@ pub fn set_theme(context: &mut egui::Context) {
     style.visuals.selection.bg_fill = scheme.highlight.opacity(0.6);
     style.visuals.selection.stroke.color = scheme.highlight;
 
+    // Text cursor (caret) should use text_primary for visibility in both light and dark modes
+    style.visuals.text_cursor.stroke.color = scheme.text_primary;
+
     configure_default_fonts(context);
 
     context.set_style(style);

@@ -374,6 +374,9 @@ impl RootWidgetSystem for MainLayout<'_, '_> {
     ) {
         let _state = state.get_mut(world);
 
+        // Update theme every frame to reflect color scheme changes
+        theme::set_theme(ctx);
+
         #[cfg(not(target_family = "wasm"))]
         world.add_root_widget::<status_bar::StatusBar>("status_bar");
 

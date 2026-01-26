@@ -2076,6 +2076,11 @@ impl RootWidgetSystem for TileSystem<'_, '_> {
         ctx: &mut egui::Context,
         target: Self::Args,
     ) {
+        // Update theme for secondary windows to reflect color scheme changes
+        if target.is_some() {
+            super::theme::set_theme(ctx);
+        }
+
         let Some((icons, is_empty_tile_tree, read_only)) =
             Self::prepare_panel_data(world, state, target)
         else {
