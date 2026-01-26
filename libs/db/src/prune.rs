@@ -26,6 +26,11 @@ pub fn run(db_path: PathBuf, dry_run: bool, auto_confirm: bool) -> Result<(), Er
         return Err(Error::MissingDbState(db_path));
     }
 
+    let db_state_path = db_path.join("db_state");
+    if !db_state_path.exists() {
+        return Err(Error::MissingDbState(db_state_path));
+    }
+
     println!("Analyzing database: {}", db_path.display());
     if dry_run {
         println!("DRY RUN - no changes will be made");

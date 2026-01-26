@@ -476,12 +476,12 @@ impl TimeseriesPlot {
                                     egui::StrokeKind::Middle,
                                 );
                                 ui.add_space(6.);
-                            ui.label(RichText::new(line_data.label.clone()).size(11.0));
-                            let value = line
-                                .data
-                                .get_nearest(timestamp)
-                                .map(|(_time, x)| format_num(*x as f64))
-                                .unwrap_or_else(|| "N/A".to_string());
+                                ui.label(RichText::new(line_data.label.clone()).size(11.0));
+                                let value = line
+                                    .data
+                                    .get_nearest(timestamp)
+                                    .map(|(_time, x)| format_num(*x as f64))
+                                    .unwrap_or_else(|| "N/A".to_string());
                                 ui.with_layout(Layout::top_down_justified(Align::RIGHT), |ui| {
                                     ui.add_space(3.0);
                                     ui.label(RichText::new(value).size(11.0));

@@ -411,10 +411,14 @@ pub fn queue_timestamp_read(
 
     // Simple volume-based decision: use overview for large time ranges (> 10 minutes)
     // This covers two use cases:
-    // 1. Live telemetry: data span is small (< 10 minutes) -> direct chunked loading  
+    // 1. Live telemetry: data span is small (< 10 minutes) -> direct chunked loading
     // 2. Historical datasets: data span is large (> 10 minutes) -> use LTTB overview first
     const TEN_MINUTES_MICROS: i64 = 600_000_000; // 10 minutes in microseconds
-    let range_duration = selected_range.0.end.0.saturating_sub(selected_range.0.start.0);
+    let range_duration = selected_range
+        .0
+        .end
+        .0
+        .saturating_sub(selected_range.0.start.0);
     let use_overview = range_duration > TEN_MINUTES_MICROS;
 
     for (&component_id, component) in graph_data.components.iter_mut() {
@@ -447,7 +451,7 @@ pub fn queue_timestamp_read(
                 component.overview_requested.insert(element_index, true);
 
                 let packet_id = fastrand::u16(..).to_le_bytes();
-                
+
                 let query = PlotOverviewQuery {
                     id: packet_id,
                     component_id,
@@ -1036,7 +1040,12 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
 
     /// Compute robust percentile-based bounds that filter out extreme outliers.
     /// Returns (p1, p99) percentile values from the data, which excludes the most extreme 1% on each end.
-    pub fn percentile_bounds(&self, range: Range<Timestamp>, p_low: f32, p_high: f32) -> Option<(D, D)>
+    pub fn percentile_bounds(
+        &self,
+        range: Range<Timestamp>,
+        p_low: f32,
+        p_high: f32,
+    ) -> Option<(D, D)>
     where
         D: PartialOrd + Copy,
     {

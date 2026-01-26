@@ -1561,8 +1561,13 @@ async fn handle_packet<A: AsyncWrite + 'static>(
             // Find the component matching this table name
             let result = db.with_state(|state| {
                 for component in state.components.values() {
-                    let component_metadata =
-                        state.component_metadata.get(&component.component_id)?;
+                    // Skip components without metadata instead of returning None,
+                    // which would abort the search and miss other valid components
+                    let Some(component_metadata) =
+                        state.component_metadata.get(&component.component_id)
+                    else {
+                        continue;
+                    };
                     let component_name = crate::arrow::sanitize_sql_table_name(
                         &component_metadata.name.to_case(convert_case::Case::Snake),
                     );
