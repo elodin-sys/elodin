@@ -958,13 +958,11 @@ impl Pane {
         targets
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn ui(
         &mut self,
         ui: &mut Ui,
         icons: &TileIcons,
         world: &mut World,
-        _tree_actions: &mut SmallVec<[TreeAction; 4]>,
         target_window: Entity,
     ) -> egui_tiles::UiResponse {
         let content_rect = ui.available_rect_before_wrap();
@@ -1377,13 +1375,7 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
         _tile_id: egui_tiles::TileId,
         pane: &mut Pane,
     ) -> egui_tiles::UiResponse {
-        pane.ui(
-            ui,
-            &self.icons,
-            self.world,
-            &mut self.tree_actions,
-            self.target_window,
-        )
+        pane.ui(ui, &self.icons, self.world, self.target_window)
     }
 
     #[allow(clippy::fn_params_excessive_bools)]
