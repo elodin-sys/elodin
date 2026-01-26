@@ -81,6 +81,7 @@ pub struct ComponentTimeRanges {
 pub struct DataOverviewRowSettings {
     pub enabled: bool,
     pub color: Option<Color32>,
+    pub custom_name: Option<String>,
 }
 
 impl Default for DataOverviewRowSettings {
@@ -88,6 +89,7 @@ impl Default for DataOverviewRowSettings {
         Self {
             enabled: true,
             color: None,
+            custom_name: None,
         }
     }
 }

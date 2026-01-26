@@ -1,7 +1,6 @@
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::{Res, ResMut};
 use bevy_egui::egui;
-use egui::FontId;
 
 use impeller2::types::ComponentId;
 
@@ -63,64 +62,83 @@ impl WidgetSystem for InspectorDataOverview<'_> {
         egui::Frame::NONE
             .inner_margin(egui::Margin::symmetric(0, 8))
             .show(ui, |ui| {
-                egui::ScrollArea::vertical().show(ui, |ui| {
-                    for (index, (component_id, label, table_name, _)) in entries.iter().enumerate()
-                    {
-                        let default_color = row_color(index);
-                        let mut clear_tables = false;
-                        {
-                            let settings = params
-                                .time_ranges
-                                .row_settings
-                                .entry(*component_id)
-                                .or_default();
-                            if settings.color.is_none() {
-                                settings.color = Some(default_color);
-                            }
-                            let label_color =
-                                settings.color.unwrap_or_else(|| get_scheme().text_primary);
-                            let label_color = if settings.enabled {
-                                label_color
-                            } else {
-                                label_color.opacity(0.35)
-                            };
-                            ui.horizontal(|ui| {
-                                ui.label(
-                                    egui::RichText::new(label)
-                                        .color(label_color)
-                                        .font(FontId::proportional(10.0)),
-                                );
-                                ui.add_space(8.0);
-                                let mut enabled_value = settings.enabled;
-                                if ui.checkbox(&mut enabled_value, "").changed() {
-                                    settings.enabled = enabled_value;
-                                    if !enabled_value {
-                                        clear_tables = true;
-                                    }
-                                }
+                if entries.is_empty() {
+                    ui.label(
+                        egui::RichText::new("No components available")
+                            .color(get_scheme().text_secondary),
+                    );
+                    return;
+                }
 
-                                ui.add_space(8.0);
-                                let mut color_value = settings.color.unwrap_or(label_color);
-                                let color_id = ui.auto_id_with(("data_overview_color", index));
-                                let color_btn = ui.add(EColorButton::new(color_value));
-                                if color_btn.clicked() {
-                                    egui::Popup::toggle_id(ui.ctx(), color_id);
+                egui::ScrollArea::vertical()
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        for (index, (component_id, label, table_name, _)) in
+                            entries.iter().enumerate()
+                        {
+                            let default_color = row_color(index);
+                            let mut clear_tables = false;
+                            {
+                                let settings = params
+                                    .time_ranges
+                                    .row_settings
+                                    .entry(*component_id)
+                                    .or_default();
+                                if settings.color.is_none() {
+                                    settings.color = Some(default_color);
                                 }
-                                if let Some(_) =
-                                    color_popup(ui, &mut color_value, color_id, &color_btn)
-                                    && Some(color_value) != settings.color
-                                {
-                                    settings.color = Some(color_value);
+                                if settings.custom_name.is_none() {
+                                    settings.custom_name = Some(label.clone());
                                 }
-                            });
+                                let row_color =
+                                    settings.color.unwrap_or_else(|| get_scheme().text_primary);
+                                let row_color = if settings.enabled {
+                                    row_color
+                                } else {
+                                    row_color.opacity(0.35)
+                                };
+
+                                ui.horizontal(|ui| {
+                                    // 1. Checkbox
+                                    let mut enabled_value = settings.enabled;
+                                    if ui.checkbox(&mut enabled_value, "").changed() {
+                                        settings.enabled = enabled_value;
+                                        if !enabled_value {
+                                            clear_tables = true;
+                                        }
+                                    }
+
+                                    // 2. Editable name
+                                    let name =
+                                        settings.custom_name.get_or_insert_with(|| label.clone());
+                                    let text_edit = egui::TextEdit::singleline(name)
+                                        .text_color(row_color)
+                                        .desired_width(ui.available_width() - 40.0)
+                                        .frame(false);
+                                    ui.add(text_edit);
+
+                                    // 3. Color button
+                                    let mut color_value = settings.color.unwrap_or(row_color);
+                                    let color_id = ui.auto_id_with(("data_overview_color", index));
+                                    let color_btn = ui.add(EColorButton::new(color_value));
+                                    if color_btn.clicked() {
+                                        egui::Popup::toggle_id(ui.ctx(), color_id);
+                                    }
+                                    if let Some(_) =
+                                        color_popup(ui, &mut color_value, color_id, &color_btn)
+                                        && Some(color_value) != settings.color
+                                    {
+                                        settings.color = Some(color_value);
+                                    }
+                                });
+                            }
+                            if clear_tables {
+                                params.time_ranges.ranges.remove(table_name);
+                                params.time_ranges.row_counts.remove(table_name);
+                                params.time_ranges.sparklines.remove(table_name);
+                            }
                         }
-                        if clear_tables {
-                            params.time_ranges.ranges.remove(table_name);
-                            params.time_ranges.row_counts.remove(table_name);
-                            params.time_ranges.sparklines.remove(table_name);
-                        }
-                    }
-                });
+                    });
             });
     }
 }
