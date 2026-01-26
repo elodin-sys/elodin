@@ -1900,7 +1900,8 @@ impl<'w, 's> TileSystem<'w, 's> {
 
         egui_material_icons::initialize(ui.ctx());
 
-        let toolbar_action = render_sidebar_toolbar(ui, left_sidebar_visible, right_sidebar_visible);
+        let toolbar_action =
+            render_sidebar_toolbar(ui, left_sidebar_visible, right_sidebar_visible);
 
         if let Some(action) = toolbar_action {
             let mut query = world.query::<&mut WindowState>();
