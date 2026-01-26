@@ -44,7 +44,13 @@ pub fn run(
     dry_run: bool,
     auto_confirm: bool,
 ) -> Result<(), Error> {
-    // Validate arguments
+    // Validate arguments - must specify exactly one of --all or --component
+    if align_all && component_name.is_some() {
+        return Err(Error::Io(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "Cannot specify both --all and --component",
+        )));
+    }
     if !align_all && component_name.is_none() {
         return Err(Error::Io(std::io::Error::new(
             std::io::ErrorKind::InvalidInput,
@@ -81,7 +87,7 @@ pub fn run(
     let target_timestamp_micros = (target_timestamp * 1_000_000.0) as i64;
 
     // Collect component information
-    let components = collect_components(&db_path, align_all, component_name.as_deref())?;
+    let components = collect_components(&db_path, component_name.as_deref())?;
 
     if components.is_empty() {
         if let Some(name) = &component_name {
@@ -181,9 +187,11 @@ pub fn run(
 }
 
 /// Collect components from the database, optionally filtering by name.
+///
+/// If `component_name` is `Some`, returns only the matching component (if found).
+/// If `component_name` is `None`, returns all components.
 fn collect_components(
     db_path: &Path,
-    align_all: bool,
     component_name: Option<&str>,
 ) -> Result<Vec<ComponentInfo>, Error> {
     let mut components = Vec::new();
@@ -245,11 +253,6 @@ fn collect_components(
         if component_name.is_some() && !components.is_empty() {
             break;
         }
-    }
-
-    // If align_all is false and we didn't find the component, that's handled by the caller
-    if !align_all && component_name.is_some() && components.is_empty() {
-        // Component not found - return empty vec, caller will report
     }
 
     Ok(components)
@@ -654,6 +657,26 @@ mod tests {
         assert!(result.is_err());
         let err_msg = result.unwrap_err().to_string();
         assert!(err_msg.contains("--all") || err_msg.contains("--component"));
+    }
+
+    #[test]
+    fn test_run_validation_rejects_both_all_and_component() {
+        let temp = TempDir::new().unwrap();
+        let db_path = temp.path().join("db");
+        create_test_db(&db_path, &[]).unwrap();
+
+        // Should fail with both --all and --component
+        let result = run(
+            db_path,
+            0.0,
+            true,
+            Some("comp1".to_string()),
+            false,
+            true,
+        );
+        assert!(result.is_err());
+        let err_msg = result.unwrap_err().to_string();
+        assert!(err_msg.contains("Cannot specify both"));
     }
 
     #[test]

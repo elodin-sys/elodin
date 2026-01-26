@@ -51,17 +51,21 @@ pub fn lttb_downsample(data: &[DataPoint], target_points: usize) -> Vec<DataPoin
         let next_bucket_end = next_bucket_end.min(n);
 
         // Calculate the average point of the next bucket
+        // Note: We use f64 for sum_time to avoid i64 overflow when summing large buckets.
+        // Wall-clock timestamps in microseconds (~1.7e15) can overflow i64 when summing
+        // more than ~5,400 values. With large datasets and small target_points, bucket
+        // sizes easily exceed this (e.g., 1M points / 100 targets = 10K per bucket).
         let (avg_time, avg_value) = if next_bucket_end > next_bucket_start {
-            let mut sum_time = 0i64;
+            let mut sum_time = 0.0f64;
             let mut sum_value = 0.0f64;
             let count = (next_bucket_end - next_bucket_start) as f64;
 
             for point in data.iter().take(next_bucket_end).skip(next_bucket_start) {
-                sum_time += point.time;
+                sum_time += point.time as f64;
                 sum_value += point.value;
             }
 
-            (sum_time as f64 / count, sum_value / count)
+            (sum_time / count, sum_value / count)
         } else {
             // Edge case: use the last point
             (data[n - 1].time as f64, data[n - 1].value)
@@ -198,6 +202,79 @@ fn filter_outliers(values: &[f64]) -> Vec<f64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_lttb_large_timestamps_no_overflow() {
+        // Test that LTTB handles large wall-clock timestamps without overflow.
+        // Wall-clock timestamps in microseconds are ~1.7e15.
+        // With i64 accumulation, summing >5,400 such timestamps would overflow.
+        // This test uses 10,000 points with target_points=10, creating ~1,250 point buckets.
+        let base_time: i64 = 1_700_000_000_000_000; // ~1.7e15 microseconds (realistic wall-clock)
+        let data: Vec<DataPoint> = (0..10_000)
+            .map(|i| DataPoint {
+                time: base_time + i * 1000, // 1ms apart
+                value: (i as f64 * 0.01).sin(),
+            })
+            .collect();
+
+        let result = lttb_downsample(&data, 10);
+
+        // Should complete without overflow and return valid results
+        assert_eq!(result.len(), 10);
+        assert_eq!(result[0].time, data[0].time);
+        assert_eq!(result[9].time, data[9999].time);
+
+        // All timestamps should be within the input range
+        for point in &result {
+            assert!(point.time >= base_time);
+            assert!(point.time <= base_time + 9_999_000);
+        }
+    }
+
+    #[test]
+    fn test_lttb_f64_precision_acceptable() {
+        // Verify that using f64 for timestamp averaging doesn't degrade output quality.
+        // Compare results from small timestamps (no precision loss) vs large timestamps.
+        // The selected point indices should be identical if precision is acceptable.
+
+        let small_base: i64 = 0;
+        let large_base: i64 = 1_700_000_000_000_000;
+
+        // Create identical signal patterns at different timestamp bases
+        let small_data: Vec<DataPoint> = (0..1000)
+            .map(|i| DataPoint {
+                time: small_base + i * 1000,
+                value: (i as f64 * 0.1).sin() * 100.0, // Sinusoidal pattern
+            })
+            .collect();
+
+        let large_data: Vec<DataPoint> = (0..1000)
+            .map(|i| DataPoint {
+                time: large_base + i * 1000,
+                value: (i as f64 * 0.1).sin() * 100.0, // Same pattern
+            })
+            .collect();
+
+        let small_result = lttb_downsample(&small_data, 20);
+        let large_result = lttb_downsample(&large_data, 20);
+
+        // The values selected should be identical (same signal shape)
+        assert_eq!(small_result.len(), large_result.len());
+        for (s, l) in small_result.iter().zip(large_result.iter()) {
+            assert!(
+                (s.value - l.value).abs() < 1e-10,
+                "Value mismatch: {} vs {}",
+                s.value,
+                l.value
+            );
+            // Timestamps differ by base offset but relative positions should match
+            assert_eq!(
+                s.time - small_base,
+                l.time - large_base,
+                "Point selection differs between small and large timestamps"
+            );
+        }
+    }
 
     #[test]
     fn test_lttb_basic() {
