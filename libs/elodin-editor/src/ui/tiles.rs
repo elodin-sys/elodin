@@ -57,7 +57,7 @@ use crate::{
         gizmos::GIZMO_RENDER_LAYER,
         navigation_gizmo::{RenderLayerAlloc, spawn_gizmo},
     },
-    ui::dashboard::NodeUpdaterParams,
+    ui::{colors::ColorExt, dashboard::NodeUpdaterParams},
 };
 
 pub(crate) mod sidebar;
@@ -1511,6 +1511,7 @@ struct TreeBehavior<'w> {
     container_titles: HashMap<TileId, String>,
     read_only: bool,
     target_window: Entity,
+    inspector_visible: bool,
 }
 
 type ShareUpdate = (TileId, TileId, TileId, f32, f32);
@@ -1531,6 +1532,8 @@ pub enum TreeAction {
     DeleteTab(TileId),
     SelectTile(TileId),
     OpenInspector(TileId),
+    HideInspector,
+    StartRenaming(TileId),
     RenameContainer(TileId, String),
     RenamePane(TileId, String),
 }
@@ -1646,6 +1649,18 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
                 .data_mut(|d| d.insert_temp(edit_buf_id, title_str.clone()));
             ui.ctx().data_mut(|d| d.insert_temp(edit_flag_id, true));
             is_editing = true;
+        }
+
+        // Check for rename signal from context menu
+        let rename_signal_id = egui::Id::new(("start_renaming_signal", tile_id));
+        if !self.read_only && !is_editing {
+            if ui.ctx().data(|d| d.get_temp::<bool>(rename_signal_id)).unwrap_or(false) {
+                ui.ctx().data_mut(|d| d.remove::<bool>(rename_signal_id));
+                ui.ctx()
+                    .data_mut(|d| d.insert_temp(edit_buf_id, title_str.clone()));
+                ui.ctx().data_mut(|d| d.insert_temp(edit_flag_id, true));
+                is_editing = true;
+            }
         }
 
         if ui.is_rect_visible(rect) && !state.is_being_dragged {
@@ -1787,6 +1802,42 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
                 egui::Stroke::new(1.0, scheme.border_primary),
             );
         }
+
+        // Context menu on right-click
+        let inspector_visible = self.inspector_visible;
+        response.context_menu(|ui| {
+            let scheme = get_scheme();
+            ui.style_mut().spacing.item_spacing = egui::vec2(0.0, 4.0);
+            ui.style_mut().visuals.widgets.hovered.bg_fill = scheme.highlight;
+            ui.style_mut().visuals.widgets.hovered.fg_stroke =
+                egui::Stroke::new(1.0, scheme.text_primary);
+            ui.style_mut().visuals.widgets.inactive.bg_fill = colors::TRANSPARENT;
+            ui.style_mut().visuals.widgets.inactive.fg_stroke =
+                egui::Stroke::new(1.0, scheme.text_primary.opacity(0.5));
+
+            egui::Frame::none()
+                .inner_margin(egui::Margin::same(10))
+                .show(ui, |ui| {
+                    ui.set_min_width(140.0);
+                    let inspector_label = if inspector_visible {
+                        "Hide Inspector"
+                    } else {
+                        "Show Inspector"
+                    };
+                    if ui.button(inspector_label).clicked() {
+                        if inspector_visible {
+                            self.tree_actions.push(TreeAction::HideInspector);
+                        } else {
+                            self.tree_actions.push(TreeAction::OpenInspector(tile_id));
+                        }
+                        ui.close();
+                    }
+                    if ui.button("Rename Tab").clicked() {
+                        self.tree_actions.push(TreeAction::StartRenaming(tile_id));
+                        ui.close();
+                    }
+                });
+        });
 
         self.on_tab_button(tiles, tile_id, response)
     }
@@ -2262,6 +2313,7 @@ impl WidgetSystem for TileLayout<'_, '_> {
                 container_titles,
                 read_only,
                 target_window,
+                inspector_visible: !sidebar_state.inspector_masked,
             };
             tree.ui(&mut behavior, ui);
 
@@ -2607,6 +2659,20 @@ impl WidgetSystem for TileLayout<'_, '_> {
                             }
                             unmask_sidebar_by_kind(tile_state, SidebarKind::Inspector);
                         }
+                    }
+                    TreeAction::HideInspector => {
+                        tile_state
+                            .sidebar_state
+                            .set_masked(SidebarKind::Inspector, true);
+                    }
+                    TreeAction::StartRenaming(tile_id) => {
+                        // Signal that this tile should start editing next frame
+                        ui.ctx().data_mut(|d| {
+                            d.insert_temp(
+                                egui::Id::new(("start_renaming_signal", tile_id)),
+                                true,
+                            )
+                        });
                     }
                     TreeAction::AddActionTile(parent_tile_id, button_name, lua_code) => {
                         let name = button_name.clone();
