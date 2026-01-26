@@ -1503,8 +1503,8 @@ async fn handle_packet<A: AsyncWrite + 'static>(
         }
         Packet::Msg(m) if m.id == SQLQuery::ID => {
             let SQLQuery(query) = m.parse::<SQLQuery>()?;
-            let query_preview = if query.len() > 80 {
-                format!("{}...", &query[..80])
+            let query_preview = if query.chars().count() > 80 {
+                format!("{}...", query.chars().take(80).collect::<String>())
             } else {
                 query.clone()
             };
@@ -1786,6 +1786,20 @@ async fn handle_packet<A: AsyncWrite + 'static>(
             // Extract values for the specified element_index
             let element_size = component.time_series.element_size();
             let dim: usize = component.schema.dim.iter().product();
+
+            // Validate element_index is within bounds
+            if element_index >= dim {
+                // Invalid element_index - send empty result rather than reading wrong data
+                tracing::warn!(
+                    component_id = ?component_id,
+                    element_index = element_index,
+                    dim = dim,
+                    "PlotOverviewQuery element_index out of bounds"
+                );
+                tx.send_time_series(request_id, &[], &[]).await?;
+                return Ok(());
+            }
+
             let scalar_size = element_size / dim.max(1);
             let element_offset = element_index * scalar_size;
 
