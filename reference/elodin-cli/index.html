@@ -395,7 +395,7 @@
             <ul>
                 
                 <li>
-                    <a href="/reference/elodin-cli/#command-line-help-for-elodin">Command-Line Help for elodin</a>
+                    <a href="/reference/elodin-cli/#command-line-help">Command-Line Help</a>
                     
                     <ul>
                         
@@ -442,14 +442,18 @@
                             
                         </li>
                         
-                    </ul>
-                    
-                </li>
-                
-                <li>
-                    <a href="/reference/elodin-cli/#command-line-help-for-elodin-db">Command-Line Help for elodin-db</a>
-                    
-                    <ul>
+                        <li>
+                            <a href="/reference/elodin-cli/#elodin-db">elodin-db</a>
+                            
+                            <ul>
+                                
+                                <li>
+                                    <a href="/reference/elodin-cli/#subcommands-1">Subcommands</a>
+                                </li>
+                                
+                            </ul>
+                            
+                        </li>
                         
                         <li>
                             <a href="/reference/elodin-cli/#elodin-db-run">elodin-db run</a>
@@ -664,6 +668,23 @@
                             
                         </li>
                         
+                        <li>
+                            <a href="/reference/elodin-cli/#elodin-db-info">elodin-db info</a>
+                            
+                            <ul>
+                                
+                                <li>
+                                    <a href="/reference/elodin-cli/#arguments-10">Arguments</a>
+                                </li>
+                                
+                                <li>
+                                    <a href="/reference/elodin-cli/#example-6">Example</a>
+                                </li>
+                                
+                            </ul>
+                            
+                        </li>
+                        
                     </ul>
                     
                 </li>
@@ -675,14 +696,26 @@
  
               <main class="docs-content col-lg-11 col-xxl-10">
                   <h1>Elodin CLI</h1>
-                   <h1 id="command-line-help-for-elodin">Command-Line Help for <code>elodin</code></h1>
-<p>This document contains the help content for the <code>elodin</code> command-line program.</p>
+                   <h1 id="command-line-help">Command-Line Help</h1>
+<p>This document contains the help content for the Elodin command-line programs.</p>
 <p><strong>Command Overview:</strong></p>
 <ul>
 <li><a href="/reference/elodin-cli/#elodin"><code>elodin</code>↴</a></li>
 <li><a href="/reference/elodin-cli/#elodin-editor"><code>elodin editor</code>↴</a></li>
 <li><a href="/reference/elodin-cli/#elodin-run"><code>elodin run</code>↴</a></li>
+<li><a href="/reference/elodin-cli/#elodin-db"><code>elodin-db</code>↴</a></li>
+<li><a href="/reference/elodin-cli/#elodin-db-run"><code>elodin-db run</code>↴</a></li>
+<li><a href="/reference/elodin-cli/#elodin-db-lua"><code>elodin-db lua</code>↴</a></li>
+<li><a href="/reference/elodin-cli/#elodin-db-gen-cpp"><code>elodin-db gen-cpp</code>↴</a></li>
+<li><a href="/reference/elodin-cli/#elodin-db-fix-timestamps"><code>elodin-db fix-timestamps</code>↴</a></li>
+<li><a href="/reference/elodin-cli/#elodin-db-merge"><code>elodin-db merge</code>↴</a></li>
+<li><a href="/reference/elodin-cli/#elodin-db-prune"><code>elodin-db prune</code>↴</a></li>
+<li><a href="/reference/elodin-cli/#elodin-db-truncate"><code>elodin-db truncate</code>↴</a></li>
+<li><a href="/reference/elodin-cli/#elodin-db-time-align"><code>elodin-db time-align</code>↴</a></li>
+<li><a href="/reference/elodin-cli/#elodin-db-drop"><code>elodin-db drop</code>↴</a></li>
+<li><a href="/reference/elodin-cli/#elodin-db-info"><code>elodin-db info</code>↴</a></li>
 </ul>
+<hr />
 <h2 id="elodin"><code>elodin</code></h2>
 <p><strong>Usage:</strong> <code>elodin [OPTIONS] [COMMAND]</code></p>
 <h6 id="subcommands"><strong>Subcommands</strong></h6>
@@ -702,35 +735,43 @@
 <p><strong>Usage:</strong> <code>elodin editor [addr/path]</code></p>
 <h6 id="arguments"><strong>Arguments</strong></h6>
 <ul>
-<li>
-<p><code>&lt;addr/path&gt;</code> — Address of a running database server (e.g., <code>localhost:2240</code>) or path to a simulation script</p>
-<p>Default value: ``</p>
+<li><code>&lt;addr/path&gt;</code> — Optional connection target or simulation to run. Can be:
+<ul>
+<li>A socket address (e.g., <code>127.0.0.1:2240</code>) to connect to a running Elodin DB</li>
+<li>A Python file (e.g., <code>main.py</code>) to run a simulation</li>
+<li>A TOML file (e.g., <code>s10.toml</code>) to run from a plan</li>
+<li>A directory containing <code>main.py</code> or <code>s10.toml</code></li>
+</ul>
 </li>
 </ul>
 <h2 id="elodin-run"><code>elodin run</code></h2>
-<p>Run an Elodin simulation in headless mode</p>
+<p>Run an Elodin simulation in headless mode (not available on Windows)</p>
 <p><strong>Usage:</strong> <code>elodin run [addr/path]</code></p>
 <h6 id="arguments-1"><strong>Arguments</strong></h6>
 <ul>
-<li>
-<p><code>&lt;addr/path&gt;</code> — Path to a simulation script to run</p>
-<p>Default value: ``</p>
+<li><code>&lt;addr/path&gt;</code> — Simulation to run. Can be:
+<ul>
+<li>A Python file (e.g., <code>main.py</code>)</li>
+<li>A TOML file (e.g., <code>s10.toml</code>)</li>
+<li>A directory containing <code>main.py</code> or <code>s10.toml</code></li>
+</ul>
 </li>
 </ul>
 <hr />
-<h1 id="command-line-help-for-elodin-db">Command-Line Help for <code>elodin-db</code></h1>
-<p>This document contains the help content for the <code>elodin-db</code> command-line program, which provides the Elodin telemetry database server and utilities for managing database files.</p>
-<p><strong>Command Overview:</strong></p>
+<h2 id="elodin-db"><code>elodin-db</code></h2>
+<p><strong>Usage:</strong> <code>elodin-db &lt;COMMAND&gt;</code></p>
+<h6 id="subcommands-1"><strong>Subcommands</strong></h6>
 <ul>
-<li><a href="/reference/elodin-cli/#elodin-db-run"><code>elodin-db run</code>↴</a></li>
-<li><a href="/reference/elodin-cli/#elodin-db-lua"><code>elodin-db lua</code>↴</a></li>
-<li><a href="/reference/elodin-cli/#elodin-db-gen-cpp"><code>elodin-db gen-cpp</code>↴</a></li>
-<li><a href="/reference/elodin-cli/#elodin-db-fix-timestamps"><code>elodin-db fix-timestamps</code>↴</a></li>
-<li><a href="/reference/elodin-cli/#elodin-db-merge"><code>elodin-db merge</code>↴</a></li>
-<li><a href="/reference/elodin-cli/#elodin-db-prune"><code>elodin-db prune</code>↴</a></li>
-<li><a href="/reference/elodin-cli/#elodin-db-truncate"><code>elodin-db truncate</code>↴</a></li>
-<li><a href="/reference/elodin-cli/#elodin-db-time-align"><code>elodin-db time-align</code>↴</a></li>
-<li><a href="/reference/elodin-cli/#elodin-db-drop"><code>elodin-db drop</code>↴</a></li>
+<li><code>run</code> — Run the Elodin database server</li>
+<li><code>lua</code> — Run a Lua script or launch a REPL</li>
+<li><code>gen-cpp</code> — Generate C++ header files</li>
+<li><code>fix-timestamps</code> — Fix monotonic timestamps in a database</li>
+<li><code>merge</code> — Merge two databases into one with optional prefixes</li>
+<li><code>prune</code> — Remove empty components from a database</li>
+<li><code>truncate</code> — Clear all data from a database, preserving schemas</li>
+<li><code>time-align</code> — Align component timestamps to a target timestamp</li>
+<li><code>drop</code> — Drop (delete) components from a database</li>
+<li><code>info</code> — Display information about a database</li>
 </ul>
 <h2 id="elodin-db-run"><code>elodin-db run</code></h2>
 <p>Run the Elodin database server</p>
@@ -1089,6 +1130,20 @@
 </span><span class="z-source z-shell z-bash">
 </span><span class="z-source z-shell z-bash"><span class="z-comment z-line z-number-sign z-shell"><span class="z-punctuation z-definition z-comment z-begin z-shell">#</span></span><span class="z-comment z-line z-number-sign z-shell"> Drop all components (dangerous!)</span><span class="z-comment z-line z-number-sign z-shell">
 </span></span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">elodin-db</span></span><span class="z-meta z-function-call z-arguments z-shell"> drop<span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> --</span>all</span><span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> -</span>y</span> ./my-database</span>
+</span></code></pre>
+<h2 id="elodin-db-info"><code>elodin-db info</code></h2>
+<p>Display information about a database, including recording state, time step configuration, and metadata.</p>
+<p><strong>Usage:</strong> <code>elodin-db info [PATH]</code></p>
+<h6 id="arguments-10"><strong>Arguments</strong></h6>
+<ul>
+<li><code>&lt;PATH&gt;</code> — Path to the database directory. If not provided, uses the standard location (<code>~/.local/share/elodin/db/data</code>).</li>
+</ul>
+<h6 id="example-6"><strong>Example</strong></h6>
+<pre data-lang="bash" class="language-bash z-code"><code class="language-bash" data-lang="bash"><span class="z-source z-shell z-bash"><span class="z-comment z-line z-number-sign z-shell"><span class="z-punctuation z-definition z-comment z-begin z-shell">#</span></span><span class="z-comment z-line z-number-sign z-shell"> Display info for the default database</span><span class="z-comment z-line z-number-sign z-shell">
+</span></span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">elodin-db</span></span><span class="z-meta z-function-call z-arguments z-shell"> info</span>
+</span><span class="z-source z-shell z-bash">
+</span><span class="z-source z-shell z-bash"><span class="z-comment z-line z-number-sign z-shell"><span class="z-punctuation z-definition z-comment z-begin z-shell">#</span></span><span class="z-comment z-line z-number-sign z-shell"> Display info for a specific database</span><span class="z-comment z-line z-number-sign z-shell">
+</span></span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">elodin-db</span></span><span class="z-meta z-function-call z-arguments z-shell"> info ./my-database</span>
 </span></code></pre>
 
                   
