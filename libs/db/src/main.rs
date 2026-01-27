@@ -41,6 +41,8 @@ enum Commands {
     TimeAlign(TimeAlignArgs),
     #[command(about = "Drop (delete) components from a database")]
     Drop(DropArgs),
+    #[command(about = "Display information about a database")]
+    Info(InfoArgs),
 }
 
 #[derive(clap::Args, Clone, Debug)]
@@ -168,6 +170,12 @@ pub struct MergeArgs {
         help = "Alignment timestamp (seconds) for the same event in DB2. DB2 is shifted to align with DB1."
     )]
     pub align2: Option<f64>,
+}
+
+#[derive(clap::Args, Clone, Debug)]
+struct InfoArgs {
+    #[clap(help = "Path to the database directory (defaults to standard location)")]
+    path: Option<PathBuf>,
 }
 
 #[derive(ValueEnum, Clone, Copy, Debug)]
@@ -369,6 +377,96 @@ async fn main() -> miette::Result<()> {
             };
 
             elodin_db::drop::run(path, match_mode, dry_run, yes).into_diagnostic()
+        }
+        Commands::Info(args) => run_info(args),
+    }
+}
+
+fn run_info(args: InfoArgs) -> miette::Result<()> {
+    use impeller2_wkt::DbConfig;
+
+    let db_state_path = match args.path {
+        Some(path) => {
+            let state_path = path.join("db_state");
+            if state_path.exists() {
+                state_path
+            } else if path.is_dir() {
+                return Err(miette::miette!(
+                    "db_state not found in directory: {}",
+                    path.display()
+                ));
+            } else {
+                path
+            }
+        }
+        None => {
+            let dirs = directories::ProjectDirs::from("systems", "elodin", "db").expect("no dirs");
+            dirs.data_dir().join("data").join("db_state")
+        }
+    };
+
+    if !db_state_path.exists() {
+        return Err(miette::miette!(
+            "db_state not found: {}",
+            db_state_path.display()
+        ));
+    }
+
+    let bytes = std::fs::read(&db_state_path)
+        .map_err(|e| miette::miette!("failed to read {}: {e}", db_state_path.display()))?;
+    let config: DbConfig =
+        postcard::from_bytes(&bytes).map_err(|e| miette::miette!("decode error: {e}"))?;
+
+    println!("db_state: {}", db_state_path.display());
+
+    // Display version information prominently
+    if let Some(version) = config.version_created() {
+        println!("version_created: {}", version);
+    }
+    if let Some(version) = config.version_last_opened() {
+        println!("version_last_opened: {}", version);
+    }
+
+    println!("recording: {}", config.recording);
+    println!(
+        "default_stream_time_step: {}",
+        format_duration(config.default_stream_time_step)
+    );
+
+    print_metadata(&config);
+
+    Ok(())
+}
+
+fn format_duration(duration: std::time::Duration) -> String {
+    let nanos = duration.as_nanos();
+    if nanos >= 1_000_000_000 {
+        format!("{} s", nanos / 1_000_000_000)
+    } else if nanos >= 1_000_000 {
+        format!("{} ms", nanos / 1_000_000)
+    } else if nanos >= 1_000 {
+        format!("{} us", nanos / 1_000)
+    } else {
+        format!("{} ns", nanos)
+    }
+}
+
+fn print_metadata(config: &impeller2_wkt::DbConfig) {
+    let meta = &config.metadata;
+
+    // Filter out version keys (displayed separately) and collect remaining metadata
+    let mut keys: Vec<&String> = meta.keys().filter(|k| !k.starts_with("version.")).collect();
+    keys.sort();
+
+    if keys.is_empty() {
+        println!("metadata: <empty>");
+        return;
+    }
+
+    println!("metadata:");
+    for key in keys {
+        if let Some(value) = meta.get(key) {
+            println!("  {key}: {value}");
         }
     }
 }

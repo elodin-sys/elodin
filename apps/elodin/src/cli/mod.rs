@@ -21,7 +21,7 @@ pub struct Cli {
 enum Commands {
     /// Launch the Elodin editor (default)
     Editor(editor::Args),
-    /// Run an Elodin simulaton in headless mode
+    /// Run an Elodin simulation in headless mode
     #[cfg(not(target_os = "windows"))]
     Run(editor::Args),
 }
