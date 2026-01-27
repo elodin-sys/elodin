@@ -174,6 +174,14 @@ in {
           libGL
         ])}:''${LD_LIBRARY_PATH}"
           ;;
+          Darwin*)
+            # Set macOS SDK path for any tools that need it
+            if [ -d "/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk" ]; then
+              export SDKROOT="/Library/Developer/CommandLineTools/SDKs/MacOSX.sdk"
+            elif [ -d "/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk" ]; then
+              export SDKROOT="/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk"
+            fi
+          ;;
         esac
 
         # Ensure Nix gfortran is in PATH before system Fortran

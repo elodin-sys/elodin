@@ -250,11 +250,45 @@ impl IREEWorldExec {
     pub fn run(&mut self, py: Python<'_>) -> Result<(), Error> {
         use std::time::Instant;
         
+        let debug_iree = std::env::var("ELODIN_DEBUG_IREE").is_ok();
+        let tick = self.world.tick();
+        
         let start = &mut Instant::now();
+        
+        // Debug: print metadata on first tick
+        if debug_iree && tick == 0 {
+            eprintln!("\n=== IREE EXEC METADATA ===");
+            eprintln!("  arg_ids ({}):", self.tick_exec.metadata.arg_ids.len());
+            for (idx, id) in self.tick_exec.metadata.arg_ids.iter().enumerate() {
+                // Try to get component name from world
+                let name = self.world.column_by_id(*id)
+                    .map(|c| format!("{:?}", c.schema))
+                    .unwrap_or_else(|| "MISSING".to_string());
+                eprintln!("    [{}] {:?} - {}", idx, id, name);
+            }
+            eprintln!("  ret_ids ({}):", self.tick_exec.metadata.ret_ids.len());
+            for (idx, id) in self.tick_exec.metadata.ret_ids.iter().enumerate() {
+                let name = self.world.column_by_id(*id)
+                    .map(|c| format!("{:?}", c.schema))
+                    .unwrap_or_else(|| "MISSING".to_string());
+                eprintln!("    [{}] {:?} - {}", idx, id, name);
+            }
+        }
         
         // Collect inputs from world
         let inputs = self.collect_inputs(py)?;
         self.profiler.copy_to_client.observe(start);
+        
+        // Debug: print inputs on first few ticks
+        if debug_iree && tick < 3 {
+            eprintln!("\n=== TICK {} INPUTS ({} arrays) ===", tick, inputs.len());
+            for (idx, id) in self.tick_exec.metadata.arg_ids.iter().enumerate() {
+                if idx < inputs.len() {
+                    let arr_repr: String = inputs[idx].bind(py).repr()?.extract()?;
+                    eprintln!("  input[{}] ({:?}): {}", idx, id, arr_repr);
+                }
+            }
+        }
         
         // Run startup exec if present (only on first tick)
         if let Some(ref mut startup_exec) = self.startup_exec.take() {
@@ -265,6 +299,17 @@ impl IREEWorldExec {
         // Run tick exec
         let outputs = self.tick_exec.run(py, &inputs, &self.device)?;
         self.profiler.execute_buffers.observe(start);
+        
+        // Debug: print outputs on first few ticks
+        if debug_iree && tick < 3 {
+            eprintln!("\n=== TICK {} OUTPUTS ===", tick);
+            for (idx, id) in self.tick_exec.metadata.ret_ids.iter().enumerate() {
+                if idx < outputs.len() {
+                    let arr_repr: String = outputs[idx].bind(py).repr()?.extract()?;
+                    eprintln!("  output[{}] ({:?}): {}", idx, id, arr_repr);
+                }
+            }
+        }
         
         // Apply outputs back to world
         self.apply_outputs(py, &outputs)?;

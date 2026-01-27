@@ -213,7 +213,10 @@ def export_and_compile(func, args, backend="llvm-cpu"):
     jax.config.update("jax_enable_x64", True)
     
     # Wrap the function in jax.jit first (required by jax.export)
-    jit_fn = jax.jit(func)
+    # IMPORTANT: keep_unused=True prevents JAX from optimizing away unused inputs
+    # This is critical because our simulation may have inputs that only matter
+    # after they're updated (e.g., world_vel starts at 0 but must be read to update)
+    jit_fn = jax.jit(func, keep_unused=True)
     
     # Get input shapes for export
     input_shapes = [jax.ShapeDtypeStruct(a.shape, a.dtype) for a in args]
@@ -227,14 +230,44 @@ def export_and_compile(func, args, backend="llvm-cpu"):
     # Important: Use extra_args to enable f64 support and prevent demotion to f32
     from iree.compiler import compile_str
     from iree import runtime as rt
-    vmfb = compile_str(
-        stablehlo_mlir, 
-        target_backends=[backend],
-        extra_args=[
-            "--iree-vm-target-extension-f64",
-            "--iree-input-demote-f64-to-f32=false"
-        ]
-    )
+    import sys
+    import os
+    
+    # Build IREE compiler args for f64 support
+    iree_args = [
+        "--iree-vm-target-extension-f64",
+        "--iree-input-demote-f64-to-f32=false",
+    ]
+    
+    # Use embedded ELF (default, portable) - no platform-specific linking needed
+    # This is IREE's recommended approach per documentation
+    # Note: If compilation fails with "undefined symbol: log" etc., the model
+    # uses math functions that require system linking. In that case, use vmvx
+    # backend as fallback or build IREE from source with proper macOS config.
+    
+    # First try with llvm-cpu embedded ELF (default, fastest)
+    try:
+        vmfb = compile_str(
+            stablehlo_mlir, 
+            target_backends=[backend],
+            extra_args=iree_args
+        )
+    except Exception as e:
+        error_msg = str(e)
+        # Check if this is a linking error that requires system libraries
+        if "undefined symbol" in error_msg and any(sym in error_msg for sym in ["log", "exp", "pow", "sin", "cos"]):
+            # Math function missing - try vmvx backend as fallback
+            print(f"IREE: Embedded ELF missing math symbols, falling back to vmvx backend (slower)")
+            vmfb = compile_str(
+                stablehlo_mlir,
+                target_backends=["vmvx"],
+                extra_args=iree_args
+            )
+            # Update backend for runtime
+            backend = "vmvx"
+        else:
+            # Re-raise other errors
+            raise
     
     # Load the module temporarily to inspect the function signature
     # IREE may optimize away unused inputs, so we need to check the actual signature
