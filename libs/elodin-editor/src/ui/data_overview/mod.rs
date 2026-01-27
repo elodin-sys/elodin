@@ -798,27 +798,27 @@ impl WidgetSystem for DataOverviewWidget<'_, '_> {
                     let start_offset = (start_ts.0 - display_start.0) as f64;
                     let end_offset = (end_ts.0 - display_start.0) as f64;
 
-                        let start_x = timeline_start_x + (start_offset * pixels_per_us) as f32;
-                        let end_x = timeline_start_x + (end_offset * pixels_per_us) as f32;
+                    let start_x = timeline_start_x + (start_offset * pixels_per_us) as f32;
+                    let end_x = timeline_start_x + (end_offset * pixels_per_us) as f32;
 
-                        // Clip to the visible timeline area
-                        let clipped_start_x = start_x.max(timeline_start_x);
-                        let clipped_end_x = end_x.min(timeline_end_x);
+                    // Clip to the visible timeline area
+                    let clipped_start_x = start_x.max(timeline_start_x);
+                    let clipped_end_x = end_x.min(timeline_end_x);
 
-                        // Only draw if there's a visible portion
-                        if clipped_end_x > clipped_start_x {
-                            let min_width = 2.0;
-                            let bar_width = (clipped_end_x - clipped_start_x).max(min_width);
+                    // Only draw if there's a visible portion
+                    if clipped_end_x > clipped_start_x {
+                        let min_width = 2.0;
+                        let bar_width = (clipped_end_x - clipped_start_x).max(min_width);
 
-                            let bar_rect = Rect::from_min_max(
-                                Pos2::new(clipped_start_x, row_rect.min.y + 3.0),
-                                Pos2::new(clipped_start_x + bar_width, row_rect.max.y - 3.0),
-                            );
+                        let bar_rect = Rect::from_min_max(
+                            Pos2::new(clipped_start_x, row_rect.min.y + 3.0),
+                            Pos2::new(clipped_start_x + bar_width, row_rect.max.y - 3.0),
+                        );
 
-                            ui.painter().rect_filled(bar_rect, 2.0, summary.color);
-                        }
+                        ui.painter().rect_filled(bar_rect, 2.0, summary.color);
                     }
                 }
+            }
         });
 
         // Draw vertical separator between labels and timeline
@@ -1234,5 +1234,5 @@ pub fn trigger_time_range_queries(
     time_ranges.total_queries = table_names.len();
     time_ranges.completed_queries = 0;
     time_ranges.current_batch = 0;
-    time_ranges.tables_to_query = table_names.into_iter().map(|(_a,b)| b).collect();
+    time_ranges.tables_to_query = table_names.into_iter().map(|(_a, b)| b).collect();
 }
