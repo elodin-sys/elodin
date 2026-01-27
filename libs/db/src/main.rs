@@ -418,6 +418,15 @@ fn run_info(args: InfoArgs) -> miette::Result<()> {
         postcard::from_bytes(&bytes).map_err(|e| miette::miette!("decode error: {e}"))?;
 
     println!("db_state: {}", db_state_path.display());
+
+    // Display version information prominently
+    if let Some(version) = config.version_created() {
+        println!("version_created: {}", version);
+    }
+    if let Some(version) = config.version_last_opened() {
+        println!("version_last_opened: {}", version);
+    }
+
     println!("recording: {}", config.recording);
     println!(
         "default_stream_time_step: {}",
@@ -444,16 +453,20 @@ fn format_duration(duration: std::time::Duration) -> String {
 
 fn print_metadata(config: &impeller2_wkt::DbConfig) {
     let meta = &config.metadata;
-    if meta.is_empty() {
+
+    // Filter out version keys (displayed separately) and collect remaining metadata
+    let mut keys: Vec<&String> = meta.keys().filter(|k| !k.starts_with("version.")).collect();
+    keys.sort();
+
+    if keys.is_empty() {
         println!("metadata: <empty>");
         return;
     }
 
-    let mut keys: Vec<&String> = meta.keys().collect();
-    keys.sort();
+    println!("metadata:");
     for key in keys {
         if let Some(value) = meta.get(key) {
-            println!("{key}: {value}");
+            println!("  {key}: {value}");
         }
     }
 }

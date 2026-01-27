@@ -361,6 +361,8 @@ impl DB {
             ..Default::default()
         };
         db_config.set_time_start_timestamp_micros(now.0);
+        db_config.set_version_created(env!("CARGO_PKG_VERSION"));
+        db_config.set_version_last_opened(env!("CARGO_PKG_VERSION"));
         let state = State {
             db_config,
             ..Default::default()
@@ -609,7 +611,9 @@ impl DB {
         }
 
         info!(db.path = ?path, "opened db");
-        let db_state = DbConfig::read(db_state_path)?;
+        let mut db_state = DbConfig::read(db_state_path)?;
+        // Update the version that last opened this database
+        db_state.set_version_last_opened(env!("CARGO_PKG_VERSION"));
         let now = Timestamp::now();
         let state = State {
             components,
@@ -628,7 +632,7 @@ impl DB {
                     Timestamp(start_timestamp)
                 }
             });
-        Ok(DB {
+        let db = DB {
             state: RwLock::new(state),
             snapshot_barrier: SnapshotBarrier::new(),
             path,
@@ -640,7 +644,10 @@ impl DB {
             last_updated: AtomicCell::new(Timestamp(last_updated)),
             earliest_timestamp: AtomicCell::new(earliest_timestamp),
             db_start_wall_clock: AtomicCell::new(now),
-        })
+        };
+        // Save updated version info
+        db.save_db_state()?;
+        Ok(db)
     }
 
     pub fn insert_vtable(&self, vtable: VTableMsg) -> Result<(), Error> {

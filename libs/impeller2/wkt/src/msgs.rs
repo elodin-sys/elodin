@@ -270,6 +270,34 @@ pub struct DbConfig {
 
 impl DbConfig {
     const TIME_START_TIMESTAMP_KEY: &'static str = "time.start_timestamp";
+    const VERSION_CREATED_KEY: &'static str = "version.created";
+    const VERSION_LAST_OPENED_KEY: &'static str = "version.last_opened";
+
+    /// Set the version that created this database
+    pub fn set_version_created(&mut self, version: impl Into<String>) {
+        self.metadata
+            .insert(Self::VERSION_CREATED_KEY.to_string(), version.into());
+    }
+
+    /// Get the version that created this database
+    pub fn version_created(&self) -> Option<&str> {
+        self.metadata
+            .get(Self::VERSION_CREATED_KEY)
+            .map(String::as_str)
+    }
+
+    /// Set the version that last opened this database
+    pub fn set_version_last_opened(&mut self, version: impl Into<String>) {
+        self.metadata
+            .insert(Self::VERSION_LAST_OPENED_KEY.to_string(), version.into());
+    }
+
+    /// Get the version that last opened this database
+    pub fn version_last_opened(&self) -> Option<&str> {
+        self.metadata
+            .get(Self::VERSION_LAST_OPENED_KEY)
+            .map(String::as_str)
+    }
 
     pub fn set_schematic_path(&mut self, path: String) {
         self.metadata.insert("schematic.path".to_string(), path);
