@@ -113,31 +113,31 @@ class Query(Generic[Unpack[A]]):
                 in_axes=0,
                 out_axes=0,
             )(self.bufs)
+            (bufs, _) = tree_flatten(buf)
         else:
             batch_size = self.bufs[0].shape[0] if len(self.bufs) > 0 else 0
-            # For single entity or use_vmap, call function directly without
-            # vmap. This preserves jax.lax.cond semantics: only one branch
-            # executes.
+            # For single entity or use_vmap=False, call function directly
+            # without vmap. This preserves jax.lax.cond semantics: only one
+            # branch executes.
             def call_single(idx):
                 args = [from_array(cls, b[idx]) for (b, cls) in zip(self.bufs, self.component_classes)]
                 return f(*args)
             
             if batch_size == 0:
-                buf = ()
+                bufs = []
             elif batch_size == 1:
                 result = call_single(0)
-                # Wrap result in batch dimension.
-                buf, _ = tree_flatten(result)
-                buf = tuple(jax.numpy.expand_dims(b, axis=0) for b in buf)
-                buf = tree_unflatten(_, buf)
+                # Flatten and wrap each leaf in batch dimension.
+                flat, _ = tree_flatten(result)
+                bufs = [jax.numpy.expand_dims(b, axis=0) for b in flat]
             else:
                 # Multiple entities without vmap: use sequential loop.
                 results = [call_single(i) for i in range(batch_size)]
-                # Stack results.
-                first_flat, tree_def = tree_flatten(results[0])
-                stacked = [jax.numpy.stack([tree_flatten(r)[0][j] for r in results]) for j in range(len(first_flat))]
-                buf = tree_unflatten(tree_def, stacked)
-        (bufs, _) = tree_flatten(buf)
+                # Flatten first result to get structure, then stack
+                # corresponding elements from all results.
+                first_flat, _ = tree_flatten(results[0])
+                all_flat = [tree_flatten(r)[0] for r in results]
+                bufs = [jax.numpy.stack([af[j] for af in all_flat]) for j in range(len(first_flat))]
         inner = None
         component_data = []
         component_classes = []
