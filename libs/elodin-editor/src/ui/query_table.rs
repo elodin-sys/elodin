@@ -11,7 +11,9 @@ use bevy::{
 use egui::RichText;
 use impeller2::types::Timestamp;
 use impeller2_bevy::CommandsExt;
-use impeller2_wkt::{ArrowIPC, EarliestTimestamp, ErrorResponse, LastUpdated, QueryTable, QueryType, SQLQuery};
+use impeller2_wkt::{
+    ArrowIPC, EarliestTimestamp, ErrorResponse, LastUpdated, QueryTable, QueryType, SQLQuery,
+};
 
 use crate::{EqlContext, SelectedTimeRange};
 
