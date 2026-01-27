@@ -239,6 +239,28 @@ def map(
     return inner
 
 
+def map_seq(
+    func: Callable[..., Union[Tuple[Annotated[Any, Component], ...], Annotated[Any, Component]]],
+) -> System:
+    """Like @map but uses sequential execution instead of vmap.
+
+    This preserves jax.lax.cond semantics (only one branch executes).
+    Use when one branch of a conditional is expensive and rarely needed.
+    """
+    sig = inspect.signature(func)
+    tys = list(sig.parameters.values())
+    query = Query[tuple(ty.annotation for ty in tys)]  # type: ignore
+    return_ty = sig.return_annotation
+    if isinstance(return_ty, types.GenericAlias):
+        return_ty = tuple(return_ty.__args__)
+
+    @system
+    def inner(q: query) -> Query[return_ty]:  # type: ignore
+        return q.map_seq(return_ty, func)
+
+    return inner
+
+
 def from_array(cls, arr):
     if hasattr(cls, "__origin__"):
         cls = cls.__origin__
