@@ -1,4 +1,5 @@
 use super::*;
+use crate::{ArrayElement, NativeType};
 
 /// Backend implementation for local computation on arrays.
 pub struct ArrayRepr;
@@ -123,7 +124,7 @@ impl OwnedRepr for ArrayRepr {
         arg.broadcast_with_shape(dim)
     }
 
-    fn scalar_from_const<T1: Field>(value: T1) -> Self::Inner<T1, ()> {
+    fn scalar_from_const<T1: Field + NativeType + ArrayElement>(value: T1) -> Self::Inner<T1, ()> {
         Array { buf: value }
     }
 

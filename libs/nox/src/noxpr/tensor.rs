@@ -1,19 +1,18 @@
 use crate::array::prelude::*;
 use crate::{
-    AddDim, ArrayTy, ConcatDims, Const, ConstDim, DefaultMap, Dim, DimConcat, Field, MappedDim,
-    NonScalarDim, Noxpr, Op, ReplaceDim, ReplaceMappedDim, ReprMonad, Scalar, Tensor, TensorItem,
-    Vector,
+    AddDim, ArrayElement, ArrayTy, ConcatDims, Const, ConstDim, DefaultMap, Dim, DimConcat, Field,
+    MappedDim, NativeType, NonScalarDim, Noxpr, Op, ReplaceDim, ReplaceMappedDim, ReprMonad,
+    Scalar, Tensor, TensorItem, Vector,
 };
 use core::marker::PhantomData;
 use smallvec::{SmallVec, smallvec};
-use xla::{ArrayElement, NativeType};
 
 impl<T: Field + ArrayElement + NativeType, D: Dim> From<Array<T, D>> for Tensor<T, D, Op> {
     fn from(arr: Array<T, D>) -> Self {
         let shape = D::array_shape(&arr.buf);
         let shape: SmallVec<[i64; 4]> = shape.as_ref().iter().map(|&x| x as i64).collect();
         let lit = T::create_r1(arr.buf.as_buf())
-            .reshape(&shape)
+            .reshape(shape.clone())
             .expect("reshape failed");
         let inner = Noxpr::constant(
             lit,
@@ -34,6 +33,25 @@ impl<T: Field + ArrayElement + NativeType, D: Dim> From<Tensor<T, D, ArrayRepr>>
 {
     fn from(value: Tensor<T, D, ArrayRepr>) -> Self {
         value.inner.into()
+    }
+}
+
+/// Direct conversion from a scalar value to a Tensor<T, (), Op>.
+/// This allows `0u64.into()` to work for Op tensors.
+impl<T: Field + ArrayElement + NativeType> From<T> for Tensor<T, (), Op> {
+    fn from(val: T) -> Self {
+        let lit = T::literal(val);
+        let inner = Noxpr::constant(
+            lit,
+            ArrayTy {
+                element_type: T::TY,
+                shape: smallvec![],
+            },
+        );
+        Tensor {
+            inner,
+            phantom: PhantomData,
+        }
     }
 }
 

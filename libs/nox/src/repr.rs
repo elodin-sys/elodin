@@ -3,8 +3,8 @@ use core::ops::{Add, Div, Mul, Neg, Sub};
 
 use crate::array::prelude::*;
 use crate::{
-    AddDim, BroadcastDim, BroadcastedDim, ConstDim, DefaultMap, DefaultMappedDim, Dim, DotDim,
-    Elem, Error, Field, RealField, ReplaceDim, ShapeConstraint,
+    AddDim, ArrayElement, BroadcastDim, BroadcastedDim, ConstDim, DefaultMap, DefaultMappedDim,
+    Dim, DotDim, Elem, Error, Field, NativeType, RealField, ReplaceDim, ShapeConstraint,
 };
 
 pub trait Repr {
@@ -123,7 +123,7 @@ pub trait OwnedRepr: Repr {
         ShapeConstraint: BroadcastDim<D1, D2>,
         <ShapeConstraint as BroadcastDim<D1, D2>>::Output: Dim;
 
-    fn scalar_from_const<T1: Field>(value: T1) -> Self::Inner<T1, ()>;
+    fn scalar_from_const<T1: Field + NativeType + ArrayElement>(value: T1) -> Self::Inner<T1, ()>;
 
     fn neg<T1, D1: Dim>(arg: &Self::Inner<T1, D1>) -> Self::Inner<T1, D1>
     where
@@ -172,9 +172,9 @@ pub trait OwnedRepr: Repr {
     where
         ShapeConstraint: TransposeDim<D1>;
 
-    fn eye<T1: Field, D1: Dim + SquareDim + ConstDim>() -> Self::Inner<T1, D1>;
+    fn eye<T1: Field + ArrayElement, D1: Dim + SquareDim + ConstDim>() -> Self::Inner<T1, D1>;
 
-    fn from_diag<T1: Field, D1: Dim + SquareDim>(
+    fn from_diag<T1: Field + ArrayElement, D1: Dim + SquareDim>(
         diag: Self::Inner<T1, D1::SideDim>,
     ) -> Self::Inner<T1, D1>;
 
@@ -203,7 +203,7 @@ pub trait OwnedRepr: Repr {
     ) -> Self::Inner<T2, D1::MappedDim<D2>>
     where
         D1::MappedDim<D2>: Dim,
-        T1: Field,
+        T1: Field + ArrayElement,
         D1: Dim + MappableDim,
         T2: Elem + 'static,
         D2: Dim;

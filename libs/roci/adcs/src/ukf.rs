@@ -176,7 +176,10 @@ impl UncheckedMerweConfig {
         ))
     }
 
-    pub fn mean_weights<S: Dim, R: OwnedRepr>(&self) -> Tensor<f64, S, R> {
+    pub fn mean_weights<S: Dim, R: OwnedRepr>(&self) -> Tensor<f64, S, R>
+    where
+        Scalar<f64, R>: From<f64>,
+    {
         let s = 2 * self.n + 1;
         let n = self.n as f64;
         let lambda = self.lambda;
@@ -188,7 +191,10 @@ impl UncheckedMerweConfig {
         )
     }
 
-    pub fn covariance_weights<S: Dim, R: OwnedRepr>(&self) -> Tensor<f64, S, R> {
+    pub fn covariance_weights<S: Dim, R: OwnedRepr>(&self) -> Tensor<f64, S, R>
+    where
+        Scalar<f64, R>: From<f64>,
+    {
         let Self {
             lambda,
             alpha,
@@ -207,7 +213,10 @@ impl UncheckedMerweConfig {
     }
 
     /// Calculated the shared weight used by both the covariance and mean weights
-    pub fn shared_weight<R: OwnedRepr>(&self) -> Scalar<f64, R> {
+    pub fn shared_weight<R: OwnedRepr>(&self) -> Scalar<f64, R>
+    where
+        Scalar<f64, R>: From<f64>,
+    {
         let lambda = self.lambda;
         let n = self.n as f64;
         let w = 1.0 / (2.0 * (n + lambda));
@@ -231,16 +240,25 @@ impl<const N: usize> MerweConfig<N> {
         self.unchecked_config.sigma_points(x, sigma)
     }
 
-    pub fn mean_weights<const S: usize, R: OwnedRepr>(&self) -> Vector<f64, S, R> {
+    pub fn mean_weights<const S: usize, R: OwnedRepr>(&self) -> Vector<f64, S, R>
+    where
+        Scalar<f64, R>: From<f64>,
+    {
         self.unchecked_config.mean_weights()
     }
 
-    pub fn covariance_weights<const S: usize, R: OwnedRepr>(&self) -> Vector<f64, S, R> {
+    pub fn covariance_weights<const S: usize, R: OwnedRepr>(&self) -> Vector<f64, S, R>
+    where
+        Scalar<f64, R>: From<f64>,
+    {
         self.unchecked_config.covariance_weights()
     }
 
     /// Calculated the shared weight used by both the covariance and mean weights
-    pub fn shared_weight<R: OwnedRepr>(&self) -> Scalar<f64, R> {
+    pub fn shared_weight<R: OwnedRepr>(&self) -> Scalar<f64, R>
+    where
+        Scalar<f64, R>: From<f64>,
+    {
         self.unchecked_config.shared_weight()
     }
 }
@@ -284,6 +302,7 @@ where
         (Z, S): Dim,
         (N, Z): Dim,
         (Z, N): Dim,
+        nox::Scalar<f64, R>: From<f64>,
     {
         let sigma_points =
             config.sigma_points::<N, S, R>(self.x_hat.clone(), self.covar.clone())?;
@@ -323,7 +342,10 @@ pub struct State<const N: usize, const Z: usize, const S: usize, R: OwnedRepr> {
     pub config: MerweConfig<N>,
 }
 
-impl<const N: usize, const Z: usize, const S: usize, R: OwnedRepr + 'static> State<N, Z, S, R> {
+impl<const N: usize, const Z: usize, const S: usize, R: OwnedRepr + 'static> State<N, Z, S, R>
+where
+    nox::Scalar<f64, R>: From<f64>,
+{
     pub fn update(
         self,
         z: Vector<f64, Z, R>,

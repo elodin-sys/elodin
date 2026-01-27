@@ -17,6 +17,8 @@ dependencies = [
     "polars",
     "pytest",
     "matplotlib",
+    "iree-base-compiler>=3.0.0",
+    "iree-base-runtime>=3.0.0",
 ]
 dynamic = ["version"]
 

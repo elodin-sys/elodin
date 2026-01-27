@@ -17,7 +17,7 @@ pyo3 = ["dep:pyo3", "nox/jax"]
 [dependencies]
 # nox
 nox.path = "../nox"
-nox.features = ["xla", "noxpr"]
+nox.features = ["noxpr"]
 
 # impeller2
 stellarator.path = "../stellarator"

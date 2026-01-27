@@ -46,6 +46,9 @@ impeller2-kdl.path = "../impeller2/kdl"
 stellarator.path = "../stellarator"
 tokio.version = "1.34"
 tokio.features = ["full"]
+futures-lite = "2.5.0"
+bytemuck.version = "1.21"
+bytemuck.features = ["derive"]
 
 # logs
 tracing = "0.1"
