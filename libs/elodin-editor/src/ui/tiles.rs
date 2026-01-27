@@ -786,6 +786,9 @@ impl TileState {
                 Tile::Pane(Pane::Dashboard(dashboard)) => {
                     commands.entity(dashboard.entity).despawn();
                 }
+                Tile::Pane(Pane::Monitor(monitor)) => {
+                    commands.entity(monitor.entity).despawn();
+                }
                 _ => {}
             }
         }
