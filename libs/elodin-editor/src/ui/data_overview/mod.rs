@@ -153,6 +153,8 @@ pub struct ComponentTimestampSummary {
     pub color: Color32,
     pub enabled: bool,
     pub timestamp_range: Option<(Timestamp, Timestamp)>,
+    /// User-defined custom name for display (if set via inspector)
+    pub custom_name: Option<String>,
 }
 
 /// Generate a distinct color for a given row index using golden ratio hue distribution
@@ -420,6 +422,11 @@ impl WidgetSystem for DataOverviewWidget<'_, '_> {
         let mut summaries: Vec<ComponentTimestampSummary> = Vec::new();
         for (component_id, label, table_name) in component_list.iter() {
             let timestamp_range = params.time_ranges.ranges.get(table_name).copied();
+            let custom_name = params
+                .time_ranges
+                .row_settings
+                .get(component_id)
+                .and_then(|s| s.custom_name.clone());
 
             summaries.push(ComponentTimestampSummary {
                 component_id: *component_id,
@@ -428,6 +435,7 @@ impl WidgetSystem for DataOverviewWidget<'_, '_> {
                 color: Color32::WHITE, // Will be assigned after sorting
                 enabled: true,
                 timestamp_range,
+                custom_name,
             });
         }
 
@@ -632,8 +640,11 @@ impl WidgetSystem for DataOverviewWidget<'_, '_> {
                     indicator_color,
                 );
 
-                // Component name (truncated if needed)
-                let mut label = summary.label.clone();
+                // Component name (use custom_name if set, otherwise original label)
+                let mut label = summary
+                    .custom_name
+                    .clone()
+                    .unwrap_or_else(|| summary.label.clone());
                 if label.len() > 38 {
                     label.truncate(35);
                     label.push_str("...");
