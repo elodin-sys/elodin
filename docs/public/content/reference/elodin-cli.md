@@ -12,15 +12,28 @@ icon = ""
 order = 4
 +++
 
-# Command-Line Help for `elodin`
+# Command-Line Help
 
-This document contains the help content for the `elodin` command-line program.
+This document contains the help content for the Elodin command-line programs.
 
 **Command Overview:**
 
 * [`elodin`↴](#elodin)
 * [`elodin editor`↴](#elodin-editor)
 * [`elodin run`↴](#elodin-run)
+* [`elodin-db`↴](#elodin-db)
+* [`elodin-db run`↴](#elodin-db-run)
+* [`elodin-db lua`↴](#elodin-db-lua)
+* [`elodin-db gen-cpp`↴](#elodin-db-gen-cpp)
+* [`elodin-db fix-timestamps`↴](#elodin-db-fix-timestamps)
+* [`elodin-db merge`↴](#elodin-db-merge)
+* [`elodin-db prune`↴](#elodin-db-prune)
+* [`elodin-db truncate`↴](#elodin-db-truncate)
+* [`elodin-db time-align`↴](#elodin-db-time-align)
+* [`elodin-db drop`↴](#elodin-db-drop)
+* [`elodin-db info`↴](#elodin-db-info)
+
+---
 
 ## `elodin`
 
@@ -47,42 +60,47 @@ Launch the Elodin editor (default)
 
 ###### **Arguments**
 
-* `<addr/path>` — Address of a running database server (e.g., `localhost:2240`) or path to a simulation script
-
-  Default value: ``
+* `<addr/path>` — Optional connection target or simulation to run. Can be:
+  - A socket address (e.g., `127.0.0.1:2240`) to connect to a running Elodin DB
+  - A Python file (e.g., `main.py`) to run a simulation
+  - A TOML file (e.g., `s10.toml`) to run from a plan
+  - A directory containing `main.py` or `s10.toml`
 
 
 
 ## `elodin run`
 
-Run an Elodin simulation in headless mode
+Run an Elodin simulation in headless mode (not available on Windows)
 
 **Usage:** `elodin run [addr/path]`
 
 ###### **Arguments**
 
-* `<addr/path>` — Path to a simulation script to run
-
-  Default value: ``
+* `<addr/path>` — Simulation to run. Can be:
+  - A Python file (e.g., `main.py`)
+  - A TOML file (e.g., `s10.toml`)
+  - A directory containing `main.py` or `s10.toml`
 
 
 ---
 
-# Command-Line Help for `elodin-db`
+## `elodin-db`
 
-This document contains the help content for the `elodin-db` command-line program, which provides the Elodin telemetry database server and utilities for managing database files.
+**Usage:** `elodin-db <COMMAND>`
 
-**Command Overview:**
+###### **Subcommands**
 
-* [`elodin-db run`↴](#elodin-db-run)
-* [`elodin-db lua`↴](#elodin-db-lua)
-* [`elodin-db gen-cpp`↴](#elodin-db-gen-cpp)
-* [`elodin-db fix-timestamps`↴](#elodin-db-fix-timestamps)
-* [`elodin-db merge`↴](#elodin-db-merge)
-* [`elodin-db prune`↴](#elodin-db-prune)
-* [`elodin-db truncate`↴](#elodin-db-truncate)
-* [`elodin-db time-align`↴](#elodin-db-time-align)
-* [`elodin-db drop`↴](#elodin-db-drop)
+* `run` — Run the Elodin database server
+* `lua` — Run a Lua script or launch a REPL
+* `gen-cpp` — Generate C++ header files
+* `fix-timestamps` — Fix monotonic timestamps in a database
+* `merge` — Merge two databases into one with optional prefixes
+* `prune` — Remove empty components from a database
+* `truncate` — Clear all data from a database, preserving schemas
+* `time-align` — Align component timestamps to a target timestamp
+* `drop` — Drop (delete) components from a database
+* `info` — Display information about a database
+
 
 ## `elodin-db run`
 
@@ -458,4 +476,25 @@ elodin-db drop --pattern "*.velocity" -y ./my-database
 
 # Drop all components (dangerous!)
 elodin-db drop --all -y ./my-database
+```
+
+
+## `elodin-db info`
+
+Display information about a database, including recording state, time step configuration, and metadata.
+
+**Usage:** `elodin-db info [PATH]`
+
+###### **Arguments**
+
+* `<PATH>` — Path to the database directory. If not provided, uses the standard location (`~/.local/share/elodin/db/data`).
+
+###### **Example**
+
+```bash
+# Display info for the default database
+elodin-db info
+
+# Display info for a specific database
+elodin-db info ./my-database
 ```
