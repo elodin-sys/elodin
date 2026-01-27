@@ -128,8 +128,8 @@ impl WidgetSystem for InspectorDataOverview<'_> {
                                     if color_btn.clicked() {
                                         egui::Popup::toggle_id(ui.ctx(), color_id);
                                     }
-                                    if let Some(_) =
-                                        color_popup(ui, &mut color_value, color_id, &color_btn)
+                                    if color_popup(ui, &mut color_value, color_id, &color_btn)
+                                        .is_some()
                                         && Some(color_value) != settings.color
                                     {
                                         settings.color = Some(color_value);

@@ -229,7 +229,7 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
 
                     let prev_color = query_plot.data.color.into_color32();
                     let mut color = prev_color;
-                    if let Some(_) = color_popup(ui, &mut color, color_id, &btn_resp)
+                    if color_popup(ui, &mut color, color_id, &btn_resp).is_some()
                         && color != prev_color
                     {
                         query_plot.data.color = impeller2_wkt::Color::from_color32(color);
