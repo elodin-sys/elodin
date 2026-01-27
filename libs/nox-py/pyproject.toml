@@ -4,21 +4,21 @@ build-backend = "maturin"
 
 [project]
 name = "elodin"
-requires-python = ">=3.10,<3.13"
+requires-python = ">=3.11,<3.13"
 classifiers = [
     "Programming Language :: Rust",
     "Programming Language :: Python :: Implementation :: CPython",
     "Programming Language :: Python :: Implementation :: PyPy",
 ]
 dependencies = [
-    "jax==0.4.31",
+    "jax==0.8.2",
     "numpy",
     "typing-extensions",
     "polars",
     "pytest",
     "matplotlib",
-    "iree-base-compiler>=3.0.0",
-    "iree-base-runtime>=3.0.0",
+    "iree-base-compiler==3.9.0",
+    "iree-base-runtime==3.9.0",
 ]
 dynamic = ["version"]
 

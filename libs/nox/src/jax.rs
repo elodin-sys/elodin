@@ -192,14 +192,14 @@ impl JaxTracer {
                 let expr = self.visit(&g.expr)?;
                 let start_indices = self.visit(&g.indices)?;
                 let gather_dims = Python::with_gil(|py| {
+                    // JAX 0.7+ requires these to be tuples (hashable), not lists
+                    let offset_dims = pyo3::types::PyTuple::new(py, g.offset_dims.iter())?;
+                    let collapsed_slice_dims = pyo3::types::PyTuple::new(py, g.collapsed_slice_dims.iter())?;
+                    let start_index_map = pyo3::types::PyTuple::new(py, g.start_index_map.iter())?;
                     self.lax.call_method1(
                         py,
                         "GatherDimensionNumbers",
-                        (
-                            g.offset_dims.to_vec(),
-                            g.collapsed_slice_dims.to_vec(),
-                            g.start_index_map.to_vec(),
-                        ),
+                        (offset_dims, collapsed_slice_dims, start_index_map),
                     )
                 })?;
                 Python::with_gil(|py| {

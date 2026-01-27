@@ -283,9 +283,7 @@ impl IREEWorldExec {
         use zerocopy::FromBytes;
         
         let mut inputs = Vec::new();
-        let tick = self.world.tick();
-        
-        for (i, id) in self.tick_exec.metadata.arg_ids.iter().enumerate() {
+        for id in self.tick_exec.metadata.arg_ids.iter() {
             let col = self.world.column_by_id(*id)
                 .ok_or(nox_ecs::Error::ComponentNotFound)?;
             
@@ -362,8 +360,6 @@ impl IREEWorldExec {
 
     /// Apply output arrays back to the world state.
     fn apply_outputs(&mut self, py: Python<'_>, outputs: &[PyObject]) -> Result<(), Error> {
-        let tick = self.world.tick();
-        
         for (idx, id) in self.tick_exec.metadata.ret_ids.iter().enumerate() {
             if idx >= outputs.len() {
                 tracing::warn!("apply_outputs: idx {} >= outputs.len() {}", idx, outputs.len());

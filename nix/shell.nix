@@ -10,26 +10,19 @@ with pkgs; let
   xla_ext = pkgs.callPackage ./pkgs/xla-ext.nix {system = pkgs.stdenv.hostPlatform.system;};
   llvm = llvmPackages_latest;
 
-  # Import shared JAX overrides
-  jaxOverrides = pkgs.callPackage ./pkgs/jax-overrides.nix {inherit pkgs;};
-
-  # Create a Python environment with the same JAX version as our pyproject.toml
-  pythonWithJax = let
-    python3' = python3.override {
-      packageOverrides = jaxOverrides;
-    };
-  in
-    python3'.withPackages (ps:
-      with ps; [
-        jax
-        jaxlib
-        typing-extensions
-        pytest
-        pytest-json-report
-        matplotlib
-        polars
-        numpy
-      ]);
+  # Python environment for base tooling (no JAX - use venv instead)
+  # JAX 0.8.2+ and IREE are installed via the Python venv:
+  #   uv venv --python 3.12 && source .venv/bin/activate
+  #   uvx maturin develop --uv --manifest-path=libs/nox-py/Cargo.toml
+  pythonBase = python3.withPackages (ps:
+    with ps; [
+      typing-extensions
+      pytest
+      pytest-json-report
+      matplotlib
+      polars
+      numpy
+    ]);
 in {
   # Unified shell that combines all development environments
   elodin = mkShell (
@@ -66,8 +59,8 @@ in {
           buildkite-test-collector-rust
           (rustToolchain pkgs)
           cargo-nextest
-          # Use our custom Python with JAX 0.4.31
-          pythonWithJax
+          # Base Python (JAX is installed via venv, see shell hook)
+          pythonBase
           clang
           maturin
           bzip2
@@ -203,11 +196,12 @@ in {
           echo "  • Tools: uv, maturin, ruff, just, kubectl, gcloud"
           echo "  • Shell tools: eza, bat, delta, fzf, ripgrep, zoxide"
           echo ""
-          echo "SDK Development (if needed):"
-          echo "  "
-          echo "uv venv --python 3.12"
-          echo "source .venv/bin/activate"
-          echo "uvx maturin develop --uv --manifest-path=libs/nox-py/Cargo.toml"
+          echo "Python SDK Development (required for simulations):"
+          echo "  uv venv --python 3.12 && source .venv/bin/activate"
+          echo "  uvx maturin develop --uv --manifest-path=libs/nox-py/Cargo.toml"
+          echo ""
+          echo "Run simulations:"
+          echo "  elodin run examples/three-body/main.py"
           echo ""
 
           exec ${pkgs.zsh}/bin/zsh

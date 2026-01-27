@@ -114,27 +114,24 @@
     '';
   };
 
-  # Import shared JAX overrides
-  jaxOverrides = pkgs.callPackage ./jax-overrides.nix {inherit pkgs;};
+  # Note: JAX and IREE are installed via pip, not nix
+  # The wheel specifies these dependencies in pyproject.toml:
+  #   - jax==0.8.2
+  #   - iree-base-compiler==3.9.0
+  #   - iree-base-runtime==3.9.0
 
-  elodin = ps: let
-    # Create a modified Python package set with our JAX/jaxlib overrides
-    # This ensures all packages use the same jaxlib version
-    ps' = ps.override {
-      overrides = jaxOverrides;
-    };
-  in
-    ps'.buildPythonPackage {
+  elodin = ps:
+    ps.buildPythonPackage {
       pname = wheelName;
       format = "wheel";
       version = version;
       src = "${wheel}/${wheelName}-${wheelVersion}-${wheelSuffix}.whl";
       doCheck = false;
       pythonImportsCheck = []; # Skip import check due to C++ library loading issues on macOS
-      propagatedBuildInputs = with ps';
+      # JAX/IREE are pip-only dependencies specified in pyproject.toml
+      # They will be installed automatically when pip installing the wheel
+      propagatedBuildInputs = with ps;
         [
-          jax
-          jaxlib
           typing-extensions
           numpy
           polars
