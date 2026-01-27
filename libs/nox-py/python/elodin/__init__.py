@@ -104,7 +104,7 @@ class Query(Generic[Unpack[A]]):
         out_tps_tuple: Tuple[Annotated[Any, Component], ...] = (
             (out_tps,) if not isinstance(out_tps, tuple) else out_tps
         )
-        
+
         if use_vmap:
             buf = jax.vmap(
                 lambda b: f(
@@ -116,13 +116,16 @@ class Query(Generic[Unpack[A]]):
             (bufs, _) = tree_flatten(buf)
         else:
             batch_size = self.bufs[0].shape[0] if len(self.bufs) > 0 else 0
+
             # For single entity or use_vmap=False, call function directly
             # without vmap. This preserves jax.lax.cond semantics: only one
             # branch executes.
             def call_single(idx):
-                args = [from_array(cls, b[idx]) for (b, cls) in zip(self.bufs, self.component_classes)]
+                args = [
+                    from_array(cls, b[idx]) for (b, cls) in zip(self.bufs, self.component_classes)
+                ]
                 return f(*args)
-            
+
             if batch_size == 0:
                 bufs = []
             elif batch_size == 1:
