@@ -139,6 +139,16 @@ pub enum SelectedObject {
     Graph {
         graph_id: Entity,
     },
+    QueryTable {
+        table_id: Entity,
+    },
+    Monitor {
+        monitor_id: Entity,
+    },
+    DataOverview,
+    DataOverviewComponent {
+        component_id: ComponentId,
+    },
     Action {
         action_id: Entity,
     },
@@ -161,6 +171,10 @@ impl SelectedObject {
             SelectedObject::Entity(pair) => Some(pair.bevy),
             SelectedObject::Viewport { camera } => Some(*camera),
             SelectedObject::Graph { graph_id } => Some(*graph_id),
+            SelectedObject::QueryTable { table_id } => Some(*table_id),
+            SelectedObject::Monitor { monitor_id } => Some(*monitor_id),
+            SelectedObject::DataOverview => None,
+            SelectedObject::DataOverviewComponent { .. } => None,
             SelectedObject::Action { action_id } => Some(*action_id),
             SelectedObject::Object3D { entity } => Some(*entity),
             SelectedObject::DashboardNode { entity } => Some(*entity),
@@ -182,6 +196,8 @@ pub struct WindowUiState {
     pub selected_object: SelectedObject,
     pub entity_filter: EntityFilter,
     pub inspector_anchor: InspectorAnchor,
+    pub left_sidebar_visible: bool,
+    pub right_sidebar_visible: bool,
 }
 
 #[derive(Component, Clone)]
@@ -380,13 +396,15 @@ impl RootWidgetSystem for MainLayout<'_, '_> {
         #[cfg(not(target_family = "wasm"))]
         world.add_root_widget::<status_bar::StatusBar>("status_bar");
 
-        #[allow(unused_mut)]
-        let mut frame = egui::Frame::new();
         #[cfg(target_os = "macos")]
-        {
+        let frame = {
             // Leave room for the native titlebar controls on the primary window.
-            frame.inner_margin.top = 32;
-        }
+            let mut f = egui::Frame::new();
+            f.inner_margin.top = 32;
+            f
+        };
+        #[cfg(not(target_os = "macos"))]
+        let frame = egui::Frame::new();
 
         egui::CentralPanel::default().frame(frame).show(ctx, |ui| {
             ui.add_widget::<timeline::TimelinePanel>(world, "timeline_panel");

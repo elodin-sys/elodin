@@ -167,7 +167,7 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
                         }
                     });
                     ui.separator();
-                    ui.label(egui::RichText::new("Query").color(get_scheme().text_secondary));
+                    ui.label(egui::RichText::new("QUERY").color(get_scheme().text_secondary));
                     configure_input_with_border(ui.style_mut());
                     let query_type = query_plot.data.query_type;
                     let query_res = ui.add(query(&mut query_plot.data.query, query_type));
@@ -229,7 +229,7 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
 
                     let prev_color = query_plot.data.color.into_color32();
                     let mut color = prev_color;
-                    if let Some(_) = color_popup(ui, &mut color, color_id, &btn_resp)
+                    if color_popup(ui, &mut color, color_id, &btn_resp).is_some()
                         && color != prev_color
                     {
                         query_plot.data.color = impeller2_wkt::Color::from_color32(color);

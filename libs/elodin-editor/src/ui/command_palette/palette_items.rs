@@ -697,19 +697,6 @@ pub fn create_data_overview(tile_id: Option<TileId>) -> PaletteItem {
     )
 }
 
-pub fn create_sidebars() -> PaletteItem {
-    PaletteItem::new(
-        "Create Sidebars",
-        TILES_LABEL,
-        move |_: In<String>, mut tile_param: TileParam, palette_state: Res<CommandPaletteState>| {
-            let Some(mut tile_state) = tile_param.target(palette_state.target_window) else {
-                return PaletteEvent::Error("Secondary window unavailable".to_string());
-            };
-            tile_state.create_sidebars_layout();
-            PaletteEvent::Exit
-        },
-    )
-}
 pub fn create_video_stream(tile_id: Option<TileId>) -> PaletteItem {
     PaletteItem::new(
         "Create Video Stream",

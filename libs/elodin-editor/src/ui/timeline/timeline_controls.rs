@@ -19,9 +19,8 @@ use crate::{
     ui::{
         Paused,
         button::EImageButton,
-        colors::{self, ColorExt, get_scheme},
+        colors::{ColorExt, get_scheme},
         theme::configure_combo_box,
-        tiles::{self, set_mode_all},
         time_label::time_label,
         widgets::WidgetSystem,
     },
@@ -34,7 +33,7 @@ pub(crate) fn plugin(app: &mut App) {
 }
 
 #[derive(SystemParam)]
-pub struct TimelineControls<'w, 's> {
+pub struct TimelineControls<'w> {
     event: Res<'w, PacketTx>,
     paused: ResMut<'w, Paused>,
     tick: ResMut<'w, CurrentTimestamp>,
@@ -45,7 +44,6 @@ pub struct TimelineControls<'w, 's> {
     behavior: ResMut<'w, TimeRangeBehavior>,
     tick_origin: ResMut<'w, StreamTickOrigin>,
     step_buttons: ResMut<'w, TimelineStepButtons>,
-    windows_state: Query<'w, 's, &'static mut tiles::WindowState>,
 }
 
 #[derive(Default, Debug, Resource)]
@@ -54,7 +52,7 @@ struct TimelineStepButtons {
     forward: Option<Instant>,
 }
 
-impl WidgetSystem for TimelineControls<'_, '_> {
+impl WidgetSystem for TimelineControls<'_> {
     type Args = TimelineIcons;
     type Output = ();
 
@@ -76,7 +74,6 @@ impl WidgetSystem for TimelineControls<'_, '_> {
             mut behavior,
             mut tick_origin,
             mut step_buttons,
-            mut windows_state,
         } = state.get_mut(world);
 
         tick_origin.observe_stream(**stream_id);
@@ -183,14 +180,6 @@ impl WidgetSystem for TimelineControls<'_, '_> {
                             if jump_to_end_btn.clicked() {
                                 tick.0 = Timestamp(max_tick.0.0 - 1);
                                 tick_changed = true;
-                            }
-
-                            ui.add_space(12.0);
-                            let current_mode = colors::current_selection().mode;
-                            let is_dark = current_mode.eq_ignore_ascii_case("dark");
-                            if let Some(mode) = theme_mode_toggle(ui, is_dark) {
-                                let selection = colors::set_active_mode(mode);
-                                set_mode_all(&selection.mode, &mut windows_state);
                             }
                         },
                     );
@@ -320,118 +309,6 @@ fn time_range_selector_button(
         )
         .inner
     }
-}
-
-fn theme_mode_toggle(ui: &mut egui::Ui, is_dark: bool) -> Option<&'static str> {
-    let font_id = egui::TextStyle::Button.resolve(ui.style());
-    let active_text = get_scheme().text_primary;
-    let inactive_text = get_scheme().text_secondary;
-    let padding = egui::vec2(12.0, 6.0);
-
-    let dark_galley = ui
-        .painter()
-        .layout_no_wrap("Dark".to_string(), font_id.clone(), active_text);
-    let light_galley =
-        ui.painter()
-            .layout_no_wrap("Light".to_string(), font_id.clone(), active_text);
-    let segment_width = dark_galley.size().x.max(light_galley.size().x) + padding.x * 2.0;
-    let segment_height = dark_galley.size().y.max(light_galley.size().y) + padding.y * 2.0;
-    let size = egui::vec2(segment_width * 2.0, segment_height);
-
-    let mut choice = None;
-    ui.allocate_ui_with_layout(
-        size,
-        egui::Layout::left_to_right(egui::Align::Center),
-        |ui| {
-            let (dark_rect, dark_response) = ui.allocate_exact_size(
-                egui::vec2(segment_width, segment_height),
-                egui::Sense::click(),
-            );
-            let (light_rect, light_response) = ui.allocate_exact_size(
-                egui::vec2(segment_width, segment_height),
-                egui::Sense::click(),
-            );
-
-            let container_rect = dark_rect.union(light_rect);
-            let radius: u8 = 6;
-            let border = get_scheme().border_primary;
-            let base_fill = get_scheme().bg_secondary;
-            ui.painter().rect(
-                container_rect,
-                egui::CornerRadius::same(radius),
-                base_fill,
-                egui::Stroke::new(1.0, border),
-                egui::StrokeKind::Middle,
-            );
-
-            let active_rect = if is_dark { dark_rect } else { light_rect };
-            let active_corner = if is_dark {
-                egui::CornerRadius {
-                    nw: radius,
-                    ne: 0,
-                    sw: radius,
-                    se: 0,
-                }
-            } else {
-                egui::CornerRadius {
-                    nw: 0,
-                    ne: radius,
-                    sw: 0,
-                    se: radius,
-                }
-            };
-            let active_fill_rect = if is_dark {
-                egui::Rect::from_min_max(
-                    egui::pos2(active_rect.min.x + 1.0, active_rect.min.y + 1.0),
-                    egui::pos2(active_rect.max.x - 1.0, active_rect.max.y - 1.0),
-                )
-            } else {
-                egui::Rect::from_min_max(
-                    egui::pos2(dark_rect.max.x, active_rect.min.y + 1.0),
-                    egui::pos2(active_rect.max.x - 1.0, active_rect.max.y - 1.0),
-                )
-            };
-            ui.painter().rect(
-                active_fill_rect,
-                active_corner,
-                get_scheme().bg_primary,
-                egui::Stroke::NONE,
-                egui::StrokeKind::Middle,
-            );
-
-            let divider_x = dark_rect.max.x;
-            ui.painter().line_segment(
-                [
-                    egui::pos2(divider_x, container_rect.min.y + 1.0),
-                    egui::pos2(divider_x, container_rect.max.y - 1.0),
-                ],
-                egui::Stroke::new(1.0, border),
-            );
-
-            ui.painter().text(
-                dark_rect.center(),
-                egui::Align2::CENTER_CENTER,
-                "Dark",
-                font_id.clone(),
-                if is_dark { active_text } else { inactive_text },
-            );
-            ui.painter().text(
-                light_rect.center(),
-                egui::Align2::CENTER_CENTER,
-                "Light",
-                font_id,
-                if is_dark { inactive_text } else { active_text },
-            );
-
-            if dark_response.clicked() {
-                choice = Some("dark");
-            } else if light_response.clicked() {
-                choice = Some("light");
-            }
-        },
-    );
-
-    choice
 }
 
 fn time_range_window(
