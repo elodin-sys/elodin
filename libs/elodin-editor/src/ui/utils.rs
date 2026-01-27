@@ -107,11 +107,11 @@ pub fn format_num(mut num: f64) -> String {
     if !num.is_finite() {
         return format!("{}", num);
     }
-    let width: usize = 8;
+    let width: usize = 9;
     // need 2 characters for the sign and the decimal point
     let digit_width = width - 2;
     let digits = (num.abs().log10().ceil() as usize).saturating_add(1);
-    let precision = digit_width.saturating_sub(digits).clamp(1, 3);
+    let precision = digit_width.saturating_sub(digits).clamp(1, 4);
     // round to the nearest multiple of 10^(-precision)
     num = (num * 10.0_f64.powi(precision as i32)).round() / 10.0_f64.powi(precision as i32);
     // -0.0 is weird, just make it 0.0
@@ -132,25 +132,30 @@ mod tests {
 
     #[test]
     fn test_format_num() {
-        assert_eq!(format_num(0.0), "0.000");
-        assert_eq!(format_num(1.0), "1.000");
-        assert_eq!(format_num(9.999), "9.999");
-        assert_eq!(format_num(9.9999), "10.000");
-        assert_eq!(format_num(99.999), "99.999");
-        assert_eq!(format_num(999.99), "999.99");
-        assert_eq!(format_num(9999.9), "9999.9");
+        assert_eq!(format_num(0.0), "0.0000");
+        assert_eq!(format_num(1.0), "1.0000");
+        assert_eq!(format_num(9.999), "9.9990");
+        assert_eq!(format_num(9.9999), "9.9999");
+        assert_eq!(format_num(9.99999), "10.0000");
+        assert_eq!(format_num(99.999), "99.9990");
+        assert_eq!(format_num(99.9999), "99.9999");
+        assert_eq!(format_num(999.99), "999.990");
+        assert_eq!(format_num(999.999), "999.999");
+        assert_eq!(format_num(9999.9), "9999.90");
+        assert_eq!(format_num(9999.99), "9999.99");
         assert_eq!(format_num(99999.9), "99999.9");
         assert_eq!(format_num(99999.99), "1.00e5");
         assert_eq!(format_num(100000.0), "1.00e5");
 
         // test negatives:
-        assert_eq!(format_num(-0.0), "0.000");
-        assert_eq!(format_num(-1.0), "-1.000");
-        assert_eq!(format_num(-9.999), "-9.999");
-        assert_eq!(format_num(-9.9999), "-10.000");
-        assert_eq!(format_num(-99.999), "-99.999");
-        assert_eq!(format_num(-999.99), "-999.99");
-        assert_eq!(format_num(-9999.9), "-9999.9");
+        assert_eq!(format_num(-0.0), "0.0000");
+        assert_eq!(format_num(-1.0), "-1.0000");
+        assert_eq!(format_num(-9.999), "-9.9990");
+        assert_eq!(format_num(-9.9999), "-9.9999");
+        assert_eq!(format_num(-9.99999), "-10.0000");
+        assert_eq!(format_num(-99.999), "-99.9990");
+        assert_eq!(format_num(-999.99), "-999.990");
+        assert_eq!(format_num(-9999.9), "-9999.90");
         assert_eq!(format_num(-99999.9), "-99999.9");
         assert_eq!(format_num(-99999.99), "-1.00e5");
         assert_eq!(format_num(-100000.0), "-1.00e5");

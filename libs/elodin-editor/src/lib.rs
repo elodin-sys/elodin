@@ -945,6 +945,8 @@ fn clear_state_new_connection(
     component_time_ranges.row_settings.clear();
     component_time_ranges.pending_queries = 0;
     component_time_ranges.total_queries = 0;
+    component_time_ranges.completed_queries = 0;
+    component_time_ranges.current_batch = 0;
     component_time_ranges.state = ui::data_overview::TimeRangeQueryState::NotStarted;
     entity_map.0.retain(|_, entity| {
         if let Ok(mut entity_commands) = commands.get_entity(*entity) {
@@ -1223,6 +1225,12 @@ pub fn update_eql_context(
         path_reg.0.iter().filter_map(|(id, path)| {
             let schema = component_schema_registry.0.get(id)?;
             let metadata = component_metadata_registry.0.get(id)?;
+
+            // Exclude timestamp source components from the EQL context.
+            if metadata.is_timestamp_source() {
+                return None;
+            }
+
             let mut component = eql::Component::new(metadata.name.clone(), path.id, schema.clone());
             if !metadata.element_names().is_empty() {
                 component.element_names = metadata

@@ -1,3 +1,4 @@
+use convert_case::Casing;
 use datafusion::common::HashSet;
 use futures_lite::StreamExt;
 use impeller2::registry::VTableRegistry;
@@ -55,10 +56,16 @@ pub use error::Error;
 pub mod append_log;
 mod arrow;
 pub mod axum;
+pub mod drop;
 mod error;
 pub mod fix_timestamps;
+pub mod merge;
 mod msg_log;
+pub mod prune;
+pub mod time_align;
 pub(crate) mod time_series;
+pub mod truncate;
+pub mod utils;
 mod vtable_stream;
 
 /// Analyzes a VTable to find byte ranges that are used as timestamp sources.
@@ -72,15 +79,37 @@ where
     Fields: impeller2::buf::Buf<impeller2::vtable::Field>,
 {
     let mut ranges = Vec::new();
-    for op in vtable.ops.as_slice() {
+    for (op_idx, op) in vtable.ops.as_slice().iter().enumerate() {
         if let Op::Timestamp { source, .. } = op {
+            debug!(op_idx, "found timestamp operation");
             // Resolve source to get the actual Table op
-            if let Ok(resolved) = vtable.realize(*source, None)
-                && let Some(range) = resolved.as_table_range()
-            {
-                ranges.push((range.start, range.end));
+            match vtable.realize(*source, None) {
+                Ok(resolved) => {
+                    if let Some(range) = resolved.as_table_range() {
+                        debug!(
+                            op_idx,
+                            range_start = range.start,
+                            range_end = range.end,
+                            "timestamp source range resolved"
+                        );
+                        ranges.push((range.start, range.end));
+                    } else {
+                        warn!(
+                            op_idx,
+                            "timestamp operation source resolved but has no table range"
+                        );
+                    }
+                }
+                Err(e) => {
+                    warn!(?e, op_idx, "failed to resolve timestamp operation source");
+                }
             }
         }
+    }
+    if ranges.is_empty() {
+        debug!("no timestamp source ranges found in vtable");
+    } else {
+        debug!(range_count = ranges.len(), "found timestamp source ranges");
     }
     ranges
 }
@@ -100,6 +129,18 @@ fn field_overlaps_timestamp_source(
         }
     }
     false
+}
+
+/// Fallback detection: checks if a component name suggests it's a timestamp source.
+/// This is used as a last resort when range-based detection fails.
+/// Only matches clear patterns to avoid false positives.
+fn looks_like_timestamp_source_by_name(component_name: &str) -> bool {
+    let name_upper = component_name.to_uppercase();
+    // Match common timestamp source patterns
+    name_upper.contains("TIME_MONOTONIC")
+        || name_upper.contains("TIMESTAMP_SOURCE")
+        || (name_upper.contains("TIMESTAMP") && name_upper.ends_with("_SOURCE"))
+        || (name_upper.contains("TIME") && name_upper.contains("MONOTONIC"))
 }
 
 pub struct SnapshotBarrier {
@@ -224,7 +265,7 @@ impl<'a> Drop for SnapshotGuard<'a> {
     }
 }
 
-fn sync_dir(path: &Path) -> io::Result<()> {
+pub(crate) fn sync_dir(path: &Path) -> io::Result<()> {
     #[cfg(target_family = "unix")]
     {
         let dir = File::open(path)?;
@@ -237,7 +278,7 @@ fn sync_dir(path: &Path) -> io::Result<()> {
     }
 }
 
-fn copy_file_native(src: &Path, dst: &Path) -> Result<(), Error> {
+pub(crate) fn copy_file_native(src: &Path, dst: &Path) -> Result<(), Error> {
     let metadata = fs::metadata(src)?;
     reflink_copy::reflink_or_copy(src, dst)?;
     fs::set_permissions(dst, metadata.permissions())?;
@@ -249,7 +290,7 @@ fn copy_file_native(src: &Path, dst: &Path) -> Result<(), Error> {
     Ok(())
 }
 
-fn copy_dir_native(src: &Path, dst: &Path) -> Result<(), Error> {
+pub(crate) fn copy_dir_native(src: &Path, dst: &Path) -> Result<(), Error> {
     fs::create_dir_all(dst)?;
     for entry in fs::read_dir(src)? {
         let entry = entry?;
@@ -608,12 +649,55 @@ impl DB {
 
         // Find byte ranges that are used as timestamp sources
         let timestamp_source_ranges = find_timestamp_source_ranges(&vtable.vtable);
+        debug!(
+            vtable_id = ?vtable.id,
+            timestamp_range_count = timestamp_source_ranges.len(),
+            ranges = ?timestamp_source_ranges,
+            "timestamp source ranges found"
+        );
 
         self.with_state_mut(|state| {
             // We need to iterate over fields to get offset/len for timestamp source detection
             let fields: Vec<_> = vtable.vtable.fields.as_slice().to_vec();
+            debug!(
+                vtable_id = ?vtable.id,
+                field_count = fields.len(),
+                "processing vtable fields"
+            );
 
-            for (field, res) in fields.iter().zip(vtable.vtable.realize_fields(None)) {
+            // Track component IDs that are referenced by timestamp operations
+            let mut timestamp_source_component_ids = std::collections::HashSet::new();
+
+            // First pass: identify components referenced by timestamp operations
+            for op in vtable.vtable.ops.as_slice() {
+                if let Op::Timestamp { source, arg } = op {
+                    // Try to resolve the arg to get the component ID
+                    if let Ok(resolved_arg) = vtable.vtable.realize(*arg, None)
+                        && let Some(comp_id) = resolved_arg.as_component_id()
+                    {
+                        debug!(
+                            component_id = ?comp_id.0,
+                            "timestamp operation references component"
+                        );
+                        // Also check if the source itself resolves to a component
+                        if let Ok(resolved_source) = vtable.vtable.realize(*source, None)
+                            && let Some(source_comp_id) = resolved_source.as_component_id()
+                        {
+                            debug!(
+                                component_id = ?source_comp_id.0,
+                                "timestamp source is itself a component"
+                            );
+                            timestamp_source_component_ids.insert(source_comp_id);
+                        }
+                    }
+                }
+            }
+
+            for (field_idx, (field, res)) in fields
+                .iter()
+                .zip(vtable.vtable.realize_fields(None))
+                .enumerate()
+            {
                 let RealizedField {
                     component_id,
                     shape,
@@ -621,11 +705,56 @@ impl DB {
                     ..
                 } = res?;
 
+                // Get component name for logging and fallback detection
+                let component_name = state
+                    .component_metadata
+                    .get(&component_id)
+                    .map(|m| m.name.clone())
+                    .unwrap_or_else(|| component_id.to_string());
+
                 // Check if this field overlaps with any timestamp source range
-                let is_timestamp_source = field_overlaps_timestamp_source(
+                let is_timestamp_source_by_range = field_overlaps_timestamp_source(
                     field.offset.to_index(),
                     field.len as usize,
                     &timestamp_source_ranges,
+                );
+
+                // Also check if this component ID is directly referenced as a timestamp source
+                let is_timestamp_source_by_id =
+                    timestamp_source_component_ids.contains(&component_id);
+
+                // Fallback: check component name pattern (only if other methods didn't detect it)
+                let is_timestamp_source_by_name =
+                    if !is_timestamp_source_by_range && !is_timestamp_source_by_id {
+                        let looks_like = looks_like_timestamp_source_by_name(&component_name);
+                        if looks_like {
+                            debug!(
+                                component_id = ?component_id.0,
+                                component_name = ?component_name,
+                                "fallback detection: component name suggests timestamp source"
+                            );
+                        }
+                        looks_like
+                    } else {
+                        false
+                    };
+
+                let is_timestamp_source = is_timestamp_source_by_range
+                    || is_timestamp_source_by_id
+                    || is_timestamp_source_by_name;
+
+                debug!(
+                    vtable_id = ?vtable.id,
+                    field_idx,
+                    component_id = ?component_id.0,
+                    component_name = ?component_name,
+                    field_offset = field.offset.to_index(),
+                    field_len = field.len,
+                    is_timestamp_source_by_range,
+                    is_timestamp_source_by_id,
+                    is_timestamp_source_by_name,
+                    is_timestamp_source,
+                    "processing field"
                 );
 
                 let component_schema = ComponentSchema::new(ty, shape);
@@ -722,10 +851,22 @@ impl State {
                 && !existing_meta.is_timestamp_source()
             {
                 existing_meta.set_timestamp_source(true);
-                // Re-save the metadata
-                let metadata_path = db_path.join(component_id.to_string()).join("metadata");
+                // Re-save the metadata - ensure directory exists first
+                let component_metadata_dir = db_path.join(component_id.to_string());
+                if let Err(err) = std::fs::create_dir_all(&component_metadata_dir) {
+                    warn!(
+                        ?err,
+                        ?component_id,
+                        "failed to create component metadata directory"
+                    );
+                }
+                let metadata_path = component_metadata_dir.join("metadata");
                 if let Err(err) = existing_meta.write(&metadata_path) {
-                    warn!(?err, "failed to update timestamp source metadata");
+                    warn!(
+                        ?err,
+                        ?component_id,
+                        "failed to update timestamp source metadata"
+                    );
                 }
             }
             return Ok(());
@@ -747,7 +888,9 @@ impl State {
             component_metadata.set_timestamp_source(true);
         }
         let component = Component::create(db_path, component_id, name, schema, Timestamp::now())?;
-        if !self.component_metadata.contains_key(&component_id) {
+        // Always update metadata if this is a timestamp source, or if metadata doesn't exist yet
+        // This ensures the timestamp source flag is preserved even if metadata was set earlier
+        if is_timestamp_source || !self.component_metadata.contains_key(&component_id) {
             self.set_component_metadata(component_metadata, db_path)?;
         }
         self.components.insert(component_id, component);
@@ -764,19 +907,37 @@ impl State {
 
     pub fn set_component_metadata(
         &mut self,
-        metadata: ComponentMetadata,
+        mut metadata: ComponentMetadata,
         db_path: &Path,
     ) -> Result<(), Error> {
         let component_metadata_path = db_path.join(metadata.component_id.to_string());
         std::fs::create_dir_all(&component_metadata_path)?;
         let component_metadata_path = component_metadata_path.join("metadata");
+
+        // Preserve existing metadata flags, especially _is_timestamp_source
+        // This is critical because SetComponentMetadata may be called after
+        // insert_component_with_timestamp_source_flag has already set the flag
+        if let Some(existing_metadata) = self.component_metadata.get(&metadata.component_id) {
+            // Preserve the timestamp source flag if it was already set
+            if existing_metadata.is_timestamp_source() {
+                metadata.set_timestamp_source(true);
+            }
+            // Merge other metadata flags from existing metadata
+            for (key, value) in existing_metadata.metadata.iter() {
+                // Only preserve internal flags (starting with _) that aren't being overwritten
+                if key.starts_with('_') && !metadata.metadata.contains_key(key) {
+                    metadata.metadata.insert(key.clone(), value.clone());
+                }
+            }
+        }
+
         if component_metadata_path.exists()
             && ComponentMetadata::read(&component_metadata_path)? == metadata
         {
             return Ok(());
         }
-        info!(component.name= ?metadata.name, component.id = ?metadata.component_id.0, "setting component metadata");
-        metadata.write(component_metadata_path)?;
+        info!(component.name= ?metadata.name, component.id = ?metadata.component_id.0, is_timestamp_source = metadata.is_timestamp_source(), "setting component metadata");
+        metadata.write(&component_metadata_path)?;
         // Sync the name to the Component for better warning messages
         if let Some(component) = self.components.get(&metadata.component_id) {
             component.set_name(metadata.name.clone());
@@ -1524,6 +1685,231 @@ async fn handle_packet<A: AsyncWrite + 'static>(
             }
             res.await??;
             tx.send_msg(&ArrowIPC { batch: None }).await?;
+        }
+        Packet::Msg(m) if m.id == SparklineQuery::ID => {
+            let query = m.parse::<SparklineQuery>()?;
+            let table_name = query.table_name;
+            let max_points = query.max_points as usize;
+
+            // Find the component matching this table name
+            let result = db.with_state(|state| {
+                for component in state.components.values() {
+                    // Skip components without metadata instead of returning None,
+                    // which would abort the search and miss other valid components
+                    let Some(component_metadata) =
+                        state.component_metadata.get(&component.component_id)
+                    else {
+                        continue;
+                    };
+                    let component_name = crate::arrow::sanitize_sql_table_name(
+                        &component_metadata.name.to_case(convert_case::Case::Snake),
+                    );
+
+                    if component_name == table_name {
+                        // Get the raw data as byte slices
+                        let time_bytes = component.time_series.index().data();
+                        let value_bytes = component.time_series.data().data();
+
+                        // Get the number of data points
+                        let timestamp_size = std::mem::size_of::<Timestamp>();
+                        let num_points = time_bytes.len() / timestamp_size;
+
+                        if num_points == 0 {
+                            return Some((vec![], vec![]));
+                        }
+
+                        // Convert timestamps to i64 array
+                        let times: Vec<i64> = (0..num_points)
+                            .map(|i| {
+                                let offset = i * timestamp_size;
+                                let bytes: [u8; 8] = time_bytes[offset..offset + 8]
+                                    .try_into()
+                                    .unwrap_or([0u8; 8]);
+                                i64::from_le_bytes(bytes)
+                            })
+                            .collect();
+
+                        // Extract scalar values from the data column
+                        // For vector types, we take just the first element
+                        let element_size = component.time_series.element_size();
+                        let dim: usize = component.schema.dim.iter().product();
+                        let scalar_size = element_size / dim.max(1);
+
+                        let prim_type = component.schema.prim_type;
+                        let values: Vec<f64> = (0..num_points)
+                            .map(|i| {
+                                let offset = i * element_size;
+                                if offset + scalar_size > value_bytes.len() {
+                                    return f64::NAN;
+                                }
+                                crate::utils::read_prim_as_f64(prim_type, value_bytes, offset)
+                            })
+                            .collect();
+
+                        return Some((times, values));
+                    }
+                }
+                None
+            });
+
+            match result {
+                Some((times, values)) => {
+                    // Apply LTTB downsampling
+                    let (ds_times, ds_values) =
+                        crate::arrow::lttb::lttb_downsample_arrays(&times, &values, max_points);
+
+                    // Build Arrow RecordBatch
+                    use ::arrow::array::{Float64Array, TimestampMicrosecondArray};
+                    use ::arrow::datatypes::{DataType, Field, Schema, TimeUnit};
+                    use ::arrow::record_batch::RecordBatch;
+
+                    let time_array = TimestampMicrosecondArray::from(ds_times);
+                    let value_array = Float64Array::from(ds_values);
+
+                    let schema = Arc::new(Schema::new(vec![
+                        Field::new(
+                            "time",
+                            DataType::Timestamp(TimeUnit::Microsecond, None),
+                            false,
+                        ),
+                        Field::new("value", DataType::Float64, true),
+                    ]));
+
+                    let batch = RecordBatch::try_new(
+                        schema.clone(),
+                        vec![Arc::new(time_array), Arc::new(value_array)],
+                    )
+                    .map_err(Error::Arrow)?;
+
+                    // Serialize to Arrow IPC
+                    let mut buf = vec![];
+                    let mut writer =
+                        ::arrow::ipc::writer::StreamWriter::try_new(&mut buf, &schema)?;
+                    writer.write(&batch)?;
+                    writer.finish()?;
+
+                    tx.send_msg(&ArrowIPC {
+                        batch: Some(Cow::Owned(buf)),
+                    })
+                    .await?;
+                }
+                None => {
+                    // Table not found - send empty result
+                    use ::arrow::datatypes::{DataType, Field, Schema, TimeUnit};
+                    use ::arrow::record_batch::RecordBatch;
+
+                    let schema = Arc::new(Schema::new(vec![
+                        Field::new(
+                            "time",
+                            DataType::Timestamp(TimeUnit::Microsecond, None),
+                            false,
+                        ),
+                        Field::new("value", DataType::Float64, true),
+                    ]));
+
+                    let batch = RecordBatch::new_empty(schema.clone());
+
+                    let mut buf = vec![];
+                    let mut writer =
+                        ::arrow::ipc::writer::StreamWriter::try_new(&mut buf, &schema)?;
+                    writer.write(&batch)?;
+                    writer.finish()?;
+
+                    tx.send_msg(&ArrowIPC {
+                        batch: Some(Cow::Owned(buf)),
+                    })
+                    .await?;
+                }
+            }
+
+            // Send completion marker
+            tx.send_msg(&ArrowIPC { batch: None }).await?;
+        }
+        Packet::Msg(m) if m.id == PlotOverviewQuery::ID => {
+            let query = m.parse::<PlotOverviewQuery>()?;
+            let PlotOverviewQuery {
+                id: request_id,
+                component_id,
+                range,
+                max_points,
+                element_index,
+            } = query;
+
+            let component = db.with_state(|state| {
+                let Some(component) = state.components.get(&component_id) else {
+                    return Err(Error::ComponentNotFound(component_id));
+                };
+                Ok(component.clone())
+            })?;
+
+            // Get the data for the requested range
+            // The range is already in Timestamp format from the query
+            let (timestamps, data) = match component.get_range(&range) {
+                Some(result) => result,
+                None => {
+                    // Range out of bounds - send empty result
+                    tx.send_time_series(request_id, &[], &[]).await?;
+                    return Ok(());
+                }
+            };
+
+            let num_points = timestamps.len();
+            if num_points == 0 {
+                tx.send_time_series(request_id, &[], &[]).await?;
+                return Ok(());
+            }
+
+            // Extract values for the specified element_index
+            let element_size = component.time_series.element_size();
+            let dim: usize = component.schema.dim.iter().product();
+
+            // Validate element_index is within bounds
+            if element_index >= dim {
+                // Invalid element_index - send empty result rather than reading wrong data
+                tracing::warn!(
+                    component_id = ?component_id,
+                    element_index = element_index,
+                    dim = dim,
+                    "PlotOverviewQuery element_index out of bounds"
+                );
+                tx.send_time_series(request_id, &[], &[]).await?;
+                return Ok(());
+            }
+
+            let scalar_size = element_size / dim.max(1);
+            let element_offset = element_index * scalar_size;
+
+            // Convert timestamps to i64 for LTTB (Timestamp wraps i64)
+            let times: Vec<i64> = timestamps.iter().map(|t| t.0).collect();
+
+            // Extract values as f64 for the specified element
+            let prim_type = component.schema.prim_type;
+            let values: Vec<f64> = (0..num_points)
+                .map(|i| {
+                    let offset = i * element_size + element_offset;
+                    if offset + scalar_size > data.len() {
+                        return f64::NAN;
+                    }
+                    crate::utils::read_prim_as_f64(prim_type, data, offset)
+                })
+                .collect();
+
+            // Apply LTTB downsampling
+            let (ds_times, ds_values) =
+                crate::arrow::lttb::lttb_downsample_arrays(&times, &values, max_points as usize);
+
+            // Convert back to the format expected by the client
+            let ds_timestamps: Vec<Timestamp> = ds_times.iter().map(|t| Timestamp(*t)).collect();
+
+            // Convert f64 values back to the original type's byte representation
+            // For simplicity, we'll send as f32 since that's what the plot panel uses internally
+            let ds_data: Vec<u8> = ds_values
+                .iter()
+                .flat_map(|v| (*v as f32).to_le_bytes())
+                .collect();
+
+            tx.send_time_series(request_id, &ds_timestamps, &ds_data)
+                .await?;
         }
         Packet::Msg(m) if m.id == SetMsgMetadata::ID => {
             let _snapshot_guard = db.snapshot_barrier.enter_writer();

@@ -48,7 +48,9 @@ mod tcp;
 #[cfg(feature = "tcp")]
 pub use tcp::*;
 
-pub const QUEUE_LEN: usize = 64 * 1024 * 1024;
+/// Size of the BBQ queue for incoming packets.
+/// Increased from 64MB to 256MB to handle large Arrow IPC responses from SQL queries.
+pub const QUEUE_LEN: usize = 256 * 1024 * 1024;
 
 #[derive(Resource)]
 pub struct PacketRx(AsyncArcQueueRx);
@@ -479,12 +481,23 @@ impl AppExt for bevy::app::App {
     }
 }
 
-#[derive(Resource, Default)]
+#[derive(Resource)]
 pub struct RequestIdAlloc(RequestId);
+
+impl Default for RequestIdAlloc {
+    fn default() -> Self {
+        // Start at 1 to avoid request ID 0, which is reserved for streaming
+        RequestIdAlloc(1)
+    }
+}
 
 impl RequestIdAlloc {
     pub fn alloc_next_id(&mut self) -> RequestId {
         self.0 = self.0.wrapping_add(1);
+        // Skip request ID 0, which is reserved for streaming messages
+        if self.0 == 0 {
+            self.0 = 1;
+        }
         self.0
     }
 }
@@ -572,7 +585,14 @@ where
         let mut handlers = world
             .get_resource_mut::<RequestIdHandlers>()
             .expect("missing packet handlers");
-        handlers.insert(req_id, system_id);
+        // Warn if we're about to overwrite an existing handler - this indicates
+        // request ID collision (IDs being reused before previous queries complete)
+        if let Some(_old) = handlers.insert(req_id, system_id) {
+            bevy::log::warn!(
+                req_id,
+                "RequestId collision: overwriting existing handler! This may cause query failures."
+            );
+        }
         let tx = world
             .get_resource_mut::<PacketTx>()
             .expect("missing packet handlers");
@@ -640,9 +660,16 @@ impl CommandsExt for Commands<'_, '_> {
                     };
                     Ok(m)
                 }
-                _ => Err(ErrorResponse {
-                    description: "wrong msg type".to_string(),
-                }),
+                other => {
+                    let desc = match other {
+                        OwnedPacket::Msg(m) => {
+                            format!("wrong msg type: got id={:?}, expected id={:?}", m.id, R::ID)
+                        }
+                        OwnedPacket::Table(_) => "wrong msg type: got Table".to_string(),
+                        OwnedPacket::TimeSeries(_) => "wrong msg type: got TimeSeries".to_string(),
+                    };
+                    Err(ErrorResponse { description: desc })
+                }
             }
         }
         let system = adapter::<M::Reply<Slice<Vec<u8>>>>.pipe(handler);

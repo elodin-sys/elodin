@@ -1,6 +1,6 @@
 use std::{io::Write, net::SocketAddr, path::PathBuf};
 
-use clap::{ArgAction, Parser, Subcommand, ValueEnum};
+use clap::{Parser, Subcommand, ValueEnum};
 use elodin_db::Server;
 use impeller2::vtable;
 use miette::IntoDiagnostic;
@@ -28,6 +28,19 @@ enum Commands {
         about = "Fix monotonic timestamps in a database"
     )]
     FixTimestamps(FixTimestampsArgs),
+    #[command(about = "Merge two databases into one with optional prefixes")]
+    Merge(MergeArgs),
+    #[command(about = "Remove empty components from a database")]
+    Prune(PruneArgs),
+    #[command(about = "Clear all data from a database, preserving schemas")]
+    Truncate(TruncateArgs),
+    #[command(
+        name = "time-align",
+        about = "Align component timestamps to a target timestamp"
+    )]
+    TimeAlign(TimeAlignArgs),
+    #[command(about = "Drop (delete) components from a database")]
+    Drop(DropArgs),
 }
 
 #[derive(clap::Args, Clone, Debug)]
@@ -63,13 +76,6 @@ struct FixTimestampsArgs {
     #[clap(long, short, help = "Skip confirmation prompt")]
     yes: bool,
     #[clap(
-        long = "no-prune",
-        action = ArgAction::SetFalse,
-        default_value_t = true,
-        help = "Do not prune empty components"
-    )]
-    prune: bool,
-    #[clap(
         long,
         value_enum,
         default_value = "wall-clock",
@@ -78,10 +84,90 @@ struct FixTimestampsArgs {
     reference: ReferenceClockArg,
 }
 
+#[derive(clap::Args, Clone, Debug)]
+struct PruneArgs {
+    #[clap(help = "Path to the database directory")]
+    path: PathBuf,
+    #[clap(long, help = "Show what would be pruned without modifying")]
+    dry_run: bool,
+    #[clap(long, short, help = "Skip confirmation prompt")]
+    yes: bool,
+}
+
+#[derive(clap::Args, Clone, Debug)]
+struct TruncateArgs {
+    #[clap(help = "Path to the database directory")]
+    path: PathBuf,
+    #[clap(long, help = "Show what would be truncated without modifying")]
+    dry_run: bool,
+    #[clap(long, short, help = "Skip confirmation prompt")]
+    yes: bool,
+}
+
+#[derive(clap::Args, Clone, Debug)]
+struct TimeAlignArgs {
+    #[clap(help = "Path to the database directory")]
+    path: PathBuf,
+    #[clap(long, help = "Target timestamp (seconds) to align first sample to")]
+    timestamp: f64,
+    #[clap(long, help = "Align all components")]
+    all: bool,
+    #[clap(long, help = "Specific component name to align")]
+    component: Option<String>,
+    #[clap(long, help = "Show what would be changed without modifying")]
+    dry_run: bool,
+    #[clap(long, short, help = "Skip confirmation prompt")]
+    yes: bool,
+}
+
+#[derive(clap::Args, Clone, Debug)]
+struct DropArgs {
+    #[clap(help = "Path to the database directory")]
+    path: PathBuf,
+    #[clap(long, help = "Component name to match (fuzzy)")]
+    component: Option<String>,
+    #[clap(
+        long,
+        help = "Glob pattern to match component names (e.g., 'rocket.*')"
+    )]
+    pattern: Option<String>,
+    #[clap(long, help = "Drop all components")]
+    all: bool,
+    #[clap(long, help = "Show what would be dropped without modifying")]
+    dry_run: bool,
+    #[clap(long, short, help = "Skip confirmation prompt")]
+    yes: bool,
+}
+
 #[derive(ValueEnum, Clone, Debug)]
 enum ReferenceClockArg {
     WallClock,
     Monotonic,
+}
+
+#[derive(clap::Args, Clone, Debug)]
+pub struct MergeArgs {
+    #[clap(help = "Path to the first source database")]
+    pub db1: PathBuf,
+    #[clap(help = "Path to the second source database")]
+    pub db2: PathBuf,
+    #[clap(long, short, help = "Path for the merged output database")]
+    pub output: PathBuf,
+    #[clap(long, help = "Prefix to apply to first database components")]
+    pub prefix1: Option<String>,
+    #[clap(long, help = "Prefix to apply to second database components")]
+    pub prefix2: Option<String>,
+    #[clap(long, help = "Show what would be merged without creating output")]
+    pub dry_run: bool,
+    #[clap(long, short, help = "Skip confirmation prompt")]
+    pub yes: bool,
+    #[clap(long, help = "Alignment timestamp (seconds) for an event in DB1")]
+    pub align1: Option<f64>,
+    #[clap(
+        long,
+        help = "Alignment timestamp (seconds) for the same event in DB2. DB2 is shifted to align with DB1."
+    )]
+    pub align2: Option<f64>,
 }
 
 #[derive(ValueEnum, Clone, Copy, Debug)]
@@ -208,7 +294,6 @@ async fn main() -> miette::Result<()> {
             path,
             dry_run,
             yes,
-            prune,
             reference,
         }) => {
             let reference = match reference {
@@ -219,7 +304,71 @@ async fn main() -> miette::Result<()> {
                     elodin_db::fix_timestamps::ReferenceClock::Monotonic
                 }
             };
-            elodin_db::fix_timestamps::run(path, dry_run, yes, reference, prune).into_diagnostic()
+            elodin_db::fix_timestamps::run(path, dry_run, yes, reference).into_diagnostic()
+        }
+        Commands::Prune(PruneArgs { path, dry_run, yes }) => {
+            elodin_db::prune::run(path, dry_run, yes).into_diagnostic()
+        }
+        Commands::Merge(MergeArgs {
+            db1,
+            db2,
+            output,
+            prefix1,
+            prefix2,
+            dry_run,
+            yes,
+            align1,
+            align2,
+        }) => elodin_db::merge::run(
+            db1, db2, output, prefix1, prefix2, dry_run, yes, align1, align2,
+        )
+        .into_diagnostic(),
+        Commands::Truncate(TruncateArgs { path, dry_run, yes }) => {
+            elodin_db::truncate::run(path, dry_run, yes).into_diagnostic()
+        }
+        Commands::TimeAlign(TimeAlignArgs {
+            path,
+            timestamp,
+            all,
+            component,
+            dry_run,
+            yes,
+        }) => elodin_db::time_align::run(path, timestamp, all, component, dry_run, yes)
+            .into_diagnostic(),
+        Commands::Drop(DropArgs {
+            path,
+            component,
+            pattern,
+            all,
+            dry_run,
+            yes,
+        }) => {
+            // Validate that exactly one matching mode is specified
+            let mode_count = [component.is_some(), pattern.is_some(), all]
+                .iter()
+                .filter(|&&x| x)
+                .count();
+
+            if mode_count == 0 {
+                return Err(miette::miette!(
+                    "Must specify one of --component, --pattern, or --all"
+                ));
+            }
+            if mode_count > 1 {
+                return Err(miette::miette!(
+                    "Cannot combine --component, --pattern, and --all. Specify only one."
+                ));
+            }
+
+            let match_mode = if let Some(name) = component {
+                elodin_db::drop::MatchMode::Fuzzy(name)
+            } else if let Some(pat) = pattern {
+                elodin_db::drop::MatchMode::Pattern(pat)
+            } else {
+                elodin_db::drop::MatchMode::All
+            };
+
+            elodin_db::drop::run(path, match_mode, dry_run, yes).into_diagnostic()
         }
     }
 }

@@ -8,8 +8,9 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
+use crate::utils::component_label;
 use crate::{Error, MetadataExt};
-use impeller2_wkt::{ComponentMetadata, DbConfig};
+use impeller2_wkt::DbConfig;
 
 const HEADER_SIZE: usize = 24; // committed_len (8) + head_len (8) + extra (8)
 
@@ -20,7 +21,6 @@ const HEADER_SIZE: usize = 24; // committed_len (8) + head_len (8) + extra (8)
 /// * `dry_run` - If true, only show what would be changed without modifying
 /// * `auto_confirm` - If true, skip the confirmation prompt (for non-interactive use)
 /// * `reference` - Which clock to treat as the reference set (monotonic or wall-clock)
-/// * `prune_empty` - If true, remove empty components
 ///
 /// # Returns
 /// * `Ok(())` if successful or no changes needed
@@ -30,7 +30,6 @@ pub fn run(
     dry_run: bool,
     auto_confirm: bool,
     reference: ReferenceClock,
-    prune_empty: bool,
 ) -> Result<(), Error> {
     if !db_path.exists() {
         return Err(Error::MissingDbState(db_path));
@@ -112,12 +111,10 @@ pub fn run(
 
     let mut good_components: Vec<(&PathBuf, &ComponentInfo)> = Vec::new();
     let mut bad_components: Vec<(&PathBuf, &ComponentInfo)> = Vec::new();
-    let mut empty_components: Vec<&PathBuf> = Vec::new();
 
     for (path, info) in &components {
         // Skip empty components
         if info.count == 0 || info.min_timestamp == i64::MAX {
-            empty_components.push(path);
             continue;
         }
 
@@ -153,20 +150,8 @@ pub fn run(
     );
     println!();
 
-    if !empty_components.is_empty() {
-        if prune_empty {
-            println!("Empty components to prune: {}", empty_components.len());
-        } else {
-            println!("Empty components kept: {}", empty_components.len());
-        }
-        println!();
-    }
-
     if bad_components.is_empty() {
         println!("No components need fixing!");
-        if prune_empty {
-            prune_components(&empty_components, dry_run, auto_confirm)?;
-        }
         return Ok(());
     }
 
@@ -229,14 +214,6 @@ pub fn run(
     }
     println!();
 
-    if prune_empty && !empty_components.is_empty() {
-        println!("Empty components to prune:");
-        for path in &empty_components {
-            println!("  {}", component_label(path));
-        }
-        println!();
-    }
-
     if dry_run {
         println!("Dry run complete. Run without --dry-run to apply changes.");
         return Ok(());
@@ -255,11 +232,7 @@ pub fn run(
     }
 
     println!();
-    if prune_empty && !empty_components.is_empty() {
-        println!("Applying fixes and pruning empty components...");
-    } else {
-        println!("Applying fixes...");
-    }
+    println!("Applying fixes...");
 
     for (path, info) in &bad_components {
         let index_path = path.join("index");
@@ -271,10 +244,6 @@ pub fn run(
                 eprintln!("  Error fixing {}: {}", path.display(), e);
             }
         }
-    }
-
-    if prune_empty {
-        apply_prune(&empty_components);
     }
 
     println!();
@@ -355,56 +324,6 @@ fn analyze_component(index_path: &Path) -> Result<ComponentInfo, std::io::Error>
     })
 }
 
-fn prune_components(
-    empty_components: &[&PathBuf],
-    dry_run: bool,
-    auto_confirm: bool,
-) -> Result<(), Error> {
-    if empty_components.is_empty() {
-        return Ok(());
-    }
-
-    println!("Empty components to prune:");
-    for path in empty_components {
-        println!("  {}", component_label(path));
-    }
-    println!();
-
-    if dry_run {
-        println!("Dry run complete. Run without --dry-run to apply changes.");
-        return Ok(());
-    }
-
-    if !auto_confirm {
-        print!("Prune empty components? [y/N] ");
-        std::io::stdout().flush()?;
-        let mut input = String::new();
-        std::io::stdin().read_line(&mut input)?;
-
-        if !input.trim().eq_ignore_ascii_case("y") {
-            println!("Aborted.");
-            return Ok(());
-        }
-    }
-
-    apply_prune(empty_components);
-    println!("Done! Empty components removed.");
-    Ok(())
-}
-
-fn apply_prune(empty_components: &[&PathBuf]) {
-    for path in empty_components {
-        match fs::remove_dir_all(path) {
-            Ok(()) => {
-                println!("  Pruned: {}", path.display());
-            }
-            Err(e) => {
-                eprintln!("  Error pruning {}: {}", path.display(), e);
-            }
-        }
-    }
-}
-
 fn apply_offset(index_path: &Path, offset: i64, count: usize) -> Result<(), std::io::Error> {
     let mut file = OpenOptions::new().read(true).write(true).open(index_path)?;
 
@@ -436,29 +355,4 @@ fn apply_offset(index_path: &Path, offset: i64, count: usize) -> Result<(), std:
     file.sync_all()?;
 
     Ok(())
-}
-
-fn read_component_name(metadata_path: &Path) -> Result<String, std::io::Error> {
-    let metadata = <ComponentMetadata as MetadataExt>::read(metadata_path)
-        .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-    Ok(metadata.name)
-}
-
-fn component_label(path: &Path) -> String {
-    let fallback = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("<unknown>")
-        .to_string();
-    let metadata_path = path.join("metadata");
-    let name = if metadata_path.exists() {
-        read_component_name(&metadata_path).unwrap_or_else(|_| fallback.clone())
-    } else {
-        fallback.clone()
-    };
-    if name == fallback {
-        name
-    } else {
-        format!("{name} ({fallback})")
-    }
 }

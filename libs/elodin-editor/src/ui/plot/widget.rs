@@ -41,7 +41,7 @@ use crate::{
         SelectedObject,
         colors::{ColorExt, get_scheme, with_opacity},
         plot::{
-            CollectedGraphData, GraphState, Line,
+            CollectedGraphData, GraphState, Line, OVERVIEW_MAX_POINTS,
             gpu::{LineBundle, LineConfig, LineUniform},
         },
         tiles::WindowState,
@@ -180,7 +180,7 @@ pub struct TimeseriesPlot {
 }
 
 pub const MARGIN: egui::Margin = egui::Margin {
-    left: 60,
+    left: 100,
     right: 0,
     top: 35,
     bottom: 35,
@@ -201,6 +201,33 @@ pub const MODAL_MARGIN: f32 = 20.0;
 
 pub const ZOOM_SENSITIVITY: f32 = 0.001;
 pub const SCROLL_PIXELS_PER_LINE: f32 = 100.0;
+
+/// Percentage of the Y range to add as padding on each side (5% = 0.05)
+pub const Y_AXIS_PADDING_PERCENT: f64 = 0.05;
+
+/// Calculate padded Y bounds with appropriate buffer based on magnitude.
+/// - For a range of values, adds a percentage-based padding on each side.
+/// - When min == max (flat line), uses magnitude-relative padding.
+pub fn calculate_padded_y_bounds(min_y: f64, max_y: f64) -> (f64, f64) {
+    let range = max_y - min_y;
+
+    if range.abs() < f64::EPSILON {
+        // min == max (flat line): use magnitude-relative padding
+        let magnitude = min_y.abs();
+        let padding = if magnitude < f64::EPSILON {
+            // Value is zero: use a small default range
+            1.0
+        } else {
+            // Use 10% of the magnitude as padding on each side
+            magnitude * 0.1
+        };
+        (min_y - padding, max_y + padding)
+    } else {
+        // Normal range: add percentage-based padding on each side
+        let padding = range * Y_AXIS_PADDING_PERCENT;
+        (min_y - padding, max_y + padding)
+    }
+}
 
 pub fn get_inner_rect(rect: egui::Rect) -> egui::Rect {
     rect.shrink4(MARGIN)
@@ -480,7 +507,7 @@ impl TimeseriesPlot {
                                 let value = line
                                     .data
                                     .get_nearest(timestamp)
-                                    .map(|(_time, x)| format!("{:.2}", x))
+                                    .map(|(_time, x)| format_num(*x as f64))
                                     .unwrap_or_else(|| "N/A".to_string());
                                 ui.with_layout(Layout::top_down_justified(Align::RIGHT), |ui| {
                                     ui.add_space(3.0);
@@ -554,7 +581,7 @@ impl TimeseriesPlot {
                                     ui.add_space(6.);
                                     ui.label(RichText::new(query_label.clone()).size(11.0));
                                     let value = nearest_value
-                                        .map(|v| format!("{:.2}", v))
+                                        .map(|v| format_num(v as f64))
                                         .unwrap_or_else(|| "N/A".to_string());
                                     ui.with_layout(Layout::top_down_justified(Align::RIGHT), |ui| {
                                         ui.add_space(3.0);
@@ -1036,6 +1063,7 @@ pub fn auto_y_bounds(
         if graph_state.auto_y_range {
             let mut y_min: Option<f32> = None;
             let mut y_max: Option<f32> = None;
+
             for (entity, _) in graph_state.enabled_lines.values() {
                 let Ok(handle) = line_handles.get(*entity) else {
                     continue;
@@ -1044,25 +1072,44 @@ pub fn auto_y_bounds(
                     continue;
                 };
                 if let gpu::LineMut::Timeseries(line) = line {
+                    // For small datasets (live streaming), use fast range_summary
+                    // For large datasets (historical/overview), use percentile_bounds to filter outliers
                     let summary = line.data.range_summary(selected_range.0.clone());
-                    if let Some(min) = summary.min {
+
+                    let (line_min, line_max) = if summary.len > OVERVIEW_MAX_POINTS {
+                        // Large dataset - use percentile bounds to filter outliers
+                        // This is expensive but necessary for historical data with corrupt values
+                        line.data
+                            .percentile_bounds(selected_range.0.clone(), 1.0, 99.0)
+                            .unwrap_or((summary.min.unwrap_or(0.0), summary.max.unwrap_or(1.0)))
+                    } else {
+                        // Small dataset (live streaming) - use fast summary
+                        // Fresh data from sensors doesn't have the outlier problem
+                        (summary.min.unwrap_or(0.0), summary.max.unwrap_or(1.0))
+                    };
+
+                    if line_min.is_finite() {
                         if let Some(v) = &mut y_min {
-                            *v = v.min(min);
+                            *v = v.min(line_min);
                         } else {
-                            y_min = Some(min)
+                            y_min = Some(line_min)
                         }
                     }
-                    if let Some(max) = summary.max {
+                    if line_max.is_finite() {
                         if let Some(v) = &mut y_max {
-                            *v = v.max(max);
+                            *v = v.max(line_max);
                         } else {
-                            y_max = Some(max)
+                            y_max = Some(line_max)
                         }
                     }
                 }
             }
-            graph_state.y_range =
-                y_min.unwrap_or_default() as f64..y_max.unwrap_or_default() as f64;
+
+            let (padded_min, padded_max) = calculate_padded_y_bounds(
+                y_min.unwrap_or_default() as f64,
+                y_max.unwrap_or_default() as f64,
+            );
+            graph_state.y_range = padded_min..padded_max;
         }
     }
 }
@@ -1537,8 +1584,9 @@ impl PlotBounds {
             baseline.end.0.saturating_sub(earliest_timestamp.0) as f64,
         );
 
-        let min_y = sigfig_round(min_y, 2);
-        let max_y = sigfig_round(max_y, 2);
+        // Don't use sigfig_round here - it can round min and max to the same value
+        // when they're close together (e.g., 101.02 and 101.20 both round to 110)
+        // Instead, use the raw values and let the rendering handle display formatting
         Self::new(min_x, min_y, max_x, max_y)
     }
 
@@ -1637,7 +1685,9 @@ impl PlotBounds {
     }
 
     pub fn screen_pos_to_value(&self, screen_rect: egui::Rect, pos: egui::Pos2) -> DVec2 {
-        let offset = (pos - screen_rect.min).as_dvec2();
+        let offset = pos - screen_rect.min;
+        // Flip y because screen y increases downward but plot y increases upward
+        let offset = DVec2::new(offset.x as f64, (screen_rect.height() - offset.y) as f64);
         let screen_to_value = self.size() / screen_rect.size().as_dvec2();
         self.min() + offset * screen_to_value
     }
