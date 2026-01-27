@@ -400,8 +400,7 @@ fn run_info(args: InfoArgs) -> miette::Result<()> {
             }
         }
         None => {
-            let dirs =
-                directories::ProjectDirs::from("systems", "elodin", "db").expect("no dirs");
+            let dirs = directories::ProjectDirs::from("systems", "elodin", "db").expect("no dirs");
             dirs.data_dir().join("data").join("db_state")
         }
     };
