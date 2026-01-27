@@ -100,12 +100,12 @@ impl WidgetSystem for InspectorEntity<'_, '_> {
             .filter_map(|child| {
                 let id = component_ids.get(child).ok()?;
                 let metadata = metadata_store.get_metadata(id)?;
-                
+
                 // Exclude timestamp source components from the inspector.
                 if metadata.is_timestamp_source() {
                     return None;
                 }
-                
+
                 let priority = metadata.priority();
                 Some((id, child, priority, metadata))
             })

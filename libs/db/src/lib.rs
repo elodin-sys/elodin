@@ -101,11 +101,7 @@ where
                     }
                 }
                 Err(e) => {
-                    warn!(
-                        ?e,
-                        op_idx,
-                        "failed to resolve timestamp operation source"
-                    );
+                    warn!(?e, op_idx, "failed to resolve timestamp operation source");
                 }
             }
         }
@@ -671,33 +667,37 @@ impl DB {
 
             // Track component IDs that are referenced by timestamp operations
             let mut timestamp_source_component_ids = std::collections::HashSet::new();
-            
+
             // First pass: identify components referenced by timestamp operations
             for op in vtable.vtable.ops.as_slice() {
                 if let Op::Timestamp { source, arg } = op {
                     // Try to resolve the arg to get the component ID
-                    if let Ok(resolved_arg) = vtable.vtable.realize(*arg, None) {
-                        if let Some(comp_id) = resolved_arg.as_component_id() {
+                    if let Ok(resolved_arg) = vtable.vtable.realize(*arg, None)
+                        && let Some(comp_id) = resolved_arg.as_component_id()
+                    {
+                        debug!(
+                            component_id = ?comp_id.0,
+                            "timestamp operation references component"
+                        );
+                        // Also check if the source itself resolves to a component
+                        if let Ok(resolved_source) = vtable.vtable.realize(*source, None)
+                            && let Some(source_comp_id) = resolved_source.as_component_id()
+                        {
                             debug!(
-                                component_id = ?comp_id.0,
-                                "timestamp operation references component"
+                                component_id = ?source_comp_id.0,
+                                "timestamp source is itself a component"
                             );
-                            // Also check if the source itself resolves to a component
-                            if let Ok(resolved_source) = vtable.vtable.realize(*source, None) {
-                                if let Some(source_comp_id) = resolved_source.as_component_id() {
-                                    debug!(
-                                        component_id = ?source_comp_id.0,
-                                        "timestamp source is itself a component"
-                                    );
-                                    timestamp_source_component_ids.insert(source_comp_id);
-                                }
-                            }
+                            timestamp_source_component_ids.insert(source_comp_id);
                         }
                     }
                 }
             }
 
-            for (field_idx, (field, res)) in fields.iter().zip(vtable.vtable.realize_fields(None)).enumerate() {
+            for (field_idx, (field, res)) in fields
+                .iter()
+                .zip(vtable.vtable.realize_fields(None))
+                .enumerate()
+            {
                 let RealizedField {
                     component_id,
                     shape,
@@ -720,25 +720,27 @@ impl DB {
                 );
 
                 // Also check if this component ID is directly referenced as a timestamp source
-                let is_timestamp_source_by_id = timestamp_source_component_ids.contains(&component_id);
+                let is_timestamp_source_by_id =
+                    timestamp_source_component_ids.contains(&component_id);
 
                 // Fallback: check component name pattern (only if other methods didn't detect it)
-                let is_timestamp_source_by_name = if !is_timestamp_source_by_range && !is_timestamp_source_by_id {
-                    let looks_like = looks_like_timestamp_source_by_name(&component_name);
-                    if looks_like {
-                        debug!(
-                            component_id = ?component_id.0,
-                            component_name = ?component_name,
-                            "fallback detection: component name suggests timestamp source"
-                        );
-                    }
-                    looks_like
-                } else {
-                    false
-                };
+                let is_timestamp_source_by_name =
+                    if !is_timestamp_source_by_range && !is_timestamp_source_by_id {
+                        let looks_like = looks_like_timestamp_source_by_name(&component_name);
+                        if looks_like {
+                            debug!(
+                                component_id = ?component_id.0,
+                                component_name = ?component_name,
+                                "fallback detection: component name suggests timestamp source"
+                            );
+                        }
+                        looks_like
+                    } else {
+                        false
+                    };
 
-                let is_timestamp_source = is_timestamp_source_by_range 
-                    || is_timestamp_source_by_id 
+                let is_timestamp_source = is_timestamp_source_by_range
+                    || is_timestamp_source_by_id
                     || is_timestamp_source_by_name;
 
                 debug!(
@@ -852,11 +854,19 @@ impl State {
                 // Re-save the metadata - ensure directory exists first
                 let component_metadata_dir = db_path.join(component_id.to_string());
                 if let Err(err) = std::fs::create_dir_all(&component_metadata_dir) {
-                    warn!(?err, ?component_id, "failed to create component metadata directory");
+                    warn!(
+                        ?err,
+                        ?component_id,
+                        "failed to create component metadata directory"
+                    );
                 }
                 let metadata_path = component_metadata_dir.join("metadata");
                 if let Err(err) = existing_meta.write(&metadata_path) {
-                    warn!(?err, ?component_id, "failed to update timestamp source metadata");
+                    warn!(
+                        ?err,
+                        ?component_id,
+                        "failed to update timestamp source metadata"
+                    );
                 }
             }
             return Ok(());
@@ -903,7 +913,7 @@ impl State {
         let component_metadata_path = db_path.join(metadata.component_id.to_string());
         std::fs::create_dir_all(&component_metadata_path)?;
         let component_metadata_path = component_metadata_path.join("metadata");
-        
+
         // Preserve existing metadata flags, especially _is_timestamp_source
         // This is critical because SetComponentMetadata may be called after
         // insert_component_with_timestamp_source_flag has already set the flag
@@ -920,7 +930,7 @@ impl State {
                 }
             }
         }
-        
+
         if component_metadata_path.exists()
             && ComponentMetadata::read(&component_metadata_path)? == metadata
         {
