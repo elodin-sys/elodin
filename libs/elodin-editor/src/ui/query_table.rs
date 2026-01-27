@@ -6,13 +6,14 @@ use arrow::{
 };
 use bevy::{
     ecs::system::SystemParam,
-    prelude::{Commands, Component, Entity, In, Query, ResMut},
+    prelude::{Commands, Component, Entity, In, Query, Res, ResMut},
 };
 use egui::RichText;
+use impeller2::types::Timestamp;
 use impeller2_bevy::CommandsExt;
-use impeller2_wkt::{ArrowIPC, ErrorResponse, QueryTable, QueryType, SQLQuery};
+use impeller2_wkt::{ArrowIPC, EarliestTimestamp, ErrorResponse, LastUpdated, QueryTable, QueryType, SQLQuery};
 
-use crate::EqlContext;
+use crate::{EqlContext, SelectedTimeRange};
 
 use super::{
     PaneName,
@@ -139,6 +140,9 @@ impl egui_table::TableDelegate for QueryTableResults<'_> {
 pub struct QueryTableWidget<'w, 's> {
     states: Query<'w, 's, &'static mut QueryTableData>,
     eql_context: ResMut<'w, EqlContext>,
+    selected_range: Res<'w, SelectedTimeRange>,
+    earliest_timestamp: Res<'w, EarliestTimestamp>,
+    last_updated: Res<'w, LastUpdated>,
     commands: Commands<'w, 's>,
 }
 
@@ -155,7 +159,10 @@ impl WidgetSystem for QueryTableWidget<'_, '_> {
     ) -> Self::Output {
         let QueryTableWidget {
             mut states,
-            eql_context,
+            mut eql_context,
+            selected_range,
+            earliest_timestamp,
+            last_updated,
             mut commands,
         } = state.get_mut(world);
         let Ok(mut table) = states.get_mut(entity) else {
@@ -166,6 +173,29 @@ impl WidgetSystem for QueryTableWidget<'_, '_> {
         if table.pending_execution && !table.data.query.is_empty() {
             table.pending_execution = false;
             table.state = QueryTableState::Requested(Instant::now());
+
+            // Initialize EQL timestamp context before conversion
+            {
+                use std::cmp::{max, min};
+
+                let mut start = selected_range.0.start;
+                let mut end = selected_range.0.end;
+                let placeholder_start = Timestamp(i64::MIN);
+                let placeholder_end = Timestamp(i64::MAX);
+
+                if start == placeholder_start && end == placeholder_end {
+                    start = earliest_timestamp.0;
+                    end = last_updated.0;
+                }
+
+                if start > end {
+                    start = min(earliest_timestamp.0, last_updated.0);
+                    end = max(earliest_timestamp.0, last_updated.0);
+                }
+
+                eql_context.0.earliest_timestamp = start;
+                eql_context.0.last_timestamp = end;
+            }
 
             let query_str = match table.data.query_type {
                 QueryType::SQL => table.data.query.clone(),
