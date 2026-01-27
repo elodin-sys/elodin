@@ -11,6 +11,7 @@ use crate::{
         colors::{ColorExt, get_scheme},
         data_overview::{ComponentTimeRanges, component_to_table_name, row_color},
         inspector::color_popup,
+        theme,
         widgets::WidgetSystem,
     },
 };
@@ -62,6 +63,9 @@ impl WidgetSystem for InspectorDataOverview<'_> {
         egui::Frame::NONE
             .inner_margin(egui::Margin::symmetric(0, 8))
             .show(ui, |ui| {
+                ui.label(egui::RichText::new("COMPONENTS").color(get_scheme().text_secondary));
+                ui.add_space(8.0);
+
                 if entries.is_empty() {
                     ui.label(
                         egui::RichText::new("No components available")
@@ -111,10 +115,10 @@ impl WidgetSystem for InspectorDataOverview<'_> {
                                     // 2. Editable name
                                     let name =
                                         settings.custom_name.get_or_insert_with(|| label.clone());
+                                    theme::configure_input_with_border(ui.style_mut());
                                     let text_edit = egui::TextEdit::singleline(name)
                                         .text_color(row_color)
-                                        .desired_width(ui.available_width() - 40.0)
-                                        .frame(false);
+                                        .desired_width(ui.available_width() - 40.0);
                                     ui.add(text_edit);
 
                                     // 3. Color button

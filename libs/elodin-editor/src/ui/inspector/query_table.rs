@@ -100,7 +100,7 @@ impl WidgetSystem for InspectorQueryTable<'_, '_> {
             });
 
         ui.separator();
-        ui.label(egui::RichText::new("Query").color(get_scheme().text_secondary));
+        ui.label(egui::RichText::new("QUERY").color(get_scheme().text_secondary));
         theme::configure_input_with_border(ui.style_mut());
         let query_type = table.data.query_type;
         let query_res = ui.add(query(&mut table.data.query, query_type));

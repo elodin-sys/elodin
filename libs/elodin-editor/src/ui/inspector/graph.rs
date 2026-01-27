@@ -167,7 +167,7 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
                         }
                     });
                     ui.separator();
-                    ui.label(egui::RichText::new("Query").color(get_scheme().text_secondary));
+                    ui.label(egui::RichText::new("QUERY").color(get_scheme().text_secondary));
                     configure_input_with_border(ui.style_mut());
                     let query_type = query_plot.data.query_type;
                     let query_res = ui.add(query(&mut query_plot.data.query, query_type));
