@@ -878,7 +878,9 @@ impl State {
             component_metadata.set_timestamp_source(true);
         }
         let component = Component::create(db_path, component_id, name, schema, Timestamp::now())?;
-        if !self.component_metadata.contains_key(&component_id) {
+        // Always update metadata if this is a timestamp source, or if metadata doesn't exist yet
+        // This ensures the timestamp source flag is preserved even if metadata was set earlier
+        if is_timestamp_source || !self.component_metadata.contains_key(&component_id) {
             self.set_component_metadata(component_metadata, db_path)?;
         }
         self.components.insert(component_id, component);
@@ -895,19 +897,37 @@ impl State {
 
     pub fn set_component_metadata(
         &mut self,
-        metadata: ComponentMetadata,
+        mut metadata: ComponentMetadata,
         db_path: &Path,
     ) -> Result<(), Error> {
         let component_metadata_path = db_path.join(metadata.component_id.to_string());
         std::fs::create_dir_all(&component_metadata_path)?;
         let component_metadata_path = component_metadata_path.join("metadata");
+        
+        // Preserve existing metadata flags, especially _is_timestamp_source
+        // This is critical because SetComponentMetadata may be called after
+        // insert_component_with_timestamp_source_flag has already set the flag
+        if let Some(existing_metadata) = self.component_metadata.get(&metadata.component_id) {
+            // Preserve the timestamp source flag if it was already set
+            if existing_metadata.is_timestamp_source() {
+                metadata.set_timestamp_source(true);
+            }
+            // Merge other metadata flags from existing metadata
+            for (key, value) in existing_metadata.metadata.iter() {
+                // Only preserve internal flags (starting with _) that aren't being overwritten
+                if key.starts_with('_') && !metadata.metadata.contains_key(key) {
+                    metadata.metadata.insert(key.clone(), value.clone());
+                }
+            }
+        }
+        
         if component_metadata_path.exists()
             && ComponentMetadata::read(&component_metadata_path)? == metadata
         {
             return Ok(());
         }
-        info!(component.name= ?metadata.name, component.id = ?metadata.component_id.0, "setting component metadata");
-        metadata.write(component_metadata_path)?;
+        info!(component.name= ?metadata.name, component.id = ?metadata.component_id.0, is_timestamp_source = metadata.is_timestamp_source(), "setting component metadata");
+        metadata.write(&component_metadata_path)?;
         // Sync the name to the Component for better warning messages
         if let Some(component) = self.components.get(&metadata.component_id) {
             component.set_name(metadata.name.clone());
