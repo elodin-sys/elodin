@@ -5,7 +5,6 @@
 ## v0.16
 
 ### v0.16.0
-### v0.16.0
 - **(feat)** Add elodin-db subcommands: `info`, `merge`, `prune`, `time-align`, `truncate`, `drop`. (#410, #437)
 - **(feat)** Add `@elodin.map_seq` to preserve `cond()` behavior. (#444)
 - **(feat)** Right-click on tab title shows context menu to open inspector or rename. (#440)
