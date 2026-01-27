@@ -93,9 +93,16 @@ class Query(Generic[Unpack[A]]):
         out_tps: Union[Tuple[Annotated[Any, Component], ...], Annotated[Any, Component]],
         f: Callable[[Unpack[A]], Union[Tuple[Unpack[S]], T]],
     ) -> "Query[Unpack[S]]":
+        """This maps a query to another query via a given function f.
+
+        It will convert `jax.lax.cond` which only evaluates one consequent to
+        `jax.lax.select` which always evaluates both consequents. If one of the
+        consequents is seldom needed and expensive, consider using `map_seq`.
+        """
         out_tps_tuple: Tuple[Annotated[Any, Component], ...] = (
             (out_tps,) if not isinstance(out_tps, tuple) else out_tps
         )
+
         buf = jax.vmap(
             lambda b: f(
                 *[from_array(cls, x) for (x, cls) in zip(b, self.component_classes)]  # type: ignore
@@ -104,6 +111,59 @@ class Query(Generic[Unpack[A]]):
             out_axes=0,
         )(self.bufs)
         (bufs, _) = tree_flatten(buf)
+        inner = None
+        component_data = []
+        component_classes = []
+        for out_tp, buf in zip(out_tps_tuple, bufs):
+            this_inner = self.inner.map(buf, Component.of(out_tp))  # type: ignore
+            if inner is None:
+                inner = this_inner
+            else:
+                inner = inner.join_query(this_inner)
+            component_data += [Component.of(out_tp)]  # type: ignore
+            component_classes += [out_tp]
+        if inner is None:
+            raise Exception("query returned no components")
+        return Query(inner, component_data, component_classes)
+
+    def map_seq(
+        self,
+        out_tps: Union[Tuple[Annotated[Any, Component], ...], Annotated[Any, Component]],
+        f: Callable[[Unpack[A]], Union[Tuple[Unpack[S]], T]],
+    ) -> "Query[Unpack[S]]":
+        """This maps a query to another query via a given function f sequentially.
+
+        It will not convert `jax.lax.cond` which only evaluates one consequent
+        to `jax.lax.select` which always evaluates both consequents. Only use
+        this if one of your consequents is very expensive to compute.
+        """
+        out_tps_tuple: Tuple[Annotated[Any, Component], ...] = (
+            (out_tps,) if not isinstance(out_tps, tuple) else out_tps
+        )
+        batch_size = self.bufs[0].shape[0] if len(self.bufs) > 0 else 0
+
+        # For single entity or use_vmap=False, call function directly
+        # without vmap. This preserves jax.lax.cond semantics: only one
+        # branch executes.
+        def call_single(idx):
+            args = [from_array(cls, b[idx]) for (b, cls) in zip(self.bufs, self.component_classes)]
+            return f(*args)
+
+        if batch_size == 0:
+            bufs = []
+        elif batch_size == 1:
+            result = call_single(0)
+            # Flatten and wrap each leaf in batch dimension.
+            flat, _ = tree_flatten(result)
+            bufs = [jax.numpy.expand_dims(b, axis=0) for b in flat]
+        else:
+            # Multiple entities without vmap: use sequential loop.
+            results = [call_single(i) for i in range(batch_size)]
+            # Flatten first result to get structure, then stack
+            # corresponding elements from all results.
+            first_flat, _ = tree_flatten(results[0])
+            all_flat = [tree_flatten(r)[0] for r in results]
+            bufs = [jax.numpy.stack([af[j] for af in all_flat]) for j in range(len(first_flat))]
         inner = None
         component_data = []
         component_classes = []
@@ -173,6 +233,28 @@ def map(
     @system
     def inner(q: query) -> Query[return_ty]:  # type: ignore
         return q.map(return_ty, func)
+
+    return inner
+
+
+def map_seq(
+    func: Callable[..., Union[Tuple[Annotated[Any, Component], ...], Annotated[Any, Component]]],
+) -> System:
+    """Like @map but uses sequential execution instead of vmap.
+
+    This preserves jax.lax.cond semantics (only one branch executes).
+    Use when one branch of a conditional is expensive and rarely needed.
+    """
+    sig = inspect.signature(func)
+    tys = list(sig.parameters.values())
+    query = Query[tuple(ty.annotation for ty in tys)]  # type: ignore
+    return_ty = sig.return_annotation
+    if isinstance(return_ty, types.GenericAlias):
+        return_ty = tuple(return_ty.__args__)
+
+    @system
+    def inner(q: query) -> Query[return_ty]:  # type: ignore
+        return q.map_seq(return_ty, func)
 
     return inner
 
