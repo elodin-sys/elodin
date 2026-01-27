@@ -1853,24 +1853,34 @@ impl<'w, 's> TileSystem<'w, 's> {
             render_sidebar_toolbar(ui, left_sidebar_visible, right_sidebar_visible);
 
         if let Some(action) = toolbar_action {
-            let mut query = world.query::<&mut WindowState>();
-            if let Ok(mut window_state) = query.get_mut(world, target_window) {
-                match action {
-                    ToolbarAction::LeftSidebar => {
-                        window_state.ui_state.left_sidebar_visible =
-                            !window_state.ui_state.left_sidebar_visible;
+            match action {
+                ToolbarAction::LeftSidebar | ToolbarAction::RightSidebar => {
+                    let mut query = world.query::<&mut WindowState>();
+                    if let Ok(mut window_state) = query.get_mut(world, target_window) {
+                        match action {
+                            ToolbarAction::LeftSidebar => {
+                                window_state.ui_state.left_sidebar_visible =
+                                    !window_state.ui_state.left_sidebar_visible;
+                            }
+                            ToolbarAction::RightSidebar => {
+                                window_state.ui_state.right_sidebar_visible =
+                                    !window_state.ui_state.right_sidebar_visible;
+                            }
+                            ToolbarAction::Theme => unreachable!(),
+                        }
                     }
-                    ToolbarAction::RightSidebar => {
-                        window_state.ui_state.right_sidebar_visible =
-                            !window_state.ui_state.right_sidebar_visible;
-                    }
-                    ToolbarAction::Theme => {
-                        let current = colors::current_selection();
-                        let is_dark = current.mode.eq_ignore_ascii_case("dark");
-                        let new_mode = if is_dark { "light" } else { "dark" };
-                        if colors::scheme_supports_mode(&current.scheme, new_mode) {
-                            colors::apply_scheme_and_mode(&current.scheme, new_mode);
-                            super::theme::set_theme(ui.ctx());
+                }
+                ToolbarAction::Theme => {
+                    let current = colors::current_selection();
+                    let is_dark = current.mode.eq_ignore_ascii_case("dark");
+                    let new_mode = if is_dark { "light" } else { "dark" };
+                    if colors::scheme_supports_mode(&current.scheme, new_mode) {
+                        colors::apply_scheme_and_mode(&current.scheme, new_mode);
+                        super::theme::set_theme(ui.ctx());
+                        // Update descriptor.mode on all windows so schematic saving persists the correct theme
+                        let mut query = world.query::<&mut WindowState>();
+                        for mut state in query.iter_mut(world) {
+                            state.descriptor.mode = Some(new_mode.to_string());
                         }
                     }
                 }
