@@ -1224,6 +1224,12 @@ pub fn update_eql_context(
         path_reg.0.iter().filter_map(|(id, path)| {
             let schema = component_schema_registry.0.get(id)?;
             let metadata = component_metadata_registry.0.get(id)?;
+            
+            // Exclude timestamp source components from the EQL context.
+            if metadata.is_timestamp_source() {
+                return None;
+            }
+            
             let mut component = eql::Component::new(metadata.name.clone(), path.id, schema.clone());
             if !metadata.element_names().is_empty() {
                 component.element_names = metadata
