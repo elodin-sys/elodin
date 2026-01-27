@@ -60,9 +60,6 @@ impl WidgetSystem for MonitorWidget<'_, '_> {
         egui::Frame::NONE
             .inner_margin(egui::Margin::same(8))
             .show(ui, |ui| {
-                let label = RichText::new(&metadata.name).monospace().size(25.);
-                ui.label(label);
-                ui.add_space(20.0);
                 let width = ui.max_rect().width();
                 ui.horizontal_wrapped(|ui| {
                     ui.set_width(width);
@@ -135,12 +132,16 @@ impl WidgetSystem for MonitorWidget<'_, '_> {
                                                 }
                                             };
                                             ui.add_space(8.0);
-                                            let value = RichText::new(value).monospace().size(18.);
+                                            let scheme = get_scheme();
+                                            let value = RichText::new(value)
+                                                .monospace()
+                                                .size(18.)
+                                                .color(scheme.text_primary);
                                             ui.label(value);
                                             let label = RichText::new(label)
                                                 .size(13.0)
                                                 .monospace()
-                                                .color(get_scheme().text_secondary);
+                                                .color(scheme.text_secondary);
                                             ui.add_space(8.0);
                                             ui.label(label);
                                         },

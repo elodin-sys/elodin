@@ -374,10 +374,19 @@ impl RootWidgetSystem for MainLayout<'_, '_> {
     ) {
         let _state = state.get_mut(world);
 
+        // Update theme every frame to reflect color scheme changes
+        theme::set_theme(ctx);
+
         #[cfg(not(target_family = "wasm"))]
         world.add_root_widget::<status_bar::StatusBar>("status_bar");
 
-        let frame = egui::Frame::new();
+        #[allow(unused_mut)]
+        let mut frame = egui::Frame::new();
+        #[cfg(target_os = "macos")]
+        {
+            // Leave room for the native titlebar controls on the primary window.
+            frame.inner_margin.top = 32;
+        }
 
         egui::CentralPanel::default().frame(frame).show(ctx, |ui| {
             ui.add_widget::<timeline::TimelinePanel>(world, "timeline_panel");

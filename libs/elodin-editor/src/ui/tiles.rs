@@ -57,14 +57,14 @@ use crate::{
         gizmos::GIZMO_RENDER_LAYER,
         navigation_gizmo::{RenderLayerAlloc, spawn_gizmo},
     },
-    ui::dashboard::NodeUpdaterParams,
+    ui::{colors::ColorExt, dashboard::NodeUpdaterParams},
 };
 
 pub(crate) mod sidebar;
 
 use sidebar::{
     SidebarKind, SidebarMaskState, apply_share_updates, collect_sidebar_gutter_updates,
-    tab_add_visible, tab_title_visible, tile_is_sidebar,
+    tab_add_visible, tile_is_sidebar,
 };
 
 pub(crate) fn plugin(app: &mut App) {
@@ -1471,7 +1471,7 @@ impl TileState {
     pub fn new(tree_id: Id) -> Self {
         Self {
             tree: egui_tiles::Tree::new_tabs(tree_id, vec![]),
-            tree_actions: smallvec![TreeAction::AddSidebars],
+            tree_actions: smallvec![],
             graphs: HashMap::new(),
             container_titles: HashMap::new(),
             sidebar_state: SidebarMaskState::default(),
@@ -1481,7 +1481,7 @@ impl TileState {
 
     fn reset_tree(&mut self) {
         self.tree = egui_tiles::Tree::new_tabs(self.tree_id, vec![]);
-        self.tree_actions = smallvec![TreeAction::AddSidebars];
+        self.tree_actions = smallvec![];
         self.sidebar_state = SidebarMaskState::default();
     }
 }
@@ -1511,6 +1511,7 @@ struct TreeBehavior<'w> {
     container_titles: HashMap<TileId, String>,
     read_only: bool,
     target_window: Entity,
+    inspector_visible: bool,
 }
 
 type ShareUpdate = (TileId, TileId, TileId, f32, f32);
@@ -1530,6 +1531,9 @@ pub enum TreeAction {
     AddSidebars,
     DeleteTab(TileId),
     SelectTile(TileId),
+    OpenInspector(TileId),
+    HideInspector,
+    StartRenaming(TileId),
     RenameContainer(TileId, String),
     RenamePane(TileId, String),
 }
@@ -1573,13 +1577,6 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
         tile_id: egui_tiles::TileId,
         state: &egui_tiles::TabState,
     ) -> egui::Response {
-        if !tab_title_visible(tiles, tile_id) {
-            let min_width = self.tab_title_spacing(ui.visuals()) * 2.0;
-            let (_, rect) = ui.allocate_space(vec2(min_width, ui.available_height()));
-            let response = ui.interact(rect, id, egui::Sense::click_and_drag());
-            return self.on_tab_button(tiles, tile_id, response);
-        }
-
         let tab_state = if state.active {
             TabState::Selected
         } else {
@@ -1595,27 +1592,22 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
             .data(|d| d.get_temp::<bool>(edit_flag_id))
             .unwrap_or(false);
 
-        let title_str: String = if is_container {
+        // Get title: check for custom/edited title first, then container titles, then pane title
+        let title_str: String =
             if let Some(custom) = ui.ctx().data(|d| d.get_temp::<String>(persist_id)) {
                 custom
-            } else if let Some(t) = self.container_titles.get(&tile_id) {
-                t.clone()
-            } else {
-                match tiles.get(tile_id) {
-                    Some(egui_tiles::Tile::Container(Container::Tabs(_))) => {
-                        // Hide Tabs containers without custom name (wrapper Tabs)
-                        let min_width = self.tab_title_spacing(ui.visuals()) * 2.0;
-                        let (_, rect) = ui.allocate_space(vec2(min_width, ui.available_height()));
-                        let response = ui.interact(rect, id, egui::Sense::click_and_drag());
-                        return self.on_tab_button(tiles, tile_id, response);
+            } else if is_container {
+                if let Some(t) = self.container_titles.get(&tile_id) {
+                    t.clone()
+                } else {
+                    match tiles.get(tile_id) {
+                        Some(egui_tiles::Tile::Container(c)) => format!("{:?}", c.kind()),
+                        _ => "Container".to_owned(),
                     }
-                    Some(egui_tiles::Tile::Container(c)) => format!("{:?}", c.kind()),
-                    _ => "Container".to_owned(),
                 }
-            }
-        } else {
-            self.tab_title_for_tile(tiles, tile_id).text().to_string()
-        };
+            } else {
+                self.tab_title_for_tile(tiles, tile_id).text().to_string()
+            };
 
         let mut font_id = egui::TextStyle::Button.resolve(ui.style());
         font_id.size = 11.0;
@@ -1659,16 +1651,32 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
             is_editing = true;
         }
 
+        // Check for rename signal from context menu
+        let rename_signal_id = egui::Id::new(("start_renaming_signal", tile_id));
+        if !self.read_only
+            && !is_editing
+            && ui
+                .ctx()
+                .data(|d| d.get_temp::<bool>(rename_signal_id))
+                .unwrap_or(false)
+        {
+            ui.ctx().data_mut(|d| d.remove::<bool>(rename_signal_id));
+            ui.ctx()
+                .data_mut(|d| d.insert_temp(edit_buf_id, title_str.clone()));
+            ui.ctx().data_mut(|d| d.insert_temp(edit_flag_id, true));
+            is_editing = true;
+        }
+
         if ui.is_rect_visible(rect) && !state.is_being_dragged {
             let scheme = get_scheme();
             let bg_color = match tab_state {
-                TabState::Selected => scheme.text_primary,
+                TabState::Selected => scheme.bg_secondary,
                 TabState::Inactive => scheme.bg_secondary,
             };
 
             let text_color = match tab_state {
-                TabState::Selected => scheme.bg_secondary,
-                TabState::Inactive => with_opacity(scheme.text_primary, 0.6),
+                TabState::Selected => scheme.text_primary,
+                TabState::Inactive => with_opacity(scheme.text_primary, 0.5),
             };
 
             ui.painter().rect_filled(rect, 0.0, bg_color);
@@ -1685,7 +1693,7 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
 
                 let resp = ui
                     .scope(|ui| {
-                        ui.visuals_mut().override_text_color = Some(Color32::BLACK);
+                        ui.visuals_mut().override_text_color = Some(scheme.text_primary);
                         ui.put(
                             edit_rect,
                             egui::TextEdit::singleline(&mut buf)
@@ -1756,12 +1764,17 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
             }
 
             ui.add_space(-3.0 * x_margin);
+            let is_hovered = response.hovered() || response.has_focus();
             let close_response = ui.add(
                 EImageButton::new(self.icons.close)
                     .scale(1.3, 1.3)
-                    .image_tint(match tab_state {
-                        TabState::Inactive => scheme.text_primary,
-                        TabState::Selected => scheme.bg_primary,
+                    .image_tint(if is_hovered {
+                        match tab_state {
+                            TabState::Inactive => with_opacity(scheme.text_primary, 0.5),
+                            TabState::Selected => scheme.text_primary,
+                        }
+                    } else {
+                        colors::TRANSPARENT
                     })
                     .bg_color(colors::TRANSPARENT)
                     .hovered_bg_color(colors::TRANSPARENT),
@@ -1772,16 +1785,63 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
 
             ui.painter().hline(
                 rect.x_range(),
+                rect.top(),
+                egui::Stroke::new(1.0, scheme.border_primary),
+            );
+            ui.painter().hline(
+                rect.x_range(),
                 rect.bottom(),
                 egui::Stroke::new(1.0, scheme.border_primary),
             );
 
+            // Draw separator lines on both sides of each tab
+            ui.painter().vline(
+                rect.left(),
+                rect.y_range(),
+                egui::Stroke::new(1.0, scheme.border_primary),
+            );
             ui.painter().vline(
                 rect.right(),
                 rect.y_range(),
                 egui::Stroke::new(1.0, scheme.border_primary),
             );
         }
+
+        // Context menu on right-click
+        let inspector_visible = self.inspector_visible;
+        response.context_menu(|ui| {
+            let scheme = get_scheme();
+            ui.style_mut().spacing.item_spacing = egui::vec2(0.0, 4.0);
+            ui.style_mut().visuals.widgets.hovered.bg_fill = scheme.highlight;
+            ui.style_mut().visuals.widgets.hovered.fg_stroke =
+                egui::Stroke::new(1.0, scheme.text_primary);
+            ui.style_mut().visuals.widgets.inactive.bg_fill = colors::TRANSPARENT;
+            ui.style_mut().visuals.widgets.inactive.fg_stroke =
+                egui::Stroke::new(1.0, scheme.text_primary.opacity(0.5));
+
+            egui::Frame::NONE
+                .inner_margin(egui::Margin::same(10))
+                .show(ui, |ui| {
+                    ui.set_min_width(140.0);
+                    let inspector_label = if inspector_visible {
+                        "Hide Inspector"
+                    } else {
+                        "Show Inspector"
+                    };
+                    if ui.button(inspector_label).clicked() {
+                        if inspector_visible {
+                            self.tree_actions.push(TreeAction::HideInspector);
+                        } else {
+                            self.tree_actions.push(TreeAction::OpenInspector(tile_id));
+                        }
+                        ui.close();
+                    }
+                    if ui.button("Rename Tab").clicked() {
+                        self.tree_actions.push(TreeAction::StartRenaming(tile_id));
+                        ui.close();
+                    }
+                });
+        });
 
         self.on_tab_button(tiles, tile_id, response)
     }
@@ -1797,6 +1857,7 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
         } else if button_response.clicked() {
             self.tree_actions.push(TreeAction::SelectTile(tile_id));
         }
+        // Note: double-click is handled in tab_ui for renaming.
         button_response
     }
 
@@ -1810,10 +1871,10 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
 
     fn simplification_options(&self) -> egui_tiles::SimplificationOptions {
         egui_tiles::SimplificationOptions {
-            prune_empty_tabs: false,
+            prune_empty_tabs: true,
             all_panes_must_have_tabs: true,
             join_nested_linear_containers: true,
-            prune_single_child_tabs: false, // Keep tabs container even with single child
+            prune_single_child_tabs: true, // Keep tabs container even with single child
             ..Default::default()
         }
     }
@@ -2015,6 +2076,11 @@ impl RootWidgetSystem for TileSystem<'_, '_> {
         ctx: &mut egui::Context,
         target: Self::Args,
     ) {
+        // Update theme for secondary windows to reflect color scheme changes
+        if target.is_some() {
+            super::theme::set_theme(ctx);
+        }
+
         let Some((icons, is_empty_tile_tree, read_only)) =
             Self::prepare_panel_data(world, state, target)
         else {
@@ -2255,8 +2321,24 @@ impl WidgetSystem for TileLayout<'_, '_> {
                 container_titles,
                 read_only,
                 target_window,
+                inspector_visible: !sidebar_state.inspector_masked,
             };
             tree.ui(&mut behavior, ui);
+
+            // Ensure all Tabs containers have an active tab after drag/drop operations
+            for (_id, tile) in tree.tiles.iter_mut() {
+                if let Tile::Container(Container::Tabs(tabs)) = tile
+                    && !tabs.children.is_empty()
+                {
+                    // If no active tab or active tab is not in children, select the first child
+                    let needs_active =
+                        tabs.active.is_none() || !tabs.children.contains(&tabs.active.unwrap());
+                    if needs_active {
+                        tabs.active = tabs.children.first().copied();
+                    }
+                }
+            }
+
             let empty_overlay_rect = if show_empty_overlay {
                 main_content_rect(&tree).or_else(|| Some(ui.max_rect()))
             } else {
@@ -2363,7 +2445,34 @@ impl WidgetSystem for TileLayout<'_, '_> {
                             state_mut.commands.entity(pane.entity).despawn();
                         };
 
+                        // Find a sibling to select if the deleted tile was active
+                        let sibling_to_select =
+                            tile_state.tree.tiles.iter().find_map(|(parent_id, tile)| {
+                                if let Tile::Container(Container::Tabs(tabs)) = tile
+                                    && tabs.active == Some(tile_id)
+                                    && tabs.children.contains(&tile_id)
+                                {
+                                    // Find a sibling that's not the one being deleted
+                                    let sibling = tabs
+                                        .children
+                                        .iter()
+                                        .find(|&&child| child != tile_id)
+                                        .copied();
+                                    sibling.map(|s| (*parent_id, s))
+                                } else {
+                                    None
+                                }
+                            });
+
                         tile_state.tree.remove_recursively(tile_id);
+
+                        // Select the sibling if we found one
+                        if let Some((parent_id, sibling_id)) = sibling_to_select
+                            && let Some(Tile::Container(Container::Tabs(tabs))) =
+                                tile_state.tree.tiles.get_mut(parent_id)
+                        {
+                            tabs.set_active(sibling_id);
+                        }
 
                         if let Some(graph_id) = tile_state.graphs.get(&tile_id) {
                             state_mut.commands.entity(*graph_id).despawn();
@@ -2527,8 +2636,48 @@ impl WidgetSystem for TileLayout<'_, '_> {
                             if let Some(kind) = pane.sidebar_kind() {
                                 unmask_sidebar_by_kind(tile_state, kind);
                             }
+                        }
+                    }
+                    TreeAction::OpenInspector(tile_id) => {
+                        tile_state.tree.make_active(|id, _| id == tile_id);
+
+                        if let Some(egui_tiles::Tile::Pane(pane)) =
+                            tile_state.tree.tiles.get(tile_id)
+                        {
+                            match pane {
+                                Pane::Graph(graph) => {
+                                    ui_state.selected_object =
+                                        SelectedObject::Graph { graph_id: graph.id };
+                                }
+                                Pane::QueryPlot(plot) => {
+                                    ui_state.selected_object = SelectedObject::Graph {
+                                        graph_id: plot.entity,
+                                    };
+                                }
+                                Pane::Viewport(viewport) => {
+                                    if let Some(camera) = viewport.camera {
+                                        ui_state.selected_object =
+                                            SelectedObject::Viewport { camera };
+                                    }
+                                }
+                                _ => {}
+                            }
+                            if let Some(kind) = pane.sidebar_kind() {
+                                unmask_sidebar_by_kind(tile_state, kind);
+                            }
                             unmask_sidebar_by_kind(tile_state, SidebarKind::Inspector);
                         }
+                    }
+                    TreeAction::HideInspector => {
+                        tile_state
+                            .sidebar_state
+                            .set_masked(SidebarKind::Inspector, true);
+                    }
+                    TreeAction::StartRenaming(tile_id) => {
+                        // Signal that this tile should start editing next frame
+                        ui.ctx().data_mut(|d| {
+                            d.insert_temp(egui::Id::new(("start_renaming_signal", tile_id)), true)
+                        });
                     }
                     TreeAction::AddActionTile(parent_tile_id, button_name, lua_code) => {
                         let name = button_name.clone();
