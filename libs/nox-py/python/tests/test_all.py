@@ -537,3 +537,439 @@ def test_external_control_waiting():
     assert np.isclose(df["e1.x"][-1], 1.0)  # Should be 1.0 + 0.0
 
     print("External control waiting test passed!")
+
+
+def test_map_seq_single_entity():
+    """Test map_seq with a single entity (batch_size == 1)."""
+
+    @el.system
+    def double_x_seq(q: el.Query[X]) -> el.Query[X]:
+        return q.map_seq(X, lambda x: x * 2)
+
+    @dataclass
+    class Test(el.Archetype):
+        x: X
+
+    w = el.World()
+    w.spawn(Test(np.array(5.0)), "e1")
+    exec = w.build(double_x_seq)
+    exec.run()
+    exec.run()
+    df = exec.history("e1.x")
+
+    expected_df = pl.DataFrame({"e1.x": [5.0, 10.0, 20.0]})
+    assert_frame_equal(df.drop("time"), expected_df)
+
+
+def test_map_seq_multiple_entities():
+    """Test map_seq with multiple entities (batch_size > 1)."""
+
+    @el.system
+    def double_x_seq(q: el.Query[X]) -> el.Query[X]:
+        return q.map_seq(X, lambda x: x * 2)
+
+    @dataclass
+    class Test(el.Archetype):
+        x: X
+
+    w = el.World()
+    w.spawn(Test(np.array(1.0)), "e1")
+    w.spawn(Test(np.array(2.0)), "e2")
+    w.spawn(Test(np.array(3.0)), "e3")
+    exec = w.build(double_x_seq)
+    exec.run()
+    exec.run()
+    df = exec.history(["e1.x", "e2.x", "e3.x"])
+
+    expected_df = pl.DataFrame({
+        "e1.x": [1.0, 2.0, 4.0],
+        "e2.x": [2.0, 4.0, 8.0],
+        "e3.x": [3.0, 6.0, 12.0],
+    })
+    assert_frame_equal(df.drop("time"), expected_df)
+
+
+def test_map_seq_multiple_outputs():
+    """Test map_seq with multiple output components."""
+
+    @el.system
+    def swap_xy_seq(q: el.Query[X, Y]) -> el.Query[X, Y]:
+        return q.map_seq((X, Y), lambda x, y: (y, x))
+
+    @dataclass
+    class Test(el.Archetype):
+        x: X
+        y: Y
+
+    w = el.World()
+    w.spawn(Test(np.array(1.0), np.array(10.0)), "e1")
+    w.spawn(Test(np.array(2.0), np.array(20.0)), "e2")
+    exec = w.build(swap_xy_seq)
+    exec.run()
+    df = exec.history(["e1.x", "e1.y", "e2.x", "e2.y"])
+
+    expected_df = pl.DataFrame({
+        "e1.x": [1.0, 10.0],
+        "e1.y": [10.0, 1.0],
+        "e2.x": [2.0, 20.0],
+        "e2.y": [20.0, 2.0],
+    })
+    assert_frame_equal(df.drop("time"), expected_df)
+
+
+def test_map_vs_map_seq_results_match_batch_size_1():
+    """Test that map and map_seq produce the same results with batch_size == 1."""
+
+    @el.system
+    def compute_with_map(q: el.Query[X, Y]) -> el.Query[X]:
+        return q.map(X, lambda x, y: x * y + 1.0)
+
+    @el.system
+    def compute_with_map_seq(q: el.Query[X, Y]) -> el.Query[X]:
+        return q.map_seq(X, lambda x, y: x * y + 1.0)
+
+    @dataclass
+    class Test(el.Archetype):
+        x: X
+        y: Y
+
+    # Test with map - single entity
+    w1 = el.World()
+    w1.spawn(Test(np.array(2.0), np.array(3.0)), "e1")
+    exec1 = w1.build(compute_with_map)
+    exec1.run()
+    exec1.run()
+    df1 = exec1.history(["e1.x"])
+
+    # Test with map_seq - single entity
+    w2 = el.World()
+    w2.spawn(Test(np.array(2.0), np.array(3.0)), "e1")
+    exec2 = w2.build(compute_with_map_seq)
+    exec2.run()
+    exec2.run()
+    df2 = exec2.history(["e1.x"])
+
+    # Results should match: 2*3+1=7, then 7*3+1=22
+    assert_frame_equal(df1.drop("time"), df2.drop("time"))
+    expected_df = pl.DataFrame({"e1.x": [2.0, 7.0, 22.0]})
+    assert_frame_equal(df1.drop("time"), expected_df)
+
+
+def test_map_vs_map_seq_results_match_batch_size_2():
+    """Test that map and map_seq produce the same results with batch_size == 2."""
+
+    @el.system
+    def compute_with_map(q: el.Query[X, Y]) -> el.Query[X]:
+        return q.map(X, lambda x, y: x * y + 1.0)
+
+    @el.system
+    def compute_with_map_seq(q: el.Query[X, Y]) -> el.Query[X]:
+        return q.map_seq(X, lambda x, y: x * y + 1.0)
+
+    @dataclass
+    class Test(el.Archetype):
+        x: X
+        y: Y
+
+    # Test with map - two entities
+    w1 = el.World()
+    w1.spawn(Test(np.array(2.0), np.array(3.0)), "e1")
+    w1.spawn(Test(np.array(4.0), np.array(5.0)), "e2")
+    exec1 = w1.build(compute_with_map)
+    exec1.run()
+    df1 = exec1.history(["e1.x", "e2.x"])
+
+    # Test with map_seq - two entities
+    w2 = el.World()
+    w2.spawn(Test(np.array(2.0), np.array(3.0)), "e1")
+    w2.spawn(Test(np.array(4.0), np.array(5.0)), "e2")
+    exec2 = w2.build(compute_with_map_seq)
+    exec2.run()
+    df2 = exec2.history(["e1.x", "e2.x"])
+
+    # Results should match: e1: 2*3+1=7, e2: 4*5+1=21
+    assert_frame_equal(df1.drop("time"), df2.drop("time"))
+    expected_df = pl.DataFrame({"e1.x": [2.0, 7.0], "e2.x": [4.0, 21.0]})
+    assert_frame_equal(df1.drop("time"), expected_df)
+
+
+def test_map_vs_map_seq_results_match_batch_size_0():
+    """Test that map and map_seq handle batch_size == 0 (no matching entities).
+    
+    Currently, elodin's Rust backend panics when building a system that queries
+    for a component that no entity has. This test documents that behavior.
+    """
+    # Define a component that no entity will have
+    Z = ty.Annotated[jax.Array, el.Component("z_unused", el.ComponentType.F64)]
+
+    @el.system
+    def compute_with_map(q: el.Query[Z]) -> el.Query[Z]:
+        return q.map(Z, lambda z: z * 2.0)
+
+    @el.system
+    def compute_with_map_seq(q: el.Query[Z]) -> el.Query[Z]:
+        return q.map_seq(Z, lambda z: z * 2.0)
+
+    @dataclass
+    class Test(el.Archetype):
+        x: X  # Only has X, not Z
+
+    # Test with map - no entities have Z component
+    # Elodin's Rust backend currently panics when no entities have the queried component
+    w1 = el.World()
+    w1.spawn(Test(np.array(1.0)), "e1")
+    map_raised = False
+    try:
+        exec1 = w1.build(compute_with_map)
+    except BaseException as e:
+        # pyo3_runtime.PanicException is a BaseException subclass
+        if "PanicException" in type(e).__name__:
+            map_raised = True
+        else:
+            raise
+    assert map_raised, "Expected PanicException when no entities have the queried component"
+
+    # Test with map_seq - same behavior expected
+    w2 = el.World()
+    w2.spawn(Test(np.array(1.0)), "e1")
+    map_seq_raised = False
+    try:
+        exec2 = w2.build(compute_with_map_seq)
+    except BaseException as e:
+        if "PanicException" in type(e).__name__:
+            map_seq_raised = True
+        else:
+            raise
+    assert map_seq_raised, "Expected PanicException when no entities have the queried component"
+
+
+def test_map_vs_map_seq_with_multiple_outputs():
+    """Test that map and map_seq match with multiple output components."""
+
+    @el.system
+    def compute_with_map(q: el.Query[X, Y]) -> el.Query[X, Y]:
+        return q.map((X, Y), lambda x, y: (x + y, x * y))
+
+    @el.system
+    def compute_with_map_seq(q: el.Query[X, Y]) -> el.Query[X, Y]:
+        return q.map_seq((X, Y), lambda x, y: (x + y, x * y))
+
+    @dataclass
+    class Test(el.Archetype):
+        x: X
+        y: Y
+
+    # Test with map - three entities
+    w1 = el.World()
+    w1.spawn(Test(np.array(1.0), np.array(2.0)), "e1")
+    w1.spawn(Test(np.array(3.0), np.array(4.0)), "e2")
+    w1.spawn(Test(np.array(5.0), np.array(6.0)), "e3")
+    exec1 = w1.build(compute_with_map)
+    exec1.run()
+    df1 = exec1.history(["e1.x", "e1.y", "e2.x", "e2.y", "e3.x", "e3.y"])
+
+    # Test with map_seq - three entities
+    w2 = el.World()
+    w2.spawn(Test(np.array(1.0), np.array(2.0)), "e1")
+    w2.spawn(Test(np.array(3.0), np.array(4.0)), "e2")
+    w2.spawn(Test(np.array(5.0), np.array(6.0)), "e3")
+    exec2 = w2.build(compute_with_map_seq)
+    exec2.run()
+    df2 = exec2.history(["e1.x", "e1.y", "e2.x", "e2.y", "e3.x", "e3.y"])
+
+    # Results should match
+    assert_frame_equal(df1.drop("time"), df2.drop("time"))
+    # e1: x=1+2=3, y=1*2=2
+    # e2: x=3+4=7, y=3*4=12
+    # e3: x=5+6=11, y=5*6=30
+    expected_df = pl.DataFrame({
+        "e1.x": [1.0, 3.0],
+        "e1.y": [2.0, 2.0],
+        "e2.x": [3.0, 7.0],
+        "e2.y": [4.0, 12.0],
+        "e3.x": [5.0, 11.0],
+        "e3.y": [6.0, 30.0],
+    })
+    assert_frame_equal(df1.drop("time"), expected_df)
+
+
+def test_map_seq_preserves_cond_semantics():
+    """Test that map_seq preserves jax.lax.cond semantics.
+    
+    With map (vmap), jax.lax.cond becomes jax.lax.select which evaluates
+    both branches. With map_seq, only one branch should execute.
+    
+    We verify this by checking that the computation produces correct results
+    when using jax.lax.cond inside the mapped function.
+    """
+    import jax.lax as lax
+
+    # Counter component to track which branch was "logically" taken
+    BranchTaken = ty.Annotated[jax.Array, el.Component("branch_taken", el.ComponentType.F64)]
+
+    @el.system
+    def cond_with_map_seq(q: el.Query[X]) -> el.Query[X, BranchTaken]:
+        def conditional_compute(x):
+            # If x > 5, multiply by 2, else multiply by 10
+            def true_branch(_):
+                return x * 2.0
+            
+            def false_branch(_):
+                return x * 10.0
+            
+            result = lax.cond(x > 5.0, true_branch, false_branch, operand=None)
+            branch_taken = lax.cond(x > 5.0, lambda _: 1.0, lambda _: 0.0, operand=None)
+            return result, branch_taken
+        
+        return q.map_seq((X, BranchTaken), conditional_compute)
+
+    @dataclass
+    class Test(el.Archetype):
+        x: X
+        branch_taken: BranchTaken
+
+    w = el.World()
+    w.spawn(Test(np.array(3.0), np.array(0.0)), "e1")  # x <= 5, should take false branch
+    w.spawn(Test(np.array(10.0), np.array(0.0)), "e2")  # x > 5, should take true branch
+    exec = w.build(cond_with_map_seq)
+    exec.run()
+    df = exec.history(["e1.x", "e2.x", "e1.branch_taken", "e2.branch_taken"])
+
+    # e1: 3.0 <= 5, so false branch: 3.0 * 10 = 30.0
+    # e2: 10.0 > 5, so true branch: 10.0 * 2 = 20.0
+    assert np.isclose(df["e1.x"][-1], 30.0)
+    assert np.isclose(df["e2.x"][-1], 20.0)
+    assert np.isclose(df["e1.branch_taken"][-1], 0.0)  # false branch
+    assert np.isclose(df["e2.branch_taken"][-1], 1.0)  # true branch
+
+
+def test_map_with_cond_also_works():
+    """Test that map with jax.lax.cond also produces correct results.
+    
+    Even though vmap converts cond to select (evaluating both branches),
+    the final result should still be correct.
+    """
+    import jax.lax as lax
+
+    BranchTaken = ty.Annotated[jax.Array, el.Component("branch_taken", el.ComponentType.F64)]
+
+    @el.system
+    def cond_with_map(q: el.Query[X]) -> el.Query[X, BranchTaken]:
+        def conditional_compute(x):
+            def true_branch(_):
+                return x * 2.0
+            
+            def false_branch(_):
+                return x * 10.0
+            
+            result = lax.cond(x > 5.0, true_branch, false_branch, operand=None)
+            branch_taken = lax.cond(x > 5.0, lambda _: 1.0, lambda _: 0.0, operand=None)
+            return result, branch_taken
+        
+        return q.map((X, BranchTaken), conditional_compute)
+
+    @dataclass
+    class Test(el.Archetype):
+        x: X
+        branch_taken: BranchTaken
+
+    w = el.World()
+    w.spawn(Test(np.array(3.0), np.array(0.0)), "e1")
+    w.spawn(Test(np.array(10.0), np.array(0.0)), "e2")
+    exec = w.build(cond_with_map)
+    exec.run()
+    df = exec.history(["e1.x", "e2.x", "e1.branch_taken", "e2.branch_taken"])
+
+    # Results should be the same as map_seq
+    assert np.isclose(df["e1.x"][-1], 30.0)
+    assert np.isclose(df["e2.x"][-1], 20.0)
+    assert np.isclose(df["e1.branch_taken"][-1], 0.0)
+    assert np.isclose(df["e2.branch_taken"][-1], 1.0)
+
+
+def test_map_seq_decorator():
+    """Test the @el.map_seq decorator syntax."""
+
+    @el.map_seq
+    def double_x(x: X) -> X:
+        return x * 2
+
+    @dataclass
+    class Test(el.Archetype):
+        x: X
+
+    w = el.World()
+    w.spawn(Test(np.array(5.0)), "e1")
+    w.spawn(Test(np.array(7.0)), "e2")
+    exec = w.build(double_x)
+    exec.run()
+    exec.run()
+    df = exec.history(["e1.x", "e2.x"])
+
+    expected_df = pl.DataFrame({
+        "e1.x": [5.0, 10.0, 20.0],
+        "e2.x": [7.0, 14.0, 28.0],
+    })
+    assert_frame_equal(df.drop("time"), expected_df)
+
+
+def test_map_seq_decorator_with_cond():
+    """Test @el.map_seq decorator with jax.lax.cond."""
+    import jax.lax as lax
+
+    @el.map_seq
+    def conditional_double(x: X) -> X:
+        # If x > 5, multiply by 2, else multiply by 10
+        def true_branch(_):
+            return x * 2.0
+
+        def false_branch(_):
+            return x * 10.0
+
+        return lax.cond(x > 5.0, true_branch, false_branch, operand=None)
+
+    @dataclass
+    class Test(el.Archetype):
+        x: X
+
+    w = el.World()
+    w.spawn(Test(np.array(3.0)), "e1")  # x <= 5, false branch: 3 * 10 = 30
+    w.spawn(Test(np.array(10.0)), "e2")  # x > 5, true branch: 10 * 2 = 20
+    w.spawn(Test(np.array(1.0)), "e3")  # x <= 5, false branch: 1 * 10 = 10
+    exec = w.build(conditional_double)
+    exec.run()
+    df = exec.history(["e1.x", "e2.x", "e3.x"])
+
+    assert np.isclose(df["e1.x"][-1], 30.0)
+    assert np.isclose(df["e2.x"][-1], 20.0)
+    assert np.isclose(df["e3.x"][-1], 10.0)
+
+
+def test_map_seq_decorator_multiple_inputs_outputs():
+    """Test @el.map_seq decorator with multiple inputs and outputs."""
+
+    @el.map_seq
+    def compute_xy(x: X, y: Y) -> tuple[X, Y]:
+        return x + y, x * y
+
+    @dataclass
+    class Test(el.Archetype):
+        x: X
+        y: Y
+
+    w = el.World()
+    w.spawn(Test(np.array(2.0), np.array(3.0)), "e1")
+    w.spawn(Test(np.array(4.0), np.array(5.0)), "e2")
+    exec = w.build(compute_xy)
+    exec.run()
+    df = exec.history(["e1.x", "e1.y", "e2.x", "e2.y"])
+
+    # e1: x=2+3=5, y=2*3=6
+    # e2: x=4+5=9, y=4*5=20
+    expected_df = pl.DataFrame({
+        "e1.x": [2.0, 5.0],
+        "e1.y": [3.0, 6.0],
+        "e2.x": [4.0, 9.0],
+        "e2.y": [5.0, 20.0],
+    })
+    assert_frame_equal(df.drop("time"), expected_df)
