@@ -1825,12 +1825,18 @@ impl<'w, 's> TileSystem<'w, 's> {
         const SIDEBAR_MIN_WIDTH: f32 = 100.0;
         const SIDEBAR_MAX_WIDTH: f32 = 400.0;
 
-        let target_window = target.unwrap_or_else(|| {
-            world
-                .query_filtered::<Entity, With<PrimaryWindow>>()
-                .single(world)
-                .expect("Primary window not found")
-        });
+        let target_window = match target {
+            Some(t) => t,
+            None => {
+                let Ok(primary) = world
+                    .query_filtered::<Entity, With<PrimaryWindow>>()
+                    .single(world)
+                else {
+                    return;
+                };
+                primary
+            }
+        };
 
         // Get sidebar visibility state
         let (left_sidebar_visible, right_sidebar_visible) = {
