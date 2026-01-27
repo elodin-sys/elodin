@@ -79,15 +79,41 @@ where
     Fields: impeller2::buf::Buf<impeller2::vtable::Field>,
 {
     let mut ranges = Vec::new();
-    for op in vtable.ops.as_slice() {
+    for (op_idx, op) in vtable.ops.as_slice().iter().enumerate() {
         if let Op::Timestamp { source, .. } = op {
+            debug!(op_idx, "found timestamp operation");
             // Resolve source to get the actual Table op
-            if let Ok(resolved) = vtable.realize(*source, None)
-                && let Some(range) = resolved.as_table_range()
-            {
-                ranges.push((range.start, range.end));
+            match vtable.realize(*source, None) {
+                Ok(resolved) => {
+                    if let Some(range) = resolved.as_table_range() {
+                        debug!(
+                            op_idx,
+                            range_start = range.start,
+                            range_end = range.end,
+                            "timestamp source range resolved"
+                        );
+                        ranges.push((range.start, range.end));
+                    } else {
+                        warn!(
+                            op_idx,
+                            "timestamp operation source resolved but has no table range"
+                        );
+                    }
+                }
+                Err(e) => {
+                    warn!(
+                        ?e,
+                        op_idx,
+                        "failed to resolve timestamp operation source"
+                    );
+                }
             }
         }
+    }
+    if ranges.is_empty() {
+        debug!("no timestamp source ranges found in vtable");
+    } else {
+        debug!(range_count = ranges.len(), "found timestamp source ranges");
     }
     ranges
 }
@@ -107,6 +133,18 @@ fn field_overlaps_timestamp_source(
         }
     }
     false
+}
+
+/// Fallback detection: checks if a component name suggests it's a timestamp source.
+/// This is used as a last resort when range-based detection fails.
+/// Only matches clear patterns to avoid false positives.
+fn looks_like_timestamp_source_by_name(component_name: &str) -> bool {
+    let name_upper = component_name.to_uppercase();
+    // Match common timestamp source patterns
+    name_upper.contains("TIME_MONOTONIC")
+        || name_upper.contains("TIMESTAMP_SOURCE")
+        || (name_upper.contains("TIMESTAMP") && name_upper.ends_with("_SOURCE"))
+        || (name_upper.contains("TIME") && name_upper.contains("MONOTONIC"))
 }
 
 pub struct SnapshotBarrier {
@@ -615,12 +653,51 @@ impl DB {
 
         // Find byte ranges that are used as timestamp sources
         let timestamp_source_ranges = find_timestamp_source_ranges(&vtable.vtable);
+        debug!(
+            vtable_id = ?vtable.id,
+            timestamp_range_count = timestamp_source_ranges.len(),
+            ranges = ?timestamp_source_ranges,
+            "timestamp source ranges found"
+        );
 
         self.with_state_mut(|state| {
             // We need to iterate over fields to get offset/len for timestamp source detection
             let fields: Vec<_> = vtable.vtable.fields.as_slice().to_vec();
+            debug!(
+                vtable_id = ?vtable.id,
+                field_count = fields.len(),
+                "processing vtable fields"
+            );
 
-            for (field, res) in fields.iter().zip(vtable.vtable.realize_fields(None)) {
+            // Track component IDs that are referenced by timestamp operations
+            let mut timestamp_source_component_ids = std::collections::HashSet::new();
+            
+            // First pass: identify components referenced by timestamp operations
+            for op in vtable.vtable.ops.as_slice() {
+                if let Op::Timestamp { source, arg } = op {
+                    // Try to resolve the arg to get the component ID
+                    if let Ok(resolved_arg) = vtable.vtable.realize(*arg, None) {
+                        if let Some(comp_id) = resolved_arg.as_component_id() {
+                            debug!(
+                                component_id = ?comp_id.0,
+                                "timestamp operation references component"
+                            );
+                            // Also check if the source itself resolves to a component
+                            if let Ok(resolved_source) = vtable.vtable.realize(*source, None) {
+                                if let Some(source_comp_id) = resolved_source.as_component_id() {
+                                    debug!(
+                                        component_id = ?source_comp_id.0,
+                                        "timestamp source is itself a component"
+                                    );
+                                    timestamp_source_component_ids.insert(source_comp_id);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            for (field_idx, (field, res)) in fields.iter().zip(vtable.vtable.realize_fields(None)).enumerate() {
                 let RealizedField {
                     component_id,
                     shape,
@@ -628,11 +705,54 @@ impl DB {
                     ..
                 } = res?;
 
+                // Get component name for logging and fallback detection
+                let component_name = state
+                    .component_metadata
+                    .get(&component_id)
+                    .map(|m| m.name.clone())
+                    .unwrap_or_else(|| component_id.to_string());
+
                 // Check if this field overlaps with any timestamp source range
-                let is_timestamp_source = field_overlaps_timestamp_source(
+                let is_timestamp_source_by_range = field_overlaps_timestamp_source(
                     field.offset.to_index(),
                     field.len as usize,
                     &timestamp_source_ranges,
+                );
+
+                // Also check if this component ID is directly referenced as a timestamp source
+                let is_timestamp_source_by_id = timestamp_source_component_ids.contains(&component_id);
+
+                // Fallback: check component name pattern (only if other methods didn't detect it)
+                let is_timestamp_source_by_name = if !is_timestamp_source_by_range && !is_timestamp_source_by_id {
+                    let looks_like = looks_like_timestamp_source_by_name(&component_name);
+                    if looks_like {
+                        debug!(
+                            component_id = ?component_id.0,
+                            component_name = ?component_name,
+                            "fallback detection: component name suggests timestamp source"
+                        );
+                    }
+                    looks_like
+                } else {
+                    false
+                };
+
+                let is_timestamp_source = is_timestamp_source_by_range 
+                    || is_timestamp_source_by_id 
+                    || is_timestamp_source_by_name;
+
+                debug!(
+                    vtable_id = ?vtable.id,
+                    field_idx,
+                    component_id = ?component_id.0,
+                    component_name = ?component_name,
+                    field_offset = field.offset.to_index(),
+                    field_len = field.len,
+                    is_timestamp_source_by_range,
+                    is_timestamp_source_by_id,
+                    is_timestamp_source_by_name,
+                    is_timestamp_source,
+                    "processing field"
                 );
 
                 let component_schema = ComponentSchema::new(ty, shape);
@@ -729,10 +849,14 @@ impl State {
                 && !existing_meta.is_timestamp_source()
             {
                 existing_meta.set_timestamp_source(true);
-                // Re-save the metadata
-                let metadata_path = db_path.join(component_id.to_string()).join("metadata");
+                // Re-save the metadata - ensure directory exists first
+                let component_metadata_dir = db_path.join(component_id.to_string());
+                if let Err(err) = std::fs::create_dir_all(&component_metadata_dir) {
+                    warn!(?err, ?component_id, "failed to create component metadata directory");
+                }
+                let metadata_path = component_metadata_dir.join("metadata");
                 if let Err(err) = existing_meta.write(&metadata_path) {
-                    warn!(?err, "failed to update timestamp source metadata");
+                    warn!(?err, ?component_id, "failed to update timestamp source metadata");
                 }
             }
             return Ok(());
