@@ -1,4 +1,3 @@
-use nox_ecs::nox;
 use pyo3::{
     PyErr,
     exceptions::{PyRuntimeError, PyValueError},
@@ -7,11 +6,13 @@ use pyo3::{
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("{0}")]
-    Nox(#[from] nox::Error),
-    #[error("{0}")]
     NoxEcs(#[from] nox_ecs::Error),
+    #[error("nox error: {0}")]
+    Nox(#[from] nox_ecs::nox::Error),
     #[error("{0}")]
     PyErr(#[from] PyErr),
+    #[error("downcast error")]
+    Downcast(String),
     #[error("hlo module was not PyBytes")]
     HloModuleNotBytes,
     #[error("unexpected input")]
@@ -30,6 +31,16 @@ pub enum Error {
     Impeller(#[from] impeller2::error::Error),
     #[error("elodin db error {0}")]
     DB(#[from] elodin_db::Error),
+    #[error("json error: {0}")]
+    Json(#[from] serde_json::Error),
+    #[error("stellarator error: {0}")]
+    Stellarator(#[from] stellarator::Error),
+}
+
+impl From<pyo3::DowncastError<'_, '_>> for Error {
+    fn from(err: pyo3::DowncastError<'_, '_>) -> Self {
+        Error::Downcast(err.to_string())
+    }
 }
 
 impl From<Error> for PyErr {

@@ -2,9 +2,9 @@ use core::ops::{Add, Div, Mul, Sub};
 
 use crate::array::dims::*;
 use crate::{
-    AddDim, ArrayTy, BroadcastDim, BroadcastedDim, ConstDim, DefaultMap, DefaultMappedDim, Dim,
-    DotDim, Elem, Error, Field, Noxpr, NoxprFn, NoxprTy, OwnedRepr, RealField, ReplaceDim, Repr,
-    ShapeConstraint,
+    AddDim, ArrayElement, ArrayTy, BroadcastDim, BroadcastedDim, ConstDim, DefaultMap,
+    DefaultMappedDim, Dim, DotDim, Elem, Error, Field, NativeType, Noxpr, NoxprFn, NoxprTy,
+    OwnedRepr, RealField, ReplaceDim, Repr, ShapeConstraint,
 };
 
 use smallvec::{SmallVec, smallvec};
@@ -205,12 +205,12 @@ impl OwnedRepr for Op {
         arg.clone().broadcast_to(dim)
     }
 
-    fn scalar_from_const<T1: Field>(value: T1) -> Self::Inner<T1, ()> {
+    fn scalar_from_const<T1: Field + NativeType + ArrayElement>(value: T1) -> Self::Inner<T1, ()> {
         let lit = T1::literal(value);
         Noxpr::constant(
             lit,
             ArrayTy {
-                element_type: T1::ELEMENT_TY,
+                element_type: T1::TY,
                 shape: smallvec::smallvec![],
             },
         )
@@ -333,26 +333,26 @@ impl OwnedRepr for Op {
         arg.clone().transpose(d1)
     }
 
-    fn eye<T1: Field, D1: Dim + SquareDim + ConstDim>() -> Self::Inner<T1, D1> {
+    fn eye<T1: Field + ArrayElement, D1: Dim + SquareDim + ConstDim>() -> Self::Inner<T1, D1> {
         let shape = D1::xla_shape();
         let a = Noxpr::iota(
             ArrayTy {
-                element_type: T1::ELEMENT_TY,
+                element_type: T1::TY,
                 shape: shape.clone(),
             },
             0,
         );
         let b = Noxpr::iota(
             ArrayTy {
-                element_type: T1::ELEMENT_TY,
+                element_type: T1::TY,
                 shape,
             },
             1,
         );
-        a.eq(b).convert(T1::ELEMENT_TY)
+        a.eq(b).convert(T1::TY)
     }
 
-    fn from_diag<T1: Field, D1: Dim + SquareDim>(
+    fn from_diag<T1: Field + ArrayElement, D1: Dim + SquareDim>(
         diag: Self::Inner<T1, D1::SideDim>,
     ) -> Self::Inner<T1, D1> {
         let side_shape = diag.shape().unwrap();
@@ -364,14 +364,14 @@ impl OwnedRepr for Op {
         //le shape = D1::shape();
         let a = Noxpr::iota(
             ArrayTy {
-                element_type: T1::ELEMENT_TY,
+                element_type: T1::TY,
                 shape: shape.clone(),
             },
             0,
         );
         let b = Noxpr::iota(
             ArrayTy {
-                element_type: T1::ELEMENT_TY,
+                element_type: T1::TY,
                 shape: shape.clone(),
             },
             1,
@@ -423,7 +423,7 @@ impl OwnedRepr for Op {
     ) -> Self::Inner<T2, D1::MappedDim<D2>>
     where
         D1::MappedDim<D2>: Dim,
-        T1: Field,
+        T1: Field + ArrayElement,
         D1: Dim + MappableDim,
         T2: Elem,
         D2: Dim,
@@ -433,7 +433,7 @@ impl OwnedRepr for Op {
         let fn_arg = Noxpr::parameter(
             0,
             NoxprTy::ArrayTy(ArrayTy {
-                element_type: T1::ELEMENT_TY,
+                element_type: T1::TY,
                 shape,
             }),
             "param_0".to_string(),

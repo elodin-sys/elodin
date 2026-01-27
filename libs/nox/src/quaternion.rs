@@ -6,6 +6,7 @@ use crate::DefaultRepr;
 use crate::Elem;
 use crate::Matrix3;
 use crate::ReprMonad;
+use crate::{ArrayElement, NativeType};
 use core::ops::{Add, Mul};
 
 use crate::{Field, MRP, OwnedRepr, RealField, Scalar, TensorItem, Vector};
@@ -191,7 +192,7 @@ impl<T: RealField, R: OwnedRepr> Quaternion<T, R> {
     }
 }
 
-impl<T: RealField> Quaternion<T, ArrayRepr> {
+impl<T: RealField + NativeType + ArrayElement> Quaternion<T, ArrayRepr> {
     pub fn from_rot_mat(mat: Matrix3<T, ArrayRepr>) -> Self {
         let m00 = mat.get([0, 0]).into_buf();
         let m01 = mat.get([0, 1]).into_buf();
@@ -339,11 +340,11 @@ mod tests {
     #[test]
     fn test_angular_distance() {
         let q1 = Quaternion::from_axis_angle(Vector3::z_axis(), 0.0);
-        let q2 = Quaternion::from_axis_angle(Vector3::z_axis(), std::f64::consts::PI / 2.0);
+        let q2 = Quaternion::from_axis_angle(Vector3::z_axis(), core::f64::consts::PI / 2.0);
         let distance = q1.angular_distance(&q2);
         assert_relative_eq!(
             distance.into_buf(),
-            std::f64::consts::PI / 2.0,
+            core::f64::consts::PI / 2.0,
             epsilon = 1e-6
         );
     }

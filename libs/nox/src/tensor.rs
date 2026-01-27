@@ -1,8 +1,8 @@
 //! Provides the core functionality for manipulating tensors.
 use crate::array::prelude::*;
 use crate::{
-    Const, DefaultRepr, Dim, Dyn, Elem, Error, Field, OwnedRepr, RealField, Repr, ReprMonad,
-    Scalar, ShapeConstraint,
+    ArrayElement, Const, DefaultRepr, Dim, Dyn, Elem, Error, Field, NativeType, OwnedRepr,
+    RealField, Repr, ReprMonad, Scalar, ShapeConstraint,
 };
 use approx::{AbsDiffEq, RelativeEq};
 use core::iter::Sum;
@@ -380,7 +380,7 @@ impl<T: TensorItem + Field, D: Dim, R: OwnedRepr> Tensor<T, D, R> {
     }
 }
 
-impl<T: Field, D1: Dim, R: OwnedRepr> Mul<T> for Tensor<T, D1, R>
+impl<T: Field + NativeType + ArrayElement, D1: Dim, R: OwnedRepr> Mul<T> for Tensor<T, D1, R>
 where
     ShapeConstraint: BroadcastDim<(), D1>,
 {
@@ -394,7 +394,7 @@ where
     }
 }
 
-impl<T: Field, D1: Dim, R: OwnedRepr> Mul<T> for &'_ Tensor<T, D1, R>
+impl<T: Field + NativeType + ArrayElement, D1: Dim, R: OwnedRepr> Mul<T> for &'_ Tensor<T, D1, R>
 where
     ShapeConstraint: BroadcastDim<(), D1>,
 {
@@ -937,6 +937,7 @@ impl<T: Field, D1: Dim, R: OwnedRepr> Tensor<T, D1, R> {
 
     pub fn eye() -> Tensor<T, D1, R>
     where
+        T: ArrayElement,
         D1: SquareDim + ConstDim,
     {
         let inner = R::eye();
@@ -959,6 +960,7 @@ impl<T: Field, D1: Dim, R: OwnedRepr> Tensor<T, D1, R> {
 
     pub fn from_diag(diag: Tensor<T, D1::SideDim, R>) -> Tensor<T, D1, R>
     where
+        T: ArrayElement,
         D1: SquareDim,
     {
         let inner = R::from_diag(diag.inner);
@@ -974,7 +976,7 @@ impl<T: Field, D1: Dim, R: OwnedRepr> Tensor<T, D1, R> {
     ) -> Tensor<T2, D1::MappedDim<D2>, R>
     where
         D1::MappedDim<D2>: Dim,
-        T: Field,
+        T: Field + ArrayElement,
         D1: Dim + MappableDim,
     {
         let inner = R::map::<T, D1, T2, D2>(&self.inner, |arg_inner| {
@@ -1107,9 +1109,9 @@ macro_rules! tensor {
     }};
 }
 
-impl<T: Field, R: OwnedRepr> From<T> for Tensor<T, (), R> {
+impl<T: Field + NativeType + ArrayElement> From<T> for Tensor<T, (), ArrayRepr> {
     fn from(val: T) -> Self {
-        Scalar::from_inner(R::scalar_from_const(val))
+        Scalar::from_inner(ArrayRepr::scalar_from_const(val))
     }
 }
 

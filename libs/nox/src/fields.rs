@@ -2,9 +2,6 @@
 use core::marker::PhantomData;
 use core::ops::{Add, Div, Mul, Neg, Sub};
 
-#[cfg(feature = "xla")]
-use xla::Literal;
-
 use crate::{OwnedRepr, Scalar, TensorItem};
 
 pub trait Elem: Copy + Default + 'static {}
@@ -51,12 +48,6 @@ pub trait Field:
     fn two_prim() -> Self
     where
         Self: Sized;
-
-    #[cfg(feature = "xla")]
-    fn literal(self) -> Literal;
-
-    #[cfg(feature = "xla")]
-    const ELEMENT_TY: xla::ElementType;
 }
 
 pub trait RealField:
@@ -209,14 +200,6 @@ macro_rules! impl_real_closed_field {
             fn two_prim() -> Self {
                 $two
             }
-
-            #[cfg(feature = "xla")]
-            fn literal(self) -> Literal {
-                xla::NativeType::literal(self)
-            }
-
-            #[cfg(feature = "xla")]
-            const ELEMENT_TY: xla::ElementType = <$t as xla::ArrayElement>::TY;
         }
     };
 }

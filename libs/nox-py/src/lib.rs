@@ -1,4 +1,3 @@
-use std::collections::HashSet;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::{collections::BTreeMap, marker::PhantomData};
@@ -6,7 +5,7 @@ use std::{collections::BTreeMap, marker::PhantomData};
 use impeller2::types::ComponentId;
 use nox_ecs::{
     ErasedSystem,
-    nox::{self, Noxpr},
+    nox::Noxpr,
 };
 use numpy::PyUntypedArray;
 use pyo3::exceptions::PyOSError;
@@ -20,6 +19,8 @@ mod entity;
 mod error;
 mod exec;
 mod graph;
+mod iree_exec;
+mod iree_server;
 mod linalg;
 mod query;
 mod s10;
@@ -124,6 +125,14 @@ pub fn _get_cache_dir() -> PyResult<String> {
 
 #[pymodule]
 pub fn elodin(m: &Bound<'_, PyModule>) -> PyResult<()> {
+    // Set JAX to use 64-bit floats before it's imported
+    // This environment variable must be set before JAX is first imported
+    // SAFETY: This is called during module initialization, before any threads
+    // could potentially be accessing this environment variable
+    unsafe {
+        std::env::set_var("JAX_ENABLE_X64", "1");
+    }
+    
     m.add_class::<ComponentType>()?;
     m.add_class::<WorldBuilder>()?;
     m.add_class::<Exec>()?;

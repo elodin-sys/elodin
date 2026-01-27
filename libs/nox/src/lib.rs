@@ -4,13 +4,11 @@
 
 extern crate alloc;
 
-#[cfg(feature = "xla")]
-extern crate lapack_src as _;
-
 pub mod array;
 mod dim;
 mod error;
 mod fields;
+pub mod literal;
 mod matrix;
 mod mrp;
 mod quaternion;
@@ -21,6 +19,8 @@ mod tensor;
 mod vector;
 
 pub mod utils;
+
+pub use literal::{ArrayElement, ElementType, Literal, LiteralError, NativeType};
 
 pub use array::prelude::*;
 pub use dim::*;
@@ -49,9 +49,6 @@ pub use noxpr::*;
 #[doc(hidden)]
 // #[cfg(doctest)]
 pub mod doctest;
-
-#[cfg(feature = "xla")]
-pub use xla;
 
 #[cfg(feature = "noxpr")]
 pub use crate::noxpr::Op as DefaultRepr;
