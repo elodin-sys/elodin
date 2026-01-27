@@ -724,7 +724,7 @@ def test_map_vs_map_seq_results_match_batch_size_0():
     w1.spawn(Test(np.array(1.0)), "e1")
     map_raised = False
     try:
-        exec1 = w1.build(compute_with_map)
+        _ = w1.build(compute_with_map)
     except BaseException as e:
         # pyo3_runtime.PanicException is a BaseException subclass
         if "PanicException" in type(e).__name__:
@@ -738,7 +738,7 @@ def test_map_vs_map_seq_results_match_batch_size_0():
     w2.spawn(Test(np.array(1.0)), "e1")
     map_seq_raised = False
     try:
-        exec2 = w2.build(compute_with_map_seq)
+        _ = w2.build(compute_with_map_seq)
     except BaseException as e:
         if "PanicException" in type(e).__name__:
             map_seq_raised = True
