@@ -581,11 +581,13 @@ def test_map_seq_multiple_entities():
     exec.run()
     df = exec.history(["e1.x", "e2.x", "e3.x"])
 
-    expected_df = pl.DataFrame({
-        "e1.x": [1.0, 2.0, 4.0],
-        "e2.x": [2.0, 4.0, 8.0],
-        "e3.x": [3.0, 6.0, 12.0],
-    })
+    expected_df = pl.DataFrame(
+        {
+            "e1.x": [1.0, 2.0, 4.0],
+            "e2.x": [2.0, 4.0, 8.0],
+            "e3.x": [3.0, 6.0, 12.0],
+        }
+    )
     assert_frame_equal(df.drop("time"), expected_df)
 
 
@@ -608,12 +610,14 @@ def test_map_seq_multiple_outputs():
     exec.run()
     df = exec.history(["e1.x", "e1.y", "e2.x", "e2.y"])
 
-    expected_df = pl.DataFrame({
-        "e1.x": [1.0, 10.0],
-        "e1.y": [10.0, 1.0],
-        "e2.x": [2.0, 20.0],
-        "e2.y": [20.0, 2.0],
-    })
+    expected_df = pl.DataFrame(
+        {
+            "e1.x": [1.0, 10.0],
+            "e1.y": [10.0, 1.0],
+            "e2.x": [2.0, 20.0],
+            "e2.y": [20.0, 2.0],
+        }
+    )
     assert_frame_equal(df.drop("time"), expected_df)
 
 
@@ -695,7 +699,7 @@ def test_map_vs_map_seq_results_match_batch_size_2():
 
 def test_map_vs_map_seq_results_match_batch_size_0():
     """Test that map and map_seq handle batch_size == 0 (no matching entities).
-    
+
     Currently, elodin's Rust backend panics when building a system that queries
     for a component that no entity has. This test documents that behavior.
     """
@@ -782,23 +786,25 @@ def test_map_vs_map_seq_with_multiple_outputs():
     # e1: x=1+2=3, y=1*2=2
     # e2: x=3+4=7, y=3*4=12
     # e3: x=5+6=11, y=5*6=30
-    expected_df = pl.DataFrame({
-        "e1.x": [1.0, 3.0],
-        "e1.y": [2.0, 2.0],
-        "e2.x": [3.0, 7.0],
-        "e2.y": [4.0, 12.0],
-        "e3.x": [5.0, 11.0],
-        "e3.y": [6.0, 30.0],
-    })
+    expected_df = pl.DataFrame(
+        {
+            "e1.x": [1.0, 3.0],
+            "e1.y": [2.0, 2.0],
+            "e2.x": [3.0, 7.0],
+            "e2.y": [4.0, 12.0],
+            "e3.x": [5.0, 11.0],
+            "e3.y": [6.0, 30.0],
+        }
+    )
     assert_frame_equal(df1.drop("time"), expected_df)
 
 
 def test_map_seq_preserves_cond_semantics():
     """Test that map_seq preserves jax.lax.cond semantics.
-    
+
     With map (vmap), jax.lax.cond becomes jax.lax.select which evaluates
     both branches. With map_seq, only one branch should execute.
-    
+
     We verify this by checking that the computation produces correct results
     when using jax.lax.cond inside the mapped function.
     """
@@ -813,14 +819,14 @@ def test_map_seq_preserves_cond_semantics():
             # If x > 5, multiply by 2, else multiply by 10
             def true_branch(_):
                 return x * 2.0
-            
+
             def false_branch(_):
                 return x * 10.0
-            
+
             result = lax.cond(x > 5.0, true_branch, false_branch, operand=None)
             branch_taken = lax.cond(x > 5.0, lambda _: 1.0, lambda _: 0.0, operand=None)
             return result, branch_taken
-        
+
         return q.map_seq((X, BranchTaken), conditional_compute)
 
     @dataclass
@@ -845,7 +851,7 @@ def test_map_seq_preserves_cond_semantics():
 
 def test_map_with_cond_also_works():
     """Test that map with jax.lax.cond also produces correct results.
-    
+
     Even though vmap converts cond to select (evaluating both branches),
     the final result should still be correct.
     """
@@ -858,14 +864,14 @@ def test_map_with_cond_also_works():
         def conditional_compute(x):
             def true_branch(_):
                 return x * 2.0
-            
+
             def false_branch(_):
                 return x * 10.0
-            
+
             result = lax.cond(x > 5.0, true_branch, false_branch, operand=None)
             branch_taken = lax.cond(x > 5.0, lambda _: 1.0, lambda _: 0.0, operand=None)
             return result, branch_taken
-        
+
         return q.map((X, BranchTaken), conditional_compute)
 
     @dataclass
@@ -906,10 +912,12 @@ def test_map_seq_decorator():
     exec.run()
     df = exec.history(["e1.x", "e2.x"])
 
-    expected_df = pl.DataFrame({
-        "e1.x": [5.0, 10.0, 20.0],
-        "e2.x": [7.0, 14.0, 28.0],
-    })
+    expected_df = pl.DataFrame(
+        {
+            "e1.x": [5.0, 10.0, 20.0],
+            "e2.x": [7.0, 14.0, 28.0],
+        }
+    )
     assert_frame_equal(df.drop("time"), expected_df)
 
 
@@ -966,10 +974,12 @@ def test_map_seq_decorator_multiple_inputs_outputs():
 
     # e1: x=2+3=5, y=2*3=6
     # e2: x=4+5=9, y=4*5=20
-    expected_df = pl.DataFrame({
-        "e1.x": [2.0, 5.0],
-        "e1.y": [3.0, 6.0],
-        "e2.x": [4.0, 9.0],
-        "e2.y": [5.0, 20.0],
-    })
+    expected_df = pl.DataFrame(
+        {
+            "e1.x": [2.0, 5.0],
+            "e1.y": [3.0, 6.0],
+            "e2.x": [4.0, 9.0],
+            "e2.y": [5.0, 20.0],
+        }
+    )
     assert_frame_equal(df.drop("time"), expected_df)

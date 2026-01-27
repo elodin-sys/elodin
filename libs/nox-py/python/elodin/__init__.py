@@ -146,9 +146,7 @@ class Query(Generic[Unpack[A]]):
         # without vmap. This preserves jax.lax.cond semantics: only one
         # branch executes.
         def call_single(idx):
-            args = [
-                from_array(cls, b[idx]) for (b, cls) in zip(self.bufs, self.component_classes)
-            ]
+            args = [from_array(cls, b[idx]) for (b, cls) in zip(self.bufs, self.component_classes)]
             return f(*args)
 
         if batch_size == 0:
