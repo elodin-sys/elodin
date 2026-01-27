@@ -92,17 +92,51 @@ class Query(Generic[Unpack[A]]):
         self,
         out_tps: Union[Tuple[Annotated[Any, Component], ...], Annotated[Any, Component]],
         f: Callable[[Unpack[A]], Union[Tuple[Unpack[S]], T]],
+        use_vmap: bool = True,
     ) -> "Query[Unpack[S]]":
+        """This maps a query to another query via a given function f.
+
+        The parameters `use_vmap` is `True` by default. It will convert
+        `jax.lax.cond` which only evaluates one consequent to `jax.lax.select`
+        which always evaluates both consequents. If one of the consequents is
+        seldom needed and expensive, consider setting `use_vmap` to `False`.
+        """
         out_tps_tuple: Tuple[Annotated[Any, Component], ...] = (
             (out_tps,) if not isinstance(out_tps, tuple) else out_tps
         )
-        buf = jax.vmap(
-            lambda b: f(
-                *[from_array(cls, x) for (x, cls) in zip(b, self.component_classes)]  # type: ignore
-            ),
-            in_axes=0,
-            out_axes=0,
-        )(self.bufs)
+        
+        if use_vmap:
+            buf = jax.vmap(
+                lambda b: f(
+                    *[from_array(cls, x) for (x, cls) in zip(b, self.component_classes)]  # type: ignore
+                ),
+                in_axes=0,
+                out_axes=0,
+            )(self.bufs)
+        else:
+            batch_size = self.bufs[0].shape[0] if len(self.bufs) > 0 else 0
+            # For single entity or use_vmap, call function directly without
+            # vmap. This preserves jax.lax.cond semantics: only one branch
+            # executes.
+            def call_single(idx):
+                args = [from_array(cls, b[idx]) for (b, cls) in zip(self.bufs, self.component_classes)]
+                return f(*args)
+            
+            if batch_size == 0:
+                buf = ()
+            elif batch_size == 1:
+                result = call_single(0)
+                # Wrap result in batch dimension.
+                buf, _ = tree_flatten(result)
+                buf = tuple(jax.numpy.expand_dims(b, axis=0) for b in buf)
+                buf = tree_unflatten(_, buf)
+            else:
+                # Multiple entities without vmap: use sequential loop.
+                results = [call_single(i) for i in range(batch_size)]
+                # Stack results.
+                first_flat, tree_def = tree_flatten(results[0])
+                stacked = [jax.numpy.stack([tree_flatten(r)[0][j] for r in results]) for j in range(len(first_flat))]
+                buf = tree_unflatten(tree_def, stacked)
         (bufs, _) = tree_flatten(buf)
         inner = None
         component_data = []
