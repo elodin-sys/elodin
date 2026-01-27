@@ -942,6 +942,7 @@ fn clear_state_new_connection(
     component_time_ranges.row_counts.clear();
     component_time_ranges.sparklines.clear();
     component_time_ranges.tables_to_query.clear();
+    component_time_ranges.row_settings.clear();
     component_time_ranges.pending_queries = 0;
     component_time_ranges.total_queries = 0;
     component_time_ranges.state = ui::data_overview::TimeRangeQueryState::NotStarted;

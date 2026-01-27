@@ -714,14 +714,22 @@ impl LoadSchematicParams<'_, '_> {
                     .name
                     .clone()
                     .unwrap_or_else(|| monitor.component_name.clone());
-                let pane = MonitorPane::new(label, monitor.component_name.clone());
+                let entity = self
+                    .commands
+                    .spawn(super::monitor::MonitorData {
+                        component_name: monitor.component_name.clone(),
+                    })
+                    .id();
+                let pane = MonitorPane::new(entity, label);
                 tile_state.insert_tile(Tile::Pane(Pane::Monitor(pane)), parent_id, false)
             }
             Panel::QueryTable(data) => {
+                let has_query = !data.query.trim().is_empty();
                 let entity = self
                     .commands
                     .spawn(super::query_table::QueryTableData {
                         data: data.clone(),
+                        pending_execution: has_query,
                         ..Default::default()
                     })
                     .id();
@@ -729,7 +737,7 @@ impl LoadSchematicParams<'_, '_> {
                     .name
                     .clone()
                     .filter(|name| !name.trim().is_empty())
-                    .unwrap_or_else(|| "Query".to_string());
+                    .unwrap_or_else(|| "Query Table".to_string());
                 let pane = super::query_table::QueryTablePane {
                     entity,
                     name: label,

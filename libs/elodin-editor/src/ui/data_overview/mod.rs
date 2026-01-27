@@ -18,9 +18,15 @@ use impeller2::types::{ComponentId, Timestamp};
 use impeller2_bevy::CommandsExt;
 use impeller2_wkt::{ArrowIPC, ErrorResponse, SQLQuery};
 
-use crate::{EqlContext, SelectedTimeRange, ui::widgets::WidgetSystem};
+use crate::{
+    EqlContext, SelectedTimeRange,
+    ui::{SelectedObject, tiles::WindowState, widgets::WidgetSystem},
+};
 
-use super::{PaneName, colors::get_scheme};
+use super::{
+    PaneName,
+    colors::{ColorExt, get_scheme},
+};
 
 // Re-export for use in component collection
 use eql;
@@ -68,6 +74,24 @@ pub struct ComponentTimeRanges {
     pub state: TimeRangeQueryState,
     /// List of table names to query (cached for phase 2)
     pub tables_to_query: Vec<String>,
+    pub row_settings: HashMap<ComponentId, DataOverviewRowSettings>,
+}
+
+#[derive(Clone, Debug)]
+pub struct DataOverviewRowSettings {
+    pub enabled: bool,
+    pub color: Option<Color32>,
+    pub custom_name: Option<String>,
+}
+
+impl Default for DataOverviewRowSettings {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            color: None,
+            custom_name: None,
+        }
+    }
 }
 
 #[derive(Default, Clone)]
@@ -127,6 +151,7 @@ pub struct ComponentTimestampSummary {
     pub label: String,
     pub table_name: String,
     pub color: Color32,
+    pub enabled: bool,
     pub timestamp_range: Option<(Timestamp, Timestamp)>,
 }
 
@@ -180,7 +205,7 @@ fn hue_to_rgb(p: f32, q: f32, mut t: f32) -> f32 {
 
 /// Convert component name to SQL table name using the same conversion as the database.
 /// The database uses `to_case(Case::Snake)` followed by replacing '.' with '_'.
-fn component_to_table_name(full_component_name: &str) -> String {
+pub fn component_to_table_name(full_component_name: &str) -> String {
     // Full component name is like "GpsPosMessage1.VACC"
     // Table name is like "gps_pos_message_1_vacc"
     // Must match the conversion in libs/db/src/arrow/mod.rs
@@ -194,19 +219,23 @@ pub struct DataOverviewWidget<'w, 's> {
     selected_range: Res<'w, SelectedTimeRange>,
     time_ranges: ResMut<'w, ComponentTimeRanges>,
     commands: Commands<'w, 's>,
+    window_states: Query<'w, 's, &'static mut WindowState>,
 }
 
 impl WidgetSystem for DataOverviewWidget<'_, '_> {
-    type Args = DataOverviewPane;
+    type Args = (DataOverviewPane, Entity);
     type Output = DataOverviewPane;
 
     fn ui_system(
         world: &mut World,
         state: &mut SystemState<Self>,
         ui: &mut egui::Ui,
-        mut pane: Self::Args,
+        (mut pane, target_window): Self::Args,
     ) -> Self::Output {
         let mut params = state.get_mut(world);
+        let Ok(mut window_state) = params.window_states.get_mut(target_window) else {
+            return pane;
+        };
 
         let scheme = get_scheme();
         let available_rect = ui.available_rect_before_wrap();
@@ -235,6 +264,17 @@ impl WidgetSystem for DataOverviewWidget<'_, '_> {
 
         let mut component_list: Vec<(ComponentId, String, String)> = Vec::new();
         collect_components(&params.eql_context.0.component_parts, &mut component_list);
+        let mut enabled_tables: Vec<String> = Vec::new();
+        for (component_id, _, table_name) in &component_list {
+            let settings = params
+                .time_ranges
+                .row_settings
+                .entry(*component_id)
+                .or_default();
+            if settings.enabled {
+                enabled_tables.push(table_name.clone());
+            }
+        }
 
         // Check if we should refresh queries for live data
         let should_refresh = pane
@@ -243,10 +283,10 @@ impl WidgetSystem for DataOverviewWidget<'_, '_> {
             .unwrap_or(true);
 
         // Trigger query for timestamp ranges if not started or need refresh
-        let should_query = (!pane.query_triggered && !component_list.is_empty())
+        let should_query = (!pane.query_triggered && !enabled_tables.is_empty())
             || (should_refresh
                 && matches!(params.time_ranges.state, TimeRangeQueryState::Ready)
-                && !component_list.is_empty());
+                && !enabled_tables.is_empty());
 
         if should_query
             && matches!(
@@ -256,14 +296,13 @@ impl WidgetSystem for DataOverviewWidget<'_, '_> {
         {
             // Phase 1: Query time ranges and row counts first
             params.time_ranges.state = TimeRangeQueryState::QueryingTimeRanges(Instant::now());
-            params.time_ranges.total_queries = component_list.len();
-            params.time_ranges.pending_queries = component_list.len();
-            params.time_ranges.tables_to_query =
-                component_list.iter().map(|(_, _, t)| t.clone()).collect();
+            params.time_ranges.total_queries = enabled_tables.len();
+            params.time_ranges.pending_queries = enabled_tables.len();
+            params.time_ranges.tables_to_query = enabled_tables.clone();
             pane.last_refresh = Some(Instant::now());
 
             // Query each table for time range AND row count
-            for (_, _, table_name) in component_list.iter() {
+            for table_name in enabled_tables.iter() {
                 let table_name_clone = table_name.clone();
                 let query = format!(
                     "SELECT min(time) as min_time, max(time) as max_time, count(*) as row_count FROM {}",
@@ -311,7 +350,8 @@ impl WidgetSystem for DataOverviewWidget<'_, '_> {
             TimeRangeQueryState::QueryingSparklines(_)
         ) && params.time_ranges.pending_queries == 0
         {
-            let tables_to_query = std::mem::take(&mut params.time_ranges.tables_to_query);
+            let mut tables_to_query = std::mem::take(&mut params.time_ranges.tables_to_query);
+            tables_to_query.retain(|table_name| enabled_tables.contains(table_name));
 
             // Safety: if no tables to query, transition directly to Ready
             if tables_to_query.is_empty() {
@@ -386,6 +426,7 @@ impl WidgetSystem for DataOverviewWidget<'_, '_> {
                 label: label.clone(),
                 table_name: table_name.clone(),
                 color: Color32::WHITE, // Will be assigned after sorting
+                enabled: true,
                 timestamp_range,
             });
         }
@@ -401,7 +442,19 @@ impl WidgetSystem for DataOverviewWidget<'_, '_> {
 
         // Assign colors after sorting so adjacent rows have distinct colors
         for (index, summary) in summaries.iter_mut().enumerate() {
-            summary.color = row_color(index);
+            let settings = params
+                .time_ranges
+                .row_settings
+                .entry(summary.component_id)
+                .or_default();
+            if settings.color.is_none() {
+                settings.color = Some(row_color(index));
+            }
+            summary.color = settings.color.unwrap_or_else(|| row_color(index));
+            summary.enabled = settings.enabled;
+            if !summary.enabled {
+                summary.timestamp_range = None;
+            }
         }
 
         // Calculate time range from actual component data ranges
@@ -452,6 +505,17 @@ impl WidgetSystem for DataOverviewWidget<'_, '_> {
         let pixels_per_us = timeline_width as f64 / time_span;
         let timeline_start_x = available_rect.min.x + LABEL_WIDTH;
         let timeline_end_x = timeline_start_x + timeline_width;
+        let response = ui.interact(
+            available_rect,
+            ui.id().with("data_overview"),
+            Sense::click_and_drag(),
+        );
+        let click_pos = if response.clicked() {
+            window_state.ui_state.selected_object = SelectedObject::DataOverview;
+            response.interact_pointer_pos()
+        } else {
+            None
+        };
 
         // Header with component count and query status
         let header_height = ROW_HEIGHT;
@@ -530,9 +594,26 @@ impl WidgetSystem for DataOverviewWidget<'_, '_> {
                     continue;
                 }
 
+                let is_selected = matches!(
+                    window_state.ui_state.selected_object,
+                    SelectedObject::DataOverviewComponent { component_id }
+                        if component_id == summary.component_id
+                );
+                if let Some(pos) = click_pos
+                    && row_rect.contains(pos)
+                {
+                    window_state.ui_state.selected_object = SelectedObject::DataOverviewComponent {
+                        component_id: summary.component_id,
+                    };
+                }
+
                 // Alternate row background
                 if row_index % 2 == 0 {
                     ui.painter().rect_filled(row_rect, 0.0, scheme.bg_primary);
+                }
+                if is_selected {
+                    ui.painter()
+                        .rect_filled(row_rect, 0.0, scheme.highlight.opacity(0.08));
                 }
 
                 // Draw label with component color
@@ -540,10 +621,15 @@ impl WidgetSystem for DataOverviewWidget<'_, '_> {
                     Rect::from_min_size(row_rect.min, Vec2::new(LABEL_WIDTH, ROW_HEIGHT));
 
                 // Color indicator
+                let indicator_color = if summary.enabled {
+                    summary.color
+                } else {
+                    summary.color.opacity(0.35)
+                };
                 ui.painter().circle_filled(
                     Pos2::new(label_rect.min.x + 8.0, label_rect.center().y),
                     4.0,
-                    summary.color,
+                    indicator_color,
                 );
 
                 // Component name (truncated if needed)
@@ -553,115 +639,122 @@ impl WidgetSystem for DataOverviewWidget<'_, '_> {
                     label.push_str("...");
                 }
 
+                let label_color = if summary.enabled {
+                    summary.color
+                } else {
+                    summary.color.opacity(0.35)
+                };
                 ui.painter().text(
                     Pos2::new(label_rect.min.x + 16.0, label_rect.center().y),
                     egui::Align2::LEFT_CENTER,
                     label,
                     egui::FontId::proportional(10.0),
-                    summary.color,
+                    label_color,
                 );
 
-                // Draw sparkline if we have data, otherwise fall back to bar
-                let sparkline = params.time_ranges.sparklines.get(&summary.table_name);
+                if summary.enabled {
+                    // Draw sparkline if we have data, otherwise fall back to bar
+                    let sparkline = params.time_ranges.sparklines.get(&summary.table_name);
 
-                if let Some(sparkline_data) = sparkline {
-                    if !sparkline_data.series.is_empty() {
-                        // Draw sparklines for each series (field/element)
-                        let row_top = row_rect.min.y + 2.0;
-                        let row_bottom = row_rect.max.y - 2.0;
-                        let row_height = row_bottom - row_top;
-                        let y_range = sparkline_data.y_max - sparkline_data.y_min;
+                    if let Some(sparkline_data) = sparkline {
+                        if !sparkline_data.series.is_empty() {
+                            // Draw sparklines for each series (field/element)
+                            let row_top = row_rect.min.y + 2.0;
+                            let row_bottom = row_rect.max.y - 2.0;
+                            let row_height = row_bottom - row_top;
+                            let y_range = sparkline_data.y_max - sparkline_data.y_min;
 
-                        let num_series = sparkline_data.series.len();
+                            let num_series = sparkline_data.series.len();
 
-                        for (series_idx, series) in sparkline_data.series.iter().enumerate() {
-                            if series.points.is_empty() {
-                                continue;
-                            }
-
-                            // Generate a color variation for each series
-                            let series_color = if num_series == 1 {
-                                summary.color
-                            } else {
-                                // Vary the hue slightly for each series
-                                let base_color = summary.color;
-                                let (r, g, b, a) = (
-                                    base_color.r(),
-                                    base_color.g(),
-                                    base_color.b(),
-                                    base_color.a(),
-                                );
-                                // Shift brightness/saturation for each series
-                                let factor =
-                                    0.7 + 0.3 * (series_idx as f32 / num_series.max(1) as f32);
-                                Color32::from_rgba_unmultiplied(
-                                    (r as f32 * factor).min(255.0) as u8,
-                                    (g as f32 * factor).min(255.0) as u8,
-                                    (b as f32 * factor).min(255.0) as u8,
-                                    a,
-                                )
-                            };
-
-                            // Build points for the polyline
-                            let mut line_points: Vec<Pos2> = Vec::new();
-
-                            for &(time, value) in &series.points {
-                                // Calculate X position
-                                let x_offset = (time - display_start.0) as f64;
-                                let x = timeline_start_x + (x_offset * pixels_per_us) as f32;
-
-                                // Skip points outside visible area
-                                if x < timeline_start_x || x > timeline_end_x {
+                            for (series_idx, series) in sparkline_data.series.iter().enumerate() {
+                                if series.points.is_empty() {
                                     continue;
                                 }
 
-                                // Calculate Y position (inverted: higher values at top)
-                                let y_normalized = if y_range > 0.0 {
-                                    (value - sparkline_data.y_min) / y_range
+                                // Generate a color variation for each series
+                                let series_color = if num_series == 1 {
+                                    summary.color
                                 } else {
-                                    0.5
+                                    // Vary the hue slightly for each series
+                                    let base_color = summary.color;
+                                    let (r, g, b, a) = (
+                                        base_color.r(),
+                                        base_color.g(),
+                                        base_color.b(),
+                                        base_color.a(),
+                                    );
+                                    // Shift brightness/saturation for each series
+                                    let factor =
+                                        0.7 + 0.3 * (series_idx as f32 / num_series.max(1) as f32);
+                                    Color32::from_rgba_unmultiplied(
+                                        (r as f32 * factor).min(255.0) as u8,
+                                        (g as f32 * factor).min(255.0) as u8,
+                                        (b as f32 * factor).min(255.0) as u8,
+                                        a,
+                                    )
                                 };
-                                let y = row_bottom - (y_normalized as f32 * row_height);
 
-                                line_points.push(Pos2::new(x, y));
-                            }
+                                // Build points for the polyline
+                                let mut line_points: Vec<Pos2> = Vec::new();
 
-                            // Draw the sparkline as a polyline
-                            if line_points.len() >= 2 {
-                                ui.painter().add(egui::Shape::line(
-                                    line_points,
-                                    Stroke::new(1.0, series_color),
-                                ));
-                            } else if line_points.len() == 1 {
-                                // Single point - draw a small circle
-                                ui.painter()
-                                    .circle_filled(line_points[0], 2.0, series_color);
+                                for &(time, value) in &series.points {
+                                    // Calculate X position
+                                    let x_offset = (time - display_start.0) as f64;
+                                    let x = timeline_start_x + (x_offset * pixels_per_us) as f32;
+
+                                    // Skip points outside visible area
+                                    if x < timeline_start_x || x > timeline_end_x {
+                                        continue;
+                                    }
+
+                                    // Calculate Y position (inverted: higher values at top)
+                                    let y_normalized = if y_range > 0.0 {
+                                        (value - sparkline_data.y_min) / y_range
+                                    } else {
+                                        0.5
+                                    };
+                                    let y = row_bottom - (y_normalized as f32 * row_height);
+
+                                    line_points.push(Pos2::new(x, y));
+                                }
+
+                                // Draw the sparkline as a polyline
+                                if line_points.len() >= 2 {
+                                    ui.painter().add(egui::Shape::line(
+                                        line_points,
+                                        Stroke::new(1.0, series_color),
+                                    ));
+                                } else if line_points.len() == 1 {
+                                    // Single point - draw a small circle
+                                    ui.painter()
+                                        .circle_filled(line_points[0], 2.0, series_color);
+                                }
                             }
                         }
-                    }
-                } else if let Some((start_ts, end_ts)) = summary.timestamp_range {
-                    // Fallback: Draw bar if we have timestamp data but no sparkline
-                    let start_offset = (start_ts.0 - display_start.0) as f64;
-                    let end_offset = (end_ts.0 - display_start.0) as f64;
+                    } else if let Some((start_ts, end_ts)) = summary.timestamp_range {
+                        // Fallback: Draw bar if we have timestamp data but no sparkline
+                        let start_offset = (start_ts.0 - display_start.0) as f64;
+                        let end_offset = (end_ts.0 - display_start.0) as f64;
 
-                    let start_x = timeline_start_x + (start_offset * pixels_per_us) as f32;
-                    let end_x = timeline_start_x + (end_offset * pixels_per_us) as f32;
+                        let start_x = timeline_start_x + (start_offset * pixels_per_us) as f32;
+                        let end_x = timeline_start_x + (end_offset * pixels_per_us) as f32;
 
-                    // Clip to the visible timeline area
-                    let clipped_start_x = start_x.max(timeline_start_x);
-                    let clipped_end_x = end_x.min(timeline_end_x);
+                        // Clip to the visible timeline area
+                        let clipped_start_x = start_x.max(timeline_start_x);
+                        let clipped_end_x = end_x.min(timeline_end_x);
 
-                    // Only draw if there's a visible portion
-                    if clipped_end_x > clipped_start_x {
-                        let min_width = 2.0;
-                        let bar_width = (clipped_end_x - clipped_start_x).max(min_width);
+                        // Only draw if there's a visible portion
+                        if clipped_end_x > clipped_start_x {
+                            let min_width = 2.0;
+                            let bar_width = (clipped_end_x - clipped_start_x).max(min_width);
 
-                        let bar_rect = Rect::from_min_max(
-                            Pos2::new(clipped_start_x, row_rect.min.y + 3.0),
-                            Pos2::new(clipped_start_x + bar_width, row_rect.max.y - 3.0),
-                        );
+                            let bar_rect = Rect::from_min_max(
+                                Pos2::new(clipped_start_x, row_rect.min.y + 3.0),
+                                Pos2::new(clipped_start_x + bar_width, row_rect.max.y - 3.0),
+                            );
 
-                        ui.painter().rect_filled(bar_rect, 2.0, summary.color);
+                            ui.painter().rect_filled(bar_rect, 2.0, summary.color);
+                        }
                     }
                 }
             }
@@ -672,13 +765,6 @@ impl WidgetSystem for DataOverviewWidget<'_, '_> {
             timeline_start_x,
             available_rect.y_range(),
             Stroke::new(1.0, scheme.border_primary),
-        );
-
-        // Handle interactions
-        let response = ui.interact(
-            available_rect,
-            ui.id().with("data_overview"),
-            Sense::click_and_drag(),
         );
 
         // Check if pointer is over the timeline area (right of labels)
@@ -1062,18 +1148,18 @@ pub fn trigger_time_range_queries(
     // Collect components
     fn collect_table_names(
         parts: &std::collections::BTreeMap<String, eql::ComponentPart>,
-        result: &mut Vec<String>,
+        result: &mut Vec<(ComponentId, String)>,
     ) {
         for part in parts.values() {
             if let Some(component) = &part.component {
                 let table_name = component_to_table_name(&component.name);
-                result.push(table_name);
+                result.push((part.id, table_name));
             }
             collect_table_names(&part.children, result);
         }
     }
 
-    let mut table_names: Vec<String> = Vec::new();
+    let mut table_names: Vec<(ComponentId, String)> = Vec::new();
     collect_table_names(&eql_context.0.component_parts, &mut table_names);
 
     // Skip if no components yet
@@ -1081,13 +1167,29 @@ pub fn trigger_time_range_queries(
         return;
     }
 
+    let enabled_tables: Vec<String> = table_names
+        .iter()
+        .filter(|(component_id, _)| {
+            time_ranges
+                .row_settings
+                .get(component_id)
+                .map(|settings| settings.enabled)
+                .unwrap_or(true)
+        })
+        .map(|(_, table_name)| table_name.clone())
+        .collect();
+
+    if enabled_tables.is_empty() {
+        return;
+    }
+
     // Start querying time ranges (phase 1 only - sparklines handled by panel)
     time_ranges.state = TimeRangeQueryState::QueryingTimeRanges(Instant::now());
-    time_ranges.total_queries = table_names.len();
-    time_ranges.pending_queries = table_names.len();
+    time_ranges.total_queries = enabled_tables.len();
+    time_ranges.pending_queries = enabled_tables.len();
 
     // Query each table individually
-    for table_name in table_names {
+    for table_name in enabled_tables {
         let table_name_clone = table_name.clone();
         let query = format!(
             "SELECT min(time) as min_time, max(time) as max_time, count(*) as row_count FROM {}",

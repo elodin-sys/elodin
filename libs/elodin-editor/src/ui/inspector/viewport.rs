@@ -91,10 +91,10 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
                 .margin(egui::Margin::same(0).bottom(16.0)),
         );
 
-        ui.label(egui::RichText::new("Position").color(get_scheme().text_secondary));
+        ui.label(egui::RichText::new("POSITION").color(get_scheme().text_secondary));
         eql_input(ui, &mut viewport.pos, &eql_ctx.0);
         ui.separator();
-        ui.label(egui::RichText::new("Look At").color(get_scheme().text_secondary));
+        ui.label(egui::RichText::new("LOOK AT").color(get_scheme().text_secondary));
         eql_input(ui, &mut viewport.look_at, &eql_ctx.0);
         ui.separator();
 
