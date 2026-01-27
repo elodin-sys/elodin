@@ -18,9 +18,15 @@ use impeller2::types::{ComponentId, Timestamp};
 use impeller2_bevy::CommandsExt;
 use impeller2_wkt::{ArrowIPC, ErrorResponse, SQLQuery, SparklineQuery};
 
-use crate::{EqlContext, SelectedTimeRange, ui::widgets::WidgetSystem};
+use crate::{
+    EqlContext, SelectedTimeRange,
+    ui::{SelectedObject, tiles::WindowState, widgets::WidgetSystem},
+};
 
-use super::{PaneName, colors::get_scheme};
+use super::{
+    PaneName,
+    colors::{ColorExt, get_scheme},
+};
 
 // Re-export for use in component collection
 use eql;
@@ -74,6 +80,24 @@ pub struct ComponentTimeRanges {
     pub tables_to_query: Vec<String>,
     /// Current batch index for processing
     pub current_batch: usize,
+    pub row_settings: HashMap<ComponentId, DataOverviewRowSettings>,
+}
+
+#[derive(Clone, Debug)]
+pub struct DataOverviewRowSettings {
+    pub enabled: bool,
+    pub color: Option<Color32>,
+    pub custom_name: Option<String>,
+}
+
+impl Default for DataOverviewRowSettings {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            color: None,
+            custom_name: None,
+        }
+    }
 }
 
 #[derive(Default, Clone)]
@@ -127,7 +151,10 @@ pub struct ComponentTimestampSummary {
     pub label: String,
     pub table_name: String,
     pub color: Color32,
+    pub enabled: bool,
     pub timestamp_range: Option<(Timestamp, Timestamp)>,
+    /// User-defined custom name for display (if set via inspector)
+    pub custom_name: Option<String>,
 }
 
 /// Generate a distinct color for a given row index using golden ratio hue distribution
@@ -180,7 +207,7 @@ fn hue_to_rgb(p: f32, q: f32, mut t: f32) -> f32 {
 
 /// Convert component name to SQL table name using the same conversion as the database.
 /// The database uses `to_case(Case::Snake)` followed by replacing invalid SQL characters.
-fn component_to_table_name(full_component_name: &str) -> String {
+pub fn component_to_table_name(full_component_name: &str) -> String {
     // Full component name is like "GpsPosMessage1.VACC"
     // Table name is like "gps_pos_message_1_vacc"
     // Must match the conversion in libs/db/src/arrow/mod.rs
@@ -208,19 +235,23 @@ pub struct DataOverviewWidget<'w, 's> {
     selected_range: Res<'w, SelectedTimeRange>,
     time_ranges: ResMut<'w, ComponentTimeRanges>,
     commands: Commands<'w, 's>,
+    window_states: Query<'w, 's, &'static mut WindowState>,
 }
 
 impl WidgetSystem for DataOverviewWidget<'_, '_> {
-    type Args = DataOverviewPane;
+    type Args = (DataOverviewPane, Entity);
     type Output = DataOverviewPane;
 
     fn ui_system(
         world: &mut World,
         state: &mut SystemState<Self>,
         ui: &mut egui::Ui,
-        mut pane: Self::Args,
+        (mut pane, target_window): Self::Args,
     ) -> Self::Output {
         let mut params = state.get_mut(world);
+        let Ok(mut window_state) = params.window_states.get_mut(target_window) else {
+            return pane;
+        };
 
         let scheme = get_scheme();
         let available_rect = ui.available_rect_before_wrap();
@@ -249,6 +280,17 @@ impl WidgetSystem for DataOverviewWidget<'_, '_> {
 
         let mut component_list: Vec<(ComponentId, String, String)> = Vec::new();
         collect_components(&params.eql_context.0.component_parts, &mut component_list);
+        let mut enabled_tables: Vec<String> = Vec::new();
+        for (component_id, _, table_name) in &component_list {
+            let settings = params
+                .time_ranges
+                .row_settings
+                .entry(*component_id)
+                .or_default();
+            if settings.enabled {
+                enabled_tables.push(table_name.clone());
+            }
+        }
 
         // Initialize Phase 1 when state is NotStarted and we have components
         if matches!(params.time_ranges.state, TimeRangeQueryState::NotStarted)
@@ -428,13 +470,20 @@ impl WidgetSystem for DataOverviewWidget<'_, '_> {
         let mut summaries: Vec<ComponentTimestampSummary> = Vec::new();
         for (component_id, label, table_name) in component_list.iter() {
             let timestamp_range = params.time_ranges.ranges.get(table_name).copied();
+            let custom_name = params
+                .time_ranges
+                .row_settings
+                .get(component_id)
+                .and_then(|s| s.custom_name.clone());
 
             summaries.push(ComponentTimestampSummary {
                 component_id: *component_id,
                 label: label.clone(),
                 table_name: table_name.clone(),
                 color: Color32::WHITE, // Will be assigned after sorting
+                enabled: true,
                 timestamp_range,
+                custom_name,
             });
         }
 
@@ -449,7 +498,19 @@ impl WidgetSystem for DataOverviewWidget<'_, '_> {
 
         // Assign colors after sorting so adjacent rows have distinct colors
         for (index, summary) in summaries.iter_mut().enumerate() {
-            summary.color = row_color(index);
+            let settings = params
+                .time_ranges
+                .row_settings
+                .entry(summary.component_id)
+                .or_default();
+            if settings.color.is_none() {
+                settings.color = Some(row_color(index));
+            }
+            summary.color = settings.color.unwrap_or_else(|| row_color(index));
+            summary.enabled = settings.enabled;
+            if !summary.enabled {
+                summary.timestamp_range = None;
+            }
         }
 
         // Calculate time range from actual component data ranges
@@ -500,6 +561,17 @@ impl WidgetSystem for DataOverviewWidget<'_, '_> {
         let pixels_per_us = timeline_width as f64 / time_span;
         let timeline_start_x = available_rect.min.x + LABEL_WIDTH;
         let timeline_end_x = timeline_start_x + timeline_width;
+        let response = ui.interact(
+            available_rect,
+            ui.id().with("data_overview"),
+            Sense::click_and_drag(),
+        );
+        let click_pos = if response.clicked() {
+            window_state.ui_state.selected_object = SelectedObject::DataOverview;
+            response.interact_pointer_pos()
+        } else {
+            None
+        };
 
         // Header with component count and query status
         let header_height = ROW_HEIGHT;
@@ -576,9 +648,26 @@ impl WidgetSystem for DataOverviewWidget<'_, '_> {
                     continue;
                 }
 
+                let is_selected = matches!(
+                    window_state.ui_state.selected_object,
+                    SelectedObject::DataOverviewComponent { component_id }
+                        if component_id == summary.component_id
+                );
+                if let Some(pos) = click_pos
+                    && row_rect.contains(pos)
+                {
+                    window_state.ui_state.selected_object = SelectedObject::DataOverviewComponent {
+                        component_id: summary.component_id,
+                    };
+                }
+
                 // Alternate row background
                 if row_index % 2 == 0 {
                     ui.painter().rect_filled(row_rect, 0.0, scheme.bg_primary);
+                }
+                if is_selected {
+                    ui.painter()
+                        .rect_filled(row_rect, 0.0, scheme.highlight.opacity(0.08));
                 }
 
                 // Draw label with component color
@@ -586,25 +675,38 @@ impl WidgetSystem for DataOverviewWidget<'_, '_> {
                     Rect::from_min_size(row_rect.min, Vec2::new(LABEL_WIDTH, ROW_HEIGHT));
 
                 // Color indicator
+                let indicator_color = if summary.enabled {
+                    summary.color
+                } else {
+                    summary.color.opacity(0.35)
+                };
                 ui.painter().circle_filled(
                     Pos2::new(label_rect.min.x + 8.0, label_rect.center().y),
                     4.0,
-                    summary.color,
+                    indicator_color,
                 );
 
-                // Component name (truncated if needed)
-                let mut label = summary.label.clone();
+                // Component name (use custom_name if set, otherwise original label)
+                let mut label = summary
+                    .custom_name
+                    .clone()
+                    .unwrap_or_else(|| summary.label.clone());
                 if label.len() > 38 {
                     label.truncate(35);
                     label.push_str("...");
                 }
 
+                let label_color = if summary.enabled {
+                    summary.color
+                } else {
+                    summary.color.opacity(0.35)
+                };
                 ui.painter().text(
                     Pos2::new(label_rect.min.x + 16.0, label_rect.center().y),
                     egui::Align2::LEFT_CENTER,
                     label,
                     egui::FontId::proportional(10.0),
-                    summary.color,
+                    label_color,
                 );
 
                 // Draw sparkline if we have data with points, otherwise fall back to bar
@@ -696,27 +798,27 @@ impl WidgetSystem for DataOverviewWidget<'_, '_> {
                     let start_offset = (start_ts.0 - display_start.0) as f64;
                     let end_offset = (end_ts.0 - display_start.0) as f64;
 
-                    let start_x = timeline_start_x + (start_offset * pixels_per_us) as f32;
-                    let end_x = timeline_start_x + (end_offset * pixels_per_us) as f32;
+                        let start_x = timeline_start_x + (start_offset * pixels_per_us) as f32;
+                        let end_x = timeline_start_x + (end_offset * pixels_per_us) as f32;
 
-                    // Clip to the visible timeline area
-                    let clipped_start_x = start_x.max(timeline_start_x);
-                    let clipped_end_x = end_x.min(timeline_end_x);
+                        // Clip to the visible timeline area
+                        let clipped_start_x = start_x.max(timeline_start_x);
+                        let clipped_end_x = end_x.min(timeline_end_x);
 
-                    // Only draw if there's a visible portion
-                    if clipped_end_x > clipped_start_x {
-                        let min_width = 2.0;
-                        let bar_width = (clipped_end_x - clipped_start_x).max(min_width);
+                        // Only draw if there's a visible portion
+                        if clipped_end_x > clipped_start_x {
+                            let min_width = 2.0;
+                            let bar_width = (clipped_end_x - clipped_start_x).max(min_width);
 
-                        let bar_rect = Rect::from_min_max(
-                            Pos2::new(clipped_start_x, row_rect.min.y + 3.0),
-                            Pos2::new(clipped_start_x + bar_width, row_rect.max.y - 3.0),
-                        );
+                            let bar_rect = Rect::from_min_max(
+                                Pos2::new(clipped_start_x, row_rect.min.y + 3.0),
+                                Pos2::new(clipped_start_x + bar_width, row_rect.max.y - 3.0),
+                            );
 
-                        ui.painter().rect_filled(bar_rect, 2.0, summary.color);
+                            ui.painter().rect_filled(bar_rect, 2.0, summary.color);
+                        }
                     }
                 }
-            }
         });
 
         // Draw vertical separator between labels and timeline
@@ -724,13 +826,6 @@ impl WidgetSystem for DataOverviewWidget<'_, '_> {
             timeline_start_x,
             available_rect.y_range(),
             Stroke::new(1.0, scheme.border_primary),
-        );
-
-        // Handle interactions
-        let response = ui.interact(
-            available_rect,
-            ui.id().with("data_overview"),
-            Sense::click_and_drag(),
         );
 
         // Check if pointer is over the timeline area (right of labels)
@@ -1115,18 +1210,18 @@ pub fn trigger_time_range_queries(
     // Collect table names
     fn collect_table_names(
         parts: &std::collections::BTreeMap<String, eql::ComponentPart>,
-        result: &mut Vec<String>,
+        result: &mut Vec<(ComponentId, String)>,
     ) {
         for part in parts.values() {
             if let Some(component) = &part.component {
                 let table_name = component_to_table_name(&component.name);
-                result.push(table_name);
+                result.push((part.id, table_name));
             }
             collect_table_names(&part.children, result);
         }
     }
 
-    let mut table_names: Vec<String> = Vec::new();
+    let mut table_names: Vec<(ComponentId, String)> = Vec::new();
     collect_table_names(&eql_context.0.component_parts, &mut table_names);
 
     // Skip if no components yet
@@ -1139,5 +1234,5 @@ pub fn trigger_time_range_queries(
     time_ranges.total_queries = table_names.len();
     time_ranges.completed_queries = 0;
     time_ranges.current_batch = 0;
-    time_ranges.tables_to_query = table_names;
+    time_ranges.tables_to_query = table_names.into_iter().map(|(_a,b)| b).collect();
 }

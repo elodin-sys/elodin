@@ -616,6 +616,39 @@ def gravity(query: el.Query[el.Force, el.Inertia]) -> el.Query[el.Force]:
     )
 ```
 
+### `@elodin.map_seq`
+
+`@elodin.map_seq` is similar to `@elodin.map`. In fact they will produce the same results numerically but their performance differs.
+
+`@elodin.map_seq` maps over items sequentially, so it does lose some parallelism, but it also preserves `jax.lax.cond()`'s behavior, which only evaluates one of its consequents. `@elodin.map` translates all `jax.lax.cond()`s to `jax.lax.select()`s, which always evaluates both of its consequents. So in cases where one of your consequents is both expensive and seldom, `@elodin.map_seq` can be faster than `@elodin.map`.
+
+```python
+import elodin as el
+
+@el.map_seq
+def gravity(f: el.Force, inertia: el.Inertia) -> el.Force: ...
+
+@el.map_seq
+def gyro_omega(vel: el.WorldVel) -> GyroOmega: ...
+```
+
+The following systems are equivalent as the `@elodin.map_seq` definition effectively desugars to the `@elodin.system` one:
+
+```python
+import elodin as el
+
+@el.map_seq
+def gravity(f: el.Force, inertia: el.Inertia) -> el.Force:
+    return f + el.SpatialForce(linear=inertia.mass() * jnp.array([0.0, -9.81, 0.0]))
+
+@el.system
+def gravity(query: el.Query[el.Force, el.Inertia]) -> el.Query[el.Force]:
+    return query.map_seq(
+        el.Force,
+        lambda f, inertia: f + el.SpatialForce(linear=inertia.mass() * jnp.array([0.0, -9.81, 0.0])),
+    )
+```
+
 ### _class_ `elodin.Query`
 
 `Query` is the primary mechanism for accessing data in Elodin. It is a view into the world state that is filtered by the components specified in the query. Only entities that have been spawned with all of the query's components will be selected for processing. For example, the query `Query[WorldPos, Inertia]` would only select entities that have both a `WorldPos` and an `Inertia` component (typically via the `Body` [archetype](#archetypes)).

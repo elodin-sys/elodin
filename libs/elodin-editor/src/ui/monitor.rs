@@ -9,22 +9,25 @@ use super::{PaneName, colors::get_scheme, widgets::WidgetSystem};
 
 #[derive(Clone)]
 pub struct MonitorPane {
+    pub entity: Entity,
     pub name: PaneName,
-    pub component_name: String,
 }
 
 impl MonitorPane {
-    pub fn new(name: PaneName, component_name: String) -> Self {
-        Self {
-            name,
-            component_name,
-        }
+    pub fn new(entity: Entity, name: PaneName) -> Self {
+        Self { entity, name }
     }
+}
+
+#[derive(Component, Clone)]
+pub struct MonitorData {
+    pub component_name: String,
 }
 
 #[derive(SystemParam)]
 pub struct MonitorWidget<'w, 's> {
     metadata_store: Res<'w, ComponentMetadataRegistry>,
+    monitors: Query<'w, 's, &'static MonitorData>,
     component_value_query: Query<'w, 's, &'static mut ComponentValue>,
     entity_map: Res<'w, EntityMap>,
 }
@@ -42,10 +45,14 @@ impl WidgetSystem for MonitorWidget<'_, '_> {
     ) -> Self::Output {
         let MonitorWidget {
             metadata_store,
+            monitors,
             mut component_value_query,
             entity_map,
         } = state.get_mut(world);
-        let component_id = ComponentId::new(&pane.component_name);
+        let Ok(monitor) = monitors.get(pane.entity) else {
+            return;
+        };
+        let component_id = ComponentId::new(&monitor.component_name);
         let Some(entity) = entity_map.get(&component_id) else {
             return;
         };

@@ -6,7 +6,7 @@ use crate::{
     ui::{
         HdrEnabled, actions, colors,
         colors::EColor,
-        inspector, plot, query_plot, query_table,
+        inspector, monitor, plot, query_plot, query_table,
         tiles::{self, Pane},
         window::compute_window_title,
     },
@@ -41,6 +41,7 @@ pub struct CurrentSecondarySchematics(pub Vec<SecondarySchematic>);
 #[derive(SystemParam)]
 pub struct SchematicParam<'w, 's> {
     pub query_tables: Query<'w, 's, &'static query_table::QueryTableData>,
+    pub monitors: Query<'w, 's, &'static monitor::MonitorData>,
     pub action_tiles: Query<'w, 's, &'static actions::ActionTile>,
     pub graph_states: Query<'w, 's, &'static plot::GraphState>,
     pub query_plots: Query<'w, 's, &'static query_plot::QueryPlotData>,
@@ -92,7 +93,7 @@ impl SchematicParam<'_, '_> {
             Pane::Dashboard(dashboard) => Some(dashboard.name.clone()),
             Pane::SchematicTree(pane) => Some(pane.name.clone()),
             Pane::DataOverview(pane) => Some(pane.name.clone()),
-            Pane::VideoStream(_) | Pane::Hierarchy | Pane::Inspector => None,
+            Pane::VideoStream(_) => None,
         }
     }
 
@@ -208,10 +209,13 @@ impl SchematicParam<'_, '_> {
                         }))
                     }
 
-                    Pane::Monitor(monitor) => Some(Panel::ComponentMonitor(ComponentMonitor {
-                        component_name: monitor.component_name.clone(),
-                        name: pane_name,
-                    })),
+                    Pane::Monitor(monitor) => {
+                        let monitor_data = self.monitors.get(monitor.entity).ok()?;
+                        Some(Panel::ComponentMonitor(ComponentMonitor {
+                            component_name: monitor_data.component_name.clone(),
+                            name: pane_name,
+                        }))
+                    }
 
                     Pane::QueryTable(query_table) => {
                         let query_table_data = self.query_tables.get(query_table.entity).ok()?;
@@ -252,7 +256,6 @@ impl SchematicParam<'_, '_> {
                         }
                         Some(Panel::Dashboard(Box::new(dashboard)))
                     }
-                    _ => None,
                 }
             }
 
@@ -261,9 +264,6 @@ impl SchematicParam<'_, '_> {
                 egui_tiles::Container::Tabs(t) => {
                     let mut tabs = vec![];
                     for child_id in &t.children {
-                        if tiles::sidebar::tile_is_sidebar(tiles, *child_id) {
-                            continue;
-                        }
                         if let Some(tab) = self.get_panel_from_state(state, *child_id) {
                             tabs.push(tab)
                         }
@@ -281,9 +281,6 @@ impl SchematicParam<'_, '_> {
                     let name = state.get_container_title(tile_id).map(|s| s.to_string());
 
                     for child_id in &linear.children {
-                        if tiles::sidebar::tile_is_sidebar(tiles, *child_id) {
-                            continue;
-                        }
                         if let Some(panel) = self.get_panel_from_state(state, *child_id) {
                             if let Some((_, share)) =
                                 linear.shares.iter().find(|(id, _)| *id == child_id)
