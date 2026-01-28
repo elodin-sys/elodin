@@ -9,7 +9,7 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.05";
     nixpkgs-unstable.url = "github:nixos/nixpkgs/nixos-unstable";
-    jetpack.url = "github:anduril/jetpack-nixos/6e7aa572e435136a26bcf475d70aafdeef117e2d";
+    jetpack.url = "github:anduril/jetpack-nixos/2c98c9d6c326d67ae5f4909db61238d31352e18c";
     rust-overlay.url = "github:oxalica/rust-overlay";
     flake-utils.url = "github:numtide/flake-utils";
 
