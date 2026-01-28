@@ -277,7 +277,7 @@ def apply_drag(w: el.Query[Wind],
 When this system is run, it will query for entities with the `Wind` component and entities with both `Force` and `WorldVel` components. These
 are provided as arrays of matching entities to the function body as `w` and `q` respectively. The function body is then expected to return a
 new Query of `Force` component attached entities, which in this case the Query.map function provides. See
-[Query.map](reference/python-api/#class-elodin-query) for more details.
+[Query.map](/reference/python-api/#class-elodin-query) for more details.
 {% end %}
 
 #### Update the System Function
