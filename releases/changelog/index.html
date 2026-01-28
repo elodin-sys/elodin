@@ -199,8 +199,8 @@
             </a>
             <span>
                 <select name="version" class="version-select" disabled>
-                    <option value="v0.15.5" selected>
-                        v0.15.5
+                    <option value="v0.16.0" selected>
+                        v0.16.0
                     </option>
                 </select>
             </span>
@@ -320,6 +320,20 @@
         <h3>On this page</h3>
         <nav id="TableOfContents">
             <ul>
+                
+                <li>
+                    <a href="/releases/changelog/#v0-16">v0.16</a>
+                    
+                    <ul>
+                        
+                        <li>
+                            <a href="/releases/changelog/#v0-16-0">v0.16.0</a>
+                            
+                        </li>
+                        
+                    </ul>
+                    
+                </li>
                 
                 <li>
                     <a href="/releases/changelog/#v0-15">v0.15</a>
@@ -680,7 +694,35 @@
  
               <main class="docs-content col-lg-11 col-xxl-10">
                   <h1>Changelog</h1>
-                   <h2 id="v0-15">v0.15</h2>
+                   <h2 id="v0-16">v0.16</h2>
+<h3 id="v0-16-0">v0.16.0</h3>
+<ul>
+<li><strong>(feat)</strong> Add elodin-db subcommands: <code>info</code>, <code>merge</code>, <code>prune</code>, <code>time-align</code>, <code>truncate</code>, <code>drop</code>. (#410, #437)</li>
+<li><strong>(feat)</strong> Add <code>@elodin.map_seq</code> to preserve <code>cond()</code> behavior. (#444)</li>
+<li><strong>(feat)</strong> Right-click on tab title shows context menu to open inspector or rename. (#440)</li>
+<li><strong>(feat)</strong> Add <code>pre_step</code> &amp; <code>ctx.truncate</code> to Elodin Sim. (#400)</li>
+<li><strong>(feat)</strong> Add <code>StepContext.write_component()</code> custom timestamp. (#407)</li>
+<li><strong>(feat)</strong> Add Component Name to Time Travel Warning. (#404)</li>
+<li><strong>(feat)</strong> Kill recipes via the StepContext. (#413)</li>
+<li><strong>(feat)</strong> Inspector/Hierarchy sidebars per window. (#385)</li>
+<li><strong>(feat)</strong> Add default Data Overview Panel. (#373)</li>
+<li><strong>(feat)</strong> Add Color Schemes UI Palette. (#372)</li>
+<li><strong>(feat)</strong> Add Bitcraze Crazyflie Example. (#388)</li>
+<li><strong>(feat)</strong> Add Lockstep SITL Example with Betaflight. (#375)</li>
+<li><strong>(feat)</strong> Add Rocket Barrowman Example. (#274)</li>
+<li><strong>(feat)</strong> Push Betaflight SITL to native 4khz. (#381)</li>
+<li><strong>(feat:aleph)</strong> Bump jetpack-nixos dependency. (#372)</li>
+<li><strong>(fix)</strong> Fix UDP receive reconnect. (#355)</li>
+<li><strong>(fix:aleph)</strong> Fix b2b DT for peripheral support.</li>
+<li><strong>(fix:aleph)</strong> Clean up aleph eth and systemd-boot.</li>
+<li><strong>(fix:aleph)</strong> Update aleph template.</li>
+<li><strong>(chore)</strong> Update Bevy to 0.17. (#399)</li>
+<li><strong>(chore)</strong> Update bevy_egui to 0.36.0. (#398)</li>
+<li><strong>(chore)</strong> Update Deepstreamer version to 7.1. (#389)</li>
+<li><strong>(doc)</strong> Document Command Palette. (#380)</li>
+<li><strong>(doc)</strong> Document Color Schemes. (#372)</li>
+</ul>
+<h2 id="v0-15">v0.15</h2>
 <h3 id="v0-15-5">v0.15.5</h3>
 <ul>
 <li><strong>(feat)</strong> Hold button to multi step. (#361)</li>
