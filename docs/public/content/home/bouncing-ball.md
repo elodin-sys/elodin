@@ -72,7 +72,7 @@ def world() -> el.World:
 
 We create a new elodin world, spawn an entity named "Ball" with a sphere mesh shape component, and a body archetype
 which provides the ball with a position, velocity, and other aspects related to the Elodin 6DoF system
-(see the [6DoF reference for more info](http://127.0.0.1:1111/reference/python-api/#6-degrees-of-freedom-model)).
+(see the [6DoF reference for more info](/reference/python-api/#6-degrees-of-freedom-model)).
 We also spawn a viewport and a line to visualize the ball's position.
 
 
