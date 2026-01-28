@@ -21,7 +21,7 @@ order = 6
 ### theme
 - Optional top-level node that sets the session UI appearance.
 - `mode`: `"dark"` (default) or `"light"`; drives window decorations and picks the dark/light variant of the color scheme. If a preset does not ship a light variant, the theme stays in dark.
-- `scheme`: name of a color preset. Built-ins are `default`, `eggplant`, `catppuccini-macchiato`, `catppuccini-mocha`, `catppuccini-latte`, and `matrix`; user presets are picked up from any `color_schemes` folder in the asset directory or data directory. Unknown names fall back to `default`. If a user preset shares a name with a built-in, the user version wins. See [color-schemes](./color-schemes.md) for the file layout.
+- `scheme`: name of a color preset. Built-ins are `default`, `eggplant`, `catppuccini-macchiato`, `catppuccini-mocha`, `catppuccini-latte`, and `matrix`; user presets are picked up from any `color_schemes` folder in the asset directory or data directory. Unknown names fall back to `default`. If a user preset shares a name with a built-in, the user version wins. See [color-schemes](/reference/color-schemes) for the file layout.
 - Applies to the whole session; a secondary file can set its own `mode` for its windows, but the active scheme stays the one from the primary schematic.
 - Controls both egui styling (palette) and the window decoration theme (Dark/Light).
 
