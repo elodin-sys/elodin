@@ -152,7 +152,7 @@ Notice we use a pipe `|` to combine the systems. This is a powerful concept in E
 {% alert(kind="info") %}
 But why is gravity supplied to `six_dof`, while bounce is not? You'll notice bounce returns the resulting velocity, while gravity only
 supplies forces that still need to be applied by an integrator. The `six_dof` system is an integrator that applies forces to update the
-velocity and position of the ball. See the [six_dof reference documentation](reference/python-api/#6-degrees-of-freedom-model)
+velocity and position of the ball. See the [six_dof reference documentation](/reference/python-api/#6-degrees-of-freedom-model)
 for more information.
 {% end %}
 
