@@ -2,6 +2,34 @@
 
 ## unreleased
 
+## v0.16
+
+### v0.16.0
+- **(feat)** Add elodin-db subcommands: `info`, `merge`, `prune`, `time-align`, `truncate`, `drop`. (#410, #437)
+- **(feat)** Add `@elodin.map_seq` to preserve `cond()` behavior. (#444)
+- **(feat)** Right-click on tab title shows context menu to open inspector or rename. (#440)
+- **(feat)** Add `pre_step` & `ctx.truncate` to Elodin Sim. (#400)
+- **(feat)** Add `StepContext.write_component()` custom timestamp. (#407)
+- **(feat)** Add Component Name to Time Travel Warning. (#404)
+- **(feat)** Kill recipes via the StepContext. (#413)
+- **(feat)** Inspector/Hierarchy sidebars per window. (#385)
+- **(feat)** Add default Data Overview Panel. (#373)
+- **(feat)** Add Color Schemes UI Palette. (#372)
+- **(feat)** Add Bitcraze Crazyflie Example. (#388)
+- **(feat)** Add Lockstep SITL Example with Betaflight. (#375)
+- **(feat)** Add Rocket Barrowman Example. (#274)
+- **(feat)** Push Betaflight SITL to native 4khz. (#381)
+- **(feat:aleph)** Bump jetpack-nixos dependency. (#372)
+- **(fix)** Fix UDP receive reconnect. (#355)
+- **(fix:aleph)** Fix b2b DT for peripheral support.
+- **(fix:aleph)** Clean up aleph eth and systemd-boot.
+- **(fix:aleph)** Update aleph template.
+- **(chore)** Update Bevy to 0.17. (#399)
+- **(chore)** Update bevy_egui to 0.36.0. (#398)
+- **(chore)** Update Deepstreamer version to 7.1. (#389)
+- **(doc)** Document Command Palette. (#380)
+- **(doc)** Document Color Schemes. (#372)
+
 ## v0.15
 
 ### v0.15.5
