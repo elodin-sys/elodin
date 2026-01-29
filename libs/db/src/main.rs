@@ -251,9 +251,6 @@ async fn main() -> miette::Result<()> {
         ))
         .try_init();
 
-    // Install signal handlers for graceful cancellation of CLI tools
-    elodin_db::cancellation::install_signal_handlers();
-
     match args.command {
         Commands::Run(RunArgs {
             addr,
@@ -421,6 +418,9 @@ async fn main() -> miette::Result<()> {
             flatten,
             pattern,
         }) => {
+            // Install signal handlers only for Export command which uses check_cancelled()
+            elodin_db::cancellation::install_signal_handlers();
+
             let export_format = match format {
                 ExportFormat::Parquet => elodin_db::export::ExportFormat::Parquet,
                 ExportFormat::ArrowIpc => elodin_db::export::ExportFormat::ArrowIpc,
