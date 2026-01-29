@@ -7,10 +7,11 @@ use std::io::Write as IoWrite;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use arrow::array::{Array, ArrayRef, FixedSizeListArray, RecordBatch, StringBuilder};
+use arrow::array::{Array, ArrayRef, FixedSizeListArray, LargeStringBuilder, RecordBatch};
 use arrow::datatypes::{DataType, Field, Schema};
 use glob::Pattern;
 
+use crate::cancellation::check_cancelled;
 use crate::{DB, Error};
 
 /// Export format for the CLI command.
@@ -22,10 +23,12 @@ pub enum ExportFormat {
     Csv,
 }
 
-/// Convert a FixedSizeListArray to a StringArray with JSON-like representation.
+/// Convert a FixedSizeListArray to a LargeStringArray with JSON-like representation.
 /// Each array element becomes a string like "[1.0, 2.0, 3.0]".
+/// Uses LargeStringBuilder (i64 offsets) to handle very large arrays that would overflow
+/// StringBuilder's i32 offset limit (~2GB).
 fn fixed_size_list_to_string(array: &FixedSizeListArray) -> ArrayRef {
-    let mut builder = StringBuilder::new();
+    let mut builder = LargeStringBuilder::new();
     let list_size = array.value_length() as usize;
 
     for i in 0..array.len() {
@@ -146,7 +149,7 @@ fn convert_lists_to_strings(batch: &RecordBatch) -> RecordBatch {
                 let string_array = fixed_size_list_to_string(list_array);
                 new_fields.push(Arc::new(Field::new(
                     field.name(),
-                    DataType::Utf8,
+                    DataType::LargeUtf8,
                     field.is_nullable(),
                 )));
                 new_columns.push(string_array);
@@ -234,6 +237,9 @@ pub fn run(
         println!("Found {} components", total_components);
 
         for component in state.components.values() {
+            // Check for cancellation at the start of each component
+            check_cancelled()?;
+
             let Some(component_metadata) = state.component_metadata.get(&component.component_id)
             else {
                 skipped_count += 1;

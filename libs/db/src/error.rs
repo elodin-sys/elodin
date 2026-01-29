@@ -55,6 +55,8 @@ pub enum Error {
     MissingDbState(PathBuf),
     #[error("fix_timestamps: {0}")]
     FixTimestamps(String),
+    #[error("operation cancelled")]
+    Cancelled,
 }
 
 impl From<impeller2_stellar::Error> for Error {

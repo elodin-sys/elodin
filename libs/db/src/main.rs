@@ -250,6 +250,10 @@ async fn main() -> miette::Result<()> {
             "%Y-%m-%d %H:%M:%S%.3f".to_string(),
         ))
         .try_init();
+
+    // Install signal handlers for graceful cancellation of CLI tools
+    elodin_db::cancellation::install_signal_handlers();
+
     match args.command {
         Commands::Run(RunArgs {
             addr,

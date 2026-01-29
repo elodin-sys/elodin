@@ -56,6 +56,7 @@ pub use error::Error;
 pub mod append_log;
 mod arrow;
 pub mod axum;
+pub mod cancellation;
 pub mod drop;
 mod error;
 pub mod export;
