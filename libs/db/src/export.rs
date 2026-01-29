@@ -23,6 +23,126 @@ pub enum ExportFormat {
     Csv,
 }
 
+/// Supported element types for fixed-size list to string conversion.
+#[derive(Clone, Copy)]
+enum ListElementType {
+    Float64,
+    Float32,
+    Int64,
+    Int32,
+    Int16,
+    Int8,
+    UInt64,
+    UInt32,
+    UInt16,
+    UInt8,
+    Boolean,
+}
+
+impl ListElementType {
+    /// Try to determine the element type from an Arrow DataType.
+    /// Returns None for unsupported types.
+    fn from_arrow(data_type: &DataType) -> Option<Self> {
+        match data_type {
+            DataType::Float64 => Some(Self::Float64),
+            DataType::Float32 => Some(Self::Float32),
+            DataType::Int64 => Some(Self::Int64),
+            DataType::Int32 => Some(Self::Int32),
+            DataType::Int16 => Some(Self::Int16),
+            DataType::Int8 => Some(Self::Int8),
+            DataType::UInt64 => Some(Self::UInt64),
+            DataType::UInt32 => Some(Self::UInt32),
+            DataType::UInt16 => Some(Self::UInt16),
+            DataType::UInt8 => Some(Self::UInt8),
+            DataType::Boolean => Some(Self::Boolean),
+            _ => None,
+        }
+    }
+
+    /// Format a single element at index `j` from the given array.
+    fn format_element(&self, values: &dyn Array, j: usize) -> String {
+        match self {
+            Self::Float64 => {
+                let arr = values
+                    .as_any()
+                    .downcast_ref::<arrow::array::Float64Array>()
+                    .unwrap();
+                format!("{}", arr.value(j))
+            }
+            Self::Float32 => {
+                let arr = values
+                    .as_any()
+                    .downcast_ref::<arrow::array::Float32Array>()
+                    .unwrap();
+                format!("{}", arr.value(j))
+            }
+            Self::Int64 => {
+                let arr = values
+                    .as_any()
+                    .downcast_ref::<arrow::array::Int64Array>()
+                    .unwrap();
+                format!("{}", arr.value(j))
+            }
+            Self::Int32 => {
+                let arr = values
+                    .as_any()
+                    .downcast_ref::<arrow::array::Int32Array>()
+                    .unwrap();
+                format!("{}", arr.value(j))
+            }
+            Self::Int16 => {
+                let arr = values
+                    .as_any()
+                    .downcast_ref::<arrow::array::Int16Array>()
+                    .unwrap();
+                format!("{}", arr.value(j))
+            }
+            Self::Int8 => {
+                let arr = values
+                    .as_any()
+                    .downcast_ref::<arrow::array::Int8Array>()
+                    .unwrap();
+                format!("{}", arr.value(j))
+            }
+            Self::UInt64 => {
+                let arr = values
+                    .as_any()
+                    .downcast_ref::<arrow::array::UInt64Array>()
+                    .unwrap();
+                format!("{}", arr.value(j))
+            }
+            Self::UInt32 => {
+                let arr = values
+                    .as_any()
+                    .downcast_ref::<arrow::array::UInt32Array>()
+                    .unwrap();
+                format!("{}", arr.value(j))
+            }
+            Self::UInt16 => {
+                let arr = values
+                    .as_any()
+                    .downcast_ref::<arrow::array::UInt16Array>()
+                    .unwrap();
+                format!("{}", arr.value(j))
+            }
+            Self::UInt8 => {
+                let arr = values
+                    .as_any()
+                    .downcast_ref::<arrow::array::UInt8Array>()
+                    .unwrap();
+                format!("{}", arr.value(j))
+            }
+            Self::Boolean => {
+                let arr = values
+                    .as_any()
+                    .downcast_ref::<arrow::array::BooleanArray>()
+                    .unwrap();
+                format!("{}", arr.value(j))
+            }
+        }
+    }
+}
+
 /// Convert a FixedSizeListArray to a LargeStringArray with JSON-like representation.
 /// Each array element becomes a string like "[1.0, 2.0, 3.0]".
 /// Uses LargeStringBuilder (i64 offsets) to handle very large arrays that would overflow
@@ -30,6 +150,35 @@ pub enum ExportFormat {
 fn fixed_size_list_to_string(array: &FixedSizeListArray) -> ArrayRef {
     let mut builder = LargeStringBuilder::new();
     let list_size = array.value_length() as usize;
+
+    // Check element type once before entering the loop.
+    // Arrow arrays are homogeneously typed, so we can determine the type from
+    // the FixedSizeList's value type in the schema.
+    let inner_field = match array.data_type() {
+        DataType::FixedSizeList(field, _) => field,
+        _ => unreachable!("FixedSizeListArray must have FixedSizeList data type"),
+    };
+    let element_type = ListElementType::from_arrow(inner_field.data_type());
+
+    // If unsupported type, warn once and return array of null-filled strings
+    let Some(element_type) = element_type else {
+        eprintln!(
+            "Warning: unsupported data type {:?} in fixed-size list, outputting nulls for all {} rows",
+            inner_field.data_type(),
+            array.len()
+        );
+
+        // Build "[null, null, ...]" string once
+        let null_list = format!("[{}]", vec!["null"; list_size].join(", "));
+        for i in 0..array.len() {
+            if array.is_null(i) {
+                builder.append_null();
+            } else {
+                builder.append_value(&null_list);
+            }
+        }
+        return Arc::new(builder.finish());
+    };
 
     for i in 0..array.len() {
         if array.is_null(i) {
@@ -39,94 +188,7 @@ fn fixed_size_list_to_string(array: &FixedSizeListArray) -> ArrayRef {
             let mut parts = Vec::with_capacity(list_size);
 
             for j in 0..list_size {
-                // Convert each element to string based on its type
-                let value_str = match values.data_type() {
-                    DataType::Float64 => {
-                        let arr = values
-                            .as_any()
-                            .downcast_ref::<arrow::array::Float64Array>()
-                            .unwrap();
-                        format!("{}", arr.value(j))
-                    }
-                    DataType::Float32 => {
-                        let arr = values
-                            .as_any()
-                            .downcast_ref::<arrow::array::Float32Array>()
-                            .unwrap();
-                        format!("{}", arr.value(j))
-                    }
-                    DataType::Int64 => {
-                        let arr = values
-                            .as_any()
-                            .downcast_ref::<arrow::array::Int64Array>()
-                            .unwrap();
-                        format!("{}", arr.value(j))
-                    }
-                    DataType::Int32 => {
-                        let arr = values
-                            .as_any()
-                            .downcast_ref::<arrow::array::Int32Array>()
-                            .unwrap();
-                        format!("{}", arr.value(j))
-                    }
-                    DataType::Int16 => {
-                        let arr = values
-                            .as_any()
-                            .downcast_ref::<arrow::array::Int16Array>()
-                            .unwrap();
-                        format!("{}", arr.value(j))
-                    }
-                    DataType::Int8 => {
-                        let arr = values
-                            .as_any()
-                            .downcast_ref::<arrow::array::Int8Array>()
-                            .unwrap();
-                        format!("{}", arr.value(j))
-                    }
-                    DataType::UInt64 => {
-                        let arr = values
-                            .as_any()
-                            .downcast_ref::<arrow::array::UInt64Array>()
-                            .unwrap();
-                        format!("{}", arr.value(j))
-                    }
-                    DataType::UInt32 => {
-                        let arr = values
-                            .as_any()
-                            .downcast_ref::<arrow::array::UInt32Array>()
-                            .unwrap();
-                        format!("{}", arr.value(j))
-                    }
-                    DataType::UInt16 => {
-                        let arr = values
-                            .as_any()
-                            .downcast_ref::<arrow::array::UInt16Array>()
-                            .unwrap();
-                        format!("{}", arr.value(j))
-                    }
-                    DataType::UInt8 => {
-                        let arr = values
-                            .as_any()
-                            .downcast_ref::<arrow::array::UInt8Array>()
-                            .unwrap();
-                        format!("{}", arr.value(j))
-                    }
-                    DataType::Boolean => {
-                        let arr = values
-                            .as_any()
-                            .downcast_ref::<arrow::array::BooleanArray>()
-                            .unwrap();
-                        format!("{}", arr.value(j))
-                    }
-                    other => {
-                        eprintln!(
-                            "Warning: unsupported data type {:?} in fixed-size list, outputting null",
-                            other
-                        );
-                        "null".to_string()
-                    }
-                };
-                parts.push(value_str);
+                parts.push(element_type.format_element(values.as_ref(), j));
             }
 
             builder.append_value(format!("[{}]", parts.join(", ")));
