@@ -60,7 +60,14 @@ impl ListElementType {
     }
 
     /// Format a single element at index `j` from the given array.
+    /// Returns "null" if the element is null, otherwise formats the value.
     fn format_element(&self, values: &dyn Array, j: usize) -> String {
+        // Check for null element first - Arrow's value(j) returns underlying data
+        // (0, 0.0, false) regardless of the null bitmap
+        if values.is_null(j) {
+            return "null".to_string();
+        }
+
         match self {
             Self::Float64 => {
                 let arr = values
