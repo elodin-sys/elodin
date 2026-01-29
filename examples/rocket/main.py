@@ -533,7 +533,11 @@ w.schematic(
         glb path="compass.glb"
     }
     object_3d rocket.world_pos {
-        glb path="rocket.glb"
+        glb path="flappy-rocket.glb"
+        animate joint="Root.Fin_0" value="(0, 1, 0)"
+        animate joint="Root.Fin_1" value="(0, 1, 0)"
+        animate joint="Root.Fin_2" value="(0, 1, 0)"
+        animate joint="Root.Fin_3" value="(0, 1, 0)"
     }
     line_3d rocket.world_pos line_width=11.0 perspective=#false {
         color yolk

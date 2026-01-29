@@ -23,6 +23,7 @@ pub struct Object3DState {
     pub compiled_expr: Option<CompiledExpr>,
     pub scale_expr: Option<CompiledExpr>,
     pub scale_error: Option<String>,
+    pub joint_animations: Vec<(String, CompiledExpr)>,
     pub data: Object3D,
 }
 
@@ -549,6 +550,32 @@ impl std::error::Error for ScaleEvalError {}
 
 const ELLIPSOID_OVERSIZED_THRESHOLD: f32 = 10_000.0;
 
+/// Recursively searches for an entity with the given name in the scene hierarchy
+fn find_entity_by_name(
+    entity: Entity,
+    target_name: &str,
+    children: &Query<&Children>,
+    names: &Query<&Name>,
+) -> Option<Entity> {
+    // Check if this entity matches
+    if let Ok(name) = names.get(entity) {
+        if name.as_str() == target_name {
+            return Some(entity);
+        }
+    }
+
+    // Recursively search children
+    if let Ok(children_list) = children.get(entity) {
+        for child in children_list.iter() {
+            if let Some(found) = find_entity_by_name(child, target_name, children, names) {
+                return Some(found);
+            }
+        }
+    }
+
+    None
+}
+
 /// System that updates 3D object entities based on their EQL expressions
 pub fn update_object_3d_system(
     mut objects_query: Query<(
@@ -598,6 +625,145 @@ pub fn update_object_3d_system(
                 object_3d.scale_error = Some(err.to_string());
                 ellipse.oversized = false;
                 ellipse.max_extent = 0.0;
+            }
+        }
+    }
+}
+
+/// Converts a ComponentValue to an angle-axis rotation (axis Vec3, angle f32)
+fn component_value_to_axis_angle(value: &ComponentValue) -> Result<(Vec3, f32), String> {
+    use nox::ArrayBuf;
+    match value {
+        ComponentValue::F64(array) => {
+            let data = array.buf.as_buf();
+            if data.len() == 4 {
+                // 4-element format: [axis_x, axis_y, axis_z, angle]
+                let axis = Vec3::new(data[0] as f32, data[1] as f32, data[2] as f32);
+                let angle = data[3] as f32;
+                let normalized_axis = axis.normalize_or_zero();
+                Ok((normalized_axis, angle))
+            } else if data.len() == 3 {
+                // 3-element format: [x, y, z] where direction is axis and magnitude is angle
+                let vec = Vec3::new(data[0] as f32, data[1] as f32, data[2] as f32);
+                let angle = vec.length();
+                let normalized_axis = if angle > f32::EPSILON {
+                    vec / angle
+                } else {
+                    Vec3::Y // Default axis if vector is zero
+                };
+                Ok((normalized_axis, angle))
+            } else {
+                Err(format!(
+                    "Expected 3 or 4 elements for angle-axis rotation, got {}",
+                    data.len()
+                ))
+            }
+        }
+        ComponentValue::F32(array) => {
+            let data = array.buf.as_buf();
+            if data.len() == 4 {
+                // 4-element format: [axis_x, axis_y, axis_z, angle]
+                let axis = Vec3::new(data[0], data[1], data[2]);
+                let angle = data[3];
+                let normalized_axis = axis.normalize_or_zero();
+                Ok((normalized_axis, angle))
+            } else if data.len() == 3 {
+                // 3-element format: [x, y, z] where direction is axis and magnitude is angle
+                let vec = Vec3::new(data[0], data[1], data[2]);
+                let angle = vec.length();
+                let normalized_axis = if angle > f32::EPSILON {
+                    vec / angle
+                } else {
+                    Vec3::Y // Default axis if vector is zero
+                };
+                Ok((normalized_axis, angle))
+            } else {
+                Err(format!(
+                    "Expected 3 or 4 elements for angle-axis rotation, got {}",
+                    data.len()
+                ))
+            }
+        }
+        _ => Err("Invalid component type for angle-axis rotation".to_string()),
+    }
+}
+
+/// System that updates joint animations based on EQL expressions
+pub fn update_joint_animations(
+    objects_query: Query<(Entity, &Object3DState)>,
+    children: Query<&Children>,
+    names: Query<&Name>,
+    mut transforms: Query<&mut Transform>,
+    entity_map: Res<EntityMap>,
+    component_value_maps: Query<&'static ComponentValue>,
+) {
+    for (object_entity, object_3d) in objects_query.iter() {
+        // Only process GLB meshes with animations
+        if !matches!(
+            object_3d.data.mesh,
+            impeller2_wkt::Object3DMesh::Glb { .. }
+        ) || object_3d.joint_animations.is_empty() {
+            continue;
+        }
+        panic!();
+
+        // For each joint animation binding
+        for (joint_name, compiled_expr) in &object_3d.joint_animations {
+            // Evaluate the EQL expression
+            let component_value = match compiled_expr.execute(&entity_map, &component_value_maps) {
+                Ok(value) => value,
+                Err(err) => {
+                    warn!(
+                        object_entity = ?object_entity,
+                        joint = %joint_name,
+                        error = %err,
+                        "Failed to evaluate EQL expression for joint animation"
+                    );
+                    continue;
+                }
+            };
+
+            // Convert to axis-angle rotation
+            let (axis, angle) = match component_value_to_axis_angle(&component_value) {
+                Ok(result) => result,
+                Err(err) => {
+                    warn!(
+                        object_entity = ?object_entity,
+                        joint = %joint_name,
+                        error = %err,
+                        "Failed to convert EQL result to axis-angle rotation for joint animation"
+                    );
+                    continue;
+                }
+            };
+
+            // Find the joint entity by name, starting from the object entity
+            let joint_entity = match find_entity_by_name(object_entity, joint_name, &children, &names) {
+                Some(entity) => entity,
+                None => {
+                    warn!(
+                        object_entity = ?object_entity,
+                        joint = %joint_name,
+                        "Joint not found in scene hierarchy. Make sure the joint name matches exactly as it appears in the GLB file."
+                    );
+                    continue;
+                }
+            };
+
+            // Update the joint's transform rotation
+            match transforms.get_mut(joint_entity) {
+                Ok(mut joint_transform) => {
+                    joint_transform.rotation = Quat::from_axis_angle(axis, angle);
+                }
+                Err(err) => {
+                    warn!(
+                        object_entity = ?object_entity,
+                        joint_entity = ?joint_entity,
+                        joint = %joint_name,
+                        error = ?err,
+                        "Failed to get transform for joint entity"
+                    );
+                }
             }
         }
     }
@@ -725,12 +891,41 @@ pub fn create_object_3d_entity(
         _ => (None, None),
     };
 
+    let joint_animations = match &data.mesh {
+        impeller2_wkt::Object3DMesh::Glb { animations, .. } => {
+            animations
+                .iter()
+                .filter_map(|anim| {
+                    ctx.parse_str(&anim.eql_expr)
+                        .map(|expr| {
+                            (
+                                anim.joint_name.clone(),
+                                compile_eql_expr(expr),
+                            )
+                        })
+                        .map_err(|err| {
+                            warn!(
+                                joint = %anim.joint_name,
+                                eql = %anim.eql_expr,
+                                error = %err,
+                                "Failed to compile joint animation EQL expression"
+                            );
+                            err
+                        })
+                        .ok()
+                })
+                .collect()
+        }
+        _ => Vec::new(),
+    };
+
     let entity_id = commands
         .spawn((
             Object3DState {
                 compiled_expr: Some(compile_eql_expr(expr)),
                 scale_expr,
                 scale_error,
+                joint_animations,
                 data: data.clone(),
             },
             Transform::default(),
@@ -772,6 +967,7 @@ pub fn spawn_mesh(
             scale,
             translate,
             rotate,
+            animations: _,
         } => {
             let url = format!("{path}#Scene0");
             let scene = assets.load(&url);
@@ -869,6 +1065,13 @@ pub struct Object3DPlugin;
 
 impl Plugin for Object3DPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (update_object_3d_system, warn_imported_cameras));
+        app.add_systems(
+            Update,
+            (
+                update_object_3d_system,
+                update_joint_animations,
+                warn_imported_cameras,
+            ),
+        );
     }
 }

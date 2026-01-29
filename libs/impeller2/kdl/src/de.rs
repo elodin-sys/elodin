@@ -602,11 +602,46 @@ fn parse_object_3d_mesh(
             let translate = parse_tuple_f32(node, "translate").unwrap_or((0.0, 0.0, 0.0));
             let rotate = parse_tuple_f32(node, "rotate").unwrap_or((0.0, 0.0, 0.0));
 
+            let mut animations = Vec::new();
+            if let Some(children) = node.children() {
+                for child in children.nodes() {
+                    if child.name().value() == "animate" {
+                        let joint_name = child
+                            .get("joint")
+                            .and_then(|v| v.as_string())
+                            .ok_or_else(|| KdlSchematicError::MissingProperty {
+                                property: "joint".to_string(),
+                                node: "animate".to_string(),
+                                src: src.to_string(),
+                                span: child.span(),
+                            })?
+                            .to_string();
+
+                        let eql_expr = child
+                            .get("value")
+                            .and_then(|v| v.as_string())
+                            .ok_or_else(|| KdlSchematicError::MissingProperty {
+                                property: "value".to_string(),
+                                node: "animate".to_string(),
+                                src: src.to_string(),
+                                span: child.span(),
+                            })?
+                            .to_string();
+
+                        animations.push(JointAnimation {
+                            joint_name,
+                            eql_expr,
+                        });
+                    }
+                }
+            }
+
             Ok(Object3DMesh::Glb {
                 path,
                 scale,
                 translate,
                 rotate,
+                animations,
             })
         }
         "sphere" => {
@@ -2010,11 +2045,13 @@ object_3d "a.world_pos" {
                     scale,
                     translate,
                     rotate,
+                    animations,
                 } => {
                     assert_eq!(path.as_str(), "hi");
                     assert_eq!(*scale, 1.0);
                     assert_eq!(*translate, (0.0, 0.0, 0.0));
                     assert_eq!(*rotate, (0.0, 0.0, 0.0));
+                    assert!(animations.is_empty());
                 }
                 _ => panic!("Expected glb"),
             }

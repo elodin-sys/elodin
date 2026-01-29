@@ -402,6 +402,7 @@ fn serialize_object_3d_mesh(mesh: &Object3DMesh) -> KdlNode {
             scale,
             translate,
             rotate,
+            animations,
         } => {
             let mut node = KdlNode::new("glb");
             node.entries_mut()
@@ -418,6 +419,20 @@ fn serialize_object_3d_mesh(mesh: &Object3DMesh) -> KdlNode {
                 let tuple_str = format!("({}, {}, {})", rotate.0, rotate.1, rotate.2);
                 node.entries_mut()
                     .push(KdlEntry::new_prop("rotate", tuple_str));
+            }
+            if !animations.is_empty() {
+                let mut children = kdl::KdlDocument::new();
+                for anim in animations {
+                    let mut anim_node = kdl::KdlNode::new("animate");
+                    anim_node
+                        .entries_mut()
+                        .push(kdl::KdlEntry::new_prop("joint", anim.joint_name.clone()));
+                    anim_node
+                        .entries_mut()
+                        .push(kdl::KdlEntry::new_prop("value", anim.eql_expr.clone()));
+                    children.nodes_mut().push(anim_node);
+                }
+                node.set_children(children);
             }
             node
         }

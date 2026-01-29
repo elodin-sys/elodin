@@ -633,6 +633,17 @@ pub fn default_glb_rotate() -> (f32, f32, f32) {
     (0.0, 0.0, 0.0)
 }
 
+fn default_glb_animations() -> Vec<JointAnimation> {
+    Vec::new()
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
+pub struct JointAnimation {
+    pub joint_name: String,
+    pub eql_expr: String,
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
 pub enum Object3DMesh {
@@ -644,6 +655,8 @@ pub enum Object3DMesh {
         translate: (f32, f32, f32),
         #[serde(default = "default_glb_rotate")]
         rotate: (f32, f32, f32),
+        #[serde(default = "default_glb_animations")]
+        animations: Vec<JointAnimation>,
     },
     Mesh {
         mesh: Mesh,
@@ -665,6 +678,7 @@ impl Object3DMesh {
             scale: default_glb_scale(),
             translate: default_glb_translate(),
             rotate: default_glb_rotate(),
+            animations: default_glb_animations(),
         }
     }
 }
