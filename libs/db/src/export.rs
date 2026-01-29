@@ -16,7 +16,7 @@ use crate::{DB, Error};
 
 /// Export format for the CLI command.
 /// This is separate from the internal ArchiveFormat to exclude "native".
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, clap::ValueEnum)]
 pub enum ExportFormat {
     Parquet,
     ArrowIpc,

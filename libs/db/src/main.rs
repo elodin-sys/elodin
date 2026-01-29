@@ -192,7 +192,7 @@ struct ExportArgs {
         default_value = "parquet",
         help = "Export format (parquet, arrow-ipc, csv)"
     )]
-    format: ExportFormat,
+    format: elodin_db::export::ExportFormat,
     #[clap(
         long,
         help = "Flatten vector columns to separate columns (e.g., vel_ned -> vel_ned_x, vel_ned_y, vel_ned_z)"
@@ -200,13 +200,6 @@ struct ExportArgs {
     flatten: bool,
     #[clap(long, help = "Filter components by glob pattern (e.g., 'NavNED.*')")]
     pattern: Option<String>,
-}
-
-#[derive(ValueEnum, Clone, Copy, Debug)]
-enum ExportFormat {
-    Parquet,
-    ArrowIpc,
-    Csv,
 }
 
 #[derive(ValueEnum, Clone, Copy, Debug)]
@@ -421,12 +414,7 @@ async fn main() -> miette::Result<()> {
             // Install signal handlers only for Export command which uses check_cancelled()
             elodin_db::cancellation::install_signal_handlers();
 
-            let export_format = match format {
-                ExportFormat::Parquet => elodin_db::export::ExportFormat::Parquet,
-                ExportFormat::ArrowIpc => elodin_db::export::ExportFormat::ArrowIpc,
-                ExportFormat::Csv => elodin_db::export::ExportFormat::Csv,
-            };
-            elodin_db::export::run(path, output, export_format, flatten, pattern).into_diagnostic()
+            elodin_db::export::run(path, output, format, flatten, pattern).into_diagnostic()
         }
     }
 }
