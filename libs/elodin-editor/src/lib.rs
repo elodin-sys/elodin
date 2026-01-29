@@ -1202,16 +1202,12 @@ pub fn clamp_current_time(
     mut current_timestamp: ResMut<CurrentTimestamp>,
     packet_tx: Res<PacketTx>,
     current_stream_id: Res<CurrentStreamId>,
-    mut paused: ResMut<ui::Paused>,
 ) {
     if range.0.start > range.0.end {
         return;
     }
     let previous_timestamp = current_timestamp.0;
     let new_timestamp = previous_timestamp.clamp(range.0.start, range.0.end);
-    if previous_timestamp > range.0.end && !paused.0 {
-        paused.0 = true;
-    }
     if new_timestamp != previous_timestamp {
         current_timestamp.0 = new_timestamp;
         packet_tx.send_msg(SetStreamState::rewind(**current_stream_id, new_timestamp))
