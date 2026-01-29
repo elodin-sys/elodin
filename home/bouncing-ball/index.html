@@ -202,8 +202,8 @@
             </a>
             <span>
                 <select name="version" class="version-select" disabled>
-                    <option value="v0.15.5" selected>
-                        v0.15.5
+                    <option value="v0.16.0" selected>
+                        v0.16.0
                     </option>
                 </select>
             </span>
@@ -610,7 +610,7 @@
 </span></code></pre>
 <p>We create a new elodin world, spawn an entity named "Ball" with a sphere mesh shape component, and a body archetype
 which provides the ball with a position, velocity, and other aspects related to the Elodin 6DoF system
-(see the <a href="http://127.0.0.1:1111/reference/python-api/#6-degrees-of-freedom-model">6DoF reference for more info</a>).
+(see the <a href="/reference/python-api/#6-degrees-of-freedom-model">6DoF reference for more info</a>).
 We also spawn a viewport and a line to visualize the ball's position.</p>
 <h4 id="define-gravity">Define gravity</h4>
 <p>Let's bring in our system for basic gravity:</p>
@@ -695,7 +695,7 @@ with the concept of pipelining systems. Let's update our system function:</p>
         </div>
         <div class="col-15"><p>But why is gravity supplied to <code>six_dof</code>, while bounce is not? You'll notice bounce returns the resulting velocity, while gravity only
 supplies forces that still need to be applied by an integrator. The <code>six_dof</code> system is an integrator that applies forces to update the
-velocity and position of the ball. See the <a href="reference/python-api/#6-degrees-of-freedom-model">six_dof reference documentation</a>
+velocity and position of the ball. See the <a href="/reference/python-api/#6-degrees-of-freedom-model">six_dof reference documentation</a>
 for more information.</p>
 </div>
     </div>
@@ -812,7 +812,7 @@ times half of the velocity <code>V squared</code> times the reference area <code
 <p>When this system is run, it will query for entities with the <code>Wind</code> component and entities with both <code>Force</code> and <code>WorldVel</code> components. These
 are provided as arrays of matching entities to the function body as <code>w</code> and <code>q</code> respectively. The function body is then expected to return a
 new Query of <code>Force</code> component attached entities, which in this case the Query.map function provides. See
-<a href="reference/python-api/#class-elodin-query">Query.map</a> for more details.</p>
+<a href="/reference/python-api/#class-elodin-query">Query.map</a> for more details.</p>
 </div>
     </div>
 </div>

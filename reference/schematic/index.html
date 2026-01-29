@@ -199,8 +199,8 @@
             </a>
             <span>
                 <select name="version" class="version-select" disabled>
-                    <option value="v0.15.5" selected>
-                        v0.15.5
+                    <option value="v0.16.0" selected>
+                        v0.16.0
                     </option>
                 </select>
             </span>
@@ -462,7 +462,7 @@
 <ul>
 <li>Optional top-level node that sets the session UI appearance.</li>
 <li><code>mode</code>: <code>"dark"</code> (default) or <code>"light"</code>; drives window decorations and picks the dark/light variant of the color scheme. If a preset does not ship a light variant, the theme stays in dark.</li>
-<li><code>scheme</code>: name of a color preset. Built-ins are <code>default</code>, <code>eggplant</code>, <code>catppuccini-macchiato</code>, <code>catppuccini-mocha</code>, <code>catppuccini-latte</code>, and <code>matrix</code>; user presets are picked up from any <code>color_schemes</code> folder in the asset directory or data directory. Unknown names fall back to <code>default</code>. If a user preset shares a name with a built-in, the user version wins. See <a href="/reference/schematic/./color-schemes.md">color-schemes</a> for the file layout.</li>
+<li><code>scheme</code>: name of a color preset. Built-ins are <code>default</code>, <code>eggplant</code>, <code>catppuccini-macchiato</code>, <code>catppuccini-mocha</code>, <code>catppuccini-latte</code>, and <code>matrix</code>; user presets are picked up from any <code>color_schemes</code> folder in the asset directory or data directory. Unknown names fall back to <code>default</code>. If a user preset shares a name with a built-in, the user version wins. See <a href="/reference/color-schemes">color-schemes</a> for the file layout.</li>
 <li>Applies to the whole session; a secondary file can set its own <code>mode</code> for its windows, but the active scheme stays the one from the primary schematic.</li>
 <li>Controls both egui styling (palette) and the window decoration theme (Dark/Light).</li>
 </ul>
