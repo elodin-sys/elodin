@@ -66,6 +66,20 @@ fn fixed_size_list_to_string(array: &FixedSizeListArray) -> ArrayRef {
                             .unwrap();
                         format!("{}", arr.value(j))
                     }
+                    DataType::Int16 => {
+                        let arr = values
+                            .as_any()
+                            .downcast_ref::<arrow::array::Int16Array>()
+                            .unwrap();
+                        format!("{}", arr.value(j))
+                    }
+                    DataType::Int8 => {
+                        let arr = values
+                            .as_any()
+                            .downcast_ref::<arrow::array::Int8Array>()
+                            .unwrap();
+                        format!("{}", arr.value(j))
+                    }
                     DataType::UInt64 => {
                         let arr = values
                             .as_any()
@@ -77,6 +91,20 @@ fn fixed_size_list_to_string(array: &FixedSizeListArray) -> ArrayRef {
                         let arr = values
                             .as_any()
                             .downcast_ref::<arrow::array::UInt32Array>()
+                            .unwrap();
+                        format!("{}", arr.value(j))
+                    }
+                    DataType::UInt16 => {
+                        let arr = values
+                            .as_any()
+                            .downcast_ref::<arrow::array::UInt16Array>()
+                            .unwrap();
+                        format!("{}", arr.value(j))
+                    }
+                    DataType::UInt8 => {
+                        let arr = values
+                            .as_any()
+                            .downcast_ref::<arrow::array::UInt8Array>()
                             .unwrap();
                         format!("{}", arr.value(j))
                     }
