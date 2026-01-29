@@ -58,6 +58,7 @@ mod arrow;
 pub mod axum;
 pub mod drop;
 mod error;
+pub mod export;
 pub mod fix_timestamps;
 pub mod merge;
 mod msg_log;
