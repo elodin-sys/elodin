@@ -118,7 +118,13 @@ fn fixed_size_list_to_string(array: &FixedSizeListArray) -> ArrayRef {
                             .unwrap();
                         format!("{}", arr.value(j))
                     }
-                    _ => "null".to_string(),
+                    other => {
+                        eprintln!(
+                            "Warning: unsupported data type {:?} in fixed-size list, outputting null",
+                            other
+                        );
+                        "null".to_string()
+                    }
                 };
                 parts.push(value_str);
             }
