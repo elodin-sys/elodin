@@ -72,7 +72,7 @@ def world() -> el.World:
 
 We create a new elodin world, spawn an entity named "Ball" with a sphere mesh shape component, and a body archetype
 which provides the ball with a position, velocity, and other aspects related to the Elodin 6DoF system
-(see the [6DoF reference for more info](http://127.0.0.1:1111/reference/python-api/#6-degrees-of-freedom-model)).
+(see the [6DoF reference for more info](/reference/python-api/#6-degrees-of-freedom-model)).
 We also spawn a viewport and a line to visualize the ball's position.
 
 
@@ -152,7 +152,7 @@ Notice we use a pipe `|` to combine the systems. This is a powerful concept in E
 {% alert(kind="info") %}
 But why is gravity supplied to `six_dof`, while bounce is not? You'll notice bounce returns the resulting velocity, while gravity only
 supplies forces that still need to be applied by an integrator. The `six_dof` system is an integrator that applies forces to update the
-velocity and position of the ball. See the [six_dof reference documentation](reference/python-api/#6-degrees-of-freedom-model)
+velocity and position of the ball. See the [six_dof reference documentation](/reference/python-api/#6-degrees-of-freedom-model)
 for more information.
 {% end %}
 
@@ -277,7 +277,7 @@ def apply_drag(w: el.Query[Wind],
 When this system is run, it will query for entities with the `Wind` component and entities with both `Force` and `WorldVel` components. These
 are provided as arrays of matching entities to the function body as `w` and `q` respectively. The function body is then expected to return a
 new Query of `Force` component attached entities, which in this case the Query.map function provides. See
-[Query.map](reference/python-api/#class-elodin-query) for more details.
+[Query.map](/reference/python-api/#class-elodin-query) for more details.
 {% end %}
 
 #### Update the System Function
