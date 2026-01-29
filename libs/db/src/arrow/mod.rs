@@ -137,7 +137,9 @@ impl Component {
         let name = name.to_string();
         let size = self.schema.dim.iter().product::<usize>();
         let (field, array) = self.as_data_array_range(name.clone(), range);
-        if self.schema.dim.is_empty() || size <= 1 {
+        // Only return early if dim is empty (scalar type, not a FixedSizeList)
+        // When dim is not empty but size == 1, we still need to flatten to extract from FixedSizeList
+        if self.schema.dim.is_empty() {
             return (vec![field], vec![array]);
         }
 
