@@ -43,6 +43,8 @@ enum Commands {
     Drop(DropArgs),
     #[command(about = "Display information about a database")]
     Info(InfoArgs),
+    #[command(about = "Export database contents to parquet, arrow-ipc, or csv files")]
+    Export(ExportArgs),
 }
 
 #[derive(clap::Args, Clone, Debug)]
@@ -176,6 +178,35 @@ pub struct MergeArgs {
 struct InfoArgs {
     #[clap(help = "Path to the database directory (defaults to standard location)")]
     path: Option<PathBuf>,
+}
+
+#[derive(clap::Args, Clone, Debug)]
+struct ExportArgs {
+    #[clap(help = "Path to the database directory")]
+    path: PathBuf,
+    #[clap(long, short, help = "Output directory for exported files")]
+    output: PathBuf,
+    #[clap(
+        long,
+        value_enum,
+        default_value = "parquet",
+        help = "Export format (parquet, arrow-ipc, csv)"
+    )]
+    format: ExportFormat,
+    #[clap(
+        long,
+        help = "Flatten vector columns to separate columns (e.g., vel_ned -> vel_ned_x, vel_ned_y, vel_ned_z)"
+    )]
+    flatten: bool,
+    #[clap(long, help = "Filter components by glob pattern (e.g., 'NavNED.*')")]
+    pattern: Option<String>,
+}
+
+#[derive(ValueEnum, Clone, Copy, Debug)]
+enum ExportFormat {
+    Parquet,
+    ArrowIpc,
+    Csv,
 }
 
 #[derive(ValueEnum, Clone, Copy, Debug)]
@@ -379,6 +410,20 @@ async fn main() -> miette::Result<()> {
             elodin_db::drop::run(path, match_mode, dry_run, yes).into_diagnostic()
         }
         Commands::Info(args) => run_info(args),
+        Commands::Export(ExportArgs {
+            path,
+            output,
+            format,
+            flatten,
+            pattern,
+        }) => {
+            let export_format = match format {
+                ExportFormat::Parquet => elodin_db::export::ExportFormat::Parquet,
+                ExportFormat::ArrowIpc => elodin_db::export::ExportFormat::ArrowIpc,
+                ExportFormat::Csv => elodin_db::export::ExportFormat::Csv,
+            };
+            elodin_db::export::run(path, output, export_format, flatten, pattern).into_diagnostic()
+        }
     }
 }
 
