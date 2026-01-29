@@ -202,8 +202,8 @@
             </a>
             <span>
                 <select name="version" class="version-select" disabled>
-                    <option value="v0.15.5" selected>
-                        v0.15.5
+                    <option value="v0.16.0" selected>
+                        v0.16.0
                     </option>
                 </select>
             </span>
@@ -438,7 +438,10 @@
                   <h1>Command Palette</h1>
                    <h2 id="usage">Usage</h2>
 <ul>
-<li>Open: <code>Cmd+P</code> on macOS, <code>Ctrl+P</code> on Windows/Linux.</li>
+<li>Open (fresh start): <code>Cmd+P</code> on macOS, <code>Ctrl+P</code> on Windows/Linux. This clears any existing
+palette nesting and starts at the top level.</li>
+<li>Open (resume): <code>Cmd+Shift+P</code> on macOS, <code>Ctrl+Shift+P</code> on Windows/Linux. This reopens the
+palette with any existing nested state.</li>
 <li>Type to filter; use Up/Down arrows to move selection.</li>
 <li>Enter to run the selected command; Escape to close.</li>
 <li>Backspace on an empty input returns to the previous page when available.</li>
