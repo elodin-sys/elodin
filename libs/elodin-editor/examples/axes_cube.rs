@@ -67,14 +67,21 @@ enum CubeElement {
     Corner(CornerPosition),
 }
 
+/// Face directions using ENU (East-North-Up) convention
+/// - X axis: East (+X) / West (-X) - Red
+/// - Y axis: North (+Y) / South (-Y) - Green  
+/// - Z axis: Up (+Z) / Down (-Z) - Blue
 #[derive(Clone, Copy, Debug)]
 enum FaceDirection {
-    Front,
-    Back,
-    Left,
-    Right,
-    Top,
-    Bottom,
+    // X axis (Red)
+    East,  // +X (Right)
+    West,  // -X (Left)
+    // Y axis (Green)
+    North, // +Y (Top)
+    South, // -Y (Bottom)
+    // Z axis (Blue)
+    Up,    // +Z (Front)
+    Down,  // -Z (Back)
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -166,6 +173,9 @@ fn setup(
     // Spawn RGB axes extending from the corner of the cube (like OnShape)
     spawn_axes(&mut commands, &mut meshes, &mut materials);
 
+    // Spawn ENU labels on each face
+    spawn_face_labels(&mut commands, &asset_server);
+
     // Camera - positioned to see the cube from an isometric-ish angle
     commands.spawn((
         Transform::from_xyz(3.0, 2.5, 3.0).looking_at(Vec3::ZERO, Vec3::Y),
@@ -212,11 +222,12 @@ fn spawn_axes(
     // Origin point - slightly outside the bottom-left-back corner of cube
     let origin = Vec3::new(-0.55, -0.55, -0.55);
 
-    // Axis colors (standard CAD convention)
+    // Axis colors (ENU convention)
+    // X = East/West (Red), Y = North/South (Green), Z = Up/Down (Blue)
     let colors = [
-        (Vec3::X, Color::srgb(0.9, 0.2, 0.2), "X"),  // Red for X
-        (Vec3::Y, Color::srgb(0.2, 0.8, 0.2), "Y"),  // Green for Y
-        (Vec3::Z, Color::srgb(0.2, 0.4, 0.9), "Z"),  // Blue for Z
+        (Vec3::X, Color::srgb(0.9, 0.2, 0.2), "X"),  // Red for X (East/West)
+        (Vec3::Y, Color::srgb(0.2, 0.8, 0.2), "Y"),  // Green for Y (North/South)
+        (Vec3::Z, Color::srgb(0.2, 0.4, 0.9), "Z"),  // Blue for Z (Up/Down)
     ];
 
     // Create shared meshes
@@ -273,22 +284,89 @@ fn spawn_axes(
     }
 }
 
-/// Get color for a cube element (faces are colored based on axis, with transparency)
+/// Spawn text labels on each face (E, W, N, S, U, D)
+fn spawn_face_labels(commands: &mut Commands, _asset_server: &Res<AssetServer>) {
+    let font_size = 80.0;
+
+    // All face directions to label
+    let faces = [
+        FaceDirection::East,
+        FaceDirection::West,
+        FaceDirection::North,
+        FaceDirection::South,
+        FaceDirection::Up,
+        FaceDirection::Down,
+    ];
+
+    for dir in faces {
+        let label = get_face_label(dir);
+        let color = get_face_label_color(dir);
+        let transform = get_face_label_transform(dir);
+
+        commands.spawn((
+            Text2d::new(label),
+            TextFont {
+                font_size,
+                ..default()
+            },
+            TextColor(color),
+            transform.with_scale(Vec3::splat(0.005)), // Scale down text for 3D world
+            Name::new(format!("label_{}", label)),
+        ));
+    }
+}
+
+/// Get color for a cube element (faces are grey/transparent)
 fn get_element_color(element: &CubeElement) -> Color {
     match element {
-        // Faces: colored by their normal axis direction, with transparency
-        CubeElement::Face(dir) => match dir {
-            // X-axis faces (Left/Right) - Red tinted
-            FaceDirection::Left | FaceDirection::Right => Color::srgba(0.9, 0.3, 0.3, 0.5),
-            // Y-axis faces (Top/Bottom) - Green tinted  
-            FaceDirection::Top | FaceDirection::Bottom => Color::srgba(0.3, 0.85, 0.4, 0.5),
-            // Z-axis faces (Front/Back) - Blue tinted
-            FaceDirection::Front | FaceDirection::Back => Color::srgba(0.3, 0.5, 0.95, 0.5),
-        },
+        // Faces: grey and transparent so axes are visible through
+        CubeElement::Face(_) => Color::srgba(0.6, 0.6, 0.65, 0.4),
         // Edges: darker, more opaque
         CubeElement::Edge(_) => Color::srgba(0.4, 0.4, 0.45, 0.85),
         // Corners: visible spheres
         CubeElement::Corner(_) => Color::srgba(0.5, 0.5, 0.55, 0.9),
+    }
+}
+
+/// Get the label text for a face direction (ENU convention)
+fn get_face_label(dir: FaceDirection) -> &'static str {
+    match dir {
+        FaceDirection::East => "E",
+        FaceDirection::West => "W",
+        FaceDirection::North => "N",
+        FaceDirection::South => "S",
+        FaceDirection::Up => "U",
+        FaceDirection::Down => "D",
+    }
+}
+
+/// Get the color for a face label based on its axis (matches axis colors)
+fn get_face_label_color(dir: FaceDirection) -> Color {
+    match dir {
+        // X axis - Red
+        FaceDirection::East | FaceDirection::West => Color::srgb(0.9, 0.2, 0.2),
+        // Y axis - Green
+        FaceDirection::North | FaceDirection::South => Color::srgb(0.2, 0.8, 0.2),
+        // Z axis - Blue
+        FaceDirection::Up | FaceDirection::Down => Color::srgb(0.2, 0.4, 0.9),
+    }
+}
+
+/// Get the position and rotation for a face label
+fn get_face_label_transform(dir: FaceDirection) -> Transform {
+    let offset = 0.52; // Slightly outside the cube face
+    match dir {
+        FaceDirection::East => Transform::from_xyz(offset, 0.0, 0.0)
+            .with_rotation(Quat::from_rotation_y(std::f32::consts::FRAC_PI_2)),
+        FaceDirection::West => Transform::from_xyz(-offset, 0.0, 0.0)
+            .with_rotation(Quat::from_rotation_y(-std::f32::consts::FRAC_PI_2)),
+        FaceDirection::North => Transform::from_xyz(0.0, offset, 0.0)
+            .with_rotation(Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)),
+        FaceDirection::South => Transform::from_xyz(0.0, -offset, 0.0)
+            .with_rotation(Quat::from_rotation_x(std::f32::consts::FRAC_PI_2)),
+        FaceDirection::Up => Transform::from_xyz(0.0, 0.0, offset),
+        FaceDirection::Down => Transform::from_xyz(0.0, 0.0, -offset)
+            .with_rotation(Quat::from_rotation_y(std::f32::consts::PI)),
     }
 }
 
@@ -377,14 +455,15 @@ fn setup_cube_elements(
 }
 
 fn parse_face(name: &str) -> CubeElement {
+    // Map GLB face names to ENU directions
     let dir = match name {
-        "Face_Front" => FaceDirection::Front,
-        "Face_Back" => FaceDirection::Back,
-        "Face_Left" => FaceDirection::Left,
-        "Face_Right" => FaceDirection::Right,
-        "Face_Top" => FaceDirection::Top,
-        "Face_Bottom" => FaceDirection::Bottom,
-        _ => FaceDirection::Front,
+        "Face_Front" => FaceDirection::Up,     // +Z
+        "Face_Back" => FaceDirection::Down,    // -Z
+        "Face_Left" => FaceDirection::West,    // -X
+        "Face_Right" => FaceDirection::East,   // +X
+        "Face_Top" => FaceDirection::North,    // +Y
+        "Face_Bottom" => FaceDirection::South, // -Y
+        _ => FaceDirection::Up,
     };
     CubeElement::Face(dir)
 }
@@ -662,12 +741,12 @@ fn on_click(
 fn get_look_direction(element: &CubeElement) -> Vec3 {
     match element {
         CubeElement::Face(dir) => match dir {
-            FaceDirection::Front => Vec3::Z,
-            FaceDirection::Back => Vec3::NEG_Z,
-            FaceDirection::Left => Vec3::NEG_X,
-            FaceDirection::Right => Vec3::X,
-            FaceDirection::Top => Vec3::Y,
-            FaceDirection::Bottom => Vec3::NEG_Y,
+            FaceDirection::East => Vec3::X,      // +X
+            FaceDirection::West => Vec3::NEG_X,  // -X
+            FaceDirection::North => Vec3::Y,     // +Y
+            FaceDirection::South => Vec3::NEG_Y, // -Y
+            FaceDirection::Up => Vec3::Z,        // +Z
+            FaceDirection::Down => Vec3::NEG_Z,  // -Z
         },
         CubeElement::Edge(dir) => match dir {
             EdgeDirection::XTopFront => Vec3::new(0.0, 1.0, 1.0).normalize(),
@@ -699,9 +778,9 @@ fn get_look_direction(element: &CubeElement) -> Vec3 {
 fn get_up_direction(element: &CubeElement) -> Vec3 {
     match element {
         CubeElement::Face(dir) => match dir {
-            FaceDirection::Top => Vec3::NEG_Z,
-            FaceDirection::Bottom => Vec3::Z,
-            _ => Vec3::Y,
+            FaceDirection::North => Vec3::NEG_Z, // Looking down from above, Z is "forward"
+            FaceDirection::South => Vec3::Z,     // Looking up from below
+            _ => Vec3::Y,                        // For other faces, Y is up
         },
         CubeElement::Edge(dir) => match dir {
             EdgeDirection::XTopFront | EdgeDirection::XTopBack => Vec3::new(0.0, 1.0, 0.0),
