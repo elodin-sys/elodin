@@ -560,7 +560,58 @@ fn parse_object_3d(node: &KdlNode, src: &str) -> Result<Object3D, KdlSchematicEr
         .to_string();
 
     let mesh = if let Some(children) = node.children() {
-        parse_object_3d_mesh(children.nodes().first(), src)?
+        let children_nodes = children.nodes();
+        let mesh_node = children_nodes.first();
+        let mut parsed_mesh = parse_object_3d_mesh(mesh_node, src)?;
+        
+        // Collect animate nodes from object_3d children (they're siblings of glb, not children)
+        let mut animations = Vec::new();
+        for child in children_nodes {
+            let child_name = child.name().value();
+            if child_name == "animate" {
+                let joint_name = child
+                    .get("joint")
+                    .and_then(|v| v.as_string())
+                    .ok_or_else(|| KdlSchematicError::MissingProperty {
+                        property: "joint".to_string(),
+                        node: "animate".to_string(),
+                        src: src.to_string(),
+                        span: child.span(),
+                    })?
+                    .to_string();
+
+                let eql_expr = child
+                    .get("value")
+                    .and_then(|v| v.as_string())
+                    .ok_or_else(|| KdlSchematicError::MissingProperty {
+                        property: "value".to_string(),
+                        node: "animate".to_string(),
+                        src: src.to_string(),
+                        span: child.span(),
+                    })?
+                    .to_string();
+
+                animations.push(JointAnimation {
+                    joint_name,
+                    eql_expr,
+                });
+            }
+        }
+        
+        // If we found animations and the mesh is a GLB, add them to the mesh
+        if !animations.is_empty() {
+            if let Object3DMesh::Glb { path, scale, translate, rotate, .. } = parsed_mesh {
+                parsed_mesh = Object3DMesh::Glb {
+                    path,
+                    scale,
+                    translate,
+                    rotate,
+                    animations,
+                };
+            }
+        }
+        
+        parsed_mesh
     } else {
         return Err(KdlSchematicError::MissingProperty {
             property: "mesh".to_string(),
@@ -602,46 +653,12 @@ fn parse_object_3d_mesh(
             let translate = parse_tuple_f32(node, "translate").unwrap_or((0.0, 0.0, 0.0));
             let rotate = parse_tuple_f32(node, "rotate").unwrap_or((0.0, 0.0, 0.0));
 
-            let mut animations = Vec::new();
-            if let Some(children) = node.children() {
-                for child in children.nodes() {
-                    if child.name().value() == "animate" {
-                        let joint_name = child
-                            .get("joint")
-                            .and_then(|v| v.as_string())
-                            .ok_or_else(|| KdlSchematicError::MissingProperty {
-                                property: "joint".to_string(),
-                                node: "animate".to_string(),
-                                src: src.to_string(),
-                                span: child.span(),
-                            })?
-                            .to_string();
-
-                        let eql_expr = child
-                            .get("value")
-                            .and_then(|v| v.as_string())
-                            .ok_or_else(|| KdlSchematicError::MissingProperty {
-                                property: "value".to_string(),
-                                node: "animate".to_string(),
-                                src: src.to_string(),
-                                span: child.span(),
-                            })?
-                            .to_string();
-
-                        animations.push(JointAnimation {
-                            joint_name,
-                            eql_expr,
-                        });
-                    }
-                }
-            }
-
             Ok(Object3DMesh::Glb {
                 path,
                 scale,
                 translate,
                 rotate,
-                animations,
+                animations: Vec::new(), // Animations are parsed at object_3d level, not glb level
             })
         }
         "sphere" => {
@@ -2051,6 +2068,79 @@ object_3d "a.world_pos" {
                     assert_eq!(*scale, 1.0);
                     assert_eq!(*translate, (0.0, 0.0, 0.0));
                     assert_eq!(*rotate, (0.0, 0.0, 0.0));
+                    assert!(animations.is_empty());
+                }
+                _ => panic!("Expected glb"),
+            }
+        } else {
+            panic!("Expected object_3d");
+        }
+    }
+
+    #[test]
+    fn test_parse_object_3d_glb_with_animations() {
+        let kdl = r#"
+object_3d "rocket.world_pos" {
+    glb path="flappy-rocket.glb"
+    animate joint="Root.Fin_0" value="(0, 3.14/2, 0)"
+    animate joint="Root.Fin_1" value="(0, 3.14/2, 0)"
+    animate joint="Root.Fin_2" value="rocket.fin_deflect"
+    animate joint="Root.Fin_3" value="(0, 1, 0, 0.5)"
+}
+"#;
+        let schematic = parse_schematic(kdl).unwrap();
+
+        assert_eq!(schematic.elems.len(), 1);
+
+        if let SchematicElem::Object3d(obj) = &schematic.elems[0] {
+            assert_eq!(obj.eql, "rocket.world_pos");
+            match &obj.mesh {
+                Object3DMesh::Glb {
+                    path,
+                    scale,
+                    translate,
+                    rotate,
+                    animations,
+                } => {
+                    assert_eq!(path.as_str(), "flappy-rocket.glb");
+                    assert_eq!(*scale, 1.0);
+                    assert_eq!(*translate, (0.0, 0.0, 0.0));
+                    assert_eq!(*rotate, (0.0, 0.0, 0.0));
+                    assert_eq!(animations.len(), 4);
+                    
+                    assert_eq!(animations[0].joint_name, "Root.Fin_0");
+                    assert_eq!(animations[0].eql_expr, "(0, 3.14/2, 0)");
+                    
+                    assert_eq!(animations[1].joint_name, "Root.Fin_1");
+                    assert_eq!(animations[1].eql_expr, "(0, 3.14/2, 0)");
+                    
+                    assert_eq!(animations[2].joint_name, "Root.Fin_2");
+                    assert_eq!(animations[2].eql_expr, "rocket.fin_deflect");
+                    
+                    assert_eq!(animations[3].joint_name, "Root.Fin_3");
+                    assert_eq!(animations[3].eql_expr, "(0, 1, 0, 0.5)");
+                }
+                _ => panic!("Expected glb"),
+            }
+        } else {
+            panic!("Expected object_3d");
+        }
+    }
+
+    #[test]
+    fn test_parse_object_3d_glb_without_animations() {
+        let kdl = r#"
+object_3d "rocket.world_pos" {
+    glb path="rocket.glb"
+}
+"#;
+        let schematic = parse_schematic(kdl).unwrap();
+
+        assert_eq!(schematic.elems.len(), 1);
+
+        if let SchematicElem::Object3d(obj) = &schematic.elems[0] {
+            match &obj.mesh {
+                Object3DMesh::Glb { animations, .. } => {
                     assert!(animations.is_empty());
                 }
                 _ => panic!("Expected glb"),

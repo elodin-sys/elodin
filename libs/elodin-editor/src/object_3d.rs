@@ -10,7 +10,7 @@ use impeller2_wkt::{ComponentValue, Object3D};
 use nox::Array;
 use smallvec::smallvec;
 
-use crate::{BevyExt, MainCamera, plugins::navigation_gizmo::NavGizmoCamera};
+use crate::{BevyExt, EqlContext, MainCamera, plugins::navigation_gizmo::NavGizmoCamera};
 use std::fmt;
 
 type ImportedCameraFilter = (Added<Camera>, Without<NavGizmoCamera>, Without<MainCamera>);
@@ -33,6 +33,14 @@ pub struct EllipsoidVisual {
     pub color: impeller2_wkt::Color,
     pub oversized: bool,
     pub max_extent: f32,
+}
+
+/// Component attached to joint entities for animation
+/// The compiled_expr is filled in lazily on first access when the EQL context is available
+#[derive(Component)]
+pub struct JointAnimationComponent {
+    // pub eql_expr: String,
+    pub compiled_expr: CompiledExpr,
 }
 
 #[derive(Default)]
@@ -576,6 +584,21 @@ fn find_entity_by_name(
     None
 }
 
+// TODO: Can do as iterator.
+fn find_entities<T>(
+    entity: Entity,
+    children: &Query<&Children>,
+    predicate: impl Fn(Entity) -> Option<T>,
+) -> Vec<(Entity, T)> {
+    let mut buffer = vec![];
+    for id in children.iter_descendants(entity) {
+        if let Some(x) = predicate(id) {
+            buffer.push((id, x));
+        }
+    }
+    buffer
+}
+
 /// System that updates 3D object entities based on their EQL expressions
 pub fn update_object_3d_system(
     mut objects_query: Query<(
@@ -688,84 +711,111 @@ fn component_value_to_axis_angle(value: &ComponentValue) -> Result<(Vec3, f32), 
     }
 }
 
-/// System that updates joint animations based on EQL expressions
-pub fn update_joint_animations(
-    objects_query: Query<(Entity, &Object3DState)>,
+/// System that attaches JointAnimationComponent to joint entities when scenes load
+/// This runs when Object3DState changes (e.g., when a scene finishes loading)
+pub fn attach_joint_animations(
+    objects_query: Query<(Entity, &Object3DState), Changed<Object3DState>>,
     children: Query<&Children>,
     names: Query<&Name>,
-    mut transforms: Query<&mut Transform>,
-    entity_map: Res<EntityMap>,
-    component_value_maps: Query<&'static ComponentValue>,
+    existing_components: Query<Entity, With<JointAnimationComponent>>,
+    mut commands: Commands,
 ) {
     for (object_entity, object_3d) in objects_query.iter() {
         // Only process GLB meshes with animations
         if !matches!(
             object_3d.data.mesh,
             impeller2_wkt::Object3DMesh::Glb { .. }
-        ) || object_3d.joint_animations.is_empty() {
+        ) {
             continue;
         }
-        panic!();
+        
+        if object_3d.joint_animations.is_empty() {
+            continue;
+        }
 
-        // For each joint animation binding
-        for (joint_name, compiled_expr) in &object_3d.joint_animations {
-            // Evaluate the EQL expression
-            let component_value = match compiled_expr.execute(&entity_map, &component_value_maps) {
-                Ok(value) => value,
+        let entity_compiled_expr = find_entities(object_entity, &children, |id| {
+            names.get(id).ok().and_then(|name| object_3d.joint_animations.iter().find_map(|(n, c)| (name.as_str() == n).then_some(c))) 
+            });
+        for (joint_entity, compiled_expr) in entity_compiled_expr {
+
+            if existing_components.contains(joint_entity) {
+                continue;
+            }
+                // Attach the component - compiled_expr will be filled in lazily
+                commands.entity(joint_entity).insert(JointAnimationComponent {
+                    compiled_expr: compiled_expr.clone(),
+                });
+            // } else {
+            //     warn!(
+            //         object_entity = ?object_entity,
+            //         joint = %joint_name,
+            //         "Joint not found in scene hierarchy when attaching animation component. Make sure the joint name matches exactly as it appears in the GLB file."
+            //     );
+            // }
+        }
+    }
+}
+
+/// System that updates joint animations based on EQL expressions
+/// This queries for entities with both Transform and JointAnimationComponent
+/// The compiled_expr is filled in lazily on first access
+pub fn update_joint_animations(
+    mut joint_query: Query<(&mut Transform, &mut JointAnimationComponent)>,
+    entity_map: Res<EntityMap>,
+    component_value_maps: Query<&'static ComponentValue>,
+    ctx: Res<EqlContext>,
+) {
+    for (mut joint_transform, mut joint_anim) in joint_query.iter_mut() {
+        // Compile the expression lazily on first access
+        if joint_anim.compiled_expr.is_none() {
+            match ctx.0.parse_str(&joint_anim.eql_expr) {
+                Ok(expr) => {
+                    joint_anim.compiled_expr = Some(compile_eql_expr(expr));
+                }
                 Err(err) => {
                     warn!(
-                        object_entity = ?object_entity,
-                        joint = %joint_name,
+                        eql = %joint_anim.eql_expr,
                         error = %err,
-                        "Failed to evaluate EQL expression for joint animation"
+                        "Failed to compile EQL expression for joint animation"
                     );
                     continue;
-                }
-            };
-
-            // Convert to axis-angle rotation
-            let (axis, angle) = match component_value_to_axis_angle(&component_value) {
-                Ok(result) => result,
-                Err(err) => {
-                    warn!(
-                        object_entity = ?object_entity,
-                        joint = %joint_name,
-                        error = %err,
-                        "Failed to convert EQL result to axis-angle rotation for joint animation"
-                    );
-                    continue;
-                }
-            };
-
-            // Find the joint entity by name, starting from the object entity
-            let joint_entity = match find_entity_by_name(object_entity, joint_name, &children, &names) {
-                Some(entity) => entity,
-                None => {
-                    warn!(
-                        object_entity = ?object_entity,
-                        joint = %joint_name,
-                        "Joint not found in scene hierarchy. Make sure the joint name matches exactly as it appears in the GLB file."
-                    );
-                    continue;
-                }
-            };
-
-            // Update the joint's transform rotation
-            match transforms.get_mut(joint_entity) {
-                Ok(mut joint_transform) => {
-                    joint_transform.rotation = Quat::from_axis_angle(axis, angle);
-                }
-                Err(err) => {
-                    warn!(
-                        object_entity = ?object_entity,
-                        joint_entity = ?joint_entity,
-                        joint = %joint_name,
-                        error = ?err,
-                        "Failed to get transform for joint entity"
-                    );
                 }
             }
         }
+
+        // Now we can safely use the compiled expression
+        let Some(compiled_expr) = &joint_anim.compiled_expr else {
+            continue;
+        };
+
+        // Evaluate the EQL expression
+        let component_value = match compiled_expr.execute(&entity_map, &component_value_maps) {
+            Ok(value) => value,
+            Err(err) => {
+                warn!(
+                    eql = %joint_anim.eql_expr,
+                    error = %err,
+                    "Failed to evaluate EQL expression for joint animation"
+                );
+                continue;
+            }
+        };
+
+        // Convert to axis-angle rotation
+        let (axis, angle) = match component_value_to_axis_angle(&component_value) {
+            Ok(result) => result,
+            Err(err) => {
+                warn!(
+                    eql = %joint_anim.eql_expr,
+                    error = %err,
+                    "Failed to convert EQL result to axis-angle rotation for joint animation"
+                );
+                continue;
+            }
+        };
+
+        // Update the joint's transform rotation
+        joint_transform.rotation = Quat::from_axis_angle(axis, angle);
     }
 }
 
@@ -892,10 +942,29 @@ pub fn create_object_3d_entity(
     };
 
     let joint_animations = match &data.mesh {
-        impeller2_wkt::Object3DMesh::Glb { animations, .. } => {
-            animations
+        impeller2_wkt::Object3DMesh::Glb { animations, path, .. } => {
+            info!(
+                count = animations.len(),
+                path = %path,
+                "Found {} animation(s) in GLB mesh '{}'",
+                animations.len(),
+                path
+            );
+            if animations.is_empty() {
+                warn!(
+                    path = %path,
+                    "GLB mesh '{}' has no animations - check if animations were parsed from KDL",
+                    path
+                );
+            }
+            let compiled: Vec<_> = animations
                 .iter()
                 .filter_map(|anim| {
+                    info!(
+                        joint = %anim.joint_name,
+                        eql = %anim.eql_expr,
+                        "Compiling joint animation"
+                    );
                     ctx.parse_str(&anim.eql_expr)
                         .map(|expr| {
                             (
@@ -914,7 +983,15 @@ pub fn create_object_3d_entity(
                         })
                         .ok()
                 })
-                .collect()
+                .collect();
+            info!(
+                compiled_count = compiled.len(),
+                total_count = animations.len(),
+                "Compiled {} out of {} joint animations",
+                compiled.len(),
+                animations.len()
+            );
+            compiled
         }
         _ => Vec::new(),
     };
@@ -1069,6 +1146,7 @@ impl Plugin for Object3DPlugin {
             Update,
             (
                 update_object_3d_system,
+                attach_joint_animations,
                 update_joint_animations,
                 warn_imported_cameras,
             ),
