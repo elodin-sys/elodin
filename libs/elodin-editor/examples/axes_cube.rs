@@ -273,6 +273,25 @@ fn spawn_axes(
     }
 }
 
+/// Get color for a cube element (faces are colored based on axis, with transparency)
+fn get_element_color(element: &CubeElement) -> Color {
+    match element {
+        // Faces: colored by their normal axis direction, with transparency
+        CubeElement::Face(dir) => match dir {
+            // X-axis faces (Left/Right) - Red tinted
+            FaceDirection::Left | FaceDirection::Right => Color::srgba(0.9, 0.3, 0.3, 0.5),
+            // Y-axis faces (Top/Bottom) - Green tinted  
+            FaceDirection::Top | FaceDirection::Bottom => Color::srgba(0.3, 0.85, 0.4, 0.5),
+            // Z-axis faces (Front/Back) - Blue tinted
+            FaceDirection::Front | FaceDirection::Back => Color::srgba(0.3, 0.5, 0.95, 0.5),
+        },
+        // Edges: darker, more opaque
+        CubeElement::Edge(_) => Color::srgba(0.4, 0.4, 0.45, 0.85),
+        // Corners: visible spheres
+        CubeElement::Corner(_) => Color::srgba(0.5, 0.5, 0.55, 0.9),
+    }
+}
+
 /// Set up cube elements after the GLB is loaded
 /// Also clones materials so each element can be highlighted independently
 fn setup_cube_elements(
@@ -323,6 +342,9 @@ fn setup_cube_elements(
         };
 
         if let Some(elem) = element {
+            // Get the color for this element type
+            let element_color = get_element_color(&elem);
+            
             commands
                 .entity(entity)
                 .insert((elem.clone(), CubeElementSetup));
@@ -331,15 +353,20 @@ fn setup_cube_elements(
             if let Ok(children) = children_query.get(entity) {
                 for child in children.iter() {
                     if let Ok(mat_handle) = material_query.get(child) {
-                        if let Some(original_mat) = materials.get(&mat_handle.0) {
-                            // Store original color
-                            original_materials
-                                .colors
-                                .insert(child, original_mat.base_color);
+                        if let Some(_original_mat) = materials.get(&mat_handle.0) {
+                            // Store the custom color as "original"
+                            original_materials.colors.insert(child, element_color);
 
-                            // Clone the material for this entity
-                            let cloned_mat = original_mat.clone();
-                            let new_handle = materials.add(cloned_mat);
+                            // Create a new material with the element color and transparency
+                            let new_mat = StandardMaterial {
+                                base_color: element_color,
+                                alpha_mode: AlphaMode::Blend,
+                                unlit: false,
+                                double_sided: true,
+                                cull_mode: None,
+                                ..default()
+                            };
+                            let new_handle = materials.add(new_mat);
                             commands.entity(child).insert(MeshMaterial3d(new_handle));
                         }
                     }
@@ -406,6 +433,9 @@ fn parse_corner(name: &str) -> CubeElement {
 
 /// Highlight color for hovered elements
 const HIGHLIGHT_COLOR: Color = Color::srgb(1.0, 0.9, 0.2); // Yellow
+
+/// Camera distance from origin (used for both click target and animation)
+const CAMERA_DISTANCE: f32 = 4.5;
 
 fn on_hover_start(
     trigger: On<Pointer<Over>>,
@@ -620,7 +650,7 @@ fn on_click(
     let up_dir = get_up_direction(element);
 
     // Calculate rotation: camera should look FROM the opposite direction
-    let camera_pos = -look_dir * 4.0; // Position camera on opposite side
+    let camera_pos = -look_dir * CAMERA_DISTANCE; // Position camera on opposite side
     let target_transform = Transform::from_translation(camera_pos).looking_at(Vec3::ZERO, up_dir);
 
     camera_target.target_rotation = target_transform.rotation;
@@ -708,9 +738,8 @@ fn animate_camera(
         .slerp(camera_target.target_rotation, t);
 
     // Update position to maintain distance from origin
-    let distance = 4.5;
     let forward = transform.rotation * Vec3::NEG_Z;
-    transform.translation = -forward * distance;
+    transform.translation = -forward * CAMERA_DISTANCE;
 
     // Check if animation is complete
     let angle_diff = transform
