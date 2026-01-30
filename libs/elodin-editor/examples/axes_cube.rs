@@ -239,7 +239,9 @@ fn setup_cube_elements(
         };
 
         if let Some(elem) = element {
-            commands.entity(entity).insert((elem.clone(), CubeElementSetup));
+            commands
+                .entity(entity)
+                .insert((elem.clone(), CubeElementSetup));
 
             // Clone materials for children (mesh nodes) so they can be highlighted independently
             if let Ok(children) = children_query.get(entity) {
@@ -247,7 +249,9 @@ fn setup_cube_elements(
                     if let Ok(mat_handle) = material_query.get(child) {
                         if let Some(original_mat) = materials.get(&mat_handle.0) {
                             // Store original color
-                            original_materials.colors.insert(child, original_mat.base_color);
+                            original_materials
+                                .colors
+                                .insert(child, original_mat.base_color);
 
                             // Clone the material for this entity
                             let cloned_mat = original_mat.clone();
@@ -359,7 +363,13 @@ fn on_hover_start(
 
     // Reset previous hovered element
     if let Some(prev) = hovered.entity {
-        reset_highlight(prev, &children_query, &material_query, &mut materials, &original_materials);
+        reset_highlight(
+            prev,
+            &children_query,
+            &material_query,
+            &mut materials,
+            &original_materials,
+        );
     }
 
     // Apply highlight to target and its mesh children
@@ -415,7 +425,13 @@ fn on_hover_end(
         return;
     }
 
-    reset_highlight(target, &children_query, &material_query, &mut materials, &original_materials);
+    reset_highlight(
+        target,
+        &children_query,
+        &material_query,
+        &mut materials,
+        &original_materials,
+    );
     hovered.entity = None;
 }
 
@@ -611,7 +627,9 @@ fn animate_camera(
     transform.translation = -forward * distance;
 
     // Check if animation is complete
-    let angle_diff = transform.rotation.angle_between(camera_target.target_rotation);
+    let angle_diff = transform
+        .rotation
+        .angle_between(camera_target.target_rotation);
     if angle_diff < 0.01 {
         camera_target.animating = false;
     }
