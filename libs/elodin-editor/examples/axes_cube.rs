@@ -559,6 +559,27 @@ const HIGHLIGHT_COLOR: Color = Color::srgb(1.0, 0.9, 0.2); // Yellow
 /// Camera distance from origin (used for both click target and animation)
 const CAMERA_DISTANCE: f32 = 4.5;
 
+/// Find the nearest ancestor (including self) that has a CubeElement component.
+/// Traverses the full parent hierarchy to handle deeply nested mesh entities.
+fn find_cube_element_ancestor(
+    entity: Entity,
+    cube_elements: &Query<&CubeElement>,
+    parents_query: &Query<&ChildOf>,
+) -> Option<Entity> {
+    let mut current = entity;
+    loop {
+        if cube_elements.get(current).is_ok() {
+            return Some(current);
+        }
+        if let Ok(parent) = parents_query.get(current) {
+            current = parent.0;
+        } else {
+            // Reached top of hierarchy without finding CubeElement
+            return None;
+        }
+    }
+}
+
 fn on_hover_start(
     trigger: On<Pointer<Over>>,
     mut commands: Commands,
@@ -572,23 +593,8 @@ fn on_hover_start(
 ) {
     let entity = trigger.event().event_target();
 
-    // Check if this is a cube element or find the parent that is
-    let element_entity = if cube_elements.get(entity).is_ok() {
-        Some(entity)
-    } else {
-        // Check if parent is a cube element (for mesh children like "Cube.003.Mat_Back")
-        if let Ok(parent) = parents_query.get(entity) {
-            if cube_elements.get(parent.0).is_ok() {
-                Some(parent.0)
-            } else {
-                None
-            }
-        } else {
-            None
-        }
-    };
-
-    let Some(target) = element_entity else {
+    // Find the CubeElement ancestor (traverses full parent hierarchy)
+    let Some(target) = find_cube_element_ancestor(entity, &cube_elements, &parents_query) else {
         return;
     };
 
@@ -637,23 +643,8 @@ fn on_hover_end(
 ) {
     let entity = trigger.event().event_target();
 
-    // Check if this is the currently hovered element
-    let element_entity = if cube_elements.get(entity).is_ok() {
-        Some(entity)
-    } else {
-        // Check if parent is a cube element
-        if let Ok(parent) = parents_query.get(entity) {
-            if cube_elements.get(parent.0).is_ok() {
-                Some(parent.0)
-            } else {
-                None
-            }
-        } else {
-            None
-        }
-    };
-
-    let Some(target) = element_entity else {
+    // Find the CubeElement ancestor (traverses full parent hierarchy)
+    let Some(target) = find_cube_element_ancestor(entity, &cube_elements, &parents_query) else {
         return;
     };
 
@@ -755,16 +746,13 @@ fn on_click(
 ) {
     let entity = trigger.event().event_target();
 
-    // Find the cube element (or parent if this is a mesh child)
-    let element = if let Ok(elem) = cube_elements.get(entity) {
-        elem
-    } else if let Ok(parent) = parents_query.get(entity) {
-        if let Ok(elem) = cube_elements.get(parent.0) {
-            elem
-        } else {
-            return;
-        }
-    } else {
+    // Find the CubeElement ancestor (traverses full parent hierarchy)
+    let Some(target_entity) = find_cube_element_ancestor(entity, &cube_elements, &parents_query)
+    else {
+        return;
+    };
+
+    let Ok(element) = cube_elements.get(target_entity) else {
         return;
     };
 
