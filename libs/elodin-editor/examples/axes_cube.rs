@@ -144,7 +144,12 @@ struct CubeElementSetup;
 // Setup
 // ============================================================================
 
-fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
+fn setup(
+    mut commands: Commands,
+    asset_server: Res<AssetServer>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
     commands.init_resource::<CameraTarget>();
 
     // Load the axes-cube.glb
@@ -157,6 +162,9 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
         AxesCube,
         Name::new("axes_cube_root"),
     ));
+
+    // Spawn RGB axes extending from the corner of the cube (like OnShape)
+    spawn_axes(&mut commands, &mut meshes, &mut materials);
 
     // Camera - positioned to see the cube from an isometric-ish angle
     commands.spawn((
@@ -187,6 +195,82 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
     println!("Hover over faces, edges, or corners to highlight them.");
     println!("Click to rotate the camera toward that element.");
     println!("Press ESC to quit.");
+}
+
+/// Spawn RGB axes extending from the bottom-left-back corner of the cube
+fn spawn_axes(
+    commands: &mut Commands,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    materials: &mut ResMut<Assets<StandardMaterial>>,
+) {
+    // Axis configuration - long enough to be clearly visible beyond the cube
+    const AXIS_LENGTH: f32 = 1.4;
+    const AXIS_RADIUS: f32 = 0.035;
+    const TIP_RADIUS: f32 = 0.08;
+    const TIP_LENGTH: f32 = 0.2;
+
+    // Origin point - slightly outside the bottom-left-back corner of cube
+    let origin = Vec3::new(-0.55, -0.55, -0.55);
+
+    // Axis colors (standard CAD convention)
+    let colors = [
+        (Vec3::X, Color::srgb(0.9, 0.2, 0.2), "X"),  // Red for X
+        (Vec3::Y, Color::srgb(0.2, 0.8, 0.2), "Y"),  // Green for Y
+        (Vec3::Z, Color::srgb(0.2, 0.4, 0.9), "Z"),  // Blue for Z
+    ];
+
+    // Create shared meshes
+    let shaft_mesh = meshes.add(Cylinder::new(AXIS_RADIUS, AXIS_LENGTH));
+    let tip_mesh = meshes.add(Cone::new(TIP_RADIUS, TIP_LENGTH));
+
+    for (direction, color, name) in colors {
+        let material = materials.add(StandardMaterial {
+            base_color: color,
+            unlit: true,
+            ..default()
+        });
+
+        // Calculate rotation to align cylinder with axis direction
+        // Cylinder is created along Y axis by default
+        let rotation = if direction == Vec3::X {
+            Quat::from_rotation_z(-std::f32::consts::FRAC_PI_2)
+        } else if direction == Vec3::Z {
+            Quat::from_rotation_x(std::f32::consts::FRAC_PI_2)
+        } else {
+            Quat::IDENTITY // Y axis, no rotation needed
+        };
+
+        // Shaft position (center of the cylinder)
+        let shaft_pos = origin + direction * (AXIS_LENGTH / 2.0);
+
+        // Spawn shaft
+        commands.spawn((
+            Mesh3d(shaft_mesh.clone()),
+            MeshMaterial3d(material.clone()),
+            Transform::from_translation(shaft_pos).with_rotation(rotation),
+            Name::new(format!("axis_{}_shaft", name)),
+        ));
+
+        // Tip position (at the end of the shaft)
+        let tip_pos = origin + direction * (AXIS_LENGTH + TIP_LENGTH / 2.0);
+
+        // Tip rotation (cone points along axis direction)
+        let tip_rotation = if direction == Vec3::X {
+            Quat::from_rotation_z(-std::f32::consts::FRAC_PI_2)
+        } else if direction == Vec3::Z {
+            Quat::from_rotation_x(std::f32::consts::FRAC_PI_2)
+        } else {
+            Quat::IDENTITY
+        };
+
+        // Spawn tip (cone/arrow)
+        commands.spawn((
+            Mesh3d(tip_mesh.clone()),
+            MeshMaterial3d(material),
+            Transform::from_translation(tip_pos).with_rotation(tip_rotation),
+            Name::new(format!("axis_{}_tip", name)),
+        ));
+    }
 }
 
 /// Set up cube elements after the GLB is loaded
