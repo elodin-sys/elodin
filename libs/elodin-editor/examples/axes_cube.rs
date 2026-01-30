@@ -767,6 +767,14 @@ fn on_click(
 
     // Calculate target: camera should look FROM the opposite direction
     let target_pos = -look_dir * CAMERA_DISTANCE;
+
+    // If camera is already at target position, don't animate
+    const POSITION_THRESHOLD: f32 = 0.1;
+    if current_transform.translation.distance(target_pos) < POSITION_THRESHOLD {
+        println!("CLICK: {:?} -> already at this view, skipping", element);
+        return;
+    }
+
     let target_transform = Transform::from_translation(target_pos).looking_at(Vec3::ZERO, up_dir);
 
     // Store start state and target for smooth interpolation
