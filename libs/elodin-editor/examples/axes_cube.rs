@@ -74,14 +74,14 @@ enum CubeElement {
 #[derive(Clone, Copy, Debug)]
 enum FaceDirection {
     // X axis (Red)
-    East,  // +X (Right)
-    West,  // -X (Left)
+    East, // +X (Right)
+    West, // -X (Left)
     // Y axis (Green)
     North, // +Y (Top)
     South, // -Y (Bottom)
     // Z axis (Blue)
-    Up,    // +Z (Front)
-    Down,  // -Z (Back)
+    Up,   // +Z (Front)
+    Down, // -Z (Back)
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -222,9 +222,9 @@ fn spawn_axes(
     // Axis colors (ENU convention)
     // X = East/West (Red), Y = North/South (Green), Z = Up/Down (Blue)
     let colors = [
-        (Vec3::X, Color::srgb(0.9, 0.2, 0.2), "X"),  // Red for X (East/West)
-        (Vec3::Y, Color::srgb(0.2, 0.8, 0.2), "Y"),  // Green for Y (North/South)
-        (Vec3::Z, Color::srgb(0.2, 0.4, 0.9), "Z"),  // Blue for Z (Up/Down)
+        (Vec3::X, Color::srgb(0.9, 0.2, 0.2), "X"), // Red for X (East/West)
+        (Vec3::Y, Color::srgb(0.2, 0.8, 0.2), "Y"), // Green for Y (North/South)
+        (Vec3::Z, Color::srgb(0.2, 0.4, 0.9), "Z"), // Blue for Z (Up/Down)
     ];
 
     // Create shared meshes
@@ -345,7 +345,7 @@ fn setup_cube_elements(
         if let Some(elem) = element {
             // Get the color for this element type
             let element_color = get_element_color(&elem);
-            
+
             commands
                 .entity(entity)
                 .insert((elem.clone(), CubeElementSetup));
@@ -735,9 +735,7 @@ fn animate_camera(
     // Clamp t to [0, 1] to handle frame stutters gracefully
     let speed = 5.0;
     let t = (speed * time.delta_secs()).clamp(0.0, 1.0);
-    transform.rotation = transform
-        .rotation
-        .slerp(camera_target.target_rotation, t);
+    transform.rotation = transform.rotation.slerp(camera_target.target_rotation, t);
 
     // Update position to maintain distance from origin
     let forward = transform.rotation * Vec3::NEG_Z;
