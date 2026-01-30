@@ -174,7 +174,7 @@ fn setup(
     spawn_axes(&mut commands, &mut meshes, &mut materials);
 
     // Spawn ENU labels on each face
-    spawn_face_labels(&mut commands, &asset_server);
+    spawn_face_labels(&mut commands, &mut meshes, &mut materials);
 
     // Camera - positioned to see the cube from an isometric-ish angle
     commands.spawn((
@@ -284,10 +284,16 @@ fn spawn_axes(
     }
 }
 
-/// Spawn text labels on each face (E, W, N, S, U, D)
-fn spawn_face_labels(commands: &mut Commands, _asset_server: &Res<AssetServer>) {
-    let font_size = 80.0;
+/// Marker component for face labels that need to billboard (face camera)
+#[derive(Component)]
+struct FaceLabel;
 
+/// Spawn 3D text labels on each face using quads with letter meshes
+fn spawn_face_labels(
+    commands: &mut Commands,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    materials: &mut ResMut<Assets<StandardMaterial>>,
+) {
     // All face directions to label
     let faces = [
         FaceDirection::East,
@@ -303,16 +309,209 @@ fn spawn_face_labels(commands: &mut Commands, _asset_server: &Res<AssetServer>) 
         let color = get_face_label_color(dir);
         let transform = get_face_label_transform(dir);
 
-        commands.spawn((
-            Text2d::new(label),
-            TextFont {
-                font_size,
-                ..default()
-            },
-            TextColor(color),
-            transform.with_scale(Vec3::splat(0.005)), // Scale down text for 3D world
-            Name::new(format!("label_{}", label)),
-        ));
+        // Spawn parent entity for the label (positioned on face)
+        let label_entity = commands
+            .spawn((
+                Transform::from_translation(transform.translation)
+                    .with_rotation(transform.rotation),
+                Visibility::Visible,
+                FaceLabel,
+                Name::new(format!("label_{}", label)),
+            ))
+            .id();
+
+        // Spawn the letter shape as child meshes
+        spawn_letter_mesh(commands, meshes, materials, label_entity, label, color);
+    }
+}
+
+/// Spawn a simple 3D representation of a letter using basic shapes
+fn spawn_letter_mesh(
+    commands: &mut Commands,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    materials: &mut ResMut<Assets<StandardMaterial>>,
+    parent: Entity,
+    letter: &str,
+    color: Color,
+) {
+    let material = materials.add(StandardMaterial {
+        base_color: color,
+        unlit: true,
+        ..default()
+    });
+
+    // Letter dimensions
+    let stroke = 0.04;  // Width of letter strokes
+    let height = 0.3;   // Total letter height
+    let width = 0.2;    // Total letter width
+
+    // Create basic box mesh for letter strokes
+    let h_bar = meshes.add(Cuboid::new(width, stroke, stroke)); // Horizontal bar
+    let v_bar = meshes.add(Cuboid::new(stroke, height, stroke)); // Vertical bar
+    let short_h = meshes.add(Cuboid::new(width * 0.6, stroke, stroke)); // Short horizontal
+
+    match letter {
+        "E" => {
+            // Vertical bar (left)
+            commands.spawn((
+                Mesh3d(v_bar.clone()),
+                MeshMaterial3d(material.clone()),
+                Transform::from_xyz(-width / 2.0 + stroke / 2.0, 0.0, 0.0),
+            )).set_parent_in_place(parent);
+            // Top horizontal
+            commands.spawn((
+                Mesh3d(h_bar.clone()),
+                MeshMaterial3d(material.clone()),
+                Transform::from_xyz(0.0, height / 2.0 - stroke / 2.0, 0.0),
+            )).set_parent_in_place(parent);
+            // Middle horizontal
+            commands.spawn((
+                Mesh3d(short_h.clone()),
+                MeshMaterial3d(material.clone()),
+                Transform::from_xyz(-width * 0.1, 0.0, 0.0),
+            )).set_parent_in_place(parent);
+            // Bottom horizontal
+            commands.spawn((
+                Mesh3d(h_bar.clone()),
+                MeshMaterial3d(material.clone()),
+                Transform::from_xyz(0.0, -height / 2.0 + stroke / 2.0, 0.0),
+            )).set_parent_in_place(parent);
+        }
+        "W" => {
+            // W shape using diagonal bars (simplified as V + V)
+            let diag = meshes.add(Cuboid::new(stroke, height * 0.55, stroke));
+            // Left diagonal down
+            commands.spawn((
+                Mesh3d(diag.clone()),
+                MeshMaterial3d(material.clone()),
+                Transform::from_xyz(-width * 0.35, 0.0, 0.0)
+                    .with_rotation(Quat::from_rotation_z(0.2)),
+            )).set_parent_in_place(parent);
+            // Left-center diagonal up
+            commands.spawn((
+                Mesh3d(diag.clone()),
+                MeshMaterial3d(material.clone()),
+                Transform::from_xyz(-width * 0.12, 0.0, 0.0)
+                    .with_rotation(Quat::from_rotation_z(-0.2)),
+            )).set_parent_in_place(parent);
+            // Right-center diagonal down
+            commands.spawn((
+                Mesh3d(diag.clone()),
+                MeshMaterial3d(material.clone()),
+                Transform::from_xyz(width * 0.12, 0.0, 0.0)
+                    .with_rotation(Quat::from_rotation_z(0.2)),
+            )).set_parent_in_place(parent);
+            // Right diagonal up
+            commands.spawn((
+                Mesh3d(diag.clone()),
+                MeshMaterial3d(material.clone()),
+                Transform::from_xyz(width * 0.35, 0.0, 0.0)
+                    .with_rotation(Quat::from_rotation_z(-0.2)),
+            )).set_parent_in_place(parent);
+        }
+        "N" => {
+            // Left vertical
+            commands.spawn((
+                Mesh3d(v_bar.clone()),
+                MeshMaterial3d(material.clone()),
+                Transform::from_xyz(-width / 2.0 + stroke / 2.0, 0.0, 0.0),
+            )).set_parent_in_place(parent);
+            // Right vertical
+            commands.spawn((
+                Mesh3d(v_bar.clone()),
+                MeshMaterial3d(material.clone()),
+                Transform::from_xyz(width / 2.0 - stroke / 2.0, 0.0, 0.0),
+            )).set_parent_in_place(parent);
+            // Diagonal
+            let diag = meshes.add(Cuboid::new(stroke, height * 1.1, stroke));
+            commands.spawn((
+                Mesh3d(diag),
+                MeshMaterial3d(material.clone()),
+                Transform::from_xyz(0.0, 0.0, 0.0)
+                    .with_rotation(Quat::from_rotation_z(-0.45)),
+            )).set_parent_in_place(parent);
+        }
+        "S" => {
+            // Top horizontal
+            commands.spawn((
+                Mesh3d(h_bar.clone()),
+                MeshMaterial3d(material.clone()),
+                Transform::from_xyz(0.0, height / 2.0 - stroke / 2.0, 0.0),
+            )).set_parent_in_place(parent);
+            // Upper left vertical segment
+            let short_v = meshes.add(Cuboid::new(stroke, height * 0.3, stroke));
+            commands.spawn((
+                Mesh3d(short_v.clone()),
+                MeshMaterial3d(material.clone()),
+                Transform::from_xyz(-width / 2.0 + stroke / 2.0, height * 0.25, 0.0),
+            )).set_parent_in_place(parent);
+            // Middle horizontal
+            commands.spawn((
+                Mesh3d(h_bar.clone()),
+                MeshMaterial3d(material.clone()),
+                Transform::from_xyz(0.0, 0.0, 0.0),
+            )).set_parent_in_place(parent);
+            // Lower right vertical segment
+            commands.spawn((
+                Mesh3d(short_v.clone()),
+                MeshMaterial3d(material.clone()),
+                Transform::from_xyz(width / 2.0 - stroke / 2.0, -height * 0.25, 0.0),
+            )).set_parent_in_place(parent);
+            // Bottom horizontal
+            commands.spawn((
+                Mesh3d(h_bar.clone()),
+                MeshMaterial3d(material.clone()),
+                Transform::from_xyz(0.0, -height / 2.0 + stroke / 2.0, 0.0),
+            )).set_parent_in_place(parent);
+        }
+        "U" => {
+            // Left vertical
+            commands.spawn((
+                Mesh3d(v_bar.clone()),
+                MeshMaterial3d(material.clone()),
+                Transform::from_xyz(-width / 2.0 + stroke / 2.0, stroke, 0.0),
+            )).set_parent_in_place(parent);
+            // Right vertical
+            commands.spawn((
+                Mesh3d(v_bar.clone()),
+                MeshMaterial3d(material.clone()),
+                Transform::from_xyz(width / 2.0 - stroke / 2.0, stroke, 0.0),
+            )).set_parent_in_place(parent);
+            // Bottom horizontal
+            commands.spawn((
+                Mesh3d(h_bar.clone()),
+                MeshMaterial3d(material.clone()),
+                Transform::from_xyz(0.0, -height / 2.0 + stroke / 2.0, 0.0),
+            )).set_parent_in_place(parent);
+        }
+        "D" => {
+            // Left vertical
+            commands.spawn((
+                Mesh3d(v_bar.clone()),
+                MeshMaterial3d(material.clone()),
+                Transform::from_xyz(-width / 2.0 + stroke / 2.0, 0.0, 0.0),
+            )).set_parent_in_place(parent);
+            // Top horizontal (shorter)
+            commands.spawn((
+                Mesh3d(short_h.clone()),
+                MeshMaterial3d(material.clone()),
+                Transform::from_xyz(-width * 0.1, height / 2.0 - stroke / 2.0, 0.0),
+            )).set_parent_in_place(parent);
+            // Bottom horizontal (shorter)
+            commands.spawn((
+                Mesh3d(short_h.clone()),
+                MeshMaterial3d(material.clone()),
+                Transform::from_xyz(-width * 0.1, -height / 2.0 + stroke / 2.0, 0.0),
+            )).set_parent_in_place(parent);
+            // Right curved part (approximated with vertical)
+            let curve_v = meshes.add(Cuboid::new(stroke, height * 0.7, stroke));
+            commands.spawn((
+                Mesh3d(curve_v),
+                MeshMaterial3d(material.clone()),
+                Transform::from_xyz(width / 2.0 - stroke / 2.0, 0.0, 0.0),
+            )).set_parent_in_place(parent);
+        }
+        _ => {}
     }
 }
 
