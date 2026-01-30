@@ -616,10 +616,12 @@ fn animate_camera(
     };
 
     // Smoothly interpolate rotation
+    // Clamp t to [0, 1] to handle frame stutters gracefully
     let speed = 5.0;
+    let t = (speed * time.delta_secs()).clamp(0.0, 1.0);
     transform.rotation = transform
         .rotation
-        .slerp(camera_target.target_rotation, speed * time.delta_secs());
+        .slerp(camera_target.target_rotation, t);
 
     // Update position to maintain distance from origin
     let distance = 4.5;
