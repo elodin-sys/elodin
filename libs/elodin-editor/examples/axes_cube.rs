@@ -10,6 +10,8 @@
 use bevy::asset::AssetPlugin;
 use bevy::picking::prelude::*;
 use bevy::prelude::*;
+use bevy_fontmesh::prelude::*;
+use std::f32::consts::{FRAC_PI_2, PI};
 use std::path::PathBuf;
 
 fn main() {
@@ -39,6 +41,7 @@ fn main() {
                 }),
         )
         .add_plugins(MeshPickingPlugin)
+        .add_plugins(FontMeshPlugin)
         .init_resource::<HoveredElement>()
         .init_resource::<OriginalMaterials>()
         .add_systems(Startup, setup)
@@ -187,6 +190,9 @@ fn setup(
     // Spawn RGB axes extending from the corner of the cube (like OnShape)
     spawn_axes(&mut commands, &mut meshes, &mut materials);
 
+    // Spawn 3D text labels for ENU faces
+    spawn_face_labels(&mut commands, &asset_server, &mut materials);
+
     // Camera - positioned to see the cube from an isometric-ish angle
     commands.spawn((
         Transform::from_xyz(3.0, 2.5, 3.0).looking_at(Vec3::ZERO, Vec3::Y),
@@ -295,6 +301,105 @@ fn spawn_axes(
     }
 }
 
+/// Spawn 3D text labels on cube faces using bevy_fontmesh
+fn spawn_face_labels(
+    commands: &mut Commands,
+    asset_server: &Res<AssetServer>,
+    materials: &mut ResMut<Assets<StandardMaterial>>,
+) {
+    // Load the font
+    let font: Handle<FontMesh> = asset_server.load("fonts/Roboto-Bold.ttf");
+
+    // Label configuration
+    const LABEL_SCALE: f32 = 0.25; // Scale controls the size
+    const LABEL_DEPTH: f32 = 0.08; // Extrusion depth
+    const FACE_OFFSET: f32 = 0.52; // Slightly outside the cube face
+
+    // Define face labels with their positions, rotations, and corresponding FaceDirection
+    // ENU: East (+X), North (+Y), Up (+Z)
+    let face_labels = [
+        // East (+X) - Red
+        (
+            "E",
+            Vec3::new(FACE_OFFSET, 0.0, 0.0),
+            Quat::from_rotation_y(FRAC_PI_2),
+            Color::srgb(0.9, 0.2, 0.2),
+            FaceDirection::East,
+        ),
+        // West (-X) - Red (darker)
+        (
+            "W",
+            Vec3::new(-FACE_OFFSET, 0.0, 0.0),
+            Quat::from_rotation_y(-FRAC_PI_2),
+            Color::srgb(0.6, 0.15, 0.15),
+            FaceDirection::West,
+        ),
+        // North (+Y) - Green
+        (
+            "N",
+            Vec3::new(0.0, FACE_OFFSET, 0.0),
+            Quat::from_rotation_x(-FRAC_PI_2),
+            Color::srgb(0.2, 0.8, 0.2),
+            FaceDirection::North,
+        ),
+        // South (-Y) - Green (darker)
+        (
+            "S",
+            Vec3::new(0.0, -FACE_OFFSET, 0.0),
+            Quat::from_rotation_x(FRAC_PI_2),
+            Color::srgb(0.15, 0.5, 0.15),
+            FaceDirection::South,
+        ),
+        // Up (+Z) - Blue
+        (
+            "U",
+            Vec3::new(0.0, 0.0, FACE_OFFSET),
+            Quat::IDENTITY,
+            Color::srgb(0.2, 0.4, 0.9),
+            FaceDirection::Up,
+        ),
+        // Down (-Z) - Blue (darker)
+        (
+            "D",
+            Vec3::new(0.0, 0.0, -FACE_OFFSET),
+            Quat::from_rotation_y(PI),
+            Color::srgb(0.15, 0.3, 0.6),
+            FaceDirection::Down,
+        ),
+    ];
+
+    for (text, position, rotation, color, direction) in face_labels {
+        let material = materials.add(StandardMaterial {
+            base_color: color,
+            unlit: true,
+            ..default()
+        });
+
+        commands.spawn((
+            TextMeshBundle {
+                text_mesh: TextMesh {
+                    text: text.to_string(),
+                    font: font.clone(),
+                    style: TextMeshStyle {
+                        depth: LABEL_DEPTH,
+                        anchor: TextAnchor::Center,
+                        ..default()
+                    },
+                    ..default()
+                },
+                material: MeshMaterial3d(material),
+                transform: Transform::from_translation(position)
+                    .with_rotation(rotation)
+                    .with_scale(Vec3::splat(LABEL_SCALE)),
+                ..default()
+            },
+            // Add CubeElement so clicking on labels triggers camera rotation
+            CubeElement::Face(direction),
+            Name::new(format!("label_{}", text)),
+        ));
+    }
+}
+
 /// Get color for a cube element (faces are grey/transparent)
 fn get_element_color(element: &CubeElement) -> Color {
     match element {
@@ -324,10 +429,10 @@ fn setup_cube_elements(
     };
 
     for (entity, name) in query.iter() {
-        // Check if this entity is in the axes cube subtree
+        // Check if this entity is in the axes cube subtree by traversing parents
         let mut in_subtree = false;
         let mut current = entity;
-        for _ in 0..10 {
+        loop {
             if current == root {
                 in_subtree = true;
                 break;
@@ -335,6 +440,7 @@ fn setup_cube_elements(
             if let Ok(parent) = parents.get(current) {
                 current = parent.0;
             } else {
+                // Reached top of hierarchy without finding root
                 break;
             }
         }
