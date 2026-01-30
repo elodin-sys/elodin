@@ -127,17 +127,31 @@ struct OriginalMaterials {
     colors: std::collections::HashMap<Entity, Color>,
 }
 
-/// Camera animation target
+/// Camera animation state with start and target for smooth interpolation
 #[derive(Resource)]
-struct CameraTarget {
+struct CameraAnimation {
+    /// Starting position when animation began
+    start_position: Vec3,
+    /// Starting rotation when animation began
+    start_rotation: Quat,
+    /// Target position to animate to
+    target_position: Vec3,
+    /// Target rotation to animate to
     target_rotation: Quat,
+    /// Animation progress from 0.0 to 1.0
+    progress: f32,
+    /// Whether animation is currently active
     animating: bool,
 }
 
-impl Default for CameraTarget {
+impl Default for CameraAnimation {
     fn default() -> Self {
         Self {
+            start_position: Vec3::new(3.0, 2.5, 3.0),
+            start_rotation: Quat::IDENTITY,
+            target_position: Vec3::ZERO,
             target_rotation: Quat::IDENTITY,
+            progress: 0.0,
             animating: false,
         }
     }
@@ -157,7 +171,7 @@ fn setup(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    commands.init_resource::<CameraTarget>();
+    commands.init_resource::<CameraAnimation>();
 
     // Load the axes-cube.glb
     let scene = asset_server.load("axes-cube.glb#Scene0");
@@ -630,7 +644,8 @@ fn on_click(
     trigger: On<Pointer<Click>>,
     cube_elements: Query<&CubeElement>,
     parents_query: Query<&ChildOf>,
-    mut camera_target: ResMut<CameraTarget>,
+    camera_query: Query<&Transform, With<MainCamera>>,
+    mut camera_anim: ResMut<CameraAnimation>,
 ) {
     let entity = trigger.event().event_target();
 
@@ -647,16 +662,26 @@ fn on_click(
         return;
     };
 
+    // Get current camera state
+    let Ok(current_transform) = camera_query.single() else {
+        return;
+    };
+
     // Calculate target rotation based on element
     let look_dir = get_look_direction(element);
     let up_dir = get_up_direction(element);
 
-    // Calculate rotation: camera should look FROM the opposite direction
-    let camera_pos = -look_dir * CAMERA_DISTANCE; // Position camera on opposite side
-    let target_transform = Transform::from_translation(camera_pos).looking_at(Vec3::ZERO, up_dir);
+    // Calculate target: camera should look FROM the opposite direction
+    let target_pos = -look_dir * CAMERA_DISTANCE;
+    let target_transform = Transform::from_translation(target_pos).looking_at(Vec3::ZERO, up_dir);
 
-    camera_target.target_rotation = target_transform.rotation;
-    camera_target.animating = true;
+    // Store start state and target for smooth interpolation
+    camera_anim.start_position = current_transform.translation;
+    camera_anim.start_rotation = current_transform.rotation;
+    camera_anim.target_position = target_pos;
+    camera_anim.target_rotation = target_transform.rotation;
+    camera_anim.progress = 0.0;
+    camera_anim.animating = true;
 
     println!("CLICK: {:?} -> rotating camera", element);
 }
@@ -720,10 +745,10 @@ fn get_up_direction(element: &CubeElement) -> Vec3 {
 
 fn animate_camera(
     mut camera_query: Query<&mut Transform, With<MainCamera>>,
-    mut camera_target: ResMut<CameraTarget>,
+    mut camera_anim: ResMut<CameraAnimation>,
     time: Res<Time>,
 ) {
-    if !camera_target.animating {
+    if !camera_anim.animating {
         return;
     }
 
@@ -731,21 +756,30 @@ fn animate_camera(
         return;
     };
 
-    // Smoothly interpolate rotation
-    // Clamp t to [0, 1] to handle frame stutters gracefully
-    let speed = 5.0;
-    let t = (speed * time.delta_secs()).clamp(0.0, 1.0);
-    transform.rotation = transform.rotation.slerp(camera_target.target_rotation, t);
+    // Animation speed (complete in ~0.4 seconds)
+    let speed = 2.5;
+    camera_anim.progress = (camera_anim.progress + speed * time.delta_secs()).min(1.0);
 
-    // Update position to maintain distance from origin
-    let forward = transform.rotation * Vec3::NEG_Z;
-    transform.translation = -forward * CAMERA_DISTANCE;
+    // Apply ease-out cubic for smooth deceleration: t' = 1 - (1-t)^3
+    let t = camera_anim.progress;
+    let eased_t = 1.0 - (1.0 - t).powi(3);
+
+    // Interpolate position and rotation independently
+    // Position: linear interpolation (lerp) for smooth straight-line movement
+    transform.translation = camera_anim
+        .start_position
+        .lerp(camera_anim.target_position, eased_t);
+
+    // Rotation: spherical interpolation (slerp) for smooth rotation
+    transform.rotation = camera_anim
+        .start_rotation
+        .slerp(camera_anim.target_rotation, eased_t);
 
     // Check if animation is complete
-    let angle_diff = transform
-        .rotation
-        .angle_between(camera_target.target_rotation);
-    if angle_diff < 0.01 {
-        camera_target.animating = false;
+    if camera_anim.progress >= 1.0 {
+        // Snap to exact target to avoid floating point drift
+        transform.translation = camera_anim.target_position;
+        transform.rotation = camera_anim.target_rotation;
+        camera_anim.animating = false;
     }
 }
