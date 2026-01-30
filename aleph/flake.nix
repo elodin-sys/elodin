@@ -145,10 +145,16 @@
         toplevel = nixosConfigurations.default.config.system.build.toplevel;
         sdimage = nixosConfigurations.installer.config.system.build.sdImage;
       };
-      packages.x86_64-linux = {
+      packages.x86_64-linux = let
+        flash-cross = jetpack.nixosConfigurations."orin-nx-devkit".extendModules {
+          modules = [
+            {nixpkgs.buildPlatform.system = "x86_64-linux";}
+          ];
+        };
+      in {
         flash-uefi = nixpkgs.legacyPackages.x86_64-linux.runCommand "flash-uefi" {} ''
           mkdir -p $out
-          cp ${jetpack.outputs.packages.x86_64-linux.flash-orin-nx-devkit}/bin/initrd-flash-orin-nx-devkit-cross $out/flash-uefi
+          cp ${flash-cross.config.system.build.legacyFlashScript}/bin/flash-orin-nx-devkit $out/flash-uefi
           sed -i '46i\cp ${./tegra234-mb2-bct-misc-p3767-0000.dts} bootloader/generic/BCT/tegra234-mb2-bct-misc-p3767-0000.dts' $out/flash-uefi
           chmod +x $out/flash-uefi
         '';
