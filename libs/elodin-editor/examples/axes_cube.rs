@@ -745,28 +745,29 @@ fn on_click(
     };
 
     // Calculate target rotation based on element
-    let look_dir = get_look_direction(element);
-    let up_dir = get_up_direction(element);
-
-    // For faces: check if the face is actually facing the camera
-    // This prevents clicking "through" transparent faces to hit the back face
-    if let CubeElement::Face(_) = element {
+    let mut look_dir = get_look_direction(element);
+    
+    // For faces: if we clicked on a face that's NOT facing the camera,
+    // it means we clicked "through" the transparent cube to the back face.
+    // In that case, flip to the opposite face (what the user actually intended).
+    if let CubeElement::Face(dir) = element {
         let camera_dir = current_transform.translation.normalize();
         let face_facing_camera = camera_dir.dot(look_dir) > 0.0;
-
+        
         if !face_facing_camera {
-            // This face is facing away from camera - we clicked through to the back
-            // Ignore this click
+            // Clicked through to back face - go to opposite face instead
+            look_dir = -look_dir;
             println!(
-                "CLICK: {:?} -> face not visible from camera, ignoring",
-                element
+                "CLICK: {:?} -> clicked through, going to opposite face",
+                dir
             );
-            return;
         }
     }
+    
+    let up_dir = get_up_direction_for_look(look_dir);
 
-    // Calculate target: camera should be positioned in the direction of the clicked face
-    // so that the face label is visible and facing the camera
+    // Calculate target: camera should be positioned in the direction of the clicked element
+    // so that the element is visible and facing the camera
     let target_pos = look_dir * CAMERA_DISTANCE;
     let target_transform = Transform::from_translation(target_pos).looking_at(Vec3::ZERO, up_dir);
 
@@ -795,16 +796,7 @@ fn on_click(
     println!("CLICK: {:?} -> rotating camera", element);
 }
 
-fn get_look_direction(element: &CubeElement) -> Vec3 {
-    match element {
-        CubeElement::Face(dir) => match dir {
-            FaceDirection::East => Vec3::X,      // +X (right)
-            FaceDirection::West => Vec3::NEG_X,  // -X (left)
-            FaceDirection::North => Vec3::Z,     // +Z (front)
-            FaceDirection::South => Vec3::NEG_Z, // -Z (back)
-            FaceDirection::Up => Vec3::Y,        // +Y (top)
-            FaceDirection::Down => Vec3::NEG_Y,  // -Y (bottom)
-        },
+git statu
         CubeElement::Edge(dir) => match dir {
             EdgeDirection::XTopFront => Vec3::new(0.0, 1.0, 1.0).normalize(),
             EdgeDirection::XTopBack => Vec3::new(0.0, 1.0, -1.0).normalize(),
@@ -829,6 +821,21 @@ fn get_look_direction(element: &CubeElement) -> Vec3 {
             CornerPosition::BottomBackLeft => Vec3::new(-1.0, -1.0, -1.0).normalize(),
             CornerPosition::BottomBackRight => Vec3::new(1.0, -1.0, -1.0).normalize(),
         },
+    }
+}
+
+/// Get the up direction for a given look direction (used when look_dir might be flipped)
+fn get_up_direction_for_look(look_dir: Vec3) -> Vec3 {
+    // If looking up or down (Y axis), use Z for up
+    if look_dir.y.abs() > 0.9 {
+        if look_dir.y > 0.0 {
+            Vec3::NEG_Z // Looking up, "up" is towards -Z
+        } else {
+            Vec3::Z // Looking down, "up" is towards +Z
+        }
+    } else {
+        // For horizontal views, Y is always up
+        Vec3::Y
     }
 }
 
