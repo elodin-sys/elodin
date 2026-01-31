@@ -32,6 +32,7 @@ This document contains the help content for the Elodin command-line programs.
 * [`elodin-db time-align`↴](#elodin-db-time-align)
 * [`elodin-db drop`↴](#elodin-db-drop)
 * [`elodin-db info`↴](#elodin-db-info)
+* [`elodin-db export`↴](#elodin-db-export)
 
 ---
 
@@ -100,6 +101,7 @@ Run an Elodin simulation in headless mode (not available on Windows)
 * `time-align` — Align component timestamps to a target timestamp
 * `drop` — Drop (delete) components from a database
 * `info` — Display information about a database
+* `export` — Export database contents to parquet, arrow-ipc, or csv files
 
 
 ## `elodin-db run`
@@ -497,4 +499,77 @@ elodin-db info
 
 # Display info for a specific database
 elodin-db info ./my-database
+```
+
+
+## `elodin-db export`
+
+Export database contents to parquet, arrow-ipc, or csv files without requiring a running server. This is useful for analyzing telemetry data with external tools like pandas, DuckDB, or other data analysis frameworks.
+
+**Usage:** `elodin-db export [OPTIONS] --output <OUTPUT> <PATH>`
+
+###### **Arguments**
+
+* `<PATH>` — Path to the database directory
+
+###### **Options**
+
+* `-o`, `--output <PATH>` — Output directory for exported files (required)
+
+* `--format <FORMAT>` — Export format
+
+  Default value: `parquet`
+
+  Possible values: `parquet`, `arrow-ipc`, `csv`
+
+* `--flatten` — Flatten vector columns to separate columns (e.g., `vel_ned` becomes `vel_ned_x`, `vel_ned_y`, `vel_ned_z`)
+
+* `--pattern <PATTERN>` — Filter components by glob pattern (e.g., `NavNED.*`, `*.velocity`)
+
+###### **Export Formats**
+
+| Format | Extension | Description |
+|--------|-----------|-------------|
+| `parquet` | `.parquet` | Columnar format with compression. Best for large datasets and analytics tools. |
+| `arrow-ipc` | `.arrow` | Arrow IPC format. Fast to read/write, good for streaming data between processes. |
+| `csv` | `.csv` | Plain text format. Universal compatibility but larger file sizes. |
+
+###### **Vector Column Handling**
+
+By default, vector columns (e.g., 3D positions, quaternions) are exported as fixed-size lists. When exporting to CSV without `--flatten`, these appear as JSON-like strings (e.g., `[1.0, 2.0, 3.0]`).
+
+With `--flatten`, vector columns are split into separate scalar columns with element names as suffixes:
+- `position` (3D vector) → `position_x`, `position_y`, `position_z`
+- `quaternion` (4D vector) → `quaternion_w`, `quaternion_x`, `quaternion_y`, `quaternion_z`
+
+This is particularly useful for CSV export or when working with tools that don't support nested types.
+
+###### **Glob Pattern Filtering**
+
+The `--pattern` option supports standard glob wildcards:
+- `*` — matches any sequence of characters
+- `?` — matches exactly one character
+
+Examples:
+- `rocket.*` — export only components starting with "rocket."
+- `*.velocity` — export only velocity components
+- `NavNED.*` — export only NavNED components
+
+###### **Example**
+
+```bash
+# Export all components to parquet (default format)
+elodin-db export ./my-database -o ./export
+
+# Export to CSV with flattened vectors
+elodin-db export ./my-database -o ./export --format csv --flatten
+
+# Export to Arrow IPC format
+elodin-db export ./my-database -o ./export --format arrow-ipc
+
+# Export only specific components using glob pattern
+elodin-db export ./my-database -o ./export --pattern "rocket.*"
+
+# Export velocity components as flattened CSV
+elodin-db export ./my-database -o ./export --format csv --flatten --pattern "*.velocity"
 ```
