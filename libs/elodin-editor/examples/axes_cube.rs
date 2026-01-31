@@ -42,6 +42,11 @@ fn main() {
         )
         .add_plugins(MeshPickingPlugin)
         .add_plugins(FontMeshPlugin)
+        // Configure coordinate system here - change to NED if needed
+        .insert_resource(CoordinateConfig {
+            system: CoordinateSystem::NED, // <- Change this to NED to switch
+            scale: 0.5,                    // <- Adjust global scale here
+        })
         .init_resource::<HoveredElement>()
         .init_resource::<OriginalMaterials>()
         .add_systems(Startup, setup)
@@ -50,6 +55,187 @@ fn main() {
         .add_observer(on_hover_end)
         .add_observer(on_click)
         .run();
+}
+
+// ============================================================================
+// Coordinate System Configuration
+// ============================================================================
+
+/// Supported coordinate systems
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum CoordinateSystem {
+    /// East-North-Up: X=East, Y=Up, Z=North (aviation/robotics)
+    #[default]
+    ENU,
+    /// North-East-Down: X=North, Y=East, Z=Down (aerospace/navigation)
+    NED,
+}
+
+/// Resource holding the active coordinate system
+#[derive(Resource)]
+pub struct CoordinateConfig {
+    pub system: CoordinateSystem,
+    pub scale: f32, // Global scale factor for the widget
+}
+
+impl Default for CoordinateConfig {
+    fn default() -> Self {
+        Self {
+            system: CoordinateSystem::NED,
+            scale: 1.5,
+        }
+    }
+}
+
+/// Axis definition with label, direction, and color
+#[derive(Clone, Debug)]
+pub struct AxisDefinition {
+    pub positive_label: &'static str,
+    pub negative_label: &'static str,
+    pub direction: Vec3,  // Unit vector for positive direction
+    pub color: Color,     // Primary color
+    pub color_dim: Color, // Dimmed color for negative side
+}
+
+impl CoordinateSystem {
+    /// Get the three axis definitions for this coordinate system
+    /// Returns (primary, secondary, vertical) axes
+    pub fn get_axes(&self) -> [AxisDefinition; 3] {
+        match self {
+            CoordinateSystem::ENU => [
+                // X axis = East/West (Red)
+                AxisDefinition {
+                    positive_label: "East",
+                    negative_label: "West",
+                    direction: Vec3::X,
+                    color: Color::srgb(0.9, 0.2, 0.2),
+                    color_dim: Color::srgb(0.6, 0.15, 0.15),
+                },
+                // Y axis = Up/Down (Green) - Bevy's vertical
+                AxisDefinition {
+                    positive_label: "Up",
+                    negative_label: "Down",
+                    direction: Vec3::Y,
+                    color: Color::srgb(0.2, 0.8, 0.2),
+                    color_dim: Color::srgb(0.15, 0.5, 0.15),
+                },
+                // Z axis = North/South (Blue) - Bevy's forward
+                AxisDefinition {
+                    positive_label: "North",
+                    negative_label: "South",
+                    direction: Vec3::Z,
+                    color: Color::srgb(0.2, 0.4, 0.9),
+                    color_dim: Color::srgb(0.15, 0.3, 0.6),
+                },
+            ],
+            CoordinateSystem::NED => [
+                // X axis = North/South (Blue) - forward
+                AxisDefinition {
+                    positive_label: "North",
+                    negative_label: "South",
+                    direction: Vec3::Z, // In Bevy, forward is +Z
+                    color: Color::srgb(0.2, 0.4, 0.9),
+                    color_dim: Color::srgb(0.15, 0.3, 0.6),
+                },
+                // Y axis = East/West (Red) - right
+                AxisDefinition {
+                    positive_label: "East",
+                    negative_label: "West",
+                    direction: Vec3::X, // In Bevy, right is +X
+                    color: Color::srgb(0.9, 0.2, 0.2),
+                    color_dim: Color::srgb(0.6, 0.15, 0.15),
+                },
+                // Z axis = Down/Up (Green inverted) - down
+                AxisDefinition {
+                    positive_label: "Down",
+                    negative_label: "Up",
+                    direction: Vec3::NEG_Y, // In Bevy, down is -Y
+                    color: Color::srgb(0.2, 0.8, 0.2),
+                    color_dim: Color::srgb(0.15, 0.5, 0.15),
+                },
+            ],
+        }
+    }
+
+    /// Get all 6 face labels with their properties
+    pub fn get_face_labels(&self, face_offset: f32) -> Vec<FaceLabelConfig> {
+        let axes = self.get_axes();
+        let mut labels = Vec::new();
+
+        for axis in &axes {
+            // Positive direction face
+            labels.push(FaceLabelConfig {
+                text: axis.positive_label,
+                position: axis.direction * face_offset,
+                rotation: Self::get_rotation_for_direction(axis.direction),
+                color: axis.color,
+                direction: Self::direction_to_face(axis.direction),
+            });
+            // Negative direction face
+            labels.push(FaceLabelConfig {
+                text: axis.negative_label,
+                position: -axis.direction * face_offset,
+                rotation: Self::get_rotation_for_direction(-axis.direction),
+                color: axis.color_dim,
+                direction: Self::direction_to_face(-axis.direction),
+            });
+        }
+        labels
+    }
+
+    /// Get rotation quaternion to make text face outward from the given direction
+    fn get_rotation_for_direction(dir: Vec3) -> Quat {
+        // Text mesh faces -Z by default (readable from +Z)
+        if dir.x.abs() > 0.9 {
+            // X axis faces
+            if dir.x > 0.0 {
+                Quat::from_rotation_y(FRAC_PI_2)
+            } else {
+                Quat::from_rotation_y(-FRAC_PI_2)
+            }
+        } else if dir.y.abs() > 0.9 {
+            // Y axis faces
+            if dir.y > 0.0 {
+                Quat::from_rotation_x(-FRAC_PI_2)
+            } else {
+                Quat::from_rotation_x(FRAC_PI_2)
+            }
+        } else {
+            // Z axis faces
+            if dir.z > 0.0 {
+                Quat::IDENTITY
+            } else {
+                Quat::from_rotation_y(std::f32::consts::PI)
+            }
+        }
+    }
+
+    /// Convert a direction vector to FaceDirection enum
+    fn direction_to_face(dir: Vec3) -> FaceDirection {
+        if dir.x > 0.5 {
+            FaceDirection::East
+        } else if dir.x < -0.5 {
+            FaceDirection::West
+        } else if dir.y > 0.5 {
+            FaceDirection::Up
+        } else if dir.y < -0.5 {
+            FaceDirection::Down
+        } else if dir.z > 0.5 {
+            FaceDirection::North
+        } else {
+            FaceDirection::South
+        }
+    }
+}
+
+/// Configuration for a face label
+#[derive(Clone, Debug)]
+pub struct FaceLabelConfig {
+    pub text: &'static str,
+    pub position: Vec3,
+    pub rotation: Quat,
+    pub color: Color,
+    pub direction: FaceDirection,
 }
 
 // ============================================================================
@@ -70,22 +256,16 @@ enum CubeElement {
     Corner(CornerPosition),
 }
 
-/// Face directions using ENU (East-North-Up) convention for Bevy coordinates
+/// Face directions - axis-agnostic, based on Bevy coordinates
 /// In Bevy: X=right, Y=up, Z=forward
-/// - X axis: East (+X) / West (-X) - Red
-/// - Z axis: North (+Z) / South (-Z) - Blue
-/// - Y axis: Up (+Y) / Down (-Y) - Green
 #[derive(Clone, Copy, Debug)]
 enum FaceDirection {
-    // X axis (Red) - horizontal
-    East, // +X (Right)
-    West, // -X (Left)
-    // Z axis (Blue) - horizontal (forward/back)
+    East,  // +X (Right)
+    West,  // -X (Left)
     North, // +Z (Front)
     South, // -Z (Back)
-    // Y axis (Green) - vertical
-    Up,   // +Y (Top)
-    Down, // -Y (Bottom)
+    Up,    // +Y (Top)
+    Down,  // -Y (Bottom)
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -174,25 +354,29 @@ fn setup(
     asset_server: Res<AssetServer>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    coord_config: Res<CoordinateConfig>,
 ) {
     commands.init_resource::<CameraAnimation>();
 
     // Load the axes-cube.glb
     let scene = asset_server.load("axes-cube.glb#Scene0");
 
-    // Spawn the cube
+    // Spawn the cube with scale from config
     commands.spawn((
         SceneRoot(scene),
-        Transform::from_xyz(0.0, 0.0, 0.0),
+        Transform::from_xyz(0.0, 0.0, 0.0).with_scale(Vec3::splat(coord_config.scale)),
         AxesCube,
         Name::new("axes_cube_root"),
     ));
 
-    // Spawn RGB axes extending from the corner of the cube (like OnShape)
-    spawn_axes(&mut commands, &mut meshes, &mut materials);
+    // Spawn RGB axes extending from the corner of the cube
+    spawn_axes(&mut commands, &mut meshes, &mut materials, &coord_config);
 
-    // Spawn 3D text labels for ENU faces
-    spawn_face_labels(&mut commands, &asset_server, &mut materials);
+    // Spawn 3D text labels based on coordinate system
+    spawn_face_labels(&mut commands, &asset_server, &mut materials, &coord_config);
+
+    println!("Coordinate System: {:?}", coord_config.system);
+    println!("Scale: {}", coord_config.scale);
 
     // Camera - positioned to see the cube from an isometric-ish angle
     commands.spawn((
@@ -230,29 +414,51 @@ fn spawn_axes(
     commands: &mut Commands,
     meshes: &mut ResMut<Assets<Mesh>>,
     materials: &mut ResMut<Assets<StandardMaterial>>,
+    config: &CoordinateConfig,
 ) {
-    // Axis configuration - long enough to be clearly visible beyond the cube
-    const AXIS_LENGTH: f32 = 1.4;
-    const AXIS_RADIUS: f32 = 0.035;
-    const TIP_RADIUS: f32 = 0.08;
-    const TIP_LENGTH: f32 = 0.2;
+    // Axis configuration - scaled by global config
+    let axis_length = 1.4 * config.scale;
+    let axis_radius = 0.035 * config.scale;
+    let tip_radius = 0.08 * config.scale;
+    let tip_length = 0.2 * config.scale;
 
     // Origin point - slightly outside the bottom-left-back corner of cube
-    let origin = Vec3::new(-0.55, -0.55, -0.55);
+    let origin = Vec3::new(-0.55, -0.55, -0.55) * config.scale;
 
-    // Axis colors (ENU convention for Bevy: E=X, N=Z, U=Y)
-    // X = East (Red), Y = Up (Green), Z = North (Blue)
-    let colors = [
-        (Vec3::X, Color::srgb(0.9, 0.2, 0.2), "X"), // Red for X (East)
-        (Vec3::Y, Color::srgb(0.2, 0.8, 0.2), "Y"), // Green for Y (Up)
-        (Vec3::Z, Color::srgb(0.2, 0.4, 0.9), "Z"), // Blue for Z (North)
+    // Get axis colors from coordinate system
+    let axes = config.system.get_axes();
+    let axis_configs: [(Vec3, Color, &str); 3] = [
+        (
+            Vec3::X,
+            axes.iter()
+                .find(|a| a.direction == Vec3::X)
+                .map(|a| a.color)
+                .unwrap_or(Color::srgb(0.9, 0.2, 0.2)),
+            "X",
+        ),
+        (
+            Vec3::Y,
+            axes.iter()
+                .find(|a| a.direction == Vec3::Y || a.direction == Vec3::NEG_Y)
+                .map(|a| a.color)
+                .unwrap_or(Color::srgb(0.2, 0.8, 0.2)),
+            "Y",
+        ),
+        (
+            Vec3::Z,
+            axes.iter()
+                .find(|a| a.direction == Vec3::Z)
+                .map(|a| a.color)
+                .unwrap_or(Color::srgb(0.2, 0.4, 0.9)),
+            "Z",
+        ),
     ];
 
     // Create shared meshes
-    let shaft_mesh = meshes.add(Cylinder::new(AXIS_RADIUS, AXIS_LENGTH));
-    let tip_mesh = meshes.add(Cone::new(TIP_RADIUS, TIP_LENGTH));
+    let shaft_mesh = meshes.add(Cylinder::new(axis_radius, axis_length));
+    let tip_mesh = meshes.add(Cone::new(tip_radius, tip_length));
 
-    for (direction, color, name) in colors {
+    for (direction, color, name) in axis_configs {
         let material = materials.add(StandardMaterial {
             base_color: color,
             unlit: true,
@@ -270,7 +476,7 @@ fn spawn_axes(
         };
 
         // Shaft position (center of the cylinder)
-        let shaft_pos = origin + direction * (AXIS_LENGTH / 2.0);
+        let shaft_pos = origin + direction * (axis_length / 2.0);
 
         // Spawn shaft
         commands.spawn((
@@ -281,7 +487,7 @@ fn spawn_axes(
         ));
 
         // Tip position (at the end of the shaft)
-        let tip_pos = origin + direction * (AXIS_LENGTH + TIP_LENGTH / 2.0);
+        let tip_pos = origin + direction * (axis_length + tip_length / 2.0);
 
         // Tip rotation (cone points along axis direction)
         let tip_rotation = if direction == Vec3::X {
@@ -307,72 +513,22 @@ fn spawn_face_labels(
     commands: &mut Commands,
     asset_server: &Res<AssetServer>,
     materials: &mut ResMut<Assets<StandardMaterial>>,
+    config: &CoordinateConfig,
 ) {
     // Load the font
     let font: Handle<FontMesh> = asset_server.load("fonts/Roboto-Bold.ttf");
 
-    // Label configuration
-    const LABEL_SCALE: f32 = 0.12; // Smaller scale for full words
-    const LABEL_DEPTH: f32 = 0.05; // Extrusion depth
-    const FACE_OFFSET: f32 = 0.52; // Slightly outside the cube face
+    // Label configuration - scaled by global config
+    let label_scale = 0.12 * config.scale;
+    let label_depth = 0.05 * config.scale;
+    let face_offset = 0.52 * config.scale;
 
-    // Define face labels - all 6 faces with full names
-    // In Bevy: X=right, Y=up, Z=forward
-    // ENU mapping: E=+X (red), N=+Z (blue), U=+Y (green)
-    let face_labels = [
-        // East (+X) - Red axis - on right face
-        (
-            "East",
-            Vec3::new(FACE_OFFSET, 0.0, 0.0),
-            Quat::from_rotation_y(FRAC_PI_2),
-            Color::srgb(0.9, 0.2, 0.2),
-            FaceDirection::East,
-        ),
-        // West (-X) - Red axis (dimmer) - on left face
-        (
-            "West",
-            Vec3::new(-FACE_OFFSET, 0.0, 0.0),
-            Quat::from_rotation_y(-FRAC_PI_2),
-            Color::srgb(0.6, 0.15, 0.15),
-            FaceDirection::West,
-        ),
-        // North (+Z) - Blue axis - on front face
-        (
-            "North",
-            Vec3::new(0.0, 0.0, FACE_OFFSET),
-            Quat::IDENTITY,
-            Color::srgb(0.2, 0.4, 0.9),
-            FaceDirection::North,
-        ),
-        // South (-Z) - Blue axis (dimmer) - on back face
-        (
-            "South",
-            Vec3::new(0.0, 0.0, -FACE_OFFSET),
-            Quat::from_rotation_y(std::f32::consts::PI),
-            Color::srgb(0.15, 0.3, 0.6),
-            FaceDirection::South,
-        ),
-        // Up (+Y) - Green axis - on top face
-        (
-            "Up",
-            Vec3::new(0.0, FACE_OFFSET, 0.0),
-            Quat::from_rotation_x(-FRAC_PI_2),
-            Color::srgb(0.2, 0.8, 0.2),
-            FaceDirection::Up,
-        ),
-        // Down (-Y) - Green axis (dimmer) - on bottom face
-        (
-            "Down",
-            Vec3::new(0.0, -FACE_OFFSET, 0.0),
-            Quat::from_rotation_x(FRAC_PI_2),
-            Color::srgb(0.15, 0.5, 0.15),
-            FaceDirection::Down,
-        ),
-    ];
+    // Get face labels from coordinate system configuration
+    let face_labels = config.system.get_face_labels(face_offset);
 
-    for (text, position, rotation, color, direction) in face_labels {
+    for label in face_labels {
         let material = materials.add(StandardMaterial {
-            base_color: color,
+            base_color: label.color,
             unlit: true,
             // Cull back faces so text is only visible from the front
             // This prevents seeing reversed text through transparent cube faces
@@ -383,24 +539,24 @@ fn spawn_face_labels(
         commands.spawn((
             TextMeshBundle {
                 text_mesh: TextMesh {
-                    text: text.to_string(),
+                    text: label.text.to_string(),
                     font: font.clone(),
                     style: TextMeshStyle {
-                        depth: LABEL_DEPTH,
+                        depth: label_depth,
                         anchor: TextAnchor::Center,
                         ..default()
                     },
                     ..default()
                 },
                 material: MeshMaterial3d(material),
-                transform: Transform::from_translation(position)
-                    .with_rotation(rotation)
-                    .with_scale(Vec3::splat(LABEL_SCALE)),
+                transform: Transform::from_translation(label.position)
+                    .with_rotation(label.rotation)
+                    .with_scale(Vec3::splat(label_scale)),
                 ..default()
             },
             // Add CubeElement so clicking on labels triggers camera rotation
-            CubeElement::Face(direction),
-            Name::new(format!("label_{}", text)),
+            CubeElement::Face(label.direction),
+            Name::new(format!("label_{}", label.text)),
         ));
     }
 }
