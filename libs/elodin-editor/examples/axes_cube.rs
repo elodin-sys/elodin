@@ -329,10 +329,11 @@ fn spawn_face_labels(
             FaceDirection::East,
         ),
         // North (+Z) - Blue axis - on front face
+        // No rotation - text faces -Z by default, readable from +Z
         (
             "N",
             Vec3::new(0.0, 0.0, FACE_OFFSET),
-            Quat::from_rotation_y(PI),
+            Quat::IDENTITY,
             Color::srgb(0.2, 0.4, 0.9),
             FaceDirection::North,
         ),
@@ -796,7 +797,16 @@ fn on_click(
     println!("CLICK: {:?} -> rotating camera", element);
 }
 
-git statu
+fn get_look_direction(element: &CubeElement) -> Vec3 {
+    match element {
+        CubeElement::Face(dir) => match dir {
+            FaceDirection::East => Vec3::X,      // +X (right)
+            FaceDirection::West => Vec3::NEG_X,  // -X (left)
+            FaceDirection::North => Vec3::Z,     // +Z (front)
+            FaceDirection::South => Vec3::NEG_Z, // -Z (back)
+            FaceDirection::Up => Vec3::Y,        // +Y (top)
+            FaceDirection::Down => Vec3::NEG_Y,  // -Y (bottom)
+        },
         CubeElement::Edge(dir) => match dir {
             EdgeDirection::XTopFront => Vec3::new(0.0, 1.0, 1.0).normalize(),
             EdgeDirection::XTopBack => Vec3::new(0.0, 1.0, -1.0).normalize(),
