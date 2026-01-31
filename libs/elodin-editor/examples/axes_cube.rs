@@ -70,21 +70,22 @@ enum CubeElement {
     Corner(CornerPosition),
 }
 
-/// Face directions using ENU (East-North-Up) convention
+/// Face directions using ENU (East-North-Up) convention for Bevy coordinates
+/// In Bevy: X=right, Y=up, Z=forward
 /// - X axis: East (+X) / West (-X) - Red
-/// - Y axis: North (+Y) / South (-Y) - Green  
-/// - Z axis: Up (+Z) / Down (-Z) - Blue
+/// - Z axis: North (+Z) / South (-Z) - Blue
+/// - Y axis: Up (+Y) / Down (-Y) - Green
 #[derive(Clone, Copy, Debug)]
 enum FaceDirection {
-    // X axis (Red)
+    // X axis (Red) - horizontal
     East, // +X (Right)
     West, // -X (Left)
-    // Y axis (Green)
-    North, // +Y (Top)
-    South, // -Y (Bottom)
-    // Z axis (Blue)
-    Up,   // +Z (Front)
-    Down, // -Z (Back)
+    // Z axis (Blue) - horizontal (forward/back)
+    North, // +Z (Front)
+    South, // -Z (Back)
+    // Y axis (Green) - vertical
+    Up,   // +Y (Top)
+    Down, // -Y (Bottom)
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -239,12 +240,12 @@ fn spawn_axes(
     // Origin point - slightly outside the bottom-left-back corner of cube
     let origin = Vec3::new(-0.55, -0.55, -0.55);
 
-    // Axis colors (ENU convention)
-    // X = East/West (Red), Y = North/South (Green), Z = Up/Down (Blue)
+    // Axis colors (ENU convention for Bevy: E=X, N=Z, U=Y)
+    // X = East (Red), Y = Up (Green), Z = North (Blue)
     let colors = [
-        (Vec3::X, Color::srgb(0.9, 0.2, 0.2), "X"), // Red for X (East/West)
-        (Vec3::Y, Color::srgb(0.2, 0.8, 0.2), "Y"), // Green for Y (North/South)
-        (Vec3::Z, Color::srgb(0.2, 0.4, 0.9), "Z"), // Blue for Z (Up/Down)
+        (Vec3::X, Color::srgb(0.9, 0.2, 0.2), "X"), // Red for X (East)
+        (Vec3::Y, Color::srgb(0.2, 0.8, 0.2), "Y"), // Green for Y (Up)
+        (Vec3::Z, Color::srgb(0.2, 0.4, 0.9), "Z"), // Blue for Z (North)
     ];
 
     // Create shared meshes
@@ -315,10 +316,11 @@ fn spawn_face_labels(
     const LABEL_DEPTH: f32 = 0.08; // Extrusion depth
     const FACE_OFFSET: f32 = 0.52; // Slightly outside the cube face
 
-    // Define face labels with their positions, rotations, and corresponding FaceDirection
-    // ENU: East (+X), North (+Y), Up (+Z)
+    // Define face labels - ENU only (East, North, Up)
+    // In Bevy: X=right, Y=up, Z=forward
+    // ENU mapping: E=+X (red), N=+Z (blue), U=+Y (green)
     let face_labels = [
-        // East (+X) - Red
+        // East (+X) - Red axis - on right face
         (
             "E",
             Vec3::new(FACE_OFFSET, 0.0, 0.0),
@@ -326,45 +328,21 @@ fn spawn_face_labels(
             Color::srgb(0.9, 0.2, 0.2),
             FaceDirection::East,
         ),
-        // West (-X) - Red (darker)
-        (
-            "W",
-            Vec3::new(-FACE_OFFSET, 0.0, 0.0),
-            Quat::from_rotation_y(-FRAC_PI_2),
-            Color::srgb(0.6, 0.15, 0.15),
-            FaceDirection::West,
-        ),
-        // North (+Y) - Green
+        // North (+Z) - Blue axis - on front face
         (
             "N",
+            Vec3::new(0.0, 0.0, FACE_OFFSET),
+            Quat::from_rotation_y(PI),
+            Color::srgb(0.2, 0.4, 0.9),
+            FaceDirection::North,
+        ),
+        // Up (+Y) - Green axis - on top face
+        (
+            "U",
             Vec3::new(0.0, FACE_OFFSET, 0.0),
             Quat::from_rotation_x(-FRAC_PI_2),
             Color::srgb(0.2, 0.8, 0.2),
-            FaceDirection::North,
-        ),
-        // South (-Y) - Green (darker)
-        (
-            "S",
-            Vec3::new(0.0, -FACE_OFFSET, 0.0),
-            Quat::from_rotation_x(FRAC_PI_2),
-            Color::srgb(0.15, 0.5, 0.15),
-            FaceDirection::South,
-        ),
-        // Up (+Z) - Blue
-        (
-            "U",
-            Vec3::new(0.0, 0.0, FACE_OFFSET),
-            Quat::IDENTITY,
-            Color::srgb(0.2, 0.4, 0.9),
             FaceDirection::Up,
-        ),
-        // Down (-Z) - Blue (darker)
-        (
-            "D",
-            Vec3::new(0.0, 0.0, -FACE_OFFSET),
-            Quat::from_rotation_y(PI),
-            Color::srgb(0.15, 0.3, 0.6),
-            FaceDirection::Down,
         ),
     ];
 
@@ -372,6 +350,9 @@ fn spawn_face_labels(
         let material = materials.add(StandardMaterial {
             base_color: color,
             unlit: true,
+            // Cull back faces so text is only visible from the front
+            // This prevents seeing reversed text through transparent cube faces
+            cull_mode: Some(bevy::render::render_resource::Face::Back),
             ..default()
         });
 
@@ -499,14 +480,16 @@ fn setup_cube_elements(
 
 fn parse_face(name: &str) -> CubeElement {
     // Map GLB face names to ENU directions
+    // GLB uses Front/Back/Left/Right/Top/Bottom
+    // ENU in Bevy: E=+X, N=+Z, U=+Y
     let dir = match name {
-        "Face_Front" => FaceDirection::Up,     // +Z
-        "Face_Back" => FaceDirection::Down,    // -Z
-        "Face_Left" => FaceDirection::West,    // -X
-        "Face_Right" => FaceDirection::East,   // +X
-        "Face_Top" => FaceDirection::North,    // +Y
-        "Face_Bottom" => FaceDirection::South, // -Y
-        _ => FaceDirection::Up,
+        "Face_Front" => FaceDirection::North, // +Z (front)
+        "Face_Back" => FaceDirection::South,  // -Z (back)
+        "Face_Left" => FaceDirection::West,   // -X (left)
+        "Face_Right" => FaceDirection::East,  // +X (right)
+        "Face_Top" => FaceDirection::Up,      // +Y (top)
+        "Face_Bottom" => FaceDirection::Down, // -Y (bottom)
+        _ => FaceDirection::North,
     };
     CubeElement::Face(dir)
 }
@@ -765,17 +748,41 @@ fn on_click(
     let look_dir = get_look_direction(element);
     let up_dir = get_up_direction(element);
 
-    // Calculate target: camera should look FROM the opposite direction
-    let target_pos = -look_dir * CAMERA_DISTANCE;
+    // For faces: check if the face is actually facing the camera
+    // This prevents clicking "through" transparent faces to hit the back face
+    if let CubeElement::Face(_) = element {
+        let camera_dir = current_transform.translation.normalize();
+        let face_facing_camera = camera_dir.dot(look_dir) > 0.0;
 
-    // If camera is already at target position, don't animate
-    const POSITION_THRESHOLD: f32 = 0.1;
-    if current_transform.translation.distance(target_pos) < POSITION_THRESHOLD {
+        if !face_facing_camera {
+            // This face is facing away from camera - we clicked through to the back
+            // Ignore this click
+            println!(
+                "CLICK: {:?} -> face not visible from camera, ignoring",
+                element
+            );
+            return;
+        }
+    }
+
+    // Calculate target: camera should be positioned in the direction of the clicked face
+    // so that the face label is visible and facing the camera
+    let target_pos = look_dir * CAMERA_DISTANCE;
+    let target_transform = Transform::from_translation(target_pos).looking_at(Vec3::ZERO, up_dir);
+
+    // If camera is already at target position/rotation, don't animate
+    // Use both position distance AND rotation similarity for robust detection
+    let position_similar = current_transform.translation.distance(target_pos) < 0.5;
+    let rotation_similar = current_transform
+        .rotation
+        .dot(target_transform.rotation)
+        .abs()
+        > 0.99;
+
+    if position_similar && rotation_similar {
         println!("CLICK: {:?} -> already at this view, skipping", element);
         return;
     }
-
-    let target_transform = Transform::from_translation(target_pos).looking_at(Vec3::ZERO, up_dir);
 
     // Store start state and target for smooth interpolation
     camera_anim.start_position = current_transform.translation;
@@ -791,12 +798,12 @@ fn on_click(
 fn get_look_direction(element: &CubeElement) -> Vec3 {
     match element {
         CubeElement::Face(dir) => match dir {
-            FaceDirection::East => Vec3::X,      // +X
-            FaceDirection::West => Vec3::NEG_X,  // -X
-            FaceDirection::North => Vec3::Y,     // +Y
-            FaceDirection::South => Vec3::NEG_Y, // -Y
-            FaceDirection::Up => Vec3::Z,        // +Z
-            FaceDirection::Down => Vec3::NEG_Z,  // -Z
+            FaceDirection::East => Vec3::X,      // +X (right)
+            FaceDirection::West => Vec3::NEG_X,  // -X (left)
+            FaceDirection::North => Vec3::Z,     // +Z (front)
+            FaceDirection::South => Vec3::NEG_Z, // -Z (back)
+            FaceDirection::Up => Vec3::Y,        // +Y (top)
+            FaceDirection::Down => Vec3::NEG_Y,  // -Y (bottom)
         },
         CubeElement::Edge(dir) => match dir {
             EdgeDirection::XTopFront => Vec3::new(0.0, 1.0, 1.0).normalize(),
@@ -825,25 +832,106 @@ fn get_look_direction(element: &CubeElement) -> Vec3 {
     }
 }
 
+/// Get the up direction for a camera view, ensuring consistent orientation like OnShape
 fn get_up_direction(element: &CubeElement) -> Vec3 {
     match element {
         CubeElement::Face(dir) => match dir {
-            FaceDirection::North => Vec3::NEG_Z, // Looking down from above, Z is "forward"
-            FaceDirection::South => Vec3::Z,     // Looking up from below
-            _ => Vec3::Y,                        // For other faces, Y is up
+            // Looking from above (+Y), "up" is towards -Z (back of scene)
+            FaceDirection::Up => Vec3::NEG_Z,
+            // Looking from below (-Y), "up" is towards +Z (front of scene)
+            FaceDirection::Down => Vec3::Z,
+            // For horizontal faces (E, W, N, S), Y is always up
+            FaceDirection::East
+            | FaceDirection::West
+            | FaceDirection::North
+            | FaceDirection::South => Vec3::Y,
         },
-        CubeElement::Edge(dir) => match dir {
-            EdgeDirection::XTopFront | EdgeDirection::XTopBack => Vec3::new(0.0, 1.0, 0.0),
-            EdgeDirection::XBottomFront | EdgeDirection::XBottomBack => Vec3::new(0.0, 1.0, 0.0),
-            _ => Vec3::Y,
-        },
-        CubeElement::Corner(_) => Vec3::Y,
+        CubeElement::Edge(dir) => {
+            // For edges, use Y as up unless it would be parallel to view direction
+            let look_dir = match dir {
+                EdgeDirection::XTopFront => Vec3::new(0.0, 1.0, 1.0),
+                EdgeDirection::XTopBack => Vec3::new(0.0, 1.0, -1.0),
+                EdgeDirection::XBottomFront => Vec3::new(0.0, -1.0, 1.0),
+                EdgeDirection::XBottomBack => Vec3::new(0.0, -1.0, -1.0),
+                EdgeDirection::YFrontLeft => Vec3::new(-1.0, 0.0, 1.0),
+                EdgeDirection::YFrontRight => Vec3::new(1.0, 0.0, 1.0),
+                EdgeDirection::YBackLeft => Vec3::new(-1.0, 0.0, -1.0),
+                EdgeDirection::YBackRight => Vec3::new(1.0, 0.0, -1.0),
+                EdgeDirection::ZTopLeft => Vec3::new(-1.0, 1.0, 0.0),
+                EdgeDirection::ZTopRight => Vec3::new(1.0, 1.0, 0.0),
+                EdgeDirection::ZBottomLeft => Vec3::new(-1.0, -1.0, 0.0),
+                EdgeDirection::ZBottomRight => Vec3::new(1.0, -1.0, 0.0),
+            }
+            .normalize();
+
+            // If Y is nearly parallel to view, use Z as up
+            if look_dir.y.abs() > 0.9 {
+                if look_dir.y > 0.0 {
+                    Vec3::NEG_Z
+                } else {
+                    Vec3::Z
+                }
+            } else {
+                Vec3::Y
+            }
+        }
+        CubeElement::Corner(pos) => {
+            // For corners, check if we're looking mostly up or down
+            let look_dir = match pos {
+                CornerPosition::TopFrontLeft => Vec3::new(-1.0, 1.0, 1.0),
+                CornerPosition::TopFrontRight => Vec3::new(1.0, 1.0, 1.0),
+                CornerPosition::TopBackLeft => Vec3::new(-1.0, 1.0, -1.0),
+                CornerPosition::TopBackRight => Vec3::new(1.0, 1.0, -1.0),
+                CornerPosition::BottomFrontLeft => Vec3::new(-1.0, -1.0, 1.0),
+                CornerPosition::BottomFrontRight => Vec3::new(1.0, -1.0, 1.0),
+                CornerPosition::BottomBackLeft => Vec3::new(-1.0, -1.0, -1.0),
+                CornerPosition::BottomBackRight => Vec3::new(1.0, -1.0, -1.0),
+            }
+            .normalize();
+
+            // Corners are at 45°, Y works well as up
+            // But adjust slightly for top/bottom corners
+            if look_dir.y > 0.3 {
+                // Top corners: tilt up slightly towards back
+                Vec3::new(0.0, 0.7, -0.7).normalize()
+            } else if look_dir.y < -0.3 {
+                // Bottom corners: tilt up slightly towards front
+                Vec3::new(0.0, 0.7, 0.7).normalize()
+            } else {
+                Vec3::Y
+            }
+        }
     }
 }
 
 // ============================================================================
 // Camera Animation
 // ============================================================================
+
+/// Spherical linear interpolation for Vec3 directions (for orbital camera movement)
+fn slerp_vec3(start: Vec3, end: Vec3, t: f32) -> Vec3 {
+    let start_norm = start.normalize();
+    let end_norm = end.normalize();
+
+    let dot = start_norm.dot(end_norm).clamp(-1.0, 1.0);
+    let theta = dot.acos();
+
+    // If vectors are nearly parallel, use linear interpolation
+    if theta.abs() < 0.0001 {
+        return start.lerp(end, t);
+    }
+
+    let sin_theta = theta.sin();
+    let a = ((1.0 - t) * theta).sin() / sin_theta;
+    let b = (t * theta).sin() / sin_theta;
+
+    // Interpolate direction and maintain distance
+    let start_len = start.length();
+    let end_len = end.length();
+    let interpolated_len = start_len + (end_len - start_len) * t;
+
+    (start_norm * a + end_norm * b) * interpolated_len
+}
 
 fn animate_camera(
     mut camera_query: Query<&mut Transform, With<MainCamera>>,
@@ -858,24 +946,34 @@ fn animate_camera(
         return;
     };
 
-    // Animation speed (complete in ~0.4 seconds)
-    let speed = 2.5;
+    // Animation speed (complete in ~0.5 seconds for smoother CAD-like feel)
+    let speed = 2.0;
     camera_anim.progress = (camera_anim.progress + speed * time.delta_secs()).min(1.0);
 
-    // Apply ease-out cubic for smooth deceleration: t' = 1 - (1-t)^3
+    // Apply ease-in-out cubic for smooth CAD-like movement
+    // t' = t < 0.5 ? 4t³ : 1 - (-2t + 2)³ / 2
     let t = camera_anim.progress;
-    let eased_t = 1.0 - (1.0 - t).powi(3);
+    let eased_t = if t < 0.5 {
+        4.0 * t * t * t
+    } else {
+        1.0 - (-2.0 * t + 2.0).powi(3) / 2.0
+    };
 
-    // Interpolate position and rotation independently
-    // Position: linear interpolation (lerp) for smooth straight-line movement
-    transform.translation = camera_anim
-        .start_position
-        .lerp(camera_anim.target_position, eased_t);
+    // Spherical interpolation for orbital movement (like rotating around a sphere)
+    transform.translation = slerp_vec3(
+        camera_anim.start_position,
+        camera_anim.target_position,
+        eased_t,
+    );
 
-    // Rotation: spherical interpolation (slerp) for smooth rotation
-    transform.rotation = camera_anim
-        .start_rotation
-        .slerp(camera_anim.target_rotation, eased_t);
+    // Recalculate rotation to always look at center with proper up vector
+    // Interpolate the up vector for smooth transitions
+    let start_up = camera_anim.start_rotation * Vec3::Y;
+    let target_up = camera_anim.target_rotation * Vec3::Y;
+    let current_up = slerp_vec3(start_up, target_up, eased_t).normalize();
+
+    // Make camera look at origin with interpolated up vector
+    transform.look_at(Vec3::ZERO, current_up);
 
     // Check if animation is complete
     if camera_anim.progress >= 1.0 {
