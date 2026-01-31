@@ -312,38 +312,61 @@ fn spawn_face_labels(
     let font: Handle<FontMesh> = asset_server.load("fonts/Roboto-Bold.ttf");
 
     // Label configuration
-    const LABEL_SCALE: f32 = 0.25; // Scale controls the size
-    const LABEL_DEPTH: f32 = 0.08; // Extrusion depth
+    const LABEL_SCALE: f32 = 0.12; // Smaller scale for full words
+    const LABEL_DEPTH: f32 = 0.05; // Extrusion depth
     const FACE_OFFSET: f32 = 0.52; // Slightly outside the cube face
 
-    // Define face labels - ENU only (East, North, Up)
+    // Define face labels - all 6 faces with full names
     // In Bevy: X=right, Y=up, Z=forward
     // ENU mapping: E=+X (red), N=+Z (blue), U=+Y (green)
     let face_labels = [
         // East (+X) - Red axis - on right face
         (
-            "E",
+            "East",
             Vec3::new(FACE_OFFSET, 0.0, 0.0),
             Quat::from_rotation_y(FRAC_PI_2),
             Color::srgb(0.9, 0.2, 0.2),
             FaceDirection::East,
         ),
-        // North (+Z) - Blue axis - on front face
-        // No rotation - text faces -Z by default, readable from +Z
+        // West (-X) - Red axis (dimmer) - on left face
         (
-            "N",
+            "West",
+            Vec3::new(-FACE_OFFSET, 0.0, 0.0),
+            Quat::from_rotation_y(-FRAC_PI_2),
+            Color::srgb(0.6, 0.15, 0.15),
+            FaceDirection::West,
+        ),
+        // North (+Z) - Blue axis - on front face
+        (
+            "North",
             Vec3::new(0.0, 0.0, FACE_OFFSET),
             Quat::IDENTITY,
             Color::srgb(0.2, 0.4, 0.9),
             FaceDirection::North,
         ),
+        // South (-Z) - Blue axis (dimmer) - on back face
+        (
+            "South",
+            Vec3::new(0.0, 0.0, -FACE_OFFSET),
+            Quat::from_rotation_y(std::f32::consts::PI),
+            Color::srgb(0.15, 0.3, 0.6),
+            FaceDirection::South,
+        ),
         // Up (+Y) - Green axis - on top face
         (
-            "U",
+            "Up",
             Vec3::new(0.0, FACE_OFFSET, 0.0),
             Quat::from_rotation_x(-FRAC_PI_2),
             Color::srgb(0.2, 0.8, 0.2),
             FaceDirection::Up,
+        ),
+        // Down (-Y) - Green axis (dimmer) - on bottom face
+        (
+            "Down",
+            Vec3::new(0.0, -FACE_OFFSET, 0.0),
+            Quat::from_rotation_x(FRAC_PI_2),
+            Color::srgb(0.15, 0.5, 0.15),
+            FaceDirection::Down,
         ),
     ];
 
@@ -747,14 +770,14 @@ fn on_click(
 
     // Calculate target rotation based on element
     let mut look_dir = get_look_direction(element);
-    
+
     // For faces: if we clicked on a face that's NOT facing the camera,
     // it means we clicked "through" the transparent cube to the back face.
     // In that case, flip to the opposite face (what the user actually intended).
     if let CubeElement::Face(dir) = element {
         let camera_dir = current_transform.translation.normalize();
         let face_facing_camera = camera_dir.dot(look_dir) > 0.0;
-        
+
         if !face_facing_camera {
             // Clicked through to back face - go to opposite face instead
             look_dir = -look_dir;
@@ -764,7 +787,7 @@ fn on_click(
             );
         }
     }
-    
+
     let up_dir = get_up_direction_for_look(look_dir);
 
     // Calculate target: camera should be positioned in the direction of the clicked element
