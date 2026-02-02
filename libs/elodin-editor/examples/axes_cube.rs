@@ -7,8 +7,7 @@
 //! - Hover over faces, edges, or corners to highlight them in yellow
 //! - Click on any element to rotate the camera to look at the cube from that direction
 
-use bevy::asset::{AssetPlugin, RenderAssetUsages};
-use bevy::mesh::{Indices, PrimitiveTopology};
+use bevy::asset::AssetPlugin;
 use bevy::picking::prelude::*;
 use bevy::prelude::*;
 use bevy_fontmesh::prelude::*;
@@ -317,31 +316,17 @@ pub enum RotationArrow {
 }
 
 /// Rotation increment per click (30 degrees)
-const ROTATION_INCREMENT: f32 = 30.0 * PI / 180.0;
+const ROTATION_INCREMENT: f32 = 15.0 * PI / 180.0;
 
 /// Create a triangle mesh for rotation arrows
 fn create_arrow_mesh() -> Mesh {
-    let mut mesh = Mesh::new(
-        PrimitiveTopology::TriangleList,
-        RenderAssetUsages::default(),
-    );
-
-    // Triangle pointing up (+Y) - smaller size
-    mesh.insert_attribute(
-        Mesh::ATTRIBUTE_POSITION,
-        vec![
-            [0.0, 0.04, 0.0],     // tip
-            [-0.025, -0.02, 0.0], // bottom left
-            [0.025, -0.02, 0.0],  // bottom right
-        ],
-    );
-    mesh.insert_attribute(
-        Mesh::ATTRIBUTE_NORMAL,
-        vec![[0.0, 0.0, 1.0], [0.0, 0.0, 1.0], [0.0, 0.0, 1.0]],
-    );
-    mesh.insert_indices(Indices::U32(vec![0, 1, 2]));
-
-    mesh
+    // Small 3D cone for a subtle arrow effect (pointing up +Y)
+    Cone {
+        radius: 0.015,
+        height: 0.04,
+    }
+    .mesh()
+    .build()
 }
 
 /// Tracks the currently hovered element
