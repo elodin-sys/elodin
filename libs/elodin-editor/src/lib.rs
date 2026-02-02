@@ -21,6 +21,8 @@ use bevy_editor_cam::{SyncCameraPosition, controller::component::EditorCam};
 #[cfg(feature = "inspector")]
 use bevy_egui::EguiContext;
 use bevy_egui::{EguiContextSettings, EguiGlobalSettings, EguiPlugin};
+#[cfg(feature = "inspector")]
+use bevy_inspector_egui::inspector_egui_impls::InspectorEguiImpl;
 use bevy_picking::PickingSettings;
 use bevy_render::alpha::AlphaMode;
 use big_space::{FloatingOrigin, FloatingOriginSettings, GridCell};
@@ -47,6 +49,7 @@ use ui::{
     utils::FriendlyEpoch,
 };
 
+pub mod iter;
 pub mod object_3d;
 mod offset_parse;
 pub mod plugins;

@@ -2,15 +2,19 @@ use bevy::ecs::hierarchy::ChildOf;
 use bevy::log::warn_once;
 use bevy::prelude::Mesh;
 use bevy::prelude::*;
+use bevy::scene::{SceneInstance, SceneRoot, SceneSpawner};
 use bevy_render::alpha::AlphaMode;
 use big_space::GridCell;
+use bitvec::prelude::*;
 use eql::Expr;
 use impeller2_bevy::EntityMap;
 use impeller2_wkt::{ComponentValue, Object3D};
 use nox::Array;
 use smallvec::smallvec;
 
+use crate::iter::JoinDisplayExt;
 use crate::{BevyExt, EqlContext, MainCamera, plugins::navigation_gizmo::NavGizmoCamera};
+use std::collections::HashSet;
 use std::fmt;
 
 type ImportedCameraFilter = (Added<Camera>, Without<NavGizmoCamera>, Without<MainCamera>);
@@ -23,7 +27,7 @@ pub struct Object3DState {
     pub compiled_expr: Option<CompiledExpr>,
     pub scale_expr: Option<CompiledExpr>,
     pub scale_error: Option<String>,
-    pub joint_animations: Vec<(String, CompiledExpr)>,
+    pub joint_animations: Vec<(String, String)>, // (joint_name, eql_expr) - compiled in attach_joint_animations
     pub data: Object3D,
 }
 
@@ -41,6 +45,7 @@ pub struct EllipsoidVisual {
 pub struct JointAnimationComponent {
     // pub eql_expr: String,
     pub compiled_expr: CompiledExpr,
+    pub original_transform: Transform,
 }
 
 #[derive(Default)]
@@ -558,37 +563,11 @@ impl std::error::Error for ScaleEvalError {}
 
 const ELLIPSOID_OVERSIZED_THRESHOLD: f32 = 10_000.0;
 
-/// Recursively searches for an entity with the given name in the scene hierarchy
-fn find_entity_by_name(
-    entity: Entity,
-    target_name: &str,
-    children: &Query<&Children>,
-    names: &Query<&Name>,
-) -> Option<Entity> {
-    // Check if this entity matches
-    if let Ok(name) = names.get(entity) {
-        if name.as_str() == target_name {
-            return Some(entity);
-        }
-    }
-
-    // Recursively search children
-    if let Ok(children_list) = children.get(entity) {
-        for child in children_list.iter() {
-            if let Some(found) = find_entity_by_name(child, target_name, children, names) {
-                return Some(found);
-            }
-        }
-    }
-
-    None
-}
-
 // TODO: Can do as iterator.
 fn find_entities<T>(
     entity: Entity,
     children: &Query<&Children>,
-    predicate: impl Fn(Entity) -> Option<T>,
+    mut predicate: impl FnMut(Entity) -> Option<T>,
 ) -> Vec<(Entity, T)> {
     let mut buffer = vec![];
     for id in children.iter_descendants(entity) {
@@ -597,6 +576,38 @@ fn find_entities<T>(
         }
     }
     buffer
+}
+
+/// Conditional system that checks if scenes are ready
+/// Returns true when at least one scene is ready, false otherwise
+pub fn on_scene_ready(
+    mut scene_queue: Local<HashSet<Entity>>,
+    added_scenes: Query<Entity, Added<SceneRoot>>,
+    scene_instances: Query<&SceneInstance>,
+    scene_spawner: Res<SceneSpawner>,
+) -> bool {
+    // Add newly added scenes to the queue
+    for entity in added_scenes.iter() {
+        scene_queue.insert(entity);
+    }
+
+    // Check if any queued scenes are ready
+    let mut any_ready = false;
+    scene_queue.retain(|&entity| {
+        if let Ok(instance) = scene_instances.get(entity) {
+            if scene_spawner.instance_is_ready(**instance) {
+                any_ready = true;
+                false // Remove from queue since it's ready
+            } else {
+                true // Keep in queue, not ready yet
+            }
+        } else {
+            // SceneInstance not found yet, keep in queue
+            true
+        }
+    });
+
+    any_ready
 }
 
 /// System that updates 3D object entities based on their EQL expressions
@@ -717,83 +728,116 @@ pub fn attach_joint_animations(
     objects_query: Query<(Entity, &Object3DState), Changed<Object3DState>>,
     children: Query<&Children>,
     names: Query<&Name>,
+    transforms: Query<&Transform>,
     existing_components: Query<Entity, With<JointAnimationComponent>>,
     mut commands: Commands,
+    ctx: Res<EqlContext>,
 ) {
     for (object_entity, object_3d) in objects_query.iter() {
         // Only process GLB meshes with animations
-        if !matches!(
-            object_3d.data.mesh,
-            impeller2_wkt::Object3DMesh::Glb { .. }
-        ) {
+        if !matches!(object_3d.data.mesh, impeller2_wkt::Object3DMesh::Glb { .. }) {
             continue;
         }
-        
+
         if object_3d.joint_animations.is_empty() {
             continue;
         }
+        const MAX_ANIMATIONS: usize = 32 * 4;
+        let mut found_animations_store = bitarr![u32, Lsb0; 0; MAX_ANIMATIONS];
+        let found_animations = found_animations_store.as_mut_bitslice();
 
+        if object_3d.joint_animations.len() > MAX_ANIMATIONS {
+            warn!(
+                "The object_3d with path '{:?}' has {} animations; cannot account for missing animations past {}.",
+                object_3d.data.mesh,
+                object_3d.joint_animations.len(),
+                MAX_ANIMATIONS
+            );
+        }
+
+        // Find entities that match joint names and compile their expressions
         let entity_compiled_expr = find_entities(object_entity, &children, |id| {
-            names.get(id).ok().and_then(|name| object_3d.joint_animations.iter().find_map(|(n, c)| (name.as_str() == n).then_some(c))) 
-            });
-        for (joint_entity, compiled_expr) in entity_compiled_expr {
+            names.get(id).ok().and_then(|name| {
+                object_3d.joint_animations.iter().enumerate().find_map(
+                    |(i, (joint_name, eql_expr))| {
+                        if name.as_str() == joint_name {
+                            found_animations.set(i, true);
+                            // Compile the EQL expression here
+                            ctx.0
+                                .parse_str(eql_expr)
+                                .map(|expr| compile_eql_expr(expr))
+                                .map_err(|err| {
+                                    warn!(
+                                        joint = %joint_name,
+                                        eql = %eql_expr,
+                                        error = %err,
+                                        "Failed to compile EQL expression for joint animation"
+                                    );
+                                    err
+                                })
+                                .ok()
+                        } else {
+                            None
+                        }
+                    },
+                )
+            })
+        });
+        info!(
+            "Have {} joint animation; found {} entities.",
+            object_3d.joint_animations.len(),
+            entity_compiled_expr.len()
+        );
 
+        if found_animations[..object_3d.joint_animations.len()].not_all() {
+            let items = found_animations[..object_3d.joint_animations.len()]
+                .iter_zeros()
+                .map(|i| &object_3d.joint_animations[i].0);
+            warn!(
+                "The object_3d {} did not have any animation joints named: {}",
+                &object_3d.data.mesh,
+                items.join_display(", ")
+            );
+        }
+
+        for (joint_entity, compiled_expr) in entity_compiled_expr {
             if existing_components.contains(joint_entity) {
                 continue;
             }
-                // Attach the component - compiled_expr will be filled in lazily
-                commands.entity(joint_entity).insert(JointAnimationComponent {
-                    compiled_expr: compiled_expr.clone(),
+
+            // Get the original transform to preserve the bone's initial rotation
+            let original_transform = transforms
+                .get(joint_entity)
+                .cloned()
+                .unwrap_or(Transform::IDENTITY);
+
+            // Attach the component with the compiled expression and original transform
+            commands
+                .entity(joint_entity)
+                .insert(JointAnimationComponent {
+                    compiled_expr,
+                    original_transform,
                 });
-            // } else {
-            //     warn!(
-            //         object_entity = ?object_entity,
-            //         joint = %joint_name,
-            //         "Joint not found in scene hierarchy when attaching animation component. Make sure the joint name matches exactly as it appears in the GLB file."
-            //     );
-            // }
         }
     }
 }
 
 /// System that updates joint animations based on EQL expressions
 /// This queries for entities with both Transform and JointAnimationComponent
-/// The compiled_expr is filled in lazily on first access
 pub fn update_joint_animations(
-    mut joint_query: Query<(&mut Transform, &mut JointAnimationComponent)>,
+    mut joint_query: Query<(&mut Transform, &JointAnimationComponent)>,
     entity_map: Res<EntityMap>,
     component_value_maps: Query<&'static ComponentValue>,
-    ctx: Res<EqlContext>,
 ) {
-    for (mut joint_transform, mut joint_anim) in joint_query.iter_mut() {
-        // Compile the expression lazily on first access
-        if joint_anim.compiled_expr.is_none() {
-            match ctx.0.parse_str(&joint_anim.eql_expr) {
-                Ok(expr) => {
-                    joint_anim.compiled_expr = Some(compile_eql_expr(expr));
-                }
-                Err(err) => {
-                    warn!(
-                        eql = %joint_anim.eql_expr,
-                        error = %err,
-                        "Failed to compile EQL expression for joint animation"
-                    );
-                    continue;
-                }
-            }
-        }
-
-        // Now we can safely use the compiled expression
-        let Some(compiled_expr) = &joint_anim.compiled_expr else {
-            continue;
-        };
-
+    for (mut joint_transform, joint_anim) in joint_query.iter_mut() {
         // Evaluate the EQL expression
-        let component_value = match compiled_expr.execute(&entity_map, &component_value_maps) {
+        let component_value = match joint_anim
+            .compiled_expr
+            .execute(&entity_map, &component_value_maps)
+        {
             Ok(value) => value,
             Err(err) => {
                 warn!(
-                    eql = %joint_anim.eql_expr,
                     error = %err,
                     "Failed to evaluate EQL expression for joint animation"
                 );
@@ -806,7 +850,6 @@ pub fn update_joint_animations(
             Ok(result) => result,
             Err(err) => {
                 warn!(
-                    eql = %joint_anim.eql_expr,
                     error = %err,
                     "Failed to convert EQL result to axis-angle rotation for joint animation"
                 );
@@ -814,8 +857,15 @@ pub fn update_joint_animations(
             }
         };
 
-        // Update the joint's transform rotation
-        joint_transform.rotation = Quat::from_axis_angle(axis, angle);
+        // Create the animation rotation
+        let animation_rotation = Quat::from_axis_angle(axis, angle);
+
+        // Multiply by the original transform's rotation to preserve the bone's initial orientation
+        joint_transform.rotation = joint_anim.original_transform.rotation * animation_rotation;
+
+        // Preserve the original translation and scale
+        joint_transform.translation = joint_anim.original_transform.translation;
+        joint_transform.scale = joint_anim.original_transform.scale;
     }
 }
 
@@ -941,8 +991,12 @@ pub fn create_object_3d_entity(
         _ => (None, None),
     };
 
+    // Store joint animation expressions as strings. They will be compiled in
+    // attach_joint_animations.
     let joint_animations = match &data.mesh {
-        impeller2_wkt::Object3DMesh::Glb { animations, path, .. } => {
+        impeller2_wkt::Object3DMesh::Glb {
+            animations, path, ..
+        } => {
             info!(
                 count = animations.len(),
                 path = %path,
@@ -951,47 +1005,12 @@ pub fn create_object_3d_entity(
                 path
             );
             if animations.is_empty() {
-                warn!(
-                    path = %path,
-                    "GLB mesh '{}' has no animations - check if animations were parsed from KDL",
-                    path
-                );
+                debug!("GLB mesh '{}' has no animations.", path);
             }
-            let compiled: Vec<_> = animations
+            animations
                 .iter()
-                .filter_map(|anim| {
-                    info!(
-                        joint = %anim.joint_name,
-                        eql = %anim.eql_expr,
-                        "Compiling joint animation"
-                    );
-                    ctx.parse_str(&anim.eql_expr)
-                        .map(|expr| {
-                            (
-                                anim.joint_name.clone(),
-                                compile_eql_expr(expr),
-                            )
-                        })
-                        .map_err(|err| {
-                            warn!(
-                                joint = %anim.joint_name,
-                                eql = %anim.eql_expr,
-                                error = %err,
-                                "Failed to compile joint animation EQL expression"
-                            );
-                            err
-                        })
-                        .ok()
-                })
-                .collect();
-            info!(
-                compiled_count = compiled.len(),
-                total_count = animations.len(),
-                "Compiled {} out of {} joint animations",
-                compiled.len(),
-                animations.len()
-            );
-            compiled
+                .map(|anim| (anim.joint_name.clone(), anim.eql_expr.clone()))
+                .collect()
         }
         _ => Vec::new(),
     };
@@ -1146,7 +1165,7 @@ impl Plugin for Object3DPlugin {
             Update,
             (
                 update_object_3d_system,
-                attach_joint_animations,
+                attach_joint_animations.run_if(on_scene_ready),
                 update_joint_animations,
                 warn_imported_cameras,
             ),

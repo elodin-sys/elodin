@@ -563,7 +563,7 @@ fn parse_object_3d(node: &KdlNode, src: &str) -> Result<Object3D, KdlSchematicEr
         let children_nodes = children.nodes();
         let mesh_node = children_nodes.first();
         let mut parsed_mesh = parse_object_3d_mesh(mesh_node, src)?;
-        
+
         // Collect animate nodes from object_3d children (they're siblings of glb, not children)
         let mut animations = Vec::new();
         for child in children_nodes {
@@ -597,10 +597,17 @@ fn parse_object_3d(node: &KdlNode, src: &str) -> Result<Object3D, KdlSchematicEr
                 });
             }
         }
-        
+
         // If we found animations and the mesh is a GLB, add them to the mesh
         if !animations.is_empty() {
-            if let Object3DMesh::Glb { path, scale, translate, rotate, .. } = parsed_mesh {
+            if let Object3DMesh::Glb {
+                path,
+                scale,
+                translate,
+                rotate,
+                ..
+            } = parsed_mesh
+            {
                 parsed_mesh = Object3DMesh::Glb {
                     path,
                     scale,
@@ -610,7 +617,7 @@ fn parse_object_3d(node: &KdlNode, src: &str) -> Result<Object3D, KdlSchematicEr
                 };
             }
         }
-        
+
         parsed_mesh
     } else {
         return Err(KdlSchematicError::MissingProperty {
@@ -2107,16 +2114,16 @@ object_3d "rocket.world_pos" {
                     assert_eq!(*translate, (0.0, 0.0, 0.0));
                     assert_eq!(*rotate, (0.0, 0.0, 0.0));
                     assert_eq!(animations.len(), 4);
-                    
+
                     assert_eq!(animations[0].joint_name, "Root.Fin_0");
                     assert_eq!(animations[0].eql_expr, "(0, 3.14/2, 0)");
-                    
+
                     assert_eq!(animations[1].joint_name, "Root.Fin_1");
                     assert_eq!(animations[1].eql_expr, "(0, 3.14/2, 0)");
-                    
+
                     assert_eq!(animations[2].joint_name, "Root.Fin_2");
                     assert_eq!(animations[2].eql_expr, "rocket.fin_deflect");
-                    
+
                     assert_eq!(animations[3].joint_name, "Root.Fin_3");
                     assert_eq!(animations[3].eql_expr, "(0, 1, 0, 0.5)");
                 }

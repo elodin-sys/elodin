@@ -681,6 +681,30 @@ impl Object3DMesh {
             animations: default_glb_animations(),
         }
     }
+
+    pub fn path(&self) -> Option<&str> {
+        match self {
+            Self::Glb { path, .. } => Some(path),
+            _ => None,
+        }
+    }
+}
+
+impl fmt::Display for Object3DMesh {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Glb { path, .. } => write!(f, "GLB '{}'", path),
+            Self::Mesh { mesh, .. } => match mesh {
+                Mesh::Sphere { radius } => write!(f, "Sphere(radius={})", radius),
+                Mesh::Box { x, y, z } => write!(f, "Box({}x{}x{})", x, y, z),
+                Mesh::Cylinder { radius, height } => {
+                    write!(f, "Cylinder(radius={}, height={})", radius, height)
+                }
+                Mesh::Plane { width, depth } => write!(f, "Plane({}x{})", width, depth),
+            },
+            Self::Ellipsoid { .. } => write!(f, "Ellipsoid"),
+        }
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
