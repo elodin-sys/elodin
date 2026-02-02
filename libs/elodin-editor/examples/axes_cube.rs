@@ -312,10 +312,12 @@ enum CornerPosition {
 pub enum RotationArrow {
     Left,
     Right,
+    Up,
+    Down,
 }
 
-/// Rotation increment per click (15 degrees)
-const ROTATION_INCREMENT: f32 = 15.0 * PI / 180.0;
+/// Rotation increment per click (30 degrees)
+const ROTATION_INCREMENT: f32 = 30.0 * PI / 180.0;
 
 /// Create a triangle mesh for rotation arrows
 fn create_arrow_mesh() -> Mesh {
@@ -324,13 +326,13 @@ fn create_arrow_mesh() -> Mesh {
         RenderAssetUsages::default(),
     );
 
-    // Triangle pointing up (+Y)
+    // Triangle pointing up (+Y) - smaller size
     mesh.insert_attribute(
         Mesh::ATTRIBUTE_POSITION,
         vec![
-            [0.0, 0.07, 0.0],    // tip
-            [-0.04, -0.03, 0.0], // bottom left
-            [0.04, -0.03, 0.0],  // bottom right
+            [0.0, 0.04, 0.0],    // tip
+            [-0.025, -0.02, 0.0], // bottom left
+            [0.025, -0.02, 0.0],  // bottom right
         ],
     );
     mesh.insert_attribute(
@@ -638,29 +640,44 @@ fn spawn_rotation_arrows_on_camera(
     // Use triangle arrow mesh
     let arrow_mesh = meshes.add(create_arrow_mesh());
 
-    // Semi-transparent white
-    let arrow_color = Color::srgba(1.0, 1.0, 1.0, 0.6);
+    // Semi-transparent white (matching cube transparency)
+    let arrow_color = Color::srgba(1.0, 1.0, 1.0, 0.4);
 
     // Position in camera local space:
     // X = left/right on screen
     // Y = up/down on screen  
     // Z = depth (negative = in front of camera)
-    let screen_distance = 0.6; // Left/right distance
-    let depth = -1.5; // In front of camera
+    // Closer to cube but still avoiding overlap
+    let horizontal_distance = 0.5; // Left/right distance from center
+    let vertical_distance = 0.4; // Up/down distance from center
+    let depth = -1.2; // In front of camera, closer
 
-    // Arrow mesh points up (+Y), rotate to point left/right
-    // Left arrow: rotate +90° around Z to point left (-X direction)
-    // Right arrow: rotate -90° around Z to point right (+X direction)
+    // Arrow mesh points up (+Y) by default
+    // Rotations to orient arrows in their pointing direction:
+    // - Left: +90° around Z (points -X)
+    // - Right: -90° around Z (points +X)
+    // - Up: no rotation (already points +Y)
+    // - Down: 180° around Z (points -Y)
     let arrows = [
         (
             RotationArrow::Left,
-            Vec3::new(-screen_distance, 0.0, depth),
+            Vec3::new(-horizontal_distance, 0.0, depth),
             Quat::from_rotation_z(FRAC_PI_2), // Points left
         ),
         (
             RotationArrow::Right,
-            Vec3::new(screen_distance, 0.0, depth),
+            Vec3::new(horizontal_distance, 0.0, depth),
             Quat::from_rotation_z(-FRAC_PI_2), // Points right
+        ),
+        (
+            RotationArrow::Up,
+            Vec3::new(0.0, vertical_distance, depth),
+            Quat::IDENTITY, // Already points up
+        ),
+        (
+            RotationArrow::Down,
+            Vec3::new(0.0, -vertical_distance, depth),
+            Quat::from_rotation_z(PI), // Points down
         ),
     ];
 
@@ -685,7 +702,7 @@ fn spawn_rotation_arrows_on_camera(
             .insert(ChildOf(camera_entity));
     }
 
-    println!("Spawned rotation arrows on camera (fixed on screen)");
+    println!("Spawned 4 rotation arrows on camera (fixed on screen)");
 }
 
 /// Set up cube elements after the GLB is loaded
@@ -1299,16 +1316,24 @@ fn on_arrow_click(
         return;
     };
 
-    // Yaw rotation around world Y axis
-    let sign = match arrow {
-        RotationArrow::Left => 1.0,
-        RotationArrow::Right => -1.0,
+    // Determine rotation based on arrow direction
+    let rotation = match arrow {
+        // Left/Right: Yaw rotation around world Y axis
+        RotationArrow::Left => Quat::from_rotation_y(ROTATION_INCREMENT),
+        RotationArrow::Right => Quat::from_rotation_y(-ROTATION_INCREMENT),
+        // Up/Down: Pitch rotation around camera's local X axis
+        RotationArrow::Up => {
+            let right = transform.right();
+            Quat::from_axis_angle(*right, ROTATION_INCREMENT)
+        }
+        RotationArrow::Down => {
+            let right = transform.right();
+            Quat::from_axis_angle(*right, -ROTATION_INCREMENT)
+        }
     };
-
-    let rotation = Quat::from_rotation_y(sign * ROTATION_INCREMENT);
 
     // Rotate around the origin (where the cube is)
     transform.rotate_around(Vec3::ZERO, rotation);
 
-    println!("Arrow click: {:?}, rotating {}°", arrow, sign * 15.0);
+    println!("Arrow click: {:?}, rotating 30°", arrow);
 }
