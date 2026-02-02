@@ -259,7 +259,7 @@ enum CubeElement {
 /// Face directions - axis-agnostic, based on Bevy coordinates
 /// In Bevy: X=right, Y=up, Z=forward
 #[derive(Clone, Copy, Debug)]
-enum FaceDirection {
+pub enum FaceDirection {
     East,  // +X (Right)
     West,  // -X (Left)
     North, // +Z (Front)
@@ -511,6 +511,7 @@ fn spawn_axes(
 }
 
 /// Spawn 3D text labels on cube faces using bevy_fontmesh
+#[allow(clippy::needless_update)]
 fn spawn_face_labels(
     commands: &mut Commands,
     asset_server: &Res<AssetServer>,
@@ -577,6 +578,11 @@ fn get_element_color(element: &CubeElement) -> Color {
 
 /// Set up cube elements after the GLB is loaded
 /// Also clones materials so each element can be highlighted independently
+#[allow(
+    clippy::too_many_arguments,
+    clippy::type_complexity,
+    clippy::collapsible_if
+)]
 fn setup_cube_elements(
     mut commands: Commands,
     query: Query<(Entity, &Name), (With<Name>, Without<CubeElementSetup>)>,
@@ -637,7 +643,7 @@ fn setup_cube_elements(
             if let Ok(children) = children_query.get(entity) {
                 for child in children.iter() {
                     if let Ok(mat_handle) = material_query.get(child) {
-                        if let Some(_original_mat) = materials.get(&mat_handle.0) {
+                        if materials.get(&mat_handle.0).is_some() {
                             // Store the custom color as "original"
                             original_materials.colors.insert(child, element_color);
 
@@ -745,6 +751,7 @@ fn find_cube_element_ancestor(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn on_hover_start(
     trigger: On<Pointer<Over>>,
     mut commands: Commands,
@@ -796,6 +803,7 @@ fn on_hover_start(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn on_hover_end(
     trigger: On<Pointer<Out>>,
     cube_elements: Query<&CubeElement>,
@@ -827,6 +835,7 @@ fn on_hover_end(
     hovered.entity = None;
 }
 
+#[allow(clippy::collapsible_if)]
 fn apply_highlight(
     entity: Entity,
     children_query: &Query<&Children>,
@@ -839,9 +848,10 @@ fn apply_highlight(
     if let Ok(mat_handle) = material_query.get(entity) {
         if let Some(mat) = materials.get_mut(&mat_handle.0) {
             // Store original color if not already stored
-            if !original_materials.colors.contains_key(&entity) {
-                original_materials.colors.insert(entity, mat.base_color);
-            }
+            original_materials
+                .colors
+                .entry(entity)
+                .or_insert(mat.base_color);
             mat.base_color = HIGHLIGHT_COLOR;
             mat.emissive = LinearRgba::new(0.5, 0.45, 0.1, 1.0);
         }
@@ -853,9 +863,10 @@ fn apply_highlight(
             if let Ok(mat_handle) = material_query.get(child) {
                 if let Some(mat) = materials.get_mut(&mat_handle.0) {
                     // Store original color if not already stored
-                    if !original_materials.colors.contains_key(&child) {
-                        original_materials.colors.insert(child, mat.base_color);
-                    }
+                    original_materials
+                        .colors
+                        .entry(child)
+                        .or_insert(mat.base_color);
                     mat.base_color = HIGHLIGHT_COLOR;
                     mat.emissive = LinearRgba::new(0.5, 0.45, 0.1, 1.0);
                 }
@@ -864,6 +875,7 @@ fn apply_highlight(
     }
 }
 
+#[allow(clippy::collapsible_if)]
 fn reset_highlight(
     entity: Entity,
     children_query: &Query<&Children>,
@@ -1027,78 +1039,6 @@ fn get_up_direction_for_look(look_dir: Vec3) -> Vec3 {
     } else {
         // For horizontal views, Y is always up
         Vec3::Y
-    }
-}
-
-/// Get the up direction for a camera view, ensuring consistent orientation like OnShape
-fn get_up_direction(element: &CubeElement) -> Vec3 {
-    match element {
-        CubeElement::Face(dir) => match dir {
-            // Looking from above (+Y), "up" is towards -Z (back of scene)
-            FaceDirection::Up => Vec3::NEG_Z,
-            // Looking from below (-Y), "up" is towards +Z (front of scene)
-            FaceDirection::Down => Vec3::Z,
-            // For horizontal faces (E, W, N, S), Y is always up
-            FaceDirection::East
-            | FaceDirection::West
-            | FaceDirection::North
-            | FaceDirection::South => Vec3::Y,
-        },
-        CubeElement::Edge(dir) => {
-            // For edges, use Y as up unless it would be parallel to view direction
-            let look_dir = match dir {
-                EdgeDirection::XTopFront => Vec3::new(0.0, 1.0, 1.0),
-                EdgeDirection::XTopBack => Vec3::new(0.0, 1.0, -1.0),
-                EdgeDirection::XBottomFront => Vec3::new(0.0, -1.0, 1.0),
-                EdgeDirection::XBottomBack => Vec3::new(0.0, -1.0, -1.0),
-                EdgeDirection::YFrontLeft => Vec3::new(-1.0, 0.0, 1.0),
-                EdgeDirection::YFrontRight => Vec3::new(1.0, 0.0, 1.0),
-                EdgeDirection::YBackLeft => Vec3::new(-1.0, 0.0, -1.0),
-                EdgeDirection::YBackRight => Vec3::new(1.0, 0.0, -1.0),
-                EdgeDirection::ZTopLeft => Vec3::new(-1.0, 1.0, 0.0),
-                EdgeDirection::ZTopRight => Vec3::new(1.0, 1.0, 0.0),
-                EdgeDirection::ZBottomLeft => Vec3::new(-1.0, -1.0, 0.0),
-                EdgeDirection::ZBottomRight => Vec3::new(1.0, -1.0, 0.0),
-            }
-            .normalize();
-
-            // If Y is nearly parallel to view, use Z as up
-            if look_dir.y.abs() > 0.9 {
-                if look_dir.y > 0.0 {
-                    Vec3::NEG_Z
-                } else {
-                    Vec3::Z
-                }
-            } else {
-                Vec3::Y
-            }
-        }
-        CubeElement::Corner(pos) => {
-            // For corners, check if we're looking mostly up or down
-            let look_dir = match pos {
-                CornerPosition::TopFrontLeft => Vec3::new(-1.0, 1.0, 1.0),
-                CornerPosition::TopFrontRight => Vec3::new(1.0, 1.0, 1.0),
-                CornerPosition::TopBackLeft => Vec3::new(-1.0, 1.0, -1.0),
-                CornerPosition::TopBackRight => Vec3::new(1.0, 1.0, -1.0),
-                CornerPosition::BottomFrontLeft => Vec3::new(-1.0, -1.0, 1.0),
-                CornerPosition::BottomFrontRight => Vec3::new(1.0, -1.0, 1.0),
-                CornerPosition::BottomBackLeft => Vec3::new(-1.0, -1.0, -1.0),
-                CornerPosition::BottomBackRight => Vec3::new(1.0, -1.0, -1.0),
-            }
-            .normalize();
-
-            // Corners are at 45°, Y works well as up
-            // But adjust slightly for top/bottom corners
-            if look_dir.y > 0.3 {
-                // Top corners: tilt up slightly towards back
-                Vec3::new(0.0, 0.7, -0.7).normalize()
-            } else if look_dir.y < -0.3 {
-                // Bottom corners: tilt up slightly towards front
-                Vec3::new(0.0, 0.7, 0.7).normalize()
-            } else {
-                Vec3::Y
-            }
-        }
     }
 }
 
