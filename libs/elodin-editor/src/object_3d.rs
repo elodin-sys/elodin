@@ -765,7 +765,7 @@ pub fn attach_joint_animations(
                             // Compile the EQL expression here
                             ctx.0
                                 .parse_str(eql_expr)
-                                .map(|expr| compile_eql_expr(expr))
+                                .map(compile_eql_expr)
                                 .map_err(|err| {
                                     warn!(
                                         joint = %joint_name,
