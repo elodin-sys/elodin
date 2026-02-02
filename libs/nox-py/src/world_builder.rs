@@ -11,7 +11,6 @@ use pyo3::{
     IntoPyObjectExt, Py, PyAny,
     types::{PyDict, PyList},
 };
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::{
     collections::{HashMap, HashSet},
     iter,
@@ -34,14 +33,11 @@ fn normalize_log_level(level: &str) -> Result<&'static str, Error> {
     }
 }
 
-fn install_signal_handlers(terminate_flag: &Arc<AtomicBool>) {
-    use signal_hook::consts::signal::*;
-    use signal_hook::flag;
-
-    // Ignore errors for brevity; in real code, handle Result
-    flag::register(SIGINT, terminate_flag.clone()).expect("register SIGINT failed");
-    flag::register(SIGTERM, terminate_flag.clone()).expect("register SIGTERM failed");
-    // Add others if you want: SIGHUP, SIGQUIT, etc.
+fn install_signal_handlers(cancel_token: CancelToken) {
+    ctrlc::set_handler(move || {
+        cancel_token.cancel();
+    })
+    .expect("install ctrl-c handler");
 }
 
 #[derive(Parser, Debug)]
@@ -269,8 +265,8 @@ impl WorldBuilder {
                 no_s10,
                 liveness_port,
             } => {
-                let terminate_flag = Arc::new(AtomicBool::new(false));
-                install_signal_handlers(&terminate_flag);
+                let cancel_token = CancelToken::new();
+                install_signal_handlers(cancel_token.clone());
                 let exec = self.build_uncompiled(
                     py,
                     sys,
@@ -322,6 +318,7 @@ impl WorldBuilder {
                     Some(p) => PathBuf::from(p),
                     None => tempfile::tempdir()?.keep().join("db"),
                 };
+                let cancel_token_for_loop = cancel_token.clone();
                 // Clone cancel tokens for each closure that needs it
                 let pre_step_cancel_token = recipe_cancel_token.clone();
                 let post_step_cancel_token = recipe_cancel_token.clone();
@@ -334,14 +331,18 @@ impl WorldBuilder {
                         )
                         .run_with_cancellation(
                             move || {
-                                if let Some(ref func) = is_canceled {
+                                let cancelled = if let Some(ref func) = is_canceled {
                                     Python::with_gil(|py| {
                                         func.call0(py).and_then(|result| result.extract::<bool>(py))
                                     })
-                                    .unwrap_or_else(|_| terminate_flag.load(Ordering::Relaxed))
+                                    .unwrap_or(false)
                                 } else {
-                                    terminate_flag.load(Ordering::Relaxed)
+                                    false
+                                };
+                                if cancelled {
+                                    cancel_token_for_loop.cancel();
                                 }
+                                cancelled
                             },
                             move |tick_count,
                                   db: &Arc<elodin_db::DB>,
@@ -413,6 +414,7 @@ impl WorldBuilder {
                             },
                             interactive,
                             start_timestamp.map(Timestamp),
+                            cancel_token,
                         )
                     });
 

@@ -2483,7 +2483,7 @@ impl PlayingCell {
         self.wait_cell.wake_all();
     }
 
-    fn is_playing(&self) -> bool {
+    pub fn is_playing(&self) -> bool {
         self.is_playing.load(atomic::Ordering::Relaxed)
     }
 
