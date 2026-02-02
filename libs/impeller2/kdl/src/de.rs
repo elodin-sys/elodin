@@ -599,23 +599,22 @@ fn parse_object_3d(node: &KdlNode, src: &str) -> Result<Object3D, KdlSchematicEr
         }
 
         // If we found animations and the mesh is a GLB, add them to the mesh
-        if !animations.is_empty() {
-            if let Object3DMesh::Glb {
+        if !animations.is_empty()
+            && let Object3DMesh::Glb {
                 path,
                 scale,
                 translate,
                 rotate,
                 ..
             } = parsed_mesh
-            {
-                parsed_mesh = Object3DMesh::Glb {
-                    path,
-                    scale,
-                    translate,
-                    rotate,
-                    animations,
-                };
-            }
+        {
+            parsed_mesh = Object3DMesh::Glb {
+                path,
+                scale,
+                translate,
+                rotate,
+                animations,
+            };
         }
 
         parsed_mesh
