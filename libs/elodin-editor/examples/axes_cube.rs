@@ -330,7 +330,7 @@ fn create_arrow_mesh() -> Mesh {
     mesh.insert_attribute(
         Mesh::ATTRIBUTE_POSITION,
         vec![
-            [0.0, 0.04, 0.0],    // tip
+            [0.0, 0.04, 0.0],     // tip
             [-0.025, -0.02, 0.0], // bottom left
             [0.025, -0.02, 0.0],  // bottom right
         ],
@@ -407,7 +407,7 @@ fn setup(
     let scene = asset_server.load("axes-cube.glb#Scene0");
 
     // Spawn the cube with scale from config
-    let cube_entity = commands
+    let _cube_entity = commands
         .spawn((
             SceneRoot(scene),
             Transform::from_xyz(0.0, 0.0, 0.0).with_scale(Vec3::splat(coord_config.scale)),
@@ -645,7 +645,7 @@ fn spawn_rotation_arrows_on_camera(
 
     // Position in camera local space:
     // X = left/right on screen
-    // Y = up/down on screen  
+    // Y = up/down on screen
     // Z = depth (negative = in front of camera)
     // Closer to cube but still avoiding overlap
     let horizontal_distance = 0.5; // Left/right distance from center
