@@ -7,11 +7,12 @@
 //! - Hover over faces, edges, or corners to highlight them in yellow
 //! - Click on any element to rotate the camera to look at the cube from that direction
 
-use bevy::asset::AssetPlugin;
+use bevy::asset::{AssetPlugin, RenderAssetUsages};
+use bevy::mesh::{Indices, PrimitiveTopology};
 use bevy::picking::prelude::*;
 use bevy::prelude::*;
 use bevy_fontmesh::prelude::*;
-use std::f32::consts::FRAC_PI_2;
+use std::f32::consts::{FRAC_PI_2, PI};
 use std::path::PathBuf;
 
 fn main() {
@@ -54,6 +55,9 @@ fn main() {
         .add_observer(on_hover_start)
         .add_observer(on_hover_end)
         .add_observer(on_click)
+        .add_observer(on_arrow_hover_start)
+        .add_observer(on_arrow_hover_end)
+        .add_observer(on_arrow_click)
         .run();
 }
 
@@ -299,6 +303,45 @@ enum CornerPosition {
     BottomBackRight,
 }
 
+// ============================================================================
+// Rotation Arrows
+// ============================================================================
+
+/// Direction for rotation arrows
+#[derive(Clone, Copy, Debug, Component)]
+pub enum RotationArrow {
+    Left,
+    Right,
+}
+
+/// Rotation increment per click (15 degrees)
+const ROTATION_INCREMENT: f32 = 15.0 * PI / 180.0;
+
+/// Create a triangle mesh for rotation arrows
+fn create_arrow_mesh() -> Mesh {
+    let mut mesh = Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::default(),
+    );
+
+    // Triangle pointing up (+Y)
+    mesh.insert_attribute(
+        Mesh::ATTRIBUTE_POSITION,
+        vec![
+            [0.0, 0.07, 0.0],    // tip
+            [-0.04, -0.03, 0.0], // bottom left
+            [0.04, -0.03, 0.0],  // bottom right
+        ],
+    );
+    mesh.insert_attribute(
+        Mesh::ATTRIBUTE_NORMAL,
+        vec![[0.0, 0.0, 1.0], [0.0, 0.0, 1.0], [0.0, 0.0, 1.0]],
+    );
+    mesh.insert_indices(Indices::U32(vec![0, 1, 2]));
+
+    mesh
+}
+
 /// Tracks the currently hovered element
 #[derive(Resource, Default)]
 struct HoveredElement {
@@ -362,12 +405,14 @@ fn setup(
     let scene = asset_server.load("axes-cube.glb#Scene0");
 
     // Spawn the cube with scale from config
-    commands.spawn((
-        SceneRoot(scene),
-        Transform::from_xyz(0.0, 0.0, 0.0).with_scale(Vec3::splat(coord_config.scale)),
-        AxesCube,
-        Name::new("axes_cube_root"),
-    ));
+    let cube_entity = commands
+        .spawn((
+            SceneRoot(scene),
+            Transform::from_xyz(0.0, 0.0, 0.0).with_scale(Vec3::splat(coord_config.scale)),
+            AxesCube,
+            Name::new("axes_cube_root"),
+        ))
+        .id();
 
     // Spawn RGB axes extending from the corner of the cube
     spawn_axes(&mut commands, &mut meshes, &mut materials, &coord_config);
@@ -375,16 +420,23 @@ fn setup(
     // Spawn 3D text labels based on coordinate system
     spawn_face_labels(&mut commands, &asset_server, &mut materials, &coord_config);
 
+    // Note: rotation arrows are spawned as children of camera below
+
     println!("Coordinate System: {:?}", coord_config.system);
     println!("Scale: {}", coord_config.scale);
 
     // Camera - positioned to see the cube from an isometric-ish angle
-    commands.spawn((
-        Transform::from_xyz(3.0, 2.5, 3.0).looking_at(Vec3::ZERO, Vec3::Y),
-        Camera3d::default(),
-        MainCamera,
-        Name::new("main_camera"),
-    ));
+    let camera_entity = commands
+        .spawn((
+            Transform::from_xyz(3.0, 2.5, 3.0).looking_at(Vec3::ZERO, Vec3::Y),
+            Camera3d::default(),
+            MainCamera,
+            Name::new("main_camera"),
+        ))
+        .id();
+
+    // Spawn rotation arrows as children of camera (fixed on screen)
+    spawn_rotation_arrows_on_camera(&mut commands, &mut meshes, &mut materials, camera_entity);
 
     // Directional light
     commands.spawn((
@@ -574,6 +626,54 @@ fn get_element_color(element: &CubeElement) -> Color {
         // Corners: visible spheres
         CubeElement::Corner(_) => Color::srgba(0.5, 0.5, 0.55, 0.9),
     }
+}
+
+/// Spawn left and right rotation arrows as children of camera (fixed on screen)
+fn spawn_rotation_arrows_on_camera(
+    commands: &mut Commands,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    materials: &mut ResMut<Assets<StandardMaterial>>,
+    camera_entity: Entity,
+) {
+    // Use a simple sphere for visibility testing
+    let arrow_mesh = meshes.add(Sphere::new(0.15));
+
+    // Semi-transparent white
+    let arrow_color = Color::srgba(1.0, 1.0, 1.0, 0.6);
+
+    // Position in camera local space:
+    // X = left/right on screen
+    // Y = up/down on screen  
+    // Z = depth (negative = in front of camera)
+    let screen_distance = 0.8; // Left/right distance
+    let depth = -2.0; // In front of camera
+
+    let arrows = [
+        (RotationArrow::Left, Vec3::new(-screen_distance, 0.0, depth)),
+        (RotationArrow::Right, Vec3::new(screen_distance, 0.0, depth)),
+    ];
+
+    for (direction, position) in arrows {
+        let material = materials.add(StandardMaterial {
+            base_color: arrow_color,
+            unlit: true,
+            alpha_mode: AlphaMode::Blend,
+            ..default()
+        });
+
+        // Spawn as child of camera (stays fixed on screen)
+        commands
+            .spawn((
+                Mesh3d(arrow_mesh.clone()),
+                MeshMaterial3d(material),
+                Transform::from_translation(position),
+                direction,
+                Name::new(format!("rotation_arrow_{:?}", direction)),
+            ))
+            .insert(ChildOf(camera_entity));
+    }
+
+    println!("Spawned rotation arrows on camera (fixed on screen)");
 }
 
 /// Set up cube elements after the GLB is loaded
@@ -1120,4 +1220,83 @@ fn animate_camera(
         transform.rotation = camera_anim.target_rotation;
         camera_anim.animating = false;
     }
+}
+
+// ============================================================================
+// Rotation Arrow Handlers
+// ============================================================================
+
+fn on_arrow_hover_start(
+    trigger: On<Pointer<Over>>,
+    arrows: Query<&RotationArrow>,
+    materials_query: Query<&MeshMaterial3d<StandardMaterial>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    let entity = trigger.event().event_target();
+
+    // Only handle rotation arrows
+    if arrows.get(entity).is_err() {
+        return;
+    }
+
+    if let Ok(mat_handle) = materials_query.get(entity)
+        && let Some(mat) = materials.get_mut(&mat_handle.0)
+    {
+        mat.base_color = Color::srgba(1.0, 1.0, 0.3, 0.9); // Bright yellow
+    }
+}
+
+fn on_arrow_hover_end(
+    trigger: On<Pointer<Out>>,
+    arrows: Query<&RotationArrow>,
+    materials_query: Query<&MeshMaterial3d<StandardMaterial>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    let entity = trigger.event().event_target();
+
+    // Only handle rotation arrows
+    if arrows.get(entity).is_err() {
+        return;
+    }
+
+    if let Ok(mat_handle) = materials_query.get(entity)
+        && let Some(mat) = materials.get_mut(&mat_handle.0)
+    {
+        mat.base_color = Color::srgba(1.0, 1.0, 1.0, 0.5); // Back to semi-transparent white
+    }
+}
+
+fn on_arrow_click(
+    trigger: On<Pointer<Click>>,
+    arrows: Query<&RotationArrow>,
+    mut camera_query: Query<&mut Transform, With<MainCamera>>,
+) {
+    let entity = trigger.event().event_target();
+
+    // Only handle rotation arrows
+    let Ok(arrow) = arrows.get(entity) else {
+        return;
+    };
+
+    // Only left click
+    if trigger.button != PointerButton::Primary {
+        return;
+    }
+
+    let Ok(mut transform) = camera_query.single_mut() else {
+        return;
+    };
+
+    // Yaw rotation around world Y axis
+    let sign = match arrow {
+        RotationArrow::Left => 1.0,
+        RotationArrow::Right => -1.0,
+    };
+
+    let rotation = Quat::from_rotation_y(sign * ROTATION_INCREMENT);
+
+    // Rotate around the origin (where the cube is)
+    transform.rotate_around(Vec3::ZERO, rotation);
+
+    println!("Arrow click: {:?}, rotating {}°", arrow, sign * 15.0);
 }
