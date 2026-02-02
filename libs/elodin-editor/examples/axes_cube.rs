@@ -635,8 +635,8 @@ fn spawn_rotation_arrows_on_camera(
     materials: &mut ResMut<Assets<StandardMaterial>>,
     camera_entity: Entity,
 ) {
-    // Use a simple sphere for visibility testing
-    let arrow_mesh = meshes.add(Sphere::new(0.15));
+    // Use triangle arrow mesh
+    let arrow_mesh = meshes.add(create_arrow_mesh());
 
     // Semi-transparent white
     let arrow_color = Color::srgba(1.0, 1.0, 1.0, 0.6);
@@ -645,19 +645,31 @@ fn spawn_rotation_arrows_on_camera(
     // X = left/right on screen
     // Y = up/down on screen  
     // Z = depth (negative = in front of camera)
-    let screen_distance = 0.8; // Left/right distance
-    let depth = -2.0; // In front of camera
+    let screen_distance = 0.6; // Left/right distance
+    let depth = -1.5; // In front of camera
 
+    // Arrow mesh points up (+Y), rotate to point left/right
+    // Left arrow: rotate +90° around Z to point left (-X direction)
+    // Right arrow: rotate -90° around Z to point right (+X direction)
     let arrows = [
-        (RotationArrow::Left, Vec3::new(-screen_distance, 0.0, depth)),
-        (RotationArrow::Right, Vec3::new(screen_distance, 0.0, depth)),
+        (
+            RotationArrow::Left,
+            Vec3::new(-screen_distance, 0.0, depth),
+            Quat::from_rotation_z(FRAC_PI_2), // Points left
+        ),
+        (
+            RotationArrow::Right,
+            Vec3::new(screen_distance, 0.0, depth),
+            Quat::from_rotation_z(-FRAC_PI_2), // Points right
+        ),
     ];
 
-    for (direction, position) in arrows {
+    for (direction, position, rotation) in arrows {
         let material = materials.add(StandardMaterial {
             base_color: arrow_color,
             unlit: true,
             alpha_mode: AlphaMode::Blend,
+            cull_mode: None, // Visible from both sides
             ..default()
         });
 
@@ -666,7 +678,7 @@ fn spawn_rotation_arrows_on_camera(
             .spawn((
                 Mesh3d(arrow_mesh.clone()),
                 MeshMaterial3d(material),
-                Transform::from_translation(position),
+                Transform::from_translation(position).with_rotation(rotation),
                 direction,
                 Name::new(format!("rotation_arrow_{:?}", direction)),
             ))
