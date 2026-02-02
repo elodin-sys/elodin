@@ -313,6 +313,8 @@ pub enum RotationArrow {
     Right,
     Up,
     Down,
+    RollLeft,  // Rotation around camera's forward axis (counter-clockwise)
+    RollRight, // Rotation around camera's forward axis (clockwise)
 }
 
 /// Rotation increment per click (30 degrees)
@@ -327,6 +329,13 @@ fn create_arrow_mesh() -> Mesh {
     }
     .mesh()
     .build()
+}
+
+/// Create a curved/flat mesh for roll arrows (different design)
+fn create_roll_arrow_mesh() -> Mesh {
+    // Smaller, flatter torus segment to suggest rotation
+    // Using a small capsule oriented horizontally as a simple alternative
+    Capsule3d::new(0.008, 0.025).mesh().build()
 }
 
 /// Tracks the currently hovered element
@@ -687,7 +696,44 @@ fn spawn_rotation_arrows_on_camera(
             .insert(ChildOf(camera_entity));
     }
 
-    println!("Spawned 4 rotation arrows on camera (fixed on screen)");
+    // Roll arrows (different mesh, positioned beside the Up arrow)
+    let roll_mesh = meshes.add(create_roll_arrow_mesh());
+    let roll_offset = 0.15; // Horizontal offset from Up arrow
+
+    let roll_arrows = [
+        (
+            RotationArrow::RollLeft,
+            Vec3::new(-roll_offset, vertical_distance, depth),
+            Quat::from_rotation_z(FRAC_PI_2 * 0.5), // Tilted to suggest CCW rotation
+        ),
+        (
+            RotationArrow::RollRight,
+            Vec3::new(roll_offset, vertical_distance, depth),
+            Quat::from_rotation_z(-FRAC_PI_2 * 0.5), // Tilted to suggest CW rotation
+        ),
+    ];
+
+    for (direction, position, rotation) in roll_arrows {
+        let material = materials.add(StandardMaterial {
+            base_color: arrow_color,
+            unlit: true,
+            alpha_mode: AlphaMode::Blend,
+            cull_mode: None,
+            ..default()
+        });
+
+        commands
+            .spawn((
+                Mesh3d(roll_mesh.clone()),
+                MeshMaterial3d(material),
+                Transform::from_translation(position).with_rotation(rotation),
+                direction,
+                Name::new(format!("rotation_arrow_{:?}", direction)),
+            ))
+            .insert(ChildOf(camera_entity));
+    }
+
+    println!("Spawned 6 rotation arrows on camera (4 pan/tilt + 2 roll)");
 }
 
 /// Set up cube elements after the GLB is loaded
@@ -1315,10 +1361,19 @@ fn on_arrow_click(
             let right = transform.right();
             Quat::from_axis_angle(*right, -ROTATION_INCREMENT)
         }
+        // Roll: Rotation around camera's forward axis (perpendicular to screen)
+        RotationArrow::RollLeft => {
+            let forward = transform.forward();
+            Quat::from_axis_angle(*forward, ROTATION_INCREMENT)
+        }
+        RotationArrow::RollRight => {
+            let forward = transform.forward();
+            Quat::from_axis_angle(*forward, -ROTATION_INCREMENT)
+        }
     };
 
     // Rotate around the origin (where the cube is)
     transform.rotate_around(Vec3::ZERO, rotation);
 
-    println!("Arrow click: {:?}, rotating 30°", arrow);
+    println!("Arrow click: {:?}, rotating 15°", arrow);
 }
