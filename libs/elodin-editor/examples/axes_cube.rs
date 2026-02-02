@@ -44,8 +44,8 @@ fn main() {
         .add_plugins(FontMeshPlugin)
         // Configure coordinate system here - change to NED if needed
         .insert_resource(CoordinateConfig {
-            system: CoordinateSystem::NED, // <- Change this to NED to switch
-            scale: 0.5,                    // <- Adjust global scale here
+            system: CoordinateSystem::ENU, // <- Change to NED to test NED mode
+            scale: 0.95,                   // <- Adjust global scale here
         })
         .init_resource::<HoveredElement>()
         .init_resource::<OriginalMaterials>()
@@ -129,29 +129,29 @@ impl CoordinateSystem {
                 },
             ],
             CoordinateSystem::NED => [
-                // X axis = North/South (Blue) - forward
+                // NED X axis = North/South (Red) - maps to Bevy X
                 AxisDefinition {
                     positive_label: "North",
                     negative_label: "South",
-                    direction: Vec3::Z, // In Bevy, forward is +Z
-                    color: Color::srgb(0.2, 0.4, 0.9),
-                    color_dim: Color::srgb(0.15, 0.3, 0.6),
-                },
-                // Y axis = East/West (Red) - right
-                AxisDefinition {
-                    positive_label: "East",
-                    negative_label: "West",
-                    direction: Vec3::X, // In Bevy, right is +X
+                    direction: Vec3::X,
                     color: Color::srgb(0.9, 0.2, 0.2),
                     color_dim: Color::srgb(0.6, 0.15, 0.15),
                 },
-                // Z axis = Down/Up (Green inverted) - down
+                // NED Y axis = East/West (Green) - maps to Bevy Y
+                AxisDefinition {
+                    positive_label: "East",
+                    negative_label: "West",
+                    direction: Vec3::Y,
+                    color: Color::srgb(0.2, 0.8, 0.2),
+                    color_dim: Color::srgb(0.15, 0.5, 0.15),
+                },
+                // NED Z axis = Down/Up (Blue) - maps to Bevy Z
                 AxisDefinition {
                     positive_label: "Down",
                     negative_label: "Up",
-                    direction: Vec3::NEG_Y, // In Bevy, down is -Y
-                    color: Color::srgb(0.2, 0.8, 0.2),
-                    color_dim: Color::srgb(0.15, 0.5, 0.15),
+                    direction: Vec3::Z,
+                    color: Color::srgb(0.2, 0.4, 0.9),
+                    color_dim: Color::srgb(0.15, 0.3, 0.6),
                 },
             ],
         }
