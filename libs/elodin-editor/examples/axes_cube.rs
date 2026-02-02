@@ -11,7 +11,7 @@ use bevy::asset::AssetPlugin;
 use bevy::picking::prelude::*;
 use bevy::prelude::*;
 use bevy_fontmesh::prelude::*;
-use std::f32::consts::{FRAC_PI_2, PI};
+use std::f32::consts::FRAC_PI_2;
 use std::path::PathBuf;
 
 fn main() {
@@ -44,7 +44,7 @@ fn main() {
         .add_plugins(FontMeshPlugin)
         // Configure coordinate system here - change to NED if needed
         .insert_resource(CoordinateConfig {
-            system: CoordinateSystem::ENU, // <- Change to NED to test NED mode
+            system: CoordinateSystem::ENU, // <- Change to NED mode here if necessary
             scale: 0.95,                   // <- Adjust global scale here
         })
         .init_resource::<HoveredElement>()
@@ -483,6 +483,7 @@ fn spawn_axes(
             Mesh3d(shaft_mesh.clone()),
             MeshMaterial3d(material.clone()),
             Transform::from_translation(shaft_pos).with_rotation(rotation),
+            Pickable::IGNORE, // Don't block picking on the cube
             Name::new(format!("axis_{}_shaft", name)),
         ));
 
@@ -503,6 +504,7 @@ fn spawn_axes(
             Mesh3d(tip_mesh.clone()),
             MeshMaterial3d(material),
             Transform::from_translation(tip_pos).with_rotation(tip_rotation),
+            Pickable::IGNORE, // Don't block picking on the cube
             Name::new(format!("axis_{}_tip", name)),
         ));
     }
