@@ -427,9 +427,10 @@ fn serialize_object_3d_mesh(mesh: &Object3DMesh) -> KdlNode {
                     anim_node
                         .entries_mut()
                         .push(kdl::KdlEntry::new_prop("joint", anim.joint_name.clone()));
-                    anim_node
-                        .entries_mut()
-                        .push(kdl::KdlEntry::new_prop("rotation_vector", anim.eql_expr.clone()));
+                    anim_node.entries_mut().push(kdl::KdlEntry::new_prop(
+                        "rotation_vector",
+                        anim.eql_expr.clone(),
+                    ));
                     children.nodes_mut().push(anim_node);
                 }
                 node.set_children(children);

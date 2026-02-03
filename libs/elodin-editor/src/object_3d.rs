@@ -568,7 +568,8 @@ fn find_entities<'a, T>(
     children: &'a Query<&Children>,
     mut predicate: impl FnMut(Entity) -> Option<T> + 'a,
 ) -> impl Iterator<Item = (Entity, T)> + 'a {
-    children.iter_descendants(entity)
+    children
+        .iter_descendants(entity)
         .filter_map(move |id| predicate(id).map(|x| (id, x)))
 }
 
@@ -806,7 +807,6 @@ pub fn attach_joint_animations(
                 items.join_display(", ")
             );
         }
-
     }
 }
 
