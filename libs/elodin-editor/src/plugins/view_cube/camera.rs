@@ -3,9 +3,10 @@
 //! When `auto_rotate` is enabled, this module handles camera rotation
 //! in response to ViewCube events.
 
+use bevy::camera::visibility::RenderLayers;
 use bevy::prelude::*;
 
-use super::components::{RotationArrow, ViewCubeLink, ViewCubeRoot};
+use super::components::{RotationArrow, ViewCubeCamera, ViewCubeLink, ViewCubeRoot};
 use super::config::ViewCubeConfig;
 use super::events::ViewCubeEvent;
 
@@ -208,5 +209,89 @@ pub fn sync_view_cube_rotation(
         // This makes the cube appear to show world orientation
         let (_, rotation, _) = main_camera_transform.to_scale_rotation_translation();
         cube_transform.rotation = rotation.conjugate();
+    }
+}
+
+// ============================================================================
+// Overlay Mode Systems
+// ============================================================================
+
+/// Apply render layers to entities loaded from the GLB scene.
+/// This runs every frame to catch newly loaded entities.
+pub fn apply_render_layers_to_scene(
+    config: Res<ViewCubeConfig>,
+    view_cube_query: Query<Entity, With<ViewCubeRoot>>,
+    children_query: Query<&Children>,
+    entities_without_layer: Query<Entity, (Without<RenderLayers>, Without<ViewCubeCamera>)>,
+    mut commands: Commands,
+) {
+    if !config.use_overlay {
+        return;
+    }
+
+    let render_layers = RenderLayers::layer(config.render_layer as usize);
+
+    for cube_root in view_cube_query.iter() {
+        // Find all descendants of the cube root that don't have render layers
+        apply_layers_recursive(
+            cube_root,
+            &children_query,
+            &entities_without_layer,
+            &render_layers,
+            &mut commands,
+        );
+    }
+}
+
+fn apply_layers_recursive(
+    entity: Entity,
+    children_query: &Query<&Children>,
+    entities_without_layer: &Query<Entity, (Without<RenderLayers>, Without<ViewCubeCamera>)>,
+    render_layers: &RenderLayers,
+    commands: &mut Commands,
+) {
+    // Apply render layer if entity doesn't have one
+    if entities_without_layer.get(entity).is_ok() {
+        commands.entity(entity).insert(render_layers.clone());
+    }
+
+    // Recurse to children
+    if let Ok(children) = children_query.get(entity) {
+        for child in children.iter() {
+            apply_layers_recursive(child, children_query, entities_without_layer, render_layers, commands);
+        }
+    }
+}
+
+/// Set the viewport for the ViewCube camera (positions it in top-right corner)
+pub fn set_view_cube_viewport(
+    config: Res<ViewCubeConfig>,
+    windows: Query<&Window>,
+    mut camera_query: Query<&mut Camera, With<ViewCubeCamera>>,
+) {
+    if !config.use_overlay {
+        return;
+    }
+
+    let Ok(window) = windows.single() else {
+        return;
+    };
+
+    let scale_factor = window.scale_factor();
+    let margin = config.overlay_margin * scale_factor;
+    let size = (config.overlay_size as f32 * scale_factor) as u32;
+
+    let window_width = window.physical_width();
+
+    // Position in top-right corner
+    let pos_x = window_width.saturating_sub(size).saturating_sub(margin as u32);
+    let pos_y = margin as u32;
+
+    for mut camera in camera_query.iter_mut() {
+        camera.viewport = Some(bevy::camera::Viewport {
+            physical_position: UVec2::new(pos_x, pos_y),
+            physical_size: UVec2::new(size, size),
+            depth: 0.0..1.0,
+        });
     }
 }

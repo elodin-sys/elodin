@@ -25,6 +25,10 @@ pub struct ViewCubeLink {
     pub main_camera: Entity,
 }
 
+/// Marker for the ViewCube's dedicated camera (used in overlay mode)
+#[derive(Component)]
+pub struct ViewCubeCamera;
+
 // ============================================================================
 // Cube Elements
 // ============================================================================
