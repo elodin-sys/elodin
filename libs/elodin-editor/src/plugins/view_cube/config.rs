@@ -190,11 +190,11 @@ impl Default for ViewCubeConfig {
             system: CoordinateSystem::ENU,
             scale: 0.95,
             rotation_increment: 15.0 * PI / 180.0,
-            camera_distance: 4.5,
+            camera_distance: 3.5,
             auto_rotate: true,
             sync_with_camera: false,
             use_overlay: false,
-            overlay_size: 128,
+            overlay_size: 160,
             overlay_margin: 8.0,
             render_layer: 31, // Use high layer to avoid conflicts
         }
