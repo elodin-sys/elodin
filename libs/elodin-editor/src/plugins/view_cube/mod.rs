@@ -88,5 +88,10 @@ impl Plugin for ViewCubePlugin {
                 (camera::handle_view_cube_camera, camera::animate_camera),
             );
         }
+
+        // Add sync system when sync_with_camera is enabled (for overlay/gizmo mode)
+        if self.config.sync_with_camera {
+            app.add_systems(PostUpdate, camera::sync_view_cube_rotation);
+        }
     }
 }

@@ -168,6 +168,10 @@ pub struct ViewCubeConfig {
     /// The target camera must have the `ViewCubeTargetCamera` component.
     /// When false, only events are emitted for manual handling.
     pub auto_rotate: bool,
+    /// When true, the cube syncs its rotation with the main camera.
+    /// Use this for overlay/gizmo mode where the cube shows world orientation.
+    /// When false, the cube stays fixed (for standalone demo mode).
+    pub sync_with_camera: bool,
 }
 
 impl Default for ViewCubeConfig {
@@ -178,6 +182,7 @@ impl Default for ViewCubeConfig {
             rotation_increment: 15.0 * PI / 180.0,
             camera_distance: 4.5,
             auto_rotate: true,
+            sync_with_camera: false, // Off by default for standalone demo
         }
     }
 }

@@ -19,6 +19,12 @@ pub struct ViewCubeMeshRoot;
 #[derive(Component)]
 pub struct ViewCubeSetup;
 
+/// Links a ViewCube to the main camera it should follow/control
+#[derive(Component)]
+pub struct ViewCubeLink {
+    pub main_camera: Entity,
+}
+
 // ============================================================================
 // Cube Elements
 // ============================================================================

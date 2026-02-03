@@ -33,13 +33,16 @@ pub fn spawn_view_cube(
     // Load the axes-cube.glb
     let scene = asset_server.load("axes-cube.glb#Scene0");
 
-    // Spawn the cube root
+    // Spawn the cube root with link to main camera
     let cube_root = commands
         .spawn((
             SceneRoot(scene),
             Transform::from_xyz(0.0, 0.0, 0.0).with_scale(Vec3::splat(config.scale)),
             ViewCubeRoot,
             ViewCubeMeshRoot,
+            ViewCubeLink {
+                main_camera: camera_entity,
+            },
             Name::new("view_cube_root"),
         ))
         .id();

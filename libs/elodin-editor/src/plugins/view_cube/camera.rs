@@ -5,7 +5,7 @@
 
 use bevy::prelude::*;
 
-use super::components::RotationArrow;
+use super::components::{RotationArrow, ViewCubeLink, ViewCubeRoot};
 use super::config::ViewCubeConfig;
 use super::events::ViewCubeEvent;
 
@@ -186,4 +186,27 @@ fn get_up_direction_for_look(look_dir: Vec3) -> Vec3 {
 
 fn ease_out_cubic(t: f32) -> f32 {
     1.0 - (1.0 - t).powi(3)
+}
+
+// ============================================================================
+// Sync System - Makes ViewCube rotate inversely to main camera
+// ============================================================================
+
+/// Sync the ViewCube rotation with the main camera.
+/// The cube rotates inversely so it always shows the world orientation
+/// from the camera's perspective.
+pub fn sync_view_cube_rotation(
+    main_camera_query: Query<&GlobalTransform, Without<ViewCubeRoot>>,
+    mut view_cube_query: Query<(&ViewCubeLink, &mut Transform), With<ViewCubeRoot>>,
+) {
+    for (link, mut cube_transform) in view_cube_query.iter_mut() {
+        let Ok(main_camera_transform) = main_camera_query.get(link.main_camera) else {
+            continue;
+        };
+
+        // Set cube rotation to inverse of camera rotation
+        // This makes the cube appear to show world orientation
+        let (_, rotation, _) = main_camera_transform.to_scale_rotation_translation();
+        cube_transform.rotation = rotation.conjugate();
+    }
 }
