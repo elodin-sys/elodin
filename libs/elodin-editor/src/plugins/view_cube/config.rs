@@ -35,22 +35,22 @@ impl CoordinateSystem {
         match self {
             CoordinateSystem::ENU => [
                 AxisDefinition {
-                    positive_label: "East",
-                    negative_label: "West",
+                    positive_label: "E",
+                    negative_label: "W",
                     direction: Vec3::X,
                     color: Color::srgb(0.9, 0.2, 0.2),
                     color_dim: Color::srgb(0.6, 0.15, 0.15),
                 },
                 AxisDefinition {
-                    positive_label: "Up",
-                    negative_label: "Down",
+                    positive_label: "U",
+                    negative_label: "D",
                     direction: Vec3::Y,
                     color: Color::srgb(0.2, 0.8, 0.2),
                     color_dim: Color::srgb(0.15, 0.5, 0.15),
                 },
                 AxisDefinition {
-                    positive_label: "North",
-                    negative_label: "South",
+                    positive_label: "N",
+                    negative_label: "S",
                     direction: Vec3::Z,
                     color: Color::srgb(0.2, 0.4, 0.9),
                     color_dim: Color::srgb(0.15, 0.3, 0.6),
@@ -58,22 +58,22 @@ impl CoordinateSystem {
             ],
             CoordinateSystem::NED => [
                 AxisDefinition {
-                    positive_label: "North",
-                    negative_label: "South",
+                    positive_label: "N",
+                    negative_label: "S",
                     direction: Vec3::X,
                     color: Color::srgb(0.9, 0.2, 0.2),
                     color_dim: Color::srgb(0.6, 0.15, 0.15),
                 },
                 AxisDefinition {
-                    positive_label: "East",
-                    negative_label: "West",
+                    positive_label: "E",
+                    negative_label: "W",
                     direction: Vec3::Y,
                     color: Color::srgb(0.2, 0.8, 0.2),
                     color_dim: Color::srgb(0.15, 0.5, 0.15),
                 },
                 AxisDefinition {
-                    positive_label: "Down",
-                    negative_label: "Up",
+                    positive_label: "D",
+                    negative_label: "U",
                     direction: Vec3::Z,
                     color: Color::srgb(0.2, 0.4, 0.9),
                     color_dim: Color::srgb(0.15, 0.3, 0.6),
