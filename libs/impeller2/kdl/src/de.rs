@@ -581,10 +581,10 @@ fn parse_object_3d(node: &KdlNode, src: &str) -> Result<Object3D, KdlSchematicEr
                     .to_string();
 
                 let eql_expr = child
-                    .get("value")
+                    .get("rotation_vector")
                     .and_then(|v| v.as_string())
                     .ok_or_else(|| KdlSchematicError::MissingProperty {
-                        property: "value".to_string(),
+                        property: "rotation_vector".to_string(),
                         node: "animate".to_string(),
                         src: src.to_string(),
                         span: child.span(),
@@ -2088,10 +2088,9 @@ object_3d "a.world_pos" {
         let kdl = r#"
 object_3d "rocket.world_pos" {
     glb path="flappy-rocket.glb"
-    animate joint="Root.Fin_0" value="(0, 3.14/2, 0)"
-    animate joint="Root.Fin_1" value="(0, 3.14/2, 0)"
-    animate joint="Root.Fin_2" value="rocket.fin_deflect"
-    animate joint="Root.Fin_3" value="(0, 1, 0, 0.5)"
+    animate joint="Root.Fin_0" rotation_vector="(0, 3.14/2, 0)"
+    animate joint="Root.Fin_1" rotation_vector="(0, 3.14/2, 0)"
+    animate joint="Root.Fin_2" rotation_vector="rocket.fin_deflect"
 }
 "#;
         let schematic = parse_schematic(kdl).unwrap();
@@ -2112,7 +2111,7 @@ object_3d "rocket.world_pos" {
                     assert_eq!(*scale, 1.0);
                     assert_eq!(*translate, (0.0, 0.0, 0.0));
                     assert_eq!(*rotate, (0.0, 0.0, 0.0));
-                    assert_eq!(animations.len(), 4);
+                    assert_eq!(animations.len(), 3);
 
                     assert_eq!(animations[0].joint_name, "Root.Fin_0");
                     assert_eq!(animations[0].eql_expr, "(0, 3.14/2, 0)");
@@ -2122,9 +2121,6 @@ object_3d "rocket.world_pos" {
 
                     assert_eq!(animations[2].joint_name, "Root.Fin_2");
                     assert_eq!(animations[2].eql_expr, "rocket.fin_deflect");
-
-                    assert_eq!(animations[3].joint_name, "Root.Fin_3");
-                    assert_eq!(animations[3].eql_expr, "(0, 1, 0, 0.5)");
                 }
                 _ => panic!("Expected glb"),
             }

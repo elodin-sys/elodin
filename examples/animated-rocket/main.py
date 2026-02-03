@@ -565,10 +565,10 @@ w.schematic(
     }
     object_3d rocket.world_pos {
         glb path="flappy-rocket.glb"
-        animate joint="Root.Fin_0" value="(0, rocket.fin_deflect_4[0] * 3.14/180.0, 0)"
-        animate joint="Root.Fin_1" value="(0, rocket.fin_deflect_4[1] * 3.14/180.0, 0)"
-        animate joint="Root.Fin_2" value="(0, rocket.fin_deflect_4[2] * 3.14/180.0, 0)"
-        animate joint="Root.Fin_3" value="(0, rocket.fin_deflect_4[3] * 3.14/180.0, 0)"
+        animate joint="Root.Fin_0" rotation_vector="(0, rocket.fin_deflect_4[0] * 3.14/180.0, 0)"
+        animate joint="Root.Fin_1" rotation_vector="(0, rocket.fin_deflect_4[1] * 3.14/180.0, 0)"
+        animate joint="Root.Fin_2" rotation_vector="(0, rocket.fin_deflect_4[2] * 3.14/180.0, 0)"
+        animate joint="Root.Fin_3" rotation_vector="(0, rocket.fin_deflect_4[3] * 3.14/180.0, 0)"
     }
     line_3d rocket.world_pos line_width=11.0 perspective=#false {
         color yolk

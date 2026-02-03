@@ -664,13 +664,7 @@ fn component_value_to_axis_angle(value: &ComponentValue) -> Result<(Vec3, f32), 
     match value {
         ComponentValue::F64(array) => {
             let data = array.buf.as_buf();
-            if data.len() == 4 {
-                // 4-element format: [axis_x, axis_y, axis_z, angle]
-                let axis = Vec3::new(data[0] as f32, data[1] as f32, data[2] as f32);
-                let angle = data[3] as f32;
-                let normalized_axis = axis.normalize_or_zero();
-                Ok((normalized_axis, angle))
-            } else if data.len() == 3 {
+            if data.len() == 3 {
                 // 3-element format: [x, y, z] where direction is axis and magnitude is angle
                 let vec = Vec3::new(data[0] as f32, data[1] as f32, data[2] as f32);
                 let angle = vec.length();
@@ -682,20 +676,14 @@ fn component_value_to_axis_angle(value: &ComponentValue) -> Result<(Vec3, f32), 
                 Ok((normalized_axis, angle))
             } else {
                 Err(format!(
-                    "Expected 3 or 4 elements for angle-axis rotation, got {}",
+                    "Expected 3 elements for rotation_vector (axis direction with magnitude as angle), got {}",
                     data.len()
                 ))
             }
         }
         ComponentValue::F32(array) => {
             let data = array.buf.as_buf();
-            if data.len() == 4 {
-                // 4-element format: [axis_x, axis_y, axis_z, angle]
-                let axis = Vec3::new(data[0], data[1], data[2]);
-                let angle = data[3];
-                let normalized_axis = axis.normalize_or_zero();
-                Ok((normalized_axis, angle))
-            } else if data.len() == 3 {
+            if data.len() == 3 {
                 // 3-element format: [x, y, z] where direction is axis and magnitude is angle
                 let vec = Vec3::new(data[0], data[1], data[2]);
                 let angle = vec.length();
@@ -707,12 +695,12 @@ fn component_value_to_axis_angle(value: &ComponentValue) -> Result<(Vec3, f32), 
                 Ok((normalized_axis, angle))
             } else {
                 Err(format!(
-                    "Expected 3 or 4 elements for angle-axis rotation, got {}",
+                    "Expected 3 elements for rotation_vector (axis direction with magnitude as angle), got {}",
                     data.len()
                 ))
             }
         }
-        _ => Err("Invalid component type for angle-axis rotation".to_string()),
+        _ => Err("Invalid component type for rotation_vector rotation".to_string()),
     }
 }
 
@@ -801,7 +789,7 @@ pub fn attach_joint_animations(
         }
 
         info!(
-            "Have {} joint animation; found {} entities.",
+            "For {} joint animations, found {} matching entities.",
             object_3d.joint_animations.len(),
             entity_count
         );
