@@ -6478,6 +6478,7 @@ dependencies = [
  "impeller2",
  "impeller2-wkt",
  "pkg-config",
+ "postcard",
 ]
 
 [[package]]
