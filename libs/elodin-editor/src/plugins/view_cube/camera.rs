@@ -10,7 +10,7 @@ use bevy::prelude::*;
 use bevy_editor_cam::controller::component::EditorCam;
 use bevy_editor_cam::extensions::look_to::LookToTrigger;
 
-use super::components::{RotationArrow, ViewCubeCamera, ViewCubeLink, ViewCubeRoot};
+use super::components::{RotationArrow, ViewCubeCamera, ViewCubeLink, ViewCubeRenderLayer, ViewCubeRoot};
 use super::config::ViewCubeConfig;
 use super::events::ViewCubeEvent;
 
@@ -224,7 +224,7 @@ pub fn sync_view_cube_rotation(
 /// This runs every frame to catch newly loaded entities.
 pub fn apply_render_layers_to_scene(
     config: Res<ViewCubeConfig>,
-    view_cube_query: Query<Entity, With<ViewCubeRoot>>,
+    view_cube_query: Query<(Entity, &ViewCubeRenderLayer), With<ViewCubeRoot>>,
     children_query: Query<&Children>,
     entities_without_layer: Query<Entity, (Without<RenderLayers>, Without<ViewCubeCamera>)>,
     mut commands: Commands,
@@ -233,9 +233,9 @@ pub fn apply_render_layers_to_scene(
         return;
     }
 
-    let render_layers = RenderLayers::layer(config.render_layer as usize);
+    for (cube_root, layer) in view_cube_query.iter() {
+        let render_layers = RenderLayers::layer(layer.0);
 
-    for cube_root in view_cube_query.iter() {
         // Find all descendants of the cube root that don't have render layers
         apply_layers_recursive(
             cube_root,

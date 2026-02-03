@@ -57,9 +57,7 @@ use crate::{
         LogicalKeyState,
         gizmos::GIZMO_RENDER_LAYER,
         navigation_gizmo::{NavGizmoCamera, NavGizmoParent, RenderLayerAlloc},
-        view_cube::{
-            NeedsInitialSnap, ViewCubeConfig, ViewCubeTargetCamera, spawn::spawn_view_cube,
-        },
+        view_cube::{ViewCubeConfig, ViewCubeTargetCamera, spawn::spawn_view_cube},
     },
     ui::{colors::ColorExt, dashboard::NodeUpdaterParams},
 };
@@ -1266,6 +1264,7 @@ impl ViewportPane {
             ChildOf(parent),
             Name::new("viewport camera3d"),
         ));
+        camera.insert(ViewCubeTargetCamera);
 
         camera.insert(Bloom { ..default() });
         camera.insert(EnvironmentMapLight {
@@ -1287,17 +1286,15 @@ impl ViewportPane {
                 name,
                 grid_layer,
                 viewport_layer,
-                view_cube_layer: None,
             };
         };
 
-        commands
-            .entity(camera)
-            .insert((ViewCubeTargetCamera, NeedsInitialSnap));
-
-        // Spawn ViewCube with editor mode configuration, only override the per-viewport render layer
+        // Spawn ViewCube with editor mode configuration using allocated layer
         let mut view_cube_config = ViewCubeConfig::editor_mode();
         view_cube_config.render_layer = view_cube_layer as u8;
+        view_cube_config.camera_distance = 2.5; // Match original gizmo
+        view_cube_config.scale = 0.5;           // Smaller cube
+        view_cube_config.follow_main_viewport = false; // Use existing set_camera_viewport
 
         let spawned = spawn_view_cube(
             commands,
@@ -1312,9 +1309,7 @@ impl ViewportPane {
         // so the existing set_camera_viewport system works on it
         if let Some(view_cube_camera) = spawned.camera {
             commands.entity(view_cube_camera).insert((
-                NavGizmoParent {
-                    main_camera: camera,
-                },
+                NavGizmoParent { main_camera: camera },
                 NavGizmoCamera,
             ));
         }

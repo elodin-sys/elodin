@@ -24,33 +24,33 @@ impl Default for ViewCubeColors {
 }
 
 impl ViewCubeColors {
-    /// Dark theme colors
+    /// Dark theme colors - bright edges/corners on dark background
     pub fn dark() -> Self {
         Self {
-            face_normal: Color::srgba(0.6, 0.6, 0.65, 0.4),
-            face_hover: Color::srgb(1.0, 0.9, 0.2),
-            edge_normal: Color::srgba(0.4, 0.4, 0.45, 0.85),
-            edge_hover: Color::srgb(1.0, 0.9, 0.2),
-            corner_normal: Color::srgba(0.5, 0.5, 0.55, 0.9),
-            corner_hover: Color::srgb(1.0, 0.9, 0.2),
-            arrow_normal: Color::srgba(1.0, 1.0, 1.0, 0.4),
-            arrow_hover: Color::srgba(1.0, 1.0, 0.3, 0.9),
-            highlight_emissive: LinearRgba::new(0.5, 0.45, 0.1, 1.0),
+            face_normal: Color::srgba(0.5, 0.5, 0.55, 0.3),
+            face_hover: Color::srgb(1.0, 0.85, 0.2),
+            edge_normal: Color::srgba(0.9, 0.9, 0.95, 0.8),    // White edges
+            edge_hover: Color::srgb(1.0, 0.85, 0.2),
+            corner_normal: Color::srgba(1.0, 1.0, 1.0, 0.9),   // White corners
+            corner_hover: Color::srgb(1.0, 0.85, 0.2),
+            arrow_normal: Color::srgba(1.0, 1.0, 1.0, 0.5),
+            arrow_hover: Color::srgba(1.0, 0.9, 0.3, 0.95),
+            highlight_emissive: LinearRgba::new(0.5, 0.4, 0.1, 1.0),
         }
     }
 
-    /// Light theme colors
+    /// Light theme colors - dark edges/corners on light background
     pub fn light() -> Self {
         Self {
-            face_normal: Color::srgba(0.7, 0.7, 0.75, 0.5),
-            face_hover: Color::srgb(0.2, 0.6, 1.0),
-            edge_normal: Color::srgba(0.5, 0.5, 0.55, 0.7),
-            edge_hover: Color::srgb(0.2, 0.6, 1.0),
-            corner_normal: Color::srgba(0.4, 0.4, 0.45, 0.8),
-            corner_hover: Color::srgb(0.2, 0.6, 1.0),
-            arrow_normal: Color::srgba(0.3, 0.3, 0.3, 0.5),
-            arrow_hover: Color::srgba(0.1, 0.5, 0.9, 0.9),
-            highlight_emissive: LinearRgba::new(0.1, 0.3, 0.5, 1.0),
+            face_normal: Color::srgba(0.6, 0.6, 0.65, 0.4),
+            face_hover: Color::srgb(0.2, 0.5, 1.0),
+            edge_normal: Color::srgba(0.2, 0.2, 0.25, 0.8),    // Dark edges
+            edge_hover: Color::srgb(0.2, 0.5, 1.0),
+            corner_normal: Color::srgba(0.15, 0.15, 0.2, 0.9), // Dark corners
+            corner_hover: Color::srgb(0.2, 0.5, 1.0),
+            arrow_normal: Color::srgba(0.2, 0.2, 0.2, 0.6),
+            arrow_hover: Color::srgba(0.1, 0.4, 0.9, 0.95),
+            highlight_emissive: LinearRgba::new(0.1, 0.25, 0.5, 1.0),
         }
     }
 
