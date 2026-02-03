@@ -101,6 +101,7 @@ pub enum Panel<T = ()> {
     SchematicTree(Option<String>),
     DataOverview(Option<String>),
     Dashboard(Box<Dashboard<T>>),
+    VideoStream(VideoStream),
 }
 
 impl<T> Panel<T> {
@@ -122,6 +123,7 @@ impl<T> Panel<T> {
             Panel::SchematicTree(name) => name.as_deref().unwrap_or("Tree"),
             Panel::DataOverview(name) => name.as_deref().unwrap_or("Data Overview"),
             Panel::Dashboard(d) => d.root.name.as_deref().unwrap_or("Dashboard"),
+            Panel::VideoStream(v) => v.name.as_deref().unwrap_or("Video Stream"),
         }
     }
 
@@ -166,6 +168,7 @@ impl<T> Panel<T> {
             Panel::DataOverview(name) => Panel::DataOverview(name.clone()),
             Panel::Viewport(v) => Panel::Viewport(v.map_aux(f)),
             Panel::Dashboard(d) => Panel::Dashboard(Box::new(d.map_aux(f))),
+            Panel::VideoStream(v) => Panel::VideoStream(v.clone()),
         }
     }
 
@@ -689,6 +692,14 @@ pub struct ComponentMonitor {
     /// NOTE: It may be nice to allow this to be an EQL expression that we
     /// monitor, which can be a simple component_name.
     pub component_name: String,
+    pub name: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct VideoStream {
+    /// Message name containing H.264 video frames
+    pub msg_name: String,
+    /// Display name for the tile
     pub name: Option<String>,
 }
 

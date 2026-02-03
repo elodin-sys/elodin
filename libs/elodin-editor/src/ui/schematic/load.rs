@@ -759,6 +759,39 @@ impl LoadSchematicParams<'_, '_> {
                 };
                 tile_state.insert_tile(Tile::Pane(Pane::ActionTile(pane)), parent_id, false)
             }
+            Panel::VideoStream(video_stream) => {
+                let msg_id = impeller2::types::msg_id(&video_stream.msg_name);
+                let label = video_stream
+                    .name
+                    .clone()
+                    .unwrap_or_else(|| format!("Video Stream {}", video_stream.msg_name));
+
+                let entity = self
+                    .commands
+                    .spawn((
+                        crate::ui::video_stream::VideoStream {
+                            msg_id,
+                            msg_name: video_stream.msg_name.clone(),
+                            ..Default::default()
+                        },
+                        bevy::ui::Node {
+                            position_type: bevy::ui::PositionType::Absolute,
+                            ..Default::default()
+                        },
+                        bevy::prelude::ImageNode {
+                            image_mode: bevy::ui::widget::NodeImageMode::Stretch,
+                            ..Default::default()
+                        },
+                        crate::ui::video_stream::VideoDecoderHandle::default(),
+                    ))
+                    .id();
+
+                let pane = crate::ui::video_stream::VideoStreamPane {
+                    entity,
+                    name: label,
+                };
+                tile_state.insert_tile(Tile::Pane(Pane::VideoStream(pane)), parent_id, false)
+            }
             // Inspector and Hierarchy are now fixed sidebars, not tile panels.
             // Set the corresponding sidebar visibility flags so they appear.
             Panel::Inspector => {

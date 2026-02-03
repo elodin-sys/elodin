@@ -42,6 +42,7 @@ pub struct VideoStreamWidgetArgs {
 #[derive(Component)]
 pub struct VideoStream {
     pub msg_id: [u8; 2],
+    pub msg_name: String,
     pub current_frame: Option<Image>,
     pub frame_timestamp: Option<Timestamp>,
     pub texture_handle: Option<TextureHandle>,
@@ -58,6 +59,7 @@ impl Default for VideoStream {
     fn default() -> Self {
         Self {
             msg_id: [0, 0],
+            msg_name: String::new(),
             current_frame: None,
             texture_handle: None,
             size: Vec2::ZERO,

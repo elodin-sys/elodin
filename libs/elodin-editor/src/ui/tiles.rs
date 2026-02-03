@@ -635,12 +635,12 @@ impl TileState {
 
     pub fn create_video_stream_tile(
         &mut self,
-        msg_id: [u8; 2],
+        msg_name: String,
         name: PaneName,
         tile_id: Option<TileId>,
     ) {
         self.tree_actions
-            .push(TreeAction::AddVideoStream(tile_id, msg_id, name));
+            .push(TreeAction::AddVideoStream(tile_id, msg_name, name));
     }
 
     pub fn create_dashboard_tile(
@@ -1347,7 +1347,7 @@ pub enum TreeAction {
     AddQueryTable(Option<TileId>),
     AddQueryPlot(Option<TileId>),
     AddActionTile(Option<TileId>, PaneName, String),
-    AddVideoStream(Option<TileId>, [u8; 2], PaneName),
+    AddVideoStream(Option<TileId>, String, PaneName),
     AddDashboard(Option<TileId>, Box<impeller2_wkt::Dashboard>, PaneName),
     AddSchematicTree(Option<TileId>),
     AddDataOverview(Option<TileId>),
@@ -2471,15 +2471,17 @@ impl WidgetSystem for TileLayout<'_, '_> {
                             tile_state.tree.make_active(|id, _| id == tile_id);
                         }
                     }
-                    TreeAction::AddVideoStream(parent_tile_id, msg_id, name) => {
+                    TreeAction::AddVideoStream(parent_tile_id, msg_name, name) => {
                         if read_only {
                             continue;
                         }
+                        let msg_id = impeller2::types::msg_id(&msg_name);
                         let entity = state_mut
                             .commands
                             .spawn((
                                 super::video_stream::VideoStream {
                                     msg_id,
+                                    msg_name,
                                     ..Default::default()
                                 },
                                 bevy::ui::Node {

@@ -17,7 +17,7 @@ use egui_tiles::{Tile, TileId};
 use impeller2_bevy::ComponentMetadataRegistry;
 use impeller2_wkt::{
     ActionPane, ComponentMonitor, ComponentPath, Dashboard, Line3d, Panel, Schematic,
-    SchematicElem, Split, VectorArrow3d, Viewport, WindowSchematic,
+    SchematicElem, Split, VectorArrow3d, VideoStream as WktVideoStream, Viewport, WindowSchematic,
 };
 
 pub mod tree;
@@ -63,6 +63,7 @@ pub struct SchematicParam<'w, 's> {
     pub windows_state: Query<'w, 's, (&'static tiles::WindowState, &'static tiles::WindowId)>,
     pub primary_window: Single<'w, 's, Entity, With<PrimaryWindow>>,
     pub dashboards: Query<'w, 's, &'static Dashboard<Entity>>,
+    pub video_streams: Query<'w, 's, &'static super::video_stream::VideoStream>,
     pub hdr_enabled: Res<'w, HdrEnabled>,
     pub metadata: Res<'w, ComponentMetadataRegistry>,
 }
@@ -93,7 +94,7 @@ impl SchematicParam<'_, '_> {
             Pane::Dashboard(dashboard) => Some(dashboard.name.clone()),
             Pane::SchematicTree(pane) => Some(pane.name.clone()),
             Pane::DataOverview(pane) => Some(pane.name.clone()),
-            Pane::VideoStream(_) => None,
+            Pane::VideoStream(pane) => Some(pane.name.clone()),
         }
     }
 
@@ -241,8 +242,13 @@ impl SchematicParam<'_, '_> {
                         }))
                     }
 
-                    // Not exported
-                    Pane::VideoStream(_) => None,
+                    Pane::VideoStream(video_pane) => {
+                        let video_stream = self.video_streams.get(video_pane.entity).ok()?;
+                        Some(Panel::VideoStream(WktVideoStream {
+                            msg_name: video_stream.msg_name.clone(),
+                            name: pane_name,
+                        }))
+                    }
                     Pane::DataOverview(_) => Some(Panel::DataOverview(pane_name)),
 
                     // Structural panes
