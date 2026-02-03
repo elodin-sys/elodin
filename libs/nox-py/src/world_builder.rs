@@ -34,10 +34,19 @@ fn normalize_log_level(level: &str) -> Result<&'static str, Error> {
 }
 
 fn install_signal_handlers(cancel_token: CancelToken) {
-    ctrlc::set_handler(move || {
-        cancel_token.cancel();
-    })
-    .expect("install ctrl-c handler");
+    use signal_hook::consts::signal::*;
+    use signal_hook::iterator::Signals;
+
+    // Note: signal_hook's iterator API is Unix-focused; native Windows support may be limited.
+    // We currently rely on WSL/Linux for Ctrl-C handling. If native Windows is required,
+    // consider switching to the `ctrlc` crate or conditional compilation.
+    let mut signals =
+        Signals::new([SIGINT, SIGTERM]).expect("create signal handler iterator");
+    std::thread::spawn(move || {
+        for _ in signals.forever() {
+            cancel_token.cancel();
+        }
+    });
 }
 
 #[derive(Parser, Debug)]
