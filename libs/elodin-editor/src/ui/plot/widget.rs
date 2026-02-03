@@ -150,6 +150,30 @@ impl WidgetSystem for PlotWidget<'_, '_> {
     }
 }
 
+/// Defines how the X-axis is interpreted and displayed
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum XAxisMode {
+    /// X values are absolute timestamps in microseconds
+    #[default]
+    TimestampAbsolute,
+    /// X values are relative time in seconds from earliest_timestamp
+    TimestampRelative,
+    /// X values are arbitrary numeric values (not time-based)
+    Numeric,
+}
+
+impl XAxisMode {
+    /// Returns true if this mode represents time-based data
+    pub fn is_time_based(&self) -> bool {
+        matches!(self, XAxisMode::TimestampAbsolute | XAxisMode::TimestampRelative)
+    }
+
+    /// Returns true if X values are relative (seconds) rather than absolute (microseconds)
+    pub fn is_relative(&self) -> bool {
+        matches!(self, XAxisMode::TimestampRelative | XAxisMode::Numeric)
+    }
+}
+
 /// Data source for plot rendering - either timeseries (Line) or XY (XYLine) data
 pub enum PlotDataSource<'a> {
     Timeseries {
@@ -175,10 +199,8 @@ pub struct TimeseriesPlot {
     inner_rect: egui::Rect,
     steps_x: usize,
     steps_y: usize,
-    // For XY plots, x values are already in relative seconds
-    is_relative_time: bool,
-    // True XY mode: X-axis shows numeric values instead of time labels
-    is_xy_mode: bool,
+    /// How the X-axis is interpreted and displayed
+    x_axis_mode: XAxisMode,
 }
 
 pub const MARGIN: egui::Margin = egui::Margin {
@@ -236,6 +258,7 @@ pub fn get_inner_rect(rect: egui::Rect) -> egui::Rect {
 }
 
 impl TimeseriesPlot {
+    /// Create a plot with absolute timestamp X-axis (default for standard graph panels)
     pub fn from_bounds(
         rect: egui::Rect,
         bounds: PlotBounds,
@@ -243,17 +266,17 @@ impl TimeseriesPlot {
         earliest_timestamp: Timestamp,
         current_timestamp: Timestamp,
     ) -> Self {
-        Self::from_bounds_with_options(
+        Self::from_bounds_with_mode(
             rect,
             bounds,
             selected_range,
             earliest_timestamp,
             current_timestamp,
-            false, // Default to absolute timestamps
-            false, // Default to time-series mode
+            XAxisMode::TimestampAbsolute,
         )
     }
 
+    /// Create a plot with relative time X-axis (for query_plot TimeSeries mode)
     pub fn from_bounds_with_relative_time(
         rect: egui::Rect,
         bounds: PlotBounds,
@@ -262,18 +285,21 @@ impl TimeseriesPlot {
         current_timestamp: Timestamp,
         is_relative_time: bool,
     ) -> Self {
-        Self::from_bounds_with_options(
+        Self::from_bounds_with_mode(
             rect,
             bounds,
             selected_range,
             earliest_timestamp,
             current_timestamp,
-            is_relative_time,
-            false, // Default to time-series mode
+            if is_relative_time {
+                XAxisMode::TimestampRelative
+            } else {
+                XAxisMode::TimestampAbsolute
+            },
         )
     }
 
-    /// Create a plot with XY mode enabled (numeric X-axis labels)
+    /// Create a plot with numeric X-axis (for XY plots where X is not time)
     pub fn from_bounds_xy_mode(
         rect: egui::Rect,
         bounds: PlotBounds,
@@ -281,25 +307,24 @@ impl TimeseriesPlot {
         earliest_timestamp: Timestamp,
         current_timestamp: Timestamp,
     ) -> Self {
-        Self::from_bounds_with_options(
+        Self::from_bounds_with_mode(
             rect,
             bounds,
             selected_range,
             earliest_timestamp,
             current_timestamp,
-            true, // XY plots use relative values
-            true, // Enable XY mode for numeric labels
+            XAxisMode::Numeric,
         )
     }
 
-    pub fn from_bounds_with_options(
+    /// Create a plot with explicit X-axis mode
+    pub fn from_bounds_with_mode(
         rect: egui::Rect,
         bounds: PlotBounds,
         selected_range: Range<Timestamp>,
         earliest_timestamp: Timestamp,
         current_timestamp: Timestamp,
-        is_relative_time: bool,
-        is_xy_mode: bool,
+        x_axis_mode: XAxisMode,
     ) -> Self {
         let mut selected_range = selected_range;
         let inner_rect = get_inner_rect(rect);
@@ -323,180 +348,187 @@ impl TimeseriesPlot {
             inner_rect,
             steps_x,
             steps_y,
-            is_relative_time,
-            is_xy_mode,
+            x_axis_mode,
         }
     }
 
     fn draw_x_axis(&self, ui: &mut egui::Ui, font_id: &egui::FontId) {
-        if self.is_xy_mode {
-            // XY mode: Display numeric values on X-axis (not time)
-            let range = self.bounds.width();
-            if range <= 0.0 || !range.is_finite() {
-                return;
-            }
+        match self.x_axis_mode {
+            XAxisMode::Numeric => {
+                // Numeric mode: Display arbitrary numeric values on X-axis (not time)
+                let range = self.bounds.width();
+                if range <= 0.0 || !range.is_finite() {
+                    return;
+                }
 
-            // Calculate nice step size for numeric values
-            let raw_step = range / self.steps_x as f64;
-            // Round to a nice number (1, 2, 5 multiples of power of 10)
-            let magnitude = 10_f64.powf(raw_step.log10().floor());
-            let normalized = raw_step / magnitude;
-            let nice_step = if normalized <= 1.5 {
-                magnitude
-            } else if normalized <= 3.5 {
-                2.0 * magnitude
-            } else if normalized <= 7.5 {
-                5.0 * magnitude
-            } else {
-                10.0 * magnitude
-            };
+                // Calculate nice step size for numeric values
+                let raw_step = range / self.steps_x as f64;
+                // Round to a nice number (1, 2, 5 multiples of power of 10)
+                let magnitude = 10_f64.powf(raw_step.log10().floor());
+                let normalized = raw_step / magnitude;
+                let nice_step = if normalized <= 1.5 {
+                    magnitude
+                } else if normalized <= 3.5 {
+                    2.0 * magnitude
+                } else if normalized <= 7.5 {
+                    5.0 * magnitude
+                } else {
+                    10.0 * magnitude
+                };
 
-            if nice_step <= 0.0 || !nice_step.is_finite() {
-                return;
-            }
+                if nice_step <= 0.0 || !nice_step.is_finite() {
+                    return;
+                }
 
-            // Calculate start and end positions aligned to step boundaries
-            let start_offset = (self.bounds.min_x / nice_step).floor() * nice_step;
-            let end_offset = (self.bounds.max_x / nice_step).ceil() * nice_step;
+                // Calculate start and end positions aligned to step boundaries
+                let start_offset = (self.bounds.min_x / nice_step).floor() * nice_step;
+                let end_offset = (self.bounds.max_x / nice_step).ceil() * nice_step;
 
-            let mut i = start_offset;
-            while i <= end_offset {
-                // Skip if outside visible bounds
-                if i < self.bounds.min_x || i > self.bounds.max_x {
+                let mut i = start_offset;
+                while i <= end_offset {
+                    // Skip if outside visible bounds
+                    if i < self.bounds.min_x || i > self.bounds.max_x {
+                        i += nice_step;
+                        continue;
+                    }
+
+                    let x_pos = self
+                        .bounds
+                        .value_to_screen_pos(self.rect, DVec2::new(i, 0.0))
+                        .x;
+
+                    ui.painter().line_segment(
+                        [
+                            egui::pos2(x_pos, self.inner_rect.max.y),
+                            egui::pos2(x_pos, self.inner_rect.max.y + (NOTCH_LENGTH)),
+                        ],
+                        egui::Stroke::new(1.0, get_scheme().border_primary),
+                    );
+
+                    // Use numeric formatting for non-time X values
+                    ui.painter().text(
+                        egui::pos2(
+                            x_pos,
+                            self.inner_rect.max.y + (NOTCH_LENGTH + AXIS_LABEL_MARGIN),
+                        ),
+                        egui::Align2::CENTER_TOP,
+                        format_num(i),
+                        font_id.clone(),
+                        get_scheme().text_primary,
+                    );
+
                     i += nice_step;
-                    continue;
+                }
+            }
+            XAxisMode::TimestampRelative => {
+                // Relative time mode: X values are in seconds from earliest_timestamp
+                // Use segment_round() to round to nice time intervals like standard graphs
+                let step_size_seconds = self.bounds.width() / self.steps_x as f64;
+                let step_size =
+                    hifitime::Duration::from_seconds(step_size_seconds).segment_round();
+                let step_size_seconds = step_size.total_nanoseconds() as f64 / 1_000_000_000.0;
+
+                if step_size_seconds <= 0.0 || !step_size_seconds.is_normal() {
+                    return;
                 }
 
-                let x_pos = self
-                    .bounds
-                    .value_to_screen_pos(self.rect, DVec2::new(i, 0.0))
-                    .x;
+                // Calculate start and end positions aligned to step boundaries
+                let start_offset =
+                    (self.bounds.min_x / step_size_seconds).floor() * step_size_seconds;
+                let end_offset =
+                    (self.bounds.max_x / step_size_seconds).ceil() * step_size_seconds;
 
-                ui.painter().line_segment(
-                    [
-                        egui::pos2(x_pos, self.inner_rect.max.y),
-                        egui::pos2(x_pos, self.inner_rect.max.y + (NOTCH_LENGTH)),
-                    ],
-                    egui::Stroke::new(1.0, get_scheme().border_primary),
-                );
+                let mut i = start_offset;
+                while i <= end_offset {
+                    // Skip if outside visible bounds
+                    if i < self.bounds.min_x || i > self.bounds.max_x {
+                        i += step_size_seconds;
+                        continue;
+                    }
 
-                // Use numeric formatting for XY mode
-                ui.painter().text(
-                    egui::pos2(
-                        x_pos,
-                        self.inner_rect.max.y + (NOTCH_LENGTH + AXIS_LABEL_MARGIN),
-                    ),
-                    egui::Align2::CENTER_TOP,
-                    format_num(i),
-                    font_id.clone(),
-                    get_scheme().text_primary,
-                );
+                    let x_pos = self
+                        .bounds
+                        .value_to_screen_pos(self.rect, DVec2::new(i, 0.0))
+                        .x;
 
-                i += nice_step;
-            }
-        } else if self.is_relative_time {
-            // For relative time (XYLine), x values are already in seconds
-            // Use segment_round() to round to nice time intervals like standard graphs
-            let step_size_seconds = self.bounds.width() / self.steps_x as f64;
-            let step_size = hifitime::Duration::from_seconds(step_size_seconds).segment_round();
-            let step_size_seconds = step_size.total_nanoseconds() as f64 / 1_000_000_000.0;
+                    ui.painter().line_segment(
+                        [
+                            egui::pos2(x_pos, self.inner_rect.max.y),
+                            egui::pos2(x_pos, self.inner_rect.max.y + (NOTCH_LENGTH)),
+                        ],
+                        egui::Stroke::new(1.0, get_scheme().border_primary),
+                    );
 
-            if step_size_seconds <= 0.0 || !step_size_seconds.is_normal() {
-                return;
-            }
+                    // Convert seconds to Duration for PrettyDuration formatting
+                    let duration = hifitime::Duration::from_seconds(i);
+                    ui.painter().text(
+                        egui::pos2(
+                            x_pos,
+                            self.inner_rect.max.y + (NOTCH_LENGTH + AXIS_LABEL_MARGIN),
+                        ),
+                        egui::Align2::CENTER_TOP,
+                        PrettyDuration(duration).to_string(),
+                        font_id.clone(),
+                        get_scheme().text_primary,
+                    );
 
-            // Calculate start and end positions aligned to step boundaries
-            let start_offset = (self.bounds.min_x / step_size_seconds).floor() * step_size_seconds;
-            let end_offset = (self.bounds.max_x / step_size_seconds).ceil() * step_size_seconds;
-
-            let mut i = start_offset;
-            while i <= end_offset {
-                // Skip if outside visible bounds
-                if i < self.bounds.min_x || i > self.bounds.max_x {
                     i += step_size_seconds;
-                    continue;
                 }
-
-                let x_pos = self
-                    .bounds
-                    .value_to_screen_pos(self.rect, DVec2::new(i, 0.0))
-                    .x;
-
-                ui.painter().line_segment(
-                    [
-                        egui::pos2(x_pos, self.inner_rect.max.y),
-                        egui::pos2(x_pos, self.inner_rect.max.y + (NOTCH_LENGTH)),
-                    ],
-                    egui::Stroke::new(1.0, get_scheme().border_primary),
-                );
-
-                // Convert seconds to Duration for PrettyDuration formatting
-                let duration = hifitime::Duration::from_seconds(i);
-                ui.painter().text(
-                    egui::pos2(
-                        x_pos,
-                        self.inner_rect.max.y + (NOTCH_LENGTH + AXIS_LABEL_MARGIN),
-                    ),
-                    egui::Align2::CENTER_TOP,
-                    PrettyDuration(duration).to_string(),
-                    font_id.clone(),
-                    get_scheme().text_primary,
-                );
-
-                i += step_size_seconds;
             }
-        } else {
-            // Original timestamp-based logic
-            let step_size =
-                hifitime::Duration::from_microseconds(self.bounds.width() / self.steps_x as f64)
-                    .segment_round();
-            let step_size_micro = step_size.total_nanoseconds() / 1000;
-            let step_size_float = step_size_micro as f64;
-            if step_size_micro <= 0 {
-                return;
-            }
-            let visible_time_range = self.visible_time_range();
-            let start = self.selected_range.start;
-            let end = visible_time_range.end;
-            let start_count = (visible_time_range.start.0 - start.0) / step_size_micro as i64 - 1;
-            let end_count = end.0.saturating_sub(start.0) / step_size_micro as i64 + 1;
+            XAxisMode::TimestampAbsolute => {
+                // Absolute timestamp mode: X values are in microseconds
+                let step_size =
+                    hifitime::Duration::from_microseconds(self.bounds.width() / self.steps_x as f64)
+                        .segment_round();
+                let step_size_micro = step_size.total_nanoseconds() / 1000;
+                let step_size_float = step_size_micro as f64;
+                if step_size_micro <= 0 {
+                    return;
+                }
+                let visible_time_range = self.visible_time_range();
+                let start = self.selected_range.start;
+                let end = visible_time_range.end;
+                let start_count =
+                    (visible_time_range.start.0 - start.0) / step_size_micro as i64 - 1;
+                let end_count = end.0.saturating_sub(start.0) / step_size_micro as i64 + 1;
 
-            for i in start_count..=end_count {
-                let offset_float = step_size_float * i as f64;
-                let offset = hifitime::Duration::from_microseconds(offset_float);
+                for i in start_count..=end_count {
+                    let offset_float = step_size_float * i as f64;
+                    let offset = hifitime::Duration::from_microseconds(offset_float);
 
-                let x_pos = self
-                    .bounds
-                    .value_to_screen_pos(
-                        self.rect,
-                        (
-                            self.timestamp_to_x(Timestamp(
-                                start.0.saturating_add(offset_float as i64),
-                            )),
-                            0.0,
+                    let x_pos = self
+                        .bounds
+                        .value_to_screen_pos(
+                            self.rect,
+                            (
+                                self.timestamp_to_x(Timestamp(
+                                    start.0.saturating_add(offset_float as i64),
+                                )),
+                                0.0,
+                            )
+                                .into(),
                         )
-                            .into(),
-                    )
-                    .x;
+                        .x;
 
-                ui.painter().line_segment(
-                    [
-                        egui::pos2(x_pos, self.inner_rect.max.y),
-                        egui::pos2(x_pos, self.inner_rect.max.y + (NOTCH_LENGTH)),
-                    ],
-                    egui::Stroke::new(1.0, get_scheme().border_primary),
-                );
+                    ui.painter().line_segment(
+                        [
+                            egui::pos2(x_pos, self.inner_rect.max.y),
+                            egui::pos2(x_pos, self.inner_rect.max.y + (NOTCH_LENGTH)),
+                        ],
+                        egui::Stroke::new(1.0, get_scheme().border_primary),
+                    );
 
-                ui.painter().text(
-                    egui::pos2(
-                        x_pos,
-                        self.inner_rect.max.y + (NOTCH_LENGTH + AXIS_LABEL_MARGIN),
-                    ),
-                    egui::Align2::CENTER_TOP,
-                    PrettyDuration(offset).to_string(),
-                    font_id.clone(),
-                    get_scheme().text_primary,
-                );
+                    ui.painter().text(
+                        egui::pos2(
+                            x_pos,
+                            self.inner_rect.max.y + (NOTCH_LENGTH + AXIS_LABEL_MARGIN),
+                        ),
+                        egui::Align2::CENTER_TOP,
+                        PrettyDuration(offset).to_string(),
+                        font_id.clone(),
+                        get_scheme().text_primary,
+                    );
+                }
             }
         }
     }
@@ -642,16 +674,28 @@ impl TimeseriesPlot {
                             ui.add(egui::Separator::default().grow(16.0 * 2.0));
                             ui.add_space(8.0);
 
-                            // Show time
-                            if let Some(relative_seconds) = relative_seconds {
-                                // Convert seconds to nanoseconds for consistent precision
-                                let duration = hifitime::Duration::from_nanoseconds(
-                                    relative_seconds * 1_000_000_000.0,
-                                );
-                                ui.label(PrettyDuration(duration).to_string());
-                            } else {
-                                let time: hifitime::Epoch = timestamp.into();
-                                ui.add(time_label(time));
+                            // Show X-axis value based on mode
+                            match self.x_axis_mode {
+                                XAxisMode::Numeric => {
+                                    // For numeric XY plots, show X as a number
+                                    if let Some(x_value) = relative_seconds {
+                                        ui.label(format!("X: {}", format_num(x_value)));
+                                    }
+                                }
+                                XAxisMode::TimestampRelative => {
+                                    // For relative time, show as duration
+                                    if let Some(relative_seconds) = relative_seconds {
+                                        let duration = hifitime::Duration::from_nanoseconds(
+                                            relative_seconds * 1_000_000_000.0,
+                                        );
+                                        ui.label(PrettyDuration(duration).to_string());
+                                    }
+                                }
+                                XAxisMode::TimestampAbsolute => {
+                                    // For absolute time, show as epoch
+                                    let time: hifitime::Epoch = timestamp.into();
+                                    ui.add(time_label(time));
+                                }
                             }
 
                             // Find and show nearest value
@@ -754,31 +798,34 @@ impl TimeseriesPlot {
                 });
         }
 
-        response.context_menu(|ui| {
-            if ui.button("Set Time Range to Viewport Bounds").clicked() {
-                let (start, end) = if self.is_relative_time {
-                    // For relative time plots, bounds.min_x/max_x are in seconds
-                    // Convert to microseconds before adding to earliest_timestamp
-                    let start_micros =
-                        (self.bounds.min_x * 1_000_000.0) as i64 + self.earliest_timestamp.0;
-                    let end_micros =
-                        (self.bounds.max_x * 1_000_000.0) as i64 + self.earliest_timestamp.0;
-                    (Timestamp(start_micros), Timestamp(end_micros))
-                } else {
-                    // For absolute time plots, bounds.min_x/max_x are already in microseconds
-                    (
-                        Timestamp((self.bounds.min_x as i64) + self.earliest_timestamp.0),
-                        Timestamp((self.bounds.max_x as i64) + self.earliest_timestamp.0),
-                    )
-                };
-                graph_state.zoom_factor = Vec2::new(1.0, 1.0);
-                graph_state.pan_offset = Vec2::ZERO;
-                *time_range_behavior = TimeRangeBehavior {
-                    start: Offset::Fixed(start),
-                    end: Offset::Fixed(end),
-                };
-            }
-        });
+        // Only show time-related context menu for time-based plots
+        if self.x_axis_mode.is_time_based() {
+            response.context_menu(|ui| {
+                if ui.button("Set Time Range to Viewport Bounds").clicked() {
+                    let (start, end) = if self.x_axis_mode.is_relative() {
+                        // For relative time plots, bounds.min_x/max_x are in seconds
+                        // Convert to microseconds before adding to earliest_timestamp
+                        let start_micros =
+                            (self.bounds.min_x * 1_000_000.0) as i64 + self.earliest_timestamp.0;
+                        let end_micros =
+                            (self.bounds.max_x * 1_000_000.0) as i64 + self.earliest_timestamp.0;
+                        (Timestamp(start_micros), Timestamp(end_micros))
+                    } else {
+                        // For absolute time plots, bounds.min_x/max_x are already in microseconds
+                        (
+                            Timestamp((self.bounds.min_x as i64) + self.earliest_timestamp.0),
+                            Timestamp((self.bounds.max_x as i64) + self.earliest_timestamp.0),
+                        )
+                    };
+                    graph_state.zoom_factor = Vec2::new(1.0, 1.0);
+                    graph_state.pan_offset = Vec2::ZERO;
+                    *time_range_behavior = TimeRangeBehavior {
+                        start: Offset::Fixed(start),
+                        end: Offset::Fixed(end),
+                    };
+                }
+            });
+        }
 
         let mut font_id = egui::TextStyle::Monospace.resolve(ui.style());
 
@@ -831,15 +878,16 @@ impl TimeseriesPlot {
             let plot_point = self.bounds.screen_pos_to_value(self.rect, pointer_pos);
             draw_y_axis_flag(ui, pointer_pos, plot_point.y, self.inner_rect, font_id);
 
-            // Calculate timestamp or relative time based on data source
-            let (timestamp, relative_seconds) = if self.is_relative_time {
-                // For XYLine, x values are relative seconds
+            // Calculate timestamp or X value based on x_axis_mode
+            let (timestamp, relative_seconds) = if self.x_axis_mode.is_relative() {
+                // For relative time or numeric XY, x values are in seconds/numeric units
                 let relative_seconds = plot_point.x;
-                // Convert to timestamp for display purposes
+                // Convert to timestamp for internal use
                 let timestamp =
                     Timestamp((relative_seconds * 1_000_000.0) as i64 + self.earliest_timestamp.0);
                 (timestamp, Some(relative_seconds))
             } else {
+                // For absolute timestamp mode
                 let inner_point_pos = pointer_pos - self.rect.min;
                 let timestamp = Timestamp(
                     (((inner_point_pos.x / self.rect.width()) as f64 * self.bounds.width()
@@ -937,28 +985,42 @@ impl TimeseriesPlot {
             );
         }
 
-        // Draw current timestamp indicator
-        if self.is_relative_time {
-            // For XYLine, convert current_timestamp to relative seconds
-            let relative_seconds =
-                (self.current_timestamp.0 - self.earliest_timestamp.0) as f64 / 1_000_000.0;
-            if relative_seconds >= self.bounds.min_x && relative_seconds <= self.bounds.max_x {
-                let tick_pos = self
-                    .bounds
-                    .value_to_screen_pos(self.rect, DVec2::new(relative_seconds, 0.0))
-                    .x;
-                draw_tick_mark(ui, self.rect, self.inner_rect, tick_pos, *scrub_icon);
-            }
-        } else {
-            // Original timestamp-based logic
-            if self.selected_range.contains(&self.current_timestamp) {
-                let tick_pos = self
-                    .bounds
-                    .value_to_screen_pos(
-                        self.rect,
-                        (self.timestamp_to_x(self.current_timestamp), 0.0).into(),
-                    )
-                    .x;
+        // Draw current timestamp indicator (only for time-based plots)
+        if self.x_axis_mode.is_time_based() {
+            let tick_pos = match self.x_axis_mode {
+                XAxisMode::TimestampRelative => {
+                    // For relative time, convert current_timestamp to relative seconds
+                    let relative_seconds =
+                        (self.current_timestamp.0 - self.earliest_timestamp.0) as f64 / 1_000_000.0;
+                    if relative_seconds >= self.bounds.min_x && relative_seconds <= self.bounds.max_x
+                    {
+                        Some(
+                            self.bounds
+                                .value_to_screen_pos(self.rect, DVec2::new(relative_seconds, 0.0))
+                                .x,
+                        )
+                    } else {
+                        None
+                    }
+                }
+                XAxisMode::TimestampAbsolute => {
+                    // For absolute time, use timestamp directly
+                    if self.selected_range.contains(&self.current_timestamp) {
+                        Some(
+                            self.bounds
+                                .value_to_screen_pos(
+                                    self.rect,
+                                    (self.timestamp_to_x(self.current_timestamp), 0.0).into(),
+                                )
+                                .x,
+                        )
+                    } else {
+                        None
+                    }
+                }
+                XAxisMode::Numeric => None, // No timestamp tick for numeric X-axis
+            };
+            if let Some(tick_pos) = tick_pos {
                 draw_tick_mark(ui, self.rect, self.inner_rect, tick_pos, *scrub_icon);
             }
         }
@@ -969,8 +1031,8 @@ impl TimeseriesPlot {
     }
 
     fn visible_time_range(&self) -> Range<Timestamp> {
-        if self.is_relative_time {
-            // For relative time plots, bounds.min_x/max_x are in seconds
+        if self.x_axis_mode.is_relative() {
+            // For relative time/numeric plots, bounds.min_x/max_x are in seconds
             // Convert to microseconds before adding to earliest_timestamp
             Timestamp((self.bounds.min_x * 1_000_000.0) as i64 + self.earliest_timestamp.0)
                 ..Timestamp((self.bounds.max_x * 1_000_000.0) as i64 + self.earliest_timestamp.0)
