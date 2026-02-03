@@ -151,8 +151,8 @@ fn spawn_axes(
     parent: Entity,
 ) {
     // Axes extend beyond the cube for better visibility
-    let axis_length = 2.6 * config.scale;   // Long enough to be clearly visible
-    let axis_radius = 0.08 * config.scale;  // Thick for visibility
+    let axis_length = 2.6 * config.scale; // Long enough to be clearly visible
+    let axis_radius = 0.08 * config.scale; // Thick for visibility
     let tip_radius = 0.14 * config.scale;
     let tip_length = 0.3 * config.scale;
     // Origin at bottom-front-left corner - axes point towards user in ENU
@@ -253,7 +253,8 @@ fn spawn_face_labels(
     parent: Entity,
 ) {
     // Load the embedded font
-    let font: Handle<FontMesh> = asset_server.load("embedded://elodin_editor/assets/fonts/IBMPlexMono-Medium_ss04.ttf");
+    let font: Handle<FontMesh> =
+        asset_server.load("embedded://elodin_editor/assets/fonts/IBMPlexMono-Medium_ss04.ttf");
 
     // Label configuration - scaled by global config
     // Large letters that almost fill the face
