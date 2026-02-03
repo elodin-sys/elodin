@@ -40,8 +40,7 @@ fn install_signal_handlers(cancel_token: CancelToken) {
     // Note: signal_hook's iterator API is Unix-focused; native Windows support may be limited.
     // We currently rely on WSL/Linux for Ctrl-C handling. If native Windows is required,
     // consider switching to the `ctrlc` crate or conditional compilation.
-    let mut signals =
-        Signals::new([SIGINT, SIGTERM]).expect("create signal handler iterator");
+    let mut signals = Signals::new([SIGINT, SIGTERM]).expect("create signal handler iterator");
     std::thread::spawn(move || {
         for _ in signals.forever() {
             cancel_token.cancel();
