@@ -96,8 +96,12 @@ pub fn animate_camera(
     } else {
         // Smooth interpolation using ease-out curve
         let t = ease_out_cubic(camera_anim.progress);
-        transform.translation = camera_anim.start_position.lerp(camera_anim.target_position, t);
-        transform.rotation = camera_anim.start_rotation.slerp(camera_anim.target_rotation, t);
+        transform.translation = camera_anim
+            .start_position
+            .lerp(camera_anim.target_position, t);
+        transform.rotation = camera_anim
+            .start_rotation
+            .slerp(camera_anim.target_rotation, t);
     }
 }
 

@@ -13,7 +13,7 @@
 use bevy::asset::AssetPlugin;
 use bevy::prelude::*;
 use elodin_editor::plugins::view_cube::{
-    spawn::spawn_view_cube, ViewCubeConfig, ViewCubePlugin, ViewCubeTargetCamera,
+    ViewCubeConfig, ViewCubePlugin, ViewCubeTargetCamera, spawn::spawn_view_cube,
 };
 use std::path::PathBuf;
 
