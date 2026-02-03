@@ -18,7 +18,7 @@ use bevy::{
 };
 use egui::RichText;
 use impeller2_bevy::CommandsExt;
-use impeller2_wkt::{ArrowIPC, ErrorResponse, QueryPlot, QueryType, SQLQuery};
+use impeller2_wkt::{ArrowIPC, ErrorResponse, PlotMode, QueryPlot, QueryType, SQLQuery};
 use itertools::Itertools;
 
 use crate::{
@@ -67,6 +67,9 @@ impl Default for QueryPlotData {
                 auto_refresh: Default::default(),
                 color: impeller2_wkt::Color::from_color32(get_scheme().highlight),
                 query_type: QueryType::EQL,
+                plot_mode: PlotMode::TimeSeries,
+                x_label: None,
+                y_label: None,
                 aux: (),
             },
             state: Default::default(),
@@ -175,15 +178,18 @@ impl QueryPlotData {
             .filter(|&x| x.is_finite())
             .collect();
 
-        self.x_offset = finite_x_values.iter().fold(f64::INFINITY, |a, &b| a.min(b));
-        self.y_offset = 0.0;
-
-        if !self.x_offset.is_finite() {
+        // In XY mode, don't subtract x_offset so we preserve absolute coordinates
+        // In TimeSeries mode, subtract x_offset to make time relative (starting from 0)
+        let is_xy_mode = self.data.plot_mode == PlotMode::XY;
+        if is_xy_mode {
             self.x_offset = 0.0;
+        } else {
+            self.x_offset = finite_x_values.iter().fold(f64::INFINITY, |a, &b| a.min(b));
+            if !self.x_offset.is_finite() {
+                self.x_offset = 0.0;
+            }
         }
-        if !self.y_offset.is_finite() {
-            self.y_offset = 0.0;
-        }
+        self.y_offset = 0.0;
 
         let mut xy_line = XYLine {
             label: "SQL Data".to_string(),
@@ -205,8 +211,9 @@ impl QueryPlotData {
             }
         }
 
-        // but not relative time calculations used for plotting.
-        let skip_initial_points = if points.len() > 2 {
+        // Skip initial points that might be initialization artifacts.
+        // Only do this heuristic for time-series mode, not XY mode where all points are meaningful.
+        let skip_initial_points = if !is_xy_mode && points.len() > 2 {
             // Find how many initial points share the same timestamp.
             let first_time = points[0].0;
             let mut last_same = 0usize;
@@ -238,7 +245,7 @@ impl QueryPlotData {
                 0
             }
         } else {
-            0 // Not enough points to analyze.
+            0 // Not enough points to analyze, or XY mode where we keep all points.
         };
 
         // Add the points to the plot, skipping initial bad points if needed
@@ -424,6 +431,9 @@ impl WidgetSystem for QueryPlotWidget<'_, '_> {
                 // Store values we need before borrowing plot
                 let query_label = plot.data.name.clone();
                 let query_color = plot.data.color.into_color32();
+                let plot_mode = plot.data.plot_mode;
+                let x_label = plot.data.x_label.clone();
+                let y_label = plot.data.y_label.clone();
                 let offset_y = plot.offset().y;
                 let earliest_timestamp = plot
                     .earliest_timestamp
@@ -473,14 +483,25 @@ impl WidgetSystem for QueryPlotWidget<'_, '_> {
                 plot.line_entity = Some(line_entity);
 
                 // Use TimeseriesPlot for unified rendering
-                let plot_renderer = TimeseriesPlot::from_bounds_with_relative_time(
-                    rect,
-                    bounds,
-                    selected_range,
-                    earliest_timestamp,
-                    current_timestamp,
-                    true, // is_relative_time = true for query plots
-                );
+                // In XY mode, use numeric X-axis labels; otherwise use time labels
+                let plot_renderer = match plot_mode {
+                    PlotMode::XY => TimeseriesPlot::from_bounds_xy_mode(
+                        rect,
+                        bounds,
+                        selected_range,
+                        earliest_timestamp,
+                        current_timestamp,
+                    ),
+                    PlotMode::TimeSeries => TimeseriesPlot::from_bounds_with_relative_time(
+                        rect,
+                        bounds,
+                        selected_range,
+                        earliest_timestamp,
+                        current_timestamp,
+                        true, // is_relative_time = true for query plots
+                    ),
+                }
+                .with_labels(x_label, y_label);
 
                 let data_source = PlotDataSource::XY {
                     xy_lines: &state.xy_lines,
@@ -572,6 +593,7 @@ pub fn auto_bounds(
                     } else {
                         (min, max)
                     };
+
                     // For X-axis (time), keep relative values (x_values already have offset subtracted)
                     // Don't add x_offset back - we want time to start from 0
                     let min = min as f64;
