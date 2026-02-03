@@ -153,8 +153,5 @@ openh264 = "0.8"
 pic-scale = "0.6"
 
 [[example]]
-name = "axes_cube"
-path = "examples/axes_cube.rs"
-
-[dev-dependencies]
-bevy_fontmesh = "0.1.4"
+name = "view_cube_demo"
+path = "examples/view_cube_demo.rs"
