@@ -19,24 +19,6 @@ pub struct ViewCubeMeshRoot;
 #[derive(Component)]
 pub struct ViewCubeSetup;
 
-/// Marker for an active right-button drag interaction on a ViewCube root.
-#[derive(Component)]
-pub struct ViewCubeDragging;
-
-/// Links a ViewCube to the main camera it should follow/control
-#[derive(Component)]
-pub struct ViewCubeLink {
-    pub main_camera: Entity,
-}
-
-/// Marker for the ViewCube's dedicated camera (used in overlay mode)
-#[derive(Component)]
-pub struct ViewCubeCamera;
-
-/// Stores the render layer for this ViewCube instance
-#[derive(Component)]
-pub struct ViewCubeRenderLayer(pub usize);
-
 // ============================================================================
 // Cube Elements
 // ============================================================================
@@ -72,18 +54,6 @@ impl FaceDirection {
             FaceDirection::Down => Vec3::NEG_Y,
         }
     }
-
-    /// Opposite cube face.
-    pub fn opposite(self) -> Self {
-        match self {
-            FaceDirection::East => FaceDirection::West,
-            FaceDirection::West => FaceDirection::East,
-            FaceDirection::North => FaceDirection::South,
-            FaceDirection::South => FaceDirection::North,
-            FaceDirection::Up => FaceDirection::Down,
-            FaceDirection::Down => FaceDirection::Up,
-        }
-    }
 }
 
 /// Edge directions (between two faces)
@@ -107,21 +77,21 @@ pub enum EdgeDirection {
 }
 
 impl EdgeDirection {
-    /// The two faces touching this edge.
-    pub fn adjacent_faces(self) -> (FaceDirection, FaceDirection) {
+    /// Convert to camera look direction
+    pub fn to_look_direction(self) -> Vec3 {
         match self {
-            EdgeDirection::XTopFront => (FaceDirection::Up, FaceDirection::North),
-            EdgeDirection::XTopBack => (FaceDirection::Up, FaceDirection::South),
-            EdgeDirection::XBottomFront => (FaceDirection::Down, FaceDirection::North),
-            EdgeDirection::XBottomBack => (FaceDirection::Down, FaceDirection::South),
-            EdgeDirection::YFrontLeft => (FaceDirection::North, FaceDirection::West),
-            EdgeDirection::YFrontRight => (FaceDirection::North, FaceDirection::East),
-            EdgeDirection::YBackLeft => (FaceDirection::South, FaceDirection::West),
-            EdgeDirection::YBackRight => (FaceDirection::South, FaceDirection::East),
-            EdgeDirection::ZTopLeft => (FaceDirection::Up, FaceDirection::West),
-            EdgeDirection::ZTopRight => (FaceDirection::Up, FaceDirection::East),
-            EdgeDirection::ZBottomLeft => (FaceDirection::Down, FaceDirection::West),
-            EdgeDirection::ZBottomRight => (FaceDirection::Down, FaceDirection::East),
+            EdgeDirection::XTopFront => Vec3::new(0.0, 1.0, 1.0).normalize(),
+            EdgeDirection::XTopBack => Vec3::new(0.0, 1.0, -1.0).normalize(),
+            EdgeDirection::XBottomFront => Vec3::new(0.0, -1.0, 1.0).normalize(),
+            EdgeDirection::XBottomBack => Vec3::new(0.0, -1.0, -1.0).normalize(),
+            EdgeDirection::YFrontLeft => Vec3::new(-1.0, 0.0, 1.0).normalize(),
+            EdgeDirection::YFrontRight => Vec3::new(1.0, 0.0, 1.0).normalize(),
+            EdgeDirection::YBackLeft => Vec3::new(-1.0, 0.0, -1.0).normalize(),
+            EdgeDirection::YBackRight => Vec3::new(1.0, 0.0, -1.0).normalize(),
+            EdgeDirection::ZTopLeft => Vec3::new(-1.0, 1.0, 0.0).normalize(),
+            EdgeDirection::ZTopRight => Vec3::new(1.0, 1.0, 0.0).normalize(),
+            EdgeDirection::ZBottomLeft => Vec3::new(-1.0, -1.0, 0.0).normalize(),
+            EdgeDirection::ZBottomRight => Vec3::new(1.0, -1.0, 0.0).normalize(),
         }
     }
 }
@@ -170,13 +140,6 @@ pub enum RotationArrow {
     RollRight,
 }
 
-/// Axis label rendered as a billboard, with metadata for screen-space spacing from the axis.
-#[derive(Component, Clone, Copy)]
-pub struct AxisLabelBillboard {
-    pub axis_direction: Vec3,
-    pub base_position: Vec3,
-}
-
 // ============================================================================
 // Resources
 // ============================================================================
@@ -185,7 +148,6 @@ pub struct AxisLabelBillboard {
 #[derive(Resource, Default)]
 pub struct HoveredElement {
     pub entity: Option<Entity>,
-    pub entities: Vec<Entity>,
 }
 
 /// Stores original material colors for restoration after hover

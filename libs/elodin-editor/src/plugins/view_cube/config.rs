@@ -15,6 +15,8 @@ pub enum CoordinateSystem {
     /// East-North-Up: X=East, Y=Up, Z=North (aviation/robotics)
     #[default]
     ENU,
+    /// North-East-Down: X=North, Y=East, Z=Down (aerospace/navigation)
+    NED,
 }
 
 /// Axis definition with label, direction, and color
@@ -31,45 +33,61 @@ impl CoordinateSystem {
     /// Get the three axis definitions for this coordinate system
     pub fn get_axes(&self) -> [AxisDefinition; 3] {
         match self {
-            // ENU mapped to Bevy's Y-up coordinate system:
-            // Bevy +X (right) → East (red)
-            // Bevy +Y (up)    → Up (blue)
-            // Bevy +Z (fwd)   → North (green)
-            // See: https://docs.elodin.systems/reference/coords/
             CoordinateSystem::ENU => [
                 AxisDefinition {
-                    positive_label: "E",
-                    negative_label: "W",
+                    positive_label: "East",
+                    negative_label: "West",
                     direction: Vec3::X,
-                    color: Color::srgb(0.9, 0.2, 0.2), // Red
+                    color: Color::srgb(0.9, 0.2, 0.2),
                     color_dim: Color::srgb(0.6, 0.15, 0.15),
                 },
                 AxisDefinition {
-                    positive_label: "U",
-                    negative_label: "D",
+                    positive_label: "Up",
+                    negative_label: "Down",
                     direction: Vec3::Y,
-                    color: Color::srgb(0.2, 0.4, 0.9), // Blue (Up)
-                    color_dim: Color::srgb(0.15, 0.3, 0.6),
+                    color: Color::srgb(0.2, 0.8, 0.2),
+                    color_dim: Color::srgb(0.15, 0.5, 0.15),
                 },
                 AxisDefinition {
-                    positive_label: "N",
-                    negative_label: "S",
+                    positive_label: "North",
+                    negative_label: "South",
                     direction: Vec3::Z,
-                    color: Color::srgb(0.2, 0.8, 0.2), // Green (North)
+                    color: Color::srgb(0.2, 0.4, 0.9),
+                    color_dim: Color::srgb(0.15, 0.3, 0.6),
+                },
+            ],
+            CoordinateSystem::NED => [
+                AxisDefinition {
+                    positive_label: "North",
+                    negative_label: "South",
+                    direction: Vec3::X,
+                    color: Color::srgb(0.9, 0.2, 0.2),
+                    color_dim: Color::srgb(0.6, 0.15, 0.15),
+                },
+                AxisDefinition {
+                    positive_label: "East",
+                    negative_label: "West",
+                    direction: Vec3::Y,
+                    color: Color::srgb(0.2, 0.8, 0.2),
                     color_dim: Color::srgb(0.15, 0.5, 0.15),
+                },
+                AxisDefinition {
+                    positive_label: "Down",
+                    negative_label: "Up",
+                    direction: Vec3::Z,
+                    color: Color::srgb(0.2, 0.4, 0.9),
+                    color_dim: Color::srgb(0.15, 0.3, 0.6),
                 },
             ],
         }
     }
 
-    /// Get face labels for all 6 faces.
-    /// Positive directions use bright axis colors; opposite directions use dim axis colors.
+    /// Get all 6 face labels with their properties
     pub fn get_face_labels(&self, face_offset: f32) -> Vec<FaceLabelConfig> {
         let axes = self.get_axes();
         let mut labels = Vec::new();
 
         for axis in &axes {
-            // Positive face label.
             labels.push(FaceLabelConfig {
                 text: axis.positive_label,
                 position: axis.direction * face_offset,
@@ -77,8 +95,6 @@ impl CoordinateSystem {
                 color: axis.color,
                 direction: Self::direction_to_face(axis.direction),
             });
-
-            // Opposite face label.
             labels.push(FaceLabelConfig {
                 text: axis.negative_label,
                 position: -axis.direction * face_offset,
@@ -148,44 +164,15 @@ pub struct ViewCubeConfig {
     pub scale: f32,
     pub rotation_increment: f32,
     pub camera_distance: f32,
-    /// When true, the cube mirrors the main camera orientation.
-    pub sync_with_camera: bool,
-    /// Optional extra rotation applied when syncing the cube to the camera.
-    /// This is applied after the system-specific correction.
-    pub axis_correction: Quat,
-    /// Render layer used by the dedicated ViewCube overlay camera.
-    pub render_layer: u8,
 }
 
 impl Default for ViewCubeConfig {
     fn default() -> Self {
         Self {
             system: CoordinateSystem::ENU,
-            scale: 0.6,
+            scale: 0.95,
             rotation_increment: 15.0 * PI / 180.0,
-            camera_distance: 2.5,
-            sync_with_camera: true,
-            axis_correction: Quat::IDENTITY,
-            render_layer: 31,
+            camera_distance: 4.5,
         }
-    }
-}
-
-impl ViewCubeConfig {
-    /// Single supported mode: editor overlay integration.
-    pub fn editor_mode() -> Self {
-        Self::default()
-    }
-
-    /// Base correction for Bevy's camera forward (-Z) vs cube face orientation (+Z).
-    pub fn system_axis_correction(system: CoordinateSystem) -> Quat {
-        match system {
-            CoordinateSystem::ENU => Quat::from_rotation_y(PI),
-        }
-    }
-
-    /// Full correction applied when syncing the cube to the camera.
-    pub fn effective_axis_correction(&self) -> Quat {
-        Self::system_axis_correction(self.system) * self.axis_correction
     }
 }
