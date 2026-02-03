@@ -43,6 +43,32 @@ pub struct CommandPaletteState {
 }
 
 impl CommandPaletteState {
+    pub fn close(&mut self) {
+        self.show = false;
+        self.target_window = None;
+        self.just_opened = false;
+    }
+
+    pub fn reset_to_top_level(&mut self) {
+        self.filter.clear();
+        self.page_stack.clear();
+        self.selected_index = 0;
+        self.auto_open_item = None;
+        self.error = None;
+    }
+
+    pub fn open_palette(&mut self, target_window: Option<Entity>) {
+        self.show = true;
+        self.input_focus = true;
+        self.target_window = target_window;
+        self.just_opened = true;
+    }
+
+    pub fn open_palette_top_level(&mut self, target_window: Option<Entity>) {
+        self.reset_to_top_level();
+        self.open_palette(target_window);
+    }
+
     pub fn open_for_window(&mut self, target_window: Option<Entity>, item: PaletteItem) {
         self.target_window = target_window;
         self.open_item(item);
@@ -133,28 +159,26 @@ impl RootWidgetSystem for CommandPalette<'_, '_> {
             } else {
                 kbd.pressed(&Key::Control)
             };
-            if cmd_pressed && kbd.just_pressed(&Key::Character("p".into())) {
-                command_palette_state.show = !command_palette_state.show;
+            let shift_pressed = kbd.pressed(&Key::Shift);
+            let p_pressed = kbd.just_pressed(&Key::Character("p".into()))
+                || kbd.just_pressed(&Key::Character("P".into()));
+            if cmd_pressed && p_pressed {
                 if command_palette_state.show {
-                    command_palette_state.input_focus = true;
-                    let target_window = focused_window.or(primary_window);
-                    command_palette_state.target_window = target_window;
-                    command_palette_state.just_opened = true;
+                    command_palette_state.close();
                 } else {
-                    command_palette_state.target_window = None;
-                    command_palette_state.just_opened = false;
+                    let target_window = focused_window.or(primary_window);
+                    if shift_pressed {
+                        command_palette_state.open_palette(target_window);
+                    } else {
+                        command_palette_state.open_palette_top_level(target_window);
+                    }
                 }
             }
 
             if kbd.just_pressed(&Key::Escape) {
-                command_palette_state.show = false;
-                command_palette_state.target_window = None;
-                command_palette_state.just_opened = false;
+                command_palette_state.close();
             }
 
-            if !command_palette_state.show {
-                command_palette_state.filter = "".to_string();
-            }
             (
                 command_palette_state.auto_open_item.take(),
                 command_palette_state.filter.clone(),
@@ -194,15 +218,13 @@ impl RootWidgetSystem for PaletteWindow<'_, '_> {
     ) -> Self::Output {
         let (command_palette_icons, auto_open_none, just_opened) = {
             let state_mut = state.get_mut(world);
-            let mut command_palette_state = state_mut.command_palette_state;
+            let command_palette_state = state_mut.command_palette_state;
 
             if command_palette_state.target_window != args {
                 return false;
             }
 
             if !command_palette_state.show {
-                command_palette_state.filter.clear();
-                command_palette_state.page_stack.clear();
                 return false;
             }
 

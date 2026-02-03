@@ -238,7 +238,10 @@ impl Plugin for EditorPlugin {
             .add_systems(Startup, spawn_ui_cam)
             .add_systems(PostUpdate, ui::video_stream::set_visibility)
             .add_systems(PostUpdate, set_clear_color)
-            //.add_systems(Update, clamp_current_time)
+            .add_systems(
+                Update,
+                clamp_current_time.before(crate::ui::timeline::timeline_slider::sync_ui_tick),
+            )
             .insert_resource(WireframeConfig {
                 global: false,
                 default_color: Color::WHITE,
@@ -1196,15 +1199,17 @@ fn clamp_range(total_range: Range<Timestamp>, b: Range<Timestamp>) -> Range<Time
 
 pub fn clamp_current_time(
     range: Res<SelectedTimeRange>,
-    current_timestamp: ResMut<CurrentTimestamp>,
+    mut current_timestamp: ResMut<CurrentTimestamp>,
     packet_tx: Res<PacketTx>,
     current_stream_id: Res<CurrentStreamId>,
 ) {
     if range.0.start > range.0.end {
         return;
     }
-    let new_timestamp = current_timestamp.0.clamp(range.0.start, range.0.end);
-    if new_timestamp != current_timestamp.0 {
+    let previous_timestamp = current_timestamp.0;
+    let new_timestamp = previous_timestamp.clamp(range.0.start, range.0.end);
+    if new_timestamp != previous_timestamp {
+        current_timestamp.0 = new_timestamp;
         packet_tx.send_msg(SetStreamState::rewind(**current_stream_id, new_timestamp))
     }
 }

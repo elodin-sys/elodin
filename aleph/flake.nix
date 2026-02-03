@@ -9,7 +9,7 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.05";
     nixpkgs-unstable.url = "github:nixos/nixpkgs/nixos-unstable";
-    jetpack.url = "github:anduril/jetpack-nixos/6e7aa572e435136a26bcf475d70aafdeef117e2d";
+    jetpack.url = "github:anduril/jetpack-nixos/2c98c9d6c326d67ae5f4909db61238d31352e18c";
     rust-overlay.url = "github:oxalica/rust-overlay";
     flake-utils.url = "github:numtide/flake-utils";
 
@@ -145,10 +145,16 @@
         toplevel = nixosConfigurations.default.config.system.build.toplevel;
         sdimage = nixosConfigurations.installer.config.system.build.sdImage;
       };
-      packages.x86_64-linux = {
+      packages.x86_64-linux = let
+        flash-cross = jetpack.nixosConfigurations."orin-nx-devkit".extendModules {
+          modules = [
+            {nixpkgs.buildPlatform.system = "x86_64-linux";}
+          ];
+        };
+      in {
         flash-uefi = nixpkgs.legacyPackages.x86_64-linux.runCommand "flash-uefi" {} ''
           mkdir -p $out
-          cp ${jetpack.outputs.packages.x86_64-linux.flash-orin-nx-devkit}/bin/flash-orin-nx-devkit-cross $out/flash-uefi
+          cp ${flash-cross.config.system.build.legacyFlashScript}/bin/flash-orin-nx-devkit $out/flash-uefi
           sed -i '46i\cp ${./tegra234-mb2-bct-misc-p3767-0000.dts} bootloader/generic/BCT/tegra234-mb2-bct-misc-p3767-0000.dts' $out/flash-uefi
           chmod +x $out/flash-uefi
         '';
