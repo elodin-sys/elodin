@@ -182,6 +182,12 @@ pub struct ViewCubeConfig {
     pub overlay_margin: f32,
     /// Render layer for overlay mode (should not conflict with other layers).
     pub render_layer: u8,
+    /// Editor mode: use LookToTrigger from bevy_editor_cam instead of direct animation.
+    /// This integrates better with the editor's camera system.
+    pub use_look_to_trigger: bool,
+    /// Editor mode: adapt viewport position based on main camera's viewport.
+    /// Required for split views where gizmo should stay in each viewport's corner.
+    pub follow_main_viewport: bool,
 }
 
 impl Default for ViewCubeConfig {
@@ -196,7 +202,24 @@ impl Default for ViewCubeConfig {
             use_overlay: false,
             overlay_size: 160,
             overlay_margin: 8.0,
-            render_layer: 31, // Use high layer to avoid conflicts
+            render_layer: 31,
+            use_look_to_trigger: false,
+            follow_main_viewport: false,
+        }
+    }
+}
+
+impl ViewCubeConfig {
+    /// Configuration preset for editor integration.
+    /// Enables LookToTrigger, viewport following, and camera sync.
+    pub fn editor_mode() -> Self {
+        Self {
+            use_overlay: true,
+            sync_with_camera: true,
+            auto_rotate: false, // Editor handles camera via LookToTrigger
+            use_look_to_trigger: true,
+            follow_main_viewport: true,
+            ..Default::default()
         }
     }
 }
