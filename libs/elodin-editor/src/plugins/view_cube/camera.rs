@@ -420,14 +420,27 @@ pub fn handle_view_cube_look_to(
 /// This ensures rotation is around the camera's anchor point.
 pub fn handle_view_cube_arrows_editor(
     mut events: MessageReader<ViewCubeEvent>,
-    mut camera_query: Query<(&Transform, &mut EditorCam), With<ViewCubeTargetCamera>>,
+    mut camera_query: Query<(&mut Transform, &mut EditorCam), With<ViewCubeTargetCamera>>,
     config: Res<ViewCubeConfig>,
 ) {
     for event in events.read() {
         if let ViewCubeEvent::ArrowClicked(arrow) = event {
-            if let Ok((transform, mut editor_cam)) = camera_query.single_mut() {
+            if let Ok((mut transform, mut editor_cam)) = camera_query.single_mut() {
+                // Handle roll separately (EditorCam orbit doesn't support roll)
+                if matches!(arrow, RotationArrow::RollLeft | RotationArrow::RollRight) {
+                    let roll_angle = if *arrow == RotationArrow::RollLeft {
+                        config.rotation_increment
+                    } else {
+                        -config.rotation_increment
+                    };
+                    let forward = transform.forward();
+                    let roll_rotation = Quat::from_axis_angle(*forward, roll_angle);
+                    transform.rotation = roll_rotation * transform.rotation;
+                    continue;
+                }
+
                 // Get anchor point from camera transform
-                let anchor = crate::plugins::camera_anchor::camera_anchor_from_transform(transform);
+                let anchor = crate::plugins::camera_anchor::camera_anchor_from_transform(&transform);
 
                 // Calculate screenspace delta based on arrow direction
                 // Using a base delta scaled by rotation_increment
@@ -437,16 +450,14 @@ pub fn handle_view_cube_arrows_editor(
                     RotationArrow::Right => Vec2::new(-base_delta, 0.0),
                     RotationArrow::Up => Vec2::new(0.0, -base_delta),
                     RotationArrow::Down => Vec2::new(0.0, base_delta),
-                    RotationArrow::RollLeft | RotationArrow::RollRight => {
-                        // Roll is not naturally supported by orbit - skip for now
-                        continue;
-                    }
+                    _ => continue,
                 };
 
-                // Use EditorCam orbit for rotation
+                // Use EditorCam orbit for rotation - single shot
                 editor_cam.end_move();
                 editor_cam.start_orbit(anchor);
                 editor_cam.send_screenspace_input(delta);
+                editor_cam.end_move(); // Stop immediately after input
             }
         }
     }
