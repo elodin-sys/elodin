@@ -5,7 +5,7 @@ Video Streaming Example
 Demonstrates streaming video from GStreamer into Elodin DB and
 displaying it in the Elodin Editor's video stream tile.
 
-A ball rolls around on a flat surface, pushed by random wind and
+A ball rolls around on a flat surface, pushed by rotating wind and
 bouncing off walls at the viewport edges.
 
 Usage:
@@ -21,8 +21,6 @@ from pathlib import Path
 import elodin as el
 import jax
 from jax import numpy as jnp
-from jax import random
-from jax.numpy import linalg as la
 
 # =============================================================================
 # Constants
@@ -31,9 +29,9 @@ from jax.numpy import linalg as la
 SIM_TIME_STEP = 1.0 / 120.0
 BALL_RADIUS = 0.3
 BOUNDARY = 4.0  # Wall distance from center
-BOUNCINESS = 0.8  # Energy retained on wall bounce
-WIND_STRENGTH = 1.5  # Scale factor for random wind
-FRICTION = 0.1  # Viscous damping coefficient
+BOUNCINESS = 0.95  # Energy retained on wall bounce (higher = bouncier)
+FRICTION = 0.4  # Viscous damping coefficient
+
 
 # =============================================================================
 # Custom Components
@@ -51,7 +49,6 @@ Wind = typing.Annotated[
 
 @el.dataclass
 class WindData(el.Archetype):
-    seed: el.Seed = field(default_factory=lambda: jnp.int64(0))
     wind: Wind = field(default_factory=lambda: jnp.array([0.0, 0.0, 0.0]))
 
 
@@ -60,12 +57,30 @@ class WindData(el.Archetype):
 # =============================================================================
 
 
-@el.map
-def sample_wind(s: el.Seed, _w: Wind) -> Wind:
-    """Generate random wind in X-Y plane."""
-    wind = random.normal(random.key(s), shape=(3,)) * WIND_STRENGTH
-    # Zero out Z component - wind only blows horizontally
-    return wind.at[2].set(0.0)
+# Wind rotation rate - completes one full rotation every N ticks
+WIND_ROTATION_PERIOD = 360  # 3 seconds at 120Hz for full rotation
+WIND_SPEED = 8.0  # Constant wind speed
+
+
+@el.system
+def sample_wind(
+    tick: el.Query[el.SimulationTick],
+    w: el.Query[Wind],
+) -> el.Query[Wind]:
+    """
+    Wind direction rotates in a circle over time.
+    Uses built-in SimulationTick for deterministic rotation.
+    """
+    # Convert tick to angle (2*pi radians per rotation period)
+    angle = (tick[0] / WIND_ROTATION_PERIOD) * 2.0 * jnp.pi
+    
+    # Wind rotates in X-Y plane
+    wind_vec = jnp.array([
+        jnp.cos(angle) * WIND_SPEED,
+        jnp.sin(angle) * WIND_SPEED,
+        0.0
+    ])
+    return w.map(Wind, lambda _: wind_vec)
 
 
 @el.map
@@ -124,39 +139,16 @@ def rolling_motion(v: el.WorldVel) -> el.WorldVel:
 # Systems - Effectors (forces passed to integrator)
 # =============================================================================
 
-
-def calculate_drag(Cd: float, rho: float, V: float, A: float) -> float:
-    """Calculate drag force magnitude."""
-    return 0.5 * Cd * rho * V**2 * A
+# Direct wind force coefficient (how strongly wind pushes the ball)
+WIND_FORCE_COEFFICIENT = 3.0
 
 
 @el.map
-def apply_wind(w: Wind, v: el.WorldVel, f: el.Force) -> el.Force:
-    """Apply wind force using drag physics."""
-    # Relative velocity between wind and ball
-    rel_vel = w - v.linear()
-    rel_speed = la.norm(rel_vel)
-
-    # Drag parameters
-    drag_coefficient = 0.5
-    air_density = 1.225
-    ball_surface_area = jnp.pi * BALL_RADIUS**2
-
-    # Calculate drag force magnitude
-    drag_mag = calculate_drag(drag_coefficient, air_density, rel_speed, ball_surface_area)
-
-    # Direction of drag force (in direction of relative wind)
-    # Avoid division by zero
-    drag_dir = jax.lax.cond(
-        rel_speed > 1e-6,
-        lambda _: rel_vel / rel_speed,
-        lambda _: jnp.zeros(3),
-        operand=None,
-    )
-
-    drag_force = drag_mag * drag_dir
-
-    return el.SpatialForce(linear=f.force() + drag_force)
+def apply_wind(w: Wind, f: el.Force) -> el.Force:
+    """Apply direct wind force - wind pushes the ball regardless of ball velocity."""
+    # Direct force proportional to wind velocity
+    wind_force = w * WIND_FORCE_COEFFICIENT
+    return el.SpatialForce(linear=f.force() + wind_force)
 
 
 @el.map
@@ -183,11 +175,11 @@ ball = world.spawn(
             world_pos=el.SpatialTransform(linear=jnp.array([0.0, 0.0, BALL_RADIUS])),
             world_vel=el.SpatialMotion(
                 angular=jnp.array([0.0, 0.0, 0.0]),
-                linear=jnp.array([1.0, 0.5, 0.0]),  # Initial velocity to start rolling
+                linear=jnp.array([3.0, 2.0, 0.0]),  # Initial velocity to start rolling
             ),
             inertia=el.SpatialInertia(mass=1.0),
         ),
-        WindData(seed=jnp.int64(42)),
+        WindData(),
     ],
     name="ball",
 )
@@ -205,11 +197,12 @@ world.recipe(video_streamer)
 # Define schematic with top-down camera view and video stream tile
 world.schematic("""
     hsplit {
-        tabs share=0.5 {
+        tabs share=0.6 {
             viewport name=Viewport pos="(0,0,0,0, 0,0,12)" look_at="(0,0,0,0, 0,0,0)" show_grid=#true
         }
-        tabs share=0.5 {
+        vsplit share=0.4 {
             video_stream "test-video" name="Test Pattern"
+            graph "ball.wind" name="Wind (m/s)"
         }
     }
     object_3d ball.world_pos {
@@ -222,12 +215,16 @@ world.schematic("""
             color 32 128 32 200
         }
     }
+    // Wind force visualization arrow at origin, slightly above ground
+    vector_arrow "ball.wind" origin="(0,0,0,1, 0,0,0.5)" scale=0.3 name="Wind" show_name=#true {
+        color cyan 200
+    }
 """)
 
 print("Video Streaming Example - Rolling Ball")
 print("======================================")
 print()
-print("A ball rolls around pushed by random wind, bouncing off walls.")
+print("A ball rolls around pushed by rotating wind, bouncing off walls.")
 print("The video stream tile shows a GStreamer test pattern.")
 print()
 
