@@ -75,11 +75,33 @@ fn setup(
 | `use_overlay` | `bool` | `false` | Render as fixed overlay with dedicated camera |
 | `sync_with_camera` | `bool` | `false` | Cube rotation mirrors main camera |
 | `auto_rotate` | `bool` | `true` | Plugin handles camera rotation on click |
+| `use_look_to_trigger` | `bool` | `false` | Use bevy_editor_cam's LookToTrigger (editor mode) |
+| `follow_main_viewport` | `bool` | `false` | Position relative to main camera's viewport (split views) |
 | `overlay_size` | `u32` | `160` | Viewport size in pixels |
 | `overlay_margin` | `f32` | `8.0` | Margin from window edge |
 | `camera_distance` | `f32` | `3.5` | Distance from cube (affects apparent size) |
 | `scale` | `f32` | `0.95` | Cube scale factor |
 | `system` | `CoordinateSystem` | `ENU` | Coordinate system (ENU or NED) |
+
+## Editor Integration
+
+For integration with the Elodin editor (using `bevy_editor_cam`):
+
+```rust
+use elodin_editor::plugins::view_cube::{ViewCubeConfig, ViewCubePlugin};
+
+// Use the editor_mode() preset
+let config = ViewCubeConfig::editor_mode();
+
+App::new()
+    .add_plugins(ViewCubePlugin { config })
+    // ...
+```
+
+This enables:
+- `use_look_to_trigger`: Uses `LookToTrigger` for smooth camera transitions
+- `follow_main_viewport`: ViewCube stays in corner of each split view
+- `sync_with_camera`: Cube rotation reflects main camera orientation
 
 ## Run the Demo
 
