@@ -150,10 +150,11 @@ fn spawn_axes(
     render_layers: Option<RenderLayers>,
     parent: Entity,
 ) {
-    let axis_length = 1.4 * config.scale;
-    let axis_radius = 0.035 * config.scale;
-    let tip_radius = 0.08 * config.scale;
-    let tip_length = 0.2 * config.scale;
+    // Axes extend beyond the cube for better visibility
+    let axis_length = 1.8 * config.scale;
+    let axis_radius = 0.06 * config.scale;  // Thicker for visibility
+    let tip_radius = 0.12 * config.scale;
+    let tip_length = 0.25 * config.scale;
     let origin = Vec3::new(-0.55, -0.55, -0.55) * config.scale;
 
     let axes = config.system.get_axes();
@@ -188,8 +189,14 @@ fn spawn_axes(
     let tip_mesh = meshes.add(Cone::new(tip_radius, tip_length));
 
     for (direction, color, name) in axis_configs {
+        // Convert color to LinearRgba for emissive
+        let emissive = match color {
+            Color::Srgba(c) => LinearRgba::new(c.red * 0.5, c.green * 0.5, c.blue * 0.5, 1.0),
+            _ => LinearRgba::new(0.3, 0.3, 0.3, 1.0),
+        };
         let material = materials.add(StandardMaterial {
             base_color: color,
+            emissive,  // Glow for visibility in dark/light modes
             unlit: true,
             ..default()
         });
