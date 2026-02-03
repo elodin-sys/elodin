@@ -83,8 +83,10 @@ impl Plugin for ViewCubePlugin {
 
         // Add camera control systems when auto_rotate is enabled
         if self.config.auto_rotate {
-            app.init_resource::<CameraAnimation>()
-                .add_systems(Update, (camera::handle_view_cube_camera, camera::animate_camera));
+            app.init_resource::<CameraAnimation>().add_systems(
+                Update,
+                (camera::handle_view_cube_camera, camera::animate_camera),
+            );
         }
     }
 }
