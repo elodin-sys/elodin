@@ -48,7 +48,7 @@ use ui::{
 
 pub mod object_3d;
 mod offset_parse;
-mod plugins;
+pub mod plugins;
 pub mod ui;
 pub mod vector_arrow;
 
