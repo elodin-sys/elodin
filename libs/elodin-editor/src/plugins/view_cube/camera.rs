@@ -3,14 +3,16 @@
 //! When `auto_rotate` is enabled, this module handles camera rotation
 //! in response to ViewCube events.
 
-use bevy::camera::visibility::RenderLayers;
 use bevy::camera::Viewport;
+use bevy::camera::visibility::RenderLayers;
 use bevy::math::Dir3;
 use bevy::prelude::*;
 use bevy_editor_cam::controller::component::EditorCam;
 use bevy_editor_cam::extensions::look_to::LookToTrigger;
 
-use super::components::{RotationArrow, ViewCubeCamera, ViewCubeLink, ViewCubeRenderLayer, ViewCubeRoot};
+use super::components::{
+    RotationArrow, ViewCubeCamera, ViewCubeLink, ViewCubeRenderLayer, ViewCubeRoot,
+};
 use super::config::ViewCubeConfig;
 use super::events::ViewCubeEvent;
 
@@ -440,7 +442,8 @@ pub fn handle_view_cube_arrows_editor(
                 }
 
                 // Get anchor point from camera transform
-                let anchor = crate::plugins::camera_anchor::camera_anchor_from_transform(&transform);
+                let anchor =
+                    crate::plugins::camera_anchor::camera_anchor_from_transform(&transform);
 
                 // Calculate screenspace delta based on arrow direction
                 // Using a base delta scaled by rotation_increment

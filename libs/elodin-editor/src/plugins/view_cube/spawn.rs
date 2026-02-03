@@ -152,7 +152,7 @@ fn spawn_axes(
 ) {
     // Axes extend beyond the cube for better visibility
     let axis_length = 1.8 * config.scale;
-    let axis_radius = 0.06 * config.scale;  // Thicker for visibility
+    let axis_radius = 0.06 * config.scale; // Thicker for visibility
     let tip_radius = 0.12 * config.scale;
     let tip_length = 0.25 * config.scale;
     let origin = Vec3::new(-0.55, -0.55, -0.55) * config.scale;
@@ -196,7 +196,7 @@ fn spawn_axes(
         };
         let material = materials.add(StandardMaterial {
             base_color: color,
-            emissive,  // Glow for visibility in dark/light modes
+            emissive, // Glow for visibility in dark/light modes
             unlit: true,
             ..default()
         });
