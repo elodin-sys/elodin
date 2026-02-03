@@ -164,6 +164,10 @@ pub struct ViewCubeConfig {
     pub scale: f32,
     pub rotation_increment: f32,
     pub camera_distance: f32,
+    /// When true, the plugin automatically handles camera rotation.
+    /// The target camera must have the `ViewCubeTargetCamera` component.
+    /// When false, only events are emitted for manual handling.
+    pub auto_rotate: bool,
 }
 
 impl Default for ViewCubeConfig {
@@ -173,6 +177,7 @@ impl Default for ViewCubeConfig {
             scale: 0.95,
             rotation_increment: 15.0 * PI / 180.0,
             camera_distance: 4.5,
+            auto_rotate: true,
         }
     }
 }
