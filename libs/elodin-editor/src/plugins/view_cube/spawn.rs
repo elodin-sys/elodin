@@ -151,11 +151,12 @@ fn spawn_axes(
     parent: Entity,
 ) {
     // Axes extend beyond the cube for better visibility
-    let axis_length = 1.8 * config.scale;
-    let axis_radius = 0.06 * config.scale; // Thicker for visibility
+    let axis_length = 2.2 * config.scale;   // Even longer
+    let axis_radius = 0.06 * config.scale;  // Thicker for visibility
     let tip_radius = 0.12 * config.scale;
     let tip_length = 0.25 * config.scale;
-    let origin = Vec3::new(-0.55, -0.55, -0.55) * config.scale;
+    // Origin at bottom-front-left corner - axes point towards user in ENU
+    let origin = Vec3::new(-0.55, -0.55, 0.55) * config.scale;
 
     let axes = config.system.get_axes();
     let axis_configs: [(Vec3, Color, &str); 3] = [
@@ -255,8 +256,9 @@ fn spawn_face_labels(
     let font: Handle<FontMesh> = asset_server.load("fonts/Roboto-Bold.ttf");
 
     // Label configuration - scaled by global config
-    let label_scale = 0.12 * config.scale;
-    let label_depth = 0.05 * config.scale;
+    // Large letters that almost fill the face
+    let label_scale = 0.35 * config.scale;
+    let label_depth = 0.03 * config.scale;
     let face_offset = 0.52 * config.scale;
 
     // Get face labels from coordinate system configuration
