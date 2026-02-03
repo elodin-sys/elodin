@@ -432,6 +432,8 @@ impl WidgetSystem for QueryPlotWidget<'_, '_> {
                 let query_label = plot.data.name.clone();
                 let query_color = plot.data.color.into_color32();
                 let plot_mode = plot.data.plot_mode;
+                let x_label = plot.data.x_label.clone();
+                let y_label = plot.data.y_label.clone();
                 let offset_y = plot.offset().y;
                 let earliest_timestamp = plot
                     .earliest_timestamp
@@ -498,7 +500,8 @@ impl WidgetSystem for QueryPlotWidget<'_, '_> {
                         current_timestamp,
                         true, // is_relative_time = true for query plots
                     ),
-                };
+                }
+                .with_labels(x_label, y_label);
 
                 let data_source = PlotDataSource::XY {
                     xy_lines: &state.xy_lines,

@@ -165,7 +165,10 @@ pub enum XAxisMode {
 impl XAxisMode {
     /// Returns true if this mode represents time-based data
     pub fn is_time_based(&self) -> bool {
-        matches!(self, XAxisMode::TimestampAbsolute | XAxisMode::TimestampRelative)
+        matches!(
+            self,
+            XAxisMode::TimestampAbsolute | XAxisMode::TimestampRelative
+        )
     }
 
     /// Returns true if X values are relative (seconds) rather than absolute (microseconds)
@@ -201,13 +204,17 @@ pub struct TimeseriesPlot {
     steps_y: usize,
     /// How the X-axis is interpreted and displayed
     x_axis_mode: XAxisMode,
+    /// Optional label for X-axis (displayed below the axis)
+    x_label: Option<String>,
+    /// Optional label for Y-axis (displayed to the left of the axis, rotated)
+    y_label: Option<String>,
 }
 
 pub const MARGIN: egui::Margin = egui::Margin {
     left: 100,
     right: 0,
     top: 35,
-    bottom: 35,
+    bottom: 45,
 };
 pub const TICK_MARK_LINE_WIDTH: f32 = 1.0;
 pub const TICK_MARK_ASPECT_RATIO: f32 = 12.0 / 30.0;
@@ -349,7 +356,16 @@ impl TimeseriesPlot {
             steps_x,
             steps_y,
             x_axis_mode,
+            x_label: None,
+            y_label: None,
         }
+    }
+
+    /// Set optional axis labels for the plot
+    pub fn with_labels(mut self, x_label: Option<String>, y_label: Option<String>) -> Self {
+        self.x_label = x_label;
+        self.y_label = y_label;
+        self
     }
 
     fn draw_x_axis(&self, ui: &mut egui::Ui, font_id: &egui::FontId) {
@@ -424,8 +440,7 @@ impl TimeseriesPlot {
                 // Relative time mode: X values are in seconds from earliest_timestamp
                 // Use segment_round() to round to nice time intervals like standard graphs
                 let step_size_seconds = self.bounds.width() / self.steps_x as f64;
-                let step_size =
-                    hifitime::Duration::from_seconds(step_size_seconds).segment_round();
+                let step_size = hifitime::Duration::from_seconds(step_size_seconds).segment_round();
                 let step_size_seconds = step_size.total_nanoseconds() as f64 / 1_000_000_000.0;
 
                 if step_size_seconds <= 0.0 || !step_size_seconds.is_normal() {
@@ -435,8 +450,7 @@ impl TimeseriesPlot {
                 // Calculate start and end positions aligned to step boundaries
                 let start_offset =
                     (self.bounds.min_x / step_size_seconds).floor() * step_size_seconds;
-                let end_offset =
-                    (self.bounds.max_x / step_size_seconds).ceil() * step_size_seconds;
+                let end_offset = (self.bounds.max_x / step_size_seconds).ceil() * step_size_seconds;
 
                 let mut i = start_offset;
                 while i <= end_offset {
@@ -477,9 +491,10 @@ impl TimeseriesPlot {
             }
             XAxisMode::TimestampAbsolute => {
                 // Absolute timestamp mode: X values are in microseconds
-                let step_size =
-                    hifitime::Duration::from_microseconds(self.bounds.width() / self.steps_x as f64)
-                        .segment_round();
+                let step_size = hifitime::Duration::from_microseconds(
+                    self.bounds.width() / self.steps_x as f64,
+                )
+                .segment_round();
                 let step_size_micro = step_size.total_nanoseconds() / 1000;
                 let step_size_float = step_size_micro as f64;
                 if step_size_micro <= 0 {
@@ -530,6 +545,57 @@ impl TimeseriesPlot {
                     );
                 }
             }
+        }
+    }
+
+    /// Draw axis title labels (X-axis label below, Y-axis label on the left rotated)
+    fn draw_axis_labels(&self, ui: &mut egui::Ui) {
+        let scheme = get_scheme();
+        let mut font_id = egui::TextStyle::Monospace.resolve(ui.style());
+        font_id.size = 12.0;
+
+        // Draw X-axis label centered below the X-axis tick labels
+        if let Some(x_label) = &self.x_label {
+            // Position at the very bottom of the plot rect to maximize separation from tick labels
+            // The tick labels end approximately at inner_rect.max.y + NOTCH_LENGTH + AXIS_LABEL_MARGIN + font_height
+            // (~27px below inner_rect.max.y). With bottom margin of 35px, we position at the bottom edge.
+            let x_label_y = self.rect.max.y;
+            let x_label_pos = egui::pos2(self.inner_rect.center().x, x_label_y);
+
+            ui.painter().text(
+                x_label_pos,
+                egui::Align2::CENTER_BOTTOM,
+                x_label,
+                font_id.clone(),
+                scheme.text_secondary,
+            );
+        }
+
+        // Draw Y-axis label rotated 90 degrees, centered on the left side
+        if let Some(y_label) = &self.y_label {
+            // Position to the left of the Y-axis tick labels
+            let y_label_x = self.rect.min.x + 12.0; // Near the left edge
+            let y_label_pos = egui::pos2(y_label_x, self.inner_rect.center().y);
+
+            // Draw rotated text using galley rotation
+            let galley = ui.painter().layout_no_wrap(
+                y_label.clone(),
+                font_id.clone(),
+                scheme.text_secondary,
+            );
+
+            // Calculate rotation angle (90 degrees counter-clockwise = -PI/2)
+            let angle = -std::f32::consts::FRAC_PI_2;
+
+            ui.painter().add(egui::Shape::Text(egui::epaint::TextShape {
+                pos: y_label_pos,
+                galley,
+                underline: egui::Stroke::NONE,
+                fallback_color: scheme.text_secondary,
+                override_text_color: Some(scheme.text_secondary),
+                opacity_factor: 1.0,
+                angle,
+            }));
         }
     }
 
@@ -870,6 +936,7 @@ impl TimeseriesPlot {
         draw_borders(ui, self.rect, self.inner_rect);
         self.draw_x_axis(ui, &font_id);
         draw_y_axis(ui, self.bounds, self.steps_y, self.rect, self.inner_rect);
+        self.draw_axis_labels(ui);
 
         if let Some(pointer_pos) = pointer_pos
             && self.inner_rect.contains(pointer_pos)
@@ -992,7 +1059,8 @@ impl TimeseriesPlot {
                     // For relative time, convert current_timestamp to relative seconds
                     let relative_seconds =
                         (self.current_timestamp.0 - self.earliest_timestamp.0) as f64 / 1_000_000.0;
-                    if relative_seconds >= self.bounds.min_x && relative_seconds <= self.bounds.max_x
+                    if relative_seconds >= self.bounds.min_x
+                        && relative_seconds <= self.bounds.max_x
                     {
                         Some(
                             self.bounds
