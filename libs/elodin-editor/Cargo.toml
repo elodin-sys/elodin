@@ -130,6 +130,8 @@ impeller2-bevy.path = "../../libs/impeller2/bevy"
 impeller2-bevy.features = ["tcp"]
 impeller2-bevy.default-features = false
 
+# 3D text for ViewCube labels
+bevy_fontmesh = "0.1.4"
 
 # macos
 [target.'cfg(target_os = "macos")'.dependencies]
