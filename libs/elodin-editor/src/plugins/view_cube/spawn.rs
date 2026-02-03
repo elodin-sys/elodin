@@ -299,11 +299,13 @@ fn spawn_face_labels(
 // ============================================================================
 
 fn create_arrow_mesh() -> Mesh {
-    Cone::new(0.015, 0.04).into()
+    // Increased size for better visibility and clickability
+    Cone::new(0.035, 0.08).into()
 }
 
 fn create_roll_arrow_mesh() -> Mesh {
-    Capsule3d::new(0.008, 0.025).into()
+    // Increased size for better visibility and clickability
+    Capsule3d::new(0.018, 0.05).into()
 }
 
 /// Spawn rotation arrows as children of camera (fixed on screen)
