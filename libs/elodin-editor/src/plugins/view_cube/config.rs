@@ -82,25 +82,19 @@ impl CoordinateSystem {
         }
     }
 
-    /// Get all 6 face labels with their properties
+    /// Get face labels (only positive directions: E, N, U for ENU / N, E, D for NED)
     pub fn get_face_labels(&self, face_offset: f32) -> Vec<FaceLabelConfig> {
         let axes = self.get_axes();
         let mut labels = Vec::new();
 
         for axis in &axes {
+            // Only positive labels (3 faces, not 6)
             labels.push(FaceLabelConfig {
                 text: axis.positive_label,
                 position: axis.direction * face_offset,
                 rotation: Self::get_rotation_for_direction(axis.direction),
                 color: axis.color,
                 direction: Self::direction_to_face(axis.direction),
-            });
-            labels.push(FaceLabelConfig {
-                text: axis.negative_label,
-                position: -axis.direction * face_offset,
-                rotation: Self::get_rotation_for_direction(-axis.direction),
-                color: axis.color_dim,
-                direction: Self::direction_to_face(-axis.direction),
             });
         }
         labels
