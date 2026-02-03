@@ -29,9 +29,9 @@ impl ViewCubeColors {
         Self {
             face_normal: Color::srgba(0.5, 0.5, 0.55, 0.3),
             face_hover: Color::srgb(1.0, 0.85, 0.2),
-            edge_normal: Color::srgba(0.9, 0.9, 0.95, 0.8),    // White edges
+            edge_normal: Color::srgba(0.9, 0.9, 0.95, 0.8), // White edges
             edge_hover: Color::srgb(1.0, 0.85, 0.2),
-            corner_normal: Color::srgba(1.0, 1.0, 1.0, 0.9),   // White corners
+            corner_normal: Color::srgba(1.0, 1.0, 1.0, 0.9), // White corners
             corner_hover: Color::srgb(1.0, 0.85, 0.2),
             arrow_normal: Color::srgba(1.0, 1.0, 1.0, 0.5),
             arrow_hover: Color::srgba(1.0, 0.9, 0.3, 0.95),
@@ -44,7 +44,7 @@ impl ViewCubeColors {
         Self {
             face_normal: Color::srgba(0.6, 0.6, 0.65, 0.4),
             face_hover: Color::srgb(0.2, 0.5, 1.0),
-            edge_normal: Color::srgba(0.2, 0.2, 0.25, 0.8),    // Dark edges
+            edge_normal: Color::srgba(0.2, 0.2, 0.25, 0.8), // Dark edges
             edge_hover: Color::srgb(0.2, 0.5, 1.0),
             corner_normal: Color::srgba(0.15, 0.15, 0.2, 0.9), // Dark corners
             corner_hover: Color::srgb(0.2, 0.5, 1.0),

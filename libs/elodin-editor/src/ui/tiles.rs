@@ -1289,7 +1289,7 @@ impl ViewportPane {
         let mut view_cube_config = ViewCubeConfig::editor_mode();
         view_cube_config.render_layer = view_cube_layer as u8;
         view_cube_config.camera_distance = 2.5; // Match original gizmo
-        view_cube_config.scale = 0.5;           // Smaller cube
+        view_cube_config.scale = 0.5; // Smaller cube
         view_cube_config.follow_main_viewport = false; // Use existing set_camera_viewport
 
         let spawned = spawn_view_cube(
@@ -1305,7 +1305,9 @@ impl ViewportPane {
         // so the existing set_camera_viewport system works on it
         if let Some(view_cube_camera) = spawned.camera {
             commands.entity(view_cube_camera).insert((
-                NavGizmoParent { main_camera: camera },
+                NavGizmoParent {
+                    main_camera: camera,
+                },
                 NavGizmoCamera,
             ));
         }
