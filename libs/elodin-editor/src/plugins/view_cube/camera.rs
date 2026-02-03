@@ -416,18 +416,37 @@ pub fn handle_view_cube_look_to(
     }
 }
 
-/// Handle arrow rotations in editor mode.
-/// Arrows still use direct transform manipulation since LookToTrigger
-/// is designed for absolute orientations, not incremental rotations.
+/// Handle arrow rotations in editor mode using EditorCam orbit.
+/// This ensures rotation is around the camera's anchor point.
 pub fn handle_view_cube_arrows_editor(
     mut events: MessageReader<ViewCubeEvent>,
-    mut camera_query: Query<&mut Transform, With<ViewCubeTargetCamera>>,
+    mut camera_query: Query<(&Transform, &mut EditorCam), With<ViewCubeTargetCamera>>,
     config: Res<ViewCubeConfig>,
 ) {
     for event in events.read() {
         if let ViewCubeEvent::ArrowClicked(arrow) = event {
-            if let Ok(mut transform) = camera_query.single_mut() {
-                apply_arrow_rotation(*arrow, &config, &mut transform);
+            if let Ok((transform, mut editor_cam)) = camera_query.single_mut() {
+                // Get anchor point from camera transform
+                let anchor = crate::plugins::camera_anchor::camera_anchor_from_transform(transform);
+
+                // Calculate screenspace delta based on arrow direction
+                // Using a base delta scaled by rotation_increment
+                let base_delta = 50.0 * (config.rotation_increment / 0.1);
+                let delta = match arrow {
+                    RotationArrow::Left => Vec2::new(base_delta, 0.0),
+                    RotationArrow::Right => Vec2::new(-base_delta, 0.0),
+                    RotationArrow::Up => Vec2::new(0.0, -base_delta),
+                    RotationArrow::Down => Vec2::new(0.0, base_delta),
+                    RotationArrow::RollLeft | RotationArrow::RollRight => {
+                        // Roll is not naturally supported by orbit - skip for now
+                        continue;
+                    }
+                };
+
+                // Use EditorCam orbit for rotation
+                editor_cam.end_move();
+                editor_cam.start_orbit(anchor);
+                editor_cam.send_screenspace_input(delta);
             }
         }
     }
