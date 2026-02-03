@@ -4,7 +4,11 @@
 //! in response to ViewCube events.
 
 use bevy::camera::visibility::RenderLayers;
+use bevy::camera::Viewport;
+use bevy::math::Dir3;
 use bevy::prelude::*;
+use bevy_editor_cam::controller::component::EditorCam;
+use bevy_editor_cam::extensions::look_to::LookToTrigger;
 
 use super::components::{RotationArrow, ViewCubeCamera, ViewCubeLink, ViewCubeRoot};
 use super::config::ViewCubeConfig;
@@ -270,12 +274,13 @@ fn apply_layers_recursive(
 }
 
 /// Set the viewport for the ViewCube camera (positions it in top-right corner)
+/// Simple version: positions based on window size only
 pub fn set_view_cube_viewport(
     config: Res<ViewCubeConfig>,
     windows: Query<&Window>,
     mut camera_query: Query<&mut Camera, With<ViewCubeCamera>>,
 ) {
-    if !config.use_overlay {
+    if !config.use_overlay || config.follow_main_viewport {
         return;
     }
 
@@ -296,10 +301,134 @@ pub fn set_view_cube_viewport(
     let pos_y = margin as u32;
 
     for mut camera in camera_query.iter_mut() {
-        camera.viewport = Some(bevy::camera::Viewport {
+        camera.viewport = Some(Viewport {
             physical_position: UVec2::new(pos_x, pos_y),
             physical_size: UVec2::new(size, size),
             depth: 0.0..1.0,
         });
+    }
+}
+
+/// Set the viewport for the ViewCube camera relative to the main camera's viewport.
+/// Editor version: respects split views and positions gizmo in each viewport's corner.
+pub fn set_view_cube_viewport_editor(
+    config: Res<ViewCubeConfig>,
+    windows: Query<&Window>,
+    mut view_cube_camera_query: Query<(&mut Camera, &ViewCubeLink), With<ViewCubeCamera>>,
+    main_camera_query: Query<&Camera, Without<ViewCubeCamera>>,
+) {
+    if !config.use_overlay || !config.follow_main_viewport {
+        return;
+    }
+
+    let Ok(window) = windows.single() else {
+        return;
+    };
+
+    let scale_factor = window.scale_factor();
+    let margin = config.overlay_margin * scale_factor;
+    let side_length = config.overlay_size as f32 * scale_factor;
+
+    for (mut view_cube_camera, link) in view_cube_camera_query.iter_mut() {
+        let Ok(main_camera) = main_camera_query.get(link.main_camera) else {
+            continue;
+        };
+
+        // Get main camera's viewport, or use full window if none
+        let (viewport_pos, viewport_size) = if let Some(viewport) = &main_camera.viewport {
+            (
+                viewport.physical_position.as_vec2(),
+                viewport.physical_size.as_vec2(),
+            )
+        } else {
+            (
+                Vec2::ZERO,
+                Vec2::new(
+                    window.physical_width() as f32,
+                    window.physical_height() as f32,
+                ),
+            )
+        };
+
+        // Position ViewCube in top-right corner of main camera's viewport
+        let nav_viewport_pos = Vec2::new(
+            (viewport_pos.x + viewport_size.x) - (side_length + margin),
+            viewport_pos.y + margin,
+        );
+
+        // Clamp to window bounds
+        let window_size = window.physical_size();
+        let pos_x = nav_viewport_pos.x.max(0.0) as u32;
+        let pos_y = nav_viewport_pos.y.max(0.0) as u32;
+        let max_w = window_size.x.saturating_sub(pos_x);
+        let max_h = window_size.y.saturating_sub(pos_y);
+
+        let (physical_size, is_active) = if main_camera.is_active && max_w > 0 && max_h > 0 {
+            (
+                UVec2::new(
+                    side_length.min(max_w as f32) as u32,
+                    side_length.min(max_h as f32) as u32,
+                ),
+                true,
+            )
+        } else {
+            (UVec2::new(1, 1), false)
+        };
+
+        view_cube_camera.is_active = is_active;
+        view_cube_camera.viewport = Some(Viewport {
+            physical_position: UVec2::new(pos_x, pos_y),
+            physical_size,
+            depth: 0.0..1.0,
+        });
+    }
+}
+
+// ============================================================================
+// LookToTrigger Integration (Editor Mode)
+// ============================================================================
+
+/// Handle ViewCube events using LookToTrigger (editor mode).
+/// This integrates with bevy_editor_cam for smoother camera control.
+pub fn handle_view_cube_look_to(
+    mut events: MessageReader<ViewCubeEvent>,
+    camera_query: Query<(Entity, &Transform, &EditorCam), With<ViewCubeTargetCamera>>,
+    mut look_to: MessageWriter<LookToTrigger>,
+) {
+    for event in events.read() {
+        let direction = match event {
+            ViewCubeEvent::FaceClicked(dir) => Some(dir.to_look_direction()),
+            ViewCubeEvent::EdgeClicked(dir) => Some(dir.to_look_direction()),
+            ViewCubeEvent::CornerClicked(pos) => Some(pos.to_look_direction()),
+            ViewCubeEvent::ArrowClicked(_) => None, // Arrows don't use LookToTrigger
+        };
+
+        if let Some(look_dir) = direction {
+            if let Ok((entity, transform, editor_cam)) = camera_query.single() {
+                // Convert Vec3 to Dir3
+                if let Ok(dir) = Dir3::new(look_dir) {
+                    look_to.write(LookToTrigger::auto_snap_up_direction(
+                        dir, entity, transform, editor_cam,
+                    ));
+                }
+            }
+        }
+    }
+}
+
+/// Handle arrow rotations in editor mode.
+/// Arrows still use direct transform manipulation since LookToTrigger
+/// is designed for absolute orientations, not incremental rotations.
+pub fn handle_view_cube_arrows_editor(
+    mut events: MessageReader<ViewCubeEvent>,
+    mut camera_query: Query<&mut Transform, With<ViewCubeTargetCamera>>,
+    config: Res<ViewCubeConfig>,
+) {
+    for event in events.read() {
+        if let ViewCubeEvent::ArrowClicked(arrow) = event {
+            if let Ok(mut transform) = camera_query.single_mut() {
+                apply_arrow_rotation(*arrow, &config, &mut transform);
+            }
+        }
     }
 }
