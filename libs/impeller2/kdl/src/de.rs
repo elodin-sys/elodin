@@ -488,6 +488,28 @@ fn parse_query_plot(node: &KdlNode, src: &str) -> Result<Panel, KdlSchematicErro
         })
         .unwrap_or(QueryType::EQL);
 
+    // Parse plot mode: "timeseries" (default) or "xy"
+    let plot_mode = node
+        .get("mode")
+        .and_then(|v| v.as_string())
+        .map(|s| match s.to_lowercase().as_str() {
+            "xy" => PlotMode::XY,
+            "timeseries" | "time_series" | "time-series" => PlotMode::TimeSeries,
+            _ => PlotMode::TimeSeries,
+        })
+        .unwrap_or(PlotMode::TimeSeries);
+
+    // Parse optional axis labels
+    let x_label = node
+        .get("x_label")
+        .and_then(|v| v.as_string())
+        .map(|s| s.to_string());
+
+    let y_label = node
+        .get("y_label")
+        .and_then(|v| v.as_string())
+        .map(|s| s.to_string());
+
     Ok(Panel::QueryPlot(QueryPlot {
         name,
         query,
@@ -495,6 +517,9 @@ fn parse_query_plot(node: &KdlNode, src: &str) -> Result<Panel, KdlSchematicErro
         auto_refresh,
         color,
         query_type,
+        plot_mode,
+        x_label,
+        y_label,
         aux: (),
     }))
 }

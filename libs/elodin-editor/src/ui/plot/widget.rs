@@ -177,6 +177,8 @@ pub struct TimeseriesPlot {
     steps_y: usize,
     // For XY plots, x values are already in relative seconds
     is_relative_time: bool,
+    // True XY mode: X-axis shows numeric values instead of time labels
+    is_xy_mode: bool,
 }
 
 pub const MARGIN: egui::Margin = egui::Margin {
@@ -241,13 +243,14 @@ impl TimeseriesPlot {
         earliest_timestamp: Timestamp,
         current_timestamp: Timestamp,
     ) -> Self {
-        Self::from_bounds_with_relative_time(
+        Self::from_bounds_with_options(
             rect,
             bounds,
             selected_range,
             earliest_timestamp,
             current_timestamp,
             false, // Default to absolute timestamps
+            false, // Default to time-series mode
         )
     }
 
@@ -258,6 +261,45 @@ impl TimeseriesPlot {
         earliest_timestamp: Timestamp,
         current_timestamp: Timestamp,
         is_relative_time: bool,
+    ) -> Self {
+        Self::from_bounds_with_options(
+            rect,
+            bounds,
+            selected_range,
+            earliest_timestamp,
+            current_timestamp,
+            is_relative_time,
+            false, // Default to time-series mode
+        )
+    }
+
+    /// Create a plot with XY mode enabled (numeric X-axis labels)
+    pub fn from_bounds_xy_mode(
+        rect: egui::Rect,
+        bounds: PlotBounds,
+        selected_range: Range<Timestamp>,
+        earliest_timestamp: Timestamp,
+        current_timestamp: Timestamp,
+    ) -> Self {
+        Self::from_bounds_with_options(
+            rect,
+            bounds,
+            selected_range,
+            earliest_timestamp,
+            current_timestamp,
+            true, // XY plots use relative values
+            true, // Enable XY mode for numeric labels
+        )
+    }
+
+    pub fn from_bounds_with_options(
+        rect: egui::Rect,
+        bounds: PlotBounds,
+        selected_range: Range<Timestamp>,
+        earliest_timestamp: Timestamp,
+        current_timestamp: Timestamp,
+        is_relative_time: bool,
+        is_xy_mode: bool,
     ) -> Self {
         let mut selected_range = selected_range;
         let inner_rect = get_inner_rect(rect);
@@ -282,11 +324,77 @@ impl TimeseriesPlot {
             steps_x,
             steps_y,
             is_relative_time,
+            is_xy_mode,
         }
     }
 
     fn draw_x_axis(&self, ui: &mut egui::Ui, font_id: &egui::FontId) {
-        if self.is_relative_time {
+        if self.is_xy_mode {
+            // XY mode: Display numeric values on X-axis (not time)
+            let range = self.bounds.width();
+            if range <= 0.0 || !range.is_finite() {
+                return;
+            }
+
+            // Calculate nice step size for numeric values
+            let raw_step = range / self.steps_x as f64;
+            // Round to a nice number (1, 2, 5 multiples of power of 10)
+            let magnitude = 10_f64.powf(raw_step.log10().floor());
+            let normalized = raw_step / magnitude;
+            let nice_step = if normalized <= 1.5 {
+                magnitude
+            } else if normalized <= 3.5 {
+                2.0 * magnitude
+            } else if normalized <= 7.5 {
+                5.0 * magnitude
+            } else {
+                10.0 * magnitude
+            };
+
+            if nice_step <= 0.0 || !nice_step.is_finite() {
+                return;
+            }
+
+            // Calculate start and end positions aligned to step boundaries
+            let start_offset = (self.bounds.min_x / nice_step).floor() * nice_step;
+            let end_offset = (self.bounds.max_x / nice_step).ceil() * nice_step;
+
+            let mut i = start_offset;
+            while i <= end_offset {
+                // Skip if outside visible bounds
+                if i < self.bounds.min_x || i > self.bounds.max_x {
+                    i += nice_step;
+                    continue;
+                }
+
+                let x_pos = self
+                    .bounds
+                    .value_to_screen_pos(self.rect, DVec2::new(i, 0.0))
+                    .x;
+
+                ui.painter().line_segment(
+                    [
+                        egui::pos2(x_pos, self.inner_rect.max.y),
+                        egui::pos2(x_pos, self.inner_rect.max.y + (NOTCH_LENGTH)),
+                    ],
+                    egui::Stroke::new(1.0, get_scheme().border_primary),
+                );
+
+                // Use numeric formatting for XY mode
+                ui.painter().text(
+                    egui::pos2(
+                        x_pos,
+                        self.inner_rect.max.y + (NOTCH_LENGTH + AXIS_LABEL_MARGIN),
+                    ),
+                    egui::Align2::CENTER_TOP,
+                    format_num(i),
+                    font_id.clone(),
+                    get_scheme().text_primary,
+                );
+
+                i += nice_step;
+            }
+        } else if self.is_relative_time {
             // For relative time (XYLine), x values are already in seconds
             // Use segment_round() to round to nice time intervals like standard graphs
             let step_size_seconds = self.bounds.width() / self.steps_x as f64;
@@ -1105,11 +1213,13 @@ pub fn auto_y_bounds(
                 }
             }
 
-            let (padded_min, padded_max) = calculate_padded_y_bounds(
-                y_min.unwrap_or_default() as f64,
-                y_max.unwrap_or_default() as f64,
-            );
-            graph_state.y_range = padded_min..padded_max;
+            // Only update y_range if we found valid data from enabled_lines
+            // Skip if no lines found - this prevents overwriting y_range set by other systems
+            // (e.g., query_plot's auto_bounds which uses line_entity, not enabled_lines)
+            if let (Some(min), Some(max)) = (y_min, y_max) {
+                let (padded_min, padded_max) = calculate_padded_y_bounds(min as f64, max as f64);
+                graph_state.y_range = padded_min..padded_max;
+            }
         }
     }
 }
