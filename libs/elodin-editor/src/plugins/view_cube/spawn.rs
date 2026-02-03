@@ -69,10 +69,24 @@ pub fn spawn_view_cube(
     let cube_root = cube_root_cmd.id();
 
     // Spawn RGB axes extending from the corner of the cube (as children of cube root)
-    spawn_axes(commands, meshes, materials, config, render_layers.clone(), cube_root);
+    spawn_axes(
+        commands,
+        meshes,
+        materials,
+        config,
+        render_layers.clone(),
+        cube_root,
+    );
 
     // Spawn 3D text labels on cube faces (as children of cube root)
-    spawn_face_labels(commands, asset_server, materials, config, render_layers.clone(), cube_root);
+    spawn_face_labels(
+        commands,
+        asset_server,
+        materials,
+        config,
+        render_layers.clone(),
+        cube_root,
+    );
 
     // Spawn the dedicated camera for overlay mode
     let camera = if config.use_overlay {
@@ -82,7 +96,13 @@ pub fn spawn_view_cube(
         Some(gizmo_camera)
     } else {
         // In standalone mode, arrows are children of the main camera
-        spawn_rotation_arrows(commands, meshes, materials, main_camera_entity, render_layers);
+        spawn_rotation_arrows(
+            commands,
+            meshes,
+            materials,
+            main_camera_entity,
+            render_layers,
+        );
         None
     };
 
@@ -101,7 +121,7 @@ fn spawn_overlay_camera(
         .spawn((
             Transform::from_xyz(0.0, 0.0, config.camera_distance).looking_at(Vec3::ZERO, Vec3::Y),
             Camera {
-                order: 10, // Render after main camera
+                order: 10,                           // Render after main camera
                 clear_color: ClearColorConfig::None, // Overlay, don't clear
                 ..default()
             },

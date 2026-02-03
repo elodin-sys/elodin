@@ -14,7 +14,7 @@
 use bevy::asset::AssetPlugin;
 use bevy::prelude::*;
 use elodin_editor::plugins::view_cube::{
-    spawn::spawn_view_cube, ViewCubeConfig, ViewCubePlugin, ViewCubeTargetCamera,
+    ViewCubeConfig, ViewCubePlugin, ViewCubeTargetCamera, spawn::spawn_view_cube,
 };
 use std::path::PathBuf;
 
@@ -30,9 +30,9 @@ fn main() {
 
     // Configure ViewCube for overlay mode (like in the editor)
     let config = ViewCubeConfig {
-        use_overlay: true,       // Render as overlay in corner
-        sync_with_camera: true,  // Cube shows world orientation
-        auto_rotate: true,       // Plugin handles camera rotation on click
+        use_overlay: true,      // Render as overlay in corner
+        sync_with_camera: true, // Cube shows world orientation
+        auto_rotate: true,      // Plugin handles camera rotation on click
         ..default()
     };
 
@@ -85,7 +85,10 @@ fn setup(
         camera_entity,
     );
 
-    println!("ViewCube spawned: cube={:?}, camera={:?}", spawned.cube_root, spawned.camera);
+    println!(
+        "ViewCube spawned: cube={:?}, camera={:?}",
+        spawned.cube_root, spawned.camera
+    );
 
     // Add a reference object in the scene to see the main camera movement
     commands.spawn((

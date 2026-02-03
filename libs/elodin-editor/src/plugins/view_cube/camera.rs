@@ -258,7 +258,13 @@ fn apply_layers_recursive(
     // Recurse to children
     if let Ok(children) = children_query.get(entity) {
         for child in children.iter() {
-            apply_layers_recursive(child, children_query, entities_without_layer, render_layers, commands);
+            apply_layers_recursive(
+                child,
+                children_query,
+                entities_without_layer,
+                render_layers,
+                commands,
+            );
         }
     }
 }
@@ -284,7 +290,9 @@ pub fn set_view_cube_viewport(
     let window_width = window.physical_width();
 
     // Position in top-right corner
-    let pos_x = window_width.saturating_sub(size).saturating_sub(margin as u32);
+    let pos_x = window_width
+        .saturating_sub(size)
+        .saturating_sub(margin as u32);
     let pos_y = margin as u32;
 
     for mut camera in camera_query.iter_mut() {
