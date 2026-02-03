@@ -82,8 +82,18 @@ impl Plugin for ViewCubePlugin {
             .add_observer(interactions::on_arrow_hover_end)
             .add_observer(interactions::on_arrow_click);
 
-        // Add camera control systems when auto_rotate is enabled
-        if self.config.auto_rotate {
+        // Add camera control systems based on configuration
+        if self.config.use_look_to_trigger {
+            // Editor mode: use LookToTrigger for face/edge/corner clicks
+            app.add_systems(
+                Update,
+                (
+                    camera::handle_view_cube_look_to,
+                    camera::handle_view_cube_arrows_editor,
+                ),
+            );
+        } else if self.config.auto_rotate {
+            // Standalone mode: direct camera animation
             app.init_resource::<CameraAnimation>().add_systems(
                 Update,
                 (camera::handle_view_cube_camera, camera::animate_camera),
@@ -97,13 +107,14 @@ impl Plugin for ViewCubePlugin {
 
         // Add overlay mode systems
         if self.config.use_overlay {
-            app.add_systems(
-                Update,
-                (
-                    camera::apply_render_layers_to_scene,
-                    camera::set_view_cube_viewport,
-                ),
-            );
+            app.add_systems(Update, camera::apply_render_layers_to_scene);
+
+            // Choose viewport system based on configuration
+            if self.config.follow_main_viewport {
+                app.add_systems(PostUpdate, camera::set_view_cube_viewport_editor);
+            } else {
+                app.add_systems(Update, camera::set_view_cube_viewport);
+            }
         }
     }
 }
