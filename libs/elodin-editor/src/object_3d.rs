@@ -563,19 +563,13 @@ impl std::error::Error for ScaleEvalError {}
 
 const ELLIPSOID_OVERSIZED_THRESHOLD: f32 = 10_000.0;
 
-// TODO: Can do as iterator.
-fn find_entities<T>(
+fn find_entities<'a, T>(
     entity: Entity,
-    children: &Query<&Children>,
-    mut predicate: impl FnMut(Entity) -> Option<T>,
-) -> Vec<(Entity, T)> {
-    let mut buffer = vec![];
-    for id in children.iter_descendants(entity) {
-        if let Some(x) = predicate(id) {
-            buffer.push((id, x));
-        }
-    }
-    buffer
+    children: &'a Query<&Children>,
+    mut predicate: impl FnMut(Entity) -> Option<T> + 'a,
+) -> impl Iterator<Item = (Entity, T)> + 'a {
+    children.iter_descendants(entity)
+        .filter_map(move |id| predicate(id).map(|x| (id, x)))
 }
 
 /// Conditional system that checks if scenes are ready
@@ -783,24 +777,10 @@ pub fn attach_joint_animations(
                 )
             })
         });
-        info!(
-            "Have {} joint animation; found {} entities.",
-            object_3d.joint_animations.len(),
-            entity_compiled_expr.len()
-        );
 
-        if found_animations[..object_3d.joint_animations.len()].not_all() {
-            let items = found_animations[..object_3d.joint_animations.len()]
-                .iter_zeros()
-                .map(|i| &object_3d.joint_animations[i].0);
-            warn!(
-                "The object_3d {} did not have any animation joints named: {}",
-                &object_3d.data.mesh,
-                items.join_display(", ")
-            );
-        }
-
+        let mut entity_count = 0;
         for (joint_entity, compiled_expr) in entity_compiled_expr {
+            entity_count += 1;
             if existing_components.contains(joint_entity) {
                 continue;
             }
@@ -819,6 +799,26 @@ pub fn attach_joint_animations(
                     original_transform,
                 });
         }
+
+        info!(
+            "Have {} joint animation; found {} entities.",
+            object_3d.joint_animations.len(),
+            entity_count
+        );
+
+        let found_animations = found_animations_store.as_bitslice();
+
+        if found_animations[..object_3d.joint_animations.len()].not_all() {
+            let items = found_animations[..object_3d.joint_animations.len()]
+                .iter_zeros()
+                .map(|i| &object_3d.joint_animations[i].0);
+            warn!(
+                "The object_3d {} did not have any animation joints named: {}",
+                &object_3d.data.mesh,
+                items.join_display(", ")
+            );
+        }
+
     }
 }
 
