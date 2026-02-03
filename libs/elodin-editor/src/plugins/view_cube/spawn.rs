@@ -68,11 +68,11 @@ pub fn spawn_view_cube(
 
     let cube_root = cube_root_cmd.id();
 
-    // Spawn RGB axes extending from the corner of the cube
-    spawn_axes(commands, meshes, materials, config, render_layers.clone());
+    // Spawn RGB axes extending from the corner of the cube (as children of cube root)
+    spawn_axes(commands, meshes, materials, config, render_layers.clone(), cube_root);
 
-    // Spawn 3D text labels on cube faces
-    spawn_face_labels(commands, asset_server, materials, config, render_layers.clone());
+    // Spawn 3D text labels on cube faces (as children of cube root)
+    spawn_face_labels(commands, asset_server, materials, config, render_layers.clone(), cube_root);
 
     // Spawn the dedicated camera for overlay mode
     let camera = if config.use_overlay {
@@ -125,6 +125,7 @@ fn spawn_axes(
     materials: &mut ResMut<Assets<StandardMaterial>>,
     config: &ViewCubeConfig,
     render_layers: Option<RenderLayers>,
+    parent: Entity,
 ) {
     let axis_length = 1.4 * config.scale;
     let axis_radius = 0.035 * config.scale;
@@ -184,6 +185,7 @@ fn spawn_axes(
             MeshMaterial3d(material.clone()),
             Transform::from_translation(shaft_pos).with_rotation(rotation),
             Pickable::IGNORE,
+            ChildOf(parent),
             Name::new(format!("axis_{}_shaft", name)),
         ));
         if let Some(layers) = render_layers.clone() {
@@ -196,6 +198,7 @@ fn spawn_axes(
             MeshMaterial3d(material),
             Transform::from_translation(tip_pos).with_rotation(rotation),
             Pickable::IGNORE,
+            ChildOf(parent),
             Name::new(format!("axis_{}_tip", name)),
         ));
         if let Some(layers) = render_layers.clone() {
@@ -216,6 +219,7 @@ fn spawn_face_labels(
     materials: &mut ResMut<Assets<StandardMaterial>>,
     config: &ViewCubeConfig,
     render_layers: Option<RenderLayers>,
+    parent: Entity,
 ) {
     // Load the font
     let font: Handle<FontMesh> = asset_server.load("fonts/Roboto-Bold.ttf");
@@ -258,6 +262,7 @@ fn spawn_face_labels(
             },
             // Add CubeElement so clicking on labels triggers camera rotation
             CubeElement::Face(label.direction),
+            ChildOf(parent),
             Name::new(format!("label_{}", label.text)),
         ));
         if let Some(layers) = render_layers.clone() {
