@@ -4,9 +4,17 @@ This example demonstrates streaming video from GStreamer into Elodin DB and disp
 
 ## What It Does
 
-- Runs a minimal simulation with a rotating cube
+- Runs a rolling ball simulation with random wind and wall bouncing
 - Launches a GStreamer pipeline that streams an H.264 test pattern to Elodin DB
-- Displays the video stream automatically in the Elodin Editor
+- Displays the video stream automatically alongside the 3D viewport
+
+## Simulation Features
+
+- **Rolling ball**: A ball rolls around on a flat surface, visually spinning as it moves
+- **Random wind**: Applies drag force that pushes the ball in random directions
+- **Wall bouncing**: Ball bounces off walls at the viewport edges (±4 units)
+- **Friction**: Viscous damping for smooth, natural deceleration
+- **Semi-implicit integrator**: Provides stable, game-like motion
 
 ## Architecture
 
@@ -14,14 +22,14 @@ This example demonstrates streaming video from GStreamer into Elodin DB and disp
 ┌──────────────────────────────────────────────────────────────────────┐
 │                         S10 Process Group                            │
 │                                                                      │
-│  ┌────────────────────┐         ┌─────────────────────────────────┐ │
-│  │  Python Simulation │         │     GStreamer Pipeline          │ │
-│  │  (main.py)         │         │     (stream-video.sh)           │ │
-│  │                    │         │                                 │ │
-│  │  - Rotating cube   │         │  videotestsrc -> x264enc ->     │ │
-│  │  - Schematic with  │         │  h264parse -> elodinsink        │ │
-│  │    video_stream    │         │                                 │ │
-│  └─────────┬──────────┘         └───────────────┬─────────────────┘ │
+│  ┌────────────────────┐         ┌─────────────────────────────────┐  │
+│  │  Python Simulation │         │     GStreamer Pipeline          │  │
+│  │  (main.py)         │         │     (stream-video.sh)           │  │
+│  │                    │         │                                 │  │
+│  │  - Rolling ball    │         │  videotestsrc -> x264enc ->     │  │
+│  │  - Wind/friction   │         │  h264parse -> elodinsink        │  │
+│  │  - Wall bouncing   │         │                                 │  │
+│  └─────────┬──────────┘         └───────────────┬─────────────────┘  │
 │            │                                    │                    │
 └────────────┼────────────────────────────────────┼────────────────────┘
              │                                    │
@@ -56,6 +64,10 @@ The video stream tile appears automatically - no manual setup required. The sche
 
 ## Troubleshooting
 
+### Video tile shows "Initializing..." or "Connecting..."
+
+This is normal - the video stream tile defers connection for about 0.5 seconds during startup to ensure the system is fully initialized. The video will appear once the GStreamer pipeline starts streaming.
+
 ### No video appears
 
 - Verify the GStreamer pipeline started (check terminal output)
@@ -70,6 +82,10 @@ The video stream tile appears automatically - no manual setup required. The sche
 ### "Loss of Signal" overlay
 
 This appears when the video stream stops or timestamps become stale. Check if the GStreamer process is still running.
+
+### "Stream disconnected. Reconnecting..."
+
+The video stream tile automatically detects when frames stop arriving and will attempt to reconnect every 2 seconds. This handles cases where the video source temporarily drops.
 
 ## Technical Details
 
