@@ -172,6 +172,16 @@ pub struct ViewCubeConfig {
     /// Use this for overlay/gizmo mode where the cube shows world orientation.
     /// When false, the cube stays fixed (for standalone demo mode).
     pub sync_with_camera: bool,
+    /// When true, renders the ViewCube as an overlay with its own camera.
+    /// The ViewCube appears fixed in the top-right corner.
+    /// When false, the ViewCube is part of the main scene.
+    pub use_overlay: bool,
+    /// Size of the overlay viewport in pixels (width and height).
+    pub overlay_size: u32,
+    /// Margin from the edge of the window in pixels.
+    pub overlay_margin: f32,
+    /// Render layer for overlay mode (should not conflict with other layers).
+    pub render_layer: u8,
 }
 
 impl Default for ViewCubeConfig {
@@ -182,7 +192,11 @@ impl Default for ViewCubeConfig {
             rotation_increment: 15.0 * PI / 180.0,
             camera_distance: 4.5,
             auto_rotate: true,
-            sync_with_camera: false, // Off by default for standalone demo
+            sync_with_camera: false,
+            use_overlay: false,
+            overlay_size: 128,
+            overlay_margin: 8.0,
+            render_layer: 31, // Use high layer to avoid conflicts
         }
     }
 }

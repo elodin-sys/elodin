@@ -1,5 +1,7 @@
 //! Spawning functions for the ViewCube widget
 
+use bevy::camera::ClearColorConfig;
+use bevy::camera::visibility::RenderLayers;
 use bevy::ecs::hierarchy::ChildOf;
 use bevy::picking::prelude::*;
 use bevy::prelude::*;
@@ -18,45 +20,98 @@ pub const ROTATION_INCREMENT: f32 = 15.0 * PI / 180.0;
 // Main Spawn Function
 // ============================================================================
 
+/// Result of spawning a ViewCube
+pub struct SpawnedViewCube {
+    /// The root entity of the ViewCube (cube + labels + axes)
+    pub cube_root: Entity,
+    /// The dedicated camera entity (only in overlay mode)
+    pub camera: Option<Entity>,
+}
+
 /// Spawn a complete ViewCube widget
 ///
-/// Returns the root entity of the ViewCube.
-/// The ViewCube is spawned at the origin and should be positioned by the caller.
+/// Returns the root entity of the ViewCube and optionally a dedicated camera.
+/// In overlay mode, a dedicated camera is created for rendering the ViewCube
+/// as an overlay in the top-right corner.
 pub fn spawn_view_cube(
     commands: &mut Commands,
     asset_server: &Res<AssetServer>,
     meshes: &mut ResMut<Assets<Mesh>>,
     materials: &mut ResMut<Assets<StandardMaterial>>,
     config: &ViewCubeConfig,
-    camera_entity: Entity,
-) -> Entity {
+    main_camera_entity: Entity,
+) -> SpawnedViewCube {
+    let render_layers = if config.use_overlay {
+        Some(RenderLayers::layer(config.render_layer as usize))
+    } else {
+        None
+    };
+
     // Load the axes-cube.glb
     let scene = asset_server.load("axes-cube.glb#Scene0");
 
     // Spawn the cube root with link to main camera
-    let cube_root = commands
-        .spawn((
-            SceneRoot(scene),
-            Transform::from_xyz(0.0, 0.0, 0.0).with_scale(Vec3::splat(config.scale)),
-            ViewCubeRoot,
-            ViewCubeMeshRoot,
-            ViewCubeLink {
-                main_camera: camera_entity,
-            },
-            Name::new("view_cube_root"),
-        ))
-        .id();
+    let mut cube_root_cmd = commands.spawn((
+        SceneRoot(scene),
+        Transform::from_xyz(0.0, 0.0, 0.0).with_scale(Vec3::splat(config.scale)),
+        ViewCubeRoot,
+        ViewCubeMeshRoot,
+        ViewCubeLink {
+            main_camera: main_camera_entity,
+        },
+        Name::new("view_cube_root"),
+    ));
+
+    if let Some(layers) = render_layers.clone() {
+        cube_root_cmd.insert(layers);
+    }
+
+    let cube_root = cube_root_cmd.id();
 
     // Spawn RGB axes extending from the corner of the cube
-    spawn_axes(commands, meshes, materials, config);
+    spawn_axes(commands, meshes, materials, config, render_layers.clone());
 
     // Spawn 3D text labels on cube faces
-    spawn_face_labels(commands, asset_server, materials, config);
+    spawn_face_labels(commands, asset_server, materials, config, render_layers.clone());
 
-    // Spawn rotation arrows as children of camera (fixed on screen)
-    spawn_rotation_arrows(commands, meshes, materials, camera_entity);
+    // Spawn the dedicated camera for overlay mode
+    let camera = if config.use_overlay {
+        let gizmo_camera = spawn_overlay_camera(commands, config, main_camera_entity);
+        // In overlay mode, arrows are children of the gizmo camera
+        spawn_rotation_arrows(commands, meshes, materials, gizmo_camera, render_layers);
+        Some(gizmo_camera)
+    } else {
+        // In standalone mode, arrows are children of the main camera
+        spawn_rotation_arrows(commands, meshes, materials, main_camera_entity, render_layers);
+        None
+    };
 
-    cube_root
+    SpawnedViewCube { cube_root, camera }
+}
+
+/// Spawn the dedicated camera for overlay mode
+fn spawn_overlay_camera(
+    commands: &mut Commands,
+    config: &ViewCubeConfig,
+    main_camera: Entity,
+) -> Entity {
+    let render_layers = RenderLayers::layer(config.render_layer as usize);
+
+    commands
+        .spawn((
+            Transform::from_xyz(0.0, 0.0, config.camera_distance).looking_at(Vec3::ZERO, Vec3::Y),
+            Camera {
+                order: 10, // Render after main camera
+                clear_color: ClearColorConfig::None, // Overlay, don't clear
+                ..default()
+            },
+            Camera3d::default(),
+            render_layers,
+            ViewCubeCamera,
+            ViewCubeLink { main_camera },
+            Name::new("view_cube_camera"),
+        ))
+        .id()
 }
 
 // ============================================================================
@@ -64,11 +119,12 @@ pub fn spawn_view_cube(
 // ============================================================================
 
 /// Spawn RGB axes extending from the bottom-left-back corner of the cube
-pub fn spawn_axes(
+fn spawn_axes(
     commands: &mut Commands,
     meshes: &mut ResMut<Assets<Mesh>>,
     materials: &mut ResMut<Assets<StandardMaterial>>,
     config: &ViewCubeConfig,
+    render_layers: Option<RenderLayers>,
 ) {
     let axis_length = 1.4 * config.scale;
     let axis_radius = 0.035 * config.scale;
@@ -123,22 +179,28 @@ pub fn spawn_axes(
         };
 
         let shaft_pos = origin + direction * (axis_length / 2.0);
-        commands.spawn((
+        let mut shaft_cmd = commands.spawn((
             Mesh3d(shaft_mesh.clone()),
             MeshMaterial3d(material.clone()),
             Transform::from_translation(shaft_pos).with_rotation(rotation),
             Pickable::IGNORE,
             Name::new(format!("axis_{}_shaft", name)),
         ));
+        if let Some(layers) = render_layers.clone() {
+            shaft_cmd.insert(layers);
+        }
 
         let tip_pos = origin + direction * (axis_length + tip_length / 2.0);
-        commands.spawn((
+        let mut tip_cmd = commands.spawn((
             Mesh3d(tip_mesh.clone()),
             MeshMaterial3d(material),
             Transform::from_translation(tip_pos).with_rotation(rotation),
             Pickable::IGNORE,
             Name::new(format!("axis_{}_tip", name)),
         ));
+        if let Some(layers) = render_layers.clone() {
+            tip_cmd.insert(layers);
+        }
     }
 }
 
@@ -148,11 +210,12 @@ pub fn spawn_axes(
 
 /// Spawn 3D text labels on cube faces using bevy_fontmesh
 #[allow(clippy::needless_update)]
-pub fn spawn_face_labels(
+fn spawn_face_labels(
     commands: &mut Commands,
     asset_server: &Res<AssetServer>,
     materials: &mut ResMut<Assets<StandardMaterial>>,
     config: &ViewCubeConfig,
+    render_layers: Option<RenderLayers>,
 ) {
     // Load the font
     let font: Handle<FontMesh> = asset_server.load("fonts/Roboto-Bold.ttf");
@@ -175,7 +238,7 @@ pub fn spawn_face_labels(
             ..default()
         });
 
-        commands.spawn((
+        let mut label_cmd = commands.spawn((
             TextMeshBundle {
                 text_mesh: TextMesh {
                     text: label.text.to_string(),
@@ -197,6 +260,9 @@ pub fn spawn_face_labels(
             CubeElement::Face(label.direction),
             Name::new(format!("label_{}", label.text)),
         ));
+        if let Some(layers) = render_layers.clone() {
+            label_cmd.insert(layers);
+        }
     }
 }
 
@@ -213,11 +279,12 @@ fn create_roll_arrow_mesh() -> Mesh {
 }
 
 /// Spawn rotation arrows as children of camera (fixed on screen)
-pub fn spawn_rotation_arrows(
+fn spawn_rotation_arrows(
     commands: &mut Commands,
     meshes: &mut ResMut<Assets<Mesh>>,
     materials: &mut ResMut<Assets<StandardMaterial>>,
     camera_entity: Entity,
+    render_layers: Option<RenderLayers>,
 ) {
     let arrow_mesh = meshes.add(create_arrow_mesh());
     let colors = ViewCubeColors::default();
@@ -259,15 +326,17 @@ pub fn spawn_rotation_arrows(
             ..default()
         });
 
-        commands
-            .spawn((
-                Mesh3d(arrow_mesh.clone()),
-                MeshMaterial3d(material),
-                Transform::from_translation(position).with_rotation(rotation),
-                direction,
-                Name::new(format!("rotation_arrow_{:?}", direction)),
-            ))
-            .insert(ChildOf(camera_entity));
+        let mut arrow_cmd = commands.spawn((
+            Mesh3d(arrow_mesh.clone()),
+            MeshMaterial3d(material),
+            Transform::from_translation(position).with_rotation(rotation),
+            direction,
+            Name::new(format!("rotation_arrow_{:?}", direction)),
+        ));
+        if let Some(layers) = render_layers.clone() {
+            arrow_cmd.insert(layers);
+        }
+        arrow_cmd.insert(ChildOf(camera_entity));
     }
 
     // Roll arrows
@@ -296,14 +365,16 @@ pub fn spawn_rotation_arrows(
             ..default()
         });
 
-        commands
-            .spawn((
-                Mesh3d(roll_mesh.clone()),
-                MeshMaterial3d(material),
-                Transform::from_translation(position).with_rotation(rotation),
-                direction,
-                Name::new(format!("rotation_arrow_{:?}", direction)),
-            ))
-            .insert(ChildOf(camera_entity));
+        let mut arrow_cmd = commands.spawn((
+            Mesh3d(roll_mesh.clone()),
+            MeshMaterial3d(material),
+            Transform::from_translation(position).with_rotation(rotation),
+            direction,
+            Name::new(format!("rotation_arrow_{:?}", direction)),
+        ));
+        if let Some(layers) = render_layers.clone() {
+            arrow_cmd.insert(layers);
+        }
+        arrow_cmd.insert(ChildOf(camera_entity));
     }
 }

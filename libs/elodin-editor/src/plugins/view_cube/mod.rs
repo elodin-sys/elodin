@@ -53,6 +53,7 @@ pub use camera::{CameraAnimation, ViewCubeTargetCamera};
 pub use components::*;
 pub use config::*;
 pub use events::*;
+pub use spawn::SpawnedViewCube;
 pub use theme::ViewCubeColors;
 
 use bevy::picking::prelude::*;
@@ -92,6 +93,17 @@ impl Plugin for ViewCubePlugin {
         // Add sync system when sync_with_camera is enabled (for overlay/gizmo mode)
         if self.config.sync_with_camera {
             app.add_systems(PostUpdate, camera::sync_view_cube_rotation);
+        }
+
+        // Add overlay mode systems
+        if self.config.use_overlay {
+            app.add_systems(
+                Update,
+                (
+                    camera::apply_render_layers_to_scene,
+                    camera::set_view_cube_viewport,
+                ),
+            );
         }
     }
 }
