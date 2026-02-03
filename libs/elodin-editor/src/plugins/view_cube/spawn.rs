@@ -3,6 +3,8 @@
 use bevy::ecs::hierarchy::ChildOf;
 use bevy::picking::prelude::*;
 use bevy::prelude::*;
+use bevy::render::render_resource::Face;
+use bevy_fontmesh::prelude::*;
 use std::f32::consts::{FRAC_PI_2, PI};
 
 use super::components::*;
@@ -45,8 +47,8 @@ pub fn spawn_view_cube(
     // Spawn RGB axes extending from the corner of the cube
     spawn_axes(commands, meshes, materials, config);
 
-    // Note: 3D text labels can be added by the application using bevy_fontmesh
-    // See examples/view_cube_demo.rs for an example
+    // Spawn 3D text labels on cube faces
+    spawn_face_labels(commands, asset_server, materials, config);
 
     // Spawn rotation arrows as children of camera (fixed on screen)
     spawn_rotation_arrows(commands, meshes, materials, camera_entity);
@@ -133,6 +135,64 @@ pub fn spawn_axes(
             Transform::from_translation(tip_pos).with_rotation(rotation),
             Pickable::IGNORE,
             Name::new(format!("axis_{}_tip", name)),
+        ));
+    }
+}
+
+// ============================================================================
+// Face Labels
+// ============================================================================
+
+/// Spawn 3D text labels on cube faces using bevy_fontmesh
+#[allow(clippy::needless_update)]
+pub fn spawn_face_labels(
+    commands: &mut Commands,
+    asset_server: &Res<AssetServer>,
+    materials: &mut ResMut<Assets<StandardMaterial>>,
+    config: &ViewCubeConfig,
+) {
+    // Load the font
+    let font: Handle<FontMesh> = asset_server.load("fonts/Roboto-Bold.ttf");
+
+    // Label configuration - scaled by global config
+    let label_scale = 0.12 * config.scale;
+    let label_depth = 0.05 * config.scale;
+    let face_offset = 0.52 * config.scale;
+
+    // Get face labels from coordinate system configuration
+    let face_labels = config.system.get_face_labels(face_offset);
+
+    for label in face_labels {
+        let material = materials.add(StandardMaterial {
+            base_color: label.color,
+            unlit: true,
+            // Cull back faces so text is only visible from the front
+            // This prevents seeing reversed text through transparent cube faces
+            cull_mode: Some(Face::Back),
+            ..default()
+        });
+
+        commands.spawn((
+            TextMeshBundle {
+                text_mesh: TextMesh {
+                    text: label.text.to_string(),
+                    font: font.clone(),
+                    style: TextMeshStyle {
+                        depth: label_depth,
+                        anchor: TextAnchor::Center,
+                        ..default()
+                    },
+                    ..default()
+                },
+                material: MeshMaterial3d(material),
+                transform: Transform::from_translation(label.position)
+                    .with_rotation(label.rotation)
+                    .with_scale(Vec3::splat(label_scale)),
+                ..default()
+            },
+            // Add CubeElement so clicking on labels triggers camera rotation
+            CubeElement::Face(label.direction),
+            Name::new(format!("label_{}", label.text)),
         ));
     }
 }

@@ -12,7 +12,6 @@
 
 use bevy::asset::AssetPlugin;
 use bevy::prelude::*;
-use bevy_fontmesh::prelude::*;
 use elodin_editor::plugins::view_cube::{
     spawn::spawn_view_cube, ViewCubeConfig, ViewCubePlugin, ViewCubeTargetCamera,
 };
@@ -44,7 +43,6 @@ fn main() {
                     ..default()
                 }),
         )
-        .add_plugins(FontMeshPlugin)
         .add_plugins(ViewCubePlugin::default()) // auto_rotate = true by default
         .add_systems(Startup, setup)
         .run();

@@ -57,6 +57,7 @@ pub use theme::ViewCubeColors;
 
 use bevy::picking::prelude::*;
 use bevy::prelude::*;
+use bevy_fontmesh::prelude::*;
 
 /// Main plugin for the ViewCube widget
 #[derive(Default)]
@@ -71,6 +72,7 @@ impl Plugin for ViewCubePlugin {
             .init_resource::<OriginalMaterials>()
             .add_message::<ViewCubeEvent>()
             .add_plugins(MeshPickingPlugin)
+            .add_plugins(FontMeshPlugin)
             .add_systems(Update, interactions::setup_cube_elements)
             .add_observer(interactions::on_cube_hover_start)
             .add_observer(interactions::on_cube_hover_end)
