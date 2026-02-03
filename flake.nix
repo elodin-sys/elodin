@@ -40,6 +40,7 @@
           pythonPackages = elodin-py.pythonPackages;
         };
         elodin-db = final.callPackage ./aleph/pkgs/elodin-db.nix {inherit rustToolchain;};
+        elodinsink = final.callPackage ./nix/pkgs/elodinsink.nix {inherit rustToolchain;};
       };
     };
   in
@@ -62,7 +63,7 @@
         shells = pkgs.callPackage ./nix/shell.nix {inherit config rustToolchain;};
       in {
         packages = with pkgs.elodin; {
-          inherit elodin-cli elodin-db;
+          inherit elodin-cli elodin-db elodinsink;
           elodin-py = elodin-py.py;
         };
 

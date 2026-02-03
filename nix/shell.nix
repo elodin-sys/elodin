@@ -79,8 +79,9 @@ in {
           gst_all_1.gstreamer
           gst_all_1.gst-plugins-base
           gst_all_1.gst-plugins-good
-          gst_all_1.gst-plugins-bad   # For h264parse
-          gst_all_1.gst-plugins-ugly  # For x264enc (H.264 encoding)
+          gst_all_1.gst-plugins-bad # For h264parse
+          gst_all_1.gst-plugins-ugly # For x264enc (H.264 encoding)
+          config.packages.elodinsink # GStreamer plugin for Elodin-DB video streaming
           flip-link
 
           # Python tools
@@ -140,6 +141,16 @@ in {
       # Environment variables
       LIBCLANG_PATH = "${libclang.lib}/lib";
       XLA_EXTENSION_DIR = "${xla_ext}";
+
+      # GStreamer plugin path for elodinsink
+      GST_PLUGIN_PATH = lib.makeSearchPathOutput "lib" "lib/gstreamer-1.0" [
+        gst_all_1.gstreamer
+        gst_all_1.gst-plugins-base
+        gst_all_1.gst-plugins-good
+        gst_all_1.gst-plugins-bad
+        gst_all_1.gst-plugins-ugly
+        config.packages.elodinsink
+      ];
 
       # Workaround for netlib-src 0.8.0 incompatibility with GCC 14+
       # GCC 14 treats -Wincompatible-pointer-types as error by default

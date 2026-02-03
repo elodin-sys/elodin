@@ -57,6 +57,7 @@ in {
       gst_all_1.gstreamer
       aravis
       deepstream
+      elodinsink
     ];
   };
   hardware.graphics.enable = true;

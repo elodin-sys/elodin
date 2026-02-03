@@ -50,6 +50,9 @@
         # udp component broadcast (for sharing component data between flight computers)
         udp-component-broadcast # broadcasts component data over UDP
         udp-component-receive # receives UDP broadcasts and writes to local elodin-db
+
+        # video streaming
+        elodinsink # GStreamer plugin for streaming H.264 video to Elodin-DB
       ];
 
       # overlays required to get elodin and nvidia packages
@@ -155,6 +158,19 @@
       #   # timestampMode = "sender";       # Timestamp mode: "sender", "local", or "monotonic"
       #   # verbose = false;                # Enable verbose logging
       # };
+
+      # Elodinsink - GStreamer plugin for streaming H.264 video to Elodin-DB
+      # Enable the elodinsink module import above, then configure:
+      # services.elodinsink = {
+      #   enable = true;
+      #   includeNvidiaPlugins = true;      # Include NVIDIA hardware encoding (default: true)
+      #   includeBasePlugins = true;        # Include gst-plugins-good/bad/ugly (default: true)
+      # };
+      #
+      # Example GStreamer pipeline (run on Aleph):
+      # gst-launch-1.0 v4l2src device=/dev/video0 ! jpegdec ! nvvidconv ! \
+      #   nvv4l2h264enc ! h264parse config-interval=-1 ! \
+      #   elodinsink db-address=127.0.0.1:2240 msg-name="camera"
     };
     # sets up two different nixos systems default and installer
     # installer is setup to be flashed to a usb drive, and contains the
