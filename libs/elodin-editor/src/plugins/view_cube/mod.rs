@@ -68,11 +68,15 @@ pub struct ViewCubePlugin {
 
 impl Plugin for ViewCubePlugin {
     fn build(&self, app: &mut App) {
+        // Only add MeshPickingPlugin if not already present
+        if !app.is_plugin_added::<MeshPickingPlugin>() {
+            app.add_plugins(MeshPickingPlugin);
+        }
+
         app.insert_resource(self.config.clone())
             .init_resource::<HoveredElement>()
             .init_resource::<OriginalMaterials>()
             .add_message::<ViewCubeEvent>()
-            .add_plugins(MeshPickingPlugin)
             .add_plugins(FontMeshPlugin)
             .add_systems(Update, interactions::setup_cube_elements)
             .add_observer(interactions::on_cube_hover_start)
@@ -109,11 +113,13 @@ impl Plugin for ViewCubePlugin {
         if self.config.use_overlay {
             app.add_systems(Update, camera::apply_render_layers_to_scene);
 
-            // Choose viewport system based on configuration
-            if self.config.follow_main_viewport {
-                app.add_systems(PostUpdate, camera::set_view_cube_viewport_editor);
-            } else {
-                app.add_systems(Update, camera::set_view_cube_viewport);
+            // Add viewport system unless skipped (e.g., when using existing navigation_gizmo system)
+            if !self.config.skip_viewport_system {
+                if self.config.follow_main_viewport {
+                    app.add_systems(PostUpdate, camera::set_view_cube_viewport_editor);
+                } else {
+                    app.add_systems(Update, camera::set_view_cube_viewport);
+                }
             }
         }
     }

@@ -59,6 +59,7 @@ pub fn spawn_view_cube(
         ViewCubeLink {
             main_camera: main_camera_entity,
         },
+        ViewCubeRenderLayer(config.render_layer as usize),
         Name::new("view_cube_root"),
     ));
 
@@ -121,8 +122,10 @@ fn spawn_overlay_camera(
         .spawn((
             Transform::from_xyz(0.0, 0.0, config.camera_distance).looking_at(Vec3::ZERO, Vec3::Y),
             Camera {
-                order: 10,                           // Render after main camera
-                clear_color: ClearColorConfig::None, // Overlay, don't clear
+                order: 3, // Match navigation_gizmo camera order
+                // NOTE: Don't clear on the ViewCube camera because the
+                // MainCamera already cleared the window.
+                clear_color: ClearColorConfig::None,
                 ..default()
             },
             Camera3d::default(),

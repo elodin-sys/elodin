@@ -36,6 +36,7 @@ use nox::Tensor;
 use object_3d::create_object_3d_entity;
 use plugins::gizmos::GizmoPlugin;
 use plugins::navigation_gizmo::{NavigationGizmoPlugin, RenderLayerAlloc};
+use plugins::view_cube::{ViewCubeConfig, ViewCubePlugin};
 use ui::{
     UI_ORDER_BASE,
     colors::{ColorExt, get_scheme},
@@ -199,6 +200,7 @@ impl Plugin for EditorPlugin {
             .add_plugins(EguiPlugin::default())
             .add_plugins(bevy_infinite_grid::InfiniteGridPlugin)
             .add_plugins(NavigationGizmoPlugin)
+            .add_plugins(ViewCubePlugin { config: ViewCubeConfig::editor_mode() })
             .add_plugins(impeller2_bevy::Impeller2Plugin)
             .add_plugins(GizmoPlugin)
             .add_plugins(ui::UiPlugin)

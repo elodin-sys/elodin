@@ -56,7 +56,8 @@ use crate::{
     plugins::{
         LogicalKeyState,
         gizmos::GIZMO_RENDER_LAYER,
-        navigation_gizmo::{RenderLayerAlloc, spawn_gizmo},
+        navigation_gizmo::{NavGizmoCamera, NavGizmoParent, RenderLayerAlloc},
+        view_cube::{ViewCubeConfig, ViewCubeTargetCamera, spawn::spawn_view_cube},
     },
     ui::{colors::ColorExt, dashboard::NodeUpdaterParams},
 };
@@ -1259,6 +1260,7 @@ impl ViewportPane {
             ChildOf(parent),
             Name::new("viewport camera3d"),
         ));
+        camera.insert(ViewCubeTargetCamera);
 
         camera.insert(Bloom { ..default() });
         camera.insert(EnvironmentMapLight {
@@ -1270,12 +1272,48 @@ impl ViewportPane {
 
         let camera = camera.id();
 
-        let (nav_gizmo, nav_gizmo_camera) =
-            spawn_gizmo(camera, commands, meshes, materials, render_layer_alloc);
+        // Allocate render layer for ViewCube (same approach as navigation_gizmo)
+        let Some(view_cube_layer) = render_layer_alloc.alloc() else {
+            return Self {
+                camera: Some(camera),
+                nav_gizmo: None,
+                nav_gizmo_camera: None,
+                rect: None,
+                name,
+                grid_layer,
+                viewport_layer,
+            };
+        };
+
+        // Spawn ViewCube with editor mode configuration using allocated layer
+        let mut view_cube_config = ViewCubeConfig::editor_mode();
+        view_cube_config.render_layer = view_cube_layer as u8;
+        view_cube_config.camera_distance = 2.5; // Match original gizmo
+        view_cube_config.scale = 0.5;           // Smaller cube
+        view_cube_config.follow_main_viewport = false; // Use existing set_camera_viewport
+
+        let spawned = spawn_view_cube(
+            commands,
+            asset_server,
+            meshes,
+            materials,
+            &view_cube_config,
+            camera,
+        );
+
+        // Add NavGizmoParent and NavGizmoCamera to the ViewCube camera
+        // so the existing set_camera_viewport system works on it
+        if let Some(view_cube_camera) = spawned.camera {
+            commands.entity(view_cube_camera).insert((
+                NavGizmoParent { main_camera: camera },
+                NavGizmoCamera,
+            ));
+        }
+
         Self {
             camera: Some(camera),
-            nav_gizmo,
-            nav_gizmo_camera,
+            nav_gizmo: Some(spawned.cube_root),
+            nav_gizmo_camera: spawned.camera,
             rect: None,
             name,
             grid_layer,

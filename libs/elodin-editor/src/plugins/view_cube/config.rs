@@ -188,6 +188,9 @@ pub struct ViewCubeConfig {
     /// Editor mode: adapt viewport position based on main camera's viewport.
     /// Required for split views where gizmo should stay in each viewport's corner.
     pub follow_main_viewport: bool,
+    /// Skip registering viewport positioning system.
+    /// Use when integrating with existing viewport system (like navigation_gizmo).
+    pub skip_viewport_system: bool,
 }
 
 impl Default for ViewCubeConfig {
@@ -205,6 +208,7 @@ impl Default for ViewCubeConfig {
             render_layer: 31,
             use_look_to_trigger: false,
             follow_main_viewport: false,
+            skip_viewport_system: false,
         }
     }
 }
@@ -212,13 +216,15 @@ impl Default for ViewCubeConfig {
 impl ViewCubeConfig {
     /// Configuration preset for editor integration.
     /// Enables LookToTrigger, viewport following, and camera sync.
+    /// Uses existing navigation_gizmo viewport system.
     pub fn editor_mode() -> Self {
         Self {
             use_overlay: true,
             sync_with_camera: true,
             auto_rotate: false, // Editor handles camera via LookToTrigger
             use_look_to_trigger: true,
-            follow_main_viewport: true,
+            follow_main_viewport: false, // Use existing set_camera_viewport
+            skip_viewport_system: true,  // Don't add our viewport system
             ..Default::default()
         }
     }
