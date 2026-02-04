@@ -252,9 +252,8 @@ fn spawn_face_labels(
     render_layers: Option<RenderLayers>,
     parent: Entity,
 ) {
-    // Load the embedded font
-    let font: Handle<FontMesh> =
-        asset_server.load("embedded://elodin_editor/assets/fonts/IBMPlexMono-Medium_ss04.ttf");
+    // Load the font from assets folder
+    let font: Handle<FontMesh> = asset_server.load("fonts/Roboto-Bold.ttf");
 
     // Label configuration - scaled by global config
     // Large letters that almost fill the face
