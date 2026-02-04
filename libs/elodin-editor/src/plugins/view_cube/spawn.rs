@@ -150,13 +150,16 @@ fn spawn_axes(
     render_layers: Option<RenderLayers>,
     parent: Entity,
 ) {
-    // Axes extend beyond the cube for better visibility
+    // Axes along cube edges (corner gizmo style)
     let axis_length = 2.6 * config.scale; // Long enough to be clearly visible
     let axis_radius = 0.08 * config.scale; // Thick for visibility
     let tip_radius = 0.14 * config.scale;
     let tip_length = 0.3 * config.scale;
-    // Origin at bottom-front-left corner - axes point towards user in ENU
-    let origin = Vec3::new(-0.55, -0.55, 0.55) * config.scale;
+    // Origin at bottom-back-left corner - each axis lies along a cube edge
+    // X goes right (along bottom-back edge)
+    // Y goes up (along back-left edge)  
+    // Z goes forward (along bottom-left edge)
+    let origin = Vec3::new(-0.55, -0.55, -0.55) * config.scale;
 
     let axes = config.system.get_axes();
     let axis_configs: [(Vec3, Color, &str); 3] = [
