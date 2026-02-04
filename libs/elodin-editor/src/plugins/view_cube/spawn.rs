@@ -157,7 +157,7 @@ fn spawn_axes(
     let tip_length = 0.3 * config.scale;
     // Origin at bottom-back-left corner - each axis lies along a cube edge
     // X goes right (along bottom-back edge)
-    // Y goes up (along back-left edge)  
+    // Y goes up (along back-left edge)
     // Z goes forward (along bottom-left edge)
     let origin = Vec3::new(-0.55, -0.55, -0.55) * config.scale;
 
