@@ -52,6 +52,12 @@ order = 6
 - Positional `eql`: required. Evaluated to a `world_pos`-like value to place the mesh.
 - Mesh child (required, exactly one):
   - `glb`: `path` (required), `scale` (default 1.0), `translate` `(x,y,z)` (default 0s), `rotate` `(deg_x,deg_y,deg_z)` in degrees (default 0s).
+    - `animate` child nodes (optional, multiple): For rigged GLB models, animate specific joints/bones.
+      - `joint`: required string; the exact name of the joint/bone in the GLB file.
+      - `rotation_vector`: required EQL expression; must evaluate to a 3-element vector `(x, y, z)` where:
+        - The vector direction is the rotation axis.
+        - The vector magnitude is the rotation angle in radians.
+      - Example: `animate joint="Root.Fin_0" rotation_vector="(0, rocket.fin_deflect * 3.14/180.0, 0)"`
   - `sphere`: `radius` (required); `color` (default white).
   - `box`: `x`, `y`, `z` (all required); `color` (default white).
   - `cylinder`: `radius`, `height` (both required); `color` (default white).
@@ -181,7 +187,7 @@ dashboard      = "dashboard" { dashboard_node }+
 
 object_3d = "object_3d"
           <eql>
-          { glb
+          { glb { animate }*
           | sphere
           | box
           | cylinder
@@ -189,6 +195,10 @@ object_3d = "object_3d"
           | ellipsoid
           }
           [emissivity=float]
+
+animate = "animate"
+        joint=string
+        rotation_vector=eql
 
 line_3d = "line_3d"
         <eql>
@@ -246,5 +256,20 @@ vector_arrow
   arrow_thickness=1.500
   label_position=0.9 {
   color 64 128 255
+}
+```
+
+Rigged GLB model with animated joints:
+
+The `rotation_vector` is an angle-axis: the direction encodes the axis, and the
+magnitude encodes the angle in radians.
+
+```kdl
+object_3d rocket.world_pos {
+    glb path="rocket.glb"
+    animate joint="Root.Fin_0" rotation_vector="(0, rocket.fin_deflect[0] * 3.14/180.0, 0)"
+    animate joint="Root.Fin_1" rotation_vector="(0, rocket.fin_deflect[1] * 3.14/180.0, 0)"
+    animate joint="Root.Fin_2" rotation_vector="(0, rocket.fin_deflect[2] * 3.14/180.0, 0)"
+    animate joint="Root.Fin_3" rotation_vector="(0, rocket.fin_deflect[3] * 3.14/180.0, 0)"
 }
 ```
