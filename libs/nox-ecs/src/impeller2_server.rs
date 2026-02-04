@@ -13,7 +13,7 @@ use std::{
 };
 use stellarator::struc_con::{Joinable, Thread};
 use stellarator::util::CancelToken;
-use tracing::warn;
+use tracing::{info, warn};
 
 use crate::{Compiled, World, WorldExec};
 
@@ -311,7 +311,8 @@ async fn tick(
         .run_time_step
         .map(|time_step| time_step.0);
     let time_step = world.world.sim_time_step().0;
-    let should_cancel = || is_cancelled() || cancel_token.is_cancelled();
+    #[rustfmt::skip]
+    let should_cancel = || { is_cancelled() || cancel_token.is_cancelled() };
     loop {
         if should_cancel() {
             return;
@@ -340,6 +341,11 @@ async fn tick(
             world.world.metadata.max_tick = u64::MAX;
             if !interactive {
                 return;
+            } else {
+                info!(
+                    "Simulation stopped; it reached its max_tick {}.",
+                    world.world.max_tick()
+                );
             }
         }
         // Python pre_step func runs (before copy_db_to_world so writes are picked up).
