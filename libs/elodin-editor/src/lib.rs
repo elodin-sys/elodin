@@ -102,6 +102,8 @@ impl Plugin for EmbeddedAssetPlugin {
         embedded_asset!(app, "assets/icons/plot.png");
         embedded_asset!(app, "assets/icons/viewport.png");
         embedded_asset!(app, "assets/icons/entity.png");
+        // Font for ViewCube labels
+        embedded_asset!(app, "assets/fonts/IBMPlexMono-Medium_ss04.ttf");
     }
 }
 
