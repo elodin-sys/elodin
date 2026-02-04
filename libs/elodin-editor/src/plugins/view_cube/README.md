@@ -2,10 +2,6 @@
 
 A CAD-style 3D orientation widget for Bevy applications.
 
-https://github.com/user-attachments/assets/view-cube-demo.mp4
-
-![ViewCube Demo](ViewCubeDemo.mp4)
-
 ## Features
 
 - **Interactive cube**: Click on faces, edges, or corners to snap the camera to that view
@@ -13,7 +9,8 @@ https://github.com/user-attachments/assets/view-cube-demo.mp4
 - **Hover highlighting**: Visual feedback when hovering over interactive elements
 - **Overlay mode**: Renders as a fixed overlay in the corner of the screen
 - **Camera sync**: Cube rotation mirrors the main camera orientation
-- **Coordinate systems**: Supports ENU (East-North-Up) and NED (North-East-Down)
+- **Coordinate systems**: Supports ENU (E, N, U labels) and NED (N, E, D labels)
+- **RGB axes**: Corner-mounted axes showing X (red), Y (green), Z (blue) directions
 
 ## Quick Start
 
