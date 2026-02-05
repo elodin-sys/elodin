@@ -61,26 +61,30 @@ impl CoordinateSystem {
                     color_dim: Color::srgb(0.15, 0.5, 0.15),
                 },
             ],
+            // NED mapped to Bevy's Y-up coordinate system:
+            // Bevy +Z (fwd)   → North (red, 1st axis)
+            // Bevy +X (right) → East (green, 2nd axis)
+            // Bevy -Y (down)  → Down (blue, 3rd axis)
             CoordinateSystem::NED => [
                 AxisDefinition {
                     positive_label: "N",
                     negative_label: "S",
-                    direction: Vec3::X,
-                    color: Color::srgb(0.9, 0.2, 0.2),
+                    direction: Vec3::Z,
+                    color: Color::srgb(0.9, 0.2, 0.2), // Red (North)
                     color_dim: Color::srgb(0.6, 0.15, 0.15),
                 },
                 AxisDefinition {
                     positive_label: "E",
                     negative_label: "W",
-                    direction: Vec3::Y,
-                    color: Color::srgb(0.2, 0.8, 0.2),
+                    direction: Vec3::X,
+                    color: Color::srgb(0.2, 0.8, 0.2), // Green (East)
                     color_dim: Color::srgb(0.15, 0.5, 0.15),
                 },
                 AxisDefinition {
                     positive_label: "D",
                     negative_label: "U",
-                    direction: Vec3::Z,
-                    color: Color::srgb(0.2, 0.4, 0.9),
+                    direction: Vec3::NEG_Y,
+                    color: Color::srgb(0.2, 0.4, 0.9), // Blue (Down)
                     color_dim: Color::srgb(0.15, 0.3, 0.6),
                 },
             ],
