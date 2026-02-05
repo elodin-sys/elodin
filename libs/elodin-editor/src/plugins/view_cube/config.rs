@@ -33,7 +33,10 @@ impl CoordinateSystem {
     /// Get the three axis definitions for this coordinate system
     pub fn get_axes(&self) -> [AxisDefinition; 3] {
         match self {
-            // ENU: +X=East(red), +Y=North(green), +Z=Up(blue)
+            // ENU mapped to Bevy's Y-up coordinate system:
+            // Bevy +X (right) → East (red)
+            // Bevy +Y (up)    → Up (blue)
+            // Bevy +Z (fwd)   → North (green)
             // See: https://docs.elodin.systems/reference/coords/
             CoordinateSystem::ENU => [
                 AxisDefinition {
@@ -44,18 +47,18 @@ impl CoordinateSystem {
                     color_dim: Color::srgb(0.6, 0.15, 0.15),
                 },
                 AxisDefinition {
-                    positive_label: "N",
-                    negative_label: "S",
-                    direction: Vec3::Y,
-                    color: Color::srgb(0.2, 0.8, 0.2), // Green
-                    color_dim: Color::srgb(0.15, 0.5, 0.15),
-                },
-                AxisDefinition {
                     positive_label: "U",
                     negative_label: "D",
-                    direction: Vec3::Z,
-                    color: Color::srgb(0.2, 0.4, 0.9), // Blue
+                    direction: Vec3::Y,
+                    color: Color::srgb(0.2, 0.4, 0.9), // Blue (Up)
                     color_dim: Color::srgb(0.15, 0.3, 0.6),
+                },
+                AxisDefinition {
+                    positive_label: "N",
+                    negative_label: "S",
+                    direction: Vec3::Z,
+                    color: Color::srgb(0.2, 0.8, 0.2), // Green (North)
+                    color_dim: Color::srgb(0.15, 0.5, 0.15),
                 },
             ],
             CoordinateSystem::NED => [
