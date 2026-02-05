@@ -195,7 +195,11 @@ pub fn color_popup(
                         }
                     });
                     ui.add_space(8.0);
-                    color_picker_color32(ui, color, Alpha::OnlyBlend);
+                    ui.scope(|ui| {
+                        ui.style_mut().override_font_id =
+                            Some(egui::FontId::new(11.0, egui::FontFamily::Monospace));
+                        color_picker_color32(ui, color, Alpha::OnlyBlend);
+                    });
                 });
             });
 
