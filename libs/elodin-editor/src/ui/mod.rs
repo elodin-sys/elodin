@@ -16,10 +16,16 @@ use bevy::{
     window::{Monitor, NormalizedWindowRef, PrimaryWindow, WindowFocused},
     winit::WINIT_WINDOWS,
 };
+use bevy::ecs::message::Messages;
+use bevy::input::{
+    ButtonInput,
+    mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll, MouseButton, MouseMotion, MouseWheel},
+};
 use bevy_defer::AsyncPlugin;
 use bevy_egui::{
     EguiContext, EguiContexts, EguiPreUpdateSet,
     egui::{self, Color32, Label, RichText},
+    input::EguiWantsInput,
 };
 pub(crate) const DEFAULT_SECONDARY_RECT: WindowRect = WindowRect {
     x: 10,
@@ -277,6 +283,50 @@ pub struct CameraQuery {
 
 pub struct UiPlugin;
 
+fn suppress_pointer_input_over_popups(
+    egui_wants_input: Res<EguiWantsInput>,
+    mut contexts: Query<&mut EguiContext>,
+    mut mouse_buttons: ResMut<ButtonInput<MouseButton>>,
+    mut mouse_motion_messages: ResMut<Messages<MouseMotion>>,
+    mut mouse_wheel_messages: ResMut<Messages<MouseWheel>>,
+    mut accumulated_motion: ResMut<AccumulatedMouseMotion>,
+    mut accumulated_scroll: ResMut<AccumulatedMouseScroll>,
+) {
+    let mut modal_open = false;
+    let mut pointer_over_popup = false;
+    for mut ctx in contexts.iter_mut() {
+        let ctx = ctx.get_mut();
+        if ctx.memory(|mem| mem.top_modal_layer().is_some()) {
+            modal_open = true;
+        }
+
+        let popup_rects_id = egui::Id::new("color_picker_popup_rects");
+        let popup_rects =
+            ctx.data(|data| data.get_temp::<Vec<egui::Rect>>(popup_rects_id))
+                .unwrap_or_default();
+        if !popup_rects.is_empty() {
+            if let Some(pointer_pos) = ctx.input(|i| i.pointer.latest_pos()) {
+                if popup_rects.iter().any(|rect| rect.contains(pointer_pos)) {
+                    pointer_over_popup = true;
+                }
+            }
+        }
+
+        ctx.data_mut(|data| data.insert_temp::<Vec<egui::Rect>>(popup_rects_id, Vec::new()));
+    }
+
+    let popup_active = egui_wants_input.is_popup_open() && pointer_over_popup;
+    if !(modal_open || popup_active) {
+        return;
+    }
+
+    mouse_motion_messages.clear();
+    mouse_wheel_messages.clear();
+    mouse_buttons.reset_all();
+    accumulated_motion.delta = Vec2::ZERO;
+    accumulated_scroll.delta = Vec2::ZERO;
+}
+
 impl Plugin for UiPlugin {
     fn build(&self, app: &mut App) {
         // Probe ELODIN_KDL_DIR once to inform or warn about an invalid
@@ -300,6 +350,10 @@ impl Plugin for UiPlugin {
             .add_systems(Update, timeline_slider::sync_ui_tick.before(render_layout))
             .add_systems(Update, actions::spawn_lua_actor)
             .add_systems(Update, update_focused_window)
+            .add_systems(
+                Update,
+                suppress_pointer_input_over_popups.before(crate::ui::plot::zoom_graph),
+            )
             .add_systems(Update, shortcuts)
             .add_systems(PreUpdate, sync_windows.before(EguiPreUpdateSet::BeginPass))
             .add_systems(

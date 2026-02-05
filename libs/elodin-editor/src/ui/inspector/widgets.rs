@@ -173,6 +173,7 @@ pub fn color_popup(
     color_id: egui::Id,
     target_res: &egui::Response,
 ) -> Option<egui::Response> {
+    let popup_rects_id = egui::Id::new("color_picker_popup_rects");
     let inner_response =
         egui::Popup::new(color_id, ui.ctx().clone(), target_res, target_res.layer_id)
             .kind(egui::PopupKind::Popup)
@@ -198,6 +199,13 @@ pub fn color_popup(
                     color_picker_color32(ui, color, Alpha::OnlyBlend);
                 });
             });
+    if let Some(inner) = &inner_response {
+        let rect = inner.response.rect;
+        ui.ctx().data_mut(|data| {
+            data.get_temp_mut_or_default::<Vec<egui::Rect>>(popup_rects_id)
+                .push(rect);
+        });
+    }
 
     inner_response.map(|ir| ir.response)
 }
