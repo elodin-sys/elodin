@@ -260,8 +260,8 @@ fn spawn_face_labels(
         asset_server.load("embedded://elodin_editor/assets/fonts/Roboto-Bold.ttf");
 
     // Label configuration - scaled by global config
-    // Large letters that almost fill the face width
-    let label_scale = 0.7 * config.scale;
+    // Letters fill the entire face
+    let label_scale = 1.0 * config.scale;
     let label_depth = 0.02 * config.scale;
     let face_offset = 0.52 * config.scale;
 
