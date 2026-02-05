@@ -286,6 +286,13 @@ pub struct UiPlugin;
 #[derive(Debug, PartialEq, Eq, Clone, Hash, SystemSet)]
 pub struct UiInputConsumerSet;
 
+// This system prevents UI events such as scroll and pan from passing through
+// egui modals and popups to whatever is behind them. The intention is for
+// modals to disable everything other than the modal, but popups allow
+// interactions with other things, except whatever is directly behind the
+// popup. The basic approach is for each popup to set a flag indicating if
+// the pointer is currently over it, then if any flags are true stop
+// propagating events.
 fn suppress_pointer_input_over_popups(
     egui_wants_input: Res<EguiWantsInput>,
     mut contexts: Query<&mut EguiContext>,
