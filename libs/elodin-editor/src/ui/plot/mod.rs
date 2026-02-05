@@ -21,6 +21,7 @@ pub use widget::{
 mod state;
 pub use state::*;
 
+use crate::ui::UiInputConsumerSet;
 use bevy::{
     app::{Plugin, PostUpdate, Startup, Update},
     ecs::schedule::IntoScheduleConfigs,
@@ -33,10 +34,10 @@ impl Plugin for PlotPlugin {
             .init_resource::<LockTracker>()
             .init_resource::<XSyncClock>()
             .add_systems(Startup, setup_pkt_handler)
-            .add_systems(Update, zoom_graph)
-            .add_systems(Update, graph_touch)
-            .add_systems(Update, pan_graph)
-            .add_systems(Update, reset_graph)
+            .add_systems(Update, zoom_graph.in_set(UiInputConsumerSet))
+            .add_systems(Update, graph_touch.in_set(UiInputConsumerSet))
+            .add_systems(Update, pan_graph.in_set(UiInputConsumerSet))
+            .add_systems(Update, reset_graph.in_set(UiInputConsumerSet))
             .add_systems(
                 Update,
                 track_lock_toggles
