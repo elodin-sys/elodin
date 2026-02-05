@@ -199,7 +199,9 @@ pub fn color_popup(
                     color_picker_color32(ui, color, Alpha::OnlyBlend);
                 });
             });
-    if let Some(inner) = &inner_response && inner.response.contains_pointer() {
+    if let Some(inner) = &inner_response
+        && inner.response.contains_pointer()
+    {
         ui.ctx().data_mut(|data| {
             data.insert_temp(popup_hovered_id, true);
         });

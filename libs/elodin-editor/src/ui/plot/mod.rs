@@ -21,11 +21,11 @@ pub use widget::{
 mod state;
 pub use state::*;
 
+use crate::ui::UiInputConsumerSet;
 use bevy::{
     app::{Plugin, PostUpdate, Startup, Update},
     ecs::schedule::IntoScheduleConfigs,
 };
-use crate::ui::UiInputConsumerSet;
 
 pub struct PlotPlugin;
 impl Plugin for PlotPlugin {

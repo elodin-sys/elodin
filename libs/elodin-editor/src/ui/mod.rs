@@ -2,6 +2,11 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
 use std::path::PathBuf;
 
+use bevy::ecs::message::Messages;
+use bevy::input::{
+    ButtonInput,
+    mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll, MouseButton, MouseMotion, MouseWheel},
+};
 use bevy::{
     camera::{RenderTarget, Viewport},
     ecs::{
@@ -15,11 +20,6 @@ use bevy::{
     render::view::Hdr,
     window::{Monitor, NormalizedWindowRef, PrimaryWindow, WindowFocused},
     winit::WINIT_WINDOWS,
-};
-use bevy::ecs::message::Messages;
-use bevy::input::{
-    ButtonInput,
-    mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll, MouseButton, MouseMotion, MouseWheel},
 };
 use bevy_defer::AsyncPlugin;
 use bevy_egui::{
