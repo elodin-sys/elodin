@@ -699,7 +699,9 @@ impl XYLine {
         let mut global_index = 0usize;
         for buf in &mut self.x_values {
             let gpu = buf.gpu.lock();
-            let Some(gpu) = gpu.as_ref() else { return 0 };
+            let Some(gpu) = gpu.as_ref() else {
+                return 0;
+            };
             let chunk = gpu.as_index_chunk::<f32>(buf.cpu().len());
             for (i, index) in chunk.into_index_iter().enumerate() {
                 let absolute = global_index + i;
@@ -710,6 +712,7 @@ impl XYLine {
             }
             global_index += buf.cpu().len();
         }
+
         count
     }
 
