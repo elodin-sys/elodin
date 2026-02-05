@@ -2,7 +2,9 @@ use crate::io::{AsyncRead, AsyncWrite};
 use crate::reactor::Completion;
 use crate::{BufResult, Error};
 use std::path::Path;
-use std::{io, os};
+use std::io;
+#[cfg(not(target_os = "windows"))]
+use std::os;
 
 pub struct File {
     handle: crate::os::OwnedHandle,

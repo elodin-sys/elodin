@@ -57,7 +57,7 @@ impl<'fd, T: IoBufMut> Read<'fd, T> {
                                     if let Some(os_err) = err.raw_os_error() {
                                         io::Error::from_raw_os_error(os_err)
                                     } else {
-                                        io::Error::new(io::ErrorKind::Other, "")
+                                        io::Error::other("")
                                     }
                                 });
                             (res.map_err(Error::from), buf)
