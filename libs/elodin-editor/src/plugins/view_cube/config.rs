@@ -33,26 +33,28 @@ impl CoordinateSystem {
     /// Get the three axis definitions for this coordinate system
     pub fn get_axes(&self) -> [AxisDefinition; 3] {
         match self {
+            // ENU: +X=East(red), +Y=North(green), +Z=Up(blue)
+            // See: https://docs.elodin.systems/reference/coords/
             CoordinateSystem::ENU => [
                 AxisDefinition {
                     positive_label: "E",
                     negative_label: "W",
                     direction: Vec3::X,
-                    color: Color::srgb(0.9, 0.2, 0.2),
+                    color: Color::srgb(0.9, 0.2, 0.2), // Red
                     color_dim: Color::srgb(0.6, 0.15, 0.15),
-                },
-                AxisDefinition {
-                    positive_label: "U",
-                    negative_label: "D",
-                    direction: Vec3::Y,
-                    color: Color::srgb(0.2, 0.8, 0.2),
-                    color_dim: Color::srgb(0.15, 0.5, 0.15),
                 },
                 AxisDefinition {
                     positive_label: "N",
                     negative_label: "S",
+                    direction: Vec3::Y,
+                    color: Color::srgb(0.2, 0.8, 0.2), // Green
+                    color_dim: Color::srgb(0.15, 0.5, 0.15),
+                },
+                AxisDefinition {
+                    positive_label: "U",
+                    negative_label: "D",
                     direction: Vec3::Z,
-                    color: Color::srgb(0.2, 0.4, 0.9),
+                    color: Color::srgb(0.2, 0.4, 0.9), // Blue
                     color_dim: Color::srgb(0.15, 0.3, 0.6),
                 },
             ],
