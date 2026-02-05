@@ -162,10 +162,16 @@ impl RootWidgetSystem for ModalWithSettings<'_, '_> {
 
         if let Some(setting_modal_state) = setting_modal_state.0.clone() {
             let close_icon = contexts.add_image(EguiTextureHandle::Weak(images.icon_close.id()));
+            let modal_id = egui::Id::new("SETTING_MODAL");
+            let modal_area = egui::Area::new(modal_id)
+                .kind(egui::UiKind::Modal)
+                .fixed_pos(modal_rect.min)
+                .order(egui::Order::Foreground)
+                .interactable(true);
 
-            egui::Window::new("SETTING_MODAL")
-                .title_bar(false)
-                .resizable(false)
+            egui::Modal::new(modal_id)
+                .area(modal_area)
+                .backdrop_color(egui::Color32::TRANSPARENT)
                 .frame(egui::Frame {
                     fill: get_scheme().bg_secondary,
                     stroke: egui::Stroke {
@@ -176,8 +182,9 @@ impl RootWidgetSystem for ModalWithSettings<'_, '_> {
                     outer_margin: egui::Margin::symmetric(4, 0),
                     ..Default::default()
                 })
-                .fixed_rect(modal_rect)
                 .show(ctx, |ui| {
+                    ui.set_min_size(modal_rect.size());
+                    ui.set_max_size(modal_rect.size());
                     let SettingModal::Dialog(dialog) = setting_modal_state;
                     ui.add_widget_with::<ModalDialog>(
                         world,

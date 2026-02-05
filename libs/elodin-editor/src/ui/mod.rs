@@ -2,6 +2,11 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
 use std::path::PathBuf;
 
+use bevy::ecs::message::Messages;
+use bevy::input::{
+    ButtonInput,
+    mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll, MouseButton, MouseMotion, MouseWheel},
+};
 use bevy::{
     camera::{RenderTarget, Viewport},
     ecs::{
@@ -20,6 +25,7 @@ use bevy_defer::AsyncPlugin;
 use bevy_egui::{
     EguiContext, EguiContexts, EguiPreUpdateSet,
     egui::{self, Color32, Label, RichText},
+    input::EguiWantsInput,
 };
 pub(crate) const DEFAULT_SECONDARY_RECT: WindowRect = WindowRect {
     x: 10,
@@ -277,6 +283,56 @@ pub struct CameraQuery {
 
 pub struct UiPlugin;
 
+#[derive(Debug, PartialEq, Eq, Clone, Hash, SystemSet)]
+pub struct UiInputConsumerSet;
+
+// This system prevents UI events such as scroll and pan from passing through
+// egui modals and popups to whatever is behind them. The intention is for
+// modals to disable everything other than the modal, but popups allow
+// interactions with other things, except whatever is directly behind the
+// popup. The basic approach is for each popup to set a flag indicating if
+// the pointer is currently over it, then if any flags are true stop
+// propagating events.
+fn suppress_pointer_input_over_popups(
+    egui_wants_input: Res<EguiWantsInput>,
+    mut contexts: Query<&mut EguiContext>,
+    mut mouse_buttons: ResMut<ButtonInput<MouseButton>>,
+    mut mouse_motion_messages: ResMut<Messages<MouseMotion>>,
+    mut mouse_wheel_messages: ResMut<Messages<MouseWheel>>,
+    mut accumulated_motion: ResMut<AccumulatedMouseMotion>,
+    mut accumulated_scroll: ResMut<AccumulatedMouseScroll>,
+) {
+    let mut modal_open = false;
+    let mut pointer_over_popup = false;
+    for mut ctx in contexts.iter_mut() {
+        let ctx = ctx.get_mut();
+        if ctx.memory(|mem| mem.top_modal_layer().is_some()) {
+            modal_open = true;
+        }
+
+        let popup_hovered_id = egui::Id::new("any_popup_hovered");
+        if ctx
+            .data(|data| data.get_temp::<bool>(popup_hovered_id))
+            .unwrap_or(false)
+        {
+            pointer_over_popup = true;
+        }
+
+        ctx.data_mut(|data| data.insert_temp::<bool>(popup_hovered_id, false));
+    }
+
+    let popup_active = egui_wants_input.is_popup_open() && pointer_over_popup;
+    if !(modal_open || popup_active) {
+        return;
+    }
+
+    mouse_motion_messages.clear();
+    mouse_wheel_messages.clear();
+    mouse_buttons.reset_all();
+    accumulated_motion.delta = Vec2::ZERO;
+    accumulated_scroll.delta = Vec2::ZERO;
+}
+
 impl Plugin for UiPlugin {
     fn build(&self, app: &mut App) {
         // Probe ELODIN_KDL_DIR once to inform or warn about an invalid
@@ -297,9 +353,14 @@ impl Plugin for UiPlugin {
             .init_resource::<timeline::StreamTickOrigin>()
             .init_resource::<command_palette::CommandPaletteState>()
             .add_message::<DialogEvent>()
+            .configure_sets(Update, UiInputConsumerSet)
             .add_systems(Update, timeline_slider::sync_ui_tick.before(render_layout))
             .add_systems(Update, actions::spawn_lua_actor)
             .add_systems(Update, update_focused_window)
+            .add_systems(
+                Update,
+                suppress_pointer_input_over_popups.before(UiInputConsumerSet),
+            )
             .add_systems(Update, shortcuts)
             .add_systems(PreUpdate, sync_windows.before(EguiPreUpdateSet::BeginPass))
             .add_systems(
