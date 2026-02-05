@@ -303,19 +303,15 @@ fn suppress_pointer_input_over_popups(
             modal_open = true;
         }
 
-        let popup_rects_id = egui::Id::new("color_picker_popup_rects");
-        let popup_rects =
-            ctx.data(|data| data.get_temp::<Vec<egui::Rect>>(popup_rects_id))
-                .unwrap_or_default();
-        if !popup_rects.is_empty() {
-            if let Some(pointer_pos) = ctx.input(|i| i.pointer.latest_pos()) {
-                if popup_rects.iter().any(|rect| rect.contains(pointer_pos)) {
-                    pointer_over_popup = true;
-                }
-            }
+        let popup_hovered_id = egui::Id::new("any_popup_hovered");
+        if ctx
+            .data(|data| data.get_temp::<bool>(popup_hovered_id))
+            .unwrap_or(false)
+        {
+            pointer_over_popup = true;
         }
 
-        ctx.data_mut(|data| data.insert_temp::<Vec<egui::Rect>>(popup_rects_id, Vec::new()));
+        ctx.data_mut(|data| data.insert_temp::<bool>(popup_hovered_id, false));
     }
 
     let popup_active = egui_wants_input.is_popup_open() && pointer_over_popup;
