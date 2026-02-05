@@ -251,7 +251,7 @@ impl RootWidgetSystem for PaletteWindow<'_, '_> {
             .fixed_pos(palette_min)
             .order(egui::Order::Foreground)
             .interactable(true);
-        let cmd_window = egui::Modal::new(modal_id)
+        let cmd_modal = egui::Modal::new(modal_id)
             .area(modal_area)
             .backdrop_color(egui::Color32::TRANSPARENT)
             .frame(egui::Frame {
@@ -282,7 +282,7 @@ impl RootWidgetSystem for PaletteWindow<'_, '_> {
                 );
             });
 
-        if cmd_window.backdrop_response.clicked() && auto_open_none && !just_opened {
+        if cmd_modal.backdrop_response.clicked() && auto_open_none && !just_opened {
             let state_mut = state.get_mut(world);
             let mut command_palette_state = state_mut.command_palette_state;
             command_palette_state.show = false;
