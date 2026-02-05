@@ -283,6 +283,9 @@ pub struct CameraQuery {
 
 pub struct UiPlugin;
 
+#[derive(Debug, PartialEq, Eq, Clone, Hash, SystemSet)]
+pub struct UiInputConsumerSet;
+
 fn suppress_pointer_input_over_popups(
     egui_wants_input: Res<EguiWantsInput>,
     mut contexts: Query<&mut EguiContext>,
@@ -347,12 +350,13 @@ impl Plugin for UiPlugin {
             .init_resource::<timeline::StreamTickOrigin>()
             .init_resource::<command_palette::CommandPaletteState>()
             .add_message::<DialogEvent>()
+            .configure_sets(Update, UiInputConsumerSet)
             .add_systems(Update, timeline_slider::sync_ui_tick.before(render_layout))
             .add_systems(Update, actions::spawn_lua_actor)
             .add_systems(Update, update_focused_window)
             .add_systems(
                 Update,
-                suppress_pointer_input_over_popups.before(crate::ui::plot::zoom_graph),
+                suppress_pointer_input_over_popups.before(UiInputConsumerSet),
             )
             .add_systems(Update, shortcuts)
             .add_systems(PreUpdate, sync_windows.before(EguiPreUpdateSet::BeginPass))
