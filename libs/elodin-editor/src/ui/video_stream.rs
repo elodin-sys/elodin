@@ -141,6 +141,10 @@ fn decode_video(
             let new_height = (new_width * aspect_ratio) as usize;
             let new_width = new_width as usize;
 
+            if new_width == 0 || new_height == 0 {
+                continue;
+            }
+
             let mut pixels = vec![0; new_width * new_height * 4];
 
             {
@@ -372,16 +376,14 @@ impl super::widgets::WidgetSystem for VideoStreamWidget<'_, '_> {
                 }
             }
             StreamState::Disconnected { retry_after } => {
-                // Resume listening for frames after the retry delay.
-                // We do NOT send a new stream request because the DB-side task
-                // spawned by our initial request is still running (it only exits
-                // on connection failure or stream stop). Sending another request
-                // would spawn a duplicate task sharing the same FixedRateStreamState
-                // and connection, causing double frame delivery and a growing
-                // resource leak with each disconnect/reconnect cycle.
+                // After a DB restart or TCP reconnection the original req_id
+                // handler is orphaned — the DB-side task is gone and the
+                // editor-side callback will never be invoked on the new
+                // connection. We must re-send the FixedRateMsgStream request
+                // so the DB starts a fresh streaming task for us.
                 if Instant::now() >= *retry_after {
-                    stream.state = StreamState::Streaming;
-                    stream.last_update = Instant::now();
+                    stream.state = StreamState::Connecting;
+                    send_stream_request(&mut state.commands, entity, msg_id, stream_id);
                 }
             }
             StreamState::Error(_) => {
