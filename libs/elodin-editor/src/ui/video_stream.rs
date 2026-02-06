@@ -382,6 +382,7 @@ impl super::widgets::WidgetSystem for VideoStreamWidget<'_, '_> {
                 // connection. We must re-send the FixedRateMsgStream request
                 // so the DB starts a fresh streaming task for us.
                 if Instant::now() >= *retry_after {
+                    stream.frame_count = 0;
                     stream.state = StreamState::Connecting;
                     send_stream_request(&mut state.commands, entity, msg_id, stream_id);
                 }
