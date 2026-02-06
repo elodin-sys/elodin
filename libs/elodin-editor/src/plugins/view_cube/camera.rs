@@ -392,9 +392,11 @@ pub fn set_view_cube_viewport_editor(
 
 /// Handle ViewCube events using LookToTrigger (editor mode).
 /// This integrates with bevy_editor_cam for smoother camera control.
+/// Uses ViewCubeLink to find the correct main camera (safe with multiple viewports).
 pub fn handle_view_cube_look_to(
     mut events: MessageReader<ViewCubeEvent>,
-    camera_query: Query<(Entity, &Transform, &EditorCam), With<ViewCubeTargetCamera>>,
+    view_cube_query: Query<&ViewCubeLink, With<ViewCubeRoot>>,
+    camera_query: Query<(Entity, &Transform, &EditorCam)>,
     mut look_to: MessageWriter<LookToTrigger>,
 ) {
     for event in events.read() {
@@ -405,13 +407,18 @@ pub fn handle_view_cube_look_to(
             ViewCubeEvent::ArrowClicked(_) => None, // Arrows don't use LookToTrigger
         };
 
-        if let Some(look_dir) = direction
-            && let Ok((entity, transform, editor_cam)) = camera_query.single()
-            && let Ok(dir) = Dir3::new(look_dir)
-        {
-            look_to.write(LookToTrigger::auto_snap_up_direction(
-                dir, entity, transform, editor_cam,
-            ));
+        if let Some(look_dir) = direction {
+            // Find the linked main camera via ViewCubeLink
+            for link in view_cube_query.iter() {
+                if let Ok((entity, transform, editor_cam)) = camera_query.get(link.main_camera)
+                    && let Ok(dir) = Dir3::new(look_dir)
+                {
+                    look_to.write(LookToTrigger::auto_snap_up_direction(
+                        dir, entity, transform, editor_cam,
+                    ));
+                    break;
+                }
+            }
         }
     }
 }
@@ -420,59 +427,68 @@ pub fn handle_view_cube_look_to(
 /// Rotates the camera around the subject (pivot point) by 15-degree increments.
 /// The subject stays in place - only the camera orbits around it.
 /// Does NOT use EditorCam's orbit system to avoid momentum/input blocking.
+/// Uses ViewCubeLink to find the correct main camera (safe with multiple viewports).
 pub fn handle_view_cube_arrows_editor(
     mut events: MessageReader<ViewCubeEvent>,
-    mut camera_query: Query<(&mut Transform, &EditorCam), With<ViewCubeTargetCamera>>,
+    view_cube_query: Query<&ViewCubeLink, With<ViewCubeRoot>>,
+    mut camera_query: Query<(&mut Transform, &EditorCam)>,
     config: Res<ViewCubeConfig>,
 ) {
     for event in events.read() {
-        if let ViewCubeEvent::ArrowClicked(arrow) = event
-            && let Ok((mut transform, editor_cam)) = camera_query.single_mut()
-        {
-            let angle = config.rotation_increment;
+        if let ViewCubeEvent::ArrowClicked(arrow) = event {
+            // Find the linked main camera via ViewCubeLink
+            for link in view_cube_query.iter() {
+                let Ok((mut transform, editor_cam)) = camera_query.get_mut(link.main_camera)
+                else {
+                    continue;
+                };
 
-            // Compute the pivot point: the point the camera is orbiting around.
-            // Use EditorCam's anchor depth to find how far the subject is.
-            let depth = editor_cam.last_anchor_depth.abs() as f32;
-            let pivot = transform.translation + *transform.forward() * depth;
+                let angle = config.rotation_increment;
 
-            match arrow {
-                RotationArrow::Left | RotationArrow::Right => {
-                    // Yaw: rotate around world up axis (Y) centered on pivot
-                    let sign = if *arrow == RotationArrow::Left {
-                        1.0
-                    } else {
-                        -1.0
-                    };
-                    let rotation = Quat::from_rotation_y(sign * angle);
-                    let offset = transform.translation - pivot;
-                    transform.translation = pivot + rotation * offset;
-                    transform.look_at(pivot, Vec3::Y);
+                // Compute the pivot point: the point the camera is orbiting around.
+                // Use EditorCam's anchor depth to find how far the subject is.
+                let depth = editor_cam.last_anchor_depth.abs() as f32;
+                let pivot = transform.translation + *transform.forward() * depth;
+
+                match arrow {
+                    RotationArrow::Left | RotationArrow::Right => {
+                        // Yaw: rotate around world up axis (Y) centered on pivot
+                        let sign = if *arrow == RotationArrow::Left {
+                            1.0
+                        } else {
+                            -1.0
+                        };
+                        let rotation = Quat::from_rotation_y(sign * angle);
+                        let offset = transform.translation - pivot;
+                        transform.translation = pivot + rotation * offset;
+                        transform.look_at(pivot, Vec3::Y);
+                    }
+                    RotationArrow::Up | RotationArrow::Down => {
+                        // Pitch: rotate around camera's local right axis centered on pivot
+                        let sign = if *arrow == RotationArrow::Up {
+                            1.0
+                        } else {
+                            -1.0
+                        };
+                        let right = transform.right();
+                        let rotation = Quat::from_axis_angle(*right, sign * angle);
+                        let offset = transform.translation - pivot;
+                        transform.translation = pivot + rotation * offset;
+                        transform.look_at(pivot, Vec3::Y);
+                    }
+                    RotationArrow::RollLeft | RotationArrow::RollRight => {
+                        // Roll: rotate camera around its own forward axis (no pivot needed)
+                        let roll_angle = if *arrow == RotationArrow::RollLeft {
+                            angle
+                        } else {
+                            -angle
+                        };
+                        let forward = transform.forward();
+                        let roll_rotation = Quat::from_axis_angle(*forward, roll_angle);
+                        transform.rotation = roll_rotation * transform.rotation;
+                    }
                 }
-                RotationArrow::Up | RotationArrow::Down => {
-                    // Pitch: rotate around camera's local right axis centered on pivot
-                    let sign = if *arrow == RotationArrow::Up {
-                        1.0
-                    } else {
-                        -1.0
-                    };
-                    let right = transform.right();
-                    let rotation = Quat::from_axis_angle(*right, sign * angle);
-                    let offset = transform.translation - pivot;
-                    transform.translation = pivot + rotation * offset;
-                    transform.look_at(pivot, Vec3::Y);
-                }
-                RotationArrow::RollLeft | RotationArrow::RollRight => {
-                    // Roll: rotate camera around its own forward axis (no pivot needed)
-                    let roll_angle = if *arrow == RotationArrow::RollLeft {
-                        angle
-                    } else {
-                        -angle
-                    };
-                    let forward = transform.forward();
-                    let roll_rotation = Quat::from_axis_angle(*forward, roll_angle);
-                    transform.rotation = roll_rotation * transform.rotation;
-                }
+                break; // Only handle once per event
             }
         }
     }
