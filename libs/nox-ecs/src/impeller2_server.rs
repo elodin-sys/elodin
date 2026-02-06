@@ -12,7 +12,8 @@ use std::{
     time::{Duration, Instant},
 };
 use stellarator::struc_con::{Joinable, Thread};
-use tracing::warn;
+use stellarator::util::CancelToken;
+use tracing::{info, warn};
 
 use crate::{Compiled, World, WorldExec};
 
@@ -28,12 +29,14 @@ impl Server {
 
     pub async fn run(self) -> Result<(), Error> {
         tracing::info!("running server");
+        let cancel_token = CancelToken::new();
         self.run_with_cancellation(
             || false,
             |_, _, _, _, _| {},
             |_, _, _, _, _| {},
             false,
             None,
+            cancel_token,
         )
         .await
     }
@@ -45,6 +48,7 @@ impl Server {
         post_step: impl Fn(u64, &Arc<DB>, &Arc<AtomicU64>, Timestamp, Timestamp) + 'static,
         interactive: bool,
         start_timestamp: Option<Timestamp>,
+        cancel_token: CancelToken,
     ) -> Result<(), Error> {
         tracing::info!("running server with cancellation");
         let Self { db, mut world } = self;
@@ -71,6 +75,7 @@ impl Server {
             post_step,
             start_time,
             interactive,
+            cancel_token,
         ));
         futures_lite::future::race(async { stream.join().await.unwrap().unwrap() }, async {
             tick.await
@@ -293,6 +298,7 @@ async fn tick(
     post_step: impl Fn(u64, &Arc<DB>, &Arc<AtomicU64>, Timestamp, Timestamp) + 'static,
     start_timestamp: Timestamp,
     interactive: bool,
+    cancel_token: CancelToken,
 ) {
     // XXX This is what world.run ultimately calls.
     let external_controls: HashSet<ComponentId> = external_controls(&world).collect();
@@ -305,7 +311,23 @@ async fn tick(
         .run_time_step
         .map(|time_step| time_step.0);
     let time_step = world.world.sim_time_step().0;
-    while db.recording_cell.wait().await {
+    #[rustfmt::skip]
+    let should_cancel = || { is_cancelled() || cancel_token.is_cancelled() };
+    loop {
+        if should_cancel() {
+            return;
+        }
+        if !db.recording_cell.is_playing() {
+            let _ = futures_lite::future::race(db.recording_cell.wait(), async {
+                cancel_token.wait().await;
+                false
+            })
+            .await;
+            if should_cancel() {
+                return;
+            }
+            continue;
+        }
         let start = Instant::now();
         // Read tick from shared counter (can be reset by StepContext::truncate())
         let tick = tick_counter.load(Ordering::SeqCst);
@@ -319,6 +341,11 @@ async fn tick(
             world.world.metadata.max_tick = u64::MAX;
             if !interactive {
                 return;
+            } else {
+                info!(
+                    "Simulation stopped; it reached its max_tick {}.",
+                    world.world.max_tick()
+                );
             }
         }
         // Python pre_step func runs (before copy_db_to_world so writes are picked up).
@@ -349,11 +376,11 @@ async fn tick(
             && !timestamps_changed(&db, &mut wait_for_write_pair_ids).unwrap_or(false)
         {
             stellarator::sleep(Duration::from_millis(1)).await;
-            if is_cancelled() {
+            if should_cancel() {
                 return;
             }
         }
-        if is_cancelled() {
+        if should_cancel() {
             return;
         }
         // Python post_step func runs.

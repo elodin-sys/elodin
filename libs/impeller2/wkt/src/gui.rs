@@ -728,6 +728,15 @@ pub struct QueryPlot<T = ()> {
     pub auto_refresh: bool,
     pub color: Color,
     pub query_type: QueryType,
+    /// Plot mode: TimeSeries (default) or XY for arbitrary X/Y plotting
+    #[serde(default)]
+    pub plot_mode: PlotMode,
+    /// Optional X-axis label (only used in XY mode)
+    #[serde(default)]
+    pub x_label: Option<String>,
+    /// Optional Y-axis label
+    #[serde(default)]
+    pub y_label: Option<String>,
     pub aux: T,
 }
 
@@ -740,6 +749,9 @@ impl<T> QueryPlot<T> {
             auto_refresh: self.auto_refresh,
             color: self.color,
             query_type: self.query_type,
+            plot_mode: self.plot_mode,
+            x_label: self.x_label.clone(),
+            y_label: self.y_label.clone(),
             aux: f(&self.aux),
         }
     }
@@ -750,6 +762,16 @@ pub enum QueryType {
     #[default]
     EQL,
     SQL,
+}
+
+/// Plot mode for query plots - determines how the X-axis is interpreted and displayed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Deserialize, Serialize)]
+pub enum PlotMode {
+    /// Time-series mode: X-axis represents time, labels formatted as durations
+    #[default]
+    TimeSeries,
+    /// XY mode: X-axis represents arbitrary numeric values, labels formatted as numbers
+    XY,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]

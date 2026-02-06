@@ -245,12 +245,15 @@ impl RootWidgetSystem for PaletteWindow<'_, '_> {
         let palette_min = egui::pos2(screen_rect.center().x - palette_width / 2.0, 64.0);
         let scheme = get_scheme();
 
-        let cmd_window = egui::Window::new("command_palette")
-            .title_bar(false)
-            .resizable(false)
-            .fixed_size(palette_size)
+        let modal_id = egui::Id::new("command_palette");
+        let modal_area = egui::Area::new(modal_id)
+            .kind(egui::UiKind::Modal)
             .fixed_pos(palette_min)
-            .max_height(palette_size.y)
+            .order(egui::Order::Foreground)
+            .interactable(true);
+        let cmd_modal = egui::Modal::new(modal_id)
+            .area(modal_area)
+            .backdrop_color(egui::Color32::TRANSPARENT)
             .frame(egui::Frame {
                 fill: scheme.bg_secondary,
                 stroke: egui::Stroke::new(1.0, with_opacity(scheme.text_primary, 0.005)),
@@ -264,6 +267,8 @@ impl RootWidgetSystem for PaletteWindow<'_, '_> {
                 ..Default::default()
             })
             .show(ctx, |ui| {
+                ui.set_min_size(palette_size);
+                ui.set_max_size(palette_size);
                 ui.style_mut().spacing.item_spacing = egui::vec2(0.0, 0.0);
 
                 let (up, down) = ui.add_widget::<PaletteSearch>(world, "command_palette_search");
@@ -277,11 +282,7 @@ impl RootWidgetSystem for PaletteWindow<'_, '_> {
                 );
             });
 
-        let Some(cmd_window) = cmd_window else {
-            return false;
-        };
-
-        if cmd_window.response.clicked_elsewhere() && auto_open_none && !just_opened {
+        if cmd_modal.backdrop_response.clicked() && auto_open_none && !just_opened {
             let state_mut = state.get_mut(world);
             let mut command_palette_state = state_mut.command_palette_state;
             command_palette_state.show = false;

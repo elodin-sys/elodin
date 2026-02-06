@@ -331,6 +331,25 @@ fn serialize_query_plot<T>(query_plot: &QueryPlot<T>) -> KdlNode {
         }
     }
 
+    // Serialize plot mode (only if not default TimeSeries)
+    match query_plot.plot_mode {
+        PlotMode::TimeSeries => {} // Default, don't serialize
+        PlotMode::XY => {
+            node.entries_mut().push(KdlEntry::new_prop("mode", "xy"));
+        }
+    }
+
+    // Serialize optional axis labels
+    if let Some(ref x_label) = query_plot.x_label {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("x_label", x_label.clone()));
+    }
+
+    if let Some(ref y_label) = query_plot.y_label {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("y_label", y_label.clone()));
+    }
+
     node
 }
 
