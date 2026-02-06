@@ -224,10 +224,11 @@ impl ViewCubeConfig {
         Self {
             use_overlay: true,
             sync_with_camera: true,
-            auto_rotate: false, // Editor handles camera via LookToTrigger
+            auto_rotate: false, // Editor handles camera via direct orbit
             use_look_to_trigger: true,
             follow_main_viewport: false, // Use existing set_camera_viewport
             skip_viewport_system: true,  // Don't add our viewport system
+            overlay_size: 128,           // Match navigation_gizmo's side_length
             ..Default::default()
         }
     }
