@@ -216,7 +216,10 @@ fn decode_video(
             }
             Ok(None) => {
                 if frame_count <= 3 {
-                    bevy::log::info!("VideoToolbox: packet {} produced no frame (parameter sets or empty)", frame_count);
+                    bevy::log::info!(
+                        "VideoToolbox: packet {} produced no frame (parameter sets or empty)",
+                        frame_count
+                    );
                 }
             }
             Err(e) => {
@@ -424,7 +427,8 @@ impl super::widgets::WidgetSystem for VideoStreamWidget<'_, '_> {
                     .width
                     .store(width as usize, atomic::Ordering::Relaxed);
                 ui.centered_and_justified(|ui| {
-                    let progress = (*frames_waited as f32 / FRAMES_BEFORE_CONNECT as f32 * 100.0) as u32;
+                    let progress =
+                        (*frames_waited as f32 / FRAMES_BEFORE_CONNECT as f32 * 100.0) as u32;
                     ui.label(format!("Initializing video stream... {}%", progress));
                 });
             }
@@ -473,7 +477,10 @@ impl super::widgets::WidgetSystem for VideoStreamWidget<'_, '_> {
                 ui.centered_and_justified(|ui| {
                     ui.colored_label(
                         get_scheme().highlight,
-                        format!("Stream disconnected. Reconnecting in {}s...", secs_until_retry),
+                        format!(
+                            "Stream disconnected. Reconnecting in {}s...",
+                            secs_until_retry
+                        ),
                     );
                 });
             }

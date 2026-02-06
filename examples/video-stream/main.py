@@ -73,13 +73,9 @@ def sample_wind(
     """
     # Convert tick to angle (2*pi radians per rotation period)
     angle = (tick[0] / WIND_ROTATION_PERIOD) * 2.0 * jnp.pi
-    
+
     # Wind rotates in X-Y plane
-    wind_vec = jnp.array([
-        jnp.cos(angle) * WIND_SPEED,
-        jnp.sin(angle) * WIND_SPEED,
-        0.0
-    ])
+    wind_vec = jnp.array([jnp.cos(angle) * WIND_SPEED, jnp.sin(angle) * WIND_SPEED, 0.0])
     return w.map(Wind, lambda _: wind_vec)
 
 
@@ -243,4 +239,3 @@ sys = constraints | el.six_dof(sys=effectors, integrator=el.Integrator.SemiImpli
 
 # Run simulation - real-time simulation is required for this to work, otherwise the video frames will be out of sync with the simulation.
 sim = world.run(sys, SIM_TIME_STEP, run_time_step=1.0 / 60.0, start_timestamp=0)
-

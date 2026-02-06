@@ -64,7 +64,7 @@ mod elodinsink {
             pub connection: Option<TcpStream>,
             pub msg_name: String,
             pub base_timestamp: Option<Timestamp>, // DB's last_updated at connect time
-            pub first_pts: Option<gst::ClockTime>,  // First buffer PTS after connect
+            pub first_pts: Option<gst::ClockTime>, // First buffer PTS after connect
         }
 
         impl Default for ElodinSinkState {

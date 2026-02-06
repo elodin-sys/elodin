@@ -382,12 +382,7 @@ impl VideoToolboxDecoder {
         let frame_ref_con = std::ptr::null_mut();
 
         let status = unsafe {
-            session.decode_frame(
-                &*sample_buffer,
-                flags,
-                frame_ref_con,
-                std::ptr::null_mut(),
-            )
+            session.decode_frame(&*sample_buffer, flags, frame_ref_con, std::ptr::null_mut())
         };
 
         if status != 0 {
