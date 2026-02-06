@@ -417,35 +417,40 @@ pub fn handle_view_cube_look_to(
 }
 
 /// Handle arrow rotations in editor mode.
-/// Rotates the camera around the scene center (origin) without using EditorCam's
-/// orbit system, which would create momentum and block subsequent mouse inputs.
+/// Rotates the camera around the subject (pivot point) by 15-degree increments.
+/// The subject stays in place - only the camera orbits around it.
+/// Does NOT use EditorCam's orbit system to avoid momentum/input blocking.
 pub fn handle_view_cube_arrows_editor(
     mut events: MessageReader<ViewCubeEvent>,
-    mut camera_query: Query<&mut Transform, With<ViewCubeTargetCamera>>,
+    mut camera_query: Query<(&mut Transform, &EditorCam), With<ViewCubeTargetCamera>>,
     config: Res<ViewCubeConfig>,
 ) {
     for event in events.read() {
         if let ViewCubeEvent::ArrowClicked(arrow) = event
-            && let Ok(mut transform) = camera_query.single_mut()
+            && let Ok((mut transform, editor_cam)) = camera_query.single_mut()
         {
             let angle = config.rotation_increment;
 
+            // Compute the pivot point: the point the camera is orbiting around.
+            // Use EditorCam's anchor depth to find how far the subject is.
+            let depth = editor_cam.last_anchor_depth.abs() as f32;
+            let pivot = transform.translation + *transform.forward() * depth;
+
             match arrow {
                 RotationArrow::Left | RotationArrow::Right => {
-                    // Yaw: rotate around world up axis (Y)
+                    // Yaw: rotate around world up axis (Y) centered on pivot
                     let sign = if *arrow == RotationArrow::Left {
                         1.0
                     } else {
                         -1.0
                     };
                     let rotation = Quat::from_rotation_y(sign * angle);
-                    // Rotate position around origin
-                    transform.translation = rotation * transform.translation;
-                    // Update camera to look at origin
-                    transform.look_at(Vec3::ZERO, Vec3::Y);
+                    let offset = transform.translation - pivot;
+                    transform.translation = pivot + rotation * offset;
+                    transform.look_at(pivot, Vec3::Y);
                 }
                 RotationArrow::Up | RotationArrow::Down => {
-                    // Pitch: rotate around camera's local right axis
+                    // Pitch: rotate around camera's local right axis centered on pivot
                     let sign = if *arrow == RotationArrow::Up {
                         1.0
                     } else {
@@ -453,13 +458,12 @@ pub fn handle_view_cube_arrows_editor(
                     };
                     let right = transform.right();
                     let rotation = Quat::from_axis_angle(*right, sign * angle);
-                    // Rotate position around origin
-                    transform.translation = rotation * transform.translation;
-                    // Update camera to look at origin
-                    transform.look_at(Vec3::ZERO, Vec3::Y);
+                    let offset = transform.translation - pivot;
+                    transform.translation = pivot + rotation * offset;
+                    transform.look_at(pivot, Vec3::Y);
                 }
                 RotationArrow::RollLeft | RotationArrow::RollRight => {
-                    // Roll: rotate around camera's forward axis
+                    // Roll: rotate camera around its own forward axis (no pivot needed)
                     let roll_angle = if *arrow == RotationArrow::RollLeft {
                         angle
                     } else {
