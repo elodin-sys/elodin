@@ -60,6 +60,20 @@ use bevy::picking::prelude::*;
 use bevy::prelude::*;
 use bevy_fontmesh::prelude::*;
 
+/// Tracks the current color mode to detect changes
+#[derive(Resource)]
+struct CurrentColorMode {
+    mode: String,
+}
+
+impl Default for CurrentColorMode {
+    fn default() -> Self {
+        Self {
+            mode: crate::ui::colors::current_selection().mode,
+        }
+    }
+}
+
 /// Main plugin for the ViewCube widget
 #[derive(Default)]
 pub struct ViewCubePlugin {
@@ -76,9 +90,11 @@ impl Plugin for ViewCubePlugin {
         app.insert_resource(self.config.clone())
             .init_resource::<HoveredElement>()
             .init_resource::<OriginalMaterials>()
+            .init_resource::<CurrentColorMode>()
             .add_message::<ViewCubeEvent>()
             .add_plugins(FontMeshPlugin)
             .add_systems(Update, interactions::setup_cube_elements)
+            .add_systems(Update, update_theme_on_mode_change)
             .add_observer(interactions::on_cube_hover_start)
             .add_observer(interactions::on_cube_hover_end)
             .add_observer(interactions::on_cube_click)
@@ -121,6 +137,59 @@ impl Plugin for ViewCubePlugin {
                     app.add_systems(Update, camera::set_view_cube_viewport);
                 }
             }
+        }
+    }
+}
+
+/// Detects color mode changes (dark/light) and updates all ViewCube materials accordingly.
+fn update_theme_on_mode_change(
+    mut current_mode: ResMut<CurrentColorMode>,
+    cube_elements: Query<(Entity, &CubeElement), With<ViewCubeSetup>>,
+    children_query: Query<&Children>,
+    material_query: Query<&MeshMaterial3d<StandardMaterial>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut original_materials: ResMut<OriginalMaterials>,
+    arrows: Query<(Entity, &RotationArrow)>,
+) {
+    let new_mode = crate::ui::colors::current_selection().mode;
+    if new_mode == current_mode.mode {
+        return;
+    }
+    current_mode.mode = new_mode;
+
+    let colors = ViewCubeColors::default();
+
+    // Update cube elements (faces, edges, corners)
+    for (entity, element) in cube_elements.iter() {
+        let new_color = colors.get_element_color(element);
+
+        // Update children materials
+        if let Ok(children) = children_query.get(entity) {
+            for child in children.iter() {
+                original_materials.colors.insert(child, new_color);
+                if let Ok(mat_handle) = material_query.get(child)
+                    && let Some(mat) = materials.get_mut(&mat_handle.0)
+                {
+                    mat.base_color = new_color;
+                }
+            }
+        }
+
+        // Update entity itself if it has a material
+        original_materials.colors.insert(entity, new_color);
+        if let Ok(mat_handle) = material_query.get(entity)
+            && let Some(mat) = materials.get_mut(&mat_handle.0)
+        {
+            mat.base_color = new_color;
+        }
+    }
+
+    // Update arrow materials
+    for (entity, _) in arrows.iter() {
+        if let Ok(mat_handle) = material_query.get(entity)
+            && let Some(mat) = materials.get_mut(&mat_handle.0)
+        {
+            mat.base_color = colors.arrow_normal;
         }
     }
 }
