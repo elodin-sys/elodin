@@ -199,11 +199,7 @@ fn stable_up_vector(camera_pos: Vec3, pivot: Vec3) -> Vec3 {
     let dir = (camera_pos - pivot).normalize();
     if dir.y.abs() > 0.95 {
         // Near the poles: use Z as up to avoid flip
-        if dir.y > 0.0 {
-            Vec3::NEG_Z
-        } else {
-            Vec3::Z
-        }
+        if dir.y > 0.0 { Vec3::NEG_Z } else { Vec3::Z }
     } else {
         Vec3::Y
     }
@@ -453,7 +449,12 @@ pub fn handle_view_cube_editor(
                 snap_camera_to_direction(&mut transform, look_dir, real_distance);
             }
             ViewCubeEvent::ArrowClicked { arrow, .. } => {
-                apply_arrow_to_transform(*arrow, config.rotation_increment, real_distance, &mut transform);
+                apply_arrow_to_transform(
+                    *arrow,
+                    config.rotation_increment,
+                    real_distance,
+                    &mut transform,
+                );
             }
         }
     }
@@ -467,23 +468,18 @@ fn snap_camera_to_direction(transform: &mut Transform, look_dir: Vec3, distance:
     transform.look_at(Vec3::ZERO, up);
 }
 
-/// Apply an arrow rotation to the camera.
-/// The camera stays in place and rotates its orientation.
-/// This makes the subject appear to rotate on itself:
-/// - Left/Right: yaw around the screen's vertical axis
-/// - Up/Down: pitch around the screen's horizontal axis
-/// - Roll: roll around the screen's depth axis
+/// Apply an arrow rotation to the camera, keeping the subject centered.
+/// Computes the look-at point along the camera's forward ray and orbits around it.
+/// This makes the subject appear to rotate on itself for all 6 arrows.
 fn apply_arrow_to_transform(
     arrow: RotationArrow,
     angle: f32,
-    _real_distance: f32,
+    real_distance: f32,
     transform: &mut Transform,
 ) {
     let rotation = match arrow {
-        // Yaw: rotate around world Y (vertical in screen plane)
         RotationArrow::Left => Quat::from_rotation_y(angle),
         RotationArrow::Right => Quat::from_rotation_y(-angle),
-        // Pitch: rotate around camera's local right axis (horizontal in screen plane)
         RotationArrow::Up => {
             let right = transform.right();
             Quat::from_axis_angle(*right, angle)
@@ -492,7 +488,6 @@ fn apply_arrow_to_transform(
             let right = transform.right();
             Quat::from_axis_angle(*right, -angle)
         }
-        // Roll: rotate around camera's forward axis
         RotationArrow::RollLeft => {
             let forward = transform.forward();
             Quat::from_axis_angle(*forward, angle)
@@ -503,7 +498,20 @@ fn apply_arrow_to_transform(
         }
     };
 
-    // Just rotate the camera orientation in place.
-    // The camera doesn't move - the subject appears to rotate on itself.
-    transform.rotation = rotation * transform.rotation;
+    // The subject is along the camera's forward ray at real_distance.
+    // Compute the pivot point in local space.
+    let pivot = transform.translation + *transform.forward() * real_distance;
+
+    // Orbit the camera around this pivot
+    let offset = transform.translation - pivot;
+    let new_offset = rotation * offset;
+    transform.translation = pivot + new_offset;
+
+    // Re-center: look at the pivot to keep the subject in the center
+    if !matches!(arrow, RotationArrow::RollLeft | RotationArrow::RollRight) {
+        let up = stable_up_vector(transform.translation, pivot);
+        transform.look_at(pivot, up);
+    } else {
+        transform.rotation = rotation * transform.rotation;
+    }
 }
