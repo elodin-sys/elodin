@@ -372,11 +372,16 @@ impl super::widgets::WidgetSystem for VideoStreamWidget<'_, '_> {
                 }
             }
             StreamState::Disconnected { retry_after } => {
-                // Attempt reconnection after the delay
+                // Resume listening for frames after the retry delay.
+                // We do NOT send a new stream request because the DB-side task
+                // spawned by our initial request is still running (it only exits
+                // on connection failure or stream stop). Sending another request
+                // would spawn a duplicate task sharing the same FixedRateStreamState
+                // and connection, causing double frame delivery and a growing
+                // resource leak with each disconnect/reconnect cycle.
                 if Instant::now() >= *retry_after {
-                    stream.state = StreamState::Connecting;
-                    stream.frame_count = 0; // Reset frame count for reconnection detection
-                    send_stream_request(&mut state.commands, entity, msg_id, stream_id);
+                    stream.state = StreamState::Streaming;
+                    stream.last_update = Instant::now();
                 }
             }
             StreamState::Error(_) => {

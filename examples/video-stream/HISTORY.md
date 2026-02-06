@@ -518,7 +518,6 @@ if (frame_timestamp.0 - state.current_time.0.0).abs() > 500000 {
 
 1. **Nix development shell** (includes GStreamer, FFMPEG, and all dependencies):
    ```bash
-   cd /home/dan/dev/elodin
    nix develop
    ```
 
