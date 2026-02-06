@@ -358,8 +358,9 @@ impl super::widgets::WidgetSystem for VideoStreamWidget<'_, '_> {
             }
             StreamState::Streaming => {
                 // Actively receiving - render frames and check for timeout
+                let prev_frame_count = stream.frame_count;
                 decoder.render_frame(&mut stream);
-                if stream.frame_count > 0 {
+                if stream.frame_count > prev_frame_count {
                     stream.last_update = Instant::now();
                 }
 
