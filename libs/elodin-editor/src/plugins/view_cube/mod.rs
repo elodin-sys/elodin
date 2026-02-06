@@ -104,14 +104,9 @@ impl Plugin for ViewCubePlugin {
 
         // Add camera control systems based on configuration
         if self.config.use_look_to_trigger {
-            // Editor mode: use LookToTrigger for face/edge/corner clicks
-            app.add_systems(
-                Update,
-                (
-                    camera::handle_view_cube_look_to,
-                    camera::handle_view_cube_arrows_editor,
-                ),
-            );
+            // Editor mode: single system handles all ViewCube events
+            // (faces, edges, corners, arrows) to avoid Message consumption conflicts
+            app.add_systems(Update, camera::handle_view_cube_editor);
         } else if self.config.auto_rotate {
             // Standalone mode: direct camera animation
             app.init_resource::<CameraAnimation>().add_systems(
