@@ -238,4 +238,4 @@ effectors = apply_wind | friction
 sys = constraints | el.six_dof(sys=effectors, integrator=el.Integrator.SemiImplicit)
 
 # Run simulation - real-time simulation is required for this to work, otherwise the video frames will be out of sync with the simulation.
-sim = world.run(sys, SIM_TIME_STEP, run_time_step=1.0 / 60.0, start_timestamp=0)
+sim = world.run(sys, SIM_TIME_STEP, run_time_step=SIM_TIME_STEP, start_timestamp=0)

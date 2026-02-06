@@ -41,12 +41,14 @@ echo ""
 
 # Run GStreamer pipeline with test pattern
 # - videotestsrc pattern=ball: animated bouncing ball test pattern
+# - video/x-raw,framerate=60/1: explicit 60 fps, matching default editor playback rate
 # - videoconvert: converts to format suitable for encoder
 # - x264enc: H.264 encoder with low-latency settings
 # - h264parse config-interval=-1: ensures SPS/PPS sent with every keyframe
 # - elodinsink: custom plugin that sends NAL units to Elodin DB
 gst-launch-1.0 \
     videotestsrc pattern=ball ! \
+    video/x-raw,framerate=60/1 ! \
     videoconvert ! \
     x264enc tune=zerolatency key-int-max=12 ! \
     video/x-h264,profile=baseline ! \

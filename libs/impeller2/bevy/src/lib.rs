@@ -26,8 +26,8 @@ use impeller2_bbq::{AsyncArcQueueRx, RxExt};
 use impeller2_wkt::{
     ComponentMetadata, CurrentTimestamp, DbConfig, DumpMetadata, DumpMetadataResp, DumpSchema,
     DumpSchemaResp, EarliestTimestamp, ErrorResponse, FixedRateBehavior, GetDbSettings,
-    GetEarliestTimestamp, IsRecording, LastUpdated, Stream, StreamBehavior, StreamId,
-    StreamTimestamp, SubscribeLastUpdated, VTableMsg, WorldPos,
+    GetEarliestTimestamp, IsRecording, LastUpdated, SetStreamState, Stream, StreamBehavior,
+    StreamId, StreamTimestamp, SubscribeLastUpdated, VTableMsg, WorldPos,
 };
 use serde::de::DeserializeOwned;
 use std::{
@@ -85,12 +85,13 @@ fn sink_inner(
     packet_handlers: &mut PacketHandlers,
     world_sink_state: &mut SystemState<WorldSink>,
 ) -> Result<(), impeller2::error::Error> {
-    let mut count = 0;
-    while let Some(pkt) = packet_rx.try_recv_pkt() {
-        if count > 2048 {
-            return Ok(());
-        }
-        count += 1;
+        let mut count = 0;
+        let mut pending_stream_time_step: Option<Duration> = None;
+        while let Some(pkt) = packet_rx.try_recv_pkt() {
+            if count > 2048 {
+                return Ok(());
+            }
+            count += 1;
         {
             let pkt_id = match &pkt {
                 OwnedPacket::Msg(m) => m.id,
@@ -177,7 +178,9 @@ fn sink_inner(
                         .metadata_reg
                         .insert(metadata.component_id, metadata);
                 }
-                *world_sink.db_config = metadata.db_config;
+                *world_sink.db_config = metadata.db_config.clone();
+                pending_stream_time_step =
+                    Some(metadata.db_config.default_stream_time_step);
             }
             OwnedPacket::Msg(m) if m.id == LastUpdated::ID => {
                 let m = m.parse::<LastUpdated>()?;
@@ -209,6 +212,20 @@ fn sink_inner(
             OwnedPacket::TimeSeries(_) => {}
         }
         world_sink_state.apply(world);
+        if let Some(time_step) = pending_stream_time_step
+            && let (Some(packet_tx), Some(current_stream_id)) = (
+                world.get_resource::<PacketTx>(),
+                world.get_resource::<CurrentStreamId>(),
+            )
+        {
+            packet_tx.send_msg(SetStreamState {
+                id: current_stream_id.0,
+                playing: None,
+                timestamp: None,
+                time_step: Some(time_step),
+                frequency: None,
+            });
+        }
     }
     Ok(())
 }

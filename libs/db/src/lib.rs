@@ -1492,6 +1492,9 @@ async fn handle_packet<A: AsyncWrite + 'static>(
                 if let Some(frequency) = set_stream_state.frequency {
                     state.set_frequency(frequency);
                 }
+                if let Some(time_step) = set_stream_state.time_step {
+                    state.set_time_step(time_step);
+                }
                 Ok(())
             })?;
         }
@@ -2142,6 +2145,11 @@ impl FixedRateStreamState {
 
     fn set_frequency(&self, frequency: u64) {
         self.frequency.store(frequency, atomic::Ordering::SeqCst);
+    }
+
+    fn set_time_step(&self, time_step: Duration) {
+        self.time_step
+            .store(time_step.as_nanos() as u64, atomic::Ordering::SeqCst);
     }
 
     fn time_step(&self) -> Duration {
