@@ -194,6 +194,25 @@ mod elodinsink {
                 packet.extend_from_slice(data);
 
                 if let Some(stream) = &mut state.connection {
+                    // Drain any pending SubscribeLastUpdated responses from the
+                    // read buffer. The DB sends LastUpdated continuously, and since
+                    // the socket is non-blocking we must discard these to prevent
+                    // the TCP receive buffer from saturating (which would back-
+                    // pressure the DB's send task).
+                    let mut drain_buf = [0u8; 4096];
+                    loop {
+                        match stream.read(&mut drain_buf) {
+                            Ok(0) => break,                          // EOF
+                            Ok(_) => continue,                       // discard, keep draining
+                            Err(ref e)
+                                if e.kind() == std::io::ErrorKind::WouldBlock =>
+                            {
+                                break
+                            } // no more data
+                            Err(_) => break,                         // other error
+                        }
+                    }
+
                     match stream.write_all(&packet.inner) {
                         Ok(_) => {}
                         Err(err) => {

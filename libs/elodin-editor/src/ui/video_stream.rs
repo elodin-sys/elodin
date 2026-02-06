@@ -89,7 +89,7 @@ pub enum StreamState {
     /// Deferring connection to avoid blocking during initialization
     WaitingToConnect { frames_waited: u32 },
     /// Stream request sent, waiting for data
-    Connecting,
+    Connecting { since: Instant },
     /// Actively receiving video frames
     Streaming,
     /// Stream disconnected, will retry after specified time
@@ -348,16 +348,25 @@ impl super::widgets::WidgetSystem for VideoStreamWidget<'_, '_> {
                 // Wait for the specified number of frames before connecting
                 *frames_waited += 1;
                 if *frames_waited >= FRAMES_BEFORE_CONNECT {
-                    stream.state = StreamState::Connecting;
+                    stream.state = StreamState::Connecting { since: Instant::now() };
                     send_stream_request(&mut state.commands, entity, msg_id, stream_id);
                 }
             }
-            StreamState::Connecting => {
+            StreamState::Connecting { since } => {
+                let since = *since;
                 // Check if we've received any frames (transition to Streaming)
                 decoder.render_frame(&mut stream);
                 if stream.frame_count > 0 {
                     stream.state = StreamState::Streaming;
                     stream.last_update = Instant::now();
+                } else if since.elapsed().as_secs_f32() > STREAM_TIMEOUT_SECS {
+                    // No frames arrived within the timeout — the connection
+                    // request may have been orphaned (e.g. DB restart or TCP
+                    // drop). Transition to Disconnected so the reconnect logic
+                    // can re-send the stream request.
+                    stream.state = StreamState::Disconnected {
+                        retry_after: Instant::now() + RECONNECT_DELAY,
+                    };
                 }
             }
             StreamState::Streaming => {
@@ -383,7 +392,7 @@ impl super::widgets::WidgetSystem for VideoStreamWidget<'_, '_> {
                 // so the DB starts a fresh streaming task for us.
                 if Instant::now() >= *retry_after {
                     stream.frame_count = 0;
-                    stream.state = StreamState::Connecting;
+                    stream.state = StreamState::Connecting { since: Instant::now() };
                     send_stream_request(&mut state.commands, entity, msg_id, stream_id);
                 }
             }
@@ -441,7 +450,7 @@ impl super::widgets::WidgetSystem for VideoStreamWidget<'_, '_> {
                     ui.label(format!("Initializing video stream... {}%", progress));
                 });
             }
-            StreamState::Connecting => {
+            StreamState::Connecting { .. } => {
                 // Set decoder width so frames are decoded at proper resolution
                 decoder
                     .width

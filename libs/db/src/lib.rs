@@ -1603,7 +1603,7 @@ async fn handle_packet<A: AsyncWrite + 'static>(
                     let last_updated = db.last_updated.latest();
                     {
                         match tx.send_msg(&LastUpdated(last_updated)).await {
-                            Err(err) if err.is_stream_closed() => {}
+                            Err(err) if err.is_stream_closed() => return,
                             Err(err) => {
                                 warn!(?err, "failed to send packet");
                                 return;
