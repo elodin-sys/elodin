@@ -265,17 +265,27 @@ pub fn on_cube_click(
     };
 
     // Find the ViewCubeRoot ancestor to identify which ViewCube was clicked
-    let source = find_root_ancestor(entity, &parents_query, &root_query).unwrap_or(Entity::PLACEHOLDER);
+    let source =
+        find_root_ancestor(entity, &parents_query, &root_query).unwrap_or(Entity::PLACEHOLDER);
 
     match element {
         CubeElement::Face(dir) => {
-            events.write(ViewCubeEvent::FaceClicked { direction: *dir, source });
+            events.write(ViewCubeEvent::FaceClicked {
+                direction: *dir,
+                source,
+            });
         }
         CubeElement::Edge(dir) => {
-            events.write(ViewCubeEvent::EdgeClicked { direction: *dir, source });
+            events.write(ViewCubeEvent::EdgeClicked {
+                direction: *dir,
+                source,
+            });
         }
         CubeElement::Corner(pos) => {
-            events.write(ViewCubeEvent::CornerClicked { position: *pos, source });
+            events.write(ViewCubeEvent::CornerClicked {
+                position: *pos,
+                source,
+            });
         }
     }
 }
@@ -342,9 +352,13 @@ pub fn on_arrow_click(
     }
 
     // Find the ViewCubeRoot ancestor to identify which ViewCube was clicked
-    let source = find_root_ancestor(entity, &parents_query, &root_query).unwrap_or(Entity::PLACEHOLDER);
+    let source =
+        find_root_ancestor(entity, &parents_query, &root_query).unwrap_or(Entity::PLACEHOLDER);
 
-    events.write(ViewCubeEvent::ArrowClicked { arrow: *arrow, source });
+    events.write(ViewCubeEvent::ArrowClicked {
+        arrow: *arrow,
+        source,
+    });
 }
 
 // ============================================================================
