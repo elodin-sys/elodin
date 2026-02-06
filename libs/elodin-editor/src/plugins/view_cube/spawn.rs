@@ -312,13 +312,13 @@ fn spawn_face_labels(
 // ============================================================================
 
 fn create_arrow_mesh() -> Mesh {
-    // Increased size for better visibility and clickability
-    Cone::new(0.035, 0.08).into()
+    // Large enough for reliable clicking in the 128px overlay viewport
+    Cone::new(0.06, 0.12).into()
 }
 
 fn create_roll_arrow_mesh() -> Mesh {
-    // Increased size for better visibility and clickability
-    Capsule3d::new(0.018, 0.05).into()
+    // Large enough for reliable clicking in the 128px overlay viewport
+    Capsule3d::new(0.03, 0.08).into()
 }
 
 /// Spawn rotation arrows as children of camera (fixed on screen)
@@ -333,8 +333,8 @@ fn spawn_rotation_arrows(
     let colors = ViewCubeColors::default();
     let arrow_color = colors.arrow_normal;
 
-    let horizontal_distance = 0.5;
-    let vertical_distance = 0.4;
+    let horizontal_distance = 0.42; // Reduced to avoid clipping at viewport edges
+    let vertical_distance = 0.38;
     let depth = -1.2;
 
     let arrows = [
