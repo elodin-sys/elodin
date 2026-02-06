@@ -118,6 +118,16 @@ mod elodinsink {
                         })?;
 
                         // Skip packet header (4 bytes), deserialize body with postcard
+                        if pkt_len < PACKET_HEADER_LEN {
+                            return Err(gst::error_msg!(
+                                gst::ResourceError::Failed,
+                                [
+                                    "LastUpdated packet too short: {} bytes (need at least {})",
+                                    pkt_len,
+                                    PACKET_HEADER_LEN
+                                ]
+                            ));
+                        }
                         let body = &pkt_buf[PACKET_HEADER_LEN..];
                         let last_updated: LastUpdated =
                             postcard::from_bytes(body).map_err(|e| {
