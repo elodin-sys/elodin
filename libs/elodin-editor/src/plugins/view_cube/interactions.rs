@@ -250,6 +250,7 @@ pub fn on_cube_click(
     trigger: On<Pointer<Click>>,
     cube_elements: Query<&CubeElement>,
     parents_query: Query<&ChildOf>,
+    root_query: Query<Entity, With<ViewCubeRoot>>,
     mut events: MessageWriter<ViewCubeEvent>,
 ) {
     let entity = trigger.entity;
@@ -263,15 +264,18 @@ pub fn on_cube_click(
         return;
     };
 
+    // Find the ViewCubeRoot ancestor to identify which ViewCube was clicked
+    let source = find_root_ancestor(entity, &parents_query, &root_query).unwrap_or(Entity::PLACEHOLDER);
+
     match element {
         CubeElement::Face(dir) => {
-            events.write(ViewCubeEvent::FaceClicked(*dir));
+            events.write(ViewCubeEvent::FaceClicked { direction: *dir, source });
         }
         CubeElement::Edge(dir) => {
-            events.write(ViewCubeEvent::EdgeClicked(*dir));
+            events.write(ViewCubeEvent::EdgeClicked { direction: *dir, source });
         }
         CubeElement::Corner(pos) => {
-            events.write(ViewCubeEvent::CornerClicked(*pos));
+            events.write(ViewCubeEvent::CornerClicked { position: *pos, source });
         }
     }
 }
@@ -323,6 +327,8 @@ pub fn on_arrow_hover_end(
 pub fn on_arrow_click(
     trigger: On<Pointer<Click>>,
     arrows: Query<&RotationArrow>,
+    parents_query: Query<&ChildOf>,
+    root_query: Query<Entity, With<ViewCubeRoot>>,
     mut events: MessageWriter<ViewCubeEvent>,
 ) {
     let entity = trigger.entity;
@@ -335,7 +341,10 @@ pub fn on_arrow_click(
         return;
     }
 
-    events.write(ViewCubeEvent::ArrowClicked(*arrow));
+    // Find the ViewCubeRoot ancestor to identify which ViewCube was clicked
+    let source = find_root_ancestor(entity, &parents_query, &root_query).unwrap_or(Entity::PLACEHOLDER);
+
+    events.write(ViewCubeEvent::ArrowClicked { arrow: *arrow, source });
 }
 
 // ============================================================================
@@ -407,6 +416,26 @@ fn reset_highlight(
                     mat.emissive = LinearRgba::BLACK;
                 }
             }
+        }
+    }
+}
+
+/// Walk up the entity hierarchy to find the ViewCubeRoot ancestor.
+/// This identifies which ViewCube instance an element belongs to.
+fn find_root_ancestor(
+    entity: Entity,
+    parents_query: &Query<&ChildOf>,
+    root_query: &Query<Entity, With<ViewCubeRoot>>,
+) -> Option<Entity> {
+    let mut current = entity;
+    loop {
+        if root_query.get(current).is_ok() {
+            return Some(current);
+        }
+        if let Ok(parent) = parents_query.get(current) {
+            current = parent.0;
+        } else {
+            return None;
         }
     }
 }

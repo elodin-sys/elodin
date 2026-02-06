@@ -4,15 +4,29 @@ use bevy::prelude::*;
 
 use super::components::{CornerPosition, EdgeDirection, FaceDirection, RotationArrow};
 
-/// Events emitted when ViewCube elements are clicked
+/// Events emitted when ViewCube elements are clicked.
+/// Each event carries the `source` entity (the ViewCubeRoot) so that handlers
+/// can identify which ViewCube instance generated the event in multi-viewport setups.
 #[derive(Message, Clone, Debug)]
 pub enum ViewCubeEvent {
     /// A face was clicked - rotate camera to face this direction
-    FaceClicked(FaceDirection),
+    FaceClicked {
+        direction: FaceDirection,
+        source: Entity,
+    },
     /// An edge was clicked - rotate camera to face this edge
-    EdgeClicked(EdgeDirection),
+    EdgeClicked {
+        direction: EdgeDirection,
+        source: Entity,
+    },
     /// A corner was clicked - rotate camera to face this corner
-    CornerClicked(CornerPosition),
+    CornerClicked {
+        position: CornerPosition,
+        source: Entity,
+    },
     /// A rotation arrow was clicked - apply incremental rotation
-    ArrowClicked(RotationArrow),
+    ArrowClicked {
+        arrow: RotationArrow,
+        source: Entity,
+    },
 }
