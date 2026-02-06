@@ -74,9 +74,19 @@ extern "C-unwind" fn decompress_callback(
 
         let desired_width = ctx.desired_width.load(Ordering::Relaxed);
         let aspect_ratio = in_height / in_width;
-        let new_width = in_width.min(desired_width as f64);
+        // Use original dimensions if desired_width is 0 (not yet set by UI)
+        let new_width = if desired_width == 0 {
+            in_width
+        } else {
+            in_width.min(desired_width as f64)
+        };
         let new_height = (new_width * aspect_ratio) as usize;
         let new_width = new_width as usize;
+
+        if new_width == 0 || new_height == 0 {
+            ctx.set_err(Error::DecodeFrame);
+            return;
+        }
 
         let mut out_buffer = std::ptr::null_mut();
         let status = unsafe {
@@ -255,143 +265,138 @@ impl VideoToolboxDecoder {
         })
     }
 
-    pub fn decode_nal(&mut self, nal_data: &[u8], pts: i64) -> Result<Option<DecodedFrame>> {
-        if nal_data.is_empty() {
-            return Ok(None);
-        }
-
-        let nal_type = NalType::from(nal_data[0]);
-
-        match nal_type {
-            NalType::Sps => {
-                self.sps_data = Some(nal_data.to_vec());
-                Ok(None)
-            }
-            NalType::Pps => {
-                self.pps_data = Some(nal_data.to_vec());
-                Ok(None)
-            }
-            NalType::Idr | NalType::Slice => {
-                // Ensure we have SPS and PPS data
-                if self.sps_data.is_none() || self.pps_data.is_none() {
-                    return Err(Error::MissingParameters);
-                }
-
-                // Create decompression session if needed
-                if self.decompression_session.is_none() {
-                    self.create_decompression_session()?;
-                }
-
-                let session = self
-                    .decompression_session
-                    .as_ref()
-                    .ok_or(Error::DecompressionSession)?;
-
-                self.frame_data.clear();
-                // we are accepting annex-b nal packets, but video-toolbox only works with aac packets
-                // which have the length prepended as big endian bytes
-                self.frame_data
-                    .extend_from_slice(&(nal_data.len() as u32).to_be_bytes());
-                self.frame_data.extend_from_slice(nal_data);
-
-                let block_buffer = unsafe {
-                    let mut block_buffer_out = std::ptr::null_mut();
-                    let status = CMBlockBuffer::create_with_memory_block(
-                        None,
-                        self.frame_data.as_mut_ptr() as *mut _, // memory_block
-                        self.frame_data.len(),                  // block_length
-                        None,                                   // block_allocator
-                        std::ptr::null_mut(),                   // custom_block_source
-                        0,                                      // offset_to_data
-                        self.frame_data.len(),                  // data_length
-                        0,                                      // flags
-                        NonNull::new(&mut block_buffer_out as *mut _).unwrap(),
-                    );
-
-                    if status != 0 {
-                        return Err(Error::DecodeFrame);
-                    }
-
-                    Retained::from_raw(block_buffer_out).unwrap()
-                };
-
-                let format_description = self.create_format_description()?;
-
-                let timing_info = unsafe {
-                    CMSampleTimingInfo {
-                        duration: CMTime::with_epoch(1, 30, 1),
-                        presentationTimeStamp: CMTime::with_epoch(pts, 1000, 1),
-                        decodeTimeStamp: CMTime::with_epoch(pts, 1000, 1),
-                    }
-                };
-
-                let sample_buffer = unsafe {
-                    let mut sample_buffer_out = std::ptr::null_mut();
-
-                    let sample_sizes = [self.frame_data.len()];
-
-                    let status = CMSampleBuffer::create(
-                        None,                      // allocator
-                        Some(&*block_buffer),      // data_buffer
-                        true,                      // data_ready
-                        None,                      // make_data_ready_callback
-                        std::ptr::null_mut(),      // make_data_ready_refcon
-                        Some(&format_description), // format_description
-                        1,                         // num_samples
-                        1,                         // num_sample_timing_entries
-                        &timing_info,              // sample_timing_array
-                        1,                         // num_sample_size_entries
-                        sample_sizes.as_ptr(),     // sample_size_array
-                        NonNull::new(&mut sample_buffer_out as *mut _).unwrap(),
-                    );
-
-                    if status != 0 {
-                        return Err(Error::DecodeFrame);
-                    }
-
-                    sample_buffer_out
-                };
-
-                let flags = VTDecodeFrameFlags::empty();
-                let frame_ref_con = std::ptr::null_mut();
-
-                let status = unsafe {
-                    session.decode_frame(
-                        &*sample_buffer,
-                        flags,
-                        frame_ref_con,
-                        std::ptr::null_mut(),
-                    )
-                };
-
-                if status != 0 {
-                    return Err(Error::DecodeFrame);
-                }
-
-                let Some(res) = self.frame.borrow_mut().take() else {
-                    return Ok(None);
-                };
-                res.map(Some)
-            }
-            _ => Ok(None),
-        }
-    }
-
+    /// Decode a complete Annex-B access unit (one or more NAL units).
+    ///
+    /// This method handles multi-slice frames by accumulating all video NAL units
+    /// (IDR/Slice) into a single AVCC-formatted sample buffer before submitting
+    /// to VideoToolbox for decoding.
     pub fn decode(&mut self, packet: &[u8], pts: i64) -> Result<Option<DecodedFrame>> {
         let nal_units = find_nal_units(packet);
 
-        let mut result = None;
+        // First pass: extract SPS/PPS and accumulate video NAL units into AVCC format
+        self.frame_data.clear();
+        let mut has_video_nals = false;
 
-        for nal_unit in nal_units {
-            match self.decode_nal(nal_unit.data, pts) {
-                Ok(Some(frame)) => {
-                    result = Some(frame);
+        for nal_unit in &nal_units {
+            if nal_unit.data.is_empty() {
+                continue;
+            }
+            match nal_unit.nal_type {
+                NalType::Sps => {
+                    self.sps_data = Some(nal_unit.data.to_vec());
                 }
-                Err(e) => return Err(e),
-                _ => {}
+                NalType::Pps => {
+                    self.pps_data = Some(nal_unit.data.to_vec());
+                }
+                NalType::Idr | NalType::Slice => {
+                    // Append this NAL unit in AVCC format: 4-byte BE length + NAL data
+                    self.frame_data
+                        .extend_from_slice(&(nal_unit.data.len() as u32).to_be_bytes());
+                    self.frame_data.extend_from_slice(nal_unit.data);
+                    has_video_nals = true;
+                }
+                _ => {
+                    // Skip AUD, SEI, and other non-video NAL units
+                }
             }
         }
 
-        Ok(result)
+        if !has_video_nals {
+            return Ok(None);
+        }
+
+        // Ensure we have SPS and PPS data
+        if self.sps_data.is_none() || self.pps_data.is_none() {
+            return Err(Error::MissingParameters);
+        }
+
+        // Create decompression session if needed
+        if self.decompression_session.is_none() {
+            self.create_decompression_session()?;
+        }
+
+        let session = self
+            .decompression_session
+            .as_ref()
+            .ok_or(Error::DecompressionSession)?;
+
+        let block_buffer = unsafe {
+            let mut block_buffer_out = std::ptr::null_mut();
+            let status = CMBlockBuffer::create_with_memory_block(
+                None,
+                self.frame_data.as_mut_ptr() as *mut _, // memory_block
+                self.frame_data.len(),                  // block_length
+                None,                                   // block_allocator
+                std::ptr::null_mut(),                   // custom_block_source
+                0,                                      // offset_to_data
+                self.frame_data.len(),                  // data_length
+                0,                                      // flags
+                NonNull::new(&mut block_buffer_out as *mut _).unwrap(),
+            );
+
+            if status != 0 {
+                return Err(Error::DecodeFrame);
+            }
+
+            Retained::from_raw(block_buffer_out).unwrap()
+        };
+
+        let format_description = self.create_format_description()?;
+
+        let timing_info = unsafe {
+            CMSampleTimingInfo {
+                duration: CMTime::with_epoch(1, 30, 1),
+                presentationTimeStamp: CMTime::with_epoch(pts, 1000, 1),
+                decodeTimeStamp: CMTime::with_epoch(pts, 1000, 1),
+            }
+        };
+
+        let sample_buffer = unsafe {
+            let mut sample_buffer_out = std::ptr::null_mut();
+
+            let sample_sizes = [self.frame_data.len()];
+
+            let status = CMSampleBuffer::create(
+                None,                      // allocator
+                Some(&*block_buffer),      // data_buffer
+                true,                      // data_ready
+                None,                      // make_data_ready_callback
+                std::ptr::null_mut(),      // make_data_ready_refcon
+                Some(&format_description), // format_description
+                1,                         // num_samples
+                1,                         // num_sample_timing_entries
+                &timing_info,              // sample_timing_array
+                1,                         // num_sample_size_entries
+                sample_sizes.as_ptr(),     // sample_size_array
+                NonNull::new(&mut sample_buffer_out as *mut _).unwrap(),
+            );
+
+            if status != 0 {
+                return Err(Error::DecodeFrame);
+            }
+
+            sample_buffer_out
+        };
+
+        let flags = VTDecodeFrameFlags::empty();
+        let frame_ref_con = std::ptr::null_mut();
+
+        let status = unsafe {
+            session.decode_frame(
+                &*sample_buffer,
+                flags,
+                frame_ref_con,
+                std::ptr::null_mut(),
+            )
+        };
+
+        if status != 0 {
+            return Err(Error::VideoToolbox(status));
+        }
+
+        let Some(res) = self.frame.borrow_mut().take() else {
+            return Ok(None);
+        };
+        res.map(Some)
     }
 }

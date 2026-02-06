@@ -173,21 +173,57 @@ fn decode_video(
     image_tx: flume::Sender<(Image, Timestamp)>,
 ) {
     let mut video_toolbox = video_toolbox::VideoToolboxDecoder::new(frame_width).unwrap();
+    let mut frame_count = 0u64;
 
     while let Ok((packet, timestamp)) = packet_rx.recv() {
-        if let Ok(Some(frame)) = video_toolbox.decode(&packet, 0) {
-            let image = Image::new(
-                Extent3d {
-                    width: frame.width as u32,
-                    height: frame.height as u32,
-                    depth_or_array_layers: 1,
-                },
-                TextureDimension::D2,
-                frame.rgba,
-                bevy_render::render_resource::TextureFormat::Rgba8UnormSrgb,
-                RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
+        frame_count += 1;
+        if frame_count <= 3 {
+            // Log NAL unit analysis for first few packets
+            let nal_units = video_toolbox::find_nal_units(&packet);
+            let nal_info: Vec<String> = nal_units
+                .iter()
+                .map(|n| format!("{:?}({}B)", n.nal_type, n.data.len()))
+                .collect();
+            bevy::log::info!(
+                "VideoToolbox: packet {} size={} NALs=[{}]",
+                frame_count,
+                packet.len(),
+                nal_info.join(", ")
             );
-            let _ = image_tx.send((image, timestamp));
+        }
+        match video_toolbox.decode(&packet, 0) {
+            Ok(Some(frame)) => {
+                if frame_count <= 3 {
+                    bevy::log::info!(
+                        "VideoToolbox: frame {} decoded {}x{}",
+                        frame_count,
+                        frame.width,
+                        frame.height
+                    );
+                }
+                let image = Image::new(
+                    Extent3d {
+                        width: frame.width as u32,
+                        height: frame.height as u32,
+                        depth_or_array_layers: 1,
+                    },
+                    TextureDimension::D2,
+                    frame.rgba,
+                    bevy_render::render_resource::TextureFormat::Rgba8UnormSrgb,
+                    RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
+                );
+                let _ = image_tx.send((image, timestamp));
+            }
+            Ok(None) => {
+                if frame_count <= 3 {
+                    bevy::log::info!("VideoToolbox: packet {} produced no frame (parameter sets or empty)", frame_count);
+                }
+            }
+            Err(e) => {
+                if frame_count <= 10 {
+                    bevy::log::warn!("VideoToolbox decode error (frame {}): {}", frame_count, e);
+                }
+            }
         }
     }
 }

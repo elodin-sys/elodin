@@ -2074,6 +2074,10 @@ pub async fn handle_fixed_rate_msg_stream<A: AsyncWrite>(
         let start = Instant::now();
         let current_timestamp = stream_state.current_timestamp();
         let Some((msg_timestamp, msg)) = msg_log.get_nearest(current_timestamp) else {
+            // Wait for data to arrive in the msg_log.
+            // This yields to the runtime (preventing scheduler starvation) without
+            // advancing the stream timestamp, so we don't skip past incoming video frames.
+            msg_log.wait().await;
             continue;
         };
 
