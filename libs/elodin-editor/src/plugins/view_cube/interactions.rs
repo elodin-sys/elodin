@@ -354,13 +354,9 @@ pub fn on_arrow_click(
 
     // Arrows are children of the ViewCube camera (not ViewCubeRoot).
     // Walk up to find the camera with ViewCubeLink, then find the root with matching main_camera.
-    let source = find_root_for_camera_child(
-        entity,
-        &parents_query,
-        &camera_link_query,
-        &root_query,
-    )
-    .unwrap_or(Entity::PLACEHOLDER);
+    let source =
+        find_root_for_camera_child(entity, &parents_query, &camera_link_query, &root_query)
+            .unwrap_or(Entity::PLACEHOLDER);
 
     events.write(ViewCubeEvent::ArrowClicked {
         arrow: *arrow,

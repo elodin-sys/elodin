@@ -5,10 +5,8 @@
 
 use bevy::camera::Viewport;
 use bevy::camera::visibility::RenderLayers;
-use bevy::math::Dir3;
 use bevy::prelude::*;
 use bevy_editor_cam::controller::component::EditorCam;
-use bevy_editor_cam::extensions::look_to::LookToTrigger;
 
 use super::components::{
     RotationArrow, ViewCubeCamera, ViewCubeLink, ViewCubeRenderLayer, ViewCubeRoot,
@@ -390,14 +388,14 @@ pub fn set_view_cube_viewport_editor(
 // LookToTrigger Integration (Editor Mode)
 // ============================================================================
 
-/// Handle ViewCube events using LookToTrigger (editor mode).
-/// This integrates with bevy_editor_cam for smoother camera control.
+/// Handle ViewCube face/edge/corner clicks in editor mode.
+/// Orbits the camera around the subject (pivot) to view from the clicked direction.
+/// The subject stays perfectly stable - only the camera moves around it.
 /// Uses the event's `source` entity to find the exact ViewCubeLink for the clicked ViewCube.
 pub fn handle_view_cube_look_to(
     mut events: MessageReader<ViewCubeEvent>,
     view_cube_query: Query<&ViewCubeLink, With<ViewCubeRoot>>,
-    camera_query: Query<(Entity, &Transform, &EditorCam)>,
-    mut look_to: MessageWriter<LookToTrigger>,
+    mut camera_query: Query<(&mut Transform, &EditorCam)>,
 ) {
     for event in events.read() {
         let (direction, source) = match event {
@@ -415,12 +413,29 @@ pub fn handle_view_cube_look_to(
 
         if let Some(look_dir) = direction
             && let Ok(link) = view_cube_query.get(source)
-            && let Ok((entity, transform, editor_cam)) = camera_query.get(link.main_camera)
-            && let Ok(dir) = Dir3::new(look_dir)
+            && let Ok((mut transform, editor_cam)) = camera_query.get_mut(link.main_camera)
         {
-            look_to.write(LookToTrigger::auto_snap_up_direction(
-                dir, entity, transform, editor_cam,
-            ));
+            // Compute the pivot point (where the subject is)
+            let depth = editor_cam.last_anchor_depth.abs() as f32;
+            let pivot = transform.translation + *transform.forward() * depth;
+
+            // Place camera at the requested direction, same distance from pivot
+            let distance = transform.translation.distance(pivot);
+            let new_pos = pivot + look_dir * distance;
+
+            // Determine up vector to avoid gimbal lock when looking straight up/down
+            let up = if look_dir.y.abs() > 0.9 {
+                if look_dir.y > 0.0 {
+                    Vec3::NEG_Z
+                } else {
+                    Vec3::Z
+                }
+            } else {
+                Vec3::Y
+            };
+
+            transform.translation = new_pos;
+            transform.look_at(pivot, up);
         }
     }
 }
