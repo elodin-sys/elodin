@@ -51,8 +51,9 @@ in {
         nvidia-jetpack.l4t-gstreamer
       ];
 
+    # Use list form so NixOS can merge with other modules (e.g. aleph-dev)
     environment.variables.GST_PLUGIN_PATH = with pkgs;
-      lib.makeSearchPathOutput "lib" "lib/gstreamer-1.0" (
+      map (p: "${lib.getOutput "lib" p}/lib/gstreamer-1.0") (
         [
           cfg.package
           gst_all_1.gstreamer
@@ -69,8 +70,9 @@ in {
       );
 
     # Add GStreamer libraries to LD_LIBRARY_PATH for runtime linking
+    # Use list form so NixOS can merge with other modules (e.g. aleph-dev)
     environment.variables.LD_LIBRARY_PATH = with pkgs;
-      lib.makeLibraryPath (
+      map (p: "${lib.getOutput "lib" p}/lib") (
         [
           gst_all_1.gstreamer
           gst_all_1.gst-plugins-base

@@ -348,7 +348,9 @@ impl super::widgets::WidgetSystem for VideoStreamWidget<'_, '_> {
                 // Wait for the specified number of frames before connecting
                 *frames_waited += 1;
                 if *frames_waited >= FRAMES_BEFORE_CONNECT {
-                    stream.state = StreamState::Connecting { since: Instant::now() };
+                    stream.state = StreamState::Connecting {
+                        since: Instant::now(),
+                    };
                     send_stream_request(&mut state.commands, entity, msg_id, stream_id);
                 }
             }
@@ -392,7 +394,9 @@ impl super::widgets::WidgetSystem for VideoStreamWidget<'_, '_> {
                 // so the DB starts a fresh streaming task for us.
                 if Instant::now() >= *retry_after {
                     stream.frame_count = 0;
-                    stream.state = StreamState::Connecting { since: Instant::now() };
+                    stream.state = StreamState::Connecting {
+                        since: Instant::now(),
+                    };
                     send_stream_request(&mut state.commands, entity, msg_id, stream_id);
                 }
             }

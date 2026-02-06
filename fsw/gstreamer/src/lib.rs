@@ -202,14 +202,10 @@ mod elodinsink {
                     let mut drain_buf = [0u8; 4096];
                     loop {
                         match stream.read(&mut drain_buf) {
-                            Ok(0) => break,                          // EOF
-                            Ok(_) => continue,                       // discard, keep draining
-                            Err(ref e)
-                                if e.kind() == std::io::ErrorKind::WouldBlock =>
-                            {
-                                break
-                            } // no more data
-                            Err(_) => break,                         // other error
+                            Ok(0) => break,                                                    // EOF
+                            Ok(_) => continue, // discard, keep draining
+                            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => break, // no more data
+                            Err(_) => break, // other error
                         }
                     }
 
