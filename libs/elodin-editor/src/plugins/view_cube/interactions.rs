@@ -338,7 +338,8 @@ pub fn on_arrow_click(
     trigger: On<Pointer<Click>>,
     arrows: Query<&RotationArrow>,
     parents_query: Query<&ChildOf>,
-    root_query: Query<Entity, With<ViewCubeRoot>>,
+    camera_link_query: Query<&ViewCubeLink, With<ViewCubeCamera>>,
+    root_query: Query<(Entity, &ViewCubeLink), With<ViewCubeRoot>>,
     mut events: MessageWriter<ViewCubeEvent>,
 ) {
     let entity = trigger.entity;
@@ -351,9 +352,15 @@ pub fn on_arrow_click(
         return;
     }
 
-    // Find the ViewCubeRoot ancestor to identify which ViewCube was clicked
-    let source =
-        find_root_ancestor(entity, &parents_query, &root_query).unwrap_or(Entity::PLACEHOLDER);
+    // Arrows are children of the ViewCube camera (not ViewCubeRoot).
+    // Walk up to find the camera with ViewCubeLink, then find the root with matching main_camera.
+    let source = find_root_for_camera_child(
+        entity,
+        &parents_query,
+        &camera_link_query,
+        &root_query,
+    )
+    .unwrap_or(Entity::PLACEHOLDER);
 
     events.write(ViewCubeEvent::ArrowClicked {
         arrow: *arrow,
@@ -436,6 +443,7 @@ fn reset_highlight(
 
 /// Walk up the entity hierarchy to find the ViewCubeRoot ancestor.
 /// This identifies which ViewCube instance an element belongs to.
+/// Works for cube faces/edges/corners that are children of ViewCubeRoot.
 fn find_root_ancestor(
     entity: Entity,
     parents_query: &Query<&ChildOf>,
@@ -445,6 +453,35 @@ fn find_root_ancestor(
     loop {
         if root_query.get(current).is_ok() {
             return Some(current);
+        }
+        if let Ok(parent) = parents_query.get(current) {
+            current = parent.0;
+        } else {
+            return None;
+        }
+    }
+}
+
+/// Find the ViewCubeRoot for an entity that is a child of the ViewCube camera
+/// (e.g., rotation arrows). Walks up to find the camera with ViewCubeLink,
+/// then finds the root that shares the same main_camera.
+fn find_root_for_camera_child(
+    entity: Entity,
+    parents_query: &Query<&ChildOf>,
+    camera_link_query: &Query<&ViewCubeLink, With<ViewCubeCamera>>,
+    root_query: &Query<(Entity, &ViewCubeLink), With<ViewCubeRoot>>,
+) -> Option<Entity> {
+    // Walk up to find the ViewCube camera
+    let mut current = entity;
+    loop {
+        if let Ok(cam_link) = camera_link_query.get(current) {
+            // Found the camera, now find the root with the same main_camera
+            for (root_entity, root_link) in root_query.iter() {
+                if root_link.main_camera == cam_link.main_camera {
+                    return Some(root_entity);
+                }
+            }
+            return None;
         }
         if let Ok(parent) = parents_query.get(current) {
             current = parent.0;
