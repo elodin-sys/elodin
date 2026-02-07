@@ -63,12 +63,21 @@ impl OrbitState {
     }
 
     /// Snap the camera to view from a specific direction (face/edge/corner click).
-    /// The camera moves to `pivot + look_dir * distance` and looks at the pivot.
+    /// Re-centers on the pivot first, then positions the camera along `look_dir`.
+    /// The camera ends up perfectly perpendicular to the face.
     fn snap_to_direction(&self, transform: &mut Transform, look_dir: Vec3) {
-        let new_pos = self.pivot + look_dir * self.distance;
-        transform.translation = new_pos;
-        let up = stable_up_vector(new_pos, self.pivot);
+        // Step 1: Re-center on the pivot (corrects any prior pan)
+        let up = stable_up_vector(transform.translation, self.pivot);
         transform.look_at(self.pivot, up);
+
+        // Step 2: Recompute pivot from re-centered camera (now forward points at subject)
+        let pivot = transform.translation + *transform.forward() * self.distance;
+
+        // Step 3: Place camera along the requested direction from the corrected pivot
+        let new_pos = pivot + look_dir * self.distance;
+        transform.translation = new_pos;
+        let up = stable_up_vector(new_pos, pivot);
+        transform.look_at(pivot, up);
     }
 
     /// Orbit the camera around the pivot by the given rotation (arrow click).
