@@ -81,46 +81,21 @@ pub fn handle_view_cube_camera(
     config: Res<ViewCubeConfig>,
 ) {
     for event in events.read() {
-        // Find the main camera via ViewCubeLink (supports split viewports)
-        let cam_entity = match event {
-            ViewCubeEvent::FaceClicked { source, .. }
-            | ViewCubeEvent::EdgeClicked { source, .. }
-            | ViewCubeEvent::CornerClicked { source, .. }
-            | ViewCubeEvent::ArrowClicked { source, .. } => view_cube_query
-                .get(*source)
-                .or_else(|_| view_cube_query.iter().next().ok_or(()))
-                .ok()
-                .map(|l| l.main_camera),
-        };
-
-        let Some(cam) = cam_entity else {
+        let Some(cam) = main_camera_for_event(event, &view_cube_query) else {
             continue;
         };
 
-        match event {
-            ViewCubeEvent::FaceClicked { direction, .. } => {
-                let look_dir = direction.to_look_direction();
-                if let Ok(transform) = camera_query.get(cam) {
-                    start_camera_animation(look_dir, transform, &mut camera_anim, &config, cam);
-                }
+        if let Some(look_dir) = target_look_direction(event) {
+            if let Ok(transform) = camera_query.get(cam) {
+                start_camera_animation(look_dir, transform, &mut camera_anim, &config, cam);
             }
-            ViewCubeEvent::EdgeClicked { direction, .. } => {
-                let look_dir = direction.to_look_direction();
-                if let Ok(transform) = camera_query.get(cam) {
-                    start_camera_animation(look_dir, transform, &mut camera_anim, &config, cam);
-                }
-            }
-            ViewCubeEvent::CornerClicked { position, .. } => {
-                let look_dir = position.to_look_direction();
-                if let Ok(transform) = camera_query.get(cam) {
-                    start_camera_animation(look_dir, transform, &mut camera_anim, &config, cam);
-                }
-            }
-            ViewCubeEvent::ArrowClicked { arrow, .. } => {
-                if let Ok(mut transform) = camera_query.get_mut(cam) {
-                    apply_arrow_rotation(*arrow, &config, &mut transform);
-                }
-            }
+            continue;
+        }
+
+        if let ViewCubeEvent::ArrowClicked { arrow, .. } = event
+            && let Ok(mut transform) = camera_query.get_mut(cam)
+        {
+            apply_arrow_rotation(*arrow, &config, &mut transform);
         }
     }
 }
@@ -245,6 +220,33 @@ fn get_up_direction_for_look(look_dir: Vec3) -> Vec3 {
 
 fn ease_out_cubic(t: f32) -> f32 {
     1.0 - (1.0 - t).powi(3)
+}
+
+fn main_camera_for_event(
+    event: &ViewCubeEvent,
+    view_cube_query: &Query<&ViewCubeLink, With<ViewCubeRoot>>,
+) -> Option<Entity> {
+    let source = match event {
+        ViewCubeEvent::FaceClicked { source, .. }
+        | ViewCubeEvent::EdgeClicked { source, .. }
+        | ViewCubeEvent::CornerClicked { source, .. }
+        | ViewCubeEvent::ArrowClicked { source, .. } => *source,
+    };
+
+    view_cube_query
+        .get(source)
+        .or_else(|_| view_cube_query.iter().next().ok_or(()))
+        .ok()
+        .map(|link| link.main_camera)
+}
+
+fn target_look_direction(event: &ViewCubeEvent) -> Option<Vec3> {
+    match event {
+        ViewCubeEvent::FaceClicked { direction, .. } => Some(direction.to_look_direction()),
+        ViewCubeEvent::EdgeClicked { direction, .. } => Some(direction.to_look_direction()),
+        ViewCubeEvent::CornerClicked { position, .. } => Some(position.to_look_direction()),
+        ViewCubeEvent::ArrowClicked { .. } => None,
+    }
 }
 
 // ============================================================================
@@ -456,19 +458,7 @@ pub fn handle_view_cube_editor(
     mut look_to: MessageWriter<LookToTrigger>,
 ) {
     for event in events.read() {
-        // Find the main camera entity (source-based lookup with fallback)
-        let cam_entity = match event {
-            ViewCubeEvent::FaceClicked { source, .. }
-            | ViewCubeEvent::EdgeClicked { source, .. }
-            | ViewCubeEvent::CornerClicked { source, .. }
-            | ViewCubeEvent::ArrowClicked { source, .. } => view_cube_query
-                .get(*source)
-                .or_else(|_| view_cube_query.iter().next().ok_or(()))
-                .ok()
-                .map(|l| l.main_camera),
-        };
-
-        let Some(cam) = cam_entity else {
+        let Some(cam) = main_camera_for_event(event, &view_cube_query) else {
             continue;
         };
         let Ok((entity, transform, mut editor_cam)) = camera_query.get_mut(cam) else {
@@ -484,88 +474,66 @@ pub fn handle_view_cube_editor(
         // Reborrow as shared ref for LookToTrigger::auto_snap_up_direction
         let editor_cam_ref: &EditorCam = &editor_cam;
 
-        match event {
-            // Face/Edge/Corner: snap to the target direction.
-            // to_look_direction() returns camera POSITION direction (subject → camera).
-            // LookToTrigger expects camera LOOK direction (camera → subject), so negate.
-            ViewCubeEvent::FaceClicked { direction, .. } => {
-                let dir_vec = -direction.to_look_direction();
-                if let Ok(direction) = Dir3::new(dir_vec) {
-                    look_to.write(LookToTrigger::auto_snap_up_direction(
-                        direction,
-                        entity,
-                        transform,
-                        editor_cam_ref,
-                    ));
-                }
+        // Face/Edge/Corner: snap to the target direction.
+        // to_look_direction() returns camera POSITION direction (subject -> camera).
+        // LookToTrigger expects camera LOOK direction (camera -> subject), so negate.
+        if let Some(look_dir) = target_look_direction(event) {
+            let dir_vec = -look_dir;
+            if let Ok(direction) = Dir3::new(dir_vec) {
+                look_to.write(LookToTrigger::auto_snap_up_direction(
+                    direction,
+                    entity,
+                    transform,
+                    editor_cam_ref,
+                ));
             }
-            ViewCubeEvent::EdgeClicked { direction, .. } => {
-                let dir_vec = -direction.to_look_direction();
-                if let Ok(direction) = Dir3::new(dir_vec) {
-                    look_to.write(LookToTrigger::auto_snap_up_direction(
-                        direction,
-                        entity,
-                        transform,
-                        editor_cam_ref,
-                    ));
-                }
-            }
-            ViewCubeEvent::CornerClicked { position, .. } => {
-                let dir_vec = -position.to_look_direction();
-                if let Ok(direction) = Dir3::new(dir_vec) {
-                    look_to.write(LookToTrigger::auto_snap_up_direction(
-                        direction,
-                        entity,
-                        transform,
-                        editor_cam_ref,
-                    ));
-                }
-            }
-            // Arrows: compute the new facing direction after rotating by the increment,
-            // then send as LookToTrigger so bevy_editor_cam handles it properly.
-            ViewCubeEvent::ArrowClicked { arrow, .. } => {
-                let angle = config.rotation_increment;
-                let forward = *transform.forward();
-                let up = *transform.up();
+            continue;
+        }
 
-                let (new_forward, new_up) = match arrow {
-                    RotationArrow::Left => {
-                        let rot = Quat::from_rotation_y(angle);
-                        (rot * forward, rot * up)
-                    }
-                    RotationArrow::Right => {
-                        let rot = Quat::from_rotation_y(-angle);
-                        (rot * forward, rot * up)
-                    }
-                    RotationArrow::Up => {
-                        let right = *transform.right();
-                        let rot = Quat::from_axis_angle(right, angle);
-                        (rot * forward, rot * up)
-                    }
-                    RotationArrow::Down => {
-                        let right = *transform.right();
-                        let rot = Quat::from_axis_angle(right, -angle);
-                        (rot * forward, rot * up)
-                    }
-                    RotationArrow::RollLeft => {
-                        let rot = Quat::from_axis_angle(forward, angle);
-                        (forward, rot * up)
-                    }
-                    RotationArrow::RollRight => {
-                        let rot = Quat::from_axis_angle(forward, -angle);
-                        (forward, rot * up)
-                    }
-                };
+        // Arrows: compute the new facing direction after rotating by the increment,
+        // then send as LookToTrigger so bevy_editor_cam handles it properly.
+        if let ViewCubeEvent::ArrowClicked { arrow, .. } = event {
+            let angle = config.rotation_increment;
+            let forward = *transform.forward();
+            let up = *transform.up();
 
-                if let Ok(facing) = Dir3::new(new_forward)
-                    && let Ok(up_dir) = Dir3::new(new_up)
-                {
-                    look_to.write(LookToTrigger {
-                        target_facing_direction: facing,
-                        target_up_direction: up_dir,
-                        camera: entity,
-                    });
+            let (new_forward, new_up) = match arrow {
+                RotationArrow::Left => {
+                    let rot = Quat::from_rotation_y(angle);
+                    (rot * forward, rot * up)
                 }
+                RotationArrow::Right => {
+                    let rot = Quat::from_rotation_y(-angle);
+                    (rot * forward, rot * up)
+                }
+                RotationArrow::Up => {
+                    let right = *transform.right();
+                    let rot = Quat::from_axis_angle(right, angle);
+                    (rot * forward, rot * up)
+                }
+                RotationArrow::Down => {
+                    let right = *transform.right();
+                    let rot = Quat::from_axis_angle(right, -angle);
+                    (rot * forward, rot * up)
+                }
+                RotationArrow::RollLeft => {
+                    let rot = Quat::from_axis_angle(forward, angle);
+                    (forward, rot * up)
+                }
+                RotationArrow::RollRight => {
+                    let rot = Quat::from_axis_angle(forward, -angle);
+                    (forward, rot * up)
+                }
+            };
+
+            if let Ok(facing) = Dir3::new(new_forward)
+                && let Ok(up_dir) = Dir3::new(new_up)
+            {
+                look_to.write(LookToTrigger {
+                    target_facing_direction: facing,
+                    target_up_direction: up_dir,
+                    camera: entity,
+                });
             }
         }
     }
