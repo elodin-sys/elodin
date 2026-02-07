@@ -451,7 +451,7 @@ pub fn set_view_cube_viewport_editor(
 pub fn handle_view_cube_editor(
     mut events: MessageReader<ViewCubeEvent>,
     view_cube_query: Query<&ViewCubeLink, With<ViewCubeRoot>>,
-    camera_query: Query<(Entity, &Transform, &EditorCam), With<ViewCubeTargetCamera>>,
+    mut camera_query: Query<(Entity, &Transform, &mut EditorCam), With<ViewCubeTargetCamera>>,
     config: Res<ViewCubeConfig>,
     mut look_to: MessageWriter<LookToTrigger>,
 ) {
@@ -471,9 +471,18 @@ pub fn handle_view_cube_editor(
         let Some(cam) = cam_entity else {
             continue;
         };
-        let Ok((entity, transform, editor_cam)) = camera_query.get(cam) else {
+        let Ok((entity, transform, mut editor_cam)) = camera_query.get_mut(cam) else {
             continue;
         };
+
+        // Cancel any EditorCam motion started by this click.
+        // Left-click on the ViewCube overlay also triggers EditorCam's PanZoom
+        // (default_camera_inputs sees MouseButton::Left), so we must stop it
+        // before sending our LookToTrigger.
+        editor_cam.end_move();
+
+        // Reborrow as shared ref for LookToTrigger::auto_snap_up_direction
+        let editor_cam_ref: &EditorCam = &editor_cam;
 
         match event {
             // Face/Edge/Corner: snap to the target direction.
@@ -483,7 +492,7 @@ pub fn handle_view_cube_editor(
                 let dir_vec = -direction.to_look_direction();
                 if let Ok(direction) = Dir3::new(dir_vec) {
                     look_to.write(LookToTrigger::auto_snap_up_direction(
-                        direction, entity, transform, editor_cam,
+                        direction, entity, transform, editor_cam_ref,
                     ));
                 }
             }
@@ -491,7 +500,7 @@ pub fn handle_view_cube_editor(
                 let dir_vec = -direction.to_look_direction();
                 if let Ok(direction) = Dir3::new(dir_vec) {
                     look_to.write(LookToTrigger::auto_snap_up_direction(
-                        direction, entity, transform, editor_cam,
+                        direction, entity, transform, editor_cam_ref,
                     ));
                 }
             }
@@ -499,7 +508,7 @@ pub fn handle_view_cube_editor(
                 let dir_vec = -position.to_look_direction();
                 if let Ok(direction) = Dir3::new(dir_vec) {
                     look_to.write(LookToTrigger::auto_snap_up_direction(
-                        direction, entity, transform, editor_cam,
+                        direction, entity, transform, editor_cam_ref,
                     ));
                 }
             }
