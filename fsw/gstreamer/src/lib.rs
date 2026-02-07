@@ -237,21 +237,37 @@ mod elodinsink {
                     }
 
                     match stream.write_all(&packet.inner) {
-                        Ok(_) => {}
+                        Ok(_) => return Ok(()),
                         Err(err) => {
                             gst::warning!(
                                 gst::CAT_DEFAULT,
-                                "error sending packet to db: {:?}",
+                                "error sending packet to db: {:?}, reconnecting and retrying",
                                 err
                             );
                             drop(state); // Release lock before reconnecting
-                            self.connect()?;
                         }
                     }
                 } else {
                     return Err(gst::error_msg!(
                         gst::ResourceError::NotFound,
                         ["No connection to elodin-db"]
+                    ));
+                }
+
+                // Reconnect and retry sending the packet once
+                self.connect()?;
+                let mut state = self.state.lock().unwrap();
+                if let Some(stream) = &mut state.connection {
+                    stream.write_all(&packet.inner).map_err(|e| {
+                        gst::error_msg!(
+                            gst::ResourceError::Failed,
+                            ["Failed to send packet after reconnect: {}", e]
+                        )
+                    })?;
+                } else {
+                    return Err(gst::error_msg!(
+                        gst::ResourceError::NotFound,
+                        ["No connection to elodin-db after reconnect"]
                     ));
                 }
 
