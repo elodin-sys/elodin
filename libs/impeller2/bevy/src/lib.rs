@@ -224,6 +224,7 @@ fn sink_inner(
                 time_step: Some(time_step),
                 frequency: None,
             });
+            pending_stream_time_step = None;
         }
     }
     Ok(())
