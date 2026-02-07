@@ -153,17 +153,9 @@ fn find_cube_element_ancestor(
     cube_elements: &Query<&CubeElement>,
     parents_query: &Query<&ChildOf>,
 ) -> Option<Entity> {
-    let mut current = entity;
-    loop {
-        if cube_elements.get(current).is_ok() {
-            return Some(current);
-        }
-        if let Ok(parent) = parents_query.get(current) {
-            current = parent.0;
-        } else {
-            return None;
-        }
-    }
+    find_ancestor(entity, parents_query, |current| {
+        cube_elements.get(current).is_ok()
+    })
 }
 
 // ============================================================================
@@ -446,17 +438,9 @@ fn find_root_ancestor(
     parents_query: &Query<&ChildOf>,
     root_query: &Query<Entity, With<ViewCubeRoot>>,
 ) -> Option<Entity> {
-    let mut current = entity;
-    loop {
-        if root_query.get(current).is_ok() {
-            return Some(current);
-        }
-        if let Ok(parent) = parents_query.get(current) {
-            current = parent.0;
-        } else {
-            return None;
-        }
-    }
+    find_ancestor(entity, parents_query, |current| {
+        root_query.get(current).is_ok()
+    })
 }
 
 /// Find the ViewCubeRoot for an entity that is a child of the ViewCube camera
@@ -468,17 +452,30 @@ fn find_root_for_camera_child(
     camera_link_query: &Query<&ViewCubeLink, With<ViewCubeCamera>>,
     root_query: &Query<(Entity, &ViewCubeLink), With<ViewCubeRoot>>,
 ) -> Option<Entity> {
-    // Walk up to find the ViewCube camera
+    let camera_entity = find_ancestor(entity, parents_query, |current| {
+        camera_link_query.get(current).is_ok()
+    })?;
+    let cam_link = camera_link_query.get(camera_entity).ok()?;
+
+    // Found the camera, now find the root with the same main_camera.
+    for (root_entity, root_link) in root_query.iter() {
+        if root_link.main_camera == cam_link.main_camera {
+            return Some(root_entity);
+        }
+    }
+
+    None
+}
+
+fn find_ancestor(
+    entity: Entity,
+    parents_query: &Query<&ChildOf>,
+    mut predicate: impl FnMut(Entity) -> bool,
+) -> Option<Entity> {
     let mut current = entity;
     loop {
-        if let Ok(cam_link) = camera_link_query.get(current) {
-            // Found the camera, now find the root with the same main_camera
-            for (root_entity, root_link) in root_query.iter() {
-                if root_link.main_camera == cam_link.main_camera {
-                    return Some(root_entity);
-                }
-            }
-            return None;
+        if predicate(current) {
+            return Some(current);
         }
         if let Ok(parent) = parents_query.get(current) {
             current = parent.0;
