@@ -62,13 +62,18 @@ impl OrbitState {
         Self { pivot, distance }
     }
 
-    /// Snap the camera to view from a specific direction (face/edge/corner click).
-    /// Camera stays in place, only rotation changes to look along `-look_dir`.
-    /// This ensures the subject stays centered regardless of prior pan.
+    /// Snap the camera to view a face/edge/corner by computing the shortest
+    /// rotation from current view direction to the target direction, then
+    /// applying it via orbit_by. Same rotation applies to cube and subject.
     fn snap_to_direction(&self, transform: &mut Transform, look_dir: Vec3) {
-        let up = stable_up_vector(look_dir, Vec3::ZERO);
-        let target = transform.translation - look_dir * self.distance;
-        transform.look_at(target, up);
+        let current_forward = -*transform.forward();
+        let target_forward = look_dir;
+        if let Ok(from) = Dir3::new(current_forward) {
+            if let Ok(to) = Dir3::new(target_forward) {
+                let rotation = Quat::from_rotation_arc(from.into(), to.into());
+                self.orbit_by(transform, rotation);
+            }
+        }
     }
 
     /// Orbit the camera around the pivot by the given rotation (arrow click).
