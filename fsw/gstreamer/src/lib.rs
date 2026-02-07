@@ -254,9 +254,26 @@ mod elodinsink {
                     ));
                 }
 
-                // Reconnect and retry sending the packet once
+                // Reconnect and retry sending the packet once.
+                // connect() resets base_timestamp and first_pts, so we must
+                // recalculate the timestamp and rebuild the packet to avoid
+                // sending a stale timestamp from the old connection.
                 self.connect()?;
                 let mut state = self.state.lock().unwrap();
+
+                if state.first_pts.is_none() {
+                    state.first_pts = pts;
+                }
+                let timestamp = match (state.base_timestamp, pts, state.first_pts) {
+                    (Some(base), Some(pts), Some(first_pts)) => {
+                        let pts_offset = pts.nseconds().saturating_sub(first_pts.nseconds());
+                        Timestamp(base.0 + (pts_offset / 1000) as i64)
+                    }
+                    _ => Timestamp::now(),
+                };
+                let mut packet = LenPacket::msg_with_timestamp(msg_id, timestamp, data.len());
+                packet.extend_from_slice(data);
+
                 if let Some(stream) = &mut state.connection {
                     stream.write_all(&packet.inner).map_err(|e| {
                         gst::error_msg!(
