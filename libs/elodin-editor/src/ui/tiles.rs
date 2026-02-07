@@ -57,7 +57,9 @@ use crate::{
         LogicalKeyState,
         gizmos::GIZMO_RENDER_LAYER,
         navigation_gizmo::{NavGizmoCamera, NavGizmoParent, RenderLayerAlloc},
-        view_cube::{ViewCubeConfig, ViewCubeTargetCamera, spawn::spawn_view_cube},
+        view_cube::{
+            NeedsInitialSnap, ViewCubeConfig, ViewCubeTargetCamera, spawn::spawn_view_cube,
+        },
     },
     ui::{colors::ColorExt, dashboard::NodeUpdaterParams},
 };
@@ -1173,7 +1175,7 @@ impl ViewportPane {
         let parent = commands
             .spawn((
                 GlobalTransform::default(),
-                Transform::from_translation(Vec3::new(0.0, 0.0, 10.0))
+                Transform::from_translation(Vec3::new(5.0, 5.0, 10.0))
                     .looking_at(Vec3::ZERO, Vec3::Y),
                 impeller2_wkt::WorldPos::default(),
                 Name::new("viewport"),
@@ -1260,7 +1262,7 @@ impl ViewportPane {
             ChildOf(parent),
             Name::new("viewport camera3d"),
         ));
-        camera.insert(ViewCubeTargetCamera);
+        camera.insert((ViewCubeTargetCamera, NeedsInitialSnap));
 
         camera.insert(Bloom { ..default() });
         camera.insert(EnvironmentMapLight {
