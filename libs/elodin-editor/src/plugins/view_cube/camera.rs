@@ -445,11 +445,9 @@ pub fn handle_view_cube_editor(
         };
 
         let Some(cam) = cam_entity else {
-            warn!("ViewCube: no camera entity found for event {:?}", event);
             continue;
         };
         let Ok((entity, transform, editor_cam)) = camera_query.get(cam) else {
-            warn!("ViewCube: camera query failed for entity {:?}", cam);
             continue;
         };
 
@@ -460,7 +458,6 @@ pub fn handle_view_cube_editor(
             ViewCubeEvent::FaceClicked { direction, .. } => {
                 let dir_vec = -direction.to_look_direction();
                 if let Ok(direction) = Dir3::new(dir_vec) {
-                    info!("ViewCube: face click → look_to direction {:?}", dir_vec);
                     look_to.write(LookToTrigger::auto_snap_up_direction(
                         direction, entity, transform, editor_cam,
                     ));

@@ -1173,7 +1173,7 @@ impl ViewportPane {
         let parent = commands
             .spawn((
                 GlobalTransform::default(),
-                Transform::from_translation(Vec3::new(5.0, 5.0, 10.0))
+                Transform::from_translation(Vec3::new(0.0, 0.0, 10.0))
                     .looking_at(Vec3::ZERO, Vec3::Y),
                 impeller2_wkt::WorldPos::default(),
                 Name::new("viewport"),
@@ -1285,12 +1285,9 @@ impl ViewportPane {
             };
         };
 
-        // Spawn ViewCube with editor mode configuration using allocated layer
+        // Spawn ViewCube with editor mode configuration, only override the per-viewport render layer
         let mut view_cube_config = ViewCubeConfig::editor_mode();
         view_cube_config.render_layer = view_cube_layer as u8;
-        view_cube_config.camera_distance = 2.5; // Match original gizmo
-        view_cube_config.scale = 0.6; // Slightly larger cube (1.2x)
-        view_cube_config.follow_main_viewport = false; // Use existing set_camera_viewport
 
         let spawned = spawn_view_cube(
             commands,
