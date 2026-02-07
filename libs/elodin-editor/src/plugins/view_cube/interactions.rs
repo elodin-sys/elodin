@@ -19,23 +19,24 @@ pub fn setup_cube_elements(
     query: Query<(Entity, &Name), (With<Name>, Without<ViewCubeSetup>)>,
     parents: Query<&ChildOf>,
     children_query: Query<&Children>,
-    mesh_root: Query<Entity, With<ViewCubeMeshRoot>>,
+    mesh_roots: Query<Entity, With<ViewCubeMeshRoot>>,
     material_query: Query<&MeshMaterial3d<StandardMaterial>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut original_materials: ResMut<OriginalMaterials>,
 ) {
-    let Ok(root) = mesh_root.single() else {
+    // Support multiple ViewCubes (split viewports)
+    if mesh_roots.is_empty() {
         return;
-    };
+    }
 
     let colors = ViewCubeColors::default();
 
     for (entity, name) in query.iter() {
-        // Check if this entity is in the cube subtree
+        // Check if this entity is in ANY cube subtree
         let mut in_subtree = false;
         let mut current = entity;
         loop {
-            if current == root {
+            if mesh_roots.get(current).is_ok() {
                 in_subtree = true;
                 break;
             }
