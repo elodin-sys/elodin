@@ -1451,6 +1451,7 @@ async fn handle_packet<A: AsyncWrite + 'static>(
     tx: &mut PacketTx<A>,
 ) -> Result<(), Error> {
     trace!(?pkt, "handling pkt");
+
     match &pkt {
         Packet::Msg(m) if m.id == VTableMsg::ID => {
             let vtable = m.parse::<VTableMsg>()?;
@@ -2041,10 +2042,6 @@ async fn handle_packet<A: AsyncWrite + 'static>(
             })?;
         }
         Packet::Msg(m) => {
-            tracing::info!(
-                msg.id = ?m.id,
-                "unmatched Msg packet (catch-all); if id is [224, 31] this may be SetMsgMetadata"
-            );
             let timestamp = m.timestamp.unwrap_or_else(|| db.apply_implicit_timestamp());
             db.push_msg(timestamp, m.id, &m.buf)?
         }

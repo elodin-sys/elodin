@@ -3,11 +3,13 @@
 //! Reads H.264 Annex B NAL units from `State::msg_logs`, parses SPS for
 //! resolution, and muxes frames into MP4 via muxide.
 
+use std::collections::HashMap;
 use std::fs::File;
 use std::io::Cursor;
 use std::path::PathBuf;
 
 use glob::Pattern;
+use impeller2::types::{PacketId, msg_id};
 use muxide::api::{MuxerBuilder, VideoCodec};
 use muxide::codec::h264::is_h264_keyframe;
 use scuffle_h264::Sps;
@@ -167,6 +169,31 @@ fn export_one(
     Ok(())
 }
 
+/// Build a mapping from msg PacketId to friendly name by scanning the
+/// schematic KDL for `video_stream "name"` entries and computing `msg_id(name)`.
+fn video_name_map_from_schematic(schematic: &str) -> HashMap<PacketId, String> {
+    let mut map = HashMap::new();
+    // Parse KDL entries like:  video_stream "test-video" name="Test Pattern"
+    // The first string argument after video_stream is the msg_name.
+    for line in schematic.lines() {
+        let trimmed = line.trim();
+        if let Some(rest) = trimmed.strip_prefix("video_stream") {
+            let rest = rest.trim();
+            // Extract the first quoted string argument (the msg_name)
+            if let Some(start) = rest.find('"')
+                && let Some(end) = rest[start + 1..].find('"')
+            {
+                let msg_name = &rest[start + 1..start + 1 + end];
+                if !msg_name.is_empty() {
+                    let id = msg_id(msg_name);
+                    map.insert(id, msg_name.to_string());
+                }
+            }
+        }
+    }
+    map
+}
+
 /// Export video message logs to MP4 files.
 ///
 /// * `db_path` - Path to the database directory
@@ -208,11 +235,19 @@ pub fn run(
     println!();
 
     let exported = db.with_state(|state| {
+        // Build a fallback name map from the schematic's video_stream entries
+        let schematic_names = state
+            .db_config
+            .schematic_content()
+            .map(video_name_map_from_schematic)
+            .unwrap_or_default();
+
         let mut video_logs: Vec<(String, &MsgLog)> = Vec::new();
         for (packet_id, msg_log) in state.msg_logs.iter() {
             let name: String = msg_log
                 .metadata()
                 .map(|m| m.name.clone())
+                .or_else(|| schematic_names.get(packet_id).cloned())
                 .unwrap_or_else(|| format!("msg-{}", u16::from_le_bytes(*packet_id)));
             if let Some(ref pat) = glob_pattern
                 && !pat.matches(&name)
