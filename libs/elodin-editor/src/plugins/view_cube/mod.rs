@@ -104,8 +104,7 @@ impl Plugin for ViewCubePlugin {
 
         // Add camera control systems based on configuration
         if self.config.use_look_to_trigger {
-            // Editor mode: single system handles all ViewCube events
-            // (faces, edges, corners, arrows) to avoid Message consumption conflicts
+            // Editor mode: sends LookToTrigger to bevy_editor_cam (same as navigation_gizmo)
             app.add_systems(Update, camera::handle_view_cube_editor);
         } else if self.config.auto_rotate {
             // Standalone mode: direct camera animation

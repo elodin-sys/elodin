@@ -218,14 +218,14 @@ impl Default for ViewCubeConfig {
 
 impl ViewCubeConfig {
     /// Configuration preset for editor integration.
-    /// Enables LookToTrigger, viewport following, and camera sync.
-    /// Uses existing navigation_gizmo viewport system.
+    /// Uses the same auto_rotate approach as the standalone example:
+    /// direct camera animation via CameraAnimation.
     pub fn editor_mode() -> Self {
         Self {
             use_overlay: true,
             sync_with_camera: true,
-            auto_rotate: false, // Editor handles camera via direct orbit
-            use_look_to_trigger: true,
+            auto_rotate: true,           // Same as example — direct camera animation
+            use_look_to_trigger: false,
             follow_main_viewport: false, // Use existing set_camera_viewport
             skip_viewport_system: true,  // Don't add our viewport system
             overlay_size: 128,           // Match navigation_gizmo's side_length
