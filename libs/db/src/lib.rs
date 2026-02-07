@@ -60,6 +60,8 @@ pub mod cancellation;
 pub mod drop;
 mod error;
 pub mod export;
+#[cfg(feature = "video-export")]
+pub mod export_videos;
 pub mod fix_timestamps;
 pub mod merge;
 mod msg_log;
@@ -1926,6 +1928,11 @@ async fn handle_packet<A: AsyncWrite + 'static>(
         Packet::Msg(m) if m.id == SetMsgMetadata::ID => {
             let _snapshot_guard = db.snapshot_barrier.enter_writer();
             let SetMsgMetadata { id, metadata } = m.parse::<SetMsgMetadata>()?;
+            info!(
+                msg.name = %metadata.name,
+                msg.id = ?id,
+                "setting msg metadata"
+            );
             db.with_state_mut(|s| s.set_msg_metadata(id, metadata, &db.path))?;
             drop(_snapshot_guard);
         }
@@ -2034,6 +2041,10 @@ async fn handle_packet<A: AsyncWrite + 'static>(
             })?;
         }
         Packet::Msg(m) => {
+            tracing::info!(
+                msg.id = ?m.id,
+                "unmatched Msg packet (catch-all); if id is [224, 31] this may be SetMsgMetadata"
+            );
             let timestamp = m.timestamp.unwrap_or_else(|| db.apply_implicit_timestamp());
             db.push_msg(timestamp, m.id, &m.buf)?
         }

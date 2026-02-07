@@ -23,7 +23,9 @@ mod elodinsink {
     use gstreamer::{prelude::*, subclass::prelude::*};
     use gstreamer_base::subclass::prelude::*;
     use impeller2::types::{msg_id, IntoLenPacket, LenPacket, Timestamp};
-    use impeller2_wkt::{LastUpdated, SubscribeLastUpdated};
+    use impeller2_wkt::{
+        opaque_bytes_msg_schema, LastUpdated, MsgMetadata, SetMsgMetadata, SubscribeLastUpdated,
+    };
     use std::{
         io::{Read, Write},
         net::{SocketAddr, TcpStream},
@@ -143,6 +145,31 @@ mod elodinsink {
                             "Connected to DB, base_timestamp = {}",
                             base_timestamp.0
                         );
+
+                        // Set message metadata (friendly name) so export-videos and DB have it.
+                        // Sent on every connect (including reconnect); DB overwrites idempotently.
+                        let set_msg_metadata = SetMsgMetadata {
+                            id: msg_id(&state.msg_name),
+                            metadata: MsgMetadata {
+                                name: state.msg_name.clone(),
+                                schema: opaque_bytes_msg_schema(),
+                                metadata: std::collections::HashMap::new(),
+                            },
+                        };
+                        let pkt = (&set_msg_metadata).into_len_packet();
+                        gst::info!(
+                            gst::CAT_DEFAULT,
+                            "Sending SetMsgMetadata: name={}, id={:?}, pkt_len={}",
+                            state.msg_name,
+                            msg_id(&state.msg_name),
+                            pkt.inner.len()
+                        );
+                        stream.write_all(&pkt.inner).map_err(|e| {
+                            gst::error_msg!(
+                                gst::ResourceError::Failed,
+                                ["Failed to send SetMsgMetadata: {}", e]
+                            )
+                        })?;
 
                         // Now set non-blocking for video streaming
                         if let Err(e) = stream.set_nonblocking(true) {

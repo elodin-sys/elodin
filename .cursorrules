@@ -35,3 +35,8 @@ uvx maturin develop --uv --manifest-path=libs/nox-py/Cargo.toml
 `alejandra`
 
 More information for specific aspects is available by reviewing the many Readme's in the codebase.  Feel free to ask clarifying questions.
+
+Rules:
+- always use the nix develop shell when developing changes
+- don't ever commit changes to git, that's for me the developer to do
+- when suggesting new dependencies, make sure to check they are well supported and maintained

@@ -19,9 +19,10 @@ license = false
 eula = false
 
 [features]
-default = ["axum", "parquet"]
+default = ["axum", "parquet", "video-export"]
 axum = ["dep:axum", "dep:axum-streams", "dep:serde_json", "dep:tokio"]
 parquet = ["dep:parquet"]
+video-export = ["dep:muxide", "dep:scuffle-h264"]
 
 [dependencies]
 # ser-de
@@ -103,6 +104,10 @@ tokio.optional = true
 postcard-c-codegen.path = "../postcard-c/codegen"
 hostname = "0.4.1"
 reflink-copy = "0.1.28"
+
+# video export
+muxide = { version = "0.2", optional = true }
+scuffle-h264 = { version = "0.2", optional = true }
 
 [dev-dependencies]
 tempfile = "3"

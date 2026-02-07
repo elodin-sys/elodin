@@ -85,13 +85,13 @@ fn sink_inner(
     packet_handlers: &mut PacketHandlers,
     world_sink_state: &mut SystemState<WorldSink>,
 ) -> Result<(), impeller2::error::Error> {
-        let mut count = 0;
-        let mut pending_stream_time_step: Option<Duration> = None;
-        while let Some(pkt) = packet_rx.try_recv_pkt() {
-            if count > 2048 {
-                return Ok(());
-            }
-            count += 1;
+    let mut count = 0;
+    let mut pending_stream_time_step: Option<Duration> = None;
+    while let Some(pkt) = packet_rx.try_recv_pkt() {
+        if count > 2048 {
+            return Ok(());
+        }
+        count += 1;
         {
             let pkt_id = match &pkt {
                 OwnedPacket::Msg(m) => m.id,
@@ -179,8 +179,7 @@ fn sink_inner(
                         .insert(metadata.component_id, metadata);
                 }
                 *world_sink.db_config = metadata.db_config.clone();
-                pending_stream_time_step =
-                    Some(metadata.db_config.default_stream_time_step);
+                pending_stream_time_step = Some(metadata.db_config.default_stream_time_step);
             }
             OwnedPacket::Msg(m) if m.id == LastUpdated::ID => {
                 let m = m.parse::<LastUpdated>()?;
