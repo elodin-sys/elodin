@@ -33,10 +33,7 @@ pub struct ViewCubeTargetCamera;
 /// Captures the camera's orbit geometry relative to a subject.
 /// All ViewCube camera operations go through this struct.
 struct OrbitState {
-    /// The point the camera orbits around (the subject's position).
     pivot: Vec3,
-    /// Distance from the camera to the pivot.
-    distance: f32,
 }
 
 impl OrbitState {
@@ -59,7 +56,7 @@ impl OrbitState {
         // The pivot (subject) is at `distance` along the camera's forward ray
         let pivot = transform.translation + *transform.forward() * distance;
 
-        Self { pivot, distance }
+        Self { pivot }
     }
 
     /// Snap the camera to view a face/edge/corner by computing the shortest
@@ -67,12 +64,11 @@ impl OrbitState {
     /// applying it via orbit_by. Same rotation applies to cube and subject.
     fn snap_to_direction(&self, transform: &mut Transform, look_dir: Vec3) {
         let current_forward = -*transform.forward();
-        let target_forward = look_dir;
-        if let Ok(from) = Dir3::new(current_forward) {
-            if let Ok(to) = Dir3::new(target_forward) {
-                let rotation = Quat::from_rotation_arc(from.into(), to.into());
-                self.orbit_by(transform, rotation);
-            }
+        if let Ok(from) = Dir3::new(current_forward)
+            && let Ok(to) = Dir3::new(look_dir)
+        {
+            let rotation = Quat::from_rotation_arc(from.into(), to.into());
+            self.orbit_by(transform, rotation);
         }
     }
 
