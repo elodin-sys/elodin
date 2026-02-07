@@ -492,7 +492,10 @@ pub fn handle_view_cube_editor(
                 let dir_vec = -direction.to_look_direction();
                 if let Ok(direction) = Dir3::new(dir_vec) {
                     look_to.write(LookToTrigger::auto_snap_up_direction(
-                        direction, entity, transform, editor_cam_ref,
+                        direction,
+                        entity,
+                        transform,
+                        editor_cam_ref,
                     ));
                 }
             }
@@ -500,7 +503,10 @@ pub fn handle_view_cube_editor(
                 let dir_vec = -direction.to_look_direction();
                 if let Ok(direction) = Dir3::new(dir_vec) {
                     look_to.write(LookToTrigger::auto_snap_up_direction(
-                        direction, entity, transform, editor_cam_ref,
+                        direction,
+                        entity,
+                        transform,
+                        editor_cam_ref,
                     ));
                 }
             }
@@ -508,7 +514,10 @@ pub fn handle_view_cube_editor(
                 let dir_vec = -position.to_look_direction();
                 if let Ok(direction) = Dir3::new(dir_vec) {
                     look_to.write(LookToTrigger::auto_snap_up_direction(
-                        direction, entity, transform, editor_cam_ref,
+                        direction,
+                        entity,
+                        transform,
+                        editor_cam_ref,
                     ));
                 }
             }

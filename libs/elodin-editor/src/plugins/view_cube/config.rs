@@ -229,8 +229,8 @@ impl ViewCubeConfig {
             follow_main_viewport: false, // Use existing set_camera_viewport
             skip_viewport_system: true,  // Don't add our viewport system
             overlay_size: 128,           // Match navigation_gizmo's side_length
-            camera_distance: 2.5,       // Overlay camera distance from cube model
-            scale: 0.6,                 // Cube model scale in overlay
+            camera_distance: 2.5,        // Overlay camera distance from cube model
+            scale: 0.6,                  // Cube model scale in overlay
             ..Default::default()
         }
     }
