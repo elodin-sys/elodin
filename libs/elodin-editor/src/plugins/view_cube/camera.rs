@@ -1,7 +1,11 @@
-//! Camera control systems for the ViewCube plugin
+//! Camera control systems for the ViewCube plugin.
 //!
-//! When `auto_rotate` is enabled, this module handles camera rotation
-//! in response to ViewCube events.
+//! Two modes:
+//! - **Standalone** (`auto_rotate`): direct camera animation via `CameraAnimation`.
+//! - **Editor** (`use_look_to_trigger`): orbit around the subject using `OrbitState`.
+//!
+//! The editor mode uses `EditorCam.last_anchor_depth` (updated by mouse interactions)
+//! to determine the distance to the subject, with `GlobalTransform` as fallback.
 
 use bevy::camera::Viewport;
 use bevy::camera::visibility::RenderLayers;
@@ -18,15 +22,90 @@ use super::events::ViewCubeEvent;
 // Components
 // ============================================================================
 
-/// Marker component for the camera that should be controlled by the ViewCube
+/// Marker component for the camera that should be controlled by the ViewCube.
 #[derive(Component)]
 pub struct ViewCubeTargetCamera;
+
+// ============================================================================
+// OrbitState - Central geometry helper
+// ============================================================================
+
+/// Captures the camera's orbit geometry relative to a subject.
+/// All ViewCube camera operations go through this struct.
+struct OrbitState {
+    /// The point the camera orbits around (the subject's position).
+    pivot: Vec3,
+    /// Distance from the camera to the pivot.
+    distance: f32,
+}
+
+impl OrbitState {
+    /// Compute the orbit state from the camera's current transform.
+    ///
+    /// Uses `EditorCam.last_anchor_depth` (most accurate, updated by mouse interactions)
+    /// with `GlobalTransform.translation().length()` as fallback (big_space compatible).
+    fn from_camera(
+        transform: &Transform,
+        global_transform: &GlobalTransform,
+        editor_cam: Option<&EditorCam>,
+    ) -> Self {
+        let distance = editor_cam
+            .and_then(|ec| {
+                let d = ec.last_anchor_depth.abs() as f32;
+                if d > 0.5 { Some(d) } else { None }
+            })
+            .unwrap_or_else(|| global_transform.translation().length().max(1.0));
+
+        // The pivot (subject) is at `distance` along the camera's forward ray
+        let pivot = transform.translation + *transform.forward() * distance;
+
+        Self { pivot, distance }
+    }
+
+    /// Snap the camera to view from a specific direction (face/edge/corner click).
+    /// The camera moves to `pivot + look_dir * distance` and looks at the pivot.
+    fn snap_to_direction(&self, transform: &mut Transform, look_dir: Vec3) {
+        let new_pos = self.pivot + look_dir * self.distance;
+        transform.translation = new_pos;
+        let up = stable_up_vector(new_pos, self.pivot);
+        transform.look_at(self.pivot, up);
+    }
+
+    /// Orbit the camera around the pivot by the given rotation (arrow click).
+    /// First re-centers on the pivot (corrects any prior pan), then orbits.
+    fn orbit_by(&self, transform: &mut Transform, rotation: Quat) {
+        // Re-center: ensure camera looks exactly at the pivot
+        let up = stable_up_vector(transform.translation, self.pivot);
+        transform.look_at(self.pivot, up);
+
+        // Orbit: rotate position around pivot, then look at it again
+        let offset = transform.translation - self.pivot;
+        let new_offset = rotation * offset;
+        transform.translation = self.pivot + new_offset;
+        let up = stable_up_vector(transform.translation, self.pivot);
+        transform.look_at(self.pivot, up);
+    }
+
+    /// Roll the camera around its forward axis (no pivot change).
+    fn roll(&self, transform: &mut Transform, angle: f32) {
+        let forward = transform.forward();
+        transform.rotation = Quat::from_axis_angle(*forward, angle) * transform.rotation;
+    }
+
+    /// Compute an appropriate rotation angle that accounts for distance.
+    /// Closer subjects get larger angles (fine orbit), farther get smaller (smooth orbit).
+    fn effective_angle(&self, base_angle: f32) -> f32 {
+        let reference_dist = 5.0;
+        let scale = (reference_dist / self.distance).clamp(0.3, 3.0);
+        base_angle * scale
+    }
+}
 
 // ============================================================================
 // Resources
 // ============================================================================
 
-/// Tracks camera animation state
+/// Tracks camera animation state (standalone mode only).
 #[derive(Resource, Default)]
 pub struct CameraAnimation {
     pub animating: bool,
@@ -398,12 +477,12 @@ pub fn set_view_cube_viewport_editor(
 }
 
 // ============================================================================
-// LookToTrigger Integration (Editor Mode)
+// Editor Mode - Single system handling all ViewCube events
 // ============================================================================
 
 /// Handle ALL ViewCube events in editor mode (faces, edges, corners, arrows).
 /// Must be a single system because Bevy Messages are consumed by the first reader.
-/// Uses GlobalTransform to get the real camera distance (big_space compatible).
+/// Uses `OrbitState` for all camera geometry calculations.
 pub fn handle_view_cube_editor(
     mut events: MessageReader<ViewCubeEvent>,
     view_cube_query: Query<&ViewCubeLink, With<ViewCubeRoot>>,
@@ -414,7 +493,7 @@ pub fn handle_view_cube_editor(
     config: Res<ViewCubeConfig>,
 ) {
     for event in events.read() {
-        // Find the main camera entity
+        // Find the main camera entity (source-based lookup with fallback)
         let cam_entity = match event {
             ViewCubeEvent::FaceClicked { source, .. }
             | ViewCubeEvent::EdgeClicked { source, .. }
@@ -435,99 +514,42 @@ pub fn handle_view_cube_editor(
             continue;
         };
 
-        // Best distance to the subject:
-        // 1. EditorCam anchor depth (updated by mouse interactions, most accurate)
-        // 2. Fallback: GlobalTransform distance to world origin
-        let real_distance = editor_cam
-            .and_then(|ec| {
-                let d = ec.last_anchor_depth.abs() as f32;
-                // Ignore default/unreasonable values
-                if d > 0.5 { Some(d) } else { None }
-            })
-            .unwrap_or_else(|| global_transform.translation().length().max(1.0));
+        let orbit = OrbitState::from_camera(&transform, global_transform, editor_cam);
 
         match event {
             ViewCubeEvent::FaceClicked { direction, .. } => {
-                let look_dir = direction.to_look_direction();
-                snap_camera_to_direction(&mut transform, look_dir, real_distance);
+                orbit.snap_to_direction(&mut transform, direction.to_look_direction());
             }
             ViewCubeEvent::EdgeClicked { direction, .. } => {
-                let look_dir = direction.to_look_direction();
-                snap_camera_to_direction(&mut transform, look_dir, real_distance);
+                orbit.snap_to_direction(&mut transform, direction.to_look_direction());
             }
             ViewCubeEvent::CornerClicked { position, .. } => {
-                let look_dir = position.to_look_direction();
-                snap_camera_to_direction(&mut transform, look_dir, real_distance);
+                orbit.snap_to_direction(&mut transform, position.to_look_direction());
             }
             ViewCubeEvent::ArrowClicked { arrow, .. } => {
-                // Scale the rotation step based on distance:
-                // - A fixed screen-space displacement gives a natural feel
-                // - Close = larger angle (fine orbit), Far = smaller angle (smooth orbit)
-                let reference_dist = 5.0;
-                let scale = (reference_dist / real_distance).clamp(0.3, 3.0);
-                let effective_angle = config.rotation_increment * scale;
-                apply_arrow_to_transform(*arrow, effective_angle, real_distance, &mut transform);
+                let angle = orbit.effective_angle(config.rotation_increment);
+                let rotation = match arrow {
+                    RotationArrow::Left => Quat::from_rotation_y(angle),
+                    RotationArrow::Right => Quat::from_rotation_y(-angle),
+                    RotationArrow::Up => {
+                        let right = transform.right();
+                        Quat::from_axis_angle(*right, angle)
+                    }
+                    RotationArrow::Down => {
+                        let right = transform.right();
+                        Quat::from_axis_angle(*right, -angle)
+                    }
+                    RotationArrow::RollLeft => {
+                        orbit.roll(&mut transform, angle);
+                        continue;
+                    }
+                    RotationArrow::RollRight => {
+                        orbit.roll(&mut transform, -angle);
+                        continue;
+                    }
+                };
+                orbit.orbit_by(&mut transform, rotation);
             }
         }
     }
-}
-
-/// Snap the camera to view from a specific direction, at the given distance from origin.
-fn snap_camera_to_direction(transform: &mut Transform, look_dir: Vec3, distance: f32) {
-    let new_pos = look_dir * distance;
-    transform.translation = new_pos;
-    let up = stable_up_vector(new_pos, Vec3::ZERO);
-    transform.look_at(Vec3::ZERO, up);
-}
-
-/// Apply an arrow rotation to the camera, keeping the subject centered.
-/// First re-centers the camera on the subject (in case the user panned),
-/// then orbits around it. CAD behavior: arrows always bring subject back to center.
-fn apply_arrow_to_transform(
-    arrow: RotationArrow,
-    angle: f32,
-    real_distance: f32,
-    transform: &mut Transform,
-) {
-    // Roll: just rotate in place, no re-centering needed
-    if matches!(arrow, RotationArrow::RollLeft | RotationArrow::RollRight) {
-        let roll_angle = if arrow == RotationArrow::RollLeft {
-            angle
-        } else {
-            -angle
-        };
-        let forward = transform.forward();
-        transform.rotation = Quat::from_axis_angle(*forward, roll_angle) * transform.rotation;
-        return;
-    }
-
-    // Step 1: Re-center on the subject.
-    // The subject is at `real_distance` along the forward ray.
-    // Snap the camera to look at that point, ensuring it's centered.
-    let pivot = transform.translation + *transform.forward() * real_distance;
-    let up = stable_up_vector(transform.translation, pivot);
-    transform.look_at(pivot, up);
-
-    // Step 2: Now apply the rotation around the pivot.
-    // Since we just re-centered, forward points exactly at the pivot.
-    let rotation = match arrow {
-        RotationArrow::Left => Quat::from_rotation_y(angle),
-        RotationArrow::Right => Quat::from_rotation_y(-angle),
-        RotationArrow::Up => {
-            let right = transform.right();
-            Quat::from_axis_angle(*right, angle)
-        }
-        RotationArrow::Down => {
-            let right = transform.right();
-            Quat::from_axis_angle(*right, -angle)
-        }
-        _ => unreachable!(),
-    };
-
-    // Orbit: rotate camera position around the pivot, then look at pivot
-    let offset = transform.translation - pivot;
-    let new_offset = rotation * offset;
-    transform.translation = pivot + new_offset;
-    let up = stable_up_vector(transform.translation, pivot);
-    transform.look_at(pivot, up);
 }
