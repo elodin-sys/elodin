@@ -27,6 +27,30 @@ use super::events::ViewCubeEvent;
 #[derive(Component)]
 pub struct ViewCubeTargetCamera;
 
+/// Marker added to new cameras to trigger a one-shot face-on snap via LookToTrigger.
+/// Removed after the snap is sent.
+#[derive(Component)]
+pub struct NeedsInitialSnap;
+
+/// Sends a LookToTrigger on newly spawned cameras to ensure they start face-on (looking along -Z).
+/// This is the only reliable way to set the initial orientation because multiple systems
+/// (setup_cell, sync_pos, EditorCam, big_space) all modify the camera transform at startup.
+pub fn snap_initial_camera(
+    mut commands: Commands,
+    cameras: Query<(Entity, &Transform, &EditorCam), With<NeedsInitialSnap>>,
+    mut look_to: MessageWriter<LookToTrigger>,
+) {
+    for (entity, transform, editor_cam) in cameras.iter() {
+        // Snap to -Z (North face visible, face-on)
+        if let Ok(direction) = Dir3::new(Vec3::NEG_Z) {
+            look_to.write(LookToTrigger::auto_snap_up_direction(
+                direction, entity, transform, editor_cam,
+            ));
+        }
+        commands.entity(entity).remove::<NeedsInitialSnap>();
+    }
+}
+
 // ============================================================================
 // Resources
 // ============================================================================
