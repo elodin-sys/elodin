@@ -218,17 +218,19 @@ impl Default for ViewCubeConfig {
 
 impl ViewCubeConfig {
     /// Configuration preset for editor integration.
-    /// Uses the same auto_rotate approach as the standalone example:
-    /// direct camera animation via CameraAnimation.
+    /// Uses LookToTrigger from bevy_editor_cam to properly rotate the camera
+    /// around its anchor point, respecting EditorCam internal state.
     pub fn editor_mode() -> Self {
         Self {
             use_overlay: true,
             sync_with_camera: true,
-            auto_rotate: true,           // Same as example — direct camera animation
-            use_look_to_trigger: false,
+            auto_rotate: false,
+            use_look_to_trigger: true,
             follow_main_viewport: false, // Use existing set_camera_viewport
             skip_viewport_system: true,  // Don't add our viewport system
             overlay_size: 128,           // Match navigation_gizmo's side_length
+            camera_distance: 2.5,       // Overlay camera distance from cube model
+            scale: 0.6,                 // Cube model scale in overlay
             ..Default::default()
         }
     }
