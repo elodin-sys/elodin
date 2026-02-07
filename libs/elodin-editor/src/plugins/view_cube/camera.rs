@@ -2,15 +2,16 @@
 //!
 //! Two modes:
 //! - **Standalone** (`auto_rotate`): direct camera animation via `CameraAnimation`.
-//! - **Editor** (`use_look_to_trigger`): orbit around the subject using `OrbitState`.
-//!
-//! The editor mode uses `EditorCam.last_anchor_depth` (updated by mouse interactions)
-//! to determine the distance to the subject, with `GlobalTransform` as fallback.
+//! - **Editor** (`use_look_to_trigger`): sends `LookToTrigger` messages to bevy_editor_cam,
+//!   same approach as navigation_gizmo. This ensures proper integration with the editor's
+//!   camera system instead of fighting it with direct Transform modifications.
 
 use bevy::camera::Viewport;
 use bevy::camera::visibility::RenderLayers;
+use bevy::math::Dir3;
 use bevy::prelude::*;
 use bevy_editor_cam::controller::component::EditorCam;
+use bevy_editor_cam::extensions::look_to::LookToTrigger;
 
 use super::components::{
     RotationArrow, ViewCubeCamera, ViewCubeLink, ViewCubeRenderLayer, ViewCubeRoot,
@@ -27,82 +28,15 @@ use super::events::ViewCubeEvent;
 pub struct ViewCubeTargetCamera;
 
 // ============================================================================
-// OrbitState - Central geometry helper
-// ============================================================================
-
-/// Captures the camera's orbit geometry relative to a subject.
-/// All ViewCube camera operations go through this struct.
-struct OrbitState {
-    pivot: Vec3,
-}
-
-impl OrbitState {
-    /// Compute the orbit state from the camera's current transform.
-    ///
-    /// Uses `EditorCam.last_anchor_depth` (most accurate, updated by mouse interactions)
-    /// with `GlobalTransform.translation().length()` as fallback (big_space compatible).
-    fn from_camera(
-        transform: &Transform,
-        global_transform: &GlobalTransform,
-        editor_cam: Option<&EditorCam>,
-    ) -> Self {
-        let distance = editor_cam
-            .and_then(|ec| {
-                let d = ec.last_anchor_depth.abs() as f32;
-                if d > 0.5 { Some(d) } else { None }
-            })
-            .unwrap_or_else(|| global_transform.translation().length().max(1.0));
-
-        // The pivot (subject) is at `distance` along the camera's forward ray
-        let pivot = transform.translation + *transform.forward() * distance;
-
-        Self { pivot }
-    }
-
-    /// Snap the camera to view a face/edge/corner by computing the shortest
-    /// rotation from current view direction to the target direction, then
-    /// applying it via orbit_by. Same rotation applies to cube and subject.
-    fn snap_to_direction(&self, transform: &mut Transform, look_dir: Vec3) {
-        let current_forward = -*transform.forward();
-        if let Ok(from) = Dir3::new(current_forward)
-            && let Ok(to) = Dir3::new(look_dir)
-        {
-            let rotation = Quat::from_rotation_arc(from.into(), to.into());
-            self.orbit_by(transform, rotation);
-        }
-    }
-
-    /// Orbit the camera around the pivot by the given rotation (arrow click).
-    /// First re-centers on the pivot (corrects any prior pan), then orbits.
-    fn orbit_by(&self, transform: &mut Transform, rotation: Quat) {
-        // Re-center: ensure camera looks exactly at the pivot
-        let up = stable_up_vector(transform.translation, self.pivot);
-        transform.look_at(self.pivot, up);
-
-        // Orbit: rotate position around pivot, then look at it again
-        let offset = transform.translation - self.pivot;
-        let new_offset = rotation * offset;
-        transform.translation = self.pivot + new_offset;
-        let up = stable_up_vector(transform.translation, self.pivot);
-        transform.look_at(self.pivot, up);
-    }
-
-    /// Roll the camera around its forward axis (no pivot change).
-    fn roll(&self, transform: &mut Transform, angle: f32) {
-        let forward = transform.forward();
-        transform.rotation = Quat::from_axis_angle(*forward, angle) * transform.rotation;
-    }
-}
-
-// ============================================================================
 // Resources
 // ============================================================================
 
-/// Tracks camera animation state (standalone mode only).
+/// Tracks camera animation state.
 #[derive(Resource, Default)]
 pub struct CameraAnimation {
     pub animating: bool,
     pub progress: f32,
+    pub target_entity: Option<Entity>,
     pub start_position: Vec3,
     pub start_rotation: Quat,
     pub target_position: Vec3,
@@ -113,35 +47,53 @@ pub struct CameraAnimation {
 // Systems
 // ============================================================================
 
-/// Handle ViewCube events and rotate the camera accordingly
+/// Handle ViewCube events and rotate the camera accordingly.
+/// Uses source-based camera lookup to support multiple viewports.
 pub fn handle_view_cube_camera(
     mut events: MessageReader<ViewCubeEvent>,
+    view_cube_query: Query<&ViewCubeLink, With<ViewCubeRoot>>,
     mut camera_query: Query<&mut Transform, With<ViewCubeTargetCamera>>,
     mut camera_anim: ResMut<CameraAnimation>,
     config: Res<ViewCubeConfig>,
 ) {
     for event in events.read() {
+        // Find the main camera via ViewCubeLink (supports split viewports)
+        let cam_entity = match event {
+            ViewCubeEvent::FaceClicked { source, .. }
+            | ViewCubeEvent::EdgeClicked { source, .. }
+            | ViewCubeEvent::CornerClicked { source, .. }
+            | ViewCubeEvent::ArrowClicked { source, .. } => view_cube_query
+                .get(*source)
+                .or_else(|_| view_cube_query.iter().next().ok_or(()))
+                .ok()
+                .map(|l| l.main_camera),
+        };
+
+        let Some(cam) = cam_entity else {
+            continue;
+        };
+
         match event {
             ViewCubeEvent::FaceClicked { direction, .. } => {
                 let look_dir = direction.to_look_direction();
-                if let Ok(transform) = camera_query.single() {
-                    start_camera_animation(look_dir, transform, &mut camera_anim, &config);
+                if let Ok(transform) = camera_query.get(cam) {
+                    start_camera_animation(look_dir, transform, &mut camera_anim, &config, cam);
                 }
             }
             ViewCubeEvent::EdgeClicked { direction, .. } => {
                 let look_dir = direction.to_look_direction();
-                if let Ok(transform) = camera_query.single() {
-                    start_camera_animation(look_dir, transform, &mut camera_anim, &config);
+                if let Ok(transform) = camera_query.get(cam) {
+                    start_camera_animation(look_dir, transform, &mut camera_anim, &config, cam);
                 }
             }
             ViewCubeEvent::CornerClicked { position, .. } => {
                 let look_dir = position.to_look_direction();
-                if let Ok(transform) = camera_query.single() {
-                    start_camera_animation(look_dir, transform, &mut camera_anim, &config);
+                if let Ok(transform) = camera_query.get(cam) {
+                    start_camera_animation(look_dir, transform, &mut camera_anim, &config, cam);
                 }
             }
             ViewCubeEvent::ArrowClicked { arrow, .. } => {
-                if let Ok(mut transform) = camera_query.single_mut() {
+                if let Ok(mut transform) = camera_query.get_mut(cam) {
                     apply_arrow_rotation(*arrow, &config, &mut transform);
                 }
             }
@@ -149,7 +101,8 @@ pub fn handle_view_cube_camera(
     }
 }
 
-/// Animate the camera smoothly to its target
+/// Animate the camera smoothly to its target.
+/// Applies to the camera that was targeted by the last animation start.
 pub fn animate_camera(
     mut camera_query: Query<&mut Transform, With<ViewCubeTargetCamera>>,
     mut camera_anim: ResMut<CameraAnimation>,
@@ -159,11 +112,14 @@ pub fn animate_camera(
         return;
     }
 
-    let Ok(mut transform) = camera_query.single_mut() else {
+    camera_anim.progress += time.delta_secs() * 3.0; // Animation speed
+
+    let Some(target_entity) = camera_anim.target_entity else {
         return;
     };
-
-    camera_anim.progress += time.delta_secs() * 3.0; // Animation speed
+    let Ok(mut transform) = camera_query.get_mut(target_entity) else {
+        return;
+    };
 
     if camera_anim.progress >= 1.0 {
         transform.translation = camera_anim.target_position;
@@ -191,6 +147,7 @@ fn start_camera_animation(
     current_transform: &Transform,
     camera_anim: &mut CameraAnimation,
     config: &ViewCubeConfig,
+    camera_entity: Entity,
 ) {
     // Check if clicking through transparent face (flip direction if looking from behind)
     let camera_dir = current_transform.translation.normalize();
@@ -214,6 +171,7 @@ fn start_camera_animation(
         return;
     }
 
+    camera_anim.target_entity = Some(camera_entity);
     camera_anim.start_position = current_transform.translation;
     camera_anim.start_rotation = current_transform.rotation;
     camera_anim.target_position = target_pos;
@@ -263,19 +221,6 @@ fn get_up_direction_for_look(look_dir: Vec3) -> Vec3 {
 
 fn ease_out_cubic(t: f32) -> f32 {
     1.0 - (1.0 - t).powi(3)
-}
-
-/// Compute a stable up vector for `look_at` that prevents camera flipping.
-/// When the camera is nearly directly above or below the pivot,
-/// uses a horizontal axis instead of Vec3::Y to avoid gimbal lock and 180-degree flips.
-fn stable_up_vector(camera_pos: Vec3, pivot: Vec3) -> Vec3 {
-    let dir = (camera_pos - pivot).normalize();
-    if dir.y.abs() > 0.95 {
-        // Near the poles: use Z as up to avoid flip
-        if dir.y > 0.0 { Vec3::NEG_Z } else { Vec3::Z }
-    } else {
-        Vec3::Y
-    }
 }
 
 // ============================================================================
@@ -475,74 +420,113 @@ pub fn set_view_cube_viewport_editor(
 
 /// Handle ALL ViewCube events in editor mode (faces, edges, corners, arrows).
 /// Must be a single system because Bevy Messages are consumed by the first reader.
-/// Uses `OrbitState` for all camera geometry calculations.
+///
+/// Uses `LookToTrigger` from bevy_editor_cam (same approach as navigation_gizmo)
+/// instead of modifying the Transform directly. Direct Transform changes are
+/// overridden by bevy_editor_cam's internal state management.
 pub fn handle_view_cube_editor(
     mut events: MessageReader<ViewCubeEvent>,
     view_cube_query: Query<&ViewCubeLink, With<ViewCubeRoot>>,
-    mut camera_query: Query<
-        (&mut Transform, &GlobalTransform, Option<&EditorCam>),
-        With<ViewCubeTargetCamera>,
-    >,
+    camera_query: Query<(Entity, &Transform, &EditorCam), With<ViewCubeTargetCamera>>,
     config: Res<ViewCubeConfig>,
+    mut look_to: MessageWriter<LookToTrigger>,
 ) {
     for event in events.read() {
         // Find the main camera entity (source-based lookup with fallback)
         let cam_entity = match event {
             ViewCubeEvent::FaceClicked { source, .. }
             | ViewCubeEvent::EdgeClicked { source, .. }
-            | ViewCubeEvent::CornerClicked { source, .. } => view_cube_query
+            | ViewCubeEvent::CornerClicked { source, .. }
+            | ViewCubeEvent::ArrowClicked { source, .. } => view_cube_query
                 .get(*source)
                 .or_else(|_| view_cube_query.iter().next().ok_or(()))
                 .ok()
                 .map(|l| l.main_camera),
-            ViewCubeEvent::ArrowClicked { .. } => {
-                view_cube_query.iter().next().map(|l| l.main_camera)
-            }
         };
 
         let Some(cam) = cam_entity else {
+            warn!("ViewCube: no camera entity found for event {:?}", event);
             continue;
         };
-        let Ok((mut transform, global_transform, editor_cam)) = camera_query.get_mut(cam) else {
+        let Ok((entity, transform, editor_cam)) = camera_query.get(cam) else {
+            warn!("ViewCube: camera query failed for entity {:?}", cam);
             continue;
         };
-
-        let orbit = OrbitState::from_camera(&transform, global_transform, editor_cam);
 
         match event {
+            // Face/Edge/Corner: snap to the target direction.
+            // to_look_direction() returns camera POSITION direction (subject → camera).
+            // LookToTrigger expects camera LOOK direction (camera → subject), so negate.
             ViewCubeEvent::FaceClicked { direction, .. } => {
-                orbit.snap_to_direction(&mut transform, direction.to_look_direction());
+                let dir_vec = -direction.to_look_direction();
+                if let Ok(direction) = Dir3::new(dir_vec) {
+                    info!("ViewCube: face click → look_to direction {:?}", dir_vec);
+                    look_to.write(LookToTrigger::auto_snap_up_direction(
+                        direction, entity, transform, editor_cam,
+                    ));
+                }
             }
             ViewCubeEvent::EdgeClicked { direction, .. } => {
-                orbit.snap_to_direction(&mut transform, direction.to_look_direction());
+                let dir_vec = -direction.to_look_direction();
+                if let Ok(direction) = Dir3::new(dir_vec) {
+                    look_to.write(LookToTrigger::auto_snap_up_direction(
+                        direction, entity, transform, editor_cam,
+                    ));
+                }
             }
             ViewCubeEvent::CornerClicked { position, .. } => {
-                orbit.snap_to_direction(&mut transform, position.to_look_direction());
+                let dir_vec = -position.to_look_direction();
+                if let Ok(direction) = Dir3::new(dir_vec) {
+                    look_to.write(LookToTrigger::auto_snap_up_direction(
+                        direction, entity, transform, editor_cam,
+                    ));
+                }
             }
+            // Arrows: compute the new facing direction after rotating by the increment,
+            // then send as LookToTrigger so bevy_editor_cam handles it properly.
             ViewCubeEvent::ArrowClicked { arrow, .. } => {
-                // Fixed angle (15° default). Subject stays at same position and depth.
                 let angle = config.rotation_increment;
-                let rotation = match arrow {
-                    RotationArrow::Left => Quat::from_rotation_y(angle),
-                    RotationArrow::Right => Quat::from_rotation_y(-angle),
+                let forward = *transform.forward();
+                let up = *transform.up();
+
+                let (new_forward, new_up) = match arrow {
+                    RotationArrow::Left => {
+                        let rot = Quat::from_rotation_y(angle);
+                        (rot * forward, rot * up)
+                    }
+                    RotationArrow::Right => {
+                        let rot = Quat::from_rotation_y(-angle);
+                        (rot * forward, rot * up)
+                    }
                     RotationArrow::Up => {
-                        let right = transform.right();
-                        Quat::from_axis_angle(*right, angle)
+                        let right = *transform.right();
+                        let rot = Quat::from_axis_angle(right, angle);
+                        (rot * forward, rot * up)
                     }
                     RotationArrow::Down => {
-                        let right = transform.right();
-                        Quat::from_axis_angle(*right, -angle)
+                        let right = *transform.right();
+                        let rot = Quat::from_axis_angle(right, -angle);
+                        (rot * forward, rot * up)
                     }
                     RotationArrow::RollLeft => {
-                        orbit.roll(&mut transform, angle);
-                        continue;
+                        let rot = Quat::from_axis_angle(forward, angle);
+                        (forward, rot * up)
                     }
                     RotationArrow::RollRight => {
-                        orbit.roll(&mut transform, -angle);
-                        continue;
+                        let rot = Quat::from_axis_angle(forward, -angle);
+                        (forward, rot * up)
                     }
                 };
-                orbit.orbit_by(&mut transform, rotation);
+
+                if let Ok(facing) = Dir3::new(new_forward)
+                    && let Ok(up_dir) = Dir3::new(new_up)
+                {
+                    look_to.write(LookToTrigger {
+                        target_facing_direction: facing,
+                        target_up_direction: up_dir,
+                        camera: entity,
+                    });
+                }
             }
         }
     }
