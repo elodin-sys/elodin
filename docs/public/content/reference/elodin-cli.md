@@ -33,6 +33,7 @@ This document contains the help content for the Elodin command-line programs.
 * [`elodin-db drop`↴](#elodin-db-drop)
 * [`elodin-db info`↴](#elodin-db-info)
 * [`elodin-db export`↴](#elodin-db-export)
+* [`elodin-db export-videos`↴](#elodin-db-export-videos)
 
 ---
 
@@ -102,6 +103,7 @@ Run an Elodin simulation in headless mode (not available on Windows)
 * `drop` — Drop (delete) components from a database
 * `info` — Display information about a database
 * `export` — Export database contents to parquet, arrow-ipc, or csv files
+* `export-videos` — Export video message logs to MP4 files
 
 
 ## `elodin-db run`
@@ -572,4 +574,47 @@ elodin-db export ./my-database -o ./export --pattern "rocket.*"
 
 # Export velocity components as flattened CSV
 elodin-db export ./my-database -o ./export --format csv --flatten --pattern "*.velocity"
+```
+
+
+## `elodin-db export-videos`
+
+Export video message logs to MP4 files. This command reads H.264 video frames stored as timestamped messages in the database and muxes them into standards-compliant MP4 files (e.g. for playback in QuickTime, VLC, or other players).
+
+**Usage:** `elodin-db export-videos [OPTIONS] --output <OUTPUT> <PATH>`
+
+###### **Arguments**
+
+* `<PATH>` — Path to the database directory
+
+###### **Options**
+
+* `-o`, `--output <PATH>` — Output directory for MP4 files (required)
+
+* `--pattern <PATTERN>` — Filter message logs by name glob (e.g. `test-*`). If not set, all video message logs in the database are exported.
+
+* `--fps <FPS>` — Default frame rate when the H.264 stream’s SPS (Sequence Parameter Set) has no timing info.
+
+  Default value: `30`
+
+###### **How video gets into the database**
+
+Video is stored in Elodin DB as **message logs**: each frame is a timestamped binary payload (H.264 NAL units in Annex B form). Typical ingestion paths:
+
+- **GStreamer + elodinsink**: A GStreamer pipeline (e.g. `videotestsrc` → `x264enc` → `h264parse` → `elodinsink`) sends H.264 frames over TCP to the database. The `elodinsink` plugin uses a configurable message name (e.g. `test-video`) that becomes the log name. See the Video Streaming Example in the repository (`examples/video-stream/`) for a full setup.
+- **Schematic**: A `video_stream "name"` entry in the schematic ties a video tile in the Elodin Editor to that message name; the same name is used when exporting with `export-videos`.
+
+Resolution and frame rate are read from the H.264 SPS in the first keyframe; no re-encoding is done. Output files use fast-start layout for web and player compatibility.
+
+###### **Example**
+
+```bash
+# Export all video streams to an output directory
+elodin-db export-videos ./my-database -o ./videos
+
+# Export only streams matching a glob (e.g. names starting with "test-")
+elodin-db export-videos ./my-database -o ./videos --pattern "test-*"
+
+# Use a specific default FPS when SPS has no timing info
+elodin-db export-videos ./my-database -o ./videos --fps 60
 ```
