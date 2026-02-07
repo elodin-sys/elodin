@@ -1379,7 +1379,9 @@ fn build_audio_trak_box(
     tables: &SampleTables,
     metadata: Option<&Metadata>,
 ) -> Vec<u8> {
-    let tkhd_box = build_audio_tkhd_box();
+    let duration = (tables.total_duration() * MOVIE_TIMESCALE as u64 / MEDIA_TIMESCALE as u64)
+        .min(u32::MAX as u64) as u32;
+    let tkhd_box = build_audio_tkhd_box(duration);
     let mdia_box = build_audio_mdia_box(audio, tables, metadata);
 
     let mut payload = Vec::new();
@@ -1388,8 +1390,8 @@ fn build_audio_trak_box(
     build_box(b"trak", &payload)
 }
 
-fn build_audio_tkhd_box() -> Vec<u8> {
-    build_tkhd_box_with_id(2, 0x0100, 0, 0)
+fn build_audio_tkhd_box(duration: u32) -> Vec<u8> {
+    build_tkhd_box_with_id(2, 0x0100, 0, 0, duration)
 }
 
 fn build_audio_mdia_box(
@@ -1615,7 +1617,9 @@ fn build_trak_box(
     video_config: &VideoConfig,
     metadata: Option<&Metadata>,
 ) -> Vec<u8> {
-    let tkhd_box = build_tkhd_box(video);
+    let duration = (tables.total_duration() * MOVIE_TIMESCALE as u64 / MEDIA_TIMESCALE as u64)
+        .min(u32::MAX as u64) as u32;
+    let tkhd_box = build_tkhd_box(video, duration);
     let mdia_box = build_mdia_box(video, tables, video_config, metadata);
 
     let mut payload = Vec::new();
@@ -2234,18 +2238,25 @@ fn build_smhd_box() -> Vec<u8> {
     build_box(b"smhd", &payload)
 }
 
-fn build_tkhd_box(video: &Mp4VideoTrack) -> Vec<u8> {
-    build_tkhd_box_with_id(1, 0, video.width, video.height)
+fn build_tkhd_box(video: &Mp4VideoTrack, duration: u32) -> Vec<u8> {
+    build_tkhd_box_with_id(1, 0, video.width, video.height, duration)
 }
 
-fn build_tkhd_box_with_id(track_id: u32, volume: u16, width: u32, height: u32) -> Vec<u8> {
+fn build_tkhd_box_with_id(
+    track_id: u32,
+    volume: u16,
+    width: u32,
+    height: u32,
+    duration: u32,
+) -> Vec<u8> {
     let mut payload = Vec::new();
-    payload.extend_from_slice(&0u32.to_be_bytes());
+    // version 0, flags = track_enabled (0x01) | track_in_movie (0x02)
+    payload.extend_from_slice(&0x00_00_00_03_u32.to_be_bytes());
     payload.extend_from_slice(&0u32.to_be_bytes());
     payload.extend_from_slice(&0u32.to_be_bytes());
     payload.extend_from_slice(&track_id.to_be_bytes());
     payload.extend_from_slice(&0u32.to_be_bytes());
-    payload.extend_from_slice(&0u32.to_be_bytes()); // duration
+    payload.extend_from_slice(&duration.to_be_bytes());
     payload.extend_from_slice(&0u32.to_be_bytes()); // reserved[0]
     payload.extend_from_slice(&0u32.to_be_bytes()); // reserved[1]
     payload.extend_from_slice(&0u16.to_be_bytes());
