@@ -91,14 +91,6 @@ impl OrbitState {
         let forward = transform.forward();
         transform.rotation = Quat::from_axis_angle(*forward, angle) * transform.rotation;
     }
-
-    /// Compute an appropriate rotation angle that accounts for distance.
-    /// Closer subjects get larger angles (fine orbit), farther get smaller (smooth orbit).
-    fn effective_angle(&self, base_angle: f32) -> f32 {
-        let reference_dist = 5.0;
-        let scale = (reference_dist / self.distance).clamp(0.3, 3.0);
-        base_angle * scale
-    }
 }
 
 // ============================================================================
@@ -527,7 +519,8 @@ pub fn handle_view_cube_editor(
                 orbit.snap_to_direction(&mut transform, position.to_look_direction());
             }
             ViewCubeEvent::ArrowClicked { arrow, .. } => {
-                let angle = orbit.effective_angle(config.rotation_increment);
+                // Fixed angle (15° default). Subject stays at same position and depth.
+                let angle = config.rotation_increment;
                 let rotation = match arrow {
                     RotationArrow::Left => Quat::from_rotation_y(angle),
                     RotationArrow::Right => Quat::from_rotation_y(-angle),
