@@ -511,8 +511,14 @@ pub fn handle_view_cube_editor(
             let facing_local_vec = parent_rotation.inverse() * facing_world;
 
             if let Ok(facing_local) = Dir3::new(facing_local_vec) {
-                let (chosen_up, chosen_up_source, chosen_up_angle) =
-                    choose_min_rotation_up(transform, parent_rotation, facing_local);
+                let (
+                    chosen_up,
+                    chosen_up_source,
+                    chosen_up_angle,
+                    chosen_up_runner_up_angle,
+                    chosen_up_margin,
+                    up_candidates_considered,
+                ) = choose_min_rotation_up(transform, parent_rotation, facing_local);
                 let trigger = LookToTrigger {
                     target_facing_direction: facing_local,
                     target_up_direction: chosen_up,
@@ -530,6 +536,9 @@ pub fn handle_view_cube_editor(
                     facing_local = ?facing_local_vec,
                     chosen_up_source = chosen_up_source,
                     chosen_up_angle = chosen_up_angle,
+                    chosen_up_runner_up_angle = chosen_up_runner_up_angle,
+                    chosen_up_margin = chosen_up_margin,
+                    up_candidates_considered = up_candidates_considered,
                     chosen_facing = ?*trigger.target_facing_direction,
                     chosen_up = ?*trigger.target_up_direction,
                     rotation_angle = rotation_angle,
@@ -554,8 +563,14 @@ pub fn handle_view_cube_editor(
             let facing_local_vec = parent_rotation.inverse() * facing_world;
 
             if let Ok(facing_local) = Dir3::new(facing_local_vec) {
-                let (chosen_up, chosen_up_source, chosen_up_angle) =
-                    choose_min_rotation_up(transform, parent_rotation, facing_local);
+                let (
+                    chosen_up,
+                    chosen_up_source,
+                    chosen_up_angle,
+                    chosen_up_runner_up_angle,
+                    chosen_up_margin,
+                    up_candidates_considered,
+                ) = choose_min_rotation_up(transform, parent_rotation, facing_local);
                 let trigger = LookToTrigger {
                     target_facing_direction: facing_local,
                     target_up_direction: chosen_up,
@@ -573,6 +588,9 @@ pub fn handle_view_cube_editor(
                     facing_local = ?facing_local_vec,
                     chosen_up_source = chosen_up_source,
                     chosen_up_angle = chosen_up_angle,
+                    chosen_up_runner_up_angle = chosen_up_runner_up_angle,
+                    chosen_up_margin = chosen_up_margin,
+                    up_candidates_considered = up_candidates_considered,
                     chosen_facing = ?*trigger.target_facing_direction,
                     chosen_up = ?*trigger.target_up_direction,
                     rotation_angle = rotation_angle,
@@ -644,6 +662,9 @@ pub fn handle_view_cube_editor(
                     facing_local = ?chosen.facing_local_vec,
                     chosen_up_source = chosen.chosen_up_source,
                     chosen_up_angle = chosen.chosen_up_angle,
+                    chosen_up_runner_up_angle = chosen.chosen_up_runner_up_angle,
+                    chosen_up_margin = chosen.chosen_up_margin,
+                    up_candidates_considered = chosen.up_candidates_considered,
                     chosen_facing = ?*trigger.target_facing_direction,
                     chosen_up = ?*trigger.target_up_direction,
                     rotation_angle = chosen.rotation_angle,
@@ -755,6 +776,9 @@ struct EdgeSnapCandidate {
     chosen_up: Dir3,
     chosen_up_source: &'static str,
     chosen_up_angle: f32,
+    chosen_up_runner_up_angle: Option<f32>,
+    chosen_up_margin: Option<f32>,
+    up_candidates_considered: usize,
     rotation_angle: f32,
 }
 
@@ -771,8 +795,14 @@ fn build_edge_snap_candidate(
     let facing_world = -raw_look_dir_world;
     let facing_local_vec = parent_rotation.inverse() * facing_world;
     let facing_local = Dir3::new(facing_local_vec).ok()?;
-    let (chosen_up, chosen_up_source, chosen_up_angle) =
-        choose_min_rotation_up(transform, parent_rotation, facing_local);
+    let (
+        chosen_up,
+        chosen_up_source,
+        chosen_up_angle,
+        chosen_up_runner_up_angle,
+        chosen_up_margin,
+        up_candidates_considered,
+    ) = choose_min_rotation_up(transform, parent_rotation, facing_local);
     let rotation_angle = angle_to_target_rotation(transform, facing_local, chosen_up);
 
     Some(EdgeSnapCandidate {
@@ -788,6 +818,9 @@ fn build_edge_snap_candidate(
         chosen_up,
         chosen_up_source,
         chosen_up_angle,
+        chosen_up_runner_up_angle,
+        chosen_up_margin,
+        up_candidates_considered,
         rotation_angle,
     })
 }
@@ -796,9 +829,11 @@ fn choose_min_rotation_up(
     transform: &Transform,
     parent_rotation: Quat,
     facing_local: Dir3,
-) -> (Dir3, &'static str, f32) {
+) -> (Dir3, &'static str, f32, Option<f32>, Option<f32>, usize) {
     let parent_inverse = parent_rotation.inverse();
     let mut best: Option<(Dir3, &'static str, f32)> = None;
+    let mut runner_up_angle: Option<f32> = None;
+    let mut candidates_considered = 0usize;
 
     for (label, up_world) in [
         ("world_pos_x", Vec3::X),
@@ -816,18 +851,39 @@ fn choose_min_rotation_up(
         if alignment > 0.99 {
             continue;
         }
+        candidates_considered += 1;
         let angle = angle_to_target_rotation(transform, facing_local, up_local);
-        let replace = match best {
-            Some((_, _, best_angle)) => angle + 1.0e-6 < best_angle,
-            None => true,
-        };
-        if replace {
-            best = Some((up_local, label, angle));
+        match best {
+            Some((_, _, best_angle)) => {
+                if angle + 1.0e-6 < best_angle {
+                    runner_up_angle = Some(best_angle);
+                    best = Some((up_local, label, angle));
+                } else {
+                    let should_update_runner = match runner_up_angle {
+                        Some(prev) => angle + 1.0e-6 < prev,
+                        None => true,
+                    };
+                    if should_update_runner {
+                        runner_up_angle = Some(angle);
+                    }
+                }
+            }
+            None => {
+                best = Some((up_local, label, angle));
+            }
         }
     }
 
-    if let Some(best) = best {
-        return best;
+    if let Some((best_up, best_label, best_angle)) = best {
+        let margin = runner_up_angle.map(|runner| runner - best_angle);
+        return (
+            best_up,
+            best_label,
+            best_angle,
+            runner_up_angle,
+            margin,
+            candidates_considered,
+        );
     }
 
     // Fallback: build an up vector orthogonal to facing in local space.
@@ -845,7 +901,14 @@ fn choose_min_rotation_up(
     };
     let fallback_up = Dir3::new(fallback).unwrap_or(Dir3::new_unchecked(Vec3::Y));
     let fallback_angle = angle_to_target_rotation(transform, facing_local, fallback_up);
-    (fallback_up, "fallback_local_orthogonal", fallback_angle)
+    (
+        fallback_up,
+        "fallback_local_orthogonal",
+        fallback_angle,
+        None,
+        None,
+        candidates_considered,
+    )
 }
 
 fn update_anchor_depth_for_view_cube(
