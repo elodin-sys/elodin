@@ -68,6 +68,18 @@ impl FaceDirection {
             FaceDirection::Down => Vec3::NEG_Y,
         }
     }
+
+    /// Opposite cube face.
+    pub fn opposite(self) -> Self {
+        match self {
+            FaceDirection::East => FaceDirection::West,
+            FaceDirection::West => FaceDirection::East,
+            FaceDirection::North => FaceDirection::South,
+            FaceDirection::South => FaceDirection::North,
+            FaceDirection::Up => FaceDirection::Down,
+            FaceDirection::Down => FaceDirection::Up,
+        }
+    }
 }
 
 /// Edge directions (between two faces)
@@ -106,6 +118,40 @@ impl EdgeDirection {
             EdgeDirection::ZTopRight => Vec3::new(1.0, 1.0, 0.0).normalize(),
             EdgeDirection::ZBottomLeft => Vec3::new(-1.0, -1.0, 0.0).normalize(),
             EdgeDirection::ZBottomRight => Vec3::new(1.0, -1.0, 0.0).normalize(),
+        }
+    }
+
+    /// The two faces touching this edge.
+    pub fn adjacent_faces(self) -> (FaceDirection, FaceDirection) {
+        match self {
+            EdgeDirection::XTopFront => (FaceDirection::Up, FaceDirection::North),
+            EdgeDirection::XTopBack => (FaceDirection::Up, FaceDirection::South),
+            EdgeDirection::XBottomFront => (FaceDirection::Down, FaceDirection::North),
+            EdgeDirection::XBottomBack => (FaceDirection::Down, FaceDirection::South),
+            EdgeDirection::YFrontLeft => (FaceDirection::North, FaceDirection::West),
+            EdgeDirection::YFrontRight => (FaceDirection::North, FaceDirection::East),
+            EdgeDirection::YBackLeft => (FaceDirection::South, FaceDirection::West),
+            EdgeDirection::YBackRight => (FaceDirection::South, FaceDirection::East),
+            EdgeDirection::ZTopLeft => (FaceDirection::Up, FaceDirection::West),
+            EdgeDirection::ZTopRight => (FaceDirection::Up, FaceDirection::East),
+            EdgeDirection::ZBottomLeft => (FaceDirection::Down, FaceDirection::West),
+            EdgeDirection::ZBottomRight => (FaceDirection::Down, FaceDirection::East),
+        }
+    }
+
+    /// Select the face (among the two adjacent faces) that is most facing the camera.
+    /// `camera_dir_world` must be the direction from subject -> camera.
+    pub fn active_frame_face(
+        self,
+        camera_dir_world: Vec3,
+    ) -> (FaceDirection, FaceDirection, f32, f32) {
+        let (face_a, face_b) = self.adjacent_faces();
+        let dot_a = face_a.to_look_direction().dot(camera_dir_world);
+        let dot_b = face_b.to_look_direction().dot(camera_dir_world);
+        if dot_a >= dot_b {
+            (face_a, face_b, dot_a, dot_b)
+        } else {
+            (face_b, face_a, dot_b, dot_a)
         }
     }
 }

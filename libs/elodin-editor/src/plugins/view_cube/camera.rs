@@ -591,12 +591,13 @@ pub fn handle_view_cube_editor(
             continue;
         }
 
-        // Edges (the frame around a face): snap to the opposite face of the currently
-        // dominant viewing direction, which matches CAD-like "flip side" behavior.
+        // Edges (the frame around a face): determine which of the two adjacent faces is
+        // currently "in front" relative to the camera, then snap to its opposite face.
         if let ViewCubeEvent::EdgeClicked { direction, .. } = event {
-            let (dominant_face_name, dominant_face_world, opposite_face_world, dominant_dot) =
-                dominant_face_and_opposite(camera_dir_global);
-            let raw_look_dir_world = opposite_face_world;
+            let (frame_face, secondary_face, frame_dot, secondary_dot) =
+                direction.active_frame_face(camera_dir_global);
+            let target_face = frame_face.opposite();
+            let raw_look_dir_world = target_face.to_look_direction();
             let facing_world = -raw_look_dir_world;
             let facing_local_vec = parent_rotation.inverse() * facing_world;
 
@@ -615,10 +616,11 @@ pub fn handle_view_cube_editor(
                     edge_direction = ?direction,
                     camera_dir_local = ?camera_dir_local,
                     camera_dir_global = ?camera_dir_global,
-                    dominant_face = dominant_face_name,
-                    dominant_dot = dominant_dot,
-                    dominant_face_world = ?dominant_face_world,
-                    opposite_face_world = ?opposite_face_world,
+                    frame_face = ?frame_face,
+                    frame_face_dot = frame_dot,
+                    secondary_face = ?secondary_face,
+                    secondary_face_dot = secondary_dot,
+                    target_face = ?target_face,
                     raw_look_dir_world = ?raw_look_dir_world,
                     facing_world = ?facing_world,
                     facing_local = ?facing_local_vec,
@@ -634,9 +636,9 @@ pub fn handle_view_cube_editor(
                 warn!(
                     edge_direction = ?direction,
                     camera_dir_global = ?camera_dir_global,
-                    dominant_face = dominant_face_name,
-                    dominant_face_world = ?dominant_face_world,
-                    opposite_face_world = ?opposite_face_world,
+                    frame_face = ?frame_face,
+                    secondary_face = ?secondary_face,
+                    target_face = ?target_face,
                     facing_local = ?facing_local_vec,
                     "view cube: invalid edge snap directions"
                 );
@@ -775,28 +777,6 @@ fn choose_min_rotation_up(
     let fallback_up = Dir3::new(fallback).unwrap_or(Dir3::new_unchecked(Vec3::Y));
     let fallback_angle = angle_to_target_rotation(transform, facing_local, fallback_up);
     (fallback_up, "fallback_local_orthogonal", fallback_angle)
-}
-
-fn dominant_face_and_opposite(camera_dir_global: Vec3) -> (&'static str, Vec3, Vec3, f32) {
-    let abs = camera_dir_global.abs();
-
-    if abs.x >= abs.y && abs.x >= abs.z {
-        if camera_dir_global.x >= 0.0 {
-            ("East", Vec3::X, Vec3::NEG_X, abs.x)
-        } else {
-            ("West", Vec3::NEG_X, Vec3::X, abs.x)
-        }
-    } else if abs.y >= abs.z {
-        if camera_dir_global.y >= 0.0 {
-            ("Up", Vec3::Y, Vec3::NEG_Y, abs.y)
-        } else {
-            ("Down", Vec3::NEG_Y, Vec3::Y, abs.y)
-        }
-    } else if camera_dir_global.z >= 0.0 {
-        ("North", Vec3::Z, Vec3::NEG_Z, abs.z)
-    } else {
-        ("South", Vec3::NEG_Z, Vec3::Z, abs.z)
-    }
 }
 
 fn update_anchor_depth_for_view_cube(
