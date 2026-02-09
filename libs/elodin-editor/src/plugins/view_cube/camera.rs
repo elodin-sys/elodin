@@ -8,16 +8,21 @@
 
 use bevy::camera::Viewport;
 use bevy::camera::visibility::RenderLayers;
+use bevy::log::{info, warn};
 use bevy::math::Dir3;
 use bevy::prelude::*;
 use bevy_editor_cam::controller::component::EditorCam;
 use bevy_editor_cam::extensions::look_to::LookToTrigger;
+use impeller2_bevy::EntityMap;
+use impeller2_wkt::ComponentValue;
 
 use super::components::{
     RotationArrow, ViewCubeCamera, ViewCubeLink, ViewCubeRenderLayer, ViewCubeRoot,
 };
 use super::config::ViewCubeConfig;
 use super::events::ViewCubeEvent;
+use crate::WorldPosExt;
+use crate::object_3d::ComponentArrayExt;
 
 // ============================================================================
 // Components
@@ -453,7 +458,13 @@ pub fn set_view_cube_viewport_editor(
 pub fn handle_view_cube_editor(
     mut events: MessageReader<ViewCubeEvent>,
     view_cube_query: Query<&ViewCubeLink, With<ViewCubeRoot>>,
-    mut camera_query: Query<(Entity, &Transform, &mut EditorCam), With<ViewCubeTargetCamera>>,
+    mut camera_query: Query<
+        (Entity, &Transform, &GlobalTransform, &mut EditorCam),
+        With<ViewCubeTargetCamera>,
+    >,
+    viewports: Query<&crate::ui::inspector::viewport::Viewport, With<ViewCubeTargetCamera>>,
+    entity_map: Res<EntityMap>,
+    values: Query<&'static ComponentValue>,
     config: Res<ViewCubeConfig>,
     mut look_to: MessageWriter<LookToTrigger>,
 ) {
@@ -461,9 +472,25 @@ pub fn handle_view_cube_editor(
         let Some(cam) = main_camera_for_event(event, &view_cube_query) else {
             continue;
         };
-        let Ok((entity, transform, mut editor_cam)) = camera_query.get_mut(cam) else {
+        let Ok((entity, transform, global_transform, mut editor_cam)) = camera_query.get_mut(cam)
+        else {
             continue;
         };
+
+        update_anchor_depth_for_view_cube(
+            entity,
+            transform,
+            &mut editor_cam,
+            &viewports,
+            &entity_map,
+            &values,
+        );
+
+        info!(
+            event = ?event,
+            camera = %entity,
+            "view cube: received event"
+        );
 
         // Cancel any EditorCam motion started by this click.
         // Left-click on the ViewCube overlay also triggers EditorCam's PanZoom
@@ -471,21 +498,148 @@ pub fn handle_view_cube_editor(
         // before sending our LookToTrigger.
         editor_cam.end_move();
 
-        // Reborrow as shared ref for LookToTrigger::auto_snap_up_direction
-        let editor_cam_ref: &EditorCam = &editor_cam;
+        // Camera local rotation is relative to its parent. ViewCube directions are expressed in
+        // world axes, so convert world targets into camera-local directions before snapping.
+        let (_, global_rotation, _) = global_transform.to_scale_rotation_translation();
+        let parent_rotation = global_rotation * transform.rotation.inverse();
+        let camera_dir_local = -(*transform.forward());
+        let camera_dir_global = parent_rotation * camera_dir_local;
 
-        // Face/Edge/Corner: snap to the target direction.
-        // to_look_direction() returns camera POSITION direction (subject -> camera).
-        // LookToTrigger expects camera LOOK direction (camera -> subject), so negate.
-        if let Some(look_dir) = target_look_direction(event) {
-            let dir_vec = -look_dir;
-            if let Ok(direction) = Dir3::new(dir_vec) {
-                look_to.write(LookToTrigger::auto_snap_up_direction(
-                    direction,
-                    entity,
-                    transform,
-                    editor_cam_ref,
-                ));
+        if let ViewCubeEvent::FaceClicked { direction, .. } = event {
+            let raw_look_dir_world = direction.to_look_direction();
+            let facing_world = -raw_look_dir_world;
+            let facing_local_vec = parent_rotation.inverse() * facing_world;
+
+            if let Ok(facing_local) = Dir3::new(facing_local_vec) {
+                let (chosen_up, chosen_up_source, chosen_up_angle) =
+                    choose_min_rotation_up(transform, parent_rotation, facing_local);
+                let trigger = LookToTrigger {
+                    target_facing_direction: facing_local,
+                    target_up_direction: chosen_up,
+                    camera: entity,
+                };
+                let rotation_angle = angle_to_trigger(transform, &trigger);
+                info!(
+                    target_kind = "face",
+                    selection_policy = "face_world_to_local_min_total_rotation",
+                    direction = ?direction,
+                    camera_dir_local = ?camera_dir_local,
+                    camera_dir_global = ?camera_dir_global,
+                    raw_look_dir_world = ?raw_look_dir_world,
+                    facing_world = ?facing_world,
+                    facing_local = ?facing_local_vec,
+                    chosen_up_source = chosen_up_source,
+                    chosen_up_angle = chosen_up_angle,
+                    chosen_facing = ?*trigger.target_facing_direction,
+                    chosen_up = ?*trigger.target_up_direction,
+                    rotation_angle = rotation_angle,
+                    "view cube: face snap"
+                );
+                look_to.write(trigger);
+            } else {
+                warn!(
+                    direction = ?direction,
+                    raw_look_dir_world = ?raw_look_dir_world,
+                    facing_world = ?facing_world,
+                    facing_local = ?facing_local_vec,
+                    "view cube: invalid face snap directions"
+                );
+            }
+            continue;
+        }
+
+        if let ViewCubeEvent::CornerClicked { position, .. } = event {
+            let raw_look_dir_world = position.to_look_direction();
+            let facing_world = -raw_look_dir_world;
+            let facing_local_vec = parent_rotation.inverse() * facing_world;
+
+            if let Ok(facing_local) = Dir3::new(facing_local_vec) {
+                let (chosen_up, chosen_up_source, chosen_up_angle) =
+                    choose_min_rotation_up(transform, parent_rotation, facing_local);
+                let trigger = LookToTrigger {
+                    target_facing_direction: facing_local,
+                    target_up_direction: chosen_up,
+                    camera: entity,
+                };
+                let rotation_angle = angle_to_trigger(transform, &trigger);
+                info!(
+                    target_kind = "corner",
+                    selection_policy = "corner_world_to_local_min_total_rotation",
+                    position = ?position,
+                    camera_dir_local = ?camera_dir_local,
+                    camera_dir_global = ?camera_dir_global,
+                    raw_look_dir_world = ?raw_look_dir_world,
+                    facing_world = ?facing_world,
+                    facing_local = ?facing_local_vec,
+                    chosen_up_source = chosen_up_source,
+                    chosen_up_angle = chosen_up_angle,
+                    chosen_facing = ?*trigger.target_facing_direction,
+                    chosen_up = ?*trigger.target_up_direction,
+                    rotation_angle = rotation_angle,
+                    "view cube: corner snap"
+                );
+                look_to.write(trigger);
+            } else {
+                warn!(
+                    position = ?position,
+                    raw_look_dir_world = ?raw_look_dir_world,
+                    facing_world = ?facing_world,
+                    facing_local = ?facing_local_vec,
+                    "view cube: invalid corner snap directions"
+                );
+            }
+            continue;
+        }
+
+        // Edges (the frame around a face): snap to the opposite face of the currently
+        // dominant viewing direction, which matches CAD-like "flip side" behavior.
+        if let ViewCubeEvent::EdgeClicked { direction, .. } = event {
+            let (dominant_face_name, dominant_face_world, opposite_face_world, dominant_dot) =
+                dominant_face_and_opposite(camera_dir_global);
+            let raw_look_dir_world = opposite_face_world;
+            let facing_world = -raw_look_dir_world;
+            let facing_local_vec = parent_rotation.inverse() * facing_world;
+
+            if let Ok(facing_local) = Dir3::new(facing_local_vec) {
+                let (chosen_up, chosen_up_source, chosen_up_angle) =
+                    choose_min_rotation_up(transform, parent_rotation, facing_local);
+                let trigger = LookToTrigger {
+                    target_facing_direction: facing_local,
+                    target_up_direction: chosen_up,
+                    camera: entity,
+                };
+                let rotation_angle = angle_to_trigger(transform, &trigger);
+                info!(
+                    target_kind = "edge",
+                    selection_policy = "edge_to_opposite_face_min_total_rotation",
+                    edge_direction = ?direction,
+                    camera_dir_local = ?camera_dir_local,
+                    camera_dir_global = ?camera_dir_global,
+                    dominant_face = dominant_face_name,
+                    dominant_dot = dominant_dot,
+                    dominant_face_world = ?dominant_face_world,
+                    opposite_face_world = ?opposite_face_world,
+                    raw_look_dir_world = ?raw_look_dir_world,
+                    facing_world = ?facing_world,
+                    facing_local = ?facing_local_vec,
+                    chosen_up_source = chosen_up_source,
+                    chosen_up_angle = chosen_up_angle,
+                    chosen_facing = ?*trigger.target_facing_direction,
+                    chosen_up = ?*trigger.target_up_direction,
+                    rotation_angle = rotation_angle,
+                    "view cube: edge snap"
+                );
+                look_to.write(trigger);
+            } else {
+                warn!(
+                    edge_direction = ?direction,
+                    camera_dir_global = ?camera_dir_global,
+                    dominant_face = dominant_face_name,
+                    dominant_face_world = ?dominant_face_world,
+                    opposite_face_world = ?opposite_face_world,
+                    facing_local = ?facing_local_vec,
+                    "view cube: invalid edge snap directions"
+                );
             }
             continue;
         }
@@ -529,12 +683,192 @@ pub fn handle_view_cube_editor(
             if let Ok(facing) = Dir3::new(new_forward)
                 && let Ok(up_dir) = Dir3::new(new_up)
             {
+                info!(
+                    arrow = ?arrow,
+                    forward = ?forward,
+                    up = ?up,
+                    new_forward = ?new_forward,
+                    new_up = ?new_up,
+                    "view cube: arrow snap"
+                );
                 look_to.write(LookToTrigger {
                     target_facing_direction: facing,
                     target_up_direction: up_dir,
                     camera: entity,
                 });
+            } else {
+                warn!(
+                    arrow = ?arrow,
+                    new_forward = ?new_forward,
+                    new_up = ?new_up,
+                    "view cube: invalid arrow directions"
+                );
             }
         }
     }
+}
+
+fn angle_to_trigger(transform: &Transform, trigger: &LookToTrigger) -> f32 {
+    angle_to_target_rotation(
+        transform,
+        trigger.target_facing_direction,
+        trigger.target_up_direction,
+    )
+}
+
+fn angle_to_target_rotation(transform: &Transform, facing: Dir3, up: Dir3) -> f32 {
+    let target_rotation = Transform::default().looking_to(*facing, *up).rotation;
+    transform.rotation.angle_between(target_rotation).abs()
+}
+
+fn choose_min_rotation_up(
+    transform: &Transform,
+    parent_rotation: Quat,
+    facing_local: Dir3,
+) -> (Dir3, &'static str, f32) {
+    let parent_inverse = parent_rotation.inverse();
+    let mut best: Option<(Dir3, &'static str, f32)> = None;
+
+    for (label, up_world) in [
+        ("world_pos_x", Vec3::X),
+        ("world_neg_x", Vec3::NEG_X),
+        ("world_pos_y", Vec3::Y),
+        ("world_neg_y", Vec3::NEG_Y),
+        ("world_pos_z", Vec3::Z),
+        ("world_neg_z", Vec3::NEG_Z),
+    ] {
+        let up_local_vec = parent_inverse * up_world;
+        let Ok(up_local) = Dir3::new(up_local_vec) else {
+            continue;
+        };
+        let alignment = facing_local.dot(*up_local).abs();
+        if alignment > 0.99 {
+            continue;
+        }
+        let angle = angle_to_target_rotation(transform, facing_local, up_local);
+        let replace = match best {
+            Some((_, _, best_angle)) => angle + 1.0e-6 < best_angle,
+            None => true,
+        };
+        if replace {
+            best = Some((up_local, label, angle));
+        }
+    }
+
+    if let Some(best) = best {
+        return best;
+    }
+
+    // Fallback: build an up vector orthogonal to facing in local space.
+    let facing = *facing_local;
+    let basis = if facing.y.abs() < 0.95 {
+        Vec3::Y
+    } else {
+        Vec3::X
+    };
+    let orthogonal = (basis - facing * basis.dot(facing)).normalize_or_zero();
+    let fallback = if orthogonal.length_squared() > 1.0e-6 {
+        orthogonal
+    } else {
+        Vec3::Z
+    };
+    let fallback_up = Dir3::new(fallback).unwrap_or(Dir3::new_unchecked(Vec3::Y));
+    let fallback_angle = angle_to_target_rotation(transform, facing_local, fallback_up);
+    (fallback_up, "fallback_local_orthogonal", fallback_angle)
+}
+
+fn dominant_face_and_opposite(camera_dir_global: Vec3) -> (&'static str, Vec3, Vec3, f32) {
+    let abs = camera_dir_global.abs();
+
+    if abs.x >= abs.y && abs.x >= abs.z {
+        if camera_dir_global.x >= 0.0 {
+            ("East", Vec3::X, Vec3::NEG_X, abs.x)
+        } else {
+            ("West", Vec3::NEG_X, Vec3::X, abs.x)
+        }
+    } else if abs.y >= abs.z {
+        if camera_dir_global.y >= 0.0 {
+            ("Up", Vec3::Y, Vec3::NEG_Y, abs.y)
+        } else {
+            ("Down", Vec3::NEG_Y, Vec3::Y, abs.y)
+        }
+    } else if camera_dir_global.z >= 0.0 {
+        ("North", Vec3::Z, Vec3::NEG_Z, abs.z)
+    } else {
+        ("South", Vec3::NEG_Z, Vec3::Z, abs.z)
+    }
+}
+
+fn update_anchor_depth_for_view_cube(
+    camera: Entity,
+    transform: &Transform,
+    editor_cam: &mut EditorCam,
+    viewports: &Query<&crate::ui::inspector::viewport::Viewport, With<ViewCubeTargetCamera>>,
+    entity_map: &EntityMap,
+    values: &Query<&'static ComponentValue>,
+) {
+    let (orbit_target, target_source) =
+        view_cube_orbit_target(camera, viewports, entity_map, values)
+            .map(|target| (target, "viewport.look_at"))
+            .unwrap_or((Vec3::ZERO, "world.origin"));
+
+    let to_target = orbit_target - transform.translation;
+    let forward = *transform.forward();
+    // Measure depth along camera forward axis (what EditorCam expects).
+    // This avoids positive feedback loops from using full 3D distance when
+    // the camera is temporarily offset from the look target.
+    let projected_distance = to_target.dot(forward);
+    let measured_distance = to_target.length();
+    let previous_distance = editor_cam.last_anchor_depth.abs() as f32;
+
+    let (mut distance, mut depth_strategy) =
+        if projected_distance.is_finite() && projected_distance > 1.0e-3 {
+            (projected_distance, "projected_forward")
+        } else if previous_distance > 1.0e-3 {
+            (previous_distance, "fallback_previous")
+        } else if measured_distance.is_finite() && measured_distance > 1.0e-3 {
+            (measured_distance, "fallback_measured")
+        } else {
+            (1.0, "fallback_default")
+        };
+
+    // Limit abrupt growth to keep orbit radius stable between consecutive face snaps.
+    if previous_distance > 1.0e-3 {
+        let growth_limit = (previous_distance * 1.35).max(previous_distance + 0.25);
+        if distance > growth_limit {
+            distance = growth_limit;
+            depth_strategy = "clamped_growth";
+        }
+    }
+
+    let new_depth = -(distance as f64);
+
+    let old_depth = editor_cam.last_anchor_depth;
+    editor_cam.last_anchor_depth = new_depth;
+    info!(
+        camera = %camera,
+        orbit_target = ?orbit_target,
+        target_source = target_source,
+        projected_distance = projected_distance,
+        measured_distance = measured_distance,
+        previous_distance = previous_distance,
+        depth_strategy = depth_strategy,
+        orbit_distance = distance,
+        old_anchor_depth = old_depth,
+        new_anchor_depth = new_depth,
+        "view cube: updated orbit anchor depth"
+    );
+}
+
+fn view_cube_orbit_target(
+    camera: Entity,
+    viewports: &Query<&crate::ui::inspector::viewport::Viewport, With<ViewCubeTargetCamera>>,
+    entity_map: &EntityMap,
+    values: &Query<&'static ComponentValue>,
+) -> Option<Vec3> {
+    let viewport = viewports.get(camera).ok()?;
+    let compiled_expr = viewport.look_at.compiled_expr.as_ref()?;
+    let val = compiled_expr.execute(entity_map, values).ok()?;
+    let world_pos = val.as_world_pos()?;
+    Some(world_pos.bevy_pos().as_vec3())
 }
