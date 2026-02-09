@@ -17,7 +17,7 @@ use impeller2_bevy::EntityMap;
 use impeller2_wkt::ComponentValue;
 
 use super::components::{
-    RotationArrow, ViewCubeCamera, ViewCubeLink, ViewCubeRenderLayer, ViewCubeRoot,
+    FaceDirection, RotationArrow, ViewCubeCamera, ViewCubeLink, ViewCubeRenderLayer, ViewCubeRoot,
 };
 use super::config::ViewCubeConfig;
 use super::events::ViewCubeEvent;
@@ -594,41 +594,59 @@ pub fn handle_view_cube_editor(
         // Edges (the frame around a face): determine which of the two adjacent faces is
         // currently "in front" relative to the camera, then snap to its opposite face.
         if let ViewCubeEvent::EdgeClicked { direction, .. } = event {
-            let (frame_face, secondary_face, frame_dot, secondary_dot) =
-                direction.active_frame_face(camera_dir_global);
-            let target_face = frame_face.opposite();
-            let raw_look_dir_world = target_face.to_look_direction();
-            let facing_world = -raw_look_dir_world;
-            let facing_local_vec = parent_rotation.inverse() * facing_world;
+            let (face_a, face_b) = direction.adjacent_faces();
+            let dot_a = face_a.to_look_direction().dot(camera_dir_global);
+            let dot_b = face_b.to_look_direction().dot(camera_dir_global);
 
-            if let Ok(facing_local) = Dir3::new(facing_local_vec) {
-                let (chosen_up, chosen_up_source, chosen_up_angle) =
-                    choose_min_rotation_up(transform, parent_rotation, facing_local);
+            let candidate_a =
+                build_edge_snap_candidate(transform, parent_rotation, face_a, dot_a, face_b, dot_b);
+            let candidate_b =
+                build_edge_snap_candidate(transform, parent_rotation, face_b, dot_b, face_a, dot_a);
+
+            let chosen = match (&candidate_a, &candidate_b) {
+                (Some(a), Some(b)) => {
+                    if a.rotation_angle <= b.rotation_angle + 1.0e-6 {
+                        Some(a)
+                    } else {
+                        Some(b)
+                    }
+                }
+                (Some(a), None) => Some(a),
+                (None, Some(b)) => Some(b),
+                (None, None) => None,
+            };
+
+            if let Some(chosen) = chosen {
                 let trigger = LookToTrigger {
-                    target_facing_direction: facing_local,
-                    target_up_direction: chosen_up,
+                    target_facing_direction: chosen.facing_local,
+                    target_up_direction: chosen.chosen_up,
                     camera: entity,
                 };
-                let rotation_angle = angle_to_trigger(transform, &trigger);
                 info!(
                     target_kind = "edge",
                     selection_policy = "edge_to_opposite_face_min_total_rotation",
                     edge_direction = ?direction,
                     camera_dir_local = ?camera_dir_local,
                     camera_dir_global = ?camera_dir_global,
-                    frame_face = ?frame_face,
-                    frame_face_dot = frame_dot,
-                    secondary_face = ?secondary_face,
-                    secondary_face_dot = secondary_dot,
-                    target_face = ?target_face,
-                    raw_look_dir_world = ?raw_look_dir_world,
-                    facing_world = ?facing_world,
-                    facing_local = ?facing_local_vec,
-                    chosen_up_source = chosen_up_source,
-                    chosen_up_angle = chosen_up_angle,
+                    candidate_a_frame_face = ?candidate_a.as_ref().map(|c| c.frame_face),
+                    candidate_a_target_face = ?candidate_a.as_ref().map(|c| c.target_face),
+                    candidate_a_rotation_angle = ?candidate_a.as_ref().map(|c| c.rotation_angle),
+                    candidate_b_frame_face = ?candidate_b.as_ref().map(|c| c.frame_face),
+                    candidate_b_target_face = ?candidate_b.as_ref().map(|c| c.target_face),
+                    candidate_b_rotation_angle = ?candidate_b.as_ref().map(|c| c.rotation_angle),
+                    frame_face = ?chosen.frame_face,
+                    frame_face_dot = chosen.frame_face_dot,
+                    secondary_face = ?chosen.secondary_face,
+                    secondary_face_dot = chosen.secondary_face_dot,
+                    target_face = ?chosen.target_face,
+                    raw_look_dir_world = ?chosen.raw_look_dir_world,
+                    facing_world = ?chosen.facing_world,
+                    facing_local = ?chosen.facing_local_vec,
+                    chosen_up_source = chosen.chosen_up_source,
+                    chosen_up_angle = chosen.chosen_up_angle,
                     chosen_facing = ?*trigger.target_facing_direction,
                     chosen_up = ?*trigger.target_up_direction,
-                    rotation_angle = rotation_angle,
+                    rotation_angle = chosen.rotation_angle,
                     "view cube: edge snap"
                 );
                 look_to.write(trigger);
@@ -636,11 +654,11 @@ pub fn handle_view_cube_editor(
                 warn!(
                     edge_direction = ?direction,
                     camera_dir_global = ?camera_dir_global,
-                    frame_face = ?frame_face,
-                    secondary_face = ?secondary_face,
-                    target_face = ?target_face,
-                    facing_local = ?facing_local_vec,
-                    "view cube: invalid edge snap directions"
+                    face_a = ?face_a,
+                    face_b = ?face_b,
+                    dot_a = dot_a,
+                    dot_b = dot_b,
+                    "view cube: invalid edge snap candidates"
                 );
             }
             continue;
@@ -721,6 +739,57 @@ fn angle_to_trigger(transform: &Transform, trigger: &LookToTrigger) -> f32 {
 fn angle_to_target_rotation(transform: &Transform, facing: Dir3, up: Dir3) -> f32 {
     let target_rotation = Transform::default().looking_to(*facing, *up).rotation;
     transform.rotation.angle_between(target_rotation).abs()
+}
+
+#[derive(Debug)]
+struct EdgeSnapCandidate {
+    frame_face: FaceDirection,
+    frame_face_dot: f32,
+    secondary_face: FaceDirection,
+    secondary_face_dot: f32,
+    target_face: FaceDirection,
+    raw_look_dir_world: Vec3,
+    facing_world: Vec3,
+    facing_local_vec: Vec3,
+    facing_local: Dir3,
+    chosen_up: Dir3,
+    chosen_up_source: &'static str,
+    chosen_up_angle: f32,
+    rotation_angle: f32,
+}
+
+fn build_edge_snap_candidate(
+    transform: &Transform,
+    parent_rotation: Quat,
+    frame_face: FaceDirection,
+    frame_face_dot: f32,
+    secondary_face: FaceDirection,
+    secondary_face_dot: f32,
+) -> Option<EdgeSnapCandidate> {
+    let target_face = frame_face.opposite();
+    let raw_look_dir_world = target_face.to_look_direction();
+    let facing_world = -raw_look_dir_world;
+    let facing_local_vec = parent_rotation.inverse() * facing_world;
+    let facing_local = Dir3::new(facing_local_vec).ok()?;
+    let (chosen_up, chosen_up_source, chosen_up_angle) =
+        choose_min_rotation_up(transform, parent_rotation, facing_local);
+    let rotation_angle = angle_to_target_rotation(transform, facing_local, chosen_up);
+
+    Some(EdgeSnapCandidate {
+        frame_face,
+        frame_face_dot,
+        secondary_face,
+        secondary_face_dot,
+        target_face,
+        raw_look_dir_world,
+        facing_world,
+        facing_local_vec,
+        facing_local,
+        chosen_up,
+        chosen_up_source,
+        chosen_up_angle,
+        rotation_angle,
+    })
 }
 
 fn choose_min_rotation_up(

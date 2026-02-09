@@ -164,6 +164,70 @@ fn same_entity_set(lhs: &[Entity], rhs: &[Entity]) -> bool {
     lhs.len() == rhs.len() && lhs.iter().all(|entity| rhs.contains(entity))
 }
 
+#[derive(Debug)]
+struct EdgeHoverCandidate {
+    frame_face: FaceDirection,
+    frame_face_dot: f32,
+    secondary_face: FaceDirection,
+    secondary_face_dot: f32,
+    target_face: FaceDirection,
+    chosen_up_source: &'static str,
+    rotation_angle: f32,
+}
+
+fn build_edge_hover_candidate(
+    camera_rotation: Quat,
+    frame_face: FaceDirection,
+    frame_face_dot: f32,
+    secondary_face: FaceDirection,
+    secondary_face_dot: f32,
+) -> Option<EdgeHoverCandidate> {
+    let target_face = frame_face.opposite();
+    let facing_world = -target_face.to_look_direction();
+    let (_up_world, chosen_up_source, rotation_angle) =
+        choose_min_rotation_up_world(camera_rotation, facing_world)?;
+    Some(EdgeHoverCandidate {
+        frame_face,
+        frame_face_dot,
+        secondary_face,
+        secondary_face_dot,
+        target_face,
+        chosen_up_source,
+        rotation_angle,
+    })
+}
+
+fn choose_min_rotation_up_world(
+    camera_rotation: Quat,
+    facing_world: Vec3,
+) -> Option<(Vec3, &'static str, f32)> {
+    let mut best: Option<(Vec3, &'static str, f32)> = None;
+
+    for (label, up_world) in [
+        ("world_pos_x", Vec3::X),
+        ("world_neg_x", Vec3::NEG_X),
+        ("world_pos_y", Vec3::Y),
+        ("world_neg_y", Vec3::NEG_Y),
+        ("world_pos_z", Vec3::Z),
+        ("world_neg_z", Vec3::NEG_Z),
+    ] {
+        if facing_world.dot(up_world).abs() > 0.99 {
+            continue;
+        }
+        let target_rotation = Transform::default().looking_to(facing_world, up_world).rotation;
+        let angle = camera_rotation.angle_between(target_rotation).abs();
+        let replace = match best {
+            Some((_, _, best_angle)) => angle + 1.0e-6 < best_angle,
+            None => true,
+        };
+        if replace {
+            best = Some((up_world, label, angle));
+        }
+    }
+
+    best
+}
+
 #[allow(clippy::too_many_arguments)]
 fn compute_hover_targets(
     target: Entity,
@@ -193,8 +257,30 @@ fn compute_hover_targets(
 
     let (_, cam_rotation, _) = camera_global.to_scale_rotation_translation();
     let camera_dir_world = cam_rotation * Vec3::Z;
-    let (frame_face, secondary_face, frame_dot, secondary_dot) =
-        edge_under_cursor.active_frame_face(camera_dir_world);
+    let (face_a, face_b) = edge_under_cursor.adjacent_faces();
+    let dot_a = face_a.to_look_direction().dot(camera_dir_world);
+    let dot_b = face_b.to_look_direction().dot(camera_dir_world);
+    let candidate_a = build_edge_hover_candidate(cam_rotation, face_a, dot_a, face_b, dot_b);
+    let candidate_b = build_edge_hover_candidate(cam_rotation, face_b, dot_b, face_a, dot_a);
+
+    let chosen = match (&candidate_a, &candidate_b) {
+        (Some(a), Some(b)) => {
+            if a.rotation_angle <= b.rotation_angle + 1.0e-6 {
+                Some(a)
+            } else {
+                Some(b)
+            }
+        }
+        (Some(a), None) => Some(a),
+        (None, Some(b)) => Some(b),
+        (None, None) => None,
+    };
+
+    let Some(chosen) = chosen else {
+        return vec![target];
+    };
+
+    let frame_face = chosen.frame_face;
     let edge_group = edges_for_face(frame_face);
 
     let mut targets = Vec::new();
@@ -218,10 +304,19 @@ fn compute_hover_targets(
     info!(
         hover_edge = ?edge_under_cursor,
         camera_dir_world = ?camera_dir_world,
-        frame_face = ?frame_face,
-        frame_face_dot = frame_dot,
-        secondary_face = ?secondary_face,
-        secondary_face_dot = secondary_dot,
+        candidate_a_frame_face = ?candidate_a.as_ref().map(|c| c.frame_face),
+        candidate_a_target_face = ?candidate_a.as_ref().map(|c| c.target_face),
+        candidate_a_rotation_angle = ?candidate_a.as_ref().map(|c| c.rotation_angle),
+        candidate_b_frame_face = ?candidate_b.as_ref().map(|c| c.frame_face),
+        candidate_b_target_face = ?candidate_b.as_ref().map(|c| c.target_face),
+        candidate_b_rotation_angle = ?candidate_b.as_ref().map(|c| c.rotation_angle),
+        frame_face = ?chosen.frame_face,
+        frame_face_dot = chosen.frame_face_dot,
+        secondary_face = ?chosen.secondary_face,
+        secondary_face_dot = chosen.secondary_face_dot,
+        target_face = ?chosen.target_face,
+        chosen_up_source = chosen.chosen_up_source,
+        rotation_angle = chosen.rotation_angle,
         edge_group = ?edge_group,
         highlighted_edges = targets.len(),
         "view cube: edge hover group"
