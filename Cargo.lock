@@ -1784,6 +1784,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "bevy_geo_frames"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "bevy-inspector-egui",
+ "bevy_editor_cam",
+ "bevy_infinite_grid",
+ "big_space",
+ "map_3d",
+ "serde",
+ "strum 0.27.2",
+ "strum_macros 0.27.2",
+]
+
+[[package]]
 name = "bevy_gilrs"
 version = "0.17.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5151,6 +5166,7 @@ dependencies = [
  "bevy_editor_cam",
  "bevy_egui",
  "bevy_framepace",
+ "bevy_geo_frames",
  "bevy_infinite_grid",
  "bevy_picking",
  "bevy_render",
@@ -7304,6 +7320,7 @@ dependencies = [
 name = "impeller2-kdl"
 version = "0.16.1-alpha.0"
 dependencies = [
+ "bevy_geo_frames",
  "impeller2",
  "impeller2-wkt",
  "kdl",
@@ -7336,6 +7353,7 @@ name = "impeller2-wkt"
 version = "0.16.1-alpha.0"
 dependencies = [
  "bevy",
+ "bevy_geo_frames",
  "compact_str",
  "impeller2",
  "mlua",
@@ -8252,6 +8270,11 @@ dependencies = [
 ]
 
 [[package]]
+name = "map_3d"
+version = "0.1.5"
+source = "git+https://github.com/shanecelis/map_3d.git?branch=feat%2Fsphere#7562c48516badfd840b2c80f2c5d38fe9d26f097"
+
+[[package]]
 name = "matchers"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9052,6 +9075,7 @@ version = "0.16.1-alpha.0"
 dependencies = [
  "approx",
  "arrow",
+ "bevy_geo_frames",
  "bytemuck",
  "byteorder",
  "bytes",
@@ -9103,6 +9127,7 @@ dependencies = [
 name = "nox-py"
 version = "0.16.1-alpha.0"
 dependencies = [
+ "bevy_geo_frames",
  "bytes",
  "clap 4.5.53",
  "convert_case 0.8.0",

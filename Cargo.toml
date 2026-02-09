@@ -53,7 +53,8 @@ members = [
     "libs/db/eql",
     "libs/impeller2/kdl",
     "libs/db/examples/rust_client",
-    "examples/rc-jet/controller"
+    "examples/rc-jet/controller",
+    "libs/bevy_geo_frames",
  ]
 exclude = ["fsw/sensor-fw", "fsw/blackbox", "docs/memserve"]
 
@@ -101,3 +102,4 @@ debug = true
 [patch.crates-io]
 bevy_editor_cam = { git = "https://github.com/aevyrie/bevy_editor_cam", rev = "1ae39bda1aa8d547dec4b26747e466ad5b2ab9ab" }
 big_space = { git = "https://github.com/elodin-sys/big_space.git", branch = "no_prop_rot_v0.17" }
+map_3d = { git = "https://github.com/shanecelis/map_3d.git", branch = "feat/sphere" }

@@ -65,6 +65,8 @@ postcard.features = ["alloc"]
 pyo3.version = "0.23.0"
 pyo3.optional = true
 
+bevy_geo_frames.path = "../bevy_geo_frames"
+bevy_geo_frames.features = ["serde", "big_space"]
 
 [dev-dependencies]
 tempfile = "3.10.0"

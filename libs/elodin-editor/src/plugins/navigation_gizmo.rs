@@ -274,7 +274,7 @@ pub struct DraggedMarker;
 pub fn drag_nav_gizmo(
     drag: On<Pointer<Drag>>,
     nav_gizmo: Query<&NavGizmoParent>,
-    mut query: Query<(&mut Transform, &mut EditorCam, &Camera), With<MainCamera>>,
+    mut query: Query<(&Transform, &mut EditorCam, &Camera), With<MainCamera>>,
     dragged_query: Query<(), With<DraggedMarker>>,
     mut commands: Commands,
 ) {
@@ -290,7 +290,7 @@ pub fn drag_nav_gizmo(
     if first_drag {
         commands.entity(drag_target).insert(DraggedMarker);
         editor_cam.end_move();
-        let anchor = camera_anchor_from_transform(transform.as_ref());
+        let anchor = camera_anchor_from_transform(&transform);
         editor_cam.start_orbit(anchor);
     }
     let delta = drag.delta
@@ -364,6 +364,9 @@ pub fn sync_nav_camera(
             commands.entity(entity).despawn();
             continue;
         };
+        // What does this do, actually? Is this a way to have a child that does
+        // not rotate with its parent? I believe there are better ways to
+        // achieve this with Bevy's generic parent-child relationships.
         nav_transform.rotation = main.rotation().conjugate();
     }
 }

@@ -88,6 +88,40 @@ impl From<Integrator> for nox_ecs::Integrator {
     }
 }
 
+#[pyclass(eq, eq_int)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Frame {
+    ENU,
+    NED,
+    ECEF,
+    // ECI,
+    // GCRF,
+}
+
+impl From<Frame> for bevy_geo_frames::GeoFrame {
+    fn from(frame: Frame) -> Self {
+        match frame {
+            Frame::ENU => bevy_geo_frames::GeoFrame::ENU,
+            Frame::NED => bevy_geo_frames::GeoFrame::NED,
+            Frame::ECEF => bevy_geo_frames::GeoFrame::ECEF,
+            // Frame::ECI => bevy_geo_frames::GeoFrame::ECI,
+            // Frame::GCRF => bevy_geo_frames::GeoFrame::GCRF,
+        }
+    }
+}
+
+impl From<bevy_geo_frames::GeoFrame> for Frame {
+    fn from(frame: bevy_geo_frames::GeoFrame) -> Self {
+        match frame {
+            bevy_geo_frames::GeoFrame::ENU => Frame::ENU,
+            bevy_geo_frames::GeoFrame::NED => Frame::NED,
+            bevy_geo_frames::GeoFrame::ECEF => Frame::ECEF,
+            // bevy_geo_frames::GeoFrame::ECI => Frame::ECI,
+            // bevy_geo_frames::GeoFrame::GCRF => Frame::GCRF,
+        }
+    }
+}
+
 #[pyfunction]
 #[pyo3(signature = (time_step = None, sys = None, integrator = Integrator::Rk4))]
 pub fn six_dof(time_step: Option<f64>, sys: Option<System>, integrator: Integrator) -> System {
@@ -139,6 +173,7 @@ pub fn elodin(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_class::<Edge>()?;
     m.add_class::<Component>()?;
     m.add_class::<Integrator>()?;
+    m.add_class::<Frame>()?;
     m.add_class::<PyFnSystem>()?;
     m.add_class::<QueryMetadata>()?;
     m.add_class::<SystemBuilder>()?;

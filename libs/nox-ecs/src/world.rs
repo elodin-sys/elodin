@@ -11,6 +11,7 @@ use impeller2::{
     types::{ComponentView, EntityId},
 };
 use impeller2_wkt::ComponentMetadata;
+use bevy_geo_frames::GeoFrame;
 
 use crate::*;
 
@@ -53,6 +54,7 @@ pub struct WorldMetadata {
     pub max_tick: u64,
     pub schematic_path: Option<PathBuf>,
     pub schematic: Option<String>,
+    pub frame: GeoFrame,
 }
 
 impl MetadataExt for World {}
@@ -70,6 +72,7 @@ impl Default for WorldMetadata {
             max_tick: u64::MAX,
             schematic: None,
             schematic_path: None,
+            frame: GeoFrame::ENU, // Default for internal use only
         }
     }
 }

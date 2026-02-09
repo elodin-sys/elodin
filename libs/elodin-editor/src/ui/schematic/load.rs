@@ -485,7 +485,16 @@ impl LoadSchematicParams<'_, '_> {
     }
 
     pub fn spawn_line_3d(&mut self, line_3d: Line3d) {
-        self.commands.spawn(line_3d);
+        let frame = line_3d.frame;
+        let mut spawn = self.commands.spawn(line_3d);
+
+        // Add GeoPosition and GeoRotation if frame is specified
+        if let Some(frame) = frame {
+            spawn.insert((
+                bevy_geo_frames::GeoPosition(frame, bevy::math::DVec3::ZERO),
+                bevy_geo_frames::GeoRotation(frame, bevy::math::DQuat::IDENTITY),
+            ));
+        }
     }
 
     pub fn spawn_vector_arrow(
@@ -508,6 +517,7 @@ impl LoadSchematicParams<'_, '_> {
             .and_then(|origin| self.eql.0.parse_str(origin).ok())
             .map(compile_eql_expr);
 
+        let frame = vector_arrow.frame;
         let mut spawn = self.commands.spawn((
             vector_arrow,
             VectorArrowState {
@@ -518,6 +528,14 @@ impl LoadSchematicParams<'_, '_> {
                 ..default()
             },
         ));
+
+        // Add GeoPosition and GeoRotation if frame is specified
+        if let Some(frame) = frame {
+            spawn.insert((
+                bevy_geo_frames::GeoPosition(frame, bevy::math::DVec3::ZERO),
+                bevy_geo_frames::GeoRotation(frame, bevy::math::DQuat::IDENTITY),
+            ));
+        }
 
         if let Some(camera) = viewport_camera {
             spawn.insert(ViewportArrow { camera });

@@ -47,7 +47,7 @@ Now let's set up our simulation world:
 BALL_RADIUS = 0.2
 
 def world() -> el.World:
-    world = el.World()
+    world = el.World(frame=el.Frame.ENU)
     ball = world.spawn(
         [
             el.Body(world_pos=el.SpatialTransform(linear=jnp.array([0.0, 0.0, 6.0]))),
@@ -195,7 +195,7 @@ class WindData(el.Archetype):
 Also make sure to update your world function to add a `WindData` instance:
 ```python
 def world(seed: int = 0) -> el.World:
-    world = el.World()
+    world = el.World(frame=el.Frame.ENU)
     world.spawn(WindData(seed=jnp.int64(seed)), name="WindData")
     ball = world.spawn(
     ...
@@ -364,7 +364,7 @@ allowing for a simpler implementation.
 First remove the global spawn of WindData and instead add a WindData component to the ball entity:
 ```python
 def world(seed: int = 0) -> el.World:
-    world = el.World()
+    world = el.World(frame=el.Frame.ENU)
     # world.spawn(WindData(seed=jnp.int64(seed)), name="WindData")
     ball = world.spawn(
         [

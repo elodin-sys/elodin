@@ -332,7 +332,7 @@ import jax.numpy as jnp
 def spin(f: el.Force, inertia: el.Inertia) -> el.Force:
     return f + el.Force(torque=(inertia.mass() * jnp.array([0.0, 1.0, 0.0])))
 
-w = el.World()
+w = el.World(frame=el.Frame.ENU)
 
 mesh = w.insert_asset(el.Mesh.cuboid(0.1, 0.8, 0.3))
 material = w.insert_asset(el.Material.color(25.3, 18.4, 1.0))
@@ -433,7 +433,7 @@ SIM_TIME_STEP = 1.0 / 120.0
 def gravity(f: el.Force, inertia: el.Inertia) -> el.Force:
     return f + el.Force(linear=(inertia.mass() * jnp.array([0.0, -9.81, 0.0])))
 
-w = el.World()
+w = el.World(frame=el.Frame.ENU)
 w.spawn(el.Body(), name="example")
 sys = el.six_dof(sys=gravity, integrator=el.Integrator.Rk4)
 sim = w.run(sys, SIM_TIME_STEP)
