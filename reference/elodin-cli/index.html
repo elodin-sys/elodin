@@ -718,6 +718,31 @@
                             
                         </li>
                         
+                        <li>
+                            <a href="/reference/elodin-cli/#elodin-db-export-videos">elodin-db export-videos</a>
+                            
+                            <ul>
+                                
+                                <li>
+                                    <a href="/reference/elodin-cli/#arguments-12">Arguments</a>
+                                </li>
+                                
+                                <li>
+                                    <a href="/reference/elodin-cli/#options-10">Options</a>
+                                </li>
+                                
+                                <li>
+                                    <a href="/reference/elodin-cli/#how-video-gets-into-the-database">How video gets into the database</a>
+                                </li>
+                                
+                                <li>
+                                    <a href="/reference/elodin-cli/#example-8">Example</a>
+                                </li>
+                                
+                            </ul>
+                            
+                        </li>
+                        
                     </ul>
                     
                 </li>
@@ -748,6 +773,7 @@
 <li><a href="/reference/elodin-cli/#elodin-db-drop"><code>elodin-db drop</code>↴</a></li>
 <li><a href="/reference/elodin-cli/#elodin-db-info"><code>elodin-db info</code>↴</a></li>
 <li><a href="/reference/elodin-cli/#elodin-db-export"><code>elodin-db export</code>↴</a></li>
+<li><a href="/reference/elodin-cli/#elodin-db-export-videos"><code>elodin-db export-videos</code>↴</a></li>
 </ul>
 <hr />
 <h2 id="elodin"><code>elodin</code></h2>
@@ -807,6 +833,7 @@
 <li><code>drop</code> — Drop (delete) components from a database</li>
 <li><code>info</code> — Display information about a database</li>
 <li><code>export</code> — Export database contents to parquet, arrow-ipc, or csv files</li>
+<li><code>export-videos</code> — Export video message logs to MP4 files</li>
 </ul>
 <h2 id="elodin-db-run"><code>elodin-db run</code></h2>
 <p>Run the Elodin database server</p>
@@ -1245,6 +1272,43 @@
 </span><span class="z-source z-shell z-bash">
 </span><span class="z-source z-shell z-bash"><span class="z-comment z-line z-number-sign z-shell"><span class="z-punctuation z-definition z-comment z-begin z-shell">#</span></span><span class="z-comment z-line z-number-sign z-shell"> Export velocity components as flattened CSV</span><span class="z-comment z-line z-number-sign z-shell">
 </span></span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">elodin-db</span></span><span class="z-meta z-function-call z-arguments z-shell"> export ./my-database<span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> -</span>o</span> ./export<span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> --</span>format</span> csv<span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> --</span>flatten</span><span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> --</span>pattern</span> <span class="z-string z-quoted z-double z-shell"><span class="z-punctuation z-definition z-string z-begin z-shell">&quot;</span>*.velocity<span class="z-punctuation z-definition z-string z-end z-shell">&quot;</span></span></span>
+</span></code></pre>
+<h2 id="elodin-db-export-videos"><code>elodin-db export-videos</code></h2>
+<p>Export video message logs to MP4 files. This command reads H.264 video frames stored as timestamped messages in the database and muxes them into standards-compliant MP4 files (e.g. for playback in QuickTime, VLC, or other players).</p>
+<p><strong>Usage:</strong> <code>elodin-db export-videos [OPTIONS] --output &lt;OUTPUT&gt; &lt;PATH&gt;</code></p>
+<h6 id="arguments-12"><strong>Arguments</strong></h6>
+<ul>
+<li><code>&lt;PATH&gt;</code> — Path to the database directory</li>
+</ul>
+<h6 id="options-10"><strong>Options</strong></h6>
+<ul>
+<li>
+<p><code>-o</code>, <code>--output &lt;PATH&gt;</code> — Output directory for MP4 files (required)</p>
+</li>
+<li>
+<p><code>--pattern &lt;PATTERN&gt;</code> — Filter message logs by name glob (e.g. <code>test-*</code>). If not set, all video message logs in the database are exported.</p>
+</li>
+<li>
+<p><code>--fps &lt;FPS&gt;</code> — Default frame rate when the H.264 stream’s SPS (Sequence Parameter Set) has no timing info.</p>
+<p>Default value: <code>30</code></p>
+</li>
+</ul>
+<h6 id="how-video-gets-into-the-database"><strong>How video gets into the database</strong></h6>
+<p>Video is stored in Elodin DB as <strong>message logs</strong>: each frame is a timestamped binary payload (H.264 NAL units in Annex B form). Typical ingestion paths:</p>
+<ul>
+<li><strong>GStreamer + elodinsink</strong>: A GStreamer pipeline (e.g. <code>videotestsrc</code> → <code>x264enc</code> → <code>h264parse</code> → <code>elodinsink</code>) sends H.264 frames over TCP to the database. The <code>elodinsink</code> plugin uses a configurable message name (e.g. <code>test-video</code>) that becomes the log name. See the Video Streaming Example in the repository (<code>examples/video-stream/</code>) for a full setup.</li>
+<li><strong>Schematic</strong>: A <code>video_stream "name"</code> entry in the schematic ties a video tile in the Elodin Editor to that message name; the same name is used when exporting with <code>export-videos</code>.</li>
+</ul>
+<p>Resolution and frame rate are read from the H.264 SPS in the first keyframe; no re-encoding is done. Output files use fast-start layout for web and player compatibility.</p>
+<h6 id="example-8"><strong>Example</strong></h6>
+<pre data-lang="bash" class="language-bash z-code"><code class="language-bash" data-lang="bash"><span class="z-source z-shell z-bash"><span class="z-comment z-line z-number-sign z-shell"><span class="z-punctuation z-definition z-comment z-begin z-shell">#</span></span><span class="z-comment z-line z-number-sign z-shell"> Export all video streams to an output directory</span><span class="z-comment z-line z-number-sign z-shell">
+</span></span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">elodin-db</span></span><span class="z-meta z-function-call z-arguments z-shell"> export-videos ./my-database<span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> -</span>o</span> ./videos</span>
+</span><span class="z-source z-shell z-bash">
+</span><span class="z-source z-shell z-bash"><span class="z-comment z-line z-number-sign z-shell"><span class="z-punctuation z-definition z-comment z-begin z-shell">#</span></span><span class="z-comment z-line z-number-sign z-shell"> Export only streams matching a glob (e.g. names starting with &quot;test-&quot;)</span><span class="z-comment z-line z-number-sign z-shell">
+</span></span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">elodin-db</span></span><span class="z-meta z-function-call z-arguments z-shell"> export-videos ./my-database<span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> -</span>o</span> ./videos<span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> --</span>pattern</span> <span class="z-string z-quoted z-double z-shell"><span class="z-punctuation z-definition z-string z-begin z-shell">&quot;</span>test-*<span class="z-punctuation z-definition z-string z-end z-shell">&quot;</span></span></span>
+</span><span class="z-source z-shell z-bash">
+</span><span class="z-source z-shell z-bash"><span class="z-comment z-line z-number-sign z-shell"><span class="z-punctuation z-definition z-comment z-begin z-shell">#</span></span><span class="z-comment z-line z-number-sign z-shell"> Use a specific default FPS when SPS has no timing info</span><span class="z-comment z-line z-number-sign z-shell">
+</span></span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">elodin-db</span></span><span class="z-meta z-function-call z-arguments z-shell"> export-videos ./my-database<span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> -</span>o</span> ./videos<span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> --</span>fps</span> 60</span>
 </span></code></pre>
 
                   
