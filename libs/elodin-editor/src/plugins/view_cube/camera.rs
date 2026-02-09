@@ -12,6 +12,7 @@ use bevy::log::{info, warn};
 use bevy::math::Dir3;
 use bevy::prelude::*;
 use bevy_editor_cam::controller::component::EditorCam;
+use bevy_editor_cam::controller::motion::CurrentMotion;
 use bevy_editor_cam::extensions::look_to::LookToTrigger;
 use impeller2_bevy::EntityMap;
 use impeller2_wkt::ComponentValue;
@@ -496,7 +497,16 @@ pub fn handle_view_cube_editor(
         // Left-click on the ViewCube overlay also triggers EditorCam's PanZoom
         // (default_camera_inputs sees MouseButton::Left), so we must stop it
         // before sending our LookToTrigger.
+        let motion_before = editor_cam.current_motion.clone();
+        let anchor_depth_before = editor_cam.last_anchor_depth;
         editor_cam.end_move();
+        editor_cam.current_motion = CurrentMotion::Stationary;
+        info!(
+            camera = %entity,
+            motion_before = ?motion_before,
+            anchor_depth_before = anchor_depth_before,
+            "view cube: cleared editor motion before snap"
+        );
 
         // Camera local rotation is relative to its parent. ViewCube directions are expressed in
         // world axes, so convert world targets into camera-local directions before snapping.
@@ -927,31 +937,41 @@ fn update_anchor_depth_for_view_cube(
     let to_target = orbit_target - transform.translation;
     let forward = *transform.forward();
     // Measure depth along camera forward axis (what EditorCam expects).
-    // This avoids positive feedback loops from using full 3D distance when
-    // the camera is temporarily offset from the look target.
+    // We only trust projected depth when look_at is close to the camera centerline.
+    // Off-axis projected depths collapse toward zero and create unstable pivots.
     let projected_distance = to_target.dot(forward);
     let measured_distance = to_target.length();
     let previous_distance = editor_cam.last_anchor_depth.abs() as f32;
+    let alignment_ratio = if measured_distance.is_finite() && measured_distance > 1.0e-3 {
+        (projected_distance / measured_distance).clamp(-1.0, 1.0)
+    } else {
+        f32::NAN
+    };
 
-    let (mut distance, mut depth_strategy) =
-        if projected_distance.is_finite() && projected_distance > 1.0e-3 {
-            (projected_distance, "projected_forward")
-        } else if previous_distance > 1.0e-3 {
-            (previous_distance, "fallback_previous")
-        } else if measured_distance.is_finite() && measured_distance > 1.0e-3 {
-            (measured_distance, "fallback_measured")
-        } else {
-            (1.0, "fallback_default")
-        };
+    const MIN_ALIGNMENT_FOR_PROJECTED: f32 = 0.65;
+    const MIN_ORBIT_DISTANCE: f32 = 0.25;
 
-    // Limit abrupt growth to keep orbit radius stable between consecutive face snaps.
-    if previous_distance > 1.0e-3 {
-        let growth_limit = (previous_distance * 1.35).max(previous_distance + 0.25);
-        if distance > growth_limit {
-            distance = growth_limit;
-            depth_strategy = "clamped_growth";
-        }
-    }
+    let (mut distance, depth_strategy) = if projected_distance.is_finite()
+        && measured_distance.is_finite()
+        && projected_distance > 1.0e-3
+        && measured_distance > 1.0e-3
+        && alignment_ratio >= MIN_ALIGNMENT_FOR_PROJECTED
+    {
+        (projected_distance, "projected_forward_aligned")
+    } else if previous_distance > 1.0e-3 {
+        (previous_distance, "fallback_previous_off_axis")
+    } else if measured_distance.is_finite() && measured_distance > 1.0e-3 {
+        (measured_distance, "fallback_measured")
+    } else {
+        (1.0, "fallback_default")
+    };
+
+    let min_clamped = if distance < MIN_ORBIT_DISTANCE {
+        distance = MIN_ORBIT_DISTANCE;
+        true
+    } else {
+        false
+    };
 
     let new_depth = -(distance as f64);
 
@@ -963,8 +983,10 @@ fn update_anchor_depth_for_view_cube(
         target_source = target_source,
         projected_distance = projected_distance,
         measured_distance = measured_distance,
+        alignment_ratio = alignment_ratio,
         previous_distance = previous_distance,
         depth_strategy = depth_strategy,
+        min_clamped = min_clamped,
         orbit_distance = distance,
         old_anchor_depth = old_depth,
         new_anchor_depth = new_depth,
