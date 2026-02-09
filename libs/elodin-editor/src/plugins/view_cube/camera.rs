@@ -481,6 +481,7 @@ pub fn handle_view_cube_editor(
         update_anchor_depth_for_view_cube(
             entity,
             transform,
+            global_transform,
             &mut editor_cam,
             &viewports,
             &entity_map,
@@ -924,18 +925,26 @@ fn choose_min_rotation_up(
 fn update_anchor_depth_for_view_cube(
     camera: Entity,
     transform: &Transform,
+    global_transform: &GlobalTransform,
     editor_cam: &mut EditorCam,
     viewports: &Query<&crate::ui::inspector::viewport::Viewport, With<ViewCubeTargetCamera>>,
     entity_map: &EntityMap,
     values: &Query<&'static ComponentValue>,
 ) {
-    let (orbit_target, target_source) =
-        view_cube_orbit_target(camera, viewports, entity_map, values)
-            .map(|target| (target, "viewport.look_at"))
-            .unwrap_or((Vec3::ZERO, "world.origin"));
+    let Some(orbit_target) = view_cube_orbit_target(camera, viewports, entity_map, values) else {
+        info!(
+            camera = %camera,
+            previous_anchor_depth = editor_cam.last_anchor_depth,
+            "view cube: orbit target unavailable; keeping previous anchor depth"
+        );
+        return;
+    };
+    let target_source = "viewport.look_at";
 
-    let to_target = orbit_target - transform.translation;
-    let forward = *transform.forward();
+    let world_translation = global_transform.translation();
+    let world_rotation = global_transform.rotation();
+    let to_target = orbit_target - world_translation;
+    let forward = world_rotation * Vec3::NEG_Z;
     // Measure depth along camera forward axis (what EditorCam expects).
     // We only trust projected depth when look_at is close to the camera centerline.
     // Off-axis projected depths collapse toward zero and create unstable pivots.
@@ -981,6 +990,9 @@ fn update_anchor_depth_for_view_cube(
         camera = %camera,
         orbit_target = ?orbit_target,
         target_source = target_source,
+        camera_local_translation = ?transform.translation,
+        camera_world_translation = ?world_translation,
+        camera_world_forward = ?forward,
         projected_distance = projected_distance,
         measured_distance = measured_distance,
         alignment_ratio = alignment_ratio,
