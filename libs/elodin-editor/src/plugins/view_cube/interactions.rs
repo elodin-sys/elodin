@@ -214,7 +214,9 @@ fn choose_min_rotation_up_world(
         if facing_world.dot(up_world).abs() > 0.99 {
             continue;
         }
-        let target_rotation = Transform::default().looking_to(facing_world, up_world).rotation;
+        let target_rotation = Transform::default()
+            .looking_to(facing_world, up_world)
+            .rotation;
         let angle = camera_rotation.angle_between(target_rotation).abs();
         let replace = match best {
             Some((_, _, best_angle)) => angle + 1.0e-6 < best_angle,
