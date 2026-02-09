@@ -193,9 +193,9 @@ fn compute_hover_targets(
 
     let (_, cam_rotation, _) = camera_global.to_scale_rotation_translation();
     let camera_dir_world = cam_rotation * Vec3::Z;
-    let dominant_face = dominant_face_from_camera_dir(camera_dir_world);
-    let opposite_face = opposite_face(dominant_face);
-    let edge_group = edges_for_face(opposite_face);
+    let (frame_face, secondary_face, frame_dot, secondary_dot) =
+        edge_under_cursor.active_frame_face(camera_dir_world);
+    let edge_group = edges_for_face(frame_face);
 
     let mut targets = Vec::new();
     for (entity, element) in cube_elements.iter() {
@@ -218,46 +218,16 @@ fn compute_hover_targets(
     info!(
         hover_edge = ?edge_under_cursor,
         camera_dir_world = ?camera_dir_world,
-        dominant_face = ?dominant_face,
-        opposite_face = ?opposite_face,
+        frame_face = ?frame_face,
+        frame_face_dot = frame_dot,
+        secondary_face = ?secondary_face,
+        secondary_face_dot = secondary_dot,
         edge_group = ?edge_group,
         highlighted_edges = targets.len(),
         "view cube: edge hover group"
     );
 
     targets
-}
-
-fn dominant_face_from_camera_dir(camera_dir_world: Vec3) -> FaceDirection {
-    let abs = camera_dir_world.abs();
-    if abs.x >= abs.y && abs.x >= abs.z {
-        if camera_dir_world.x >= 0.0 {
-            FaceDirection::East
-        } else {
-            FaceDirection::West
-        }
-    } else if abs.y >= abs.z {
-        if camera_dir_world.y >= 0.0 {
-            FaceDirection::Up
-        } else {
-            FaceDirection::Down
-        }
-    } else if camera_dir_world.z >= 0.0 {
-        FaceDirection::North
-    } else {
-        FaceDirection::South
-    }
-}
-
-fn opposite_face(face: FaceDirection) -> FaceDirection {
-    match face {
-        FaceDirection::East => FaceDirection::West,
-        FaceDirection::West => FaceDirection::East,
-        FaceDirection::North => FaceDirection::South,
-        FaceDirection::South => FaceDirection::North,
-        FaceDirection::Up => FaceDirection::Down,
-        FaceDirection::Down => FaceDirection::Up,
-    }
 }
 
 fn edges_for_face(face: FaceDirection) -> [EdgeDirection; 4] {
