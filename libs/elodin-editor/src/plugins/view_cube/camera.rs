@@ -713,6 +713,8 @@ pub fn handle_view_cube_editor(
             let angle = config.rotation_increment;
             let forward = *transform.forward();
             let up = *transform.up();
+            let forward_world = parent_rotation * forward;
+            let up_world = parent_rotation * up;
 
             let (new_forward, new_up) = match arrow {
                 RotationArrow::Left => {
@@ -748,10 +750,15 @@ pub fn handle_view_cube_editor(
             {
                 debug!(
                     arrow = ?arrow,
+                    parent_rotation = ?parent_rotation,
                     forward = ?forward,
                     up = ?up,
+                    forward_world = ?forward_world,
+                    up_world = ?up_world,
                     new_forward = ?new_forward,
                     new_up = ?new_up,
+                    new_forward_world = ?(parent_rotation * new_forward),
+                    new_up_world = ?(parent_rotation * new_up),
                     "view cube: arrow snap"
                 );
                 look_to.write(LookToTrigger {
@@ -1028,4 +1035,49 @@ fn view_cube_orbit_target(
     let val = compiled_expr.execute(entity_map, values).ok()?;
     let world_pos = val.as_world_pos()?;
     Some(world_pos.bevy_pos().as_vec3())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn angle_to_target_rotation_default_is_zero() {
+        let transform = Transform::default();
+        let facing = Dir3::new(Vec3::NEG_Z).expect("unit vector");
+        let up = Dir3::new(Vec3::Y).expect("unit vector");
+        let angle = angle_to_target_rotation(&transform, facing, up);
+        assert!(
+            angle.abs() < 1.0e-6,
+            "expected ~0 for identity orientation, got {}",
+            angle
+        );
+    }
+
+    #[test]
+    fn angle_to_target_rotation_opposite_forward_is_pi() {
+        let transform = Transform::default();
+        let facing = Dir3::new(Vec3::Z).expect("unit vector");
+        let up = Dir3::new(Vec3::Y).expect("unit vector");
+        let angle = angle_to_target_rotation(&transform, facing, up);
+        assert!(
+            (angle - std::f32::consts::PI).abs() < 1.0e-5,
+            "expected PI for opposite forward, got {}",
+            angle
+        );
+    }
+
+    #[test]
+    fn choose_min_rotation_up_keeps_up_non_parallel_to_facing() {
+        let transform = Transform::default();
+        let facing = Dir3::new(Vec3::Y).expect("unit vector");
+        let (up, _, _, _, _, candidates) =
+            choose_min_rotation_up(&transform, Quat::IDENTITY, facing);
+        assert!(candidates > 0, "expected at least one valid up candidate");
+        assert!(
+            facing.dot(*up).abs() < 0.99,
+            "up must not be parallel to facing (dot={})",
+            facing.dot(*up)
+        );
+    }
 }
