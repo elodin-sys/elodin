@@ -8,7 +8,8 @@
 
 use bevy::camera::Viewport;
 use bevy::camera::visibility::RenderLayers;
-use bevy::log::{info, warn};
+use bevy::ecs::system::SystemParam;
+use bevy::log::{debug, warn};
 use bevy::math::Dir3;
 use bevy::prelude::*;
 use bevy_editor_cam::controller::component::EditorCam;
@@ -456,6 +457,18 @@ pub fn set_view_cube_viewport_editor(
 /// Uses `LookToTrigger` from bevy_editor_cam (same approach as navigation_gizmo)
 /// instead of modifying the Transform directly. Direct Transform changes are
 /// overridden by bevy_editor_cam's internal state management.
+#[derive(SystemParam)]
+pub(super) struct ViewCubeEditorLookup<'w, 's> {
+    viewports: Query<
+        'w,
+        's,
+        &'static crate::ui::inspector::viewport::Viewport,
+        With<ViewCubeTargetCamera>,
+    >,
+    entity_map: Res<'w, EntityMap>,
+    values: Query<'w, 's, &'static ComponentValue>,
+}
+
 pub fn handle_view_cube_editor(
     mut events: MessageReader<ViewCubeEvent>,
     view_cube_query: Query<&ViewCubeLink, With<ViewCubeRoot>>,
@@ -463,9 +476,7 @@ pub fn handle_view_cube_editor(
         (Entity, &Transform, &GlobalTransform, &mut EditorCam),
         With<ViewCubeTargetCamera>,
     >,
-    viewports: Query<&crate::ui::inspector::viewport::Viewport, With<ViewCubeTargetCamera>>,
-    entity_map: Res<EntityMap>,
-    values: Query<&'static ComponentValue>,
+    lookup: ViewCubeEditorLookup,
     config: Res<ViewCubeConfig>,
     mut look_to: MessageWriter<LookToTrigger>,
 ) {
@@ -483,12 +494,12 @@ pub fn handle_view_cube_editor(
             transform,
             global_transform,
             &mut editor_cam,
-            &viewports,
-            &entity_map,
-            &values,
+            &lookup.viewports,
+            lookup.entity_map.as_ref(),
+            &lookup.values,
         );
 
-        info!(
+        debug!(
             event = ?event,
             camera = %entity,
             "view cube: received event"
@@ -502,7 +513,7 @@ pub fn handle_view_cube_editor(
         let anchor_depth_before = editor_cam.last_anchor_depth;
         editor_cam.end_move();
         editor_cam.current_motion = CurrentMotion::Stationary;
-        info!(
+        debug!(
             camera = %entity,
             motion_before = ?motion_before,
             anchor_depth_before = anchor_depth_before,
@@ -536,7 +547,7 @@ pub fn handle_view_cube_editor(
                     camera: entity,
                 };
                 let rotation_angle = angle_to_trigger(transform, &trigger);
-                info!(
+                debug!(
                     target_kind = "face",
                     selection_policy = "face_world_to_local_min_total_rotation",
                     direction = ?direction,
@@ -588,7 +599,7 @@ pub fn handle_view_cube_editor(
                     camera: entity,
                 };
                 let rotation_angle = angle_to_trigger(transform, &trigger);
-                info!(
+                debug!(
                     target_kind = "corner",
                     selection_policy = "corner_world_to_local_min_total_rotation",
                     position = ?position,
@@ -651,7 +662,7 @@ pub fn handle_view_cube_editor(
                     target_up_direction: chosen.chosen_up,
                     camera: entity,
                 };
-                info!(
+                debug!(
                     target_kind = "edge",
                     selection_policy = "edge_to_opposite_face_min_total_rotation",
                     edge_direction = ?direction,
@@ -735,7 +746,7 @@ pub fn handle_view_cube_editor(
             if let Ok(facing) = Dir3::new(new_forward)
                 && let Ok(up_dir) = Dir3::new(new_up)
             {
-                info!(
+                debug!(
                     arrow = ?arrow,
                     forward = ?forward,
                     up = ?up,
@@ -932,7 +943,7 @@ fn update_anchor_depth_for_view_cube(
     values: &Query<&'static ComponentValue>,
 ) {
     let Some(orbit_target) = view_cube_orbit_target(camera, viewports, entity_map, values) else {
-        info!(
+        debug!(
             camera = %camera,
             previous_anchor_depth = editor_cam.last_anchor_depth,
             "view cube: orbit target unavailable; keeping previous anchor depth"
@@ -986,7 +997,7 @@ fn update_anchor_depth_for_view_cube(
 
     let old_depth = editor_cam.last_anchor_depth;
     editor_cam.last_anchor_depth = new_depth;
-    info!(
+    debug!(
         camera = %camera,
         orbit_target = ?orbit_target,
         target_source = target_source,
