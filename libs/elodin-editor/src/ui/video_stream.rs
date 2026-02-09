@@ -20,7 +20,7 @@ use impeller2_wkt::{CurrentTimestamp, FixedRateMsgStream, FixedRateOp};
 use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::{self};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use super::{
     PaneName,
@@ -42,6 +42,7 @@ pub struct VideoStreamWidgetArgs {
 #[derive(Component)]
 pub struct VideoStream {
     pub msg_id: [u8; 2],
+    pub msg_name: String,
     pub current_frame: Option<Image>,
     pub frame_timestamp: Option<Timestamp>,
     pub texture_handle: Option<TextureHandle>,
@@ -58,6 +59,7 @@ impl Default for VideoStream {
     fn default() -> Self {
         Self {
             msg_id: [0, 0],
+            msg_name: String::new(),
             current_frame: None,
             texture_handle: None,
             size: Vec2::ZERO,
@@ -69,11 +71,30 @@ impl Default for VideoStream {
     }
 }
 
+/// Number of frames to wait before sending the stream request.
+/// This prevents blocking during initial schematic loading.
+const FRAMES_BEFORE_CONNECT: u32 = 30;
+
+/// Timeout in seconds before considering a stream disconnected.
+const STREAM_TIMEOUT_SECS: f32 = 5.0;
+
+/// Delay before attempting to reconnect after disconnect.
+const RECONNECT_DELAY: Duration = Duration::from_secs(2);
+
 #[derive(Default, Clone)]
 pub enum StreamState {
+    /// Initial state - waiting to start connection process
     #[default]
     None,
+    /// Deferring connection to avoid blocking during initialization
+    WaitingToConnect { frames_waited: u32 },
+    /// Stream request sent, waiting for data
+    Connecting { since: Instant },
+    /// Actively receiving video frames
     Streaming,
+    /// Stream disconnected, will retry after specified time
+    Disconnected { retry_after: Instant },
+    /// Unrecoverable error
     Error(String),
 }
 
@@ -111,9 +132,18 @@ fn decode_video(
             let (width, height) = (width as f64, height as f64);
             let desired_width = frame_width.load(atomic::Ordering::Relaxed);
             let aspect_ratio = height / width;
-            let new_width = width.min(desired_width as f64);
+            // Use original dimensions if desired_width is 0 (not yet set by UI)
+            let new_width = if desired_width == 0 {
+                width
+            } else {
+                width.min(desired_width as f64)
+            };
             let new_height = (new_width * aspect_ratio) as usize;
             let new_width = new_width as usize;
+
+            if new_width == 0 || new_height == 0 {
+                continue;
+            }
 
             let mut pixels = vec![0; new_width * new_height * 4];
 
@@ -147,21 +177,60 @@ fn decode_video(
     image_tx: flume::Sender<(Image, Timestamp)>,
 ) {
     let mut video_toolbox = video_toolbox::VideoToolboxDecoder::new(frame_width).unwrap();
+    let mut frame_count = 0u64;
 
     while let Ok((packet, timestamp)) = packet_rx.recv() {
-        if let Ok(Some(frame)) = video_toolbox.decode(&packet, 0) {
-            let image = Image::new(
-                Extent3d {
-                    width: frame.width as u32,
-                    height: frame.height as u32,
-                    depth_or_array_layers: 1,
-                },
-                TextureDimension::D2,
-                frame.rgba,
-                bevy_render::render_resource::TextureFormat::Rgba8UnormSrgb,
-                RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
+        frame_count += 1;
+        if frame_count <= 3 {
+            // Log NAL unit analysis for first few packets
+            let nal_units = video_toolbox::find_nal_units(&packet);
+            let nal_info: Vec<String> = nal_units
+                .iter()
+                .map(|n| format!("{:?}({}B)", n.nal_type, n.data.len()))
+                .collect();
+            bevy::log::info!(
+                "VideoToolbox: packet {} size={} NALs=[{}]",
+                frame_count,
+                packet.len(),
+                nal_info.join(", ")
             );
-            let _ = image_tx.send((image, timestamp));
+        }
+        match video_toolbox.decode(&packet, 0) {
+            Ok(Some(frame)) => {
+                if frame_count <= 3 {
+                    bevy::log::info!(
+                        "VideoToolbox: frame {} decoded {}x{}",
+                        frame_count,
+                        frame.width,
+                        frame.height
+                    );
+                }
+                let image = Image::new(
+                    Extent3d {
+                        width: frame.width as u32,
+                        height: frame.height as u32,
+                        depth_or_array_layers: 1,
+                    },
+                    TextureDimension::D2,
+                    frame.rgba,
+                    bevy_render::render_resource::TextureFormat::Rgba8UnormSrgb,
+                    RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
+                );
+                let _ = image_tx.send((image, timestamp));
+            }
+            Ok(None) => {
+                if frame_count <= 3 {
+                    bevy::log::info!(
+                        "VideoToolbox: packet {} produced no frame (parameter sets or empty)",
+                        frame_count
+                    );
+                }
+            }
+            Err(e) => {
+                if frame_count <= 10 {
+                    bevy::log::warn!("VideoToolbox decode error (frame {}): {}", frame_count, e);
+                }
+            }
         }
     }
 }
@@ -221,6 +290,29 @@ pub struct VideoStreamWidget<'w, 's> {
     window_settings: Query<'w, 's, &'static bevy_egui::EguiContextSettings>,
 }
 
+/// Send a FixedRateMsgStream request to start receiving video frames
+fn send_stream_request(commands: &mut Commands, entity: Entity, msg_id: [u8; 2], stream_id: u64) {
+    commands.send_req_reply_raw(
+        FixedRateMsgStream {
+            msg_id,
+            fixed_rate: FixedRateOp {
+                stream_id,
+                behavior: Default::default(),
+            },
+        },
+        move |InRef(pkt): InRef<OwnedPacket<PacketGrantR>>,
+              mut decoders: Query<&mut VideoDecoderHandle>| {
+            if let OwnedPacket::Msg(msg_buf) = pkt
+                && let Ok(mut decoder) = decoders.get_mut(entity)
+                && let Some(timestamp) = msg_buf.timestamp
+            {
+                decoder.process_frame(timestamp, &msg_buf.buf);
+            }
+            false
+        },
+    );
+}
+
 impl super::widgets::WidgetSystem for VideoStreamWidget<'_, '_> {
     type Args = VideoStreamWidgetArgs;
     type Output = ();
@@ -243,32 +335,74 @@ impl super::widgets::WidgetSystem for VideoStreamWidget<'_, '_> {
             return;
         };
 
-        if let StreamState::Streaming = stream.state {
-            decoder.render_frame(&mut stream);
-            stream.last_update = Instant::now();
-        }
+        // State machine for video stream connection
+        let stream_id = state.stream_id.0;
+        let msg_id = stream.msg_id;
 
-        if let StreamState::None = stream.state {
-            stream.state = StreamState::Streaming;
-            state.commands.send_req_reply_raw(
-                FixedRateMsgStream {
-                    msg_id: stream.msg_id,
-                    fixed_rate: FixedRateOp {
-                        stream_id: state.stream_id.0,
-                        behavior: Default::default(),
-                    },
-                },
-                move |InRef(pkt): InRef<OwnedPacket<PacketGrantR>>,
-                      mut decoders: Query<&mut VideoDecoderHandle>| {
-                    if let OwnedPacket::Msg(msg_buf) = pkt
-                        && let Ok(mut decoder) = decoders.get_mut(entity)
-                        && let Some(timestamp) = msg_buf.timestamp
-                    {
-                        decoder.process_frame(timestamp, &msg_buf.buf);
-                    }
-                    false
-                },
-            );
+        match &mut stream.state {
+            StreamState::None => {
+                // Start the deferred connection process
+                stream.state = StreamState::WaitingToConnect { frames_waited: 0 };
+            }
+            StreamState::WaitingToConnect { frames_waited } => {
+                // Wait for the specified number of frames before connecting
+                *frames_waited += 1;
+                if *frames_waited >= FRAMES_BEFORE_CONNECT {
+                    stream.state = StreamState::Connecting {
+                        since: Instant::now(),
+                    };
+                    send_stream_request(&mut state.commands, entity, msg_id, stream_id);
+                }
+            }
+            StreamState::Connecting { since } => {
+                let since = *since;
+                // Check if we've received any frames (transition to Streaming)
+                decoder.render_frame(&mut stream);
+                if stream.frame_count > 0 {
+                    stream.state = StreamState::Streaming;
+                    stream.last_update = Instant::now();
+                } else if since.elapsed().as_secs_f32() > STREAM_TIMEOUT_SECS {
+                    // No frames arrived within the timeout — the connection
+                    // request may have been orphaned (e.g. DB restart or TCP
+                    // drop). Transition to Disconnected so the reconnect logic
+                    // can re-send the stream request.
+                    stream.state = StreamState::Disconnected {
+                        retry_after: Instant::now() + RECONNECT_DELAY,
+                    };
+                }
+            }
+            StreamState::Streaming => {
+                // Actively receiving - render frames and check for timeout
+                let prev_frame_count = stream.frame_count;
+                decoder.render_frame(&mut stream);
+                if stream.frame_count > prev_frame_count {
+                    stream.last_update = Instant::now();
+                }
+
+                // Check for stream timeout (no frames received for a while)
+                if stream.last_update.elapsed().as_secs_f32() > STREAM_TIMEOUT_SECS {
+                    stream.state = StreamState::Disconnected {
+                        retry_after: Instant::now() + RECONNECT_DELAY,
+                    };
+                }
+            }
+            StreamState::Disconnected { retry_after } => {
+                // After a DB restart or TCP reconnection the original req_id
+                // handler is orphaned — the DB-side task is gone and the
+                // editor-side callback will never be invoked on the new
+                // connection. We must re-send the FixedRateMsgStream request
+                // so the DB starts a fresh streaming task for us.
+                if Instant::now() >= *retry_after {
+                    stream.frame_count = 0;
+                    stream.state = StreamState::Connecting {
+                        since: Instant::now(),
+                    };
+                    send_stream_request(&mut state.commands, entity, msg_id, stream_id);
+                }
+            }
+            StreamState::Error(_) => {
+                // Error state - no automatic recovery
+            }
         }
 
         let max_rect = ui.max_rect();
@@ -306,7 +440,27 @@ impl super::widgets::WidgetSystem for VideoStreamWidget<'_, '_> {
         match &stream.state {
             StreamState::None => {
                 ui.centered_and_justified(|ui| {
-                    ui.label("No video stream. Please send a valid H264 stream");
+                    ui.label("Initializing...");
+                });
+            }
+            StreamState::WaitingToConnect { frames_waited } => {
+                // Set decoder width early so frames are decoded at proper resolution
+                decoder
+                    .width
+                    .store(width as usize, atomic::Ordering::Relaxed);
+                ui.centered_and_justified(|ui| {
+                    let progress =
+                        (*frames_waited as f32 / FRAMES_BEFORE_CONNECT as f32 * 100.0) as u32;
+                    ui.label(format!("Initializing video stream... {}%", progress));
+                });
+            }
+            StreamState::Connecting { .. } => {
+                // Set decoder width so frames are decoded at proper resolution
+                decoder
+                    .width
+                    .store(width as usize, atomic::Ordering::Relaxed);
+                ui.centered_and_justified(|ui| {
+                    ui.label("Connecting to video stream...");
                 });
             }
             StreamState::Streaming => {
@@ -337,6 +491,20 @@ impl super::widgets::WidgetSystem for VideoStreamWidget<'_, '_> {
                         ),
                     );
                 }
+            }
+            StreamState::Disconnected { retry_after } => {
+                let secs_until_retry = retry_after
+                    .saturating_duration_since(Instant::now())
+                    .as_secs();
+                ui.centered_and_justified(|ui| {
+                    ui.colored_label(
+                        get_scheme().highlight,
+                        format!(
+                            "Stream disconnected. Reconnecting in {}s...",
+                            secs_until_retry
+                        ),
+                    );
+                });
             }
             StreamState::Error(error) => {
                 ui.centered_and_justified(|ui| {

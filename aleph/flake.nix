@@ -66,6 +66,7 @@
       msp-osd = ./modules/msp-osd.nix;
       udp-component-broadcast = ./modules/udp-component-broadcast.nix;
       udp-component-receive = ./modules/udp-component-receive.nix;
+      elodinsink = ./modules/elodinsink.nix;
     };
     devModules = {
       aleph-dev = ./modules/aleph-dev.nix;

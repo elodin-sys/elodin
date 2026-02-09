@@ -60,6 +60,8 @@ pub mod cancellation;
 pub mod drop;
 mod error;
 pub mod export;
+#[cfg(feature = "video-export")]
+pub mod export_videos;
 pub mod fix_timestamps;
 pub mod merge;
 mod msg_log;
@@ -1449,6 +1451,7 @@ async fn handle_packet<A: AsyncWrite + 'static>(
     tx: &mut PacketTx<A>,
 ) -> Result<(), Error> {
     trace!(?pkt, "handling pkt");
+
     match &pkt {
         Packet::Msg(m) if m.id == VTableMsg::ID => {
             let vtable = m.parse::<VTableMsg>()?;
@@ -1491,6 +1494,9 @@ async fn handle_packet<A: AsyncWrite + 'static>(
                 }
                 if let Some(frequency) = set_stream_state.frequency {
                     state.set_frequency(frequency);
+                }
+                if let Some(time_step) = set_stream_state.time_step {
+                    state.set_time_step(time_step);
                 }
                 Ok(())
             })?;
@@ -1603,7 +1609,7 @@ async fn handle_packet<A: AsyncWrite + 'static>(
                     let last_updated = db.last_updated.latest();
                     {
                         match tx.send_msg(&LastUpdated(last_updated)).await {
-                            Err(err) if err.is_stream_closed() => {}
+                            Err(err) if err.is_stream_closed() => return,
                             Err(err) => {
                                 warn!(?err, "failed to send packet");
                                 return;
@@ -1923,6 +1929,11 @@ async fn handle_packet<A: AsyncWrite + 'static>(
         Packet::Msg(m) if m.id == SetMsgMetadata::ID => {
             let _snapshot_guard = db.snapshot_barrier.enter_writer();
             let SetMsgMetadata { id, metadata } = m.parse::<SetMsgMetadata>()?;
+            info!(
+                msg.name = %metadata.name,
+                msg.id = ?id,
+                "setting msg metadata"
+            );
             db.with_state_mut(|s| s.set_msg_metadata(id, metadata, &db.path))?;
             drop(_snapshot_guard);
         }
@@ -2074,6 +2085,10 @@ pub async fn handle_fixed_rate_msg_stream<A: AsyncWrite>(
         let start = Instant::now();
         let current_timestamp = stream_state.current_timestamp();
         let Some((msg_timestamp, msg)) = msg_log.get_nearest(current_timestamp) else {
+            // Wait for data to arrive in the msg_log.
+            // This yields to the runtime (preventing scheduler starvation) without
+            // advancing the stream timestamp, so we don't skip past incoming video frames.
+            msg_log.wait().await;
             continue;
         };
 
@@ -2138,6 +2153,11 @@ impl FixedRateStreamState {
 
     fn set_frequency(&self, frequency: u64) {
         self.frequency.store(frequency, atomic::Ordering::SeqCst);
+    }
+
+    fn set_time_step(&self, time_step: Duration) {
+        self.time_step
+            .store(time_step.as_nanos() as u64, atomic::Ordering::SeqCst);
     }
 
     fn time_step(&self) -> Duration {

@@ -7,6 +7,7 @@ use impeller2::{
     },
     vtable::{Field, Op, VTable},
 };
+use postcard_schema::Schema as PostcardSchema;
 use postcard_schema::schema::owned::OwnedNamedType;
 use serde::{Deserialize, Serialize};
 use std::{borrow::Cow, path::PathBuf, time::Duration};
@@ -517,6 +518,19 @@ impl Msg for ErrorResponse {
 
 impl Request for SQLQuery {
     type Reply<B: IoBuf + Clone> = ArrowIPC<'static>;
+}
+
+/// Schema identity for raw-byte message streams (e.g. H.264 NAL).
+/// Used as `MsgMetadata.schema` when payload is opaque bytes, not postcard-encoded.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, postcard_schema::Schema)]
+pub struct OpaqueBytes {
+    pub data: Vec<u8>,
+}
+
+/// Returns the schema for [`OpaqueBytes`], for use in [`MsgMetadata`] when the stream
+/// payload is raw bytes (e.g. H.264 Annex B).
+pub fn opaque_bytes_msg_schema() -> OwnedNamedType {
+    <OpaqueBytes as PostcardSchema>::SCHEMA.into()
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]

@@ -45,6 +45,12 @@ enum Commands {
     Info(InfoArgs),
     #[command(about = "Export database contents to parquet, arrow-ipc, or csv files")]
     Export(ExportArgs),
+    #[cfg(feature = "video-export")]
+    #[command(
+        name = "export-videos",
+        about = "Export video message logs to MP4 files"
+    )]
+    ExportVideos(ExportVideosArgs),
 }
 
 #[derive(clap::Args, Clone, Debug)]
@@ -200,6 +206,23 @@ struct ExportArgs {
     flatten: bool,
     #[clap(long, help = "Filter components by glob pattern (e.g., 'NavNED.*')")]
     pattern: Option<String>,
+}
+
+#[cfg(feature = "video-export")]
+#[derive(clap::Args, Clone, Debug)]
+struct ExportVideosArgs {
+    #[clap(help = "Path to the database directory")]
+    path: PathBuf,
+    #[clap(long, short, help = "Output directory for MP4 files")]
+    output: PathBuf,
+    #[clap(long, help = "Filter message logs by name glob (e.g., 'test-*')")]
+    pattern: Option<String>,
+    #[clap(
+        long,
+        default_value = "30",
+        help = "Frame rate when SPS has no timing_info"
+    )]
+    fps: u32,
 }
 
 #[derive(ValueEnum, Clone, Copy, Debug)]
@@ -415,6 +438,11 @@ async fn main() -> miette::Result<()> {
             elodin_db::cancellation::install_signal_handlers();
 
             elodin_db::export::run(path, output, format, flatten, pattern).into_diagnostic()
+        }
+        #[cfg(feature = "video-export")]
+        Commands::ExportVideos(args) => {
+            elodin_db::export_videos::run(args.path, args.output, args.pattern, args.fps)
+                .into_diagnostic()
         }
     }
 }

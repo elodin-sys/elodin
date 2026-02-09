@@ -22,7 +22,7 @@ use bevy_editor_cam::controller::{component::EditorCam, motion::CurrentMotion};
 use bevy_infinite_grid::InfiniteGrid;
 use egui_tiles::{Tile, TileId};
 use fuzzy_matcher::{FuzzyMatcher, skim::SkimMatcherV2};
-use impeller2::types::{Timestamp, msg_id};
+use impeller2::types::Timestamp;
 use impeller2_bevy::{CommandsExt, ComponentPathRegistry, CurrentStreamId, EntityMap, PacketTx};
 use impeller2_kdl::{
     ToKdl,
@@ -715,9 +715,9 @@ pub fn create_video_stream(tile_id: Option<TileId>) -> PaletteItem {
                         else {
                             return PaletteEvent::Error("Secondary window unavailable".to_string());
                         };
-                        let msg_name = msg_name.trim();
+                        let msg_name = msg_name.trim().to_string();
                         let label = format!("Video Stream {}", msg_name);
-                        tile_state.create_video_stream_tile(msg_id(msg_name), label, tile_id);
+                        tile_state.create_video_stream_tile(msg_name, label, tile_id);
                         PaletteEvent::Exit
                     },
                 )

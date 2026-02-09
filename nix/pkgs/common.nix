@@ -12,6 +12,7 @@
         "/apps"
         "/libs"
         "/fsw"
+        "/examples"
         "/.config"
       ];
       matchesSuffix = lib.any (suffix: lib.hasSuffix suffix base) [

@@ -65,6 +65,7 @@ fn serialize_panel<T>(panel: &Panel<T>) -> KdlNode {
             node
         }
         Panel::Dashboard(dashboard) => serialize_dashboard(dashboard),
+        Panel::VideoStream(video_stream) => serialize_video_stream(video_stream),
     }
 }
 
@@ -76,6 +77,14 @@ fn push_optional_name_prop(node: &mut KdlNode, name: Option<&str>) {
     if let Some(name) = name {
         push_name_prop(node, name);
     }
+}
+
+fn serialize_video_stream(video_stream: &VideoStream) -> KdlNode {
+    let mut node = KdlNode::new("video_stream");
+    node.entries_mut()
+        .push(KdlEntry::new(video_stream.msg_name.as_str()));
+    push_optional_name_prop(&mut node, video_stream.name.as_deref());
+    node
 }
 
 fn serialize_split<T>(split: &Split<T>, is_horizontal: bool) -> KdlNode {

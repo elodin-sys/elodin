@@ -22,13 +22,18 @@ mod elodinsink {
     use gstreamer::{self as gst, glib};
     use gstreamer::{prelude::*, subclass::prelude::*};
     use gstreamer_base::subclass::prelude::*;
-    use impeller2::types::{msg_id, LenPacket, Timestamp};
+    use impeller2::types::{msg_id, IntoLenPacket, LenPacket, Timestamp};
+    use impeller2_wkt::{
+        opaque_bytes_msg_schema, LastUpdated, MsgMetadata, SetMsgMetadata, SubscribeLastUpdated,
+    };
     use std::{
-        io::Write,
+        io::{Read, Write},
         net::{SocketAddr, TcpStream},
         str::FromStr,
         sync::Mutex,
     };
+
+    const PACKET_HEADER_LEN: usize = 4; // ty (1) + id (2) + req_id (1)
 
     glib::wrapper! {
         pub struct ElodinSink(ObjectSubclass<imp::ElodinSink>)
@@ -60,6 +65,8 @@ mod elodinsink {
             pub db_addr: SocketAddr,
             pub connection: Option<TcpStream>,
             pub msg_name: String,
+            pub base_timestamp: Option<Timestamp>, // DB's last_updated at connect time
+            pub first_pts: Option<gst::ClockTime>, // First buffer PTS after connect
         }
 
         impl Default for ElodinSinkState {
@@ -68,6 +75,8 @@ mod elodinsink {
                     db_addr: SocketAddr::new([127, 0, 0, 1].into(), 2240),
                     connection: None,
                     msg_name: "video".to_string(),
+                    base_timestamp: None,
+                    first_pts: None,
                 }
             }
         }
@@ -77,15 +86,100 @@ mod elodinsink {
                 let mut state = self.state.lock().unwrap();
 
                 state.connection = None;
+                state.base_timestamp = None;
+                state.first_pts = None; // Reset PTS anchor on reconnect
 
                 match TcpStream::connect(state.db_addr) {
-                    Ok(stream) => {
+                    Ok(mut stream) => {
+                        // Query last_updated timestamp (blocking, before setting non-blocking)
+                        let pkt = (&SubscribeLastUpdated).into_len_packet();
+                        stream.write_all(&pkt.inner).map_err(|e| {
+                            gst::error_msg!(
+                                gst::ResourceError::Failed,
+                                ["Failed to send SubscribeLastUpdated: {}", e]
+                            )
+                        })?;
+
+                        // Read response length (4 bytes, u32 LE)
+                        let mut len_buf = [0u8; 4];
+                        stream.read_exact(&mut len_buf).map_err(|e| {
+                            gst::error_msg!(
+                                gst::ResourceError::Failed,
+                                ["Failed to read LastUpdated length: {}", e]
+                            )
+                        })?;
+                        let pkt_len = u32::from_le_bytes(len_buf) as usize;
+
+                        // Read the rest of the packet (header + body)
+                        let mut pkt_buf = vec![0u8; pkt_len];
+                        stream.read_exact(&mut pkt_buf).map_err(|e| {
+                            gst::error_msg!(
+                                gst::ResourceError::Failed,
+                                ["Failed to read LastUpdated packet: {}", e]
+                            )
+                        })?;
+
+                        // Skip packet header (4 bytes), deserialize body with postcard
+                        if pkt_len < PACKET_HEADER_LEN {
+                            return Err(gst::error_msg!(
+                                gst::ResourceError::Failed,
+                                [
+                                    "LastUpdated packet too short: {} bytes (need at least {})",
+                                    pkt_len,
+                                    PACKET_HEADER_LEN
+                                ]
+                            ));
+                        }
+                        let body = &pkt_buf[PACKET_HEADER_LEN..];
+                        let last_updated: LastUpdated =
+                            postcard::from_bytes(body).map_err(|e| {
+                                gst::error_msg!(
+                                    gst::ResourceError::Failed,
+                                    ["Failed to deserialize LastUpdated: {}", e]
+                                )
+                            })?;
+                        let base_timestamp = last_updated.0;
+
+                        gst::info!(
+                            gst::CAT_DEFAULT,
+                            "Connected to DB, base_timestamp = {}",
+                            base_timestamp.0
+                        );
+
+                        // Set message metadata (friendly name) so export-videos and DB have it.
+                        // Sent on every connect (including reconnect); DB overwrites idempotently.
+                        let set_msg_metadata = SetMsgMetadata {
+                            id: msg_id(&state.msg_name),
+                            metadata: MsgMetadata {
+                                name: state.msg_name.clone(),
+                                schema: opaque_bytes_msg_schema(),
+                                metadata: std::collections::HashMap::new(),
+                            },
+                        };
+                        let pkt = (&set_msg_metadata).into_len_packet();
+                        gst::info!(
+                            gst::CAT_DEFAULT,
+                            "Sending SetMsgMetadata: name={}, id={:?}, pkt_len={}",
+                            state.msg_name,
+                            msg_id(&state.msg_name),
+                            pkt.inner.len()
+                        );
+                        stream.write_all(&pkt.inner).map_err(|e| {
+                            gst::error_msg!(
+                                gst::ResourceError::Failed,
+                                ["Failed to send SetMsgMetadata: {}", e]
+                            )
+                        })?;
+
+                        // Now set non-blocking for video streaming
                         if let Err(e) = stream.set_nonblocking(true) {
                             return Err(gst::error_msg!(
                                 gst::ResourceError::Failed,
                                 ["failed to set non-blocking mode: {}", e]
                             ));
                         }
+
+                        state.base_timestamp = Some(base_timestamp);
                         state.connection = Some(stream);
                         Ok(())
                     }
@@ -100,31 +194,97 @@ mod elodinsink {
                 }
             }
 
-            fn send_packet(&self, data: &[u8]) -> Result<(), gst::ErrorMessage> {
+            fn send_packet(
+                &self,
+                data: &[u8],
+                pts: Option<gst::ClockTime>,
+            ) -> Result<(), gst::ErrorMessage> {
                 let mut state = self.state.lock().unwrap();
+
+                // Track first PTS after connect for offset calculation
+                if state.first_pts.is_none() {
+                    state.first_pts = pts;
+                }
 
                 let msg_id = msg_id(&state.msg_name);
 
-                let mut packet =
-                    LenPacket::msg_with_timestamp(msg_id, Timestamp::now(), data.len());
+                // Calculate timestamp: base + (current_pts - first_pts)
+                let timestamp = match (state.base_timestamp, pts, state.first_pts) {
+                    (Some(base), Some(pts), Some(first_pts)) => {
+                        let pts_offset = pts.nseconds().saturating_sub(first_pts.nseconds());
+                        Timestamp(base.0 + (pts_offset / 1000) as i64)
+                    }
+                    _ => Timestamp::now(), // Fallback to wall clock
+                };
+
+                let mut packet = LenPacket::msg_with_timestamp(msg_id, timestamp, data.len());
                 packet.extend_from_slice(data);
 
                 if let Some(stream) = &mut state.connection {
+                    // Drain any pending SubscribeLastUpdated responses from the
+                    // read buffer. The DB sends LastUpdated continuously, and since
+                    // the socket is non-blocking we must discard these to prevent
+                    // the TCP receive buffer from saturating (which would back-
+                    // pressure the DB's send task).
+                    let mut drain_buf = [0u8; 4096];
+                    loop {
+                        match stream.read(&mut drain_buf) {
+                            Ok(0) => break,                                                    // EOF
+                            Ok(_) => continue, // discard, keep draining
+                            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => break, // no more data
+                            Err(_) => break, // other error
+                        }
+                    }
+
                     match stream.write_all(&packet.inner) {
-                        Ok(_) => {}
+                        Ok(_) => return Ok(()),
                         Err(err) => {
                             gst::warning!(
                                 gst::CAT_DEFAULT,
-                                "error sending packet to db: {:?}",
+                                "error sending packet to db: {:?}, reconnecting and retrying",
                                 err
                             );
-                            self.connect()?;
+                            drop(state); // Release lock before reconnecting
                         }
                     }
                 } else {
                     return Err(gst::error_msg!(
                         gst::ResourceError::NotFound,
                         ["No connection to elodin-db"]
+                    ));
+                }
+
+                // Reconnect and retry sending the packet once.
+                // connect() resets base_timestamp and first_pts, so we must
+                // recalculate the timestamp and rebuild the packet to avoid
+                // sending a stale timestamp from the old connection.
+                self.connect()?;
+                let mut state = self.state.lock().unwrap();
+
+                if state.first_pts.is_none() {
+                    state.first_pts = pts;
+                }
+                let timestamp = match (state.base_timestamp, pts, state.first_pts) {
+                    (Some(base), Some(pts), Some(first_pts)) => {
+                        let pts_offset = pts.nseconds().saturating_sub(first_pts.nseconds());
+                        Timestamp(base.0 + (pts_offset / 1000) as i64)
+                    }
+                    _ => Timestamp::now(),
+                };
+                let mut packet = LenPacket::msg_with_timestamp(msg_id, timestamp, data.len());
+                packet.extend_from_slice(data);
+
+                if let Some(stream) = &mut state.connection {
+                    stream.write_all(&packet.inner).map_err(|e| {
+                        gst::error_msg!(
+                            gst::ResourceError::Failed,
+                            ["Failed to send packet after reconnect: {}", e]
+                        )
+                    })?;
+                } else {
+                    return Err(gst::error_msg!(
+                        gst::ResourceError::NotFound,
+                        ["No connection to elodin-db after reconnect"]
                     ));
                 }
 
@@ -263,7 +423,7 @@ mod elodinsink {
                     gst::FlowError::Error
                 })?;
 
-                if let Err(e) = self.send_packet(&map) {
+                if let Err(e) = self.send_packet(&map, buffer.pts()) {
                     gst::error!(gst::CAT_DEFAULT, "Failed to send data: {}", e);
                     return Err(gst::FlowError::Error);
                 }
