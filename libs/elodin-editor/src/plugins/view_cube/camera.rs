@@ -17,6 +17,7 @@ use bevy_editor_cam::controller::motion::CurrentMotion;
 use bevy_editor_cam::extensions::look_to::LookToTrigger;
 use impeller2_bevy::EntityMap;
 use impeller2_wkt::ComponentValue;
+use std::collections::HashMap;
 
 use super::components::{
     FaceDirection, RotationArrow, ViewCubeCamera, ViewCubeLink, ViewCubeRenderLayer, ViewCubeRoot,
@@ -72,6 +73,47 @@ pub struct CameraAnimation {
     pub start_rotation: Quat,
     pub target_position: Vec3,
     pub target_rotation: Quat,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct ArrowTargetState {
+    target_rotation: Quat,
+    valid_until_secs: f64,
+}
+
+/// Caches target camera orientation for incremental arrow clicks.
+///
+/// This prevents drift when users click arrows rapidly while a previous
+/// LookTo animation is still in flight.
+#[derive(Resource, Default)]
+pub struct ViewCubeArrowTargetCache {
+    entries: HashMap<Entity, ArrowTargetState>,
+}
+
+impl ViewCubeArrowTargetCache {
+    const TTL_SECS: f64 = 0.55;
+
+    fn prune(&mut self, now_secs: f64) {
+        self.entries
+            .retain(|_, state| state.valid_until_secs + 0.25 >= now_secs);
+    }
+
+    fn get_valid_target(&self, camera: Entity, now_secs: f64) -> Option<Quat> {
+        self.entries
+            .get(&camera)
+            .filter(|state| state.valid_until_secs >= now_secs)
+            .map(|state| state.target_rotation)
+    }
+
+    fn set_target(&mut self, camera: Entity, target_rotation: Quat, now_secs: f64) {
+        self.entries.insert(
+            camera,
+            ArrowTargetState {
+                target_rotation,
+                valid_until_secs: now_secs + Self::TTL_SECS,
+            },
+        );
+    }
 }
 
 // ============================================================================
@@ -467,6 +509,8 @@ pub(super) struct ViewCubeEditorLookup<'w, 's> {
     >,
     entity_map: Res<'w, EntityMap>,
     values: Query<'w, 's, &'static ComponentValue>,
+    time: Res<'w, Time>,
+    arrow_cache: ResMut<'w, ViewCubeArrowTargetCache>,
 }
 
 pub fn handle_view_cube_editor(
@@ -476,11 +520,14 @@ pub fn handle_view_cube_editor(
         (Entity, &Transform, &GlobalTransform, &mut EditorCam),
         With<ViewCubeTargetCamera>,
     >,
-    lookup: ViewCubeEditorLookup,
+    mut lookup: ViewCubeEditorLookup,
     config: Res<ViewCubeConfig>,
     mut look_to: MessageWriter<LookToTrigger>,
 ) {
     for event in events.read() {
+        let now_secs = lookup.time.elapsed_secs_f64();
+        lookup.arrow_cache.prune(now_secs);
+
         let Some(cam) = main_camera_for_event(event, &view_cube_query) else {
             continue;
         };
@@ -566,6 +613,9 @@ pub fn handle_view_cube_editor(
                     rotation_angle = rotation_angle,
                     "view cube: face snap"
                 );
+                lookup
+                    .arrow_cache
+                    .set_target(entity, trigger_rotation(&trigger), now_secs);
                 look_to.write(trigger);
             } else {
                 warn!(
@@ -618,6 +668,9 @@ pub fn handle_view_cube_editor(
                     rotation_angle = rotation_angle,
                     "view cube: corner snap"
                 );
+                lookup
+                    .arrow_cache
+                    .set_target(entity, trigger_rotation(&trigger), now_secs);
                 look_to.write(trigger);
             } else {
                 warn!(
@@ -692,6 +745,9 @@ pub fn handle_view_cube_editor(
                     rotation_angle = chosen.rotation_angle,
                     "view cube: edge snap"
                 );
+                lookup
+                    .arrow_cache
+                    .set_target(entity, trigger_rotation(&trigger), now_secs);
                 look_to.write(trigger);
             } else {
                 warn!(
@@ -711,66 +767,92 @@ pub fn handle_view_cube_editor(
         // then send as LookToTrigger so bevy_editor_cam handles it properly.
         if let ViewCubeEvent::ArrowClicked { arrow, .. } = event {
             let angle = config.rotation_increment;
-            let forward = *transform.forward();
-            let up = *transform.up();
-            let forward_world = parent_rotation * forward;
-            let up_world = parent_rotation * up;
+            let (base_rotation, base_rotation_source) = lookup
+                .arrow_cache
+                .get_valid_target(entity, now_secs)
+                .map(|cached| (cached, "cached_target"))
+                .unwrap_or((transform.rotation, "current_transform"));
+            let base_forward_local = base_rotation * Vec3::NEG_Z;
+            let base_up_local = base_rotation * Vec3::Y;
+            let base_right_local = base_rotation * Vec3::X;
+            let base_forward_world = parent_rotation * base_forward_local;
+            let base_up_world = parent_rotation * base_up_local;
+            let base_right_world = parent_rotation * base_right_local;
 
-            let (new_forward, new_up) = match arrow {
+            let step_rotation_world = match arrow {
                 RotationArrow::Left => {
-                    let rot = Quat::from_rotation_y(angle);
-                    (rot * forward, rot * up)
+                    let axis = Dir3::new(base_up_world)
+                        .expect("camera up axis should always be non-zero and finite");
+                    Quat::from_axis_angle(*axis, angle)
                 }
                 RotationArrow::Right => {
-                    let rot = Quat::from_rotation_y(-angle);
-                    (rot * forward, rot * up)
+                    let axis = Dir3::new(base_up_world)
+                        .expect("camera up axis should always be non-zero and finite");
+                    Quat::from_axis_angle(*axis, -angle)
                 }
                 RotationArrow::Up => {
-                    let right = *transform.right();
-                    let rot = Quat::from_axis_angle(right, angle);
-                    (rot * forward, rot * up)
+                    let axis = Dir3::new(base_right_world)
+                        .expect("camera right axis should always be non-zero and finite");
+                    Quat::from_axis_angle(*axis, angle)
                 }
                 RotationArrow::Down => {
-                    let right = *transform.right();
-                    let rot = Quat::from_axis_angle(right, -angle);
-                    (rot * forward, rot * up)
+                    let axis = Dir3::new(base_right_world)
+                        .expect("camera right axis should always be non-zero and finite");
+                    Quat::from_axis_angle(*axis, -angle)
                 }
                 RotationArrow::RollLeft => {
-                    let rot = Quat::from_axis_angle(forward, angle);
-                    (forward, rot * up)
+                    let axis = Dir3::new(base_forward_world)
+                        .expect("camera forward axis should always be non-zero and finite");
+                    Quat::from_axis_angle(*axis, angle)
                 }
                 RotationArrow::RollRight => {
-                    let rot = Quat::from_axis_angle(forward, -angle);
-                    (forward, rot * up)
+                    let axis = Dir3::new(base_forward_world)
+                        .expect("camera forward axis should always be non-zero and finite");
+                    Quat::from_axis_angle(*axis, -angle)
                 }
             };
+            let new_forward_world = step_rotation_world * base_forward_world;
+            let new_up_world = step_rotation_world * base_up_world;
+            let new_forward_local = parent_rotation.inverse() * new_forward_world;
+            let new_up_local = parent_rotation.inverse() * new_up_world;
 
-            if let Ok(facing) = Dir3::new(new_forward)
-                && let Ok(up_dir) = Dir3::new(new_up)
+            if let Ok(facing) = Dir3::new(new_forward_local)
+                && let Ok(up_dir) = Dir3::new(new_up_local)
             {
-                debug!(
-                    arrow = ?arrow,
-                    parent_rotation = ?parent_rotation,
-                    forward = ?forward,
-                    up = ?up,
-                    forward_world = ?forward_world,
-                    up_world = ?up_world,
-                    new_forward = ?new_forward,
-                    new_up = ?new_up,
-                    new_forward_world = ?(parent_rotation * new_forward),
-                    new_up_world = ?(parent_rotation * new_up),
-                    "view cube: arrow snap"
-                );
-                look_to.write(LookToTrigger {
+                let trigger = LookToTrigger {
                     target_facing_direction: facing,
                     target_up_direction: up_dir,
                     camera: entity,
-                });
+                };
+                let target_rotation = trigger_rotation(&trigger);
+                debug!(
+                    arrow = ?arrow,
+                    base_rotation_source = base_rotation_source,
+                    base_rotation = ?base_rotation,
+                    parent_rotation = ?parent_rotation,
+                    base_forward_local = ?base_forward_local,
+                    base_up_local = ?base_up_local,
+                    base_right_local = ?base_right_local,
+                    base_forward_world = ?base_forward_world,
+                    base_up_world = ?base_up_world,
+                    base_right_world = ?base_right_world,
+                    step_rotation_world = ?step_rotation_world,
+                    new_forward_world = ?new_forward_world,
+                    new_up_world = ?new_up_world,
+                    new_forward_local = ?new_forward_local,
+                    new_up_local = ?new_up_local,
+                    rotation_angle = angle_to_trigger(transform, &trigger),
+                    "view cube: arrow snap"
+                );
+                lookup
+                    .arrow_cache
+                    .set_target(entity, target_rotation, now_secs);
+                look_to.write(trigger);
             } else {
                 warn!(
                     arrow = ?arrow,
-                    new_forward = ?new_forward,
-                    new_up = ?new_up,
+                    new_forward_local = ?new_forward_local,
+                    new_up_local = ?new_up_local,
                     "view cube: invalid arrow directions"
                 );
             }
@@ -784,6 +866,15 @@ fn angle_to_trigger(transform: &Transform, trigger: &LookToTrigger) -> f32 {
         trigger.target_facing_direction,
         trigger.target_up_direction,
     )
+}
+
+fn trigger_rotation(trigger: &LookToTrigger) -> Quat {
+    Transform::default()
+        .looking_to(
+            *trigger.target_facing_direction,
+            *trigger.target_up_direction,
+        )
+        .rotation
 }
 
 fn angle_to_target_rotation(transform: &Transform, facing: Dir3, up: Dir3) -> f32 {
@@ -1079,5 +1170,25 @@ mod tests {
             "up must not be parallel to facing (dot={})",
             facing.dot(*up)
         );
+    }
+
+    #[test]
+    fn arrow_target_cache_is_valid_within_ttl() {
+        let mut cache = ViewCubeArrowTargetCache::default();
+        let entity = Entity::from_bits(42);
+        let target = Quat::from_rotation_y(0.4);
+        cache.set_target(entity, target, 10.0);
+        let cached = cache.get_valid_target(entity, 10.3);
+        assert_eq!(cached, Some(target));
+    }
+
+    #[test]
+    fn arrow_target_cache_expires_after_ttl() {
+        let mut cache = ViewCubeArrowTargetCache::default();
+        let entity = Entity::from_bits(7);
+        let target = Quat::from_rotation_x(0.2);
+        cache.set_target(entity, target, 1.0);
+        let cached = cache.get_valid_target(entity, 2.0);
+        assert_eq!(cached, None);
     }
 }
