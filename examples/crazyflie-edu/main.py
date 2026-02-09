@@ -36,7 +36,7 @@ import jax.numpy as jnp
 import numpy as np
 
 from config import CrazyflieConfig, create_default_config
-from sim import CrazyflieDrone, create_physics_system, thrust_visualization
+from sim import CrazyflieDrone, create_physics_system, thrust_visualization, propeller_animation
 from sensors import IMU, create_imu_system
 
 # Try to import keyboard controller (optional dependency)
@@ -522,6 +522,10 @@ def create_world() -> tuple[el.World, el.EntityId]:
         }
         object_3d crazyflie.world_pos {
             glb path="crazyflie.glb" rotate="(0.0, 0.0, 0.0)" translate="(-0.01, 0.0, 0.0)" scale=0.7
+            animate joint="Root.Propeller_0" rotation_vector="(0, crazyflie.propeller_angle[0], 0)"
+            animate joint="Root.Propeller_1" rotation_vector="(0, crazyflie.propeller_angle[1], 0)"
+            animate joint="Root.Propeller_2" rotation_vector="(0, crazyflie.propeller_angle[2], 0)"
+            animate joint="Root.Propeller_3" rotation_vector="(0, crazyflie.propeller_angle[3], 0)"
         }
 
         // Motor position indicators
@@ -588,7 +592,7 @@ def system(include_physics: bool = True) -> el.System:
                         If False (HITL mode), skip physics (real world is source of truth).
     """
     clock = update_sim_time
-    visualization = thrust_visualization
+    visualization = thrust_visualization | propeller_animation
 
     if include_physics:
         physics = create_physics_system()
