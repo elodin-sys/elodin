@@ -162,6 +162,7 @@ pub enum RotationArrow {
 #[derive(Resource, Default)]
 pub struct HoveredElement {
     pub entity: Option<Entity>,
+    pub entities: Vec<Entity>,
 }
 
 /// Stores original material colors for restoration after hover

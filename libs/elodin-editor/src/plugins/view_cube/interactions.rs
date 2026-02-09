@@ -1,9 +1,11 @@
 //! Interaction handlers for the ViewCube widget
 
 use bevy::ecs::hierarchy::ChildOf;
+use bevy::log::info;
 use bevy::picking::prelude::*;
 use bevy::prelude::*;
 
+use super::camera::ViewCubeTargetCamera;
 use super::components::*;
 use super::events::ViewCubeEvent;
 use super::theme::ViewCubeColors;
@@ -150,12 +152,153 @@ fn parse_corner(name: &str) -> Option<CubeElement> {
 /// Find the nearest ancestor with a CubeElement component
 fn find_cube_element_ancestor(
     entity: Entity,
-    cube_elements: &Query<&CubeElement>,
+    cube_elements: &Query<(Entity, &CubeElement)>,
     parents_query: &Query<&ChildOf>,
 ) -> Option<Entity> {
     find_ancestor(entity, parents_query, |current| {
         cube_elements.get(current).is_ok()
     })
+}
+
+fn same_entity_set(lhs: &[Entity], rhs: &[Entity]) -> bool {
+    lhs.len() == rhs.len() && lhs.iter().all(|entity| rhs.contains(entity))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn compute_hover_targets(
+    target: Entity,
+    cube_elements: &Query<(Entity, &CubeElement)>,
+    parents_query: &Query<&ChildOf>,
+    root_query: &Query<Entity, With<ViewCubeRoot>>,
+    root_links: &Query<&ViewCubeLink, With<ViewCubeRoot>>,
+    camera_globals: &Query<&GlobalTransform, With<ViewCubeTargetCamera>>,
+) -> Vec<Entity> {
+    let Ok((_, element)) = cube_elements.get(target) else {
+        return vec![target];
+    };
+
+    let CubeElement::Edge(edge_under_cursor) = *element else {
+        return vec![target];
+    };
+
+    let Some(root) = find_root_ancestor(target, parents_query, root_query) else {
+        return vec![target];
+    };
+    let Ok(link) = root_links.get(root) else {
+        return vec![target];
+    };
+    let Ok(camera_global) = camera_globals.get(link.main_camera) else {
+        return vec![target];
+    };
+
+    let (_, cam_rotation, _) = camera_global.to_scale_rotation_translation();
+    let camera_dir_world = cam_rotation * Vec3::Z;
+    let dominant_face = dominant_face_from_camera_dir(camera_dir_world);
+    let opposite_face = opposite_face(dominant_face);
+    let edge_group = edges_for_face(opposite_face);
+
+    let mut targets = Vec::new();
+    for (entity, element) in cube_elements.iter() {
+        let CubeElement::Edge(candidate_edge) = *element else {
+            continue;
+        };
+        if !edge_group.contains(&candidate_edge) {
+            continue;
+        }
+        let candidate_root = find_root_ancestor(entity, parents_query, root_query);
+        if candidate_root == Some(root) {
+            targets.push(entity);
+        }
+    }
+
+    if targets.is_empty() {
+        targets.push(target);
+    }
+
+    info!(
+        hover_edge = ?edge_under_cursor,
+        camera_dir_world = ?camera_dir_world,
+        dominant_face = ?dominant_face,
+        opposite_face = ?opposite_face,
+        edge_group = ?edge_group,
+        highlighted_edges = targets.len(),
+        "view cube: edge hover group"
+    );
+
+    targets
+}
+
+fn dominant_face_from_camera_dir(camera_dir_world: Vec3) -> FaceDirection {
+    let abs = camera_dir_world.abs();
+    if abs.x >= abs.y && abs.x >= abs.z {
+        if camera_dir_world.x >= 0.0 {
+            FaceDirection::East
+        } else {
+            FaceDirection::West
+        }
+    } else if abs.y >= abs.z {
+        if camera_dir_world.y >= 0.0 {
+            FaceDirection::Up
+        } else {
+            FaceDirection::Down
+        }
+    } else if camera_dir_world.z >= 0.0 {
+        FaceDirection::North
+    } else {
+        FaceDirection::South
+    }
+}
+
+fn opposite_face(face: FaceDirection) -> FaceDirection {
+    match face {
+        FaceDirection::East => FaceDirection::West,
+        FaceDirection::West => FaceDirection::East,
+        FaceDirection::North => FaceDirection::South,
+        FaceDirection::South => FaceDirection::North,
+        FaceDirection::Up => FaceDirection::Down,
+        FaceDirection::Down => FaceDirection::Up,
+    }
+}
+
+fn edges_for_face(face: FaceDirection) -> [EdgeDirection; 4] {
+    match face {
+        FaceDirection::North => [
+            EdgeDirection::XTopFront,
+            EdgeDirection::XBottomFront,
+            EdgeDirection::YFrontLeft,
+            EdgeDirection::YFrontRight,
+        ],
+        FaceDirection::South => [
+            EdgeDirection::XTopBack,
+            EdgeDirection::XBottomBack,
+            EdgeDirection::YBackLeft,
+            EdgeDirection::YBackRight,
+        ],
+        FaceDirection::East => [
+            EdgeDirection::YFrontRight,
+            EdgeDirection::YBackRight,
+            EdgeDirection::ZTopRight,
+            EdgeDirection::ZBottomRight,
+        ],
+        FaceDirection::West => [
+            EdgeDirection::YFrontLeft,
+            EdgeDirection::YBackLeft,
+            EdgeDirection::ZTopLeft,
+            EdgeDirection::ZBottomLeft,
+        ],
+        FaceDirection::Up => [
+            EdgeDirection::XTopFront,
+            EdgeDirection::XTopBack,
+            EdgeDirection::ZTopLeft,
+            EdgeDirection::ZTopRight,
+        ],
+        FaceDirection::Down => [
+            EdgeDirection::XBottomFront,
+            EdgeDirection::XBottomBack,
+            EdgeDirection::ZBottomLeft,
+            EdgeDirection::ZBottomRight,
+        ],
+    }
 }
 
 // ============================================================================
@@ -166,8 +309,11 @@ fn find_cube_element_ancestor(
 pub fn on_cube_hover_start(
     trigger: On<Pointer<Over>>,
     mut commands: Commands,
-    cube_elements: Query<&CubeElement>,
+    cube_elements: Query<(Entity, &CubeElement)>,
     parents_query: Query<&ChildOf>,
+    root_query: Query<Entity, With<ViewCubeRoot>>,
+    root_links: Query<&ViewCubeLink, With<ViewCubeRoot>>,
+    camera_globals: Query<&GlobalTransform, With<ViewCubeTargetCamera>>,
     children_query: Query<&Children>,
     material_query: Query<&MeshMaterial3d<StandardMaterial>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
@@ -180,12 +326,21 @@ pub fn on_cube_hover_start(
         return;
     };
 
-    if hovered.entity == Some(target) {
+    let target_entities = compute_hover_targets(
+        target,
+        &cube_elements,
+        &parents_query,
+        &root_query,
+        &root_links,
+        &camera_globals,
+    );
+
+    if same_entity_set(&hovered.entities, &target_entities) {
         return;
     }
 
     // Reset previous
-    if let Some(prev) = hovered.entity {
+    for prev in hovered.entities.iter().copied() {
         reset_highlight(
             prev,
             &children_query,
@@ -196,22 +351,25 @@ pub fn on_cube_hover_start(
     }
 
     // Apply highlight
-    apply_highlight(
-        target,
-        &children_query,
-        &material_query,
-        &mut materials,
-        &mut original_materials,
-        &mut commands,
-    );
+    for hover_target in target_entities.iter().copied() {
+        apply_highlight(
+            hover_target,
+            &children_query,
+            &material_query,
+            &mut materials,
+            &mut original_materials,
+            &mut commands,
+        );
+    }
 
     hovered.entity = Some(target);
+    hovered.entities = target_entities;
 }
 
 #[allow(clippy::too_many_arguments)]
 pub fn on_cube_hover_end(
     trigger: On<Pointer<Out>>,
-    cube_elements: Query<&CubeElement>,
+    cube_elements: Query<(Entity, &CubeElement)>,
     parents_query: Query<&ChildOf>,
     children_query: Query<&Children>,
     material_query: Query<&MeshMaterial3d<StandardMaterial>>,
@@ -225,25 +383,29 @@ pub fn on_cube_hover_end(
         return;
     };
 
-    if hovered.entity != Some(target) {
+    if !hovered.entities.contains(&target) {
         return;
     }
 
-    reset_highlight(
-        target,
-        &children_query,
-        &material_query,
-        &mut materials,
-        &original_materials,
-    );
+    for hover_target in hovered.entities.iter().copied() {
+        reset_highlight(
+            hover_target,
+            &children_query,
+            &material_query,
+            &mut materials,
+            &original_materials,
+        );
+    }
     hovered.entity = None;
+    hovered.entities.clear();
 }
 
 pub fn on_cube_click(
     trigger: On<Pointer<Click>>,
-    cube_elements: Query<&CubeElement>,
+    cube_elements: Query<(Entity, &CubeElement)>,
     parents_query: Query<&ChildOf>,
     root_query: Query<Entity, With<ViewCubeRoot>>,
+    names: Query<&Name>,
     mut events: MessageWriter<ViewCubeEvent>,
 ) {
     let entity = trigger.entity;
@@ -253,13 +415,45 @@ pub fn on_cube_click(
         return;
     };
 
-    let Ok(element) = cube_elements.get(target_entity) else {
+    // Pointer click events can bubble from mesh children to the CubeElement parent.
+    // Handle only the canonical callback on the CubeElement entity to avoid
+    // emitting duplicated ViewCubeEvent for a single click.
+    if entity != target_entity {
+        info!(
+            trigger_entity = %entity,
+            canonical_entity = %target_entity,
+            pointer_event = ?trigger.event(),
+            "view cube: skipping bubbled click"
+        );
+        return;
+    }
+
+    let Ok((_, element)) = cube_elements.get(target_entity) else {
         return;
     };
 
     // Find the ViewCubeRoot ancestor to identify which ViewCube was clicked
     let source =
         find_root_ancestor(entity, &parents_query, &root_query).unwrap_or(Entity::PLACEHOLDER);
+
+    let target_name = names
+        .get(target_entity)
+        .map(|name| name.as_str())
+        .unwrap_or("<unnamed>");
+    let source_name = names
+        .get(source)
+        .map(|name| name.as_str())
+        .unwrap_or("<unnamed>");
+    info!(
+        trigger_entity = %entity,
+        target_entity = %target_entity,
+        target_name = target_name,
+        source = %source,
+        source_name = source_name,
+        element = ?element,
+        pointer_event = ?trigger.event(),
+        "view cube: on_cube_click resolved"
+    );
 
     match element {
         CubeElement::Face(dir) => {
@@ -333,6 +527,7 @@ pub fn on_arrow_click(
     parents_query: Query<&ChildOf>,
     camera_link_query: Query<&ViewCubeLink, With<ViewCubeCamera>>,
     root_query: Query<(Entity, &ViewCubeLink), With<ViewCubeRoot>>,
+    names: Query<&Name>,
     mut events: MessageWriter<ViewCubeEvent>,
 ) {
     let entity = trigger.entity;
@@ -350,6 +545,24 @@ pub fn on_arrow_click(
     let source =
         find_root_for_camera_child(entity, &parents_query, &camera_link_query, &root_query)
             .unwrap_or(Entity::PLACEHOLDER);
+
+    let arrow_name = names
+        .get(entity)
+        .map(|name| name.as_str())
+        .unwrap_or("<unnamed>");
+    let source_name = names
+        .get(source)
+        .map(|name| name.as_str())
+        .unwrap_or("<unnamed>");
+    info!(
+        trigger_entity = %entity,
+        trigger_name = arrow_name,
+        source = %source,
+        source_name = source_name,
+        arrow = ?arrow,
+        pointer_event = ?trigger.event(),
+        "view cube: on_arrow_click resolved"
+    );
 
     events.write(ViewCubeEvent::ArrowClicked {
         arrow: *arrow,
