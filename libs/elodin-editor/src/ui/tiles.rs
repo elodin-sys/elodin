@@ -1288,6 +1288,7 @@ impl ViewportPane {
                 name,
                 grid_layer,
                 viewport_layer,
+                view_cube_layer: None,
             };
         };
 
