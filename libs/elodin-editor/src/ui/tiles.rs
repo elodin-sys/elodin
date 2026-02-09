@@ -753,6 +753,9 @@ impl TileState {
                     if let Some(layer) = viewport.grid_layer {
                         render_layer_alloc.free(layer);
                     }
+                    if let Some(layer) = viewport.view_cube_layer {
+                        render_layer_alloc.free(layer);
+                    }
                     if let Some(camera) = viewport.camera {
                         commands.entity(camera).despawn();
                     }
@@ -1122,6 +1125,7 @@ pub struct ViewportPane {
     pub name: PaneName,
     pub grid_layer: Option<usize>,
     pub viewport_layer: Option<usize>,
+    pub view_cube_layer: Option<usize>,
 }
 
 impl ViewportPane {
@@ -1284,6 +1288,7 @@ impl ViewportPane {
                 name,
                 grid_layer,
                 viewport_layer,
+                view_cube_layer: None,
             };
         };
 
@@ -1319,6 +1324,7 @@ impl ViewportPane {
             name,
             grid_layer,
             viewport_layer,
+            view_cube_layer: Some(view_cube_layer),
         }
     }
 }
@@ -2350,6 +2356,9 @@ impl WidgetSystem for TileLayout<'_, '_> {
                                 state_mut.render_layer_alloc.free(layer);
                             }
                             if let Some(layer) = viewport.grid_layer {
+                                state_mut.render_layer_alloc.free(layer);
+                            }
+                            if let Some(layer) = viewport.view_cube_layer {
                                 state_mut.render_layer_alloc.free(layer);
                             }
                             if let Some(camera) = viewport.camera {
