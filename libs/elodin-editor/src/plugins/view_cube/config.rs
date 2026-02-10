@@ -177,76 +177,33 @@ pub struct ViewCubeConfig {
     pub scale: f32,
     pub rotation_increment: f32,
     pub camera_distance: f32,
-    /// When true, the plugin automatically handles camera rotation.
-    /// The target camera must have the `ViewCubeTargetCamera` component.
-    /// When false, only events are emitted for manual handling.
-    pub auto_rotate: bool,
-    /// When true, the cube syncs its rotation with the main camera.
-    /// Use this for overlay/gizmo mode where the cube shows world orientation.
-    /// When false, the cube stays fixed (for standalone demo mode).
+    /// When true, the cube mirrors the main camera orientation.
     pub sync_with_camera: bool,
     /// Optional extra rotation applied when syncing the cube to the camera.
     /// This is applied after the system-specific correction.
     pub axis_correction: Quat,
-    /// When true, renders the ViewCube as an overlay with its own camera.
-    /// The ViewCube appears fixed in the top-right corner.
-    /// When false, the ViewCube is part of the main scene.
-    pub use_overlay: bool,
-    /// Size of the overlay viewport in pixels (width and height).
-    pub overlay_size: u32,
-    /// Margin from the edge of the window in pixels.
-    pub overlay_margin: f32,
-    /// Render layer for overlay mode (should not conflict with other layers).
+    /// Render layer used by the dedicated ViewCube overlay camera.
     pub render_layer: u8,
-    /// Editor mode: use LookToTrigger from bevy_editor_cam instead of direct animation.
-    /// This integrates better with the editor's camera system.
-    pub use_look_to_trigger: bool,
-    /// Editor mode: adapt viewport position based on main camera's viewport.
-    /// Required for split views where gizmo should stay in each viewport's corner.
-    pub follow_main_viewport: bool,
-    /// Skip registering viewport positioning system.
-    /// Use when integrating with existing viewport system (like navigation_gizmo).
-    pub skip_viewport_system: bool,
 }
 
 impl Default for ViewCubeConfig {
     fn default() -> Self {
         Self {
             system: CoordinateSystem::ENU,
-            scale: 0.95,
+            scale: 0.6,
             rotation_increment: 15.0 * PI / 180.0,
-            camera_distance: 3.5,
-            auto_rotate: true,
-            sync_with_camera: false,
+            camera_distance: 2.5,
+            sync_with_camera: true,
             axis_correction: Quat::IDENTITY,
-            use_overlay: false,
-            overlay_size: 160,
-            overlay_margin: 8.0,
             render_layer: 31,
-            use_look_to_trigger: false,
-            follow_main_viewport: false,
-            skip_viewport_system: false,
         }
     }
 }
 
 impl ViewCubeConfig {
-    /// Configuration preset for editor integration.
-    /// Uses LookToTrigger from bevy_editor_cam to properly rotate the camera
-    /// around its anchor point, respecting EditorCam internal state.
+    /// Single supported mode: editor overlay integration.
     pub fn editor_mode() -> Self {
-        Self {
-            use_overlay: true,
-            sync_with_camera: true,
-            auto_rotate: false,
-            use_look_to_trigger: true,
-            follow_main_viewport: false, // Use existing set_camera_viewport
-            skip_viewport_system: true,  // Don't add our viewport system
-            overlay_size: 128,           // Match navigation_gizmo's side_length
-            camera_distance: 2.5,        // Overlay camera distance from cube model
-            scale: 0.6,                  // Cube model scale in overlay
-            ..Default::default()
-        }
+        Self::default()
     }
 
     /// Base correction for Bevy's camera forward (-Z) vs cube face orientation (+Z).
