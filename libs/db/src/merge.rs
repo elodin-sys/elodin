@@ -41,8 +41,8 @@ struct DatabaseInfo {
 /// * `prefix2` - Optional prefix for second database components
 /// * `dry_run` - If true, only show what would be done without creating output
 /// * `auto_confirm` - If true, skip the confirmation prompt
-/// * `align1` - Optional alignment timestamp (seconds) for an event in DB1
-/// * `align2` - Optional alignment timestamp (seconds) for the same event in DB2.
+/// * `align1` - Optional alignment timestamp (microseconds) for an event in DB1
+/// * `align2` - Optional alignment timestamp (microseconds) for the same event in DB2.
 ///   DB2 is shifted so that its anchor aligns with DB1's anchor. The shift may be
 ///   forward (positive) or backward (negative).
 ///
@@ -58,35 +58,17 @@ pub fn run(
     prefix2: Option<String>,
     dry_run: bool,
     auto_confirm: bool,
-    align1: Option<f64>,
-    align2: Option<f64>,
+    align1: Option<i64>,
+    align2: Option<i64>,
 ) -> Result<(), Error> {
     // Validate alignment arguments: both must be provided or neither
     // DB2 is shifted to align with DB1. The offset may be positive (forward) or negative (backward).
     let (db1_offset, db2_offset) = match (align1, align2) {
         (Some(a1), Some(a2)) => {
-            // Validate alignment values are finite numbers
-            if !a1.is_finite() {
-                return Err(Error::Io(io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    format!("--align1 must be a finite number, got: {}", a1),
-                )));
-            }
-            if !a2.is_finite() {
-                return Err(Error::Io(io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    format!("--align2 must be a finite number, got: {}", a2),
-                )));
-            }
-
-            // Convert from seconds to microseconds
-            let a1_micros = (a1 * 1_000_000.0) as i64;
-            let a2_micros = (a2 * 1_000_000.0) as i64;
-
             // Shift DB2 to align with DB1
             // offset = where we want it (align1) - where it is (align2)
             // This may be positive (shift forward) or negative (shift backward)
-            let db2_offset = a1_micros - a2_micros;
+            let db2_offset = a1 - a2;
             (0i64, db2_offset)
         }
         (None, None) => (0, 0),
@@ -186,9 +168,12 @@ pub fn run(
     if let (Some(a1), Some(a2)) = (align1, align2) {
         let db2_offset_secs = db2_offset as f64 / 1_000_000.0;
 
+        let a1_secs = a1 as f64 / 1_000_000.0;
+        let a2_secs = a2 as f64 / 1_000_000.0;
+
         println!("\nTime Alignment:");
-        println!("  DB1 anchor: {:.3}s", a1);
-        println!("  DB2 anchor: {:.3}s", a2);
+        println!("  DB1 anchor: {:.3}s", a1_secs);
+        println!("  DB2 anchor: {:.3}s", a2_secs);
 
         // Show the shift direction for DB2 (DB1 is never shifted)
         if db2_offset > 0 {
@@ -248,27 +233,25 @@ pub fn run(
         }
 
         // Warn if anchor is outside the dataset's time range
-        if let Some((start, end)) = db1_info.time_range {
-            let a1_micros = (a1 * 1_000_000.0) as i64;
-            if a1_micros < start || a1_micros > end {
-                eprintln!(
-                    "\nWarning: DB1 anchor ({:.3}s) is outside its time range ({:.3}s - {:.3}s)",
-                    a1,
-                    start as f64 / 1_000_000.0,
-                    end as f64 / 1_000_000.0
-                );
-            }
+        if let Some((start, end)) = db1_info.time_range
+            && (a1 < start || a1 > end)
+        {
+            eprintln!(
+                "\nWarning: DB1 anchor ({:.3}s) is outside its time range ({:.3}s - {:.3}s)",
+                a1_secs,
+                start as f64 / 1_000_000.0,
+                end as f64 / 1_000_000.0
+            );
         }
-        if let Some((start, end)) = db2_info.time_range {
-            let a2_micros = (a2 * 1_000_000.0) as i64;
-            if a2_micros < start || a2_micros > end {
-                eprintln!(
-                    "\nWarning: DB2 anchor ({:.3}s) is outside its time range ({:.3}s - {:.3}s)",
-                    a2,
-                    start as f64 / 1_000_000.0,
-                    end as f64 / 1_000_000.0
-                );
-            }
+        if let Some((start, end)) = db2_info.time_range
+            && (a2 < start || a2 > end)
+        {
+            eprintln!(
+                "\nWarning: DB2 anchor ({:.3}s) is outside its time range ({:.3}s - {:.3}s)",
+                a2_secs,
+                start as f64 / 1_000_000.0,
+                end as f64 / 1_000_000.0
+            );
         }
     }
 
@@ -1656,8 +1639,8 @@ mod tests {
             None,
             false,
             true,
-            Some(100.0), // align1
-            None,        // align2 missing
+            Some(100_000_000), // align1
+            None,              // align2 missing
         );
         assert!(result.is_err());
 
@@ -1671,8 +1654,8 @@ mod tests {
             None,
             false,
             true,
-            None,        // align1 missing
-            Some(100.0), // align2
+            None,              // align1 missing
+            Some(100_000_000), // align2
         );
         assert!(result.is_err());
     }
@@ -1775,8 +1758,8 @@ mod tests {
             Some("truth".to_string()),
             false,
             true,
-            Some(15.0), // align1: boost at 15s in DB1
-            Some(45.0), // align2: boost at 45s in DB2
+            Some(15_000_000), // align1: boost at 15s in DB1
+            Some(45_000_000), // align2: boost at 45s in DB2
         )
         .unwrap();
 
@@ -1844,8 +1827,8 @@ mod tests {
             Some("truth".to_string()),
             false,
             true,
-            Some(45.0), // align1: boost at 45s in DB1
-            Some(15.0), // align2: boost at 15s in DB2
+            Some(45_000_000), // align1: boost at 45s in DB1
+            Some(15_000_000), // align2: boost at 15s in DB2
         )
         .unwrap();
 
@@ -1921,8 +1904,8 @@ mod tests {
             Some("real".to_string()),
             false,
             true,
-            Some(0.0),       // align1: start of DB1
-            Some(4884937.0), // align2: start of DB2 (in seconds)
+            Some(0),                    // align1: start of DB1
+            Some(4_884_937_000_000i64), // align2: start of DB2 (in microseconds)
         )
         .unwrap();
 
@@ -1947,99 +1930,5 @@ mod tests {
         assert_eq!(real_timestamps[0], 0);
         assert_eq!(real_timestamps[1], 10_000_000);
         assert_eq!(real_timestamps[2], 20_000_000);
-    }
-
-    #[test]
-    fn test_alignment_rejects_nan_and_infinity() {
-        let temp = TempDir::new().unwrap();
-        let db1_path = temp.path().join("db1");
-        let db2_path = temp.path().join("db2");
-
-        create_test_db(&db1_path, &[]).unwrap();
-        create_test_db(&db2_path, &[]).unwrap();
-
-        // Test NaN in align1
-        let output_path = temp.path().join("merged_nan1");
-        let result = run(
-            db1_path.clone(),
-            db2_path.clone(),
-            output_path,
-            None,
-            None,
-            false,
-            true,
-            Some(f64::NAN),
-            Some(100.0),
-        );
-        assert!(result.is_err());
-        let err_msg = format!("{:?}", result.unwrap_err());
-        assert!(
-            err_msg.contains("finite"),
-            "Expected 'finite' in error: {}",
-            err_msg
-        );
-
-        // Test NaN in align2
-        let output_path = temp.path().join("merged_nan2");
-        let result = run(
-            db1_path.clone(),
-            db2_path.clone(),
-            output_path,
-            None,
-            None,
-            false,
-            true,
-            Some(100.0),
-            Some(f64::NAN),
-        );
-        assert!(result.is_err());
-        let err_msg = format!("{:?}", result.unwrap_err());
-        assert!(
-            err_msg.contains("finite"),
-            "Expected 'finite' in error: {}",
-            err_msg
-        );
-
-        // Test positive infinity in align1
-        let output_path = temp.path().join("merged_inf1");
-        let result = run(
-            db1_path.clone(),
-            db2_path.clone(),
-            output_path,
-            None,
-            None,
-            false,
-            true,
-            Some(f64::INFINITY),
-            Some(100.0),
-        );
-        assert!(result.is_err());
-        let err_msg = format!("{:?}", result.unwrap_err());
-        assert!(
-            err_msg.contains("finite"),
-            "Expected 'finite' in error: {}",
-            err_msg
-        );
-
-        // Test negative infinity in align2
-        let output_path = temp.path().join("merged_neginf2");
-        let result = run(
-            db1_path.clone(),
-            db2_path.clone(),
-            output_path,
-            None,
-            None,
-            false,
-            true,
-            Some(100.0),
-            Some(f64::NEG_INFINITY),
-        );
-        assert!(result.is_err());
-        let err_msg = format!("{:?}", result.unwrap_err());
-        assert!(
-            err_msg.contains("finite"),
-            "Expected 'finite' in error: {}",
-            err_msg
-        );
     }
 }
