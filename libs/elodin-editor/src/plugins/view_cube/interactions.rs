@@ -386,7 +386,6 @@ fn edges_for_face(face: FaceDirection) -> [EdgeDirection; 4] {
 #[allow(clippy::too_many_arguments)]
 pub fn on_cube_hover_start(
     trigger: On<Pointer<Over>>,
-    mut commands: Commands,
     cube_elements: Query<(Entity, &CubeElement)>,
     parents_query: Query<&ChildOf>,
     root_query: Query<Entity, With<ViewCubeRoot>>,
@@ -399,6 +398,7 @@ pub fn on_cube_hover_start(
     mut original_materials: ResMut<OriginalMaterials>,
 ) {
     let entity = trigger.entity;
+    let colors = ViewCubeColors::default();
 
     let Some(target) = find_cube_element_ancestor(entity, &cube_elements, &parents_query) else {
         return;
@@ -430,13 +430,20 @@ pub fn on_cube_hover_start(
 
     // Apply highlight
     for hover_target in target_entities.iter().copied() {
+        let (hover_color, hover_emissive) =
+            if let Ok((_, element)) = cube_elements.get(hover_target) {
+                (colors.get_element_hover(element), colors.highlight_emissive)
+            } else {
+                (colors.face_hover, colors.highlight_emissive)
+            };
         apply_highlight(
             hover_target,
             &children_query,
             &material_query,
             &mut materials,
             &mut original_materials,
-            &mut commands,
+            hover_color,
+            hover_emissive,
         );
     }
 
@@ -659,18 +666,17 @@ fn apply_highlight(
     material_query: &Query<&MeshMaterial3d<StandardMaterial>>,
     materials: &mut Assets<StandardMaterial>,
     original_materials: &mut OriginalMaterials,
-    _commands: &mut Commands,
+    hover_color: Color,
+    hover_emissive: LinearRgba,
 ) {
-    let colors = ViewCubeColors::default();
-
     if let Ok(mat_handle) = material_query.get(entity) {
         if let Some(mat) = materials.get_mut(&mat_handle.0) {
             original_materials
                 .colors
                 .entry(entity)
                 .or_insert(mat.base_color);
-            mat.base_color = colors.face_hover;
-            mat.emissive = colors.highlight_emissive;
+            mat.base_color = hover_color;
+            mat.emissive = hover_emissive;
         }
     }
 
@@ -682,8 +688,8 @@ fn apply_highlight(
                         .colors
                         .entry(child)
                         .or_insert(mat.base_color);
-                    mat.base_color = colors.face_hover;
-                    mat.emissive = colors.highlight_emissive;
+                    mat.base_color = hover_color;
+                    mat.emissive = hover_emissive;
                 }
             }
         }

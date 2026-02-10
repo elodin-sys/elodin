@@ -41,10 +41,10 @@ impl ViewCubeColors {
             face_hover: Color::srgb(1.0, 0.85, 0.3),
             // Warm bronze edges - clearly distinct from faces
             edge_normal: Color::srgba(0.72, 0.62, 0.45, 0.9),
-            edge_hover: Color::srgb(1.0, 0.85, 0.3),
+            edge_hover: Color::srgb(0.3, 0.76, 1.0),
             // Bright gold corners - accent points
             corner_normal: Color::srgba(0.85, 0.72, 0.4, 0.95),
-            corner_hover: Color::srgb(1.0, 0.85, 0.3),
+            corner_hover: Color::srgb(1.0, 0.55, 0.18),
             // Arrows
             arrow_normal: Color::srgba(0.85, 0.8, 0.7, 0.6),
             arrow_hover: Color::srgba(1.0, 0.9, 0.4, 0.95),
@@ -60,10 +60,10 @@ impl ViewCubeColors {
             face_hover: Color::srgb(0.2, 0.55, 1.0),
             // Medium warm brown edges - clear separation
             edge_normal: Color::srgba(0.55, 0.48, 0.38, 0.85),
-            edge_hover: Color::srgb(0.2, 0.55, 1.0),
+            edge_hover: Color::srgb(0.0, 0.7, 0.54),
             // Darker brown corners - defined anchor points
             corner_normal: Color::srgba(0.42, 0.36, 0.28, 0.9),
-            corner_hover: Color::srgb(0.2, 0.55, 1.0),
+            corner_hover: Color::srgb(0.92, 0.36, 0.22),
             // Arrows
             arrow_normal: Color::srgba(0.45, 0.4, 0.35, 0.55),
             arrow_hover: Color::srgba(0.15, 0.45, 0.95, 0.95),
