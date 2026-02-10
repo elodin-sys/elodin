@@ -52,17 +52,15 @@ fn setup(
     mut materials: ResMut<Assets<StandardMaterial>>,
     config: Res<ViewCubeConfig>,
 ) {
-    // Spawn main camera with ViewCubeTargetCamera marker
     let camera_entity = commands
         .spawn((
             Transform::from_xyz(5.0, 4.0, 5.0).looking_at(Vec3::ZERO, Vec3::Y),
             Camera3d::default(),
-            ViewCubeTargetCamera,  // Required: marks this as the camera to control
+            ViewCubeTargetCamera,
             Name::new("main_camera"),
         ))
         .id();
 
-    // Spawn the ViewCube
     spawn_view_cube(
         &mut commands,
         &asset_server,
@@ -97,23 +95,15 @@ For integration with the Elodin editor (using `bevy_editor_cam`):
 ```rust
 use elodin_editor::plugins::view_cube::{ViewCubeConfig, ViewCubePlugin};
 
-// Use the editor_mode() preset
 let config = ViewCubeConfig::editor_mode();
 
 App::new()
     .add_plugins(ViewCubePlugin { config })
-    // ...
 ```
 
 This enables:
 - `follow_main_viewport`: ViewCube stays in corner of each split view
 - `sync_with_camera`: Cube rotation reflects main camera orientation
-
-## Run the Demo
-
-```bash
-cargo run --example view_cube_demo -p elodin-editor
-```
 
 ## Required Assets
 

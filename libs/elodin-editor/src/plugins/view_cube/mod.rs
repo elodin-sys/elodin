@@ -1,45 +1,4 @@
-//! ViewCube Plugin - A CAD-style navigation widget for 3D viewports
-//!
-//! Provides a clickable cube with faces, edges, and corners for quick camera orientation,
-//! plus rotation arrows for incremental adjustments.
-//!
-//! # Usage
-//!
-//! ## With auto_rotate (default)
-//!
-//! ```rust,ignore
-//! use elodin_editor::plugins::view_cube::{
-//!     ViewCubePlugin, ViewCubeConfig, ViewCubeTargetCamera, spawn::spawn_view_cube
-//! };
-//!
-//! fn main() {
-//!     App::new()
-//!         .add_plugins(DefaultPlugins)
-//!         .add_plugins(ViewCubePlugin::default()) // auto_rotate = true
-//!         .add_systems(Startup, setup)
-//!         .run();
-//! }
-//!
-//! fn setup(mut commands: Commands, ...) {
-//!     // Add ViewCubeTargetCamera to the camera you want to control
-//!     let camera = commands.spawn((Camera3d::default(), ViewCubeTargetCamera)).id();
-//!     spawn_view_cube(&mut commands, ..., camera);
-//! }
-//! ```
-//!
-//! ## With manual event handling
-//!
-//! ```rust,ignore
-//! let config = ViewCubeConfig { auto_rotate: false, ..default() };
-//! app.add_plugins(ViewCubePlugin { config });
-//!
-//! // Then handle ViewCubeEvent in your own systems
-//! fn handle_events(mut events: MessageReader<ViewCubeEvent>, ...) {
-//!     for event in events.read() {
-//!         // Handle camera rotation manually
-//!     }
-//! }
-//! ```
+//! ViewCube plugin for CAD-style camera orientation in 3D viewports.
 
 mod camera;
 mod components;
@@ -60,7 +19,6 @@ use bevy::picking::prelude::*;
 use bevy::prelude::*;
 use bevy_fontmesh::prelude::*;
 
-/// Tracks the current color mode to detect changes
 #[derive(Resource)]
 struct CurrentColorMode {
     mode: String,
@@ -74,7 +32,6 @@ impl Default for CurrentColorMode {
     }
 }
 
-/// Main plugin for the ViewCube widget
 #[derive(Default)]
 pub struct ViewCubePlugin {
     pub config: ViewCubeConfig,
@@ -82,7 +39,6 @@ pub struct ViewCubePlugin {
 
 impl Plugin for ViewCubePlugin {
     fn build(&self, app: &mut App) {
-        // Only add MeshPickingPlugin if not already present
         if !app.is_plugin_added::<MeshPickingPlugin>() {
             app.add_plugins(MeshPickingPlugin);
         }
@@ -102,23 +58,19 @@ impl Plugin for ViewCubePlugin {
             .add_observer(interactions::on_arrow_hover_end)
             .add_observer(interactions::on_arrow_click);
 
-        // Camera control uses LookToTrigger to stay aligned with EditorCam state.
         if self.config.auto_rotate {
             app.init_resource::<camera::ViewCubeArrowTargetCache>()
                 .add_systems(Update, camera::handle_view_cube_editor)
                 .add_systems(Update, camera::snap_initial_camera);
         }
 
-        // Add sync system when sync_with_camera is enabled (for overlay/gizmo mode)
         if self.config.sync_with_camera {
             app.add_systems(PostUpdate, camera::sync_view_cube_rotation);
         }
 
-        // Add overlay mode systems
         if self.config.use_overlay {
             app.add_systems(Update, camera::apply_render_layers_to_scene);
 
-            // Add viewport system unless skipped (e.g., when using existing navigation_gizmo system)
             if !self.config.skip_viewport_system {
                 if self.config.follow_main_viewport {
                     app.add_systems(PostUpdate, camera::set_view_cube_viewport_editor);
@@ -130,7 +82,6 @@ impl Plugin for ViewCubePlugin {
     }
 }
 
-/// Detects color mode changes (dark/light) and updates all ViewCube materials accordingly.
 fn update_theme_on_mode_change(
     mut current_mode: ResMut<CurrentColorMode>,
     cube_elements: Query<(Entity, &CubeElement), With<ViewCubeSetup>>,
@@ -148,11 +99,9 @@ fn update_theme_on_mode_change(
 
     let colors = ViewCubeColors::default();
 
-    // Update cube elements (faces, edges, corners)
     for (entity, element) in cube_elements.iter() {
         let new_color = colors.get_element_color(element);
 
-        // Update children materials
         if let Ok(children) = children_query.get(entity) {
             for child in children.iter() {
                 original_materials.colors.insert(child, new_color);
@@ -164,7 +113,6 @@ fn update_theme_on_mode_change(
             }
         }
 
-        // Update entity itself if it has a material
         original_materials.colors.insert(entity, new_color);
         if let Ok(mat_handle) = material_query.get(entity)
             && let Some(mat) = materials.get_mut(&mat_handle.0)
@@ -173,7 +121,6 @@ fn update_theme_on_mode_change(
         }
     }
 
-    // Update arrow materials
     for (entity, _) in arrows.iter() {
         if let Ok(mat_handle) = material_query.get(entity)
             && let Some(mat) = materials.get_mut(&mat_handle.0)
