@@ -29,6 +29,7 @@ pub fn setup_cube_elements(
     mut original_materials: ResMut<OriginalMaterials>,
 ) {
     const EDGE_HOVER_SCALE: f32 = 1.2;
+    const CORNER_PICK_SCALE: f32 = 1.15;
 
     // Support multiple ViewCubes (split viewports)
     if mesh_roots.is_empty() {
@@ -77,6 +78,12 @@ pub fn setup_cube_elements(
             {
                 // Slightly enlarge border meshes so edge/frame hover is easier to trigger.
                 transform.scale *= Vec3::splat(EDGE_HOVER_SCALE);
+            }
+            if matches!(elem, CubeElement::Corner(_))
+                && let Ok(mut transform) = transforms.get_mut(entity)
+            {
+                // Slightly enlarge corners to improve click tolerance.
+                transform.scale *= Vec3::splat(CORNER_PICK_SCALE);
             }
 
             commands
@@ -176,118 +183,48 @@ fn same_entity_set(lhs: &[Entity], rhs: &[Entity]) -> bool {
     lhs.len() == rhs.len() && lhs.iter().all(|entity| rhs.contains(entity))
 }
 
-#[derive(Debug)]
-struct EdgeHoverCandidate {
-    frame_face: FaceDirection,
-    frame_face_dot: f32,
-    secondary_face: FaceDirection,
-    secondary_face_dot: f32,
-    target_face: FaceDirection,
-    chosen_up_source: &'static str,
-    rotation_angle: f32,
+const FACE_FRONT_DOT_THRESHOLD: f32 = 0.95;
+const FACE_VISIBLE_DOT_THRESHOLD: f32 = 0.0;
+
+#[derive(Clone, Copy, Debug)]
+struct EdgeInteractionContext {
+    camera_dir_cube: Vec3,
+    front_face: FaceDirection,
+    front_dot: f32,
 }
 
-fn choose_best_edge_hover_candidate<'a>(
-    candidate_a: &'a Option<EdgeHoverCandidate>,
-    candidate_b: &'a Option<EdgeHoverCandidate>,
-) -> Option<&'a EdgeHoverCandidate> {
-    match (candidate_a.as_ref(), candidate_b.as_ref()) {
-        (Some(a), Some(b)) => {
-            if a.rotation_angle <= b.rotation_angle + 1.0e-6 {
-                Some(a)
-            } else {
-                Some(b)
-            }
-        }
-        (Some(a), None) => Some(a),
-        (None, Some(b)) => Some(b),
-        (None, None) => None,
-    }
+fn face_dot(face: FaceDirection, camera_dir_cube: Vec3) -> f32 {
+    face.to_look_direction().dot(camera_dir_cube)
 }
 
-fn build_edge_hover_candidate(
-    camera_rotation: Quat,
-    frame_face: FaceDirection,
-    frame_face_dot: f32,
-    secondary_face: FaceDirection,
-    secondary_face_dot: f32,
-) -> Option<EdgeHoverCandidate> {
-    let target_face = frame_face.opposite();
-    let facing_world = -target_face.to_look_direction();
-    let (_up_world, chosen_up_source, rotation_angle) =
-        choose_min_rotation_up_world(camera_rotation, facing_world)?;
-    Some(EdgeHoverCandidate {
-        frame_face,
-        frame_face_dot,
-        secondary_face,
-        secondary_face_dot,
-        target_face,
-        chosen_up_source,
-        rotation_angle,
-    })
-}
-
-fn choose_min_rotation_up_world(
-    camera_rotation: Quat,
-    facing_world: Vec3,
-) -> Option<(Vec3, &'static str, f32)> {
-    let mut best: Option<(Vec3, &'static str, f32)> = None;
-
-    for (label, up_world) in [
-        ("world_pos_x", Vec3::X),
-        ("world_neg_x", Vec3::NEG_X),
-        ("world_pos_y", Vec3::Y),
-        ("world_neg_y", Vec3::NEG_Y),
-        ("world_pos_z", Vec3::Z),
-        ("world_neg_z", Vec3::NEG_Z),
-    ] {
-        if facing_world.dot(up_world).abs() > 0.99 {
-            continue;
-        }
-        let target_rotation = Transform::default()
-            .looking_to(facing_world, up_world)
-            .rotation;
-        let angle = camera_rotation.angle_between(target_rotation).abs();
-        let replace = match best {
-            Some((_, _, best_angle)) => angle + 1.0e-6 < best_angle,
-            None => true,
-        };
-        if replace {
-            best = Some((up_world, label, angle));
-        }
-    }
-
-    best
+fn front_face(camera_dir_cube: Vec3) -> (FaceDirection, f32) {
+    [
+        FaceDirection::East,
+        FaceDirection::West,
+        FaceDirection::North,
+        FaceDirection::South,
+        FaceDirection::Up,
+        FaceDirection::Down,
+    ]
+    .into_iter()
+    .map(|face| (face, face_dot(face, camera_dir_cube)))
+    .max_by(|(_, dot_a), (_, dot_b)| dot_a.total_cmp(dot_b))
+    .unwrap_or((FaceDirection::North, 0.0))
 }
 
 #[allow(clippy::too_many_arguments)]
-fn compute_hover_targets(
+fn edge_interaction_context(
     target: Entity,
-    cube_elements: &Query<(Entity, &CubeElement)>,
     parents_query: &Query<&ChildOf>,
     root_query: &Query<Entity, With<ViewCubeRoot>>,
     root_links: &Query<&ViewCubeLink, With<ViewCubeRoot>>,
     camera_globals: &Query<&GlobalTransform, With<ViewCubeTargetCamera>>,
     root_globals: &Query<&GlobalTransform, With<ViewCubeRoot>>,
     config: &ViewCubeConfig,
-) -> Vec<Entity> {
-    let Ok((_, element)) = cube_elements.get(target) else {
-        return vec![target];
-    };
-
-    let CubeElement::Edge(edge_under_cursor) = *element else {
-        return vec![target];
-    };
-
-    let Some(root) = find_root_ancestor(target, parents_query, root_query) else {
-        return vec![target];
-    };
-    let Ok(link) = root_links.get(root) else {
-        return vec![target];
-    };
-    let Ok(camera_global) = camera_globals.get(link.main_camera) else {
-        return vec![target];
-    };
+) -> Option<(Entity, EdgeInteractionContext)> {
+    let root = find_root_ancestor(target, parents_query, root_query)?;
+    let link = root_links.get(root).ok()?;
+    let camera_global = camera_globals.get(link.main_camera).ok()?;
     let cube_global = root_globals
         .get(root)
         .ok()
@@ -310,21 +247,99 @@ fn compute_hover_targets(
         camera_dir_world
     };
     let camera_dir_cube = cube_rotation.inverse() * view_dir_world;
+    let (front_face, front_dot) = front_face(camera_dir_cube);
+
+    Some((
+        root,
+        EdgeInteractionContext {
+            camera_dir_cube,
+            front_face,
+            front_dot,
+        },
+    ))
+}
+
+fn resolve_edge_target_face(
+    edge_under_cursor: EdgeDirection,
+    context: EdgeInteractionContext,
+) -> Option<FaceDirection> {
+    if context.front_dot >= FACE_FRONT_DOT_THRESHOLD {
+        if edges_for_face(context.front_face).contains(&edge_under_cursor) {
+            return Some(context.front_face.opposite());
+        }
+        return None;
+    }
+
     let (face_a, face_b) = edge_under_cursor.adjacent_faces();
-    let dot_a = face_a.to_look_direction().dot(camera_dir_cube);
-    let dot_b = face_b.to_look_direction().dot(camera_dir_cube);
-    let candidate_a = build_edge_hover_candidate(cam_rotation, face_a, dot_a, face_b, dot_b);
-    let candidate_b = build_edge_hover_candidate(cam_rotation, face_b, dot_b, face_a, dot_a);
+    let dot_a = face_dot(face_a, context.camera_dir_cube);
+    let dot_b = face_dot(face_b, context.camera_dir_cube);
+    let a_visible = dot_a >= FACE_VISIBLE_DOT_THRESHOLD;
+    let b_visible = dot_b >= FACE_VISIBLE_DOT_THRESHOLD;
 
-    let chosen = choose_best_edge_hover_candidate(&candidate_a, &candidate_b);
+    match (a_visible, b_visible) {
+        (true, false) => Some(face_b),
+        (false, true) => Some(face_a),
+        (false, false) => {
+            // Degenerate case: both faces hidden. Prefer the more hidden face.
+            if dot_a <= dot_b {
+                Some(face_a)
+            } else {
+                Some(face_b)
+            }
+        }
+        (true, true) => None,
+    }
+}
 
-    let Some(chosen) = chosen else {
-        return vec![target];
+fn edge_is_visible_for_target_face(
+    edge: EdgeDirection,
+    target_face: FaceDirection,
+    camera_dir_cube: Vec3,
+) -> bool {
+    let (face_a, face_b) = edge.adjacent_faces();
+    let other_face = if face_a == target_face {
+        face_b
+    } else if face_b == target_face {
+        face_a
+    } else {
+        return false;
     };
 
-    let frame_face = chosen.frame_face;
-    let edge_group = edges_for_face(frame_face);
+    face_dot(other_face, camera_dir_cube) >= FACE_VISIBLE_DOT_THRESHOLD
+}
 
+fn edge_group_for_target_face(
+    edge_under_cursor: EdgeDirection,
+    target_face: FaceDirection,
+    context: EdgeInteractionContext,
+) -> Vec<EdgeDirection> {
+    let mut group: Vec<EdgeDirection> = if context.front_dot >= FACE_FRONT_DOT_THRESHOLD
+        && target_face == context.front_face.opposite()
+    {
+        edges_for_face(context.front_face).into_iter().collect()
+    } else {
+        edges_for_face(target_face)
+            .into_iter()
+            .filter(|edge| {
+                edge_is_visible_for_target_face(*edge, target_face, context.camera_dir_cube)
+            })
+            .collect()
+    };
+
+    if !group.contains(&edge_under_cursor) {
+        group.push(edge_under_cursor);
+    }
+
+    group
+}
+
+fn collect_edge_entities_for_root(
+    root: Entity,
+    edge_group: &[EdgeDirection],
+    cube_elements: &Query<(Entity, &CubeElement)>,
+    parents_query: &Query<&ChildOf>,
+    root_query: &Query<Entity, With<ViewCubeRoot>>,
+) -> Vec<Entity> {
     let mut targets = Vec::new();
     for (entity, element) in cube_elements.iter() {
         let CubeElement::Edge(candidate_edge) = *element else {
@@ -338,27 +353,52 @@ fn compute_hover_targets(
             targets.push(entity);
         }
     }
+    targets
+}
 
-    if targets.is_empty() {
-        targets.push(target);
-    }
+#[allow(clippy::too_many_arguments)]
+fn compute_hover_targets(
+    target: Entity,
+    cube_elements: &Query<(Entity, &CubeElement)>,
+    parents_query: &Query<&ChildOf>,
+    root_query: &Query<Entity, With<ViewCubeRoot>>,
+    root_links: &Query<&ViewCubeLink, With<ViewCubeRoot>>,
+    camera_globals: &Query<&GlobalTransform, With<ViewCubeTargetCamera>>,
+    root_globals: &Query<&GlobalTransform, With<ViewCubeRoot>>,
+    config: &ViewCubeConfig,
+) -> Vec<Entity> {
+    let Ok((_, element)) = cube_elements.get(target) else {
+        return vec![];
+    };
+
+    let CubeElement::Edge(edge_under_cursor) = *element else {
+        return vec![target];
+    };
+
+    let Some((root, context)) = edge_interaction_context(
+        target,
+        parents_query,
+        root_query,
+        root_links,
+        camera_globals,
+        root_globals,
+        config,
+    ) else {
+        return vec![];
+    };
+
+    let Some(target_face) = resolve_edge_target_face(edge_under_cursor, context) else {
+        return vec![];
+    };
+    let edge_group = edge_group_for_target_face(edge_under_cursor, target_face, context);
+    let targets =
+        collect_edge_entities_for_root(root, &edge_group, cube_elements, parents_query, root_query);
 
     debug!(
         hover_edge = ?edge_under_cursor,
-        camera_dir_world = ?camera_dir_world,
-        candidate_a_frame_face = ?candidate_a.as_ref().map(|c| c.frame_face),
-        candidate_a_target_face = ?candidate_a.as_ref().map(|c| c.target_face),
-        candidate_a_rotation_angle = ?candidate_a.as_ref().map(|c| c.rotation_angle),
-        candidate_b_frame_face = ?candidate_b.as_ref().map(|c| c.frame_face),
-        candidate_b_target_face = ?candidate_b.as_ref().map(|c| c.target_face),
-        candidate_b_rotation_angle = ?candidate_b.as_ref().map(|c| c.rotation_angle),
-        frame_face = ?chosen.frame_face,
-        frame_face_dot = chosen.frame_face_dot,
-        secondary_face = ?chosen.secondary_face,
-        secondary_face_dot = chosen.secondary_face_dot,
-        target_face = ?chosen.target_face,
-        chosen_up_source = chosen.chosen_up_source,
-        rotation_angle = chosen.rotation_angle,
+        front_face = ?context.front_face,
+        front_dot = context.front_dot,
+        target_face = ?target_face,
         edge_group = ?edge_group,
         highlighted_edges = targets.len(),
         "view cube: edge hover group"
@@ -446,6 +486,21 @@ pub fn on_cube_hover_start(
         &config,
     );
 
+    if target_entities.is_empty() {
+        for prev in hovered.entities.iter().copied() {
+            reset_highlight(
+                prev,
+                &children_query,
+                &material_query,
+                &mut materials,
+                &original_materials,
+            );
+        }
+        hovered.entity = None;
+        hovered.entities.clear();
+        return;
+    }
+
     if same_entity_set(&hovered.entities, &target_entities) {
         return;
     }
@@ -523,6 +578,10 @@ pub fn on_cube_click(
     cube_elements: Query<(Entity, &CubeElement)>,
     parents_query: Query<&ChildOf>,
     root_query: Query<Entity, With<ViewCubeRoot>>,
+    root_links: Query<&ViewCubeLink, With<ViewCubeRoot>>,
+    camera_globals: Query<&GlobalTransform, With<ViewCubeTargetCamera>>,
+    root_globals: Query<&GlobalTransform, With<ViewCubeRoot>>,
+    config: Res<ViewCubeConfig>,
     names: Query<&Name>,
     mut events: MessageWriter<ViewCubeEvent>,
 ) {
@@ -581,8 +640,24 @@ pub fn on_cube_click(
             });
         }
         CubeElement::Edge(dir) => {
+            let Some((_root, context)) = edge_interaction_context(
+                target_entity,
+                &parents_query,
+                &root_query,
+                &root_links,
+                &camera_globals,
+                &root_globals,
+                &config,
+            ) else {
+                return;
+            };
+            let Some(target_face) = resolve_edge_target_face(*dir, context) else {
+                return;
+            };
+
             events.write(ViewCubeEvent::EdgeClicked {
                 direction: *dir,
+                target_face,
                 source,
             });
         }
@@ -812,5 +887,48 @@ fn find_ancestor(
         } else {
             return None;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn context(camera_dir_cube: Vec3) -> EdgeInteractionContext {
+        let (front_face, front_dot) = front_face(camera_dir_cube);
+        EdgeInteractionContext {
+            camera_dir_cube,
+            front_face,
+            front_dot,
+        }
+    }
+
+    #[test]
+    fn edge_target_face_uses_opposite_when_face_on() {
+        let ctx = context(Vec3::Z);
+        let edge = EdgeDirection::YFrontLeft;
+        let target = resolve_edge_target_face(edge, ctx);
+        assert_eq!(target, Some(FaceDirection::South));
+    }
+
+    #[test]
+    fn edge_target_face_selects_hidden_face_in_oblique_view() {
+        let ctx = context(Vec3::new(1.0, 1.0, 1.0).normalize());
+        let edge = EdgeDirection::YFrontLeft;
+        let target = resolve_edge_target_face(edge, ctx);
+        assert_eq!(target, Some(FaceDirection::West));
+
+        let group = edge_group_for_target_face(edge, FaceDirection::West, ctx);
+        assert_eq!(group.len(), 2);
+        assert!(group.contains(&EdgeDirection::YFrontLeft));
+        assert!(group.contains(&EdgeDirection::ZTopLeft));
+    }
+
+    #[test]
+    fn edge_between_two_visible_faces_is_not_clickable() {
+        let ctx = context(Vec3::new(1.0, 1.0, 1.0).normalize());
+        let edge = EdgeDirection::XTopFront; // Up + North (both visible in this view)
+        let target = resolve_edge_target_face(edge, ctx);
+        assert_eq!(target, None);
     }
 }

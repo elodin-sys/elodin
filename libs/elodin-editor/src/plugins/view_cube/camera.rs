@@ -1,10 +1,7 @@
 //! Camera control systems for the ViewCube plugin.
 //!
-//! Two modes:
-//! - **Standalone** (`auto_rotate`): direct camera animation via `CameraAnimation`.
-//! - **Editor** (`use_look_to_trigger`): sends `LookToTrigger` messages to bevy_editor_cam,
-//!   same approach as navigation_gizmo. This ensures proper integration with the editor's
-//!   camera system instead of fighting it with direct Transform modifications.
+//! ViewCube camera snaps are driven through `LookToTrigger` to stay consistent
+//! with `bevy_editor_cam` state and avoid transform fighting.
 
 use bevy::camera::Viewport;
 use bevy::camera::visibility::RenderLayers;
@@ -20,15 +17,15 @@ use impeller2_wkt::ComponentValue;
 use std::collections::HashMap;
 
 use super::components::{
-    FaceDirection, RotationArrow, ViewCubeCamera, ViewCubeLink, ViewCubeRenderLayer, ViewCubeRoot,
+    RotationArrow, ViewCubeCamera, ViewCubeLink, ViewCubeRenderLayer, ViewCubeRoot,
 };
 use super::config::ViewCubeConfig;
 use super::events::ViewCubeEvent;
 use crate::WorldPosExt;
 use crate::object_3d::ComponentArrayExt;
 
-/// If the clicked face is already mostly in front of the camera, swap to its opposite.
-const FACE_SWAP_DOT_THRESHOLD: f32 = 0.95;
+/// Face-on threshold for front-face click behavior.
+const FACE_FRONT_DOT_THRESHOLD: f32 = 0.95;
 
 // ============================================================================
 // Components
@@ -65,18 +62,6 @@ pub fn snap_initial_camera(
 // ============================================================================
 // Resources
 // ============================================================================
-
-/// Tracks camera animation state.
-#[derive(Resource, Default)]
-pub struct CameraAnimation {
-    pub animating: bool,
-    pub progress: f32,
-    pub target_entity: Option<Entity>,
-    pub start_position: Vec3,
-    pub start_rotation: Quat,
-    pub target_position: Vec3,
-    pub target_rotation: Quat,
-}
 
 #[derive(Clone, Copy, Debug)]
 struct ArrowTargetState {
@@ -123,208 +108,9 @@ impl ViewCubeArrowTargetCache {
 // Systems
 // ============================================================================
 
-/// Handle ViewCube events and rotate the camera accordingly.
-/// Uses source-based camera lookup to support multiple viewports.
-pub fn handle_view_cube_camera(
-    mut events: MessageReader<ViewCubeEvent>,
-    view_cube_query: Query<&ViewCubeLink, With<ViewCubeRoot>>,
-    cube_root_query: Query<&GlobalTransform, With<ViewCubeRoot>>,
-    mut camera_query: Query<(&mut Transform, &GlobalTransform), With<ViewCubeTargetCamera>>,
-    mut camera_anim: ResMut<CameraAnimation>,
-    config: Res<ViewCubeConfig>,
-) {
-    for event in events.read() {
-        let Some(cam) = main_camera_for_event(event, &view_cube_query) else {
-            continue;
-        };
-
-        if let ViewCubeEvent::FaceClicked { direction, source } = event {
-            if let Ok((transform, global_transform)) = camera_query.get(cam) {
-                let cube_global = cube_root_query
-                    .get(*source)
-                    .ok()
-                    .map(|transform| (transform.translation(), transform.rotation()));
-                let (_, camera_rotation, _) = global_transform.to_scale_rotation_translation();
-                let camera_dir_world = camera_rotation * Vec3::Z;
-                let cube_rotation = if config.sync_with_camera {
-                    camera_rotation.conjugate() * config.effective_axis_correction()
-                } else {
-                    cube_global
-                        .map(|(_, rotation)| rotation)
-                        .unwrap_or(Quat::IDENTITY)
-                };
-                let view_dir_world = if config.use_overlay {
-                    Vec3::Z
-                } else if let Some((cube_translation, _)) = cube_global {
-                    (global_transform.translation() - cube_translation).normalize_or_zero()
-                } else {
-                    camera_dir_world
-                };
-                let camera_dir_cube = cube_rotation.inverse() * view_dir_world;
-                let (target_face, clicked_face_dot, face_was_in_front) =
-                    resolve_face_click_target(*direction, camera_dir_cube);
-                debug!(
-                    mode = "standalone",
-                    clicked_face = ?direction,
-                    target_face = ?target_face,
-                    clicked_face_dot = clicked_face_dot,
-                    face_was_in_front = face_was_in_front,
-                    threshold = FACE_SWAP_DOT_THRESHOLD,
-                    "view cube: face target selection"
-                );
-                start_camera_animation(
-                    target_face.to_look_direction(),
-                    transform,
-                    &mut camera_anim,
-                    &config,
-                    cam,
-                );
-            }
-            continue;
-        }
-
-        if let Some(look_dir) = target_look_direction(event) {
-            if let Ok((transform, _)) = camera_query.get(cam) {
-                start_camera_animation(look_dir, transform, &mut camera_anim, &config, cam);
-            }
-            continue;
-        }
-
-        if let ViewCubeEvent::ArrowClicked { arrow, .. } = event
-            && let Ok((mut transform, _)) = camera_query.get_mut(cam)
-        {
-            apply_arrow_rotation(*arrow, &config, &mut transform);
-        }
-    }
-}
-
-/// Animate the camera smoothly to its target.
-/// Applies to the camera that was targeted by the last animation start.
-pub fn animate_camera(
-    mut camera_query: Query<&mut Transform, With<ViewCubeTargetCamera>>,
-    mut camera_anim: ResMut<CameraAnimation>,
-    time: Res<Time>,
-) {
-    if !camera_anim.animating {
-        return;
-    }
-
-    camera_anim.progress += time.delta_secs() * 3.0; // Animation speed
-
-    let Some(target_entity) = camera_anim.target_entity else {
-        return;
-    };
-    let Ok(mut transform) = camera_query.get_mut(target_entity) else {
-        return;
-    };
-
-    if camera_anim.progress >= 1.0 {
-        transform.translation = camera_anim.target_position;
-        transform.rotation = camera_anim.target_rotation;
-        camera_anim.animating = false;
-        camera_anim.progress = 0.0;
-    } else {
-        // Smooth interpolation using ease-out curve
-        let t = ease_out_cubic(camera_anim.progress);
-        transform.translation = camera_anim
-            .start_position
-            .lerp(camera_anim.target_position, t);
-        transform.rotation = camera_anim
-            .start_rotation
-            .slerp(camera_anim.target_rotation, t);
-    }
-}
-
 // ============================================================================
 // Helper Functions
 // ============================================================================
-
-fn start_camera_animation(
-    mut look_dir: Vec3,
-    current_transform: &Transform,
-    camera_anim: &mut CameraAnimation,
-    config: &ViewCubeConfig,
-    camera_entity: Entity,
-) {
-    // Check if clicking through transparent face (flip direction if looking from behind)
-    let camera_dir = current_transform.translation.normalize();
-    if camera_dir.dot(look_dir) < 0.0 {
-        look_dir = -look_dir;
-    }
-
-    let up_dir = get_up_direction_for_look(look_dir);
-    let target_pos = look_dir * config.camera_distance;
-    let target_transform = Transform::from_translation(target_pos).looking_at(Vec3::ZERO, up_dir);
-
-    // Skip if already at target
-    let position_similar = current_transform.translation.distance(target_pos) < 0.5;
-    let rotation_similar = current_transform
-        .rotation
-        .dot(target_transform.rotation)
-        .abs()
-        > 0.99;
-
-    if position_similar && rotation_similar {
-        return;
-    }
-
-    camera_anim.target_entity = Some(camera_entity);
-    camera_anim.start_position = current_transform.translation;
-    camera_anim.start_rotation = current_transform.rotation;
-    camera_anim.target_position = target_pos;
-    camera_anim.target_rotation = target_transform.rotation;
-    camera_anim.progress = 0.0;
-    camera_anim.animating = true;
-}
-
-fn apply_arrow_rotation(arrow: RotationArrow, config: &ViewCubeConfig, transform: &mut Transform) {
-    let rotation = match arrow {
-        RotationArrow::Left => {
-            let up = transform.up();
-            Quat::from_axis_angle(*up, config.rotation_increment)
-        }
-        RotationArrow::Right => {
-            let up = transform.up();
-            Quat::from_axis_angle(*up, -config.rotation_increment)
-        }
-        RotationArrow::Up => {
-            let right = transform.right();
-            Quat::from_axis_angle(*right, config.rotation_increment)
-        }
-        RotationArrow::Down => {
-            let right = transform.right();
-            Quat::from_axis_angle(*right, -config.rotation_increment)
-        }
-        RotationArrow::RollLeft => {
-            let forward = transform.forward();
-            Quat::from_axis_angle(*forward, config.rotation_increment)
-        }
-        RotationArrow::RollRight => {
-            let forward = transform.forward();
-            Quat::from_axis_angle(*forward, -config.rotation_increment)
-        }
-    };
-
-    // Rotate around the origin (where the cube is)
-    transform.rotate_around(Vec3::ZERO, rotation);
-}
-
-fn get_up_direction_for_look(look_dir: Vec3) -> Vec3 {
-    // When looking up or down, use a different up vector to avoid gimbal lock
-    if look_dir.y.abs() > 0.9 {
-        if look_dir.y > 0.0 {
-            Vec3::NEG_Z
-        } else {
-            Vec3::Z
-        }
-    } else {
-        Vec3::Y
-    }
-}
-
-fn ease_out_cubic(t: f32) -> f32 {
-    1.0 - (1.0 - t).powi(3)
-}
 
 fn main_camera_for_event(
     event: &ViewCubeEvent,
@@ -345,29 +131,6 @@ fn event_source(event: &ViewCubeEvent) -> Entity {
         | ViewCubeEvent::EdgeClicked { source, .. }
         | ViewCubeEvent::CornerClicked { source, .. }
         | ViewCubeEvent::ArrowClicked { source, .. } => *source,
-    }
-}
-
-fn resolve_face_click_target(
-    clicked_face: FaceDirection,
-    camera_dir_world: Vec3,
-) -> (FaceDirection, f32, bool) {
-    let clicked_face_dot = clicked_face.to_look_direction().dot(camera_dir_world);
-    let face_was_in_front = clicked_face_dot >= FACE_SWAP_DOT_THRESHOLD;
-    let target_face = if face_was_in_front {
-        clicked_face.opposite()
-    } else {
-        clicked_face
-    };
-    (target_face, clicked_face_dot, face_was_in_front)
-}
-
-fn target_look_direction(event: &ViewCubeEvent) -> Option<Vec3> {
-    match event {
-        ViewCubeEvent::FaceClicked { direction, .. } => Some(direction.to_look_direction()),
-        ViewCubeEvent::EdgeClicked { direction, .. } => Some(direction.to_look_direction()),
-        ViewCubeEvent::CornerClicked { position, .. } => Some(position.to_look_direction()),
-        ViewCubeEvent::ArrowClicked { .. } => None,
     }
 }
 
@@ -669,19 +432,30 @@ pub fn handle_view_cube_editor(
         let camera_dir_cube = cube_rotation.inverse() * view_dir_world;
 
         if let ViewCubeEvent::FaceClicked { direction, .. } = event {
-            let (target_face, clicked_face_dot, face_was_in_front) =
-                resolve_face_click_target(*direction, camera_dir_cube);
+            let clicked_face_dot = direction.to_look_direction().dot(camera_dir_cube);
+            let face_was_in_front = clicked_face_dot >= FACE_FRONT_DOT_THRESHOLD;
+            if face_was_in_front {
+                debug!(
+                    mode = "editor",
+                    clicked_face = ?direction,
+                    clicked_face_dot = clicked_face_dot,
+                    threshold = FACE_FRONT_DOT_THRESHOLD,
+                    "view cube: face click ignored (already front)"
+                );
+                continue;
+            }
+
             debug!(
                 mode = "editor",
                 clicked_face = ?direction,
-                target_face = ?target_face,
+                target_face = ?direction,
                 clicked_face_dot = clicked_face_dot,
                 face_was_in_front = face_was_in_front,
-                threshold = FACE_SWAP_DOT_THRESHOLD,
+                threshold = FACE_FRONT_DOT_THRESHOLD,
                 "view cube: face target selection"
             );
 
-            let raw_look_dir_world = target_face.to_look_direction();
+            let raw_look_dir_world = direction.to_look_direction();
             let facing_world = -raw_look_dir_world;
             let facing_local_vec = parent_rotation.inverse() * facing_world;
 
@@ -702,9 +476,9 @@ pub fn handle_view_cube_editor(
                 let rotation_angle = angle_to_trigger(transform, &trigger);
                 debug!(
                     target_kind = "face",
-                    selection_policy = "face_click_front_toggles_opposite_world_to_local_min_total_rotation",
+                    selection_policy = "face_click_non_front_snap_to_face_world_to_local_min_total_rotation",
                     clicked_face = ?direction,
-                    target_face = ?target_face,
+                    target_face = ?direction,
                     clicked_face_dot = clicked_face_dot,
                     face_was_in_front = face_was_in_front,
                     camera_dir_local = ?camera_dir_local,
@@ -793,54 +567,49 @@ pub fn handle_view_cube_editor(
             continue;
         }
 
-        // Edges (the frame around a face): determine which of the two adjacent faces is
-        // currently "in front" relative to the camera, then snap to its opposite face.
-        if let ViewCubeEvent::EdgeClicked { direction, .. } = event {
-            let (face_a, face_b) = direction.adjacent_faces();
-            let dot_a = face_a.to_look_direction().dot(camera_dir_cube);
-            let dot_b = face_b.to_look_direction().dot(camera_dir_cube);
+        if let ViewCubeEvent::EdgeClicked {
+            direction,
+            target_face,
+            ..
+        } = event
+        {
+            let raw_look_dir_world = target_face.to_look_direction();
+            let facing_world = -raw_look_dir_world;
+            let facing_local_vec = parent_rotation.inverse() * facing_world;
 
-            let candidate_a =
-                build_edge_snap_candidate(transform, parent_rotation, face_a, dot_a, face_b, dot_b);
-            let candidate_b =
-                build_edge_snap_candidate(transform, parent_rotation, face_b, dot_b, face_a, dot_a);
-
-            let chosen = choose_best_edge_candidate(&candidate_a, &candidate_b);
-
-            if let Some(chosen) = chosen {
+            if let Ok(facing_local) = Dir3::new(facing_local_vec) {
+                let (
+                    chosen_up,
+                    chosen_up_source,
+                    chosen_up_angle,
+                    chosen_up_runner_up_angle,
+                    chosen_up_margin,
+                    up_candidates_considered,
+                ) = choose_min_rotation_up(transform, parent_rotation, facing_local);
                 let trigger = LookToTrigger {
-                    target_facing_direction: chosen.facing_local,
-                    target_up_direction: chosen.chosen_up,
+                    target_facing_direction: facing_local,
+                    target_up_direction: chosen_up,
                     camera: entity,
                 };
+                let rotation_angle = angle_to_trigger(transform, &trigger);
                 debug!(
                     target_kind = "edge",
-                    selection_policy = "edge_to_opposite_face_min_total_rotation",
+                    selection_policy = "edge_group_resolved_target_face_world_to_local_min_total_rotation",
                     edge_direction = ?direction,
+                    target_face = ?target_face,
                     camera_dir_local = ?camera_dir_local,
                     camera_dir_global = ?camera_dir_global,
-                    candidate_a_frame_face = ?candidate_a.as_ref().map(|c| c.frame_face),
-                    candidate_a_target_face = ?candidate_a.as_ref().map(|c| c.target_face),
-                    candidate_a_rotation_angle = ?candidate_a.as_ref().map(|c| c.rotation_angle),
-                    candidate_b_frame_face = ?candidate_b.as_ref().map(|c| c.frame_face),
-                    candidate_b_target_face = ?candidate_b.as_ref().map(|c| c.target_face),
-                    candidate_b_rotation_angle = ?candidate_b.as_ref().map(|c| c.rotation_angle),
-                    frame_face = ?chosen.frame_face,
-                    frame_face_dot = chosen.frame_face_dot,
-                    secondary_face = ?chosen.secondary_face,
-                    secondary_face_dot = chosen.secondary_face_dot,
-                    target_face = ?chosen.target_face,
-                    raw_look_dir_world = ?chosen.raw_look_dir_world,
-                    facing_world = ?chosen.facing_world,
-                    facing_local = ?chosen.facing_local_vec,
-                    chosen_up_source = chosen.chosen_up_source,
-                    chosen_up_angle = chosen.chosen_up_angle,
-                    chosen_up_runner_up_angle = chosen.chosen_up_runner_up_angle,
-                    chosen_up_margin = chosen.chosen_up_margin,
-                    up_candidates_considered = chosen.up_candidates_considered,
+                    raw_look_dir_world = ?raw_look_dir_world,
+                    facing_world = ?facing_world,
+                    facing_local = ?facing_local_vec,
+                    chosen_up_source = chosen_up_source,
+                    chosen_up_angle = chosen_up_angle,
+                    chosen_up_runner_up_angle = chosen_up_runner_up_angle,
+                    chosen_up_margin = chosen_up_margin,
+                    up_candidates_considered = up_candidates_considered,
                     chosen_facing = ?*trigger.target_facing_direction,
                     chosen_up = ?*trigger.target_up_direction,
-                    rotation_angle = chosen.rotation_angle,
+                    rotation_angle = rotation_angle,
                     "view cube: edge snap"
                 );
                 lookup
@@ -850,12 +619,11 @@ pub fn handle_view_cube_editor(
             } else {
                 warn!(
                     edge_direction = ?direction,
-                    camera_dir_global = ?camera_dir_global,
-                    face_a = ?face_a,
-                    face_b = ?face_b,
-                    dot_a = dot_a,
-                    dot_b = dot_b,
-                    "view cube: invalid edge snap candidates"
+                    target_face = ?target_face,
+                    raw_look_dir_world = ?raw_look_dir_world,
+                    facing_world = ?facing_world,
+                    facing_local = ?facing_local_vec,
+                    "view cube: invalid edge snap directions"
                 );
             }
             continue;
@@ -1043,87 +811,6 @@ fn arrow_camera_axis_angle(
 fn angle_to_target_rotation(transform: &Transform, facing: Dir3, up: Dir3) -> f32 {
     let target_rotation = Transform::default().looking_to(*facing, *up).rotation;
     transform.rotation.angle_between(target_rotation).abs()
-}
-
-#[derive(Debug)]
-struct EdgeSnapCandidate {
-    frame_face: FaceDirection,
-    frame_face_dot: f32,
-    secondary_face: FaceDirection,
-    secondary_face_dot: f32,
-    target_face: FaceDirection,
-    raw_look_dir_world: Vec3,
-    facing_world: Vec3,
-    facing_local_vec: Vec3,
-    facing_local: Dir3,
-    chosen_up: Dir3,
-    chosen_up_source: &'static str,
-    chosen_up_angle: f32,
-    chosen_up_runner_up_angle: Option<f32>,
-    chosen_up_margin: Option<f32>,
-    up_candidates_considered: usize,
-    rotation_angle: f32,
-}
-
-fn choose_best_edge_candidate<'a>(
-    candidate_a: &'a Option<EdgeSnapCandidate>,
-    candidate_b: &'a Option<EdgeSnapCandidate>,
-) -> Option<&'a EdgeSnapCandidate> {
-    match (candidate_a.as_ref(), candidate_b.as_ref()) {
-        (Some(a), Some(b)) => {
-            if a.rotation_angle <= b.rotation_angle + 1.0e-6 {
-                Some(a)
-            } else {
-                Some(b)
-            }
-        }
-        (Some(a), None) => Some(a),
-        (None, Some(b)) => Some(b),
-        (None, None) => None,
-    }
-}
-
-fn build_edge_snap_candidate(
-    transform: &Transform,
-    parent_rotation: Quat,
-    frame_face: FaceDirection,
-    frame_face_dot: f32,
-    secondary_face: FaceDirection,
-    secondary_face_dot: f32,
-) -> Option<EdgeSnapCandidate> {
-    let target_face = frame_face.opposite();
-    let raw_look_dir_world = target_face.to_look_direction();
-    let facing_world = -raw_look_dir_world;
-    let facing_local_vec = parent_rotation.inverse() * facing_world;
-    let facing_local = Dir3::new(facing_local_vec).ok()?;
-    let (
-        chosen_up,
-        chosen_up_source,
-        chosen_up_angle,
-        chosen_up_runner_up_angle,
-        chosen_up_margin,
-        up_candidates_considered,
-    ) = choose_min_rotation_up(transform, parent_rotation, facing_local);
-    let rotation_angle = angle_to_target_rotation(transform, facing_local, chosen_up);
-
-    Some(EdgeSnapCandidate {
-        frame_face,
-        frame_face_dot,
-        secondary_face,
-        secondary_face_dot,
-        target_face,
-        raw_look_dir_world,
-        facing_world,
-        facing_local_vec,
-        facing_local,
-        chosen_up,
-        chosen_up_source,
-        chosen_up_angle,
-        chosen_up_runner_up_angle,
-        chosen_up_margin,
-        up_candidates_considered,
-        rotation_angle,
-    })
 }
 
 fn choose_min_rotation_up(

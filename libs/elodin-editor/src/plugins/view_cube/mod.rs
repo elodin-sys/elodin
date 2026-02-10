@@ -49,7 +49,7 @@ mod interactions;
 pub mod spawn;
 mod theme;
 
-pub use camera::{CameraAnimation, NeedsInitialSnap, ViewCubeTargetCamera};
+pub use camera::{NeedsInitialSnap, ViewCubeTargetCamera};
 pub use components::*;
 pub use config::*;
 pub use events::*;
@@ -102,18 +102,11 @@ impl Plugin for ViewCubePlugin {
             .add_observer(interactions::on_arrow_hover_end)
             .add_observer(interactions::on_arrow_click);
 
-        // Add camera control systems based on configuration
-        if self.config.use_look_to_trigger {
-            // Editor mode: sends LookToTrigger to bevy_editor_cam (same as navigation_gizmo)
+        // Camera control uses LookToTrigger to stay aligned with EditorCam state.
+        if self.config.auto_rotate {
             app.init_resource::<camera::ViewCubeArrowTargetCache>()
                 .add_systems(Update, camera::handle_view_cube_editor)
                 .add_systems(Update, camera::snap_initial_camera);
-        } else if self.config.auto_rotate {
-            // Standalone mode: direct camera animation
-            app.init_resource::<CameraAnimation>().add_systems(
-                Update,
-                (camera::handle_view_cube_camera, camera::animate_camera),
-            );
         }
 
         // Add sync system when sync_with_camera is enabled (for overlay/gizmo mode)
