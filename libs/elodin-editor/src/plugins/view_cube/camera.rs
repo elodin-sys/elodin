@@ -779,38 +779,9 @@ pub fn handle_view_cube_editor(
             let base_up_world = parent_rotation * base_up_local;
             let base_right_world = parent_rotation * base_right_local;
 
-            let step_rotation_world = match arrow {
-                RotationArrow::Left => {
-                    let axis = Dir3::new(base_up_world)
-                        .expect("camera up axis should always be non-zero and finite");
-                    Quat::from_axis_angle(*axis, angle)
-                }
-                RotationArrow::Right => {
-                    let axis = Dir3::new(base_up_world)
-                        .expect("camera up axis should always be non-zero and finite");
-                    Quat::from_axis_angle(*axis, -angle)
-                }
-                RotationArrow::Up => {
-                    let axis = Dir3::new(base_right_world)
-                        .expect("camera right axis should always be non-zero and finite");
-                    Quat::from_axis_angle(*axis, angle)
-                }
-                RotationArrow::Down => {
-                    let axis = Dir3::new(base_right_world)
-                        .expect("camera right axis should always be non-zero and finite");
-                    Quat::from_axis_angle(*axis, -angle)
-                }
-                RotationArrow::RollLeft => {
-                    let axis = Dir3::new(base_forward_world)
-                        .expect("camera forward axis should always be non-zero and finite");
-                    Quat::from_axis_angle(*axis, angle)
-                }
-                RotationArrow::RollRight => {
-                    let axis = Dir3::new(base_forward_world)
-                        .expect("camera forward axis should always be non-zero and finite");
-                    Quat::from_axis_angle(*axis, -angle)
-                }
-            };
+            let (step_axis_world, signed_angle, step_axis_source) =
+                arrow_world_axis_angle(*arrow, angle);
+            let step_rotation_world = Quat::from_axis_angle(*step_axis_world, signed_angle);
             let new_forward_world = step_rotation_world * base_forward_world;
             let new_up_world = step_rotation_world * base_up_world;
             let new_forward_local = parent_rotation.inverse() * new_forward_world;
@@ -836,6 +807,9 @@ pub fn handle_view_cube_editor(
                     base_forward_world = ?base_forward_world,
                     base_up_world = ?base_up_world,
                     base_right_world = ?base_right_world,
+                    step_axis_source = step_axis_source,
+                    step_axis_world = ?*step_axis_world,
+                    step_angle = signed_angle,
                     step_rotation_world = ?step_rotation_world,
                     new_forward_world = ?new_forward_world,
                     new_up_world = ?new_up_world,
@@ -875,6 +849,17 @@ fn trigger_rotation(trigger: &LookToTrigger) -> Quat {
             *trigger.target_up_direction,
         )
         .rotation
+}
+
+fn arrow_world_axis_angle(arrow: RotationArrow, angle: f32) -> (Dir3, f32, &'static str) {
+    match arrow {
+        RotationArrow::Left => (Dir3::new_unchecked(Vec3::Y), angle, "world_pos_y"),
+        RotationArrow::Right => (Dir3::new_unchecked(Vec3::Y), -angle, "world_pos_y"),
+        RotationArrow::Up => (Dir3::new_unchecked(Vec3::X), angle, "world_pos_x"),
+        RotationArrow::Down => (Dir3::new_unchecked(Vec3::X), -angle, "world_pos_x"),
+        RotationArrow::RollLeft => (Dir3::new_unchecked(Vec3::Z), angle, "world_pos_z"),
+        RotationArrow::RollRight => (Dir3::new_unchecked(Vec3::Z), -angle, "world_pos_z"),
+    }
 }
 
 fn angle_to_target_rotation(transform: &Transform, facing: Dir3, up: Dir3) -> f32 {
@@ -1190,5 +1175,39 @@ mod tests {
         cache.set_target(entity, target, 1.0);
         let cached = cache.get_valid_target(entity, 2.0);
         assert_eq!(cached, None);
+    }
+
+    #[test]
+    fn arrow_world_axis_angle_maps_each_pair_to_fixed_axis() {
+        let angle = 0.25;
+        let (axis, signed_angle, source) = arrow_world_axis_angle(RotationArrow::Left, angle);
+        assert_eq!(*axis, Vec3::Y);
+        assert_eq!(signed_angle, angle);
+        assert_eq!(source, "world_pos_y");
+
+        let (axis, signed_angle, source) = arrow_world_axis_angle(RotationArrow::Right, angle);
+        assert_eq!(*axis, Vec3::Y);
+        assert_eq!(signed_angle, -angle);
+        assert_eq!(source, "world_pos_y");
+
+        let (axis, signed_angle, source) = arrow_world_axis_angle(RotationArrow::Up, angle);
+        assert_eq!(*axis, Vec3::X);
+        assert_eq!(signed_angle, angle);
+        assert_eq!(source, "world_pos_x");
+
+        let (axis, signed_angle, source) = arrow_world_axis_angle(RotationArrow::Down, angle);
+        assert_eq!(*axis, Vec3::X);
+        assert_eq!(signed_angle, -angle);
+        assert_eq!(source, "world_pos_x");
+
+        let (axis, signed_angle, source) = arrow_world_axis_angle(RotationArrow::RollLeft, angle);
+        assert_eq!(*axis, Vec3::Z);
+        assert_eq!(signed_angle, angle);
+        assert_eq!(source, "world_pos_z");
+
+        let (axis, signed_angle, source) = arrow_world_axis_angle(RotationArrow::RollRight, angle);
+        assert_eq!(*axis, Vec3::Z);
+        assert_eq!(signed_angle, -angle);
+        assert_eq!(source, "world_pos_z");
     }
 }
