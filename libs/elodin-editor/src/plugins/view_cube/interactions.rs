@@ -1,7 +1,7 @@
 //! Interaction handlers for the ViewCube widget
 
 use bevy::ecs::hierarchy::ChildOf;
-use bevy::log::info;
+use bevy::log::debug;
 use bevy::picking::prelude::*;
 use bevy::prelude::*;
 
@@ -186,6 +186,24 @@ struct EdgeHoverCandidate {
     rotation_angle: f32,
 }
 
+fn choose_best_edge_hover_candidate<'a>(
+    candidate_a: &'a Option<EdgeHoverCandidate>,
+    candidate_b: &'a Option<EdgeHoverCandidate>,
+) -> Option<&'a EdgeHoverCandidate> {
+    match (candidate_a.as_ref(), candidate_b.as_ref()) {
+        (Some(a), Some(b)) => {
+            if a.rotation_angle <= b.rotation_angle + 1.0e-6 {
+                Some(a)
+            } else {
+                Some(b)
+            }
+        }
+        (Some(a), None) => Some(a),
+        (None, Some(b)) => Some(b),
+        (None, None) => None,
+    }
+}
+
 fn build_edge_hover_candidate(
     camera_rotation: Quat,
     frame_face: FaceDirection,
@@ -276,18 +294,7 @@ fn compute_hover_targets(
     let candidate_a = build_edge_hover_candidate(cam_rotation, face_a, dot_a, face_b, dot_b);
     let candidate_b = build_edge_hover_candidate(cam_rotation, face_b, dot_b, face_a, dot_a);
 
-    let chosen = match (&candidate_a, &candidate_b) {
-        (Some(a), Some(b)) => {
-            if a.rotation_angle <= b.rotation_angle + 1.0e-6 {
-                Some(a)
-            } else {
-                Some(b)
-            }
-        }
-        (Some(a), None) => Some(a),
-        (None, Some(b)) => Some(b),
-        (None, None) => None,
-    };
+    let chosen = choose_best_edge_hover_candidate(&candidate_a, &candidate_b);
 
     let Some(chosen) = chosen else {
         return vec![target];
@@ -314,7 +321,7 @@ fn compute_hover_targets(
         targets.push(target);
     }
 
-    info!(
+    debug!(
         hover_edge = ?edge_under_cursor,
         camera_dir_world = ?camera_dir_world,
         candidate_a_frame_face = ?candidate_a.as_ref().map(|c| c.frame_face),
@@ -504,7 +511,7 @@ pub fn on_cube_click(
     // Handle only the canonical callback on the CubeElement entity to avoid
     // emitting duplicated ViewCubeEvent for a single click.
     if entity != target_entity {
-        info!(
+        debug!(
             trigger_entity = %entity,
             canonical_entity = %target_entity,
             pointer_event = ?trigger.event(),
@@ -529,7 +536,7 @@ pub fn on_cube_click(
         .get(source)
         .map(|name| name.as_str())
         .unwrap_or("<unnamed>");
-    info!(
+    debug!(
         trigger_entity = %entity,
         target_entity = %target_entity,
         target_name = target_name,
@@ -639,7 +646,7 @@ pub fn on_arrow_click(
         .get(source)
         .map(|name| name.as_str())
         .unwrap_or("<unnamed>");
-    info!(
+    debug!(
         trigger_entity = %entity,
         trigger_name = arrow_name,
         source = %source,
