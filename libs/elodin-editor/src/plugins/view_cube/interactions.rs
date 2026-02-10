@@ -24,7 +24,8 @@ pub fn setup_cube_elements(
     mut original_materials: ResMut<OriginalMaterials>,
 ) {
     const EDGE_HOVER_SCALE: f32 = 1.2;
-    const CORNER_PICK_SCALE: f32 = 1.15;
+    const CORNER_PICK_SCALE: f32 = 1.3;
+    const CORNER_OUTWARD_BIAS: f32 = 0.02;
 
     if mesh_roots.is_empty() {
         return;
@@ -73,6 +74,10 @@ pub fn setup_cube_elements(
             if matches!(elem, CubeElement::Corner(_))
                 && let Ok(mut transform) = transforms.get_mut(entity)
             {
+                let outward = transform.translation.normalize_or_zero();
+                if outward.length_squared() > 1.0e-6 {
+                    transform.translation += outward * CORNER_OUTWARD_BIAS;
+                }
                 transform.scale *= Vec3::splat(CORNER_PICK_SCALE);
             }
 
