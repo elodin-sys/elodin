@@ -1,14 +1,17 @@
 # ViewCube Plugin
 
-A CAD-style 3D orientation widget for Bevy applications.
+A CAD-style 3D orientation widget for Bevy editor viewports.
+
+This plugin now runs in a single mode: overlay editor integration (camera snaps via
+`LookToTrigger`).
 
 ## Features
 
 - **Interactive cube**: Click on faces, edges, or corners to snap the camera to that view
 - **Rotation arrows**: top-left/top-right roll around the camera axis; left/right rotate around camera up; up/down rotate around camera right
 - **Hover highlighting**: Visual feedback with CAD-style grouped edge hover (4 edges for active front frame, 2-3 edges for hidden-face groups)
-- **Overlay mode**: Renders as a fixed overlay in the corner of the screen
-- **Camera sync**: Cube rotation mirrors the main camera orientation
+- **Overlay rendering**: Dedicated ViewCube camera rendered in viewport corner
+- **Camera sync**: Cube mirrors the main camera orientation
 - **Coordinate systems**: Supports ENU (E, N, U labels) and NED (N, E, D labels)
 - **RGB axes**: Corner-mounted axes showing X (red), Y (green), Z (blue) directions
 
@@ -25,21 +28,21 @@ A CAD-style 3D orientation widget for Bevy applications.
 
 ```rust
 use bevy::prelude::*;
-use elodin_editor::plugins::view_cube::{
-    ViewCubeConfig, ViewCubePlugin, ViewCubeTargetCamera,
-    spawn::spawn_view_cube,
+use bevy_editor_cam::prelude::EditorCam;
+use elodin_editor::plugins::{
+    navigation_gizmo::{NavGizmoCamera, NavGizmoParent, NavigationGizmoPlugin},
+    view_cube::{
+        NeedsInitialSnap, ViewCubeConfig, ViewCubePlugin, ViewCubeTargetCamera,
+        spawn::spawn_view_cube,
+    },
 };
 
 fn main() {
-    let config = ViewCubeConfig {
-        use_overlay: true,       // Render as overlay in corner
-        sync_with_camera: true,  // Cube shows world orientation
-        auto_rotate: true,       // Plugin handles camera rotation on click
-        ..default()
-    };
+    let config = ViewCubeConfig::editor_mode();
 
     App::new()
         .add_plugins(DefaultPlugins)
+        .add_plugins(NavigationGizmoPlugin)
         .add_plugins(ViewCubePlugin { config })
         .add_systems(Startup, setup)
         .run();
@@ -56,12 +59,14 @@ fn setup(
         .spawn((
             Transform::from_xyz(5.0, 4.0, 5.0).looking_at(Vec3::ZERO, Vec3::Y),
             Camera3d::default(),
+            EditorCam::default(),
             ViewCubeTargetCamera,
+            NeedsInitialSnap,
             Name::new("main_camera"),
         ))
         .id();
 
-    spawn_view_cube(
+    let spawned = spawn_view_cube(
         &mut commands,
         &asset_server,
         &mut meshes,
@@ -69,6 +74,15 @@ fn setup(
         &config,
         camera_entity,
     );
+
+    if let Some(view_cube_camera) = spawned.camera {
+        commands.entity(view_cube_camera).insert((
+            NavGizmoParent {
+                main_camera: camera_entity,
+            },
+            NavGizmoCamera,
+        ));
+    }
 }
 ```
 
@@ -76,34 +90,15 @@ fn setup(
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `use_overlay` | `bool` | `false` | Render as fixed overlay with dedicated camera |
-| `sync_with_camera` | `bool` | `false` | Cube rotation mirrors main camera |
-| `auto_rotate` | `bool` | `true` | Plugin handles camera rotation on click |
-| `use_look_to_trigger` | `bool` | `false` | Legacy flag kept for compatibility; camera snaps now always use `LookToTrigger` |
-| `follow_main_viewport` | `bool` | `false` | Position relative to main camera's viewport (split views) |
-| `overlay_size` | `u32` | `160` | Viewport size in pixels |
-| `overlay_margin` | `f32` | `8.0` | Margin from window edge |
-| `camera_distance` | `f32` | `3.5` | Distance from cube (affects apparent size) |
-| `scale` | `f32` | `0.95` | Cube scale factor |
+| `sync_with_camera` | `bool` | `true` | Cube rotation mirrors main camera |
+| `camera_distance` | `f32` | `2.5` | Overlay camera distance from cube |
+| `scale` | `f32` | `0.6` | Cube scale factor |
+| `rotation_increment` | `f32` | `15°` | Arrow click angular step |
 | `axis_correction` | `Quat` | `IDENTITY` | Extra rotation applied after the system correction |
+| `render_layer` | `u8` | `31` | Render layer used by ViewCube camera and entities |
 | `system` | `CoordinateSystem` | `ENU` | Coordinate system (ENU or NED) |
 
-## Editor Integration
-
-For integration with the Elodin editor (using `bevy_editor_cam`):
-
-```rust
-use elodin_editor::plugins::view_cube::{ViewCubeConfig, ViewCubePlugin};
-
-let config = ViewCubeConfig::editor_mode();
-
-App::new()
-    .add_plugins(ViewCubePlugin { config })
-```
-
-This enables:
-- `follow_main_viewport`: ViewCube stays in corner of each split view
-- `sync_with_camera`: Cube rotation reflects main camera orientation
+`ViewCubeConfig::editor_mode()` is the canonical preset and currently matches `Default`.
 
 ## Required Assets
 

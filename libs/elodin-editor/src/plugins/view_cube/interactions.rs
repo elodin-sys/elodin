@@ -206,28 +206,15 @@ fn edge_interaction_context(
     let root = find_root_ancestor(target, parents_query, root_query)?;
     let link = root_links.get(root).ok()?;
     let camera_global = camera_globals.get(link.main_camera).ok()?;
-    let cube_global = root_globals
-        .get(root)
-        .ok()
-        .map(|transform| (transform.translation(), transform.rotation()));
+    let cube_global = root_globals.get(root).ok().map(GlobalTransform::rotation);
 
     let (_, cam_rotation, _) = camera_global.to_scale_rotation_translation();
-    let camera_dir_world = cam_rotation * Vec3::Z;
     let cube_rotation = if config.sync_with_camera {
         cam_rotation.conjugate() * config.effective_axis_correction()
     } else {
-        cube_global
-            .map(|(_, rotation)| rotation)
-            .unwrap_or(Quat::IDENTITY)
+        cube_global.unwrap_or(Quat::IDENTITY)
     };
-    let view_dir_world = if config.use_overlay {
-        Vec3::Z
-    } else if let Some((cube_translation, _)) = cube_global {
-        (camera_global.translation() - cube_translation).normalize_or_zero()
-    } else {
-        camera_dir_world
-    };
-    let camera_dir_cube = cube_rotation.inverse() * view_dir_world;
+    let camera_dir_cube = cube_rotation.inverse() * Vec3::Z;
     let (front_face, front_dot) = front_face(camera_dir_cube);
 
     Some((

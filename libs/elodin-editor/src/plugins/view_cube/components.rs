@@ -103,24 +103,6 @@ pub enum EdgeDirection {
 }
 
 impl EdgeDirection {
-    /// Convert to camera look direction
-    pub fn to_look_direction(self) -> Vec3 {
-        match self {
-            EdgeDirection::XTopFront => Vec3::new(0.0, 1.0, 1.0).normalize(),
-            EdgeDirection::XTopBack => Vec3::new(0.0, 1.0, -1.0).normalize(),
-            EdgeDirection::XBottomFront => Vec3::new(0.0, -1.0, 1.0).normalize(),
-            EdgeDirection::XBottomBack => Vec3::new(0.0, -1.0, -1.0).normalize(),
-            EdgeDirection::YFrontLeft => Vec3::new(-1.0, 0.0, 1.0).normalize(),
-            EdgeDirection::YFrontRight => Vec3::new(1.0, 0.0, 1.0).normalize(),
-            EdgeDirection::YBackLeft => Vec3::new(-1.0, 0.0, -1.0).normalize(),
-            EdgeDirection::YBackRight => Vec3::new(1.0, 0.0, -1.0).normalize(),
-            EdgeDirection::ZTopLeft => Vec3::new(-1.0, 1.0, 0.0).normalize(),
-            EdgeDirection::ZTopRight => Vec3::new(1.0, 1.0, 0.0).normalize(),
-            EdgeDirection::ZBottomLeft => Vec3::new(-1.0, -1.0, 0.0).normalize(),
-            EdgeDirection::ZBottomRight => Vec3::new(1.0, -1.0, 0.0).normalize(),
-        }
-    }
-
     /// The two faces touching this edge.
     pub fn adjacent_faces(self) -> (FaceDirection, FaceDirection) {
         match self {
@@ -136,22 +118,6 @@ impl EdgeDirection {
             EdgeDirection::ZTopRight => (FaceDirection::Up, FaceDirection::East),
             EdgeDirection::ZBottomLeft => (FaceDirection::Down, FaceDirection::West),
             EdgeDirection::ZBottomRight => (FaceDirection::Down, FaceDirection::East),
-        }
-    }
-
-    /// Select the face (among the two adjacent faces) that is most facing the camera.
-    /// `camera_dir_world` must be the direction from subject -> camera.
-    pub fn active_frame_face(
-        self,
-        camera_dir_world: Vec3,
-    ) -> (FaceDirection, FaceDirection, f32, f32) {
-        let (face_a, face_b) = self.adjacent_faces();
-        let dot_a = face_a.to_look_direction().dot(camera_dir_world);
-        let dot_b = face_b.to_look_direction().dot(camera_dir_world);
-        if dot_a >= dot_b {
-            (face_a, face_b, dot_a, dot_b)
-        } else {
-            (face_b, face_a, dot_b, dot_a)
         }
     }
 }

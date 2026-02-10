@@ -12,9 +12,6 @@ use super::components::*;
 use super::config::*;
 use super::theme::ViewCubeColors;
 
-/// Rotation increment per click (15 degrees)
-pub const ROTATION_INCREMENT: f32 = 15.0 * PI / 180.0;
-
 // ============================================================================
 // Main Spawn Function
 // ============================================================================
@@ -23,15 +20,13 @@ pub const ROTATION_INCREMENT: f32 = 15.0 * PI / 180.0;
 pub struct SpawnedViewCube {
     /// The root entity of the ViewCube (cube + labels + axes)
     pub cube_root: Entity,
-    /// The dedicated camera entity (only in overlay mode)
+    /// The dedicated camera entity used for overlay rendering.
     pub camera: Option<Entity>,
 }
 
 /// Spawn a complete ViewCube widget
 ///
-/// Returns the root entity of the ViewCube and optionally a dedicated camera.
-/// In overlay mode, a dedicated camera is created for rendering the ViewCube
-/// as an overlay in the top-right corner.
+/// Returns the root entity of the ViewCube and its dedicated overlay camera.
 pub fn spawn_view_cube(
     commands: &mut Commands,
     asset_server: &Res<AssetServer>,
@@ -40,11 +35,7 @@ pub fn spawn_view_cube(
     config: &ViewCubeConfig,
     main_camera_entity: Entity,
 ) -> SpawnedViewCube {
-    let render_layers = if config.use_overlay {
-        Some(RenderLayers::layer(config.render_layer as usize))
-    } else {
-        None
-    };
+    let render_layers = Some(RenderLayers::layer(config.render_layer as usize));
 
     // Load the axes-cube.glb
     let scene = asset_server.load("axes-cube.glb#Scene0");
@@ -88,33 +79,20 @@ pub fn spawn_view_cube(
         cube_root,
     );
 
-    // Spawn the dedicated camera for overlay mode
-    let camera = if config.use_overlay {
-        let gizmo_camera = spawn_overlay_camera(commands, config, main_camera_entity);
-        // In overlay mode, arrows are children of the gizmo camera
-        spawn_rotation_arrows(
-            commands,
-            asset_server,
-            meshes,
-            materials,
-            gizmo_camera,
-            render_layers,
-        );
-        Some(gizmo_camera)
-    } else {
-        // In standalone mode, arrows are children of the main camera
-        spawn_rotation_arrows(
-            commands,
-            asset_server,
-            meshes,
-            materials,
-            main_camera_entity,
-            render_layers,
-        );
-        None
-    };
+    let gizmo_camera = spawn_overlay_camera(commands, config, main_camera_entity);
+    spawn_rotation_arrows(
+        commands,
+        asset_server,
+        meshes,
+        materials,
+        gizmo_camera,
+        render_layers,
+    );
 
-    SpawnedViewCube { cube_root, camera }
+    SpawnedViewCube {
+        cube_root,
+        camera: Some(gizmo_camera),
+    }
 }
 
 /// Spawn the dedicated camera for overlay mode
