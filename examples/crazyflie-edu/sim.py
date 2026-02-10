@@ -331,12 +331,13 @@ def propeller_animation(
 
     Accumulates rotation angle over time for visual animation.
     Motors M1 and M3 spin CW (negative rotation), M2 and M4 spin CCW (positive).
+    Output is in degrees for use with rotation_vector animate directive.
     """
     config = Config.get_global()
     dt = config.fast_loop_time_step
 
-    # Convert RPM to radians per second: omega = rpm * 2π / 60
-    omega = rpm * 2.0 * jnp.pi / 60.0
+    # Convert RPM to degrees per second: omega = rpm * 360 / 60 = rpm * 6
+    omega = rpm * 6.0
 
     # Motor rotation directions (Crazyflie Quad-X):
     # M1 (FR): CW  -> negative rotation
@@ -349,8 +350,8 @@ def propeller_animation(
     new_angle = prev_angle + omega * dt * direction
 
     # Keep angles bounded to prevent floating point issues over long runs
-    # Wrap to [-2π, 2π] range (animation doesn't care about full rotations)
-    new_angle = jnp.mod(new_angle + jnp.pi, 2.0 * jnp.pi) - jnp.pi
+    # Wrap to [-180, 180] degrees range (animation doesn't care about full rotations)
+    new_angle = jnp.mod(new_angle + 180.0, 360.0) - 180.0
 
     return new_angle
 

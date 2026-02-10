@@ -56,8 +56,8 @@ order = 6
       - `joint`: required string; the exact name of the joint/bone in the GLB file.
       - `rotation_vector`: required EQL expression; must evaluate to a 3-element vector `(x, y, z)` where:
         - The vector direction is the rotation axis.
-        - The vector magnitude is the rotation angle in radians.
-      - Example: `animate joint="Root.Fin_0" rotation_vector="(0, rocket.fin_deflect * 3.14/180.0, 0)"`
+        - The vector magnitude is the rotation angle in degrees.
+      - Example: `animate joint="Root.Fin_0" rotation_vector="(0, rocket.fin_deflect, 0)"`
   - `sphere`: `radius` (required); `color` (default white).
   - `box`: `x`, `y`, `z` (all required); `color` (default white).
   - `cylinder`: `radius`, `height` (both required); `color` (default white).
@@ -262,14 +262,14 @@ vector_arrow
 Rigged GLB model with animated joints:
 
 The `rotation_vector` is an angle-axis: the direction encodes the axis, and the
-magnitude encodes the angle in radians.
+magnitude encodes the angle in degrees.
 
 ```kdl
 object_3d rocket.world_pos {
     glb path="rocket.glb"
-    animate joint="Root.Fin_0" rotation_vector="(0, rocket.fin_deflect[0] * 3.14/180.0, 0)"
-    animate joint="Root.Fin_1" rotation_vector="(0, rocket.fin_deflect[1] * 3.14/180.0, 0)"
-    animate joint="Root.Fin_2" rotation_vector="(0, rocket.fin_deflect[2] * 3.14/180.0, 0)"
-    animate joint="Root.Fin_3" rotation_vector="(0, rocket.fin_deflect[3] * 3.14/180.0, 0)"
+    animate joint="Root.Fin_0" rotation_vector="(0, rocket.fin_deflect[0], 0)"
+    animate joint="Root.Fin_1" rotation_vector="(0, rocket.fin_deflect[1], 0)"
+    animate joint="Root.Fin_2" rotation_vector="(0, rocket.fin_deflect[2], 0)"
+    animate joint="Root.Fin_3" rotation_vector="(0, rocket.fin_deflect[3], 0)"
 }
 ```

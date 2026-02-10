@@ -521,7 +521,7 @@ def create_world() -> tuple[el.World, el.EntityId]:
             }
         }
         object_3d crazyflie.world_pos {
-            glb path="crazyflie.glb" rotate="(0.0, 0.0, 0.0)" translate="(-0.01, 0.0, 0.0)" scale=0.7
+            glb path="crazyflie.glb" rotate="(0.0, 0.0, 0.0)" translate="(0.0, 0.0, 0.0)" scale=0.7
             animate joint="Root.Propeller_0" rotation_vector="(0, crazyflie.propeller_angle[0], 0)"
             animate joint="Root.Propeller_1" rotation_vector="(0, crazyflie.propeller_angle[1], 0)"
             animate joint="Root.Propeller_2" rotation_vector="(0, crazyflie.propeller_angle[2], 0)"

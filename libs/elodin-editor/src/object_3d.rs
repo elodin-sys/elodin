@@ -659,25 +659,29 @@ pub fn update_object_3d_system(
     }
 }
 
-/// Converts a ComponentValue to an angle-axis rotation (axis Vec3, angle f32)
+/// Converts a ComponentValue to an angle-axis rotation (axis Vec3, angle f32 in radians)
+/// Input: 3-element vector where direction is axis and magnitude is angle in DEGREES
+/// Output: (normalized axis, angle in radians)
 fn component_value_to_axis_angle(value: &ComponentValue) -> Result<(Vec3, f32), String> {
     use nox::ArrayBuf;
     match value {
         ComponentValue::F64(array) => {
             let data = array.buf.as_buf();
             if data.len() == 3 {
-                // 3-element format: [x, y, z] where direction is axis and magnitude is angle
+                // 3-element format: [x, y, z] where direction is axis and magnitude is angle in degrees
                 let vec = Vec3::new(data[0] as f32, data[1] as f32, data[2] as f32);
-                let angle = vec.length();
-                let normalized_axis = if angle > f32::EPSILON {
-                    vec / angle
+                let angle_deg = vec.length();
+                let normalized_axis = if angle_deg > f32::EPSILON {
+                    vec / angle_deg
                 } else {
                     Vec3::Y // Default axis if vector is zero
                 };
-                Ok((normalized_axis, angle))
+                // Convert degrees to radians
+                let angle_rad = angle_deg.to_radians();
+                Ok((normalized_axis, angle_rad))
             } else {
                 Err(format!(
-                    "Expected 3 elements for rotation_vector (axis direction with magnitude as angle), got {}",
+                    "Expected 3 elements for rotation_vector (axis direction with magnitude as angle in degrees), got {}",
                     data.len()
                 ))
             }
@@ -685,18 +689,20 @@ fn component_value_to_axis_angle(value: &ComponentValue) -> Result<(Vec3, f32), 
         ComponentValue::F32(array) => {
             let data = array.buf.as_buf();
             if data.len() == 3 {
-                // 3-element format: [x, y, z] where direction is axis and magnitude is angle
+                // 3-element format: [x, y, z] where direction is axis and magnitude is angle in degrees
                 let vec = Vec3::new(data[0], data[1], data[2]);
-                let angle = vec.length();
-                let normalized_axis = if angle > f32::EPSILON {
-                    vec / angle
+                let angle_deg = vec.length();
+                let normalized_axis = if angle_deg > f32::EPSILON {
+                    vec / angle_deg
                 } else {
                     Vec3::Y // Default axis if vector is zero
                 };
-                Ok((normalized_axis, angle))
+                // Convert degrees to radians
+                let angle_rad = angle_deg.to_radians();
+                Ok((normalized_axis, angle_rad))
             } else {
                 Err(format!(
-                    "Expected 3 elements for rotation_vector (axis direction with magnitude as angle), got {}",
+                    "Expected 3 elements for rotation_vector (axis direction with magnitude as angle in degrees), got {}",
                     data.len()
                 ))
             }
