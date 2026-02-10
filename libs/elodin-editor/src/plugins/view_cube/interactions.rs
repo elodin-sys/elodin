@@ -7,6 +7,7 @@ use bevy::prelude::*;
 
 use super::camera::ViewCubeTargetCamera;
 use super::components::*;
+use super::config::ViewCubeConfig;
 use super::events::ViewCubeEvent;
 use super::theme::ViewCubeColors;
 
@@ -267,6 +268,8 @@ fn compute_hover_targets(
     root_query: &Query<Entity, With<ViewCubeRoot>>,
     root_links: &Query<&ViewCubeLink, With<ViewCubeRoot>>,
     camera_globals: &Query<&GlobalTransform, With<ViewCubeTargetCamera>>,
+    root_globals: &Query<&GlobalTransform, With<ViewCubeRoot>>,
+    config: &ViewCubeConfig,
 ) -> Vec<Entity> {
     let Ok((_, element)) = cube_elements.get(target) else {
         return vec![target];
@@ -285,12 +288,31 @@ fn compute_hover_targets(
     let Ok(camera_global) = camera_globals.get(link.main_camera) else {
         return vec![target];
     };
+    let cube_global = root_globals
+        .get(root)
+        .ok()
+        .map(|transform| (transform.translation(), transform.rotation()));
 
     let (_, cam_rotation, _) = camera_global.to_scale_rotation_translation();
     let camera_dir_world = cam_rotation * Vec3::Z;
+    let cube_rotation = if config.sync_with_camera {
+        cam_rotation.conjugate() * config.axis_correction
+    } else {
+        cube_global
+            .map(|(_, rotation)| rotation)
+            .unwrap_or(Quat::IDENTITY)
+    };
+    let view_dir_world = if config.use_overlay {
+        Vec3::Z
+    } else if let Some((cube_translation, _)) = cube_global {
+        (camera_global.translation() - cube_translation).normalize_or_zero()
+    } else {
+        camera_dir_world
+    };
+    let camera_dir_cube = cube_rotation.inverse() * view_dir_world;
     let (face_a, face_b) = edge_under_cursor.adjacent_faces();
-    let dot_a = face_a.to_look_direction().dot(camera_dir_world);
-    let dot_b = face_b.to_look_direction().dot(camera_dir_world);
+    let dot_a = face_a.to_look_direction().dot(camera_dir_cube);
+    let dot_b = face_b.to_look_direction().dot(camera_dir_cube);
     let candidate_a = build_edge_hover_candidate(cam_rotation, face_a, dot_a, face_b, dot_b);
     let candidate_b = build_edge_hover_candidate(cam_rotation, face_b, dot_b, face_a, dot_a);
 
@@ -398,6 +420,8 @@ pub fn on_cube_hover_start(
     root_query: Query<Entity, With<ViewCubeRoot>>,
     root_links: Query<&ViewCubeLink, With<ViewCubeRoot>>,
     camera_globals: Query<&GlobalTransform, With<ViewCubeTargetCamera>>,
+    root_globals: Query<&GlobalTransform, With<ViewCubeRoot>>,
+    config: Res<ViewCubeConfig>,
     children_query: Query<&Children>,
     material_query: Query<&MeshMaterial3d<StandardMaterial>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
@@ -418,6 +442,8 @@ pub fn on_cube_hover_start(
         &root_query,
         &root_links,
         &camera_globals,
+        &root_globals,
+        &config,
     );
 
     if same_entity_set(&hovered.entities, &target_entities) {

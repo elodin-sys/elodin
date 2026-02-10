@@ -78,6 +78,7 @@ fn setup(
 | `overlay_margin` | `f32` | `8.0` | Margin from window edge |
 | `camera_distance` | `f32` | `3.5` | Distance from cube (affects apparent size) |
 | `scale` | `f32` | `0.95` | Cube scale factor |
+| `axis_correction` | `Quat` | `IDENTITY` | Extra rotation applied when syncing cube to camera |
 | `system` | `CoordinateSystem` | `ENU` | Coordinate system (ENU or NED) |
 
 ## Editor Integration

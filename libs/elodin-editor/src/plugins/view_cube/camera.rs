@@ -128,7 +128,8 @@ impl ViewCubeArrowTargetCache {
 pub fn handle_view_cube_camera(
     mut events: MessageReader<ViewCubeEvent>,
     view_cube_query: Query<&ViewCubeLink, With<ViewCubeRoot>>,
-    mut camera_query: Query<&mut Transform, With<ViewCubeTargetCamera>>,
+    cube_root_query: Query<&GlobalTransform, With<ViewCubeRoot>>,
+    mut camera_query: Query<(&mut Transform, &GlobalTransform), With<ViewCubeTargetCamera>>,
     mut camera_anim: ResMut<CameraAnimation>,
     config: Res<ViewCubeConfig>,
 ) {
@@ -137,11 +138,31 @@ pub fn handle_view_cube_camera(
             continue;
         };
 
-        if let ViewCubeEvent::FaceClicked { direction, .. } = event {
-            if let Ok(transform) = camera_query.get(cam) {
-                let camera_dir_world = -(*transform.forward());
+        if let ViewCubeEvent::FaceClicked { direction, source } = event {
+            if let Ok((transform, global_transform)) = camera_query.get(cam) {
+                let cube_global = cube_root_query
+                    .get(*source)
+                    .ok()
+                    .map(|transform| (transform.translation(), transform.rotation()));
+                let (_, camera_rotation, _) = global_transform.to_scale_rotation_translation();
+                let camera_dir_world = camera_rotation * Vec3::Z;
+                let cube_rotation = if config.sync_with_camera {
+                    camera_rotation.conjugate() * config.axis_correction
+                } else {
+                    cube_global
+                        .map(|(_, rotation)| rotation)
+                        .unwrap_or(Quat::IDENTITY)
+                };
+                let view_dir_world = if config.use_overlay {
+                    Vec3::Z
+                } else if let Some((cube_translation, _)) = cube_global {
+                    (global_transform.translation() - cube_translation).normalize_or_zero()
+                } else {
+                    camera_dir_world
+                };
+                let camera_dir_cube = cube_rotation.inverse() * view_dir_world;
                 let (target_face, clicked_face_dot, face_was_in_front) =
-                    resolve_face_click_target(*direction, camera_dir_world);
+                    resolve_face_click_target(*direction, camera_dir_cube);
                 debug!(
                     mode = "standalone",
                     clicked_face = ?direction,
@@ -163,14 +184,14 @@ pub fn handle_view_cube_camera(
         }
 
         if let Some(look_dir) = target_look_direction(event) {
-            if let Ok(transform) = camera_query.get(cam) {
+            if let Ok((transform, _)) = camera_query.get(cam) {
                 start_camera_animation(look_dir, transform, &mut camera_anim, &config, cam);
             }
             continue;
         }
 
         if let ViewCubeEvent::ArrowClicked { arrow, .. } = event
-            && let Ok(mut transform) = camera_query.get_mut(cam)
+            && let Ok((mut transform, _)) = camera_query.get_mut(cam)
         {
             apply_arrow_rotation(*arrow, &config, &mut transform);
         }
@@ -303,18 +324,22 @@ fn main_camera_for_event(
     event: &ViewCubeEvent,
     view_cube_query: &Query<&ViewCubeLink, With<ViewCubeRoot>>,
 ) -> Option<Entity> {
-    let source = match event {
-        ViewCubeEvent::FaceClicked { source, .. }
-        | ViewCubeEvent::EdgeClicked { source, .. }
-        | ViewCubeEvent::CornerClicked { source, .. }
-        | ViewCubeEvent::ArrowClicked { source, .. } => *source,
-    };
+    let source = event_source(event);
 
     view_cube_query
         .get(source)
         .or_else(|_| view_cube_query.iter().next().ok_or(()))
         .ok()
         .map(|link| link.main_camera)
+}
+
+fn event_source(event: &ViewCubeEvent) -> Entity {
+    match event {
+        ViewCubeEvent::FaceClicked { source, .. }
+        | ViewCubeEvent::EdgeClicked { source, .. }
+        | ViewCubeEvent::CornerClicked { source, .. }
+        | ViewCubeEvent::ArrowClicked { source, .. } => *source,
+    }
 }
 
 fn resolve_face_click_target(
@@ -348,6 +373,7 @@ fn target_look_direction(event: &ViewCubeEvent) -> Option<Vec3> {
 /// The cube rotates inversely so it always shows the world orientation
 /// from the camera's perspective.
 pub fn sync_view_cube_rotation(
+    config: Res<ViewCubeConfig>,
     main_camera_query: Query<&GlobalTransform, Without<ViewCubeRoot>>,
     mut view_cube_query: Query<(&ViewCubeLink, &mut Transform), With<ViewCubeRoot>>,
 ) {
@@ -359,7 +385,7 @@ pub fn sync_view_cube_rotation(
         // Set cube rotation to inverse of camera rotation
         // This makes the cube appear to show world orientation
         let (_, rotation, _) = main_camera_transform.to_scale_rotation_translation();
-        cube_transform.rotation = rotation.conjugate();
+        cube_transform.rotation = rotation.conjugate() * config.axis_correction;
     }
 }
 
@@ -558,6 +584,7 @@ pub(super) struct ViewCubeEditorLookup<'w, 's> {
 pub fn handle_view_cube_editor(
     mut events: MessageReader<ViewCubeEvent>,
     view_cube_query: Query<&ViewCubeLink, With<ViewCubeRoot>>,
+    cube_root_query: Query<&GlobalTransform, With<ViewCubeRoot>>,
     mut camera_query: Query<
         (Entity, &Transform, &GlobalTransform, &mut EditorCam),
         With<ViewCubeTargetCamera>,
@@ -615,10 +642,29 @@ pub fn handle_view_cube_editor(
         let parent_rotation = global_rotation * transform.rotation.inverse();
         let camera_dir_local = -(*transform.forward());
         let camera_dir_global = parent_rotation * camera_dir_local;
+        let cube_global = cube_root_query
+            .get(event_source(event))
+            .ok()
+            .map(|transform| (transform.translation(), transform.rotation()));
+        let cube_rotation = if config.sync_with_camera {
+            global_rotation.conjugate() * config.axis_correction
+        } else {
+            cube_global
+                .map(|(_, rotation)| rotation)
+                .unwrap_or(Quat::IDENTITY)
+        };
+        let view_dir_world = if config.use_overlay {
+            Vec3::Z
+        } else if let Some((cube_translation, _)) = cube_global {
+            (global_transform.translation() - cube_translation).normalize_or_zero()
+        } else {
+            camera_dir_global
+        };
+        let camera_dir_cube = cube_rotation.inverse() * view_dir_world;
 
         if let ViewCubeEvent::FaceClicked { direction, .. } = event {
             let (target_face, clicked_face_dot, face_was_in_front) =
-                resolve_face_click_target(*direction, camera_dir_global);
+                resolve_face_click_target(*direction, camera_dir_cube);
             debug!(
                 mode = "editor",
                 clicked_face = ?direction,
@@ -745,8 +791,8 @@ pub fn handle_view_cube_editor(
         // currently "in front" relative to the camera, then snap to its opposite face.
         if let ViewCubeEvent::EdgeClicked { direction, .. } = event {
             let (face_a, face_b) = direction.adjacent_faces();
-            let dot_a = face_a.to_look_direction().dot(camera_dir_global);
-            let dot_b = face_b.to_look_direction().dot(camera_dir_global);
+            let dot_a = face_a.to_look_direction().dot(camera_dir_cube);
+            let dot_b = face_b.to_look_direction().dot(camera_dir_cube);
 
             let candidate_a =
                 build_edge_snap_candidate(transform, parent_rotation, face_a, dot_a, face_b, dot_b);
