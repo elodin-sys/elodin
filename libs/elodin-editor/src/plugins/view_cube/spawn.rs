@@ -135,7 +135,7 @@ fn spawn_axes(
     render_layers: Option<RenderLayers>,
     parent: Entity,
 ) {
-    const AXIS_SCALE_BUMP: f32 = 1.06;
+    const AXIS_SCALE_BUMP: f32 = 0.95;
 
     // Axes along cube edges (corner gizmo style)
     let axis_length = 2.6 * config.scale * AXIS_SCALE_BUMP; // Long enough to be clearly visible
