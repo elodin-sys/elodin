@@ -185,8 +185,8 @@ pub struct ViewCubeConfig {
     /// Use this for overlay/gizmo mode where the cube shows world orientation.
     /// When false, the cube stays fixed (for standalone demo mode).
     pub sync_with_camera: bool,
-    /// Optional rotation applied when syncing the cube to the camera.
-    /// Use this to align coordinate conventions between the editor camera and cube.
+    /// Optional extra rotation applied when syncing the cube to the camera.
+    /// This is applied after the system-specific correction.
     pub axis_correction: Quat,
     /// When true, renders the ViewCube as an overlay with its own camera.
     /// The ViewCube appears fixed in the top-right corner.
@@ -245,9 +245,19 @@ impl ViewCubeConfig {
             overlay_size: 128,           // Match navigation_gizmo's side_length
             camera_distance: 2.5,        // Overlay camera distance from cube model
             scale: 0.6,                  // Cube model scale in overlay
-            // EditorCam reports forward relative to +Z; apply 180° yaw to align ENU labels.
-            axis_correction: Quat::from_rotation_y(PI),
             ..Default::default()
         }
+    }
+
+    /// Base correction for Bevy's camera forward (-Z) vs cube face orientation (+Z).
+    pub fn system_axis_correction(system: CoordinateSystem) -> Quat {
+        match system {
+            CoordinateSystem::ENU | CoordinateSystem::NED => Quat::from_rotation_y(PI),
+        }
+    }
+
+    /// Full correction applied when syncing the cube to the camera.
+    pub fn effective_axis_correction(&self) -> Quat {
+        Self::system_axis_correction(self.system) * self.axis_correction
     }
 }
