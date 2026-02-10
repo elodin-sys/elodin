@@ -147,7 +147,7 @@ pub fn handle_view_cube_camera(
                 let (_, camera_rotation, _) = global_transform.to_scale_rotation_translation();
                 let camera_dir_world = camera_rotation * Vec3::Z;
                 let cube_rotation = if config.sync_with_camera {
-                    camera_rotation.conjugate() * config.axis_correction
+                    camera_rotation.conjugate() * config.effective_axis_correction()
                 } else {
                     cube_global
                         .map(|(_, rotation)| rotation)
@@ -385,7 +385,7 @@ pub fn sync_view_cube_rotation(
         // Set cube rotation to inverse of camera rotation
         // This makes the cube appear to show world orientation
         let (_, rotation, _) = main_camera_transform.to_scale_rotation_translation();
-        cube_transform.rotation = rotation.conjugate() * config.axis_correction;
+        cube_transform.rotation = rotation.conjugate() * config.effective_axis_correction();
     }
 }
 
@@ -647,7 +647,7 @@ pub fn handle_view_cube_editor(
             .ok()
             .map(|transform| (transform.translation(), transform.rotation()));
         let cube_rotation = if config.sync_with_camera {
-            global_rotation.conjugate() * config.axis_correction
+            global_rotation.conjugate() * config.effective_axis_correction()
         } else {
             cube_global
                 .map(|(_, rotation)| rotation)
