@@ -14,9 +14,12 @@ pub enum ViewCubeEvent {
         direction: FaceDirection,
         source: Entity,
     },
-    /// An edge was clicked - rotate camera to face this edge
+    /// An edge frame segment was clicked.
+    /// `target_face` is pre-resolved from interaction rules and represents the
+    /// face to snap to (or opposite face when clicking the active front frame).
     EdgeClicked {
         direction: EdgeDirection,
+        target_face: FaceDirection,
         source: Entity,
     },
     /// A corner was clicked - rotate camera to face this corner

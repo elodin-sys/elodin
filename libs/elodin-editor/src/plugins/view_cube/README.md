@@ -6,11 +6,20 @@ A CAD-style 3D orientation widget for Bevy applications.
 
 - **Interactive cube**: Click on faces, edges, or corners to snap the camera to that view
 - **Rotation arrows**: top-left/top-right roll around the camera axis; left/right rotate around camera up; up/down rotate around camera right
-- **Hover highlighting**: Visual feedback when hovering over interactive elements (edge hover highlights the 4-edge frame)
+- **Hover highlighting**: Visual feedback with CAD-style grouped edge hover (4 edges for active front frame, 2-3 edges for hidden-face groups)
 - **Overlay mode**: Renders as a fixed overlay in the corner of the screen
 - **Camera sync**: Cube rotation mirrors the main camera orientation
 - **Coordinate systems**: Supports ENU (E, N, U labels) and NED (N, E, D labels)
 - **RGB axes**: Corner-mounted axes showing X (red), Y (green), Z (blue) directions
+
+## Interaction Rules
+
+- **Front face click**: no-op (clicking a face already in front does nothing)
+- **Oblique face click**: snaps to the clicked face
+- **Front-frame edges**: when a face is front-on, hovering any edge highlights all 4 frame edges; clicking snaps to the opposite face
+- **Hidden-face edges**: in oblique views, only edges mapped to a hidden face are active; hovering highlights that hidden face's coherent edge group (typically 2-3 edges), clicking snaps to that face
+- **Inactive edges**: no hover highlight, no click action
+- **Corner click**: snaps along the clicked corner axis (corner-centered CAD-style view) using minimal-roll up selection
 
 ## Quick Start
 
@@ -72,7 +81,7 @@ fn setup(
 | `use_overlay` | `bool` | `false` | Render as fixed overlay with dedicated camera |
 | `sync_with_camera` | `bool` | `false` | Cube rotation mirrors main camera |
 | `auto_rotate` | `bool` | `true` | Plugin handles camera rotation on click |
-| `use_look_to_trigger` | `bool` | `false` | Use bevy_editor_cam's LookToTrigger (editor mode) |
+| `use_look_to_trigger` | `bool` | `false` | Legacy flag kept for compatibility; camera snaps now always use `LookToTrigger` |
 | `follow_main_viewport` | `bool` | `false` | Position relative to main camera's viewport (split views) |
 | `overlay_size` | `u32` | `160` | Viewport size in pixels |
 | `overlay_margin` | `f32` | `8.0` | Margin from window edge |
@@ -97,7 +106,6 @@ App::new()
 ```
 
 This enables:
-- `use_look_to_trigger`: Uses `LookToTrigger` for smooth camera transitions
 - `follow_main_viewport`: ViewCube stays in corner of each split view
 - `sync_with_camera`: Cube rotation reflects main camera orientation
 
