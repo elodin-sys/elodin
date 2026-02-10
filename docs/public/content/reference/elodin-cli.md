@@ -236,9 +236,9 @@ Merge two databases into one with optional prefixes. This enables viewing simula
 
 * `-y`, `--yes` — Skip the confirmation prompt
 
-* `--align1 <SECONDS>` — Alignment timestamp (in seconds) for an event in DB1
+* `--align1 <MICROSECONDS>` — Alignment timestamp (in microseconds) for an event in DB1
 
-* `--align2 <SECONDS>` — Alignment timestamp (in seconds) for the same event in DB2. DB2 is shifted to align its anchor with DB1's anchor.
+* `--align2 <MICROSECONDS>` — Alignment timestamp (in microseconds) for the same event in DB2. DB2 is shifted to align its anchor with DB1's anchor.
 
 ###### **Component Naming**
 
@@ -248,7 +248,7 @@ When prefixes are applied, component names are transformed using an underscore s
 
 ###### **Time Alignment**
 
-The `--align1` and `--align2` options allow you to align two databases based on a common event (e.g., launch, ignition, or simply the start of recording). Both options must be provided together.
+The `--align1` and `--align2` options allow you to align two databases based on a common event (e.g., launch, ignition, or simply the start of recording). Both options must be provided together. Timestamps are specified in microseconds for precise alignment.
 
 When alignment is specified:
 - **DB1 is never shifted** - it serves as the reference
@@ -266,17 +266,18 @@ This is particularly useful for aligning:
 elodin-db merge ./sim-db ./flight-db -o ./merged-db --prefix1 sim --prefix2 truth
 
 # Merge with time alignment (align "launch" event at 15s in sim with 45s in flight)
+# Timestamps are in microseconds: 15s = 15000000, 45s = 45000000
 # DB2 (flight) is shifted backward by 30s to align
 elodin-db merge ./sim-db ./flight-db -o ./merged-db \
   --prefix1 sim --prefix2 truth \
-  --align1 15.0 --align2 45.0
+  --align1 15000000 --align2 45000000
 
 # Align wall-clock timestamps to monotonic (start DB2 at 0)
-# DB2 starts at 4884937s, align with DB1's start at 0s
+# DB2 starts at 4884937s (4884937000000us), align with DB1's start at 0
 # DB2 is shifted backward by ~4.8M seconds
 elodin-db merge ./sitl-db ./real-db -o ./merged-db \
   --prefix1 sitl --prefix2 real \
-  --align1 0.0 --align2 4884937.0
+  --align1 0 --align2 4884937000000
 
 # Preview merge without creating output
 elodin-db merge ./sim-db ./flight-db -o ./merged-db --dry-run
