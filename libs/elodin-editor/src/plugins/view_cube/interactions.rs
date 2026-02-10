@@ -1,6 +1,7 @@
 //! Interaction handlers for the ViewCube widget.
 
 use bevy::ecs::hierarchy::ChildOf;
+use bevy::ecs::system::SystemParam;
 use bevy::picking::prelude::*;
 use bevy::prelude::*;
 
@@ -358,10 +359,7 @@ fn compute_hover_targets(
         return vec![];
     };
     let edge_group = edge_group_for_target_face(edge_under_cursor, target_face, context);
-    let targets =
-        collect_edge_entities_for_root(root, &edge_group, cube_elements, parents_query, root_query);
-
-    targets
+    collect_edge_entities_for_root(root, &edge_group, cube_elements, parents_query, root_query)
 }
 
 fn edges_for_face(face: FaceDirection) -> [EdgeDirection; 4] {
@@ -524,15 +522,20 @@ pub fn on_cube_hover_end(
     hovered.entities.clear();
 }
 
+#[derive(SystemParam)]
+pub struct OnCubeClickLookup<'w, 's> {
+    root_query: Query<'w, 's, Entity, With<ViewCubeRoot>>,
+    root_links: Query<'w, 's, &'static ViewCubeLink, With<ViewCubeRoot>>,
+    camera_globals: Query<'w, 's, &'static GlobalTransform, With<ViewCubeTargetCamera>>,
+    root_globals: Query<'w, 's, &'static GlobalTransform, With<ViewCubeRoot>>,
+    config: Res<'w, ViewCubeConfig>,
+}
+
 pub fn on_cube_click(
     trigger: On<Pointer<Click>>,
     cube_elements: Query<(Entity, &CubeElement)>,
     parents_query: Query<&ChildOf>,
-    root_query: Query<Entity, With<ViewCubeRoot>>,
-    root_links: Query<&ViewCubeLink, With<ViewCubeRoot>>,
-    camera_globals: Query<&GlobalTransform, With<ViewCubeTargetCamera>>,
-    root_globals: Query<&GlobalTransform, With<ViewCubeRoot>>,
-    config: Res<ViewCubeConfig>,
+    lookup: OnCubeClickLookup,
     mut events: MessageWriter<ViewCubeEvent>,
 ) {
     let entity = trigger.entity;
@@ -550,8 +553,8 @@ pub fn on_cube_click(
         return;
     };
 
-    let source =
-        find_root_ancestor(entity, &parents_query, &root_query).unwrap_or(Entity::PLACEHOLDER);
+    let source = find_root_ancestor(entity, &parents_query, &lookup.root_query)
+        .unwrap_or(Entity::PLACEHOLDER);
 
     match element {
         CubeElement::Face(dir) => {
@@ -564,11 +567,11 @@ pub fn on_cube_click(
             let Some((_root, context)) = edge_interaction_context(
                 target_entity,
                 &parents_query,
-                &root_query,
-                &root_links,
-                &camera_globals,
-                &root_globals,
-                &config,
+                &lookup.root_query,
+                &lookup.root_links,
+                &lookup.camera_globals,
+                &lookup.root_globals,
+                &lookup.config,
             ) else {
                 return;
             };
