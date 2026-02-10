@@ -151,7 +151,3 @@ image.features = ["png"]
 [target.'cfg(not(target_os = "macos"))'.dependencies]
 openh264 = "0.8"
 pic-scale = "0.6"
-
-[[example]]
-name = "view_cube_demo"
-path = "examples/view_cube_demo.rs"

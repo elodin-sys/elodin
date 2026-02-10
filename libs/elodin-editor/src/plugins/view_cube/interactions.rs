@@ -1,7 +1,6 @@
-//! Interaction handlers for the ViewCube widget
+//! Interaction handlers for the ViewCube widget.
 
 use bevy::ecs::hierarchy::ChildOf;
-use bevy::log::debug;
 use bevy::picking::prelude::*;
 use bevy::prelude::*;
 
@@ -11,11 +10,6 @@ use super::config::ViewCubeConfig;
 use super::events::ViewCubeEvent;
 use super::theme::ViewCubeColors;
 
-// ============================================================================
-// Setup System - Called each frame to set up new cube elements from GLB
-// ============================================================================
-
-/// Set up cube elements after the GLB is loaded
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 pub fn setup_cube_elements(
     mut commands: Commands,
@@ -31,7 +25,6 @@ pub fn setup_cube_elements(
     const EDGE_HOVER_SCALE: f32 = 1.2;
     const CORNER_PICK_SCALE: f32 = 1.15;
 
-    // Support multiple ViewCubes (split viewports)
     if mesh_roots.is_empty() {
         return;
     }
@@ -39,7 +32,6 @@ pub fn setup_cube_elements(
     let colors = ViewCubeColors::default();
 
     for (entity, name) in query.iter() {
-        // Check if this entity is in ANY cube subtree
         let mut in_subtree = false;
         let mut current = entity;
         loop {
@@ -60,7 +52,6 @@ pub fn setup_cube_elements(
 
         let name_str = name.as_str();
 
-        // Parse element type from name
         let element = if name_str.starts_with("Face_") {
             parse_face(name_str)
         } else if name_str.starts_with("Border_") {
@@ -76,13 +67,11 @@ pub fn setup_cube_elements(
             if matches!(elem, CubeElement::Edge(_))
                 && let Ok(mut transform) = transforms.get_mut(entity)
             {
-                // Slightly enlarge border meshes so edge/frame hover is easier to trigger.
                 transform.scale *= Vec3::splat(EDGE_HOVER_SCALE);
             }
             if matches!(elem, CubeElement::Corner(_))
                 && let Ok(mut transform) = transforms.get_mut(entity)
             {
-                // Slightly enlarge corners to improve click tolerance.
                 transform.scale *= Vec3::splat(CORNER_PICK_SCALE);
             }
 
@@ -90,7 +79,6 @@ pub fn setup_cube_elements(
                 .entity(entity)
                 .insert((elem.clone(), ViewCubeSetup));
 
-            // Clone materials for children so they can be highlighted independently
             if let Ok(children) = children_query.get(entity) {
                 for child in children.iter() {
                     if let Ok(mat_handle) = material_query.get(child)
@@ -117,8 +105,6 @@ pub fn setup_cube_elements(
 
 fn parse_face(name: &str) -> Option<CubeElement> {
     let dir = match name {
-        // In axes-cube.glb, Face_Back is translated to +Z and Face_Front to -Z.
-        // Map names to world directions, not to lexical front/back wording.
         "Face_Front" => FaceDirection::South,
         "Face_Back" => FaceDirection::North,
         "Face_Left" => FaceDirection::West,
@@ -164,11 +150,6 @@ fn parse_corner(name: &str) -> Option<CubeElement> {
     Some(CubeElement::Corner(pos))
 }
 
-// ============================================================================
-// Helper Functions
-// ============================================================================
-
-/// Find the nearest ancestor with a CubeElement component
 fn find_cube_element_ancestor(
     entity: Entity,
     cube_elements: &Query<(Entity, &CubeElement)>,
@@ -280,7 +261,6 @@ fn resolve_edge_target_face(
         (true, false) => Some(face_b),
         (false, true) => Some(face_a),
         (false, false) => {
-            // Degenerate case: both faces hidden. Prefer the more hidden face.
             if dot_a <= dot_b {
                 Some(face_a)
             } else {
@@ -394,16 +374,6 @@ fn compute_hover_targets(
     let targets =
         collect_edge_entities_for_root(root, &edge_group, cube_elements, parents_query, root_query);
 
-    debug!(
-        hover_edge = ?edge_under_cursor,
-        front_face = ?context.front_face,
-        front_dot = context.front_dot,
-        target_face = ?target_face,
-        edge_group = ?edge_group,
-        highlighted_edges = targets.len(),
-        "view cube: edge hover group"
-    );
-
     targets
 }
 
@@ -447,10 +417,6 @@ fn edges_for_face(face: FaceDirection) -> [EdgeDirection; 4] {
         ],
     }
 }
-
-// ============================================================================
-// Cube Element Hover Handlers
-// ============================================================================
 
 #[allow(clippy::too_many_arguments)]
 pub fn on_cube_hover_start(
@@ -505,7 +471,6 @@ pub fn on_cube_hover_start(
         return;
     }
 
-    // Reset previous
     for prev in hovered.entities.iter().copied() {
         reset_highlight(
             prev,
@@ -516,7 +481,6 @@ pub fn on_cube_hover_start(
         );
     }
 
-    // Apply highlight
     for hover_target in target_entities.iter().copied() {
         let (hover_color, hover_emissive) =
             if let Ok((_, element)) = cube_elements.get(hover_target) {
@@ -582,7 +546,6 @@ pub fn on_cube_click(
     camera_globals: Query<&GlobalTransform, With<ViewCubeTargetCamera>>,
     root_globals: Query<&GlobalTransform, With<ViewCubeRoot>>,
     config: Res<ViewCubeConfig>,
-    names: Query<&Name>,
     mut events: MessageWriter<ViewCubeEvent>,
 ) {
     let entity = trigger.entity;
@@ -592,16 +555,7 @@ pub fn on_cube_click(
         return;
     };
 
-    // Pointer click events can bubble from mesh children to the CubeElement parent.
-    // Handle only the canonical callback on the CubeElement entity to avoid
-    // emitting duplicated ViewCubeEvent for a single click.
     if entity != target_entity {
-        debug!(
-            trigger_entity = %entity,
-            canonical_entity = %target_entity,
-            pointer_event = ?trigger.event(),
-            "view cube: skipping bubbled click"
-        );
         return;
     }
 
@@ -609,28 +563,8 @@ pub fn on_cube_click(
         return;
     };
 
-    // Find the ViewCubeRoot ancestor to identify which ViewCube was clicked
     let source =
         find_root_ancestor(entity, &parents_query, &root_query).unwrap_or(Entity::PLACEHOLDER);
-
-    let target_name = names
-        .get(target_entity)
-        .map(|name| name.as_str())
-        .unwrap_or("<unnamed>");
-    let source_name = names
-        .get(source)
-        .map(|name| name.as_str())
-        .unwrap_or("<unnamed>");
-    debug!(
-        trigger_entity = %entity,
-        target_entity = %target_entity,
-        target_name = target_name,
-        source = %source,
-        source_name = source_name,
-        element = ?element,
-        pointer_event = ?trigger.event(),
-        "view cube: on_cube_click resolved"
-    );
 
     match element {
         CubeElement::Face(dir) => {
@@ -669,10 +603,6 @@ pub fn on_cube_click(
         }
     }
 }
-
-// ============================================================================
-// Arrow Hover Handlers
-// ============================================================================
 
 pub fn on_arrow_hover_start(
     trigger: On<Pointer<Over>>,
@@ -720,7 +650,6 @@ pub fn on_arrow_click(
     parents_query: Query<&ChildOf>,
     camera_link_query: Query<&ViewCubeLink, With<ViewCubeCamera>>,
     root_query: Query<(Entity, &ViewCubeLink), With<ViewCubeRoot>>,
-    names: Query<&Name>,
     mut events: MessageWriter<ViewCubeEvent>,
 ) {
     let entity = trigger.entity;
@@ -733,39 +662,15 @@ pub fn on_arrow_click(
         return;
     }
 
-    // Arrows are children of the ViewCube camera (not ViewCubeRoot).
-    // Walk up to find the camera with ViewCubeLink, then find the root with matching main_camera.
     let source =
         find_root_for_camera_child(entity, &parents_query, &camera_link_query, &root_query)
             .unwrap_or(Entity::PLACEHOLDER);
-
-    let arrow_name = names
-        .get(entity)
-        .map(|name| name.as_str())
-        .unwrap_or("<unnamed>");
-    let source_name = names
-        .get(source)
-        .map(|name| name.as_str())
-        .unwrap_or("<unnamed>");
-    debug!(
-        trigger_entity = %entity,
-        trigger_name = arrow_name,
-        source = %source,
-        source_name = source_name,
-        arrow = ?arrow,
-        pointer_event = ?trigger.event(),
-        "view cube: on_arrow_click resolved"
-    );
 
     events.write(ViewCubeEvent::ArrowClicked {
         arrow: *arrow,
         source,
     });
 }
-
-// ============================================================================
-// Highlight Helpers
-// ============================================================================
 
 #[allow(clippy::collapsible_if)]
 fn apply_highlight(
@@ -835,9 +740,6 @@ fn reset_highlight(
     }
 }
 
-/// Walk up the entity hierarchy to find the ViewCubeRoot ancestor.
-/// This identifies which ViewCube instance an element belongs to.
-/// Works for cube faces/edges/corners that are children of ViewCubeRoot.
 fn find_root_ancestor(
     entity: Entity,
     parents_query: &Query<&ChildOf>,
@@ -848,9 +750,6 @@ fn find_root_ancestor(
     })
 }
 
-/// Find the ViewCubeRoot for an entity that is a child of the ViewCube camera
-/// (e.g., rotation arrows). Walks up to find the camera with ViewCubeLink,
-/// then finds the root that shares the same main_camera.
 fn find_root_for_camera_child(
     entity: Entity,
     parents_query: &Query<&ChildOf>,
@@ -862,7 +761,6 @@ fn find_root_for_camera_child(
     })?;
     let cam_link = camera_link_query.get(camera_entity).ok()?;
 
-    // Found the camera, now find the root with the same main_camera.
     for (root_entity, root_link) in root_query.iter() {
         if root_link.main_camera == cam_link.main_camera {
             return Some(root_entity);
@@ -927,7 +825,7 @@ mod tests {
     #[test]
     fn edge_between_two_visible_faces_is_not_clickable() {
         let ctx = context(Vec3::new(1.0, 1.0, 1.0).normalize());
-        let edge = EdgeDirection::XTopFront; // Up + North (both visible in this view)
+        let edge = EdgeDirection::XTopFront;
         let target = resolve_edge_target_face(edge, ctx);
         assert_eq!(target, None);
     }
