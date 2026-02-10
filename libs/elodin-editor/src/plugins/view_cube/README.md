@@ -1,9 +1,6 @@
 # ViewCube Plugin
 
-A CAD-style 3D orientation widget for Bevy editor viewports.
-
-This plugin now runs in a single mode: overlay editor integration (camera snaps via
-`LookToTrigger`).
+A CAD-style 3D orientation widget for Bevy editor viewports (overlay + `LookToTrigger` snaps).
 
 ## Features
 
@@ -13,7 +10,7 @@ This plugin now runs in a single mode: overlay editor integration (camera snaps 
 - **Overlay rendering**: Dedicated ViewCube camera rendered in viewport corner
 - **Camera sync**: Cube mirrors the main camera orientation
 - **Coordinate systems**: Supports ENU (E, N, U labels) and NED (N, E, D labels)
-- **RGB axes**: Corner-mounted axes showing X (red), Y (green), Z (blue) directions
+- **Colored axes**: Corner-mounted X/Y/Z axes, colored according to the active coordinate system
 
 ## Interaction Rules
 
@@ -22,7 +19,7 @@ This plugin now runs in a single mode: overlay editor integration (camera snaps 
 - **Front-frame edges**: when a face is front-on, hovering any edge highlights all 4 frame edges; clicking snaps to the opposite face
 - **Hidden-face edges**: in oblique views, only edges mapped to a hidden face are active; hovering highlights that hidden face's coherent edge group (typically 2-3 edges), clicking snaps to that face
 - **Inactive edges**: no hover highlight, no click action
-- **Corner click**: snaps along the clicked corner axis (corner-centered CAD-style view) using minimal-roll up selection
+- **Corner click**: if the corner is already centered in view, no-op; otherwise snap to that corner axis
 
 ## Quick Start
 
