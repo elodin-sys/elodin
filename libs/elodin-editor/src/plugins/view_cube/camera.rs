@@ -21,6 +21,7 @@ use crate::WorldPosExt;
 use crate::object_3d::ComponentArrayExt;
 
 const FACE_IN_SCREEN_PLANE_DOT_THRESHOLD: f32 = 0.999;
+const CORNER_IN_SCREEN_AXIS_DOT_THRESHOLD: f32 = 0.998;
 
 #[derive(Component)]
 pub struct ViewCubeTargetCamera;
@@ -245,9 +246,10 @@ pub fn handle_view_cube_editor(
                     target_up_direction: chosen_up,
                     camera: entity,
                 };
+                let target_rotation = trigger_rotation(&trigger);
                 lookup
                     .arrow_cache
-                    .set_target(entity, trigger_rotation(&trigger), now_secs);
+                    .set_target(entity, target_rotation, now_secs);
                 look_to.write(trigger);
             } else {
                 warn!(
@@ -261,8 +263,20 @@ pub fn handle_view_cube_editor(
             continue;
         }
 
-        if let ViewCubeEvent::CornerClicked { position, .. } = event {
-            let raw_look_dir_world = position.to_look_direction();
+        if let ViewCubeEvent::CornerClicked {
+            position,
+            local_direction,
+            ..
+        } = event
+        {
+            let clicked_corner_dot = local_direction.dot(camera_dir_cube);
+            if clicked_corner_dot >= CORNER_IN_SCREEN_AXIS_DOT_THRESHOLD {
+                continue;
+            }
+            let raw_look_dir_world = direction_target_camera_dir_world(*local_direction, &config);
+            if raw_look_dir_world.length_squared() <= 1.0e-6 {
+                continue;
+            }
             let facing_world = -raw_look_dir_world;
             let facing_local_vec = parent_rotation.inverse() * facing_world;
 
@@ -274,9 +288,10 @@ pub fn handle_view_cube_editor(
                     target_up_direction: chosen_up,
                     camera: entity,
                 };
+                let target_rotation = trigger_rotation(&trigger);
                 lookup
                     .arrow_cache
-                    .set_target(entity, trigger_rotation(&trigger), now_secs);
+                    .set_target(entity, target_rotation, now_secs);
                 look_to.write(trigger);
             } else {
                 warn!(
@@ -390,10 +405,23 @@ fn face_target_camera_dir_world(
     config: &ViewCubeConfig,
 ) -> Vec3 {
     let local_dir = direction.to_look_direction();
+    direction_target_camera_dir_world(local_dir, config)
+}
+
+#[cfg(test)]
+fn corner_target_camera_dir_world(
+    position: super::components::CornerPosition,
+    config: &ViewCubeConfig,
+) -> Vec3 {
+    let local_dir = position.to_look_direction();
+    direction_target_camera_dir_world(local_dir, config)
+}
+
+fn direction_target_camera_dir_world(local_dir: Vec3, config: &ViewCubeConfig) -> Vec3 {
     if config.sync_with_camera {
         (config.effective_axis_correction() * local_dir).normalize_or_zero()
     } else {
-        local_dir
+        local_dir.normalize_or_zero()
     }
 }
 
@@ -707,5 +735,14 @@ mod tests {
         let config = ViewCubeConfig::default();
         let world = face_target_camera_dir_world(dir, &config);
         assert!((world - Vec3::NEG_X).length() < 1.0e-5);
+    }
+
+    #[test]
+    fn corner_target_camera_dir_world_applies_axis_correction() {
+        let corner = crate::plugins::view_cube::CornerPosition::TopFrontRight;
+        let config = ViewCubeConfig::default();
+        let world = corner_target_camera_dir_world(corner, &config);
+        let expected = Vec3::new(-1.0, 1.0, -1.0).normalize();
+        assert!((world - expected).length() < 1.0e-5);
     }
 }

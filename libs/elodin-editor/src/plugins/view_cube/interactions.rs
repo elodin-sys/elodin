@@ -528,6 +528,7 @@ pub struct OnCubeClickLookup<'w, 's> {
     root_links: Query<'w, 's, &'static ViewCubeLink, With<ViewCubeRoot>>,
     camera_globals: Query<'w, 's, &'static GlobalTransform, With<ViewCubeTargetCamera>>,
     root_globals: Query<'w, 's, &'static GlobalTransform, With<ViewCubeRoot>>,
+    globals: Query<'w, 's, &'static GlobalTransform>,
     config: Res<'w, ViewCubeConfig>,
 }
 
@@ -586,8 +587,16 @@ pub fn on_cube_click(
             });
         }
         CubeElement::Corner(pos) => {
+            let local_direction = corner_local_direction(
+                target_entity,
+                source,
+                &lookup.globals,
+                &lookup.root_globals,
+                pos.to_look_direction(),
+            );
             events.write(ViewCubeEvent::CornerClicked {
                 position: *pos,
+                local_direction,
                 source,
             });
         }
@@ -775,6 +784,32 @@ fn find_ancestor(
         } else {
             return None;
         }
+    }
+}
+
+fn corner_local_direction(
+    corner_entity: Entity,
+    root_entity: Entity,
+    globals: &Query<&GlobalTransform>,
+    root_globals: &Query<&GlobalTransform, With<ViewCubeRoot>>,
+    fallback: Vec3,
+) -> Vec3 {
+    let Ok(corner_global) = globals.get(corner_entity) else {
+        return fallback;
+    };
+    let Ok(root_global) = root_globals.get(root_entity) else {
+        return fallback;
+    };
+
+    let corner_local = root_global
+        .to_matrix()
+        .inverse()
+        .transform_point3(corner_global.translation());
+    let dir = corner_local.normalize_or_zero();
+    if dir.length_squared() > 1.0e-6 {
+        dir
+    } else {
+        fallback
     }
 }
 
