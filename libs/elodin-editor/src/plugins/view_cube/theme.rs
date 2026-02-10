@@ -55,17 +55,17 @@ impl ViewCubeColors {
     /// Light theme colors - soft cream cube with defined structure
     pub fn light() -> Self {
         Self {
-            // Soft warm cream faces
-            face_normal: Color::srgba(0.94, 0.91, 0.85, 0.7),
+            // Very bright ivory faces. Keep high alpha to avoid scene bleed-through.
+            face_normal: Color::srgba(1.0, 0.99, 0.965, 0.96),
             face_hover: Color::srgb(0.2, 0.55, 1.0),
-            // Medium warm brown edges - clear separation
-            edge_normal: Color::srgba(0.55, 0.48, 0.38, 0.85),
+            // Light warm edges
+            edge_normal: Color::srgba(0.9, 0.82, 0.68, 0.94),
             edge_hover: Color::srgb(0.0, 0.7, 0.54),
-            // Darker brown corners - defined anchor points
-            corner_normal: Color::srgba(0.42, 0.36, 0.28, 0.9),
+            // Bright corner accents
+            corner_normal: Color::srgba(0.98, 0.89, 0.72, 0.97),
             corner_hover: Color::srgb(0.92, 0.36, 0.22),
             // Arrows
-            arrow_normal: Color::srgba(0.45, 0.4, 0.35, 0.55),
+            arrow_normal: Color::srgba(0.74, 0.66, 0.52, 0.72),
             arrow_hover: Color::srgba(0.15, 0.45, 0.95, 0.95),
             highlight_emissive: LinearRgba::new(0.1, 0.25, 0.5, 1.0),
         }
