@@ -19,6 +19,7 @@ use super::theme::ViewCubeColors;
 pub fn setup_cube_elements(
     mut commands: Commands,
     query: Query<(Entity, &Name), (With<Name>, Without<ViewCubeSetup>)>,
+    mut transforms: Query<&mut Transform>,
     parents: Query<&ChildOf>,
     children_query: Query<&Children>,
     mesh_roots: Query<Entity, With<ViewCubeMeshRoot>>,
@@ -26,6 +27,8 @@ pub fn setup_cube_elements(
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut original_materials: ResMut<OriginalMaterials>,
 ) {
+    const EDGE_HOVER_SCALE: f32 = 1.2;
+
     // Support multiple ViewCubes (split viewports)
     if mesh_roots.is_empty() {
         return;
@@ -68,6 +71,12 @@ pub fn setup_cube_elements(
 
         if let Some(elem) = element {
             let element_color = colors.get_element_color(&elem);
+            if matches!(elem, CubeElement::Edge(_))
+                && let Ok(mut transform) = transforms.get_mut(entity)
+            {
+                // Slightly enlarge border meshes so edge/frame hover is easier to trigger.
+                transform.scale *= Vec3::splat(EDGE_HOVER_SCALE);
+            }
 
             commands
                 .entity(entity)

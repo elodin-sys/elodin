@@ -5,7 +5,6 @@ use bevy::camera::visibility::RenderLayers;
 use bevy::ecs::hierarchy::ChildOf;
 use bevy::picking::prelude::*;
 use bevy::prelude::*;
-use bevy::render::render_resource::Face;
 use bevy_fontmesh::prelude::*;
 use std::f32::consts::{FRAC_PI_2, PI};
 
@@ -150,11 +149,13 @@ fn spawn_axes(
     render_layers: Option<RenderLayers>,
     parent: Entity,
 ) {
+    const AXIS_SCALE_BUMP: f32 = 1.06;
+
     // Axes along cube edges (corner gizmo style)
-    let axis_length = 2.6 * config.scale; // Long enough to be clearly visible
-    let axis_radius = 0.08 * config.scale; // Thick for visibility
-    let tip_radius = 0.14 * config.scale;
-    let tip_length = 0.3 * config.scale;
+    let axis_length = 2.6 * config.scale * AXIS_SCALE_BUMP; // Long enough to be clearly visible
+    let axis_radius = 0.08 * config.scale * AXIS_SCALE_BUMP; // Thick for visibility
+    let tip_radius = 0.14 * config.scale * AXIS_SCALE_BUMP;
+    let tip_length = 0.3 * config.scale * AXIS_SCALE_BUMP;
     // Origin at bottom-back-left corner - each axis lies along a cube edge
     // X goes right (along bottom-back edge)
     // Y goes up (along back-left edge)
@@ -259,22 +260,26 @@ fn spawn_face_labels(
     let font: Handle<FontMesh> =
         asset_server.load("embedded://elodin_editor/assets/fonts/Roboto-Bold.ttf");
 
-    // Label configuration - scaled by global config
-    // Letters fill the entire face
-    let label_scale = 1.0 * config.scale;
-    let label_depth = 0.02 * config.scale;
-    let face_offset = 0.52 * config.scale;
+    // Label transforms are local to the cube root, which already carries `config.scale`.
+    // Applying `config.scale` again would push labels inside the cube in editor mode.
+    let label_scale = 0.88;
+    let label_depth = 0.03;
+    let face_offset = 0.56;
 
     // Get face labels from coordinate system configuration
     let face_labels = config.system.get_face_labels(face_offset);
 
     for label in face_labels {
+        let emissive = match label.color {
+            Color::Srgba(c) => LinearRgba::new(c.red * 0.45, c.green * 0.45, c.blue * 0.45, 1.0),
+            _ => LinearRgba::new(0.35, 0.35, 0.35, 1.0),
+        };
         let material = materials.add(StandardMaterial {
             base_color: label.color,
+            emissive,
             unlit: true,
-            // Cull back faces so text is only visible from the front
-            // This prevents seeing reversed text through transparent cube faces
-            cull_mode: Some(Face::Back),
+            // Keep text visible even if the generated mesh winding differs per face.
+            cull_mode: None,
             ..default()
         });
 
@@ -296,8 +301,8 @@ fn spawn_face_labels(
                     .with_scale(Vec3::splat(label_scale)),
                 ..default()
             },
-            // Add CubeElement so clicking on labels triggers camera rotation
-            CubeElement::Face(label.direction),
+            // Labels are purely visual; interaction stays on cube faces/edges/corners.
+            Pickable::IGNORE,
             ChildOf(parent),
             Name::new(format!("label_{}", label.text)),
         ));
