@@ -185,7 +185,7 @@ impl Plugin for EditorPlugin {
                     .disable::<LogPlugin>()
                     .build(),
             )
-            // Note: we added this because bevy 0.17.3 changed it's behavior
+            // Note: we added this because bevy 0.17.3 changed its behavior
             // which broke bevy_editor_cam. See here:
             // https://github.com/aevyrie/bevy_editor_cam/issues/61
             .insert_resource(PickingSettings {

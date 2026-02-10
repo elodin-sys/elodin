@@ -82,7 +82,7 @@ fn setup_primary_window_state(
         warn!("No primary window to setup");
         return;
     };
-    // TODO: Setup this descriptor with the path when its known.
+    // TODO: Set the descriptor path once it is known.
     let descriptor = WindowDescriptor::default();
     let state = WindowState {
         descriptor,
