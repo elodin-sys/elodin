@@ -347,33 +347,37 @@ fn spawn_rotation_arrows(
     let roll_mesh = meshes.add(Rectangle::new(button_size * 0.92, button_size * 0.92));
 
     let horizontal_distance = 0.42; // Reduced to avoid clipping at viewport edges
-    let vertical_distance = 0.38;
+    // Keep up/down arrows at identical spacing from the cube center.
+    let vertical_distance = 0.43;
     let depth = -1.2;
+
+    // Slightly thicken cardinal arrows (left/right/up/down) without affecting roll arrows.
+    let directional_scale = Vec3::splat(1.08);
 
     let arrows = [
         (
             RotationArrow::Left,
             Vec3::new(-horizontal_distance, 0.0, depth),
             Quat::from_rotation_z(PI),
-            Vec3::ONE,
+            directional_scale,
         ),
         (
             RotationArrow::Right,
             Vec3::new(horizontal_distance, 0.0, depth),
             Quat::IDENTITY,
-            Vec3::ONE,
+            directional_scale,
         ),
         (
             RotationArrow::Up,
             Vec3::new(0.0, vertical_distance, depth),
             Quat::from_rotation_z(FRAC_PI_2),
-            Vec3::ONE,
+            directional_scale,
         ),
         (
             RotationArrow::Down,
             Vec3::new(0.0, -vertical_distance, depth),
             Quat::from_rotation_z(-FRAC_PI_2),
-            Vec3::ONE,
+            directional_scale,
         ),
     ];
 
