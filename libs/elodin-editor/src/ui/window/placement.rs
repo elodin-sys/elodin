@@ -329,7 +329,7 @@ pub fn handle_window_relayout_events(
                             let window_states = AsyncWorld.query::<&WindowState>();
                             if let Ok(Some(rect)) = window_states
                                 .entity(window)
-                                // TODO: Can got back to .get() when bevy_defer is updated past 0.15.1.
+                                // TODO: Can go back to `.get()` once bevy_defer > 0.15.1.
                                 .get_mut(|state| state.descriptor.screen_rect)
                             {
                                 apply_physical_screen_rect(window, screen, rect).await.ok();
@@ -347,7 +347,7 @@ pub fn handle_window_relayout_events(
                             if let Some(screen) = AsyncWorld
                                 .query::<&WindowState>()
                                 .entity(window)
-                                // TODO: Can got back to .get() when bevy_defer is updated past 0.15.1.
+                                // TODO: Can go back to `.get()` once bevy_defer > 0.15.1.
                                 .get_mut(|state| state.descriptor.screen)
                                 .ok()
                                 .flatten()

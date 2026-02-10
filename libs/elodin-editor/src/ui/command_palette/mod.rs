@@ -196,7 +196,7 @@ impl RootWidgetSystem for CommandPalette<'_, '_> {
 #[derive(Clone)]
 pub struct CommandPaletteIcons {
     pub link: egui::TextureId,
-    // TODO: cmd_btn
+    // TODO: Add a command-palette button icon once the asset exists.
 }
 
 #[derive(SystemParam)]
