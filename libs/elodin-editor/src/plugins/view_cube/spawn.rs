@@ -403,7 +403,9 @@ fn spawn_rotation_arrows(
     }
 
     // Top roll arrows: use rounded loop icon to suggest rotation around view axis.
-    let roll_offset = 0.15;
+    // Keep top roll arrows almost vertically aligned with left/right arrows,
+    // while staying slightly inward to avoid edge clipping.
+    let roll_offset = horizontal_distance - 0.03;
     let roll_height = vertical_distance + 0.01;
 
     let roll_arrows = [
