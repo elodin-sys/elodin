@@ -17,6 +17,7 @@ pub enum ViewCubeEvent {
     },
     CornerClicked {
         position: CornerPosition,
+        local_direction: Vec3,
         source: Entity,
     },
     ArrowClicked {
