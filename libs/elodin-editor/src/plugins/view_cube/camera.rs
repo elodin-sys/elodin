@@ -9,7 +9,7 @@
 use bevy::camera::Viewport;
 use bevy::camera::visibility::RenderLayers;
 use bevy::ecs::system::SystemParam;
-use bevy::log::{debug, info, warn};
+use bevy::log::{debug, warn};
 use bevy::math::Dir3;
 use bevy::prelude::*;
 use bevy_editor_cam::controller::component::EditorCam;
@@ -142,7 +142,7 @@ pub fn handle_view_cube_camera(
                 let camera_dir_world = -(*transform.forward());
                 let (target_face, clicked_face_dot, face_was_in_front) =
                     resolve_face_click_target(*direction, camera_dir_world);
-                info!(
+                debug!(
                     mode = "standalone",
                     clicked_face = ?direction,
                     target_face = ?target_face,
@@ -619,7 +619,7 @@ pub fn handle_view_cube_editor(
         if let ViewCubeEvent::FaceClicked { direction, .. } = event {
             let (target_face, clicked_face_dot, face_was_in_front) =
                 resolve_face_click_target(*direction, camera_dir_global);
-            info!(
+            debug!(
                 mode = "editor",
                 clicked_face = ?direction,
                 target_face = ?target_face,
@@ -753,18 +753,7 @@ pub fn handle_view_cube_editor(
             let candidate_b =
                 build_edge_snap_candidate(transform, parent_rotation, face_b, dot_b, face_a, dot_a);
 
-            let chosen = match (&candidate_a, &candidate_b) {
-                (Some(a), Some(b)) => {
-                    if a.rotation_angle <= b.rotation_angle + 1.0e-6 {
-                        Some(a)
-                    } else {
-                        Some(b)
-                    }
-                }
-                (Some(a), None) => Some(a),
-                (None, Some(b)) => Some(b),
-                (None, None) => None,
-            };
+            let chosen = choose_best_edge_candidate(&candidate_a, &candidate_b);
 
             if let Some(chosen) = chosen {
                 let trigger = LookToTrigger {
@@ -847,7 +836,7 @@ pub fn handle_view_cube_editor(
             let axis_dot_right = step_axis_world.dot(base_right_world);
             let axis_dot_up = step_axis_world.dot(base_up_world);
             let axis_dot_forward = step_axis_world.dot(base_forward_world);
-            info!(
+            debug!(
                 arrow = ?arrow,
                 camera = %entity,
                 now_secs = now_secs,
@@ -902,7 +891,7 @@ pub fn handle_view_cube_editor(
                     .arrow_cache
                     .set_target(entity, target_rotation, now_secs);
                 look_to.write(trigger);
-                info!(
+                debug!(
                     arrow = ?arrow,
                     camera = %entity,
                     new_forward_world = ?new_forward_world,
@@ -987,6 +976,24 @@ struct EdgeSnapCandidate {
     chosen_up_margin: Option<f32>,
     up_candidates_considered: usize,
     rotation_angle: f32,
+}
+
+fn choose_best_edge_candidate<'a>(
+    candidate_a: &'a Option<EdgeSnapCandidate>,
+    candidate_b: &'a Option<EdgeSnapCandidate>,
+) -> Option<&'a EdgeSnapCandidate> {
+    match (candidate_a.as_ref(), candidate_b.as_ref()) {
+        (Some(a), Some(b)) => {
+            if a.rotation_angle <= b.rotation_angle + 1.0e-6 {
+                Some(a)
+            } else {
+                Some(b)
+            }
+        }
+        (Some(a), None) => Some(a),
+        (None, Some(b)) => Some(b),
+        (None, None) => None,
+    }
 }
 
 fn build_edge_snap_candidate(

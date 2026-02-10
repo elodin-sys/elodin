@@ -5,8 +5,8 @@ A CAD-style 3D orientation widget for Bevy applications.
 ## Features
 
 - **Interactive cube**: Click on faces, edges, or corners to snap the camera to that view
-- **Rotation arrows**: 6 buttons for incremental camera rotation (up, down, left, right, roll)
-- **Hover highlighting**: Visual feedback when hovering over interactive elements
+- **Rotation arrows**: 4 directional chevrons + 2 roll-loop buttons for incremental camera rotation
+- **Hover highlighting**: Visual feedback when hovering over interactive elements (edge hover highlights the 4-edge frame)
 - **Overlay mode**: Renders as a fixed overlay in the corner of the screen
 - **Camera sync**: Cube rotation mirrors the main camera orientation
 - **Coordinate systems**: Supports ENU (E, N, U labels) and NED (N, E, D labels)
@@ -111,3 +111,7 @@ cargo run --example view_cube_demo -p elodin-editor
 The plugin expects these assets in your assets folder:
 - `axes-cube.glb` - The 3D cube model
 - `fonts/Roboto-Bold.ttf` - Font for face labels
+- `icons/chevron_right.png` - Icon used for left/right/up/down arrow buttons
+- `icons/loop.png` - Icon used for roll-left/roll-right buttons
+
+When used inside `elodin_editor`, these font/icon assets are embedded by `EmbeddedAssetPlugin`.
