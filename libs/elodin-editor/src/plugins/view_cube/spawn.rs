@@ -92,12 +92,20 @@ pub fn spawn_view_cube(
     let camera = if config.use_overlay {
         let gizmo_camera = spawn_overlay_camera(commands, config, main_camera_entity);
         // In overlay mode, arrows are children of the gizmo camera
-        spawn_rotation_arrows(commands, meshes, materials, gizmo_camera, render_layers);
+        spawn_rotation_arrows(
+            commands,
+            asset_server,
+            meshes,
+            materials,
+            gizmo_camera,
+            render_layers,
+        );
         Some(gizmo_camera)
     } else {
         // In standalone mode, arrows are children of the main camera
         spawn_rotation_arrows(
             commands,
+            asset_server,
             meshes,
             materials,
             main_camera_entity,
@@ -313,30 +321,30 @@ fn spawn_face_labels(
 }
 
 // ============================================================================
-// Rotation Arrows
+// Rotation Buttons
 // ============================================================================
 
-fn create_arrow_mesh() -> Mesh {
-    // Large enough for reliable clicking in the 128px overlay viewport
-    Cone::new(0.06, 0.12).into()
-}
-
-fn create_roll_arrow_mesh() -> Mesh {
-    // Large enough for reliable clicking in the 128px overlay viewport
-    Capsule3d::new(0.03, 0.08).into()
-}
-
-/// Spawn rotation arrows as children of camera (fixed on screen)
+/// Spawn rotation buttons as icon quads (fixed on screen).
 fn spawn_rotation_arrows(
     commands: &mut Commands,
+    asset_server: &Res<AssetServer>,
     meshes: &mut ResMut<Assets<Mesh>>,
     materials: &mut ResMut<Assets<StandardMaterial>>,
     camera_entity: Entity,
     render_layers: Option<RenderLayers>,
 ) {
-    let arrow_mesh = meshes.add(create_arrow_mesh());
     let colors = ViewCubeColors::default();
     let arrow_color = colors.arrow_normal;
+
+    let directional_icon: Handle<Image> =
+        asset_server.load("embedded://elodin_editor/assets/icons/chevron_right.png");
+    let roll_icon: Handle<Image> =
+        asset_server.load("embedded://elodin_editor/assets/icons/loop.png");
+
+    // Quads provide a much more reliable click target than thin cone/capsule meshes.
+    let button_size = 0.2;
+    let directional_mesh = meshes.add(Rectangle::new(button_size, button_size));
+    let roll_mesh = meshes.add(Rectangle::new(button_size * 0.92, button_size * 0.92));
 
     let horizontal_distance = 0.42; // Reduced to avoid clipping at viewport edges
     let vertical_distance = 0.38;
@@ -346,28 +354,33 @@ fn spawn_rotation_arrows(
         (
             RotationArrow::Left,
             Vec3::new(-horizontal_distance, 0.0, depth),
-            Quat::from_rotation_z(FRAC_PI_2),
+            Quat::from_rotation_z(PI),
+            Vec3::ONE,
         ),
         (
             RotationArrow::Right,
             Vec3::new(horizontal_distance, 0.0, depth),
-            Quat::from_rotation_z(-FRAC_PI_2),
+            Quat::IDENTITY,
+            Vec3::ONE,
         ),
         (
             RotationArrow::Up,
             Vec3::new(0.0, vertical_distance, depth),
-            Quat::IDENTITY,
+            Quat::from_rotation_z(FRAC_PI_2),
+            Vec3::ONE,
         ),
         (
             RotationArrow::Down,
             Vec3::new(0.0, -vertical_distance, depth),
-            Quat::from_rotation_z(PI),
+            Quat::from_rotation_z(-FRAC_PI_2),
+            Vec3::ONE,
         ),
     ];
 
-    for (direction, position, rotation) in arrows {
+    for (direction, position, rotation, scale) in arrows {
         let material = materials.add(StandardMaterial {
             base_color: arrow_color,
+            base_color_texture: Some(directional_icon.clone()),
             unlit: true,
             alpha_mode: AlphaMode::Blend,
             cull_mode: None,
@@ -375,9 +388,11 @@ fn spawn_rotation_arrows(
         });
 
         let mut arrow_cmd = commands.spawn((
-            Mesh3d(arrow_mesh.clone()),
+            Mesh3d(directional_mesh.clone()),
             MeshMaterial3d(material),
-            Transform::from_translation(position).with_rotation(rotation),
+            Transform::from_translation(position)
+                .with_rotation(rotation)
+                .with_scale(scale),
             direction,
             Name::new(format!("rotation_arrow_{:?}", direction)),
         ));
@@ -387,26 +402,29 @@ fn spawn_rotation_arrows(
         arrow_cmd.insert(ChildOf(camera_entity));
     }
 
-    // Roll arrows
-    let roll_mesh = meshes.add(create_roll_arrow_mesh());
+    // Top roll arrows: use rounded loop icon to suggest rotation around view axis.
     let roll_offset = 0.15;
+    let roll_height = vertical_distance + 0.01;
 
     let roll_arrows = [
         (
             RotationArrow::RollLeft,
-            Vec3::new(-roll_offset, vertical_distance, depth),
-            Quat::from_rotation_z(FRAC_PI_2 * 0.5),
+            Vec3::new(-roll_offset, roll_height, depth),
+            Quat::from_rotation_z(0.0),
+            Vec3::new(-1.0, 1.0, 1.0),
         ),
         (
             RotationArrow::RollRight,
-            Vec3::new(roll_offset, vertical_distance, depth),
-            Quat::from_rotation_z(-FRAC_PI_2 * 0.5),
+            Vec3::new(roll_offset, roll_height, depth),
+            Quat::from_rotation_z(0.0),
+            Vec3::ONE,
         ),
     ];
 
-    for (direction, position, rotation) in roll_arrows {
+    for (direction, position, rotation, scale) in roll_arrows {
         let material = materials.add(StandardMaterial {
             base_color: arrow_color,
+            base_color_texture: Some(roll_icon.clone()),
             unlit: true,
             alpha_mode: AlphaMode::Blend,
             cull_mode: None,
@@ -416,7 +434,9 @@ fn spawn_rotation_arrows(
         let mut arrow_cmd = commands.spawn((
             Mesh3d(roll_mesh.clone()),
             MeshMaterial3d(material),
-            Transform::from_translation(position).with_rotation(rotation),
+            Transform::from_translation(position)
+                .with_rotation(rotation)
+                .with_scale(scale),
             direction,
             Name::new(format!("rotation_arrow_{:?}", direction)),
         ));
