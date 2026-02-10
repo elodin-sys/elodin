@@ -5,7 +5,7 @@ A CAD-style 3D orientation widget for Bevy applications.
 ## Features
 
 - **Interactive cube**: Click on faces, edges, or corners to snap the camera to that view
-- **Rotation arrows**: 4 directional chevrons + 2 roll-loop buttons for incremental camera rotation
+- **Rotation arrows**: top-left/top-right roll around the camera axis; left/right rotate around camera up; up/down rotate around camera right
 - **Hover highlighting**: Visual feedback when hovering over interactive elements (edge hover highlights the 4-edge frame)
 - **Overlay mode**: Renders as a fixed overlay in the corner of the screen
 - **Camera sync**: Cube rotation mirrors the main camera orientation
