@@ -58,7 +58,7 @@ impl Plugin for ViewCubePlugin {
             .add_observer(interactions::on_arrow_hover_end)
             .add_observer(interactions::on_arrow_click);
 
-        if self.config.auto_rotate {
+        if self.config.auto_rotate || self.config.use_look_to_trigger {
             app.init_resource::<camera::ViewCubeArrowTargetCache>()
                 .add_systems(Update, camera::handle_view_cube_editor)
                 .add_systems(Update, camera::snap_initial_camera);
