@@ -109,8 +109,10 @@ pub fn setup_cube_elements(
 
 fn parse_face(name: &str) -> Option<CubeElement> {
     let dir = match name {
-        "Face_Front" => FaceDirection::North,
-        "Face_Back" => FaceDirection::South,
+        // In axes-cube.glb, Face_Back is translated to +Z and Face_Front to -Z.
+        // Map names to world directions, not to lexical front/back wording.
+        "Face_Front" => FaceDirection::South,
+        "Face_Back" => FaceDirection::North,
         "Face_Left" => FaceDirection::West,
         "Face_Right" => FaceDirection::East,
         "Face_Top" => FaceDirection::Up,

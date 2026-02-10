@@ -27,6 +27,9 @@ use super::events::ViewCubeEvent;
 use crate::WorldPosExt;
 use crate::object_3d::ComponentArrayExt;
 
+/// If the clicked face is already mostly in front of the camera, swap to its opposite.
+const FACE_SWAP_DOT_THRESHOLD: f32 = 0.95;
+
 // ============================================================================
 // Components
 // ============================================================================
@@ -133,6 +136,31 @@ pub fn handle_view_cube_camera(
         let Some(cam) = main_camera_for_event(event, &view_cube_query) else {
             continue;
         };
+
+        if let ViewCubeEvent::FaceClicked { direction, .. } = event {
+            if let Ok(transform) = camera_query.get(cam) {
+                let camera_dir_world = -(*transform.forward());
+                let (target_face, clicked_face_dot, face_was_in_front) =
+                    resolve_face_click_target(*direction, camera_dir_world);
+                info!(
+                    mode = "standalone",
+                    clicked_face = ?direction,
+                    target_face = ?target_face,
+                    clicked_face_dot = clicked_face_dot,
+                    face_was_in_front = face_was_in_front,
+                    threshold = FACE_SWAP_DOT_THRESHOLD,
+                    "view cube: face target selection"
+                );
+                start_camera_animation(
+                    target_face.to_look_direction(),
+                    transform,
+                    &mut camera_anim,
+                    &config,
+                    cam,
+                );
+            }
+            continue;
+        }
 
         if let Some(look_dir) = target_look_direction(event) {
             if let Ok(transform) = camera_query.get(cam) {
@@ -287,6 +315,20 @@ fn main_camera_for_event(
         .or_else(|_| view_cube_query.iter().next().ok_or(()))
         .ok()
         .map(|link| link.main_camera)
+}
+
+fn resolve_face_click_target(
+    clicked_face: FaceDirection,
+    camera_dir_world: Vec3,
+) -> (FaceDirection, f32, bool) {
+    let clicked_face_dot = clicked_face.to_look_direction().dot(camera_dir_world);
+    let face_was_in_front = clicked_face_dot >= FACE_SWAP_DOT_THRESHOLD;
+    let target_face = if face_was_in_front {
+        clicked_face.opposite()
+    } else {
+        clicked_face
+    };
+    (target_face, clicked_face_dot, face_was_in_front)
 }
 
 fn target_look_direction(event: &ViewCubeEvent) -> Option<Vec3> {
@@ -575,7 +617,19 @@ pub fn handle_view_cube_editor(
         let camera_dir_global = parent_rotation * camera_dir_local;
 
         if let ViewCubeEvent::FaceClicked { direction, .. } = event {
-            let raw_look_dir_world = direction.to_look_direction();
+            let (target_face, clicked_face_dot, face_was_in_front) =
+                resolve_face_click_target(*direction, camera_dir_global);
+            info!(
+                mode = "editor",
+                clicked_face = ?direction,
+                target_face = ?target_face,
+                clicked_face_dot = clicked_face_dot,
+                face_was_in_front = face_was_in_front,
+                threshold = FACE_SWAP_DOT_THRESHOLD,
+                "view cube: face target selection"
+            );
+
+            let raw_look_dir_world = target_face.to_look_direction();
             let facing_world = -raw_look_dir_world;
             let facing_local_vec = parent_rotation.inverse() * facing_world;
 
@@ -596,8 +650,11 @@ pub fn handle_view_cube_editor(
                 let rotation_angle = angle_to_trigger(transform, &trigger);
                 debug!(
                     target_kind = "face",
-                    selection_policy = "face_world_to_local_min_total_rotation",
-                    direction = ?direction,
+                    selection_policy = "face_click_front_toggles_opposite_world_to_local_min_total_rotation",
+                    clicked_face = ?direction,
+                    target_face = ?target_face,
+                    clicked_face_dot = clicked_face_dot,
+                    face_was_in_front = face_was_in_front,
                     camera_dir_local = ?camera_dir_local,
                     camera_dir_global = ?camera_dir_global,
                     raw_look_dir_world = ?raw_look_dir_world,
