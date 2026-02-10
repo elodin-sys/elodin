@@ -9,7 +9,7 @@
 use bevy::camera::Viewport;
 use bevy::camera::visibility::RenderLayers;
 use bevy::ecs::system::SystemParam;
-use bevy::log::{debug, warn};
+use bevy::log::{debug, info, warn};
 use bevy::math::Dir3;
 use bevy::prelude::*;
 use bevy_editor_cam::controller::component::EditorCam;
@@ -787,6 +787,29 @@ pub fn handle_view_cube_editor(
             let new_forward_local = parent_rotation.inverse() * new_forward_world;
             let new_up_local = parent_rotation.inverse() * new_up_world;
 
+            let axis_dot_right = step_axis_world.dot(base_right_world);
+            let axis_dot_up = step_axis_world.dot(base_up_world);
+            let axis_dot_forward = step_axis_world.dot(base_forward_world);
+            info!(
+                arrow = ?arrow,
+                camera = %entity,
+                now_secs = now_secs,
+                base_rotation_source = base_rotation_source,
+                step_axis_source = step_axis_source,
+                step_axis_world = ?*step_axis_world,
+                step_angle_deg = signed_angle.to_degrees(),
+                base_forward_world = ?base_forward_world,
+                base_up_world = ?base_up_world,
+                base_right_world = ?base_right_world,
+                base_forward_world_major = dominant_world_axis_label(base_forward_world),
+                base_up_world_major = dominant_world_axis_label(base_up_world),
+                base_right_world_major = dominant_world_axis_label(base_right_world),
+                axis_dot_right = axis_dot_right,
+                axis_dot_up = axis_dot_up,
+                axis_dot_forward = axis_dot_forward,
+                "view cube: arrow frame probe"
+            );
+
             if let Ok(facing) = Dir3::new(new_forward_local)
                 && let Ok(up_dir) = Dir3::new(new_up_local)
             {
@@ -822,6 +845,15 @@ pub fn handle_view_cube_editor(
                     .arrow_cache
                     .set_target(entity, target_rotation, now_secs);
                 look_to.write(trigger);
+                info!(
+                    arrow = ?arrow,
+                    camera = %entity,
+                    new_forward_world = ?new_forward_world,
+                    new_up_world = ?new_up_world,
+                    new_forward_world_major = dominant_world_axis_label(new_forward_world),
+                    new_up_world_major = dominant_world_axis_label(new_up_world),
+                    "view cube: arrow frame result"
+                );
             } else {
                 warn!(
                     arrow = ?arrow,
@@ -849,6 +881,19 @@ fn trigger_rotation(trigger: &LookToTrigger) -> Quat {
             *trigger.target_up_direction,
         )
         .rotation
+}
+
+fn dominant_world_axis_label(vec: Vec3) -> &'static str {
+    let abs = vec.abs();
+    if abs.x >= abs.y && abs.x >= abs.z {
+        if vec.x >= 0.0 { "+X" } else { "-X" }
+    } else if abs.y >= abs.x && abs.y >= abs.z {
+        if vec.y >= 0.0 { "+Y" } else { "-Y" }
+    } else if vec.z >= 0.0 {
+        "+Z"
+    } else {
+        "-Z"
+    }
 }
 
 fn arrow_world_axis_angle(arrow: RotationArrow, angle: f32) -> (Dir3, f32, &'static str) {
