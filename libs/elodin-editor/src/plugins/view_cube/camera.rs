@@ -20,7 +20,7 @@ use super::events::ViewCubeEvent;
 use crate::WorldPosExt;
 use crate::object_3d::ComponentArrayExt;
 
-const FACE_FRONT_DOT_THRESHOLD: f32 = 0.95;
+const FACE_IN_SCREEN_PLANE_DOT_THRESHOLD: f32 = 0.999;
 
 #[derive(Component)]
 pub struct ViewCubeTargetCamera;
@@ -226,11 +226,14 @@ pub fn handle_view_cube_editor(
 
         if let ViewCubeEvent::FaceClicked { direction, .. } = event {
             let clicked_face_dot = direction.to_look_direction().dot(camera_dir_cube);
-            if clicked_face_dot >= FACE_FRONT_DOT_THRESHOLD {
+            if clicked_face_dot >= FACE_IN_SCREEN_PLANE_DOT_THRESHOLD {
                 continue;
             }
 
-            let raw_look_dir_world = direction.to_look_direction();
+            let raw_look_dir_world = face_target_camera_dir_world(*direction, &config);
+            if raw_look_dir_world.length_squared() <= 1.0e-6 {
+                continue;
+            }
             let facing_world = -raw_look_dir_world;
             let facing_local_vec = parent_rotation.inverse() * facing_world;
 
@@ -380,6 +383,18 @@ fn trigger_rotation(trigger: &LookToTrigger) -> Quat {
             *trigger.target_up_direction,
         )
         .rotation
+}
+
+fn face_target_camera_dir_world(
+    direction: super::components::FaceDirection,
+    config: &ViewCubeConfig,
+) -> Vec3 {
+    let local_dir = direction.to_look_direction();
+    if config.sync_with_camera {
+        (config.effective_axis_correction() * local_dir).normalize_or_zero()
+    } else {
+        local_dir
+    }
 }
 
 fn arrow_camera_axis_angle(
@@ -684,5 +699,13 @@ mod tests {
         assert_eq!(*axis, forward);
         assert_eq!(signed_angle, -angle);
         assert_eq!(source, "camera_forward");
+    }
+
+    #[test]
+    fn face_target_camera_dir_world_applies_axis_correction() {
+        let dir = crate::plugins::view_cube::FaceDirection::East;
+        let config = ViewCubeConfig::default();
+        let world = face_target_camera_dir_world(dir, &config);
+        assert!((world - Vec3::NEG_X).length() < 1.0e-5);
     }
 }
