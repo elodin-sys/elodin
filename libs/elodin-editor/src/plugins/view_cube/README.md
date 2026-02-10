@@ -102,10 +102,10 @@ fn setup(
 
 ## Required Assets
 
-The plugin expects these assets in your assets folder:
-- `axes-cube.glb` - The 3D cube model
-- `fonts/Roboto-Bold.ttf` - Font for face labels
-- `icons/chevron_right.png` - Icon used for left/right/up/down arrow buttons
-- `icons/loop.png` - Icon used for roll-left/roll-right buttons
+The plugin expects:
+- `axes-cube.glb` in your runtime assets folder
+- `fonts/Roboto-Bold.ttf` for face labels (embedded in `elodin_editor`)
+- `icons/chevron_right.png` for left/right/up/down arrow buttons (embedded in `elodin_editor`)
+- `icons/loop.png` for roll-left/roll-right buttons (embedded in `elodin_editor`)
 
 When used inside `elodin_editor`, these font/icon assets are embedded by `EmbeddedAssetPlugin`.
