@@ -170,6 +170,10 @@ pub enum RotationArrow {
     RollRight,
 }
 
+/// Marker for axis labels that should remain in the screen plane.
+#[derive(Component)]
+pub struct AxisLabelBillboard;
+
 // ============================================================================
 // Resources
 // ============================================================================

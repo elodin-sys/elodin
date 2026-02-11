@@ -68,7 +68,16 @@ impl Plugin for ViewCubePlugin {
             .add_systems(Update, camera::snap_initial_camera);
 
         if self.config.sync_with_camera {
-            app.add_systems(PostUpdate, camera::sync_view_cube_rotation);
+            app.add_systems(
+                PostUpdate,
+                (
+                    camera::sync_view_cube_rotation,
+                    camera::orient_axis_labels_to_screen_plane,
+                )
+                    .chain(),
+            );
+        } else {
+            app.add_systems(PostUpdate, camera::orient_axis_labels_to_screen_plane);
         }
 
         app.add_systems(Update, camera::apply_render_layers_to_scene);

@@ -62,6 +62,7 @@ pub fn spawn_view_cube(
     // Spawn RGB axes extending from the corner of the cube (as children of cube root)
     spawn_axes(
         commands,
+        asset_server,
         meshes,
         materials,
         config,
@@ -129,6 +130,7 @@ fn spawn_overlay_camera(
 /// Spawn RGB axes extending from the bottom-left-back corner of the cube
 fn spawn_axes(
     commands: &mut Commands,
+    asset_server: &Res<AssetServer>,
     meshes: &mut ResMut<Assets<Mesh>>,
     materials: &mut ResMut<Assets<StandardMaterial>>,
     config: &ViewCubeConfig,
@@ -137,16 +139,15 @@ fn spawn_axes(
 ) {
     const AXIS_SCALE_BUMP: f32 = 0.95;
 
-    // Axes along cube edges (corner gizmo style)
-    let axis_length = 2.6 * config.scale * AXIS_SCALE_BUMP; // Long enough to be clearly visible
-    let axis_radius = 0.08 * config.scale * AXIS_SCALE_BUMP; // Thick for visibility
-    let tip_radius = 0.14 * config.scale * AXIS_SCALE_BUMP;
-    let tip_length = 0.3 * config.scale * AXIS_SCALE_BUMP;
+    // Axes are children of `view_cube_root` (already scaled by `config.scale`),
+    // so keep these in cube-local units to avoid double-scaling.
+    let axis_length = 1.1;
+    let axis_radius = 0.08 * AXIS_SCALE_BUMP;
     // Origin at bottom-back-left corner - each axis lies along a cube edge
     // X goes right (along bottom-back edge)
     // Y goes up (along back-left edge)
     // Z goes forward (along bottom-left edge)
-    let origin = Vec3::new(-0.55, -0.55, -0.55) * config.scale;
+    let axis_origin = Vec3::new(-0.55, -0.55, -0.55);
 
     let axes = config.system.get_axes();
     let axis_configs: [(Vec3, Color, &str); 3] = [
@@ -163,7 +164,7 @@ fn spawn_axes(
             axes.iter()
                 .find(|a| a.direction == Vec3::Y || a.direction == Vec3::NEG_Y)
                 .map(|a| a.color)
-                .unwrap_or(Color::srgb(0.2, 0.8, 0.2)),
+                .unwrap_or(Color::srgb(0.2, 0.4, 0.9)),
             "Y",
         ),
         (
@@ -171,13 +172,21 @@ fn spawn_axes(
             axes.iter()
                 .find(|a| a.direction == Vec3::Z)
                 .map(|a| a.color)
-                .unwrap_or(Color::srgb(0.2, 0.4, 0.9)),
+                .unwrap_or(Color::srgb(0.2, 0.8, 0.2)),
             "Z",
         ),
     ];
 
     let shaft_mesh = meshes.add(Cylinder::new(axis_radius, axis_length));
-    let tip_mesh = meshes.add(Cone::new(tip_radius, tip_length));
+    let font: Handle<FontMesh> =
+        asset_server.load("embedded://elodin_editor/assets/fonts/Roboto-Bold.ttf");
+    let axis_label_scale = 0.41;
+    let axis_label_depth = 0.005;
+    // Small gap between axis end and letter.
+    let axis_label_offset = 0.14 * AXIS_SCALE_BUMP;
+    let axis_label_distance = axis_length + axis_label_offset;
+    // Push labels away from the cube volume (not just along the axis direction).
+    let axis_label_outward_offset = 0.11 * AXIS_SCALE_BUMP;
 
     for (direction, color, name) in axis_configs {
         let material = materials.add(StandardMaterial {
@@ -195,7 +204,7 @@ fn spawn_axes(
             Quat::IDENTITY
         };
 
-        let shaft_pos = origin + direction * (axis_length / 2.0);
+        let shaft_pos = axis_origin + direction * (axis_length / 2.0);
         let mut shaft_cmd = commands.spawn((
             Mesh3d(shaft_mesh.clone()),
             MeshMaterial3d(material.clone()),
@@ -208,17 +217,39 @@ fn spawn_axes(
             shaft_cmd.insert(layers);
         }
 
-        let tip_pos = origin + direction * (axis_length + tip_length / 2.0);
-        let mut tip_cmd = commands.spawn((
-            Mesh3d(tip_mesh.clone()),
-            MeshMaterial3d(material),
-            Transform::from_translation(tip_pos).with_rotation(rotation),
+        let axis_tip = axis_origin + direction * axis_label_distance;
+        let outward = (axis_tip - direction * axis_tip.dot(direction)).normalize_or_zero();
+        let label_pos = axis_tip + outward * axis_label_outward_offset;
+        let mut label_cmd = commands.spawn((
+            TextMeshBundle {
+                text_mesh: TextMesh {
+                    text: name.to_string(),
+                    font: font.clone(),
+                    style: TextMeshStyle {
+                        depth: axis_label_depth,
+                        anchor: TextAnchor::Center,
+                        ..default()
+                    },
+                    ..default()
+                },
+                material: MeshMaterial3d(materials.add(StandardMaterial {
+                    base_color: color,
+                    emissive: LinearRgba::BLACK,
+                    unlit: true,
+                    cull_mode: None,
+                    ..default()
+                })),
+                transform: Transform::from_translation(label_pos)
+                    .with_scale(Vec3::splat(axis_label_scale)),
+                ..default()
+            },
             Pickable::IGNORE,
+            AxisLabelBillboard,
             ChildOf(parent),
-            Name::new(format!("axis_{}_tip", name)),
+            Name::new(format!("axis_{}_label", name)),
         ));
         if let Some(layers) = render_layers.clone() {
-            tip_cmd.insert(layers);
+            label_cmd.insert(layers);
         }
     }
 }
