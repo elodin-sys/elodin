@@ -301,9 +301,38 @@ fn same_entity_set(lhs: &[Entity], rhs: &[Entity]) -> bool {
     lhs.len() == rhs.len() && lhs.iter().all(|entity| rhs.contains(entity))
 }
 
-const FACE_FRONT_DOT_THRESHOLD: f32 = 0.9;
+fn hidden_target_face_from_hovered_group(
+    hovered: &HoveredElement,
+    cube_elements: &Query<(Entity, &CubeElement)>,
+    context: EdgeInteractionContext,
+) -> Option<FaceDirection> {
+    let mut resolved: Option<FaceDirection> = None;
+    let mut saw_edge = false;
+
+    for entity in hovered.entities.iter().copied() {
+        let Ok((_, element)) = cube_elements.get(entity) else {
+            continue;
+        };
+        let CubeElement::Edge(edge) = *element else {
+            continue;
+        };
+        saw_edge = true;
+        let Some(face) = resolve_edge_target_face(edge, context) else {
+            continue;
+        };
+        match resolved {
+            None => resolved = Some(face),
+            Some(current) if current == face => {}
+            Some(_) => return None,
+        }
+    }
+
+    if saw_edge { resolved } else { None }
+}
+
+const FACE_FRONT_DOT_THRESHOLD: f32 = 0.95;
 const FACE_HIDDEN_CLASS_DOT_THRESHOLD: f32 = 0.05;
-const FACE_ON_VISIBLE_FACE_DOT_THRESHOLD: f32 = 0.12;
+const FACE_ON_SECOND_FACE_MAX_DOT: f32 = 0.08;
 const EDGE_GROUP_NEIGHBOR_MIN_DOT: f32 = -0.02;
 
 #[derive(Clone, Copy, Debug)]
@@ -338,7 +367,7 @@ fn front_face(camera_dir_cube: Vec3) -> (FaceDirection, f32) {
     (front_face, front_dot)
 }
 
-fn visible_face_count(camera_dir_cube: Vec3, dot_threshold: f32) -> usize {
+fn second_most_visible_face_dot(camera_dir_cube: Vec3, front_face: FaceDirection) -> f32 {
     [
         FaceDirection::East,
         FaceDirection::West,
@@ -348,13 +377,16 @@ fn visible_face_count(camera_dir_cube: Vec3, dot_threshold: f32) -> usize {
         FaceDirection::Down,
     ]
     .into_iter()
-    .filter(|face| face_dot(*face, camera_dir_cube) >= dot_threshold)
-    .count()
+    .filter(|face| *face != front_face)
+    .map(|face| face_dot(face, camera_dir_cube))
+    .max_by(|dot_a, dot_b| dot_a.total_cmp(dot_b))
+    .unwrap_or(-1.0)
 }
 
 fn is_face_on(context: EdgeInteractionContext) -> bool {
     context.front_dot >= FACE_FRONT_DOT_THRESHOLD
-        && visible_face_count(context.camera_dir_cube, FACE_ON_VISIBLE_FACE_DOT_THRESHOLD) == 1
+        && second_most_visible_face_dot(context.camera_dir_cube, context.front_face)
+            <= FACE_ON_SECOND_FACE_MAX_DOT
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -444,7 +476,6 @@ fn edge_is_visible_for_target_face(
 }
 
 fn edge_group_for_target_face(
-    edge_under_cursor: EdgeDirection,
     target_face: FaceDirection,
     context: EdgeInteractionContext,
 ) -> Vec<EdgeDirection> {
@@ -484,8 +515,15 @@ fn edge_group_for_target_face(
             group
         };
 
-    if !group.contains(&edge_under_cursor) {
-        group.push(edge_under_cursor);
+    if group.len() < 2 {
+        for edge in edges_for_face(target_face) {
+            if !group.contains(&edge) {
+                group.push(edge);
+            }
+            if group.len() >= 2 {
+                break;
+            }
+        }
     }
 
     group
@@ -593,7 +631,6 @@ fn corner_is_visible_for_target_face(
         .any(|face| face_dot(face, camera_dir_cube) >= EDGE_GROUP_NEIGHBOR_MIN_DOT)
 }
 
-#[cfg(test)]
 fn hidden_target_face_for_corner(
     corner: CornerPosition,
     context: EdgeInteractionContext,
@@ -695,7 +732,10 @@ fn compute_hover_targets(
             let Some(target_face) = resolve_edge_target_face(edge_under_cursor, context) else {
                 return vec![];
             };
-            let edge_group = edge_group_for_target_face(edge_under_cursor, target_face, context);
+            let mut edge_group = edge_group_for_target_face(target_face, context);
+            if !edge_group.contains(&edge_under_cursor) {
+                edge_group.push(edge_under_cursor);
+            }
             let mut targets = collect_edge_entities_for_root(
                 root,
                 &edge_group,
@@ -730,7 +770,57 @@ fn compute_hover_targets(
 
             targets
         }
-        CubeElement::Corner(_) => vec![target],
+        CubeElement::Corner(corner_under_cursor) => {
+            let Some((root, context)) = edge_interaction_context(
+                target,
+                parents_query,
+                root_query,
+                root_links,
+                camera_globals,
+                root_globals,
+                config,
+            ) else {
+                return vec![];
+            };
+
+            let Some(target_face) = hidden_target_face_for_corner(corner_under_cursor, context)
+            else {
+                return if is_face_on(context) {
+                    vec![target]
+                } else {
+                    vec![]
+                };
+            };
+
+            let edge_group = edge_group_for_target_face(target_face, context);
+            let mut targets = collect_edge_entities_for_root(
+                root,
+                &edge_group,
+                cube_elements,
+                parents_query,
+                root_query,
+            );
+
+            let mut corner_group: Vec<CornerPosition> = corner_group_for_edge_group(&edge_group)
+                .into_iter()
+                .filter(|corner| {
+                    corner_is_visible_for_target_face(*corner, target_face, context.camera_dir_cube)
+                })
+                .collect();
+            if !corner_group.contains(&corner_under_cursor) {
+                corner_group.push(corner_under_cursor);
+            }
+
+            let corner_targets = collect_corner_entities_for_root(
+                root,
+                &corner_group,
+                cube_elements,
+                parents_query,
+                root_query,
+            );
+            targets.extend(corner_targets);
+            targets
+        }
         _ => vec![target],
     }
 }
@@ -851,6 +941,23 @@ pub fn on_cube_hover_start(
         &config,
     );
 
+    let mixed_edge_corner_group = if target_entities.len() > 1 {
+        let mut has_edge = false;
+        let mut has_corner = false;
+        for hover_target in target_entities.iter().copied() {
+            if let Ok((_, element)) = cube_elements.get(hover_target) {
+                match element {
+                    CubeElement::Edge(_) => has_edge = true,
+                    CubeElement::Corner(_) => has_corner = true,
+                    CubeElement::Face(_) => {}
+                }
+            }
+        }
+        has_edge && has_corner
+    } else {
+        false
+    };
+
     if target_entities.is_empty() {
         for prev in hovered.entities.iter().copied() {
             reset_highlight(
@@ -881,12 +988,13 @@ pub fn on_cube_hover_start(
     }
 
     for hover_target in target_entities.iter().copied() {
-        let (hover_color, hover_emissive) =
-            if let Ok((_, element)) = cube_elements.get(hover_target) {
-                (colors.get_element_hover(element), colors.highlight_emissive)
-            } else {
-                (colors.face_hover, colors.highlight_emissive)
-            };
+        let (hover_color, hover_emissive) = if mixed_edge_corner_group {
+            (colors.edge_hover, colors.highlight_emissive)
+        } else if let Ok((_, element)) = cube_elements.get(hover_target) {
+            (colors.get_element_hover(element), colors.highlight_emissive)
+        } else {
+            (colors.face_hover, colors.highlight_emissive)
+        };
         apply_highlight(
             hover_target,
             &children_query,
@@ -1019,21 +1127,6 @@ pub fn on_cube_click(
         return;
     };
 
-    if let Some((direction, source)) = frame_hover_swap_target(
-        target_entity,
-        &hovered,
-        &cube_elements,
-        &parents_query,
-        &lookup.root_query,
-        &lookup.root_links,
-        &lookup.camera_globals,
-        &lookup.root_globals,
-        &lookup.config,
-    ) {
-        events.write(ViewCubeEvent::FaceClicked { direction, source });
-        return;
-    }
-
     let source = find_root_ancestor(target_entity, &parents_query, &lookup.root_query)
         .unwrap_or(Entity::PLACEHOLDER);
 
@@ -1045,6 +1138,21 @@ pub fn on_cube_click(
             });
         }
         CubeElement::Edge(dir) => {
+            if let Some((direction, source)) = frame_hover_swap_target(
+                target_entity,
+                &hovered,
+                &cube_elements,
+                &parents_query,
+                &lookup.root_query,
+                &lookup.root_links,
+                &lookup.camera_globals,
+                &lookup.root_globals,
+                &lookup.config,
+            ) {
+                events.write(ViewCubeEvent::FaceClicked { direction, source });
+                return;
+            }
+
             let Some((_root, context)) = edge_interaction_context(
                 target_entity,
                 &parents_query,
@@ -1067,6 +1175,39 @@ pub fn on_cube_click(
             });
         }
         CubeElement::Corner(pos) => {
+            let Some((_root, context)) = edge_interaction_context(
+                target_entity,
+                &parents_query,
+                &lookup.root_query,
+                &lookup.root_links,
+                &lookup.camera_globals,
+                &lookup.root_globals,
+                &lookup.config,
+            ) else {
+                return;
+            };
+            if !is_face_on(context)
+                && hovered.entities.contains(&target_entity)
+                && let Some(target_face) =
+                    hidden_target_face_from_hovered_group(&hovered, &cube_elements, context)
+            {
+                events.write(ViewCubeEvent::FaceClicked {
+                    direction: target_face,
+                    source,
+                });
+                return;
+            }
+            if let Some(target_face) = hidden_target_face_for_corner(*pos, context) {
+                events.write(ViewCubeEvent::FaceClicked {
+                    direction: target_face,
+                    source,
+                });
+                return;
+            }
+            if !is_face_on(context) {
+                return;
+            }
+
             let local_direction = corner_local_direction(
                 target_entity,
                 source,
@@ -1452,7 +1593,7 @@ mod tests {
         let target = resolve_edge_target_face(edge, ctx);
         assert_eq!(target, Some(FaceDirection::West));
 
-        let group = edge_group_for_target_face(edge, FaceDirection::West, ctx);
+        let group = edge_group_for_target_face(FaceDirection::West, ctx);
         assert_eq!(group.len(), 2);
         assert!(group.contains(&EdgeDirection::YFrontLeft));
         assert!(group.contains(&EdgeDirection::ZTopLeft));
@@ -1501,7 +1642,7 @@ mod tests {
         let target = resolve_edge_target_face(edge, ctx);
         assert_eq!(target, Some(FaceDirection::West));
 
-        let group = edge_group_for_target_face(edge, FaceDirection::West, ctx);
+        let group = edge_group_for_target_face(FaceDirection::West, ctx);
         assert!(group.len() >= 2);
     }
 
@@ -1515,8 +1656,7 @@ mod tests {
     #[test]
     fn hidden_face_corner_group_has_at_least_two_corners() {
         let ctx = context(Vec3::new(1.0, 1.0, 1.0).normalize());
-        let edge_group =
-            edge_group_for_target_face(EdgeDirection::YFrontLeft, FaceDirection::West, ctx);
+        let edge_group = edge_group_for_target_face(FaceDirection::West, ctx);
         let corners: Vec<CornerPosition> = corner_group_for_edge_group(&edge_group)
             .into_iter()
             .filter(|corner| {
