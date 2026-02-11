@@ -57,14 +57,12 @@ impl ViewCubeColors {
         let (arrow_normal, arrow_hover) = Self::arrow_palette();
 
         Self {
-            // Light ivory faces - bright and readable on dark bg
-            face_normal: Color::srgba(0.92, 0.89, 0.82, 0.85),
+            // Very bright neutral fill for maximum readability in dark mode.
+            face_normal: Color::srgba(0.98, 0.98, 0.98, 1.0),
             face_hover: Color::srgb(1.0, 0.85, 0.3),
-            // Warm bronze edges - clearly distinct from faces
-            edge_normal: Color::srgba(0.72, 0.62, 0.45, 0.9),
+            edge_normal: Color::srgba(0.9, 0.9, 0.9, 1.0),
             edge_hover: Color::srgb(0.3, 0.76, 1.0),
-            // Bright gold corners - accent points
-            corner_normal: Color::srgba(0.85, 0.72, 0.4, 0.95),
+            corner_normal: Color::srgba(0.94, 0.94, 0.94, 1.0),
             corner_hover: Color::srgb(1.0, 0.55, 0.18),
             // Arrows
             arrow_normal,
@@ -78,14 +76,12 @@ impl ViewCubeColors {
         let (arrow_normal, arrow_hover) = Self::arrow_palette();
 
         Self {
-            // Very bright ivory faces. Keep high alpha to avoid scene bleed-through.
-            face_normal: Color::srgba(1.0, 0.99, 0.965, 0.96),
+            // Keep a clear, light gray in light mode while preserving contrast with the bg.
+            face_normal: Color::srgba(0.9, 0.9, 0.9, 1.0),
             face_hover: Color::srgb(0.2, 0.55, 1.0),
-            // Light warm edges
-            edge_normal: Color::srgba(0.9, 0.82, 0.68, 0.94),
+            edge_normal: Color::srgba(0.78, 0.78, 0.78, 1.0),
             edge_hover: Color::srgb(0.0, 0.7, 0.54),
-            // Bright corner accents
-            corner_normal: Color::srgba(0.98, 0.89, 0.72, 0.97),
+            corner_normal: Color::srgba(0.84, 0.84, 0.84, 1.0),
             corner_hover: Color::srgb(0.92, 0.36, 0.22),
             // Arrows
             arrow_normal,
