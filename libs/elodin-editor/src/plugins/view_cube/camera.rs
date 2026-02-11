@@ -2,7 +2,7 @@
 
 use bevy::camera::visibility::RenderLayers;
 use bevy::ecs::system::SystemParam;
-use bevy::log::warn;
+use bevy::log::{debug, warn};
 use bevy::math::Dir3;
 use bevy::prelude::*;
 use bevy_editor_cam::controller::component::EditorCam;
@@ -49,6 +49,13 @@ pub fn snap_initial_camera(
 struct ArrowTargetState {
     target_rotation: Quat,
     valid_until_secs: f64,
+    source: ArrowTargetSource,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ArrowTargetSource {
+    ArrowStep,
+    ViewSnap,
 }
 
 #[derive(Resource, Default)]
@@ -64,19 +71,26 @@ impl ViewCubeArrowTargetCache {
             .retain(|_, state| state.valid_until_secs + 0.25 >= now_secs);
     }
 
-    fn get_valid_target(&self, camera: Entity, now_secs: f64) -> Option<Quat> {
+    fn get_valid_target(&self, camera: Entity, now_secs: f64) -> Option<ArrowTargetState> {
         self.entries
             .get(&camera)
             .filter(|state| state.valid_until_secs >= now_secs)
-            .map(|state| state.target_rotation)
+            .copied()
     }
 
-    fn set_target(&mut self, camera: Entity, target_rotation: Quat, now_secs: f64) {
+    fn set_target(
+        &mut self,
+        camera: Entity,
+        target_rotation: Quat,
+        now_secs: f64,
+        source: ArrowTargetSource,
+    ) {
         self.entries.insert(
             camera,
             ArrowTargetState {
                 target_rotation,
                 valid_until_secs: now_secs + Self::TTL_SECS,
+                source,
             },
         );
     }
@@ -254,9 +268,12 @@ pub fn handle_view_cube_editor(
                     camera: entity,
                 };
                 let target_rotation = trigger_rotation(&trigger);
-                lookup
-                    .arrow_cache
-                    .set_target(entity, target_rotation, now_secs);
+                lookup.arrow_cache.set_target(
+                    entity,
+                    target_rotation,
+                    now_secs,
+                    ArrowTargetSource::ViewSnap,
+                );
                 look_to.write(trigger);
             } else {
                 warn!(
@@ -296,9 +313,12 @@ pub fn handle_view_cube_editor(
                     camera: entity,
                 };
                 let target_rotation = trigger_rotation(&trigger);
-                lookup
-                    .arrow_cache
-                    .set_target(entity, target_rotation, now_secs);
+                lookup.arrow_cache.set_target(
+                    entity,
+                    target_rotation,
+                    now_secs,
+                    ArrowTargetSource::ViewSnap,
+                );
                 look_to.write(trigger);
             } else {
                 warn!(
@@ -330,9 +350,12 @@ pub fn handle_view_cube_editor(
                     target_up_direction: chosen_up,
                     camera: entity,
                 };
-                lookup
-                    .arrow_cache
-                    .set_target(entity, trigger_rotation(&trigger), now_secs);
+                lookup.arrow_cache.set_target(
+                    entity,
+                    trigger_rotation(&trigger),
+                    now_secs,
+                    ArrowTargetSource::ViewSnap,
+                );
                 look_to.write(trigger);
             } else {
                 warn!(
@@ -348,20 +371,73 @@ pub fn handle_view_cube_editor(
         }
 
         if let ViewCubeEvent::ArrowClicked { arrow, .. } = event {
-            let angle = config.rotation_increment;
-            let base_rotation = if let Some(cached_target) =
-                lookup.arrow_cache.get_valid_target(entity, now_secs)
-            {
-                let drift = cached_target.angle_between(transform.rotation).abs();
-                if drift <= ARROW_CACHE_MAX_DRIFT_RADIANS {
-                    cached_target
-                } else {
-                    lookup.arrow_cache.clear(entity);
-                    transform.rotation
-                }
+            if let Some((previous_depth, refreshed_depth)) = refresh_anchor_depth_for_arrow(
+                entity,
+                global_transform,
+                &mut editor_cam,
+                &lookup.viewports,
+                lookup.entity_map.as_ref(),
+                &lookup.values,
+            ) {
+                debug!(
+                    target: "view_cube::arrow",
+                    camera = ?entity,
+                    arrow = ?arrow,
+                    previous_depth,
+                    refreshed_depth,
+                    "refreshed anchor depth from orbit target before arrow step"
+                );
             } else {
-                transform.rotation
-            };
+                debug!(
+                    target: "view_cube::arrow",
+                    camera = ?entity,
+                    arrow = ?arrow,
+                    current_depth = editor_cam.last_anchor_depth,
+                    "anchor depth refresh unavailable; keeping current depth"
+                );
+            }
+
+            let angle = config.rotation_increment;
+            let (base_rotation, base_source) =
+                if let Some(cached) = lookup.arrow_cache.get_valid_target(entity, now_secs) {
+                    let drift = cached
+                        .target_rotation
+                        .angle_between(transform.rotation)
+                        .abs();
+                    if cached.source != ArrowTargetSource::ArrowStep {
+                        debug!(
+                            target: "view_cube::arrow",
+                            camera = ?entity,
+                            arrow = ?arrow,
+                            cached_source = ?cached.source,
+                            drift_deg = drift.to_degrees(),
+                            "ignoring non-arrow cached target"
+                        );
+                        (transform.rotation, "current_rotation")
+                    } else if drift <= ARROW_CACHE_MAX_DRIFT_RADIANS {
+                        debug!(
+                            target: "view_cube::arrow",
+                            camera = ?entity,
+                            arrow = ?arrow,
+                            drift_deg = drift.to_degrees(),
+                            "using cached arrow target as rotation base"
+                        );
+                        (cached.target_rotation, "cached_arrow_target")
+                    } else {
+                        debug!(
+                            target: "view_cube::arrow",
+                            camera = ?entity,
+                            arrow = ?arrow,
+                            drift_deg = drift.to_degrees(),
+                            drift_threshold_deg = ARROW_CACHE_MAX_DRIFT_RADIANS.to_degrees(),
+                            "dropping stale cached arrow target"
+                        );
+                        lookup.arrow_cache.clear(entity);
+                        (transform.rotation, "current_rotation")
+                    }
+                } else {
+                    (transform.rotation, "current_rotation")
+                };
             let base_forward_local = base_rotation * Vec3::NEG_Z;
             let base_up_local = base_rotation * Vec3::Y;
             let base_right_local = base_rotation * Vec3::X;
@@ -391,9 +467,25 @@ pub fn handle_view_cube_editor(
                     camera: entity,
                 };
                 let target_rotation = trigger_rotation(&trigger);
-                lookup
-                    .arrow_cache
-                    .set_target(entity, target_rotation, now_secs);
+                let target_delta_deg = transform
+                    .rotation
+                    .angle_between(target_rotation)
+                    .to_degrees();
+                debug!(
+                    target: "view_cube::arrow",
+                    camera = ?entity,
+                    arrow = ?arrow,
+                    step_deg = angle.to_degrees(),
+                    base_source,
+                    target_delta_deg,
+                    "arrow click resolved target rotation"
+                );
+                lookup.arrow_cache.set_target(
+                    entity,
+                    target_rotation,
+                    now_secs,
+                    ArrowTargetSource::ArrowStep,
+                );
                 look_to.write(trigger);
             } else {
                 warn!(
@@ -624,6 +716,28 @@ fn update_anchor_depth_for_view_cube(
     editor_cam.last_anchor_depth = new_depth;
 }
 
+fn refresh_anchor_depth_for_arrow(
+    camera: Entity,
+    global_transform: &GlobalTransform,
+    editor_cam: &mut EditorCam,
+    viewports: &Query<&crate::ui::inspector::viewport::Viewport, With<ViewCubeTargetCamera>>,
+    entity_map: &EntityMap,
+    values: &Query<&'static ComponentValue>,
+) -> Option<(f32, f32)> {
+    let orbit_target = view_cube_orbit_target(camera, viewports, entity_map, values)?;
+    let world_translation = global_transform.translation();
+    let measured_distance = (orbit_target - world_translation).length();
+    if !measured_distance.is_finite() || measured_distance <= 1.0e-3 {
+        return None;
+    }
+
+    const MIN_ORBIT_DISTANCE: f32 = 0.25;
+    let previous_distance = editor_cam.last_anchor_depth.abs() as f32;
+    let refreshed_distance = measured_distance.max(MIN_ORBIT_DISTANCE);
+    editor_cam.last_anchor_depth = -(refreshed_distance as f64);
+    Some((previous_distance, refreshed_distance))
+}
+
 fn view_cube_orbit_target(
     camera: Entity,
     viewports: &Query<&crate::ui::inspector::viewport::Viewport, With<ViewCubeTargetCamera>>,
@@ -686,9 +800,12 @@ mod tests {
         let mut cache = ViewCubeArrowTargetCache::default();
         let entity = Entity::from_bits(42);
         let target = Quat::from_rotation_y(0.4);
-        cache.set_target(entity, target, 10.0);
-        let cached = cache.get_valid_target(entity, 10.3);
-        assert_eq!(cached, Some(target));
+        cache.set_target(entity, target, 10.0, ArrowTargetSource::ArrowStep);
+        let cached = cache
+            .get_valid_target(entity, 10.3)
+            .expect("cached target should still be valid");
+        assert_eq!(cached.target_rotation, target);
+        assert_eq!(cached.source, ArrowTargetSource::ArrowStep);
     }
 
     #[test]
@@ -696,9 +813,9 @@ mod tests {
         let mut cache = ViewCubeArrowTargetCache::default();
         let entity = Entity::from_bits(7);
         let target = Quat::from_rotation_x(0.2);
-        cache.set_target(entity, target, 1.0);
+        cache.set_target(entity, target, 1.0, ArrowTargetSource::ViewSnap);
         let cached = cache.get_valid_target(entity, 2.0);
-        assert_eq!(cached, None);
+        assert!(cached.is_none(), "cached target should have expired");
     }
 
     #[test]
