@@ -3,6 +3,7 @@
 //! Automatically adapts to the editor's active color scheme (dark/light mode).
 
 use bevy::prelude::*;
+use bevy_egui::egui;
 
 use super::components::CubeElement;
 use crate::ui::colors;
@@ -33,8 +34,28 @@ impl Default for ViewCubeColors {
 }
 
 impl ViewCubeColors {
+    fn from_color32(color: egui::Color32) -> Color {
+        let [r, g, b, a] = color.to_srgba_unmultiplied();
+        Color::srgba(
+            r as f32 / 255.0,
+            g as f32 / 255.0,
+            b as f32 / 255.0,
+            a as f32 / 255.0,
+        )
+    }
+
+    fn arrow_palette() -> (Color, Color) {
+        let scheme = colors::get_scheme();
+        (
+            Self::from_color32(scheme.icon_primary),
+            Self::from_color32(scheme.highlight),
+        )
+    }
+
     /// Dark theme colors - light ivory cube on dark background, CAD-style
     pub fn dark() -> Self {
+        let (arrow_normal, arrow_hover) = Self::arrow_palette();
+
         Self {
             // Light ivory faces - bright and readable on dark bg
             face_normal: Color::srgba(0.92, 0.89, 0.82, 0.85),
@@ -46,14 +67,16 @@ impl ViewCubeColors {
             corner_normal: Color::srgba(0.85, 0.72, 0.4, 0.95),
             corner_hover: Color::srgb(1.0, 0.55, 0.18),
             // Arrows
-            arrow_normal: Color::srgba(0.85, 0.8, 0.7, 0.6),
-            arrow_hover: Color::srgba(1.0, 0.9, 0.4, 0.95),
+            arrow_normal,
+            arrow_hover,
             highlight_emissive: LinearRgba::new(0.5, 0.4, 0.15, 1.0),
         }
     }
 
     /// Light theme colors - soft cream cube with defined structure
     pub fn light() -> Self {
+        let (arrow_normal, arrow_hover) = Self::arrow_palette();
+
         Self {
             // Very bright ivory faces. Keep high alpha to avoid scene bleed-through.
             face_normal: Color::srgba(1.0, 0.99, 0.965, 0.96),
@@ -65,8 +88,8 @@ impl ViewCubeColors {
             corner_normal: Color::srgba(0.98, 0.89, 0.72, 0.97),
             corner_hover: Color::srgb(0.92, 0.36, 0.22),
             // Arrows
-            arrow_normal: Color::srgba(0.74, 0.66, 0.52, 0.72),
-            arrow_hover: Color::srgba(0.15, 0.45, 0.95, 0.95),
+            arrow_normal,
+            arrow_hover,
             highlight_emissive: LinearRgba::new(0.1, 0.25, 0.5, 1.0),
         }
     }
