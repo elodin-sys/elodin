@@ -19,6 +19,10 @@ pub struct ViewCubeMeshRoot;
 #[derive(Component)]
 pub struct ViewCubeSetup;
 
+/// Marker for an active right-button drag interaction on a ViewCube root.
+#[derive(Component)]
+pub struct ViewCubeDragging;
+
 /// Links a ViewCube to the main camera it should follow/control
 #[derive(Component)]
 pub struct ViewCubeLink {

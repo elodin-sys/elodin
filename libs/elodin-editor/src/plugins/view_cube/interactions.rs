@@ -4,12 +4,14 @@ use bevy::ecs::hierarchy::ChildOf;
 use bevy::ecs::system::SystemParam;
 use bevy::picking::prelude::*;
 use bevy::prelude::*;
+use bevy_editor_cam::controller::component::EditorCam;
 
 use super::camera::ViewCubeTargetCamera;
 use super::components::*;
 use super::config::ViewCubeConfig;
 use super::events::ViewCubeEvent;
 use super::theme::ViewCubeColors;
+use crate::plugins::camera_anchor::camera_anchor_from_transform;
 
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 pub fn setup_cube_elements(
@@ -988,6 +990,10 @@ pub fn on_cube_click(
     hovered: Res<HoveredElement>,
     mut events: MessageWriter<ViewCubeEvent>,
 ) {
+    if trigger.event().button != PointerButton::Primary {
+        return;
+    }
+
     let entity = trigger.entity;
 
     let Some(target_entity) = find_cube_element_ancestor(entity, &cube_elements, &parents_query)
@@ -1061,6 +1067,81 @@ pub fn on_cube_click(
             });
         }
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn on_cube_drag(
+    drag: On<Pointer<Drag>>,
+    cube_elements: Query<(Entity, &CubeElement)>,
+    parents_query: Query<&ChildOf>,
+    root_query: Query<Entity, With<ViewCubeRoot>>,
+    root_links: Query<&ViewCubeLink, With<ViewCubeRoot>>,
+    mut cameras: Query<(&Transform, &mut EditorCam, &Camera), With<ViewCubeTargetCamera>>,
+    dragging_roots: Query<(), With<ViewCubeDragging>>,
+    mut commands: Commands,
+) {
+    if drag.button != PointerButton::Secondary {
+        return;
+    }
+
+    let Some(target_entity) =
+        find_cube_element_ancestor(drag.entity, &cube_elements, &parents_query)
+    else {
+        return;
+    };
+    let Some(root) = find_root_ancestor(target_entity, &parents_query, &root_query) else {
+        return;
+    };
+    let Ok(link) = root_links.get(root) else {
+        return;
+    };
+    let Ok((transform, mut editor_cam, camera)) = cameras.get_mut(link.main_camera) else {
+        return;
+    };
+
+    if dragging_roots.get(root).is_err() {
+        commands.entity(root).insert(ViewCubeDragging);
+        editor_cam.end_move();
+        let anchor = camera_anchor_from_transform(transform);
+        editor_cam.start_orbit(anchor);
+    }
+
+    let viewport_size = camera
+        .physical_viewport_size()
+        .unwrap_or_else(|| UVec2::new(256, 256));
+    let delta = drag.delta * viewport_size.as_vec2() / 75.0;
+    editor_cam.send_screenspace_input(delta);
+}
+
+pub fn on_cube_drag_end(
+    drag_end: On<Pointer<DragEnd>>,
+    cube_elements: Query<(Entity, &CubeElement)>,
+    parents_query: Query<&ChildOf>,
+    root_query: Query<Entity, With<ViewCubeRoot>>,
+    root_links: Query<&ViewCubeLink, With<ViewCubeRoot>>,
+    mut cameras: Query<&mut EditorCam, With<ViewCubeTargetCamera>>,
+    mut commands: Commands,
+) {
+    if drag_end.button != PointerButton::Secondary {
+        return;
+    }
+
+    let Some(target_entity) =
+        find_cube_element_ancestor(drag_end.entity, &cube_elements, &parents_query)
+    else {
+        return;
+    };
+    let Some(root) = find_root_ancestor(target_entity, &parents_query, &root_query) else {
+        return;
+    };
+    let Ok(link) = root_links.get(root) else {
+        return;
+    };
+
+    if let Ok(mut editor_cam) = cameras.get_mut(link.main_camera) {
+        editor_cam.end_move();
+    }
+    commands.entity(root).remove::<ViewCubeDragging>();
 }
 
 pub fn on_arrow_hover_start(
