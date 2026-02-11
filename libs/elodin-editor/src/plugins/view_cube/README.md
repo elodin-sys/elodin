@@ -19,7 +19,8 @@ A CAD-style 3D orientation widget for Bevy editor viewports (overlay + `LookToTr
 - **Front-frame edges**: when a face is front-on, hovering any edge highlights all 4 frame edges; clicking snaps to the opposite face
 - **Hidden-face edges**: in oblique views, only edges mapped to a hidden face are active; hovering highlights that hidden face's coherent edge group (typically 2-3 edges), clicking snaps to that face
 - **Inactive edges**: no hover highlight, no click action
-- **Corner click**: if the corner is already centered in view, no-op; otherwise snap to that corner axis
+- **Corners**: hover highlights only the targeted corner; click snaps to that corner view
+- **Front corner click**: no-op when the clicked corner is already aligned with the camera axis
 
 ## Quick Start
 

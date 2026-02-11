@@ -24,8 +24,8 @@ pub fn setup_cube_elements(
     mut original_materials: ResMut<OriginalMaterials>,
 ) {
     const EDGE_HOVER_SCALE: f32 = 1.2;
-    const CORNER_PICK_SCALE: f32 = 1.3;
-    const CORNER_OUTWARD_BIAS: f32 = 0.02;
+    const CORNER_PICK_SCALE: f32 = 1.45;
+    const CORNER_OUTWARD_BIAS: f32 = 0.035;
 
     if mesh_roots.is_empty() {
         return;
@@ -170,7 +170,7 @@ fn same_entity_set(lhs: &[Entity], rhs: &[Entity]) -> bool {
     lhs.len() == rhs.len() && lhs.iter().all(|entity| rhs.contains(entity))
 }
 
-const FACE_FRONT_DOT_THRESHOLD: f32 = 0.95;
+const FACE_FRONT_DOT_THRESHOLD: f32 = 0.999;
 const FACE_VISIBLE_DOT_THRESHOLD: f32 = 0.0;
 
 #[derive(Clone, Copy, Debug)]
@@ -344,27 +344,35 @@ fn compute_hover_targets(
         return vec![];
     };
 
-    let CubeElement::Edge(edge_under_cursor) = *element else {
-        return vec![target];
-    };
+    match *element {
+        CubeElement::Edge(edge_under_cursor) => {
+            let Some((root, context)) = edge_interaction_context(
+                target,
+                parents_query,
+                root_query,
+                root_links,
+                camera_globals,
+                root_globals,
+                config,
+            ) else {
+                return vec![];
+            };
 
-    let Some((root, context)) = edge_interaction_context(
-        target,
-        parents_query,
-        root_query,
-        root_links,
-        camera_globals,
-        root_globals,
-        config,
-    ) else {
-        return vec![];
-    };
-
-    let Some(target_face) = resolve_edge_target_face(edge_under_cursor, context) else {
-        return vec![];
-    };
-    let edge_group = edge_group_for_target_face(edge_under_cursor, target_face, context);
-    collect_edge_entities_for_root(root, &edge_group, cube_elements, parents_query, root_query)
+            let Some(target_face) = resolve_edge_target_face(edge_under_cursor, context) else {
+                return vec![];
+            };
+            let edge_group = edge_group_for_target_face(edge_under_cursor, target_face, context);
+            collect_edge_entities_for_root(
+                root,
+                &edge_group,
+                cube_elements,
+                parents_query,
+                root_query,
+            )
+        }
+        CubeElement::Corner(_) => vec![target],
+        _ => vec![target],
+    }
 }
 
 fn edges_for_face(face: FaceDirection) -> [EdgeDirection; 4] {
@@ -537,11 +545,60 @@ pub struct OnCubeClickLookup<'w, 's> {
     config: Res<'w, ViewCubeConfig>,
 }
 
+#[allow(clippy::too_many_arguments)]
+fn frame_hover_swap_target(
+    target_entity: Entity,
+    hovered: &HoveredElement,
+    cube_elements: &Query<(Entity, &CubeElement)>,
+    parents_query: &Query<&ChildOf>,
+    root_query: &Query<Entity, With<ViewCubeRoot>>,
+    root_links: &Query<&ViewCubeLink, With<ViewCubeRoot>>,
+    camera_globals: &Query<&GlobalTransform, With<ViewCubeTargetCamera>>,
+    root_globals: &Query<&GlobalTransform, With<ViewCubeRoot>>,
+    config: &ViewCubeConfig,
+) -> Option<(FaceDirection, Entity)> {
+    if hovered.entities.len() != 4 || !hovered.entities.contains(&target_entity) {
+        return None;
+    }
+
+    let mut hovered_edges = Vec::with_capacity(4);
+    for entity in hovered.entities.iter().copied() {
+        let Ok((_, element)) = cube_elements.get(entity) else {
+            return None;
+        };
+        let CubeElement::Edge(edge) = *element else {
+            return None;
+        };
+        hovered_edges.push(edge);
+    }
+
+    let (root, context) = edge_interaction_context(
+        target_entity,
+        parents_query,
+        root_query,
+        root_links,
+        camera_globals,
+        root_globals,
+        config,
+    )?;
+    if context.front_dot < FACE_FRONT_DOT_THRESHOLD {
+        return None;
+    }
+
+    let frame_edges = edges_for_face(context.front_face);
+    if !hovered_edges.iter().all(|edge| frame_edges.contains(edge)) {
+        return None;
+    }
+
+    Some((context.front_face.opposite(), root))
+}
+
 pub fn on_cube_click(
     trigger: On<Pointer<Click>>,
     cube_elements: Query<(Entity, &CubeElement)>,
     parents_query: Query<&ChildOf>,
     lookup: OnCubeClickLookup,
+    hovered: Res<HoveredElement>,
     mut events: MessageWriter<ViewCubeEvent>,
 ) {
     let entity = trigger.entity;
@@ -551,15 +608,26 @@ pub fn on_cube_click(
         return;
     };
 
-    if entity != target_entity {
-        return;
-    }
-
     let Ok((_, element)) = cube_elements.get(target_entity) else {
         return;
     };
 
-    let source = find_root_ancestor(entity, &parents_query, &lookup.root_query)
+    if let Some((direction, source)) = frame_hover_swap_target(
+        target_entity,
+        &hovered,
+        &cube_elements,
+        &parents_query,
+        &lookup.root_query,
+        &lookup.root_links,
+        &lookup.camera_globals,
+        &lookup.root_globals,
+        &lookup.config,
+    ) {
+        events.write(ViewCubeEvent::FaceClicked { direction, source });
+        return;
+    }
+
+    let source = find_root_ancestor(target_entity, &parents_query, &lookup.root_query)
         .unwrap_or(Entity::PLACEHOLDER);
 
     match element {
