@@ -676,9 +676,6 @@ fn set_icon_mac() {
     }
 }
 
-#[derive(Component)]
-pub struct EntityConfigured;
-
 pub fn setup_cell(
     query: Query<Entity, (With<WorldPos>, Without<GridCell<i128>>)>,
     mut cmds: Commands,
