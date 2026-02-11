@@ -301,35 +301,6 @@ fn same_entity_set(lhs: &[Entity], rhs: &[Entity]) -> bool {
     lhs.len() == rhs.len() && lhs.iter().all(|entity| rhs.contains(entity))
 }
 
-fn hidden_target_face_from_hovered_group(
-    hovered: &HoveredElement,
-    cube_elements: &Query<(Entity, &CubeElement)>,
-    context: EdgeInteractionContext,
-) -> Option<FaceDirection> {
-    let mut resolved: Option<FaceDirection> = None;
-    let mut saw_edge = false;
-
-    for entity in hovered.entities.iter().copied() {
-        let Ok((_, element)) = cube_elements.get(entity) else {
-            continue;
-        };
-        let CubeElement::Edge(edge) = *element else {
-            continue;
-        };
-        saw_edge = true;
-        let Some(face) = resolve_edge_target_face(edge, context) else {
-            continue;
-        };
-        match resolved {
-            None => resolved = Some(face),
-            Some(current) if current == face => {}
-            Some(_) => return None,
-        }
-    }
-
-    if saw_edge { resolved } else { None }
-}
-
 const FACE_FRONT_DOT_THRESHOLD: f32 = 0.95;
 const FACE_HIDDEN_CLASS_DOT_THRESHOLD: f32 = 0.05;
 const FACE_ON_SECOND_FACE_MAX_DOT: f32 = 0.08;
@@ -631,6 +602,7 @@ fn corner_is_visible_for_target_face(
         .any(|face| face_dot(face, camera_dir_cube) >= EDGE_GROUP_NEIGHBOR_MIN_DOT)
 }
 
+#[cfg(test)]
 fn hidden_target_face_for_corner(
     corner: CornerPosition,
     context: EdgeInteractionContext,
@@ -770,57 +742,7 @@ fn compute_hover_targets(
 
             targets
         }
-        CubeElement::Corner(corner_under_cursor) => {
-            let Some((root, context)) = edge_interaction_context(
-                target,
-                parents_query,
-                root_query,
-                root_links,
-                camera_globals,
-                root_globals,
-                config,
-            ) else {
-                return vec![];
-            };
-
-            let Some(target_face) = hidden_target_face_for_corner(corner_under_cursor, context)
-            else {
-                return if is_face_on(context) {
-                    vec![target]
-                } else {
-                    vec![]
-                };
-            };
-
-            let edge_group = edge_group_for_target_face(target_face, context);
-            let mut targets = collect_edge_entities_for_root(
-                root,
-                &edge_group,
-                cube_elements,
-                parents_query,
-                root_query,
-            );
-
-            let mut corner_group: Vec<CornerPosition> = corner_group_for_edge_group(&edge_group)
-                .into_iter()
-                .filter(|corner| {
-                    corner_is_visible_for_target_face(*corner, target_face, context.camera_dir_cube)
-                })
-                .collect();
-            if !corner_group.contains(&corner_under_cursor) {
-                corner_group.push(corner_under_cursor);
-            }
-
-            let corner_targets = collect_corner_entities_for_root(
-                root,
-                &corner_group,
-                cube_elements,
-                parents_query,
-                root_query,
-            );
-            targets.extend(corner_targets);
-            targets
-        }
+        CubeElement::Corner(_) => vec![target],
         _ => vec![target],
     }
 }
@@ -1123,11 +1045,30 @@ pub fn on_cube_click(
         return;
     };
 
-    let Ok((_, element)) = cube_elements.get(target_entity) else {
+    let click_root = find_root_ancestor(target_entity, &parents_query, &lookup.root_query);
+    let selected_entity = if hovered.entities.len() == 1 {
+        let hovered_entity = hovered.entities[0];
+        let hovered_root = find_root_ancestor(hovered_entity, &parents_query, &lookup.root_query);
+        if hovered_root.is_some()
+            && hovered_root == click_root
+            && matches!(
+                cube_elements.get(hovered_entity),
+                Ok((_, CubeElement::Corner(_)))
+            )
+        {
+            hovered_entity
+        } else {
+            target_entity
+        }
+    } else {
+        target_entity
+    };
+
+    let Ok((_, element)) = cube_elements.get(selected_entity) else {
         return;
     };
 
-    let source = find_root_ancestor(target_entity, &parents_query, &lookup.root_query)
+    let source = find_root_ancestor(selected_entity, &parents_query, &lookup.root_query)
         .unwrap_or(Entity::PLACEHOLDER);
 
     match element {
@@ -1139,7 +1080,7 @@ pub fn on_cube_click(
         }
         CubeElement::Edge(dir) => {
             if let Some((direction, source)) = frame_hover_swap_target(
-                target_entity,
+                selected_entity,
                 &hovered,
                 &cube_elements,
                 &parents_query,
@@ -1154,7 +1095,7 @@ pub fn on_cube_click(
             }
 
             let Some((_root, context)) = edge_interaction_context(
-                target_entity,
+                selected_entity,
                 &parents_query,
                 &lookup.root_query,
                 &lookup.root_links,
@@ -1175,41 +1116,8 @@ pub fn on_cube_click(
             });
         }
         CubeElement::Corner(pos) => {
-            let Some((_root, context)) = edge_interaction_context(
-                target_entity,
-                &parents_query,
-                &lookup.root_query,
-                &lookup.root_links,
-                &lookup.camera_globals,
-                &lookup.root_globals,
-                &lookup.config,
-            ) else {
-                return;
-            };
-            if !is_face_on(context)
-                && hovered.entities.contains(&target_entity)
-                && let Some(target_face) =
-                    hidden_target_face_from_hovered_group(&hovered, &cube_elements, context)
-            {
-                events.write(ViewCubeEvent::FaceClicked {
-                    direction: target_face,
-                    source,
-                });
-                return;
-            }
-            if let Some(target_face) = hidden_target_face_for_corner(*pos, context) {
-                events.write(ViewCubeEvent::FaceClicked {
-                    direction: target_face,
-                    source,
-                });
-                return;
-            }
-            if !is_face_on(context) {
-                return;
-            }
-
             let local_direction = corner_local_direction(
-                target_entity,
+                selected_entity,
                 source,
                 &lookup.globals,
                 &lookup.root_globals,
