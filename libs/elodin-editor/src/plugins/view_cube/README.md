@@ -9,8 +9,8 @@ A CAD-style 3D orientation widget for Bevy editor viewports (overlay + `LookToTr
 - **Hover highlighting**: Visual feedback with CAD-style grouped edge hover (4 edges for active front frame, 2-3 edges for hidden-face groups)
 - **Overlay rendering**: Dedicated ViewCube camera rendered in viewport corner
 - **Camera sync**: Cube mirrors the main camera orientation
-- **Coordinate systems**: Supports ENU (E, N, U labels) and NED (N, E, D labels)
-- **Colored axes**: Corner-mounted X/Y/Z axes, colored according to the active coordinate system
+- **Coordinate system**: ENU only (E, N, U labels)
+- **Colored axes**: Corner-mounted X/Y/Z axes, colored for ENU
 
 ## Interaction Rules
 
@@ -94,7 +94,7 @@ fn setup(
 | `rotation_increment` | `f32` | `15°` | Arrow click angular step |
 | `axis_correction` | `Quat` | `IDENTITY` | Extra rotation applied after the system correction |
 | `render_layer` | `u8` | `31` | Render layer used by ViewCube camera and entities |
-| `system` | `CoordinateSystem` | `ENU` | Coordinate system (ENU or NED) |
+| `system` | `CoordinateSystem` | `ENU` | Coordinate system (ENU only) |
 
 `ViewCubeConfig::editor_mode()` is the canonical preset and currently matches `Default`.
 
