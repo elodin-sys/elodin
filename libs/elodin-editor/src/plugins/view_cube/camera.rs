@@ -338,7 +338,7 @@ pub fn handle_view_cube_editor(
             ..
         } = event
         {
-            let raw_look_dir_world = target_face.to_look_direction();
+            let raw_look_dir_world = face_target_camera_dir_world(*target_face, &config);
             let facing_world = -raw_look_dir_world;
             let facing_local_vec = parent_rotation.inverse() * facing_world;
 
