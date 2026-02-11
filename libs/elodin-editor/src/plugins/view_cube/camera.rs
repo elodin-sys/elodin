@@ -22,6 +22,7 @@ use crate::object_3d::ComponentArrayExt;
 
 const FACE_IN_SCREEN_PLANE_DOT_THRESHOLD: f32 = 0.999;
 const CORNER_IN_SCREEN_AXIS_DOT_THRESHOLD: f32 = 0.998;
+const ARROW_CACHE_MAX_DRIFT_RADIANS: f32 = 6.0_f32.to_radians();
 
 #[derive(Component)]
 pub struct ViewCubeTargetCamera;
@@ -56,7 +57,7 @@ pub struct ViewCubeArrowTargetCache {
 }
 
 impl ViewCubeArrowTargetCache {
-    const TTL_SECS: f64 = 0.55;
+    const TTL_SECS: f64 = 1.5;
 
     fn prune(&mut self, now_secs: f64) {
         self.entries
@@ -78,6 +79,10 @@ impl ViewCubeArrowTargetCache {
                 valid_until_secs: now_secs + Self::TTL_SECS,
             },
         );
+    }
+
+    fn clear(&mut self, camera: Entity) {
+        self.entries.remove(&camera);
     }
 }
 
@@ -199,15 +204,17 @@ pub fn handle_view_cube_editor(
             continue;
         };
 
-        update_anchor_depth_for_view_cube(
-            entity,
-            transform,
-            global_transform,
-            &mut editor_cam,
-            &lookup.viewports,
-            lookup.entity_map.as_ref(),
-            &lookup.values,
-        );
+        if !matches!(event, ViewCubeEvent::ArrowClicked { .. }) {
+            update_anchor_depth_for_view_cube(
+                entity,
+                transform,
+                global_transform,
+                &mut editor_cam,
+                &lookup.viewports,
+                lookup.entity_map.as_ref(),
+                &lookup.values,
+            );
+        }
 
         editor_cam.end_move();
         editor_cam.current_motion = CurrentMotion::Stationary;
@@ -342,10 +349,19 @@ pub fn handle_view_cube_editor(
 
         if let ViewCubeEvent::ArrowClicked { arrow, .. } = event {
             let angle = config.rotation_increment;
-            let base_rotation = lookup
-                .arrow_cache
-                .get_valid_target(entity, now_secs)
-                .unwrap_or(transform.rotation);
+            let base_rotation = if let Some(cached_target) =
+                lookup.arrow_cache.get_valid_target(entity, now_secs)
+            {
+                let drift = cached_target.angle_between(transform.rotation).abs();
+                if drift <= ARROW_CACHE_MAX_DRIFT_RADIANS {
+                    cached_target
+                } else {
+                    lookup.arrow_cache.clear(entity);
+                    transform.rotation
+                }
+            } else {
+                transform.rotation
+            };
             let base_forward_local = base_rotation * Vec3::NEG_Z;
             let base_up_local = base_rotation * Vec3::Y;
             let base_right_local = base_rotation * Vec3::X;
