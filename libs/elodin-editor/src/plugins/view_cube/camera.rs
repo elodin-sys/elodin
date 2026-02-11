@@ -814,7 +814,8 @@ mod tests {
         let entity = Entity::from_bits(7);
         let target = Quat::from_rotation_x(0.2);
         cache.set_target(entity, target, 1.0, ArrowTargetSource::ViewSnap);
-        let cached = cache.get_valid_target(entity, 2.0);
+        let cached =
+            cache.get_valid_target(entity, 1.0 + ViewCubeArrowTargetCache::TTL_SECS + 0.01);
         assert!(cached.is_none(), "cached target should have expired");
     }
 
