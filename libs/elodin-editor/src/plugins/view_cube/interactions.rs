@@ -55,11 +55,26 @@ pub fn setup_cube_elements(
         let name_str = name.as_str();
 
         let element = if name_str.starts_with("Face_") {
-            parse_face(name_str)
+            transforms
+                .get(entity)
+                .ok()
+                .and_then(|transform| classify_face_from_translation(transform.translation))
+                .map(CubeElement::Face)
+                .or_else(|| parse_face(name_str))
         } else if name_str.starts_with("Border_") {
-            parse_edge(name_str)
+            transforms
+                .get(entity)
+                .ok()
+                .and_then(|transform| classify_edge_from_translation(transform.translation))
+                .map(CubeElement::Edge)
+                .or_else(|| parse_edge(name_str))
         } else if name_str.starts_with("Corner_") {
-            parse_corner(name_str)
+            transforms
+                .get(entity)
+                .ok()
+                .and_then(|transform| classify_corner_from_translation(transform.translation))
+                .map(CubeElement::Corner)
+                .or_else(|| parse_corner(name_str))
         } else {
             None
         };
@@ -107,6 +122,97 @@ pub fn setup_cube_elements(
             }
         }
     }
+}
+
+fn classify_face_from_translation(translation: Vec3) -> Option<FaceDirection> {
+    let abs = translation.abs();
+    let max = abs.max_element();
+    if max <= 1.0e-3 {
+        return None;
+    }
+
+    if abs.x >= abs.y && abs.x >= abs.z {
+        Some(if translation.x >= 0.0 {
+            FaceDirection::East
+        } else {
+            FaceDirection::West
+        })
+    } else if abs.y >= abs.x && abs.y >= abs.z {
+        Some(if translation.y >= 0.0 {
+            FaceDirection::Up
+        } else {
+            FaceDirection::Down
+        })
+    } else {
+        Some(if translation.z >= 0.0 {
+            FaceDirection::North
+        } else {
+            FaceDirection::South
+        })
+    }
+}
+
+fn classify_edge_from_translation(translation: Vec3) -> Option<EdgeDirection> {
+    const AXIS_NEAR_ZERO_EPS: f32 = 0.18;
+    let abs = translation.abs();
+
+    if abs.x <= AXIS_NEAR_ZERO_EPS {
+        let is_top = translation.y >= 0.0;
+        let is_front = translation.z >= 0.0;
+        return Some(match (is_top, is_front) {
+            (true, true) => EdgeDirection::XTopFront,
+            (true, false) => EdgeDirection::XTopBack,
+            (false, true) => EdgeDirection::XBottomFront,
+            (false, false) => EdgeDirection::XBottomBack,
+        });
+    }
+
+    if abs.y <= AXIS_NEAR_ZERO_EPS {
+        let is_front = translation.z >= 0.0;
+        let is_left = translation.x < 0.0;
+        return Some(match (is_front, is_left) {
+            (true, true) => EdgeDirection::YFrontLeft,
+            (true, false) => EdgeDirection::YFrontRight,
+            (false, true) => EdgeDirection::YBackLeft,
+            (false, false) => EdgeDirection::YBackRight,
+        });
+    }
+
+    if abs.z <= AXIS_NEAR_ZERO_EPS {
+        let is_top = translation.y >= 0.0;
+        let is_left = translation.x < 0.0;
+        return Some(match (is_top, is_left) {
+            (true, true) => EdgeDirection::ZTopLeft,
+            (true, false) => EdgeDirection::ZTopRight,
+            (false, true) => EdgeDirection::ZBottomLeft,
+            (false, false) => EdgeDirection::ZBottomRight,
+        });
+    }
+
+    None
+}
+
+fn classify_corner_from_translation(translation: Vec3) -> Option<CornerPosition> {
+    const CORNER_MIN_ABS: f32 = 0.18;
+    let abs = translation.abs();
+    if abs.min_element() <= CORNER_MIN_ABS {
+        return None;
+    }
+
+    let is_top = translation.y >= 0.0;
+    let is_front = translation.z >= 0.0;
+    let is_left = translation.x < 0.0;
+
+    Some(match (is_top, is_front, is_left) {
+        (true, true, true) => CornerPosition::TopFrontLeft,
+        (true, true, false) => CornerPosition::TopFrontRight,
+        (true, false, true) => CornerPosition::TopBackLeft,
+        (true, false, false) => CornerPosition::TopBackRight,
+        (false, true, true) => CornerPosition::BottomFrontLeft,
+        (false, true, false) => CornerPosition::BottomFrontRight,
+        (false, false, true) => CornerPosition::BottomBackLeft,
+        (false, false, false) => CornerPosition::BottomBackRight,
+    })
 }
 
 fn parse_face(name: &str) -> Option<CubeElement> {
@@ -170,8 +276,10 @@ fn same_entity_set(lhs: &[Entity], rhs: &[Entity]) -> bool {
     lhs.len() == rhs.len() && lhs.iter().all(|entity| rhs.contains(entity))
 }
 
-const FACE_FRONT_DOT_THRESHOLD: f32 = 0.999;
-const FACE_VISIBLE_DOT_THRESHOLD: f32 = 0.0;
+const FACE_FRONT_DOT_THRESHOLD: f32 = 0.9;
+const FACE_HIDDEN_CLASS_DOT_THRESHOLD: f32 = 0.05;
+const FACE_ON_VISIBLE_FACE_DOT_THRESHOLD: f32 = 0.12;
+const EDGE_GROUP_NEIGHBOR_MIN_DOT: f32 = -0.02;
 
 #[derive(Clone, Copy, Debug)]
 struct EdgeInteractionContext {
@@ -185,7 +293,7 @@ fn face_dot(face: FaceDirection, camera_dir_cube: Vec3) -> f32 {
 }
 
 fn front_face(camera_dir_cube: Vec3) -> (FaceDirection, f32) {
-    [
+    let mut face_dots: Vec<(FaceDirection, f32)> = [
         FaceDirection::East,
         FaceDirection::West,
         FaceDirection::North,
@@ -195,8 +303,33 @@ fn front_face(camera_dir_cube: Vec3) -> (FaceDirection, f32) {
     ]
     .into_iter()
     .map(|face| (face, face_dot(face, camera_dir_cube)))
-    .max_by(|(_, dot_a), (_, dot_b)| dot_a.total_cmp(dot_b))
-    .unwrap_or((FaceDirection::North, 0.0))
+    .collect();
+    face_dots.sort_by(|(_, dot_a), (_, dot_b)| dot_b.total_cmp(dot_a));
+
+    let (front_face, front_dot) = face_dots
+        .first()
+        .copied()
+        .unwrap_or((FaceDirection::North, 0.0));
+    (front_face, front_dot)
+}
+
+fn visible_face_count(camera_dir_cube: Vec3, dot_threshold: f32) -> usize {
+    [
+        FaceDirection::East,
+        FaceDirection::West,
+        FaceDirection::North,
+        FaceDirection::South,
+        FaceDirection::Up,
+        FaceDirection::Down,
+    ]
+    .into_iter()
+    .filter(|face| face_dot(*face, camera_dir_cube) >= dot_threshold)
+    .count()
+}
+
+fn is_face_on(context: EdgeInteractionContext) -> bool {
+    context.front_dot >= FACE_FRONT_DOT_THRESHOLD
+        && visible_face_count(context.camera_dir_cube, FACE_ON_VISIBLE_FACE_DOT_THRESHOLD) == 1
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -237,7 +370,7 @@ fn resolve_edge_target_face(
     edge_under_cursor: EdgeDirection,
     context: EdgeInteractionContext,
 ) -> Option<FaceDirection> {
-    if context.front_dot >= FACE_FRONT_DOT_THRESHOLD {
+    if is_face_on(context) {
         if edges_for_face(context.front_face).contains(&edge_under_cursor) {
             return Some(context.front_face.opposite());
         }
@@ -247,21 +380,33 @@ fn resolve_edge_target_face(
     let (face_a, face_b) = edge_under_cursor.adjacent_faces();
     let dot_a = face_dot(face_a, context.camera_dir_cube);
     let dot_b = face_dot(face_b, context.camera_dir_cube);
-    let a_visible = dot_a >= FACE_VISIBLE_DOT_THRESHOLD;
-    let b_visible = dot_b >= FACE_VISIBLE_DOT_THRESHOLD;
+    let a_visible = dot_a >= FACE_HIDDEN_CLASS_DOT_THRESHOLD;
+    let b_visible = dot_b >= FACE_HIDDEN_CLASS_DOT_THRESHOLD;
+    let a_hidden = dot_a <= -FACE_HIDDEN_CLASS_DOT_THRESHOLD;
+    let b_hidden = dot_b <= -FACE_HIDDEN_CLASS_DOT_THRESHOLD;
 
-    match (a_visible, b_visible) {
-        (true, false) => Some(face_b),
-        (false, true) => Some(face_a),
-        (false, false) => {
-            if dot_a <= dot_b {
-                Some(face_a)
-            } else {
-                Some(face_b)
-            }
-        }
-        (true, true) => None,
+    match (a_visible, b_visible, a_hidden, b_hidden) {
+        (true, false, false, true) => Some(face_b),
+        (false, true, true, false) => Some(face_a),
+        _ => None,
     }
+}
+
+fn other_face_dot_for_target_face(
+    edge: EdgeDirection,
+    target_face: FaceDirection,
+    camera_dir_cube: Vec3,
+) -> Option<f32> {
+    let (face_a, face_b) = edge.adjacent_faces();
+    let other_face = if face_a == target_face {
+        face_b
+    } else if face_b == target_face {
+        face_a
+    } else {
+        return None;
+    };
+
+    Some(face_dot(other_face, camera_dir_cube))
 }
 
 fn edge_is_visible_for_target_face(
@@ -269,16 +414,8 @@ fn edge_is_visible_for_target_face(
     target_face: FaceDirection,
     camera_dir_cube: Vec3,
 ) -> bool {
-    let (face_a, face_b) = edge.adjacent_faces();
-    let other_face = if face_a == target_face {
-        face_b
-    } else if face_b == target_face {
-        face_a
-    } else {
-        return false;
-    };
-
-    face_dot(other_face, camera_dir_cube) >= FACE_VISIBLE_DOT_THRESHOLD
+    other_face_dot_for_target_face(edge, target_face, camera_dir_cube)
+        .is_some_and(|dot| dot >= EDGE_GROUP_NEIGHBOR_MIN_DOT)
 }
 
 fn edge_group_for_target_face(
@@ -286,24 +423,173 @@ fn edge_group_for_target_face(
     target_face: FaceDirection,
     context: EdgeInteractionContext,
 ) -> Vec<EdgeDirection> {
-    let mut group: Vec<EdgeDirection> = if context.front_dot >= FACE_FRONT_DOT_THRESHOLD
-        && target_face == context.front_face.opposite()
-    {
-        edges_for_face(context.front_face).into_iter().collect()
-    } else {
-        edges_for_face(target_face)
-            .into_iter()
-            .filter(|edge| {
-                edge_is_visible_for_target_face(*edge, target_face, context.camera_dir_cube)
-            })
-            .collect()
-    };
+    let mut group: Vec<EdgeDirection> =
+        if is_face_on(context) && target_face == context.front_face.opposite() {
+            edges_for_face(context.front_face).into_iter().collect()
+        } else {
+            let mut group: Vec<EdgeDirection> = edges_for_face(target_face)
+                .into_iter()
+                .filter(|edge| {
+                    edge_is_visible_for_target_face(*edge, target_face, context.camera_dir_cube)
+                })
+                .collect();
+
+            // Keep hidden-face groups coherent in oblique views: if filtering gets too strict,
+            // include the best in-plane candidate so the group remains at least 2 edges.
+            if group.len() < 2 {
+                let mut fallback: Vec<(EdgeDirection, f32)> = edges_for_face(target_face)
+                    .into_iter()
+                    .filter_map(|edge| {
+                        other_face_dot_for_target_face(edge, target_face, context.camera_dir_cube)
+                            .map(|dot| (edge, dot))
+                    })
+                    .filter(|(_, dot)| *dot > -FACE_HIDDEN_CLASS_DOT_THRESHOLD)
+                    .collect();
+                fallback.sort_by(|(_, dot_a), (_, dot_b)| dot_b.total_cmp(dot_a));
+                for (edge, _) in fallback {
+                    if !group.contains(&edge) {
+                        group.push(edge);
+                    }
+                    if group.len() >= 2 {
+                        break;
+                    }
+                }
+            }
+
+            group
+        };
 
     if !group.contains(&edge_under_cursor) {
         group.push(edge_under_cursor);
     }
 
     group
+}
+
+fn faces_for_corner(corner: CornerPosition) -> [FaceDirection; 3] {
+    match corner {
+        CornerPosition::TopFrontLeft => {
+            [FaceDirection::Up, FaceDirection::North, FaceDirection::West]
+        }
+        CornerPosition::TopFrontRight => {
+            [FaceDirection::Up, FaceDirection::North, FaceDirection::East]
+        }
+        CornerPosition::TopBackLeft => {
+            [FaceDirection::Up, FaceDirection::South, FaceDirection::West]
+        }
+        CornerPosition::TopBackRight => {
+            [FaceDirection::Up, FaceDirection::South, FaceDirection::East]
+        }
+        CornerPosition::BottomFrontLeft => [
+            FaceDirection::Down,
+            FaceDirection::North,
+            FaceDirection::West,
+        ],
+        CornerPosition::BottomFrontRight => [
+            FaceDirection::Down,
+            FaceDirection::North,
+            FaceDirection::East,
+        ],
+        CornerPosition::BottomBackLeft => [
+            FaceDirection::Down,
+            FaceDirection::South,
+            FaceDirection::West,
+        ],
+        CornerPosition::BottomBackRight => [
+            FaceDirection::Down,
+            FaceDirection::South,
+            FaceDirection::East,
+        ],
+    }
+}
+
+fn corners_for_edge(edge: EdgeDirection) -> [CornerPosition; 2] {
+    match edge {
+        EdgeDirection::XTopFront => [CornerPosition::TopFrontLeft, CornerPosition::TopFrontRight],
+        EdgeDirection::XTopBack => [CornerPosition::TopBackLeft, CornerPosition::TopBackRight],
+        EdgeDirection::XBottomFront => [
+            CornerPosition::BottomFrontLeft,
+            CornerPosition::BottomFrontRight,
+        ],
+        EdgeDirection::XBottomBack => [
+            CornerPosition::BottomBackLeft,
+            CornerPosition::BottomBackRight,
+        ],
+        EdgeDirection::YFrontLeft => [
+            CornerPosition::TopFrontLeft,
+            CornerPosition::BottomFrontLeft,
+        ],
+        EdgeDirection::YFrontRight => [
+            CornerPosition::TopFrontRight,
+            CornerPosition::BottomFrontRight,
+        ],
+        EdgeDirection::YBackLeft => [CornerPosition::TopBackLeft, CornerPosition::BottomBackLeft],
+        EdgeDirection::YBackRight => [
+            CornerPosition::TopBackRight,
+            CornerPosition::BottomBackRight,
+        ],
+        EdgeDirection::ZTopLeft => [CornerPosition::TopFrontLeft, CornerPosition::TopBackLeft],
+        EdgeDirection::ZTopRight => [CornerPosition::TopFrontRight, CornerPosition::TopBackRight],
+        EdgeDirection::ZBottomLeft => [
+            CornerPosition::BottomFrontLeft,
+            CornerPosition::BottomBackLeft,
+        ],
+        EdgeDirection::ZBottomRight => [
+            CornerPosition::BottomFrontRight,
+            CornerPosition::BottomBackRight,
+        ],
+    }
+}
+
+fn corner_group_for_edge_group(edge_group: &[EdgeDirection]) -> Vec<CornerPosition> {
+    let mut corners = Vec::new();
+    for edge in edge_group.iter().copied() {
+        for corner in corners_for_edge(edge) {
+            if !corners.contains(&corner) {
+                corners.push(corner);
+            }
+        }
+    }
+    corners
+}
+
+fn corner_is_visible_for_target_face(
+    corner: CornerPosition,
+    target_face: FaceDirection,
+    camera_dir_cube: Vec3,
+) -> bool {
+    let corner_faces = faces_for_corner(corner);
+    if !corner_faces.contains(&target_face) {
+        return false;
+    }
+    corner_faces
+        .into_iter()
+        .filter(|face| *face != target_face)
+        .any(|face| face_dot(face, camera_dir_cube) >= EDGE_GROUP_NEIGHBOR_MIN_DOT)
+}
+
+#[cfg(test)]
+fn hidden_target_face_for_corner(
+    corner: CornerPosition,
+    context: EdgeInteractionContext,
+) -> Option<FaceDirection> {
+    if is_face_on(context) {
+        return None;
+    }
+
+    let mut hidden_faces: Vec<(FaceDirection, f32)> = faces_for_corner(corner)
+        .into_iter()
+        .map(|face| (face, face_dot(face, context.camera_dir_cube)))
+        .filter(|(_, dot)| *dot <= -FACE_HIDDEN_CLASS_DOT_THRESHOLD)
+        .collect();
+
+    hidden_faces.sort_by(|(_, dot_a), (_, dot_b)| dot_a.total_cmp(dot_b));
+
+    hidden_faces.into_iter().map(|(face, _)| face).find(|face| {
+        edges_for_face(*face)
+            .into_iter()
+            .any(|edge| edge_is_visible_for_target_face(edge, *face, context.camera_dir_cube))
+    })
 }
 
 fn collect_edge_entities_for_root(
@@ -319,6 +605,29 @@ fn collect_edge_entities_for_root(
             continue;
         };
         if !edge_group.contains(&candidate_edge) {
+            continue;
+        }
+        let candidate_root = find_root_ancestor(entity, parents_query, root_query);
+        if candidate_root == Some(root) {
+            targets.push(entity);
+        }
+    }
+    targets
+}
+
+fn collect_corner_entities_for_root(
+    root: Entity,
+    corner_group: &[CornerPosition],
+    cube_elements: &Query<(Entity, &CubeElement)>,
+    parents_query: &Query<&ChildOf>,
+    root_query: &Query<Entity, With<ViewCubeRoot>>,
+) -> Vec<Entity> {
+    let mut targets = Vec::new();
+    for (entity, element) in cube_elements.iter() {
+        let CubeElement::Corner(candidate_corner) = *element else {
+            continue;
+        };
+        if !corner_group.contains(&candidate_corner) {
             continue;
         }
         let candidate_root = find_root_ancestor(entity, parents_query, root_query);
@@ -362,13 +671,39 @@ fn compute_hover_targets(
                 return vec![];
             };
             let edge_group = edge_group_for_target_face(edge_under_cursor, target_face, context);
-            collect_edge_entities_for_root(
+            let mut targets = collect_edge_entities_for_root(
                 root,
                 &edge_group,
                 cube_elements,
                 parents_query,
                 root_query,
-            )
+            );
+
+            let corner_group: Vec<CornerPosition> = if is_face_on(context) {
+                corners_for_face(context.front_face).to_vec()
+            } else {
+                corner_group_for_edge_group(&edge_group)
+                    .into_iter()
+                    .filter(|corner| {
+                        corner_is_visible_for_target_face(
+                            *corner,
+                            target_face,
+                            context.camera_dir_cube,
+                        )
+                    })
+                    .collect()
+            };
+
+            let corner_targets = collect_corner_entities_for_root(
+                root,
+                &corner_group,
+                cube_elements,
+                parents_query,
+                root_query,
+            );
+            targets.extend(corner_targets);
+
+            targets
         }
         CubeElement::Corner(_) => vec![target],
         _ => vec![target],
@@ -412,6 +747,47 @@ fn edges_for_face(face: FaceDirection) -> [EdgeDirection; 4] {
             EdgeDirection::XBottomBack,
             EdgeDirection::ZBottomLeft,
             EdgeDirection::ZBottomRight,
+        ],
+    }
+}
+
+fn corners_for_face(face: FaceDirection) -> [CornerPosition; 4] {
+    match face {
+        FaceDirection::North => [
+            CornerPosition::TopFrontLeft,
+            CornerPosition::TopFrontRight,
+            CornerPosition::BottomFrontLeft,
+            CornerPosition::BottomFrontRight,
+        ],
+        FaceDirection::South => [
+            CornerPosition::TopBackLeft,
+            CornerPosition::TopBackRight,
+            CornerPosition::BottomBackLeft,
+            CornerPosition::BottomBackRight,
+        ],
+        FaceDirection::East => [
+            CornerPosition::TopFrontRight,
+            CornerPosition::TopBackRight,
+            CornerPosition::BottomFrontRight,
+            CornerPosition::BottomBackRight,
+        ],
+        FaceDirection::West => [
+            CornerPosition::TopFrontLeft,
+            CornerPosition::TopBackLeft,
+            CornerPosition::BottomFrontLeft,
+            CornerPosition::BottomBackLeft,
+        ],
+        FaceDirection::Up => [
+            CornerPosition::TopFrontLeft,
+            CornerPosition::TopFrontRight,
+            CornerPosition::TopBackLeft,
+            CornerPosition::TopBackRight,
+        ],
+        FaceDirection::Down => [
+            CornerPosition::BottomFrontLeft,
+            CornerPosition::BottomFrontRight,
+            CornerPosition::BottomBackLeft,
+            CornerPosition::BottomBackRight,
         ],
     }
 }
@@ -557,19 +933,18 @@ fn frame_hover_swap_target(
     root_globals: &Query<&GlobalTransform, With<ViewCubeRoot>>,
     config: &ViewCubeConfig,
 ) -> Option<(FaceDirection, Entity)> {
-    if hovered.entities.len() != 4 || !hovered.entities.contains(&target_entity) {
+    if !hovered.entities.contains(&target_entity) {
         return None;
     }
 
-    let mut hovered_edges = Vec::with_capacity(4);
+    let mut hovered_edges = Vec::new();
     for entity in hovered.entities.iter().copied() {
         let Ok((_, element)) = cube_elements.get(entity) else {
             return None;
         };
-        let CubeElement::Edge(edge) = *element else {
-            return None;
-        };
-        hovered_edges.push(edge);
+        if let CubeElement::Edge(edge) = *element {
+            hovered_edges.push(edge);
+        }
     }
 
     let (root, context) = edge_interaction_context(
@@ -581,12 +956,15 @@ fn frame_hover_swap_target(
         root_globals,
         config,
     )?;
-    if context.front_dot < FACE_FRONT_DOT_THRESHOLD {
+    if !is_face_on(context) {
         return None;
     }
 
     let frame_edges = edges_for_face(context.front_face);
-    if !hovered_edges.iter().all(|edge| frame_edges.contains(edge)) {
+    if !frame_edges
+        .into_iter()
+        .all(|edge| hovered_edges.contains(&edge))
+    {
         return None;
     }
 
@@ -926,5 +1304,65 @@ mod tests {
         let edge = EdgeDirection::XTopFront;
         let target = resolve_edge_target_face(edge, ctx);
         assert_eq!(target, None);
+    }
+
+    #[test]
+    fn edge_between_two_hidden_faces_is_not_clickable() {
+        let ctx = context(Vec3::new(1.0, 1.0, 1.0).normalize());
+        let edge = EdgeDirection::YBackLeft;
+        let target = resolve_edge_target_face(edge, ctx);
+        assert_eq!(target, None);
+    }
+
+    #[test]
+    fn edge_is_inactive_when_adjacent_face_is_only_in_screen_plane() {
+        let ctx = context(Vec3::new(0.0, 0.2, 1.0).normalize());
+        let edge = EdgeDirection::YFrontLeft;
+        let target = resolve_edge_target_face(edge, ctx);
+        assert_eq!(target, None);
+    }
+
+    #[test]
+    fn face_on_detection_accepts_small_tilt_but_rejects_oblique() {
+        let axis_aligned = context(Vec3::new(0.03, 0.0, 1.0).normalize());
+        assert!(is_face_on(axis_aligned));
+
+        let near_face = context(Vec3::new(0.08, 0.0, 1.0).normalize());
+        assert!(is_face_on(near_face));
+
+        let oblique = context(Vec3::new(1.0, 1.0, 1.0).normalize());
+        assert!(!is_face_on(oblique));
+    }
+
+    #[test]
+    fn hidden_face_edge_group_has_at_least_two_edges_in_oblique_view() {
+        let ctx = context(Vec3::new(0.15, 0.2, 1.0).normalize());
+        let edge = EdgeDirection::YFrontLeft;
+        let target = resolve_edge_target_face(edge, ctx);
+        assert_eq!(target, Some(FaceDirection::West));
+
+        let group = edge_group_for_target_face(edge, FaceDirection::West, ctx);
+        assert!(group.len() >= 2);
+    }
+
+    #[test]
+    fn corner_in_oblique_view_resolves_to_hidden_face() {
+        let ctx = context(Vec3::new(1.0, 1.0, 1.0).normalize());
+        let target = hidden_target_face_for_corner(CornerPosition::TopFrontLeft, ctx);
+        assert_eq!(target, Some(FaceDirection::West));
+    }
+
+    #[test]
+    fn hidden_face_corner_group_has_at_least_two_corners() {
+        let ctx = context(Vec3::new(1.0, 1.0, 1.0).normalize());
+        let edge_group =
+            edge_group_for_target_face(EdgeDirection::YFrontLeft, FaceDirection::West, ctx);
+        let corners: Vec<CornerPosition> = corner_group_for_edge_group(&edge_group)
+            .into_iter()
+            .filter(|corner| {
+                corner_is_visible_for_target_face(*corner, FaceDirection::West, ctx.camera_dir_cube)
+            })
+            .collect();
+        assert!(corners.len() >= 2);
     }
 }

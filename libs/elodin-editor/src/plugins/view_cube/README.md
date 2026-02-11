@@ -16,10 +16,10 @@ A CAD-style 3D orientation widget for Bevy editor viewports (overlay + `LookToTr
 
 - **Front face click**: no-op (clicking a face already in front does nothing)
 - **Oblique face click**: snaps to the clicked face
-- **Front-frame edges**: when a face is front-on, hovering any edge highlights all 4 frame edges; clicking snaps to the opposite face
-- **Hidden-face edges**: in oblique views, only edges mapped to a hidden face are active; hovering highlights that hidden face's coherent edge group (typically 2-3 edges), clicking snaps to that face
+- **Front-frame group**: only when a single face is truly visible (face-on), hovering a border highlights the full frame group (4 frame edges + 4 frame corners); clicking that border snaps to the opposite face
+- **Hidden-face groups**: in oblique views, hovering a border tied to a truly hidden face highlights a coherent mixed group (border edges plus adjacent corners, with at least 2 edges), clicking that border snaps to the hidden face
 - **Inactive edges**: no hover highlight, no click action
-- **Corners**: hover highlights only the targeted corner; click snaps to that corner view
+- **Corners**: hover highlights only the targeted corner and click snaps to that corner view
 - **Front corner click**: no-op when the clicked corner is already aligned with the camera axis
 
 ## Quick Start
