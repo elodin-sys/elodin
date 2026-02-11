@@ -260,8 +260,11 @@ pub fn handle_view_cube_editor(
             let facing_local_vec = parent_rotation.inverse() * facing_world;
 
             if let Ok(facing_local) = Dir3::new(facing_local_vec) {
-                let (chosen_up, _, _, _, _, _) =
-                    choose_min_rotation_up(transform, parent_rotation, facing_local);
+                let chosen_up = choose_face_upright_up(*direction, parent_rotation, facing_local)
+                    .or_else(|| choose_continuous_up(transform, facing_local))
+                    .unwrap_or_else(|| {
+                        choose_min_rotation_up(transform, parent_rotation, facing_local).0
+                    });
                 let trigger = LookToTrigger {
                     target_facing_direction: facing_local,
                     target_up_direction: chosen_up,
@@ -343,8 +346,11 @@ pub fn handle_view_cube_editor(
             let facing_local_vec = parent_rotation.inverse() * facing_world;
 
             if let Ok(facing_local) = Dir3::new(facing_local_vec) {
-                let (chosen_up, _, _, _, _, _) =
-                    choose_min_rotation_up(transform, parent_rotation, facing_local);
+                let chosen_up = choose_face_upright_up(*target_face, parent_rotation, facing_local)
+                    .or_else(|| choose_continuous_up(transform, facing_local))
+                    .unwrap_or_else(|| {
+                        choose_min_rotation_up(transform, parent_rotation, facing_local).0
+                    });
                 let trigger = LookToTrigger {
                     target_facing_direction: facing_local,
                     target_up_direction: chosen_up,
@@ -579,6 +585,54 @@ fn angle_to_target_rotation(transform: &Transform, facing: Dir3, up: Dir3) -> f3
     transform.rotation.angle_between(target_rotation).abs()
 }
 
+fn choose_continuous_up(transform: &Transform, facing_local: Dir3) -> Option<Dir3> {
+    let facing = *facing_local;
+    for candidate in [
+        transform.rotation * Vec3::Y,
+        transform.rotation * Vec3::NEG_Z,
+        transform.rotation * Vec3::X,
+    ] {
+        let projected = candidate - facing * candidate.dot(facing);
+        if projected.length_squared() <= 1.0e-6 {
+            continue;
+        }
+        if let Ok(up) = Dir3::new(projected) {
+            return Some(up);
+        }
+    }
+    None
+}
+
+fn choose_face_upright_up(
+    target_face: super::components::FaceDirection,
+    parent_rotation: Quat,
+    facing_local: Dir3,
+) -> Option<Dir3> {
+    let parent_inverse = parent_rotation.inverse();
+    let world_candidates: &[Vec3] = match target_face {
+        super::components::FaceDirection::East
+        | super::components::FaceDirection::West
+        | super::components::FaceDirection::North
+        | super::components::FaceDirection::South => &[Vec3::Y, Vec3::Z, Vec3::X],
+        super::components::FaceDirection::Up => &[Vec3::Z, Vec3::X, Vec3::Y],
+        super::components::FaceDirection::Down => &[Vec3::NEG_Z, Vec3::X, Vec3::Y],
+    };
+
+    let facing = *facing_local;
+    for world_up in world_candidates.iter().copied() {
+        let local_up_candidate = parent_inverse * world_up;
+        let projected = local_up_candidate - facing * local_up_candidate.dot(facing);
+        if projected.length_squared() <= 1.0e-6 {
+            continue;
+        }
+        if let Ok(up) = Dir3::new(projected) {
+            return Some(up);
+        }
+    }
+
+    None
+}
+
 fn choose_min_rotation_up(
     transform: &Transform,
     parent_rotation: Quat,
@@ -792,6 +846,85 @@ mod tests {
             facing.dot(*up).abs() < 0.99,
             "up must not be parallel to facing (dot={})",
             facing.dot(*up)
+        );
+    }
+
+    #[test]
+    fn choose_continuous_up_keeps_visible_face_orientation_on_opposite_snap() {
+        let transform = Transform::default();
+        let facing = Dir3::new(Vec3::Z).expect("unit vector");
+        let up = choose_continuous_up(&transform, facing).expect("continuous up");
+        assert!(
+            up.dot(Vec3::Y) > 0.99,
+            "expected up close to +Y, got {:?}",
+            *up
+        );
+    }
+
+    #[test]
+    fn choose_continuous_up_falls_back_to_forward_when_up_is_parallel() {
+        let transform = Transform::default();
+        let facing = Dir3::new(Vec3::Y).expect("unit vector");
+        let up = choose_continuous_up(&transform, facing).expect("continuous up");
+        assert!(
+            up.dot(Vec3::NEG_Z).abs() > 0.99,
+            "expected up close to +/-Z, got {:?}",
+            *up
+        );
+    }
+
+    #[test]
+    fn choose_face_upright_up_keeps_east_west_consistent() {
+        let parent = Quat::IDENTITY;
+        let east_facing = Dir3::new(Vec3::NEG_X).expect("unit vector");
+        let west_facing = Dir3::new(Vec3::X).expect("unit vector");
+        let east_up = choose_face_upright_up(
+            crate::plugins::view_cube::FaceDirection::East,
+            parent,
+            east_facing,
+        )
+        .expect("upright up for east");
+        let west_up = choose_face_upright_up(
+            crate::plugins::view_cube::FaceDirection::West,
+            parent,
+            west_facing,
+        )
+        .expect("upright up for west");
+        assert!(east_up.dot(Vec3::Y) > 0.99, "east up should be +Y");
+        assert!(west_up.dot(Vec3::Y) > 0.99, "west up should be +Y");
+    }
+
+    #[test]
+    fn choose_face_upright_up_prefers_backward_on_down_face() {
+        let parent = Quat::IDENTITY;
+        let down_facing = Dir3::new(Vec3::Y).expect("unit vector");
+        let up = choose_face_upright_up(
+            crate::plugins::view_cube::FaceDirection::Down,
+            parent,
+            down_facing,
+        )
+        .expect("upright up for down");
+        assert!(
+            up.dot(Vec3::NEG_Z) > 0.99,
+            "down-face up should align with -Z, got {:?}",
+            *up
+        );
+    }
+
+    #[test]
+    fn choose_face_upright_up_prefers_forward_on_up_face() {
+        let parent = Quat::IDENTITY;
+        let up_facing = Dir3::new(Vec3::NEG_Y).expect("unit vector");
+        let up = choose_face_upright_up(
+            crate::plugins::view_cube::FaceDirection::Up,
+            parent,
+            up_facing,
+        )
+        .expect("upright up for up-face");
+        assert!(
+            up.dot(Vec3::Z) > 0.99,
+            "up-face up should align with +Z, got {:?}",
+            *up
         );
     }
 
