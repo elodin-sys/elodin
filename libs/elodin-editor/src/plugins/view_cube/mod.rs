@@ -53,6 +53,8 @@ impl Plugin for ViewCubePlugin {
             .add_systems(Update, update_theme_on_mode_change)
             .add_observer(interactions::on_cube_hover_start)
             .add_observer(interactions::on_cube_hover_end)
+            .add_observer(interactions::on_cube_drag)
+            .add_observer(interactions::on_cube_drag_end)
             .add_observer(interactions::on_cube_click)
             .add_observer(interactions::on_arrow_hover_start)
             .add_observer(interactions::on_arrow_hover_end)
