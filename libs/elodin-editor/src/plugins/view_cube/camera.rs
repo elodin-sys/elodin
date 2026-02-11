@@ -1,6 +1,7 @@
 //! Camera systems for the ViewCube plugin.
 
 use bevy::camera::visibility::RenderLayers;
+use bevy::ecs::hierarchy::ChildOf;
 use bevy::ecs::system::SystemParam;
 use bevy::log::{debug, warn};
 use bevy::math::Dir3;
@@ -13,7 +14,8 @@ use impeller2_wkt::ComponentValue;
 use std::collections::HashMap;
 
 use super::components::{
-    RotationArrow, ViewCubeCamera, ViewCubeLink, ViewCubeRenderLayer, ViewCubeRoot,
+    AxisLabelBillboard, RotationArrow, ViewCubeCamera, ViewCubeLink, ViewCubeRenderLayer,
+    ViewCubeRoot,
 };
 use super::config::ViewCubeConfig;
 use super::events::ViewCubeEvent;
@@ -134,6 +136,33 @@ pub fn sync_view_cube_rotation(
 
         let (_, rotation, _) = main_camera_transform.to_scale_rotation_translation();
         cube_transform.rotation = rotation.conjugate() * config.effective_axis_correction();
+    }
+}
+
+pub fn orient_axis_labels_to_screen_plane(
+    mut labels: Query<(&ChildOf, &mut Transform), With<AxisLabelBillboard>>,
+    cubes: Query<(&ViewCubeLink, &GlobalTransform), With<ViewCubeRoot>>,
+    cube_cameras: Query<(&ViewCubeLink, &GlobalTransform), With<ViewCubeCamera>>,
+) {
+    if labels.is_empty() {
+        return;
+    }
+
+    let mut camera_rotation_by_main = HashMap::new();
+    for (link, camera_global) in cube_cameras.iter() {
+        camera_rotation_by_main.insert(link.main_camera, camera_global.rotation());
+    }
+
+    for (parent, mut label_transform) in labels.iter_mut() {
+        let Ok((cube_link, cube_global)) = cubes.get(parent.0) else {
+            continue;
+        };
+        let Some(camera_rotation) = camera_rotation_by_main.get(&cube_link.main_camera) else {
+            continue;
+        };
+
+        // Cancel the cube's local rotation so labels remain parallel to the screen.
+        label_transform.rotation = cube_global.rotation().inverse() * *camera_rotation;
     }
 }
 
