@@ -81,6 +81,14 @@ pub fn setup_cube_elements(
 
         if let Some(elem) = element {
             let element_color = colors.get_element_color(&elem);
+            let make_theme_material = |base_color: Color| StandardMaterial {
+                base_color,
+                alpha_mode: AlphaMode::Opaque,
+                unlit: true,
+                double_sided: true,
+                cull_mode: None,
+                ..default()
+            };
             if matches!(elem, CubeElement::Edge(_))
                 && let Ok(mut transform) = transforms.get_mut(entity)
             {
@@ -100,21 +108,22 @@ pub fn setup_cube_elements(
                 .entity(entity)
                 .insert((elem.clone(), ViewCubeSetup));
 
+            if let Ok(mat_handle) = material_query.get(entity)
+                && materials.get(&mat_handle.0).is_some()
+            {
+                original_materials.colors.insert(entity, element_color);
+                let new_mat = make_theme_material(element_color);
+                let new_handle = materials.add(new_mat);
+                commands.entity(entity).insert(MeshMaterial3d(new_handle));
+            }
+
             if let Ok(children) = children_query.get(entity) {
                 for child in children.iter() {
                     if let Ok(mat_handle) = material_query.get(child)
                         && materials.get(&mat_handle.0).is_some()
                     {
                         original_materials.colors.insert(child, element_color);
-
-                        let new_mat = StandardMaterial {
-                            base_color: element_color,
-                            alpha_mode: AlphaMode::Blend,
-                            unlit: false,
-                            double_sided: true,
-                            cull_mode: None,
-                            ..default()
-                        };
+                        let new_mat = make_theme_material(element_color);
                         let new_handle = materials.add(new_mat);
                         commands.entity(child).insert(MeshMaterial3d(new_handle));
                     }
