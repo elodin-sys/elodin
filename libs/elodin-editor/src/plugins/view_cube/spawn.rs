@@ -324,9 +324,9 @@ fn spawn_rotation_arrows(
     let directional_mesh = meshes.add(Rectangle::new(button_size, button_size));
     let roll_mesh = meshes.add(Rectangle::new(button_size * 0.92, button_size * 0.92));
 
-    let horizontal_distance = 0.42; // Reduced to avoid clipping at viewport edges
-    // Keep up/down arrows at identical spacing from the cube center.
+    let horizontal_distance = 0.42;
     let vertical_distance = 0.43;
+    let vertical_center_offset = -0.03;
     let depth = -1.2;
 
     // Slightly thicken cardinal arrows (left/right/up/down) without affecting roll arrows.
@@ -335,25 +335,25 @@ fn spawn_rotation_arrows(
     let arrows = [
         (
             RotationArrow::Left,
-            Vec3::new(-horizontal_distance, 0.0, depth),
+            Vec3::new(-horizontal_distance, vertical_center_offset, depth),
             Quat::from_rotation_z(PI),
             directional_scale,
         ),
         (
             RotationArrow::Right,
-            Vec3::new(horizontal_distance, 0.0, depth),
+            Vec3::new(horizontal_distance, vertical_center_offset, depth),
             Quat::IDENTITY,
             directional_scale,
         ),
         (
             RotationArrow::Up,
-            Vec3::new(0.0, vertical_distance, depth),
+            Vec3::new(0.0, vertical_center_offset + vertical_distance, depth),
             Quat::from_rotation_z(FRAC_PI_2),
             directional_scale,
         ),
         (
             RotationArrow::Down,
-            Vec3::new(0.0, -vertical_distance, depth),
+            Vec3::new(0.0, vertical_center_offset - vertical_distance, depth),
             Quat::from_rotation_z(-FRAC_PI_2),
             directional_scale,
         ),
@@ -384,22 +384,20 @@ fn spawn_rotation_arrows(
         arrow_cmd.insert(ChildOf(camera_entity));
     }
 
-    // Top roll arrows: use rounded loop icon to suggest rotation around view axis.
-    // Keep top roll arrows almost vertically aligned with left/right arrows,
-    // while staying slightly inward to avoid edge clipping.
+    // Keep roll arrows slightly above the top arrow and near left/right verticals.
     let roll_offset = horizontal_distance - 0.03;
     let roll_height = vertical_distance + 0.01;
 
     let roll_arrows = [
         (
             RotationArrow::RollLeft,
-            Vec3::new(-roll_offset, roll_height, depth),
+            Vec3::new(-roll_offset, vertical_center_offset + roll_height, depth),
             Quat::from_rotation_z(0.0),
             Vec3::new(-1.0, 1.0, 1.0),
         ),
         (
             RotationArrow::RollRight,
-            Vec3::new(roll_offset, roll_height, depth),
+            Vec3::new(roll_offset, vertical_center_offset + roll_height, depth),
             Quat::from_rotation_z(0.0),
             Vec3::ONE,
         ),
