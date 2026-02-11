@@ -19,10 +19,11 @@ license = false
 eula = false
 
 [features]
-default = ["axum", "parquet", "video-export"]
+default = ["axum", "parquet", "video-export", "rtmp"]
 axum = ["dep:axum", "dep:axum-streams", "dep:serde_json", "dep:tokio"]
 parquet = ["dep:parquet"]
 video-export = ["dep:muxide", "dep:scuffle-h264"]
+rtmp = ["dep:scuffle-rtmp", "dep:scuffle-flv", "dep:bytes", "dep:tokio"]
 
 [dependencies]
 # ser-de
@@ -98,6 +99,7 @@ axum-streams.optional = true
 serde_json.version = "1"
 serde_json.optional = true
 tokio.version = "1"
+tokio.features = ["rt-multi-thread", "net", "io-util", "time", "macros"]
 tokio.optional = true
 
 # codegen
@@ -108,6 +110,11 @@ reflink-copy = "0.1.28"
 # video export
 muxide = { version = "0.2", optional = true }
 scuffle-h264 = { version = "0.2", optional = true }
+
+# rtmp ingest
+scuffle-rtmp = { version = "0.2", optional = true }
+scuffle-flv = { version = "0.2", optional = true }
+bytes = { version = "1", optional = true }
 
 [dev-dependencies]
 tempfile = "3"

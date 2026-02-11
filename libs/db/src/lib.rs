@@ -66,6 +66,8 @@ pub mod fix_timestamps;
 pub mod merge;
 mod msg_log;
 pub mod prune;
+#[cfg(feature = "rtmp")]
+pub mod rtmp;
 pub mod time_align;
 pub(crate) mod time_series;
 pub mod truncate;
@@ -1305,10 +1307,36 @@ impl Server {
         let addr = listener.local_addr()?;
         let udp_db = db.clone();
         stellarator::struc_con::stellar(move || Self::handle_udp(addr, udp_db));
+
+        Self::spawn_rtmp(addr, &db);
+
         loop {
             let stream = listener.accept().await?;
             let conn_db = db.clone();
             stellarator::struc_con::stellar(move || handle_conn(stream, conn_db));
+        }
+    }
+
+    /// Spawn the RTMP ingest server on `addr.port() + 1`.
+    ///
+    /// This is a no-op when the `rtmp` feature is disabled.
+    /// Called automatically by [`Server::run`], but exposed publicly so
+    /// callers that destructure [`Server`] (e.g. `nox_ecs::impeller2_server`)
+    /// can start the RTMP listener themselves.
+    pub fn spawn_rtmp(addr: SocketAddr, db: &Arc<DB>) {
+        #[cfg(feature = "rtmp")]
+        {
+            let rtmp_db = db.clone();
+            let rtmp_addr = SocketAddr::new(addr.ip(), addr.port() + 1);
+            stellarator::struc_con::tokio(move |_| async move {
+                if let Err(err) = crate::rtmp::serve(rtmp_addr, rtmp_db).await {
+                    tracing::error!(?err, "RTMP ingest server error");
+                }
+            });
+        }
+        #[cfg(not(feature = "rtmp"))]
+        {
+            let _ = (addr, db);
         }
     }
 

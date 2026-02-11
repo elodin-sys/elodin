@@ -53,8 +53,13 @@ impl Server {
         tracing::info!("running server with cancellation");
         let Self { db, mut world } = self;
         let elodin_db::Server { listener, db } = db;
+        let addr = listener.local_addr().map_err(elodin_db::Error::from)?;
         let start_time = start_timestamp.unwrap_or_else(Timestamp::now);
         init_db(&db, &mut world.world, start_time)?;
+
+        // Start RTMP ingest server (port + 1).
+        elodin_db::Server::spawn_rtmp(addr, &db);
+
         let tick_db = db.clone();
         // Shared tick counter that can be reset by StepContext::truncate()
         let tick_counter = Arc::new(AtomicU64::new(0));

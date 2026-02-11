@@ -180,7 +180,7 @@ ball = world.spawn(
     name="ball",
 )
 
-# Register the video streaming process via S10 recipe
+# Register the GStreamer video streaming process via S10 recipe
 stream_script = Path(__file__).parent / "stream-video.sh"
 video_streamer = el.s10.PyRecipe.process(
     name="video-stream",
@@ -190,14 +190,17 @@ video_streamer = el.s10.PyRecipe.process(
 )
 world.recipe(video_streamer)
 
-# Define schematic with top-down camera view and video stream tile
+# Define schematic with top-down camera view and video stream tiles
+# "test-video" is streamed via elodinsink (GStreamer direct-to-DB)
+# "rtmp-feed" is streamed via native RTMP ingest from OBS Studio (port 2241)
 world.schematic("""
     hsplit {
-        tabs share=0.6 {
+        tabs share=0.5 {
             viewport name=Viewport pos="(0,0,0,0, 0,0,12)" look_at="(0,0,0,0, 0,0,0)" show_grid=#true
         }
-        vsplit share=0.4 {
+        vsplit share=0.5 {
             video_stream "test-video" name="Test Pattern"
+            video_stream "rtmp-feed" name="OBS Studio Feed"
             graph "ball.wind" name="Wind (m/s)"
         }
     }
@@ -221,7 +224,11 @@ print("Video Streaming Example - Rolling Ball")
 print("======================================")
 print()
 print("A ball rolls around pushed by rotating wind, bouncing off walls.")
-print("The video stream tile shows a GStreamer test pattern.")
+print("Video tiles: GStreamer test pattern + OBS Studio RTMP feed.")
+print()
+print("To stream from OBS Studio:")
+print("  Server:     rtmp://127.0.0.1:2241/live")
+print("  Stream Key: rtmp-feed")
 print()
 
 # =============================================================================

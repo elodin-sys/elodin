@@ -133,6 +133,9 @@ Run the Elodin database server
 * `--http-addr <ADDR>` — Address to bind the HTTP server to (enables HTTP API)
 
 
+The RTMP ingest server starts automatically on the DB port + 1 (default `2241`). It accepts RTMP publish connections (e.g. from OBS Studio) using both Legacy and Enhanced RTMP. The RTMP stream key is used as the message name, mapping to `video_stream` panels in the editor. Video is automatically converted from FLV/AVCC to Annex-B H.264 for storage. For example, with the default port, configure OBS to stream to `rtmp://HOST:2241/live/STREAM_KEY`. **Important**: Set the x264 option `keyint=1` in OBS to ensure every frame is independently decodable.
+
+
 ## `elodin-db lua`
 
 Run a Lua script or launch an interactive REPL for querying and interacting with the database.
@@ -601,6 +604,7 @@ Export video message logs to MP4 files. This command reads H.264 video frames st
 
 Video is stored in Elodin DB as **message logs**: each frame is a timestamped binary payload (H.264 NAL units in Annex B form). Typical ingestion paths:
 
+- **RTMP ingest** (e.g. OBS Studio): The DB automatically starts an RTMP server on port 2241 (DB port + 1). Point OBS Studio (or any RTMP source) at `rtmp://HOST:2241/live/STREAM_KEY`. The stream key becomes the message name. The DB automatically converts FLV/AVCC to Annex-B H.264. No extra plugins or processes required.
 - **GStreamer + elodinsink**: A GStreamer pipeline (e.g. `videotestsrc` → `x264enc` → `h264parse` → `elodinsink`) sends H.264 frames over TCP to the database. The `elodinsink` plugin uses a configurable message name (e.g. `test-video`) that becomes the log name. See the Video Streaming Example in the repository (`examples/video-stream/`) for a full setup.
 - **Schematic**: A `video_stream "name"` entry in the schematic ties a video tile in the Elodin Editor to that message name; the same name is used when exporting with `export-videos`.
 
