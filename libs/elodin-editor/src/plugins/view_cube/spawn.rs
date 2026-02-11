@@ -138,16 +138,17 @@ fn spawn_axes(
     parent: Entity,
 ) {
     const AXIS_SCALE_BUMP: f32 = 0.95;
+    const CUBE_HALF_EXTENT: f32 = 0.5;
 
     // Axes are children of `view_cube_root` (already scaled by `config.scale`),
     // so keep these in cube-local units to avoid double-scaling.
-    let axis_length = 1.1;
+    let axis_length = CUBE_HALF_EXTENT * 2.0;
     let axis_radius = 0.08 * AXIS_SCALE_BUMP;
-    // Origin at bottom-back-left corner - each axis lies along a cube edge
+    // Origin at the exact bottom-back-left cube corner - each axis lies on an edge
     // X goes right (along bottom-back edge)
     // Y goes up (along back-left edge)
     // Z goes forward (along bottom-left edge)
-    let axis_origin = Vec3::new(-0.55, -0.55, -0.55);
+    let axis_origin = Vec3::splat(-CUBE_HALF_EXTENT);
 
     let axes = config.system.get_axes();
     let axis_configs: [(Vec3, Color, &str); 3] = [
