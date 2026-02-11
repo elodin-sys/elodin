@@ -139,18 +139,19 @@ fn spawn_axes(
 ) {
     const AXIS_SCALE_BUMP: f32 = 0.95;
     const CUBE_HALF_EXTENT: f32 = 0.5;
-    const AXIS_CUBE_GAP: f32 = 0.04;
+    const AXIS_SURFACE_GAP: f32 = 0.05;
 
     // Axes are children of `view_cube_root` (already scaled by `config.scale`),
     // so keep these in cube-local units to avoid double-scaling.
     let axis_length = CUBE_HALF_EXTENT * 2.0;
-    let axis_radius = 0.08 * AXIS_SCALE_BUMP;
-    // Origin just outside the bottom-back-left corner so axes don't visually touch the cube body.
+    let axis_radius = 0.07 * AXIS_SCALE_BUMP;
+    // Keep a tiny but visible clearance between axis surface and cube body.
     // X goes right (along bottom-back edge)
     // Y goes up (along back-left edge)
     // Z goes forward (along bottom-left edge)
     let cube_corner = Vec3::splat(-CUBE_HALF_EXTENT);
-    let axis_origin = cube_corner + Vec3::splat(-1.0).normalize() * AXIS_CUBE_GAP;
+    let axis_center_offset = axis_radius + AXIS_SURFACE_GAP;
+    let axis_origin = cube_corner - Vec3::splat(axis_center_offset);
 
     let axes = config.system.get_axes();
     let axis_configs: [(Vec3, Color, &str); 3] = [
