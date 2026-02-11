@@ -140,10 +140,12 @@ pub fn sync_view_cube_rotation(
 }
 
 pub fn orient_axis_labels_to_screen_plane(
-    mut labels: Query<(&ChildOf, &mut Transform), With<AxisLabelBillboard>>,
+    mut labels: Query<(&ChildOf, &AxisLabelBillboard, &mut Transform)>,
     cubes: Query<(&ViewCubeLink, &GlobalTransform), With<ViewCubeRoot>>,
     cube_cameras: Query<(&ViewCubeLink, &GlobalTransform), With<ViewCubeCamera>>,
 ) {
+    const AXIS_LABEL_SCREEN_GAP: f32 = 0.035;
+
     if labels.is_empty() {
         return;
     }
@@ -153,7 +155,7 @@ pub fn orient_axis_labels_to_screen_plane(
         camera_rotation_by_main.insert(link.main_camera, camera_global.rotation());
     }
 
-    for (parent, mut label_transform) in labels.iter_mut() {
+    for (parent, label_meta, mut label_transform) in labels.iter_mut() {
         let Ok((cube_link, cube_global)) = cubes.get(parent.0) else {
             continue;
         };
@@ -161,8 +163,17 @@ pub fn orient_axis_labels_to_screen_plane(
             continue;
         };
 
+        let cube_rotation = cube_global.rotation();
+        let camera_up_world = *camera_rotation * Vec3::Y;
+        let camera_up_local = cube_rotation.inverse() * camera_up_world;
+        let axis_dir = label_meta.axis_direction.normalize_or_zero();
+        let gap_dir_local =
+            (camera_up_local - axis_dir * camera_up_local.dot(axis_dir)).normalize_or_zero();
+
+        label_transform.translation =
+            label_meta.base_position + gap_dir_local * AXIS_LABEL_SCREEN_GAP;
         // Cancel the cube's local rotation so labels remain parallel to the screen.
-        label_transform.rotation = cube_global.rotation().inverse() * *camera_rotation;
+        label_transform.rotation = cube_rotation.inverse() * *camera_rotation;
     }
 }
 

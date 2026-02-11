@@ -191,8 +191,6 @@ fn spawn_axes(
     // Small gap between axis end and letter.
     let axis_label_offset = 0.18 * AXIS_SCALE_BUMP;
     let axis_label_distance = axis_length + axis_label_offset;
-    // Push labels away from the cube volume (not just along the axis direction).
-    let axis_label_outward_offset = 0.11 * AXIS_SCALE_BUMP;
 
     for (direction, color, name) in axis_configs {
         let material = materials.add(StandardMaterial {
@@ -223,9 +221,7 @@ fn spawn_axes(
             shaft_cmd.insert(layers);
         }
 
-        let axis_tip = axis_origin + direction * axis_label_distance;
-        let outward = (axis_tip - direction * axis_tip.dot(direction)).normalize_or_zero();
-        let label_pos = axis_tip + outward * axis_label_outward_offset;
+        let label_pos = axis_origin + direction * axis_label_distance;
         let mut label_cmd = commands.spawn((
             TextMeshBundle {
                 text_mesh: TextMesh {
@@ -249,7 +245,10 @@ fn spawn_axes(
                 ..default()
             },
             Pickable::IGNORE,
-            AxisLabelBillboard,
+            AxisLabelBillboard {
+                axis_direction: direction,
+                base_position: label_pos,
+            },
             ChildOf(parent),
             Name::new(format!("axis_{}_label", name)),
         ));
