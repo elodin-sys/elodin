@@ -13,6 +13,20 @@ use super::events::ViewCubeEvent;
 use super::theme::ViewCubeColors;
 use crate::plugins::camera_anchor::camera_anchor_from_transform;
 
+#[derive(Clone)]
+struct ArrowHold {
+    arrow: RotationArrow,
+    source: Entity,
+    timer: Timer,
+}
+
+#[derive(Resource, Default)]
+pub struct ActiveArrowHold {
+    active: Option<ArrowHold>,
+}
+
+const ARROW_HOLD_REPEAT_INTERVAL_SECS: f32 = 0.1;
+
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 pub fn setup_cube_elements(
     mut commands: Commands,
@@ -1184,32 +1198,88 @@ pub fn on_arrow_hover_end(
     }
 }
 
-pub fn on_arrow_click(
-    trigger: On<Pointer<Click>>,
+pub fn on_arrow_pressed(
+    trigger: On<Pointer<Press>>,
     arrows: Query<&RotationArrow>,
     parents_query: Query<&ChildOf>,
     camera_link_query: Query<&ViewCubeLink, With<ViewCubeCamera>>,
     root_query: Query<(Entity, &ViewCubeLink), With<ViewCubeRoot>>,
+    mut hold: ResMut<ActiveArrowHold>,
     mut events: MessageWriter<ViewCubeEvent>,
 ) {
-    let entity = trigger.entity;
-
-    let Ok(arrow) = arrows.get(entity) else {
-        return;
-    };
-
     if trigger.event().button != PointerButton::Primary {
         return;
     }
+
+    let entity = trigger.entity;
+    let Ok(arrow) = arrows.get(entity) else {
+        return;
+    };
 
     let source =
         find_root_for_camera_child(entity, &parents_query, &camera_link_query, &root_query)
             .unwrap_or(Entity::PLACEHOLDER);
 
+    // First step happens immediately on press.
     events.write(ViewCubeEvent::ArrowClicked {
         arrow: *arrow,
         source,
     });
+
+    hold.active = Some(ArrowHold {
+        arrow: *arrow,
+        source,
+        timer: Timer::from_seconds(ARROW_HOLD_REPEAT_INTERVAL_SECS, TimerMode::Repeating),
+    });
+}
+
+pub fn on_arrow_released(
+    trigger: On<Pointer<Release>>,
+    arrows: Query<&RotationArrow>,
+    mut hold: ResMut<ActiveArrowHold>,
+) {
+    if trigger.event().button != PointerButton::Primary {
+        return;
+    }
+
+    let entity = trigger.entity;
+    let Ok(released_arrow) = arrows.get(entity) else {
+        return;
+    };
+
+    let Some(active) = hold.active.as_ref() else {
+        return;
+    };
+
+    if active.arrow == *released_arrow {
+        hold.active = None;
+    }
+}
+
+pub fn repeat_held_arrow(
+    time: Res<Time>,
+    mouse_buttons: Res<ButtonInput<MouseButton>>,
+    mut hold: ResMut<ActiveArrowHold>,
+    mut events: MessageWriter<ViewCubeEvent>,
+) {
+    // If primary is no longer held (release happened off-target), stop repeating.
+    if !mouse_buttons.pressed(MouseButton::Left) {
+        hold.active = None;
+        return;
+    }
+
+    let Some(active) = hold.active.as_mut() else {
+        return;
+    };
+
+    active.timer.tick(time.delta());
+    let repeats = active.timer.times_finished_this_tick();
+    for _ in 0..repeats {
+        events.write(ViewCubeEvent::ArrowClicked {
+            arrow: active.arrow,
+            source: active.source,
+        });
+    }
 }
 
 #[allow(clippy::collapsible_if)]
