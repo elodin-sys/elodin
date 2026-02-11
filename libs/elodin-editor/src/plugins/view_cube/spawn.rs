@@ -140,11 +140,13 @@ fn spawn_axes(
     const AXIS_SCALE_BUMP: f32 = 0.95;
     const CUBE_HALF_EXTENT: f32 = 0.5;
     const AXIS_SURFACE_GAP: f32 = 0.05;
+    const AXIS_OVERHANG: f32 = 0.24;
 
     // Axes are children of `view_cube_root` (already scaled by `config.scale`),
     // so keep these in cube-local units to avoid double-scaling.
-    let axis_length = CUBE_HALF_EXTENT * 2.0;
-    let axis_radius = 0.07 * AXIS_SCALE_BUMP;
+    // Extend a touch beyond cube edges so XYZ labels have more breathing room.
+    let axis_length = (CUBE_HALF_EXTENT * 2.0) + AXIS_OVERHANG;
+    let axis_radius = 0.04 * AXIS_SCALE_BUMP;
     // Keep a tiny but visible clearance between axis surface and cube body.
     // X goes right (along bottom-back edge)
     // Y goes up (along back-left edge)
@@ -187,7 +189,7 @@ fn spawn_axes(
     let axis_label_scale = 0.37;
     let axis_label_depth = 0.005;
     // Small gap between axis end and letter.
-    let axis_label_offset = 0.14 * AXIS_SCALE_BUMP;
+    let axis_label_offset = 0.18 * AXIS_SCALE_BUMP;
     let axis_label_distance = axis_length + axis_label_offset;
     // Push labels away from the cube volume (not just along the axis direction).
     let axis_label_outward_offset = 0.11 * AXIS_SCALE_BUMP;
