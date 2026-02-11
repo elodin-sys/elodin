@@ -180,14 +180,9 @@ fn spawn_axes(
     let tip_mesh = meshes.add(Cone::new(tip_radius, tip_length));
 
     for (direction, color, name) in axis_configs {
-        // Convert color to LinearRgba for emissive
-        let emissive = match color {
-            Color::Srgba(c) => LinearRgba::new(c.red * 0.5, c.green * 0.5, c.blue * 0.5, 1.0),
-            _ => LinearRgba::new(0.3, 0.3, 0.3, 1.0),
-        };
         let material = materials.add(StandardMaterial {
             base_color: color,
-            emissive, // Glow for visibility in dark/light modes
+            emissive: LinearRgba::BLACK,
             unlit: true,
             ..default()
         });
@@ -249,20 +244,16 @@ fn spawn_face_labels(
     // Label transforms are local to the cube root, which already carries `config.scale`.
     // Applying `config.scale` again would push labels inside the cube in editor mode.
     let label_scale = 0.88;
-    let label_depth = 0.03;
-    let face_offset = 0.56;
+    let label_depth = 0.008;
+    let face_offset = 0.535;
 
     // Get face labels from coordinate system configuration
     let face_labels = config.system.get_face_labels(face_offset);
 
     for label in face_labels {
-        let emissive = match label.color {
-            Color::Srgba(c) => LinearRgba::new(c.red * 0.45, c.green * 0.45, c.blue * 0.45, 1.0),
-            _ => LinearRgba::new(0.35, 0.35, 0.35, 1.0),
-        };
         let material = materials.add(StandardMaterial {
             base_color: label.color,
-            emissive,
+            emissive: LinearRgba::BLACK,
             unlit: true,
             // Keep text visible even if the generated mesh winding differs per face.
             cull_mode: None,
