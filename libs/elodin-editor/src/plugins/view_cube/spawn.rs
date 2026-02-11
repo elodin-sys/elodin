@@ -139,16 +139,18 @@ fn spawn_axes(
 ) {
     const AXIS_SCALE_BUMP: f32 = 0.95;
     const CUBE_HALF_EXTENT: f32 = 0.5;
+    const AXIS_CUBE_GAP: f32 = 0.04;
 
     // Axes are children of `view_cube_root` (already scaled by `config.scale`),
     // so keep these in cube-local units to avoid double-scaling.
     let axis_length = CUBE_HALF_EXTENT * 2.0;
     let axis_radius = 0.08 * AXIS_SCALE_BUMP;
-    // Origin at the exact bottom-back-left cube corner - each axis lies on an edge
+    // Origin just outside the bottom-back-left corner so axes don't visually touch the cube body.
     // X goes right (along bottom-back edge)
     // Y goes up (along back-left edge)
     // Z goes forward (along bottom-left edge)
-    let axis_origin = Vec3::splat(-CUBE_HALF_EXTENT);
+    let cube_corner = Vec3::splat(-CUBE_HALF_EXTENT);
+    let axis_origin = cube_corner + Vec3::splat(-1.0).normalize() * AXIS_CUBE_GAP;
 
     let axes = config.system.get_axes();
     let axis_configs: [(Vec3, Color, &str); 3] = [
@@ -181,7 +183,7 @@ fn spawn_axes(
     let shaft_mesh = meshes.add(Cylinder::new(axis_radius, axis_length));
     let font: Handle<FontMesh> =
         asset_server.load("embedded://elodin_editor/assets/fonts/Roboto-Bold.ttf");
-    let axis_label_scale = 0.41;
+    let axis_label_scale = 0.37;
     let axis_label_depth = 0.005;
     // Small gap between axis end and letter.
     let axis_label_offset = 0.14 * AXIS_SCALE_BUMP;
@@ -274,7 +276,7 @@ fn spawn_face_labels(
 
     // Label transforms are local to the cube root, which already carries `config.scale`.
     // Applying `config.scale` again would push labels inside the cube in editor mode.
-    let label_scale = 0.88;
+    let label_scale = 0.6;
     let label_depth = 0.008;
     let face_offset = 0.535;
 
