@@ -231,7 +231,6 @@ fn spawn_axes(
                         anchor: TextAnchor::Center,
                         ..default()
                     },
-                    ..default()
                 },
                 material: MeshMaterial3d(materials.add(StandardMaterial {
                     base_color: color,
