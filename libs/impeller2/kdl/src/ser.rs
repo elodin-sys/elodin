@@ -1405,4 +1405,20 @@ object_3d a.world_pos {
             panic!("Expected dashboard");
         }
     }
+
+    #[test]
+    fn test_roundtrip_glb_animations_are_dropped() {
+        use impeller2_wkt::{Object3DMesh, SchematicElem};
+        let original = r#" object_3d "rocket.world_pos" {   glb path="rocket.glb"   animate joint="Root.Fin_0" rotation_vector="(0, 1.0, 0)" } "#;
+        let parsed = parse_schematic(original).unwrap();
+        let serialized = serialize_schematic(&parsed);
+        let reparsed = parse_schematic(&serialized).unwrap();
+        let SchematicElem::Object3d(obj) = &reparsed.elems[0] else {
+            panic!()
+        };
+        let Object3DMesh::Glb { animations, .. } = &obj.mesh else {
+            panic!()
+        };
+        assert_eq!(animations.len(), 1, "serialized:\n{serialized}");
+    }
 }
