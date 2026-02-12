@@ -107,7 +107,10 @@ fn main_camera_for_event(
     view_cube_query: &Query<&ViewCubeLink, With<ViewCubeRoot>>,
 ) -> Option<Entity> {
     let source = event_source(event);
-    view_cube_query.get(source).ok().map(|link| link.main_camera)
+    view_cube_query
+        .get(source)
+        .ok()
+        .map(|link| link.main_camera)
 }
 
 fn event_source(event: &ViewCubeEvent) -> Entity {
@@ -162,8 +165,14 @@ pub fn orient_axis_labels_to_screen_plane(
         let camera_up_world = *camera_rotation * Vec3::Y;
         let camera_up_local = cube_rotation.inverse() * camera_up_world;
         let axis_dir = label_meta.axis_direction.normalize_or_zero();
-        let gap_dir_local =
-            (camera_up_local - axis_dir * camera_up_local.dot(axis_dir)).normalize_or_zero();
+        let projected_up = camera_up_local - axis_dir * camera_up_local.dot(axis_dir);
+        let mut gap_dir_local = projected_up.normalize_or_zero();
+        if gap_dir_local.length_squared() <= 1.0e-6 {
+            let camera_right_world = *camera_rotation * Vec3::X;
+            let camera_right_local = cube_rotation.inverse() * camera_right_world;
+            let projected_right = camera_right_local - axis_dir * camera_right_local.dot(axis_dir);
+            gap_dir_local = projected_right.normalize_or_zero();
+        }
 
         label_transform.translation =
             label_meta.base_position + gap_dir_local * AXIS_LABEL_SCREEN_GAP;
