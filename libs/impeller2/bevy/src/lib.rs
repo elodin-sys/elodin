@@ -4,7 +4,7 @@ use bevy::{
         hierarchy::ChildOf,
         system::{EntityCommands, SystemId},
     },
-    prelude::{Command, In, InRef, IntoSystem, Mut, System},
+    prelude::{Command, In, InRef, IntoSystem, Message, Mut, System},
 };
 use bevy::{ecs::system::SystemParam, prelude::World};
 use bevy::{
@@ -76,6 +76,11 @@ impl PacketTx {
         let pkt = msg.into_len_packet();
         let _ = self.0.try_send(Some(pkt));
     }
+}
+
+#[derive(Debug, Message)]
+pub enum DbMessage {
+    UpdateConfig,
 }
 
 fn sink_inner(
@@ -180,6 +185,7 @@ fn sink_inner(
                 }
                 *world_sink.db_config = metadata.db_config.clone();
                 pending_stream_time_step = Some(metadata.db_config.default_stream_time_step);
+                world_sink.commands.write_message(DbMessage::UpdateConfig);
             }
             OwnedPacket::Msg(m) if m.id == LastUpdated::ID => {
                 let m = m.parse::<LastUpdated>()?;
@@ -533,7 +539,8 @@ pub struct Impeller2Plugin;
 
 impl Plugin for Impeller2Plugin {
     fn build(&self, app: &mut bevy::prelude::App) {
-        app.add_plugins(DefaultAdaptersPlugin)
+        app.add_message::<DbMessage>()
+            .add_plugins(DefaultAdaptersPlugin)
             .insert_resource(impeller2_wkt::SimulationTimeStep(0.001))
             .insert_resource(impeller2_wkt::CurrentTimestamp(Timestamp::EPOCH))
             .insert_resource(impeller2_wkt::LastUpdated(Timestamp::now()))

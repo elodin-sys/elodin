@@ -151,3 +151,6 @@ image.features = ["png"]
 [target.'cfg(not(target_os = "macos"))'.dependencies]
 openh264 = "0.8"
 pic-scale = "0.6"
+
+# [patch.crates-io]
+# bevy_editor_cam = { path = "../bevy_editor_cam" }
