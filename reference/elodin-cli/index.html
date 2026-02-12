@@ -792,7 +792,7 @@
 </ul>
 <h2 id="elodin-editor"><code>elodin editor</code></h2>
 <p>Launch the Elodin editor (default)</p>
-<p><strong>Usage:</strong> <code>elodin editor [addr/path]</code></p>
+<p><strong>Usage:</strong> <code>elodin editor [--kdl KDL-PATH] [addr/path]</code></p>
 <h6 id="arguments"><strong>Arguments</strong></h6>
 <ul>
 <li><code>&lt;addr/path&gt;</code> — Optional connection target or simulation to run. Can be:
@@ -803,6 +803,8 @@
 <li>A directory containing <code>main.py</code> or <code>s10.toml</code></li>
 </ul>
 </li>
+<li><code>--kdl &lt;PATH&gt;</code> — Optional parameter that will load a specific schematic KDL
+after connecting to a database.</li>
 </ul>
 <h2 id="elodin-run"><code>elodin run</code></h2>
 <p>Run an Elodin simulation in headless mode (not available on Windows)</p>
