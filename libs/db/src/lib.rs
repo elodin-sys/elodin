@@ -35,7 +35,7 @@ use std::{
         Arc, Condvar, Mutex as StdMutex, RwLock,
         atomic::{self, AtomicBool, AtomicI64, AtomicU64},
     },
-    time::{Duration, Instant},
+    time::Duration,
 };
 use stellarator::{
     buf::Slice,
@@ -810,7 +810,7 @@ impl DB {
         behavior: FixedRateBehavior,
     ) -> Arc<FixedRateStreamState> {
         let mut state = self.state.write().expect("poisoned lock");
-        state
+        let stream_state = state
             .streams
             .entry(stream_id)
             .or_insert_with(|| {
@@ -825,7 +825,15 @@ impl DB {
                     behavior.frequency,
                 ))
             })
-            .clone()
+            .clone();
+        // Spawn a dedicated tick driver if one hasn't been spawned yet
+        if !stream_state
+            .driver_spawned
+            .swap(true, atomic::Ordering::SeqCst)
+        {
+            stellarator::spawn(run_tick_driver(stream_state.clone()));
+        }
+        stream_state
     }
 }
 
@@ -2078,12 +2086,11 @@ pub async fn handle_fixed_rate_msg_stream<A: AsyncWrite>(
 ) -> Result<(), Error> {
     let mut pkt = LenPacket::msg_with_timestamp(msg_id, Timestamp(0), 64).with_request_id(req_id);
     let mut last_sent_timestamp: Option<Timestamp> = None;
+    let mut current_timestamp = stream_state.current_timestamp();
     loop {
         if !stream_state.wait_for_playing().await {
             return Ok(());
         }
-        let start = Instant::now();
-        let current_timestamp = stream_state.current_timestamp();
         let Some((msg_timestamp, msg)) = msg_log.get_nearest(current_timestamp) else {
             // Wait for data to arrive in the msg_log.
             // This yields to the runtime (preventing scheduler starvation) without
@@ -2093,9 +2100,7 @@ pub async fn handle_fixed_rate_msg_stream<A: AsyncWrite>(
         };
 
         if Some(msg_timestamp) == last_sent_timestamp {
-            stream_state
-                .wait_for_tick(start.elapsed(), current_timestamp)
-                .await;
+            current_timestamp = stream_state.wait_for_next_tick(current_timestamp).await;
             continue;
         }
 
@@ -2108,9 +2113,7 @@ pub async fn handle_fixed_rate_msg_stream<A: AsyncWrite>(
         }
         last_sent_timestamp = Some(msg_timestamp);
 
-        stream_state
-            .wait_for_tick(start.elapsed(), current_timestamp)
-            .await;
+        current_timestamp = stream_state.wait_for_next_tick(current_timestamp).await;
     }
 }
 
@@ -2121,6 +2124,8 @@ pub struct FixedRateStreamState {
     is_scrubbed: AtomicBool,
     current_tick: AtomicI64,
     playing_cell: PlayingCell,
+    tick_notify: WaitQueue,
+    driver_spawned: AtomicBool,
 }
 
 impl FixedRateStreamState {
@@ -2137,6 +2142,8 @@ impl FixedRateStreamState {
             current_tick: AtomicI64::new(current_tick.0),
             playing_cell: PlayingCell::new(true),
             frequency: AtomicU64::new(frequency),
+            tick_notify: WaitQueue::new(),
+            driver_spawned: AtomicBool::new(false),
         }
     }
 
@@ -2149,6 +2156,7 @@ impl FixedRateStreamState {
         self.current_tick
             .store(timestamp.0, atomic::Ordering::SeqCst);
         self.playing_cell.wait_cell.wake_all();
+        self.tick_notify.wake_all();
     }
 
     fn set_frequency(&self, frequency: u64) {
@@ -2160,10 +2168,6 @@ impl FixedRateStreamState {
             .store(time_step.as_nanos() as u64, atomic::Ordering::SeqCst);
     }
 
-    fn time_step(&self) -> Duration {
-        Duration::from_nanos(self.time_step.load(atomic::Ordering::Relaxed))
-    }
-
     fn sleep_time(&self) -> Duration {
         Duration::from_micros(1_000_000 / self.frequency.load(atomic::Ordering::Relaxed))
     }
@@ -2172,14 +2176,19 @@ impl FixedRateStreamState {
         Timestamp(self.current_tick.load(atomic::Ordering::Relaxed))
     }
 
-    fn try_increment_tick(&self, last_timestamp: Timestamp) {
-        let time_step = self.time_step();
-        let _ = self.current_tick.compare_exchange(
-            last_timestamp.0,
-            (last_timestamp + time_step).0,
-            atomic::Ordering::Acquire,
-            atomic::Ordering::Relaxed,
-        );
+    fn advance_tick(&self) {
+        let time_step = self.time_step.load(atomic::Ordering::Relaxed) as i64;
+        self.current_tick
+            .fetch_add(time_step, atomic::Ordering::Release);
+        self.tick_notify.wake_all();
+    }
+
+    async fn wait_for_next_tick(&self, last_seen: Timestamp) -> Timestamp {
+        let _ = self
+            .tick_notify
+            .wait_for(|| self.current_timestamp() != last_seen)
+            .await;
+        self.current_timestamp()
     }
 
     fn is_playing(&self) -> bool {
@@ -2197,17 +2206,27 @@ impl FixedRateStreamState {
             .await
             .is_ok()
     }
+}
 
-    async fn wait_for_tick(&self, elapsed: Duration, last_timestamp: Timestamp) {
-        let sleep_time = self.sleep_time().saturating_sub(elapsed);
+async fn run_tick_driver(state: Arc<FixedRateStreamState>) {
+    loop {
+        // Respect play/pause
+        if !state.wait_for_playing().await {
+            return;
+        }
+        let sleep_time = state.sleep_time();
+        // Sleep for one tick period, interruptible by play/pause changes
         futures_lite::future::race(
             async {
-                self.playing_cell.wait_for_change().await;
+                state.playing_cell.wait_for_change().await;
             },
             stellarator::sleep(sleep_time),
         )
         .await;
-        self.try_increment_tick(last_timestamp);
+        // Only advance if still playing
+        if state.is_playing() {
+            state.advance_tick();
+        }
     }
 }
 
@@ -2254,6 +2273,10 @@ fn handle_stream<A: AsyncWrite + 'static>(
             ));
             debug!(stream.id = ?stream.id, "inserting stream");
             db.with_state_mut(|s| s.streams.insert(stream.id, state.clone()));
+            // Spawn a dedicated tick driver for this stream state
+            if !state.driver_spawned.swap(true, atomic::Ordering::SeqCst) {
+                stellarator::spawn(run_tick_driver(state.clone()));
+            }
             stellarator::spawn(async move {
                 match handle_fixed_stream(tx, req_id, state, db).await {
                     Ok(_) => {}
@@ -2395,12 +2418,11 @@ async fn handle_fixed_stream<A: AsyncWrite>(
     let mut current_gen = u64::MAX;
     let mut table = LenPacket::table([0; 2], 2048 - 16);
     let mut components = db.with_state(|state| state.components.clone());
+    let mut current_timestamp = state.current_timestamp();
     loop {
         if !state.wait_for_playing().await {
             return Ok(());
         }
-        let start = Instant::now();
-        let current_timestamp = state.current_timestamp();
         let vtable_gen = db.vtable_gen.latest();
         if vtable_gen != current_gen {
             components = db.with_state(|state| state.components.clone());
@@ -2430,9 +2452,7 @@ async fn handle_fixed_stream<A: AsyncWrite>(
                 .0?;
             rent!(stream.send(table.with_request_id(req_id)).await, table)?;
         }
-        state
-            .wait_for_tick(start.elapsed(), current_timestamp)
-            .await;
+        current_timestamp = state.wait_for_next_tick(current_timestamp).await;
     }
 }
 

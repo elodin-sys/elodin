@@ -5,13 +5,12 @@ use std::{
         Arc,
         atomic::{AtomicUsize, Ordering},
     },
-    time::Instant,
 };
 
 use impeller2::{
     types::{
         ComponentView, IntoLenPacket, LenPacket, Msg, PACKET_HEADER_LEN, PacketId, PrimType,
-        RequestId,
+        RequestId, Timestamp,
     },
     vtable::{Op, RealizedComponent, RealizedOp, VTable},
 };
@@ -93,12 +92,13 @@ pub async fn handle_vtable_stream<A: AsyncWrite + 'static>(
                         .clone();
 
                     let state = db.get_or_insert_fixed_rate_state(stream_id, behavior);
+                    let initial_tick = state.current_timestamp();
                     plan.insert(
                         0,
                         StreamStage::FixedRate(FixedRateStage {
                             component,
                             state,
-                            last_tick: Instant::now(),
+                            last_seen_tick: initial_tick,
                         }),
                     );
                     break 'find;
@@ -246,7 +246,7 @@ impl Field {
 struct FixedRateStage {
     component: Component,
     state: Arc<FixedRateStreamState>,
-    last_tick: Instant,
+    last_seen_tick: Timestamp,
 }
 
 impl FixedRateStage {
@@ -255,17 +255,8 @@ impl FixedRateStage {
         shard: &Field,
         timestamp_shard: Option<&Field>,
     ) -> Result<bool, Error> {
-        let sleep_time = self
-            .state
-            .sleep_time()
-            .saturating_sub(self.last_tick.elapsed());
-        futures_lite::future::race(
-            async {
-                self.state.playing_cell.wait_for_change().await;
-            },
-            stellarator::sleep(sleep_time),
-        )
-        .await;
+        // Wait for the tick driver to advance the tick
+        self.last_seen_tick = self.state.wait_for_next_tick(self.last_seen_tick).await;
         if self
             .state
             .playing_cell
@@ -293,8 +284,6 @@ impl FixedRateStage {
                 })
                 .await;
         }
-        self.state.try_increment_tick(current_timestamp);
-        self.last_tick = Instant::now();
         Ok(true)
     }
 }

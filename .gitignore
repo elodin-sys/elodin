@@ -43,4 +43,5 @@ examples/rocket-barrowman/motor_cache/
 examples/rocket-barrowman/*.log
 **/rocket.glb
 dbs
+video-stream-db/
 *.log
