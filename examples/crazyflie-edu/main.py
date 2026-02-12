@@ -928,7 +928,8 @@ else:
     world.run(
         sys,
         sim_time_step=config.dt,
-        run_time_step=1.0 / 60.0,  # 60 FPS for visualization
+        # Run it in real-time: wait if necessary after each time step.
+        run_time_step=config.dt,
         max_ticks=config.total_sim_ticks,
         post_step=sitl_post_step,
     )

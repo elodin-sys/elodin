@@ -139,6 +139,9 @@ class CrazyflieConfig:
     frame: Frame = Frame.CRAZYFLIE_X
 
     # Simulation time step in seconds (500 Hz control loop)
+    # 
+    # NOTE: If the simulation is too slow to be practical, try raising this
+    # value.
     sim_time_step: float = 0.002
 
     # Fast loop time step for physics (1000 Hz)
