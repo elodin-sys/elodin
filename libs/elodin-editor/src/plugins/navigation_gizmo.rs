@@ -376,6 +376,7 @@ pub fn set_camera_viewport(
     primary_query: Query<Entity, With<PrimaryWindow>>,
 ) {
     let margin = 8.0;
+    let top_offset = 10.0;
     let side_length = 128.0;
     for (mut nav_camera, parent) in nav_camera_query.iter_mut() {
         let Ok(main) = main_camera_query.get(parent.main_camera) else {
@@ -397,12 +398,14 @@ pub fn set_camera_viewport(
         };
         let scale_factor = window.scale_factor() * egui_settings.scale_factor;
         let margin = margin * scale_factor;
+        let top_offset = top_offset * scale_factor;
         let side_length = side_length * scale_factor;
         let viewport_pos = viewport.physical_position.as_vec2();
         let viewport_size = viewport.physical_size.as_vec2();
+        let right_offset = 20.0 * scale_factor; // Slight left offset to avoid overlap with right panel
         let nav_viewport_pos = Vec2::new(
-            (viewport_pos.x + viewport_size.x) - (side_length + margin),
-            viewport_pos.y,
+            (viewport_pos.x + viewport_size.x) - (side_length + margin + right_offset),
+            viewport_pos.y + top_offset,
         );
         // Clamp the gizmo viewport to the actual window surface to avoid invalid wgpu viewports
         // when the target window is smaller than the desired overlay.

@@ -147,6 +147,7 @@ impl SchematicParam<'_, '_> {
                             .get(cam_entity)
                             .map(|config| config.show_arrows)
                             .unwrap_or(true);
+                        let show_view_cube = viewport.view_cube_layer.is_some();
 
                         let local_arrows: Vec<VectorArrow3d> = self
                             .vector_arrows
@@ -166,6 +167,7 @@ impl SchematicParam<'_, '_> {
                             active: false,
                             show_grid,
                             show_arrows,
+                            show_view_cube,
                             hdr: self.hdr_enabled.0,
                             name: pane_name,
                             pos: Some(viewport_data.pos.eql.clone()),
@@ -415,10 +417,16 @@ pub struct SchematicPlugin;
 
 impl Plugin for SchematicPlugin {
     fn build(&self, app: &mut App) {
-        app.insert_resource(CurrentSchematic(Default::default()))
+        app.add_plugins(load::plugin)
+            .insert_resource(CurrentSchematic(Default::default()))
             .insert_resource(CurrentSecondarySchematics::default())
             .add_systems(PostUpdate, tiles_to_schematic)
-            .add_systems(PostUpdate, sync_schematic.before(tiles_to_schematic))
+            .add_systems(
+                PostUpdate,
+                load::apply_initial_kdl_path
+                    .pipe(sync_schematic)
+                    .before(tiles_to_schematic),
+            )
             .init_resource::<SchematicLiveReloadRx>()
             .add_systems(PreUpdate, load::schematic_live_reload);
     }

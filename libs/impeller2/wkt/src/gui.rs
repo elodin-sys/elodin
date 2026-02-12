@@ -8,6 +8,10 @@ use std::ops::Range;
 use std::time::Duration;
 use strum::{EnumString, IntoStaticStr, VariantNames};
 
+fn default_true() -> bool {
+    true
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(bound = "T: Serialize + DeserializeOwned")]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::TypePath,))]
@@ -213,6 +217,8 @@ pub struct Viewport<T = ()> {
     pub active: bool,
     pub show_grid: bool,
     pub show_arrows: bool,
+    #[serde(default = "default_true")]
+    pub show_view_cube: bool,
     pub hdr: bool,
     pub name: Option<String>,
     pub pos: Option<String>,
@@ -229,6 +235,7 @@ impl<T> Viewport<T> {
             active: self.active,
             show_grid: self.show_grid,
             show_arrows: self.show_arrows,
+            show_view_cube: self.show_view_cube,
             hdr: self.hdr,
             name: self.name.clone(),
             pos: self.pos.clone(),
@@ -246,6 +253,7 @@ impl Default for Viewport {
             active: false,
             show_grid: false,
             show_arrows: true,
+            show_view_cube: true,
             hdr: false,
             name: None,
             pos: None,

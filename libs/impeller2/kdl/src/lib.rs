@@ -1,6 +1,7 @@
 use miette::{Diagnostic, Result, SourceSpan};
 use thiserror::Error;
 
+use std::path::PathBuf;
 mod color_names;
 pub use color_names::*;
 
@@ -57,6 +58,8 @@ pub enum KdlSchematicError {
         #[label("unknown node")]
         span: SourceSpan,
     },
+    #[error("No such file '{path}'")]
+    NoSuchFile { path: PathBuf },
 }
 
 // TODO: Consider using the `Display` or `ToString` trait.

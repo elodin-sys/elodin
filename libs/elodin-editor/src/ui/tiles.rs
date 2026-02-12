@@ -8,7 +8,10 @@ use bevy::{
     prelude::*,
     window::{Monitor, PrimaryWindow, Window, WindowPosition},
 };
-use bevy_editor_cam::prelude::{EditorCam, EnabledMotion, OrbitConstraint};
+use bevy_editor_cam::{
+    controller::{component::Sensitivity, zoom::ZoomLimits},
+    prelude::{EditorCam, EnabledMotion, OrbitConstraint},
+};
 use bevy_egui::{
     EguiContexts, EguiTextureHandle,
     egui::{self, Color32, CornerRadius, Frame, Id, RichText, Stroke, Ui, Visuals, vec2},
@@ -56,7 +59,10 @@ use crate::{
     plugins::{
         LogicalKeyState,
         gizmos::GIZMO_RENDER_LAYER,
-        navigation_gizmo::{RenderLayerAlloc, spawn_gizmo},
+        navigation_gizmo::{NavGizmoCamera, NavGizmoParent, RenderLayerAlloc},
+        view_cube::{
+            NeedsInitialSnap, ViewCubeConfig, ViewCubeTargetCamera, spawn::spawn_view_cube,
+        },
     },
     ui::{colors::ColorExt, dashboard::NodeUpdaterParams},
 };
@@ -79,7 +85,7 @@ fn setup_primary_window_state(
         warn!("No primary window to setup");
         return;
     };
-    // TODO: Setup this descriptor with the path when its known.
+    // TODO: Set the descriptor path once it is known.
     let descriptor = WindowDescriptor::default();
     let state = WindowState {
         descriptor,
@@ -750,6 +756,9 @@ impl TileState {
                     if let Some(layer) = viewport.grid_layer {
                         render_layer_alloc.free(layer);
                     }
+                    if let Some(layer) = viewport.view_cube_layer {
+                        render_layer_alloc.free(layer);
+                    }
                     if let Some(camera) = viewport.camera {
                         commands.entity(camera).despawn();
                     }
@@ -1119,6 +1128,7 @@ pub struct ViewportPane {
     pub name: PaneName,
     pub grid_layer: Option<usize>,
     pub viewport_layer: Option<usize>,
+    pub view_cube_layer: Option<usize>,
 }
 
 impl ViewportPane {
@@ -1247,6 +1257,15 @@ impl ViewportPane {
                     up: Vec3::Y,
                     can_pass_tdc: false,
                 },
+                zoom_limits: ZoomLimits {
+                    min_size_per_pixel: 1e-3,
+                    max_size_per_pixel: 10.0,
+                    zoom_through_objects: false,
+                },
+                sensitivity: Sensitivity {
+                    zoom: 0.2,
+                    ..default()
+                },
                 last_anchor_depth: 2.0,
                 ..Default::default()
             },
@@ -1270,16 +1289,70 @@ impl ViewportPane {
 
         let camera = camera.id();
 
-        let (nav_gizmo, nav_gizmo_camera) =
-            spawn_gizmo(camera, commands, meshes, materials, render_layer_alloc);
+        if !viewport.show_view_cube {
+            return Self {
+                camera: Some(camera),
+                nav_gizmo: None,
+                nav_gizmo_camera: None,
+                rect: None,
+                name,
+                grid_layer,
+                viewport_layer,
+                view_cube_layer: None,
+            };
+        }
+
+        // Allocate render layer for ViewCube (same approach as navigation_gizmo)
+        let Some(view_cube_layer) = render_layer_alloc.alloc() else {
+            return Self {
+                camera: Some(camera),
+                nav_gizmo: None,
+                nav_gizmo_camera: None,
+                rect: None,
+                name,
+                grid_layer,
+                viewport_layer,
+                view_cube_layer: None,
+            };
+        };
+
+        commands
+            .entity(camera)
+            .insert((ViewCubeTargetCamera, NeedsInitialSnap));
+
+        // Spawn ViewCube with editor mode configuration, only override the per-viewport render layer
+        let mut view_cube_config = ViewCubeConfig::editor_mode();
+        view_cube_config.render_layer = view_cube_layer as u8;
+
+        let spawned = spawn_view_cube(
+            commands,
+            asset_server,
+            meshes,
+            materials,
+            &view_cube_config,
+            camera,
+        );
+
+        // Add NavGizmoParent and NavGizmoCamera to the ViewCube camera
+        // so the existing set_camera_viewport system works on it
+        if let Some(view_cube_camera) = spawned.camera {
+            commands.entity(view_cube_camera).insert((
+                NavGizmoParent {
+                    main_camera: camera,
+                },
+                NavGizmoCamera,
+            ));
+        }
+
         Self {
             camera: Some(camera),
-            nav_gizmo,
-            nav_gizmo_camera,
+            nav_gizmo: Some(spawned.cube_root),
+            nav_gizmo_camera: spawned.camera,
             rect: None,
             name,
             grid_layer,
             viewport_layer,
+            view_cube_layer: Some(view_cube_layer),
         }
     }
 }
@@ -2311,6 +2384,9 @@ impl WidgetSystem for TileLayout<'_, '_> {
                                 state_mut.render_layer_alloc.free(layer);
                             }
                             if let Some(layer) = viewport.grid_layer {
+                                state_mut.render_layer_alloc.free(layer);
+                            }
+                            if let Some(layer) = viewport.view_cube_layer {
                                 state_mut.render_layer_alloc.free(layer);
                             }
                             if let Some(camera) = viewport.camera {
