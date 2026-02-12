@@ -355,8 +355,18 @@ fn spawn_rotation_arrows(
 
     // Quads provide a much more reliable click target than thin cone/capsule meshes.
     let button_size = 0.2;
+    let hitbox_size = button_size * 1.55;
     let directional_mesh = meshes.add(Rectangle::new(button_size, button_size));
     let roll_mesh = meshes.add(Rectangle::new(button_size * 0.92, button_size * 0.92));
+    let hitbox_mesh = meshes.add(Rectangle::new(hitbox_size, hitbox_size));
+    let hitbox_material = materials.add(StandardMaterial {
+        // Invisible pick surface used to make interaction forgiving.
+        base_color: Color::srgba(1.0, 1.0, 1.0, 0.0),
+        unlit: true,
+        alpha_mode: AlphaMode::Blend,
+        cull_mode: None,
+        ..default()
+    });
 
     let horizontal_distance = 0.42;
     let vertical_distance = 0.43;
@@ -409,6 +419,8 @@ fn spawn_rotation_arrows(
             Transform::from_translation(position)
                 .with_rotation(rotation)
                 .with_scale(scale),
+            // Use a dedicated child hitbox so users don't need pixel-perfect alignment.
+            Pickable::IGNORE,
             direction,
             Name::new(format!("rotation_arrow_{:?}", direction)),
         ));
@@ -416,6 +428,18 @@ fn spawn_rotation_arrows(
             arrow_cmd.insert(layers);
         }
         arrow_cmd.insert(ChildOf(camera_entity));
+        let arrow_entity = arrow_cmd.id();
+
+        let mut hitbox_cmd = commands.spawn((
+            Mesh3d(hitbox_mesh.clone()),
+            MeshMaterial3d(hitbox_material.clone()),
+            Transform::from_translation(Vec3::ZERO),
+            ChildOf(arrow_entity),
+            Name::new(format!("rotation_arrow_{:?}_hitbox", direction)),
+        ));
+        if let Some(layers) = render_layers.clone() {
+            hitbox_cmd.insert(layers);
+        }
     }
 
     // Keep roll arrows slightly above the top arrow and near left/right verticals.
@@ -453,6 +477,7 @@ fn spawn_rotation_arrows(
             Transform::from_translation(position)
                 .with_rotation(rotation)
                 .with_scale(scale),
+            Pickable::IGNORE,
             direction,
             Name::new(format!("rotation_arrow_{:?}", direction)),
         ));
@@ -460,6 +485,18 @@ fn spawn_rotation_arrows(
             arrow_cmd.insert(layers);
         }
         arrow_cmd.insert(ChildOf(camera_entity));
+        let arrow_entity = arrow_cmd.id();
+
+        let mut hitbox_cmd = commands.spawn((
+            Mesh3d(hitbox_mesh.clone()),
+            MeshMaterial3d(hitbox_material.clone()),
+            Transform::from_translation(Vec3::ZERO),
+            ChildOf(arrow_entity),
+            Name::new(format!("rotation_arrow_{:?}_hitbox", direction)),
+        ));
+        if let Some(layers) = render_layers.clone() {
+            hitbox_cmd.insert(layers);
+        }
     }
 }
 
@@ -476,8 +513,17 @@ fn spawn_viewport_action_buttons(
     let button_color = colors.arrow_normal;
     let depth = -1.2;
     let reset_button_mesh = meshes.add(Rectangle::new(0.165, 0.165));
+    let reset_hitbox_mesh = meshes.add(Rectangle::new(0.26, 0.26));
     let zoom_button_mesh = meshes.add(Annulus::new(0.073, 0.088));
     let zoom_icon_mesh = meshes.add(Rectangle::new(0.102, 0.102));
+    let zoom_hitbox_mesh = meshes.add(Rectangle::new(0.26, 0.26));
+    let hitbox_material = materials.add(StandardMaterial {
+        base_color: Color::srgba(1.0, 1.0, 1.0, 0.0),
+        unlit: true,
+        alpha_mode: AlphaMode::Blend,
+        cull_mode: None,
+        ..default()
+    });
 
     let reset_icon: Handle<Image> =
         asset_server.load("embedded://elodin_editor/assets/icons/viewport.png");
@@ -498,6 +544,7 @@ fn spawn_viewport_action_buttons(
         Mesh3d(reset_button_mesh),
         MeshMaterial3d(reset_material),
         Transform::from_translation(Vec3::new(-0.40, -0.39, depth)),
+        Pickable::IGNORE,
         ViewportActionButton::Reset,
         Name::new("viewport_action_button_Reset"),
     ));
@@ -505,6 +552,17 @@ fn spawn_viewport_action_buttons(
         reset_cmd.insert(layers);
     }
     reset_cmd.insert(ChildOf(camera_entity));
+    let reset_button = reset_cmd.id();
+    let mut reset_hitbox_cmd = commands.spawn((
+        Mesh3d(reset_hitbox_mesh),
+        MeshMaterial3d(hitbox_material.clone()),
+        Transform::from_translation(Vec3::ZERO),
+        ChildOf(reset_button),
+        Name::new("viewport_action_button_Reset_hitbox"),
+    ));
+    if let Some(layers) = render_layers.clone() {
+        reset_hitbox_cmd.insert(layers);
+    }
 
     // Circular zoom-out button for clearer visual hierarchy.
     let zoom_material = materials.add(StandardMaterial {
@@ -519,6 +577,7 @@ fn spawn_viewport_action_buttons(
             Mesh3d(zoom_button_mesh),
             MeshMaterial3d(zoom_material),
             Transform::from_translation(Vec3::new(0.40, -0.39, depth)),
+            Pickable::IGNORE,
             ViewportActionButton::ZoomOut,
             Name::new("viewport_action_button_ZoomOut"),
         ))
@@ -545,7 +604,18 @@ fn spawn_viewport_action_buttons(
         ChildOf(zoom_button),
         Name::new("viewport_action_button_ZoomOut_icon"),
     ));
-    if let Some(layers) = render_layers {
+    if let Some(layers) = render_layers.clone() {
         zoom_icon_cmd.insert(layers);
+    }
+
+    let mut zoom_hitbox_cmd = commands.spawn((
+        Mesh3d(zoom_hitbox_mesh),
+        MeshMaterial3d(hitbox_material),
+        Transform::from_translation(Vec3::ZERO),
+        ChildOf(zoom_button),
+        Name::new("viewport_action_button_ZoomOut_hitbox"),
+    ));
+    if let Some(layers) = render_layers.clone() {
+        zoom_hitbox_cmd.insert(layers);
     }
 }
