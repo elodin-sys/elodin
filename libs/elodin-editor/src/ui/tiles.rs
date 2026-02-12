@@ -1266,7 +1266,6 @@ impl ViewportPane {
             ChildOf(parent),
             Name::new("viewport camera3d"),
         ));
-        camera.insert((ViewCubeTargetCamera, NeedsInitialSnap));
 
         camera.insert(Bloom { ..default() });
         camera.insert(EnvironmentMapLight {
@@ -1291,6 +1290,10 @@ impl ViewportPane {
                 view_cube_layer: None,
             };
         };
+
+        commands
+            .entity(camera)
+            .insert((ViewCubeTargetCamera, NeedsInitialSnap));
 
         // Spawn ViewCube with editor mode configuration, only override the per-viewport render layer
         let mut view_cube_config = ViewCubeConfig::editor_mode();
