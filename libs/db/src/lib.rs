@@ -2086,11 +2086,15 @@ pub async fn handle_fixed_rate_msg_stream<A: AsyncWrite>(
 ) -> Result<(), Error> {
     let mut pkt = LenPacket::msg_with_timestamp(msg_id, Timestamp(0), 64).with_request_id(req_id);
     let mut last_sent_timestamp: Option<Timestamp> = None;
-    let mut current_timestamp = stream_state.current_timestamp();
+    let mut current_timestamp;
     loop {
         if !stream_state.wait_for_playing().await {
             return Ok(());
         }
+        // Refresh after waking so scrub-while-paused renders the correct tick
+        // (is_scrubbed is consumed by wait_for_playing, so we must pick up
+        // the new current_tick here before using it).
+        current_timestamp = stream_state.current_timestamp();
         let Some((msg_timestamp, msg)) = msg_log.get_nearest(current_timestamp) else {
             // Wait for data to arrive in the msg_log.
             // This yields to the runtime (preventing scheduler starvation) without
@@ -2107,7 +2111,6 @@ pub async fn handle_fixed_rate_msg_stream<A: AsyncWrite>(
                 stellarator::sleep(stream_state.sleep_time()),
             )
             .await;
-            current_timestamp = stream_state.current_timestamp();
             continue;
         }
 
@@ -2127,7 +2130,6 @@ pub async fn handle_fixed_rate_msg_stream<A: AsyncWrite>(
             stellarator::sleep(stream_state.sleep_time()),
         )
         .await;
-        current_timestamp = stream_state.current_timestamp();
     }
 }
 
@@ -2573,7 +2575,7 @@ async fn handle_fixed_stream<A: AsyncWrite>(
     let mut current_gen = u64::MAX;
     let mut table = LenPacket::table([0; 2], 2048 - 16);
     let mut components = db.with_state(|state| state.components.clone());
-    let mut current_timestamp = state.current_timestamp();
+    let mut current_timestamp;
 
     // Lightweight profiling: accumulate timings and log every LOG_INTERVAL frames.
     // Captures both the work time (populate + lock + send) and the wall-clock
@@ -2591,6 +2593,12 @@ async fn handle_fixed_stream<A: AsyncWrite>(
         if !state.wait_for_playing().await {
             return Ok(());
         }
+        // Refresh the timestamp immediately after waking.  When we wake
+        // because of a scrub (is_scrubbed consumed above), current_tick
+        // already holds the scrubbed-to position and we must use it for
+        // the render that follows -- otherwise we'd display a stale frame
+        // and then block again without ever rendering the correct one.
+        current_timestamp = state.current_timestamp();
         let frame_start = Instant::now();
         let wall_since_last = last_frame_wall.elapsed();
         last_frame_wall = frame_start;
@@ -2675,7 +2683,6 @@ async fn handle_fixed_stream<A: AsyncWrite>(
             stellarator::sleep(state.sleep_time()),
         )
         .await;
-        current_timestamp = state.current_timestamp();
     }
 }
 
