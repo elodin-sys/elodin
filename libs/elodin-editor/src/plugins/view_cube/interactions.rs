@@ -1249,6 +1249,44 @@ pub fn on_arrow_hover_end(
     }
 }
 
+pub fn on_action_button_hover_start(
+    trigger: On<Pointer<Over>>,
+    action_buttons: Query<&ViewportActionButton>,
+    materials_query: Query<&MeshMaterial3d<StandardMaterial>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    let entity = trigger.entity;
+    if action_buttons.get(entity).is_err() {
+        return;
+    }
+
+    let colors = ViewCubeColors::default();
+    if let Ok(mat_handle) = materials_query.get(entity)
+        && let Some(mat) = materials.get_mut(&mat_handle.0)
+    {
+        mat.base_color = colors.arrow_hover;
+    }
+}
+
+pub fn on_action_button_hover_end(
+    trigger: On<Pointer<Out>>,
+    action_buttons: Query<&ViewportActionButton>,
+    materials_query: Query<&MeshMaterial3d<StandardMaterial>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    let entity = trigger.entity;
+    if action_buttons.get(entity).is_err() {
+        return;
+    }
+
+    let colors = ViewCubeColors::default();
+    if let Ok(mat_handle) = materials_query.get(entity)
+        && let Some(mat) = materials.get_mut(&mat_handle.0)
+    {
+        mat.base_color = colors.arrow_normal;
+    }
+}
+
 pub fn on_arrow_pressed(
     trigger: On<Pointer<Press>>,
     arrows: Query<&RotationArrow>,
@@ -1283,6 +1321,35 @@ pub fn on_arrow_pressed(
         arrow: *arrow,
         source,
         timer: Timer::from_seconds(ARROW_HOLD_REPEAT_INTERVAL_SECS, TimerMode::Repeating),
+    });
+}
+
+pub fn on_action_button_click(
+    trigger: On<Pointer<Click>>,
+    action_buttons: Query<&ViewportActionButton>,
+    parents_query: Query<&ChildOf>,
+    camera_link_query: Query<&ViewCubeLink, With<ViewCubeCamera>>,
+    root_query: Query<(Entity, &ViewCubeLink), With<ViewCubeRoot>>,
+    mut events: MessageWriter<ViewCubeEvent>,
+) {
+    if trigger.event().button != PointerButton::Primary {
+        return;
+    }
+
+    let entity = trigger.entity;
+    let Ok(action) = action_buttons.get(entity) else {
+        return;
+    };
+
+    let Some(source) =
+        find_root_for_camera_child(entity, &parents_query, &camera_link_query, &root_query)
+    else {
+        return;
+    };
+
+    events.write(ViewCubeEvent::ViewportActionClicked {
+        action: *action,
+        source,
     });
 }
 
