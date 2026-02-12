@@ -15,7 +15,7 @@ use std::collections::HashMap;
 
 use super::components::{
     AxisLabelBillboard, RotationArrow, ViewCubeCamera, ViewCubeLink, ViewCubeRenderLayer,
-    ViewCubeRoot,
+    ViewCubeRoot, ViewportActionButton,
 };
 use super::config::ViewCubeConfig;
 use super::events::ViewCubeEvent;
@@ -25,6 +25,8 @@ use crate::object_3d::ComponentArrayExt;
 const FACE_IN_SCREEN_PLANE_DOT_THRESHOLD: f32 = 0.999;
 const CORNER_IN_SCREEN_AXIS_DOT_THRESHOLD: f32 = 0.998;
 const ARROW_CACHE_MAX_DRIFT_RADIANS: f32 = 6.0_f32.to_radians();
+const VIEWPORT_RESET_ANCHOR_DEPTH: f64 = -2.0;
+const VIEWPORT_ZOOM_OUT_MULTIPLIER: f32 = 2.2;
 
 #[derive(Component)]
 pub struct ViewCubeTargetCamera;
@@ -118,7 +120,8 @@ fn event_source(event: &ViewCubeEvent) -> Entity {
         ViewCubeEvent::FaceClicked { source, .. }
         | ViewCubeEvent::EdgeClicked { source, .. }
         | ViewCubeEvent::CornerClicked { source, .. }
-        | ViewCubeEvent::ArrowClicked { source, .. } => *source,
+        | ViewCubeEvent::ArrowClicked { source, .. }
+        | ViewCubeEvent::ViewportActionClicked { source, .. } => *source,
     }
 }
 
@@ -243,7 +246,7 @@ pub fn handle_view_cube_editor(
     view_cube_query: Query<&ViewCubeLink, With<ViewCubeRoot>>,
     cube_root_query: Query<&GlobalTransform, With<ViewCubeRoot>>,
     mut camera_query: Query<
-        (Entity, &Transform, &GlobalTransform, &mut EditorCam),
+        (Entity, &mut Transform, &GlobalTransform, &mut EditorCam),
         With<ViewCubeTargetCamera>,
     >,
     mut lookup: ViewCubeEditorLookup,
@@ -257,7 +260,8 @@ pub fn handle_view_cube_editor(
         let Some(cam) = main_camera_for_event(event, &view_cube_query) else {
             continue;
         };
-        let Ok((entity, transform, global_transform, mut editor_cam)) = camera_query.get_mut(cam)
+        let Ok((entity, mut transform, global_transform, mut editor_cam)) =
+            camera_query.get_mut(cam)
         else {
             continue;
         };
@@ -265,7 +269,7 @@ pub fn handle_view_cube_editor(
         if !matches!(event, ViewCubeEvent::ArrowClicked { .. }) {
             update_anchor_depth_for_view_cube(
                 entity,
-                transform,
+                transform.as_ref(),
                 global_transform,
                 &mut editor_cam,
                 &lookup.viewports,
@@ -305,9 +309,9 @@ pub fn handle_view_cube_editor(
 
             if let Ok(facing_local) = Dir3::new(facing_local_vec) {
                 let chosen_up = choose_face_upright_up(*direction, parent_rotation, facing_local)
-                    .or_else(|| choose_continuous_up(transform, facing_local))
+                    .or_else(|| choose_continuous_up(transform.as_ref(), facing_local))
                     .unwrap_or_else(|| {
-                        choose_min_rotation_up(transform, parent_rotation, facing_local).0
+                        choose_min_rotation_up(transform.as_ref(), parent_rotation, facing_local).0
                     });
                 let trigger = LookToTrigger {
                     target_facing_direction: facing_local,
@@ -353,7 +357,7 @@ pub fn handle_view_cube_editor(
 
             if let Ok(facing_local) = Dir3::new(facing_local_vec) {
                 let (chosen_up, _, _, _, _, _) =
-                    choose_min_rotation_up(transform, parent_rotation, facing_local);
+                    choose_min_rotation_up(transform.as_ref(), parent_rotation, facing_local);
                 let trigger = LookToTrigger {
                     target_facing_direction: facing_local,
                     target_up_direction: chosen_up,
@@ -391,9 +395,9 @@ pub fn handle_view_cube_editor(
 
             if let Ok(facing_local) = Dir3::new(facing_local_vec) {
                 let chosen_up = choose_face_upright_up(*target_face, parent_rotation, facing_local)
-                    .or_else(|| choose_continuous_up(transform, facing_local))
+                    .or_else(|| choose_continuous_up(transform.as_ref(), facing_local))
                     .unwrap_or_else(|| {
-                        choose_min_rotation_up(transform, parent_rotation, facing_local).0
+                        choose_min_rotation_up(transform.as_ref(), parent_rotation, facing_local).0
                     });
                 let trigger = LookToTrigger {
                     target_facing_direction: facing_local,
@@ -546,6 +550,18 @@ pub fn handle_view_cube_editor(
                 );
             }
         }
+
+        if let ViewCubeEvent::ViewportActionClicked { action, .. } = event {
+            match action {
+                ViewportActionButton::Reset => {
+                    apply_viewport_reset(transform.as_mut(), &mut editor_cam);
+                }
+                ViewportActionButton::ZoomOut => {
+                    apply_viewport_zoom_out(transform.as_mut(), &mut editor_cam);
+                }
+            }
+            lookup.arrow_cache.clear(entity);
+        }
     }
 }
 
@@ -556,6 +572,26 @@ fn trigger_rotation(trigger: &LookToTrigger) -> Quat {
             *trigger.target_up_direction,
         )
         .rotation
+}
+
+fn apply_viewport_reset(transform: &mut Transform, editor_cam: &mut EditorCam) {
+    *transform = Transform::IDENTITY;
+    editor_cam.current_motion = CurrentMotion::Stationary;
+    editor_cam.last_anchor_depth = VIEWPORT_RESET_ANCHOR_DEPTH;
+}
+
+fn apply_viewport_zoom_out(transform: &mut Transform, editor_cam: &mut EditorCam) {
+    let current_depth = (editor_cam.last_anchor_depth.abs() as f32).max(0.25);
+    let target_depth = (current_depth * VIEWPORT_ZOOM_OUT_MULTIPLIER).max(0.5);
+    let depth_delta = target_depth - current_depth;
+    if depth_delta <= 1.0e-6 {
+        return;
+    }
+
+    // Move camera backwards in its local view direction to increase orbit distance.
+    transform.translation += (transform.rotation * Vec3::Z) * depth_delta;
+    editor_cam.last_anchor_depth = -(target_depth as f64);
+    editor_cam.current_motion = CurrentMotion::Stationary;
 }
 
 fn face_target_camera_dir_world(
@@ -1055,5 +1091,45 @@ mod tests {
         let world = corner_target_camera_dir_world(corner, &config);
         let expected = Vec3::new(-1.0, 1.0, -1.0).normalize();
         assert!((world - expected).length() < 1.0e-5);
+    }
+
+    #[test]
+    fn viewport_reset_restores_identity_transform_and_default_depth() {
+        let mut transform = Transform::from_translation(Vec3::new(1.0, -2.0, 3.0))
+            .with_rotation(Quat::from_rotation_y(0.4));
+        let mut editor_cam = EditorCam::default();
+        editor_cam.last_anchor_depth = -9.0;
+
+        apply_viewport_reset(&mut transform, &mut editor_cam);
+
+        assert_eq!(transform, Transform::IDENTITY);
+        assert_eq!(editor_cam.last_anchor_depth, VIEWPORT_RESET_ANCHOR_DEPTH);
+        assert!(matches!(
+            editor_cam.current_motion,
+            CurrentMotion::Stationary
+        ));
+    }
+
+    #[test]
+    fn viewport_zoom_out_moves_back_along_view_and_updates_depth() {
+        let mut transform = Transform::from_translation(Vec3::new(0.5, 1.0, -0.25))
+            .with_rotation(Quat::from_rotation_y(0.3));
+        let mut editor_cam = EditorCam::default();
+        editor_cam.last_anchor_depth = -2.0;
+
+        let initial_translation = transform.translation;
+        let expected_target_depth = 2.0 * VIEWPORT_ZOOM_OUT_MULTIPLIER;
+        let expected_delta = expected_target_depth - 2.0;
+        let expected_translation =
+            initial_translation + (transform.rotation * Vec3::Z) * expected_delta;
+
+        apply_viewport_zoom_out(&mut transform, &mut editor_cam);
+
+        assert!((transform.translation - expected_translation).length() < 1.0e-5);
+        assert!((editor_cam.last_anchor_depth + expected_target_depth as f64).abs() < 1.0e-8);
+        assert!(matches!(
+            editor_cam.current_motion,
+            CurrentMotion::Stationary
+        ));
     }
 }

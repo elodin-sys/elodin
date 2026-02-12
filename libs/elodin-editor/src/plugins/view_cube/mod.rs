@@ -61,7 +61,10 @@ impl Plugin for ViewCubePlugin {
             .add_observer(interactions::on_arrow_hover_start)
             .add_observer(interactions::on_arrow_hover_end)
             .add_observer(interactions::on_arrow_pressed)
-            .add_observer(interactions::on_arrow_released);
+            .add_observer(interactions::on_arrow_released)
+            .add_observer(interactions::on_action_button_hover_start)
+            .add_observer(interactions::on_action_button_hover_end)
+            .add_observer(interactions::on_action_button_click);
 
         app.init_resource::<camera::ViewCubeArrowTargetCache>()
             .add_systems(Update, camera::handle_view_cube_editor)
@@ -84,6 +87,7 @@ impl Plugin for ViewCubePlugin {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn update_theme_on_mode_change(
     mut current_mode: ResMut<CurrentColorMode>,
     cube_elements: Query<(Entity, &CubeElement), With<ViewCubeSetup>>,
@@ -92,6 +96,7 @@ fn update_theme_on_mode_change(
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut original_materials: ResMut<OriginalMaterials>,
     arrows: Query<(Entity, &RotationArrow)>,
+    action_buttons: Query<(Entity, &ViewportActionButton)>,
 ) {
     let new_mode = crate::ui::colors::current_selection().mode;
     if new_mode == current_mode.mode {
@@ -124,6 +129,14 @@ fn update_theme_on_mode_change(
     }
 
     for (entity, _) in arrows.iter() {
+        if let Ok(mat_handle) = material_query.get(entity)
+            && let Some(mat) = materials.get_mut(&mat_handle.0)
+        {
+            mat.base_color = colors.arrow_normal;
+        }
+    }
+
+    for (entity, _) in action_buttons.iter() {
         if let Ok(mat_handle) = material_query.get(entity)
             && let Some(mat) = materials.get_mut(&mat_handle.0)
         {

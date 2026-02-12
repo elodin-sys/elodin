@@ -170,6 +170,13 @@ pub enum RotationArrow {
     RollRight,
 }
 
+/// Action buttons rendered in the ViewCube overlay.
+#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ViewportActionButton {
+    Reset,
+    ZoomOut,
+}
+
 /// Axis label rendered as a billboard, with metadata for screen-space spacing from the axis.
 #[derive(Component, Clone, Copy)]
 pub struct AxisLabelBillboard {
