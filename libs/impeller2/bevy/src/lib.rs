@@ -725,7 +725,7 @@ pub fn new_connection_packets(stream_id: StreamId) -> impl Iterator<Item = LenPa
         }
         .into_len_packet(),
         Stream {
-            behavior: StreamBehavior::RealTime,
+            behavior: StreamBehavior::RealTimeBatched,
             id: fastrand::u64(..),
         }
         .into_len_packet(),

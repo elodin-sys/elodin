@@ -2330,6 +2330,15 @@ fn handle_stream<A: AsyncWrite + 'static>(
                 }
             })
         }
+        StreamBehavior::RealTimeBatched => stellarator::spawn(async move {
+            match handle_real_time_stream_batched(tx, req_id, db).await {
+                Ok(_) => {}
+                Err(err) if err.is_stream_closed() => {}
+                Err(err) => {
+                    warn!(?err, "error streaming data");
+                }
+            }
+        }),
     }
 }
 
@@ -2452,6 +2461,109 @@ async fn handle_real_time_component<A: AsyncWrite>(
     }
 }
 
+/// Batched real-time stream handler.
+///
+/// Unlike `handle_real_time_stream` which spawns one task per component (N
+/// tasks, N wake-ups per sim tick), this handler uses a **single task** that
+/// wakes once per `db.last_updated` notification and sends all components'
+/// latest data in one table packet.
+///
+/// Component discovery (metadata + schema) works identically to the original
+/// `handle_real_time_stream`.
+async fn handle_real_time_stream_batched<A: AsyncWrite + 'static>(
+    sink: Arc<Mutex<PacketSink<A>>>,
+    req_id: RequestId,
+    db: Arc<DB>,
+) -> Result<(), Error> {
+    let mut current_gen = u64::MAX;
+    let mut table = LenPacket::table([0; 2], 2048 - 16);
+    let mut components = HashMap::new();
+
+    loop {
+        // Re-check for new components when vtable_gen changes.
+        let vtable_gen = db.vtable_gen.latest();
+        if vtable_gen != current_gen {
+            let new_components: Vec<(Component, Option<ComponentMetadata>, Schema<Vec<u64>>)> = db
+                .with_state(|state| {
+                    let mut new_comps = Vec::new();
+                    for component in state.components.values() {
+                        if components.contains_key(&component.component_id) {
+                            continue;
+                        }
+                        let metadata = state
+                            .get_component_metadata(component.component_id)
+                            .cloned();
+                        let schema = component.schema.to_schema();
+                        new_comps.push((component.clone(), metadata, schema));
+                    }
+                    new_comps
+                });
+
+            // Send metadata and schema for each new component.
+            for (component, metadata, schema) in new_components {
+                if let Some(metadata) = metadata {
+                    let stream = sink.lock().await;
+                    if let Err(err) = stream
+                        .send(metadata.into_len_packet().with_request_id(req_id))
+                        .await
+                        .0
+                    {
+                        debug!(%err, "error sending component metadata");
+                    }
+                }
+
+                let schema_msg = DumpSchemaResp {
+                    schemas: [(component.component_id, schema)].into_iter().collect(),
+                };
+                {
+                    let stream = sink.lock().await;
+                    if let Err(err) = stream
+                        .send(schema_msg.into_len_packet().with_request_id(req_id))
+                        .await
+                        .0
+                    {
+                        debug!(%err, "error sending component schema");
+                    }
+                }
+
+                components.insert(component.component_id, component);
+            }
+
+            // Rebuild the VTable with the full component set.
+            let vtable_msg = DBVisitor.vtable(&components)?;
+            let id: PacketId = fastrand::u16(..).to_le_bytes();
+            table = LenPacket::table(id, 2048 - 16);
+            {
+                let stream = sink.lock().await;
+                stream
+                    .send(
+                        VTableMsg {
+                            id,
+                            vtable: vtable_msg,
+                        }
+                        .with_request_id(req_id),
+                    )
+                    .await
+                    .0?;
+            }
+            current_gen = vtable_gen;
+        }
+
+        // Populate the table with every component's latest data point.
+        table.clear();
+        DBVisitor.populate_table_latest(&components, &mut table);
+
+        // Single lock + send for all components.
+        {
+            let stream = sink.lock().await;
+            rent!(stream.send(table.with_request_id(req_id)).await, table)?;
+        }
+
+        // Wait for the simulation to write new data (1 wake per sim tick).
+        db.last_updated.wait().await;
+    }
+}
+
 async fn handle_fixed_stream<A: AsyncWrite>(
     stream: Arc<Mutex<PacketSink<A>>>,
     req_id: RequestId,
@@ -2462,10 +2574,27 @@ async fn handle_fixed_stream<A: AsyncWrite>(
     let mut table = LenPacket::table([0; 2], 2048 - 16);
     let mut components = db.with_state(|state| state.components.clone());
     let mut current_timestamp = state.current_timestamp();
+
+    // Lightweight profiling: accumulate timings and log every LOG_INTERVAL frames.
+    // Captures both the work time (populate + lock + send) and the wall-clock
+    // frame-to-frame time (work + wait) so we can see scheduling overhead.
+    const LOG_INTERVAL: u64 = 120;
+    let mut frame_count: u64 = 0;
+    let mut accum_populate_us: u64 = 0;
+    let mut accum_lock_us: u64 = 0;
+    let mut accum_send_us: u64 = 0;
+    let mut accum_work_us: u64 = 0;
+    let mut accum_wall_us: u64 = 0;
+    let mut last_frame_wall = Instant::now();
+
     loop {
         if !state.wait_for_playing().await {
             return Ok(());
         }
+        let frame_start = Instant::now();
+        let wall_since_last = last_frame_wall.elapsed();
+        last_frame_wall = frame_start;
+
         let vtable_gen = db.vtable_gen.latest();
         if vtable_gen != current_gen {
             components = db.with_state(|state| state.components.clone());
@@ -2478,23 +2607,62 @@ async fn handle_fixed_stream<A: AsyncWrite>(
             current_gen = vtable_gen;
         }
         table.clear();
-        if let Err(err) = DBVisitor.populate_table(&components, &mut table, current_timestamp) {
+        let t0 = Instant::now();
+        if let Err(err) = DBVisitor
+            .populate_table(&components, &mut table, current_timestamp)
+            .await
+        {
             warn!(?err, "failed to populate table");
         }
+        let populate_elapsed = t0.elapsed();
+        // Yield once more after populating to give the tick driver a chance
+        // to run before we acquire the stream lock.
+        stellarator::yield_now().await;
+        // Pre-serialize the timestamp message before acquiring the lock so the
+        // critical section is limited to the two TCP writes.
+        let ts_pkt = StreamTimestamp {
+            timestamp: current_timestamp,
+            stream_id: state.stream_id,
+        }
+        .with_request_id(req_id);
+        let t1 = Instant::now();
         {
             let stream = stream.lock().await;
-            stream
-                .send(
-                    StreamTimestamp {
-                        timestamp: current_timestamp,
-                        stream_id: state.stream_id,
-                    }
-                    .with_request_id(req_id),
-                )
-                .await
-                .0?;
+            let lock_elapsed = t1.elapsed();
+            let t2 = Instant::now();
+            stream.send(ts_pkt).await.0?;
             rent!(stream.send(table.with_request_id(req_id)).await, table)?;
+            let send_elapsed = t2.elapsed();
+
+            accum_populate_us += populate_elapsed.as_micros() as u64;
+            accum_lock_us += lock_elapsed.as_micros() as u64;
+            accum_send_us += send_elapsed.as_micros() as u64;
         }
+        let work_elapsed = frame_start.elapsed();
+        accum_work_us += work_elapsed.as_micros() as u64;
+        accum_wall_us += wall_since_last.as_micros() as u64;
+        frame_count += 1;
+
+        if frame_count.is_multiple_of(LOG_INTERVAL) {
+            let n = LOG_INTERVAL as f64;
+            let wall_fps = n / (accum_wall_us as f64 / 1_000_000.0);
+            debug!(
+                populate_avg_ms = accum_populate_us as f64 / n / 1000.0,
+                lock_avg_ms = accum_lock_us as f64 / n / 1000.0,
+                send_avg_ms = accum_send_us as f64 / n / 1000.0,
+                work_avg_ms = accum_work_us as f64 / n / 1000.0,
+                wall_avg_ms = accum_wall_us as f64 / n / 1000.0,
+                wall_fps,
+                components = components.len(),
+                "fixed_stream consumer stats"
+            );
+            accum_populate_us = 0;
+            accum_lock_us = 0;
+            accum_send_us = 0;
+            accum_work_us = 0;
+            accum_wall_us = 0;
+        }
+
         // Race between the tick notification and a timer so the consumer
         // updates at least once per sleep_time (~16 ms at 60 Hz).  Under heavy
         // cooperative-scheduling load the tick driver may run infrequently; this
@@ -2533,22 +2701,52 @@ impl DBVisitor {
         Ok(vtable(fields))
     }
 
-    fn populate_table(
+    /// Populate the table with data for all components at the given timestamp.
+    ///
+    /// Cooperatively yields every `YIELD_EVERY` components so that the tick
+    /// driver and other tasks on the single-threaded stellarator runtime get
+    /// CPU time.  Without these yields, heavy simulations (many components)
+    /// starve the tick driver and produce choppy visual updates at ~6-10 FPS.
+    async fn populate_table(
         &self,
         components: &HashMap<ComponentId, Component>,
         table: &mut LenPacket,
         timestamp: Timestamp,
     ) -> Result<(), Error> {
-        self.visit(components, |entity| {
-            let tick = entity.time_series.start_timestamp().max(timestamp);
-            let Some((timestamp, buf)) = entity.get_nearest(tick) else {
-                return Ok(());
+        const YIELD_EVERY: usize = 8;
+        for (i, (_, component)) in components.iter().enumerate() {
+            let tick = component.time_series.start_timestamp().max(timestamp);
+            let Some((ts, buf)) = component.get_nearest(tick) else {
+                continue;
             };
-            table.push_aligned(timestamp);
-            table.pad_for_type(entity.schema.prim_type);
+            table.push_aligned(ts);
+            table.pad_for_type(component.schema.prim_type);
             table.extend_from_slice(buf);
-            Ok(())
-        })
+            if (i + 1) % YIELD_EVERY == 0 {
+                stellarator::yield_now().await;
+            }
+        }
+        Ok(())
+    }
+
+    /// Populate the table with every component's most recent data point.
+    ///
+    /// Used by the `RealTimeBatched` stream handler which always wants the
+    /// freshest value, unlike `populate_table` which looks up data at a
+    /// specific playback timestamp.
+    fn populate_table_latest(
+        &self,
+        components: &HashMap<ComponentId, Component>,
+        table: &mut LenPacket,
+    ) {
+        for (_, component) in components.iter() {
+            let Some((&ts, buf)) = component.time_series.latest() else {
+                continue;
+            };
+            table.push_aligned(ts);
+            table.pad_for_type(component.schema.prim_type);
+            table.extend_from_slice(buf);
+        }
     }
 
     fn visit(

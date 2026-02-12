@@ -116,6 +116,15 @@ pub enum StreamBehavior {
     #[default]
     RealTime,
     FixedRate(FixedRateBehavior),
+    /// Like `RealTime`, but batches all components into a single handler that
+    /// wakes once per `db.last_updated` notification instead of spawning a
+    /// separate task per component.  This dramatically reduces scheduler
+    /// pressure in simulations with many components (e.g. 37 components at
+    /// 300 Hz drops from 11 100 wake-ups/sec to 300).
+    ///
+    /// Use `RealTime` for latency-sensitive real-world telemetry where each
+    /// component must be sent as soon as it arrives.
+    RealTimeBatched,
 }
 
 pub type StreamId = u64;

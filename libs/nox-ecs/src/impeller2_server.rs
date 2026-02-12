@@ -156,9 +156,8 @@ pub fn init_db(
     // time_step * frequency = 1 second of sim-time per second of wall-clock.
     // default_playback_speed scales this linearly (2.0 = 2x real-time, etc.).
     const PLAYBACK_FREQUENCY: f64 = 60.0;
-    let default_stream_time_step = Duration::from_secs_f64(
-        world.metadata.default_playback_speed / PLAYBACK_FREQUENCY,
-    );
+    let default_stream_time_step =
+        Duration::from_secs_f64(world.metadata.default_playback_speed / PLAYBACK_FREQUENCY);
     db.default_stream_time_step.store(
         default_stream_time_step.as_nanos() as u64,
         atomic::Ordering::SeqCst,
