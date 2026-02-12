@@ -152,5 +152,5 @@ image.features = ["png"]
 openh264 = "0.8"
 pic-scale = "0.6"
 
-[patch.crates-io]
-bevy_editor_cam = { path = "../bevy_editor_cam" }
+# [patch.crates-io]
+# bevy_editor_cam = { path = "../bevy_editor_cam" }
