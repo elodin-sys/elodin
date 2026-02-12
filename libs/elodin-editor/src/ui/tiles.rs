@@ -8,7 +8,10 @@ use bevy::{
     prelude::*,
     window::{Monitor, PrimaryWindow, Window, WindowPosition},
 };
-use bevy_editor_cam::prelude::{EditorCam, EnabledMotion, OrbitConstraint};
+use bevy_editor_cam::{
+    prelude::{EditorCam, EnabledMotion, OrbitConstraint},
+    controller::zoom::ZoomLimits,
+};
 use bevy_egui::{
     EguiContexts, EguiTextureHandle,
     egui::{self, Color32, CornerRadius, Frame, Id, RichText, Stroke, Ui, Visuals, vec2},
@@ -1253,6 +1256,12 @@ impl ViewportPane {
                 orbit_constraint: OrbitConstraint::Fixed {
                     up: Vec3::Y,
                     can_pass_tdc: false,
+                },
+                zoom_limits: ZoomLimits {
+                    min_size_per_pixel: 1e-3,
+                    // max_size_per_pixel: 1e9,
+                    max_size_per_pixel: 1e3,
+                    zoom_through_objects: false,
                 },
                 last_anchor_depth: 2.0,
                 ..Default::default()
