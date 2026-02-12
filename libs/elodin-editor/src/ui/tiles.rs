@@ -1277,6 +1277,19 @@ impl ViewportPane {
 
         let camera = camera.id();
 
+        if !viewport.show_view_cube {
+            return Self {
+                camera: Some(camera),
+                nav_gizmo: None,
+                nav_gizmo_camera: None,
+                rect: None,
+                name,
+                grid_layer,
+                viewport_layer,
+                view_cube_layer: None,
+            };
+        }
+
         // Allocate render layer for ViewCube (same approach as navigation_gizmo)
         let Some(view_cube_layer) = render_layer_alloc.alloc() else {
             return Self {

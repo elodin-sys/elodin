@@ -36,15 +36,17 @@ order = 6
 - `hsplit` / `vsplit`: children are panels. Child `share=<f32>` controls the weight within the split. `active` (bool) is parsed but not currently used. Optional `name`.
 
 ### panel content
-- `viewport`: `fov` (default 45.0), `active` (bool, default false), `show_grid` (default false), `show_arrows` (default true), `hdr` (default false), `name` (optional label), camera `pos`/`look_at` (optional EQL). Vector arrows can also be declared directly inside the viewport node; those arrows are treated as part of that viewport’s layer and respect its `show_arrows`/`show_grid` settings, allowing you to build a local triad tied to the viewport camera.
+- `viewport`: `fov` (default 45.0), `active` (bool, default false), `show_grid` (default false), `show_arrows` (default true), `show_view_cube` (default true), `hdr` (default false), `name` (optional label), camera `pos`/`look_at` (optional EQL). Vector arrows can also be declared directly inside the viewport node; those arrows are treated as part of that viewport’s layer and respect its `show_arrows`/`show_grid` settings, allowing you to build a local triad tied to the viewport camera.
 - `graph`: positional `eql` (required), `name` (optional), `type` (`line`/`point`/`bar`, default `line`), `lock` (default false), `auto_y_range` (default true), `y_min`/`y_max` (default `0.0..1.0`), child `color` nodes (optional list; otherwise palette).
 - `component_monitor`: `component_name` (required), `name` (optional).
 - `action_pane`: `name` (required pane title), `lua` script (required).
 - `query_table`: `name` (optional), positional `query` (defaults to empty), `type` (`eql` default, or `sql`).
 - `query_plot`: `name` (required pane title), `query` (required), `refresh_interval` in ms (default 1000), `auto_refresh` (default false), `color` (default white), `type` (`eql` default, or `sql`), `mode` (`timeseries` default, or `xy` for numeric X-axis labels), `x_label` (optional X-axis label for XY mode), `y_label` (optional Y-axis label).
+- `inspector` / `hierarchy`: sidebar panels with no properties.
 - `data_overview`: `name` (optional pane title).
-- `schematic_tree`: `name` (optional pane title). (Hierarchy/Inspector sidebars are implicit and not serialized.)
+- `schematic_tree`: `name` (optional pane title).
 - `dashboard`: layout node (Bevy UI style). Key properties: `name` (optional), `display` (`flex` default, or `grid`/`block`/`none`), `box_sizing` (`border-box` default or `content-box`), `position_type` (`relative` default or `absolute`), `overflow` (per-axis; defaults visible), `overflow_clip_margin` (visual_box + margin, defaults content-box / 0), sizing (`left`/`right`/`top`/`bottom`/`width`/`height`/`min_*`/`max_*` accept `auto`, `px`, `%`, `vw`, `vh`, `vmin`, `vmax`; default `auto`), `aspect_ratio` (optional f32), alignment (`align_items`/`justify_items`/`align_self`/`justify_self`/`align_content`/`justify_content`, all default to `default` variants), flex (`flex_direction`, `flex_wrap`, `flex_grow` default 0, `flex_shrink` default 1, `flex_basis` default `auto`, `row_gap`/`column_gap` default `auto`), `children` (nested dashboard nodes), colors via `bg`/`background` child (default transparent), `text` (optional), `font_size` (default 16), `text_color` child (default white), spacing via `margin`/`padding`/`border` children with `left`/`right`/`top`/`bottom`.
+- `video_stream`: positional message name (`msg_name`) plus optional `name` for display label. Supported when nested under `tabs`/splits; not currently parsed as a top-level node.
 
 ### object_3d
 - Positional `eql`: required. Evaluated to a `world_pos`-like value to place the mesh.
@@ -76,7 +78,8 @@ order = 6
 - `arrow_thickness`: numeric thickness multiplier with 3-decimal precision (default `0.1`).
 - `label_position`: proportionately 0.0–1.0 along the arrow (0=base, 1=tip) for
    label anchor, or absolutely by specifying a number in a string with an 'm'
-   suffix, .e.g., "0.3m" for 0.3 meters from origin (default "0.1m").
+   suffix (e.g., "0.3m" for 0.3 meters from origin). If omitted, runtime uses
+   the arrow tip with a small separation.
 
 ## Schema at a glance
 
@@ -109,6 +112,8 @@ panel =
   | action_pane
   | query_table
   | query_plot
+  | inspector
+  | hierarchy
   | data_overview
   | schematic_tree
   | dashboard
@@ -127,6 +132,7 @@ viewport = "viewport"
          [active=bool]
          [show_grid=bool]
          [show_arrows=bool]
+         [show_view_cube=bool]
          [hdr=bool]
          [name=string]
          [pos=eql]
@@ -200,7 +206,7 @@ vector_arrow = "vector_arrow"
              [name=string]
              [show_name=bool]
              [arrow_thickness=float]
-             [label_position=0..1]
+             [label_position=0..1|"<meters>m"]
 
 color = "color"
       ( r g b [a]
@@ -219,6 +225,7 @@ viewport name="Main"
          fov=45.0
          active=#true
          show_grid=#true
+         show_view_cube=#false
          pos="drone.world_pos"
          look_at="(0, 0, 0)"
 graph "drone.altitude"
