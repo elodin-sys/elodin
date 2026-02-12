@@ -474,47 +474,78 @@ fn spawn_viewport_action_buttons(
 ) {
     let colors = ViewCubeColors::default();
     let button_color = colors.arrow_normal;
-    let button_mesh = meshes.add(Rectangle::new(0.165, 0.165));
     let depth = -1.2;
+    let reset_button_mesh = meshes.add(Rectangle::new(0.165, 0.165));
+    let zoom_button_mesh = meshes.add(Annulus::new(0.073, 0.088));
+    let zoom_icon_mesh = meshes.add(Rectangle::new(0.102, 0.102));
 
     let reset_icon: Handle<Image> =
         asset_server.load("embedded://elodin_editor/assets/icons/viewport.png");
     let zoom_out_icon: Handle<Image> =
         asset_server.load("embedded://elodin_editor/assets/icons/subtract.png");
 
-    let buttons = [
-        (
-            ViewportActionButton::Reset,
-            reset_icon,
-            Vec3::new(-0.30, -0.63, depth),
-        ),
-        (
+    // Keep buttons inside the camera frustum (Perspective fov ~= 45deg),
+    // while still reading as bottom-left / bottom-right controls.
+    let reset_material = materials.add(StandardMaterial {
+        base_color: button_color,
+        base_color_texture: Some(reset_icon),
+        unlit: true,
+        alpha_mode: AlphaMode::Blend,
+        cull_mode: None,
+        ..default()
+    });
+    let mut reset_cmd = commands.spawn((
+        Mesh3d(reset_button_mesh),
+        MeshMaterial3d(reset_material),
+        Transform::from_translation(Vec3::new(-0.40, -0.39, depth)),
+        ViewportActionButton::Reset,
+        Name::new("viewport_action_button_Reset"),
+    ));
+    if let Some(layers) = render_layers.clone() {
+        reset_cmd.insert(layers);
+    }
+    reset_cmd.insert(ChildOf(camera_entity));
+
+    // Circular zoom-out button for clearer visual hierarchy.
+    let zoom_material = materials.add(StandardMaterial {
+        base_color: button_color,
+        unlit: true,
+        alpha_mode: AlphaMode::Blend,
+        cull_mode: None,
+        ..default()
+    });
+    let zoom_button = commands
+        .spawn((
+            Mesh3d(zoom_button_mesh),
+            MeshMaterial3d(zoom_material),
+            Transform::from_translation(Vec3::new(0.40, -0.39, depth)),
             ViewportActionButton::ZoomOut,
-            zoom_out_icon,
-            Vec3::new(0.30, -0.63, depth),
-        ),
-    ];
+            Name::new("viewport_action_button_ZoomOut"),
+        ))
+        .id();
+    let mut zoom_button_cmd = commands.entity(zoom_button);
+    if let Some(layers) = render_layers.clone() {
+        zoom_button_cmd.insert(layers.clone());
+    }
+    zoom_button_cmd.insert(ChildOf(camera_entity));
 
-    for (action, icon, position) in buttons {
-        let material = materials.add(StandardMaterial {
-            base_color: button_color,
-            base_color_texture: Some(icon),
-            unlit: true,
-            alpha_mode: AlphaMode::Blend,
-            cull_mode: None,
-            ..default()
-        });
-
-        let mut button_cmd = commands.spawn((
-            Mesh3d(button_mesh.clone()),
-            MeshMaterial3d(material),
-            Transform::from_translation(position),
-            action,
-            Name::new(format!("viewport_action_button_{:?}", action)),
-        ));
-        if let Some(layers) = render_layers.clone() {
-            button_cmd.insert(layers);
-        }
-        button_cmd.insert(ChildOf(camera_entity));
+    let zoom_icon_material = materials.add(StandardMaterial {
+        base_color: Color::WHITE,
+        base_color_texture: Some(zoom_out_icon),
+        unlit: true,
+        alpha_mode: AlphaMode::Blend,
+        cull_mode: None,
+        ..default()
+    });
+    let mut zoom_icon_cmd = commands.spawn((
+        Mesh3d(zoom_icon_mesh),
+        MeshMaterial3d(zoom_icon_material),
+        Transform::from_translation(Vec3::new(0.0, 0.0, 0.002)),
+        Pickable::IGNORE,
+        ChildOf(zoom_button),
+        Name::new("viewport_action_button_ZoomOut_icon"),
+    ));
+    if let Some(layers) = render_layers {
+        zoom_icon_cmd.insert(layers);
     }
 }
