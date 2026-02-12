@@ -289,8 +289,10 @@ impl DbConfig {
 
     /// Set the version that last opened this database
     pub fn set_version_last_opened(&mut self, version: impl Into<String>) {
-        self.metadata
-            .insert(Self::VERSION_LAST_OPENED_KEY.to_string().into(), version.into());
+        self.metadata.insert(
+            Self::VERSION_LAST_OPENED_KEY.to_string().into(),
+            version.into(),
+        );
     }
 
     /// Get the version that last opened this database

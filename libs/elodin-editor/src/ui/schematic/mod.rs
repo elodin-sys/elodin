@@ -415,14 +415,15 @@ pub struct SchematicPlugin;
 
 impl Plugin for SchematicPlugin {
     fn build(&self, app: &mut App) {
-        app
-            .add_plugins(load::plugin)
+        app.add_plugins(load::plugin)
             .insert_resource(CurrentSchematic(Default::default()))
             .insert_resource(CurrentSecondarySchematics::default())
             .add_systems(PostUpdate, tiles_to_schematic)
             .add_systems(
                 PostUpdate,
-                load::apply_initial_kdl_path.pipe(sync_schematic).before(tiles_to_schematic),
+                load::apply_initial_kdl_path
+                    .pipe(sync_schematic)
+                    .before(tiles_to_schematic),
             )
             .init_resource::<SchematicLiveReloadRx>()
             .add_systems(PreUpdate, load::schematic_live_reload);

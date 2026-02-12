@@ -274,8 +274,7 @@ impl Plugin for EditorPlugin {
 
         #[cfg(feature = "inspector")]
         {
-            app
-                .add_plugins(bevy_inspector_egui::DefaultInspectorConfigPlugin)
+            app.add_plugins(bevy_inspector_egui::DefaultInspectorConfigPlugin)
                 .add_systems(Startup, setup_egui_inspector)
                 .add_systems(Update, run_egui_inspector);
         }

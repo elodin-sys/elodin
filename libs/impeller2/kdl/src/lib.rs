@@ -59,9 +59,7 @@ pub enum KdlSchematicError {
         span: SourceSpan,
     },
     #[error("No such file '{path}'")]
-    NoSuchFile {
-        path: PathBuf,
-    }
+    NoSuchFile { path: PathBuf },
 }
 
 // TODO: Consider using the `Display` or `ToString` trait.

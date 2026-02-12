@@ -27,7 +27,7 @@ pub fn apply_initial_kdl_path(
     mut reader: MessageReader<DbMessage>,
     initial: Res<InitialKdlPath>,
 ) -> Option<PathBuf> {
-    if ! reader.read().any(|m| matches!(m, DbMessage::UpdateConfig)) {
+    if !reader.read().any(|m| matches!(m, DbMessage::UpdateConfig)) {
         None
     } else {
         initial.0.clone()
@@ -117,8 +117,7 @@ pub fn sync_schematic(
     if given_path.is_none() && !config.is_changed() {
         return;
     }
-    if let Some(path) = given_path.or(config.schematic_path()
-                                      .map(PathBuf::from)) {
+    if let Some(path) = given_path.or(config.schematic_path().map(PathBuf::from)) {
         // NOTE: This path is not resolved yet. We can't test if it exists here.
         // load_schematic_file resolves it and should do that test there.
         if let Err(e) = load_schematic_file(&path, &mut params, live_reload_rx) {

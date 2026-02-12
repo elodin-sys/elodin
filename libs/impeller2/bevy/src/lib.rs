@@ -4,7 +4,7 @@ use bevy::{
         hierarchy::ChildOf,
         system::{EntityCommands, SystemId},
     },
-    prelude::{Command, In, InRef, IntoSystem, Mut, System, Message},
+    prelude::{Command, In, InRef, IntoSystem, Message, Mut, System},
 };
 use bevy::{ecs::system::SystemParam, prelude::World};
 use bevy::{
@@ -539,8 +539,7 @@ pub struct Impeller2Plugin;
 
 impl Plugin for Impeller2Plugin {
     fn build(&self, app: &mut bevy::prelude::App) {
-        app
-            .add_message::<DbMessage>()
+        app.add_message::<DbMessage>()
             .add_plugins(DefaultAdaptersPlugin)
             .insert_resource(impeller2_wkt::SimulationTimeStep(0.001))
             .insert_resource(impeller2_wkt::CurrentTimestamp(Timestamp::EPOCH))

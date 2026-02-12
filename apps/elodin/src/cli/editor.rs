@@ -175,7 +175,9 @@ impl Cli {
         app.insert_resource(BevyCancelToken(cancel_token.clone()))
             .add_systems(Update, check_cancel_token);
         if let Some(path) = &args.kdl {
-            app.insert_resource(elodin_editor::ui::schematic::InitialKdlPath(Some(path.clone())));
+            app.insert_resource(elodin_editor::ui::schematic::InitialKdlPath(Some(
+                path.clone(),
+            )));
         }
         app.run();
         cancel_token.cancel();

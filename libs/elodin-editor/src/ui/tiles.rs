@@ -9,8 +9,8 @@ use bevy::{
     window::{Monitor, PrimaryWindow, Window, WindowPosition},
 };
 use bevy_editor_cam::{
-    prelude::{EditorCam, EnabledMotion, OrbitConstraint},
     controller::zoom::ZoomLimits,
+    prelude::{EditorCam, EnabledMotion, OrbitConstraint},
 };
 use bevy_egui::{
     EguiContexts, EguiTextureHandle,
