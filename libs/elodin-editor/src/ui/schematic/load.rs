@@ -4,12 +4,35 @@ use bevy_defer::AsyncCommandsExtension;
 use bevy_egui::egui::{Color32, Id};
 use bevy_infinite_grid::InfiniteGrid;
 use egui_tiles::{Container, Tile, TileId};
-use impeller2_bevy::{ComponentPath, ComponentSchemaRegistry};
+use impeller2_bevy::{ComponentPath, ComponentSchemaRegistry, DbMessage};
 use impeller2_kdl::FromKdl;
 use impeller2_kdl::KdlSchematicError;
 use impeller2_wkt::{
     DbConfig, Graph, Line3d, Object3D, Panel, Schematic, VectorArrow3d, Viewport, WindowSchematic,
 };
+
+/// When set (e.g. by CLI `--kdl`), the path is applied to `DbConfig` once so that the schematic
+/// is loaded after connecting to the database.
+#[derive(Resource, Default)]
+pub struct InitialKdlPath(pub Option<PathBuf>);
+
+pub(crate) fn plugin(app: &mut App) {
+    app.init_resource::<InitialKdlPath>();
+}
+
+/// Applies `InitialKdlPath` to `DbConfig` so that `sync_schematic` will load that file.
+/// Runs before `sync_schematic`. Re-applies when the path is missing or different (e.g.
+/// after the connection overwrote DbConfig with metadata) so the schematic loads.
+pub fn apply_initial_kdl_path(
+    mut reader: MessageReader<DbMessage>,
+    initial: Res<InitialKdlPath>,
+) -> Option<PathBuf> {
+    if ! reader.read().any(|m| matches!(m, DbMessage::UpdateConfig)) {
+        None
+    } else {
+        initial.0.clone()
+    }
+}
 use miette::{Diagnostic, miette};
 #[cfg(target_os = "linux")]
 use std::time::{Instant, SystemTime};
@@ -85,27 +108,28 @@ pub struct LoadSchematicParams<'w, 's> {
 }
 
 pub fn sync_schematic(
+    In(given_path): In<Option<PathBuf>>,
     config: Res<DbConfig>,
     mut params: LoadSchematicParams,
     live_reload_rx: ResMut<SchematicLiveReloadRx>,
     mut modal: ModalDialog,
 ) {
-    if !config.is_changed() {
+    if given_path.is_none() && !config.is_changed() {
         return;
     }
-    if let Some(path) = config.schematic_path() {
-        let path = Path::new(path);
-        if path.try_exists().unwrap_or(false) {
-            if let Err(e) = load_schematic_file(path, &mut params, live_reload_rx) {
-                modal.dialog_error(
-                    format!("Invalid Schematic in {:?}", path.display()),
-                    &render_diag(&e),
-                );
-                let report = miette!(e.clone());
-                bevy::log::error!(?report, "Invalid schematic for {path:?}");
-            } else {
-                return;
-            }
+    if let Some(path) = given_path.or(config.schematic_path()
+                                      .map(PathBuf::from)) {
+        // NOTE: This path is not resolved yet. We can't test if it exists here.
+        // load_schematic_file resolves it and should do that test there.
+        if let Err(e) = load_schematic_file(&path, &mut params, live_reload_rx) {
+            modal.dialog_error(
+                format!("Invalid Schematic in {:?}", path.display()),
+                &render_diag(&e),
+            );
+            let report = miette!(e.clone());
+            bevy::log::error!(?report, "Invalid schematic for {path:?}");
+        } else {
+            return;
         }
     }
     if let Some(content) = config.schematic_content() {
@@ -182,6 +206,11 @@ pub fn load_schematic_file(
     mut live_reload_rx: ResMut<SchematicLiveReloadRx>,
 ) -> Result<(), KdlSchematicError> {
     let resolved_path = impeller2_kdl::env::schematic_file(path);
+    if !resolved_path.try_exists().unwrap_or(false) {
+        return Err(KdlSchematicError::NoSuchFile {
+            path: resolved_path,
+        });
+    }
     let watch_path = resolved_path.clone();
     let (tx, rx) = flume::bounded(1);
     live_reload_rx.set_receiver(rx);

@@ -266,7 +266,7 @@ impl Msg for SetDbConfig {
 pub struct DbConfig {
     pub recording: bool,
     pub default_stream_time_step: Duration,
-    pub metadata: HashMap<String, String>,
+    pub metadata: HashMap<Cow<'static, str>, String>,
 }
 
 impl DbConfig {
@@ -277,7 +277,7 @@ impl DbConfig {
     /// Set the version that created this database
     pub fn set_version_created(&mut self, version: impl Into<String>) {
         self.metadata
-            .insert(Self::VERSION_CREATED_KEY.to_string(), version.into());
+            .insert(Self::VERSION_CREATED_KEY.to_string().into(), version.into());
     }
 
     /// Get the version that created this database
@@ -290,7 +290,7 @@ impl DbConfig {
     /// Set the version that last opened this database
     pub fn set_version_last_opened(&mut self, version: impl Into<String>) {
         self.metadata
-            .insert(Self::VERSION_LAST_OPENED_KEY.to_string(), version.into());
+            .insert(Self::VERSION_LAST_OPENED_KEY.to_string().into(), version.into());
     }
 
     /// Get the version that last opened this database
@@ -301,7 +301,7 @@ impl DbConfig {
     }
 
     pub fn set_schematic_path(&mut self, path: String) {
-        self.metadata.insert("schematic.path".to_string(), path);
+        self.metadata.insert(Cow::from("schematic.path"), path);
     }
 
     pub fn schematic_path(&self) -> Option<&str> {
@@ -309,7 +309,7 @@ impl DbConfig {
     }
 
     pub fn set_schematic_content(&mut self, path: String) {
-        self.metadata.insert("schematic.content".to_string(), path);
+        self.metadata.insert(Cow::from("schematic.content"), path);
     }
 
     pub fn schematic_content(&self) -> Option<&str> {
@@ -318,7 +318,7 @@ impl DbConfig {
 
     pub fn set_time_start_timestamp_micros(&mut self, timestamp: i64) {
         self.metadata.insert(
-            Self::TIME_START_TIMESTAMP_KEY.to_string(),
+            Self::TIME_START_TIMESTAMP_KEY.to_string().into(),
             timestamp.to_string(),
         );
     }
