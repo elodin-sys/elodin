@@ -87,6 +87,14 @@ pub fn spawn_view_cube(
         meshes,
         materials,
         gizmo_camera,
+        render_layers.clone(),
+    );
+    spawn_viewport_action_buttons(
+        commands,
+        asset_server,
+        meshes,
+        materials,
+        gizmo_camera,
         render_layers,
     );
 
@@ -452,5 +460,61 @@ fn spawn_rotation_arrows(
             arrow_cmd.insert(layers);
         }
         arrow_cmd.insert(ChildOf(camera_entity));
+    }
+}
+
+/// Spawn viewport action buttons as icon quads (fixed on screen).
+fn spawn_viewport_action_buttons(
+    commands: &mut Commands,
+    asset_server: &Res<AssetServer>,
+    meshes: &mut ResMut<Assets<Mesh>>,
+    materials: &mut ResMut<Assets<StandardMaterial>>,
+    camera_entity: Entity,
+    render_layers: Option<RenderLayers>,
+) {
+    let colors = ViewCubeColors::default();
+    let button_color = colors.arrow_normal;
+    let button_mesh = meshes.add(Rectangle::new(0.165, 0.165));
+    let depth = -1.2;
+
+    let reset_icon: Handle<Image> =
+        asset_server.load("embedded://elodin_editor/assets/icons/viewport.png");
+    let zoom_out_icon: Handle<Image> =
+        asset_server.load("embedded://elodin_editor/assets/icons/subtract.png");
+
+    let buttons = [
+        (
+            ViewportActionButton::Reset,
+            reset_icon,
+            Vec3::new(-0.30, -0.63, depth),
+        ),
+        (
+            ViewportActionButton::ZoomOut,
+            zoom_out_icon,
+            Vec3::new(0.30, -0.63, depth),
+        ),
+    ];
+
+    for (action, icon, position) in buttons {
+        let material = materials.add(StandardMaterial {
+            base_color: button_color,
+            base_color_texture: Some(icon),
+            unlit: true,
+            alpha_mode: AlphaMode::Blend,
+            cull_mode: None,
+            ..default()
+        });
+
+        let mut button_cmd = commands.spawn((
+            Mesh3d(button_mesh.clone()),
+            MeshMaterial3d(material),
+            Transform::from_translation(position),
+            action,
+            Name::new(format!("viewport_action_button_{:?}", action)),
+        ));
+        if let Some(layers) = render_layers.clone() {
+            button_cmd.insert(layers);
+        }
+        button_cmd.insert(ChildOf(camera_entity));
     }
 }

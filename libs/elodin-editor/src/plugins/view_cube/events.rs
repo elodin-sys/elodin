@@ -2,7 +2,9 @@
 
 use bevy::prelude::*;
 
-use super::components::{CornerPosition, EdgeDirection, FaceDirection, RotationArrow};
+use super::components::{
+    CornerPosition, EdgeDirection, FaceDirection, RotationArrow, ViewportActionButton,
+};
 
 #[derive(Message, Clone, Debug)]
 pub enum ViewCubeEvent {
@@ -22,6 +24,10 @@ pub enum ViewCubeEvent {
     },
     ArrowClicked {
         arrow: RotationArrow,
+        source: Entity,
+    },
+    ViewportActionClicked {
+        action: ViewportActionButton,
         source: Entity,
     },
 }
