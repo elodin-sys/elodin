@@ -283,6 +283,11 @@ fn parse_viewport(node: &KdlNode, kdl_src: &str) -> Result<Panel, KdlSchematicEr
         .and_then(|v| v.as_bool())
         .unwrap_or(true);
 
+    let show_view_cube = node
+        .get("show_view_cube")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true);
+
     let hdr = node.get("hdr").and_then(|v| v.as_bool()).unwrap_or(false);
 
     let pos = node
@@ -325,6 +330,7 @@ fn parse_viewport(node: &KdlNode, kdl_src: &str) -> Result<Panel, KdlSchematicEr
         active,
         show_grid,
         show_arrows,
+        show_view_cube,
         hdr,
         name,
         pos,
@@ -1471,6 +1477,20 @@ mod tests {
             assert_eq!(viewport.fov, 60.0);
             assert!(viewport.active);
             assert!(viewport.show_grid);
+            assert!(viewport.show_view_cube);
+        } else {
+            panic!("Expected viewport panel");
+        }
+    }
+
+    #[test]
+    fn test_parse_viewport_with_view_cube_disabled() {
+        let kdl = r#"viewport show_view_cube=#false"#;
+        let schematic = parse_schematic(kdl).unwrap();
+
+        assert_eq!(schematic.elems.len(), 1);
+        if let SchematicElem::Panel(Panel::Viewport(viewport)) = &schematic.elems[0] {
+            assert!(!viewport.show_view_cube);
         } else {
             panic!("Expected viewport panel");
         }

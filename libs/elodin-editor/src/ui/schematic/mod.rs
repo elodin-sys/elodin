@@ -147,6 +147,7 @@ impl SchematicParam<'_, '_> {
                             .get(cam_entity)
                             .map(|config| config.show_arrows)
                             .unwrap_or(true);
+                        let show_view_cube = viewport.view_cube_layer.is_some();
 
                         let local_arrows: Vec<VectorArrow3d> = self
                             .vector_arrows
@@ -166,6 +167,7 @@ impl SchematicParam<'_, '_> {
                             active: false,
                             show_grid,
                             show_arrows,
+                            show_view_cube,
                             hdr: self.hdr_enabled.0,
                             name: pane_name,
                             pos: Some(viewport_data.pos.eql.clone()),

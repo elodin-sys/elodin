@@ -149,6 +149,11 @@ fn serialize_viewport<T>(viewport: &Viewport<T>) -> KdlNode {
             .push(KdlEntry::new_prop("show_arrows", false));
     }
 
+    if !viewport.show_view_cube {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("show_view_cube", false));
+    }
+
     if viewport.active {
         node.entries_mut().push(KdlEntry::new_prop("active", true));
     }
@@ -840,6 +845,7 @@ mod tests {
                 active: true,
                 show_grid: true,
                 show_arrows: true,
+                show_view_cube: true,
                 hdr: false,
                 pos: None,
                 look_at: None,
@@ -856,6 +862,7 @@ mod tests {
             assert_eq!(viewport.fov, 60.0);
             assert!(viewport.active);
             assert!(viewport.show_grid);
+            assert!(viewport.show_view_cube);
         } else {
             panic!("Expected viewport panel");
         }
@@ -872,6 +879,7 @@ mod tests {
                 active: true,
                 show_grid: true,
                 show_arrows: false,
+                show_view_cube: false,
                 hdr: true,
                 pos: Some("(0,0,0,0, 1,2,3)".to_string()),
                 look_at: Some("(0,0,0,0, 0,0,0)".to_string()),
@@ -893,6 +901,7 @@ mod tests {
             "hdr=",
             "show_grid=",
             "show_arrows=",
+            "show_view_cube=",
             "active=",
         ];
         let mut indices = Vec::with_capacity(properties.len());
@@ -906,7 +915,7 @@ mod tests {
         for window in indices.windows(2) {
             assert!(
                 window[0] < window[1],
-                "expected viewport properties in order name → fov → pos → look_at → hdr → show_grid → active: `{viewport_line}`"
+                "expected viewport properties in order name → fov → pos → look_at → hdr → show_grid → show_arrows → show_view_cube → active: `{viewport_line}`"
             );
         }
     }
@@ -1136,6 +1145,7 @@ graph "value" {
                 active: false,
                 show_grid: false,
                 show_arrows: true,
+                show_view_cube: true,
                 hdr: false,
                 pos: None,
                 look_at: None,
