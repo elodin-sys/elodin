@@ -36,6 +36,7 @@ use nox::Tensor;
 use object_3d::create_object_3d_entity;
 use plugins::gizmos::GizmoPlugin;
 use plugins::navigation_gizmo::{NavigationGizmoPlugin, RenderLayerAlloc};
+use plugins::view_cube::{ViewCubeConfig, ViewCubePlugin};
 use ui::{
     UI_ORDER_BASE,
     colors::{ColorExt, get_scheme},
@@ -48,7 +49,7 @@ use ui::{
 
 pub mod object_3d;
 mod offset_parse;
-mod plugins;
+pub mod plugins;
 pub mod ui;
 pub mod vector_arrow;
 
@@ -101,6 +102,8 @@ impl Plugin for EmbeddedAssetPlugin {
         embedded_asset!(app, "assets/icons/plot.png");
         embedded_asset!(app, "assets/icons/viewport.png");
         embedded_asset!(app, "assets/icons/entity.png");
+        // Font for ViewCube labels
+        embedded_asset!(app, "assets/fonts/Roboto-Bold.ttf");
     }
 }
 
@@ -182,7 +185,7 @@ impl Plugin for EditorPlugin {
                     .disable::<LogPlugin>()
                     .build(),
             )
-            // Note: we added this because bevy 0.17.3 changed it's behavior
+            // Note: we added this because bevy 0.17.3 changed its behavior
             // which broke bevy_editor_cam. See here:
             // https://github.com/aevyrie/bevy_editor_cam/issues/61
             .insert_resource(PickingSettings {
@@ -199,6 +202,9 @@ impl Plugin for EditorPlugin {
             .add_plugins(EguiPlugin::default())
             .add_plugins(bevy_infinite_grid::InfiniteGridPlugin)
             .add_plugins(NavigationGizmoPlugin)
+            .add_plugins(ViewCubePlugin {
+                config: ViewCubeConfig::editor_mode(),
+            })
             .add_plugins(impeller2_bevy::Impeller2Plugin)
             .add_plugins(GizmoPlugin)
             .add_plugins(ui::UiPlugin)

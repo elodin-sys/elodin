@@ -400,8 +400,9 @@ pub fn set_camera_viewport(
         let side_length = side_length * scale_factor;
         let viewport_pos = viewport.physical_position.as_vec2();
         let viewport_size = viewport.physical_size.as_vec2();
+        let right_offset = 20.0 * scale_factor; // Slight left offset to avoid overlap with right panel
         let nav_viewport_pos = Vec2::new(
-            (viewport_pos.x + viewport_size.x) - (side_length + margin),
+            (viewport_pos.x + viewport_size.x) - (side_length + margin + right_offset),
             viewport_pos.y,
         );
         // Clamp the gizmo viewport to the actual window surface to avoid invalid wgpu viewports
