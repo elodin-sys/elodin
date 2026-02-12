@@ -255,8 +255,19 @@ impl FixedRateStage {
         shard: &Field,
         timestamp_shard: Option<&Field>,
     ) -> Result<bool, Error> {
-        // Wait for the tick driver to advance the tick
-        self.last_seen_tick = self.state.wait_for_next_tick(self.last_seen_tick).await;
+        // Race between the tick notification and a timer so the consumer
+        // updates at least once per sleep_time (~16 ms at 60 Hz).  Under heavy
+        // cooperative-scheduling load the tick driver may run infrequently; this
+        // timer ensures we still pick up its wall-clock-proportional timestamp
+        // advances at a smooth visual rate.
+        futures_lite::future::race(
+            async {
+                let _ = self.state.wait_for_next_tick(self.last_seen_tick).await;
+            },
+            stellarator::sleep(self.state.sleep_time()),
+        )
+        .await;
+        self.last_seen_tick = self.state.current_timestamp();
         if self
             .state
             .playing_cell
