@@ -2242,7 +2242,8 @@ impl FixedRateStreamState {
 }
 
 async fn run_tick_driver(state: Arc<FixedRateStreamState>) {
-    let mut last_advance = Instant::now();
+    #[allow(unused_assignments)]
+    let mut last_advance: Option<Instant> = None;
     loop {
         // Wait for playing only (not scrubbed) -- the tick driver does not need
         // to respond to scrub events. Letting the consumer own the is_scrubbed
@@ -2250,6 +2251,12 @@ async fn run_tick_driver(state: Arc<FixedRateStreamState>) {
         if !state.playing_cell.wait().await {
             return;
         }
+        // Reset the advance anchor as soon as we (re)enter playing. If we were
+        // paused, we just woke from wait() and last_advance was from before the
+        // pause; resetting here ensures the next elapsed doesn't include the
+        // pause duration and we don't jump the playback timestamp on resume.
+        last_advance = Some(Instant::now());
+
         let sleep_time = state.sleep_time();
         // Sleep for one tick period, interruptible by play/pause changes.
         futures_lite::future::race(
@@ -2265,13 +2272,11 @@ async fn run_tick_driver(state: Arc<FixedRateStreamState>) {
         // driver runs after 16 ms or after 150 ms, the advance is always
         // proportional to real time.
         if state.is_playing() {
-            let elapsed = last_advance.elapsed();
+            let elapsed = last_advance.unwrap().elapsed();
             state.advance_tick_wall(elapsed);
-            last_advance = Instant::now();
-        } else {
-            // Paused -- reset the advance anchor so we don't burst on resume
-            last_advance = Instant::now();
         }
+        // When paused, do not reset last_advance here: the next iteration
+        // blocks on wait() until resume, and we reset above when wait() returns.
     }
 }
 
