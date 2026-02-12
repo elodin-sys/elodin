@@ -1431,7 +1431,11 @@ object_3d "rocket.world_pos" {
         let SchematicElem::Object3d(parsed_obj) = &parsed.elems[0] else {
             panic!("Expected Object3d in parsed")
         };
-        let Object3DMesh::Glb { animations: parsed_anims, .. } = &parsed_obj.mesh else {
+        let Object3DMesh::Glb {
+            animations: parsed_anims,
+            ..
+        } = &parsed_obj.mesh
+        else {
             panic!("Expected Glb mesh in parsed")
         };
         assert_eq!(parsed_anims.len(), 1);
