@@ -35,7 +35,7 @@ use std::{
         Arc, Condvar, Mutex as StdMutex, RwLock,
         atomic::{self, AtomicBool, AtomicI64, AtomicU64},
     },
-    time::Duration,
+    time::{Duration, Instant},
 };
 use stellarator::{
     buf::Slice,
@@ -2100,7 +2100,14 @@ pub async fn handle_fixed_rate_msg_stream<A: AsyncWrite>(
         };
 
         if Some(msg_timestamp) == last_sent_timestamp {
-            current_timestamp = stream_state.wait_for_next_tick(current_timestamp).await;
+            futures_lite::future::race(
+                async {
+                    let _ = stream_state.wait_for_next_tick(current_timestamp).await;
+                },
+                stellarator::sleep(stream_state.sleep_time()),
+            )
+            .await;
+            current_timestamp = stream_state.current_timestamp();
             continue;
         }
 
@@ -2113,7 +2120,14 @@ pub async fn handle_fixed_rate_msg_stream<A: AsyncWrite>(
         }
         last_sent_timestamp = Some(msg_timestamp);
 
-        current_timestamp = stream_state.wait_for_next_tick(current_timestamp).await;
+        futures_lite::future::race(
+            async {
+                let _ = stream_state.wait_for_next_tick(current_timestamp).await;
+            },
+            stellarator::sleep(stream_state.sleep_time()),
+        )
+        .await;
+        current_timestamp = stream_state.current_timestamp();
     }
 }
 
@@ -2156,7 +2170,15 @@ impl FixedRateStreamState {
         self.current_tick
             .store(timestamp.0, atomic::Ordering::SeqCst);
         self.playing_cell.wait_cell.wake_all();
-        self.tick_notify.wake_all();
+        // Only wake tick consumers when paused (scrubbing while paused).
+        // During playback, the tick driver incorporates the new position on its
+        // next advance via fetch_add on the updated current_tick. Waking
+        // tick_notify here while playing causes the consumer to spin because the
+        // editor sends set_timestamp at its frame rate (~60 Hz), creating a
+        // feedback loop that fights the tick driver.
+        if !self.is_playing() {
+            self.tick_notify.wake_all();
+        }
     }
 
     fn set_frequency(&self, frequency: u64) {
@@ -2176,11 +2198,20 @@ impl FixedRateStreamState {
         Timestamp(self.current_tick.load(atomic::Ordering::Relaxed))
     }
 
-    fn advance_tick(&self) {
-        let time_step = self.time_step.load(atomic::Ordering::Relaxed) as i64;
-        self.current_tick
-            .fetch_add(time_step, atomic::Ordering::Release);
-        self.tick_notify.wake_all();
+    /// Advance the tick by a wall-clock duration scaled by the current speed.
+    /// speed_ratio = time_step_us * frequency / 1_000_000 (sim-µs per real-µs).
+    fn advance_tick_wall(&self, wall_elapsed: Duration) {
+        let time_step_us = self.time_step.load(atomic::Ordering::Relaxed) / 1000;
+        let frequency = self.frequency.load(atomic::Ordering::Relaxed);
+        // advance = wall_elapsed_µs * (time_step_µs * frequency / 1_000_000)
+        // Rewritten to avoid floating point: (wall_µs * ts_µs * freq) / 1_000_000
+        let wall_us = wall_elapsed.as_micros() as i64;
+        let advance_us = wall_us * time_step_us as i64 * frequency as i64 / 1_000_000;
+        if advance_us > 0 {
+            self.current_tick
+                .fetch_add(advance_us, atomic::Ordering::Release);
+            self.tick_notify.wake_all();
+        }
     }
 
     async fn wait_for_next_tick(&self, last_seen: Timestamp) -> Timestamp {
@@ -2209,13 +2240,16 @@ impl FixedRateStreamState {
 }
 
 async fn run_tick_driver(state: Arc<FixedRateStreamState>) {
+    let mut last_advance = Instant::now();
     loop {
-        // Respect play/pause
-        if !state.wait_for_playing().await {
+        // Wait for playing only (not scrubbed) -- the tick driver does not need
+        // to respond to scrub events. Letting the consumer own the is_scrubbed
+        // flag avoids a race where the driver consumes it first.
+        if !state.playing_cell.wait().await {
             return;
         }
         let sleep_time = state.sleep_time();
-        // Sleep for one tick period, interruptible by play/pause changes
+        // Sleep for one tick period, interruptible by play/pause changes.
         futures_lite::future::race(
             async {
                 state.playing_cell.wait_for_change().await;
@@ -2223,9 +2257,18 @@ async fn run_tick_driver(state: Arc<FixedRateStreamState>) {
             stellarator::sleep(sleep_time),
         )
         .await;
-        // Only advance if still playing
+        // Advance by the exact wall-clock time that elapsed since the last
+        // advance, scaled by the playback speed. This produces smooth
+        // timestamps regardless of cooperative-scheduling jitter: whether the
+        // driver runs after 16 ms or after 150 ms, the advance is always
+        // proportional to real time.
         if state.is_playing() {
-            state.advance_tick();
+            let elapsed = last_advance.elapsed();
+            state.advance_tick_wall(elapsed);
+            last_advance = Instant::now();
+        } else {
+            // Paused -- reset the advance anchor so we don't burst on resume
+            last_advance = Instant::now();
         }
     }
 }
@@ -2452,7 +2495,19 @@ async fn handle_fixed_stream<A: AsyncWrite>(
                 .0?;
             rent!(stream.send(table.with_request_id(req_id)).await, table)?;
         }
-        current_timestamp = state.wait_for_next_tick(current_timestamp).await;
+        // Race between the tick notification and a timer so the consumer
+        // updates at least once per sleep_time (~16 ms at 60 Hz).  Under heavy
+        // cooperative-scheduling load the tick driver may run infrequently; this
+        // timer ensures we still pick up its wall-clock-proportional timestamp
+        // advances at a smooth visual rate.
+        futures_lite::future::race(
+            async {
+                let _ = state.wait_for_next_tick(current_timestamp).await;
+            },
+            stellarator::sleep(state.sleep_time()),
+        )
+        .await;
+        current_timestamp = state.current_timestamp();
     }
 }
 

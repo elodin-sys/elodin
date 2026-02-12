@@ -15,10 +15,10 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BETAFLIGHT_DIR="$SCRIPT_DIR/betaflight"
 
-# Check if betaflight submodule exists
-if [ ! -d "$BETAFLIGHT_DIR" ]; then
-    echo "Error: Betaflight submodule not found at $BETAFLIGHT_DIR"
-    echo "Run: git submodule update --init --recursive"
+# Check if betaflight submodule is cloned (directory may exist as empty gitlink before update)
+if [ ! -f "$BETAFLIGHT_DIR/Makefile" ]; then
+    echo "Error: Betaflight submodule not initialized at $BETAFLIGHT_DIR"
+    echo "Run (from repo root): git submodule update --init --recursive --depth 1"
     exit 1
 fi
 
