@@ -9,7 +9,7 @@ use bevy::{
     window::{Monitor, PrimaryWindow, Window, WindowPosition},
 };
 use bevy_editor_cam::{
-    controller::zoom::ZoomLimits,
+    controller::{component::Sensitivity, zoom::ZoomLimits},
     prelude::{EditorCam, EnabledMotion, OrbitConstraint},
 };
 use bevy_egui::{
@@ -1259,9 +1259,12 @@ impl ViewportPane {
                 },
                 zoom_limits: ZoomLimits {
                     min_size_per_pixel: 1e-3,
-                    // max_size_per_pixel: 1e9,
-                    max_size_per_pixel: 1e3,
+                    max_size_per_pixel: 10.0,
                     zoom_through_objects: false,
+                },
+                sensitivity: Sensitivity {
+                    zoom: 0.2,
+                    ..default()
                 },
                 last_anchor_depth: 2.0,
                 ..Default::default()
