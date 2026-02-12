@@ -2,6 +2,9 @@ use crate::color_names::{color_to_ints, name_from_color};
 use impeller2_wkt::*;
 use kdl::{KdlDocument, KdlEntry, KdlNode};
 
+// Default precision for float properties emitted to KDL.
+const KDL_FLOAT_PRECISION: u32 = 6;
+
 pub fn serialize_schematic<T>(schematic: &Schematic<T>) -> String {
     let mut doc = KdlDocument::new();
 
@@ -73,6 +76,30 @@ fn push_name_prop(node: &mut KdlNode, name: &str) {
     node.entries_mut().push(KdlEntry::new_prop("name", name));
 }
 
+fn round_float(value: f64, precision: u32) -> f64 {
+    if !value.is_finite() {
+        return value;
+    }
+
+    let factor = 10_f64.powi(precision as i32);
+    let rounded = (value * factor).round() / factor;
+
+    if rounded == 0.0 && rounded.is_sign_negative() {
+        0.0
+    } else {
+        rounded
+    }
+}
+
+fn round_float_default(value: f64) -> f64 {
+    round_float(value, KDL_FLOAT_PRECISION)
+}
+
+fn push_rounded_float_prop(node: &mut KdlNode, name: &str, value: f64) {
+    node.entries_mut()
+        .push(KdlEntry::new_prop(name, round_float_default(value)));
+}
+
 fn push_optional_name_prop(node: &mut KdlNode, name: Option<&str>) {
     if let Some(name) = name {
         push_name_prop(node, name);
@@ -103,9 +130,7 @@ fn serialize_split<T>(split: &Split<T>, is_horizontal: bool) -> KdlNode {
         let mut child_node = serialize_panel(panel);
 
         if let Some(&share) = split.shares.get(&i) {
-            child_node
-                .entries_mut()
-                .push(KdlEntry::new_prop("share", share as f64));
+            push_rounded_float_prop(&mut child_node, "share", share as f64);
         }
 
         children.nodes_mut().push(child_node);
@@ -121,8 +146,7 @@ fn serialize_viewport<T>(viewport: &Viewport<T>) -> KdlNode {
     push_optional_name_prop(&mut node, viewport.name.as_deref());
 
     if viewport.fov != 45.0 {
-        node.entries_mut()
-            .push(KdlEntry::new_prop("fov", viewport.fov as f64));
+        push_rounded_float_prop(&mut node, "fov", viewport.fov as f64);
     }
 
     if let Some(ref pos) = viewport.pos {
@@ -251,10 +275,8 @@ fn serialize_graph<T>(graph: &Graph<T>) -> KdlNode {
 
     // Only serialize y_range if auto_y_range is false and range is not default
     if !graph.auto_y_range && (graph.y_range.start != 0.0 || graph.y_range.end != 1.0) {
-        node.entries_mut()
-            .push(KdlEntry::new_prop("y_min", graph.y_range.start));
-        node.entries_mut()
-            .push(KdlEntry::new_prop("y_max", graph.y_range.end));
+        push_rounded_float_prop(&mut node, "y_min", graph.y_range.start);
+        push_rounded_float_prop(&mut node, "y_max", graph.y_range.end);
     }
 
     for color in &graph.colors {
@@ -385,8 +407,7 @@ fn serialize_object_3d_mesh(mesh: &Object3DMesh) -> KdlNode {
             node.entries_mut()
                 .push(KdlEntry::new_prop("path", path.clone()));
             if *scale != 1.0 {
-                node.entries_mut()
-                    .push(KdlEntry::new_prop("scale", *scale as f64));
+                push_rounded_float_prop(&mut node, "scale", *scale as f64);
             }
             if *translate != (0.0, 0.0, 0.0) {
                 let tuple_str = format!("({}, {}, {})", translate.0, translate.1, translate.2);
@@ -403,34 +424,29 @@ fn serialize_object_3d_mesh(mesh: &Object3DMesh) -> KdlNode {
         Object3DMesh::Mesh { mesh, material } => match mesh {
             Mesh::Sphere { radius } => {
                 let mut node = KdlNode::new("sphere");
-                node.entries_mut()
-                    .push(KdlEntry::new_prop("radius", *radius as f64));
+                push_rounded_float_prop(&mut node, "radius", *radius as f64);
                 serialize_material_to_node(&mut node, material);
                 node
             }
             Mesh::Box { x, y, z } => {
                 let mut node = KdlNode::new("box");
-                node.entries_mut().push(KdlEntry::new_prop("x", *x as f64));
-                node.entries_mut().push(KdlEntry::new_prop("y", *y as f64));
-                node.entries_mut().push(KdlEntry::new_prop("z", *z as f64));
+                push_rounded_float_prop(&mut node, "x", *x as f64);
+                push_rounded_float_prop(&mut node, "y", *y as f64);
+                push_rounded_float_prop(&mut node, "z", *z as f64);
                 serialize_material_to_node(&mut node, material);
                 node
             }
             Mesh::Cylinder { radius, height } => {
                 let mut node = KdlNode::new("cylinder");
-                node.entries_mut()
-                    .push(KdlEntry::new_prop("radius", *radius as f64));
-                node.entries_mut()
-                    .push(KdlEntry::new_prop("height", *height as f64));
+                push_rounded_float_prop(&mut node, "radius", *radius as f64);
+                push_rounded_float_prop(&mut node, "height", *height as f64);
                 serialize_material_to_node(&mut node, material);
                 node
             }
             Mesh::Plane { width, depth } => {
                 let mut node = KdlNode::new("plane");
-                node.entries_mut()
-                    .push(KdlEntry::new_prop("width", *width as f64));
-                node.entries_mut()
-                    .push(KdlEntry::new_prop("depth", *depth as f64));
+                push_rounded_float_prop(&mut node, "width", *width as f64);
+                push_rounded_float_prop(&mut node, "depth", *depth as f64);
                 serialize_material_to_node(&mut node, material);
                 node
             }
@@ -456,8 +472,7 @@ fn serialize_line_3d<T>(line: &Line3d<T>) -> KdlNode {
     node.entries_mut().push(KdlEntry::new(line.eql.clone()));
 
     if line.line_width != 1.0 {
-        node.entries_mut()
-            .push(KdlEntry::new_prop("line_width", line.line_width as f64));
+        push_rounded_float_prop(&mut node, "line_width", line.line_width as f64);
     }
 
     serialize_color_to_node(&mut node, &line.color);
@@ -480,8 +495,7 @@ fn serialize_vector_arrow<T>(arrow: &VectorArrow3d<T>) -> KdlNode {
     }
 
     if (arrow.scale - 1.0).abs() > f64::EPSILON {
-        node.entries_mut()
-            .push(KdlEntry::new_prop("scale", arrow.scale));
+        push_rounded_float_prop(&mut node, "scale", arrow.scale);
     }
 
     push_optional_name_prop(&mut node, arrow.name.as_deref());
@@ -503,10 +517,11 @@ fn serialize_vector_arrow<T>(arrow: &VectorArrow3d<T>) -> KdlNode {
 
     let thickness = arrow.thickness.value();
     if (thickness - ArrowThickness::default().value()).abs() > f32::EPSILON {
-        node.entries_mut().push(KdlEntry::new_prop(
+        push_rounded_float_prop(
+            &mut node,
             "arrow_thickness",
             ArrowThickness::round_to_precision(thickness) as f64,
-        ));
+        );
     }
 
     match arrow.label_position {
@@ -564,8 +579,7 @@ fn serialize_color_to_node_named(node: &mut KdlNode, color: &Color, name: Option
 fn serialize_material_to_node(node: &mut KdlNode, material: &Material) {
     let emissivity = material.emissivity.clamp(0.0, 1.0);
     if emissivity > 0.0 {
-        node.entries_mut()
-            .push(KdlEntry::new_prop("emissivity", emissivity as f64));
+        push_rounded_float_prop(node, "emissivity", emissivity as f64);
     }
     serialize_color_to_node(node, &material.base_color);
 }
@@ -664,8 +678,7 @@ fn serialize_dashboard_node_properties<T>(node: &mut KdlNode, dashboard_node: &D
     serialize_val_prop(node, "max_height", &dashboard_node.max_height);
 
     if let Some(aspect_ratio) = dashboard_node.aspect_ratio {
-        node.entries_mut()
-            .push(KdlEntry::new_prop("aspect_ratio", aspect_ratio as f64));
+        push_rounded_float_prop(node, "aspect_ratio", aspect_ratio as f64);
     }
 
     // Serialize alignment properties
@@ -726,17 +739,11 @@ fn serialize_dashboard_node_properties<T>(node: &mut KdlNode, dashboard_node: &D
     }
 
     if dashboard_node.flex_grow != 0.0 {
-        node.entries_mut().push(KdlEntry::new_prop(
-            "flex_grow",
-            dashboard_node.flex_grow as f64,
-        ));
+        push_rounded_float_prop(node, "flex_grow", dashboard_node.flex_grow as f64);
     }
 
     if dashboard_node.flex_shrink != 1.0 {
-        node.entries_mut().push(KdlEntry::new_prop(
-            "flex_shrink",
-            dashboard_node.flex_shrink as f64,
-        ));
+        push_rounded_float_prop(node, "flex_shrink", dashboard_node.flex_shrink as f64);
     }
 
     serialize_val_prop(node, "flex_basis", &dashboard_node.flex_basis);
@@ -749,10 +756,7 @@ fn serialize_dashboard_node_properties<T>(node: &mut KdlNode, dashboard_node: &D
     }
 
     if dashboard_node.font_size != 16.0 {
-        node.entries_mut().push(KdlEntry::new_prop(
-            "font_size",
-            dashboard_node.font_size as f64,
-        ));
+        push_rounded_float_prop(node, "font_size", dashboard_node.font_size as f64);
     }
 }
 
@@ -1315,7 +1319,7 @@ tabs {
     graph a.world_pos name="a world_pos"
 }
 object_3d a.world_pos {
-    sphere radius=0.20000000298023224 {
+    sphere radius=0.2 {
         color 255 0 255
     }
 }"#
