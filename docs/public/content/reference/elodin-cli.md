@@ -58,7 +58,7 @@ This document contains the help content for the Elodin command-line programs.
 
 Launch the Elodin editor (default)
 
-**Usage:** `elodin editor [addr/path]`
+**Usage:** `elodin editor [--kdl KDL-PATH] [addr/path]`
 
 ###### **Arguments**
 
@@ -67,8 +67,8 @@ Launch the Elodin editor (default)
   - A Python file (e.g., `main.py`) to run a simulation
   - A TOML file (e.g., `s10.toml`) to run from a plan
   - A directory containing `main.py` or `s10.toml`
-
-
+* `--kdl <PATH>` — Optional parameter that will load a specific schematic KDL
+  after connecting to a database.
 
 ## `elodin run`
 
