@@ -6,6 +6,7 @@ A CAD-style 3D orientation widget for Bevy editor viewports (overlay + `LookToTr
 
 - **Interactive cube**: Click on faces, edges, or corners to snap the camera to that view
 - **Rotation arrows**: top-left/top-right roll around the camera axis; left/right rotate around camera up; up/down rotate around camera right
+- **Viewport action buttons**: bottom-left reset and bottom-right zoom-out controls
 - **Hover highlighting**: Visual feedback with CAD-style grouped edge hover (4 edges for active front frame, 2-3 edges for hidden-face groups)
 - **Overlay rendering**: Dedicated ViewCube camera rendered in viewport corner
 - **Camera sync**: Cube mirrors the main camera orientation
@@ -21,6 +22,8 @@ A CAD-style 3D orientation widget for Bevy editor viewports (overlay + `LookToTr
 - **Inactive edges**: no hover highlight, no click action
 - **Corners**: hover highlights only the targeted corner and click snaps to that corner view
 - **Front corner click**: no-op when the clicked corner is already aligned with the camera axis
+- **Bottom-left button**: reset viewport camera (`Transform::IDENTITY`, anchor depth `-2.0`)
+- **Bottom-right button**: zoom out while preserving current orientation
 
 ## Quick Start
 
