@@ -1068,8 +1068,10 @@ pub fn on_cube_click(
         return;
     };
 
-    let source = find_root_ancestor(selected_entity, &parents_query, &lookup.root_query)
-        .unwrap_or(Entity::PLACEHOLDER);
+    let Some(source) = find_root_ancestor(selected_entity, &parents_query, &lookup.root_query)
+    else {
+        return;
+    };
 
     match element {
         CubeElement::Face(dir) => {
@@ -1265,9 +1267,11 @@ pub fn on_arrow_pressed(
         return;
     };
 
-    let source =
+    let Some(source) =
         find_root_for_camera_child(entity, &parents_query, &camera_link_query, &root_query)
-            .unwrap_or(Entity::PLACEHOLDER);
+    else {
+        return;
+    };
 
     // First step happens immediately on press.
     events.write(ViewCubeEvent::ArrowClicked {

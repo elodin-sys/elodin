@@ -107,12 +107,7 @@ fn main_camera_for_event(
     view_cube_query: &Query<&ViewCubeLink, With<ViewCubeRoot>>,
 ) -> Option<Entity> {
     let source = event_source(event);
-
-    view_cube_query
-        .get(source)
-        .or_else(|_| view_cube_query.iter().next().ok_or(()))
-        .ok()
-        .map(|link| link.main_camera)
+    view_cube_query.get(source).ok().map(|link| link.main_camera)
 }
 
 fn event_source(event: &ViewCubeEvent) -> Entity {
