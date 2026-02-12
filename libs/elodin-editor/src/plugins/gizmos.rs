@@ -1,5 +1,6 @@
 use bevy::camera::RenderTarget;
 use bevy::camera::visibility::RenderLayers;
+use bevy::picking::prelude::Pickable;
 use bevy::ui::{Node, PositionType, UiTargetCamera, Val, ZIndex};
 use bevy::window::WindowRef;
 use bevy::{
@@ -784,6 +785,7 @@ fn update_arrow_label_ui(
                             },
                             TextColor(label_color),
                             ZIndex(1000), // Render above 3D content
+                            Pickable::IGNORE,
                             ArrowLabelUI,
                             UiTargetCamera(ui_cam_entity),
                             Name::new(format!(
