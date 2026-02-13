@@ -1,4 +1,4 @@
-use bevy::ecs::hierarchy::ChildOf;
+use bevy::ecs::{hierarchy::ChildOf, relationship::Relationship};
 use bevy::log::warn_once;
 use bevy::prelude::Mesh;
 use bevy::prelude::*;
@@ -582,18 +582,22 @@ pub fn on_scene_ready(
     scene_roots: Query<&SceneRoot>,
     names: Query<&Name>,
     scene_spawner: Res<SceneSpawner>,
-) -> bool {
+) -> Option<Entity> {
     // Add newly added scenes to the queue.
     for entity in added_scenes.iter() {
         scene_queue.insert(entity);
     }
 
     // Collect which queued scenes became ready this frame.
-    let mut ready_entities = Vec::new();
+    let mut ready_entity = None;
     scene_queue.retain(|&entity| {
-        if let Ok(instance) = scene_instances.get(entity) {
+        if ready_entity.is_some() {
+            // Keep in queue to evaluate later. We do this one frame at a
+            // time rather than allocating a Vec.
+            true
+        } else if let Ok(instance) = scene_instances.get(entity) {
             if scene_spawner.instance_is_ready(**instance) {
-                ready_entities.push(entity);
+                ready_entity = Some(entity);
                 false // Remove from queue since it's ready.
             } else {
                 true // Keep in queue since it's not ready yet.
@@ -604,9 +608,11 @@ pub fn on_scene_ready(
         }
     });
 
-    let any_ready = !ready_entities.is_empty();
-    for entity in &ready_entities {
-        let name = names.get(*entity).map(|n| n.as_str()).unwrap_or("<no name>");
+    if let Some(entity) = ready_entity.as_ref() {
+        let name = names
+            .get(*entity)
+            .map(|n| n.as_str())
+            .unwrap_or("<no name>");
         let scene_info = scene_roots
             .get(*entity)
             .map(|r| format!("handle id={:?}", r.0.id()))
@@ -618,7 +624,7 @@ pub fn on_scene_ready(
             "A scene is ready."
         );
     }
-    any_ready
+    ready_entity
 }
 
 /// System that updates 3D object entities based on their EQL expressions
@@ -676,7 +682,7 @@ pub fn update_object_3d_system(
 }
 
 /// Converts a ComponentValue to an angle-axis rotation (axis Vec3, angle f32 in radians).
-/// 
+///
 /// Input: 3-element vector where direction is axis and magnitude is angle in DEGREES
 /// Output: (normalized axis, angle in radians)
 fn component_value_to_axis_angle(value: &ComponentValue) -> Result<(Vec3, f32), String> {
@@ -731,22 +737,37 @@ fn component_value_to_axis_angle(value: &ComponentValue) -> Result<(Vec3, f32), 
 /// System that attaches JointAnimationComponent to joint entities when scenes load
 /// This runs when Object3DState changes (e.g., when a scene finishes loading)
 pub fn attach_joint_animations(
-    objects_query: Query<(Entity, &Object3DState), Changed<Object3DState>>,
+    In(scene_entity): In<Option<Entity>>,
+    objects_query: Query<&Object3DState>,
     children: Query<&Children>,
+    parent: Query<&ChildOf>,
     names: Query<&Name>,
     transforms: Query<&Transform>,
     existing_components: Query<Entity, With<JointAnimationComponent>>,
     mut commands: Commands,
     ctx: Res<EqlContext>,
 ) {
-    for (object_entity, object_3d) in objects_query.iter() {
+    let Some(scene_entity) = scene_entity else {
+        return;
+    };
+    debug!("Run attach joint animations for scene {scene_entity}.");
+    let Ok(object_3d_entity) = parent.get(scene_entity).map(|p| p.get()) else {
+        // This can be ok. So I'm leaving debug instead of warn because the axes
+        // cube triggers it.
+        debug!("Could not get parent for scene {scene_entity}.");
+        return;
+    };
+
+    if let Ok(object_3d) = objects_query.get(object_3d_entity) {
         // Only process GLB meshes with animations.
         if !matches!(object_3d.data.mesh, impeller2_wkt::Object3DMesh::Glb { .. }) {
-            continue;
+            debug!("Not a mesh for object 3d {object_3d_entity}.");
+            return;
         }
 
         if object_3d.joint_animations.is_empty() {
-            continue;
+            debug!("No joint animations for object 3d {object_3d_entity}.");
+            return;
         }
         const MAX_ANIMATIONS: usize = 32 * 4;
         let mut found_animations_store = bitarr![u32, Lsb0; 0; MAX_ANIMATIONS];
@@ -762,7 +783,7 @@ pub fn attach_joint_animations(
         }
 
         // Find entities that match joint names and compile their expressions.
-        let entity_compiled_expr = find_entities(object_entity, &children, |id| {
+        let entity_compiled_expr = find_entities(object_3d_entity, &children, |id| {
             names.get(id).ok().and_then(|name| {
                 object_3d.joint_animations.iter().enumerate().find_map(
                     |(i, (joint_name, eql_expr))| {
@@ -777,7 +798,7 @@ pub fn attach_joint_animations(
                                         joint = %joint_name,
                                         eql = %eql_expr,
                                         error = %err,
-                                        "Failed to compile EQL expression for joint animation"
+                                        "Failed to compile EQL expression for joint animation."
                                     );
                                     err
                                 })
@@ -830,6 +851,10 @@ pub fn attach_joint_animations(
                 items.join_display(", ")
             );
         }
+    } else {
+        warn!(
+            "Could not get `Object3dState` for entity {object_3d_entity} for scene {scene_entity}."
+        );
     }
 }
 
@@ -1176,7 +1201,7 @@ impl Plugin for Object3DPlugin {
             Update,
             (
                 update_object_3d_system,
-                attach_joint_animations.run_if(on_scene_ready),
+                on_scene_ready.pipe(attach_joint_animations),
                 update_joint_animations,
                 warn_imported_cameras,
             ),
