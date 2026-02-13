@@ -387,15 +387,21 @@ fn serialize_object_3d<T>(obj: &Object3D<T>) -> KdlNode {
     node.entries_mut().push(KdlEntry::new(obj.eql.clone()));
 
     let mut children = KdlDocument::new();
-    children
-        .nodes_mut()
-        .push(serialize_object_3d_mesh(&obj.mesh));
+    // Get the mesh node and any sibling nodes (like animate nodes)
+    let (mesh_node, sibling_nodes) = serialize_object_3d_mesh(&obj.mesh);
+    children.nodes_mut().push(mesh_node);
+    // Add sibling nodes (animate nodes are siblings of glb, not children)
+    for sibling in sibling_nodes {
+        children.nodes_mut().push(sibling);
+    }
     node.set_children(children);
 
     node
 }
 
-fn serialize_object_3d_mesh(mesh: &Object3DMesh) -> KdlNode {
+/// Returns (mesh_node, sibling_nodes) where sibling_nodes are nodes that should be
+/// siblings of the mesh node in the object_3d children (e.g., animate nodes)
+fn serialize_object_3d_mesh(mesh: &Object3DMesh) -> (KdlNode, Vec<KdlNode>) {
     match mesh {
         Object3DMesh::Glb {
             path,
@@ -420,53 +426,59 @@ fn serialize_object_3d_mesh(mesh: &Object3DMesh) -> KdlNode {
                 node.entries_mut()
                     .push(KdlEntry::new_prop("rotate", tuple_str));
             }
-            if !animations.is_empty() {
-                let mut children = kdl::KdlDocument::new();
-                for anim in animations {
-                    let mut anim_node = kdl::KdlNode::new("animate");
-                    anim_node
-                        .entries_mut()
-                        .push(kdl::KdlEntry::new_prop("joint", anim.joint_name.clone()));
-                    anim_node.entries_mut().push(kdl::KdlEntry::new_prop(
-                        "rotation_vector",
-                        anim.eql_expr.clone(),
-                    ));
-                    children.nodes_mut().push(anim_node);
-                }
-                node.set_children(children);
+            // Build animate nodes as siblings (not children of glb)
+            let mut animate_nodes = Vec::new();
+            for anim in animations {
+                let mut anim_node = kdl::KdlNode::new("animate");
+                anim_node
+                    .entries_mut()
+                    .push(kdl::KdlEntry::new_prop("joint", anim.joint_name.clone()));
+                anim_node.entries_mut().push(kdl::KdlEntry::new_prop(
+                    "rotation_vector",
+                    anim.eql_expr.clone(),
+                ));
+                animate_nodes.push(anim_node);
             }
-            node
+            (node, animate_nodes)
         }
-        Object3DMesh::Mesh { mesh, material } => match mesh {
-            Mesh::Sphere { radius } => {
-                let mut node = KdlNode::new("sphere");
-                push_rounded_float_prop(&mut node, "radius", *radius as f64);
-                serialize_material_to_node(&mut node, material);
-                node
-            }
-            Mesh::Box { x, y, z } => {
-                let mut node = KdlNode::new("box");
-                push_rounded_float_prop(&mut node, "x", *x as f64);
-                push_rounded_float_prop(&mut node, "y", *y as f64);
-                push_rounded_float_prop(&mut node, "z", *z as f64);
-                serialize_material_to_node(&mut node, material);
-                node
-            }
-            Mesh::Cylinder { radius, height } => {
-                let mut node = KdlNode::new("cylinder");
-                push_rounded_float_prop(&mut node, "radius", *radius as f64);
-                push_rounded_float_prop(&mut node, "height", *height as f64);
-                serialize_material_to_node(&mut node, material);
-                node
-            }
-            Mesh::Plane { width, depth } => {
-                let mut node = KdlNode::new("plane");
-                push_rounded_float_prop(&mut node, "width", *width as f64);
-                push_rounded_float_prop(&mut node, "depth", *depth as f64);
-                serialize_material_to_node(&mut node, material);
-                node
-            }
-        },
+        Object3DMesh::Mesh { mesh, material } => {
+            let node = match mesh {
+                Mesh::Sphere { radius } => {
+                    let mut node = KdlNode::new("sphere");
+                    node.entries_mut()
+                        .push(KdlEntry::new_prop("radius", *radius as f64));
+                    serialize_material_to_node(&mut node, material);
+                    node
+                }
+                Mesh::Box { x, y, z } => {
+                    let mut node = KdlNode::new("box");
+                    node.entries_mut().push(KdlEntry::new_prop("x", *x as f64));
+                    node.entries_mut().push(KdlEntry::new_prop("y", *y as f64));
+                    node.entries_mut().push(KdlEntry::new_prop("z", *z as f64));
+                    serialize_material_to_node(&mut node, material);
+                    node
+                }
+                Mesh::Cylinder { radius, height } => {
+                    let mut node = KdlNode::new("cylinder");
+                    node.entries_mut()
+                        .push(KdlEntry::new_prop("radius", *radius as f64));
+                    node.entries_mut()
+                        .push(KdlEntry::new_prop("height", *height as f64));
+                    serialize_material_to_node(&mut node, material);
+                    node
+                }
+                Mesh::Plane { width, depth } => {
+                    let mut node = KdlNode::new("plane");
+                    node.entries_mut()
+                        .push(KdlEntry::new_prop("width", *width as f64));
+                    node.entries_mut()
+                        .push(KdlEntry::new_prop("depth", *depth as f64));
+                    serialize_material_to_node(&mut node, material);
+                    node
+                }
+            };
+            (node, Vec::new())
+        }
         Object3DMesh::Ellipsoid { scale, color } => {
             let mut node = KdlNode::new("ellipsoid");
             node.entries_mut()
@@ -476,7 +488,7 @@ fn serialize_object_3d_mesh(mesh: &Object3DMesh) -> KdlNode {
                 serialize_color_to_node(&mut node, color);
             }
 
-            node
+            (node, Vec::new())
         }
     }
 }
@@ -1407,10 +1419,22 @@ object_3d a.world_pos {
     }
 
     #[test]
-    fn test_roundtrip_glb_animations_are_dropped() {
+    fn test_roundtrip_glb_animations() {
         use impeller2_wkt::{Object3DMesh, SchematicElem};
-        let original = r#" object_3d "rocket.world_pos" {   glb path="rocket.glb"   animate joint="Root.Fin_0" rotation_vector="(0, 1.0, 0)" } "#;
+        let original = r#"
+object_3d "rocket.world_pos" {
+    glb path="rocket.glb"
+    animate joint="Root.Fin_0" rotation_vector="(0, 1.0, 0)"
+}
+"#;
         let parsed = parse_schematic(original).unwrap();
+        let SchematicElem::Object3d(parsed_obj) = &parsed.elems[0] else {
+            panic!("Expected Object3d in parsed")
+        };
+        let Object3DMesh::Glb { animations: parsed_anims, .. } = &parsed_obj.mesh else {
+            panic!("Expected Glb mesh in parsed")
+        };
+        assert_eq!(parsed_anims.len(), 1);
         let serialized = serialize_schematic(&parsed);
         let reparsed = parse_schematic(&serialized).unwrap();
         let SchematicElem::Object3d(obj) = &reparsed.elems[0] else {
