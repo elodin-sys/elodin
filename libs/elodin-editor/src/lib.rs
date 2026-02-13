@@ -104,6 +104,8 @@ impl Plugin for EmbeddedAssetPlugin {
         embedded_asset!(app, "assets/icons/entity.png");
         // Font for ViewCube labels
         embedded_asset!(app, "assets/fonts/Roboto-Bold.ttf");
+        // Axes Cube 3D model
+        embedded_asset!(app, "assets/axes-cube.glb");
     }
 }
 
