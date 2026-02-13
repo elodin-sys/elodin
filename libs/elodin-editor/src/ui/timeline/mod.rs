@@ -1,12 +1,11 @@
 use bevy::ecs::{
-    message::MessageReader,
     system::{Local, Res, SystemParam, SystemState},
     world::World,
 };
 use bevy::prelude::*;
 use bevy_egui::{EguiContexts, EguiTextureHandle, egui};
-use impeller2_bevy::DbMessage;
-use impeller2_wkt::{DbConfig, SimulationTimeStep, StreamId};
+use impeller2_bevy::CurrentStreamId;
+use impeller2_wkt::{SimulationTimeStep, StreamId};
 use timeline_controls::TimelineControls;
 
 use std::ops::RangeInclusive;
@@ -26,7 +25,7 @@ pub mod timeline_slider;
 pub(crate) fn plugin(app: &mut App) {
     app.add_plugins(timeline_controls::plugin)
         .init_resource::<PlaybackSpeed>()
-        .add_systems(Update, sync_playback_speed_from_db_config);
+        .add_systems(Update, reset_playback_speed_on_stream_change);
 }
 
 /// Fixed playback frequency for the editor stream.
@@ -41,24 +40,17 @@ impl Default for PlaybackSpeed {
     }
 }
 
-pub fn playback_speed_from_time_step(time_step: Duration) -> f64 {
-    time_step.as_secs_f64() * PLAYBACK_FREQUENCY_HZ
-}
-
 pub fn playback_time_step_from_speed(speed: f64) -> Duration {
     Duration::from_secs_f64(speed / PLAYBACK_FREQUENCY_HZ)
 }
 
-fn sync_playback_speed_from_db_config(
-    mut updates: MessageReader<DbMessage>,
-    db_config: Res<DbConfig>,
+fn reset_playback_speed_on_stream_change(
+    current_stream_id: Res<CurrentStreamId>,
     mut playback_speed: ResMut<PlaybackSpeed>,
 ) {
-    if !updates.read().any(|m| matches!(m, DbMessage::UpdateConfig)) {
-        return;
+    if current_stream_id.is_changed() {
+        *playback_speed = PlaybackSpeed::default();
     }
-
-    playback_speed.0 = playback_speed_from_time_step(db_config.default_stream_time_step);
 }
 
 #[derive(bevy::prelude::Resource, Default, Clone, Copy, Debug)]
