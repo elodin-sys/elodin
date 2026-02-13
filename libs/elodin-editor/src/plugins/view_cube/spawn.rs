@@ -38,8 +38,7 @@ pub fn spawn_view_cube(
     let render_layers = Some(RenderLayers::layer(config.render_layer as usize));
 
     // Load the axes-cube.glb (embedded)
-    let scene = asset_server
-        .load("embedded://elodin_editor/assets/axes-cube.glb#Scene0");
+    let scene = asset_server.load("embedded://elodin_editor/assets/axes-cube.glb#Scene0");
 
     // Spawn the cube root with link to main camera
     let mut cube_root_cmd = commands.spawn((
