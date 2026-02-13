@@ -2695,8 +2695,12 @@ async fn handle_fixed_stream<A: AsyncWrite>(
             // Small buffer (100ms) ahead of current position prevents the
             // editor's clamp_current_time from throttling playback due to
             // latency between last_updated and CurrentTimestamp updates.
-            let ahead = Timestamp(current_timestamp.0 + 100_000);
-            db.last_updated.update_max(ahead);
+            // Direct store (not update_max) so that scrubbing backward
+            // decreases last_updated and the editor's time range tracks
+            // the playback position.
+            let replay_end = db.replay_end.load(atomic::Ordering::Relaxed);
+            let ahead = Timestamp((current_timestamp.0 + 100_000).min(replay_end));
+            db.last_updated.store(ahead);
         }
         let work_elapsed = frame_start.elapsed();
         accum_work_us += work_elapsed.as_micros() as u64;

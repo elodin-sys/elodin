@@ -296,15 +296,18 @@ async fn main() -> miette::Result<()> {
             }
             info!(?path, "starting db");
             let server = Server::new(&path, addr).into_diagnostic()?;
-            if replay {
-                info!("replay mode enabled: last_updated will advance with playback");
-                server.db.enable_replay_mode();
-            }
+            // Apply start_timestamp before enable_replay_mode so replay uses the
+            // correct earliest_timestamp; otherwise last_updated can end up before
+            // earliest_timestamp and the editor shows NoData.
             if let Some(start_timestamp) = start_timestamp {
                 server
                     .db
                     .set_earliest_timestamp(impeller2::types::Timestamp(start_timestamp))
                     .into_diagnostic()?;
+            }
+            if replay {
+                info!("replay mode enabled: last_updated will advance with playback");
+                server.db.enable_replay_mode();
             }
             let axum_db = server.db.clone();
             let db = stellarator::spawn(server.run());
