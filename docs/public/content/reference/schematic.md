@@ -36,7 +36,7 @@ order = 6
 - `hsplit` / `vsplit`: children are panels. Child `share=<f32>` controls the weight within the split. `active` (bool) is parsed but not currently used. Optional `name`.
 
 ### panel content
-- `viewport`: `fov` (default 45.0), `active` (bool, default false), `show_grid` (default false), `show_arrows` (default true), `show_view_cube` (default true), `hdr` (default false), `name` (optional label), camera `pos`/`look_at` (optional EQL). Vector arrows can also be declared directly inside the viewport node; those arrows are treated as part of that viewport’s layer and respect its `show_arrows`/`show_grid` settings, allowing you to build a local triad tied to the viewport camera.
+- `viewport`: `fov` (default 45.0), `active` (bool, default false), `show_grid` (default false), `show_arrows` (default true), `show_view_cube` (default true), `hdr` (default false), `name` (optional label), camera `pos`/`look_at` (optional EQL). Vector arrows can also be declared directly inside the viewport node; those arrows are treated as part of that viewport’s layer and respect its `show_arrows`/`show_grid` settings, allowing you to build a local triad tied to the viewport camera. An `up` (default "(0, 1, 0)") specifies a direction vector in the world frame for the camera.
 - `graph`: positional `eql` (required), `name` (optional), `type` (`line`/`point`/`bar`, default `line`), `lock` (default false), `auto_y_range` (default true), `y_min`/`y_max` (default `0.0..1.0`), child `color` nodes (optional list; otherwise palette).
 - `component_monitor`: `component_name` (required), `name` (optional).
 - `action_pane`: `name` (required pane title), `lua` script (required).
@@ -52,6 +52,12 @@ order = 6
 - Positional `eql`: required. Evaluated to a `world_pos`-like value to place the mesh.
 - Mesh child (required, exactly one):
   - `glb`: `path` (required), `scale` (default 1.0), `translate` `(x,y,z)` (default 0s), `rotate` `(deg_x,deg_y,deg_z)` in degrees (default 0s).
+    - `animate` child nodes (optional, multiple): For rigged GLB models, animate specific joints/bones.
+      - `joint`: required string; the exact name of the joint/bone in the GLB file.
+      - `rotation_vector`: required EQL expression; must evaluate to a 3-element vector `(x, y, z)` where:
+        - The vector direction is the rotation axis.
+        - The vector magnitude is the rotation angle in degrees.
+      - Example: `animate joint="Root.Fin_0" rotation_vector="(0, rocket.fin_deflect, 0)"`
   - `sphere`: `radius` (required); `color` (default white).
   - `box`: `x`, `y`, `z` (all required); `color` (default white).
   - `cylinder`: `radius`, `height` (both required); `color` (default white).
@@ -181,7 +187,7 @@ dashboard      = "dashboard" { dashboard_node }+
 
 object_3d = "object_3d"
           <eql>
-          { glb
+          { glb { animate }*
           | sphere
           | box
           | cylinder
@@ -189,6 +195,10 @@ object_3d = "object_3d"
           | ellipsoid
           }
           [emissivity=float]
+
+animate = "animate"
+        joint=string
+        rotation_vector=eql
 
 line_3d = "line_3d"
         <eql>
@@ -246,5 +256,20 @@ vector_arrow
   arrow_thickness=1.500
   label_position=0.9 {
   color 64 128 255
+}
+```
+
+Rigged GLB model with animated joints:
+
+The `rotation_vector` is an angle-axis: the direction encodes the axis, and the
+magnitude encodes the angle in degrees.
+
+```kdl
+object_3d rocket.world_pos {
+    glb path="rocket.glb"
+    animate joint="Root.Fin_0" rotation_vector="(0, rocket.fin_deflect[0], 0)"
+    animate joint="Root.Fin_1" rotation_vector="(0, rocket.fin_deflect[1], 0)"
+    animate joint="Root.Fin_2" rotation_vector="(0, rocket.fin_deflect[2], 0)"
+    animate joint="Root.Fin_3" rotation_vector="(0, rocket.fin_deflect[3], 0)"
 }
 ```

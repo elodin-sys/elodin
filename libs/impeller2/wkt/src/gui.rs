@@ -223,6 +223,8 @@ pub struct Viewport<T = ()> {
     pub name: Option<String>,
     pub pos: Option<String>,
     pub look_at: Option<String>,
+    /// Optional camera up vector in world frame. EQL that evaluates to a 3-vector (e.g. "(0,0,1)" or "pose.direction(0,1,1)" for body-frame direction).
+    pub up: Option<String>,
     #[serde(default)]
     pub local_arrows: Vec<VectorArrow3d>,
     pub aux: T,
@@ -240,6 +242,7 @@ impl<T> Viewport<T> {
             name: self.name.clone(),
             pos: self.pos.clone(),
             look_at: self.look_at.clone(),
+            up: self.up.clone(),
             local_arrows: self.local_arrows.clone(),
             aux: f(&self.aux),
         }
@@ -258,6 +261,7 @@ impl Default for Viewport {
             name: None,
             pos: None,
             look_at: None,
+            up: None,
             local_arrows: Vec::new(),
             aux: (),
         }
@@ -633,6 +637,17 @@ pub fn default_glb_rotate() -> (f32, f32, f32) {
     (0.0, 0.0, 0.0)
 }
 
+fn default_glb_animations() -> Vec<JointAnimation> {
+    Vec::new()
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
+pub struct JointAnimation {
+    pub joint_name: String,
+    pub eql_expr: String,
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
 pub enum Object3DMesh {
@@ -644,6 +659,8 @@ pub enum Object3DMesh {
         translate: (f32, f32, f32),
         #[serde(default = "default_glb_rotate")]
         rotate: (f32, f32, f32),
+        #[serde(default = "default_glb_animations")]
+        animations: Vec<JointAnimation>,
     },
     Mesh {
         mesh: Mesh,
@@ -665,6 +682,31 @@ impl Object3DMesh {
             scale: default_glb_scale(),
             translate: default_glb_translate(),
             rotate: default_glb_rotate(),
+            animations: default_glb_animations(),
+        }
+    }
+
+    pub fn path(&self) -> Option<&str> {
+        match self {
+            Self::Glb { path, .. } => Some(path),
+            _ => None,
+        }
+    }
+}
+
+impl fmt::Display for Object3DMesh {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Glb { path, .. } => write!(f, "GLB '{}'", path),
+            Self::Mesh { mesh, .. } => match mesh {
+                Mesh::Sphere { radius } => write!(f, "Sphere(radius={})", radius),
+                Mesh::Box { x, y, z } => write!(f, "Box({}x{}x{})", x, y, z),
+                Mesh::Cylinder { radius, height } => {
+                    write!(f, "Cylinder(radius={}, height={})", radius, height)
+                }
+                Mesh::Plane { width, depth } => write!(f, "Plane({}x{})", width, depth),
+            },
+            Self::Ellipsoid { .. } => write!(f, "Ellipsoid"),
         }
     }
 }

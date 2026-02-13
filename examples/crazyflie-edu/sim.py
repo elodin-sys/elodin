@@ -97,6 +97,16 @@ ThrustVizM4 = ty.Annotated[
     el.Component("thrust_viz_m4", el.ComponentType(el.PrimitiveType.F64, (3,))),
 ]
 
+# Propeller rotation angles (accumulated, in radians)
+PropellerAngle = ty.Annotated[
+    jax.Array,
+    el.Component(
+        "propeller_angle",
+        el.ComponentType(el.PrimitiveType.F64, (4,)),
+        metadata={"element_names": "p0,p1,p2,p3"},
+    ),
+]
+
 # =============================================================================
 # Archetypes
 # =============================================================================
@@ -117,6 +127,8 @@ class CrazyflieDrone(el.Archetype):
     thrust_viz_m2: ThrustVizM2 = field(default_factory=lambda: jnp.array([0.0, 0.0, -0.001]))
     thrust_viz_m3: ThrustVizM3 = field(default_factory=lambda: jnp.array([0.0, 0.0, -0.001]))
     thrust_viz_m4: ThrustVizM4 = field(default_factory=lambda: jnp.array([0.0, 0.0, -0.001]))
+    # Propeller rotation angles (accumulated, in radians)
+    propeller_angle: PropellerAngle = field(default_factory=lambda: jnp.zeros(4))
 
 
 # =============================================================================
@@ -307,6 +319,41 @@ def thrust_visualization(
         normalize(thrust[2]),
         normalize(thrust[3]),
     )
+
+
+@el.map
+def propeller_animation(
+    rpm: MotorRpm,
+    prev_angle: PropellerAngle,
+) -> PropellerAngle:
+    """
+    Update propeller rotation angles based on motor RPM.
+
+    Accumulates rotation angle over time for visual animation.
+    Motors M1 and M3 spin CW (negative rotation), M2 and M4 spin CCW (positive).
+    Output is in degrees for use with rotation_vector animate directive.
+    """
+    config = Config.get_global()
+    dt = config.fast_loop_time_step
+
+    # Convert RPM to degrees per second: omega = rpm * 360 / 60 = rpm * 6
+    omega = rpm * 6.0
+
+    # Motor rotation directions (Crazyflie Quad-X):
+    # M1 (FR): CW  -> negative rotation
+    # M2 (FL): CCW -> positive rotation
+    # M3 (BL): CW  -> negative rotation
+    # M4 (BR): CCW -> positive rotation
+    direction = jnp.array([-1.0, 1.0, -1.0, 1.0])
+
+    # Integrate angle: angle += omega * dt * direction
+    new_angle = prev_angle + omega * dt * direction
+
+    # Keep angles bounded to prevent floating point issues over long runs
+    # Wrap to [-180, 180] degrees range (animation doesn't care about full rotations)
+    new_angle = jnp.mod(new_angle + 180.0, 360.0) - 180.0
+
+    return new_angle
 
 
 # =============================================================================

@@ -1230,6 +1230,27 @@ impl ViewportPane {
                 }
             })
             .unwrap_or_default();
+        let up = viewport
+            .up
+            .as_ref()
+            .map(|eql| {
+                let compiled_expr = match eql_ctx.parse_str(eql) {
+                    Ok(expr) => Some(compile_eql_expr(expr)),
+                    Err(e) => {
+                        bevy::log::error!(
+                            "Failed to parse viewport up expression '{}': {}",
+                            eql,
+                            e
+                        );
+                        None
+                    }
+                };
+                EditableEQL {
+                    eql: eql.to_string(),
+                    compiled_expr,
+                }
+            })
+            .unwrap_or_default();
 
         let mut camera = commands.spawn((
             Transform::default(),
@@ -1274,7 +1295,7 @@ impl ViewportPane {
                 show_arrows: viewport.show_arrows,
                 viewport_layer,
             },
-            crate::ui::inspector::viewport::Viewport::new(parent, pos, look_at),
+            crate::ui::inspector::viewport::Viewport::new(parent, pos, look_at, up),
             ChildOf(parent),
             Name::new("viewport camera3d"),
         ));

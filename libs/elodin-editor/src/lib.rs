@@ -47,6 +47,7 @@ use ui::{
     utils::FriendlyEpoch,
 };
 
+pub mod iter;
 pub mod object_3d;
 mod offset_parse;
 pub mod plugins;

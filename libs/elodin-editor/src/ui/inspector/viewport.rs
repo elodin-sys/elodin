@@ -9,6 +9,7 @@ use bevy_egui::egui::{self, Align};
 use bevy_infinite_grid::InfiniteGrid;
 use impeller2_bevy::EntityMap;
 use impeller2_wkt::{ComponentValue, QueryType, WorldPos};
+use nox::{ArrayBuf, ArrayRepr, Vector3};
 
 use crate::EqlContext;
 use crate::object_3d::{ComponentArrayExt, EditableEQL, compile_eql_expr};
@@ -24,19 +25,39 @@ use crate::{
 
 use super::{empty_inspector, eql_autocomplete, query};
 
+/// Extract a 3-vector from a ComponentValue (e.g. F64 array of length >= 3). Returns None if not a numeric array or length < 3.
+fn extract_vec3(val: &ComponentValue) -> Option<Vector3<f64, ArrayRepr>> {
+    let ComponentValue::F64(array) = val else {
+        return None;
+    };
+    let data = array.buf.as_buf();
+    if data.len() < 3 {
+        return None;
+    }
+    Some(Vector3::new(data[0], data[1], data[2]))
+}
+
 #[derive(Component)]
 pub struct Viewport {
     parent_entity: Entity,
     pub pos: EditableEQL,
     pub look_at: EditableEQL,
+    /// Optional camera up vector in world frame. EQL that evaluates to a 3-vector (e.g. "(0,0,1)" or "pose.direction(0,1,1)").
+    pub up: EditableEQL,
 }
 
 impl Viewport {
-    pub fn new(parent_entity: Entity, pos: EditableEQL, look_at: EditableEQL) -> Self {
+    pub fn new(
+        parent_entity: Entity,
+        pos: EditableEQL,
+        look_at: EditableEQL,
+        up: EditableEQL,
+    ) -> Self {
         Self {
             parent_entity,
             pos,
             look_at,
+            up,
         }
     }
 }
@@ -97,9 +118,12 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
         ui.label(egui::RichText::new("LOOK AT").color(get_scheme().text_secondary));
         eql_input(ui, &mut viewport.look_at, &eql_ctx.0);
         ui.separator();
+        ui.label(egui::RichText::new("UP").color(get_scheme().text_secondary));
+        eql_input(ui, &mut viewport.up, &eql_ctx.0);
+        ui.separator();
 
         if ui.add(EButton::highlight("Reset Pos")).clicked() {
-            *cam.transform = Transform::default();
+            *cam.transform = <bevy::prelude::Transform as std::default::Default>::default();
         }
 
         if let Projection::Perspective(persp) = cam.projection.as_mut() {
@@ -203,7 +227,22 @@ pub fn set_viewport_pos(
                 && let Some(look_at) = val.as_world_pos()
             {
                 let dir = (look_at.pos - pos.pos).normalize();
-                pos.att = nox::Quaternion::look_at_rh(dir, nox::Vec3::z_axis());
+                let up_vec = viewport
+                    .up
+                    .compiled_expr
+                    .as_ref()
+                    .and_then(|up_expr| up_expr.execute(&entity_map, &values).ok())
+                    .and_then(|v| extract_vec3(&v))
+                    .and_then(|v| {
+                        let n_sq = v.norm_squared();
+                        if n_sq.into_buf() > 1e-20 {
+                            Some(v.normalize())
+                        } else {
+                            None
+                        }
+                    })
+                    .unwrap_or_else(nox::Vec3::z_axis);
+                pos.att = nox::Quaternion::look_at_rh(dir, up_vec);
             }
         }
     }

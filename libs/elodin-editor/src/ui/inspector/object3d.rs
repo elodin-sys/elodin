@@ -235,6 +235,7 @@ impl WidgetSystem for InspectorObject3D<'_, '_> {
                     scale,
                     translate,
                     rotate,
+                    animations: _,
                 } => {
                     ui.label(egui::RichText::new("GLB Path").color(get_scheme().text_secondary));
                     ui.add_space(8.0);
