@@ -117,18 +117,29 @@ pub fn sync_schematic(
     if given_path.is_none() && !config.is_changed() {
         return;
     }
+    let has_content_fallback = config.schematic_content().is_some();
+    let path_was_overridden = given_path.is_some();
     if let Some(path) = given_path.or(config.schematic_path().map(PathBuf::from)) {
         // NOTE: This path is not resolved yet. We can't test if it exists here.
         // load_schematic_file resolves it and should do that test there.
-        if let Err(e) = load_schematic_file(&path, &mut params, live_reload_rx) {
-            modal.dialog_error(
-                format!("Invalid Schematic in {:?}", path.display()),
-                &render_diag(&e),
-            );
-            let report = miette!(e.clone());
-            bevy::log::error!(?report, "Invalid schematic for {path:?}");
-        } else {
-            return;
+        match load_schematic_file(&path, &mut params, live_reload_rx) {
+            Ok(()) => return,
+            Err(KdlSchematicError::NoSuchFile { .. })
+                if has_content_fallback && !path_was_overridden =>
+            {
+                bevy::log::info!(
+                    "Schematic file {:?} not found; using embedded schematic content fallback",
+                    path.display()
+                );
+            }
+            Err(e) => {
+                modal.dialog_error(
+                    format!("Invalid Schematic in {:?}", path.display()),
+                    &render_diag(&e),
+                );
+                let report = miette!(e.clone());
+                bevy::log::error!(?report, "Invalid schematic for {path:?}");
+            }
         }
     }
     if let Some(content) = config.schematic_content() {
