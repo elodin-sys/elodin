@@ -30,7 +30,8 @@ impl OwnedHandle {
     /// The user must ensure that no one else holds `RawFd`,
     /// because `OwnedHandle` will close the file-descriptor on drop
     pub unsafe fn from_raw_fd(raw_fd: RawHandle) -> Self {
-        OwnedHandle::Fd(std::os::windows::io::OwnedHandle::from_raw_handle(raw_fd))
+        // safety: simple wrapper around already unsafe code
+        unsafe { OwnedHandle::Fd(std::os::windows::io::OwnedHandle::from_raw_handle(raw_fd)) }
     }
 
     pub fn from_socket(socket: Socket) -> Self {
