@@ -810,7 +810,7 @@ impl DB {
         behavior: FixedRateBehavior,
     ) -> Arc<FixedRateStreamState> {
         let mut state = self.state.write().expect("poisoned lock");
-        state
+        let stream_state = state
             .streams
             .entry(stream_id)
             .or_insert_with(|| {
@@ -825,7 +825,15 @@ impl DB {
                     behavior.frequency,
                 ))
             })
-            .clone()
+            .clone();
+        // Spawn a dedicated tick driver if one hasn't been spawned yet
+        if !stream_state
+            .driver_spawned
+            .swap(true, atomic::Ordering::SeqCst)
+        {
+            stellarator::spawn(run_tick_driver(stream_state.clone()));
+        }
+        stream_state
     }
 }
 
@@ -2078,12 +2086,15 @@ pub async fn handle_fixed_rate_msg_stream<A: AsyncWrite>(
 ) -> Result<(), Error> {
     let mut pkt = LenPacket::msg_with_timestamp(msg_id, Timestamp(0), 64).with_request_id(req_id);
     let mut last_sent_timestamp: Option<Timestamp> = None;
+    let mut current_timestamp;
     loop {
         if !stream_state.wait_for_playing().await {
             return Ok(());
         }
-        let start = Instant::now();
-        let current_timestamp = stream_state.current_timestamp();
+        // Refresh after waking so scrub-while-paused renders the correct tick
+        // (is_scrubbed is consumed by wait_for_playing, so we must pick up
+        // the new current_tick here before using it).
+        current_timestamp = stream_state.current_timestamp();
         let Some((msg_timestamp, msg)) = msg_log.get_nearest(current_timestamp) else {
             // Wait for data to arrive in the msg_log.
             // This yields to the runtime (preventing scheduler starvation) without
@@ -2093,9 +2104,13 @@ pub async fn handle_fixed_rate_msg_stream<A: AsyncWrite>(
         };
 
         if Some(msg_timestamp) == last_sent_timestamp {
-            stream_state
-                .wait_for_tick(start.elapsed(), current_timestamp)
-                .await;
+            futures_lite::future::race(
+                async {
+                    let _ = stream_state.wait_for_next_tick(current_timestamp).await;
+                },
+                stellarator::sleep(stream_state.sleep_time()),
+            )
+            .await;
             continue;
         }
 
@@ -2108,9 +2123,13 @@ pub async fn handle_fixed_rate_msg_stream<A: AsyncWrite>(
         }
         last_sent_timestamp = Some(msg_timestamp);
 
-        stream_state
-            .wait_for_tick(start.elapsed(), current_timestamp)
-            .await;
+        futures_lite::future::race(
+            async {
+                let _ = stream_state.wait_for_next_tick(current_timestamp).await;
+            },
+            stellarator::sleep(stream_state.sleep_time()),
+        )
+        .await;
     }
 }
 
@@ -2121,6 +2140,8 @@ pub struct FixedRateStreamState {
     is_scrubbed: AtomicBool,
     current_tick: AtomicI64,
     playing_cell: PlayingCell,
+    tick_notify: WaitQueue,
+    driver_spawned: AtomicBool,
 }
 
 impl FixedRateStreamState {
@@ -2137,6 +2158,8 @@ impl FixedRateStreamState {
             current_tick: AtomicI64::new(current_tick.0),
             playing_cell: PlayingCell::new(true),
             frequency: AtomicU64::new(frequency),
+            tick_notify: WaitQueue::new(),
+            driver_spawned: AtomicBool::new(false),
         }
     }
 
@@ -2149,6 +2172,15 @@ impl FixedRateStreamState {
         self.current_tick
             .store(timestamp.0, atomic::Ordering::SeqCst);
         self.playing_cell.wait_cell.wake_all();
+        // Only wake tick consumers when paused (scrubbing while paused).
+        // During playback, the tick driver incorporates the new position on its
+        // next advance via fetch_add on the updated current_tick. Waking
+        // tick_notify here while playing causes the consumer to spin because the
+        // editor sends set_timestamp at its frame rate (~60 Hz), creating a
+        // feedback loop that fights the tick driver.
+        if !self.is_playing() {
+            self.tick_notify.wake_all();
+        }
     }
 
     fn set_frequency(&self, frequency: u64) {
@@ -2160,10 +2192,6 @@ impl FixedRateStreamState {
             .store(time_step.as_nanos() as u64, atomic::Ordering::SeqCst);
     }
 
-    fn time_step(&self) -> Duration {
-        Duration::from_nanos(self.time_step.load(atomic::Ordering::Relaxed))
-    }
-
     fn sleep_time(&self) -> Duration {
         Duration::from_micros(1_000_000 / self.frequency.load(atomic::Ordering::Relaxed))
     }
@@ -2172,14 +2200,28 @@ impl FixedRateStreamState {
         Timestamp(self.current_tick.load(atomic::Ordering::Relaxed))
     }
 
-    fn try_increment_tick(&self, last_timestamp: Timestamp) {
-        let time_step = self.time_step();
-        let _ = self.current_tick.compare_exchange(
-            last_timestamp.0,
-            (last_timestamp + time_step).0,
-            atomic::Ordering::Acquire,
-            atomic::Ordering::Relaxed,
-        );
+    /// Advance the tick by a wall-clock duration scaled by the current speed.
+    /// speed_ratio = time_step_us * frequency / 1_000_000 (sim-µs per real-µs).
+    fn advance_tick_wall(&self, wall_elapsed: Duration) {
+        let time_step_us = self.time_step.load(atomic::Ordering::Relaxed) / 1000;
+        let frequency = self.frequency.load(atomic::Ordering::Relaxed);
+        // advance = wall_elapsed_µs * (time_step_µs * frequency / 1_000_000)
+        // Rewritten to avoid floating point: (wall_µs * ts_µs * freq) / 1_000_000
+        let wall_us = wall_elapsed.as_micros() as i64;
+        let advance_us = wall_us * time_step_us as i64 * frequency as i64 / 1_000_000;
+        if advance_us > 0 {
+            self.current_tick
+                .fetch_add(advance_us, atomic::Ordering::Release);
+            self.tick_notify.wake_all();
+        }
+    }
+
+    async fn wait_for_next_tick(&self, last_seen: Timestamp) -> Timestamp {
+        let _ = self
+            .tick_notify
+            .wait_for(|| self.current_timestamp() != last_seen)
+            .await;
+        self.current_timestamp()
     }
 
     fn is_playing(&self) -> bool {
@@ -2197,17 +2239,44 @@ impl FixedRateStreamState {
             .await
             .is_ok()
     }
+}
 
-    async fn wait_for_tick(&self, elapsed: Duration, last_timestamp: Timestamp) {
-        let sleep_time = self.sleep_time().saturating_sub(elapsed);
+async fn run_tick_driver(state: Arc<FixedRateStreamState>) {
+    #[allow(unused_assignments)]
+    let mut last_advance: Option<Instant> = None;
+    loop {
+        // Wait for playing only (not scrubbed) -- the tick driver does not need
+        // to respond to scrub events. Letting the consumer own the is_scrubbed
+        // flag avoids a race where the driver consumes it first.
+        if !state.playing_cell.wait().await {
+            return;
+        }
+        // Reset the advance anchor as soon as we (re)enter playing. If we were
+        // paused, we just woke from wait() and last_advance was from before the
+        // pause; resetting here ensures the next elapsed doesn't include the
+        // pause duration and we don't jump the playback timestamp on resume.
+        last_advance = Some(Instant::now());
+
+        let sleep_time = state.sleep_time();
+        // Sleep for one tick period, interruptible by play/pause changes.
         futures_lite::future::race(
             async {
-                self.playing_cell.wait_for_change().await;
+                state.playing_cell.wait_for_change().await;
             },
             stellarator::sleep(sleep_time),
         )
         .await;
-        self.try_increment_tick(last_timestamp);
+        // Advance by the exact wall-clock time that elapsed since the last
+        // advance, scaled by the playback speed. This produces smooth
+        // timestamps regardless of cooperative-scheduling jitter: whether the
+        // driver runs after 16 ms or after 150 ms, the advance is always
+        // proportional to real time.
+        if state.is_playing() {
+            let elapsed = last_advance.unwrap().elapsed();
+            state.advance_tick_wall(elapsed);
+        }
+        // When paused, do not reset last_advance here: the next iteration
+        // blocks on wait() until resume, and we reset above when wait() returns.
     }
 }
 
@@ -2254,6 +2323,10 @@ fn handle_stream<A: AsyncWrite + 'static>(
             ));
             debug!(stream.id = ?stream.id, "inserting stream");
             db.with_state_mut(|s| s.streams.insert(stream.id, state.clone()));
+            // Spawn a dedicated tick driver for this stream state
+            if !state.driver_spawned.swap(true, atomic::Ordering::SeqCst) {
+                stellarator::spawn(run_tick_driver(state.clone()));
+            }
             stellarator::spawn(async move {
                 match handle_fixed_stream(tx, req_id, state, db).await {
                     Ok(_) => {}
@@ -2264,6 +2337,15 @@ fn handle_stream<A: AsyncWrite + 'static>(
                 }
             })
         }
+        StreamBehavior::RealTimeBatched => stellarator::spawn(async move {
+            match handle_real_time_stream_batched(tx, req_id, db).await {
+                Ok(_) => {}
+                Err(err) if err.is_stream_closed() => {}
+                Err(err) => {
+                    warn!(?err, "error streaming data");
+                }
+            }
+        }),
     }
 }
 
@@ -2386,6 +2468,109 @@ async fn handle_real_time_component<A: AsyncWrite>(
     }
 }
 
+/// Batched real-time stream handler.
+///
+/// Unlike `handle_real_time_stream` which spawns one task per component (N
+/// tasks, N wake-ups per sim tick), this handler uses a **single task** that
+/// wakes once per `db.last_updated` notification and sends all components'
+/// latest data in one table packet.
+///
+/// Component discovery (metadata + schema) works identically to the original
+/// `handle_real_time_stream`.
+async fn handle_real_time_stream_batched<A: AsyncWrite + 'static>(
+    sink: Arc<Mutex<PacketSink<A>>>,
+    req_id: RequestId,
+    db: Arc<DB>,
+) -> Result<(), Error> {
+    let mut current_gen = u64::MAX;
+    let mut table = LenPacket::table([0; 2], 2048 - 16);
+    let mut components = HashMap::new();
+
+    loop {
+        // Re-check for new components when vtable_gen changes.
+        let vtable_gen = db.vtable_gen.latest();
+        if vtable_gen != current_gen {
+            let new_components: Vec<(Component, Option<ComponentMetadata>, Schema<Vec<u64>>)> = db
+                .with_state(|state| {
+                    let mut new_comps = Vec::new();
+                    for component in state.components.values() {
+                        if components.contains_key(&component.component_id) {
+                            continue;
+                        }
+                        let metadata = state
+                            .get_component_metadata(component.component_id)
+                            .cloned();
+                        let schema = component.schema.to_schema();
+                        new_comps.push((component.clone(), metadata, schema));
+                    }
+                    new_comps
+                });
+
+            // Send metadata and schema for each new component.
+            for (component, metadata, schema) in new_components {
+                if let Some(metadata) = metadata {
+                    let stream = sink.lock().await;
+                    if let Err(err) = stream
+                        .send(metadata.into_len_packet().with_request_id(req_id))
+                        .await
+                        .0
+                    {
+                        debug!(%err, "error sending component metadata");
+                    }
+                }
+
+                let schema_msg = DumpSchemaResp {
+                    schemas: [(component.component_id, schema)].into_iter().collect(),
+                };
+                {
+                    let stream = sink.lock().await;
+                    if let Err(err) = stream
+                        .send(schema_msg.into_len_packet().with_request_id(req_id))
+                        .await
+                        .0
+                    {
+                        debug!(%err, "error sending component schema");
+                    }
+                }
+
+                components.insert(component.component_id, component);
+            }
+
+            // Rebuild the VTable with the full component set.
+            let vtable_msg = DBVisitor.vtable(&components)?;
+            let id: PacketId = fastrand::u16(..).to_le_bytes();
+            table = LenPacket::table(id, 2048 - 16);
+            {
+                let stream = sink.lock().await;
+                stream
+                    .send(
+                        VTableMsg {
+                            id,
+                            vtable: vtable_msg,
+                        }
+                        .with_request_id(req_id),
+                    )
+                    .await
+                    .0?;
+            }
+            current_gen = vtable_gen;
+        }
+
+        // Populate the table with every component's latest data point.
+        table.clear();
+        DBVisitor.populate_table_latest(&components, &mut table);
+
+        // Single lock + send for all components.
+        {
+            let stream = sink.lock().await;
+            rent!(stream.send(table.with_request_id(req_id)).await, table)?;
+        }
+
+        // Wait for the simulation to write new data (1 wake per sim tick).
+        db.last_updated.wait().await;
+    }
+}
+
 async fn handle_fixed_stream<A: AsyncWrite>(
     stream: Arc<Mutex<PacketSink<A>>>,
     req_id: RequestId,
@@ -2395,12 +2580,34 @@ async fn handle_fixed_stream<A: AsyncWrite>(
     let mut current_gen = u64::MAX;
     let mut table = LenPacket::table([0; 2], 2048 - 16);
     let mut components = db.with_state(|state| state.components.clone());
+    let mut current_timestamp;
+
+    // Lightweight profiling: accumulate timings and log every LOG_INTERVAL frames.
+    // Captures both the work time (populate + lock + send) and the wall-clock
+    // frame-to-frame time (work + wait) so we can see scheduling overhead.
+    const LOG_INTERVAL: u64 = 120;
+    let mut frame_count: u64 = 0;
+    let mut accum_populate_us: u64 = 0;
+    let mut accum_lock_us: u64 = 0;
+    let mut accum_send_us: u64 = 0;
+    let mut accum_work_us: u64 = 0;
+    let mut accum_wall_us: u64 = 0;
+    let mut last_frame_wall = Instant::now();
+
     loop {
         if !state.wait_for_playing().await {
             return Ok(());
         }
-        let start = Instant::now();
-        let current_timestamp = state.current_timestamp();
+        // Refresh the timestamp immediately after waking.  When we wake
+        // because of a scrub (is_scrubbed consumed above), current_tick
+        // already holds the scrubbed-to position and we must use it for
+        // the render that follows -- otherwise we'd display a stale frame
+        // and then block again without ever rendering the correct one.
+        current_timestamp = state.current_timestamp();
+        let frame_start = Instant::now();
+        let wall_since_last = last_frame_wall.elapsed();
+        last_frame_wall = frame_start;
+
         let vtable_gen = db.vtable_gen.latest();
         if vtable_gen != current_gen {
             components = db.with_state(|state| state.components.clone());
@@ -2413,26 +2620,74 @@ async fn handle_fixed_stream<A: AsyncWrite>(
             current_gen = vtable_gen;
         }
         table.clear();
-        if let Err(err) = DBVisitor.populate_table(&components, &mut table, current_timestamp) {
+        let t0 = Instant::now();
+        if let Err(err) = DBVisitor
+            .populate_table(&components, &mut table, current_timestamp)
+            .await
+        {
             warn!(?err, "failed to populate table");
         }
+        let populate_elapsed = t0.elapsed();
+        // Yield once more after populating to give the tick driver a chance
+        // to run before we acquire the stream lock.
+        stellarator::yield_now().await;
+        // Pre-serialize the timestamp message before acquiring the lock so the
+        // critical section is limited to the two TCP writes.
+        let ts_pkt = StreamTimestamp {
+            timestamp: current_timestamp,
+            stream_id: state.stream_id,
+        }
+        .with_request_id(req_id);
+        let t1 = Instant::now();
         {
             let stream = stream.lock().await;
-            stream
-                .send(
-                    StreamTimestamp {
-                        timestamp: current_timestamp,
-                        stream_id: state.stream_id,
-                    }
-                    .with_request_id(req_id),
-                )
-                .await
-                .0?;
+            let lock_elapsed = t1.elapsed();
+            let t2 = Instant::now();
+            stream.send(ts_pkt).await.0?;
             rent!(stream.send(table.with_request_id(req_id)).await, table)?;
+            let send_elapsed = t2.elapsed();
+
+            accum_populate_us += populate_elapsed.as_micros() as u64;
+            accum_lock_us += lock_elapsed.as_micros() as u64;
+            accum_send_us += send_elapsed.as_micros() as u64;
         }
-        state
-            .wait_for_tick(start.elapsed(), current_timestamp)
-            .await;
+        let work_elapsed = frame_start.elapsed();
+        accum_work_us += work_elapsed.as_micros() as u64;
+        accum_wall_us += wall_since_last.as_micros() as u64;
+        frame_count += 1;
+
+        if frame_count.is_multiple_of(LOG_INTERVAL) {
+            let n = LOG_INTERVAL as f64;
+            let wall_fps = n / (accum_wall_us as f64 / 1_000_000.0);
+            debug!(
+                populate_avg_ms = accum_populate_us as f64 / n / 1000.0,
+                lock_avg_ms = accum_lock_us as f64 / n / 1000.0,
+                send_avg_ms = accum_send_us as f64 / n / 1000.0,
+                work_avg_ms = accum_work_us as f64 / n / 1000.0,
+                wall_avg_ms = accum_wall_us as f64 / n / 1000.0,
+                wall_fps,
+                components = components.len(),
+                "fixed_stream consumer stats"
+            );
+            accum_populate_us = 0;
+            accum_lock_us = 0;
+            accum_send_us = 0;
+            accum_work_us = 0;
+            accum_wall_us = 0;
+        }
+
+        // Race between the tick notification and a timer so the consumer
+        // updates at least once per sleep_time (~16 ms at 60 Hz).  Under heavy
+        // cooperative-scheduling load the tick driver may run infrequently; this
+        // timer ensures we still pick up its wall-clock-proportional timestamp
+        // advances at a smooth visual rate.
+        futures_lite::future::race(
+            async {
+                let _ = state.wait_for_next_tick(current_timestamp).await;
+            },
+            stellarator::sleep(state.sleep_time()),
+        )
+        .await;
     }
 }
 
@@ -2458,22 +2713,52 @@ impl DBVisitor {
         Ok(vtable(fields))
     }
 
-    fn populate_table(
+    /// Populate the table with data for all components at the given timestamp.
+    ///
+    /// Cooperatively yields every `YIELD_EVERY` components so that the tick
+    /// driver and other tasks on the single-threaded stellarator runtime get
+    /// CPU time.  Without these yields, heavy simulations (many components)
+    /// starve the tick driver and produce choppy visual updates at ~6-10 FPS.
+    async fn populate_table(
         &self,
         components: &HashMap<ComponentId, Component>,
         table: &mut LenPacket,
         timestamp: Timestamp,
     ) -> Result<(), Error> {
-        self.visit(components, |entity| {
-            let tick = entity.time_series.start_timestamp().max(timestamp);
-            let Some((timestamp, buf)) = entity.get_nearest(tick) else {
-                return Ok(());
+        const YIELD_EVERY: usize = 8;
+        for (i, (_, component)) in components.iter().enumerate() {
+            let tick = component.time_series.start_timestamp().max(timestamp);
+            let Some((ts, buf)) = component.get_nearest(tick) else {
+                continue;
             };
-            table.push_aligned(timestamp);
-            table.pad_for_type(entity.schema.prim_type);
+            table.push_aligned(ts);
+            table.pad_for_type(component.schema.prim_type);
             table.extend_from_slice(buf);
-            Ok(())
-        })
+            if (i + 1) % YIELD_EVERY == 0 {
+                stellarator::yield_now().await;
+            }
+        }
+        Ok(())
+    }
+
+    /// Populate the table with every component's most recent data point.
+    ///
+    /// Used by the `RealTimeBatched` stream handler which always wants the
+    /// freshest value, unlike `populate_table` which looks up data at a
+    /// specific playback timestamp.
+    fn populate_table_latest(
+        &self,
+        components: &HashMap<ComponentId, Component>,
+        table: &mut LenPacket,
+    ) {
+        for (_, component) in components.iter() {
+            let Some((&ts, buf)) = component.time_series.latest() else {
+                continue;
+            };
+            table.push_aligned(ts);
+            table.pad_for_type(component.schema.prim_type);
+            table.extend_from_slice(buf);
+        }
     }
 
     fn visit(

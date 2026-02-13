@@ -151,13 +151,21 @@ pub fn init_db(
         Ok::<_, elodin_db::Error>(())
     })?;
 
-    let default_stream_time_step = Duration::from_secs_f64(
-        world.metadata.sim_time_step.0.as_secs_f64() / world.metadata.default_playback_speed,
-    );
+    // The editor subscribes with a fixed playback frequency of 60 Hz.
+    // For 1x real-time playback, time_step must equal 1/frequency so that
+    // time_step * frequency = 1 second of sim-time per second of wall-clock.
+    // default_playback_speed scales this linearly (2.0 = 2x real-time, etc.).
+    const PLAYBACK_FREQUENCY: f64 = 60.0;
+    let default_stream_time_step =
+        Duration::from_secs_f64(world.metadata.default_playback_speed / PLAYBACK_FREQUENCY);
     db.default_stream_time_step.store(
         default_stream_time_step.as_nanos() as u64,
         atomic::Ordering::SeqCst,
     );
+    // Also persist the computed value in db_config so it survives save/load
+    db.with_state_mut(|state| {
+        state.db_config.default_stream_time_step = default_stream_time_step;
+    });
     let _ = db.save_db_state();
 
     Ok(())

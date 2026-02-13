@@ -40,6 +40,11 @@ The simulation provides:
    uvx maturin develop --uv --manifest-path=libs/nox-py/Cargo.toml
    ```
 
+3. Betaflight submodule (from repo root):
+   ```bash
+   git submodule update --init --recursive --depth 1
+   ```
+
 ### Build Betaflight SITL
 
 ```bash
@@ -64,8 +69,7 @@ This only needs to be done once - the config is saved to `eeprom.bin`.
 2. **Connect to CLI** (in terminal 2):
    ```bash
    # Create virtual serial port
-   socat -d -d pty,raw,echo=0,link=/tmp/bf tcp:localhost:5761 &
-   sleep 2
+   socat -d -d pty,raw,echo=0,link=/tmp/bf tcp:localhost:5761 & sleep 2
    
    # Connect with screen
    screen /tmp/bf
