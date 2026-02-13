@@ -1,16 +1,18 @@
 use bevy::ecs::{
+    message::MessageReader,
     system::{Local, Res, SystemParam, SystemState},
     world::World,
 };
 use bevy::prelude::*;
 use bevy_egui::{EguiContexts, EguiTextureHandle, egui};
-use impeller2_bevy::CurrentStreamId;
+use impeller2_bevy::{CurrentStreamId, DbMessage};
 use impeller2_wkt::{
-    CurrentTimestamp, EarliestTimestamp, LastUpdated, SimulationTimeStep, StreamId,
+    CurrentTimestamp, EarliestTimestamp, LastUpdated, DbConfig, SimulationTimeStep, StreamId,
 };
 use timeline_controls::TimelineControls;
 
 use std::ops::RangeInclusive;
+use std::time::Duration;
 use timeline_slider::TimelineSlider;
 
 use crate::{
@@ -36,6 +38,7 @@ pub(crate) fn plugin(app: &mut App) {
                 reset_latest_follow_on_stream_change,
                 reset_auto_follow_latest_state,
                 auto_start_follow_latest,
+                sync_playback_speed_from_db_config,
             ),
         );
 }
@@ -111,6 +114,18 @@ struct AutoFollowLatestParams<'w> {
     paused: ResMut<'w, crate::ui::Paused>,
     latest_follow: ResMut<'w, LatestFollow>,
     state: ResMut<'w, AutoFollowLatestState>,
+\n+// Playback conversion helpers. `PLAYBACK_FREQUENCY_HZ` is a fallback value
+// used to convert between stream time-step and playback speed. Update as
+// appropriate for desired semantics.
+const PLAYBACK_FREQUENCY_HZ: f64 = 1.0;
+
+pub fn playback_speed_from_time_step(time_step: Duration) -> f64 {
+    time_step.as_secs_f64() * PLAYBACK_FREQUENCY_HZ
+}
+
+pub fn playback_time_step_from_speed(speed: f64) -> Duration {
+    Duration::from_secs_f64(speed / PLAYBACK_FREQUENCY_HZ)
+\n+
 }
 
 fn reset_playback_speed_on_stream_change(
@@ -188,6 +203,19 @@ fn auto_start_follow_latest(params: AutoFollowLatestParams) {
         }
         Some(_) => {}
     }
+}
+
+fn sync_playback_speed_from_db_config(
+    mut updates: MessageReader<DbMessage>,
+    db_config: Res<DbConfig>,
+    mut playback_speed: ResMut<PlaybackSpeed>,
+) {
+    if !updates.read().any(|m| matches!(m, DbMessage::UpdateConfig)) {
+        return;
+    }
+
+    playback_speed.0 = playback_speed_from_time_step(db_config.default_stream_time_step);
+}
 }
 
 #[derive(bevy::prelude::Resource, Default, Clone, Copy, Debug)]
