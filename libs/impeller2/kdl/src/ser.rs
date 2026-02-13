@@ -450,34 +450,29 @@ fn serialize_object_3d_mesh(mesh: &Object3DMesh) -> (KdlNode, Vec<KdlNode>) {
             let node = match mesh {
                 Mesh::Sphere { radius } => {
                     let mut node = KdlNode::new("sphere");
-                    node.entries_mut()
-                        .push(KdlEntry::new_prop("radius", *radius as f64));
+                    push_rounded_float_prop(&mut node, "radius", *radius as f64);
                     serialize_material_to_node(&mut node, material);
                     node
                 }
                 Mesh::Box { x, y, z } => {
                     let mut node = KdlNode::new("box");
-                    node.entries_mut().push(KdlEntry::new_prop("x", *x as f64));
-                    node.entries_mut().push(KdlEntry::new_prop("y", *y as f64));
-                    node.entries_mut().push(KdlEntry::new_prop("z", *z as f64));
+                    push_rounded_float_prop(&mut node, "x", *x as f64);
+                    push_rounded_float_prop(&mut node, "y", *y as f64);
+                    push_rounded_float_prop(&mut node, "z", *z as f64);
                     serialize_material_to_node(&mut node, material);
                     node
                 }
                 Mesh::Cylinder { radius, height } => {
                     let mut node = KdlNode::new("cylinder");
-                    node.entries_mut()
-                        .push(KdlEntry::new_prop("radius", *radius as f64));
-                    node.entries_mut()
-                        .push(KdlEntry::new_prop("height", *height as f64));
+                    push_rounded_float_prop(&mut node, "radius", *radius as f64);
+                    push_rounded_float_prop(&mut node, "height", *height as f64);
                     serialize_material_to_node(&mut node, material);
                     node
                 }
                 Mesh::Plane { width, depth } => {
                     let mut node = KdlNode::new("plane");
-                    node.entries_mut()
-                        .push(KdlEntry::new_prop("width", *width as f64));
-                    node.entries_mut()
-                        .push(KdlEntry::new_prop("depth", *depth as f64));
+                    push_rounded_float_prop(&mut node, "width", *width as f64);
+                    push_rounded_float_prop(&mut node, "depth", *depth as f64);
                     serialize_material_to_node(&mut node, material);
                     node
                 }
