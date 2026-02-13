@@ -6,6 +6,7 @@ mod arccos;
 mod atan2;
 mod clip;
 mod degrees;
+mod direction;
 mod fft;
 mod fftfreq;
 mod linear;
@@ -23,6 +24,7 @@ pub use arccos::*;
 pub use atan2::*;
 pub use clip::*;
 pub use degrees::*;
+pub use direction::*;
 pub use fft::*;
 pub use fftfreq::*;
 pub use linear::*;
@@ -163,6 +165,7 @@ pub fn create_default_registry() -> FormulaRegistry {
     registry.register(TranslateWorldY);
     registry.register(TranslateWorldZ);
     registry.register(TranslateWorld);
+    registry.register(Direction);
 
     registry
 }

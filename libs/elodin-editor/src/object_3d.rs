@@ -190,6 +190,13 @@ fn build_spatial_result(q: (f64, f64, f64, f64), pos: (f64, f64, f64)) -> Compon
     ComponentValue::F64(result_array)
 }
 
+/// Build result array from a 3-vector (e.g. direction in world frame)
+fn build_vec3_result(v: (f64, f64, f64)) -> ComponentValue {
+    let result = vec![v.0, v.1, v.2];
+    let result_array = Array::from_shape_vec(smallvec![3], result).unwrap();
+    ComponentValue::F64(result_array)
+}
+
 /// Compiles a formula expression into a runtime closure
 fn compile_formula(formula_name: &str, inner_expr: eql::Expr) -> CompiledExpr {
     match formula_name {
@@ -387,6 +394,36 @@ fn compile_formula(formula_name: &str, inner_expr: eql::Expr) -> CompiledExpr {
                     q,
                     (data[4] + rx, data[5] + ry, data[6] + rz),
                 ))
+            })
+        }
+
+        // direction(x, y, z): body-frame direction transformed to world frame (returns 3-vector)
+        "direction" => {
+            let eql::Expr::Tuple(elements) = inner_expr else {
+                return CompiledExpr::closure(move |_, _| {
+                    Err("direction requires tuple (receiver, x, y, z)".to_string())
+                });
+            };
+            if elements.len() != 4 {
+                return CompiledExpr::closure(move |_, _| {
+                    Err("direction requires receiver and three components (x, y, z)".to_string())
+                });
+            }
+
+            let receiver_compiled = compile_eql_expr(elements[0].clone());
+            let x_compiled = compile_eql_expr(elements[1].clone());
+            let y_compiled = compile_eql_expr(elements[2].clone());
+            let z_compiled = compile_eql_expr(elements[3].clone());
+
+            CompiledExpr::closure(move |entity_map, component_values| {
+                let spatial = receiver_compiled.execute(entity_map, component_values)?;
+                let data = extract_spatial(spatial)?;
+                let dx = extract_scalar(x_compiled.execute(entity_map, component_values)?)?;
+                let dy = extract_scalar(y_compiled.execute(entity_map, component_values)?)?;
+                let dz = extract_scalar(z_compiled.execute(entity_map, component_values)?)?;
+                let q = (data[0], data[1], data[2], data[3]);
+                let world = rotate_vector_by_quat(q, (dx, dy, dz));
+                Ok(build_vec3_result(world))
             })
         }
 

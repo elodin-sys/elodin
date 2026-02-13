@@ -316,6 +316,19 @@ fn parse_viewport(node: &KdlNode, kdl_src: &str) -> Result<Panel, KdlSchematicEr
             }
         });
 
+    let up = node
+        .get("up")
+        .and_then(|v| v.as_string())
+        .map(|s| s.to_string())
+        .and_then(|s| {
+            let trimmed = s.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_string())
+            }
+        });
+
     let mut local_arrows = Vec::new();
     if let Some(children) = node.children() {
         for child in children.nodes() {
@@ -335,6 +348,7 @@ fn parse_viewport(node: &KdlNode, kdl_src: &str) -> Result<Panel, KdlSchematicEr
         name,
         pos,
         look_at,
+        up,
         local_arrows,
         aux: (),
     }))

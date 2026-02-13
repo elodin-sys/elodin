@@ -159,6 +159,11 @@ fn serialize_viewport<T>(viewport: &Viewport<T>) -> KdlNode {
             .push(KdlEntry::new_prop("look_at", look_at.clone()));
     }
 
+    if let Some(ref up) = viewport.up {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("up", up.clone()));
+    }
+
     if viewport.hdr {
         node.entries_mut().push(KdlEntry::new_prop("hdr", true));
     }
@@ -881,6 +886,7 @@ mod tests {
                 hdr: false,
                 pos: None,
                 look_at: None,
+                up: None,
                 local_arrows: Vec::new(),
                 aux: (),
             })));
@@ -915,6 +921,7 @@ mod tests {
                 hdr: true,
                 pos: Some("(0,0,0,0, 1,2,3)".to_string()),
                 look_at: Some("(0,0,0,0, 0,0,0)".to_string()),
+                up: None,
                 local_arrows: Vec::new(),
                 aux: (),
             })));
@@ -1181,6 +1188,7 @@ graph "value" {
                 hdr: false,
                 pos: None,
                 look_at: None,
+                up: None,
                 local_arrows: Vec::new(),
                 aux: (),
             }),

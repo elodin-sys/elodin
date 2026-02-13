@@ -223,6 +223,8 @@ pub struct Viewport<T = ()> {
     pub name: Option<String>,
     pub pos: Option<String>,
     pub look_at: Option<String>,
+    /// Optional camera up vector in world frame. EQL that evaluates to a 3-vector (e.g. "(0,0,1)" or "pose.direction(0,1,1)" for body-frame direction).
+    pub up: Option<String>,
     #[serde(default)]
     pub local_arrows: Vec<VectorArrow3d>,
     pub aux: T,
@@ -240,6 +242,7 @@ impl<T> Viewport<T> {
             name: self.name.clone(),
             pos: self.pos.clone(),
             look_at: self.look_at.clone(),
+            up: self.up.clone(),
             local_arrows: self.local_arrows.clone(),
             aux: f(&self.aux),
         }
@@ -258,6 +261,7 @@ impl Default for Viewport {
             name: None,
             pos: None,
             look_at: None,
+            up: None,
             local_arrows: Vec::new(),
             aux: (),
         }
