@@ -156,7 +156,8 @@ pub fn init_db(
     // The editor will use its own constant on connect and let the user
     // change speed via the command palette.
     const PLAYBACK_FREQUENCY: f64 = 60.0;
-    let default_stream_time_step = Duration::from_secs_f64(1.0 / PLAYBACK_FREQUENCY);
+    let default_stream_time_step =
+        Duration::from_secs_f64(world.metadata.default_playback_speed / PLAYBACK_FREQUENCY);
     db.default_stream_time_step.store(
         default_stream_time_step.as_nanos() as u64,
         atomic::Ordering::SeqCst,
