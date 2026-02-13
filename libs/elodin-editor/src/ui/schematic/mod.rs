@@ -172,6 +172,8 @@ impl SchematicParam<'_, '_> {
                             name: pane_name,
                             pos: Some(viewport_data.pos.eql.clone()),
                             look_at: Some(viewport_data.look_at.eql.clone()),
+                            up: (!viewport_data.up.eql.is_empty())
+                                .then(|| viewport_data.up.eql.clone()),
                             local_arrows,
                             aux: cam_entity,
                         }))

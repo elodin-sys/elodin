@@ -176,13 +176,13 @@ pub struct MergeArgs {
     pub dry_run: bool,
     #[clap(long, short, help = "Skip confirmation prompt")]
     pub yes: bool,
-    #[clap(long, help = "Alignment timestamp (seconds) for an event in DB1")]
-    pub align1: Option<f64>,
+    #[clap(long, help = "Alignment timestamp (microseconds) for an event in DB1")]
+    pub align1: Option<i64>,
     #[clap(
         long,
-        help = "Alignment timestamp (seconds) for the same event in DB2. DB2 is shifted to align with DB1."
+        help = "Alignment timestamp (microseconds) for the same event in DB2. DB2 is shifted to align with DB1."
     )]
-    pub align2: Option<f64>,
+    pub align2: Option<i64>,
 }
 
 #[derive(clap::Args, Clone, Debug)]

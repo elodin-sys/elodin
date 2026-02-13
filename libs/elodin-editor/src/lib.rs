@@ -47,6 +47,7 @@ use ui::{
     utils::FriendlyEpoch,
 };
 
+pub mod iter;
 pub mod object_3d;
 mod offset_parse;
 pub mod plugins;
@@ -104,6 +105,8 @@ impl Plugin for EmbeddedAssetPlugin {
         embedded_asset!(app, "assets/icons/entity.png");
         // Font for ViewCube labels
         embedded_asset!(app, "assets/fonts/Roboto-Bold.ttf");
+        // Axes Cube 3D model
+        embedded_asset!(app, "assets/axes-cube.glb");
     }
 }
 
