@@ -351,7 +351,8 @@ pub struct State {
 
 impl DB {
     pub fn create(path: PathBuf) -> Result<Self, Error> {
-        Self::with_time_step(path, Duration::from_secs_f64(1.0 / 120.0))
+        // Default to 1/60 s which gives 1x real-time at 60 Hz playback frequency.
+        Self::with_time_step(path, Duration::from_secs_f64(1.0 / 60.0))
     }
 
     pub fn with_time_step(path: PathBuf, time_step: Duration) -> Result<Self, Error> {
