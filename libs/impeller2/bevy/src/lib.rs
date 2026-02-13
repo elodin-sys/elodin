@@ -52,6 +52,15 @@ pub use tcp::*;
 /// Increased from 64MB to 256MB to handle large Arrow IPC responses from SQL queries.
 pub const QUEUE_LEN: usize = 256 * 1024 * 1024;
 
+/// The playback frequency used by the editor (frames per second).
+const PLAYBACK_FREQUENCY: f64 = 60.0;
+
+/// The stream time-step that corresponds to 1x real-time playback at
+/// [`PLAYBACK_FREQUENCY`] Hz.  `time_step * frequency == 1 second` of
+/// sim-time per second of wall-clock time.
+const REAL_TIME_STREAM_TIME_STEP: Duration =
+    Duration::from_nanos((1_000_000_000.0 / PLAYBACK_FREQUENCY) as u64);
+
 #[derive(Resource)]
 pub struct PacketRx(AsyncArcQueueRx);
 
@@ -184,7 +193,10 @@ fn sink_inner(
                         .insert(metadata.component_id, metadata);
                 }
                 *world_sink.db_config = metadata.db_config.clone();
-                pending_stream_time_step = Some(metadata.db_config.default_stream_time_step);
+                // Always start playback at 1x real-time speed regardless of
+                // what the DB has stored.  Playback speed is the requester's
+                // concern; the DB should not dictate it.
+                pending_stream_time_step = Some(REAL_TIME_STREAM_TIME_STEP);
                 world_sink.commands.write_message(DbMessage::UpdateConfig);
             }
             OwnedPacket::Msg(m) if m.id == LastUpdated::ID => {
@@ -725,8 +737,8 @@ pub fn new_connection_packets(stream_id: StreamId) -> impl Iterator<Item = LenPa
         Stream {
             behavior: StreamBehavior::FixedRate(FixedRateBehavior {
                 initial_timestamp: impeller2_wkt::InitialTimestamp::Earliest,
-                timestep: Duration::from_secs_f64(1.0 / 60.0).as_nanos() as u64,
-                frequency: 60,
+                timestep: REAL_TIME_STREAM_TIME_STEP.as_nanos() as u64,
+                frequency: PLAYBACK_FREQUENCY as u64,
             }),
             id: stream_id,
         }
