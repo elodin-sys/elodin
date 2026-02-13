@@ -332,6 +332,13 @@ pub struct DB {
     pub earliest_timestamp: AtomicCell<Timestamp>,
     // Wall-clock timestamp at the moment the DB start anchor was set.
     db_start_wall_clock: AtomicCell<Timestamp>,
+    /// When true, last_updated advances with playback position instead of
+    /// reflecting the actual data extent. This makes recorded data look like
+    /// live telemetry to connected editors.
+    pub replay: AtomicBool,
+    /// The original end-of-data timestamp, saved before replay mode resets
+    /// last_updated. Used to stop playback when the recording runs out.
+    pub replay_end: AtomicI64,
 }
 
 #[derive(Default)]
@@ -381,9 +388,24 @@ impl DB {
             last_updated: AtomicCell::new(Timestamp(i64::MIN)),
             earliest_timestamp: AtomicCell::new(now),
             db_start_wall_clock: AtomicCell::new(now),
+            replay: AtomicBool::new(false),
+            replay_end: AtomicI64::new(i64::MAX),
         };
         db.save_db_state()?;
         Ok(db)
+    }
+
+    /// Enable replay mode: reset last_updated to earliest_timestamp so
+    /// connected editors see data "arriving" as playback advances.
+    pub fn enable_replay_mode(&self) {
+        self.replay.store(true, atomic::Ordering::SeqCst);
+        let earliest = self.earliest_timestamp.latest();
+        let old_lu = self.last_updated.latest().0;
+        self.replay_end.store(old_lu, atomic::Ordering::SeqCst);
+        self.last_updated
+            .value
+            .store(earliest.0, atomic::Ordering::SeqCst);
+        self.last_updated.wait_queue.wake_all();
     }
 
     pub fn with_state<O, F: FnOnce(&State) -> O>(&self, f: F) -> O {
@@ -648,6 +670,8 @@ impl DB {
             last_updated: AtomicCell::new(Timestamp(last_updated)),
             earliest_timestamp: AtomicCell::new(earliest_timestamp),
             db_start_wall_clock: AtomicCell::new(now),
+            replay: AtomicBool::new(false),
+            replay_end: AtomicI64::new(i64::MAX),
         };
         // Save updated version info
         db.save_db_state()?;
@@ -2337,15 +2361,25 @@ fn handle_stream<A: AsyncWrite + 'static>(
                 }
             })
         }
-        StreamBehavior::RealTimeBatched => stellarator::spawn(async move {
-            match handle_real_time_stream_batched(tx, req_id, db).await {
-                Ok(_) => {}
-                Err(err) if err.is_stream_closed() => {}
-                Err(err) => {
-                    warn!(?err, "error streaming data");
-                }
+        StreamBehavior::RealTimeBatched => {
+            // In replay mode, skip the RealTimeBatched handler. It uses
+            // populate_table_latest which always returns end-of-recording
+            // values for a recorded DB (no new data arrives). The FixedRate
+            // stream handles all playback data at the correct timestamp.
+            if db.replay.load(atomic::Ordering::Relaxed) {
+                return stellarator::spawn(async {});
             }
-        }),
+            stellarator::spawn(async move {
+                match handle_real_time_stream_batched(tx, req_id, db).await {
+                    Ok(_) => {}
+                    Err(err) if err.is_stream_closed() => {}
+                    Err(err) => {
+                        warn!(?err, "error streaming data");
+                    }
+                }
+            })
+        }
+
     }
 }
 
@@ -2604,6 +2638,12 @@ async fn handle_fixed_stream<A: AsyncWrite>(
         // the render that follows -- otherwise we'd display a stale frame
         // and then block again without ever rendering the correct one.
         current_timestamp = state.current_timestamp();
+        // In replay mode, stop playback when we reach the end of recorded data.
+        let replay_end = db.replay_end.load(atomic::Ordering::Relaxed);
+        if db.replay.load(atomic::Ordering::Relaxed) && current_timestamp.0 >= replay_end {
+            state.set_playing(false);
+            continue;
+        }
         let frame_start = Instant::now();
         let wall_since_last = last_frame_wall.elapsed();
         last_frame_wall = frame_start;
@@ -2650,6 +2690,13 @@ async fn handle_fixed_stream<A: AsyncWrite>(
             accum_populate_us += populate_elapsed.as_micros() as u64;
             accum_lock_us += lock_elapsed.as_micros() as u64;
             accum_send_us += send_elapsed.as_micros() as u64;
+        }
+        if db.replay.load(atomic::Ordering::Relaxed) {
+            // Small buffer (100ms) ahead of current position prevents the
+            // editor's clamp_current_time from throttling playback due to
+            // latency between last_updated and CurrentTimestamp updates.
+            let ahead = Timestamp(current_timestamp.0 + 100_000);
+            db.last_updated.update_max(ahead);
         }
         let work_elapsed = frame_start.elapsed();
         accum_work_us += work_elapsed.as_micros() as u64;

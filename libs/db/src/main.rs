@@ -75,6 +75,11 @@ struct RunArgs {
     http_addr: Option<SocketAddr>,
     #[clap(long, hide = true)]
     reset: bool,
+    #[clap(
+        long,
+        help = "Replay recorded data as live telemetry (advances last_updated with playback)"
+    )]
+    replay: bool,
 }
 
 #[derive(clap::Args, Clone, Debug)]
@@ -275,6 +280,7 @@ async fn main() -> miette::Result<()> {
             config,
             reset,
             start_timestamp,
+            replay,
             ..
         }) => {
             let path = path.unwrap_or_else(|| {
@@ -290,6 +296,10 @@ async fn main() -> miette::Result<()> {
             }
             info!(?path, "starting db");
             let server = Server::new(&path, addr).into_diagnostic()?;
+            if replay {
+                info!("replay mode enabled: last_updated will advance with playback");
+                server.db.enable_replay_mode();
+            }
             if let Some(start_timestamp) = start_timestamp {
                 server
                     .db
