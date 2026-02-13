@@ -2379,7 +2379,6 @@ fn handle_stream<A: AsyncWrite + 'static>(
                 }
             })
         }
-
     }
 }
 
