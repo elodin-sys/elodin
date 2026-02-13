@@ -773,6 +773,7 @@ fn component_value_to_axis_angle(value: &ComponentValue) -> Result<(Vec3, f32), 
 
 /// System that attaches JointAnimationComponent to joint entities when scenes load
 /// This runs when Object3DState changes (e.g., when a scene finishes loading)
+#[allow(clippy::too_many_arguments)]
 pub fn attach_joint_animations(
     In(scene_entity): In<Option<Entity>>,
     objects_query: Query<&Object3DState>,
