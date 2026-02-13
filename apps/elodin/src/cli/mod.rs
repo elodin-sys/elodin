@@ -1,7 +1,9 @@
 use clap::{Parser, Subcommand};
 use miette::Context;
 use miette::IntoDiagnostic;
+#[cfg(not(target_os = "windows"))]
 use miette::miette;
+#[cfg(not(target_os = "windows"))]
 use stellarator::util::CancelToken;
 use tracing_subscriber::{EnvFilter, fmt::time::ChronoLocal};
 mod editor;

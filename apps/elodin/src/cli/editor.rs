@@ -7,6 +7,7 @@ use std::io::{Read, Seek, Write};
 use std::net::{Ipv6Addr, SocketAddr};
 use std::path::PathBuf;
 use std::thread::JoinHandle;
+#[cfg(not(target_os = "windows"))]
 use std::time::Duration;
 use stellarator::util::CancelToken;
 use tokio::runtime::Runtime;
