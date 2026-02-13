@@ -579,6 +579,8 @@ pub fn on_scene_ready(
     mut scene_queue: Local<HashSet<Entity>>,
     added_scenes: Query<Entity, Added<SceneRoot>>,
     scene_instances: Query<&SceneInstance>,
+    scene_roots: Query<&SceneRoot>,
+    names: Query<&Name>,
     scene_spawner: Res<SceneSpawner>,
 ) -> bool {
     // Add newly added scenes to the queue.
@@ -586,12 +588,12 @@ pub fn on_scene_ready(
         scene_queue.insert(entity);
     }
 
-    // Check if any queued scenes are ready.
-    let mut any_ready = false;
+    // Collect which queued scenes became ready this frame.
+    let mut ready_entities = Vec::new();
     scene_queue.retain(|&entity| {
         if let Ok(instance) = scene_instances.get(entity) {
             if scene_spawner.instance_is_ready(**instance) {
-                any_ready = true;
+                ready_entities.push(entity);
                 false // Remove from queue since it's ready.
             } else {
                 true // Keep in queue since it's not ready yet.
@@ -602,6 +604,20 @@ pub fn on_scene_ready(
         }
     });
 
+    let any_ready = !ready_entities.is_empty();
+    for entity in &ready_entities {
+        let name = names.get(*entity).map(|n| n.as_str()).unwrap_or("<no name>");
+        let scene_info = scene_roots
+            .get(*entity)
+            .map(|r| format!("handle id={:?}", r.0.id()))
+            .unwrap_or_else(|_| "<no SceneRoot>".to_string());
+        info!(
+            entity = ?entity,
+            name = %name,
+            scene = %scene_info,
+            "A scene is ready."
+        );
+    }
     any_ready
 }
 
