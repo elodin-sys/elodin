@@ -573,31 +573,31 @@ fn find_entities<'a, T>(
         .filter_map(move |id| predicate(id).map(|x| (id, x)))
 }
 
-/// Conditional system that checks if scenes are ready
-/// Returns true when at least one scene is ready, false otherwise
+/// Conditional system that checks if scenes are ready. Returns true when at
+/// least one scene is ready, false otherwise.
 pub fn on_scene_ready(
     mut scene_queue: Local<HashSet<Entity>>,
     added_scenes: Query<Entity, Added<SceneRoot>>,
     scene_instances: Query<&SceneInstance>,
     scene_spawner: Res<SceneSpawner>,
 ) -> bool {
-    // Add newly added scenes to the queue
+    // Add newly added scenes to the queue.
     for entity in added_scenes.iter() {
         scene_queue.insert(entity);
     }
 
-    // Check if any queued scenes are ready
+    // Check if any queued scenes are ready.
     let mut any_ready = false;
     scene_queue.retain(|&entity| {
         if let Ok(instance) = scene_instances.get(entity) {
             if scene_spawner.instance_is_ready(**instance) {
                 any_ready = true;
-                false // Remove from queue since it's ready
+                false // Remove from queue since it's ready.
             } else {
-                true // Keep in queue, not ready yet
+                true // Keep in queue since it's not ready yet.
             }
         } else {
-            // SceneInstance not found yet, keep in queue
+            // SceneInstance not found yet; keep in queue.
             true
         }
     });
@@ -659,7 +659,8 @@ pub fn update_object_3d_system(
     }
 }
 
-/// Converts a ComponentValue to an angle-axis rotation (axis Vec3, angle f32 in radians)
+/// Converts a ComponentValue to an angle-axis rotation (axis Vec3, angle f32 in radians).
+/// 
 /// Input: 3-element vector where direction is axis and magnitude is angle in DEGREES
 /// Output: (normalized axis, angle in radians)
 fn component_value_to_axis_angle(value: &ComponentValue) -> Result<(Vec3, f32), String> {
@@ -723,7 +724,7 @@ pub fn attach_joint_animations(
     ctx: Res<EqlContext>,
 ) {
     for (object_entity, object_3d) in objects_query.iter() {
-        // Only process GLB meshes with animations
+        // Only process GLB meshes with animations.
         if !matches!(object_3d.data.mesh, impeller2_wkt::Object3DMesh::Glb { .. }) {
             continue;
         }
@@ -744,14 +745,14 @@ pub fn attach_joint_animations(
             );
         }
 
-        // Find entities that match joint names and compile their expressions
+        // Find entities that match joint names and compile their expressions.
         let entity_compiled_expr = find_entities(object_entity, &children, |id| {
             names.get(id).ok().and_then(|name| {
                 object_3d.joint_animations.iter().enumerate().find_map(
                     |(i, (joint_name, eql_expr))| {
                         if name.as_str() == joint_name {
                             found_animations.set(i, true);
-                            // Compile the EQL expression here
+                            // Compile the EQL expression here.
                             ctx.0
                                 .parse_str(eql_expr)
                                 .map(compile_eql_expr)
@@ -780,13 +781,13 @@ pub fn attach_joint_animations(
                 continue;
             }
 
-            // Get the original transform to preserve the bone's initial rotation
+            // Get the original transform to preserve the bone's initial rotation.
             let original_transform = transforms
                 .get(joint_entity)
                 .cloned()
                 .unwrap_or(Transform::IDENTITY);
 
-            // Attach the component with the compiled expression and original transform
+            // Attach the component with the compiled expression and original transform.
             commands
                 .entity(joint_entity)
                 .insert(JointAnimationComponent {
@@ -816,8 +817,8 @@ pub fn attach_joint_animations(
     }
 }
 
-/// System that updates joint animations based on EQL expressions
-/// This queries for entities with both Transform and JointAnimationComponent
+/// System that updates joint animations based on EQL expressions. This queries
+/// for entities with both Transform and JointAnimationComponent.
 pub fn update_joint_animations(
     mut joint_query: Query<(&mut Transform, &JointAnimationComponent)>,
     entity_map: Res<EntityMap>,
