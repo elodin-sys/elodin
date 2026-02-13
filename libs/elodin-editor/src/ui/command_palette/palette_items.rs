@@ -48,7 +48,9 @@ use crate::{
             SchematicLiveReloadRx, load_schematic_file,
         },
         tiles::{self, set_mode_all},
-        timeline::{StreamTickOrigin, timeline_slider::UITick},
+        timeline::{
+            PlaybackSpeed, StreamTickOrigin, playback_time_step_from_speed, timeline_slider::UITick,
+        },
     },
 };
 
@@ -743,12 +745,14 @@ fn set_playback_speed() -> PaletteItem {
                         "SPEED".to_string(),
                         move |_: In<String>,
                               packet_tx: Res<PacketTx>,
+                              mut playback_speed: ResMut<PlaybackSpeed>,
                               stream_id: Res<CurrentStreamId>| {
+                            playback_speed.0 = speed;
                             packet_tx.send_msg(SetStreamState {
                                 id: stream_id.0,
                                 playing: None,
                                 timestamp: None,
-                                time_step: Some(Duration::from_secs_f64(speed / 60.0)),
+                                time_step: Some(playback_time_step_from_speed(speed)),
                                 frequency: None,
                             });
                             PaletteEvent::Exit
