@@ -201,7 +201,11 @@ fn sink_inner(
             }
             OwnedPacket::Msg(m) if m.id == LastUpdated::ID => {
                 let m = m.parse::<LastUpdated>()?;
-                *world_sink.max_tick = m;
+                // Only accept LastUpdated values that are >= the current value to
+                // prevent out-of-order messages from causing the timeline to flicker.
+                if m.0 >= world_sink.max_tick.0 {
+                    *world_sink.max_tick = m;
+                }
             }
             OwnedPacket::Msg(m) if m.id == DbConfig::ID => {
                 let config = m.parse::<DbConfig>()?;
