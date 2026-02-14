@@ -743,13 +743,9 @@ pub fn new_connection_packets(stream_id: StreamId) -> impl Iterator<Item = LenPa
             id: stream_id,
         }
         .into_len_packet(),
-        // Experiment: RealTimeBatched stream disabled to verify editor only uses FixedRate.
-        // Going to leave this for a while just in case there's some bad side effect I can't produce.
-        // Stream {
-        //     behavior: StreamBehavior::RealTimeBatched,
-        //     id: fastrand::u64(..),
-        // }
-        // .into_len_packet(),
+        // Editor uses only this FixedRate stream (playback, timeline, rewind). Other clients
+        // (e.g. rust_client, msp-osd, or a DB on Aleph) that want RealTime or RealTimeBatched
+        // create their own Stream with the desired behavior when connecting.
         GetEarliestTimestamp.into_len_packet(),
         DumpMetadata.into_len_packet(),
         GetDbSettings.into_len_packet(),
