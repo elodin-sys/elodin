@@ -16,7 +16,7 @@ use bevy::{
 use egui::{self, Color32, TextureHandle, Vec2};
 use impeller2::types::{OwnedPacket, Timestamp};
 use impeller2_bevy::{CommandsExt, CurrentStreamId, PacketGrantR};
-use impeller2_wkt::{CurrentTimestamp, FixedRateMsgStream, FixedRateOp};
+use impeller2_wkt::{FixedRateMsgStream, FixedRateOp};
 use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::{self};
@@ -73,13 +73,19 @@ impl Default for VideoStream {
 
 /// Number of frames to wait before sending the stream request.
 /// This prevents blocking during initial schematic loading.
-const FRAMES_BEFORE_CONNECT: u32 = 30;
+const FRAMES_BEFORE_CONNECT: u32 = 5;
 
 /// Timeout in seconds before considering a stream disconnected.
 const STREAM_TIMEOUT_SECS: f32 = 5.0;
 
 /// Delay before attempting to reconnect after disconnect.
 const RECONNECT_DELAY: Duration = Duration::from_secs(2);
+
+/// Timeout for the initial connection attempt.
+/// If no frames arrive within this window the request is assumed lost
+/// (e.g. sent during a TCP reconnection race) and we transition to
+/// `Disconnected` so the retry logic re-sends `FixedRateMsgStream`.
+const CONNECT_TIMEOUT_SECS: f32 = 30.0;
 
 #[derive(Default, Clone)]
 pub enum StreamState {
@@ -108,16 +114,11 @@ pub struct VideoDecoderHandle {
 
 #[cfg(not(target_os = "macos"))]
 fn decode_video(
-    frame_width: Arc<AtomicUsize>,
+    _frame_width: Arc<AtomicUsize>,
     packet_rx: flume::Receiver<(Vec<u8>, Timestamp)>,
     image_tx: flume::Sender<(Image, Timestamp)>,
 ) {
-    use pic_scale::{
-        ImageStore, ImageStoreMut, LinearScaler, ResamplingFunction, Scaling, ThreadingPolicy,
-    };
     let mut decoder = openh264::decoder::Decoder::new().unwrap();
-    let mut scaler = LinearScaler::new(ResamplingFunction::Bilinear);
-    scaler.set_threading_policy(ThreadingPolicy::Adaptive);
 
     let mut rgba = vec![];
     while let Ok((packet, timestamp)) = packet_rx.recv() {
@@ -127,45 +128,20 @@ fn decode_video(
             rgba.clear();
             rgba.resize(width * height * 4, 0);
             yuv.write_rgba8(&mut rgba);
-            let input = ImageStore::<'_, u8, 4>::borrow(&rgba, width, height).unwrap();
-
-            let (width, height) = (width as f64, height as f64);
-            let desired_width = frame_width.load(atomic::Ordering::Relaxed);
-            let aspect_ratio = height / width;
-            // Use original dimensions if desired_width is 0 (not yet set by UI)
-            let new_width = if desired_width == 0 {
-                width
-            } else {
-                width.min(desired_width as f64)
-            };
-            let new_height = (new_width * aspect_ratio) as usize;
-            let new_width = new_width as usize;
-
-            if new_width == 0 || new_height == 0 {
-                continue;
-            }
-
-            let mut pixels = vec![0; new_width * new_height * 4];
-
-            {
-                let mut out =
-                    ImageStoreMut::<'_, u8, 4>::borrow(&mut pixels, new_width, new_height).unwrap();
-                scaler.resize_rgba(&input, &mut out, false).unwrap();
-            }
 
             let image = Image::new(
                 Extent3d {
-                    width: new_width as u32,
-                    height: new_height as u32,
+                    width: width as u32,
+                    height: height as u32,
                     depth_or_array_layers: 1,
                 },
                 TextureDimension::D2,
-                pixels,
+                rgba.clone(),
                 bevy_render::render_resource::TextureFormat::Rgba8UnormSrgb,
                 RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
             );
 
-            let _ = image_tx.send((image, timestamp));
+            let _ = image_tx.try_send((image, timestamp));
         }
     }
 }
@@ -216,7 +192,7 @@ fn decode_video(
                     bevy_render::render_resource::TextureFormat::Rgba8UnormSrgb,
                     RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
                 );
-                let _ = image_tx.send((image, timestamp));
+                let _ = image_tx.try_send((image, timestamp));
             }
             Ok(None) => {
                 if frame_count <= 3 {
@@ -237,8 +213,8 @@ fn decode_video(
 
 impl Default for VideoDecoderHandle {
     fn default() -> Self {
-        let (packet_tx, packet_rx) = flume::bounded::<(Vec<u8>, Timestamp)>(8);
-        let (image_tx, image_rx) = flume::bounded(8);
+        let (packet_tx, packet_rx) = flume::bounded::<(Vec<u8>, Timestamp)>(32);
+        let (image_tx, image_rx) = flume::bounded(32);
         let width = Arc::new(AtomicUsize::new(0));
         let frame_width = width.clone();
         let _handle = std::thread::spawn(move || decode_video(frame_width, packet_rx, image_tx));
@@ -285,7 +261,6 @@ pub struct VideoStreamWidget<'w, 's> {
     query: Query<'w, 's, WidgetQuery>,
     commands: Commands<'w, 's>,
     stream_id: Res<'w, CurrentStreamId>,
-    current_time: Res<'w, CurrentTimestamp>,
     images: ResMut<'w, Assets<Image>>,
     window_settings: Query<'w, 's, &'static bevy_egui::EguiContextSettings>,
 }
@@ -355,17 +330,22 @@ impl super::widgets::WidgetSystem for VideoStreamWidget<'_, '_> {
                 }
             }
             StreamState::Connecting { since } => {
-                let since = *since;
+                let since = *since; // copy to release borrow on stream.state
                 // Check if we've received any frames (transition to Streaming)
                 decoder.render_frame(&mut stream);
                 if stream.frame_count > 0 {
                     stream.state = StreamState::Streaming;
                     stream.last_update = Instant::now();
-                } else if since.elapsed().as_secs_f32() > STREAM_TIMEOUT_SECS {
-                    // No frames arrived within the timeout — the connection
-                    // request may have been orphaned (e.g. DB restart or TCP
-                    // drop). Transition to Disconnected so the reconnect logic
-                    // can re-send the stream request.
+                } else if since.elapsed().as_secs_f32() > CONNECT_TIMEOUT_SECS {
+                    // The initial request may have been lost (e.g. sent
+                    // during a TCP reconnection race) or the source may be
+                    // unavailable.  Transition to Disconnected so the retry
+                    // logic re-sends FixedRateMsgStream.
+                    //
+                    // The timeout is intentionally generous (30 s) to avoid
+                    // unnecessary duplicate handlers when the DB handler is
+                    // legitimately waiting for a slow source (e.g. OBS
+                    // Studio that hasn't connected yet).
                     stream.state = StreamState::Disconnected {
                         retry_after: Instant::now() + RECONNECT_DELAY,
                     };
@@ -469,12 +449,33 @@ impl super::widgets::WidgetSystem for VideoStreamWidget<'_, '_> {
                     .store(width as usize, atomic::Ordering::Relaxed);
 
                 if let Some(frame) = stream.current_frame.take() {
-                    image_node.image = state.images.add(frame);
+                    if let Some(existing) = state.images.get_mut(&image_node.image) {
+                        if existing.width() == frame.width()
+                            && existing.height() == frame.height()
+                            && let Some(dst) = &mut existing.data
+                            && let Some(src) = &frame.data
+                        {
+                            // Reuse the existing GPU texture — just overwrite pixel data.
+                            // The mutable borrow triggers Bevy change detection so the
+                            // texture is re-uploaded to the GPU automatically.
+                            dst.copy_from_slice(src);
+                        } else {
+                            // Resolution changed or missing data — must allocate a new texture.
+                            image_node.image = state.images.add(frame);
+                        }
+                    } else {
+                        // First frame — no existing texture yet.
+                        image_node.image = state.images.add(frame);
+                    }
                 }
 
-                if let Some(frame_timestamp) = stream.frame_timestamp
-                    && (frame_timestamp.0 - state.current_time.0.0).abs() > 500000
-                {
+                // Show "Loss of Signal" only when the DB has genuinely
+                // stopped sending data (wall-clock based).  Brief H.264
+                // decode failures (e.g. a missed reference frame before
+                // the next keyframe) should NOT trigger the overlay — the
+                // last good frame is still displayed and the decoder will
+                // recover at the next keyframe.
+                if stream.last_update.elapsed().as_secs_f32() > STREAM_TIMEOUT_SECS {
                     ui.painter()
                         .rect_filled(max_rect, 0, Color32::BLACK.opacity(0.75));
                     ui.put(
@@ -483,11 +484,9 @@ impl super::widgets::WidgetSystem for VideoStreamWidget<'_, '_> {
                             egui::vec2(max_rect.width(), 20.0),
                         ),
                         egui::Label::new(
-                            egui::RichText::new(
-                                "Loss of Signal - Frame out of date. Waiting for new keyframe",
-                            )
-                            .size(16.0)
-                            .color(get_scheme().highlight),
+                            egui::RichText::new("Loss of Signal")
+                                .size(16.0)
+                                .color(get_scheme().highlight),
                         ),
                     );
                 }

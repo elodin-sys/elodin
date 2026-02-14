@@ -17,8 +17,8 @@ REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 echo "Building elodinsink GStreamer plugin..."
 cargo build --release --manifest-path="$REPO_ROOT/fsw/gstreamer/Cargo.toml"
 
-# Set plugin path to include our built plugin
-export GST_PLUGIN_PATH="${GST_PLUGIN_PATH}:$REPO_ROOT/target/release"
+# Set plugin path to include our built plugin (prepend so local build overrides nix)
+export GST_PLUGIN_PATH="$REPO_ROOT/target/release:${GST_PLUGIN_PATH}"
 
 echo "Waiting for elodin-db on 127.0.0.1:2240..."
 
@@ -47,8 +47,9 @@ echo ""
 # - h264parse config-interval=-1: ensures SPS/PPS sent with every keyframe
 # - elodinsink: custom plugin that sends NAL units to Elodin DB
 gst-launch-1.0 \
-    videotestsrc pattern=ball ! \
-    video/x-raw,framerate=60/1 ! \
+    videotestsrc pattern=ball !  \
+    clockoverlay time-format="%H:%M:%S" font-desc="Sans, 48" color=-16776961 ! \
+    video/x-raw,width=640,height=512,framerate=60/1 ! \
     videoconvert ! \
     x264enc tune=zerolatency key-int-max=12 ! \
     video/x-h264,profile=baseline ! \
