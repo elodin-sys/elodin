@@ -376,6 +376,12 @@ async fn tick(
         // skip this iteration to avoid writing at the old (higher) timestamp,
         // which would cause TimeTravel errors on the next tick.
         if tick_counter.load(Ordering::SeqCst) < tick {
+            // Truncate happened: reset last_updated so the next tick's
+            // update_max can set it to the new (lower) timestamp.
+            db.last_updated.store(Timestamp(i64::MIN));
+            // Reset the pacing deadline so we don't run in a tight
+            // catch-up loop against the now-stale old deadline.
+            next_tick_deadline = None;
             continue;
         }
 
