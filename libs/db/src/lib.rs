@@ -1650,7 +1650,9 @@ async fn handle_packet<A: AsyncWrite + 'static>(
                             _ => (),
                         }
                     }
-                    db.last_updated.wait_for(|time| time > last_updated).await;
+                    // Wake on any change (not only increase) so replay-mode backward
+                    // scrubs are sent to the editor and rolling windows track correctly.
+                    db.last_updated.wait_for(|time| time != last_updated).await;
                 }
             });
         }
@@ -2692,14 +2694,14 @@ async fn handle_fixed_stream<A: AsyncWrite>(
             accum_send_us += send_elapsed.as_micros() as u64;
         }
         if db.replay.load(atomic::Ordering::Relaxed) {
-            // Small buffer (100ms) ahead of current position prevents the
+            // Small buffer (20ms) ahead of current position prevents the
             // editor's clamp_current_time from throttling playback due to
             // latency between last_updated and CurrentTimestamp updates.
             // Direct store (not update_max) so that scrubbing backward
             // decreases last_updated and the editor's time range tracks
             // the playback position.
             let replay_end = db.replay_end.load(atomic::Ordering::Relaxed);
-            let ahead = Timestamp((current_timestamp.0 + 100_000).min(replay_end));
+            let ahead = Timestamp((current_timestamp.0 + 20_000).min(replay_end));
             db.last_updated.store(ahead);
         }
         let work_elapsed = frame_start.elapsed();

@@ -294,6 +294,11 @@ async fn main() -> miette::Result<()> {
                     tracing::warn!("failed to remove existing data directory");
                 });
             }
+            if replay && !path.exists() {
+                return Err(miette::miette!(
+                    "--replay cannot be used when the database path does not exist; create and record data first"
+                ));
+            }
             info!(?path, "starting db");
             let server = Server::new(&path, addr).into_diagnostic()?;
             // Apply start_timestamp before enable_replay_mode so replay uses the
@@ -306,6 +311,11 @@ async fn main() -> miette::Result<()> {
                     .into_diagnostic()?;
             }
             if replay {
+                if server.db.last_updated.latest().0 == i64::MIN {
+                    return Err(miette::miette!(
+                        "--replay cannot be used on an empty database; record data first"
+                    ));
+                }
                 info!("replay mode enabled: last_updated will advance with playback");
                 server.db.enable_replay_mode();
             }
