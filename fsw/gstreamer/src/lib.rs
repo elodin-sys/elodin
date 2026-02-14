@@ -68,6 +68,7 @@ mod elodinsink {
             pub base_timestamp: Option<Timestamp>, // DB's last_updated at connect time
             pub first_pts: Option<gst::ClockTime>, // First buffer PTS after connect
             pub last_written_ts: Option<Timestamp>, // Last timestamp written to DB (monotonicity guard)
+            pub first_buffer_connected: bool, // Whether we've reconnected for the first buffer
         }
 
         impl Default for ElodinSinkState {
@@ -79,6 +80,7 @@ mod elodinsink {
                     base_timestamp: None,
                     first_pts: None,
                     last_written_ts: None,
+                    first_buffer_connected: false,
                 }
             }
         }
@@ -90,6 +92,7 @@ mod elodinsink {
                 state.connection = None;
                 state.base_timestamp = None;
                 state.first_pts = None; // Reset PTS anchor on reconnect
+                state.first_buffer_connected = false;
 
                 match TcpStream::connect(state.db_addr) {
                     Ok(mut stream) => {
@@ -208,15 +211,22 @@ mod elodinsink {
                 // Without this, frames would be written with a stale
                 // timestamp from pipeline-start time, landing far behind
                 // the editor's current playback position.
+                //
+                // We use a dedicated `first_buffer_connected` flag rather
+                // than checking `first_pts.is_none()` because buffers can
+                // arrive with `pts = None`, which would leave `first_pts`
+                // as `None` and trigger reconnection on every packet.
                 {
                     let state = self.state.lock().unwrap();
-                    if state.first_pts.is_none() {
+                    if !state.first_buffer_connected {
                         drop(state); // release lock before reconnecting
                         gst::info!(
                             gst::CAT_DEFAULT,
                             "First buffer arrived — reconnecting to refresh base_timestamp"
                         );
                         self.connect()?;
+                        // Mark that we've handled the first-buffer reconnect.
+                        self.state.lock().unwrap().first_buffer_connected = true;
                     }
                 }
 

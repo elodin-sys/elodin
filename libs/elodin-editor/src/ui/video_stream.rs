@@ -24,6 +24,7 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::{self};
+use std::time::Instant;
 
 use super::{
     PaneName,
@@ -94,6 +95,16 @@ const NO_DATA_THRESHOLD_US: i64 = 500_000;
 /// `last_decoded_ts`, treat it as sequential playback and send a single
 /// `DecoderInput::Frame` (no decoder reset).  200 ms.
 const SEQUENTIAL_THRESHOLD_US: i64 = 200_000;
+
+/// Maximum number of raw H.264 frames to keep in the cache.
+/// At ~25 KB/frame (OBS 1080p), 50 000 frames ≈ 1.2 GB, covering ~28 min
+/// at 30 fps.  Prevents unbounded memory growth during long live sessions.
+const MAX_RAW_FRAMES: usize = 50_000;
+
+/// If the live-tail `FixedRateMsgStream` has not delivered a frame for this
+/// many seconds, re-send the backfill and stream requests to recover from
+/// a dropped DB connection.
+const STREAM_RECOVERY_TIMEOUT_SECS: f32 = 30.0;
 
 // ---------------------------------------------------------------------------
 // H.264 keyframe detection
@@ -182,12 +193,18 @@ pub struct VideoFrameCache {
     keyframe_index: Vec<Timestamp>,
     /// Maximum number of decoded frames to retain.
     max_frames: usize,
+    /// Maximum number of raw frames to retain.
+    max_raw_frames: usize,
     /// Timestamp of the last frame fed to the decoder (for sequential opt).
     last_decoded_ts: Option<Timestamp>,
     /// `true` while a `SeekBatch` is in-flight on the decoder thread.
     seeking: bool,
     /// Generation counter for `SeekBatch` coalescing.
     seek_generation: u64,
+    /// Wall-clock time of the last frame received from the live-tail
+    /// `FixedRateMsgStream`.  Used to detect DB disconnection and trigger
+    /// recovery.  `None` until the first live frame arrives.
+    last_stream_activity: Option<Instant>,
 }
 
 impl Default for VideoFrameCache {
@@ -197,9 +214,11 @@ impl Default for VideoFrameCache {
             decoded_frames: BTreeMap::new(),
             keyframe_index: Vec::new(),
             max_frames: MAX_CACHED_FRAMES,
+            max_raw_frames: MAX_RAW_FRAMES,
             last_decoded_ts: None,
             seeking: false,
             seek_generation: 0,
+            last_stream_activity: None,
         }
     }
 }
@@ -268,9 +287,41 @@ impl VideoFrameCache {
             .map(|(t, d)| (*t, d))
     }
 
+    /// Insert a raw frame and evict oldest entries if over the limit.
+    pub fn insert_raw(&mut self, timestamp: Timestamp, data: Vec<u8>) {
+        if is_keyframe(&data) {
+            self.record_keyframe(timestamp);
+        }
+        self.raw_frames.insert(timestamp, data);
+        self.evict_raw_if_needed();
+    }
+
     fn evict_if_needed(&mut self) {
         while self.decoded_frames.len() > self.max_frames {
             if self.decoded_frames.pop_first().is_none() {
+                break;
+            }
+        }
+    }
+
+    fn evict_raw_if_needed(&mut self) {
+        while self.raw_frames.len() > self.max_raw_frames {
+            if let Some((evicted_ts, _)) = self.raw_frames.pop_first() {
+                // Also remove stale keyframe index entries that are now
+                // before the earliest raw frame.
+                if let Some(&first_raw_ts) = self.raw_frames.keys().next() {
+                    self.keyframe_index.retain(|ts| *ts >= first_raw_ts);
+                }
+                // Also remove decoded frames that are before the evicted
+                // raw frame since they can no longer be re-derived.
+                while let Some((&decoded_ts, _)) = self.decoded_frames.iter().next() {
+                    if decoded_ts <= evicted_ts {
+                        self.decoded_frames.pop_first();
+                    } else {
+                        break;
+                    }
+                }
+            } else {
                 break;
             }
         }
@@ -500,17 +551,19 @@ impl Default for VideoDecoderHandle {
 
 impl VideoDecoderHandle {
     /// Send a single raw H.264 frame for sequential decode (warm decoder).
-    pub fn process_frame(&self, timestamp: Timestamp, frame_data: &[u8]) {
-        let _ = self
-            .tx
-            .try_send(DecoderInput::Frame(frame_data.to_vec(), timestamp));
+    /// Returns `true` if the frame was successfully enqueued.
+    pub fn process_frame(&self, timestamp: Timestamp, frame_data: &[u8]) -> bool {
+        self.tx
+            .try_send(DecoderInput::Frame(frame_data.to_vec(), timestamp))
+            .is_ok()
     }
 
     /// Send a batch of raw frames for seek-decode (resets the decoder).
-    pub fn send_seek_batch(&self, frames: Vec<(Timestamp, Vec<u8>)>, generation: u64) {
-        let _ = self
-            .tx
-            .try_send(DecoderInput::SeekBatch { frames, generation });
+    /// Returns `true` if the batch was successfully enqueued.
+    pub fn send_seek_batch(&self, frames: Vec<(Timestamp, Vec<u8>)>, generation: u64) -> bool {
+        self.tx
+            .try_send(DecoderInput::SeekBatch { frames, generation })
+            .is_ok()
     }
 
     /// Drain decoded frames from the decoder thread into the cache.
@@ -579,10 +632,8 @@ fn send_stream_request(commands: &mut Commands, entity: Entity, msg_id: [u8; 2],
                 && let Some(timestamp) = msg_buf.timestamp
                 && let Ok(mut cache) = caches.get_mut(entity)
             {
-                cache.raw_frames.insert(timestamp, msg_buf.buf.to_vec());
-                if is_keyframe(&msg_buf.buf) {
-                    cache.record_keyframe(timestamp);
-                }
+                cache.insert_raw(timestamp, msg_buf.buf.to_vec());
+                cache.last_stream_activity = Some(Instant::now());
             }
             false
         },
@@ -603,10 +654,7 @@ fn send_backfill_request(commands: &mut Commands, entity: Entity, msg_id: [u8; 2
                 && let Ok(mut cache) = caches.get_mut(entity)
             {
                 for (timestamp, data) in batch.data {
-                    if is_keyframe(&data) {
-                        cache.record_keyframe(timestamp);
-                    }
-                    cache.raw_frames.insert(timestamp, data);
+                    cache.insert_raw(timestamp, data);
                 }
             }
             true // one-shot
@@ -694,13 +742,10 @@ impl super::widgets::WidgetSystem for VideoStreamWidget<'_, '_> {
                 // --- 2. Pick the best frame to display ---
                 // First check the decoded cache for a frame at-or-before
                 // the current playback position.
-                let mut displayed = false;
-                if let Some((ts, img)) = cache.decoded_at_or_before(current_ts) {
-                    // Only display if reasonably close to playback position.
-                    if (current_ts.0 - ts.0).abs() <= NO_DATA_THRESHOLD_US {
-                        stream.current_frame = Some(img.clone());
-                        displayed = true;
-                    }
+                if let Some((ts, img)) = cache.decoded_at_or_before(current_ts)
+                    && (current_ts.0 - ts.0).abs() <= NO_DATA_THRESHOLD_US
+                {
+                    stream.current_frame = Some(img.clone());
                 }
 
                 // --- 3. Feed the decoder from the raw cache ---
@@ -719,14 +764,16 @@ impl super::widgets::WidgetSystem for VideoStreamWidget<'_, '_> {
                             && ts.0 <= current_ts.0 + SEQUENTIAL_THRESHOLD_US
                         {
                             let data = data.clone();
-                            decoder.process_frame(ts, &data);
-                            cache.last_decoded_ts = Some(ts);
+                            if decoder.process_frame(ts, &data) {
+                                cache.last_decoded_ts = Some(ts);
+                            }
                         }
-                    } else if cache.has_raw_data_near(current_ts, NO_DATA_THRESHOLD_US)
-                        && !displayed
-                    {
+                    } else if cache.has_raw_data_near(current_ts, NO_DATA_THRESHOLD_US) {
                         // Jump / scrub / first frame: need a full seek from
-                        // the nearest keyframe.
+                        // the nearest keyframe.  We seek even when `displayed`
+                        // is true (stale decoded frame from a previous visit)
+                        // because the decoder must be repositioned for
+                        // sequential playback to resume from the new position.
                         let seek_start = cache
                             .nearest_keyframe_before(current_ts)
                             .unwrap_or(Timestamp(current_ts.0.saturating_sub(1_000_000)));
@@ -735,10 +782,23 @@ impl super::widgets::WidgetSystem for VideoStreamWidget<'_, '_> {
                         let frames = cache.get_raw_sequence(seek_start, seek_end);
                         if !frames.is_empty() {
                             cache.seek_generation += 1;
-                            decoder.send_seek_batch(frames, cache.seek_generation);
-                            cache.seeking = true;
+                            if decoder.send_seek_batch(frames, cache.seek_generation) {
+                                cache.seeking = true;
+                            }
                         }
                     }
+                }
+
+                // --- 4. Live-stream recovery ---
+                // If the FixedRateMsgStream was previously delivering frames
+                // but has gone silent (e.g. DB connection dropped and
+                // reconnected), re-send both requests to recover.
+                if let Some(last) = cache.last_stream_activity
+                    && last.elapsed().as_secs_f32() > STREAM_RECOVERY_TIMEOUT_SECS
+                {
+                    send_backfill_request(&mut state.commands, entity, msg_id);
+                    send_stream_request(&mut state.commands, entity, msg_id, stream_id);
+                    cache.last_stream_activity = Some(Instant::now());
                 }
             }
             StreamState::Error(_) => {}
