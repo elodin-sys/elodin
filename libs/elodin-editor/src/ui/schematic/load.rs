@@ -822,6 +822,7 @@ impl LoadSchematicParams<'_, '_> {
                             ..Default::default()
                         },
                         crate::ui::video_stream::VideoDecoderHandle::default(),
+                        crate::ui::video_stream::VideoFrameCache::default(),
                     ))
                     .id();
 
