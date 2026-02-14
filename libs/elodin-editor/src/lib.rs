@@ -1094,6 +1094,8 @@ impl TimeRangeBehavior {
         start: Offset::Earliest(Duration::ZERO),
         end: Offset::Latest(Duration::ZERO),
     };
+    const LAST_5S: Self = Self::last(Duration::from_secs(5));
+    const LAST_15S: Self = Self::last(Duration::from_secs(15));
     const LAST_30S: Self = Self::last(Duration::from_secs(30));
     const LAST_1M: Self = Self::last(Duration::from_secs(60));
     const LAST_5M: Self = Self::last(Duration::from_secs(60 * 5));

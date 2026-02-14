@@ -318,6 +318,8 @@ fn time_range_window(
 ) -> impl FnOnce(&mut egui::Ui) + '_ {
     const VISIBLE_RANGES: &[TimeRangeBehavior] = &[
         TimeRangeBehavior::FULL,
+        TimeRangeBehavior::LAST_5S,
+        TimeRangeBehavior::LAST_15S,
         TimeRangeBehavior::LAST_30S,
         TimeRangeBehavior::LAST_1M,
         TimeRangeBehavior::LAST_5M,

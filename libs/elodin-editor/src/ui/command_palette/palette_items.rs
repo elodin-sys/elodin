@@ -731,8 +731,7 @@ pub fn create_video_stream(tile_id: Option<TileId>) -> PaletteItem {
 fn set_playback_speed() -> PaletteItem {
     PaletteItem::new("Set Playback Speed", TIME_LABEL, |_: In<String>| {
         let speeds = [
-            0.001, 0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 2.0, 3.0, 4.0, 5.0, 10.0, 20.0, 30.0, 40.0,
-            50.0, 100.0,
+            0.05, 0.1, 0.25, 0.5, 1.0, 2.0, 3.0, 4.0, 5.0, 10.0, 20.0, 30.0, 40.0, 50.0, 100.0,
         ];
         let next_page = PalettePage::new(
             speeds
@@ -748,8 +747,8 @@ fn set_playback_speed() -> PaletteItem {
                                 id: stream_id.0,
                                 playing: None,
                                 timestamp: None,
-                                time_step: Some(Duration::from_secs_f64(speed / 60.0)),
-                                frequency: None,
+                                time_step: None,
+                                frequency: Some((speed * 60.0) as u64),
                             });
                             PaletteEvent::Exit
                         },
