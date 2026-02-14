@@ -50,7 +50,7 @@ use super::{
     query_plot::QueryPlotData,
     query_table::{QueryTableData, QueryTablePane, QueryTableWidget},
     schematic::{graph_label, viewport_label},
-    video_stream::{IsTileVisible, VideoDecoderHandle, VideoStreamWidgetArgs},
+    video_stream::{IsTileVisible, VideoDecoderHandle, VideoFrameCache, VideoStreamWidgetArgs},
     widgets::{RootWidgetSystem, WidgetSystem, WidgetSystemExt},
 };
 use crate::{
@@ -2590,6 +2590,7 @@ impl WidgetSystem for TileLayout<'_, '_> {
                                     ..Default::default()
                                 },
                                 VideoDecoderHandle::default(),
+                                VideoFrameCache::default(),
                             ))
                             .id();
                         let pane = Pane::VideoStream(super::video_stream::VideoStreamPane {
