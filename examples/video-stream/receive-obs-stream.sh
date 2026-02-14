@@ -128,12 +128,15 @@ echo "Press Ctrl+C to stop."
 echo ""
 
 # Graceful shutdown on Ctrl+C
+SHUTDOWN=false
 cleanup() {
+    SHUTDOWN=true
     echo ""
     echo "Shutting down SRT receiver..."
     kill "$GST_PID" 2>/dev/null || true
     wait "$GST_PID" 2>/dev/null || true
     echo "Done."
+    exit 0
 }
 trap cleanup INT TERM
 
@@ -143,12 +146,27 @@ trap cleanup INT TERM
 # - h264parse config-interval=-1: ensures SPS/PPS sent with every keyframe
 # - queue: decouples the live source from the sink for latency negotiation
 # - elodinsink: sends H.264 NAL units to Elodin DB
-gst-launch-1.0 \
-    srtsrc uri="srt://0.0.0.0:${SRT_PORT}?mode=listener" latency="${SRT_LATENCY}" ! \
-    tsdemux ! \
-    h264parse config-interval=-1 ! \
-    queue max-size-buffers=10 ! \
-    elodinsink sync=false db-address="${DB_ADDRESS}" msg-name="${MSG_NAME}" &
+#
+# The pipeline is wrapped in a restart loop because gst-launch-1.0 exits
+# cleanly (EOS) whenever the OBS caller disconnects.  We automatically
+# re-launch the listener so the next OBS connection is accepted without
+# manual intervention.
+while [ "$SHUTDOWN" = false ]; do
+    gst-launch-1.0 \
+        srtsrc uri="srt://0.0.0.0:${SRT_PORT}?mode=listener" latency="${SRT_LATENCY}" ! \
+        tsdemux ! \
+        h264parse config-interval=-1 ! \
+        queue max-size-buffers=10 ! \
+        elodinsink sync=false db-address="${DB_ADDRESS}" msg-name="${MSG_NAME}" &
 
-GST_PID=$!
-wait "$GST_PID"
+    GST_PID=$!
+    wait "$GST_PID" || true
+
+    if [ "$SHUTDOWN" = true ]; then
+        break
+    fi
+
+    echo ""
+    echo "OBS disconnected. Restarting SRT listener in 1 second..."
+    sleep 1
+done
