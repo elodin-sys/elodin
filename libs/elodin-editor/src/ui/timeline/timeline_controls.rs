@@ -26,7 +26,7 @@ use crate::{
     },
 };
 
-use super::{StreamTickOrigin, TimelineIcons};
+use super::{PlaybackSpeed, StreamTickOrigin, TimelineIcons};
 
 pub(crate) fn plugin(app: &mut App) {
     app.init_resource::<TimelineStepButtons>();
@@ -39,6 +39,7 @@ pub struct TimelineControls<'w> {
     tick: ResMut<'w, CurrentTimestamp>,
     max_tick: Res<'w, LastUpdated>,
     tick_time: Res<'w, SimulationTimeStep>,
+    playback_speed: Res<'w, PlaybackSpeed>,
     stream_id: Res<'w, CurrentStreamId>,
     earliest_timestamp: Res<'w, EarliestTimestamp>,
     behavior: ResMut<'w, TimeRangeBehavior>,
@@ -69,6 +70,7 @@ impl WidgetSystem for TimelineControls<'_> {
             mut tick,
             max_tick,
             tick_time,
+            playback_speed,
             stream_id,
             earliest_timestamp,
             mut behavior,
@@ -252,6 +254,24 @@ impl WidgetSystem for TimelineControls<'_> {
                                     ui.add_space(8.0);
 
                                     ui.add(egui::Label::new(tick_label).selectable(false));
+
+                                    ui.add_space(24.0);
+
+                                    let speed_text = egui::RichText::new(format_playback_speed(
+                                        playback_speed.0,
+                                    ))
+                                    .color(get_scheme().text_primary);
+                                    ui.add(
+                                        egui::Label::new(speed_text)
+                                            .selectable(false)
+                                            .halign(egui::Align::BOTTOM),
+                                    );
+
+                                    let speed_label = egui::RichText::new("SPEED")
+                                        .color(get_scheme().text_secondary);
+                                    ui.add_space(8.0);
+
+                                    ui.add(egui::Label::new(speed_label).selectable(false));
                                 });
                         },
                     );
@@ -262,6 +282,21 @@ impl WidgetSystem for TimelineControls<'_> {
             event.send_msg(SetStreamState::rewind(**stream_id, tick.0));
         }
     }
+}
+
+fn format_playback_speed(speed: f64) -> String {
+    if !speed.is_finite() || speed < 0.0 {
+        return "-".to_string();
+    }
+
+    let mut value = format!("{speed:.3}");
+    while value.ends_with('0') {
+        value.pop();
+    }
+    if value.ends_with('.') {
+        value.pop();
+    }
+    format!("{value}x")
 }
 
 fn time_range_selector_button(

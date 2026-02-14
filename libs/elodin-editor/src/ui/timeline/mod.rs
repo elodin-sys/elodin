@@ -4,10 +4,12 @@ use bevy::ecs::{
 };
 use bevy::prelude::*;
 use bevy_egui::{EguiContexts, EguiTextureHandle, egui};
+use impeller2_bevy::CurrentStreamId;
 use impeller2_wkt::{SimulationTimeStep, StreamId};
 use timeline_controls::TimelineControls;
 
 use std::ops::RangeInclusive;
+use std::time::Duration;
 use timeline_slider::TimelineSlider;
 
 use crate::{
@@ -21,7 +23,34 @@ pub mod timeline_controls;
 pub mod timeline_slider;
 
 pub(crate) fn plugin(app: &mut App) {
-    app.add_plugins(timeline_controls::plugin);
+    app.add_plugins(timeline_controls::plugin)
+        .init_resource::<PlaybackSpeed>()
+        .add_systems(Update, reset_playback_speed_on_stream_change);
+}
+
+/// Fixed playback frequency for the editor stream.
+pub const PLAYBACK_FREQUENCY_HZ: f64 = 60.0;
+
+#[derive(bevy::prelude::Resource, Clone, Copy, Debug)]
+pub struct PlaybackSpeed(pub f64);
+
+impl Default for PlaybackSpeed {
+    fn default() -> Self {
+        Self(1.0)
+    }
+}
+
+pub fn playback_time_step_from_speed(speed: f64) -> Duration {
+    Duration::from_secs_f64(speed / PLAYBACK_FREQUENCY_HZ)
+}
+
+fn reset_playback_speed_on_stream_change(
+    current_stream_id: Res<CurrentStreamId>,
+    mut playback_speed: ResMut<PlaybackSpeed>,
+) {
+    if current_stream_id.is_changed() {
+        *playback_speed = PlaybackSpeed::default();
+    }
 }
 
 #[derive(bevy::prelude::Resource, Default, Clone, Copy, Debug)]
