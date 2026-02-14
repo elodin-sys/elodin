@@ -1,5 +1,5 @@
 use bytemuck;
-use elodin_db::{DB, State, handle_conn};
+use elodin_db::{AtomicTimestampExt, DB, State, handle_conn};
 use impeller2::types::{ComponentId, Timestamp};
 use impeller2_wkt::{ComponentMetadata, EntityMetadata};
 use nox_ecs::Error;
@@ -320,11 +320,20 @@ async fn tick(
     let time_step = world.world.sim_time_step().0;
     #[rustfmt::skip]
     let should_cancel = || { is_cancelled() || cancel_token.is_cancelled() };
+    // Absolute deadline for real-time pacing.  Instead of sleeping a relative
+    // `run_time_step - elapsed` each tick (which accumulates sleep-overshoot
+    // drift), we advance a fixed deadline by exactly `run_time_step` per tick.
+    // If tick N oversleeps, tick N+1's deadline is still at the correct
+    // absolute time, so it sleeps less to compensate automatically.
+    let mut next_tick_deadline: Option<Instant> = None;
     loop {
         if should_cancel() {
             return;
         }
         if !db.recording_cell.is_playing() {
+            // Reset deadline when paused so we don't try to "catch up"
+            // an unbounded amount of ticks after resume.
+            next_tick_deadline = None;
             let _ = futures_lite::future::race(db.recording_cell.wait(), async {
                 cancel_token.wait().await;
                 false
@@ -336,6 +345,10 @@ async fn tick(
             continue;
         }
         let start = Instant::now();
+        // Initialize the deadline on the first tick (or after un-pause).
+        if let Some(rts) = run_time_step {
+            next_tick_deadline.get_or_insert(start + rts);
+        }
         // Read tick from shared counter (can be reset by StepContext::truncate())
         let tick = tick_counter.load(Ordering::SeqCst);
         // Calculate timestamp based on current tick
@@ -363,6 +376,12 @@ async fn tick(
         // skip this iteration to avoid writing at the old (higher) timestamp,
         // which would cause TimeTravel errors on the next tick.
         if tick_counter.load(Ordering::SeqCst) < tick {
+            // Truncate happened: reset last_updated so the next tick's
+            // update_max can set it to the new (lower) timestamp.
+            db.last_updated.store(Timestamp(i64::MIN));
+            // Reset the pacing deadline so we don't run in a tight
+            // catch-up loop against the now-stale old deadline.
+            next_tick_deadline = None;
             continue;
         }
 
@@ -378,7 +397,11 @@ async fn tick(
                 warn!(?err, "error committing head");
             }
         });
-        db.last_updated.store(timestamp);
+        // Use update_max (not store) so that external writers whose data was
+        // ingested between ticks do not have last_updated pulled backward,
+        // which would cause the editor's SubscribeLastUpdated to send
+        // non-monotonic values.
+        db.last_updated.update_max(timestamp);
         while !wait_for_write_pair_ids.is_empty()
             && !timestamps_changed(&db, &mut wait_for_write_pair_ids).unwrap_or(false)
         {
@@ -392,11 +415,15 @@ async fn tick(
         }
         // Python post_step func runs.
         post_step(tick, &db, &tick_counter, timestamp, start_timestamp);
-        // We only wait if there is a run_time_step set and it's >= the time elapsed.
-        if let Some(run_time_step) = run_time_step.as_ref()
-            && let Some(sleep_time) = run_time_step.checked_sub(start.elapsed())
-        {
-            stellarator::sleep(sleep_time).await;
+        // Sleep until the absolute deadline instead of a relative duration.
+        // This prevents sleep-overshoot from accumulating across ticks.
+        if let Some(deadline) = next_tick_deadline.as_mut() {
+            let now = Instant::now();
+            if *deadline > now {
+                stellarator::sleep(*deadline - now).await;
+            }
+            // Advance deadline by exactly one run_time_step for the next tick.
+            *deadline += run_time_step.unwrap();
         }
 
         // Only increment tick_counter if it wasn't reset by truncate() during post_step.

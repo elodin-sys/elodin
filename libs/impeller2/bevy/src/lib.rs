@@ -734,6 +734,11 @@ impl CommandsExt for Commands<'_, '_> {
 
 pub fn new_connection_packets(stream_id: StreamId) -> impl Iterator<Item = LenPacket> {
     [
+        // Editor uses only this FixedRate stream (playback, timeline, rewind).
+        // Video tiles use FixedRateMsgStream with this same stream_id to get
+        // use FixedRateMsgStream with this same stream_id to get message-log frames in sync.
+        // Other clients (e.g. rust_client, msp-osd) that want RealTime or RealTimeBatched
+        // create their own Stream with the desired behavior when connecting.
         Stream {
             behavior: StreamBehavior::FixedRate(FixedRateBehavior {
                 initial_timestamp: impeller2_wkt::InitialTimestamp::Earliest,
@@ -741,11 +746,6 @@ pub fn new_connection_packets(stream_id: StreamId) -> impl Iterator<Item = LenPa
                 frequency: PLAYBACK_FREQUENCY as u64,
             }),
             id: stream_id,
-        }
-        .into_len_packet(),
-        Stream {
-            behavior: StreamBehavior::RealTimeBatched,
-            id: fastrand::u64(..),
         }
         .into_len_packet(),
         GetEarliestTimestamp.into_len_packet(),

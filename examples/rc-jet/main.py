@@ -194,6 +194,6 @@ world.recipe(controller)
 world.run(
     sim_system,
     sim_time_step=config.dt,
-    run_time_step=2 * config.dt,  # Setting this higher than sim allows for real-time control
+    run_time_step=config.dt,
     max_ticks=config.total_ticks,
 )
