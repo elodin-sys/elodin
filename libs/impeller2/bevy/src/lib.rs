@@ -743,11 +743,13 @@ pub fn new_connection_packets(stream_id: StreamId) -> impl Iterator<Item = LenPa
             id: stream_id,
         }
         .into_len_packet(),
-        Stream {
-            behavior: StreamBehavior::RealTimeBatched,
-            id: fastrand::u64(..),
-        }
-        .into_len_packet(),
+        // Experiment: RealTimeBatched stream disabled to verify editor only uses FixedRate.
+        // Going to leave this for a while just in case there's some bad side effect I can't produce.
+        // Stream {
+        //     behavior: StreamBehavior::RealTimeBatched,
+        //     id: fastrand::u64(..),
+        // }
+        // .into_len_packet(),
         GetEarliestTimestamp.into_len_packet(),
         DumpMetadata.into_len_packet(),
         GetDbSettings.into_len_packet(),
