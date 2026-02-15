@@ -22,6 +22,7 @@ use impeller2_wkt::{
 };
 use std::collections::BTreeMap;
 use std::sync::Arc;
+use std::sync::atomic::AtomicU64;
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::{self};
 use std::time::Instant;
@@ -91,10 +92,12 @@ const MAX_CACHED_FRAMES: usize = 300;
 /// show the "No video at this time" overlay.  500 ms.
 const NO_DATA_THRESHOLD_US: i64 = 500_000;
 
-/// If `current_ts` is within this many microseconds *forward* of
-/// `last_decoded_ts`, treat it as sequential playback and send a single
-/// `DecoderInput::Frame` (no decoder reset).  200 ms.
-const SEQUENTIAL_THRESHOLD_US: i64 = 200_000;
+/// If the decoder's last position is within this many microseconds of
+/// `current_ts` (in either direction), suppress seek retries.  This is
+/// wider than `SEQUENTIAL_THRESHOLD_US` to prevent the seek loop where
+/// the decoder is "close but not sequential" (e.g. OBS at 30fps with
+/// wide frame spacing).  2 seconds.
+const DECODER_NEAR_THRESHOLD_US: i64 = 2_000_000;
 
 /// Maximum number of raw H.264 frames to keep in the cache.
 /// At ~25 KB/frame (OBS 1080p), 50 000 frames ≈ 1.2 GB, covering ~28 min
@@ -247,12 +250,29 @@ impl VideoFrameCache {
         }
     }
 
+    /// Find the first keyframe strictly after `target`.
+    pub fn first_keyframe_after(&self, target: Timestamp) -> Option<Timestamp> {
+        match self.keyframe_index.binary_search(&target) {
+            Ok(i) => self.keyframe_index.get(i + 1).copied(),
+            Err(i) => self.keyframe_index.get(i).copied(),
+        }
+    }
+
     /// Get the decoded frame at-or-before `target` (most recent frame that
     /// should be displayed at this playback position).
     pub fn decoded_at_or_before(&self, target: Timestamp) -> Option<(Timestamp, &Image)> {
         self.decoded_frames
             .range(..=target)
             .next_back()
+            .map(|(t, img)| (*t, img))
+    }
+
+    /// Get the first decoded frame at-or-after `target` (used when data
+    /// only exists ahead of the playback position, e.g. after a forward-seek).
+    pub fn decoded_at_or_after(&self, target: Timestamp) -> Option<(Timestamp, &Image)> {
+        self.decoded_frames
+            .range(target..)
+            .next()
             .map(|(t, img)| (*t, img))
     }
 
@@ -298,8 +318,24 @@ impl VideoFrameCache {
 
     fn evict_if_needed(&mut self) {
         while self.decoded_frames.len() > self.max_frames {
-            if self.decoded_frames.pop_first().is_none() {
-                break;
+            // Evict the frame farthest from where the decoder is currently
+            // working.  This prevents freshly-decoded frames from being
+            // immediately evicted when scrubbing backward (where new frames
+            // have lower timestamps than old cached frames).
+            let pivot = self.last_decoded_ts.map(|t| t.0).unwrap_or(0);
+            let first_ts = self.decoded_frames.keys().next().map(|t| t.0);
+            let last_ts = self.decoded_frames.keys().next_back().map(|t| t.0);
+            match (first_ts, last_ts) {
+                (Some(first), Some(last)) => {
+                    let dist_first = (pivot - first).abs();
+                    let dist_last = (pivot - last).abs();
+                    if dist_last >= dist_first {
+                        self.decoded_frames.pop_last();
+                    } else {
+                        self.decoded_frames.pop_first();
+                    }
+                }
+                _ => break,
             }
         }
     }
@@ -356,6 +392,8 @@ pub struct VideoDecoderHandle {
     tx: flume::Sender<DecoderInput>,
     rx: flume::Receiver<DecoderOutput>,
     width: Arc<AtomicUsize>,
+    /// Shared with the decoder thread so it can skip stale seek batches.
+    latest_seek_generation: Arc<AtomicU64>,
     _handle: std::thread::JoinHandle<()>,
 }
 
@@ -396,6 +434,7 @@ fn decode_video(
     _frame_width: Arc<AtomicUsize>,
     packet_rx: flume::Receiver<DecoderInput>,
     image_tx: flume::Sender<DecoderOutput>,
+    latest_generation: Arc<AtomicU64>,
 ) {
     let mut decoder = openh264::decoder::Decoder::new().unwrap();
     let mut rgba = vec![];
@@ -408,19 +447,25 @@ fn decode_video(
                 }
             }
             DecoderInput::SeekBatch { frames, generation } => {
+                // If a newer seek has been requested, skip this stale batch
+                // entirely — no point decoding 60 frames for a position the
+                // user has already scrubbed past.
+                if latest_generation.load(atomic::Ordering::Relaxed) != generation {
+                    let _ = image_tx.send(DecoderOutput::SeekComplete(generation));
+                    continue;
+                }
                 decoder = openh264::decoder::Decoder::new().unwrap();
-                // Decode every frame to build H.264 reference state, but
-                // only keep the LAST successfully decoded image.  This avoids
-                // flooding the bounded output channel (and the heap) with
-                // dozens of intermediate 1080p RGBA frames.
                 let mut last_image: Option<(Image, Timestamp)> = None;
                 for (timestamp, packet) in &frames {
+                    // Check mid-decode too — bail early if superseded.
+                    if latest_generation.load(atomic::Ordering::Relaxed) != generation {
+                        break;
+                    }
                     if let Some(image) = decode_one_frame(&mut decoder, packet, &mut rgba) {
                         last_image = Some((image, *timestamp));
                     }
                 }
                 if let Some((image, ts)) = last_image {
-                    // Blocking send — must not be lost.
                     let _ = image_tx.send(DecoderOutput::Frame(Box::new(image), ts));
                 }
                 let _ = image_tx.send(DecoderOutput::SeekComplete(generation));
@@ -480,6 +525,7 @@ fn decode_video(
     frame_width: Arc<AtomicUsize>,
     packet_rx: flume::Receiver<DecoderInput>,
     image_tx: flume::Sender<DecoderOutput>,
+    latest_generation: Arc<AtomicU64>,
 ) {
     let mut video_toolbox = video_toolbox::VideoToolboxDecoder::new(frame_width.clone()).unwrap();
     let mut frame_count = 0u64;
@@ -506,13 +552,19 @@ fn decode_video(
                 }
             }
             DecoderInput::SeekBatch { frames, generation } => {
+                // Skip stale seek batches.
+                if latest_generation.load(atomic::Ordering::Relaxed) != generation {
+                    let _ = image_tx.send(DecoderOutput::SeekComplete(generation));
+                    continue;
+                }
                 video_toolbox =
                     video_toolbox::VideoToolboxDecoder::new(frame_width.clone()).unwrap();
                 frame_count = 0;
-                // Decode every frame to build reference state, keep only
-                // the last decoded image to avoid channel/memory congestion.
                 let mut last_image: Option<(Image, Timestamp)> = None;
                 for (timestamp, packet) in &frames {
+                    if latest_generation.load(atomic::Ordering::Relaxed) != generation {
+                        break;
+                    }
                     frame_count += 1;
                     if let Some(image) =
                         decode_one_frame_vt(&mut video_toolbox, packet, frame_count)
@@ -539,12 +591,16 @@ impl Default for VideoDecoderHandle {
         let (image_tx, image_rx) = flume::bounded::<DecoderOutput>(32);
         let width = Arc::new(AtomicUsize::new(0));
         let frame_width = width.clone();
-        let _handle = std::thread::spawn(move || decode_video(frame_width, packet_rx, image_tx));
+        let latest_gen = Arc::new(AtomicU64::new(0));
+        let decoder_gen = latest_gen.clone();
+        let _handle =
+            std::thread::spawn(move || decode_video(frame_width, packet_rx, image_tx, decoder_gen));
         VideoDecoderHandle {
             tx: packet_tx,
             rx: image_rx,
             _handle,
             width,
+            latest_seek_generation: latest_gen,
         }
     }
 }
@@ -560,7 +616,11 @@ impl VideoDecoderHandle {
 
     /// Send a batch of raw frames for seek-decode (resets the decoder).
     /// Returns `true` if the batch was successfully enqueued.
+    /// Also publishes `generation` to the shared atomic so the decoder
+    /// thread can skip any older (stale) batches still in the queue.
     pub fn send_seek_batch(&self, frames: Vec<(Timestamp, Vec<u8>)>, generation: u64) -> bool {
+        self.latest_seek_generation
+            .store(generation, atomic::Ordering::Relaxed);
         self.tx
             .try_send(DecoderInput::SeekBatch { frames, generation })
             .is_ok()
@@ -602,8 +662,6 @@ pub struct WidgetQuery {
 #[derive(SystemParam)]
 pub struct VideoStreamWidget<'w, 's> {
     query: Query<'w, 's, WidgetQuery>,
-    commands: Commands<'w, 's>,
-    stream_id: Res<'w, CurrentStreamId>,
     current_time: Res<'w, CurrentTimestamp>,
     images: ResMut<'w, Assets<Image>>,
     window_settings: Query<'w, 's, &'static bevy_egui::EguiContextSettings>,
@@ -640,24 +698,48 @@ fn send_stream_request(commands: &mut Commands, entity: Entity, msg_id: [u8; 2],
     );
 }
 
-/// One-shot `GetMsgs` backfill: fetch all historical raw data from the DB.
-fn send_backfill_request(commands: &mut Commands, entity: Entity, msg_id: [u8; 2]) {
+/// Maximum number of raw frames to request in a single backfill.
+/// Keeps the DB response size manageable.  At ~25 KB/frame (OBS 1080p),
+/// 500 frames ≈ 12.5 MB, well within tested limits (10 MB succeeded).
+/// The live-tail `FixedRateMsgStream` fills the rest during playback.
+const BACKFILL_FRAME_LIMIT: usize = 500;
+
+/// Paginated `GetMsgs` backfill: fetch historical raw data from the DB
+/// in small batches of `BACKFILL_FRAME_LIMIT` frames.  When a full batch
+/// arrives, the callback immediately requests the next page.  This keeps
+/// each individual DB response small (~6-12 MB) while progressively
+/// filling the entire raw cache.
+fn send_backfill_request(
+    commands: &mut Commands,
+    entity: Entity,
+    msg_id: [u8; 2],
+    start_from: Timestamp,
+) {
     commands.send_req_reply(
         GetMsgs {
             msg_id,
-            range: Timestamp(i64::MIN)..Timestamp(i64::MAX),
-            limit: None,
+            range: start_from..Timestamp(i64::MAX),
+            limit: Some(BACKFILL_FRAME_LIMIT),
         },
         move |In(result): In<Result<MsgBatch, ErrorResponse>>,
-              mut caches: Query<&mut VideoFrameCache>| {
+              mut caches: Query<&mut VideoFrameCache>,
+              mut cmds: Commands| {
             if let Ok(batch) = result
                 && let Ok(mut cache) = caches.get_mut(entity)
             {
+                let count = batch.data.len();
+                let mut last_ts = start_from;
                 for (timestamp, data) in batch.data {
+                    last_ts = timestamp;
                     cache.insert_raw(timestamp, data);
                 }
+                // If we received a full page, there's likely more data.
+                // Request the next page starting just after the last frame.
+                if count >= BACKFILL_FRAME_LIMIT {
+                    send_backfill_request(&mut cmds, entity, msg_id, Timestamp(last_ts.0 + 1));
+                }
             }
-            true // one-shot
+            true // remove this handler; the continuation (if any) registers a new one
         },
     );
 }
@@ -715,91 +797,96 @@ impl super::widgets::WidgetSystem for VideoStreamWidget<'_, '_> {
             return;
         };
 
-        let stream_id = state.stream_id.0;
-        let msg_id = stream.msg_id;
         let current_ts = state.current_time.0;
 
         // ---------------------------------------------------------------
         // State machine
         // ---------------------------------------------------------------
         match &mut stream.state {
-            StreamState::WaitingToConnect { frames_waited } => {
-                *frames_waited += 1;
-                if *frames_waited >= FRAMES_BEFORE_CONNECT {
-                    // Fire both requests and transition immediately.
-                    send_backfill_request(&mut state.commands, entity, msg_id);
-                    send_stream_request(&mut state.commands, entity, msg_id, stream_id);
-                    stream.state = StreamState::Active;
-                }
+            StreamState::WaitingToConnect { .. } => {
+                // Connection + drain handled by `connect_streams` system.
             }
             StreamState::Active => {
-                // --- 1. Drain decoder output into decoded cache ---
+                // Drain is also done by connect_streams, but drain again
+                // here so the widget sees the latest decoded frames
+                // within the same tick.
                 let seek_done = decoder.drain_into_cache(&mut cache);
                 if seek_done {
                     cache.seeking = false;
                 }
 
                 // --- 2. Pick the best frame to display ---
-                // First check the decoded cache for a frame at-or-before
-                // the current playback position.
+                // Check at-or-before first (normal case), then at-or-after
+                // (handles forward-seek when data only exists ahead).
                 if let Some((ts, img)) = cache.decoded_at_or_before(current_ts)
                     && (current_ts.0 - ts.0).abs() <= NO_DATA_THRESHOLD_US
+                {
+                    stream.current_frame = Some(img.clone());
+                } else if let Some((ts, img)) = cache.decoded_at_or_after(current_ts)
+                    && (ts.0 - current_ts.0).abs() <= NO_DATA_THRESHOLD_US
                 {
                     stream.current_frame = Some(img.clone());
                 }
 
                 // --- 3. Feed the decoder from the raw cache ---
-                if !cache.seeking {
-                    let is_sequential = if let Some(last) = cache.last_decoded_ts {
-                        current_ts.0 > last.0 && (current_ts.0 - last.0) < SEQUENTIAL_THRESHOLD_US
-                    } else {
-                        false
-                    };
+                let decoder_near = if let Some(last) = cache.last_decoded_ts {
+                    (current_ts.0 - last.0).abs() < DECODER_NEAR_THRESHOLD_US
+                } else {
+                    false
+                };
 
-                    if is_sequential {
-                        // Sequential playback: send the next raw frame after
-                        // last_decoded_ts.  Decoder state is warm.
-                        if let Some((ts, data)) =
-                            cache.next_raw_frame_after(cache.last_decoded_ts.unwrap())
-                            && ts.0 <= current_ts.0 + SEQUENTIAL_THRESHOLD_US
-                        {
-                            let data = data.clone();
-                            if decoder.process_frame(ts, &data) {
-                                cache.last_decoded_ts = Some(ts);
-                            }
+                // Sequential: decoder is behind current_ts but within the
+                // near threshold.  Feed frames one at a time to catch up.
+                // Uses the same wide threshold as decoder_near so there's
+                // no dead zone where neither sequential nor seek fires.
+                let is_sequential = if let Some(last) = cache.last_decoded_ts {
+                    current_ts.0 >= last.0 && (current_ts.0 - last.0) < DECODER_NEAR_THRESHOLD_US
+                } else {
+                    false
+                };
+
+                let has_raw = cache.has_raw_data_near(current_ts, NO_DATA_THRESHOLD_US);
+
+                if is_sequential && !cache.seeking {
+                    // Sequential playback: decoder state is warm, feed next frame.
+                    if let Some((ts, data)) =
+                        cache.next_raw_frame_after(cache.last_decoded_ts.unwrap())
+                        && ts.0 <= current_ts.0 + DECODER_NEAR_THRESHOLD_US
+                    {
+                        let data = data.clone();
+                        if decoder.process_frame(ts, &data) {
+                            cache.last_decoded_ts = Some(ts);
                         }
-                    } else if cache.has_raw_data_near(current_ts, NO_DATA_THRESHOLD_US) {
-                        // Jump / scrub / first frame: need a full seek from
-                        // the nearest keyframe.  We seek even when `displayed`
-                        // is true (stale decoded frame from a previous visit)
-                        // because the decoder must be repositioned for
-                        // sequential playback to resume from the new position.
-                        let seek_start = cache
-                            .nearest_keyframe_before(current_ts)
-                            .unwrap_or(Timestamp(current_ts.0.saturating_sub(1_000_000)));
-                        let seek_end = current_ts;
+                    }
+                } else if !decoder_near && has_raw {
+                    // Jump / scrub / first frame: seek from nearest keyframe.
+                    // If no data at-or-before current_ts, seek forward to the
+                    // first available keyframe instead.
+                    let (seek_start, seek_end) =
+                        if let Some(kf) = cache.nearest_keyframe_before(current_ts) {
+                            (kf, current_ts)
+                        } else if let Some(kf) = cache.first_keyframe_after(current_ts) {
+                            let end = cache
+                                .raw_frames
+                                .range(kf..)
+                                .nth(1)
+                                .map(|(t, _)| *t)
+                                .unwrap_or(kf);
+                            (kf, end)
+                        } else {
+                            (current_ts, current_ts)
+                        };
 
-                        let frames = cache.get_raw_sequence(seek_start, seek_end);
-                        if !frames.is_empty() {
-                            cache.seek_generation += 1;
-                            if decoder.send_seek_batch(frames, cache.seek_generation) {
-                                cache.seeking = true;
-                            }
+                    let frames = cache.get_raw_sequence(seek_start, seek_end);
+                    if !frames.is_empty() {
+                        cache.seek_generation += 1;
+                        if decoder.send_seek_batch(frames, cache.seek_generation) {
+                            cache.seeking = true;
                         }
                     }
                 }
 
-                // --- 4. Live-stream recovery ---
-                // If the FixedRateMsgStream was previously delivering frames
-                // but has gone silent (e.g. DB connection dropped and
-                // reconnected), re-send both requests to recover.
-                if let Some(last) = cache.last_stream_activity
-                    && last.elapsed().as_secs_f32() > STREAM_RECOVERY_TIMEOUT_SECS
-                {
-                    send_backfill_request(&mut state.commands, entity, msg_id);
-                    send_stream_request(&mut state.commands, entity, msg_id, stream_id);
-                    cache.last_stream_activity = Some(Instant::now());
-                }
+                // Live-stream recovery handled by `connect_streams`.
             }
             StreamState::Error(_) => {}
         }
@@ -894,7 +981,59 @@ impl super::widgets::WidgetSystem for VideoStreamWidget<'_, '_> {
 }
 
 // ---------------------------------------------------------------------------
-// Visibility system (unchanged)
+// Eager connection system — runs for ALL video streams, even hidden ones
+// ---------------------------------------------------------------------------
+
+/// Bevy system that transitions every `VideoStream` from `WaitingToConnect`
+/// to `Active` after the startup delay, regardless of whether the panel is
+/// currently visible.  This ensures the raw-frame cache starts filling
+/// immediately for all streams.
+pub fn connect_streams(
+    mut query: Query<(
+        Entity,
+        &mut VideoStream,
+        &VideoDecoderHandle,
+        &mut VideoFrameCache,
+    )>,
+    mut commands: Commands,
+    stream_id: Res<CurrentStreamId>,
+) {
+    for (entity, mut stream, decoder, mut cache) in &mut query {
+        match &mut stream.state {
+            StreamState::WaitingToConnect { frames_waited } => {
+                *frames_waited += 1;
+                if *frames_waited >= FRAMES_BEFORE_CONNECT {
+                    let msg_id = stream.msg_id;
+                    send_backfill_request(&mut commands, entity, msg_id, Timestamp(i64::MIN));
+                    send_stream_request(&mut commands, entity, msg_id, stream_id.0);
+                    stream.state = StreamState::Active;
+                }
+            }
+            StreamState::Active => {
+                // Drain decoder output even when the widget is not visible,
+                // so seek completions are processed promptly.
+                let seek_done = decoder.drain_into_cache(&mut cache);
+                if seek_done {
+                    cache.seeking = false;
+                }
+
+                // Live-stream recovery (same as in the widget).
+                if let Some(last) = cache.last_stream_activity
+                    && last.elapsed().as_secs_f32() > STREAM_RECOVERY_TIMEOUT_SECS
+                {
+                    let msg_id = stream.msg_id;
+                    send_backfill_request(&mut commands, entity, msg_id, Timestamp(i64::MIN));
+                    send_stream_request(&mut commands, entity, msg_id, stream_id.0);
+                    cache.last_stream_activity = Some(Instant::now());
+                }
+            }
+            StreamState::Error(_) => {}
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Visibility system
 // ---------------------------------------------------------------------------
 
 pub fn set_visibility(mut query: Query<(&mut Node, &IsTileVisible)>) {
