@@ -13,11 +13,24 @@ This folder contains Bevy plugins used by the Elodin editor.
 
 ### Prototype scope (important)
 
-The use of **OpenStreetMap + Overpass** in this plugin is intentionally for a
-**prototype** workflow.
+This data flow is primarily a **geodata integration pipeline** for simulation work:
 
-It is meant to quickly validate editor UX and visual context for demos, not to be a
-final geodata pipeline.
+- ingest polygon geometry,
+- keep polygon key/value properties available,
+- let systems use those attributes to enrich simulation behavior and semantics.
+
+The use of **OpenStreetMap + Overpass** in this plugin is intentionally a
+**prototype** choice.
+It is meant to quickly validate editor UX, rendering, and polygon-attribute-driven
+simulation ideas. It is not the final production geodata pipeline.
+
+### Future direction
+
+A pipeline based on **GeoParquet** is a strong candidate to explore for production:
+
+- better control of schemas and data contracts,
+- offline/replicable data packaging,
+- scalable querying and processing compared to ad-hoc API fetches.
 
 ### How it works
 
