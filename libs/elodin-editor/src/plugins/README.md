@@ -13,7 +13,7 @@ Inventory of Bevy plugins and support modules used by `elodin-editor`.
 | `env_asset_source` | 2025-09-26 | Active | Configures the default `AssetServer` source from `ELODIN_ASSETS_DIR` and warns on invalid paths. | [README.md](env_asset_source/README.md) |
 | `camera_anchor` | 2025-11-24 | Active | Computes a safe camera anchor (view ↔ origin) to avoid depth `NaN`s. | [README.md](camera_anchor/README.md) |
 | `view_cube` (Cube-Viewer) | 2026-02-12 | Active | Current interactive Cube-Viewer (snap/zoom buttons, synchronized overlay rendering). | [README.md](view_cube/README.md) |
-| `osm_world` | 2026-02-14 | Exploratory (POC) | Geodata tile streaming plus polygon metadata for simulation enrichment and editor context. | [osm_world.md](./osm_world.md) |
+| `osm_world` | 2026-02-14 | Exploratory (POC) | Geodata tile streaming plus polygon metadata for simulation enrichment and editor context. Activated only through `examples/drone/main_osm_world.py` and `examples/rc-jet/main_osm_world.py`; default examples keep standard non-geodata behavior. | [README.md](./osm_world/README.md) |
 | `frustum` | 2026-02-19 | Active | Draws created viewport frustums (`create_frustum`) onto viewports that opt in (`show_frustums`), with per-source color and thickness. | [README.md](frustum/README.md) |
 | `frustum_intersection` | 2026-02-24 | Active | Volume coverage (frustum∩ellipsoid) and 2D projection on the far plane; Inspector controls are gated by `show_frustums` and ellipsoid detection. | [README.md](frustum_intersection/README.md) |
 | `kdl_asset_source` | 2026-03-18 | Active | Registers a custom Bevy `AssetSource` for `.kdl` files, using Bevy's built-in `FileWatcher` for hot-reload. | [README.md](kdl_asset_source/README.md) |

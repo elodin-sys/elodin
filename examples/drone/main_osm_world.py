@@ -10,6 +10,14 @@ import util
 from config import Config, Control, Frame
 from sim import system, world
 
+SANTA_MONICA_PIER_START_POS = np.array(
+    [
+        -6625.34,  # East offset (m) from OSM origin at Century City
+        -4952.58,  # North offset (m): negative means south
+        35.0,  # Altitude (m) >= 30m
+    ]
+)
+
 EDU_450_CONFIG = Config(
     control=Control(
         rate_pid_gains=np.array(
@@ -28,7 +36,7 @@ EDU_450_CONFIG = Config(
     drone_glb="https://assets.elodin.systems/assets/edu-450-v2-drone.glb",
     mass=1.0,
     inertia_diagonal=np.array([0.1, 0.1, 0.2]),
-    start_pos=np.array([0.0, 0.0, 2.0]),
+    start_pos=SANTA_MONICA_PIER_START_POS.copy(),
     start_euler_angles=np.array([0.0, 0.0, 0.0]),
     motor_positions=util.motor_positions(np.pi * np.array([0.25, -0.75, 0.75, -0.25]), 0.24),
     motor_thrust_directions=np.array(
@@ -40,7 +48,7 @@ EDU_450_CONFIG = Config(
         ]
     ),
     motor_thrust_curve_path="./motor_thrust_curve.csv",
-    simulation_rate=300.0,
+    sim_time_step=(1.0 / 300.0),
     frame=Frame.QUAD_X,
     fast_loop_time_step=(1.0 / 900.0),
     simulation_time=30.0,
@@ -97,7 +105,7 @@ TALON_QUAD_CONFIG = Config(
     drone_glb="https://assets.elodin.systems/assets/talon-quad-v2.glb",
     mass=2.586,
     inertia_diagonal=np.array([0.0854, 0.1149, 0.1604]),
-    start_pos=np.array([0.0, 0.0, 2.0]),
+    start_pos=SANTA_MONICA_PIER_START_POS.copy(),
     start_euler_angles=np.array([0.0, 0.0, 0.0]),
     motor_positions=np.array(
         [
@@ -108,7 +116,7 @@ TALON_QUAD_CONFIG = Config(
     ).T,
     motor_thrust_directions=np.array(motor_thrust_directions),
     motor_thrust_curve_path="./motor_thrust_curve.csv",
-    simulation_rate=300.0,
+    sim_time_step=(1.0 / 300.0),
     frame=Frame.QUAD_X,
     fast_loop_time_step=(1.0 / 900.0),
     simulation_time=30.0,
@@ -137,8 +145,7 @@ if "--telemetry" in args:
 else:
     world.run(
         system(),
-        simulation_rate=Config.GLOBAL.simulation_rate,
-        telemetry_rate=Config.GLOBAL.simulation_rate / 3.0,
-        generate_real_time=True,
+        sim_time_step=Config.GLOBAL.dt,
+        run_time_step=Config.GLOBAL.dt,
         max_ticks=int(Config.GLOBAL.total_sim_ticks or 1200),
     )

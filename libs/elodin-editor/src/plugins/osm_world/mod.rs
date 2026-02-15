@@ -51,7 +51,10 @@ mod native {
 
     impl OsmWorldConfig {
         fn from_env() -> Self {
-            let enabled = env_flag("ELODIN_OSM_ENABLED", env_flag("ELODIN_OSM_BUILDINGS", true));
+            let enabled = env_flag(
+                "ELODIN_OSM_ENABLED",
+                env_flag("ELODIN_OSM_BUILDINGS", false),
+            );
             let origin_lat = env_parse("ELODIN_OSM_ORIGIN_LAT").unwrap_or(DEFAULT_ORIGIN_LAT);
             let origin_lon = env_parse("ELODIN_OSM_ORIGIN_LON").unwrap_or(DEFAULT_ORIGIN_LON);
             let retry_interval_s: f64 = env_parse("ELODIN_OSM_REFRESH_S").unwrap_or(8.0);
