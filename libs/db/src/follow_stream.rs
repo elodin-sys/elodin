@@ -111,6 +111,60 @@ pub async fn handle_follow_stream<W: AsyncWrite>(
             )
             .await?;
 
+            // ── Backfill: send ALL existing data for newly discovered
+            // components.  We iterate through unique timestamps across all
+            // components and send a full table row for each, so the
+            // follower receives the complete history.
+            {
+                // Collect all unique timestamps from all components.
+                let mut all_timestamps: Vec<Timestamp> = Vec::new();
+                for (_, component) in components.iter() {
+                    if component_last_sent.contains_key(&component.component_id) {
+                        continue;
+                    }
+                    if let Some((ts_slice, _)) = component
+                        .time_series
+                        .get_range(&(Timestamp(i64::MIN)..Timestamp(i64::MAX)))
+                    {
+                        all_timestamps.extend_from_slice(ts_slice);
+                    }
+                }
+                all_timestamps.sort_unstable();
+                all_timestamps.dedup();
+
+                if !all_timestamps.is_empty() {
+                    info!(
+                        samples = all_timestamps.len(),
+                        components = components.len(),
+                        "backfilling historical data"
+                    );
+                    for &ts in &all_timestamps {
+                        table.clear();
+                        for (_, component) in components.iter() {
+                            if let Some((sample_ts, buf)) = component.time_series.get_nearest(ts) {
+                                table.push_aligned(sample_ts);
+                                table.pad_for_type(component.schema.prim_type);
+                                table.extend_from_slice(buf);
+                            }
+                        }
+                        if table.inner.len() > 8 {
+                            table.set_request_id(req_id);
+                            table = sink.send_reusable(table).await?;
+                        }
+                    }
+                    // Update component_last_sent so real-time streaming
+                    // doesn't re-send backfilled data.
+                    for (_, component) in components.iter() {
+                        if let Some((&ts, _)) = component.time_series.latest() {
+                            component_last_sent.insert(component.component_id, ts);
+                        }
+                    }
+                    // Final flush to ensure all backfill data is sent.
+                    sink.flush().await?;
+                    info!("backfill complete");
+                }
+            }
+
             current_gen = vtable_gen;
         }
 
@@ -135,17 +189,10 @@ pub async fn handle_follow_stream<W: AsyncWrite>(
                 )
                 .await?;
             }
-            // Start tracking from the latest timestamp so we only send
-            // newly arriving messages (backfill is handled in Phase 1).
-            let latest_ts = db
-                .with_state(|state| {
-                    state
-                        .msg_logs
-                        .get(&msg_id)
-                        .and_then(|log| log.latest().map(|(ts, _)| ts))
-                })
-                .unwrap_or(Timestamp(i64::MIN));
-            msg_positions.insert(msg_id, latest_ts);
+            // Start tracking from the beginning so Section 4 sends
+            // ALL existing messages as backfill, then continues with
+            // real-time messages.
+            msg_positions.insert(msg_id, Timestamp(i64::MIN));
             known_msg_ids.insert(msg_id);
         }
 

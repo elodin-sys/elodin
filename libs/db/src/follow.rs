@@ -2,14 +2,19 @@
 //!
 //! Usage: `elodin-db run [::]:2241 --follows SOURCE_IP:2240 --follow-packet-size 1500`
 //!
-//! # Phases
+//! # Design
 //!
-//! 1. **Initial sync** – fetch metadata and schemas from the source via
-//!    request/response.
-//! 2. **Historical backfill** – fetch all existing time-series data and
-//!    message logs.
-//! 3. **Real-time streaming** – send a [`FollowStream`] request and
-//!    continuously apply incoming packets to the local database.
+//! All requests are sent in a single burst before reading any responses.
+//! This is required because each connection handler on the source runs on
+//! a stellarator `stellar()` thread whose I/O reactor only reliably delivers
+//! data that is already buffered in the TCP socket at the time of the read.
+//! By pipelining all requests, the source processes them sequentially from
+//! its TCP receive buffer without needing I/O wake-ups between requests.
+//!
+//! The follower sends `DumpMetadata`, `DumpSchema`, and `FollowStream` in
+//! one burst. The source handles DumpMetadata and DumpSchema inline (sending
+//! responses), then transitions the connection into follow-stream mode.
+//! The FollowStream handler streams all existing and new data.
 
 use std::{net::SocketAddr, sync::Arc, time::Duration};
 
@@ -19,7 +24,7 @@ use impeller2_wkt::*;
 use stellarator::{io::SplitExt, net::TcpStream};
 use tracing::{debug, info, warn};
 
-use crate::{AtomicTimestampExt, ComponentSchema, DB, DBSink, Error};
+use crate::{ComponentSchema, DB, DBSink, Error};
 
 /// Configuration for a follower connection.
 pub struct FollowConfig {
@@ -80,24 +85,34 @@ async fn run_follower_inner(config: &FollowConfig, db: &Arc<DB>) -> Result<(), E
     let tx = PacketSink::new(tx);
 
     let mut buf = vec![0u8; 8 * 1024 * 1024];
-    let mut next_req_id: u8 = 1;
 
-    // ── Phase 1: Metadata & schema sync ─────────────────────────────────
+    // ── Send ALL requests in one burst ──────────────────────────────────
+    // This avoids the source's I/O reactor needing to wake up between
+    // requests.  DumpMetadata + DumpSchema are processed inline by the
+    // source and their responses sent back.  FollowStream transitions the
+    // connection into streaming mode.
 
-    // Send DumpMetadata
-    let meta_req_id = next_req_id;
-    next_req_id += 1;
+    let meta_req_id: u8 = 1;
+    let schema_req_id: u8 = 2;
+    let follow_req_id: u8 = 0; // streaming uses req_id 0
+
     tx.send(DumpMetadata.with_request_id(meta_req_id)).await.0?;
-
-    // Send DumpSchema
-    let schema_req_id = next_req_id;
-    next_req_id += 1;
     tx.send(DumpSchema.with_request_id(schema_req_id)).await.0?;
+    tx.send(
+        FollowStream {
+            target_packet_size: config.target_packet_size as u32,
+        }
+        .with_request_id(follow_req_id),
+    )
+    .await
+    .0?;
 
+    info!("sent DumpMetadata + DumpSchema + FollowStream in one burst");
+
+    // ── Receive DumpMetadataResp and DumpSchemaResp ─────────────────────
     let mut metadata_resp: Option<DumpMetadataResp> = None;
     let mut schema_resp: Option<DumpSchemaResp> = None;
 
-    // Receive both responses (order not guaranteed).
     while metadata_resp.is_none() || schema_resp.is_none() {
         let pkt = rx.next(buf).await?;
         match &pkt {
@@ -124,6 +139,11 @@ async fn run_follower_inner(config: &FollowConfig, db: &Arc<DB>) -> Result<(), E
         "phase 1: received metadata and schemas"
     );
 
+    // ── Apply metadata ──────────────────────────────────────────────────
+
+    // Apply db_config (includes schematic content/path, recording flag, etc.).
+    // ── Apply metadata ──────────────────────────────────────────────────
+
     // Apply db_config (includes schematic content/path, recording flag, etc.).
     db.with_state_mut(|s| {
         s.db_config
@@ -131,8 +151,8 @@ async fn run_follower_inner(config: &FollowConfig, db: &Arc<DB>) -> Result<(), E
             .extend(metadata_resp.db_config.metadata.clone());
         s.db_config.default_stream_time_step = metadata_resp.db_config.default_stream_time_step;
     });
-    // Match the source's earliest_timestamp so the follower's time range
-    // is identical.
+    // Set earliest_timestamp to the source's DB creation time so the
+    // editor's timeline starts at the correct point.
     if let Some(ts_micros) = metadata_resp.db_config.time_start_timestamp_micros() {
         let _ = db.set_earliest_timestamp(Timestamp(ts_micros));
     }
@@ -145,14 +165,11 @@ async fn run_follower_inner(config: &FollowConfig, db: &Arc<DB>) -> Result<(), E
 
     // Apply message metadata.
     for msg_meta in &metadata_resp.msg_metadata {
-        // Derive the packet ID from the message name hash (same as the source).
         let msg_id = impeller2::types::msg_id(&msg_meta.name);
         db.with_state_mut(|s| s.set_msg_metadata(msg_id, msg_meta.clone(), &db.path))?;
     }
 
-    // Create components from schemas using the source's per-component
-    // start_timestamp so that the on-disk AppendLog headers match exactly
-    // between source and follower (binary-level replication fidelity).
+    // Create components from schemas using per-component start_timestamps.
     let source_start_ts = metadata_resp
         .db_config
         .time_start_timestamp_micros()
@@ -178,133 +195,12 @@ async fn run_follower_inner(config: &FollowConfig, db: &Arc<DB>) -> Result<(), E
         }
     }
 
-    // ── Phase 1b: Historical backfill ───────────────────────────────────
-
-    // Backfill component time-series data.
-    for (&component_id, schema) in &schema_resp.schemas {
-        let ts_req_id = next_req_id;
-        next_req_id = next_req_id.wrapping_add(1);
-        if next_req_id == 0 {
-            next_req_id = 1;
-        }
-
-        let schema_size = ComponentSchema::from(schema.clone()).size();
-        // Use a unique-ish packet ID for request/response correlation.
-        let id_bytes = (component_id.0 as u16).to_le_bytes();
-        let get_ts = GetTimeSeries {
-            id: id_bytes,
-            range: Timestamp(i64::MIN)..Timestamp(i64::MAX),
-            component_id,
-            limit: None,
-        };
-        tx.send(get_ts.with_request_id(ts_req_id)).await.0?;
-
-        // Receive the TimeSeries response.
-        loop {
-            let pkt = rx.next(buf).await?;
-            match &pkt {
-                Packet::TimeSeries(ts) if ts.req_id == ts_req_id => {
-                    if let (Ok(timestamps), Ok(data)) = (ts.timestamps(), ts.data())
-                        && !timestamps.is_empty()
-                    {
-                        let component = db.with_state(|s| s.components.get(&component_id).cloned());
-                        if let Some(component) = component {
-                            // Skip samples at or before the follower's current
-                            // latest -- prevents duplicates on reconnect when
-                            // the follower already has persisted data.
-                            let local_latest = component
-                                .time_series
-                                .latest()
-                                .map(|(ts, _)| *ts)
-                                .unwrap_or(Timestamp(i64::MIN));
-                            for (i, timestamp) in timestamps.iter().enumerate() {
-                                if *timestamp <= local_latest {
-                                    continue;
-                                }
-                                let start = i * schema_size;
-                                let end = start + schema_size;
-                                if end <= data.len() {
-                                    let _ = component
-                                        .time_series
-                                        .push_buf(*timestamp, &data[start..end]);
-                                }
-                            }
-                            db.last_updated.update_max(*timestamps.last().unwrap());
-                        }
-                        debug!(
-                            component = ?component_id,
-                            samples = timestamps.len(),
-                            "backfilled component"
-                        );
-                    }
-                    buf = pkt.into_buf().into_inner();
-                    break;
-                }
-                _ => {
-                    debug!("unexpected packet during backfill, ignoring");
-                    buf = pkt.into_buf().into_inner();
-                }
-            }
-        }
-    }
-
-    // Backfill message logs.
+    // Track message timestamps for dedup.
     let msg_ids: Vec<PacketId> = metadata_resp
         .msg_metadata
         .iter()
         .map(|m| impeller2::types::msg_id(&m.name))
         .collect();
-
-    for &msg_id in &msg_ids {
-        let msg_req_id = next_req_id;
-        next_req_id = next_req_id.wrapping_add(1);
-        if next_req_id == 0 {
-            next_req_id = 1;
-        }
-
-        let get_msgs = GetMsgs {
-            msg_id,
-            range: Timestamp(i64::MIN)..Timestamp(i64::MAX),
-            limit: None,
-        };
-        tx.send(get_msgs.with_request_id(msg_req_id)).await.0?;
-
-        loop {
-            let pkt = rx.next(buf).await?;
-            match &pkt {
-                Packet::Msg(m) if m.req_id == msg_req_id && m.id == MsgBatch::ID => {
-                    let batch: MsgBatch = m.parse()?;
-                    // Determine local latest to skip already-persisted messages.
-                    let db_path = db.path.clone();
-                    let local_msg_latest = db.with_state_mut(|s| {
-                        s.get_or_insert_msg_log(msg_id, &db_path)
-                            .ok()
-                            .and_then(|log| log.latest().map(|(ts, _)| ts))
-                            .unwrap_or(Timestamp(i64::MIN))
-                    });
-                    let mut written = 0usize;
-                    for (timestamp, data) in &batch.data {
-                        if *timestamp <= local_msg_latest {
-                            continue;
-                        }
-                        db.push_msg(*timestamp, msg_id, data)?;
-                        written += 1;
-                    }
-                    debug!(msg_id = ?msg_id, messages = written, total = batch.data.len(), "backfilled message log");
-                    buf = pkt.into_buf().into_inner();
-                    break;
-                }
-                _ => {
-                    debug!("unexpected packet during msg backfill, ignoring");
-                    buf = pkt.into_buf().into_inner();
-                }
-            }
-        }
-    }
-
-    info!("phase 1b: historical backfill complete");
-
-    // Track latest message timestamps so we can skip duplicates in Phase 2.
     let mut msg_last_ts: std::collections::HashMap<PacketId, Timestamp> =
         std::collections::HashMap::new();
     {
@@ -320,24 +216,16 @@ async fn run_follower_inner(config: &FollowConfig, db: &Arc<DB>) -> Result<(), E
         });
     }
 
-    // ── Phase 2: Real-time streaming via FollowStream ───────────────────
-
-    let follow_req_id: u8 = 0; // streaming uses req_id 0
-    tx.send(
-        FollowStream {
-            target_packet_size: config.target_packet_size as u32,
-        }
-        .with_request_id(follow_req_id),
-    )
-    .await
-    .0?;
-
     info!(
         target_packet_size = config.target_packet_size,
-        "phase 2: real-time follow stream started"
+        "phase 2: entering follow stream (backfill + real-time)"
     );
 
-    // Receive loop – process the unified stream from the source.
+    // ── Phase 2: Receive the unified FollowStream ───────────────────────
+    // The source's FollowStream handler sends all existing data (backfill)
+    // and then streams new data as it arrives.  No separate backfill phase
+    // is needed.
+
     loop {
         let pkt = rx.next(buf).await?;
         match &pkt {
@@ -415,7 +303,7 @@ async fn run_follower_inner(config: &FollowConfig, db: &Arc<DB>) -> Result<(), E
             }
 
             // MsgWithTimestamp – write message with original timestamp,
-            // skipping duplicates already received during backfill.
+            // skipping duplicates already received during previous sessions.
             Packet::Msg(m) if m.timestamp.is_some() => {
                 let timestamp = m.timestamp.unwrap();
                 let last = msg_last_ts

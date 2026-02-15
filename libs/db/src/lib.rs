@@ -1465,6 +1465,7 @@ async fn handle_conn_inner<A: AsyncRead + AsyncWrite + 'static>(
             pkt: Some(resp_pkt),
         };
         let result = handle_packet(&pkt, &db, &mut pkt_tx).await;
+        // #endregion
         buf = pkt.into_buf().into_inner();
         match result {
             Ok(PacketAction::Continue) => {}
@@ -3031,11 +3032,17 @@ impl MetadataExt for DbConfig {}
 
 pub trait AtomicTimestampExt {
     fn update_max(&self, val: Timestamp);
+    fn update_min(&self, val: Timestamp);
 }
 
 impl AtomicTimestampExt for AtomicCell<Timestamp> {
     fn update_max(&self, val: Timestamp) {
         self.value.fetch_max(val.0, atomic::Ordering::AcqRel);
+        self.wait_queue.wake_all();
+    }
+
+    fn update_min(&self, val: Timestamp) {
+        self.value.fetch_min(val.0, atomic::Ordering::AcqRel);
         self.wait_queue.wake_all();
     }
 }
