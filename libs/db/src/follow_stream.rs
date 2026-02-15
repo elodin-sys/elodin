@@ -2,33 +2,41 @@
 //!
 //! When a follower sends `FollowStream { target_packet_size }`, this module
 //! streams ALL data (component metadata, schemas, table data, and messages)
-//! through a [`CoalescingSink`] that batches small packets into writes of
-//! approximately `target_packet_size` bytes.
+//! through a [`CoalescingSink`] that batches small per-component packets
+//! into TCP writes of approximately `target_packet_size` bytes.
+//!
+//! Each component gets its own VTable (one field: timestamp + data), producing
+//! small table packets that the [`CoalescingSink`] can actually batch.  This
+//! ensures the `--follow-packet-size` flag controls the real TCP write size.
 
 use std::{
     collections::{HashMap, HashSet},
+    mem::size_of,
     sync::Arc,
     time::Duration,
 };
 
-use impeller2::types::{IntoLenPacket, LenPacket, PacketId, Timestamp};
+use impeller2::{
+    types::{ComponentId, IntoLenPacket, LenPacket, PacketId, PrimType, Timestamp},
+    vtable::builder::{component, raw_field, raw_table, schema, timestamp, vtable},
+};
 use impeller2_wkt::*;
 use stellarator::io::AsyncWrite;
 use tracing::info;
 
-use crate::{Component, DB, DBVisitor, Error, coalescing_sink::CoalescingSink};
+use crate::{Component, DB, Error, coalescing_sink::CoalescingSink};
 
 /// Default flush interval for the coalescing sink.
 const FLUSH_INTERVAL: Duration = Duration::from_millis(5);
 
+/// Per-component VTable info used for sending small table packets.
+struct PerComponentVTable {
+    vtable_id: PacketId,
+    prim_type: PrimType,
+    elem_size: usize,
+}
+
 /// Run the unified follow-stream handler on the source side.
-///
-/// This function never returns under normal operation – it streams data
-/// continuously until the connection is closed.
-///
-/// `writer` is the raw writer extracted from the connection's `PacketSink`
-/// (via `PacketSink::writer()`).  We wrap it in a [`CoalescingSink`] to
-/// coalesce small packets into target-sized TCP writes.
 pub async fn handle_follow_stream<W: AsyncWrite>(
     db: Arc<DB>,
     writer: &W,
@@ -39,13 +47,12 @@ pub async fn handle_follow_stream<W: AsyncWrite>(
     let mut sink = CoalescingSink::new(writer, target, FLUSH_INTERVAL);
 
     let mut current_gen = u64::MAX;
-    let mut table = LenPacket::table([0; 2], 2048 - 16);
-    let mut components: HashMap<impeller2::types::ComponentId, Component> = HashMap::new();
+    let mut components: HashMap<ComponentId, Component> = HashMap::new();
+    let mut component_vtables: HashMap<ComponentId, PerComponentVTable> = HashMap::new();
     let mut known_msg_ids: HashSet<PacketId> = HashSet::new();
 
-    // Track last-sent timestamp per component so we only send newer data
-    // (avoids re-sending data the follower already backfilled).
-    let mut component_last_sent: HashMap<impeller2::types::ComponentId, Timestamp> = HashMap::new();
+    // Track last-sent timestamp per component so we only send newer data.
+    let mut component_last_sent: HashMap<ComponentId, Timestamp> = HashMap::new();
 
     // Track last-sent timestamp per msg-log so we only send new messages.
     let mut msg_positions: HashMap<PacketId, Timestamp> = HashMap::new();
@@ -65,20 +72,20 @@ pub async fn handle_follow_stream<W: AsyncWrite>(
                 impeller2::schema::Schema<Vec<u64>>,
             )> = db.with_state(|state| {
                 let mut new_comps = Vec::new();
-                for component in state.components.values() {
-                    if components.contains_key(&component.component_id) {
+                for comp in state.components.values() {
+                    if components.contains_key(&comp.component_id) {
                         continue;
                     }
-                    let metadata = state
-                        .get_component_metadata(component.component_id)
-                        .cloned();
-                    let schema = component.schema.to_schema();
-                    new_comps.push((component.clone(), metadata, schema));
+                    let metadata = state.get_component_metadata(comp.component_id).cloned();
+                    let sch = comp.schema.to_schema();
+                    new_comps.push((comp.clone(), metadata, sch));
                 }
                 new_comps
             });
 
-            for (component, metadata, schema) in new_components {
+            for (comp, metadata, sch) in new_components {
+                let cid = comp.component_id;
+
                 // Send ComponentMetadata
                 if let Some(metadata) = metadata {
                     sink.send(metadata.into_len_packet().with_request_id(req_id))
@@ -86,84 +93,50 @@ pub async fn handle_follow_stream<W: AsyncWrite>(
                 }
 
                 // Send DumpSchemaResp for this component
-                let start_ts = *component.index_extra();
+                let start_ts = *comp.index_extra();
                 let schema_msg = DumpSchemaResp {
-                    schemas: [(component.component_id, schema)].into_iter().collect(),
-                    start_timestamps: [(component.component_id, start_ts)].into_iter().collect(),
+                    schemas: [(cid, sch)].into_iter().collect(),
+                    start_timestamps: [(cid, start_ts)].into_iter().collect(),
                 };
                 sink.send(schema_msg.into_len_packet().with_request_id(req_id))
                     .await?;
 
-                components.insert(component.component_id, component);
+                // Create and send a per-component VTable
+                let prim_type = comp.schema.prim_type;
+                let elem_size = comp.schema.size();
+                let timestamp_loc = raw_table(0, size_of::<Timestamp>() as u16);
+                let per_vtable = vtable([raw_field(
+                    (prim_type.padding(8) + size_of::<Timestamp>()) as u16,
+                    elem_size as u16,
+                    timestamp(
+                        timestamp_loc,
+                        schema(prim_type, &comp.schema.shape(), component(cid)),
+                    ),
+                )]);
+                let vtable_id: PacketId = fastrand::u16(..).to_le_bytes();
+                sink.send(
+                    VTableMsg {
+                        id: vtable_id,
+                        vtable: per_vtable,
+                    }
+                    .into_len_packet()
+                    .with_request_id(req_id),
+                )
+                .await?;
+
+                component_vtables.insert(
+                    cid,
+                    PerComponentVTable {
+                        vtable_id,
+                        prim_type,
+                        elem_size,
+                    },
+                );
+                components.insert(cid, comp);
             }
 
-            // Rebuild the VTable with the full component set and send it.
-            let vtable_msg = DBVisitor.vtable(&components)?;
-            let id: PacketId = fastrand::u16(..).to_le_bytes();
-            table = LenPacket::table(id, 2048 - 16);
-            sink.send(
-                VTableMsg {
-                    id,
-                    vtable: vtable_msg,
-                }
-                .into_len_packet()
-                .with_request_id(req_id),
-            )
-            .await?;
-
-            // ── Backfill: send ALL existing data for newly discovered
-            // components.  We iterate through unique timestamps across all
-            // components and send a full table row for each, so the
-            // follower receives the complete history.
-            {
-                // Collect all unique timestamps from all components.
-                let mut all_timestamps: Vec<Timestamp> = Vec::new();
-                for (_, component) in components.iter() {
-                    if component_last_sent.contains_key(&component.component_id) {
-                        continue;
-                    }
-                    if let Some((ts_slice, _)) = component
-                        .time_series
-                        .get_range(&(Timestamp(i64::MIN)..Timestamp(i64::MAX)))
-                    {
-                        all_timestamps.extend_from_slice(ts_slice);
-                    }
-                }
-                all_timestamps.sort_unstable();
-                all_timestamps.dedup();
-
-                if !all_timestamps.is_empty() {
-                    info!(
-                        samples = all_timestamps.len(),
-                        components = components.len(),
-                        "backfilling historical data"
-                    );
-                    for &ts in &all_timestamps {
-                        table.clear();
-                        for (_, component) in components.iter() {
-                            if let Some((sample_ts, buf)) = component.time_series.get_nearest(ts) {
-                                table.push_aligned(sample_ts);
-                                table.pad_for_type(component.schema.prim_type);
-                                table.extend_from_slice(buf);
-                            }
-                        }
-                        if table.inner.len() > 8 {
-                            table.set_request_id(req_id);
-                            table = sink.send_reusable(table).await?;
-                        }
-                    }
-                    // Update component_last_sent so real-time streaming
-                    // doesn't re-send backfilled data.
-                    for (_, component) in components.iter() {
-                        if let Some((&ts, _)) = component.time_series.latest() {
-                            component_last_sent.insert(component.component_id, ts);
-                        }
-                    }
-                    // Final flush to ensure all backfill data is sent.
-                    sink.flush().await?;
-                    info!("backfill complete");
-                }
-            }
+            // Flush metadata/schema/VTable messages.
+            sink.flush().await?;
 
             current_gen = vtable_gen;
         }
@@ -189,41 +162,59 @@ pub async fn handle_follow_stream<W: AsyncWrite>(
                 )
                 .await?;
             }
-            // Start tracking from the beginning so Section 4 sends
-            // ALL existing messages as backfill, then continues with
-            // real-time messages.
             msg_positions.insert(msg_id, Timestamp(i64::MIN));
             known_msg_ids.insert(msg_id);
         }
 
-        // ── 3. Component data (latest values) ──────────────────────────
-        // Check if any component has new data before building the table.
-        let any_new = components.iter().any(|(_, component)| {
-            let Some((&ts, _)) = component.time_series.latest() else {
-                return false;
+        // ── 3. Component data (per-component packets) ───────────────────
+        // For each component, send samples newer than the last-sent
+        // timestamp.  A byte budget per iteration prevents overwhelming
+        // the TCP send buffer (which would block write_all and stall the
+        // loop).  During catch-up the budget is consumed quickly; once
+        // caught up to real-time it's more than enough for a single new
+        // sample per component.
+        let byte_budget = target * 10; // ~15 KB at default 1500 MTU
+        let mut bytes_sent = 0usize;
+        'components: for (cid, comp) in components.iter() {
+            let info = match component_vtables.get(cid) {
+                Some(v) => v,
+                None => continue,
             };
             let last = component_last_sent
-                .get(&component.component_id)
+                .get(cid)
                 .copied()
                 .unwrap_or(Timestamp(i64::MIN));
-            ts > last
-        });
-
-        if any_new {
-            table.clear();
-            DBVisitor.populate_table_latest(&components, &mut table);
-
-            // Track what we just sent.
-            for (_, component) in components.iter() {
-                if let Some((&ts, _)) = component.time_series.latest() {
-                    component_last_sent.insert(component.component_id, ts);
+            let range = Timestamp(last.0.saturating_add(1))..Timestamp(i64::MAX);
+            let Some((timestamps, data)) = comp.time_series.get_range(&range) else {
+                continue;
+            };
+            if timestamps.is_empty() {
+                continue;
+            }
+            for (i, &ts) in timestamps.iter().enumerate() {
+                if bytes_sent >= byte_budget {
+                    // Save progress for this component so we resume here
+                    // on the next iteration.
+                    if i > 0 {
+                        component_last_sent.insert(*cid, timestamps[i - 1]);
+                    }
+                    break 'components;
                 }
+                let start = i * info.elem_size;
+                let end = start + info.elem_size;
+                if end > data.len() {
+                    break;
+                }
+                let pkt_size = size_of::<Timestamp>() + info.elem_size + 8;
+                let mut pkt = LenPacket::table(info.vtable_id, pkt_size);
+                pkt.push_aligned(ts);
+                pkt.pad_for_type(info.prim_type);
+                pkt.extend_from_slice(&data[start..end]);
+                pkt.set_request_id(req_id);
+                sink.send(pkt).await?;
+                bytes_sent += pkt_size + 8; // +8 for LenPacket header
             }
-
-            if table.inner.len() > 8 {
-                table.set_request_id(req_id);
-                table = sink.send_reusable(table).await?;
-            }
+            component_last_sent.insert(*cid, *timestamps.last().unwrap());
         }
 
         // ── 4. New message data ─────────────────────────────────────────
@@ -259,8 +250,6 @@ pub async fn handle_follow_stream<W: AsyncWrite>(
         sink.maybe_flush().await?;
 
         // ── 6. Wait for next change ─────────────────────────────────────
-        // Race between component data change and a short sleep so we
-        // periodically check for new message logs / flush the sink.
         futures_lite::future::race(db.last_updated.wait(), stellarator::sleep(FLUSH_INTERVAL))
             .await;
     }

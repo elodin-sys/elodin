@@ -52,6 +52,7 @@ impl<'a, W: AsyncWrite> CoalescingSink<'a, W> {
 
     /// Buffer a raw `LenPacket`, returning it afterwards so the caller can
     /// reuse the allocation (mirrors the `rent!` pattern used elsewhere).
+    #[allow(dead_code)]
     pub async fn send_reusable(&mut self, pkt: LenPacket) -> Result<LenPacket, Error> {
         self.buffer.extend_from_slice(&pkt.inner);
 

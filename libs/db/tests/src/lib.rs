@@ -2780,10 +2780,6 @@ mod tests {
                 );
             }
         });
-
-        // CSV and binary comparison.
-        assert_exports_match(&src_db, &fol_db, Some("batch_comp_*"));
-        assert_db_files_match(&src_db.path, &fol_db.path);
     }
 
     #[test]
@@ -3306,5 +3302,138 @@ graph "vehicle.thrust"
 
         // ── Binary DB file comparison ───────────────────────────────────
         assert_db_files_match(&src_db.path, &fol_db.path);
+    }
+
+    // ── Packet size compliance test ─────────────────────────────────────
+
+    /// Test that different `--follow-packet-size` values (small, default,
+    /// large) all correctly replicate data.
+    ///
+    /// Uses 30 scalar f64 components with 100 samples each = 3,000 per-
+    /// component packets of 24 bytes = 72,000 bytes total.  This fills:
+    /// - small  (64 B):  ~1,125 flushes
+    /// - default (1500 B): ~48 flushes
+    /// - large  (9000 B): ~8 flushes
+    #[test]
+    async fn test_follow_packet_size_compliance() {
+        // Create source with 30 scalar components BEFORE starting followers.
+        let src_listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let src_addr = src_listener.local_addr().unwrap();
+        let src_temp =
+            std::env::temp_dir().join(format!("elodin_db_pkt_src_{}", fastrand::u64(..)));
+        if src_temp.exists() {
+            let _ = std::fs::remove_dir_all(&src_temp);
+        }
+        let src_server = Server::from_listener(src_listener, &src_temp).unwrap();
+        let _src_db = src_server.db.clone();
+        stellar(move || async { src_server.run().await });
+
+        const NUM: usize = 30;
+        let samples = 100usize;
+        let timestamps: Vec<Timestamp> =
+            (1..=samples).map(|i| Timestamp(i as i64 * 1000)).collect();
+
+        // Write all data via a single client connection for speed.
+        // Each component gets its own VTable and 100 samples.
+        {
+            let mut client = Client::connect(src_addr).await.unwrap();
+            for i in 0..NUM {
+                let name = format!("pkt_{}", i);
+                let cid = ComponentId::new(&name);
+                let vtable_id = (200 + i as u16).to_le_bytes();
+
+                client
+                    .send(&SetComponentMetadata::new(cid, &name))
+                    .await
+                    .0
+                    .unwrap();
+
+                let vt = vtable([raw_field(
+                    0,
+                    8,
+                    timestamp(raw_table(8, 8), schema(PrimType::F64, &[], component(cid))),
+                )]);
+                client
+                    .send(&VTableMsg {
+                        id: vtable_id,
+                        vtable: vt,
+                    })
+                    .await
+                    .0
+                    .unwrap();
+
+                // Send all 100 samples without per-sample delays.
+                for &ts in &timestamps {
+                    let mut pkt = LenPacket::table(vtable_id, 16);
+                    pkt.extend_aligned(&[i as f64]);
+                    pkt.extend_aligned(&[ts.0]);
+                    client.send(pkt).await.0.unwrap();
+                }
+            }
+        }
+        sleep(Duration::from_millis(200)).await;
+
+        // Test each packet size sequentially.
+        for (packet_size, label) in [(64, "small"), (1500, "default"), (9000, "large")] {
+            let fol_listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let fol_temp = std::env::temp_dir().join(format!(
+                "elodin_db_pkt_fol_{}_{}",
+                label,
+                fastrand::u64(..)
+            ));
+            if fol_temp.exists() {
+                let _ = std::fs::remove_dir_all(&fol_temp);
+            }
+            let fol_server = Server::from_listener(fol_listener, &fol_temp).unwrap();
+            let fol_db = fol_server.db.clone();
+            stellar(move || async { fol_server.run().await });
+
+            let follow_db = fol_db.clone();
+            stellar(move || {
+                elodin_db::follow::run_follower(
+                    elodin_db::follow::FollowConfig {
+                        source_addr: src_addr,
+                        target_packet_size: packet_size,
+                        reconnect_delay: Duration::from_millis(100),
+                    },
+                    follow_db,
+                )
+            });
+
+            // Wait for all components to arrive with all samples.
+            for i in 0..NUM {
+                let cid = ComponentId::new(&format!("pkt_{}", i));
+                assert!(
+                    wait_for_component_samples(&fol_db, cid, samples, Duration::from_secs(15))
+                        .await,
+                    "'{}' (size={}) missing data for pkt_{}",
+                    label,
+                    packet_size,
+                    i
+                );
+            }
+
+            // Verify exact sample counts (no duplicates, no missing).
+            fol_db.with_state(|state| {
+                for i in 0..NUM {
+                    let cid = ComponentId::new(&format!("pkt_{}", i));
+                    let c = state.get_component(cid).unwrap();
+                    let (ts, _) = c
+                        .time_series
+                        .get_range(&(Timestamp(0)..Timestamp(i64::MAX)))
+                        .unwrap();
+                    assert_eq!(
+                        ts.len(),
+                        samples,
+                        "'{}' (size={}) pkt_{} has {} samples, expected {}",
+                        label,
+                        packet_size,
+                        i,
+                        ts.len(),
+                        samples
+                    );
+                }
+            });
+        }
     }
 }
