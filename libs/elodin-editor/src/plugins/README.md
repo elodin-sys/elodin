@@ -1,4 +1,5 @@
-# Plugins documentation overview
+# Plugins Documentation Overview
+
 This folder gathers the Bevy utilities and plugins used by the Elodin editor.
 
 | Plugin | First appearance | Status | Description | Docs |
@@ -12,7 +13,68 @@ This folder gathers the Bevy utilities and plugins used by the Elodin editor.
 | `env_asset_source` | 2025-09-26 | Active | Configures the default `AssetServer` source from `ELODIN_ASSETS_DIR` and warns on invalid paths. | [README.md](env_asset_source/README.md) |
 | `camera_anchor` | 2025-11-24 | Active | Computes a safe camera anchor (view ↔ origin) to avoid depth `NaN`s. | [README.md](camera_anchor/README.md) |
 | `view_cube` (Cube-Viewer) | 2026-02-12 | Active | Current interactive Cube-Viewer (snap/zoom buttons, synchronized overlay rendering). | [README.md](view_cube/README.md) |
+| `osm_world` | 2026-02-14 | Prototype | Adds streamed OpenStreetMap context around the tracked vehicle using a local tile cache and Overpass-backed fetches. | [README.md](#osm_world-plugin) |
 | `frustum` | 2026-02-19 | Active | Draws created viewport frustums (`create_frustum`) onto viewports that opt in (`show_frustums`), with per-source color/thickness. | [README.md](frustum/README.md) |
 | `frustum_intersection` | 2026-02-24 | Active | Volume coverage (frustum∩ellipsoid) and 2D projection on far plane; Inspector controls are gated by `show_frustums` and ellipsoid detection. | [README.md](frustum_intersection/README.md) |
 | `kdl_asset_source` | 2026-03-18 | Active | Registers a custom Bevy `AssetSource` for `.kdl` files, using Bevy's built-in `FileWatcher` for hot-reload. | [README.md](kdl_asset_source/README.md) |
 | `kdl_document` | 2026-03-18 | Active | KDL schematic document lifecycle: loading, saving, hot-reload, and message-based command API. | [README.md](kdl_document/README.md) |
+
+## `osm_world` plugin
+
+`osm_world` adds lightweight geospatial context around the current simulated vehicle:
+
+- building meshes (extruded from OSM polygons),
+- roads and land/water areas,
+- hover metadata on buildings,
+- tile streaming with local cache and incremental frame-by-frame rendering.
+
+### Prototype scope
+
+The use of OpenStreetMap plus Overpass in this plugin is intentionally for a
+prototype workflow.
+
+It is meant to quickly validate editor UX and visual context for demos, not to be a
+final geodata pipeline.
+
+### How it works
+
+1. Determine the tracked center (`bdx.world_pos`, `drone.world_pos`, `target.world_pos`, or a configured component).
+2. Convert the center to local tiles.
+3. Load tile data from cache when available.
+4. Fetch missing tiles from Overpass, then persist JSON locally.
+5. Build renderables and apply them progressively over frames.
+
+### Default behavior
+
+- Enabled by default in editor builds (non-wasm).
+- Default origin is fixed near Century City:
+  - lat: `34.054085661510506`
+  - lon: `-118.42558289792434`
+- Local cache defaults to: `~/.cache/elodin/osm_tiles`
+
+### Main tuning environment variables
+
+- `ELODIN_OSM_ENABLED`
+- `ELODIN_OSM_ORIGIN_LAT`, `ELODIN_OSM_ORIGIN_LON`
+- `ELODIN_OSM_TILE_SIZE_M`
+- `ELODIN_OSM_TILE_RADIUS`
+- `ELODIN_OSM_PREFETCH_TILE_RADIUS`
+- `ELODIN_OSM_MAX_INFLIGHT_FETCHES`
+- `ELODIN_OSM_SPAWN_PER_FRAME`
+- `ELODIN_OSM_CACHE_DIR`
+- `ELODIN_OSM_OVERPASS_URLS`
+- `ELODIN_OSM_TRACK_COMPONENT`
+
+### Quick run
+
+From repository root:
+
+```bash
+cargo run -p elodin -- editor examples/drone/main.py
+```
+
+or:
+
+```bash
+cargo run -p elodin -- editor examples/rc-jet/main.py
+```
