@@ -92,49 +92,6 @@ def setup_world(config: BDXConfig) -> tuple[el.World, el.EntityId, el.EntityId]:
         tabs {
             hsplit name="Main View" {
                 viewport name=Viewport pos="bdx.world_pos.translate_world(-8.0,-8.0,4.0)" look_at="bdx.world_pos" show_grid=#true active=#true
-                vsplit share=0.4 {
-                    vsplit {
-                        graph "bdx.alpha" name="Angle of Attack (rad)"
-                        graph "bdx.thrust" name="Thrust (N)"
-                        viewport name=TGTViewport pos="target.world_pos.translate_world(1,1,0.2)" look_at="bdx.world_pos" show_grid=#true
-                        viewport name=FPVViewport pos="bdx.world_pos.rotate_z(-90).translate_y(-2.0)" show_grid=#true
-                    }
-                }
-            }
-            vsplit name="Flight Data" {
-                hsplit {
-                    graph "bdx.velocity_body" name="Body Velocity (m/s)"
-                    graph "bdx.world_pos.q0, bdx.world_pos.q1, bdx.world_pos.q2, bdx.world_pos.q3" name="Attitude (quat)"
-                }
-                hsplit {
-                    graph "bdx.control_surfaces" name="Control Surfaces (rad)"
-                    graph "bdx.dynamic_pressure, bdx.mach" name="Dynamic Pressure / Mach"
-                }
-            }
-            vsplit name="Propulsion" {
-                graph "bdx.thrust" name="Thrust (N)"
-                graph "bdx.spool_speed" name="Spool Speed (normalized)"
-                graph "bdx.throttle_command" name="Throttle Command"
-            }
-            vsplit name="Control Input" {
-                graph "bdx.control_commands" name="Control Commands (rad/normalized)"
-                graph "bdx.control_surfaces" name="Control Surfaces (rad)"
-            }
-            vsplit name="Aerodynamics" {
-                hsplit {
-                    graph "bdx.alpha" name="Angle of Attack (rad)"
-                    graph "bdx.beta" name="Sideslip (rad)"
-                }
-                hsplit {
-                    graph "bdx.aero_coefs.CL, bdx.aero_coefs.CD" name="CL, CD"
-                    graph "bdx.aero_coefs.Cm" name="Pitch Moment Cm"
-                }
-            }
-            hsplit name="Navigation" {
-                viewport name="Top-Down View" pos="bdx.world_pos.translate_world(0.0, 0.0, 150.0)" look_at="bdx.world_pos" fov=60.0 show_grid=#true
-                query_plot name="Ground Track (XY)" query="SELECT bdx_world_pos.bdx_world_pos[5], bdx_world_pos.bdx_world_pos[6] FROM bdx_world_pos" type="sql" mode="xy" x_label="X Position (m)" y_label="Y Position (m)" auto_refresh=#true refresh_interval=500 {
-                    color cyan
-                }
             }
         }
 
@@ -145,7 +102,7 @@ def setup_world(config: BDXConfig) -> tuple[el.World, el.EntityId, el.EntityId]:
                 color 76 175 80
             }
         }
-        
+
         object_3d target.world_pos {
             glb path="edu-450-v2-drone.glb"
             icon builtin="adjust" {
@@ -153,7 +110,7 @@ def setup_world(config: BDXConfig) -> tuple[el.World, el.EntityId, el.EntityId]:
                 color 244 67 54
             }
         }
-        
+
         vector_arrow "(1, 0, 0)" origin="bdx.world_pos" scale=1.0 name="Forward (X)" show_name=#true body_frame=#true {
            color red 150
         }
