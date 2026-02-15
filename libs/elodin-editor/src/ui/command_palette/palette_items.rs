@@ -14,7 +14,7 @@ use bevy::{
     },
     log::error,
     pbr::{StandardMaterial, wireframe::WireframeConfig},
-    prelude::{Deref, DerefMut, Entity, In, MessageWriter, Mut, Quat, Resource, Transform},
+    prelude::{Deref, DerefMut, Entity, In, MessageWriter, Mut, Quat, Resource, Transform, Vec3},
     window::PrimaryWindow,
 };
 use bevy_editor_cam::controller::{component::EditorCam, motion::CurrentMotion};
@@ -319,6 +319,7 @@ fn viewport_display_label(label: &str, window_label: &str) -> String {
 }
 
 fn reset_editor_cam(transform: &mut Transform, editor_cam: &mut EditorCam) {
+    transform.translation = Vec3::ZERO;
     transform.rotation = Quat::IDENTITY;
     editor_cam.current_motion = CurrentMotion::Stationary;
     if !editor_cam.last_anchor_depth.is_finite() || editor_cam.last_anchor_depth >= -1.0e-6 {
