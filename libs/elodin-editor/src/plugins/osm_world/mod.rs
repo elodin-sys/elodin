@@ -19,6 +19,7 @@ mod native {
     use bevy_picking::prelude::{Pickable, Pointer};
     use impeller2::types::ComponentId;
     use impeller2_wkt::WorldPos;
+    use prost::Message;
     use serde::Deserialize;
 
     use super::OsmWorldRedrawRequest;
@@ -35,9 +36,16 @@ mod native {
 
     pub struct OsmWorldPlugin;
 
+    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+    enum GeoTileBackend {
+        Overpass,
+        Martin,
+    }
+
     #[derive(Clone, Resource)]
     struct OsmWorldConfig {
         enabled: bool,
+        backend: GeoTileBackend,
         origin_lat: f64,
         origin_lon: f64,
         retry_interval: Duration,
@@ -50,6 +58,9 @@ mod native {
         max_areas_per_tile: usize,
         tracked_world_pos_component: String,
         overpass_urls: Vec<String>,
+        martin_url: String,
+        martin_source: String,
+        martin_zoom: u8,
         use_cache: bool,
         prefer_cache: bool,
         cache_dir: Option<PathBuf>,
@@ -62,6 +73,19 @@ mod native {
                 "ELODIN_OSM_ENABLED",
                 env_flag("ELODIN_OSM_BUILDINGS", false),
             );
+            let backend = std::env::var("ELODIN_GEO_BACKEND")
+                .ok()
+                .or_else(|| std::env::var("ELODIN_OSM_BACKEND").ok())
+                .map(|value| value.to_ascii_lowercase())
+                .as_deref()
+                .map(|value| {
+                    if value == "martin" {
+                        GeoTileBackend::Martin
+                    } else {
+                        GeoTileBackend::Overpass
+                    }
+                })
+                .unwrap_or(GeoTileBackend::Overpass);
             let origin_lat = env_parse("ELODIN_OSM_ORIGIN_LAT").unwrap_or(DEFAULT_ORIGIN_LAT);
             let origin_lon = env_parse("ELODIN_OSM_ORIGIN_LON").unwrap_or(DEFAULT_ORIGIN_LON);
             let retry_interval_s: f64 = env_parse("ELODIN_OSM_REFRESH_S").unwrap_or(8.0);
@@ -97,6 +121,16 @@ mod native {
                         .map(ToString::to_string)
                         .collect()
                 });
+            let martin_url = std::env::var("ELODIN_MARTIN_URL")
+                .or_else(|_| std::env::var("ELODIN_OSM_MARTIN_URL"))
+                .unwrap_or_else(|_| "http://127.0.0.1:3000".to_string());
+            let martin_source = std::env::var("ELODIN_MARTIN_SOURCE")
+                .or_else(|_| std::env::var("ELODIN_OSM_MARTIN_SOURCE"))
+                .unwrap_or_else(|_| "osm".to_string());
+            let martin_zoom = env_parse("ELODIN_MARTIN_ZOOM")
+                .or_else(|| env_parse("ELODIN_OSM_MARTIN_ZOOM"))
+                .unwrap_or(15u8)
+                .clamp(8, 18);
             let use_cache = !env_flag("ELODIN_OSM_DISABLE_CACHE", false);
             let prefer_cache = env_flag("ELODIN_OSM_PREFER_CACHE", true);
             let cache_dir = if use_cache {
@@ -109,6 +143,7 @@ mod native {
             };
             Self {
                 enabled,
+                backend,
                 origin_lat,
                 origin_lon,
                 retry_interval: Duration::from_secs_f64(retry_interval_s.max(0.25)),
@@ -121,6 +156,9 @@ mod native {
                 max_areas_per_tile: max_areas_per_tile.max(20),
                 tracked_world_pos_component,
                 overpass_urls,
+                martin_url,
+                martin_source,
+                martin_zoom,
                 use_cache,
                 prefer_cache,
                 cache_dir,
@@ -327,6 +365,67 @@ mod native {
         tags: Option<HashMap<String, String>>,
     }
 
+    #[derive(Clone, PartialEq, prost::Message)]
+    struct VectorTile {
+        #[prost(message, repeated, tag = "3")]
+        layers: Vec<VectorTileLayer>,
+    }
+
+    #[derive(Clone, PartialEq, prost::Message)]
+    struct VectorTileLayer {
+        #[prost(string, required, tag = "1")]
+        name: String,
+        #[prost(message, repeated, tag = "2")]
+        features: Vec<VectorTileFeature>,
+        #[prost(string, repeated, tag = "3")]
+        keys: Vec<String>,
+        #[prost(message, repeated, tag = "4")]
+        values: Vec<VectorTileValue>,
+        #[prost(uint32, optional, tag = "5")]
+        extent: Option<u32>,
+        #[prost(uint32, required, tag = "15")]
+        version: u32,
+    }
+
+    #[derive(Clone, PartialEq, prost::Message)]
+    struct VectorTileFeature {
+        #[prost(uint64, optional, tag = "1")]
+        id: Option<u64>,
+        #[prost(uint32, repeated, tag = "2")]
+        tags: Vec<u32>,
+        #[prost(enumeration = "VectorTileGeomType", optional, tag = "3")]
+        geometry_type: Option<i32>,
+        #[prost(uint32, repeated, tag = "4")]
+        geometry: Vec<u32>,
+    }
+
+    #[derive(Clone, PartialEq, prost::Message)]
+    struct VectorTileValue {
+        #[prost(string, optional, tag = "1")]
+        string_value: Option<String>,
+        #[prost(float, optional, tag = "2")]
+        float_value: Option<f32>,
+        #[prost(double, optional, tag = "3")]
+        double_value: Option<f64>,
+        #[prost(int64, optional, tag = "4")]
+        int_value: Option<i64>,
+        #[prost(uint64, optional, tag = "5")]
+        uint_value: Option<u64>,
+        #[prost(sint64, optional, tag = "6")]
+        sint_value: Option<i64>,
+        #[prost(bool, optional, tag = "7")]
+        bool_value: Option<bool>,
+    }
+
+    #[derive(Clone, Copy, Debug, PartialEq, Eq, prost::Enumeration)]
+    #[repr(i32)]
+    enum VectorTileGeomType {
+        Unknown = 0,
+        Point = 1,
+        LineString = 2,
+        Polygon = 3,
+    }
+
     impl Plugin for OsmWorldPlugin {
         fn build(&self, app: &mut App) {
             let config = OsmWorldConfig::from_env();
@@ -342,7 +441,8 @@ mod native {
                 config.tracked_world_pos_component.clone()
             };
             info!(
-                "OSM world enabled (origin: {}, {}, track: {}, tile_size: {}m, radius: {}, prefetch: {}, inflight: {}, cache_first: {}, max: b{} r{} a{})",
+                "OSM world enabled (backend: {:?}, origin: {}, {}, track: {}, tile_size: {}m, radius: {}, prefetch: {}, inflight: {}, cache_first: {}, max: b{} r{} a{}, martin: {}/{}/z{})",
+                config.backend,
                 config.origin_lat,
                 config.origin_lon,
                 track,
@@ -353,7 +453,10 @@ mod native {
                 config.prefer_cache,
                 config.max_buildings_per_tile,
                 config.max_roads_per_tile,
-                config.max_areas_per_tile
+                config.max_areas_per_tile,
+                config.martin_url,
+                config.martin_source,
+                config.martin_zoom
             );
             app.init_resource::<HoveredBuilding>()
                 .init_resource::<HoveredRoad>()
@@ -1002,7 +1105,7 @@ mod native {
     fn fetch_tile_buildings(tile: TileKey, cfg: &OsmWorldConfig) -> TileFetchResult {
         match fetch_tile_buildings_inner(tile, cfg) {
             Ok((mut scene, from_cache)) => {
-                let tile_center = tile_center_local(tile, cfg.tile_size_m);
+                let tile_center = tile_center_local(tile, cfg);
                 scene.buildings.sort_by(|a, b| {
                     let da = centroid(&a.points).distance_squared(tile_center);
                     let db = centroid(&b.points).distance_squared(tile_center);
@@ -1045,6 +1148,16 @@ mod native {
     }
 
     fn fetch_tile_buildings_inner(
+        tile: TileKey,
+        cfg: &OsmWorldConfig,
+    ) -> Result<(TileSceneData, bool), String> {
+        match cfg.backend {
+            GeoTileBackend::Overpass => fetch_tile_overpass_inner(tile, cfg),
+            GeoTileBackend::Martin => fetch_tile_martin_inner(tile, cfg),
+        }
+    }
+
+    fn fetch_tile_overpass_inner(
         tile: TileKey,
         cfg: &OsmWorldConfig,
     ) -> Result<(TileSceneData, bool), String> {
@@ -1094,6 +1207,46 @@ mod native {
         };
 
         parse_overpass(&response_text, cfg).map(|b| (b, false))
+    }
+
+    fn fetch_tile_martin_inner(
+        tile: TileKey,
+        cfg: &OsmWorldConfig,
+    ) -> Result<(TileSceneData, bool), String> {
+        let geo_center = tile_center_geo_from_local_tile(tile, cfg);
+        let martin_tile = geo_to_slippy_tile(geo_center, cfg.martin_zoom);
+        let cache_key = format!(
+            "martin_{}_z{}_{}_{}",
+            cfg.martin_source, cfg.martin_zoom, martin_tile.x, martin_tile.y
+        );
+
+        if cfg.use_cache
+            && cfg.prefer_cache
+            && let Some(bytes) = load_cache_bytes(cfg, &cache_key)
+            && let Ok(parsed) = parse_martin_tile(&bytes, martin_tile, cfg, tile)
+        {
+            return Ok((parsed, true));
+        }
+
+        let tile_bytes = match request_martin_tile(martin_tile, cfg) {
+            Ok(bytes) => {
+                if cfg.use_cache {
+                    save_cache_bytes(cfg, &cache_key, &bytes);
+                }
+                bytes
+            }
+            Err(err) => {
+                if cfg.use_cache
+                    && let Some(bytes) = load_cache_bytes(cfg, &cache_key)
+                {
+                    return parse_martin_tile(&bytes, martin_tile, cfg, tile)
+                        .map(|scene| (scene, true));
+                }
+                return Err(err);
+            }
+        };
+
+        parse_martin_tile(&tile_bytes, martin_tile, cfg, tile).map(|scene| (scene, false))
     }
 
     fn parse_overpass(response_text: &str, cfg: &OsmWorldConfig) -> Result<TileSceneData, String> {
@@ -1278,6 +1431,283 @@ mod native {
                     points,
                     area_m2: area,
                 });
+            }
+        }
+
+        Ok(TileSceneData {
+            buildings,
+            roads,
+            areas,
+        })
+    }
+
+    fn request_martin_tile(tile: TileKey, cfg: &OsmWorldConfig) -> Result<Vec<u8>, String> {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|e| format!("tokio runtime init failed: {e}"))?;
+
+        let base = cfg.martin_url.trim_end_matches('/');
+        let source = cfg.martin_source.trim_matches('/');
+        let candidates = [
+            format!("{base}/{source}/{}/{}/{}", cfg.martin_zoom, tile.x, tile.y),
+            format!(
+                "{base}/{source}/{}/{}/{}.mvt",
+                cfg.martin_zoom, tile.x, tile.y
+            ),
+        ];
+
+        rt.block_on(async move {
+            let client = reqwest::Client::builder()
+                .timeout(Duration::from_secs(20))
+                .build()
+                .map_err(|e| format!("http client init failed: {e}"))?;
+
+            let mut errors = Vec::new();
+            for url in candidates {
+                let response = match client
+                    .get(&url)
+                    .header("Accept", "application/x-protobuf,application/octet-stream")
+                    .send()
+                    .await
+                {
+                    Ok(response) => response,
+                    Err(e) => {
+                        errors.push(format!("{url}: request error: {e}"));
+                        continue;
+                    }
+                };
+
+                if !response.status().is_success() {
+                    errors.push(format!("{url}: HTTP {}", response.status()));
+                    continue;
+                }
+
+                match response.bytes().await {
+                    Ok(bytes) => return Ok(bytes.to_vec()),
+                    Err(e) => errors.push(format!("{url}: invalid bytes: {e}")),
+                }
+            }
+            Err(format!(
+                "martin tile request failed: {}",
+                errors.join(" | ")
+            ))
+        })
+    }
+
+    fn parse_martin_tile(
+        tile_bytes: &[u8],
+        martin_tile: TileKey,
+        cfg: &OsmWorldConfig,
+        local_tile: TileKey,
+    ) -> Result<TileSceneData, String> {
+        let vector_tile =
+            VectorTile::decode(tile_bytes).map_err(|e| format!("invalid MVT tile: {e}"))?;
+
+        let mut buildings = Vec::new();
+        let mut roads = Vec::new();
+        let mut areas = Vec::new();
+        let (min_x, max_x, min_y, max_y) = local_tile_bounds_rect(local_tile, cfg);
+        let mut synthetic_id = -1_i64;
+
+        for layer in vector_tile.layers {
+            let extent = layer.extent.unwrap_or(4096).max(1);
+
+            for feature in &layer.features {
+                let geometry_type =
+                    match feature.geometry_type.and_then(VectorTileGeomType::from_i32) {
+                        Some(kind) => kind,
+                        None => continue,
+                    };
+
+                let tags = decode_mvt_tags(&layer, feature);
+                let paths = decode_mvt_paths(&feature.geometry);
+                if paths.is_empty() {
+                    continue;
+                }
+
+                let make_id = |path_idx: usize, synthetic_id: &mut i64| -> i64 {
+                    if let Some(base) = feature.id.filter(|id| *id > 0) {
+                        (base as i64)
+                            .saturating_mul(16)
+                            .saturating_add(path_idx as i64)
+                    } else {
+                        let value = *synthetic_id;
+                        *synthetic_id -= 1;
+                        value
+                    }
+                };
+
+                match geometry_type {
+                    VectorTileGeomType::Polygon => {
+                        for (path_idx, path) in paths.iter().enumerate() {
+                            let mut points = path
+                                .iter()
+                                .map(|(u, v)| {
+                                    geo_to_local(
+                                        mvt_point_to_geo(
+                                            *u,
+                                            *v,
+                                            martin_tile,
+                                            cfg.martin_zoom,
+                                            extent,
+                                        ),
+                                        cfg.origin(),
+                                    )
+                                })
+                                .collect::<Vec<_>>();
+                            dedupe_ring_points(&mut points);
+                            if points.len() < 3 {
+                                continue;
+                            }
+                            let center = centroid(&points);
+                            if !point_in_rect(center, min_x, max_x, min_y, max_y) {
+                                continue;
+                            }
+
+                            if tags.contains_key("building") {
+                                let area = polygon_area_abs(&points);
+                                if area < 8.0 {
+                                    continue;
+                                }
+
+                                let levels = tags
+                                    .get("building:levels")
+                                    .and_then(|s| parse_prefixed_f32(s));
+                                let mut height_m = tags
+                                    .get("height")
+                                    .and_then(|s| parse_prefixed_f32(s))
+                                    .or_else(|| levels.map(|x| x * 3.2))
+                                    .unwrap_or(12.0);
+                                height_m = height_m.clamp(3.0, 450.0);
+                                let name = tags
+                                    .get("name")
+                                    .cloned()
+                                    .or_else(|| tags.get("addr:housename").cloned())
+                                    .unwrap_or_else(|| {
+                                        format!("Building #{}", feature.id.unwrap_or(0))
+                                    });
+                                let id = make_id(path_idx, &mut synthetic_id);
+                                let tint = classify_building_tint(&tags, &name);
+                                buildings.push(BuildingGeom {
+                                    id,
+                                    name,
+                                    tint,
+                                    height_m,
+                                    levels,
+                                    points,
+                                    area_m2: area,
+                                });
+                                continue;
+                            }
+
+                            if let Some((tint, kind)) = classify_area_tint(&tags) {
+                                let area = polygon_area_abs(&points);
+                                if area < 120.0 {
+                                    continue;
+                                }
+                                areas.push(LandAreaGeom {
+                                    id: make_id(path_idx, &mut synthetic_id),
+                                    kind,
+                                    tint,
+                                    points,
+                                    area_m2: area,
+                                });
+                            }
+                        }
+                    }
+                    VectorTileGeomType::LineString => {
+                        for (path_idx, path) in paths.iter().enumerate() {
+                            let mut points = path
+                                .iter()
+                                .map(|(u, v)| {
+                                    geo_to_local(
+                                        mvt_point_to_geo(
+                                            *u,
+                                            *v,
+                                            martin_tile,
+                                            cfg.martin_zoom,
+                                            extent,
+                                        ),
+                                        cfg.origin(),
+                                    )
+                                })
+                                .collect::<Vec<_>>();
+                            dedupe_polyline_points(&mut points);
+                            if points.len() < 2 {
+                                continue;
+                            }
+                            let center = centroid(&points);
+                            if !point_in_rect(center, min_x, max_x, min_y, max_y) {
+                                continue;
+                            }
+
+                            if is_pier_way(&tags) {
+                                let length_m = polyline_length(&points);
+                                if length_m >= 20.0 {
+                                    roads.push(RoadGeom {
+                                        id: make_id(path_idx, &mut synthetic_id),
+                                        kind: "pier".to_string(),
+                                        name: road_display_name(
+                                            &tags,
+                                            "pier",
+                                            feature.id.unwrap_or(0) as i64,
+                                        ),
+                                        fast: false,
+                                        width_m: road_width_for_kind("pier"),
+                                        points,
+                                        length_m,
+                                    });
+                                }
+                                continue;
+                            }
+
+                            if is_coastline_way(&tags) {
+                                let length_m = polyline_length(&points);
+                                if length_m >= 30.0 {
+                                    roads.push(RoadGeom {
+                                        id: make_id(path_idx, &mut synthetic_id),
+                                        kind: "coastline".to_string(),
+                                        name: road_display_name(
+                                            &tags,
+                                            "coastline",
+                                            feature.id.unwrap_or(0) as i64,
+                                        ),
+                                        fast: false,
+                                        width_m: road_width_for_kind("coastline"),
+                                        points,
+                                        length_m,
+                                    });
+                                }
+                                continue;
+                            }
+
+                            if let Some(kind) = tags.get("highway") {
+                                if !include_highway(kind) {
+                                    continue;
+                                }
+                                let length_m = polyline_length(&points);
+                                if length_m < 20.0 {
+                                    continue;
+                                }
+                                roads.push(RoadGeom {
+                                    id: make_id(path_idx, &mut synthetic_id),
+                                    kind: kind.clone(),
+                                    name: road_display_name(
+                                        &tags,
+                                        kind,
+                                        feature.id.unwrap_or(0) as i64,
+                                    ),
+                                    fast: is_fast_road_kind(kind),
+                                    width_m: road_width_for_kind(kind),
+                                    points,
+                                    length_m,
+                                });
+                            }
+                        }
+                    }
+                    VectorTileGeomType::Point | VectorTileGeomType::Unknown => {}
+                }
             }
         }
 
@@ -1926,6 +2356,21 @@ mod native {
         std::fs::read_to_string(path).ok()
     }
 
+    fn save_cache_bytes(cfg: &OsmWorldConfig, key: &str, data: &[u8]) {
+        let Some(path) = cache_path(cfg, key) else {
+            return;
+        };
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let _ = std::fs::write(path, data);
+    }
+
+    fn load_cache_bytes(cfg: &OsmWorldConfig, key: &str) -> Option<Vec<u8>> {
+        let path = cache_path(cfg, key)?;
+        std::fs::read(path).ok()
+    }
+
     fn tile_bounds_geo(tile: TileKey, cfg: &OsmWorldConfig) -> (f64, f64, f64, f64) {
         let origin = cfg.origin();
         let west_m = f64::from(tile.x) * cfg.tile_size_m - TILE_QUERY_MARGIN_M;
@@ -1943,9 +2388,9 @@ mod native {
         (south, west, north, east)
     }
 
-    fn tile_center_local(tile: TileKey, tile_size_m: f64) -> Vec2 {
-        let east = (f64::from(tile.x) + 0.5) * tile_size_m;
-        let north = (f64::from(tile.y) + 0.5) * tile_size_m;
+    fn tile_center_local(tile: TileKey, cfg: &OsmWorldConfig) -> Vec2 {
+        let east = (f64::from(tile.x) + 0.5) * cfg.tile_size_m;
+        let north = (f64::from(tile.y) + 0.5) * cfg.tile_size_m;
         Vec2::new(east as f32, -(north as f32))
     }
 
@@ -2096,6 +2541,153 @@ mod native {
         let lat = origin.lat + north_m / meters_per_degree_lat(origin.lat);
         let lon = origin.lon + east_m / meters_per_degree_lon(origin.lat);
         GeoPoint { lat, lon }
+    }
+
+    fn tile_center_geo_from_local_tile(tile: TileKey, cfg: &OsmWorldConfig) -> GeoPoint {
+        let east_m = (f64::from(tile.x) + 0.5) * cfg.tile_size_m;
+        let north_m = (f64::from(tile.y) + 0.5) * cfg.tile_size_m;
+        local_m_to_geo(east_m, north_m, cfg.origin())
+    }
+
+    fn geo_to_slippy_tile(point: GeoPoint, zoom: u8) -> TileKey {
+        let zoom_scale = 2_f64.powi(i32::from(zoom));
+        let x = (((point.lon + 180.0) / 360.0) * zoom_scale).floor() as i32;
+        let lat_rad = point.lat.to_radians();
+        let y = ((1.0 - ((lat_rad.tan() + 1.0 / lat_rad.cos()).ln() / std::f64::consts::PI))
+            * 0.5
+            * zoom_scale)
+            .floor() as i32;
+        TileKey { x, y }
+    }
+
+    fn mvt_point_to_geo(u: i32, v: i32, tile: TileKey, zoom: u8, extent: u32) -> GeoPoint {
+        let extent = f64::from(extent.max(1));
+        let zoom_scale = 2_f64.powi(i32::from(zoom));
+        let x = f64::from(tile.x) + f64::from(u) / extent;
+        let y = f64::from(tile.y) + f64::from(v) / extent;
+        let lon = x / zoom_scale * 360.0 - 180.0;
+        let n = std::f64::consts::PI * (1.0 - 2.0 * y / zoom_scale);
+        let lat = n.sinh().atan().to_degrees();
+        GeoPoint { lat, lon }
+    }
+
+    fn local_tile_bounds_rect(tile: TileKey, cfg: &OsmWorldConfig) -> (f32, f32, f32, f32) {
+        let west_m = f64::from(tile.x) * cfg.tile_size_m - TILE_QUERY_MARGIN_M;
+        let east_m = (f64::from(tile.x) + 1.0) * cfg.tile_size_m + TILE_QUERY_MARGIN_M;
+        let south_m = f64::from(tile.y) * cfg.tile_size_m - TILE_QUERY_MARGIN_M;
+        let north_m = (f64::from(tile.y) + 1.0) * cfg.tile_size_m + TILE_QUERY_MARGIN_M;
+        let min_x = west_m as f32;
+        let max_x = east_m as f32;
+        let min_y = -(north_m as f32);
+        let max_y = -(south_m as f32);
+        (min_x, max_x, min_y, max_y)
+    }
+
+    fn point_in_rect(point: Vec2, min_x: f32, max_x: f32, min_y: f32, max_y: f32) -> bool {
+        point.x >= min_x && point.x <= max_x && point.y >= min_y && point.y <= max_y
+    }
+
+    fn decode_mvt_tags(
+        layer: &VectorTileLayer,
+        feature: &VectorTileFeature,
+    ) -> HashMap<String, String> {
+        let mut tags = HashMap::new();
+        for pair in feature.tags.chunks_exact(2) {
+            let key_idx = pair[0] as usize;
+            let value_idx = pair[1] as usize;
+            let Some(key) = layer.keys.get(key_idx) else {
+                continue;
+            };
+            let Some(value) = layer.values.get(value_idx) else {
+                continue;
+            };
+            tags.insert(key.clone(), vector_tile_value_to_string(value));
+        }
+        tags
+    }
+
+    fn vector_tile_value_to_string(value: &VectorTileValue) -> String {
+        if let Some(v) = &value.string_value {
+            return v.clone();
+        }
+        if let Some(v) = value.bool_value {
+            return if v { "true" } else { "false" }.to_string();
+        }
+        if let Some(v) = value.int_value {
+            return v.to_string();
+        }
+        if let Some(v) = value.uint_value {
+            return v.to_string();
+        }
+        if let Some(v) = value.sint_value {
+            return v.to_string();
+        }
+        if let Some(v) = value.double_value {
+            return format!("{v}");
+        }
+        if let Some(v) = value.float_value {
+            return format!("{v}");
+        }
+        String::new()
+    }
+
+    fn decode_mvt_paths(commands: &[u32]) -> Vec<Vec<(i32, i32)>> {
+        let mut paths: Vec<Vec<(i32, i32)>> = Vec::new();
+        let mut path: Vec<(i32, i32)> = Vec::new();
+        let mut cursor = 0usize;
+        let mut x = 0i32;
+        let mut y = 0i32;
+
+        while cursor < commands.len() {
+            let command = commands[cursor];
+            cursor += 1;
+            let id = command & 0x7;
+            let count = command >> 3;
+            match id {
+                1 => {
+                    for _ in 0..count {
+                        if cursor + 1 >= commands.len() {
+                            break;
+                        }
+                        x += decode_zigzag_i32(commands[cursor]);
+                        y += decode_zigzag_i32(commands[cursor + 1]);
+                        cursor += 2;
+                        if !path.is_empty() {
+                            paths.push(path);
+                            path = Vec::new();
+                        }
+                        path.push((x, y));
+                    }
+                }
+                2 => {
+                    for _ in 0..count {
+                        if cursor + 1 >= commands.len() {
+                            break;
+                        }
+                        x += decode_zigzag_i32(commands[cursor]);
+                        y += decode_zigzag_i32(commands[cursor + 1]);
+                        cursor += 2;
+                        path.push((x, y));
+                    }
+                }
+                7 => {
+                    if !path.is_empty() {
+                        if let Some(first) = path.first().copied() {
+                            path.push(first);
+                        }
+                    }
+                }
+                _ => break,
+            }
+        }
+        if !path.is_empty() {
+            paths.push(path);
+        }
+        paths
+    }
+
+    fn decode_zigzag_i32(value: u32) -> i32 {
+        ((value >> 1) as i32) ^ -((value & 1) as i32)
     }
 
     fn centroid(points: &[Vec2]) -> Vec2 {
