@@ -805,23 +805,20 @@ mod native {
         status: Res<OsmWorldStatus>,
         mut contexts: Query<&mut EguiContext, With<PrimaryWindow>>,
     ) {
-        if status.message.is_empty() {
+        // Keep the editor tabs/viewport layout clean: only show this overlay for real errors.
+        if status.message.is_empty() || !status.is_error {
             return;
         }
         let Ok(mut context) = contexts.single_mut() else {
             return;
         };
         let ctx = context.get_mut();
-        let pos = egui::pos2(12.0, 12.0);
+        let pos = egui::pos2(12.0, 52.0);
         egui::Area::new(egui::Id::new("osm_building_status_overlay"))
             .order(egui::Order::Foreground)
             .fixed_pos(pos)
             .show(ctx, |ui| {
-                let text = if status.is_error {
-                    egui::RichText::new(&status.message).color(egui::Color32::LIGHT_RED)
-                } else {
-                    egui::RichText::new(&status.message).color(egui::Color32::LIGHT_GRAY)
-                };
+                let text = egui::RichText::new(&status.message).color(egui::Color32::LIGHT_RED);
                 egui::Frame::NONE.show(ui, |ui| {
                     ui.label(text);
                 });
