@@ -10,6 +10,14 @@ import util
 from config import Config, Control, Frame
 from sim import system, world
 
+SANTA_MONICA_PIER_START_POS = np.array(
+    [
+        -6625.34,  # East offset (m) from OSM origin at Century City
+        -4952.58,  # North offset (m): negative means south
+        35.0,  # Altitude (m) >= 30m
+    ]
+)
+
 EDU_450_CONFIG = Config(
     control=Control(
         rate_pid_gains=np.array(
@@ -28,7 +36,7 @@ EDU_450_CONFIG = Config(
     drone_glb="https://assets.elodin.systems/assets/edu-450-v2-drone.glb",
     mass=1.0,
     inertia_diagonal=np.array([0.1, 0.1, 0.2]),
-    start_pos=np.array([0.0, 0.0, 2.0]),
+    start_pos=SANTA_MONICA_PIER_START_POS.copy(),
     start_euler_angles=np.array([0.0, 0.0, 0.0]),
     motor_positions=util.motor_positions(np.pi * np.array([0.25, -0.75, 0.75, -0.25]), 0.24),
     motor_thrust_directions=np.array(
@@ -97,7 +105,7 @@ TALON_QUAD_CONFIG = Config(
     drone_glb="https://assets.elodin.systems/assets/talon-quad-v2.glb",
     mass=2.586,
     inertia_diagonal=np.array([0.0854, 0.1149, 0.1604]),
-    start_pos=np.array([0.0, 0.0, 2.0]),
+    start_pos=SANTA_MONICA_PIER_START_POS.copy(),
     start_euler_angles=np.array([0.0, 0.0, 0.0]),
     motor_positions=np.array(
         [

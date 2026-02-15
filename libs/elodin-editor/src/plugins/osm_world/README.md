@@ -20,9 +20,29 @@ spawned progressively frame-by-frame.
 For production, a **GeoParquet-based pipeline** is a likely next step to get stronger
 schemas, reproducible offline datasets, and better scaling.
 
-Quick run:
+Activation rule:
+
+- `main_osm_world.py` entrypoints: OSM world overlay is enabled.
+
+This keeps default examples unchanged and isolates geodata behavior to dedicated
+OSM entrypoints.
+
+Entrypoints (drone):
 
 ```bash
+# Default example, no geographic overlay
 cargo run -p elodin -- editor examples/drone/main.py
+
+# OSM world overlay enabled
+cargo run -p elodin -- editor examples/drone/main_osm_world.py
+```
+
+Entrypoints (rc-jet):
+
+```bash
+# Default example, no geographic overlay
 cargo run -p elodin -- editor examples/rc-jet/main.py
+
+# OSM world overlay enabled
+cargo run -p elodin -- editor examples/rc-jet/main_osm_world.py
 ```

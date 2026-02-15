@@ -34,6 +34,31 @@ enum Simulator {
     ReplayDir(PathBuf),
 }
 
+fn configure_osm_world_mode(sim: &Simulator) {
+    let Simulator::File(path) = sim else {
+        return;
+    };
+
+    let enable_osm = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .map(|name| name == "main_osm_world.py")
+        .unwrap_or(false);
+
+    // SAFETY: this runs before `run_sim` spawns any thread, so no concurrent
+    // environment access can race with these process-wide updates.
+    unsafe {
+        std::env::set_var("ELODIN_OSM_ENABLED", if enable_osm { "1" } else { "0" });
+        std::env::set_var("ELODIN_OSM_BUILDINGS", if enable_osm { "1" } else { "0" });
+    }
+
+    if enable_osm {
+        info!(entrypoint = %path.display(), "OSM world auto-enabled for *_osm_world.py entrypoint");
+    } else {
+        info!(entrypoint = %path.display(), "OSM world auto-disabled for non-OSM entrypoint");
+    }
+}
+
 #[derive(Resource)]
 struct WindowStateFile(std::fs::File);
 
@@ -154,6 +179,7 @@ impl Cli {
     }
 
     pub fn editor(self, args: Args, rt: Runtime) -> miette::Result<()> {
+        configure_osm_world_mode(&args.sim);
         let cancel_token = CancelToken::new();
         let thread = self.run_sim(&args, rt, cancel_token.clone())?;
         let mut app = self.editor_app()?;
