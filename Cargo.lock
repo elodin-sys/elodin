@@ -5225,6 +5225,7 @@ dependencies = [
  "peg",
  "pic-scale",
  "postcard",
+ "prost 0.11.9",
  "raw-window-handle 0.5.2",
  "reqwest",
  "rfd",

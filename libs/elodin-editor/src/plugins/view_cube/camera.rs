@@ -19,9 +19,9 @@ use super::components::{
 };
 use super::config::ViewCubeConfig;
 use super::events::ViewCubeEvent;
-use crate::plugins::osm_world::OsmWorldRedrawRequest;
 use crate::WorldPosExt;
 use crate::object_3d::ComponentArrayExt;
+use crate::plugins::osm_world::OsmWorldRedrawRequest;
 
 const FACE_IN_SCREEN_PLANE_DOT_THRESHOLD: f32 = 0.999;
 const CORNER_IN_SCREEN_AXIS_DOT_THRESHOLD: f32 = 0.998;
