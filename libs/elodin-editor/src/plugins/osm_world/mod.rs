@@ -342,6 +342,7 @@ mod native {
         Park,
         Water,
         Beach,
+        Desert,
         School,
         Pier,
     }
@@ -1238,8 +1239,8 @@ mod native {
                 way[\"man_made\"=\"pier\"]({south},{west},{north},{east});\
                 way[\"tourism\"=\"pier\"]({south},{west},{north},{east});\
                 way[\"amenity\"~\"school|college|university|kindergarten\"]({south},{west},{north},{east});\
-                way[\"landuse\"~\"forest|grass|meadow|recreation_ground|village_green|reservoir|basin\"]({south},{west},{north},{east});\
-                way[\"natural\"~\"wood|scrub|grassland|water|wetland|beach|sand|coastline\"]({south},{west},{north},{east});\
+                way[\"landuse\"~\"forest|grass|meadow|recreation_ground|village_green|reservoir|basin|quarry|brownfield\"]({south},{west},{north},{east});\
+                way[\"natural\"~\"wood|scrub|grassland|water|wetland|beach|sand|desert|bare_rock|coastline\"]({south},{west},{north},{east});\
                 way[\"leisure\"~\"park|golf_course|nature_reserve\"]({south},{west},{north},{east});\
                 way[\"waterway\"~\"riverbank|dock|canal\"]({south},{west},{north},{east});\
             );\
@@ -2249,8 +2250,11 @@ mod native {
                 "water" | "wetland" | "bay" => {
                     return Some((LandTint::Water, format!("natural:{value}")));
                 }
-                "beach" | "sand" => {
+                "beach" => {
                     return Some((LandTint::Beach, format!("natural:{value}")));
+                }
+                "sand" | "desert" | "bare_rock" => {
+                    return Some((LandTint::Desert, format!("natural:{value}")));
                 }
                 "wood" | "scrub" => return Some((LandTint::Forest, format!("natural:{value}"))),
                 "grassland" => return Some((LandTint::Park, format!("natural:{value}"))),
@@ -2264,6 +2268,9 @@ mod native {
                     return Some((LandTint::Water, format!("landuse:{value}")));
                 }
                 "forest" => return Some((LandTint::Forest, format!("landuse:{value}"))),
+                "quarry" | "brownfield" => {
+                    return Some((LandTint::Desert, format!("landuse:{value}")));
+                }
                 "grass" | "meadow" | "recreation_ground" | "village_green" => {
                     return Some((LandTint::Park, format!("landuse:{value}")));
                 }
@@ -2286,6 +2293,7 @@ mod native {
             LandTint::Park => Color::srgb(0.24, 0.36, 0.21),
             LandTint::Water => Color::srgb(0.12, 0.27, 0.40),
             LandTint::Beach => Color::srgb(0.88, 0.82, 0.55),
+            LandTint::Desert => Color::srgb(0.64, 0.53, 0.33),
             LandTint::School => Color::srgb(0.72, 0.20, 0.20),
             LandTint::Pier => Color::srgb(0.90, 0.48, 0.16),
         }
@@ -2295,10 +2303,11 @@ mod native {
         match tint {
             LandTint::Water => 0,
             LandTint::Beach => 1,
-            LandTint::Pier => 2,
-            LandTint::School => 3,
-            LandTint::Forest => 4,
-            LandTint::Park => 5,
+            LandTint::Desert => 2,
+            LandTint::Pier => 3,
+            LandTint::School => 4,
+            LandTint::Forest => 5,
+            LandTint::Park => 6,
         }
     }
 
