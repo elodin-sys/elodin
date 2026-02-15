@@ -42,11 +42,10 @@ order = 6
 - `action_pane`: `name` (required pane title), `lua` script (required).
 - `query_table`: `name` (optional), positional `query` (defaults to empty), `type` (`eql` default, or `sql`).
 - `query_plot`: `name` (required pane title), `query` (required), `refresh_interval` in ms (default 1000), `auto_refresh` (default false), `color` (default white), `type` (`eql` default, or `sql`), `mode` (`timeseries` default, or `xy` for numeric X-axis labels), `x_label` (optional X-axis label for XY mode), `y_label` (optional Y-axis label).
-- `inspector` / `hierarchy`: sidebar panels with no properties.
 - `data_overview`: `name` (optional pane title).
-- `schematic_tree`: `name` (optional pane title).
+- `schematic_tree`: `name` (optional pane title). (Hierarchy/Inspector sidebars are implicit and not serialized.)
+- `video_stream`: positional `msg_name` (required; the message name matching the `elodinsink` `msg-name` property), `name` (optional display label; defaults to `"Video Stream <msg_name>"`). Displays an H.264 video stream received by Elodin DB. The video source can be a GStreamer pipeline using `elodinsink`, an OBS Studio SRT stream via a receiver pipeline, or any source that sends H.264 NAL units to Elodin DB. See the [OBS Studio Integration](#obs-studio-integration) section below.
 - `dashboard`: layout node (Bevy UI style). Key properties: `name` (optional), `display` (`flex` default, or `grid`/`block`/`none`), `box_sizing` (`border-box` default or `content-box`), `position_type` (`relative` default or `absolute`), `overflow` (per-axis; defaults visible), `overflow_clip_margin` (visual_box + margin, defaults content-box / 0), sizing (`left`/`right`/`top`/`bottom`/`width`/`height`/`min_*`/`max_*` accept `auto`, `px`, `%`, `vw`, `vh`, `vmin`, `vmax`; default `auto`), `aspect_ratio` (optional f32), alignment (`align_items`/`justify_items`/`align_self`/`justify_self`/`align_content`/`justify_content`, all default to `default` variants), flex (`flex_direction`, `flex_wrap`, `flex_grow` default 0, `flex_shrink` default 1, `flex_basis` default `auto`, `row_gap`/`column_gap` default `auto`), `children` (nested dashboard nodes), colors via `bg`/`background` child (default transparent), `text` (optional), `font_size` (default 16), `text_color` child (default white), spacing via `margin`/`padding`/`border` children with `left`/`right`/`top`/`bottom`.
-- `video_stream`: positional message name (`msg_name`) plus optional `name` for display label. Supported when nested under `tabs`/splits; not currently parsed as a top-level node.
 
 ### object_3d
 - Positional `eql`: required. Evaluated to a `world_pos`-like value to place the mesh.
@@ -84,8 +83,7 @@ order = 6
 - `arrow_thickness`: numeric thickness multiplier with 3-decimal precision (default `0.1`).
 - `label_position`: proportionately 0.0–1.0 along the arrow (0=base, 1=tip) for
    label anchor, or absolutely by specifying a number in a string with an 'm'
-   suffix (e.g., "0.3m" for 0.3 meters from origin). If omitted, runtime uses
-   the arrow tip with a small separation.
+   suffix, .e.g., "0.3m" for 0.3 meters from origin (default "0.1m").
 
 ## Schema at a glance
 
@@ -118,10 +116,9 @@ panel =
   | action_pane
   | query_table
   | query_plot
-  | inspector
-  | hierarchy
   | data_overview
   | schematic_tree
+  | video_stream
   | dashboard
   | split
   | tabs
@@ -138,7 +135,6 @@ viewport = "viewport"
          [active=bool]
          [show_grid=bool]
          [show_arrows=bool]
-         [show_view_cube=bool]
          [hdr=bool]
          [name=string]
          [pos=eql]
@@ -183,6 +179,10 @@ data_overview = "data_overview"
 
 schematic_tree = "schematic_tree"
                [name=string]
+
+video_stream = "video_stream" <msg_name>
+             [name=string]
+
 dashboard      = "dashboard" { dashboard_node }+
 
 object_3d = "object_3d"
@@ -216,13 +216,61 @@ vector_arrow = "vector_arrow"
              [name=string]
              [show_name=bool]
              [arrow_thickness=float]
-             [label_position=0..1|"<meters>m"]
+             [label_position=0..1]
 
 color = "color"
       ( r g b [a]
       | name [alpha]
       )
 ```
+
+## OBS Studio Integration
+
+The `video_stream` panel can display live video from OBS Studio. There are two integration paths:
+
+### SRT Receiver (Recommended)
+
+OBS Studio has built-in SRT (Secure Reliable Transport) support. A GStreamer receiver pipeline on the Elodin server demuxes the MPEG-TS stream and forwards H.264 frames to Elodin DB.
+
+**OBS configuration**: Settings -> Stream -> Custom -> `srt://ELODIN_IP:9000?mode=caller`
+
+**Elodin-side receiver pipeline**:
+
+```bash
+gst-launch-1.0 \
+    srtsrc uri="srt://0.0.0.0:9000?mode=listener" ! \
+    tsdemux ! \
+    h264parse config-interval=-1 ! \
+    queue ! \
+    elodinsink db-address=127.0.0.1:2240 msg-name="obs-camera"
+```
+
+A convenience script and full example are provided in `examples/video-stream/`.
+
+### obs-gstreamer Direct Pipeline (Alternative)
+
+If the [obs-gstreamer](https://github.com/fzwoch/obs-gstreamer) plugin is installed on the OBS machine, H.264 can be piped directly into `elodinsink` without an intermediate process.
+
+**OBS output pipeline** (configured in obs-gstreamer settings):
+
+```
+video. ! h264parse config-interval=-1 ! elodinsink db-address=ELODIN_IP:2240 msg-name="obs-camera" audio. ! fakesink
+```
+
+This requires both `obs-gstreamer` and `elodinsink` to be installed on the OBS machine.
+
+### Recommended OBS Encoder Settings
+
+| Setting | Value |
+|---|---|
+| Encoder | x264 (Software) or NVENC (Hardware) |
+| Rate Control | CBR |
+| Bitrate | 2500–6000 kbps |
+| Keyframe Interval | 2 seconds |
+| Profile | Baseline or Main (High also works) |
+| Tune | `zerolatency` |
+
+> **Important**: Use H.264, not H.265/HEVC. Elodin's video decoder only supports H.264.
 
 ## Examples
 
@@ -235,12 +283,26 @@ viewport name="Main"
          fov=45.0
          active=#true
          show_grid=#true
-         show_view_cube=#false
          pos="drone.world_pos"
          look_at="(0, 0, 0)"
 graph "drone.altitude"
       name="Altitude"
       auto_y_range=#true
+```
+
+Video stream panel (e.g. from OBS Studio):
+
+```kdl
+video_stream "obs-camera" name="OBS Camera"
+```
+
+Viewport + video stream side by side:
+
+```kdl
+hsplit {
+    viewport name="3D View" show_grid=#true share=0.6
+    video_stream "obs-camera" name="OBS Camera" share=0.4
+}
 ```
 
 Vector arrow with custom color and label:

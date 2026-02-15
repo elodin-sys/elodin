@@ -67,6 +67,8 @@ mod elodinsink {
             pub msg_name: String,
             pub base_timestamp: Option<Timestamp>, // DB's last_updated at connect time
             pub first_pts: Option<gst::ClockTime>, // First buffer PTS after connect
+            pub last_written_ts: Option<Timestamp>, // Last timestamp written to DB (monotonicity guard)
+            pub first_buffer_connected: bool, // Whether we've reconnected for the first buffer
         }
 
         impl Default for ElodinSinkState {
@@ -77,6 +79,8 @@ mod elodinsink {
                     msg_name: "video".to_string(),
                     base_timestamp: None,
                     first_pts: None,
+                    last_written_ts: None,
+                    first_buffer_connected: false,
                 }
             }
         }
@@ -88,6 +92,10 @@ mod elodinsink {
                 state.connection = None;
                 state.base_timestamp = None;
                 state.first_pts = None; // Reset PTS anchor on reconnect
+                                        // Note: first_buffer_connected is NOT reset here.  It tracks
+                                        // whether the initial first-buffer reconnect has occurred.
+                                        // Write-failure reconnects already refresh base_timestamp
+                                        // via connect() and don't need the first-buffer path.
 
                 match TcpStream::connect(state.db_addr) {
                     Ok(mut stream) => {
@@ -199,6 +207,32 @@ mod elodinsink {
                 data: &[u8],
                 pts: Option<gst::ClockTime>,
             ) -> Result<(), gst::ErrorMessage> {
+                // On the very first buffer, reconnect to get a fresh
+                // base_timestamp from the DB.  This handles the case where
+                // the pipeline started long before data actually arrived
+                // (e.g. an SRT source waiting for OBS Studio to connect).
+                // Without this, frames would be written with a stale
+                // timestamp from pipeline-start time, landing far behind
+                // the editor's current playback position.
+                //
+                // We use a dedicated `first_buffer_connected` flag rather
+                // than checking `first_pts.is_none()` because buffers can
+                // arrive with `pts = None`, which would leave `first_pts`
+                // as `None` and trigger reconnection on every packet.
+                {
+                    let state = self.state.lock().unwrap();
+                    if !state.first_buffer_connected {
+                        drop(state); // release lock before reconnecting
+                        gst::info!(
+                            gst::CAT_DEFAULT,
+                            "First buffer arrived — reconnecting to refresh base_timestamp"
+                        );
+                        self.connect()?;
+                        // Mark that we've handled the first-buffer reconnect.
+                        self.state.lock().unwrap().first_buffer_connected = true;
+                    }
+                }
+
                 let mut state = self.state.lock().unwrap();
 
                 // Track first PTS after connect for offset calculation
@@ -209,13 +243,23 @@ mod elodinsink {
                 let msg_id = msg_id(&state.msg_name);
 
                 // Calculate timestamp: base + (current_pts - first_pts)
-                let timestamp = match (state.base_timestamp, pts, state.first_pts) {
+                let mut timestamp = match (state.base_timestamp, pts, state.first_pts) {
                     (Some(base), Some(pts), Some(first_pts)) => {
                         let pts_offset = pts.nseconds().saturating_sub(first_pts.nseconds());
                         Timestamp(base.0 + (pts_offset / 1000) as i64)
                     }
                     _ => Timestamp::now(), // Fallback to wall clock
                 };
+
+                // Enforce strict monotonicity: after a reconnect the new
+                // base_timestamp + reset first_pts can produce timestamps that
+                // overlap with previously written frames.  The msg_log requires
+                // sorted timestamps for binary-search-based sequential delivery.
+                if let Some(last) = state.last_written_ts {
+                    if timestamp.0 <= last.0 {
+                        timestamp = Timestamp(last.0 + 1);
+                    }
+                }
 
                 let mut packet = LenPacket::msg_with_timestamp(msg_id, timestamp, data.len());
                 packet.extend_from_slice(data);
@@ -237,7 +281,10 @@ mod elodinsink {
                     }
 
                     match stream.write_all(&packet.inner) {
-                        Ok(_) => return Ok(()),
+                        Ok(_) => {
+                            state.last_written_ts = Some(timestamp);
+                            return Ok(());
+                        }
                         Err(err) => {
                             gst::warning!(
                                 gst::CAT_DEFAULT,
@@ -264,13 +311,19 @@ mod elodinsink {
                 if state.first_pts.is_none() {
                     state.first_pts = pts;
                 }
-                let timestamp = match (state.base_timestamp, pts, state.first_pts) {
+                let mut timestamp = match (state.base_timestamp, pts, state.first_pts) {
                     (Some(base), Some(pts), Some(first_pts)) => {
                         let pts_offset = pts.nseconds().saturating_sub(first_pts.nseconds());
                         Timestamp(base.0 + (pts_offset / 1000) as i64)
                     }
                     _ => Timestamp::now(),
                 };
+                // Enforce monotonicity after reconnect
+                if let Some(last) = state.last_written_ts {
+                    if timestamp.0 <= last.0 {
+                        timestamp = Timestamp(last.0 + 1);
+                    }
+                }
                 let mut packet = LenPacket::msg_with_timestamp(msg_id, timestamp, data.len());
                 packet.extend_from_slice(data);
 
@@ -281,6 +334,7 @@ mod elodinsink {
                             ["Failed to send packet after reconnect: {}", e]
                         )
                     })?;
+                    state.last_written_ts = Some(timestamp);
                 } else {
                     return Err(gst::error_msg!(
                         gst::ResourceError::NotFound,

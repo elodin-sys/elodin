@@ -2,16 +2,21 @@
 """
 Video Streaming Example
 
-Demonstrates streaming video from GStreamer into Elodin DB and
-displaying it in the Elodin Editor's video stream tile.
+Demonstrates two video streaming paths into Elodin DB:
+1. A local GStreamer test pattern (stream-video.sh) - starts automatically
+2. An OBS Studio SRT receiver (receive-obs-stream.sh) - waits for OBS to connect
 
 A ball rolls around on a flat surface, pushed by rotating wind and
-bouncing off walls at the viewport edges.
+bouncing off walls at the viewport edges. Both video streams are
+displayed in tabs alongside the 3D viewport.
 
 Usage:
     elodin editor examples/video-stream/main.py
 
-The video stream tile is automatically created via the schematic.
+To also stream from OBS Studio, configure OBS to stream to:
+    srt://<ELODIN_HOST_IP>:9000?mode=caller
+
+See README.md for full OBS setup instructions.
 """
 
 import typing
@@ -180,7 +185,7 @@ ball = world.spawn(
     name="ball",
 )
 
-# Register the video streaming process via S10 recipe
+# Register the video streaming process via S10 recipe (GStreamer test pattern)
 stream_script = Path(__file__).parent / "stream-video.sh"
 video_streamer = el.s10.PyRecipe.process(
     name="video-stream",
@@ -190,14 +195,27 @@ video_streamer = el.s10.PyRecipe.process(
 )
 world.recipe(video_streamer)
 
-# Define schematic with top-down camera view and video stream tile
+# Register the OBS SRT receiver process via S10 recipe
+receiver_script = Path(__file__).parent / "receive-obs-stream.sh"
+obs_receiver = el.s10.PyRecipe.process(
+    name="obs-srt-receiver",
+    cmd="bash",
+    args=[str(receiver_script)],
+    cwd=str(Path(__file__).parent),
+)
+world.recipe(obs_receiver)
+
+# Define schematic with top-down camera view and video stream tiles
 world.schematic("""
     hsplit {
-        tabs share=0.6 {
+        tabs share=0.5 {
             viewport name=Viewport pos="(0,0,0,0, 0,0,12)" look_at="(0,0,0,0, 0,0,0)" show_grid=#true
         }
-        vsplit share=0.4 {
-            video_stream "test-video" name="Test Pattern"
+        vsplit share=0.5 {
+            tabs {
+                video_stream "test-video" name="Test Pattern"
+                video_stream "obs-camera" name="OBS Camera"
+            }
             graph "ball.wind" name="Wind (m/s)"
         }
     }
@@ -221,7 +239,13 @@ print("Video Streaming Example - Rolling Ball")
 print("======================================")
 print()
 print("A ball rolls around pushed by rotating wind, bouncing off walls.")
-print("The video stream tile shows a GStreamer test pattern.")
+print()
+print("Two video stream tiles are available (in tabs):")
+print("  - Test Pattern: GStreamer test pattern (starts automatically)")
+print("  - OBS Camera:   SRT receiver on port 9000 (waiting for OBS)")
+print()
+print("To stream from OBS Studio, configure it to stream to:")
+print("  srt://<THIS_MACHINE_IP>:9000?mode=caller")
 print()
 
 # =============================================================================
