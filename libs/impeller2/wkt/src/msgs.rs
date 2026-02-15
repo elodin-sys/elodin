@@ -423,6 +423,11 @@ impl Msg for DumpSchema {
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct DumpSchemaResp {
     pub schemas: HashMap<ComponentId, Schema<Vec<u64>>>,
+    /// Per-component start timestamps (the `extra` field from the index
+    /// AppendLog header).  Used by followers to create components with
+    /// matching on-disk binary representations.
+    #[serde(default)]
+    pub start_timestamps: HashMap<ComponentId, Timestamp>,
 }
 
 impl Msg for DumpSchemaResp {

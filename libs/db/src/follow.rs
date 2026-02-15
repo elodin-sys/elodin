@@ -124,6 +124,20 @@ async fn run_follower_inner(config: &FollowConfig, db: &Arc<DB>) -> Result<(), E
         "phase 1: received metadata and schemas"
     );
 
+    // Apply db_config (includes schematic content/path, recording flag, etc.).
+    db.with_state_mut(|s| {
+        s.db_config
+            .metadata
+            .extend(metadata_resp.db_config.metadata.clone());
+        s.db_config.default_stream_time_step = metadata_resp.db_config.default_stream_time_step;
+    });
+    // Match the source's earliest_timestamp so the follower's time range
+    // is identical.
+    if let Some(ts_micros) = metadata_resp.db_config.time_start_timestamp_micros() {
+        let _ = db.set_earliest_timestamp(Timestamp(ts_micros));
+    }
+    db.save_db_state()?;
+
     // Apply component metadata.
     for metadata in &metadata_resp.component_metadata {
         db.with_state_mut(|s| s.set_component_metadata(metadata.clone(), &db.path))?;
@@ -136,10 +150,24 @@ async fn run_follower_inner(config: &FollowConfig, db: &Arc<DB>) -> Result<(), E
         db.with_state_mut(|s| s.set_msg_metadata(msg_id, msg_meta.clone(), &db.path))?;
     }
 
-    // Create components from schemas.
+    // Create components from schemas using the source's per-component
+    // start_timestamp so that the on-disk AppendLog headers match exactly
+    // between source and follower (binary-level replication fidelity).
+    let source_start_ts = metadata_resp
+        .db_config
+        .time_start_timestamp_micros()
+        .map(Timestamp)
+        .unwrap_or_else(Timestamp::now);
     for (&component_id, schema) in &schema_resp.schemas {
         let cs = ComponentSchema::from(schema.clone());
-        db.with_state_mut(|s| s.insert_component(component_id, cs, &db.path))?;
+        let start_ts = schema_resp
+            .start_timestamps
+            .get(&component_id)
+            .copied()
+            .unwrap_or(source_start_ts);
+        db.with_state_mut(|s| {
+            s.insert_component_with_start_timestamp(component_id, cs, start_ts, &db.path)
+        })?;
     }
 
     // Track all known component IDs as followed.
@@ -181,7 +209,18 @@ async fn run_follower_inner(config: &FollowConfig, db: &Arc<DB>) -> Result<(), E
                     {
                         let component = db.with_state(|s| s.components.get(&component_id).cloned());
                         if let Some(component) = component {
+                            // Skip samples at or before the follower's current
+                            // latest -- prevents duplicates on reconnect when
+                            // the follower already has persisted data.
+                            let local_latest = component
+                                .time_series
+                                .latest()
+                                .map(|(ts, _)| *ts)
+                                .unwrap_or(Timestamp(i64::MIN));
                             for (i, timestamp) in timestamps.iter().enumerate() {
+                                if *timestamp <= local_latest {
+                                    continue;
+                                }
                                 let start = i * schema_size;
                                 let end = start + schema_size;
                                 if end <= data.len() {
@@ -235,10 +274,23 @@ async fn run_follower_inner(config: &FollowConfig, db: &Arc<DB>) -> Result<(), E
             match &pkt {
                 Packet::Msg(m) if m.req_id == msg_req_id && m.id == MsgBatch::ID => {
                     let batch: MsgBatch = m.parse()?;
+                    // Determine local latest to skip already-persisted messages.
+                    let db_path = db.path.clone();
+                    let local_msg_latest = db.with_state_mut(|s| {
+                        s.get_or_insert_msg_log(msg_id, &db_path)
+                            .ok()
+                            .and_then(|log| log.latest().map(|(ts, _)| ts))
+                            .unwrap_or(Timestamp(i64::MIN))
+                    });
+                    let mut written = 0usize;
                     for (timestamp, data) in &batch.data {
+                        if *timestamp <= local_msg_latest {
+                            continue;
+                        }
                         db.push_msg(*timestamp, msg_id, data)?;
+                        written += 1;
                     }
-                    debug!(msg_id = ?msg_id, messages = batch.data.len(), "backfilled message log");
+                    debug!(msg_id = ?msg_id, messages = written, total = batch.data.len(), "backfilled message log");
                     buf = pkt.into_buf().into_inner();
                     break;
                 }
@@ -302,7 +354,19 @@ async fn run_follower_inner(config: &FollowConfig, db: &Arc<DB>) -> Result<(), E
                 let resp: DumpSchemaResp = m.parse()?;
                 for (component_id, schema) in resp.schemas {
                     let cs = ComponentSchema::from(schema);
-                    db.with_state_mut(|s| s.insert_component(component_id, cs, &db.path))?;
+                    let start_ts = resp
+                        .start_timestamps
+                        .get(&component_id)
+                        .copied()
+                        .unwrap_or(source_start_ts);
+                    db.with_state_mut(|s| {
+                        s.insert_component_with_start_timestamp(
+                            component_id,
+                            cs,
+                            start_ts,
+                            &db.path,
+                        )
+                    })?;
                     db.followed_components.write().unwrap().insert(component_id);
                 }
             }

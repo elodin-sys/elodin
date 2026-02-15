@@ -882,6 +882,41 @@ impl State {
         self.insert_component_with_timestamp_source_flag(component_id, schema, false, db_path)
     }
 
+    /// Insert a component with an explicit start_timestamp.
+    /// Used by the follower to match the source's start_timestamp exactly
+    /// so that on-disk binary representations are identical.
+    pub fn insert_component_with_start_timestamp(
+        &mut self,
+        component_id: ComponentId,
+        schema: ComponentSchema,
+        start_timestamp: Timestamp,
+        db_path: &Path,
+    ) -> Result<(), Error> {
+        if self.components.contains_key(&component_id) {
+            return Ok(());
+        }
+        info!(component.id = ?component_id.0, "inserting with explicit start_timestamp");
+        let name = self
+            .component_metadata
+            .get(&component_id)
+            .map(|m| m.name.clone())
+            .unwrap_or_else(|| component_id.to_string());
+        let component =
+            Component::create(db_path, component_id, name.clone(), schema, start_timestamp)?;
+        if !self.component_metadata.contains_key(&component_id) {
+            self.set_component_metadata(
+                ComponentMetadata {
+                    component_id,
+                    name,
+                    metadata: Default::default(),
+                },
+                db_path,
+            )?;
+        }
+        self.components.insert(component_id, component);
+        Ok(())
+    }
+
     /// Inserts a component, optionally marking it as a timestamp source.
     /// Timestamp source components contain raw clock values used as timestamps
     /// for other components, and should be excluded from time range calculations.
@@ -1244,6 +1279,11 @@ impl Component {
 
     fn sync_all(&self) -> Result<(), Error> {
         self.time_series.sync_all()
+    }
+
+    /// Returns the raw start_timestamp from the index file header.
+    pub fn index_extra(&self) -> &Timestamp {
+        self.time_series.index_extra()
     }
 
     /// Truncate the component, clearing all time-series data while preserving the schema.
@@ -1699,7 +1739,18 @@ async fn handle_packet<A: AsyncWrite + 'static>(
                     .values()
                     .map(|c| (c.component_id, c.schema.to_schema()))
                     .collect();
-                DumpSchemaResp { schemas }
+                let start_timestamps = state
+                    .components
+                    .values()
+                    .map(|c| {
+                        let ts = *c.time_series.index_extra();
+                        (c.component_id, ts)
+                    })
+                    .collect();
+                DumpSchemaResp {
+                    schemas,
+                    start_timestamps,
+                }
             });
 
             tx.send_msg(&msg).await?;
@@ -2542,8 +2593,10 @@ async fn handle_real_time_stream<A: AsyncWrite + 'static>(
             }
 
             // Send schema for this component
+            let start_ts = *component.index_extra();
             let schema_msg = DumpSchemaResp {
                 schemas: [(component.component_id, schema)].into_iter().collect(),
+                start_timestamps: [(component.component_id, start_ts)].into_iter().collect(),
             };
             {
                 let stream = sink.lock().await;
@@ -2671,8 +2724,10 @@ async fn handle_real_time_stream_batched<A: AsyncWrite + 'static>(
                     }
                 }
 
+                let start_ts = *component.index_extra();
                 let schema_msg = DumpSchemaResp {
                     schemas: [(component.component_id, schema)].into_iter().collect(),
+                    start_timestamps: [(component.component_id, start_ts)].into_iter().collect(),
                 };
                 {
                     let stream = sink.lock().await;

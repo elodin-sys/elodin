@@ -86,8 +86,10 @@ pub async fn handle_follow_stream<W: AsyncWrite>(
                 }
 
                 // Send DumpSchemaResp for this component
+                let start_ts = *component.index_extra();
                 let schema_msg = DumpSchemaResp {
                     schemas: [(component.component_id, schema)].into_iter().collect(),
+                    start_timestamps: [(component.component_id, start_ts)].into_iter().collect(),
                 };
                 sink.send(schema_msg.into_len_packet().with_request_id(req_id))
                     .await?;

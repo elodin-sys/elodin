@@ -11,9 +11,11 @@ mod tests {
     use impeller2_stellar::Client;
     use postcard_schema::{Schema, schema::owned::OwnedNamedType};
     use std::{
+        collections::{BTreeMap, BTreeSet},
         fs::File,
         io::Write,
         net::SocketAddr,
+        path::Path,
         sync::Arc,
         time::{Duration, Instant},
     };
@@ -1557,6 +1559,260 @@ mod tests {
         }
     }
 
+    // ── DB comparison helpers ────────────────────────────────────────────
+
+    /// Read all .csv files in a directory, returning filename -> contents.
+    fn collect_csv_files(dir: &Path) -> BTreeMap<String, String> {
+        let mut files = BTreeMap::new();
+        if let Ok(entries) = std::fs::read_dir(dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().is_some_and(|e| e == "csv") {
+                    let name = path.file_name().unwrap().to_string_lossy().to_string();
+                    let content = std::fs::read_to_string(&path).unwrap();
+                    files.insert(name, content);
+                }
+            }
+        }
+        files
+    }
+
+    /// Export both databases to CSV and assert they produce identical files.
+    fn assert_exports_match(src_db: &Arc<DB>, fol_db: &Arc<DB>, pattern: Option<&str>) {
+        let src_out = std::env::temp_dir().join(format!("elodin_export_src_{}", fastrand::u64(..)));
+        let fol_out = std::env::temp_dir().join(format!("elodin_export_fol_{}", fastrand::u64(..)));
+
+        src_db.flush_all().unwrap();
+        fol_db.flush_all().unwrap();
+
+        elodin_db::export::run(
+            src_db.path.clone(),
+            src_out.clone(),
+            elodin_db::export::ExportFormat::Csv,
+            true,
+            pattern.map(String::from),
+        )
+        .unwrap();
+
+        elodin_db::export::run(
+            fol_db.path.clone(),
+            fol_out.clone(),
+            elodin_db::export::ExportFormat::Csv,
+            true,
+            pattern.map(String::from),
+        )
+        .unwrap();
+
+        let src_files = collect_csv_files(&src_out);
+        let fol_files = collect_csv_files(&fol_out);
+
+        assert_eq!(
+            src_files.keys().collect::<BTreeSet<_>>(),
+            fol_files.keys().collect::<BTreeSet<_>>(),
+            "source and follower should have the same set of exported CSV files"
+        );
+
+        for (name, src_content) in &src_files {
+            let fol_content = &fol_files[name];
+            assert_eq!(
+                src_content, fol_content,
+                "CSV mismatch for {}: source and follower data differ",
+                name
+            );
+        }
+
+        let _ = std::fs::remove_dir_all(&src_out);
+        let _ = std::fs::remove_dir_all(&fol_out);
+    }
+
+    /// Read the committed data from an AppendLog file on disk.
+    /// Returns bytes 16..committed_len -- the `extra` field (start_timestamp
+    /// for index, element_size for data) plus all committed data.  Bytes
+    /// 0-15 (committed_len + head_len atomics) are runtime bookkeeping and
+    /// skipped.  The `extra` field IS included because the follower now
+    /// sets it to match the source's value during backfill.
+    fn read_append_log_committed(path: &Path) -> Vec<u8> {
+        let data = std::fs::read(path).unwrap_or_default();
+        if data.len() < 16 {
+            return vec![];
+        }
+        let committed_len = u64::from_ne_bytes(data[0..8].try_into().unwrap()) as usize;
+        if committed_len <= 16 || committed_len > data.len() {
+            return vec![];
+        }
+        data[16..committed_len].to_vec()
+    }
+
+    /// Compare the data-bearing files in two DB directories.
+    /// Skips db_state (contains creation timestamps). For AppendLog files,
+    /// compares only the deterministic portion (bytes 16..committed_len).
+    fn assert_db_files_match(src_path: &Path, fol_path: &Path) {
+        // Collect numeric component directories from source.
+        let src_entries: BTreeSet<String> = std::fs::read_dir(src_path)
+            .unwrap()
+            .flatten()
+            .filter(|e| {
+                let name = e.file_name().to_string_lossy().to_string();
+                e.path().is_dir() && name != "msgs" && name.chars().all(|c| c.is_ascii_digit())
+            })
+            .map(|e| e.file_name().to_string_lossy().to_string())
+            .collect();
+
+        let fol_entries: BTreeSet<String> = std::fs::read_dir(fol_path)
+            .unwrap()
+            .flatten()
+            .filter(|e| {
+                let name = e.file_name().to_string_lossy().to_string();
+                e.path().is_dir() && name != "msgs" && name.chars().all(|c| c.is_ascii_digit())
+            })
+            .map(|e| e.file_name().to_string_lossy().to_string())
+            .collect();
+
+        assert_eq!(
+            src_entries, fol_entries,
+            "source and follower should have the same component directories"
+        );
+
+        // Compare each component directory.
+        for comp_id in &src_entries {
+            let src_dir = src_path.join(comp_id);
+            let fol_dir = fol_path.join(comp_id);
+
+            // schema: byte-for-byte
+            let src_schema = src_dir.join("schema");
+            let fol_schema = fol_dir.join("schema");
+            if src_schema.exists() {
+                assert!(
+                    fol_schema.exists(),
+                    "follower missing schema for component {}",
+                    comp_id
+                );
+                assert_eq!(
+                    std::fs::read(&src_schema).unwrap(),
+                    std::fs::read(&fol_schema).unwrap(),
+                    "schema mismatch for component {}",
+                    comp_id
+                );
+            }
+
+            // metadata: byte-for-byte (if present in source)
+            let src_meta = src_dir.join("metadata");
+            let fol_meta = fol_dir.join("metadata");
+            if src_meta.exists() {
+                assert!(
+                    fol_meta.exists(),
+                    "follower missing metadata for component {}",
+                    comp_id
+                );
+                assert_eq!(
+                    std::fs::read(&src_meta).unwrap(),
+                    std::fs::read(&fol_meta).unwrap(),
+                    "metadata mismatch for component {}",
+                    comp_id
+                );
+            }
+
+            // index and data: compare committed portions of AppendLog files
+            for filename in &["index", "data"] {
+                let src_file = src_dir.join(filename);
+                let fol_file = fol_dir.join(filename);
+                if src_file.exists() {
+                    assert!(
+                        fol_file.exists(),
+                        "follower missing {} for component {}",
+                        filename,
+                        comp_id
+                    );
+                    let src_data = read_append_log_committed(&src_file);
+                    let fol_data = read_append_log_committed(&fol_file);
+                    assert_eq!(
+                        src_data,
+                        fol_data,
+                        "{} data mismatch for component {} (src {} bytes, fol {} bytes)",
+                        filename,
+                        comp_id,
+                        src_data.len(),
+                        fol_data.len()
+                    );
+                }
+            }
+        }
+
+        // Compare msgs/ subdirectories.
+        let src_msgs = src_path.join("msgs");
+        let fol_msgs = fol_path.join("msgs");
+        if src_msgs.exists() {
+            let src_msg_ids: BTreeSet<String> = std::fs::read_dir(&src_msgs)
+                .unwrap()
+                .flatten()
+                .filter(|e| e.path().is_dir())
+                .map(|e| e.file_name().to_string_lossy().to_string())
+                .collect();
+
+            let fol_msg_ids: BTreeSet<String> = if fol_msgs.exists() {
+                std::fs::read_dir(&fol_msgs)
+                    .unwrap()
+                    .flatten()
+                    .filter(|e| e.path().is_dir())
+                    .map(|e| e.file_name().to_string_lossy().to_string())
+                    .collect()
+            } else {
+                BTreeSet::new()
+            };
+
+            assert_eq!(
+                src_msg_ids, fol_msg_ids,
+                "source and follower should have the same message log directories"
+            );
+
+            for msg_id in &src_msg_ids {
+                let src_msg_dir = src_msgs.join(msg_id);
+                let fol_msg_dir = fol_msgs.join(msg_id);
+
+                for filename in &["timestamps", "offsets", "data_log"] {
+                    let src_file = src_msg_dir.join(filename);
+                    let fol_file = fol_msg_dir.join(filename);
+                    if src_file.exists() {
+                        assert!(
+                            fol_file.exists(),
+                            "follower missing msgs/{}/{}",
+                            msg_id,
+                            filename
+                        );
+                        let src_data = read_append_log_committed(&src_file);
+                        let fol_data = read_append_log_committed(&fol_file);
+                        assert_eq!(
+                            src_data,
+                            fol_data,
+                            "msgs/{}/{} data mismatch (src {} bytes, fol {} bytes)",
+                            msg_id,
+                            filename,
+                            src_data.len(),
+                            fol_data.len()
+                        );
+                    }
+                }
+
+                // metadata: byte-for-byte
+                let src_meta = src_msg_dir.join("metadata");
+                let fol_meta = fol_msg_dir.join("metadata");
+                if src_meta.exists() {
+                    assert!(
+                        fol_meta.exists(),
+                        "follower missing msgs/{}/metadata",
+                        msg_id
+                    );
+                    assert_eq!(
+                        std::fs::read(&src_meta).unwrap(),
+                        std::fs::read(&fol_meta).unwrap(),
+                        "msgs/{}/metadata mismatch",
+                        msg_id
+                    );
+                }
+            }
+        }
+    }
+
     #[test]
     async fn test_follow_metadata_sync() {
         let (src_addr, _src_db, _fol_addr, fol_db) = setup_follow_pair(1500).await.unwrap();
@@ -1639,7 +1895,7 @@ mod tests {
             let _ = std::fs::remove_dir_all(&src_temp);
         }
         let src_server = Server::from_listener(src_listener, src_temp).unwrap();
-        let _src_db = src_server.db.clone();
+        let src_db = src_server.db.clone();
         stellar(move || async { src_server.run().await });
 
         let component_id = ComponentId::new("follow_comp_test");
@@ -1739,6 +1995,10 @@ mod tests {
                 assert_eq!(*val, (i + 1) as f64 * 10.0);
             }
         });
+
+        // CSV and binary comparison.
+        assert_exports_match(&src_db, &fol_db, Some("follow_comp_test*"));
+        assert_db_files_match(&src_db.path, &fol_db.path);
         let _ = fol_addr; // suppress unused warning
     }
 
@@ -1853,7 +2113,7 @@ mod tests {
 
     #[test]
     async fn test_follow_timestamp_preservation() {
-        let (src_addr, _src_db, _fol_addr, fol_db) = setup_follow_pair(1500).await.unwrap();
+        let (src_addr, src_db, _fol_addr, fol_db) = setup_follow_pair(1500).await.unwrap();
 
         let component_id = ComponentId::new("follow_ts_test");
         let vtable_id = 12u16.to_le_bytes();
@@ -1927,6 +2187,10 @@ mod tests {
                 "message timestamp should survive round-trip exactly"
             );
         });
+
+        // CSV and binary comparison.
+        assert_exports_match(&src_db, &fol_db, Some("follow_ts_test*"));
+        assert_db_files_match(&src_db.path, &fol_db.path);
     }
 
     #[test]
@@ -2267,7 +2531,7 @@ mod tests {
         let src_addr_era2 = src_listener_era2.local_addr().unwrap();
         // Reopen from the same persistent source data dir.
         let src_server_era2 = Server::from_listener(src_listener_era2, &src_dir).unwrap();
-        let _src_db_era2 = src_server_era2.db.clone();
+        let src_db_era2 = src_server_era2.db.clone();
         stellar(move || async { src_server_era2.run().await });
 
         // Write 5 more component samples at timestamps 6000..10000.
@@ -2365,11 +2629,15 @@ mod tests {
                 );
             }
         });
+
+        // CSV and binary comparison of era 2 source vs era 3 follower.
+        assert_exports_match(&src_db_era2, &fol_db_era3, Some("disruption_test*"));
+        assert_db_files_match(&src_db_era2.path, &fol_db_era3.path);
     }
 
     #[test]
     async fn test_follow_new_component_after_connect() {
-        let (src_addr, _src_db, _fol_addr, fol_db) = setup_follow_pair(1500).await.unwrap();
+        let (src_addr, src_db, _fol_addr, fol_db) = setup_follow_pair(1500).await.unwrap();
 
         // No components exist yet. Create "alpha" with 3 samples.
         let alpha_id = ComponentId::new("follow_alpha");
@@ -2432,11 +2700,15 @@ mod tests {
             assert_eq!(ts[0].0, 4000);
             assert_eq!(ts[1].0, 5000);
         });
+
+        // CSV and binary comparison.
+        assert_exports_match(&src_db, &fol_db, None);
+        assert_db_files_match(&src_db.path, &fol_db.path);
     }
 
     #[test]
     async fn test_follow_many_components_batching() {
-        let (src_addr, _src_db, _fol_addr, fol_db) = setup_follow_pair(1500).await.unwrap();
+        let (src_addr, src_db, _fol_addr, fol_db) = setup_follow_pair(1500).await.unwrap();
 
         const NUM_COMPONENTS: usize = 20;
 
@@ -2508,6 +2780,10 @@ mod tests {
                 );
             }
         });
+
+        // CSV and binary comparison.
+        assert_exports_match(&src_db, &fol_db, Some("batch_comp_*"));
+        assert_db_files_match(&src_db.path, &fol_db.path);
     }
 
     #[test]
@@ -2521,7 +2797,7 @@ mod tests {
             let _ = std::fs::remove_dir_all(&src_temp);
         }
         let src_server = Server::from_listener(src_listener, src_temp).unwrap();
-        let _src_db = src_server.db.clone();
+        let src_db = src_server.db.clone();
         stellar(move || async { src_server.run().await });
 
         let component_id = ComponentId::new("follow_sensor");
@@ -2681,5 +2957,354 @@ mod tests {
                 assert_eq!(ts.0, expected_msg_ts[i], "message ts mismatch at {}", i);
             }
         });
+
+        // CSV and binary comparison.
+        assert_exports_match(&src_db, &fol_db, Some("follow_sensor*"));
+        assert_db_files_match(&src_db.path, &fol_db.path);
+    }
+
+    // ── Comprehensive replication verification ──────────────────────────
+
+    /// Helper: send a typed component with explicit timestamps.
+    /// `prim` and `elem_size` describe the element type; `make_row` generates
+    /// one row of data as bytes for each sample index.
+    async fn send_typed_component(
+        addr: SocketAddr,
+        cid: ComponentId,
+        name: &str,
+        vtable_id: [u8; 2],
+        prim: PrimType,
+        shape: &[u64],
+        timestamps: &[Timestamp],
+        make_row: impl Fn(usize) -> Vec<u8>,
+    ) {
+        let mut client = Client::connect(addr).await.unwrap();
+
+        client
+            .send(&SetComponentMetadata::new(cid, name))
+            .await
+            .0
+            .unwrap();
+
+        let elem_count: usize = shape.iter().product::<u64>().max(1) as usize;
+        let prim_size = match prim {
+            PrimType::F64 | PrimType::U64 | PrimType::I64 => 8,
+            PrimType::F32 | PrimType::U32 | PrimType::I32 => 4,
+            PrimType::U16 | PrimType::I16 => 2,
+            PrimType::U8 | PrimType::I8 | PrimType::Bool => 1,
+        };
+        let row_size = elem_count * prim_size;
+
+        // VTable with explicit timestamp: [data | timestamp]
+        let vt = vtable([raw_field(
+            0,
+            row_size as u16,
+            timestamp(
+                raw_table(row_size as u16, 8),
+                schema(prim, shape, component(cid)),
+            ),
+        )]);
+        client
+            .send(&VTableMsg {
+                id: vtable_id,
+                vtable: vt,
+            })
+            .await
+            .0
+            .unwrap();
+        sleep(Duration::from_millis(50)).await;
+
+        for (i, ts) in timestamps.iter().enumerate() {
+            let row = make_row(i);
+            let mut pkt = LenPacket::table(vtable_id, row.len() + 8);
+            pkt.extend_from_slice(&row);
+            pkt.extend_aligned(&[ts.0]);
+            client.send(pkt).await.0.unwrap();
+            // Small delay to avoid timestamp collisions
+            if i % 20 == 19 {
+                sleep(Duration::from_millis(5)).await;
+            }
+        }
+        sleep(Duration::from_millis(50)).await;
+    }
+
+    #[test]
+    async fn test_follow_realistic_replication() {
+        let subscriber = tracing_subscriber::FmtSubscriber::new();
+        let _ = tracing::subscriber::set_global_default(subscriber);
+
+        // Persistent directories.
+        let src_dir =
+            std::env::temp_dir().join(format!("elodin_db_realistic_src_{}", fastrand::u64(..)));
+        let fol_dir =
+            std::env::temp_dir().join(format!("elodin_db_realistic_fol_{}", fastrand::u64(..)));
+        for d in [&src_dir, &fol_dir] {
+            if d.exists() {
+                let _ = std::fs::remove_dir_all(d);
+            }
+        }
+
+        // ── Start source ────────────────────────────────────────────────
+        let src_listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let src_addr = src_listener.local_addr().unwrap();
+        let src_server = Server::from_listener(src_listener, &src_dir).unwrap();
+        let src_db = src_server.db.clone();
+        stellar(move || async { src_server.run().await });
+
+        // ── Send KDL schematic ──────────────────────────────────────────
+        {
+            let mut client = Client::connect(src_addr).await.unwrap();
+            let kdl = r#"
+hsplit {
+  viewport pos="vehicle.world_pos.translate_world(0,0,5)" look_at="vehicle.world_pos"
+}
+object_3d vehicle.world_pos {
+  sphere radius=0.5 { color blue }
+}
+graph "vehicle.world_pos"
+graph "vehicle.world_vel"
+graph "vehicle.thrust"
+"#;
+            client
+                .send(&SetDbConfig {
+                    recording: None,
+                    metadata: [("schematic.content".to_string(), kdl.to_string())]
+                        .into_iter()
+                        .collect(),
+                })
+                .await
+                .0
+                .unwrap();
+            sleep(Duration::from_millis(50)).await;
+        }
+
+        // ── Send entity metadata (bare names, no schema) ────────────────
+        {
+            let mut client = Client::connect(src_addr).await.unwrap();
+            client
+                .send(&SetComponentMetadata::new(
+                    ComponentId::new("vehicle"),
+                    "vehicle",
+                ))
+                .await
+                .0
+                .unwrap();
+            client
+                .send(&SetComponentMetadata::new(
+                    ComponentId::new("Globals"),
+                    "Globals",
+                ))
+                .await
+                .0
+                .unwrap();
+            sleep(Duration::from_millis(50)).await;
+        }
+
+        // ── Component data ──────────────────────────────────────────────
+        let sample_count = 100usize;
+        let timestamps: Vec<Timestamp> = (1..=sample_count)
+            .map(|i| Timestamp(i as i64 * 1000))
+            .collect();
+
+        // vehicle.world_pos: f64[7] (SpatialTransform: qw,qx,qy,qz,x,y,z)
+        let world_pos_id = ComponentId::new("vehicle.world_pos");
+        send_typed_component(
+            src_addr,
+            world_pos_id,
+            "vehicle.world_pos",
+            100u16.to_le_bytes(),
+            PrimType::F64,
+            &[7],
+            &timestamps,
+            |i| {
+                let qw = 1.0f64;
+                let qx = 0.0f64;
+                let qy = 0.0f64;
+                let qz = 0.0f64;
+                let x = i as f64 * 0.5;
+                let y = (i as f64 * 0.1).sin() * 10.0;
+                let z = 50.0 + (i as f64 * 0.05).cos() * 5.0;
+                [qw, qx, qy, qz, x, y, z]
+                    .iter()
+                    .flat_map(|v| v.to_le_bytes())
+                    .collect()
+            },
+        )
+        .await;
+
+        // vehicle.world_vel: f64[6] (SpatialMotion: wx,wy,wz,vx,vy,vz)
+        let world_vel_id = ComponentId::new("vehicle.world_vel");
+        send_typed_component(
+            src_addr,
+            world_vel_id,
+            "vehicle.world_vel",
+            101u16.to_le_bytes(),
+            PrimType::F64,
+            &[6],
+            &timestamps,
+            |i| {
+                let wx = 0.01f64 * i as f64;
+                let wy = 0.0f64;
+                let wz = -0.005f64 * i as f64;
+                let vx = 70.0f64;
+                let vy = (i as f64 * 0.1).cos() * 2.0;
+                let vz = -0.5f64;
+                [wx, wy, wz, vx, vy, vz]
+                    .iter()
+                    .flat_map(|v| v.to_le_bytes())
+                    .collect()
+            },
+        )
+        .await;
+
+        // vehicle.thrust: f64[1] (scalar)
+        let thrust_id = ComponentId::new("vehicle.thrust");
+        send_typed_component(
+            src_addr,
+            thrust_id,
+            "vehicle.thrust",
+            102u16.to_le_bytes(),
+            PrimType::F64,
+            &[],
+            &timestamps,
+            |i| {
+                let thrust = 150.0f64 + (i as f64 * 0.1).sin() * 30.0;
+                thrust.to_le_bytes().to_vec()
+            },
+        )
+        .await;
+
+        // vehicle.control_surfaces: f32[4] (different prim type!)
+        let ctrl_id = ComponentId::new("vehicle.control_surfaces");
+        send_typed_component(
+            src_addr,
+            ctrl_id,
+            "vehicle.control_surfaces",
+            103u16.to_le_bytes(),
+            PrimType::F32,
+            &[4],
+            &timestamps,
+            |i| {
+                let aileron = (i as f32 * 0.2).sin() * 15.0;
+                let elevator = -5.0f32 + i as f32 * 0.1;
+                let rudder = 0.0f32;
+                let flap = if i > 50 { 10.0f32 } else { 0.0f32 };
+                [aileron, elevator, rudder, flap]
+                    .iter()
+                    .flat_map(|v| v.to_le_bytes())
+                    .collect()
+            },
+        )
+        .await;
+
+        // Globals.tick: u64[1] (integer type)
+        let tick_id = ComponentId::new("Globals.tick");
+        send_typed_component(
+            src_addr,
+            tick_id,
+            "Globals.tick",
+            104u16.to_le_bytes(),
+            PrimType::U64,
+            &[],
+            &timestamps,
+            |i| (i as u64).to_le_bytes().to_vec(),
+        )
+        .await;
+
+        // Globals.simulation_time_step: f64[1] (single static value)
+        let timestep_id = ComponentId::new("Globals.simulation_time_step");
+        send_typed_component(
+            src_addr,
+            timestep_id,
+            "Globals.simulation_time_step",
+            105u16.to_le_bytes(),
+            PrimType::F64,
+            &[],
+            &[Timestamp(1000)],
+            |_| (1.0f64 / 300.0).to_le_bytes().to_vec(),
+        )
+        .await;
+
+        // ── Messages ────────────────────────────────────────────────────
+        let msg_name = "telemetry_log";
+        let msg_id = impeller2::types::msg_id(msg_name);
+        {
+            let mut client = Client::connect(src_addr).await.unwrap();
+            client
+                .send(&SetMsgMetadata {
+                    id: msg_id,
+                    metadata: MsgMetadata {
+                        name: msg_name.to_string(),
+                        schema: <impeller2_wkt::OpaqueBytes as postcard_schema::Schema>::SCHEMA
+                            .into(),
+                        metadata: Default::default(),
+                    },
+                })
+                .await
+                .0
+                .unwrap();
+            sleep(Duration::from_millis(50)).await;
+
+            for i in 0..20u32 {
+                let ts = Timestamp((i as i64 + 1) * 5000);
+                let payload = format!("telemetry_entry_{:04}", i);
+                let mut pkt = LenPacket::msg_with_timestamp(msg_id, ts, payload.len());
+                pkt.extend_from_slice(payload.as_bytes());
+                client.send(pkt).await.0.unwrap();
+                sleep(Duration::from_millis(5)).await;
+            }
+        }
+
+        sleep(Duration::from_millis(200)).await;
+
+        // ── Start follower ──────────────────────────────────────────────
+        let fol_listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let fol_server = Server::from_listener(fol_listener, &fol_dir).unwrap();
+        let fol_db = fol_server.db.clone();
+        stellar(move || async { fol_server.run().await });
+
+        let follow_db = fol_db.clone();
+        stellar(move || {
+            elodin_db::follow::run_follower(
+                elodin_db::follow::FollowConfig {
+                    source_addr: src_addr,
+                    target_packet_size: 1500,
+                    reconnect_delay: Duration::from_millis(100),
+                },
+                follow_db,
+            )
+        });
+
+        // ── Wait for full sync ──────────────────────────────────────────
+        for (cid, expected) in [
+            (world_pos_id, sample_count),
+            (world_vel_id, sample_count),
+            (thrust_id, sample_count),
+            (ctrl_id, sample_count),
+            (tick_id, sample_count),
+            (timestep_id, 1),
+        ] {
+            assert!(
+                wait_for_component_samples(&fol_db, cid, expected, Duration::from_secs(10)).await,
+                "follower should have {} samples for {:?}",
+                expected,
+                cid
+            );
+        }
+        assert!(
+            wait_for_msg_count(&fol_db, msg_id, 20, Duration::from_secs(10)).await,
+            "follower should have 20 messages"
+        );
+
+        // ── Flush both databases ────────────────────────────────────────
+        src_db.flush_all().unwrap();
+        fol_db.flush_all().unwrap();
+        sleep(Duration::from_millis(200)).await;
+
+        // ── CSV export comparison ───────────────────────────────────────
+        assert_exports_match(&src_db, &fol_db, None);
+
+        // ── Binary DB file comparison ───────────────────────────────────
+        assert_db_files_match(&src_db.path, &fol_db.path);
     }
 }

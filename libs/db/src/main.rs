@@ -294,9 +294,19 @@ async fn main() -> miette::Result<()> {
             ..
         }) => {
             let path = path.unwrap_or_else(|| {
-                let dirs =
-                    directories::ProjectDirs::from("systems", "elodin", "db").expect("no dirs");
-                dirs.data_dir().join("data")
+                if follows.is_some() {
+                    // Follower mode without an explicit path: use a temp directory
+                    // so we don't pollute (or inherit stale data from) the default
+                    // system data directory.
+                    let tmp = std::env::temp_dir()
+                        .join(format!("elodin-db-follower-{}", std::process::id()));
+                    info!(?tmp, "follower mode: using temp data directory");
+                    tmp
+                } else {
+                    let dirs =
+                        directories::ProjectDirs::from("systems", "elodin", "db").expect("no dirs");
+                    dirs.data_dir().join("data")
+                }
             });
             if reset && path.exists() {
                 info!(?path, "resetting db");
