@@ -14,7 +14,6 @@ WASD / Arrow keys for keyboard control.
 """
 
 from dataclasses import field
-from pathlib import Path
 
 import elodin as el
 import jax.numpy as jnp
@@ -32,8 +31,9 @@ class StaticMarker(el.Archetype):
 
 # Create configuration
 config = BDXConfig()
-config.initial_speed = 55.0
-config.initial_altitude = 110.0
+config.initial_speed = 70.0
+config.initial_altitude = 260.0
+config.initial_pitch_deg = 2.0
 config.set_as_global()
 
 
@@ -54,7 +54,9 @@ def setup_world(config: BDXConfig) -> tuple[el.World, el.EntityId, el.EntityId]:
     v_body = config.initial_velocity_body
     v_world = config.initial_attitude @ v_body
 
-    # Spawn the BDX jet
+    # Spawn the BDX jet with a cruise throttle setup for stable flyover.
+    # This avoids the initial descent seen with low default throttle.
+    cruise_throttle = 0.78
     jet = world.spawn(
         [
             el.Body(
@@ -68,7 +70,11 @@ def setup_world(config: BDXConfig) -> tuple[el.World, el.EntityId, el.EntityId]:
                 ),
                 inertia=config.spatial_inertia,
             ),
-            BDXJet(),
+            BDXJet(
+                spool_speed=jnp.float64(cruise_throttle),
+                throttle_command=jnp.float64(cruise_throttle),
+                control_commands=jnp.array([0.0, 0.0, 0.0, cruise_throttle]),
+            ),
         ],
         name="bdx",
     )
@@ -115,7 +121,7 @@ def setup_world(config: BDXConfig) -> tuple[el.World, el.EntityId, el.EntityId]:
            color blue 150
         }
         
-        line_3d bdx.world_pos line_width=3.0 perspective=#false {
+        line_3d "bdx.world_pos.translate_world(0.0,0.0,20.0)" line_width=7.0 perspective=#false {
             color yolk
         }
         """,
@@ -144,12 +150,7 @@ print(f"Time step: {config.dt:.6f} s ({1 / config.dt:.0f} Hz)")
 print(f"Total ticks: {config.total_ticks}")
 print()
 
-# Register the RC controller to run alongside the simulation
-controller_path = Path(__file__).parent / "controller"
-controller = el.s10.PyRecipe.cargo(name="controller", path=str(controller_path))
-world.recipe(controller)
-
-# Run simulation in real-time mode for responsive RC control
+# OSM flyover mode runs without the RC controller recipe to keep throttle trim stable.
 world.run(
     sim_system,
     sim_time_step=config.dt,
