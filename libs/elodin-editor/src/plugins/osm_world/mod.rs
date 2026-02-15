@@ -25,6 +25,7 @@ mod native {
         "https://overpass-api.de/api/interpreter",
     ];
     const TILE_QUERY_MARGIN_M: f64 = 32.0;
+    const TELEPORT_RESET_TILE_DELTA: i32 = 5;
 
     pub struct OsmWorldPlugin;
 
@@ -366,6 +367,7 @@ mod native {
         mut hovered_road: ResMut<HoveredRoad>,
         mut status: ResMut<OsmWorldStatus>,
         world_pos_query: Query<(&ComponentId, &WorldPos)>,
+        existing_entities: Query<Entity>,
         mut commands: Commands,
         mut meshes: ResMut<Assets<Mesh>>,
         mut materials: ResMut<Assets<StandardMaterial>>,
@@ -396,6 +398,7 @@ mod native {
         let track = current_center(&config, &world_pos_query);
         let center = track.geo;
         let center_tile = geo_to_tile(center, &config);
+        let previous_center_tile = state.last_reported_center_tile;
         if state.last_reported_center_tile != Some(center_tile) {
             info!(
                 "OSM center tile: ({}, {}) [{:?}]",
@@ -425,6 +428,40 @@ mod native {
         let active_tiles_set: HashSet<TileKey> = active_tiles_vec.iter().copied().collect();
         let prefetch_tiles_set: HashSet<TileKey> = prefetch_tiles_vec.iter().copied().collect();
         state.active_tiles = active_tiles_set.clone();
+
+        // If another system reset/reloaded scene entities, stale handles can stay in
+        // `loaded_tiles` and block respawn forever. Prune dead entity IDs eagerly.
+        let removed_stale_handles = prune_missing_loaded_entities(&mut state, &existing_entities);
+        if removed_stale_handles > 0 {
+            hovered.0 = None;
+            hovered_road.0 = None;
+            info!(
+                "OSM recovered from scene reset: pruned {} stale entity handles",
+                removed_stale_handles
+            );
+        }
+
+        if let Some(previous_tile) = previous_center_tile {
+            let jump_tiles = tile_jump_chebyshev(previous_tile, center_tile);
+            if jump_tiles >= TELEPORT_RESET_TILE_DELTA {
+                force_recenter_streaming_state(
+                    &mut state,
+                    &mut hovered,
+                    &mut hovered_road,
+                    center_tile,
+                    &prefetch_tiles_set,
+                );
+                status.message = format!(
+                    "OSM recenter: jump {} tiles -> refreshing around ({}, {})",
+                    jump_tiles, center_tile.x, center_tile.y
+                );
+                status.is_error = false;
+                info!(
+                    "OSM recenter triggered: jump {} tiles ({}, {}) -> ({}, {})",
+                    jump_tiles, previous_tile.x, previous_tile.y, center_tile.x, center_tile.y
+                );
+            }
+        }
 
         loop {
             let result = match state.fetch_rx.try_recv() {
@@ -1923,6 +1960,55 @@ mod native {
         let dx = i64::from(a.x - b.x);
         let dy = i64::from(a.y - b.y);
         dx * dx + dy * dy
+    }
+
+    fn tile_jump_chebyshev(a: TileKey, b: TileKey) -> i32 {
+        (a.x - b.x).abs().max((a.y - b.y).abs())
+    }
+
+    fn force_recenter_streaming_state(
+        state: &mut OsmWorldState,
+        hovered: &mut HoveredBuilding,
+        hovered_road: &mut HoveredRoad,
+        center_tile: TileKey,
+        prefetch_tiles: &HashSet<TileKey>,
+    ) {
+        hovered.0 = None;
+        hovered_road.0 = None;
+
+        for (_, entities) in state.loaded_tiles.drain() {
+            state.pending_to_despawn.extend(entities);
+        }
+        state.pending_renderables.clear();
+        state.pending_total = 0;
+        state.pending_tiles.clear();
+
+        // In-flight worker threads cannot be cancelled; drop accounting so new center
+        // can schedule fetches immediately.
+        state.inflight_tiles.clear();
+        state.failed_attempts.clear();
+        state.next_retry_at.clear();
+
+        state
+            .prefetched_tiles
+            .retain(|tile, _| prefetch_tiles.contains(tile));
+        state.last_prefetch_center_local = None;
+        state.last_prefetch_tile = None;
+        state.last_reported_center_tile = Some(center_tile);
+    }
+
+    fn prune_missing_loaded_entities(
+        state: &mut OsmWorldState,
+        existing_entities: &Query<Entity>,
+    ) -> usize {
+        let mut removed = 0usize;
+        state.loaded_tiles.retain(|_, entities| {
+            let before = entities.len();
+            entities.retain(|entity| existing_entities.contains(*entity));
+            removed += before.saturating_sub(entities.len());
+            !entities.is_empty()
+        });
+        removed
     }
 
     fn reprioritize_pending_tiles(
