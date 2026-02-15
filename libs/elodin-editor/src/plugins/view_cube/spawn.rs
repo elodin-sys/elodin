@@ -12,6 +12,10 @@ use super::components::*;
 use super::config::*;
 use super::theme::ViewCubeColors;
 
+pub(crate) fn plugin(app: &mut App) {
+    app.add_systems(PreUpdate, swap_zoom_buttons_on_alt);
+}
+
 // ============================================================================
 // Main Spawn Function
 // ============================================================================
@@ -500,6 +504,13 @@ fn spawn_rotation_arrows(
     }
 }
 
+#[derive(Debug, Resource)]
+struct ZoomIconMaterials {
+    icon_material: Handle<StandardMaterial>,
+    zoom_in: Handle<Image>,
+    zoom_out: Handle<Image>,
+}
+
 /// Spawn viewport action buttons as icon quads (fixed on screen).
 fn spawn_viewport_action_buttons(
     commands: &mut Commands,
@@ -529,7 +540,8 @@ fn spawn_viewport_action_buttons(
         asset_server.load("embedded://elodin_editor/assets/icons/viewport.png");
     let zoom_out_icon: Handle<Image> =
         asset_server.load("embedded://elodin_editor/assets/icons/subtract.png");
-
+    let zoom_in_icon: Handle<Image> =
+        asset_server.load("embedded://elodin_editor/assets/icons/add.png");
     // Keep buttons inside the camera frustum (Perspective fov ~= 45deg),
     // while still reading as bottom-left / bottom-right controls.
     let reset_material = materials.add(StandardMaterial {
@@ -590,11 +602,16 @@ fn spawn_viewport_action_buttons(
 
     let zoom_icon_material = materials.add(StandardMaterial {
         base_color: Color::WHITE,
-        base_color_texture: Some(zoom_out_icon),
+        base_color_texture: Some(zoom_out_icon.clone()),
         unlit: true,
         alpha_mode: AlphaMode::Blend,
         cull_mode: None,
         ..default()
+    });
+    commands.insert_resource(ZoomIconMaterials {
+        icon_material: zoom_icon_material.clone(),
+        zoom_out: zoom_out_icon,
+        zoom_in: zoom_in_icon,
     });
     let mut zoom_icon_cmd = commands.spawn((
         Mesh3d(zoom_icon_mesh),
@@ -617,5 +634,49 @@ fn spawn_viewport_action_buttons(
     ));
     if let Some(layers) = render_layers.clone() {
         zoom_hitbox_cmd.insert(layers);
+    }
+}
+
+fn swap_zoom_buttons_on_alt(
+    mut buttons: Query<&mut ViewportActionButton>,
+    keys: Res<ButtonInput<KeyCode>>,
+    zoom_icon_materials: Option<Res<ZoomIconMaterials>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    let pressed = if keys.just_pressed(KeyCode::AltLeft) || keys.just_pressed(KeyCode::AltRight) {
+        Some(true)
+    } else if keys.just_released(KeyCode::AltLeft) || keys.just_released(KeyCode::AltRight) {
+        Some(false)
+    } else {
+        None
+    };
+    if let Some(pressed) = pressed {
+        for mut action in &mut buttons {
+            match *action {
+                ViewportActionButton::ZoomIn | ViewportActionButton::ZoomOut => {
+                    if pressed {
+                        // Go to zoom in.
+                        *action = ViewportActionButton::ZoomIn;
+                    } else {
+                        // Go back to zoom out.
+                        *action = ViewportActionButton::ZoomOut;
+                    }
+                }
+                _ => (),
+            }
+        }
+        let Some(zoom_icon_materials) = zoom_icon_materials else {
+            return;
+        };
+
+        let Some(zoom_material) = materials.get_mut(&zoom_icon_materials.icon_material) else {
+            return;
+        };
+        let zoom_icon: Handle<Image> = if pressed {
+            zoom_icon_materials.zoom_in.clone()
+        } else {
+            zoom_icon_materials.zoom_out.clone()
+        };
+        zoom_material.base_color_texture = Some(zoom_icon);
     }
 }
