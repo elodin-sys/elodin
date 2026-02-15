@@ -50,6 +50,7 @@ impl Plugin for ViewCubePlugin {
             .init_resource::<CurrentColorMode>()
             .add_message::<ViewCubeEvent>()
             .add_plugins(FontMeshPlugin)
+            .add_plugins(spawn::plugin)
             .add_systems(Update, interactions::setup_cube_elements)
             .add_systems(Update, interactions::repeat_held_arrow)
             .add_systems(Update, update_theme_on_mode_change)

@@ -16,6 +16,10 @@ use super::theme::ViewCubeColors;
 // Main Spawn Function
 // ============================================================================
 
+pub(crate) fn plugin(app: &mut App) {
+    app.add_systems(PreUpdate, swap_zoom_buttons_on_alt);
+}
+
 /// Result of spawning a ViewCube
 pub struct SpawnedViewCube {
     /// The root entity of the ViewCube (cube + labels + axes)
@@ -529,7 +533,8 @@ fn spawn_viewport_action_buttons(
         asset_server.load("embedded://elodin_editor/assets/icons/viewport.png");
     let zoom_out_icon: Handle<Image> =
         asset_server.load("embedded://elodin_editor/assets/icons/subtract.png");
-
+    let zoom_in_icon: Handle<Image> =
+        asset_server.load("embedded://elodin_editor/assets/icons/add.png");
     // Keep buttons inside the camera frustum (Perspective fov ~= 45deg),
     // while still reading as bottom-left / bottom-right controls.
     let reset_material = materials.add(StandardMaterial {
@@ -574,7 +579,7 @@ fn spawn_viewport_action_buttons(
     });
     let zoom_button = commands
         .spawn((
-            Mesh3d(zoom_button_mesh),
+            Mesh3d(zoom_button_mesh.clone()),
             MeshMaterial3d(zoom_material),
             Transform::from_translation(Vec3::new(0.40, -0.39, depth)),
             Pickable::IGNORE,
@@ -597,7 +602,7 @@ fn spawn_viewport_action_buttons(
         ..default()
     });
     let mut zoom_icon_cmd = commands.spawn((
-        Mesh3d(zoom_icon_mesh),
+        Mesh3d(zoom_icon_mesh.clone()),
         MeshMaterial3d(zoom_icon_material),
         Transform::from_translation(Vec3::new(0.0, 0.0, 0.002)),
         Pickable::IGNORE,
@@ -609,13 +614,101 @@ fn spawn_viewport_action_buttons(
     }
 
     let mut zoom_hitbox_cmd = commands.spawn((
-        Mesh3d(zoom_hitbox_mesh),
-        MeshMaterial3d(hitbox_material),
+        Mesh3d(zoom_hitbox_mesh.clone()),
+        MeshMaterial3d(hitbox_material.clone()),
         Transform::from_translation(Vec3::ZERO),
         ChildOf(zoom_button),
         Name::new("viewport_action_button_ZoomOut_hitbox"),
     ));
     if let Some(layers) = render_layers.clone() {
         zoom_hitbox_cmd.insert(layers);
+    }
+
+    // Make a zoom in button in the same place.
+    {
+        // Circular zoom-out button for clearer visual hierarchy.
+        let zoom_material = materials.add(StandardMaterial {
+            base_color: button_color,
+            unlit: true,
+            alpha_mode: AlphaMode::Blend,
+            cull_mode: None,
+            ..default()
+        });
+        let zoom_button = commands
+            .spawn((
+                Mesh3d(zoom_button_mesh),
+                MeshMaterial3d(zoom_material),
+                Transform::from_translation(Vec3::new(0.40, -0.39, depth)),
+                Pickable::IGNORE,
+                ViewportActionButton::ZoomIn,
+                Visibility::Hidden,
+                Name::new("viewport_action_button_ZoomIn"),
+            ))
+            .id();
+        let mut zoom_button_cmd = commands.entity(zoom_button);
+        if let Some(layers) = render_layers.clone() {
+            zoom_button_cmd.insert(layers.clone());
+        }
+        zoom_button_cmd.insert(ChildOf(camera_entity));
+
+        let zoom_icon_material = materials.add(StandardMaterial {
+            base_color: Color::WHITE,
+            base_color_texture: Some(zoom_in_icon),
+            unlit: true,
+            alpha_mode: AlphaMode::Blend,
+            cull_mode: None,
+            ..default()
+        });
+        let mut zoom_icon_cmd = commands.spawn((
+            Mesh3d(zoom_icon_mesh),
+            MeshMaterial3d(zoom_icon_material),
+            Transform::from_translation(Vec3::new(0.0, 0.0, 0.002)),
+            Pickable::IGNORE,
+            ChildOf(zoom_button),
+            Name::new("viewport_action_button_ZoomIn_icon"),
+        ));
+        if let Some(layers) = render_layers.clone() {
+            zoom_icon_cmd.insert(layers);
+        }
+
+        let mut zoom_hitbox_cmd = commands.spawn((
+            Mesh3d(zoom_hitbox_mesh),
+            MeshMaterial3d(hitbox_material),
+            Transform::from_translation(Vec3::ZERO),
+            ChildOf(zoom_button),
+            Name::new("viewport_action_button_ZoomIn_hitbox"),
+        ));
+        if let Some(layers) = render_layers.clone() {
+            zoom_hitbox_cmd.insert(layers);
+        }
+    }
+}
+
+fn swap_zoom_buttons_on_alt(
+    mut buttons: Query<(&ViewportActionButton, &mut Visibility)>,
+    keys: Res<ButtonInput<KeyCode>>,
+) {
+    let pressed = if keys.just_pressed(KeyCode::AltLeft) || keys.just_pressed(KeyCode::AltRight) {
+        Some(true)
+    } else if keys.just_released(KeyCode::AltLeft) || keys.just_released(KeyCode::AltRight) {
+        Some(false)
+    } else {
+        None
+    };
+    let vis = |vis| {
+        if vis {
+            Visibility::Visible
+        } else {
+            Visibility::Hidden
+        }
+    };
+    if let Some(pressed) = pressed {
+        for (action, mut visibility) in &mut buttons {
+            match action {
+                ViewportActionButton::ZoomIn => *visibility = vis(pressed),
+                ViewportActionButton::ZoomOut => *visibility = vis(!pressed),
+                _ => (),
+            }
+        }
     }
 }
