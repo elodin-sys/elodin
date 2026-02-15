@@ -34,6 +34,7 @@ use nox::ArrayBuf;
 use crate::{
     EqlContext, MainCamera, Offset, SelectedTimeRange, TimeRangeBehavior, TimeRangeError,
     plugins::navigation_gizmo::RenderLayerAlloc,
+    plugins::osm_world::OsmWorldRedrawRequest,
     ui::{
         FocusedWindow, HdrEnabled, Paused, colors,
         command_palette::CommandPaletteState,
@@ -547,12 +548,14 @@ fn reset_cameras() -> PaletteItem {
                 "Reset all viewports",
                 VIEWPORT_LABEL,
                 move |_: In<String>,
-                      mut query: Query<(&mut Transform, &mut EditorCam), With<MainCamera>>| {
+                      mut query: Query<(&mut Transform, &mut EditorCam), With<MainCamera>>,
+                      mut redraw_requests: MessageWriter<OsmWorldRedrawRequest>| {
                     for camera in &all_cameras {
                         if let Ok((mut transform, mut editor_cam)) = query.get_mut(*camera) {
                             reset_editor_cam(&mut transform, &mut editor_cam);
                         }
                     }
+                    redraw_requests.write(OsmWorldRedrawRequest);
                     PaletteEvent::Exit
                 },
             ));
@@ -568,10 +571,12 @@ fn reset_cameras() -> PaletteItem {
                               mut query: Query<
                             (&mut Transform, &mut EditorCam),
                             With<MainCamera>,
-                        >| {
+                        >,
+                              mut redraw_requests: MessageWriter<OsmWorldRedrawRequest>| {
                             if let Ok((mut transform, mut editor_cam)) = query.get_mut(camera) {
                                 reset_editor_cam(&mut transform, &mut editor_cam);
                             }
+                            redraw_requests.write(OsmWorldRedrawRequest);
                             PaletteEvent::Exit
                         },
                     ),

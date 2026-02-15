@@ -1,3 +1,8 @@
+use bevy::prelude::Message;
+
+#[derive(Message, Clone, Copy, Debug, Default)]
+pub struct OsmWorldRedrawRequest;
+
 #[cfg(not(target_family = "wasm"))]
 mod native {
     use std::collections::{HashMap, HashSet, VecDeque};
@@ -16,6 +21,7 @@ mod native {
     use impeller2_wkt::WorldPos;
     use serde::Deserialize;
 
+    use super::OsmWorldRedrawRequest;
     use crate::WorldPosExt;
 
     const DEFAULT_ORIGIN_LAT: f64 = 34.054085661510506;
@@ -324,6 +330,7 @@ mod native {
     impl Plugin for OsmWorldPlugin {
         fn build(&self, app: &mut App) {
             let config = OsmWorldConfig::from_env();
+            app.add_message::<OsmWorldRedrawRequest>();
             app.insert_resource(config.clone());
             if !config.enabled {
                 info!("OSM world disabled. Set ELODIN_OSM_ENABLED=1 to enable it.");
@@ -366,6 +373,7 @@ mod native {
         mut hovered: ResMut<HoveredBuilding>,
         mut hovered_road: ResMut<HoveredRoad>,
         mut status: ResMut<OsmWorldStatus>,
+        mut redraw_requests: MessageReader<OsmWorldRedrawRequest>,
         world_pos_query: Query<(&ComponentId, &WorldPos)>,
         existing_entities: Query<Entity>,
         mut commands: Commands,
@@ -438,6 +446,24 @@ mod native {
             info!(
                 "OSM recovered from scene reset: pruned {} stale entity handles",
                 removed_stale_handles
+            );
+        }
+
+        if redraw_requests.read().next().is_some() {
+            let refreshed_tiles = force_redraw_active_tiles(
+                &mut state,
+                &mut hovered,
+                &mut hovered_road,
+                &active_tiles_vec,
+            );
+            status.message = format!(
+                "OSM redraw requested: {} active tiles around ({}, {})",
+                refreshed_tiles, center_tile.x, center_tile.y
+            );
+            status.is_error = false;
+            info!(
+                "OSM redraw requested around center tile ({}, {}), refreshed {} tiles",
+                center_tile.x, center_tile.y, refreshed_tiles
             );
         }
 
@@ -1995,6 +2021,33 @@ mod native {
         state.last_prefetch_center_local = None;
         state.last_prefetch_tile = None;
         state.last_reported_center_tile = Some(center_tile);
+    }
+
+    fn force_redraw_active_tiles(
+        state: &mut OsmWorldState,
+        hovered: &mut HoveredBuilding,
+        hovered_road: &mut HoveredRoad,
+        active_tiles: &[TileKey],
+    ) -> usize {
+        hovered.0 = None;
+        hovered_road.0 = None;
+
+        let mut refreshed_tiles = 0usize;
+        for tile in active_tiles {
+            if let Some(entities) = state.loaded_tiles.remove(tile) {
+                state.pending_to_despawn.extend(entities);
+            }
+            state
+                .pending_renderables
+                .retain(|pending| pending.tile != *tile);
+            if let Some(scene) = state.prefetched_tiles.get(tile).cloned() {
+                enqueue_tile_scene(*tile, &scene, &mut state.pending_renderables);
+                refreshed_tiles += 1;
+            }
+        }
+
+        state.pending_total = state.pending_renderables.len();
+        refreshed_tiles
     }
 
     fn prune_missing_loaded_entities(
