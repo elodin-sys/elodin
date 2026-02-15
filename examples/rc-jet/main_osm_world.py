@@ -32,6 +32,8 @@ class StaticMarker(el.Archetype):
 
 # Create configuration
 config = BDXConfig()
+config.initial_speed = 55.0
+config.initial_altitude = 110.0
 config.set_as_global()
 
 

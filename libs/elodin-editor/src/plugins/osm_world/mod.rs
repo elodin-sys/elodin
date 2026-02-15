@@ -157,6 +157,13 @@ mod native {
         levels: Option<f32>,
     }
 
+    #[derive(Component, Clone, Debug)]
+    struct OsmRoadMeta {
+        id: i64,
+        name: String,
+        kind: String,
+    }
+
     #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
     struct TileKey {
         x: i32,
@@ -178,6 +185,9 @@ mod native {
 
     #[derive(Resource, Default, Clone, Debug)]
     struct HoveredBuilding(pub Option<OsmBuildingMeta>);
+
+    #[derive(Resource, Default, Clone, Debug)]
+    struct HoveredRoad(pub Option<OsmRoadMeta>);
 
     #[derive(Resource, Default, Clone)]
     struct OsmWorldStatus {
@@ -245,12 +255,16 @@ mod native {
         Default,
         School,
         Pier,
+        Hospital,
+        FireStation,
     }
 
     #[derive(Debug, Clone)]
     struct RoadGeom {
         id: i64,
         kind: String,
+        name: String,
+        fast: bool,
         points: Vec<Vec2>,
         width_m: f32,
         length_m: f32,
@@ -334,10 +348,12 @@ mod native {
                 config.max_areas_per_tile
             );
             app.init_resource::<HoveredBuilding>()
+                .init_resource::<HoveredRoad>()
                 .init_resource::<OsmWorldStatus>()
                 .init_resource::<OsmWorldState>()
                 .add_systems(Update, update_osm_world)
                 .add_systems(Update, render_hover_overlay)
+                .add_systems(Update, render_road_hover_overlay)
                 .add_systems(Update, render_status_overlay);
         }
     }
@@ -347,6 +363,7 @@ mod native {
         config: Res<OsmWorldConfig>,
         mut state: ResMut<OsmWorldState>,
         mut hovered: ResMut<HoveredBuilding>,
+        mut hovered_road: ResMut<HoveredRoad>,
         mut status: ResMut<OsmWorldStatus>,
         world_pos_query: Query<(&ComponentId, &WorldPos)>,
         mut commands: Commands,
@@ -459,6 +476,7 @@ mod native {
             if let Some(old_entities) = state.loaded_tiles.remove(&tile) {
                 state.pending_to_despawn.extend(old_entities);
                 hovered.0 = None;
+                hovered_road.0 = None;
             }
             state
                 .pending_renderables
@@ -494,6 +512,7 @@ mod native {
             .collect();
         if !stale_tiles.is_empty() {
             hovered.0 = None;
+            hovered_road.0 = None;
         }
         for tile in stale_tiles {
             if let Some(entities) = state.loaded_tiles.remove(&tile) {
@@ -696,15 +715,28 @@ mod native {
                         perceptual_roughness: 0.95,
                         metallic: 0.01,
                         reflectance: 0.06,
+                        emissive: LinearRgba::BLACK,
                         ..Default::default()
                     });
-                    commands
-                        .spawn((
-                            Name::new(format!("osm_road_{}", road.id)),
-                            Mesh3d(meshes.add(mesh)),
-                            MeshMaterial3d(material),
-                        ))
-                        .id()
+                    let mut entity = commands.spawn((
+                        Name::new(format!("osm_road_{}", road.id)),
+                        Mesh3d(meshes.add(mesh)),
+                        MeshMaterial3d(material),
+                    ));
+                    if road.fast {
+                        entity
+                            .insert((
+                                Pickable::default(),
+                                OsmRoadMeta {
+                                    id: road.id,
+                                    name: road.name.clone(),
+                                    kind: road.kind.clone(),
+                                },
+                            ))
+                            .observe(on_road_hover_over)
+                            .observe(on_road_hover_out);
+                    }
+                    entity.id()
                 }
                 RenderableItem::Area(area) => {
                     let color = area_color(area.tint);
@@ -768,6 +800,46 @@ mod native {
         }
     }
 
+    fn on_road_hover_over(
+        event: On<Pointer<bevy_picking::prelude::Over>>,
+        road_query: Query<(&OsmRoadMeta, &MeshMaterial3d<StandardMaterial>)>,
+        mut hovered: ResMut<HoveredRoad>,
+        mut materials: ResMut<Assets<StandardMaterial>>,
+    ) {
+        let event_target = event.event().event_target();
+        let Ok((meta, material_handle)) = road_query.get(event_target) else {
+            return;
+        };
+
+        hovered.0 = Some(meta.clone());
+        if let Some(material) = materials.get_mut(&material_handle.0) {
+            let [r, g, b, _] = road_highlight_color_for_kind(&meta.kind)
+                .to_linear()
+                .to_f32_array();
+            material.emissive = LinearRgba::new(r * 0.45, g * 0.45, b * 0.45, 1.0);
+        }
+    }
+
+    fn on_road_hover_out(
+        event: On<Pointer<bevy_picking::prelude::Out>>,
+        road_query: Query<(&OsmRoadMeta, &MeshMaterial3d<StandardMaterial>)>,
+        mut hovered: ResMut<HoveredRoad>,
+        mut materials: ResMut<Assets<StandardMaterial>>,
+    ) {
+        let event_target = event.event().event_target();
+        let Ok((meta, material_handle)) = road_query.get(event_target) else {
+            return;
+        };
+
+        if let Some(material) = materials.get_mut(&material_handle.0) {
+            material.emissive = LinearRgba::BLACK;
+        }
+        let hovered_id = hovered.0.as_ref().map(|m| m.id);
+        if hovered_id == Some(meta.id) {
+            hovered.0 = None;
+        }
+    }
+
     fn render_hover_overlay(
         hovered: Res<HoveredBuilding>,
         windows: Query<&Window, With<PrimaryWindow>>,
@@ -800,6 +872,42 @@ mod native {
                         ui.label(format!("levels: {:.1}", levels));
                     }
                     ui.label("source: OpenStreetMap / Overpass");
+                });
+            });
+    }
+
+    fn render_road_hover_overlay(
+        hovered_road: Res<HoveredRoad>,
+        hovered_building: Res<HoveredBuilding>,
+        windows: Query<&Window, With<PrimaryWindow>>,
+        mut contexts: Query<&mut EguiContext, With<PrimaryWindow>>,
+    ) {
+        if hovered_building.0.is_some() {
+            return;
+        }
+        let Some(meta) = hovered_road.0.as_ref() else {
+            return;
+        };
+        let Ok(window) = windows.single() else {
+            return;
+        };
+        let Some(cursor_pos) = window.cursor_position() else {
+            return;
+        };
+        let Ok(mut context) = contexts.single_mut() else {
+            return;
+        };
+        let ctx = context.get_mut();
+        ctx.set_cursor_icon(egui::CursorIcon::PointingHand);
+        let pos = egui::pos2(cursor_pos.x + 14.0, cursor_pos.y + 14.0);
+        egui::Area::new(egui::Id::new("osm_road_hover_overlay"))
+            .order(egui::Order::Foreground)
+            .fixed_pos(pos)
+            .show(ctx, |ui| {
+                egui::Frame::popup(ui.style()).show(ui, |ui| {
+                    ui.label(egui::RichText::new(&meta.name).strong());
+                    ui.label(format!("type: {}", meta.kind));
+                    ui.label("highlight: fast road");
                 });
             });
     }
@@ -1035,6 +1143,8 @@ mod native {
                         roads.push(RoadGeom {
                             id: way_id,
                             kind: "pier".to_string(),
+                            name: road_display_name(&tags, "pier", way_id),
+                            fast: false,
                             width_m: road_width_for_kind("pier"),
                             points,
                             length_m,
@@ -1056,6 +1166,8 @@ mod native {
                 roads.push(RoadGeom {
                     id: way_id,
                     kind: "coastline".to_string(),
+                    name: road_display_name(&tags, "coastline", way_id),
+                    fast: false,
                     width_m: road_width_for_kind("coastline"),
                     points,
                     length_m,
@@ -1078,6 +1190,8 @@ mod native {
                 roads.push(RoadGeom {
                     id: way_id,
                     kind: kind.clone(),
+                    name: road_display_name(&tags, kind, way_id),
+                    fast: is_fast_road_kind(kind),
                     width_m: road_width_for_kind(kind),
                     points,
                     length_m,
@@ -1306,6 +1420,21 @@ mod native {
         )
     }
 
+    fn is_fast_road_kind(kind: &str) -> bool {
+        matches!(
+            kind,
+            "motorway" | "motorway_link" | "trunk" | "trunk_link" | "primary" | "primary_link"
+        )
+    }
+
+    fn road_display_name(tags: &HashMap<String, String>, kind: &str, way_id: i64) -> String {
+        tags.get("name")
+            .or_else(|| tags.get("official_name"))
+            .or_else(|| tags.get("ref"))
+            .cloned()
+            .unwrap_or_else(|| format!("{kind} #{way_id}"))
+    }
+
     fn road_width_for_kind(kind: &str) -> f32 {
         match kind {
             "coastline" => 20.0,
@@ -1332,6 +1461,15 @@ mod native {
         }
     }
 
+    fn road_highlight_color_for_kind(kind: &str) -> Color {
+        match kind {
+            "motorway" | "motorway_link" => Color::srgb(0.95, 0.85, 0.20),
+            "trunk" | "trunk_link" => Color::srgb(0.94, 0.78, 0.24),
+            "primary" | "primary_link" => Color::srgb(0.92, 0.72, 0.28),
+            _ => Color::srgb(0.90, 0.76, 0.26),
+        }
+    }
+
     fn is_school_value(value: &str) -> bool {
         matches!(value, "school" | "college" | "university" | "kindergarten")
     }
@@ -1343,6 +1481,34 @@ mod native {
             || tags
                 .get("building")
                 .map(|value| is_school_value(value))
+                .unwrap_or(false)
+    }
+
+    fn is_hospital_way(tags: &HashMap<String, String>) -> bool {
+        tags.get("amenity")
+            .map(|value| value == "hospital")
+            .unwrap_or(false)
+            || tags
+                .get("building")
+                .map(|value| value == "hospital")
+                .unwrap_or(false)
+            || tags
+                .get("healthcare")
+                .map(|value| value == "hospital")
+                .unwrap_or(false)
+    }
+
+    fn is_fire_station_way(tags: &HashMap<String, String>) -> bool {
+        tags.get("amenity")
+            .map(|value| value == "fire_station")
+            .unwrap_or(false)
+            || tags
+                .get("emergency")
+                .map(|value| value == "fire_station")
+                .unwrap_or(false)
+            || tags
+                .get("building")
+                .map(|value| value == "fire_station")
                 .unwrap_or(false)
     }
 
@@ -1373,6 +1539,10 @@ mod native {
     fn classify_building_tint(tags: &HashMap<String, String>, name: &str) -> BuildingTint {
         if is_pier_way(tags) || name.to_ascii_lowercase().contains("pier") {
             BuildingTint::Pier
+        } else if is_hospital_way(tags) || name.to_ascii_lowercase().contains("hospital") {
+            BuildingTint::Hospital
+        } else if is_fire_station_way(tags) || name.to_ascii_lowercase().contains("fire station") {
+            BuildingTint::FireStation
         } else if is_school_way(tags) {
             BuildingTint::School
         } else {
@@ -1610,6 +1780,16 @@ mod native {
                 (0.72 * jitter).clamp(0.0, 1.0),
                 (0.20 * jitter).clamp(0.0, 1.0),
                 (0.20 * jitter).clamp(0.0, 1.0),
+            ),
+            BuildingTint::Hospital => Color::srgb(
+                (0.22 * jitter).clamp(0.0, 1.0),
+                (0.62 * jitter).clamp(0.0, 1.0),
+                (0.29 * jitter).clamp(0.0, 1.0),
+            ),
+            BuildingTint::FireStation => Color::srgb(
+                (0.90 * jitter).clamp(0.0, 1.0),
+                (0.78 * jitter).clamp(0.0, 1.0),
+                (0.18 * jitter).clamp(0.0, 1.0),
             ),
             BuildingTint::Default => {
                 let t = (height_m / 250.0).clamp(0.0, 1.0);
