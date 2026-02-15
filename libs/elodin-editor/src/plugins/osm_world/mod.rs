@@ -61,6 +61,10 @@ mod native {
         martin_url: String,
         martin_source: String,
         martin_zoom: u8,
+        terrain_enabled: bool,
+        terrain_url_template: String,
+        terrain_zoom: u8,
+        terrain_exaggeration: f32,
         use_cache: bool,
         prefer_cache: bool,
         cache_dir: Option<PathBuf>,
@@ -131,6 +135,18 @@ mod native {
                 .or_else(|| env_parse("ELODIN_OSM_MARTIN_ZOOM"))
                 .unwrap_or(15u8)
                 .clamp(8, 18);
+            let terrain_enabled = env_flag("ELODIN_OSM_TERRAIN", true);
+            let terrain_url_template = std::env::var("ELODIN_OSM_TERRAIN_URL")
+                .unwrap_or_else(|_| {
+                    "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png"
+                        .to_string()
+                });
+            let terrain_zoom = env_parse("ELODIN_OSM_TERRAIN_ZOOM")
+                .unwrap_or(13u8)
+                .clamp(8, 15);
+            let terrain_exaggeration = env_parse("ELODIN_OSM_TERRAIN_EXAGGERATION")
+                .unwrap_or(1.0_f32)
+                .clamp(0.1, 8.0);
             let use_cache = !env_flag("ELODIN_OSM_DISABLE_CACHE", false);
             let prefer_cache = env_flag("ELODIN_OSM_PREFER_CACHE", true);
             let cache_dir = if use_cache {
@@ -159,6 +175,10 @@ mod native {
                 martin_url,
                 martin_source,
                 martin_zoom,
+                terrain_enabled,
+                terrain_url_template,
+                terrain_zoom,
+                terrain_exaggeration,
                 use_cache,
                 prefer_cache,
                 cache_dir,
@@ -223,6 +243,7 @@ mod native {
 
     #[derive(Debug, Clone)]
     enum RenderableItem {
+        Terrain(TerrainGeom),
         Building(BuildingGeom),
         Road(RoadGeom),
         Area(LandAreaGeom),
@@ -334,8 +355,17 @@ mod native {
         area_m2: f32,
     }
 
+    #[derive(Debug, Clone)]
+    struct TerrainGeom {
+        id: i64,
+        positions: Vec<[f32; 3]>,
+        uvs: Vec<[f32; 2]>,
+        indices: Vec<u32>,
+    }
+
     #[derive(Debug, Clone, Default)]
     struct TileSceneData {
+        terrain: Option<TerrainGeom>,
         buildings: Vec<BuildingGeom>,
         roads: Vec<RoadGeom>,
         areas: Vec<LandAreaGeom>,
@@ -441,7 +471,7 @@ mod native {
                 config.tracked_world_pos_component.clone()
             };
             info!(
-                "OSM world enabled (backend: {:?}, origin: {}, {}, track: {}, tile_size: {}m, radius: {}, prefetch: {}, inflight: {}, cache_first: {}, max: b{} r{} a{}, martin: {}/{}/z{})",
+                "OSM world enabled (backend: {:?}, origin: {}, {}, track: {}, tile_size: {}m, radius: {}, prefetch: {}, inflight: {}, cache_first: {}, max: b{} r{} a{}, martin: {}/{}/z{}, terrain: {} z{} x{})",
                 config.backend,
                 config.origin_lat,
                 config.origin_lon,
@@ -456,7 +486,10 @@ mod native {
                 config.max_areas_per_tile,
                 config.martin_url,
                 config.martin_source,
-                config.martin_zoom
+                config.martin_zoom,
+                config.terrain_enabled,
+                config.terrain_zoom,
+                config.terrain_exaggeration
             );
             app.init_resource::<HoveredBuilding>()
                 .init_resource::<HoveredRoad>()
@@ -829,6 +862,27 @@ mod native {
             }
 
             let entity = match pending.item {
+                RenderableItem::Terrain(terrain) => {
+                    let Some(mesh) = terrain_mesh(&terrain) else {
+                        continue;
+                    };
+                    let material = materials.add(StandardMaterial {
+                        base_color: Color::WHITE,
+                        unlit: false,
+                        cull_mode: None,
+                        perceptual_roughness: 0.98,
+                        metallic: 0.0,
+                        reflectance: 0.03,
+                        ..Default::default()
+                    });
+                    commands
+                        .spawn((
+                            Name::new(format!("osm_terrain_{}", terrain.id)),
+                            Mesh3d(meshes.add(mesh)),
+                            MeshMaterial3d(material),
+                        ))
+                        .id()
+                }
                 RenderableItem::Building(building) => {
                     let wall_color =
                         wall_color_for_building(building.height_m, building.id, building.tint);
@@ -1131,6 +1185,11 @@ mod native {
                         .then_with(|| b.area_m2.total_cmp(&a.area_m2))
                 });
                 scene.areas.truncate(cfg.max_areas_per_tile);
+                if cfg.terrain_enabled {
+                    scene.terrain = build_terrain_tile(tile, cfg);
+                } else {
+                    scene.terrain = None;
+                }
                 TileFetchResult {
                     tile,
                     scene,
@@ -1435,6 +1494,7 @@ mod native {
         }
 
         Ok(TileSceneData {
+            terrain: None,
             buildings,
             roads,
             areas,
@@ -1712,9 +1772,127 @@ mod native {
         }
 
         Ok(TileSceneData {
+            terrain: None,
             buildings,
             roads,
             areas,
+        })
+    }
+
+    fn build_terrain_tile(tile: TileKey, cfg: &OsmWorldConfig) -> Option<TerrainGeom> {
+        let dem_tile = geo_to_slippy_tile(tile_center_geo_from_local_tile(tile, cfg), cfg.terrain_zoom);
+        let cache_key = format!("terrain_terrarium_z{}_{}_{}", cfg.terrain_zoom, dem_tile.x, dem_tile.y);
+        let bytes = if cfg.use_cache
+            && cfg.prefer_cache
+            && let Some(bytes) = load_cache_bytes(cfg, &cache_key)
+        {
+            bytes
+        } else {
+            match request_terrain_tile(dem_tile, cfg) {
+                Ok(bytes) => {
+                    if cfg.use_cache {
+                        save_cache_bytes(cfg, &cache_key, &bytes);
+                    }
+                    bytes
+                }
+                Err(_) => {
+                    if cfg.use_cache
+                        && let Some(bytes) = load_cache_bytes(cfg, &cache_key)
+                    {
+                        bytes
+                    } else {
+                        return None;
+                    }
+                }
+            }
+        };
+
+        let img = image::load_from_memory(&bytes).ok()?.to_rgb8();
+        let (width, height) = img.dimensions();
+        if width < 2 || height < 2 {
+            return None;
+        }
+
+        let steps = 24usize;
+        let mut samples = Vec::with_capacity((steps + 1) * (steps + 1));
+        let mut mean_elevation = 0.0_f32;
+        for gy in 0..=steps {
+            let v = gy as f64 / steps as f64;
+            let north_m = (f64::from(tile.y) + v) * cfg.tile_size_m;
+            for gx in 0..=steps {
+                let u = gx as f64 / steps as f64;
+                let east_m = (f64::from(tile.x) + u) * cfg.tile_size_m;
+                let geo = local_m_to_geo(east_m, north_m, cfg.origin());
+                let (tile_xf, tile_yf) = geo_to_slippy_f64(geo, cfg.terrain_zoom);
+                let px = (tile_xf - f64::from(dem_tile.x)) * f64::from(width - 1);
+                let py = (tile_yf - f64::from(dem_tile.y)) * f64::from(height - 1);
+                let elevation = sample_terrarium_bilinear(&img, px as f32, py as f32);
+                mean_elevation += elevation;
+                samples.push((east_m as f32, -(north_m as f32), elevation, u as f32, v as f32));
+            }
+        }
+        mean_elevation /= samples.len().max(1) as f32;
+
+        let mut positions = Vec::with_capacity(samples.len());
+        let mut uvs = Vec::with_capacity(samples.len());
+        for (east, north_neg, elevation, u, v) in samples {
+            let y = (elevation - mean_elevation) * cfg.terrain_exaggeration - 3.0;
+            positions.push([east, y, north_neg]);
+            uvs.push([u, v]);
+        }
+
+        let row = steps + 1;
+        let mut indices = Vec::with_capacity(steps * steps * 6);
+        for gy in 0..steps {
+            for gx in 0..steps {
+                let i0 = (gy * row + gx) as u32;
+                let i1 = i0 + 1;
+                let i2 = i0 + row as u32;
+                let i3 = i2 + 1;
+                indices.extend_from_slice(&[i0, i2, i1, i1, i2, i3]);
+            }
+        }
+
+        Some(TerrainGeom {
+            id: (i64::from(tile.x) << 32) ^ i64::from(tile.y),
+            positions,
+            uvs,
+            indices,
+        })
+    }
+
+    fn request_terrain_tile(tile: TileKey, cfg: &OsmWorldConfig) -> Result<Vec<u8>, String> {
+        let url = cfg
+            .terrain_url_template
+            .replace("{z}", &cfg.terrain_zoom.to_string())
+            .replace("{x}", &tile.x.to_string())
+            .replace("{y}", &tile.y.to_string());
+
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|e| format!("tokio runtime init failed: {e}"))?;
+
+        rt.block_on(async move {
+            let client = reqwest::Client::builder()
+                .timeout(Duration::from_secs(20))
+                .build()
+                .map_err(|e| format!("http client init failed: {e}"))?;
+
+            let response = client
+                .get(&url)
+                .header("Accept", "image/png")
+                .send()
+                .await
+                .map_err(|e| format!("terrain request failed: {e}"))?;
+            if !response.status().is_success() {
+                return Err(format!("terrain request {url} failed: HTTP {}", response.status()));
+            }
+            response
+                .bytes()
+                .await
+                .map(|bytes| bytes.to_vec())
+                .map_err(|e| format!("terrain invalid bytes: {e}"))
         })
     }
 
@@ -1873,6 +2051,12 @@ mod native {
         scene: &TileSceneData,
         queue: &mut VecDeque<PendingRenderable>,
     ) {
+        if let Some(terrain) = &scene.terrain {
+            queue.push_back(PendingRenderable {
+                tile,
+                item: RenderableItem::Terrain(terrain.clone()),
+            });
+        }
         for area in &scene.areas {
             queue.push_back(PendingRenderable {
                 tile,
@@ -2688,6 +2872,93 @@ mod native {
 
     fn decode_zigzag_i32(value: u32) -> i32 {
         ((value >> 1) as i32) ^ -((value & 1) as i32)
+    }
+
+    fn geo_to_slippy_f64(point: GeoPoint, zoom: u8) -> (f64, f64) {
+        let zoom_scale = 2_f64.powi(i32::from(zoom));
+        let x = ((point.lon + 180.0) / 360.0) * zoom_scale;
+        let lat_rad = point.lat.to_radians();
+        let y = (1.0 - ((lat_rad.tan() + 1.0 / lat_rad.cos()).ln() / std::f64::consts::PI))
+            * 0.5
+            * zoom_scale;
+        (x, y)
+    }
+
+    fn sample_terrarium_height(rgb: image::Rgb<u8>) -> f32 {
+        let [r, g, b] = rgb.0;
+        (f32::from(r) * 256.0 + f32::from(g) + f32::from(b) / 256.0) - 32768.0
+    }
+
+    fn sample_terrarium_bilinear(img: &image::RgbImage, x: f32, y: f32) -> f32 {
+        let max_x = (img.width() - 1) as f32;
+        let max_y = (img.height() - 1) as f32;
+        let x = x.clamp(0.0, max_x);
+        let y = y.clamp(0.0, max_y);
+
+        let x0 = x.floor() as u32;
+        let y0 = y.floor() as u32;
+        let x1 = (x0 + 1).min(img.width() - 1);
+        let y1 = (y0 + 1).min(img.height() - 1);
+        let tx = x - x0 as f32;
+        let ty = y - y0 as f32;
+
+        let h00 = sample_terrarium_height(*img.get_pixel(x0, y0));
+        let h10 = sample_terrarium_height(*img.get_pixel(x1, y0));
+        let h01 = sample_terrarium_height(*img.get_pixel(x0, y1));
+        let h11 = sample_terrarium_height(*img.get_pixel(x1, y1));
+
+        let h0 = h00 + (h10 - h00) * tx;
+        let h1 = h01 + (h11 - h01) * tx;
+        h0 + (h1 - h0) * ty
+    }
+
+    fn terrain_mesh(terrain: &TerrainGeom) -> Option<Mesh> {
+        if terrain.positions.len() < 3 || terrain.indices.is_empty() {
+            return None;
+        }
+        let mut normals = vec![[0.0_f32, 0.0_f32, 0.0_f32]; terrain.positions.len()];
+        let mut colors = Vec::with_capacity(terrain.positions.len());
+        let color_low = Color::srgb(0.34, 0.31, 0.24).to_linear().to_f32_array();
+        let color_high = Color::srgb(0.24, 0.38, 0.24).to_linear().to_f32_array();
+
+        for tri in terrain.indices.chunks_exact(3) {
+            let i0 = tri[0] as usize;
+            let i1 = tri[1] as usize;
+            let i2 = tri[2] as usize;
+            let p0 = Vec3::from_array(terrain.positions[i0]);
+            let p1 = Vec3::from_array(terrain.positions[i1]);
+            let p2 = Vec3::from_array(terrain.positions[i2]);
+            let n = (p1 - p0).cross(p2 - p0).normalize_or_zero().to_array();
+            for idx in [i0, i1, i2] {
+                normals[idx][0] += n[0];
+                normals[idx][1] += n[1];
+                normals[idx][2] += n[2];
+            }
+        }
+
+        for (idx, normal) in normals.iter_mut().enumerate() {
+            let n = Vec3::from_array(*normal).normalize_or_zero();
+            *normal = n.to_array();
+            let y = terrain.positions[idx][1];
+            let t = ((y + 25.0) / 50.0).clamp(0.0, 1.0);
+            colors.push([
+                color_low[0] + (color_high[0] - color_low[0]) * t,
+                color_low[1] + (color_high[1] - color_low[1]) * t,
+                color_low[2] + (color_high[2] - color_low[2]) * t,
+                1.0,
+            ]);
+        }
+
+        let mut mesh = Mesh::new(
+            PrimitiveTopology::TriangleList,
+            RenderAssetUsages::default(),
+        );
+        mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, terrain.positions.clone());
+        mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
+        mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, terrain.uvs.clone());
+        mesh.insert_attribute(Mesh::ATTRIBUTE_COLOR, colors);
+        mesh.insert_indices(Indices::U32(terrain.indices.clone()));
+        Some(mesh)
     }
 
     fn centroid(points: &[Vec2]) -> Vec2 {
