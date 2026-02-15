@@ -19,6 +19,7 @@ use super::components::{
 };
 use super::config::ViewCubeConfig;
 use super::events::ViewCubeEvent;
+use crate::plugins::osm_world::OsmWorldRedrawRequest;
 use crate::WorldPosExt;
 use crate::object_3d::ComponentArrayExt;
 
@@ -252,6 +253,7 @@ pub fn handle_view_cube_editor(
     mut lookup: ViewCubeEditorLookup,
     config: Res<ViewCubeConfig>,
     mut look_to: MessageWriter<LookToTrigger>,
+    mut osm_redraw_requests: MessageWriter<OsmWorldRedrawRequest>,
 ) {
     for event in events.read() {
         let now_secs = lookup.time.elapsed_secs_f64();
@@ -555,6 +557,7 @@ pub fn handle_view_cube_editor(
             match action {
                 ViewportActionButton::Reset => {
                     apply_viewport_reset(transform.as_mut(), &mut editor_cam);
+                    osm_redraw_requests.write(OsmWorldRedrawRequest);
                 }
                 ViewportActionButton::ZoomOut => {
                     apply_viewport_zoom_out(transform.as_mut(), &mut editor_cam);
