@@ -1131,7 +1131,7 @@ mod tests {
         let expected_translation =
             initial_translation + (transform.rotation * Vec3::Z) * expected_delta;
 
-        apply_viewport_zoom_out(&mut transform, &mut editor_cam);
+        apply_viewport_zoom(true, &mut transform, &mut editor_cam);
 
         assert!((transform.translation - expected_translation).length() < 1.0e-5);
         assert!((editor_cam.last_anchor_depth + expected_target_depth as f64).abs() < 1.0e-8);
