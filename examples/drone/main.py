@@ -14,7 +14,7 @@ SANTA_MONICA_PIER_START_POS = np.array(
     [
         -6625.34,  # East offset (m) from OSM origin at Century City
         -4952.58,  # North offset (m): negative means south
-        35.0,      # Altitude (m) >= 30m
+        35.0,  # Altitude (m) >= 30m
     ]
 )
 
