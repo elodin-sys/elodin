@@ -113,7 +113,7 @@ class BDXConfig:
     initial_altitude: float = 50.0  # m (higher altitude)
     initial_pitch_deg: float = 0.0  # degrees (level on runway)
     initial_roll_deg: float = 0.0  # degrees
-    initial_yaw_deg: float = 0.0  # degrees (0° = East)
+    initial_yaw_deg: float = 35.0  # degrees (35° offset - northeast heading)
 
     # Simulation parameters
     dt: float = 1.0 / 300.0  # 300 Hz simulation rate
