@@ -92,7 +92,10 @@ mod elodinsink {
                 state.connection = None;
                 state.base_timestamp = None;
                 state.first_pts = None; // Reset PTS anchor on reconnect
-                state.first_buffer_connected = false;
+                                        // Note: first_buffer_connected is NOT reset here.  It tracks
+                                        // whether the initial first-buffer reconnect has occurred.
+                                        // Write-failure reconnects already refresh base_timestamp
+                                        // via connect() and don't need the first-buffer path.
 
                 match TcpStream::connect(state.db_addr) {
                     Ok(mut stream) => {

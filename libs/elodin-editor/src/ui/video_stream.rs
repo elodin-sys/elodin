@@ -627,7 +627,8 @@ impl VideoDecoderHandle {
     }
 
     /// Drain decoded frames from the decoder thread into the cache.
-    /// Returns `true` if a `SeekComplete` was received.
+    /// Returns `true` if a `SeekComplete` for the *current* generation
+    /// was received (stale completions from older batches are ignored).
     pub fn drain_into_cache(&self, cache: &mut VideoFrameCache) -> bool {
         let mut seek_completed = false;
         while let Ok(output) = self.rx.try_recv() {
@@ -636,8 +637,13 @@ impl VideoDecoderHandle {
                     cache.insert_decoded(timestamp, *frame);
                     cache.last_decoded_ts = Some(timestamp);
                 }
-                DecoderOutput::SeekComplete(_) => {
-                    seek_completed = true;
+                DecoderOutput::SeekComplete(completed_gen) => {
+                    // Only acknowledge if this matches the current generation.
+                    // A stale completion from an older batch must not clear
+                    // `seeking` while a newer seek is still in flight.
+                    if completed_gen == cache.seek_generation {
+                        seek_completed = true;
+                    }
                 }
             }
         }
@@ -1017,14 +1023,20 @@ pub fn connect_streams(
                     cache.seeking = false;
                 }
 
-                // Live-stream recovery (same as in the widget).
+                // Live-stream recovery: if the FixedRateMsgStream was
+                // previously delivering frames but has gone silent, re-send
+                // both requests.  Reset to None so recovery only fires once
+                // — it won't repeat until the stream actually delivers
+                // another frame (which sets last_stream_activity back to
+                // Some).  This prevents repeated re-fetches during normal
+                // paused/idle periods on recorded data.
                 if let Some(last) = cache.last_stream_activity
                     && last.elapsed().as_secs_f32() > STREAM_RECOVERY_TIMEOUT_SECS
                 {
                     let msg_id = stream.msg_id;
                     send_backfill_request(&mut commands, entity, msg_id, Timestamp(i64::MIN));
                     send_stream_request(&mut commands, entity, msg_id, stream_id.0);
-                    cache.last_stream_activity = Some(Instant::now());
+                    cache.last_stream_activity = None;
                 }
             }
             StreamState::Error(_) => {}

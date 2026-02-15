@@ -27,15 +27,15 @@ This example demonstrates streaming video from GStreamer into Elodin DB and disp
 ┌──────────────────────────────────────────────────────────────────────────┐
 │                         S10 Process Group                                │
 │                                                                          │
-│  ┌────────────────────┐  ┌─────────────────────┐  ┌──────────────────┐  │
+│  ┌────────────────────┐  ┌──────────────────────┐  ┌──────────────────┐  │
 │  │  Python Simulation │  │  GStreamer Pipeline  │  │  SRT Receiver    │  │
 │  │  (main.py)         │  │  (stream-video.sh)   │  │  (receive-obs-   │  │
 │  │                    │  │                      │  │   stream.sh)     │  │
 │  │  - Rolling ball    │  │  videotestsrc ->     │  │                  │  │
 │  │  - Wind/friction   │  │  x264enc ->          │  │  srtsrc :9000 -> │  │
 │  │  - Wall bouncing   │  │  h264parse ->        │  │  tsdemux ->      │  │
-│  │                    │  │  elodinsink           │  │  h264parse ->    │  │
-│  │                    │  │  msg:"test-video"    │  │  elodinsink       │  │
+│  │                    │  │  elodinsink          │  │  h264parse ->    │  │
+│  │                    │  │  msg:"test-video"    │  │  elodinsink      │  │
 │  │                    │  │                      │  │  msg:"obs-camera"│  │
 │  └────────┬───────────┘  └──────────┬───────────┘  └────────┬─────────┘  │
 │           │                         │                       │            │
