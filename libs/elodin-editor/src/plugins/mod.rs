@@ -5,6 +5,7 @@ pub(crate) mod env_asset_source;
 pub mod gizmos;
 mod logical_key;
 pub mod navigation_gizmo;
+pub mod osm_world;
 pub mod view_cube;
 mod web_asset;
 
