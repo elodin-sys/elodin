@@ -137,11 +137,21 @@ def world() -> tuple[el.World, el.EntityId]:
         theme mode="dark" scheme="default"
 
         tabs {
-            hsplit name="Main View" {
+            hsplit name = "Viewport" {
                 viewport name=Viewport pos="drone.world_pos + (0,0,0,0, 2,2,2)" look_at="drone.world_pos" show_grid=#true active=#true
+                vsplit share=0.4 {
+                    graph "drone.angle_desired" name="angle_desired"
+                    graph "drone.world_pos.q0, drone.world_pos.q1, drone.world_pos.q2, drone.world_pos.q3, drone.attitude_target" name="World Pos"
+                    graph "drone.ang_vel_setpoint"
+                }
+            }
+            vsplit name="Sensor Panel" {
+                graph "drone.gyro"
+                graph "drone.accel"
+                graph "drone.magnetometer"
             }
         }
-
+        
         //window path="examples/drone/motor-panel.kdl"
         //window path="examples/drone/rate-control-panel.kdl"
 
