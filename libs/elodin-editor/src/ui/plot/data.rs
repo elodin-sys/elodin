@@ -92,13 +92,20 @@ impl PlotDataComponent {
                 })
             });
             let line = assets.get_mut(line.id()).expect("missing line asset");
-            if let Some(last) = line.data.last()
-                && last.timestamps.len() < CHUNK_LEN
-            {
-                line.data.update_last(|c| {
-                    c.push(timestamp, earliest_timestamp, new_value);
-                });
-                continue;
+            // Only accept data at timestamps beyond all existing data for this
+            // line.  The FixedRate stream sends a snapshot at the current
+            // playback position each frame; skipping timestamps already covered
+            // prevents corrupting historical data loaded by GetTimeSeries.
+            if let Some(last) = line.data.last() {
+                if timestamp <= last.summary.end_timestamp {
+                    continue;
+                }
+                if last.timestamps.len() < CHUNK_LEN {
+                    line.data.update_last(|c| {
+                        c.push(timestamp, earliest_timestamp, new_value);
+                    });
+                    continue;
+                }
             }
             let new_chunk = Chunk::from_initial_value(timestamp, earliest_timestamp, new_value);
             line.data.insert(new_chunk);
