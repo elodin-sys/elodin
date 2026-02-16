@@ -2977,12 +2977,25 @@ impl DBVisitor {
         table: &mut LenPacket,
     ) {
         for (_, component) in components.iter() {
-            let Some((&ts, buf)) = component.time_series.latest() else {
-                continue;
-            };
-            table.push_aligned(ts);
-            table.pad_for_type(component.schema.prim_type);
-            table.extend_from_slice(buf);
+            let elem_size = component.schema.size();
+            let prim_type = component.schema.prim_type;
+            match component.time_series.latest() {
+                Some((&ts, buf)) => {
+                    table.push_aligned(ts);
+                    table.pad_for_type(prim_type);
+                    table.extend_from_slice(buf);
+                }
+                None => {
+                    // Write zeros to preserve VTable field offset alignment.
+                    // Without this, skipping a component shifts all
+                    // subsequent fields backward, causing type mismatches.
+                    table.push_aligned(Timestamp(0));
+                    table.pad_for_type(prim_type);
+                    for _ in 0..elem_size {
+                        table.push(0);
+                    }
+                }
+            }
         }
     }
 

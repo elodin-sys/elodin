@@ -24,7 +24,8 @@ use impeller2_wkt::*;
 use stellarator::{io::SplitExt, net::TcpStream};
 use tracing::{debug, info, warn};
 
-use crate::{ComponentSchema, DB, DBSink, Error};
+use crate::{AtomicTimestampExt, ComponentSchema, DB, DBSink, Error};
+use impeller2::registry::VTableRegistry;
 
 /// Configuration for a follower connection.
 pub struct FollowConfig {
@@ -226,6 +227,18 @@ async fn run_follower_inner(config: &FollowConfig, db: &Arc<DB>) -> Result<(), E
     // and then streams new data as it arrives.  No separate backfill phase
     // is needed.
 
+    // Track how many samples each component had at connection start.
+    // On reconnection, the source resends ALL data; we skip samples we
+    // already have using these counters (decremented as chunks arrive).
+    let mut skip_remaining: std::collections::HashMap<impeller2::types::ComponentId, usize> =
+        db.with_state(|state| {
+            state
+                .components
+                .iter()
+                .map(|(&cid, comp)| (cid, comp.time_series.sample_count()))
+                .collect()
+        });
+
     loop {
         let pkt = rx.next(buf).await?;
         match &pkt {
@@ -269,6 +282,68 @@ async fn run_follower_inner(config: &FollowConfig, db: &Arc<DB>) -> Result<(), E
             Packet::Msg(m) if m.id == VTableMsg::ID => {
                 let vtable = m.parse::<VTableMsg>()?;
                 db.insert_vtable(vtable)?;
+            }
+
+            // TimeSeries – bulk data from follow-stream.  Write
+            // timestamps and data directly to the component's time
+            // series without per-sample VTable decomposition.
+            Packet::TimeSeries(ts) => 'ts: {
+                let Ok(timestamps) = ts.timestamps() else {
+                    warn!(vtable_id = ?ts.id, "failed to parse TimeSeries timestamps");
+                    break 'ts;
+                };
+                let Ok(data_buf) = ts.data() else {
+                    warn!(vtable_id = ?ts.id, "failed to parse TimeSeries data");
+                    break 'ts;
+                };
+                // Resolve component_id from the VTable.
+                let component_id = match db.with_state(|state| -> Result<_, Error> {
+                    let vtable = state
+                        .vtable_registry
+                        .get(&ts.id)
+                        .ok_or(Error::Impeller(
+                            impeller2::error::Error::VTableNotFound(ts.id),
+                        ))?;
+                    for res in vtable.realize_fields(None) {
+                        let field = res?;
+                        return Ok(field.component_id);
+                    }
+                    Err(Error::Impeller(impeller2::error::Error::InvalidOp))
+                }) {
+                    Ok(cid) => cid,
+                    Err(e) => {
+                        warn!(?e, vtable_id = ?ts.id, "failed to resolve component from TimeSeries VTable");
+                        break 'ts;
+                    }
+                };
+                // Dedup: skip samples we already had at connection start.
+                let skip_count = skip_remaining.get(&component_id).copied().unwrap_or(0);
+                let skip = skip_count.min(timestamps.len());
+                if skip > 0 {
+                    *skip_remaining.entry(component_id).or_insert(0) -= skip;
+                }
+
+                db.with_state(|state| -> Result<(), Error> {
+                    let Some(component) = state.components.get(&component_id) else {
+                        return Ok(());
+                    };
+                    let elem_size = component.schema.size();
+                    for (i, &timestamp) in timestamps.iter().enumerate().skip(skip) {
+                        let start = i * elem_size;
+                        let end = start + elem_size;
+                        if end > data_buf.len() {
+                            break;
+                        }
+                        let _ = component
+                            .time_series
+                            .push_buf(timestamp, &data_buf[start..end]);
+                    }
+                    if timestamps.len() > skip {
+                        db.last_updated
+                            .update_max(*timestamps.last().unwrap());
+                    }
+                    Ok(())
+                })?;
             }
 
             // Table – decomponentize and write to local DB.
@@ -321,8 +396,6 @@ async fn run_follower_inner(config: &FollowConfig, db: &Arc<DB>) -> Result<(), E
                 let timestamp = m.timestamp.unwrap_or_else(|| db.apply_implicit_timestamp());
                 db.push_msg(timestamp, m.id, &m.buf)?;
             }
-
-            _ => {}
         }
         buf = pkt.into_buf().into_inner();
     }

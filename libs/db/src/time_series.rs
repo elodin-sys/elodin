@@ -207,4 +207,9 @@ impl TimeSeries {
         self.data_waker.wake_all();
         Ok(())
     }
+
+    /// Returns the number of samples currently stored.
+    pub fn sample_count(&self) -> usize {
+        self.index.len() as usize / size_of::<i64>()
+    }
 }

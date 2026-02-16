@@ -38,12 +38,24 @@ impl<'a, W: AsyncWrite> CoalescingSink<'a, W> {
         }
     }
 
-    /// Buffer a packet.  If the buffer has reached `target_size` after
-    /// appending, it is flushed immediately.
+    /// Buffer a packet, flushing existing data first if appending
+    /// would exceed `target_size`.  This ensures each TCP write stays
+    /// as close to `target_size` as possible.
     pub async fn send(&mut self, packet: impl IntoLenPacket) -> Result<(), Error> {
         let pkt = packet.into_len_packet();
+
+        // If appending this packet would exceed the target, flush the
+        // existing buffer first so the TCP write stays within budget.
+        if !self.buffer.is_empty()
+            && self.buffer.len() + pkt.inner.len() > self.target_size
+        {
+            self.flush().await?;
+        }
+
         self.buffer.extend_from_slice(&pkt.inner);
 
+        // If this single packet alone exceeds the target (e.g. a large
+        // metadata message), flush it immediately.
         if self.buffer.len() >= self.target_size {
             self.flush().await?;
         }
@@ -81,7 +93,9 @@ impl<'a, W: AsyncWrite> CoalescingSink<'a, W> {
         let buf = std::mem::replace(&mut self.buffer, Vec::with_capacity(self.target_size));
         let (res, _buf) = self.writer.write_all(buf).await;
         self.last_flush = Instant::now();
-        res.map_err(Error::from)
+        res?;
+        stellarator::yield_now().await;
+        Ok(())
     }
 
     /// Returns the number of bytes currently buffered.
