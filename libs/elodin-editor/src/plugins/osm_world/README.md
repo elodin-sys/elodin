@@ -17,6 +17,9 @@ Runtime flow is cache-first and incremental: when a tile is needed it is loaded 
 local cache if present, otherwise fetched then persisted locally, and entities are
 spawned progressively frame-by-frame.
 
+The plugin also draws a sober grayscale raster OSM basemap under the generated
+geometry for visual continuity (`ELODIN_OSM_BASEMAP_FALLBACK=1`, enabled by default).
+
 For production, a **GeoParquet-based pipeline** is a likely next step to get stronger
 schemas, reproducible offline datasets, and better scaling.
 
