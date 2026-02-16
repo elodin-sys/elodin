@@ -416,12 +416,20 @@ impl<Ops: Buf<Op>, Data: Buf<u8>, Fields: Buf<Field>> VTable<Ops, Data, Fields> 
                     }
                     RealizedOp::Ext(e) => {
                         if e.id == TIMESTAMP_NS_EXT_ID {
-                            let ns_timestamp = Timestamp::read_from_bytes(e.data)?;
-                            let us_timestamp = Timestamp(ns_timestamp.0 / 1000);
+                            // Convert nanosecond timestamp to microseconds.
+                            // When table is None (e.g. during VTable registration),
+                            // e.data is empty so we skip reading the value -- only
+                            // the structural walk matters in that case.
+                            let ts = if e.data.len() >= core::mem::size_of::<Timestamp>() {
+                                let ns = Timestamp::read_from_bytes(e.data)?;
+                                Some(Timestamp(ns.0 / 1000))
+                            } else {
+                                None
+                            };
                             timestamp = Some(RealizedTimestamp {
-                                timestamp: Some(us_timestamp),
+                                timestamp: ts,
                                 arg: e.arg,
-                                range: None,
+                                range: e.range.clone(),
                             });
                         }
                         realized_op = self.realize(e.arg, table)?;
