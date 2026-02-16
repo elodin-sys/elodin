@@ -280,6 +280,7 @@ pub(super) struct ViewCubeEditorLookup<'w, 's> {
     floating_origin_settings: Res<'w, FloatingOriginSettings>,
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn handle_view_cube_editor(
     mut events: MessageReader<ViewCubeEvent>,
     view_cube_query: Query<&ViewCubeLink, With<ViewCubeRoot>>,

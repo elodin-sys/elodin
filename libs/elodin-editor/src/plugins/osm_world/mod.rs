@@ -3032,10 +3032,10 @@ mod native {
                     }
                 }
                 7 => {
-                    if !path.is_empty() {
-                        if let Some(first) = path.first().copied() {
-                            path.push(first);
-                        }
+                    if !path.is_empty()
+                        && let Some(first) = path.first().copied()
+                    {
+                        path.push(first);
                     }
                 }
                 _ => break,
