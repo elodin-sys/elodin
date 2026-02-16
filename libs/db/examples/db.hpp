@@ -4022,16 +4022,6 @@ namespace builder {
         return std::make_shared<OpBuilder>(ts);
     }
 
-    /// Creates a nanosecond-source timestamp operation.
-    /// The DB engine divides the source value by 1000 to produce microseconds
-    /// for the record timestamp. The raw component data is stored unchanged.
-    inline std::shared_ptr<OpBuilder> timestamp_ns(
-        std::shared_ptr<OpBuilder> source,
-        std::shared_ptr<OpBuilder> arg)
-    {
-        return ext({0x01, 0x00}, std::move(source), std::move(arg));
-    }
-
     /**
      * Creates an extension operation builder from a message ID, data, and an argument
      */
@@ -4040,6 +4030,16 @@ namespace builder {
     {
         OpBuilder::Ext ext { id, std::move(data), std::move(arg) };
         return std::make_shared<OpBuilder>(ext);
+    }
+
+    /// Creates a nanosecond-source timestamp operation.
+    /// The DB engine divides the source value by 1000 to produce microseconds
+    /// for the record timestamp. The raw component data is stored unchanged.
+    inline std::shared_ptr<OpBuilder> timestamp_ns(
+        std::shared_ptr<OpBuilder> source,
+        std::shared_ptr<OpBuilder> arg)
+    {
+        return ext({0x01, 0x00}, std::move(source), std::move(arg));
     }
 
     /// Creates a field builder with the specified offset, length, and argument
