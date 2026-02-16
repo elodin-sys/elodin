@@ -358,15 +358,14 @@ impl<Ops: Buf<Op>, Data: Buf<u8>, Fields: Buf<Field>> VTable<Ops, Data, Fields> 
             Op::Ext { arg, id, data } => {
                 let resolved = self.realize(*data, table)?;
                 let range = resolved.as_table_range();
-                // timestamp_ns uses a table reference as its data operand,
-                // which can't resolve to bytes when table is None (e.g.
-                // during VTable registration). Allow empty data only for
-                // that well-known ID; all other exts require valid bytes.
-                let data_bytes = if *id == TIMESTAMP_NS_EXT_ID {
-                    resolved.as_slice().unwrap_or(&[])
-                } else {
-                    resolved.as_slice().ok_or(Error::InvalidOp)?
-                };
+                // When table is None (e.g. during VTable registration or
+                // streaming setup), table-reference data operands can't
+                // resolve to bytes. This is expected for timestamp_ns which
+                // uses a raw_table() as its data source. Other exts
+                // (MeanOp, FixedRateBehavior) use embedded Data ops that
+                // always resolve, so this fallback only activates for
+                // table-reference data.
+                let data_bytes = resolved.as_slice().unwrap_or(&[]);
                 Ok(RealizedOp::Ext(RealizedExt {
                     id: *id,
                     data: data_bytes,
