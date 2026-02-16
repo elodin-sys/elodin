@@ -46,9 +46,7 @@ impl<'a, W: AsyncWrite> CoalescingSink<'a, W> {
 
         // If appending this packet would exceed the target, flush the
         // existing buffer first so the TCP write stays within budget.
-        if !self.buffer.is_empty()
-            && self.buffer.len() + pkt.inner.len() > self.target_size
-        {
+        if !self.buffer.is_empty() && self.buffer.len() + pkt.inner.len() > self.target_size {
             self.flush().await?;
         }
 

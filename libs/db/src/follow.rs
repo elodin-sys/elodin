@@ -230,8 +230,8 @@ async fn run_follower_inner(config: &FollowConfig, db: &Arc<DB>) -> Result<(), E
     // Track how many samples each component had at connection start.
     // On reconnection, the source resends ALL data; we skip samples we
     // already have using these counters (decremented as chunks arrive).
-    let mut skip_remaining: std::collections::HashMap<impeller2::types::ComponentId, usize> =
-        db.with_state(|state| {
+    let mut skip_remaining: std::collections::HashMap<impeller2::types::ComponentId, usize> = db
+        .with_state(|state| {
             state
                 .components
                 .iter()
@@ -298,17 +298,15 @@ async fn run_follower_inner(config: &FollowConfig, db: &Arc<DB>) -> Result<(), E
                 };
                 // Resolve component_id from the VTable.
                 let component_id = match db.with_state(|state| -> Result<_, Error> {
-                    let vtable = state
-                        .vtable_registry
-                        .get(&ts.id)
-                        .ok_or(Error::Impeller(
-                            impeller2::error::Error::VTableNotFound(ts.id),
-                        ))?;
-                    for res in vtable.realize_fields(None) {
+                    let vtable = state.vtable_registry.get(&ts.id).ok_or(Error::Impeller(
+                        impeller2::error::Error::VTableNotFound(ts.id),
+                    ))?;
+                    if let Some(res) = vtable.realize_fields(None).next() {
                         let field = res?;
-                        return Ok(field.component_id);
+                        Ok(field.component_id)
+                    } else {
+                        Err(Error::Impeller(impeller2::error::Error::InvalidOp))
                     }
-                    Err(Error::Impeller(impeller2::error::Error::InvalidOp))
                 }) {
                     Ok(cid) => cid,
                     Err(e) => {
@@ -339,8 +337,7 @@ async fn run_follower_inner(config: &FollowConfig, db: &Arc<DB>) -> Result<(), E
                             .push_buf(timestamp, &data_buf[start..end]);
                     }
                     if timestamps.len() > skip {
-                        db.last_updated
-                            .update_max(*timestamps.last().unwrap());
+                        db.last_updated.update_max(*timestamps.last().unwrap());
                     }
                     Ok(())
                 })?;

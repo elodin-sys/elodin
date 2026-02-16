@@ -116,8 +116,9 @@ pub async fn handle_follow_stream<W: AsyncWrite>(
                 // Random u16 IDs collide ~56% of the time with 320
                 // components (birthday paradox), causing the follower
                 // to write data to the wrong component.
-                let vtable_id: PacketId =
-                    (component_vtables.len() as u16).wrapping_add(0x8000).to_le_bytes();
+                let vtable_id: PacketId = (component_vtables.len() as u16)
+                    .wrapping_add(0x8000)
+                    .to_le_bytes();
                 sink.send(
                     VTableMsg {
                         id: vtable_id,
@@ -180,7 +181,7 @@ pub async fn handle_follow_stream<W: AsyncWrite>(
         // TimeSeries wire format per chunk:
         //   [len:4] [type:1] [vtable_id:2] [req_id:1]  (8 B header)
         //   [count:u64] [ts1..tsN] [data1..dataN]
-        
+
         for (cid, comp) in components.iter() {
             let info = match component_vtables.get(cid) {
                 Some(v) => v,
@@ -218,10 +219,7 @@ pub async fn handle_follow_stream<W: AsyncWrite>(
             let mut pkt = LenPacket::time_series(info.vtable_id, payload);
             pkt.extend_from_slice(&(count as u64).to_le_bytes());
             let ts_raw: &[u8] = unsafe {
-                std::slice::from_raw_parts(
-                    timestamps[..count].as_ptr() as *const u8,
-                    ts_bytes,
-                )
+                std::slice::from_raw_parts(timestamps[..count].as_ptr() as *const u8, ts_bytes)
             };
             pkt.extend_from_slice(ts_raw);
             pkt.extend_from_slice(&data[..data_bytes]);
@@ -273,10 +271,7 @@ pub async fn handle_follow_stream<W: AsyncWrite>(
         // real-time, db.last_updated fires every sim tick (~3ms at
         // 300Hz) so the sleep rarely triggers.
         sink.flush().await?;
-        futures_lite::future::race(
-            db.last_updated.wait(),
-            stellarator::sleep(FLUSH_INTERVAL),
-        )
-        .await;
+        futures_lite::future::race(db.last_updated.wait(), stellarator::sleep(FLUSH_INTERVAL))
+            .await;
     }
 }
