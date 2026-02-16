@@ -11,8 +11,8 @@ use bevy_render::render_resource::{Buffer, BufferDescriptor, BufferSlice, Buffer
 use bevy_render::renderer::{RenderDevice, RenderQueue};
 use impeller2::types::{ComponentId, ComponentView, OwnedPacket, PrimType, Timestamp};
 use impeller2_bevy::{
-    CommandsExt, ComponentSchemaRegistry, ComponentValueMap, CurrentStreamId, EntityMap,
-    PacketGrantR, PacketHandlerInput, PacketHandlers,
+    CommandsExt, ComponentSchemaRegistry, ComponentValueMap, EntityMap, PacketGrantR,
+    PacketHandlerInput, PacketHandlers,
 };
 use impeller2_wkt::{CurrentTimestamp, EarliestTimestamp, GetTimeSeries, PlotOverviewQuery};
 use itertools::{Itertools, MinMaxResult};
@@ -135,13 +135,9 @@ pub fn pkt_handler(
     mut lines: ResMut<Assets<Line>>,
     tick: Res<CurrentTimestamp>,
     earliest_timestamp: Res<EarliestTimestamp>,
-    current_stream_id: Res<CurrentStreamId>,
 ) {
     let mut tick = *tick;
     if let OwnedPacket::Table(table) = packet {
-        if table.id == current_stream_id.packet_id() {
-            return;
-        }
         if let Err(err) = table.sink(registry, &mut tick) {
             warn_once!(?err, "tick sink failed");
         }
@@ -245,13 +241,6 @@ pub fn handle_time_series(
             let Some(plot_data) = collected_graph_data.get_component_mut(&component_id) else {
                 return;
             };
-            plot_data.request_states.insert(
-                range.start,
-                RequestState::Returned {
-                    len: timestamps.len(),
-                    last_timestamp: timestamps.last().copied(),
-                },
-            );
             match prim_type {
                 PrimType::U8 => process_time_series::<u8>(
                     buf,
@@ -342,6 +331,13 @@ pub fn handle_time_series(
                     earliest_timestamp.0,
                 ),
             }
+            plot_data.request_states.insert(
+                range.start,
+                RequestState::Returned {
+                    len: timestamps.len(),
+                    last_timestamp: timestamps.last().copied(),
+                },
+            );
             let Some(last_timestamp) = timestamps.last() else {
                 return;
             };
@@ -405,7 +401,11 @@ pub fn queue_timestamp_read(
     mut lines: ResMut<Assets<Line>>,
     earliest_timestamp: Res<EarliestTimestamp>,
 ) {
-    if selected_range.0.end.0 == i64::MIN || selected_range.0.start.0 == i64::MAX {
+    if selected_range.0.end.0 == i64::MIN
+        || selected_range.0.start.0 == i64::MAX
+        || selected_range.0.start.0 == i64::MIN
+        || selected_range.0.end.0 == i64::MAX
+    {
         return;
     }
 
