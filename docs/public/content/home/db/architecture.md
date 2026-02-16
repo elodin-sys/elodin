@@ -39,13 +39,17 @@ auto time_ns = builder::raw_table(40, 8);  // nanosecond clock field
 auto table = builder::vtable({
     raw_field(0, 8, schema(PrimType::F64(), {},
         timestamp_ns(time_ns, component("sensor.pressure")))),
-    // TIME_MONOTONIC stored as a plain component (raw ns preserved)
+    raw_field(8, 8, schema(PrimType::F64(), {},
+        timestamp_ns(time_ns, component("sensor.temperature")))),
+    // The clock field itself also uses timestamp_ns, giving it the same
+    // converted microsecond record timestamp as every other field.
+    // The raw nanosecond value is preserved in the component data.
     raw_field(40, 8, schema(PrimType::U64(), {},
-        component("sensor.time_monotonic"))),
+        timestamp_ns(time_ns, component("sensor.time_monotonic")))),
 });
 ```
 
-The DB engine automatically divides the nanosecond source value by 1000 on ingestion, producing correct microsecond record timestamps. The raw component data is stored unchanged, preserving full nanosecond precision for downstream analysis. This works identically for SITL and real hardware -- the conversion is declared in the VTable schema, not in mode-specific code.
+The DB engine automatically divides the nanosecond source value by 1000 on ingestion, producing correct microsecond record timestamps. The raw component data is stored unchanged, preserving full nanosecond precision for downstream analysis. Wrapping every field -- including the clock field itself -- in `timestamp_ns()` ensures all components in a message share the same temporally-aligned record timestamp. This works identically for SITL and real hardware -- the conversion is declared in the VTable schema, not in mode-specific code.
 
 ## VTable
 

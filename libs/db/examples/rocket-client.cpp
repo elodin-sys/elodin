@@ -152,14 +152,16 @@ try {
     // Example: if the timestamp source is in nanoseconds (e.g. from
     // clock_gettime(CLOCK_MONOTONIC)), use timestamp_ns() instead of timestamp().
     // The DB engine divides by 1000 to produce microsecond record timestamps.
-    // The raw component data is stored unchanged.
+    // The raw component data is stored unchanged. Wrap every field --
+    // including the clock field itself -- in timestamp_ns() so all
+    // components share the same temporally-aligned record timestamp.
     //
     //   auto time_ns = builder::raw_table(0, 8);
     //   auto table_ns = builder::vtable({
     //       raw_field(8, 8, schema(PrimType::F64(), {},
     //           timestamp_ns(time_ns, component("sensor.pressure")))),
     //       raw_field(0, 8, schema(PrimType::U64(), {},
-    //           component("sensor.time_monotonic"))),  // raw ns preserved
+    //           timestamp_ns(time_ns, component("sensor.time_monotonic")))),
     //   });
 
     sock.send(VTableMsg {
