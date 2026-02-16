@@ -1727,7 +1727,9 @@ async fn handle_packet<A: AsyncWrite + 'static>(
         }
         Packet::Table(table) => {
             trace!(table.len = table.buf.len(), "sinking table");
-            db.with_state(|state| {
+            let table_id = table.id;
+            let table_buf_len = table.buf.len();
+            if let Err(err) = db.with_state(|state| {
                 let mut sink = DBSink {
                     components: &state.components,
                     snapshot_barrier: &db.snapshot_barrier,
@@ -1740,7 +1742,15 @@ async fn handle_packet<A: AsyncWrite + 'static>(
                     db.vtable_gen.fetch_add(1, atomic::Ordering::SeqCst);
                 }
                 Ok::<_, Error>(())
-            })?;
+            }) {
+                debug!(
+                    ?err,
+                    ?table_id,
+                    table_buf_len,
+                    "error sinking table packet"
+                );
+                return Err(err);
+            }
         }
 
         Packet::Msg(m) if m.id == GetDbSettings::ID => {
