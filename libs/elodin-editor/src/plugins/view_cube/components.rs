@@ -175,6 +175,7 @@ pub enum RotationArrow {
 pub enum ViewportActionButton {
     Reset,
     ZoomOut,
+    ZoomIn,
 }
 
 /// Axis label rendered as a billboard, with metadata for screen-space spacing from the axis.

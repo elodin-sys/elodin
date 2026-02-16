@@ -12,6 +12,10 @@ use super::components::*;
 use super::config::*;
 use super::theme::ViewCubeColors;
 
+pub(crate) fn plugin(app: &mut App) {
+    app.add_systems(PreUpdate, swap_zoom_buttons_on_alt);
+}
+
 // ============================================================================
 // Main Spawn Function
 // ============================================================================
@@ -135,6 +139,45 @@ fn spawn_overlay_camera(
 // Axes
 // ============================================================================
 
+fn axis_visual_configs(system: CoordinateSystem) -> [(Vec3, Color, &'static str); 3] {
+    let axes = system.get_axes();
+    let east_color = axes
+        .iter()
+        .find(|axis| axis.direction.x.abs() > 0.9)
+        .map(|axis| axis.color)
+        .unwrap_or(Color::srgb(0.9, 0.2, 0.2));
+    let up_color = axes
+        .iter()
+        .find(|axis| axis.direction.y.abs() > 0.9)
+        .map(|axis| axis.color)
+        .unwrap_or(Color::srgb(0.2, 0.4, 0.9));
+    let north_color = axes
+        .iter()
+        .find(|axis| axis.direction.z.abs() > 0.9)
+        .map(|axis| axis.color)
+        .unwrap_or(Color::srgb(0.2, 0.8, 0.2));
+
+    // Visual mapping requested for ENU view cube:
+    // - X must point opposite local +X
+    // - Y/Z labels are swapped while preserving blue/green axis colors
+    [
+        (Vec3::NEG_X, east_color, "X"),
+        (Vec3::Y, up_color, "Z"),
+        (Vec3::Z, north_color, "Y"),
+    ]
+}
+
+fn axis_origin_for_visual_layout(cube_half_extent: f32, axis_center_offset: f32) -> Vec3 {
+    // In synced mode the cube receives a Y-PI correction.
+    // Use local corner (+X, -Y, -Z) so it appears at visual (W, bottom, S),
+    // then offset outward by axis radius so shafts sit on cube borders.
+    Vec3::new(
+        cube_half_extent + axis_center_offset,
+        -cube_half_extent - axis_center_offset,
+        -cube_half_extent - axis_center_offset,
+    )
+}
+
 /// Spawn RGB axes extending from the bottom-left-back corner of the cube
 fn spawn_axes(
     commands: &mut Commands,
@@ -147,7 +190,7 @@ fn spawn_axes(
 ) {
     const AXIS_SCALE_BUMP: f32 = 0.95;
     const CUBE_HALF_EXTENT: f32 = 0.5;
-    const AXIS_SURFACE_GAP: f32 = 0.05;
+    const AXIS_SURFACE_GAP: f32 = 0.01;
     const AXIS_OVERHANG: f32 = 0.24;
 
     // Axes are children of `view_cube_root` (already scaled by `config.scale`),
@@ -155,41 +198,12 @@ fn spawn_axes(
     // Extend a touch beyond cube edges so XYZ labels have more breathing room.
     let axis_length = (CUBE_HALF_EXTENT * 2.0) + AXIS_OVERHANG;
     let axis_radius = 0.04 * AXIS_SCALE_BUMP;
-    // Keep a tiny but visible clearance between axis surface and cube body.
-    // X goes right (along bottom-back edge)
-    // Y goes up (along back-left edge)
-    // Z goes forward (along bottom-left edge)
-    let cube_corner = Vec3::splat(-CUBE_HALF_EXTENT);
+    // `axis_visual_configs` defines final visual axis directions/labels/colors.
+    // Keep shafts on cube borders (no extra surface gap).
     let axis_center_offset = axis_radius + AXIS_SURFACE_GAP;
-    let axis_origin = cube_corner - Vec3::splat(axis_center_offset);
+    let axis_origin = axis_origin_for_visual_layout(CUBE_HALF_EXTENT, axis_center_offset);
 
-    let axes = config.system.get_axes();
-    let axis_configs: [(Vec3, Color, &str); 3] = [
-        (
-            Vec3::X,
-            axes.iter()
-                .find(|a| a.direction == Vec3::X)
-                .map(|a| a.color)
-                .unwrap_or(Color::srgb(0.9, 0.2, 0.2)),
-            "X",
-        ),
-        (
-            Vec3::Y,
-            axes.iter()
-                .find(|a| a.direction == Vec3::Y || a.direction == Vec3::NEG_Y)
-                .map(|a| a.color)
-                .unwrap_or(Color::srgb(0.2, 0.4, 0.9)),
-            "Y",
-        ),
-        (
-            Vec3::Z,
-            axes.iter()
-                .find(|a| a.direction == Vec3::Z)
-                .map(|a| a.color)
-                .unwrap_or(Color::srgb(0.2, 0.8, 0.2)),
-            "Z",
-        ),
-    ];
+    let axis_configs = axis_visual_configs(config.system);
 
     let shaft_mesh = meshes.add(Cylinder::new(axis_radius, axis_length));
     let font: Handle<FontMesh> =
@@ -208,9 +222,9 @@ fn spawn_axes(
             ..default()
         });
 
-        let rotation = if direction == Vec3::X {
+        let rotation = if direction.x.abs() > 0.9 {
             Quat::from_rotation_z(-FRAC_PI_2)
-        } else if direction == Vec3::Z {
+        } else if direction.z.abs() > 0.9 {
             Quat::from_rotation_x(FRAC_PI_2)
         } else {
             Quat::IDENTITY
@@ -263,6 +277,64 @@ fn spawn_axes(
         if let Some(layers) = render_layers.clone() {
             label_cmd.insert(layers);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn axis_visual_configs_match_requested_xyz_rbg_mapping() {
+        let axis_configs = axis_visual_configs(CoordinateSystem::ENU);
+
+        assert_eq!(axis_configs[0].0, Vec3::NEG_X);
+        assert_eq!(axis_configs[0].2, "X");
+        assert_eq!(axis_configs[1].0, Vec3::Y);
+        assert_eq!(axis_configs[1].2, "Z");
+        assert_eq!(axis_configs[2].0, Vec3::Z);
+        assert_eq!(axis_configs[2].2, "Y");
+
+        let logical_axes = CoordinateSystem::ENU.get_axes();
+        let east_color = logical_axes
+            .iter()
+            .find(|axis| axis.direction == Vec3::X)
+            .map(|axis| axis.color)
+            .expect("east color");
+        let up_color = logical_axes
+            .iter()
+            .find(|axis| axis.direction == Vec3::Y)
+            .map(|axis| axis.color)
+            .expect("up color");
+        let north_color = logical_axes
+            .iter()
+            .find(|axis| axis.direction == Vec3::Z)
+            .map(|axis| axis.color)
+            .expect("north color");
+
+        assert_eq!(axis_configs[0].1, east_color);
+        assert_eq!(axis_configs[1].1, up_color);
+        assert_eq!(axis_configs[2].1, north_color);
+    }
+
+    #[test]
+    fn axis_origin_layout_maps_to_visual_west_bottom_south_corner() {
+        let local_origin = axis_origin_for_visual_layout(0.5, 0.04);
+        let correction = ViewCubeConfig::system_axis_correction(CoordinateSystem::ENU);
+        let visual_origin = correction * local_origin;
+
+        assert!(
+            visual_origin.x < 0.0,
+            "origin should be on visual west side"
+        );
+        assert!(
+            visual_origin.y < 0.0,
+            "origin should be on visual bottom side"
+        );
+        assert!(
+            visual_origin.z > 0.0,
+            "origin should be on visual south side"
+        );
     }
 }
 
@@ -500,6 +572,13 @@ fn spawn_rotation_arrows(
     }
 }
 
+#[derive(Debug, Resource)]
+struct ZoomIconMaterials {
+    icon_material: Handle<StandardMaterial>,
+    zoom_in: Handle<Image>,
+    zoom_out: Handle<Image>,
+}
+
 /// Spawn viewport action buttons as icon quads (fixed on screen).
 fn spawn_viewport_action_buttons(
     commands: &mut Commands,
@@ -529,7 +608,8 @@ fn spawn_viewport_action_buttons(
         asset_server.load("embedded://elodin_editor/assets/icons/viewport.png");
     let zoom_out_icon: Handle<Image> =
         asset_server.load("embedded://elodin_editor/assets/icons/subtract.png");
-
+    let zoom_in_icon: Handle<Image> =
+        asset_server.load("embedded://elodin_editor/assets/icons/add.png");
     // Keep buttons inside the camera frustum (Perspective fov ~= 45deg),
     // while still reading as bottom-left / bottom-right controls.
     let reset_material = materials.add(StandardMaterial {
@@ -590,11 +670,16 @@ fn spawn_viewport_action_buttons(
 
     let zoom_icon_material = materials.add(StandardMaterial {
         base_color: Color::WHITE,
-        base_color_texture: Some(zoom_out_icon),
+        base_color_texture: Some(zoom_out_icon.clone()),
         unlit: true,
         alpha_mode: AlphaMode::Blend,
         cull_mode: None,
         ..default()
+    });
+    commands.insert_resource(ZoomIconMaterials {
+        icon_material: zoom_icon_material.clone(),
+        zoom_out: zoom_out_icon,
+        zoom_in: zoom_in_icon,
     });
     let mut zoom_icon_cmd = commands.spawn((
         Mesh3d(zoom_icon_mesh),
@@ -617,5 +702,49 @@ fn spawn_viewport_action_buttons(
     ));
     if let Some(layers) = render_layers.clone() {
         zoom_hitbox_cmd.insert(layers);
+    }
+}
+
+fn swap_zoom_buttons_on_alt(
+    mut buttons: Query<&mut ViewportActionButton>,
+    keys: Res<ButtonInput<KeyCode>>,
+    zoom_icon_materials: Option<Res<ZoomIconMaterials>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    let pressed = if keys.just_pressed(KeyCode::AltLeft) || keys.just_pressed(KeyCode::AltRight) {
+        Some(true)
+    } else if keys.just_released(KeyCode::AltLeft) || keys.just_released(KeyCode::AltRight) {
+        Some(false)
+    } else {
+        None
+    };
+    if let Some(pressed) = pressed {
+        for mut action in &mut buttons {
+            match *action {
+                ViewportActionButton::ZoomIn | ViewportActionButton::ZoomOut => {
+                    if pressed {
+                        // Go to zoom in.
+                        *action = ViewportActionButton::ZoomIn;
+                    } else {
+                        // Go back to zoom out.
+                        *action = ViewportActionButton::ZoomOut;
+                    }
+                }
+                _ => (),
+            }
+        }
+        let Some(zoom_icon_materials) = zoom_icon_materials else {
+            return;
+        };
+
+        let Some(zoom_material) = materials.get_mut(&zoom_icon_materials.icon_material) else {
+            return;
+        };
+        let zoom_icon: Handle<Image> = if pressed {
+            zoom_icon_materials.zoom_in.clone()
+        } else {
+            zoom_icon_materials.zoom_out.clone()
+        };
+        zoom_material.base_color_texture = Some(zoom_icon);
     }
 }

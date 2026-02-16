@@ -27,6 +27,7 @@ const CORNER_IN_SCREEN_AXIS_DOT_THRESHOLD: f32 = 0.998;
 const ARROW_CACHE_MAX_DRIFT_RADIANS: f32 = 6.0_f32.to_radians();
 const VIEWPORT_RESET_ANCHOR_DEPTH: f64 = -2.0;
 const VIEWPORT_ZOOM_OUT_MULTIPLIER: f32 = 2.2;
+const VIEWPORT_ZOOM_IN_MULTIPLIER: f32 = 1.2;
 
 #[derive(Component)]
 pub struct ViewCubeTargetCamera;
@@ -557,7 +558,10 @@ pub fn handle_view_cube_editor(
                     apply_viewport_reset(transform.as_mut(), &mut editor_cam);
                 }
                 ViewportActionButton::ZoomOut => {
-                    apply_viewport_zoom_out(transform.as_mut(), &mut editor_cam);
+                    apply_viewport_zoom(true, transform.as_mut(), &mut editor_cam);
+                }
+                ViewportActionButton::ZoomIn => {
+                    apply_viewport_zoom(false, transform.as_mut(), &mut editor_cam);
                 }
             }
             lookup.arrow_cache.clear(entity);
@@ -580,11 +584,15 @@ fn apply_viewport_reset(transform: &mut Transform, editor_cam: &mut EditorCam) {
     editor_cam.last_anchor_depth = VIEWPORT_RESET_ANCHOR_DEPTH;
 }
 
-fn apply_viewport_zoom_out(transform: &mut Transform, editor_cam: &mut EditorCam) {
+fn apply_viewport_zoom(out: bool, transform: &mut Transform, editor_cam: &mut EditorCam) {
     let current_depth = (editor_cam.last_anchor_depth.abs() as f32).max(0.25);
-    let target_depth = (current_depth * VIEWPORT_ZOOM_OUT_MULTIPLIER).max(0.5);
+    let target_depth = if out {
+        (current_depth * VIEWPORT_ZOOM_OUT_MULTIPLIER).max(0.5)
+    } else {
+        (current_depth / VIEWPORT_ZOOM_IN_MULTIPLIER).max(0.5)
+    };
     let depth_delta = target_depth - current_depth;
-    if depth_delta <= 1.0e-6 {
+    if depth_delta.abs() <= 1.0e-6 {
         return;
     }
 
@@ -1123,7 +1131,7 @@ mod tests {
         let expected_translation =
             initial_translation + (transform.rotation * Vec3::Z) * expected_delta;
 
-        apply_viewport_zoom_out(&mut transform, &mut editor_cam);
+        apply_viewport_zoom(true, &mut transform, &mut editor_cam);
 
         assert!((transform.translation - expected_translation).length() < 1.0e-5);
         assert!((editor_cam.last_anchor_depth + expected_target_depth as f64).abs() < 1.0e-8);
