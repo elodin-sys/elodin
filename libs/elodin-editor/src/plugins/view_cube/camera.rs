@@ -242,6 +242,7 @@ pub(super) struct ViewCubeEditorLookup<'w, 's> {
     arrow_cache: ResMut<'w, ViewCubeArrowTargetCache>,
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn handle_view_cube_editor(
     mut events: MessageReader<ViewCubeEvent>,
     view_cube_query: Query<&ViewCubeLink, With<ViewCubeRoot>>,
