@@ -63,6 +63,10 @@ use crate::{
 /// When the DB encounters an `OpExt` with this ID, it reads the source data as
 /// nanoseconds and divides by 1000 to produce the microsecond record timestamp.
 /// Use the [`builder::timestamp_ns`] convenience function to create this operation.
+///
+/// **Reserved ID:** `[0x01, 0x00]` is outside the auto-generated FNV1a hash range
+/// and the manually-assigned `[224, *]` range used by other messages and extensions.
+/// Do not reuse this ID for other extensions.
 pub const TIMESTAMP_NS_EXT_ID: PacketId = [0x01, 0x00];
 
 /// Operations that can be performed in a VTable
@@ -353,8 +357,16 @@ impl<Ops: Buf<Op>, Data: Buf<u8>, Fields: Buf<Field>> VTable<Ops, Data, Fields> 
             Op::None => Ok(RealizedOp::None),
             Op::Ext { arg, id, data } => {
                 let resolved = self.realize(*data, table)?;
-                let data_bytes = resolved.as_slice().unwrap_or(&[]);
                 let range = resolved.as_table_range();
+                // timestamp_ns uses a table reference as its data operand,
+                // which can't resolve to bytes when table is None (e.g.
+                // during VTable registration). Allow empty data only for
+                // that well-known ID; all other exts require valid bytes.
+                let data_bytes = if *id == TIMESTAMP_NS_EXT_ID {
+                    resolved.as_slice().unwrap_or(&[])
+                } else {
+                    resolved.as_slice().ok_or(Error::InvalidOp)?
+                };
                 Ok(RealizedOp::Ext(RealizedExt {
                     id: *id,
                     data: data_bytes,
