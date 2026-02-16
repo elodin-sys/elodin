@@ -112,7 +112,12 @@ pub async fn handle_follow_stream<W: AsyncWrite>(
                         schema(prim_type, &comp.schema.shape(), component(cid)),
                     ),
                 )]);
-                let vtable_id: PacketId = fastrand::u16(..).to_le_bytes();
+                // Sequential VTable IDs, guaranteed collision-free.
+                // Random u16 IDs collide ~56% of the time with 320
+                // components (birthday paradox), causing the follower
+                // to write data to the wrong component.
+                let vtable_id: PacketId =
+                    (component_vtables.len() as u16).wrapping_add(0x8000).to_le_bytes();
                 sink.send(
                     VTableMsg {
                         id: vtable_id,
@@ -164,18 +169,18 @@ pub async fn handle_follow_stream<W: AsyncWrite>(
             known_msg_ids.insert(msg_id);
         }
 
-        // ── 3. Component data (chunked TimeSeries packets) ────────────────
-        // Send each component's data as TimeSeries packets chunked to
-        // approximately `target` bytes each.  This gives us both:
-        //   (a) bulk efficiency – follower receives N samples per packet
-        //       avoiding per-sample VTable decomposition overhead, and
-        //   (b) target-packet-size compliance – each TCP write stays
-        //       within the --follow-packet-size budget.
+        // ── 3. Component data (round-robin, one chunk per component) ─────
+        // Send ONE target-sized chunk per component, then move to the next.
+        // This serves both backfill and real-time streaming identically:
+        //   - Backfill: many iterations, each sending 1 chunk per component
+        //   - Real-time: each tick produces ~1 sample per component
+        // All components receive data simultaneously, preventing the editor
+        // from seeing partial component sets.
         //
         // TimeSeries wire format per chunk:
         //   [len:4] [type:1] [vtable_id:2] [req_id:1]  (8 B header)
         //   [count:u64] [ts1..tsN] [data1..dataN]
-        let mut bytes_sent = 0usize;
+        
         for (cid, comp) in components.iter() {
             let info = match component_vtables.get(cid) {
                 Some(v) => v,
@@ -196,49 +201,36 @@ pub async fn handle_follow_stream<W: AsyncWrite>(
             let n = timestamps.len().min(data.len() / info.elem_size);
 
             // How many samples fit in one target-sized packet?
-            // Overhead: 8 (LenPacket header) + 8 (count u64) = 16 bytes.
-            // Per sample: 8 (timestamp) + elem_size.
             let per_sample = size_of::<Timestamp>() + info.elem_size;
             let usable = target.saturating_sub(16);
             let chunk_size = if per_sample > 0 && usable > 0 {
                 (usable / per_sample).max(1)
             } else {
-                n // fallback: send everything
+                n
             };
 
-            let mut offset = 0;
-            while offset < n {
-                let end = (offset + chunk_size).min(n);
-                let count = end - offset;
-                let ts_bytes = count * size_of::<Timestamp>();
-                let data_bytes = count * info.elem_size;
-                let payload = 8 + ts_bytes + data_bytes;
+            // Send ONE chunk only, then move to the next component.
+            let count = chunk_size.min(n);
+            let ts_bytes = count * size_of::<Timestamp>();
+            let data_bytes = count * info.elem_size;
+            let payload = 8 + ts_bytes + data_bytes;
 
-                let mut pkt = LenPacket::time_series(info.vtable_id, payload);
-                // sample count
-                pkt.extend_from_slice(&(count as u64).to_le_bytes());
-                // timestamps
-                let ts_slice = &timestamps[offset..end];
-                let ts_raw: &[u8] = unsafe {
-                    std::slice::from_raw_parts(
-                        ts_slice.as_ptr() as *const u8,
-                        ts_bytes,
-                    )
-                };
-                pkt.extend_from_slice(ts_raw);
-                // data
-                let d_start = offset * info.elem_size;
-                let d_end = d_start + data_bytes;
-                pkt.extend_from_slice(&data[d_start..d_end]);
-                pkt.set_request_id(req_id);
+            let mut pkt = LenPacket::time_series(info.vtable_id, payload);
+            pkt.extend_from_slice(&(count as u64).to_le_bytes());
+            let ts_raw: &[u8] = unsafe {
+                std::slice::from_raw_parts(
+                    timestamps[..count].as_ptr() as *const u8,
+                    ts_bytes,
+                )
+            };
+            pkt.extend_from_slice(ts_raw);
+            pkt.extend_from_slice(&data[..data_bytes]);
+            pkt.set_request_id(req_id);
 
-                let wire_len = pkt.inner.len();
-                sink.send(pkt).await?;
-                bytes_sent += wire_len;
-                offset = end;
-            }
+            sink.send(pkt).await?;
 
-            component_last_sent.insert(*cid, timestamps[n - 1]);
+            // Track progress: last sample in THIS chunk (not all data).
+            component_last_sent.insert(*cid, timestamps[count - 1]);
         }
 
         // ── 4. New message data ─────────────────────────────────────────
@@ -273,17 +265,18 @@ pub async fn handle_follow_stream<W: AsyncWrite>(
         // ── 5. Flush timer check ────────────────────────────────────────
         sink.maybe_flush().await?;
 
-        // ── 6. Wait for next change ─────────────────────────────────────
-        // If we sent data this iteration we may still be catching up;
-        // skip the sleep so we can drain the backlog as fast as the link
-        // allows.  The CoalescingSink already yields between writes, so
-        // this won't starve other tasks.
-        if bytes_sent == 0 {
-            futures_lite::future::race(
-                db.last_updated.wait(),
-                stellarator::sleep(FLUSH_INTERVAL),
-            )
-            .await;
-        }
+        // ── 6. Pace iteration ─────────────────────────────────────────────
+        // Always flush and wait between iterations to prevent the TCP
+        // send buffer from filling up.  During backfill, the sleep
+        // (FLUSH_INTERVAL = 5ms) limits throughput to ~6 MB/s which is
+        // fast enough (rc-jet: ~0.1s, ft12_1_real: ~20s).  During
+        // real-time, db.last_updated fires every sim tick (~3ms at
+        // 300Hz) so the sleep rarely triggers.
+        sink.flush().await?;
+        futures_lite::future::race(
+            db.last_updated.wait(),
+            stellarator::sleep(FLUSH_INTERVAL),
+        )
+        .await;
     }
 }

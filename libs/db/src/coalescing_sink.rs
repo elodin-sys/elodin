@@ -94,7 +94,6 @@ impl<'a, W: AsyncWrite> CoalescingSink<'a, W> {
         let (res, _buf) = self.writer.write_all(buf).await;
         self.last_flush = Instant::now();
         res?;
-        stellarator::yield_now().await;
         Ok(())
     }
 

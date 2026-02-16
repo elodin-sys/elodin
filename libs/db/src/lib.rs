@@ -2952,13 +2952,28 @@ impl DBVisitor {
     ) -> Result<(), Error> {
         const YIELD_EVERY: usize = 8;
         for (i, (_, component)) in components.iter().enumerate() {
-            let tick = component.time_series.start_timestamp().max(timestamp);
-            let Some((ts, buf)) = component.get_nearest(tick) else {
+            // Skip components with no data – the VTable builder
+            // (vtable()) excludes them, so we must too.
+            if component.time_series.index().is_empty() {
                 continue;
-            };
-            table.push_aligned(ts);
-            table.pad_for_type(component.schema.prim_type);
-            table.extend_from_slice(buf);
+            }
+            let tick = component.time_series.start_timestamp().max(timestamp);
+            match component.get_nearest(tick) {
+                Some((ts, buf)) => {
+                    table.push_aligned(ts);
+                    table.pad_for_type(component.schema.prim_type);
+                    table.extend_from_slice(buf);
+                }
+                None => {
+                    // Component has data but not at this timestamp.
+                    // Write zeros to preserve VTable field offset alignment.
+                    table.push_aligned(Timestamp(0));
+                    table.pad_for_type(component.schema.prim_type);
+                    for _ in 0..component.schema.size() {
+                        table.push(0);
+                    }
+                }
+            }
             if (i + 1) % YIELD_EVERY == 0 {
                 stellarator::yield_now().await;
             }
@@ -2977,6 +2992,11 @@ impl DBVisitor {
         table: &mut LenPacket,
     ) {
         for (_, component) in components.iter() {
+            // Skip components with no data – the VTable builder
+            // (vtable()) excludes them, so we must too.
+            if component.time_series.index().is_empty() {
+                continue;
+            }
             let elem_size = component.schema.size();
             let prim_type = component.schema.prim_type;
             match component.time_series.latest() {
@@ -2986,9 +3006,9 @@ impl DBVisitor {
                     table.extend_from_slice(buf);
                 }
                 None => {
+                    // Component has data in index but latest() returned
+                    // None (e.g. data AppendLog shorter than index).
                     // Write zeros to preserve VTable field offset alignment.
-                    // Without this, skipping a component shifts all
-                    // subsequent fields backward, causing type mismatches.
                     table.push_aligned(Timestamp(0));
                     table.pad_for_type(prim_type);
                     for _ in 0..elem_size {
