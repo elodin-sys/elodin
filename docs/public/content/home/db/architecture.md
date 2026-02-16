@@ -30,6 +30,22 @@ Elodin DB stores tensors in time-series columns associated with a particular ent
 | 1742223919e6  | [1.0, 2.0, 3.0] |
 | 1742223919    | [4.0, 5.0, 6.0] |
 
+### Nanosecond Timestamp Sources
+
+External processes (such as C/C++ flight software) often use nanosecond monotonic clocks (`clock_gettime(CLOCK_MONOTONIC)`). Rather than requiring every write call-site to divide by 1000, you can declare the timestamp source as nanoseconds in the VTable. Use `timestamp_ns()` instead of `timestamp()` when building the VTable:
+
+```cpp
+auto time_ns = builder::raw_table(40, 8);  // nanosecond clock field
+auto table = builder::vtable({
+    raw_field(0, 8, schema(PrimType::F64(), {},
+        timestamp_ns(time_ns, component("sensor.pressure")))),
+    // TIME_MONOTONIC stored as a plain component (raw ns preserved)
+    raw_field(40, 8, schema(PrimType::U64(), {},
+        component("sensor.time_monotonic"))),
+});
+```
+
+The DB engine automatically divides the nanosecond source value by 1000 on ingestion, producing correct microsecond record timestamps. The raw component data is stored unchanged, preserving full nanosecond precision for downstream analysis. This works identically for SITL and real hardware -- the conversion is declared in the VTable schema, not in mode-specific code.
 
 ## VTable
 

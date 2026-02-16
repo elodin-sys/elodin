@@ -149,6 +149,19 @@ try {
         field<RocketData, &RocketData::commanded_deflect>(schema(PrimType::F64(), { }, timestamp(time, component("rocket.fin_control_trim")))),
     });
 
+    // Example: if the timestamp source is in nanoseconds (e.g. from
+    // clock_gettime(CLOCK_MONOTONIC)), use timestamp_ns() instead of timestamp().
+    // The DB engine divides by 1000 to produce microsecond record timestamps.
+    // The raw component data is stored unchanged.
+    //
+    //   auto time_ns = builder::raw_table(0, 8);
+    //   auto table_ns = builder::vtable({
+    //       raw_field(8, 8, schema(PrimType::F64(), {},
+    //           timestamp_ns(time_ns, component("sensor.pressure")))),
+    //       raw_field(0, 8, schema(PrimType::U64(), {},
+    //           component("sensor.time_monotonic"))),  // raw ns preserved
+    //   });
+
     sock.send(VTableMsg {
         .id = { ID[0], ID[1] },
         .vtable = table,

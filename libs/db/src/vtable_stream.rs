@@ -12,7 +12,7 @@ use impeller2::{
         ComponentView, IntoLenPacket, LenPacket, Msg, PACKET_HEADER_LEN, PacketId, PrimType,
         RequestId, Timestamp,
     },
-    vtable::{Op, RealizedComponent, RealizedOp, VTable},
+    vtable::{Op, RealizedComponent, RealizedOp, TIMESTAMP_NS_EXT_ID, VTable},
 };
 use impeller2_stellar::PacketSink;
 use impeller2_wkt::{ComponentValue, FixedRateBehavior, FixedRateOp, MeanOp, VTableMsg};
@@ -102,6 +102,12 @@ pub async fn handle_vtable_stream<A: AsyncWrite + 'static>(
                         }),
                     );
                     break 'find;
+                }
+                RealizedOp::Ext(ext) if ext.id == TIMESTAMP_NS_EXT_ID => {
+                    if let Some(range) = ext.range {
+                        timestamp = Some(range);
+                    }
+                    realized_op = vtable.realize(ext.arg, None)?;
                 }
                 _ => return Err(Error::Impeller(impeller2::error::Error::InvalidOp)),
             }
