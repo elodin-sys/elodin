@@ -6,6 +6,7 @@ pub struct OsmWorldRedrawRequest;
 #[cfg(not(target_family = "wasm"))]
 mod native {
     use std::collections::{HashMap, HashSet, VecDeque};
+    use std::hash::{Hash, Hasher};
     use std::path::PathBuf;
     use std::str::FromStr;
     use std::thread;
@@ -14,6 +15,7 @@ mod native {
     use bevy::asset::RenderAssetUsages;
     use bevy::mesh::{Indices, PrimitiveTopology};
     use bevy::prelude::*;
+    use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
     use bevy::window::PrimaryWindow;
     use bevy_egui::{EguiContext, egui};
     use bevy_picking::prelude::{Pickable, Pointer};
@@ -65,6 +67,10 @@ mod native {
         terrain_url_template: String,
         terrain_zoom: u8,
         terrain_exaggeration: f32,
+        basemap_fallback_enabled: bool,
+        basemap_url_template: String,
+        basemap_zoom: u8,
+        basemap_alpha: f32,
         use_cache: bool,
         prefer_cache: bool,
         cache_dir: Option<PathBuf>,
@@ -136,8 +142,8 @@ mod native {
                 .unwrap_or(15u8)
                 .clamp(8, 18);
             let terrain_enabled = env_flag("ELODIN_OSM_TERRAIN", true);
-            let terrain_url_template = std::env::var("ELODIN_OSM_TERRAIN_URL")
-                .unwrap_or_else(|_| {
+            let terrain_url_template =
+                std::env::var("ELODIN_OSM_TERRAIN_URL").unwrap_or_else(|_| {
                     "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png"
                         .to_string()
                 });
@@ -147,6 +153,15 @@ mod native {
             let terrain_exaggeration = env_parse("ELODIN_OSM_TERRAIN_EXAGGERATION")
                 .unwrap_or(1.0_f32)
                 .clamp(0.1, 8.0);
+            let basemap_fallback_enabled = env_flag("ELODIN_OSM_BASEMAP_FALLBACK", true);
+            let basemap_url_template = std::env::var("ELODIN_OSM_BASEMAP_URL")
+                .unwrap_or_else(|_| "https://tile.openstreetmap.org/{z}/{x}/{y}.png".to_string());
+            let basemap_zoom = env_parse("ELODIN_OSM_BASEMAP_ZOOM")
+                .unwrap_or(17u8)
+                .clamp(8, 19);
+            let basemap_alpha = env_parse("ELODIN_OSM_BASEMAP_ALPHA")
+                .unwrap_or(0.82_f32)
+                .clamp(0.15, 1.0);
             let use_cache = !env_flag("ELODIN_OSM_DISABLE_CACHE", false);
             let prefer_cache = env_flag("ELODIN_OSM_PREFER_CACHE", true);
             let cache_dir = if use_cache {
@@ -179,6 +194,10 @@ mod native {
                 terrain_url_template,
                 terrain_zoom,
                 terrain_exaggeration,
+                basemap_fallback_enabled,
+                basemap_url_template,
+                basemap_zoom,
+                basemap_alpha,
                 use_cache,
                 prefer_cache,
                 cache_dir,
@@ -243,6 +262,7 @@ mod native {
 
     #[derive(Debug, Clone)]
     enum RenderableItem {
+        Basemap(BasemapGeom),
         Terrain(TerrainGeom),
         Building(BuildingGeom),
         Road(RoadGeom),
@@ -364,8 +384,15 @@ mod native {
         indices: Vec<u32>,
     }
 
+    #[derive(Debug, Clone)]
+    struct BasemapGeom {
+        id: i64,
+        png_jpg_bytes: Vec<u8>,
+    }
+
     #[derive(Debug, Clone, Default)]
     struct TileSceneData {
+        basemap: Option<BasemapGeom>,
         terrain: Option<TerrainGeom>,
         buildings: Vec<BuildingGeom>,
         roads: Vec<RoadGeom>,
@@ -472,7 +499,7 @@ mod native {
                 config.tracked_world_pos_component.clone()
             };
             info!(
-                "OSM world enabled (backend: {:?}, origin: {}, {}, track: {}, tile_size: {}m, radius: {}, prefetch: {}, inflight: {}, cache_first: {}, max: b{} r{} a{}, martin: {}/{}/z{}, terrain: {} z{} x{})",
+                "OSM world enabled (backend: {:?}, origin: {}, {}, track: {}, tile_size: {}m, radius: {}, prefetch: {}, inflight: {}, cache_first: {}, max: b{} r{} a{}, martin: {}/{}/z{}, terrain: {} z{} x{}, basemap_fallback: {} z{} a{})",
                 config.backend,
                 config.origin_lat,
                 config.origin_lon,
@@ -490,7 +517,10 @@ mod native {
                 config.martin_zoom,
                 config.terrain_enabled,
                 config.terrain_zoom,
-                config.terrain_exaggeration
+                config.terrain_exaggeration,
+                config.basemap_fallback_enabled,
+                config.basemap_zoom,
+                config.basemap_alpha,
             );
             app.init_resource::<HoveredBuilding>()
                 .init_resource::<HoveredRoad>()
@@ -515,6 +545,7 @@ mod native {
         existing_entities: Query<Entity>,
         mut commands: Commands,
         mut meshes: ResMut<Assets<Mesh>>,
+        mut images: ResMut<Assets<Image>>,
         mut materials: ResMut<Assets<StandardMaterial>>,
     ) {
         // On the very first frame, seed all tiles around the origin so fetching
@@ -786,6 +817,7 @@ mod native {
             &mut status,
             &mut commands,
             &mut meshes,
+            &mut images,
             &mut materials,
         );
 
@@ -838,6 +870,7 @@ mod native {
         status: &mut OsmWorldStatus,
         commands: &mut Commands,
         meshes: &mut Assets<Mesh>,
+        images: &mut Assets<Image>,
         materials: &mut Assets<StandardMaterial>,
     ) {
         let mut despawn_budget = config.spawn_per_frame.saturating_mul(2).max(8);
@@ -863,6 +896,30 @@ mod native {
             }
 
             let entity = match pending.item {
+                RenderableItem::Basemap(basemap) => {
+                    let Some(texture) = image_from_encoded_tile(&basemap.png_jpg_bytes) else {
+                        continue;
+                    };
+                    let Some(mesh) = basemap_tile_mesh(pending.tile, config, -0.08) else {
+                        continue;
+                    };
+                    let texture = images.add(texture);
+                    let material = materials.add(StandardMaterial {
+                        base_color: Color::srgba(1.0, 1.0, 1.0, config.basemap_alpha),
+                        base_color_texture: Some(texture),
+                        alpha_mode: AlphaMode::Blend,
+                        unlit: true,
+                        cull_mode: None,
+                        ..Default::default()
+                    });
+                    commands
+                        .spawn((
+                            Name::new(format!("osm_basemap_{}", basemap.id)),
+                            Mesh3d(meshes.add(mesh)),
+                            MeshMaterial3d(material),
+                        ))
+                        .id()
+                }
                 RenderableItem::Terrain(terrain) => {
                     let Some(mesh) = terrain_mesh(&terrain) else {
                         continue;
@@ -1191,6 +1248,11 @@ mod native {
                 } else {
                     scene.terrain = None;
                 }
+                scene.basemap = if cfg.basemap_fallback_enabled {
+                    build_basemap_tile(tile, cfg)
+                } else {
+                    None
+                };
                 TileFetchResult {
                     tile,
                     scene,
@@ -1495,6 +1557,7 @@ mod native {
         }
 
         Ok(TileSceneData {
+            basemap: None,
             terrain: None,
             buildings,
             roads,
@@ -1773,6 +1836,7 @@ mod native {
         }
 
         Ok(TileSceneData {
+            basemap: None,
             terrain: None,
             buildings,
             roads,
@@ -1780,9 +1844,98 @@ mod native {
         })
     }
 
+    fn build_basemap_tile(tile: TileKey, cfg: &OsmWorldConfig) -> Option<BasemapGeom> {
+        let raster_tile =
+            geo_to_slippy_tile(tile_center_geo_from_local_tile(tile, cfg), cfg.basemap_zoom);
+        let mut template_hasher = std::collections::hash_map::DefaultHasher::new();
+        cfg.basemap_url_template.hash(&mut template_hasher);
+        let template_hash = template_hasher.finish();
+        let cache_key = format!(
+            "basemap_v1_z{}_{}_{}_h{:x}",
+            cfg.basemap_zoom, raster_tile.x, raster_tile.y, template_hash
+        );
+
+        let bytes = if cfg.use_cache
+            && cfg.prefer_cache
+            && let Some(bytes) = load_cache_bytes(cfg, &cache_key)
+        {
+            bytes
+        } else {
+            match request_basemap_tile(raster_tile, cfg) {
+                Ok(bytes) => {
+                    if cfg.use_cache {
+                        save_cache_bytes(cfg, &cache_key, &bytes);
+                    }
+                    bytes
+                }
+                Err(_) => {
+                    if cfg.use_cache
+                        && let Some(bytes) = load_cache_bytes(cfg, &cache_key)
+                    {
+                        bytes
+                    } else {
+                        return None;
+                    }
+                }
+            }
+        };
+
+        if image::load_from_memory(&bytes).is_err() {
+            return None;
+        }
+
+        Some(BasemapGeom {
+            id: (i64::from(tile.x) << 32) ^ i64::from(tile.y),
+            png_jpg_bytes: bytes,
+        })
+    }
+
+    fn request_basemap_tile(tile: TileKey, cfg: &OsmWorldConfig) -> Result<Vec<u8>, String> {
+        let url = cfg
+            .basemap_url_template
+            .replace("{z}", &cfg.basemap_zoom.to_string())
+            .replace("{x}", &tile.x.to_string())
+            .replace("{y}", &tile.y.to_string());
+
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|e| format!("tokio runtime init failed: {e}"))?;
+
+        rt.block_on(async move {
+            let client = reqwest::Client::builder()
+                .timeout(Duration::from_secs(20))
+                .build()
+                .map_err(|e| format!("http client init failed: {e}"))?;
+
+            let response = client
+                .get(&url)
+                .header("Accept", "image/png,image/jpeg")
+                .header("User-Agent", "elodin-osm-world")
+                .send()
+                .await
+                .map_err(|e| format!("basemap request failed: {e}"))?;
+            if !response.status().is_success() {
+                return Err(format!(
+                    "basemap request {url} failed: HTTP {}",
+                    response.status()
+                ));
+            }
+            response
+                .bytes()
+                .await
+                .map(|bytes| bytes.to_vec())
+                .map_err(|e| format!("basemap invalid bytes: {e}"))
+        })
+    }
+
     fn build_terrain_tile(tile: TileKey, cfg: &OsmWorldConfig) -> Option<TerrainGeom> {
-        let dem_tile = geo_to_slippy_tile(tile_center_geo_from_local_tile(tile, cfg), cfg.terrain_zoom);
-        let cache_key = format!("terrain_terrarium_z{}_{}_{}", cfg.terrain_zoom, dem_tile.x, dem_tile.y);
+        let dem_tile =
+            geo_to_slippy_tile(tile_center_geo_from_local_tile(tile, cfg), cfg.terrain_zoom);
+        let cache_key = format!(
+            "terrain_terrarium_z{}_{}_{}",
+            cfg.terrain_zoom, dem_tile.x, dem_tile.y
+        );
         let bytes = if cfg.use_cache
             && cfg.prefer_cache
             && let Some(bytes) = load_cache_bytes(cfg, &cache_key)
@@ -1829,7 +1982,13 @@ mod native {
                 let py = (tile_yf - f64::from(dem_tile.y)) * f64::from(height - 1);
                 let elevation = sample_terrarium_bilinear(&img, px as f32, py as f32);
                 mean_elevation += elevation;
-                samples.push((east_m as f32, -(north_m as f32), elevation, u as f32, v as f32));
+                samples.push((
+                    east_m as f32,
+                    -(north_m as f32),
+                    elevation,
+                    u as f32,
+                    v as f32,
+                ));
             }
         }
         mean_elevation /= samples.len().max(1) as f32;
@@ -1887,7 +2046,10 @@ mod native {
                 .await
                 .map_err(|e| format!("terrain request failed: {e}"))?;
             if !response.status().is_success() {
-                return Err(format!("terrain request {url} failed: HTTP {}", response.status()));
+                return Err(format!(
+                    "terrain request {url} failed: HTTP {}",
+                    response.status()
+                ));
             }
             response
                 .bytes()
@@ -2052,6 +2214,12 @@ mod native {
         scene: &TileSceneData,
         queue: &mut VecDeque<PendingRenderable>,
     ) {
+        if let Some(basemap) = &scene.basemap {
+            queue.push_back(PendingRenderable {
+                tile,
+                item: RenderableItem::Basemap(basemap.clone()),
+            });
+        }
         if let Some(terrain) = &scene.terrain {
             queue.push_back(PendingRenderable {
                 tile,
@@ -2919,6 +3087,63 @@ mod native {
         let h0 = h00 + (h10 - h00) * tx;
         let h1 = h01 + (h11 - h01) * tx;
         h0 + (h1 - h0) * ty
+    }
+
+    fn image_from_encoded_tile(bytes: &[u8]) -> Option<Image> {
+        let mut rgba = image::load_from_memory(bytes).ok()?.to_rgba8();
+        // Keep the fallback map sober: convert the raster tile to grayscale.
+        for px in rgba.pixels_mut() {
+            let [r, g, b, a] = px.0;
+            let luma =
+                0.2126_f32 * f32::from(r) + 0.7152_f32 * f32::from(g) + 0.0722_f32 * f32::from(b);
+            let tone = ((luma * 0.88) + 18.0).clamp(0.0, 255.0) as u8;
+            px.0 = [tone, tone, tone, a];
+        }
+        let (width, height) = rgba.dimensions();
+        Some(Image::new(
+            Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            TextureDimension::D2,
+            rgba.into_raw(),
+            TextureFormat::Rgba8UnormSrgb,
+            RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
+        ))
+    }
+
+    fn basemap_tile_mesh(tile: TileKey, cfg: &OsmWorldConfig, y: f32) -> Option<Mesh> {
+        let size = cfg.tile_size_m as f32;
+        if size <= 0.0 {
+            return None;
+        }
+        let west = tile.x as f32 * size;
+        let east = west + size;
+        let south = tile.y as f32 * size;
+        let north = south + size;
+        let z_north = -north;
+        let z_south = -south;
+
+        let positions = vec![
+            [west, y, z_north],
+            [west, y, z_south],
+            [east, y, z_south],
+            [east, y, z_north],
+        ];
+        let normals = vec![[0.0, 1.0, 0.0]; 4];
+        let uvs = vec![[0.0, 0.0], [0.0, 1.0], [1.0, 1.0], [1.0, 0.0]];
+        let indices = vec![0_u32, 1, 2, 0, 2, 3];
+
+        let mut mesh = Mesh::new(
+            PrimitiveTopology::TriangleList,
+            RenderAssetUsages::default(),
+        );
+        mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+        mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
+        mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uvs);
+        mesh.insert_indices(Indices::U32(indices));
+        Some(mesh)
     }
 
     fn terrain_mesh(terrain: &TerrainGeom) -> Option<Mesh> {
