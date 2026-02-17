@@ -37,7 +37,7 @@ in {
   nixpkgs.config = {
     allowUnfree = true;
     cudaSupport = true;
-    cudaCapabilities = ["7.2" "8.7"];
+    cudaCapabilities = ["8.7"];
   };
 
   # Use list form for PATH-like variables so NixOS can merge across modules
