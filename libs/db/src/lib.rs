@@ -1743,12 +1743,7 @@ async fn handle_packet<A: AsyncWrite + 'static>(
                 }
                 Ok::<_, Error>(())
             }) {
-                debug!(
-                    ?err,
-                    ?table_id,
-                    table_buf_len,
-                    "error sinking table packet"
-                );
+                debug!(?err, ?table_id, table_buf_len, "error sinking table packet");
                 return Err(err);
             }
         }
