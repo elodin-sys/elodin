@@ -1465,7 +1465,6 @@ async fn handle_conn_inner<A: AsyncRead + AsyncWrite + 'static>(
             pkt: Some(resp_pkt),
         };
         let result = handle_packet(&pkt, &db, &mut pkt_tx).await;
-        // #endregion
         buf = pkt.into_buf().into_inner();
         match result {
             Ok(PacketAction::Continue) => {}

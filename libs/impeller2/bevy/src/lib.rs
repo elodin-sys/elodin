@@ -216,8 +216,8 @@ fn sink_inner(
             }
             OwnedPacket::Table(_) => {}
             OwnedPacket::Msg(m) if m.id == EarliestTimestamp::ID => {
-                let earliest_timestamp = m.parse::<EarliestTimestamp>()?;
-                world_sink.commands.insert_resource(earliest_timestamp);
+                let new_earliest = m.parse::<EarliestTimestamp>()?;
+                *world_sink.earliest_timestamp = new_earliest;
             }
             OwnedPacket::Msg(m) if m.id == StreamTimestamp::ID => {
                 let stream_timestamp = m.parse::<StreamTimestamp>()?;
@@ -326,6 +326,7 @@ pub struct WorldSink<'w, 's> {
     metadata_reg: ResMut<'w, ComponentMetadataRegistry>,
     component_adapters: ResMut<'w, ComponentAdapters>,
     max_tick: ResMut<'w, LastUpdated>,
+    earliest_timestamp: ResMut<'w, EarliestTimestamp>,
     current_stream_id: ResMut<'w, CurrentStreamId>,
     recording: ResMut<'w, IsRecording>,
     current_timestamp: ResMut<'w, CurrentTimestamp>,
@@ -555,8 +556,8 @@ impl Plugin for Impeller2Plugin {
             .add_plugins(DefaultAdaptersPlugin)
             .insert_resource(impeller2_wkt::SimulationTimeStep(0.001))
             .insert_resource(impeller2_wkt::CurrentTimestamp(Timestamp::EPOCH))
-            .insert_resource(impeller2_wkt::LastUpdated(Timestamp::now()))
-            .insert_resource(impeller2_wkt::EarliestTimestamp(Timestamp::now()))
+            .insert_resource(impeller2_wkt::LastUpdated(Timestamp(i64::MIN)))
+            .insert_resource(impeller2_wkt::EarliestTimestamp(Timestamp(i64::MAX)))
             .init_resource::<IsRecording>()
             .init_resource::<EntityMap>()
             .init_resource::<ComponentMetadataRegistry>()

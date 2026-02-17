@@ -180,7 +180,7 @@ impl WidgetSystem for TimelineControls<'_> {
                             );
 
                             if jump_to_end_btn.clicked() {
-                                tick.0 = Timestamp(max_tick.0.0 - 1);
+                                tick.0 = Timestamp(max_tick.0.0.saturating_sub(1));
                                 tick_changed = true;
                             }
                         },
