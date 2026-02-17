@@ -3197,8 +3197,23 @@ struct VTable {
   std::vector<Op> ops;
   std::vector<Field> fields;
   std::vector<uint8_t> data;
-  
 
+  /// Returns the minimum table buffer size (in bytes) required by this VTable.
+  /// Computed from the maximum (offset + len) across all fields and Table ops.
+  size_t min_table_size() const {
+    size_t max_extent = 0;
+    for (const auto& f : fields) {
+      size_t end = static_cast<size_t>(f.offset) + static_cast<size_t>(f.len);
+      if (end > max_extent) max_extent = end;
+    }
+    for (const auto& op : ops) {
+      if (auto* table_op = op.get_table()) {
+        size_t end = static_cast<size_t>(table_op->offset) + static_cast<size_t>(table_op->len);
+        if (end > max_extent) max_extent = end;
+      }
+    }
+    return max_extent;
+  }
 
   size_t encoded_size() const {
     size_t size = 0;
@@ -4032,6 +4047,16 @@ namespace builder {
         return std::make_shared<OpBuilder>(ext);
     }
 
+    /// Creates a nanosecond-source timestamp operation.
+    /// The DB engine divides the source value by 1000 to produce microseconds
+    /// for the record timestamp. The raw component data is stored unchanged.
+    inline std::shared_ptr<OpBuilder> timestamp_ns(
+        std::shared_ptr<OpBuilder> source,
+        std::shared_ptr<OpBuilder> arg)
+    {
+        return ext({0x01, 0x00}, std::move(source), std::move(arg));
+    }
+
     /// Creates a field builder with the specified offset, length, and argument
     inline FieldBuilder raw_field(uint16_t offset, uint16_t len, std::shared_ptr<OpBuilder> arg)
     {
@@ -4168,6 +4193,24 @@ namespace builder {
         }
 
         return builder.build();
+    }
+
+    /// Creates a VTable and validates that sizeof(T) covers all declared field
+    /// and table-op byte ranges. Throws std::logic_error on mismatch.
+    /// Use this instead of vtable() to catch struct/VTable size mismatches
+    /// at startup rather than getting silent BufferUnderflow errors at runtime.
+    template <typename T>
+    inline VTable checked_vtable(const std::initializer_list<FieldBuilder> fields)
+    {
+        auto vt = vtable(fields);
+        size_t required = vt.min_table_size();
+        if (sizeof(T) < required) {
+            throw std::logic_error(
+                "checked_vtable: sizeof(" + std::string(typeid(T).name()) +
+                ") is " + std::to_string(sizeof(T)) +
+                " but VTable requires at least " + std::to_string(required) + " bytes");
+        }
+        return vt;
     }
 
 // Convenience macro to create a table operation for a struct field
