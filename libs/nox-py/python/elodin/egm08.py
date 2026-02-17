@@ -1,6 +1,7 @@
 # ignore ambiguous variable names since they are based on math literature
 # ruff: noqa: E741
 import os
+import shutil
 import urllib.request
 
 import jax
@@ -24,7 +25,7 @@ class EGM08:
 
         if not os.path.isfile(self.c_full_path):
             os.makedirs(cache_directory, exist_ok=True)
-            self.c_bar_file_path = urllib.request.urlretrieve(
+            self._download_file(
                 "https://assets.elodin.systems/assets/C_normal.npy",
                 self.c_full_path,
             )
@@ -33,7 +34,7 @@ class EGM08:
 
         if not os.path.isfile(self.s_full_path):
             os.makedirs(cache_directory, exist_ok=True)
-            self.s_bar_file_path = urllib.request.urlretrieve(
+            self._download_file(
                 "https://assets.elodin.systems/assets/S_normal.npy",
                 self.s_full_path,
             )
@@ -68,6 +69,18 @@ class EGM08:
         self.a_4 = 0.0
 
         self.initialize_parameters()
+
+    def _download_file(self, url, destination):
+        request = urllib.request.Request(
+            url,
+            headers={
+                "User-Agent": "Mozilla/5.0 (compatible; Elodin/1.0)",
+                "Accept": "*/*",
+            },
+        )
+        with urllib.request.urlopen(request, timeout=60) as response:
+            with open(destination, "wb") as outfile:
+                shutil.copyfileobj(response, outfile)
 
     def compute_a_bar_diagonal(self, a_0_0, l):
         numerator = (2 * l + 1) * k_delta(l)
