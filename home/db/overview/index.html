@@ -472,11 +472,21 @@
                         </li>
                         
                         <li>
+                            <a href="/home/db/overview/#editor">Editor</a>
+                            
+                        </li>
+                        
+                        <li>
                             <a href="/home/db/overview/#sql">SQL</a>
                             
                         </li>
                         
                     </ul>
+                    
+                </li>
+                
+                <li>
+                    <a href="/home/db/overview/#key-capabilities">Key Capabilities</a>
                     
                 </li>
                 
@@ -489,7 +499,7 @@
                   <h1>Overview</h1>
                   
                   <p class="lead">Overview of Elodin DB</p>
-                   <p>Elodin DB is a time-series database purpose built for flight computers. It is designed as a central telemetry store and message bus. Flight software publish and subscribes to telemetry data and messages from Elodin DB.</p>
+                   <p>Elodin DB is a time-series database for physical systems. It serves as a central telemetry store and message bus -- on a flight computer, in a ground station, or alongside a simulation. Flight software, sensors, and simulations publish and subscribe to telemetry data and messages through it.</p>
 <p>Elodin DB is based on the same ECS system as Elodin Sim (and the rest of the Elodin ecosystem). Elodin DB sorts data into "entities" and "components". Entities are best thought as objects that emit telemetry. For instance an individual sensor would be an entity. A component is a piece of telemetry data that is associated with an entity. For example an accelerator's acceleration reading would be a component. Entities can have multiple components, and each component can be associated with multiple entities.</p>
 <p>Elodin DB chiefly communicates over <code>impeller</code> -- Elodin's lightweight message protocol designed for flight software. In addition to <code>impeller</code>, Elodin DB can be queries via SQL and results are returned in the Arrow IPC format.</p>
 <h2 id="quick-start">Quick Start</h2>
@@ -504,6 +514,10 @@
 <p>You can connect to the database by running:</p>
 <pre data-lang="lua" class="language-lua z-code"><code class="language-lua" data-lang="lua"><span class="z-source z-lua"><span class="z-variable z-other z-lua">client</span> <span class="z-keyword z-operator z-assignment z-lua">=</span> <span class="z-variable z-function z-lua">connect</span><span class="z-meta z-function-call z-arguments z-lua"><span class="z-meta z-group z-lua"><span class="z-punctuation z-section z-group z-begin z-lua">(</span><span class="z-string z-quoted z-double z-lua"><span class="z-punctuation z-definition z-string z-begin z-lua">&quot;</span>localhost:2240<span class="z-punctuation z-definition z-string z-end z-lua">&quot;</span></span><span class="z-punctuation z-section z-group z-end z-lua">)</span></span></span>
 </span></code></pre>
+<h3 id="editor">Editor</h3>
+<p>Connect the Elodin Editor to a running database to visualize telemetry and video in real time:</p>
+<pre data-lang="sh" class="language-sh z-code"><code class="language-sh" data-lang="sh"><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">elodin</span></span><span class="z-meta z-function-call z-arguments z-shell"> editor 127.0.0.1:2240</span>
+</span></code></pre>
 <h3 id="sql">SQL</h3>
 <p>You can query Elodin DB via SQL. The easiest way to access this interface is through the REPL where you can run the following command to connect to the database using SQL</p>
 <pre data-lang="lua" class="language-lua z-code"><code class="language-lua" data-lang="lua"><span class="z-source z-lua"><span class="z-punctuation z-accessor z-lua">:</span><span class="z-meta z-property z-lua">sql</span> <span class="z-meta z-brackets z-lua"><span class="z-punctuation z-section z-brackets z-begin z-lua">[</span><span class="z-punctuation z-accessor z-lua">:</span><span class="z-punctuation z-accessor z-lua">:</span><span class="z-punctuation z-section z-brackets z-end z-lua">]</span></span><span class="z-punctuation z-accessor z-lua">:</span><span class="z-constant z-numeric z-integer z-decimal z-lua">2240</span>
@@ -513,6 +527,14 @@
 <pre data-lang="sql" class="language-sql z-code"><code class="language-sql" data-lang="sql"><span class="z-source z-sql">show tables;
 </span></code></pre>
 <p>We use Datafusion to power the SQL interface. <a href="https://datafusion.apache.org/user-guide/sql/index.html">Their docs</a> are the best place for details on the dialect.</p>
+<h2 id="key-capabilities">Key Capabilities</h2>
+<p><strong>Replay</strong> -- Start a server with <code>--replay</code> to play back a recorded database as if data were arriving live. Connected editors scrub through the timeline with full fidelity.</p>
+<p><strong>Follow mode</strong> -- Start a second instance with <code>--follows &lt;source&gt;</code> to replicate all data from another running database over a single TCP connection. The follower accepts its own local connections and writers simultaneously.</p>
+<pre data-lang="sh" class="language-sh z-code"><code class="language-sh" data-lang="sh"><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">elodin-db</span></span><span class="z-meta z-function-call z-arguments z-shell"> run <span class="z-keyword z-control z-regexp z-set z-begin z-shell">[</span>::<span class="z-keyword z-control z-regexp z-set z-end z-shell">]</span>:2241 ./ground-station<span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> --</span>follows</span> 192.168.1.10:2240</span>
+</span></code></pre>
+<p><strong>Video</strong> -- H.264 video streams (e.g. from GStreamer via <code>elodinsink</code>) are stored as timestamped message logs and displayed in the Elodin Editor. Recorded video can be exported to MP4 with <code>elodin-db export-videos</code>.</p>
+<p><strong>Export</strong> -- Export component data to Parquet, Arrow IPC, or CSV without a running server: <code>elodin-db export ./db -o ./out</code>. Glob filtering and vector flattening are supported.</p>
+<p><strong>Database tools</strong> -- Offline commands for common post-processing tasks: <code>merge</code> (combine two databases with optional time alignment), <code>drop</code> (delete components by name or glob), <code>prune</code> (remove empties), <code>truncate</code> (clear data, keep schemas), <code>time-align</code> (shift timestamps), and <code>fix-timestamps</code> (normalize clock sources).</p>
 
                   
 <div class="footer-line-padding"></div>

@@ -865,6 +865,16 @@ after connecting to a database.</li>
 <li>
 <p><code>--http-addr &lt;ADDR&gt;</code> — Address to bind the HTTP server to (enables HTTP API)</p>
 </li>
+<li>
+<p><code>--replay</code> — Replay recorded data as live telemetry. The database advances <code>last_updated</code> with playback so connected editors see data "arriving" over time. Requires an existing database with recorded data.</p>
+</li>
+<li>
+<p><code>--follows &lt;ADDR&gt;</code> — Follow another elodin-db instance, replicating all components, messages, and metadata over a single TCP connection. The local instance still accepts its own connections and data writers.</p>
+</li>
+<li>
+<p><code>--follow-packet-size &lt;BYTES&gt;</code> — Target packet size for follow streaming. Small updates are buffered to this size before sending, reducing network overhead when the source has many components.</p>
+<p>Default value: <code>1500</code></p>
+</li>
 </ul>
 <h2 id="elodin-db-lua"><code>elodin-db lua</code></h2>
 <p>Run a Lua script or launch an interactive REPL for querying and interacting with the database.</p>
