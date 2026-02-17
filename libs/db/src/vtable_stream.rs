@@ -66,6 +66,14 @@ pub async fn handle_vtable_stream<A: AsyncWrite + 'static>(
                 }
                 RealizedOp::Timestamp(t) => {
                     if let Some(range) = t.range {
+                        if range.end - range.start != size_of::<Timestamp>() {
+                            warn!(
+                                range_len = range.end - range.start,
+                                expected = size_of::<Timestamp>(),
+                                "timestamp source range has wrong byte length"
+                            );
+                            return Err(Error::Impeller(impeller2::error::Error::InvalidOp));
+                        }
                         timestamp = Some(range);
                     }
                     realized_op = vtable.realize(t.arg, None)?;
@@ -105,6 +113,14 @@ pub async fn handle_vtable_stream<A: AsyncWrite + 'static>(
                 }
                 RealizedOp::Ext(ext) if ext.id == TIMESTAMP_NS_EXT_ID => {
                     if let Some(range) = ext.range {
+                        if range.end - range.start != size_of::<Timestamp>() {
+                            warn!(
+                                range_len = range.end - range.start,
+                                expected = size_of::<Timestamp>(),
+                                "timestamp_ns source range has wrong byte length"
+                            );
+                            return Err(Error::Impeller(impeller2::error::Error::InvalidOp));
+                        }
                         timestamp = Some(range);
                     }
                     realized_op = vtable.realize(ext.arg, None)?;
