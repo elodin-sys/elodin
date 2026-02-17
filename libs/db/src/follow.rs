@@ -25,7 +25,6 @@ use stellarator::{io::SplitExt, net::TcpStream};
 use tracing::{debug, info, warn};
 
 use crate::{AtomicTimestampExt, ComponentSchema, DB, DBSink, Error};
-use impeller2::registry::VTableRegistry;
 
 /// Configuration for a follower connection.
 pub struct FollowConfig {
@@ -227,6 +226,12 @@ async fn run_follower_inner(config: &FollowConfig, db: &Arc<DB>) -> Result<(), E
     // and then streams new data as it arrives.  No separate backfill phase
     // is needed.
 
+    // Connection-local VTable-to-ComponentId mapping for follow-stream data.
+    // Stored locally (not in the global vtable_registry) to prevent ID collisions
+    // with VTables registered by local clients connecting to this follower DB.
+    let mut follow_vtables: std::collections::HashMap<PacketId, impeller2::types::ComponentId> =
+        std::collections::HashMap::new();
+
     // Track how many samples each component had at connection start.
     // On reconnection, the source resends ALL data; we skip samples we
     // already have using these counters (decremented as chunks arrive).
@@ -278,10 +283,16 @@ async fn run_follower_inner(config: &FollowConfig, db: &Arc<DB>) -> Result<(), E
                 db.with_state_mut(|s| s.set_msg_metadata(meta.id, meta.metadata, &db.path))?;
             }
 
-            // VTableMsg – register vtable locally.
+            // VTableMsg – extract ComponentId and store in connection-local map.
+            // Not inserted into the global vtable_registry to avoid ID collisions
+            // with VTables from local clients.
             Packet::Msg(m) if m.id == VTableMsg::ID => {
-                let vtable = m.parse::<VTableMsg>()?;
-                db.insert_vtable(vtable)?;
+                let vtable_msg = m.parse::<VTableMsg>()?;
+                if let Some(Ok(field)) = vtable_msg.vtable.realize_fields(None).next() {
+                    follow_vtables.insert(vtable_msg.id, field.component_id);
+                } else {
+                    warn!(vtable_id = ?vtable_msg.id, "failed to extract ComponentId from follow-stream VTable");
+                }
             }
 
             // TimeSeries – bulk data from follow-stream.  Write
@@ -296,23 +307,10 @@ async fn run_follower_inner(config: &FollowConfig, db: &Arc<DB>) -> Result<(), E
                     warn!(vtable_id = ?ts.id, "failed to parse TimeSeries data");
                     break 'ts;
                 };
-                // Resolve component_id from the VTable.
-                let component_id = match db.with_state(|state| -> Result<_, Error> {
-                    let vtable = state.vtable_registry.get(&ts.id).ok_or(Error::Impeller(
-                        impeller2::error::Error::VTableNotFound(ts.id),
-                    ))?;
-                    if let Some(res) = vtable.realize_fields(None).next() {
-                        let field = res?;
-                        Ok(field.component_id)
-                    } else {
-                        Err(Error::Impeller(impeller2::error::Error::InvalidOp))
-                    }
-                }) {
-                    Ok(cid) => cid,
-                    Err(e) => {
-                        warn!(?e, vtable_id = ?ts.id, "failed to resolve component from TimeSeries VTable");
-                        break 'ts;
-                    }
+                // Resolve component_id from the connection-local VTable map.
+                let Some(&component_id) = follow_vtables.get(&ts.id) else {
+                    warn!(vtable_id = ?ts.id, "unknown follow-stream VTable ID in TimeSeries packet");
+                    break 'ts;
                 };
                 // Dedup: skip samples we already had at connection start.
                 let skip_count = skip_remaining.get(&component_id).copied().unwrap_or(0);
