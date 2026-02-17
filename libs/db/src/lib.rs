@@ -6,7 +6,7 @@ use impeller2::types::{PacketHeader, PacketTy};
 use impeller2::vtable::builder::{
     OpBuilder, component, raw_field, raw_table, schema, timestamp, vtable,
 };
-use impeller2::vtable::{Op, RealizedField, builder};
+use impeller2::vtable::{Op, RealizedField, TIMESTAMP_NS_EXT_ID, builder};
 use impeller2::{
     com_de::Decomponentize,
     registry,
@@ -106,6 +106,28 @@ where
                 }
                 Err(e) => {
                     warn!(?e, op_idx, "failed to resolve timestamp operation source");
+                }
+            }
+        }
+        // Handle nanosecond timestamp ext (same role as Op::Timestamp but source is in ns)
+        if let Op::Ext { data, id, .. } = op
+            && *id == TIMESTAMP_NS_EXT_ID
+        {
+            debug!(op_idx, "found nanosecond timestamp ext");
+            match vtable.realize(*data, None) {
+                Ok(resolved) => {
+                    if let Some(range) = resolved.as_table_range() {
+                        debug!(
+                            op_idx,
+                            range_start = range.start,
+                            range_end = range.end,
+                            "timestamp_ns ext source range resolved"
+                        );
+                        ranges.push((range.start, range.end));
+                    }
+                }
+                Err(e) => {
+                    warn!(?e, op_idx, "failed to resolve timestamp_ns ext data source");
                 }
             }
         }
@@ -725,6 +747,26 @@ impl DB {
                             );
                             timestamp_source_component_ids.insert(source_comp_id);
                         }
+                    }
+                }
+                // Handle nanosecond timestamp ext: data is the ns source, arg is the component
+                if let Op::Ext { data, id, arg } = op
+                    && *id == TIMESTAMP_NS_EXT_ID
+                    && let Ok(resolved_arg) = vtable.vtable.realize(*arg, None)
+                    && let Some(comp_id) = resolved_arg.as_component_id()
+                {
+                    debug!(
+                        component_id = ?comp_id.0,
+                        "timestamp_ns ext references component"
+                    );
+                    if let Ok(resolved_data) = vtable.vtable.realize(*data, None)
+                        && let Some(source_comp_id) = resolved_data.as_component_id()
+                    {
+                        debug!(
+                            component_id = ?source_comp_id.0,
+                            "timestamp_ns ext source is itself a component"
+                        );
+                        timestamp_source_component_ids.insert(source_comp_id);
                     }
                 }
             }
@@ -1685,7 +1727,9 @@ async fn handle_packet<A: AsyncWrite + 'static>(
         }
         Packet::Table(table) => {
             trace!(table.len = table.buf.len(), "sinking table");
-            db.with_state(|state| {
+            let table_id = table.id;
+            let table_buf_len = table.buf.len();
+            if let Err(err) = db.with_state(|state| {
                 let mut sink = DBSink {
                     components: &state.components,
                     snapshot_barrier: &db.snapshot_barrier,
@@ -1698,7 +1742,10 @@ async fn handle_packet<A: AsyncWrite + 'static>(
                     db.vtable_gen.fetch_add(1, atomic::Ordering::SeqCst);
                 }
                 Ok::<_, Error>(())
-            })?;
+            }) {
+                debug!(?err, ?table_id, table_buf_len, "error sinking table packet");
+                return Err(err);
+            }
         }
 
         Packet::Msg(m) if m.id == GetDbSettings::ID => {
