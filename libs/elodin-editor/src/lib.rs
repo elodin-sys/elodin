@@ -1014,9 +1014,7 @@ pub fn set_selected_range(
         Ok(range) => {
             selected_range.0 = range;
         }
-        Err(TimeRangeError::NoData) => {
-            // Nothing to do yet; keep previous selection until we have a valid dataset.
-        }
+        Err(TimeRangeError::NoData) => {}
         Err(TimeRangeError::InvalidRange { start, end }) => {
             bevy::log::warn!(
                 "Time range selection skipped because start ({start:?}) is not before end ({end:?})"

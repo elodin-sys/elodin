@@ -70,25 +70,75 @@ elodin editor 127.0.0.1:2240
 
 The example C client just streams a sine wave component to entity "1". You can view this in the editor by creating a graph for entity "1" and selecting the only component available for that entity.
 
-### Mirror data from one db instance to another
+### Follow mode -- replicate data from another database
 
-Launch a secondary db instance:
+Follow mode starts a database that replicates all data (components, messages,
+metadata) from another running elodin-db instance over a single TCP
+connection.  The follower database still accepts its own local connections and
+data writers.
+
+Start the source database:
 
 ```sh
-elodin-db run [::]:2241 $HOME/.local/share/elodin/ground-station
+elodin-db run [::]:2240 $HOME/.local/share/elodin/source-db
 ```
 
-Run the `downlink.lua` script to sync metadata from the primary db instance to the secondary db instance *and* command the primary instance to start streaming data to the secondary instance:
+Start the follower database, pointing it at the source:
 
 ```sh
-FC_ADDR="127.0.0.1:2240" GROUND_STATION_ADDR="127.0.0.1:2241" elodin-db lua examples/downlink.lua
+elodin-db run [::]:2241 $HOME/.local/share/elodin/follower-db --follows 127.0.0.1:2240
 ```
 
-Confirm that the secondary instance is receiving data by connecting to it via the Elodin Editor:
+The follower will:
+1. Synchronize all existing metadata and schemas from the source.
+2. Backfill all historical component time-series data and message logs.
+3. Stream real-time updates as they arrive on the source.
+
+Connect the Elodin Editor to the follower to view the replicated data:
 
 ```sh
 elodin editor 127.0.0.1:2241
 ```
+
+#### Configurable packet size
+
+By default, the source batches outgoing data into ~1500-byte TCP writes
+(standard Ethernet MTU).  This dramatically reduces network overhead when the
+source has many components.  You can tune the target packet size:
+
+```sh
+elodin-db run [::]:2241 ./follower-db --follows 127.0.0.1:2240 --follow-packet-size 9000
+```
+
+#### Dual-source example (video stream)
+
+Run the video-stream example on the source, follow it on the target, and also
+connect a local video stream directly to the follower:
+
+```sh
+# Source machine
+elodin editor examples/video-stream/main.py
+
+# Target machine -- follow the source
+elodin-db run [::]:2241 ./follower-db --follows SOURCE_IP:2240 --follow-packet-size 1500
+
+# Target machine -- connect the editor
+elodin editor 127.0.0.1:2241
+
+# Target machine -- add a second, local video stream
+examples/video-stream/stream-video.sh  # (pointed at 127.0.0.1:2241)
+```
+
+Both the replicated video from the source and the locally-streamed video will
+be visible in the editor connected to the follower.
+
+If two sources write to the same component, the follower logs a warning to
+alert you to potential data corruption.
+
+#### Legacy lua-based downlink
+
+The `examples/downlink.lua` script is still available for custom replication
+workflows, but `--follows` is the recommended approach for most use cases.
 
 ### Generate C++ Header
 

@@ -80,6 +80,14 @@ struct RunArgs {
         help = "Replay recorded data as live telemetry (advances last_updated with playback)"
     )]
     replay: bool,
+    #[clap(long, help = "Follow another elodin-db instance, replicating all data")]
+    follows: Option<SocketAddr>,
+    #[clap(
+        long,
+        default_value = "1500",
+        help = "Target packet size in bytes for follow streaming (data is buffered to this size before sending)"
+    )]
+    follow_packet_size: usize,
 }
 
 #[derive(clap::Args, Clone, Debug)]
@@ -281,12 +289,24 @@ async fn main() -> miette::Result<()> {
             reset,
             start_timestamp,
             replay,
+            follows,
+            follow_packet_size,
             ..
         }) => {
             let path = path.unwrap_or_else(|| {
-                let dirs =
-                    directories::ProjectDirs::from("systems", "elodin", "db").expect("no dirs");
-                dirs.data_dir().join("data")
+                if follows.is_some() {
+                    // Follower mode without an explicit path: use a temp directory
+                    // so we don't pollute (or inherit stale data from) the default
+                    // system data directory.
+                    let tmp = std::env::temp_dir()
+                        .join(format!("elodin-db-follower-{}", std::process::id()));
+                    info!(?tmp, "follower mode: using temp data directory");
+                    tmp
+                } else {
+                    let dirs =
+                        directories::ProjectDirs::from("systems", "elodin", "db").expect("no dirs");
+                    dirs.data_dir().join("data")
+                }
             });
             if reset && path.exists() {
                 info!(?path, "resetting db");
@@ -320,6 +340,20 @@ async fn main() -> miette::Result<()> {
                 server.db.enable_replay_mode();
             }
             let axum_db = server.db.clone();
+            // Spawn follower before server.run() consumes server.
+            if let Some(source_addr) = follows {
+                let follow_db = server.db.clone();
+                stellarator::struc_con::stellar(move || {
+                    elodin_db::follow::run_follower(
+                        elodin_db::follow::FollowConfig {
+                            source_addr,
+                            target_packet_size: follow_packet_size,
+                            reconnect_delay: std::time::Duration::from_secs(2),
+                        },
+                        follow_db,
+                    )
+                });
+            }
             let db = stellarator::spawn(server.run());
             if let Some(http_addr) = http_addr {
                 stellarator::struc_con::tokio(move |_| async move {

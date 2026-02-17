@@ -423,6 +423,11 @@ impl Msg for DumpSchema {
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct DumpSchemaResp {
     pub schemas: HashMap<ComponentId, Schema<Vec<u64>>>,
+    /// Per-component start timestamps (the `extra` field from the index
+    /// AppendLog header).  Used by followers to create components with
+    /// matching on-disk binary representations.
+    #[serde(default)]
+    pub start_timestamps: HashMap<ComponentId, Timestamp>,
 }
 
 impl Msg for DumpSchemaResp {
@@ -653,6 +658,36 @@ pub enum ArchiveFormat {
     Parquet,
     Csv,
     Native,
+}
+
+/// Request a unified replication stream from the source database.
+///
+/// The source will stream ALL data (components, messages, metadata, schemas)
+/// through a coalescing buffer that batches small packets into writes of
+/// approximately `target_packet_size` bytes, reducing network overhead when
+/// the source has many components.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct FollowStream {
+    /// Target size in bytes for coalesced TCP writes (default: 1500).
+    /// Small outgoing packets are buffered until this size is reached
+    /// or a flush timeout expires.
+    pub target_packet_size: u32,
+}
+
+impl Msg for FollowStream {
+    const ID: PacketId = [224, 37];
+}
+
+/// Like [`MsgStream`], but responses use `MsgWithTimestamp` packets that
+/// preserve the original source timestamps.  Used by the `FollowStream`
+/// handler for message replication.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct TimestampedMsgStream {
+    pub msg_id: PacketId,
+}
+
+impl Msg for TimestampedMsgStream {
+    const ID: PacketId = [224, 38];
 }
 
 #[derive(Serialize, Deserialize, Default, Debug, Clone, postcard_schema::Schema)]

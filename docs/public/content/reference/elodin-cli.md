@@ -132,6 +132,14 @@ Run the Elodin database server
 
 * `--http-addr <ADDR>` — Address to bind the HTTP server to (enables HTTP API)
 
+* `--replay` — Replay recorded data as live telemetry. The database advances `last_updated` with playback so connected editors see data "arriving" over time. Requires an existing database with recorded data.
+
+* `--follows <ADDR>` — Follow another elodin-db instance, replicating all components, messages, and metadata over a single TCP connection. The local instance still accepts its own connections and data writers.
+
+* `--follow-packet-size <BYTES>` — Target packet size for follow streaming. Small updates are buffered to this size before sending, reducing network overhead when the source has many components.
+
+  Default value: `1500`
+
 
 ## `elodin-db lua`
 
