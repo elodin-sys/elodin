@@ -60,10 +60,16 @@ impl Server {
         let tick_counter = Arc::new(AtomicU64::new(0));
         let stream: Thread<Option<Result<(), Error>>> =
             stellarator::struc_con::stellar(move || async move {
-                let mut handles = vec![];
                 loop {
                     let stream = listener.accept().await?;
-                    handles.push(stellarator::spawn(handle_conn(stream, db.clone())).drop_guard());
+                    let conn_db = db.clone();
+                    // Give each connection its own stellarator thread, matching
+                    // the standalone elodin-db Server::run().  Using `spawn()`
+                    // here put all connections on a single thread, and a busy
+                    // writer connection (e.g. the simulation) would starve the
+                    // I/O reactor, preventing other connections (e.g. editor)
+                    // from ever reading subsequent packets.
+                    stellarator::struc_con::stellar(move || handle_conn(stream, conn_db));
                 }
             });
         let tick = stellarator::spawn(tick(

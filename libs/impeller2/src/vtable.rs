@@ -58,6 +58,17 @@ use crate::{
     types::{ComponentId, ComponentView, PacketId, PrimType, Timestamp},
 };
 
+/// Well-known extension ID for nanosecond timestamp sources.
+///
+/// When the DB encounters an `OpExt` with this ID, it reads the source data as
+/// nanoseconds and divides by 1000 to produce the microsecond record timestamp.
+/// Use the [`builder::timestamp_ns`] convenience function to create this operation.
+///
+/// **Reserved ID:** `[0x01, 0x00]` is outside the auto-generated FNV1a hash range
+/// and the manually-assigned `[224, *]` range used by other messages and extensions.
+/// Do not reuse this ID for other extensions.
+pub const TIMESTAMP_NS_EXT_ID: PacketId = [0x01, 0x00];
+
 /// Operations that can be performed in a VTable
 ///
 /// Each operation represents a different way to reference or manipulate data within a VTable.
@@ -202,6 +213,9 @@ pub struct RealizedTableSlice<'a> {
 pub struct RealizedExt<'a> {
     pub id: PacketId,
     pub data: &'a [u8],
+    /// The table byte range of the data source, if available.
+    /// Present when the ext's data op is a `Table` reference (e.g. for `timestamp_ns`).
+    pub range: Option<Range<usize>>,
     pub arg: OpRef,
 }
 
@@ -342,13 +356,20 @@ impl<Ops: Buf<Op>, Data: Buf<u8>, Fields: Buf<Field>> VTable<Ops, Data, Fields> 
             }
             Op::None => Ok(RealizedOp::None),
             Op::Ext { arg, id, data } => {
-                let data = self
-                    .realize(*data, table)?
-                    .as_slice()
-                    .ok_or(Error::InvalidOp)?;
+                let resolved = self.realize(*data, table)?;
+                let range = resolved.as_table_range();
+                // When table is None (e.g. during VTable registration or
+                // streaming setup), table-reference data operands can't
+                // resolve to bytes. This is expected for timestamp_ns which
+                // uses a raw_table() as its data source. Other exts
+                // (MeanOp, FixedRateBehavior) use embedded Data ops that
+                // always resolve, so this fallback only activates for
+                // table-reference data.
+                let data_bytes = resolved.as_slice().unwrap_or(&[]);
                 Ok(RealizedOp::Ext(RealizedExt {
                     id: *id,
-                    data,
+                    data: data_bytes,
+                    range,
                     arg: *arg,
                 }))
             }
@@ -405,6 +426,23 @@ impl<Ops: Buf<Op>, Data: Buf<u8>, Fields: Buf<Field>> VTable<Ops, Data, Fields> 
                         realized_op = self.realize(t.arg, table)?;
                     }
                     RealizedOp::Ext(e) => {
+                        if e.id == TIMESTAMP_NS_EXT_ID {
+                            // Convert nanosecond timestamp to microseconds.
+                            // When table is None (e.g. during VTable registration),
+                            // e.data is empty so we skip reading the value -- only
+                            // the structural walk matters in that case.
+                            let ts = if e.data.len() >= core::mem::size_of::<Timestamp>() {
+                                let ns = Timestamp::read_from_bytes(e.data)?;
+                                Some(Timestamp(ns.0 / 1000))
+                            } else {
+                                None
+                            };
+                            timestamp = Some(RealizedTimestamp {
+                                timestamp: ts,
+                                arg: e.arg,
+                                range: e.range.clone(),
+                            });
+                        }
                         realized_op = self.realize(e.arg, table)?;
                     }
                     _ => return Err(Error::InvalidOp),
@@ -519,6 +557,20 @@ pub mod builder {
     /// Creates a timestamp operation builder from a timestamp source and an argument
     pub fn timestamp(timestamp: Arc<OpBuilder>, arg: Arc<OpBuilder>) -> Arc<OpBuilder> {
         Arc::new(OpBuilder::Timestamp { timestamp, arg })
+    }
+
+    /// Creates a nanosecond-source timestamp operation.
+    ///
+    /// The DB engine divides the source value by 1000 to produce microseconds
+    /// for the record timestamp. The raw component data is stored unchanged.
+    /// This uses the existing `OpExt` wire format with the well-known
+    /// [`TIMESTAMP_NS_EXT_ID`] extension ID.
+    pub fn timestamp_ns(source: Arc<OpBuilder>, arg: Arc<OpBuilder>) -> Arc<OpBuilder> {
+        Arc::new(OpBuilder::Ext {
+            id: TIMESTAMP_NS_EXT_ID,
+            data: source,
+            arg,
+        })
     }
 
     /// Creates an extension operation builder from a message and an argument

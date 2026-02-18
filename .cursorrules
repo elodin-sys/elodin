@@ -40,3 +40,4 @@ Rules:
 - always use the nix develop shell when developing changes
 - don't ever commit changes to git, that's for me the developer to do
 - when suggesting new dependencies, make sure to check they are well supported and maintained
+- never use unsafe Rust code

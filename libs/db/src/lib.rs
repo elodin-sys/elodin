@@ -6,7 +6,7 @@ use impeller2::types::{PacketHeader, PacketTy};
 use impeller2::vtable::builder::{
     OpBuilder, component, raw_field, raw_table, schema, timestamp, vtable,
 };
-use impeller2::vtable::{Op, RealizedField, builder};
+use impeller2::vtable::{Op, RealizedField, TIMESTAMP_NS_EXT_ID, builder};
 use impeller2::{
     com_de::Decomponentize,
     registry,
@@ -57,12 +57,15 @@ pub mod append_log;
 mod arrow;
 pub mod axum;
 pub mod cancellation;
+pub(crate) mod coalescing_sink;
 pub mod drop;
 mod error;
 pub mod export;
 #[cfg(feature = "video-export")]
 pub mod export_videos;
 pub mod fix_timestamps;
+pub mod follow;
+mod follow_stream;
 pub mod merge;
 mod msg_log;
 pub mod prune;
@@ -106,6 +109,28 @@ where
                 }
                 Err(e) => {
                     warn!(?e, op_idx, "failed to resolve timestamp operation source");
+                }
+            }
+        }
+        // Handle nanosecond timestamp ext (same role as Op::Timestamp but source is in ns)
+        if let Op::Ext { data, id, .. } = op
+            && *id == TIMESTAMP_NS_EXT_ID
+        {
+            debug!(op_idx, "found nanosecond timestamp ext");
+            match vtable.realize(*data, None) {
+                Ok(resolved) => {
+                    if let Some(range) = resolved.as_table_range() {
+                        debug!(
+                            op_idx,
+                            range_start = range.start,
+                            range_end = range.end,
+                            "timestamp_ns ext source range resolved"
+                        );
+                        ranges.push((range.start, range.end));
+                    }
+                }
+                Err(e) => {
+                    warn!(?e, op_idx, "failed to resolve timestamp_ns ext data source");
                 }
             }
         }
@@ -322,7 +347,7 @@ pub(crate) fn copy_dir_native(src: &Path, dst: &Path) -> Result<(), Error> {
 pub struct DB {
     pub vtable_gen: AtomicCell<u64>,
     state: RwLock<State>,
-    snapshot_barrier: SnapshotBarrier,
+    pub(crate) snapshot_barrier: SnapshotBarrier,
     pub recording_cell: PlayingCell,
 
     // metadata
@@ -339,6 +364,11 @@ pub struct DB {
     /// The original end-of-data timestamp, saved before replay mode resets
     /// last_updated. Used to stop playback when the recording runs out.
     pub replay_end: AtomicI64,
+
+    /// Component IDs being replicated from a followed source database.
+    /// When a local (non-follower) writer writes to one of these, a warning
+    /// is logged to highlight potential data corruption.
+    pub followed_components: RwLock<HashSet<ComponentId>>,
 }
 
 #[derive(Default)]
@@ -391,6 +421,7 @@ impl DB {
             db_start_wall_clock: AtomicCell::new(now),
             replay: AtomicBool::new(false),
             replay_end: AtomicI64::new(i64::MAX),
+            followed_components: RwLock::new(HashSet::default()),
         };
         db.save_db_state()?;
         Ok(db)
@@ -673,6 +704,7 @@ impl DB {
             db_start_wall_clock: AtomicCell::new(now),
             replay: AtomicBool::new(false),
             replay_end: AtomicI64::new(i64::MAX),
+            followed_components: RwLock::new(HashSet::default()),
         };
         // Save updated version info
         db.save_db_state()?;
@@ -725,6 +757,26 @@ impl DB {
                             );
                             timestamp_source_component_ids.insert(source_comp_id);
                         }
+                    }
+                }
+                // Handle nanosecond timestamp ext: data is the ns source, arg is the component
+                if let Op::Ext { data, id, arg } = op
+                    && *id == TIMESTAMP_NS_EXT_ID
+                    && let Ok(resolved_arg) = vtable.vtable.realize(*arg, None)
+                    && let Some(comp_id) = resolved_arg.as_component_id()
+                {
+                    debug!(
+                        component_id = ?comp_id.0,
+                        "timestamp_ns ext references component"
+                    );
+                    if let Ok(resolved_data) = vtable.vtable.realize(*data, None)
+                        && let Some(source_comp_id) = resolved_data.as_component_id()
+                    {
+                        debug!(
+                            component_id = ?source_comp_id.0,
+                            "timestamp_ns ext source is itself a component"
+                        );
+                        timestamp_source_component_ids.insert(source_comp_id);
                     }
                 }
             }
@@ -870,6 +922,41 @@ impl State {
         db_path: &Path,
     ) -> Result<(), Error> {
         self.insert_component_with_timestamp_source_flag(component_id, schema, false, db_path)
+    }
+
+    /// Insert a component with an explicit start_timestamp.
+    /// Used by the follower to match the source's start_timestamp exactly
+    /// so that on-disk binary representations are identical.
+    pub fn insert_component_with_start_timestamp(
+        &mut self,
+        component_id: ComponentId,
+        schema: ComponentSchema,
+        start_timestamp: Timestamp,
+        db_path: &Path,
+    ) -> Result<(), Error> {
+        if self.components.contains_key(&component_id) {
+            return Ok(());
+        }
+        info!(component.id = ?component_id.0, "inserting with explicit start_timestamp");
+        let name = self
+            .component_metadata
+            .get(&component_id)
+            .map(|m| m.name.clone())
+            .unwrap_or_else(|| component_id.to_string());
+        let component =
+            Component::create(db_path, component_id, name.clone(), schema, start_timestamp)?;
+        if !self.component_metadata.contains_key(&component_id) {
+            self.set_component_metadata(
+                ComponentMetadata {
+                    component_id,
+                    name,
+                    metadata: Default::default(),
+                },
+                db_path,
+            )?;
+        }
+        self.components.insert(component_id, component);
+        Ok(())
     }
 
     /// Inserts a component, optionally marking it as a timestamp source.
@@ -1236,6 +1323,11 @@ impl Component {
         self.time_series.sync_all()
     }
 
+    /// Returns the raw start_timestamp from the index file header.
+    pub fn index_extra(&self) -> &Timestamp {
+        self.time_series.index_extra()
+    }
+
     /// Truncate the component, clearing all time-series data while preserving the schema.
     pub fn truncate(&self) {
         self.time_series.truncate();
@@ -1249,12 +1341,17 @@ impl Component {
     }
 }
 
-struct DBSink<'a> {
-    components: &'a HashMap<ComponentId, Component>,
-    snapshot_barrier: &'a SnapshotBarrier,
-    last_updated: &'a AtomicCell<Timestamp>,
-    sunk_new_time_series: bool,
-    table_received: Timestamp,
+pub(crate) struct DBSink<'a> {
+    pub(crate) components: &'a HashMap<ComponentId, Component>,
+    pub(crate) snapshot_barrier: &'a SnapshotBarrier,
+    pub(crate) last_updated: &'a AtomicCell<Timestamp>,
+    pub(crate) sunk_new_time_series: bool,
+    pub(crate) table_received: Timestamp,
+    /// Set of component IDs replicated from a followed source.
+    /// When a non-follower writes to one of these, we warn.
+    pub(crate) followed_components: &'a RwLock<HashSet<ComponentId>>,
+    /// True when the writer is the follower itself (suppresses the warning).
+    pub(crate) is_follower: bool,
 }
 
 impl Decomponentize for DBSink<'_> {
@@ -1265,12 +1362,38 @@ impl Decomponentize for DBSink<'_> {
         value: impeller2::types::ComponentView<'_>,
         timestamp: Option<Timestamp>,
     ) -> Result<(), Error> {
+        // Warn if a non-follower connection writes to a component being
+        // replicated from a followed source.
+        if !self.is_follower
+            && self
+                .followed_components
+                .read()
+                .is_ok_and(|f| f.contains(&component_id))
+        {
+            warn!(
+                component_id = ?component_id,
+                "component is being written by both the followed source and a local connection; \
+                 this may result in data corruption if not intentionally done"
+            );
+        }
         let _snapshot_guard = self.snapshot_barrier.enter_writer();
         let mut timestamp = timestamp.unwrap_or(self.table_received);
         let value_buf = value.as_bytes();
         let Some(component) = self.components.get(&component_id) else {
             return Err(Error::ComponentNotFound(component_id));
         };
+        // When processing data from a followed source, skip samples that
+        // are not strictly newer than the latest in the local time series.
+        // This prevents duplicates when the follow stream re-sends the
+        // "latest" value that was already written during backfill.
+        if self.is_follower
+            && component
+                .time_series
+                .latest()
+                .is_some_and(|(last_ts, _)| timestamp <= *last_ts)
+        {
+            return Ok(());
+        }
         let time_series_empty = component.time_series.index().is_empty();
         // When timestamps are auto-generated (no explicit timestamp provided), concurrent writers
         // may occasionally observe a slightly newer last timestamp and reject with
@@ -1386,7 +1509,26 @@ async fn handle_conn_inner<A: AsyncRead + AsyncWrite + 'static>(
         let result = handle_packet(&pkt, &db, &mut pkt_tx).await;
         buf = pkt.into_buf().into_inner();
         match result {
-            Ok(_) => {}
+            Ok(PacketAction::Continue) => {}
+            Ok(PacketAction::StartFollowStream {
+                target_packet_size,
+                req_id: follow_req_id,
+            }) => {
+                // The connection is now dedicated to the follow stream.
+                // Take back ownership of the tx Arc and hold the lock for
+                // the lifetime of the follow stream.
+                let follow_tx = pkt_tx.tx;
+                let sink = follow_tx.lock().await;
+                info!("connection entering follow-stream mode");
+                follow_stream::handle_follow_stream(
+                    db,
+                    sink.writer(),
+                    target_packet_size,
+                    follow_req_id,
+                )
+                .await?;
+                return Ok(());
+            }
             Err(err) if err.is_stream_closed() => {}
             Err(err) => {
                 debug!(?err, "error handling packet");
@@ -1403,6 +1545,17 @@ async fn handle_conn_inner<A: AsyncRead + AsyncWrite + 'static>(
         resp_pkt = pkt_tx.pkt.expect("len pkt taken and not given back");
         tx = pkt_tx.tx;
     }
+}
+
+/// Action returned by [`handle_packet`] to signal whether the connection
+/// should continue its normal read loop or switch to a special mode.
+enum PacketAction {
+    Continue,
+    /// Transition the connection into follow-stream mode.
+    StartFollowStream {
+        target_packet_size: u32,
+        req_id: u8,
+    },
 }
 
 pub struct PacketTx<A: AsyncWrite + 'static> {
@@ -1482,7 +1635,7 @@ async fn handle_packet<A: AsyncWrite + 'static>(
     pkt: &Packet<Slice<Vec<u8>>>,
     db: &Arc<DB>,
     tx: &mut PacketTx<A>,
-) -> Result<(), Error> {
+) -> Result<PacketAction, Error> {
     trace!(?pkt, "handling pkt");
 
     match &pkt {
@@ -1628,7 +1781,18 @@ async fn handle_packet<A: AsyncWrite + 'static>(
                     .values()
                     .map(|c| (c.component_id, c.schema.to_schema()))
                     .collect();
-                DumpSchemaResp { schemas }
+                let start_timestamps = state
+                    .components
+                    .values()
+                    .map(|c| {
+                        let ts = *c.time_series.index_extra();
+                        (c.component_id, ts)
+                    })
+                    .collect();
+                DumpSchemaResp {
+                    schemas,
+                    start_timestamps,
+                }
             });
 
             tx.send_msg(&msg).await?;
@@ -1685,20 +1849,27 @@ async fn handle_packet<A: AsyncWrite + 'static>(
         }
         Packet::Table(table) => {
             trace!(table.len = table.buf.len(), "sinking table");
-            db.with_state(|state| {
+            let table_id = table.id;
+            let table_buf_len = table.buf.len();
+            if let Err(err) = db.with_state(|state| {
                 let mut sink = DBSink {
                     components: &state.components,
                     snapshot_barrier: &db.snapshot_barrier,
                     last_updated: &db.last_updated,
                     sunk_new_time_series: false,
                     table_received: db.apply_implicit_timestamp(),
+                    followed_components: &db.followed_components,
+                    is_follower: false,
                 };
                 table.sink(&state.vtable_registry, &mut sink)??;
                 if sink.sunk_new_time_series {
                     db.vtable_gen.fetch_add(1, atomic::Ordering::SeqCst);
                 }
                 Ok::<_, Error>(())
-            })?;
+            }) {
+                debug!(?err, ?table_id, table_buf_len, "error sinking table packet");
+                return Err(err);
+            }
         }
 
         Packet::Msg(m) if m.id == GetDbSettings::ID => {
@@ -1899,14 +2070,14 @@ async fn handle_packet<A: AsyncWrite + 'static>(
                 None => {
                     // Range out of bounds - send empty result
                     tx.send_time_series(request_id, &[], &[]).await?;
-                    return Ok(());
+                    return Ok(PacketAction::Continue);
                 }
             };
 
             let num_points = timestamps.len();
             if num_points == 0 {
                 tx.send_time_series(request_id, &[], &[]).await?;
-                return Ok(());
+                return Ok(PacketAction::Continue);
             }
 
             // Extract values for the specified element_index
@@ -1923,7 +2094,7 @@ async fn handle_packet<A: AsyncWrite + 'static>(
                     "PlotOverviewQuery element_index out of bounds"
                 );
                 tx.send_time_series(request_id, &[], &[]).await?;
-                return Ok(());
+                return Ok(PacketAction::Continue);
             }
 
             let scalar_size = element_size / dim.max(1);
@@ -2076,13 +2247,34 @@ async fn handle_packet<A: AsyncWrite + 'static>(
                 Ok::<_, Error>(())
             })?;
         }
+        Packet::Msg(m) if m.id == FollowStream::ID => {
+            let follow = m.parse::<FollowStream>()?;
+            return Ok(PacketAction::StartFollowStream {
+                target_packet_size: follow.target_packet_size,
+                req_id: m.req_id,
+            });
+        }
+        Packet::Msg(m) if m.id == TimestampedMsgStream::ID => {
+            let _snapshot_guard = db.snapshot_barrier.enter_writer();
+            let stream = m.parse::<TimestampedMsgStream>()?;
+            let msg_log =
+                db.with_state_mut(|s| s.get_or_insert_msg_log(stream.msg_id, &db.path).cloned())?;
+            drop(_snapshot_guard);
+            let req_id = m.req_id;
+            stellarator::spawn(handle_timestamped_msg_stream(
+                stream.msg_id,
+                req_id,
+                msg_log,
+                tx.tx.clone(),
+            ));
+        }
         Packet::Msg(m) => {
             let timestamp = m.timestamp.unwrap_or_else(|| db.apply_implicit_timestamp());
             db.push_msg(timestamp, m.id, &m.buf)?
         }
         _ => {}
     }
-    Ok(())
+    Ok(PacketAction::Continue)
 }
 
 pub async fn handle_msg_stream<A: AsyncWrite>(
@@ -2099,6 +2291,28 @@ pub async fn handle_msg_stream<A: AsyncWrite>(
         };
         let tx = tx.lock().await;
         pkt.clear();
+        pkt.extend_from_slice(msg);
+        rent!(tx.send(pkt).await, pkt)?;
+    }
+}
+
+/// Like [`handle_msg_stream`] but uses `MsgWithTimestamp` packets so the
+/// receiver gets the original source timestamp for each message.
+pub async fn handle_timestamped_msg_stream<A: AsyncWrite>(
+    msg_id: PacketId,
+    req_id: RequestId,
+    msg_log: MsgLog,
+    tx: Arc<Mutex<PacketSink<A>>>,
+) -> Result<(), Error> {
+    let mut pkt = LenPacket::msg_with_timestamp(msg_id, Timestamp(0), 64).with_request_id(req_id);
+    loop {
+        msg_log.wait().await;
+        let Some((timestamp, msg)) = msg_log.latest() else {
+            continue;
+        };
+        let tx = tx.lock().await;
+        pkt.clear();
+        pkt.extend_from_slice(timestamp.as_bytes());
         pkt.extend_from_slice(msg);
         rent!(tx.send(pkt).await, pkt)?;
     }
@@ -2426,8 +2640,10 @@ async fn handle_real_time_stream<A: AsyncWrite + 'static>(
             }
 
             // Send schema for this component
+            let start_ts = *component.index_extra();
             let schema_msg = DumpSchemaResp {
                 schemas: [(component.component_id, schema)].into_iter().collect(),
+                start_timestamps: [(component.component_id, start_ts)].into_iter().collect(),
             };
             {
                 let stream = sink.lock().await;
@@ -2555,8 +2771,10 @@ async fn handle_real_time_stream_batched<A: AsyncWrite + 'static>(
                     }
                 }
 
+                let start_ts = *component.index_extra();
                 let schema_msg = DumpSchemaResp {
                     schemas: [(component.component_id, schema)].into_iter().collect(),
+                    start_timestamps: [(component.component_id, start_ts)].into_iter().collect(),
                 };
                 {
                     let stream = sink.lock().await;
@@ -2744,7 +2962,7 @@ async fn handle_fixed_stream<A: AsyncWrite>(
     }
 }
 
-struct DBVisitor;
+pub(crate) struct DBVisitor;
 
 impl DBVisitor {
     fn vtable(&self, components: &HashMap<ComponentId, Component>) -> Result<VTable, Error> {
@@ -2780,13 +2998,28 @@ impl DBVisitor {
     ) -> Result<(), Error> {
         const YIELD_EVERY: usize = 8;
         for (i, (_, component)) in components.iter().enumerate() {
-            let tick = component.time_series.start_timestamp().max(timestamp);
-            let Some((ts, buf)) = component.get_nearest(tick) else {
+            // Skip components with no data – the VTable builder
+            // (vtable()) excludes them, so we must too.
+            if component.time_series.index().is_empty() {
                 continue;
-            };
-            table.push_aligned(ts);
-            table.pad_for_type(component.schema.prim_type);
-            table.extend_from_slice(buf);
+            }
+            let tick = component.time_series.start_timestamp().max(timestamp);
+            match component.get_nearest(tick) {
+                Some((ts, buf)) => {
+                    table.push_aligned(ts);
+                    table.pad_for_type(component.schema.prim_type);
+                    table.extend_from_slice(buf);
+                }
+                None => {
+                    // Component has data but not at this timestamp.
+                    // Write zeros to preserve VTable field offset alignment.
+                    table.push_aligned(Timestamp(0));
+                    table.pad_for_type(component.schema.prim_type);
+                    for _ in 0..component.schema.size() {
+                        table.push(0);
+                    }
+                }
+            }
             if (i + 1) % YIELD_EVERY == 0 {
                 stellarator::yield_now().await;
             }
@@ -2805,12 +3038,30 @@ impl DBVisitor {
         table: &mut LenPacket,
     ) {
         for (_, component) in components.iter() {
-            let Some((&ts, buf)) = component.time_series.latest() else {
+            // Skip components with no data – the VTable builder
+            // (vtable()) excludes them, so we must too.
+            if component.time_series.index().is_empty() {
                 continue;
-            };
-            table.push_aligned(ts);
-            table.pad_for_type(component.schema.prim_type);
-            table.extend_from_slice(buf);
+            }
+            let elem_size = component.schema.size();
+            let prim_type = component.schema.prim_type;
+            match component.time_series.latest() {
+                Some((&ts, buf)) => {
+                    table.push_aligned(ts);
+                    table.pad_for_type(prim_type);
+                    table.extend_from_slice(buf);
+                }
+                None => {
+                    // Component has data in index but latest() returned
+                    // None (e.g. data AppendLog shorter than index).
+                    // Write zeros to preserve VTable field offset alignment.
+                    table.push_aligned(Timestamp(0));
+                    table.pad_for_type(prim_type);
+                    for _ in 0..elem_size {
+                        table.push(0);
+                    }
+                }
+            }
         }
     }
 
@@ -2860,11 +3111,17 @@ impl MetadataExt for DbConfig {}
 
 pub trait AtomicTimestampExt {
     fn update_max(&self, val: Timestamp);
+    fn update_min(&self, val: Timestamp);
 }
 
 impl AtomicTimestampExt for AtomicCell<Timestamp> {
     fn update_max(&self, val: Timestamp) {
         self.value.fetch_max(val.0, atomic::Ordering::AcqRel);
+        self.wait_queue.wake_all();
+    }
+
+    fn update_min(&self, val: Timestamp) {
+        self.value.fetch_min(val.0, atomic::Ordering::AcqRel);
         self.wait_queue.wake_all();
     }
 }
