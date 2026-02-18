@@ -58,7 +58,7 @@ members = [
 exclude = ["fsw/sensor-fw", "fsw/blackbox", "docs/memserve"]
 
 [workspace.package]
-version = "0.16.1"
+version = "0.16.2-alpha.0"
 edition = "2024"
 repository = "https://github.com/elodin-sys/elodin"
 
