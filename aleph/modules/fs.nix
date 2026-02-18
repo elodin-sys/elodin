@@ -51,7 +51,6 @@
         }
         ''
           install -m755 ${./mk-esp-contents.py} $out
-          substituteInPlace $out --replace-fail "@python3@" "${pkgs.buildPackages.python3}"
           mypy \
             --no-implicit-optional \
             --disallow-untyped-calls \
@@ -63,7 +62,7 @@
       firmwareSize = 256;
       populateFirmwareCommands = ''
         mkdir -pv firmware
-        ${mkESPContent} \
+        ${pkgs.buildPackages.python3}/bin/python3 ${mkESPContent} \
           --toplevel ${config.system.build.toplevel} \
           --output firmware/ \
           --device-tree ${fdtPath}
