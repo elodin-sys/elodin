@@ -648,8 +648,9 @@ w.schematic(
 
     object_3d ore_sat.world_pos {
         glb path="oresat-low.glb"
+        icon builtin="satellite_alt" color="#4CAF50" swap_distance=500.0
     }
-    line_3d ore_sat.world_pos line_width=10.0 perspective=#false
+    
 """,
     "cube-sat.kdl",
 )

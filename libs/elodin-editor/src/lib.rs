@@ -47,6 +47,7 @@ use ui::{
     utils::FriendlyEpoch,
 };
 
+pub mod icon_rasterizer;
 pub mod iter;
 pub mod object_3d;
 mod offset_parse;
@@ -905,6 +906,7 @@ fn sync_object_3d(
             Object3D {
                 eql,
                 mesh: mesh_source,
+                icon: None,
                 aux: (),
             },
             expr,

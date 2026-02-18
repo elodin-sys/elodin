@@ -399,7 +399,54 @@ fn serialize_object_3d<T>(obj: &Object3D<T>) -> KdlNode {
     for sibling in sibling_nodes {
         children.nodes_mut().push(sibling);
     }
+
+    if let Some(icon) = &obj.icon {
+        children.nodes_mut().push(serialize_object_3d_icon(icon));
+    }
+
     node.set_children(children);
+
+    node
+}
+
+fn serialize_object_3d_icon(icon: &Object3DIcon) -> KdlNode {
+    use impeller2_wkt::{Object3DIconSource, default_icon_size, default_icon_swap_distance};
+
+    let mut node = KdlNode::new("icon");
+
+    match &icon.source {
+        Object3DIconSource::Path(path) => {
+            node.entries_mut()
+                .push(KdlEntry::new_prop("path", path.clone()));
+        }
+        Object3DIconSource::Builtin(name) => {
+            node.entries_mut()
+                .push(KdlEntry::new_prop("builtin", name.clone()));
+        }
+    }
+
+    let color_hex = format!(
+        "#{:02X}{:02X}{:02X}",
+        (icon.color.r * 255.0) as u8,
+        (icon.color.g * 255.0) as u8,
+        (icon.color.b * 255.0) as u8,
+    );
+    if icon.color.r != 1.0 || icon.color.g != 1.0 || icon.color.b != 1.0 {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("color", color_hex));
+    }
+
+    if (icon.swap_distance - default_icon_swap_distance()).abs() > f32::EPSILON {
+        node.entries_mut().push(KdlEntry::new_prop(
+            "swap_distance",
+            icon.swap_distance as f64,
+        ));
+    }
+
+    if (icon.size - default_icon_size()).abs() > f32::EPSILON {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("size", icon.size as f64));
+    }
 
     node
 }
@@ -1044,6 +1091,7 @@ graph "value" {
                 mesh: Mesh::Sphere { radius: 0.2 },
                 material: Material::with_color(Color::rgb(1.0, 0.0, 0.0)),
             },
+            icon: None,
             aux: (),
         }));
 
@@ -1082,6 +1130,7 @@ graph "value" {
                 },
                 material: Material::with_color(Color::rgb(0.0, 0.5, 1.0)),
             },
+            icon: None,
             aux: (),
         }));
 
@@ -1117,6 +1166,7 @@ graph "value" {
                 mesh: Mesh::Sphere { radius: 0.2 },
                 material: Material::color_with_emissivity(1.0, 1.0, 0.0, 0.25),
             },
+            icon: None,
             aux: (),
         }));
 
@@ -1145,6 +1195,7 @@ graph "value" {
                 scale: "rocket.scale".to_string(),
                 color: Color::rgba(64.0 / 255.0, 128.0 / 255.0, 1.0, 96.0 / 255.0),
             },
+            icon: None,
             aux: (),
         }));
 

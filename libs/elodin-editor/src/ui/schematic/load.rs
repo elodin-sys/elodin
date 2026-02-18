@@ -1,3 +1,4 @@
+use crate::icon_rasterizer::IconTextureCache;
 use bevy::{ecs::system::SystemParam, prelude::*, window::PrimaryWindow};
 #[cfg(target_os = "macos")]
 use bevy_defer::AsyncCommandsExtension;
@@ -95,6 +96,8 @@ pub struct LoadSchematicParams<'w, 's> {
     pub asset_server: Res<'w, AssetServer>,
     pub meshes: ResMut<'w, Assets<Mesh>>,
     pub materials: ResMut<'w, Assets<StandardMaterial>>,
+    pub images: ResMut<'w, Assets<Image>>,
+    pub icon_cache: ResMut<'w, IconTextureCache>,
     pub render_layer_alloc: ResMut<'w, RenderLayerAlloc>,
     pub hdr_enabled: ResMut<'w, HdrEnabled>,
     pub schema_reg: Res<'w, ComponentSchemaRegistry>,
@@ -512,7 +515,8 @@ impl LoadSchematicParams<'_, '_> {
         let Ok(expr) = self.eql.0.parse_str(&object_3d.eql) else {
             return;
         };
-        crate::object_3d::create_object_3d_entity(
+        let icon = object_3d.icon.clone();
+        let entity = crate::object_3d::create_object_3d_entity(
             &mut self.commands,
             object_3d.clone(),
             expr,
@@ -521,6 +525,18 @@ impl LoadSchematicParams<'_, '_> {
             &mut self.meshes,
             &self.asset_server,
         );
+        if let Some(icon) = &icon {
+            crate::object_3d::spawn_billboard_icon(
+                &mut self.commands,
+                entity,
+                icon,
+                &mut self.materials,
+                &mut self.meshes,
+                &mut self.images,
+                &self.asset_server,
+                &mut self.icon_cache,
+            );
+        }
     }
 
     pub fn spawn_line_3d(&mut self, line_3d: Line3d) {

@@ -16,6 +16,7 @@ debug = ["big_space/debug"]
 nox.path = "../nox"
 nox.default-features = false
 egui_material_icons = "0.5"
+ab_glyph = "0.2"
 
 # bevy
 bevy.version = "0.17"

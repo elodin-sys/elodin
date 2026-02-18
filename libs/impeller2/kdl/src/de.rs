@@ -573,12 +573,13 @@ fn parse_object_3d(node: &KdlNode, src: &str) -> Result<Object3D, KdlSchematicEr
         })?
         .to_string();
 
+    let mut icon = None;
+
     let mesh = if let Some(children) = node.children() {
         let children_nodes = children.nodes();
         let mesh_node = children_nodes.first();
         let mut parsed_mesh = parse_object_3d_mesh(mesh_node, src)?;
 
-        // Collect animate nodes from object_3d children (they're siblings of glb, not children)
         let mut animations = Vec::new();
         for child in children_nodes {
             let child_name = child.name().value();
@@ -609,10 +610,11 @@ fn parse_object_3d(node: &KdlNode, src: &str) -> Result<Object3D, KdlSchematicEr
                     joint_name,
                     eql_expr,
                 });
+            } else if child_name == "icon" {
+                icon = Some(parse_object_3d_icon(child, src)?);
             }
         }
 
-        // If we found animations and the mesh is a GLB, add them to the mesh
         if !animations.is_empty()
             && let Object3DMesh::Glb {
                 path,
@@ -641,7 +643,92 @@ fn parse_object_3d(node: &KdlNode, src: &str) -> Result<Object3D, KdlSchematicEr
         });
     };
 
-    Ok(Object3D { eql, mesh, aux: () })
+    Ok(Object3D {
+        eql,
+        mesh,
+        icon,
+        aux: (),
+    })
+}
+
+fn parse_hex_color(hex: &str) -> Option<Color> {
+    let hex = hex.strip_prefix('#').unwrap_or(hex);
+    match hex.len() {
+        6 => {
+            let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
+            let g = u8::from_str_radix(&hex[2..4], 16).ok()?;
+            let b = u8::from_str_radix(&hex[4..6], 16).ok()?;
+            Some(Color::rgba(
+                r as f32 / 255.0,
+                g as f32 / 255.0,
+                b as f32 / 255.0,
+                1.0,
+            ))
+        }
+        8 => {
+            let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
+            let g = u8::from_str_radix(&hex[2..4], 16).ok()?;
+            let b = u8::from_str_radix(&hex[4..6], 16).ok()?;
+            let a = u8::from_str_radix(&hex[6..8], 16).ok()?;
+            Some(Color::rgba(
+                r as f32 / 255.0,
+                g as f32 / 255.0,
+                b as f32 / 255.0,
+                a as f32 / 255.0,
+            ))
+        }
+        _ => None,
+    }
+}
+
+fn parse_object_3d_icon(node: &KdlNode, src: &str) -> Result<Object3DIcon, KdlSchematicError> {
+    let has_path = node.get("path").and_then(|v| v.as_string()).is_some();
+    let has_builtin = node.get("builtin").and_then(|v| v.as_string()).is_some();
+
+    let source = if has_path && has_builtin {
+        return Err(KdlSchematicError::MissingProperty {
+            property: "path OR builtin (not both)".to_string(),
+            node: "icon".to_string(),
+            src: src.to_string(),
+            span: node.span(),
+        });
+    } else if let Some(path) = node.get("path").and_then(|v| v.as_string()) {
+        Object3DIconSource::Path(path.to_string())
+    } else if let Some(name) = node.get("builtin").and_then(|v| v.as_string()) {
+        Object3DIconSource::Builtin(name.to_string())
+    } else {
+        return Err(KdlSchematicError::MissingProperty {
+            property: "path or builtin".to_string(),
+            node: "icon".to_string(),
+            src: src.to_string(),
+            span: node.span(),
+        });
+    };
+
+    let color = node
+        .get("color")
+        .and_then(|v| v.as_string())
+        .and_then(|s| parse_hex_color(s).or_else(|| color_from_name(s)))
+        .unwrap_or_else(default_icon_color);
+
+    let swap_distance = node
+        .get("swap_distance")
+        .and_then(|v| v.as_float())
+        .map(|v| v as f32)
+        .unwrap_or_else(default_icon_swap_distance);
+
+    let size = node
+        .get("size")
+        .and_then(|v| v.as_float())
+        .map(|v| v as f32)
+        .unwrap_or_else(default_icon_size);
+
+    Ok(Object3DIcon {
+        source,
+        color,
+        swap_distance,
+        size,
+    })
 }
 
 fn parse_object_3d_mesh(

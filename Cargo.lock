@@ -5176,6 +5176,7 @@ dependencies = [
 name = "elodin-editor"
 version = "0.16.2-alpha.0"
 dependencies = [
+ "ab_glyph",
  "arc-swap",
  "arrow",
  "bevy",
