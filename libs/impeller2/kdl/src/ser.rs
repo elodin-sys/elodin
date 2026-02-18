@@ -425,13 +425,25 @@ fn serialize_object_3d_icon(icon: &Object3DIcon) -> KdlNode {
         }
     }
 
-    let color_hex = format!(
-        "#{:02X}{:02X}{:02X}",
-        (icon.color.r * 255.0) as u8,
-        (icon.color.g * 255.0) as u8,
-        (icon.color.b * 255.0) as u8,
-    );
-    if icon.color.r != 1.0 || icon.color.g != 1.0 || icon.color.b != 1.0 {
+    let is_default_color =
+        icon.color.r == 1.0 && icon.color.g == 1.0 && icon.color.b == 1.0 && icon.color.a == 1.0;
+    if !is_default_color {
+        let color_hex = if icon.color.a < 1.0 {
+            format!(
+                "#{:02X}{:02X}{:02X}{:02X}",
+                (icon.color.r * 255.0) as u8,
+                (icon.color.g * 255.0) as u8,
+                (icon.color.b * 255.0) as u8,
+                (icon.color.a * 255.0) as u8,
+            )
+        } else {
+            format!(
+                "#{:02X}{:02X}{:02X}",
+                (icon.color.r * 255.0) as u8,
+                (icon.color.g * 255.0) as u8,
+                (icon.color.b * 255.0) as u8,
+            )
+        };
         node.entries_mut()
             .push(KdlEntry::new_prop("color", color_hex));
     }

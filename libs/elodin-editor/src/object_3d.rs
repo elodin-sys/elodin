@@ -1257,10 +1257,20 @@ pub fn spawn_mesh(
                 material.cull_mode = None;
             }
             let material = material_assets.add(material);
-            commands.entity(entity).insert(MeshMaterial3d(material));
             let mesh = mesh.clone().into_bevy();
             let mesh = mesh_assets.add(mesh);
-            commands.entity(entity).insert(Mesh3d(mesh));
+            commands.spawn((
+                Mesh3d(mesh),
+                MeshMaterial3d(material),
+                Transform::IDENTITY,
+                GlobalTransform::IDENTITY,
+                Visibility::default(),
+                InheritedVisibility::default(),
+                ViewVisibility::default(),
+                Object3DMeshChild,
+                ChildOf(entity),
+                Name::new("object_3d_mesh"),
+            ));
             None
         }
         impeller2_wkt::Object3DMesh::Ellipsoid { color, .. } => {
@@ -1293,6 +1303,7 @@ pub fn spawn_mesh(
                     Visibility::default(),
                     InheritedVisibility::default(),
                     ViewVisibility::default(),
+                    Object3DMeshChild,
                     ChildOf(entity),
                 ))
                 .id();
@@ -1315,7 +1326,7 @@ pub fn update_object_3d_billboard_system(
         &GlobalTransform,
         &impeller2_wkt::WorldPos,
     )>,
-    cameras: Query<(&Camera, &GlobalTransform), With<MainCamera>>,
+    cameras: Query<(&Camera, &GlobalTransform, &Projection), With<MainCamera>>,
     mut transforms_and_vis: Query<
         (&mut Transform, &mut Visibility),
         (Without<Object3DIconState>, Without<MainCamera>),
@@ -1333,9 +1344,10 @@ pub fn update_object_3d_billboard_system(
         let mut best_distance = f32::MAX;
         let mut best_cam_rotation = Quat::IDENTITY;
         let mut best_viewport_height = 1080.0f32;
+        let mut best_fov = std::f32::consts::FRAC_PI_4;
         let mut best_in_view = false;
 
-        for (camera, cam_gt) in cameras.iter() {
+        for (camera, cam_gt, projection) in cameras.iter() {
             let viewport_size = camera.logical_viewport_size();
             let viewport_h = viewport_size.map(|s| s.y).unwrap_or(0.0);
             if viewport_h < 1.0 {
@@ -1362,6 +1374,10 @@ pub fn update_object_3d_billboard_system(
                 best_distance = distance;
                 best_cam_rotation = cam_gt.to_scale_rotation_translation().1;
                 best_viewport_height = viewport_h;
+                best_fov = match projection {
+                    Projection::Perspective(persp) => persp.fov,
+                    _ => std::f32::consts::FRAC_PI_4,
+                };
                 best_in_view = in_view;
             }
         }
@@ -1389,9 +1405,8 @@ pub fn update_object_3d_billboard_system(
             bb_transform.rotation = parent_rotation.inverse() * best_cam_rotation;
 
             if billboard_alpha > 0.0 {
-                let fov = std::f32::consts::FRAC_PI_4;
                 let world_size =
-                    best_distance * icon_state.screen_size_px * 2.0 * (fov / 2.0).tan()
+                    best_distance * icon_state.screen_size_px * 2.0 * (best_fov / 2.0).tan()
                         / best_viewport_height;
                 bb_transform.scale = Vec3::splat(world_size);
             } else {
@@ -1405,7 +1420,7 @@ pub fn update_object_3d_billboard_system(
             mat.base_color = c;
         }
 
-        let hide_mesh = distance_alpha > 0.99;
+        let hide_mesh = billboard_alpha > 0.99;
 
         if let Ok(children) = children_query.get(parent_entity) {
             for child in children.iter() {
