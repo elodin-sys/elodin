@@ -199,8 +199,8 @@
             </a>
             <span>
                 <select name="version" class="version-select" disabled>
-                    <option value="v0.16.1" selected>
-                        v0.16.1
+                    <option value="v0.16.2-alpha.0" selected>
+                        v0.16.2-alpha.0
                     </option>
                 </select>
             </span>
@@ -325,6 +325,11 @@
                     <a href="/releases/changelog/#v0-16">v0.16</a>
                     
                     <ul>
+                        
+                        <li>
+                            <a href="/releases/changelog/#v0-16-1">v0.16.1</a>
+                            
+                        </li>
                         
                         <li>
                             <a href="/releases/changelog/#v0-16-0">v0.16.0</a>
@@ -695,6 +700,22 @@
               <main class="docs-content col-lg-11 col-xxl-10">
                   <h1>Changelog</h1>
                    <h2 id="v0-16">v0.16</h2>
+<h3 id="v0-16-1">v0.16.1</h3>
+<ul>
+<li><strong>(feat)</strong> Upgrade 3D axes widget to cube with UI affordances like reset-view button. (#456)</li>
+<li><strong>(feat)</strong> Add real-time, performant editor playback. (#480)</li>
+<li><strong>(feat)</strong> Add <code>elodin editor --kdl &lt;file.kdl&gt;</code> CLI option. (#478)</li>
+<li><strong>(feat)</strong> Add <code>elodin-db --replay</code>. (#471)</li>
+<li><strong>(feat)</strong> Add <code>elodin-db --follow</code>. (#489)</li>
+<li><strong>(feat)</strong> Display replay speed. (#486)</li>
+<li><strong>(feat)</strong> Hold <code>Alt/Option</code> to reveal zoom-in button. (#492)</li>
+<li><strong>(feat)</strong> Animate joints on GLB files via EQL. (#461)</li>
+<li><strong>(feat)</strong> Add <code>Timestamp_NS</code> to <code>db.hpp</code>. (#494)</li>
+<li><strong>(feat)</strong> Improve OBS video stream and latency. (#482)</li>
+<li><strong>(fix)</strong> Fix RC Jet flicker. (#487)</li>
+<li><strong>(fix)</strong> Set editor default playback speed to <code>1x</code>. (#485)</li>
+<li><strong>(fix)</strong> Make <code>elodin-db merge time-align</code> use milliseconds. (#470)</li>
+</ul>
 <h3 id="v0-16-0">v0.16.0</h3>
 <ul>
 <li><strong>(feat)</strong> Add elodin-db subcommands: <code>info</code>, <code>merge</code>, <code>prune</code>, <code>time-align</code>, <code>truncate</code>, <code>drop</code>. (#410, #437)</li>
