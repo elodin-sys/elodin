@@ -8,6 +8,12 @@ default_host="fde1:2240:a1ef::1"
 default_config="default"
 no_aleph_builder=false
 
+# Nix cache/build options
+nix_fallback="true"
+nix_extra_substituters="https://elodin-nix-cache.s3.us-west-2.amazonaws.com"
+nix_extra_trusted_public_keys="elodin-cache-1:vvbmIQvTOjcBjIs8Ri7xlT2I3XAmeJyF5mNlWB+fIwM="
+nix_cache_opts="--option fallback $nix_fallback --option extra-substituters $nix_extra_substituters --option extra-trusted-public-keys $nix_extra_trusted_public_keys"
+
 log_info() { gum log --level info "$*"; }
 log_warn() { gum log --level warn "$*"; }
 log_error() { gum log --level error "$*"; }
@@ -72,11 +78,11 @@ fi
 if [ "$no_aleph_builder" = false ] && ! ( ([ "$(uname -m)" = "aarch64" ] && [ "$(uname)" = "Linux" ]) ||
   ([ -f /etc/nix/machines ] && grep -q 'aarch64-linux' /etc/nix/machines)); then
   log_warn "No aarch64-linux builder found, falling back to building on Aleph (slow)"
-  build_cmd="nom build --accept-flake-config --eval-store auto --store ssh-ng://$user@$host $target --print-out-paths"
+  build_cmd="nom build $nix_cache_opts --eval-store auto --store ssh-ng://$user@$host $target --print-out-paths"
   log_info "Running: $build_cmd"
   out_path=$(eval "$build_cmd")
 else
-  build_cmd="nom build --accept-flake-config $target --print-out-paths"
+  build_cmd="nom build $nix_cache_opts $target --print-out-paths"
   log_info "Running: $build_cmd"
   out_path=$(eval "$build_cmd")
   copy_cmd="nix copy --no-check-sigs --to ssh-ng://$user@$host $out_path"
