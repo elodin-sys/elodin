@@ -759,44 +759,68 @@ impl TileState {
                     if let Some(layer) = viewport.view_cube_layer {
                         render_layer_alloc.free(layer);
                     }
-                    if let Some(camera) = viewport.camera {
-                        commands.entity(camera).despawn();
+                    if let Some(camera) = viewport.camera
+                        && let Ok(mut e) = commands.get_entity(camera)
+                    {
+                        e.despawn();
                     }
-                    if let Some(nav_gizmo_camera) = viewport.nav_gizmo_camera {
-                        commands.entity(nav_gizmo_camera).despawn();
+                    if let Some(nav_gizmo_camera) = viewport.nav_gizmo_camera
+                        && let Ok(mut e) = commands.get_entity(nav_gizmo_camera)
+                    {
+                        e.despawn();
                     }
-                    if let Some(nav_gizmo) = viewport.nav_gizmo {
-                        commands.entity(nav_gizmo).despawn();
+                    if let Some(nav_gizmo) = viewport.nav_gizmo
+                        && let Ok(mut e) = commands.get_entity(nav_gizmo)
+                    {
+                        e.despawn();
                     }
                 }
                 Tile::Pane(Pane::Graph(graph)) => {
-                    commands.entity(graph.id).despawn();
+                    if let Ok(mut e) = commands.get_entity(graph.id) {
+                        e.despawn();
+                    }
                     if let Some(graph_id) = self.graphs.get(tile_id) {
-                        commands.entity(*graph_id).despawn();
+                        if let Ok(mut e) = commands.get_entity(*graph_id) {
+                            e.despawn();
+                        }
                         self.graphs.remove(tile_id);
                     }
                 }
 
                 Tile::Pane(Pane::VideoStream(pane)) => {
-                    commands.entity(pane.entity).despawn();
+                    if let Ok(mut e) = commands.get_entity(pane.entity) {
+                        e.despawn();
+                    }
                 }
                 Tile::Pane(Pane::ActionTile(pane)) => {
-                    commands.entity(pane.entity).despawn();
+                    if let Ok(mut e) = commands.get_entity(pane.entity) {
+                        e.despawn();
+                    }
                 }
                 Tile::Pane(Pane::QueryTable(pane)) => {
-                    commands.entity(pane.entity).despawn();
+                    if let Ok(mut e) = commands.get_entity(pane.entity) {
+                        e.despawn();
+                    }
                 }
                 Tile::Pane(Pane::QueryPlot(pane)) => {
-                    commands.entity(pane.entity).despawn();
+                    if let Ok(mut e) = commands.get_entity(pane.entity) {
+                        e.despawn();
+                    }
                 }
                 Tile::Pane(Pane::SchematicTree(pane)) => {
-                    commands.entity(pane.entity).despawn();
+                    if let Ok(mut e) = commands.get_entity(pane.entity) {
+                        e.despawn();
+                    }
                 }
                 Tile::Pane(Pane::Dashboard(dashboard)) => {
-                    commands.entity(dashboard.entity).despawn();
+                    if let Ok(mut e) = commands.get_entity(dashboard.entity) {
+                        e.despawn();
+                    }
                 }
                 Tile::Pane(Pane::Monitor(monitor)) => {
-                    commands.entity(monitor.entity).despawn();
+                    if let Ok(mut e) = commands.get_entity(monitor.entity) {
+                        e.despawn();
+                    }
                 }
                 _ => {}
             }

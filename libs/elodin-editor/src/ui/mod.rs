@@ -362,7 +362,12 @@ impl Plugin for UiPlugin {
                 suppress_pointer_input_over_popups.before(UiInputConsumerSet),
             )
             .add_systems(Update, shortcuts)
-            .add_systems(PreUpdate, sync_windows.before(EguiPreUpdateSet::BeginPass))
+            .add_systems(
+                PreUpdate,
+                sync_windows
+                    .after(impeller2_bevy::sink)
+                    .before(EguiPreUpdateSet::BeginPass),
+            )
             .add_systems(
                 Update,
                 (

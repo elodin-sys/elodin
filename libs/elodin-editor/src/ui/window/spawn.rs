@@ -205,7 +205,9 @@ fn assign_ui_target_camera(
 ) {
     let mut stack = vec![root];
     while let Some(entity) = stack.pop() {
-        commands.entity(entity).insert(UiTargetCamera(target));
+        if let Ok(mut entity_commands) = commands.get_entity(entity) {
+            entity_commands.insert(UiTargetCamera(target));
+        }
         if let Ok(children) = children.get(entity) {
             stack.extend(children.iter());
         }
