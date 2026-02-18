@@ -68,7 +68,7 @@ order = 6
   - Source (exactly one required):
     - `builtin`: name of a [Material Icons](https://fonts.google.com/icons?icon.set=Material+Icons) glyph (snake_case). Supported names include: `satellite_alt`, `satellite`, `rocket_launch`, `rocket`, `flight`, `flight_takeoff`, `public`, `language`, `circle`, `fiber_manual_record`, `star`, `star_outline`, `location_on`, `place`, `adjust`, `gps_fixed`, `my_location`, `explore`, `navigation`, `near_me`, `diamond`, `hexagon`, `change_history`, `lens`, `panorama_fish_eye`, `radio_button_unchecked`, `brightness_1`, `flare`, `wb_sunny`, `bolt`.
     - `path`: path to a custom PNG image file (loaded from the assets folder).
-  - `color`: hex color string to tint the icon (default `"#FFFFFF"`). Supports `#RRGGBB` and `#RRGGBBAA` formats, or named colors.
+  - `color` child node: tint color for the icon using the standard `color r g b [a]` format or named colors (default white). See Colors in the glossary above.
   - `swap_distance`: world-unit distance from the camera at which the icon replaces the 3D mesh (default 500.0). The transition fades smoothly over a band around this threshold.
   - `size`: desired screen pixel size of the icon (default 32).
 
@@ -210,9 +210,9 @@ animate = "animate"
 
 icon = "icon"
      (builtin=string | path=string)
-     [color=string]
      [swap_distance=float]
      [size=float]
+     { [color] }
 
 line_3d = "line_3d"
         <eql>
@@ -355,7 +355,9 @@ Distance icon fallback using a built-in Material Icon:
 ```kdl
 object_3d satellite.world_pos {
     glb path="satellite.glb"
-    icon builtin="satellite_alt" color="#4CAF50" swap_distance=500.0
+    icon builtin="satellite_alt" swap_distance=500.0 {
+        color 76 175 80
+    }
 }
 ```
 
@@ -364,7 +366,9 @@ Distance icon using a custom image:
 ```kdl
 object_3d drone.world_pos {
     glb path="drone.glb"
-    icon path="drone-icon.png" color="#00BCD4" size=48
+    icon path="drone-icon.png" size=48 {
+        color 0 188 212
+    }
 }
 ```
 

@@ -80,8 +80,6 @@ pub fn rasterize_material_icon(codepoint: char, px_size: u32) -> Image {
     }
 
     let canvas_size = px_size.max(glyph_w.max(glyph_h));
-    let offset_x = (canvas_size.saturating_sub(glyph_w)) / 2;
-    let offset_y = (canvas_size.saturating_sub(glyph_h)) / 2;
 
     let h_advance = scaled_font.h_advance(glyph_id);
     let ascent = scaled_font.ascent();
@@ -109,9 +107,6 @@ pub fn rasterize_material_icon(codepoint: char, px_size: u32) -> Image {
             pixels[idx + 3] = alpha;
         }
     });
-
-    let _ = offset_x;
-    let _ = offset_y;
 
     Image::new(
         Extent3d {

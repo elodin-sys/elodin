@@ -651,36 +651,6 @@ fn parse_object_3d(node: &KdlNode, src: &str) -> Result<Object3D, KdlSchematicEr
     })
 }
 
-fn parse_hex_color(hex: &str) -> Option<Color> {
-    let hex = hex.strip_prefix('#').unwrap_or(hex);
-    match hex.len() {
-        6 => {
-            let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
-            let g = u8::from_str_radix(&hex[2..4], 16).ok()?;
-            let b = u8::from_str_radix(&hex[4..6], 16).ok()?;
-            Some(Color::rgba(
-                r as f32 / 255.0,
-                g as f32 / 255.0,
-                b as f32 / 255.0,
-                1.0,
-            ))
-        }
-        8 => {
-            let r = u8::from_str_radix(&hex[0..2], 16).ok()?;
-            let g = u8::from_str_radix(&hex[2..4], 16).ok()?;
-            let b = u8::from_str_radix(&hex[4..6], 16).ok()?;
-            let a = u8::from_str_radix(&hex[6..8], 16).ok()?;
-            Some(Color::rgba(
-                r as f32 / 255.0,
-                g as f32 / 255.0,
-                b as f32 / 255.0,
-                a as f32 / 255.0,
-            ))
-        }
-        _ => None,
-    }
-}
-
 fn parse_object_3d_icon(node: &KdlNode, src: &str) -> Result<Object3DIcon, KdlSchematicError> {
     let has_path = node.get("path").and_then(|v| v.as_string()).is_some();
     let has_builtin = node.get("builtin").and_then(|v| v.as_string()).is_some();
@@ -705,21 +675,17 @@ fn parse_object_3d_icon(node: &KdlNode, src: &str) -> Result<Object3DIcon, KdlSc
         });
     };
 
-    let color = node
-        .get("color")
-        .and_then(|v| v.as_string())
-        .and_then(|s| parse_hex_color(s).or_else(|| color_from_name(s)))
-        .unwrap_or_else(default_icon_color);
+    let color = parse_color_from_node_or_children(node, None).unwrap_or_else(default_icon_color);
 
     let swap_distance = node
         .get("swap_distance")
-        .and_then(|v| v.as_float())
+        .and_then(|v| v.as_float().or_else(|| v.as_integer().map(|i| i as f64)))
         .map(|v| v as f32)
         .unwrap_or_else(default_icon_swap_distance);
 
     let size = node
         .get("size")
-        .and_then(|v| v.as_float())
+        .and_then(|v| v.as_float().or_else(|| v.as_integer().map(|i| i as f64)))
         .map(|v| v as f32)
         .unwrap_or_else(default_icon_size);
 

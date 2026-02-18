@@ -13,7 +13,7 @@ use impeller2_wkt::{
 };
 use smallvec::SmallVec;
 
-use crate::object_3d::{EllipsoidVisual, compile_scale_eql, spawn_mesh};
+use crate::object_3d::{EllipsoidVisual, Object3DMeshChild, compile_scale_eql, spawn_mesh};
 use crate::ui::inspector::{eql_textfield, node_color_picker};
 use crate::{
     object_3d::Object3DState,
@@ -39,6 +39,8 @@ pub struct InspectorObject3D<'w, 's> {
     mesh_assets: ResMut<'w, Assets<bevy::prelude::Mesh>>,
     assets: Res<'w, AssetServer>,
     ellipse_visuals: Query<'w, 's, &'static EllipsoidVisual>,
+    children_query: Query<'w, 's, &'static Children>,
+    mesh_child_markers: Query<'w, 's, (), With<Object3DMeshChild>>,
 }
 
 impl WidgetSystem for InspectorObject3D<'_, '_> {
@@ -61,6 +63,8 @@ impl WidgetSystem for InspectorObject3D<'_, '_> {
             mut material_assets,
             mut mesh_assets,
             ellipse_visuals,
+            children_query,
+            mesh_child_markers,
         } = state.get_mut(world);
 
         let (_icons, entity) = args;
@@ -429,17 +433,15 @@ impl WidgetSystem for InspectorObject3D<'_, '_> {
                     commands.entity(entity).remove::<EllipsoidVisual>();
                 }
 
-                // Note: GLB child entities are not explicitly despawned here.
-                // When a new mesh is spawned, the old child will become orphaned
-                // but remain in the hierarchy. This is acceptable since it won't
-                // be rendered without the parent's SceneRoot.
-                // A future optimization could track child entities similar to EllipsoidVisual.
+                if let Ok(children) = children_query.get(entity) {
+                    for child in children.iter() {
+                        if mesh_child_markers.get(child).is_ok() {
+                            commands.entity(child).despawn();
+                        }
+                    }
+                }
 
-                commands
-                    .entity(entity)
-                    .remove::<SceneRoot>()
-                    .remove::<Mesh3d>()
-                    .remove::<MeshMaterial3d<StandardMaterial>>();
+                commands.entity(entity).remove::<SceneRoot>();
 
                 if let Some(ellipse) = spawn_mesh(
                     &mut commands,

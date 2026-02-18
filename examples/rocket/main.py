@@ -534,7 +534,9 @@ w.schematic(
     }
     object_3d rocket.world_pos {
         glb path="rocket.glb"
-        icon builtin="rocket_launch" color="#4CAF50"
+        icon builtin="rocket_launch" {
+            color 76 175 80
+        }
     }
     line_3d rocket.world_pos line_width=11.0 perspective=#false {
         color yolk
