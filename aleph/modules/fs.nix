@@ -38,10 +38,9 @@
   };
 
   config = {
+    image.fileName = "aleph-os.img";
+
     sdImage = let
-      mkESPContentSource = pkgs.replaceVars ./mk-esp-contents.py {
-        python3 = pkgs.buildPackages.python3;
-      };
       mkESPContent =
         pkgs.runCommand "mk-esp-contents"
         {
@@ -51,7 +50,7 @@
           ];
         }
         ''
-          install -m755 ${mkESPContentSource} $out
+          install -m755 ${./mk-esp-contents.py} $out
           mypy \
             --no-implicit-optional \
             --disallow-untyped-calls \
@@ -60,11 +59,10 @@
         '';
       fdtPath = "${config.hardware.deviceTree.package}/${config.hardware.deviceTree.name}";
     in {
-      imageName = "aleph-os.img";
       firmwareSize = 256;
       populateFirmwareCommands = ''
         mkdir -pv firmware
-        ${mkESPContent} \
+        ${pkgs.buildPackages.python3}/bin/python3 ${mkESPContent} \
           --toplevel ${config.system.build.toplevel} \
           --output firmware/ \
           --device-tree ${fdtPath}
