@@ -704,11 +704,11 @@ fn send_stream_request(commands: &mut Commands, entity: Entity, msg_id: [u8; 2],
     );
 }
 
-/// Maximum number of raw frames to request in a single backfill.
-/// Keeps the DB response size manageable.  At ~25 KB/frame (OBS 1080p),
-/// 500 frames ≈ 12.5 MB, well within tested limits (10 MB succeeded).
+/// Maximum number of raw frames to request in a single backfill page.
+/// At ~50 KB/frame (worst-case OBS keyframe), 200 frames ≈ 10 MB,
+/// safely under the 64 MB client receive-grant ceiling.
 /// The live-tail `FixedRateMsgStream` fills the rest during playback.
-const BACKFILL_FRAME_LIMIT: usize = 500;
+const BACKFILL_FRAME_LIMIT: usize = 200;
 
 /// Paginated `GetMsgs` backfill: fetch historical raw data from the DB
 /// in small batches of `BACKFILL_FRAME_LIMIT` frames.  When a full batch
