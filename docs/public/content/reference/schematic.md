@@ -64,6 +64,13 @@ order = 6
   - `ellipsoid`: `scale` (EQL string, default `"(1, 1, 1)"`), `color` (default white).
 
   Mesh nodes support an optional `emissivity=<value>` property (0.0–1.0) to make the material glow (e.g., `sphere radius=0.2 emissivity=0.25 { color yellow }`).
+- `icon` child (optional): Displays a fixed-size billboard icon when the camera is far from the object, making it easy to locate at any zoom level. The icon automatically faces the camera and fades in/out around the swap distance.
+  - Source (exactly one required):
+    - `builtin`: name of a [Material Icons](https://fonts.google.com/icons?icon.set=Material+Icons) glyph (snake_case). Supported names include: `satellite_alt`, `satellite`, `rocket_launch`, `rocket`, `flight`, `flight_takeoff`, `public`, `language`, `circle`, `fiber_manual_record`, `star`, `star_outline`, `location_on`, `place`, `adjust`, `gps_fixed`, `my_location`, `explore`, `navigation`, `near_me`, `diamond`, `hexagon`, `change_history`, `lens`, `panorama_fish_eye`, `radio_button_unchecked`, `brightness_1`, `flare`, `wb_sunny`, `bolt`.
+    - `path`: path to a custom PNG image file (loaded from the assets folder).
+  - `color`: hex color string to tint the icon (default `"#FFFFFF"`). Supports `#RRGGBB` and `#RRGGBBAA` formats, or named colors.
+  - `swap_distance`: world-unit distance from the camera at which the icon replaces the 3D mesh (default 500.0). The transition fades smoothly over a band around this threshold.
+  - `size`: desired screen pixel size of the icon (default 32).
 
 ### line_3d
 - Positional `eql`: required; expects 3 values (or 7 where the last 3 are XYZ).
@@ -195,10 +202,17 @@ object_3d = "object_3d"
           | ellipsoid
           }
           [emissivity=float]
+          [icon]
 
 animate = "animate"
         joint=string
         rotation_vector=eql
+
+icon = "icon"
+     (builtin=string | path=string)
+     [color=string]
+     [swap_distance=float]
+     [size=float]
 
 line_3d = "line_3d"
         <eql>
@@ -335,3 +349,23 @@ object_3d rocket.world_pos {
     animate joint="Root.Fin_3" rotation_vector="(0, rocket.fin_deflect[3], 0)"
 }
 ```
+
+Distance icon fallback using a built-in Material Icon:
+
+```kdl
+object_3d satellite.world_pos {
+    glb path="satellite.glb"
+    icon builtin="satellite_alt" color="#4CAF50" swap_distance=500.0
+}
+```
+
+Distance icon using a custom image:
+
+```kdl
+object_3d drone.world_pos {
+    glb path="drone.glb"
+    icon path="drone-icon.png" color="#00BCD4" size=48
+}
+```
+
+Browse all available built-in icon names at [Material Icons](https://fonts.google.com/icons?icon.set=Material+Icons) (use the snake_case version of the icon name, e.g. "Satellite Alt" becomes `satellite_alt`).
