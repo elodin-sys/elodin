@@ -4,7 +4,7 @@ use bevy::prelude::Mesh;
 use bevy::prelude::*;
 use bevy::scene::{SceneInstance, SceneRoot, SceneSpawner};
 use bevy_render::alpha::AlphaMode;
-use big_space::{FloatingOriginSettings, GridCell};
+use big_space::GridCell;
 use bitvec::prelude::*;
 use eql::Expr;
 use impeller2_bevy::EntityMap;
@@ -1313,46 +1313,56 @@ pub fn update_object_3d_billboard_system(
         Entity,
         &Object3DIconState,
         &GlobalTransform,
-        &GridCell<i128>,
         &impeller2_wkt::WorldPos,
     )>,
-    cameras: Query<(&Camera, &GlobalTransform, &GridCell<i128>), With<MainCamera>>,
+    cameras: Query<(&Camera, &GlobalTransform), With<MainCamera>>,
     mut transforms_and_vis: Query<
         (&mut Transform, &mut Visibility),
         (Without<Object3DIconState>, Without<MainCamera>),
     >,
     children_query: Query<&Children>,
     mesh_child_markers: Query<(), With<Object3DMeshChild>>,
-    floating_origin: Res<FloatingOriginSettings>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
-    let edge = floating_origin.grid_edge_length();
-
-    for (parent_entity, icon_state, obj_gt, obj_cell, world_pos) in objects.iter() {
+    for (parent_entity, icon_state, obj_gt, world_pos) in objects.iter() {
         if *world_pos == impeller2_wkt::WorldPos::default() {
             continue;
         }
 
-        let mut closest_distance = f32::MAX;
-        let mut closest_cam_rotation = Quat::IDENTITY;
-        let mut closest_viewport_height = 1080.0f32;
+        let obj_pos = obj_gt.translation();
+        let mut best_distance = f32::MAX;
+        let mut best_cam_rotation = Quat::IDENTITY;
+        let mut best_viewport_height = 1080.0f32;
+        let mut best_in_view = false;
 
-        for (camera, cam_gt, cam_cell) in cameras.iter() {
-            let dx = (obj_cell.x as f64 - cam_cell.x as f64) as f32 * edge;
-            let dy = (obj_cell.y as f64 - cam_cell.y as f64) as f32 * edge;
-            let dz = (obj_cell.z as f64 - cam_cell.z as f64) as f32 * edge;
-            let obj_local = obj_gt.translation();
-            let obj_world = obj_local + Vec3::new(dx, dy, dz);
-            let cam_pos = cam_gt.translation();
-            let distance = (obj_world - cam_pos).length();
+        for (camera, cam_gt) in cameras.iter() {
+            let viewport_size = camera.logical_viewport_size();
+            let viewport_h = viewport_size.map(|s| s.y).unwrap_or(0.0);
+            if viewport_h < 1.0 {
+                continue;
+            }
 
-            if distance < closest_distance {
-                closest_distance = distance;
-                closest_cam_rotation = cam_gt.to_scale_rotation_translation().1;
-                closest_viewport_height = camera
-                    .logical_viewport_size()
-                    .map(|s| s.y)
-                    .unwrap_or(1080.0);
+            let distance = (obj_pos - cam_gt.translation()).length();
+
+            let in_view = camera
+                .world_to_viewport(cam_gt, obj_pos)
+                .is_ok_and(|screen_pos| {
+                    if let Some(vp) = viewport_size {
+                        let inset = vp.y * 0.01;
+                        screen_pos.x >= inset
+                            && screen_pos.x <= vp.x - inset
+                            && screen_pos.y >= inset
+                            && screen_pos.y <= vp.y - inset
+                    } else {
+                        true
+                    }
+                });
+
+            if distance < best_distance {
+                best_distance = distance;
+                best_cam_rotation = cam_gt.to_scale_rotation_translation().1;
+                best_viewport_height = viewport_h;
+                best_in_view = in_view;
             }
         }
 
@@ -1361,26 +1371,28 @@ pub fn update_object_3d_billboard_system(
         let fade_start = swap - fade_half;
         let fade_end = swap + fade_half;
 
-        let billboard_alpha = if closest_distance <= fade_start {
+        let distance_alpha = if best_distance <= fade_start {
             0.0f32
-        } else if closest_distance >= fade_end {
+        } else if best_distance >= fade_end {
             1.0f32
         } else {
-            (closest_distance - fade_start) / (fade_end - fade_start)
+            (best_distance - fade_start) / (fade_end - fade_start)
         };
+
+        let billboard_alpha = if best_in_view { distance_alpha } else { 0.0 };
 
         let parent_rotation = obj_gt.to_scale_rotation_translation().1;
 
         if let Ok((mut bb_transform, _bb_vis)) =
             transforms_and_vis.get_mut(icon_state.billboard_entity)
         {
-            bb_transform.rotation = parent_rotation.inverse() * closest_cam_rotation;
+            bb_transform.rotation = parent_rotation.inverse() * best_cam_rotation;
 
             if billboard_alpha > 0.0 {
                 let fov = std::f32::consts::FRAC_PI_4;
                 let world_size =
-                    closest_distance * icon_state.screen_size_px * 2.0 * (fov / 2.0).tan()
-                        / closest_viewport_height;
+                    best_distance * icon_state.screen_size_px * 2.0 * (fov / 2.0).tan()
+                        / best_viewport_height;
                 bb_transform.scale = Vec3::splat(world_size);
             } else {
                 bb_transform.scale = Vec3::ZERO;
@@ -1393,8 +1405,7 @@ pub fn update_object_3d_billboard_system(
             mat.base_color = c;
         }
 
-        let mesh_alpha = 1.0 - billboard_alpha;
-        let hide_mesh = mesh_alpha < 0.01;
+        let hide_mesh = distance_alpha > 0.99;
 
         if let Ok(children) = children_query.get(parent_entity) {
             for child in children.iter() {
