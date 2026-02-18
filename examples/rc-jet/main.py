@@ -140,10 +140,12 @@ def setup_world(config: BDXConfig) -> tuple[el.World, el.EntityId, el.EntityId]:
 
         object_3d bdx.world_pos {
             glb path="f22.glb" scale=0.01 translate="(0.0, 0.0, 0.0)" rotate="(0.0, 0.0, 0.0)"
+            icon builtin="flight_takeoff" color="#F44336"
         }
         
         object_3d target.world_pos {
             glb path="edu-450-v2-drone.glb"
+            icon builtin="adjust" color="#FF9800"
         }
         
         vector_arrow "(1, 0, 0)" origin="bdx.world_pos" scale=1.0 name="Forward (X)" show_name=#true body_frame=#true {
