@@ -693,6 +693,7 @@ pub fn on_scene_ready(
 }
 
 /// System that updates 3D object entities based on their EQL expressions
+#[allow(clippy::type_complexity)]
 pub fn update_object_3d_system(
     mut commands: Commands,
     mut objects_query: Query<(
@@ -1330,10 +1331,7 @@ pub fn spawn_mesh(
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 pub fn update_object_3d_billboard_system(
     mut commands: Commands,
-    mut objects: Query<
-        (Entity, &mut Object3DIconState, &GlobalTransform),
-        With<WorldPosReceived>,
-    >,
+    mut objects: Query<(Entity, &mut Object3DIconState, &GlobalTransform), With<WorldPosReceived>>,
     cameras: Query<
         (
             Entity,
