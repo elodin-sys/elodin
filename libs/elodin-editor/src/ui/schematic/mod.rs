@@ -46,6 +46,7 @@ pub struct SchematicParam<'w, 's> {
     pub graph_states: Query<'w, 's, &'static plot::GraphState>,
     pub query_plots: Query<'w, 's, &'static query_plot::QueryPlotData>,
     pub viewports: Query<'w, 's, &'static inspector::viewport::Viewport>,
+    pub projections: Query<'w, 's, &'static Projection>,
     pub viewport_configs: Query<'w, 's, &'static tiles::ViewportConfig>,
     pub camera_grids: Query<'w, 's, &'static GridHandle>,
     pub grid_visibility: Query<'w, 's, &'static Visibility>,
@@ -135,6 +136,19 @@ impl SchematicParam<'_, '_> {
                     Pane::Viewport(viewport) => {
                         let cam_entity = viewport.camera?;
                         let viewport_data = self.viewports.get(cam_entity).ok()?;
+                        let (fov, near, far) = self
+                            .projections
+                            .get(cam_entity)
+                            .ok()
+                            .and_then(|projection| match projection {
+                                Projection::Perspective(perspective) => Some((
+                                    perspective.fov.to_degrees(),
+                                    Some(perspective.near),
+                                    Some(perspective.far),
+                                )),
+                                _ => None,
+                            })
+                            .unwrap_or((45.0, None, None));
                         let mut show_grid = false;
                         if let Ok(grid_handle) = self.camera_grids.get(cam_entity)
                             && let Ok(visibility) = self.grid_visibility.get(grid_handle.grid)
@@ -168,7 +182,9 @@ impl SchematicParam<'_, '_> {
                             .collect();
 
                         Some(Panel::Viewport(Viewport {
-                            fov: 45.0,
+                            fov,
+                            near,
+                            far,
                             active: false,
                             show_grid,
                             show_arrows,

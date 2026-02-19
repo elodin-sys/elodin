@@ -5,6 +5,7 @@ Viewport camera frustum overlay rendering.
 ## What it does
 - Watches `MainCamera` viewports with `show_frustum=#true`.
 - Builds line-mesh frustums directly from each camera projection (`near`, `far`, `fov`, `aspect`).
+- If viewport `near`/`far` are set in KDL, frustum rendering follows those values automatically.
 - Parents frustum visuals to the source camera, so motion/rotation stay exact.
 - Renders those frustums on viewport render layers (works across viewports).
 - In practice, frustums are easiest to inspect from another viewport.

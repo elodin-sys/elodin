@@ -1277,6 +1277,26 @@ impl ViewportPane {
             })
             .unwrap_or_default();
 
+        let perspective_defaults = PerspectiveProjection::default();
+        let mut perspective = PerspectiveProjection {
+            fov: viewport.fov.to_radians(),
+            ..perspective_defaults
+        };
+        if let Some(near) = viewport.near {
+            perspective.near = near;
+        }
+        if let Some(far) = viewport.far {
+            perspective.far = far;
+        }
+        if !(perspective.near > 0.0 && perspective.far > perspective.near) {
+            warn!(
+                "Invalid viewport near/far (near={}, far={}), restoring defaults",
+                perspective.near, perspective.far
+            );
+            perspective.near = PerspectiveProjection::default().near;
+            perspective.far = PerspectiveProjection::default().far;
+        }
+
         let mut camera = commands.spawn((
             Transform::default(),
             Camera3d::default(),
@@ -1284,10 +1304,7 @@ impl ViewportPane {
                 order: 1,
                 ..Default::default()
             },
-            Projection::Perspective(PerspectiveProjection {
-                fov: viewport.fov.to_radians(),
-                ..Default::default()
-            }),
+            Projection::Perspective(perspective),
             Tonemapping::TonyMcMapface,
             Exposure::from_physical_camera(PhysicalCameraParameters {
                 aperture_f_stops: 2.8,

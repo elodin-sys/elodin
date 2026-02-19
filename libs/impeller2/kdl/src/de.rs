@@ -266,6 +266,48 @@ fn parse_split(
 
 fn parse_viewport(node: &KdlNode, kdl_src: &str) -> Result<Panel, KdlSchematicError> {
     let fov = node.get("fov").and_then(|v| v.as_float()).unwrap_or(45.0) as f32;
+    let near = node
+        .get("near")
+        .and_then(|v| v.as_float().or_else(|| v.as_integer().map(|i| i as f64)))
+        .map(|v| v as f32);
+    let far = node
+        .get("far")
+        .and_then(|v| v.as_float().or_else(|| v.as_integer().map(|i| i as f64)))
+        .map(|v| v as f32);
+
+    if let Some(near) = near
+        && near <= 0.0
+    {
+        return Err(KdlSchematicError::InvalidValue {
+            property: "near".to_string(),
+            node: "viewport".to_string(),
+            expected: "near must be > 0".to_string(),
+            src: kdl_src.to_string(),
+            span: node.span(),
+        });
+    }
+    if let Some(far) = far
+        && far <= 0.0
+    {
+        return Err(KdlSchematicError::InvalidValue {
+            property: "far".to_string(),
+            node: "viewport".to_string(),
+            expected: "far must be > 0".to_string(),
+            src: kdl_src.to_string(),
+            span: node.span(),
+        });
+    }
+    if let (Some(near), Some(far)) = (near, far)
+        && far <= near
+    {
+        return Err(KdlSchematicError::InvalidValue {
+            property: "far".to_string(),
+            node: "viewport".to_string(),
+            expected: "far must be > near".to_string(),
+            src: kdl_src.to_string(),
+            span: node.span(),
+        });
+    }
 
     let active = node
         .get("active")
@@ -345,6 +387,8 @@ fn parse_viewport(node: &KdlNode, kdl_src: &str) -> Result<Panel, KdlSchematicEr
 
     Ok(Panel::Viewport(Viewport {
         fov,
+        near,
+        far,
         active,
         show_grid,
         show_arrows,
@@ -1669,6 +1713,33 @@ mod tests {
             panic!("Expected viewport panel");
         };
         assert!(viewport.show_frustum);
+    }
+
+    #[test]
+    fn test_parse_viewport_near_far() {
+        let kdl = r#"viewport near=0.05 far=500.0"#;
+        let schematic = parse_schematic(kdl).unwrap();
+
+        assert_eq!(schematic.elems.len(), 1);
+        let SchematicElem::Panel(Panel::Viewport(viewport)) = &schematic.elems[0] else {
+            panic!("Expected viewport panel");
+        };
+        assert_eq!(viewport.near, Some(0.05));
+        assert_eq!(viewport.far, Some(500.0));
+    }
+
+    #[test]
+    fn test_parse_viewport_rejects_invalid_near_far_pair() {
+        let kdl = r#"viewport near=1.0 far=0.5"#;
+        let err = parse_schematic(kdl).unwrap_err();
+
+        match err {
+            KdlSchematicError::InvalidValue { property, node, .. } => {
+                assert_eq!(property, "far");
+                assert_eq!(node, "viewport");
+            }
+            other => panic!("Expected invalid value error, got {other:?}"),
+        }
     }
 
     #[test]

@@ -149,6 +149,14 @@ fn serialize_viewport<T>(viewport: &Viewport<T>) -> KdlNode {
         push_rounded_float_prop(&mut node, "fov", viewport.fov as f64);
     }
 
+    if let Some(near) = viewport.near {
+        push_rounded_float_prop(&mut node, "near", near as f64);
+    }
+
+    if let Some(far) = viewport.far {
+        push_rounded_float_prop(&mut node, "far", far as f64);
+    }
+
     if let Some(ref pos) = viewport.pos {
         node.entries_mut()
             .push(KdlEntry::new_prop("pos", pos.clone()));
@@ -942,6 +950,8 @@ mod tests {
             .push(SchematicElem::Panel(Panel::Viewport(Viewport {
                 name: Some("main".to_string()),
                 fov: 60.0,
+                near: None,
+                far: None,
                 active: true,
                 show_grid: true,
                 show_arrows: true,
@@ -978,6 +988,8 @@ mod tests {
             .push(SchematicElem::Panel(Panel::Viewport(Viewport {
                 name: Some("main".to_string()),
                 fov: 60.0,
+                near: Some(0.05),
+                far: Some(500.0),
                 active: true,
                 show_grid: true,
                 show_arrows: false,
@@ -1000,6 +1012,8 @@ mod tests {
         let properties = [
             "name=",
             "fov=",
+            "near=",
+            "far=",
             "pos=",
             "look_at=",
             "hdr=",
@@ -1020,7 +1034,7 @@ mod tests {
         for window in indices.windows(2) {
             assert!(
                 window[0] < window[1],
-                "expected viewport properties in order name → fov → pos → look_at → hdr → show_grid → show_arrows → show_frustum → show_view_cube → active: `{viewport_line}`"
+                "expected viewport properties in order name → fov → near → far → pos → look_at → hdr → show_grid → show_arrows → show_frustum → show_view_cube → active: `{viewport_line}`"
             );
         }
     }
@@ -1255,6 +1269,8 @@ graph "value" {
             Panel::Viewport(Viewport {
                 name: Some("camera1".to_string()),
                 fov: 45.0,
+                near: None,
+                far: None,
                 active: false,
                 show_grid: false,
                 show_arrows: true,

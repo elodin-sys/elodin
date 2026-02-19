@@ -214,6 +214,10 @@ impl<T> Split<T> {
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
 pub struct Viewport<T = ()> {
     pub fov: f32,
+    #[serde(default)]
+    pub near: Option<f32>,
+    #[serde(default)]
+    pub far: Option<f32>,
     pub active: bool,
     pub show_grid: bool,
     pub show_arrows: bool,
@@ -236,6 +240,8 @@ impl<T> Viewport<T> {
     pub fn map_aux<U>(&self, f: impl Fn(&T) -> U) -> Viewport<U> {
         Viewport {
             fov: self.fov,
+            near: self.near,
+            far: self.far,
             active: self.active,
             show_grid: self.show_grid,
             show_arrows: self.show_arrows,
@@ -256,6 +262,8 @@ impl Default for Viewport {
     fn default() -> Self {
         Self {
             fov: 45.0,
+            near: None,
+            far: None,
             active: false,
             show_grid: false,
             show_arrows: true,
