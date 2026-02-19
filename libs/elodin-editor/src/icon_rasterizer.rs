@@ -83,9 +83,10 @@ pub fn rasterize_material_icon(codepoint: char, px_size: u32) -> Image {
 
     let h_advance = scaled_font.h_advance(glyph_id);
     let ascent = scaled_font.ascent();
+    let descent = scaled_font.descent();
 
     let baseline_x = (canvas_size as f32 - h_advance) / 2.0;
-    let baseline_y = (canvas_size as f32 + ascent) / 2.0;
+    let baseline_y = (canvas_size as f32 + ascent + descent) / 2.0;
 
     let glyph = glyph_id.with_scale_and_position(scale, point(baseline_x, baseline_y));
     let Some(outlined) = font.outline_glyph(glyph) else {
