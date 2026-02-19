@@ -647,7 +647,10 @@ impl DB {
                 if let Some((timestamp, _)) = component.time_series.latest() {
                     last_updated = timestamp.0.max(last_updated);
                 };
-                start_timestamp = start_timestamp.min(component.time_series.start_timestamp().0);
+                let comp_start = component.time_series.start_timestamp().0;
+                if comp_start > 0 {
+                    start_timestamp = start_timestamp.min(comp_start);
+                }
             } else {
                 trace!(
                     component.id = ?component_id.0,
@@ -692,12 +695,15 @@ impl DB {
         };
         let earliest_timestamp = db_state
             .time_start_timestamp_micros()
+            .filter(|&ts| ts > 0)
             .map(Timestamp)
             .unwrap_or_else(|| {
-                if start_timestamp == i64::MAX {
-                    now
-                } else {
+                if start_timestamp != i64::MAX {
                     Timestamp(start_timestamp)
+                } else if last_updated != i64::MIN {
+                    Timestamp(last_updated)
+                } else {
+                    now
                 }
             });
         // Validate: ensure earliest_timestamp is not beyond the actual data range.
@@ -905,7 +911,9 @@ impl DB {
             })?;
         }
         self.last_updated.update_max(timestamp);
-        self.earliest_timestamp.update_min(timestamp);
+        if timestamp.0 > 0 {
+            self.earliest_timestamp.update_min(timestamp);
+        }
         Ok(())
     }
 
@@ -1046,7 +1054,8 @@ impl State {
         if is_timestamp_source {
             component_metadata.set_timestamp_source(true);
         }
-        let component = Component::create(db_path, component_id, name, schema, Timestamp::now())?;
+        let component =
+            Component::create(db_path, component_id, name, schema, Timestamp(i64::MAX))?;
         // Always update metadata if this is a timestamp source, or if metadata doesn't exist yet
         // This ensures the timestamp source flag is preserved even if metadata was set earlier
         if is_timestamp_source || !self.component_metadata.contains_key(&component_id) {
@@ -1457,7 +1466,9 @@ impl Decomponentize for DBSink<'_> {
             self.sunk_new_time_series = true;
         }
         self.last_updated.update_max(timestamp);
-        self.earliest_timestamp.update_min(timestamp);
+        if timestamp.0 > 0 {
+            self.earliest_timestamp.update_min(timestamp);
+        }
         Ok(())
     }
 }
