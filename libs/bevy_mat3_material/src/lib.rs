@@ -8,11 +8,11 @@ use bevy::{
 
 /// GPU-side parameters for the lower-triangular transform.
 ///
-/// - `lower_tri`: affine transform in a Mat4. Typically you'd put your lower-triangular 3x3 in the top-left.
+/// - `lower_tri`: linear transform in a Mat3 (the lower-triangular 3x3).
 /// - `normal_matrix`: inverse-transpose of the top-left 3x3, for correct normal transformation under shear.
 #[derive(ShaderType, Copy, Clone, Debug)]
 pub struct LowerTriParams {
-    pub lower_tri: Mat4,
+    pub lower_tri: Mat3,
     pub normal_matrix: Mat3,
     // WebGL2 (and some std140-like layouts) can be picky; keeping this struct aligned is helpful.
     // Mat3 is 48 bytes in WGSL layout rules, so padding is often required if you extend further.
@@ -21,7 +21,7 @@ pub struct LowerTriParams {
 impl Default for LowerTriParams {
     fn default() -> Self {
         Self {
-            lower_tri: Mat4::IDENTITY,
+            lower_tri: Mat3::IDENTITY,
             normal_matrix: Mat3::IDENTITY,
         }
     }
@@ -49,7 +49,7 @@ pub type LowerTriMaterial = bevy::pbr::ExtendedMaterial<StandardMaterial, LowerT
 ///
 /// This computes the correct normal matrix (`inverse().transpose()`).
 pub fn params_from_linear(linear: Mat3) -> LowerTriParams {
-    let lower_tri = Mat4::from_mat3(linear);
+    let lower_tri = linear;
     let normal_matrix = linear.inverse().transpose();
     LowerTriParams {
         lower_tri,
