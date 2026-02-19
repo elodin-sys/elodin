@@ -15,6 +15,21 @@ order = 1
 
 ## v0.16
 
+### v0.16.1
+- **(feat)** Upgrade 3D axes widget to cube with UI affordances like reset-view button. (#456)
+- **(feat)** Add real-time, performant editor playback. (#480)
+- **(feat)** Add `elodin editor --kdl <file.kdl>` CLI option. (#478)
+- **(feat)** Add `elodin-db --replay`. (#471)
+- **(feat)** Add `elodin-db --follow`. (#489)
+- **(feat)** Display replay speed. (#486)
+- **(feat)** Hold `Alt/Option` to reveal zoom-in button. (#492)
+- **(feat)** Animate joints on GLB files via EQL. (#461)
+- **(feat)** Add `Timestamp_NS` to `db.hpp`. (#494)
+- **(feat)** Improve OBS video stream and latency. (#482)
+- **(fix)** Fix RC Jet flicker. (#487)
+- **(fix)** Set editor default playback speed to `1x`. (#485)
+- **(fix)** Make `elodin-db merge time-align` use milliseconds. (#470)
+
 ### v0.16.0
 - **(feat)** Add elodin-db subcommands: `info`, `merge`, `prune`, `time-align`, `truncate`, `drop`. (#410, #437)
 - **(feat)** Add `@elodin.map_seq` to preserve `cond()` behavior. (#444)
