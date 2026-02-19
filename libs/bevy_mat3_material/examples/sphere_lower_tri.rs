@@ -62,9 +62,14 @@ fn setup(
     let c = 0.25;
     let d = sqrt(a*a + b*b);
     let e = sqrt(2.0);
+    // let linear = Mat3::from_cols_array(&[
+    //     d/e, 0.0, 0.0,
+    //     (a*a - b*b)/(e * d),   a*b*e/d, 0.0,
+    //     0.0,   0.0,   c,
+    // ]);
     let linear = Mat3::from_cols_array(&[
-        d/e, 0.0, 0.0,
-        (a*a - b*b)/(e * d),   a*b*e/d, 0.0,
+        a, 0.0, 0.0,
+        0.0,   b, 0.0,
         0.0,   0.0,   c,
     ]);
 
