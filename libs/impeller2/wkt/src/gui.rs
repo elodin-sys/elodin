@@ -736,6 +736,8 @@ pub struct VisRange {
     pub min: f32,
     #[serde(default = "vis_range_default_max")]
     pub max: f32,
+    #[serde(default)]
+    pub fade_distance: f32,
 }
 
 fn vis_range_default_max() -> f32 {
@@ -747,6 +749,7 @@ impl Default for VisRange {
         Self {
             min: 0.0,
             max: f32::MAX,
+            fade_distance: 0.0,
         }
     }
 }

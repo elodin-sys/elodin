@@ -71,6 +71,7 @@ pub struct Object3DIconState {
     pub billboards: HashMap<Entity, Entity>,
     pub icon_min_distance: f32,
     pub icon_max_distance: f32,
+    pub icon_fade_distance: f32,
     pub mesh_min_distance: f32,
     pub mesh_max_distance: f32,
     pub screen_size_px: f32,
@@ -1176,28 +1177,20 @@ pub fn spawn_billboard_icon(
 
     let quad = mesh_assets.add(Mesh::from(bevy::math::primitives::Rectangle::new(1.0, 1.0)));
 
-    let default_swap = 500.0f32;
+    let icon_vr = icon.visibility_range.as_ref();
+    let icon_min = icon_vr.map(|vr| vr.min).unwrap_or(0.0);
+    let icon_max = icon_vr.map(|vr| vr.max).unwrap_or(f32::MAX);
+    let icon_fade = icon_vr.map(|vr| vr.fade_distance).unwrap_or(0.0);
 
-    let (icon_min, icon_max) = if let Some(vr) = &icon.visibility_range {
-        (vr.min, vr.max)
-    } else if let Some(mvr) = mesh_visibility_range {
-        (mvr.max, f32::MAX)
-    } else {
-        (default_swap, f32::MAX)
-    };
-
-    let (mesh_min, mesh_max) = if let Some(mvr) = mesh_visibility_range {
-        (mvr.min, mvr.max)
-    } else if let Some(vr) = &icon.visibility_range {
-        (0.0, vr.min)
-    } else {
-        (0.0, default_swap)
-    };
+    let mesh_vr = mesh_visibility_range;
+    let mesh_min = mesh_vr.map(|vr| vr.min).unwrap_or(0.0);
+    let mesh_max = mesh_vr.map(|vr| vr.max).unwrap_or(f32::MAX);
 
     commands.entity(parent).insert(Object3DIconState {
         billboards: HashMap::new(),
         icon_min_distance: icon_min,
         icon_max_distance: icon_max,
+        icon_fade_distance: icon_fade,
         mesh_min_distance: mesh_min,
         mesh_max_distance: mesh_max,
         screen_size_px: icon.size,
@@ -1343,6 +1336,11 @@ pub fn update_object_3d_billboard_system(
         With<MainCamera>,
     >,
     mut billboard_transforms: Query<&mut Transform, (With<BillboardIcon>, Without<MainCamera>)>,
+    billboard_materials_query: Query<
+        &MeshMaterial3d<StandardMaterial>,
+        (With<BillboardIcon>, Without<MainCamera>),
+    >,
+    mut materials: ResMut<Assets<StandardMaterial>>,
     children_query: Query<&Children>,
     mesh_child_markers: Query<(), With<Object3DMeshChild>>,
     mesh3d_query: Query<(), With<Mesh3d>>,
@@ -1357,6 +1355,15 @@ pub fn update_object_3d_billboard_system(
         let mut mesh_layers = RenderLayers::none();
         let mut seen_cameras: HashSet<Entity> = HashSet::new();
 
+        let icon_min = icon_state.icon_min_distance;
+        let icon_max = icon_state.icon_max_distance;
+        let icon_fade = icon_state.icon_fade_distance;
+        let mesh_min = icon_state.mesh_min_distance;
+        let mesh_max = icon_state.mesh_max_distance;
+        let screen_px = icon_state.screen_size_px;
+        let bb_mesh_handle = icon_state.billboard_mesh.clone();
+        let bb_mat_source = icon_state.billboard_material.clone();
+
         for (cam_entity, camera, cam_gt, projection, viewport_config) in cameras.iter() {
             let viewport_h = camera.logical_viewport_size().map(|s| s.y).unwrap_or(0.0);
             if viewport_h < 1.0 {
@@ -1368,10 +1375,8 @@ pub fn update_object_3d_billboard_system(
 
             seen_cameras.insert(cam_entity);
             let distance = (obj_pos - cam_gt.translation()).length();
-            let shows_billboard = distance >= icon_state.icon_min_distance
-                && distance <= icon_state.icon_max_distance;
-            let shows_mesh = distance >= icon_state.mesh_min_distance
-                && distance <= icon_state.mesh_max_distance;
+            let shows_billboard = distance >= icon_min && distance <= icon_max;
+            let shows_mesh = distance >= mesh_min && distance <= mesh_max;
 
             if shows_mesh {
                 mesh_layers = mesh_layers.with(layer);
@@ -1383,16 +1388,21 @@ pub fn update_object_3d_billboard_system(
                     Projection::Perspective(persp) => persp.fov,
                     _ => std::f32::consts::FRAC_PI_4,
                 };
-                let world_size =
-                    distance * icon_state.screen_size_px * 2.0 * (fov / 2.0).tan() / viewport_h;
+                let world_size = distance * screen_px * 2.0 * (fov / 2.0).tan() / viewport_h;
 
-                let bb_mesh = icon_state.billboard_mesh.clone();
-                let bb_mat = icon_state.billboard_material.clone();
+                let mesh_clone = bb_mesh_handle.clone();
+                let mat_clone = bb_mat_source.clone();
+                let cloned_mat_data = materials.get(&mat_clone).cloned();
                 let bb_entity = icon_state.billboards.entry(cam_entity).or_insert_with(|| {
+                    let cloned_mat = if let Some(mat_data) = cloned_mat_data {
+                        materials.add(mat_data)
+                    } else {
+                        mat_clone
+                    };
                     commands
                         .spawn((
-                            Mesh3d(bb_mesh),
-                            MeshMaterial3d(bb_mat),
+                            Mesh3d(mesh_clone),
+                            MeshMaterial3d(cloned_mat),
                             Transform::IDENTITY,
                             GlobalTransform::IDENTITY,
                             Visibility::Inherited,
@@ -1409,6 +1419,30 @@ pub fn update_object_3d_billboard_system(
                 commands
                     .entity(*bb_entity)
                     .insert(RenderLayers::layer(layer));
+
+                let alpha = if icon_fade > 0.0 {
+                    let min_fade = if distance < icon_min + icon_fade {
+                        ((distance - icon_min) / icon_fade).clamp(0.0, 1.0)
+                    } else {
+                        1.0
+                    };
+                    let max_fade = if icon_max < f32::MAX && distance > icon_max - icon_fade {
+                        ((icon_max - distance) / icon_fade).clamp(0.0, 1.0)
+                    } else {
+                        1.0
+                    };
+                    min_fade.min(max_fade)
+                } else {
+                    1.0
+                };
+
+                if let Ok(mat_handle) = billboard_materials_query.get(*bb_entity)
+                    && let Some(mat) = materials.get_mut(mat_handle)
+                {
+                    let mut c = mat.base_color;
+                    c.set_alpha(alpha);
+                    mat.base_color = c;
+                }
 
                 if let Ok(mut bb_transform) = billboard_transforms.get_mut(*bb_entity) {
                     bb_transform.rotation = parent_rotation.inverse() * cam_rotation;

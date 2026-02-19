@@ -454,6 +454,9 @@ fn serialize_visibility_range_to_node(node: &mut KdlNode, vr: &impeller2_wkt::Vi
     if vr.max < f32::MAX {
         push_rounded_float_prop(&mut vr_node, "max", vr.max as f64);
     }
+    if vr.fade_distance > 0.0 {
+        push_rounded_float_prop(&mut vr_node, "fade_distance", vr.fade_distance as f64);
+    }
 
     if let Some(existing_children) = node.children_mut().as_mut() {
         existing_children.nodes_mut().push(vr_node);

@@ -716,8 +716,17 @@ fn parse_visibility_range_from_children(node: &KdlNode) -> Option<VisRange> {
         .and_then(|v| v.as_float().or_else(|| v.as_integer().map(|i| i as f64)))
         .map(|v| v as f32)
         .unwrap_or(f32::MAX);
+    let fade_distance = vr_node
+        .get("fade_distance")
+        .and_then(|v| v.as_float().or_else(|| v.as_integer().map(|i| i as f64)))
+        .map(|v| v as f32)
+        .unwrap_or(0.0);
 
-    Some(VisRange { min, max })
+    Some(VisRange {
+        min,
+        max,
+        fade_distance,
+    })
 }
 
 fn parse_object_3d_mesh(
