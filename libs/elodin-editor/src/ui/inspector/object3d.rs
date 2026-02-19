@@ -443,6 +443,7 @@ impl WidgetSystem for InspectorObject3D<'_, '_> {
 
                 commands.entity(entity).remove::<SceneRoot>();
 
+                let icon_swap = object_3d_state.data.icon.as_ref().map(|i| i.swap_distance);
                 if let Some(ellipse) = spawn_mesh(
                     &mut commands,
                     entity,
@@ -450,6 +451,7 @@ impl WidgetSystem for InspectorObject3D<'_, '_> {
                     &mut material_assets,
                     &mut mesh_assets,
                     &assets,
+                    icon_swap,
                 ) {
                     commands.entity(entity).insert(ellipse);
                 }
