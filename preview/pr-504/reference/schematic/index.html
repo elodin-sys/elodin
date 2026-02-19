@@ -548,8 +548,8 @@
 <p>Mesh nodes support an optional <code>emissivity=&lt;value&gt;</code> property (0.0–1.0) to make the material glow (e.g., <code>sphere radius=0.2 emissivity=0.25 { color yellow }</code>).</p>
 <p>Mesh nodes and <code>icon</code> nodes both support an optional <code>visibility_range</code> child node that controls at what camera distances the element is rendered:</p>
 <ul>
-<li><code>visibility_range</code>: child node with <code>min</code> (default 0), <code>max</code> (default infinity), and <code>fade_distance</code> (default 0) properties. The element is visible when the camera distance is between <code>min</code> and <code>max</code>. Both mesh and icon are visible at all distances by default; <code>visibility_range</code> is purely opt-in.</li>
-<li><code>fade_distance</code>: world-unit distance over which the element fades in at the <code>min</code> boundary and fades out at the <code>max</code> boundary. For example, <code>min=50 fade_distance=50</code> means the icon starts appearing at distance 50 (alpha=0) and reaches full opacity at distance 100.</li>
+<li><code>visibility_range</code>: child node with <code>min</code> (default 0) and <code>max</code> (default infinity) properties. The element is visible when the camera distance is between <code>min</code> and <code>max</code>. Both mesh and icon are visible at all distances by default; <code>visibility_range</code> is purely opt-in.</li>
+<li><code>fade_distance</code> (icon only, default 0): world-unit distance over which the icon fades in at the <code>min</code> boundary and fades out at the <code>max</code> boundary. For example, <code>min=50 fade_distance=50</code> means the icon starts appearing at distance 50 (alpha=0) and reaches full opacity at distance 100. Mesh nodes use hard visibility cutoffs at their <code>min</code>/<code>max</code> boundaries.</li>
 <li>Ranges can overlap (both mesh and icon visible simultaneously) or have gaps.</li>
 </ul>
 </li>
