@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 use bevy::pbr::MaterialPlugin;
-use bevy::mesh::{SphereKind, SphereMeshBuilder};
+use bevy::mesh::{SphereKind, SphereMeshBuilder, VertexAttributeValues};
 
 use bevy_lower_tri_material::{params_from_linear, LowerTriMaterial, LowerTriTransformExt};
 
@@ -49,7 +49,7 @@ fn setup(
 
     // --- Unit sphere mesh via SphereMeshBuilder (radius = 1.0) ---
     let sphere_mesh = SphereMeshBuilder::new(1.0, SphereKind::Uv { sectors: 64, stacks: 32 }).build();
-    let sphere = meshes.add(sphere_mesh);
+    let sphere = meshes.add(sphere_mesh.clone());
 
     // --- Lower-triangular 3x3 (example) ---
     // [ 1   0   0 ]
@@ -63,16 +63,23 @@ fn setup(
     let c = 0.25;
     let d = sqrt(a*a + b*b);
     let e = sqrt(2.0);
-    // let linear = Mat3::from_cols_array(&[
-    //     d/e, 0.0, 0.0,
-    //     (a*a - b*b)/(e * d),   a*b*e/d, 0.0,
-    //     0.0,   0.0,   c,
-    // ]);
     let linear = Mat3::from_cols_array(&[
-        a, 0.0, 0.0,
-        0.0,   b, 0.0,
+        d/e, 0.0, 0.0,
+        (a*a - b*b)/(e * d),   a*b*e/d, 0.0,
         0.0,   0.0,   c,
     ]);
+    // let linear = Mat3::from_cols_array(&[
+    //     a, 0.0, 0.0,
+    //     0.0,   b, 0.0,
+    //     0.0,   0.0,   c,
+    // ]);
+    let deform = Mat4::from_mat3(linear);
+
+    // New sphere with matrix baked into the mesh (for normals / CPU-deformed geometry).
+    let mut deformed_sphere_mesh =
+        SphereMeshBuilder::new(1.0, SphereKind::Uv { sectors: 64, stacks: 32 }).build();
+    apply_matrix_to_mesh(&mut deformed_sphere_mesh, deform);
+    let deformed_sphere = meshes.add(deformed_sphere_mesh);
 
     let params = params_from_linear(linear);
 
@@ -94,10 +101,18 @@ fn setup(
         ..default()
     });
 
+    // Deformed by material (shader) — same unit sphere, deformed at render time.
     commands.spawn((
         Mesh3d(sphere.clone()),
         MeshMaterial3d(material),
         Transform::from_xyz(-1.2, 0.0, 0.0),
+    ));
+
+    // Deformed by apply_matrix_to_mesh — normals reflect actual mesh geometry.
+    commands.spawn((
+        Mesh3d(deformed_sphere),
+        MeshMaterial3d(regular_material.clone()),
+        Transform::from_xyz(4.2, 0.0, 0.0),
     ));
 
     // Control sphere: no deformation (plain StandardMaterial).
@@ -110,11 +125,11 @@ fn setup(
 
 fn draw_normals(
     mut gizmos: Gizmos,
-    query: Query<(&Handle<Mesh>, &GlobalTransform)>,
+    query: Query<(&Mesh3d, &GlobalTransform)>,
     meshes: Res<Assets<Mesh>>,
 ) {
-    for (mesh_handle, transform) in &query {
-        let mesh = if let Some(mesh) = meshes.get(mesh_handle) {
+    for (mesh_3d, transform) in &query {
+        let mesh = if let Some(mesh) = meshes.get(&mesh_3d.0) {
             mesh
         } else {
             continue;
@@ -137,8 +152,38 @@ fn draw_normals(
             gizmos.line(
                 world_pos,
                 world_pos + world_normal * 0.2,
-                Color::GREEN,
+                Color::srgb(0.0, 1.0, 0.0),
             );
         }
     }
+}
+
+fn apply_matrix_to_mesh(mesh: &mut Mesh, m: Mat4) {
+    // Positions
+    if let Some(VertexAttributeValues::Float32x3(positions)) =
+        mesh.attribute_mut(Mesh::ATTRIBUTE_POSITION)
+    {
+        for p in positions.iter_mut() {
+            let v = Vec3::from(*p);
+            *p = m.transform_point3(v).to_array();
+        }
+    } else {
+        panic!("mesh has no POSITION attribute");
+    }
+
+    // Normals (important if your matrix is not pure rotation/scale)
+    // For a general linear transform, normals should use inverse-transpose of the 3x3 part.
+    let linear = Mat3::from_mat4(m);
+    let normal_xform = linear.inverse().transpose();
+
+    if let Some(VertexAttributeValues::Float32x3(normals)) =
+        mesh.attribute_mut(Mesh::ATTRIBUTE_NORMAL)
+    {
+        for n in normals.iter_mut() {
+            let v = Vec3::from(*n);
+            *n = normal_xform.mul_vec3(v).normalize().to_array();
+        }
+    }
+
+    // If you use normal maps/tangents, you may need to recompute tangents after this.
 }
