@@ -6,6 +6,7 @@ use std::collections::HashMap;
 #[derive(Resource, Default)]
 pub struct IconTextureCache {
     cache: HashMap<(String, u32), Handle<Image>>,
+    codepoint_cache: HashMap<(char, u32), Handle<Image>>,
 }
 
 impl IconTextureCache {
@@ -41,8 +42,14 @@ impl IconTextureCache {
         px_size: u32,
         images: &mut Assets<Image>,
     ) -> Handle<Image> {
+        let key = (codepoint, px_size);
+        if let Some(handle) = self.codepoint_cache.get(&key) {
+            return handle.clone();
+        }
         let image = rasterize_material_icon(codepoint, px_size);
-        images.add(image)
+        let handle = images.add(image);
+        self.codepoint_cache.insert(key, handle.clone());
+        handle
     }
 }
 

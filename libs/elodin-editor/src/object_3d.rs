@@ -86,6 +86,11 @@ pub struct BillboardIcon;
 #[derive(Component)]
 pub struct Object3DMeshChild;
 
+/// Marker inserted once `WorldPos` has been set from telemetry data.
+/// Distinguishes "genuinely at the origin" from "not yet received any data."
+#[derive(Component)]
+pub struct WorldPosReceived;
+
 type ExprFn = dyn for<'a, 'b> Fn(
         &'a EntityMap,
         &'a Query<'b, 'b, &'static ComponentValue>,
@@ -689,23 +694,27 @@ pub fn on_scene_ready(
 
 /// System that updates 3D object entities based on their EQL expressions
 pub fn update_object_3d_system(
+    mut commands: Commands,
     mut objects_query: Query<(
         Entity,
         &mut Object3DState,
         &mut impeller2_wkt::WorldPos,
         Option<&mut EllipsoidVisual>,
+        Has<WorldPosReceived>,
     )>,
     mut transforms: Query<&mut Transform>,
     entity_map: Res<EntityMap>,
     component_value_maps: Query<&'static ComponentValue>,
 ) {
-    // return;
-    for (_entity, mut object_3d, mut pos, ellipse) in objects_query.iter_mut() {
+    for (entity, mut object_3d, mut pos, ellipse, has_received) in objects_query.iter_mut() {
         if let Some(compiled_expr) = &object_3d.compiled_expr
             && let Ok(component_value) = compiled_expr.execute(&entity_map, &component_value_maps)
             && let Some(world_pos) = component_value.as_world_pos()
         {
             *pos = world_pos;
+            if !has_received {
+                commands.entity(entity).insert(WorldPosReceived);
+            }
         }
 
         let Some(mut ellipse) = ellipse else {
@@ -1321,12 +1330,10 @@ pub fn spawn_mesh(
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
 pub fn update_object_3d_billboard_system(
     mut commands: Commands,
-    mut objects: Query<(
-        Entity,
-        &mut Object3DIconState,
-        &GlobalTransform,
-        &impeller2_wkt::WorldPos,
-    )>,
+    mut objects: Query<
+        (Entity, &mut Object3DIconState, &GlobalTransform),
+        With<WorldPosReceived>,
+    >,
     cameras: Query<
         (
             Entity,
@@ -1347,11 +1354,7 @@ pub fn update_object_3d_billboard_system(
     mesh_child_markers: Query<(), With<Object3DMeshChild>>,
     mesh3d_query: Query<(), With<Mesh3d>>,
 ) {
-    for (parent_entity, mut icon_state, obj_gt, world_pos) in objects.iter_mut() {
-        if *world_pos == impeller2_wkt::WorldPos::default() {
-            continue;
-        }
-
+    for (parent_entity, mut icon_state, obj_gt) in objects.iter_mut() {
         let obj_pos = obj_gt.translation();
         let parent_rotation = obj_gt.to_scale_rotation_translation().1;
         let mut mesh_layers = RenderLayers::none();
