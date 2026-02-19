@@ -31,6 +31,12 @@ fn setup(
     mut materials: ResMut<Assets<LowerTriMaterial>>,
     mut standard_materials: ResMut<Assets<StandardMaterial>>,
 ) {
+
+    // let sectors = 64;
+    // let stacks = 32;
+
+    let sectors = 20;
+    let stacks = 10;
     // Camera
     commands.spawn((
         Camera3d::default(),
@@ -48,7 +54,7 @@ fn setup(
     ));
 
     // --- Unit sphere mesh via SphereMeshBuilder (radius = 1.0) ---
-    let sphere_mesh = SphereMeshBuilder::new(1.0, SphereKind::Uv { sectors: 64, stacks: 32 }).build();
+    let sphere_mesh = SphereMeshBuilder::new(1.0, SphereKind::Uv { sectors, stacks }).build();
     let sphere = meshes.add(sphere_mesh.clone());
 
     // --- Lower-triangular 3x3 (example) ---
@@ -74,10 +80,9 @@ fn setup(
     //     0.0,   0.0,   c,
     // ]);
     let deform = Mat4::from_mat3(linear);
-
     // New sphere with matrix baked into the mesh (for normals / CPU-deformed geometry).
     let mut deformed_sphere_mesh =
-        SphereMeshBuilder::new(1.0, SphereKind::Uv { sectors: 64, stacks: 32 }).build();
+        SphereMeshBuilder::new(1.0, SphereKind::Uv { sectors, stacks }).build();
     apply_matrix_to_mesh(&mut deformed_sphere_mesh, deform);
     let deformed_sphere = meshes.add(deformed_sphere_mesh);
 
@@ -101,18 +106,27 @@ fn setup(
         ..default()
     });
 
+    let deformed_material = standard_materials.add(StandardMaterial {
+        base_color: Color::srgb(0.4, 0.9, 0.2),
+        perceptual_roughness: 0.35,
+        metallic: 0.05,
+        ..default()
+    });
+
     // Deformed by material (shader) — same unit sphere, deformed at render time.
     commands.spawn((
         Mesh3d(sphere.clone()),
         MeshMaterial3d(material),
         Transform::from_xyz(-1.2, 0.0, 0.0),
+        bevy::light::NotShadowReceiver,
     ));
 
     // Deformed by apply_matrix_to_mesh — normals reflect actual mesh geometry.
     commands.spawn((
         Mesh3d(deformed_sphere),
-        MeshMaterial3d(regular_material.clone()),
+        MeshMaterial3d(deformed_material),
         Transform::from_xyz(4.2, 0.0, 0.0),
+        bevy::light::NotShadowReceiver,
     ));
 
     // Control sphere: no deformation (plain StandardMaterial).
@@ -120,6 +134,7 @@ fn setup(
         Mesh3d(sphere),
         MeshMaterial3d(regular_material),
         Transform::from_xyz(1.2, 0.0, 0.0),
+        bevy::light::NotShadowReceiver,
     ));
 }
 
@@ -182,6 +197,7 @@ fn apply_matrix_to_mesh(mesh: &mut Mesh, m: Mat4) {
         for n in normals.iter_mut() {
             let v = Vec3::from(*n);
             *n = normal_xform.mul_vec3(v).normalize().to_array();
+            // *n = normal_xform.mul_vec3(v).to_array();
         }
     }
 

@@ -31,7 +31,8 @@ fn vertex(in: Vertex) -> VertexOutput {
     out.position = position_world_to_clip(world_pos.xyz);
 #ifdef VERTEX_NORMALS
     // Correct normal transformation for shear: n' = inverse-transpose(M3) * n
-    let local_normal = normalize(params.normal_matrix * in.normal);
+    // let local_normal = normalize(params.normal_matrix * in.normal);
+    let local_normal = params.normal_matrix * in.normal;
     out.world_normal = mesh_functions::mesh_normal_local_to_world(local_normal, in.instance_index);
 #else
     out.world_normal = vec3<f32>(0.0);
