@@ -217,6 +217,8 @@ pub struct Viewport<T = ()> {
     pub active: bool,
     pub show_grid: bool,
     pub show_arrows: bool,
+    #[serde(default)]
+    pub show_frustum: bool,
     #[serde(default = "default_true")]
     pub show_view_cube: bool,
     pub hdr: bool,
@@ -237,6 +239,7 @@ impl<T> Viewport<T> {
             active: self.active,
             show_grid: self.show_grid,
             show_arrows: self.show_arrows,
+            show_frustum: self.show_frustum,
             show_view_cube: self.show_view_cube,
             hdr: self.hdr,
             name: self.name.clone(),
@@ -256,6 +259,7 @@ impl Default for Viewport {
             active: false,
             show_grid: false,
             show_arrows: true,
+            show_frustum: false,
             show_view_cube: true,
             hdr: false,
             name: None,

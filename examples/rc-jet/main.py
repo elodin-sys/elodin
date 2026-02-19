@@ -97,7 +97,7 @@ def setup_world(config: BDXConfig) -> tuple[el.World, el.EntityId, el.EntityId]:
                         graph "bdx.alpha" name="Angle of Attack (rad)"
                         graph "bdx.thrust" name="Thrust (N)"
                         viewport name=TGTViewport pos="target.world_pos.translate_world(1,1,0.2)" look_at="bdx.world_pos" show_grid=#true
-                        viewport name=FPVViewport pos="bdx.world_pos.rotate_z(-90).translate_y(-2.0)" show_grid=#true
+                        viewport name=FPVViewport pos="bdx.world_pos.rotate_z(-90).translate_y(-2.0)" show_grid=#true show_frustum=#true
                     }
                 }
             }

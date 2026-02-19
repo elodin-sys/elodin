@@ -99,6 +99,7 @@ fn setup_primary_window_state(
 #[derive(Component)]
 pub struct ViewportConfig {
     pub show_arrows: bool,
+    pub show_frustum: bool,
     pub viewport_layer: Option<usize>,
 }
 
@@ -1317,6 +1318,7 @@ impl ViewportPane {
             GridHandle { grid: grid_id },
             ViewportConfig {
                 show_arrows: viewport.show_arrows,
+                show_frustum: viewport.show_frustum,
                 viewport_layer,
             },
             crate::ui::inspector::viewport::Viewport::new(parent, pos, look_at, up),
