@@ -2,7 +2,7 @@
 mod tests {
 
     use arrow::{array::AsArray, datatypes::Float64Type};
-    use elodin_db::{DB, Error, Server};
+    use elodin_db::{AtomicTimestampExt, DB, Error, Server};
     use futures_lite::future::zip;
     use impeller2::{
         types::{ComponentId, IntoLenPacket, LenPacket, Msg, PrimType, Timestamp},
@@ -2667,9 +2667,9 @@ mod tests {
         assert_db_files_match(&src_db.path, &fol_db.path);
     }
 
-    /// Verify that DB::open() corrects earliest_timestamp when
-    /// time_start_timestamp_micros (wall-clock) exceeds the actual
-    /// monotonic data range.
+    /// Verify that earliest_timestamp tracks actual data at runtime via
+    /// update_min, and that DB::open() also computes it correctly from data
+    /// when time_start_timestamp_micros is not explicitly set.
     #[test]
     async fn test_open_fixes_mismatched_timestamp_domains() {
         let subscriber = tracing_subscriber::FmtSubscriber::new();
@@ -2690,14 +2690,23 @@ mod tests {
         let monotonic_ts2 = Timestamp(2_879_000_000);
 
         {
-            // Create the DB -- this sets time_start_timestamp_micros to
-            // Timestamp::now() (wall-clock, ~2026), simulating how flight
-            // hardware creates a DB.
             let db = elodin_db::DB::create(temp_dir.clone()).unwrap();
+
+            // After creation, time_start_timestamp_micros should NOT be set
+            // (deferred until data arrives or explicit set_earliest_timestamp)
+            db.with_state(|state| {
+                assert!(
+                    state.db_config.time_start_timestamp_micros().is_none(),
+                    "DB creation should NOT persist time_start_timestamp_micros (got {:?})",
+                    state.db_config.time_start_timestamp_micros(),
+                );
+            });
+
+            // In-memory earliest_timestamp starts at wall-clock (for apply_implicit_timestamp)
             let wall_clock_start = db.earliest_timestamp.latest();
             assert!(
                 wall_clock_start.0 > 1_500_000_000_000_000,
-                "DB creation should set earliest_timestamp to wall-clock (got {})",
+                "in-memory earliest_timestamp should start at wall-clock (got {})",
                 wall_clock_start.0,
             );
 
@@ -2726,12 +2735,27 @@ mod tests {
                     .unwrap();
             });
 
+            // update_min is called by DBSink (via Table packets), but push_buf
+            // is a direct TimeSeries call that doesn't go through DBSink.
+            // Simulate the update_min that would happen via the normal packet path.
+            db.earliest_timestamp.update_min(monotonic_ts1);
+
+            // Verify earliest_timestamp tracked down to the data range at runtime
+            let earliest_live = db.earliest_timestamp.latest();
+            assert!(
+                earliest_live.0 <= monotonic_ts1.0,
+                "earliest_timestamp should have tracked down to data range via update_min \
+                 (got {}, expected <= {})",
+                earliest_live.0,
+                monotonic_ts1.0,
+            );
+
             // Flush to ensure data hits disk
             db.flush_all().unwrap();
         }
         // DB is dropped, files are on disk
 
-        // Re-open and verify the fix
+        // Re-open and verify
         let db = elodin_db::DB::open(temp_dir.clone()).unwrap();
         let earliest = db.earliest_timestamp.latest();
         let last = db.last_updated.latest();

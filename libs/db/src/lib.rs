@@ -402,7 +402,6 @@ impl DB {
             default_stream_time_step: time_step,
             ..Default::default()
         };
-        db_config.set_time_start_timestamp_micros(now.0);
         db_config.set_version_created(env!("CARGO_PKG_VERSION"));
         db_config.set_version_last_opened(env!("CARGO_PKG_VERSION"));
         let state = State {
@@ -455,6 +454,17 @@ impl DB {
     }
 
     pub fn save_db_state(&self) -> Result<(), Error> {
+        let earliest = self.earliest_timestamp.latest();
+        let has_data = self.last_updated.latest().0 != i64::MIN;
+        self.with_state_mut(|state| {
+            if state.db_config.time_start_timestamp_micros().is_none()
+                && has_data
+                && earliest.0 != i64::MAX
+                && earliest.0 != i64::MIN
+            {
+                state.db_config.set_time_start_timestamp_micros(earliest.0);
+            }
+        });
         let db_state = self.db_config();
         db_state.write(self.path.join("db_state"))
     }
@@ -895,6 +905,7 @@ impl DB {
             })?;
         }
         self.last_updated.update_max(timestamp);
+        self.earliest_timestamp.update_min(timestamp);
         Ok(())
     }
 
@@ -1362,6 +1373,7 @@ pub(crate) struct DBSink<'a> {
     pub(crate) components: &'a HashMap<ComponentId, Component>,
     pub(crate) snapshot_barrier: &'a SnapshotBarrier,
     pub(crate) last_updated: &'a AtomicCell<Timestamp>,
+    pub(crate) earliest_timestamp: &'a AtomicCell<Timestamp>,
     pub(crate) sunk_new_time_series: bool,
     pub(crate) table_received: Timestamp,
     /// Set of component IDs replicated from a followed source.
@@ -1445,6 +1457,7 @@ impl Decomponentize for DBSink<'_> {
             self.sunk_new_time_series = true;
         }
         self.last_updated.update_max(timestamp);
+        self.earliest_timestamp.update_min(timestamp);
         Ok(())
     }
 }
@@ -1873,6 +1886,7 @@ async fn handle_packet<A: AsyncWrite + 'static>(
                     components: &state.components,
                     snapshot_barrier: &db.snapshot_barrier,
                     last_updated: &db.last_updated,
+                    earliest_timestamp: &db.earliest_timestamp,
                     sunk_new_time_series: false,
                     table_received: db.apply_implicit_timestamp(),
                     followed_components: &db.followed_components,
