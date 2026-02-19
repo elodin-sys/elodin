@@ -141,7 +141,7 @@ def setup_world(config: BDXConfig) -> tuple[el.World, el.EntityId, el.EntityId]:
         object_3d bdx.world_pos {
             glb path="f22.glb" scale=0.01 translate="(0.0, 0.0, 0.0)" rotate="(0.0, 0.0, 0.0)"
             icon builtin="flight_takeoff" {
-                visibility_range min=500.0
+                visibility_range min=50.0 fade_distance=50.0
                 color 76 175 80
             }
         }
@@ -149,7 +149,7 @@ def setup_world(config: BDXConfig) -> tuple[el.World, el.EntityId, el.EntityId]:
         object_3d target.world_pos {
             glb path="edu-450-v2-drone.glb"
             icon builtin="adjust" {
-                visibility_range min=500.0
+                visibility_range min=50.0 fade_distance=50.0
                 color 244 67 54
             }
         }

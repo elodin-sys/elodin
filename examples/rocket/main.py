@@ -535,7 +535,7 @@ w.schematic(
     object_3d rocket.world_pos {
         glb path="rocket.glb"
         icon builtin="rocket_launch" {
-            visibility_range min=500.0
+            visibility_range min=50.0 fade_distance=50.0
             color 76 175 80
         }
     }
