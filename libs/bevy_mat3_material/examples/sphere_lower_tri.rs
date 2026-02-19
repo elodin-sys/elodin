@@ -13,6 +13,7 @@ fn main() {
         .add_plugins(MaterialPlugin::<LowerTriMaterial>::default())
         .add_systems(Startup, setup)
         .add_systems(Update, draw_axes_gizmos)
+        .add_systems(Update, draw_normals)
         .run();
 }
 
@@ -105,4 +106,39 @@ fn setup(
         MeshMaterial3d(regular_material),
         Transform::from_xyz(1.2, 0.0, 0.0),
     ));
+}
+
+fn draw_normals(
+    mut gizmos: Gizmos,
+    query: Query<(&Handle<Mesh>, &GlobalTransform)>,
+    meshes: Res<Assets<Mesh>>,
+) {
+    for (mesh_handle, transform) in &query {
+        let mesh = if let Some(mesh) = meshes.get(mesh_handle) {
+            mesh
+        } else {
+            continue;
+        };
+
+        let positions = match mesh.attribute(Mesh::ATTRIBUTE_POSITION) {
+            Some(VertexAttributeValues::Float32x3(pos)) => pos,
+            _ => continue,
+        };
+
+        let normals = match mesh.attribute(Mesh::ATTRIBUTE_NORMAL) {
+            Some(VertexAttributeValues::Float32x3(norm)) => norm,
+            _ => continue,
+        };
+
+        for (position, normal) in positions.iter().zip(normals.iter()) {
+            let world_pos = transform.transform_point(Vec3::from(*position));
+            let world_normal = transform.rotation() * Vec3::from(*normal);
+
+            gizmos.line(
+                world_pos,
+                world_pos + world_normal * 0.2,
+                Color::GREEN,
+            );
+        }
+    }
 }
