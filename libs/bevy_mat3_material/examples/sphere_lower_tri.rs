@@ -7,6 +7,9 @@ use bevy_lower_tri_material::{params_from_linear, LowerTriMaterial, LowerTriTran
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
+        .add_plugins(bevy_inspector_egui::bevy_egui::EguiPlugin::default())
+        .add_plugins(bevy_inspector_egui::quick::WorldInspectorPlugin::new())
+        .add_plugins(bevy_editor_cam::DefaultEditorCamPlugins)
         .add_plugins(MaterialPlugin::<LowerTriMaterial>::default())
         .add_systems(Startup, setup)
         .run();
@@ -21,6 +24,7 @@ fn setup(
     commands.spawn((
         Camera3d::default(),
         Transform::from_xyz(-2.0, 1.8, 5.0).looking_at(Vec3::ZERO, Vec3::Y),
+        bevy_editor_cam::controller::component::EditorCam::default(),
     ));
 
     // Light

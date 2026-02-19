@@ -10,7 +10,7 @@ use bevy::{
 ///
 /// - `lower_tri`: linear transform in a Mat3 (the lower-triangular 3x3).
 /// - `normal_matrix`: inverse-transpose of the top-left 3x3, for correct normal transformation under shear.
-#[derive(ShaderType, Copy, Clone, Debug)]
+#[derive(ShaderType, Copy, Clone, Debug, Reflect)]
 pub struct LowerTriParams {
     pub lower_tri: Mat3,
     pub normal_matrix: Mat3,
