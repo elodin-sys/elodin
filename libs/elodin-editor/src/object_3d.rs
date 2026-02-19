@@ -1,3 +1,4 @@
+use bevy::camera::visibility::RenderLayers;
 use bevy::ecs::{hierarchy::ChildOf, relationship::Relationship};
 use bevy::log::warn_once;
 use bevy::prelude::Mesh;
@@ -8,13 +9,15 @@ use big_space::GridCell;
 use bitvec::prelude::*;
 use eql::Expr;
 use impeller2_bevy::EntityMap;
-use impeller2_wkt::{ComponentValue, Object3D};
+use impeller2_wkt::{ComponentValue, Object3D, Object3DIconSource};
 use nox::Array;
 use smallvec::smallvec;
 
+use crate::icon_rasterizer::IconTextureCache;
 use crate::iter::JoinDisplayExt;
+use crate::ui::tiles::ViewportConfig;
 use crate::{BevyExt, EqlContext, MainCamera, plugins::navigation_gizmo::NavGizmoCamera};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 
 type ImportedCameraFilter = (Added<Camera>, Without<NavGizmoCamera>, Without<MainCamera>);
@@ -62,6 +65,31 @@ impl EditableEQL {
         }
     }
 }
+
+#[derive(Component)]
+pub struct Object3DIconState {
+    pub billboards: HashMap<Entity, Entity>,
+    pub icon_min_distance: f32,
+    pub icon_max_distance: f32,
+    pub icon_fade_distance: f32,
+    pub icon_base_alpha: f32,
+    pub mesh_min_distance: f32,
+    pub mesh_max_distance: f32,
+    pub screen_size_px: f32,
+    pub billboard_material: Handle<StandardMaterial>,
+    pub billboard_mesh: Handle<Mesh>,
+}
+
+#[derive(Component)]
+pub struct BillboardIcon;
+
+#[derive(Component)]
+pub struct Object3DMeshChild;
+
+/// Marker inserted once `WorldPos` has been set from telemetry data.
+/// Distinguishes "genuinely at the origin" from "not yet received any data."
+#[derive(Component)]
+pub struct WorldPosReceived;
 
 type ExprFn = dyn for<'a, 'b> Fn(
         &'a EntityMap,
@@ -665,24 +693,29 @@ pub fn on_scene_ready(
 }
 
 /// System that updates 3D object entities based on their EQL expressions
+#[allow(clippy::type_complexity)]
 pub fn update_object_3d_system(
+    mut commands: Commands,
     mut objects_query: Query<(
         Entity,
         &mut Object3DState,
         &mut impeller2_wkt::WorldPos,
         Option<&mut EllipsoidVisual>,
+        Has<WorldPosReceived>,
     )>,
     mut transforms: Query<&mut Transform>,
     entity_map: Res<EntityMap>,
     component_value_maps: Query<&'static ComponentValue>,
 ) {
-    // return;
-    for (_entity, mut object_3d, mut pos, ellipse) in objects_query.iter_mut() {
+    for (entity, mut object_3d, mut pos, ellipse, has_received) in objects_query.iter_mut() {
         if let Some(compiled_expr) = &object_3d.compiled_expr
             && let Ok(component_value) = compiled_expr.execute(&entity_map, &component_value_maps)
             && let Some(world_pos) = component_value.as_world_pos()
         {
             *pos = world_pos;
+            if !has_received {
+                commands.entity(entity).insert(WorldPosReceived);
+            }
         }
 
         let Some(mut ellipse) = ellipse else {
@@ -1065,8 +1098,6 @@ pub fn create_object_3d_entity(
         _ => (None, None),
     };
 
-    // Store joint animation expressions as strings. They will be compiled in
-    // attach_joint_animations.
     let joint_animations = match &data.mesh {
         impeller2_wkt::Object3DMesh::Glb {
             animations, path, ..
@@ -1123,6 +1154,63 @@ pub fn create_object_3d_entity(
     entity_id
 }
 
+#[allow(clippy::too_many_arguments)]
+pub fn spawn_billboard_icon(
+    commands: &mut Commands,
+    parent: Entity,
+    icon: &impeller2_wkt::Object3DIcon,
+    mesh_visibility_range: Option<&impeller2_wkt::VisRange>,
+    material_assets: &mut ResMut<Assets<StandardMaterial>>,
+    mesh_assets: &mut ResMut<Assets<Mesh>>,
+    image_assets: &mut ResMut<Assets<Image>>,
+    asset_server: &Res<AssetServer>,
+    icon_cache: &mut ResMut<IconTextureCache>,
+) {
+    let texture_handle: Handle<Image> = match &icon.source {
+        Object3DIconSource::Path(path) => asset_server.load(path.clone()),
+        Object3DIconSource::Builtin(name) => {
+            let raster_size = (icon.size * 2.0).max(64.0) as u32;
+            icon_cache.get_or_insert(name, raster_size, image_assets)
+        }
+    };
+
+    let icon_color = Color::srgba(icon.color.r, icon.color.g, icon.color.b, icon.color.a);
+
+    let material = material_assets.add(StandardMaterial {
+        base_color: icon_color,
+        base_color_texture: Some(texture_handle),
+        alpha_mode: AlphaMode::Blend,
+        unlit: true,
+        double_sided: true,
+        cull_mode: None,
+        ..Default::default()
+    });
+
+    let quad = mesh_assets.add(Mesh::from(bevy::math::primitives::Rectangle::new(1.0, 1.0)));
+
+    let icon_vr = icon.visibility_range.as_ref();
+    let icon_min = icon_vr.map(|vr| vr.min).unwrap_or(0.0);
+    let icon_max = icon_vr.map(|vr| vr.max).unwrap_or(f32::MAX);
+    let icon_fade = icon_vr.map(|vr| vr.fade_distance).unwrap_or(0.0);
+
+    let mesh_vr = mesh_visibility_range;
+    let mesh_min = mesh_vr.map(|vr| vr.min).unwrap_or(0.0);
+    let mesh_max = mesh_vr.map(|vr| vr.max).unwrap_or(f32::MAX);
+
+    commands.entity(parent).insert(Object3DIconState {
+        billboards: HashMap::new(),
+        icon_min_distance: icon_min,
+        icon_max_distance: icon_max,
+        icon_fade_distance: icon_fade,
+        icon_base_alpha: icon.color.a,
+        mesh_min_distance: mesh_min,
+        mesh_max_distance: mesh_max,
+        screen_size_px: icon.size,
+        billboard_material: material,
+        billboard_mesh: quad,
+    });
+}
+
 pub fn spawn_mesh(
     commands: &mut Commands,
     entity: Entity,
@@ -1142,7 +1230,6 @@ pub fn spawn_mesh(
             let url = format!("{path}#Scene0");
             let scene = assets.load(&url);
 
-            // Create transform for offset (translate, rotate, scale)
             let translation = Vec3::new(translate.0, translate.1, translate.2);
             let rotation = Quat::from_euler(
                 EulerRot::XYZ,
@@ -1156,8 +1243,6 @@ pub fn spawn_mesh(
                 scale: Vec3::splat(*scale),
             };
 
-            // Create a child entity to hold the scene with the offset transform
-            // This way the parent can be synced with WorldPos without affecting the offset
             commands.spawn((
                 SceneRoot(scene),
                 offset_transform,
@@ -1165,6 +1250,7 @@ pub fn spawn_mesh(
                 Visibility::default(),
                 InheritedVisibility::default(),
                 ViewVisibility::default(),
+                Object3DMeshChild,
                 ChildOf(entity),
                 Name::new(format!("object_3d_scene {}", path)),
             ));
@@ -1181,10 +1267,20 @@ pub fn spawn_mesh(
                 material.cull_mode = None;
             }
             let material = material_assets.add(material);
-            commands.entity(entity).insert(MeshMaterial3d(material));
             let mesh = mesh.clone().into_bevy();
             let mesh = mesh_assets.add(mesh);
-            commands.entity(entity).insert(Mesh3d(mesh));
+            commands.spawn((
+                Mesh3d(mesh),
+                MeshMaterial3d(material),
+                Transform::IDENTITY,
+                GlobalTransform::IDENTITY,
+                Visibility::default(),
+                InheritedVisibility::default(),
+                ViewVisibility::default(),
+                Object3DMeshChild,
+                ChildOf(entity),
+                Name::new("object_3d_mesh"),
+            ));
             None
         }
         impeller2_wkt::Object3DMesh::Ellipsoid { color, .. } => {
@@ -1217,6 +1313,7 @@ pub fn spawn_mesh(
                     Visibility::default(),
                     InheritedVisibility::default(),
                     ViewVisibility::default(),
+                    Object3DMeshChild,
                     ChildOf(entity),
                 ))
                 .id();
@@ -1231,17 +1328,193 @@ pub fn spawn_mesh(
     }
 }
 
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
+pub fn update_object_3d_billboard_system(
+    mut commands: Commands,
+    mut objects: Query<(Entity, &mut Object3DIconState, &GlobalTransform), With<WorldPosReceived>>,
+    cameras: Query<
+        (
+            Entity,
+            &Camera,
+            &GlobalTransform,
+            &Projection,
+            Option<&ViewportConfig>,
+        ),
+        With<MainCamera>,
+    >,
+    mut billboard_transforms: Query<&mut Transform, (With<BillboardIcon>, Without<MainCamera>)>,
+    billboard_materials_query: Query<
+        &MeshMaterial3d<StandardMaterial>,
+        (With<BillboardIcon>, Without<MainCamera>),
+    >,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    children_query: Query<&Children>,
+    mesh_child_markers: Query<(), With<Object3DMeshChild>>,
+    mesh3d_query: Query<(), With<Mesh3d>>,
+) {
+    for (parent_entity, mut icon_state, obj_gt) in objects.iter_mut() {
+        let obj_pos = obj_gt.translation();
+        let parent_rotation = obj_gt.to_scale_rotation_translation().1;
+        let mut mesh_layers = RenderLayers::none();
+        let mut seen_cameras: HashSet<Entity> = HashSet::new();
+
+        let icon_min = icon_state.icon_min_distance;
+        let icon_max = icon_state.icon_max_distance;
+        let icon_fade = icon_state.icon_fade_distance;
+        let base_alpha = icon_state.icon_base_alpha;
+        let mesh_min = icon_state.mesh_min_distance;
+        let mesh_max = icon_state.mesh_max_distance;
+        let screen_px = icon_state.screen_size_px;
+        let bb_mesh_handle = icon_state.billboard_mesh.clone();
+        let bb_mat_source = icon_state.billboard_material.clone();
+
+        for (cam_entity, camera, cam_gt, projection, viewport_config) in cameras.iter() {
+            let viewport_h = camera.logical_viewport_size().map(|s| s.y).unwrap_or(0.0);
+            if viewport_h < 1.0 {
+                continue;
+            }
+            let Some(layer) = viewport_config.and_then(|c| c.viewport_layer) else {
+                continue;
+            };
+
+            seen_cameras.insert(cam_entity);
+            let distance = (obj_pos - cam_gt.translation()).length();
+            let shows_billboard = distance >= icon_min && distance <= icon_max;
+            let shows_mesh = distance >= mesh_min && distance <= mesh_max;
+
+            if shows_mesh {
+                mesh_layers = mesh_layers.with(layer);
+            }
+
+            if shows_billboard {
+                let cam_rotation = cam_gt.to_scale_rotation_translation().1;
+                let fov = match projection {
+                    Projection::Perspective(persp) => persp.fov,
+                    _ => std::f32::consts::FRAC_PI_4,
+                };
+                let world_size = distance * screen_px * 2.0 * (fov / 2.0).tan() / viewport_h;
+
+                let mesh_clone = bb_mesh_handle.clone();
+                let mat_clone = bb_mat_source.clone();
+                let cloned_mat_data = materials.get(&mat_clone).cloned();
+                let bb_entity = icon_state.billboards.entry(cam_entity).or_insert_with(|| {
+                    let cloned_mat = if let Some(mat_data) = cloned_mat_data {
+                        materials.add(mat_data)
+                    } else {
+                        mat_clone
+                    };
+                    commands
+                        .spawn((
+                            Mesh3d(mesh_clone),
+                            MeshMaterial3d(cloned_mat),
+                            Transform::IDENTITY,
+                            GlobalTransform::IDENTITY,
+                            Visibility::Hidden,
+                            InheritedVisibility::default(),
+                            ViewVisibility::default(),
+                            RenderLayers::layer(layer),
+                            BillboardIcon,
+                            ChildOf(parent_entity),
+                            Name::new(format!("billboard_icon_cam_{cam_entity}")),
+                        ))
+                        .id()
+                });
+
+                commands
+                    .entity(*bb_entity)
+                    .insert(RenderLayers::layer(layer));
+
+                let alpha = if icon_fade > 0.0 {
+                    let min_fade = if distance < icon_min + icon_fade {
+                        ((distance - icon_min) / icon_fade).clamp(0.0, 1.0)
+                    } else {
+                        1.0
+                    };
+                    let max_fade = if icon_max < f32::MAX && distance > icon_max - icon_fade {
+                        ((icon_max - distance) / icon_fade).clamp(0.0, 1.0)
+                    } else {
+                        1.0
+                    };
+                    min_fade.min(max_fade)
+                } else {
+                    1.0
+                };
+
+                if let Ok(mat_handle) = billboard_materials_query.get(*bb_entity)
+                    && let Some(mat) = materials.get_mut(mat_handle)
+                {
+                    let mut c = mat.base_color;
+                    c.set_alpha(base_alpha * alpha);
+                    mat.base_color = c;
+                }
+
+                if let Ok(mut bb_transform) = billboard_transforms.get_mut(*bb_entity) {
+                    bb_transform.rotation = parent_rotation.inverse() * cam_rotation;
+                    bb_transform.scale = Vec3::splat(world_size);
+                    commands.entity(*bb_entity).insert(Visibility::Inherited);
+                }
+            } else if let Some(bb_entity) = icon_state.billboards.get(&cam_entity) {
+                commands.entity(*bb_entity).insert(RenderLayers::none());
+            }
+        }
+
+        icon_state.billboards.retain(|cam_entity, bb_entity| {
+            if seen_cameras.contains(cam_entity) {
+                true
+            } else {
+                commands.entity(*bb_entity).despawn();
+                false
+            }
+        });
+
+        if let Ok(children) = children_query.get(parent_entity) {
+            for child in children.iter() {
+                if icon_state.billboards.values().any(|bb| *bb == child) {
+                    continue;
+                }
+                if mesh_child_markers.get(child).is_ok() {
+                    propagate_render_layers(
+                        &mut commands,
+                        child,
+                        &mesh_layers,
+                        &children_query,
+                        &mesh3d_query,
+                    );
+                }
+            }
+        }
+    }
+}
+
+fn propagate_render_layers(
+    commands: &mut Commands,
+    entity: Entity,
+    layers: &RenderLayers,
+    children_query: &Query<&Children>,
+    mesh3d_query: &Query<(), With<Mesh3d>>,
+) {
+    if mesh3d_query.get(entity).is_ok() {
+        commands.entity(entity).insert(layers.clone());
+    }
+    if let Ok(children) = children_query.get(entity) {
+        for child in children.iter() {
+            propagate_render_layers(commands, child, layers, children_query, mesh3d_query);
+        }
+    }
+}
+
 pub struct Object3DPlugin;
 
 impl Plugin for Object3DPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(
+        app.init_resource::<IconTextureCache>().add_systems(
             Update,
             (
                 update_object_3d_system,
                 on_scene_ready.pipe(attach_joint_animations),
                 update_joint_animations,
                 warn_imported_cameras,
+                update_object_3d_billboard_system,
             ),
         );
     }

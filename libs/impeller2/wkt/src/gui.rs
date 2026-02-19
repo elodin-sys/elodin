@@ -712,11 +712,107 @@ impl fmt::Display for Object3DMesh {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
+pub enum Object3DIconSource {
+    Path(String),
+    Builtin(String),
+}
+
+pub fn default_icon_color() -> Color {
+    Color {
+        r: 1.0,
+        g: 1.0,
+        b: 1.0,
+        a: 1.0,
+    }
+}
+
+pub fn default_icon_size() -> f32 {
+    32.0
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct VisRange {
+    #[serde(default)]
+    pub min: f32,
+    #[serde(default = "vis_range_default_max")]
+    pub max: f32,
+    #[serde(default)]
+    pub fade_distance: f32,
+}
+
+fn vis_range_default_max() -> f32 {
+    f32::MAX
+}
+
+impl Default for VisRange {
+    fn default() -> Self {
+        Self {
+            min: 0.0,
+            max: f32::MAX,
+            fade_distance: 0.0,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct Object3DIcon {
+    pub source: Object3DIconSource,
+    #[serde(default = "default_icon_color")]
+    pub color: Color,
+    #[serde(default = "default_icon_size")]
+    pub size: f32,
+    #[serde(default)]
+    pub visibility_range: Option<VisRange>,
+}
+
+/// Maps a built-in icon name (snake_case) to its Material Icons Unicode codepoint.
+pub fn builtin_icon_char(name: &str) -> Option<char> {
+    let cp: u32 = match name {
+        "satellite_alt" => 0xeb3a,
+        "satellite" => 0xe562,
+        "rocket_launch" => 0xeb9b,
+        "rocket" => 0xeba5,
+        "flight" => 0xe539,
+        "flight_takeoff" => 0xe53d,
+        "public" => 0xe80b,
+        "language" => 0xe894,
+        "circle" => 0xef4a,
+        "fiber_manual_record" => 0xe061,
+        "star" => 0xe838,
+        "star_outline" => 0xe83a,
+        "location_on" => 0xe0c8,
+        "place" => 0xe55f,
+        "adjust" => 0xe39e,
+        "gps_fixed" => 0xe1b3,
+        "my_location" => 0xe55c,
+        "explore" => 0xe87a,
+        "navigation" => 0xe55d,
+        "near_me" => 0xe569,
+        "diamond" => 0xead5,
+        "hexagon" => 0xeb39,
+        "change_history" => 0xe86b,
+        "lens" => 0xe3fa,
+        "panorama_fish_eye" => 0xe40c,
+        "radio_button_unchecked" => 0xe836,
+        "brightness_1" => 0xe3a6,
+        "flare" => 0xef4e,
+        "wb_sunny" => 0xe430,
+        "bolt" => 0xea0b,
+        _ => return None,
+    };
+    char::from_u32(cp)
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(bound = "T: Serialize + DeserializeOwned")]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
 pub struct Object3D<T = ()> {
     pub eql: String,
     pub mesh: Object3DMesh,
+    #[serde(default)]
+    pub icon: Option<Object3DIcon>,
+    #[serde(default)]
+    pub mesh_visibility_range: Option<VisRange>,
     pub aux: T,
 }
 
@@ -725,6 +821,8 @@ impl<T> Object3D<T> {
         Object3D {
             eql: self.eql.clone(),
             mesh: self.mesh.clone(),
+            icon: self.icon.clone(),
+            mesh_visibility_range: self.mesh_visibility_range.clone(),
             aux: f(&self.aux),
         }
     }

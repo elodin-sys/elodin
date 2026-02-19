@@ -65,6 +65,18 @@ order = 6
 
   Mesh nodes support an optional `emissivity=<value>` property (0.0–1.0) to make the material glow (e.g., `sphere radius=0.2 emissivity=0.25 { color yellow }`).
 
+  Mesh nodes and `icon` nodes both support an optional `visibility_range` child node that controls at what camera distances the element is rendered:
+  - `visibility_range`: child node with `min` (default 0) and `max` (default infinity) properties. The element is visible when the camera distance is between `min` and `max`. Both mesh and icon are visible at all distances by default; `visibility_range` is purely opt-in.
+  - `fade_distance` (icon only, default 0): world-unit distance over which the icon fades in at the `min` boundary and fades out at the `max` boundary. For example, `min=50 fade_distance=50` means the icon starts appearing at distance 50 (alpha=0) and reaches full opacity at distance 100. Mesh nodes use hard visibility cutoffs at their `min`/`max` boundaries.
+  - Ranges can overlap (both mesh and icon visible simultaneously) or have gaps.
+- `icon` child (optional): Displays a fixed-size billboard icon at the object's position. Each viewport camera independently evaluates whether to show the icon based on its own distance. The icon always faces the camera and maintains a constant screen pixel size.
+  - Source (exactly one required):
+    - `builtin`: name of a [Material Icons](https://fonts.google.com/icons?icon.set=Material+Icons) glyph (snake_case). Supported names include: `satellite_alt`, `satellite`, `rocket_launch`, `rocket`, `flight`, `flight_takeoff`, `public`, `language`, `circle`, `fiber_manual_record`, `star`, `star_outline`, `location_on`, `place`, `adjust`, `gps_fixed`, `my_location`, `explore`, `navigation`, `near_me`, `diamond`, `hexagon`, `change_history`, `lens`, `panorama_fish_eye`, `radio_button_unchecked`, `brightness_1`, `flare`, `wb_sunny`, `bolt`.
+    - `path`: path to a custom PNG image file (loaded from the assets folder).
+  - `color` child node: tint color for the icon using the standard `color r g b [a]` format or named colors (default white). See Colors in the glossary above.
+  - `visibility_range` child node: `min`, `max`, and `fade_distance` in world units (see above).
+  - `size`: desired screen pixel size of the icon (default 32).
+
 ### line_3d
 - Positional `eql`: required; expects 3 values (or 7 where the last 3 are XYZ).
 - `line_width`: default 1.0.
@@ -195,10 +207,22 @@ object_3d = "object_3d"
           | ellipsoid
           }
           [emissivity=float]
+          { [visibility_range] }
+          [icon]
 
 animate = "animate"
         joint=string
         rotation_vector=eql
+
+icon = "icon"
+     (builtin=string | path=string)
+     [size=float]
+     { [visibility_range] [color] }
+
+visibility_range = "visibility_range"
+                 [min=float]
+                 [max=float]
+                 [fade_distance=float]
 
 line_3d = "line_3d"
         <eql>
@@ -335,3 +359,45 @@ object_3d rocket.world_pos {
     animate joint="Root.Fin_3" rotation_vector="(0, rocket.fin_deflect[3], 0)"
 }
 ```
+
+Distance icon with independent visibility ranges:
+
+```kdl
+object_3d satellite.world_pos {
+    glb path="satellite.glb" {
+        visibility_range max=500.0
+    }
+    icon builtin="satellite_alt" {
+        visibility_range min=500.0
+        color 76 175 80
+    }
+}
+```
+
+Icon with fade-in (both mesh and icon visible by default, icon fades in over 50 units starting at distance 200):
+
+```kdl
+object_3d drone.world_pos {
+    glb path="drone.glb"
+    icon path="drone-icon.png" size=48 {
+        visibility_range min=200.0 fade_distance=50.0
+        color 0 188 212
+    }
+}
+```
+
+Overlapping ranges (both mesh and icon visible between 400 and 600 units):
+
+```kdl
+object_3d rocket.world_pos {
+    glb path="rocket.glb" {
+        visibility_range max=600.0
+    }
+    icon builtin="rocket_launch" {
+        visibility_range min=400.0
+        color 244 67 54
+    }
+}
+```
+
+Browse all available built-in icon names at [Material Icons](https://fonts.google.com/icons?icon.set=Material+Icons) (use the snake_case version of the icon name, e.g. "Satellite Alt" becomes `satellite_alt`).

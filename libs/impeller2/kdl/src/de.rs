@@ -573,12 +573,18 @@ fn parse_object_3d(node: &KdlNode, src: &str) -> Result<Object3D, KdlSchematicEr
         })?
         .to_string();
 
+    let mut icon = None;
+    let mut mesh_visibility_range = None;
+
     let mesh = if let Some(children) = node.children() {
         let children_nodes = children.nodes();
         let mesh_node = children_nodes.first();
         let mut parsed_mesh = parse_object_3d_mesh(mesh_node, src)?;
 
-        // Collect animate nodes from object_3d children (they're siblings of glb, not children)
+        if let Some(mn) = mesh_node {
+            mesh_visibility_range = parse_visibility_range_from_children(mn);
+        }
+
         let mut animations = Vec::new();
         for child in children_nodes {
             let child_name = child.name().value();
@@ -609,10 +615,11 @@ fn parse_object_3d(node: &KdlNode, src: &str) -> Result<Object3D, KdlSchematicEr
                     joint_name,
                     eql_expr,
                 });
+            } else if child_name == "icon" {
+                icon = Some(parse_object_3d_icon(child, src)?);
             }
         }
 
-        // If we found animations and the mesh is a GLB, add them to the mesh
         if !animations.is_empty()
             && let Object3DMesh::Glb {
                 path,
@@ -641,7 +648,85 @@ fn parse_object_3d(node: &KdlNode, src: &str) -> Result<Object3D, KdlSchematicEr
         });
     };
 
-    Ok(Object3D { eql, mesh, aux: () })
+    Ok(Object3D {
+        eql,
+        mesh,
+        icon,
+        mesh_visibility_range,
+        aux: (),
+    })
+}
+
+fn parse_object_3d_icon(node: &KdlNode, src: &str) -> Result<Object3DIcon, KdlSchematicError> {
+    let has_path = node.get("path").and_then(|v| v.as_string()).is_some();
+    let has_builtin = node.get("builtin").and_then(|v| v.as_string()).is_some();
+
+    let source = if has_path && has_builtin {
+        return Err(KdlSchematicError::MissingProperty {
+            property: "path OR builtin (not both)".to_string(),
+            node: "icon".to_string(),
+            src: src.to_string(),
+            span: node.span(),
+        });
+    } else if let Some(path) = node.get("path").and_then(|v| v.as_string()) {
+        Object3DIconSource::Path(path.to_string())
+    } else if let Some(name) = node.get("builtin").and_then(|v| v.as_string()) {
+        Object3DIconSource::Builtin(name.to_string())
+    } else {
+        return Err(KdlSchematicError::MissingProperty {
+            property: "path or builtin".to_string(),
+            node: "icon".to_string(),
+            src: src.to_string(),
+            span: node.span(),
+        });
+    };
+
+    let color = parse_color_from_node_or_children(node, None).unwrap_or_else(default_icon_color);
+
+    let size = node
+        .get("size")
+        .and_then(|v| v.as_float().or_else(|| v.as_integer().map(|i| i as f64)))
+        .map(|v| v as f32)
+        .unwrap_or_else(default_icon_size);
+
+    let visibility_range = parse_visibility_range_from_children(node);
+
+    Ok(Object3DIcon {
+        source,
+        color,
+        size,
+        visibility_range,
+    })
+}
+
+fn parse_visibility_range_from_children(node: &KdlNode) -> Option<VisRange> {
+    let children = node.children()?;
+    let vr_node = children
+        .nodes()
+        .iter()
+        .find(|n| n.name().value() == "visibility_range")?;
+
+    let min = vr_node
+        .get("min")
+        .and_then(|v| v.as_float().or_else(|| v.as_integer().map(|i| i as f64)))
+        .map(|v| v as f32)
+        .unwrap_or(0.0);
+    let max = vr_node
+        .get("max")
+        .and_then(|v| v.as_float().or_else(|| v.as_integer().map(|i| i as f64)))
+        .map(|v| v as f32)
+        .unwrap_or(f32::MAX);
+    let fade_distance = vr_node
+        .get("fade_distance")
+        .and_then(|v| v.as_float().or_else(|| v.as_integer().map(|i| i as f64)))
+        .map(|v| v as f32)
+        .unwrap_or(0.0);
+
+    Some(VisRange {
+        min,
+        max,
+        fade_distance,
+    })
 }
 
 fn parse_object_3d_mesh(

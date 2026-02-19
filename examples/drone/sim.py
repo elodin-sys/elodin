@@ -129,6 +129,10 @@ def world() -> tuple[el.World, el.EntityId]:
     object_mesh = f"""
     object_3d drone.world_pos {{
         glb path="{Config.GLOBAL.drone_glb}"
+        icon builtin="flight" {{
+            visibility_range min=500.0
+            color 0 188 212
+        }}
     }}
     """
 

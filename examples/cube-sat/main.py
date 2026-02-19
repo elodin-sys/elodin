@@ -636,7 +636,7 @@ w.schematic(
     vsplit {
         hsplit share=0.6 {
             tabs {
-                viewport name=Viewport pos="ore_sat.world_pos + (0,0,0,0, 5,0,0)" look_at="earth.world_pos" hdr=#true
+                viewport name=Viewport pos="ore_sat.world_pos + (0,0,0,0, 5,0,0)" look_at="ore_sat.world_pos" hdr=#true
             }
             graph "css_0.css_value, css_1.css_value, css_2.css_value, css_3.css_value, css_4.css_value, css_5.css_value" Name=Sensor
         }
@@ -648,8 +648,11 @@ w.schematic(
 
     object_3d ore_sat.world_pos {
         glb path="oresat-low.glb"
+        icon builtin="satellite_alt" {
+            visibility_range min=50.0 fade_distance=50.0
+            color 76 175 80
+        }
     }
-    line_3d ore_sat.world_pos line_width=10.0 perspective=#false
 """,
     "cube-sat.kdl",
 )

@@ -388,20 +388,83 @@ fn serialize_query_plot<T>(query_plot: &QueryPlot<T>) -> KdlNode {
 fn serialize_object_3d<T>(obj: &Object3D<T>) -> KdlNode {
     let mut node = KdlNode::new("object_3d");
 
-    // Add the EQL query as the first unnamed entry
     node.entries_mut().push(KdlEntry::new(obj.eql.clone()));
 
     let mut children = KdlDocument::new();
-    // Get the mesh node and any sibling nodes (like animate nodes)
-    let (mesh_node, sibling_nodes) = serialize_object_3d_mesh(&obj.mesh);
+    let (mut mesh_node, sibling_nodes) = serialize_object_3d_mesh(&obj.mesh);
+
+    if let Some(vr) = &obj.mesh_visibility_range {
+        serialize_visibility_range_to_node(&mut mesh_node, vr);
+    }
+
     children.nodes_mut().push(mesh_node);
-    // Add sibling nodes (animate nodes are siblings of glb, not children)
     for sibling in sibling_nodes {
         children.nodes_mut().push(sibling);
     }
+
+    if let Some(icon) = &obj.icon {
+        children.nodes_mut().push(serialize_object_3d_icon(icon));
+    }
+
     node.set_children(children);
 
     node
+}
+
+fn serialize_object_3d_icon(icon: &Object3DIcon) -> KdlNode {
+    use impeller2_wkt::{Object3DIconSource, default_icon_size};
+
+    let mut node = KdlNode::new("icon");
+
+    match &icon.source {
+        Object3DIconSource::Path(path) => {
+            node.entries_mut()
+                .push(KdlEntry::new_prop("path", path.clone()));
+        }
+        Object3DIconSource::Builtin(name) => {
+            node.entries_mut()
+                .push(KdlEntry::new_prop("builtin", name.clone()));
+        }
+    }
+
+    let is_default_color =
+        icon.color.r == 1.0 && icon.color.g == 1.0 && icon.color.b == 1.0 && icon.color.a == 1.0;
+    if !is_default_color {
+        serialize_color_to_node(&mut node, &icon.color);
+    }
+
+    if (icon.size - default_icon_size()).abs() > f32::EPSILON {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("size", icon.size as f64));
+    }
+
+    if let Some(vr) = &icon.visibility_range {
+        serialize_visibility_range_to_node(&mut node, vr);
+    }
+
+    node
+}
+
+fn serialize_visibility_range_to_node(node: &mut KdlNode, vr: &impeller2_wkt::VisRange) {
+    let mut vr_node = KdlNode::new("visibility_range");
+
+    if vr.min > 0.0 {
+        push_rounded_float_prop(&mut vr_node, "min", vr.min as f64);
+    }
+    if vr.max < f32::MAX {
+        push_rounded_float_prop(&mut vr_node, "max", vr.max as f64);
+    }
+    if vr.fade_distance > 0.0 {
+        push_rounded_float_prop(&mut vr_node, "fade_distance", vr.fade_distance as f64);
+    }
+
+    if let Some(existing_children) = node.children_mut().as_mut() {
+        existing_children.nodes_mut().push(vr_node);
+    } else {
+        let mut doc = KdlDocument::new();
+        doc.nodes_mut().push(vr_node);
+        node.set_children(doc);
+    }
 }
 
 /// Returns (mesh_node, sibling_nodes) where sibling_nodes are nodes that should be
@@ -1044,6 +1107,8 @@ graph "value" {
                 mesh: Mesh::Sphere { radius: 0.2 },
                 material: Material::with_color(Color::rgb(1.0, 0.0, 0.0)),
             },
+            icon: None,
+            mesh_visibility_range: None,
             aux: (),
         }));
 
@@ -1082,6 +1147,8 @@ graph "value" {
                 },
                 material: Material::with_color(Color::rgb(0.0, 0.5, 1.0)),
             },
+            icon: None,
+            mesh_visibility_range: None,
             aux: (),
         }));
 
@@ -1117,6 +1184,8 @@ graph "value" {
                 mesh: Mesh::Sphere { radius: 0.2 },
                 material: Material::color_with_emissivity(1.0, 1.0, 0.0, 0.25),
             },
+            icon: None,
+            mesh_visibility_range: None,
             aux: (),
         }));
 
@@ -1145,6 +1214,8 @@ graph "value" {
                 scale: "rocket.scale".to_string(),
                 color: Color::rgba(64.0 / 255.0, 128.0 / 255.0, 1.0, 96.0 / 255.0),
             },
+            icon: None,
+            mesh_visibility_range: None,
             aux: (),
         }));
 
