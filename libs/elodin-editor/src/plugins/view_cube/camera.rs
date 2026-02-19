@@ -21,6 +21,7 @@ use super::config::ViewCubeConfig;
 use super::events::ViewCubeEvent;
 use crate::WorldPosExt;
 use crate::object_3d::ComponentArrayExt;
+use crate::plugins::osm_world::OsmWorldRedrawRequest;
 
 const FACE_IN_SCREEN_PLANE_DOT_THRESHOLD: f32 = 0.999;
 const CORNER_IN_SCREEN_AXIS_DOT_THRESHOLD: f32 = 0.998;
@@ -242,6 +243,7 @@ pub(super) struct ViewCubeEditorLookup<'w, 's> {
     arrow_cache: ResMut<'w, ViewCubeArrowTargetCache>,
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn handle_view_cube_editor(
     mut events: MessageReader<ViewCubeEvent>,
     view_cube_query: Query<&ViewCubeLink, With<ViewCubeRoot>>,
@@ -253,6 +255,7 @@ pub fn handle_view_cube_editor(
     mut lookup: ViewCubeEditorLookup,
     config: Res<ViewCubeConfig>,
     mut look_to: MessageWriter<LookToTrigger>,
+    mut osm_redraw_requests: MessageWriter<OsmWorldRedrawRequest>,
 ) {
     for event in events.read() {
         let now_secs = lookup.time.elapsed_secs_f64();
@@ -556,6 +559,7 @@ pub fn handle_view_cube_editor(
             match action {
                 ViewportActionButton::Reset => {
                     apply_viewport_reset(transform.as_mut(), &mut editor_cam);
+                    osm_redraw_requests.write(OsmWorldRedrawRequest);
                 }
                 ViewportActionButton::ZoomOut => {
                     apply_viewport_zoom(true, transform.as_mut(), &mut editor_cam);
@@ -579,9 +583,12 @@ fn trigger_rotation(trigger: &LookToTrigger) -> Quat {
 }
 
 fn apply_viewport_reset(transform: &mut Transform, editor_cam: &mut EditorCam) {
-    *transform = Transform::IDENTITY;
+    transform.translation = Vec3::ZERO;
+    transform.rotation = Quat::IDENTITY;
     editor_cam.current_motion = CurrentMotion::Stationary;
-    editor_cam.last_anchor_depth = VIEWPORT_RESET_ANCHOR_DEPTH;
+    if !editor_cam.last_anchor_depth.is_finite() || editor_cam.last_anchor_depth >= -1.0e-6 {
+        editor_cam.last_anchor_depth = VIEWPORT_RESET_ANCHOR_DEPTH;
+    }
 }
 
 fn apply_viewport_zoom(out: bool, transform: &mut Transform, editor_cam: &mut EditorCam) {
@@ -1102,15 +1109,34 @@ mod tests {
     }
 
     #[test]
-    fn viewport_reset_restores_identity_transform_and_default_depth() {
+    fn viewport_reset_recenters_to_parent_and_keeps_depth() {
         let mut transform = Transform::from_translation(Vec3::new(1.0, -2.0, 3.0))
             .with_rotation(Quat::from_rotation_y(0.4));
         let mut editor_cam = EditorCam::default();
         editor_cam.last_anchor_depth = -9.0;
+        let initial_scale = transform.scale;
 
         apply_viewport_reset(&mut transform, &mut editor_cam);
 
-        assert_eq!(transform, Transform::IDENTITY);
+        assert!((transform.translation - Vec3::ZERO).length() < 1.0e-6);
+        assert!((transform.rotation.angle_between(Quat::IDENTITY)).abs() < 1.0e-6);
+        assert!((transform.scale - initial_scale).length() < 1.0e-6);
+        assert_eq!(editor_cam.last_anchor_depth, -9.0);
+        assert!(matches!(
+            editor_cam.current_motion,
+            CurrentMotion::Stationary
+        ));
+    }
+
+    #[test]
+    fn viewport_reset_restores_default_depth_when_invalid() {
+        let mut transform = Transform::from_translation(Vec3::new(2.0, 3.0, -4.0))
+            .with_rotation(Quat::from_rotation_x(0.25));
+        let mut editor_cam = EditorCam::default();
+        editor_cam.last_anchor_depth = f64::NAN;
+
+        apply_viewport_reset(&mut transform, &mut editor_cam);
+
         assert_eq!(editor_cam.last_anchor_depth, VIEWPORT_RESET_ANCHOR_DEPTH);
         assert!(matches!(
             editor_cam.current_motion,

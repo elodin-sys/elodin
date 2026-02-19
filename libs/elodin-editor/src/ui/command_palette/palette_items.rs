@@ -15,7 +15,7 @@ use bevy::{
     },
     log::{error, info, warn},
     pbr::{StandardMaterial, wireframe::WireframeConfig},
-    prelude::{Deref, DerefMut, Entity, In, Mut, Resource, Transform},
+    prelude::{Deref, DerefMut, Entity, In, MessageWriter, Mut, Quat, Resource, Transform, Vec3},
     window::PrimaryWindow,
 };
 use bevy_editor_cam::controller::{component::EditorCam, motion::CurrentMotion};
@@ -39,6 +39,7 @@ use nox::ArrayBuf;
 use crate::{
     EqlContext, MainCamera, Offset, SelectedTimeRange, TimeRangeBehavior, TimeRangeError,
     plugins::navigation_gizmo::RenderLayerAlloc,
+    plugins::osm_world::OsmWorldRedrawRequest,
     ui::{
         FocusedWindow, HdrEnabled, Paused, colors,
         command_palette::CommandPaletteState,
@@ -322,9 +323,12 @@ fn viewport_display_label(label: &str, window_label: &str) -> String {
 }
 
 fn reset_editor_cam(transform: &mut Transform, editor_cam: &mut EditorCam) {
-    *transform = Transform::IDENTITY;
+    transform.translation = Vec3::ZERO;
+    transform.rotation = Quat::IDENTITY;
     editor_cam.current_motion = CurrentMotion::Stationary;
-    editor_cam.last_anchor_depth = -2.0;
+    if !editor_cam.last_anchor_depth.is_finite() || editor_cam.last_anchor_depth >= -1.0e-6 {
+        editor_cam.last_anchor_depth = -2.0;
+    }
 }
 
 #[derive(bevy::ecs::system::SystemParam)]
@@ -549,12 +553,14 @@ fn reset_cameras() -> PaletteItem {
                 "Reset all viewports",
                 VIEWPORT_LABEL,
                 move |_: In<String>,
-                      mut query: Query<(&mut Transform, &mut EditorCam), With<MainCamera>>| {
+                      mut query: Query<(&mut Transform, &mut EditorCam), With<MainCamera>>,
+                      mut redraw_requests: MessageWriter<OsmWorldRedrawRequest>| {
                     for camera in &all_cameras {
                         if let Ok((mut transform, mut editor_cam)) = query.get_mut(*camera) {
                             reset_editor_cam(&mut transform, &mut editor_cam);
                         }
                     }
+                    redraw_requests.write(OsmWorldRedrawRequest);
                     PaletteEvent::Exit
                 },
             ));
@@ -570,10 +576,12 @@ fn reset_cameras() -> PaletteItem {
                               mut query: Query<
                             (&mut Transform, &mut EditorCam),
                             With<MainCamera>,
-                        >| {
+                        >,
+                              mut redraw_requests: MessageWriter<OsmWorldRedrawRequest>| {
                             if let Ok((mut transform, mut editor_cam)) = query.get_mut(camera) {
                                 reset_editor_cam(&mut transform, &mut editor_cam);
                             }
+                            redraw_requests.write(OsmWorldRedrawRequest);
                             PaletteEvent::Exit
                         },
                     ),
