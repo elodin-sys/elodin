@@ -2,6 +2,11 @@
 
 A CAD-style 3D orientation widget for Bevy editor viewports (overlay + `LookToTrigger` snaps).
 
+## Status
+
+This is the current Cube-Viewer implementation used in the editor.
+It replaces the legacy navigation gizmo UX.
+
 ## Features
 
 - **Interactive cube**: Click on faces, edges, or corners to snap the camera to that view
