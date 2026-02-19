@@ -2666,4 +2666,91 @@ mod tests {
         assert_exports_match(&src_db, &fol_db, None);
         assert_db_files_match(&src_db.path, &fol_db.path);
     }
+
+    /// Verify that DB::open() corrects earliest_timestamp when
+    /// time_start_timestamp_micros (wall-clock) exceeds the actual
+    /// monotonic data range.
+    #[test]
+    async fn test_open_fixes_mismatched_timestamp_domains() {
+        let subscriber = tracing_subscriber::FmtSubscriber::new();
+        let _ = tracing::subscriber::set_global_default(subscriber);
+
+        let temp_dir =
+            std::env::temp_dir().join(format!("elodin_db_ts_mismatch_{}", fastrand::u64(..)));
+        if temp_dir.exists() {
+            let _ = std::fs::remove_dir_all(&temp_dir);
+        }
+
+        let component_id = ComponentId::new("mono_test");
+        let schema = elodin_db::ComponentSchema::new(PrimType::F64, &[1]);
+
+        // Monotonic timestamps: ~48 minutes from epoch (typical boot-time values)
+        let monotonic_start = Timestamp(2_877_000_000); // ~48 min
+        let monotonic_ts1 = Timestamp(2_878_000_000);
+        let monotonic_ts2 = Timestamp(2_879_000_000);
+
+        {
+            // Create the DB -- this sets time_start_timestamp_micros to
+            // Timestamp::now() (wall-clock, ~2026), simulating how flight
+            // hardware creates a DB.
+            let db = elodin_db::DB::create(temp_dir.clone()).unwrap();
+            let wall_clock_start = db.earliest_timestamp.latest();
+            assert!(
+                wall_clock_start.0 > 1_500_000_000_000_000,
+                "DB creation should set earliest_timestamp to wall-clock (got {})",
+                wall_clock_start.0,
+            );
+
+            // Insert a component and write data with monotonic timestamps
+            db.with_state_mut(|state| {
+                state
+                    .insert_component_with_start_timestamp(
+                        component_id,
+                        schema.clone(),
+                        monotonic_start,
+                        &temp_dir,
+                    )
+                    .unwrap();
+            });
+
+            db.with_state(|state| {
+                let component = state.get_component(component_id).unwrap();
+                let data = 42.0f64.to_le_bytes();
+                component
+                    .time_series
+                    .push_buf(monotonic_ts1, &data)
+                    .unwrap();
+                component
+                    .time_series
+                    .push_buf(monotonic_ts2, &data)
+                    .unwrap();
+            });
+
+            // Flush to ensure data hits disk
+            db.flush_all().unwrap();
+        }
+        // DB is dropped, files are on disk
+
+        // Re-open and verify the fix
+        let db = elodin_db::DB::open(temp_dir.clone()).unwrap();
+        let earliest = db.earliest_timestamp.latest();
+        let last = db.last_updated.latest();
+
+        assert!(
+            earliest <= last,
+            "earliest_timestamp ({}) must be <= last_updated ({}) after open",
+            earliest.0,
+            last.0,
+        );
+        assert_eq!(
+            earliest.0, monotonic_start.0,
+            "earliest_timestamp should match the data's start timestamp, not wall-clock"
+        );
+        assert_eq!(
+            last.0, monotonic_ts2.0,
+            "last_updated should be the latest data timestamp"
+        );
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
 }

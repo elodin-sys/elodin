@@ -690,6 +690,23 @@ impl DB {
                     Timestamp(start_timestamp)
                 }
             });
+        // Validate: ensure earliest_timestamp is not beyond the actual data range.
+        // This handles databases where time_start_timestamp_micros was set to
+        // wall-clock time but data uses monotonic timestamps (or vice versa).
+        let earliest_timestamp = if start_timestamp != i64::MAX && last_updated != i64::MIN {
+            if earliest_timestamp.0 > last_updated {
+                warn!(
+                    earliest_timestamp = earliest_timestamp.0,
+                    last_updated,
+                    start_timestamp,
+                    "time_start_timestamp_micros in db_state exceeds data range; \
+                     adjusting earliest_timestamp to match data"
+                );
+            }
+            Timestamp(earliest_timestamp.0.min(start_timestamp))
+        } else {
+            earliest_timestamp
+        };
         let db = DB {
             state: RwLock::new(state),
             snapshot_barrier: SnapshotBarrier::new(),
