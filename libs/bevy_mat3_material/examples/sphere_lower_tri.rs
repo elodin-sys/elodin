@@ -119,6 +119,7 @@ fn setup(
         MeshMaterial3d(material),
         Transform::from_xyz(-1.2, 0.0, 0.0),
         bevy::light::NotShadowReceiver,
+        Name::new("deformed by shader"),
     ));
 
     // Deformed by apply_matrix_to_mesh — normals reflect actual mesh geometry.
@@ -127,6 +128,7 @@ fn setup(
         MeshMaterial3d(deformed_material),
         Transform::from_xyz(4.2, 0.0, 0.0),
         bevy::light::NotShadowReceiver,
+        Name::new("deformed mesh"),
     ));
 
     // Control sphere: no deformation (plain StandardMaterial).
@@ -135,6 +137,7 @@ fn setup(
         MeshMaterial3d(regular_material),
         Transform::from_xyz(1.2, 0.0, 0.0),
         bevy::light::NotShadowReceiver,
+        Name::new("control"),
     ));
 }
 
