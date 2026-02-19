@@ -69,7 +69,10 @@ impl EditableEQL {
 #[derive(Component)]
 pub struct Object3DIconState {
     pub billboards: HashMap<Entity, Entity>,
-    pub swap_distance: f32,
+    pub icon_min_distance: f32,
+    pub icon_max_distance: f32,
+    pub mesh_min_distance: f32,
+    pub mesh_max_distance: f32,
     pub screen_size_px: f32,
     pub billboard_material: Handle<StandardMaterial>,
     pub billboard_mesh: Handle<Mesh>,
@@ -1125,7 +1128,6 @@ pub fn create_object_3d_entity(
         ))
         .id();
 
-    let icon_swap = data.icon.as_ref().map(|i| i.swap_distance);
     if let Some(ellipse) = spawn_mesh(
         commands,
         entity_id,
@@ -1133,7 +1135,6 @@ pub fn create_object_3d_entity(
         material_assets,
         mesh_assets,
         assets,
-        icon_swap,
     ) {
         commands.entity(entity_id).insert(ellipse);
     }
@@ -1146,6 +1147,7 @@ pub fn spawn_billboard_icon(
     commands: &mut Commands,
     parent: Entity,
     icon: &impeller2_wkt::Object3DIcon,
+    mesh_visibility_range: Option<&impeller2_wkt::VisRange>,
     material_assets: &mut ResMut<Assets<StandardMaterial>>,
     mesh_assets: &mut ResMut<Assets<Mesh>>,
     image_assets: &mut ResMut<Assets<Image>>,
@@ -1174,9 +1176,30 @@ pub fn spawn_billboard_icon(
 
     let quad = mesh_assets.add(Mesh::from(bevy::math::primitives::Rectangle::new(1.0, 1.0)));
 
+    let default_swap = 500.0f32;
+
+    let (icon_min, icon_max) = if let Some(vr) = &icon.visibility_range {
+        (vr.min, vr.max)
+    } else if let Some(mvr) = mesh_visibility_range {
+        (mvr.max, f32::MAX)
+    } else {
+        (default_swap, f32::MAX)
+    };
+
+    let (mesh_min, mesh_max) = if let Some(mvr) = mesh_visibility_range {
+        (mvr.min, mvr.max)
+    } else if let Some(vr) = &icon.visibility_range {
+        (0.0, vr.min)
+    } else {
+        (0.0, default_swap)
+    };
+
     commands.entity(parent).insert(Object3DIconState {
         billboards: HashMap::new(),
-        swap_distance: icon.swap_distance,
+        icon_min_distance: icon_min,
+        icon_max_distance: icon_max,
+        mesh_min_distance: mesh_min,
+        mesh_max_distance: mesh_max,
         screen_size_px: icon.size,
         billboard_material: material,
         billboard_mesh: quad,
@@ -1190,7 +1213,6 @@ pub fn spawn_mesh(
     material_assets: &mut ResMut<Assets<StandardMaterial>>,
     mesh_assets: &mut ResMut<Assets<Mesh>>,
     assets: &Res<AssetServer>,
-    _icon_swap_distance: Option<f32>,
 ) -> Option<EllipsoidVisual> {
     match mesh {
         impeller2_wkt::Object3DMesh::Glb {
@@ -1346,7 +1368,14 @@ pub fn update_object_3d_billboard_system(
 
             seen_cameras.insert(cam_entity);
             let distance = (obj_pos - cam_gt.translation()).length();
-            let shows_billboard = distance > icon_state.swap_distance;
+            let shows_billboard = distance >= icon_state.icon_min_distance
+                && distance <= icon_state.icon_max_distance;
+            let shows_mesh = distance >= icon_state.mesh_min_distance
+                && distance <= icon_state.mesh_max_distance;
+
+            if shows_mesh {
+                mesh_layers = mesh_layers.with(layer);
+            }
 
             if shows_billboard {
                 let cam_rotation = cam_gt.to_scale_rotation_translation().1;
@@ -1385,11 +1414,8 @@ pub fn update_object_3d_billboard_system(
                     bb_transform.rotation = parent_rotation.inverse() * cam_rotation;
                     bb_transform.scale = Vec3::splat(world_size);
                 }
-            } else {
-                mesh_layers = mesh_layers.with(layer);
-                if let Some(bb_entity) = icon_state.billboards.get(&cam_entity) {
-                    commands.entity(*bb_entity).insert(RenderLayers::none());
-                }
+            } else if let Some(bb_entity) = icon_state.billboards.get(&cam_entity) {
+                commands.entity(*bb_entity).insert(RenderLayers::none());
             }
         }
 

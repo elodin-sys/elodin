@@ -516,6 +516,7 @@ impl LoadSchematicParams<'_, '_> {
             return;
         };
         let icon = object_3d.icon.clone();
+        let mesh_vr = object_3d.mesh_visibility_range.clone();
         let entity = crate::object_3d::create_object_3d_entity(
             &mut self.commands,
             object_3d.clone(),
@@ -530,6 +531,7 @@ impl LoadSchematicParams<'_, '_> {
                 &mut self.commands,
                 entity,
                 icon,
+                mesh_vr.as_ref(),
                 &mut self.materials,
                 &mut self.meshes,
                 &mut self.images,

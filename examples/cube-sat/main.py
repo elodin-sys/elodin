@@ -648,7 +648,8 @@ w.schematic(
 
     object_3d ore_sat.world_pos {
         glb path="oresat-low.glb"
-        icon builtin="satellite_alt" swap_distance=500.0 {
+        icon builtin="satellite_alt" {
+            visibility_range min=50.0
             color 76 175 80
         }
     }

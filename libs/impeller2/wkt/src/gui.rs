@@ -726,12 +726,29 @@ pub fn default_icon_color() -> Color {
     }
 }
 
-pub fn default_icon_swap_distance() -> f32 {
-    500.0
-}
-
 pub fn default_icon_size() -> f32 {
     32.0
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct VisRange {
+    #[serde(default)]
+    pub min: f32,
+    #[serde(default = "vis_range_default_max")]
+    pub max: f32,
+}
+
+fn vis_range_default_max() -> f32 {
+    f32::MAX
+}
+
+impl Default for VisRange {
+    fn default() -> Self {
+        Self {
+            min: 0.0,
+            max: f32::MAX,
+        }
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -739,10 +756,10 @@ pub struct Object3DIcon {
     pub source: Object3DIconSource,
     #[serde(default = "default_icon_color")]
     pub color: Color,
-    #[serde(default = "default_icon_swap_distance")]
-    pub swap_distance: f32,
     #[serde(default = "default_icon_size")]
     pub size: f32,
+    #[serde(default)]
+    pub visibility_range: Option<VisRange>,
 }
 
 /// Maps a built-in icon name (snake_case) to its Material Icons Unicode codepoint.
@@ -791,6 +808,8 @@ pub struct Object3D<T = ()> {
     pub mesh: Object3DMesh,
     #[serde(default)]
     pub icon: Option<Object3DIcon>,
+    #[serde(default)]
+    pub mesh_visibility_range: Option<VisRange>,
     pub aux: T,
 }
 
@@ -800,6 +819,7 @@ impl<T> Object3D<T> {
             eql: self.eql.clone(),
             mesh: self.mesh.clone(),
             icon: self.icon.clone(),
+            mesh_visibility_range: self.mesh_visibility_range.clone(),
             aux: f(&self.aux),
         }
     }

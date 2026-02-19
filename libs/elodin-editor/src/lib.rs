@@ -907,6 +907,7 @@ fn sync_object_3d(
                 eql,
                 mesh: mesh_source,
                 icon: None,
+                mesh_visibility_range: None,
                 aux: (),
             },
             expr,

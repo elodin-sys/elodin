@@ -574,11 +574,16 @@ fn parse_object_3d(node: &KdlNode, src: &str) -> Result<Object3D, KdlSchematicEr
         .to_string();
 
     let mut icon = None;
+    let mut mesh_visibility_range = None;
 
     let mesh = if let Some(children) = node.children() {
         let children_nodes = children.nodes();
         let mesh_node = children_nodes.first();
         let mut parsed_mesh = parse_object_3d_mesh(mesh_node, src)?;
+
+        if let Some(mn) = mesh_node {
+            mesh_visibility_range = parse_visibility_range_from_children(mn);
+        }
 
         let mut animations = Vec::new();
         for child in children_nodes {
@@ -647,6 +652,7 @@ fn parse_object_3d(node: &KdlNode, src: &str) -> Result<Object3D, KdlSchematicEr
         eql,
         mesh,
         icon,
+        mesh_visibility_range,
         aux: (),
     })
 }
@@ -677,24 +683,41 @@ fn parse_object_3d_icon(node: &KdlNode, src: &str) -> Result<Object3DIcon, KdlSc
 
     let color = parse_color_from_node_or_children(node, None).unwrap_or_else(default_icon_color);
 
-    let swap_distance = node
-        .get("swap_distance")
-        .and_then(|v| v.as_float().or_else(|| v.as_integer().map(|i| i as f64)))
-        .map(|v| v as f32)
-        .unwrap_or_else(default_icon_swap_distance);
-
     let size = node
         .get("size")
         .and_then(|v| v.as_float().or_else(|| v.as_integer().map(|i| i as f64)))
         .map(|v| v as f32)
         .unwrap_or_else(default_icon_size);
 
+    let visibility_range = parse_visibility_range_from_children(node);
+
     Ok(Object3DIcon {
         source,
         color,
-        swap_distance,
         size,
+        visibility_range,
     })
+}
+
+fn parse_visibility_range_from_children(node: &KdlNode) -> Option<VisRange> {
+    let children = node.children()?;
+    let vr_node = children
+        .nodes()
+        .iter()
+        .find(|n| n.name().value() == "visibility_range")?;
+
+    let min = vr_node
+        .get("min")
+        .and_then(|v| v.as_float().or_else(|| v.as_integer().map(|i| i as f64)))
+        .map(|v| v as f32)
+        .unwrap_or(0.0);
+    let max = vr_node
+        .get("max")
+        .and_then(|v| v.as_float().or_else(|| v.as_integer().map(|i| i as f64)))
+        .map(|v| v as f32)
+        .unwrap_or(f32::MAX);
+
+    Some(VisRange { min, max })
 }
 
 fn parse_object_3d_mesh(
