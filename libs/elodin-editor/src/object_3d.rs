@@ -72,6 +72,7 @@ pub struct Object3DIconState {
     pub icon_min_distance: f32,
     pub icon_max_distance: f32,
     pub icon_fade_distance: f32,
+    pub icon_base_alpha: f32,
     pub mesh_min_distance: f32,
     pub mesh_max_distance: f32,
     pub screen_size_px: f32,
@@ -1191,6 +1192,7 @@ pub fn spawn_billboard_icon(
         icon_min_distance: icon_min,
         icon_max_distance: icon_max,
         icon_fade_distance: icon_fade,
+        icon_base_alpha: icon.color.a,
         mesh_min_distance: mesh_min,
         mesh_max_distance: mesh_max,
         screen_size_px: icon.size,
@@ -1358,6 +1360,7 @@ pub fn update_object_3d_billboard_system(
         let icon_min = icon_state.icon_min_distance;
         let icon_max = icon_state.icon_max_distance;
         let icon_fade = icon_state.icon_fade_distance;
+        let base_alpha = icon_state.icon_base_alpha;
         let mesh_min = icon_state.mesh_min_distance;
         let mesh_max = icon_state.mesh_max_distance;
         let screen_px = icon_state.screen_size_px;
@@ -1405,7 +1408,7 @@ pub fn update_object_3d_billboard_system(
                             MeshMaterial3d(cloned_mat),
                             Transform::IDENTITY,
                             GlobalTransform::IDENTITY,
-                            Visibility::Inherited,
+                            Visibility::Hidden,
                             InheritedVisibility::default(),
                             ViewVisibility::default(),
                             RenderLayers::layer(layer),
@@ -1440,13 +1443,14 @@ pub fn update_object_3d_billboard_system(
                     && let Some(mat) = materials.get_mut(mat_handle)
                 {
                     let mut c = mat.base_color;
-                    c.set_alpha(alpha);
+                    c.set_alpha(base_alpha * alpha);
                     mat.base_color = c;
                 }
 
                 if let Ok(mut bb_transform) = billboard_transforms.get_mut(*bb_entity) {
                     bb_transform.rotation = parent_rotation.inverse() * cam_rotation;
                     bb_transform.scale = Vec3::splat(world_size);
+                    commands.entity(*bb_entity).insert(Visibility::Inherited);
                 }
             } else if let Some(bb_entity) = icon_state.billboards.get(&cam_entity) {
                 commands.entity(*bb_entity).insert(RenderLayers::none());
