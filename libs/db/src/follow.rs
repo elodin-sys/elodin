@@ -336,7 +336,9 @@ async fn run_follower_inner(config: &FollowConfig, db: &Arc<DB>) -> Result<(), E
                     }
                     if timestamps.len() > skip {
                         db.last_updated.update_max(*timestamps.last().unwrap());
-                        db.earliest_timestamp.update_min(timestamps[skip]);
+                        if timestamps[skip].0 > 0 {
+                            db.earliest_timestamp.update_min(timestamps[skip]);
+                        }
                     }
                     Ok(())
                 })?;
