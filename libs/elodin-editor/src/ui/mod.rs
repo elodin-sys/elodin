@@ -141,6 +141,7 @@ pub enum SelectedObject {
     Entity(EntityPair),
     Viewport {
         camera: Entity,
+        title: String,
     },
     Graph {
         graph_id: Entity,
@@ -175,7 +176,7 @@ impl SelectedObject {
         match self {
             SelectedObject::None => None,
             SelectedObject::Entity(pair) => Some(pair.bevy),
-            SelectedObject::Viewport { camera } => Some(*camera),
+            SelectedObject::Viewport { camera, .. } => Some(*camera),
             SelectedObject::Graph { graph_id } => Some(*graph_id),
             SelectedObject::QueryTable { table_id } => Some(*table_id),
             SelectedObject::Monitor { monitor_id } => Some(*monitor_id),

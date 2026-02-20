@@ -2720,8 +2720,10 @@ impl WidgetSystem for TileLayout<'_, '_> {
                                 }
                                 Pane::Viewport(viewport) => {
                                     if let Some(camera) = viewport.camera {
-                                        ui_state.selected_object =
-                                            SelectedObject::Viewport { camera };
+                                        ui_state.selected_object = SelectedObject::Viewport {
+                                            camera,
+                                            title: viewport.name.clone(),
+                                        };
                                     }
                                 }
                                 _ => {}
@@ -2746,8 +2748,10 @@ impl WidgetSystem for TileLayout<'_, '_> {
                                 }
                                 Pane::Viewport(viewport) => {
                                     if let Some(camera) = viewport.camera {
-                                        ui_state.selected_object =
-                                            SelectedObject::Viewport { camera };
+                                        ui_state.selected_object = SelectedObject::Viewport {
+                                            camera,
+                                            title: viewport.name.clone(),
+                                        };
                                     }
                                 }
                                 _ => {}

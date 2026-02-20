@@ -74,7 +74,7 @@ pub struct InspectorViewport<'w, 's> {
 }
 
 impl WidgetSystem for InspectorViewport<'_, '_> {
-    type Args = Entity;
+    type Args = (Entity, String);
     type Output = ();
 
     fn ui_system(
@@ -86,7 +86,7 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
         let scheme = get_scheme();
         let state_mut = state.get_mut(world);
 
-        let camera = args;
+        let (camera, title) = args;
 
         let InspectorViewport {
             mut camera_query,
@@ -110,8 +110,10 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
         };
 
         ui.spacing_mut().item_spacing.y = 8.0;
+        let title = title.trim();
+        let title = if title.is_empty() { "Viewport" } else { title };
         ui.add(
-            ELabel::new("Viewport")
+            ELabel::new(title)
                 .padding(egui::Margin::same(8).bottom(24.0))
                 .bottom_stroke(egui::Stroke {
                     color: get_scheme().border_primary,
