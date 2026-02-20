@@ -14,10 +14,6 @@ impl Plugin for FrustumPlugin {
     }
 }
 
-const SELF_VIEW_XY_INSET: f32 = 0.985;
-const SELF_VIEW_NEAR_DEPTH_SCALE: f32 = 1.02;
-const SELF_VIEW_FAR_DEPTH_SCALE: f32 = 0.998;
-
 #[derive(Resource, Clone)]
 struct FrustumLineAssets {
     edge_mesh: Handle<Mesh>,
@@ -155,25 +151,6 @@ fn frustum_segments(points: [Vec3; 8]) -> [(Vec3, Vec3); 12] {
     ]
 }
 
-fn frustum_points_for_target(points: [Vec3; 8], is_self_view: bool) -> [Vec3; 8] {
-    if !is_self_view {
-        return points;
-    }
-
-    let mut adjusted = points;
-    for point in adjusted.iter_mut().take(4) {
-        point.x *= SELF_VIEW_XY_INSET;
-        point.y *= SELF_VIEW_XY_INSET;
-        point.z *= SELF_VIEW_NEAR_DEPTH_SCALE;
-    }
-    for point in adjusted.iter_mut().skip(4) {
-        point.x *= SELF_VIEW_XY_INSET;
-        point.y *= SELF_VIEW_XY_INSET;
-        point.z *= SELF_VIEW_FAR_DEPTH_SCALE;
-    }
-    adjusted
-}
-
 fn frustum_segment_transform_local(
     start_local: Vec3,
     end_local: Vec3,
@@ -265,11 +242,11 @@ fn draw_viewport_frustums(mut params: FrustumDrawParams<'_, '_>, mut commands: C
     for (source_camera, points, color, thickness) in sources {
         let material =
             frustum_material_for_color(color, &mut params.materials, &mut params.material_cache);
+        let segments = frustum_segments(points);
         for (target_camera, render_layers) in &targets {
-            let segments = frustum_segments(frustum_points_for_target(
-                points,
-                source_camera == *target_camera,
-            ));
+            if source_camera == *target_camera {
+                continue;
+            }
             let root_key = CameraFrustumRootVisual {
                 source: source_camera,
                 target: *target_camera,

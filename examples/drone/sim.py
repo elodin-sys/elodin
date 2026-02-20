@@ -142,8 +142,8 @@ def world() -> tuple[el.World, el.EntityId]:
 
         tabs {
             hsplit name = "Viewport" {
-                viewport name=Viewport pos="drone.world_pos + (0,0,0,0, 2,2,2)" look_at="drone.world_pos" show_grid=#true show_frustums=#true frustums_color="blue" near=0.05 far=40.0 active=#true
-                viewport name="Drone Side View" pos="drone.world_pos + (0,0,0,0, -3.0,1.0,1.5)" look_at="drone.world_pos" show_grid=#true show_frustums=#true frustums_color="orange" near=0.05 far=40.0
+                viewport name=Viewport pos="drone.world_pos + (0,0,0,0, 2,2,2)" look_at="drone.world_pos" fov=30.0 show_grid=#true show_frustums=#true frustums_color="yellow" frustums_thickness=0.012 near=0.05 far=40.0 active=#true
+                viewport name="Drone Side View" pos="drone.world_pos + (0,0,0,0, -3.0,1.0,1.5)" look_at="drone.world_pos" fov=30.0 show_grid=#true show_frustums=#true frustums_color="orange" frustums_thickness=0.012 near=0.05 far=40.0
                 vsplit share=0.4 {
                     graph "drone.angle_desired" name="angle_desired"
                     graph "drone.world_pos.q0, drone.world_pos.q1, drone.world_pos.q2, drone.world_pos.q3, drone.attitude_target" name="World Pos"

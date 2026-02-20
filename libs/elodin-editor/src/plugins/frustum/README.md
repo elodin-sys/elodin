@@ -13,7 +13,7 @@ Viewport camera frustum overlay rendering.
 
 ## Viewport parameters
 - `show_frustums` (bool): enable frustum rendering for that viewport camera.
-- `near`/`far` (optional): override camera clipping planes.
+- `near`/`far` (optional): override camera clipping planes. Defaults are `near=0.05`, `far=5.0`.
 - `frustums_color` (optional): named color or tuple string like `"(255,255,0,200)"`.
 - `frustums_thickness` (optional): edge radius in world units.
 

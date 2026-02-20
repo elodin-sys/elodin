@@ -71,6 +71,17 @@ pub(crate) mod sidebar;
 
 use sidebar::tab_add_visible;
 
+const DEFAULT_VIEWPORT_NEAR: f32 = 0.05;
+const DEFAULT_VIEWPORT_FAR: f32 = 5.0;
+
+fn default_viewport_perspective() -> PerspectiveProjection {
+    PerspectiveProjection {
+        near: DEFAULT_VIEWPORT_NEAR,
+        far: DEFAULT_VIEWPORT_FAR,
+        ..PerspectiveProjection::default()
+    }
+}
+
 pub(crate) fn plugin(app: &mut App) {
     app.register_type::<WindowId>()
         .add_message::<WindowRelayout>()
@@ -1279,7 +1290,7 @@ impl ViewportPane {
             })
             .unwrap_or_default();
 
-        let perspective_defaults = PerspectiveProjection::default();
+        let perspective_defaults = default_viewport_perspective();
         let mut perspective = PerspectiveProjection {
             fov: viewport.fov.to_radians(),
             ..perspective_defaults
@@ -1295,8 +1306,8 @@ impl ViewportPane {
                 "Invalid viewport near/far (near={}, far={}), restoring defaults",
                 perspective.near, perspective.far
             );
-            perspective.near = PerspectiveProjection::default().near;
-            perspective.far = PerspectiveProjection::default().far;
+            perspective.near = DEFAULT_VIEWPORT_NEAR;
+            perspective.far = DEFAULT_VIEWPORT_FAR;
         }
 
         let mut camera = commands.spawn((
