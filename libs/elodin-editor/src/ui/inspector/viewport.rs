@@ -155,6 +155,31 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
                     {
                         persp.fov = fov.to_radians();
                     }
+
+                    ui.add_space(8.0);
+                    let mut near = persp.near;
+                    let mut far = persp.far;
+
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new("NEAR").color(scheme.text_secondary));
+                        ui.with_layout(egui::Layout::right_to_left(Align::Min), |ui| {
+                            ui.add(egui::DragValue::new(&mut near).speed(0.001));
+                        });
+                    });
+
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new("FAR").color(scheme.text_secondary));
+                        ui.with_layout(egui::Layout::right_to_left(Align::Min), |ui| {
+                            ui.add(egui::DragValue::new(&mut far).speed(0.01));
+                        });
+                    });
+
+                    near = near.max(0.0001);
+                    if far <= near + 0.0001 {
+                        far = near + 0.0001;
+                    }
+                    persp.near = near;
+                    persp.far = far;
                 });
         }
 
