@@ -269,7 +269,7 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
             .show(ui, |ui| {
                 let create_button_width = 88.0;
                 ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new("FRUSTRUM").color(scheme.text_secondary));
+                    ui.label(egui::RichText::new("FRUSTUM").color(scheme.text_secondary));
                     ui.with_layout(egui::Layout::right_to_left(Align::Min), |ui| {
                         let response = ui.add(
                             EButton::highlight("CREATE")
@@ -303,7 +303,7 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
 
                     let mut frustums_color = viewport_config.frustums_color.into_color32();
                     ui.horizontal(|ui| {
-                        ui.label(egui::RichText::new("FRUSTRUM COLOR").color(scheme.text_secondary));
+                        ui.label(egui::RichText::new("FRUSTUM COLOR").color(scheme.text_secondary));
                         ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
                             let swatch = ui.add(
                                 egui::Button::new("")
@@ -341,7 +341,7 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
                 ui.separator();
                 ui.add_space(8.0);
                 ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new("SHOW FRUSTRUMS").color(scheme.text_secondary));
+                    ui.label(egui::RichText::new("SHOW FRUSTUMS").color(scheme.text_secondary));
                     ui.with_layout(egui::Layout::right_to_left(Align::Min), |ui| {
                         theme::configure_input_with_border(ui.style_mut());
                         ui.checkbox(&mut viewport_config.show_frustums, "");
