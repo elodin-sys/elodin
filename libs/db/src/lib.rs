@@ -670,7 +670,9 @@ impl DB {
                     .and_then(|p| p.parse().ok())
                     .ok_or(Error::InvalidMsgId)?;
                 let msg_log = MsgLog::open(path)?;
-                if let Some(first_timestamp) = msg_log.timestamps().first() {
+                if let Some(first_timestamp) = msg_log.timestamps().first()
+                    && first_timestamp.0 > 0
+                {
                     start_timestamp = start_timestamp.min(first_timestamp.0);
                 }
 
