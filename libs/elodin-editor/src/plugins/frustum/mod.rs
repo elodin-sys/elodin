@@ -4,6 +4,11 @@ use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use std::collections::HashMap;
 
+/// Squared distance below which two cameras are considered overlapping.
+/// Frustum pairs are skipped when cameras are this close, which prevents the
+/// visual glitch at startup when all viewports share the same default position.
+const MIN_FRUSTUM_CAMERA_DISTANCE_SQ: f32 = 0.01;
+
 pub struct FrustumPlugin;
 
 impl Plugin for FrustumPlugin {
@@ -54,6 +59,7 @@ struct FrustumDrawParams<'w, 's> {
             Entity,
             &'static Camera,
             &'static Projection,
+            &'static GlobalTransform,
             Option<&'static ViewportConfig>,
         ),
         With<MainCamera>,
@@ -189,8 +195,11 @@ fn draw_viewport_frustums(mut params: FrustumDrawParams<'_, '_>, mut commands: C
 
     let mut sources = Vec::new();
     let mut targets = Vec::new();
+    let mut camera_positions: HashMap<Entity, Vec3> = HashMap::new();
 
-    for (camera_entity, camera, projection, config) in params.main_viewports.iter() {
+    for (camera_entity, camera, projection, global_transform, config) in
+        params.main_viewports.iter()
+    {
         if !camera.is_active {
             continue;
         }
@@ -203,6 +212,7 @@ fn draw_viewport_frustums(mut params: FrustumDrawParams<'_, '_>, mut commands: C
             continue;
         };
 
+        camera_positions.insert(camera_entity, global_transform.translation());
         targets.push((camera_entity, RenderLayers::layer(viewport_layer)));
 
         if !config.show_frustums {
@@ -246,6 +256,14 @@ fn draw_viewport_frustums(mut params: FrustumDrawParams<'_, '_>, mut commands: C
         for (target_camera, render_layers) in &targets {
             if source_camera == *target_camera {
                 continue;
+            }
+            if let (Some(&src_pos), Some(&tgt_pos)) = (
+                camera_positions.get(&source_camera),
+                camera_positions.get(target_camera),
+            ) {
+                if (src_pos - tgt_pos).length_squared() < MIN_FRUSTUM_CAMERA_DISTANCE_SQ {
+                    continue;
+                }
             }
             let root_key = CameraFrustumRootVisual {
                 source: source_camera,
