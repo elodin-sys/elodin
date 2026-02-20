@@ -1,8 +1,10 @@
-use bevy::prelude::*;
 use bevy::asset::RenderAssetUsages;
+use bevy::mesh::{
+    Indices, Mesh, PrimitiveTopology, SphereKind, SphereMeshBuilder, VertexAttributeValues,
+};
 use bevy::pbr::MaterialPlugin;
+use bevy::prelude::*;
 use bevy::render::alpha::AlphaMode;
-use bevy::mesh::{Indices, Mesh, PrimitiveTopology, SphereKind, SphereMeshBuilder, VertexAttributeValues};
 
 use bevy_lower_tri_material::{params_from_linear, LowerTriMaterial, LowerTriTransformExt};
 
@@ -33,12 +35,13 @@ fn setup(
     mut materials: ResMut<Assets<LowerTriMaterial>>,
     mut standard_materials: ResMut<Assets<StandardMaterial>>,
 ) {
-
     // let sectors = 64;
     // let stacks = 32;
 
     let sectors = 20;
     let stacks = 10;
+    let transparent = false;
+
     // Camera
     commands.spawn((
         Camera3d::default(),
@@ -69,19 +72,21 @@ fn setup(
     let a = 1.35;
     let b = 0.40;
     let c = 0.25;
-    let d = sqrt(a*a + b*b);
+    let d = sqrt(a * a + b * b);
     let e = sqrt(2.0);
+    #[rustfmt::skip]
     let linear = Mat3::from_cols_array(&[
-        d/e, 0.0, 0.0,
-        (a*a - b*b)/(e * d),   a*b*e/d, 0.0,
+        d/e,                 0.0,     0.0,
+        (a*a - b*b)/(e * d), a*b*e/d, 0.0,
+        0.0,                 0.0,     c,
+    ]);
+    #[rustfmt::skip]
+    let linear2 = Mat3::from_cols_array(&[
+        a, 0.0, 0.0,
+        0.0,   b, 0.0,
         0.0,   0.0,   c,
     ]);
-    // let linear = Mat3::from_cols_array(&[
-    //     a, 0.0, 0.0,
-    //     0.0,   b, 0.0,
-    //     0.0,   0.0,   c,
-    // ]);
-    let deform = Mat4::from_mat3(linear);
+    let deform = Mat4::from_mat3(linear2);
     // New sphere with matrix baked into the mesh (for normals / CPU-deformed geometry).
     let mut deformed_sphere_mesh =
         SphereMeshBuilder::new(1.0, SphereKind::Uv { sectors, stacks }).build();
@@ -89,99 +94,134 @@ fn setup(
     let deformed_sphere = meshes.add(deformed_sphere_mesh);
 
     let params = params_from_linear(linear);
+    let params2 = params_from_linear(linear2);
 
-    // let alpha = 0.35;
-    let alpha = 0.1;
-    let unlit = false;
-    // Transparent materials so the grid is visible through the surface.
+    let (base_color_deformed, regular_color, deformed_color, alpha_mode) = if transparent {
+        let alpha = 0.35;
+        (
+            Color::srgba(0.2, 0.6, 0.9, alpha),
+            Color::srgba(0.9, 0.4, 0.2, alpha),
+            Color::srgba(0.4, 0.9, 0.2, alpha),
+            AlphaMode::Blend,
+        )
+    } else {
+        (
+            Color::srgb(0.2, 0.6, 0.9),
+            Color::srgb(0.9, 0.4, 0.2),
+            Color::srgb(0.4, 0.9, 0.2),
+            AlphaMode::Opaque,
+        )
+    };
+
     let material = materials.add(LowerTriMaterial {
         base: StandardMaterial {
-            unlit,
-            base_color: Color::srgba(0.2, 0.6, 0.9, alpha),
+            base_color: base_color_deformed,
             perceptual_roughness: 0.35,
             metallic: 0.05,
-            alpha_mode: AlphaMode::Blend,
+            alpha_mode,
             ..default()
         },
         extension: LowerTriTransformExt { params },
     });
 
     let regular_material = standard_materials.add(StandardMaterial {
-        unlit,
-        base_color: Color::srgba(0.9, 0.4, 0.2, alpha),
+        base_color: regular_color,
         perceptual_roughness: 0.35,
         metallic: 0.05,
-        alpha_mode: AlphaMode::Blend,
+        alpha_mode,
         ..default()
     });
 
     let deformed_material = standard_materials.add(StandardMaterial {
-        unlit,
-        base_color: Color::srgba(0.4, 0.9, 0.2, alpha),
+        base_color: deformed_color,
         perceptual_roughness: 0.35,
         metallic: 0.05,
-        alpha_mode: AlphaMode::Blend,
+        alpha_mode,
         ..default()
     });
 
-    // Grid line meshes: quad-like edges on the ellipsoids (same UV layout as the spheres).
-    let grid_mesh_deformed = meshes.add(uv_sphere_grid_line_mesh(1.0, sectors, stacks, deform));
-    let grid_mesh_unit = meshes.add(uv_sphere_grid_line_mesh(1.0, sectors, stacks, Mat4::IDENTITY));
-    let grid_material = standard_materials.add(StandardMaterial {
-        // base_color: Color::srgba(0.15, 0.15, 0.2, 0.95),
-        base_color: Color::srgba(0., 0., 0., 1.0),
-        unlit: true,
-        ..default()
+    // Single unit-sphere grid mesh; deformation is done in the vertex shader via LowerTriMaterial.
+    let grid_mesh = meshes.add(uv_sphere_grid_line_mesh(1.0, sectors, stacks));
+
+    let grid_material_deformed = materials.add(LowerTriMaterial {
+        base: StandardMaterial {
+            base_color: Color::srgba(0., 0., 0., 1.0),
+            unlit: true,
+            ..default()
+        },
+        extension: LowerTriTransformExt { params },
+    });
+
+    let grid_material_deformed2 = materials.add(LowerTriMaterial {
+        base: StandardMaterial {
+            base_color: Color::srgba(0., 0., 0., 1.0),
+            unlit: true,
+            ..default()
+        },
+        extension: LowerTriTransformExt { params: params2 },
+    });
+    let grid_material_unit = materials.add(LowerTriMaterial {
+        base: StandardMaterial {
+            base_color: Color::srgba(0., 0., 0., 1.0),
+            unlit: true,
+            ..default()
+        },
+        extension: LowerTriTransformExt {
+            params: bevy_lower_tri_material::LowerTriParams::default(),
+        },
     });
 
     let shadow_receiver = true;
-    let maybe_add = |mut ecommands: EntityCommands| -> EntityCommands {
-        ecommands.insert_if(bevy::light::NotShadowReceiver,
-                            || !shadow_receiver);
-        ecommands
-    };
-
     // Deformed by material (shader) — same unit sphere, deformed at render time.
-    maybe_add(commands.spawn((
-        Mesh3d(sphere.clone()),
-        MeshMaterial3d(material),
-        Transform::from_xyz(-1.2, 0.0, 0.0),
-        Name::new("deformed by shader"),
-    )));
-    maybe_add(commands.spawn((
-        Mesh3d(grid_mesh_deformed.clone()),
-        MeshMaterial3d(grid_material.clone()),
-        Transform::from_xyz(-1.2, 0.0, 0.0),
-        Name::new("grid (deformed by shader)"),
-    )));
+    commands
+        .spawn((
+            Mesh3d(sphere.clone()),
+            MeshMaterial3d(material),
+            Transform::from_xyz(-1.2, 0.0, 0.0),
+            Name::new("deformed by shader"),
+        ))
+        .insert_if(bevy::light::NotShadowReceiver, || !shadow_receiver)
+        .with_children(|commands| {
+            commands.spawn((
+                Mesh3d(grid_mesh.clone()),
+                MeshMaterial3d(grid_material_deformed.clone()),
+                Name::new("grid (deformed by shader)"),
+            ));
+        });
 
     // Deformed by apply_matrix_to_mesh — normals reflect actual mesh geometry.
-    maybe_add(commands.spawn((
-        Mesh3d(deformed_sphere),
-        MeshMaterial3d(deformed_material),
-        Transform::from_xyz(4.2, 0.0, 0.0),
-        Name::new("deformed mesh"),
-    )));
-    maybe_add(commands.spawn((
-        Mesh3d(grid_mesh_deformed),
-        MeshMaterial3d(grid_material.clone()),
-        Transform::from_xyz(4.2, 0.0, 0.0),
-        Name::new("grid (deformed mesh)"),
-    )));
+    commands
+        .spawn((
+            Mesh3d(deformed_sphere),
+            MeshMaterial3d(deformed_material),
+            Transform::from_xyz(4.2, 0.0, 0.0),
+            Name::new("deformed mesh"),
+        ))
+        .insert_if(bevy::light::NotShadowReceiver, || !shadow_receiver)
+        .with_children(|commands| {
+            commands.spawn((
+                Mesh3d(grid_mesh.clone()),
+                MeshMaterial3d(grid_material_deformed2.clone()),
+                Name::new("grid (deformed mesh)"),
+            ));
+        });
 
     // Control sphere: no deformation (plain StandardMaterial).
-    maybe_add(commands.spawn((
-        Mesh3d(sphere),
-        MeshMaterial3d(regular_material),
-        Transform::from_xyz(1.2, 0.0, 0.0),
-        Name::new("control"),
-    )));
-    maybe_add(commands.spawn((
-        Mesh3d(grid_mesh_unit),
-        MeshMaterial3d(grid_material),
-        Transform::from_xyz(1.2, 0.0, 0.0),
-        Name::new("grid (control)"),
-    )));
+    commands
+        .spawn((
+            Mesh3d(sphere),
+            MeshMaterial3d(regular_material),
+            Transform::from_xyz(1.2, 0.0, 0.0),
+            Name::new("control"),
+        ))
+        .insert_if(bevy::light::NotShadowReceiver, || !shadow_receiver)
+        .with_children(|commands| {
+            commands.spawn((
+                Mesh3d(grid_mesh),
+                MeshMaterial3d(grid_material_unit),
+                Name::new("grid (control)"),
+            ));
+        });
 }
 
 fn draw_normals(
@@ -222,7 +262,9 @@ fn draw_normals(
 /// Builds a line-list mesh for the UV sphere grid (quad-like edges). Uses the same vertex layout
 /// as Bevy's `SphereMeshBuilder::uv`. Pass `Mat4::IDENTITY` for a unit sphere grid, or a deform
 /// matrix to match a deformed ellipsoid.
-fn uv_sphere_grid_line_mesh(radius: f32, sectors: u32, stacks: u32, deform: Mat4) -> Mesh {
+/// Builds a line-list mesh for the UV sphere grid in **unit-sphere** space (radius, no deform).
+/// Deformation is applied at runtime by using a material with a vertex shader (e.g. `LowerTriMaterial`).
+fn uv_sphere_grid_line_mesh(radius: f32, sectors: u32, stacks: u32) -> Mesh {
     use std::f32::consts::PI;
 
     let sector_step = 2.0 * PI / sectors as f32;
@@ -237,8 +279,7 @@ fn uv_sphere_grid_line_mesh(radius: f32, sectors: u32, stacks: u32, deform: Mat4
             let sector_angle = (j as f32) * sector_step;
             let x = xy * sector_angle.cos();
             let y = xy * sector_angle.sin();
-            let p = deform.transform_point3(Vec3::new(x, y, z));
-            positions.push(p.to_array());
+            positions.push([x, y, z]);
         }
     }
 

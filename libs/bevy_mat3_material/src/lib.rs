@@ -2,8 +2,8 @@ use bevy::{
     pbr::MaterialExtension,
     prelude::*,
     reflect::TypePath,
-    shader::ShaderRef,
     render::render_resource::{AsBindGroup, ShaderType},
+    shader::ShaderRef,
 };
 
 /// GPU-side parameters for the lower-triangular transform.
