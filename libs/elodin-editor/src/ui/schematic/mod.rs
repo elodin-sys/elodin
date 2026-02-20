@@ -161,6 +161,11 @@ impl SchematicParam<'_, '_> {
                             .get(cam_entity)
                             .map(|config| config.show_arrows)
                             .unwrap_or(true);
+                        let create_frustum = self
+                            .viewport_configs
+                            .get(cam_entity)
+                            .map(|config| config.create_frustum)
+                            .unwrap_or(false);
                         let show_frustums = self
                             .viewport_configs
                             .get(cam_entity)
@@ -196,6 +201,7 @@ impl SchematicParam<'_, '_> {
                             active: false,
                             show_grid,
                             show_arrows,
+                            create_frustum,
                             show_frustums,
                             frustums_color,
                             frustums_thickness,

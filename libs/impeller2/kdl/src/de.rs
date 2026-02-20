@@ -325,6 +325,11 @@ fn parse_viewport(node: &KdlNode, kdl_src: &str) -> Result<Panel, KdlSchematicEr
         .and_then(|v| v.as_bool())
         .unwrap_or(true);
 
+    let create_frustum = node
+        .get("create_frustum")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
     let show_frustums = node
         .get("show_frustums")
         .or_else(|| node.get("show_frustum"))
@@ -418,6 +423,7 @@ fn parse_viewport(node: &KdlNode, kdl_src: &str) -> Result<Panel, KdlSchematicEr
         active,
         show_grid,
         show_arrows,
+        create_frustum,
         show_frustums,
         frustums_color,
         frustums_thickness,
@@ -1779,6 +1785,18 @@ mod tests {
             panic!("Expected viewport panel");
         };
         assert!(viewport.show_frustums);
+    }
+
+    #[test]
+    fn test_parse_viewport_create_frustum() {
+        let kdl = r#"viewport create_frustum=#true"#;
+        let schematic = parse_schematic(kdl).unwrap();
+
+        assert_eq!(schematic.elems.len(), 1);
+        let SchematicElem::Panel(Panel::Viewport(viewport)) = &schematic.elems[0] else {
+            panic!("Expected viewport panel");
+        };
+        assert!(viewport.create_frustum);
     }
 
     #[test]

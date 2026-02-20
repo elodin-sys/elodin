@@ -210,6 +210,24 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
             .inner_margin(egui::Margin::symmetric(8, 8))
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new("CREATE FRUSTUM").color(scheme.text_secondary));
+                    ui.with_layout(egui::Layout::right_to_left(Align::Min), |ui| {
+                        let label = if viewport_config.create_frustum {
+                            "CREATED"
+                        } else {
+                            "CREATE"
+                        };
+                        let response = ui.add(
+                            EButton::highlight(label).disabled(viewport_config.create_frustum),
+                        );
+                        if response.clicked() && !viewport_config.create_frustum {
+                            viewport_config.create_frustum = true;
+                        }
+                    });
+                });
+
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
                     ui.label(egui::RichText::new("SHOW FRUSTUMS").color(scheme.text_secondary));
                     ui.with_layout(egui::Layout::right_to_left(Align::Min), |ui| {
                         theme::configure_input_with_border(ui.style_mut());
@@ -217,7 +235,7 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
                     });
                 });
 
-                if viewport_config.show_frustums {
+                if viewport_config.create_frustum {
                     ui.add_space(8.0);
 
                     let mut frustums_color = viewport_config.frustums_color.into_color32();
