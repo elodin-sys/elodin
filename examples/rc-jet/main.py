@@ -91,13 +91,13 @@ def setup_world(config: BDXConfig) -> tuple[el.World, el.EntityId, el.EntityId]:
         """
         tabs {
             hsplit name="Main View" {
-                viewport name=Viewport pos="bdx.world_pos.translate_world(-8.0,-8.0,4.0)" look_at="bdx.world_pos" show_grid=#true show_frustum=#true frustums_color="yalk" frustums_thickness=0.007 near=0.05 far=400.0 active=#true
+                viewport name=Viewport pos="bdx.world_pos.translate_world(-8.0,-8.0,4.0)" look_at="bdx.world_pos" show_grid=#true active=#true
                 vsplit share=0.4 {
                     vsplit {
                         graph "bdx.alpha" name="Angle of Attack (rad)"
                         graph "bdx.thrust" name="Thrust (N)"
-                        viewport name=TGTViewport pos="target.world_pos.translate_world(1,1,0.2)" look_at="bdx.world_pos" show_grid=#true show_frustum=#true frustums_color="cyan" frustums_thickness=0.004
-                        viewport name=FPVViewport pos="bdx.world_pos.rotate_z(-90).translate_y(-2.0)" show_grid=#true show_frustum=#true frustums_color="red" frustums_thickness=0.01 near=0.02 far=120.0
+                        viewport name=TGTViewport pos="target.world_pos.translate_world(1,1,0.2)" look_at="bdx.world_pos" show_grid=#true
+                        viewport name=FPVViewport pos="bdx.world_pos.rotate_z(-90).translate_y(-2.0)" show_grid=#true
                     }
                 }
             }
@@ -131,7 +131,7 @@ def setup_world(config: BDXConfig) -> tuple[el.World, el.EntityId, el.EntityId]:
                 }
             }
             hsplit name="Navigation" {
-                viewport name="Top-Down View" pos="bdx.world_pos.translate_world(0.0, 0.0, 150.0)" look_at="bdx.world_pos" fov=60.0 show_grid=#true show_frustum=#true frustums_color="mint" frustums_thickness=0.003 near=1.0 far=800.0
+                viewport name="Top-Down View" pos="bdx.world_pos.translate_world(0.0, 0.0, 150.0)" look_at="bdx.world_pos" fov=60.0 show_grid=#true
                 query_plot name="Ground Track (XY)" query="SELECT bdx_world_pos.bdx_world_pos[5], bdx_world_pos.bdx_world_pos[6] FROM bdx_world_pos" type="sql" mode="xy" x_label="X Position (m)" y_label="Y Position (m)" auto_refresh=#true refresh_interval=500 {
                     color cyan
                 }
