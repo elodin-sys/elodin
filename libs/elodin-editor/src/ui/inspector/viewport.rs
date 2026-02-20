@@ -209,31 +209,36 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
         egui::Frame::NONE
             .inner_margin(egui::Margin::symmetric(8, 8))
             .show(ui, |ui| {
+                let create_button_width = 88.0;
                 ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new("CREATE FRUSTUM").color(scheme.text_secondary));
+                    ui.label(egui::RichText::new("FRUSTRUM").color(scheme.text_secondary));
                     ui.with_layout(egui::Layout::right_to_left(Align::Min), |ui| {
-                        let label = if viewport_config.create_frustum {
-                            "CREATED"
-                        } else {
-                            "CREATE"
-                        };
                         let response = ui.add(
-                            EButton::highlight(label).disabled(viewport_config.create_frustum),
+                            EButton::highlight("CREATE")
+                                .width(create_button_width)
+                                .disabled(viewport_config.create_frustum),
                         );
                         if response.clicked() && !viewport_config.create_frustum {
                             viewport_config.create_frustum = true;
                         }
                     });
                 });
-
-                ui.add_space(8.0);
-                ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new("SHOW FRUSTUMS").color(scheme.text_secondary));
-                    ui.with_layout(egui::Layout::right_to_left(Align::Min), |ui| {
-                        theme::configure_input_with_border(ui.style_mut());
-                        ui.checkbox(&mut viewport_config.show_frustums, "");
+                if viewport_config.create_frustum {
+                    ui.add_space(4.0);
+                    ui.horizontal(|ui| {
+                        ui.label("");
+                        ui.with_layout(egui::Layout::right_to_left(Align::Min), |ui| {
+                            ui.add_sized(
+                                [create_button_width, 18.0],
+                                egui::Label::new(
+                                    egui::RichText::new("CREATED")
+                                        .color(scheme.highlight)
+                                        .strong(),
+                                ),
+                            );
+                        });
                     });
-                });
+                }
 
                 if viewport_config.create_frustum {
                     ui.add_space(8.0);
@@ -261,9 +266,7 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
 
                     ui.add_space(8.0);
                     ui.horizontal(|ui| {
-                        ui.label(
-                            egui::RichText::new("FRUSTUM THICKNESS").color(scheme.text_secondary),
-                        );
+                        ui.label(egui::RichText::new("THICKNESS").color(scheme.text_secondary));
                         ui.with_layout(egui::Layout::right_to_left(Align::Min), |ui| {
                             let mut thickness = viewport_config.frustums_thickness;
                             if ui
@@ -275,6 +278,17 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
                         });
                     });
                 }
+
+                ui.add_space(8.0);
+                ui.separator();
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new("SHOW FRUSTUMS").color(scheme.text_secondary));
+                    ui.with_layout(egui::Layout::right_to_left(Align::Min), |ui| {
+                        theme::configure_input_with_border(ui.style_mut());
+                        ui.checkbox(&mut viewport_config.show_frustums, "");
+                    });
+                });
             });
     }
 }
