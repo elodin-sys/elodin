@@ -518,6 +518,7 @@ impl WidgetSystem for DataOverviewWidget<'_, '_> {
         let data_time_range: Option<(Timestamp, Timestamp)> = summaries
             .iter()
             .filter_map(|s| s.timestamp_range)
+            .filter(|(min, _)| min.0 > 0)
             .fold(None, |acc: Option<(Timestamp, Timestamp)>, (min, max)| {
                 Some(match acc {
                     None => (min, max),
