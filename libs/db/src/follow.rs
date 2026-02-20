@@ -336,9 +336,7 @@ async fn run_follower_inner(config: &FollowConfig, db: &Arc<DB>) -> Result<(), E
                     }
                     if timestamps.len() > skip {
                         db.last_updated.update_max(*timestamps.last().unwrap());
-                        if let Some(&first_valid) =
-                            timestamps[skip..].iter().find(|ts| ts.0 > 0)
-                        {
+                        if let Some(&first_valid) = timestamps[skip..].iter().find(|ts| ts.0 > 0) {
                             db.earliest_timestamp.update_min(first_valid);
                         }
                     }
