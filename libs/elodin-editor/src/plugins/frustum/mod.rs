@@ -9,6 +9,14 @@ use std::collections::HashMap;
 /// visual glitch at startup when all viewports share the same default position.
 const MIN_FRUSTUM_CAMERA_DISTANCE_SQ: f32 = 0.01;
 
+type MainViewportQueryItem = (
+    Entity,
+    &'static Camera,
+    &'static Projection,
+    &'static GlobalTransform,
+    Option<&'static ViewportConfig>,
+);
+
 pub struct FrustumPlugin;
 
 impl Plugin for FrustumPlugin {
@@ -52,18 +60,7 @@ struct CameraFrustumLineVisual {
 
 #[derive(SystemParam)]
 struct FrustumDrawParams<'w, 's> {
-    main_viewports: Query<
-        'w,
-        's,
-        (
-            Entity,
-            &'static Camera,
-            &'static Projection,
-            &'static GlobalTransform,
-            Option<&'static ViewportConfig>,
-        ),
-        With<MainCamera>,
-    >,
+    main_viewports: Query<'w, 's, MainViewportQueryItem, With<MainCamera>>,
     materials: ResMut<'w, Assets<StandardMaterial>>,
     material_cache: ResMut<'w, FrustumMaterialCache>,
     line_assets: Option<Res<'w, FrustumLineAssets>>,
@@ -260,10 +257,9 @@ fn draw_viewport_frustums(mut params: FrustumDrawParams<'_, '_>, mut commands: C
             if let (Some(&src_pos), Some(&tgt_pos)) = (
                 camera_positions.get(&source_camera),
                 camera_positions.get(target_camera),
-            ) {
-                if (src_pos - tgt_pos).length_squared() < MIN_FRUSTUM_CAMERA_DISTANCE_SQ {
-                    continue;
-                }
+            ) && (src_pos - tgt_pos).length_squared() < MIN_FRUSTUM_CAMERA_DISTANCE_SQ
+            {
+                continue;
             }
             let root_key = CameraFrustumRootVisual {
                 source: source_camera,
