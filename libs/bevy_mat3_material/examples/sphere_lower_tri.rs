@@ -10,7 +10,7 @@ fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
         .add_plugins(bevy_inspector_egui::bevy_egui::EguiPlugin::default())
-        // .add_plugins(bevy_inspector_egui::quick::WorldInspectorPlugin::new())
+        .add_plugins(bevy_inspector_egui::quick::WorldInspectorPlugin::new())
         .add_plugins(bevy_editor_cam::DefaultEditorCamPlugins)
         .add_plugins(MaterialPlugin::<LowerTriMaterial>::default())
         .add_systems(Startup, setup)
@@ -134,53 +134,54 @@ fn setup(
         ..default()
     });
 
+    let shadow_receiver = true;
+    let maybe_add = |mut ecommands: EntityCommands| -> EntityCommands {
+        ecommands.insert_if(bevy::light::NotShadowReceiver,
+                            || !shadow_receiver);
+        ecommands
+    };
+
     // Deformed by material (shader) — same unit sphere, deformed at render time.
-    commands.spawn((
+    maybe_add(commands.spawn((
         Mesh3d(sphere.clone()),
         MeshMaterial3d(material),
         Transform::from_xyz(-1.2, 0.0, 0.0),
-        bevy::light::NotShadowReceiver,
         Name::new("deformed by shader"),
-    ));
-    commands.spawn((
+    )));
+    maybe_add(commands.spawn((
         Mesh3d(grid_mesh_deformed.clone()),
         MeshMaterial3d(grid_material.clone()),
         Transform::from_xyz(-1.2, 0.0, 0.0),
-        bevy::light::NotShadowReceiver,
         Name::new("grid (deformed by shader)"),
-    ));
+    )));
 
     // Deformed by apply_matrix_to_mesh — normals reflect actual mesh geometry.
-    commands.spawn((
+    maybe_add(commands.spawn((
         Mesh3d(deformed_sphere),
         MeshMaterial3d(deformed_material),
         Transform::from_xyz(4.2, 0.0, 0.0),
-        bevy::light::NotShadowReceiver,
         Name::new("deformed mesh"),
-    ));
-    commands.spawn((
+    )));
+    maybe_add(commands.spawn((
         Mesh3d(grid_mesh_deformed),
         MeshMaterial3d(grid_material.clone()),
         Transform::from_xyz(4.2, 0.0, 0.0),
-        bevy::light::NotShadowReceiver,
         Name::new("grid (deformed mesh)"),
-    ));
+    )));
 
     // Control sphere: no deformation (plain StandardMaterial).
-    commands.spawn((
+    maybe_add(commands.spawn((
         Mesh3d(sphere),
         MeshMaterial3d(regular_material),
         Transform::from_xyz(1.2, 0.0, 0.0),
-        bevy::light::NotShadowReceiver,
         Name::new("control"),
-    ));
-    commands.spawn((
+    )));
+    maybe_add(commands.spawn((
         Mesh3d(grid_mesh_unit),
         MeshMaterial3d(grid_material),
         Transform::from_xyz(1.2, 0.0, 0.0),
-        bevy::light::NotShadowReceiver,
         Name::new("grid (control)"),
-    ));
+    )));
 }
 
 fn draw_normals(

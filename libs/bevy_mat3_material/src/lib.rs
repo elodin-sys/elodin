@@ -40,6 +40,11 @@ impl MaterialExtension for LowerTriTransformExt {
     fn vertex_shader() -> ShaderRef {
         "shaders/lower_tri_transform.wgsl".into()
     }
+
+    /// Use the same vertex deformation in the prepass (depth / shadow) pass so shadows match the ellipsoid.
+    fn prepass_vertex_shader() -> ShaderRef {
+        "shaders/lower_tri_prepass.wgsl".into()
+    }
 }
 
 /// Convenience alias: Standard PBR material + our vertex-shader extension.
