@@ -6,7 +6,9 @@ use bevy::pbr::MaterialPlugin;
 use bevy::prelude::*;
 use bevy::render::alpha::AlphaMode;
 
-use bevy_lower_tri_material::{params_from_linear, LowerTriMaterial, LowerTriTransformExt};
+use bevy_lower_tri_material::{
+    params_from_linear, LowerTriMaterial, LowerTriParamsComponent, LowerTriTransformExt,
+};
 
 fn main() {
     App::new()
@@ -15,10 +17,23 @@ fn main() {
         .add_plugins(bevy_inspector_egui::quick::WorldInspectorPlugin::new())
         .add_plugins(bevy_editor_cam::DefaultEditorCamPlugins)
         .add_plugins(MaterialPlugin::<LowerTriMaterial>::default())
+        .register_type::<LowerTriParamsComponent>()
         .add_systems(Startup, setup)
-        .add_systems(Update, draw_axes_gizmos)
+        .add_systems(Update, (draw_axes_gizmos, sync_lower_tri_params_from_component))
         // .add_systems(Update, draw_normals)
         .run();
+}
+
+/// Syncs [`LowerTriParamsComponent`] into the entity's [`LowerTriMaterial`] so inspector edits apply.
+fn sync_lower_tri_params_from_component(
+    mut materials: ResMut<Assets<LowerTriMaterial>>,
+    query: Query<(&LowerTriParamsComponent, &MeshMaterial3d<LowerTriMaterial>)>,
+) {
+    for (comp, mesh_material) in &query {
+        if let Some(material) = materials.get_mut(&mesh_material.0) {
+            material.extension.params = params_from_linear(comp.linear);
+        }
+    }
 }
 
 fn draw_axes_gizmos(mut gizmos: Gizmos) {
@@ -113,6 +128,7 @@ fn setup(
         )
     };
 
+    // Material for "deformed by shader" — unique handle so LowerTriParamsComponent can drive it.
     let material = materials.add(LowerTriMaterial {
         base: StandardMaterial {
             base_color: base_color_deformed,
@@ -143,15 +159,6 @@ fn setup(
     // Single unit-sphere grid mesh; deformation is done in the vertex shader via LowerTriMaterial.
     let grid_mesh = meshes.add(uv_sphere_grid_line_mesh(1.0, sectors, stacks));
 
-    let grid_material_deformed = materials.add(LowerTriMaterial {
-        base: StandardMaterial {
-            base_color: Color::srgba(0., 0., 0., 1.0),
-            unlit: true,
-            ..default()
-        },
-        extension: LowerTriTransformExt { params },
-    });
-
     let grid_material_deformed2 = materials.add(LowerTriMaterial {
         base: StandardMaterial {
             base_color: Color::srgba(0., 0., 0., 1.0),
@@ -172,11 +179,12 @@ fn setup(
     });
 
     let shadow_receiver = true;
-    // Deformed by material (shader) — same unit sphere, deformed at render time.
+    // Deformed by material (shader) — params editable via LowerTriParamsComponent in the inspector.
     commands
         .spawn((
             Mesh3d(sphere.clone()),
-            MeshMaterial3d(material),
+            MeshMaterial3d(material.clone()),
+            LowerTriParamsComponent { linear },
             Transform::from_xyz(-1.2, 0.0, 0.0),
             Name::new("deformed by shader"),
         ))
@@ -184,7 +192,7 @@ fn setup(
         .with_children(|commands| {
             commands.spawn((
                 Mesh3d(grid_mesh.clone()),
-                MeshMaterial3d(grid_material_deformed.clone()),
+                MeshMaterial3d(material),
                 Name::new("grid (deformed by shader)"),
             ));
         });

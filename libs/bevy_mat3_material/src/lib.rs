@@ -61,3 +61,24 @@ pub fn params_from_linear(linear: Mat3) -> LowerTriParams {
         normal_matrix,
     }
 }
+
+/// Component that drives [`LowerTriMaterial`] from the inspector.
+///
+/// Edit `linear` in the inspector; it is synced to the material each frame and the normal matrix
+/// is derived automatically. Attach this to any entity with `MeshMaterial3d<LowerTriMaterial>`
+/// that uses a material handle unique to that entity (or shared only with its grid child).
+#[derive(Component, Debug, Reflect)]
+#[reflect(Component)]
+pub struct LowerTriParamsComponent {
+    /// The 3×3 linear transform applied in the vertex shader (lower-triangular convention).
+    /// The normal matrix is computed as `linear.inverse().transpose()` when syncing to the material.
+    pub linear: Mat3,
+}
+
+impl Default for LowerTriParamsComponent {
+    fn default() -> Self {
+        Self {
+            linear: Mat3::IDENTITY,
+        }
+    }
+}
