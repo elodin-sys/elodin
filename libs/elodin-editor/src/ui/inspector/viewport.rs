@@ -15,15 +15,16 @@ use crate::EqlContext;
 use crate::object_3d::{ComponentArrayExt, EditableEQL, compile_eql_expr};
 use crate::ui::CameraQuery;
 use crate::ui::button::EButton;
-use crate::ui::colors::get_scheme;
+use crate::ui::colors::{EColor, get_scheme};
 use crate::ui::theme::configure_input_with_border;
 use crate::ui::widgets::WidgetSystem;
 use crate::{
     GridHandle, MainCamera,
+    ui::tiles::ViewportConfig,
     ui::{label::ELabel, theme, utils::MarginSides},
 };
 
-use super::{empty_inspector, eql_autocomplete, query};
+use super::{color_popup, empty_inspector, eql_autocomplete, query};
 
 /// Extract a 3-vector from a ComponentValue (e.g. F64 array of length >= 3). Returns None if not a numeric array or length < 3.
 fn extract_vec3(val: &ComponentValue) -> Option<Vector3<f64, ArrayRepr>> {
@@ -66,6 +67,7 @@ impl Viewport {
 pub struct InspectorViewport<'w, 's> {
     camera_query: Query<'w, 's, CameraQuery, With<MainCamera>>,
     viewports: Query<'w, 's, &'static mut Viewport>,
+    viewport_configs: Query<'w, 's, &'static mut ViewportConfig>,
     grid_visibility: Query<'w, 's, &'static mut Visibility, With<InfiniteGrid>>,
     eql_ctx: ResMut<'w, EqlContext>,
 }
@@ -88,6 +90,7 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
         let InspectorViewport {
             mut camera_query,
             mut viewports,
+            mut viewport_configs,
             mut grid_visibility,
             eql_ctx,
         } = state_mut;
@@ -98,6 +101,9 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
         };
 
         let Ok(mut viewport) = viewports.get_mut(camera) else {
+            return;
+        };
+        let Ok(mut viewport_config) = viewport_configs.get_mut(camera) else {
             return;
         };
 
@@ -173,6 +179,60 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
                     });
                 });
         }
+
+        ui.separator();
+        egui::Frame::NONE
+            .inner_margin(egui::Margin::symmetric(8, 8))
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new("SHOW FRUSTUMS").color(scheme.text_secondary));
+                    ui.with_layout(egui::Layout::right_to_left(Align::Min), |ui| {
+                        theme::configure_input_with_border(ui.style_mut());
+                        ui.checkbox(&mut viewport_config.show_frustums, "");
+                    });
+                });
+
+                if viewport_config.show_frustums {
+                    ui.add_space(8.0);
+
+                    let mut frustums_color = viewport_config.frustums_color.into_color32();
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new("FRUSTUM COLOR").color(scheme.text_secondary));
+                        ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
+                            let swatch = ui.add(
+                                egui::Button::new("")
+                                    .fill(frustums_color)
+                                    .stroke(egui::Stroke::new(1.0, scheme.border_primary))
+                                    .corner_radius(egui::CornerRadius::same(10))
+                                    .min_size(egui::vec2(20.0, 20.0)),
+                            );
+                            let color_id = ui.auto_id_with("frustums_color");
+                            if swatch.clicked() {
+                                egui::Popup::toggle_id(ui.ctx(), color_id);
+                            }
+                            color_popup(ui, &mut frustums_color, color_id, &swatch);
+                        });
+                    });
+                    viewport_config.frustums_color =
+                        impeller2_wkt::Color::from_color32(frustums_color);
+
+                    ui.add_space(8.0);
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            egui::RichText::new("FRUSTUM THICKNESS").color(scheme.text_secondary),
+                        );
+                        ui.with_layout(egui::Layout::right_to_left(Align::Min), |ui| {
+                            let mut thickness = viewport_config.frustums_thickness;
+                            if ui
+                                .add(egui::DragValue::new(&mut thickness).speed(0.001))
+                                .changed()
+                            {
+                                viewport_config.frustums_thickness = thickness.max(0.0001);
+                            }
+                        });
+                    });
+                }
+            });
     }
 }
 

@@ -27,3 +27,8 @@ tabs {
 
 ## Main API
 - `FrustumPlugin`
+
+## Inspector UX
+- In viewport inspector, frustum controls are contextual:
+  - `show_frustums` toggle is always visible.
+  - When enabled, a color swatch opens a color picker and `frustums_thickness` is editable.
