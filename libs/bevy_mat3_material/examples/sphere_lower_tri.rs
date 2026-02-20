@@ -1,6 +1,8 @@
 use bevy::prelude::*;
+use bevy::asset::RenderAssetUsages;
 use bevy::pbr::MaterialPlugin;
-use bevy::mesh::{SphereKind, SphereMeshBuilder, VertexAttributeValues};
+use bevy::render::alpha::AlphaMode;
+use bevy::mesh::{Indices, Mesh, PrimitiveTopology, SphereKind, SphereMeshBuilder, VertexAttributeValues};
 
 use bevy_lower_tri_material::{params_from_linear, LowerTriMaterial, LowerTriTransformExt};
 
@@ -8,12 +10,12 @@ fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
         .add_plugins(bevy_inspector_egui::bevy_egui::EguiPlugin::default())
-        .add_plugins(bevy_inspector_egui::quick::WorldInspectorPlugin::new())
+        // .add_plugins(bevy_inspector_egui::quick::WorldInspectorPlugin::new())
         .add_plugins(bevy_editor_cam::DefaultEditorCamPlugins)
         .add_plugins(MaterialPlugin::<LowerTriMaterial>::default())
         .add_systems(Startup, setup)
         .add_systems(Update, draw_axes_gizmos)
-        .add_systems(Update, draw_normals)
+        // .add_systems(Update, draw_normals)
         .run();
 }
 
@@ -40,7 +42,7 @@ fn setup(
     // Camera
     commands.spawn((
         Camera3d::default(),
-        Transform::from_xyz(-2.0, 1.8, 5.0).looking_at(Vec3::ZERO, Vec3::Y),
+        Transform::from_xyz(1.2, 0.0, 8.0).looking_at(Vec3::ZERO, Vec3::Y),
         bevy_editor_cam::controller::component::EditorCam::default(),
     ));
 
@@ -88,28 +90,47 @@ fn setup(
 
     let params = params_from_linear(linear);
 
-    // StandardMaterial base controls PBR appearance; our extension only modifies the vertex positions/normals.
+    // let alpha = 0.35;
+    let alpha = 0.1;
+    let unlit = false;
+    // Transparent materials so the grid is visible through the surface.
     let material = materials.add(LowerTriMaterial {
         base: StandardMaterial {
-            base_color: Color::srgb(0.2, 0.6, 0.9),
+            unlit,
+            base_color: Color::srgba(0.2, 0.6, 0.9, alpha),
             perceptual_roughness: 0.35,
             metallic: 0.05,
+            alpha_mode: AlphaMode::Blend,
             ..default()
         },
         extension: LowerTriTransformExt { params },
     });
 
     let regular_material = standard_materials.add(StandardMaterial {
-        base_color: Color::srgb(0.9, 0.4, 0.2),
+        unlit,
+        base_color: Color::srgba(0.9, 0.4, 0.2, alpha),
         perceptual_roughness: 0.35,
         metallic: 0.05,
+        alpha_mode: AlphaMode::Blend,
         ..default()
     });
 
     let deformed_material = standard_materials.add(StandardMaterial {
-        base_color: Color::srgb(0.4, 0.9, 0.2),
+        unlit,
+        base_color: Color::srgba(0.4, 0.9, 0.2, alpha),
         perceptual_roughness: 0.35,
         metallic: 0.05,
+        alpha_mode: AlphaMode::Blend,
+        ..default()
+    });
+
+    // Grid line meshes: quad-like edges on the ellipsoids (same UV layout as the spheres).
+    let grid_mesh_deformed = meshes.add(uv_sphere_grid_line_mesh(1.0, sectors, stacks, deform));
+    let grid_mesh_unit = meshes.add(uv_sphere_grid_line_mesh(1.0, sectors, stacks, Mat4::IDENTITY));
+    let grid_material = standard_materials.add(StandardMaterial {
+        // base_color: Color::srgba(0.15, 0.15, 0.2, 0.95),
+        base_color: Color::srgba(0., 0., 0., 1.0),
+        unlit: true,
         ..default()
     });
 
@@ -121,6 +142,13 @@ fn setup(
         bevy::light::NotShadowReceiver,
         Name::new("deformed by shader"),
     ));
+    commands.spawn((
+        Mesh3d(grid_mesh_deformed.clone()),
+        MeshMaterial3d(grid_material.clone()),
+        Transform::from_xyz(-1.2, 0.0, 0.0),
+        bevy::light::NotShadowReceiver,
+        Name::new("grid (deformed by shader)"),
+    ));
 
     // Deformed by apply_matrix_to_mesh — normals reflect actual mesh geometry.
     commands.spawn((
@@ -130,6 +158,13 @@ fn setup(
         bevy::light::NotShadowReceiver,
         Name::new("deformed mesh"),
     ));
+    commands.spawn((
+        Mesh3d(grid_mesh_deformed),
+        MeshMaterial3d(grid_material.clone()),
+        Transform::from_xyz(4.2, 0.0, 0.0),
+        bevy::light::NotShadowReceiver,
+        Name::new("grid (deformed mesh)"),
+    ));
 
     // Control sphere: no deformation (plain StandardMaterial).
     commands.spawn((
@@ -138,6 +173,13 @@ fn setup(
         Transform::from_xyz(1.2, 0.0, 0.0),
         bevy::light::NotShadowReceiver,
         Name::new("control"),
+    ));
+    commands.spawn((
+        Mesh3d(grid_mesh_unit),
+        MeshMaterial3d(grid_material),
+        Transform::from_xyz(1.2, 0.0, 0.0),
+        bevy::light::NotShadowReceiver,
+        Name::new("grid (control)"),
     ));
 }
 
@@ -174,6 +216,52 @@ fn draw_normals(
             );
         }
     }
+}
+
+/// Builds a line-list mesh for the UV sphere grid (quad-like edges). Uses the same vertex layout
+/// as Bevy's `SphereMeshBuilder::uv`. Pass `Mat4::IDENTITY` for a unit sphere grid, or a deform
+/// matrix to match a deformed ellipsoid.
+fn uv_sphere_grid_line_mesh(radius: f32, sectors: u32, stacks: u32, deform: Mat4) -> Mesh {
+    use std::f32::consts::PI;
+
+    let sector_step = 2.0 * PI / sectors as f32;
+    let stack_step = PI / stacks as f32;
+    let mut positions: Vec<[f32; 3]> = Vec::with_capacity(((stacks + 1) * (sectors + 1)) as usize);
+
+    for i in 0..=stacks {
+        let stack_angle = PI / 2.0 - (i as f32) * stack_step;
+        let xy = radius * stack_angle.cos();
+        let z = radius * stack_angle.sin();
+        for j in 0..=sectors {
+            let sector_angle = (j as f32) * sector_step;
+            let x = xy * sector_angle.cos();
+            let y = xy * sector_angle.sin();
+            let p = deform.transform_point3(Vec3::new(x, y, z));
+            positions.push(p.to_array());
+        }
+    }
+
+    let mut line_indices: Vec<u32> = Vec::new();
+    // Ring edges (constant stack i): (i*(sectors+1)+j) -> (i*(sectors+1)+j+1)
+    for i in 0..=stacks {
+        for j in 0..sectors {
+            let a = i * (sectors + 1) + j;
+            let b = a + 1;
+            line_indices.extend_from_slice(&[a, b]);
+        }
+    }
+    // Meridian edges (constant sector j): (i*(sectors+1)+j) -> ((i+1)*(sectors+1)+j)
+    for j in 0..=sectors {
+        for i in 0..stacks {
+            let a = i * (sectors + 1) + j;
+            let b = a + (sectors + 1);
+            line_indices.extend_from_slice(&[a, b]);
+        }
+    }
+
+    Mesh::new(PrimitiveTopology::LineList, RenderAssetUsages::default())
+        .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, positions)
+        .with_inserted_indices(Indices::U32(line_indices))
 }
 
 fn apply_matrix_to_mesh(mesh: &mut Mesh, m: Mat4) {
