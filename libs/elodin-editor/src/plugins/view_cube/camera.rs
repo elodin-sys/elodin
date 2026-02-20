@@ -1105,8 +1105,10 @@ mod tests {
     fn viewport_reset_restores_identity_transform_and_default_depth() {
         let mut transform = Transform::from_translation(Vec3::new(1.0, -2.0, 3.0))
             .with_rotation(Quat::from_rotation_y(0.4));
-        let mut editor_cam = EditorCam::default();
-        editor_cam.last_anchor_depth = -9.0;
+        let mut editor_cam = EditorCam {
+            last_anchor_depth: -9.0,
+            ..Default::default()
+        };
 
         apply_viewport_reset(&mut transform, &mut editor_cam);
 
@@ -1122,8 +1124,10 @@ mod tests {
     fn viewport_zoom_out_moves_back_along_view_and_updates_depth() {
         let mut transform = Transform::from_translation(Vec3::new(0.5, 1.0, -0.25))
             .with_rotation(Quat::from_rotation_y(0.3));
-        let mut editor_cam = EditorCam::default();
-        editor_cam.last_anchor_depth = -2.0;
+        let mut editor_cam = EditorCam {
+            last_anchor_depth: -2.0,
+            ..Default::default()
+        };
 
         let initial_translation = transform.translation;
         let expected_target_depth = 2.0 * VIEWPORT_ZOOM_OUT_MULTIPLIER;
