@@ -109,6 +109,7 @@ fn setup_primary_window_state(
 
 #[derive(Component)]
 pub struct ViewportConfig {
+    pub aspect: Option<f32>,
     pub show_arrows: bool,
     pub create_frustum: bool,
     pub show_frustums: bool,
@@ -1302,6 +1303,9 @@ impl ViewportPane {
         if let Some(far) = viewport.far {
             perspective.far = far;
         }
+        if let Some(aspect) = viewport.aspect {
+            perspective.aspect_ratio = aspect;
+        }
         if !(perspective.near > 0.0 && perspective.far > perspective.near) {
             warn!(
                 "Invalid viewport near/far (near={}, far={}), restoring defaults",
@@ -1348,6 +1352,7 @@ impl ViewportPane {
             },
             GridHandle { grid: grid_id },
             ViewportConfig {
+                aspect: viewport.aspect,
                 show_arrows: viewport.show_arrows,
                 create_frustum: viewport.create_frustum,
                 show_frustums: viewport.show_frustums,

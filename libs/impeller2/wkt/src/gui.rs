@@ -226,6 +226,8 @@ pub struct Viewport<T = ()> {
     pub near: Option<f32>,
     #[serde(default)]
     pub far: Option<f32>,
+    #[serde(default, alias = "aspect_ratio")]
+    pub aspect: Option<f32>,
     pub active: bool,
     pub show_grid: bool,
     pub show_arrows: bool,
@@ -256,6 +258,7 @@ impl<T> Viewport<T> {
             fov: self.fov,
             near: self.near,
             far: self.far,
+            aspect: self.aspect,
             active: self.active,
             show_grid: self.show_grid,
             show_arrows: self.show_arrows,
@@ -281,6 +284,7 @@ impl Default for Viewport {
             fov: 45.0,
             near: None,
             far: None,
+            aspect: None,
             active: false,
             show_grid: false,
             show_arrows: true,

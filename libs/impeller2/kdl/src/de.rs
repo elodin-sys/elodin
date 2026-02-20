@@ -274,6 +274,11 @@ fn parse_viewport(node: &KdlNode, kdl_src: &str) -> Result<Panel, KdlSchematicEr
         .get("far")
         .and_then(|v| v.as_float().or_else(|| v.as_integer().map(|i| i as f64)))
         .map(|v| v as f32);
+    let aspect = node
+        .get("aspect")
+        .or_else(|| node.get("aspect_ratio"))
+        .and_then(|v| v.as_float().or_else(|| v.as_integer().map(|i| i as f64)))
+        .map(|v| v as f32);
 
     if let Some(near) = near
         && near <= 0.0
@@ -304,6 +309,17 @@ fn parse_viewport(node: &KdlNode, kdl_src: &str) -> Result<Panel, KdlSchematicEr
             property: "far".to_string(),
             node: "viewport".to_string(),
             expected: "far must be > near".to_string(),
+            src: kdl_src.to_string(),
+            span: node.span(),
+        });
+    }
+    if let Some(aspect) = aspect
+        && aspect <= 0.0
+    {
+        return Err(KdlSchematicError::InvalidValue {
+            property: "aspect".to_string(),
+            node: "viewport".to_string(),
+            expected: "aspect must be > 0".to_string(),
             src: kdl_src.to_string(),
             span: node.span(),
         });
@@ -420,6 +436,7 @@ fn parse_viewport(node: &KdlNode, kdl_src: &str) -> Result<Panel, KdlSchematicEr
         fov,
         near,
         far,
+        aspect,
         active,
         show_grid,
         show_arrows,
@@ -1825,6 +1842,18 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_viewport_aspect() {
+        let kdl = r#"viewport aspect=1.7778"#;
+        let schematic = parse_schematic(kdl).unwrap();
+
+        assert_eq!(schematic.elems.len(), 1);
+        let SchematicElem::Panel(Panel::Viewport(viewport)) = &schematic.elems[0] else {
+            panic!("Expected viewport panel");
+        };
+        assert_eq!(viewport.aspect, Some(1.7778));
+    }
+
+    #[test]
     fn test_parse_viewport_rejects_invalid_near_far_pair() {
         let kdl = r#"viewport near=1.0 far=0.5"#;
         let err = parse_schematic(kdl).unwrap_err();
@@ -1832,6 +1861,20 @@ mod tests {
         match err {
             KdlSchematicError::InvalidValue { property, node, .. } => {
                 assert_eq!(property, "far");
+                assert_eq!(node, "viewport");
+            }
+            other => panic!("Expected invalid value error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_parse_viewport_rejects_invalid_aspect() {
+        let kdl = r#"viewport aspect=0.0"#;
+        let err = parse_schematic(kdl).unwrap_err();
+
+        match err {
+            KdlSchematicError::InvalidValue { property, node, .. } => {
+                assert_eq!(property, "aspect");
                 assert_eq!(node, "viewport");
             }
             other => panic!("Expected invalid value error, got {other:?}"),

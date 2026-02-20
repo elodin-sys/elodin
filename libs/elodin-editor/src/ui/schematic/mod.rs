@@ -149,6 +149,11 @@ impl SchematicParam<'_, '_> {
                                 _ => None,
                             })
                             .unwrap_or((45.0, None, None));
+                        let aspect = self
+                            .viewport_configs
+                            .get(cam_entity)
+                            .ok()
+                            .and_then(|config| config.aspect);
                         let mut show_grid = false;
                         if let Ok(grid_handle) = self.camera_grids.get(cam_entity)
                             && let Ok(visibility) = self.grid_visibility.get(grid_handle.grid)
@@ -198,6 +203,7 @@ impl SchematicParam<'_, '_> {
                             fov,
                             near,
                             far,
+                            aspect,
                             active: false,
                             show_grid,
                             show_arrows,

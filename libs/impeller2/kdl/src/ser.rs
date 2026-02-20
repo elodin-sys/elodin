@@ -157,6 +157,10 @@ fn serialize_viewport<T>(viewport: &Viewport<T>) -> KdlNode {
         push_rounded_float_prop(&mut node, "far", far as f64);
     }
 
+    if let Some(aspect) = viewport.aspect {
+        push_rounded_float_prop(&mut node, "aspect", aspect as f64);
+    }
+
     if let Some(ref pos) = viewport.pos {
         node.entries_mut()
             .push(KdlEntry::new_prop("pos", pos.clone()));
@@ -985,6 +989,7 @@ mod tests {
                 fov: 60.0,
                 near: None,
                 far: None,
+                aspect: None,
                 active: true,
                 show_grid: true,
                 show_arrows: true,
@@ -1026,6 +1031,7 @@ mod tests {
                 fov: 60.0,
                 near: Some(0.05),
                 far: Some(500.0),
+                aspect: Some(1.7778),
                 active: true,
                 show_grid: true,
                 show_arrows: false,
@@ -1053,6 +1059,7 @@ mod tests {
             "fov=",
             "near=",
             "far=",
+            "aspect=",
             "pos=",
             "look_at=",
             "hdr=",
@@ -1076,7 +1083,7 @@ mod tests {
         for window in indices.windows(2) {
             assert!(
                 window[0] < window[1],
-                "expected viewport properties in order name → fov → near → far → pos → look_at → hdr → show_grid → show_arrows → create_frustum → show_frustums → frustums_color → frustums_thickness → show_view_cube → active: `{viewport_line}`"
+                "expected viewport properties in order name → fov → near → far → aspect → pos → look_at → hdr → show_grid → show_arrows → create_frustum → show_frustums → frustums_color → frustums_thickness → show_view_cube → active: `{viewport_line}`"
             );
         }
     }
@@ -1313,6 +1320,7 @@ graph "value" {
                 fov: 45.0,
                 near: None,
                 far: None,
+                aspect: None,
                 active: false,
                 show_grid: false,
                 show_arrows: true,

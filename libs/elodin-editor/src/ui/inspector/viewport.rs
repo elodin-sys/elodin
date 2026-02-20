@@ -13,11 +13,11 @@ use nox::{ArrayBuf, ArrayRepr, Vector3};
 
 use crate::EqlContext;
 use crate::object_3d::{ComponentArrayExt, EditableEQL, compile_eql_expr};
-use crate::ui::CameraQuery;
 use crate::ui::button::EButton;
 use crate::ui::colors::{EColor, get_scheme};
 use crate::ui::theme::configure_input_with_border;
 use crate::ui::widgets::WidgetSystem;
+use crate::ui::{CameraQuery, ViewportRect};
 use crate::{
     GridHandle, MainCamera,
     ui::tiles::ViewportConfig,
@@ -68,6 +68,7 @@ pub struct InspectorViewport<'w, 's> {
     camera_query: Query<'w, 's, CameraQuery, With<MainCamera>>,
     viewports: Query<'w, 's, &'static mut Viewport>,
     viewport_configs: Query<'w, 's, &'static mut ViewportConfig>,
+    viewport_rects: Query<'w, 's, &'static ViewportRect, With<MainCamera>>,
     grid_visibility: Query<'w, 's, &'static mut Visibility, With<InfiniteGrid>>,
     eql_ctx: ResMut<'w, EqlContext>,
 }
@@ -91,6 +92,7 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
             mut camera_query,
             mut viewports,
             mut viewport_configs,
+            viewport_rects,
             mut grid_visibility,
             eql_ctx,
         } = state_mut;
@@ -180,6 +182,62 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
                     }
                     persp.near = near;
                     persp.far = far;
+
+                    ui.add_space(8.0);
+                    let derived_aspect = viewport_rects
+                        .get(camera)
+                        .ok()
+                        .and_then(|rect| rect.0)
+                        .and_then(|rect| {
+                            let size = rect.size();
+                            if size.x > 0.0 && size.y > 0.0 {
+                                Some((size.x / size.y, size.x, size.y))
+                            } else {
+                                None
+                            }
+                        });
+
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new("REAL ASPECT").color(scheme.text_secondary));
+                        ui.with_layout(egui::Layout::right_to_left(Align::Min), |ui| {
+                            if let Some((aspect, width, height)) = derived_aspect {
+                                ui.label(format!("{aspect:.3} ({width:.0}x{height:.0})"));
+                            } else {
+                                ui.label("N/A");
+                            }
+                        });
+                    });
+
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new("ASPECT MODE").color(scheme.text_secondary));
+                        ui.with_layout(egui::Layout::right_to_left(Align::Min), |ui| {
+                            let fixed_selected = viewport_config.aspect.is_some();
+                            if ui.selectable_label(fixed_selected, "FIXED").clicked()
+                                && viewport_config.aspect.is_none()
+                            {
+                                viewport_config.aspect = Some(
+                                    derived_aspect
+                                        .map(|(aspect, _, _)| aspect)
+                                        .unwrap_or(persp.aspect_ratio.max(0.0001)),
+                                );
+                            }
+                            ui.add_space(8.0);
+                            if ui.selectable_label(!fixed_selected, "AUTO").clicked() {
+                                viewport_config.aspect = None;
+                            }
+                        });
+                    });
+
+                    if let Some(aspect) = viewport_config.aspect.as_mut() {
+                        ui.horizontal(|ui| {
+                            ui.label(egui::RichText::new("ASPECT").color(scheme.text_secondary));
+                            ui.with_layout(egui::Layout::right_to_left(Align::Min), |ui| {
+                                if ui.add(egui::DragValue::new(aspect).speed(0.01)).changed() {
+                                    *aspect = (*aspect).max(0.0001);
+                                }
+                            });
+                        });
+                    }
                 });
         }
 

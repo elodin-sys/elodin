@@ -16,13 +16,14 @@ Viewport camera frustum overlay rendering.
 - `create_frustum` (bool): creates/publishes this viewport camera frustum.
 - `show_frustums` (bool): shows frustums created by other viewports on this viewport.
 - `near`/`far` (optional): override camera clipping planes. Defaults are `near=0.05`, `far=5.0`.
+- `aspect` (optional): fixed camera aspect ratio. If omitted, aspect is derived from viewport size.
 - `frustums_color` (optional): named color or tuple string like `"(255,255,0,200)"`.
 - `frustums_thickness` (optional): edge radius in world units.
 
 ## KDL usage
 ```kdl
 tabs {
-    viewport name=ViewportA pos="(0,0,0,0, 8,2,4)" look_at="(0,0,0,0, 0,0,0)" create_frustum=#true frustums_color="yalk" frustums_thickness=0.008 near=0.05 far=300.0 active=#true
+    viewport name=ViewportA pos="(0,0,0,0, 8,2,4)" look_at="(0,0,0,0, 0,0,0)" create_frustum=#true frustums_color="yalk" frustums_thickness=0.008 near=0.05 far=300.0 aspect=1.7778 active=#true
     viewport name=ViewportB pos="(0,0,0,0, 2,2,2)" look_at="(0,0,0,0, 0,0,0)" show_frustums=#true active=#true
 }
 ```
