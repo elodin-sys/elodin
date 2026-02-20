@@ -273,32 +273,17 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
                 ui.horizontal(|ui| {
                     ui.label(egui::RichText::new("FRUSTUM").color(scheme.text_secondary));
                     ui.with_layout(egui::Layout::right_to_left(Align::Min), |ui| {
-                        let response = ui.add(
+                        let frustum_created = viewport_config.create_frustum;
+                        let button = if frustum_created {
+                            EButton::red("DELETE")
+                        } else {
                             EButton::highlight("CREATE")
-                                .width(create_button_width)
-                                .disabled(viewport_config.create_frustum),
-                        );
-                        if response.clicked() && !viewport_config.create_frustum {
-                            viewport_config.create_frustum = true;
+                        };
+                        if ui.add(button.width(create_button_width)).clicked() {
+                            viewport_config.create_frustum = !frustum_created;
                         }
                     });
                 });
-                if viewport_config.create_frustum {
-                    ui.add_space(4.0);
-                    ui.horizontal(|ui| {
-                        ui.label("");
-                        ui.with_layout(egui::Layout::right_to_left(Align::Min), |ui| {
-                            ui.add_sized(
-                                [create_button_width, 18.0],
-                                egui::Label::new(
-                                    egui::RichText::new("CREATED")
-                                        .color(scheme.highlight)
-                                        .strong(),
-                                ),
-                            );
-                        });
-                    });
-                }
 
                 if viewport_config.create_frustum {
                     ui.add_space(8.0);
