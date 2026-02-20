@@ -146,7 +146,7 @@ graph.edge_fold(
     right_query=q,          # Query for right entity of each edge
     return_type=el.Force,   # Output component (written to LEFT entity)
     init_value=el.SpatialForce(),
-    fold_fn=lambda acc, *left_comps, *right_comps: acc + compute(...),
+    fold_fn=lambda acc, pos_l, inertia_l, pos_r, inertia_r: acc + compute(...),
 )
 ```
 

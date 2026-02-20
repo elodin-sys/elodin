@@ -14,7 +14,7 @@ Elodin-DB is a high-performance time-series database for telemetry data. It stor
 just install
 
 # Run the database
-elodin-db run [::]:2240 $HOME/.local/share/elodin/db --config examples/db-config.lua --log-level warn
+elodin-db run [::]:2240 $HOME/.local/share/elodin/db --config libs/db/examples/db-config.lua --log-level warn
 
 # Connect the Elodin Editor
 elodin editor 127.0.0.1:2240
@@ -33,7 +33,7 @@ elodin-db run <bind_addr> <data_dir> [--config <lua_file>] [--log-level <level>]
 |-----------|---------|---------|
 | `bind_addr` | `[::]:2240` | Listen address (IPv4/IPv6 + port) |
 | `data_dir` | `$HOME/.local/share/elodin/db` | Storage directory |
-| `--config` | `examples/db-config.lua` | Lua configuration script |
+| `--config` | `libs/db/examples/db-config.lua` | Lua configuration script |
 | `--log-level` | `warn` | Log verbosity: error, warn, info, debug, trace |
 
 ## Lua REPL
@@ -159,9 +159,9 @@ Storage is append-only with configurable retention. The database supports concur
 
 ## Key References
 
-- Full documentation: [libs/db/README.md](../../libs/db/README.md)
-- C client example: [libs/db/examples/client.c](../../libs/db/examples/client.c)
-- C++ client example: [libs/db/examples/client.cpp](../../libs/db/examples/client.cpp)
-- Rust client example: [libs/db/examples/rust_client/](../../libs/db/examples/rust_client/)
-- Lua config example: [examples/db-config.lua](../../examples/db-config.lua)
-- DB architecture docs: [docs/public/content/home/db/](../../docs/public/content/home/db/)
+- Full documentation: [libs/db/README.md](../../../libs/db/README.md)
+- C client example: [libs/db/examples/client.c](../../../libs/db/examples/client.c)
+- C++ client example: [libs/db/examples/client.cpp](../../../libs/db/examples/client.cpp)
+- Rust client example: [libs/db/examples/rust_client/](../../../libs/db/examples/rust_client/)
+- Lua config example: [libs/db/examples/db-config.lua](../../../libs/db/examples/db-config.lua)
+- DB architecture docs: [docs/public/content/home/db/](../../../docs/public/content/home/db/)

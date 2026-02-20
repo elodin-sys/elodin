@@ -145,6 +145,6 @@ Key crates used in the editor:
 
 ## Key References
 
-- Editor README: [apps/elodin/README.md](../../apps/elodin/README.md)
-- KDL schematic syntax: [docs/public/content/reference/schematic.md](../../docs/public/content/reference/schematic.md)
-- Command palette reference: [docs/public/content/reference/command-palette.md](../../docs/public/content/reference/command-palette.md)
+- Editor README: [apps/elodin/README.md](../../../apps/elodin/README.md)
+- KDL schematic syntax: [docs/public/content/reference/schematic.md](../../../docs/public/content/reference/schematic.md)
+- Command palette reference: [docs/public/content/reference/command-palette.md](../../../docs/public/content/reference/command-palette.md)

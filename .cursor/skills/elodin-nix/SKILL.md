@@ -155,7 +155,7 @@ This is enforced by CI.
 
 ## Key References
 
-- Internal Nix docs: [docs/internal/nix.md](../../docs/internal/nix.md)
-- Root flake: [flake.nix](../../flake.nix)
-- Aleph flake: [aleph/flake.nix](../../aleph/flake.nix)
+- Internal Nix docs: [docs/internal/nix.md](../../../docs/internal/nix.md)
+- Root flake: [flake.nix](../../../flake.nix)
+- Aleph flake: [aleph/flake.nix](../../../aleph/flake.nix)
 - Nix overlay: defined in root `flake.nix` as `elodinOverlay`

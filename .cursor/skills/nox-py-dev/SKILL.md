@@ -138,7 +138,7 @@ Graph query implementation. `edge_fold` is the core operation — it iterates ed
 
 ## Key References
 
-- Full SDK documentation: [libs/nox-py/README.md](../../libs/nox-py/README.md)
-- Python API reference: [docs/public/content/reference/python-api.md](../../docs/public/content/reference/python-api.md)
-- nox-ecs crate: [libs/nox-ecs/](../../libs/nox-ecs/)
-- Impeller2 protocol: [libs/impeller2/](../../libs/impeller2/)
+- Full SDK documentation: [libs/nox-py/README.md](../../../libs/nox-py/README.md)
+- Python API reference: [docs/public/content/reference/python-api.md](../../../docs/public/content/reference/python-api.md)
+- nox-ecs crate: [libs/nox-ecs/](../../../libs/nox-ecs/)
+- Impeller2 protocol: [libs/impeller2/](../../../libs/impeller2/)

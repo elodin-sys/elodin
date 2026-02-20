@@ -142,7 +142,7 @@ aleph/scripts/aleph-scan.sh
 
 ## Key References
 
-- Full setup guide: [aleph/README.md](../../aleph/README.md)
-- Template configuration: [aleph/template/flake.nix](../../aleph/template/flake.nix)
-- Sensor firmware: [fsw/sensor-fw/README.md](../../fsw/sensor-fw/README.md)
-- MSP OSD service: [fsw/msp-osd/README.md](../../fsw/msp-osd/README.md)
+- Full setup guide: [aleph/README.md](../../../aleph/README.md)
+- Template configuration: [aleph/template/flake.nix](../../../aleph/template/flake.nix)
+- Sensor firmware: [fsw/sensor-fw/README.md](../../../fsw/sensor-fw/README.md)
+- MSP OSD service: [fsw/msp-osd/README.md](../../../fsw/msp-osd/README.md)
