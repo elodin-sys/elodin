@@ -402,7 +402,6 @@ impl DB {
             default_stream_time_step: time_step,
             ..Default::default()
         };
-        db_config.set_time_start_timestamp_micros(now.0);
         db_config.set_version_created(env!("CARGO_PKG_VERSION"));
         db_config.set_version_last_opened(env!("CARGO_PKG_VERSION"));
         let state = State {
@@ -455,6 +454,17 @@ impl DB {
     }
 
     pub fn save_db_state(&self) -> Result<(), Error> {
+        let earliest = self.earliest_timestamp.latest();
+        let has_data = self.last_updated.latest().0 != i64::MIN;
+        self.with_state_mut(|state| {
+            if state.db_config.time_start_timestamp_micros().is_none()
+                && has_data
+                && earliest.0 != i64::MAX
+                && earliest.0 != i64::MIN
+            {
+                state.db_config.set_time_start_timestamp_micros(earliest.0);
+            }
+        });
         let db_state = self.db_config();
         db_state.write(self.path.join("db_state"))
     }
@@ -637,7 +647,10 @@ impl DB {
                 if let Some((timestamp, _)) = component.time_series.latest() {
                     last_updated = timestamp.0.max(last_updated);
                 };
-                start_timestamp = start_timestamp.min(component.time_series.start_timestamp().0);
+                let comp_start = component.time_series.start_timestamp().0;
+                if comp_start > 0 {
+                    start_timestamp = start_timestamp.min(comp_start);
+                }
             } else {
                 trace!(
                     component.id = ?component_id.0,
@@ -657,7 +670,9 @@ impl DB {
                     .and_then(|p| p.parse().ok())
                     .ok_or(Error::InvalidMsgId)?;
                 let msg_log = MsgLog::open(path)?;
-                if let Some(first_timestamp) = msg_log.timestamps().first() {
+                if let Some(first_timestamp) = msg_log.timestamps().first()
+                    && first_timestamp.0 > 0
+                {
                     start_timestamp = start_timestamp.min(first_timestamp.0);
                 }
 
@@ -682,14 +697,34 @@ impl DB {
         };
         let earliest_timestamp = db_state
             .time_start_timestamp_micros()
+            .filter(|&ts| ts > 0)
             .map(Timestamp)
             .unwrap_or_else(|| {
-                if start_timestamp == i64::MAX {
-                    now
-                } else {
+                if start_timestamp != i64::MAX {
                     Timestamp(start_timestamp)
+                } else if last_updated != i64::MIN {
+                    Timestamp(last_updated)
+                } else {
+                    now
                 }
             });
+        // Validate: ensure earliest_timestamp is not beyond the actual data range.
+        // This handles databases where time_start_timestamp_micros was set to
+        // wall-clock time but data uses monotonic timestamps (or vice versa).
+        let earliest_timestamp = if start_timestamp != i64::MAX && last_updated != i64::MIN {
+            if earliest_timestamp.0 > last_updated {
+                warn!(
+                    earliest_timestamp = earliest_timestamp.0,
+                    last_updated,
+                    start_timestamp,
+                    "time_start_timestamp_micros in db_state exceeds data range; \
+                     adjusting earliest_timestamp to match data"
+                );
+            }
+            Timestamp(earliest_timestamp.0.min(start_timestamp))
+        } else {
+            earliest_timestamp
+        };
         let db = DB {
             state: RwLock::new(state),
             snapshot_barrier: SnapshotBarrier::new(),
@@ -878,6 +913,9 @@ impl DB {
             })?;
         }
         self.last_updated.update_max(timestamp);
+        if timestamp.0 > 0 {
+            self.earliest_timestamp.update_min(timestamp);
+        }
         Ok(())
     }
 
@@ -1018,7 +1056,8 @@ impl State {
         if is_timestamp_source {
             component_metadata.set_timestamp_source(true);
         }
-        let component = Component::create(db_path, component_id, name, schema, Timestamp::now())?;
+        let component =
+            Component::create(db_path, component_id, name, schema, Timestamp(i64::MAX))?;
         // Always update metadata if this is a timestamp source, or if metadata doesn't exist yet
         // This ensures the timestamp source flag is preserved even if metadata was set earlier
         if is_timestamp_source || !self.component_metadata.contains_key(&component_id) {
@@ -1345,6 +1384,7 @@ pub(crate) struct DBSink<'a> {
     pub(crate) components: &'a HashMap<ComponentId, Component>,
     pub(crate) snapshot_barrier: &'a SnapshotBarrier,
     pub(crate) last_updated: &'a AtomicCell<Timestamp>,
+    pub(crate) earliest_timestamp: &'a AtomicCell<Timestamp>,
     pub(crate) sunk_new_time_series: bool,
     pub(crate) table_received: Timestamp,
     /// Set of component IDs replicated from a followed source.
@@ -1428,6 +1468,9 @@ impl Decomponentize for DBSink<'_> {
             self.sunk_new_time_series = true;
         }
         self.last_updated.update_max(timestamp);
+        if timestamp.0 > 0 {
+            self.earliest_timestamp.update_min(timestamp);
+        }
         Ok(())
     }
 }
@@ -1856,6 +1899,7 @@ async fn handle_packet<A: AsyncWrite + 'static>(
                     components: &state.components,
                     snapshot_barrier: &db.snapshot_barrier,
                     last_updated: &db.last_updated,
+                    earliest_timestamp: &db.earliest_timestamp,
                     sunk_new_time_series: false,
                     table_received: db.apply_implicit_timestamp(),
                     followed_components: &db.followed_components,

@@ -2,7 +2,7 @@
 mod tests {
 
     use arrow::{array::AsArray, datatypes::Float64Type};
-    use elodin_db::{DB, Error, Server};
+    use elodin_db::{AtomicTimestampExt, DB, Error, Server};
     use futures_lite::future::zip;
     use impeller2::{
         types::{ComponentId, IntoLenPacket, LenPacket, Msg, PrimType, Timestamp},
@@ -2665,5 +2665,128 @@ mod tests {
 
         assert_exports_match(&src_db, &fol_db, None);
         assert_db_files_match(&src_db.path, &fol_db.path);
+    }
+
+    /// Verify that earliest_timestamp tracks actual data at runtime via
+    /// update_min, and that DB::open() also computes it correctly from data
+    /// when time_start_timestamp_micros is not explicitly set.
+    #[test]
+    async fn test_open_fixes_mismatched_timestamp_domains() {
+        let subscriber = tracing_subscriber::FmtSubscriber::new();
+        let _ = tracing::subscriber::set_global_default(subscriber);
+
+        let temp_dir =
+            std::env::temp_dir().join(format!("elodin_db_ts_mismatch_{}", fastrand::u64(..)));
+        if temp_dir.exists() {
+            let _ = std::fs::remove_dir_all(&temp_dir);
+        }
+
+        // Two components: one with initialization data at Timestamp(0) (like
+        // TARGETMESSAGE on flight hardware), and one with only valid timestamps
+        // (like BARMESSAGE).
+        let target_id = ComponentId::new("target_test");
+        let sensor_id = ComponentId::new("sensor_test");
+        let schema = elodin_db::ComponentSchema::new(PrimType::F64, &[1]);
+
+        // Monotonic timestamps: ~48 minutes from epoch (typical boot-time values)
+        let monotonic_ts1 = Timestamp(2_878_000_000);
+        let monotonic_ts2 = Timestamp(2_879_000_000);
+
+        {
+            let db = elodin_db::DB::create(temp_dir.clone()).unwrap();
+
+            // After creation, time_start_timestamp_micros should NOT be set
+            db.with_state(|state| {
+                assert!(
+                    state.db_config.time_start_timestamp_micros().is_none(),
+                    "DB creation should NOT persist time_start_timestamp_micros (got {:?})",
+                    state.db_config.time_start_timestamp_micros(),
+                );
+            });
+
+            // In-memory earliest_timestamp starts at wall-clock (for apply_implicit_timestamp)
+            let wall_clock_start = db.earliest_timestamp.latest();
+            assert!(
+                wall_clock_start.0 > 1_500_000_000_000_000,
+                "in-memory earliest_timestamp should start at wall-clock (got {})",
+                wall_clock_start.0,
+            );
+
+            // Insert both components
+            db.with_state_mut(|state| {
+                state
+                    .insert_component(target_id, schema.clone(), &temp_dir)
+                    .unwrap();
+                state
+                    .insert_component(sensor_id, schema.clone(), &temp_dir)
+                    .unwrap();
+            });
+
+            db.with_state(|state| {
+                let data = 42.0f64.to_le_bytes();
+
+                // Target component: initialization data at Timestamp(0),
+                // then real data -- mimics flight software writing defaults
+                // before the monotonic clock starts.
+                let target = state.get_component(target_id).unwrap();
+                target.time_series.push_buf(Timestamp(0), &data).unwrap();
+                target.time_series.push_buf(monotonic_ts1, &data).unwrap();
+
+                // Sensor component: only valid monotonic timestamps
+                let sensor = state.get_component(sensor_id).unwrap();
+                sensor.time_series.push_buf(monotonic_ts1, &data).unwrap();
+                sensor.time_series.push_buf(monotonic_ts2, &data).unwrap();
+            });
+
+            // Simulate the update_min/update_max calls that DBSink would make.
+            // The guard filters Timestamp(0).
+            for &ts in &[Timestamp(0), monotonic_ts1, monotonic_ts2] {
+                db.last_updated.update_max(ts);
+                if ts.0 > 0 {
+                    db.earliest_timestamp.update_min(ts);
+                }
+            }
+
+            // Verify earliest_timestamp tracked to the monotonic range, NOT to 0
+            let earliest_live = db.earliest_timestamp.latest();
+            assert!(
+                earliest_live.0 > 0,
+                "earliest_timestamp should NOT be pulled to 0 by initialization data (got {})",
+                earliest_live.0,
+            );
+            assert_eq!(
+                earliest_live.0, monotonic_ts1.0,
+                "earliest_timestamp should track to first non-zero data timestamp"
+            );
+
+            db.flush_all().unwrap();
+        }
+
+        // Re-open and verify
+        let db = elodin_db::DB::open(temp_dir.clone()).unwrap();
+        let earliest = db.earliest_timestamp.latest();
+        let last = db.last_updated.latest();
+
+        assert!(
+            earliest <= last,
+            "earliest_timestamp ({}) must be <= last_updated ({}) after open",
+            earliest.0,
+            last.0,
+        );
+        assert!(
+            earliest.0 > 0,
+            "earliest_timestamp should not be 0 after re-open (got {})",
+            earliest.0,
+        );
+        assert_eq!(
+            earliest.0, monotonic_ts1.0,
+            "earliest_timestamp should match the first non-zero data timestamp"
+        );
+        assert_eq!(
+            last.0, monotonic_ts2.0,
+            "last_updated should be the latest data timestamp"
+        );
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 }

@@ -246,6 +246,29 @@ pub fn run(
         }
     }
 
+    // Update time.start_timestamp in db_state to match the corrected data
+    let db_state_path = db_path.join("db_state");
+    if db_state_path.exists()
+        && let Ok(mut config) = DbConfig::read(&db_state_path)
+        && let Some(old_start) = config.time_start_timestamp_micros()
+    {
+        let is_bad = match reference {
+            ReferenceClock::WallClock => old_start < cutoff_2000,
+            ReferenceClock::Monotonic => old_start > cutoff_2020,
+        };
+        if is_bad {
+            let new_start = old_start + offset;
+            println!(
+                "Updating time.start_timestamp in db_state: {} -> {}",
+                old_start, new_start
+            );
+            config.set_time_start_timestamp_micros(new_start);
+            if let Err(e) = config.write(&db_state_path) {
+                eprintln!("Warning: failed to update db_state: {}", e);
+            }
+        }
+    }
+
     println!();
     println!("Done! Database timestamps have been normalized.");
     println!("You may need to restart elodin-db to see the changes.");
