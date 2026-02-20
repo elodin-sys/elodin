@@ -8,17 +8,28 @@ pub struct FrustumPlugin;
 
 impl Plugin for FrustumPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Startup, frustum_mesh_setup)
+        app.init_resource::<FrustumMaterialCache>()
+            .add_systems(Startup, frustum_mesh_setup)
             .add_systems(PreUpdate, draw_viewport_frustums);
     }
 }
 
-const FRUSTUM_EDGE_RADIUS: f32 = 0.006;
-
 #[derive(Resource, Clone)]
 struct FrustumLineAssets {
     edge_mesh: Handle<Mesh>,
-    edge_material: Handle<StandardMaterial>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+struct FrustumMaterialKey {
+    r: u8,
+    g: u8,
+    b: u8,
+    a: u8,
+}
+
+#[derive(Resource, Default)]
+struct FrustumMaterialCache {
+    materials: HashMap<FrustumMaterialKey, Handle<StandardMaterial>>,
 }
 
 #[derive(Component, Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -47,30 +58,53 @@ struct FrustumDrawParams<'w, 's> {
         ),
         With<MainCamera>,
     >,
+    materials: ResMut<'w, Assets<StandardMaterial>>,
+    material_cache: ResMut<'w, FrustumMaterialCache>,
     line_assets: Option<Res<'w, FrustumLineAssets>>,
     existing_roots: Query<'w, 's, (Entity, &'static CameraFrustumRootVisual)>,
     existing_lines: Query<'w, 's, (Entity, &'static CameraFrustumLineVisual)>,
 }
 
-fn frustum_mesh_setup(
-    mut commands: Commands,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<StandardMaterial>>,
-) {
+fn frustum_mesh_setup(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>) {
     let edge_mesh = meshes.add(Mesh::from(Cylinder::new(1.0, 1.0)));
-    let edge_material = materials.add(StandardMaterial {
-        base_color: Color::srgba(1.0, 1.0, 0.0, 0.9),
-        emissive: Color::srgb(1.0, 1.0, 0.0).into(),
+    commands.insert_resource(FrustumLineAssets { edge_mesh });
+}
+
+fn color_component_to_u8(value: f32) -> u8 {
+    (value.clamp(0.0, 1.0) * 255.0).round() as u8
+}
+
+fn frustum_material_for_color(
+    color: impeller2_wkt::Color,
+    materials: &mut Assets<StandardMaterial>,
+    cache: &mut FrustumMaterialCache,
+) -> Handle<StandardMaterial> {
+    let key = FrustumMaterialKey {
+        r: color_component_to_u8(color.r),
+        g: color_component_to_u8(color.g),
+        b: color_component_to_u8(color.b),
+        a: color_component_to_u8(color.a),
+    };
+    if let Some(handle) = cache.materials.get(&key) {
+        return handle.clone();
+    }
+
+    let alpha = key.a as f32 / 255.0;
+    let material = materials.add(StandardMaterial {
+        base_color: Color::srgba_u8(key.r, key.g, key.b, key.a),
+        emissive: Color::srgb_u8(key.r, key.g, key.b).into(),
         cull_mode: None,
         unlit: true,
-        alpha_mode: AlphaMode::Blend,
+        alpha_mode: if alpha < 1.0 {
+            AlphaMode::Blend
+        } else {
+            AlphaMode::Opaque
+        },
         depth_bias: -8.0,
         ..Default::default()
     });
-    commands.insert_resource(FrustumLineAssets {
-        edge_mesh,
-        edge_material,
-    });
+    cache.materials.insert(key, material.clone());
+    material
 }
 
 fn frustum_local_points(perspective: &PerspectiveProjection) -> Option<[Vec3; 8]> {
@@ -117,10 +151,14 @@ fn frustum_segments(points: [Vec3; 8]) -> [(Vec3, Vec3); 12] {
     ]
 }
 
-fn frustum_segment_transform_local(start_local: Vec3, end_local: Vec3) -> Option<Transform> {
+fn frustum_segment_transform_local(
+    start_local: Vec3,
+    end_local: Vec3,
+    thickness: f32,
+) -> Option<Transform> {
     let delta = end_local - start_local;
     let length = delta.length();
-    if length <= 1.0e-5_f32 {
+    if length <= 1.0e-5_f32 || thickness <= 0.0 {
         return None;
     }
 
@@ -130,7 +168,7 @@ fn frustum_segment_transform_local(start_local: Vec3, end_local: Vec3) -> Option
     Some(Transform {
         translation: midpoint_local,
         rotation,
-        scale: Vec3::new(FRUSTUM_EDGE_RADIUS, length, FRUSTUM_EDGE_RADIUS),
+        scale: Vec3::new(thickness, length, thickness),
     })
 }
 
@@ -143,7 +181,7 @@ fn cleanup_frustum_entities(params: &FrustumDrawParams<'_, '_>, commands: &mut C
     }
 }
 
-fn draw_viewport_frustums(params: FrustumDrawParams<'_, '_>, mut commands: Commands) {
+fn draw_viewport_frustums(mut params: FrustumDrawParams<'_, '_>, mut commands: Commands) {
     let Some(line_assets) = params.line_assets.as_ref() else {
         cleanup_frustum_entities(&params, &mut commands);
         return;
@@ -177,7 +215,12 @@ fn draw_viewport_frustums(params: FrustumDrawParams<'_, '_>, mut commands: Comma
         let Some(points) = frustum_local_points(perspective) else {
             continue;
         };
-        sources.push((camera_entity, points));
+        sources.push((
+            camera_entity,
+            points,
+            config.frustums_color,
+            config.frustums_thickness,
+        ));
     }
 
     if sources.is_empty() || targets.is_empty() {
@@ -188,10 +231,17 @@ fn draw_viewport_frustums(params: FrustumDrawParams<'_, '_>, mut commands: Comma
     let mut desired_roots: HashMap<CameraFrustumRootVisual, ()> = HashMap::new();
     let mut desired_segments: HashMap<
         CameraFrustumLineVisual,
-        (CameraFrustumRootVisual, Transform, RenderLayers),
+        (
+            CameraFrustumRootVisual,
+            Transform,
+            RenderLayers,
+            MeshMaterial3d<StandardMaterial>,
+        ),
     > = HashMap::new();
 
-    for (source_camera, points) in sources {
+    for (source_camera, points, color, thickness) in sources {
+        let material =
+            frustum_material_for_color(color, &mut params.materials, &mut params.material_cache);
         let segments = frustum_segments(points);
         for (target_camera, render_layers) in &targets {
             let root_key = CameraFrustumRootVisual {
@@ -202,7 +252,7 @@ fn draw_viewport_frustums(params: FrustumDrawParams<'_, '_>, mut commands: Comma
 
             for (segment_idx, (start_local, end_local)) in segments.iter().enumerate() {
                 let Some(local_transform) =
-                    frustum_segment_transform_local(*start_local, *end_local)
+                    frustum_segment_transform_local(*start_local, *end_local, thickness)
                 else {
                     continue;
                 };
@@ -212,7 +262,12 @@ fn draw_viewport_frustums(params: FrustumDrawParams<'_, '_>, mut commands: Comma
                         target: *target_camera,
                         segment: segment_idx as u8,
                     },
-                    (root_key, local_transform, render_layers.clone()),
+                    (
+                        root_key,
+                        local_transform,
+                        render_layers.clone(),
+                        MeshMaterial3d(material.clone()),
+                    ),
                 );
             }
         }
@@ -255,21 +310,24 @@ fn draw_viewport_frustums(params: FrustumDrawParams<'_, '_>, mut commands: Comma
         existing_lines_by_key.insert(*key, entity);
     }
 
-    for (key, (root_key, transform, render_layers)) in desired_segments {
+    for (key, (root_key, transform, render_layers, material)) in desired_segments {
         let Some(&root_entity) = root_entities.get(&root_key) else {
             continue;
         };
 
         if let Some(entity) = existing_lines_by_key.remove(&key) {
-            commands
-                .entity(entity)
-                .insert((transform, render_layers, ChildOf(root_entity)));
+            commands.entity(entity).insert((
+                transform,
+                render_layers,
+                material,
+                ChildOf(root_entity),
+            ));
             continue;
         }
 
         commands.spawn((
             Mesh3d(line_assets.edge_mesh.clone()),
-            MeshMaterial3d(line_assets.edge_material.clone()),
+            material,
             transform,
             GlobalTransform::default(),
             render_layers,

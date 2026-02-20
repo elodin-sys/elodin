@@ -329,6 +329,31 @@ fn parse_viewport(node: &KdlNode, kdl_src: &str) -> Result<Panel, KdlSchematicEr
         .get("show_frustum")
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
+    let frustums_color = if let Some(value) = node.get("frustums_color") {
+        parse_viewport_frustums_color(value).ok_or_else(|| KdlSchematicError::InvalidValue {
+            property: "frustums_color".to_string(),
+            node: "viewport".to_string(),
+            expected: "a named color or tuple string like \"(255,255,0,200)\"".to_string(),
+            src: kdl_src.to_string(),
+            span: node.span(),
+        })?
+    } else {
+        default_viewport_frustums_color()
+    };
+    let frustums_thickness = node
+        .get("frustums_thickness")
+        .and_then(|v| v.as_float().or_else(|| v.as_integer().map(|i| i as f64)))
+        .map(|v| v as f32)
+        .unwrap_or_else(default_viewport_frustums_thickness);
+    if frustums_thickness <= 0.0 {
+        return Err(KdlSchematicError::InvalidValue {
+            property: "frustums_thickness".to_string(),
+            node: "viewport".to_string(),
+            expected: "frustums_thickness must be > 0".to_string(),
+            src: kdl_src.to_string(),
+            span: node.span(),
+        });
+    }
 
     let show_view_cube = node
         .get("show_view_cube")
@@ -393,6 +418,8 @@ fn parse_viewport(node: &KdlNode, kdl_src: &str) -> Result<Panel, KdlSchematicEr
         show_grid,
         show_arrows,
         show_frustum,
+        frustums_color,
+        frustums_thickness,
         show_view_cube,
         hdr,
         name,
@@ -1224,6 +1251,44 @@ fn parse_color_component_str(value: &str) -> Option<f32> {
         .and_then(color_component_from_integer)
 }
 
+fn parse_color_from_text(value: &str) -> Option<Color> {
+    let trimmed = value.trim();
+
+    if let Some(named) = parse_named_color(trimmed) {
+        return Some(named);
+    }
+
+    if !trimmed.starts_with('(') || !trimmed.ends_with(')') {
+        return None;
+    }
+
+    let values: Vec<&str> = trimmed[1..trimmed.len() - 1]
+        .split(',')
+        .map(|s| s.trim())
+        .collect();
+    if values.len() < 3 {
+        return None;
+    }
+
+    let (Some(r), Some(g), Some(b)) = (
+        parse_color_component_str(values[0]),
+        parse_color_component_str(values[1]),
+        parse_color_component_str(values[2]),
+    ) else {
+        return None;
+    };
+
+    let a = values
+        .get(3)
+        .and_then(|v| parse_color_component_str(v))
+        .unwrap_or(1.0);
+    Some(Color::rgba(r, g, b, a))
+}
+
+fn parse_viewport_frustums_color(value: &kdl::KdlValue) -> Option<Color> {
+    value.as_string().and_then(parse_color_from_text)
+}
+
 fn parse_named_color(name: &str) -> Option<Color> {
     color_from_name(name)
 }
@@ -1736,6 +1801,48 @@ mod tests {
         match err {
             KdlSchematicError::InvalidValue { property, node, .. } => {
                 assert_eq!(property, "far");
+                assert_eq!(node, "viewport");
+            }
+            other => panic!("Expected invalid value error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_parse_viewport_frustums_style() {
+        let kdl = r#"viewport show_frustum=#true frustums_color="yalk" frustums_thickness=0.012"#;
+        let schematic = parse_schematic(kdl).unwrap();
+
+        assert_eq!(schematic.elems.len(), 1);
+        let SchematicElem::Panel(Panel::Viewport(viewport)) = &schematic.elems[0] else {
+            panic!("Expected viewport panel");
+        };
+        assert!(viewport.show_frustum);
+        assert_eq!(viewport.frustums_color, Color::YALK);
+        assert!((viewport.frustums_thickness - 0.012).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_parse_viewport_rejects_invalid_frustums_thickness() {
+        let kdl = r#"viewport frustums_thickness=0.0"#;
+        let err = parse_schematic(kdl).unwrap_err();
+
+        match err {
+            KdlSchematicError::InvalidValue { property, node, .. } => {
+                assert_eq!(property, "frustums_thickness");
+                assert_eq!(node, "viewport");
+            }
+            other => panic!("Expected invalid value error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_parse_viewport_rejects_invalid_frustums_color() {
+        let kdl = r#"viewport frustums_color="not_a_color""#;
+        let err = parse_schematic(kdl).unwrap_err();
+
+        match err {
+            KdlSchematicError::InvalidValue { property, node, .. } => {
+                assert_eq!(property, "frustums_color");
                 assert_eq!(node, "viewport");
             }
             other => panic!("Expected invalid value error, got {other:?}"),

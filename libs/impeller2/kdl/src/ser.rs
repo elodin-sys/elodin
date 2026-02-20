@@ -191,6 +191,34 @@ fn serialize_viewport<T>(viewport: &Viewport<T>) -> KdlNode {
             .push(KdlEntry::new_prop("show_frustum", true));
     }
 
+    if viewport.frustums_color != default_viewport_frustums_color() {
+        if let Some(name) = name_from_color(&viewport.frustums_color) {
+            node.entries_mut()
+                .push(KdlEntry::new_prop("frustums_color", name));
+        } else {
+            let (r, g, b, a) = color_to_ints(&viewport.frustums_color);
+            if a == 255 {
+                node.entries_mut().push(KdlEntry::new_prop(
+                    "frustums_color",
+                    format!("({r},{g},{b})"),
+                ));
+            } else {
+                node.entries_mut().push(KdlEntry::new_prop(
+                    "frustums_color",
+                    format!("({r},{g},{b},{a})"),
+                ));
+            }
+        }
+    }
+
+    if (viewport.frustums_thickness - default_viewport_frustums_thickness()).abs() > f32::EPSILON {
+        push_rounded_float_prop(
+            &mut node,
+            "frustums_thickness",
+            viewport.frustums_thickness as f64,
+        );
+    }
+
     if !viewport.show_view_cube {
         node.entries_mut()
             .push(KdlEntry::new_prop("show_view_cube", false));
@@ -956,6 +984,8 @@ mod tests {
                 show_grid: true,
                 show_arrows: true,
                 show_frustum: false,
+                frustums_color: default_viewport_frustums_color(),
+                frustums_thickness: default_viewport_frustums_thickness(),
                 show_view_cube: true,
                 hdr: false,
                 pos: None,
@@ -994,6 +1024,8 @@ mod tests {
                 show_grid: true,
                 show_arrows: false,
                 show_frustum: true,
+                frustums_color: Color::YALK,
+                frustums_thickness: 0.012,
                 show_view_cube: false,
                 hdr: true,
                 pos: Some("(0,0,0,0, 1,2,3)".to_string()),
@@ -1020,6 +1052,8 @@ mod tests {
             "show_grid=",
             "show_arrows=",
             "show_frustum=",
+            "frustums_color=",
+            "frustums_thickness=",
             "show_view_cube=",
             "active=",
         ];
@@ -1034,7 +1068,7 @@ mod tests {
         for window in indices.windows(2) {
             assert!(
                 window[0] < window[1],
-                "expected viewport properties in order name → fov → near → far → pos → look_at → hdr → show_grid → show_arrows → show_frustum → show_view_cube → active: `{viewport_line}`"
+                "expected viewport properties in order name → fov → near → far → pos → look_at → hdr → show_grid → show_arrows → show_frustum → frustums_color → frustums_thickness → show_view_cube → active: `{viewport_line}`"
             );
         }
     }
@@ -1275,6 +1309,8 @@ graph "value" {
                 show_grid: false,
                 show_arrows: true,
                 show_frustum: false,
+                frustums_color: default_viewport_frustums_color(),
+                frustums_thickness: default_viewport_frustums_thickness(),
                 show_view_cube: true,
                 hdr: false,
                 pos: None,

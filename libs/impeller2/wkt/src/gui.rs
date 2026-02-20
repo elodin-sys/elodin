@@ -12,6 +12,14 @@ fn default_true() -> bool {
     true
 }
 
+pub fn default_viewport_frustums_color() -> Color {
+    Color::YELLOW
+}
+
+pub fn default_viewport_frustums_thickness() -> f32 {
+    0.006
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(bound = "T: Serialize + DeserializeOwned")]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::TypePath,))]
@@ -223,6 +231,10 @@ pub struct Viewport<T = ()> {
     pub show_arrows: bool,
     #[serde(default)]
     pub show_frustum: bool,
+    #[serde(default = "default_viewport_frustums_color")]
+    pub frustums_color: Color,
+    #[serde(default = "default_viewport_frustums_thickness")]
+    pub frustums_thickness: f32,
     #[serde(default = "default_true")]
     pub show_view_cube: bool,
     pub hdr: bool,
@@ -246,6 +258,8 @@ impl<T> Viewport<T> {
             show_grid: self.show_grid,
             show_arrows: self.show_arrows,
             show_frustum: self.show_frustum,
+            frustums_color: self.frustums_color,
+            frustums_thickness: self.frustums_thickness,
             show_view_cube: self.show_view_cube,
             hdr: self.hdr,
             name: self.name.clone(),
@@ -268,6 +282,8 @@ impl Default for Viewport {
             show_grid: false,
             show_arrows: true,
             show_frustum: false,
+            frustums_color: default_viewport_frustums_color(),
+            frustums_thickness: default_viewport_frustums_thickness(),
             show_view_cube: true,
             hdr: false,
             name: None,

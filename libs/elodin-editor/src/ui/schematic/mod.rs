@@ -166,6 +166,14 @@ impl SchematicParam<'_, '_> {
                             .get(cam_entity)
                             .map(|config| config.show_frustum)
                             .unwrap_or(false);
+                        let frustums_color = self.viewport_configs.get(cam_entity).map_or_else(
+                            |_| impeller2_wkt::default_viewport_frustums_color(),
+                            |config| config.frustums_color,
+                        );
+                        let frustums_thickness = self.viewport_configs.get(cam_entity).map_or_else(
+                            |_| impeller2_wkt::default_viewport_frustums_thickness(),
+                            |config| config.frustums_thickness,
+                        );
                         let show_view_cube = viewport.view_cube_layer.is_some();
 
                         let local_arrows: Vec<VectorArrow3d> = self
@@ -189,6 +197,8 @@ impl SchematicParam<'_, '_> {
                             show_grid,
                             show_arrows,
                             show_frustum,
+                            frustums_color,
+                            frustums_thickness,
                             show_view_cube,
                             hdr: self.hdr_enabled.0,
                             name: pane_name,
