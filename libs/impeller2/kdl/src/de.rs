@@ -325,8 +325,9 @@ fn parse_viewport(node: &KdlNode, kdl_src: &str) -> Result<Panel, KdlSchematicEr
         .and_then(|v| v.as_bool())
         .unwrap_or(true);
 
-    let show_frustum = node
-        .get("show_frustum")
+    let show_frustums = node
+        .get("show_frustums")
+        .or_else(|| node.get("show_frustum"))
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
     let frustums_color = if let Some(value) = node.get("frustums_color") {
@@ -417,7 +418,7 @@ fn parse_viewport(node: &KdlNode, kdl_src: &str) -> Result<Panel, KdlSchematicEr
         active,
         show_grid,
         show_arrows,
-        show_frustum,
+        show_frustums,
         frustums_color,
         frustums_thickness,
         show_view_cube,
@@ -1769,7 +1770,19 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_viewport_show_frustum() {
+    fn test_parse_viewport_show_frustums() {
+        let kdl = r#"viewport show_frustums=#true"#;
+        let schematic = parse_schematic(kdl).unwrap();
+
+        assert_eq!(schematic.elems.len(), 1);
+        let SchematicElem::Panel(Panel::Viewport(viewport)) = &schematic.elems[0] else {
+            panic!("Expected viewport panel");
+        };
+        assert!(viewport.show_frustums);
+    }
+
+    #[test]
+    fn test_parse_viewport_show_frustum_legacy() {
         let kdl = r#"viewport show_frustum=#true"#;
         let schematic = parse_schematic(kdl).unwrap();
 
@@ -1777,7 +1790,7 @@ mod tests {
         let SchematicElem::Panel(Panel::Viewport(viewport)) = &schematic.elems[0] else {
             panic!("Expected viewport panel");
         };
-        assert!(viewport.show_frustum);
+        assert!(viewport.show_frustums);
     }
 
     #[test]
@@ -1809,14 +1822,14 @@ mod tests {
 
     #[test]
     fn test_parse_viewport_frustums_style() {
-        let kdl = r#"viewport show_frustum=#true frustums_color="yalk" frustums_thickness=0.012"#;
+        let kdl = r#"viewport show_frustums=#true frustums_color="yalk" frustums_thickness=0.012"#;
         let schematic = parse_schematic(kdl).unwrap();
 
         assert_eq!(schematic.elems.len(), 1);
         let SchematicElem::Panel(Panel::Viewport(viewport)) = &schematic.elems[0] else {
             panic!("Expected viewport panel");
         };
-        assert!(viewport.show_frustum);
+        assert!(viewport.show_frustums);
         assert_eq!(viewport.frustums_color, Color::YALK);
         assert!((viewport.frustums_thickness - 0.012).abs() < f32::EPSILON);
     }

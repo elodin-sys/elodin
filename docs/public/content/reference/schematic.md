@@ -36,7 +36,7 @@ order = 6
 - `hsplit` / `vsplit`: children are panels. Child `share=<f32>` controls the weight within the split. `active` (bool) is parsed but not currently used. Optional `name`.
 
 ### panel content
-- `viewport`: `fov` (default 45.0), optional `near`/`far` clipping planes (when set, they are applied to the camera projection), `active` (bool, default false), `show_grid` (default false), `show_arrows` (default true), `show_frustum` (default false; draws that viewport camera frustum), `frustums_color` (default `yellow`), `frustums_thickness` (default `0.006` world units), `show_view_cube` (default true), `hdr` (default false), `name` (optional label), camera `pos`/`look_at` (optional EQL). Vector arrows can also be declared directly inside the viewport node; those arrows are treated as part of that viewport’s layer and respect its `show_arrows`/`show_grid` settings, allowing you to build a local triad tied to the viewport camera. An `up` (default "(0, 1, 0)") specifies a direction vector in the world frame for the camera.
+- `viewport`: `fov` (default 45.0), optional `near`/`far` clipping planes (when set, they are applied to the camera projection), `active` (bool, default false), `show_grid` (default false), `show_arrows` (default true), `show_frustums` (default false; draws that viewport camera frustum), `frustums_color` (default `yellow`), `frustums_thickness` (default `0.006` world units), `show_view_cube` (default true), `hdr` (default false), `name` (optional label), camera `pos`/`look_at` (optional EQL). Vector arrows can also be declared directly inside the viewport node; those arrows are treated as part of that viewport’s layer and respect its `show_arrows`/`show_grid` settings, allowing you to build a local triad tied to the viewport camera. An `up` (default "(0, 1, 0)") specifies a direction vector in the world frame for the camera.
 - `graph`: positional `eql` (required), `name` (optional), `type` (`line`/`point`/`bar`, default `line`), `lock` (default false), `auto_y_range` (default true), `y_min`/`y_max` (default `0.0..1.0`), child `color` nodes (optional list; otherwise palette).
 - `component_monitor`: `component_name` (required), `name` (optional).
 - `action_pane`: `name` (required pane title), `lua` script (required).
@@ -149,7 +149,7 @@ viewport = "viewport"
          [active=bool]
          [show_grid=bool]
          [show_arrows=bool]
-         [show_frustum=bool]
+         [show_frustums=bool]
          [frustums_color=color_name_or_tuple]
          [frustums_thickness=float]
          [hdr=bool]

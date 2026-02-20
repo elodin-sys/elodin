@@ -205,7 +205,7 @@ fn draw_viewport_frustums(mut params: FrustumDrawParams<'_, '_>, mut commands: C
 
         targets.push((camera_entity, RenderLayers::layer(viewport_layer)));
 
-        if !config.show_frustum {
+        if !config.show_frustums {
             continue;
         }
 

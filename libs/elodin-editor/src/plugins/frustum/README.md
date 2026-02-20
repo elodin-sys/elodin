@@ -3,7 +3,7 @@
 Viewport camera frustum overlay rendering.
 
 ## What it does
-- Watches `MainCamera` viewports with `show_frustum=#true`.
+- Watches `MainCamera` viewports with `show_frustums=#true`.
 - Builds line-mesh frustums directly from each camera projection (`near`, `far`, `fov`, `aspect`).
 - If viewport `near`/`far` are set in KDL, frustum rendering follows those values automatically.
 - Supports per-viewport style via `frustums_color` and `frustums_thickness`.
@@ -12,7 +12,7 @@ Viewport camera frustum overlay rendering.
 - In practice, frustums are easiest to inspect from another viewport.
 
 ## Viewport parameters
-- `show_frustum` (bool): enable frustum rendering for that viewport camera.
+- `show_frustums` (bool): enable frustum rendering for that viewport camera.
 - `near`/`far` (optional): override camera clipping planes.
 - `frustums_color` (optional): named color or tuple string like `"(255,255,0,200)"`.
 - `frustums_thickness` (optional): edge radius in world units.
@@ -20,7 +20,7 @@ Viewport camera frustum overlay rendering.
 ## KDL usage
 ```kdl
 tabs {
-    viewport name=ViewportA pos="(0,0,0,0, 8,2,4)" look_at="(0,0,0,0, 0,0,0)" show_frustum=#true frustums_color="yalk" frustums_thickness=0.008 near=0.05 far=300.0 active=#true
+    viewport name=ViewportA pos="(0,0,0,0, 8,2,4)" look_at="(0,0,0,0, 0,0,0)" show_frustums=#true frustums_color="yalk" frustums_thickness=0.008 near=0.05 far=300.0 active=#true
     viewport name=ViewportB pos="(0,0,0,0, 2,2,2)" look_at="(0,0,0,0, 0,0,0)" active=#true
 }
 ```

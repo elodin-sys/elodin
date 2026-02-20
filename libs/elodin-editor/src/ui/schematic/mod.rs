@@ -161,10 +161,10 @@ impl SchematicParam<'_, '_> {
                             .get(cam_entity)
                             .map(|config| config.show_arrows)
                             .unwrap_or(true);
-                        let show_frustum = self
+                        let show_frustums = self
                             .viewport_configs
                             .get(cam_entity)
-                            .map(|config| config.show_frustum)
+                            .map(|config| config.show_frustums)
                             .unwrap_or(false);
                         let frustums_color = self.viewport_configs.get(cam_entity).map_or_else(
                             |_| impeller2_wkt::default_viewport_frustums_color(),
@@ -196,7 +196,7 @@ impl SchematicParam<'_, '_> {
                             active: false,
                             show_grid,
                             show_arrows,
-                            show_frustum,
+                            show_frustums,
                             frustums_color,
                             frustums_thickness,
                             show_view_cube,

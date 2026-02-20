@@ -229,8 +229,8 @@ pub struct Viewport<T = ()> {
     pub active: bool,
     pub show_grid: bool,
     pub show_arrows: bool,
-    #[serde(default)]
-    pub show_frustum: bool,
+    #[serde(default, alias = "show_frustum")]
+    pub show_frustums: bool,
     #[serde(default = "default_viewport_frustums_color")]
     pub frustums_color: Color,
     #[serde(default = "default_viewport_frustums_thickness")]
@@ -257,7 +257,7 @@ impl<T> Viewport<T> {
             active: self.active,
             show_grid: self.show_grid,
             show_arrows: self.show_arrows,
-            show_frustum: self.show_frustum,
+            show_frustums: self.show_frustums,
             frustums_color: self.frustums_color,
             frustums_thickness: self.frustums_thickness,
             show_view_cube: self.show_view_cube,
@@ -281,7 +281,7 @@ impl Default for Viewport {
             active: false,
             show_grid: false,
             show_arrows: true,
-            show_frustum: false,
+            show_frustums: false,
             frustums_color: default_viewport_frustums_color(),
             frustums_thickness: default_viewport_frustums_thickness(),
             show_view_cube: true,

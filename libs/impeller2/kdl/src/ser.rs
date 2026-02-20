@@ -186,9 +186,9 @@ fn serialize_viewport<T>(viewport: &Viewport<T>) -> KdlNode {
             .push(KdlEntry::new_prop("show_arrows", false));
     }
 
-    if viewport.show_frustum {
+    if viewport.show_frustums {
         node.entries_mut()
-            .push(KdlEntry::new_prop("show_frustum", true));
+            .push(KdlEntry::new_prop("show_frustums", true));
     }
 
     if viewport.frustums_color != default_viewport_frustums_color() {
@@ -983,7 +983,7 @@ mod tests {
                 active: true,
                 show_grid: true,
                 show_arrows: true,
-                show_frustum: false,
+                show_frustums: false,
                 frustums_color: default_viewport_frustums_color(),
                 frustums_thickness: default_viewport_frustums_thickness(),
                 show_view_cube: true,
@@ -1023,7 +1023,7 @@ mod tests {
                 active: true,
                 show_grid: true,
                 show_arrows: false,
-                show_frustum: true,
+                show_frustums: true,
                 frustums_color: Color::YALK,
                 frustums_thickness: 0.012,
                 show_view_cube: false,
@@ -1051,7 +1051,7 @@ mod tests {
             "hdr=",
             "show_grid=",
             "show_arrows=",
-            "show_frustum=",
+            "show_frustums=",
             "frustums_color=",
             "frustums_thickness=",
             "show_view_cube=",
@@ -1068,7 +1068,7 @@ mod tests {
         for window in indices.windows(2) {
             assert!(
                 window[0] < window[1],
-                "expected viewport properties in order name → fov → near → far → pos → look_at → hdr → show_grid → show_arrows → show_frustum → frustums_color → frustums_thickness → show_view_cube → active: `{viewport_line}`"
+                "expected viewport properties in order name → fov → near → far → pos → look_at → hdr → show_grid → show_arrows → show_frustums → frustums_color → frustums_thickness → show_view_cube → active: `{viewport_line}`"
             );
         }
     }
@@ -1308,7 +1308,7 @@ graph "value" {
                 active: false,
                 show_grid: false,
                 show_arrows: true,
-                show_frustum: false,
+                show_frustums: false,
                 frustums_color: default_viewport_frustums_color(),
                 frustums_thickness: default_viewport_frustums_thickness(),
                 show_view_cube: true,

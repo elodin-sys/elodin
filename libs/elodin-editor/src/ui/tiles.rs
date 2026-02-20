@@ -99,7 +99,7 @@ fn setup_primary_window_state(
 #[derive(Component)]
 pub struct ViewportConfig {
     pub show_arrows: bool,
-    pub show_frustum: bool,
+    pub show_frustums: bool,
     pub frustums_color: impeller2_wkt::Color,
     pub frustums_thickness: f32,
     pub viewport_layer: Option<usize>,
@@ -1337,7 +1337,7 @@ impl ViewportPane {
             GridHandle { grid: grid_id },
             ViewportConfig {
                 show_arrows: viewport.show_arrows,
-                show_frustum: viewport.show_frustum,
+                show_frustums: viewport.show_frustums,
                 frustums_color: viewport.frustums_color,
                 frustums_thickness: viewport.frustums_thickness,
                 viewport_layer,
