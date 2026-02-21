@@ -7649,7 +7649,7 @@ name = "iree-runtime"
 version = "0.16.2-alpha.0"
 dependencies = [
  "bindgen 0.72.1",
- "thiserror 2.0.17",
+ "zerocopy",
 ]
 
 [[package]]

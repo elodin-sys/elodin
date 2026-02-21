@@ -9,5 +9,5 @@ links = "iree"
 [build-dependencies]
 bindgen = "0.72"
 
-[dependencies]
-thiserror = { version = "2.0", default-features = false, features = ["std"] }
+[dev-dependencies]
+zerocopy = { version = "0.8", features = ["derive"] }

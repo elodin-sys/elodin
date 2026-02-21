@@ -113,14 +113,12 @@ uv venv /tmp/iree-venv --python 3.12
 source /tmp/iree-venv/bin/activate
 uv pip install iree-base-compiler==3.10.0
 
-# Compile f32 module
+# Compile f32 module (no target triple -- produces cross-platform VMFB)
 iree-compile --iree-hal-target-backends=llvm-cpu \
-  --iree-llvmcpu-target-triple=arm64-apple-darwin \
   simple_mul.mlir -o simple_mul.vmfb
 
 # Compile f64 module (critical flags for physics simulations)
 iree-compile --iree-hal-target-backends=llvm-cpu \
-  --iree-llvmcpu-target-triple=arm64-apple-darwin \
   --iree-vm-target-extension-f64 \
   --iree-input-demote-f64-to-f32=false \
   simple_add_f64.mlir -o simple_add_f64.vmfb
@@ -128,7 +126,7 @@ iree-compile --iree-hal-target-backends=llvm-cpu \
 
 The `iree-base-compiler` version must match the IREE runtime version in `nix/pkgs/iree-runtime.nix` (currently 3.10.0).
 
-For cross-platform CI, compile without `--iree-llvmcpu-target-triple` to produce a generic VMFB, or produce per-platform fixtures.
+Do NOT use `--iree-llvmcpu-target-triple` for checked-in fixtures -- omitting it produces host-independent VMFBs that work on both aarch64 and x86_64 CI runners.
 
 ## Nix Integration
 

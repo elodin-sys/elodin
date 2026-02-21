@@ -136,15 +136,30 @@ fn main() {
     println!("cargo:rustc-link-lib=static=iree_builtins_device_device");
     println!("cargo:rustc-link-lib=static=iree_builtins_musl_bin_libmusl");
 
-    // Architecture-specific micro-kernels (only on aarch64)
-    #[cfg(target_arch = "aarch64")]
-    {
+    // Architecture-specific micro-kernels.
+    // Use CARGO_CFG_TARGET_ARCH (not #[cfg]) so cross-compilation links
+    // the correct target libraries rather than the host's.
+    let target_arch = env::var("CARGO_CFG_TARGET_ARCH").unwrap();
+    if target_arch == "aarch64" {
         println!("cargo:rustc-link-lib=static=iree_builtins_ukernel_arch_arm_64_arm_64");
         println!("cargo:rustc-link-lib=static=iree_builtins_ukernel_arch_arm_64_arm_64_bf16");
         println!("cargo:rustc-link-lib=static=iree_builtins_ukernel_arch_arm_64_arm_64_dotprod");
         println!("cargo:rustc-link-lib=static=iree_builtins_ukernel_arch_arm_64_arm_64_fp16fml");
         println!("cargo:rustc-link-lib=static=iree_builtins_ukernel_arch_arm_64_arm_64_fullfp16");
         println!("cargo:rustc-link-lib=static=iree_builtins_ukernel_arch_arm_64_arm_64_i8mm");
+    } else if target_arch == "x86_64" {
+        println!("cargo:rustc-link-lib=static=iree_builtins_ukernel_arch_x86_64_x86_64");
+        println!("cargo:rustc-link-lib=static=iree_builtins_ukernel_arch_x86_64_common_x86_64");
+        println!("cargo:rustc-link-lib=static=iree_builtins_ukernel_arch_x86_64_x86_64_avx2_fma");
+        println!(
+            "cargo:rustc-link-lib=static=iree_builtins_ukernel_arch_x86_64_x86_64_avx512_base"
+        );
+        println!(
+            "cargo:rustc-link-lib=static=iree_builtins_ukernel_arch_x86_64_x86_64_avx512_vnni"
+        );
+        println!(
+            "cargo:rustc-link-lib=static=iree_builtins_ukernel_arch_x86_64_x86_64_avx512_bf16"
+        );
     }
 
     // Third-party deps
@@ -152,16 +167,15 @@ fn main() {
     println!("cargo:rustc-link-lib=static=flatcc_runtime");
     println!("cargo:rustc-link-lib=static=benchmark");
 
-    // System libraries
-    #[cfg(target_os = "linux")]
-    {
+    // System libraries.
+    // Use CARGO_CFG_TARGET_OS (not #[cfg]) for cross-compilation correctness.
+    let target_os = env::var("CARGO_CFG_TARGET_OS").unwrap();
+    if target_os == "linux" {
         println!("cargo:rustc-link-lib=stdc++");
         println!("cargo:rustc-link-lib=pthread");
         println!("cargo:rustc-link-lib=dl");
         println!("cargo:rustc-link-lib=m");
-    }
-    #[cfg(target_os = "macos")]
-    {
+    } else if target_os == "macos" {
         println!("cargo:rustc-link-lib=c++");
         println!("cargo:rustc-link-lib=framework=Foundation");
         println!("cargo:rustc-link-lib=framework=Security");

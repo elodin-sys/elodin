@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use iree_runtime::{BufferView, ElementType, Instance, Session};
+use zerocopy::{FromBytes, IntoBytes};
 
 fn fixture_path(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -28,9 +29,9 @@ fn test_simple_mul() {
     let input1: [f32; 4] = [10.0, 100.0, 1000.0, 10000.0];
     let expected: [f32; 4] = [10.0, 110.0, 1200.0, 13000.0];
 
-    let buf0 = BufferView::from_bytes(&session, bytemuck(&input0), &[4], ElementType::Float32)
+    let buf0 = BufferView::from_bytes(&session, as_bytes(&input0), &[4], ElementType::Float32)
         .expect("failed to create buffer view 0");
-    let buf1 = BufferView::from_bytes(&session, bytemuck(&input1), &[4], ElementType::Float32)
+    let buf1 = BufferView::from_bytes(&session, as_bytes(&input1), &[4], ElementType::Float32)
         .expect("failed to create buffer view 1");
 
     let mut call = session
@@ -42,7 +43,7 @@ fn test_simple_mul() {
 
     let output = call.pop_output().expect("failed to pop output");
     let output_bytes = output.to_bytes().expect("failed to read output");
-    let result: &[f32] = bytecast(&output_bytes);
+    let result: &[f32] = from_bytes(&output_bytes);
 
     assert_eq!(result.len(), 4);
     for (i, (&got, &want)) in result.iter().zip(expected.iter()).enumerate() {
@@ -61,9 +62,9 @@ fn test_f64_support() {
     let input1: [f64; 4] = [0.1, 0.2, 0.3, 0.4];
     let expected: [f64; 4] = [1.1, 2.2, 3.3, 4.4];
 
-    let buf0 = BufferView::from_bytes(&session, bytemuck(&input0), &[4], ElementType::Float64)
+    let buf0 = BufferView::from_bytes(&session, as_bytes(&input0), &[4], ElementType::Float64)
         .expect("failed to create f64 buffer view 0");
-    let buf1 = BufferView::from_bytes(&session, bytemuck(&input1), &[4], ElementType::Float64)
+    let buf1 = BufferView::from_bytes(&session, as_bytes(&input1), &[4], ElementType::Float64)
         .expect("failed to create f64 buffer view 1");
 
     let mut call = session
@@ -75,7 +76,7 @@ fn test_f64_support() {
 
     let output = call.pop_output().expect("failed to pop output");
     let output_bytes = output.to_bytes().expect("failed to read output");
-    let result: &[f64] = bytecast(&output_bytes);
+    let result: &[f64] = from_bytes(&output_bytes);
 
     assert_eq!(result.len(), 4);
     for (i, (&got, &want)) in result.iter().zip(expected.iter()).enumerate() {
@@ -91,7 +92,7 @@ fn test_buffer_view_metadata() {
     let (_instance, session) = setup_session("simple_mul.vmfb");
 
     let data: [f32; 4] = [1.0, 2.0, 3.0, 4.0];
-    let buf = BufferView::from_bytes(&session, bytemuck(&data), &[4], ElementType::Float32)
+    let buf = BufferView::from_bytes(&session, as_bytes(&data), &[4], ElementType::Float32)
         .expect("failed to create buffer view");
 
     assert_eq!(buf.shape(), vec![4]);
@@ -111,9 +112,9 @@ fn test_multiple_invocations() {
         let input0: [f32; 4] = [1.0, 2.0, 3.0, 4.0];
         let input1: [f32; 4] = [multiplier; 4];
 
-        let buf0 = BufferView::from_bytes(&session, bytemuck(&input0), &[4], ElementType::Float32)
+        let buf0 = BufferView::from_bytes(&session, as_bytes(&input0), &[4], ElementType::Float32)
             .unwrap();
-        let buf1 = BufferView::from_bytes(&session, bytemuck(&input1), &[4], ElementType::Float32)
+        let buf1 = BufferView::from_bytes(&session, as_bytes(&input1), &[4], ElementType::Float32)
             .unwrap();
 
         let mut call = session.call("module.simple_mul").unwrap();
@@ -123,7 +124,7 @@ fn test_multiple_invocations() {
 
         let output = call.pop_output().unwrap();
         let output_bytes = output.to_bytes().unwrap();
-        let result: &[f32] = bytecast(&output_bytes);
+        let result: &[f32] = from_bytes(&output_bytes);
 
         for (i, &val) in result.iter().enumerate() {
             let expected = input0[i] * multiplier;
@@ -160,9 +161,9 @@ fn test_multidimensional_shapes() {
     // Row 2: 9*1+10*3+11*5+12*7=178, 9*2+10*4+11*6+12*8=220
     let expected: [f32; 6] = [50.0, 60.0, 114.0, 140.0, 178.0, 220.0];
 
-    let buf_a = BufferView::from_bytes(&session, bytemuck(&a), &[3, 4], ElementType::Float32)
+    let buf_a = BufferView::from_bytes(&session, as_bytes(&a), &[3, 4], ElementType::Float32)
         .expect("failed to create A");
-    let buf_b = BufferView::from_bytes(&session, bytemuck(&b), &[4, 2], ElementType::Float32)
+    let buf_b = BufferView::from_bytes(&session, as_bytes(&b), &[4, 2], ElementType::Float32)
         .expect("failed to create B");
 
     assert_eq!(buf_a.shape(), vec![3, 4]);
@@ -180,7 +181,7 @@ fn test_multidimensional_shapes() {
     assert_eq!(output.element_type(), Some(ElementType::Float32));
 
     let output_bytes = output.to_bytes().unwrap();
-    let result: &[f32] = bytecast(&output_bytes);
+    let result: &[f32] = from_bytes(&output_bytes);
     assert_eq!(result.len(), 6);
     for (i, (&got, &want)) in result.iter().zip(expected.iter()).enumerate() {
         assert!(
@@ -199,8 +200,8 @@ fn test_multiple_outputs() {
     let expected_sum: [f32; 4] = [11.0, 22.0, 33.0, 44.0];
     let expected_prod: [f32; 4] = [10.0, 40.0, 90.0, 160.0];
 
-    let buf_a = BufferView::from_bytes(&session, bytemuck(&a), &[4], ElementType::Float32).unwrap();
-    let buf_b = BufferView::from_bytes(&session, bytemuck(&b), &[4], ElementType::Float32).unwrap();
+    let buf_a = BufferView::from_bytes(&session, as_bytes(&a), &[4], ElementType::Float32).unwrap();
+    let buf_b = BufferView::from_bytes(&session, as_bytes(&b), &[4], ElementType::Float32).unwrap();
 
     let mut call = session
         .call("module.multi_output")
@@ -215,7 +216,7 @@ fn test_multiple_outputs() {
         .expect("failed to pop second output (prod)");
 
     let sum_bytes = out_sum.to_bytes().unwrap();
-    let sum_result: &[f32] = bytecast(&sum_bytes);
+    let sum_result: &[f32] = from_bytes(&sum_bytes);
     for (i, (&got, &want)) in sum_result.iter().zip(expected_sum.iter()).enumerate() {
         assert!(
             (got - want).abs() < 1e-6,
@@ -224,7 +225,7 @@ fn test_multiple_outputs() {
     }
 
     let prod_bytes = out_prod.to_bytes().unwrap();
-    let prod_result: &[f32] = bytecast(&prod_bytes);
+    let prod_result: &[f32] = from_bytes(&prod_bytes);
     for (i, (&got, &want)) in prod_result.iter().zip(expected_prod.iter()).enumerate() {
         assert!(
             (got - want).abs() < 1e-6,
@@ -239,7 +240,7 @@ fn test_integer_roundtrip() {
 
     let input: [i64; 4] = [1, -42, i64::MAX, i64::MIN];
 
-    let buf = BufferView::from_bytes(&session, bytemuck(&input), &[4], ElementType::Int64).unwrap();
+    let buf = BufferView::from_bytes(&session, as_bytes(&input), &[4], ElementType::Int64).unwrap();
     assert_eq!(buf.element_type(), Some(ElementType::Int64));
 
     let mut call = session
@@ -250,7 +251,7 @@ fn test_integer_roundtrip() {
 
     let output = call.pop_output().unwrap();
     let output_bytes = output.to_bytes().unwrap();
-    let result: &[i64] = bytecast(&output_bytes);
+    let result: &[i64] = from_bytes(&output_bytes);
 
     assert_eq!(result, &input, "i64 round-trip must be exact byte-for-byte");
 }
@@ -270,9 +271,9 @@ fn test_load_vmfb_from_bytes() {
     let input1: [f32; 4] = [10.0, 10.0, 10.0, 10.0];
 
     let buf0 =
-        BufferView::from_bytes(&session, bytemuck(&input0), &[4], ElementType::Float32).unwrap();
+        BufferView::from_bytes(&session, as_bytes(&input0), &[4], ElementType::Float32).unwrap();
     let buf1 =
-        BufferView::from_bytes(&session, bytemuck(&input1), &[4], ElementType::Float32).unwrap();
+        BufferView::from_bytes(&session, as_bytes(&input1), &[4], ElementType::Float32).unwrap();
 
     let mut call = session.call("module.simple_mul").unwrap();
     call.push_input(&buf0).unwrap();
@@ -282,7 +283,7 @@ fn test_load_vmfb_from_bytes() {
 
     let output = call.pop_output().unwrap();
     let output_bytes = output.to_bytes().unwrap();
-    let result: &[f32] = bytecast(&output_bytes);
+    let result: &[f32] = from_bytes(&output_bytes);
     assert_eq!(result, &[20.0, 30.0, 40.0, 50.0]);
 }
 
@@ -303,7 +304,7 @@ fn test_error_wrong_input_count() {
 
     let input: [f32; 4] = [1.0, 2.0, 3.0, 4.0];
     let buf =
-        BufferView::from_bytes(&session, bytemuck(&input), &[4], ElementType::Float32).unwrap();
+        BufferView::from_bytes(&session, as_bytes(&input), &[4], ElementType::Float32).unwrap();
 
     let mut call = session.call("module.simple_mul").unwrap();
     call.push_input(&buf).unwrap();
@@ -326,7 +327,7 @@ fn test_large_buffer() {
     let large_data: Vec<f32> = (0..1024).map(|i| i as f32 * 0.001).collect();
     let buf = BufferView::from_bytes(
         &session,
-        bytemuck(&large_data),
+        as_bytes(&large_data),
         &[1024],
         ElementType::Float32,
     )
@@ -336,7 +337,7 @@ fn test_large_buffer() {
     assert_eq!(buf.element_count(), 1024);
 
     let round_trip = buf.to_bytes().unwrap();
-    let result: &[f32] = bytecast(&round_trip);
+    let result: &[f32] = from_bytes(&round_trip);
     assert_eq!(result.len(), 1024);
     for (i, (&got, &want)) in result.iter().zip(large_data.iter()).enumerate() {
         assert!(
@@ -346,14 +347,10 @@ fn test_large_buffer() {
     }
 }
 
-fn bytemuck<T: Copy>(slice: &[T]) -> &[u8] {
-    let ptr = slice.as_ptr() as *const u8;
-    let len = std::mem::size_of_val(slice);
-    unsafe { std::slice::from_raw_parts(ptr, len) }
+fn as_bytes<T: zerocopy::IntoBytes + zerocopy::Immutable>(slice: &[T]) -> &[u8] {
+    zerocopy::IntoBytes::as_bytes(slice)
 }
 
-fn bytecast<T: Copy>(bytes: &[u8]) -> &[T] {
-    let ptr = bytes.as_ptr() as *const T;
-    let len = bytes.len() / std::mem::size_of::<T>();
-    unsafe { std::slice::from_raw_parts(ptr, len) }
+fn from_bytes<T: zerocopy::FromBytes + zerocopy::Immutable>(bytes: &[u8]) -> &[T] {
+    <[T]>::ref_from_bytes(bytes).expect("alignment or size mismatch in from_bytes")
 }
