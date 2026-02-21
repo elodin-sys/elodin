@@ -46,6 +46,7 @@ pub struct SchematicParam<'w, 's> {
     pub graph_states: Query<'w, 's, &'static plot::GraphState>,
     pub query_plots: Query<'w, 's, &'static query_plot::QueryPlotData>,
     pub viewports: Query<'w, 's, &'static inspector::viewport::Viewport>,
+    pub projections: Query<'w, 's, &'static Projection>,
     pub viewport_configs: Query<'w, 's, &'static tiles::ViewportConfig>,
     pub camera_grids: Query<'w, 's, &'static GridHandle>,
     pub grid_visibility: Query<'w, 's, &'static Visibility>,
@@ -135,6 +136,24 @@ impl SchematicParam<'_, '_> {
                     Pane::Viewport(viewport) => {
                         let cam_entity = viewport.camera?;
                         let viewport_data = self.viewports.get(cam_entity).ok()?;
+                        let (fov, near, far) = self
+                            .projections
+                            .get(cam_entity)
+                            .ok()
+                            .and_then(|projection| match projection {
+                                Projection::Perspective(perspective) => Some((
+                                    perspective.fov.to_degrees(),
+                                    Some(perspective.near),
+                                    Some(perspective.far),
+                                )),
+                                _ => None,
+                            })
+                            .unwrap_or((45.0, None, None));
+                        let aspect = self
+                            .viewport_configs
+                            .get(cam_entity)
+                            .ok()
+                            .and_then(|config| config.aspect);
                         let mut show_grid = false;
                         if let Ok(grid_handle) = self.camera_grids.get(cam_entity)
                             && let Ok(visibility) = self.grid_visibility.get(grid_handle.grid)
@@ -147,6 +166,24 @@ impl SchematicParam<'_, '_> {
                             .get(cam_entity)
                             .map(|config| config.show_arrows)
                             .unwrap_or(true);
+                        let create_frustum = self
+                            .viewport_configs
+                            .get(cam_entity)
+                            .map(|config| config.create_frustum)
+                            .unwrap_or(false);
+                        let show_frustums = self
+                            .viewport_configs
+                            .get(cam_entity)
+                            .map(|config| config.show_frustums)
+                            .unwrap_or(false);
+                        let frustums_color = self.viewport_configs.get(cam_entity).map_or_else(
+                            |_| impeller2_wkt::default_viewport_frustums_color(),
+                            |config| config.frustums_color,
+                        );
+                        let frustums_thickness = self.viewport_configs.get(cam_entity).map_or_else(
+                            |_| impeller2_wkt::default_viewport_frustums_thickness(),
+                            |config| config.frustums_thickness,
+                        );
                         let show_view_cube = viewport.view_cube_layer.is_some();
 
                         let local_arrows: Vec<VectorArrow3d> = self
@@ -163,10 +200,17 @@ impl SchematicParam<'_, '_> {
                             .collect();
 
                         Some(Panel::Viewport(Viewport {
-                            fov: 45.0,
+                            fov,
+                            near,
+                            far,
+                            aspect,
                             active: false,
                             show_grid,
                             show_arrows,
+                            create_frustum,
+                            show_frustums,
+                            frustums_color,
+                            frustums_thickness,
                             show_view_cube,
                             hdr: self.hdr_enabled.0,
                             name: pane_name,
