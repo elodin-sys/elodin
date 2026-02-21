@@ -8,6 +8,7 @@ with pkgs; let
   # Import shared configuration
   common = pkgs.callPackage ./pkgs/common.nix {};
   xla_ext = pkgs.callPackage ./pkgs/xla-ext.nix {system = pkgs.stdenv.hostPlatform.system;};
+  iree_runtime = pkgs.callPackage ./pkgs/iree-runtime.nix {};
   llvm = llvmPackages_latest;
 
   # Import shared JAX overrides
@@ -141,6 +142,7 @@ in {
       # Environment variables
       LIBCLANG_PATH = "${libclang.lib}/lib";
       XLA_EXTENSION_DIR = "${xla_ext}";
+      IREE_RUNTIME_DIR = "${iree_runtime}";
 
       # GStreamer plugin path for elodinsink
       GST_PLUGIN_PATH = lib.makeSearchPathOutput "lib" "lib/gstreamer-1.0" [
