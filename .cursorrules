@@ -1,43 +1,11 @@
-Hello! I'm the a software developer of Elodin, which is this repository.
-
-At the most basic high level, "Elodin" is:
-
-1. Elodin Editor & Nox/Nox-Py - A simulator & viewer that can easily and locally do the 10's of thousands of sample rates needed for a real world sensor simulation
-2. Elodin DB - A telemetry database that can ingest this huge amount of data in real time or faster
-3. Elodin Aleph - A flight computer that uses these things for effective bench top testing
-
-Which enables more rapid software development for physical systems
-
-The recommended development workflow repository wide:
-
-1. Always develop inside a nix develop shell, you can start one in a terminal with:
-`nix develop`
-Or alternatively can pass it a one-off command:
-`nix develop --command "EXAMPLE COMMAND"`
-
-2. For developing nox-py, or running simulations with nox-py changes, you need to build the Elodin SDK Python wheel with:
-```
-uv venv --python 3.12
-source .venv/bin/activate
-uvx maturin develop --uv --manifest-path=libs/nox-py/Cargo.toml
-```
-
-3. For building both the Elodin Editor and the Elodin DB, use the convenience command:
-`just install`
-
-4. For all development, best practice is run all activities from the repository root to prevent confusion and improve multi-tasking. All Readme instructions should assume running from repository root unless there is a reason that is difficult or overly cumbersome.
-
-5. The CI enforces these tests, so make sure they pass if relevant to changes made:
-`cargo fmt`
-`cargo test`
-`cargo clippy -- -Dwarnings`
-`ruff format --check && ruff check --fix`
-`alejandra`
-
-More information for specific aspects is available by reviewing the many Readme's in the codebase.  Feel free to ask clarifying questions.
+Elodin is a platform for rapid design, testing, and simulation of aerospace and physical systems. This monorepo contains the Elodin Editor, Elodin DB, the Python SDK (nox-py), flight software, and the Aleph flight computer NixOS configuration.
 
 Rules:
-- always use the nix develop shell when developing changes
-- don't ever commit changes to git, that's for me the developer to do
-- when suggesting new dependencies, make sure to check they are well supported and maintained
-- never use unsafe Rust code
+- Always use the nix develop shell when developing changes
+- Don't ever commit changes to git, that's for the developer to do
+- When suggesting new dependencies, make sure to check they are well supported and maintained
+- Never use unsafe Rust code
+- Run all activities from the repository root
+- CI enforces: `cargo fmt`, `cargo test`, `cargo clippy -- -Dwarnings`, `ruff format --check && ruff check --fix`, `alejandra`
+
+For development workflows, build instructions, and architecture details see the skills in `.cursor/skills/`.

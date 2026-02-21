@@ -13,7 +13,7 @@ This monorepo contains the source code for all Elodin simulation and flight soft
   - [`mekf`](./fsw/mekf) (FSW application): A Multiplicative Extended Kalman Filter implementation that fuses sensor data to estimate vehicle attitude.
   - [`sensor-fw`](./fsw/sensor-fw): Aleph expansion board firmware that streams sensor data (IMU, mag, baro) to the Orin over USB/UART.
 - Simulation software
-  - [`nox-py`](./libs/nox-py): Python version of `nox-ecs`, that works with JAX.
+  - [`nox-py`](./libs/nox-py): Python SDK (includes ECS and JAX integration).
 - [Editor](./apps/elodin): 3D viewer and graphing tool for visualizing both simulation and flight data.
 
 <h2 align="center">

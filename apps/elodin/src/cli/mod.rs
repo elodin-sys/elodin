@@ -41,9 +41,7 @@ impl Cli {
 
         let filter = EnvFilter::try_from_default_env()
             .or_else(|_| {
-                EnvFilter::try_new(
-                    "s10=info,elodin=info,impeller=info,nox_ecs=info,impeller::bevy=error,error",
-                )
+                EnvFilter::try_new("s10=info,elodin=info,impeller=info,impeller::bevy=error,error")
             })
             .unwrap_or_else(|_| EnvFilter::new("info"));
 
