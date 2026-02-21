@@ -2734,6 +2734,8 @@ dependencies = [
  "cexpr",
  "clang-sys",
  "itertools 0.13.0",
+ "log",
+ "prettyplease",
  "proc-macro2",
  "quote",
  "regex",
@@ -7641,6 +7643,14 @@ name = "ipnet"
 version = "2.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "469fb0b9cefa57e3ef31275ee7cacb78f2fdca44e4765491884a2b119d4eb130"
+
+[[package]]
+name = "iree-runtime"
+version = "0.16.2-alpha.0"
+dependencies = [
+ "bindgen 0.72.1",
+ "thiserror 2.0.17",
+]
 
 [[package]]
 name = "iri-string"
