@@ -39,7 +39,10 @@ impl Session {
         let allocator = ffi::iree_allocator_system();
 
         // Allocate an IREE-owned buffer and copy the data into it.
-        // IREE takes ownership of this buffer (frees it via the allocator).
+        // IREE takes ownership unconditionally: on success the module holds it,
+        // on failure iree_runtime_session_append_bytecode_module_from_memory
+        // calls iree_allocator_free itself (see session.c: "we always consume
+        // the flatbuffer data even if we fail"). No cleanup needed here.
         let mut iree_buf: *mut std::ffi::c_void = ptr::null_mut();
         let alloc_status =
             unsafe { ffi::iree_allocator_malloc(allocator, vmfb_data.len(), &mut iree_buf) };
