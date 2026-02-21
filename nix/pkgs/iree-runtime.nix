@@ -69,6 +69,10 @@ in
       # Disable optional features not needed for our use case
       "-DIREE_ENABLE_CPUINFO=OFF"
       "-DIREE_BUILD_TRACY=OFF"
+      # Prevent FetchContent from trying to git-clone libbacktrace during
+      # the build (nix sandboxes have no network access). Defaults to ON
+      # on Linux.
+      "-DIREE_ENABLE_LIBBACKTRACE=OFF"
     ];
 
     # Install headers and static libraries
