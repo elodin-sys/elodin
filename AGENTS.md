@@ -44,3 +44,4 @@ For in-depth instructions, read the relevant skill file below when working in th
 - **Elodin Editor** (Bevy/Egui architecture, hot-reload, viewport, telemetry graphs, KDL schematics): `.cursor/skills/elodin-editor-dev/SKILL.md`
 - **Python SDK internals** (PyO3 bindings, nox-py, JAX integration, adding components/systems): `.cursor/skills/nox-py-dev/SKILL.md`
 - **Nix environment** (dev shell troubleshooting, OrbStack VMs, flake.nix, binary cache): `.cursor/skills/elodin-nix/SKILL.md`
+- **IREE runtime** (iree-runtime crate, VMFB execution from Rust, FFI bindings, XLA-to-IREE migration): `.cursor/skills/elodin-iree/SKILL.md`
