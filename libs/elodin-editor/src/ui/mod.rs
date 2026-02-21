@@ -27,6 +27,7 @@ use bevy_egui::{
     egui::{self, Color32, Label, RichText},
     input::EguiWantsInput,
 };
+use tracing::instrument;
 pub(crate) const DEFAULT_SECONDARY_RECT: WindowRect = WindowRect {
     x: 10,
     y: 10,
@@ -546,6 +547,7 @@ impl RootWidgetSystem for ViewportOverlay<'_, '_> {
     }
 }
 
+#[instrument]
 pub fn render_layout(
     world: &mut World,
     mut windows: Local<Vec<(Entity, WindowId)>>,

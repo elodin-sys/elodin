@@ -60,6 +60,7 @@ impeller2-kdl.path = "../../libs/impeller2/kdl"
 toml.version = "0.8"
 serde = { version = "1.0.196", features = ["derive"] }
 serde_json = "1"
+tracing = "0.1"
 
 # search
 fuzzy-matcher = "0.3.7"
