@@ -1075,7 +1075,7 @@ and running the simulation. The <code>World</code> object also provides helper m
 <h2 id="6-degrees-of-freedom-model">6 Degrees of Freedom Model</h2>
 <p>Elodin has a built-in <a href="https://en.wikipedia.org/wiki/Six_degrees_of_freedom">6 Degrees of Freedom</a> (6DoF) system
 implementation for simulating <a href="https://en.m.wikipedia.org/wiki/Rigid_body">rigid bodies</a>, such as flight vehicles.
-You can review the implementation <a href="https://github.com/elodin-sys/elodin/blob/332957c41f609e1ccee36dbc48750ea59001c817/libs/nox-ecs/src/six_dof.rs">here</a>.
+You can review the implementation <a href="https://github.com/elodin-sys/elodin/blob/main/libs/nox-py/src/six_dof.rs">here</a>.
 Using the associated <a href="/reference/python-api/#class-elodin-body">elodin.Body</a> archetype and prebuilt components, we can create a 6DoF system that aligns closely with this
 <a href="https://www.mathworks.com/help/aeroblks/6dofquaternion.html">familiar model</a> from Simulink.</p>
 <h3 id="function-elodin-six-dof"><em>function</em> <code>elodin.six_dof</code></h3>
@@ -1097,12 +1097,12 @@ to the <code>sim_time_step</code> provided in World.run(...) if unset</li>
 <li>
 <p><code>elodin.Integrator.Rk4</code> -&gt; <a href="/reference/python-api/#class-elodin-integrator">elodin.Integrator</a></p>
 <p>Runge-Kutta 4th Order (RK4) Integrator: Elodin provides a built-in implementation for a <a href="https://en.wikipedia.org/wiki/Runge%E2%80%93Kutta_methods">4th order Runge-Kutta integrator</a>.
-The RK4 integrator is a numerical method used to solve ordinary differential equations. You can review the implementation <a href="https://github.com/elodin-sys/elodin/blob/332957c41f609e1ccee36dbc48750ea59001c817/libs/nox-ecs/src/integrator/rk4.rs">here</a>.</p>
+The RK4 integrator is a numerical method used to solve ordinary differential equations. You can review the implementation <a href="https://github.com/elodin-sys/elodin/blob/main/libs/nox-py/src/integrator/rk4.rs">here</a>.</p>
 </li>
 <li>
 <p><code>elodin.Integrator.SemiImplicit</code> -&gt; <a href="/reference/python-api/#class-elodin-integrator">elodin.Integrator</a></p>
 <p>Semi-Implicit Integrator: Elodin provides a built-in implementation for a <a href="https://en.wikipedia.org/wiki/Semi-implicit_Euler_method">semi-implicit Euler integrator</a>.
-The semi-implicit integrator is a numerical method used to solve ordinary differential equations. You can review the implementation <a href="https://github.com/elodin-sys/elodin/blob/332957c41f609e1ccee36dbc48750ea59001c817/libs/nox-ecs/src/integrator/semi_implicit.rs">here</a>.</p>
+The semi-implicit integrator is a numerical method used to solve ordinary differential equations. You can review the implementation <a href="https://github.com/elodin-sys/elodin/blob/main/libs/nox-py/src/integrator/semi_implicit.rs">here</a>.</p>
 </li>
 </ul>
 <h3 id="class-elodin-body"><em>class</em> <code>elodin.Body</code></h3>
