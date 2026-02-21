@@ -10,7 +10,7 @@ use nox::{
 };
 use std::{collections::BTreeMap, marker::PhantomData};
 
-use crate::{ComponentArray, ComponentGroup, Query};
+use crate::nox_ecs::{ComponentArray, ComponentGroup, Query};
 
 #[derive(Clone)]
 pub struct GraphQuery<E> {
@@ -83,7 +83,7 @@ impl ReprMonad<Op> for Edge {
 //     }
 // }
 
-impl crate::component::Component for Edge {}
+impl crate::nox_ecs::component::Component for Edge {}
 
 impl Component for Edge {
     const NAME: &'static str = "edge";
@@ -120,14 +120,18 @@ impl EdgeComponent for Edge {
 
 pub struct TotalEdge;
 
-impl<E: EdgeComponent + 'static> crate::system::SystemParam for GraphQuery<E> {
+impl<E: EdgeComponent + 'static> crate::nox_ecs::system::SystemParam for GraphQuery<E> {
     type Item = Self;
 
-    fn init(_builder: &mut crate::system::SystemBuilder) -> Result<(), crate::Error> {
+    fn init(
+        _builder: &mut crate::nox_ecs::system::SystemBuilder,
+    ) -> Result<(), crate::nox_ecs::Error> {
         Ok(())
     }
 
-    fn param(builder: &crate::system::SystemBuilder) -> Result<Self::Item, crate::Error> {
+    fn param(
+        builder: &crate::nox_ecs::system::SystemBuilder,
+    ) -> Result<Self::Item, crate::nox_ecs::Error> {
         let col = builder.world.column::<E>().unwrap();
         let ty = &col.schema;
         let buf = &mut &col.column[..];
@@ -149,19 +153,26 @@ impl<E: EdgeComponent + 'static> crate::system::SystemParam for GraphQuery<E> {
         std::iter::empty()
     }
 
-    fn output(&self, _builder: &mut crate::system::SystemBuilder) -> Result<Noxpr, crate::Error> {
+    fn output(
+        &self,
+        _builder: &mut crate::nox_ecs::system::SystemBuilder,
+    ) -> Result<Noxpr, crate::nox_ecs::Error> {
         unimplemented!()
     }
 }
 
-impl crate::system::SystemParam for GraphQuery<TotalEdge> {
+impl crate::nox_ecs::system::SystemParam for GraphQuery<TotalEdge> {
     type Item = Self;
 
-    fn init(_builder: &mut crate::system::SystemBuilder) -> Result<(), crate::Error> {
+    fn init(
+        _builder: &mut crate::nox_ecs::system::SystemBuilder,
+    ) -> Result<(), crate::nox_ecs::Error> {
         Ok(())
     }
 
-    fn param(builder: &crate::system::SystemBuilder) -> Result<Self::Item, crate::Error> {
+    fn param(
+        builder: &crate::nox_ecs::system::SystemBuilder,
+    ) -> Result<Self::Item, crate::nox_ecs::Error> {
         let edges = (0..builder.world.entity_len())
             .flat_map(|from| {
                 (0..builder.world.entity_len())
@@ -179,7 +190,10 @@ impl crate::system::SystemParam for GraphQuery<TotalEdge> {
         std::iter::empty()
     }
 
-    fn output(&self, _builder: &mut crate::system::SystemBuilder) -> Result<Noxpr, crate::Error> {
+    fn output(
+        &self,
+        _builder: &mut crate::nox_ecs::system::SystemBuilder,
+    ) -> Result<Noxpr, crate::nox_ecs::Error> {
         unimplemented!()
     }
 }
@@ -333,7 +347,7 @@ mod tests {
     use nox::{Matrix, OwnedRepr, Scalar, Vector, tensor};
     use nox_ecs_macros::{Component, ReprMonad};
 
-    use crate::IntoSystemExt;
+    use crate::nox_ecs::IntoSystemExt;
 
     use super::*;
 

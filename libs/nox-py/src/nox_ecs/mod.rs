@@ -1,7 +1,4 @@
-#![doc = include_str!("../README.md")]
-extern crate self as nox_ecs;
-
-use crate::utils::SchemaExt;
+use crate::nox_ecs::utils::SchemaExt;
 use impeller2::types::{ComponentId, EntityId};
 use impeller2_wkt::EntityMetadata;
 use nox::xla::{BufferArgsRef, HloModuleProto, PjRtBuffer, PjRtLoadedExecutable};
@@ -16,8 +13,8 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 use std::{collections::BTreeMap, marker::PhantomData};
 
-pub use crate::archetype::ComponentExt;
-pub use crate::component::Component;
+pub use crate::nox_ecs::archetype::ComponentExt;
+pub use crate::nox_ecs::component::Component;
 pub use nox;
 pub use nox::{DefaultRepr, Op, OwnedRepr};
 
@@ -108,7 +105,7 @@ impl<T: Component> ComponentArray<T> {
     }
 }
 
-impl<T: Component + 'static> crate::system::SystemParam for ComponentArray<T> {
+impl<T: Component + 'static> crate::nox_ecs::system::SystemParam for ComponentArray<T> {
     type Item = Self;
 
     fn init(builder: &mut SystemBuilder) -> Result<(), Error> {
@@ -209,8 +206,8 @@ impl Default for WorldBuilder {
 
 impl<Sys, StartupSys> WorldBuilder<Sys, StartupSys>
 where
-    Sys: crate::system::System,
-    StartupSys: crate::system::System,
+    Sys: crate::nox_ecs::system::System,
+    StartupSys: crate::nox_ecs::system::System,
 {
     pub fn world(mut self, world: World) -> Self {
         self.world = world;
@@ -295,7 +292,7 @@ pub trait SystemExt {
     fn build(self, world: &mut World) -> Result<Exec, Error>;
 }
 
-impl<S: crate::system::System> SystemExt for S {
+impl<S: crate::nox_ecs::system::System> SystemExt for S {
     fn build(self, world: &mut World) -> Result<Exec, Error> {
         let mut system_builder = SystemBuilder {
             vars: BTreeMap::default(),
@@ -570,7 +567,6 @@ pub enum Error {
     Io(#[from] std::io::Error),
     #[error("serde_json {0}")]
     Json(#[from] serde_json::Error),
-    #[cfg(feature = "pyo3")]
     #[error("python error")]
     PyO3(#[from] pyo3::PyErr),
     #[error("db {0}")]
@@ -590,7 +586,7 @@ impl From<nox::xla::Error> for Error {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Archetype, World};
+    use crate::nox_ecs::{Archetype, World};
     use nox::{Op, OwnedRepr, Scalar, Vector, tensor};
     use nox_ecs_macros::ReprMonad;
 

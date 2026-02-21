@@ -1,7 +1,7 @@
-use crate::World;
-use crate::globals::SimulationTimeStep;
-use crate::system::{CompiledSystem, IntoSystem, System, SystemBuilder, SystemParam};
-use crate::{ComponentArray, ComponentGroup, Error, Query};
+use crate::nox_ecs::World;
+use crate::nox_ecs::globals::SimulationTimeStep;
+use crate::nox_ecs::system::{CompiledSystem, IntoSystem, System, SystemBuilder, SystemParam};
+use crate::nox_ecs::{ComponentArray, ComponentGroup, Error, Query};
 use nox::Scalar;
 use std::ops::Add;
 use std::{marker::PhantomData, ops::Mul};
@@ -128,7 +128,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Archetype, Component, World, WorldExt};
+    use crate::nox_ecs::{Archetype, Component, World, WorldExt};
     use nox::{Op, OwnedRepr, tensor};
     use nox::{Scalar, SpatialMotion, SpatialTransform};
     use nox_ecs_macros::{ComponentGroup, FromBuilder, ReprMonad};

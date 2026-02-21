@@ -2,16 +2,16 @@ use std::collections::HashMap;
 
 use crate::*;
 
+use crate::nox_ecs::Compiled;
 use impeller2::types::Timestamp;
 use impeller2_wkt::ArchiveFormat;
 use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
-use nox_ecs::Compiled;
 use pyo3::exceptions::PyTypeError;
 use pyo3::types::IntoPyDict;
 
 #[pyclass]
 pub struct Exec {
-    pub exec: nox_ecs::WorldExec<Compiled>,
+    pub exec: crate::nox_ecs::WorldExec<Compiled>,
     // DB is 128-bit aligned. We box to avoid `Exec` being 128-bit aligned,
     // which Python doesn't like.
     pub db: Box<elodin_db::DB>,
@@ -43,7 +43,12 @@ impl Exec {
         for _ in 0..ticks {
             self.exec.run()?;
             self.db.with_state(|state| {
-                nox_ecs::impeller2_server::commit_world_head(state, &mut self.exec, timestamp, None)
+                crate::nox_ecs::impeller2_server::commit_world_head(
+                    state,
+                    &mut self.exec,
+                    timestamp,
+                    None,
+                )
             })?;
             timestamp += self.exec.world.sim_time_step().0;
 

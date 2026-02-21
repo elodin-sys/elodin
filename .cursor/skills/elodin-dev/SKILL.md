@@ -7,8 +7,8 @@ description: Develop and contribute to the Elodin codebase. Use when building El
 
 Elodin is a monorepo for aerospace simulation and flight software. The stack:
 
-- **nox-py** — Python SDK (JAX + PyO3 bindings)
-- **nox-ecs / nox** — ECS world and tensor compiler → XLA
+- **nox-py** — Python SDK (JAX + PyO3 bindings; includes ECS at `src/nox_ecs/`)
+- **nox** — Tensor compiler → XLA
 - **Impeller2** — High-performance pub-sub telemetry protocol
 - **Elodin-DB** — Time-series telemetry database
 - **Elodin Editor** — 3D viewer and graphing tool (Bevy + Egui)
@@ -34,7 +34,7 @@ Compiler  (Telemetry)   (Storage)
 ```
 
 Key integration points:
-1. nox-py → nox-ecs → nox → noxla → XLA (simulation compilation)
+1. nox-py (includes nox_ecs) → nox → noxla → XLA (simulation compilation)
 2. nox-py → impeller2 → elodin-db (telemetry)
 3. elodin-editor → impeller2 → elodin-db (visualization)
 4. roci → impeller2 → elodin-db (flight software telemetry)
@@ -88,7 +88,7 @@ The Cargo workspace has 57 members. Key crates by area:
 
 | Area | Crates |
 |------|--------|
-| Simulation | `nox`, `nox-ecs`, `nox-ecs-macros`, `nox-py`, `nox-frames`, `noxla` |
+| Simulation | `nox`, `nox-ecs-macros`, `nox-py`, `nox-frames`, `noxla` |
 | Database | `db`, `db/cli`, `db/eql`, `db/tests` |
 | Telemetry | `impeller2`, `impeller2/{bevy,stellar,bbq,frame,kdl,wkt}` |
 | Editor | `elodin-editor`, `apps/elodin` |

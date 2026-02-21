@@ -2,14 +2,14 @@ use super::*;
 
 use impeller2::types::ComponentId;
 //use impeller::{ComponentExt, ComponentId};
-use nox_ecs::graph::{GraphQuery, exprs_from_edges_queries};
-use nox_ecs::nox::ReprMonad;
+use crate::nox_ecs::graph::{GraphQuery, exprs_from_edges_queries};
+use crate::nox_ecs::nox::ReprMonad;
 use pyo3::types::{PyDict, PyList};
 
 #[pyclass]
 #[derive(Clone)]
 pub struct GraphQueryInner {
-    query: nox_ecs::graph::GraphQuery<()>,
+    query: crate::nox_ecs::graph::GraphQuery<()>,
 }
 
 #[pymethods]
@@ -34,7 +34,7 @@ impl GraphQueryInner {
         let edges = builder
             .edge_map
             .get(&edge_id)
-            .ok_or(nox_ecs::Error::ComponentNotFound)?;
+            .ok_or(crate::nox_ecs::Error::ComponentNotFound)?;
         let edges = edges
             .iter()
             .map(|x| if reverse { x.reverse() } else { x.clone() })
@@ -88,7 +88,7 @@ impl GraphQueryInner {
         }
         let expr = Noxpr::jax(new_buf);
         QueryInner {
-            query: nox_ecs::Query {
+            query: crate::nox_ecs::Query {
                 exprs: vec![expr],
                 entity_map,
                 len,
@@ -101,7 +101,7 @@ impl GraphQueryInner {
 
 #[pyclass]
 pub struct Edge {
-    inner: nox_ecs::graph::Edge,
+    inner: crate::nox_ecs::graph::Edge,
 }
 
 #[pymethods]
@@ -109,7 +109,7 @@ impl Edge {
     #[new]
     pub fn new(from: EntityId, to: EntityId) -> Self {
         Self {
-            inner: nox_ecs::graph::Edge {
+            inner: crate::nox_ecs::graph::Edge {
                 from: from.inner,
                 to: to.inner,
             },
@@ -133,7 +133,7 @@ impl Edge {
 
     #[classattr]
     fn metadata() -> Component {
-        Component::from_component::<nox_ecs::graph::Edge>()
+        Component::from_component::<crate::nox_ecs::graph::Edge>()
     }
 
     #[classattr]

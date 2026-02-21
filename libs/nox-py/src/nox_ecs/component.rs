@@ -29,7 +29,7 @@ impl Time {
 
 #[cfg(test)]
 mod tests {
-    use crate::{Seed, WorldPos};
+    use crate::nox_ecs::{Seed, WorldPos};
     use impeller2::component::Component;
     use nox::Op;
 

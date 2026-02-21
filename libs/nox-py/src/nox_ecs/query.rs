@@ -1,4 +1,4 @@
-use crate::{Component, ComponentArray, Error, SystemParam, system::SystemBuilder};
+use crate::nox_ecs::{Component, ComponentArray, Error, SystemParam, system::SystemBuilder};
 use elodin_db::ComponentSchema;
 use impeller2::types::{ComponentId, EntityId};
 use nox::{ArrayTy, Builder, CompFn, Noxpr, NoxprFn, ReprMonad, xla};
@@ -73,7 +73,7 @@ macro_rules! impl_group {
             type Params = Self;
             type Append<O> = ($($param,)* O);
 
-            fn init(builder: &mut crate::system::SystemBuilder) -> Result<(), Error> {
+            fn init(builder: &mut crate::nox_ecs::system::SystemBuilder) -> Result<(), Error> {
                 $(
                     <$param>::init(builder)?;
                 )*
@@ -82,7 +82,7 @@ macro_rules! impl_group {
             }
 
             fn component_arrays<'a>(
-                builder: &'a crate::system::SystemBuilder,
+                builder: &'a crate::nox_ecs::system::SystemBuilder,
             ) -> impl Iterator<Item = ComponentArray<()>> + 'a {
                 let iter = std::iter::empty();
                 $(
@@ -133,20 +133,20 @@ macro_rules! impl_group {
 impl<T> ComponentGroup for T
 where
     T: Component,
-    ComponentArray<T>: crate::system::SystemParam<Item = ComponentArray<T>>,
+    ComponentArray<T>: crate::nox_ecs::system::SystemParam<Item = ComponentArray<T>>,
 {
     type Params = T;
 
     type Append<O> = (T, O);
 
     fn init(builder: &mut SystemBuilder) -> Result<(), Error> {
-        <ComponentArray<T> as crate::system::SystemParam>::init(builder)
+        <ComponentArray<T> as crate::nox_ecs::system::SystemParam>::init(builder)
     }
 
     fn component_arrays<'a>(
         builder: &'a SystemBuilder,
     ) -> impl Iterator<Item = ComponentArray<()>> + 'a {
-        use crate::system::SystemParam;
+        use crate::nox_ecs::system::SystemParam;
         std::iter::once(ComponentArray::<T>::param(builder).unwrap().cast())
     }
 
@@ -184,7 +184,7 @@ impl_group!(10; T1, T2, T3, T4, T5, T6, T7, T9, T10, T11);
 impl_group!(11; T1, T2, T3, T4, T5, T6, T7, T9, T10, T11, T12);
 impl_group!(12; T1, T2, T3, T4, T5, T6, T7, T9, T10, T11, T12, T13);
 
-impl<G: ComponentGroup> crate::system::SystemParam for Query<G> {
+impl<G: ComponentGroup> crate::nox_ecs::system::SystemParam for Query<G> {
     type Item = Self;
 
     fn init(builder: &mut SystemBuilder) -> Result<(), Error> {
@@ -224,7 +224,7 @@ impl<G: ComponentGroup> crate::system::SystemParam for Query<G> {
             if let Some(var) = builder.vars.get_mut(&id)
                 && var.entity_map != self.entity_map
             {
-                outputs.push(crate::update_var(
+                outputs.push(crate::nox_ecs::update_var(
                     &var.entity_map,
                     &self.entity_map,
                     &var.buffer,
@@ -494,7 +494,7 @@ impl<A> From<ComponentArray<A>> for Query<A> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Archetype, IntoSystemExt};
+    use crate::nox_ecs::{Archetype, IntoSystemExt};
     use nox::{Op, OwnedRepr, Scalar};
     use nox_ecs_macros::{ComponentGroup, FromBuilder, ReprMonad};
 

@@ -1,11 +1,11 @@
+use crate::nox_ecs::{Archetype, Component};
+use crate::nox_ecs::{Query, WorldPos, system::IntoSystem, system::System};
 use core::ops::{Add, Mul};
 use nox::{Op, OwnedRepr, Scalar, SpatialForce, SpatialInertia, SpatialMotion};
-use nox_ecs::{Archetype, Component};
-use nox_ecs::{Query, WorldPos, system::IntoSystem, system::System};
 use nox_ecs_macros::{ComponentGroup, FromBuilder, ReprMonad};
 use std::sync::Arc;
 
-use crate::{
+use crate::nox_ecs::{
     ComponentArray, ErasedSystem, Integrator, Rk4Ext, semi_implicit_euler,
     semi_implicit_euler_with_dt,
 };
@@ -209,8 +209,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::World;
-    use crate::WorldExt;
+    use crate::nox_ecs::World;
+    use crate::nox_ecs::WorldExt;
     use approx::assert_relative_eq;
     use impeller2::component::Component;
     use impeller2::types::ComponentId;

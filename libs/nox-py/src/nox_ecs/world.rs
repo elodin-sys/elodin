@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;
 use std::time::Duration;
 
-use crate::utils::SchemaExt;
+use crate::nox_ecs::utils::SchemaExt;
 use bytemuck::Pod;
 use elodin_db::{ComponentSchema, MetadataExt};
 use impeller2::com_de::FromComponentView;
@@ -12,7 +12,7 @@ use impeller2::{
 };
 use impeller2_wkt::ComponentMetadata;
 
-use crate::*;
+use crate::nox_ecs::*;
 
 // 16.67 ms
 pub const DEFAULT_TIME_STEP: Duration = Duration::from_nanos(1_000_000_000 / 120);

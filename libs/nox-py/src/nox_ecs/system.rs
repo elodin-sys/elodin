@@ -1,10 +1,10 @@
 use std::{collections::BTreeMap, marker::PhantomData, sync::Arc};
 
-use crate::{World, utils::SchemaExt};
+use crate::nox_ecs::{World, utils::SchemaExt};
 use impeller2::types::ComponentId;
 use nox::{ArrayTy, Noxpr, NoxprComp, NoxprFn, NoxprId, NoxprTy};
 
-use crate::{ComponentArray, Error};
+use crate::nox_ecs::{ComponentArray, Error};
 
 pub struct SystemBuilder<'a> {
     pub vars: BTreeMap<ComponentId, ComponentArray<()>>,

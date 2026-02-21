@@ -1,12 +1,12 @@
 use crate::*;
 
-use nox_ecs::utils::PrimTypeExt;
-use nox_ecs::{
+use crate::nox_ecs::utils::PrimTypeExt;
+use crate::nox_ecs::{
     CompiledSystem, Exec, ExecMetadata, SystemParam,
     graph::{EdgeComponent, GraphQuery, TotalEdge},
     nox::{NoxprComp, NoxprFn, NoxprNode, NoxprTy, jax::JaxNoxprFn},
 };
-use nox_ecs::{ComponentSchema, World};
+use crate::nox_ecs::{ComponentSchema, World};
 use pyo3::IntoPyObjectExt;
 use pyo3::types::{IntoPyDict, PyBytes};
 use std::{collections::HashMap, sync::Arc};
@@ -58,12 +58,15 @@ impl PyFnSystem {
     }
 }
 
-impl nox_ecs::System for PyFnSystem {
+impl crate::nox_ecs::System for PyFnSystem {
     type Arg = ();
 
     type Ret = ();
 
-    fn init(&self, builder: &mut nox_ecs::SystemBuilder) -> Result<(), nox_ecs::Error> {
+    fn init(
+        &self,
+        builder: &mut crate::nox_ecs::SystemBuilder,
+    ) -> Result<(), crate::nox_ecs::Error> {
         for &id in &self.input_ids {
             builder.init_with_column(id)?;
         }
@@ -74,11 +77,14 @@ impl nox_ecs::System for PyFnSystem {
         Ok(())
     }
 
-    fn compile(&self, world: &World) -> Result<nox_ecs::CompiledSystem, nox_ecs::Error> {
+    fn compile(
+        &self,
+        world: &World,
+    ) -> Result<crate::nox_ecs::CompiledSystem, crate::nox_ecs::Error> {
         let sys = Python::with_gil(|py| self.sys.clone_ref(py));
         let mut input_ids = self.input_ids.clone();
         let output_ids = self.output_ids.clone();
-        let builder = nox_ecs::SystemBuilder::new(world);
+        let builder = crate::nox_ecs::SystemBuilder::new(world);
         let mut py_builder = SystemBuilder {
             total_edges: GraphQuery::<TotalEdge>::param(&builder)?.edges,
             ..Default::default()
@@ -95,7 +101,7 @@ impl nox_ecs::System for PyFnSystem {
             let col = builder
                 .world
                 .column_by_id(id)
-                .ok_or(nox_ecs::Error::ComponentNotFound)?;
+                .ok_or(crate::nox_ecs::Error::ComponentNotFound)?;
             let arg_metadata = ArgMetadata {
                 entity_map: col.entity_map(),
                 len: col.len(),
@@ -112,7 +118,7 @@ impl nox_ecs::System for PyFnSystem {
             let col = builder.world.column_by_id(id).unwrap();
             let edges = col
                 .iter()
-                .map(move |(_, value)| nox_ecs::graph::Edge::from_value(value).unwrap())
+                .map(move |(_, value)| crate::nox_ecs::graph::Edge::from_value(value).unwrap())
                 .collect();
             py_builder.edge_map.insert(id, edges);
         }
@@ -161,7 +167,7 @@ impl CompiledSystemExt for CompiledSystem {
             let jnp = py.import("jax.numpy")?;
             let col = world
                 .column_by_id(*id)
-                .ok_or(nox_ecs::Error::ComponentNotFound)?;
+                .ok_or(crate::nox_ecs::Error::ComponentNotFound)?;
             let elem_ty = col.schema.prim_type;
             let dtype = nox::jax::dtype(&elem_ty.to_element_type())?;
             // Build tuple shape manually instead of using PyTuple
@@ -239,8 +245,8 @@ def build_expr(func):
 #[derive(Clone, Default)]
 pub struct SystemBuilder {
     arg_map: HashMap<ComponentId, (ArgMetadata, usize)>,
-    pub edge_map: HashMap<ComponentId, Vec<nox_ecs::graph::Edge>>,
-    pub total_edges: Vec<nox_ecs::graph::Edge>,
+    pub edge_map: HashMap<ComponentId, Vec<crate::nox_ecs::graph::Edge>>,
+    pub total_edges: Vec<crate::nox_ecs::graph::Edge>,
 }
 
 #[derive(Clone)]
@@ -260,11 +266,11 @@ impl SystemBuilder {
 #[pyclass]
 #[derive(Clone)]
 pub struct System {
-    pub inner: Arc<dyn nox_ecs::System<Arg = (), Ret = ()> + Send + Sync>,
+    pub inner: Arc<dyn crate::nox_ecs::System<Arg = (), Ret = ()> + Send + Sync>,
 }
 
 impl System {
-    pub fn new(sys: impl nox_ecs::System + Send + Sync + 'static) -> Self {
+    pub fn new(sys: impl crate::nox_ecs::System + Send + Sync + 'static) -> Self {
         let inner = Arc::new(ErasedSystem::new(sys));
         Self { inner }
     }
@@ -273,7 +279,7 @@ impl System {
 #[pymethods]
 impl System {
     pub fn pipe(&self, other: System) -> System {
-        let pipe = nox_ecs::Pipe::new(self.clone(), other);
+        let pipe = crate::nox_ecs::Pipe::new(self.clone(), other);
         System::new(pipe)
     }
 
@@ -291,16 +297,19 @@ impl System {
     }
 }
 
-impl nox_ecs::System for System {
+impl crate::nox_ecs::System for System {
     type Arg = ();
 
     type Ret = ();
 
-    fn init(&self, builder: &mut nox_ecs::SystemBuilder) -> Result<(), nox_ecs::Error> {
+    fn init(
+        &self,
+        builder: &mut crate::nox_ecs::SystemBuilder,
+    ) -> Result<(), crate::nox_ecs::Error> {
         self.inner.init(builder)
     }
 
-    fn compile(&self, world: &World) -> Result<CompiledSystem, nox_ecs::Error> {
+    fn compile(&self, world: &World) -> Result<CompiledSystem, crate::nox_ecs::Error> {
         self.inner.compile(world)
     }
 }

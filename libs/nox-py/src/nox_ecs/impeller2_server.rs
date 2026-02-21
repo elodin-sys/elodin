@@ -1,8 +1,8 @@
+use crate::nox_ecs::Error;
 use bytemuck;
 use elodin_db::{AtomicTimestampExt, DB, State, handle_conn};
 use impeller2::types::{ComponentId, Timestamp};
 use impeller2_wkt::{ComponentMetadata, EntityMetadata};
-use nox_ecs::Error;
 use std::{
     collections::HashSet,
     sync::{
@@ -15,7 +15,7 @@ use stellarator::struc_con::{Joinable, Thread};
 use stellarator::util::CancelToken;
 use tracing::{info, warn};
 
-use crate::{Compiled, World, WorldExec};
+use crate::nox_ecs::{Compiled, World, WorldExec};
 
 pub struct Server {
     db: elodin_db::Server,

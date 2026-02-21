@@ -1,14 +1,14 @@
 # nox-ecs-macros
 
 ## Description
-**nox-ecs-macros** saves you from writing verbose manual `impl`s to hook your structs into the **nox / nox-ecs** engine:  
+**nox-ecs-macros** saves you from writing verbose manual `impl`s to hook your structs into the **nox-py** engine (which contains the merged nox-ecs code):  
 - Declare a `Component`, assemble an `Archetype`, group components, and convert to/from computational expressions (`Noxpr`).  
 - You write a struct → you add `#[derive(...)]` → it’s wired.
 
 ---
 
 ## The problem without this crate
-In **nox/nox-ecs**, doing things “by hand” means:
+In **nox-py** (which contains the nox_ecs submodule at `libs/nox-py/src/nox_ecs/`), doing things “by hand” means:
 
 - implementing `impeller2::component::Component` (name, schema, etc.),
 - implementing `nox_ecs::Component`, `Archetype`, `ComponentGroup`,
@@ -48,4 +48,4 @@ In **nox/nox-ecs**, doing things “by hand” means:
 ---
 
 ## Some examples
-Runnable examples are available in the [nox-ecs README](../nox-ecs/README.md).
+Runnable examples are available in the [nox-py README](../nox-py/README.md).

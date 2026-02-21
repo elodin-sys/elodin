@@ -1,6 +1,6 @@
-use crate::globals::SimulationTimeStep;
-use crate::{ComponentArray, ComponentGroup, ErasedSystem, IntoSystem, Query};
-use crate::{System, SystemParam};
+use crate::nox_ecs::globals::SimulationTimeStep;
+use crate::nox_ecs::{ComponentArray, ComponentGroup, ErasedSystem, IntoSystem, Query};
+use crate::nox_ecs::{System, SystemParam};
 use core::ops::Add;
 use core::ops::Mul;
 use nox::Scalar;
@@ -64,7 +64,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Archetype, Component, World, WorldExt};
+    use crate::nox_ecs::{Archetype, Component, World, WorldExt};
     use nox::{Op, OwnedRepr, Scalar, SpatialMotion, SpatialTransform, tensor};
     use nox_ecs_macros::ReprMonad;
 

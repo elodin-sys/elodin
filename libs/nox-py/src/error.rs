@@ -1,4 +1,4 @@
-use nox_ecs::nox;
+use crate::nox_ecs::nox;
 use pyo3::{
     PyErr,
     exceptions::{PyRuntimeError, PyValueError},
@@ -9,7 +9,7 @@ pub enum Error {
     #[error("{0}")]
     Nox(#[from] nox::Error),
     #[error("{0}")]
-    NoxEcs(#[from] nox_ecs::Error),
+    NoxEcs(#[from] crate::nox_ecs::Error),
     #[error("{0}")]
     PyErr(#[from] PyErr),
     #[error("hlo module was not PyBytes")]
@@ -35,16 +35,16 @@ pub enum Error {
 impl From<Error> for PyErr {
     fn from(value: Error) -> Self {
         match value {
-            Error::NoxEcs(nox_ecs::Error::ComponentNotFound) => {
+            Error::NoxEcs(crate::nox_ecs::Error::ComponentNotFound) => {
                 PyValueError::new_err("component not found")
             }
-            Error::NoxEcs(nox_ecs::Error::ValueSizeMismatch) => {
+            Error::NoxEcs(crate::nox_ecs::Error::ValueSizeMismatch) => {
                 PyValueError::new_err("value size mismatch")
             }
             Error::InvalidLogLevel(level) => {
                 PyValueError::new_err(format!("invalid log level: {level}"))
             }
-            Error::NoxEcs(nox_ecs::Error::PyO3(err)) | Error::PyErr(err) => err,
+            Error::NoxEcs(crate::nox_ecs::Error::PyO3(err)) | Error::PyErr(err) => err,
             err => PyRuntimeError::new_err(err.to_string()),
         }
     }

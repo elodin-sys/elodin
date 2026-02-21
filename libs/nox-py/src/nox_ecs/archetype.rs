@@ -4,19 +4,21 @@ use nox::NoxprNode;
 
 use impeller2::schema::Schema;
 
-use crate::World;
+use crate::nox_ecs::World;
 
 pub trait Archetype {
     fn components() -> Vec<(Schema<Vec<u64>>, ComponentMetadata)>;
     fn insert_into_world(self, world: &mut World);
 }
 
-impl<T: crate::Component + nox::ReprMonad<nox::Op> + 'static> crate::Archetype for T {
+impl<T: crate::nox_ecs::Component + nox::ReprMonad<nox::Op> + 'static> crate::nox_ecs::Archetype
+    for T
+{
     fn components() -> Vec<(Schema<Vec<u64>>, ComponentMetadata)> {
         vec![(T::schema(), T::metadata())]
     }
 
-    fn insert_into_world(self, world: &mut crate::World) {
+    fn insert_into_world(self, world: &mut crate::nox_ecs::World) {
         use std::ops::Deref;
         let mut col = world.column_mut::<T>().unwrap();
         let op = self.into_inner();

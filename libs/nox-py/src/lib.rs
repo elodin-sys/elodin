@@ -3,16 +3,18 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::{collections::BTreeMap, marker::PhantomData};
 
-use impeller2::types::ComponentId;
-use nox_ecs::{
+use crate::nox_ecs::{
     ErasedSystem,
     nox::{self, Noxpr},
 };
+use impeller2::types::ComponentId;
 use numpy::PyUntypedArray;
 use pyo3::exceptions::PyOSError;
 use pyo3::exceptions::PyValueError;
 use pyo3::prelude::*;
 use pyo3::types::PyAnyMethods;
+
+pub mod nox_ecs;
 
 mod archetype;
 mod component;
@@ -79,11 +81,11 @@ impl FromStr for Integrator {
     }
 }
 
-impl From<Integrator> for nox_ecs::Integrator {
+impl From<Integrator> for crate::nox_ecs::Integrator {
     fn from(integrator: Integrator) -> Self {
         match integrator {
-            Integrator::Rk4 => nox_ecs::Integrator::Rk4,
-            Integrator::SemiImplicit => nox_ecs::Integrator::SemiImplicit,
+            Integrator::Rk4 => crate::nox_ecs::Integrator::Rk4,
+            Integrator::SemiImplicit => crate::nox_ecs::Integrator::SemiImplicit,
         }
     }
 }
@@ -92,17 +94,17 @@ impl From<Integrator> for nox_ecs::Integrator {
 #[pyo3(signature = (time_step = None, sys = None, integrator = Integrator::Rk4))]
 pub fn six_dof(time_step: Option<f64>, sys: Option<System>, integrator: Integrator) -> System {
     let integrator = integrator.into();
-    let sys: Arc<dyn nox_ecs::System<Arg = (), Ret = ()> + Send + Sync> =
+    let sys: Arc<dyn crate::nox_ecs::System<Arg = (), Ret = ()> + Send + Sync> =
         if let Some(dt) = time_step {
             if let Some(sys) = sys {
-                nox_ecs::six_dof::six_dof_with_dt(|| sys, dt, integrator)
+                crate::nox_ecs::six_dof::six_dof_with_dt(|| sys, dt, integrator)
             } else {
-                nox_ecs::six_dof::six_dof_with_dt(|| (), dt, integrator)
+                crate::nox_ecs::six_dof::six_dof_with_dt(|| (), dt, integrator)
             }
         } else if let Some(sys) = sys {
-            nox_ecs::six_dof::six_dof(|| sys, integrator)
+            crate::nox_ecs::six_dof::six_dof(|| sys, integrator)
         } else {
-            nox_ecs::six_dof::six_dof(|| (), integrator)
+            crate::nox_ecs::six_dof::six_dof(|| (), integrator)
         };
     System { inner: sys }
 }

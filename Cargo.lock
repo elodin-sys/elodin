@@ -2985,9 +2985,6 @@ name = "bytes"
 version = "1.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b35204fbdc0b3f4446b89fc1ac2cf84a8a68971995d0bf2e925ec7cd960f9cb3"
-dependencies = [
- "serde",
-]
 
 [[package]]
 name = "bytestring"
@@ -9153,37 +9150,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "nox-ecs"
-version = "0.16.2-alpha.0"
-dependencies = [
- "approx",
- "arrow",
- "bytemuck",
- "byteorder",
- "bytes",
- "elodin-db",
- "futures-lite",
- "impeller2",
- "impeller2-stellar",
- "impeller2-wkt",
- "ndarray",
- "nox",
- "nox-ecs-macros",
- "paste",
- "postcard",
- "pyo3",
- "serde",
- "serde_json",
- "smallvec",
- "stellarator",
- "tempfile",
- "thingbuf",
- "thiserror 2.0.17",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
 name = "nox-ecs-macros"
 version = "0.16.2-alpha.0"
 dependencies = [
@@ -9209,28 +9175,39 @@ dependencies = [
 name = "nox-py"
 version = "0.16.2-alpha.0"
 dependencies = [
+ "approx",
+ "arrow",
+ "bytemuck",
+ "byteorder",
  "bytes",
  "clap 4.5.53",
  "convert_case 0.8.0",
  "directories",
  "elodin-db",
  "env_logger 0.11.8",
+ "futures-lite",
  "impeller2",
  "impeller2-kdl",
+ "impeller2-stellar",
  "impeller2-wkt",
  "indicatif",
  "miette 7.6.0",
- "nox-ecs",
+ "ndarray",
+ "nox",
  "nox-ecs-macros",
  "numpy",
+ "paste",
  "postcard",
  "pyo3",
  "roci-adcs",
  "s10",
+ "serde",
  "serde_json",
  "signal-hook",
+ "smallvec",
  "stellarator",
  "tempfile",
+ "thingbuf",
  "thiserror 2.0.17",
  "tokio",
  "toml 0.8.23",

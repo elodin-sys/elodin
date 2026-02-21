@@ -3,7 +3,7 @@ use nox::OwnedRepr;
 use nox::Scalar;
 use nox_ecs_macros::ReprMonad;
 
-use crate::{Archetype, Component, ComponentArray};
+use crate::nox_ecs::{Archetype, Component, ComponentArray};
 
 #[derive(Component, Clone, ReprMonad)]
 pub struct SimulationTimeStep<R: OwnedRepr = Op>(pub Scalar<f64, R>);
