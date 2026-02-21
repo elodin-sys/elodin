@@ -30,10 +30,8 @@ with pkgs; let
         polars
         numpy
       ]);
-in {
+  shellAttrs = {
   # Unified shell that combines all development environments
-  elodin = mkShell (
-    {
       name = "elo-unified-shell";
       buildInputs =
         [
@@ -226,9 +224,28 @@ in {
           exec ${pkgs.zsh}/bin/zsh
         fi
       '';
-    }
-    // lib.optionalAttrs pkgs.stdenv.isLinux (
-      common.linuxGraphicsEnv {inherit pkgs;}
-    )
+  };
+  linuxShellAttrs = lib.optionalAttrs pkgs.stdenv.isLinux (
+    common.linuxGraphicsEnv {inherit pkgs;}
+  );
+in {
+  # Unified shell that combines all development environments
+  elodin = mkShell (shellAttrs // linuxShellAttrs);
+
+  # Profiling shell adds Tracy GUI without duplicating the base shell definition
+  elodin-profiling = mkShell (
+    (shellAttrs
+      // {
+        name = "elo-profiling-shell";
+        buildInputs = shellAttrs.buildInputs ++ [tracy];
+        shellHook =
+          shellAttrs.shellHook
+          + ''
+            echo "Profiling shell:"
+            echo "  • Tracy GUI is available"
+            echo "  • Run Elodin with: cargo run -p elodin --features tracy"
+          '';
+      })
+    // linuxShellAttrs
   );
 }

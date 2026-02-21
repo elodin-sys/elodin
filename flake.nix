@@ -27,6 +27,9 @@
   }: let
     rustToolchain = p: p.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
     elodinOverlay = final: prev: {
+      tracy = final.callPackage ./nix/pkgs/tracy.nix {
+        tracy = prev.tracy;
+      };
       elodin = rec {
         elodin-py = final.callPackage ./nix/pkgs/elodin-py.nix {
           inherit rustToolchain;
@@ -69,6 +72,7 @@
 
         devShells = with shells; {
           inherit elodin;
+          profiling = shells.elodin-profiling;
           default = shells.elodin;
         };
 
