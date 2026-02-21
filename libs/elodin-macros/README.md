@@ -1,17 +1,17 @@
-# nox-ecs-macros
+# elodin-macros
 
 ## Description
-**nox-ecs-macros** saves you from writing verbose manual `impl`s to hook your structs into the **nox / nox-ecs** engine:  
+**elodin-macros** saves you from writing verbose manual `impl`s to hook your structs into the **nox-py** engine:  
 - Declare a `Component`, assemble an `Archetype`, group components, and convert to/from computational expressions (`Noxpr`).  
 - You write a struct → you add `#[derive(...)]` → it’s wired.
 
 ---
 
 ## The problem without this crate
-In **nox/nox-ecs**, doing things “by hand” means:
+In **nox-py**, doing things “by hand” means:
 
 - implementing `impeller2::component::Component` (name, schema, etc.),
-- implementing `nox_ecs::Component`, `Archetype`, `ComponentGroup`,
+- implementing `elodin_macros::Component`, `Archetype`, `ComponentGroup`,
 - handling `IntoOp` / `FromOp` conversions (to/from `Noxpr`),
 - writing boilerplate to insert into the `World`, initialize systems, etc.
 
@@ -48,4 +48,4 @@ In **nox/nox-ecs**, doing things “by hand” means:
 ---
 
 ## Some examples
-Runnable examples are available in the [nox-ecs README](../nox-ecs/README.md).
+Runnable examples are available in the [nox-py README](../nox-py/README.md).

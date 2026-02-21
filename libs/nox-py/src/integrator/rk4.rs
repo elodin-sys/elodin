@@ -128,10 +128,10 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Archetype, Component, World, WorldExt};
+    use crate::world::{World, WorldExt};
+    use elodin_macros::{Archetype, Component, ComponentGroup, FromBuilder, ReprMonad};
     use nox::{Op, OwnedRepr, tensor};
     use nox::{Scalar, SpatialMotion, SpatialTransform};
-    use nox_ecs_macros::{ComponentGroup, FromBuilder, ReprMonad};
 
     #[test]
     fn test_simple_rk4() {

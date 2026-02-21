@@ -355,7 +355,7 @@ sim = w.run(sys, sim_time_step=1.0 / 120.0)
 
 Elodin has a built-in [6 Degrees of Freedom](https://en.wikipedia.org/wiki/Six_degrees_of_freedom) (6DoF) system
 implementation for simulating [rigid bodies](https://en.m.wikipedia.org/wiki/Rigid_body), such as flight vehicles.
-You can review the implementation [here](https://github.com/elodin-sys/elodin/blob/332957c41f609e1ccee36dbc48750ea59001c817/libs/nox-ecs/src/six_dof.rs).
+You can review the implementation [here](https://github.com/elodin-sys/elodin/blob/main/libs/nox-py/src/six_dof.rs).
 Using the associated [elodin.Body] archetype and prebuilt components, we can create a 6DoF system that aligns closely with this
 [familiar model](https://www.mathworks.com/help/aeroblks/6dofquaternion.html) from Simulink.
 
@@ -375,12 +375,12 @@ Using the associated [elodin.Body] archetype and prebuilt components, we can cre
 - `elodin.Integrator.Rk4` -> [elodin.Integrator]
 
     Runge-Kutta 4th Order (RK4) Integrator: Elodin provides a built-in implementation for a [4th order Runge-Kutta integrator](https://en.wikipedia.org/wiki/Runge%E2%80%93Kutta_methods).
-    The RK4 integrator is a numerical method used to solve ordinary differential equations. You can review the implementation [here](https://github.com/elodin-sys/elodin/blob/332957c41f609e1ccee36dbc48750ea59001c817/libs/nox-ecs/src/integrator/rk4.rs).
+    The RK4 integrator is a numerical method used to solve ordinary differential equations. You can review the implementation [here](https://github.com/elodin-sys/elodin/blob/main/libs/nox-py/src/integrator/rk4.rs).
 
 - `elodin.Integrator.SemiImplicit` -> [elodin.Integrator]
 
     Semi-Implicit Integrator: Elodin provides a built-in implementation for a [semi-implicit Euler integrator](https://en.wikipedia.org/wiki/Semi-implicit_Euler_method).
-    The semi-implicit integrator is a numerical method used to solve ordinary differential equations. You can review the implementation [here](https://github.com/elodin-sys/elodin/blob/332957c41f609e1ccee36dbc48750ea59001c817/libs/nox-ecs/src/integrator/semi_implicit.rs).
+    The semi-implicit integrator is a numerical method used to solve ordinary differential equations. You can review the implementation [here](https://github.com/elodin-sys/elodin/blob/main/libs/nox-py/src/integrator/semi_implicit.rs).
 
 ### _class_ `elodin.Body`
 

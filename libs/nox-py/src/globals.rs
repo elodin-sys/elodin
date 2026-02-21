@@ -1,7 +1,7 @@
+use elodin_macros::ReprMonad;
 use nox::Op;
 use nox::OwnedRepr;
 use nox::Scalar;
-use nox_ecs_macros::ReprMonad;
 
 use crate::{Archetype, Component, ComponentArray};
 

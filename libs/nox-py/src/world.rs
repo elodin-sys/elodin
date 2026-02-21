@@ -10,11 +10,16 @@ use impeller2::{
     component::Component,
     types::{ComponentView, EntityId},
 };
-use impeller2_wkt::ComponentMetadata;
+use impeller2_wkt::{ComponentMetadata, EntityMetadata};
 
-use crate::*;
+use crate::error::Error;
+use crate::globals::SimulationTimeStep;
+use crate::globals::SystemGlobals;
+use impeller2::types::ComponentId;
+use nox::{ArrayTy, Client};
+use serde::{Deserialize, Serialize};
+use smallvec::SmallVec;
 
-// 16.67 ms
 pub const DEFAULT_TIME_STEP: Duration = Duration::from_nanos(1_000_000_000 / 120);
 
 pub type Buffers<B = Vec<u8>> = BTreeMap<ComponentId, Column<B>>;
@@ -108,7 +113,7 @@ impl Entity<'_> {
         self
     }
 
-    pub fn insert(self, archetype: impl Archetype + 'static) -> Self {
+    pub fn insert(self, archetype: impl crate::archetype::Archetype + 'static) -> Self {
         self.world.insert_with_id(archetype, self.id);
         self
     }
@@ -164,7 +169,7 @@ impl World {
         .metadata(EntityMetadata {
             entity_id: EntityId(0),
             name: "Globals".to_string(),
-            metadata: Default::default(), //color: Color::WHITE,
+            metadata: Default::default(),
         });
     }
 
@@ -176,14 +181,14 @@ impl World {
         col.column[..8].copy_from_slice(&bytes);
     }
 
-    pub fn spawn(&mut self, archetype: impl Archetype + 'static) -> Entity<'_> {
+    pub fn spawn(&mut self, archetype: impl crate::archetype::Archetype + 'static) -> Entity<'_> {
         let entity_id = EntityId(self.metadata.entity_len);
         self.spawn_with_id(archetype, entity_id)
     }
 
     pub fn spawn_with_id(
         &mut self,
-        archetype: impl Archetype + 'static,
+        archetype: impl crate::archetype::Archetype + 'static,
         entity_id: EntityId,
     ) -> Entity<'_> {
         self.insert_with_id(archetype, entity_id);
@@ -194,7 +199,11 @@ impl World {
         }
     }
 
-    pub fn insert_with_id<A: Archetype + 'static>(&mut self, archetype: A, entity_id: EntityId) {
+    pub fn insert_with_id<A: crate::archetype::Archetype + 'static>(
+        &mut self,
+        archetype: A,
+        entity_id: EntityId,
+    ) {
         for (schema, metadata) in A::components() {
             let id = metadata.component_id;
             let buffer = self.host.entry(id).or_default();
@@ -318,7 +327,7 @@ impl<'a, B: 'a + AsRef<[u8]>> ColumnRef<'a, B> {
         self.len() == 0
     }
 
-    pub fn buffer_ty(&self) -> ::nox::ArrayTy {
+    pub fn buffer_ty(&self) -> ArrayTy {
         let mut array_ty = self.schema.to_array_ty();
         array_ty.shape.insert(0, self.len() as i64);
         array_ty
@@ -350,12 +359,155 @@ impl<'a> ColumnRef<'a, &'a mut Vec<u8>> {
     }
 }
 
-use nox::{Client, xla};
+use nox::xla;
 
 impl<'a, B: 'a + AsRef<[u8]>> ColumnRef<'a, B> {
     pub fn copy_to_client(&self, client: &Client) -> Result<xla::PjRtBuffer, xla::Error> {
         let mut dims: SmallVec<[i64; 4]> = self.schema.dim.iter().map(|&x| x as i64).collect();
         dims.insert(0, self.len() as i64);
         client.copy_raw_host_buffer(self.schema.element_type(), self.column.as_ref(), &dims[..])
+    }
+}
+
+// --- WorldExt, WorldBuilder, IntoSystemExt, SystemExt from mod.rs ---
+
+use crate::exec::{Exec, WorldExec};
+use crate::globals::increment_sim_tick;
+use crate::system::{CompiledSystem, IntoSystem, System, SystemBuilder as EcsSystemBuilder};
+
+pub trait WorldExt {
+    fn builder(self) -> WorldBuilder;
+}
+
+impl WorldExt for World {
+    fn builder(self) -> WorldBuilder {
+        WorldBuilder::default().world(self)
+    }
+}
+
+pub struct WorldBuilder<Sys = (), StartupSys = ()> {
+    world: World,
+    pipe: Sys,
+    startup_sys: StartupSys,
+}
+
+impl Default for WorldBuilder {
+    fn default() -> Self {
+        Self {
+            world: World::default(),
+            pipe: (),
+            startup_sys: (),
+        }
+    }
+}
+
+impl<Sys, StartupSys> WorldBuilder<Sys, StartupSys>
+where
+    Sys: System,
+    StartupSys: System,
+{
+    pub fn world(mut self, world: World) -> Self {
+        self.world = world;
+        self
+    }
+
+    pub fn tick_pipeline<M, A, R, N: IntoSystem<M, A, R>>(
+        self,
+        pipe: N,
+    ) -> WorldBuilder<N::System, StartupSys> {
+        WorldBuilder {
+            world: self.world,
+            pipe: pipe.into_system(),
+            startup_sys: self.startup_sys,
+        }
+    }
+
+    pub fn startup_pipeline<M, A, R, N: IntoSystem<M, A, R>>(
+        self,
+        startup: N,
+    ) -> WorldBuilder<Sys, N::System> {
+        WorldBuilder {
+            world: self.world,
+            pipe: self.pipe,
+            startup_sys: startup.into_system(),
+        }
+    }
+
+    pub fn sim_time_step(mut self, time_step: Duration) -> Self {
+        self.world.metadata.sim_time_step = TimeStep(time_step);
+        self
+    }
+
+    pub fn spawn(&mut self, archetype: impl crate::archetype::Archetype + 'static) -> Entity<'_> {
+        self.world.spawn(archetype)
+    }
+
+    pub fn insert_with_id(
+        &mut self,
+        archetype: impl crate::archetype::Archetype + 'static,
+        entity_id: EntityId,
+    ) {
+        self.world.insert_with_id(archetype, entity_id);
+    }
+
+    pub fn build(mut self) -> Result<WorldExec, Error> {
+        self.world.set_globals();
+        let tick_exec = increment_sim_tick.pipe(self.pipe).build(&mut self.world)?;
+        let startup_exec = self.startup_sys.build(&mut self.world)?;
+        let world_exec = WorldExec::new(self.world, tick_exec, Some(startup_exec));
+        Ok(world_exec)
+    }
+
+    pub fn run(self) -> World {
+        let client = Client::cpu().unwrap();
+        let mut exec = self.build().unwrap().compile(client).unwrap();
+        exec.run().unwrap();
+        exec.world
+    }
+}
+
+pub trait IntoSystemExt<Marker, Arg, Ret> {
+    type System;
+    fn world(self) -> WorldBuilder<Self::System>
+    where
+        Self: Sized,
+        Self::System: Sized;
+}
+
+impl<S: IntoSystem<Marker, Arg, Ret>, Marker, Arg, Ret> IntoSystemExt<Marker, Arg, Ret> for S {
+    type System = <Self as IntoSystem<Marker, Arg, Ret>>::System;
+
+    fn world(self) -> WorldBuilder<Self::System>
+    where
+        Self: Sized,
+        Self::System: Sized,
+    {
+        WorldBuilder::default().tick_pipeline(self.into_system())
+    }
+}
+
+pub trait SystemExt {
+    fn build(self, world: &mut World) -> Result<Exec, Error>;
+}
+
+impl<S: System> SystemExt for S {
+    fn build(self, world: &mut World) -> Result<Exec, Error> {
+        let mut system_builder = EcsSystemBuilder {
+            vars: BTreeMap::default(),
+            inputs: vec![],
+            world,
+        };
+        self.init(&mut system_builder)?;
+        let CompiledSystem {
+            computation,
+            inputs,
+            outputs,
+        } = self.compile(world)?;
+        let metadata = crate::exec::ExecMetadata {
+            arg_ids: inputs,
+            ret_ids: outputs,
+        };
+        let computation = computation.func.build("exec")?.build()?;
+        Ok(Exec::new(metadata, computation.to_hlo_module()))
     }
 }

@@ -1,4 +1,4 @@
-use nox_ecs::nox;
+use nox;
 use pyo3::{
     PyErr,
     exceptions::{PyRuntimeError, PyValueError},
@@ -8,10 +8,26 @@ use pyo3::{
 pub enum Error {
     #[error("{0}")]
     Nox(#[from] nox::Error),
-    #[error("{0}")]
-    NoxEcs(#[from] nox_ecs::Error),
-    #[error("{0}")]
-    PyErr(#[from] PyErr),
+    #[error("component not found")]
+    ComponentNotFound,
+    #[error("component value had wrong size")]
+    ValueSizeMismatch,
+    #[error("impeller error: {0}")]
+    Impeller(#[from] impeller2::error::Error),
+    #[error("channel closed")]
+    ChannelClosed,
+    #[error("io {0}")]
+    Io(#[from] std::io::Error),
+    #[error("serde_json {0}")]
+    Json(#[from] serde_json::Error),
+    #[error("python error")]
+    PyO3(#[from] pyo3::PyErr),
+    #[error("db {0}")]
+    DB(#[from] elodin_db::Error),
+    #[error("stellarator error {0}")]
+    Stellar(#[from] stellarator::Error),
+    #[error("arrow error {0}")]
+    Arrow(#[from] ::arrow::error::ArrowError),
     #[error("hlo module was not PyBytes")]
     HloModuleNotBytes,
     #[error("unexpected input")]
@@ -20,31 +36,27 @@ pub enum Error {
     UnknownCommand(String),
     #[error("{0}")]
     MissingArg(String),
-    #[error("io: {0}")]
-    Io(#[from] std::io::Error),
     #[error("invalid time step: {0:?}")]
     InvalidTimeStep(std::time::Duration),
     #[error("invalid log level: {0}")]
     InvalidLogLevel(String),
-    #[error("impeller error {0}")]
-    Impeller(#[from] impeller2::error::Error),
-    #[error("elodin db error {0}")]
-    DB(#[from] elodin_db::Error),
+}
+
+impl From<nox::xla::Error> for Error {
+    fn from(value: nox::xla::Error) -> Self {
+        Error::Nox(nox::Error::Xla(value))
+    }
 }
 
 impl From<Error> for PyErr {
     fn from(value: Error) -> Self {
         match value {
-            Error::NoxEcs(nox_ecs::Error::ComponentNotFound) => {
-                PyValueError::new_err("component not found")
-            }
-            Error::NoxEcs(nox_ecs::Error::ValueSizeMismatch) => {
-                PyValueError::new_err("value size mismatch")
-            }
+            Error::ComponentNotFound => PyValueError::new_err("component not found"),
+            Error::ValueSizeMismatch => PyValueError::new_err("value size mismatch"),
             Error::InvalidLogLevel(level) => {
                 PyValueError::new_err(format!("invalid log level: {level}"))
             }
-            Error::NoxEcs(nox_ecs::Error::PyO3(err)) | Error::PyErr(err) => err,
+            Error::PyO3(err) => err,
             err => PyRuntimeError::new_err(err.to_string()),
         }
     }

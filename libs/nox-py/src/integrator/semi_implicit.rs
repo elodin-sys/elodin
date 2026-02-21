@@ -64,9 +64,9 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Archetype, Component, World, WorldExt};
+    use crate::world::{World, WorldExt};
+    use elodin_macros::{Archetype, Component, ReprMonad};
     use nox::{Op, OwnedRepr, Scalar, SpatialMotion, SpatialTransform, tensor};
-    use nox_ecs_macros::ReprMonad;
 
     #[test]
     fn test_simple_semi_implicit_vertlet() {

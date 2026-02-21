@@ -44,15 +44,14 @@ pub fn component_group(input: TokenStream) -> TokenStream {
     component_group::component_group(input)
 }
 
-pub(crate) fn nox_ecs_crate_name() -> proc_macro2::TokenStream {
-    let name = crate_name("nox-ecs");
-
-    match name {
+pub(crate) fn elodin_crate_name() -> proc_macro2::TokenStream {
+    match crate_name("nox-py") {
+        Ok(FoundCrate::Itself) => quote!(crate),
         Ok(FoundCrate::Name(name)) => {
             let ident = Ident::new(&name, Span::call_site());
             quote!( #ident )
         }
-        _ => quote!(::nox_ecs),
+        Err(_) => quote!(::elodin),
     }
 }
 

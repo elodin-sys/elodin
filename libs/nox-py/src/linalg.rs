@@ -1,4 +1,4 @@
-use nox_ecs::nox::{Op, ReprMonad, Vector};
+use nox::{Op, ReprMonad, Vector};
 use pyo3::prelude::*;
 
 use crate::Error;
