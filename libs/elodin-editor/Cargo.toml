@@ -10,6 +10,7 @@ publish = false
 cargo-clippy = []
 inspector = ["dep:bevy-inspector-egui"]
 debug = ["big_space/debug"]
+tracy = ["bevy/trace_tracy"]
 
 [dependencies]
 # math

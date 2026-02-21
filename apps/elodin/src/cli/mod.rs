@@ -5,7 +5,7 @@ use miette::IntoDiagnostic;
 use miette::miette;
 #[cfg(not(target_os = "windows"))]
 use stellarator::util::CancelToken;
-use tracing_subscriber::{EnvFilter, fmt::time::ChronoLocal};
+use tracing_subscriber::{EnvFilter, fmt::time::ChronoLocal, prelude::*};
 mod editor;
 
 #[derive(Parser, Clone)]
@@ -47,11 +47,26 @@ impl Cli {
             })
             .unwrap_or_else(|_| EnvFilter::new("info"));
 
-        let _ = tracing_subscriber::fmt()
+        let fmt_layer = tracing_subscriber::fmt::layer()
             .with_target(false)
-            .with_env_filter(filter)
-            .with_timer(ChronoLocal::new("%Y-%m-%d %H:%M:%S%.3f".to_string()))
+            .with_timer(ChronoLocal::new("%Y-%m-%d %H:%M:%S%.3f".to_string()));
+
+        #[cfg(feature = "tracy")]
+        let init_res = tracing_subscriber::registry()
+            .with(filter)
+            .with(fmt_layer)
+            .with(tracing_tracy::TracyLayer::default())
             .try_init();
+
+        #[cfg(not(feature = "tracy"))]
+        let init_res = tracing_subscriber::registry()
+            .with(filter)
+            .with(fmt_layer)
+            .try_init();
+
+        if let Err(err) = init_res {
+            eprintln!("warning: failed to install global tracing subscriber ({err})");
+        }
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
