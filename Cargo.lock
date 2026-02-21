@@ -5246,6 +5246,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "elodin-macros"
+version = "0.16.2-alpha.0"
+dependencies = [
+ "convert_case 0.6.0",
+ "darling 0.20.11",
+ "proc-macro-crate",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.111",
+]
+
+[[package]]
 name = "emath"
 version = "0.33.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -9150,18 +9162,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "nox-ecs-macros"
-version = "0.16.2-alpha.0"
-dependencies = [
- "convert_case 0.6.0",
- "darling 0.20.11",
- "proc-macro-crate",
- "proc-macro2",
- "quote",
- "syn 2.0.111",
-]
-
-[[package]]
 name = "nox-frames"
 version = "0.16.2-alpha.0"
 dependencies = [
@@ -9184,6 +9184,7 @@ dependencies = [
  "convert_case 0.8.0",
  "directories",
  "elodin-db",
+ "elodin-macros",
  "env_logger 0.11.8",
  "futures-lite",
  "impeller2",
@@ -9194,7 +9195,6 @@ dependencies = [
  "miette 7.6.0",
  "ndarray",
  "nox",
- "nox-ecs-macros",
  "numpy",
  "paste",
  "postcard",

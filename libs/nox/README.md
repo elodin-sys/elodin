@@ -22,8 +22,8 @@ Most users will **not depend on `nox` directly**. Instead, they will interact wi
 ## Related crates and subsystems
 - [array](array) – array and tensor utilities.
 - [noxpr](src/noxpr) – subsystem of nox (not standalone) for building tensor compute graphs in Rust and lowering them to XLA. 
-- [nox-py](../nox-py) – Python bindings (includes ECS layer at `src/nox_ecs/`).
-   - [nox-ecs-macros](../nox-ecs-macros) – derive macros for components and archetypes.  
+- [nox-py](../nox-py) – Python bindings (includes ECS layer in `src/`).
+   - [elodin-macros](../elodin-macros) – derive macros for components and archetypes.  
 - [noxla](../noxla) – minimal integration layer with XLA. 
 
 
@@ -32,7 +32,7 @@ Most users will **not depend on `nox` directly**. Instead, they will interact wi
 nox (core crate: tensors, symbolic backend, differentiation)
 ├── array (tensor/array utilities)
 ├── src/noxpr (subsystem: tensor IR + XLA lowering)
-├── nox-py (Python bindings; ECS at src/nox_ecs/)
-│ └── nox-ecs-macros (derive macros for components/archetypes)
+├── nox-py (Python bindings; ECS in src/)
+│ └── elodin-macros (derive macros for components/archetypes)
 └── noxla (minimal XLA integration)
 ```

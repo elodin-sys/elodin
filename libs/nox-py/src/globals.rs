@@ -1,9 +1,9 @@
+use elodin_macros::ReprMonad;
 use nox::Op;
 use nox::OwnedRepr;
 use nox::Scalar;
-use nox_ecs_macros::ReprMonad;
 
-use crate::nox_ecs::{Archetype, Component, ComponentArray};
+use crate::{Archetype, Component, ComponentArray};
 
 #[derive(Component, Clone, ReprMonad)]
 pub struct SimulationTimeStep<R: OwnedRepr = Op>(pub Scalar<f64, R>);

@@ -13,7 +13,7 @@ pub struct ComponentGroup {
 }
 
 pub fn component_group(input: TokenStream) -> TokenStream {
-    let crate_name = crate::nox_ecs_crate_name();
+    let crate_name = crate::elodin_crate_name();
     let input = parse_macro_input!(input as DeriveInput);
     let ComponentGroup {
         ident,

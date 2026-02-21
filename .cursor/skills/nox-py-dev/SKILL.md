@@ -5,7 +5,7 @@ description: Contribute to the Elodin Python SDK (nox-py). Use when editing PyO3
 
 # nox-py Development
 
-nox-py is the Elodin Python SDK — PyO3 bindings that bridge Python simulations to the Rust ECS engine (nox_ecs submodule), the NOX tensor compiler (→ XLA), and Impeller2 telemetry.
+nox-py is the Elodin Python SDK — PyO3 bindings that bridge Python simulations to the Rust ECS engine (in nox-py/src/), the NOX tensor compiler (→ XLA), and Impeller2 telemetry.
 
 ## Build & Test
 
@@ -53,7 +53,7 @@ libs/nox-py/src/lib.rs       ← PyO3 module registration
     └── error.rs              ← Error types and Python exception mapping
     │
     ▼
-libs/nox-py/src/nox_ecs/      ← ECS world, component storage, system execution
+libs/nox-py/src/              ← ECS world, component storage, system execution (world, exec, etc.)
     │
     ▼
 libs/nox/                     ← Tensor library, symbolic backend
@@ -90,7 +90,7 @@ Central orchestrator. Handles `World.spawn()`, `World.insert()`, `World.run()`, 
 Compiles Python-defined systems into XLA computations. Handles the `@system`, `@map`, `@map_seq` decorator logic on the Rust side. System composition (pipe `|`) is implemented here.
 
 ### `component.rs`
-Maps Python `Component` annotations to nox_ecs component schemas. Handles type inference, metadata, and the `ComponentType` / `PrimitiveType` hierarchy.
+Maps Python `Component` annotations to component schemas. Handles type inference, metadata, and the `ComponentType` / `PrimitiveType` hierarchy.
 
 ### `exec.rs`
 The execution engine. Manages tick loops, database integration, profiling (`bench --profile`), and the `components` discovery command. Includes the `StepContext` callback dispatch.
@@ -130,7 +130,7 @@ Graph query implementation. `edge_fold` is the core operation — it iterates ed
 |-------|---------|
 | `pyo3` | Python ↔ Rust bindings |
 | `numpy` | NumPy array interop (via pyo3-numpy) |
-| nox_ecs (in nox-py) | ECS world, component storage, system execution |
+| nox-py (Rust core) | ECS world, component storage, system execution |
 | `nox` | Tensor library, spatial math |
 | `impeller2` | Telemetry protocol |
 | `stellarator` | Async runtime for DB connections |
@@ -140,5 +140,5 @@ Graph query implementation. `edge_fold` is the core operation — it iterates ed
 
 - Full SDK documentation: [libs/nox-py/README.md](../../../libs/nox-py/README.md)
 - Python API reference: [docs/public/content/reference/python-api.md](../../../docs/public/content/reference/python-api.md)
-- nox_ecs module: [libs/nox-py/src/nox_ecs/](../../../libs/nox-py/src/nox_ecs/)
+- nox-py Rust source: [libs/nox-py/src/](../../../libs/nox-py/src/)
 - Impeller2 protocol: [libs/impeller2/](../../../libs/impeller2/)

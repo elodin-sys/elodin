@@ -1,14 +1,12 @@
-use crate::nox_ecs::{Archetype, Component};
-use crate::nox_ecs::{Query, WorldPos, system::IntoSystem, system::System};
+use crate::{Archetype, Component};
+use crate::{Query, WorldPos, system::IntoSystem, system::System};
 use core::ops::{Add, Mul};
+use elodin_macros::{ComponentGroup, FromBuilder, ReprMonad};
 use nox::{Op, OwnedRepr, Scalar, SpatialForce, SpatialInertia, SpatialMotion};
-use nox_ecs_macros::{ComponentGroup, FromBuilder, ReprMonad};
 use std::sync::Arc;
 
-use crate::nox_ecs::{
-    ComponentArray, ErasedSystem, Integrator, Rk4Ext, semi_implicit_euler,
-    semi_implicit_euler_with_dt,
-};
+use crate::integrator::{Integrator, Rk4Ext, semi_implicit_euler, semi_implicit_euler_with_dt};
+use crate::{ComponentArray, ErasedSystem};
 
 #[derive(Component, ReprMonad)]
 pub struct WorldVel<R: OwnedRepr = Op>(pub SpatialMotion<f64, R>);
@@ -173,7 +171,6 @@ where
     <Sys as IntoSystem<M, A, R>>::System: Send + Sync,
 {
     let sys = clear_forces.pipe(effectors()).pipe(calc_accel);
-    //let sys = clear_forces.pipe(calc_accel);
     match integrator {
         Integrator::Rk4 => Arc::new(sys.rk4_with_dt::<U, DU>(time_step)),
         Integrator::SemiImplicit => {
@@ -196,7 +193,6 @@ where
     <Sys as IntoSystem<M, A, R>>::System: Send + Sync,
 {
     let sys = clear_forces.pipe(effectors()).pipe(calc_accel);
-    //let sys = clear_forces.pipe(calc_accel);
     match integrator {
         Integrator::Rk4 => Arc::new(sys.rk4::<U, DU>()),
         Integrator::SemiImplicit => {
@@ -209,8 +205,8 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::nox_ecs::World;
-    use crate::nox_ecs::WorldExt;
+    use crate::World;
+    use crate::WorldExt;
     use approx::assert_relative_eq;
     use impeller2::component::Component;
     use impeller2::types::ComponentId;
@@ -264,7 +260,6 @@ mod tests {
             .typed_iter::<SpatialTransform<f64, ArrayRepr>>()
             .next()
             .unwrap();
-        // see test-gen/julia/six-dof.jl for the source of these values
         approx::assert_relative_eq!(
             pos.inner,
             tensor![
@@ -352,12 +347,6 @@ mod tests {
     fn test_inertia_frame() {
         let client = nox::Client::cpu().unwrap();
 
-        // test setup:
-        // - body with inertia diag that only allows angular acceleration along x-axis (in body frame)
-
-        // body is not rotated
-        // 1 Nm torque along x-axis
-        // = 1 rad/s^2 angular acceleration along x-axis
         expect_angular_accel(
             &client,
             Quaternion::default(),
@@ -365,9 +354,6 @@ mod tests {
             [1.0, 0.0, 0.0],
             [1.0, 0.0, 0.0],
         );
-        // body is rotated 90 degrees around y-axis
-        // 1 Nm torque along x-axis
-        // = 0 angular acceleration because inertia frame is rotated
         expect_angular_accel(
             &client,
             Quaternion::from_axis_angle(Vector3::y_axis(), 1.0 * FRAC_PI_2),
@@ -375,9 +361,6 @@ mod tests {
             [1.0, 0.0, 0.0],
             [0.0, 0.0, 0.0],
         );
-        // body is rotated 90 degrees around y-axis
-        // 1 Nm torque along z-axis
-        // = 1 rad/s^2 angular acceleration along z-axis (in world frame)
         expect_angular_accel(
             &client,
             Quaternion::from_axis_angle(Vector3::y_axis(), 1.0 * FRAC_PI_2),
@@ -385,7 +368,6 @@ mod tests {
             [0.0, 0.0, 1.0],
             [0.0, 0.0, 1.0],
         );
-        // same as above, but with a torque along multiple axes
         expect_angular_accel(
             &client,
             Quaternion::from_axis_angle(Vector3::y_axis(), 1.0 * FRAC_PI_2),

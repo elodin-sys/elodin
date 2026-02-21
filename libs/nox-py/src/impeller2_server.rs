@@ -1,4 +1,4 @@
-use crate::nox_ecs::Error;
+use crate::Error;
 use bytemuck;
 use elodin_db::{AtomicTimestampExt, DB, State, handle_conn};
 use impeller2::types::{ComponentId, Timestamp};
@@ -15,7 +15,7 @@ use stellarator::struc_con::{Joinable, Thread};
 use stellarator::util::CancelToken;
 use tracing::{info, warn};
 
-use crate::nox_ecs::{Compiled, World, WorldExec};
+use crate::{Compiled, World, WorldExec};
 
 pub struct Server {
     db: elodin_db::Server,
@@ -56,19 +56,12 @@ impl Server {
         let start_time = start_timestamp.unwrap_or_else(Timestamp::now);
         init_db(&db, &mut world.world, start_time)?;
         let tick_db = db.clone();
-        // Shared tick counter that can be reset by StepContext::truncate()
         let tick_counter = Arc::new(AtomicU64::new(0));
         let stream: Thread<Option<Result<(), Error>>> =
             stellarator::struc_con::stellar(move || async move {
                 loop {
                     let stream = listener.accept().await?;
                     let conn_db = db.clone();
-                    // Give each connection its own stellarator thread, matching
-                    // the standalone elodin-db Server::run().  Using `spawn()`
-                    // here put all connections on a single thread, and a busy
-                    // writer connection (e.g. the simulation) would starve the
-                    // I/O reactor, preventing other connections (e.g. editor)
-                    // from ever reading subsequent packets.
                     stellarator::struc_con::stellar(move || handle_conn(stream, conn_db));
                 }
             });
@@ -98,8 +91,6 @@ pub fn init_db(
     start_timestamp: Timestamp,
 ) -> Result<(), elodin_db::Error> {
     tracing::info!("initializing db");
-    // Set the earliest timestamp from the start_timestamp parameter
-    // This ensures the editor displays the correct time baseline
     db.set_earliest_timestamp(start_timestamp)?;
     db.with_state_mut(|state| {
         for (component_id, (schema, component_metadata)) in world.metadata.component_map.iter() {
@@ -157,10 +148,6 @@ pub fn init_db(
         Ok::<_, elodin_db::Error>(())
     })?;
 
-    // Playback speed is the requester's (editor's) concern, not the DB's.
-    // Always store the 1x real-time time-step (1/60 s at 60 Hz playback).
-    // The editor will use its own constant on connect and let the user
-    // change speed via the command palette.
     const PLAYBACK_FREQUENCY: f64 = 60.0;
     let default_stream_time_step =
         Duration::from_secs_f64(world.metadata.default_playback_speed / PLAYBACK_FREQUENCY);
@@ -185,7 +172,6 @@ pub fn copy_db_to_world(state: &State, world: &mut WorldExec<Compiled>) {
         let entity_ids = bytemuck::try_cast_slice::<_, u64>(column.entity_ids.as_slice()).unwrap();
         let size = schema.size();
 
-        // Track if any values changed for this component
         let mut component_changed = false;
 
         for (i, entity_id) in entity_ids.iter().enumerate() {
@@ -203,12 +189,10 @@ pub fn copy_db_to_world(state: &State, world: &mut WorldExec<Compiled>) {
             let Some(component) = state.get_component(pair_id) else {
                 continue;
             };
-            // After truncate(), time series may be empty - skip if no data
             let Some((_, head)) = component.time_series.latest() else {
                 continue;
             };
 
-            // Check if the value has changed
             let current_value = &column.buffer[offset..offset + size];
             if current_value != head {
                 component_changed = true;
@@ -217,8 +201,6 @@ pub fn copy_db_to_world(state: &State, world: &mut WorldExec<Compiled>) {
             column.buffer[offset..offset + size].copy_from_slice(head);
         }
 
-        // Mark component as dirty if any value changed
-        // This ensures it gets copied to client buffers for GPU execution
         if component_changed {
             world.dirty_components.insert(*component_id);
         }
@@ -227,10 +209,6 @@ pub fn copy_db_to_world(state: &State, world: &mut WorldExec<Compiled>) {
 
 pub type PairId = ComponentId;
 
-/// Collect the pair IDs. For each component ID and associated entity ID, create
-/// the composite `PairId`, which is equivalent to
-/// `ComponentId::new(&format!("{}.{}", entity_name, component_name))`, but we
-/// don't allocate a string.
 pub fn get_pair_ids(
     world: &WorldExec<Compiled>,
     components: &[ComponentId],
@@ -313,7 +291,6 @@ async fn tick(
     interactive: bool,
     cancel_token: CancelToken,
 ) {
-    // XXX This is what world.run ultimately calls.
     let external_controls: HashSet<ComponentId> = external_controls(&world).collect();
     let wait_for_write: Vec<ComponentId> = wait_for_write(&world).collect();
     let wait_for_write_pair_ids: Vec<PairId> = get_pair_ids(&world, &wait_for_write).unwrap();
@@ -326,19 +303,12 @@ async fn tick(
     let time_step = world.world.sim_time_step().0;
     #[rustfmt::skip]
     let should_cancel = || { is_cancelled() || cancel_token.is_cancelled() };
-    // Absolute deadline for real-time pacing.  Instead of sleeping a relative
-    // `run_time_step - elapsed` each tick (which accumulates sleep-overshoot
-    // drift), we advance a fixed deadline by exactly `run_time_step` per tick.
-    // If tick N oversleeps, tick N+1's deadline is still at the correct
-    // absolute time, so it sleeps less to compensate automatically.
     let mut next_tick_deadline: Option<Instant> = None;
     loop {
         if should_cancel() {
             return;
         }
         if !db.recording_cell.is_playing() {
-            // Reset deadline when paused so we don't try to "catch up"
-            // an unbounded amount of ticks after resume.
             next_tick_deadline = None;
             let _ = futures_lite::future::race(db.recording_cell.wait(), async {
                 cancel_token.wait().await;
@@ -351,14 +321,10 @@ async fn tick(
             continue;
         }
         let start = Instant::now();
-        // Initialize the deadline on the first tick (or after un-pause).
         if let Some(rts) = run_time_step {
             next_tick_deadline.get_or_insert(start + rts);
         }
-        // Read tick from shared counter (can be reset by StepContext::truncate())
         let tick = tick_counter.load(Ordering::SeqCst);
-        // Calculate timestamp based on current tick
-        // Use u128 arithmetic to avoid overflow for long-running simulations (u32 would truncate after ~4B ticks)
         let tick_nanos = time_step.as_nanos() * (tick as u128);
         let tick_duration = Duration::from_nanos(tick_nanos.min(u64::MAX as u128) as u64);
         let timestamp = start_timestamp + tick_duration;
@@ -374,25 +340,15 @@ async fn tick(
                 );
             }
         }
-        // Python pre_step func runs (before copy_db_to_world so writes are picked up).
         pre_step(tick, &db, &tick_counter, timestamp, start_timestamp);
 
-        // Check if truncate() was called during pre_step.
-        // If tick_counter was reset to a value less than our current tick,
-        // skip this iteration to avoid writing at the old (higher) timestamp,
-        // which would cause TimeTravel errors on the next tick.
         if tick_counter.load(Ordering::SeqCst) < tick {
-            // Truncate happened: reset last_updated so the next tick's
-            // update_max can set it to the new (lower) timestamp.
             db.last_updated.store(Timestamp(i64::MIN));
-            // Reset the pacing deadline so we don't run in a tight
-            // catch-up loop against the now-stale old deadline.
             next_tick_deadline = None;
             continue;
         }
 
         db.with_state(|state| copy_db_to_world(state, &mut world));
-        // JAX runs.
         if let Err(err) = world.run() {
             warn!(?err, "error ticking world");
         }
@@ -403,10 +359,6 @@ async fn tick(
                 warn!(?err, "error committing head");
             }
         });
-        // Use update_max (not store) so that external writers whose data was
-        // ingested between ticks do not have last_updated pulled backward,
-        // which would cause the editor's SubscribeLastUpdated to send
-        // non-monotonic values.
         db.last_updated.update_max(timestamp);
         while !wait_for_write_pair_ids.is_empty()
             && !timestamps_changed(&db, &mut wait_for_write_pair_ids).unwrap_or(false)
@@ -419,28 +371,21 @@ async fn tick(
         if should_cancel() {
             return;
         }
-        // Python post_step func runs.
         post_step(tick, &db, &tick_counter, timestamp, start_timestamp);
-        // Sleep until the absolute deadline instead of a relative duration.
-        // This prevents sleep-overshoot from accumulating across ticks.
         if let Some(deadline) = next_tick_deadline.as_mut() {
             let now = Instant::now();
             if *deadline > now {
                 stellarator::sleep(*deadline - now).await;
             }
-            // Advance deadline by exactly one run_time_step for the next tick.
             *deadline += run_time_step.unwrap();
         }
 
-        // Only increment tick_counter if it wasn't reset by truncate() during post_step.
-        // If truncate() was called, tick_counter is already at the desired reset value (0).
         if tick_counter.load(Ordering::SeqCst) == tick {
             tick_counter.fetch_add(1, Ordering::SeqCst);
         }
     }
 }
 
-/// Collect all component IDs that are marked with "external_control" metadata
 pub fn external_controls(world: &WorldExec<Compiled>) -> impl Iterator<Item = ComponentId> + '_ {
     world
         .world
@@ -457,7 +402,6 @@ pub fn external_controls(world: &WorldExec<Compiled>) -> impl Iterator<Item = Co
         .map(|(component_id, _)| *component_id)
 }
 
-/// Collect all component IDs that are marked with "wait_for_write" metadata
 pub fn wait_for_write(world: &WorldExec<Compiled>) -> impl Iterator<Item = ComponentId> + '_ {
     world
         .world
@@ -474,11 +418,7 @@ pub fn wait_for_write(world: &WorldExec<Compiled>) -> impl Iterator<Item = Compo
         .map(|(component_id, _)| *component_id)
 }
 
-/// Check if any external control components have been updated since the last check
-/// Returns (has_updates, updated_timestamps) where updated_timestamps contains the latest
-/// timestamp for each external control component that was updated
 pub fn collect_timestamps(db: &DB, components: &[ComponentId]) -> Vec<(ComponentId, Timestamp)> {
-    // Use the external_controls function to get all external control components
     db.with_state(|state| {
         let mut timestamps = vec![];
         for component_id in components.iter() {
@@ -509,7 +449,6 @@ pub fn timestamps_changed(db: &DB, components: &mut [(PairId, Timestamp)]) -> Op
                 if *timestamp != *curr_timestamp {
                     changed = Some(true);
                     *timestamp = *curr_timestamp;
-                    // tracing::info!("time stamp changed");
                 } else if changed.is_none() {
                     changed = Some(false);
                 }

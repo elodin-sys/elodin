@@ -1,10 +1,10 @@
 use core::ops::{Add, Mul};
 
-use crate::nox_ecs::nox::{self, Noxpr, Op, ReprMonad, Scalar, Tensor, Vector};
+use nox::{self, Noxpr, Op, ReprMonad, Scalar, Tensor, Vector};
 use pyo3::IntoPyObjectExt;
 use pyo3::{prelude::*, types::PyTuple};
 
-use crate::{Component, Error};
+use crate::{Error, PyComponent};
 
 #[pyclass]
 #[derive(Clone)]
@@ -80,12 +80,12 @@ impl SpatialTransform {
     }
 
     #[classattr]
-    fn metadata() -> Component {
-        Component::from_component::<nox::SpatialTransform<f64>>()
+    fn metadata() -> PyComponent {
+        PyComponent::from_component::<nox::SpatialTransform<f64>>()
     }
 
     #[classattr]
-    fn __metadata__() -> (Component,) {
+    fn __metadata__() -> (PyComponent,) {
         (Self::metadata(),)
     }
 
@@ -161,12 +161,12 @@ impl SpatialMotion {
     }
 
     #[classattr]
-    fn metadata() -> Component {
-        Component::from_component::<nox::SpatialMotion<f64>>()
+    fn metadata() -> PyComponent {
+        PyComponent::from_component::<nox::SpatialMotion<f64>>()
     }
 
     #[classattr]
-    fn __metadata__() -> (Component,) {
+    fn __metadata__() -> (PyComponent,) {
         (Self::metadata(),)
     }
 
@@ -247,12 +247,12 @@ impl SpatialForce {
     }
 
     #[classattr]
-    fn metadata() -> Component {
-        Component::from_component::<nox::SpatialForce<f64>>()
+    fn metadata() -> PyComponent {
+        PyComponent::from_component::<nox::SpatialForce<f64>>()
     }
 
     #[classattr]
-    fn __metadata__() -> (Component,) {
+    fn __metadata__() -> (PyComponent,) {
         (Self::metadata(),)
     }
 
@@ -312,12 +312,12 @@ impl Quaternion {
     }
 
     #[classattr]
-    fn metadata() -> Component {
-        Component::from_component::<nox::Quaternion<f64>>()
+    fn metadata() -> PyComponent {
+        PyComponent::from_component::<nox::Quaternion<f64>>()
     }
 
     #[classattr]
-    fn __metadata__() -> (Component,) {
+    fn __metadata__() -> (PyComponent,) {
         (Self::metadata(),)
     }
 
@@ -438,12 +438,12 @@ impl SpatialInertia {
     }
 
     #[classattr]
-    fn metadata() -> Component {
-        Component::from_component::<nox::SpatialInertia<f64>>()
+    fn metadata() -> PyComponent {
+        PyComponent::from_component::<nox::SpatialInertia<f64>>()
     }
 
     #[classattr]
-    fn __metadata__() -> (Component,) {
+    fn __metadata__() -> (PyComponent,) {
         (Self::metadata(),)
     }
 }

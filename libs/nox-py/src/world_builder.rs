@@ -1,23 +1,34 @@
-use crate::nox_ecs::{
-    ComponentSchema, IntoSystem, System as _, TimeStep, World, increment_sim_tick, nox,
+use crate::PyUntypedArrayExt;
+use crate::archetype::Spawnable;
+use crate::entity::EntityId;
+use crate::error::Error;
+use crate::exec::{PyExec, WorldExec};
+use crate::step_context::StepContext;
+use crate::system::{CompiledSystemExt, PySystem};
+use crate::{
+    ComponentSchema, TimeStep, World, globals::increment_sim_tick, system::IntoSystem,
+    system::System as _,
 };
-use crate::*;
 use ::s10::{GroupRecipe, SimRecipe, cli::run_recipe_with_token};
 use clap::Parser;
 use convert_case::Casing;
-use impeller2::types::{PrimType, Timestamp};
+use impeller2::types::{ComponentId, PrimType, Timestamp};
 use impeller2_wkt::{ComponentMetadata, EntityMetadata};
 use miette::miette;
+use nox;
 use numpy::{PyArray, PyArrayMethods, ndarray::IntoDimension};
+use pyo3::exceptions::PyValueError;
+use pyo3::prelude::*;
 use pyo3::{
     IntoPyObjectExt, Py, PyAny,
-    types::{PyDict, PyList},
+    types::{PyDict, PyDictMethods, PyList, PyListMethods},
 };
 use std::{
     collections::{HashMap, HashSet},
     iter,
     net::SocketAddr,
     path::{Path, PathBuf},
+    sync::Arc,
     time,
 };
 use stellarator::util::CancelToken;
@@ -230,7 +241,7 @@ impl WorldBuilder {
     pub fn run(
         &mut self,
         py: Python<'_>,
-        sys: System,
+        sys: PySystem,
         sim_time_step: f64,
         run_time_step: Option<f64>,
         default_playback_speed: f64,
@@ -334,7 +345,7 @@ impl WorldBuilder {
                 let post_step_cancel_token = recipe_cancel_token.clone();
                 py.allow_threads(|| {
                     let result = stellarator::run(|| {
-                        crate::nox_ecs::impeller2_server::Server::new(
+                        crate::impeller2_server::Server::new(
                             // Here we start the DB with an address.
                             elodin_db::Server::new(db_path, addr).unwrap(),
                             exec,
@@ -613,11 +624,7 @@ impl WorldBuilder {
                         .hlo_module()
                         .computation()
                         .to_hlo_text()
-                        .map_err(|e| {
-                            Error::NoxEcs(crate::nox_ecs::Error::Nox(
-                                crate::nox_ecs::nox::Error::Xla(e),
-                            ))
-                        })?;
+                        .map_err(|e| Error::Nox(nox::Error::Xla(e)))?;
 
                     // Save HLO dump to output directory
                     let hlo_dump_path = output_dir.join("hlo_dump.txt");
@@ -981,13 +988,13 @@ impl WorldBuilder {
                     let db_dir = tempfile::tempdir()?;
                     let db_dir_path = db_dir.keep();
                     let db = elodin_db::DB::create(db_dir_path.join("db"))?;
-                    crate::nox_ecs::impeller2_server::init_db(
+                    crate::impeller2_server::init_db(
                         &db,
                         &mut compiled_exec.world,
                         impeller2::types::Timestamp::now(),
                     )?;
 
-                    let mut exec_with_db = Exec {
+                    let mut exec_with_db = PyExec {
                         exec: compiled_exec,
                         db: Box::new(db),
                     };
@@ -1032,14 +1039,14 @@ impl WorldBuilder {
     pub fn build(
         &mut self,
         py: Python<'_>,
-        system: System,
+        system: PySystem,
         sim_time_step: f64,
         run_time_step: Option<f64>,
         default_playback_speed: f64,
         max_ticks: Option<u64>,
         optimize: bool,
         db_path: Option<String>,
-    ) -> Result<Exec, Error> {
+    ) -> Result<PyExec, Error> {
         let exec = self.build_uncompiled(
             py,
             system,
@@ -1058,8 +1065,8 @@ impl WorldBuilder {
             None => tempfile::tempdir()?.keep().join("db"),
         };
         let db = elodin_db::DB::create(db_path)?;
-        crate::nox_ecs::impeller2_server::init_db(&db, &mut exec.world, Timestamp::now())?;
-        Ok(Exec {
+        crate::impeller2_server::init_db(&db, &mut exec.world, Timestamp::now())?;
+        Ok(PyExec {
             exec,
             db: Box::new(db),
         })
@@ -1077,7 +1084,7 @@ impl WorldBuilder {
     pub fn to_jax_func(
         &mut self,
         py: Python<'_>,
-        system: System,
+        system: PySystem,
         sim_time_step: f64,
         run_time_step: Option<f64>,
         default_playback_speed: f64,
@@ -1304,12 +1311,12 @@ impl WorldBuilder {
     fn build_uncompiled(
         &mut self,
         py: Python<'_>,
-        sys: System,
+        sys: PySystem,
         sim_time_step: f64,
         run_time_step: Option<f64>,
         default_playback_speed: f64,
         max_ticks: Option<u64>,
-    ) -> Result<crate::nox_ecs::WorldExec, Error> {
+    ) -> Result<WorldExec, Error> {
         let mut start = time::Instant::now();
         let ts = time::Duration::from_secs_f64(sim_time_step);
         self.world.metadata.sim_time_step = TimeStep(ts);
@@ -1328,7 +1335,7 @@ impl WorldBuilder {
         let xla_exec = increment_sim_tick.pipe(sys).compile(&world)?;
         let tick_exec = xla_exec.compile_hlo_module(py, &world)?;
 
-        let mut exec = crate::nox_ecs::WorldExec::new(world, tick_exec, None);
+        let mut exec = WorldExec::new(world, tick_exec, None);
         exec.profiler.build.observe(&mut start);
         Ok(exec)
     }
@@ -1337,7 +1344,7 @@ impl WorldBuilder {
     fn build_jited(
         &mut self,
         py: Python<'_>,
-        sys: System,
+        sys: PySystem,
         sim_time_step: f64,
         run_time_step: Option<f64>,
         default_playback_speed: f64,
