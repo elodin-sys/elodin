@@ -1017,7 +1017,11 @@ pub fn set_selected_range(
         Ok(range) => {
             selected_range.0 = range;
         }
-        Err(TimeRangeError::NoData) => {}
+        Err(TimeRangeError::NoData) => {
+            if selected_range.0.start.0 == i64::MIN || selected_range.0.end.0 == i64::MAX {
+                selected_range.0 = Timestamp(0)..Timestamp(1_000_000);
+            }
+        }
         Err(TimeRangeError::InvalidRange { start, end }) => {
             bevy::log::warn!(
                 "Time range selection skipped because start ({start:?}) is not before end ({end:?})"
