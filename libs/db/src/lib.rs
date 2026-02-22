@@ -734,8 +734,15 @@ impl DB {
         {
             let actual_first = state
                 .components
-                .values()
-                .map(|c| c.time_series.start_timestamp().0)
+                .iter()
+                .filter(|(id, _)| {
+                    !state
+                        .component_metadata
+                        .get(id)
+                        .map(|m| m.is_timestamp_source())
+                        .unwrap_or(false)
+                })
+                .map(|(_, c)| c.time_series.start_timestamp().0)
                 .filter(|&ts| ts < i64::MAX)
                 .min();
             if let Some(first) = actual_first {
