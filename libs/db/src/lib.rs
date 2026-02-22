@@ -730,28 +730,28 @@ impl DB {
         // This handles databases where all data legitimately starts at timestamp 0
         // (e.g., simulations using relative time) without breaking the init-message
         // filtering for databases with a single outlier point at timestamp 0.
-        let earliest_timestamp =
-            if earliest_timestamp.0 >= last_updated && last_updated != i64::MIN {
-                let actual_first = state
-                    .components
-                    .values()
-                    .map(|c| c.time_series.start_timestamp().0)
-                    .filter(|&ts| ts < i64::MAX)
-                    .min();
-                if let Some(first) = actual_first {
-                    warn!(
-                        earliest_timestamp = earliest_timestamp.0,
-                        last_updated,
-                        actual_first_timestamp = first,
-                        "degenerate earliest_timestamp range; recovering from actual data"
-                    );
-                    Timestamp(first)
-                } else {
-                    earliest_timestamp
-                }
+        let earliest_timestamp = if earliest_timestamp.0 >= last_updated && last_updated != i64::MIN
+        {
+            let actual_first = state
+                .components
+                .values()
+                .map(|c| c.time_series.start_timestamp().0)
+                .filter(|&ts| ts < i64::MAX)
+                .min();
+            if let Some(first) = actual_first {
+                warn!(
+                    earliest_timestamp = earliest_timestamp.0,
+                    last_updated,
+                    actual_first_timestamp = first,
+                    "degenerate earliest_timestamp range; recovering from actual data"
+                );
+                Timestamp(first)
             } else {
                 earliest_timestamp
-            };
+            }
+        } else {
+            earliest_timestamp
+        };
         let db = DB {
             state: RwLock::new(state),
             snapshot_barrier: SnapshotBarrier::new(),
