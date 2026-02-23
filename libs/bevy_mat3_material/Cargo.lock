@@ -399,15 +399,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "bevy_3x3_material"
-version = "0.1.0"
-dependencies = [
- "bevy",
- "bevy-inspector-egui",
- "bevy_editor_cam",
-]
-
-[[package]]
 name = "bevy_a11y"
 version = "0.17.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1069,6 +1060,15 @@ dependencies = [
  "quote",
  "syn",
  "toml_edit",
+]
+
+[[package]]
+name = "bevy_mat3_material"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "bevy-inspector-egui",
+ "bevy_editor_cam",
 ]
 
 [[package]]

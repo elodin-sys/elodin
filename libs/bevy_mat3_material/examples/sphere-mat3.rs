@@ -6,16 +6,15 @@ use bevy::pbr::MaterialPlugin;
 use bevy::prelude::*;
 use bevy::render::alpha::AlphaMode;
 
-use bevy_3x3_material::{params_from_linear, Mat3Material, Mat3Params, Mat3ParamsComponent, Mat3TransformExt};
+use bevy_mat3_material::{Mat3MaterialPlugin, Mat3Material, Mat3Params, Mat3ParamsComponent, Mat3TransformExt};
 
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
+        .add_plugins(Mat3MaterialPlugin)
         .add_plugins(bevy_inspector_egui::bevy_egui::EguiPlugin::default())
         .add_plugins(bevy_inspector_egui::quick::WorldInspectorPlugin::new())
         .add_plugins(bevy_editor_cam::DefaultEditorCamPlugins)
-        .add_plugins(MaterialPlugin::<Mat3Material>::default())
-        .register_type::<Mat3ParamsComponent>()
         .add_systems(Startup, setup)
         .add_systems(Update, (draw_axes_gizmos, sync_mat3_params_from_component))
         // .add_systems(Update, draw_normals)
@@ -29,7 +28,7 @@ fn sync_mat3_params_from_component(
 ) {
     for (comp, mesh_material) in &query {
         if let Some(material) = materials.get_mut(&mesh_material.0) {
-            material.extension.params = params_from_linear(comp.linear);
+            material.extension.params = comp.linear.into();
         }
     }
 }
@@ -104,8 +103,8 @@ fn setup(
     apply_matrix_to_mesh(&mut deformed_sphere_mesh, deform);
     let deformed_sphere = meshes.add(deformed_sphere_mesh);
 
-    let params = params_from_linear(linear);
-    let params2 = params_from_linear(linear2);
+    let params = linear.into();
+    let params2 = linear2.into();
 
     let (base_color_deformed, regular_color, deformed_color, alpha_mode) = if transparent {
         let alpha = 0.35;
