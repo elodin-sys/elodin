@@ -335,9 +335,18 @@ async fn run_follower_inner(config: &FollowConfig, db: &Arc<DB>) -> Result<(), E
                             .push_buf(timestamp, &data_buf[start..end]);
                     }
                     if timestamps.len() > skip {
-                        db.last_updated.update_max(*timestamps.last().unwrap());
-                        if let Some(&first_valid) = timestamps[skip..].iter().find(|ts| ts.0 > 0) {
-                            db.earliest_timestamp.update_min(first_valid);
+                        let is_ts_source = state
+                            .component_metadata
+                            .get(&component_id)
+                            .map(|m| m.is_timestamp_source())
+                            .unwrap_or(false);
+                        if !is_ts_source {
+                            db.last_updated.update_max(*timestamps.last().unwrap());
+                            if let Some(&first_valid) =
+                                timestamps[skip..].iter().find(|ts| ts.0 > 0)
+                            {
+                                db.earliest_timestamp.update_min(first_valid);
+                            }
                         }
                     }
                     Ok(())
@@ -349,6 +358,7 @@ async fn run_follower_inner(config: &FollowConfig, db: &Arc<DB>) -> Result<(), E
                 db.with_state(|state| -> Result<(), Error> {
                     let mut sink = DBSink {
                         components: &state.components,
+                        component_metadata: &state.component_metadata,
                         snapshot_barrier: &db.snapshot_barrier,
                         last_updated: &db.last_updated,
                         earliest_timestamp: &db.earliest_timestamp,
