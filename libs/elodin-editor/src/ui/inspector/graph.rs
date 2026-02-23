@@ -10,6 +10,7 @@ use bevy::ecs::{
     world::World,
 };
 use bevy_egui::egui;
+use fuzzy_matcher::{FuzzyMatcher, skim::SkimMatcherV2};
 use impeller2_wkt::{ComponentPath, GraphType, QueryType};
 use smallvec::SmallVec;
 
@@ -21,7 +22,7 @@ use crate::{
     ui::{
         button::{EButton, ECheckboxButton},
         colors::{EColor, get_color_by_index_all, get_scheme},
-        inspector::{color_popup, eql_autocomplete, inspector_text_field, query},
+        inspector::{color_popup, eql_autocomplete, inspector_text_field, query, search},
         label::{self, label_with_buttons},
         plot::GraphState,
         query_plot::QueryPlotData,
@@ -36,7 +37,8 @@ use super::InspectorIcons;
 
 #[derive(Default)]
 struct AddComponentState {
-    query: String,
+    filter: String,
+    expression: String,
     feedback: Option<AddComponentFeedback>,
 }
 
@@ -292,6 +294,7 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
 
             add_component_widget(
                 ui,
+                icons.search,
                 graph_state,
                 &metadata_store,
                 &schema_store,
@@ -378,6 +381,7 @@ fn component_value(
 
 fn add_component_widget(
     ui: &mut egui::Ui,
+    search_icon: egui::TextureId,
     graph_state: &mut GraphState,
     metadata_store: &ComponentMetadataRegistry,
     schema_store: &ComponentSchemaRegistry,
@@ -386,89 +390,208 @@ fn add_component_widget(
 ) {
     ui.separator();
 
+    let mut component_names = Vec::new();
+    collect_component_names(&eql_context.component_parts, &mut component_names);
+    component_names.sort();
+    component_names.dedup();
+
+    let matcher = SkimMatcherV2::default().smart_case().use_cache(true);
+    let filter = add_state.filter.trim();
+    let mut matched_components = component_names
+        .iter()
+        .filter_map(|name| {
+            if filter.is_empty() {
+                Some((0, name.as_str()))
+            } else {
+                matcher
+                    .fuzzy_match(name, filter)
+                    .map(|score| (score, name.as_str()))
+            }
+        })
+        .collect::<Vec<_>>();
+    matched_components.sort_by(|(score_a, name_a), (score_b, name_b)| {
+        score_b.cmp(score_a).then_with(|| name_a.cmp(name_b))
+    });
+
+    const MAX_SEARCH_RESULTS: usize = 12;
+
     egui::Frame::NONE
         .inner_margin(egui::Margin::symmetric(0, 8))
         .show(ui, |ui| {
             ui.label(egui::RichText::new("ADD COMPONENT").color(get_scheme().text_secondary));
             ui.add_space(8.0);
+            ui.label(egui::RichText::new("SEARCH").color(get_scheme().text_secondary));
+            search(ui, &mut add_state.filter, search_icon);
+            ui.add_space(8.0);
+
+            if matched_components.is_empty() {
+                ui.label(
+                    egui::RichText::new("No component matches this search.")
+                        .color(get_scheme().text_tertiary),
+                );
+            } else {
+                let shown_results = matched_components.len().min(MAX_SEARCH_RESULTS);
+                egui::ScrollArea::vertical()
+                    .auto_shrink([false, false])
+                    .max_height(220.0)
+                    .show(ui, |ui| {
+                        for (index, (_, component_name)) in matched_components
+                            .iter()
+                            .take(MAX_SEARCH_RESULTS)
+                            .enumerate()
+                        {
+                            ui.horizontal(|ui| {
+                                ui.label((*component_name).to_string());
+                                ui.with_layout(egui::Layout::right_to_left(Align::Min), |ui| {
+                                    if ui.add(EButton::highlight("ADD").width(88.0)).clicked() {
+                                        apply_add_components(
+                                            add_state,
+                                            graph_state,
+                                            metadata_store,
+                                            schema_store,
+                                            eql_context,
+                                            component_name,
+                                            false,
+                                        );
+                                    }
+                                });
+                            });
+                            if index + 1 < shown_results {
+                                ui.add_space(4.0);
+                                ui.separator();
+                                ui.add_space(4.0);
+                            }
+                        }
+                    });
+
+                if matched_components.len() > MAX_SEARCH_RESULTS {
+                    ui.add_space(6.0);
+                    ui.label(
+                        egui::RichText::new(format!(
+                            "Showing first {MAX_SEARCH_RESULTS} of {} results.",
+                            matched_components.len()
+                        ))
+                        .color(get_scheme().text_tertiary),
+                    );
+                }
+            }
+
+            ui.add_space(8.0);
+            ui.separator();
+            ui.add_space(8.0);
+            ui.label(egui::RichText::new("ADD BY EQL").color(get_scheme().text_secondary));
 
             configure_input_with_border(ui.style_mut());
             let query_res = ui.add(inspector_text_field(
-                &mut add_state.query,
-                "EQL component or list (e.g. drone.world_pos, drone.vel[2])",
+                &mut add_state.expression,
+                "Advanced expression (e.g. drone.world_pos, drone.vel[2])",
             ));
-            eql_autocomplete(ui, eql_context, &query_res, &mut add_state.query);
-
+            eql_autocomplete(ui, eql_context, &query_res, &mut add_state.expression);
             let enter_pressed =
                 query_res.has_focus() && ui.ctx().input(|i| i.key_pressed(egui::Key::Enter));
 
             ui.add_space(8.0);
-            let add_clicked = ui
-                .add_sized([ui.available_width(), 32.0], EButton::new("Add Component"))
-                .clicked();
+            let mut add_expression_clicked = false;
+            ui.with_layout(egui::Layout::right_to_left(Align::Min), |ui| {
+                add_expression_clicked = ui.add(EButton::highlight("ADD").width(88.0)).clicked();
+            });
 
-            if add_clicked || enter_pressed {
-                let query = add_state.query.trim();
-                if query.is_empty() {
-                    add_state.feedback = Some(AddComponentFeedback {
-                        message: "Enter a component expression.".to_string(),
-                        color: get_scheme().error,
-                    });
-                } else {
-                    match add_components_from_eql(
+            if add_expression_clicked || enter_pressed {
+                let query = add_state.expression.trim().to_string();
+                if !query.is_empty() {
+                    apply_add_components(
+                        add_state,
                         graph_state,
                         metadata_store,
                         schema_store,
                         eql_context,
-                        query,
-                    ) {
-                        Ok(result) => {
-                            let mut message = if result.added_lines == 0 {
-                                "All referenced lines are already in this graph.".to_string()
-                            } else {
-                                format!(
-                                    "Added {} line{} from {} component{}.",
-                                    result.added_lines,
-                                    plural(result.added_lines),
-                                    result.added_components,
-                                    plural(result.added_components),
-                                )
-                            };
-
-                            if result.has_formula {
-                                message.push_str(
-                                    " Formula parts are expanded to source components in standard graphs.",
-                                );
-                            }
-
-                            add_state.feedback = Some(AddComponentFeedback {
-                                message,
-                                color: if result.added_lines == 0 {
-                                    get_scheme().text_tertiary
-                                } else {
-                                    get_scheme().success
-                                },
-                            });
-
-                            if result.added_lines > 0 {
-                                add_state.query.clear();
-                            }
-                        }
-                        Err(error) => {
-                            add_state.feedback = Some(AddComponentFeedback {
-                                message: error,
-                                color: get_scheme().error,
-                            });
-                        }
-                    }
+                        &query,
+                        true,
+                    );
+                } else {
+                    add_state.feedback = Some(AddComponentFeedback {
+                        message: "Enter an EQL expression before adding.".to_string(),
+                        color: get_scheme().error,
+                    });
                 }
             }
 
             if let Some(feedback) = &add_state.feedback {
                 ui.add_space(8.0);
+                ui.separator();
+                ui.add_space(8.0);
                 ui.label(egui::RichText::new(&feedback.message).color(feedback.color));
             }
         });
+}
+
+fn collect_component_names(
+    parts: &std::collections::BTreeMap<String, eql::ComponentPart>,
+    out: &mut Vec<String>,
+) {
+    for part in parts.values() {
+        if let Some(component) = &part.component {
+            out.push(component.name.clone());
+        }
+        collect_component_names(&part.children, out);
+    }
+}
+
+fn apply_add_components(
+    add_state: &mut AddComponentState,
+    graph_state: &mut GraphState,
+    metadata_store: &ComponentMetadataRegistry,
+    schema_store: &ComponentSchemaRegistry,
+    eql_context: &eql::Context,
+    query: &str,
+    clear_expression_on_success: bool,
+) {
+    match add_components_from_eql(
+        graph_state,
+        metadata_store,
+        schema_store,
+        eql_context,
+        query,
+    ) {
+        Ok(result) => {
+            let mut message = if result.added_lines == 0 {
+                "All referenced lines are already in this graph.".to_string()
+            } else {
+                format!(
+                    "Added {} line{} from {} component{}.",
+                    result.added_lines,
+                    plural(result.added_lines),
+                    result.added_components,
+                    plural(result.added_components),
+                )
+            };
+
+            if result.has_formula {
+                message.push_str(
+                    " Formula parts are expanded to source components in standard graphs.",
+                );
+            }
+
+            add_state.feedback = Some(AddComponentFeedback {
+                message,
+                color: if result.added_lines == 0 {
+                    get_scheme().text_tertiary
+                } else {
+                    get_scheme().success
+                },
+            });
+
+            if result.added_lines > 0 && clear_expression_on_success {
+                add_state.expression.clear();
+            }
+        }
+        Err(error) => {
+            add_state.feedback = Some(AddComponentFeedback {
+                message: error,
+                color: get_scheme().error,
+            });
+        }
+    }
 }
 
 fn add_components_from_eql(
