@@ -71,8 +71,8 @@ pub(crate) mod sidebar;
 
 use sidebar::tab_add_visible;
 
-const DEFAULT_VIEWPORT_NEAR: f32 = 0.05;
-const DEFAULT_VIEWPORT_FAR: f32 = 5.0;
+pub(crate) const DEFAULT_VIEWPORT_NEAR: f32 = 0.05;
+pub(crate) const DEFAULT_VIEWPORT_FAR: f32 = 5.0;
 
 fn default_viewport_perspective() -> PerspectiveProjection {
     PerspectiveProjection {

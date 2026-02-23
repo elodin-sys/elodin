@@ -141,19 +141,26 @@ impl SchematicParam<'_, '_> {
                             .get(cam_entity)
                             .ok()
                             .and_then(|projection| match projection {
-                                Projection::Perspective(perspective) => Some((
-                                    perspective.fov.to_degrees(),
-                                    Some(perspective.near),
-                                    Some(perspective.far),
-                                )),
+                                Projection::Perspective(perspective) => {
+                                    let near = if (perspective.near - tiles::DEFAULT_VIEWPORT_NEAR).abs() > f32::EPSILON {
+                                        Some(perspective.near)
+                                    } else {
+                                        None
+                                    };
+                                    let far = if (perspective.far - tiles::DEFAULT_VIEWPORT_FAR).abs() > f32::EPSILON {
+                                        Some(perspective.far)
+                                    } else {
+                                        None
+                                    };
+                                    Some((perspective.fov.to_degrees(), near, far))
+                                }
                                 _ => None,
                             })
                             .unwrap_or((45.0, None, None));
-                        let aspect = self
-                            .viewport_configs
-                            .get(cam_entity)
-                            .ok()
-                            .and_then(|config| config.aspect);
+
+                        let vp_config = self.viewport_configs.get(cam_entity).ok();
+                        let aspect = vp_config.and_then(|c| c.aspect);
+
                         let mut show_grid = false;
                         if let Ok(grid_handle) = self.camera_grids.get(cam_entity)
                             && let Ok(visibility) = self.grid_visibility.get(grid_handle.grid)
@@ -161,29 +168,15 @@ impl SchematicParam<'_, '_> {
                             show_grid = matches!(*visibility, Visibility::Visible);
                         }
 
-                        let show_arrows = self
-                            .viewport_configs
-                            .get(cam_entity)
-                            .map(|config| config.show_arrows)
-                            .unwrap_or(true);
-                        let create_frustum = self
-                            .viewport_configs
-                            .get(cam_entity)
-                            .map(|config| config.create_frustum)
-                            .unwrap_or(false);
-                        let show_frustums = self
-                            .viewport_configs
-                            .get(cam_entity)
-                            .map(|config| config.show_frustums)
-                            .unwrap_or(false);
-                        let frustums_color = self.viewport_configs.get(cam_entity).map_or_else(
-                            |_| impeller2_wkt::default_viewport_frustums_color(),
-                            |config| config.frustums_color,
-                        );
-                        let frustums_thickness = self.viewport_configs.get(cam_entity).map_or_else(
-                            |_| impeller2_wkt::default_viewport_frustums_thickness(),
-                            |config| config.frustums_thickness,
-                        );
+                        let show_arrows = vp_config.map(|c| c.show_arrows).unwrap_or(true);
+                        let create_frustum = vp_config.map(|c| c.create_frustum).unwrap_or(false);
+                        let show_frustums = vp_config.map(|c| c.show_frustums).unwrap_or(false);
+                        let frustums_color = vp_config
+                            .map(|c| c.frustums_color)
+                            .unwrap_or_else(impeller2_wkt::default_viewport_frustums_color);
+                        let frustums_thickness = vp_config
+                            .map(|c| c.frustums_thickness)
+                            .unwrap_or_else(impeller2_wkt::default_viewport_frustums_thickness);
                         let show_view_cube = viewport.view_cube_layer.is_some();
 
                         let local_arrows: Vec<VectorArrow3d> = self
