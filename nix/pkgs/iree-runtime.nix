@@ -58,10 +58,14 @@ in
       "-DIREE_HAL_DRIVER_LOCAL_SYNC=ON"
       "-DIREE_HAL_DRIVER_LOCAL_TASK=ON"
 
-      # Executable loaders
+      # Executable loaders (all three needed for full platform support)
       "-DIREE_HAL_EXECUTABLE_LOADER_DEFAULTS=OFF"
       "-DIREE_HAL_EXECUTABLE_LOADER_EMBEDDED_ELF=ON"
+      "-DIREE_HAL_EXECUTABLE_LOADER_SYSTEM_LIBRARY=ON"
       "-DIREE_HAL_EXECUTABLE_LOADER_VMVX_MODULE=ON"
+
+      # Executable plugins
+      "-DIREE_HAL_EXECUTABLE_PLUGIN_SYSTEM_LIBRARY=ON"
 
       # Static libraries
       "-DBUILD_SHARED_LIBS=OFF"

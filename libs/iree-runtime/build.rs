@@ -50,6 +50,7 @@ fn main() {
 
     // Executable loaders
     println!("cargo:rustc-link-lib=static=iree_hal_local_loaders_embedded_elf_loader");
+    println!("cargo:rustc-link-lib=static=iree_hal_local_loaders_system_library_loader");
     println!("cargo:rustc-link-lib=static=iree_hal_local_loaders_vmvx_module_loader");
     println!("cargo:rustc-link-lib=static=iree_hal_local_loaders_static_library_loader");
     println!("cargo:rustc-link-lib=static=iree_hal_local_loaders_registration_registration");
@@ -179,6 +180,7 @@ fn main() {
         println!("cargo:rustc-link-lib=c++");
         println!("cargo:rustc-link-lib=framework=Foundation");
         println!("cargo:rustc-link-lib=framework=Security");
+        println!("cargo:rustc-link-lib=dl");
     }
 
     // Run bindgen

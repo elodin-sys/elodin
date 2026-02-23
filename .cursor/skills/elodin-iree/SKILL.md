@@ -9,7 +9,7 @@ The `libs/iree-runtime/` crate provides Rust FFI bindings and safe wrappers for 
 
 ## Background
 
-The old `libs/noxla/` crate wraps XLA's C++ API via `cpp!`/`cxx` macros: it downloads a prebuilt XLA binary from an Elodin fork, compiles vendored JAXlib C++ kernels, statically links ~hundreds of MB, and pins the project to JAX 0.4.31. This is the single largest source of build pain in the repo.
+The old `libs/noxla/` crate wraps XLA's C++ API via `cpp!`/`cxx` macros: it downloads a prebuilt XLA binary from an Elodin fork, compiles vendored JAXlib C++ kernels, statically links ~hundreds of MB, and historically required tightly pinned JAX/JAXlib versions. This is the single largest source of build pain in the repo.
 
 A first migration attempt (PR #445, Jan 2026) replaced XLA with IREE's Python runtime (`iree.runtime`), but called Python every tick via PyO3 -- unacceptable for a real-time simulation loop.
 

@@ -9,8 +9,8 @@
 }: let
   # Import shared configuration
   common = pkgs.callPackage ./common.nix {};
+  iree_runtime = pkgs.callPackage ./iree-runtime.nix {};
   # Direct Rust build using rustPlatform.buildRustPackage
-  xla_ext = pkgs.callPackage ./xla-ext.nix {inherit system;};
 
   # Extract pname and version directly from Cargo.toml files
   noxPyCargoToml = builtins.fromTOML (builtins.readFile ../../libs/nox-py/Cargo.toml);
@@ -69,8 +69,7 @@
     buildInputs = with pkgs;
       [
         python
-        gfortran.cc.lib # Fortran runtime library for linking
-        xla_ext
+        iree_runtime
       ]
       ++ common.commonBuildInputs
       ++ lib.optionals stdenv.isDarwin common.darwinDeps
@@ -79,14 +78,10 @@
       ];
 
     # Environment variables for the build
-    XLA_EXTENSION_DIR = "${xla_ext}";
+    IREE_RUNTIME_DIR = "${iree_runtime}";
     OPENSSL_DIR = "${pkgs.openssl.dev}";
     OPENSSL_LIB_DIR = "${pkgs.openssl.out}/lib";
     OPENSSL_INCLUDE_DIR = "${pkgs.openssl.dev}/include/";
-
-    # Workaround for netlib-src 0.8.0 incompatibility with GCC 14+
-    # GCC 14 treats -Wincompatible-pointer-types as error by default
-    NIX_CFLAGS_COMPILE = common.netlibWorkaround;
 
     # Ensure C++ standard library is linked on macOS
     NIX_LDFLAGS = lib.optionalString pkgs.stdenv.isDarwin "-lc++";
@@ -114,24 +109,15 @@
     '';
   };
 
-  # Import shared JAX overrides
-  jaxOverrides = pkgs.callPackage ./jax-overrides.nix {inherit pkgs;};
-
-  elodin = ps: let
-    # Create a modified Python package set with our JAX/jaxlib overrides
-    # This ensures all packages use the same jaxlib version
-    ps' = ps.override {
-      overrides = jaxOverrides;
-    };
-  in
-    ps'.buildPythonPackage {
+  elodin = ps:
+    ps.buildPythonPackage {
       pname = wheelName;
       format = "wheel";
       version = version;
       src = "${wheel}/${wheelName}-${wheelVersion}-${wheelSuffix}.whl";
       doCheck = false;
       pythonImportsCheck = []; # Skip import check due to C++ library loading issues on macOS
-      propagatedBuildInputs = with ps';
+      propagatedBuildInputs = with ps;
         [
           jax
           jaxlib
@@ -146,8 +132,7 @@
         ];
       buildInputs =
         [
-          xla_ext
-          pkgs.gfortran.cc.lib
+          iree_runtime
         ]
         ++ lib.optionals pkgs.stdenv.isDarwin [
           pkgs.stdenv.cc.cc.lib # C++ standard library for macOS

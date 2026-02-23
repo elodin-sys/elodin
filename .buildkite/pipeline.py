@@ -73,7 +73,7 @@ test_steps = [
         steps=[
             nix_step(
                 label=":python: pytest",
-                command="pytest libs/nox-py",
+                command="python -m pip install iree-base-compiler==3.10.0 && pytest libs/nox-py",
             ),
             nix_step(
                 label=":python: lint",

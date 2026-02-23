@@ -1,4 +1,3 @@
-use pyo3::IntoPyObjectExt;
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyModule};
 use std::collections::HashSet;
@@ -36,7 +35,7 @@ pub fn compile_iree_module(
             .collect();
         let jnp = py.import("jax.numpy")?;
         let arr = jnp.getattr("zeros")?.call((shape_vec, dtype), None)?;
-        input_arrays.push(arr.into_py_any(py)?);
+        input_arrays.push(arr.unbind());
         visited_ids.insert(id);
     }
 
@@ -44,6 +43,7 @@ pub fn compile_iree_module(
 import jax
 import os
 import re
+import platform
 os.environ["JAX_ENABLE_X64"] = "1"
 jax.config.update("jax_enable_x64", True)
 
@@ -59,84 +59,71 @@ def compile_to_vmfb(func, input_arrays):
     # Rename to @module so the VMFB function is always "module.main".
     stablehlo_mlir = re.sub(r'module @\S+', 'module @module', stablehlo_mlir, count=1)
 
-    import platform, subprocess, tempfile, shutil, stat
-
-    backend = "llvm-cpu"
-    args = [
+    extra = [
         "--iree-vm-target-extension-f64",
         "--iree-input-demote-f64-to-f32=false",
-        "--iree-hal-indirect-command-buffers=false",
         "--iree-input-type=stablehlo",
-        f"--iree-hal-target-backends={backend}",
     ]
-    cleanup_files = []
-    if platform.system() == "Darwin":
-        # macOS embedded ELF linker can't resolve cos/sin/exp/log.
-        # Provide them as linked bitcode using LLVM intrinsics.
-        math_ll = (
-            'declare double @llvm.cos.f64(double)\n'
-            'declare double @llvm.sin.f64(double)\n'
-            'declare double @llvm.exp.f64(double)\n'
-            'declare double @llvm.log.f64(double)\n'
-            'declare double @llvm.pow.f64(double, double)\n'
-            'declare float @llvm.cos.f32(float)\n'
-            'declare float @llvm.sin.f32(float)\n'
-            'declare float @llvm.exp.f32(float)\n'
-            'declare float @llvm.log.f32(float)\n'
-            'declare float @llvm.pow.f32(float, float)\n'
-            'define double @cos(double %x) { %r = call double @llvm.cos.f64(double %x) ret double %r }\n'
-            'define double @sin(double %x) { %r = call double @llvm.sin.f64(double %x) ret double %r }\n'
-            'define double @exp(double %x) { %r = call double @llvm.exp.f64(double %x) ret double %r }\n'
-            'define double @log(double %x) { %r = call double @llvm.log.f64(double %x) ret double %r }\n'
-            'define double @pow(double %x, double %y) { %r = call double @llvm.pow.f64(double %x, double %y) ret double %r }\n'
-            'define float @cosf(float %x) { %r = call float @llvm.cos.f32(float %x) ret float %r }\n'
-            'define float @sinf(float %x) { %r = call float @llvm.sin.f32(float %x) ret float %r }\n'
-            'define float @expf(float %x) { %r = call float @llvm.exp.f32(float %x) ret float %r }\n'
-            'define float @logf(float %x) { %r = call float @llvm.log.f32(float %x) ret float %r }\n'
-            'define float @powf(float %x, float %y) { %r = call float @llvm.pow.f32(float %x, float %y) ret float %r }\n'
-        )
-        math_ll_fd, math_ll_path = tempfile.mkstemp(suffix=".ll", prefix="iree_math_")
-        math_bc_path = math_ll_path.replace(".ll", ".bc")
-        with os.fdopen(math_ll_fd, "w") as f:
-            f.write(math_ll)
-        cleanup_files.append(math_ll_path)
-        cleanup_files.append(math_bc_path)
-        llvm_as = shutil.which("llvm-as")
-        if llvm_as:
-            subprocess.run([llvm_as, math_ll_path, "-o", math_bc_path], check=True)
-            args.append(f"--iree-link-bitcode={math_bc_path}")
 
-    iree_compile = shutil.which("iree-compile")
-    if iree_compile is None:
+    if platform.system() == "Darwin":
+        import tempfile, stat
+        # macOS: use system-library loader (produces .dylib linked via dlopen).
+        # IREE passes -static to the linker, which macOS doesn't support.
+        # Create a wrapper that strips -static and uses /usr/bin/cc.
+        wrapper_path = tempfile.mktemp(suffix='.sh', prefix='iree_cc_')
+        lines = [
+            '#!/bin/bash',
+            'filtered=()',
+            'for arg in "$@"; do',
+            '  case "$arg" in',
+            '    -static) ;;',
+            '    -dylib) filtered+=("-dynamiclib") ;;',
+            '    -flat_namespace) filtered+=("-Wl,-flat_namespace") ;;',
+            '    *) filtered+=("$arg") ;;',
+            '  esac',
+            'done',
+            'exec /usr/bin/cc "${filtered[@]}"',
+        ]
+        with open(wrapper_path, 'w') as wf:
+            wf.write('\n'.join(lines) + '\n')
+        os.chmod(wrapper_path, os.stat(wrapper_path).st_mode | stat.S_IEXEC)
+        machine = platform.machine()
+        arch = 'arm64' if machine == 'arm64' else 'x86_64'
+        extra.append('--iree-llvmcpu-link-embedded=false')
+        extra.append('--iree-llvmcpu-target-triple=' + arch + '-apple-darwin')
+        extra.append('--iree-llvmcpu-system-linker-path=' + wrapper_path)
+
+    import subprocess, shutil
+    iree_bin = shutil.which('iree-compile')
+    if iree_bin is None:
         from iree.compiler import _mlir_libs
         import pathlib
-        iree_compile = str(pathlib.Path(_mlir_libs.__file__).parent / "iree-compile")
+        iree_bin = str(pathlib.Path(_mlir_libs.__file__).parent / 'iree-compile')
 
-    out_fd, out_path = tempfile.mkstemp(suffix=".vmfb")
-    os.close(out_fd)
-    cleanup_files.append(out_path)
-
-    cmd = [iree_compile, "-", "-o", out_path] + args
-    result = subprocess.run(
-        cmd,
-        input=stablehlo_mlir.encode("utf-8"),
-        capture_output=True,
-    )
+    out_path = tempfile.mktemp(suffix='.vmfb')
+    cmd = [iree_bin, '-', '-o', out_path, '--iree-hal-target-backends=llvm-cpu'] + extra
+    import sys
+    print('[IREE] cmd: ' + ' '.join(cmd), file=sys.stderr, flush=True)
+    if platform.system() == 'Darwin':
+        with open(wrapper_path) as wf:
+            content = wf.read()
+        print('[IREE] wrapper len=' + str(len(content)) + ' first_line=' + repr(content.split('\n')[0]), file=sys.stderr, flush=True)
+    result = subprocess.run(cmd, input=stablehlo_mlir.encode('utf-8'), capture_output=True)
+    print('[IREE] exit: ' + str(result.returncode), file=sys.stderr, flush=True)
+    if result.stderr:
+        stderr_text = result.stderr.decode('utf-8', errors='replace')
+        if 'error' in stderr_text.lower():
+            print('[IREE] stderr: ' + stderr_text[:500], file=sys.stderr, flush=True)
     if result.returncode != 0:
-        for f in cleanup_files:
-            try: os.unlink(f)
-            except: pass
-        raise RuntimeError(
-            f"iree-compile failed (code {result.returncode}):\n"
-            f"{result.stderr.decode('utf-8', errors='replace')}"
-        )
-
-    with open(out_path, "rb") as f:
-        vmfb = f.read()
-    for f in cleanup_files:
-        try: os.unlink(f)
+        try: os.unlink(out_path)
         except: pass
-
+        raise RuntimeError(
+            'iree-compile failed (code ' + str(result.returncode) + '):\n'
+            + result.stderr.decode('utf-8', errors='replace')
+        )
+    with open(out_path, 'rb') as f:
+        vmfb = f.read()
+    os.unlink(out_path)
     return vmfb
 "#;
 
