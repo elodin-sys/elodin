@@ -138,6 +138,24 @@ elodin editor 127.0.0.1:2241
 examples/video-stream/stream-video.sh
 ```
 
+## Trimming a Database
+
+Remove data from the beginning or end of a recording. Values are in microseconds. Without `--output`, modifies in place.
+
+```bash
+# Remove the first 3 minutes from a recording
+elodin-db trim --from-start 180000000 ./my-db
+
+# Remove the last 2 minutes from a recording
+elodin-db trim --from-end 120000000 --output ./trimmed ./my-db
+
+# Trim 1 minute from the start and 2 minutes from the end
+elodin-db trim --from-start 60000000 --from-end 120000000 --output ./window ./my-db
+
+# Preview without modifying
+elodin-db trim --from-start 180000000 --dry-run ./my-db
+```
+
 ## Editor Connection
 
 The Elodin Editor connects to any running database:

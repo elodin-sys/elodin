@@ -84,4 +84,17 @@ elodin-db run [::]:2241 ./ground-station --follows 192.168.1.10:2240
 
 **Export** -- Export component data to Parquet, Arrow IPC, or CSV without a running server: `elodin-db export ./db -o ./out`. Glob filtering and vector flattening are supported.
 
-**Database tools** -- Offline commands for common post-processing tasks: `merge` (combine two databases with optional time alignment), `drop` (delete components by name or glob), `prune` (remove empties), `truncate` (clear data, keep schemas), `time-align` (shift timestamps), and `fix-timestamps` (normalize clock sources).
+**Trim** -- Remove data from the beginning or end of a recording without a running server:
+
+```sh
+# Remove the first 3 minutes from a recording
+elodin-db trim --from-start 180000000 ./my-db
+
+# Remove the last 2 minutes from a recording
+elodin-db trim --from-end 120000000 --output ./trimmed ./my-db
+
+# Trim 1 minute from the start and 2 minutes from the end
+elodin-db trim --from-start 60000000 --from-end 120000000 --output ./window ./my-db
+```
+
+**Database tools** -- Additional offline commands for post-processing: `merge` (combine two databases with optional time alignment), `drop` (delete components by name or glob), `prune` (remove empties), `truncate` (clear data, keep schemas), `time-align` (shift timestamps), and `fix-timestamps` (normalize clock sources).
