@@ -39,18 +39,6 @@ use super::InspectorIcons;
 struct AddComponentState {
     filter: String,
     expression: String,
-    feedback: Option<AddComponentFeedback>,
-}
-
-struct AddComponentFeedback {
-    message: String,
-    color: Color32,
-}
-
-struct AddComponentsResult {
-    added_lines: usize,
-    added_components: usize,
-    has_formula: bool,
 }
 
 #[derive(SystemParam)]
@@ -470,18 +458,17 @@ fn add_component_widget(
                     .take(MAX_SEARCH_RESULTS)
                     .enumerate()
                 {
+                    ui.label((*component_name).to_string());
+                    ui.add_space(4.0);
                     ui.horizontal(|ui| {
-                        ui.label((*component_name).to_string());
                         ui.with_layout(egui::Layout::right_to_left(Align::Min), |ui| {
                             if ui.add(EButton::highlight("ADD").width(88.0)).clicked() {
-                                apply_add_components(
-                                    add_state,
+                                let _ = add_components_from_eql(
                                     graph_state,
                                     metadata_store,
                                     schema_store,
                                     eql_context,
                                     component_name,
-                                    false,
                                 );
                             }
                         });
@@ -521,35 +508,28 @@ fn add_component_widget(
 
             ui.add_space(8.0);
             let mut add_expression_clicked = false;
-            ui.with_layout(egui::Layout::right_to_left(Align::Min), |ui| {
-                add_expression_clicked = ui.add(EButton::highlight("ADD").width(88.0)).clicked();
+            ui.horizontal(|ui| {
+                ui.with_layout(egui::Layout::right_to_left(Align::Min), |ui| {
+                    add_expression_clicked =
+                        ui.add(EButton::highlight("ADD").width(88.0)).clicked();
+                });
             });
 
             if add_expression_clicked || enter_pressed {
                 let query = add_state.expression.trim().to_string();
                 if !query.is_empty() {
-                    apply_add_components(
-                        add_state,
+                    if add_components_from_eql(
                         graph_state,
                         metadata_store,
                         schema_store,
                         eql_context,
                         &query,
-                        true,
-                    );
-                } else {
-                    add_state.feedback = Some(AddComponentFeedback {
-                        message: "Enter an EQL expression before adding.".to_string(),
-                        color: get_scheme().error,
-                    });
+                    )
+                    .unwrap_or(false)
+                    {
+                        add_state.expression.clear();
+                    }
                 }
-            }
-
-            if let Some(feedback) = &add_state.feedback {
-                ui.add_space(8.0);
-                ui.separator();
-                ui.add_space(8.0);
-                ui.label(egui::RichText::new(&feedback.message).color(feedback.color));
             }
         });
 }
@@ -566,75 +546,16 @@ fn collect_component_names(
     }
 }
 
-fn apply_add_components(
-    add_state: &mut AddComponentState,
-    graph_state: &mut GraphState,
-    metadata_store: &ComponentMetadataRegistry,
-    schema_store: &ComponentSchemaRegistry,
-    eql_context: &eql::Context,
-    query: &str,
-    clear_expression_on_success: bool,
-) {
-    match add_components_from_eql(
-        graph_state,
-        metadata_store,
-        schema_store,
-        eql_context,
-        query,
-    ) {
-        Ok(result) => {
-            let mut message = if result.added_lines == 0 {
-                "All referenced lines are already in this graph.".to_string()
-            } else {
-                format!(
-                    "Added {} line{} from {} component{}.",
-                    result.added_lines,
-                    plural(result.added_lines),
-                    result.added_components,
-                    plural(result.added_components),
-                )
-            };
-
-            if result.has_formula {
-                message.push_str(
-                    " Formula parts are expanded to source components in standard graphs.",
-                );
-            }
-
-            add_state.feedback = Some(AddComponentFeedback {
-                message,
-                color: if result.added_lines == 0 {
-                    get_scheme().text_tertiary
-                } else {
-                    get_scheme().success
-                },
-            });
-
-            if result.added_lines > 0 && clear_expression_on_success {
-                add_state.expression.clear();
-            }
-        }
-        Err(error) => {
-            add_state.feedback = Some(AddComponentFeedback {
-                message: error,
-                color: get_scheme().error,
-            });
-        }
-    }
-}
-
 fn add_components_from_eql(
     graph_state: &mut GraphState,
     metadata_store: &ComponentMetadataRegistry,
     schema_store: &ComponentSchemaRegistry,
     eql_context: &eql::Context,
     query: &str,
-) -> Result<AddComponentsResult, String> {
+) -> Result<bool, String> {
     let expr = eql_context
         .parse_str(query)
         .map_err(|err| format!("Invalid EQL expression: {err}"))?;
-
-    let has_formula = contains_formula_expression(&expr);
 
     let mut requested_components = expr.to_graph_components();
     requested_components.sort();
@@ -649,7 +570,6 @@ fn add_components_from_eql(
         requested_by_path.entry(path).or_default().insert(index);
     }
 
-    let mut added_components = 0;
     let mut added_lines = 0;
     let mut next_color_index = count_enabled_lines(graph_state);
 
@@ -658,7 +578,6 @@ fn add_components_from_eql(
         if !graph_state.components.contains_key(&path) {
             let len = component_len(graph_state, metadata_store, schema_store, &path, max_index);
             graph_state.insert_component(path.clone(), default_component_values(&path, len));
-            added_components += 1;
         }
 
         let Some(component_values) = graph_state.components.get_mut(&path) else {
@@ -686,20 +605,7 @@ fn add_components_from_eql(
         }
     }
 
-    Ok(AddComponentsResult {
-        added_lines,
-        added_components,
-        has_formula,
-    })
-}
-
-fn contains_formula_expression(expr: &eql::Expr) -> bool {
-    match expr {
-        eql::Expr::Tuple(exprs) => exprs.iter().any(contains_formula_expression),
-        eql::Expr::ArrayAccess(inner, _) => contains_formula_expression(inner),
-        eql::Expr::BinaryOp(..) | eql::Expr::Formula(..) => true,
-        _ => false,
-    }
+    Ok(added_lines > 0)
 }
 
 fn count_enabled_lines(graph_state: &GraphState) -> usize {
@@ -747,8 +653,4 @@ fn default_component_values(path: &ComponentPath, len: usize) -> Vec<(bool, Colo
     (0..len)
         .map(|i| (false, get_color_by_index_all(path.id.0 as usize + i)))
         .collect()
-}
-
-const fn plural(n: usize) -> &'static str {
-    if n == 1 { "" } else { "s" }
 }
