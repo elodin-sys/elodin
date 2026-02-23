@@ -338,14 +338,20 @@ impl WorldBuilder {
                 // Clone cancel tokens for each closure that needs it
                 let pre_step_cancel_token = recipe_cancel_token.clone();
                 let post_step_cancel_token = recipe_cancel_token.clone();
+                let db_server = elodin_db::Server::new(&db_path, addr)
+                    .map_err(|e| {
+                        if matches!(&e, elodin_db::Error::Io(io) if io.kind() == std::io::ErrorKind::AddrInUse) {
+                            crate::Error::Io(std::io::Error::new(
+                                std::io::ErrorKind::AddrInUse,
+                                format!("port {} is already in use — is another elodin instance running? Kill it with: lsof -tiTCP:{} -sTCP:LISTEN | xargs kill -9", addr.port(), addr.port()),
+                            ))
+                        } else {
+                            crate::Error::DB(e)
+                        }
+                    })?;
                 py.allow_threads(|| {
                     let result = stellarator::run(|| {
-                        crate::impeller2_server::Server::new(
-                            // Here we start the DB with an address.
-                            elodin_db::Server::new(db_path, addr).unwrap(),
-                            exec,
-                        )
-                        .run_with_cancellation(
+                        crate::impeller2_server::Server::new(db_server, exec).run_with_cancellation(
                             move || {
                                 let cancelled = if let Some(ref func) = is_canceled {
                                     Python::with_gil(|py| {

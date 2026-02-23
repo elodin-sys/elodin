@@ -281,17 +281,17 @@ def attitude_control(
             1.0
             - (thrust_error_angle - AC_ATTITUDE_THRUST_ERROR_ANGLE) / AC_ATTITUDE_THRUST_ERROR_ANGLE
         )
-        ang_vel_body.at[0].set(ang_vel_body[0] + ang_vel_body_feedforward[0] * feedforward_scalar)
-        ang_vel_body.at[1].set(ang_vel_body[1] + ang_vel_body_feedforward[1] * feedforward_scalar)
-        ang_vel_body.at[2].set(ang_vel_body[2] + ang_vel_body_feedforward[2])
-        ang_vel_body.at[2].set(
-            gyro[2] * (1.0 - feedforward_scalar) + ang_vel_body[2] * feedforward_scalar
-        )
-        return ang_vel_body
+        xy = (ang_vel_body[:2] + ang_vel_body_feedforward[:2] * feedforward_scalar)
+        z_base = ang_vel_body[2] + ang_vel_body_feedforward[2]
+        z = gyro[2] * (1.0 - feedforward_scalar) + z_base * feedforward_scalar
+        return jnp.array([xy[0], xy[1], z])
+
+    def set_yaw_from_gyro(ang_vel_body, gyro):
+        return jnp.array([ang_vel_body[0], ang_vel_body[1], gyro[2]])
 
     ang_vel_body = jax.lax.cond(
         thrust_error_angle > AC_ATTITUDE_THRUST_ERROR_ANGLE * 2.0,
-        lambda _: ang_vel_body.at[2].set(gyro[2]),
+        lambda _: set_yaw_from_gyro(ang_vel_body, gyro),
         lambda _: jax.lax.cond(
             thrust_error_angle > AC_ATTITUDE_THRUST_ERROR_ANGLE,
             lambda _: feedforward(ang_vel_body, ang_vel_body_feedforward, thrust_error_angle, gyro),

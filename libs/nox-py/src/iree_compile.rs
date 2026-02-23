@@ -63,13 +63,17 @@ def compile_to_vmfb(func, input_arrays):
         "--iree-vm-target-extension-f64",
         "--iree-input-demote-f64-to-f32=false",
         "--iree-input-type=stablehlo",
+        "--iree-hal-indirect-command-buffers=false",
     ]
 
     if platform.system() == "Darwin":
-        import tempfile, stat
+        import tempfile, stat, shutil, subprocess, pathlib
+        machine = platform.machine()
+        arch = 'arm64' if machine == 'arm64' else 'x86_64'
+
         # macOS: use system-library loader (produces .dylib linked via dlopen).
-        # IREE passes -static to the linker, which macOS doesn't support.
-        # Create a wrapper that strips -static and uses /usr/bin/cc.
+        # IREE's system linker invocation passes -static which macOS ld rejects.
+        # Create a wrapper that strips -static and maps lld flags to cc flags.
         wrapper_path = tempfile.mktemp(suffix='.sh', prefix='iree_cc_')
         lines = [
             '#!/bin/bash',
@@ -87,11 +91,37 @@ def compile_to_vmfb(func, input_arrays):
         with open(wrapper_path, 'w') as wf:
             wf.write('\n'.join(lines) + '\n')
         os.chmod(wrapper_path, os.stat(wrapper_path).st_mode | stat.S_IEXEC)
-        machine = platform.machine()
-        arch = 'arm64' if machine == 'arm64' else 'x86_64'
+
+        # iree-lld wrapper: wraps the real iree-lld but tells it to ignore
+        # undefined math symbols (cos, sin, etc.) that can't be statically
+        # linked on macOS. The system-library loader resolves them via dlopen.
+        from iree.compiler import _mlir_libs
+        iree_tools_dir = str(pathlib.Path(_mlir_libs.__file__).parent)
+        real_lld = iree_tools_dir + '/iree-lld'
+        lld_wrapper_path = tempfile.mktemp(suffix='.sh', prefix='iree_lld_')
+        lld_lines = [
+            '#!/bin/bash',
+            '# Strip --no-undefined and --no-allow-shlib-undefined from iree-lld args',
+            '# so that unresolved math symbols (cos, sin) are allowed in the embedded',
+            '# ELF. The system-library loader resolves them via dlopen at runtime.',
+            'filtered=()',
+            'for arg in "$@"; do',
+            '  case "$arg" in',
+            '    --no-undefined|--no-allow-shlib-undefined) ;;',
+            '    *) filtered+=("$arg") ;;',
+            '  esac',
+            'done',
+            'exec "' + real_lld + '" "${filtered[@]}"',
+        ]
+        with open(lld_wrapper_path, 'w') as wf:
+            wf.write('\n'.join(lld_lines) + '\n')
+        os.chmod(lld_wrapper_path, os.stat(lld_wrapper_path).st_mode | stat.S_IEXEC)
+
         extra.append('--iree-llvmcpu-link-embedded=false')
         extra.append('--iree-llvmcpu-target-triple=' + arch + '-apple-darwin')
         extra.append('--iree-llvmcpu-system-linker-path=' + wrapper_path)
+        extra.append('--iree-llvmcpu-embedded-linker-path=' + lld_wrapper_path)
+        extra.append('--iree-opt-const-eval=false')
 
     import subprocess, shutil
     iree_bin = shutil.which('iree-compile')
@@ -100,20 +130,17 @@ def compile_to_vmfb(func, input_arrays):
         import pathlib
         iree_bin = str(pathlib.Path(_mlir_libs.__file__).parent / 'iree-compile')
 
-    out_path = tempfile.mktemp(suffix='.vmfb')
+    import tempfile as _tempfile
+    out_path = _tempfile.mktemp(suffix='.vmfb')
     cmd = [iree_bin, '-', '-o', out_path, '--iree-hal-target-backends=llvm-cpu'] + extra
     import sys
     print('[IREE] cmd: ' + ' '.join(cmd), file=sys.stderr, flush=True)
-    if platform.system() == 'Darwin':
-        with open(wrapper_path) as wf:
-            content = wf.read()
-        print('[IREE] wrapper len=' + str(len(content)) + ' first_line=' + repr(content.split('\n')[0]), file=sys.stderr, flush=True)
     result = subprocess.run(cmd, input=stablehlo_mlir.encode('utf-8'), capture_output=True)
     print('[IREE] exit: ' + str(result.returncode), file=sys.stderr, flush=True)
     if result.stderr:
         stderr_text = result.stderr.decode('utf-8', errors='replace')
         if 'error' in stderr_text.lower():
-            print('[IREE] stderr: ' + stderr_text[:500], file=sys.stderr, flush=True)
+            print('[IREE] stderr: ' + stderr_text[:2000], file=sys.stderr, flush=True)
     if result.returncode != 0:
         try: os.unlink(out_path)
         except: pass
