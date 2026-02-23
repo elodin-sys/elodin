@@ -1,10 +1,13 @@
 use bevy::{
+    asset::{embedded_asset, RenderAssetUsages},
+    mesh::{
+        Indices, Mesh, PrimitiveTopology,
+    },
     pbr::MaterialExtension,
     prelude::*,
     reflect::TypePath,
     render::render_resource::{AsBindGroup, ShaderType},
     shader::ShaderRef,
-    asset::embedded_asset,
 };
 
 pub struct Mat3MaterialPlugin;
@@ -13,10 +16,24 @@ impl Plugin for Mat3MaterialPlugin {
     fn build(&self, app: &mut App) {
         embedded_asset!(app, "mat3_prepass.wgsl");
         embedded_asset!(app, "mat3_transform.wgsl");
-        app.add_plugins((
-            MaterialPlugin::<Mat3Material>::default(),
-        ))
-        .register_type::<Mat3ParamsComponent>();
+        app.add_plugins(MaterialPlugin::<Mat3Material>::default())
+            .add_systems(Update, sync_mat3_params_from_component)
+            .register_type::<Mat3ParamsComponent>();
+    }
+}
+
+/// Syncs [`Mat3ParamsComponent`] into the entity's [`Mat3Material`] so inspector edits apply.
+fn sync_mat3_params_from_component(
+    mut materials: ResMut<Assets<Mat3Material>>,
+    query: Query<
+        (&Mat3ParamsComponent, &MeshMaterial3d<Mat3Material>),
+        Changed<Mat3ParamsComponent>,
+    >,
+) {
+    for (comp, mesh_material) in &query {
+        if let Some(material) = materials.get_mut(&mesh_material.0) {
+            material.extension.params = comp.linear.into();
+        }
     }
 }
 
@@ -78,7 +95,7 @@ pub type Mat3Material = bevy::pbr::ExtendedMaterial<StandardMaterial, Mat3Transf
 
 /// Component that drives [`Mat3Material`] from the inspector.
 ///
-/// Edit `linear` in the inspector; it is synced to the material each frame and the normal matrix
+/// Edit `linear` in the inspector; it is synced to the material when changed and the normal matrix
 /// is derived automatically. Attach this to any entity with `MeshMaterial3d<Mat3Material>`
 /// that uses a material handle unique to that entity (or shared only with its grid child).
 #[derive(Default, Component, Debug, Reflect)]
@@ -87,4 +104,51 @@ pub struct Mat3ParamsComponent {
     /// The 3×3 linear transform applied in the vertex shader (lower-triangular convention).
     /// The normal matrix is computed as `linear.inverse().transpose()` when syncing to the material.
     pub linear: Mat3,
+}
+
+/// Builds a line-list mesh for the UV sphere grid (quad-like edges). Uses the same vertex layout
+/// as Bevy's `SphereMeshBuilder::uv`. Pass `Mat4::IDENTITY` for a unit sphere grid, or a deform
+/// matrix to match a deformed ellipsoid.
+/// Builds a line-list mesh for the UV sphere grid in **unit-sphere** space (radius, no deform).
+/// Deformation is applied at runtime by using a material with a vertex shader (e.g. `Mat3Material`).
+pub fn uv_sphere_grid_line_mesh(radius: f32, sectors: u32, stacks: u32) -> Mesh {
+    use std::f32::consts::PI;
+
+    let sector_step = 2.0 * PI / sectors as f32;
+    let stack_step = PI / stacks as f32;
+    let mut positions: Vec<[f32; 3]> = Vec::with_capacity(((stacks + 1) * (sectors + 1)) as usize);
+
+    for i in 0..=stacks {
+        let stack_angle = PI / 2.0 - (i as f32) * stack_step;
+        let xy = radius * stack_angle.cos();
+        let z = radius * stack_angle.sin();
+        for j in 0..=sectors {
+            let sector_angle = (j as f32) * sector_step;
+            let x = xy * sector_angle.cos();
+            let y = xy * sector_angle.sin();
+            positions.push([x, y, z]);
+        }
+    }
+
+    let mut line_indices: Vec<u32> = Vec::new();
+    // Ring edges (constant stack i): (i*(sectors+1)+j) -> (i*(sectors+1)+j+1)
+    for i in 0..=stacks {
+        for j in 0..sectors {
+            let a = i * (sectors + 1) + j;
+            let b = a + 1;
+            line_indices.extend_from_slice(&[a, b]);
+        }
+    }
+    // Meridian edges (constant sector j): (i*(sectors+1)+j) -> ((i+1)*(sectors+1)+j)
+    for j in 0..=sectors {
+        for i in 0..stacks {
+            let a = i * (sectors + 1) + j;
+            let b = a + (sectors + 1);
+            line_indices.extend_from_slice(&[a, b]);
+        }
+    }
+
+    Mesh::new(PrimitiveTopology::LineList, RenderAssetUsages::default())
+        .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, positions)
+        .with_inserted_indices(Indices::U32(line_indices))
 }

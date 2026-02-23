@@ -1,12 +1,13 @@
-use bevy::asset::RenderAssetUsages;
 use bevy::mesh::{
-    Indices, Mesh, PrimitiveTopology, SphereKind, SphereMeshBuilder, VertexAttributeValues,
+    Mesh, SphereKind, SphereMeshBuilder, VertexAttributeValues,
 };
-use bevy::pbr::MaterialPlugin;
 use bevy::prelude::*;
 use bevy::render::alpha::AlphaMode;
 
-use bevy_mat3_material::{Mat3MaterialPlugin, Mat3Material, Mat3Params, Mat3ParamsComponent, Mat3TransformExt};
+use bevy_mat3_material::{
+    uv_sphere_grid_line_mesh, Mat3Material, Mat3MaterialPlugin, Mat3Params, Mat3ParamsComponent,
+    Mat3TransformExt,
+};
 
 fn main() {
     App::new()
@@ -16,21 +17,9 @@ fn main() {
         .add_plugins(bevy_inspector_egui::quick::WorldInspectorPlugin::new())
         .add_plugins(bevy_editor_cam::DefaultEditorCamPlugins)
         .add_systems(Startup, setup)
-        .add_systems(Update, (draw_axes_gizmos, sync_mat3_params_from_component))
-        // .add_systems(Update, draw_normals)
+        .add_systems(Update, draw_axes_gizmos)
+        .add_systems(Update, draw_mesh_normals)
         .run();
-}
-
-/// Syncs [`Mat3ParamsComponent`] into the entity's [`Mat3Material`] so inspector edits apply.
-fn sync_mat3_params_from_component(
-    mut materials: ResMut<Assets<Mat3Material>>,
-    query: Query<(&Mat3ParamsComponent, &MeshMaterial3d<Mat3Material>)>,
-) {
-    for (comp, mesh_material) in &query {
-        if let Some(material) = materials.get_mut(&mesh_material.0) {
-            material.extension.params = comp.linear.into();
-        }
-    }
 }
 
 fn draw_axes_gizmos(mut gizmos: Gizmos) {
@@ -227,7 +216,8 @@ fn setup(
         });
 }
 
-fn draw_normals(
+#[allow(dead_code)]
+fn draw_mesh_normals(
     mut gizmos: Gizmos,
     query: Query<(&Mesh3d, &GlobalTransform)>,
     meshes: Res<Assets<Mesh>>,
@@ -262,53 +252,6 @@ fn draw_normals(
     }
 }
 
-/// Builds a line-list mesh for the UV sphere grid (quad-like edges). Uses the same vertex layout
-/// as Bevy's `SphereMeshBuilder::uv`. Pass `Mat4::IDENTITY` for a unit sphere grid, or a deform
-/// matrix to match a deformed ellipsoid.
-/// Builds a line-list mesh for the UV sphere grid in **unit-sphere** space (radius, no deform).
-/// Deformation is applied at runtime by using a material with a vertex shader (e.g. `Mat3Material`).
-fn uv_sphere_grid_line_mesh(radius: f32, sectors: u32, stacks: u32) -> Mesh {
-    use std::f32::consts::PI;
-
-    let sector_step = 2.0 * PI / sectors as f32;
-    let stack_step = PI / stacks as f32;
-    let mut positions: Vec<[f32; 3]> = Vec::with_capacity(((stacks + 1) * (sectors + 1)) as usize);
-
-    for i in 0..=stacks {
-        let stack_angle = PI / 2.0 - (i as f32) * stack_step;
-        let xy = radius * stack_angle.cos();
-        let z = radius * stack_angle.sin();
-        for j in 0..=sectors {
-            let sector_angle = (j as f32) * sector_step;
-            let x = xy * sector_angle.cos();
-            let y = xy * sector_angle.sin();
-            positions.push([x, y, z]);
-        }
-    }
-
-    let mut line_indices: Vec<u32> = Vec::new();
-    // Ring edges (constant stack i): (i*(sectors+1)+j) -> (i*(sectors+1)+j+1)
-    for i in 0..=stacks {
-        for j in 0..sectors {
-            let a = i * (sectors + 1) + j;
-            let b = a + 1;
-            line_indices.extend_from_slice(&[a, b]);
-        }
-    }
-    // Meridian edges (constant sector j): (i*(sectors+1)+j) -> ((i+1)*(sectors+1)+j)
-    for j in 0..=sectors {
-        for i in 0..stacks {
-            let a = i * (sectors + 1) + j;
-            let b = a + (sectors + 1);
-            line_indices.extend_from_slice(&[a, b]);
-        }
-    }
-
-    Mesh::new(PrimitiveTopology::LineList, RenderAssetUsages::default())
-        .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, positions)
-        .with_inserted_indices(Indices::U32(line_indices))
-}
-
 fn apply_matrix_to_mesh(mesh: &mut Mesh, m: Mat4) {
     // Positions
     if let Some(VertexAttributeValues::Float32x3(positions)) =
@@ -327,7 +270,8 @@ fn apply_matrix_to_mesh(mesh: &mut Mesh, m: Mat4) {
     let linear = Mat3::from_mat4(m);
     let normal_xform = linear.inverse().transpose();
 
-    if let Some(VertexAttributeValues::Float32x3(normals)) = mesh.attribute_mut(Mesh::ATTRIBUTE_NORMAL)
+    if let Some(VertexAttributeValues::Float32x3(normals)) =
+        mesh.attribute_mut(Mesh::ATTRIBUTE_NORMAL)
     {
         for n in normals.iter_mut() {
             let v = Vec3::from(*n);
