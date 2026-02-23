@@ -38,6 +38,10 @@ fn extract_vec3(val: &ComponentValue) -> Option<Vector3<f64, ArrayRepr>> {
     Some(Vector3::new(data[0], data[1], data[2]))
 }
 
+fn is_missing_component_value_error(err: &str) -> bool {
+    err.contains("no component value map found for component")
+}
+
 #[derive(Component)]
 pub struct Viewport {
     parent_entity: Entity,
@@ -381,6 +385,10 @@ pub fn set_viewport_pos(
                     }
                 }
                 Err(e) => {
+                    if is_missing_component_value_error(&e) {
+                        bevy::log::debug!("viewport pos waiting for first component value: {}", e);
+                        continue;
+                    }
                     bevy::log::error!("viewport pos formula execution error: {}", e);
                 }
             }
