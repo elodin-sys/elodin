@@ -1,8 +1,12 @@
-use std::{ops::Range, time::Duration};
+use std::{
+    collections::{BTreeMap, BTreeSet, HashMap},
+    ops::Range,
+    time::Duration,
+};
 
 use bevy::ecs::{
     entity::Entity,
-    system::{Query, Res, SystemParam, SystemState},
+    system::{Local, Query, Res, SystemParam, SystemState},
     world::World,
 };
 use bevy_egui::egui;
@@ -10,17 +14,18 @@ use impeller2_wkt::{ComponentPath, GraphType, QueryType};
 use smallvec::SmallVec;
 
 use egui::{Align, Color32};
-use impeller2_bevy::ComponentMetadataRegistry;
+use impeller2_bevy::{ComponentMetadataRegistry, ComponentSchemaRegistry};
 
 use crate::{
     EqlContext,
     ui::{
         button::{EButton, ECheckboxButton},
-        colors::{EColor, get_scheme},
-        inspector::{color_popup, eql_autocomplete, query},
+        colors::{EColor, get_color_by_index_all, get_scheme},
+        inspector::{color_popup, eql_autocomplete, inspector_text_field, query},
         label::{self, label_with_buttons},
         plot::GraphState,
         query_plot::QueryPlotData,
+        schematic::EqlExt,
         theme::{self, configure_input_with_border},
         utils::MarginSides,
         widgets::WidgetSystem,
@@ -29,12 +34,31 @@ use crate::{
 
 use super::InspectorIcons;
 
+#[derive(Default)]
+struct AddComponentState {
+    query: String,
+    feedback: Option<AddComponentFeedback>,
+}
+
+struct AddComponentFeedback {
+    message: String,
+    color: Color32,
+}
+
+struct AddComponentsResult {
+    added_lines: usize,
+    added_components: usize,
+    has_formula: bool,
+}
+
 #[derive(SystemParam)]
 pub struct InspectorGraph<'w, 's> {
     metadata_store: Res<'w, ComponentMetadataRegistry>,
+    schema_store: Res<'w, ComponentSchemaRegistry>,
     graph_states: Query<'w, 's, &'static mut GraphState>,
     query_plots: Query<'w, 's, &'static mut QueryPlotData>,
     eql_context: Res<'w, EqlContext>,
+    add_component_state: Local<'s, HashMap<Entity, AddComponentState>>,
 }
 
 impl WidgetSystem for InspectorGraph<'_, '_> {
@@ -53,9 +77,11 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
 
         let InspectorGraph {
             metadata_store,
+            schema_store,
             mut graph_states,
             mut query_plots,
             eql_context,
+            mut add_component_state,
         } = state_mut;
 
         let graph_label_margin = egui::Margin::same(0).top(10.0).bottom(14.0);
@@ -263,6 +289,15 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
             for path in remove_list.into_iter() {
                 graph_state.remove_component(&path);
             }
+
+            add_component_widget(
+                ui,
+                graph_state,
+                &metadata_store,
+                &schema_store,
+                &eql_context.0,
+                add_component_state.entry(graph_id).or_default(),
+            );
         }
     }
 }
@@ -339,4 +374,229 @@ fn component_value(
             color_popup(ui, color, color_id, &value_toggle);
         }
     });
+}
+
+fn add_component_widget(
+    ui: &mut egui::Ui,
+    graph_state: &mut GraphState,
+    metadata_store: &ComponentMetadataRegistry,
+    schema_store: &ComponentSchemaRegistry,
+    eql_context: &eql::Context,
+    add_state: &mut AddComponentState,
+) {
+    ui.separator();
+
+    egui::Frame::NONE
+        .inner_margin(egui::Margin::symmetric(0, 8))
+        .show(ui, |ui| {
+            ui.label(egui::RichText::new("ADD COMPONENT").color(get_scheme().text_secondary));
+            ui.add_space(8.0);
+
+            configure_input_with_border(ui.style_mut());
+            let query_res = ui.add(inspector_text_field(
+                &mut add_state.query,
+                "EQL component or list (e.g. drone.world_pos, drone.vel[2])",
+            ));
+            eql_autocomplete(ui, eql_context, &query_res, &mut add_state.query);
+
+            let enter_pressed =
+                query_res.has_focus() && ui.ctx().input(|i| i.key_pressed(egui::Key::Enter));
+
+            ui.add_space(8.0);
+            let add_clicked = ui
+                .add_sized([ui.available_width(), 32.0], EButton::new("Add Component"))
+                .clicked();
+
+            if add_clicked || enter_pressed {
+                let query = add_state.query.trim();
+                if query.is_empty() {
+                    add_state.feedback = Some(AddComponentFeedback {
+                        message: "Enter a component expression.".to_string(),
+                        color: get_scheme().error,
+                    });
+                } else {
+                    match add_components_from_eql(
+                        graph_state,
+                        metadata_store,
+                        schema_store,
+                        eql_context,
+                        query,
+                    ) {
+                        Ok(result) => {
+                            let mut message = if result.added_lines == 0 {
+                                "All referenced lines are already in this graph.".to_string()
+                            } else {
+                                format!(
+                                    "Added {} line{} from {} component{}.",
+                                    result.added_lines,
+                                    plural(result.added_lines),
+                                    result.added_components,
+                                    plural(result.added_components),
+                                )
+                            };
+
+                            if result.has_formula {
+                                message.push_str(
+                                    " Formula parts are expanded to source components in standard graphs.",
+                                );
+                            }
+
+                            add_state.feedback = Some(AddComponentFeedback {
+                                message,
+                                color: if result.added_lines == 0 {
+                                    get_scheme().text_tertiary
+                                } else {
+                                    get_scheme().success
+                                },
+                            });
+
+                            if result.added_lines > 0 {
+                                add_state.query.clear();
+                            }
+                        }
+                        Err(error) => {
+                            add_state.feedback = Some(AddComponentFeedback {
+                                message: error,
+                                color: get_scheme().error,
+                            });
+                        }
+                    }
+                }
+            }
+
+            if let Some(feedback) = &add_state.feedback {
+                ui.add_space(8.0);
+                ui.label(egui::RichText::new(&feedback.message).color(feedback.color));
+            }
+        });
+}
+
+fn add_components_from_eql(
+    graph_state: &mut GraphState,
+    metadata_store: &ComponentMetadataRegistry,
+    schema_store: &ComponentSchemaRegistry,
+    eql_context: &eql::Context,
+    query: &str,
+) -> Result<AddComponentsResult, String> {
+    let expr = eql_context
+        .parse_str(query)
+        .map_err(|err| format!("Invalid EQL expression: {err}"))?;
+
+    let has_formula = contains_formula_expression(&expr);
+
+    let mut requested_components = expr.to_graph_components();
+    requested_components.sort();
+    requested_components.dedup();
+
+    if requested_components.is_empty() {
+        return Err("The expression does not reference any plottable component.".to_string());
+    }
+
+    let mut requested_by_path: BTreeMap<ComponentPath, BTreeSet<usize>> = BTreeMap::new();
+    for (path, index) in requested_components {
+        requested_by_path.entry(path).or_default().insert(index);
+    }
+
+    let mut added_components = 0;
+    let mut added_lines = 0;
+    let mut next_color_index = count_enabled_lines(graph_state);
+
+    for (path, indexes) in requested_by_path {
+        let max_index = indexes.iter().copied().max().unwrap_or(0);
+        if !graph_state.components.contains_key(&path) {
+            let len = component_len(graph_state, metadata_store, schema_store, &path, max_index);
+            graph_state.insert_component(path.clone(), default_component_values(&path, len));
+            added_components += 1;
+        }
+
+        let Some(component_values) = graph_state.components.get_mut(&path) else {
+            continue;
+        };
+
+        if component_values.len() <= max_index {
+            let current_len = component_values.len();
+            component_values.extend(
+                (current_len..=max_index)
+                    .map(|i| (false, get_color_by_index_all(path.id.0 as usize + i))),
+            );
+        }
+
+        for index in indexes {
+            let Some((enabled, color)) = component_values.get_mut(index) else {
+                continue;
+            };
+            if !*enabled {
+                *enabled = true;
+                *color = get_color_by_index_all(next_color_index);
+                next_color_index += 1;
+                added_lines += 1;
+            }
+        }
+    }
+
+    Ok(AddComponentsResult {
+        added_lines,
+        added_components,
+        has_formula,
+    })
+}
+
+fn contains_formula_expression(expr: &eql::Expr) -> bool {
+    match expr {
+        eql::Expr::Tuple(exprs) => exprs.iter().any(contains_formula_expression),
+        eql::Expr::ArrayAccess(inner, _) => contains_formula_expression(inner),
+        eql::Expr::BinaryOp(..) | eql::Expr::Formula(..) => true,
+        _ => false,
+    }
+}
+
+fn count_enabled_lines(graph_state: &GraphState) -> usize {
+    graph_state
+        .components
+        .values()
+        .flat_map(|component| component.iter())
+        .filter(|(enabled, _)| *enabled)
+        .count()
+}
+
+fn component_len(
+    graph_state: &GraphState,
+    metadata_store: &ComponentMetadataRegistry,
+    schema_store: &ComponentSchemaRegistry,
+    path: &ComponentPath,
+    required_index: usize,
+) -> usize {
+    if let Some(values) = graph_state.components.get(path) {
+        return values.len().max(required_index + 1);
+    }
+
+    if let Some(schema) = schema_store.0.get(&path.id) {
+        let len = schema.shape().iter().copied().product::<usize>();
+        if len > 0 {
+            return len.max(required_index + 1);
+        }
+    }
+
+    if let Some(metadata) = metadata_store.get(&path.id) {
+        let named_len = metadata
+            .element_names()
+            .split(',')
+            .filter(|name| !name.trim().is_empty())
+            .count();
+        if named_len > 0 {
+            return named_len.max(required_index + 1);
+        }
+    }
+
+    required_index + 1
+}
+
+fn default_component_values(path: &ComponentPath, len: usize) -> Vec<(bool, Color32)> {
+    (0..len)
+        .map(|i| (false, get_color_by_index_all(path.id.0 as usize + i)))
+        .collect()
+}
+
+const fn plural(n: usize) -> &'static str {
+    if n == 1 { "" } else { "s" }
 }
