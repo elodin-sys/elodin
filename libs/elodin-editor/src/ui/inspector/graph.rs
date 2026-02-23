@@ -20,7 +20,7 @@ use impeller2_bevy::{ComponentMetadataRegistry, ComponentSchemaRegistry};
 use crate::{
     EqlContext,
     ui::{
-        button::{EButton, ECheckboxButton, EColorButton},
+        button::{EButton, EColorButton},
         colors::{EColor, get_color_by_index_all, get_scheme},
         inspector::{color_popup, eql_autocomplete, inspector_text_field, query, search},
         label::{self, label_with_buttons},
@@ -380,29 +380,37 @@ fn component_value(
         .filter(|s| !s.is_empty())
         .map(Option::Some)
         .chain(std::iter::repeat(None));
-    ui.horizontal_wrapped(|ui| {
+    let row_count = component_values.len();
+    ui.vertical(|ui| {
         for (index, ((enabled, color), element_name)) in
             component_values.iter_mut().zip(element_names).enumerate()
         {
-            ui.style_mut().override_font_id =
-                Some(egui::TextStyle::Monospace.resolve(ui.style_mut()));
             let label = element_name
                 .map(|name| name.to_string())
                 .unwrap_or_else(|| format!("[{index}]"));
             ui.horizontal(|ui| {
-                let value_toggle =
-                    ui.add(ECheckboxButton::new(label.to_string(), *enabled).on_color(*color));
-                if value_toggle.clicked() {
-                    *enabled = !*enabled;
-                }
+                ui.checkbox(enabled, "");
 
-                let color_id = ui.auto_id_with(("component_color", label.clone(), index));
+                let color_id = ui.auto_id_with(("component_color", label, index));
                 let color_btn = ui.add(EColorButton::new(*color));
                 if color_btn.clicked() {
                     egui::Popup::toggle_id(ui.ctx(), color_id);
                 }
                 color_popup(ui, color, color_id, &color_btn);
+                ui.add_space(4.0);
+
+                ui.style_mut().override_font_id =
+                    Some(egui::TextStyle::Monospace.resolve(ui.style_mut()));
+                ui.label(
+                    element_name
+                        .map(|name| name.to_string())
+                        .unwrap_or_else(|| format!("[{index}]")),
+                );
+                ui.style_mut().override_font_id = None;
             });
+            if index + 1 < row_count {
+                ui.add_space(2.0);
+            }
         }
     });
 }
