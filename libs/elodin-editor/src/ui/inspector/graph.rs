@@ -20,7 +20,7 @@ use impeller2_bevy::{ComponentMetadataRegistry, ComponentSchemaRegistry};
 use crate::{
     EqlContext,
     ui::{
-        button::{EButton, ECheckboxButton},
+        button::{EButton, ECheckboxButton, EColorButton},
         colors::{EColor, get_color_by_index_all, get_scheme},
         inspector::{color_popup, eql_autocomplete, inspector_text_field, query, search},
         label::{self, label_with_buttons},
@@ -265,32 +265,59 @@ impl WidgetSystem for InspectorGraph<'_, '_> {
                     }
                 });
         } else {
-            let mut remove_list: SmallVec<[ComponentPath; 1]> = SmallVec::new();
-            for (path, component) in graph_state.components.iter_mut() {
-                let Some(metadata) = metadata_store.get(&path.id) else {
-                    continue;
-                };
+            egui::Frame::NONE
+                .inner_margin(egui::Margin::symmetric(0, 8))
+                .show(ui, |ui| {
+                    ui.label(
+                        egui::RichText::new("EXISTING COMPONENTS")
+                            .color(get_scheme().text_secondary),
+                    );
+                    ui.add_space(8.0);
+                    if graph_state.components.is_empty() {
+                        ui.label(
+                            egui::RichText::new("No component selected yet.")
+                                .color(get_scheme().text_tertiary),
+                        );
+                    } else {
+                        let mut remove_list: SmallVec<[ComponentPath; 1]> = SmallVec::new();
+                        let mut first_component = true;
+                        for (path, component) in graph_state.components.iter_mut() {
+                            let Some(metadata) = metadata_store.get(&path.id) else {
+                                continue;
+                            };
+                            if !first_component {
+                                ui.add_space(8.0);
+                                ui.separator();
+                                ui.add_space(8.0);
+                            }
+                            first_component = false;
 
-                let component_label = metadata.name.clone();
-                let element_names = metadata.element_names();
+                            let component_label = metadata.name.clone();
+                            let element_names = metadata.element_names();
 
-                let component_label_margin = egui::Margin::symmetric(0, 18);
-                let [subtract_clicked] = label_with_buttons(
-                    ui,
-                    [icons.subtract],
-                    component_label,
-                    get_scheme().text_tertiary,
-                    component_label_margin,
-                );
-                if subtract_clicked {
-                    remove_list.push(path.clone());
-                }
+                            let component_label_margin = egui::Margin::symmetric(0, 8);
+                            let [subtract_clicked] = label_with_buttons(
+                                ui,
+                                [icons.subtract],
+                                component_label,
+                                get_scheme().text_tertiary,
+                                component_label_margin,
+                            );
+                            if subtract_clicked {
+                                remove_list.push(path.clone());
+                            }
 
-                component_value(ui, component, element_names);
-            }
-            for path in remove_list.into_iter() {
-                graph_state.remove_component(&path);
-            }
+                            component_value(ui, component, element_names);
+                        }
+                        for path in remove_list.into_iter() {
+                            graph_state.remove_component(&path);
+                        }
+                    }
+                });
+
+            ui.add_space(8.0);
+            ui.separator();
+            ui.add_space(8.0);
 
             add_component_widget(
                 ui,
@@ -362,19 +389,20 @@ fn component_value(
             let label = element_name
                 .map(|name| name.to_string())
                 .unwrap_or_else(|| format!("[{index}]"));
-            let value_toggle =
-                ui.add(ECheckboxButton::new(label.to_string(), *enabled).on_color(*color));
+            ui.horizontal(|ui| {
+                let value_toggle =
+                    ui.add(ECheckboxButton::new(label.to_string(), *enabled).on_color(*color));
+                if value_toggle.clicked() {
+                    *enabled = !*enabled;
+                }
 
-            if value_toggle.clicked() {
-                *enabled = !*enabled;
-            }
-            let color_id = ui.auto_id_with("color");
-
-            if value_toggle.secondary_clicked() {
-                egui::Popup::toggle_id(ui.ctx(), color_id);
-            }
-
-            color_popup(ui, color, color_id, &value_toggle);
+                let color_id = ui.auto_id_with(("component_color", label.clone(), index));
+                let color_btn = ui.add(EColorButton::new(*color));
+                if color_btn.clicked() {
+                    egui::Popup::toggle_id(ui.ctx(), color_id);
+                }
+                color_popup(ui, color, color_id, &color_btn);
+            });
         }
     });
 }
@@ -388,8 +416,6 @@ fn add_component_widget(
     eql_context: &eql::Context,
     add_state: &mut AddComponentState,
 ) {
-    ui.separator();
-
     let mut component_names = Vec::new();
     collect_component_names(&eql_context.component_parts, &mut component_names);
     component_names.sort();
@@ -413,7 +439,7 @@ fn add_component_widget(
         score_b.cmp(score_a).then_with(|| name_a.cmp(name_b))
     });
 
-    const MAX_SEARCH_RESULTS: usize = 12;
+    const MAX_SEARCH_RESULTS: usize = 3;
 
     egui::Frame::NONE
         .inner_margin(egui::Margin::symmetric(0, 8))
@@ -431,38 +457,33 @@ fn add_component_widget(
                 );
             } else {
                 let shown_results = matched_components.len().min(MAX_SEARCH_RESULTS);
-                egui::ScrollArea::vertical()
-                    .auto_shrink([false, false])
-                    .max_height(220.0)
-                    .show(ui, |ui| {
-                        for (index, (_, component_name)) in matched_components
-                            .iter()
-                            .take(MAX_SEARCH_RESULTS)
-                            .enumerate()
-                        {
-                            ui.horizontal(|ui| {
-                                ui.label((*component_name).to_string());
-                                ui.with_layout(egui::Layout::right_to_left(Align::Min), |ui| {
-                                    if ui.add(EButton::highlight("ADD").width(88.0)).clicked() {
-                                        apply_add_components(
-                                            add_state,
-                                            graph_state,
-                                            metadata_store,
-                                            schema_store,
-                                            eql_context,
-                                            component_name,
-                                            false,
-                                        );
-                                    }
-                                });
-                            });
-                            if index + 1 < shown_results {
-                                ui.add_space(4.0);
-                                ui.separator();
-                                ui.add_space(4.0);
+                for (index, (_, component_name)) in matched_components
+                    .iter()
+                    .take(MAX_SEARCH_RESULTS)
+                    .enumerate()
+                {
+                    ui.horizontal(|ui| {
+                        ui.label((*component_name).to_string());
+                        ui.with_layout(egui::Layout::right_to_left(Align::Min), |ui| {
+                            if ui.add(EButton::highlight("ADD").width(88.0)).clicked() {
+                                apply_add_components(
+                                    add_state,
+                                    graph_state,
+                                    metadata_store,
+                                    schema_store,
+                                    eql_context,
+                                    component_name,
+                                    false,
+                                );
                             }
-                        }
+                        });
                     });
+                    if index + 1 < shown_results {
+                        ui.add_space(4.0);
+                        ui.separator();
+                        ui.add_space(4.0);
+                    }
+                }
 
                 if matched_components.len() > MAX_SEARCH_RESULTS {
                     ui.add_space(6.0);
