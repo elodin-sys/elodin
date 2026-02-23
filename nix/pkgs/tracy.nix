@@ -10,8 +10,7 @@
   pugixml,
   curl,
   xorg,
-}:
-let
+}: let
   tracySrc = fetchFromGitHub {
     owner = "wolfpld";
     repo = "tracy";
@@ -102,31 +101,34 @@ let
     hash = "sha256-18PTj4hvBw8RTgzaFGeaDbBfkxmotxSoGtprIjcEuVg=";
   };
 
-  imguiPatched = runCommand "imgui-tracy-0.13.1-patched" {
-    nativeBuildInputs = [patch];
-  } ''
-    cp -R ${imguiSrc} $out
-    chmod -R u+w $out
-    patch -d $out -p1 < ${tracySrc}/cmake/imgui-emscripten.patch
-    patch -d $out -p1 < ${tracySrc}/cmake/imgui-loader.patch
-  '';
+  imguiPatched =
+    runCommand "imgui-tracy-0.13.1-patched" {
+      nativeBuildInputs = [patch];
+    } ''
+      cp -R ${imguiSrc} $out
+      chmod -R u+w $out
+      patch -d $out -p1 < ${tracySrc}/cmake/imgui-emscripten.patch
+      patch -d $out -p1 < ${tracySrc}/cmake/imgui-loader.patch
+    '';
 
-  ppqsortPatched = runCommand "ppqsort-tracy-0.13.1-patched" {
-    nativeBuildInputs = [patch gnused];
-  } ''
-    cp -R ${ppqsortSrc} $out
-    chmod -R u+w $out
-    sed -i 's#https://github.com/cpm-cmake/CPM.cmake/releases/download/v''${CPM_DOWNLOAD_VERSION}/CPM.cmake#file://${cpmSrc}#' $out/cmake/CPM.cmake
-    patch -d $out -p1 < ${tracySrc}/cmake/ppqsort-nodebug.patch
-  '';
+  ppqsortPatched =
+    runCommand "ppqsort-tracy-0.13.1-patched" {
+      nativeBuildInputs = [patch gnused];
+    } ''
+      cp -R ${ppqsortSrc} $out
+      chmod -R u+w $out
+      sed -i 's#https://github.com/cpm-cmake/CPM.cmake/releases/download/v''${CPM_DOWNLOAD_VERSION}/CPM.cmake#file://${cpmSrc}#' $out/cmake/CPM.cmake
+      patch -d $out -p1 < ${tracySrc}/cmake/ppqsort-nodebug.patch
+    '';
 
-  tidyPatched = runCommand "tidy-tracy-0.13.1-patched" {
-    nativeBuildInputs = [patch];
-  } ''
-    cp -R ${tidySrc} $out
-    chmod -R u+w $out
-    patch -d $out -p1 < ${tracySrc}/cmake/tidy-cmake.patch
-  '';
+  tidyPatched =
+    runCommand "tidy-tracy-0.13.1-patched" {
+      nativeBuildInputs = [patch];
+    } ''
+      cp -R ${tidySrc} $out
+      chmod -R u+w $out
+      patch -d $out -p1 < ${tracySrc}/cmake/tidy-cmake.patch
+    '';
 in
   (tracy.override {withWayland = false;}).overrideAttrs (oldAttrs: {
     version = "0.13.1";
