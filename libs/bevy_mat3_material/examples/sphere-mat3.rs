@@ -5,7 +5,7 @@ use bevy::prelude::*;
 use bevy::render::alpha::AlphaMode;
 
 use bevy_mat3_material::{
-    uv_sphere_grid_line_mesh, Mat3Material, Mat3MaterialPlugin, Mat3Params, Mat3ParamsComponent,
+    uv_sphere_grid_line_mesh, Mat3Material, Mat3MaterialPlugin, Mat3Uniforms, Mat3Params,
     Mat3TransformExt,
 };
 
@@ -41,7 +41,7 @@ fn setup(
 
     let sectors = 20;
     let stacks = 10;
-    let transparent = false;
+    let transparent = true;
 
     // Camera
     commands.spawn((
@@ -85,11 +85,10 @@ fn setup(
         0.0,   0.0,   c,
     ]);
 
-    let deform = Mat4::from_mat3(linear2);
     // New sphere with matrix baked into the mesh (for normals / CPU-deformed geometry).
     let mut deformed_sphere_mesh =
         SphereMeshBuilder::new(1.0, SphereKind::Uv { sectors, stacks }).build();
-    apply_matrix_to_mesh(&mut deformed_sphere_mesh, deform);
+    apply_matrix_to_mesh(&mut deformed_sphere_mesh, Mat4::from_mat3(linear2));
     let deformed_sphere = meshes.add(deformed_sphere_mesh);
 
     let params = linear.into();
@@ -112,7 +111,7 @@ fn setup(
         )
     };
 
-    // Material for "deformed by shader" — unique handle so Mat3ParamsComponent can drive it.
+    // Material for "deformed by shader" — unique handle so Mat3Params can drive it.
     let material = materials.add(Mat3Material {
         base: StandardMaterial {
             base_color: base_color_deformed,
@@ -158,17 +157,17 @@ fn setup(
             ..default()
         },
         extension: Mat3TransformExt {
-            params: Mat3Params::default(),
+            params: Mat3Uniforms::default(),
         },
     });
 
     let shadow_receiver = true;
-    // Deformed by material (shader) — params editable via Mat3ParamsComponent in the inspector.
+    // Deformed by material (shader) — params editable via Mat3Params in the inspector.
     commands
         .spawn((
             Mesh3d(sphere.clone()),
             MeshMaterial3d(material.clone()),
-            Mat3ParamsComponent { linear },
+            Mat3Params { linear },
             Transform::from_xyz(-1.2, 0.0, 0.0),
             Name::new("deformed by shader"),
         ))
@@ -177,6 +176,8 @@ fn setup(
             commands.spawn((
                 Mesh3d(grid_mesh.clone()),
                 MeshMaterial3d(material),
+                bevy::light::NotShadowReceiver,
+                bevy::light::NotShadowCaster,
                 Name::new("grid (deformed by shader)"),
             ));
         });
@@ -194,6 +195,8 @@ fn setup(
             commands.spawn((
                 Mesh3d(grid_mesh.clone()),
                 MeshMaterial3d(grid_material_deformed2.clone()),
+                bevy::light::NotShadowReceiver,
+                bevy::light::NotShadowCaster,
                 Name::new("grid (deformed mesh)"),
             ));
         });
@@ -211,6 +214,8 @@ fn setup(
             commands.spawn((
                 Mesh3d(grid_mesh),
                 MeshMaterial3d(grid_material_unit),
+                bevy::light::NotShadowReceiver,
+                bevy::light::NotShadowCaster,
                 Name::new("grid (control)"),
             ));
         });
@@ -252,6 +257,7 @@ fn draw_mesh_normals(
     }
 }
 
+/// Transform a mesh's positions and normals.
 fn apply_matrix_to_mesh(mesh: &mut Mesh, m: Mat4) {
     // Positions
     if let Some(VertexAttributeValues::Float32x3(positions)) =
@@ -268,14 +274,14 @@ fn apply_matrix_to_mesh(mesh: &mut Mesh, m: Mat4) {
     // Normals (important if your matrix is not pure rotation/scale)
     // For a general linear transform, normals should use inverse-transpose of the 3x3 part.
     let linear = Mat3::from_mat4(m);
-    let normal_xform = linear.inverse().transpose();
+    let normal_transform = linear.inverse().transpose();
 
     if let Some(VertexAttributeValues::Float32x3(normals)) =
         mesh.attribute_mut(Mesh::ATTRIBUTE_NORMAL)
     {
         for n in normals.iter_mut() {
             let v = Vec3::from(*n);
-            *n = normal_xform.mul_vec3(v).normalize().to_array();
+            *n = normal_transform.mul_vec3(v).normalize().to_array();
         }
     }
 

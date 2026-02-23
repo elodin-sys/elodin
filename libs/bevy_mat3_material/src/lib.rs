@@ -1,3 +1,6 @@
+// #![doc(html_root_url = "https://docs.rs/bevy_mat3_material/0.1.0")]
+#![doc = include_str!("../README.md")]
+#![forbid(missing_docs)]
 use bevy::{
     asset::{embedded_asset, RenderAssetUsages},
     mesh::{
@@ -10,6 +13,7 @@ use bevy::{
     shader::ShaderRef,
 };
 
+/// Plugin for `Mat3Material`.
 pub struct Mat3MaterialPlugin;
 
 impl Plugin for Mat3MaterialPlugin {
@@ -18,16 +22,16 @@ impl Plugin for Mat3MaterialPlugin {
         embedded_asset!(app, "mat3_transform.wgsl");
         app.add_plugins(MaterialPlugin::<Mat3Material>::default())
             .add_systems(Update, sync_mat3_params_from_component)
-            .register_type::<Mat3ParamsComponent>();
+            .register_type::<Mat3Params>();
     }
 }
 
-/// Syncs [`Mat3ParamsComponent`] into the entity's [`Mat3Material`] so inspector edits apply.
+/// Syncs [`Mat3Params`] into the entity's [`Mat3Material`] so inspector edits apply.
 fn sync_mat3_params_from_component(
     mut materials: ResMut<Assets<Mat3Material>>,
     query: Query<
-        (&Mat3ParamsComponent, &MeshMaterial3d<Mat3Material>),
-        Changed<Mat3ParamsComponent>,
+        (&Mat3Params, &MeshMaterial3d<Mat3Material>),
+        Changed<Mat3Params>,
     >,
 ) {
     for (comp, mesh_material) in &query {
@@ -39,18 +43,21 @@ fn sync_mat3_params_from_component(
 
 /// GPU-side parameters for a 3×3 linear transform.
 ///
-/// - `linear`: linear transform in a Mat3.
-/// - `normal_matrix`: inverse-transpose of the top-left 3x3, for correct normal transformation under shear.
+/// - `linear`: linear transform of points in the mesh.
+/// - `normal_matrix`: inverse-transpose of the `linear` Mat3, to correctly
+///   transform mesh normals.
 #[derive(ShaderType, Copy, Clone, Debug, Reflect)]
-pub struct Mat3Params {
-    pub linear: Mat3,
-    pub normal_matrix: Mat3,
-    // Mat3 is 48 bytes in WGSL layout rules, so padding is often required if you extend further.
+pub struct Mat3Uniforms {
+    /// The linear transformation
+    pub linear: Mat3, // 48 bytes, 3 * 16 bytes
+    /// Its inverse transpose used to transform normals
+    pub normal_matrix: Mat3, // 48 bytes, 3 * 16 bytes
+    // WebGL2/WASM structs must be 16 byte aligned.
     // #[cfg(target_arch = "wasm32")]
     // _webgl2_padding: Vec3,
 }
 
-impl Default for Mat3Params {
+impl Default for Mat3Uniforms {
     fn default() -> Self {
         Self {
             linear: Mat3::IDENTITY,
@@ -60,10 +67,10 @@ impl Default for Mat3Params {
 }
 
 /// This computes the correct normal matrix (`inverse().transpose()`).
-impl From<Mat3> for Mat3Params {
-    fn from(linear: Mat3) -> Mat3Params {
+impl From<Mat3> for Mat3Uniforms {
+    fn from(linear: Mat3) -> Mat3Uniforms {
         let normal_matrix = linear.inverse().transpose();
-        Mat3Params {
+        Mat3Uniforms {
             linear,
             normal_matrix,
         }
@@ -75,8 +82,9 @@ impl From<Mat3> for Mat3Params {
 /// We use binding slot 100 to avoid colliding with StandardMaterial's bindings, following Bevy's example convention.
 #[derive(Asset, AsBindGroup, TypePath, Debug, Clone, Default)]
 pub struct Mat3TransformExt {
+    /// The linear transformations
     #[uniform(100)]
-    pub params: Mat3Params,
+    pub params: Mat3Uniforms,
 }
 
 impl MaterialExtension for Mat3TransformExt {
@@ -100,7 +108,7 @@ pub type Mat3Material = bevy::pbr::ExtendedMaterial<StandardMaterial, Mat3Transf
 /// that uses a material handle unique to that entity (or shared only with its grid child).
 #[derive(Default, Component, Debug, Reflect)]
 #[reflect(Component)]
-pub struct Mat3ParamsComponent {
+pub struct Mat3Params {
     /// The 3×3 linear transform applied in the vertex shader (lower-triangular convention).
     /// The normal matrix is computed as `linear.inverse().transpose()` when syncing to the material.
     pub linear: Mat3,
