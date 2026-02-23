@@ -142,12 +142,18 @@ impl SchematicParam<'_, '_> {
                             .ok()
                             .and_then(|projection| match projection {
                                 Projection::Perspective(perspective) => {
-                                    let near = if (perspective.near - tiles::DEFAULT_VIEWPORT_NEAR).abs() > f32::EPSILON {
+                                    let near = if (perspective.near - tiles::DEFAULT_VIEWPORT_NEAR)
+                                        .abs()
+                                        > f32::EPSILON
+                                    {
                                         Some(perspective.near)
                                     } else {
                                         None
                                     };
-                                    let far = if (perspective.far - tiles::DEFAULT_VIEWPORT_FAR).abs() > f32::EPSILON {
+                                    let far = if (perspective.far - tiles::DEFAULT_VIEWPORT_FAR)
+                                        .abs()
+                                        > f32::EPSILON
+                                    {
                                         Some(perspective.far)
                                     } else {
                                         None
