@@ -1416,6 +1416,7 @@ impl Component {
 
 pub(crate) struct DBSink<'a> {
     pub(crate) components: &'a HashMap<ComponentId, Component>,
+    pub(crate) component_metadata: &'a HashMap<ComponentId, ComponentMetadata>,
     pub(crate) snapshot_barrier: &'a SnapshotBarrier,
     pub(crate) last_updated: &'a AtomicCell<Timestamp>,
     pub(crate) earliest_timestamp: &'a AtomicCell<Timestamp>,
@@ -1501,9 +1502,16 @@ impl Decomponentize for DBSink<'_> {
             debug!("sunk new time series for component {}", component_id);
             self.sunk_new_time_series = true;
         }
-        self.last_updated.update_max(timestamp);
-        if timestamp.0 > 0 {
-            self.earliest_timestamp.update_min(timestamp);
+        let is_ts_source = self
+            .component_metadata
+            .get(&component_id)
+            .map(|m| m.is_timestamp_source())
+            .unwrap_or(false);
+        if !is_ts_source {
+            self.last_updated.update_max(timestamp);
+            if timestamp.0 > 0 {
+                self.earliest_timestamp.update_min(timestamp);
+            }
         }
         Ok(())
     }
@@ -1931,6 +1939,7 @@ async fn handle_packet<A: AsyncWrite + 'static>(
             if let Err(err) = db.with_state(|state| {
                 let mut sink = DBSink {
                     components: &state.components,
+                    component_metadata: &state.component_metadata,
                     snapshot_barrier: &db.snapshot_barrier,
                     last_updated: &db.last_updated,
                     earliest_timestamp: &db.earliest_timestamp,
