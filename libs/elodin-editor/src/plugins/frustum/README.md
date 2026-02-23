@@ -23,7 +23,7 @@ Viewport camera frustum overlay rendering.
 ## KDL usage
 ```kdl
 tabs {
-    viewport name=ViewportA pos="(0,0,0,0, 8,2,4)" look_at="(0,0,0,0, 0,0,0)" create_frustum=#true frustums_color="yalk" frustums_thickness=0.008 near=0.05 far=300.0 aspect=1.7778 active=#true
+    viewport name=ViewportA pos="(0,0,0,0, 8,2,4)" look_at="(0,0,0,0, 0,0,0)" create_frustum=#true frustums_color="yellow" frustums_thickness=0.008 near=0.05 far=300.0 aspect=1.7778 active=#true
     viewport name=ViewportB pos="(0,0,0,0, 2,2,2)" look_at="(0,0,0,0, 0,0,0)" show_frustums=#true active=#true
 }
 ```

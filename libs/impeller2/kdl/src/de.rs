@@ -1924,6 +1924,30 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_viewport_rejects_partial_color_tuple() {
+        let kdl = r#"viewport frustums_color="(255,)""#;
+        let err = parse_schematic(kdl).unwrap_err();
+        match err {
+            KdlSchematicError::InvalidValue { property, .. } => {
+                assert_eq!(property, "frustums_color");
+            }
+            other => panic!("Expected invalid value error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_parse_viewport_rejects_two_component_color_tuple() {
+        let kdl = r#"viewport frustums_color="(255,128)""#;
+        let err = parse_schematic(kdl).unwrap_err();
+        match err {
+            KdlSchematicError::InvalidValue { property, .. } => {
+                assert_eq!(property, "frustums_color");
+            }
+            other => panic!("Expected invalid value error, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn test_parse_graph() {
         let kdl = r#"graph "a.world_pos" name="Position Graph" type="line""#;
         let schematic = parse_schematic(kdl).unwrap();

@@ -2,7 +2,7 @@ use crate::{MainCamera, ui::tiles::ViewportConfig};
 use bevy::camera::visibility::{NoFrustumCulling, RenderLayers};
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
-use bevy::transform::TransformSystem;
+use bevy::transform::TransformSystems;
 use std::collections::{HashMap, HashSet};
 
 /// Squared distance below which two cameras are considered overlapping.
@@ -26,7 +26,7 @@ impl Plugin for FrustumPlugin {
             .add_systems(Startup, frustum_mesh_setup)
             .add_systems(
                 PostUpdate,
-                draw_viewport_frustums.after(TransformSystem::TransformPropagate),
+                draw_viewport_frustums.after(TransformSystems::Propagate),
             );
     }
 }
