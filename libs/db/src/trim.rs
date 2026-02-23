@@ -435,29 +435,17 @@ fn trim_component(
         return Ok((i64::MAX, i64::MIN));
     }
 
-    let start_idx = match timestamps.binary_search(&keep_start) {
-        Ok(i) => i,
-        Err(i) => i,
-    };
-    let end_idx = match timestamps.binary_search(&keep_end) {
-        Ok(i) => i,
-        Err(0) => {
-            write_empty_index(&dst_dir.join("index"), src_header.start_ts)?;
-            write_empty_data(&dst_dir.join("data"), element_size)?;
-            sync_dir(dst_dir)?;
-            return Ok((i64::MAX, i64::MIN));
-        }
-        Err(i) => i - 1,
-    };
+    let start_idx = timestamps.partition_point(|&ts| ts < keep_start);
+    let end_idx = timestamps.partition_point(|&ts| ts <= keep_end);
 
-    if start_idx > end_idx || start_idx >= timestamps.len() {
+    if start_idx >= end_idx {
         write_empty_index(&dst_dir.join("index"), src_header.start_ts)?;
         write_empty_data(&dst_dir.join("data"), element_size)?;
         sync_dir(dst_dir)?;
         return Ok((i64::MAX, i64::MIN));
     }
 
-    let kept_timestamps = &timestamps[start_idx..=end_idx];
+    let kept_timestamps = &timestamps[start_idx..end_idx];
     let min_kept = kept_timestamps[0];
     let max_kept = *kept_timestamps.last().unwrap();
 
@@ -469,7 +457,7 @@ fn trim_component(
         &dst_dir.join("data"),
         element_size,
         start_idx,
-        end_idx,
+        end_idx - 1,
     )?;
 
     sync_dir(dst_dir)?;
@@ -515,23 +503,10 @@ fn trim_msg_log(
         return Ok((i64::MAX, i64::MIN));
     }
 
-    let start_idx = match msg_timestamps.binary_search(&keep_start) {
-        Ok(i) => i,
-        Err(i) => i,
-    };
-    let end_idx = match msg_timestamps.binary_search(&keep_end) {
-        Ok(i) => i,
-        Err(0) => {
-            write_empty_appendlog(&dst_dir.join("timestamps"))?;
-            write_empty_appendlog(&dst_dir.join("offsets"))?;
-            write_empty_appendlog(&dst_dir.join("data_log"))?;
-            sync_dir(dst_dir)?;
-            return Ok((i64::MAX, i64::MIN));
-        }
-        Err(i) => i - 1,
-    };
+    let start_idx = msg_timestamps.partition_point(|&ts| ts < keep_start);
+    let end_idx = msg_timestamps.partition_point(|&ts| ts <= keep_end);
 
-    if start_idx > end_idx || start_idx >= msg_timestamps.len() {
+    if start_idx >= end_idx {
         write_empty_appendlog(&dst_dir.join("timestamps"))?;
         write_empty_appendlog(&dst_dir.join("offsets"))?;
         write_empty_appendlog(&dst_dir.join("data_log"))?;
@@ -540,7 +515,7 @@ fn trim_msg_log(
     }
 
     let min_kept = msg_timestamps[start_idx];
-    let max_kept = msg_timestamps[end_idx];
+    let max_kept = msg_timestamps[end_idx - 1];
 
     let src_offsets_data = read_appendlog_data(&offsets_src, MSG_HEADER_SIZE)?;
     let src_data_log_data = read_appendlog_data(&data_log_src, MSG_HEADER_SIZE)?;
@@ -552,12 +527,10 @@ fn trim_msg_log(
     let mut new_offsets_data: Vec<u8> = Vec::new();
     let mut new_data_log: Vec<u8> = Vec::new();
 
-    for (src_idx, &ts) in msg_timestamps[start_idx..=end_idx].iter().enumerate() {
-        new_timestamps_data.extend_from_slice(&ts.to_le_bytes());
-
+    for (src_idx, &ts) in msg_timestamps[start_idx..end_idx].iter().enumerate() {
         let abs_idx = start_idx + src_idx;
         if abs_idx >= num_bufs {
-            continue;
+            break;
         }
         let buf_offset = abs_idx * umbra_buf_size;
         let buf_bytes = &src_offsets_data[buf_offset..buf_offset + umbra_buf_size];
@@ -565,17 +538,20 @@ fn trim_msg_log(
 
         let len = umbra.len as usize;
         if len <= 12 {
+            new_timestamps_data.extend_from_slice(&ts.to_le_bytes());
             new_offsets_data.extend_from_slice(buf_bytes);
         } else {
             let old_offset = unsafe { umbra.data.offset.offset } as usize;
-            if old_offset + len <= src_data_log_data.len() {
-                let payload = &src_data_log_data[old_offset..old_offset + len];
-                let prefix: [u8; 4] = payload[..4].try_into().expect("trivial cast");
-                let new_offset = new_data_log.len() as u32;
-                new_data_log.extend_from_slice(payload);
-                let new_buf = UmbraBuf::with_offset(len as u32, prefix, new_offset);
-                new_offsets_data.extend_from_slice(zerocopy::IntoBytes::as_bytes(&new_buf));
+            if old_offset + len > src_data_log_data.len() {
+                break;
             }
+            let payload = &src_data_log_data[old_offset..old_offset + len];
+            let prefix: [u8; 4] = payload[..4].try_into().expect("trivial cast");
+            let new_offset = new_data_log.len() as u32;
+            new_data_log.extend_from_slice(payload);
+            let new_buf = UmbraBuf::with_offset(len as u32, prefix, new_offset);
+            new_timestamps_data.extend_from_slice(&ts.to_le_bytes());
+            new_offsets_data.extend_from_slice(zerocopy::IntoBytes::as_bytes(&new_buf));
         }
     }
 
