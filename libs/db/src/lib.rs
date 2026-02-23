@@ -71,6 +71,7 @@ mod msg_log;
 pub mod prune;
 pub mod time_align;
 pub(crate) mod time_series;
+pub mod trim;
 pub mod truncate;
 pub mod utils;
 mod vtable_stream;
