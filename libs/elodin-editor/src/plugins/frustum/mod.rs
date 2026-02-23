@@ -2,7 +2,8 @@ use crate::{MainCamera, ui::tiles::ViewportConfig};
 use bevy::camera::visibility::{NoFrustumCulling, RenderLayers};
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
-use std::collections::HashMap;
+use bevy::transform::TransformSystem;
+use std::collections::{HashMap, HashSet};
 
 /// Squared distance below which two cameras are considered overlapping.
 /// Frustum pairs are skipped when cameras are this close, which prevents the
@@ -23,7 +24,10 @@ impl Plugin for FrustumPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<FrustumMaterialCache>()
             .add_systems(Startup, frustum_mesh_setup)
-            .add_systems(PreUpdate, draw_viewport_frustums);
+            .add_systems(
+                PostUpdate,
+                draw_viewport_frustums.after(TransformSystem::TransformPropagate),
+            );
     }
 }
 
@@ -237,7 +241,7 @@ fn draw_viewport_frustums(mut params: FrustumDrawParams<'_, '_>, mut commands: C
         return;
     }
 
-    let mut desired_roots: HashMap<CameraFrustumRootVisual, ()> = HashMap::new();
+    let mut desired_roots: HashSet<CameraFrustumRootVisual> = HashSet::new();
     let mut desired_segments: HashMap<
         CameraFrustumLineVisual,
         (
@@ -267,7 +271,7 @@ fn draw_viewport_frustums(mut params: FrustumDrawParams<'_, '_>, mut commands: C
                 source: source_camera,
                 target: *target_camera,
             };
-            desired_roots.insert(root_key, ());
+            desired_roots.insert(root_key);
 
             for (segment_idx, (start_local, end_local)) in segments.iter().enumerate() {
                 let Some(local_transform) =
@@ -298,7 +302,7 @@ fn draw_viewport_frustums(mut params: FrustumDrawParams<'_, '_>, mut commands: C
     }
 
     let mut root_entities: HashMap<CameraFrustumRootVisual, Entity> = HashMap::new();
-    for key in desired_roots.keys() {
+    for key in &desired_roots {
         if let Some(entity) = existing_roots_by_key.remove(key) {
             commands.entity(entity).insert(ChildOf(key.source));
             root_entities.insert(*key, entity);
