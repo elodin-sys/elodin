@@ -262,6 +262,7 @@ impl Plugin for EditorPlugin {
             .insert_resource(ClearColor(get_scheme().bg_secondary.into_bevy()))
             .insert_resource(TimeRangeBehavior::default())
             .insert_resource(SelectedTimeRange(Timestamp(i64::MIN)..Timestamp(i64::MAX)))
+            .insert_resource(FullTimeRange(Timestamp(0)..Timestamp(1_000_000)))
             .init_resource::<EqlContext>()
             .init_resource::<SyncedObject3d>()
             .init_resource::<ui::data_overview::ComponentTimeRanges>()
@@ -1009,12 +1010,20 @@ impl Default for SelectedTimeRange {
     }
 }
 
+#[derive(Resource, Clone)]
+pub struct FullTimeRange(pub Range<Timestamp>);
+
 pub fn set_selected_range(
     mut selected_range: ResMut<SelectedTimeRange>,
+    mut full_range: ResMut<FullTimeRange>,
     earliest: Res<EarliestTimestamp>,
     latest: Res<LastUpdated>,
     behavior: Res<TimeRangeBehavior>,
 ) {
+    if earliest.0 < latest.0 {
+        full_range.0 = earliest.0..latest.0;
+    }
+
     match behavior.calculate_selected_range(earliest.0, latest.0) {
         Ok(range) => {
             selected_range.0 = range;
