@@ -441,7 +441,13 @@ fn trim_component(
     };
     let end_idx = match timestamps.binary_search(&keep_end) {
         Ok(i) => i,
-        Err(i) => i.saturating_sub(1),
+        Err(0) => {
+            write_empty_index(&dst_dir.join("index"), src_header.start_ts)?;
+            write_empty_data(&dst_dir.join("data"), element_size)?;
+            sync_dir(dst_dir)?;
+            return Ok((i64::MAX, i64::MIN));
+        }
+        Err(i) => i - 1,
     };
 
     if start_idx > end_idx || start_idx >= timestamps.len() {
@@ -515,7 +521,14 @@ fn trim_msg_log(
     };
     let end_idx = match msg_timestamps.binary_search(&keep_end) {
         Ok(i) => i,
-        Err(i) => i.saturating_sub(1),
+        Err(0) => {
+            write_empty_appendlog(&dst_dir.join("timestamps"))?;
+            write_empty_appendlog(&dst_dir.join("offsets"))?;
+            write_empty_appendlog(&dst_dir.join("data_log"))?;
+            sync_dir(dst_dir)?;
+            return Ok((i64::MAX, i64::MIN));
+        }
+        Err(i) => i - 1,
     };
 
     if start_idx > end_idx || start_idx >= msg_timestamps.len() {
@@ -1347,5 +1360,40 @@ mod tests {
                 base + 3_000_000,
             ]
         );
+    }
+
+    // --from-end with a value exceeding the recording duration should produce
+    // an empty database (not incorrectly keep the first data point).
+    #[test]
+    fn test_trim_from_end_exceeds_duration_gives_empty() {
+        let temp = TempDir::new().unwrap();
+        let db_path = temp.path().join("db");
+        let output_path = temp.path().join("trimmed");
+
+        create_test_db(
+            &db_path,
+            &[("sensor.data", 0, &[1_000_000, 2_000_000, 3_000_000])],
+        )
+        .unwrap();
+
+        // --from-end 10M on a 3s recording (end=3M): keep <= 3M - 10M = -7M
+        // All data is above -7M so this should keep everything... but the
+        // resolved abs_end is negative, which is below all timestamps, so
+        // the result should be empty.
+        run(
+            db_path,
+            None,
+            Some(10_000_000),
+            Some(output_path.clone()),
+            false,
+            true,
+        )
+        .unwrap();
+
+        let comp_id = ComponentId::new("sensor.data");
+        let (_start_ts, timestamps) =
+            read_index_file(&output_path.join(comp_id.to_string()).join("index"));
+
+        assert_eq!(timestamps, Vec::<i64>::new());
     }
 }
