@@ -7,30 +7,19 @@
 with pkgs; let
   # Import shared configuration
   common = pkgs.callPackage ./pkgs/common.nix {};
-  xla_ext = pkgs.callPackage ./pkgs/xla-ext.nix {system = pkgs.stdenv.hostPlatform.system;};
   iree_runtime = pkgs.callPackage ./pkgs/iree-runtime.nix {};
   llvm = llvmPackages_latest;
 
-  # Import shared JAX overrides
-  jaxOverrides = pkgs.callPackage ./pkgs/jax-overrides.nix {inherit pkgs;};
-
-  # Create a Python environment with the same JAX version as our pyproject.toml
-  pythonWithJax = let
-    python3' = python3.override {
-      packageOverrides = jaxOverrides;
-    };
-  in
-    python3'.withPackages (ps:
-      with ps; [
-        jax
-        jaxlib
-        typing-extensions
-        pytest
-        pytest-json-report
-        matplotlib
-        polars
-        numpy
-      ]);
+  # Base Python for use with venv (JAX 0.8+ and iree-base-compiler installed via pip)
+  pythonBase = python3.withPackages (ps:
+    with ps; [
+      typing-extensions
+      pytest
+      pytest-json-report
+      matplotlib
+      polars
+      numpy
+    ]);
 in {
   # Unified shell that combines all development environments
   elodin = mkShell (
@@ -67,13 +56,12 @@ in {
           buildkite-test-collector-rust
           (rustToolchain pkgs)
           cargo-nextest
-          # Use our custom Python with JAX 0.4.31
-          pythonWithJax
+          # Base Python; JAX and IREE installed via pip venv
+          pythonBase
           clang
           maturin
           bzip2
           libclang
-          # Ensure gfortran is available and prioritized for netlib-src builds
           gfortran
           ffmpeg-full
           ffmpeg-full.dev
@@ -141,7 +129,6 @@ in {
 
       # Environment variables
       LIBCLANG_PATH = "${libclang.lib}/lib";
-      XLA_EXTENSION_DIR = "${xla_ext}";
       IREE_RUNTIME_DIR = "${iree_runtime}";
 
       # GStreamer plugin path for elodinsink

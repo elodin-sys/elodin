@@ -1,8 +1,8 @@
 #[cfg(feature = "noxpr")]
 pub mod noxpr {
+    use crate::ElementType;
     use crate::{ArrayTy, Noxpr, NoxprFn, NoxprScalarExt, NoxprTy};
     use smallvec::smallvec;
-    use xla::ElementType;
 
     pub fn example_function() -> NoxprFn {
         // Parameters

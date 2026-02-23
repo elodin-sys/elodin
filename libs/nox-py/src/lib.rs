@@ -17,6 +17,8 @@ pub mod globals;
 pub mod graph;
 pub mod impeller2_server;
 pub mod integrator;
+pub mod iree_compile;
+pub mod iree_exec;
 pub mod linalg;
 pub mod profile;
 pub mod query;
@@ -41,7 +43,6 @@ pub use query::*;
 pub use spatial::*;
 pub use step_context::*;
 pub use system::*;
-pub use world::SystemExt as WorldSystemExt;
 pub use world::{
     Buffers, Column, ColumnRef, DEFAULT_TIME_STEP, Entity, IntoSystemExt, TimeStep, World,
     WorldExt, WorldMetadata,
@@ -167,5 +168,7 @@ pub fn elodin(m: &Bound<'_, PyModule>) -> PyResult<()> {
     ukf::register(m)?;
     s10::register(m)?;
     env_logger::init();
+    // Safety: called during single-threaded module init before any threads are spawned
+    unsafe { std::env::set_var("JAX_ENABLE_X64", "1") };
     Ok(())
 }

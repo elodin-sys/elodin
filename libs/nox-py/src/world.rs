@@ -16,9 +16,8 @@ use crate::error::Error;
 use crate::globals::SimulationTimeStep;
 use crate::globals::SystemGlobals;
 use impeller2::types::ComponentId;
-use nox::{ArrayTy, Client};
+use nox::ArrayTy;
 use serde::{Deserialize, Serialize};
-use smallvec::SmallVec;
 
 pub const DEFAULT_TIME_STEP: Duration = Duration::from_nanos(1_000_000_000 / 120);
 
@@ -359,21 +358,9 @@ impl<'a> ColumnRef<'a, &'a mut Vec<u8>> {
     }
 }
 
-use nox::xla;
+// --- WorldExt, WorldBuilder, IntoSystemExt ---
 
-impl<'a, B: 'a + AsRef<[u8]>> ColumnRef<'a, B> {
-    pub fn copy_to_client(&self, client: &Client) -> Result<xla::PjRtBuffer, xla::Error> {
-        let mut dims: SmallVec<[i64; 4]> = self.schema.dim.iter().map(|&x| x as i64).collect();
-        dims.insert(0, self.len() as i64);
-        client.copy_raw_host_buffer(self.schema.element_type(), self.column.as_ref(), &dims[..])
-    }
-}
-
-// --- WorldExt, WorldBuilder, IntoSystemExt, SystemExt from mod.rs ---
-
-use crate::exec::{Exec, WorldExec};
-use crate::globals::increment_sim_tick;
-use crate::system::{CompiledSystem, IntoSystem, System, SystemBuilder as EcsSystemBuilder};
+use crate::system::{IntoSystem, System};
 
 pub trait WorldExt {
     fn builder(self) -> WorldBuilder;
@@ -449,21 +436,6 @@ where
     ) {
         self.world.insert_with_id(archetype, entity_id);
     }
-
-    pub fn build(mut self) -> Result<WorldExec, Error> {
-        self.world.set_globals();
-        let tick_exec = increment_sim_tick.pipe(self.pipe).build(&mut self.world)?;
-        let startup_exec = self.startup_sys.build(&mut self.world)?;
-        let world_exec = WorldExec::new(self.world, tick_exec, Some(startup_exec));
-        Ok(world_exec)
-    }
-
-    pub fn run(self) -> World {
-        let client = Client::cpu().unwrap();
-        let mut exec = self.build().unwrap().compile(client).unwrap();
-        exec.run().unwrap();
-        exec.world
-    }
 }
 
 pub trait IntoSystemExt<Marker, Arg, Ret> {
@@ -483,31 +455,5 @@ impl<S: IntoSystem<Marker, Arg, Ret>, Marker, Arg, Ret> IntoSystemExt<Marker, Ar
         Self::System: Sized,
     {
         WorldBuilder::default().tick_pipeline(self.into_system())
-    }
-}
-
-pub trait SystemExt {
-    fn build(self, world: &mut World) -> Result<Exec, Error>;
-}
-
-impl<S: System> SystemExt for S {
-    fn build(self, world: &mut World) -> Result<Exec, Error> {
-        let mut system_builder = EcsSystemBuilder {
-            vars: BTreeMap::default(),
-            inputs: vec![],
-            world,
-        };
-        self.init(&mut system_builder)?;
-        let CompiledSystem {
-            computation,
-            inputs,
-            outputs,
-        } = self.compile(world)?;
-        let metadata = crate::exec::ExecMetadata {
-            arg_ids: inputs,
-            ret_ids: outputs,
-        };
-        let computation = computation.func.build("exec")?.build()?;
-        Ok(Exec::new(metadata, computation.to_hlo_module()))
     }
 }

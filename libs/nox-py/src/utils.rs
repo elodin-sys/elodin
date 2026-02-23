@@ -1,5 +1,5 @@
 use impeller2::{schema::Schema, types::PrimType};
-use nox::{ArrayTy, xla::ElementType};
+use nox::{ArrayTy, ElementType};
 
 pub trait SchemaExt {
     fn element_type(&self) -> ElementType;

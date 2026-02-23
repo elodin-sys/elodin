@@ -8,7 +8,6 @@ publish = false
 
 [features]
 publish = ["pyo3/extension-module", "pyo3/abi3-py310"]
-cuda = ["nox/cuda"]
 shared = ["nox/shared"]
 
 [package.metadata.maturin]
@@ -25,7 +24,8 @@ numpy.version = "0.23"
 
 # nox
 nox.path = "../nox"
-nox.features = ["xla", "noxpr", "jax"]
+nox.features = ["noxpr", "jax"]
+iree-runtime.path = "../iree-runtime"
 elodin-macros.path = "../elodin-macros"
 
 # types

@@ -15,15 +15,16 @@ use stellarator::struc_con::{Joinable, Thread};
 use stellarator::util::CancelToken;
 use tracing::{info, warn};
 
-use crate::{Compiled, World, WorldExec};
+use crate::World;
+use crate::iree_exec::IREEWorldExec;
 
 pub struct Server {
     db: elodin_db::Server,
-    world: WorldExec<Compiled>,
+    world: IREEWorldExec,
 }
 
 impl Server {
-    pub fn new(db: elodin_db::Server, world: WorldExec<Compiled>) -> Self {
+    pub fn new(db: elodin_db::Server, world: IREEWorldExec) -> Self {
         Self { db, world }
     }
 
@@ -163,7 +164,7 @@ pub fn init_db(
     Ok(())
 }
 
-pub fn copy_db_to_world(state: &State, world: &mut WorldExec<Compiled>) {
+pub fn copy_db_to_world(state: &State, world: &mut IREEWorldExec) {
     let world = &mut world.world;
     for (component_id, (schema, _)) in world.metadata.component_map.iter() {
         let Some(column) = world.host.get_mut(component_id) else {
@@ -210,7 +211,7 @@ pub fn copy_db_to_world(state: &State, world: &mut WorldExec<Compiled>) {
 pub type PairId = ComponentId;
 
 pub fn get_pair_ids(
-    world: &WorldExec<Compiled>,
+    world: &IREEWorldExec,
     components: &[ComponentId],
 ) -> Result<Vec<PairId>, Error> {
     let mut results = vec![];
@@ -240,7 +241,7 @@ pub fn get_pair_ids(
 
 pub fn commit_world_head(
     state: &State,
-    world: &mut WorldExec<Compiled>,
+    world: &mut IREEWorldExec,
     timestamp: Timestamp,
     exclusions: Option<&HashSet<ComponentId>>,
 ) -> Result<(), Error> {
@@ -283,7 +284,7 @@ pub fn commit_world_head(
 async fn tick(
     db: Arc<DB>,
     tick_counter: Arc<AtomicU64>,
-    mut world: WorldExec<Compiled>,
+    mut world: IREEWorldExec,
     is_cancelled: impl Fn() -> bool + 'static,
     pre_step: impl Fn(u64, &Arc<DB>, &Arc<AtomicU64>, Timestamp, Timestamp) + 'static,
     post_step: impl Fn(u64, &Arc<DB>, &Arc<AtomicU64>, Timestamp, Timestamp) + 'static,
@@ -386,7 +387,7 @@ async fn tick(
     }
 }
 
-pub fn external_controls(world: &WorldExec<Compiled>) -> impl Iterator<Item = ComponentId> + '_ {
+pub fn external_controls(world: &IREEWorldExec) -> impl Iterator<Item = ComponentId> + '_ {
     world
         .world
         .metadata
@@ -402,7 +403,7 @@ pub fn external_controls(world: &WorldExec<Compiled>) -> impl Iterator<Item = Co
         .map(|(component_id, _)| *component_id)
 }
 
-pub fn wait_for_write(world: &WorldExec<Compiled>) -> impl Iterator<Item = ComponentId> + '_ {
+pub fn wait_for_write(world: &IREEWorldExec) -> impl Iterator<Item = ComponentId> + '_ {
     world
         .world
         .metadata

@@ -558,11 +558,10 @@ where
 
 use pyo3::IntoPyObjectExt;
 use pyo3::prelude::*;
-use pyo3::types::{IntoPyDict, PyBytes};
-use std::collections::{HashMap, HashSet};
+use pyo3::types::IntoPyDict;
+use std::collections::HashMap;
 
 use crate::graph::{EdgeComponent, GraphQuery, TotalEdge};
-use crate::utils::PrimTypeExt;
 use crate::{ComponentSchema, PyComponent};
 use nox::{NoxprNode, jax::JaxNoxprFn};
 
@@ -698,65 +697,21 @@ impl System for PyFnSystem {
 }
 
 pub trait CompiledSystemExt {
-    fn arg_arrays(&self, py: Python<'_>, world: &World) -> Result<Vec<Py<PyAny>>, Error>;
-    fn compile_hlo_module(&self, py: Python<'_>, world: &World) -> Result<crate::Exec, Error>;
+    fn compile_iree_module(
+        &self,
+        py: Python<'_>,
+        world: &World,
+    ) -> Result<crate::iree_exec::IREEExec, Error>;
     fn compile_jax_module(&self, py: Python<'_>) -> Result<Py<PyAny>, Error>;
 }
 
 impl CompiledSystemExt for CompiledSystem {
-    fn arg_arrays(&self, py: Python<'_>, world: &World) -> Result<Vec<Py<PyAny>>, Error> {
-        let mut res = vec![];
-        let mut visited_ids = HashSet::new();
-        for id in self.inputs.iter().chain(self.outputs.iter()) {
-            if visited_ids.contains(id) {
-                continue;
-            }
-            let jnp = py.import("jax.numpy")?;
-            let col = world.column_by_id(*id).ok_or(Error::ComponentNotFound)?;
-            let elem_ty = col.schema.prim_type;
-            let dtype = nox::jax::dtype(&elem_ty.to_element_type())?;
-            let shape_vec: Vec<_> = std::iter::once(col.len() as u64)
-                .chain(col.schema.shape().iter().copied())
-                .collect();
-            let arr = jnp.getattr("zeros")?.call((shape_vec, dtype), None)?;
-            visited_ids.insert(id);
-            res.push(arr.into());
-        }
-        Ok(res)
-    }
-
-    fn compile_hlo_module(&self, py: Python<'_>, world: &World) -> Result<crate::Exec, Error> {
-        let func = noxpr_to_callable(self.computation.func.clone());
-        let input_arrays = self.arg_arrays(py, world)?;
-        let py_code = "import jax
-def build_expr(jit, args):
-  xla = jit.lower(*args).compiler_ir('hlo')
-  return xla";
-        let module = PyModule::new(py, "build_expr")?;
-        let globals = module.dict();
-        let code_cstr = std::ffi::CString::new(py_code).expect("Python code C string");
-        py.run(code_cstr.as_ref(), Some(&globals), None)?;
-        let fun: Py<PyAny> = module.getattr("build_expr")?.into();
-
-        let comp = fun
-            .call1(py, (func, input_arrays))?
-            .extract::<PyObject>(py)?;
-        let comp = comp.call_method0(py, "as_serialized_hlo_module_proto")?;
-        let comp = comp
-            .downcast_bound::<PyBytes>(py)
-            .map_err(|_| Error::HloModuleNotBytes)?;
-        let comp_bytes = comp.as_bytes();
-        let hlo_module = nox::xla::HloModuleProto::parse_binary(comp_bytes)
-            .map_err(|err| PyValueError::new_err(err.to_string()))?;
-        let exec = crate::Exec::new(
-            crate::ExecMetadata {
-                arg_ids: self.inputs.clone(),
-                ret_ids: self.outputs.clone(),
-            },
-            hlo_module,
-        );
-
-        Ok(exec)
+    fn compile_iree_module(
+        &self,
+        py: Python<'_>,
+        world: &World,
+    ) -> Result<crate::iree_exec::IREEExec, Error> {
+        crate::iree_compile::compile_iree_module(py, self, world)
     }
 
     fn compile_jax_module(&self, py: Python<'_>) -> Result<Py<PyAny>, Error> {
@@ -779,8 +734,6 @@ def build_expr(func):
         Ok(comp)
     }
 }
-
-use pyo3::exceptions::PyValueError;
 
 #[pyclass(name = "SystemBuilder")]
 #[derive(Clone, Default)]
@@ -850,7 +803,7 @@ impl System for PySystem {
     }
 }
 
-fn noxpr_to_callable(func: Arc<NoxprFn>) -> Py<PyAny> {
+pub fn noxpr_to_callable(func: Arc<NoxprFn>) -> Py<PyAny> {
     if let NoxprNode::Jax(j) = &*func.inner.node {
         return Python::with_gil(|py| j.clone_ref(py));
     }

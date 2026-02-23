@@ -3,9 +3,9 @@
 //! of batch_dfs.
 
 use crate::{
-    ArrayTy, BinaryOp, DotDimensionNums, Error, Noxpr, NoxprFn, NoxprId, NoxprNode, NoxprTy,
+    ArrayTy, BinaryOp, DotDimensionNums, ElementType, Error, Noxpr, NoxprFn, NoxprId, NoxprNode,
+    NoxprTy,
     batch_dfs::{BatchAxis, BatchedExpr},
-    xla::ElementType,
 };
 use core::{
     iter,
