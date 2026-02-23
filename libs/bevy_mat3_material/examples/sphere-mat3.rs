@@ -142,6 +142,15 @@ fn setup(
     // Single unit-sphere grid mesh; deformation is done in the vertex shader via Mat3Material.
     let grid_mesh = meshes.add(uv_sphere_grid_line_mesh(1.0, sectors, stacks));
 
+    let grid_material_deformed = materials.add(Mat3Material {
+        base: StandardMaterial {
+            base_color: Color::srgba(0., 0., 0., 1.0),
+            unlit: true,
+            ..default()
+        },
+        extension: Mat3TransformExt { params: params },
+    });
+
     let grid_material_deformed2 = materials.add(Mat3Material {
         base: StandardMaterial {
             base_color: Color::srgba(0., 0., 0., 1.0),
@@ -166,7 +175,7 @@ fn setup(
     commands
         .spawn((
             Mesh3d(sphere.clone()),
-            MeshMaterial3d(material.clone()),
+            MeshMaterial3d(material),
             Mat3Params { linear },
             Transform::from_xyz(-1.2, 0.0, 0.0),
             Name::new("deformed by shader"),
@@ -175,7 +184,7 @@ fn setup(
         .with_children(|commands| {
             commands.spawn((
                 Mesh3d(grid_mesh.clone()),
-                MeshMaterial3d(material),
+                MeshMaterial3d(grid_material_deformed),
                 bevy::light::NotShadowReceiver,
                 bevy::light::NotShadowCaster,
                 Name::new("grid (deformed by shader)"),
