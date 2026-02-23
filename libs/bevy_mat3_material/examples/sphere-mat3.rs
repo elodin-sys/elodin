@@ -6,9 +6,7 @@ use bevy::pbr::MaterialPlugin;
 use bevy::prelude::*;
 use bevy::render::alpha::AlphaMode;
 
-use bevy_lower_tri_material::{
-    params_from_linear, LowerTriMaterial, LowerTriParamsComponent, LowerTriTransformExt,
-};
+use bevy_3x3_material::{params_from_linear, Mat3Material, Mat3Params, Mat3ParamsComponent, Mat3TransformExt};
 
 fn main() {
     App::new()
@@ -16,18 +14,18 @@ fn main() {
         .add_plugins(bevy_inspector_egui::bevy_egui::EguiPlugin::default())
         .add_plugins(bevy_inspector_egui::quick::WorldInspectorPlugin::new())
         .add_plugins(bevy_editor_cam::DefaultEditorCamPlugins)
-        .add_plugins(MaterialPlugin::<LowerTriMaterial>::default())
-        .register_type::<LowerTriParamsComponent>()
+        .add_plugins(MaterialPlugin::<Mat3Material>::default())
+        .register_type::<Mat3ParamsComponent>()
         .add_systems(Startup, setup)
-        .add_systems(Update, (draw_axes_gizmos, sync_lower_tri_params_from_component))
+        .add_systems(Update, (draw_axes_gizmos, sync_mat3_params_from_component))
         // .add_systems(Update, draw_normals)
         .run();
 }
 
-/// Syncs [`LowerTriParamsComponent`] into the entity's [`LowerTriMaterial`] so inspector edits apply.
-fn sync_lower_tri_params_from_component(
-    mut materials: ResMut<Assets<LowerTriMaterial>>,
-    query: Query<(&LowerTriParamsComponent, &MeshMaterial3d<LowerTriMaterial>)>,
+/// Syncs [`Mat3ParamsComponent`] into the entity's [`Mat3Material`] so inspector edits apply.
+fn sync_mat3_params_from_component(
+    mut materials: ResMut<Assets<Mat3Material>>,
+    query: Query<(&Mat3ParamsComponent, &MeshMaterial3d<Mat3Material>)>,
 ) {
     for (comp, mesh_material) in &query {
         if let Some(material) = materials.get_mut(&mesh_material.0) {
@@ -47,7 +45,7 @@ fn draw_axes_gizmos(mut gizmos: Gizmos) {
 fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<LowerTriMaterial>>,
+    mut materials: ResMut<Assets<Mat3Material>>,
     mut standard_materials: ResMut<Assets<StandardMaterial>>,
 ) {
     // let sectors = 64;
@@ -77,13 +75,10 @@ fn setup(
     let sphere_mesh = SphereMeshBuilder::new(1.0, SphereKind::Uv { sectors, stacks }).build();
     let sphere = meshes.add(sphere_mesh.clone());
 
-    // --- Lower-triangular 3x3 (example) ---
-    // [ 1   0   0 ]
-    // [ a   1   0 ]
-    // [ b   c   1 ]
     fn sqrt(x: f32) -> f32 {
         x.sqrt()
     }
+
     let a = 1.35;
     let b = 0.40;
     let c = 0.25;
@@ -101,6 +96,7 @@ fn setup(
         0.0,   b, 0.0,
         0.0,   0.0,   c,
     ]);
+
     let deform = Mat4::from_mat3(linear2);
     // New sphere with matrix baked into the mesh (for normals / CPU-deformed geometry).
     let mut deformed_sphere_mesh =
@@ -128,8 +124,8 @@ fn setup(
         )
     };
 
-    // Material for "deformed by shader" — unique handle so LowerTriParamsComponent can drive it.
-    let material = materials.add(LowerTriMaterial {
+    // Material for "deformed by shader" — unique handle so Mat3ParamsComponent can drive it.
+    let material = materials.add(Mat3Material {
         base: StandardMaterial {
             base_color: base_color_deformed,
             perceptual_roughness: 0.35,
@@ -137,7 +133,7 @@ fn setup(
             alpha_mode,
             ..default()
         },
-        extension: LowerTriTransformExt { params },
+        extension: Mat3TransformExt { params },
     });
 
     let regular_material = standard_materials.add(StandardMaterial {
@@ -156,35 +152,35 @@ fn setup(
         ..default()
     });
 
-    // Single unit-sphere grid mesh; deformation is done in the vertex shader via LowerTriMaterial.
+    // Single unit-sphere grid mesh; deformation is done in the vertex shader via Mat3Material.
     let grid_mesh = meshes.add(uv_sphere_grid_line_mesh(1.0, sectors, stacks));
 
-    let grid_material_deformed2 = materials.add(LowerTriMaterial {
+    let grid_material_deformed2 = materials.add(Mat3Material {
         base: StandardMaterial {
             base_color: Color::srgba(0., 0., 0., 1.0),
             unlit: true,
             ..default()
         },
-        extension: LowerTriTransformExt { params: params2 },
+        extension: Mat3TransformExt { params: params2 },
     });
-    let grid_material_unit = materials.add(LowerTriMaterial {
+    let grid_material_unit = materials.add(Mat3Material {
         base: StandardMaterial {
             base_color: Color::srgba(0., 0., 0., 1.0),
             unlit: true,
             ..default()
         },
-        extension: LowerTriTransformExt {
-            params: bevy_lower_tri_material::LowerTriParams::default(),
+        extension: Mat3TransformExt {
+            params: Mat3Params::default(),
         },
     });
 
     let shadow_receiver = true;
-    // Deformed by material (shader) — params editable via LowerTriParamsComponent in the inspector.
+    // Deformed by material (shader) — params editable via Mat3ParamsComponent in the inspector.
     commands
         .spawn((
             Mesh3d(sphere.clone()),
             MeshMaterial3d(material.clone()),
-            LowerTriParamsComponent { linear },
+            Mat3ParamsComponent { linear },
             Transform::from_xyz(-1.2, 0.0, 0.0),
             Name::new("deformed by shader"),
         ))
@@ -271,7 +267,7 @@ fn draw_normals(
 /// as Bevy's `SphereMeshBuilder::uv`. Pass `Mat4::IDENTITY` for a unit sphere grid, or a deform
 /// matrix to match a deformed ellipsoid.
 /// Builds a line-list mesh for the UV sphere grid in **unit-sphere** space (radius, no deform).
-/// Deformation is applied at runtime by using a material with a vertex shader (e.g. `LowerTriMaterial`).
+/// Deformation is applied at runtime by using a material with a vertex shader (e.g. `Mat3Material`).
 fn uv_sphere_grid_line_mesh(radius: f32, sectors: u32, stacks: u32) -> Mesh {
     use std::f32::consts::PI;
 
@@ -332,13 +328,11 @@ fn apply_matrix_to_mesh(mesh: &mut Mesh, m: Mat4) {
     let linear = Mat3::from_mat4(m);
     let normal_xform = linear.inverse().transpose();
 
-    if let Some(VertexAttributeValues::Float32x3(normals)) =
-        mesh.attribute_mut(Mesh::ATTRIBUTE_NORMAL)
+    if let Some(VertexAttributeValues::Float32x3(normals)) = mesh.attribute_mut(Mesh::ATTRIBUTE_NORMAL)
     {
         for n in normals.iter_mut() {
             let v = Vec3::from(*n);
             *n = normal_xform.mul_vec3(v).normalize().to_array();
-            // *n = normal_xform.mul_vec3(v).to_array();
         }
     }
 

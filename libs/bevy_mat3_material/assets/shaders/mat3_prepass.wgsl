@@ -1,23 +1,23 @@
-// Prepass (depth / normal / shadow) vertex shader: applies the same lower-tri transform
-// so shadow maps and prepass use the deformed geometry, not the unit sphere.
+// Prepass (depth / normal / shadow) vertex shader: applies the same 3×3 linear transform
+// so shadow maps and prepass use the deformed geometry, not the original mesh.
 #import bevy_pbr::{
     mesh_functions,
     prepass_io::{Vertex, VertexOutput},
     view_transformations::position_world_to_clip,
 }
 
-struct LowerTriParams {
-    lower_tri: mat3x3<f32>,
+struct Mat3Params {
+    linear: mat3x3<f32>,
     normal_matrix: mat3x3<f32>,
 };
 
 @group(#{MATERIAL_BIND_GROUP}) @binding(100)
-var<uniform> params: LowerTriParams;
+var<uniform> params: Mat3Params;
 
 @vertex
 fn vertex(in: Vertex) -> VertexOutput {
     // Apply the same local-space transform as the forward pass.
-    let local_pos = params.lower_tri * in.position;
+    let local_pos = params.linear * in.position;
 
     let world_from_local = mesh_functions::get_world_from_local(in.instance_index);
 
@@ -51,12 +51,12 @@ fn vertex(in: Vertex) -> VertexOutput {
 #endif
 
 #ifdef VERTEX_TANGENTS
-    var local_tangent_dir = params.lower_tri * in.tangent.xyz;
+    var local_tangent_dir = params.linear * in.tangent.xyz;
 #ifdef VERTEX_NORMALS
     local_tangent_dir = local_tangent_dir - local_normal * dot(local_normal, local_tangent_dir);
 #endif
     local_tangent_dir = normalize(local_tangent_dir);
-    let det_sign = select(-1.0, 1.0, determinant(params.lower_tri) >= 0.0);
+    let det_sign = select(-1.0, 1.0, determinant(params.linear) >= 0.0);
     let local_tangent = vec4<f32>(local_tangent_dir, in.tangent.w * det_sign);
     out.world_tangent = mesh_functions::mesh_tangent_local_to_world(
         world_from_local,
