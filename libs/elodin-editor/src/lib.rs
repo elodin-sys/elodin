@@ -349,6 +349,13 @@ fn setup_egui_global_system(mut egui_global_settings: ResMut<EguiGlobalSettings>
 fn setup_egui_context(mut contexts: Query<&mut EguiContextSettings>) {
     for mut context in &mut contexts {
         context.capture_pointer_input = false;
+        // Workaround for https://github.com/emilk/egui/issues/5008
+        // On Linux, IME activation via set_ime_allowed(true) causes the compositor to
+        // capture Backspace/arrow key events, preventing them from reaching TextEdit.
+        #[cfg(target_os = "linux")]
+        {
+            context.enable_ime = false;
+        }
     }
 }
 
