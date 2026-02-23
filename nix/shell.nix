@@ -247,7 +247,7 @@ in {
             ''
               echo "Profiling shell:"
               echo "  • Tracy GUI is available by running 'tracy'"
-              echo "  • Run Elodin with: RUST_LOG=info cargo run -p elodin --features tracy"
+              echo "  • Run Elodin with: RUST_LOG=info cargo run --release -p elodin --features tracy"
               echo ""
 
               exec ${pkgs.zsh}/bin/zsh
