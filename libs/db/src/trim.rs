@@ -208,8 +208,15 @@ fn analyze_database(db_path: &Path) -> Result<TrimInfo, Error> {
         if dir_name == "msgs" {
             if let Ok(msgs_dir) = fs::read_dir(&path) {
                 for msg_entry in msgs_dir.flatten() {
-                    if msg_entry.path().is_dir() {
-                        msg_log_count += 1;
+                    let msg_path = msg_entry.path();
+                    if !msg_path.is_dir() {
+                        continue;
+                    }
+                    msg_log_count += 1;
+                    let ts_path = msg_path.join("timestamps");
+                    if let Ok(Some((start, end))) = read_msg_timestamp_range(&ts_path) {
+                        min_timestamp = min_timestamp.min(start);
+                        max_timestamp = max_timestamp.max(end);
                     }
                 }
             }
@@ -791,6 +798,47 @@ fn write_empty_appendlog(path: &Path) -> Result<(), Error> {
     write_msg_appendlog(path, &[])
 }
 
+/// Read first/last timestamp from a message log timestamps file (16-byte header).
+fn read_msg_timestamp_range(timestamps_path: &Path) -> Result<Option<(i64, i64)>, Error> {
+    if !timestamps_path.exists() {
+        return Ok(None);
+    }
+
+    let mut file = File::open(timestamps_path)?;
+    let mut header = [0u8; MSG_HEADER_SIZE];
+    let bytes_read = file.read(&mut header)?;
+    if bytes_read < MSG_HEADER_SIZE {
+        return Ok(None);
+    }
+
+    let committed_len = u64::from_le_bytes(header[0..8].try_into().unwrap()) as usize;
+    let committed_len = committed_len.max(MSG_HEADER_SIZE);
+    let data_len = committed_len.saturating_sub(MSG_HEADER_SIZE);
+    if data_len < 8 {
+        return Ok(None);
+    }
+
+    let num_timestamps = data_len / 8;
+
+    let mut first_ts_bytes = [0u8; 8];
+    file.read_exact(&mut first_ts_bytes)?;
+    let first_ts = i64::from_le_bytes(first_ts_bytes);
+
+    if num_timestamps == 1 {
+        return Ok(Some((first_ts, first_ts)));
+    }
+
+    file.seek(SeekFrom::Start(
+        (MSG_HEADER_SIZE + (num_timestamps - 1) * 8) as u64,
+    ))?;
+    let mut last_ts_bytes = [0u8; 8];
+    file.read_exact(&mut last_ts_bytes)?;
+    let last_ts = i64::from_le_bytes(last_ts_bytes);
+
+    Ok(Some((first_ts, last_ts)))
+}
+
+/// Read first/last timestamp from a component index file (24-byte header).
 fn read_timestamp_range(index_path: &Path) -> Result<Option<(i64, i64)>, Error> {
     if !index_path.exists() {
         return Ok(None);
