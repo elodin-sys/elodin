@@ -111,11 +111,11 @@ impl WidgetSystem for InspectorContent<'_, '_> {
                                         "inspector_entity",
                                         (icons, pair),
                                     ),
-                                SelectedObject::Viewport { camera, .. } => {
+                                SelectedObject::Viewport { camera, title } => {
                                     ui.add_widget_with::<InspectorViewport>(
                                         world,
                                         "inspector_viewport",
-                                        camera,
+                                        (camera, title),
                                     );
                                     Default::default()
                                 }

@@ -46,6 +46,7 @@ pub struct SchematicParam<'w, 's> {
     pub graph_states: Query<'w, 's, &'static plot::GraphState>,
     pub query_plots: Query<'w, 's, &'static query_plot::QueryPlotData>,
     pub viewports: Query<'w, 's, &'static inspector::viewport::Viewport>,
+    pub projections: Query<'w, 's, &'static Projection>,
     pub viewport_configs: Query<'w, 's, &'static tiles::ViewportConfig>,
     pub camera_grids: Query<'w, 's, &'static GridHandle>,
     pub grid_visibility: Query<'w, 's, &'static Visibility>,
@@ -135,6 +136,37 @@ impl SchematicParam<'_, '_> {
                     Pane::Viewport(viewport) => {
                         let cam_entity = viewport.camera?;
                         let viewport_data = self.viewports.get(cam_entity).ok()?;
+                        let (fov, near, far) = self
+                            .projections
+                            .get(cam_entity)
+                            .ok()
+                            .and_then(|projection| match projection {
+                                Projection::Perspective(perspective) => {
+                                    let near = if (perspective.near - tiles::DEFAULT_VIEWPORT_NEAR)
+                                        .abs()
+                                        > f32::EPSILON
+                                    {
+                                        Some(perspective.near)
+                                    } else {
+                                        None
+                                    };
+                                    let far = if (perspective.far - tiles::DEFAULT_VIEWPORT_FAR)
+                                        .abs()
+                                        > f32::EPSILON
+                                    {
+                                        Some(perspective.far)
+                                    } else {
+                                        None
+                                    };
+                                    Some((perspective.fov.to_degrees(), near, far))
+                                }
+                                _ => None,
+                            })
+                            .unwrap_or((45.0, None, None));
+
+                        let vp_config = self.viewport_configs.get(cam_entity).ok();
+                        let aspect = vp_config.and_then(|c| c.aspect);
+
                         let mut show_grid = false;
                         if let Ok(grid_handle) = self.camera_grids.get(cam_entity)
                             && let Ok(visibility) = self.grid_visibility.get(grid_handle.grid)
@@ -142,11 +174,15 @@ impl SchematicParam<'_, '_> {
                             show_grid = matches!(*visibility, Visibility::Visible);
                         }
 
-                        let show_arrows = self
-                            .viewport_configs
-                            .get(cam_entity)
-                            .map(|config| config.show_arrows)
-                            .unwrap_or(true);
+                        let show_arrows = vp_config.map(|c| c.show_arrows).unwrap_or(true);
+                        let create_frustum = vp_config.map(|c| c.create_frustum).unwrap_or(false);
+                        let show_frustums = vp_config.map(|c| c.show_frustums).unwrap_or(false);
+                        let frustums_color = vp_config
+                            .map(|c| c.frustums_color)
+                            .unwrap_or_else(impeller2_wkt::default_viewport_frustums_color);
+                        let frustums_thickness = vp_config
+                            .map(|c| c.frustums_thickness)
+                            .unwrap_or_else(impeller2_wkt::default_viewport_frustums_thickness);
                         let show_view_cube = viewport.view_cube_layer.is_some();
 
                         let local_arrows: Vec<VectorArrow3d> = self
@@ -163,10 +199,17 @@ impl SchematicParam<'_, '_> {
                             .collect();
 
                         Some(Panel::Viewport(Viewport {
-                            fov: 45.0,
+                            fov,
+                            near,
+                            far,
+                            aspect,
                             active: false,
                             show_grid,
                             show_arrows,
+                            create_frustum,
+                            show_frustums,
+                            frustums_color,
+                            frustums_thickness,
                             show_view_cube,
                             hdr: self.hdr_enabled.0,
                             name: pane_name,

@@ -38,7 +38,7 @@ use super::{
     PaneName, SelectedObject, ViewportRect, WindowUiState,
     actions::{ActionTile, ActionTileWidget},
     button::{EImageButton, ETileButton},
-    colors::{self, get_scheme, with_opacity},
+    colors::{self, EColor, get_scheme, with_opacity},
     command_palette::{CommandPaletteState, palette_items},
     dashboard::{DashboardWidget, DashboardWidgetArgs, spawn_dashboard},
     data_overview::{DataOverviewPane, DataOverviewWidget},
@@ -71,6 +71,17 @@ pub(crate) mod sidebar;
 
 use sidebar::tab_add_visible;
 
+pub(crate) const DEFAULT_VIEWPORT_NEAR: f32 = 0.05;
+pub(crate) const DEFAULT_VIEWPORT_FAR: f32 = 5.0;
+
+fn default_viewport_perspective() -> PerspectiveProjection {
+    PerspectiveProjection {
+        near: DEFAULT_VIEWPORT_NEAR,
+        far: DEFAULT_VIEWPORT_FAR,
+        ..PerspectiveProjection::default()
+    }
+}
+
 pub(crate) fn plugin(app: &mut App) {
     app.register_type::<WindowId>()
         .add_message::<WindowRelayout>()
@@ -98,7 +109,12 @@ fn setup_primary_window_state(
 
 #[derive(Component)]
 pub struct ViewportConfig {
+    pub aspect: Option<f32>,
     pub show_arrows: bool,
+    pub create_frustum: bool,
+    pub show_frustums: bool,
+    pub frustums_color: impeller2_wkt::Color,
+    pub frustums_thickness: f32,
     pub viewport_layer: Option<usize>,
 }
 
@@ -1276,6 +1292,29 @@ impl ViewportPane {
             })
             .unwrap_or_default();
 
+        let perspective_defaults = default_viewport_perspective();
+        let mut perspective = PerspectiveProjection {
+            fov: viewport.fov.to_radians(),
+            ..perspective_defaults
+        };
+        if let Some(near) = viewport.near {
+            perspective.near = near;
+        }
+        if let Some(far) = viewport.far {
+            perspective.far = far;
+        }
+        if let Some(aspect) = viewport.aspect {
+            perspective.aspect_ratio = aspect;
+        }
+        if !(perspective.near > 0.0 && perspective.far > perspective.near) {
+            warn!(
+                "Invalid viewport near/far (near={}, far={}), restoring defaults",
+                perspective.near, perspective.far
+            );
+            perspective.near = DEFAULT_VIEWPORT_NEAR;
+            perspective.far = DEFAULT_VIEWPORT_FAR;
+        }
+
         let mut camera = commands.spawn((
             Transform::default(),
             Camera3d::default(),
@@ -1283,10 +1322,7 @@ impl ViewportPane {
                 order: 1,
                 ..Default::default()
             },
-            Projection::Perspective(PerspectiveProjection {
-                fov: viewport.fov.to_radians(),
-                ..Default::default()
-            }),
+            Projection::Perspective(perspective),
             Tonemapping::TonyMcMapface,
             Exposure::from_physical_camera(PhysicalCameraParameters {
                 aperture_f_stops: 2.8,
@@ -1316,7 +1352,12 @@ impl ViewportPane {
             },
             GridHandle { grid: grid_id },
             ViewportConfig {
+                aspect: viewport.aspect,
                 show_arrows: viewport.show_arrows,
+                create_frustum: viewport.create_frustum,
+                show_frustums: viewport.show_frustums,
+                frustums_color: viewport.frustums_color,
+                frustums_thickness: viewport.frustums_thickness,
                 viewport_layer,
             },
             crate::ui::inspector::viewport::Viewport::new(parent, pos, look_at, up),
@@ -1483,6 +1524,51 @@ enum TabState {
     Inactive,
 }
 
+impl TreeBehavior<'_> {
+    fn viewport_frustum_dot_color(
+        &mut self,
+        tiles: &Tiles<Pane>,
+        tile_id: TileId,
+    ) -> Option<Color32> {
+        let pane = match tiles.get(tile_id) {
+            Some(Tile::Pane(Pane::Viewport(pane))) => pane,
+            _ => return None,
+        };
+        let camera_entity = pane.camera?;
+        let config = self.world.get::<ViewportConfig>(camera_entity)?;
+        if !config.create_frustum {
+            return None;
+        }
+        Some(config.frustums_color.into_color32())
+    }
+
+    fn paint_tab_title(
+        &self,
+        ui: &egui::Ui,
+        text_rect: egui::Rect,
+        galley: &std::sync::Arc<egui::Galley>,
+        text_color: Color32,
+        dot_color: Option<Color32>,
+    ) {
+        let label_rect = egui::Align2::LEFT_CENTER.align_size_within_rect(galley.size(), text_rect);
+        ui.painter()
+            .galley(label_rect.min, galley.clone(), text_color);
+
+        if let Some(dot_color) = dot_color {
+            let dot_radius = 3.5;
+            let dot_gap = 7.0;
+            let dot_center = egui::pos2(label_rect.max.x + dot_gap, label_rect.center().y);
+            ui.painter()
+                .circle_filled(dot_center, dot_radius, dot_color);
+            ui.painter().circle_stroke(
+                dot_center,
+                dot_radius,
+                egui::Stroke::new(1.0, get_scheme().border_primary),
+            );
+        }
+    }
+}
+
 impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
     fn on_edit(&mut self, _edit_action: egui_tiles::EditAction) {}
 
@@ -1552,9 +1638,15 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
             font_id.clone(),
         );
 
+        let dot_color = if is_container {
+            None
+        } else {
+            self.viewport_frustum_dot_color(tiles, tile_id)
+        };
+        let dot_width = if dot_color.is_some() { 14.0 } else { 0.0 };
         let x_margin = self.tab_title_spacing(ui.visuals());
         let (_, rect) = ui.allocate_space(vec2(
-            galley.size().x + x_margin * 4.0,
+            galley.size().x + x_margin * 4.0 + dot_width,
             ui.available_height(),
         ));
         let text_rect = rect
@@ -1674,13 +1766,7 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
                         font_id.clone(),
                     );
 
-                    ui.painter().galley(
-                        egui::Align2::LEFT_CENTER
-                            .align_size_within_rect(galley.size(), text_rect)
-                            .min,
-                        galley.clone(),
-                        text_color,
-                    );
+                    self.paint_tab_title(ui, text_rect, &galley, text_color, dot_color);
                 } else {
                     ui.ctx().data_mut(|d| d.insert_temp(edit_buf_id, buf));
                     if !resp.has_focus() {
@@ -1688,13 +1774,7 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
                     }
                 }
             } else {
-                ui.painter().galley(
-                    egui::Align2::LEFT_CENTER
-                        .align_size_within_rect(galley.size(), text_rect)
-                        .min,
-                    galley.clone(),
-                    text_color,
-                );
+                self.paint_tab_title(ui, text_rect, &galley, text_color, dot_color);
             }
 
             ui.add_space(-3.0 * x_margin);
@@ -2679,8 +2759,10 @@ impl WidgetSystem for TileLayout<'_, '_> {
                                 }
                                 Pane::Viewport(viewport) => {
                                     if let Some(camera) = viewport.camera {
-                                        ui_state.selected_object =
-                                            SelectedObject::Viewport { camera };
+                                        ui_state.selected_object = SelectedObject::Viewport {
+                                            camera,
+                                            title: viewport.name.clone(),
+                                        };
                                     }
                                 }
                                 _ => {}
@@ -2705,8 +2787,10 @@ impl WidgetSystem for TileLayout<'_, '_> {
                                 }
                                 Pane::Viewport(viewport) => {
                                     if let Some(camera) = viewport.camera {
-                                        ui_state.selected_object =
-                                            SelectedObject::Viewport { camera };
+                                        ui_state.selected_object = SelectedObject::Viewport {
+                                            camera,
+                                            title: viewport.name.clone(),
+                                        };
                                     }
                                 }
                                 _ => {}

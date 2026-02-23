@@ -11,4 +11,5 @@ This folder gathers the Bevy utilities and plugins used by the Elodin editor.
 | `logical_key` | 2024-09-26 | Active | Tracks logical keys pressed/just-pressed/just-released for keyboard handling. | [README.md](logical_key/README.md) |
 | `env_asset_source` | 2025-09-26 | Active | Configures the default `AssetServer` source from `ELODIN_ASSETS_DIR` and warns on invalid paths. | [README.md](env_asset_source/README.md) |
 | `camera_anchor` | 2025-11-24 | Active | Computes a safe camera anchor (view ↔ origin) to avoid depth `NaN`s. | [README.md](camera_anchor/README.md) |
-| `view_cube` | 2026-02-12 | Active (Cube-Viewer) | Current interactive Cube-Viewer (snap/zoom buttons, synchronized overlay rendering). | [README.md](view_cube/README.md) |
+| `view_cube` (Cube-Viewer) | 2026-02-12 | Active | Current interactive Cube-Viewer (snap/zoom buttons, synchronized overlay rendering). | [README.md](view_cube/README.md) |
+| `frustum` | 2026-02-19 | Active | Draws created viewport frustums (`create_frustum`) onto viewports that opt in (`show_frustums`), with per-source color/thickness. | [README.md](frustum/README.md) |
