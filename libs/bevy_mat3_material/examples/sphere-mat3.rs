@@ -1,12 +1,10 @@
-use bevy::mesh::{
-    Mesh, SphereKind, SphereMeshBuilder, VertexAttributeValues,
-};
+use bevy::mesh::{Mesh, SphereKind, SphereMeshBuilder, VertexAttributeValues};
 use bevy::prelude::*;
 use bevy::render::alpha::AlphaMode;
 
 use bevy_mat3_material::{
-    uv_sphere_grid_line_mesh, Mat3Material, Mat3MaterialPlugin, Mat3Uniforms, Mat3Params,
-    Mat3TransformExt,
+    uv_sphere_grid_line_mesh, Mat3Material, Mat3MaterialPlugin, Mat3Params, Mat3TransformExt,
+    Mat3Uniforms,
 };
 
 fn main() {
@@ -148,7 +146,7 @@ fn setup(
             unlit: true,
             ..default()
         },
-        extension: Mat3TransformExt { params: params },
+        extension: Mat3TransformExt { params },
     });
 
     let grid_material_deformed2 = materials.add(Mat3Material {

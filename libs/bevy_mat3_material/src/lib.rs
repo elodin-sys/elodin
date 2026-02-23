@@ -3,9 +3,7 @@
 #![forbid(missing_docs)]
 use bevy::{
     asset::{embedded_asset, RenderAssetUsages},
-    mesh::{
-        Indices, Mesh, PrimitiveTopology,
-    },
+    mesh::{Indices, Mesh, PrimitiveTopology},
     pbr::MaterialExtension,
     prelude::*,
     reflect::TypePath,
@@ -27,6 +25,7 @@ impl Plugin for Mat3MaterialPlugin {
 }
 
 /// Syncs [`Mat3Params`] into the entity's [`Mat3Material`] so inspector edits apply.
+#[allow(clippy::type_complexity)]
 fn sync_mat3_params_from_component(
     mut materials: ResMut<Assets<Mat3Material>>,
     query: Query<
@@ -73,10 +72,10 @@ pub struct Mat3Uniforms {
     pub linear: Mat3, // 48 bytes, 3 * 16 bytes
     /// Its inverse transpose used to transform normals
     pub normal_matrix: Mat3, // 48 bytes, 3 * 16 bytes
-    // WebGL2/WASM structs must be 16 byte aligned.
-    // #[cfg(target_arch = "wasm32")]
-    // _webgl2_padding: Vec3,
 }
+// WebGL2/WASM structs must be 16 byte aligned.
+// #[cfg(target_arch = "wasm32")]
+// _webgl2_padding: Vec3,
 
 impl Default for Mat3Uniforms {
     fn default() -> Self {
