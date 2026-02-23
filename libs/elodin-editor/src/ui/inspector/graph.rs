@@ -517,8 +517,8 @@ fn add_component_widget(
 
             if add_expression_clicked || enter_pressed {
                 let query = add_state.expression.trim().to_string();
-                if !query.is_empty() {
-                    if add_components_from_eql(
+                if !query.is_empty()
+                    && add_components_from_eql(
                         graph_state,
                         metadata_store,
                         schema_store,
@@ -526,9 +526,8 @@ fn add_component_widget(
                         &query,
                     )
                     .unwrap_or(false)
-                    {
-                        add_state.expression.clear();
-                    }
+                {
+                    add_state.expression.clear();
                 }
             }
         });
