@@ -238,13 +238,21 @@ in {
       // {
         name = "elo-profiling-shell";
         buildInputs = shellAttrs.buildInputs ++ [tracy];
-        shellHook =
-          shellAttrs.shellHook
-          + ''
-            echo "Profiling shell:"
-            echo "  • Tracy GUI is available"
-            echo "  • Run Elodin with: cargo run -p elodin --features tracy"
-          '';
+        shellHook = lib.replaceStrings
+          [
+            "exec ${pkgs.zsh}/bin/zsh"
+          ]
+          [
+            ''
+              echo "Profiling shell:"
+              echo "  • Tracy GUI is available by running 'tracy'"
+              echo "  • Run Elodin with: RUST_LOG=info cargo run -p elodin --features tracy"
+              echo ""
+
+              exec ${pkgs.zsh}/bin/zsh
+            ''
+          ]
+          shellAttrs.shellHook;
       })
     // linuxShellAttrs
   );
