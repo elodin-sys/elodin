@@ -30,13 +30,34 @@ impl Plugin for Mat3MaterialPlugin {
 fn sync_mat3_params_from_component(
     mut materials: ResMut<Assets<Mat3Material>>,
     query: Query<
-        (&Mat3Params, &MeshMaterial3d<Mat3Material>),
+        (
+            Entity,
+            &Mat3Params,
+            Option<&MeshMaterial3d<Mat3Material>>,
+            Option<&Children>,
+        ),
         Changed<Mat3Params>,
     >,
+    child_mesh_materials: Query<&MeshMaterial3d<Mat3Material>>,
+    children_query: Query<&Children>,
 ) {
-    for (comp, mesh_material) in &query {
-        if let Some(material) = materials.get_mut(&mesh_material.0) {
-            material.extension.params = comp.linear.into();
+    for (entity, comp, maybe_mesh_material, maybe_children) in &query {
+        let params: Mat3Uniforms = comp.linear.into();
+
+        if let Some(mesh_material) = maybe_mesh_material {
+            if let Some(material) = materials.get_mut(&mesh_material.0) {
+                material.extension.params = params;
+            }
+        }
+
+        if maybe_children.is_some() {
+            for descendant in children_query.iter_descendants(entity) {
+                if let Ok(mesh_material) = child_mesh_materials.get(descendant) {
+                    if let Some(material) = materials.get_mut(&mesh_material.0) {
+                        material.extension.params = params;
+                    }
+                }
+            }
         }
     }
 }
