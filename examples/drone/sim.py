@@ -159,9 +159,6 @@ def world() -> tuple[el.World, el.EntityId]:
             }
         }
         
-        vector_arrow "(1, 0, 0)" origin="presence.world_pos" scale=1.0 name="Presence Axis X" body_frame=#true
-        vector_arrow "(0, 1, 0)" origin="presence.world_pos" scale=1.0 name="Presence Axis Y" body_frame=#true
-        vector_arrow "(0, 0, 1)" origin="presence.world_pos" scale=1.0 name="Presence Axis Z" body_frame=#true
     """
         + object_mesh,
         "presence.kdl",
