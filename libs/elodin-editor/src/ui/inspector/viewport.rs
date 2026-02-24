@@ -194,10 +194,8 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
                         persp.near = near;
                         persp.far = far;
 
-                        if near_changed {
-                            if let Ok(mut editor_cam) = editor_cams.get_mut(camera) {
-                                editor_cam.perspective.near_clip_limits = near..near;
-                            }
+                        if near_changed && let Ok(mut editor_cam) = editor_cams.get_mut(camera) {
+                            editor_cam.perspective.near_clip_limits = near..near;
                         }
                     }
 
