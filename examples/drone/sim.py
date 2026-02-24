@@ -129,7 +129,7 @@ def world() -> tuple[el.World, el.EntityId]:
     object_mesh = """
     object_3d presence.world_pos {
         ellipsoid scale="(1.2, 0.7, 0.5)" {
-            color 255 196 107 128
+            color 255 196 107 64
         }
         icon builtin="adjust" {
             visibility_range min=500.0
@@ -144,7 +144,7 @@ def world() -> tuple[el.World, el.EntityId]:
 
         tabs {
             hsplit name = "Viewport" {
-                viewport name=FrustumSource pos="presence.world_pos + (0,0,0,0, 4,3,3)" look_at="presence.world_pos" show_grid=#true create_frustum=#true frustums_color="yalk" frustums_thickness=0.008 active=#true
+                viewport name=FrustumSource pos="presence.world_pos + (0,0,0,0, 4,3,3)" look_at="presence.world_pos" show_grid=#true create_frustum=#true frustums_color="(255,80,32)" frustums_thickness=0.010 active=#true
                 viewport name=IntersectionView pos="presence.world_pos + (0,0,0,0, 2,2,2)" look_at="presence.world_pos" show_grid=#true show_frustums=#true active=#true
                 vsplit share=0.35 {
                     graph "presence.angle_desired" name="angle_desired"
