@@ -159,10 +159,6 @@ def world() -> tuple[el.World, el.EntityId]:
             }
         }
         
-        // important to keep these active as our only regression tests for the multiple window panels
-        window path="examples/drone/motor-panel.kdl"
-        window path="examples/drone/rate-control-panel.kdl"
-
         vector_arrow "(1, 0, 0)" origin="presence.world_pos" scale=1.0 name="Presence Axis X" body_frame=#true
         vector_arrow "(0, 1, 0)" origin="presence.world_pos" scale=1.0 name="Presence Axis Y" body_frame=#true
         vector_arrow "(0, 0, 1)" origin="presence.world_pos" scale=1.0 name="Presence Axis Z" body_frame=#true
