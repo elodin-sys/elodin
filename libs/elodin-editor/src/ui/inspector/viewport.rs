@@ -5,6 +5,7 @@ use bevy::{
     camera::visibility::Visibility,
     ecs::{entity::Entity, system::Query},
 };
+use bevy_editor_cam::prelude::EditorCam;
 use bevy_egui::egui::{self, Align};
 use bevy_infinite_grid::InfiniteGrid;
 use impeller2_bevy::EntityMap;
@@ -70,6 +71,7 @@ pub struct InspectorViewport<'w, 's> {
     viewport_configs: Query<'w, 's, &'static mut ViewportConfig>,
     viewport_rects: Query<'w, 's, &'static ViewportRect, With<MainCamera>>,
     grid_visibility: Query<'w, 's, &'static mut Visibility, With<InfiniteGrid>>,
+    editor_cams: Query<'w, 's, &'static mut EditorCam>,
     eql_ctx: ResMut<'w, EqlContext>,
 }
 
@@ -94,6 +96,7 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
             mut viewport_configs,
             viewport_rects,
             mut grid_visibility,
+            mut editor_cams,
             eql_ctx,
         } = state_mut;
 
@@ -163,27 +166,40 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
                     ui.add_space(8.0);
                     let mut near = persp.near;
                     let mut far = persp.far;
+                    let mut near_changed = false;
+                    let mut far_changed = false;
 
                     ui.horizontal(|ui| {
                         ui.label(egui::RichText::new("NEAR").color(scheme.text_secondary));
                         ui.with_layout(egui::Layout::right_to_left(Align::Min), |ui| {
-                            ui.add(egui::DragValue::new(&mut near).speed(0.001));
+                            near_changed |= ui
+                                .add(egui::DragValue::new(&mut near).speed(0.001))
+                                .changed();
                         });
                     });
 
                     ui.horizontal(|ui| {
                         ui.label(egui::RichText::new("FAR").color(scheme.text_secondary));
                         ui.with_layout(egui::Layout::right_to_left(Align::Min), |ui| {
-                            ui.add(egui::DragValue::new(&mut far).speed(0.01));
+                            far_changed |=
+                                ui.add(egui::DragValue::new(&mut far).speed(0.01)).changed();
                         });
                     });
 
-                    near = near.max(0.0001);
-                    if far <= near + 0.0001 {
-                        far = near + 0.0001;
+                    if near_changed || far_changed {
+                        near = near.max(0.0001);
+                        if far <= near + 0.0001 {
+                            far = near + 0.0001;
+                        }
+                        persp.near = near;
+                        persp.far = far;
+
+                        if near_changed {
+                            if let Ok(mut editor_cam) = editor_cams.get_mut(camera) {
+                                editor_cam.perspective.near_clip_limits = near..near;
+                            }
+                        }
                     }
-                    persp.near = near;
-                    persp.far = far;
 
                     ui.add_space(8.0);
                     let derived_aspect = viewport_rects
