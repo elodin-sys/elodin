@@ -429,7 +429,7 @@ impl WidgetSystem for InspectorObject3D<'_, '_> {
 
             if changed {
                 if let Ok(ellipse_visual) = ellipse_visuals.get(entity) {
-                    commands.entity(ellipse_visual.child).despawn();
+                    commands.entity(entity).despawn_children();
                     commands.entity(entity).remove::<EllipsoidVisual>();
                 }
 
@@ -443,16 +443,14 @@ impl WidgetSystem for InspectorObject3D<'_, '_> {
 
                 commands.entity(entity).remove::<SceneRoot>();
 
-                if let Some(ellipse) = spawn_mesh(
+                spawn_mesh(
                     &mut commands,
                     entity,
                     &object_3d_state.data.mesh,
                     &mut material_assets,
                     &mut mesh_assets,
                     &assets,
-                ) {
-                    commands.entity(entity).insert(ellipse);
-                }
+                );
             }
         });
 

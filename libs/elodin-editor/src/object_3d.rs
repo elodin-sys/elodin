@@ -34,9 +34,8 @@ pub struct Object3DState {
     pub data: Object3D,
 }
 
-#[derive(Component)]
+#[derive(Component, Reflect)]
 pub struct EllipsoidVisual {
-    pub child: Entity,
     pub color: impeller2_wkt::Color,
     pub oversized: bool,
     pub max_extent: f32,
@@ -702,12 +701,15 @@ pub fn update_object_3d_system(
         &mut impeller2_wkt::WorldPos,
         Option<&mut EllipsoidVisual>,
         Has<WorldPosReceived>,
+        Option<&Children>,
     )>,
     mut transforms: Query<&mut Transform>,
     entity_map: Res<EntityMap>,
     component_value_maps: Query<&'static ComponentValue>,
 ) {
-    for (entity, mut object_3d, mut pos, ellipse, has_received) in objects_query.iter_mut() {
+    for (entity, mut object_3d, mut pos, ellipse, has_received, children_maybe) in
+        objects_query.iter_mut()
+    {
         if let Some(compiled_expr) = &object_3d.compiled_expr
             && let Ok(component_value) = compiled_expr.execute(&entity_map, &component_value_maps)
             && let Some(world_pos) = component_value.as_world_pos()
@@ -732,14 +734,24 @@ pub fn update_object_3d_system(
         match evaluate_scale(&object_3d, &entity_map, &component_value_maps) {
             Ok(scale) => {
                 let scale = scale.max(Vec3::splat(f32::EPSILON));
-                if let Ok(mut child_transform) = transforms.get_mut(ellipse.child) {
-                    child_transform.scale = scale;
-                    child_transform.translation = Vec3::ZERO;
-                }
-                ellipse.max_extent = scale.max_element();
-                ellipse.oversized = ellipse.max_extent > ELLIPSOID_OVERSIZED_THRESHOLD;
-                if object_3d.scale_expr.is_some() {
-                    object_3d.scale_error = None;
+                if let Some(children) = children_maybe {
+                    if children.len() != 1 {
+                        warn!(
+                            "object_3d ellipse had {} children expected 1.",
+                            children.len()
+                        );
+                    }
+                    if let Some(child) = children.get(0) {
+                        if let Ok(mut child_transform) = transforms.get_mut(*child) {
+                            child_transform.scale = scale;
+                            child_transform.translation = Vec3::ZERO;
+                        }
+                        ellipse.max_extent = scale.max_element();
+                        ellipse.oversized = ellipse.max_extent > ELLIPSOID_OVERSIZED_THRESHOLD;
+                        if object_3d.scale_expr.is_some() {
+                            object_3d.scale_error = None;
+                        }
+                    }
                 }
             }
             Err(err) => {
@@ -1140,17 +1152,14 @@ pub fn create_object_3d_entity(
         ))
         .id();
 
-    if let Some(ellipse) = spawn_mesh(
+    spawn_mesh(
         commands,
         entity_id,
         &data.mesh,
         material_assets,
         mesh_assets,
         assets,
-    ) {
-        commands.entity(entity_id).insert(ellipse);
-    }
-
+    );
     entity_id
 }
 
@@ -1218,7 +1227,7 @@ pub fn spawn_mesh(
     material_assets: &mut ResMut<Assets<StandardMaterial>>,
     mesh_assets: &mut ResMut<Assets<Mesh>>,
     assets: &Res<AssetServer>,
-) -> Option<EllipsoidVisual> {
+) {
     match mesh {
         impeller2_wkt::Object3DMesh::Glb {
             path,
@@ -1258,7 +1267,6 @@ pub fn spawn_mesh(
             commands
                 .entity(entity)
                 .insert(Name::new(format!("object_3d {}", path)));
-            None
         }
         impeller2_wkt::Object3DMesh::Mesh { mesh, material } => {
             let mut material = material.clone().into_bevy();
@@ -1281,7 +1289,6 @@ pub fn spawn_mesh(
                 ChildOf(entity),
                 Name::new("object_3d_mesh"),
             ));
-            None
         }
         impeller2_wkt::Object3DMesh::Ellipsoid { color, .. } => {
             let bevy_color = Color::srgba(color.r, color.g, color.b, color.a);
@@ -1318,12 +1325,14 @@ pub fn spawn_mesh(
                 ))
                 .id();
 
-            Some(EllipsoidVisual {
-                child,
-                color: *color,
-                oversized: false,
-                max_extent: 0.0,
-            })
+            commands.entity(entity).insert((
+                EllipsoidVisual {
+                    color: *color,
+                    oversized: false,
+                    max_extent: 0.0,
+                },
+                Name::new("object_3d ellipsoid"),
+            ));
         }
     }
 }
