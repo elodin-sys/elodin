@@ -35,6 +35,7 @@ use impeller2_wkt::{EarliestTimestamp, LastUpdated};
 use nox::Tensor;
 use object_3d::create_object_3d_entity;
 use plugins::frustum::FrustumPlugin;
+use plugins::frustum_intersection::FrustumIntersectionPlugin;
 use plugins::gizmos::GizmoPlugin;
 use plugins::navigation_gizmo::{NavigationGizmoPlugin, RenderLayerAlloc};
 use plugins::view_cube::{ViewCubeConfig, ViewCubePlugin};
@@ -212,6 +213,7 @@ impl Plugin for EditorPlugin {
             })
             .add_plugins(impeller2_bevy::Impeller2Plugin)
             .add_plugins(FrustumPlugin)
+            .add_plugins(FrustumIntersectionPlugin)
             .add_plugins(GizmoPlugin)
             .add_plugins(ui::UiPlugin)
             .add_plugins(FrameTimeDiagnosticsPlugin::default())
