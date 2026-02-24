@@ -142,6 +142,7 @@ pub enum SelectedObject {
     Entity(EntityPair),
     Viewport {
         camera: Entity,
+        title: String,
     },
     Graph {
         graph_id: Entity,
@@ -176,7 +177,7 @@ impl SelectedObject {
         match self {
             SelectedObject::None => None,
             SelectedObject::Entity(pair) => Some(pair.bevy),
-            SelectedObject::Viewport { camera } => Some(*camera),
+            SelectedObject::Viewport { camera, .. } => Some(*camera),
             SelectedObject::Graph { graph_id } => Some(*graph_id),
             SelectedObject::QueryTable { table_id } => Some(*table_id),
             SelectedObject::Monitor { monitor_id } => Some(*monitor_id),
@@ -680,12 +681,30 @@ fn clamp_viewport_to_window(
     Some((pos, size))
 }
 
+fn fit_size_to_aspect(size: Vec2, aspect: f32) -> Vec2 {
+    if !(aspect > 0.0 && size.x > 0.0 && size.y > 0.0) {
+        return size;
+    }
+
+    let current = size.x / size.y;
+    if current > aspect {
+        Vec2::new(size.y * aspect, size.y)
+    } else {
+        Vec2::new(size.x, size.x / aspect)
+    }
+}
+
+type MainCameraViewportQueryItem = (
+    Entity,
+    &'static ViewportRect,
+    Option<&'static GraphState>,
+    Option<&'static tiles::ViewportConfig>,
+    &'static mut Camera,
+);
+
 fn set_camera_viewport(
     window: Query<(Entity, &Window, &bevy_egui::EguiContextSettings), With<PrimaryWindow>>,
-    mut main_camera_query: Query<
-        (Entity, &ViewportRect, Option<&GraphState>, &mut Camera),
-        With<MainCamera>,
-    >,
+    mut main_camera_query: Query<MainCameraViewportQueryItem, With<MainCamera>>,
     mut entries: Local<Vec<(Entity, bool)>>,
 ) {
     let order_offset = PRIMARY_ORDER_OFFSET;
@@ -695,7 +714,7 @@ fn set_camera_viewport(
     entries.extend(
         main_camera_query
             .iter()
-            .map(|(entity, _, graph_state, _)| (entity, graph_state.is_some())),
+            .map(|(entity, _, graph_state, _, _)| (entity, graph_state.is_some())),
     );
     // Stable ordering: non-graph cameras first, then graphs; break ties by entity id.
     entries.sort_by_key(|(entity, is_graph)| (*is_graph, entity.index()));
@@ -707,7 +726,8 @@ fn set_camera_viewport(
     let window_size: Vec2 = window.physical_size().as_vec2();
 
     for (entity, is_graph) in &entries {
-        let Ok((_, viewport_rect, _graph_state, mut camera)) = main_camera_query.get_mut(*entity)
+        let Ok((_, viewport_rect, _graph_state, viewport_config, mut camera)) =
+            main_camera_query.get_mut(*entity)
         else {
             continue;
         };
@@ -741,8 +761,16 @@ fn set_camera_viewport(
         camera.is_active = true;
         let viewport_pos = available_rect.left_top().to_vec2() * scale_factor;
         let viewport_size = available_rect.size() * scale_factor;
-        let viewport_pos = Vec2::new(viewport_pos.x, viewport_pos.y);
-        let viewport_size = Vec2::new(viewport_size.x, viewport_size.y);
+        let mut viewport_pos = Vec2::new(viewport_pos.x, viewport_pos.y);
+        let mut viewport_size = Vec2::new(viewport_size.x, viewport_size.y);
+
+        if let Some(aspect) = viewport_config.and_then(|config| config.aspect) {
+            let fitted = fit_size_to_aspect(viewport_size, aspect);
+            let pad = (viewport_size - fitted) * 0.5;
+            viewport_pos += pad;
+            viewport_size = fitted;
+        }
+
         if let Some((clamped_pos, clamped_size)) =
             clamp_viewport_to_window(viewport_pos, viewport_size, window_size)
         {

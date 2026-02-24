@@ -18,6 +18,9 @@ categories = [
 ]
 edition = "2024"
 
+[lib]
+test = false
+
 # NOTE! As a workaround for https://github.com/rust-lang/rust/issues/97708,
 # maitake uses some `no_mangle` functions. This will cause linker errors if
 # you attempt to use two versions of maitake in the same binary. Until then,

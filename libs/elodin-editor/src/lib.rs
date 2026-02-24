@@ -34,6 +34,7 @@ use impeller2_wkt::{CurrentTimestamp, NewConnection, Object3D, SetStreamState, W
 use impeller2_wkt::{EarliestTimestamp, LastUpdated};
 use nox::Tensor;
 use object_3d::create_object_3d_entity;
+use plugins::frustum::FrustumPlugin;
 use plugins::gizmos::GizmoPlugin;
 use plugins::navigation_gizmo::{NavigationGizmoPlugin, RenderLayerAlloc};
 use plugins::view_cube::{ViewCubeConfig, ViewCubePlugin};
@@ -210,6 +211,7 @@ impl Plugin for EditorPlugin {
                 config: ViewCubeConfig::editor_mode(),
             })
             .add_plugins(impeller2_bevy::Impeller2Plugin)
+            .add_plugins(FrustumPlugin)
             .add_plugins(GizmoPlugin)
             .add_plugins(ui::UiPlugin)
             .add_plugins(FrameTimeDiagnosticsPlugin::default())
@@ -260,6 +262,7 @@ impl Plugin for EditorPlugin {
             .insert_resource(ClearColor(get_scheme().bg_secondary.into_bevy()))
             .insert_resource(TimeRangeBehavior::default())
             .insert_resource(SelectedTimeRange(Timestamp(i64::MIN)..Timestamp(i64::MAX)))
+            .insert_resource(FullTimeRange(Timestamp(0)..Timestamp(1_000_000)))
             .init_resource::<EqlContext>()
             .init_resource::<SyncedObject3d>()
             .init_resource::<ui::data_overview::ComponentTimeRanges>()
@@ -346,6 +349,13 @@ fn setup_egui_global_system(mut egui_global_settings: ResMut<EguiGlobalSettings>
 fn setup_egui_context(mut contexts: Query<&mut EguiContextSettings>) {
     for mut context in &mut contexts {
         context.capture_pointer_input = false;
+        // Workaround for https://github.com/emilk/egui/issues/5008
+        // On Linux, IME activation via set_ime_allowed(true) causes the compositor to
+        // capture Backspace/arrow key events, preventing them from reaching TextEdit.
+        #[cfg(target_os = "linux")]
+        {
+            context.enable_ime = false;
+        }
     }
 }
 
@@ -1007,17 +1017,29 @@ impl Default for SelectedTimeRange {
     }
 }
 
+#[derive(Resource, Clone)]
+pub struct FullTimeRange(pub Range<Timestamp>);
+
 pub fn set_selected_range(
     mut selected_range: ResMut<SelectedTimeRange>,
+    mut full_range: ResMut<FullTimeRange>,
     earliest: Res<EarliestTimestamp>,
     latest: Res<LastUpdated>,
     behavior: Res<TimeRangeBehavior>,
 ) {
+    if earliest.0 < latest.0 {
+        full_range.0 = earliest.0..latest.0;
+    }
+
     match behavior.calculate_selected_range(earliest.0, latest.0) {
         Ok(range) => {
             selected_range.0 = range;
         }
-        Err(TimeRangeError::NoData) => {}
+        Err(TimeRangeError::NoData) => {
+            if selected_range.0.start.0 == i64::MIN || selected_range.0.end.0 == i64::MAX {
+                selected_range.0 = Timestamp(0)..Timestamp(1_000_000);
+            }
+        }
         Err(TimeRangeError::InvalidRange { start, end }) => {
             bevy::log::warn!(
                 "Time range selection skipped because start ({start:?}) is not before end ({end:?})"

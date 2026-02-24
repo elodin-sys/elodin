@@ -13,17 +13,18 @@ use nox::{ArrayBuf, ArrayRepr, Vector3};
 
 use crate::EqlContext;
 use crate::object_3d::{ComponentArrayExt, EditableEQL, compile_eql_expr};
-use crate::ui::CameraQuery;
 use crate::ui::button::EButton;
-use crate::ui::colors::get_scheme;
+use crate::ui::colors::{EColor, get_scheme};
 use crate::ui::theme::configure_input_with_border;
 use crate::ui::widgets::WidgetSystem;
+use crate::ui::{CameraQuery, ViewportRect};
 use crate::{
     GridHandle, MainCamera,
+    ui::tiles::ViewportConfig,
     ui::{label::ELabel, theme, utils::MarginSides},
 };
 
-use super::{empty_inspector, eql_autocomplete, query};
+use super::{color_popup, empty_inspector, eql_autocomplete, query};
 
 /// Extract a 3-vector from a ComponentValue (e.g. F64 array of length >= 3). Returns None if not a numeric array or length < 3.
 fn extract_vec3(val: &ComponentValue) -> Option<Vector3<f64, ArrayRepr>> {
@@ -66,12 +67,14 @@ impl Viewport {
 pub struct InspectorViewport<'w, 's> {
     camera_query: Query<'w, 's, CameraQuery, With<MainCamera>>,
     viewports: Query<'w, 's, &'static mut Viewport>,
+    viewport_configs: Query<'w, 's, &'static mut ViewportConfig>,
+    viewport_rects: Query<'w, 's, &'static ViewportRect, With<MainCamera>>,
     grid_visibility: Query<'w, 's, &'static mut Visibility, With<InfiniteGrid>>,
     eql_ctx: ResMut<'w, EqlContext>,
 }
 
 impl WidgetSystem for InspectorViewport<'_, '_> {
-    type Args = Entity;
+    type Args = (Entity, String);
     type Output = ();
 
     fn ui_system(
@@ -83,11 +86,13 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
         let scheme = get_scheme();
         let state_mut = state.get_mut(world);
 
-        let camera = args;
+        let (camera, title) = args;
 
         let InspectorViewport {
             mut camera_query,
             mut viewports,
+            mut viewport_configs,
+            viewport_rects,
             mut grid_visibility,
             eql_ctx,
         } = state_mut;
@@ -100,10 +105,15 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
         let Ok(mut viewport) = viewports.get_mut(camera) else {
             return;
         };
+        let Ok(mut viewport_config) = viewport_configs.get_mut(camera) else {
+            return;
+        };
 
         ui.spacing_mut().item_spacing.y = 8.0;
+        let title = title.trim();
+        let title = if title.is_empty() { "Viewport" } else { title };
         ui.add(
-            ELabel::new("Viewport")
+            ELabel::new(title)
                 .padding(egui::Margin::same(8).bottom(24.0))
                 .bottom_stroke(egui::Stroke {
                     color: get_scheme().border_primary,
@@ -149,6 +159,87 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
                     {
                         persp.fov = fov.to_radians();
                     }
+
+                    ui.add_space(8.0);
+                    let mut near = persp.near;
+                    let mut far = persp.far;
+
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new("NEAR").color(scheme.text_secondary));
+                        ui.with_layout(egui::Layout::right_to_left(Align::Min), |ui| {
+                            ui.add(egui::DragValue::new(&mut near).speed(0.001));
+                        });
+                    });
+
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new("FAR").color(scheme.text_secondary));
+                        ui.with_layout(egui::Layout::right_to_left(Align::Min), |ui| {
+                            ui.add(egui::DragValue::new(&mut far).speed(0.01));
+                        });
+                    });
+
+                    near = near.max(0.0001);
+                    if far <= near + 0.0001 {
+                        far = near + 0.0001;
+                    }
+                    persp.near = near;
+                    persp.far = far;
+
+                    ui.add_space(8.0);
+                    let derived_aspect = viewport_rects
+                        .get(camera)
+                        .ok()
+                        .and_then(|rect| rect.0)
+                        .and_then(|rect| {
+                            let size = rect.size();
+                            if size.x > 0.0 && size.y > 0.0 {
+                                Some((size.x / size.y, size.x, size.y))
+                            } else {
+                                None
+                            }
+                        });
+
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new("REAL ASPECT").color(scheme.text_secondary));
+                        ui.with_layout(egui::Layout::right_to_left(Align::Min), |ui| {
+                            if let Some((aspect, width, height)) = derived_aspect {
+                                ui.label(format!("{aspect:.3} ({width:.0}x{height:.0})"));
+                            } else {
+                                ui.label("N/A");
+                            }
+                        });
+                    });
+
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new("ASPECT MODE").color(scheme.text_secondary));
+                        ui.with_layout(egui::Layout::right_to_left(Align::Min), |ui| {
+                            let fixed_selected = viewport_config.aspect.is_some();
+                            if ui.selectable_label(fixed_selected, "FIXED").clicked()
+                                && viewport_config.aspect.is_none()
+                            {
+                                viewport_config.aspect = Some(
+                                    derived_aspect
+                                        .map(|(aspect, _, _)| aspect)
+                                        .unwrap_or(persp.aspect_ratio.max(0.0001)),
+                                );
+                            }
+                            ui.add_space(8.0);
+                            if ui.selectable_label(!fixed_selected, "AUTO").clicked() {
+                                viewport_config.aspect = None;
+                            }
+                        });
+                    });
+
+                    if let Some(aspect) = viewport_config.aspect.as_mut() {
+                        ui.horizontal(|ui| {
+                            ui.label(egui::RichText::new("ASPECT").color(scheme.text_secondary));
+                            ui.with_layout(egui::Layout::right_to_left(Align::Min), |ui| {
+                                if ui.add(egui::DragValue::new(aspect).speed(0.01)).changed() {
+                                    *aspect = (*aspect).max(0.0001);
+                                }
+                            });
+                        });
+                    }
                 });
         }
 
@@ -173,6 +264,77 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
                     });
                 });
         }
+
+        ui.separator();
+        egui::Frame::NONE
+            .inner_margin(egui::Margin::symmetric(8, 8))
+            .show(ui, |ui| {
+                let create_button_width = 88.0;
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new("FRUSTUM").color(scheme.text_secondary));
+                    ui.with_layout(egui::Layout::right_to_left(Align::Min), |ui| {
+                        let frustum_created = viewport_config.create_frustum;
+                        let button = if frustum_created {
+                            EButton::red("DELETE")
+                        } else {
+                            EButton::highlight("CREATE")
+                        };
+                        if ui.add(button.width(create_button_width)).clicked() {
+                            viewport_config.create_frustum = !frustum_created;
+                        }
+                    });
+                });
+
+                if viewport_config.create_frustum {
+                    ui.add_space(8.0);
+
+                    let mut frustums_color = viewport_config.frustums_color.into_color32();
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new("FRUSTUM COLOR").color(scheme.text_secondary));
+                        ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
+                            let swatch = ui.add(
+                                egui::Button::new("")
+                                    .fill(frustums_color)
+                                    .stroke(egui::Stroke::new(1.0, scheme.border_primary))
+                                    .corner_radius(egui::CornerRadius::same(10))
+                                    .min_size(egui::vec2(20.0, 20.0)),
+                            );
+                            let color_id = ui.auto_id_with("frustums_color");
+                            if swatch.clicked() {
+                                egui::Popup::toggle_id(ui.ctx(), color_id);
+                            }
+                            color_popup(ui, &mut frustums_color, color_id, &swatch);
+                        });
+                    });
+                    viewport_config.frustums_color =
+                        impeller2_wkt::Color::from_color32(frustums_color);
+
+                    ui.add_space(8.0);
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new("THICKNESS").color(scheme.text_secondary));
+                        ui.with_layout(egui::Layout::right_to_left(Align::Min), |ui| {
+                            let mut thickness = viewport_config.frustums_thickness;
+                            if ui
+                                .add(egui::DragValue::new(&mut thickness).speed(0.001))
+                                .changed()
+                            {
+                                viewport_config.frustums_thickness = thickness.max(0.0001);
+                            }
+                        });
+                    });
+                }
+
+                ui.add_space(8.0);
+                ui.separator();
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new("SHOW FRUSTUMS").color(scheme.text_secondary));
+                    ui.with_layout(egui::Layout::right_to_left(Align::Min), |ui| {
+                        theme::configure_input_with_border(ui.style_mut());
+                        ui.checkbox(&mut viewport_config.show_frustums, "");
+                    });
+                });
+            });
     }
 }
 

@@ -202,6 +202,7 @@ fn panel(
             Panel::Viewport(viewport) => {
                 *selected_object = SelectedObject::Viewport {
                     camera: viewport.aux,
+                    title: p.label().to_string(),
                 }
             }
             Panel::Graph(graph) => {

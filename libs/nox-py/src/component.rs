@@ -1,14 +1,48 @@
-use crate::*;
+use elodin_macros::{Component, ReprMonad};
+use nox::{Op, OwnedRepr, ReprMonad, Scalar};
+
+pub trait Component:
+    impeller2::component::Component + for<'a> nox::FromBuilder<Item<'a> = Self> + ReprMonad<Op>
+{
+}
+
+#[derive(Component, ReprMonad)]
+pub struct WorldPos<R: OwnedRepr = Op>(pub nox::SpatialTransform<f64, R>);
+
+#[derive(Component, ReprMonad)]
+pub struct Seed<R: OwnedRepr = Op>(pub Scalar<u64, R>);
+
+#[derive(Component, ReprMonad)]
+pub struct Time<R: OwnedRepr = Op>(pub Scalar<f64, R>);
+
+impl Seed {
+    pub fn zero() -> Self {
+        Seed(0u64.into())
+    }
+}
+
+impl Time {
+    pub fn zero() -> Self {
+        Time(Scalar::from(0f64))
+    }
+}
+
+// --- Python-facing PyComponent ---
 
 use std::collections::HashMap;
 
 use pyo3::IntoPyObjectExt;
+use pyo3::exceptions::PyValueError;
+use pyo3::prelude::*;
 use pyo3::types::PyList;
 use pyo3::{intern, types::PySequence};
 
+use crate::Error;
+use impeller2::types::ComponentId;
+
 #[derive(Clone, Debug)]
-#[pyclass]
-pub struct Component {
+#[pyclass(name = "Component")]
+pub struct PyComponent {
     #[pyo3(set)]
     pub name: String,
     #[pyo3(get, set)]
@@ -16,14 +50,14 @@ pub struct Component {
     pub metadata: HashMap<String, String>,
 }
 
-impl Component {
+impl PyComponent {
     pub fn component_id(&self) -> ComponentId {
         ComponentId::new(&self.name)
     }
 
     pub fn from_component<C: impeller2::component::Component>() -> Self {
         let schema = C::schema();
-        Component {
+        PyComponent {
             name: C::NAME.to_string(),
             ty: Some(ComponentType {
                 shape: schema.shape().iter().map(|&x| x as u64).collect(),
@@ -35,7 +69,7 @@ impl Component {
 }
 
 #[pymethods]
-impl Component {
+impl PyComponent {
     #[new]
     #[pyo3(signature = (name, ty = None, metadata = HashMap::default()))]
     pub fn new(
@@ -70,13 +104,12 @@ impl Component {
 
     #[staticmethod]
     pub fn name(py: Python<'_>, component: PyObject) -> Result<String, Error> {
-        Component::of(py, component).map(|metadata| metadata.name.to_string())
+        PyComponent::of(py, component).map(|metadata| metadata.name.to_string())
     }
 
     #[staticmethod]
     pub fn index(py: Python<'_>, component: PyObject) -> Result<ShapeIndexer, Error> {
-        let component = Component::of(py, component)?;
-        //let metadata = Metadata::of(py, component)?.inner;
+        let component = PyComponent::of(py, component)?;
         let ty = component.ty.unwrap();
         let strides: Vec<usize> = ty
             .shape
@@ -107,7 +140,7 @@ impl Component {
                     .downcast_bound::<PySequence>(py)
                     .map_err(PyErr::from)
                     .and_then(|seq| seq.get_item(0))
-                    .and_then(|item| item.extract::<Component>())
+                    .and_then(|item| item.extract::<PyComponent>())
             })?;
 
         if component_data.ty.is_none()
@@ -119,7 +152,7 @@ impl Component {
                         .downcast_bound::<PySequence>(py)
                         .map_err(PyErr::from)
                         .and_then(|seq| seq.get_item(0))
-                        .and_then(|item| item.extract::<Component>())
+                        .and_then(|item| item.extract::<PyComponent>())
                 })
                 .ok()
                 .and_then(|component| component.ty)
@@ -224,8 +257,8 @@ impl From<elodin_db::ComponentSchema> for ComponentType {
     }
 }
 
-impl From<Component> for elodin_db::ComponentSchema {
-    fn from(val: Component) -> Self {
+impl From<PyComponent> for elodin_db::ComponentSchema {
+    fn from(val: PyComponent) -> Self {
         let ty = val.ty.unwrap();
         elodin_db::ComponentSchema {
             prim_type: ty.ty.into(),
@@ -293,7 +326,7 @@ pub struct ShapeIndexer {
     strides: Vec<usize>,
     shape: Vec<usize>,
     index: Vec<usize>,
-    py_list: Py<PyAny>, // Changed from Py<PyList> to Py<PyAny> which has Clone
+    py_list: Py<PyAny>,
     items: Vec<ShapeIndexer>,
 }
 
@@ -338,23 +371,19 @@ impl ShapeIndexer {
                 .collect()
         };
         let py_list = Python::with_gil(|py| {
-            // Create a Python list of items
             let items_py: Vec<PyObject> = items
                 .iter()
                 .map(|x| {
-                    // Extract what we need and create a new Python object
                     let new_indexer = ShapeIndexer::new(
                         x.component_name.clone(),
                         x.shape.clone(),
                         x.index.clone(),
                         x.strides.clone(),
                     );
-                    // Convert to PyObject
                     Py::new(py, new_indexer).unwrap().into_py_any(py).unwrap()
                 })
                 .collect();
 
-            // Create a PyList from the items and convert to Py<PyAny>
             PyList::new(py, &items_py).unwrap().into_py_any(py).unwrap()
         });
         ShapeIndexer {
@@ -383,5 +412,18 @@ impl ShapeIndexer {
 
     fn __getitem__(&self, py: Python<'_>, index: PyObject) -> PyResult<PyObject> {
         self.py_list.call_method1(py, "__getitem__", (index,))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{Seed, WorldPos};
+    use impeller2::component::Component;
+    use nox::Op;
+
+    #[test]
+    fn component_names() {
+        assert_eq!(WorldPos::<Op>::NAME, "world_pos");
+        assert_eq!(Seed::<Op>::NAME, "seed");
     }
 }

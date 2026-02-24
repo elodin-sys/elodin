@@ -2789,4 +2789,96 @@ mod tests {
 
         let _ = std::fs::remove_dir_all(&temp_dir);
     }
+
+    /// Verify that DB::open() correctly recovers earliest_timestamp when ALL
+    /// components have dense data starting at timestamp 0 (e.g., simulations
+    /// using relative time). This is the FT13 scenario where the `> 0` filters
+    /// (from d5436a4) reject every component's start, producing a degenerate
+    /// range that the editor displays as ~213 billion days.
+    #[test]
+    async fn test_open_dense_epoch_zero_data() {
+        let subscriber = tracing_subscriber::FmtSubscriber::new();
+        let _ = tracing::subscriber::set_global_default(subscriber);
+
+        let temp_dir =
+            std::env::temp_dir().join(format!("elodin_db_epoch_zero_{}", fastrand::u64(..)));
+        if temp_dir.exists() {
+            let _ = std::fs::remove_dir_all(&temp_dir);
+        }
+
+        let comp_a = ComponentId::new("rocket_pos");
+        let comp_b = ComponentId::new("rocket_vel");
+        let schema = elodin_db::ComponentSchema::new(PrimType::F64, &[1]);
+
+        let time_step_us: i64 = 2_000; // 2ms time step
+        let num_ticks: i64 = 100;
+
+        {
+            let db = elodin_db::DB::create(temp_dir.clone()).unwrap();
+
+            db.with_state_mut(|state| {
+                state
+                    .insert_component(comp_a, schema.clone(), &temp_dir)
+                    .unwrap();
+                state
+                    .insert_component(comp_b, schema.clone(), &temp_dir)
+                    .unwrap();
+            });
+
+            db.with_state(|state| {
+                let data = 1.0f64.to_le_bytes();
+
+                let a = state.get_component(comp_a).unwrap();
+                let b = state.get_component(comp_b).unwrap();
+
+                // Two initialization points at timestamp 0, then dense 2ms data
+                // — mirrors the FT13 flight test pattern.
+                a.time_series.push_buf(Timestamp(0), &data).unwrap();
+                a.time_series.push_buf(Timestamp(0), &data).unwrap();
+                b.time_series.push_buf(Timestamp(0), &data).unwrap();
+                b.time_series.push_buf(Timestamp(0), &data).unwrap();
+
+                for tick in 1..num_ticks {
+                    let ts = Timestamp(tick * time_step_us);
+                    a.time_series.push_buf(ts, &data).unwrap();
+                    b.time_series.push_buf(ts, &data).unwrap();
+                }
+            });
+
+            // Simulate runtime update_min/update_max (the > 0 guard skips ts=0)
+            for tick in 0..num_ticks {
+                let ts = Timestamp(tick * time_step_us);
+                db.last_updated.update_max(ts);
+                if ts.0 > 0 {
+                    db.earliest_timestamp.update_min(ts);
+                }
+            }
+
+            db.flush_all().unwrap();
+        }
+
+        // Re-open — the degenerate-range fallback should recover
+        let db = elodin_db::DB::open(temp_dir.clone()).unwrap();
+        let earliest = db.earliest_timestamp.latest();
+        let last = db.last_updated.latest();
+
+        assert!(
+            earliest < last,
+            "earliest_timestamp ({}) must be < last_updated ({}) — degenerate range not recovered",
+            earliest.0,
+            last.0,
+        );
+        assert_eq!(
+            earliest.0, 0,
+            "earliest_timestamp should be 0 for dense epoch-zero data (got {})",
+            earliest.0,
+        );
+        assert_eq!(
+            last.0,
+            (num_ticks - 1) * time_step_us,
+            "last_updated should be the final tick timestamp"
+        );
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
 }
