@@ -93,12 +93,16 @@ Playback:
 ```
 
 **Key design choices:**
-- Historical backfill via paginated `GetMsgs` (200 frames/page)
-- Live-tail via `FixedRateMsgStream` subscription
-- Playback reads from cache, *never* requests data per-frame from DB
-- Keyframe index for efficient seeking
-- LRU eviction for decoded frames, FIFO for raw frames
-- Works offline once cache is warm
+- **Dual-source concurrent loading**: Backfill and live-tail stream start simultaneously (lines 1013-1014), both populating the same `raw_frames` `BTreeMap`. Neither blocks the other.
+- **Streaming-preferred**: The comment on line 710 states: "The live-tail `FixedRateMsgStream` fills the rest during playback." Backfill provides a burst of historical data, but the live-tail stream is the continuous source of truth.
+- **Paginated backfill**: `GetMsgs` requests 200 frames/page (`BACKFILL_FRAME_LIMIT`), capped at ~10 MB per page to stay under the 64 MB receive-grant ceiling. Auto-paginates until a partial page signals end-of-history.
+- **Immediate transition to Active**: The cache starts empty and fills asynchronously (line 1015). Playback begins immediately against whatever is in the cache.
+- **Cache-driven playback**: Playback reads from cache, *never* requests data per-frame from DB. Decoder is fed from the cache, not directly from network.
+- **Keyframe index** for efficient seeking
+- **LRU eviction** for decoded frames (max 300), **FIFO** for raw frames (max 50,000)
+- **Stream recovery**: If `FixedRateMsgStream` stalls for 30 seconds, both backfill and stream are re-sent (lines 1033-1040).
+
+**This is the reference pattern for the telemetry cache.** The same dual-source concurrent approach (backfill + streaming, both feeding the cache, streaming-preferred) should be adopted for the component data cache.
 
 ### Plot System — `LineTree` + Chunked Loading
 
@@ -168,15 +172,21 @@ The 3D viewport currently receives entity state *only* from the FixedRate stream
 
 ### Core Principles
 
-1. **DB delivers data, Editor owns playback.** The DB streams data to the Editor as efficiently as possible. The Editor decides what to display and when.
+1. **DB delivers data, Editor owns playback.** The DB is a high-performance telemetry database — it should ingest and serve data as blazing fast as possible in all cases. Playback rate, scrubbing, and replay are client concerns, never database concerns.
 
 2. **Cache is the single source of truth for display.** All UI consumers (timeline, viewport, plots, video, inspector) read from the cache at `CurrentTimestamp` or `SelectedTimeRange`. No consumer directly interacts with the DB for position-dependent data.
 
-3. **Local playback timer.** `CurrentTimestamp` advances from a local wall-clock timer in the Editor, scaled by `PlaybackSpeed`. No `SetStreamState` round-trip needed for play/pause/scrub.
+3. **Full-fidelity caching.** The cache stores every sample at full granularity — no downsampling. All data the DB delivers goes into the cache.
 
-4. **Replay is an Editor feature.** Opening a recorded database and playing it back is just "load data into cache, play from cache." No special DB mode needed.
+4. **Local playback timer.** `CurrentTimestamp` advances from a local wall-clock timer in the Editor, scaled by `PlaybackSpeed`. No `SetStreamState` round-trip needed for play/pause/scrub.
 
-5. **Incremental, backward-compatible migration.** Each phase delivers value independently and can be shipped/tested separately.
+5. **Replay is an Editor feature.** `--replay` moves from `elodin-db` to `elodin editor`. The Editor controls replay presentation; the DB just serves data.
+
+6. **Auto-follow in live mode.** When a simulation is actively writing data, the playback marker automatically follows the latest timestamp (matching current behavior).
+
+7. **All streams feed the cache.** Even if multiple streams exist (VTable streams, batched streams, backfill responses), they all populate the same cache. All Editor behavior is cache-driven.
+
+8. **Incremental, backward-compatible migration.** Each phase delivers value independently and can be shipped/tested separately.
 
 ---
 
@@ -202,7 +212,11 @@ TelemetryCache
 
 **Design considerations:**
 
+- **Full-fidelity storage**: Every sample stored at full granularity — no downsampling. The cache is the authoritative local copy of what the DB has delivered.
+
 - **Chunked vs. flat storage**: The plot system's `LineTree` (chunked interval tree) is proven and handles large datasets well. The component cache could use a similar chunked approach, or a simpler `BTreeMap` for entity-state data (which has fewer points than high-frequency sensor data).
+
+- **Dual-source population (matching video stream pattern)**: On connect, simultaneously start (1) paginated `GetTimeSeries` backfill for historical data and (2) `RealTimeBatched` live-tail stream. Both populate the same cache. Streaming is preferred as the continuous source; backfill provides the initial historical burst. The cache transitions to `Active` immediately — playback begins against whatever data has arrived.
 
 - **Memory management**: Eviction policy based on distance from `CurrentTimestamp` and `SelectedTimeRange`. Keep a configurable window of data in memory; evict outside the window.
 
@@ -255,12 +269,17 @@ current_timestamp.0 = timestamp;
 
 With the Editor owning playback, the DB stream simplifies to:
 
-#### New: Data Delivery Stream
+#### Data Delivery Streams
 
-Instead of the current `FixedRate` stream (which sends data at DB-computed timestamps), the DB provides a **data delivery stream** that sends new data as it arrives:
+Instead of the current `FixedRate` stream (which sends data at DB-computed timestamps, entangled with playback state), the Editor uses data delivery streams that send data as it arrives:
 
-- **Live simulation**: `RealTimeBatched` behavior — sends component updates as data is written, batched per `last_updated` change. The Editor inserts into cache.
-- **Recorded data**: On connection, Editor sends `GetTimeSeries` / bulk fetch requests to populate the cache. No special `--replay` mode needed.
+- **Live simulation — `RealTimeBatched`**: Batches all components into a single handler that wakes once per `db.last_updated` change. This was specifically added to solve the drone example performance issue: 37 components at 300 Hz caused 11,100 wake-ups/sec with individual `RealTime` streams, vs. 300 wake-ups/sec with `RealTimeBatched`. The Editor inserts all received data into the cache.
+
+- **VTable streams**: The existing `VTableStream` interface is high-performance and proven. It remains unchanged on the DB side. Individual VTable streams may still be used for specific component subscriptions where granularity is needed.
+
+- **Historical / recorded data**: On connection, the Editor sends paginated `GetTimeSeries` requests (matching the video stream's dual-source backfill pattern) to populate the cache with existing data. For recorded databases, this is the primary data source.
+
+- **All streams feed one cache**: Regardless of whether data arrives via `RealTimeBatched`, VTable stream, or `GetTimeSeries` response, it all goes into the `TelemetryCache`. All Editor behavior reads from the cache.
 
 #### Removable DB-side Concerns
 
@@ -287,27 +306,42 @@ Instead of the current `FixedRate` stream (which sends data at DB-computed times
 
 ### 4.4 Connection Flow (After Refactor)
 
+Matches the video stream dual-source pattern: start backfill and streaming simultaneously. Both populate the same cache. Streaming is the continuous source; backfill provides the initial historical burst.
+
 ```
-Editor connects:
+Editor connects (burst, like video_stream.rs lines 1013-1014):
   1. DumpMetadata
   2. DumpSchema
   3. GetEarliestTimestamp
   4. SubscribeLastUpdated
-  5. Stream { RealTimeBatched }          // for live data delivery
-  6. Bulk GetTimeSeries requests          // populate cache for available range
+  5. Stream { RealTimeBatched }          // live-tail: data as it arrives
+  6. Paginated GetTimeSeries requests    // backfill: historical data
+
+  Both (5) and (6) start concurrently.
+  Cache transitions to Active immediately — playback begins
+  against whatever data has arrived (matching video stream line 1015).
 
 Editor receives:
   - Metadata + schema (one-time)
   - EarliestTimestamp (one-time)
   - LastUpdated (subscription, fires on new data)
-  - RealTimeBatched data (ongoing, as simulation writes)
-  - GetTimeSeries responses (paginated, for historical backfill)
+  - RealTimeBatched tables (ongoing, as simulation writes)
+  - GetTimeSeries responses (paginated, auto-continues until partial page)
+
+  All responses insert into TelemetryCache.
+
+Editor determines mode:
+  - LastUpdated keeps advancing → Live mode (auto-follow latest)
+  - LastUpdated static, no --replay → Recorded mode (start at beginning, full range visible)
+  - LastUpdated static, --replay flag → Replay mode (start at beginning, reveal progressively)
 
 Editor playback:
   - All local. No SetStreamState messages sent.
-  - CurrentTimestamp advances from local timer.
+  - CurrentTimestamp advances from local wall-clock timer.
   - All consumers read from TelemetryCache.
 ```
+
+**Note on `RealTimeBatched` for recorded DBs**: Currently, `RealTimeBatched` calls `populate_table_latest()` which only returns the most recent value. For recorded DBs where `last_updated` is static, the handler returns end-of-recording data once and then blocks on `db.last_updated.wait()` forever. This is fine — for recorded DBs, `GetTimeSeries` backfill is the primary data source. The `RealTimeBatched` stream contributes nothing and can simply be a no-op. If the recorded DB later receives new data (e.g. from a follow source), `RealTimeBatched` wakes up and delivers it.
 
 ---
 
@@ -356,20 +390,33 @@ Editor playback:
 
 ### Phase 3: Move Replay to Editor
 
-**Goal**: Remove `--replay` from `elodin-db`. Recorded data playback is an Editor feature.
+**Goal**: Move `--replay` from `elodin-db` to `elodin editor`. Replay is a presentation concern.
 
 **Changes:**
-- Editor detects "recorded DB" (no live data arriving) from `LastUpdated` not changing
-- Offers play-from-start UX (already natural with local playback controller)
+- Add `--replay` flag to `elodin editor` CLI (e.g. `elodin editor 127.0.0.1:2240 --replay`)
+- In replay mode, the Editor:
+  - Fetches all data into cache via `GetTimeSeries` backfill (dual-source pattern)
+  - Starts playback at the beginning (`EarliestTimestamp`)
+  - Reveals data progressively in the timeline as `CurrentTimestamp` advances (simulates "data arriving")
+  - Cache holds all data; the progressive reveal is purely a UI concern (e.g. `FullTimeRange.end` tracks `CurrentTimestamp` instead of `latest_timestamp`)
+- Without `--replay`, connecting to a recorded DB starts at the beginning with all data visible (standard recorded playback)
 - Remove `replay` mode from DB (`enable_replay_mode()`, `replay_end`, `last_updated` direct store)
-- Remove `--replay` CLI flag
+- Remove `--replay` CLI flag from `elodin-db`
+
+**Three distinct modes** (all handled by Editor, not DB):
+
+| Mode | Detected by | Playback start | Timeline extent |
+|---|---|---|---|
+| **Live** | `LastUpdated` keeps advancing | End (auto-follow) | Grows with new data |
+| **Recorded** | `LastUpdated` is static | Beginning | Full range visible |
+| **Replay** | `--replay` flag on Editor | Beginning at 1x | Reveals progressively |
 
 **Deliverables:**
-- Simpler DB code
-- Replay works with any recorded DB without special flags
-- Auto-detect live vs. recorded mode in Editor
+- Simpler DB code (~100-200 lines removed)
+- Replay works without special DB flags
+- Clear separation: DB serves data, Editor presents it
 
-**Estimated scope**: ~100-200 lines removed from DB, ~50-100 lines added to Editor
+**Estimated scope**: ~100-200 lines removed from DB, ~100-200 lines added to Editor
 
 ### Phase 4: Simplify DB Streaming API
 
@@ -424,26 +471,95 @@ Editor playback:
 ## 7. Success Metrics
 
 1. **Scrub latency**: From ~50-100ms (TCP round-trip) to <1ms (local cache read)
-2. **Code complexity**: `FixedRateStreamState` reduced from ~500 lines to ~100 lines
+2. **Code complexity**: `FixedRateStreamState` reduced from ~500 lines to ~100 lines; replay logic removed entirely from DB
 3. **Bug surface area**: Eliminate `is_scrubbed`, replay-mode `last_updated` manipulation, and `SetStreamState` edge cases
-4. **Feature parity**: All existing timeline behaviors (play, pause, scrub, frame step, jump, speed change, time range selection) work identically from the user's perspective
-5. **Replay just works**: Opening a recorded DB in the Editor plays back without `--replay` flag
+4. **Feature parity**: All three product test scenarios (live, recorded, replay) pass with identical UX from the user's perspective
+5. **Replay moves to Editor**: `elodin editor 127.0.0.1:2240 --replay` replaces `elodin-db --replay`; no special DB mode needed
+6. **DB is simpler**: Rate of playback is never a DB concern; the DB ingests and serves data as fast as possible
 
 ---
 
-## 8. Open Questions
+## 8. Resolved Design Decisions
 
-1. **Cache granularity for 3D viewport**: Should the component cache store every sample at full fidelity, or downsample for older data (like plot overview mode)?
+1. **Cache granularity**: Full fidelity — every sample stored at full granularity. No downsampling anywhere in the cache. Plot overview mode (LTTB) is a *view-layer* concern on top of the full-fidelity cache, not a cache-layer concern.
 
-2. **Cache warming strategy**: On connect to a large recorded DB, should we backfill the entire dataset or use lazy loading (fetch on scrub)?
+2. **Cache warming strategy**: Match the video stream dual-source pattern. On connect, simultaneously start paginated `GetTimeSeries` backfill and `RealTimeBatched` live-tail. Streaming is preferred as the continuous source; backfill provides the initial historical burst. Cache transitions to Active immediately — playback begins against whatever data has arrived.
 
-3. **Live simulation edge**: When a simulation is actively writing data, should the Editor auto-follow the latest timestamp (current behavior) or require explicit "follow live" mode?
+3. **Live simulation behavior**: Auto-follow, matching current behavior. When `LastUpdated` keeps advancing, the playback marker stays at the end / follows the latest data continuously.
 
-4. **Multi-stream support**: The current architecture allows multiple `Stream` instances with different behaviors. Does the cache-first approach need to support this?
+4. **Multi-stream support**: All streams (VTable, `RealTimeBatched`, `GetTimeSeries` responses, `GetMsgs` responses) feed the same cache. All Editor behavior is cache-driven regardless of how data arrived.
 
-5. **Non-Editor clients**: If we remove `SetStreamState` handling, do any non-Editor clients (C/C++ clients, Lua REPL) depend on it?
+5. **Playback rate is never a DB concern**: The DB is a high-performance telemetry database that should ingest and serve data as fast as possible. Rate of playback is purely a client concern. `SetStreamState` for play/pause/speed can be deprecated; the DB does not need to know or care about playback state.
 
-6. **VTable stream**: The current `VTableStream` is used for individual component subscriptions. Should this be replaced by cache-driven reads, or kept for efficiency?
+6. **VTable streams stay**: VTable streams are a proven high-performance interface on the DB side and should not be complicated. The `RealTimeBatched` stream was added specifically because individual VTable streams per component created too much overhead (demonstrated by the drone example: 37 components at 300 Hz). Both interfaces stay; both feed the cache.
+
+## 9. Open Questions
+
+1. **Eviction policy**: For very long recordings, the full-fidelity cache may grow large. What is the eviction policy? Options: (a) keep everything in memory with a configurable cap, (b) evict outside a sliding window around `CurrentTimestamp`, (c) memory-map from disk.
+
+2. **`GetTimeSeries` vs. `RealTimeBatched` for recorded DBs**: `RealTimeBatched` uses `populate_table_latest()` which only returns the most recent value. For recorded DBs (where `last_updated` is static), it returns end-of-recording data and then blocks forever. Should we (a) fix `RealTimeBatched` to handle static DBs, (b) use only `GetTimeSeries` for recorded DBs, or (c) add a new `RealTimeBatchedHistorical` behavior?
+
+3. **Entity state interpolation**: When `CurrentTimestamp` falls between two cached samples, should the 3D viewport show (a) the nearest-earlier sample, (b) interpolated values, or (c) depend on the component type?
+
+---
+
+## 10. Product Test Scenarios
+
+These are the critical end-to-end scenarios that must pass at every phase of the migration. Each scenario exercises a different mode (live, recorded, replay) and validates that all playback controls work correctly.
+
+### Scenario 1: Live Simulation (Embedded DB)
+
+**Setup:**
+```bash
+elodin editor examples/drone/main.py
+```
+
+**Acceptance criteria:**
+- Playback starts at **1.0x real-time speed**
+- Because it's live streaming from the simulation, the **playback marker is at the end** / follows the latest data / auto-follows continuously as data streams in
+- Scrub around, jump to end, jump to beginning, pause, and play: **viewport and graph lines follow the current time marker**
+- Timeline extent grows as new data arrives from the simulation
+
+### Scenario 2: Recorded Database (Separate DB + Editor)
+
+**Setup:**
+```bash
+# First, generate a recording by running Scenario 1 and letting it accumulate data
+# Then connect to the saved database:
+elodin-db run 127.0.0.1:2240 DBNAME
+elodin editor 127.0.0.1:2240
+```
+
+**Acceptance criteria:**
+- Playback starts at **1.0x real-time speed**
+- Because it's a recording, the **playback marker starts at the beginning**
+- Full time range is visible in the timeline immediately
+- Scrub around, jump to end, jump to beginning, pause, and play: **viewport and graph lines follow the current time marker**
+
+### Scenario 3: Replay Mode (Separate DB + Editor with `--replay`)
+
+**Setup:**
+```bash
+# Use the same recorded database from Scenario 2:
+elodin-db run 127.0.0.1:2240 DBNAME
+elodin editor 127.0.0.1:2240 --replay
+```
+
+**Acceptance criteria:**
+- Playback starts at **1.0x real-time speed**
+- Because it's set to replay mode, **playback starts at the beginning** and data presents into the editor **as if it were being streamed in real time**
+- Timeline extent grows progressively as the playback marker advances (simulating live data arrival)
+- Scrub around, jump to end, jump to beginning, pause, and play: **viewport and graph lines follow the current time marker**
+
+### Phase-Specific Test Requirements
+
+| Phase | Scenario 1 (Live) | Scenario 2 (Recorded) | Scenario 3 (Replay) |
+|---|---|---|---|
+| **Phase 1** (Local Playback) | Must pass | Must pass (3D viewport may lag behind scrub) | Not yet migrated; existing `elodin-db --replay` still works |
+| **Phase 2** (Component Cache) | Must pass | Must pass (smooth 3D scrubbing) | Not yet migrated |
+| **Phase 3** (Replay → Editor) | Must pass | Must pass | Must pass with `elodin editor --replay` |
+| **Phase 4** (DB Simplification) | Must pass | Must pass | Must pass |
+| **Phase 5** (Unified Cache) | Must pass | Must pass | Must pass |
 
 ---
 
@@ -495,7 +611,7 @@ Editor playback:
 | `GetDbSettings` | DB config | Keep |
 | `GetTimeSeries` | Historical data | Keep (primary cache population) |
 | `GetMsgs` | Historical messages | Keep (video cache population) |
-| `VTableStream` | Component subscription | Keep or replace with cache reads |
+| `VTableStream` | Component subscription | Keep (proven high-performance interface) |
 
 ### Messages the DB Sends to Editor
 
