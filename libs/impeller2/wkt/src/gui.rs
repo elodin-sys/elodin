@@ -661,6 +661,14 @@ pub fn default_ellipsoid_color() -> Color {
     Color::WHITE
 }
 
+pub fn default_ellipsoid_confidence_interval() -> f32 {
+    70.0
+}
+
+pub fn default_ellipsoid_show_grid() -> bool {
+    false
+}
+
 pub fn default_glb_scale() -> f32 {
     1.0
 }
@@ -707,6 +715,12 @@ pub enum Object3DMesh {
         scale: String,
         #[serde(default = "default_ellipsoid_color")]
         color: Color,
+        #[serde(default)]
+        error_covariance_cholesky: Option<String>,
+        #[serde(default = "default_ellipsoid_confidence_interval")]
+        error_confidence_interval: f32,
+        #[serde(default = "default_ellipsoid_show_grid")]
+        show_grid: bool,
     },
 }
 

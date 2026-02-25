@@ -976,7 +976,29 @@ fn parse_object_3d_mesh(
             let color = parse_color_from_node_or_children(node, None)
                 .unwrap_or_else(impeller2_wkt::default_ellipsoid_color);
 
-            Ok(Object3DMesh::Ellipsoid { scale, color })
+            let error_covariance_cholesky = node
+                .get("error_covariance_cholesky")
+                .and_then(|v| v.as_string())
+                .map(str::to_string);
+
+            let error_confidence_interval = node
+                .get("error_confidence_interval")
+                .and_then(|v| v.as_float())
+                .map(|f| f as f32)
+                .unwrap_or_else(impeller2_wkt::default_ellipsoid_confidence_interval);
+
+            let show_grid = node
+                .get("show_grid")
+                .and_then(|v| v.as_bool())
+                .unwrap_or_else(impeller2_wkt::default_ellipsoid_show_grid);
+
+            Ok(Object3DMesh::Ellipsoid {
+                scale,
+                color,
+                error_covariance_cholesky,
+                error_confidence_interval,
+                show_grid,
+            })
         }
         _ => Err(KdlSchematicError::UnknownNode {
             node_type: node.name().value().to_string(),
@@ -2138,12 +2160,60 @@ object_3d "rocket.world_pos" {
         if let SchematicElem::Object3d(obj) = &schematic.elems[0] {
             assert_eq!(obj.eql, "rocket.world_pos");
             match &obj.mesh {
-                Object3DMesh::Ellipsoid { scale, color } => {
+                Object3DMesh::Ellipsoid {
+                    scale,
+                    color,
+                    error_covariance_cholesky,
+                    error_confidence_interval,
+                    show_grid,
+                } => {
                     assert_eq!(scale, "rocket.scale");
                     assert!((color.r - 64.0 / 255.0).abs() < f32::EPSILON);
                     assert!((color.g - 128.0 / 255.0).abs() < f32::EPSILON);
                     assert!((color.b - 1.0).abs() < f32::EPSILON);
+                    assert!(error_covariance_cholesky.is_none());
+                    assert!((*error_confidence_interval - 70.0).abs() < f32::EPSILON);
+                    assert!(!*show_grid);
                     assert!((color.a - 96.0 / 255.0).abs() < f32::EPSILON);
+                }
+                _ => panic!("Expected ellipsoid mesh"),
+            }
+        } else {
+            panic!("Expected object_3d");
+        }
+    }
+
+    #[test]
+    fn test_parse_object_3d_ellipsoid_error_covariance() {
+        let kdl = r#"
+object_3d "satellite.world_pos" {
+    ellipsoid error_covariance_cholesky="(1, 0, 1, 0, 0, 1)" error_confidence_interval=95.0 show_grid=#true {
+        color 200 200 0 120
+    }
+}
+"#;
+
+        let schematic = parse_schematic(kdl).unwrap();
+        assert_eq!(schematic.elems.len(), 1);
+
+        if let SchematicElem::Object3d(obj) = &schematic.elems[0] {
+            assert_eq!(obj.eql, "satellite.world_pos");
+            match &obj.mesh {
+                Object3DMesh::Ellipsoid {
+                    scale: _,
+                    color,
+                    error_covariance_cholesky,
+                    error_confidence_interval,
+                    show_grid,
+                } => {
+                    assert_eq!(
+                        error_covariance_cholesky.as_deref(),
+                        Some("(1, 0, 1, 0, 0, 1)")
+                    );
+                    assert!((*error_confidence_interval - 95.0).abs() < f32::EPSILON);
+                    assert!(*show_grid);
+                    assert!((color.r - 200.0 / 255.0).abs() < f32::EPSILON);
+                    assert!((color.a - 120.0 / 255.0).abs() < f32::EPSILON);
                 }
                 _ => panic!("Expected ellipsoid mesh"),
             }

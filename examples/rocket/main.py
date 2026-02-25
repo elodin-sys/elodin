@@ -539,6 +539,12 @@ w.schematic(
             color 76 175 80
         }
     }
+    object_3d rocket.world_pos {
+        //ellipsoid scale="(0.15, 0.15, 0.8)" {
+        ellipsoid error_covariance_cholesky="(3, 0, 2, 0, 0, 1)" show_grid=#true {
+            color 255 200 100 100
+        }
+    }
     line_3d rocket.world_pos line_width=11.0 perspective=#false {
         color yolk
     }

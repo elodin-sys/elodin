@@ -1335,6 +1335,7 @@ fn create_object_3d_with_color(eql: String, expr: eql::Expr, mesh: Mesh) -> Pale
                   component_value_maps: Query<&'static ComponentValue>,
                   mut material_assets: ResMut<Assets<StandardMaterial>>,
                   mut mesh_assets: ResMut<Assets<bevy::prelude::Mesh>>,
+                  mut mat3_material_assets: ResMut<Assets<bevy_mat3_material::Mat3Material>>,
                   assets: Res<AssetServer>| {
                 let color_str = color_str.trim();
                 let (r, g, b) =
@@ -1359,6 +1360,7 @@ fn create_object_3d_with_color(eql: String, expr: eql::Expr, mesh: Mesh) -> Pale
                     &eql_ctx.0,
                     &mut material_assets,
                     &mut mesh_assets,
+                    &mut mat3_material_assets,
                     &assets,
                 );
 
@@ -1423,6 +1425,7 @@ pub fn create_3d_object() -> PaletteItem {
                                                   eql_ctx: Res<EqlContext>,
                                                   mut material_assets: ResMut<Assets<StandardMaterial>>,
                                                   mut mesh_assets: ResMut<Assets<bevy::prelude::Mesh>>,
+                                                  mut mat3_material_assets: ResMut<Assets<bevy_mat3_material::Mat3Material>>,
                                                   assets: Res<AssetServer>| {
                                                 let obj = impeller2_wkt::Object3DMesh::glb(gltf_path.trim());
 
@@ -1433,6 +1436,7 @@ pub fn create_3d_object() -> PaletteItem {
                                                     &eql_ctx.0,
                                                     &mut material_assets,
                                                     &mut mesh_assets,
+                                                    &mut mat3_material_assets,
                                                     &assets,
                                                 );
 

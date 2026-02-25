@@ -5194,6 +5194,7 @@ dependencies = [
  "bevy_fontmesh",
  "bevy_framepace",
  "bevy_infinite_grid",
+ "bevy_mat3_material",
  "bevy_picking",
  "bevy_render",
  "big_space",
