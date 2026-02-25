@@ -144,8 +144,8 @@ def world() -> tuple[el.World, el.EntityId]:
 
         tabs {
             hsplit name = "Viewport" {
-                viewport name=FrustumSource pos="presence.world_pos + (0,0,0,0, 4,3,3)" look_at="presence.world_pos" show_grid=#true create_frustum=#true frustums_color="(255,80,32)" frustums_thickness=0.010 show_frustums=#true active=#true
-                viewport name=IntersectionView pos="presence.world_pos + (0,0,0,0, 2,2,2)" look_at="presence.world_pos" show_grid=#true create_frustum=#true frustums_color="(255,220,40)" frustums_thickness=0.010 show_frustums=#true active=#true
+                viewport name=FrustumSource pos="presence.world_pos + (0,0,0,0, 4,3,3)" look_at="presence.world_pos" show_grid=#true active=#true
+                viewport name=IntersectionView pos="presence.world_pos + (0,0,0,0, 2,2,2)" look_at="presence.world_pos" show_grid=#true active=#true
                 vsplit share=0.35 {
                     graph "presence.angle_desired" name="angle_desired"
                     graph "presence.world_pos.q0, presence.world_pos.q1, presence.world_pos.q2, presence.world_pos.q3, presence.attitude_target" name="World Pos"
