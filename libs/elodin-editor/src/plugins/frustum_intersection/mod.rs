@@ -292,25 +292,18 @@ fn sdf_gradient(p: Vec3, frustum: &FrustumVolume, ellipsoid: &EllipsoidVolume) -
 }
 
 fn push_triangle(
-    a: Vec3,
-    b: Vec3,
-    c: Vec3,
-    na: Vec3,
-    nb: Vec3,
-    nc: Vec3,
+    verts: [(Vec3, Vec3); 3],
     positions: &mut Vec<[f32; 3]>,
     normals: &mut Vec<[f32; 3]>,
 ) {
-    let face = (b - a).cross(c - a);
+    let face = (verts[1].0 - verts[0].0).cross(verts[2].0 - verts[0].0);
     if face.length_squared() <= SURFACE_EPS * SURFACE_EPS {
         return;
     }
-    positions.push([a.x, a.y, a.z]);
-    positions.push([b.x, b.y, b.z]);
-    positions.push([c.x, c.y, c.z]);
-    normals.push([na.x, na.y, na.z]);
-    normals.push([nb.x, nb.y, nb.z]);
-    normals.push([nc.x, nc.y, nc.z]);
+    for (p, n) in &verts {
+        positions.push([p.x, p.y, p.z]);
+        normals.push([n.x, n.y, n.z]);
+    }
 }
 
 fn polygonize_tetra(
@@ -353,7 +346,11 @@ fn polygonize_tetra(
         let a = interp(in_idx, outs[0]);
         let b = interp(in_idx, outs[1]);
         let c = interp(in_idx, outs[2]);
-        push_triangle(a, b, c, grad(a), grad(b), grad(c), positions, normals);
+        push_triangle(
+            [(a, grad(a)), (b, grad(b)), (c, grad(c))],
+            positions,
+            normals,
+        );
         return;
     }
 
@@ -370,7 +367,11 @@ fn polygonize_tetra(
         let a = interp(out_idx, ins[0]);
         let b = interp(out_idx, ins[2]);
         let c = interp(out_idx, ins[1]);
-        push_triangle(a, b, c, grad(a), grad(b), grad(c), positions, normals);
+        push_triangle(
+            [(a, grad(a)), (b, grad(b)), (c, grad(c))],
+            positions,
+            normals,
+        );
         return;
     }
 
@@ -396,8 +397,8 @@ fn polygonize_tetra(
     let n1 = grad(p1);
     let n2 = grad(p2);
     let n3 = grad(p3);
-    push_triangle(p0, p1, p2, n0, n1, n2, positions, normals);
-    push_triangle(p2, p1, p3, n2, n1, n3, positions, normals);
+    push_triangle([(p0, n0), (p1, n1), (p2, n2)], positions, normals);
+    push_triangle([(p2, n2), (p1, n1), (p3, n3)], positions, normals);
 }
 
 fn build_intersection_mesh(
@@ -506,7 +507,14 @@ fn build_intersection_mesh(
                         cube_values[tetra[2]],
                         cube_values[tetra[3]],
                     ];
-                    polygonize_tetra(tetra_points, tetra_values, frustum, ellipsoid, &mut positions, &mut normals);
+                    polygonize_tetra(
+                        tetra_points,
+                        tetra_values,
+                        frustum,
+                        ellipsoid,
+                        &mut positions,
+                        &mut normals,
+                    );
                 }
             }
         }
