@@ -992,12 +992,23 @@ fn parse_object_3d_mesh(
                 .and_then(|v| v.as_bool())
                 .unwrap_or_else(impeller2_wkt::default_ellipsoid_show_grid);
 
+            let grid_color = node
+                .children()
+                .and_then(|c| {
+                    c.nodes()
+                        .iter()
+                        .find(|n| n.name().value() == "grid_color")
+                })
+                .and_then(parse_color_from_node)
+                .unwrap_or_else(impeller2_wkt::default_ellipsoid_grid_color);
+
             Ok(Object3DMesh::Ellipsoid {
                 scale,
                 color,
                 error_covariance_cholesky,
                 error_confidence_interval,
                 show_grid,
+                grid_color,
             })
         }
         _ => Err(KdlSchematicError::UnknownNode {
@@ -2166,6 +2177,7 @@ object_3d "rocket.world_pos" {
                     error_covariance_cholesky,
                     error_confidence_interval,
                     show_grid,
+                    grid_color: _,
                 } => {
                     assert_eq!(scale, "rocket.scale");
                     assert!((color.r - 64.0 / 255.0).abs() < f32::EPSILON);
@@ -2205,6 +2217,7 @@ object_3d "satellite.world_pos" {
                     error_covariance_cholesky,
                     error_confidence_interval,
                     show_grid,
+                    grid_color: _,
                 } => {
                     assert_eq!(
                         error_covariance_cholesky.as_deref(),

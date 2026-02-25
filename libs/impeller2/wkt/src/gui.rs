@@ -669,6 +669,10 @@ pub fn default_ellipsoid_show_grid() -> bool {
     false
 }
 
+pub fn default_ellipsoid_grid_color() -> Color {
+    Color::BLACK
+}
+
 pub fn default_glb_scale() -> f32 {
     1.0
 }
@@ -721,6 +725,8 @@ pub enum Object3DMesh {
         error_confidence_interval: f32,
         #[serde(default = "default_ellipsoid_show_grid")]
         show_grid: bool,
+        #[serde(default = "default_ellipsoid_grid_color")]
+        grid_color: Color,
     },
 }
 

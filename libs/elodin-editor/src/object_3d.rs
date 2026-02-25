@@ -1437,6 +1437,7 @@ pub fn spawn_mesh(
             error_covariance_cholesky,
             error_confidence_interval: _error_confidence_interval,
             show_grid,
+            grid_color,
             ..
         } => {
             let bevy_color = Color::srgba(color.r, color.g, color.b, color.a);
@@ -1486,9 +1487,11 @@ pub fn spawn_mesh(
                         ELLIPSOID_GRID_SECTORS,
                         ELLIPSOID_GRID_STACKS,
                     ));
+                    let grid_bevy_color =
+                        Color::srgba(grid_color.r, grid_color.g, grid_color.b, grid_color.a);
                     let grid_mat = mat3_material_assets.add(Mat3Material {
                         base: StandardMaterial {
-                            base_color: Color::srgba(0.0, 0.0, 0.0, 1.0),
+                            base_color: grid_bevy_color,
                             unlit: true,
                             ..Default::default()
                         },
@@ -1538,8 +1541,10 @@ pub fn spawn_mesh(
                         ELLIPSOID_GRID_SECTORS,
                         ELLIPSOID_GRID_STACKS,
                     ));
+                    let grid_bevy_color =
+                        Color::srgba(grid_color.r, grid_color.g, grid_color.b, grid_color.a);
                     let grid_material = material_assets.add(StandardMaterial {
-                        base_color: Color::srgba(0.0, 0.0, 0.0, 1.0),
+                        base_color: grid_bevy_color,
                         unlit: true,
                         ..Default::default()
                     });

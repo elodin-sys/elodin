@@ -10,7 +10,7 @@ use bevy::{
 use bevy_egui::egui::{self, Align, RichText};
 use impeller2_wkt::{
     ComponentMetadata, Material, Mesh, Object3DMesh, default_ellipsoid_confidence_interval,
-    default_ellipsoid_scale_expr, default_ellipsoid_show_grid,
+    default_ellipsoid_grid_color, default_ellipsoid_scale_expr, default_ellipsoid_show_grid,
 };
 use smallvec::SmallVec;
 
@@ -223,6 +223,7 @@ impl WidgetSystem for InspectorObject3D<'_, '_> {
                             error_covariance_cholesky: None,
                             error_confidence_interval: default_ellipsoid_confidence_interval(),
                             show_grid: default_ellipsoid_show_grid(),
+                            grid_color: default_ellipsoid_grid_color(),
                         };
                         object_3d_state.error_covariance_cholesky_expr = None;
                         match compile_scale_eql(&default_scale, &eql_context.0) {
@@ -418,9 +419,13 @@ impl WidgetSystem for InspectorObject3D<'_, '_> {
                     error_covariance_cholesky,
                     error_confidence_interval,
                     show_grid,
+                    grid_color,
                 } => {
                     changed |= node_color_picker(ui, "Ellipse Color", color);
                     changed |= ui.checkbox(show_grid, "Show grid").changed();
+                    if *show_grid {
+                        changed |= node_color_picker(ui, "Grid color", grid_color);
+                    }
                     ui.separator();
                     if error_covariance_cholesky.is_some() {
                         ui.label(

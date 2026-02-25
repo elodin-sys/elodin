@@ -598,6 +598,7 @@ fn serialize_object_3d_mesh(mesh: &Object3DMesh) -> (KdlNode, Vec<KdlNode>) {
             error_covariance_cholesky,
             error_confidence_interval,
             show_grid,
+            grid_color,
         } => {
             let mut node = KdlNode::new("ellipsoid");
             if let Some(cholesky) = error_covariance_cholesky {
@@ -623,6 +624,11 @@ fn serialize_object_3d_mesh(mesh: &Object3DMesh) -> (KdlNode, Vec<KdlNode>) {
             }
             if color != &default_ellipsoid_color() {
                 serialize_color_to_node(&mut node, color);
+            }
+            if *show_grid
+                && *grid_color != impeller2_wkt::default_ellipsoid_grid_color()
+            {
+                serialize_color_to_node_named(&mut node, grid_color, Some("grid_color"));
             }
 
             (node, Vec::new())
@@ -1311,6 +1317,7 @@ graph "value" {
                 error_covariance_cholesky: None,
                 error_confidence_interval: impeller2_wkt::default_ellipsoid_confidence_interval(),
                 show_grid: impeller2_wkt::default_ellipsoid_show_grid(),
+                grid_color: impeller2_wkt::default_ellipsoid_grid_color(),
             },
             icon: None,
             mesh_visibility_range: None,
@@ -1330,6 +1337,7 @@ graph "value" {
                     error_covariance_cholesky,
                     error_confidence_interval: _,
                     show_grid: _,
+                    grid_color: _,
                 } => {
                     assert_eq!(scale, "rocket.scale");
                     assert!((color.r - 64.0 / 255.0).abs() < f32::EPSILON);
