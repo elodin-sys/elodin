@@ -217,8 +217,8 @@ fn sink_inner(
     world_sink_state: &mut SystemState<WorldSink>,
 ) -> Result<(), impeller2::error::Error> {
     let mut count = 0;
-    let mut pending_stream_ts: Option<Timestamp> = None;
     let mut pending_cache_entries: Vec<(ComponentId, Timestamp, ComponentValue)> = Vec::new();
+    let mut pending_new_stream_ts: Option<Timestamp> = None;
     while let Some(pkt) = packet_rx.try_recv_pkt() {
         if count > 2048 {
             return Ok(());
@@ -274,6 +274,10 @@ fn sink_inner(
                 bevy::log::error!(?err, "packet handler error");
             }
         }
+        let cached_stream_ts = world
+            .get_resource::<StreamDataTimestamp>()
+            .map(|r| r.0)
+            .unwrap_or(Timestamp(0));
         let mut world_sink = world_sink_state.get_mut(world);
         match &pkt {
             OwnedPacket::Msg(m) if m.id == VTableMsg::ID => {
@@ -326,9 +330,8 @@ fn sink_inner(
                 world_sink.schema_reg.0.extend(dump_schema.schemas);
             }
             OwnedPacket::Table(table) if table.id == world_sink.current_stream_id.packet_id() => {
-                let stream_ts = pending_stream_ts.unwrap_or(Timestamp(0));
                 let mut collector = CacheCollector {
-                    timestamp: stream_ts,
+                    timestamp: cached_stream_ts,
                     collected: Vec::new(),
                 };
                 let _ = table.sink(vtable_registry, &mut collector);
@@ -346,12 +349,18 @@ fn sink_inner(
             }
             OwnedPacket::Msg(m) if m.id == StreamTimestamp::ID => {
                 let stream_timestamp = m.parse::<StreamTimestamp>()?;
-                pending_stream_ts = Some(stream_timestamp.timestamp);
+                pending_new_stream_ts = Some(stream_timestamp.timestamp);
             }
             OwnedPacket::Msg(_) => {}
             OwnedPacket::TimeSeries(_) => {}
         }
         world_sink_state.apply(world);
+
+        if let Some(ts) = pending_new_stream_ts.take()
+            && let Some(mut sdt) = world.get_resource_mut::<StreamDataTimestamp>()
+        {
+            sdt.0 = ts;
+        }
 
         if !pending_cache_entries.is_empty()
             && let Some(mut cache) = world.get_resource_mut::<TelemetryCache>()
