@@ -186,7 +186,7 @@ The 3D viewport currently receives entity state *only* from the FixedRate stream
 
 7. **All streams feed the cache.** Even if multiple streams exist (VTable streams, batched streams, backfill responses), they all populate the same cache. All Editor behavior is cache-driven.
 
-8. **Incremental, backward-compatible migration.** Each phase delivers value independently and can be shipped/tested separately.
+8. **Incremental migration.** Each phase delivers value independently and can be shipped/tested separately. Backward compatibility is not a concern — breaking changes to the protocol are acceptable.
 
 ---
 
@@ -218,7 +218,7 @@ TelemetryCache
 
 - **Dual-source population (matching video stream pattern)**: On connect, simultaneously start (1) paginated `GetTimeSeries` backfill for historical data and (2) `RealTimeBatched` live-tail stream. Both populate the same cache. Streaming is preferred as the continuous source; backfill provides the initial historical burst. The cache transitions to `Active` immediately — playback begins against whatever data has arrived.
 
-- **Memory management**: Eviction policy based on distance from `CurrentTimestamp` and `SelectedTimeRange`. Keep a configurable window of data in memory; evict outside the window.
+- **No eviction; memory-map from disk**: The cache does not evict data. For large recordings, memory-mapping from disk lets the OS handle paging while keeping the full dataset addressable. This avoids the complexity of eviction policies and ensures scrubbing to any timestamp is always instant.
 
 - **Thread safety**: Cache populated from async I/O thread, read from Bevy systems. Use `Arc<RwLock<>>` or Bevy's change detection. Alternatively, use a channel-based approach (existing `PacketRx`/`PacketTx` pattern).
 
@@ -280,6 +280,8 @@ Instead of the current `FixedRate` stream (which sends data at DB-computed times
 - **Historical / recorded data**: On connection, the Editor sends paginated `GetTimeSeries` requests (matching the video stream's dual-source backfill pattern) to populate the cache with existing data. For recorded databases, this is the primary data source.
 
 - **All streams feed one cache**: Regardless of whether data arrives via `RealTimeBatched`, VTable stream, or `GetTimeSeries` response, it all goes into the `TelemetryCache`. All Editor behavior reads from the cache.
+
+**Long-term simplification**: The current zoo of stream types (`RealTime`, `RealTimeBatched`, `FixedRate`) exists because the DB was built to accommodate the Editor's various playback modes. With the Editor owning playback, these should converge toward a single data-serving mechanism — `GetTimeSeries` with batching as a connection option. The word "RealTime" in `RealTimeBatched` shouldn't exist; it reflects complexity created to handle Editor use cases that now move to the Editor. Phase 4 begins this convergence.
 
 #### Removable DB-side Concerns
 
@@ -420,21 +422,22 @@ Editor playback:
 
 ### Phase 4: Simplify DB Streaming API
 
-**Goal**: Remove playback state management from the DB entirely.
+**Goal**: Remove playback state management from the DB entirely. Begin converging toward a single data-serving mechanism.
 
 **Changes:**
-- Remove `SetStreamState` message handling for play/pause/timestamp (keep for potential non-Editor clients if needed, or deprecate)
-- Simplify `FixedRateStreamState` to only manage data delivery rate
-- Or: replace `FixedRate` with `RealTimeBatched` for all Editor connections
-- Remove tick driver complexity (`is_scrubbed`, speed scaling, etc.)
+- Remove `SetStreamState` message and all its handling
+- Remove `FixedRateStreamState` entirely (tick driver, `is_scrubbed`, speed scaling)
+- Remove `FixedRate` stream behavior
+- Remove `StreamTimestamp` message
 - Simplify `SubscribeLastUpdated` handler (no more replay-mode special cases)
+- Begin converging `RealTime`, `RealTimeBatched`, and historical queries toward a unified data-serving interface (`GetTimeSeries` with batching as an option)
 
 **Deliverables:**
 - Significantly simpler DB streaming code
 - Fewer edge cases in stream management
-- Clearer API contract: DB delivers data, clients render it
+- Clearer API contract: DB ingests and serves data as fast as possible; clients own playback
 
-**Estimated scope**: ~300-500 lines removed from DB
+**Estimated scope**: ~500-800 lines removed from DB
 
 ### Phase 5 (Optional): Unified Cache
 
@@ -459,12 +462,11 @@ Editor playback:
 
 | Risk | Impact | Mitigation |
 |---|---|---|
-| Memory pressure from caching all data | High | Windowed eviction; chunked storage; configurable cache size |
-| 3D viewport interpolation gaps | Medium | Cache includes interpolation support; show nearest-available marker |
-| Breaking non-Editor clients | Medium | Keep `SetStreamState` protocol message; deprecate rather than remove |
+| Memory pressure from caching all data | Medium | Memory-map from disk; OS handles paging for large recordings |
 | Large refactor surface area | High | Phased approach; each phase is independently shippable |
 | Performance regression on cache reads | Low | BTreeMap/interval-tree lookups are O(log n); benchmark |
-| Live simulation latency | Low | `RealTimeBatched` already delivers data at ~60Hz; cache insertion is O(log n) |
+| Live simulation latency | Low | Batched data delivery already operates at sim tick rate; cache insertion is O(log n) |
+| Data Overview sparkline loading regression | Medium | Data Overview panel is the diagnostic canary; test it at every phase |
 
 ---
 
@@ -493,13 +495,19 @@ Editor playback:
 
 6. **VTable streams stay**: VTable streams are a proven high-performance interface on the DB side and should not be complicated. The `RealTimeBatched` stream was added specifically because individual VTable streams per component created too much overhead (demonstrated by the drone example: 37 components at 300 Hz). Both interfaces stay; both feed the cache.
 
-## 9. Open Questions
+## 9. Resolved Design Decisions (Continued)
 
-1. **Eviction policy**: For very long recordings, the full-fidelity cache may grow large. What is the eviction policy? Options: (a) keep everything in memory with a configurable cap, (b) evict outside a sliding window around `CurrentTimestamp`, (c) memory-map from disk.
+7. **No eviction; memory-map from disk.** The cache should not evict data. For large recordings, memory-mapping from disk is the preferred strategy — the OS handles paging, and the full dataset remains addressable without explicit eviction logic.
 
-2. **`GetTimeSeries` vs. `RealTimeBatched` for recorded DBs**: `RealTimeBatched` uses `populate_table_latest()` which only returns the most recent value. For recorded DBs (where `last_updated` is static), it returns end-of-recording data and then blocks forever. Should we (a) fix `RealTimeBatched` to handle static DBs, (b) use only `GetTimeSeries` for recorded DBs, or (c) add a new `RealTimeBatchedHistorical` behavior?
+8. **Simplify streaming to one mechanism.** The current zoo of stream types (`RealTime`, `RealTimeBatched`, `FixedRate`) exists because the DB was built to accommodate the Editor's multiple use cases (live playback, recorded playback, replay). With the Editor owning playback, the DB should ideally expose one data-serving mechanism — `GetTimeSeries` with batching as a connection option — rather than multiple stream behaviors. The word "RealTime" in `RealTimeBatched` shouldn't exist; it's complexity created to handle Editor use cases that now move to the Editor. This simplification is a longer-term goal that Phase 4 can work toward.
 
-3. **Entity state interpolation**: When `CurrentTimestamp` falls between two cached samples, should the 3D viewport show (a) the nearest-earlier sample, (b) interpolated values, or (c) depend on the component type?
+9. **Nearest-before lookup; no interpolation.** This matches the current behavior throughout the entire codebase. When `CurrentTimestamp` falls between two cached samples:
+   - The system selects the sample at or immediately before the timestamp (nearest-before / floor).
+   - `TimeSeries::get_nearest()` in the DB uses `binary_search` with `saturating_sub(1)` for the floor case.
+   - No interpolation (lerp) is performed anywhere — 3D viewport, plots, and video all use this strategy.
+   - The cache should implement the same `binary_search` + floor lookup.
+
+10. **No backward compatibility concerns.** This refactor does not need to maintain backward compatibility with existing `SetStreamState`, `FixedRate`, or `--replay` behavior. Breaking changes to the protocol are acceptable.
 
 ---
 
@@ -551,15 +559,34 @@ elodin editor 127.0.0.1:2240 --replay
 - Timeline extent grows progressively as the playback marker advances (simulating live data arrival)
 - Scrub around, jump to end, jump to beginning, pause, and play: **viewport and graph lines follow the current time marker**
 
+### Scenario 4: Data Overview Panel (Sparkline Loading)
+
+**Setup:**
+```bash
+# Use a recorded database with multiple components (drone example generates ~37 components):
+elodin-db run 127.0.0.1:2240 DBNAME
+elodin editor 127.0.0.1:2240
+# Open the Data Overview panel
+```
+
+**Acceptance criteria:**
+- All components appear as sparklines in the Data Overview panel
+- Sparklines load rapidly (concurrent `SparklineQuery` requests, up to 120 batched)
+- Sparklines accurately represent the full time range of each component
+- This panel serves as a visual smoke test for data loading: if sparklines render correctly and promptly, the cache is being populated properly
+- Works identically for live simulations (sparklines grow as data streams in) and recorded databases (sparklines show full range immediately)
+
+**Why this matters:** The Data Overview panel is the best diagnostic for cache population health. It loads all components simultaneously and renders their full extent as sparklines. If the cache refactor breaks data loading, this panel will show it immediately.
+
 ### Phase-Specific Test Requirements
 
-| Phase | Scenario 1 (Live) | Scenario 2 (Recorded) | Scenario 3 (Replay) |
-|---|---|---|---|
-| **Phase 1** (Local Playback) | Must pass | Must pass (3D viewport may lag behind scrub) | Not yet migrated; existing `elodin-db --replay` still works |
-| **Phase 2** (Component Cache) | Must pass | Must pass (smooth 3D scrubbing) | Not yet migrated |
-| **Phase 3** (Replay → Editor) | Must pass | Must pass | Must pass with `elodin editor --replay` |
-| **Phase 4** (DB Simplification) | Must pass | Must pass | Must pass |
-| **Phase 5** (Unified Cache) | Must pass | Must pass | Must pass |
+| Phase | Sc. 1 (Live) | Sc. 2 (Recorded) | Sc. 3 (Replay) | Sc. 4 (Data Overview) |
+|---|---|---|---|---|
+| **Phase 1** (Local Playback) | Must pass | Must pass | Not yet migrated | Must pass |
+| **Phase 2** (Component Cache) | Must pass | Must pass (smooth 3D scrubbing) | Not yet migrated | Must pass |
+| **Phase 3** (Replay → Editor) | Must pass | Must pass | Must pass with `elodin editor --replay` | Must pass |
+| **Phase 4** (DB Simplification) | Must pass | Must pass | Must pass | Must pass |
+| **Phase 5** (Unified Cache) | Must pass | Must pass | Must pass | Must pass |
 
 ---
 
@@ -573,6 +600,7 @@ elodin editor 127.0.0.1:2240 --replay
 | `libs/elodin-editor/src/ui/timeline/mod.rs` | Read from cache for time range |
 | `libs/elodin-editor/src/ui/timeline/timeline_controls.rs` | Set `CurrentTimestamp` directly; remove `PacketTx` usage |
 | `libs/elodin-editor/src/ui/timeline/timeline_slider.rs` | Set `CurrentTimestamp` directly; remove `SetStreamState::rewind()` |
+| `libs/elodin-editor/src/ui/data_overview/mod.rs` | Read sparkline data from cache; replace `SparklineQuery` with cache reads |
 | `libs/elodin-editor/src/ui/plot/data.rs` | (Phase 5) Read from shared cache |
 | `libs/elodin-editor/src/ui/video_stream.rs` | (Phase 5) Read from shared cache |
 | `libs/impeller2/bevy/src/lib.rs` | Populate `TelemetryCache`; change connection setup |
