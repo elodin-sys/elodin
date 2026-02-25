@@ -123,6 +123,8 @@ fn color_component_to_u8(value: f32) -> u8 {
     (value.clamp(0.0, 1.0) * 255.0).round() as u8
 }
 
+const INTERSECTION_ALPHA: u8 = 160;
+
 fn intersection_material_for_color(
     color: impeller2_wkt::Color,
     materials: &mut Assets<StandardMaterial>,
@@ -132,23 +134,27 @@ fn intersection_material_for_color(
         r: color_component_to_u8(color.r),
         g: color_component_to_u8(color.g),
         b: color_component_to_u8(color.b),
-        a: color_component_to_u8(color.a),
+        a: INTERSECTION_ALPHA,
     };
     if let Some(handle) = cache.materials.get(&key) {
         return handle.clone();
     }
 
-    let alpha = key.a as f32 / 255.0;
+    let emissive_strength = 0.3;
     let material = materials.add(StandardMaterial {
-        base_color: Color::srgba_u8(key.r, key.g, key.b, key.a),
-        emissive: Color::srgb_u8(key.r, key.g, key.b).into(),
+        base_color: Color::srgba_u8(key.r, key.g, key.b, INTERSECTION_ALPHA),
+        emissive: Color::srgba(
+            color.r * emissive_strength,
+            color.g * emissive_strength,
+            color.b * emissive_strength,
+            1.0,
+        )
+        .into(),
         cull_mode: None,
-        unlit: true,
-        alpha_mode: if alpha < 1.0 {
-            AlphaMode::Blend
-        } else {
-            AlphaMode::Opaque
-        },
+        unlit: false,
+        double_sided: true,
+        alpha_mode: AlphaMode::Blend,
+        perceptual_roughness: 0.4,
         depth_bias: -2.0,
         ..Default::default()
     });
