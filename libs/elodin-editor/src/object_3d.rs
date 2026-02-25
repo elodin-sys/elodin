@@ -1172,22 +1172,27 @@ fn component_value_to_6floats(value: &ComponentValue) -> Result<[f32; 6], String
     }
 }
 
-/// Build Mat3 from lower-triangular Cholesky L (row-major: a,b,c,d,e,f -> L00,L10,L11,L20,L21,L22),
-/// scaled by sqrt(chi2_3(confidence)) so the ellipsoid boundary matches the confidence interval.
+/// ENU (East-North-Up) to Bevy (East-Up-South) basis change.
+/// ENU: X=East, Y=North, Z=Up. Bevy: X=East, Y=Up, Z=South.
+/// So Bevy = (ENU.x, ENU.z, -ENU.y).
+const ENU_TO_BEVY: Mat3 = Mat3::from_cols(
+    Vec3::new(1.0, 0.0, 0.0),  // ENU East  -> Bevy X
+    Vec3::new(0.0, 0.0, -1.0), // ENU North -> Bevy -Z
+    Vec3::new(0.0, 1.0, 0.0),  // ENU Up    -> Bevy Y
+);
+
+/// Build Mat3 from lower-triangular Cholesky L in **ENU** (row-major: a,b,c,d,e,f -> L00,L10,L11,L20,L21,L22),
+/// scaled by sqrt(chi2_3(confidence)), then converted to Bevy (East-Up-South) so the ellipsoid displays correctly.
 fn cholesky_6_to_mat3(l: &[f32; 6], confidence_percent: f32) -> Mat3 {
     let confidence_fraction = (confidence_percent / 100.0).clamp(0.01, 0.999);
     let scale = chi2_3_quantile(confidence_fraction).sqrt();
-    Mat3::from_cols_array(&[
-        l[0] * scale,
-        0.0,
-        0.0,
-        l[1] * scale,
-        l[2] * scale,
-        0.0,
-        l[3] * scale,
-        l[4] * scale,
-        l[5] * scale,
-    ])
+    #[rustfmt::skip]
+    let l_enu = Mat3::from_cols_array(&[
+        l[0] * scale, 0.0,          0.0,
+        l[1] * scale, l[2] * scale, 0.0,
+        l[3] * scale, l[4] * scale, l[5] * scale,
+    ]);
+    ENU_TO_BEVY * l_enu
 }
 
 pub trait ComponentArrayExt {
