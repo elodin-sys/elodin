@@ -743,8 +743,8 @@ pub fn advance_playback(
         return;
     }
     let delta_micros = (time.delta_secs_f64() * speed.0 * 1_000_000.0) as i64;
-    let new_ts = Timestamp(current_ts.0 .0.saturating_add(delta_micros));
-    current_ts.0 = Timestamp(new_ts.0.clamp(earliest.0 .0, last_updated.0 .0));
+    let new_ts = Timestamp(current_ts.0.0.saturating_add(delta_micros));
+    current_ts.0 = Timestamp(new_ts.0.clamp(earliest.0.0, last_updated.0.0));
 }
 
 pub fn sync_pos(

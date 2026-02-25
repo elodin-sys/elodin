@@ -2643,17 +2643,15 @@ fn handle_stream<A: AsyncWrite + 'static>(
                 }
             })
         }
-        StreamBehavior::RealTimeBatched => {
-            stellarator::spawn(async move {
-                match handle_real_time_stream_batched(tx, req_id, db).await {
-                    Ok(_) => {}
-                    Err(err) if err.is_stream_closed() => {}
-                    Err(err) => {
-                        warn!(?err, "error streaming data");
-                    }
+        StreamBehavior::RealTimeBatched => stellarator::spawn(async move {
+            match handle_real_time_stream_batched(tx, req_id, db).await {
+                Ok(_) => {}
+                Err(err) if err.is_stream_closed() => {}
+                Err(err) => {
+                    warn!(?err, "error streaming data");
                 }
-            })
-        }
+            }
+        }),
     }
 }
 

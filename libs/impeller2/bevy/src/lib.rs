@@ -26,8 +26,8 @@ use impeller2_bbq::{AsyncArcQueueRx, RxExt};
 use impeller2_wkt::{
     ComponentMetadata, CurrentTimestamp, DbConfig, DumpMetadata, DumpMetadataResp, DumpSchema,
     DumpSchemaResp, EarliestTimestamp, ErrorResponse, FixedRateBehavior, GetDbSettings,
-    GetEarliestTimestamp, IsRecording, LastUpdated, Stream, StreamBehavior,
-    StreamId, StreamTimestamp, SubscribeLastUpdated, VTableMsg, WorldPos,
+    GetEarliestTimestamp, IsRecording, LastUpdated, Stream, StreamBehavior, StreamId,
+    StreamTimestamp, SubscribeLastUpdated, VTableMsg, WorldPos,
 };
 use serde::de::DeserializeOwned;
 use std::{
@@ -212,8 +212,7 @@ fn sink_inner(
             OwnedPacket::Table(_) => {}
             OwnedPacket::Msg(m) if m.id == EarliestTimestamp::ID => {
                 let new_earliest = m.parse::<EarliestTimestamp>()?;
-                let is_first =
-                    world_sink.earliest_timestamp.0 == Timestamp(i64::MAX);
+                let is_first = world_sink.earliest_timestamp.0 == Timestamp(i64::MAX);
                 *world_sink.earliest_timestamp = new_earliest;
                 if is_first {
                     world_sink.current_timestamp.0 = new_earliest.0;
