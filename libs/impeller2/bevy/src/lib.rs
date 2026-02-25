@@ -26,7 +26,7 @@ use impeller2_bbq::{AsyncArcQueueRx, RxExt};
 use impeller2_wkt::{
     ComponentMetadata, CurrentTimestamp, DbConfig, DumpMetadata, DumpMetadataResp, DumpSchema,
     DumpSchemaResp, EarliestTimestamp, ErrorResponse, FixedRateBehavior, GetDbSettings,
-    GetEarliestTimestamp, IsRecording, LastUpdated, SetStreamState, Stream, StreamBehavior,
+    GetEarliestTimestamp, IsRecording, LastUpdated, Stream, StreamBehavior,
     StreamId, StreamTimestamp, SubscribeLastUpdated, VTableMsg, WorldPos,
 };
 use serde::de::DeserializeOwned;
@@ -100,7 +100,6 @@ fn sink_inner(
     world_sink_state: &mut SystemState<WorldSink>,
 ) -> Result<(), impeller2::error::Error> {
     let mut count = 0;
-    let mut pending_stream_time_step: Option<Duration> = None;
     while let Some(pkt) = packet_rx.try_recv_pkt() {
         if count > 2048 {
             return Ok(());
@@ -193,10 +192,6 @@ fn sink_inner(
                         .insert(metadata.component_id, metadata);
                 }
                 *world_sink.db_config = metadata.db_config.clone();
-                // Always start playback at 1x real-time speed regardless of
-                // what the DB has stored.  Playback speed is the requester's
-                // concern; the DB should not dictate it.
-                pending_stream_time_step = Some(REAL_TIME_STREAM_TIME_STEP);
                 world_sink.commands.write_message(DbMessage::UpdateConfig);
             }
             OwnedPacket::Msg(m) if m.id == LastUpdated::ID => {
@@ -217,33 +212,22 @@ fn sink_inner(
             OwnedPacket::Table(_) => {}
             OwnedPacket::Msg(m) if m.id == EarliestTimestamp::ID => {
                 let new_earliest = m.parse::<EarliestTimestamp>()?;
+                let is_first =
+                    world_sink.earliest_timestamp.0 == Timestamp(i64::MAX);
                 *world_sink.earliest_timestamp = new_earliest;
+                if is_first {
+                    world_sink.current_timestamp.0 = new_earliest.0;
+                }
             }
             OwnedPacket::Msg(m) if m.id == StreamTimestamp::ID => {
-                let stream_timestamp = m.parse::<StreamTimestamp>()?;
-                if stream_timestamp.stream_id == world_sink.current_stream_id.0 {
-                    world_sink.current_timestamp.0 = stream_timestamp.timestamp;
-                }
+                // CurrentTimestamp is now owned by the Editor's local playback
+                // timer. StreamTimestamp from the DB is ignored.
+                let _ = m;
             }
             OwnedPacket::Msg(_) => {}
             OwnedPacket::TimeSeries(_) => {}
         }
         world_sink_state.apply(world);
-        if let Some(time_step) = pending_stream_time_step
-            && let (Some(packet_tx), Some(current_stream_id)) = (
-                world.get_resource::<PacketTx>(),
-                world.get_resource::<CurrentStreamId>(),
-            )
-        {
-            packet_tx.send_msg(SetStreamState {
-                id: current_stream_id.0,
-                playing: None,
-                timestamp: None,
-                time_step: Some(time_step),
-                frequency: None,
-            });
-            pending_stream_time_step = None;
-        }
     }
     Ok(())
 }

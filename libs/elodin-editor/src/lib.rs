@@ -28,9 +28,9 @@ use impeller2::types::{ComponentId, OwnedPacket};
 use impeller2::types::{Msg, Timestamp};
 use impeller2_bevy::{
     ComponentMetadataRegistry, ComponentPathRegistry, ComponentSchemaRegistry, ComponentValueMap,
-    CurrentStreamId, EntityMap, PacketHandlerInput, PacketHandlers, PacketTx,
+    EntityMap, PacketHandlerInput, PacketHandlers,
 };
-use impeller2_wkt::{CurrentTimestamp, NewConnection, Object3D, SetStreamState, WorldPos};
+use impeller2_wkt::{CurrentTimestamp, NewConnection, Object3D, WorldPos};
 use impeller2_wkt::{EarliestTimestamp, LastUpdated};
 use nox::Tensor;
 use object_3d::create_object_3d_entity;
@@ -242,7 +242,7 @@ impl Plugin for EditorPlugin {
                     .chain()
                     .in_set(PositionSync),
             )
-            .add_systems(Update, sync_paused)
+            .add_systems(Update, advance_playback)
             .add_systems(Update, ui::data_overview::trigger_time_range_queries)
             .add_systems(PreUpdate, set_selected_range)
             .add_systems(Update, update_eql_context)
@@ -728,20 +728,23 @@ impl WorldPosExt for WorldPos {
     }
 }
 
-pub fn sync_paused(
+pub fn advance_playback(
+    time: Res<Time>,
+    mut current_ts: ResMut<CurrentTimestamp>,
     paused: Res<ui::Paused>,
-    event: ResMut<PacketTx>,
-    stream_id: Res<CurrentStreamId>,
+    speed: Res<ui::timeline::PlaybackSpeed>,
+    last_updated: Res<LastUpdated>,
+    earliest: Res<EarliestTimestamp>,
 ) {
-    if paused.is_changed() {
-        event.send_msg(SetStreamState {
-            id: stream_id.0,
-            playing: Some(!paused.0),
-            timestamp: None,
-            time_step: None,
-            frequency: None,
-        })
+    if paused.0 {
+        return;
     }
+    if earliest.0 >= last_updated.0 {
+        return;
+    }
+    let delta_micros = (time.delta_secs_f64() * speed.0 * 1_000_000.0) as i64;
+    let new_ts = Timestamp(current_ts.0 .0.saturating_add(delta_micros));
+    current_ts.0 = Timestamp(new_ts.0.clamp(earliest.0 .0, last_updated.0 .0));
 }
 
 pub fn sync_pos(
@@ -1233,8 +1236,6 @@ fn clamp_range(total_range: Range<Timestamp>, b: Range<Timestamp>) -> Range<Time
 pub fn clamp_current_time(
     range: Res<SelectedTimeRange>,
     mut current_timestamp: ResMut<CurrentTimestamp>,
-    packet_tx: Res<PacketTx>,
-    current_stream_id: Res<CurrentStreamId>,
 ) {
     if range.0.start > range.0.end {
         return;
@@ -1243,7 +1244,6 @@ pub fn clamp_current_time(
     let new_timestamp = previous_timestamp.clamp(range.0.start, range.0.end);
     if new_timestamp != previous_timestamp {
         current_timestamp.0 = new_timestamp;
-        packet_tx.send_msg(SetStreamState::rewind(**current_stream_id, new_timestamp))
     }
 }
 

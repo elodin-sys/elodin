@@ -6,10 +6,8 @@ use bevy::prelude::*;
 use bevy_egui::egui;
 use egui::{Ui, load::SizedTexture};
 use impeller2::types::Timestamp;
-use impeller2_bevy::{CurrentStreamId, PacketTx};
-use impeller2_wkt::{
-    CurrentTimestamp, EarliestTimestamp, LastUpdated, SetStreamState, SimulationTimeStep,
-};
+use impeller2_bevy::CurrentStreamId;
+use impeller2_wkt::{CurrentTimestamp, EarliestTimestamp, LastUpdated, SimulationTimeStep};
 use std::convert::TryFrom;
 use std::time::Duration;
 use std::time::Instant;
@@ -34,7 +32,6 @@ pub(crate) fn plugin(app: &mut App) {
 
 #[derive(SystemParam)]
 pub struct TimelineControls<'w> {
-    event: Res<'w, PacketTx>,
     paused: ResMut<'w, Paused>,
     tick: ResMut<'w, CurrentTimestamp>,
     max_tick: Res<'w, LastUpdated>,
@@ -65,7 +62,6 @@ impl WidgetSystem for TimelineControls<'_> {
     ) {
         let icons = args;
         let TimelineControls {
-            event,
             mut paused,
             mut tick,
             max_tick,
@@ -278,9 +274,7 @@ impl WidgetSystem for TimelineControls<'_> {
                 });
             });
 
-        if tick_changed {
-            event.send_msg(SetStreamState::rewind(**stream_id, tick.0));
-        }
+        let _ = tick_changed;
     }
 }
 
