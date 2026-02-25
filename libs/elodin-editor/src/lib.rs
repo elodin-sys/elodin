@@ -1023,18 +1023,32 @@ impl Default for SelectedTimeRange {
 #[derive(Resource, Clone)]
 pub struct FullTimeRange(pub Range<Timestamp>);
 
+/// When present, the Editor operates in replay mode: the timeline reveals data
+/// progressively as `CurrentTimestamp` advances, simulating a live session from
+/// a recorded database.
+#[derive(Resource, Default)]
+pub struct ReplayMode;
+
 pub fn set_selected_range(
     mut selected_range: ResMut<SelectedTimeRange>,
     mut full_range: ResMut<FullTimeRange>,
     earliest: Res<EarliestTimestamp>,
     latest: Res<LastUpdated>,
+    current_ts: Res<CurrentTimestamp>,
     behavior: Res<TimeRangeBehavior>,
+    replay: Option<Res<ReplayMode>>,
 ) {
-    if earliest.0 < latest.0 {
-        full_range.0 = earliest.0..latest.0;
+    let effective_latest = if replay.is_some() {
+        latest.0.min(current_ts.0)
+    } else {
+        latest.0
+    };
+
+    if earliest.0 < effective_latest {
+        full_range.0 = earliest.0..effective_latest;
     }
 
-    match behavior.calculate_selected_range(earliest.0, latest.0) {
+    match behavior.calculate_selected_range(earliest.0, effective_latest) {
         Ok(range) => {
             selected_range.0 = range;
         }
