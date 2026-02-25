@@ -15,7 +15,7 @@ use std::collections::HashMap;
 /// when cameras overlap at startup.
 const MIN_FRUSTUM_CAMERA_DISTANCE_SQ: f32 = 0.01;
 /// POC marching grid resolution (cells). Balance quality vs per-frame CPU cost.
-const INTERSECTION_GRID: UVec3 = UVec3::new(20, 20, 20);
+const INTERSECTION_GRID: UVec3 = UVec3::new(32, 32, 32);
 const SURFACE_EPS: f32 = 1.0e-5;
 
 type MainViewportQueryItem = (
@@ -273,29 +273,45 @@ fn intersection_sdf(p: Vec3, frustum: &FrustumVolume, ellipsoid: &EllipsoidVolum
     d_ellipsoid.max(d_frustum)
 }
 
+const SDF_GRADIENT_H: f32 = 0.001;
+
+fn sdf_gradient(p: Vec3, frustum: &FrustumVolume, ellipsoid: &EllipsoidVolume) -> Vec3 {
+    let dx = intersection_sdf(p + Vec3::X * SDF_GRADIENT_H, frustum, ellipsoid)
+        - intersection_sdf(p - Vec3::X * SDF_GRADIENT_H, frustum, ellipsoid);
+    let dy = intersection_sdf(p + Vec3::Y * SDF_GRADIENT_H, frustum, ellipsoid)
+        - intersection_sdf(p - Vec3::Y * SDF_GRADIENT_H, frustum, ellipsoid);
+    let dz = intersection_sdf(p + Vec3::Z * SDF_GRADIENT_H, frustum, ellipsoid)
+        - intersection_sdf(p - Vec3::Z * SDF_GRADIENT_H, frustum, ellipsoid);
+    Vec3::new(dx, dy, dz).normalize_or_zero()
+}
+
 fn push_triangle(
     a: Vec3,
     b: Vec3,
     c: Vec3,
+    na: Vec3,
+    nb: Vec3,
+    nc: Vec3,
     positions: &mut Vec<[f32; 3]>,
     normals: &mut Vec<[f32; 3]>,
 ) {
-    let normal = (b - a).cross(c - a);
-    if normal.length_squared() <= SURFACE_EPS * SURFACE_EPS {
+    let face = (b - a).cross(c - a);
+    if face.length_squared() <= SURFACE_EPS * SURFACE_EPS {
         return;
     }
-    let n = normal.normalize();
     positions.push([a.x, a.y, a.z]);
     positions.push([b.x, b.y, b.z]);
     positions.push([c.x, c.y, c.z]);
-    normals.push([n.x, n.y, n.z]);
-    normals.push([n.x, n.y, n.z]);
-    normals.push([n.x, n.y, n.z]);
+    normals.push([na.x, na.y, na.z]);
+    normals.push([nb.x, nb.y, nb.z]);
+    normals.push([nc.x, nc.y, nc.z]);
 }
 
 fn polygonize_tetra(
     p: [Vec3; 4],
     v: [f32; 4],
+    frustum: &FrustumVolume,
+    ellipsoid: &EllipsoidVolume,
     positions: &mut Vec<[f32; 3]>,
     normals: &mut Vec<[f32; 3]>,
 ) {
@@ -316,6 +332,8 @@ fn polygonize_tetra(
         p[a].lerp(p[b], t)
     };
 
+    let grad = |pt: Vec3| sdf_gradient(pt, frustum, ellipsoid);
+
     if inside_count == 1 {
         let in_idx = inside.iter().position(|&x| x).unwrap_or(0);
         let mut outs = [0_usize; 3];
@@ -329,7 +347,7 @@ fn polygonize_tetra(
         let a = interp(in_idx, outs[0]);
         let b = interp(in_idx, outs[1]);
         let c = interp(in_idx, outs[2]);
-        push_triangle(a, b, c, positions, normals);
+        push_triangle(a, b, c, grad(a), grad(b), grad(c), positions, normals);
         return;
     }
 
@@ -346,7 +364,7 @@ fn polygonize_tetra(
         let a = interp(out_idx, ins[0]);
         let b = interp(out_idx, ins[2]);
         let c = interp(out_idx, ins[1]);
-        push_triangle(a, b, c, positions, normals);
+        push_triangle(a, b, c, grad(a), grad(b), grad(c), positions, normals);
         return;
     }
 
@@ -368,8 +386,12 @@ fn polygonize_tetra(
     let p1 = interp(ins[0], outs[1]);
     let p2 = interp(ins[1], outs[0]);
     let p3 = interp(ins[1], outs[1]);
-    push_triangle(p0, p1, p2, positions, normals);
-    push_triangle(p2, p1, p3, positions, normals);
+    let n0 = grad(p0);
+    let n1 = grad(p1);
+    let n2 = grad(p2);
+    let n3 = grad(p3);
+    push_triangle(p0, p1, p2, n0, n1, n2, positions, normals);
+    push_triangle(p2, p1, p3, n2, n1, n3, positions, normals);
 }
 
 fn build_intersection_mesh(
@@ -478,7 +500,7 @@ fn build_intersection_mesh(
                         cube_values[tetra[2]],
                         cube_values[tetra[3]],
                     ];
-                    polygonize_tetra(tetra_points, tetra_values, &mut positions, &mut normals);
+                    polygonize_tetra(tetra_points, tetra_values, frustum, ellipsoid, &mut positions, &mut normals);
                 }
             }
         }
