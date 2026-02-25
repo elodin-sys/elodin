@@ -43,3 +43,46 @@ For in-depth instructions, read the relevant skill file below when working in th
 - **Elodin Editor** (Bevy/Egui architecture, hot-reload, viewport, telemetry graphs, KDL schematics): `.cursor/skills/elodin-editor-dev/SKILL.md`
 - **Python SDK internals** (PyO3 bindings, nox-py, JAX integration, adding components/systems): `.cursor/skills/nox-py-dev/SKILL.md`
 - **Nix environment** (dev shell troubleshooting, OrbStack VMs, flake.nix, binary cache): `.cursor/skills/elodin-nix/SKILL.md`
+
+## Cursor Cloud specific instructions
+
+### Nix daemon
+
+The VM snapshot has Determinate Nix installed with the Elodin binary cache pre-configured in `/etc/nix/nix.custom.conf`. The nix daemon must be running before any `nix develop` commands. Start it with:
+
+```bash
+sudo /nix/var/nix/profiles/default/bin/nix-daemon &
+sleep 2
+```
+
+After the daemon is up, ensure `/nix/var/nix/profiles/default/bin` is on `PATH`.
+
+### Running commands in the Nix shell
+
+All development commands must run inside `nix develop`. For one-off commands:
+
+```bash
+nix develop --accept-flake-config --command bash -c '<command>'
+```
+
+The `--accept-flake-config` flag trusts the binary cache from `flake.nix` and avoids warnings. The first `nix develop` after a fresh VM snapshot is fast because the Nix store is pre-warmed.
+
+### Key services
+
+| Service | How to run | Notes |
+|---------|-----------|-------|
+| **Elodin DB** | `elodin-db run [::]:2240 /tmp/elodin-db --log-level info` | Headless; works in cloud VM. Build with `just install`. |
+| **Elodin Editor** | `elodin editor <addr>` | Requires GPU/display; will not render in headless cloud VM. |
+| **Python SDK** | `source .venv/bin/activate && python3 <script>` | Build first: see Quick Start above. |
+
+### DB integration tests and OOM
+
+`cargo test -p elodin-db-tests` may OOM-kill in memory-constrained VMs. Use `--test-threads=1` to reduce memory pressure:
+
+```bash
+cargo test -p elodin-db-tests -- --test-threads=1
+```
+
+### Environment variables
+
+The Nix shell sets `CC`, `CXX`, `LIBCLANG_PATH`, `FC`, `XLA_EXTENSION_DIR`, and `LD_LIBRARY_PATH` automatically. Do **not** override these manually.
