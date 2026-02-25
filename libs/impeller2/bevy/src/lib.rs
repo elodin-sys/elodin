@@ -92,6 +92,123 @@ pub enum DbMessage {
     UpdateConfig,
 }
 
+/// The timestamp of the most recently received stream data from the DB.
+/// Separate from `CurrentTimestamp` which is owned by the Editor's local
+/// playback timer.
+#[derive(Resource, Default, Clone, Copy, Debug)]
+pub struct StreamDataTimestamp(pub Timestamp);
+
+/// Per-component time-series cache. Stores raw component values keyed by
+/// timestamp so the Editor can display data at any `CurrentTimestamp` without
+/// a DB round-trip.
+#[derive(Resource, Default)]
+pub struct TelemetryCache {
+    components: HashMap<ComponentId, ComponentTimeSeries>,
+}
+
+#[derive(Default)]
+struct ComponentTimeSeries {
+    timestamps: Vec<Timestamp>,
+    values: Vec<ComponentValue>,
+}
+
+impl ComponentTimeSeries {
+    fn insert(&mut self, ts: Timestamp, value: ComponentValue) {
+        match self.timestamps.binary_search(&ts) {
+            Ok(i) => self.values[i] = value,
+            Err(i) => {
+                self.timestamps.insert(i, ts);
+                self.values.insert(i, value);
+            }
+        }
+    }
+
+    fn get_at_or_before(&self, ts: Timestamp) -> Option<&ComponentValue> {
+        if self.timestamps.is_empty() {
+            return None;
+        }
+        let idx = match self.timestamps.binary_search(&ts) {
+            Ok(i) => i,
+            Err(0) => return None,
+            Err(i) => i - 1,
+        };
+        Some(&self.values[idx])
+    }
+}
+
+impl TelemetryCache {
+    pub fn insert(&mut self, component_id: ComponentId, ts: Timestamp, value: ComponentValue) {
+        self.components
+            .entry(component_id)
+            .or_default()
+            .insert(ts, value);
+    }
+
+    pub fn get_at_or_before(
+        &self,
+        component_id: &ComponentId,
+        ts: Timestamp,
+    ) -> Option<&ComponentValue> {
+        self.components.get(component_id)?.get_at_or_before(ts)
+    }
+
+    pub fn component_ids(&self) -> impl Iterator<Item = &ComponentId> {
+        self.components.keys()
+    }
+}
+
+/// Decomponentize implementation that collects component values into a
+/// Vec for later insertion into the TelemetryCache.
+struct CacheCollector {
+    timestamp: Timestamp,
+    collected: Vec<(ComponentId, Timestamp, ComponentValue)>,
+}
+
+impl Decomponentize for CacheCollector {
+    type Error = core::convert::Infallible;
+    fn apply_value(
+        &mut self,
+        component_id: ComponentId,
+        view: ComponentView<'_>,
+        _timestamp: Option<Timestamp>,
+    ) -> Result<(), Infallible> {
+        let value = ComponentValue::from_view(view);
+        self.collected.push((component_id, self.timestamp, value));
+        Ok(())
+    }
+}
+
+/// Bevy system that reads the TelemetryCache at `CurrentTimestamp` and
+/// overwrites entity `ComponentValue` components and adapted components
+/// (like `WorldPos`) with the cached data. This allows the viewport to
+/// display data at any timestamp the user scrubs to, without waiting for
+/// the DB stream to deliver it.
+pub fn apply_cached_data(
+    current_ts: bevy::prelude::Res<CurrentTimestamp>,
+    cache: bevy::prelude::Res<TelemetryCache>,
+    mut entity_map: ResMut<EntityMap>,
+    mut query: Query<&mut ComponentValue>,
+    adapters: bevy::prelude::Res<ComponentAdapters>,
+    mut commands: Commands,
+) {
+    let ts = current_ts.0;
+    for component_id in cache.component_ids().copied().collect::<Vec<_>>() {
+        let Some(value) = cache.get_at_or_before(&component_id, ts) else {
+            continue;
+        };
+        let Some(&entity) = entity_map.get(&component_id) else {
+            continue;
+        };
+        if let Ok(mut cv) = query.get_mut(entity) {
+            *cv = value.clone();
+        }
+        if let Some(adapter) = adapters.get(&component_id) {
+            let view = value.as_view();
+            adapter.insert(&mut commands, &mut entity_map, component_id, view);
+        }
+    }
+}
+
 fn sink_inner(
     world: &mut World,
     packet_rx: &mut PacketRx,
@@ -100,6 +217,8 @@ fn sink_inner(
     world_sink_state: &mut SystemState<WorldSink>,
 ) -> Result<(), impeller2::error::Error> {
     let mut count = 0;
+    let mut pending_stream_ts: Option<Timestamp> = None;
+    let mut pending_cache_entries: Vec<(ComponentId, Timestamp, ComponentValue)> = Vec::new();
     while let Some(pkt) = packet_rx.try_recv_pkt() {
         if count > 2048 {
             return Ok(());
@@ -207,7 +326,14 @@ fn sink_inner(
                 world_sink.schema_reg.0.extend(dump_schema.schemas);
             }
             OwnedPacket::Table(table) if table.id == world_sink.current_stream_id.packet_id() => {
-                let _ = table.sink(&*vtable_registry, &mut world_sink)?;
+                let stream_ts = pending_stream_ts.unwrap_or(Timestamp(0));
+                let mut collector = CacheCollector {
+                    timestamp: stream_ts,
+                    collected: Vec::new(),
+                };
+                let _ = table.sink(vtable_registry, &mut collector);
+                pending_cache_entries.extend(collector.collected);
+                let _ = table.sink(vtable_registry, &mut world_sink)?;
             }
             OwnedPacket::Table(_) => {}
             OwnedPacket::Msg(m) if m.id == EarliestTimestamp::ID => {
@@ -219,14 +345,21 @@ fn sink_inner(
                 }
             }
             OwnedPacket::Msg(m) if m.id == StreamTimestamp::ID => {
-                // CurrentTimestamp is now owned by the Editor's local playback
-                // timer. StreamTimestamp from the DB is ignored.
-                let _ = m;
+                let stream_timestamp = m.parse::<StreamTimestamp>()?;
+                pending_stream_ts = Some(stream_timestamp.timestamp);
             }
             OwnedPacket::Msg(_) => {}
             OwnedPacket::TimeSeries(_) => {}
         }
         world_sink_state.apply(world);
+
+        if !pending_cache_entries.is_empty()
+            && let Some(mut cache) = world.get_resource_mut::<TelemetryCache>()
+        {
+            for (cid, ts, val) in pending_cache_entries.drain(..) {
+                cache.insert(cid, ts, val);
+            }
+        }
     }
     Ok(())
 }
@@ -551,7 +684,9 @@ impl Plugin for Impeller2Plugin {
             .init_resource::<PacketHandlers>()
             .init_resource::<RequestIdHandlers>()
             .init_resource::<RequestIdAlloc>()
-            .init_resource::<DbConfig>();
+            .init_resource::<DbConfig>()
+            .init_resource::<StreamDataTimestamp>()
+            .init_resource::<TelemetryCache>();
     }
 }
 

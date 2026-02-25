@@ -77,7 +77,6 @@ impl WidgetSystem for TimelineControls<'_> {
         tick_origin.observe_stream(**stream_id);
         tick_origin.observe_tick(tick.0, earliest_timestamp.0);
 
-        let mut tick_changed = false;
         let tick_step_duration = hifitime::Duration::from_seconds(tick_time.0);
         let tick_step_micros_i128 = tick_step_duration.total_nanoseconds() / 1000;
         let tick_step_micros = i64::try_from(tick_step_micros_i128).unwrap_or(0);
@@ -102,7 +101,6 @@ impl WidgetSystem for TimelineControls<'_> {
 
                             if jump_to_start_btn.clicked() {
                                 tick.0 = earliest_timestamp.0;
-                                tick_changed = true;
                                 tick_origin.request_rebase();
                             }
 
@@ -122,7 +120,6 @@ impl WidgetSystem for TimelineControls<'_> {
 
                                 if first || down.elapsed() > wait_before_advancing {
                                     tick.0.0 -= tick_step_micros;
-                                    tick_changed = true;
                                     if tick.0 <= earliest_timestamp.0 {
                                         tick_origin.request_rebase();
                                     }
@@ -164,8 +161,6 @@ impl WidgetSystem for TimelineControls<'_> {
 
                                 if first || down.elapsed() > wait_before_advancing {
                                     tick.0.0 += tick_step_micros;
-
-                                    tick_changed = true;
                                 }
                             } else {
                                 let _ = step_buttons.forward.take();
@@ -177,7 +172,6 @@ impl WidgetSystem for TimelineControls<'_> {
 
                             if jump_to_end_btn.clicked() {
                                 tick.0 = Timestamp(max_tick.0.0.saturating_sub(1));
-                                tick_changed = true;
                             }
                         },
                     );
@@ -273,8 +267,6 @@ impl WidgetSystem for TimelineControls<'_> {
                     );
                 });
             });
-
-        let _ = tick_changed;
     }
 }
 

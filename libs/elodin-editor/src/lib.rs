@@ -242,7 +242,10 @@ impl Plugin for EditorPlugin {
                     .chain()
                     .in_set(PositionSync),
             )
-            .add_systems(Update, advance_playback)
+            .add_systems(
+                Update,
+                (advance_playback, impeller2_bevy::apply_cached_data).chain(),
+            )
             .add_systems(Update, ui::data_overview::trigger_time_range_queries)
             .add_systems(PreUpdate, set_selected_range)
             .add_systems(Update, update_eql_context)
@@ -1046,6 +1049,8 @@ pub fn set_selected_range(
 
     if earliest.0 < effective_latest {
         full_range.0 = earliest.0..effective_latest;
+    } else if earliest.0 < latest.0 {
+        full_range.0 = earliest.0..latest.0;
     }
 
     match behavior.calculate_selected_range(earliest.0, effective_latest) {
