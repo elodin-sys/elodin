@@ -77,11 +77,6 @@ struct RunArgs {
     http_addr: Option<SocketAddr>,
     #[clap(long, hide = true)]
     reset: bool,
-    #[clap(
-        long,
-        help = "Replay recorded data as live telemetry (advances last_updated with playback)"
-    )]
-    replay: bool,
     #[clap(long, help = "Follow another elodin-db instance, replicating all data")]
     follows: Option<SocketAddr>,
     #[clap(
@@ -312,7 +307,6 @@ async fn main() -> miette::Result<()> {
             config,
             reset,
             start_timestamp,
-            replay,
             follows,
             follow_packet_size,
             ..
@@ -338,30 +332,13 @@ async fn main() -> miette::Result<()> {
                     tracing::warn!("failed to remove existing data directory");
                 });
             }
-            if replay && !path.exists() {
-                return Err(miette::miette!(
-                    "--replay cannot be used when the database path does not exist; create and record data first"
-                ));
-            }
             info!(?path, "starting db");
             let server = Server::new(&path, addr).into_diagnostic()?;
-            // Apply start_timestamp before enable_replay_mode so replay uses the
-            // correct earliest_timestamp; otherwise last_updated can end up before
-            // earliest_timestamp and the editor shows NoData.
             if let Some(start_timestamp) = start_timestamp {
                 server
                     .db
                     .set_earliest_timestamp(impeller2::types::Timestamp(start_timestamp))
                     .into_diagnostic()?;
-            }
-            if replay {
-                if server.db.last_updated.latest().0 == i64::MIN {
-                    return Err(miette::miette!(
-                        "--replay cannot be used on an empty database; record data first"
-                    ));
-                }
-                info!("replay mode enabled: last_updated will advance with playback");
-                server.db.enable_replay_mode();
             }
             let axum_db = server.db.clone();
             // Spawn follower before server.run() consumes server.
