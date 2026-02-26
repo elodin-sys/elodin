@@ -1072,11 +1072,18 @@ impl Pane {
                         Query<&ViewportConfig>,
                     )>::new(world);
                     let (ratios, configs) = state.get(world);
-                    if let Ok(config) = configs.get(cam)
-                        && config.show_ratio_monitor
                     {
-                        let relevant: Vec<_> =
-                            ratios.0.iter().filter(|r| r.source != cam).collect();
+                        let relevant: Vec<_> = ratios
+                            .0
+                            .iter()
+                            .filter(|r| {
+                                r.source != cam
+                                    && configs
+                                        .get(r.source)
+                                        .map(|c| c.show_ratio_monitor)
+                                        .unwrap_or(false)
+                            })
+                            .collect();
                         if !relevant.is_empty() {
                             show_monitor = true;
                             let viewport_rect = egui::Rect::from_min_max(
