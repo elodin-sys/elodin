@@ -1034,16 +1034,22 @@ fn draw_intersection_ratio_overlay(
     };
 
     for (cam_entity, config, viewport_rect) in viewports.iter() {
-        if config.ellipsoid_intersect_mode != EllipsoidIntersectMode::Mesh3D {
-            continue;
-        }
-
         let Some(rect) = viewport_rect.0 else {
             continue;
         };
 
-        let relevant: Vec<&IntersectionRatio> =
-            ratios.0.iter().filter(|r| r.source == cam_entity).collect();
+        let is_source = config.create_frustum
+            && config.ellipsoid_intersect_mode == EllipsoidIntersectMode::Mesh3D;
+        let is_target =
+            config.show_frustums || config.ellipsoid_intersect_mode != EllipsoidIntersectMode::Off;
+
+        let relevant: Vec<&IntersectionRatio> = ratios
+            .0
+            .iter()
+            .filter(|r| {
+                (is_source && r.source == cam_entity) || (is_target && r.source != cam_entity)
+            })
+            .collect();
 
         if relevant.is_empty() {
             continue;
