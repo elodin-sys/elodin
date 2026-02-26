@@ -1,9 +1,0 @@
-    hsplit name="Rate Control Panel" {
-        vsplit {
-            graph "presence.rate_pid_state"
-            component_monitor component_name="presence.rate_pid_state"
-        }
-        vsplit {
-            graph "presence.gyro, presence.ang_vel_setpoint" name="Presence: rate_control"
-        }
-    }
