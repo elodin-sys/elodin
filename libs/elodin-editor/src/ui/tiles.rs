@@ -122,7 +122,7 @@ impl EllipsoidIntersectMode {
         match self {
             Self::Off => "Off",
             Self::Mesh3D => "3D",
-            Self::Projection2D => "2D Projection",
+            Self::Projection2D => "2D",
         }
     }
 }
