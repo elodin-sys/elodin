@@ -166,7 +166,7 @@ fn intersection_material_for_color(
     material
 }
 
-const PROJECTION_ALPHA: u8 = 220;
+const PROJECTION_ALPHA: u8 = 180;
 
 fn projection_material_for_color(
     color: impeller2_wkt::Color,
@@ -183,12 +183,21 @@ fn projection_material_for_color(
         return handle.clone();
     }
 
+    let emissive_strength = 0.5;
     let material = materials.add(StandardMaterial {
         base_color: Color::srgba_u8(key.r, key.g, key.b, PROJECTION_ALPHA),
-        emissive: Color::srgba_u8(key.r, key.g, key.b, 255).into(),
+        emissive: Color::srgba(
+            color.r * emissive_strength,
+            color.g * emissive_strength,
+            color.b * emissive_strength,
+            1.0,
+        )
+        .into(),
         cull_mode: None,
-        unlit: true,
+        unlit: false,
+        double_sided: true,
         alpha_mode: AlphaMode::Blend,
+        perceptual_roughness: 0.3,
         depth_bias: -3.0,
         ..Default::default()
     });
@@ -567,9 +576,9 @@ fn build_intersection_mesh(
     Some(mesh)
 }
 
-const PROJECTION_GRID: usize = 64;
+const PROJECTION_GRID: usize = 80;
 
-fn ray_hits_ellipsoid(origin: Vec3, dir: Vec3, ellipsoid: &EllipsoidVolume) -> bool {
+fn ray_ellipsoid_sdf(origin: Vec3, dir: Vec3, ellipsoid: &EllipsoidVolume) -> f32 {
     let inv_rot = ellipsoid.rotation.inverse();
     let local_o = inv_rot * (origin - ellipsoid.center);
     let local_d = inv_rot * dir;
@@ -579,7 +588,8 @@ fn ray_hits_ellipsoid(origin: Vec3, dir: Vec3, ellipsoid: &EllipsoidVolume) -> b
     let a = d_s.dot(d_s);
     let b = 2.0 * o_s.dot(d_s);
     let c = o_s.dot(o_s) - 1.0;
-    b * b - 4.0 * a * c >= 0.0
+    let discriminant = b * b - 4.0 * a * c;
+    -discriminant
 }
 
 fn build_projection_mesh(frustum: &FrustumVolume, ellipsoid: &EllipsoidVolume) -> Option<Mesh> {
@@ -594,9 +604,10 @@ fn build_projection_mesh(frustum: &FrustumVolume, ellipsoid: &EllipsoidVolume) -
         e03.lerp(e12, u)
     };
 
-    let mut hit_grid = vec![false; np * np];
+    let mut scalar = vec![0.0_f32; np * np];
     let idx = |i: usize, j: usize| j * np + i;
-    let mut any_hit = false;
+    let mut has_inside = false;
+    let mut has_outside = false;
 
     for j in 0..np {
         let v = j as f32 / n as f32;
@@ -604,14 +615,17 @@ fn build_projection_mesh(frustum: &FrustumVolume, ellipsoid: &EllipsoidVolume) -
             let u = i as f32 / n as f32;
             let p = bilinear(u, v);
             let dir = (p - cam).normalize_or_zero();
-            if ray_hits_ellipsoid(cam, dir, ellipsoid) {
-                hit_grid[idx(i, j)] = true;
-                any_hit = true;
+            let s = ray_ellipsoid_sdf(cam, dir, ellipsoid);
+            scalar[idx(i, j)] = s;
+            if s <= 0.0 {
+                has_inside = true;
+            } else {
+                has_outside = true;
             }
         }
     }
 
-    if !any_hit {
+    if !has_inside {
         return None;
     }
 
@@ -621,30 +635,41 @@ fn build_projection_mesh(frustum: &FrustumVolume, ellipsoid: &EllipsoidVolume) -
     let mut positions = Vec::new();
     let mut normals = Vec::new();
 
+    let interp_uv = |ua: f32, va: f32, sa: f32, ub: f32, vb: f32, sb: f32| -> (f32, f32) {
+        let denom = sa - sb;
+        if denom.abs() <= SURFACE_EPS {
+            return (ua, va);
+        }
+        let t = (sa / denom).clamp(0.0, 1.0);
+        (ua + t * (ub - ua), va + t * (vb - va))
+    };
+
     for j in 0..n {
-        let v0 = j as f32 / n as f32;
-        let v1 = (j + 1) as f32 / n as f32;
         for i in 0..n {
             let u0 = i as f32 / n as f32;
             let u1 = (i + 1) as f32 / n as f32;
+            let v0 = j as f32 / n as f32;
+            let v1 = (j + 1) as f32 / n as f32;
 
-            let hits = [
-                hit_grid[idx(i, j)],
-                hit_grid[idx(i + 1, j)],
-                hit_grid[idx(i + 1, j + 1)],
-                hit_grid[idx(i, j + 1)],
-            ];
-            let count = hits.iter().filter(|&&h| h).count();
+            let s00 = scalar[idx(i, j)];
+            let s10 = scalar[idx(i + 1, j)];
+            let s11 = scalar[idx(i + 1, j + 1)];
+            let s01 = scalar[idx(i, j + 1)];
+
+            let inside = [s00 <= 0.0, s10 <= 0.0, s11 <= 0.0, s01 <= 0.0];
+            let count = inside.iter().filter(|&&x| x).count();
             if count == 0 {
                 continue;
             }
 
-            let p00 = bilinear(u0, v0);
-            let p10 = bilinear(u1, v0);
-            let p11 = bilinear(u1, v1);
-            let p01 = bilinear(u0, v1);
+            let uvs = [(u0, v0), (u1, v0), (u1, v1), (u0, v1)];
+            let vals = [s00, s10, s11, s01];
 
-            if count == 4 {
+            if !has_outside || count == 4 {
+                let p00 = bilinear(u0, v0);
+                let p10 = bilinear(u1, v0);
+                let p11 = bilinear(u1, v1);
+                let p01 = bilinear(u0, v1);
                 positions.extend_from_slice(&[
                     [p00.x, p00.y, p00.z],
                     [p10.x, p10.y, p10.z],
@@ -654,20 +679,40 @@ fn build_projection_mesh(frustum: &FrustumVolume, ellipsoid: &EllipsoidVolume) -
                     [p01.x, p01.y, p01.z],
                 ]);
                 normals.extend_from_slice(&[nn, nn, nn, nn, nn, nn]);
-            } else {
-                let pc = bilinear((u0 + u1) * 0.5, (v0 + v1) * 0.5);
-                let pts = [p00, p10, p11, p01];
-                for k in 0..4 {
-                    if hits[k] || hits[(k + 1) % 4] {
-                        let a = pts[k];
-                        let b = pts[(k + 1) % 4];
-                        positions.extend_from_slice(&[
-                            [pc.x, pc.y, pc.z],
-                            [a.x, a.y, a.z],
-                            [b.x, b.y, b.z],
-                        ]);
-                        normals.extend_from_slice(&[nn, nn, nn]);
-                    }
+                continue;
+            }
+
+            let mut edge_verts = Vec::new();
+            for e in 0..4 {
+                let e_next = (e + 1) % 4;
+                if inside[e] {
+                    edge_verts.push(bilinear(uvs[e].0, uvs[e].1));
+                }
+                if inside[e] != inside[e_next] {
+                    let (eu, ev) = interp_uv(
+                        uvs[e].0,
+                        uvs[e].1,
+                        vals[e],
+                        uvs[e_next].0,
+                        uvs[e_next].1,
+                        vals[e_next],
+                    );
+                    edge_verts.push(bilinear(eu, ev));
+                }
+            }
+
+            if edge_verts.len() >= 3 {
+                let center: Vec3 =
+                    edge_verts.iter().copied().sum::<Vec3>() / edge_verts.len() as f32;
+                for k in 0..edge_verts.len() {
+                    let a = edge_verts[k];
+                    let b = edge_verts[(k + 1) % edge_verts.len()];
+                    positions.extend_from_slice(&[
+                        [center.x, center.y, center.z],
+                        [a.x, a.y, a.z],
+                        [b.x, b.y, b.z],
+                    ]);
+                    normals.extend_from_slice(&[nn, nn, nn]);
                 }
             }
         }
