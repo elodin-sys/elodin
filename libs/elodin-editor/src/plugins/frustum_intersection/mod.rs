@@ -636,17 +636,17 @@ fn ray_intersects_ellipsoid_in_frustum(
         return discriminant;
     }
     let sqrt_disc = discriminant.sqrt();
-    let t_enter = (-b - sqrt_disc) / (2.0 * a);
-    let t_exit = (-b + sqrt_disc) / (2.0 * a);
-    let hit_enter = origin + dir * t_enter.max(0.0);
-    let hit_exit = origin + dir * t_exit.max(0.0);
-    let enter_in_frustum = frustum_signed_distance(hit_enter, &frustum.planes) <= 0.0;
-    let exit_in_frustum = frustum_signed_distance(hit_exit, &frustum.planes) <= 0.0;
-    if enter_in_frustum || exit_in_frustum {
-        -discriminant
-    } else {
-        discriminant
+    let t_enter = ((-b - sqrt_disc) / (2.0 * a)).max(0.0);
+    let t_exit = ((-b + sqrt_disc) / (2.0 * a)).max(0.0);
+    let samples: [f32; 5] = [0.0, 0.25, 0.5, 0.75, 1.0];
+    for &frac in &samples {
+        let t = t_enter + frac * (t_exit - t_enter);
+        let p = origin + dir * t;
+        if frustum_signed_distance(p, &frustum.planes) <= 0.0 {
+            return -discriminant;
+        }
     }
+    discriminant
 }
 
 fn build_projection_mesh(frustum: &FrustumVolume, ellipsoid: &EllipsoidVolume) -> Option<Mesh> {
