@@ -87,37 +87,7 @@ pub enum DbMessage {
 /// a DB round-trip.
 #[derive(Resource, Default)]
 pub struct TelemetryCache {
-    components: HashMap<ComponentId, ComponentTimeSeries>,
-}
-
-#[derive(Default)]
-struct ComponentTimeSeries {
-    timestamps: Vec<Timestamp>,
-    values: Vec<ComponentValue>,
-}
-
-impl ComponentTimeSeries {
-    fn insert(&mut self, ts: Timestamp, value: ComponentValue) {
-        match self.timestamps.binary_search(&ts) {
-            Ok(i) => self.values[i] = value,
-            Err(i) => {
-                self.timestamps.insert(i, ts);
-                self.values.insert(i, value);
-            }
-        }
-    }
-
-    fn get_at_or_before(&self, ts: Timestamp) -> Option<&ComponentValue> {
-        if self.timestamps.is_empty() {
-            return None;
-        }
-        let idx = match self.timestamps.binary_search(&ts) {
-            Ok(i) => i,
-            Err(0) => return None,
-            Err(i) => i - 1,
-        };
-        Some(&self.values[idx])
-    }
+    components: HashMap<ComponentId, BTreeMap<Timestamp, ComponentValue>>,
 }
 
 impl TelemetryCache {
@@ -133,7 +103,8 @@ impl TelemetryCache {
         component_id: &ComponentId,
         ts: Timestamp,
     ) -> Option<&ComponentValue> {
-        self.components.get(component_id)?.get_at_or_before(ts)
+        let series = self.components.get(component_id)?;
+        series.range(..=ts).next_back().map(|(_, v)| v)
     }
 
     pub fn component_ids(&self) -> impl Iterator<Item = &ComponentId> {
