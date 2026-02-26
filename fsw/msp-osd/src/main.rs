@@ -45,10 +45,6 @@ struct Args {
     /// Enable verbose logging
     #[arg(short, long)]
     verbose: bool,
-
-    /// Replay mode: stream from earliest timestamp instead of real-time
-    #[arg(long)]
-    replay: bool,
 }
 
 #[stellarator::main]
@@ -144,10 +140,7 @@ async fn main() -> Result<()> {
 
     // Connect to database using configured input mappings
     let db_addr: SocketAddr = format!("{}:{}", config.db.host, config.db.port).parse()?;
-    if args.replay {
-        info!("Replay mode enabled - streaming from earliest timestamp");
-    }
-    let db_client = DbClient::new(db_addr, config.inputs.clone(), args.replay);
+    let db_client = DbClient::new(db_addr, config.inputs.clone());
 
     // Create channel for telemetry updates
     let (tx, rx) = async_channel::bounded(100);
