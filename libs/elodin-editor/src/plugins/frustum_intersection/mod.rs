@@ -85,7 +85,6 @@ pub struct IntersectionRatios(pub Vec<IntersectionRatio>);
 struct DesiredIntersection {
     key: FrustumEllipsoidIntersectionVisual,
     mesh: Mesh,
-    ratio: f32,
     render_layers: RenderLayers,
     material: MeshMaterial3d<StandardMaterial>,
 }
@@ -885,6 +884,7 @@ fn draw_frustum_ellipsoid_intersections(
         return;
     }
 
+    ratios.0.clear();
     let mut desired = Vec::new();
 
     for frustum in &sources {
@@ -901,34 +901,47 @@ fn draw_frustum_ellipsoid_intersections(
             ),
         };
         let material = MeshMaterial3d(material_handle);
-        for (target_camera, render_layers) in &targets {
-            for ellipsoid in &ellipsoids {
-                if !aabb_overlap(
-                    frustum.aabb_min,
-                    frustum.aabb_max,
-                    ellipsoid.aabb_min,
-                    ellipsoid.aabb_max,
-                ) {
+
+        for ellipsoid in &ellipsoids {
+            if !aabb_overlap(
+                frustum.aabb_min,
+                frustum.aabb_max,
+                ellipsoid.aabb_min,
+                ellipsoid.aabb_max,
+            ) {
+                continue;
+            }
+
+            let (mesh, ratio) = match frustum.mode {
+                EllipsoidIntersectMode::Mesh3D => {
+                    let bounds_min = frustum.aabb_min.max(ellipsoid.aabb_min);
+                    let bounds_max = frustum.aabb_max.min(ellipsoid.aabb_max);
+                    match build_intersection_mesh(bounds_min, bounds_max, frustum, ellipsoid) {
+                        Some(result) => (result.mesh, Some(result.ratio)),
+                        None => continue,
+                    }
+                }
+                EllipsoidIntersectMode::Projection2D => {
+                    match build_projection_mesh(frustum, ellipsoid) {
+                        Some(m) => (m, None),
+                        None => continue,
+                    }
+                }
+                EllipsoidIntersectMode::Off => continue,
+            };
+
+            if let Some(r) = ratio {
+                ratios.0.push(IntersectionRatio {
+                    source: frustum.source,
+                    ellipsoid: ellipsoid.entity,
+                    ratio: r,
+                });
+            }
+
+            for (target_camera, render_layers) in &targets {
+                if frustum.source == *target_camera {
                     continue;
                 }
-
-                let (mesh, ratio) = match frustum.mode {
-                    EllipsoidIntersectMode::Mesh3D => {
-                        let bounds_min = frustum.aabb_min.max(ellipsoid.aabb_min);
-                        let bounds_max = frustum.aabb_max.min(ellipsoid.aabb_max);
-                        match build_intersection_mesh(bounds_min, bounds_max, frustum, ellipsoid) {
-                            Some(result) => (result.mesh, Some(result.ratio)),
-                            None => continue,
-                        }
-                    }
-                    EllipsoidIntersectMode::Projection2D => {
-                        match build_projection_mesh(frustum, ellipsoid) {
-                            Some(m) => (m, None),
-                            None => continue,
-                        }
-                    }
-                    EllipsoidIntersectMode::Off => continue,
-                };
 
                 desired.push(DesiredIntersection {
                     key: FrustumEllipsoidIntersectionVisual {
@@ -936,23 +949,11 @@ fn draw_frustum_ellipsoid_intersections(
                         target: *target_camera,
                         ellipsoid: ellipsoid.entity,
                     },
-                    mesh,
-                    ratio: ratio.unwrap_or(0.0),
+                    mesh: mesh.clone(),
                     render_layers: render_layers.clone(),
                     material: material.clone(),
                 });
             }
-        }
-    }
-
-    ratios.0.clear();
-    for visual in &desired {
-        if visual.ratio > 0.0 {
-            ratios.0.push(IntersectionRatio {
-                source: visual.key.source,
-                ellipsoid: visual.key.ellipsoid,
-                ratio: visual.ratio,
-            });
         }
     }
 
