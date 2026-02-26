@@ -227,7 +227,6 @@ impl Plugin for EditorPlugin {
             .add_systems(Update, setup_egui_context)
             //.add_systems(Update, make_entities_selectable)
             .add_systems(PreUpdate, setup_cell)
-            .add_systems(PreUpdate, sync_res::<CurrentTimestamp>)
             .add_systems(PreUpdate, sync_res::<impeller2_wkt::SimulationTimeStep>)
             .add_systems(
                 PreUpdate,

@@ -175,8 +175,13 @@ pub fn apply_cached_data(
     mut query: Query<&mut ComponentValue>,
     adapters: bevy::prelude::Res<ComponentAdapters>,
     mut commands: Commands,
+    mut last_applied_ts: bevy::prelude::Local<Timestamp>,
 ) {
     let ts = current_ts.0;
+    if ts == *last_applied_ts {
+        return;
+    }
+    *last_applied_ts = ts;
     for component_id in cache.component_ids().copied().collect::<Vec<_>>() {
         let Some(value) = cache.get_at_or_before(&component_id, ts) else {
             continue;
