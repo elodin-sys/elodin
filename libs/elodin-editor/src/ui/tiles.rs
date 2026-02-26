@@ -1073,12 +1073,10 @@ impl Pane {
                     )>::new(world);
                     let (ratios, configs) = state.get(world);
                     if let Ok(config) = configs.get(cam)
-                        && config.create_frustum
-                        && config.ellipsoid_intersect_mode == EllipsoidIntersectMode::Mesh3D
                         && config.show_ratio_monitor
                     {
                         let relevant: Vec<_> =
-                            ratios.0.iter().filter(|r| r.source == cam).collect();
+                            ratios.0.iter().filter(|r| r.source != cam).collect();
                         if !relevant.is_empty() {
                             show_monitor = true;
                             let viewport_rect = egui::Rect::from_min_max(
