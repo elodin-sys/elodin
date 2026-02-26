@@ -387,6 +387,7 @@ pub struct UITick(pub i64);
 #[derive(SystemParam)]
 pub struct TimelineSlider<'w> {
     tick: ResMut<'w, UITick>,
+    current_timestamp: ResMut<'w, CurrentTimestamp>,
     current_stream_id: Res<'w, CurrentStreamId>,
     tick_origin: ResMut<'w, StreamTickOrigin>,
     earliest_timestamp: Res<'w, EarliestTimestamp>,
@@ -404,6 +405,7 @@ impl WidgetSystem for TimelineSlider<'_> {
     ) {
         let TimelineSlider {
             mut tick,
+            mut current_timestamp,
             current_stream_id,
             mut tick_origin,
             earliest_timestamp,
@@ -433,6 +435,7 @@ impl WidgetSystem for TimelineSlider<'_> {
 
             if response.changed() {
                 let target_timestamp = Timestamp(tick.0);
+                current_timestamp.0 = target_timestamp;
                 if target_timestamp <= earliest_timestamp.0 {
                     tick_origin.request_rebase();
                 }
