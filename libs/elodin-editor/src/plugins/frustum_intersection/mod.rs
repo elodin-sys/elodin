@@ -491,7 +491,6 @@ fn build_intersection_mesh(
 
     let mut has_inside = false;
     let mut has_outside = false;
-    let mut inside_ellipsoid_count: u32 = 0;
     let mut inside_intersection_count: u32 = 0;
     for k in 0..points_z {
         let tz = k as f32 / nz as f32;
@@ -506,9 +505,6 @@ fn build_intersection_mesh(
                 let d_ellipsoid = ellipsoid_signed_distance(p, ellipsoid);
                 let d_frustum = frustum_signed_distance(p, &frustum.planes);
                 let s = d_ellipsoid.max(d_frustum);
-                if d_ellipsoid <= 0.0 {
-                    inside_ellipsoid_count += 1;
-                }
                 if s <= 0.0 {
                     has_inside = true;
                     inside_intersection_count += 1;
@@ -523,8 +519,12 @@ fn build_intersection_mesh(
         return None;
     }
 
-    let ratio = if inside_ellipsoid_count > 0 {
-        inside_intersection_count as f32 / inside_ellipsoid_count as f32
+    let cell_volume = (size.x / nx as f32) * (size.y / ny as f32) * (size.z / nz as f32);
+    let intersection_volume = inside_intersection_count as f32 * cell_volume;
+    let r = ellipsoid.radii;
+    let ellipsoid_volume = (4.0 / 3.0) * std::f32::consts::PI * r.x * r.y * r.z;
+    let ratio = if ellipsoid_volume > SURFACE_EPS {
+        (intersection_volume / ellipsoid_volume).clamp(0.0, 1.0)
     } else {
         0.0
     };
