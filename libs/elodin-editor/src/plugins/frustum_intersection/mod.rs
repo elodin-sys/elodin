@@ -810,9 +810,7 @@ fn draw_frustum_ellipsoid_intersections(
             continue;
         };
 
-        if config.show_frustums || config.ellipsoid_intersect_mode != EllipsoidIntersectMode::Off {
-            targets.push((camera_entity, RenderLayers::layer(viewport_layer)));
-        }
+        targets.push((camera_entity, RenderLayers::layer(viewport_layer)));
 
         if !config.create_frustum || config.ellipsoid_intersect_mode == EllipsoidIntersectMode::Off
         {
