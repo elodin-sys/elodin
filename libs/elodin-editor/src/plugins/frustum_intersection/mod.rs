@@ -1045,7 +1045,7 @@ fn write_coverage_to_db(
                 }
             }
         } else {
-            let mut arr = nox::Array::<f32, nox::Dyn>::zeroed(&[]);
+            let mut arr = nox::Array::<f32, nox::Dyn>::zeroed(&[1]);
             nox::ArrayBuf::as_mut_buf(&mut arr.buf)[0] = ratio.ratio;
             commands.entity(entity).insert(ComponentValue::F32(arr));
         }
