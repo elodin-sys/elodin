@@ -771,28 +771,19 @@ pub fn update_object_3d_system(
                 error_confidence_interval,
                 ..
             } = &object_3d.data.mesh
+                && let Ok(cv) = cholesky_expr.execute(&entity_map, &component_value_maps)
+                && let Ok(l) = component_value_to_6floats(&cv)
             {
-                match cholesky_expr.execute(&entity_map, &component_value_maps) {
-                    Ok(cv) => match component_value_to_6floats(&cv) {
-                        Ok(l) => {
-                            let linear = cholesky_6_to_mat3(&l, *error_confidence_interval);
-                            if let Some(children) = children_maybe {
-                                if let Some(child) = children.first() {
-                                    if let Ok(mut params) = mat3_params.get_mut(*child) {
-                                        params.linear = linear;
-                                    }
-                                }
-                            }
-                            let scale =
-                                chi2_3_quantile((*error_confidence_interval) / 100.0).sqrt();
-                            ellipse.max_extent =
-                                (l[0].abs().max(l[2].abs()).max(l[5].abs())) * scale;
-                            ellipse.oversized = ellipse.max_extent > ELLIPSOID_OVERSIZED_THRESHOLD;
-                        }
-                        Err(_) => {}
-                    },
-                    Err(_) => {}
+                let linear = cholesky_6_to_mat3(&l, *error_confidence_interval);
+                if let Some(children) = children_maybe
+                    && let Some(child) = children.first()
+                    && let Ok(mut params) = mat3_params.get_mut(*child)
+                {
+                    params.linear = linear;
                 }
+                let scale = chi2_3_quantile((*error_confidence_interval) / 100.0).sqrt();
+                ellipse.max_extent = (l[0].abs().max(l[2].abs()).max(l[5].abs())) * scale;
+                ellipse.oversized = ellipse.max_extent > ELLIPSOID_OVERSIZED_THRESHOLD;
             }
         } else {
             match evaluate_scale(&object_3d, &entity_map, &component_value_maps) {
@@ -805,7 +796,7 @@ pub fn update_object_3d_system(
                                 children.len()
                             );
                         }
-                        if let Some(child) = children.get(0) {
+                        if let Some(child) = children.first() {
                             if let Ok(mut child_transform) = transforms.get_mut(*child) {
                                 child_transform.scale = scale;
                                 child_transform.translation = Vec3::ZERO;

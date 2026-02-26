@@ -625,9 +625,7 @@ fn serialize_object_3d_mesh(mesh: &Object3DMesh) -> (KdlNode, Vec<KdlNode>) {
             if color != &default_ellipsoid_color() {
                 serialize_color_to_node(&mut node, color);
             }
-            if *show_grid
-                && *grid_color != impeller2_wkt::default_ellipsoid_grid_color()
-            {
+            if *show_grid && *grid_color != impeller2_wkt::default_ellipsoid_grid_color() {
                 serialize_color_to_node_named(&mut node, grid_color, Some("grid_color"));
             }
 

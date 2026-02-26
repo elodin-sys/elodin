@@ -994,11 +994,7 @@ fn parse_object_3d_mesh(
 
             let grid_color = node
                 .children()
-                .and_then(|c| {
-                    c.nodes()
-                        .iter()
-                        .find(|n| n.name().value() == "grid_color")
-                })
+                .and_then(|c| c.nodes().iter().find(|n| n.name().value() == "grid_color"))
                 .and_then(parse_color_from_node)
                 .unwrap_or_else(impeller2_wkt::default_ellipsoid_grid_color);
 
