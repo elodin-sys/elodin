@@ -1,7 +1,10 @@
 use crate::{
     MainCamera,
     object_3d::{EllipsoidVisual, Object3DState, WorldPosReceived},
-    ui::tiles::{EllipsoidIntersectMode, ViewportConfig},
+    ui::{
+        ViewportRect,
+        tiles::{EllipsoidIntersectMode, ViewportConfig},
+    },
 };
 use bevy::asset::RenderAssetUsages;
 use bevy::camera::visibility::{NoFrustumCulling, RenderLayers};
@@ -9,6 +12,7 @@ use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy::render::render_resource::PrimitiveTopology;
 use bevy::transform::TransformSystems;
+use bevy_egui::{EguiContexts, egui};
 use std::collections::HashMap;
 
 /// Keep parity with the frustum line overlay behavior: skip source/target pairs
@@ -75,9 +79,20 @@ struct FrustumEllipsoidIntersectionVisual {
     ellipsoid: Entity,
 }
 
+#[derive(Component, Clone, Copy, Debug)]
+pub struct IntersectionRatio {
+    pub source: Entity,
+    pub ellipsoid: Entity,
+    pub ratio: f32,
+}
+
+#[derive(Resource, Default)]
+pub struct IntersectionRatios(pub Vec<IntersectionRatio>);
+
 struct DesiredIntersection {
     key: FrustumEllipsoidIntersectionVisual,
     mesh: Mesh,
+    ratio: f32,
     render_layers: RenderLayers,
     material: MeshMaterial3d<StandardMaterial>,
 }
@@ -116,9 +131,13 @@ pub struct FrustumIntersectionPlugin;
 impl Plugin for FrustumIntersectionPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<IntersectionMaterialCache>()
+            .init_resource::<IntersectionRatios>()
             .add_systems(
                 PostUpdate,
-                draw_frustum_ellipsoid_intersections.after(TransformSystems::Propagate),
+                (
+                    draw_frustum_ellipsoid_intersections.after(TransformSystems::Propagate),
+                    draw_intersection_ratio_overlay.after(draw_frustum_ellipsoid_intersections),
+                ),
             );
     }
 }
@@ -444,12 +463,17 @@ fn polygonize_tetra(
     push_triangle([(p2, n2), (p1, n1), (p3, n3)], positions, normals);
 }
 
+struct IntersectionResult {
+    mesh: Mesh,
+    ratio: f32,
+}
+
 fn build_intersection_mesh(
     bounds_min: Vec3,
     bounds_max: Vec3,
     frustum: &FrustumVolume,
     ellipsoid: &EllipsoidVolume,
-) -> Option<Mesh> {
+) -> Option<IntersectionResult> {
     let size = bounds_max - bounds_min;
     if size.x <= SURFACE_EPS || size.y <= SURFACE_EPS || size.z <= SURFACE_EPS {
         return None;
@@ -470,6 +494,8 @@ fn build_intersection_mesh(
 
     let mut has_inside = false;
     let mut has_outside = false;
+    let mut inside_ellipsoid_count: u32 = 0;
+    let mut inside_intersection_count: u32 = 0;
     for k in 0..points_z {
         let tz = k as f32 / nz as f32;
         let z = bounds_min.z + size.z * tz;
@@ -480,9 +506,15 @@ fn build_intersection_mesh(
                 let tx = i as f32 / nx as f32;
                 let x = bounds_min.x + size.x * tx;
                 let p = Vec3::new(x, y, z);
-                let s = intersection_sdf(p, frustum, ellipsoid);
+                let d_ellipsoid = ellipsoid_signed_distance(p, ellipsoid);
+                let d_frustum = frustum_signed_distance(p, &frustum.planes);
+                let s = d_ellipsoid.max(d_frustum);
+                if d_ellipsoid <= 0.0 {
+                    inside_ellipsoid_count += 1;
+                }
                 if s <= 0.0 {
                     has_inside = true;
+                    inside_intersection_count += 1;
                 } else {
                     has_outside = true;
                 }
@@ -493,6 +525,12 @@ fn build_intersection_mesh(
     if !(has_inside && has_outside) {
         return None;
     }
+
+    let ratio = if inside_ellipsoid_count > 0 {
+        inside_intersection_count as f32 / inside_ellipsoid_count as f32
+    } else {
+        0.0
+    };
 
     let mut positions = Vec::new();
     let mut normals = Vec::new();
@@ -573,7 +611,7 @@ fn build_intersection_mesh(
     );
     mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
     mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
-    Some(mesh)
+    Some(IntersectionResult { mesh, ratio })
 }
 
 const PROJECTION_GRID: usize = 80;
@@ -741,6 +779,7 @@ fn cleanup_intersection_entities(
 }
 
 fn draw_frustum_ellipsoid_intersections(
+    mut ratios: ResMut<IntersectionRatios>,
     mut params: FrustumIntersectionParams<'_, '_>,
     mut commands: Commands,
 ) {
@@ -875,19 +914,22 @@ fn draw_frustum_ellipsoid_intersections(
                     continue;
                 }
 
-                let mesh_opt = match frustum.mode {
+                let (mesh, ratio) = match frustum.mode {
                     EllipsoidIntersectMode::Mesh3D => {
                         let bounds_min = frustum.aabb_min.max(ellipsoid.aabb_min);
                         let bounds_max = frustum.aabb_max.min(ellipsoid.aabb_max);
-                        build_intersection_mesh(bounds_min, bounds_max, frustum, ellipsoid)
+                        match build_intersection_mesh(bounds_min, bounds_max, frustum, ellipsoid) {
+                            Some(result) => (result.mesh, Some(result.ratio)),
+                            None => continue,
+                        }
                     }
                     EllipsoidIntersectMode::Projection2D => {
-                        build_projection_mesh(frustum, ellipsoid)
+                        match build_projection_mesh(frustum, ellipsoid) {
+                            Some(m) => (m, None),
+                            None => continue,
+                        }
                     }
-                    EllipsoidIntersectMode::Off => None,
-                };
-                let Some(mesh) = mesh_opt else {
-                    continue;
+                    EllipsoidIntersectMode::Off => continue,
                 };
 
                 desired.push(DesiredIntersection {
@@ -897,10 +939,22 @@ fn draw_frustum_ellipsoid_intersections(
                         ellipsoid: ellipsoid.entity,
                     },
                     mesh,
+                    ratio: ratio.unwrap_or(0.0),
                     render_layers: render_layers.clone(),
                     material: material.clone(),
                 });
             }
+        }
+    }
+
+    ratios.0.clear();
+    for visual in &desired {
+        if visual.ratio > 0.0 {
+            ratios.0.push(IntersectionRatio {
+                source: visual.key.source,
+                ellipsoid: visual.key.ellipsoid,
+                ratio: visual.ratio,
+            });
         }
     }
 
@@ -942,5 +996,61 @@ fn draw_frustum_ellipsoid_intersections(
 
     for (entity, _) in existing_by_key.into_values() {
         commands.entity(entity).despawn();
+    }
+}
+
+fn draw_intersection_ratio_overlay(
+    ratios: Res<IntersectionRatios>,
+    viewports: Query<(Entity, &ViewportConfig, &ViewportRect), With<MainCamera>>,
+    mut contexts: EguiContexts,
+) {
+    if ratios.0.is_empty() {
+        return;
+    }
+
+    for (cam_entity, config, viewport_rect) in viewports.iter() {
+        if !config.show_frustums && config.ellipsoid_intersect_mode == EllipsoidIntersectMode::Off {
+            continue;
+        }
+
+        let Some(rect) = viewport_rect.0 else {
+            continue;
+        };
+
+        let relevant: Vec<&IntersectionRatio> = ratios
+            .0
+            .iter()
+            .filter(|r| r.source == cam_entity || config.show_frustums)
+            .collect();
+
+        if relevant.is_empty() {
+            continue;
+        }
+
+        let Ok(ctx) = contexts.ctx_mut() else {
+            return;
+        };
+
+        let area_id = egui::Id::new("intersection_ratio").with(cam_entity);
+        egui::Area::new(area_id)
+            .fixed_pos(egui::pos2(rect.min.x + 8.0, rect.max.y - 28.0))
+            .interactable(false)
+            .show(ctx, |ui| {
+                egui::Frame::NONE
+                    .fill(egui::Color32::from_black_alpha(140))
+                    .corner_radius(egui::CornerRadius::same(4))
+                    .inner_margin(egui::Margin::symmetric(6, 3))
+                    .show(ui, |ui| {
+                        for r in &relevant {
+                            let pct = (r.ratio * 100.0).clamp(0.0, 100.0);
+                            ui.label(
+                                egui::RichText::new(format!("Coverage: {pct:.1}%"))
+                                    .monospace()
+                                    .size(11.0)
+                                    .color(egui::Color32::from_rgb(220, 220, 220)),
+                            );
+                        }
+                    });
+            });
     }
 }
