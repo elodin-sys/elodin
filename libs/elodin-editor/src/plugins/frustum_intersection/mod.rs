@@ -1,10 +1,7 @@
 use crate::{
     MainCamera,
     object_3d::{EllipsoidVisual, Object3DState, WorldPosReceived},
-    ui::{
-        ViewportRect,
-        tiles::{EllipsoidIntersectMode, ViewportConfig},
-    },
+    ui::tiles::{EllipsoidIntersectMode, ViewportConfig},
 };
 use bevy::asset::RenderAssetUsages;
 use bevy::camera::visibility::{NoFrustumCulling, RenderLayers};
@@ -12,7 +9,6 @@ use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy::render::render_resource::PrimitiveTopology;
 use bevy::transform::TransformSystems;
-use bevy_egui::{EguiContexts, egui};
 use std::collections::HashMap;
 
 /// Keep parity with the frustum line overlay behavior: skip source/target pairs
@@ -134,10 +130,7 @@ impl Plugin for FrustumIntersectionPlugin {
             .init_resource::<IntersectionRatios>()
             .add_systems(
                 PostUpdate,
-                (
-                    draw_frustum_ellipsoid_intersections.after(TransformSystems::Propagate),
-                    draw_intersection_ratio_overlay.after(draw_frustum_ellipsoid_intersections),
-                ),
+                draw_frustum_ellipsoid_intersections.after(TransformSystems::Propagate),
             );
     }
 }
@@ -1017,69 +1010,5 @@ fn draw_frustum_ellipsoid_intersections(
 
     for (entity, _) in existing_by_key.into_values() {
         commands.entity(entity).despawn();
-    }
-}
-
-fn draw_intersection_ratio_overlay(
-    ratios: Res<IntersectionRatios>,
-    viewports: Query<(Entity, &ViewportConfig, &ViewportRect), With<MainCamera>>,
-    mut contexts: EguiContexts,
-) {
-    if ratios.0.is_empty() {
-        return;
-    }
-
-    let Ok(ctx) = contexts.ctx_mut() else {
-        return;
-    };
-
-    for (cam_entity, config, viewport_rect) in viewports.iter() {
-        let Some(rect) = viewport_rect.0 else {
-            continue;
-        };
-
-        let is_source = config.create_frustum
-            && config.ellipsoid_intersect_mode == EllipsoidIntersectMode::Mesh3D;
-        let is_target =
-            config.show_frustums || config.ellipsoid_intersect_mode != EllipsoidIntersectMode::Off;
-
-        let relevant: Vec<&IntersectionRatio> = ratios
-            .0
-            .iter()
-            .filter(|r| {
-                (is_source && r.source == cam_entity) || (is_target && r.source != cam_entity)
-            })
-            .collect();
-
-        if relevant.is_empty() {
-            continue;
-        }
-
-        let area_id = egui::Id::new("intersection_ratio").with(cam_entity);
-        let row_height = 16.0;
-        let overlay_height = relevant.len() as f32 * row_height + 8.0;
-        egui::Area::new(area_id)
-            .fixed_pos(egui::pos2(
-                rect.min.x + 8.0,
-                rect.max.y - overlay_height - 4.0,
-            ))
-            .interactable(false)
-            .show(ctx, |ui| {
-                egui::Frame::NONE
-                    .fill(egui::Color32::from_black_alpha(140))
-                    .corner_radius(egui::CornerRadius::same(4))
-                    .inner_margin(egui::Margin::symmetric(6, 3))
-                    .show(ui, |ui| {
-                        for r in &relevant {
-                            let pct = (r.ratio * 100.0).clamp(0.0, 100.0);
-                            ui.label(
-                                egui::RichText::new(format!("{pct:.1}%"))
-                                    .monospace()
-                                    .size(11.0)
-                                    .color(egui::Color32::from_rgb(220, 220, 220)),
-                            );
-                        }
-                    });
-            });
     }
 }
