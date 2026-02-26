@@ -823,7 +823,7 @@ fn draw_frustum_ellipsoid_intersections(
         };
 
         camera_positions.insert(camera_entity, global_transform.translation());
-        if config.show_frustums {
+        if config.show_frustums || config.ellipsoid_intersect_mode != EllipsoidIntersectMode::Off {
             targets.push((camera_entity, RenderLayers::layer(viewport_layer)));
         }
 
