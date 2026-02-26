@@ -359,6 +359,32 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
                         });
                     });
 
+                    if viewport_config.ellipsoid_intersect_mode == EllipsoidIntersectMode::Mesh3D {
+                        ui.add_space(8.0);
+                        let mut color_3d = viewport_config.intersect_3d_color.into_color32();
+                        ui.horizontal(|ui| {
+                            ui.label(
+                                egui::RichText::new("INTERSECT COLOR").color(scheme.text_secondary),
+                            );
+                            ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
+                                let swatch = ui.add(
+                                    egui::Button::new("")
+                                        .fill(color_3d)
+                                        .stroke(egui::Stroke::new(1.0, scheme.border_primary))
+                                        .corner_radius(egui::CornerRadius::same(10))
+                                        .min_size(egui::vec2(20.0, 20.0)),
+                                );
+                                let color_id = ui.auto_id_with("intersect_3d_color");
+                                if swatch.clicked() {
+                                    egui::Popup::toggle_id(ui.ctx(), color_id);
+                                }
+                                color_popup(ui, &mut color_3d, color_id, &swatch);
+                            });
+                        });
+                        viewport_config.intersect_3d_color =
+                            impeller2_wkt::Color::from_color32(color_3d);
+                    }
+
                     if viewport_config.ellipsoid_intersect_mode
                         == EllipsoidIntersectMode::Projection2D
                     {

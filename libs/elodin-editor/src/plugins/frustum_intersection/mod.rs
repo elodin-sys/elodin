@@ -796,7 +796,7 @@ fn draw_frustum_ellipsoid_intersections(
             planes,
             aabb_min,
             aabb_max,
-            color: config.frustums_color,
+            color: config.intersect_3d_color,
             projection_color: config.projection_color,
         });
     }
