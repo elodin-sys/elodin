@@ -1,7 +1,8 @@
+use super::frustum_common::{MainViewportQueryItem, color_component_to_u8, frustum_local_points};
 use crate::{
     MainCamera,
     object_3d::{EllipsoidVisual, Object3DState, WorldPosReceived},
-    ui::tiles::{EllipsoidIntersectMode, ViewportConfig},
+    ui::tiles::EllipsoidIntersectMode,
 };
 use bevy::asset::RenderAssetUsages;
 use bevy::camera::visibility::{NoFrustumCulling, RenderLayers};
@@ -17,14 +18,6 @@ use std::collections::HashMap;
 /// POC marching grid resolution (cells). Balance quality vs per-frame CPU cost.
 const INTERSECTION_GRID: UVec3 = UVec3::new(32, 32, 32);
 const SURFACE_EPS: f32 = 1.0e-5;
-
-type MainViewportQueryItem = (
-    Entity,
-    &'static Camera,
-    &'static Projection,
-    &'static GlobalTransform,
-    Option<&'static ViewportConfig>,
-);
 
 #[derive(Clone, Copy)]
 struct Plane {
@@ -139,10 +132,6 @@ impl Plugin for FrustumIntersectionPlugin {
     }
 }
 
-fn color_component_to_u8(value: f32) -> u8 {
-    (value.clamp(0.0, 1.0) * 255.0).round() as u8
-}
-
 const INTERSECTION_ALPHA: u8 = 160;
 
 fn intersection_material_for_color(
@@ -219,33 +208,6 @@ fn projection_material_for_color(
     });
     cache.materials.insert(key, material.clone());
     material
-}
-
-fn frustum_local_points(perspective: &PerspectiveProjection) -> Option<[Vec3; 8]> {
-    let near = perspective.near;
-    let far = perspective.far;
-    let fov = perspective.fov;
-    let aspect = perspective.aspect_ratio;
-    if !(near > 0.0 && far > near && fov > 0.0 && aspect > 0.0) {
-        return None;
-    }
-
-    let tan_half = (fov * 0.5).tan();
-    let near_half_height = tan_half * near;
-    let near_half_width = near_half_height * aspect;
-    let far_half_height = tan_half * far;
-    let far_half_width = far_half_height * aspect;
-
-    Some([
-        Vec3::new(-near_half_width, near_half_height, -near),
-        Vec3::new(near_half_width, near_half_height, -near),
-        Vec3::new(near_half_width, -near_half_height, -near),
-        Vec3::new(-near_half_width, -near_half_height, -near),
-        Vec3::new(-far_half_width, far_half_height, -far),
-        Vec3::new(far_half_width, far_half_height, -far),
-        Vec3::new(far_half_width, -far_half_height, -far),
-        Vec3::new(-far_half_width, -far_half_height, -far),
-    ])
 }
 
 fn plane_from_points(a: Vec3, b: Vec3, c: Vec3, inside: Vec3) -> Option<Plane> {
