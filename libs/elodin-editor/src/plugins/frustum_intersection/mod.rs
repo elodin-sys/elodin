@@ -608,7 +608,7 @@ const PROJECTION_GRID: usize = 80;
 fn ray_intersects_ellipsoid_in_frustum(
     origin: Vec3,
     dir: Vec3,
-    frustum: &FrustumVolume,
+    far_point: Vec3,
     ellipsoid: &EllipsoidVolume,
 ) -> f32 {
     let inv_rot = ellipsoid.rotation.inverse();
@@ -625,17 +625,16 @@ fn ray_intersects_ellipsoid_in_frustum(
         return discriminant;
     }
     let sqrt_disc = discriminant.sqrt();
-    let t_enter = ((-b - sqrt_disc) / (2.0 * a)).max(0.0);
-    let t_exit = ((-b + sqrt_disc) / (2.0 * a)).max(0.0);
-    let samples: [f32; 5] = [0.0, 0.25, 0.5, 0.75, 1.0];
-    for &frac in &samples {
-        let t = t_enter + frac * (t_exit - t_enter);
-        let p = origin + dir * t;
-        if frustum_signed_distance(p, &frustum.planes) <= 0.0 {
-            return -discriminant;
-        }
+    let t_enter = (-b - sqrt_disc) / (2.0 * a);
+    let t_exit = (-b + sqrt_disc) / (2.0 * a);
+    let t_far = (far_point - origin).length();
+    let overlap_enter = t_enter.max(0.0);
+    let overlap_exit = t_exit.min(t_far);
+    if overlap_enter < overlap_exit {
+        -discriminant
+    } else {
+        discriminant
     }
-    discriminant
 }
 
 fn build_projection_mesh(frustum: &FrustumVolume, ellipsoid: &EllipsoidVolume) -> Option<Mesh> {
@@ -661,7 +660,7 @@ fn build_projection_mesh(frustum: &FrustumVolume, ellipsoid: &EllipsoidVolume) -
             let u = i as f32 / n as f32;
             let p = bilinear(u, v);
             let dir = (p - cam).normalize_or_zero();
-            let s = ray_intersects_ellipsoid_in_frustum(cam, dir, frustum, ellipsoid);
+            let s = ray_intersects_ellipsoid_in_frustum(cam, dir, p, ellipsoid);
             scalar[idx(i, j)] = s;
             if s <= 0.0 {
                 has_inside = true;
