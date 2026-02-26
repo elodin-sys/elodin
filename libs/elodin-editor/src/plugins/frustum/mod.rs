@@ -1,4 +1,5 @@
-use crate::{MainCamera, ui::tiles::ViewportConfig};
+use super::frustum_common::{MainViewportQueryItem, color_component_to_u8, frustum_local_points};
+use crate::MainCamera;
 use bevy::asset::RenderAssetUsages;
 use bevy::camera::visibility::{NoFrustumCulling, RenderLayers};
 use bevy::ecs::system::SystemParam;
@@ -11,14 +12,6 @@ use std::collections::{HashMap, HashSet};
 /// Frustum pairs are skipped when cameras are this close, which prevents the
 /// visual glitch at startup when all viewports share the same default position.
 const MIN_FRUSTUM_CAMERA_DISTANCE_SQ: f32 = 0.01;
-
-type MainViewportQueryItem = (
-    Entity,
-    &'static Camera,
-    &'static Projection,
-    &'static GlobalTransform,
-    Option<&'static ViewportConfig>,
-);
 
 pub struct FrustumPlugin;
 
@@ -160,10 +153,6 @@ fn frustum_mesh_setup(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>) 
     commands.insert_resource(FrustumLineAssets { edge_mesh });
 }
 
-fn color_component_to_u8(value: f32) -> u8 {
-    (value.clamp(0.0, 1.0) * 255.0).round() as u8
-}
-
 fn frustum_material_for_color(
     color: impeller2_wkt::Color,
     materials: &mut Assets<StandardMaterial>,
@@ -195,33 +184,6 @@ fn frustum_material_for_color(
     });
     cache.materials.insert(key, material.clone());
     material
-}
-
-fn frustum_local_points(perspective: &PerspectiveProjection) -> Option<[Vec3; 8]> {
-    let near = perspective.near;
-    let far = perspective.far;
-    let fov = perspective.fov;
-    let aspect = perspective.aspect_ratio;
-    if !(near > 0.0 && far > near && fov > 0.0 && aspect > 0.0) {
-        return None;
-    }
-
-    let tan_half = (fov * 0.5).tan();
-    let near_half_height = tan_half * near;
-    let near_half_width = near_half_height * aspect;
-    let far_half_height = tan_half * far;
-    let far_half_width = far_half_height * aspect;
-
-    Some([
-        Vec3::new(-near_half_width, near_half_height, -near),
-        Vec3::new(near_half_width, near_half_height, -near),
-        Vec3::new(near_half_width, -near_half_height, -near),
-        Vec3::new(-near_half_width, -near_half_height, -near),
-        Vec3::new(-far_half_width, far_half_height, -far),
-        Vec3::new(far_half_width, far_half_height, -far),
-        Vec3::new(far_half_width, -far_half_height, -far),
-        Vec3::new(-far_half_width, -far_half_height, -far),
-    ])
 }
 
 fn frustum_segments(points: [Vec3; 8]) -> [(Vec3, Vec3); 12] {
