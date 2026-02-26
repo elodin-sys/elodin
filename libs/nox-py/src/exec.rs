@@ -292,7 +292,6 @@ impl PyExec {
             "arrow_ipc" | "arrow" => ArchiveFormat::ArrowIpc,
             "parquet" | "pq" => ArchiveFormat::Parquet,
             "csv" => ArchiveFormat::Csv,
-            "native" => ArchiveFormat::Native,
             _ => return Err(Error::UnknownCommand(format)),
         };
         self.db.save_archive(path, format)?;

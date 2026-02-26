@@ -3,7 +3,7 @@ mod tests {
 
     use arrow::{array::AsArray, datatypes::Float64Type};
     use elodin_db::{AtomicTimestampExt, DB, Error, Server};
-    use futures_lite::future::zip;
+
     use impeller2::{
         types::{ComponentId, IntoLenPacket, LenPacket, Msg, PrimType, Timestamp},
         vtable::builder::{component, raw_field, raw_table, schema, timestamp, vtable},
@@ -12,8 +12,6 @@ mod tests {
     use postcard_schema::{Schema, schema::owned::OwnedNamedType};
     use std::{
         collections::{BTreeMap, BTreeSet},
-        fs::File,
-        io::Write,
         net::SocketAddr,
         path::Path,
         sync::Arc,
@@ -556,173 +554,6 @@ mod tests {
             "error description missing drive-relative path: {}",
             description
         );
-    }
-
-    #[test]
-    async fn test_save_archive_native_blocks_writes() {
-        let (addr, db) = setup_test_db().await.unwrap();
-        let mut setup_client = Client::connect(addr).await.unwrap();
-
-        let component_id = ComponentId::new("archive_native_test");
-        setup_client
-            .send(&SetComponentMetadata::new(
-                component_id,
-                "TestComponentNative",
-            ))
-            .await
-            .0
-            .unwrap();
-
-        let vtable = vtable([raw_field(
-            0,
-            8,
-            schema(PrimType::F64, &[1], component(component_id)),
-        )]);
-        let vtable_id = 3u16.to_le_bytes();
-        setup_client
-            .send(&VTableMsg {
-                id: vtable_id,
-                vtable,
-            })
-            .await
-            .0
-            .unwrap();
-
-        let initial_values = [10.5f64, 20.5, 30.5];
-        for value in initial_values {
-            let mut pkt = LenPacket::table(vtable_id, 8);
-            pkt.extend_aligned(&[value]);
-            setup_client.send(pkt).await.0.unwrap();
-            sleep(Duration::from_millis(5)).await;
-        }
-
-        // Add a filler file to make the native copy take perceptible time.
-        let filler_path = db.path.join("filler.bin");
-        {
-            let mut filler = File::create(&filler_path).unwrap();
-            filler.write_all(&vec![0xAAu8; 4 * 1024 * 1024]).unwrap();
-            filler.sync_all().unwrap();
-        }
-
-        // Ensure the server has ingested the component metadata + initial samples
-        // before triggering the snapshot; otherwise the copy might race ahead of
-        // the write pipeline and miss the component entirely.
-        let ready_deadline = Instant::now() + Duration::from_secs(1);
-        let mut component_ready = false;
-        while Instant::now() < ready_deadline {
-            component_ready = db.with_state(|state| {
-                state
-                    .get_component(component_id)
-                    .and_then(|component| component.time_series.latest())
-                    .is_some()
-            });
-            if component_ready {
-                break;
-            }
-            sleep(Duration::from_millis(10)).await;
-        }
-        assert!(
-            component_ready,
-            "component metadata/data must exist before snapshot"
-        );
-
-        let native_root =
-            std::env::temp_dir().join(format!("test_native_archive_{}", fastrand::u64(..)));
-
-        let mut archive_client = Client::connect(addr).await.unwrap();
-        let mut writer_client = Client::connect(addr).await.unwrap();
-        let late_value = 99.5f64;
-
-        let save_future = {
-            let save_path = native_root.clone();
-            async move {
-                let save_archive = SaveArchive {
-                    path: save_path,
-                    format: ArchiveFormat::Native,
-                };
-                archive_client.request(&save_archive).await.unwrap()
-            }
-        };
-
-        let native_root_for_writer = native_root.clone();
-        let write_future = async move {
-            // Wait until the snapshot copy has actually started by polling for the
-            // temporary directory (db.tmp). This ensures the snapshot barrier is
-            // active before sending the late write, making the test deterministic.
-            let parent = native_root_for_writer
-                .parent()
-                .map(std::path::Path::to_path_buf)
-                .unwrap_or_else(|| std::path::PathBuf::from("."));
-            let tmp_db_dir = parent.join(format!(
-                "{}.tmp",
-                native_root_for_writer
-                    .file_name()
-                    .unwrap_or_default()
-                    .to_string_lossy()
-            ));
-            let start = std::time::Instant::now();
-            while !tmp_db_dir.exists() && start.elapsed() < Duration::from_secs(1) {
-                sleep(Duration::from_millis(5)).await;
-            }
-
-            let mut pkt = LenPacket::table(vtable_id, 8);
-            pkt.extend_aligned(&[late_value]);
-            writer_client.send(pkt).await.0.unwrap();
-        };
-
-        let (archive_saved, _) = zip(save_future, write_future).await;
-
-        assert_eq!(archive_saved.path, native_root);
-        assert!(native_root.exists());
-
-        let snapshot_db = DB::open(native_root.clone()).unwrap();
-        snapshot_db.with_state(|state| {
-            let component = state
-                .get_component(component_id)
-                .expect("missing component in snapshot");
-            let (timestamps, _) = component
-                .time_series
-                .get_range(&(Timestamp(i64::MIN)..Timestamp(i64::MAX)))
-                .expect("failed to read snapshot range");
-            assert_eq!(timestamps.len(), 3);
-            let (_, buf) = component
-                .time_series
-                .latest()
-                .expect("missing latest snapshot sample");
-            let latest =
-                f64::from_le_bytes(buf.try_into().expect("component sample size mismatch"));
-            assert!((latest - 30.5).abs() <= f64::EPSILON);
-        });
-
-        // The client `send` completes when bytes are written to the socket, not
-        // when the server has applied the write. Poll the DB briefly until the
-        // late write becomes visible, then assert.
-        let start = std::time::Instant::now();
-        let timeout = Duration::from_millis(500);
-        loop {
-            let latest_seen = db.with_state(|state| {
-                let component = state
-                    .get_component(component_id)
-                    .expect("missing component");
-                let (_, buf) = component
-                    .time_series
-                    .latest()
-                    .expect("missing latest sample");
-                f64::from_le_bytes(buf.try_into().expect("component sample size mismatch"))
-            });
-            if (latest_seen - late_value).abs() <= f64::EPSILON {
-                break;
-            }
-            if start.elapsed() > timeout {
-                panic!(
-                    "latest sample should include post-snapshot write; got {}",
-                    latest_seen
-                );
-            }
-            sleep(Duration::from_millis(10)).await;
-        }
-
-        let _ = std::fs::remove_dir_all(native_root);
     }
 
     #[test]

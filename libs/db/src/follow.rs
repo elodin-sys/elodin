@@ -359,7 +359,6 @@ async fn run_follower_inner(config: &FollowConfig, db: &Arc<DB>) -> Result<(), E
                     let mut sink = DBSink {
                         components: &state.components,
                         component_metadata: &state.component_metadata,
-                        snapshot_barrier: &db.snapshot_barrier,
                         last_updated: &db.last_updated,
                         earliest_timestamp: &db.earliest_timestamp,
                         sunk_new_time_series: false,
