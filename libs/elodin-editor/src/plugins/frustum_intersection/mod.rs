@@ -9,6 +9,9 @@ use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy::render::render_resource::PrimitiveTopology;
 use bevy::transform::TransformSystems;
+use impeller2::types::ComponentId;
+use impeller2_bevy::{ComponentMetadataRegistry, ComponentValue, EntityMap};
+use impeller2_wkt::ComponentMetadata;
 use std::collections::HashMap;
 
 /// POC marching grid resolution (cells). Balance quality vs per-frame CPU cost.
@@ -122,11 +125,16 @@ pub struct FrustumIntersectionPlugin;
 
 impl Plugin for FrustumIntersectionPlugin {
     fn build(&self, app: &mut App) {
+        use impeller2_bevy::AppExt;
         app.init_resource::<IntersectionMaterialCache>()
             .init_resource::<IntersectionRatios>()
+            .add_impeller_component::<impeller2_wkt::FrustumCoverage>()
             .add_systems(
                 PostUpdate,
-                draw_frustum_ellipsoid_intersections.after(TransformSystems::Propagate),
+                (
+                    draw_frustum_ellipsoid_intersections.after(TransformSystems::Propagate),
+                    write_coverage_to_db.after(draw_frustum_ellipsoid_intersections),
+                ),
             );
     }
 }
@@ -992,5 +1000,54 @@ fn draw_frustum_ellipsoid_intersections(
 
     for (entity, _) in existing_by_key.into_values() {
         commands.entity(entity).despawn();
+    }
+}
+
+fn write_coverage_to_db(
+    ratios: Res<IntersectionRatios>,
+    mut entity_map: ResMut<EntityMap>,
+    mut metadata_reg: ResMut<ComponentMetadataRegistry>,
+    mut values: Query<&mut ComponentValue>,
+    names: Query<&Name>,
+    mut commands: Commands,
+) {
+    for ratio in &ratios.0 {
+        let ellipsoid_name = names
+            .get(ratio.ellipsoid)
+            .map(|n| n.as_str())
+            .unwrap_or("ellipsoid");
+        let full_name = format!("{ellipsoid_name}.frustum_coverage");
+        let cid = ComponentId::new(&full_name);
+
+        let entity = if let Some(&e) = entity_map.get(&cid) {
+            e
+        } else {
+            let metadata = metadata_reg
+                .entry(cid)
+                .or_insert_with(|| ComponentMetadata {
+                    component_id: cid,
+                    name: full_name.clone(),
+                    metadata: Default::default(),
+                })
+                .clone();
+            let e = commands
+                .spawn((cid, impeller2_bevy::ComponentValueMap::default(), metadata))
+                .id();
+            entity_map.insert(cid, e);
+            e
+        };
+
+        if let Ok(mut value) = values.get_mut(entity) {
+            if let ComponentValue::F32(arr) = &mut *value {
+                let buf = nox::ArrayBuf::as_mut_buf(&mut arr.buf);
+                if !buf.is_empty() {
+                    buf[0] = ratio.ratio;
+                }
+            }
+        } else {
+            let mut arr = nox::Array::<f32, nox::Dyn>::zeroed(&[]);
+            nox::ArrayBuf::as_mut_buf(&mut arr.buf)[0] = ratio.ratio;
+            commands.entity(entity).insert(ComponentValue::F32(arr));
+        }
     }
 }
