@@ -544,7 +544,7 @@ w.schematic(
         //    color 255 200 100 100
         //    grid_color 255 255 255 255
         //}
-        //ellipsoid error_covariance_cholesky="(3, 0, 2, 0, 0, 1)" show_grid=#true {
+        //ellipsoid error_covariance_cholesky="(3, 0, 2, 0, 0, 1)" error_confidence_interval="20" show_grid=#true {
         //    color 255 200 100 100
         //    grid_color 255 255 255 255
         //}
