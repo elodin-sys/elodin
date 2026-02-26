@@ -203,10 +203,11 @@ pub fn apply_render_layers_to_scene(
         );
 
         // The root starts Visibility::Hidden so GLB children never appear on
-        // the default render layer 0. Once every descendant has been assigned
-        // the correct RenderLayers we flip to Inherited so the cube becomes
-        // visible through the dedicated overlay camera only.
-        if !had_untagged && *visibility == Visibility::Hidden {
+        // the default render layer 0. Only reveal once:
+        //   1. The GLB scene has actually spawned children, AND
+        //   2. Every descendant has been assigned the correct RenderLayers.
+        let has_children = children_query.get(cube_root).is_ok();
+        if has_children && !had_untagged && *visibility == Visibility::Hidden {
             commands.entity(cube_root).insert(Visibility::Inherited);
         }
     }
