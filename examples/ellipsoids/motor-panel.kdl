@@ -1,0 +1,10 @@
+tabs {
+    hsplit name="Motor Panel" {
+        vsplit share=0.4 {
+            graph "presence.motor_input"
+            graph "presence.motor_pwm"
+            graph "presence.motor_rpm"
+        }
+        graph "presence.thrust"
+    }
+}

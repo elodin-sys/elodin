@@ -51,7 +51,7 @@ Torque = ty.Annotated[
 
 
 @dataclass
-class Drone(el.Archetype):
+class PresenceLocus(el.Archetype):
     body_thrust: BodyThrust = field(default_factory=lambda: el.SpatialForce())
     body_drag: BodyDrag = field(default_factory=lambda: jnp.zeros(3))
     thrust: Thrust = field(default_factory=lambda: jnp.zeros(4))
@@ -110,30 +110,32 @@ def gravity(inertia: el.Inertia, f: el.Force) -> el.Force:
 
 def world() -> tuple[el.World, el.EntityId]:
     world = el.World()
-    drone = world.spawn(
+    presence = world.spawn(
         [
             el.Body(
                 world_pos=Config.GLOBAL.spatial_transform,
                 inertia=Config.GLOBAL.spatial_inertia,
             ),
-            Drone(),
+            PresenceLocus(),
             motors.Motors(),
             sensors.IMU(),
             control.AttitudeController(),
             mekf.MEKF(),
             telemetry.Telemetry(),
         ],
-        name="drone",
+        name="presence",
     )
 
-    object_mesh = f"""
-    object_3d drone.world_pos {{
-        glb path="{Config.GLOBAL.drone_glb}"
-        icon builtin="flight" {{
+    object_mesh = """
+    object_3d presence.world_pos {
+        ellipsoid scale="(1.2, 0.7, 0.5)" {
+            color 140 200 255 20
+        }
+        icon builtin="adjust" {
             visibility_range min=500.0
-            color 0 188 212
-        }}
-    }}
+            color 140 200 255
+        }
+    }
     """
 
     world.schematic(
@@ -142,32 +144,26 @@ def world() -> tuple[el.World, el.EntityId]:
 
         tabs {
             hsplit name = "Viewport" {
-                viewport name=Viewport pos="drone.world_pos + (0,0,0,0, 2,2,2)" look_at="drone.world_pos" show_grid=#true active=#true
-                vsplit share=0.4 {
-                    graph "drone.angle_desired" name="angle_desired"
-                    graph "drone.world_pos.q0, drone.world_pos.q1, drone.world_pos.q2, drone.world_pos.q3, drone.attitude_target" name="World Pos"
-                    graph "drone.ang_vel_setpoint"
+                viewport name=FrustumSource pos="presence.world_pos + (0,0,0,0, 4,3,3)" look_at="presence.world_pos" show_grid=#true active=#true
+                viewport name=IntersectionView pos="presence.world_pos + (0,0,0,0, 2,2,2)" look_at="presence.world_pos" show_grid=#true active=#true
+                vsplit share=0.35 {
+                    graph "presence.angle_desired" name="angle_desired"
+                    graph "presence.world_pos.q0, presence.world_pos.q1, presence.world_pos.q2, presence.world_pos.q3, presence.attitude_target" name="World Pos"
+                    graph "presence.ang_vel_setpoint"
                 }
             }
             vsplit name="Sensor Panel" {
-                graph "drone.gyro"
-                graph "drone.accel"
-                graph "drone.magnetometer"
+                graph "presence.gyro"
+                graph "presence.accel"
+                graph "presence.magnetometer"
             }
         }
         
-        // important to keep these active as our only regression tests for the multiple window panels
-        window path="examples/drone/motor-panel.kdl"
-        window path="examples/drone/rate-control-panel.kdl"
-
-        vector_arrow "(1, 0, 0)" origin="drone.world_pos" scale=1.0 name="Drone Velocity X" body_frame=#true
-        vector_arrow "(0, 1, 0)" origin="drone.world_pos" scale=1.0 name="Drone Velocity Y" body_frame=#true
-        vector_arrow "(0, 0, 1)" origin="drone.world_pos" scale=1.0 name="Drone Velocity Z" body_frame=#true
     """
         + object_mesh,
-        "drone.kdl",
+        "presence.kdl",
     )
-    return world, drone
+    return world, presence
 
 
 def inner_loop(run_count: int, system: el.System) -> el.System:
