@@ -341,6 +341,43 @@ fn parse_viewport(node: &KdlNode, kdl_src: &str) -> Result<Panel, KdlSchematicEr
         .and_then(|v| v.as_bool())
         .unwrap_or(true);
 
+    let create_frustum = node
+        .get("create_frustum")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
+    let show_frustums = node
+        .get("show_frustums")
+        .or_else(|| node.get("show_frustum"))
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
+    let frustums_color = if let Some(value) = node.get("frustums_color") {
+        parse_viewport_frustums_color(value).ok_or_else(|| KdlSchematicError::InvalidValue {
+            property: "frustums_color".to_string(),
+            node: "viewport".to_string(),
+            expected: "a named color or tuple string like \"(255,255,0,200)\"".to_string(),
+            src: kdl_src.to_string(),
+            span: node.span(),
+        })?
+    } else {
+        default_viewport_frustums_color()
+    };
+    let frustums_thickness = node
+        .get("frustums_thickness")
+        .and_then(|v| v.as_float().or_else(|| v.as_integer().map(|i| i as f64)))
+        .map(|v| v as f32)
+        .unwrap_or_else(default_viewport_frustums_thickness);
+    if frustums_thickness <= 0.0 {
+        return Err(KdlSchematicError::InvalidValue {
+            property: "frustums_thickness".to_string(),
+            node: "viewport".to_string(),
+            expected: "frustums_thickness must be > 0".to_string(),
+            src: kdl_src.to_string(),
+            span: node.span(),
+        });
+    }
+
     let show_view_cube = node
         .get("show_view_cube")
         .and_then(|v| v.as_bool())
@@ -404,6 +441,10 @@ fn parse_viewport(node: &KdlNode, kdl_src: &str) -> Result<Panel, KdlSchematicEr
         active,
         show_grid,
         show_arrows,
+        create_frustum,
+        show_frustums,
+        frustums_color,
+        frustums_thickness,
         show_view_cube,
         hdr,
         name,
@@ -1262,6 +1303,39 @@ fn parse_color_component_str(value: &str) -> Option<f32> {
         .parse::<i64>()
         .ok()
         .and_then(color_component_from_integer)
+}
+
+fn parse_color_from_text(value: &str) -> Option<Color> {
+    let trimmed = value.trim();
+    if let Some(named) = parse_named_color(trimmed) {
+        return Some(named);
+    }
+    if !trimmed.starts_with('(') || !trimmed.ends_with(')') {
+        return None;
+    }
+    let values: Vec<&str> = trimmed[1..trimmed.len() - 1]
+        .split(',')
+        .map(|s| s.trim())
+        .collect();
+    if values.len() < 3 {
+        return None;
+    }
+    let (Some(r), Some(g), Some(b)) = (
+        parse_color_component_str(values[0]),
+        parse_color_component_str(values[1]),
+        parse_color_component_str(values[2]),
+    ) else {
+        return None;
+    };
+    let a = values
+        .get(3)
+        .and_then(|v| parse_color_component_str(v))
+        .unwrap_or(1.0);
+    Some(Color::rgba(r, g, b, a))
+}
+
+fn parse_viewport_frustums_color(value: &kdl::KdlValue) -> Option<Color> {
+    value.as_string().and_then(parse_color_from_text)
 }
 
 fn parse_named_color(name: &str) -> Option<Color> {
