@@ -1111,7 +1111,7 @@ mod tests {
         for window in indices.windows(2) {
             assert!(
                 window[0] < window[1],
-                "expected viewport properties in order: `{viewport_line}`"
+                "expected viewport properties in order name → fov → near → far → aspect → pos → look_at → hdr → show_grid → show_arrows → create_frustum → show_frustums → frustums_color → frustums_thickness → show_view_cube → active: `{viewport_line}`"
             );
         }
     }
