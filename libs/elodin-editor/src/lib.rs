@@ -244,7 +244,12 @@ impl Plugin for EditorPlugin {
             )
             .add_systems(
                 Update,
-                (advance_playback, impeller2_bevy::apply_cached_data).chain(),
+                (
+                    impeller2_bevy::backfill_cache,
+                    advance_playback,
+                    impeller2_bevy::apply_cached_data,
+                )
+                    .chain(),
             )
             .add_systems(Update, ui::data_overview::trigger_time_range_queries)
             .add_systems(PreUpdate, set_selected_range)
