@@ -142,6 +142,7 @@ pub struct ViewportConfig {
     pub create_frustum: bool,
     pub show_frustums: bool,
     pub ellipsoid_intersect_mode: EllipsoidIntersectMode,
+    pub show_ratio_monitor: bool,
     pub intersect_3d_color: impeller2_wkt::Color,
     pub projection_color: impeller2_wkt::Color,
     pub frustums_color: impeller2_wkt::Color,
@@ -1062,7 +1063,8 @@ impl Pane {
                 egui_tiles::UiResponse::None
             }
             Pane::Viewport(pane) => {
-                pane.rect = Some(content_rect);
+                const MONITOR_HEIGHT: f32 = 36.0;
+                let mut show_monitor = false;
 
                 if let Some(cam) = pane.camera {
                     let mut state = SystemState::<(
@@ -1073,37 +1075,51 @@ impl Pane {
                     if let Ok(config) = configs.get(cam)
                         && config.create_frustum
                         && config.ellipsoid_intersect_mode == EllipsoidIntersectMode::Mesh3D
+                        && config.show_ratio_monitor
                     {
                         let relevant: Vec<_> =
                             ratios.0.iter().filter(|r| r.source == cam).collect();
                         if !relevant.is_empty() {
-                            let rect = ui.available_rect_before_wrap();
-                            for r in &relevant {
+                            show_monitor = true;
+                            let viewport_rect = egui::Rect::from_min_max(
+                                content_rect.min,
+                                egui::pos2(content_rect.max.x, content_rect.max.y - MONITOR_HEIGHT),
+                            );
+                            pane.rect = Some(viewport_rect);
+
+                            let monitor_rect = egui::Rect::from_min_max(
+                                egui::pos2(content_rect.min.x, content_rect.max.y - MONITOR_HEIGHT),
+                                content_rect.max,
+                            );
+                            let scheme = super::colors::get_scheme();
+                            ui.painter()
+                                .rect_filled(monitor_rect, 0.0, scheme.bg_secondary);
+                            ui.painter().line_segment(
+                                [monitor_rect.left_top(), monitor_rect.right_top()],
+                                egui::Stroke::new(1.0, scheme.border_primary),
+                            );
+
+                            for (i, r) in relevant.iter().enumerate() {
                                 let pct = (r.ratio * 100.0).clamp(0.0, 100.0);
-                                let text = format!("{pct:.1}%");
+                                let text = format!("Volume: {pct:.1}%");
                                 let galley = ui.painter().layout_no_wrap(
                                     text,
-                                    egui::FontId::monospace(13.0),
-                                    egui::Color32::from_rgb(220, 220, 220),
+                                    egui::FontId::monospace(14.0),
+                                    scheme.text_primary,
                                 );
                                 let pos = egui::pos2(
-                                    rect.min.x + 8.0,
-                                    rect.max.y - galley.size().y - 8.0,
+                                    monitor_rect.min.x + 10.0,
+                                    monitor_rect.min.y + 8.0 + i as f32 * 20.0,
                                 );
-                                let bg = egui::Rect::from_min_size(
-                                    pos - egui::vec2(4.0, 2.0),
-                                    galley.size() + egui::vec2(8.0, 4.0),
-                                );
-                                ui.painter().rect_filled(
-                                    bg,
-                                    4.0,
-                                    egui::Color32::from_black_alpha(160),
-                                );
-                                ui.painter().galley(pos, galley, egui::Color32::WHITE);
+                                ui.painter().galley(pos, galley, scheme.text_primary);
                             }
                         }
                     }
                     state.apply(world);
+                }
+
+                if !show_monitor {
+                    pane.rect = Some(content_rect);
                 }
 
                 egui_tiles::UiResponse::None
@@ -1431,6 +1447,7 @@ impl ViewportPane {
                 create_frustum: false,
                 show_frustums: false,
                 ellipsoid_intersect_mode: EllipsoidIntersectMode::Off,
+                show_ratio_monitor: false,
                 intersect_3d_color: default_intersect_3d_color(),
                 projection_color: default_projection_color(),
                 frustums_color: impeller2_wkt::default_viewport_frustums_color(),
