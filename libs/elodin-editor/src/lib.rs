@@ -950,6 +950,8 @@ fn sync_res<R: Component + Resource + Clone>(q: Query<&R>, mut res: ResMut<R>) {
 pub fn setup_clear_state(mut packet_handlers: ResMut<PacketHandlers>, mut commands: Commands) {
     let sys = commands.register_system(clear_state_new_connection);
     packet_handlers.0.push(sys);
+    let sys = commands.register_system(reset_timestamps_on_new_connection);
+    packet_handlers.0.push(sys);
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1022,6 +1024,23 @@ fn clear_state_new_connection(
     render_layer_alloc.free_all();
     *telemetry_cache = impeller2_bevy::TelemetryCache::default();
     *backfill_state = impeller2_bevy::BackfillState::default();
+}
+
+/// Reset timestamp resources so the next connection initializes correctly.
+/// Registered as a packet handler alongside `clear_state_new_connection`.
+fn reset_timestamps_on_new_connection(
+    PacketHandlerInput { packet, .. }: PacketHandlerInput,
+    mut earliest: ResMut<EarliestTimestamp>,
+    mut latest: ResMut<LastUpdated>,
+    mut current: ResMut<CurrentTimestamp>,
+) {
+    match packet {
+        OwnedPacket::Msg(m) if m.id == NewConnection::ID => {}
+        _ => return,
+    }
+    *earliest = EarliestTimestamp(Timestamp(i64::MAX));
+    *latest = LastUpdated(Timestamp(i64::MIN));
+    current.0 = Timestamp::EPOCH;
 }
 
 #[derive(Resource, Clone)]
