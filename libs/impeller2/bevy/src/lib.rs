@@ -395,7 +395,7 @@ fn sink_inner(
                 let dump_schema = m.parse::<DumpSchemaResp>()?;
                 world_sink.schema_reg.0.extend(dump_schema.schemas);
             }
-            OwnedPacket::Table(table) if table.id == world_sink.current_stream_id.packet_id() => {
+            OwnedPacket::Table(table) => {
                 let mut collector = CacheCollector {
                     collected: Vec::new(),
                 };
@@ -403,7 +403,6 @@ fn sink_inner(
                 pending_cache_entries.extend(collector.collected);
                 let _ = table.sink(vtable_registry, &mut world_sink)?;
             }
-            OwnedPacket::Table(_) => {}
             OwnedPacket::Msg(m) if m.id == EarliestTimestamp::ID => {
                 let new_earliest = m.parse::<EarliestTimestamp>()?;
                 let is_first = world_sink.earliest_timestamp.0 == Timestamp(i64::MAX);
@@ -510,7 +509,6 @@ pub struct WorldSink<'w, 's> {
     component_adapters: ResMut<'w, ComponentAdapters>,
     max_tick: ResMut<'w, LastUpdated>,
     earliest_timestamp: ResMut<'w, EarliestTimestamp>,
-    current_stream_id: ResMut<'w, CurrentStreamId>,
     recording: ResMut<'w, IsRecording>,
     current_timestamp: ResMut<'w, CurrentTimestamp>,
     schema_reg: ResMut<'w, ComponentSchemaRegistry>,
