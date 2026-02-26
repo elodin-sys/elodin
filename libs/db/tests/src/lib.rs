@@ -82,8 +82,8 @@ mod tests {
     #[test]
     async fn test_vtable_stream() {
         let (addr, _db) = setup_test_db().await.unwrap();
-        let mut tx_client = Client::connect(addr).await.unwrap();
         let mut rx_client = Client::connect(addr).await.unwrap();
+        let mut tx_client = Client::connect(addr).await.unwrap();
 
         let component_id = ComponentId::new("temperature");
 
@@ -99,8 +99,9 @@ mod tests {
             vtable: vtable.clone(),
         };
         let vtable_stream = VTableStream { id: vtable_id };
-        tx_client.send(&msg).await.0.unwrap();
-        sleep(Duration::from_millis(50)).await;
+        // Use rx_client for both VTableMsg and stream so the server processes them
+        // in order on the same connection (avoids "invalid msg id" race).
+        rx_client.send(&msg).await.0.unwrap();
         let mut sub = rx_client.stream(&vtable_stream).await.unwrap();
 
         spawn(async move {
