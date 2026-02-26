@@ -415,8 +415,8 @@ pub fn set_camera_viewport(
             continue;
         }
 
-        let side_length = (preferred_side_length * scale_factor)
-            .min(min_viewport_dim * max_viewport_fraction);
+        let side_length =
+            (preferred_side_length * scale_factor).min(min_viewport_dim * max_viewport_fraction);
         let right_offset = 20.0 * scale_factor; // Slight left offset to avoid overlap with right panel
         let nav_viewport_pos = Vec2::new(
             (viewport_pos.x + viewport_size.x) - (side_length + margin + right_offset),
