@@ -358,6 +358,35 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
                                 });
                         });
                     });
+
+                    if viewport_config.ellipsoid_intersect_mode
+                        == EllipsoidIntersectMode::Projection2D
+                    {
+                        ui.add_space(8.0);
+                        let mut proj_color = viewport_config.projection_color.into_color32();
+                        ui.horizontal(|ui| {
+                            ui.label(
+                                egui::RichText::new("PROJECTION COLOR")
+                                    .color(scheme.text_secondary),
+                            );
+                            ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
+                                let swatch = ui.add(
+                                    egui::Button::new("")
+                                        .fill(proj_color)
+                                        .stroke(egui::Stroke::new(1.0, scheme.border_primary))
+                                        .corner_radius(egui::CornerRadius::same(10))
+                                        .min_size(egui::vec2(20.0, 20.0)),
+                                );
+                                let color_id = ui.auto_id_with("projection_color");
+                                if swatch.clicked() {
+                                    egui::Popup::toggle_id(ui.ctx(), color_id);
+                                }
+                                color_popup(ui, &mut proj_color, color_id, &swatch);
+                            });
+                        });
+                        viewport_config.projection_color =
+                            impeller2_wkt::Color::from_color32(proj_color);
+                    }
                 }
 
                 ui.add_space(8.0);

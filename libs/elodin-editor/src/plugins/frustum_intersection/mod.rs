@@ -42,6 +42,7 @@ struct FrustumVolume {
     aabb_min: Vec3,
     aabb_max: Vec3,
     color: impeller2_wkt::Color,
+    projection_color: impeller2_wkt::Color,
 }
 
 #[derive(Clone, Copy)]
@@ -159,6 +160,36 @@ fn intersection_material_for_color(
         alpha_mode: AlphaMode::Blend,
         perceptual_roughness: 0.4,
         depth_bias: -2.0,
+        ..Default::default()
+    });
+    cache.materials.insert(key, material.clone());
+    material
+}
+
+const PROJECTION_ALPHA: u8 = 220;
+
+fn projection_material_for_color(
+    color: impeller2_wkt::Color,
+    materials: &mut Assets<StandardMaterial>,
+    cache: &mut IntersectionMaterialCache,
+) -> Handle<StandardMaterial> {
+    let key = IntersectionMaterialKey {
+        r: color_component_to_u8(color.r),
+        g: color_component_to_u8(color.g),
+        b: color_component_to_u8(color.b),
+        a: PROJECTION_ALPHA,
+    };
+    if let Some(handle) = cache.materials.get(&key) {
+        return handle.clone();
+    }
+
+    let material = materials.add(StandardMaterial {
+        base_color: Color::srgba_u8(key.r, key.g, key.b, PROJECTION_ALPHA),
+        emissive: Color::srgba_u8(key.r, key.g, key.b, 255).into(),
+        cull_mode: None,
+        unlit: true,
+        alpha_mode: AlphaMode::Blend,
+        depth_bias: -3.0,
         ..Default::default()
     });
     cache.materials.insert(key, material.clone());
@@ -721,6 +752,7 @@ fn draw_frustum_ellipsoid_intersections(
             aabb_min,
             aabb_max,
             color: config.frustums_color,
+            projection_color: config.projection_color,
         });
     }
 
@@ -763,11 +795,19 @@ fn draw_frustum_ellipsoid_intersections(
     let mut desired = Vec::new();
 
     for frustum in &sources {
-        let material = MeshMaterial3d(intersection_material_for_color(
-            frustum.color,
-            &mut params.materials,
-            &mut params.material_cache,
-        ));
+        let material_handle = match frustum.mode {
+            EllipsoidIntersectMode::Projection2D => projection_material_for_color(
+                frustum.projection_color,
+                &mut params.materials,
+                &mut params.material_cache,
+            ),
+            _ => intersection_material_for_color(
+                frustum.color,
+                &mut params.materials,
+                &mut params.material_cache,
+            ),
+        };
+        let material = MeshMaterial3d(material_handle);
         for (target_camera, render_layers) in &targets {
             if frustum.source == *target_camera {
                 continue;

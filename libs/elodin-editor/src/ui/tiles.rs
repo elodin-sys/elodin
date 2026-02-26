@@ -127,6 +127,10 @@ impl EllipsoidIntersectMode {
     }
 }
 
+pub fn default_projection_color() -> impeller2_wkt::Color {
+    impeller2_wkt::Color::WHITE
+}
+
 #[derive(Component)]
 pub struct ViewportConfig {
     pub aspect: Option<f32>,
@@ -134,6 +138,7 @@ pub struct ViewportConfig {
     pub create_frustum: bool,
     pub show_frustums: bool,
     pub ellipsoid_intersect_mode: EllipsoidIntersectMode,
+    pub projection_color: impeller2_wkt::Color,
     pub frustums_color: impeller2_wkt::Color,
     pub frustums_thickness: f32,
     pub viewport_layer: Option<usize>,
@@ -1378,6 +1383,7 @@ impl ViewportPane {
                 create_frustum: false,
                 show_frustums: false,
                 ellipsoid_intersect_mode: EllipsoidIntersectMode::Off,
+                projection_color: default_projection_color(),
                 frustums_color: impeller2_wkt::default_viewport_frustums_color(),
                 frustums_thickness: impeller2_wkt::default_viewport_frustums_thickness(),
                 viewport_layer,
