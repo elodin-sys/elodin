@@ -11,9 +11,6 @@ use bevy::render::render_resource::PrimitiveTopology;
 use bevy::transform::TransformSystems;
 use std::collections::HashMap;
 
-/// Keep parity with the frustum line overlay behavior: skip source/target pairs
-/// when cameras overlap at startup.
-const MIN_FRUSTUM_CAMERA_DISTANCE_SQ: f32 = 0.01;
 /// POC marching grid resolution (cells). Balance quality vs per-frame CPU cost.
 const INTERSECTION_GRID: UVec3 = UVec3::new(32, 32, 32);
 const SURFACE_EPS: f32 = 1.0e-5;
@@ -797,7 +794,6 @@ fn draw_frustum_ellipsoid_intersections(
     mut params: FrustumIntersectionParams<'_, '_>,
     mut commands: Commands,
 ) {
-    let mut camera_positions: HashMap<Entity, Vec3> = HashMap::new();
     let mut sources = Vec::new();
     let mut targets = Vec::new();
 
@@ -815,7 +811,6 @@ fn draw_frustum_ellipsoid_intersections(
             continue;
         };
 
-        camera_positions.insert(camera_entity, global_transform.translation());
         if config.show_frustums || config.ellipsoid_intersect_mode != EllipsoidIntersectMode::Off {
             targets.push((camera_entity, RenderLayers::layer(viewport_layer)));
         }
@@ -907,17 +902,6 @@ fn draw_frustum_ellipsoid_intersections(
         };
         let material = MeshMaterial3d(material_handle);
         for (target_camera, render_layers) in &targets {
-            if frustum.source == *target_camera {
-                continue;
-            }
-            if let (Some(&src_pos), Some(&tgt_pos)) = (
-                camera_positions.get(&frustum.source),
-                camera_positions.get(target_camera),
-            ) && (src_pos - tgt_pos).length_squared() < MIN_FRUSTUM_CAMERA_DISTANCE_SQ
-            {
-                continue;
-            }
-
             for ellipsoid in &ellipsoids {
                 if !aabb_overlap(
                     frustum.aabb_min,
