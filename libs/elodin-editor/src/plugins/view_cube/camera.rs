@@ -186,38 +186,50 @@ pub fn orient_axis_labels_to_screen_plane(
 }
 
 pub fn apply_render_layers_to_scene(
-    view_cube_query: Query<(Entity, &ViewCubeRenderLayer), With<ViewCubeRoot>>,
+    view_cube_query: Query<(Entity, &ViewCubeRenderLayer, &Visibility), With<ViewCubeRoot>>,
     children_query: Query<&Children>,
     entities_without_layer: Query<Entity, (Without<RenderLayers>, Without<ViewCubeCamera>)>,
     mut commands: Commands,
 ) {
-    for (cube_root, layer) in view_cube_query.iter() {
+    for (cube_root, layer, visibility) in view_cube_query.iter() {
         let render_layers = RenderLayers::layer(layer.0);
 
-        apply_layers_recursive(
+        let had_untagged = apply_layers_recursive(
             cube_root,
             &children_query,
             &entities_without_layer,
             &render_layers,
             &mut commands,
         );
+
+        // The root starts Visibility::Hidden so GLB children never appear on
+        // the default render layer 0. Once every descendant has been assigned
+        // the correct RenderLayers we flip to Inherited so the cube becomes
+        // visible through the dedicated overlay camera only.
+        if !had_untagged && *visibility == Visibility::Hidden {
+            commands.entity(cube_root).insert(Visibility::Inherited);
+        }
     }
 }
 
+/// Returns `true` if any descendant was still missing its `RenderLayers`.
 fn apply_layers_recursive(
     entity: Entity,
     children_query: &Query<&Children>,
     entities_without_layer: &Query<Entity, (Without<RenderLayers>, Without<ViewCubeCamera>)>,
     render_layers: &RenderLayers,
     commands: &mut Commands,
-) {
+) -> bool {
+    let mut had_untagged = false;
+
     if entities_without_layer.get(entity).is_ok() {
         commands.entity(entity).insert(render_layers.clone());
+        had_untagged = true;
     }
 
     if let Ok(children) = children_query.get(entity) {
         for child in children.iter() {
-            apply_layers_recursive(
+            had_untagged |= apply_layers_recursive(
                 child,
                 children_query,
                 entities_without_layer,
@@ -226,6 +238,8 @@ fn apply_layers_recursive(
             );
         }
     }
+
+    had_untagged
 }
 
 #[derive(SystemParam)]

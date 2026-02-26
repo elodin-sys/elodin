@@ -44,10 +44,14 @@ pub fn spawn_view_cube(
     // Load the axes-cube.glb (embedded)
     let scene = asset_server.load("embedded://elodin_editor/assets/axes-cube.glb#Scene0");
 
-    // Spawn the cube root with link to main camera
+    // Spawn the cube root hidden; apply_render_layers_to_scene will flip to
+    // Visibility::Inherited once every descendant has been assigned the correct
+    // RenderLayers, preventing the GLB children from briefly appearing on all
+    // cameras via the default layer 0.
     let mut cube_root_cmd = commands.spawn((
         SceneRoot(scene),
         Transform::from_xyz(0.0, 0.0, 0.0).with_scale(Vec3::splat(config.scale)),
+        Visibility::Hidden,
         ViewCubeRoot,
         ViewCubeMeshRoot,
         ViewCubeLink {
