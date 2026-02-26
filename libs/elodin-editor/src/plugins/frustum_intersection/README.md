@@ -10,4 +10,4 @@ Frustum/ellipsoid intersection mesh rendering.
 
 ## Notes
 - This is currently a CPU-generated POC mesh intended for visualization and validation.
-- Mesh resolution is fixed (`20^3` cells) to keep update cost bounded.
+- Mesh resolution is fixed (`32^3` cells) to keep update cost bounded.
