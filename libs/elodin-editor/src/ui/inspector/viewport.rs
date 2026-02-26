@@ -383,6 +383,15 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
                         });
                         viewport_config.intersect_3d_color =
                             impeller2_wkt::Color::from_color32(color_3d);
+
+                        ui.add_space(8.0);
+                        ui.horizontal(|ui| {
+                            ui.label(egui::RichText::new("MONITOR").color(scheme.text_secondary));
+                            ui.with_layout(egui::Layout::right_to_left(Align::Min), |ui| {
+                                theme::configure_input_with_border(ui.style_mut());
+                                ui.checkbox(&mut viewport_config.show_ratio_monitor, "");
+                            });
+                        });
                     }
 
                     if viewport_config.ellipsoid_intersect_mode
