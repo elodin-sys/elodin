@@ -966,6 +966,8 @@ fn clear_state_new_connection(
     mut commands: Commands,
     mut windows_state: Query<(Entity, &mut tiles::WindowState)>,
     primary_window: Single<Entity, With<PrimaryWindow>>,
+    mut telemetry_cache: ResMut<impeller2_bevy::TelemetryCache>,
+    mut backfill_state: ResMut<impeller2_bevy::BackfillState>,
 ) {
     match packet {
         OwnedPacket::Msg(m) if m.id == NewConnection::ID => {}
@@ -1018,6 +1020,8 @@ fn clear_state_new_connection(
     }
     *graph_data = CollectedGraphData::default();
     render_layer_alloc.free_all();
+    *telemetry_cache = impeller2_bevy::TelemetryCache::default();
+    *backfill_state = impeller2_bevy::BackfillState::default();
 }
 
 #[derive(Resource, Clone)]
@@ -1258,14 +1262,15 @@ fn clamp_range(total_range: Range<Timestamp>, b: Range<Timestamp>) -> Range<Time
 }
 
 pub fn clamp_current_time(
-    range: Res<SelectedTimeRange>,
+    earliest: Res<EarliestTimestamp>,
+    latest: Res<LastUpdated>,
     mut current_timestamp: ResMut<CurrentTimestamp>,
 ) {
-    if range.0.start > range.0.end {
+    if earliest.0 >= latest.0 {
         return;
     }
     let previous_timestamp = current_timestamp.0;
-    let new_timestamp = previous_timestamp.clamp(range.0.start, range.0.end);
+    let new_timestamp = previous_timestamp.clamp(earliest.0, latest.0);
     if new_timestamp != previous_timestamp {
         current_timestamp.0 = new_timestamp;
     }
