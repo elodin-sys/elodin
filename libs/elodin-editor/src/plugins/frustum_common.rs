@@ -57,10 +57,7 @@ mod tests {
             assert!((p.z - (-0.1)).abs() < 1e-5, "near plane z should be -near");
         }
         for p in &pts[4..8] {
-            assert!(
-                (p.z - (-100.0)).abs() < 1e-3,
-                "far plane z should be -far"
-            );
+            assert!((p.z - (-100.0)).abs() < 1e-3, "far plane z should be -far");
         }
     }
 
