@@ -795,7 +795,8 @@ pub fn update_object_3d_system(
         } else {
             match evaluate_scale(&object_3d, &entity_map, &component_value_maps) {
                 Ok(scale) => {
-                    let scale = scale.max(Vec3::splat(f32::EPSILON));
+                    let scale_enu = scale.max(Vec3::splat(f32::EPSILON));
+                    let scale = enu_scale_to_bevy(scale_enu);
                     if let Some(children) = children_maybe {
                         if children.len() != 1 {
                             warn!(
@@ -1168,6 +1169,13 @@ fn component_value_to_6floats(value: &ComponentValue) -> Result<[f32; 6], String
         }
         _ => Err("error_covariance_cholesky must yield an F32 or F64 array".to_string()),
     }
+}
+
+/// Converts ellipsoid scale from ENU (East, North, Up) to Bevy (East, Up, South).
+/// The scale EQL expression is in ENU; Bevy applies scale along its axes.
+#[inline]
+fn enu_scale_to_bevy(enu: Vec3) -> Vec3 {
+    Vec3::new(enu.x, enu.z, enu.y)
 }
 
 /// ENU (East-North-Up) to Bevy (East-Up-South) basis change.
