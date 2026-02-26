@@ -769,13 +769,15 @@ fn build_projection_mesh(frustum: &FrustumVolume, ellipsoid: &EllipsoidVolume) -
     Some(mesh)
 }
 
-fn cleanup_intersection_entities(
+fn cleanup_all(
     params: &FrustumIntersectionParams<'_, '_>,
+    ratios: &mut ResMut<IntersectionRatios>,
     commands: &mut Commands,
 ) {
     for (entity, _, _) in params.existing_visuals.iter() {
         commands.entity(entity).despawn();
     }
+    ratios.0.clear();
 }
 
 fn draw_frustum_ellipsoid_intersections(
@@ -841,7 +843,7 @@ fn draw_frustum_ellipsoid_intersections(
     }
 
     if sources.is_empty() || targets.is_empty() {
-        cleanup_intersection_entities(&params, &mut commands);
+        cleanup_all(&params, &mut ratios, &mut commands);
         return;
     }
 
@@ -872,7 +874,7 @@ fn draw_frustum_ellipsoid_intersections(
     }
 
     if ellipsoids.is_empty() {
-        cleanup_intersection_entities(&params, &mut commands);
+        cleanup_all(&params, &mut ratios, &mut commands);
         return;
     }
 
@@ -1008,8 +1010,12 @@ fn draw_intersection_ratio_overlay(
         return;
     }
 
+    let Ok(ctx) = contexts.ctx_mut() else {
+        return;
+    };
+
     for (cam_entity, config, viewport_rect) in viewports.iter() {
-        if !config.show_frustums && config.ellipsoid_intersect_mode == EllipsoidIntersectMode::Off {
+        if config.ellipsoid_intersect_mode != EllipsoidIntersectMode::Mesh3D {
             continue;
         }
 
@@ -1017,23 +1023,21 @@ fn draw_intersection_ratio_overlay(
             continue;
         };
 
-        let relevant: Vec<&IntersectionRatio> = ratios
-            .0
-            .iter()
-            .filter(|r| r.source == cam_entity || config.show_frustums)
-            .collect();
+        let relevant: Vec<&IntersectionRatio> =
+            ratios.0.iter().filter(|r| r.source == cam_entity).collect();
 
         if relevant.is_empty() {
             continue;
         }
 
-        let Ok(ctx) = contexts.ctx_mut() else {
-            return;
-        };
-
         let area_id = egui::Id::new("intersection_ratio").with(cam_entity);
+        let row_height = 16.0;
+        let overlay_height = relevant.len() as f32 * row_height + 8.0;
         egui::Area::new(area_id)
-            .fixed_pos(egui::pos2(rect.min.x + 8.0, rect.max.y - 28.0))
+            .fixed_pos(egui::pos2(
+                rect.min.x + 8.0,
+                rect.max.y - overlay_height - 4.0,
+            ))
             .interactable(false)
             .show(ctx, |ui| {
                 egui::Frame::NONE
@@ -1044,7 +1048,7 @@ fn draw_intersection_ratio_overlay(
                         for r in &relevant {
                             let pct = (r.ratio * 100.0).clamp(0.0, 100.0);
                             ui.label(
-                                egui::RichText::new(format!("Coverage: {pct:.1}%"))
+                                egui::RichText::new(format!("{pct:.1}%"))
                                     .monospace()
                                     .size(11.0)
                                     .color(egui::Color32::from_rgb(220, 220, 220)),
