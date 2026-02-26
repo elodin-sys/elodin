@@ -622,7 +622,7 @@ fn ray_intersects_ellipsoid_in_frustum(
     let c = o_s.dot(o_s) - 1.0;
     let discriminant = b * b - 4.0 * a * c;
     if discriminant < 0.0 {
-        return discriminant;
+        return -discriminant;
     }
     let sqrt_disc = discriminant.sqrt();
     let t_enter = (-b - sqrt_disc) / (2.0 * a);
