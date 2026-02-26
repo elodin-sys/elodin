@@ -616,7 +616,12 @@ fn build_intersection_mesh(
 
 const PROJECTION_GRID: usize = 80;
 
-fn ray_ellipsoid_sdf(origin: Vec3, dir: Vec3, ellipsoid: &EllipsoidVolume) -> f32 {
+fn ray_intersects_ellipsoid_in_frustum(
+    origin: Vec3,
+    dir: Vec3,
+    frustum: &FrustumVolume,
+    ellipsoid: &EllipsoidVolume,
+) -> f32 {
     let inv_rot = ellipsoid.rotation.inverse();
     let local_o = inv_rot * (origin - ellipsoid.center);
     let local_d = inv_rot * dir;
@@ -627,7 +632,21 @@ fn ray_ellipsoid_sdf(origin: Vec3, dir: Vec3, ellipsoid: &EllipsoidVolume) -> f3
     let b = 2.0 * o_s.dot(d_s);
     let c = o_s.dot(o_s) - 1.0;
     let discriminant = b * b - 4.0 * a * c;
-    -discriminant
+    if discriminant < 0.0 {
+        return discriminant;
+    }
+    let sqrt_disc = discriminant.sqrt();
+    let t_enter = (-b - sqrt_disc) / (2.0 * a);
+    let t_exit = (-b + sqrt_disc) / (2.0 * a);
+    let hit_enter = origin + dir * t_enter.max(0.0);
+    let hit_exit = origin + dir * t_exit.max(0.0);
+    let enter_in_frustum = frustum_signed_distance(hit_enter, &frustum.planes) <= 0.0;
+    let exit_in_frustum = frustum_signed_distance(hit_exit, &frustum.planes) <= 0.0;
+    if enter_in_frustum || exit_in_frustum {
+        -discriminant
+    } else {
+        discriminant
+    }
 }
 
 fn build_projection_mesh(frustum: &FrustumVolume, ellipsoid: &EllipsoidVolume) -> Option<Mesh> {
@@ -653,7 +672,7 @@ fn build_projection_mesh(frustum: &FrustumVolume, ellipsoid: &EllipsoidVolume) -
             let u = i as f32 / n as f32;
             let p = bilinear(u, v);
             let dir = (p - cam).normalize_or_zero();
-            let s = ray_ellipsoid_sdf(cam, dir, ellipsoid);
+            let s = ray_intersects_ellipsoid_in_frustum(cam, dir, frustum, ellipsoid);
             scalar[idx(i, j)] = s;
             if s <= 0.0 {
                 has_inside = true;
