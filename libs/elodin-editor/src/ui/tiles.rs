@@ -112,15 +112,17 @@ pub enum EllipsoidIntersectMode {
     #[default]
     Off,
     Mesh3D,
+    Projection2D,
 }
 
 impl EllipsoidIntersectMode {
-    pub const ALL: [Self; 2] = [Self::Off, Self::Mesh3D];
+    pub const ALL: [Self; 3] = [Self::Off, Self::Mesh3D, Self::Projection2D];
 
     pub fn label(self) -> &'static str {
         match self {
             Self::Off => "Off",
             Self::Mesh3D => "3D",
+            Self::Projection2D => "2D Projection",
         }
     }
 }

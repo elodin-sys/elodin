@@ -35,6 +35,9 @@ struct Plane {
 #[derive(Clone, Copy)]
 struct FrustumVolume {
     source: Entity,
+    mode: EllipsoidIntersectMode,
+    camera_pos: Vec3,
+    far_corners: [Vec3; 4],
     planes: [Plane; 6],
     aabb_min: Vec3,
     aabb_max: Vec3,
@@ -533,6 +536,125 @@ fn build_intersection_mesh(
     Some(mesh)
 }
 
+const PROJECTION_GRID: usize = 64;
+
+fn ray_hits_ellipsoid(origin: Vec3, dir: Vec3, ellipsoid: &EllipsoidVolume) -> bool {
+    let inv_rot = ellipsoid.rotation.inverse();
+    let local_o = inv_rot * (origin - ellipsoid.center);
+    let local_d = inv_rot * dir;
+    let r = ellipsoid.radii.max(Vec3::splat(SURFACE_EPS));
+    let o_s = local_o / r;
+    let d_s = local_d / r;
+    let a = d_s.dot(d_s);
+    let b = 2.0 * o_s.dot(d_s);
+    let c = o_s.dot(o_s) - 1.0;
+    b * b - 4.0 * a * c >= 0.0
+}
+
+fn build_projection_mesh(frustum: &FrustumVolume, ellipsoid: &EllipsoidVolume) -> Option<Mesh> {
+    let [c0, c1, c2, c3] = frustum.far_corners;
+    let cam = frustum.camera_pos;
+    let n = PROJECTION_GRID;
+    let np = n + 1;
+
+    let bilinear = |u: f32, v: f32| -> Vec3 {
+        let e03 = c0.lerp(c3, v);
+        let e12 = c1.lerp(c2, v);
+        e03.lerp(e12, u)
+    };
+
+    let mut hit_grid = vec![false; np * np];
+    let idx = |i: usize, j: usize| j * np + i;
+    let mut any_hit = false;
+
+    for j in 0..np {
+        let v = j as f32 / n as f32;
+        for i in 0..np {
+            let u = i as f32 / n as f32;
+            let p = bilinear(u, v);
+            let dir = (p - cam).normalize_or_zero();
+            if ray_hits_ellipsoid(cam, dir, ellipsoid) {
+                hit_grid[idx(i, j)] = true;
+                any_hit = true;
+            }
+        }
+    }
+
+    if !any_hit {
+        return None;
+    }
+
+    let far_normal = (c1 - c0).cross(c3 - c0).normalize_or_zero();
+    let nn = [far_normal.x, far_normal.y, far_normal.z];
+
+    let mut positions = Vec::new();
+    let mut normals = Vec::new();
+
+    for j in 0..n {
+        let v0 = j as f32 / n as f32;
+        let v1 = (j + 1) as f32 / n as f32;
+        for i in 0..n {
+            let u0 = i as f32 / n as f32;
+            let u1 = (i + 1) as f32 / n as f32;
+
+            let hits = [
+                hit_grid[idx(i, j)],
+                hit_grid[idx(i + 1, j)],
+                hit_grid[idx(i + 1, j + 1)],
+                hit_grid[idx(i, j + 1)],
+            ];
+            let count = hits.iter().filter(|&&h| h).count();
+            if count == 0 {
+                continue;
+            }
+
+            let p00 = bilinear(u0, v0);
+            let p10 = bilinear(u1, v0);
+            let p11 = bilinear(u1, v1);
+            let p01 = bilinear(u0, v1);
+
+            if count == 4 {
+                positions.extend_from_slice(&[
+                    [p00.x, p00.y, p00.z],
+                    [p10.x, p10.y, p10.z],
+                    [p11.x, p11.y, p11.z],
+                    [p00.x, p00.y, p00.z],
+                    [p11.x, p11.y, p11.z],
+                    [p01.x, p01.y, p01.z],
+                ]);
+                normals.extend_from_slice(&[nn, nn, nn, nn, nn, nn]);
+            } else {
+                let pc = bilinear((u0 + u1) * 0.5, (v0 + v1) * 0.5);
+                let pts = [p00, p10, p11, p01];
+                for k in 0..4 {
+                    if hits[k] || hits[(k + 1) % 4] {
+                        let a = pts[k];
+                        let b = pts[(k + 1) % 4];
+                        positions.extend_from_slice(&[
+                            [pc.x, pc.y, pc.z],
+                            [a.x, a.y, a.z],
+                            [b.x, b.y, b.z],
+                        ]);
+                        normals.extend_from_slice(&[nn, nn, nn]);
+                    }
+                }
+            }
+        }
+    }
+
+    if positions.is_empty() {
+        return None;
+    }
+
+    let mut mesh = Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
+    );
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
+    Some(mesh)
+}
+
 fn cleanup_intersection_entities(
     params: &FrustumIntersectionParams<'_, '_>,
     commands: &mut Commands,
@@ -587,6 +709,14 @@ fn draw_frustum_ellipsoid_intersections(
         let (aabb_min, aabb_max) = points_aabb(&world_points);
         sources.push(FrustumVolume {
             source: camera_entity,
+            mode: config.ellipsoid_intersect_mode,
+            camera_pos: global_transform.translation(),
+            far_corners: [
+                world_points[4],
+                world_points[5],
+                world_points[6],
+                world_points[7],
+            ],
             planes,
             aabb_min,
             aabb_max,
@@ -660,12 +790,18 @@ fn draw_frustum_ellipsoid_intersections(
                     continue;
                 }
 
-                let bounds_min = frustum.aabb_min.max(ellipsoid.aabb_min);
-                let bounds_max = frustum.aabb_max.min(ellipsoid.aabb_max);
-
-                let Some(mesh) =
-                    build_intersection_mesh(bounds_min, bounds_max, frustum, ellipsoid)
-                else {
+                let mesh_opt = match frustum.mode {
+                    EllipsoidIntersectMode::Mesh3D => {
+                        let bounds_min = frustum.aabb_min.max(ellipsoid.aabb_min);
+                        let bounds_max = frustum.aabb_max.min(ellipsoid.aabb_max);
+                        build_intersection_mesh(bounds_min, bounds_max, frustum, ellipsoid)
+                    }
+                    EllipsoidIntersectMode::Projection2D => {
+                        build_projection_mesh(frustum, ellipsoid)
+                    }
+                    EllipsoidIntersectMode::Off => None,
+                };
+                let Some(mesh) = mesh_opt else {
                     continue;
                 };
 
