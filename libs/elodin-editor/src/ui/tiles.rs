@@ -1063,6 +1063,49 @@ impl Pane {
             }
             Pane::Viewport(pane) => {
                 pane.rect = Some(content_rect);
+
+                if let Some(cam) = pane.camera {
+                    let mut state = SystemState::<(
+                        Res<crate::plugins::frustum_intersection::IntersectionRatios>,
+                        Query<&ViewportConfig>,
+                    )>::new(world);
+                    let (ratios, configs) = state.get(world);
+                    if let Ok(config) = configs.get(cam)
+                        && config.create_frustum
+                        && config.ellipsoid_intersect_mode == EllipsoidIntersectMode::Mesh3D
+                    {
+                        let relevant: Vec<_> =
+                            ratios.0.iter().filter(|r| r.source == cam).collect();
+                        if !relevant.is_empty() {
+                            let rect = ui.available_rect_before_wrap();
+                            for r in &relevant {
+                                let pct = (r.ratio * 100.0).clamp(0.0, 100.0);
+                                let text = format!("{pct:.1}%");
+                                let galley = ui.painter().layout_no_wrap(
+                                    text,
+                                    egui::FontId::monospace(13.0),
+                                    egui::Color32::from_rgb(220, 220, 220),
+                                );
+                                let pos = egui::pos2(
+                                    rect.min.x + 8.0,
+                                    rect.max.y - galley.size().y - 8.0,
+                                );
+                                let bg = egui::Rect::from_min_size(
+                                    pos - egui::vec2(4.0, 2.0),
+                                    galley.size() + egui::vec2(8.0, 4.0),
+                                );
+                                ui.painter().rect_filled(
+                                    bg,
+                                    4.0,
+                                    egui::Color32::from_black_alpha(160),
+                                );
+                                ui.painter().galley(pos, galley, egui::Color32::WHITE);
+                            }
+                        }
+                    }
+                    state.apply(world);
+                }
+
                 egui_tiles::UiResponse::None
             }
             Pane::Monitor(pane) => {
