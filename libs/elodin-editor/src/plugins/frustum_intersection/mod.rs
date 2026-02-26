@@ -1003,26 +1003,32 @@ fn draw_frustum_ellipsoid_intersections(
     }
 }
 
-fn write_coverage_to_db(
-    ratios: Res<IntersectionRatios>,
-    mut entity_map: ResMut<EntityMap>,
-    mut metadata_reg: ResMut<ComponentMetadataRegistry>,
-    mut values: Query<&mut ComponentValue>,
-    names: Query<&Name>,
-    mut commands: Commands,
-) {
-    for ratio in &ratios.0 {
-        let ellipsoid_name = names
+#[derive(SystemParam)]
+struct CoverageDbParams<'w, 's> {
+    ratios: Res<'w, IntersectionRatios>,
+    entity_map: ResMut<'w, EntityMap>,
+    metadata_reg: ResMut<'w, ComponentMetadataRegistry>,
+    schema_reg: ResMut<'w, impeller2_bevy::ComponentSchemaRegistry>,
+    path_reg: ResMut<'w, impeller2_bevy::ComponentPathRegistry>,
+    values: Query<'w, 's, &'static mut ComponentValue>,
+    names: Query<'w, 's, &'static Name>,
+}
+
+fn write_coverage_to_db(mut params: CoverageDbParams<'_, '_>, mut commands: Commands) {
+    for ratio in params.ratios.0.iter() {
+        let ellipsoid_name = params
+            .names
             .get(ratio.ellipsoid)
             .map(|n| n.as_str())
             .unwrap_or("ellipsoid");
         let full_name = format!("{ellipsoid_name}.frustum_coverage");
         let cid = ComponentId::new(&full_name);
 
-        let entity = if let Some(&e) = entity_map.get(&cid) {
+        let entity = if let Some(&e) = params.entity_map.get(&cid) {
             e
         } else {
-            let metadata = metadata_reg
+            let metadata = params
+                .metadata_reg
                 .entry(cid)
                 .or_insert_with(|| ComponentMetadata {
                     component_id: cid,
@@ -1030,14 +1036,26 @@ fn write_coverage_to_db(
                     metadata: Default::default(),
                 })
                 .clone();
+
+            params.schema_reg.0.entry(cid).or_insert_with(|| {
+                use impeller2::component::Component;
+                impeller2_wkt::FrustumCoverage::schema()
+            });
+
+            params
+                .path_reg
+                .0
+                .entry(cid)
+                .or_insert_with(|| impeller2_bevy::ComponentPath::from_name(&full_name));
+
             let e = commands
                 .spawn((cid, impeller2_bevy::ComponentValueMap::default(), metadata))
                 .id();
-            entity_map.insert(cid, e);
+            params.entity_map.insert(cid, e);
             e
         };
 
-        if let Ok(mut value) = values.get_mut(entity) {
+        if let Ok(mut value) = params.values.get_mut(entity) {
             if let ComponentValue::F32(arr) = &mut *value {
                 let buf = nox::ArrayBuf::as_mut_buf(&mut arr.buf);
                 if !buf.is_empty() {
