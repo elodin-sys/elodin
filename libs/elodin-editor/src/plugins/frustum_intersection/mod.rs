@@ -1,7 +1,7 @@
 use crate::{
     MainCamera,
     object_3d::{EllipsoidVisual, Object3DState, WorldPosReceived},
-    ui::tiles::ViewportConfig,
+    ui::tiles::{EllipsoidIntersectMode, ViewportConfig},
 };
 use bevy::asset::RenderAssetUsages;
 use bevy::camera::visibility::{NoFrustumCulling, RenderLayers};
@@ -569,7 +569,8 @@ fn draw_frustum_ellipsoid_intersections(
             targets.push((camera_entity, RenderLayers::layer(viewport_layer)));
         }
 
-        if !config.create_frustum {
+        if !config.create_frustum || config.ellipsoid_intersect_mode == EllipsoidIntersectMode::Off
+        {
             continue;
         }
 

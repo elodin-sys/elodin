@@ -107,12 +107,31 @@ fn setup_primary_window_state(
     commands.entity(id).insert((state, WindowId(0)));
 }
 
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub enum EllipsoidIntersectMode {
+    #[default]
+    Off,
+    Mesh3D,
+}
+
+impl EllipsoidIntersectMode {
+    pub const ALL: [Self; 2] = [Self::Off, Self::Mesh3D];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Off => "Off",
+            Self::Mesh3D => "3D",
+        }
+    }
+}
+
 #[derive(Component)]
 pub struct ViewportConfig {
     pub aspect: Option<f32>,
     pub show_arrows: bool,
     pub create_frustum: bool,
     pub show_frustums: bool,
+    pub ellipsoid_intersect_mode: EllipsoidIntersectMode,
     pub frustums_color: impeller2_wkt::Color,
     pub frustums_thickness: f32,
     pub viewport_layer: Option<usize>,
@@ -1356,6 +1375,7 @@ impl ViewportPane {
                 show_arrows: viewport.show_arrows,
                 create_frustum: false,
                 show_frustums: false,
+                ellipsoid_intersect_mode: EllipsoidIntersectMode::Off,
                 frustums_color: impeller2_wkt::default_viewport_frustums_color(),
                 frustums_thickness: impeller2_wkt::default_viewport_frustums_thickness(),
                 viewport_layer,

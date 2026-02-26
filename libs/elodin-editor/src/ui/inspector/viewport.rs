@@ -21,7 +21,7 @@ use crate::ui::widgets::WidgetSystem;
 use crate::ui::{CameraQuery, ViewportRect};
 use crate::{
     GridHandle, MainCamera,
-    ui::tiles::ViewportConfig,
+    ui::tiles::{EllipsoidIntersectMode, ViewportConfig},
     ui::{label::ELabel, theme, utils::MarginSides},
 };
 
@@ -334,6 +334,28 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
                             {
                                 viewport_config.frustums_thickness = thickness.max(0.0001);
                             }
+                        });
+                    });
+
+                    ui.add_space(8.0);
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            egui::RichText::new("ELLIPSOID INTERSECT").color(scheme.text_secondary),
+                        );
+                        ui.with_layout(egui::Layout::right_to_left(Align::Min), |ui| {
+                            theme::configure_input_with_border(ui.style_mut());
+                            let current = viewport_config.ellipsoid_intersect_mode;
+                            egui::ComboBox::from_id_salt("ellipsoid_intersect_mode")
+                                .selected_text(current.label())
+                                .show_ui(ui, |ui| {
+                                    for mode in EllipsoidIntersectMode::ALL {
+                                        ui.selectable_value(
+                                            &mut viewport_config.ellipsoid_intersect_mode,
+                                            mode,
+                                            mode.label(),
+                                        );
+                                    }
+                                });
                         });
                     });
                 }
