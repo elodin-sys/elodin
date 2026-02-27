@@ -2067,6 +2067,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "bevy_mat3_material"
+version = "0.1.0"
+dependencies = [
+ "bevy",
+ "bevy-inspector-egui",
+ "bevy_editor_cam",
+]
+
+[[package]]
 name = "bevy_math"
 version = "0.17.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5193,6 +5202,7 @@ dependencies = [
  "bevy_fontmesh",
  "bevy_framepace",
  "bevy_infinite_grid",
+ "bevy_mat3_material",
  "bevy_picking",
  "bevy_render",
  "big_space",
