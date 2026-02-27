@@ -72,6 +72,7 @@ pub mod msg_log;
 pub mod prune;
 #[cfg(target_family = "unix")]
 pub use render_bridge;
+pub mod query;
 pub mod time_align;
 pub(crate) mod time_series;
 pub mod trim;
