@@ -236,6 +236,18 @@ type FloatingOriginQuery<'w, 's> = Query<
     (With<FloatingOrigin>, Without<ViewCubeTargetCamera>),
 >;
 
+type ViewCubeCameraQuery<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        &'static mut Transform,
+        &'static GlobalTransform,
+        &'static mut EditorCam,
+    ),
+    (With<ViewCubeTargetCamera>, Without<FloatingOrigin>),
+>;
+
 #[derive(SystemParam)]
 pub(super) struct ViewCubeEditorLookup<'w, 's> {
     viewports: Query<
@@ -256,10 +268,7 @@ pub fn handle_view_cube_editor(
     mut events: MessageReader<ViewCubeEvent>,
     view_cube_query: Query<&ViewCubeLink, With<ViewCubeRoot>>,
     cube_root_query: Query<&GlobalTransform, With<ViewCubeRoot>>,
-    mut camera_query: Query<
-        (Entity, &mut Transform, &GlobalTransform, &mut EditorCam),
-        (With<ViewCubeTargetCamera>, Without<FloatingOrigin>),
-    >,
+    mut camera_query: ViewCubeCameraQuery,
     mut lookup: ViewCubeEditorLookup,
     config: Res<ViewCubeConfig>,
     mut look_to: MessageWriter<LookToTrigger>,
