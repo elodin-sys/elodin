@@ -229,8 +229,12 @@ fn apply_layers_recursive(
     }
 }
 
-type FloatingOriginQuery<'w, 's> =
-    Query<'w, 's, (&'static Transform, &'static GridCell<i128>), With<FloatingOrigin>>;
+type FloatingOriginQuery<'w, 's> = Query<
+    'w,
+    's,
+    (&'static Transform, &'static GridCell<i128>),
+    (With<FloatingOrigin>, Without<ViewCubeTargetCamera>),
+>;
 
 #[derive(SystemParam)]
 pub(super) struct ViewCubeEditorLookup<'w, 's> {
@@ -254,7 +258,7 @@ pub fn handle_view_cube_editor(
     cube_root_query: Query<&GlobalTransform, With<ViewCubeRoot>>,
     mut camera_query: Query<
         (Entity, &mut Transform, &GlobalTransform, &mut EditorCam),
-        With<ViewCubeTargetCamera>,
+        (With<ViewCubeTargetCamera>, Without<FloatingOrigin>),
     >,
     mut lookup: ViewCubeEditorLookup,
     config: Res<ViewCubeConfig>,
