@@ -78,6 +78,7 @@ signal-hook = "0.3"
 # query (EQL → SQL, table output)
 eql.path = "eql"
 tabled = "0.17.0"
+tabular = "0.2.0"
 
 
 # arrow
