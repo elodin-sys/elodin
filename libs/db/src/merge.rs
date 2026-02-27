@@ -422,21 +422,27 @@ fn analyze_database(db_path: &Path, prefix: Option<String>) -> Result<DatabaseIn
         if path.join("schema").exists() {
             component_count += 1;
 
-            // Try to get timestamp range from index file
-            match read_timestamp_range(&path.join("index")) {
-                Ok(Some((start, end))) => {
-                    min_timestamp = min_timestamp.min(start);
-                    max_timestamp = max_timestamp.max(end);
-                }
-                Ok(None) => {
-                    // No timestamps in this component
-                }
-                Err(e) => {
-                    eprintln!(
-                        "Warning: Failed to read timestamps from {}: {}",
-                        path.display(),
-                        e
-                    );
+            let is_ts_source = path
+                .join("metadata")
+                .exists()
+                .then(|| ComponentMetadata::read(path.join("metadata")).ok())
+                .flatten()
+                .is_some_and(|m| m.is_timestamp_source());
+
+            if !is_ts_source {
+                match read_timestamp_range(&path.join("index")) {
+                    Ok(Some((start, end))) => {
+                        min_timestamp = min_timestamp.min(start);
+                        max_timestamp = max_timestamp.max(end);
+                    }
+                    Ok(None) => {}
+                    Err(e) => {
+                        eprintln!(
+                            "Warning: Failed to read timestamps from {}: {}",
+                            path.display(),
+                            e
+                        );
+                    }
                 }
             }
         }

@@ -215,6 +215,11 @@ pub struct MergeArgs {
         help = "Alignment timestamp (microseconds) for the same event in DB2. DB2 is shifted to align with DB1."
     )]
     pub align2: Option<i64>,
+    #[clap(
+        long,
+        help = "Interpret --align1/--align2 as offsets from each database's playback start rather than absolute timestamps"
+    )]
+    pub from_playback_start: bool,
 }
 
 #[derive(clap::Args, Clone, Debug)]
@@ -456,10 +461,32 @@ async fn main() -> miette::Result<()> {
             yes,
             align1,
             align2,
-        }) => elodin_db::merge::run(
-            db1, db2, output, prefix1, prefix2, dry_run, yes, align1, align2,
-        )
-        .into_diagnostic(),
+            from_playback_start,
+        }) => {
+            use elodin_db::MetadataExt;
+            let (align1, align2) = if from_playback_start {
+                let resolve = |db_path: &std::path::Path,
+                               val: Option<i64>|
+                 -> miette::Result<Option<i64>> {
+                    match val {
+                        Some(v) => {
+                            let config = impeller2_wkt::DbConfig::read(db_path.join("db_state"))
+                                .into_diagnostic()?;
+                            let start = config.time_start_timestamp_micros().unwrap_or(0);
+                            Ok(Some(start.saturating_add(v)))
+                        }
+                        None => Ok(None),
+                    }
+                };
+                (resolve(&db1, align1)?, resolve(&db2, align2)?)
+            } else {
+                (align1, align2)
+            };
+            elodin_db::merge::run(
+                db1, db2, output, prefix1, prefix2, dry_run, yes, align1, align2,
+            )
+            .into_diagnostic()
+        }
         Commands::Trim(TrimArgs {
             path,
             from_start,

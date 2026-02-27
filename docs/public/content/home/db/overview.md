@@ -97,4 +97,14 @@ elodin-db trim --from-end 120000000 --output ./trimmed ./my-db
 elodin-db trim --from-start 60000000 --from-end 120000000 --output ./window ./my-db
 ```
 
-**Database tools** -- Additional offline commands for post-processing: `merge` (combine two databases with optional time alignment), `drop` (delete components by name or glob), `prune` (remove empties), `truncate` (clear data, keep schemas), `time-align` (shift timestamps), and `fix-timestamps` (normalize clock sources).
+**Merge** -- Combine two databases (e.g. SITL and real telemetry) with optional time alignment and component prefixes:
+
+```sh
+# Merge with alignment using playback-relative timestamps (what the Editor shows)
+elodin-db merge -o merged --prefix1 sitl --prefix2 real \
+  --align1 15000000 --align2 14000000 --from-playback-start ./sitl-db ./real-db
+```
+
+Use `--from-playback-start` when alignment timestamps come from the Elodin Editor's playback timeline. Without it, `--align1`/`--align2` are interpreted as absolute timestamps.
+
+**Database tools** -- Additional offline commands for post-processing: `drop` (delete components by name or glob), `prune` (remove empties), `truncate` (clear data, keep schemas), `time-align` (shift timestamps), and `fix-timestamps` (normalize clock sources).
