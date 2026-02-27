@@ -75,6 +75,10 @@ fuzzy-matcher = "0.3.7"
 glob = "0.3"
 signal-hook = "0.3"
 
+# query (EQL → SQL, table output)
+eql.path = "eql"
+tabled = "0.17.0"
+
 
 # arrow
 arrow.version = "55.0"

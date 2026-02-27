@@ -45,6 +45,10 @@ enum Commands {
     Drop(DropArgs),
     #[command(about = "Display information about a database")]
     Info(InfoArgs),
+    #[command(
+        about = "Run an EQL query against a database file and print results as a table"
+    )]
+    Query(QueryArgs),
     #[command(about = "Export database contents to parquet, arrow-ipc, or csv files")]
     Export(ExportArgs),
     #[cfg(feature = "video-export")]
@@ -221,6 +225,18 @@ pub struct MergeArgs {
 struct InfoArgs {
     #[clap(help = "Path to the database directory (defaults to standard location)")]
     path: Option<PathBuf>,
+}
+
+#[derive(clap::Args, Clone, Debug)]
+struct QueryArgs {
+    #[clap(long, help = "Show only the first N rows")]
+    head: Option<usize>,
+    #[clap(long, help = "Show only the last N rows")]
+    tail: Option<usize>,
+    #[clap(help = "EQL query expression")]
+    eql: String,
+    #[clap(help = "Path to the database directory")]
+    dbfile: PathBuf,
 }
 
 #[derive(clap::Args, Clone, Debug)]
@@ -518,6 +534,15 @@ async fn main() -> miette::Result<()> {
             elodin_db::drop::run(path, match_mode, dry_run, yes).into_diagnostic()
         }
         Commands::Info(args) => run_info(args),
+        Commands::Query(args) => {
+            elodin_db::query::run(elodin_db::query::QueryArgs {
+                eql: args.eql,
+                dbfile: args.dbfile,
+                head: args.head,
+                tail: args.tail,
+            })
+            .await
+        }
         Commands::Export(ExportArgs {
             path,
             output,
