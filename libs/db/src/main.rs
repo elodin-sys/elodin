@@ -49,6 +49,11 @@ enum Commands {
         about = "Run an EQL query against a database file and print results as a table"
     )]
     Query(QueryArgs),
+    #[command(
+        name = "list-components",
+        about = "List all component names in a database"
+    )]
+    ListComponents(ListComponentsArgs),
     #[command(about = "Export database contents to parquet, arrow-ipc, or csv files")]
     Export(ExportArgs),
     #[cfg(feature = "video-export")]
@@ -233,8 +238,29 @@ struct QueryArgs {
     head: Option<usize>,
     #[clap(long, help = "Show only the last N rows")]
     tail: Option<usize>,
+    #[clap(
+        long,
+        short,
+        value_enum,
+        default_value = "table",
+        help = "Output format: table, csv, arrow-ipc, or parquet (binary formats should be piped to a file)"
+    )]
+    format: elodin_db::query::QueryOutputFormat,
+    #[clap(
+        long,
+        help = "Flatten vector columns to separate columns (e.g. vel -> vel.0, vel.1)"
+    )]
+    flatten: bool,
     #[clap(help = "EQL query expression")]
     eql: String,
+    #[clap(help = "Path to the database directory")]
+    dbfile: PathBuf,
+}
+
+#[derive(clap::Args, Clone, Debug)]
+struct ListComponentsArgs {
+    #[clap(long, short, help = "Show first/last timestamp and entry count per component")]
+    long: bool,
     #[clap(help = "Path to the database directory")]
     dbfile: PathBuf,
 }
@@ -313,6 +339,7 @@ async fn main() -> miette::Result<()> {
     };
 
     let _ = tracing_subscriber::fmt::fmt()
+        .with_writer(std::io::stderr)
         .with_target(false)
         .with_env_filter(filter)
         .with_timer(tracing_subscriber::fmt::time::ChronoLocal::new(
@@ -558,8 +585,13 @@ async fn main() -> miette::Result<()> {
                 dbfile: args.dbfile,
                 head: args.head,
                 tail: args.tail,
+                format: args.format,
+                flatten: args.flatten,
             })
             .await
+        }
+        Commands::ListComponents(args) => {
+            elodin_db::list_components::run(args.dbfile, args.long).into_diagnostic()
         }
         Commands::Export(ExportArgs {
             path,

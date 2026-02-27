@@ -1,8 +1,12 @@
-//! Run EQL queries against a database file and print results as a table.
+//! Run EQL queries against a database file and print results (table, CSV, or binary to terminal).
 
+use std::io::Write;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use arrow::array::{Array, ArrayRef, FixedSizeListArray, Int32Array};
+use arrow::compute;
+use arrow::datatypes::{DataType, Field};
 use arrow::record_batch::RecordBatch;
 use futures_lite::StreamExt;
 use impeller2::schema::Schema;
@@ -10,6 +14,21 @@ use miette::IntoDiagnostic;
 use tabled::builder::Builder;
 
 use crate::DB;
+
+/// Output format for query results (always to stdout).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, clap::ValueEnum)]
+pub enum QueryOutputFormat {
+    /// Human-readable table (default).
+    #[default]
+    Table,
+    /// CSV lines.
+    Csv,
+    /// Arrow IPC stream (binary; pipe to a file).
+    ArrowIpc,
+    /// Parquet (binary; pipe to a file).
+    #[cfg(feature = "parquet")]
+    Parquet,
+}
 
 /// Arguments for the `query` subcommand.
 #[derive(Clone, Debug)]
@@ -22,16 +41,22 @@ pub struct QueryArgs {
     pub head: Option<usize>,
     /// Show only the last N rows.
     pub tail: Option<usize>,
+    /// Output format (table, csv, parquet, or arrow-ipc to terminal).
+    pub format: QueryOutputFormat,
+    /// Flatten vector columns to separate columns (e.g. vel -> vel_x, vel_y, vel_z).
+    pub flatten: bool,
 }
 
 /// Runs an EQL query against the database at `dbfile`, optionally limiting
-/// to the first `head` or last `tail` rows, and prints the result as a table.
+/// to the first `head` or last `tail` rows, and prints the result to stdout.
 pub async fn run(args: QueryArgs) -> miette::Result<()> {
     let QueryArgs {
         eql,
         dbfile,
         head,
         tail,
+        format,
+        flatten,
     } = args;
 
     if !dbfile.exists() {
@@ -95,8 +120,25 @@ pub async fn run(args: QueryArgs) -> miette::Result<()> {
         (None, None) => (0, total_rows),
     };
 
-    let slice = combined.slice(start, len);
-    print_record_batch_table(&slice)?;
+    let mut slice = combined.slice(start, len);
+    if flatten {
+        slice = flatten_record_batch(&slice)
+            .map_err(|e| miette::miette!("flatten: {}", e))?;
+    }
+
+    match format {
+        QueryOutputFormat::Table => print_record_batch_table(&slice)?,
+        QueryOutputFormat::Csv => print_record_batch_csv(&slice)?,
+        QueryOutputFormat::ArrowIpc => {
+            eprintln!("Warning: output is binary; pipe to a file (e.g. ... > out.arrow)");
+            print_record_batch_arrow_ipc(&slice)?;
+        }
+        #[cfg(feature = "parquet")]
+        QueryOutputFormat::Parquet => {
+            eprintln!("Warning: output is binary; pipe to a file (e.g. ... > out.parquet)");
+            print_record_batch_parquet(&slice)?;
+        }
+    }
 
     if len < total_rows {
         eprintln!("(showing {} of {} rows)", len, total_rows);
@@ -133,6 +175,133 @@ fn print_record_batch_table(batch: &RecordBatch) -> miette::Result<()> {
     println!("{}", table);
 
     Ok(())
+}
+
+/// Flattens FixedSizeList columns into separate scalar columns.
+/// Uses field metadata "element_names" (comma-separated) when present for column names (e.g. vel.x, vel.y, vel.z).
+fn flatten_record_batch(batch: &RecordBatch) -> Result<RecordBatch, arrow::error::ArrowError> {
+    use arrow::datatypes::FieldRef;
+
+    let schema = batch.schema();
+    let mut new_fields: Vec<FieldRef> = Vec::new();
+    let mut new_columns: Vec<ArrayRef> = Vec::new();
+
+    for (i, field) in schema.fields().iter().enumerate() {
+        let column = batch.column(i);
+
+        match field.data_type() {
+            DataType::FixedSizeList(_inner_field, size) => {
+                let list_array = column
+                    .as_any()
+                    .downcast_ref::<FixedSizeListArray>()
+                    .ok_or_else(|| {
+                        arrow::error::ArrowError::InvalidArgumentError(
+                            "expected FixedSizeListArray".to_string(),
+                        )
+                    })?;
+                let values = list_array.values();
+                let num_lists = list_array.len();
+                let size = *size as usize;
+
+                let element_name_parts: Vec<&str> = field
+                    .metadata()
+                    .get("element_names")
+                    .map(|s| s.split(',').map(|s| s.trim()).collect())
+                    .unwrap_or_default();
+
+                for j in 0..size {
+                    let indices: Vec<i32> =
+                        (0..num_lists).map(|row| (row * size + j) as i32).collect();
+                    let indices_array = Int32Array::from(indices);
+                    let element_array = compute::take(values.as_ref(), &indices_array, None)?;
+                    let suffix = if j < element_name_parts.len() && !element_name_parts[j].is_empty()
+                    {
+                        element_name_parts[j].to_string()
+                    } else {
+                        j.to_string()
+                    };
+                    let field_name = format!("{}.{}", field.name(), suffix);
+                    new_fields.push(Arc::new(Field::new(
+                        field_name,
+                        element_array.data_type().clone(),
+                        field.is_nullable(),
+                    )));
+                    new_columns.push(Arc::new(element_array));
+                }
+            }
+            _ => {
+                new_fields.push(Arc::clone(field));
+                new_columns.push(Arc::clone(column));
+            }
+        }
+    }
+
+    let new_schema = Arc::new(arrow::datatypes::Schema::new(new_fields));
+    RecordBatch::try_new(new_schema, new_columns)
+}
+
+/// Prints a RecordBatch as Arrow IPC stream to stdout.
+fn print_record_batch_arrow_ipc(batch: &RecordBatch) -> miette::Result<()> {
+    let mut out = std::io::stdout();
+    let mut writer =
+        arrow::ipc::writer::StreamWriter::try_new(&mut out, batch.schema_ref()).into_diagnostic()?;
+    writer.write(batch).into_diagnostic()?;
+    writer.finish().into_diagnostic()?;
+    out.flush().into_diagnostic()?;
+    Ok(())
+}
+
+#[cfg(feature = "parquet")]
+/// Prints a RecordBatch as Parquet to stdout.
+fn print_record_batch_parquet(batch: &RecordBatch) -> miette::Result<()> {
+    let mut out = std::io::stdout();
+    let mut writer = parquet::arrow::ArrowWriter::try_new(
+        &mut out,
+        batch.schema_ref().clone(),
+        None,
+    )
+    .into_diagnostic()?;
+    writer.write(batch).into_diagnostic()?;
+    writer.close().into_diagnostic()?;
+    out.flush().into_diagnostic()?;
+    Ok(())
+}
+
+/// Prints a RecordBatch as CSV to stdout (same cell formatting as table).
+fn print_record_batch_csv(batch: &RecordBatch) -> miette::Result<()> {
+    let schema = batch.schema();
+    let n_rows = batch.num_rows();
+    let mut out = std::io::stdout();
+
+    for (col_idx, field) in schema.fields().iter().enumerate() {
+        if col_idx > 0 {
+            write!(out, ",").into_diagnostic()?;
+        }
+        write!(out, "{}", csv_escape(field.name())).into_diagnostic()?;
+    }
+    writeln!(out).into_diagnostic()?;
+
+    for i in 0..n_rows {
+        for (col_idx, field) in schema.fields().iter().enumerate() {
+            if col_idx > 0 {
+                write!(out, ",").into_diagnostic()?;
+            }
+            let col = batch.column(col_idx);
+            let s = format_cell(col, i, field.data_type())?;
+            write!(out, "{}", csv_escape(&s)).into_diagnostic()?;
+        }
+        writeln!(out).into_diagnostic()?;
+    }
+    out.flush().into_diagnostic()?;
+    Ok(())
+}
+
+fn csv_escape(s: &str) -> String {
+    if s.contains(',') || s.contains('"') || s.contains('\n') || s.contains('\r') {
+        format!("\"{}\"", s.replace('"', "\"\""))
+    } else {
+        s.to_string()
+    }
 }
 
 fn format_cell(

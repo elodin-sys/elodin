@@ -66,6 +66,7 @@ pub mod export_videos;
 pub mod fix_timestamps;
 pub mod follow;
 mod follow_stream;
+pub mod list_components;
 pub mod merge;
 mod msg_log;
 pub mod prune;
