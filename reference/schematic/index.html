@@ -543,7 +543,27 @@
 <li><code>box</code>: <code>x</code>, <code>y</code>, <code>z</code> (all required); <code>color</code> (default white).</li>
 <li><code>cylinder</code>: <code>radius</code>, <code>height</code> (both required); <code>color</code> (default white).</li>
 <li><code>plane</code>: <code>width</code>/<code>depth</code> (default <code>size</code> if set, else 10.0); optional <code>size</code> shorthand; <code>color</code> (default white).</li>
-<li><code>ellipsoid</code>: <code>scale</code> (EQL string, default <code>"(1, 1, 1)"</code>), <code>color</code> (default white).</li>
+<li><code>ellipsoid</code>: , <code>color</code> (default white), <code>show_grid</code> (default <code>#false</code>).
+<ul>
+<li>Physical measure
+-<code>scale</code> an EQL string, e.g., <code>"(1, 1, 1)"</code> in meters</li>
+<li>Error measure
+<ul>
+<li><code>error_covariance_cholesky</code> as an alternative to specifying the scale
+and rotation, one can specify the lower triangle cholesky L of the
+error covariance matrix P = LL^T. Example <code>"(a,b,c,d,e,f)"</code> which
+describes a matrix that looks like this:
+| a 0 0 |
+| b c 0 |
+| d e f |</li>
+<li><code>error_confidence_interval</code> (default <code>70</code>) the percentage that if this
+were repeated 100 times, we would expect that in 70 cases, the true
+value would be within the bounds. In practice this means that the
+larger the error confidence interval, the larger the ellipsoid.</li>
+</ul>
+</li>
+</ul>
+</li>
 </ul>
 <p>Mesh nodes support an optional <code>emissivity=&lt;value&gt;</code> property (0.0–1.0) to make the material glow (e.g., <code>sphere radius=0.2 emissivity=0.25 { color yellow }</code>).</p>
 <p>Mesh nodes and <code>icon</code> nodes both support an optional <code>visibility_range</code> child node that controls at what camera distances the element is rendered:</p>
