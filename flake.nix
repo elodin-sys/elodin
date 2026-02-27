@@ -72,6 +72,7 @@
 
         devShells = with shells; {
           inherit elodin;
+          inherit quick;
           profiling = shells.elodin-profiling;
           default = shells.elodin;
         };

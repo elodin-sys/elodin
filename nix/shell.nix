@@ -232,6 +232,26 @@ in {
   # Unified shell that combines all development environments
   elodin = mkShell (shellAttrs // linuxShellAttrs);
 
+  # Quick shell reuses the default shell machinery but skips heavy Rust package builds.
+  quick = mkShell (
+    (shellAttrs
+      // {
+        name = "elo-quick-shell";
+        buildInputs = lib.subtractLists [
+          config.packages.elodinsink
+          config.packages.elodin-py.py
+        ] shellAttrs.buildInputs;
+        GST_PLUGIN_PATH = lib.makeSearchPathOutput "lib" "lib/gstreamer-1.0" [
+          gst_all_1.gstreamer
+          gst_all_1.gst-plugins-base
+          gst_all_1.gst-plugins-good
+          gst_all_1.gst-plugins-bad
+          gst_all_1.gst-plugins-ugly
+        ];
+      })
+    // linuxShellAttrs
+  );
+
   # Profiling shell adds Tracy GUI without duplicating the base shell definition
   elodin-profiling = mkShell (
     (shellAttrs
