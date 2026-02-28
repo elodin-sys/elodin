@@ -264,7 +264,7 @@ fn read_timestamp_range(index_path: &Path) -> Result<Option<(i64, i64)>, std::io
     Ok(Some((first_ts, last_ts)))
 }
 
-const MSG_TIMESTAMPS_HEADER_SIZE: usize = 24;
+const MSG_TIMESTAMPS_HEADER_SIZE: usize = 16;
 
 /// Read the first and last timestamp from a message log timestamps file.
 fn read_msg_timestamp_range(timestamps_path: &Path) -> Result<Option<(i64, i64)>, std::io::Error> {
