@@ -463,22 +463,36 @@ async fn main() -> miette::Result<()> {
             align2,
             from_playback_start,
         }) => {
-            use elodin_db::MetadataExt;
             let (align1, align2) = if from_playback_start {
                 let resolve = |db_path: &std::path::Path,
-                               val: Option<i64>|
+                               val: Option<i64>,
+                               db_label: &str|
                  -> miette::Result<Option<i64>> {
                     match val {
                         Some(v) => {
-                            let config = impeller2_wkt::DbConfig::read(db_path.join("db_state"))
+                            let playback_start = elodin_db::utils::resolve_playback_start(db_path)
                                 .into_diagnostic()?;
-                            let start = config.time_start_timestamp_micros().unwrap_or(0);
-                            Ok(Some(start.saturating_add(v)))
+                            match playback_start {
+                                Some(ps) => {
+                                    if ps.is_from_data() {
+                                        eprintln!(
+                                            "Warning: {db_label} does not have time_start_timestamp_micros set; \
+                                             deriving playback start from data ({:.3}s)",
+                                            ps.timestamp() as f64 / 1_000_000.0
+                                        );
+                                    }
+                                    Ok(Some(ps.timestamp().saturating_add(v)))
+                                }
+                                None => Err(miette::miette!(
+                                    "{db_label} has no time_start_timestamp_micros and no data to derive playback start from; \
+                                     cannot use --from-playback-start"
+                                )),
+                            }
                         }
                         None => Ok(None),
                     }
                 };
-                (resolve(&db1, align1)?, resolve(&db2, align2)?)
+                (resolve(&db1, align1, "DB1")?, resolve(&db2, align2, "DB2")?)
             } else {
                 (align1, align2)
             };
