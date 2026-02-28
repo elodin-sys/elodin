@@ -9,6 +9,7 @@ use bevy::prelude::*;
 use bevy_editor_cam::controller::component::EditorCam;
 use bevy_editor_cam::controller::motion::CurrentMotion;
 use bevy_editor_cam::extensions::look_to::LookToTrigger;
+use big_space::{FloatingOrigin, FloatingOriginSettings, GridCell};
 use impeller2_bevy::EntityMap;
 use impeller2_wkt::ComponentValue;
 use std::collections::HashMap;
@@ -228,6 +229,25 @@ fn apply_layers_recursive(
     }
 }
 
+type FloatingOriginQuery<'w, 's> = Query<
+    'w,
+    's,
+    (&'static Transform, &'static GridCell<i128>),
+    (With<FloatingOrigin>, Without<ViewCubeTargetCamera>),
+>;
+
+type ViewCubeCameraQuery<'w, 's> = Query<
+    'w,
+    's,
+    (
+        Entity,
+        &'static mut Transform,
+        &'static GlobalTransform,
+        &'static mut EditorCam,
+    ),
+    (With<ViewCubeTargetCamera>, Without<FloatingOrigin>),
+>;
+
 #[derive(SystemParam)]
 pub(super) struct ViewCubeEditorLookup<'w, 's> {
     viewports: Query<
@@ -240,16 +260,15 @@ pub(super) struct ViewCubeEditorLookup<'w, 's> {
     values: Query<'w, 's, &'static ComponentValue>,
     time: Res<'w, Time>,
     arrow_cache: ResMut<'w, ViewCubeArrowTargetCache>,
+    floating_origin: FloatingOriginQuery<'w, 's>,
+    floating_origin_settings: Res<'w, FloatingOriginSettings>,
 }
 
 pub fn handle_view_cube_editor(
     mut events: MessageReader<ViewCubeEvent>,
     view_cube_query: Query<&ViewCubeLink, With<ViewCubeRoot>>,
     cube_root_query: Query<&GlobalTransform, With<ViewCubeRoot>>,
-    mut camera_query: Query<
-        (Entity, &mut Transform, &GlobalTransform, &mut EditorCam),
-        With<ViewCubeTargetCamera>,
-    >,
+    mut camera_query: ViewCubeCameraQuery,
     mut lookup: ViewCubeEditorLookup,
     config: Res<ViewCubeConfig>,
     mut look_to: MessageWriter<LookToTrigger>,
@@ -267,6 +286,18 @@ pub fn handle_view_cube_editor(
             continue;
         };
 
+        let origin_world = lookup
+            .floating_origin
+            .iter()
+            .next()
+            .map(|(t, c)| {
+                lookup
+                    .floating_origin_settings
+                    .grid_position_double::<i128>(c, t)
+                    .as_vec3()
+            })
+            .unwrap_or(Vec3::ZERO);
+
         if !matches!(event, ViewCubeEvent::ArrowClicked { .. }) {
             update_anchor_depth_for_view_cube(
                 entity,
@@ -276,6 +307,7 @@ pub fn handle_view_cube_editor(
                 &lookup.viewports,
                 lookup.entity_map.as_ref(),
                 &lookup.values,
+                origin_world,
             );
         }
 
@@ -433,6 +465,7 @@ pub fn handle_view_cube_editor(
                 &lookup.viewports,
                 lookup.entity_map.as_ref(),
                 &lookup.values,
+                origin_world,
             ) {
                 debug!(
                     target: "view_cube::arrow",
@@ -806,6 +839,7 @@ fn choose_min_rotation_up(
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn update_anchor_depth_for_view_cube(
     camera: Entity,
     _transform: &Transform,
@@ -814,10 +848,13 @@ fn update_anchor_depth_for_view_cube(
     viewports: &Query<&crate::ui::inspector::viewport::Viewport, With<ViewCubeTargetCamera>>,
     entity_map: &EntityMap,
     values: &Query<&'static ComponentValue>,
+    origin_world: Vec3,
 ) {
-    let Some(orbit_target) = view_cube_orbit_target(camera, viewports, entity_map, values) else {
+    let Some(orbit_target_world) = view_cube_orbit_target(camera, viewports, entity_map, values)
+    else {
         return;
     };
+    let orbit_target = orbit_target_world - origin_world;
 
     let world_translation = global_transform.translation();
     let world_rotation = global_transform.rotation();
@@ -858,6 +895,7 @@ fn update_anchor_depth_for_view_cube(
     editor_cam.last_anchor_depth = new_depth;
 }
 
+#[allow(clippy::too_many_arguments)]
 fn refresh_anchor_depth_for_arrow(
     camera: Entity,
     global_transform: &GlobalTransform,
@@ -865,8 +903,10 @@ fn refresh_anchor_depth_for_arrow(
     viewports: &Query<&crate::ui::inspector::viewport::Viewport, With<ViewCubeTargetCamera>>,
     entity_map: &EntityMap,
     values: &Query<&'static ComponentValue>,
+    origin_world: Vec3,
 ) -> Option<(f32, f32)> {
-    let orbit_target = view_cube_orbit_target(camera, viewports, entity_map, values)?;
+    let orbit_target_world = view_cube_orbit_target(camera, viewports, entity_map, values)?;
+    let orbit_target = orbit_target_world - origin_world;
     let world_translation = global_transform.translation();
     let measured_distance = (orbit_target - world_translation).length();
     if !measured_distance.is_finite() || measured_distance <= 1.0e-3 {
