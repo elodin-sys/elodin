@@ -122,6 +122,23 @@ pub fn read_component_name(metadata_path: &Path) -> Result<String, std::io::Erro
     Ok(metadata.name)
 }
 
+/// Check if a component directory contains a timestamp-source component.
+///
+/// Timestamp-source components store raw clock values used as timestamps for other
+/// components, and should be excluded from time range calculations to avoid
+/// wildly inflated duration estimates.
+///
+/// Returns `true` if the component's metadata has `is_timestamp_source` set,
+/// `false` if metadata is missing or the flag is not set.
+pub(crate) fn is_timestamp_source_component(component_path: &Path) -> bool {
+    component_path
+        .join("metadata")
+        .exists()
+        .then(|| ComponentMetadata::read(component_path.join("metadata")).ok())
+        .flatten()
+        .is_some_and(|m| m.is_timestamp_source())
+}
+
 /// Result of resolving a database's playback start timestamp.
 #[derive(Debug, Clone, Copy)]
 pub enum PlaybackStart {
@@ -204,18 +221,11 @@ fn derive_playback_start_from_data(db_path: &Path) -> Result<Option<i64>, std::i
             continue;
         }
 
-        if path.join("schema").exists() {
-            let is_ts_source = path
-                .join("metadata")
-                .exists()
-                .then(|| ComponentMetadata::read(path.join("metadata")).ok())
-                .flatten()
-                .is_some_and(|m| m.is_timestamp_source());
-
-            if !is_ts_source && let Ok(Some((start, _))) = read_timestamp_range(&path.join("index"))
-            {
-                min_timestamp = min_timestamp.min(start);
-            }
+        if path.join("schema").exists()
+            && !is_timestamp_source_component(&path)
+            && let Ok(Some((start, _))) = read_timestamp_range(&path.join("index"))
+        {
+            min_timestamp = min_timestamp.min(start);
         }
     }
 

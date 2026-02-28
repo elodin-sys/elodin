@@ -14,11 +14,12 @@ use std::io::{self, Read, Seek, SeekFrom, Write as IoWrite};
 use std::path::{Path, PathBuf};
 
 use impeller2::buf::UmbraBuf;
-use impeller2_wkt::{ComponentMetadata, DbConfig};
+use impeller2_wkt::DbConfig;
 use zerocopy::FromBytes;
 
 use crate::utils::{
-    INDEX_HEADER_SIZE, MSG_HEADER_SIZE, read_msg_timestamp_range, read_timestamp_range,
+    INDEX_HEADER_SIZE, MSG_HEADER_SIZE, is_timestamp_source_component, read_msg_timestamp_range,
+    read_timestamp_range,
 };
 use crate::{Error, MetadataExt, copy_file_native, sync_dir};
 
@@ -230,13 +231,7 @@ fn analyze_database(db_path: &Path) -> Result<TrimInfo, Error> {
         }
         if path.join("schema").exists() {
             component_count += 1;
-            let is_ts_source = path
-                .join("metadata")
-                .exists()
-                .then(|| ComponentMetadata::read(path.join("metadata")).ok())
-                .flatten()
-                .is_some_and(|m| m.is_timestamp_source());
-            if !is_ts_source
+            if !is_timestamp_source_component(&path)
                 && let Ok(Some((start, end))) = read_timestamp_range(&path.join("index"))
             {
                 min_timestamp = min_timestamp.min(start);

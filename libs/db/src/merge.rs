@@ -9,7 +9,7 @@ use std::fs::{self, File};
 use std::io::{self, Write as IoWrite};
 use std::path::{Path, PathBuf};
 
-use crate::utils::read_timestamp_range;
+use crate::utils::{is_timestamp_source_component, read_timestamp_range};
 use crate::{Error, MetadataExt, copy_dir_native, copy_file_native, sync_dir};
 use impeller2::types::ComponentId;
 use impeller2_wkt::{ComponentMetadata, DbConfig};
@@ -423,14 +423,7 @@ fn analyze_database(db_path: &Path, prefix: Option<String>) -> Result<DatabaseIn
         if path.join("schema").exists() {
             component_count += 1;
 
-            let is_ts_source = path
-                .join("metadata")
-                .exists()
-                .then(|| ComponentMetadata::read(path.join("metadata")).ok())
-                .flatten()
-                .is_some_and(|m| m.is_timestamp_source());
-
-            if !is_ts_source {
+            if !is_timestamp_source_component(&path) {
                 match read_timestamp_range(&path.join("index")) {
                     Ok(Some((start, end))) => {
                         min_timestamp = min_timestamp.min(start);
