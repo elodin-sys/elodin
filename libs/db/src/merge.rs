@@ -9,6 +9,7 @@ use std::fs::{self, File};
 use std::io::{self, Write as IoWrite};
 use std::path::{Path, PathBuf};
 
+use crate::utils::{is_timestamp_source_component, read_timestamp_range};
 use crate::{Error, MetadataExt, copy_dir_native, copy_file_native, sync_dir};
 use impeller2::types::ComponentId;
 use impeller2_wkt::{ComponentMetadata, DbConfig};
@@ -422,21 +423,20 @@ fn analyze_database(db_path: &Path, prefix: Option<String>) -> Result<DatabaseIn
         if path.join("schema").exists() {
             component_count += 1;
 
-            // Try to get timestamp range from index file
-            match read_timestamp_range(&path.join("index")) {
-                Ok(Some((start, end))) => {
-                    min_timestamp = min_timestamp.min(start);
-                    max_timestamp = max_timestamp.max(end);
-                }
-                Ok(None) => {
-                    // No timestamps in this component
-                }
-                Err(e) => {
-                    eprintln!(
-                        "Warning: Failed to read timestamps from {}: {}",
-                        path.display(),
-                        e
-                    );
+            if !is_timestamp_source_component(&path) {
+                match read_timestamp_range(&path.join("index")) {
+                    Ok(Some((start, end))) => {
+                        min_timestamp = min_timestamp.min(start);
+                        max_timestamp = max_timestamp.max(end);
+                    }
+                    Ok(None) => {}
+                    Err(e) => {
+                        eprintln!(
+                            "Warning: Failed to read timestamps from {}: {}",
+                            path.display(),
+                            e
+                        );
+                    }
                 }
             }
         }
@@ -465,62 +465,6 @@ fn analyze_database(db_path: &Path, prefix: Option<String>) -> Result<DatabaseIn
         time_range,
         has_schematic,
     })
-}
-
-/// Read the first and last timestamp from an index file
-fn read_timestamp_range(index_path: &Path) -> Result<Option<(i64, i64)>, Error> {
-    if !index_path.exists() {
-        return Ok(None);
-    }
-
-    let file = File::open(index_path)?;
-
-    // Header is 24 bytes: committed_len (8) + head_len (8) + extra (8)
-    // committed_len includes the header size, so actual data length = committed_len - 24
-    const HEADER_SIZE: usize = 24;
-
-    // Read header to get committed length
-    use std::io::Read;
-    let mut header = [0u8; HEADER_SIZE];
-    let mut file = file;
-    file.read_exact(&mut header)?;
-
-    // committed_len includes the header size
-    let committed_len = u64::from_le_bytes(header[0..8].try_into().unwrap()) as usize;
-
-    // Calculate actual data length (excluding header)
-    let data_len = committed_len.saturating_sub(HEADER_SIZE);
-    if data_len < 8 {
-        // No timestamps stored
-        return Ok(None);
-    }
-
-    // Number of timestamps
-    let num_timestamps = data_len / 8;
-    if num_timestamps == 0 {
-        return Ok(None);
-    }
-
-    // Read first timestamp (starts right after header)
-    let mut first_ts_bytes = [0u8; 8];
-    file.read_exact(&mut first_ts_bytes)?;
-    let first_ts = i64::from_le_bytes(first_ts_bytes);
-
-    // If only one timestamp, first == last
-    if num_timestamps == 1 {
-        return Ok(Some((first_ts, first_ts)));
-    }
-
-    // Read last timestamp
-    use std::io::{Seek, SeekFrom};
-    file.seek(SeekFrom::Start(
-        (HEADER_SIZE + (num_timestamps - 1) * 8) as u64,
-    ))?;
-    let mut last_ts_bytes = [0u8; 8];
-    file.read_exact(&mut last_ts_bytes)?;
-    let last_ts = i64::from_le_bytes(last_ts_bytes);
-
-    Ok(Some((first_ts, last_ts)))
 }
 
 /// Print information about a database
