@@ -10,6 +10,7 @@ publish = false
 cargo-clippy = []
 inspector = ["dep:bevy-inspector-egui"]
 debug = ["big_space/debug"]
+tracy = ["bevy/trace_tracy"]
 
 [dependencies]
 # math
@@ -56,9 +57,11 @@ impeller2.features = ["hifitime"]
 impeller2-wkt.path = "../../libs/impeller2/wkt"
 impeller2-wkt.features = ["bevy", "nox", "gui", "std"]
 impeller2-kdl.path = "../../libs/impeller2/kdl"
+bevy_mat3_material.path = "../bevy_mat3_material"
 toml.version = "0.8"
 serde = { version = "1.0.196", features = ["derive"] }
 serde_json = "1"
+tracing = "0.1"
 
 # search
 fuzzy-matcher = "0.3.7"

@@ -592,13 +592,41 @@ fn serialize_object_3d_mesh(mesh: &Object3DMesh) -> (KdlNode, Vec<KdlNode>) {
             };
             (node, Vec::new())
         }
-        Object3DMesh::Ellipsoid { scale, color } => {
+        Object3DMesh::Ellipsoid {
+            scale,
+            color,
+            error_covariance_cholesky,
+            error_confidence_interval,
+            show_grid,
+            grid_color,
+        } => {
             let mut node = KdlNode::new("ellipsoid");
-            node.entries_mut()
-                .push(KdlEntry::new_prop("scale", scale.clone()));
-
+            if let Some(cholesky) = error_covariance_cholesky {
+                node.entries_mut().push(KdlEntry::new_prop(
+                    "error_covariance_cholesky",
+                    cholesky.clone(),
+                ));
+                if *error_confidence_interval
+                    != impeller2_wkt::default_ellipsoid_confidence_interval()
+                {
+                    node.entries_mut().push(KdlEntry::new_prop(
+                        "error_confidence_interval",
+                        *error_confidence_interval as f64,
+                    ));
+                }
+            } else {
+                node.entries_mut()
+                    .push(KdlEntry::new_prop("scale", scale.clone()));
+            }
+            if *show_grid {
+                node.entries_mut()
+                    .push(KdlEntry::new_prop("show_grid", true));
+            }
             if color != &default_ellipsoid_color() {
                 serialize_color_to_node(&mut node, color);
+            }
+            if *show_grid && *grid_color != impeller2_wkt::default_ellipsoid_grid_color() {
+                serialize_color_to_node_named(&mut node, grid_color, Some("grid_color"));
             }
 
             (node, Vec::new())
@@ -1284,6 +1312,10 @@ graph "value" {
             mesh: Object3DMesh::Ellipsoid {
                 scale: "rocket.scale".to_string(),
                 color: Color::rgba(64.0 / 255.0, 128.0 / 255.0, 1.0, 96.0 / 255.0),
+                error_covariance_cholesky: None,
+                error_confidence_interval: impeller2_wkt::default_ellipsoid_confidence_interval(),
+                show_grid: impeller2_wkt::default_ellipsoid_show_grid(),
+                grid_color: impeller2_wkt::default_ellipsoid_grid_color(),
             },
             icon: None,
             mesh_visibility_range: None,
@@ -1297,12 +1329,20 @@ graph "value" {
         if let SchematicElem::Object3d(obj) = &parsed.elems[0] {
             assert_eq!(obj.eql, "rocket.world_pos");
             match &obj.mesh {
-                Object3DMesh::Ellipsoid { scale, color } => {
+                Object3DMesh::Ellipsoid {
+                    scale,
+                    color,
+                    error_covariance_cholesky,
+                    error_confidence_interval: _,
+                    show_grid: _,
+                    grid_color: _,
+                } => {
                     assert_eq!(scale, "rocket.scale");
                     assert!((color.r - 64.0 / 255.0).abs() < f32::EPSILON);
                     assert!((color.g - 128.0 / 255.0).abs() < f32::EPSILON);
                     assert!((color.b - 1.0).abs() < f32::EPSILON);
                     assert!((color.a - 96.0 / 255.0).abs() < f32::EPSILON);
+                    assert!(error_covariance_cholesky.is_none());
                 }
                 _ => panic!("Expected ellipsoid mesh"),
             }

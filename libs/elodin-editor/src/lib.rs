@@ -265,6 +265,7 @@ impl Plugin for EditorPlugin {
             .init_resource::<EqlContext>()
             .init_resource::<SyncedObject3d>()
             .init_resource::<ui::data_overview::ComponentTimeRanges>()
+            .add_plugins(bevy_mat3_material::Mat3MaterialPlugin)
             .add_plugins(object_3d::Object3DPlugin);
         if cfg!(target_os = "windows") || cfg!(target_os = "linux") {
             app.add_systems(Update, handle_drag_resize);
@@ -873,6 +874,7 @@ fn sync_object_3d(
     ctx: Res<EqlContext>,
     mut material_assets: ResMut<Assets<StandardMaterial>>,
     mut mesh_assets: ResMut<Assets<Mesh>>,
+    mut mat3_material_assets: ResMut<Assets<bevy_mat3_material::Mat3Material>>,
     mut commands: Commands,
     assets: Res<AssetServer>,
 ) {
@@ -931,6 +933,7 @@ fn sync_object_3d(
             &ctx.0,
             &mut material_assets,
             &mut mesh_assets,
+            &mut mat3_material_assets,
             &assets,
         );
         synced_object_3d.0.insert(entity, object_entity);

@@ -4,6 +4,7 @@ use bevy::{ecs::system::SystemParam, prelude::*, window::PrimaryWindow};
 use bevy_defer::AsyncCommandsExtension;
 use bevy_egui::egui::{Color32, Id};
 use bevy_infinite_grid::InfiniteGrid;
+use bevy_mat3_material::Mat3Material;
 use egui_tiles::{Container, Tile, TileId};
 use impeller2_bevy::{ComponentPath, ComponentSchemaRegistry, DbMessage};
 use impeller2_kdl::FromKdl;
@@ -96,6 +97,7 @@ pub struct LoadSchematicParams<'w, 's> {
     pub asset_server: Res<'w, AssetServer>,
     pub meshes: ResMut<'w, Assets<Mesh>>,
     pub materials: ResMut<'w, Assets<StandardMaterial>>,
+    pub mat3_materials: ResMut<'w, Assets<Mat3Material>>,
     pub images: ResMut<'w, Assets<Image>>,
     pub icon_cache: ResMut<'w, IconTextureCache>,
     pub render_layer_alloc: ResMut<'w, RenderLayerAlloc>,
@@ -524,6 +526,7 @@ impl LoadSchematicParams<'_, '_> {
             &self.eql.0,
             &mut self.materials,
             &mut self.meshes,
+            &mut self.mat3_materials,
             &self.asset_server,
         );
         if let Some(icon) = &icon {

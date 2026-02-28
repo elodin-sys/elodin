@@ -377,7 +377,10 @@ pub fn set_camera_viewport(
 ) {
     let margin = 8.0;
     let top_offset = 10.0;
-    let side_length = 128.0;
+    let preferred_side_length = 128.0;
+    let max_viewport_fraction = 0.45;
+    let min_side_length = 64.0;
+    let min_viewport_for_gizmo = 100.0;
     for (mut nav_camera, parent) in nav_camera_query.iter_mut() {
         let Ok(main) = main_camera_query.get(parent.main_camera) else {
             continue;
@@ -399,9 +402,23 @@ pub fn set_camera_viewport(
         let scale_factor = window.scale_factor() * egui_settings.scale_factor;
         let margin = margin * scale_factor;
         let top_offset = top_offset * scale_factor;
-        let side_length = side_length * scale_factor;
         let viewport_pos = viewport.physical_position.as_vec2();
         let viewport_size = viewport.physical_size.as_vec2();
+
+        let min_viewport_dim = viewport_size.x.min(viewport_size.y);
+        if min_viewport_dim < min_viewport_for_gizmo * scale_factor {
+            nav_camera.is_active = false;
+            nav_camera.viewport = Some(Viewport {
+                physical_position: UVec2::ZERO,
+                physical_size: UVec2::new(1, 1),
+                depth: 0.0..1.0,
+            });
+            continue;
+        }
+
+        let side_length = (preferred_side_length * scale_factor)
+            .min(min_viewport_dim * max_viewport_fraction)
+            .max(min_side_length * scale_factor);
         let right_offset = 20.0 * scale_factor; // Slight left offset to avoid overlap with right panel
         let nav_viewport_pos = Vec2::new(
             (viewport_pos.x + viewport_size.x) - (side_length + margin + right_offset),

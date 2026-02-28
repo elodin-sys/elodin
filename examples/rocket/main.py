@@ -539,6 +539,16 @@ w.schematic(
             color 76 175 80
         }
     }
+    //object_3d "(0,0,0,1, rocket.world_pos[4],rocket.world_pos[5],rocket.world_pos[6])" {
+        //ellipsoid scale="(3, 2, 1)" show_grid=#true {
+        //    color 255 200 100 100
+        //    grid_color 255 255 255 255
+        //}
+        //ellipsoid error_covariance_cholesky="(3, 0, 2, 0, 0, 1)" error_confidence_interval="20" show_grid=#true {
+        //    color 255 200 100 100
+        //    grid_color 255 255 255 255
+        //}
+    //}
     line_3d rocket.world_pos line_width=11.0 perspective=#false {
         color yolk
     }
