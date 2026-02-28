@@ -253,7 +253,6 @@ impl Plugin for EditorPlugin {
             .add_systems(Update, ui::video_stream::connect_streams)
             .add_systems(PostUpdate, ui::video_stream::set_visibility)
             .add_systems(PostUpdate, set_clear_color)
-            .add_systems(Update, crate::ui::timeline::timeline_slider::sync_ui_tick)
             .insert_resource(WireframeConfig {
                 global: false,
                 default_color: Color::WHITE,
