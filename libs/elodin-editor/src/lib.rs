@@ -235,33 +235,25 @@ impl Plugin for EditorPlugin {
             .add_systems(
                 PreUpdate,
                 (
+                    set_selected_range,
+                    clamp_current_time,
+                    advance_playback,
+                    impeller2_bevy::apply_cached_data,
                     set_floating_origin,
                     (sync_pos, sync_object_3d, set_viewport_pos),
                 )
                     .chain()
                     .in_set(PositionSync),
             )
-            .add_systems(
-                Update,
-                (
-                    impeller2_bevy::backfill_cache,
-                    advance_playback,
-                    impeller2_bevy::apply_cached_data,
-                )
-                    .chain(),
-            )
+            .add_systems(Update, impeller2_bevy::backfill_cache)
             .add_systems(Update, ui::data_overview::trigger_time_range_queries)
-            .add_systems(PreUpdate, set_selected_range)
             .add_systems(Update, update_eql_context)
             .add_systems(Update, set_eql_context_range.after(update_eql_context))
             .add_systems(Startup, spawn_ui_cam)
             .add_systems(Update, ui::video_stream::connect_streams)
             .add_systems(PostUpdate, ui::video_stream::set_visibility)
             .add_systems(PostUpdate, set_clear_color)
-            .add_systems(
-                Update,
-                clamp_current_time.before(crate::ui::timeline::timeline_slider::sync_ui_tick),
-            )
+            .add_systems(Update, crate::ui::timeline::timeline_slider::sync_ui_tick)
             .insert_resource(WireframeConfig {
                 global: false,
                 default_color: Color::WHITE,
@@ -303,6 +295,11 @@ impl Plugin for EditorPlugin {
         app.configure_sets(
             PreUpdate,
             PositionSync.before(bevy_editor_cam::SyncCameraPosition),
+        );
+        app.configure_sets(
+            PostUpdate,
+            bevy_editor_cam::SyncCameraPosition
+                .after(bevy::transform::TransformSystems::Propagate),
         );
     }
 }
