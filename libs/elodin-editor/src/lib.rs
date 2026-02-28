@@ -299,8 +299,7 @@ impl Plugin for EditorPlugin {
         );
         app.configure_sets(
             PostUpdate,
-            bevy_editor_cam::SyncCameraPosition
-                .after(bevy::transform::TransformSystems::Propagate),
+            bevy_editor_cam::SyncCameraPosition.after(bevy::transform::TransformSystems::Propagate),
         );
     }
 }
