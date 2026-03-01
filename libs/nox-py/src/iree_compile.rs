@@ -48,8 +48,6 @@ os.environ["JAX_ENABLE_X64"] = "1"
 jax.config.update("jax_enable_x64", True)
 
 def compile_to_vmfb(func, input_arrays):
-    from iree.compiler import compile_str
-
     jit_fn = jax.jit(func, keep_unused=True)
     lowered = jit_fn.lower(*input_arrays)
     stablehlo_module = lowered.compiler_ir(dialect="stablehlo")
@@ -76,6 +74,7 @@ def compile_to_vmfb(func, input_arrays):
     # libm symbols from the host process.
     extra.append('--iree-llvmcpu-link-embedded=false')
 
+    wrapper_path = None
     if platform.system() == "Darwin":
         machine = platform.machine()
         arch = 'arm64' if machine == 'arm64' else 'x86_64'
@@ -83,22 +82,21 @@ def compile_to_vmfb(func, input_arrays):
         # macOS: IREE's system linker invocation passes -static which
         # macOS ld rejects. Create a wrapper that strips -static and maps
         # lld flags to cc flags.
-        wrapper_path = tempfile.mktemp(suffix='.sh', prefix='iree_cc_')
-        lines = [
-            '#!/bin/bash',
-            'filtered=()',
-            'for arg in "$@"; do',
-            '  case "$arg" in',
-            '    -static) ;;',
-            '    -dylib) filtered+=("-dynamiclib") ;;',
-            '    -flat_namespace) filtered+=("-Wl,-flat_namespace") ;;',
-            '    *) filtered+=("$arg") ;;',
-            '  esac',
-            'done',
-            'exec /usr/bin/cc "${filtered[@]}"',
-        ]
-        with open(wrapper_path, 'w') as wf:
-            wf.write('\n'.join(lines) + '\n')
+        fd, wrapper_path = tempfile.mkstemp(suffix='.sh', prefix='iree_cc_')
+        with os.fdopen(fd, 'w') as wf:
+            wf.write('\n'.join([
+                '#!/bin/bash',
+                'filtered=()',
+                'for arg in "$@"; do',
+                '  case "$arg" in',
+                '    -static) ;;',
+                '    -dylib) filtered+=("-dynamiclib") ;;',
+                '    -flat_namespace) filtered+=("-Wl,-flat_namespace") ;;',
+                '    *) filtered+=("$arg") ;;',
+                '  esac',
+                'done',
+                'exec /usr/bin/cc "${filtered[@]}"',
+            ]) + '\n')
         os.chmod(wrapper_path, os.stat(wrapper_path).st_mode | stat.S_IEXEC)
 
         extra.append('--iree-llvmcpu-target-triple=' + arch + '-apple-darwin')
@@ -109,28 +107,25 @@ def compile_to_vmfb(func, input_arrays):
     if iree_bin is None:
         iree_bin = iree_tools_dir + '/iree-compile'
 
-    import tempfile as _tempfile
-    out_path = _tempfile.mktemp(suffix='.vmfb')
-    cmd = [iree_bin, '-', '-o', out_path, '--iree-hal-target-backends=llvm-cpu'] + extra
-    import sys
-    print('[IREE] cmd: ' + ' '.join(cmd), file=sys.stderr, flush=True)
-    result = subprocess.run(cmd, input=stablehlo_mlir.encode('utf-8'), capture_output=True)
-    print('[IREE] exit: ' + str(result.returncode), file=sys.stderr, flush=True)
-    if result.stderr:
-        stderr_text = result.stderr.decode('utf-8', errors='replace')
-        if 'error' in stderr_text.lower():
-            print('[IREE] stderr: ' + stderr_text[:2000], file=sys.stderr, flush=True)
-    if result.returncode != 0:
+    try:
+        fd, out_path = tempfile.mkstemp(suffix='.vmfb')
+        os.close(fd)
+        cmd = [iree_bin, '-', '-o', out_path, '--iree-hal-target-backends=llvm-cpu'] + extra
+        result = subprocess.run(cmd, input=stablehlo_mlir.encode('utf-8'), capture_output=True)
+        if result.returncode != 0:
+            raise RuntimeError(
+                'iree-compile failed (code ' + str(result.returncode) + '):\n'
+                + result.stderr.decode('utf-8', errors='replace')
+            )
+        with open(out_path, 'rb') as f:
+            vmfb = f.read()
+        return vmfb
+    finally:
         try: os.unlink(out_path)
         except: pass
-        raise RuntimeError(
-            'iree-compile failed (code ' + str(result.returncode) + '):\n'
-            + result.stderr.decode('utf-8', errors='replace')
-        )
-    with open(out_path, 'rb') as f:
-        vmfb = f.read()
-    os.unlink(out_path)
-    return vmfb
+        if wrapper_path:
+            try: os.unlink(wrapper_path)
+            except: pass
 "#;
 
     let module = PyModule::new(py, "iree_compile")?;
