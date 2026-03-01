@@ -13,8 +13,7 @@ Elodin is an open-source platform for rapid design, testing, and simulation of a
 
 ## Quick Start
 
-
-### Python SDK (alwasy build first, so binaries pick it up)
+### Python SDK (always build first, so binaries pick it up)
 
 ```bash
 uv venv --python 3.12 && source .venv/bin/activate
