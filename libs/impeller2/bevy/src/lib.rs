@@ -162,6 +162,8 @@ pub fn apply_cached_data(
         };
         if let Ok(mut cv) = query.get_mut(entity) {
             *cv = value.clone();
+        } else {
+            commands.entity(entity).insert(value.clone());
         }
         if let Some(adapter) = adapters.get(&component_id) {
             let view = value.as_view();
