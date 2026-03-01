@@ -120,7 +120,7 @@ TALON_QUAD_CONFIG.set_as_global()
 args = sys.argv[1:]
 world, drone = world()
 if "--telemetry" in args:
-    exec = world.build(system(only_rate_control=True))
+    exec = world.build(system(only_rate_control=True), backend="jax")
     exec.run(Config.GLOBAL.total_sim_ticks)
     df = exec.history(["drone.body_ang_vel", "drone.motor_ang_vel"])
     print(df)
@@ -140,4 +140,5 @@ else:
         sim_time_step=Config.GLOBAL.dt,
         run_time_step=Config.GLOBAL.dt,
         max_ticks=int(Config.GLOBAL.total_sim_ticks or 1200),
+        backend="jax",
     )

@@ -69,40 +69,20 @@ def compile_to_vmfb(func, input_arrays):
     import tempfile, stat, shutil, subprocess, pathlib
     from iree.compiler import _mlir_libs
     iree_tools_dir = str(pathlib.Path(_mlir_libs.__file__).parent)
-    real_lld = iree_tools_dir + '/iree-lld'
 
-    # iree-lld wrapper: wraps the real iree-lld but tells it to ignore
-    # undefined math symbols (cos, sin, log, etc.) that can't be statically
-    # linked. The system-library loader resolves them via dlopen at runtime.
-    lld_wrapper_path = tempfile.mktemp(suffix='.sh', prefix='iree_lld_')
-    lld_lines = [
-        '#!/bin/bash',
-        '# Strip --no-undefined and --no-allow-shlib-undefined from iree-lld args',
-        '# so that unresolved math symbols (cos, sin, log) are allowed in the embedded',
-        '# ELF. The system-library loader resolves them via dlopen at runtime.',
-        'filtered=()',
-        'for arg in "$@"; do',
-        '  case "$arg" in',
-        '    --no-undefined|--no-allow-shlib-undefined) ;;',
-        '    *) filtered+=("$arg") ;;',
-        '  esac',
-        'done',
-        'exec "' + real_lld + '" "${filtered[@]}"',
-    ]
-    with open(lld_wrapper_path, 'w') as wf:
-        wf.write('\n'.join(lld_lines) + '\n')
-    os.chmod(lld_wrapper_path, os.stat(lld_wrapper_path).st_mode | stat.S_IEXEC)
-
-    # Use the iree-lld wrapper for embedded linking on all platforms
-    extra.append('--iree-llvmcpu-embedded-linker-path=' + lld_wrapper_path)
+    # The embedded ELF loader does not support importing symbols (log, cos,
+    # sin, etc.).  Use the system-library loader on all platforms -- it
+    # produces a .so / .dylib that gets loaded via dlopen which CAN resolve
+    # libm symbols from the host process.
+    extra.append('--iree-llvmcpu-link-embedded=false')
 
     if platform.system() == "Darwin":
         machine = platform.machine()
         arch = 'arm64' if machine == 'arm64' else 'x86_64'
 
-        # macOS: use system-library loader (produces .dylib linked via dlopen).
-        # IREE's system linker invocation passes -static which macOS ld rejects.
-        # Create a wrapper that strips -static and maps lld flags to cc flags.
+        # macOS: IREE's system linker invocation passes -static which
+        # macOS ld rejects. Create a wrapper that strips -static and maps
+        # lld flags to cc flags.
         wrapper_path = tempfile.mktemp(suffix='.sh', prefix='iree_cc_')
         lines = [
             '#!/bin/bash',
@@ -121,7 +101,6 @@ def compile_to_vmfb(func, input_arrays):
             wf.write('\n'.join(lines) + '\n')
         os.chmod(wrapper_path, os.stat(wrapper_path).st_mode | stat.S_IEXEC)
 
-        extra.append('--iree-llvmcpu-link-embedded=false')
         extra.append('--iree-llvmcpu-target-triple=' + arch + '-apple-darwin')
         extra.append('--iree-llvmcpu-system-linker-path=' + wrapper_path)
         extra.append('--iree-opt-const-eval=false')

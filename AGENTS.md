@@ -13,16 +13,19 @@ Elodin is an open-source platform for rapid design, testing, and simulation of a
 
 ## Quick Start
 
-```bash
-nix develop                          # Enter unified dev shell (Rust, Python, C/C++, git-lfs)
-just install                         # Build and install Elodin Editor + Elodin DB
-```
 
-### Python SDK
+### Python SDK (alwasy build first, so binaries pick it up)
 
 ```bash
 uv venv --python 3.12 && source .venv/bin/activate
 uvx maturin develop --uv --manifest-path=libs/nox-py/Cargo.toml
+```
+
+### Elodin CLI and Elodin-DB CLI
+
+```bash
+nix develop                          # Enter unified dev shell (Rust, Python, C/C++, git-lfs)
+just install                         # Build and install Elodin Editor + Elodin DB
 ```
 
 ### CI Checks
