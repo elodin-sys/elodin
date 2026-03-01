@@ -720,7 +720,7 @@ impl CompiledSystemExt for CompiledSystem {
         let py_code = "
 import jax
 def build_expr(func):
-    res = jax.jit(func)
+    res = jax.jit(func, keep_unused=True)
     return res";
 
         let module = PyModule::new(py, "build_expr")?;
