@@ -85,6 +85,10 @@
     OPENSSL_INCLUDE_DIR = "${pkgs.openssl.dev}/include/";
     LIBCLANG_PATH = "${pkgs.llvmPackages.libclang.lib}/lib";
 
+    # Tell bindgen where to find C standard library headers (required on Linux in Nix builds)
+    BINDGEN_EXTRA_CLANG_ARGS = lib.optionalString pkgs.stdenv.isLinux
+      "-I${pkgs.stdenv.cc.libc.dev}/include -I${pkgs.llvmPackages.libclang.lib}/lib/clang/${lib.versions.major pkgs.llvmPackages.libclang.version}/include";
+
     # Ensure C++ standard library is linked on macOS
     NIX_LDFLAGS = lib.optionalString pkgs.stdenv.isDarwin "-lc++";
 
