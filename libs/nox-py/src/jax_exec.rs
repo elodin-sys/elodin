@@ -34,21 +34,20 @@ impl JaxExec {
             let jnp = py.import("jax.numpy")?;
             let np = py.import("numpy")?;
 
-            let py_args = pyo3::types::PyTuple::new(
-                py,
-                inputs.iter().map(|input| {
-                    let np_dtype = numpy_dtype_str(input.element_type);
-                    let np_arr = np
-                        .call_method1(
-                            "frombuffer",
-                            (pyo3::types::PyBytes::new(py, input.data), np_dtype),
-                        )
-                        .unwrap();
+            let input_arrays = inputs
+                .iter()
+                .map(|input| -> Result<_, Error> {
+                    let np_dtype = numpy_dtype_str(input.element_type)?;
+                    let np_arr = np.call_method1(
+                        "frombuffer",
+                        (pyo3::types::PyBytes::new(py, input.data), np_dtype),
+                    )?;
                     let shape_tuple: Vec<i64> = input.shape.clone();
-                    let np_arr = np_arr.call_method1("reshape", (shape_tuple,)).unwrap();
-                    jnp.call_method1("array", (np_arr,)).unwrap()
-                }),
-            )?;
+                    let np_arr = np_arr.call_method1("reshape", (shape_tuple,))?;
+                    Ok(jnp.call_method1("array", (np_arr,))?)
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let py_args = pyo3::types::PyTuple::new(py, input_arrays)?;
 
             let result = self.jax_fn.call(py, &py_args, None)?;
 
@@ -75,20 +74,20 @@ impl JaxExec {
     }
 }
 
-fn numpy_dtype_str(et: nox::ElementType) -> &'static str {
+fn numpy_dtype_str(et: nox::ElementType) -> Result<&'static str, Error> {
     match et {
-        nox::ElementType::F64 => "float64",
-        nox::ElementType::F32 => "float32",
-        nox::ElementType::S32 => "int32",
-        nox::ElementType::S64 => "int64",
-        nox::ElementType::U32 => "uint32",
-        nox::ElementType::U64 => "uint64",
-        nox::ElementType::U8 => "uint8",
-        nox::ElementType::U16 => "uint16",
-        nox::ElementType::S8 => "int8",
-        nox::ElementType::S16 => "int16",
-        nox::ElementType::Pred => "bool",
-        _ => "float64",
+        nox::ElementType::F64 => Ok("float64"),
+        nox::ElementType::F32 => Ok("float32"),
+        nox::ElementType::S32 => Ok("int32"),
+        nox::ElementType::S64 => Ok("int64"),
+        nox::ElementType::U32 => Ok("uint32"),
+        nox::ElementType::U64 => Ok("uint64"),
+        nox::ElementType::U8 => Ok("uint8"),
+        nox::ElementType::U16 => Ok("uint16"),
+        nox::ElementType::S8 => Ok("int8"),
+        nox::ElementType::S16 => Ok("int16"),
+        nox::ElementType::Pred => Ok("bool"),
+        other => Err(Error::UnsupportedDtype(format!("{other:?}"))),
     }
 }
 

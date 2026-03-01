@@ -42,6 +42,8 @@ pub enum Error {
     IreeCompilationFailed(String),
     #[error("IREE runtime error: {0}")]
     IreeRuntimeError(String),
+    #[error("unsupported element type for JAX backend: {0}")]
+    UnsupportedDtype(String),
 }
 
 impl From<Error> for PyErr {
