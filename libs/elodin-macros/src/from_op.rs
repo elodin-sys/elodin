@@ -30,7 +30,7 @@ pub fn from_op(input: TokenStream) -> TokenStream {
                 return None;
             };
             let ident = &t.ident;
-            Some(quote! { #ident: #crate_name::xla::ArrayElement + #crate_name::xla::NativeType, })
+            Some(quote! { #ident: #crate_name::nox::ArrayElement + #crate_name::nox::NativeType, })
         })
         .collect::<Vec<_>>();
     let where_clause = if where_clause_predicates.is_some() || !bounds.is_empty() {

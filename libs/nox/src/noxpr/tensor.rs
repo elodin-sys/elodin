@@ -1,4 +1,5 @@
 use crate::array::prelude::*;
+use crate::literal::{ArrayElement, NativeType};
 use crate::{
     AddDim, ArrayTy, ConcatDims, Const, ConstDim, DefaultMap, Dim, DimConcat, Field, MappedDim,
     NonScalarDim, Noxpr, Op, ReplaceDim, ReplaceMappedDim, ReprMonad, Scalar, Tensor, TensorItem,
@@ -6,7 +7,6 @@ use crate::{
 };
 use core::marker::PhantomData;
 use smallvec::{SmallVec, smallvec};
-use xla::{ArrayElement, NativeType};
 
 impl<T: Field + ArrayElement + NativeType, D: Dim> From<Array<T, D>> for Tensor<T, D, Op> {
     fn from(arr: Array<T, D>) -> Self {

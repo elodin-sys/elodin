@@ -29,8 +29,8 @@ nox-py provides a high-performance Python API for building aerospace simulations
       ┌──────┴─────┬───────────────┐
       │            │               │
 ┌─────▼─────┐ ┌────▼────┐ ┌────────▼─────┐
-│    NOX    │ │   JAX   │ │  Impeller2   │
-│  Compiler │ │  (XLA)  │ │  (Pub-Sub)   │
+│    NOX    │ │  IREE / │ │  Impeller2   │
+│  Compiler │ │   JAX   │ │  (Pub-Sub)   │
 └───────────┘ └─────────┘ └───────┬──────┘
                                   │
                           ┌───────▼───────┐
@@ -125,10 +125,23 @@ jax.vmap(sim.step)(batch_inputs)
 ### 5. Compiled Mode
 Pre-compile for maximum performance:
 ```python
-exec = w.build(system, optimize=True)
+exec = w.build(system)              # Uses IREE backend (default)
+exec = w.build(system, backend="jax")  # Uses JAX backend for full compatibility
 exec.run(1000)  # Run 1000 ticks
 df = exec.history(["satellite.world_pos", "satellite.world_vel"])
 ```
+
+### Execution Backends
+
+nox-py supports two execution backends, selected via `backend` parameter on `w.run()` and `w.build()`:
+
+| Backend | Default | Tick Execution | Supports All JAX Ops | Performance |
+|---------|---------|----------------|---------------------|-------------|
+| `"iree"` | Yes | Pure Rust (no GIL) | No (some limitations) | Fast |
+| `"jax"` | No | Python/JAX per-tick | Yes | Slower |
+
+When IREE compilation fails, the error message suggests setting `backend="jax"`.
+
 
 ### 6. External Control Mode (Real-Time with External Inputs)
 Enable external clients to control simulation components:
@@ -736,7 +749,7 @@ class ElodinEnv(gym.Env):
 
 ## Performance Tips
 
-1. **Use compiled mode** for production: `w.build(system, optimize=True)`
+1. **Use IREE backend** for production: `w.build(system)` (default)
 2. **Batch operations** in JAX mode: `jax.vmap(sim.step)`
 3. **Profile bottlenecks**: `exec.profile()` returns timing breakdowns
 4. **Minimize Python callbacks** in hot loops
@@ -751,12 +764,11 @@ The Rust core provides Python bindings for:
 - Graph operations for relationships between components
 - NOX compiler interface
 
-### NOX Compiler
-Transforms Python-defined systems into optimized native code:
-- Automatic vectorization
-- Memory layout optimization
-- Multi-threading
-- Optional GPU compilation
+### NOX Compiler → IREE / JAX
+Transforms Python-defined systems into compiled executables:
+- **IREE backend** (default): JAX → StableHLO → IREE VMFB → Pure Rust execution per tick
+- **JAX backend**: JAX → `jax.jit()` → Python/XLA execution per tick
+- Automatic vectorization and memory layout optimization
 
 ### Impeller2 Protocol
 High-performance pub-sub for telemetry:
@@ -822,7 +834,8 @@ exec.history(["drone.world_pos", "drone.imu.accel", "drone.motors.0.rpm"])
 - [Elodin Editor](../../apps/elodin) - 3D visualization and debugging
 - [Elodin-DB](../db) - Time-series telemetry database
 - [Impeller2](../impeller2) - High-performance pub-sub protocol
-- [NOX](../nox) - Tensor compiler backend
+- [NOX](../nox) - Tensor compiler
+- [iree-runtime](../iree-runtime) - IREE C runtime FFI (default backend)
 - [Roci](../roci) - Flight software framework
 
 ## License

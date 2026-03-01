@@ -7,9 +7,9 @@ use std::{
 };
 
 use crate::Error;
+use crate::literal::{ArrayElement, ElementType, NativeType};
 use itertools::Itertools;
 use smallvec::{SmallVec, smallvec};
-use xla::{ArrayElement, ElementType, NativeType, XlaBuilder, XlaComputation, XlaOp, XlaOpRef};
 
 /// Represents various types of nodes in an expression tree (Noxpr) for tensor computations.
 #[derive(Debug)]
@@ -653,8 +653,7 @@ impl Eq for NoxprNode {}
 /// Represents a constant value within the Noxpr.
 #[derive(Clone, PartialEq, Eq)]
 pub struct Constant {
-    pub data: xla::Literal, // NOTE: it might make more sense to use the xla independent store below
-    // pub data: SmallVec<[u8; size_of::<f64>()]>,
+    pub data: crate::Literal,
     pub ty: ArrayTy,
 }
 
@@ -708,24 +707,6 @@ impl ArrayTy {
     /// Pretty prints the array type to the given writer.
     fn pretty_print(&self, writer: &mut dyn std::fmt::Write) -> std::fmt::Result {
         write!(writer, "{:?}{:?}", self.element_type, &self.shape)
-    }
-}
-
-impl From<ArrayTy> for xla::ArrayShape {
-    fn from(val: ArrayTy) -> Self {
-        xla::ArrayShape::new_with_type(val.element_type, val.shape.to_vec())
-    }
-}
-
-impl From<NoxprTy> for xla::Shape {
-    fn from(val: NoxprTy) -> Self {
-        match val {
-            NoxprTy::ArrayTy(ty) => xla::Shape::Array(ty.into()),
-            NoxprTy::Tuple(tys) => {
-                let tys = tys.into_iter().map(Into::into).collect::<Vec<_>>();
-                xla::Shape::tuple(tys)
-            }
-        }
     }
 }
 
@@ -904,35 +885,7 @@ pub struct DotDimensionNums {
     pub rhs_batch_dimensions: SmallVec<[i64; 2]>,
 }
 
-impl DotDimensionNums {
-    /// Conversion of `DotDimensionNums` to XLA's internal `DotDimensionNumbers` structure.
-    fn to_xla(&self) -> xla::DotDimensionNumbers {
-        let DotDimensionNums {
-            lhs_contracting_dimensions,
-            rhs_contracting_dimensions,
-            lhs_batch_dimensions,
-            rhs_batch_dimensions,
-        } = self;
-        let mut dims = xla::DotDimensionNumbers::default();
-        lhs_contracting_dimensions
-            .iter()
-            .cloned()
-            .for_each(|d| dims.add_lhs_contracting_dimensions(d));
-        rhs_contracting_dimensions
-            .iter()
-            .cloned()
-            .for_each(|d| dims.add_rhs_contracting_dimensions(d));
-        lhs_batch_dimensions
-            .iter()
-            .cloned()
-            .for_each(|d| dims.add_lhs_batch_dimensions(d));
-        rhs_batch_dimensions
-            .iter()
-            .cloned()
-            .for_each(|d| dims.add_rhs_batch_dimensions(d));
-        dims
-    }
-}
+impl DotDimensionNums {}
 
 /// Stores the details for concatenation operations within the Noxpr.
 #[derive(Debug, PartialEq, Eq)]
@@ -1186,7 +1139,7 @@ impl Noxpr {
     }
 
     /// Creates a constant `Noxpr` from a given literal and type.
-    pub fn constant(data: xla::Literal, ty: ArrayTy) -> Self {
+    pub fn constant(data: crate::Literal, ty: ArrayTy) -> Self {
         Self::new(NoxprNode::Constant(Constant { data, ty }))
     }
 
@@ -2051,352 +2004,6 @@ impl_binary_op!(Mul, mul, Mul);
 impl_binary_op!(Div, div, Div);
 impl_binary_op!(Sub, sub, Sub);
 
-/// Traces and transforms `Noxpr` expressions into XLA operations.
-pub struct XlaTracer {
-    builder: XlaBuilder,
-    cache: HashMap<NoxprId, XlaOp>,
-    comp_cache: HashMap<NoxprId, Arc<XlaComputation>>,
-}
-
-impl XlaTracer {
-    /// Constructs a new `XlaTracer` with a specified computation name.
-    pub fn new(name: &str) -> Self {
-        Self {
-            builder: XlaBuilder::new(name),
-            cache: HashMap::new(),
-            comp_cache: HashMap::new(),
-        }
-    }
-
-    /// Visits a `Noxpr`, recursively compiling it into an `XlaOp` using the XlaBuilder, with caching to prevent redundant computations.
-    pub fn visit(&mut self, expr: &Noxpr) -> Result<XlaOp, Error> {
-        let id = expr.id();
-        if let Some(op) = self.cache.get(&id) {
-            return Ok(op.clone());
-        }
-
-        let op = match expr.deref() {
-            NoxprNode::Constant(c) => self.builder.constant_literal(&c.data)?.reshape(&c.ty.shape),
-            NoxprNode::Param(p) => {
-                self.builder
-                    .parameter(p.number, p.ty.clone().into(), &p.name)?
-            }
-            NoxprNode::Add(b) => {
-                let (lhs, rhs) = self.visit_binary_op(b)?;
-                lhs + rhs
-            }
-            NoxprNode::Sub(b) => {
-                let (lhs, rhs) = self.visit_binary_op(b)?;
-                lhs - rhs
-            }
-            NoxprNode::Div(b) => {
-                let (lhs, rhs) = self.visit_binary_op(b)?;
-                lhs / rhs
-            }
-            NoxprNode::Mul(b) => {
-                let (lhs, rhs) = self.visit_binary_op(b)?;
-                lhs.mul(rhs)
-            }
-            NoxprNode::Dot(b) => {
-                let (lhs, rhs) = self.visit_binary_op(b)?;
-                lhs.dot(&rhs)
-            }
-
-            NoxprNode::DotGeneral(DotGeneral {
-                lhs,
-                rhs,
-                dimensions,
-            }) => {
-                let lhs = self.visit(lhs)?;
-                let rhs = self.visit(rhs)?;
-                lhs.dot_general(&rhs, dimensions.to_xla())
-            }
-            NoxprNode::And(b) => {
-                let (lhs, rhs) = self.visit_binary_op(b)?;
-                lhs.and(&rhs)
-            }
-            NoxprNode::Or(b) => {
-                let (lhs, rhs) = self.visit_binary_op(b)?;
-                lhs.or(&rhs)
-            }
-            NoxprNode::GreaterOrEqual(b) => {
-                let (lhs, rhs) = self.visit_binary_op(b)?;
-                lhs.ge(&rhs)
-            }
-            NoxprNode::LessOrEqual(b) => {
-                let (lhs, rhs) = self.visit_binary_op(b)?;
-                lhs.le(&rhs)
-            }
-            NoxprNode::Less(b) => {
-                let (lhs, rhs) = self.visit_binary_op(b)?;
-                lhs.lt(&rhs)
-            }
-            NoxprNode::Equal(b) => {
-                let (lhs, rhs) = self.visit_binary_op(b)?;
-                lhs.eq(&rhs)
-            }
-            NoxprNode::Atan2(b) => {
-                let (lhs, rhs) = self.visit_binary_op(b)?;
-                lhs.atan2(&rhs)
-            }
-
-            NoxprNode::Sqrt(expr) => {
-                let expr = self.visit(expr)?;
-                expr.sqrt()
-            }
-            NoxprNode::Log(expr) => {
-                let expr = self.visit(expr)?;
-                expr.log()
-            }
-            NoxprNode::Neg(expr) => {
-                let expr = self.visit(expr)?;
-                expr.neg()
-            }
-            NoxprNode::Sin(expr) => {
-                let expr = self.visit(expr)?;
-                expr.sin()
-            }
-            NoxprNode::Cos(expr) => {
-                let expr = self.visit(expr)?;
-                expr.cos()
-            }
-            NoxprNode::Abs(expr) => {
-                let expr = self.visit(expr)?;
-                expr.abs()
-            }
-
-            NoxprNode::Acos(c) => {
-                let arg = self.visit(c)?;
-                arg.acos()
-            }
-            NoxprNode::Asin(c) => {
-                let arg = self.visit(c)?;
-                arg.asin()
-            }
-
-            NoxprNode::Concat(concat) => {
-                let ops = concat
-                    .nodes
-                    .iter()
-                    .map(|n| self.visit(n))
-                    .collect::<Result<Vec<_>, _>>()?;
-                let ops = ops.iter().map(XlaOp::as_ref).collect::<Vec<_>>();
-                self.builder.concat_in_dim(&ops, concat.dimension as i64)
-            }
-            NoxprNode::Slice(slice) => {
-                let op = self.visit(&slice.expr)?;
-                op.slice(&slice.start_indices, &slice.stop_indices, &slice.strides)
-            }
-            NoxprNode::DynamicSlice(dynamic) => {
-                let op = self.visit(&dynamic.expr)?;
-                let start_indices = dynamic
-                    .start_indices
-                    .iter()
-                    .map(|expr| self.visit(expr))
-                    .collect::<Result<Vec<_>, _>>()?;
-                let start_indices = start_indices.iter().map(XlaOp::as_ref).collect::<Vec<_>>();
-                op.dynamic_slice(&start_indices, &dynamic.size_indices)
-            }
-            NoxprNode::Reshape(reshape) => {
-                let op = self.visit(&reshape.expr)?;
-                op.reshape(&reshape.new_sizes)
-            }
-            NoxprNode::Tuple(tuple) => {
-                let ops = tuple
-                    .iter()
-                    .map(|n| self.visit(n))
-                    .collect::<Result<Vec<_>, _>>()?;
-                let ops = ops.iter().map(XlaOp::as_ref).collect::<Vec<_>>();
-                self.builder.tuple(&ops)
-            }
-            NoxprNode::GetTupleElement(g) => {
-                let op = self.visit(&g.expr)?;
-                op.get_tuple_element(g.index as i64)
-            }
-            NoxprNode::Broadcast(b) => {
-                let op = self.visit(&b.expr)?;
-                op.broadcast(&b.sizes)
-            }
-            NoxprNode::BroadcastInDim(b) => {
-                let op = self.visit(&b.expr)?;
-                op.broadcast_in_dim(&b.sizes, &b.broadcast_dims)
-            }
-            NoxprNode::Transpose(t) => {
-                let op = self.visit(&t.expr)?;
-                op.transpose(&t.permutation)
-            }
-            NoxprNode::Gather(g) => {
-                let op = self.visit(&g.expr)?;
-                let indices = self.visit(&g.indices)?;
-                op.gather(
-                    &indices,
-                    &g.offset_dims,
-                    &g.collapsed_slice_dims,
-                    &g.start_index_map,
-                    &g.slice_sizes,
-                    g.index_vector_dim,
-                )
-            }
-            NoxprNode::Iota(i) => {
-                self.builder
-                    .iota(&i.shape.shape, i.shape.element_type, i.dim as i64)
-            }
-            NoxprNode::DynamicUpdateSlice(d) => {
-                let inner = self.visit(&d.expr)?;
-                let update = self.visit(&d.update)?;
-                let start = d
-                    .start_indices
-                    .iter()
-                    .map(|expr| self.visit(expr))
-                    .collect::<Result<Vec<_>, Error>>()?;
-                let start = start
-                    .iter()
-                    .map(|op| op.as_ref())
-                    .collect::<SmallVec<[XlaOpRef<'_>; 4]>>();
-                inner.dynamic_update_slice(&update, &start)
-            }
-            #[cfg(feature = "jax")]
-            NoxprNode::Jax(_) => {
-                unimplemented!()
-            }
-            NoxprNode::Scan(s) => {
-                let mut xs_shape = None;
-                let mut input_shape = vec![];
-                for arg in &s.inputs {
-                    let shape = arg.shape().unwrap();
-                    let element_type = arg.element_type().unwrap();
-                    input_shape.push(NoxprTy::ArrayTy(ArrayTy {
-                        shape: shape.clone(),
-                        element_type,
-                    }));
-                    if xs_shape.is_none() {
-                        xs_shape = Some(shape);
-                    } else if let Some(xs_shape) = xs_shape.as_mut()
-                        && xs_shape.first() != shape.first()
-                    {
-                        //return Err(Error::ScanShapeMismatch);
-                    }
-                }
-                let arg_shape = xs_shape.unwrap();
-                if s.inputs.is_empty() {
-                    return Err(Error::ScanMissingArg);
-                }
-
-                fn index(noxpr: &Noxpr, index: Noxpr) -> Option<Noxpr> {
-                    let mut shape = noxpr.shape()?;
-                    *shape.first_mut()? = 1;
-                    let starts = std::iter::once(index)
-                        .chain((0..(shape.len() - 1)).map(|_| 0i64.constant()))
-                        .collect();
-                    let out = noxpr.dynamic_slice(starts, shape.clone());
-                    shape.remove(0);
-                    Some(out.reshape(shape))
-                }
-                let mut init_tuple = input_shape.clone();
-                init_tuple.insert(
-                    0,
-                    NoxprTy::ArrayTy(ArrayTy {
-                        element_type: ElementType::S64,
-                        shape: smallvec![],
-                    }),
-                );
-                let scan_fn = {
-                    let mut scan_fn = s.scan_fn.collapse_params(init_tuple)?;
-                    let next = scan_fn.args[0].get_tuple_element(0).add(1i64.constant());
-                    let mut tuple = vec![next.clone()];
-                    for i in 0..s.inputs.len() {
-                        tuple.push(scan_fn.args[0].get_tuple_element(1 + i));
-                    }
-                    tuple.push(scan_fn.inner);
-                    for i in 0..s.inputs.len() {
-                        let inner_xs_arg = scan_fn.args[0].get_tuple_element(1 + i);
-                        let Some(next_x) = index(&inner_xs_arg, next.clone()) else {
-                            panic!()
-                        };
-                        tuple.push(next_x);
-                    }
-                    scan_fn.inner = Noxpr::tuple(tuple);
-                    scan_fn
-                };
-                let cond = {
-                    let len = *arg_shape.first().unwrap();
-                    let arg = scan_fn.args[0].clone();
-
-                    let index = arg.get_tuple_element(0);
-                    let inner = index.less(len.constant());
-                    NoxprFn {
-                        args: scan_fn.args.clone(),
-                        inner,
-                    }
-                    .build("scan_cond")?
-                    .build()?
-                };
-                let scan_fn = scan_fn.build("scan_fn")?.build()?;
-                let mut initial_state = vec![0i64.constant()];
-                for i in s.inputs.iter() {
-                    initial_state.push(i.clone())
-                }
-                initial_state.push(s.initial_state.clone());
-                for i in s.inputs.iter() {
-                    initial_state.push(index(i, 0i64.constant()).unwrap())
-                }
-                let last_elem = s.inputs.len() + 1;
-                let initial_state = Noxpr::tuple(initial_state);
-                let initial_state = self.visit(&initial_state)?;
-                let out = cond.stmt_while(&scan_fn, &initial_state);
-                out.get_tuple_element(last_elem as i64)
-            }
-            NoxprNode::Convert(c) => {
-                let arg = self.visit(&c.arg)?;
-                arg.convert_element_type(c.ty.primitive_type())
-            }
-            NoxprNode::Select(s) => {
-                let cond = self.visit(&s.cond)?;
-                let on_true = self.visit(&s.on_true)?;
-                let on_false = self.visit(&s.on_false)?;
-                cond.select(&on_true, &on_false)
-            }
-            NoxprNode::Call(c) => {
-                let comp = self.visit_comp(&c.comp)?;
-                let args = c
-                    .args
-                    .iter()
-                    .map(|arg| self.visit(arg))
-                    .collect::<Result<Vec<_>, _>>()?;
-                let args = args.iter().map(XlaOp::as_ref).collect::<Vec<_>>();
-                self.builder.call(&args, &comp)
-            }
-            NoxprNode::Cholesky(c) => {
-                let arg = self.visit(&c.arg)?;
-                arg.cholesky(!c.upper)
-            }
-            NoxprNode::LuInverse(_) => {
-                todo!() // TODO: add this when we get custom calls
-            }
-        };
-        self.cache.insert(id, op.clone());
-        Ok(op)
-    }
-
-    fn visit_comp(&mut self, comp: &NoxprComp) -> Result<Arc<XlaComputation>, Error> {
-        if let Some(comp) = self.comp_cache.get(&comp.id) {
-            return Ok(comp.clone());
-        }
-        let mut tracer = XlaTracer::new("comp");
-        tracer.comp_cache.clone_from(&self.comp_cache);
-        let xla_comp = Arc::new(comp.func.build_with_tracer(&mut tracer)?.build()?);
-        self.comp_cache = tracer.comp_cache;
-        self.comp_cache.insert(comp.id, xla_comp.clone());
-        Ok(xla_comp)
-    }
-
-    /// Helps in visiting and compiling binary operations like Add, Mul into XLA binary operations.
-    #[inline]
-    fn visit_binary_op(&mut self, op: &BinaryOp) -> Result<(XlaOp, XlaOp), Error> {
-        Ok((self.visit(&op.lhs)?, self.visit(&op.rhs)?))
-    }
-}
-
 /// A function that encapsulates a `Noxpr` and its arguments.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NoxprFn {
@@ -2408,20 +2015,6 @@ impl NoxprFn {
     /// Creates a new `NoxprFn` with specified arguments and inner expression.
     pub fn new(args: Vec<Noxpr>, inner: Noxpr) -> Self {
         Self { args, inner }
-    }
-
-    /// Builds an XLA operation based on the `NoxprFn` definition.
-    pub fn build(&self, name: &str) -> Result<XlaOp, Error> {
-        let mut tracer = XlaTracer::new(name);
-        self.build_with_tracer(&mut tracer)
-    }
-
-    /// Builds an XLA operation based on the `NoxprFn` definition.
-    pub fn build_with_tracer(&self, tracer: &mut XlaTracer) -> Result<XlaOp, Error> {
-        for a in self.args.iter() {
-            tracer.visit(a)?;
-        }
-        tracer.visit(&self.inner)
     }
 
     /// Collapses multiple parameters into a single tuple parameter for compact representation.
@@ -2999,136 +2592,6 @@ impl PrettyPrintTracer {
 
 #[cfg(test)]
 mod tests {
-    use crate::{Client, Collapse, CompFn, Const, Matrix, Scalar, Tensor, Vector, tensor};
-
-    #[test]
-    fn test_scalar_add_vmap() {
-        let client = Client::cpu().unwrap();
-        fn add_one(mat: Vector<f32, 5>) -> Vector<f32, 5> {
-            mat.vmap(|x: Scalar<f32>| x + 1.0).unwrap().collapse()
-        }
-        let comp = add_one.build().unwrap();
-        let exec = match comp.compile(&client) {
-            Ok(exec) => exec,
-            Err(xla::Error::XlaError { msg, .. }) => {
-                panic!("{}", msg);
-            }
-            Err(e) => {
-                panic!("{:?}", e);
-            }
-        };
-        let out = exec
-            .run(&client, tensor![1.0f32, 2.0, 3.0, 5.0, 6.0])
-            .unwrap()
-            .to_host();
-        assert_eq!(out, tensor![2.0, 3.0, 4.0, 6.0, 7.0])
-    }
-
-    #[test]
-    fn test_unary_vmap() {
-        let client = Client::cpu().unwrap();
-        fn add_one(mat: Vector<f32, 5>) -> Vector<f32, 5> {
-            mat.vmap(|x: Scalar<f32>| x.sqrt()).unwrap().collapse()
-        }
-        let comp = add_one.build().unwrap();
-        let exec = match comp.compile(&client) {
-            Ok(exec) => exec,
-            Err(xla::Error::XlaError { msg, .. }) => {
-                panic!("{}", msg);
-            }
-            Err(e) => {
-                panic!("{:?}", e);
-            }
-        };
-        let out = exec
-            .run(&client, tensor![4.0f32, 9.0, 16.0, 25.0, 36.0])
-            .unwrap()
-            .to_host();
-        assert_eq!(out, tensor![2.0, 3.0, 4.0, 5.0, 6.0])
-    }
-
-    #[test]
-    fn test_broadcast_vmap() {
-        let client = Client::cpu().unwrap();
-        fn add_one(mat: Vector<f32, 5>) -> Vector<f32, 5> {
-            mat.vmap(|_| Scalar::from(1.0)).unwrap().collapse()
-        }
-        let comp = add_one.build().unwrap();
-        let exec = match comp.compile(&client) {
-            Ok(exec) => exec,
-            Err(xla::Error::XlaError { msg, .. }) => {
-                panic!("{}", msg);
-            }
-            Err(e) => {
-                panic!("{:?}", e);
-            }
-        };
-        let out = exec
-            .run(&client, tensor![4.0f32, 9.0, 16.0, 25.0, 36.0])
-            .unwrap()
-            .to_host();
-        assert_eq!(out, tensor![1.0, 1.0, 1.0, 1.0, 1.0])
-    }
-
-    #[test]
-    fn test_matrix_vmap() {
-        let client = Client::cpu().unwrap();
-        fn add_one(mat: Matrix<f32, 2, 2>) -> Matrix<f32, 2, 2> {
-            mat.vmap(|x: Vector<f32, 2>| x).unwrap().collapse()
-        }
-        let comp = add_one.build().unwrap();
-        let exec = match comp.compile(&client) {
-            Ok(exec) => exec,
-            Err(xla::Error::XlaError { msg, .. }) => {
-                panic!("{}", msg);
-            }
-            Err(e) => {
-                panic!("{:?}", e);
-            }
-        };
-        let out = exec
-            .run(&client, tensor![[1.0, 2.0], [3.0, 4.0]])
-            .unwrap()
-            .to_host();
-        assert_eq!(out, tensor![[1.0, 2.0], [3.0, 4.0]])
-    }
-
-    #[test]
-    fn test_dot_vmap() {
-        let client = Client::cpu().unwrap();
-        fn add_one(
-            mat: Tensor<f32, (Const<2>, Const<2>, Const<2>)>,
-        ) -> Tensor<f32, (Const<2>, Const<2>, Const<2>)> {
-            mat.vmap(|x: Matrix<f32, 2, 2>| x.clone().dot(&x))
-                .unwrap()
-                .collapse()
-        }
-        let comp = add_one.build().unwrap();
-        let exec = match comp.compile(&client) {
-            Ok(exec) => exec,
-            Err(xla::Error::XlaError { msg, .. }) => {
-                panic!("{}", msg);
-            }
-            Err(e) => {
-                panic!("{}", e);
-            }
-        };
-        let out = exec
-            .run(
-                &client,
-                tensor![[[1.0, 2.0], [3.0, 4.0f32]], [[5.0, 8.0], [9.0, 10.0]]],
-            )
-            .unwrap()
-            .to_host();
-        assert_eq!(
-            out,
-            tensor![
-                [[7.0, 10.0], [15.0, 22.0,]],
-                [[97.0, 120.0,], [135.0, 172.0]]
-            ]
-        );
-    }
-
     #[test]
     fn test_broadcast_dims() {
         let a = &[1, 6];
@@ -3138,140 +2601,16 @@ mod tests {
     }
 
     #[test]
-    fn test_normalize_vmap() {
-        let client = Client::cpu().unwrap();
-        fn norm(q: Matrix<f32, 2, 3>) -> Matrix<f32, 2, 3> {
-            q.vmap(|x: Vector<f32, 3>| x.clone() / x.norm())
-                .unwrap()
-                .collapse()
-        }
-
-        let comp = norm.build().unwrap();
-        let exec = match comp.compile(&client) {
-            Ok(exec) => exec,
-            Err(xla::Error::XlaError { msg, .. }) => {
-                panic!("{}", msg);
-            }
-            Err(e) => {
-                panic!("{:?}", e);
-            }
-        };
-        let out = exec
-            .run(&client, tensor![[1.0, 0.0, 0.0], [0.0, 4.0, 0.0]])
-            .unwrap()
-            .to_host();
-        assert_eq!(out, tensor![[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]])
-    }
-
-    #[test]
-    fn test_scalar_add_scan() {
-        let client = Client::cpu().unwrap();
-        fn add_one(mat: Vector<f32, 5>) -> Scalar<f32> {
-            mat.scan(Scalar::from(0f32), |acc, x| acc + x).unwrap()
-        }
-        let comp = add_one.build().unwrap();
-        let exec = match comp.compile(&client) {
-            Ok(exec) => exec,
-            Err(xla::Error::XlaError { msg, .. }) => {
-                panic!("{}", msg);
-            }
-            Err(e) => {
-                panic!("{:?}", e);
-            }
-        };
-        let out = exec
-            .run(&client, tensor![1.0f32, 2.0, 3.0, 5.0, 6.0])
-            .unwrap()
-            .to_host();
-        assert_eq!(out, 17.0.into())
-    }
-
-    #[test]
-    fn test_vec_add_scan() {
-        let client = Client::cpu().unwrap();
-        fn add_one(mat: Matrix<f32, 3, 2>) -> Vector<f32, 2> {
-            mat.scan(Vector::<f32, 2>::zeros(), |acc, x| acc + x)
-                .unwrap()
-        }
-        let comp = add_one.build().unwrap();
-        let exec = match comp.compile(&client) {
-            Ok(exec) => exec,
-            Err(xla::Error::XlaError { msg, .. }) => {
-                panic!("{}", msg);
-            }
-            Err(e) => {
-                panic!("{:?}", e);
-            }
-        };
-        let out = exec
-            .run(&client, tensor![[1.0f32, 2.0], [3.0, 5.0], [6.0, 7.0]])
-            .unwrap()
-            .to_host();
-        assert_eq!(out, tensor![10.0, 14.0])
-    }
-
-    #[test]
-    fn test_scan_order() {
-        let client = Client::cpu().unwrap();
-        fn acc_only(mat: Matrix<f32, 3, 2>) -> Vector<f32, 2> {
-            mat.scan(Vector::<f32, 2>::zeros(), |acc, _| acc).unwrap()
-        }
-        let comp = acc_only.build().unwrap();
-        let exec = match comp.compile(&client) {
-            Ok(exec) => exec,
-            Err(xla::Error::XlaError { msg, .. }) => {
-                panic!("{}", msg);
-            }
-            Err(e) => {
-                panic!("{:?}", e);
-            }
-        };
-        let out = exec
-            .run(&client, tensor![[1.0f32, 2.0], [3.0, 5.0], [6.0, 7.0]])
-            .unwrap()
-            .to_host();
-        assert_eq!(out, tensor![0.0, 0.0])
-    }
-
-    #[test]
-    fn test_vmap_add_scan() {
-        let client = Client::cpu().unwrap();
-        fn add_one(mat: Matrix<f32, 3, 2>) -> Vector<f32, 3> {
-            mat.vmap(|vec: Vector<f32, 2>| vec.scan(Scalar::from(0f32), |acc, x| acc + x).unwrap())
-                .unwrap()
-                .collapse()
-        }
-        let comp = add_one.build().unwrap();
-        let exec = match comp.compile(&client) {
-            Ok(exec) => exec,
-            Err(xla::Error::XlaError { msg, .. }) => {
-                panic!("{}", msg);
-            }
-            Err(e) => {
-                panic!("{:?}", e);
-            }
-        };
-        let out = exec
-            .run(&client, tensor![[1.0f32, 2.0], [3.0, 5.0], [6.0, 7.0]])
-            .unwrap()
-            .to_host();
-        assert_eq!(out, tensor![3.0, 8.0, 13.0])
-    }
-
-    #[test]
     fn test_children_iterator() {
         use crate::{NoxprNode, NoxprScalarExt};
 
-        // Create a simple binary operation: a + b
         let a = 1.0f32.constant();
         let b = 2.0f32.constant();
         let add = a + b;
 
-        // Test that we can iterate over children
         let children: Vec<_> = add.node.children().collect();
         assert_eq!(children.len(), 2);
 
-        // Test that the children are the operands
         match &*add.node {
             NoxprNode::Add(binary_op) => {
                 assert_eq!(children[0].id(), binary_op.lhs.id());
@@ -3285,15 +2624,12 @@ mod tests {
     fn test_children_iterator_unary() {
         use crate::{NoxprNode, NoxprScalarExt};
 
-        // Create a simple unary operation: sqrt(a)
         let a = 4.0f32.constant();
         let sqrt = a.sqrt();
 
-        // Test that we can iterate over children
         let children: Vec<_> = sqrt.node.children().collect();
         assert_eq!(children.len(), 1);
 
-        // Test that the child is the operand
         match &*sqrt.node {
             NoxprNode::Sqrt(child) => {
                 assert_eq!(children[0].id(), child.id());
@@ -3306,7 +2642,6 @@ mod tests {
     fn test_children_iterator_leaf() {
         use crate::NoxprScalarExt;
 
-        // Test leaf nodes have no children
         let a = 1.0f32.constant();
         let children: Vec<_> = a.node.children().collect();
         assert_eq!(children.len(), 0);

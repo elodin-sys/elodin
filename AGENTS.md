@@ -5,6 +5,7 @@ Elodin is an open-source platform for rapid design, testing, and simulation of a
 ## Rules
 
 - Always use the `nix develop` shell when developing changes
+- Always use `uv` inside the nix shell for Python everything
 - Don't commit changes to git — that's for the developer to do
 - When suggesting new dependencies, check they are well supported and maintained
 - Never use unsafe Rust code
@@ -12,16 +13,18 @@ Elodin is an open-source platform for rapid design, testing, and simulation of a
 
 ## Quick Start
 
-```bash
-nix develop                          # Enter unified dev shell (Rust, Python, C/C++, git-lfs)
-just install                         # Build and install Elodin Editor + Elodin DB
-```
-
-### Python SDK
+### Python SDK (always build first, so binaries pick it up)
 
 ```bash
 uv venv --python 3.12 && source .venv/bin/activate
 uvx maturin develop --uv --manifest-path=libs/nox-py/Cargo.toml
+```
+
+### Elodin CLI and Elodin-DB CLI
+
+```bash
+nix develop                          # Enter unified dev shell (Rust, Python, C/C++, git-lfs)
+just install                         # Build and install Elodin Editor + Elodin DB
 ```
 
 ### CI Checks
@@ -43,3 +46,4 @@ For in-depth instructions, read the relevant skill file below when working in th
 - **Elodin Editor** (Bevy/Egui architecture, hot-reload, viewport, telemetry graphs, KDL schematics): `.cursor/skills/elodin-editor-dev/SKILL.md`
 - **Python SDK internals** (PyO3 bindings, nox-py, JAX integration, adding components/systems): `.cursor/skills/nox-py-dev/SKILL.md`
 - **Nix environment** (dev shell troubleshooting, OrbStack VMs, flake.nix, binary cache): `.cursor/skills/elodin-nix/SKILL.md`
+- **IREE runtime** (iree-runtime crate, VMFB execution from Rust, FFI bindings, dual-backend architecture): `.cursor/skills/elodin-iree/SKILL.md`

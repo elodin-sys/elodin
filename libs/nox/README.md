@@ -11,7 +11,7 @@ For a broader introduction to the project, see the [overview documentation](../.
 
 ## Role of this crate
 - Defines the fundamental tensor types (`Scalar`, `Vector`, `Matrix`, `Tensor<_, _, Op>`). 
-- Provides an Intermediate Representation (IR) for mathematical expressions and integrates with XLA via the `noxla` crate for compilation and execution. 
+- Provides an Intermediate Representation (IR) for mathematical expressions, compiled to IREE (default) or executed via JAX for simulation backends. 
 - Implements differentiable programming utilities used across the Nox ecosystem. 
 - Serves as the foundation for domain-specific layers (ECS, world management, bindings, etc.).
 
@@ -21,18 +21,18 @@ Most users will **not depend on `nox` directly**. Instead, they will interact wi
 
 ## Related crates and subsystems
 - [array](array) – array and tensor utilities.
-- [noxpr](src/noxpr) – subsystem of nox (not standalone) for building tensor compute graphs in Rust and lowering them to XLA. 
+- [noxpr](src/noxpr) – subsystem of nox (not standalone) for building tensor compute graphs in Rust, lowered to JAX for StableHLO/IREE compilation. 
 - [nox-py](../nox-py) – Python bindings (includes ECS layer in `src/`).
    - [elodin-macros](../elodin-macros) – derive macros for components and archetypes.  
-- [noxla](../noxla) – minimal integration layer with XLA. 
+- [iree-runtime](../iree-runtime) – Rust FFI bindings for the IREE C runtime API. 
 
 
 ### Visual overview
 ```text
 nox (core crate: tensors, symbolic backend, differentiation)
 ├── array (tensor/array utilities)
-├── src/noxpr (subsystem: tensor IR + XLA lowering)
+├── src/noxpr (subsystem: tensor IR → JAX → StableHLO → IREE)
 ├── nox-py (Python bindings; ECS in src/)
 │ └── elodin-macros (derive macros for components/archetypes)
-└── noxla (minimal XLA integration)
+└── iree-runtime (IREE C API FFI bindings)
 ```

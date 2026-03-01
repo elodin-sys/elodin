@@ -7,31 +7,20 @@
 with pkgs; let
   # Import shared configuration
   common = pkgs.callPackage ./pkgs/common.nix {};
-  xla_ext = pkgs.callPackage ./pkgs/xla-ext.nix {system = pkgs.stdenv.hostPlatform.system;};
+  iree_runtime = pkgs.callPackage ./pkgs/iree-runtime.nix {};
   llvm = llvmPackages_latest;
 
-  # Import shared JAX overrides
-  jaxOverrides = pkgs.callPackage ./pkgs/jax-overrides.nix {inherit pkgs;};
-
-  # Create a Python environment with the same JAX version as our pyproject.toml
-  pythonWithJax = let
-    python3' = python3.override {
-      packageOverrides = jaxOverrides;
-    };
-  in
-    python3'.withPackages (ps:
-      with ps; [
-        jax
-        jaxlib
-        typing-extensions
-        pytest
-        pytest-json-report
-        matplotlib
-        polars
-        numpy
-      ]);
+  # Base Python for use with venv (JAX 0.8+ and iree-base-compiler installed via pip)
+  pythonBase = python3.withPackages (ps:
+    with ps; [
+      typing-extensions
+      pytest
+      pytest-json-report
+      matplotlib
+      polars
+      numpy
+    ]);
   shellAttrs = {
-    # Unified shell that combines all development environments
     name = "elo-unified-shell";
     buildInputs =
       [
@@ -64,13 +53,12 @@ with pkgs; let
         buildkite-test-collector-rust
         (rustToolchain pkgs)
         cargo-nextest
-        # Use our custom Python with JAX 0.4.31
-        pythonWithJax
+        # Base Python; JAX and IREE installed via pip venv
+        pythonBase
         clang
         maturin
         bzip2
         libclang
-        # Ensure gfortran is available and prioritized for netlib-src builds
         gfortran
         ffmpeg-full
         ffmpeg-full.dev
@@ -138,7 +126,7 @@ with pkgs; let
 
     # Environment variables
     LIBCLANG_PATH = "${libclang.lib}/lib";
-    XLA_EXTENSION_DIR = "${xla_ext}";
+    IREE_RUNTIME_DIR = "${iree_runtime}";
 
     # GStreamer plugin path for elodinsink
     GST_PLUGIN_PATH = lib.makeSearchPathOutput "lib" "lib/gstreamer-1.0" [
@@ -149,17 +137,6 @@ with pkgs; let
       gst_all_1.gst-plugins-ugly
       config.packages.elodinsink
     ];
-
-    # Workaround for netlib-src 0.8.0 incompatibility with GCC 14+
-    # GCC 14 treats -Wincompatible-pointer-types as error by default
-    NIX_CFLAGS_COMPILE = common.netlibWorkaround;
-
-    # Force CMake to use Nix Fortran compiler instead of system one
-    # This fixes netlib-src build failures when system Fortran is incompatible
-    FC = "${pkgs.gfortran}/bin/gfortran";
-    F77 = "${pkgs.gfortran}/bin/gfortran";
-    # Explicitly tell CMake which Fortran compiler to use
-    CMAKE_Fortran_COMPILER = "${pkgs.gfortran}/bin/gfortran";
 
     LLDB_DEBUGSERVER_PATH = lib.optionalString pkgs.stdenv.isDarwin "/Applications/Xcode.app/Contents/SharedFrameworks/LLDB.framework/Versions/A/Resources/debugserver";
 
@@ -193,15 +170,6 @@ with pkgs; let
       ])}:''${LD_LIBRARY_PATH}"
         ;;
       esac
-
-      # Ensure Nix gfortran is in PATH before system Fortran
-      # This is critical for netlib-src builds
-      export PATH="${pkgs.gfortran}/bin:''${PATH}"
-
-      # Explicitly set Fortran compiler for CMake
-      export FC="${pkgs.gfortran}/bin/gfortran"
-      export F77="${pkgs.gfortran}/bin/gfortran"
-      export CMAKE_Fortran_COMPILER="${pkgs.gfortran}/bin/gfortran"
 
       # start the shell if we're in an interactive shell
       if [[ $- == *i* ]]; then

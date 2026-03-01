@@ -14,7 +14,7 @@ members = [
     "libs/elodin-macros",
     "libs/nox-py",
     "libs/nox-frames",
-    "libs/noxla",
+    "libs/iree-runtime",
     "apps/elodin",
     "libs/roci",
     "libs/roci/macros",
@@ -81,9 +81,6 @@ inherits = "release"
 lto = "thin"
 
 [workspace.dependencies]
-# set workspace version as the version of xla
-xla.package = "noxla"
-xla.path = "libs/noxla"
 roci-macros.path = "libs/roci/macros"
 roci.path = "libs/roci"
 roci.default-features = false

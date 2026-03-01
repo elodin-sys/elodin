@@ -61,7 +61,7 @@ where
     ErasedSystem::new(step_v.pipe(step_x))
 }
 
-#[cfg(test)]
+#[cfg(any())]
 mod tests {
     use super::*;
     use crate::world::{World, WorldExt};

@@ -28,8 +28,6 @@ pub enum Error {
     Stellar(#[from] stellarator::Error),
     #[error("arrow error {0}")]
     Arrow(#[from] ::arrow::error::ArrowError),
-    #[error("hlo module was not PyBytes")]
-    HloModuleNotBytes,
     #[error("unexpected input")]
     UnexpectedInput,
     #[error("unknown command: {0}")]
@@ -40,12 +38,12 @@ pub enum Error {
     InvalidTimeStep(std::time::Duration),
     #[error("invalid log level: {0}")]
     InvalidLogLevel(String),
-}
-
-impl From<nox::xla::Error> for Error {
-    fn from(value: nox::xla::Error) -> Self {
-        Error::Nox(nox::Error::Xla(value))
-    }
+    #[error("IREE compilation failed: {0}")]
+    IreeCompilationFailed(String),
+    #[error("IREE runtime error: {0}")]
+    IreeRuntimeError(String),
+    #[error("unsupported element type for JAX backend: {0}")]
+    UnsupportedDtype(String),
 }
 
 impl From<Error> for PyErr {

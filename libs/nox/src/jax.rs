@@ -8,9 +8,9 @@ use pyo3::{
 };
 use smallvec::SmallVec;
 use std::{collections::HashMap, ops::Deref, sync::Arc};
-use xla::{ArrayElement, ElementType, Literal};
 use zerocopy::{FromBytes, Immutable};
 
+use crate::literal::{ArrayElement, ElementType, Literal};
 use crate::{BinaryOp, CompFn, Error, Noxpr, NoxprComp, NoxprFn, NoxprId, NoxprNode, ReprMonad};
 
 impl Noxpr {
@@ -70,25 +70,25 @@ impl JaxTracer {
         }
         let op: PyObject = match expr.deref() {
             NoxprNode::Constant(c) => match c.ty.element_type {
-                xla::ElementType::S8 => literal_to_arr::<i8>(&c.data, &c.ty.shape, &self.jnp)?,
-                xla::ElementType::S16 => literal_to_arr::<i16>(&c.data, &c.ty.shape, &self.jnp)?,
-                xla::ElementType::S32 => literal_to_arr::<i32>(&c.data, &c.ty.shape, &self.jnp)?,
-                xla::ElementType::S64 => literal_to_arr::<i64>(&c.data, &c.ty.shape, &self.jnp)?,
-                xla::ElementType::U8 => literal_to_arr::<u8>(&c.data, &c.ty.shape, &self.jnp)?,
-                xla::ElementType::U16 => literal_to_arr::<u16>(&c.data, &c.ty.shape, &self.jnp)?,
-                xla::ElementType::U32 => literal_to_arr::<u32>(&c.data, &c.ty.shape, &self.jnp)?,
-                xla::ElementType::U64 => literal_to_arr::<u64>(&c.data, &c.ty.shape, &self.jnp)?,
-                xla::ElementType::F32 => literal_to_arr::<f32>(&c.data, &c.ty.shape, &self.jnp)?,
-                // xla::ElementType::F16 => literal_to_arr::<F16>(&c.data, &c.ty.shape, &self.jnp)?,
-                // xla::ElementType::Bf16 => literal_to_arr::<Bf16>(&c.data, &c.ty.shape, &self.jnp)?,
-                xla::ElementType::F64 => literal_to_arr::<f64>(&c.data, &c.ty.shape, &self.jnp)?,
-                xla::ElementType::Pred => {
+                ElementType::S8 => literal_to_arr::<i8>(&c.data, &c.ty.shape, &self.jnp)?,
+                ElementType::S16 => literal_to_arr::<i16>(&c.data, &c.ty.shape, &self.jnp)?,
+                ElementType::S32 => literal_to_arr::<i32>(&c.data, &c.ty.shape, &self.jnp)?,
+                ElementType::S64 => literal_to_arr::<i64>(&c.data, &c.ty.shape, &self.jnp)?,
+                ElementType::U8 => literal_to_arr::<u8>(&c.data, &c.ty.shape, &self.jnp)?,
+                ElementType::U16 => literal_to_arr::<u16>(&c.data, &c.ty.shape, &self.jnp)?,
+                ElementType::U32 => literal_to_arr::<u32>(&c.data, &c.ty.shape, &self.jnp)?,
+                ElementType::U64 => literal_to_arr::<u64>(&c.data, &c.ty.shape, &self.jnp)?,
+                ElementType::F32 => literal_to_arr::<f32>(&c.data, &c.ty.shape, &self.jnp)?,
+                // ElementType::F16 => literal_to_arr::<F16>(&c.data, &c.ty.shape, &self.jnp)?,
+                // ElementType::Bf16 => literal_to_arr::<Bf16>(&c.data, &c.ty.shape, &self.jnp)?,
+                ElementType::F64 => literal_to_arr::<f64>(&c.data, &c.ty.shape, &self.jnp)?,
+                ElementType::Pred => {
                     todo!()
                 }
-                xla::ElementType::C64 => todo!(),
-                xla::ElementType::C128 => todo!(),
-                xla::ElementType::F16 => todo!(),
-                xla::ElementType::Bf16 => todo!(),
+                ElementType::C64 => todo!(),
+                ElementType::C128 => todo!(),
+                ElementType::F16 => todo!(),
+                ElementType::Bf16 => todo!(),
             },
             NoxprNode::Param(_) => {
                 unimplemented!("param found")
@@ -128,16 +128,18 @@ impl JaxTracer {
             NoxprNode::DotGeneral(d) => {
                 let lhs = self.visit(&d.lhs)?;
                 let rhs = self.visit(&d.rhs)?;
-                let contracting = (
-                    d.dimensions.lhs_contracting_dimensions.to_vec(),
-                    d.dimensions.rhs_contracting_dimensions.to_vec(),
-                );
-                let batch_dims = (
-                    d.dimensions.lhs_batch_dimensions.to_vec(),
-                    d.dimensions.rhs_batch_dimensions.to_vec(),
-                );
-                let dims = (contracting, batch_dims);
-                Python::with_gil(|py| self.lax.call_method1(py, "dot_general", (lhs, rhs, dims)))?
+                Python::with_gil(|py| {
+                    let contracting = (
+                        PyTuple::new(py, &d.dimensions.lhs_contracting_dimensions)?,
+                        PyTuple::new(py, &d.dimensions.rhs_contracting_dimensions)?,
+                    );
+                    let batch_dims = (
+                        PyTuple::new(py, &d.dimensions.lhs_batch_dimensions)?,
+                        PyTuple::new(py, &d.dimensions.rhs_batch_dimensions)?,
+                    );
+                    let dims = (contracting, batch_dims);
+                    self.lax.call_method1(py, "dot_general", (lhs, rhs, dims))
+                })?
             }
             NoxprNode::Sqrt(op) => self.visit_unary_lax(op, "sqrt")?,
             NoxprNode::Neg(op) => self.visit_unary_lax(op, "neg")?,
@@ -187,14 +189,13 @@ impl JaxTracer {
                 let expr = self.visit(&g.expr)?;
                 let start_indices = self.visit(&g.indices)?;
                 let gather_dims = Python::with_gil(|py| {
+                    let offset_dims = PyTuple::new(py, &g.offset_dims)?;
+                    let collapsed = PyTuple::new(py, &g.collapsed_slice_dims)?;
+                    let start_map = PyTuple::new(py, &g.start_index_map)?;
                     self.lax.call_method1(
                         py,
                         "GatherDimensionNumbers",
-                        (
-                            g.offset_dims.to_vec(),
-                            g.collapsed_slice_dims.to_vec(),
-                            g.start_index_map.to_vec(),
-                        ),
+                        (offset_dims, collapsed, start_map),
                     )
                 })?;
                 Python::with_gil(|py| {

@@ -491,6 +491,7 @@ class World(WorldBuilder):
         interactive: bool = True,
         start_timestamp: Optional[int] = None,
         log_level: Optional[str] = None,
+        backend: str = "iree",
     ):
         current_frame = inspect.currentframe()
         if current_frame is None:
@@ -512,6 +513,7 @@ class World(WorldBuilder):
             interactive,
             start_timestamp,
             log_level,
+            backend,
         )
         locals = frame.f_locals
         if not interactive and addr is not None:

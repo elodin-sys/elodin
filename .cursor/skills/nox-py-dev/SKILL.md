@@ -5,7 +5,7 @@ description: Contribute to the Elodin Python SDK (nox-py). Use when editing PyO3
 
 # nox-py Development
 
-nox-py is the Elodin Python SDK — PyO3 bindings that bridge Python simulations to the Rust ECS engine (in nox-py/src/), the NOX tensor compiler (→ XLA), and Impeller2 telemetry.
+nox-py is the Elodin Python SDK — PyO3 bindings that bridge Python simulations to the Rust ECS engine (in nox-py/src/), the NOX tensor compiler (→ IREE / JAX), and Impeller2 telemetry.
 
 ## Build & Test
 
@@ -43,7 +43,10 @@ libs/nox-py/src/lib.rs       ← PyO3 module registration
     ├── graph.rs              ← GraphQuery and edge_fold
     ├── spatial.rs            ← SpatialTransform, SpatialMotion, SpatialForce, SpatialInertia
     ├── entity.rs             ← EntityId management
-    ├── exec.rs               ← Execution engine, profiling, DB integration
+    ├── exec.rs               ← WorldExec enum (Iree/Jax), profiling, DB integration
+    ├── iree_compile.rs       ← JAX → StableHLO → VMFB compilation pipeline
+    ├── iree_exec.rs          ← IREEExec, IREEWorldExec (Python-free tick loop)
+    ├── jax_exec.rs           ← JaxExec, JaxWorldExec (JAX JIT per-tick execution)
     ├── step_context.rs       ← StepContext for pre/post step callbacks
     ├── impeller_client.rs    ← Impeller2 client for DB connection
     ├── asset.rs              ← Mesh, Material, GLB asset handling
@@ -53,13 +56,10 @@ libs/nox-py/src/lib.rs       ← PyO3 module registration
     └── error.rs              ← Error types and Python exception mapping
     │
     ▼
-libs/nox-py/src/              ← ECS world, component storage, system execution (world, exec, etc.)
-    │
-    ▼
 libs/nox/                     ← Tensor library, symbolic backend
     │
     ▼
-libs/noxla/                   ← Rust → XLA C++ bindings
+libs/iree-runtime/            ← Rust FFI bindings for IREE C runtime API
 ```
 
 ## Python API Surface
@@ -87,13 +87,19 @@ Earth gravity models. EGM08 is a high-fidelity spherical harmonics model; J2 is 
 Central orchestrator. Handles `World.spawn()`, `World.insert()`, `World.run()`, `World.build()`, `World.to_jax()`. This is where simulation execution modes branch.
 
 ### `system.rs`
-Compiles Python-defined systems into XLA computations. Handles the `@system`, `@map`, `@map_seq` decorator logic on the Rust side. System composition (pipe `|`) is implemented here.
+Compiles Python-defined systems into executable computations via IREE (default) or JAX. Handles the `@system`, `@map`, `@map_seq` decorator logic on the Rust side. System composition (pipe `|`) is implemented here.
+
+### `exec.rs`
+Defines `WorldExec` enum with `Iree(IREEWorldExec)` and `Jax(JaxWorldExec)` variants. Both implement the same interface for tick execution, profiling, and DB integration. The `backend` parameter in `w.run()` / `w.build()` selects which variant is used.
+
+### `iree_compile.rs` / `iree_exec.rs`
+IREE backend: compiles Noxpr graph → JAX → StableHLO MLIR → `iree-compile` → VMFB, then executes each tick via the IREE C runtime with no Python/GIL involvement.
+
+### `jax_exec.rs`
+JAX backend: compiles Noxpr graph → `jax.jit()` callable, then executes each tick by calling the JAX function via PyO3. Slower than IREE but supports all JAX operations.
 
 ### `component.rs`
 Maps Python `Component` annotations to component schemas. Handles type inference, metadata, and the `ComponentType` / `PrimitiveType` hierarchy.
-
-### `exec.rs`
-The execution engine. Manages tick loops, database integration, profiling (`bench --profile`), and the `components` discovery command. Includes the `StepContext` callback dispatch.
 
 ### `spatial.rs`
 PyO3 bindings for spatial vector algebra types. Each type wraps a nox tensor and exposes Python-friendly constructors, accessors, and arithmetic operators.

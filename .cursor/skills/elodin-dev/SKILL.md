@@ -8,7 +8,7 @@ description: Develop and contribute to the Elodin codebase. Use when building El
 Elodin is a monorepo for aerospace simulation and flight software. The stack:
 
 - **nox-py** — Python SDK (JAX + PyO3 bindings; includes ECS in `src/`)
-- **nox** — Tensor compiler → XLA
+- **nox** — Tensor compiler (→ IREE / JAX)
 - **Impeller2** — High-performance pub-sub telemetry protocol
 - **Elodin-DB** — Time-series telemetry database
 - **Elodin Editor** — 3D viewer and graphing tool (Bevy + Egui)
@@ -25,8 +25,8 @@ Python Simulations (nox-py)
  NOX      Impeller2     Elodin-DB
 Compiler  (Telemetry)   (Storage)
    │         │              │
-  XLA     Stellarator    Elodin
-          (Async RT)     Editor
+ IREE /   Stellarator    Elodin
+  JAX     (Async RT)     Editor
                 │
          ┌──────┴──────┐
        Roci          Aleph
@@ -34,7 +34,7 @@ Compiler  (Telemetry)   (Storage)
 ```
 
 Key integration points:
-1. nox-py → nox → noxla → XLA (simulation compilation)
+1. nox-py → nox → IREE (default) or JAX (simulation compilation)
 2. nox-py → impeller2 → elodin-db (telemetry)
 3. elodin-editor → impeller2 → elodin-db (visualization)
 4. roci → impeller2 → elodin-db (flight software telemetry)
@@ -88,7 +88,7 @@ The Cargo workspace has 57 members. Key crates by area:
 
 | Area | Crates |
 |------|--------|
-| Simulation | `nox`, `elodin-macros`, `nox-py`, `nox-frames`, `noxla` |
+| Simulation | `nox`, `elodin-macros`, `nox-py`, `nox-frames`, `iree-runtime` |
 | Database | `db`, `db/cli`, `db/eql`, `db/tests` |
 | Telemetry | `impeller2`, `impeller2/{bevy,stellar,bbq,frame,kdl,wkt}` |
 | Editor | `elodin-editor`, `apps/elodin` |
