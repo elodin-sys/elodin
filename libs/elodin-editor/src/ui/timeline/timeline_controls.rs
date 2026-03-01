@@ -6,10 +6,8 @@ use bevy::prelude::*;
 use bevy_egui::egui;
 use egui::{Ui, load::SizedTexture};
 use impeller2::types::Timestamp;
-use impeller2_bevy::{CurrentStreamId, PacketTx};
-use impeller2_wkt::{
-    CurrentTimestamp, EarliestTimestamp, LastUpdated, SetStreamState, SimulationTimeStep,
-};
+use impeller2_bevy::CurrentStreamId;
+use impeller2_wkt::{CurrentTimestamp, EarliestTimestamp, LastUpdated, SimulationTimeStep};
 use std::convert::TryFrom;
 use std::time::Duration;
 use std::time::Instant;
@@ -34,7 +32,6 @@ pub(crate) fn plugin(app: &mut App) {
 
 #[derive(SystemParam)]
 pub struct TimelineControls<'w> {
-    event: Res<'w, PacketTx>,
     paused: ResMut<'w, Paused>,
     tick: ResMut<'w, CurrentTimestamp>,
     max_tick: Res<'w, LastUpdated>,
@@ -65,7 +62,6 @@ impl WidgetSystem for TimelineControls<'_> {
     ) {
         let icons = args;
         let TimelineControls {
-            event,
             mut paused,
             mut tick,
             max_tick,
@@ -81,7 +77,6 @@ impl WidgetSystem for TimelineControls<'_> {
         tick_origin.observe_stream(**stream_id);
         tick_origin.observe_tick(tick.0, earliest_timestamp.0);
 
-        let mut tick_changed = false;
         let tick_step_duration = hifitime::Duration::from_seconds(tick_time.0);
         let tick_step_micros_i128 = tick_step_duration.total_nanoseconds() / 1000;
         let tick_step_micros = i64::try_from(tick_step_micros_i128).unwrap_or(0);
@@ -106,7 +101,6 @@ impl WidgetSystem for TimelineControls<'_> {
 
                             if jump_to_start_btn.clicked() {
                                 tick.0 = earliest_timestamp.0;
-                                tick_changed = true;
                                 tick_origin.request_rebase();
                             }
 
@@ -126,7 +120,6 @@ impl WidgetSystem for TimelineControls<'_> {
 
                                 if first || down.elapsed() > wait_before_advancing {
                                     tick.0.0 -= tick_step_micros;
-                                    tick_changed = true;
                                     if tick.0 <= earliest_timestamp.0 {
                                         tick_origin.request_rebase();
                                     }
@@ -168,8 +161,6 @@ impl WidgetSystem for TimelineControls<'_> {
 
                                 if first || down.elapsed() > wait_before_advancing {
                                     tick.0.0 += tick_step_micros;
-
-                                    tick_changed = true;
                                 }
                             } else {
                                 let _ = step_buttons.forward.take();
@@ -181,7 +172,6 @@ impl WidgetSystem for TimelineControls<'_> {
 
                             if jump_to_end_btn.clicked() {
                                 tick.0 = Timestamp(max_tick.0.0.saturating_sub(1));
-                                tick_changed = true;
                             }
                         },
                     );
@@ -277,10 +267,6 @@ impl WidgetSystem for TimelineControls<'_> {
                     );
                 });
             });
-
-        if tick_changed {
-            event.send_msg(SetStreamState::rewind(**stream_id, tick.0));
-        }
     }
 }
 

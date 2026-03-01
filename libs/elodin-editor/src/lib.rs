@@ -28,9 +28,9 @@ use impeller2::types::{ComponentId, OwnedPacket};
 use impeller2::types::{Msg, Timestamp};
 use impeller2_bevy::{
     ComponentMetadataRegistry, ComponentPathRegistry, ComponentSchemaRegistry, ComponentValueMap,
-    CurrentStreamId, EntityMap, PacketHandlerInput, PacketHandlers, PacketTx,
+    EntityMap, PacketHandlerInput, PacketHandlers,
 };
-use impeller2_wkt::{CurrentTimestamp, NewConnection, Object3D, SetStreamState, WorldPos};
+use impeller2_wkt::{CurrentTimestamp, NewConnection, Object3D, WorldPos};
 use impeller2_wkt::{EarliestTimestamp, LastUpdated};
 use nox::Tensor;
 use object_3d::create_object_3d_entity;
@@ -227,7 +227,6 @@ impl Plugin for EditorPlugin {
             .add_systems(Update, setup_egui_context)
             //.add_systems(Update, make_entities_selectable)
             .add_systems(PreUpdate, setup_cell)
-            .add_systems(PreUpdate, sync_res::<CurrentTimestamp>)
             .add_systems(PreUpdate, sync_res::<impeller2_wkt::SimulationTimeStep>)
             .add_systems(
                 PreUpdate,
@@ -236,25 +235,24 @@ impl Plugin for EditorPlugin {
             .add_systems(
                 PreUpdate,
                 (
+                    set_selected_range,
+                    clamp_current_time,
+                    advance_playback,
+                    impeller2_bevy::apply_cached_data,
                     set_floating_origin,
                     (sync_pos, sync_object_3d, set_viewport_pos),
                 )
                     .chain()
                     .in_set(PositionSync),
             )
-            .add_systems(Update, sync_paused)
+            .add_systems(Update, impeller2_bevy::backfill_cache)
             .add_systems(Update, ui::data_overview::trigger_time_range_queries)
-            .add_systems(PreUpdate, set_selected_range)
             .add_systems(Update, update_eql_context)
             .add_systems(Update, set_eql_context_range.after(update_eql_context))
             .add_systems(Startup, spawn_ui_cam)
             .add_systems(Update, ui::video_stream::connect_streams)
             .add_systems(PostUpdate, ui::video_stream::set_visibility)
             .add_systems(PostUpdate, set_clear_color)
-            .add_systems(
-                Update,
-                clamp_current_time.before(crate::ui::timeline::timeline_slider::sync_ui_tick),
-            )
             .insert_resource(WireframeConfig {
                 global: false,
                 default_color: Color::WHITE,
@@ -297,6 +295,10 @@ impl Plugin for EditorPlugin {
         app.configure_sets(
             PreUpdate,
             PositionSync.before(bevy_editor_cam::SyncCameraPosition),
+        );
+        app.configure_sets(
+            PostUpdate,
+            bevy_editor_cam::SyncCameraPosition.after(bevy::transform::TransformSystems::Propagate),
         );
     }
 }
@@ -729,20 +731,23 @@ impl WorldPosExt for WorldPos {
     }
 }
 
-pub fn sync_paused(
+pub fn advance_playback(
+    time: Res<Time>,
+    mut current_ts: ResMut<CurrentTimestamp>,
     paused: Res<ui::Paused>,
-    event: ResMut<PacketTx>,
-    stream_id: Res<CurrentStreamId>,
+    speed: Res<ui::timeline::PlaybackSpeed>,
+    last_updated: Res<LastUpdated>,
+    earliest: Res<EarliestTimestamp>,
 ) {
-    if paused.is_changed() {
-        event.send_msg(SetStreamState {
-            id: stream_id.0,
-            playing: Some(!paused.0),
-            timestamp: None,
-            time_step: None,
-            frequency: None,
-        })
+    if paused.0 {
+        return;
     }
+    if earliest.0 >= last_updated.0 {
+        return;
+    }
+    let delta_micros = (time.delta_secs_f64() * speed.0 * 1_000_000.0) as i64;
+    let new_ts = Timestamp(current_ts.0.0.saturating_add(delta_micros));
+    current_ts.0 = Timestamp(new_ts.0.clamp(earliest.0.0, last_updated.0.0));
 }
 
 pub fn sync_pos(
@@ -942,6 +947,8 @@ fn sync_res<R: Component + Resource + Clone>(q: Query<&R>, mut res: ResMut<R>) {
 pub fn setup_clear_state(mut packet_handlers: ResMut<PacketHandlers>, mut commands: Commands) {
     let sys = commands.register_system(clear_state_new_connection);
     packet_handlers.0.push(sys);
+    let sys = commands.register_system(reset_timestamps_on_new_connection);
+    packet_handlers.0.push(sys);
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -958,6 +965,8 @@ fn clear_state_new_connection(
     mut commands: Commands,
     mut windows_state: Query<(Entity, &mut tiles::WindowState)>,
     primary_window: Single<Entity, With<PrimaryWindow>>,
+    mut telemetry_cache: ResMut<impeller2_bevy::TelemetryCache>,
+    mut backfill_state: ResMut<impeller2_bevy::BackfillState>,
 ) {
     match packet {
         OwnedPacket::Msg(m) if m.id == NewConnection::ID => {}
@@ -1010,6 +1019,25 @@ fn clear_state_new_connection(
     }
     *graph_data = CollectedGraphData::default();
     render_layer_alloc.free_all();
+    *telemetry_cache = impeller2_bevy::TelemetryCache::default();
+    *backfill_state = impeller2_bevy::BackfillState::default();
+}
+
+/// Reset timestamp resources so the next connection initializes correctly.
+/// Registered as a packet handler alongside `clear_state_new_connection`.
+fn reset_timestamps_on_new_connection(
+    PacketHandlerInput { packet, .. }: PacketHandlerInput,
+    mut earliest: ResMut<EarliestTimestamp>,
+    mut latest: ResMut<LastUpdated>,
+    mut current: ResMut<CurrentTimestamp>,
+) {
+    match packet {
+        OwnedPacket::Msg(m) if m.id == NewConnection::ID => {}
+        _ => return,
+    }
+    *earliest = EarliestTimestamp(Timestamp(i64::MAX));
+    *latest = LastUpdated(Timestamp(i64::MIN));
+    current.0 = Timestamp::EPOCH;
 }
 
 #[derive(Resource, Clone)]
@@ -1023,18 +1051,34 @@ impl Default for SelectedTimeRange {
 #[derive(Resource, Clone)]
 pub struct FullTimeRange(pub Range<Timestamp>);
 
+/// When present, the Editor operates in replay mode: the timeline reveals data
+/// progressively as `CurrentTimestamp` advances, simulating a live session from
+/// a recorded database.
+#[derive(Resource, Default)]
+pub struct ReplayMode;
+
 pub fn set_selected_range(
     mut selected_range: ResMut<SelectedTimeRange>,
     mut full_range: ResMut<FullTimeRange>,
     earliest: Res<EarliestTimestamp>,
     latest: Res<LastUpdated>,
+    current_ts: Res<CurrentTimestamp>,
     behavior: Res<TimeRangeBehavior>,
+    replay: Option<Res<ReplayMode>>,
 ) {
-    if earliest.0 < latest.0 {
+    let effective_latest = if replay.is_some() {
+        latest.0.min(current_ts.0)
+    } else {
+        latest.0
+    };
+
+    if earliest.0 < effective_latest {
+        full_range.0 = earliest.0..effective_latest;
+    } else if earliest.0 < latest.0 {
         full_range.0 = earliest.0..latest.0;
     }
 
-    match behavior.calculate_selected_range(earliest.0, latest.0) {
+    match behavior.calculate_selected_range(earliest.0, effective_latest) {
         Ok(range) => {
             selected_range.0 = range;
         }
@@ -1234,19 +1278,17 @@ fn clamp_range(total_range: Range<Timestamp>, b: Range<Timestamp>) -> Range<Time
 }
 
 pub fn clamp_current_time(
-    range: Res<SelectedTimeRange>,
+    earliest: Res<EarliestTimestamp>,
+    latest: Res<LastUpdated>,
     mut current_timestamp: ResMut<CurrentTimestamp>,
-    packet_tx: Res<PacketTx>,
-    current_stream_id: Res<CurrentStreamId>,
 ) {
-    if range.0.start > range.0.end {
+    if earliest.0 >= latest.0 {
         return;
     }
     let previous_timestamp = current_timestamp.0;
-    let new_timestamp = previous_timestamp.clamp(range.0.start, range.0.end);
+    let new_timestamp = previous_timestamp.clamp(earliest.0, latest.0);
     if new_timestamp != previous_timestamp {
         current_timestamp.0 = new_timestamp;
-        packet_tx.send_msg(SetStreamState::rewind(**current_stream_id, new_timestamp))
     }
 }
 

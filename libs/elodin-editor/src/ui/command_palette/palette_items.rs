@@ -23,7 +23,7 @@ use bevy_infinite_grid::InfiniteGrid;
 use egui_tiles::{Tile, TileId};
 use fuzzy_matcher::{FuzzyMatcher, skim::SkimMatcherV2};
 use impeller2::types::Timestamp;
-use impeller2_bevy::{CommandsExt, ComponentPathRegistry, CurrentStreamId, EntityMap, PacketTx};
+use impeller2_bevy::{CommandsExt, ComponentPathRegistry, EntityMap, PacketTx};
 use impeller2_kdl::{
     ToKdl,
     env::{schematic_dir_or_cwd, schematic_file},
@@ -31,7 +31,7 @@ use impeller2_kdl::{
 use impeller2_wkt::{
     ArchiveFormat, ArchiveSaved, ComponentPath, ComponentValue, CurrentTimestamp, DbConfig,
     EarliestTimestamp, ErrorResponse, IsRecording, LastUpdated, Material, Mesh, Object3D,
-    SaveArchive, SetDbConfig, SetStreamState, SimulationTimeStep,
+    SaveArchive, SetDbConfig, SimulationTimeStep,
 };
 use miette::IntoDiagnostic;
 use nox::ArrayBuf;
@@ -48,9 +48,7 @@ use crate::{
             SchematicLiveReloadRx, load_schematic_file,
         },
         tiles::{self, set_mode_all},
-        timeline::{
-            PlaybackSpeed, StreamTickOrigin, playback_time_step_from_speed, timeline_slider::UITick,
-        },
+        timeline::{PlaybackSpeed, StreamTickOrigin, timeline_slider::UITick},
     },
 };
 
@@ -742,18 +740,8 @@ fn set_playback_speed() -> PaletteItem {
                     PaletteItem::new(
                         speed.to_string(),
                         "SPEED".to_string(),
-                        move |_: In<String>,
-                              packet_tx: Res<PacketTx>,
-                              mut playback_speed: ResMut<PlaybackSpeed>,
-                              stream_id: Res<CurrentStreamId>| {
+                        move |_: In<String>, mut playback_speed: ResMut<PlaybackSpeed>| {
                             playback_speed.0 = speed;
-                            packet_tx.send_msg(SetStreamState {
-                                id: stream_id.0,
-                                playing: None,
-                                timestamp: None,
-                                time_step: Some(playback_time_step_from_speed(speed)),
-                                frequency: None,
-                            });
                             PaletteEvent::Exit
                         },
                     )
@@ -857,8 +845,6 @@ fn goto_tick() -> PaletteItem {
                       mut current_tick: ResMut<CurrentTimestamp>,
                       mut ui_tick: ResMut<UITick>,
                       mut paused: ResMut<Paused>,
-                      stream_id: Res<CurrentStreamId>,
-                      packet_tx: Res<PacketTx>,
                       earliest_timestamp: Res<EarliestTimestamp>,
                       mut tick_origin: ResMut<StreamTickOrigin>,
                       tick_time: Res<SimulationTimeStep>| {
@@ -912,7 +898,6 @@ fn goto_tick() -> PaletteItem {
                     if parsed_tick == 0 {
                         tick_origin.request_rebase();
                     }
-                    packet_tx.send_msg(SetStreamState::rewind(**stream_id, timestamp));
 
                     PaletteEvent::Exit
                 },

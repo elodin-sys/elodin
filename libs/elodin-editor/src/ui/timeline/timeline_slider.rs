@@ -9,8 +9,8 @@ use bevy::{
 use bevy_egui::egui;
 use egui::{CornerRadius, Margin};
 use impeller2::types::Timestamp;
-use impeller2_bevy::{CurrentStreamId, PacketTx};
-use impeller2_wkt::{CurrentTimestamp, EarliestTimestamp, SetStreamState};
+use impeller2_bevy::CurrentStreamId;
+use impeller2_wkt::{CurrentTimestamp, EarliestTimestamp};
 use std::ops::RangeInclusive;
 
 use crate::ui::{
@@ -386,8 +386,8 @@ pub struct UITick(pub i64);
 
 #[derive(SystemParam)]
 pub struct TimelineSlider<'w> {
-    event: Res<'w, PacketTx>,
     tick: ResMut<'w, UITick>,
+    current_timestamp: ResMut<'w, CurrentTimestamp>,
     current_stream_id: Res<'w, CurrentStreamId>,
     tick_origin: ResMut<'w, StreamTickOrigin>,
     earliest_timestamp: Res<'w, EarliestTimestamp>,
@@ -404,8 +404,8 @@ impl WidgetSystem for TimelineSlider<'_> {
         args: Self::Args,
     ) {
         let TimelineSlider {
-            event,
             mut tick,
+            mut current_timestamp,
             current_stream_id,
             mut tick_origin,
             earliest_timestamp,
@@ -435,13 +435,10 @@ impl WidgetSystem for TimelineSlider<'_> {
 
             if response.changed() {
                 let target_timestamp = Timestamp(tick.0);
+                current_timestamp.0 = target_timestamp;
                 if target_timestamp <= earliest_timestamp.0 {
                     tick_origin.request_rebase();
                 }
-                event.send_msg(SetStreamState::rewind(
-                    **current_stream_id,
-                    target_timestamp,
-                ))
             }
         });
     }

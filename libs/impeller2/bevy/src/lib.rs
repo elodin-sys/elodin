@@ -25,16 +25,15 @@ use impeller2::{
 use impeller2_bbq::{AsyncArcQueueRx, RxExt};
 use impeller2_wkt::{
     ComponentMetadata, CurrentTimestamp, DbConfig, DumpMetadata, DumpMetadataResp, DumpSchema,
-    DumpSchemaResp, EarliestTimestamp, ErrorResponse, FixedRateBehavior, GetDbSettings,
-    GetEarliestTimestamp, IsRecording, LastUpdated, SetStreamState, Stream, StreamBehavior,
-    StreamId, StreamTimestamp, SubscribeLastUpdated, VTableMsg, WorldPos,
+    DumpSchemaResp, EarliestTimestamp, ErrorResponse, GetDbSettings, GetEarliestTimestamp,
+    GetTimeSeries, IsRecording, LastUpdated, Stream, StreamBehavior, StreamId, StreamTimestamp,
+    SubscribeLastUpdated, VTableMsg, WorldPos,
 };
 use serde::de::DeserializeOwned;
 use std::{
     collections::{BTreeMap, HashMap},
     convert::Infallible,
     marker::PhantomData,
-    time::Duration,
 };
 use stellarator_buf::Slice;
 
@@ -51,15 +50,6 @@ pub use tcp::*;
 /// Size of the BBQ queue for incoming packets.
 /// Increased from 64MB to 256MB to handle large Arrow IPC responses from SQL queries.
 pub const QUEUE_LEN: usize = 256 * 1024 * 1024;
-
-/// The playback frequency used by the editor (frames per second).
-const PLAYBACK_FREQUENCY: f64 = 60.0;
-
-/// The stream time-step that corresponds to 1x real-time playback at
-/// [`PLAYBACK_FREQUENCY`] Hz.  `time_step * frequency == 1 second` of
-/// sim-time per second of wall-clock time.
-const REAL_TIME_STREAM_TIME_STEP: Duration =
-    Duration::from_nanos((1_000_000_000.0 / PLAYBACK_FREQUENCY) as u64);
 
 #[derive(Resource)]
 pub struct PacketRx(AsyncArcQueueRx);
@@ -92,6 +82,185 @@ pub enum DbMessage {
     UpdateConfig,
 }
 
+/// Per-component time-series cache. Stores raw component values keyed by
+/// timestamp so the Editor can display data at any `CurrentTimestamp` without
+/// a DB round-trip.
+#[derive(Resource, Default)]
+pub struct TelemetryCache {
+    components: HashMap<ComponentId, BTreeMap<Timestamp, ComponentValue>>,
+    generation: u64,
+}
+
+impl TelemetryCache {
+    pub fn insert(&mut self, component_id: ComponentId, ts: Timestamp, value: ComponentValue) {
+        self.components
+            .entry(component_id)
+            .or_default()
+            .insert(ts, value);
+        self.generation = self.generation.wrapping_add(1);
+    }
+
+    pub fn get_at_or_before(
+        &self,
+        component_id: &ComponentId,
+        ts: Timestamp,
+    ) -> Option<&ComponentValue> {
+        let series = self.components.get(component_id)?;
+        series.range(..=ts).next_back().map(|(_, v)| v)
+    }
+
+    pub fn component_ids(&self) -> impl Iterator<Item = &ComponentId> {
+        self.components.keys()
+    }
+}
+
+/// Decomponentize implementation that collects component values into a
+/// Vec for later insertion into the TelemetryCache.
+struct CacheCollector {
+    collected: Vec<(ComponentId, Timestamp, ComponentValue)>,
+}
+
+impl Decomponentize for CacheCollector {
+    type Error = core::convert::Infallible;
+    fn apply_value(
+        &mut self,
+        component_id: ComponentId,
+        view: ComponentView<'_>,
+        timestamp: Option<Timestamp>,
+    ) -> Result<(), Infallible> {
+        if let Some(ts) = timestamp {
+            let value = ComponentValue::from_view(view);
+            self.collected.push((component_id, ts, value));
+        }
+        Ok(())
+    }
+}
+
+/// Bevy system that reads the TelemetryCache at `CurrentTimestamp` and
+/// overwrites entity `ComponentValue` components and adapted components
+/// (like `WorldPos`) with the cached data. This allows the viewport to
+/// display data at any timestamp the user scrubs to, without waiting for
+/// the DB stream to deliver it.
+pub fn apply_cached_data(
+    current_ts: bevy::prelude::Res<CurrentTimestamp>,
+    cache: bevy::prelude::Res<TelemetryCache>,
+    mut entity_map: ResMut<EntityMap>,
+    mut query: Query<&mut ComponentValue>,
+    adapters: bevy::prelude::Res<ComponentAdapters>,
+    mut commands: Commands,
+    mut last_applied: bevy::prelude::Local<(Timestamp, u64)>,
+) {
+    let ts = current_ts.0;
+    let cache_gen = cache.generation;
+    if ts == last_applied.0 && cache_gen == last_applied.1 {
+        return;
+    }
+    *last_applied = (ts, cache_gen);
+    for component_id in cache.component_ids().copied().collect::<Vec<_>>() {
+        let Some(value) = cache.get_at_or_before(&component_id, ts) else {
+            continue;
+        };
+        let Some(&entity) = entity_map.get(&component_id) else {
+            continue;
+        };
+        if let Ok(mut cv) = query.get_mut(entity) {
+            *cv = value.clone();
+        } else {
+            commands.entity(entity).insert(value.clone());
+        }
+        if let Some(adapter) = adapters.get(&component_id) {
+            let view = value.as_view();
+            adapter.insert(&mut commands, &mut entity_map, component_id, view);
+        }
+    }
+}
+
+/// Tracks which components have had their backfill requests sent.
+#[derive(Resource, Default)]
+pub struct BackfillState {
+    requested: std::collections::HashSet<ComponentId>,
+}
+
+const BACKFILL_CHUNK_SIZE: usize = 4096;
+
+/// Bevy system that sends paginated `GetTimeSeries` requests for each
+/// known component to populate the `TelemetryCache` with historical data.
+/// Runs every frame but only sends requests for components not yet requested.
+pub fn backfill_cache(
+    metadata_reg: bevy::prelude::Res<ComponentMetadataRegistry>,
+    schema_reg: bevy::prelude::Res<ComponentSchemaRegistry>,
+    mut backfill: ResMut<BackfillState>,
+    mut commands: Commands,
+) {
+    for (&component_id, _metadata) in metadata_reg.iter() {
+        if backfill.requested.contains(&component_id) {
+            continue;
+        }
+        if !schema_reg.0.contains_key(&component_id) {
+            continue;
+        }
+        backfill.requested.insert(component_id);
+        send_backfill_page(&mut commands, component_id, Timestamp(i64::MIN));
+    }
+}
+
+fn send_backfill_page(commands: &mut Commands, component_id: ComponentId, start: Timestamp) {
+    let msg = GetTimeSeries {
+        id: PacketId::default(),
+        range: start..Timestamp(i64::MAX),
+        component_id,
+        limit: Some(BACKFILL_CHUNK_SIZE),
+    };
+
+    commands.send_req_reply_raw::<_, GetTimeSeries, _>(
+        msg,
+        move |pkt: bevy::prelude::InRef<OwnedPacket<PacketGrantR>>,
+              mut cache: ResMut<TelemetryCache>,
+              schema_reg: bevy::prelude::Res<ComponentSchemaRegistry>,
+              mut cmds: Commands| {
+            let OwnedPacket::TimeSeries(ts) = &*pkt else {
+                return true;
+            };
+            let Ok(timestamps) = ts.timestamps() else {
+                return true;
+            };
+            let Ok(data) = ts.data() else {
+                return true;
+            };
+
+            let Some(schema) = schema_reg.0.get(&component_id) else {
+                return true;
+            };
+
+            let elem_size = schema.size();
+            let count = timestamps.len();
+            let mut last_ts = start;
+
+            for (i, &timestamp) in timestamps.iter().enumerate() {
+                let offset = i * elem_size;
+                if offset + elem_size > data.len() {
+                    break;
+                }
+                let bytes = &data[offset..offset + elem_size];
+                if let Ok(view) = impeller2::types::ComponentView::try_from_bytes_shape(
+                    bytes,
+                    schema.shape(),
+                    schema.prim_type(),
+                ) {
+                    let value = ComponentValue::from_view(view);
+                    cache.insert(component_id, timestamp, value);
+                    last_ts = timestamp;
+                }
+            }
+
+            if count >= BACKFILL_CHUNK_SIZE {
+                send_backfill_page(&mut cmds, component_id, Timestamp(last_ts.0 + 1));
+            }
+            true
+        },
+    );
+}
+
 fn sink_inner(
     world: &mut World,
     packet_rx: &mut PacketRx,
@@ -100,7 +269,7 @@ fn sink_inner(
     world_sink_state: &mut SystemState<WorldSink>,
 ) -> Result<(), impeller2::error::Error> {
     let mut count = 0;
-    let mut pending_stream_time_step: Option<Duration> = None;
+    let mut pending_cache_entries: Vec<(ComponentId, Timestamp, ComponentValue)> = Vec::new();
     while let Some(pkt) = packet_rx.try_recv_pkt() {
         if count > 2048 {
             return Ok(());
@@ -193,10 +362,6 @@ fn sink_inner(
                         .insert(metadata.component_id, metadata);
                 }
                 *world_sink.db_config = metadata.db_config.clone();
-                // Always start playback at 1x real-time speed regardless of
-                // what the DB has stored.  Playback speed is the requester's
-                // concern; the DB should not dictate it.
-                pending_stream_time_step = Some(REAL_TIME_STREAM_TIME_STEP);
                 world_sink.commands.write_message(DbMessage::UpdateConfig);
             }
             OwnedPacket::Msg(m) if m.id == LastUpdated::ID => {
@@ -211,38 +376,36 @@ fn sink_inner(
                 let dump_schema = m.parse::<DumpSchemaResp>()?;
                 world_sink.schema_reg.0.extend(dump_schema.schemas);
             }
-            OwnedPacket::Table(table) if table.id == world_sink.current_stream_id.packet_id() => {
-                let _ = table.sink(&*vtable_registry, &mut world_sink)?;
+            OwnedPacket::Table(table) => {
+                let mut collector = CacheCollector {
+                    collected: Vec::new(),
+                };
+                let _ = table.sink(vtable_registry, &mut collector);
+                pending_cache_entries.extend(collector.collected);
+                let _ = table.sink(vtable_registry, &mut world_sink)?;
             }
-            OwnedPacket::Table(_) => {}
             OwnedPacket::Msg(m) if m.id == EarliestTimestamp::ID => {
                 let new_earliest = m.parse::<EarliestTimestamp>()?;
+                let is_first = world_sink.earliest_timestamp.0 == Timestamp(i64::MAX);
                 *world_sink.earliest_timestamp = new_earliest;
+                if is_first {
+                    world_sink.current_timestamp.0 = new_earliest.0;
+                }
             }
             OwnedPacket::Msg(m) if m.id == StreamTimestamp::ID => {
-                let stream_timestamp = m.parse::<StreamTimestamp>()?;
-                if stream_timestamp.stream_id == world_sink.current_stream_id.0 {
-                    world_sink.current_timestamp.0 = stream_timestamp.timestamp;
-                }
+                let _ = m;
             }
             OwnedPacket::Msg(_) => {}
             OwnedPacket::TimeSeries(_) => {}
         }
         world_sink_state.apply(world);
-        if let Some(time_step) = pending_stream_time_step
-            && let (Some(packet_tx), Some(current_stream_id)) = (
-                world.get_resource::<PacketTx>(),
-                world.get_resource::<CurrentStreamId>(),
-            )
+
+        if !pending_cache_entries.is_empty()
+            && let Some(mut cache) = world.get_resource_mut::<TelemetryCache>()
         {
-            packet_tx.send_msg(SetStreamState {
-                id: current_stream_id.0,
-                playing: None,
-                timestamp: None,
-                time_step: Some(time_step),
-                frequency: None,
-            });
-            pending_stream_time_step = None;
+            for (cid, ts, val) in pending_cache_entries.drain(..) {
+                cache.insert(cid, ts, val);
+            }
         }
     }
     Ok(())
@@ -320,14 +483,11 @@ pub struct ComponentPathRegistry(pub HashMap<ComponentId, ComponentPath>);
 
 #[derive(SystemParam)]
 pub struct WorldSink<'w, 's> {
-    query: Query<'w, 's, &'static mut ComponentValue>,
     commands: Commands<'w, 's>,
     entity_map: ResMut<'w, EntityMap>,
     metadata_reg: ResMut<'w, ComponentMetadataRegistry>,
-    component_adapters: ResMut<'w, ComponentAdapters>,
     max_tick: ResMut<'w, LastUpdated>,
     earliest_timestamp: ResMut<'w, EarliestTimestamp>,
-    current_stream_id: ResMut<'w, CurrentStreamId>,
     recording: ResMut<'w, IsRecording>,
     current_timestamp: ResMut<'w, CurrentTimestamp>,
     schema_reg: ResMut<'w, ComponentSchemaRegistry>,
@@ -370,7 +530,7 @@ impl Decomponentize for WorldSink<'_, '_> {
     fn apply_value(
         &mut self,
         component_id: ComponentId,
-        view: ComponentView<'_>,
+        _view: ComponentView<'_>,
         _timestamp: Option<Timestamp>,
     ) -> Result<(), Infallible> {
         let Some(path) = self.path_reg.get(&component_id) else {
@@ -381,21 +541,15 @@ impl Decomponentize for WorldSink<'_, '_> {
             return Ok(());
         };
 
-        let Some(mut e) = try_insert_entity(
+        // Ensure the entity exists (creates if needed).
+        try_insert_entity(
             &mut self.entity_map,
             &mut self.metadata_reg,
             &mut self.commands,
             part,
-        ) else {
-            return Ok(());
-        };
+        );
 
-        if let Ok(mut value) = self.query.get_mut(e.id()) {
-            value.copy_from_view(view);
-        } else {
-            e.insert(ComponentValue::from_view(view));
-        }
-
+        // Build parent-child hierarchy.
         let mut last_entity: Option<Entity> = None;
         for parent in path.path.iter() {
             let Some(mut e) = try_insert_entity(
@@ -412,12 +566,8 @@ impl Decomponentize for WorldSink<'_, '_> {
             last_entity = Some(e.id());
         }
 
-        let tail_component = path.tail();
-
-        let Some(adapter) = self.component_adapters.get(&tail_component.id) else {
-            return Ok(());
-        };
-        adapter.insert(&mut self.commands, &mut self.entity_map, component_id, view);
+        // ComponentValue and adapter writes (WorldPos, etc.) are handled
+        // exclusively by apply_cached_data from the TelemetryCache.
         Ok(())
     }
 }
@@ -568,7 +718,9 @@ impl Plugin for Impeller2Plugin {
             .init_resource::<PacketHandlers>()
             .init_resource::<RequestIdHandlers>()
             .init_resource::<RequestIdAlloc>()
-            .init_resource::<DbConfig>();
+            .init_resource::<DbConfig>()
+            .init_resource::<TelemetryCache>()
+            .init_resource::<BackfillState>();
     }
 }
 
@@ -735,17 +887,12 @@ impl CommandsExt for Commands<'_, '_> {
 
 pub fn new_connection_packets(stream_id: StreamId) -> impl Iterator<Item = LenPacket> {
     [
-        // Editor uses only this FixedRate stream (playback, timeline, rewind).
-        // Video tiles use FixedRateMsgStream with this same stream_id to get
-        // use FixedRateMsgStream with this same stream_id to get message-log frames in sync.
-        // Other clients (e.g. rust_client, msp-osd) that want RealTime or RealTimeBatched
-        // create their own Stream with the desired behavior when connecting.
+        // RealTimeBatched delivers all component data whenever new data
+        // arrives (batched per last_updated change).  For recorded DBs this
+        // sends one table then blocks — historical data is loaded via
+        // GetTimeSeries backfill (triggered after DumpMetadata).
         Stream {
-            behavior: StreamBehavior::FixedRate(FixedRateBehavior {
-                initial_timestamp: impeller2_wkt::InitialTimestamp::Earliest,
-                timestep: REAL_TIME_STREAM_TIME_STEP.as_nanos() as u64,
-                frequency: PLAYBACK_FREQUENCY as u64,
-            }),
+            behavior: StreamBehavior::RealTimeBatched,
             id: stream_id,
         }
         .into_len_packet(),
