@@ -107,30 +107,6 @@ fn setup_primary_window_state(
     commands.entity(id).insert((state, WindowId(0)));
 }
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub enum EllipsoidIntersectMode {
-    #[default]
-    Off,
-    Mesh3D,
-    Projection2D,
-}
-
-impl EllipsoidIntersectMode {
-    pub const ALL: [Self; 3] = [Self::Off, Self::Mesh3D, Self::Projection2D];
-
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Off => "Off",
-            Self::Mesh3D => "3D",
-            Self::Projection2D => "2D",
-        }
-    }
-}
-
-pub fn default_intersect_3d_color() -> impeller2_wkt::Color {
-    impeller2_wkt::Color::rgba(1.0, 0.3, 0.1, 1.0)
-}
-
 pub fn default_projection_color() -> impeller2_wkt::Color {
     impeller2_wkt::Color::WHITE
 }
@@ -141,9 +117,11 @@ pub struct ViewportConfig {
     pub show_arrows: bool,
     pub create_frustum: bool,
     pub show_frustums: bool,
-    pub ellipsoid_intersect_mode: EllipsoidIntersectMode,
+    /// Compute frustum∩ellipsoid volume, create FrustumCoverage component, display in viewport (no 3D mesh).
+    pub show_coverage_in_viewport: bool,
+    /// Display 2D projection of frustum∩ellipsoid on far plane.
+    pub show_projection_2d: bool,
     pub show_ratio_monitor: bool,
-    pub intersect_3d_color: impeller2_wkt::Color,
     pub projection_color: impeller2_wkt::Color,
     pub frustums_color: impeller2_wkt::Color,
     pub frustums_thickness: f32,
@@ -1451,9 +1429,9 @@ impl ViewportPane {
                 show_arrows: viewport.show_arrows,
                 create_frustum: viewport.create_frustum,
                 show_frustums: viewport.show_frustums,
-                ellipsoid_intersect_mode: EllipsoidIntersectMode::Off,
+                show_coverage_in_viewport: false,
+                show_projection_2d: false,
                 show_ratio_monitor: false,
-                intersect_3d_color: default_intersect_3d_color(),
                 projection_color: default_projection_color(),
                 frustums_color: viewport.frustums_color,
                 frustums_thickness: viewport.frustums_thickness,

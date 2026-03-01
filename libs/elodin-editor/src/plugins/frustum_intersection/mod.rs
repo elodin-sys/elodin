@@ -2,7 +2,6 @@ use super::frustum_common::{MainViewportQueryItem, color_component_to_u8, frustu
 use crate::{
     MainCamera,
     object_3d::{EllipsoidVisual, Object3DState, WorldPosReceived},
-    ui::tiles::EllipsoidIntersectMode,
 };
 use bevy::asset::RenderAssetUsages;
 use bevy::camera::visibility::{NoFrustumCulling, RenderLayers};
@@ -28,13 +27,13 @@ struct Plane {
 #[derive(Clone, Copy)]
 struct FrustumVolume {
     source: Entity,
-    mode: EllipsoidIntersectMode,
+    show_coverage_in_viewport: bool,
+    show_projection_2d: bool,
     camera_pos: Vec3,
     far_corners: [Vec3; 4],
     planes: [Plane; 6],
     aabb_min: Vec3,
     aabb_max: Vec3,
-    color: impeller2_wkt::Color,
     projection_color: impeller2_wkt::Color,
 }
 
@@ -130,45 +129,6 @@ impl Plugin for FrustumIntersectionPlugin {
                 ),
             );
     }
-}
-
-const INTERSECTION_ALPHA: u8 = 160;
-
-fn intersection_material_for_color(
-    color: impeller2_wkt::Color,
-    materials: &mut Assets<StandardMaterial>,
-    cache: &mut IntersectionMaterialCache,
-) -> Handle<StandardMaterial> {
-    let key = IntersectionMaterialKey {
-        r: color_component_to_u8(color.r),
-        g: color_component_to_u8(color.g),
-        b: color_component_to_u8(color.b),
-        a: INTERSECTION_ALPHA,
-    };
-    if let Some(handle) = cache.materials.get(&key) {
-        return handle.clone();
-    }
-
-    let emissive_strength = 0.3;
-    let material = materials.add(StandardMaterial {
-        base_color: Color::srgba_u8(key.r, key.g, key.b, INTERSECTION_ALPHA),
-        emissive: Color::srgba(
-            color.r * emissive_strength,
-            color.g * emissive_strength,
-            color.b * emissive_strength,
-            1.0,
-        )
-        .into(),
-        cull_mode: None,
-        unlit: false,
-        double_sided: true,
-        alpha_mode: AlphaMode::Blend,
-        perceptual_roughness: 0.4,
-        depth_bias: -2.0,
-        ..Default::default()
-    });
-    cache.materials.insert(key, material.clone());
-    material
 }
 
 const PROJECTION_ALPHA: u8 = 180;
@@ -294,145 +254,13 @@ fn ellipsoid_signed_distance(p: Vec3, ellipsoid: &EllipsoidVolume) -> f32 {
     k0 * (k0 - 1.0) / k1
 }
 
-fn intersection_sdf(p: Vec3, frustum: &FrustumVolume, ellipsoid: &EllipsoidVolume) -> f32 {
-    let d_ellipsoid = ellipsoid_signed_distance(p, ellipsoid);
-    let d_frustum = frustum_signed_distance(p, &frustum.planes);
-    d_ellipsoid.max(d_frustum)
-}
-
-const SDF_GRADIENT_H: f32 = 0.001;
-
-fn sdf_gradient(p: Vec3, frustum: &FrustumVolume, ellipsoid: &EllipsoidVolume) -> Vec3 {
-    let dx = intersection_sdf(p + Vec3::X * SDF_GRADIENT_H, frustum, ellipsoid)
-        - intersection_sdf(p - Vec3::X * SDF_GRADIENT_H, frustum, ellipsoid);
-    let dy = intersection_sdf(p + Vec3::Y * SDF_GRADIENT_H, frustum, ellipsoid)
-        - intersection_sdf(p - Vec3::Y * SDF_GRADIENT_H, frustum, ellipsoid);
-    let dz = intersection_sdf(p + Vec3::Z * SDF_GRADIENT_H, frustum, ellipsoid)
-        - intersection_sdf(p - Vec3::Z * SDF_GRADIENT_H, frustum, ellipsoid);
-    Vec3::new(dx, dy, dz).normalize_or_zero()
-}
-
-fn push_triangle(
-    verts: [(Vec3, Vec3); 3],
-    positions: &mut Vec<[f32; 3]>,
-    normals: &mut Vec<[f32; 3]>,
-) {
-    let face = (verts[1].0 - verts[0].0).cross(verts[2].0 - verts[0].0);
-    if face.length_squared() <= SURFACE_EPS * SURFACE_EPS {
-        return;
-    }
-    for (p, n) in &verts {
-        positions.push([p.x, p.y, p.z]);
-        normals.push([n.x, n.y, n.z]);
-    }
-}
-
-fn polygonize_tetra(
-    p: [Vec3; 4],
-    v: [f32; 4],
-    frustum: &FrustumVolume,
-    ellipsoid: &EllipsoidVolume,
-    positions: &mut Vec<[f32; 3]>,
-    normals: &mut Vec<[f32; 3]>,
-) {
-    let inside = [v[0] <= 0.0, v[1] <= 0.0, v[2] <= 0.0, v[3] <= 0.0];
-    let inside_count = inside.iter().filter(|&&x| x).count();
-    if inside_count == 0 || inside_count == 4 {
-        return;
-    }
-
-    let interp = |a: usize, b: usize| -> Vec3 {
-        let va = v[a];
-        let vb = v[b];
-        let denom = va - vb;
-        if denom.abs() <= SURFACE_EPS {
-            return p[a];
-        }
-        let t = (va / denom).clamp(0.0, 1.0);
-        p[a].lerp(p[b], t)
-    };
-
-    let grad = |pt: Vec3| sdf_gradient(pt, frustum, ellipsoid);
-
-    if inside_count == 1 {
-        let in_idx = inside.iter().position(|&x| x).unwrap_or(0);
-        let mut outs = [0_usize; 3];
-        let mut cursor = 0;
-        for (idx, is_inside) in inside.iter().enumerate() {
-            if !*is_inside {
-                outs[cursor] = idx;
-                cursor += 1;
-            }
-        }
-        let a = interp(in_idx, outs[0]);
-        let b = interp(in_idx, outs[1]);
-        let c = interp(in_idx, outs[2]);
-        push_triangle(
-            [(a, grad(a)), (b, grad(b)), (c, grad(c))],
-            positions,
-            normals,
-        );
-        return;
-    }
-
-    if inside_count == 3 {
-        let out_idx = inside.iter().position(|&x| !x).unwrap_or(0);
-        let mut ins = [0_usize; 3];
-        let mut cursor = 0;
-        for (idx, is_inside) in inside.iter().enumerate() {
-            if *is_inside {
-                ins[cursor] = idx;
-                cursor += 1;
-            }
-        }
-        let a = interp(out_idx, ins[0]);
-        let b = interp(out_idx, ins[2]);
-        let c = interp(out_idx, ins[1]);
-        push_triangle(
-            [(a, grad(a)), (b, grad(b)), (c, grad(c))],
-            positions,
-            normals,
-        );
-        return;
-    }
-
-    let mut ins = [0_usize; 2];
-    let mut outs = [0_usize; 2];
-    let mut in_cursor = 0;
-    let mut out_cursor = 0;
-    for (idx, is_inside) in inside.iter().enumerate() {
-        if *is_inside {
-            ins[in_cursor] = idx;
-            in_cursor += 1;
-        } else {
-            outs[out_cursor] = idx;
-            out_cursor += 1;
-        }
-    }
-
-    let p0 = interp(ins[0], outs[0]);
-    let p1 = interp(ins[0], outs[1]);
-    let p2 = interp(ins[1], outs[0]);
-    let p3 = interp(ins[1], outs[1]);
-    let n0 = grad(p0);
-    let n1 = grad(p1);
-    let n2 = grad(p2);
-    let n3 = grad(p3);
-    push_triangle([(p0, n0), (p1, n1), (p2, n2)], positions, normals);
-    push_triangle([(p2, n2), (p1, n1), (p3, n3)], positions, normals);
-}
-
-struct IntersectionResult {
-    mesh: Mesh,
-    ratio: f32,
-}
-
-fn build_intersection_mesh(
+/// Compute frustum∩ellipsoid volume ratio (intersection_volume / ellipsoid_volume) without building mesh.
+fn compute_intersection_volume(
     bounds_min: Vec3,
     bounds_max: Vec3,
     frustum: &FrustumVolume,
     ellipsoid: &EllipsoidVolume,
-) -> Option<IntersectionResult> {
+) -> Option<f32> {
     let size = bounds_max - bounds_min;
     if size.x <= SURFACE_EPS || size.y <= SURFACE_EPS || size.z <= SURFACE_EPS {
         return None;
@@ -448,11 +276,7 @@ fn build_intersection_mesh(
     let points_x = nx + 1;
     let points_y = ny + 1;
     let points_z = nz + 1;
-    let mut scalar = vec![0.0_f32; points_x * points_y * points_z];
-    let idx = |i: usize, j: usize, k: usize| -> usize { (k * points_y + j) * points_x + i };
-
     let mut has_inside = false;
-    let mut has_outside = false;
     let mut inside_intersection_count: u32 = 0;
     for k in 0..points_z {
         let tz = k as f32 / nz as f32;
@@ -470,14 +294,11 @@ fn build_intersection_mesh(
                 if s <= 0.0 {
                     has_inside = true;
                     inside_intersection_count += 1;
-                } else {
-                    has_outside = true;
                 }
-                scalar[idx(i, j, k)] = s;
             }
         }
     }
-    if !(has_inside && has_outside) {
+    if !has_inside {
         return None;
     }
 
@@ -490,87 +311,7 @@ fn build_intersection_mesh(
     } else {
         0.0
     };
-
-    let mut positions = Vec::new();
-    let mut normals = Vec::new();
-
-    const CORNERS: [(usize, usize, usize); 8] = [
-        (0, 0, 0),
-        (1, 0, 0),
-        (1, 1, 0),
-        (0, 1, 0),
-        (0, 0, 1),
-        (1, 0, 1),
-        (1, 1, 1),
-        (0, 1, 1),
-    ];
-    const TETS: [[usize; 4]; 6] = [
-        [0, 5, 1, 6],
-        [0, 1, 2, 6],
-        [0, 2, 3, 6],
-        [0, 3, 7, 6],
-        [0, 7, 4, 6],
-        [0, 4, 5, 6],
-    ];
-
-    for k in 0..nz {
-        for j in 0..ny {
-            for i in 0..nx {
-                let mut cube_points = [Vec3::ZERO; 8];
-                let mut cube_values = [0.0_f32; 8];
-                for (corner_idx, (ox, oy, oz)) in CORNERS.iter().enumerate() {
-                    let gx = i + ox;
-                    let gy = j + oy;
-                    let gz = k + oz;
-
-                    let tx = gx as f32 / nx as f32;
-                    let ty = gy as f32 / ny as f32;
-                    let tz = gz as f32 / nz as f32;
-                    cube_points[corner_idx] = Vec3::new(
-                        bounds_min.x + size.x * tx,
-                        bounds_min.y + size.y * ty,
-                        bounds_min.z + size.z * tz,
-                    );
-                    cube_values[corner_idx] = scalar[idx(gx, gy, gz)];
-                }
-
-                for tetra in TETS {
-                    let tetra_points = [
-                        cube_points[tetra[0]],
-                        cube_points[tetra[1]],
-                        cube_points[tetra[2]],
-                        cube_points[tetra[3]],
-                    ];
-                    let tetra_values = [
-                        cube_values[tetra[0]],
-                        cube_values[tetra[1]],
-                        cube_values[tetra[2]],
-                        cube_values[tetra[3]],
-                    ];
-                    polygonize_tetra(
-                        tetra_points,
-                        tetra_values,
-                        frustum,
-                        ellipsoid,
-                        &mut positions,
-                        &mut normals,
-                    );
-                }
-            }
-        }
-    }
-
-    if positions.is_empty() {
-        return None;
-    }
-
-    let mut mesh = Mesh::new(
-        PrimitiveTopology::TriangleList,
-        RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
-    );
-    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
-    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
-    Some(IntersectionResult { mesh, ratio })
+    Some(ratio)
 }
 
 const PROJECTION_GRID: usize = 80;
@@ -781,7 +522,8 @@ fn draw_frustum_ellipsoid_intersections(
 
         targets.push((camera_entity, RenderLayers::layer(viewport_layer)));
 
-        if !config.create_frustum || config.ellipsoid_intersect_mode == EllipsoidIntersectMode::Off
+        if !config.create_frustum
+            || (!config.show_coverage_in_viewport && !config.show_projection_2d)
         {
             continue;
         }
@@ -799,7 +541,8 @@ fn draw_frustum_ellipsoid_intersections(
         let (aabb_min, aabb_max) = points_aabb(&world_points);
         sources.push(FrustumVolume {
             source: camera_entity,
-            mode: config.ellipsoid_intersect_mode,
+            show_coverage_in_viewport: config.show_coverage_in_viewport,
+            show_projection_2d: config.show_projection_2d,
             camera_pos: global_transform.translation(),
             far_corners: [
                 world_points[4],
@@ -810,7 +553,6 @@ fn draw_frustum_ellipsoid_intersections(
             planes,
             aabb_min,
             aabb_max,
-            color: config.intersect_3d_color,
             projection_color: config.projection_color,
         });
     }
@@ -855,19 +597,15 @@ fn draw_frustum_ellipsoid_intersections(
     let mut desired = Vec::new();
 
     for frustum in &sources {
-        let material_handle = match frustum.mode {
-            EllipsoidIntersectMode::Projection2D => projection_material_for_color(
+        let material_handle = if frustum.show_projection_2d {
+            Some(projection_material_for_color(
                 frustum.projection_color,
                 &mut params.materials,
                 &mut params.material_cache,
-            ),
-            _ => intersection_material_for_color(
-                frustum.color,
-                &mut params.materials,
-                &mut params.material_cache,
-            ),
+            ))
+        } else {
+            None
         };
-        let material = MeshMaterial3d(material_handle);
 
         for ellipsoid in &ellipsoids {
             if !aabb_overlap(
@@ -879,47 +617,40 @@ fn draw_frustum_ellipsoid_intersections(
                 continue;
             }
 
-            let (mesh, ratio) = match frustum.mode {
-                EllipsoidIntersectMode::Mesh3D => {
-                    let bounds_min = frustum.aabb_min.max(ellipsoid.aabb_min);
-                    let bounds_max = frustum.aabb_max.min(ellipsoid.aabb_max);
-                    match build_intersection_mesh(bounds_min, bounds_max, frustum, ellipsoid) {
-                        Some(result) => (result.mesh, Some(result.ratio)),
-                        None => continue,
-                    }
+            if frustum.show_coverage_in_viewport {
+                let bounds_min = frustum.aabb_min.max(ellipsoid.aabb_min);
+                let bounds_max = frustum.aabb_max.min(ellipsoid.aabb_max);
+                if let Some(ratio) =
+                    compute_intersection_volume(bounds_min, bounds_max, frustum, ellipsoid)
+                {
+                    ratios.0.push(IntersectionRatio {
+                        source: frustum.source,
+                        ellipsoid: ellipsoid.entity,
+                        ratio,
+                    });
                 }
-                EllipsoidIntersectMode::Projection2D => {
-                    match build_projection_mesh(frustum, ellipsoid) {
-                        Some(m) => (m, None),
-                        None => continue,
-                    }
-                }
-                EllipsoidIntersectMode::Off => continue,
-            };
-
-            if let Some(r) = ratio {
-                ratios.0.push(IntersectionRatio {
-                    source: frustum.source,
-                    ellipsoid: ellipsoid.entity,
-                    ratio: r,
-                });
             }
 
-            for (target_camera, render_layers) in &targets {
-                if frustum.source == *target_camera {
+            if frustum.show_projection_2d {
+                let Some(mesh) = build_projection_mesh(frustum, ellipsoid) else {
                     continue;
+                };
+                let material = MeshMaterial3d(material_handle.clone().unwrap());
+                for (target_camera, render_layers) in &targets {
+                    if frustum.source == *target_camera {
+                        continue;
+                    }
+                    desired.push(DesiredIntersection {
+                        key: FrustumEllipsoidIntersectionVisual {
+                            source: frustum.source,
+                            target: *target_camera,
+                            ellipsoid: ellipsoid.entity,
+                        },
+                        mesh: mesh.clone(),
+                        render_layers: render_layers.clone(),
+                        material: material.clone(),
+                    });
                 }
-
-                desired.push(DesiredIntersection {
-                    key: FrustumEllipsoidIntersectionVisual {
-                        source: frustum.source,
-                        target: *target_camera,
-                        ellipsoid: ellipsoid.entity,
-                    },
-                    mesh: mesh.clone(),
-                    render_layers: render_layers.clone(),
-                    material: material.clone(),
-                });
             }
         }
     }

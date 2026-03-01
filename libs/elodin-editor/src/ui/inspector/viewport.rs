@@ -21,7 +21,7 @@ use crate::ui::widgets::WidgetSystem;
 use crate::ui::{CameraQuery, ViewportRect};
 use crate::{
     GridHandle, MainCamera,
-    ui::tiles::{EllipsoidIntersectMode, ViewportConfig},
+    ui::tiles::ViewportConfig,
     ui::{label::ELabel, theme, utils::MarginSides},
 };
 
@@ -340,50 +340,15 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
                     ui.add_space(8.0);
                     ui.horizontal(|ui| {
                         ui.label(
-                            egui::RichText::new("ELLIPSOID INTERSECT").color(scheme.text_secondary),
+                            egui::RichText::new("COVERAGE IN VIEWPORT")
+                                .color(scheme.text_secondary),
                         );
                         ui.with_layout(egui::Layout::right_to_left(Align::Min), |ui| {
                             theme::configure_input_with_border(ui.style_mut());
-                            let current = viewport_config.ellipsoid_intersect_mode;
-                            egui::ComboBox::from_id_salt("ellipsoid_intersect_mode")
-                                .selected_text(current.label())
-                                .show_ui(ui, |ui| {
-                                    for mode in EllipsoidIntersectMode::ALL {
-                                        ui.selectable_value(
-                                            &mut viewport_config.ellipsoid_intersect_mode,
-                                            mode,
-                                            mode.label(),
-                                        );
-                                    }
-                                });
+                            ui.checkbox(&mut viewport_config.show_coverage_in_viewport, "");
                         });
                     });
-
-                    if viewport_config.ellipsoid_intersect_mode == EllipsoidIntersectMode::Mesh3D {
-                        ui.add_space(8.0);
-                        let mut color_3d = viewport_config.intersect_3d_color.into_color32();
-                        ui.horizontal(|ui| {
-                            ui.label(
-                                egui::RichText::new("INTERSECT COLOR").color(scheme.text_secondary),
-                            );
-                            ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
-                                let swatch = ui.add(
-                                    egui::Button::new("")
-                                        .fill(color_3d)
-                                        .stroke(egui::Stroke::new(1.0, scheme.border_primary))
-                                        .corner_radius(egui::CornerRadius::same(10))
-                                        .min_size(egui::vec2(20.0, 20.0)),
-                                );
-                                let color_id = ui.auto_id_with("intersect_3d_color");
-                                if swatch.clicked() {
-                                    egui::Popup::toggle_id(ui.ctx(), color_id);
-                                }
-                                color_popup(ui, &mut color_3d, color_id, &swatch);
-                            });
-                        });
-                        viewport_config.intersect_3d_color =
-                            impeller2_wkt::Color::from_color32(color_3d);
-
+                    if viewport_config.show_coverage_in_viewport {
                         ui.add_space(8.0);
                         ui.horizontal(|ui| {
                             ui.label(
@@ -397,9 +362,15 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
                         });
                     }
 
-                    if viewport_config.ellipsoid_intersect_mode
-                        == EllipsoidIntersectMode::Projection2D
-                    {
+                    ui.add_space(8.0);
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new("PROJECTION 2D").color(scheme.text_secondary));
+                        ui.with_layout(egui::Layout::right_to_left(Align::Min), |ui| {
+                            theme::configure_input_with_border(ui.style_mut());
+                            ui.checkbox(&mut viewport_config.show_projection_2d, "");
+                        });
+                    });
+                    if viewport_config.show_projection_2d {
                         ui.add_space(8.0);
                         let mut proj_color = viewport_config.projection_color.into_color32();
                         ui.horizontal(|ui| {
