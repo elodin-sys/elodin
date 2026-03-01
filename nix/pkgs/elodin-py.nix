@@ -55,6 +55,7 @@
         maturin
         python3 # Add python3 to nativeBuildInputs so it's available during build
         which # Required for build scripts that use which to find python3
+        llvmPackages.libclang # Required for bindgen (used by iree-runtime)
       ]
       ++ common.commonNativeBuildInputs
       ++ lib.optionals stdenv.isLinux [
@@ -82,6 +83,7 @@
     OPENSSL_DIR = "${pkgs.openssl.dev}";
     OPENSSL_LIB_DIR = "${pkgs.openssl.out}/lib";
     OPENSSL_INCLUDE_DIR = "${pkgs.openssl.dev}/include/";
+    LIBCLANG_PATH = "${pkgs.llvmPackages.libclang.lib}/lib";
 
     # Ensure C++ standard library is linked on macOS
     NIX_LDFLAGS = lib.optionalString pkgs.stdenv.isDarwin "-lc++";
