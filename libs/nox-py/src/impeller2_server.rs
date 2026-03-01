@@ -16,15 +16,16 @@ use stellarator::util::CancelToken;
 use tracing::{info, warn};
 
 use crate::World;
+use crate::exec::WorldExec;
 use crate::iree_exec::IREEWorldExec;
 
 pub struct Server {
     db: elodin_db::Server,
-    world: IREEWorldExec,
+    world: WorldExec,
 }
 
 impl Server {
-    pub fn new(db: elodin_db::Server, world: IREEWorldExec) -> Self {
+    pub fn new(db: elodin_db::Server, world: WorldExec) -> Self {
         Self { db, world }
     }
 
@@ -55,7 +56,7 @@ impl Server {
         let Self { db, mut world } = self;
         let elodin_db::Server { listener, db } = db;
         let start_time = start_timestamp.unwrap_or_else(Timestamp::now);
-        init_db(&db, &mut world.world, start_time)?;
+        init_db(&db, world.world_mut(), start_time)?;
         let tick_db = db.clone();
         let tick_counter = Arc::new(AtomicU64::new(0));
         let stream: Thread<Option<Result<(), Error>>> =
@@ -164,8 +165,8 @@ pub fn init_db(
     Ok(())
 }
 
-pub fn copy_db_to_world(state: &State, world: &mut IREEWorldExec) {
-    let world = &mut world.world;
+pub fn copy_db_to_world(state: &State, world: &mut WorldExec) {
+    let world = world.world_mut();
     for (component_id, (schema, _)) in world.metadata.component_map.iter() {
         let Some(column) = world.host.get_mut(component_id) else {
             continue;
@@ -211,22 +212,23 @@ pub fn copy_db_to_world(state: &State, world: &mut IREEWorldExec) {
 pub type PairId = ComponentId;
 
 pub fn get_pair_ids(
-    world: &IREEWorldExec,
+    world: &WorldExec,
     components: &[ComponentId],
 ) -> Result<Vec<PairId>, Error> {
+    let w = world.world();
     let mut results = vec![];
     for component_id in components {
         if let Some((_schema, component_metadata)) =
-            world.world.metadata.component_map.get(component_id)
+            w.metadata.component_map.get(component_id)
         {
-            let Some(column) = world.world.host.get(component_id) else {
+            let Some(column) = w.host.get(component_id) else {
                 continue;
             };
             let entity_ids =
                 bytemuck::try_cast_slice::<_, u64>(column.entity_ids.as_slice()).unwrap();
             for entity_id in entity_ids.iter() {
                 let entity_id = impeller2::types::EntityId(*entity_id);
-                let Some(entity_metadata) = world.world.metadata.entity_metadata.get(&entity_id)
+                let Some(entity_metadata) = w.metadata.entity_metadata.get(&entity_id)
                 else {
                     continue;
                 };
@@ -245,8 +247,26 @@ pub fn commit_world_head(
     timestamp: Timestamp,
     exclusions: Option<&HashSet<ComponentId>>,
 ) -> Result<(), Error> {
-    for (component_id, (schema, _)) in world.world.metadata.component_map.iter() {
-        let Some(column) = world.world.host.get_mut(component_id) else {
+    commit_world_head_for_world(state, &mut world.world, timestamp, exclusions)
+}
+
+pub fn commit_world_head_unified(
+    state: &State,
+    exec: &mut crate::exec::WorldExec,
+    timestamp: Timestamp,
+    exclusions: Option<&HashSet<ComponentId>>,
+) -> Result<(), Error> {
+    commit_world_head_for_world(state, exec.world_mut(), timestamp, exclusions)
+}
+
+fn commit_world_head_for_world(
+    state: &State,
+    world: &mut crate::world::World,
+    timestamp: Timestamp,
+    exclusions: Option<&HashSet<ComponentId>>,
+) -> Result<(), Error> {
+    for (component_id, (schema, _)) in world.metadata.component_map.iter() {
+        let Some(column) = world.host.get_mut(component_id) else {
             continue;
         };
         let entity_ids = bytemuck::try_cast_slice::<_, u64>(column.entity_ids.as_slice()).unwrap();
@@ -254,11 +274,11 @@ pub fn commit_world_head(
         for (i, entity_id) in entity_ids.iter().enumerate() {
             let offset = i * size;
             let entity_id = impeller2::types::EntityId(*entity_id);
-            let Some(entity_metadata) = world.world.metadata.entity_metadata.get(&entity_id) else {
+            let Some(entity_metadata) = world.metadata.entity_metadata.get(&entity_id) else {
                 continue;
             };
             let Some((_schema, component_metadata)) =
-                world.world.metadata.component_map.get(component_id)
+                world.metadata.component_map.get(component_id)
             else {
                 continue;
             };
@@ -284,7 +304,7 @@ pub fn commit_world_head(
 async fn tick(
     db: Arc<DB>,
     tick_counter: Arc<AtomicU64>,
-    mut world: IREEWorldExec,
+    mut world: WorldExec,
     is_cancelled: impl Fn() -> bool + 'static,
     pre_step: impl Fn(u64, &Arc<DB>, &Arc<AtomicU64>, Timestamp, Timestamp) + 'static,
     post_step: impl Fn(u64, &Arc<DB>, &Arc<AtomicU64>, Timestamp, Timestamp) + 'static,
@@ -297,11 +317,11 @@ async fn tick(
     let wait_for_write_pair_ids: Vec<PairId> = get_pair_ids(&world, &wait_for_write).unwrap();
     let mut wait_for_write_pair_ids = collect_timestamps(&db, &wait_for_write_pair_ids);
     let run_time_step: Option<Duration> = world
-        .world
+        .world()
         .metadata
         .run_time_step
         .map(|time_step| time_step.0);
-    let time_step = world.world.sim_time_step().0;
+    let time_step = world.world().sim_time_step().0;
     #[rustfmt::skip]
     let should_cancel = || { is_cancelled() || cancel_token.is_cancelled() };
     let mut next_tick_deadline: Option<Instant> = None;
@@ -329,15 +349,15 @@ async fn tick(
         let tick_nanos = time_step.as_nanos() * (tick as u128);
         let tick_duration = Duration::from_nanos(tick_nanos.min(u64::MAX as u128) as u64);
         let timestamp = start_timestamp + tick_duration;
-        if tick >= world.world.max_tick() {
+        if tick >= world.world().max_tick() {
             db.recording_cell.set_playing(false);
-            world.world.metadata.max_tick = u64::MAX;
+            world.world_mut().metadata.max_tick = u64::MAX;
             if !interactive {
                 return;
             } else {
                 info!(
                     "Simulation stopped; it reached its max_tick {}.",
-                    world.world.max_tick()
+                    world.world().max_tick()
                 );
             }
         }
@@ -355,7 +375,7 @@ async fn tick(
         }
         db.with_state(|state| {
             if let Err(err) =
-                commit_world_head(state, &mut world, timestamp, Some(&external_controls))
+                commit_world_head_unified(state, &mut world, timestamp, Some(&external_controls))
             {
                 warn!(?err, "error committing head");
             }
@@ -387,9 +407,9 @@ async fn tick(
     }
 }
 
-pub fn external_controls(world: &IREEWorldExec) -> impl Iterator<Item = ComponentId> + '_ {
+pub fn external_controls(world: &WorldExec) -> impl Iterator<Item = ComponentId> + '_ {
     world
-        .world
+        .world()
         .metadata
         .component_map
         .iter()
@@ -403,9 +423,9 @@ pub fn external_controls(world: &IREEWorldExec) -> impl Iterator<Item = Componen
         .map(|(component_id, _)| *component_id)
 }
 
-pub fn wait_for_write(world: &IREEWorldExec) -> impl Iterator<Item = ComponentId> + '_ {
+pub fn wait_for_write(world: &WorldExec) -> impl Iterator<Item = ComponentId> + '_ {
     world
-        .world
+        .world()
         .metadata
         .component_map
         .iter()

@@ -2,7 +2,8 @@ use crate::PyUntypedArrayExt;
 use crate::archetype::Spawnable;
 use crate::entity::EntityId;
 use crate::error::Error;
-use crate::exec::PyExec;
+use crate::exec::{PyExec, WorldExec};
+use crate::jax_exec::{JaxExec, JaxWorldExec};
 use crate::iree_exec::IREEWorldExec;
 use crate::step_context::StepContext;
 use crate::system::{CompiledSystemExt, PySystem};
@@ -237,6 +238,7 @@ impl WorldBuilder {
         interactive = true,
         start_timestamp = None,
         log_level = None,
+        backend = "iree",
     ))]
     pub fn run(
         &mut self,
@@ -254,6 +256,7 @@ impl WorldBuilder {
         interactive: bool,
         start_timestamp: Option<i64>,
         log_level: Option<String>,
+        backend: &str,
     ) -> Result<Option<String>, Error> {
         let log_level = log_level.as_deref().map(normalize_log_level).transpose()?;
         let filter = if std::env::var("RUST_LOG").is_ok() {
@@ -288,13 +291,14 @@ impl WorldBuilder {
             } => {
                 let cancel_token = CancelToken::new();
                 install_signal_handlers(cancel_token.clone());
-                let exec = self.build_iree(
+                let exec = self.build_with_backend(
                     py,
                     sys,
                     sim_time_step,
                     run_time_step,
                     default_playback_speed,
                     max_ticks,
+                    backend,
                 )?;
                 let recipes = self.recipes.clone();
                 // Create a cancel token that can be used to gracefully stop s10 recipes
@@ -484,6 +488,7 @@ impl WorldBuilder {
                         max_ticks,
                         optimize,
                         db_path,
+                        backend,
                     )?;
                     exec.run(py, ticks, true, None)?;
                     let profile = exec.profile();
@@ -538,16 +543,17 @@ impl WorldBuilder {
                     }
                     let _xla_guard = XlaFlagsGuard(previous_xla_flags);
 
-                    let exec = self.build_iree(
+                    let mut exec = self.build_with_backend(
                         py,
                         sys,
                         sim_time_step,
                         run_time_step,
                         default_playback_speed,
                         max_ticks,
+                        backend,
                     )?;
 
-                    let build_time_ms = exec.profiler.build.mean();
+                    let build_time_ms = exec.profiler_mut().build.mean();
                     let compile_time_ms = 0.0;
                     let mut compiled_exec = exec;
 
@@ -832,8 +838,12 @@ impl WorldBuilder {
                     let mut input_memory_bytes = 0usize;
                     let mut component_memory: Vec<(String, usize)> = Vec::new();
 
-                    for id in &compiled_exec.tick_exec.metadata.arg_ids {
-                        if let Some(col) = compiled_exec.world.column_by_id(*id) {
+                    let arg_ids: Vec<_> = match &compiled_exec {
+                        WorldExec::Iree(e) => e.tick_exec.metadata.arg_ids.clone(),
+                        WorldExec::Jax(e) => e.tick_exec.metadata.arg_ids.clone(),
+                    };
+                    for id in &arg_ids {
+                        if let Some(col) = compiled_exec.world().column_by_id(*id) {
                             let shape_size: usize =
                                 col.schema.shape().iter().map(|&x| x as usize).product();
                             let elem_size = element_size(col.schema.prim_type);
@@ -977,7 +987,7 @@ impl WorldBuilder {
                     let db = elodin_db::DB::create(db_dir_path.join("db"))?;
                     crate::impeller2_server::init_db(
                         &db,
-                        &mut compiled_exec.world,
+                        compiled_exec.world_mut(),
                         impeller2::types::Timestamp::now(),
                     )?;
 
@@ -1022,6 +1032,7 @@ impl WorldBuilder {
         max_ticks = None,
         optimize = false,
         db_path = None,
+        backend = "iree",
     ))]
     pub fn build(
         &mut self,
@@ -1033,21 +1044,23 @@ impl WorldBuilder {
         max_ticks: Option<u64>,
         #[allow(unused_variables)] optimize: bool,
         db_path: Option<String>,
+        backend: &str,
     ) -> Result<PyExec, Error> {
-        let mut exec = self.build_iree(
+        let mut exec = self.build_with_backend(
             py,
             system,
             sim_time_step,
             run_time_step,
             default_playback_speed,
             max_ticks,
+            backend,
         )?;
         let db_path = match db_path {
             Some(p) => PathBuf::from(p),
             None => tempfile::tempdir()?.keep().join("db"),
         };
         let db = elodin_db::DB::create(db_path)?;
-        crate::impeller2_server::init_db(&db, &mut exec.world, Timestamp::now())?;
+        crate::impeller2_server::init_db(&db, exec.world_mut(), Timestamp::now())?;
         Ok(PyExec {
             exec,
             db: Box::new(db),
@@ -1290,7 +1303,7 @@ impl WorldBuilder {
 }
 
 impl WorldBuilder {
-    fn build_iree(
+    fn build_with_backend(
         &mut self,
         py: Python<'_>,
         sys: PySystem,
@@ -1298,7 +1311,8 @@ impl WorldBuilder {
         run_time_step: Option<f64>,
         default_playback_speed: f64,
         max_ticks: Option<u64>,
-    ) -> Result<IREEWorldExec, Error> {
+        backend: &str,
+    ) -> Result<WorldExec, Error> {
         let mut start = time::Instant::now();
         let ts = time::Duration::from_secs_f64(sim_time_step);
         self.world.metadata.sim_time_step = TimeStep(ts);
@@ -1315,11 +1329,38 @@ impl WorldBuilder {
 
         let world = std::mem::take(&mut self.world);
         let compiled_sys = increment_sim_tick.pipe(sys).compile(&world)?;
-        let tick_exec = compiled_sys.compile_iree_module(py, &world)?;
 
-        let mut exec = IREEWorldExec::new(world, tick_exec, None);
-        exec.profiler.build.observe(&mut start);
-        Ok(exec)
+        match backend {
+            "jax" => {
+                let tick_exec = JaxExec::new(py, &compiled_sys)?;
+                let mut exec = JaxWorldExec::new(world, tick_exec, None);
+                exec.profiler.build.observe(&mut start);
+                Ok(WorldExec::Jax(exec))
+            }
+            "iree" => {
+                match compiled_sys.compile_iree_module(py, &world) {
+                    Ok(tick_exec) => {
+                        let mut exec = IREEWorldExec::new(world, tick_exec, None);
+                        exec.profiler.build.observe(&mut start);
+                        Ok(WorldExec::Iree(exec))
+                    }
+                    Err(iree_err) => {
+                        let msg = format!(
+                            "{iree_err}\n\n\
+                            This simulation uses JAX features not yet supported by the IREE backend.\n\
+                            To run this simulation, set backend=\"jax\" in your w.run() call:\n\n  \
+                            w.run(system, backend=\"jax\", ...)\n\n\
+                            The JAX backend is slower but supports all JAX operations."
+                        );
+                        Err(Error::IreeCompilationFailed(msg))
+                    }
+                }
+            }
+            other => Err(Error::UnknownCommand(format!(
+                "unknown backend '{}': expected 'iree' or 'jax'",
+                other
+            ))),
+        }
     }
 
     #[allow(clippy::type_complexity)]

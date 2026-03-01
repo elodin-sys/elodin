@@ -10,7 +10,7 @@ It is a subsystem of **Nox** (not a standalone crate) and lives in `libs/nox/src
    Use `Scalar`, `Vector`, `Matrix`, and `Tensor<_, _, Op>` to build a graph (`Noxpr` / `NoxprNode`).
 
 2. **Lower to JAX** — With the `jax` feature, `JaxTracer` converts the graph to JAX operations
-   for compilation via StableHLO and IREE.
+   for compilation via StableHLO and IREE (default backend), or direct JAX JIT execution (`backend="jax"`).
 
 3. **Rich, typed ops** — Elementwise math, linear algebra (`dot`, `dot_general`), shape transforms
    (`reshape`, `transpose`, `broadcast`), indexing (`slice`, `gather`, `dynamic_slice`),

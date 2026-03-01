@@ -8,20 +8,6 @@ from elodin import egm08
 from elodin.elodin import Quaternion
 from jax.numpy import linalg as la
 
-def _inv3x3(m):
-    """Analytic 3x3 matrix inverse using cofactors (avoids LAPACK/SVD)."""
-    a, b, c = m[0, 0], m[0, 1], m[0, 2]
-    d, e, f = m[1, 0], m[1, 1], m[1, 2]
-    g, h, i = m[2, 0], m[2, 1], m[2, 2]
-    det = a * (e * i - f * h) - b * (d * i - f * g) + c * (d * h - e * g)
-    inv_det = 1.0 / det
-    return inv_det * np.array([
-        [e * i - f * h, c * h - b * i, b * f - c * e],
-        [f * g - d * i, a * i - c * g, c * d - a * f],
-        [d * h - e * g, b * g - a * h, a * e - b * d],
-    ])
-
-
 angular_vel_axis = np.array([1.0, 1.0, 1.0])
 angular_vel_axis = angular_vel_axis / la.norm(angular_vel_axis)
 initial_angular_vel = angular_vel_axis * np.radians(80)
@@ -270,9 +256,8 @@ def estimate_attitude(
         e = measured_body - body_r
         H = np.block([el.skew(body_r), np.zeros((3, 3))])
         H_trans = H.T
-        S = H @ p @ H_trans + var_r
-        S_inv = _inv3x3(S)
-        K = p @ H_trans @ S_inv
+        # Use pseudoinverse for better numerical stability and vmap compatibility
+        K = p @ H_trans @ np.linalg.pinv(H @ p @ H_trans + var_r)
         p = (np.eye(6) - K @ H) @ p
         delta_x_hat = delta_x_hat + K @ (e - H @ delta_x_hat)
     delta_alpha = delta_x_hat[0:3]

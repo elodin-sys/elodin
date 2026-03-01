@@ -9,7 +9,9 @@ use serde::{Deserialize, Serialize};
 use crate::component::Component;
 use crate::error::Error;
 use crate::iree_exec::IREEWorldExec;
+use crate::jax_exec::JaxWorldExec;
 use crate::query::ComponentArray;
+use crate::world::World;
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct ExecMetadata {
@@ -34,6 +36,48 @@ impl<C: Component> ComponentArray<C> {
     }
 }
 
+pub enum WorldExec {
+    Iree(IREEWorldExec),
+    Jax(JaxWorldExec),
+}
+
+impl WorldExec {
+    pub fn run(&mut self) -> Result<(), Error> {
+        match self {
+            Self::Iree(e) => e.run(),
+            Self::Jax(e) => e.run(),
+        }
+    }
+
+    pub fn world(&self) -> &World {
+        match self {
+            Self::Iree(e) => &e.world,
+            Self::Jax(e) => &e.world,
+        }
+    }
+
+    pub fn world_mut(&mut self) -> &mut World {
+        match self {
+            Self::Iree(e) => &mut e.world,
+            Self::Jax(e) => &mut e.world,
+        }
+    }
+
+    pub fn profile(&self) -> HashMap<&'static str, f64> {
+        match self {
+            Self::Iree(e) => e.profile(),
+            Self::Jax(e) => e.profile(),
+        }
+    }
+
+    pub fn profiler_mut(&mut self) -> &mut crate::profile::Profiler {
+        match self {
+            Self::Iree(e) => &mut e.profiler,
+            Self::Jax(e) => &mut e.profiler,
+        }
+    }
+}
+
 // --- Python wrapper ---
 
 use indicatif::{ProgressBar, ProgressDrawTarget, ProgressStyle};
@@ -43,7 +87,7 @@ use pyo3::types::IntoPyDict;
 
 #[pyclass(name = "Exec")]
 pub struct PyExec {
-    pub exec: IREEWorldExec,
+    pub exec: WorldExec,
     pub db: Box<elodin_db::DB>,
 }
 
@@ -73,9 +117,9 @@ impl PyExec {
         for _ in 0..ticks {
             self.exec.run()?;
             self.db.with_state(|state| {
-                crate::impeller2_server::commit_world_head(state, &mut self.exec, timestamp, None)
+                crate::impeller2_server::commit_world_head_unified(state, &mut self.exec, timestamp, None)
             })?;
-            timestamp += self.exec.world.sim_time_step().0;
+            timestamp += self.exec.world().sim_time_step().0;
 
             if let Some(func) = &is_canceled {
                 let is_canceled = Python::with_gil(|py| {

@@ -1,6 +1,6 @@
 ---
 name: elodin-iree
-description: Work with the IREE runtime FFI crate. Use when modifying libs/iree-runtime/, writing code that executes VMFB modules from Rust, compiling MLIR test fixtures, updating the IREE nix package, or continuing the XLA-to-IREE migration.
+description: Work with the IREE runtime FFI crate. Use when modifying libs/iree-runtime/, writing code that executes VMFB modules from Rust, compiling MLIR test fixtures, updating the IREE nix package, or working on the IREE execution backend.
 ---
 
 # Elodin IREE Runtime
@@ -9,14 +9,28 @@ The `libs/iree-runtime/` crate provides Rust FFI bindings and safe wrappers for 
 
 ## Background
 
-The old `libs/noxla/` crate wraps XLA's C++ API via `cpp!`/`cxx` macros: it downloads a prebuilt XLA binary from an Elodin fork, compiles vendored JAXlib C++ kernels, statically links ~hundreds of MB, and historically required tightly pinned JAX/JAXlib versions. This is the single largest source of build pain in the repo.
+IREE is the **default execution backend** for Elodin simulations. When users call `w.run(system)` or `w.build(system)`, the system is compiled through IREE by default (`backend="iree"`). A JAX backend (`backend="jax"`) is available for simulations that use JAX features IREE does not yet support.
 
-A first migration attempt (PR #445, Jan 2026) replaced XLA with IREE's Python runtime (`iree.runtime`), but called Python every tick via PyO3 -- unacceptable for a real-time simulation loop.
+The two-phase architecture:
 
-This crate takes a different two-phase approach:
-
-- **Compilation** (Python, happens once at startup): JAX function -> `jax.export` -> StableHLO MLIR -> `iree.compiler.compile_str()` -> VMFB bytes
+- **Compilation** (Python, happens once at startup): JAX function -> `jax.jit().lower()` -> StableHLO MLIR -> `iree-compile` (subprocess) -> VMFB bytes
 - **Execution** (Pure Rust via IREE C API, happens every tick): VMFB -> `Instance` -> `Session` -> `Call` -> `BufferView` I/O. No GIL, no PyO3, no numpy.
+
+## Backend Selection
+
+Simulations select their backend via the `backend` parameter:
+
+```python
+w.run(system, backend="iree")   # Default: fast, Python-free tick loop
+w.run(system, backend="jax")    # Full JAX compatibility, Python per-tick
+```
+
+IREE does not yet support all JAX operations. Known unsupported patterns:
+- `.at[].set()` scatter patterns (IREE scatter validation too strict)
+- `jnp.linalg.{pinv, svd, solve, eig}` (LAPACK custom calls)
+- Complex control flow with `np.block` in loops (`tensor.expand_shape` limitation)
+
+When IREE compilation fails, a helpful error message tells the user to set `backend="jax"`.
 
 ## Crate Structure
 
@@ -179,18 +193,15 @@ Without both `--iree-vm-target-extension-f64` and `--iree-input-demote-f64-to-f3
 6. Recompile all `.vmfb` fixtures in `tests/fixtures/` with the new compiler
 7. Run `cargo test -p iree-runtime` to verify
 
-## Next Steps
+## Key Integration Points
 
-The broader migration (replacing `libs/noxla/` entirely) involves:
+- `libs/nox-py/src/iree_compile.rs` — JAX -> StableHLO -> VMFB compilation pipeline
+- `libs/nox-py/src/iree_exec.rs` — `IREEExec` and `IREEWorldExec` for per-tick execution
+- `libs/nox-py/src/jax_exec.rs` — `JaxExec` and `JaxWorldExec` for the JAX backend
+- `libs/nox-py/src/exec.rs` — `WorldExec` enum with `Iree` and `Jax` variants
+- `libs/nox-py/src/world_builder.rs` — `build_with_backend()` dispatches to IREE or JAX
 
-1. Create Rust-native `Literal`/`ElementType`/`ArrayElement` types in `libs/nox/` to replace `xla::Literal` etc.
-2. Add a Python compilation module in `libs/nox-py/` that uses `jax.export` -> StableHLO -> `iree.compiler` -> VMFB
-3. Wire `IREEWorldExec` in `libs/nox-py/` to use this crate's C API for the per-tick execution loop
-4. Update `impeller2_server` to use `IREEWorldExec` instead of `WorldExec<Compiled>`
-5. Delete `libs/noxla/` and all XLA feature flags
-
-Key lessons from the first attempt (PR #445):
+Key lessons:
 - `jax.jit(func, keep_unused=True)` is required to prevent JAX from optimizing away simulation inputs
 - JAX 0.7+ requires tuples (not lists) for `GatherDimensionNumbers` parameters
-- IREE may reorder I/O relative to JAX's function signature; match by shape+dtype via ABI declaration
-- Math functions (`log`, `exp`) may require VMVX backend fallback if embedded ELF linking fails
+- Math functions (`log`, `exp`) may require VMVX backend fallback if embedded ELF linking fails on macOS

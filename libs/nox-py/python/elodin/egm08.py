@@ -149,12 +149,11 @@ class EGM08:
         return nq2
 
     def compute_components(self):
-        n = self.rho_l.shape[0]
-        rho_l_1 = jnp.concatenate([self.rho_l[1:], jnp.zeros(1)])
-        r_m_1 = jnp.concatenate([jnp.zeros(1), self.i_r_m[1][:-1]])
-        i_m_1 = jnp.concatenate([jnp.zeros(1), self.i_r_m[0][:-1]])
+        rho_l_1 = jnp.roll(self.rho_l, -1).at[self.rho_l.shape[0] - 1].set(0.0)
+        r_m_1 = jnp.roll(self.i_r_m[1], 1).at[0].set(0.0)
+        i_m_1 = jnp.roll(self.i_r_m[0], 1).at[0].set(0.0)
         e = self.c_bar * r_m_1 + self.s_bar * i_m_1
-        m = jnp.concatenate([self.m[1:], jnp.zeros(1)])
+        m = jnp.roll(self.m, -1).at[self.m.shape[0] - 1].set(0.0)
         a_1 = ((rho_l_1 / self.r_ref) * self.a_bar.T).T * m * e
         self.a_1 = jnp.sum(jnp.sum(a_1, axis=1), axis=0)
 
@@ -163,13 +162,25 @@ class EGM08:
         self.a_2 = jnp.sum(jnp.sum(a_2, axis=1), axis=0)
 
         d = self.c_bar * self.i_r_m[1] + self.s_bar * self.i_r_m[0]
-        nr, nc = self.a_bar.shape
-        a_bar1 = jnp.concatenate([self.a_bar[:, 1:], jnp.zeros((nr, 1))], axis=1)
+        a_bar1 = (
+            jnp.roll(self.a_bar, -1, axis=1)
+            .at[:, self.a_bar.shape[1] - 1]
+            .set(jnp.zeros(self.a_bar.shape[0]))
+        )
         a_3 = ((rho_l_1 / self.r_ref) * a_bar1.T).T * m * self.nq1 * d
         self.a_3 = jnp.sum(jnp.sum(a_3, axis=1), axis=0)
 
-        a_bar_shifted_cols = jnp.concatenate([self.a_bar[:, 1:], jnp.zeros((nr, 1))], axis=1)
-        a_bar2 = jnp.concatenate([a_bar_shifted_cols[1:, :], jnp.zeros((1, nc))], axis=0)
+        a_bar2 = (
+            jnp.roll(
+                jnp.roll(self.a_bar, -1, axis=1)
+                .at[:, self.a_bar.shape[1] - 1]
+                .set(jnp.zeros(self.a_bar.shape[0])),
+                -1,
+                axis=0,
+            )
+            .at[self.a_bar.shape[0] - 1, :]
+            .set(jnp.zeros(self.a_bar.shape[1]))
+        )
         a_4 = ((rho_l_1 / self.r_ref) * a_bar2.T).T * m * self.nq2 * d * (-1)
         self.a_4 = jnp.sum(jnp.sum(a_4, axis=1), axis=0)
 
