@@ -10,6 +10,7 @@
   # Import shared configuration
   common = pkgs.callPackage ./common.nix {};
   iree_runtime = pkgs.callPackage ./iree-runtime.nix {};
+  iree_compiler = pkgs.callPackage ./iree-compiler.nix {};
   # Direct Rust build using rustPlatform.buildRustPackage
 
   # Extract pname and version directly from Cargo.toml files
@@ -86,7 +87,8 @@
     LIBCLANG_PATH = "${pkgs.llvmPackages.libclang.lib}/lib";
 
     # Tell bindgen where to find C standard library headers (required on Linux in Nix builds)
-    BINDGEN_EXTRA_CLANG_ARGS = lib.optionalString pkgs.stdenv.isLinux
+    BINDGEN_EXTRA_CLANG_ARGS =
+      lib.optionalString pkgs.stdenv.isLinux
       "-I${pkgs.stdenv.cc.libc.dev}/include -I${pkgs.llvmPackages.libclang.lib}/lib/clang/${lib.versions.major pkgs.llvmPackages.libclang.version}/include";
 
     # Ensure C++ standard library is linked on macOS
@@ -132,6 +134,7 @@
           polars
           pytest
           matplotlib
+          iree_compiler # IREE compiler for JIT compilation
         ]
         ++ lib.optionals pkgs.stdenv.isDarwin [
           pkgs.libcxx # C++ standard library runtime
