@@ -5,10 +5,10 @@ Frustum/ellipsoid intersection: volume coverage and 2D projection.
 ## What it does
 
 - Finds active viewport frustums from cameras with `create_frustum=#true` (set in Inspector).
-- Finds visible ellipsoid `object_3d` meshes.
+- Finds ellipsoid `object_3d` meshes with received world position data.
 - **Feature 1 – Coverage in viewport (Y/N):** Computes frustum∩ellipsoid volume ratio, creates `FrustumCoverage` component, displays ratio in viewport (no 3D mesh). Uses SDF grid sampling.
 - **Feature 2 – Projection 2D (Y/N):** Renders 2D projection of frustum∩ellipsoid on far plane.
-- Both features are independent toggles in the Inspector; they can be enabled together.
+- Both features are independent toggles in the Inspector; they are shown/enabled only when an ellipsoid is detected.
 - Renders only on viewports that enable `show_frustums=#true` (same layer-routing model as `frustum`).
 
 ## Inspector
@@ -16,9 +16,9 @@ Frustum/ellipsoid intersection: volume coverage and 2D projection.
 When a frustum is created (CREATE button in Inspector):
 
 - **COVERAGE IN VIEWPORT:** Toggle volume computation + component + viewport display.
-- **COVERAGE MONITOR:** When coverage is on, show ratio on other viewports with `show_frustums`.
 - **PROJECTION 2D:** Toggle 2D projection mesh on far plane.
 - **PROJECTION COLOR:** Color of the 2D projection mesh.
+- If no ellipsoid is detected, the two Y/N feature toggles are hidden and forced off.
 
 ## Notes
 
