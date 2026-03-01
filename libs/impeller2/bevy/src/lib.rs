@@ -88,6 +88,7 @@ pub enum DbMessage {
 #[derive(Resource, Default)]
 pub struct TelemetryCache {
     components: HashMap<ComponentId, BTreeMap<Timestamp, ComponentValue>>,
+    generation: u64,
 }
 
 impl TelemetryCache {
@@ -96,6 +97,7 @@ impl TelemetryCache {
             .entry(component_id)
             .or_default()
             .insert(ts, value);
+        self.generation = self.generation.wrapping_add(1);
     }
 
     pub fn get_at_or_before(
@@ -146,13 +148,14 @@ pub fn apply_cached_data(
     mut query: Query<&mut ComponentValue>,
     adapters: bevy::prelude::Res<ComponentAdapters>,
     mut commands: Commands,
-    mut last_applied_ts: bevy::prelude::Local<Timestamp>,
+    mut last_applied: bevy::prelude::Local<(Timestamp, u64)>,
 ) {
     let ts = current_ts.0;
-    if ts == *last_applied_ts {
+    let cache_gen = cache.generation;
+    if ts == last_applied.0 && cache_gen == last_applied.1 {
         return;
     }
-    *last_applied_ts = ts;
+    *last_applied = (ts, cache_gen);
     for component_id in cache.component_ids().copied().collect::<Vec<_>>() {
         let Some(value) = cache.get_at_or_before(&component_id, ts) else {
             continue;
