@@ -10,6 +10,7 @@ authors = ["sascha@elodin.systems", "akhil@elodin.systems", "van@elodin.systems"
 cargo-clippy = []
 inspector = ["elodin-editor/inspector"]
 debug = ["elodin-editor/debug"]
+tracy = ["elodin-editor/tracy", "bevy/trace_tracy", "dep:tracing-tracy"]
 
 [dependencies]
 thiserror = "2.0"
@@ -35,6 +36,7 @@ uuid = "1.7.0"
 directories = "5.0.1"
 bevy.version = "0.17"
 tracing-subscriber = { version = "0.3", features = ["chrono"] }
+tracing-tracy = { version = "0.11", optional = true }
 
 elodin-editor.path = "../../libs/elodin-editor"
 elodin-editor.default-features = false

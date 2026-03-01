@@ -149,6 +149,18 @@ fn serialize_viewport<T>(viewport: &Viewport<T>) -> KdlNode {
         push_rounded_float_prop(&mut node, "fov", viewport.fov as f64);
     }
 
+    if let Some(near) = viewport.near {
+        push_rounded_float_prop(&mut node, "near", near as f64);
+    }
+
+    if let Some(far) = viewport.far {
+        push_rounded_float_prop(&mut node, "far", far as f64);
+    }
+
+    if let Some(aspect) = viewport.aspect {
+        push_rounded_float_prop(&mut node, "aspect", aspect as f64);
+    }
+
     if let Some(ref pos) = viewport.pos {
         node.entries_mut()
             .push(KdlEntry::new_prop("pos", pos.clone()));
@@ -176,6 +188,44 @@ fn serialize_viewport<T>(viewport: &Viewport<T>) -> KdlNode {
     if !viewport.show_arrows {
         node.entries_mut()
             .push(KdlEntry::new_prop("show_arrows", false));
+    }
+
+    if viewport.create_frustum {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("create_frustum", true));
+    }
+
+    if viewport.show_frustums {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("show_frustums", true));
+    }
+
+    if viewport.frustums_color != default_viewport_frustums_color() {
+        if let Some(name) = name_from_color(&viewport.frustums_color) {
+            node.entries_mut()
+                .push(KdlEntry::new_prop("frustums_color", name));
+        } else {
+            let (r, g, b, a) = color_to_ints(&viewport.frustums_color);
+            if a == 255 {
+                node.entries_mut().push(KdlEntry::new_prop(
+                    "frustums_color",
+                    format!("({r},{g},{b})"),
+                ));
+            } else {
+                node.entries_mut().push(KdlEntry::new_prop(
+                    "frustums_color",
+                    format!("({r},{g},{b},{a})"),
+                ));
+            }
+        }
+    }
+
+    if (viewport.frustums_thickness - default_viewport_frustums_thickness()).abs() > f32::EPSILON {
+        push_rounded_float_prop(
+            &mut node,
+            "frustums_thickness",
+            viewport.frustums_thickness as f64,
+        );
     }
 
     if !viewport.show_view_cube {
@@ -542,13 +592,41 @@ fn serialize_object_3d_mesh(mesh: &Object3DMesh) -> (KdlNode, Vec<KdlNode>) {
             };
             (node, Vec::new())
         }
-        Object3DMesh::Ellipsoid { scale, color } => {
+        Object3DMesh::Ellipsoid {
+            scale,
+            color,
+            error_covariance_cholesky,
+            error_confidence_interval,
+            show_grid,
+            grid_color,
+        } => {
             let mut node = KdlNode::new("ellipsoid");
-            node.entries_mut()
-                .push(KdlEntry::new_prop("scale", scale.clone()));
-
+            if let Some(cholesky) = error_covariance_cholesky {
+                node.entries_mut().push(KdlEntry::new_prop(
+                    "error_covariance_cholesky",
+                    cholesky.clone(),
+                ));
+                if *error_confidence_interval
+                    != impeller2_wkt::default_ellipsoid_confidence_interval()
+                {
+                    node.entries_mut().push(KdlEntry::new_prop(
+                        "error_confidence_interval",
+                        *error_confidence_interval as f64,
+                    ));
+                }
+            } else {
+                node.entries_mut()
+                    .push(KdlEntry::new_prop("scale", scale.clone()));
+            }
+            if *show_grid {
+                node.entries_mut()
+                    .push(KdlEntry::new_prop("show_grid", true));
+            }
             if color != &default_ellipsoid_color() {
                 serialize_color_to_node(&mut node, color);
+            }
+            if *show_grid && *grid_color != impeller2_wkt::default_ellipsoid_grid_color() {
+                serialize_color_to_node_named(&mut node, grid_color, Some("grid_color"));
             }
 
             (node, Vec::new())
@@ -937,9 +1015,16 @@ mod tests {
             .push(SchematicElem::Panel(Panel::Viewport(Viewport {
                 name: Some("main".to_string()),
                 fov: 60.0,
+                near: None,
+                far: None,
+                aspect: None,
                 active: true,
                 show_grid: true,
                 show_arrows: true,
+                create_frustum: false,
+                show_frustums: false,
+                frustums_color: default_viewport_frustums_color(),
+                frustums_thickness: default_viewport_frustums_thickness(),
                 show_view_cube: true,
                 hdr: false,
                 pos: None,
@@ -972,9 +1057,16 @@ mod tests {
             .push(SchematicElem::Panel(Panel::Viewport(Viewport {
                 name: Some("main".to_string()),
                 fov: 60.0,
+                near: Some(0.05),
+                far: Some(500.0),
+                aspect: Some(1.7778),
                 active: true,
                 show_grid: true,
                 show_arrows: false,
+                create_frustum: true,
+                show_frustums: true,
+                frustums_color: Color::YALK,
+                frustums_thickness: 0.012,
                 show_view_cube: false,
                 hdr: true,
                 pos: Some("(0,0,0,0, 1,2,3)".to_string()),
@@ -993,11 +1085,18 @@ mod tests {
         let properties = [
             "name=",
             "fov=",
+            "near=",
+            "far=",
+            "aspect=",
             "pos=",
             "look_at=",
             "hdr=",
             "show_grid=",
             "show_arrows=",
+            "create_frustum=",
+            "show_frustums=",
+            "frustums_color=",
+            "frustums_thickness=",
             "show_view_cube=",
             "active=",
         ];
@@ -1012,7 +1111,7 @@ mod tests {
         for window in indices.windows(2) {
             assert!(
                 window[0] < window[1],
-                "expected viewport properties in order name → fov → pos → look_at → hdr → show_grid → show_arrows → show_view_cube → active: `{viewport_line}`"
+                "expected viewport properties in order name → fov → near → far → aspect → pos → look_at → hdr → show_grid → show_arrows → create_frustum → show_frustums → frustums_color → frustums_thickness → show_view_cube → active: `{viewport_line}`"
             );
         }
     }
@@ -1213,6 +1312,10 @@ graph "value" {
             mesh: Object3DMesh::Ellipsoid {
                 scale: "rocket.scale".to_string(),
                 color: Color::rgba(64.0 / 255.0, 128.0 / 255.0, 1.0, 96.0 / 255.0),
+                error_covariance_cholesky: None,
+                error_confidence_interval: impeller2_wkt::default_ellipsoid_confidence_interval(),
+                show_grid: impeller2_wkt::default_ellipsoid_show_grid(),
+                grid_color: impeller2_wkt::default_ellipsoid_grid_color(),
             },
             icon: None,
             mesh_visibility_range: None,
@@ -1226,12 +1329,20 @@ graph "value" {
         if let SchematicElem::Object3d(obj) = &parsed.elems[0] {
             assert_eq!(obj.eql, "rocket.world_pos");
             match &obj.mesh {
-                Object3DMesh::Ellipsoid { scale, color } => {
+                Object3DMesh::Ellipsoid {
+                    scale,
+                    color,
+                    error_covariance_cholesky,
+                    error_confidence_interval: _,
+                    show_grid: _,
+                    grid_color: _,
+                } => {
                     assert_eq!(scale, "rocket.scale");
                     assert!((color.r - 64.0 / 255.0).abs() < f32::EPSILON);
                     assert!((color.g - 128.0 / 255.0).abs() < f32::EPSILON);
                     assert!((color.b - 1.0).abs() < f32::EPSILON);
                     assert!((color.a - 96.0 / 255.0).abs() < f32::EPSILON);
+                    assert!(error_covariance_cholesky.is_none());
                 }
                 _ => panic!("Expected ellipsoid mesh"),
             }
@@ -1247,9 +1358,16 @@ graph "value" {
             Panel::Viewport(Viewport {
                 name: Some("camera1".to_string()),
                 fov: 45.0,
+                near: None,
+                far: None,
+                aspect: None,
                 active: false,
                 show_grid: false,
                 show_arrows: true,
+                create_frustum: false,
+                show_frustums: false,
+                frustums_color: default_viewport_frustums_color(),
+                frustums_thickness: default_viewport_frustums_thickness(),
                 show_view_cube: true,
                 hdr: false,
                 pos: None,

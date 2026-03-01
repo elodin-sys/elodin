@@ -32,6 +32,8 @@ enum Commands {
     Merge(MergeArgs),
     #[command(about = "Remove empty components from a database")]
     Prune(PruneArgs),
+    #[command(about = "Trim a database to a time range, removing data outside the window")]
+    Trim(TrimArgs),
     #[command(about = "Clear all data from a database, preserving schemas")]
     Truncate(TruncateArgs),
     #[command(
@@ -118,6 +120,28 @@ struct PruneArgs {
 }
 
 #[derive(clap::Args, Clone, Debug)]
+struct TrimArgs {
+    #[clap(help = "Path to the database directory")]
+    path: PathBuf,
+    #[clap(
+        long,
+        help = "Remove the first N microseconds of data (from the start of the recording)"
+    )]
+    from_start: Option<i64>,
+    #[clap(
+        long,
+        help = "Remove the last N microseconds of data (from the end of the recording)"
+    )]
+    from_end: Option<i64>,
+    #[clap(long, short, help = "Output path (modifies in place if not specified)")]
+    output: Option<PathBuf>,
+    #[clap(long, help = "Show what would be trimmed without modifying")]
+    dry_run: bool,
+    #[clap(long, short, help = "Skip confirmation prompt")]
+    yes: bool,
+}
+
+#[derive(clap::Args, Clone, Debug)]
 struct TruncateArgs {
     #[clap(help = "Path to the database directory")]
     path: PathBuf,
@@ -191,6 +215,11 @@ pub struct MergeArgs {
         help = "Alignment timestamp (microseconds) for the same event in DB2. DB2 is shifted to align with DB1."
     )]
     pub align2: Option<i64>,
+    #[clap(
+        long,
+        help = "Interpret --align1/--align2 as offsets from each database's playback start rather than absolute timestamps"
+    )]
+    pub from_playback_start: bool,
 }
 
 #[derive(clap::Args, Clone, Debug)]
@@ -432,10 +461,56 @@ async fn main() -> miette::Result<()> {
             yes,
             align1,
             align2,
-        }) => elodin_db::merge::run(
-            db1, db2, output, prefix1, prefix2, dry_run, yes, align1, align2,
-        )
-        .into_diagnostic(),
+            from_playback_start,
+        }) => {
+            let (align1, align2) = if from_playback_start {
+                let resolve = |db_path: &std::path::Path,
+                               val: Option<i64>,
+                               db_label: &str|
+                 -> miette::Result<Option<i64>> {
+                    match val {
+                        Some(v) => {
+                            let playback_start = elodin_db::utils::resolve_playback_start(db_path)
+                                .into_diagnostic()?;
+                            match playback_start {
+                                Some(ps) => {
+                                    if ps.is_from_data() {
+                                        eprintln!(
+                                            "Warning: {db_label} does not have time_start_timestamp_micros set; \
+                                             deriving playback start from data ({:.3}s)",
+                                            ps.timestamp() as f64 / 1_000_000.0
+                                        );
+                                    }
+                                    Ok(Some(ps.timestamp().saturating_add(v)))
+                                }
+                                None => Err(miette::miette!(
+                                    "{db_label} has no time_start_timestamp_micros and no data to derive playback start from; \
+                                     cannot use --from-playback-start"
+                                )),
+                            }
+                        }
+                        None => Ok(None),
+                    }
+                };
+                (resolve(&db1, align1, "DB1")?, resolve(&db2, align2, "DB2")?)
+            } else {
+                (align1, align2)
+            };
+            elodin_db::merge::run(
+                db1, db2, output, prefix1, prefix2, dry_run, yes, align1, align2,
+            )
+            .into_diagnostic()
+        }
+        Commands::Trim(TrimArgs {
+            path,
+            from_start,
+            from_end,
+            output,
+            dry_run,
+            yes,
+        }) => {
+            elodin_db::trim::run(path, from_start, from_end, output, dry_run, yes).into_diagnostic()
+        }
         Commands::Truncate(TruncateArgs { path, dry_run, yes }) => {
             elodin_db::truncate::run(path, dry_run, yes).into_diagnostic()
         }

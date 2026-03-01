@@ -140,6 +140,56 @@ alert you to potential data corruption.
 The `examples/downlink.lua` script is still available for custom replication
 workflows, but `--follows` is the recommended approach for most use cases.
 
+### Merge two databases
+
+Combine two databases into one with optional component prefixes and time
+alignment. This is useful for viewing SITL and real-world telemetry
+side-by-side in the Elodin Editor.
+
+```sh
+# Basic merge with prefixes
+elodin-db merge -o merged --prefix1 sitl --prefix2 real ./sitl-db ./real-db
+
+# Align using timestamps from the Elodin Editor's playback timeline
+elodin-db merge -o merged --prefix1 sitl --prefix2 real \
+  --align1 15000000 --align2 14000000 --from-playback-start ./sitl-db ./real-db
+```
+
+| Parameter | Example | Purpose |
+|-----------|---------|---------|
+| `--prefix1` | `sitl` | Prefix for first database component names |
+| `--prefix2` | `real` | Prefix for second database component names |
+| `--align1` | `15000000` | Alignment timestamp (microseconds) for an event in DB1 |
+| `--align2` | `14000000` | Alignment timestamp for the same event in DB2. DB2 is shifted to align with DB1 |
+| `--from-playback-start` | | Interpret align values as offsets from each database's playback start |
+| `--output` | `./merged` | Path for the merged output database |
+| `--dry-run` | | Show what would be merged without creating output |
+
+### Trim a database
+
+Remove data from the beginning or end of a recording. Values are in
+microseconds. At least one of `--before` or `--after` must be provided.
+Without `--output`, the database is modified in place.
+
+```sh
+# Remove the first 3 minutes from a recording
+elodin-db trim --from-start 180000000 ./my-db
+
+# Remove the last 2 minutes from a recording
+elodin-db trim --from-end 120000000 --output ./trimmed ./my-db
+
+# Trim 1 minute from the start and 2 minutes from the end
+elodin-db trim --from-start 60000000 --from-end 120000000 --output ./window ./my-db
+```
+
+| Parameter | Example | Purpose |
+|-----------|---------|---------|
+| `--from-start` | `180000000` | Remove the first N microseconds from the start |
+| `--from-end` | `120000000` | Remove the last N microseconds from the end |
+| `--output` | `./trimmed` | Write to a new path instead of modifying in place |
+| `--dry-run` | | Show what would be trimmed without making changes |
+| `-y` | | Skip the confirmation prompt |
+
 ### Generate C++ Header
 
 elodin-db ships with a single header C++20 library. The library includes message definitions for communicating with the DB.

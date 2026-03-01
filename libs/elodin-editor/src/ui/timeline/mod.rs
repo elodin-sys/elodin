@@ -13,7 +13,7 @@ use std::time::Duration;
 use timeline_slider::TimelineSlider;
 
 use crate::{
-    SelectedTimeRange,
+    FullTimeRange, SelectedTimeRange, TimeRangeBehavior,
     ui::{colors::get_scheme, images},
 };
 
@@ -107,6 +107,7 @@ pub struct TimelineArgs {
     pub segment_count: u8,
     pub frames_per_second: f64,
     pub active_range: RangeInclusive<i64>,
+    pub focus_range: Option<RangeInclusive<i64>>,
 }
 
 /// Returns a `value` based on the `position` in the timeline
@@ -264,6 +265,8 @@ pub struct TimelinePanel<'w, 's> {
     images: Local<'s, images::Images>,
     tick_time: Res<'w, SimulationTimeStep>,
     selected_time_range: Res<'w, SelectedTimeRange>,
+    full_time_range: Res<'w, FullTimeRange>,
+    time_range_behavior: Res<'w, TimeRangeBehavior>,
 }
 
 impl WidgetSystem for TimelinePanel<'_, '_> {
@@ -280,8 +283,13 @@ impl WidgetSystem for TimelinePanel<'_, '_> {
         let mut contexts = state_mut.contexts;
         let images = state_mut.images;
         let tick_time = state_mut.tick_time;
-        let active_range =
-            state_mut.selected_time_range.0.start.0..=state_mut.selected_time_range.0.end.0;
+        let active_range = state_mut.full_time_range.0.start.0..=state_mut.full_time_range.0.end.0;
+        let is_full = *state_mut.time_range_behavior == TimeRangeBehavior::default();
+        let focus_range = if is_full {
+            None
+        } else {
+            Some(state_mut.selected_time_range.0.start.0..=state_mut.selected_time_range.0.end.0)
+        };
 
         let frames_per_second = 1.0 / tick_time.0;
 
@@ -322,6 +330,7 @@ impl WidgetSystem for TimelinePanel<'_, '_> {
                     segment_count: (available_width / 90.0) as u8,
                     frames_per_second,
                     active_range,
+                    focus_range,
                 };
 
                 ui.horizontal(|ui| {

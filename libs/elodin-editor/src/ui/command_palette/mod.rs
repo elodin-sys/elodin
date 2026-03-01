@@ -372,14 +372,17 @@ impl WidgetSystem for PaletteSearch<'_> {
                     font_id.size = 13.0;
 
                     let mut popped_page = false;
-                    if command_palette_state.filter.is_empty() {
-                        ui.ctx().input(|i| {
-                            if i.key_pressed(egui::Key::Backspace) {
-                                popped_page = true;
-                                command_palette_state.page_stack.pop();
-                                command_palette_state.selected_index = 0;
-                            }
-                        })
+                    let can_pop_page_with_backspace = command_palette_state.filter.is_empty()
+                        && command_palette_state.page_stack.len() > 1;
+                    if can_pop_page_with_backspace {
+                        let backspace_pressed = ui
+                            .ctx()
+                            .input_mut(|i| i.consume_key(Modifiers::NONE, egui::Key::Backspace));
+                        if backspace_pressed {
+                            popped_page = true;
+                            command_palette_state.page_stack.pop();
+                            command_palette_state.selected_index = 0;
+                        }
                     }
 
                     let prompt = command_palette_state

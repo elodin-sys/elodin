@@ -138,6 +138,39 @@ elodin editor 127.0.0.1:2241
 examples/video-stream/stream-video.sh
 ```
 
+## Merging Databases
+
+Combine two databases (e.g. SITL and real telemetry) with optional time alignment and component prefixes.
+
+```bash
+# Basic merge with prefixes
+elodin-db merge -o merged --prefix1 sitl --prefix2 real ./sitl-db ./real-db
+
+# Align using timestamps from the Elodin Editor's playback timeline
+elodin-db merge -o merged --prefix1 sitl --prefix2 real \
+  --align1 15000000 --align2 14000000 --from-playback-start ./sitl-db ./real-db
+```
+
+Use `--from-playback-start` when alignment timestamps come from the Editor's playback timeline (relative to recording start). Without it, `--align1`/`--align2` are absolute timestamps.
+
+## Trimming a Database
+
+Remove data from the beginning or end of a recording. Values are in microseconds. Without `--output`, modifies in place.
+
+```bash
+# Remove the first 3 minutes from a recording
+elodin-db trim --from-start 180000000 ./my-db
+
+# Remove the last 2 minutes from a recording
+elodin-db trim --from-end 120000000 --output ./trimmed ./my-db
+
+# Trim 1 minute from the start and 2 minutes from the end
+elodin-db trim --from-start 60000000 --from-end 120000000 --output ./window ./my-db
+
+# Preview without modifying
+elodin-db trim --from-start 180000000 --dry-run ./my-db
+```
+
 ## Editor Connection
 
 The Elodin Editor connects to any running database:

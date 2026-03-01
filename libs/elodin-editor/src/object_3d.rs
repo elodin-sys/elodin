@@ -4,6 +4,7 @@ use bevy::log::warn_once;
 use bevy::prelude::Mesh;
 use bevy::prelude::*;
 use bevy::scene::{SceneInstance, SceneRoot, SceneSpawner};
+use bevy_mat3_material::{Mat3Material, Mat3Params, Mat3TransformExt, uv_sphere_grid_line_mesh};
 use bevy_render::alpha::AlphaMode;
 use big_space::GridCell;
 use bitvec::prelude::*;
@@ -30,13 +31,14 @@ pub struct Object3DState {
     pub compiled_expr: Option<CompiledExpr>,
     pub scale_expr: Option<CompiledExpr>,
     pub scale_error: Option<String>,
+    /// When set, ellipsoid shape is driven by error covariance (Mat3 path); evaluated each frame.
+    pub error_covariance_cholesky_expr: Option<CompiledExpr>,
     pub joint_animations: Vec<(String, String)>, // (joint_name, eql_expr) - compiled in attach_joint_animations
     pub data: Object3D,
 }
 
-#[derive(Component)]
+#[derive(Component, Reflect)]
 pub struct EllipsoidVisual {
-    pub child: Entity,
     pub color: impeller2_wkt::Color,
     pub oversized: bool,
     pub max_extent: f32,
@@ -595,6 +597,17 @@ pub fn compile_scale_eql(scale: &str, ctx: &eql::Context) -> Result<CompiledExpr
         .map_err(|err| err.to_string())
 }
 
+/// Compiles an EQL expression that must yield at least 6 floats (lower-triangular Cholesky L).
+pub fn compile_cholesky_eql(expr: &str, ctx: &eql::Context) -> Result<CompiledExpr, String> {
+    let trimmed = expr.trim();
+    if trimmed.is_empty() {
+        return Err("error_covariance_cholesky expression cannot be empty".to_string());
+    }
+    ctx.parse_str(trimmed)
+        .map(compile_eql_expr)
+        .map_err(|err| err.to_string())
+}
+
 #[derive(Debug)]
 pub enum ScaleEvalError {
     Expr(String),
@@ -627,6 +640,33 @@ impl From<String> for ScaleEvalError {
 impl std::error::Error for ScaleEvalError {}
 
 const ELLIPSOID_OVERSIZED_THRESHOLD: f32 = 10_000.0;
+
+/// Chi-squared quantile for 3 degrees of freedom (confidence as fraction 0..1).
+/// Used to scale the covariance ellipsoid so the boundary corresponds to the
+/// given confidence.
+///
+/// Once could use statrs' chi_square_ppf but this way we avoid a dependency and
+/// it's faster. The Mean Absolute Error (MAE) for this approximation is 0.11.
+///
+/// The domain is [0, 1] and the range is [0, ~12].
+fn chi2_3_quantile(confidence_fraction: f32) -> f32 {
+    const TABLE: [(f32, f32); 6] = [
+        (0.25, 1.213),
+        (0.50, 2.366),
+        (0.70, 3.665),
+        (0.90, 6.251),
+        (0.95, 7.815),
+        (0.99, 11.345),
+    ];
+    let p = confidence_fraction.clamp(0.01, 0.999);
+    for i in 0..TABLE.len() - 1 {
+        if p <= TABLE[i + 1].0 {
+            let t = (p - TABLE[i].0) / (TABLE[i + 1].0 - TABLE[i].0);
+            return TABLE[i].1 + t * (TABLE[i + 1].1 - TABLE[i].1);
+        }
+    }
+    TABLE[TABLE.len() - 1].1
+}
 
 fn find_entities<'a, T>(
     entity: Entity,
@@ -702,12 +742,16 @@ pub fn update_object_3d_system(
         &mut impeller2_wkt::WorldPos,
         Option<&mut EllipsoidVisual>,
         Has<WorldPosReceived>,
+        Option<&Children>,
     )>,
     mut transforms: Query<&mut Transform>,
+    mut mat3_params: Query<&mut Mat3Params>,
     entity_map: Res<EntityMap>,
     component_value_maps: Query<&'static ComponentValue>,
 ) {
-    for (entity, mut object_3d, mut pos, ellipse, has_received) in objects_query.iter_mut() {
+    for (entity, mut object_3d, mut pos, ellipse, has_received, children_maybe) in
+        objects_query.iter_mut()
+    {
         if let Some(compiled_expr) = &object_3d.compiled_expr
             && let Ok(component_value) = compiled_expr.execute(&entity_map, &component_value_maps)
             && let Some(world_pos) = component_value.as_world_pos()
@@ -729,23 +773,55 @@ pub fn update_object_3d_system(
             continue;
         }
 
-        match evaluate_scale(&object_3d, &entity_map, &component_value_maps) {
-            Ok(scale) => {
-                let scale = scale.max(Vec3::splat(f32::EPSILON));
-                if let Ok(mut child_transform) = transforms.get_mut(ellipse.child) {
-                    child_transform.scale = scale;
-                    child_transform.translation = Vec3::ZERO;
+        if let Some(ref cholesky_expr) = object_3d.error_covariance_cholesky_expr {
+            if let impeller2_wkt::Object3DMesh::Ellipsoid {
+                error_confidence_interval,
+                ..
+            } = &object_3d.data.mesh
+                && let Ok(cv) = cholesky_expr.execute(&entity_map, &component_value_maps)
+                && let Ok(l) = component_value_to_6floats(&cv)
+            {
+                let linear = cholesky_6_to_mat3(&l, *error_confidence_interval);
+                if let Some(children) = children_maybe
+                    && let Some(child) = children.first()
+                    && let Ok(mut params) = mat3_params.get_mut(*child)
+                {
+                    params.linear = linear;
                 }
-                ellipse.max_extent = scale.max_element();
+                let scale = chi2_3_quantile((*error_confidence_interval) / 100.0).sqrt();
+                ellipse.max_extent = (l[0].abs().max(l[2].abs()).max(l[5].abs())) * scale;
                 ellipse.oversized = ellipse.max_extent > ELLIPSOID_OVERSIZED_THRESHOLD;
-                if object_3d.scale_expr.is_some() {
-                    object_3d.scale_error = None;
-                }
             }
-            Err(err) => {
-                object_3d.scale_error = Some(err.to_string());
-                ellipse.oversized = false;
-                ellipse.max_extent = 0.0;
+        } else {
+            match evaluate_scale(&object_3d, &entity_map, &component_value_maps) {
+                Ok(scale) => {
+                    let scale_enu = scale.max(Vec3::splat(f32::EPSILON));
+                    let scale = enu_scale_to_bevy(scale_enu);
+                    if let Some(children) = children_maybe {
+                        if children.len() != 1 {
+                            warn!(
+                                "object_3d ellipse had {} children expected 1.",
+                                children.len()
+                            );
+                        }
+                        if let Some(child) = children.first() {
+                            if let Ok(mut child_transform) = transforms.get_mut(*child) {
+                                child_transform.scale = scale;
+                                child_transform.translation = Vec3::ZERO;
+                            }
+                            ellipse.max_extent = scale.max_element();
+                            ellipse.oversized = ellipse.max_extent > ELLIPSOID_OVERSIZED_THRESHOLD;
+                            if object_3d.scale_expr.is_some() {
+                                object_3d.scale_error = None;
+                            }
+                        }
+                    }
+                }
+                Err(err) => {
+                    object_3d.scale_error = Some(err.to_string());
+                    ellipse.oversized = false;
+                    ellipse.max_extent = 0.0;
+                }
             }
         }
     }
@@ -1059,6 +1135,72 @@ fn component_value_to_vec3(value: &ComponentValue) -> Result<Vec3, ScaleEvalErro
     }
 }
 
+fn component_value_to_6floats(value: &ComponentValue) -> Result<[f32; 6], String> {
+    use nox::ArrayBuf;
+    match value {
+        ComponentValue::F64(array) => {
+            let data = array.buf.as_buf();
+            if data.len() >= 6 {
+                Ok([
+                    data[0] as f32,
+                    data[1] as f32,
+                    data[2] as f32,
+                    data[3] as f32,
+                    data[4] as f32,
+                    data[5] as f32,
+                ])
+            } else {
+                Err(format!(
+                    "error_covariance_cholesky must yield at least 6 values, got {}",
+                    data.len()
+                ))
+            }
+        }
+        ComponentValue::F32(array) => {
+            let data = array.buf.as_buf();
+            if data.len() >= 6 {
+                Ok([data[0], data[1], data[2], data[3], data[4], data[5]])
+            } else {
+                Err(format!(
+                    "error_covariance_cholesky must yield at least 6 values, got {}",
+                    data.len()
+                ))
+            }
+        }
+        _ => Err("error_covariance_cholesky must yield an F32 or F64 array".to_string()),
+    }
+}
+
+/// Converts ellipsoid scale from ENU (East, North, Up) to Bevy (East, Up, South).
+/// The scale EQL expression is in ENU; Bevy applies scale along its axes.
+#[inline]
+fn enu_scale_to_bevy(enu: Vec3) -> Vec3 {
+    Vec3::new(enu.x, enu.z, enu.y)
+}
+
+/// ENU (East-North-Up) to Bevy (East-Up-South) basis change.
+/// ENU: X=East, Y=North, Z=Up. Bevy: X=East, Y=Up, Z=South.
+/// So Bevy = (ENU.x, ENU.z, -ENU.y).
+const ENU_TO_BEVY: Mat3 = Mat3::from_cols(
+    Vec3::new(1.0, 0.0, 0.0),  // ENU East  -> Bevy X
+    Vec3::new(0.0, 0.0, -1.0), // ENU North -> Bevy -Z
+    Vec3::new(0.0, 1.0, 0.0),  // ENU Up    -> Bevy Y
+);
+
+/// Build Mat3 from lower-triangular Cholesky L in **ENU** (row-major: a,b,c,d,e,f -> L00,L10,L11,L20,L21,L22),
+/// scaled by sqrt(chi2_3(confidence)), then converted to Bevy (East-Up-South) so the ellipsoid displays correctly.
+fn cholesky_6_to_mat3(l: &[f32; 6], confidence_percent: f32) -> Mat3 {
+    let confidence_fraction = (confidence_percent / 100.0).clamp(0.01, 0.999);
+    let scale = chi2_3_quantile(confidence_fraction).sqrt();
+    #[rustfmt::skip]
+    let l_enu = Mat3::from_cols_array(&[
+        l[0] * scale, 0.0,          0.0,
+        l[1] * scale, l[2] * scale, 0.0,
+        l[3] * scale, l[4] * scale, l[5] * scale,
+    ]);
+    ENU_TO_BEVY * l_enu
+}
+
 pub trait ComponentArrayExt {
     fn as_world_pos(&self) -> Option<impeller2_wkt::WorldPos>;
 }
@@ -1079,6 +1221,7 @@ impl ComponentArrayExt for ComponentValue {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn create_object_3d_entity(
     commands: &mut Commands,
     data: impeller2_wkt::Object3D,
@@ -1086,16 +1229,26 @@ pub fn create_object_3d_entity(
     ctx: &eql::Context,
     material_assets: &mut ResMut<Assets<StandardMaterial>>,
     mesh_assets: &mut ResMut<Assets<Mesh>>,
+    mat3_material_assets: &mut ResMut<Assets<Mat3Material>>,
     assets: &Res<AssetServer>,
 ) -> Entity {
     let (scale_expr, scale_error) = match &data.mesh {
-        impeller2_wkt::Object3DMesh::Ellipsoid { scale, .. } => {
-            match compile_scale_eql(scale, ctx) {
-                Ok(expr) => (Some(expr), None),
-                Err(err) => (None, Some(err)),
-            }
-        }
+        impeller2_wkt::Object3DMesh::Ellipsoid {
+            scale,
+            error_covariance_cholesky: None,
+            ..
+        } => match compile_scale_eql(scale, ctx) {
+            Ok(compiled) => (Some(compiled), None),
+            Err(err) => (None, Some(err)),
+        },
         _ => (None, None),
+    };
+    let error_covariance_cholesky_expr = match &data.mesh {
+        impeller2_wkt::Object3DMesh::Ellipsoid {
+            error_covariance_cholesky: Some(cholesky),
+            ..
+        } => compile_cholesky_eql(cholesky, ctx).ok(),
+        _ => None,
     };
 
     let joint_animations = match &data.mesh {
@@ -1126,6 +1279,7 @@ pub fn create_object_3d_entity(
                 compiled_expr: Some(compile_eql_expr(expr)),
                 scale_expr,
                 scale_error,
+                error_covariance_cholesky_expr,
                 joint_animations,
                 data: data.clone(),
             },
@@ -1140,17 +1294,15 @@ pub fn create_object_3d_entity(
         ))
         .id();
 
-    if let Some(ellipse) = spawn_mesh(
+    spawn_mesh(
         commands,
         entity_id,
         &data.mesh,
         material_assets,
         mesh_assets,
+        mat3_material_assets,
         assets,
-    ) {
-        commands.entity(entity_id).insert(ellipse);
-    }
-
+    );
     entity_id
 }
 
@@ -1211,14 +1363,19 @@ pub fn spawn_billboard_icon(
     });
 }
 
+const ELLIPSOID_GRID_SECTORS: u32 = 20;
+const ELLIPSOID_GRID_STACKS: u32 = 10;
+
+#[allow(clippy::too_many_arguments)]
 pub fn spawn_mesh(
     commands: &mut Commands,
     entity: Entity,
     mesh: &impeller2_wkt::Object3DMesh,
     material_assets: &mut ResMut<Assets<StandardMaterial>>,
     mesh_assets: &mut ResMut<Assets<Mesh>>,
+    mat3_material_assets: &mut ResMut<Assets<Mat3Material>>,
     assets: &Res<AssetServer>,
-) -> Option<EllipsoidVisual> {
+) {
     match mesh {
         impeller2_wkt::Object3DMesh::Glb {
             path,
@@ -1258,7 +1415,6 @@ pub fn spawn_mesh(
             commands
                 .entity(entity)
                 .insert(Name::new(format!("object_3d {}", path)));
-            None
         }
         impeller2_wkt::Object3DMesh::Mesh { mesh, material } => {
             let mut material = material.clone().into_bevy();
@@ -1281,9 +1437,15 @@ pub fn spawn_mesh(
                 ChildOf(entity),
                 Name::new("object_3d_mesh"),
             ));
-            None
         }
-        impeller2_wkt::Object3DMesh::Ellipsoid { color, .. } => {
+        impeller2_wkt::Object3DMesh::Ellipsoid {
+            color,
+            error_covariance_cholesky,
+            error_confidence_interval: _error_confidence_interval,
+            show_grid,
+            grid_color,
+            ..
+        } => {
             let bevy_color = Color::srgba(color.r, color.g, color.b, color.a);
             let alpha_mode = if color.a < 1.0 {
                 AlphaMode::Blend
@@ -1291,21 +1453,83 @@ pub fn spawn_mesh(
                 AlphaMode::Opaque
             };
 
-            let material_handle = material_assets.add(StandardMaterial {
-                base_color: bevy_color,
-                alpha_mode,
-                unlit: false,
-                double_sided: true,
-                cull_mode: None,
-                perceptual_roughness: 0.6,
-                ..Default::default()
-            });
+            if error_covariance_cholesky.is_some() {
+                let initial_linear = Mat3::IDENTITY;
+                let mat3_material = mat3_material_assets.add(Mat3Material {
+                    base: StandardMaterial {
+                        base_color: bevy_color,
+                        alpha_mode,
+                        unlit: false,
+                        double_sided: true,
+                        cull_mode: None,
+                        perceptual_roughness: 0.6,
+                        ..Default::default()
+                    },
+                    extension: Mat3TransformExt {
+                        params: initial_linear.into(),
+                    },
+                });
+                let sphere_handle =
+                    mesh_assets.add(Mesh::from(bevy::math::primitives::Sphere { radius: 1.0 }));
 
-            let mesh_handle =
-                mesh_assets.add(Mesh::from(bevy::math::primitives::Sphere { radius: 1.0 }));
+                let mut child_cmd = commands.spawn((
+                    Mesh3d(sphere_handle),
+                    MeshMaterial3d(mat3_material),
+                    Mat3Params {
+                        linear: initial_linear,
+                    },
+                    Transform::IDENTITY,
+                    GlobalTransform::IDENTITY,
+                    Visibility::default(),
+                    InheritedVisibility::default(),
+                    ViewVisibility::default(),
+                    Object3DMeshChild,
+                    ChildOf(entity),
+                ));
 
-            let child = commands
-                .spawn((
+                if *show_grid {
+                    let grid_mesh = mesh_assets.add(uv_sphere_grid_line_mesh(
+                        1.0,
+                        ELLIPSOID_GRID_SECTORS,
+                        ELLIPSOID_GRID_STACKS,
+                    ));
+                    let grid_bevy_color =
+                        Color::srgba(grid_color.r, grid_color.g, grid_color.b, grid_color.a);
+                    let grid_mat = mat3_material_assets.add(Mat3Material {
+                        base: StandardMaterial {
+                            base_color: grid_bevy_color,
+                            unlit: true,
+                            ..Default::default()
+                        },
+                        extension: Mat3TransformExt {
+                            params: initial_linear.into(),
+                        },
+                    });
+                    child_cmd.with_children(|p| {
+                        p.spawn((
+                            Mesh3d(grid_mesh),
+                            MeshMaterial3d(grid_mat),
+                            bevy::light::NotShadowCaster,
+                            bevy::light::NotShadowReceiver,
+                        ));
+                    });
+                }
+
+                let _child = child_cmd.id();
+            } else {
+                let material_handle = material_assets.add(StandardMaterial {
+                    base_color: bevy_color,
+                    alpha_mode,
+                    unlit: false,
+                    double_sided: true,
+                    cull_mode: None,
+                    perceptual_roughness: 0.6,
+                    ..Default::default()
+                });
+                let mesh_handle =
+                    mesh_assets.add(Mesh::from(bevy::math::primitives::Sphere { radius: 1.0 }));
+
+                let mut child_cmd = commands.spawn((
                     Mesh3d(mesh_handle),
                     MeshMaterial3d(material_handle),
                     Transform::IDENTITY,
@@ -1315,15 +1539,42 @@ pub fn spawn_mesh(
                     ViewVisibility::default(),
                     Object3DMeshChild,
                     ChildOf(entity),
-                ))
-                .id();
+                ));
 
-            Some(EllipsoidVisual {
-                child,
-                color: *color,
-                oversized: false,
-                max_extent: 0.0,
-            })
+                if *show_grid {
+                    let grid_mesh = mesh_assets.add(uv_sphere_grid_line_mesh(
+                        1.0,
+                        ELLIPSOID_GRID_SECTORS,
+                        ELLIPSOID_GRID_STACKS,
+                    ));
+                    let grid_bevy_color =
+                        Color::srgba(grid_color.r, grid_color.g, grid_color.b, grid_color.a);
+                    let grid_material = material_assets.add(StandardMaterial {
+                        base_color: grid_bevy_color,
+                        unlit: true,
+                        ..Default::default()
+                    });
+                    child_cmd.with_children(|p| {
+                        p.spawn((
+                            Mesh3d(grid_mesh),
+                            MeshMaterial3d(grid_material),
+                            bevy::light::NotShadowCaster,
+                            bevy::light::NotShadowReceiver,
+                        ));
+                    });
+                }
+
+                let _child = child_cmd.id();
+            }
+
+            commands.entity(entity).insert((
+                EllipsoidVisual {
+                    color: *color,
+                    oversized: false,
+                    max_extent: 0.0,
+                },
+                Name::new("object_3d ellipsoid"),
+            ));
         }
     }
 }

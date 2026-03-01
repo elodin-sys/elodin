@@ -12,6 +12,14 @@ fn default_true() -> bool {
     true
 }
 
+pub fn default_viewport_frustums_color() -> Color {
+    Color::YELLOW
+}
+
+pub fn default_viewport_frustums_thickness() -> f32 {
+    0.006
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(bound = "T: Serialize + DeserializeOwned")]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::TypePath,))]
@@ -214,9 +222,23 @@ impl<T> Split<T> {
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
 pub struct Viewport<T = ()> {
     pub fov: f32,
+    #[serde(default)]
+    pub near: Option<f32>,
+    #[serde(default)]
+    pub far: Option<f32>,
+    #[serde(default, alias = "aspect_ratio")]
+    pub aspect: Option<f32>,
     pub active: bool,
     pub show_grid: bool,
     pub show_arrows: bool,
+    #[serde(default)]
+    pub create_frustum: bool,
+    #[serde(default, alias = "show_frustum")]
+    pub show_frustums: bool,
+    #[serde(default = "default_viewport_frustums_color")]
+    pub frustums_color: Color,
+    #[serde(default = "default_viewport_frustums_thickness")]
+    pub frustums_thickness: f32,
     #[serde(default = "default_true")]
     pub show_view_cube: bool,
     pub hdr: bool,
@@ -234,9 +256,16 @@ impl<T> Viewport<T> {
     pub fn map_aux<U>(&self, f: impl Fn(&T) -> U) -> Viewport<U> {
         Viewport {
             fov: self.fov,
+            near: self.near,
+            far: self.far,
+            aspect: self.aspect,
             active: self.active,
             show_grid: self.show_grid,
             show_arrows: self.show_arrows,
+            create_frustum: self.create_frustum,
+            show_frustums: self.show_frustums,
+            frustums_color: self.frustums_color,
+            frustums_thickness: self.frustums_thickness,
             show_view_cube: self.show_view_cube,
             hdr: self.hdr,
             name: self.name.clone(),
@@ -253,9 +282,16 @@ impl Default for Viewport {
     fn default() -> Self {
         Self {
             fov: 45.0,
+            near: None,
+            far: None,
+            aspect: None,
             active: false,
             show_grid: false,
             show_arrows: true,
+            create_frustum: false,
+            show_frustums: false,
+            frustums_color: default_viewport_frustums_color(),
+            frustums_thickness: default_viewport_frustums_thickness(),
             show_view_cube: true,
             hdr: false,
             name: None,
@@ -625,6 +661,18 @@ pub fn default_ellipsoid_color() -> Color {
     Color::WHITE
 }
 
+pub fn default_ellipsoid_confidence_interval() -> f32 {
+    70.0
+}
+
+pub fn default_ellipsoid_show_grid() -> bool {
+    false
+}
+
+pub fn default_ellipsoid_grid_color() -> Color {
+    Color::BLACK
+}
+
 pub fn default_glb_scale() -> f32 {
     1.0
 }
@@ -671,6 +719,14 @@ pub enum Object3DMesh {
         scale: String,
         #[serde(default = "default_ellipsoid_color")]
         color: Color,
+        #[serde(default)]
+        error_covariance_cholesky: Option<String>,
+        #[serde(default = "default_ellipsoid_confidence_interval")]
+        error_confidence_interval: f32,
+        #[serde(default = "default_ellipsoid_show_grid")]
+        show_grid: bool,
+        #[serde(default = "default_ellipsoid_grid_color")]
+        grid_color: Color,
     },
 }
 

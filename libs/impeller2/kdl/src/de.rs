@@ -266,6 +266,64 @@ fn parse_split(
 
 fn parse_viewport(node: &KdlNode, kdl_src: &str) -> Result<Panel, KdlSchematicError> {
     let fov = node.get("fov").and_then(|v| v.as_float()).unwrap_or(45.0) as f32;
+    let near = node
+        .get("near")
+        .and_then(|v| v.as_float().or_else(|| v.as_integer().map(|i| i as f64)))
+        .map(|v| v as f32);
+    let far = node
+        .get("far")
+        .and_then(|v| v.as_float().or_else(|| v.as_integer().map(|i| i as f64)))
+        .map(|v| v as f32);
+    let aspect = node
+        .get("aspect")
+        .or_else(|| node.get("aspect_ratio"))
+        .and_then(|v| v.as_float().or_else(|| v.as_integer().map(|i| i as f64)))
+        .map(|v| v as f32);
+
+    if let Some(near) = near
+        && near <= 0.0
+    {
+        return Err(KdlSchematicError::InvalidValue {
+            property: "near".to_string(),
+            node: "viewport".to_string(),
+            expected: "near must be > 0".to_string(),
+            src: kdl_src.to_string(),
+            span: node.span(),
+        });
+    }
+    if let Some(far) = far
+        && far <= 0.0
+    {
+        return Err(KdlSchematicError::InvalidValue {
+            property: "far".to_string(),
+            node: "viewport".to_string(),
+            expected: "far must be > 0".to_string(),
+            src: kdl_src.to_string(),
+            span: node.span(),
+        });
+    }
+    if let (Some(near), Some(far)) = (near, far)
+        && far <= near
+    {
+        return Err(KdlSchematicError::InvalidValue {
+            property: "far".to_string(),
+            node: "viewport".to_string(),
+            expected: "far must be > near".to_string(),
+            src: kdl_src.to_string(),
+            span: node.span(),
+        });
+    }
+    if let Some(aspect) = aspect
+        && aspect <= 0.0
+    {
+        return Err(KdlSchematicError::InvalidValue {
+            property: "aspect".to_string(),
+            node: "viewport".to_string(),
+            expected: "aspect must be > 0".to_string(),
+            src: kdl_src.to_string(),
+            span: node.span(),
+        });
+    }
 
     let active = node
         .get("active")
@@ -282,6 +340,42 @@ fn parse_viewport(node: &KdlNode, kdl_src: &str) -> Result<Panel, KdlSchematicEr
         .get("show_arrows")
         .and_then(|v| v.as_bool())
         .unwrap_or(true);
+
+    let create_frustum = node
+        .get("create_frustum")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
+    let show_frustums = node
+        .get("show_frustums")
+        .or_else(|| node.get("show_frustum"))
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    let frustums_color = if let Some(value) = node.get("frustums_color") {
+        parse_viewport_frustums_color(value).ok_or_else(|| KdlSchematicError::InvalidValue {
+            property: "frustums_color".to_string(),
+            node: "viewport".to_string(),
+            expected: "a named color or tuple string like \"(255,255,0,200)\"".to_string(),
+            src: kdl_src.to_string(),
+            span: node.span(),
+        })?
+    } else {
+        default_viewport_frustums_color()
+    };
+    let frustums_thickness = node
+        .get("frustums_thickness")
+        .and_then(|v| v.as_float().or_else(|| v.as_integer().map(|i| i as f64)))
+        .map(|v| v as f32)
+        .unwrap_or_else(default_viewport_frustums_thickness);
+    if frustums_thickness <= 0.0 {
+        return Err(KdlSchematicError::InvalidValue {
+            property: "frustums_thickness".to_string(),
+            node: "viewport".to_string(),
+            expected: "frustums_thickness must be > 0".to_string(),
+            src: kdl_src.to_string(),
+            span: node.span(),
+        });
+    }
 
     let show_view_cube = node
         .get("show_view_cube")
@@ -340,9 +434,16 @@ fn parse_viewport(node: &KdlNode, kdl_src: &str) -> Result<Panel, KdlSchematicEr
 
     Ok(Panel::Viewport(Viewport {
         fov,
+        near,
+        far,
+        aspect,
         active,
         show_grid,
         show_arrows,
+        create_frustum,
+        show_frustums,
+        frustums_color,
+        frustums_thickness,
         show_view_cube,
         hdr,
         name,
@@ -875,7 +976,36 @@ fn parse_object_3d_mesh(
             let color = parse_color_from_node_or_children(node, None)
                 .unwrap_or_else(impeller2_wkt::default_ellipsoid_color);
 
-            Ok(Object3DMesh::Ellipsoid { scale, color })
+            let error_covariance_cholesky = node
+                .get("error_covariance_cholesky")
+                .and_then(|v| v.as_string())
+                .map(str::to_string);
+
+            let error_confidence_interval = node
+                .get("error_confidence_interval")
+                .and_then(|v| v.as_float())
+                .map(|f| f as f32)
+                .unwrap_or_else(impeller2_wkt::default_ellipsoid_confidence_interval);
+
+            let show_grid = node
+                .get("show_grid")
+                .and_then(|v| v.as_bool())
+                .unwrap_or_else(impeller2_wkt::default_ellipsoid_show_grid);
+
+            let grid_color = node
+                .children()
+                .and_then(|c| c.nodes().iter().find(|n| n.name().value() == "grid_color"))
+                .and_then(parse_color_from_node)
+                .unwrap_or_else(impeller2_wkt::default_ellipsoid_grid_color);
+
+            Ok(Object3DMesh::Ellipsoid {
+                scale,
+                color,
+                error_covariance_cholesky,
+                error_confidence_interval,
+                show_grid,
+                grid_color,
+            })
         }
         _ => Err(KdlSchematicError::UnknownNode {
             node_type: node.name().value().to_string(),
@@ -1172,6 +1302,44 @@ fn parse_color_component_str(value: &str) -> Option<f32> {
         .parse::<i64>()
         .ok()
         .and_then(color_component_from_integer)
+}
+
+fn parse_color_from_text(value: &str) -> Option<Color> {
+    let trimmed = value.trim();
+
+    if let Some(named) = parse_named_color(trimmed) {
+        return Some(named);
+    }
+
+    if !trimmed.starts_with('(') || !trimmed.ends_with(')') {
+        return None;
+    }
+
+    let values: Vec<&str> = trimmed[1..trimmed.len() - 1]
+        .split(',')
+        .map(|s| s.trim())
+        .collect();
+    if values.len() < 3 {
+        return None;
+    }
+
+    let (Some(r), Some(g), Some(b)) = (
+        parse_color_component_str(values[0]),
+        parse_color_component_str(values[1]),
+        parse_color_component_str(values[2]),
+    ) else {
+        return None;
+    };
+
+    let a = values
+        .get(3)
+        .and_then(|v| parse_color_component_str(v))
+        .unwrap_or(1.0);
+    Some(Color::rgba(r, g, b, a))
+}
+
+fn parse_viewport_frustums_color(value: &kdl::KdlValue) -> Option<Color> {
+    value.as_string().and_then(parse_color_from_text)
 }
 
 fn parse_named_color(name: &str) -> Option<Color> {
@@ -1654,6 +1822,161 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_viewport_show_frustums() {
+        let kdl = r#"viewport show_frustums=#true"#;
+        let schematic = parse_schematic(kdl).unwrap();
+
+        assert_eq!(schematic.elems.len(), 1);
+        let SchematicElem::Panel(Panel::Viewport(viewport)) = &schematic.elems[0] else {
+            panic!("Expected viewport panel");
+        };
+        assert!(viewport.show_frustums);
+    }
+
+    #[test]
+    fn test_parse_viewport_create_frustum() {
+        let kdl = r#"viewport create_frustum=#true"#;
+        let schematic = parse_schematic(kdl).unwrap();
+
+        assert_eq!(schematic.elems.len(), 1);
+        let SchematicElem::Panel(Panel::Viewport(viewport)) = &schematic.elems[0] else {
+            panic!("Expected viewport panel");
+        };
+        assert!(viewport.create_frustum);
+    }
+
+    #[test]
+    fn test_parse_viewport_show_frustum_legacy() {
+        let kdl = r#"viewport show_frustum=#true"#;
+        let schematic = parse_schematic(kdl).unwrap();
+
+        assert_eq!(schematic.elems.len(), 1);
+        let SchematicElem::Panel(Panel::Viewport(viewport)) = &schematic.elems[0] else {
+            panic!("Expected viewport panel");
+        };
+        assert!(viewport.show_frustums);
+    }
+
+    #[test]
+    fn test_parse_viewport_near_far() {
+        let kdl = r#"viewport near=0.05 far=500.0"#;
+        let schematic = parse_schematic(kdl).unwrap();
+
+        assert_eq!(schematic.elems.len(), 1);
+        let SchematicElem::Panel(Panel::Viewport(viewport)) = &schematic.elems[0] else {
+            panic!("Expected viewport panel");
+        };
+        assert_eq!(viewport.near, Some(0.05));
+        assert_eq!(viewport.far, Some(500.0));
+    }
+
+    #[test]
+    fn test_parse_viewport_aspect() {
+        let kdl = r#"viewport aspect=1.7778"#;
+        let schematic = parse_schematic(kdl).unwrap();
+
+        assert_eq!(schematic.elems.len(), 1);
+        let SchematicElem::Panel(Panel::Viewport(viewport)) = &schematic.elems[0] else {
+            panic!("Expected viewport panel");
+        };
+        assert_eq!(viewport.aspect, Some(1.7778));
+    }
+
+    #[test]
+    fn test_parse_viewport_rejects_invalid_near_far_pair() {
+        let kdl = r#"viewport near=1.0 far=0.5"#;
+        let err = parse_schematic(kdl).unwrap_err();
+
+        match err {
+            KdlSchematicError::InvalidValue { property, node, .. } => {
+                assert_eq!(property, "far");
+                assert_eq!(node, "viewport");
+            }
+            other => panic!("Expected invalid value error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_parse_viewport_rejects_invalid_aspect() {
+        let kdl = r#"viewport aspect=0.0"#;
+        let err = parse_schematic(kdl).unwrap_err();
+
+        match err {
+            KdlSchematicError::InvalidValue { property, node, .. } => {
+                assert_eq!(property, "aspect");
+                assert_eq!(node, "viewport");
+            }
+            other => panic!("Expected invalid value error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_parse_viewport_frustums_style() {
+        let kdl = r#"viewport show_frustums=#true frustums_color="yalk" frustums_thickness=0.012"#;
+        let schematic = parse_schematic(kdl).unwrap();
+
+        assert_eq!(schematic.elems.len(), 1);
+        let SchematicElem::Panel(Panel::Viewport(viewport)) = &schematic.elems[0] else {
+            panic!("Expected viewport panel");
+        };
+        assert!(viewport.show_frustums);
+        assert_eq!(viewport.frustums_color, Color::YALK);
+        assert!((viewport.frustums_thickness - 0.012).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn test_parse_viewport_rejects_invalid_frustums_thickness() {
+        let kdl = r#"viewport frustums_thickness=0.0"#;
+        let err = parse_schematic(kdl).unwrap_err();
+
+        match err {
+            KdlSchematicError::InvalidValue { property, node, .. } => {
+                assert_eq!(property, "frustums_thickness");
+                assert_eq!(node, "viewport");
+            }
+            other => panic!("Expected invalid value error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_parse_viewport_rejects_invalid_frustums_color() {
+        let kdl = r#"viewport frustums_color="not_a_color""#;
+        let err = parse_schematic(kdl).unwrap_err();
+
+        match err {
+            KdlSchematicError::InvalidValue { property, node, .. } => {
+                assert_eq!(property, "frustums_color");
+                assert_eq!(node, "viewport");
+            }
+            other => panic!("Expected invalid value error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_parse_viewport_rejects_partial_color_tuple() {
+        let kdl = r#"viewport frustums_color="(255,)""#;
+        let err = parse_schematic(kdl).unwrap_err();
+        match err {
+            KdlSchematicError::InvalidValue { property, .. } => {
+                assert_eq!(property, "frustums_color");
+            }
+            other => panic!("Expected invalid value error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn test_parse_viewport_rejects_two_component_color_tuple() {
+        let kdl = r#"viewport frustums_color="(255,128)""#;
+        let err = parse_schematic(kdl).unwrap_err();
+        match err {
+            KdlSchematicError::InvalidValue { property, .. } => {
+                assert_eq!(property, "frustums_color");
+            }
+            other => panic!("Expected invalid value error, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn test_parse_graph() {
         let kdl = r#"graph "a.world_pos" name="Position Graph" type="line""#;
         let schematic = parse_schematic(kdl).unwrap();
@@ -1844,12 +2167,62 @@ object_3d "rocket.world_pos" {
         if let SchematicElem::Object3d(obj) = &schematic.elems[0] {
             assert_eq!(obj.eql, "rocket.world_pos");
             match &obj.mesh {
-                Object3DMesh::Ellipsoid { scale, color } => {
+                Object3DMesh::Ellipsoid {
+                    scale,
+                    color,
+                    error_covariance_cholesky,
+                    error_confidence_interval,
+                    show_grid,
+                    grid_color: _,
+                } => {
                     assert_eq!(scale, "rocket.scale");
                     assert!((color.r - 64.0 / 255.0).abs() < f32::EPSILON);
                     assert!((color.g - 128.0 / 255.0).abs() < f32::EPSILON);
                     assert!((color.b - 1.0).abs() < f32::EPSILON);
+                    assert!(error_covariance_cholesky.is_none());
+                    assert!((*error_confidence_interval - 70.0).abs() < f32::EPSILON);
+                    assert!(!*show_grid);
                     assert!((color.a - 96.0 / 255.0).abs() < f32::EPSILON);
+                }
+                _ => panic!("Expected ellipsoid mesh"),
+            }
+        } else {
+            panic!("Expected object_3d");
+        }
+    }
+
+    #[test]
+    fn test_parse_object_3d_ellipsoid_error_covariance() {
+        let kdl = r#"
+object_3d "satellite.world_pos" {
+    ellipsoid error_covariance_cholesky="(1, 0, 1, 0, 0, 1)" error_confidence_interval=95.0 show_grid=#true {
+        color 200 200 0 120
+    }
+}
+"#;
+
+        let schematic = parse_schematic(kdl).unwrap();
+        assert_eq!(schematic.elems.len(), 1);
+
+        if let SchematicElem::Object3d(obj) = &schematic.elems[0] {
+            assert_eq!(obj.eql, "satellite.world_pos");
+            match &obj.mesh {
+                Object3DMesh::Ellipsoid {
+                    scale: _,
+                    color,
+                    error_covariance_cholesky,
+                    error_confidence_interval,
+                    show_grid,
+                    grid_color: _,
+                } => {
+                    assert_eq!(
+                        error_covariance_cholesky.as_deref(),
+                        Some("(1, 0, 1, 0, 0, 1)")
+                    );
+                    assert!((*error_confidence_interval - 95.0).abs() < f32::EPSILON);
+                    assert!(*show_grid);
+                    assert!((color.r - 200.0 / 255.0).abs() < f32::EPSILON);
+                    assert!((color.a - 120.0 / 255.0).abs() < f32::EPSILON);
                 }
                 _ => panic!("Expected ellipsoid mesh"),
             }

@@ -1,0 +1,15 @@
+[package]
+name = "bevy_mat3_material"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+
+[dependencies]
+bevy = "0.17"
+
+[dev-dependencies]
+bevy-inspector-egui = "0.35"
+bevy_editor_cam = "0.7"
+
+[lib]
+path = "src/lib.rs"

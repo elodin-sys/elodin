@@ -36,7 +36,7 @@ order = 6
 - `hsplit` / `vsplit`: children are panels. Child `share=<f32>` controls the weight within the split. `active` (bool) is parsed but not currently used. Optional `name`.
 
 ### panel content
-- `viewport`: `fov` (default 45.0), `active` (bool, default false), `show_grid` (default false), `show_arrows` (default true), `show_view_cube` (default true), `hdr` (default false), `name` (optional label), camera `pos`/`look_at` (optional EQL). Vector arrows can also be declared directly inside the viewport node; those arrows are treated as part of that viewport’s layer and respect its `show_arrows`/`show_grid` settings, allowing you to build a local triad tied to the viewport camera. An `up` (default "(0, 1, 0)") specifies a direction vector in the world frame for the camera.
+- `viewport`: `fov` (default 45.0), optional `near`/`far` clipping planes (if omitted, camera defaults are `near=0.05` and `far=5.0`; if set, they are applied to the camera projection), optional `aspect` (if omitted, ratio is derived from viewport size), `active` (bool, default false), `show_grid` (default false), `show_arrows` (default true), `create_frustum` (default false; creates that viewport camera frustum), `show_frustums` (default false; shows frustums created by other viewports on this viewport), `frustums_color` (default `yellow`), `frustums_thickness` (default `0.006` world units), `show_view_cube` (default true), `hdr` (default false), `name` (optional label), camera `pos`/`look_at` (optional EQL). Vector arrows can also be declared directly inside the viewport node; those arrows are treated as part of that viewport’s layer and respect its `show_arrows`/`show_grid` settings, allowing you to build a local triad tied to the viewport camera. An `up` (default "(0, 1, 0)") specifies a direction vector in the world frame for the camera.
 - `graph`: positional `eql` (required), `name` (optional), `type` (`line`/`point`/`bar`, default `line`), `lock` (default false), `auto_y_range` (default true), `y_min`/`y_max` (default `0.0..1.0`), child `color` nodes (optional list; otherwise palette).
 - `component_monitor`: `component_name` (required), `name` (optional).
 - `action_pane`: `name` (required pane title), `lua` script (required).
@@ -61,7 +61,21 @@ order = 6
   - `box`: `x`, `y`, `z` (all required); `color` (default white).
   - `cylinder`: `radius`, `height` (both required); `color` (default white).
   - `plane`: `width`/`depth` (default `size` if set, else 10.0); optional `size` shorthand; `color` (default white).
-  - `ellipsoid`: `scale` (EQL string, default `"(1, 1, 1)"`), `color` (default white).
+  - `ellipsoid`: , `color` (default white), `show_grid` (default `#false`).
+     - Physical measure
+        -`scale` an EQL string, e.g., `"(1, 1, 1)"` in meters
+     - Error measure
+        - `error_covariance_cholesky` as an alternative to specifying the scale
+          and rotation, one can specify the lower triangle cholesky L of the
+          error covariance matrix P = LL^T. Example `"(a,b,c,d,e,f)"` which
+          describes a matrix that looks like this:
+          | a 0 0 |
+          | b c 0 |
+          | d e f |
+        - `error_confidence_interval` (default `70`) the percentage that if this
+          were repeated 100 times, we would expect that in 70 cases, the true
+          value would be within the bounds. In practice this means that the
+          larger the error confidence interval, the larger the ellipsoid.
 
   Mesh nodes support an optional `emissivity=<value>` property (0.0–1.0) to make the material glow (e.g., `sphere radius=0.2 emissivity=0.25 { color yellow }`).
 
@@ -144,9 +158,16 @@ tabs = "tabs" { panel }+
 
 viewport = "viewport"
          [fov=float]
+         [near=float]
+         [far=float]
+         [aspect=float]
          [active=bool]
          [show_grid=bool]
          [show_arrows=bool]
+         [create_frustum=bool]
+         [show_frustums=bool]
+         [frustums_color=color_name_or_tuple]
+         [frustums_thickness=float]
          [hdr=bool]
          [name=string]
          [pos=eql]

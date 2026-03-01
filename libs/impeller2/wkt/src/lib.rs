@@ -22,6 +22,7 @@ pub use gui::*;
 
 // TODO: Consider making this an enum so we can round-trip color names.
 #[derive(Debug, Serialize, Deserialize, Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "bevy", derive(bevy::prelude::Reflect))]
 pub struct Color {
     pub r: f32,
     pub g: f32,

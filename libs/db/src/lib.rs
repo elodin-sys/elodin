@@ -71,6 +71,7 @@ mod msg_log;
 pub mod prune;
 pub mod time_align;
 pub(crate) mod time_series;
+pub mod trim;
 pub mod truncate;
 pub mod utils;
 mod vtable_stream;
@@ -722,6 +723,40 @@ impl DB {
                 );
             }
             Timestamp(earliest_timestamp.0.min(start_timestamp))
+        } else {
+            earliest_timestamp
+        };
+        // If the > 0 filters caused a degenerate range (earliest >= last_updated),
+        // fall back to scanning the actual first data timestamp from components.
+        // This handles databases where all data legitimately starts at timestamp 0
+        // (e.g., simulations using relative time) without breaking the init-message
+        // filtering for databases with a single outlier point at timestamp 0.
+        let earliest_timestamp = if earliest_timestamp.0 >= last_updated && last_updated != i64::MIN
+        {
+            let actual_first = state
+                .components
+                .iter()
+                .filter(|(id, _)| {
+                    !state
+                        .component_metadata
+                        .get(id)
+                        .map(|m| m.is_timestamp_source())
+                        .unwrap_or(false)
+                })
+                .map(|(_, c)| c.time_series.start_timestamp().0)
+                .filter(|&ts| ts < i64::MAX)
+                .min();
+            if let Some(first) = actual_first {
+                warn!(
+                    earliest_timestamp = earliest_timestamp.0,
+                    last_updated,
+                    actual_first_timestamp = first,
+                    "degenerate earliest_timestamp range; recovering from actual data"
+                );
+                Timestamp(first)
+            } else {
+                earliest_timestamp
+            }
         } else {
             earliest_timestamp
         };
@@ -1382,6 +1417,7 @@ impl Component {
 
 pub(crate) struct DBSink<'a> {
     pub(crate) components: &'a HashMap<ComponentId, Component>,
+    pub(crate) component_metadata: &'a HashMap<ComponentId, ComponentMetadata>,
     pub(crate) snapshot_barrier: &'a SnapshotBarrier,
     pub(crate) last_updated: &'a AtomicCell<Timestamp>,
     pub(crate) earliest_timestamp: &'a AtomicCell<Timestamp>,
@@ -1467,9 +1503,16 @@ impl Decomponentize for DBSink<'_> {
             debug!("sunk new time series for component {}", component_id);
             self.sunk_new_time_series = true;
         }
-        self.last_updated.update_max(timestamp);
-        if timestamp.0 > 0 {
-            self.earliest_timestamp.update_min(timestamp);
+        let is_ts_source = self
+            .component_metadata
+            .get(&component_id)
+            .map(|m| m.is_timestamp_source())
+            .unwrap_or(false);
+        if !is_ts_source {
+            self.last_updated.update_max(timestamp);
+            if timestamp.0 > 0 {
+                self.earliest_timestamp.update_min(timestamp);
+            }
         }
         Ok(())
     }
@@ -1897,6 +1940,7 @@ async fn handle_packet<A: AsyncWrite + 'static>(
             if let Err(err) = db.with_state(|state| {
                 let mut sink = DBSink {
                     components: &state.components,
+                    component_metadata: &state.component_metadata,
                     snapshot_barrier: &db.snapshot_barrier,
                     last_updated: &db.last_updated,
                     earliest_timestamp: &db.earliest_timestamp,
