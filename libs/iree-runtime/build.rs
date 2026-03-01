@@ -150,7 +150,7 @@ fn main() {
         println!("cargo:rustc-link-lib=static=iree_builtins_ukernel_arch_arm_64_arm_64_i8mm");
     } else if target_arch == "x86_64" {
         println!("cargo:rustc-link-lib=static=iree_builtins_ukernel_arch_x86_64_x86_64");
-        println!("cargo:rustc-link-lib=static=iree_builtins_ukernel_arch_x86_64_common_x86_64");
+        // Note: common_x86_64 is a header-only library in IREE, no .a file produced
         println!("cargo:rustc-link-lib=static=iree_builtins_ukernel_arch_x86_64_x86_64_avx2_fma");
         println!(
             "cargo:rustc-link-lib=static=iree_builtins_ukernel_arch_x86_64_x86_64_avx512_base"
