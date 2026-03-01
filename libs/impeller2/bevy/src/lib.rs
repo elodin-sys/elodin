@@ -478,11 +478,9 @@ pub struct ComponentPathRegistry(pub HashMap<ComponentId, ComponentPath>);
 
 #[derive(SystemParam)]
 pub struct WorldSink<'w, 's> {
-    query: Query<'w, 's, &'static mut ComponentValue>,
     commands: Commands<'w, 's>,
     entity_map: ResMut<'w, EntityMap>,
     metadata_reg: ResMut<'w, ComponentMetadataRegistry>,
-    component_adapters: ResMut<'w, ComponentAdapters>,
     max_tick: ResMut<'w, LastUpdated>,
     earliest_timestamp: ResMut<'w, EarliestTimestamp>,
     recording: ResMut<'w, IsRecording>,
@@ -527,7 +525,7 @@ impl Decomponentize for WorldSink<'_, '_> {
     fn apply_value(
         &mut self,
         component_id: ComponentId,
-        view: ComponentView<'_>,
+        _view: ComponentView<'_>,
         _timestamp: Option<Timestamp>,
     ) -> Result<(), Infallible> {
         let Some(path) = self.path_reg.get(&component_id) else {
@@ -538,21 +536,15 @@ impl Decomponentize for WorldSink<'_, '_> {
             return Ok(());
         };
 
-        let Some(mut e) = try_insert_entity(
+        // Ensure the entity exists (creates if needed).
+        try_insert_entity(
             &mut self.entity_map,
             &mut self.metadata_reg,
             &mut self.commands,
             part,
-        ) else {
-            return Ok(());
-        };
+        );
 
-        if let Ok(mut value) = self.query.get_mut(e.id()) {
-            value.copy_from_view(view);
-        } else {
-            e.insert(ComponentValue::from_view(view));
-        }
-
+        // Build parent-child hierarchy.
         let mut last_entity: Option<Entity> = None;
         for parent in path.path.iter() {
             let Some(mut e) = try_insert_entity(
@@ -569,12 +561,8 @@ impl Decomponentize for WorldSink<'_, '_> {
             last_entity = Some(e.id());
         }
 
-        let tail_component = path.tail();
-
-        let Some(adapter) = self.component_adapters.get(&tail_component.id) else {
-            return Ok(());
-        };
-        adapter.insert(&mut self.commands, &mut self.entity_map, component_id, view);
+        // ComponentValue and adapter writes (WorldPos, etc.) are handled
+        // exclusively by apply_cached_data from the TelemetryCache.
         Ok(())
     }
 }
