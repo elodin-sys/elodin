@@ -117,7 +117,12 @@ impl PyExec {
         for _ in 0..ticks {
             self.exec.run()?;
             self.db.with_state(|state| {
-                crate::impeller2_server::commit_world_head_unified(state, &mut self.exec, timestamp, None)
+                crate::impeller2_server::commit_world_head_unified(
+                    state,
+                    &mut self.exec,
+                    timestamp,
+                    None,
+                )
             })?;
             timestamp += self.exec.world().sim_time_step().0;
 

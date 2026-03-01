@@ -3,8 +3,8 @@ use crate::archetype::Spawnable;
 use crate::entity::EntityId;
 use crate::error::Error;
 use crate::exec::{PyExec, WorldExec};
-use crate::jax_exec::{JaxExec, JaxWorldExec};
 use crate::iree_exec::IREEWorldExec;
+use crate::jax_exec::{JaxExec, JaxWorldExec};
 use crate::step_context::StepContext;
 use crate::system::{CompiledSystemExt, PySystem};
 use crate::{
@@ -1303,6 +1303,7 @@ impl WorldBuilder {
 }
 
 impl WorldBuilder {
+    #[allow(clippy::too_many_arguments)]
     fn build_with_backend(
         &mut self,
         py: Python<'_>,
@@ -1337,25 +1338,23 @@ impl WorldBuilder {
                 exec.profiler.build.observe(&mut start);
                 Ok(WorldExec::Jax(exec))
             }
-            "iree" => {
-                match compiled_sys.compile_iree_module(py, &world) {
-                    Ok(tick_exec) => {
-                        let mut exec = IREEWorldExec::new(world, tick_exec, None);
-                        exec.profiler.build.observe(&mut start);
-                        Ok(WorldExec::Iree(exec))
-                    }
-                    Err(iree_err) => {
-                        let msg = format!(
-                            "{iree_err}\n\n\
+            "iree" => match compiled_sys.compile_iree_module(py, &world) {
+                Ok(tick_exec) => {
+                    let mut exec = IREEWorldExec::new(world, tick_exec, None);
+                    exec.profiler.build.observe(&mut start);
+                    Ok(WorldExec::Iree(exec))
+                }
+                Err(iree_err) => {
+                    let msg = format!(
+                        "{iree_err}\n\n\
                             This simulation uses JAX features not yet supported by the IREE backend.\n\
                             To run this simulation, set backend=\"jax\" in your w.run() call:\n\n  \
                             w.run(system, backend=\"jax\", ...)\n\n\
                             The JAX backend is slower but supports all JAX operations."
-                        );
-                        Err(Error::IreeCompilationFailed(msg))
-                    }
+                    );
+                    Err(Error::IreeCompilationFailed(msg))
                 }
-            }
+            },
             other => Err(Error::UnknownCommand(format!(
                 "unknown backend '{}': expected 'iree' or 'jax'",
                 other

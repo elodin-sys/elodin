@@ -211,16 +211,11 @@ pub fn copy_db_to_world(state: &State, world: &mut WorldExec) {
 
 pub type PairId = ComponentId;
 
-pub fn get_pair_ids(
-    world: &WorldExec,
-    components: &[ComponentId],
-) -> Result<Vec<PairId>, Error> {
+pub fn get_pair_ids(world: &WorldExec, components: &[ComponentId]) -> Result<Vec<PairId>, Error> {
     let w = world.world();
     let mut results = vec![];
     for component_id in components {
-        if let Some((_schema, component_metadata)) =
-            w.metadata.component_map.get(component_id)
-        {
+        if let Some((_schema, component_metadata)) = w.metadata.component_map.get(component_id) {
             let Some(column) = w.host.get(component_id) else {
                 continue;
             };
@@ -228,8 +223,7 @@ pub fn get_pair_ids(
                 bytemuck::try_cast_slice::<_, u64>(column.entity_ids.as_slice()).unwrap();
             for entity_id in entity_ids.iter() {
                 let entity_id = impeller2::types::EntityId(*entity_id);
-                let Some(entity_metadata) = w.metadata.entity_metadata.get(&entity_id)
-                else {
+                let Some(entity_metadata) = w.metadata.entity_metadata.get(&entity_id) else {
                     continue;
                 };
                 let pair_id =

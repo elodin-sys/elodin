@@ -41,10 +41,7 @@ impl JaxExec {
                     let np_arr = np
                         .call_method1(
                             "frombuffer",
-                            (
-                                pyo3::types::PyBytes::new(py, input.data),
-                                np_dtype,
-                            ),
+                            (pyo3::types::PyBytes::new(py, input.data), np_dtype),
                         )
                         .unwrap();
                     let shape_tuple: Vec<i64> = input.shape.clone();
