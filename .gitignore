@@ -46,3 +46,9 @@ dbs
 video-stream-db/
 testvids/
 *.log
+
+# macOS debug symbols
+*.dSYM/
+
+# Compiled native libraries (macOS/Linux)
+*.dylib

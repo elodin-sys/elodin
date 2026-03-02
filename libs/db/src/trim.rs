@@ -17,9 +17,13 @@ use impeller2::buf::UmbraBuf;
 use impeller2_wkt::DbConfig;
 use zerocopy::FromBytes;
 
+use crate::utils::{
+    INDEX_HEADER_SIZE, MSG_HEADER_SIZE, is_timestamp_source_component, read_msg_timestamp_range,
+    read_timestamp_range,
+};
 use crate::{Error, MetadataExt, copy_file_native, sync_dir};
 
-const HEADER_SIZE: usize = 24;
+const HEADER_SIZE: usize = INDEX_HEADER_SIZE;
 
 /// Trim a database to only include data within the specified time range.
 ///
@@ -227,7 +231,9 @@ fn analyze_database(db_path: &Path) -> Result<TrimInfo, Error> {
         }
         if path.join("schema").exists() {
             component_count += 1;
-            if let Ok(Some((start, end))) = read_timestamp_range(&path.join("index")) {
+            if !is_timestamp_source_component(&path)
+                && let Ok(Some((start, end))) = read_timestamp_range(&path.join("index"))
+            {
                 min_timestamp = min_timestamp.min(start);
                 max_timestamp = max_timestamp.max(end);
             }
@@ -720,8 +726,6 @@ fn write_trimmed_data(
 
 // -- Message log I/O helpers --
 
-const MSG_HEADER_SIZE: usize = 16;
-
 fn read_msg_timestamps(path: &Path) -> Result<Vec<i64>, Error> {
     let mut file = File::open(path)?;
     let mut header = [0u8; MSG_HEADER_SIZE];
@@ -796,82 +800,6 @@ fn write_msg_appendlog(path: &Path, data: &[u8]) -> Result<(), Error> {
 
 fn write_empty_appendlog(path: &Path) -> Result<(), Error> {
     write_msg_appendlog(path, &[])
-}
-
-/// Read first/last timestamp from a message log timestamps file (16-byte header).
-fn read_msg_timestamp_range(timestamps_path: &Path) -> Result<Option<(i64, i64)>, Error> {
-    if !timestamps_path.exists() {
-        return Ok(None);
-    }
-
-    let mut file = File::open(timestamps_path)?;
-    let mut header = [0u8; MSG_HEADER_SIZE];
-    let bytes_read = file.read(&mut header)?;
-    if bytes_read < MSG_HEADER_SIZE {
-        return Ok(None);
-    }
-
-    let committed_len = u64::from_le_bytes(header[0..8].try_into().unwrap()) as usize;
-    let committed_len = committed_len.max(MSG_HEADER_SIZE);
-    let data_len = committed_len.saturating_sub(MSG_HEADER_SIZE);
-    if data_len < 8 {
-        return Ok(None);
-    }
-
-    let num_timestamps = data_len / 8;
-
-    let mut first_ts_bytes = [0u8; 8];
-    file.read_exact(&mut first_ts_bytes)?;
-    let first_ts = i64::from_le_bytes(first_ts_bytes);
-
-    if num_timestamps == 1 {
-        return Ok(Some((first_ts, first_ts)));
-    }
-
-    file.seek(SeekFrom::Start(
-        (MSG_HEADER_SIZE + (num_timestamps - 1) * 8) as u64,
-    ))?;
-    let mut last_ts_bytes = [0u8; 8];
-    file.read_exact(&mut last_ts_bytes)?;
-    let last_ts = i64::from_le_bytes(last_ts_bytes);
-
-    Ok(Some((first_ts, last_ts)))
-}
-
-/// Read first/last timestamp from a component index file (24-byte header).
-fn read_timestamp_range(index_path: &Path) -> Result<Option<(i64, i64)>, Error> {
-    if !index_path.exists() {
-        return Ok(None);
-    }
-
-    let mut file = File::open(index_path)?;
-    let mut header = [0u8; HEADER_SIZE];
-    file.read_exact(&mut header)?;
-
-    let committed_len = u64::from_le_bytes(header[0..8].try_into().unwrap()) as usize;
-    let data_len = committed_len.saturating_sub(HEADER_SIZE);
-    if data_len < 8 {
-        return Ok(None);
-    }
-
-    let num_timestamps = data_len / 8;
-
-    let mut first_ts_bytes = [0u8; 8];
-    file.read_exact(&mut first_ts_bytes)?;
-    let first_ts = i64::from_le_bytes(first_ts_bytes);
-
-    if num_timestamps == 1 {
-        return Ok(Some((first_ts, first_ts)));
-    }
-
-    file.seek(SeekFrom::Start(
-        (HEADER_SIZE + (num_timestamps - 1) * 8) as u64,
-    ))?;
-    let mut last_ts_bytes = [0u8; 8];
-    file.read_exact(&mut last_ts_bytes)?;
-    let last_ts = i64::from_le_bytes(last_ts_bytes);
-
-    Ok(Some((first_ts, last_ts)))
 }
 
 #[cfg(test)]

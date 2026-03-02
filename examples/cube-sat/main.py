@@ -686,4 +686,5 @@ exec = w.run(
     default_playback_speed=60.0,
     max_ticks=60 * 20 * 60,
     optimize=True,
+    backend="jax",
 )

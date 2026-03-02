@@ -4,13 +4,11 @@
 
 extern crate alloc;
 
-#[cfg(feature = "xla")]
-extern crate lapack_src as _;
-
 pub mod array;
 mod dim;
 mod error;
 mod fields;
+mod literal;
 mod matrix;
 mod mrp;
 mod quaternion;
@@ -26,6 +24,7 @@ pub use array::prelude::*;
 pub use dim::*;
 pub use error::*;
 pub use fields::*;
+pub use literal::*;
 pub use matrix::*;
 pub use mrp::*;
 pub use quaternion::*;
@@ -43,15 +42,8 @@ pub mod noxpr;
 #[cfg(feature = "noxpr")]
 pub use noxpr::*;
 
-// NOTE(shane): I would like to gate this behind `doctest` since that is all it
-// is used for. However, I can't at least not for the tests present in the
-// README. As a substitute I am making it hidden.
 #[doc(hidden)]
-// #[cfg(doctest)]
 pub mod doctest;
-
-#[cfg(feature = "xla")]
-pub use xla;
 
 #[cfg(feature = "noxpr")]
 pub use crate::noxpr::Op as DefaultRepr;

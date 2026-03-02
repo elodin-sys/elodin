@@ -197,14 +197,17 @@ ThrustCmd = ty.Annotated[jax.Array,
 
 ## Execution Modes
 
-| Mode | Command | Use |
-|------|---------|-----|
-| Editor (GUI) | `elodin editor sim.py` | Development with 3D visualization |
-| Headless | `elodin run sim.py` | CI/CD, batch processing |
-| JAX-only | `w.to_jax(sys)` | RL training, `jax.vmap` batching |
-| Compiled | `w.build(sys, optimize=True)` | Maximum performance |
-| Real-time | `w.run(sys, run_time_step=1/120.0)` | Match wall-clock time |
-| DB-connected | `w.run(sys, db_addr="0.0.0.0:2240")` | External clients + Editor |
+| Mode | Command | Backend | Use |
+|------|---------|---------|-----|
+| Editor (GUI) | `elodin editor sim.py` | IREE (default) | Development with 3D visualization |
+| Headless | `elodin run sim.py` | IREE (default) | CI/CD, batch processing |
+| JAX backend | `w.run(sys, backend="jax")` | JAX | When IREE doesn't support certain JAX ops |
+| JAX-only | `w.to_jax(sys)` | JAX | RL training, `jax.vmap` batching |
+| Compiled | `w.build(sys)` | IREE (default) | Maximum performance |
+| Real-time | `w.run(sys, run_time_step=1/120.0)` | IREE (default) | Match wall-clock time |
+| DB-connected | `w.run(sys, db_addr="0.0.0.0:2240")` | IREE (default) | External clients + Editor |
+
+**Backend selection:** The `backend` parameter defaults to `"iree"` (fast, Python-free tick loop). Set `backend="jax"` for simulations using JAX features IREE does not yet support (e.g. `.at[].set()`, `jnp.linalg.pinv`, complex control flow with `np.block`). When IREE compilation fails, the error message will suggest using `backend="jax"`.
 
 ## Earth Gravity Models
 
