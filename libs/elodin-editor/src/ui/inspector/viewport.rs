@@ -413,11 +413,9 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
                     } else {
                         ui.add_space(6.0);
                         ui.label(
-                            egui::RichText::new(
-                                "No ellipsoid detected.",
-                            )
-                            .color(scheme.text_secondary)
-                            .italics(),
+                            egui::RichText::new("No ellipsoid detected.")
+                                .color(scheme.text_secondary)
+                                .italics(),
                         );
                     }
                 }
