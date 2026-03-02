@@ -365,11 +365,17 @@ impl Expr {
                 "cannot convert string literal to SQL".to_string(),
             )),
             Expr::Formula(formula, expr) => formula.to_sql(expr, context),
-            expr => Ok(format!(
-                "select {} from {}",
-                expr.to_select_part()?,
-                expr.to_table()?
-            )),
+            expr => {
+                let table = expr.to_table()?;
+                let select_part = expr.to_select_part()?;
+                let time_only = select_part == format!("{}.time", table);
+                let sql = if time_only {
+                    format!("select {} from {}", select_part, table)
+                } else {
+                    format!("select {}.time, {} from {}", table, select_part, table)
+                };
+                Ok(sql)
+            }
         }
     }
 }
@@ -802,7 +808,7 @@ mod tests {
         let result = expr.to_sql(&context);
         assert_eq!(
             result.unwrap(),
-            "select a_world_pos.a_world_pos as 'a.world_pos' from a_world_pos"
+            "select a_world_pos.time, a_world_pos.a_world_pos as 'a.world_pos' from a_world_pos"
         );
     }
 
@@ -859,7 +865,7 @@ mod tests {
         let result = expr.to_sql(&context);
         assert_eq!(
             result.unwrap(),
-            "select a_world_pos.a_world_pos[1] as 'a.world_pos.x' from a_world_pos"
+            "select a_world_pos.time, a_world_pos.a_world_pos[1] as 'a.world_pos.x' from a_world_pos"
         );
 
         // Test second element
@@ -867,7 +873,7 @@ mod tests {
         let result = expr.to_sql(&context);
         assert_eq!(
             result.unwrap(),
-            "select a_world_pos.a_world_pos[2] as 'a.world_pos.y' from a_world_pos"
+            "select a_world_pos.time, a_world_pos.a_world_pos[2] as 'a.world_pos.y' from a_world_pos"
         );
 
         // Test third element
@@ -875,7 +881,7 @@ mod tests {
         let result = expr.to_sql(&context);
         assert_eq!(
             result.unwrap(),
-            "select a_world_pos.a_world_pos[3] as 'a.world_pos.z' from a_world_pos"
+            "select a_world_pos.time, a_world_pos.a_world_pos[3] as 'a.world_pos.z' from a_world_pos"
         );
     }
 

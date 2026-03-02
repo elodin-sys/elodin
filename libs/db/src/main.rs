@@ -46,7 +46,7 @@ enum Commands {
     #[command(about = "Display information about a database")]
     Info(InfoArgs),
     #[command(
-        about = "Run an EQL query against a database file and print results as a table"
+        about = "Query component data from a database file and print results as a table"
     )]
     Query(QueryArgs),
     #[command(
@@ -251,7 +251,14 @@ struct QueryArgs {
         help = "Flatten vector columns to separate columns (e.g. vel -> vel.0, vel.1)"
     )]
     flatten: bool,
-    #[clap(help = "EQL query expression")]
+    #[clap(
+        long,
+        value_enum,
+        default_value = "seconds",
+        help = "Time column display: omit, datetime, seconds (default), or microseconds"
+    )]
+    time_format: elodin_db::query::TimeFormat,
+    #[clap(value_name = "COMPONENT", help = "Component name, e.g. drone.position or rocket.world_pos")]
     eql: String,
     #[clap(help = "Path to the database directory")]
     dbfile: PathBuf,
@@ -580,15 +587,17 @@ async fn main() -> miette::Result<()> {
         }
         Commands::Info(args) => run_info(args),
         Commands::Query(args) => {
-            elodin_db::query::run(elodin_db::query::QueryArgs {
+            let rt = tokio::runtime::Runtime::new().into_diagnostic()?;
+            rt.block_on(elodin_db::query::run(elodin_db::query::QueryArgs {
                 eql: args.eql,
                 dbfile: args.dbfile,
                 head: args.head,
                 tail: args.tail,
                 format: args.format,
                 flatten: args.flatten,
-            })
-            .await
+                time_format: args.time_format,
+            }))?;
+            Ok(())
         }
         Commands::ListComponents(args) => {
             elodin_db::list_components::run(args.dbfile, args.long).into_diagnostic()
