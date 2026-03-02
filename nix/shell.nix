@@ -2,6 +2,7 @@
   config,
   pkgs,
   rustToolchain,
+  includeHeavyPackages ? true,
   ...
 }:
 with pkgs; let
@@ -79,7 +80,6 @@ with pkgs; let
         gst_all_1.gst-plugins-good
         gst_all_1.gst-plugins-bad # For h264parse
         gst_all_1.gst-plugins-ugly # For x264enc (H.264 encoding)
-        config.packages.elodinsink # GStreamer plugin for Elodin-DB video streaming
         flip-link
 
         # Python tools
@@ -107,6 +107,9 @@ with pkgs; let
         zola
         rav1e
       ]
+      ++ lib.optionals includeHeavyPackages [
+        config.packages.elodinsink # GStreamer plugin for Elodin-DB video streaming
+      ]
       ++ common.commonNativeBuildInputs
       ++ common.commonBuildInputs
       # Linux-specific dependencies
@@ -120,8 +123,8 @@ with pkgs; let
           fontconfig
           lldb
           autoPatchelfHook
-          config.packages.elodin-py.py
         ]
+        ++ lib.optionals includeHeavyPackages [config.packages.elodin-py.py]
       )
       # macOS-specific dependencies
       ++ lib.optionals pkgs.stdenv.isDarwin (
@@ -141,14 +144,16 @@ with pkgs; let
     XLA_EXTENSION_DIR = "${xla_ext}";
 
     # GStreamer plugin path for elodinsink
-    GST_PLUGIN_PATH = lib.makeSearchPathOutput "lib" "lib/gstreamer-1.0" [
-      gst_all_1.gstreamer
-      gst_all_1.gst-plugins-base
-      gst_all_1.gst-plugins-good
-      gst_all_1.gst-plugins-bad
-      gst_all_1.gst-plugins-ugly
-      config.packages.elodinsink
-    ];
+    GST_PLUGIN_PATH = lib.makeSearchPathOutput "lib" "lib/gstreamer-1.0" (
+      [
+        gst_all_1.gstreamer
+        gst_all_1.gst-plugins-base
+        gst_all_1.gst-plugins-good
+        gst_all_1.gst-plugins-bad
+        gst_all_1.gst-plugins-ugly
+      ]
+      ++ lib.optionals includeHeavyPackages [config.packages.elodinsink]
+    );
 
     # Workaround for netlib-src 0.8.0 incompatibility with GCC 14+
     # GCC 14 treats -Wincompatible-pointer-types as error by default
@@ -231,26 +236,6 @@ with pkgs; let
 in {
   # Unified shell that combines all development environments
   elodin = mkShell (shellAttrs // linuxShellAttrs);
-
-  # Quick shell reuses the default shell machinery but skips heavy Rust package builds.
-  quick = mkShell (
-    (shellAttrs
-      // {
-        name = "elo-quick-shell";
-        buildInputs = lib.subtractLists [
-          config.packages.elodinsink
-          config.packages.elodin-py.py
-        ] shellAttrs.buildInputs;
-        GST_PLUGIN_PATH = lib.makeSearchPathOutput "lib" "lib/gstreamer-1.0" [
-          gst_all_1.gstreamer
-          gst_all_1.gst-plugins-base
-          gst_all_1.gst-plugins-good
-          gst_all_1.gst-plugins-bad
-          gst_all_1.gst-plugins-ugly
-        ];
-      })
-    // linuxShellAttrs
-  );
 
   # Profiling shell adds Tracy GUI without duplicating the base shell definition
   elodin-profiling = mkShell (

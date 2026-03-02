@@ -63,7 +63,14 @@
 
         config.packages = pkgs.elodin;
 
-        shells = pkgs.callPackage ./nix/shell.nix {inherit config rustToolchain;};
+        shells = pkgs.callPackage ./nix/shell.nix {
+          inherit config rustToolchain;
+          includeHeavyPackages = true;
+        };
+        quickShells = pkgs.callPackage ./nix/shell.nix {
+          inherit config rustToolchain;
+          includeHeavyPackages = false;
+        };
       in {
         packages = with pkgs.elodin; {
           inherit elodin-cli elodin-db elodinsink;
@@ -72,7 +79,7 @@
 
         devShells = with shells; {
           inherit elodin;
-          inherit quick;
+          quick = quickShells.elodin;
           profiling = shells.elodin-profiling;
           default = shells.elodin;
         };
