@@ -1,4 +1,4 @@
-//! Run EQL queries against a database file and print results (table, CSV, or binary to terminal).
+//! Query component data from a database file and print results (table, CSV, or binary to terminal).
 
 use std::io::Write;
 use std::path::PathBuf;
@@ -14,6 +14,20 @@ use miette::IntoDiagnostic;
 use tabled::builder::Builder;
 
 use crate::DB;
+
+/// How to display the time column in table/CSV output.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, clap::ValueEnum)]
+pub enum TimeFormat {
+    /// Do not show the time column.
+    Omit,
+    /// Show as date-time (e.g. 2025-02-27T12:00:00.000 UTC).
+    Datetime,
+    /// Show as seconds since epoch (default).
+    #[default]
+    Seconds,
+    /// Show as microseconds since epoch.
+    Microseconds,
+}
 
 /// Output format for query results (always to stdout).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, clap::ValueEnum)]
@@ -33,7 +47,7 @@ pub enum QueryOutputFormat {
 /// Arguments for the `query` subcommand.
 #[derive(Clone, Debug)]
 pub struct QueryArgs {
-    /// EQL query string.
+    /// Single component name, e.g. "drone.position" or "rocket.world_pos".
     pub eql: String,
     /// Database directory path.
     pub dbfile: PathBuf,
@@ -45,9 +59,11 @@ pub struct QueryArgs {
     pub format: QueryOutputFormat,
     /// Flatten vector columns to separate columns (e.g. vel -> vel_x, vel_y, vel_z).
     pub flatten: bool,
+    /// How to display the time column: omit, datetime, seconds (default), or microseconds.
+    pub time_format: TimeFormat,
 }
 
-/// Runs an EQL query against the database at `dbfile`, optionally limiting
+/// Queries the given component from the database at `dbfile`, optionally limiting
 /// to the first `head` or last `tail` rows, and prints the result to stdout.
 pub async fn run(args: QueryArgs) -> miette::Result<()> {
     let QueryArgs {
@@ -57,7 +73,14 @@ pub async fn run(args: QueryArgs) -> miette::Result<()> {
         tail,
         format,
         flatten,
+        time_format,
     } = args;
+
+    // if eql.trim().contains(',') {
+    //     return Err(miette::miette!(
+    //         "only one component is allowed; do not use comma-separated names"
+    //     ));
+    // }
 
     if !dbfile.exists() {
         return Err(miette::miette!("database path does not exist: {}", dbfile.display()));
@@ -89,7 +112,7 @@ pub async fn run(args: QueryArgs) -> miette::Result<()> {
             })
             .collect();
         let ctx = eql::Context::from_leaves(components, earliest, last_ts);
-        ctx.sql(eql.trim()).map_err(|e| miette::miette!("EQL parse/compile error: {}", e))
+        ctx.sql(eql.trim()).map_err(|e| miette::miette!("query parse error: {}", e))
     })?;
 
     let mut session = db.as_session_context().into_diagnostic()?;
@@ -125,10 +148,11 @@ pub async fn run(args: QueryArgs) -> miette::Result<()> {
         slice = flatten_record_batch(&slice)
             .map_err(|e| miette::miette!("flatten: {}", e))?;
     }
+    slice = time_column_first(&slice).into_diagnostic()?;
 
     match format {
-        QueryOutputFormat::Table => print_record_batch_table(&slice)?,
-        QueryOutputFormat::Csv => print_record_batch_csv(&slice)?,
+        QueryOutputFormat::Table => print_record_batch_table(&slice, time_format)?,
+        QueryOutputFormat::Csv => print_record_batch_csv(&slice, time_format)?,
         QueryOutputFormat::ArrowIpc => {
             eprintln!("Warning: output is binary; pipe to a file (e.g. ... > out.arrow)");
             print_record_batch_arrow_ipc(&slice)?;
@@ -147,24 +171,51 @@ pub async fn run(args: QueryArgs) -> miette::Result<()> {
     Ok(())
 }
 
-/// Prints a RecordBatch as a terminal table using column names and stringified values.
-fn print_record_batch_table(batch: &RecordBatch) -> miette::Result<()> {
+/// Reorders columns so "time" is first if present.
+fn time_column_first(batch: &RecordBatch) -> Result<RecordBatch, arrow::error::ArrowError> {
     let schema = batch.schema();
-    let columns: Vec<String> = schema
+    let time_idx = schema.fields().iter().position(|f| f.name() == "time");
+    let Some(time_idx) = time_idx else {
+        return Ok(batch.clone());
+    };
+    if time_idx == 0 {
+        return Ok(batch.clone());
+    }
+    let mut indices: Vec<usize> = (0..schema.fields().len()).collect();
+    indices.remove(time_idx);
+    indices.insert(0, time_idx);
+    let new_columns: Vec<ArrayRef> = indices.iter().map(|&i| batch.column(i).clone()).collect();
+    let new_fields: Vec<Arc<Field>> = indices
+        .iter()
+        .map(|&i| Arc::clone(&schema.fields()[i]))
+        .collect();
+    let new_schema = Arc::new(arrow::datatypes::Schema::new(new_fields));
+    RecordBatch::try_new(new_schema, new_columns)
+}
+
+/// Prints a RecordBatch as a terminal table using column names and stringified values.
+fn print_record_batch_table(batch: &RecordBatch, time_format: TimeFormat) -> miette::Result<()> {
+    let schema = batch.schema();
+    let col_indices: Vec<(usize, &Arc<Field>)> = schema
         .fields()
         .iter()
-        .map(|f| f.name().to_string())
+        .enumerate()
+        .filter(|(_, f)| time_format != TimeFormat::Omit || f.name() != "time")
+        .map(|(i, f)| (i, f))
         .collect();
-    let n_cols = columns.len();
+    let columns: Vec<String> = col_indices
+        .iter()
+        .map(|(_, f)| f.name().to_string())
+        .collect();
     let n_rows = batch.num_rows();
 
     let mut builder = Builder::default();
-    builder.push_record(columns.clone());
+    builder.push_record(columns);
     for i in 0..n_rows {
-        let mut row = Vec::with_capacity(n_cols);
-        for (col_idx, field) in schema.fields().iter().enumerate() {
-            let col = batch.column(col_idx);
-            let s = format_cell(col, i, field.data_type())?;
+        let mut row = Vec::with_capacity(col_indices.len());
+        for (col_idx, field) in &col_indices {
+            let col = batch.column(*col_idx);
+            let s = format_cell(col, i, field.data_type(), Some(field.name()), time_format)?;
             row.push(s);
         }
         builder.push_record(row);
@@ -268,13 +319,20 @@ fn print_record_batch_parquet(batch: &RecordBatch) -> miette::Result<()> {
 }
 
 /// Prints a RecordBatch as CSV to stdout (same cell formatting as table).
-fn print_record_batch_csv(batch: &RecordBatch) -> miette::Result<()> {
+fn print_record_batch_csv(batch: &RecordBatch, time_format: TimeFormat) -> miette::Result<()> {
     let schema = batch.schema();
+    let col_indices: Vec<(usize, &Arc<Field>)> = schema
+        .fields()
+        .iter()
+        .enumerate()
+        .filter(|(_, f)| time_format != TimeFormat::Omit || f.name() != "time")
+        .map(|(i, f)| (i, f))
+        .collect();
     let n_rows = batch.num_rows();
     let mut out = std::io::stdout();
 
-    for (col_idx, field) in schema.fields().iter().enumerate() {
-        if col_idx > 0 {
+    for (j, (_, field)) in col_indices.iter().enumerate() {
+        if j > 0 {
             write!(out, ",").into_diagnostic()?;
         }
         write!(out, "{}", csv_escape(field.name())).into_diagnostic()?;
@@ -282,12 +340,12 @@ fn print_record_batch_csv(batch: &RecordBatch) -> miette::Result<()> {
     writeln!(out).into_diagnostic()?;
 
     for i in 0..n_rows {
-        for (col_idx, field) in schema.fields().iter().enumerate() {
-            if col_idx > 0 {
+        for (j, (col_idx, field)) in col_indices.iter().enumerate() {
+            if j > 0 {
                 write!(out, ",").into_diagnostic()?;
             }
-            let col = batch.column(col_idx);
-            let s = format_cell(col, i, field.data_type())?;
+            let col = batch.column(*col_idx);
+            let s = format_cell(col, i, field.data_type(), Some(field.name()), time_format)?;
             write!(out, "{}", csv_escape(&s)).into_diagnostic()?;
         }
         writeln!(out).into_diagnostic()?;
@@ -308,9 +366,12 @@ fn format_cell(
     col: &arrow::array::ArrayRef,
     row: usize,
     data_type: &arrow::datatypes::DataType,
+    column_name: Option<&str>,
+    time_format: TimeFormat,
 ) -> miette::Result<String> {
     use arrow::array::*;
     use arrow::datatypes::DataType;
+    use impeller2::types::Timestamp;
 
     if col.is_null(row) {
         return Ok("null".to_string());
@@ -370,21 +431,34 @@ fn format_cell(
             a.value(row).to_string()
         }
         DataType::Timestamp(_, _) => {
-            if let Some(a) = col.as_any().downcast_ref::<arrow::array::TimestampMicrosecondArray>()
+            let value_us = if let Some(a) = col
+                .as_any()
+                .downcast_ref::<arrow::array::TimestampMicrosecondArray>()
             {
-                format!("{}", a.value(row))
+                a.value(row)
             } else if let Some(a) = col
                 .as_any()
                 .downcast_ref::<arrow::array::TimestampMillisecondArray>()
             {
-                format!("{}", a.value(row))
+                a.value(row).saturating_mul(1000)
             } else if let Some(a) = col
                 .as_any()
                 .downcast_ref::<arrow::array::TimestampNanosecondArray>()
             {
-                format!("{}", a.value(row))
+                a.value(row) / 1000
             } else {
-                "<ts>".to_string()
+                return Ok("<ts>".to_string());
+            };
+            match (column_name == Some("time"), time_format) {
+                (true, TimeFormat::Omit) => String::new(),
+                (true, TimeFormat::Datetime) => {
+                    format!("{}", hifitime::Epoch::from(Timestamp(value_us)))
+                }
+                (true, TimeFormat::Seconds) => {
+                    format!("{}", value_us as f64 / 1_000_000.0)
+                }
+                (true, TimeFormat::Microseconds) => format!("{}", value_us),
+                (false, _) => format!("{}", hifitime::Epoch::from(Timestamp(value_us))),
             }
         }
         DataType::FixedSizeList(_, _) | DataType::List(_) => {
@@ -393,7 +467,7 @@ fn format_cell(
                 let vals = arr.value(row);
                 let len = vals.len();
                 let parts: Vec<String> = (0..len)
-                    .map(|j| format_cell(&vals, j, vals.data_type()))
+                    .map(|j| format_cell(&vals, j, vals.data_type(), None, time_format))
                     .collect::<Result<Vec<_>, _>>()?;
                 format!("[{}]", parts.join(", "))
             } else {
