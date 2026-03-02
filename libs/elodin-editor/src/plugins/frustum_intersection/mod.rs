@@ -1,7 +1,7 @@
 use super::frustum_common::{MainViewportQueryItem, color_component_to_u8, frustum_local_points};
 use crate::{
     MainCamera,
-    object_3d::{EllipsoidVisual, Object3DState, WorldPosReceived},
+    object_3d::{EllipsoidVisual, Object3DMeshChild, Object3DState, WorldPosReceived},
 };
 use bevy::asset::RenderAssetUsages;
 use bevy::camera::visibility::{NoFrustumCulling, RenderLayers};
@@ -98,6 +98,8 @@ struct FrustumIntersectionParams<'w, 's> {
         ),
         With<WorldPosReceived>,
     >,
+    children: Query<'w, 's, &'static Children>,
+    mesh_children: Query<'w, 's, (), With<Object3DMeshChild>>,
     transforms: Query<'w, 's, &'static Transform>,
     meshes: ResMut<'w, Assets<Mesh>>,
     materials: ResMut<'w, Assets<StandardMaterial>>,
@@ -563,7 +565,7 @@ fn draw_frustum_ellipsoid_intersections(
     }
 
     let mut ellipsoids = Vec::new();
-    for (entity, global_transform, ellipse_visual, object_state) in params.ellipsoids.iter() {
+    for (entity, global_transform, _ellipse_visual, object_state) in params.ellipsoids.iter() {
         if !matches!(
             object_state.data.mesh,
             impeller2_wkt::Object3DMesh::Ellipsoid { .. }
@@ -571,7 +573,16 @@ fn draw_frustum_ellipsoid_intersections(
             continue;
         }
 
-        let Ok(child_transform) = params.transforms.get(ellipse_visual.child) else {
+        let Ok(children) = params.children.get(entity) else {
+            continue;
+        };
+        let Some(mesh_child_entity) = children
+            .iter()
+            .find(|child| params.mesh_children.contains(*child))
+        else {
+            continue;
+        };
+        let Ok(child_transform) = params.transforms.get(mesh_child_entity) else {
             continue;
         };
 
