@@ -1761,7 +1761,6 @@ impl Plugin for Object3DPlugin {
         app.init_resource::<IconTextureCache>().add_systems(
             Update,
             (
-                update_object_3d_system,
                 on_scene_ready.pipe(attach_joint_animations),
                 update_joint_animations,
                 warn_imported_cameras,
