@@ -93,11 +93,14 @@ pub struct TelemetryCache {
 
 impl TelemetryCache {
     pub fn insert(&mut self, component_id: ComponentId, ts: Timestamp, value: ComponentValue) {
-        self.components
-            .entry(component_id)
-            .or_default()
-            .insert(ts, value);
-        self.generation = self.generation.wrapping_add(1);
+        let series = self.components.entry(component_id).or_default();
+        // Keep the first value seen for a timestamp. In mixed backfill+live
+        // streaming, the same timestamp can be replayed; replacing it can make
+        // rendered poses jump between two states for the same tick.
+        if let std::collections::btree_map::Entry::Vacant(entry) = series.entry(ts) {
+            entry.insert(value);
+            self.generation = self.generation.wrapping_add(1);
+        }
     }
 
     pub fn get_at_or_before(
@@ -366,7 +369,12 @@ fn sink_inner(
             }
             OwnedPacket::Msg(m) if m.id == LastUpdated::ID => {
                 let m = m.parse::<LastUpdated>()?;
-                *world_sink.max_tick = m;
+                // Keep LastUpdated monotonic on the client. In mixed/reconnect
+                // conditions, out-of-order packets can otherwise move the
+                // playback clock backward and cause visible pose flicker.
+                if m.0 > world_sink.max_tick.0 {
+                    *world_sink.max_tick = m;
+                }
             }
             OwnedPacket::Msg(m) if m.id == DbConfig::ID => {
                 let config = m.parse::<DbConfig>()?;
@@ -387,7 +395,13 @@ fn sink_inner(
             OwnedPacket::Msg(m) if m.id == EarliestTimestamp::ID => {
                 let new_earliest = m.parse::<EarliestTimestamp>()?;
                 let is_first = world_sink.earliest_timestamp.0 == Timestamp(i64::MAX);
-                *world_sink.earliest_timestamp = new_earliest;
+                if is_first {
+                    *world_sink.earliest_timestamp = new_earliest;
+                } else if new_earliest.0 < world_sink.earliest_timestamp.0 {
+                    // Keep EarliestTimestamp monotonic (min) to avoid narrowing
+                    // the clamp window from stale/out-of-order updates.
+                    *world_sink.earliest_timestamp = new_earliest;
+                }
                 if is_first {
                     world_sink.current_timestamp.0 = new_earliest.0;
                 }

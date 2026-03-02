@@ -235,14 +235,21 @@ impl Plugin for EditorPlugin {
             .add_systems(
                 PreUpdate,
                 (
-                    set_selected_range,
                     clamp_current_time,
                     advance_playback,
+                    // Update selection after playback advances to keep line_3d and object_3d in sync.
+                    set_selected_range,
                     impeller2_bevy::apply_cached_data,
+                    // Keep Object3D WorldPos in lock-step with cached component values
+                    // before transforms are synchronized for rendering.
+                    object_3d::update_object_3d_system,
                     set_floating_origin,
-                    (sync_pos, sync_object_3d, set_viewport_pos),
+                    sync_object_3d,
+                    set_viewport_pos,
+                    sync_pos,
                 )
                     .chain()
+                    .after(impeller2_bevy::sink)
                     .in_set(PositionSync),
             )
             .add_systems(Update, impeller2_bevy::backfill_cache)

@@ -89,7 +89,10 @@ impl Plugin for GizmoPlugin {
         app.add_systems(Startup, (gizmo_setup, arrow_mesh_setup));
         // This is how the `big_space` crate did it.
         // app.add_systems(PostUpdate, render_vector_arrow.after(TransformSystem::TransformPropagate));
-        app.add_systems(bevy::app::PreUpdate, render_vector_arrow);
+        app.add_systems(
+            bevy::app::PreUpdate,
+            render_vector_arrow.after(crate::PositionSync),
+        );
         app.add_systems(
             bevy::app::PostUpdate,
             cleanup_removed_arrows.after(render_vector_arrow),
@@ -239,7 +242,7 @@ fn render_vector_arrow(
     }
     let has_show_arrows = main_camera_data
         .iter()
-        .any(|(_, _, _, _, config)| config.as_ref().map(|c| c.show_arrows).unwrap_or(false));
+        .any(|(_, _, _, _, config)| config.as_ref().map(|c| c.show_arrows).unwrap_or(true));
 
     for (entity, arrow, mut state) in vector_arrows.iter_mut() {
         if !has_show_arrows {
