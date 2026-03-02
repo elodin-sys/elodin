@@ -14,8 +14,8 @@ order = 64
 
 At Elodin's core is a physics toolkit that utilizes the ECS design pattern.
 This toolkit allows our users to create incredibly efficient physics simulations easily.
-Elodin's ECS engine is unique in that it does all the computation using [XLA](https://openxla.org/xla), a compiler for linear algebra.
-Our engine allows your simulations to run on GPU, TPU, or CPU, all with no code changes.
+Elodin's ECS engine is unique in that it compiles simulations through [IREE](https://iree.dev/) for fast CPU execution by default, with an optional [JAX](https://jax.readthedocs.io/) backend for full compatibility.
+Our engine allows your simulations to run efficiently with no code changes.
 
 ## A History Lesson on ECS
 
@@ -84,9 +84,9 @@ ECS isn't just great for video games; it is widely applicable to all kinds of ap
 
 We want to build an ECS-based physics engine that utilizes all of ECS's benefits and is easy for non-professional software engineers to use. Historically, writing code that utilizes vectorized operations was a harrowing manual process. Engineers had to write code in an obscure, often difficult-to-read way ([https://mcyoung.xyz/2023/11/27/simd-base64/](https://mcyoung.xyz/2023/11/27/simd-base64/)). While the results were very performant, they were not very readable. Simulation code is already difficult to understand due to its heavy reliance on often obscure mathematical methods. Adding complex performance optimizations to that is a recipe for confusion.
 
-Thankfully, there is another math-heavy field that deals with this exact problem – Machine Learning (ML). There are several systems built for machine learning that allow efficient vectorized operations without sacrificing readability. We will focus on two related projects, JAX and XLA. XLA is a compiler that compiles linear algebra operations to GPU, CPU, or TPU. JAX is a JIT for Python that turns standard numpy operations into XLA intermediate representation called StableHLO – technically, it uses MHLO, which is a compatible but distinct IR to StableHLO, which is then converted by XLA into StableHLO. JAX is wonderful because it allows anyone comfortable with Numpy to write efficient code for the GPU. Python is quickly becoming the lingua franca of scientific programming, so this feature is of particular interest.
+Thankfully, there is another math-heavy field that deals with this exact problem -- Machine Learning (ML). There are several systems built for machine learning that allow efficient vectorized operations without sacrificing readability. We use [JAX](https://jax.readthedocs.io/), a JIT compiler for Python that turns standard NumPy operations into StableHLO intermediate representation. Elodin then compiles this StableHLO to [IREE](https://iree.dev/) bytecode for fast, Python-free execution each simulation tick. JAX is wonderful because it allows anyone comfortable with NumPy to write efficient simulation code. Python is quickly becoming the lingua franca of scientific programming, so this feature is of particular interest.
 
-Our simulation engine works by merging ECS and Jax into a unified platform. We have ported a subset of Jax's features to Rust, a system we call Nox. Here is an example of how to write a basic six DOF (degrees-of-freedom) physics engine using Nox and our ECS.
+Our simulation engine works by merging ECS and JAX into a unified platform. We have ported a subset of JAX's features to Rust, a system we call Nox. Here is an example of how to write a basic six DOF (degrees-of-freedom) physics engine using Nox and our ECS.
 
 ```rust
 #[derive(Clone, Component, Default)]

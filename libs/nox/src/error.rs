@@ -5,11 +5,6 @@ use alloc::borrow::Cow;
 /// Enumerates possible error types that can occur within the Nox tensor operations.
 #[derive(Error, Debug)]
 pub enum Error {
-    /// Error propagated from underlying XLA library.
-    #[cfg(feature = "xla")]
-    #[error("xla error {0}")]
-    Xla(#[from] xla::Error),
-
     /// Error indicating that the length of the vmap axis does not match the number of inputs.
     #[error("vmap axis len must be same as input len")]
     WrongAxisLen,

@@ -3,18 +3,14 @@ name = "nox"
 license = "MIT OR Apache-2.0"
 version.workspace = true
 edition = "2024"
-description = "Tensor library that compiles to XLA (like JAX, but for Rust)."
+description = "Tensor library for building computation graphs."
 repository = "https://github.com/elodin-sys/elodin"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
 default = []
 std = ["thiserror/std", "faer/std", "num-traits/std", "nox-array/std"]
 jax = ["pyo3", "pyo3-build-config", "numpy", "noxpr"]
-cuda = ["shared", "xla"]
-noxpr = ["xla", "boxcar", "paste", "itertools", "indent_write"]
-xla = ["dep:xla", "lapack-src", "std"]
+noxpr = ["boxcar", "paste", "itertools", "indent_write", "std"]
 shared = []
 serde = ["dep:serde", "smallvec/serde"]
 
@@ -44,9 +40,6 @@ indent_write.optional = true
 zerocopy.version = "0.8.2"
 zerocopy.features = ["derive"]
 
-# noxla - a wrapper around raw xla
-xla = { optional = true, workspace = true }
-
 # jax
 pyo3.version = "0.23.0"
 pyo3.optional = true
@@ -62,12 +55,6 @@ serde.optional = true
 traversal = "0.1.2"
 
 tracing = "0.1"
-
-[target.'cfg(not(target_os = "macos"))'.dependencies]
-lapack-src = { version = "0.10", features = ["netlib"], optional = true }
-netlib-src = { version = "0.8", features = ["static"], optional = true }
-[target.'cfg(target_os = "macos")'.dependencies]
-lapack-src = { version = "0.10", features = ["accelerate"], optional = true }
 
 [build-dependencies]
 which = "6.0.3"

@@ -23,7 +23,8 @@ w.to_jax(system, sim_time_step=1/120.0)         # Export as JAX function
 | `run_time_step` | float/None | None (max speed) | Real seconds per tick |
 | `default_playback_speed` | float | 1.0 | Editor playback rate |
 | `max_ticks` | int | None | Stop after N ticks |
-| `optimize` | bool | False | Enable XLA optimizations |
+| `optimize` | bool | False | Enable compilation optimizations |
+| `backend` | str | "iree" | Execution backend: `"iree"` (default, fast) or `"jax"` (full JAX compatibility) |
 | `pre_step` | Callable | None | `(tick, StepContext) -> None` before each tick |
 | `post_step` | Callable | None | `(tick, StepContext) -> None` after each tick |
 | `db_path` | str | None | Database directory path |
