@@ -1,7 +1,10 @@
-use crate::{MainCamera, ui::tiles::ViewportConfig};
+use super::frustum_common::{MainViewportQueryItem, color_component_to_u8, frustum_local_points};
+use crate::MainCamera;
+use bevy::asset::RenderAssetUsages;
 use bevy::camera::visibility::{NoFrustumCulling, RenderLayers};
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
+use bevy::render::render_resource::PrimitiveTopology;
 use bevy::transform::TransformSystems;
 use std::collections::{HashMap, HashSet};
 
@@ -9,14 +12,6 @@ use std::collections::{HashMap, HashSet};
 /// Frustum pairs are skipped when cameras are this close, which prevents the
 /// visual glitch at startup when all viewports share the same default position.
 const MIN_FRUSTUM_CAMERA_DISTANCE_SQ: f32 = 0.01;
-
-type MainViewportQueryItem = (
-    Entity,
-    &'static Camera,
-    &'static Projection,
-    &'static GlobalTransform,
-    Option<&'static ViewportConfig>,
-);
 
 pub struct FrustumPlugin;
 
@@ -62,23 +57,100 @@ struct CameraFrustumLineVisual {
     segment: u8,
 }
 
+#[derive(Component, Clone, Copy, Debug, Eq, Hash, PartialEq)]
+struct CameraFrustumFaceVisual {
+    source: Entity,
+    target: Entity,
+}
+
+const FRUSTUM_FACE_ALPHA: u8 = 10;
+
+fn frustum_face_material_for_color(
+    color: impeller2_wkt::Color,
+    materials: &mut Assets<StandardMaterial>,
+    cache: &mut FrustumMaterialCache,
+) -> Handle<StandardMaterial> {
+    let key = FrustumMaterialKey {
+        r: color_component_to_u8(color.r),
+        g: color_component_to_u8(color.g),
+        b: color_component_to_u8(color.b),
+        a: FRUSTUM_FACE_ALPHA,
+    };
+    if let Some(handle) = cache.materials.get(&key) {
+        return handle.clone();
+    }
+
+    let material = materials.add(StandardMaterial {
+        base_color: Color::srgba_u8(key.r, key.g, key.b, FRUSTUM_FACE_ALPHA),
+        emissive: Color::srgb_u8(key.r, key.g, key.b).into(),
+        cull_mode: None,
+        unlit: true,
+        alpha_mode: AlphaMode::Blend,
+        depth_bias: -4.0,
+        ..Default::default()
+    });
+    cache.materials.insert(key, material.clone());
+    material
+}
+
+fn build_frustum_face_mesh(points: &[Vec3; 8]) -> Mesh {
+    let quads: [[usize; 4]; 6] = [
+        [0, 1, 2, 3], // near
+        [5, 4, 7, 6], // far
+        [4, 0, 3, 7], // left
+        [1, 5, 6, 2], // right
+        [4, 5, 1, 0], // top
+        [3, 2, 6, 7], // bottom
+    ];
+
+    let mut positions = Vec::with_capacity(36);
+    let mut normals = Vec::with_capacity(36);
+
+    for quad in &quads {
+        let a = points[quad[0]];
+        let b = points[quad[1]];
+        let c = points[quad[2]];
+        let d = points[quad[3]];
+        let n = (b - a).cross(d - a).normalize_or_zero();
+        let nn = [n.x, n.y, n.z];
+        positions.push([a.x, a.y, a.z]);
+        positions.push([b.x, b.y, b.z]);
+        positions.push([c.x, c.y, c.z]);
+        normals.push(nn);
+        normals.push(nn);
+        normals.push(nn);
+        positions.push([a.x, a.y, a.z]);
+        positions.push([c.x, c.y, c.z]);
+        positions.push([d.x, d.y, d.z]);
+        normals.push(nn);
+        normals.push(nn);
+        normals.push(nn);
+    }
+
+    let mut mesh = Mesh::new(
+        PrimitiveTopology::TriangleList,
+        RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
+    );
+    mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, positions);
+    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, normals);
+    mesh
+}
+
 #[derive(SystemParam)]
 struct FrustumDrawParams<'w, 's> {
     main_viewports: Query<'w, 's, MainViewportQueryItem, With<MainCamera>>,
     materials: ResMut<'w, Assets<StandardMaterial>>,
+    meshes: ResMut<'w, Assets<Mesh>>,
     material_cache: ResMut<'w, FrustumMaterialCache>,
     line_assets: Option<Res<'w, FrustumLineAssets>>,
     existing_roots: Query<'w, 's, (Entity, &'static CameraFrustumRootVisual)>,
     existing_lines: Query<'w, 's, (Entity, &'static CameraFrustumLineVisual)>,
+    existing_faces: Query<'w, 's, (Entity, &'static CameraFrustumFaceVisual, &'static Mesh3d)>,
 }
 
 fn frustum_mesh_setup(mut commands: Commands, mut meshes: ResMut<Assets<Mesh>>) {
     let edge_mesh = meshes.add(Mesh::from(Cylinder::new(1.0, 1.0)));
     commands.insert_resource(FrustumLineAssets { edge_mesh });
-}
-
-fn color_component_to_u8(value: f32) -> u8 {
-    (value.clamp(0.0, 1.0) * 255.0).round() as u8
 }
 
 fn frustum_material_for_color(
@@ -112,33 +184,6 @@ fn frustum_material_for_color(
     });
     cache.materials.insert(key, material.clone());
     material
-}
-
-fn frustum_local_points(perspective: &PerspectiveProjection) -> Option<[Vec3; 8]> {
-    let near = perspective.near;
-    let far = perspective.far;
-    let fov = perspective.fov;
-    let aspect = perspective.aspect_ratio;
-    if !(near > 0.0 && far > near && fov > 0.0 && aspect > 0.0) {
-        return None;
-    }
-
-    let tan_half = (fov * 0.5).tan();
-    let near_half_height = tan_half * near;
-    let near_half_width = near_half_height * aspect;
-    let far_half_height = tan_half * far;
-    let far_half_width = far_half_height * aspect;
-
-    Some([
-        Vec3::new(-near_half_width, near_half_height, -near),
-        Vec3::new(near_half_width, near_half_height, -near),
-        Vec3::new(near_half_width, -near_half_height, -near),
-        Vec3::new(-near_half_width, -near_half_height, -near),
-        Vec3::new(-far_half_width, far_half_height, -far),
-        Vec3::new(far_half_width, far_half_height, -far),
-        Vec3::new(far_half_width, -far_half_height, -far),
-        Vec3::new(-far_half_width, -far_half_height, -far),
-    ])
 }
 
 fn frustum_segments(points: [Vec3; 8]) -> [(Vec3, Vec3); 12] {
@@ -181,6 +226,9 @@ fn frustum_segment_transform_local(
 
 fn cleanup_frustum_entities(params: &FrustumDrawParams<'_, '_>, commands: &mut Commands) {
     for (entity, _) in params.existing_lines.iter() {
+        commands.entity(entity).despawn();
+    }
+    for (entity, _, _) in params.existing_faces.iter() {
         commands.entity(entity).despawn();
     }
     for (entity, _) in params.existing_roots.iter() {
@@ -252,9 +300,23 @@ fn draw_viewport_frustums(mut params: FrustumDrawParams<'_, '_>, mut commands: C
         ),
     > = HashMap::new();
 
+    struct DesiredFace {
+        key: CameraFrustumFaceVisual,
+        root_key: CameraFrustumRootVisual,
+        mesh: Mesh,
+        render_layers: RenderLayers,
+        material: MeshMaterial3d<StandardMaterial>,
+    }
+    let mut desired_faces: Vec<DesiredFace> = Vec::new();
+
     for (source_camera, points, color, thickness) in sources {
         let material =
             frustum_material_for_color(color, &mut params.materials, &mut params.material_cache);
+        let face_material = frustum_face_material_for_color(
+            color,
+            &mut params.materials,
+            &mut params.material_cache,
+        );
         let segments = frustum_segments(points);
         for (target_camera, render_layers) in &targets {
             if source_camera == *target_camera {
@@ -293,6 +355,17 @@ fn draw_viewport_frustums(mut params: FrustumDrawParams<'_, '_>, mut commands: C
                     ),
                 );
             }
+
+            desired_faces.push(DesiredFace {
+                key: CameraFrustumFaceVisual {
+                    source: source_camera,
+                    target: *target_camera,
+                },
+                root_key,
+                mesh: build_frustum_face_mesh(&points),
+                render_layers: render_layers.clone(),
+                material: MeshMaterial3d(face_material.clone()),
+            });
         }
     }
 
@@ -366,6 +439,53 @@ fn draw_viewport_frustums(mut params: FrustumDrawParams<'_, '_>, mut commands: C
     }
 
     for entity in existing_lines_by_key.into_values() {
+        commands.entity(entity).despawn();
+    }
+
+    let mut existing_faces_by_key: HashMap<CameraFrustumFaceVisual, (Entity, Handle<Mesh>)> =
+        HashMap::new();
+    for (entity, key, mesh3d) in params.existing_faces.iter() {
+        existing_faces_by_key.insert(*key, (entity, mesh3d.0.clone()));
+    }
+
+    for face in desired_faces {
+        let Some(&root_entity) = root_entities.get(&face.root_key) else {
+            continue;
+        };
+
+        if let Some((entity, mesh_handle)) = existing_faces_by_key.remove(&face.key) {
+            if let Some(mesh_asset) = params.meshes.get_mut(&mesh_handle) {
+                *mesh_asset = face.mesh;
+            } else {
+                let new_mesh = params.meshes.add(face.mesh);
+                commands.entity(entity).insert(Mesh3d(new_mesh));
+            }
+            commands.entity(entity).insert((
+                face.render_layers,
+                face.material,
+                ChildOf(root_entity),
+            ));
+            continue;
+        }
+
+        let mesh_handle = params.meshes.add(face.mesh);
+        commands.spawn((
+            Mesh3d(mesh_handle),
+            face.material,
+            Transform::IDENTITY,
+            GlobalTransform::default(),
+            Visibility::default(),
+            InheritedVisibility::default(),
+            ViewVisibility::default(),
+            face.render_layers,
+            NoFrustumCulling,
+            face.key,
+            ChildOf(root_entity),
+            Name::new("viewport_frustum_face"),
+        ));
+    }
+
+    for (entity, _) in existing_faces_by_key.into_values() {
         commands.entity(entity).despawn();
     }
 }

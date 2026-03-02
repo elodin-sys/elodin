@@ -151,6 +151,40 @@ impl impeller2::com_de::Decomponentize for SimulationTimeStep {
     }
 }
 
+#[derive(Clone, Serialize, Deserialize, Default)]
+#[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
+pub struct FrustumCoverage(pub f32);
+
+impl impeller2::component::Component for FrustumCoverage {
+    const NAME: &'static str = "frustum_coverage";
+
+    fn schema() -> impeller2::schema::Schema<Vec<u64>> {
+        impeller2::schema::Schema::new(impeller2::types::PrimType::F32, [0usize; 0])
+            .expect("failed to create schema")
+    }
+}
+
+#[cfg(feature = "nox")]
+impl impeller2::com_de::Decomponentize for FrustumCoverage {
+    type Error = core::convert::Infallible;
+    fn apply_value(
+        &mut self,
+        component_id: impeller2::types::ComponentId,
+        value: impeller2::types::ComponentView<'_>,
+        _timestamp: Option<Timestamp>,
+    ) -> Result<(), Self::Error> {
+        if component_id != FrustumCoverage::COMPONENT_ID {
+            return Ok(());
+        }
+        let impeller2::types::ComponentView::F32(view) = value else {
+            return Ok(());
+        };
+        let buf = view.buf();
+        self.0 = buf[0];
+        Ok(())
+    }
+}
+
 #[derive(Clone, Serialize, Deserialize, Copy)]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Resource))]
 pub struct LastUpdated(pub Timestamp);

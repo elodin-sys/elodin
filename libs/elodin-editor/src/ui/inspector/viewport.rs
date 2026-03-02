@@ -13,7 +13,10 @@ use impeller2_wkt::{ComponentValue, QueryType, WorldPos};
 use nox::{ArrayBuf, ArrayRepr, Vector3};
 
 use crate::EqlContext;
-use crate::object_3d::{ComponentArrayExt, EditableEQL, compile_eql_expr};
+use crate::object_3d::{
+    ComponentArrayExt, EditableEQL, EllipsoidVisual, Object3DState, WorldPosReceived,
+    compile_eql_expr,
+};
 use crate::ui::button::EButton;
 use crate::ui::colors::{EColor, get_scheme};
 use crate::ui::theme::configure_input_with_border;
@@ -72,6 +75,8 @@ pub struct InspectorViewport<'w, 's> {
     viewport_rects: Query<'w, 's, &'static ViewportRect, With<MainCamera>>,
     grid_visibility: Query<'w, 's, &'static mut Visibility, With<InfiniteGrid>>,
     editor_cams: Query<'w, 's, &'static mut EditorCam>,
+    ellipsoids:
+        Query<'w, 's, &'static Object3DState, (With<EllipsoidVisual>, With<WorldPosReceived>)>,
     eql_ctx: ResMut<'w, EqlContext>,
 }
 
@@ -97,6 +102,7 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
             viewport_rects,
             mut grid_visibility,
             mut editor_cams,
+            ellipsoids,
             eql_ctx,
         } = state_mut;
 
@@ -111,6 +117,18 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
         let Ok(mut viewport_config) = viewport_configs.get_mut(camera) else {
             return;
         };
+        let has_detected_ellipsoid = ellipsoids.iter().any(|object_state| {
+            matches!(
+                &object_state.data.mesh,
+                impeller2_wkt::Object3DMesh::Ellipsoid { .. }
+            )
+        });
+
+        if !has_detected_ellipsoid {
+            viewport_config.show_coverage_in_viewport = false;
+            viewport_config.show_projection_2d = false;
+            viewport_config.show_ratio_monitor = false;
+        }
 
         ui.spacing_mut().item_spacing.y = 8.0;
         let title = title.trim();
@@ -336,6 +354,72 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
                             }
                         });
                     });
+
+                    ui.add_space(8.0);
+                    ui.label(
+                        egui::RichText::new("ELLIPSOID INTERSECTION").color(scheme.text_secondary),
+                    );
+                    if has_detected_ellipsoid {
+                        ui.add_space(8.0);
+                        ui.horizontal(|ui| {
+                            ui.label(
+                                egui::RichText::new("COVERAGE IN VIEWPORT")
+                                    .color(scheme.text_secondary),
+                            );
+                            ui.with_layout(egui::Layout::right_to_left(Align::Min), |ui| {
+                                theme::configure_input_with_border(ui.style_mut());
+                                ui.checkbox(&mut viewport_config.show_coverage_in_viewport, "");
+                            });
+                        });
+                        viewport_config.show_ratio_monitor =
+                            viewport_config.show_coverage_in_viewport;
+
+                        ui.add_space(8.0);
+                        ui.horizontal(|ui| {
+                            ui.label(
+                                egui::RichText::new("PROJECTION 2D").color(scheme.text_secondary),
+                            );
+                            ui.with_layout(egui::Layout::right_to_left(Align::Min), |ui| {
+                                theme::configure_input_with_border(ui.style_mut());
+                                ui.checkbox(&mut viewport_config.show_projection_2d, "");
+                            });
+                        });
+                        if viewport_config.show_projection_2d {
+                            ui.add_space(8.0);
+                            let mut proj_color = viewport_config.projection_color.into_color32();
+                            ui.horizontal(|ui| {
+                                ui.label(
+                                    egui::RichText::new("PROJECTION COLOR")
+                                        .color(scheme.text_secondary),
+                                );
+                                ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
+                                    let swatch = ui.add(
+                                        egui::Button::new("")
+                                            .fill(proj_color)
+                                            .stroke(egui::Stroke::new(1.0, scheme.border_primary))
+                                            .corner_radius(egui::CornerRadius::same(10))
+                                            .min_size(egui::vec2(20.0, 20.0)),
+                                    );
+                                    let color_id = ui.auto_id_with("projection_color");
+                                    if swatch.clicked() {
+                                        egui::Popup::toggle_id(ui.ctx(), color_id);
+                                    }
+                                    color_popup(ui, &mut proj_color, color_id, &swatch);
+                                });
+                            });
+                            viewport_config.projection_color =
+                                impeller2_wkt::Color::from_color32(proj_color);
+                        }
+                    } else {
+                        ui.add_space(6.0);
+                        ui.label(
+                            egui::RichText::new(
+                                "Add an ellipsoid object to enable Coverage and Projection 2D.",
+                            )
+                            .color(scheme.text_secondary)
+                            .italics(),
+                        );
+                    }
                 }
 
                 ui.add_space(8.0);

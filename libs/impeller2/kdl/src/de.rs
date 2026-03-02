@@ -351,6 +351,7 @@ fn parse_viewport(node: &KdlNode, kdl_src: &str) -> Result<Panel, KdlSchematicEr
         .or_else(|| node.get("show_frustum"))
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
+
     let frustums_color = if let Some(value) = node.get("frustums_color") {
         parse_viewport_frustums_color(value).ok_or_else(|| KdlSchematicError::InvalidValue {
             property: "frustums_color".to_string(),

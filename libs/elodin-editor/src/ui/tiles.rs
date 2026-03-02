@@ -107,12 +107,22 @@ fn setup_primary_window_state(
     commands.entity(id).insert((state, WindowId(0)));
 }
 
+pub fn default_projection_color() -> impeller2_wkt::Color {
+    impeller2_wkt::Color::WHITE
+}
+
 #[derive(Component)]
 pub struct ViewportConfig {
     pub aspect: Option<f32>,
     pub show_arrows: bool,
     pub create_frustum: bool,
     pub show_frustums: bool,
+    /// Compute frustum∩ellipsoid volume, create FrustumCoverage component, display in viewport (no 3D mesh).
+    pub show_coverage_in_viewport: bool,
+    /// Display 2D projection of frustum∩ellipsoid on far plane.
+    pub show_projection_2d: bool,
+    pub show_ratio_monitor: bool,
+    pub projection_color: impeller2_wkt::Color,
     pub frustums_color: impeller2_wkt::Color,
     pub frustums_thickness: f32,
     pub viewport_layer: Option<usize>,
@@ -1031,7 +1041,70 @@ impl Pane {
                 egui_tiles::UiResponse::None
             }
             Pane::Viewport(pane) => {
-                pane.rect = Some(content_rect);
+                const MONITOR_HEIGHT: f32 = 36.0;
+                let mut show_monitor = false;
+
+                if let Some(cam) = pane.camera {
+                    let mut state = SystemState::<(
+                        Res<crate::plugins::frustum_intersection::IntersectionRatios>,
+                        Query<&ViewportConfig>,
+                    )>::new(world);
+                    let (ratios, configs) = state.get(world);
+                    {
+                        let relevant: Vec<_> = ratios
+                            .0
+                            .iter()
+                            .filter(|r| {
+                                r.source != cam
+                                    && configs
+                                        .get(r.source)
+                                        .map(|c| c.show_ratio_monitor)
+                                        .unwrap_or(false)
+                            })
+                            .collect();
+                        if !relevant.is_empty() {
+                            show_monitor = true;
+                            let viewport_rect = egui::Rect::from_min_max(
+                                content_rect.min,
+                                egui::pos2(content_rect.max.x, content_rect.max.y - MONITOR_HEIGHT),
+                            );
+                            pane.rect = Some(viewport_rect);
+
+                            let monitor_rect = egui::Rect::from_min_max(
+                                egui::pos2(content_rect.min.x, content_rect.max.y - MONITOR_HEIGHT),
+                                content_rect.max,
+                            );
+                            let scheme = super::colors::get_scheme();
+                            ui.painter()
+                                .rect_filled(monitor_rect, 0.0, scheme.bg_secondary);
+                            ui.painter().line_segment(
+                                [monitor_rect.left_top(), monitor_rect.right_top()],
+                                egui::Stroke::new(1.0, scheme.border_primary),
+                            );
+
+                            for (i, r) in relevant.iter().enumerate() {
+                                let pct = (r.ratio * 100.0).clamp(0.0, 100.0);
+                                let text = format!("Volume: {pct:.1}%");
+                                let galley = ui.painter().layout_no_wrap(
+                                    text,
+                                    egui::FontId::monospace(14.0),
+                                    scheme.text_primary,
+                                );
+                                let pos = egui::pos2(
+                                    monitor_rect.min.x + 10.0,
+                                    monitor_rect.min.y + 8.0 + i as f32 * 20.0,
+                                );
+                                ui.painter().galley(pos, galley, scheme.text_primary);
+                            }
+                        }
+                    }
+                    state.apply(world);
+                }
+
+                if !show_monitor {
+                    pane.rect = Some(content_rect);
+                }
+
                 egui_tiles::UiResponse::None
             }
             Pane::Monitor(pane) => {
@@ -1356,6 +1429,10 @@ impl ViewportPane {
                 show_arrows: viewport.show_arrows,
                 create_frustum: viewport.create_frustum,
                 show_frustums: viewport.show_frustums,
+                show_coverage_in_viewport: false,
+                show_projection_2d: false,
+                show_ratio_monitor: false,
+                projection_color: default_projection_color(),
                 frustums_color: viewport.frustums_color,
                 frustums_thickness: viewport.frustums_thickness,
                 viewport_layer,
