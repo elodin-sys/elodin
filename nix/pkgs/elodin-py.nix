@@ -9,8 +9,9 @@
 }: let
   # Import shared configuration
   common = pkgs.callPackage ./common.nix {};
+  iree_runtime = pkgs.callPackage ./iree-runtime.nix {};
+  iree_compiler = pkgs.callPackage ./iree-compiler.nix {};
   # Direct Rust build using rustPlatform.buildRustPackage
-  xla_ext = pkgs.callPackage ./xla-ext.nix {inherit system;};
 
   # Extract pname and version directly from Cargo.toml files
   noxPyCargoToml = builtins.fromTOML (builtins.readFile ../../libs/nox-py/Cargo.toml);
@@ -55,6 +56,7 @@
         maturin
         python3 # Add python3 to nativeBuildInputs so it's available during build
         which # Required for build scripts that use which to find python3
+        llvmPackages.libclang # Required for bindgen (used by iree-runtime)
       ]
       ++ common.commonNativeBuildInputs
       ++ lib.optionals stdenv.isLinux [
@@ -69,8 +71,7 @@
     buildInputs = with pkgs;
       [
         python
-        gfortran.cc.lib # Fortran runtime library for linking
-        xla_ext
+        iree_runtime
       ]
       ++ common.commonBuildInputs
       ++ lib.optionals stdenv.isDarwin common.darwinDeps
@@ -79,14 +80,16 @@
       ];
 
     # Environment variables for the build
-    XLA_EXTENSION_DIR = "${xla_ext}";
+    IREE_RUNTIME_DIR = "${iree_runtime}";
     OPENSSL_DIR = "${pkgs.openssl.dev}";
     OPENSSL_LIB_DIR = "${pkgs.openssl.out}/lib";
     OPENSSL_INCLUDE_DIR = "${pkgs.openssl.dev}/include/";
+    LIBCLANG_PATH = "${pkgs.llvmPackages.libclang.lib}/lib";
 
-    # Workaround for netlib-src 0.8.0 incompatibility with GCC 14+
-    # GCC 14 treats -Wincompatible-pointer-types as error by default
-    NIX_CFLAGS_COMPILE = common.netlibWorkaround;
+    # Tell bindgen where to find C standard library headers (required on Linux in Nix builds)
+    BINDGEN_EXTRA_CLANG_ARGS =
+      lib.optionalString pkgs.stdenv.isLinux
+      "-I${pkgs.stdenv.cc.libc.dev}/include -I${pkgs.llvmPackages.libclang.lib}/lib/clang/${lib.versions.major pkgs.llvmPackages.libclang.version}/include";
 
     # Ensure C++ standard library is linked on macOS
     NIX_LDFLAGS = lib.optionalString pkgs.stdenv.isDarwin "-lc++";
@@ -114,24 +117,15 @@
     '';
   };
 
-  # Import shared JAX overrides
-  jaxOverrides = pkgs.callPackage ./jax-overrides.nix {inherit pkgs;};
-
-  elodin = ps: let
-    # Create a modified Python package set with our JAX/jaxlib overrides
-    # This ensures all packages use the same jaxlib version
-    ps' = ps.override {
-      overrides = jaxOverrides;
-    };
-  in
-    ps'.buildPythonPackage {
+  elodin = ps:
+    ps.buildPythonPackage {
       pname = wheelName;
       format = "wheel";
       version = version;
       src = "${wheel}/${wheelName}-${wheelVersion}-${wheelSuffix}.whl";
       doCheck = false;
       pythonImportsCheck = []; # Skip import check due to C++ library loading issues on macOS
-      propagatedBuildInputs = with ps';
+      propagatedBuildInputs = with ps;
         [
           jax
           jaxlib
@@ -140,14 +134,14 @@
           polars
           pytest
           matplotlib
+          iree_compiler # IREE compiler for JIT compilation
         ]
         ++ lib.optionals pkgs.stdenv.isDarwin [
           pkgs.libcxx # C++ standard library runtime
         ];
       buildInputs =
         [
-          xla_ext
-          pkgs.gfortran.cc.lib
+          iree_runtime
         ]
         ++ lib.optionals pkgs.stdenv.isDarwin [
           pkgs.stdenv.cc.cc.lib # C++ standard library for macOS

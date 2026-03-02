@@ -1,0 +1,13 @@
+[package]
+name = "iree-runtime"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+description = "Rust FFI bindings and safe wrappers for the IREE runtime C API"
+links = "iree"
+
+[build-dependencies]
+bindgen = "0.72"
+
+[dev-dependencies]
+zerocopy = { version = "0.8", features = ["derive"] }
