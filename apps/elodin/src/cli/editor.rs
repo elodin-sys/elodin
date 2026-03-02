@@ -24,6 +24,12 @@ pub struct Args {
     /// Open this KDL schematic file after connecting to the database.
     #[clap(long)]
     pub kdl: Option<PathBuf>,
+
+    /// Replay recorded data as if it were streaming in real time. The timeline
+    /// reveals data progressively as the playback marker advances, simulating
+    /// a live session.
+    #[clap(long)]
+    pub replay: bool,
 }
 
 #[derive(Clone)]
@@ -175,6 +181,9 @@ impl Cli {
         };
         app.insert_resource(BevyCancelToken(cancel_token.clone()))
             .add_systems(Update, check_cancel_token);
+        if args.replay {
+            app.init_resource::<elodin_editor::ReplayMode>();
+        }
         if let Some(path) = &args.kdl {
             app.insert_resource(elodin_editor::ui::schematic::InitialKdlPath(Some(
                 path.clone(),
