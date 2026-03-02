@@ -414,7 +414,7 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
                         ui.add_space(6.0);
                         ui.label(
                             egui::RichText::new(
-                                "Add an ellipsoid object to enable Coverage and Projection 2D.",
+                                "No ellipsoid detected.",
                             )
                             .color(scheme.text_secondary)
                             .italics(),
