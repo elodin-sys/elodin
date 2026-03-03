@@ -657,7 +657,6 @@ pub enum ArchiveFormat {
     ArrowIpc,
     Parquet,
     Csv,
-    Native,
 }
 
 /// Request a unified replication stream from the source database.
