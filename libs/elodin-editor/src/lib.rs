@@ -14,7 +14,7 @@ use bevy::{
     math::{DQuat, DVec3},
     pbr::wireframe::{WireframeConfig, WireframePlugin},
     prelude::*,
-    window::{PresentMode, PrimaryWindow, WindowRef, WindowResolution},
+    window::{PrimaryWindow, WindowRef, WindowResolution},
     winit::{WINIT_WINDOWS, WinitSettings},
 };
 use bevy_editor_cam::{SyncCameraPosition, controller::component::EditorCam};
@@ -41,7 +41,7 @@ use plugins::view_cube::{ViewCubeConfig, ViewCubePlugin};
 use ui::{
     UI_ORDER_BASE,
     colors::{ColorExt, get_scheme},
-    create_egui_context,
+    create_egui_context, default_present_mode,
     inspector::viewport::set_viewport_pos,
     plot::{CollectedGraphData, gpu::LineHandle},
     tiles,
@@ -55,10 +55,6 @@ mod offset_parse;
 pub mod plugins;
 pub mod ui;
 pub mod vector_arrow;
-
-const fn default_present_mode() -> PresentMode {
-    PresentMode::Fifo
-}
 
 #[cfg(not(target_family = "wasm"))]
 pub mod run;
