@@ -63,7 +63,8 @@ struct CameraFrustumFaceVisual {
     target: Entity,
 }
 
-const FRUSTUM_FACE_ALPHA: u8 = 10;
+const FRUSTUM_FACE_ALPHA: u8 = 45;
+const FRUSTUM_FACE_EMISSIVE_STRENGTH: f32 = 0.15;
 
 fn frustum_face_material_for_color(
     color: impeller2_wkt::Color,
@@ -82,10 +83,19 @@ fn frustum_face_material_for_color(
 
     let material = materials.add(StandardMaterial {
         base_color: Color::srgba_u8(key.r, key.g, key.b, FRUSTUM_FACE_ALPHA),
-        emissive: Color::srgb_u8(key.r, key.g, key.b).into(),
+        emissive: Color::srgba(
+            (key.r as f32 / 255.0) * FRUSTUM_FACE_EMISSIVE_STRENGTH,
+            (key.g as f32 / 255.0) * FRUSTUM_FACE_EMISSIVE_STRENGTH,
+            (key.b as f32 / 255.0) * FRUSTUM_FACE_EMISSIVE_STRENGTH,
+            1.0,
+        )
+        .into(),
         cull_mode: None,
+        double_sided: true,
         unlit: true,
         alpha_mode: AlphaMode::Blend,
+        perceptual_roughness: 0.28,
+        metallic: 0.04,
         depth_bias: -4.0,
         ..Default::default()
     });
