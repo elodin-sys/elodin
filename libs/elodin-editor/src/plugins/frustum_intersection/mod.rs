@@ -107,11 +107,7 @@ struct DesiredIntersectionLight {
 #[derive(SystemParam)]
 struct FrustumIntersectionParams<'w, 's> {
     main_viewports: Query<'w, 's, MainViewportQueryItem, With<MainCamera>>,
-    ellipsoids: Query<
-        'w,
-        's,
-        (Entity, &'static GlobalTransform, &'static Object3DState),
-    >,
+    ellipsoids: Query<'w, 's, (Entity, &'static GlobalTransform, &'static Object3DState)>,
     children: Query<'w, 's, &'static Children>,
     mesh_children: Query<'w, 's, (), With<Object3DMeshChild>>,
     transforms: Query<'w, 's, &'static Transform>,
@@ -156,12 +152,11 @@ impl Plugin for FrustumIntersectionPlugin {
 
 /// When a viewport has show_frustums, enable intersection features on that viewport (if not already
 /// enabled), so the features are available as soon as the user shows frustums.
-fn enable_intersection_when_show_frustums(mut configs: Query<&mut ViewportConfig, With<MainCamera>>) {
+fn enable_intersection_when_show_frustums(
+    mut configs: Query<&mut ViewportConfig, With<MainCamera>>,
+) {
     for mut config in configs.iter_mut() {
-        if config.show_frustums
-            && !config.show_coverage_in_viewport
-            && !config.show_projection_2d
-        {
+        if config.show_frustums && !config.show_coverage_in_viewport && !config.show_projection_2d {
             config.show_coverage_in_viewport = true;
             config.show_projection_2d = true;
             config.show_ratio_monitor = true;
@@ -792,9 +787,9 @@ fn draw_frustum_ellipsoid_intersections(
             let maybe_ratio =
                 compute_intersection_volume(bounds_min, bounds_max, frustum, ellipsoid);
 
-            let some_target_wants_coverage = targets.iter().any(|(t, _, _, sc, _)| {
-                *sc && *t != frustum.source
-            });
+            let some_target_wants_coverage = targets
+                .iter()
+                .any(|(t, _, _, sc, _)| *sc && *t != frustum.source);
             if let Some(ratio) = maybe_ratio.filter(|_| some_target_wants_coverage) {
                 let entry = ellipsoid_max_ratio.entry(ellipsoid.entity).or_insert(0.0);
                 *entry = entry.max(ratio);
@@ -808,7 +803,14 @@ fn draw_frustum_ellipsoid_intersections(
             let Some(mesh) = build_projection_mesh(frustum, ellipsoid) else {
                 continue;
             };
-            for (target_camera, render_layers, target_projection_color, _show_coverage, target_show_projection) in &targets {
+            for (
+                target_camera,
+                render_layers,
+                target_projection_color,
+                _show_coverage,
+                target_show_projection,
+            ) in &targets
+            {
                 if frustum.source == *target_camera || !target_show_projection {
                     continue;
                 }

@@ -13,9 +13,7 @@ use impeller2_wkt::{ComponentValue, QueryType, WorldPos};
 use nox::{ArrayBuf, ArrayRepr, Vector3};
 
 use crate::EqlContext;
-use crate::object_3d::{
-    ComponentArrayExt, EditableEQL, Object3DState, compile_eql_expr,
-};
+use crate::object_3d::{ComponentArrayExt, EditableEQL, Object3DState, compile_eql_expr};
 use crate::ui::button::EButton;
 use crate::ui::colors::{EColor, get_scheme};
 use crate::ui::theme::configure_input_with_border;
@@ -351,7 +349,6 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
                             }
                         });
                     });
-
                 }
 
                 ui.add_space(8.0);
@@ -372,7 +369,8 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
                     ui.add_space(8.0);
                     ui.horizontal(|ui| {
                         ui.label(
-                            egui::RichText::new("COVERAGE IN VIEWPORT").color(scheme.text_secondary),
+                            egui::RichText::new("COVERAGE IN VIEWPORT")
+                                .color(scheme.text_secondary),
                         );
                         ui.with_layout(egui::Layout::right_to_left(Align::Min), |ui| {
                             theme::configure_input_with_border(ui.style_mut());
