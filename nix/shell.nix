@@ -201,7 +201,7 @@ with pkgs; let
 
         # HOOK
 
-        exec ${pkgs.zsh}/bin/zsh 
+        exec ${pkgs.zsh}/bin/zsh
       fi
     '';
   };
