@@ -82,6 +82,7 @@ with pkgs; let
         kubectl
         jq
         yq
+        git
         git-filter-repo
         git-lfs
         (google-cloud-sdk.withExtraComponents (
@@ -146,7 +147,6 @@ with pkgs; let
     );
 
     doCheck = false;
-
     shellHook = ''
       case "$(uname -s)" in
         Linux*)
@@ -170,7 +170,10 @@ with pkgs; let
       ])}:''${LD_LIBRARY_PATH}"
         ;;
       esac
-
+      export REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+      if [ -f "$REPO_ROOT/nix/shellrc" ]; then
+        export NIX_SHELLRC="$REPO_ROOT/nix/shellrc"
+      fi
       # start the shell if we're in an interactive shell
       if [[ $- == *i* ]]; then
         echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -184,12 +187,21 @@ with pkgs; let
         echo ""
         echo "SDK Development (if needed):"
         echo "  "
-        echo "uv venv --python 3.12"
-        echo "source .venv/bin/activate"
-        echo "uvx maturin develop --uv --manifest-path=libs/nox-py/Cargo.toml"
+        if [ "''${NIX_SHELLRC_READY:-0}" -eq 1 ]; then
+            echo "init-elodin; # To install elodin-py, elodin, and elodin-db."
+        else
+            echo "uv venv --python 3.12"
+            echo "source .venv/bin/activate"
+            echo "uvx maturin develop --uv --manifest-path=libs/nox-py/Cargo.toml && just install"
+            echo ""
+            echo "OR use 'init-elodin' shell function, by adding this to your .zshrc:"
+            echo 'export NIX_SHELLRC_READY=1; [[ -n "$NIX_SHELLRC" ]] && source "$NIX_SHELLRC"'
+        fi
         echo ""
 
-        exec ${pkgs.zsh}/bin/zsh
+        # HOOK
+
+        exec ${pkgs.zsh}/bin/zsh 
       fi
     '';
   };
@@ -209,7 +221,7 @@ in {
         shellHook =
           lib.replaceStrings
           [
-            "exec ${pkgs.zsh}/bin/zsh"
+            "# HOOK"
           ]
           [
             ''
@@ -217,8 +229,6 @@ in {
               echo "  • Tracy GUI is available by running 'tracy'"
               echo "  • Run Elodin with: RUST_LOG=info cargo run --release -p elodin --features tracy"
               echo ""
-
-              exec ${pkgs.zsh}/bin/zsh
             ''
           ]
           shellAttrs.shellHook;
