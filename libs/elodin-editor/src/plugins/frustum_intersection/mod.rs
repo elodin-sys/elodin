@@ -17,8 +17,9 @@ use impeller2_bevy::{ComponentMetadataRegistry, ComponentValue, EntityMap};
 use impeller2_wkt::ComponentMetadata;
 use std::collections::HashMap;
 
-/// POC marching grid resolution (cells). Balance quality vs per-frame CPU cost.
+/// Marching grid resolution for volume sampling. Higher = better quality, higher CPU cost per frame.
 const INTERSECTION_GRID: UVec3 = UVec3::new(32, 32, 32);
+/// Epsilon for signed-distance and plane tests.
 const SURFACE_EPS: f32 = 1.0e-5;
 
 #[derive(Clone, Copy)]
@@ -152,6 +153,7 @@ impl Plugin for FrustumIntersectionPlugin {
 
 /// When a viewport has show_frustums, enable intersection features on that viewport (if not already
 /// enabled), so the features are available as soon as the user shows frustums.
+/// Runs each frame; mutations only occur on the transition (one-time auto-enable per viewport).
 fn enable_intersection_when_show_frustums(
     mut configs: Query<&mut ViewportConfig, With<MainCamera>>,
 ) {
@@ -168,7 +170,9 @@ const PROJECTION_ALPHA: u8 = 230;
 const PROJECTION_EMISSIVE_STRENGTH: f32 = 1.4;
 const PROJECTION_DEPTH_BIAS: f32 = -8.0;
 const INTERSECTION_LIGHT_INTENSITY: f32 = 1500.0;
+/// Ellipsoid tint: min blend toward warm when partially inside frustum.
 const ELLIPSOID_TINT_MIN_BLEND: f32 = 0.20;
+/// Ellipsoid tint: max blend toward green when fully inside frustum.
 const ELLIPSOID_TINT_MAX_BLEND: f32 = 0.65;
 const ELLIPSOID_TINT_EMISSIVE_SCALE: f32 = 0.12;
 
@@ -429,6 +433,7 @@ fn compute_intersection_volume(
     Some(ratio)
 }
 
+/// Grid resolution for 2D projection mesh on far plane. Higher = finer projection boundary.
 const PROJECTION_GRID: usize = 80;
 
 fn ray_intersects_ellipsoid_in_frustum(

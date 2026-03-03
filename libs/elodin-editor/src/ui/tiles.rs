@@ -122,8 +122,6 @@ pub struct ViewportConfig {
     /// Display 2D projection of frustum∩ellipsoid on far plane.
     pub show_projection_2d: bool,
     pub show_ratio_monitor: bool,
-    /// Set when we auto-enabled intersection features (create_frustum + ellipsoid detected).
-    pub intersection_auto_enabled: bool,
     pub projection_color: impeller2_wkt::Color,
     pub frustums_color: impeller2_wkt::Color,
     pub frustums_thickness: f32,
@@ -1434,7 +1432,6 @@ impl ViewportPane {
                 show_coverage_in_viewport: false,
                 show_projection_2d: false,
                 show_ratio_monitor: false,
-                intersection_auto_enabled: false,
                 projection_color: default_projection_color(),
                 frustums_color: viewport.frustums_color,
                 frustums_thickness: viewport.frustums_thickness,
