@@ -132,7 +132,9 @@ impl Plugin for EditorPlugin {
         } else {
             bevy::window::CompositeAlphaMode::Opaque
         };
-        let winit_settings = if cfg!(target_os = "macos") {
+        let winit_settings = if cfg!(feature = "tracy") {
+            WinitSettings::continuous()
+        } else if cfg!(target_os = "macos") {
             WinitSettings {
                 focused_mode: bevy::winit::UpdateMode::Reactive {
                     wait: Duration::from_millis(16),
@@ -196,6 +198,10 @@ impl Plugin for EditorPlugin {
             .insert_resource(winit_settings)
             .init_resource::<tiles::ViewportContainsPointer>()
             .add_plugins(bevy_framepace::FramepacePlugin)
+            .insert_resource(
+                bevy_framepace::FramepaceSettings::default()
+                    .with_limiter(bevy_framepace::Limiter::Off),
+            )
             //.add_plugins(DefaultPickingPlugins)
             .add_plugins(bevy_editor_cam::DefaultEditorCamPlugins)
             .add_plugins(big_space::FloatingOriginPlugin::<i128>::new(16_000., 100.))
