@@ -12,13 +12,14 @@ use bevy::window::{PrimaryWindow, WindowRef};
 use bevy_editor_cam::controller::component::EditorCam;
 use bevy_editor_cam::extensions::look_to::LookToTrigger;
 use bevy_egui::EguiContexts;
-use std::f32::consts;
+use std::{collections::HashMap, f32::consts};
 
 pub struct NavigationGizmoPlugin;
 
 impl Plugin for NavigationGizmoPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<RenderLayerAlloc>()
+            .init_resource::<NavGizmoAnchorState>()
             .add_systems(PostUpdate, set_camera_viewport)
             .add_systems(PostUpdate, sync_nav_camera)
             .add_plugins(MeshPickingPlugin);
@@ -141,6 +142,20 @@ pub struct NavGizmo;
 #[derive(Component, Debug)]
 pub struct NavGizmoParent {
     pub main_camera: Entity,
+}
+
+#[derive(Debug)]
+struct NavGizmoDrag {
+    main_camera: Entity,
+    pointer_press: Vec2,
+    grab_offset: Vec2,
+    dragging: bool,
+}
+
+#[derive(Resource, Default, Debug)]
+struct NavGizmoAnchorState {
+    offsets: HashMap<Entity, Vec2>,
+    active_drag: Option<NavGizmoDrag>,
 }
 
 pub fn spawn_gizmo(
@@ -369,12 +384,20 @@ pub fn sync_nav_camera(
     }
 }
 
-pub fn set_camera_viewport(
+fn clamp_overlay_position(position: Vec2, side_length: f32, window_size: Vec2) -> Vec2 {
+    let max_x = (window_size.x - side_length).max(0.0);
+    let max_y = (window_size.y - side_length).max(0.0);
+    Vec2::new(position.x.clamp(0.0, max_x), position.y.clamp(0.0, max_y))
+}
+
+fn set_camera_viewport(
     windows: Query<(Entity, &Window, &bevy_egui::EguiContextSettings)>,
     _contexts: EguiContexts,
     mut nav_camera_query: Query<(&mut Camera, &NavGizmoParent)>,
     main_camera_query: Query<(&Camera, Option<&ViewportRect>), Without<NavGizmoParent>>,
     primary_query: Query<Entity, With<PrimaryWindow>>,
+    mouse_buttons: Res<ButtonInput<MouseButton>>,
+    mut anchor_state: ResMut<NavGizmoAnchorState>,
 ) {
     let margin = 8.0;
     let top_offset = 10.0;
@@ -382,6 +405,12 @@ pub fn set_camera_viewport(
     let max_viewport_fraction = 0.45;
     let min_side_length = 64.0;
     let min_viewport_for_gizmo = 100.0;
+    let drag_start_threshold = 4.0;
+
+    if !mouse_buttons.pressed(MouseButton::Left) {
+        anchor_state.active_drag = None;
+    }
+
     for (mut nav_camera, parent) in nav_camera_query.iter_mut() {
         let Ok((main, viewport_rect)) = main_camera_query.get(parent.main_camera) else {
             continue;
@@ -429,10 +458,64 @@ pub fn set_camera_viewport(
             .min(min_viewport_dim * max_viewport_fraction)
             .max(min_side_length * scale_factor);
         let right_offset = 20.0 * scale_factor; // Slight left offset to avoid overlap with right panel
-        let nav_viewport_pos = Vec2::new(
+        let default_nav_viewport_pos = Vec2::new(
             (viewport_pos.x + viewport_size.x) - (side_length + margin + right_offset),
             viewport_pos.y + top_offset,
         );
+
+        let window_size = window.physical_size().as_vec2();
+        let current_offset = anchor_state
+            .offsets
+            .get(&parent.main_camera)
+            .copied()
+            .unwrap_or(Vec2::ZERO);
+        let mut nav_viewport_pos = clamp_overlay_position(
+            default_nav_viewport_pos + current_offset,
+            side_length,
+            window_size,
+        );
+
+        if mouse_buttons.just_pressed(MouseButton::Left)
+            && anchor_state.active_drag.is_none()
+            && let Some(cursor_pos) = window.physical_cursor_position()
+        {
+            let drag_rect = Rect::from_corners(
+                nav_viewport_pos,
+                nav_viewport_pos + Vec2::splat(side_length),
+            );
+            if drag_rect.contains(cursor_pos) {
+                anchor_state.active_drag = Some(NavGizmoDrag {
+                    main_camera: parent.main_camera,
+                    pointer_press: cursor_pos,
+                    grab_offset: cursor_pos - nav_viewport_pos,
+                    dragging: false,
+                });
+            }
+        }
+
+        if let Some(active_drag) = anchor_state.active_drag.as_mut()
+            && active_drag.main_camera == parent.main_camera
+            && let Some(cursor_pos) = window.physical_cursor_position()
+        {
+            if !active_drag.dragging
+                && cursor_pos.distance(active_drag.pointer_press) >= drag_start_threshold
+            {
+                active_drag.dragging = true;
+            }
+
+            if active_drag.dragging {
+                let dragged_pos = clamp_overlay_position(
+                    cursor_pos - active_drag.grab_offset,
+                    side_length,
+                    window_size,
+                );
+                anchor_state
+                    .offsets
+                    .insert(parent.main_camera, dragged_pos - default_nav_viewport_pos);
+                nav_viewport_pos = dragged_pos;
+            }
+        }
+
         // Clamp the gizmo viewport to the actual window surface to avoid invalid wgpu viewports
         // when the target window is smaller than the desired overlay.
         let window_size = window.physical_size();
