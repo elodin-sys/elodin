@@ -18,7 +18,7 @@ use frustum_tint_material::{FrustumTintExt, FrustumTintMaterial, FrustumTintPara
 use impeller2::types::ComponentId;
 use impeller2_bevy::{ComponentMetadataRegistry, ComponentValue, EntityMap};
 use impeller2_wkt::ComponentMetadata;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// Marching grid resolution for volume sampling. Higher = better quality, higher CPU cost per frame.
 const INTERSECTION_GRID: UVec3 = UVec3::new(32, 32, 32);
@@ -94,7 +94,6 @@ struct FrustumEllipsoidTintOverlay {
 
 #[derive(Component, Clone, Copy, Debug)]
 pub struct IntersectionRatio {
-    pub source: Entity,
     pub ellipsoid: Entity,
     pub ratio: f32,
 }
@@ -407,19 +406,16 @@ fn compute_intersection_volume(
         return None;
     }
 
-    let points_x = nx + 1;
-    let points_y = ny + 1;
-    let points_z = nz + 1;
     let mut has_inside = false;
     let mut inside_intersection_count: u32 = 0;
-    for k in 0..points_z {
-        let tz = k as f32 / nz as f32;
+    for k in 0..nz {
+        let tz = (k as f32 + 0.5) / nz as f32;
         let z = bounds_min.z + size.z * tz;
-        for j in 0..points_y {
-            let ty = j as f32 / ny as f32;
+        for j in 0..ny {
+            let ty = (j as f32 + 0.5) / ny as f32;
             let y = bounds_min.y + size.y * ty;
-            for i in 0..points_x {
-                let tx = i as f32 / nx as f32;
+            for i in 0..nx {
+                let tx = (i as f32 + 0.5) / nx as f32;
                 let x = bounds_min.x + size.x * tx;
                 let p = Vec3::new(x, y, z);
                 let d_ellipsoid = ellipsoid_signed_distance(p, ellipsoid);
@@ -814,7 +810,6 @@ fn draw_frustum_ellipsoid_intersections(
     let mut desired = Vec::new();
     let mut desired_lights = Vec::new();
     let mut desired_tint_overlays = Vec::new();
-    let mut ellipsoid_max_ratio: HashMap<Entity, f32> = HashMap::new();
     let mut coverage_layers = RenderLayers::none();
     for (_, render_layers, _, show_coverage, _) in &targets {
         if *show_coverage {
@@ -822,6 +817,17 @@ fn draw_frustum_ellipsoid_intersections(
         }
     }
     let any_target_wants_coverage = coverage_layers.iter().next().is_some();
+    let any_target_wants_projection = targets
+        .iter()
+        .any(|(_, _, _, _, show_projection)| *show_projection);
+    let mut ellipsoid_max_ratio: HashMap<Entity, f32> = if any_target_wants_coverage {
+        ellipsoids
+            .iter()
+            .map(|ellipsoid| (ellipsoid.entity, 0.0_f32))
+            .collect::<HashMap<Entity, f32>>()
+    } else {
+        HashMap::<Entity, f32>::new()
+    };
 
     for frustum in &sources {
         for ellipsoid in &ellipsoids {
@@ -836,19 +842,20 @@ fn draw_frustum_ellipsoid_intersections(
 
             let bounds_min = frustum.aabb_min.max(ellipsoid.aabb_min);
             let bounds_max = frustum.aabb_max.min(ellipsoid.aabb_max);
-            let maybe_ratio =
-                compute_intersection_volume(bounds_min, bounds_max, frustum, ellipsoid);
+            let maybe_ratio = if any_target_wants_coverage {
+                compute_intersection_volume(bounds_min, bounds_max, frustum, ellipsoid)
+            } else {
+                None
+            };
 
-            if let Some(ratio) = maybe_ratio.filter(|_| any_target_wants_coverage) {
+            if let Some(ratio) = maybe_ratio {
                 let entry = ellipsoid_max_ratio.entry(ellipsoid.entity).or_insert(0.0);
-                *entry = entry.max(ratio);
-                ratios.0.push(IntersectionRatio {
-                    source: frustum.source,
-                    ellipsoid: ellipsoid.entity,
-                    ratio,
-                });
+                *entry = (*entry).max(ratio);
             }
 
+            if !any_target_wants_projection {
+                continue;
+            }
             let Some(mesh) = build_projection_mesh(frustum, ellipsoid) else {
                 continue;
             };
@@ -888,6 +895,11 @@ fn draw_frustum_ellipsoid_intersections(
                     transform: light_transform,
                 });
             }
+        }
+    }
+    if any_target_wants_coverage {
+        for (&ellipsoid, &ratio) in &ellipsoid_max_ratio {
+            ratios.0.push(IntersectionRatio { ellipsoid, ratio });
         }
     }
 
@@ -1103,15 +1115,44 @@ struct CoverageDbParams<'w, 's> {
     names: Query<'w, 's, &'static Name>,
 }
 
+fn set_coverage_value(
+    entity: Entity,
+    ratio: f32,
+    values: &mut Query<'_, '_, &'static mut ComponentValue>,
+    commands: &mut Commands,
+) {
+    if let Ok(mut value) = values.get_mut(entity)
+        && let ComponentValue::F32(arr) = &mut *value
+    {
+        let buf = nox::ArrayBuf::as_mut_buf(&mut arr.buf);
+        if !buf.is_empty() {
+            buf[0] = ratio;
+            return;
+        }
+    }
+
+    let mut arr = nox::Array::<f32, nox::Dyn>::zeroed(&[1]);
+    nox::ArrayBuf::as_mut_buf(&mut arr.buf)[0] = ratio;
+    commands.entity(entity).insert(ComponentValue::F32(arr));
+}
+
 fn write_coverage_to_db(mut params: CoverageDbParams<'_, '_>, mut commands: Commands) {
+    let mut ratios_by_ellipsoid: HashMap<Entity, f32> = HashMap::new();
     for ratio in params.ratios.0.iter() {
+        let entry = ratios_by_ellipsoid.entry(ratio.ellipsoid).or_insert(0.0);
+        *entry = (*entry).max(ratio.ratio);
+    }
+
+    let mut touched_cids = HashSet::new();
+    for (&ellipsoid, &ratio) in &ratios_by_ellipsoid {
         let ellipsoid_name = params
             .names
-            .get(ratio.ellipsoid)
+            .get(ellipsoid)
             .map(|n| n.as_str())
             .unwrap_or("ellipsoid");
         let full_name = format!("{ellipsoid_name}.frustum_coverage");
         let cid = ComponentId::new(&full_name);
+        touched_cids.insert(cid);
 
         let entity = if let Some(&e) = params.entity_map.get(&cid) {
             e
@@ -1144,17 +1185,25 @@ fn write_coverage_to_db(mut params: CoverageDbParams<'_, '_>, mut commands: Comm
             e
         };
 
-        if let Ok(mut value) = params.values.get_mut(entity) {
-            if let ComponentValue::F32(arr) = &mut *value {
-                let buf = nox::ArrayBuf::as_mut_buf(&mut arr.buf);
-                if !buf.is_empty() {
-                    buf[0] = ratio.ratio;
-                }
+        set_coverage_value(entity, ratio, &mut params.values, &mut commands);
+    }
+
+    let stale_coverage_entities = params
+        .entity_map
+        .iter()
+        .filter_map(|(cid, entity)| {
+            if touched_cids.contains(cid) {
+                return None;
             }
-        } else {
-            let mut arr = nox::Array::<f32, nox::Dyn>::zeroed(&[1]);
-            nox::ArrayBuf::as_mut_buf(&mut arr.buf)[0] = ratio.ratio;
-            commands.entity(entity).insert(ComponentValue::F32(arr));
-        }
+            let is_coverage = params
+                .metadata_reg
+                .get(cid)
+                .is_some_and(|metadata| metadata.name.ends_with(".frustum_coverage"));
+            if is_coverage { Some(*entity) } else { None }
+        })
+        .collect::<Vec<_>>();
+
+    for entity in stale_coverage_entities {
+        set_coverage_value(entity, 0.0, &mut params.values, &mut commands);
     }
 }

@@ -362,8 +362,6 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
                     viewport_config.show_coverage_in_viewport = false;
                     viewport_config.show_projection_2d = false;
                 }
-                viewport_config.show_ratio_monitor =
-                    show_intersection_options && viewport_config.show_coverage_in_viewport;
 
                 if show_intersection_options {
                     ui.add_space(8.0);
@@ -408,15 +406,6 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
                         viewport_config.projection_color =
                             impeller2_wkt::Color::from_color32(proj_color);
                     }
-                } else if !has_detected_ellipsoid {
-                    ui.add_space(6.0);
-                    ui.label(
-                        egui::RichText::new(
-                            "Add an ellipsoid and enable SHOW FRUSTUMS to access intersection options.",
-                        )
-                            .color(scheme.text_secondary)
-                            .italics(),
-                    );
                 }
             });
     }

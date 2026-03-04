@@ -22,7 +22,6 @@ Controls in the viewport Inspector:
   - **PROJ. 2D:** Toggle 2D projection mesh on far plane.
   - **PROJ. COLOR:** Color for the 2D projection mesh in this viewport (shown only when **PROJ. 2D** is on).
 - If prerequisites are not met, intersection toggles are hidden and forced off.
-- If no ellipsoid is detected, a helper message is shown.
 
 ## Notes
 

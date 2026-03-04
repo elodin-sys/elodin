@@ -121,7 +121,6 @@ pub struct ViewportConfig {
     pub show_coverage_in_viewport: bool,
     /// Display 2D projection of frustum∩ellipsoid on far plane.
     pub show_projection_2d: bool,
-    pub show_ratio_monitor: bool,
     pub projection_color: impeller2_wkt::Color,
     pub frustums_color: impeller2_wkt::Color,
     pub frustums_thickness: f32,
@@ -1463,7 +1462,6 @@ impl ViewportPane {
                 show_frustums: viewport.show_frustums,
                 show_coverage_in_viewport: viewport.show_frustums,
                 show_projection_2d: viewport.show_frustums,
-                show_ratio_monitor: viewport.show_frustums,
                 projection_color: default_projection_color(),
                 frustums_color: viewport.frustums_color,
                 frustums_thickness: viewport.frustums_thickness,
