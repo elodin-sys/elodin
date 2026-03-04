@@ -39,7 +39,9 @@ impl Default for FrustumTintExt {
 
 impl MaterialExtension for FrustumTintExt {
     fn fragment_shader() -> ShaderRef {
-        ShaderRef::Path("embedded://elodin_editor/plugins/frustum_intersection/frustum_tint.wgsl".into())
+        ShaderRef::Path(
+            "embedded://elodin_editor/plugins/frustum_intersection/frustum_tint.wgsl".into(),
+        )
     }
 
     fn deferred_fragment_shader() -> ShaderRef {
