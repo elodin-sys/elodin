@@ -11,6 +11,7 @@ use bevy::prelude::*;
 use bevy::window::{PrimaryWindow, WindowRef};
 use bevy_editor_cam::controller::component::EditorCam;
 use bevy_editor_cam::extensions::look_to::LookToTrigger;
+use bevy_editor_cam::prelude::EnabledMotion;
 use bevy_egui::EguiContexts;
 use std::{collections::HashMap, f32::consts};
 
@@ -390,11 +391,13 @@ fn clamp_overlay_position(position: Vec2, side_length: f32, window_size: Vec2) -
     Vec2::new(position.x.clamp(0.0, max_x), position.y.clamp(0.0, max_y))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn set_camera_viewport(
     windows: Query<(Entity, &Window, &bevy_egui::EguiContextSettings)>,
     _contexts: EguiContexts,
     mut nav_camera_query: Query<(&mut Camera, &NavGizmoParent)>,
     main_camera_query: Query<(&Camera, Option<&ViewportRect>), Without<NavGizmoParent>>,
+    mut main_editor_cam_query: Query<&mut EditorCam, (With<MainCamera>, Without<NavGizmoParent>)>,
     primary_query: Query<Entity, With<PrimaryWindow>>,
     mouse_buttons: Res<ButtonInput<MouseButton>>,
     mut anchor_state: ResMut<NavGizmoAnchorState>,
@@ -513,6 +516,16 @@ fn set_camera_viewport(
                     .offsets
                     .insert(parent.main_camera, dragged_pos - default_nav_viewport_pos);
                 nav_viewport_pos = dragged_pos;
+
+                if let Ok(mut editor_cam) = main_editor_cam_query.get_mut(parent.main_camera) {
+                    // Prevent the main viewport from orbiting while we drag the overlay.
+                    editor_cam.enabled_motion = EnabledMotion {
+                        pan: false,
+                        orbit: false,
+                        zoom: false,
+                    };
+                    editor_cam.end_move();
+                }
             }
         }
 
