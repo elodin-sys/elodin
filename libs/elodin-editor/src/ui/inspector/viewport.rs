@@ -408,15 +408,12 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
                         viewport_config.projection_color =
                             impeller2_wkt::Color::from_color32(proj_color);
                     }
-                } else {
+                } else if !has_detected_ellipsoid {
                     ui.add_space(6.0);
-                    let status_msg = if has_detected_ellipsoid {
-                        "Enable SHOW FRUSTUMS to access intersection options."
-                    } else {
-                        "Add an ellipsoid and enable SHOW FRUSTUMS to access intersection options."
-                    };
                     ui.label(
-                        egui::RichText::new(status_msg)
+                        egui::RichText::new(
+                            "Add an ellipsoid and enable SHOW FRUSTUMS to access intersection options.",
+                        )
                             .color(scheme.text_secondary)
                             .italics(),
                     );
