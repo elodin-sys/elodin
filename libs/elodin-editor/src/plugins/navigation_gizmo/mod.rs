@@ -1,6 +1,7 @@
 use crate::{
     MainCamera,
     plugins::{camera_anchor::camera_anchor_from_transform, gizmos::GIZMO_RENDER_LAYER},
+    ui::ViewportRect,
 };
 use bevy::animation::{AnimationTarget, AnimationTargetId, animated_field};
 use bevy::camera::visibility::RenderLayers;
@@ -372,7 +373,7 @@ pub fn set_camera_viewport(
     windows: Query<(Entity, &Window, &bevy_egui::EguiContextSettings)>,
     _contexts: EguiContexts,
     mut nav_camera_query: Query<(&mut Camera, &NavGizmoParent)>,
-    main_camera_query: Query<&mut Camera, Without<NavGizmoParent>>,
+    main_camera_query: Query<(&Camera, Option<&ViewportRect>), Without<NavGizmoParent>>,
     primary_query: Query<Entity, With<PrimaryWindow>>,
 ) {
     let margin = 8.0;
@@ -382,10 +383,7 @@ pub fn set_camera_viewport(
     let min_side_length = 64.0;
     let min_viewport_for_gizmo = 100.0;
     for (mut nav_camera, parent) in nav_camera_query.iter_mut() {
-        let Ok(main) = main_camera_query.get(parent.main_camera) else {
-            continue;
-        };
-        let Some(viewport) = &main.viewport else {
+        let Ok((main, viewport_rect)) = main_camera_query.get(parent.main_camera) else {
             continue;
         };
         let target_window = match &nav_camera.target {
@@ -402,8 +400,19 @@ pub fn set_camera_viewport(
         let scale_factor = window.scale_factor() * egui_settings.scale_factor;
         let margin = margin * scale_factor;
         let top_offset = top_offset * scale_factor;
-        let viewport_pos = viewport.physical_position.as_vec2();
-        let viewport_size = viewport.physical_size.as_vec2();
+        let (viewport_pos, viewport_size) = if let Some(rect) = viewport_rect.and_then(|r| r.0) {
+            let pos = rect.left_top().to_vec2() * scale_factor;
+            let size = rect.size() * scale_factor;
+            (Vec2::new(pos.x, pos.y), Vec2::new(size.x, size.y))
+        } else {
+            let Some(viewport) = &main.viewport else {
+                continue;
+            };
+            (
+                viewport.physical_position.as_vec2(),
+                viewport.physical_size.as_vec2(),
+            )
+        };
 
         let min_viewport_dim = viewport_size.x.min(viewport_size.y);
         if min_viewport_dim < min_viewport_for_gizmo * scale_factor {
