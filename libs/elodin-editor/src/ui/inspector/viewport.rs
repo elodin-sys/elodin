@@ -368,10 +368,7 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
                 if show_intersection_options {
                     ui.add_space(8.0);
                     ui.horizontal(|ui| {
-                        ui.label(
-                            egui::RichText::new("COVERAGE IN VIEWPORT")
-                                .color(scheme.text_secondary),
-                        );
+                        ui.label(egui::RichText::new("COVERAGE").color(scheme.text_secondary));
                         ui.with_layout(egui::Layout::right_to_left(Align::Min), |ui| {
                             theme::configure_input_with_border(ui.style_mut());
                             ui.checkbox(&mut viewport_config.show_coverage_in_viewport, "");
@@ -380,7 +377,7 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
 
                     ui.add_space(8.0);
                     ui.horizontal(|ui| {
-                        ui.label(egui::RichText::new("PROJECTION 2D").color(scheme.text_secondary));
+                        ui.label(egui::RichText::new("PROJ. 2D").color(scheme.text_secondary));
                         ui.with_layout(egui::Layout::right_to_left(Align::Min), |ui| {
                             theme::configure_input_with_border(ui.style_mut());
                             ui.checkbox(&mut viewport_config.show_projection_2d, "");
@@ -391,8 +388,7 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
                         let mut proj_color = viewport_config.projection_color.into_color32();
                         ui.horizontal(|ui| {
                             ui.label(
-                                egui::RichText::new("PROJECTION COLOR")
-                                    .color(scheme.text_secondary),
+                                egui::RichText::new("PROJ. COLOR").color(scheme.text_secondary),
                             );
                             ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
                                 let swatch = ui.add(
