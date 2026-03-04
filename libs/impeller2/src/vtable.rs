@@ -467,7 +467,15 @@ impl<Ops: Buf<Op>, Data: Buf<u8>, Fields: Buf<Field>> VTable<Ops, Data, Fields> 
                 view,
                 timestamp,
                 ..
-            } = res?;
+            } = match res {
+                Ok(f) => f,
+                Err(Error::BufferUnderflow) => {
+                    #[cfg(feature = "std")]
+                    eprintln!("[impeller2] skipping VTable field with BufferUnderflow");
+                    continue;
+                }
+                Err(e) => return Err(e),
+            };
             let view = view.expect("table not found");
             if let Err(err) = sink.apply_value(component_id, view, timestamp) {
                 return Ok(Err(err));

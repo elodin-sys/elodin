@@ -59,6 +59,9 @@ pub struct VideoStream {
     pub current_frame: Option<Image>,
     pub size: Vec2,
     pub state: StreamState,
+    /// When set, incoming MsgBatch bytes are treated as raw RGBA pixels
+    /// (bypassing the H.264 decoder). The tuple is `(width, height)`.
+    pub raw_rgba_dims: Option<(u32, u32)>,
 }
 
 #[derive(Component)]
@@ -72,6 +75,7 @@ impl Default for VideoStream {
             current_frame: None,
             size: Vec2::ZERO,
             state: StreamState::default(),
+            raw_rgba_dims: None,
         }
     }
 }
@@ -813,86 +817,92 @@ impl super::widgets::WidgetSystem for VideoStreamWidget<'_, '_> {
                 // Connection + drain handled by `connect_streams` system.
             }
             StreamState::Active => {
-                // Drain is also done by connect_streams, but drain again
-                // here so the widget sees the latest decoded frames
-                // within the same tick.
-                let seek_done = decoder.drain_into_cache(&mut cache);
-                if seek_done {
-                    cache.seeking = false;
-                }
-
-                // --- 2. Pick the best frame to display ---
-                // Check at-or-before first (normal case), then at-or-after
-                // (handles forward-seek when data only exists ahead).
-                if let Some((ts, img)) = cache.decoded_at_or_before(current_ts)
-                    && (current_ts.0 - ts.0).abs() <= NO_DATA_THRESHOLD_US
-                {
-                    stream.current_frame = Some(img.clone());
-                } else if let Some((ts, img)) = cache.decoded_at_or_after(current_ts)
-                    && (ts.0 - current_ts.0).abs() <= NO_DATA_THRESHOLD_US
-                {
-                    stream.current_frame = Some(img.clone());
-                }
-
-                // --- 3. Feed the decoder from the raw cache ---
-                let decoder_near = if let Some(last) = cache.last_decoded_ts {
-                    (current_ts.0 - last.0).abs() < DECODER_NEAR_THRESHOLD_US
+                if let Some((w, h)) = stream.raw_rgba_dims {
+                    if let Some((_ts, data)) = cache.raw_frames.range(..=current_ts).next_back() {
+                        let expected = (w * h * 4) as usize;
+                        if data.len() == expected {
+                            let img = Image::new(
+                                Extent3d {
+                                    width: w,
+                                    height: h,
+                                    depth_or_array_layers: 1,
+                                },
+                                TextureDimension::D2,
+                                data.clone(),
+                                bevy::render::render_resource::TextureFormat::Rgba8UnormSrgb,
+                                RenderAssetUsages::MAIN_WORLD
+                                    | RenderAssetUsages::RENDER_WORLD,
+                            );
+                            stream.current_frame = Some(img);
+                        }
+                    }
                 } else {
-                    false
-                };
+                    // H.264 decoded video: existing decode pipeline.
+                    let seek_done = decoder.drain_into_cache(&mut cache);
+                    if seek_done {
+                        cache.seeking = false;
+                    }
 
-                // Sequential: decoder is behind current_ts but within the
-                // near threshold.  Feed frames one at a time to catch up.
-                // Uses the same wide threshold as decoder_near so there's
-                // no dead zone where neither sequential nor seek fires.
-                let is_sequential = if let Some(last) = cache.last_decoded_ts {
-                    current_ts.0 >= last.0 && (current_ts.0 - last.0) < DECODER_NEAR_THRESHOLD_US
-                } else {
-                    false
-                };
-
-                let has_raw = cache.has_raw_data_near(current_ts, NO_DATA_THRESHOLD_US);
-
-                if is_sequential && !cache.seeking {
-                    // Sequential playback: decoder state is warm, feed next frame.
-                    if let Some((ts, data)) =
-                        cache.next_raw_frame_after(cache.last_decoded_ts.unwrap())
-                        && ts.0 <= current_ts.0 + DECODER_NEAR_THRESHOLD_US
+                    if let Some((ts, img)) = cache.decoded_at_or_before(current_ts)
+                        && (current_ts.0 - ts.0).abs() <= NO_DATA_THRESHOLD_US
                     {
-                        let data = data.clone();
-                        if decoder.process_frame(ts, &data) {
-                            cache.last_decoded_ts = Some(ts);
-                        }
+                        stream.current_frame = Some(img.clone());
+                    } else if let Some((ts, img)) = cache.decoded_at_or_after(current_ts)
+                        && (ts.0 - current_ts.0).abs() <= NO_DATA_THRESHOLD_US
+                    {
+                        stream.current_frame = Some(img.clone());
                     }
-                } else if !decoder_near && has_raw {
-                    // Jump / scrub / first frame: seek from nearest keyframe.
-                    // If no data at-or-before current_ts, seek forward to the
-                    // first available keyframe instead.
-                    let (seek_start, seek_end) =
-                        if let Some(kf) = cache.nearest_keyframe_before(current_ts) {
-                            (kf, current_ts)
-                        } else if let Some(kf) = cache.first_keyframe_after(current_ts) {
-                            let end = cache
-                                .raw_frames
-                                .range(kf..)
-                                .nth(1)
-                                .map(|(t, _)| *t)
-                                .unwrap_or(kf);
-                            (kf, end)
-                        } else {
-                            (current_ts, current_ts)
-                        };
 
-                    let frames = cache.get_raw_sequence(seek_start, seek_end);
-                    if !frames.is_empty() {
-                        cache.seek_generation += 1;
-                        if decoder.send_seek_batch(frames, cache.seek_generation) {
-                            cache.seeking = true;
+                    let decoder_near = if let Some(last) = cache.last_decoded_ts {
+                        (current_ts.0 - last.0).abs() < DECODER_NEAR_THRESHOLD_US
+                    } else {
+                        false
+                    };
+
+                    let is_sequential = if let Some(last) = cache.last_decoded_ts {
+                        current_ts.0 >= last.0
+                            && (current_ts.0 - last.0) < DECODER_NEAR_THRESHOLD_US
+                    } else {
+                        false
+                    };
+
+                    let has_raw = cache.has_raw_data_near(current_ts, NO_DATA_THRESHOLD_US);
+
+                    if is_sequential && !cache.seeking {
+                        if let Some((ts, data)) =
+                            cache.next_raw_frame_after(cache.last_decoded_ts.unwrap())
+                            && ts.0 <= current_ts.0 + DECODER_NEAR_THRESHOLD_US
+                        {
+                            let data = data.clone();
+                            if decoder.process_frame(ts, &data) {
+                                cache.last_decoded_ts = Some(ts);
+                            }
+                        }
+                    } else if !decoder_near && has_raw {
+                        let (seek_start, seek_end) =
+                            if let Some(kf) = cache.nearest_keyframe_before(current_ts) {
+                                (kf, current_ts)
+                            } else if let Some(kf) = cache.first_keyframe_after(current_ts) {
+                                let end = cache
+                                    .raw_frames
+                                    .range(kf..)
+                                    .nth(1)
+                                    .map(|(t, _)| *t)
+                                    .unwrap_or(kf);
+                                (kf, end)
+                            } else {
+                                (current_ts, current_ts)
+                            };
+
+                        let frames = cache.get_raw_sequence(seek_start, seek_end);
+                        if !frames.is_empty() {
+                            cache.seek_generation += 1;
+                            if decoder.send_seek_batch(frames, cache.seek_generation) {
+                                cache.seeking = true;
+                            }
                         }
                     }
                 }
-
-                // Live-stream recovery handled by `connect_streams`.
             }
             StreamState::Error(_) => {}
         }

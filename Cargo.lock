@@ -5017,6 +5017,7 @@ dependencies = [
  "bitvec",
  "const-fnv1a-hash",
  "convert_case 0.7.1",
+ "crossbeam-channel",
  "directories",
  "egui",
  "egui_material_icons",

@@ -96,6 +96,7 @@ impeller2-cli.path = "../db/cli"
 
 # channels
 flume = "0.11.1"
+crossbeam-channel = "0.5"
 
 # parsing
 jiff = "0.2"

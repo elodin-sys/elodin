@@ -67,7 +67,7 @@ pub mod fix_timestamps;
 pub mod follow;
 mod follow_stream;
 pub mod merge;
-mod msg_log;
+pub mod msg_log;
 pub mod prune;
 pub mod time_align;
 pub(crate) mod time_series;
@@ -914,6 +914,10 @@ impl State {
 
     pub fn get_component(&self, component_id: ComponentId) -> Option<&Component> {
         self.components.get(&component_id)
+    }
+
+    pub fn get_msg_log(&self, id: PacketId) -> Option<&MsgLog> {
+        self.msg_logs.get(&id)
     }
 
     pub fn set_component_metadata(

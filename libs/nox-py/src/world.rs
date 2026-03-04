@@ -45,6 +45,30 @@ pub struct World {
     pub metadata: WorldMetadata,
 }
 
+fn default_fps() -> f32 {
+    60.0
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SensorCameraConfig {
+    pub entity_name: String,
+    pub camera_name: String,
+    pub width: u32,
+    pub height: u32,
+    pub fov_degrees: f32,
+    pub near: f32,
+    pub far: f32,
+    pub pos_offset: [f64; 3],
+    pub look_at_offset: [f64; 3],
+    pub channels: u32,
+    #[serde(default = "default_fps")]
+    pub fps: f32,
+    #[serde(default)]
+    pub effect: String,
+    #[serde(default)]
+    pub effect_params: HashMap<String, f64>,
+}
+
 #[derive(Debug, PartialEq, Serialize, Deserialize, Clone)]
 pub struct WorldMetadata {
     pub entity_metadata: HashMap<EntityId, EntityMetadata>,
@@ -57,6 +81,8 @@ pub struct WorldMetadata {
     pub max_tick: u64,
     pub schematic_path: Option<PathBuf>,
     pub schematic: Option<String>,
+    #[serde(default)]
+    pub sensor_cameras: Vec<SensorCameraConfig>,
 }
 
 impl MetadataExt for World {}
@@ -74,6 +100,7 @@ impl Default for WorldMetadata {
             max_tick: u64::MAX,
             schematic: None,
             schematic_path: None,
+            sensor_cameras: Vec::new(),
         }
     }
 }

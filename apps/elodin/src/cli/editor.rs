@@ -194,6 +194,31 @@ impl Cli {
         thread.join().map_err(|_| miette!("join error"))?
     }
 
+    /// Run a simulation with a headless Bevy renderer for sensor cameras.
+    ///
+    /// The headless Bevy app runs on the main thread (required on macOS),
+    /// while the simulation runs on a background thread -- the same pattern
+    /// as `editor()` but without a window or GUI.
+    #[cfg(not(target_os = "windows"))]
+    pub fn run_headless(self, args: Args, rt: Runtime) -> miette::Result<()> {
+        let cancel_token = CancelToken::new();
+        let thread = self.run_sim(&args, rt, cancel_token.clone())?;
+
+        if let Simulator::File(_) = &args.sim {
+            let mut app = App::new();
+            app.add_plugins(elodin_editor::headless::HeadlessEditorPlugin);
+            app.add_plugins(impeller2_bevy::TcpImpellerPlugin::new(Some(
+                SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), 2240),
+            )));
+            app.insert_resource(BevyCancelToken(cancel_token.clone()));
+            app.add_systems(Update, check_cancel_token);
+            app.run();
+        }
+
+        cancel_token.cancel();
+        thread.join().map_err(|_| miette!("join error"))?
+    }
+
     pub fn editor_app(&self) -> miette::Result<App> {
         let mut window_state_file = self.window_state_file()?;
         let mut window_state = String::new();

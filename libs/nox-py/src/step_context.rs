@@ -313,6 +313,39 @@ impl StepContext {
         })
     }
 
+    /// Read the latest message payload from the database as a numpy byte array.
+    ///
+    /// This is used to read sensor camera frames that were written by the
+    /// editor/headless renderer as messages (via MsgWithTimestamp).
+    ///
+    /// Args:
+    ///     msg_name: The message name (e.g., "ball.downward_cam")
+    ///
+    /// Returns:
+    ///     NumPy uint8 array containing the message payload, or None if no message exists
+    fn read_msg<'py>(
+        &self,
+        py: Python<'py>,
+        msg_name: &str,
+    ) -> Result<Option<Bound<'py, PyAny>>, Error> {
+        let msg_id = impeller2::types::msg_id(msg_name);
+
+        self.db.with_state(|state| {
+            if let Some(msg_log) = state.get_msg_log(msg_id) {
+                if let Some((_timestamp, buf)) = msg_log.latest() {
+                    let data: Vec<u8> = buf.to_vec();
+                    Ok(Some(
+                        numpy::PyArray1::from_vec(py, data).into_any(),
+                    ))
+                } else {
+                    Ok(None)
+                }
+            } else {
+                Ok(None)
+            }
+        })
+    }
+
     /// Current simulation tick count.
     #[getter]
     fn tick(&self) -> u64 {

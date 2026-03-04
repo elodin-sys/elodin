@@ -53,9 +53,12 @@ pub mod iter;
 pub mod object_3d;
 mod offset_parse;
 pub mod plugins;
+pub mod sensor_camera;
 pub mod ui;
 pub mod vector_arrow;
 
+#[cfg(not(target_family = "wasm"))]
+pub mod headless;
 #[cfg(not(target_family = "wasm"))]
 pub mod run;
 
@@ -268,7 +271,8 @@ impl Plugin for EditorPlugin {
             .init_resource::<SyncedObject3d>()
             .init_resource::<ui::data_overview::ComponentTimeRanges>()
             .add_plugins(bevy_mat3_material::Mat3MaterialPlugin)
-            .add_plugins(object_3d::Object3DPlugin);
+            .add_plugins(object_3d::Object3DPlugin)
+            .add_plugins(sensor_camera::SensorCameraPlugin);
         if cfg!(target_os = "windows") || cfg!(target_os = "linux") {
             app.add_systems(Update, handle_drag_resize);
         }
@@ -861,10 +865,10 @@ impl BevyExt for impeller2_wkt::Material {
 }
 
 #[derive(Default, Resource)]
-struct SyncedObject3d(HashMap<Entity, Entity>);
+pub struct SyncedObject3d(HashMap<Entity, Entity>);
 
 #[allow(clippy::too_many_arguments)]
-fn sync_object_3d(
+pub fn sync_object_3d(
     query: Query<(Entity, &ComponentId), With<impeller2_wkt::WorldPos>>,
     meshes: Query<&impeller2_wkt::Mesh>,
     materials: Query<&impeller2_wkt::Material>,

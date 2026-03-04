@@ -114,6 +114,7 @@ pub enum Panel<T = ()> {
     DataOverview(Option<String>),
     Dashboard(Box<Dashboard<T>>),
     VideoStream(VideoStream),
+    SensorView(SensorView),
 }
 
 impl<T> Panel<T> {
@@ -136,6 +137,7 @@ impl<T> Panel<T> {
             Panel::DataOverview(name) => name.as_deref().unwrap_or("Data Overview"),
             Panel::Dashboard(d) => d.root.name.as_deref().unwrap_or("Dashboard"),
             Panel::VideoStream(v) => v.name.as_deref().unwrap_or("Video Stream"),
+            Panel::SensorView(v) => v.name.as_deref().unwrap_or("Sensor View"),
         }
     }
 
@@ -181,6 +183,7 @@ impl<T> Panel<T> {
             Panel::Viewport(v) => Panel::Viewport(v.map_aux(f)),
             Panel::Dashboard(d) => Panel::Dashboard(Box::new(d.map_aux(f))),
             Panel::VideoStream(v) => Panel::VideoStream(v.clone()),
+            Panel::SensorView(v) => Panel::SensorView(v.clone()),
         }
     }
 
@@ -903,6 +906,14 @@ pub struct ComponentMonitor {
 pub struct VideoStream {
     /// Message name containing H.264 video frames
     pub msg_name: String,
+    /// Display name for the tile
+    pub name: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct SensorView {
+    /// Component name containing raw RGBA sensor camera frame data
+    pub component_name: String,
     /// Display name for the tile
     pub name: Option<String>,
 }

@@ -225,6 +225,105 @@ impl WorldBuilder {
 
     #[allow(clippy::too_many_arguments)]
     #[pyo3(signature = (
+        entity,
+        name,
+        width,
+        height,
+        fov = 90.0,
+        near = 0.01,
+        far = 1000.0,
+        pos_offset = vec![0.0, 0.0, 0.0],
+        look_at_offset = vec![0.0, 0.0, -1.0],
+        format = "rgba",
+        fps = 60.0,
+        effect = "normal",
+        effect_params = None,
+    ))]
+    fn sensor_camera(
+        &mut self,
+        entity: crate::entity::EntityId,
+        name: String,
+        width: u32,
+        height: u32,
+        fov: f32,
+        near: f32,
+        far: f32,
+        pos_offset: Vec<f64>,
+        look_at_offset: Vec<f64>,
+        format: &str,
+        fps: f32,
+        effect: &str,
+        effect_params: Option<&Bound<'_, PyDict>>,
+    ) -> Result<(), crate::error::Error> {
+        let entity_meta = self
+            .world
+            .metadata
+            .entity_metadata
+            .get(&entity.inner)
+            .ok_or_else(|| {
+                crate::error::Error::PyO3(pyo3::exceptions::PyValueError::new_err(format!(
+                    "entity {:?} not found in metadata; spawn it before calling sensor_camera()",
+                    entity.inner
+                )))
+            })?;
+        let pair_name = format!("{}.{}", entity_meta.name, name);
+        let channels: u32 = match format {
+            "rgba" => 4,
+            "gray" => 1,
+            _ => {
+                return Err(crate::error::Error::PyO3(
+                    pyo3::exceptions::PyValueError::new_err(format!(
+                        "unsupported format '{}': expected 'rgba' or 'gray'",
+                        format
+                    )),
+                ));
+            }
+        };
+
+        let mut parsed_effect_params = std::collections::HashMap::new();
+        if let Some(params) = effect_params {
+            for (key, value) in params.iter() {
+                if let (Ok(k), Ok(v)) = (key.extract::<String>(), value.extract::<f64>()) {
+                    parsed_effect_params.insert(k, v);
+                }
+            }
+        }
+
+        let pos_off = [
+            *pos_offset.first().unwrap_or(&0.0),
+            *pos_offset.get(1).unwrap_or(&0.0),
+            *pos_offset.get(2).unwrap_or(&0.0),
+        ];
+        let look_off = [
+            *look_at_offset.first().unwrap_or(&0.0),
+            *look_at_offset.get(1).unwrap_or(&0.0),
+            *look_at_offset.get(2).unwrap_or(&-1.0),
+        ];
+
+        self.world
+            .metadata
+            .sensor_cameras
+            .push(crate::world::SensorCameraConfig {
+                entity_name: entity_meta.name.clone(),
+                camera_name: pair_name,
+                width,
+                height,
+                fov_degrees: fov,
+                near,
+                far,
+                pos_offset: pos_off,
+                look_at_offset: look_off,
+                channels,
+                fps,
+                effect: effect.to_string(),
+                effect_params: parsed_effect_params,
+            });
+
+        Ok(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    #[pyo3(signature = (
         sys,
         sim_time_step = 1.0 / 120.0,
         run_time_step = None,

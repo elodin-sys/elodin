@@ -1,10 +1,6 @@
 use clap::{Parser, Subcommand};
 use miette::Context;
 use miette::IntoDiagnostic;
-#[cfg(not(target_os = "windows"))]
-use miette::miette;
-#[cfg(not(target_os = "windows"))]
-use stellarator::util::CancelToken;
 use tracing_subscriber::{EnvFilter, fmt::time::ChronoLocal, prelude::*};
 mod editor;
 
@@ -78,10 +74,7 @@ impl Cli {
         match &self.command {
             Some(Commands::Editor(args)) => self.clone().editor(args.clone(), rt),
             #[cfg(not(target_os = "windows"))]
-            Some(Commands::Run(args)) => self
-                .run_sim(args, rt, CancelToken::new())?
-                .join()
-                .map_err(|_| miette!("join error"))?,
+            Some(Commands::Run(args)) => self.clone().run_headless(args.clone(), rt),
             None => self.clone().editor(editor::Args::default(), rt),
         }
     }
