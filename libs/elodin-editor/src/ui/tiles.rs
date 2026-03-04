@@ -1047,7 +1047,10 @@ impl Pane {
                 if let Some(cam) = pane.camera {
                     let mut state = SystemState::<(
                         Query<&ViewportConfig>,
-                        Query<(&impeller2_wkt::ComponentMetadata, &impeller2_bevy::ComponentValue)>,
+                        Query<(
+                            &impeller2_wkt::ComponentMetadata,
+                            &impeller2_bevy::ComponentValue,
+                        )>,
                     )>::new(world);
                     let (configs, component_values) = state.get(world);
                     {
@@ -1067,9 +1070,7 @@ impl Pane {
                                         nox::ArrayBuf::as_buf(&array.buf).first().copied()
                                     }
                                     impeller2_bevy::ComponentValue::F64(array) => {
-                                        nox::ArrayBuf::as_buf(&array.buf)
-                                            .first()
-                                            .map(|v| *v as f32)
+                                        nox::ArrayBuf::as_buf(&array.buf).first().map(|v| *v as f32)
                                     }
                                     _ => None,
                                 }?;

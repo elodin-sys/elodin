@@ -660,7 +660,7 @@ fn draw_frustum_ellipsoid_intersections(
             continue;
         };
 
-        if config.show_frustums {
+        if config.show_coverage_in_viewport || config.show_projection_2d {
             targets.push((
                 camera_entity,
                 RenderLayers::layer(viewport_layer),
