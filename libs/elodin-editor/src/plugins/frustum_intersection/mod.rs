@@ -2,12 +2,11 @@ use super::frustum_common::{MainViewportQueryItem, color_component_to_u8, frustu
 use crate::{
     MainCamera,
     object_3d::{Object3DMeshChild, Object3DState},
-    ui::tiles::ViewportConfig,
 };
 use bevy::asset::RenderAssetUsages;
 use bevy::camera::visibility::{NoFrustumCulling, RenderLayers};
 use bevy::ecs::system::SystemParam;
-use bevy::pbr::wireframe::Wireframe;
+use bevy::pbr::wireframe::{Wireframe, WireframeColor};
 use bevy::prelude::*;
 use bevy::render::render_resource::PrimitiveTopology;
 use bevy::transform::TransformSystems;
@@ -142,27 +141,10 @@ impl Plugin for FrustumIntersectionPlugin {
             .add_systems(
                 PostUpdate,
                 (
-                    enable_intersection_when_show_frustums
-                        .before(draw_frustum_ellipsoid_intersections),
                     draw_frustum_ellipsoid_intersections.after(TransformSystems::Propagate),
                     write_coverage_to_db.after(draw_frustum_ellipsoid_intersections),
                 ),
             );
-    }
-}
-
-/// When a viewport has show_frustums, enable intersection features on that viewport (if not already
-/// enabled), so the features are available as soon as the user shows frustums.
-/// Runs each frame; mutations only occur on the transition (one-time auto-enable per viewport).
-fn enable_intersection_when_show_frustums(
-    mut configs: Query<&mut ViewportConfig, With<MainCamera>>,
-) {
-    for mut config in configs.iter_mut() {
-        if config.show_frustums && !config.show_coverage_in_viewport && !config.show_projection_2d {
-            config.show_coverage_in_viewport = true;
-            config.show_projection_2d = true;
-            config.show_ratio_monitor = true;
-        }
     }
 }
 
@@ -792,10 +774,8 @@ fn draw_frustum_ellipsoid_intersections(
             let maybe_ratio =
                 compute_intersection_volume(bounds_min, bounds_max, frustum, ellipsoid);
 
-            let some_target_wants_coverage = targets
-                .iter()
-                .any(|(t, _, _, sc, _)| *sc && *t != frustum.source);
-            if let Some(ratio) = maybe_ratio.filter(|_| some_target_wants_coverage) {
+            let any_target_wants_coverage = targets.iter().any(|(_, _, _, sc, _)| *sc);
+            if let Some(ratio) = maybe_ratio.filter(|_| any_target_wants_coverage) {
                 let entry = ellipsoid_max_ratio.entry(ellipsoid.entity).or_insert(0.0);
                 *entry = entry.max(ratio);
                 ratios.0.push(IntersectionRatio {
@@ -884,7 +864,11 @@ fn draw_frustum_ellipsoid_intersections(
             }
             commands
                 .entity(entity)
-                .insert((visual.render_layers, visual.material, Wireframe));
+                .insert((visual.render_layers, visual.material));
+            commands
+                .entity(entity)
+                .remove::<Wireframe>()
+                .remove::<WireframeColor>();
             continue;
         }
 
@@ -898,7 +882,6 @@ fn draw_frustum_ellipsoid_intersections(
             InheritedVisibility::default(),
             ViewVisibility::default(),
             visual.render_layers,
-            Wireframe,
             NoFrustumCulling,
             visual.key,
             Name::new("frustum_ellipsoid_intersection"),

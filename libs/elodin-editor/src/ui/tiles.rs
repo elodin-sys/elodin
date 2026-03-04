@@ -1046,23 +1046,42 @@ impl Pane {
 
                 if let Some(cam) = pane.camera {
                     let mut state = SystemState::<(
-                        Res<crate::plugins::frustum_intersection::IntersectionRatios>,
                         Query<&ViewportConfig>,
+                        Query<(&impeller2_wkt::ComponentMetadata, &impeller2_bevy::ComponentValue)>,
                     )>::new(world);
-                    let (ratios, configs) = state.get(world);
+                    let (configs, component_values) = state.get(world);
                     {
-                        let relevant: Vec<_> = ratios
-                            .0
+                        let monitor_enabled = configs
+                            .get(cam)
+                            .map(|c| c.show_coverage_in_viewport)
+                            .unwrap_or(false);
+                        let relevant: Vec<_> = component_values
                             .iter()
-                            .filter(|r| {
-                                r.source != cam
-                                    && configs
-                                        .get(r.source)
-                                        .map(|c| c.show_ratio_monitor)
-                                        .unwrap_or(false)
+                            .filter_map(|(metadata, value)| {
+                                if !monitor_enabled || !metadata.name.ends_with(".frustum_coverage")
+                                {
+                                    return None;
+                                }
+                                let ratio = match value {
+                                    impeller2_bevy::ComponentValue::F32(array) => {
+                                        nox::ArrayBuf::as_buf(&array.buf).first().copied()
+                                    }
+                                    impeller2_bevy::ComponentValue::F64(array) => {
+                                        nox::ArrayBuf::as_buf(&array.buf)
+                                            .first()
+                                            .map(|v| *v as f32)
+                                    }
+                                    _ => None,
+                                }?;
+                                let label = metadata
+                                    .name
+                                    .strip_suffix(".frustum_coverage")
+                                    .unwrap_or(&metadata.name)
+                                    .to_string();
+                                Some((label, ratio))
                             })
                             .collect();
-                        if !relevant.is_empty() {
+                        if monitor_enabled {
                             show_monitor = true;
                             let viewport_rect = egui::Rect::from_min_max(
                                 content_rect.min,
@@ -1082,19 +1101,31 @@ impl Pane {
                                 egui::Stroke::new(1.0, scheme.border_primary),
                             );
 
-                            for (i, r) in relevant.iter().enumerate() {
-                                let pct = (r.ratio * 100.0).clamp(0.0, 100.0);
-                                let text = format!("Volume: {pct:.1}%");
+                            if relevant.is_empty() {
+                                let text = "Coverage: --".to_string();
                                 let galley = ui.painter().layout_no_wrap(
                                     text,
                                     egui::FontId::monospace(14.0),
-                                    scheme.text_primary,
+                                    scheme.text_secondary,
                                 );
-                                let pos = egui::pos2(
-                                    monitor_rect.min.x + 10.0,
-                                    monitor_rect.min.y + 8.0 + i as f32 * 20.0,
-                                );
-                                ui.painter().galley(pos, galley, scheme.text_primary);
+                                let pos =
+                                    egui::pos2(monitor_rect.min.x + 10.0, monitor_rect.min.y + 8.0);
+                                ui.painter().galley(pos, galley, scheme.text_secondary);
+                            } else {
+                                for (i, (label, ratio)) in relevant.iter().enumerate() {
+                                    let pct = (*ratio * 100.0).clamp(0.0, 100.0);
+                                    let text = format!("{label}: {pct:.1}%");
+                                    let galley = ui.painter().layout_no_wrap(
+                                        text,
+                                        egui::FontId::monospace(14.0),
+                                        scheme.text_primary,
+                                    );
+                                    let pos = egui::pos2(
+                                        monitor_rect.min.x + 10.0,
+                                        monitor_rect.min.y + 8.0 + i as f32 * 20.0,
+                                    );
+                                    ui.painter().galley(pos, galley, scheme.text_primary);
+                                }
                             }
                         }
                     }
