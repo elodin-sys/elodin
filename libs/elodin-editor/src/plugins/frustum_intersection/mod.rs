@@ -25,8 +25,8 @@ use frustum_tint_material::{FrustumTintExt, FrustumTintMaterial, FrustumTintPara
 use projection::build_projection_mesh;
 use std::collections::HashMap;
 use volume::{
-    aabb_overlap, compute_intersection_volume, ellipsoid_world_extent, frustum_planes,
-    plane_to_vec4, points_aabb, FrustumVolume, SURFACE_EPS,
+    FrustumVolume, SURFACE_EPS, aabb_overlap, compute_intersection_volume, ellipsoid_world_extent,
+    frustum_planes, plane_to_vec4, points_aabb,
 };
 
 #[derive(Clone)]
@@ -784,4 +784,3 @@ fn draw_frustum_ellipsoid_intersections(
         commands.entity(entity).despawn();
     }
 }
-

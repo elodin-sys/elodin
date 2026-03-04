@@ -8,8 +8,8 @@ use bevy::asset::RenderAssetUsages;
 use bevy::prelude::*;
 use bevy::render::render_resource::PrimitiveTopology;
 
-use super::volume::{FrustumVolume, SURFACE_EPS};
 use super::EllipsoidVolume;
+use super::volume::{FrustumVolume, SURFACE_EPS};
 
 /// Grid resolution for 2D projection mesh on far plane. Higher = finer projection boundary.
 const PROJECTION_GRID: usize = 80;

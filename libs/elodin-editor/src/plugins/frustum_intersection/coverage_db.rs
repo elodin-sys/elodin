@@ -47,10 +47,7 @@ fn set_coverage_value(
 
 /// Persist coverage ratios to impeller2 components. Spawns new entities for unseen ellipsoids,
 /// updates existing ones, and resets coverage to 0.0 for ellipsoids no longer in any frustum.
-pub(super) fn write_coverage_to_db(
-    mut params: CoverageDbParams<'_, '_>,
-    mut commands: Commands,
-) {
+pub(super) fn write_coverage_to_db(mut params: CoverageDbParams<'_, '_>, mut commands: Commands) {
     let mut ratios_by_ellipsoid: HashMap<Entity, f32> = HashMap::new();
     for ratio in params.ratios.0.iter() {
         let entry = ratios_by_ellipsoid.entry(ratio.ellipsoid).or_insert(0.0);
@@ -114,11 +111,7 @@ pub(super) fn write_coverage_to_db(
                 .metadata_reg
                 .get(cid)
                 .is_some_and(|metadata| metadata.name.ends_with(".frustum_coverage"));
-            if is_coverage {
-                Some(*entity)
-            } else {
-                None
-            }
+            if is_coverage { Some(*entity) } else { None }
         })
         .collect::<Vec<_>>();
 
