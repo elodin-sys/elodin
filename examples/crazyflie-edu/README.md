@@ -28,7 +28,7 @@ void user_main_loop(user_state_t* state) {
 nix develop
 
 # Set up Python environment with Elodin
-uv venv --python 3.12
+uv venv --python 3.13
 source .venv/bin/activate
 uvx maturin develop --uv --manifest-path=libs/nox-py/Cargo.toml
 

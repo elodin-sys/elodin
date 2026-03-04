@@ -84,7 +84,7 @@
     openssl
     openblas
     xz
-    python312
+    python313
     gfortran.cc.lib
   ];
 

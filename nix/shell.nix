@@ -11,7 +11,7 @@ with pkgs; let
   llvm = llvmPackages_latest;
 
   # Base Python for use with venv (JAX 0.8+ and iree-base-compiler installed via pip)
-  pythonBase = python312.withPackages (ps:
+  pythonBase = python313.withPackages (ps:
     with ps; [
       typing-extensions
       pytest
@@ -182,7 +182,7 @@ with pkgs; let
         echo ""
         echo "SDK Development (if needed):"
         echo "  "
-        echo "uv venv --python 3.12"
+        echo "uv venv --python 3.13"
         echo "source .venv/bin/activate"
         echo "uvx maturin develop --uv --manifest-path=libs/nox-py/Cargo.toml"
         echo ""

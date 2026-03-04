@@ -21,7 +21,7 @@ nix develop
 just install
 
 # Set up Python environment
-uv venv --python 3.12 && source .venv/bin/activate
+uv venv --python 3.13 && source .venv/bin/activate
 uvx maturin develop --uv --manifest-path=libs/nox-py/Cargo.toml
 uv pip install -r examples/rocket-barrowman/requirements.txt
 

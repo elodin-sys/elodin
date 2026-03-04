@@ -122,7 +122,7 @@ sudo nixos-rebuild switch
 
 Edit the `devShells` section in the root `flake.nix`. The shell is built from a single unified definition that includes:
 - Rust toolchain (from `rust-toolchain.toml`)
-- Python 3.12 + uv + maturin
+- Python 3.13 + uv + maturin
 - C/C++ compilers and system libraries
 - GStreamer (for video streaming)
 - git-lfs

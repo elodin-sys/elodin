@@ -33,8 +33,8 @@
       elodin = rec {
         elodin-py = final.callPackage ./nix/pkgs/elodin-py.nix {
           inherit rustToolchain;
-          python = final.python312;
-          pythonPackages = final.python312Packages;
+          python = final.python313;
+          pythonPackages = final.python313Packages;
         };
         elodin-cli = final.callPackage ./nix/pkgs/elodin-cli.nix {
           inherit rustToolchain;

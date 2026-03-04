@@ -18,18 +18,18 @@
   wheelInfo =
     if stdenv.isDarwin
     then {
-      url = "https://files.pythonhosted.org/packages/2e/47/fcf68acc6b34ca3b92b08d171f4a5f676346c0c1ee65efeba1bc00c7efb7/iree_base_compiler-3.10.0-cp312-cp312-macosx_13_0_universal2.whl";
-      hash = "sha256-S8YV/QmsuXSzEvj7A2YWy2PWnUv8uCT4VowZ8/JYWiY=";
+      url = "https://files.pythonhosted.org/packages/6f/ab/0a36a64a5f38b04ee8ada47780d0893a77c9c4741158fbb878d3cbcbc5a1/iree_base_compiler-3.10.0-cp313-cp313-macosx_13_0_universal2.whl";
+      hash = "sha256-rRlZjGd9CpxsHpr4DmE5CL7BHgIPKzANVRH6lksFXjA=";
     }
     else if stdenv.hostPlatform.system == "x86_64-linux"
     then {
-      url = "https://files.pythonhosted.org/packages/0c/b9/ac4156d5c99afb799c07a06066e3db5c72ef2e10107a46da78e532c678fe/iree_base_compiler-3.10.0-cp312-cp312-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl";
-      hash = "sha256-SjUrvnu6z7KdAVSQhD71YA7FONNV6Ay01JUhJkVzHgM=";
+      url = "https://files.pythonhosted.org/packages/df/22/6590fb777060c870106f58234646c328a3675ca6e5b5463682b850fc8a27/iree_base_compiler-3.10.0-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl";
+      hash = "sha256-vjAqXFOHa9y9qUJbiI25cIlX0ROtxYvu1vg6RFFbtBI=";
     }
     else if stdenv.hostPlatform.system == "aarch64-linux"
     then {
-      url = "https://files.pythonhosted.org/packages/6a/d9/99eb4cd2bdbe77bc0597a4cc32d3a4c6adb2af0cf0f1c3bbffa97be43f66/iree_base_compiler-3.10.0-cp312-cp312-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl";
-      hash = "sha256-FWOgaBNu3GhSwV8zbovpTjYgFZ78JDj/On2n22iXmm0=";
+      url = "https://files.pythonhosted.org/packages/33/13/c14d9378c4a15ac80aa1fa6fb4e78457ab8f0f5dd88c205954e5965c5c5e/iree_base_compiler-3.10.0-cp313-cp313-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl";
+      hash = "sha256-4kajF+UDU5uzmg/8Mv8pshbqeN0tRyOB0Z2vKdYIix8=";
     }
     else throw "Unsupported platform: ${stdenv.hostPlatform.system}";
 

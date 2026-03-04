@@ -16,7 +16,7 @@ Before starting this lab, ensure you have:
 ```bash
 # From the repository root
 nix develop
-uv venv --python 3.12
+uv venv --python 3.13
 source .venv/bin/activate
 uvx maturin develop --uv --manifest-path=libs/nox-py/Cargo.toml
 uv pip install pynput  # For keyboard input
