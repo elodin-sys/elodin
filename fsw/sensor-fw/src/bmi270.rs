@@ -70,7 +70,7 @@ pub enum Registers {
     GyrOffsetY07 = 0x75,   // bits 0-7 of the 10 bit offset
     GyrOffsetZ07 = 0x76,   // bits 0-7 of the 10 bit offset
     GyrOffsetXYZ89 = 0x77, // bits 8 & 9 of the 10 bit offsets
-    PowerConfg = 0x7C,
+    PowerConfig = 0x7C,
     PowerCtrl = 0x7D,
 }
 
@@ -322,7 +322,7 @@ impl Bmi270 {
         }
 
         defmt::debug!("Configuring BMI270");
-        self.write_register(i2c_dma, Registers::PowerConfg, POWER_CONF_REG_VAL)?;
+        self.write_register(i2c_dma, Registers::PowerConfig, POWER_CONF_REG_VAL)?;
         delay.delay_us(POR_DELAY_MICRO_SECONDS.to_micros());
         self.write_register(i2c_dma, Registers::InitCtrl, START_INITIALIZATION)?;
         self.burst_write(i2c_dma, CONFIG_FILE, delay);

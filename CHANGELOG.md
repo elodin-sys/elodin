@@ -174,7 +174,7 @@
   })
 
   ```
-- **(feat)** Add VTableStream to elodin-db. VTableStream lets you specify a vtable for the database to populate, and have data streamed directly into it. You can also specify aggreator operations like `mean`. For example to setup a stream that calculates the mean of every 10 values:
+- **(feat)** Add VTableStream to elodin-db. VTableStream lets you specify a vtable for the database to populate, and have data streamed directly into it. You can also specify aggregator operations like `mean`. For example to setup a stream that calculates the mean of every 10 values:
 
   ```lua
   client:vtable_stream({field(0, 4, mean(10, schema("f32", {}, pair(1, "temp"))))})

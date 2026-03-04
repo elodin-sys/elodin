@@ -7,7 +7,7 @@
     fallback = true;
   };
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.05";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.11";
     nixpkgs-unstable.url = "github:nixos/nixpkgs/nixos-unstable";
     jetpack.url = "github:anduril/jetpack-nixos/2c98c9d6c326d67ae5f4909db61238d31352e18c";
     rust-overlay.url = "github:oxalica/rust-overlay";
@@ -79,7 +79,7 @@
         jetpack.overlays.default
         overlay
       ];
-      system.stateVersion = "25.05";
+      system.stateVersion = "25.11";
       i18n.supportedLocales = [(config.i18n.defaultLocale + "/UTF-8")];
       services.openssh.settings.PasswordAuthentication = true;
       services.openssh.enable = true;

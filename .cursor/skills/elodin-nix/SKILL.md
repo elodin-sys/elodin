@@ -67,7 +67,7 @@ Provides:
 - **Dev shell**: `nix develop` — unified development environment
 - **Packages**: `elodin-py`, `elodin-cli`, `elodin-db`, `elodinsink`
 - **Overlay**: `elodinOverlay` with all Elodin packages
-- **NixOS configs**: NixOS 25.05 based
+- **NixOS configs**: NixOS 25.11 based
 
 Key inputs: nixpkgs, rust-overlay (for toolchain from `rust-toolchain.toml`), crane (Rust builds).
 

@@ -16,8 +16,7 @@
   # ];
   #services.udev.enable = false;
   #services.lvm.enable = false;
-  system.switch.enable = false;
-  system.switch.enableNg = true;
+  system.switch.enable = true;
 
   # changes sourced from: https://github.com/NixOS/nixpkgs/blob/master/nixos/modules/profiles/perlless.nix
   boot.initrd.systemd.enable = true;
