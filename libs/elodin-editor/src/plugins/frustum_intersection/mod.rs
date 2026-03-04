@@ -1,3 +1,7 @@
+//! Frustum∩ellipsoid intersection: volume coverage, 2D projection, and tint overlay.
+//!
+//! See `frustum_intersection/README.md` for feature overview and Inspector controls.
+
 mod coverage_db;
 mod frustum_tint_material;
 mod projection;
@@ -39,10 +43,13 @@ struct EllipsoidVolume {
     material_target: Option<EllipsoidMaterialTarget>,
 }
 
+/// How we apply tint to an ellipsoid: Standard/Mat3 materials get runtime edits;
+/// FrustumTintSwapped means the mesh uses FrustumTintMaterial (GPU tint) instead.
 #[derive(Clone)]
 enum EllipsoidMaterialTarget {
     Standard(Handle<StandardMaterial>),
-    FrustumTintSwapped, // Was Standard, now FrustumTintMaterial; restore when ratio=0
+    /// Mesh was swapped to FrustumTintMaterial; tint is handled by the shader, not CPU.
+    FrustumTintSwapped,
     Mat3(Handle<Mat3Material>),
 }
 
@@ -163,14 +170,19 @@ impl Plugin for FrustumIntersectionPlugin {
     }
 }
 
+/// Alpha for the 2D projection mesh overlay on the far plane.
 const PROJECTION_ALPHA: u8 = 230;
+/// Emissive multiplier for projection material visibility.
 const PROJECTION_EMISSIVE_STRENGTH: f32 = 1.4;
+/// Depth bias so the projection mesh renders in front of far-plane geometry.
 const PROJECTION_DEPTH_BIAS: f32 = -8.0;
+/// Intensity of the point light placed at each intersection for visual emphasis.
 const INTERSECTION_LIGHT_INTENSITY: f32 = 1500.0;
 /// Ellipsoid tint: min blend toward warm when partially inside frustum.
 const ELLIPSOID_TINT_MIN_BLEND: f32 = 0.20;
 /// Ellipsoid tint: max blend toward green when fully inside frustum.
 const ELLIPSOID_TINT_MAX_BLEND: f32 = 0.65;
+/// Emissive scale for tinted ellipsoids (increases with coverage ratio).
 const ELLIPSOID_TINT_EMISSIVE_SCALE: f32 = 0.12;
 
 fn projection_material_for_color(
@@ -209,6 +221,7 @@ fn projection_material_for_color(
     material
 }
 
+/// Place a point light near the ellipsoid surface, toward the camera, to emphasize the intersection.
 fn intersection_light_for(
     frustum: &FrustumVolume,
     ellipsoid: &EllipsoidVolume,
@@ -271,7 +284,9 @@ fn apply_ellipsoid_tint(
 ) {
     let (tinted, emissive) = ellipsoid_tinted_color(base, ratio);
     match target {
-        EllipsoidMaterialTarget::FrustumTintSwapped => {}
+        EllipsoidMaterialTarget::FrustumTintSwapped => {
+            // Tint is applied by FrustumTintMaterial shader; no CPU-side edit.
+        }
         EllipsoidMaterialTarget::Standard(handle) => {
             if let Some(material) = standard_materials.get_mut(handle) {
                 material.base_color = tinted;
@@ -485,6 +500,7 @@ fn draw_frustum_ellipsoid_intersections(
     let any_target_wants_projection = targets
         .iter()
         .any(|(_, _, _, _, show_projection)| *show_projection);
+    // Per-ellipsoid max coverage ratio across all frustums. Empty when coverage is disabled.
     let mut ellipsoid_max_ratio: HashMap<Entity, f32> = if any_target_wants_coverage {
         ellipsoids
             .iter()

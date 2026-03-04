@@ -1,15 +1,20 @@
 //! Frustum∩ellipsoid volume computation via SDF grid sampling.
+//!
+//! Uses a fixed-resolution grid to sample the intersection of frustum and ellipsoid
+//! signed-distance fields. Points with both SDFs ≤ 0 are counted as inside the intersection.
 
 use bevy::prelude::*;
 
 use super::EllipsoidVolume;
 
-/// Epsilon for signed-distance and plane tests.
+/// Epsilon for signed-distance and plane tests. Used to avoid division by zero and
+/// to classify points as inside/outside surfaces.
 pub(super) const SURFACE_EPS: f32 = 1.0e-5;
 
 /// Marching grid resolution for volume sampling. Higher = better quality, higher CPU cost per frame.
 const INTERSECTION_GRID: UVec3 = UVec3::new(32, 32, 32);
 
+/// Half-space plane: points satisfying `normal·p + d ≤ 0` are inside the frustum.
 #[derive(Clone, Copy)]
 pub(super) struct Plane {
     pub normal: Vec3,
@@ -26,6 +31,8 @@ pub(super) struct FrustumVolume {
     pub aabb_max: Vec3,
 }
 
+/// Build a plane from three points (a, b, c). The normal points toward the half-space
+/// containing `inside`, so that points on the same side as `inside` have negative distance.
 pub(super) fn plane_from_points(a: Vec3, b: Vec3, c: Vec3, inside: Vec3) -> Option<Plane> {
     let normal = (b - a).cross(c - a);
     let len = normal.length();
@@ -41,6 +48,7 @@ pub(super) fn plane_from_points(a: Vec3, b: Vec3, c: Vec3, inside: Vec3) -> Opti
     Some(Plane { normal: n, d })
 }
 
+/// Build the six frustum planes from the eight corner points. Order: near, far, left, right, top, bottom.
 pub(super) fn frustum_planes(points: &[Vec3; 8]) -> Option<[Plane; 6]> {
     let mut center = Vec3::ZERO;
     for point in points {
@@ -58,6 +66,7 @@ pub(super) fn frustum_planes(points: &[Vec3; 8]) -> Option<[Plane; 6]> {
     ])
 }
 
+/// Axis-aligned bounding box of the eight frustum corner points.
 pub(super) fn points_aabb(points: &[Vec3; 8]) -> (Vec3, Vec3) {
     let mut min = points[0];
     let mut max = points[0];
@@ -68,6 +77,7 @@ pub(super) fn points_aabb(points: &[Vec3; 8]) -> (Vec3, Vec3) {
     (min, max)
 }
 
+/// True if the two axis-aligned boxes overlap.
 pub(super) fn aabb_overlap(min_a: Vec3, max_a: Vec3, min_b: Vec3, max_b: Vec3) -> bool {
     min_a.x <= max_b.x
         && max_a.x >= min_b.x
@@ -77,10 +87,12 @@ pub(super) fn aabb_overlap(min_a: Vec3, max_a: Vec3, min_b: Vec3, max_b: Vec3) -
         && max_a.z >= min_b.z
 }
 
+/// Convert plane to Vec4 (xyz = normal, w = d) for GPU uniform upload.
 pub(super) fn plane_to_vec4(plane: &Plane) -> Vec4 {
     Vec4::new(plane.normal.x, plane.normal.y, plane.normal.z, plane.d)
 }
 
+/// Half-extent of the ellipsoid AABB in world space (axis-aligned bounding box half-sizes).
 pub(super) fn ellipsoid_world_extent(rotation: Quat, radii: Vec3) -> Vec3 {
     let rot = Mat3::from_quat(rotation);
     let ex = rot.x_axis * radii.x;
@@ -93,6 +105,7 @@ pub(super) fn ellipsoid_world_extent(rotation: Quat, radii: Vec3) -> Vec3 {
     )
 }
 
+/// Signed distance to frustum: max over all planes. Negative = inside, positive = outside.
 pub(super) fn frustum_signed_distance(p: Vec3, planes: &[Plane; 6]) -> f32 {
     let mut max_distance = f32::NEG_INFINITY;
     for plane in planes {
@@ -101,7 +114,8 @@ pub(super) fn frustum_signed_distance(p: Vec3, planes: &[Plane; 6]) -> f32 {
     max_distance
 }
 
-/// Approximate SDF from IQ's ellipsoid formulation.
+/// Approximate signed distance to ellipsoid surface (IQ's formulation).
+/// Not an exact SDF but sufficient for inside/outside classification. Negative = inside.
 pub(super) fn ellipsoid_signed_distance(p: Vec3, ellipsoid: &EllipsoidVolume) -> f32 {
     let local = ellipsoid.rotation.inverse() * (p - ellipsoid.center);
     let r = ellipsoid.radii.max(Vec3::splat(SURFACE_EPS));
@@ -115,6 +129,7 @@ pub(super) fn ellipsoid_signed_distance(p: Vec3, ellipsoid: &EllipsoidVolume) ->
 }
 
 /// Compute frustum∩ellipsoid volume ratio (intersection_volume / ellipsoid_volume) without building mesh.
+/// Samples the intersection AABB with a regular grid; cells inside both SDFs contribute to the count.
 pub(super) fn compute_intersection_volume(
     bounds_min: Vec3,
     bounds_max: Vec3,

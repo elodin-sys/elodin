@@ -44,6 +44,7 @@ impl MaterialExtension for FrustumTintExt {
         )
     }
 
+    /// Forward rendering only; deferred pipeline falls back to base material.
     fn deferred_fragment_shader() -> ShaderRef {
         ShaderRef::Default
     }

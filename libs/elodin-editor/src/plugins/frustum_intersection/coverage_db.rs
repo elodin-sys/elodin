@@ -1,4 +1,7 @@
 //! Persist frustum coverage ratios to impeller2/Elodin DB.
+//!
+//! Creates or updates `{ellipsoid_name}.frustum_coverage` components with the volume ratio.
+//! Stale coverage entities (ellipsoids no longer in view) are reset to 0.0.
 
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
@@ -20,6 +23,7 @@ pub(super) struct CoverageDbParams<'w, 's> {
     pub names: Query<'w, 's, &'static Name>,
 }
 
+/// Write a coverage ratio to an entity's ComponentValue. Creates an F32 array if missing.
 fn set_coverage_value(
     entity: Entity,
     ratio: f32,
@@ -41,6 +45,8 @@ fn set_coverage_value(
     commands.entity(entity).insert(ComponentValue::F32(arr));
 }
 
+/// Persist coverage ratios to impeller2 components. Spawns new entities for unseen ellipsoids,
+/// updates existing ones, and resets coverage to 0.0 for ellipsoids no longer in any frustum.
 pub(super) fn write_coverage_to_db(
     mut params: CoverageDbParams<'_, '_>,
     mut commands: Commands,
@@ -96,6 +102,7 @@ pub(super) fn write_coverage_to_db(
         set_coverage_value(entity, ratio, &mut params.values, &mut commands);
     }
 
+    // Ellipsoids that had coverage last frame but are not in this frame's ratios get 0.0.
     let stale_coverage_entities = params
         .entity_map
         .iter()

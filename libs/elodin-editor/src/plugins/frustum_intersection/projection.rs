@@ -1,4 +1,8 @@
 //! 2D projection of frustum∩ellipsoid on the far plane.
+//!
+//! Casts rays from the camera through a grid on the far plane; for each cell we determine
+//! whether the ray hits the ellipsoid before the far plane. A marching-squares-style
+//! contour extraction builds the projection mesh from the scalar field.
 
 use bevy::asset::RenderAssetUsages;
 use bevy::prelude::*;
@@ -10,7 +14,10 @@ use super::EllipsoidVolume;
 /// Grid resolution for 2D projection mesh on far plane. Higher = finer projection boundary.
 const PROJECTION_GRID: usize = 80;
 
-/// Returns: negative if ray hits ellipsoid within frustum (before far plane), positive otherwise.
+/// Ray-ellipsoid intersection test for projection mesh generation.
+/// Returns a scalar: **negative** if the ray hits the ellipsoid between origin and far_point
+/// (i.e. "inside" the projected silhouette), **positive** otherwise. Used for marching-squares
+/// contour extraction on the far-plane grid.
 fn ray_intersects_ellipsoid_in_frustum(
     origin: Vec3,
     dir: Vec3,
@@ -43,6 +50,9 @@ fn ray_intersects_ellipsoid_in_frustum(
     }
 }
 
+/// Build a triangle mesh of the frustum∩ellipsoid silhouette projected onto the far plane.
+/// Samples a grid via bilinear interpolation of far-plane corners; extracts contours
+/// where the ray-ellipsoid hit scalar crosses zero.
 pub(super) fn build_projection_mesh(
     frustum: &FrustumVolume,
     ellipsoid: &EllipsoidVolume,
