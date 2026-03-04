@@ -18,12 +18,7 @@ git clone git@github.com:elodin-sys/elodin.git && cd elodin
 
 # Enter nix shell and install elodin
 nix develop
-just install
-
-# Set up Python environment
-uv venv --python 3.12 && source .venv/bin/activate
-uvx maturin develop --uv --manifest-path=libs/nox-py/Cargo.toml
-uv pip install -r examples/rocket-barrowman/requirements.txt
+install-elodin
 
 # Run the Streamlit web interface
 examples/rocket-barrowman/run_streamlit.sh
