@@ -912,8 +912,8 @@ pub struct VideoStream {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct SensorView {
-    /// Component name containing raw RGBA sensor camera frame data
-    pub component_name: String,
+    /// Message name for the sensor camera frame data (e.g. "drone.scene_cam")
+    pub msg_name: String,
     /// Display name for the tile
     pub name: Option<String>,
 }

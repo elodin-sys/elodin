@@ -192,7 +192,7 @@ impl Default for StreamState {
 /// the decoder thread.
 #[derive(Component)]
 pub struct VideoFrameCache {
-    /// All raw H.264 NAL data, keyed by timestamp.
+    /// All raw frame data (H.264 NAL or raw RGBA), keyed by timestamp.
     raw_frames: BTreeMap<Timestamp, Vec<u8>>,
     /// Decoded RGBA frames (LRU-evicted to `max_frames`).
     decoded_frames: BTreeMap<Timestamp, Image>,
@@ -347,13 +347,9 @@ impl VideoFrameCache {
     fn evict_raw_if_needed(&mut self) {
         while self.raw_frames.len() > self.max_raw_frames {
             if let Some((evicted_ts, _)) = self.raw_frames.pop_first() {
-                // Also remove stale keyframe index entries that are now
-                // before the earliest raw frame.
                 if let Some(&first_raw_ts) = self.raw_frames.keys().next() {
                     self.keyframe_index.retain(|ts| *ts >= first_raw_ts);
                 }
-                // Also remove decoded frames that are before the evicted
-                // raw frame since they can no longer be re-derived.
                 while let Some((&decoded_ts, _)) = self.decoded_frames.iter().next() {
                     if decoded_ts <= evicted_ts {
                         self.decoded_frames.pop_first();
@@ -708,11 +704,25 @@ fn send_stream_request(commands: &mut Commands, entity: Entity, msg_id: [u8; 2],
     );
 }
 
-/// Maximum number of raw frames to request in a single backfill page.
-/// At ~50 KB/frame (worst-case OBS keyframe), 200 frames ≈ 10 MB,
-/// safely under the 64 MB client receive-grant ceiling.
-/// The live-tail `FixedRateMsgStream` fills the rest during playback.
-const BACKFILL_FRAME_LIMIT: usize = 200;
+/// Maximum payload size (in bytes) for a single backfill `GetMsgs` batch.
+/// Must stay well under the 64 MB receive-grant ceiling in
+/// `impeller2_stellar::queue::tcp_connect`.
+const BACKFILL_MAX_BATCH_BYTES: usize = 32 * 1024 * 1024;
+
+/// Default backfill frame limit for compressed streams (H.264).
+/// At ~50 KB/frame (worst-case OBS keyframe), 200 frames ≈ 10 MB.
+const BACKFILL_FRAME_LIMIT_DEFAULT: usize = 200;
+
+/// Compute the backfill frame limit for a given frame size.
+fn backfill_frame_limit(raw_rgba_dims: Option<(u32, u32)>) -> usize {
+    if let Some((w, h)) = raw_rgba_dims {
+        let frame_bytes = w as usize * h as usize * 4;
+        if frame_bytes > 0 {
+            return (BACKFILL_MAX_BATCH_BYTES / frame_bytes).max(1);
+        }
+    }
+    BACKFILL_FRAME_LIMIT_DEFAULT
+}
 
 /// Paginated `GetMsgs` backfill: fetch historical raw data from the DB
 /// in small batches of `BACKFILL_FRAME_LIMIT` frames.  When a full batch
@@ -724,12 +734,13 @@ fn send_backfill_request(
     entity: Entity,
     msg_id: [u8; 2],
     start_from: Timestamp,
+    limit: usize,
 ) {
     commands.send_req_reply(
         GetMsgs {
             msg_id,
             range: start_from..Timestamp(i64::MAX),
-            limit: Some(BACKFILL_FRAME_LIMIT),
+            limit: Some(limit),
         },
         move |In(result): In<Result<MsgBatch, ErrorResponse>>,
               mut caches: Query<&mut VideoFrameCache>,
@@ -743,13 +754,17 @@ fn send_backfill_request(
                     last_ts = timestamp;
                     cache.insert_raw(timestamp, data);
                 }
-                // If we received a full page, there's likely more data.
-                // Request the next page starting just after the last frame.
-                if count >= BACKFILL_FRAME_LIMIT {
-                    send_backfill_request(&mut cmds, entity, msg_id, Timestamp(last_ts.0 + 1));
+                if count >= limit {
+                    send_backfill_request(
+                        &mut cmds,
+                        entity,
+                        msg_id,
+                        Timestamp(last_ts.0 + 1),
+                        limit,
+                    );
                 }
             }
-            true // remove this handler; the continuation (if any) registers a new one
+            true
         },
     );
 }
@@ -1020,31 +1035,36 @@ pub fn connect_streams(
                 *frames_waited += 1;
                 if *frames_waited >= FRAMES_BEFORE_CONNECT {
                     let msg_id = stream.msg_id;
-                    send_backfill_request(&mut commands, entity, msg_id, Timestamp(i64::MIN));
+                    let limit = backfill_frame_limit(stream.raw_rgba_dims);
+                    send_backfill_request(
+                        &mut commands,
+                        entity,
+                        msg_id,
+                        Timestamp(i64::MIN),
+                        limit,
+                    );
                     send_stream_request(&mut commands, entity, msg_id, stream_id.0);
                     stream.state = StreamState::Active;
                 }
             }
             StreamState::Active => {
-                // Drain decoder output even when the widget is not visible,
-                // so seek completions are processed promptly.
                 let seek_done = decoder.drain_into_cache(&mut cache);
                 if seek_done {
                     cache.seeking = false;
                 }
 
-                // Live-stream recovery: if the FixedRateMsgStream was
-                // previously delivering frames but has gone silent, re-send
-                // both requests.  Reset to None so recovery only fires once
-                // — it won't repeat until the stream actually delivers
-                // another frame (which sets last_stream_activity back to
-                // Some).  This prevents repeated re-fetches during normal
-                // paused/idle periods on recorded data.
                 if let Some(last) = cache.last_stream_activity
                     && last.elapsed().as_secs_f32() > STREAM_RECOVERY_TIMEOUT_SECS
                 {
                     let msg_id = stream.msg_id;
-                    send_backfill_request(&mut commands, entity, msg_id, Timestamp(i64::MIN));
+                    let limit = backfill_frame_limit(stream.raw_rgba_dims);
+                    send_backfill_request(
+                        &mut commands,
+                        entity,
+                        msg_id,
+                        Timestamp(i64::MIN),
+                        limit,
+                    );
                     send_stream_request(&mut commands, entity, msg_id, stream_id.0);
                     cache.last_stream_activity = None;
                 }

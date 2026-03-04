@@ -128,21 +128,21 @@ pub fn init_db(
                 let buf = &column.buffer[offset..offset + size];
                 component.time_series.push_buf(start_timestamp, buf)?;
             }
-            if let Some(path) = &world.metadata.schematic_path {
+        }
+        if let Some(path) = &world.metadata.schematic_path {
+            state
+                .db_config
+                .set_schematic_path(path.to_string_lossy().to_string());
+        }
+        if let Some(content) = &world.metadata.schematic {
+            state.db_config.set_schematic_content(content.clone());
+        }
+        if !world.metadata.sensor_cameras.is_empty() {
+            if let Ok(json) = serde_json::to_string(&world.metadata.sensor_cameras) {
                 state
                     .db_config
-                    .set_schematic_path(path.to_string_lossy().to_string());
-            }
-            if let Some(content) = &world.metadata.schematic {
-                state.db_config.set_schematic_content(content.clone());
-            }
-            if !world.metadata.sensor_cameras.is_empty() {
-                if let Ok(json) = serde_json::to_string(&world.metadata.sensor_cameras) {
-                    state
-                        .db_config
-                        .metadata
-                        .insert("sensor_cameras".to_string(), json);
-                }
+                    .metadata
+                    .insert("sensor_cameras".to_string(), json);
             }
         }
         for entity_metadata in world.entity_metadata().values() {

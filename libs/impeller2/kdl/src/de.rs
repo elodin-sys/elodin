@@ -562,7 +562,7 @@ fn parse_video_stream(node: &KdlNode) -> Result<Panel, KdlSchematicError> {
 }
 
 fn parse_sensor_view(node: &KdlNode) -> Result<Panel, KdlSchematicError> {
-    let component_name = node
+    let msg_name = node
         .entries()
         .iter()
         .find(|e| e.name().is_none())
@@ -572,10 +572,7 @@ fn parse_sensor_view(node: &KdlNode) -> Result<Panel, KdlSchematicError> {
 
     let name = parse_name(node);
 
-    Ok(Panel::SensorView(SensorView {
-        component_name,
-        name,
-    }))
+    Ok(Panel::SensorView(SensorView { msg_name, name }))
 }
 
 fn parse_query_table(node: &KdlNode) -> Result<Panel, KdlSchematicError> {

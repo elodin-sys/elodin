@@ -267,9 +267,8 @@ impl WorldBuilder {
                 )))
             })?;
         let pair_name = format!("{}.{}", entity_meta.name, name);
-        let channels: u32 = match format {
-            "rgba" => 4,
-            "gray" => 1,
+        match format {
+            "rgba" | "gray" => {}
             _ => {
                 return Err(crate::error::Error::PyO3(
                     pyo3::exceptions::PyValueError::new_err(format!(
@@ -278,7 +277,7 @@ impl WorldBuilder {
                     )),
                 ));
             }
-        };
+        }
 
         let mut parsed_effect_params = std::collections::HashMap::new();
         if let Some(params) = effect_params {
@@ -313,7 +312,7 @@ impl WorldBuilder {
                 far,
                 pos_offset: pos_off,
                 look_at_offset: look_off,
-                channels,
+                format: format.to_string(),
                 fps,
                 effect: effect.to_string(),
                 effect_params: parsed_effect_params,

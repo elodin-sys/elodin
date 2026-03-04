@@ -856,19 +856,19 @@ impl LoadSchematicParams<'_, '_> {
             }
             Panel::SensorView(sensor_view) => {
                 let msg_id =
-                    impeller2::types::msg_id(&sensor_view.component_name);
+                    impeller2::types::msg_id(&sensor_view.msg_name);
                 let label = sensor_view
                     .name
                     .clone()
                     .unwrap_or_else(|| {
-                        format!("Sensor View {}", sensor_view.component_name)
+                        format!("Sensor View {}", sensor_view.msg_name)
                     });
 
                 let raw_rgba_dims = self
                     .sensor_camera_configs
                     .0
                     .iter()
-                    .find(|c| c.camera_name == sensor_view.component_name)
+                    .find(|c| c.camera_name == sensor_view.msg_name)
                     .map(|c| (c.width, c.height));
 
                 let entity = self
@@ -876,7 +876,7 @@ impl LoadSchematicParams<'_, '_> {
                     .spawn((
                         crate::ui::video_stream::VideoStream {
                             msg_id,
-                            msg_name: sensor_view.component_name.clone(),
+                            msg_name: sensor_view.msg_name.clone(),
                             raw_rgba_dims,
                             ..Default::default()
                         },

@@ -36,10 +36,6 @@ use impeller2::types::{self, ComponentId, LenPacket, Timestamp};
 use impeller2_bevy::{EntityMap, PacketTx};
 use impeller2_wkt::{ComponentValue, DbConfig, LastUpdated};
 use serde::{Deserialize, Serialize};
-use std::sync::{
-    Arc,
-    atomic::{AtomicBool, Ordering},
-};
 
 use crate::object_3d::ComponentArrayExt;
 
@@ -49,6 +45,10 @@ use crate::object_3d::ComponentArrayExt;
 
 fn default_fps() -> f32 {
     60.0
+}
+
+fn default_format() -> String {
+    "rgba".to_string()
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -62,7 +62,8 @@ pub struct SensorCameraConfig {
     pub far: f32,
     pub pos_offset: [f64; 3],
     pub look_at_offset: [f64; 3],
-    pub channels: u32,
+    #[serde(default = "default_format")]
+    pub format: String,
     #[serde(default = "default_fps")]
     pub fps: f32,
     #[serde(default)]
@@ -97,7 +98,6 @@ pub struct SensorEffectSettings {
 #[derive(Clone, Component)]
 struct ImageCopier {
     buffer: Buffer,
-    enabled: Arc<AtomicBool>,
     src_image: Handle<Image>,
     camera_name: String,
     width: u32,
@@ -377,7 +377,6 @@ fn spawn_sensor_cameras(
 
         let copier = ImageCopier {
             buffer: cpu_buffer,
-            enabled: Arc::new(AtomicBool::new(true)),
             src_image: render_target_handle.clone(),
             camera_name: config.camera_name.clone(),
             width: config.width,
@@ -530,10 +529,6 @@ fn image_copy_driver(
     gpu_images: Res<RenderAssets<bevy::render::texture::GpuImage>>,
 ) {
     for image_copier in image_copiers.0.iter() {
-        if !image_copier.enabled.load(Ordering::Relaxed) {
-            continue;
-        }
-
         let Some(src_image) = gpu_images.get(&image_copier.src_image) else {
             continue;
         };
@@ -575,10 +570,6 @@ fn receive_image_from_buffer(
     sender: Res<SensorFrameSender>,
 ) {
     for image_copier in image_copiers.0.iter() {
-        if !image_copier.enabled.load(Ordering::Relaxed) {
-            continue;
-        }
-
         let buffer_slice = image_copier.buffer.slice(..);
 
         let (s, r) = crossbeam_channel::bounded(1);

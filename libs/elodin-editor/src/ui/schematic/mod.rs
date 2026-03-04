@@ -300,7 +300,7 @@ impl SchematicParam<'_, '_> {
                     Pane::SensorView(sv_pane) => {
                         let video_stream = self.video_streams.get(sv_pane.entity).ok()?;
                         Some(Panel::SensorView(impeller2_wkt::SensorView {
-                            component_name: video_stream.msg_name.clone(),
+                            msg_name: video_stream.msg_name.clone(),
                             name: pane_name,
                         }))
                     }

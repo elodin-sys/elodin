@@ -49,6 +49,10 @@ fn default_fps() -> f32 {
     60.0
 }
 
+fn default_format() -> String {
+    "rgba".to_string()
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SensorCameraConfig {
     pub entity_name: String,
@@ -60,7 +64,8 @@ pub struct SensorCameraConfig {
     pub far: f32,
     pub pos_offset: [f64; 3],
     pub look_at_offset: [f64; 3],
-    pub channels: u32,
+    #[serde(default = "default_format")]
+    pub format: String,
     #[serde(default = "default_fps")]
     pub fps: f32,
     #[serde(default)]

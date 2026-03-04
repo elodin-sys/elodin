@@ -471,7 +471,7 @@ impl<Ops: Buf<Op>, Data: Buf<u8>, Fields: Buf<Field>> VTable<Ops, Data, Fields> 
                 Ok(f) => f,
                 Err(Error::BufferUnderflow) => {
                     #[cfg(feature = "std")]
-                    eprintln!("[impeller2] skipping VTable field with BufferUnderflow");
+                    eprintln!("[WARN impeller2::vtable] skipping VTable field due to BufferUnderflow");
                     continue;
                 }
                 Err(e) => return Err(e),

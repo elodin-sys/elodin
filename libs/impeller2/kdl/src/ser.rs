@@ -118,7 +118,7 @@ fn serialize_video_stream(video_stream: &VideoStream) -> KdlNode {
 fn serialize_sensor_view(sensor_view: &SensorView) -> KdlNode {
     let mut node = KdlNode::new("sensor_view");
     node.entries_mut()
-        .push(KdlEntry::new(sensor_view.component_name.as_str()));
+        .push(KdlEntry::new(sensor_view.msg_name.as_str()));
     push_optional_name_prop(&mut node, sensor_view.name.as_deref());
     node
 }
