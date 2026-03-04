@@ -1,16 +1,20 @@
+mod frustum_tint_material;
+
 use super::frustum_common::{MainViewportQueryItem, color_component_to_u8, frustum_local_points};
 use crate::{
     MainCamera,
     object_3d::{Object3DMeshChild, Object3DState},
 };
-use bevy::asset::RenderAssetUsages;
+use bevy::asset::{RenderAssetUsages, embedded_asset};
 use bevy::camera::visibility::{NoFrustumCulling, RenderLayers};
 use bevy::ecs::system::SystemParam;
+use bevy::pbr::MaterialPlugin;
 use bevy::pbr::wireframe::{Wireframe, WireframeColor};
 use bevy::prelude::*;
 use bevy::render::render_resource::PrimitiveTopology;
 use bevy::transform::TransformSystems;
 use bevy_mat3_material::Mat3Material;
+use frustum_tint_material::{FrustumTintExt, FrustumTintMaterial, FrustumTintParams};
 use impeller2::types::ComponentId;
 use impeller2_bevy::{ComponentMetadataRegistry, ComponentValue, EntityMap};
 use impeller2_wkt::ComponentMetadata;
@@ -40,6 +44,8 @@ struct FrustumVolume {
 #[derive(Clone)]
 struct EllipsoidVolume {
     entity: Entity,
+    mesh_child: Entity,
+    mesh_handle: Handle<Mesh>,
     center: Vec3,
     rotation: Quat,
     radii: Vec3,
@@ -52,6 +58,7 @@ struct EllipsoidVolume {
 #[derive(Clone)]
 enum EllipsoidMaterialTarget {
     Standard(Handle<StandardMaterial>),
+    FrustumTintSwapped, // Was Standard, now FrustumTintMaterial; restore when ratio=0
     Mat3(Handle<Mat3Material>),
 }
 
@@ -80,6 +87,11 @@ struct FrustumEllipsoidIntersectionLight {
     key: FrustumEllipsoidIntersectionVisual,
 }
 
+#[derive(Component, Clone, Copy, Debug, Eq, Hash, PartialEq)]
+struct FrustumEllipsoidTintOverlay {
+    ellipsoid: Entity,
+}
+
 #[derive(Component, Clone, Copy, Debug)]
 pub struct IntersectionRatio {
     pub source: Entity,
@@ -104,17 +116,28 @@ struct DesiredIntersectionLight {
     transform: Transform,
 }
 
+struct DesiredTintOverlay {
+    ellipsoid: Entity,
+    mesh_child: Entity,
+    mesh: Handle<Mesh>,
+    material: MeshMaterial3d<FrustumTintMaterial>,
+    render_layers: RenderLayers,
+}
+
 #[derive(SystemParam)]
 struct FrustumIntersectionParams<'w, 's> {
     main_viewports: Query<'w, 's, MainViewportQueryItem, With<MainCamera>>,
     ellipsoids: Query<'w, 's, (Entity, &'static GlobalTransform, &'static Object3DState)>,
     children: Query<'w, 's, &'static Children>,
     mesh_children: Query<'w, 's, (), With<Object3DMeshChild>>,
+    mesh_handles: Query<'w, 's, &'static Mesh3d>,
     transforms: Query<'w, 's, &'static Transform>,
     mesh_materials: Query<'w, 's, &'static MeshMaterial3d<StandardMaterial>>,
+    mesh_frustum_tint_materials: Query<'w, 's, &'static MeshMaterial3d<FrustumTintMaterial>>,
     mesh_mat3_materials: Query<'w, 's, &'static MeshMaterial3d<Mat3Material>>,
     meshes: ResMut<'w, Assets<Mesh>>,
     materials: ResMut<'w, Assets<StandardMaterial>>,
+    frustum_tint_materials: ResMut<'w, Assets<FrustumTintMaterial>>,
     mat3_materials: ResMut<'w, Assets<Mat3Material>>,
     material_cache: ResMut<'w, IntersectionMaterialCache>,
     existing_visuals: Query<
@@ -128,15 +151,23 @@ struct FrustumIntersectionParams<'w, 's> {
     >,
     existing_lights:
         Query<'w, 's, (Entity, &'static FrustumEllipsoidIntersectionLight), With<PointLight>>,
+    existing_tint_overlays: Query<'w, 's, (Entity, &'static FrustumEllipsoidTintOverlay)>,
+    swapped: ResMut<'w, EllipsoidTintSwapped>,
 }
 
 pub struct FrustumIntersectionPlugin;
+
+/// Tracks mesh children that were swapped to FrustumTintMaterial; maps to original StandardMaterial handle.
+#[derive(Resource, Default)]
+struct EllipsoidTintSwapped(HashMap<Entity, Handle<StandardMaterial>>);
 
 impl Plugin for FrustumIntersectionPlugin {
     fn build(&self, app: &mut App) {
         use impeller2_bevy::AppExt;
         app.init_resource::<IntersectionMaterialCache>()
             .init_resource::<IntersectionRatios>()
+            .init_resource::<EllipsoidTintSwapped>()
+            .add_plugins(MaterialPlugin::<FrustumTintMaterial>::default())
             .add_impeller_component::<impeller2_wkt::FrustumCoverage>()
             .add_systems(
                 PostUpdate,
@@ -145,6 +176,7 @@ impl Plugin for FrustumIntersectionPlugin {
                     write_coverage_to_db.after(draw_frustum_ellipsoid_intersections),
                 ),
             );
+        embedded_asset!(app, "frustum_tint.wgsl");
     }
 }
 
@@ -256,6 +288,7 @@ fn apply_ellipsoid_tint(
 ) {
     let (tinted, emissive) = ellipsoid_tinted_color(base, ratio);
     match target {
+        EllipsoidMaterialTarget::FrustumTintSwapped => {}
         EllipsoidMaterialTarget::Standard(handle) => {
             if let Some(material) = standard_materials.get_mut(handle) {
                 material.base_color = tinted;
@@ -600,10 +633,23 @@ fn cleanup_all(
     for (entity, _) in params.existing_lights.iter() {
         commands.entity(entity).despawn();
     }
+    for (entity, _) in params.existing_tint_overlays.iter() {
+        commands.entity(entity).despawn();
+    }
     ratios.0.clear();
 }
 
-fn reset_ellipsoid_tints(params: &mut FrustumIntersectionParams<'_, '_>) {
+fn plane_to_vec4(plane: &Plane) -> Vec4 {
+    Vec4::new(plane.normal.x, plane.normal.y, plane.normal.z, plane.d)
+}
+
+fn reset_ellipsoid_tints(params: &mut FrustumIntersectionParams<'_, '_>, commands: &mut Commands) {
+    for (mesh_child, original) in params.swapped.0.drain() {
+        commands
+            .entity(mesh_child)
+            .remove::<MeshMaterial3d<FrustumTintMaterial>>()
+            .insert(MeshMaterial3d(original));
+    }
     for (entity, _global_transform, object_state) in params.ellipsoids.iter() {
         let impeller2_wkt::Object3DMesh::Ellipsoid { color, .. } = object_state.data.mesh else {
             continue;
@@ -701,7 +747,7 @@ fn draw_frustum_ellipsoid_intersections(
     }
 
     if sources.is_empty() || targets.is_empty() {
-        reset_ellipsoid_tints(&mut params);
+        reset_ellipsoid_tints(&mut params, &mut commands);
         cleanup_all(&params, &mut ratios, &mut commands);
         return;
     }
@@ -721,12 +767,21 @@ fn draw_frustum_ellipsoid_intersections(
         else {
             continue;
         };
+        let Ok(mesh_handle) = params.mesh_handles.get(mesh_child_entity) else {
+            continue;
+        };
         let Ok(child_transform) = params.transforms.get(mesh_child_entity) else {
             continue;
         };
 
         let material_target = if let Ok(mat) = params.mesh_materials.get(mesh_child_entity) {
             Some(EllipsoidMaterialTarget::Standard(mat.0.clone()))
+        } else if params
+            .mesh_frustum_tint_materials
+            .get(mesh_child_entity)
+            .is_ok()
+        {
+            Some(EllipsoidMaterialTarget::FrustumTintSwapped)
         } else if let Ok(mat) = params.mesh_mat3_materials.get(mesh_child_entity) {
             Some(EllipsoidMaterialTarget::Mat3(mat.0.clone()))
         } else {
@@ -738,6 +793,8 @@ fn draw_frustum_ellipsoid_intersections(
         let extent = ellipsoid_world_extent(rotation, radii);
         ellipsoids.push(EllipsoidVolume {
             entity,
+            mesh_child: mesh_child_entity,
+            mesh_handle: mesh_handle.0.clone(),
             center,
             rotation,
             radii,
@@ -756,7 +813,15 @@ fn draw_frustum_ellipsoid_intersections(
     ratios.0.clear();
     let mut desired = Vec::new();
     let mut desired_lights = Vec::new();
+    let mut desired_tint_overlays = Vec::new();
     let mut ellipsoid_max_ratio: HashMap<Entity, f32> = HashMap::new();
+    let mut coverage_layers = RenderLayers::none();
+    for (_, render_layers, _, show_coverage, _) in &targets {
+        if *show_coverage {
+            coverage_layers = coverage_layers.union(render_layers);
+        }
+    }
+    let any_target_wants_coverage = coverage_layers.iter().next().is_some();
 
     for frustum in &sources {
         for ellipsoid in &ellipsoids {
@@ -774,7 +839,6 @@ fn draw_frustum_ellipsoid_intersections(
             let maybe_ratio =
                 compute_intersection_volume(bounds_min, bounds_max, frustum, ellipsoid);
 
-            let any_target_wants_coverage = targets.iter().any(|(_, _, _, sc, _)| *sc);
             if let Some(ratio) = maybe_ratio.filter(|_| any_target_wants_coverage) {
                 let entry = ellipsoid_max_ratio.entry(ellipsoid.entity).or_insert(0.0);
                 *entry = entry.max(ratio);
@@ -832,14 +896,89 @@ fn draw_frustum_ellipsoid_intersections(
             .get(&ellipsoid.entity)
             .copied()
             .unwrap_or(0.0);
-        if let Some(material_target) = &ellipsoid.material_target {
-            apply_ellipsoid_tint(
-                material_target,
-                ellipsoid.base_color,
-                ratio,
-                &mut params.materials,
-                &mut params.mat3_materials,
-            );
+
+        if ratio > SURFACE_EPS && any_target_wants_coverage {
+            let first_frustum = sources.iter().find(|f| {
+                aabb_overlap(
+                    f.aabb_min,
+                    f.aabb_max,
+                    ellipsoid.aabb_min,
+                    ellipsoid.aabb_max,
+                )
+            });
+            if let Some(frustum) = first_frustum {
+                let mut base = match &ellipsoid.material_target {
+                    Some(EllipsoidMaterialTarget::Standard(handle)) => {
+                        params.materials.get(handle).cloned().unwrap_or_default()
+                    }
+                    Some(EllipsoidMaterialTarget::Mat3(handle)) => params
+                        .mat3_materials
+                        .get(handle)
+                        .map(|m| m.base.clone())
+                        .unwrap_or_default(),
+                    _ => StandardMaterial::default(),
+                };
+                base.alpha_mode = AlphaMode::Blend;
+                base.cull_mode = None;
+                base.double_sided = true;
+                base.depth_bias = PROJECTION_DEPTH_BIAS;
+
+                let planes: [Vec4; 6] = std::array::from_fn(|i| plane_to_vec4(&frustum.planes[i]));
+                let (inside_rgb, _) = ellipsoid_tinted_color(ellipsoid.base_color, 1.0);
+                let (outside_rgb, _) = ellipsoid_tinted_color(ellipsoid.base_color, 0.01);
+                let alpha = ellipsoid.base_color.a.max(0.35);
+                let tint_material = FrustumTintMaterial {
+                    base,
+                    extension: FrustumTintExt {
+                        params: FrustumTintParams {
+                            planes,
+                            inside_color: Vec4::new(
+                                inside_rgb.to_srgba().red,
+                                inside_rgb.to_srgba().green,
+                                inside_rgb.to_srgba().blue,
+                                alpha,
+                            ),
+                            outside_color: Vec4::new(
+                                outside_rgb.to_srgba().red,
+                                outside_rgb.to_srgba().green,
+                                outside_rgb.to_srgba().blue,
+                                alpha,
+                            ),
+                            enabled: 1,
+                        },
+                    },
+                };
+                desired_tint_overlays.push(DesiredTintOverlay {
+                    ellipsoid: ellipsoid.entity,
+                    mesh_child: ellipsoid.mesh_child,
+                    mesh: ellipsoid.mesh_handle.clone(),
+                    material: MeshMaterial3d(params.frustum_tint_materials.add(tint_material)),
+                    render_layers: coverage_layers.clone(),
+                });
+            }
+        }
+
+        match &ellipsoid.material_target {
+            Some(EllipsoidMaterialTarget::FrustumTintSwapped) => {
+                // Avoid runtime material-type swaps on mesh entities: they can desync
+                // Bevy's specialization bookkeeping and panic in `specialize_material_meshes`.
+                if let Some(original) = params.swapped.0.remove(&ellipsoid.mesh_child) {
+                    commands
+                        .entity(ellipsoid.mesh_child)
+                        .remove::<MeshMaterial3d<FrustumTintMaterial>>()
+                        .insert(MeshMaterial3d(original));
+                }
+            }
+            Some(material_target) => {
+                apply_ellipsoid_tint(
+                    material_target,
+                    ellipsoid.base_color,
+                    ratio,
+                    &mut params.materials,
+                    &mut params.mat3_materials,
+                );
+            }
+            None => {}
         }
     }
 
@@ -852,6 +991,10 @@ fn draw_frustum_ellipsoid_intersections(
         HashMap::new();
     for (entity, marker) in params.existing_lights.iter() {
         existing_lights_by_key.insert(marker.key, entity);
+    }
+    let mut existing_tint_overlays_by_ellipsoid: HashMap<Entity, Entity> = HashMap::new();
+    for (entity, marker) in params.existing_tint_overlays.iter() {
+        existing_tint_overlays_by_ellipsoid.insert(marker.ellipsoid, entity);
     }
 
     for visual in desired {
@@ -904,10 +1047,47 @@ fn draw_frustum_ellipsoid_intersections(
         ));
     }
 
+    for overlay in desired_tint_overlays {
+        if let Some(entity) = existing_tint_overlays_by_ellipsoid.remove(&overlay.ellipsoid) {
+            commands.entity(entity).insert((
+                Mesh3d(overlay.mesh),
+                overlay.material,
+                overlay.render_layers,
+            ));
+            commands.entity(overlay.mesh_child).add_child(entity);
+            continue;
+        }
+        let overlay_entity = commands
+            .spawn((
+                Mesh3d(overlay.mesh),
+                overlay.material,
+                Transform::IDENTITY,
+                GlobalTransform::IDENTITY,
+                Visibility::default(),
+                InheritedVisibility::default(),
+                ViewVisibility::default(),
+                overlay.render_layers,
+                NoFrustumCulling,
+                bevy::light::NotShadowCaster,
+                bevy::light::NotShadowReceiver,
+                FrustumEllipsoidTintOverlay {
+                    ellipsoid: overlay.ellipsoid,
+                },
+                Name::new("frustum_ellipsoid_tint_overlay"),
+            ))
+            .id();
+        commands
+            .entity(overlay.mesh_child)
+            .add_child(overlay_entity);
+    }
+
     for (entity, _) in existing_by_key.into_values() {
         commands.entity(entity).despawn();
     }
     for entity in existing_lights_by_key.into_values() {
+        commands.entity(entity).despawn();
+    }
+    for entity in existing_tint_overlays_by_ellipsoid.into_values() {
         commands.entity(entity).despawn();
     }
 }
