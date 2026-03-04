@@ -93,6 +93,9 @@ with pkgs; let
         typos
         zola
         rav1e
+
+        # Tracy profiler
+        tracy
       ]
       ++ common.commonNativeBuildInputs
       ++ common.commonBuildInputs
@@ -197,30 +200,4 @@ with pkgs; let
 in {
   # Unified shell that combines all development environments
   elodin = mkShell (shellAttrs // linuxShellAttrs);
-
-  # Profiling shell adds Tracy GUI without duplicating the base shell definition
-  elodin-profiling = mkShell (
-    (shellAttrs
-      // {
-        name = "elo-profiling-shell";
-        buildInputs = shellAttrs.buildInputs ++ [tracy];
-        shellHook =
-          lib.replaceStrings
-          [
-            "exec ${pkgs.zsh}/bin/zsh"
-          ]
-          [
-            ''
-              echo "Profiling shell:"
-              echo "  • Tracy GUI is available by running 'tracy'"
-              echo "  • Run Elodin with: RUST_LOG=info cargo run --release -p elodin --features tracy"
-              echo ""
-
-              exec ${pkgs.zsh}/bin/zsh
-            ''
-          ]
-          shellAttrs.shellHook;
-      })
-    // linuxShellAttrs
-  );
 }
