@@ -186,15 +186,14 @@ with pkgs; let
         echo "  • Shell tools: eza, bat, delta, fzf, ripgrep, zoxide"
         echo ""
         echo "SDK Development (if needed):"
-        echo "  "
-        if [ "''${NIX_SHELLRC_READY:-0}" -eq 1 ]; then
-            echo "init-elodin; # To install elodin-py, elodin, and elodin-db."
-        else
-            echo "uv venv --python 3.12"
-            echo "source .venv/bin/activate"
-            echo "uvx maturin develop --uv --manifest-path=libs/nox-py/Cargo.toml && just install"
-            echo ""
-            echo "OR use 'init-elodin' shell function, by adding this to your .zshrc:"
+        echo "  • Run 'install-elodin' to provide: elodin-py, elodin, and elodin-db"
+        # NIX_SHELLRC_READY promises the shell will consume the rc file. We can't test that it
+        # has happened because it won't happen until the new zsh is exec'd. And we can't ensure that
+        # it did happen once exec'd unless we could run commands in that shell--which is exactly the
+        # kind of facility that we get by asking the user to source "$NIX_SHELLRC".
+        if [ "''${NIX_SHELLRC_READY:-0}" -ne 1 ]; then
+            echo "warning: No 'install-elodin' shell function will be available." >&2;
+            echo "Add this to your .zshrc to rectify:"
             echo 'export NIX_SHELLRC_READY=1; [[ -n "$NIX_SHELLRC" ]] && source "$NIX_SHELLRC"'
         fi
         echo ""
@@ -229,6 +228,8 @@ in {
               echo "  • Tracy GUI is available by running 'tracy'"
               echo "  • Run Elodin with: RUST_LOG=info cargo run --release -p elodin --features tracy"
               echo ""
+
+              # HOOK
             ''
           ]
           shellAttrs.shellHook;
