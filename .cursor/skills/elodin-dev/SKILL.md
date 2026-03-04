@@ -62,7 +62,7 @@ nix develop --command "cargo build"      # One-off command
 just install
 
 # Python SDK wheel (for running/testing simulations)
-uv venv --python 3.12
+uv venv --python 3.13
 source .venv/bin/activate
 uvx maturin develop --uv --manifest-path=libs/nox-py/Cargo.toml
 

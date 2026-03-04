@@ -16,7 +16,7 @@ Elodin is an open-source platform for rapid design, testing, and simulation of a
 ### Python SDK (always build first, so binaries pick it up)
 
 ```bash
-uv venv --python 3.12 && source .venv/bin/activate
+uv venv --python 3.13 && source .venv/bin/activate
 uvx maturin develop --uv --manifest-path=libs/nox-py/Cargo.toml
 ```
 

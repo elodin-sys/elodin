@@ -35,7 +35,7 @@ The simulation provides:
 
 2. Python virtual environment with Elodin:
    ```bash
-   uv venv --python 3.12
+   uv venv --python 3.13
    source .venv/bin/activate
    uvx maturin develop --uv --manifest-path=libs/nox-py/Cargo.toml
    ```

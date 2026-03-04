@@ -39,10 +39,8 @@
 
   config = {
     sdImage = let
-      mkESPContentSource = pkgs.substituteAll {
-        src = ./mk-esp-contents.py;
-        isExecutable = true;
-        inherit (pkgs.buildPackages) python3;
+      mkESPContentSource = pkgs.replaceVars ./mk-esp-contents.py {
+        python3 = pkgs.buildPackages.python3;
       };
       mkESPContent =
         pkgs.runCommand "mk-esp-contents"

@@ -123,7 +123,7 @@ Test fixtures are precompiled `.vmfb` files checked into `tests/fixtures/`. To r
 
 ```bash
 # Install the IREE compiler (in a venv, not the nix Python)
-uv venv /tmp/iree-venv --python 3.12
+uv venv /tmp/iree-venv --python 3.13
 source /tmp/iree-venv/bin/activate
 uv pip install iree-base-compiler==3.10.0
 

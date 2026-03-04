@@ -48,6 +48,18 @@ class Control:
     pilot_yaw_rate_tc: float
 
 
+class _classproperty:
+    """Descriptor that works like @property but on the class itself (Python 3.13+)."""
+
+    def __init__(self, func):
+        self.fget = func
+
+    def __get__(self, obj, cls=None):
+        if cls is None:
+            cls = type(obj)
+        return self.fget(cls)
+
+
 @dataclass
 class Config:
     _GLOBAL: ty.ClassVar[ty.Self | None] = None
@@ -120,8 +132,7 @@ class Config:
         path = os.path.join(os.path.dirname(__file__), self.motor_thrust_curve_path)
         return np.genfromtxt(path, delimiter=",", skip_header=1).transpose()
 
-    @classmethod
-    @property
+    @_classproperty
     def GLOBAL(cls) -> ty.Self:
         if cls._GLOBAL is None:
             raise ValueError("No global config set")
