@@ -192,9 +192,12 @@ with pkgs; let
         # it did happen once exec'd unless we could run commands in that shell--which is exactly the
         # kind of facility that we get by asking the user to source "$NIX_SHELLRC".
         if [ "''${NIX_SHELLRC_READY:-0}" -ne 1 ]; then
-            echo "warning: No 'install-elodin' shell function will be available." >&2;
-            echo "Add this to your .zshrc to rectify:"
-            echo 'export NIX_SHELLRC_READY=1; [[ -n "$NIX_SHELLRC" ]] && source "$NIX_SHELLRC"'
+            echo "WARNING: No 'install-elodin' shell function available. Run this to fix:" >&2;
+            echo ""
+            echo 'source $NIX_SHELLRC;' >&2;
+            echo ""
+            echo "Or add this to your .zshrc to fix permanently:" >&2;
+            echo 'export NIX_SHELLRC_READY=1; [[ -n "$NIX_SHELLRC" ]] && source "$NIX_SHELLRC"' >&2;
         fi
         echo ""
 
