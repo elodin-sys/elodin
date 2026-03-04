@@ -1056,7 +1056,7 @@ impl Pane {
                     {
                         let monitor_enabled = configs
                             .get(cam)
-                            .map(|c| c.show_coverage_in_viewport)
+                            .map(|c| c.show_frustums && c.show_coverage_in_viewport)
                             .unwrap_or(false);
                         let relevant: Vec<_> = component_values
                             .iter()

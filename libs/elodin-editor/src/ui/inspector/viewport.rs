@@ -356,56 +356,71 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
                         ui.checkbox(&mut viewport_config.show_frustums, "");
                     });
                 });
-                ui.add_space(8.0);
-                ui.horizontal(|ui| {
-                    ui.label(
-                        egui::RichText::new("COVERAGE IN VIEWPORT").color(scheme.text_secondary),
-                    );
-                    ui.with_layout(egui::Layout::right_to_left(Align::Min), |ui| {
-                        theme::configure_input_with_border(ui.style_mut());
-                        ui.checkbox(&mut viewport_config.show_coverage_in_viewport, "");
-                    });
-                });
-                viewport_config.show_ratio_monitor = viewport_config.show_coverage_in_viewport;
+                let show_intersection_options =
+                    viewport_config.show_frustums && has_detected_ellipsoid;
+                if !show_intersection_options {
+                    viewport_config.show_coverage_in_viewport = false;
+                    viewport_config.show_projection_2d = false;
+                }
+                viewport_config.show_ratio_monitor =
+                    show_intersection_options && viewport_config.show_coverage_in_viewport;
 
-                ui.add_space(8.0);
-                ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new("PROJECTION 2D").color(scheme.text_secondary));
-                    ui.with_layout(egui::Layout::right_to_left(Align::Min), |ui| {
-                        theme::configure_input_with_border(ui.style_mut());
-                        ui.checkbox(&mut viewport_config.show_projection_2d, "");
-                    });
-                });
-                if viewport_config.show_projection_2d {
+                if show_intersection_options {
                     ui.add_space(8.0);
-                    let mut proj_color = viewport_config.projection_color.into_color32();
                     ui.horizontal(|ui| {
                         ui.label(
-                            egui::RichText::new("PROJECTION COLOR").color(scheme.text_secondary),
+                            egui::RichText::new("COVERAGE IN VIEWPORT")
+                                .color(scheme.text_secondary),
                         );
-                        ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
-                            let swatch = ui.add(
-                                egui::Button::new("")
-                                    .fill(proj_color)
-                                    .stroke(egui::Stroke::new(1.0, scheme.border_primary))
-                                    .corner_radius(egui::CornerRadius::same(10))
-                                    .min_size(egui::vec2(20.0, 20.0)),
-                            );
-                            let color_id = ui.auto_id_with("show_frustums_projection_color");
-                            if swatch.clicked() {
-                                egui::Popup::toggle_id(ui.ctx(), color_id);
-                            }
-                            color_popup(ui, &mut proj_color, color_id, &swatch);
+                        ui.with_layout(egui::Layout::right_to_left(Align::Min), |ui| {
+                            theme::configure_input_with_border(ui.style_mut());
+                            ui.checkbox(&mut viewport_config.show_coverage_in_viewport, "");
                         });
                     });
-                    viewport_config.projection_color =
-                        impeller2_wkt::Color::from_color32(proj_color);
-                }
 
-                if !has_detected_ellipsoid {
+                    ui.add_space(8.0);
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new("PROJECTION 2D").color(scheme.text_secondary));
+                        ui.with_layout(egui::Layout::right_to_left(Align::Min), |ui| {
+                            theme::configure_input_with_border(ui.style_mut());
+                            ui.checkbox(&mut viewport_config.show_projection_2d, "");
+                        });
+                    });
+                    if viewport_config.show_projection_2d {
+                        ui.add_space(8.0);
+                        let mut proj_color = viewport_config.projection_color.into_color32();
+                        ui.horizontal(|ui| {
+                            ui.label(
+                                egui::RichText::new("PROJECTION COLOR")
+                                    .color(scheme.text_secondary),
+                            );
+                            ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
+                                let swatch = ui.add(
+                                    egui::Button::new("")
+                                        .fill(proj_color)
+                                        .stroke(egui::Stroke::new(1.0, scheme.border_primary))
+                                        .corner_radius(egui::CornerRadius::same(10))
+                                        .min_size(egui::vec2(20.0, 20.0)),
+                                );
+                                let color_id = ui.auto_id_with("show_frustums_projection_color");
+                                if swatch.clicked() {
+                                    egui::Popup::toggle_id(ui.ctx(), color_id);
+                                }
+                                color_popup(ui, &mut proj_color, color_id, &swatch);
+                            });
+                        });
+                        viewport_config.projection_color =
+                            impeller2_wkt::Color::from_color32(proj_color);
+                    }
+                } else {
                     ui.add_space(6.0);
+                    let status_msg = if has_detected_ellipsoid {
+                        "Enable SHOW FRUSTUMS to access intersection options."
+                    } else {
+                        "Add an ellipsoid and enable SHOW FRUSTUMS to access intersection options."
+                    };
                     ui.label(
-                        egui::RichText::new("No ellipsoid detected yet (features stay armed).")
+                        egui::RichText::new(status_msg)
                             .color(scheme.text_secondary)
                             .italics(),
                     );
