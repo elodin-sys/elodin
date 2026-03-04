@@ -22,9 +22,9 @@ def world() -> tuple[el.World, el.EntityId]:
 
     object_mesh = """
     object_3d ellipsoid.world_pos {
-        ellipsoid scale="(0.65, 0.65, 0.24)" show_grid=#true {
-            color 0 188 212 140
-            grid_color 255 255 255 200
+        ellipsoid scale="(1.2, 1.2, 0.5)" show_grid=#true {
+            color 0 188 212 40
+            grid_color 255 255 255 120
         }
     }
     """
@@ -35,8 +35,8 @@ def world() -> tuple[el.World, el.EntityId]:
 
         tabs {
             hsplit name="Viewport" {
-                viewport name="Frustum Source" pos="(0,0,0,1, 8,2,4)" look_at="(0,0,0,0, 0,0,0)" create_frustum=#true show_grid=#true active=#true
-                viewport name="Frustum View" pos="(0,0,0,1, 2,2,2)" look_at="(0,0,0,0, 0,0,0)" show_frustums=#true show_grid=#true active=#true
+                viewport name="Frustum Source" pos="(0,0,0,1, 3,0.5,2)" look_at="(0,0,0,0, 0,0,0)" create_frustum=#true show_grid=#true active=#true near=0.05 far=6.0
+                viewport name="Frustum View" pos="(0,0,0,1, 2,2,1.5)" look_at="(0,0,0,0, 0,0,0)" show_frustums=#true show_grid=#true active=#true
             }
         }
     """
