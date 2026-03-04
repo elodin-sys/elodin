@@ -746,6 +746,7 @@ pub fn update_object_3d_system(
     )>,
     mut transforms: Query<&mut Transform>,
     mut mat3_params: Query<&mut Mat3Params>,
+    mesh_child_markers: Query<(), With<Object3DMeshChild>>,
     entity_map: Res<EntityMap>,
     component_value_maps: Query<&'static ComponentValue>,
 ) {
@@ -773,6 +774,27 @@ pub fn update_object_3d_system(
             continue;
         }
 
+        let mesh_child = children_maybe.and_then(|children| {
+            let mut mesh_children = children
+                .iter()
+                .filter(|child| mesh_child_markers.contains(*child));
+            let first = mesh_children.next();
+            if mesh_children.next().is_some() {
+                warn_once!(
+                    entity = ?entity,
+                    "object_3d ellipsoid has multiple mesh children; using first"
+                );
+            }
+            if first.is_none() {
+                warn_once!(
+                    entity = ?entity,
+                    total_children = children.len(),
+                    "object_3d ellipsoid has no mesh child"
+                );
+            }
+            first
+        });
+
         if let Some(ref cholesky_expr) = object_3d.error_covariance_cholesky_expr {
             if let impeller2_wkt::Object3DMesh::Ellipsoid {
                 error_confidence_interval,
@@ -782,9 +804,8 @@ pub fn update_object_3d_system(
                 && let Ok(l) = component_value_to_6floats(&cv)
             {
                 let linear = cholesky_6_to_mat3(&l, *error_confidence_interval);
-                if let Some(children) = children_maybe
-                    && let Some(child) = children.first()
-                    && let Ok(mut params) = mat3_params.get_mut(*child)
+                if let Some(child) = mesh_child
+                    && let Ok(mut params) = mat3_params.get_mut(child)
                 {
                     params.linear = linear;
                 }
@@ -797,23 +818,15 @@ pub fn update_object_3d_system(
                 Ok(scale) => {
                     let scale_enu = scale.max(Vec3::splat(f32::EPSILON));
                     let scale = enu_scale_to_bevy(scale_enu);
-                    if let Some(children) = children_maybe {
-                        if children.len() != 1 {
-                            warn!(
-                                "object_3d ellipse had {} children expected 1.",
-                                children.len()
-                            );
+                    if let Some(child) = mesh_child {
+                        if let Ok(mut child_transform) = transforms.get_mut(child) {
+                            child_transform.scale = scale;
+                            child_transform.translation = Vec3::ZERO;
                         }
-                        if let Some(child) = children.first() {
-                            if let Ok(mut child_transform) = transforms.get_mut(*child) {
-                                child_transform.scale = scale;
-                                child_transform.translation = Vec3::ZERO;
-                            }
-                            ellipse.max_extent = scale.max_element();
-                            ellipse.oversized = ellipse.max_extent > ELLIPSOID_OVERSIZED_THRESHOLD;
-                            if object_3d.scale_expr.is_some() {
-                                object_3d.scale_error = None;
-                            }
+                        ellipse.max_extent = scale.max_element();
+                        ellipse.oversized = ellipse.max_extent > ELLIPSOID_OVERSIZED_THRESHOLD;
+                        if object_3d.scale_expr.is_some() {
+                            object_3d.scale_error = None;
                         }
                     }
                 }
