@@ -112,7 +112,7 @@ pub fn default_projection_color() -> impeller2_wkt::Color {
 }
 
 pub fn default_playback_accent_color() -> impeller2_wkt::Color {
-    impeller2_wkt::Color::from_color32(Color32::from_bevy(colors::bevy::GREEN))
+    impeller2_wkt::Color::from_color32(colors::YOLK_DEFAULT)
 }
 
 #[derive(Component)]
