@@ -220,8 +220,8 @@
             </a>
             <span>
                 <select name="version" class="version-select" disabled>
-                    <option value="v0.15.5" selected>
-                        v0.15.5
+                    <option value="v0.16.2-alpha.0" selected>
+                        v0.16.2-alpha.0
                     </option>
                 </select>
             </span>
@@ -496,7 +496,7 @@ Other solutions simply require large amounts of engineering effort and/or massiv
 <p>Elodin solves these problems by introducing a cloud-based simulation runner that can run up to 100,000 simulations simultaneously. We're able to do so in a cost-effective way by:</p>
 <ul>
 <li>Using the <a href="https://en.wikipedia.org/wiki/Entity_component_system">ECS</a> architecture to exploit the inherent parallelism in running the same compute kernel against different sets of data.</li>
-<li>Leveraging <a href="https://openxla.org/xla">XLA</a> to compile the simulation code to run on GPUs.</li>
+<li>Leveraging <a href="https://iree.dev/">IREE</a> to compile the simulation code for fast execution.</li>
 <li>Using the cloud's elasticity to scale up and down as needed.</li>
 </ul>
 

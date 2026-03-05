@@ -220,8 +220,8 @@
             </a>
             <span>
                 <select name="version" class="version-select" disabled>
-                    <option value="v0.15.5" selected>
-                        v0.15.5
+                    <option value="v0.16.2-alpha.0" selected>
+                        v0.16.2-alpha.0
                     </option>
                 </select>
             </span>
@@ -573,6 +573,7 @@ Python but with near-C++ performance.</p>
 <h4 id="gpu-tpu-acceleration">GPU &amp; TPU Acceleration</h4>
 <p>Third, it can easily run your computations on GPUs and TPUs by compiling to <a href="https://openxla.org/xla">XLA</a>, without you having to manage
 all that complexity. You just write Python code, and JAX handles sending it to the GPU in the background.</p>
+<p>In Elodin, JAX code is compiled to <a href="https://iree.dev/">IREE</a> by default for Python-free execution each tick, or can use JAX's built-in XLA backend via <code>backend="jax"</code> for full compatibility.</p>
 <p>JAX is like NumPy, but optimized for high-performance computing, like running massive monte-carlo simulations.</p>
 <h2 id="nox">Nox</h2>
 <p>Enter Nox, a Rust implementation of JAX. Nox is a Rust library that provides a NumPy-like interface for numerical computing, but with the
