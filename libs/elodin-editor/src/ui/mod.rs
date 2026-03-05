@@ -228,6 +228,7 @@ pub fn create_egui_context() -> EguiContext {
 
 pub fn shortcuts(
     mut paused: ResMut<Paused>,
+    mut latest_follow: ResMut<timeline::LatestFollow>,
     command_palette_state: Res<CommandPaletteState>,
     key_state: Res<LogicalKeyState>,
     mut context: Query<&mut EguiContext>,
@@ -239,6 +240,9 @@ pub fn shortcuts(
 
     if !input_has_focus && key_state.just_pressed(&Key::Space) {
         paused.0 = !paused.0;
+        if paused.0 {
+            latest_follow.0 = false;
+        }
     }
 }
 

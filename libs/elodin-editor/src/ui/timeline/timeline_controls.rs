@@ -24,7 +24,7 @@ use crate::{
     },
 };
 
-use super::{PlaybackSpeed, StreamTickOrigin, TimelineIcons};
+use super::{LatestFollow, PlaybackSpeed, StreamTickOrigin, TimelineIcons};
 
 pub(crate) fn plugin(app: &mut App) {
     app.init_resource::<TimelineStepButtons>();
@@ -42,6 +42,8 @@ pub struct TimelineControls<'w> {
     behavior: ResMut<'w, TimeRangeBehavior>,
     tick_origin: ResMut<'w, StreamTickOrigin>,
     step_buttons: ResMut<'w, TimelineStepButtons>,
+    latest_follow: ResMut<'w, LatestFollow>,
+    replay_mode: Option<Res<'w, crate::ReplayMode>>,
 }
 
 #[derive(Default, Debug, Resource)]
@@ -72,6 +74,8 @@ impl WidgetSystem for TimelineControls<'_> {
             mut behavior,
             mut tick_origin,
             mut step_buttons,
+            mut latest_follow,
+            replay_mode,
         } = state.get_mut(world);
 
         tick_origin.observe_stream(**stream_id);
@@ -100,6 +104,7 @@ impl WidgetSystem for TimelineControls<'_> {
                             );
 
                             if jump_to_start_btn.clicked() {
+                                latest_follow.0 = false;
                                 tick.0 = earliest_timestamp.0;
                                 tick_origin.request_rebase();
                             }
@@ -112,6 +117,7 @@ impl WidgetSystem for TimelineControls<'_> {
                                 && tick.0 > earliest_timestamp.0
                                 && tick_step_micros > 0
                             {
+                                latest_follow.0 = false;
                                 let mut first = false;
                                 let down = step_buttons.back.get_or_insert_with(|| {
                                     first = true;
@@ -142,6 +148,7 @@ impl WidgetSystem for TimelineControls<'_> {
 
                                 if pause_btn.clicked() {
                                     paused.0 = true;
+                                    latest_follow.0 = false;
                                 }
                             }
 
@@ -153,6 +160,7 @@ impl WidgetSystem for TimelineControls<'_> {
                                 && tick.0 < max_tick.0
                                 && tick_step_micros > 0
                             {
+                                latest_follow.0 = false;
                                 let mut first = false;
                                 let down = step_buttons.forward.get_or_insert_with(|| {
                                     first = true;
@@ -171,7 +179,9 @@ impl WidgetSystem for TimelineControls<'_> {
                             );
 
                             if jump_to_end_btn.clicked() {
-                                tick.0 = Timestamp(max_tick.0.0.saturating_sub(1));
+                                tick.0 = max_tick.0;
+                                paused.0 = false;
+                                latest_follow.0 = replay_mode.is_none();
                             }
                         },
                     );
@@ -262,6 +272,17 @@ impl WidgetSystem for TimelineControls<'_> {
                                     ui.add_space(8.0);
 
                                     ui.add(egui::Label::new(speed_label).selectable(false));
+
+                                    ui.add_space(16.0);
+
+                                    let latest_enabled = replay_mode.is_none();
+                                    let latest_response = ui.add_enabled_ui(latest_enabled, |ui| {
+                                        ui.checkbox(&mut latest_follow.0, "LATEST")
+                                    });
+                                    if latest_response.inner.changed() && latest_follow.0 {
+                                        paused.0 = false;
+                                        tick.0 = max_tick.0;
+                                    }
                                 });
                         },
                     );
