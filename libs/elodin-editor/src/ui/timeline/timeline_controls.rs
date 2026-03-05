@@ -314,20 +314,20 @@ fn format_playback_speed(speed: f64) -> String {
     format!("{value}x")
 }
 
-fn format_lag_label(micros: i64) -> String {
+fn format_lag_counter(micros: i64) -> String {
     if micros <= 0 {
-        return "LIVE".to_owned();
+        return "0ms".to_owned();
     }
 
     if micros >= 1_000_000 {
-        return format!("LIVE +{:.1}s", micros as f64 / 1_000_000.0);
+        return format!("+{:.1}s", micros as f64 / 1_000_000.0);
     }
 
     if micros >= 1_000 {
-        return format!("LIVE +{}ms", micros / 1_000);
+        return format!("+{}ms", micros / 1_000);
     }
 
-    format!("LIVE +{micros}us")
+    format!("+{micros}us")
 }
 
 fn live_follow_button(
@@ -337,16 +337,14 @@ fn live_follow_button(
     lag_micros: i64,
 ) -> egui::Response {
     let is_delayed = lag_micros > 0;
-    let label = if enabled && following {
-        "LIVE".to_owned()
-    } else {
-        format_lag_label(lag_micros)
-    };
+    let live_label = "LIVE";
+    let counter_label = format_lag_counter(lag_micros);
 
     let scheme = get_scheme();
-    let (text_color, fill_color, stroke_color, dot_color) = if !enabled {
+    let (live_text_color, counter_text_color, fill_color, stroke_color, dot_color) = if !enabled {
         (
             scheme.text_tertiary,
+            scheme.text_tertiary.opacity(0.7),
             scheme.bg_primary,
             scheme.border_primary.opacity(0.25),
             scheme.text_tertiary.opacity(0.4),
@@ -354,12 +352,14 @@ fn live_follow_button(
     } else if following {
         (
             scheme.success,
+            scheme.success.opacity(0.9),
             scheme.bg_secondary.opacity(0.7),
             scheme.success.opacity(0.45),
             scheme.success,
         )
     } else if is_delayed {
         (
+            scheme.text_primary,
             scheme.text_primary,
             scheme.bg_secondary.opacity(0.7),
             scheme.border_primary.opacity(0.75),
@@ -368,6 +368,7 @@ fn live_follow_button(
     } else {
         (
             scheme.text_secondary,
+            scheme.text_secondary,
             scheme.bg_secondary.opacity(0.6),
             scheme.border_primary.opacity(0.55),
             scheme.text_tertiary.opacity(0.8),
@@ -375,12 +376,34 @@ fn live_follow_button(
     };
 
     let font_id = egui::TextStyle::Button.resolve(ui.style());
-    let text_galley = ui
+    let live_galley = ui
         .painter()
-        .layout_no_wrap(label.clone(), font_id.clone(), text_color);
+        .layout_no_wrap(live_label.to_owned(), font_id.clone(), live_text_color);
+    let counter_galley = ui
+        .painter()
+        .layout_no_wrap(counter_label.clone(), font_id.clone(), counter_text_color);
     let dot_radius = 3.0;
-    let height = (text_galley.size().y + 8.0).max(22.0);
-    let width = text_galley.size().x + 26.0;
+    let height = (live_galley.size().y.max(counter_galley.size().y) + 8.0).max(22.0);
+    let live_fixed_width = ui
+        .painter()
+        .layout_no_wrap("LIVE".to_owned(), font_id.clone(), live_text_color)
+        .size()
+        .x;
+    let counter_fixed_width = [
+        "0ms",
+        "+9999ms",
+        "+9999us",
+        "+999.9s",
+    ]
+    .into_iter()
+    .map(|sample| {
+        ui.painter()
+            .layout_no_wrap(sample.to_owned(), font_id.clone(), counter_text_color)
+            .size()
+            .x
+    })
+    .fold(counter_galley.size().x, f32::max);
+    let width = 32.0 + live_fixed_width + 10.0 + counter_fixed_width;
 
     let sense = if enabled {
         egui::Sense::click()
@@ -410,12 +433,29 @@ fn live_follow_button(
 
         let dot_center = egui::pos2(rect.left() + 10.0, rect.center().y);
         ui.painter().circle_filled(dot_center, dot_radius, dot_color);
+        let live_pos = egui::pos2(rect.left() + 18.0, rect.center().y);
         ui.painter().text(
-            egui::pos2(rect.left() + 18.0, rect.center().y),
+            live_pos,
             egui::Align2::LEFT_CENTER,
-            label,
+            live_label,
+            font_id.clone(),
+            live_text_color,
+        );
+
+        let separator_x = live_pos.x + live_fixed_width + 5.0;
+        ui.painter().line_segment(
+            [
+                egui::pos2(separator_x, rect.top() + 4.0),
+                egui::pos2(separator_x, rect.bottom() - 4.0),
+            ],
+            egui::Stroke::new(1.0, stroke_color.opacity(0.65)),
+        );
+        ui.painter().text(
+            egui::pos2(separator_x + 6.0, rect.center().y),
+            egui::Align2::LEFT_CENTER,
+            counter_label,
             font_id,
-            text_color,
+            counter_text_color,
         );
     }
 
