@@ -241,6 +241,7 @@ impl Plugin for EditorPlugin {
                 (
                     clamp_current_time,
                     advance_playback,
+                    follow_latest,
                     // Update selection after playback advances to keep line_3d and object_3d in sync.
                     set_selected_range,
                     impeller2_bevy::apply_cached_data,
@@ -759,6 +760,22 @@ pub fn advance_playback(
     let delta_micros = (time.delta_secs_f64() * speed.0 * 1_000_000.0) as i64;
     let new_ts = Timestamp(current_ts.0.0.saturating_add(delta_micros));
     current_ts.0 = Timestamp(new_ts.0.clamp(earliest.0.0, last_updated.0.0));
+}
+
+pub fn follow_latest(
+    mut current_ts: ResMut<CurrentTimestamp>,
+    latest: Res<LastUpdated>,
+    earliest: Res<EarliestTimestamp>,
+    latest_follow: Res<ui::timeline::LatestFollow>,
+    replay: Option<Res<ReplayMode>>,
+) {
+    if replay.is_some() || !latest_follow.0 {
+        return;
+    }
+    if earliest.0 >= latest.0 {
+        return;
+    }
+    current_ts.0 = latest.0;
 }
 
 pub fn sync_pos(

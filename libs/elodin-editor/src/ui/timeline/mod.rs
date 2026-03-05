@@ -24,7 +24,14 @@ pub mod timeline_slider;
 pub(crate) fn plugin(app: &mut App) {
     app.add_plugins(timeline_controls::plugin)
         .init_resource::<PlaybackSpeed>()
-        .add_systems(Update, reset_playback_speed_on_stream_change);
+        .init_resource::<LatestFollow>()
+        .add_systems(
+            Update,
+            (
+                reset_playback_speed_on_stream_change,
+                reset_latest_follow_on_stream_change,
+            ),
+        );
 }
 
 #[derive(bevy::prelude::Resource, Clone, Copy, Debug)]
@@ -36,12 +43,24 @@ impl Default for PlaybackSpeed {
     }
 }
 
+#[derive(bevy::prelude::Resource, Default, Clone, Copy, Debug)]
+pub struct LatestFollow(pub bool);
+
 fn reset_playback_speed_on_stream_change(
     current_stream_id: Res<CurrentStreamId>,
     mut playback_speed: ResMut<PlaybackSpeed>,
 ) {
     if current_stream_id.is_changed() {
         *playback_speed = PlaybackSpeed::default();
+    }
+}
+
+fn reset_latest_follow_on_stream_change(
+    current_stream_id: Res<CurrentStreamId>,
+    mut latest_follow: ResMut<LatestFollow>,
+) {
+    if current_stream_id.is_changed() {
+        latest_follow.0 = false;
     }
 }
 
