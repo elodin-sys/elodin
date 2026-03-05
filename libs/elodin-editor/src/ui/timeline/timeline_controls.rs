@@ -276,10 +276,18 @@ impl WidgetSystem for TimelineControls<'_> {
                                     ui.add_space(16.0);
 
                                     let latest_enabled = replay_mode.is_none();
-                                    let latest_response = ui.add_enabled_ui(latest_enabled, |ui| {
-                                        ui.checkbox(&mut latest_follow.0, "LATEST")
-                                    });
-                                    if latest_response.inner.changed() && latest_follow.0 {
+                                    let lag_micros = max_tick.0.0.saturating_sub(tick.0.0);
+                                    let latest_response = live_follow_button(
+                                        ui,
+                                        latest_enabled,
+                                        latest_follow.0,
+                                        lag_micros,
+                                    );
+                                    if latest_enabled && latest_response.clicked() {
+                                        latest_follow.0 = !latest_follow.0;
+                                    }
+
+                                    if latest_follow.0 {
                                         paused.0 = false;
                                         tick.0 = max_tick.0;
                                     }
@@ -304,6 +312,128 @@ fn format_playback_speed(speed: f64) -> String {
         value.pop();
     }
     format!("{value}x")
+}
+
+fn format_lag_label(micros: i64) -> String {
+    if micros <= 0 {
+        return "LIVE".to_owned();
+    }
+
+    if micros >= 1_000_000 {
+        return format!("LIVE +{:.1}s", micros as f64 / 1_000_000.0);
+    }
+
+    if micros >= 1_000 {
+        return format!("LIVE +{}ms", micros / 1_000);
+    }
+
+    format!("LIVE +{micros}us")
+}
+
+fn live_follow_button(
+    ui: &mut egui::Ui,
+    enabled: bool,
+    following: bool,
+    lag_micros: i64,
+) -> egui::Response {
+    let is_delayed = lag_micros > 0;
+    let label = if enabled && following {
+        "LIVE".to_owned()
+    } else {
+        format_lag_label(lag_micros)
+    };
+
+    let scheme = get_scheme();
+    let (text_color, fill_color, stroke_color, dot_color) = if !enabled {
+        (
+            scheme.text_tertiary,
+            scheme.bg_primary,
+            scheme.border_primary.opacity(0.25),
+            scheme.text_tertiary.opacity(0.4),
+        )
+    } else if following {
+        (
+            scheme.success,
+            scheme.bg_secondary.opacity(0.7),
+            scheme.success.opacity(0.45),
+            scheme.success,
+        )
+    } else if is_delayed {
+        (
+            scheme.text_primary,
+            scheme.bg_secondary.opacity(0.7),
+            scheme.border_primary.opacity(0.75),
+            scheme.text_secondary,
+        )
+    } else {
+        (
+            scheme.text_secondary,
+            scheme.bg_secondary.opacity(0.6),
+            scheme.border_primary.opacity(0.55),
+            scheme.text_tertiary.opacity(0.8),
+        )
+    };
+
+    let font_id = egui::TextStyle::Button.resolve(ui.style());
+    let text_galley = ui
+        .painter()
+        .layout_no_wrap(label.clone(), font_id.clone(), text_color);
+    let dot_radius = 3.0;
+    let height = (text_galley.size().y + 8.0).max(22.0);
+    let width = text_galley.size().x + 26.0;
+
+    let sense = if enabled {
+        egui::Sense::click()
+    } else {
+        egui::Sense::hover()
+    };
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(width, height), sense);
+
+    if ui.is_rect_visible(rect) {
+        let hover = enabled && response.hovered();
+        let pressed = enabled && response.is_pointer_button_down_on();
+        let fill = if pressed {
+            fill_color.opacity(0.85)
+        } else if hover {
+            fill_color.opacity(0.92)
+        } else {
+            fill_color
+        };
+
+        ui.painter().rect(
+            rect,
+            egui::CornerRadius::same(10),
+            fill,
+            egui::Stroke::new(1.0, stroke_color),
+            egui::StrokeKind::Middle,
+        );
+
+        let dot_center = egui::pos2(rect.left() + 10.0, rect.center().y);
+        ui.painter().circle_filled(dot_center, dot_radius, dot_color);
+        ui.painter().text(
+            egui::pos2(rect.left() + 18.0, rect.center().y),
+            egui::Align2::LEFT_CENTER,
+            label,
+            font_id,
+            text_color,
+        );
+    }
+
+    let response = if enabled {
+        response.on_hover_cursor(egui::CursorIcon::PointingHand)
+    } else {
+        response
+    };
+
+    let hover_text = if !enabled {
+        "Disabled in replay mode"
+    } else if following {
+        "Following latest data"
+    } else {
+        "Click to jump to latest and keep following"
+    };
+
+    response.on_hover_text(hover_text)
 }
 
 fn time_range_selector_button(
