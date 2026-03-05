@@ -57,6 +57,8 @@ use binding_types::storage_buffer_read_only_sized;
 use impeller2_wkt::CurrentTimestamp;
 
 const LINE_SHADER_HANDLE: Handle<Shader> = uuid_handle!("bfffa3c4-9401-4b6e-b3ab-3564180352f1");
+const PLAYED_TRAIL_COLOR: Color = crate::ui::colors::bevy::GREEN;
+const FUTURE_TRAIL_COLOR: Color = Color::WHITE;
 const FUTURE_TRAIL_ALPHA: f32 = 0.35;
 
 #[derive(SystemSet, Clone, Debug, Hash, PartialEq, Eq)]
@@ -439,6 +441,9 @@ fn extract_lines(
         let (mut lines, mut line_assets, mut _main_commands, selected_time_range, current_timestamp) =
             cached_state.state.get_mut(world);
         let selected_range = selected_time_range.0.clone();
+        let played_trail_color = Vec4::from_array(PLAYED_TRAIL_COLOR.to_linear().to_f32_array());
+        let mut future_trail_color = Vec4::from_array(FUTURE_TRAIL_COLOR.to_linear().to_f32_array());
+        future_trail_color.w *= FUTURE_TRAIL_ALPHA;
 
         let played_range = selected_range.start..selected_range.end.min(current_timestamp.0);
         let future_range = selected_range.start.max(current_timestamp.0)..selected_range.end;
@@ -519,12 +524,14 @@ fn extract_lines(
             };
 
             if let Some(gpu_line) = build_gpu_line(played_range.clone()) {
+                let mut played_uniform = *uniform;
+                played_uniform.color = played_trail_color;
                 commands.spawn((
                     MainEntity::from(entity),
                     LineBundle {
                         line: line_handles.clone(),
                         config: config.clone(),
-                        uniform: *uniform,
+                        uniform: played_uniform,
                         global_transform: GlobalTransform::default(),
                         transform: Transform::default(),
                         grid_cell: GridCell::default(),
@@ -536,7 +543,7 @@ fn extract_lines(
 
             if let Some(gpu_line) = build_gpu_line(future_range.clone()) {
                 let mut future_uniform = *uniform;
-                future_uniform.color.w *= FUTURE_TRAIL_ALPHA;
+                future_uniform.color = future_trail_color;
                 commands.spawn((
                     MainEntity::from(entity),
                     LineBundle {
