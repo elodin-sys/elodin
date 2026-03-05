@@ -33,6 +33,6 @@ tabs {
 
 ## Inspector UX
 - In viewport inspector, frustum controls are contextual:
-  - `create_frustum` is exposed as a button (`CREATE`, then disabled as `CREATED`).
+  - `create_frustum` is exposed as a toggle button (`CREATE` / `DELETE`).
   - `show_frustums` toggle controls whether this viewport renders frustums from other viewports.
   - `frustums_color` and `frustums_thickness` are editable when `create_frustum` is enabled.
