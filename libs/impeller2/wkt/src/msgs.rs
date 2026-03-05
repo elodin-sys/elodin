@@ -7,6 +7,7 @@ use impeller2::{
     },
     vtable::{Field, Op, VTable},
 };
+use postcard_schema::Schema as PostcardSchema;
 use postcard_schema::schema::owned::OwnedNamedType;
 use serde::{Deserialize, Serialize};
 use std::{borrow::Cow, path::PathBuf, time::Duration};
@@ -115,6 +116,15 @@ pub enum StreamBehavior {
     #[default]
     RealTime,
     FixedRate(FixedRateBehavior),
+    /// Like `RealTime`, but batches all components into a single handler that
+    /// wakes once per `db.last_updated` notification instead of spawning a
+    /// separate task per component.  This dramatically reduces scheduler
+    /// pressure in simulations with many components (e.g. 37 components at
+    /// 300 Hz drops from 11 100 wake-ups/sec to 300).
+    ///
+    /// Use `RealTime` for latency-sensitive real-world telemetry where each
+    /// component must be sent as soon as it arrives.
+    RealTimeBatched,
 }
 
 pub type StreamId = u64;
@@ -270,6 +280,34 @@ pub struct DbConfig {
 
 impl DbConfig {
     const TIME_START_TIMESTAMP_KEY: &'static str = "time.start_timestamp";
+    const VERSION_CREATED_KEY: &'static str = "version.created";
+    const VERSION_LAST_OPENED_KEY: &'static str = "version.last_opened";
+
+    /// Set the version that created this database
+    pub fn set_version_created(&mut self, version: impl Into<String>) {
+        self.metadata
+            .insert(Self::VERSION_CREATED_KEY.to_string(), version.into());
+    }
+
+    /// Get the version that created this database
+    pub fn version_created(&self) -> Option<&str> {
+        self.metadata
+            .get(Self::VERSION_CREATED_KEY)
+            .map(String::as_str)
+    }
+
+    /// Set the version that last opened this database
+    pub fn set_version_last_opened(&mut self, version: impl Into<String>) {
+        self.metadata
+            .insert(Self::VERSION_LAST_OPENED_KEY.to_string(), version.into());
+    }
+
+    /// Get the version that last opened this database
+    pub fn version_last_opened(&self) -> Option<&str> {
+        self.metadata
+            .get(Self::VERSION_LAST_OPENED_KEY)
+            .map(String::as_str)
+    }
 
     pub fn set_schematic_path(&mut self, path: String) {
         self.metadata.insert("schematic.path".to_string(), path);
@@ -385,6 +423,11 @@ impl Msg for DumpSchema {
 #[derive(Clone, Serialize, Deserialize, Debug)]
 pub struct DumpSchemaResp {
     pub schemas: HashMap<ComponentId, Schema<Vec<u64>>>,
+    /// Per-component start timestamps (the `extra` field from the index
+    /// AppendLog header).  Used by followers to create components with
+    /// matching on-disk binary representations.
+    #[serde(default)]
+    pub start_timestamps: HashMap<ComponentId, Timestamp>,
 }
 
 impl Msg for DumpSchemaResp {
@@ -415,6 +458,53 @@ impl Msg for SQLQuery {
 
 impl_user_data_msg!(SQLQuery);
 
+/// Query for sparkline data with server-side LTTB downsampling.
+/// Returns downsampled time series data optimized for visualization.
+#[derive(Clone, Serialize, Deserialize, Debug)]
+pub struct SparklineQuery {
+    /// The table name to query (sanitized component name)
+    pub table_name: String,
+    /// Maximum number of points to return (will use LTTB downsampling if data exceeds this)
+    pub max_points: u32,
+}
+
+impl Msg for SparklineQuery {
+    const ID: PacketId = [224, 36];
+}
+
+impl_user_data_msg!(SparklineQuery);
+
+impl Request for SparklineQuery {
+    type Reply<B: IoBuf + Clone> = ArrowIPC<'static>;
+}
+
+/// Query for plot overview data with server-side LTTB downsampling.
+/// Used for initial load of large historical datasets in the plot panel.
+/// Returns downsampled time series data optimized for visualization.
+#[derive(Clone, Serialize, Deserialize, Debug)]
+pub struct PlotOverviewQuery {
+    /// Packet ID for request/response correlation
+    pub id: PacketId,
+    /// The component ID to query
+    pub component_id: ComponentId,
+    /// Time range to query
+    pub range: Range<Timestamp>,
+    /// Maximum number of points to return per element (will use LTTB downsampling if data exceeds this)
+    pub max_points: u32,
+    /// Which element of a vector component to query (0 for scalar components)
+    pub element_index: usize,
+}
+
+impl Msg for PlotOverviewQuery {
+    const ID: PacketId = [224, 32];
+}
+
+impl_user_data_msg!(PlotOverviewQuery);
+
+impl Request for PlotOverviewQuery {
+    type Reply<B: IoBuf + Clone> = OwnedTimeSeries<B>;
+}
+
 #[derive(Clone, Serialize, Deserialize, Debug)]
 #[repr(transparent)]
 pub struct ArrowIPC<'a> {
@@ -442,6 +532,19 @@ impl Msg for ErrorResponse {
 
 impl Request for SQLQuery {
     type Reply<B: IoBuf + Clone> = ArrowIPC<'static>;
+}
+
+/// Schema identity for raw-byte message streams (e.g. H.264 NAL).
+/// Used as `MsgMetadata.schema` when payload is opaque bytes, not postcard-encoded.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, postcard_schema::Schema)]
+pub struct OpaqueBytes {
+    pub data: Vec<u8>,
+}
+
+/// Returns the schema for [`OpaqueBytes`], for use in [`MsgMetadata`] when the stream
+/// payload is raw bytes (e.g. H.264 Annex B).
+pub fn opaque_bytes_msg_schema() -> OwnedNamedType {
+    <OpaqueBytes as PostcardSchema>::SCHEMA.into()
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
@@ -554,7 +657,36 @@ pub enum ArchiveFormat {
     ArrowIpc,
     Parquet,
     Csv,
-    Native,
+}
+
+/// Request a unified replication stream from the source database.
+///
+/// The source will stream ALL data (components, messages, metadata, schemas)
+/// through a coalescing buffer that batches small packets into writes of
+/// approximately `target_packet_size` bytes, reducing network overhead when
+/// the source has many components.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct FollowStream {
+    /// Target size in bytes for coalesced TCP writes (default: 1500).
+    /// Small outgoing packets are buffered until this size is reached
+    /// or a flush timeout expires.
+    pub target_packet_size: u32,
+}
+
+impl Msg for FollowStream {
+    const ID: PacketId = [224, 37];
+}
+
+/// Like [`MsgStream`], but responses use `MsgWithTimestamp` packets that
+/// preserve the original source timestamps.  Used by the `FollowStream`
+/// handler for message replication.
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct TimestampedMsgStream {
+    pub msg_id: PacketId,
+}
+
+impl Msg for TimestampedMsgStream {
+    const ID: PacketId = [224, 38];
 }
 
 #[derive(Serialize, Deserialize, Default, Debug, Clone, postcard_schema::Schema)]

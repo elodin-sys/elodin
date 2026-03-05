@@ -5,8 +5,8 @@ use crate::Elem;
 use crate::Noxpr;
 use crate::Op;
 use crate::Vector;
+use crate::literal::{ArrayElement, NativeType};
 use smallvec::smallvec;
-use xla::{ArrayElement, NativeType};
 
 impl<T: NativeType + ArrayElement + Elem> Vector<T, 3, Op> {
     /// Extends a 3-dimensional vector to a 4-dimensional vector by appending a given element.

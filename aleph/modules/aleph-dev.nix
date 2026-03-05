@@ -37,11 +37,12 @@ in {
   nixpkgs.config = {
     allowUnfree = true;
     cudaSupport = true;
-    cudaCapabilities = ["7.2" "8.7"];
+    cudaCapabilities = ["8.7"];
   };
 
+  # Use list form for PATH-like variables so NixOS can merge across modules
   environment.variables = with pkgs; {
-    LD_LIBRARY_PATH = lib.makeLibraryPath [
+    LD_LIBRARY_PATH = map (p: "${lib.getOutput "lib" p}/lib") [
       stdenv.cc.cc.lib
       cudaPackages.cudatoolkit
       cudaPackages.cudnn
@@ -51,12 +52,13 @@ in {
       nvidia-jetpack.l4t-multimedia
       nvidia-jetpack.l4t-camera
     ];
-    NVCC_PREPEND_FLAGS = "--compiler-bindir ${pkgs.gcc11}/bin/gcc";
+    NVCC_PREPEND_FLAGS = "--compiler-bindir ${pkgs.gcc13}/bin/gcc";
     CONTAINER_HOST = "unix:///run/podman/podman.sock";
-    GST_PLUGIN_PATH = lib.makeSearchPathOutput "lib" "lib/gstreamer-1.0" [
+    GST_PLUGIN_PATH = map (p: "${lib.getOutput "lib" p}/lib/gstreamer-1.0") [
       gst_all_1.gstreamer
       aravis
       deepstream
+      elodinsink
     ];
   };
   hardware.graphics.enable = true;

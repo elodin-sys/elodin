@@ -42,6 +42,18 @@ import numpy as np
 from numpy.typing import NDArray
 
 
+class _classproperty:
+    """Descriptor that works like @property but on the class itself (Python 3.13+)."""
+
+    def __init__(self, func):
+        self.fget = func
+
+    def __get__(self, obj, cls=None):
+        if cls is None:
+            cls = type(obj)
+        return self.fget(cls)
+
+
 @dataclass
 class MotorConfig:
     """Configuration for a single motor."""
@@ -307,8 +319,7 @@ class DroneConfig:
             torque_coefficient=self.motor_torque_coeff,
         )
 
-    @classmethod
-    @property
+    @_classproperty
     def GLOBAL(cls) -> Self:
         """Get the global configuration instance."""
         if cls._GLOBAL is None:

@@ -1,18 +1,26 @@
-use bevy::ecs::hierarchy::ChildOf;
+use bevy::camera::visibility::RenderLayers;
+use bevy::ecs::{hierarchy::ChildOf, relationship::Relationship};
 use bevy::log::warn_once;
 use bevy::math::{DQuat, DVec3};
 use bevy::prelude::Mesh;
 use bevy::prelude::*;
 use bevy_geo_frames::{GeoPosition, GeoRotation};
+use bevy::scene::{SceneInstance, SceneRoot, SceneSpawner};
+use bevy_mat3_material::{Mat3Material, Mat3Params, Mat3TransformExt, uv_sphere_grid_line_mesh};
 use bevy_render::alpha::AlphaMode;
 use big_space::GridCell;
+use bitvec::prelude::*;
 use eql::Expr;
 use impeller2_bevy::EntityMap;
-use impeller2_wkt::{ComponentValue, Object3D};
+use impeller2_wkt::{ComponentValue, Object3D, Object3DIconSource};
 use nox::Array;
 use smallvec::smallvec;
 
-use crate::{BevyExt, MainCamera, plugins::navigation_gizmo::NavGizmoCamera};
+use crate::icon_rasterizer::IconTextureCache;
+use crate::iter::JoinDisplayExt;
+use crate::ui::tiles::ViewportConfig;
+use crate::{BevyExt, EqlContext, MainCamera, plugins::navigation_gizmo::NavGizmoCamera};
+use std::collections::{HashMap, HashSet};
 use std::fmt;
 
 type ImportedCameraFilter = (Added<Camera>, Without<NavGizmoCamera>, Without<MainCamera>);
@@ -25,15 +33,26 @@ pub struct Object3DState {
     pub compiled_expr: Option<CompiledExpr>,
     pub scale_expr: Option<CompiledExpr>,
     pub scale_error: Option<String>,
+    /// When set, ellipsoid shape is driven by error covariance (Mat3 path); evaluated each frame.
+    pub error_covariance_cholesky_expr: Option<CompiledExpr>,
+    pub joint_animations: Vec<(String, String)>, // (joint_name, eql_expr) - compiled in attach_joint_animations
     pub data: Object3D,
 }
 
-#[derive(Component)]
+#[derive(Component, Reflect)]
 pub struct EllipsoidVisual {
-    pub child: Entity,
     pub color: impeller2_wkt::Color,
     pub oversized: bool,
     pub max_extent: f32,
+}
+
+/// Component attached to joint entities for animation
+/// The compiled_expr is filled in lazily on first access when the EQL context is available
+#[derive(Component)]
+pub struct JointAnimationComponent {
+    // pub eql_expr: String,
+    pub compiled_expr: CompiledExpr,
+    pub original_transform: Transform,
 }
 
 #[derive(Default)]
@@ -50,6 +69,31 @@ impl EditableEQL {
         }
     }
 }
+
+#[derive(Component)]
+pub struct Object3DIconState {
+    pub billboards: HashMap<Entity, Entity>,
+    pub icon_min_distance: f32,
+    pub icon_max_distance: f32,
+    pub icon_fade_distance: f32,
+    pub icon_base_alpha: f32,
+    pub mesh_min_distance: f32,
+    pub mesh_max_distance: f32,
+    pub screen_size_px: f32,
+    pub billboard_material: Handle<StandardMaterial>,
+    pub billboard_mesh: Handle<Mesh>,
+}
+
+#[derive(Component)]
+pub struct BillboardIcon;
+
+#[derive(Component)]
+pub struct Object3DMeshChild;
+
+/// Marker inserted once `WorldPos` has been set from telemetry data.
+/// Distinguishes "genuinely at the origin" from "not yet received any data."
+#[derive(Component)]
+pub struct WorldPosReceived;
 
 type ExprFn = dyn for<'a, 'b> Fn(
         &'a EntityMap,
@@ -175,6 +219,13 @@ fn extract_scalar(val: ComponentValue) -> Result<f64, String> {
 fn build_spatial_result(q: (f64, f64, f64, f64), pos: (f64, f64, f64)) -> ComponentValue {
     let result = vec![q.0, q.1, q.2, q.3, pos.0, pos.1, pos.2];
     let result_array = Array::from_shape_vec(smallvec![7], result).unwrap();
+    ComponentValue::F64(result_array)
+}
+
+/// Build result array from a 3-vector (e.g. direction in world frame)
+fn build_vec3_result(v: (f64, f64, f64)) -> ComponentValue {
+    let result = vec![v.0, v.1, v.2];
+    let result_array = Array::from_shape_vec(smallvec![3], result).unwrap();
     ComponentValue::F64(result_array)
 }
 
@@ -378,6 +429,36 @@ fn compile_formula(formula_name: &str, inner_expr: eql::Expr) -> CompiledExpr {
             })
         }
 
+        // direction(x, y, z): body-frame direction transformed to world frame (returns 3-vector)
+        "direction" => {
+            let eql::Expr::Tuple(elements) = inner_expr else {
+                return CompiledExpr::closure(move |_, _| {
+                    Err("direction requires tuple (receiver, x, y, z)".to_string())
+                });
+            };
+            if elements.len() != 4 {
+                return CompiledExpr::closure(move |_, _| {
+                    Err("direction requires receiver and three components (x, y, z)".to_string())
+                });
+            }
+
+            let receiver_compiled = compile_eql_expr(elements[0].clone());
+            let x_compiled = compile_eql_expr(elements[1].clone());
+            let y_compiled = compile_eql_expr(elements[2].clone());
+            let z_compiled = compile_eql_expr(elements[3].clone());
+
+            CompiledExpr::closure(move |entity_map, component_values| {
+                let spatial = receiver_compiled.execute(entity_map, component_values)?;
+                let data = extract_spatial(spatial)?;
+                let dx = extract_scalar(x_compiled.execute(entity_map, component_values)?)?;
+                let dy = extract_scalar(y_compiled.execute(entity_map, component_values)?)?;
+                let dz = extract_scalar(z_compiled.execute(entity_map, component_values)?)?;
+                let q = (data[0], data[1], data[2], data[3]);
+                let world = rotate_vector_by_quat(q, (dx, dy, dz));
+                Ok(build_vec3_result(world))
+            })
+        }
+
         _ => {
             let error = format!(
                 "formula '{}' is not supported in editor runtime",
@@ -518,6 +599,17 @@ pub fn compile_scale_eql(scale: &str, ctx: &eql::Context) -> Result<CompiledExpr
         .map_err(|err| err.to_string())
 }
 
+/// Compiles an EQL expression that must yield at least 6 floats (lower-triangular Cholesky L).
+pub fn compile_cholesky_eql(expr: &str, ctx: &eql::Context) -> Result<CompiledExpr, String> {
+    let trimmed = expr.trim();
+    if trimmed.is_empty() {
+        return Err("error_covariance_cholesky expression cannot be empty".to_string());
+    }
+    ctx.parse_str(trimmed)
+        .map(compile_eql_expr)
+        .map_err(|err| err.to_string())
+}
+
 #[derive(Debug)]
 pub enum ScaleEvalError {
     Expr(String),
@@ -551,25 +643,126 @@ impl std::error::Error for ScaleEvalError {}
 
 const ELLIPSOID_OVERSIZED_THRESHOLD: f32 = 10_000.0;
 
+/// Chi-squared quantile for 3 degrees of freedom (confidence as fraction 0..1).
+/// Used to scale the covariance ellipsoid so the boundary corresponds to the
+/// given confidence.
+///
+/// Once could use statrs' chi_square_ppf but this way we avoid a dependency and
+/// it's faster. The Mean Absolute Error (MAE) for this approximation is 0.11.
+///
+/// The domain is [0, 1] and the range is [0, ~12].
+fn chi2_3_quantile(confidence_fraction: f32) -> f32 {
+    const TABLE: [(f32, f32); 6] = [
+        (0.25, 1.213),
+        (0.50, 2.366),
+        (0.70, 3.665),
+        (0.90, 6.251),
+        (0.95, 7.815),
+        (0.99, 11.345),
+    ];
+    let p = confidence_fraction.clamp(0.01, 0.999);
+    for i in 0..TABLE.len() - 1 {
+        if p <= TABLE[i + 1].0 {
+            let t = (p - TABLE[i].0) / (TABLE[i + 1].0 - TABLE[i].0);
+            return TABLE[i].1 + t * (TABLE[i + 1].1 - TABLE[i].1);
+        }
+    }
+    TABLE[TABLE.len() - 1].1
+}
+
+fn find_entities<'a, T>(
+    entity: Entity,
+    children: &'a Query<&Children>,
+    mut predicate: impl FnMut(Entity) -> Option<T> + 'a,
+) -> impl Iterator<Item = (Entity, T)> + 'a {
+    children
+        .iter_descendants(entity)
+        .filter_map(move |id| predicate(id).map(|x| (id, x)))
+}
+
+/// Conditional system that checks if scenes are ready. Returns true when at
+/// least one scene is ready, false otherwise.
+pub fn on_scene_ready(
+    mut scene_queue: Local<HashSet<Entity>>,
+    added_scenes: Query<Entity, Added<SceneRoot>>,
+    scene_instances: Query<&SceneInstance>,
+    scene_roots: Query<&SceneRoot>,
+    names: Query<&Name>,
+    scene_spawner: Res<SceneSpawner>,
+) -> Option<Entity> {
+    // Add newly added scenes to the queue.
+    for entity in added_scenes.iter() {
+        scene_queue.insert(entity);
+    }
+
+    // Collect which queued scenes became ready this frame.
+    let mut ready_entity = None;
+    scene_queue.retain(|&entity| {
+        if ready_entity.is_some() {
+            // Keep in queue to evaluate later. We do this one frame at a
+            // time rather than allocating a Vec.
+            true
+        } else if let Ok(instance) = scene_instances.get(entity) {
+            if scene_spawner.instance_is_ready(**instance) {
+                ready_entity = Some(entity);
+                false // Remove from queue since it's ready.
+            } else {
+                true // Keep in queue since it's not ready yet.
+            }
+        } else {
+            // SceneInstance not found yet; keep in queue.
+            true
+        }
+    });
+
+    if let Some(entity) = ready_entity.as_ref() {
+        let name = names
+            .get(*entity)
+            .map(|n| n.as_str())
+            .unwrap_or("<no name>");
+        let scene_info = scene_roots
+            .get(*entity)
+            .map(|r| format!("handle id={:?}", r.0.id()))
+            .unwrap_or_else(|_| "<no SceneRoot>".to_string());
+        info!(
+            entity = ?entity,
+            name = %name,
+            scene = %scene_info,
+            "A scene is ready."
+        );
+    }
+    ready_entity
+}
+
 /// System that updates 3D object entities based on their EQL expressions
+#[allow(clippy::type_complexity)]
 pub fn update_object_3d_system(
+    mut commands: Commands,
     mut objects_query: Query<(
         Entity,
         &mut Object3DState,
         &mut impeller2_wkt::WorldPos,
         Option<&mut EllipsoidVisual>,
+        Has<WorldPosReceived>,
+        Option<&Children>,
     )>,
     mut transforms: Query<&mut Transform>,
+    mut mat3_params: Query<&mut Mat3Params>,
+    mesh_child_markers: Query<(), With<Object3DMeshChild>>,
     entity_map: Res<EntityMap>,
     component_value_maps: Query<&'static ComponentValue>,
 ) {
-    // return;
-    for (_entity, mut object_3d, mut pos, ellipse) in objects_query.iter_mut() {
+    for (entity, mut object_3d, mut pos, ellipse, has_received, children_maybe) in
+        objects_query.iter_mut()
+    {
         if let Some(compiled_expr) = &object_3d.compiled_expr
             && let Ok(component_value) = compiled_expr.execute(&entity_map, &component_value_maps)
             && let Some(world_pos) = component_value.as_world_pos()
         {
             *pos = world_pos;
+            if !has_received {
+                commands.entity(entity).insert(WorldPosReceived);
+            }
         }
 
         let Some(mut ellipse) = ellipse else {
@@ -583,25 +776,294 @@ pub fn update_object_3d_system(
             continue;
         }
 
-        match evaluate_scale(&object_3d, &entity_map, &component_value_maps) {
-            Ok(scale) => {
-                let scale = scale.max(Vec3::splat(f32::EPSILON));
-                if let Ok(mut child_transform) = transforms.get_mut(ellipse.child) {
-                    child_transform.scale = scale;
-                    child_transform.translation = Vec3::ZERO;
-                }
-                ellipse.max_extent = scale.max_element();
-                ellipse.oversized = ellipse.max_extent > ELLIPSOID_OVERSIZED_THRESHOLD;
-                if object_3d.scale_expr.is_some() {
-                    object_3d.scale_error = None;
-                }
+        let mesh_child = children_maybe.and_then(|children| {
+            let mut mesh_children = children
+                .iter()
+                .filter(|child| mesh_child_markers.contains(*child));
+            let first = mesh_children.next();
+            if mesh_children.next().is_some() {
+                warn_once!(
+                    entity = ?entity,
+                    "object_3d ellipsoid has multiple mesh children; using first"
+                );
             }
-            Err(err) => {
-                object_3d.scale_error = Some(err.to_string());
-                ellipse.oversized = false;
-                ellipse.max_extent = 0.0;
+            if first.is_none() {
+                warn_once!(
+                    entity = ?entity,
+                    total_children = children.len(),
+                    "object_3d ellipsoid has no mesh child"
+                );
+            }
+            first
+        });
+
+        if let Some(ref cholesky_expr) = object_3d.error_covariance_cholesky_expr {
+            if let impeller2_wkt::Object3DMesh::Ellipsoid {
+                error_confidence_interval,
+                ..
+            } = &object_3d.data.mesh
+                && let Ok(cv) = cholesky_expr.execute(&entity_map, &component_value_maps)
+                && let Ok(l) = component_value_to_6floats(&cv)
+            {
+                let linear = cholesky_6_to_mat3(&l, *error_confidence_interval);
+                if let Some(child) = mesh_child
+                    && let Ok(mut params) = mat3_params.get_mut(child)
+                {
+                    params.linear = linear;
+                }
+                let scale = chi2_3_quantile((*error_confidence_interval) / 100.0).sqrt();
+                ellipse.max_extent = (l[0].abs().max(l[2].abs()).max(l[5].abs())) * scale;
+                ellipse.oversized = ellipse.max_extent > ELLIPSOID_OVERSIZED_THRESHOLD;
+            }
+        } else {
+            match evaluate_scale(&object_3d, &entity_map, &component_value_maps) {
+                Ok(scale) => {
+                    let scale_enu = scale.max(Vec3::splat(f32::EPSILON));
+                    let scale = enu_scale_to_bevy(scale_enu);
+                    if let Some(child) = mesh_child {
+                        if let Ok(mut child_transform) = transforms.get_mut(child) {
+                            child_transform.scale = scale;
+                            child_transform.translation = Vec3::ZERO;
+                        }
+                        ellipse.max_extent = scale.max_element();
+                        ellipse.oversized = ellipse.max_extent > ELLIPSOID_OVERSIZED_THRESHOLD;
+                        if object_3d.scale_expr.is_some() {
+                            object_3d.scale_error = None;
+                        }
+                    }
+                }
+                Err(err) => {
+                    object_3d.scale_error = Some(err.to_string());
+                    ellipse.oversized = false;
+                    ellipse.max_extent = 0.0;
+                }
             }
         }
+    }
+}
+
+/// Converts a ComponentValue to an angle-axis rotation (axis Vec3, angle f32 in radians).
+///
+/// Input: 3-element vector where direction is axis and magnitude is angle in DEGREES
+/// Output: (normalized axis, angle in radians)
+fn component_value_to_axis_angle(value: &ComponentValue) -> Result<(Vec3, f32), String> {
+    use nox::ArrayBuf;
+    match value {
+        ComponentValue::F64(array) => {
+            let data = array.buf.as_buf();
+            if data.len() == 3 {
+                // 3-element format: [x, y, z] where direction is axis and magnitude is angle in degrees
+                let vec = Vec3::new(data[0] as f32, data[1] as f32, data[2] as f32);
+                let angle_deg = vec.length();
+                let normalized_axis = if angle_deg > f32::EPSILON {
+                    vec / angle_deg
+                } else {
+                    Vec3::Y // Default axis if vector is zero
+                };
+                // Convert degrees to radians
+                let angle_rad = angle_deg.to_radians();
+                Ok((normalized_axis, angle_rad))
+            } else {
+                Err(format!(
+                    "Expected 3 elements for rotation_vector (axis direction with magnitude as angle in degrees), got {}",
+                    data.len()
+                ))
+            }
+        }
+        ComponentValue::F32(array) => {
+            let data = array.buf.as_buf();
+            if data.len() == 3 {
+                // 3-element format: [x, y, z] where direction is axis and magnitude is angle in degrees
+                let vec = Vec3::new(data[0], data[1], data[2]);
+                let angle_deg = vec.length();
+                let normalized_axis = if angle_deg > f32::EPSILON {
+                    vec / angle_deg
+                } else {
+                    Vec3::Y // Default axis if vector is zero
+                };
+                // Convert degrees to radians
+                let angle_rad = angle_deg.to_radians();
+                Ok((normalized_axis, angle_rad))
+            } else {
+                Err(format!(
+                    "Expected 3 elements for rotation_vector (axis direction with magnitude as angle in degrees), got {}",
+                    data.len()
+                ))
+            }
+        }
+        _ => Err("Invalid component type for rotation_vector rotation".to_string()),
+    }
+}
+
+/// System that attaches JointAnimationComponent to joint entities when scenes load
+/// This runs when Object3DState changes (e.g., when a scene finishes loading)
+#[allow(clippy::too_many_arguments)]
+pub fn attach_joint_animations(
+    In(scene_entity): In<Option<Entity>>,
+    objects_query: Query<&Object3DState>,
+    children: Query<&Children>,
+    parent: Query<&ChildOf>,
+    names: Query<&Name>,
+    transforms: Query<&Transform>,
+    existing_components: Query<Entity, With<JointAnimationComponent>>,
+    mut commands: Commands,
+    ctx: Res<EqlContext>,
+) {
+    let Some(scene_entity) = scene_entity else {
+        return;
+    };
+    debug!("Run attach joint animations for scene {scene_entity}.");
+    let Ok(object_3d_entity) = parent.get(scene_entity).map(|p| p.get()) else {
+        // This can be ok. So I'm leaving debug instead of warn because the axes
+        // cube triggers it.
+        debug!("Could not get parent for scene {scene_entity}.");
+        return;
+    };
+
+    if let Ok(object_3d) = objects_query.get(object_3d_entity) {
+        // Only process GLB meshes with animations.
+        if !matches!(object_3d.data.mesh, impeller2_wkt::Object3DMesh::Glb { .. }) {
+            debug!("Not a mesh for object 3d {object_3d_entity}.");
+            return;
+        }
+
+        if object_3d.joint_animations.is_empty() {
+            debug!("No joint animations for object 3d {object_3d_entity}.");
+            return;
+        }
+        const MAX_ANIMATIONS: usize = 32 * 4;
+        let mut found_animations_store = bitarr![u32, Lsb0; 0; MAX_ANIMATIONS];
+        let found_animations = found_animations_store.as_mut_bitslice();
+
+        if object_3d.joint_animations.len() > MAX_ANIMATIONS {
+            warn!(
+                "The object_3d with path '{:?}' has {} animations; cannot account for missing animations past {}.",
+                object_3d.data.mesh,
+                object_3d.joint_animations.len(),
+                MAX_ANIMATIONS
+            );
+        }
+
+        // Find entities that match joint names and compile their expressions.
+        let entity_compiled_expr = find_entities(object_3d_entity, &children, |id| {
+            names.get(id).ok().and_then(|name| {
+                object_3d.joint_animations.iter().enumerate().find_map(
+                    |(i, (joint_name, eql_expr))| {
+                        if name.as_str() == joint_name {
+                            found_animations.set(i, true);
+                            // Compile the EQL expression here.
+                            ctx.0
+                                .parse_str(eql_expr)
+                                .map(compile_eql_expr)
+                                .map_err(|err| {
+                                    warn!(
+                                        joint = %joint_name,
+                                        eql = %eql_expr,
+                                        error = %err,
+                                        "Failed to compile EQL expression for joint animation."
+                                    );
+                                    err
+                                })
+                                .ok()
+                        } else {
+                            None
+                        }
+                    },
+                )
+            })
+        });
+
+        let mut entity_count = 0;
+        for (joint_entity, compiled_expr) in entity_compiled_expr {
+            entity_count += 1;
+            if existing_components.contains(joint_entity) {
+                continue;
+            }
+
+            // Get the original transform to preserve the bone's initial rotation.
+            let original_transform = transforms
+                .get(joint_entity)
+                .cloned()
+                .unwrap_or(Transform::IDENTITY);
+
+            // Attach the component with the compiled expression and original transform.
+            commands
+                .entity(joint_entity)
+                .insert(JointAnimationComponent {
+                    compiled_expr,
+                    original_transform,
+                });
+        }
+
+        info!(
+            "For {} joint animations, found {} matching entities.",
+            object_3d.joint_animations.len(),
+            entity_count
+        );
+
+        let found_animations = found_animations_store.as_bitslice();
+
+        if found_animations[..object_3d.joint_animations.len()].not_all() {
+            let items = found_animations[..object_3d.joint_animations.len()]
+                .iter_zeros()
+                .map(|i| &object_3d.joint_animations[i].0);
+            warn!(
+                "The object_3d {} did not have any animation joints named: {}",
+                &object_3d.data.mesh,
+                items.join_display(", ")
+            );
+        }
+    } else {
+        warn!(
+            "Could not get `Object3dState` for entity {object_3d_entity} for scene {scene_entity}."
+        );
+    }
+}
+
+/// System that updates joint animations based on EQL expressions. This queries
+/// for entities with both Transform and JointAnimationComponent.
+pub fn update_joint_animations(
+    mut joint_query: Query<(&mut Transform, &JointAnimationComponent)>,
+    entity_map: Res<EntityMap>,
+    component_value_maps: Query<&'static ComponentValue>,
+) {
+    for (mut joint_transform, joint_anim) in joint_query.iter_mut() {
+        // Evaluate the EQL expression
+        let component_value = match joint_anim
+            .compiled_expr
+            .execute(&entity_map, &component_value_maps)
+        {
+            Ok(value) => value,
+            Err(err) => {
+                warn!(
+                    error = %err,
+                    "Failed to evaluate EQL expression for joint animation"
+                );
+                continue;
+            }
+        };
+
+        // Convert to axis-angle rotation
+        let (axis, angle) = match component_value_to_axis_angle(&component_value) {
+            Ok(result) => result,
+            Err(err) => {
+                warn!(
+                    error = %err,
+                    "Failed to convert EQL result to axis-angle rotation for joint animation"
+                );
+                continue;
+            }
+        };
+
+        // Create the animation rotation
+        let animation_rotation = Quat::from_axis_angle(axis, angle);
+
+        // Multiply by the original transform's rotation to preserve the bone's initial orientation
+        joint_transform.rotation = joint_anim.original_transform.rotation * animation_rotation;
+
+        // Preserve the original translation and scale
+        joint_transform.translation = joint_anim.original_transform.translation;
+        joint_transform.scale = joint_anim.original_transform.scale;
     }
 }
 
@@ -688,6 +1150,72 @@ fn component_value_to_vec3(value: &ComponentValue) -> Result<Vec3, ScaleEvalErro
     }
 }
 
+fn component_value_to_6floats(value: &ComponentValue) -> Result<[f32; 6], String> {
+    use nox::ArrayBuf;
+    match value {
+        ComponentValue::F64(array) => {
+            let data = array.buf.as_buf();
+            if data.len() >= 6 {
+                Ok([
+                    data[0] as f32,
+                    data[1] as f32,
+                    data[2] as f32,
+                    data[3] as f32,
+                    data[4] as f32,
+                    data[5] as f32,
+                ])
+            } else {
+                Err(format!(
+                    "error_covariance_cholesky must yield at least 6 values, got {}",
+                    data.len()
+                ))
+            }
+        }
+        ComponentValue::F32(array) => {
+            let data = array.buf.as_buf();
+            if data.len() >= 6 {
+                Ok([data[0], data[1], data[2], data[3], data[4], data[5]])
+            } else {
+                Err(format!(
+                    "error_covariance_cholesky must yield at least 6 values, got {}",
+                    data.len()
+                ))
+            }
+        }
+        _ => Err("error_covariance_cholesky must yield an F32 or F64 array".to_string()),
+    }
+}
+
+/// Converts ellipsoid scale from ENU (East, North, Up) to Bevy (East, Up, South).
+/// The scale EQL expression is in ENU; Bevy applies scale along its axes.
+#[inline]
+fn enu_scale_to_bevy(enu: Vec3) -> Vec3 {
+    Vec3::new(enu.x, enu.z, enu.y)
+}
+
+/// ENU (East-North-Up) to Bevy (East-Up-South) basis change.
+/// ENU: X=East, Y=North, Z=Up. Bevy: X=East, Y=Up, Z=South.
+/// So Bevy = (ENU.x, ENU.z, -ENU.y).
+const ENU_TO_BEVY: Mat3 = Mat3::from_cols(
+    Vec3::new(1.0, 0.0, 0.0),  // ENU East  -> Bevy X
+    Vec3::new(0.0, 0.0, -1.0), // ENU North -> Bevy -Z
+    Vec3::new(0.0, 1.0, 0.0),  // ENU Up    -> Bevy Y
+);
+
+/// Build Mat3 from lower-triangular Cholesky L in **ENU** (row-major: a,b,c,d,e,f -> L00,L10,L11,L20,L21,L22),
+/// scaled by sqrt(chi2_3(confidence)), then converted to Bevy (East-Up-South) so the ellipsoid displays correctly.
+fn cholesky_6_to_mat3(l: &[f32; 6], confidence_percent: f32) -> Mat3 {
+    let confidence_fraction = (confidence_percent / 100.0).clamp(0.01, 0.999);
+    let scale = chi2_3_quantile(confidence_fraction).sqrt();
+    #[rustfmt::skip]
+    let l_enu = Mat3::from_cols_array(&[
+        l[0] * scale, 0.0,          0.0,
+        l[1] * scale, l[2] * scale, 0.0,
+        l[3] * scale, l[4] * scale, l[5] * scale,
+    ]);
+    ENU_TO_BEVY * l_enu
+}
+
 pub trait ComponentArrayExt {
     fn as_world_pos(&self) -> Option<impeller2_wkt::WorldPos>;
 }
@@ -708,6 +1236,7 @@ impl ComponentArrayExt for ComponentValue {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn create_object_3d_entity(
     commands: &mut Commands,
     data: impeller2_wkt::Object3D,
@@ -715,16 +1244,48 @@ pub fn create_object_3d_entity(
     ctx: &eql::Context,
     material_assets: &mut ResMut<Assets<StandardMaterial>>,
     mesh_assets: &mut ResMut<Assets<Mesh>>,
+    mat3_material_assets: &mut ResMut<Assets<Mat3Material>>,
     assets: &Res<AssetServer>,
 ) -> Entity {
     let (scale_expr, scale_error) = match &data.mesh {
-        impeller2_wkt::Object3DMesh::Ellipsoid { scale, .. } => {
-            match compile_scale_eql(scale, ctx) {
-                Ok(expr) => (Some(expr), None),
-                Err(err) => (None, Some(err)),
-            }
-        }
+        impeller2_wkt::Object3DMesh::Ellipsoid {
+            scale,
+            error_covariance_cholesky: None,
+            ..
+        } => match compile_scale_eql(scale, ctx) {
+            Ok(compiled) => (Some(compiled), None),
+            Err(err) => (None, Some(err)),
+        },
         _ => (None, None),
+    };
+    let error_covariance_cholesky_expr = match &data.mesh {
+        impeller2_wkt::Object3DMesh::Ellipsoid {
+            error_covariance_cholesky: Some(cholesky),
+            ..
+        } => compile_cholesky_eql(cholesky, ctx).ok(),
+        _ => None,
+    };
+
+    let joint_animations = match &data.mesh {
+        impeller2_wkt::Object3DMesh::Glb {
+            animations, path, ..
+        } => {
+            info!(
+                count = animations.len(),
+                path = %path,
+                "Found {} animation(s) in GLB mesh '{}'",
+                animations.len(),
+                path
+            );
+            if animations.is_empty() {
+                debug!("GLB mesh '{}' has no animations.", path);
+            }
+            animations
+                .iter()
+                .map(|anim| (anim.joint_name.clone(), anim.eql_expr.clone()))
+                .collect()
+        }
+        _ => Vec::new(),
     };
 
     let geo_frame = data.frame;
@@ -735,6 +1296,8 @@ pub fn create_object_3d_entity(
                 compiled_expr: Some(compile_eql_expr(expr)),
                 scale_expr,
                 scale_error,
+                error_covariance_cholesky_expr,
+                joint_animations,
                 data: data.clone(),
             },
             Transform::default(),
@@ -756,39 +1319,99 @@ pub fn create_object_3d_entity(
         ));
     }
 
-    if let Some(ellipse) = spawn_mesh(
+    spawn_mesh(
         commands,
         entity_id,
         &data.mesh,
         material_assets,
         mesh_assets,
+        mat3_material_assets,
         assets,
-    ) {
-        commands.entity(entity_id).insert(ellipse);
-    }
-
+    );
     entity_id
 }
 
+#[allow(clippy::too_many_arguments)]
+pub fn spawn_billboard_icon(
+    commands: &mut Commands,
+    parent: Entity,
+    icon: &impeller2_wkt::Object3DIcon,
+    mesh_visibility_range: Option<&impeller2_wkt::VisRange>,
+    material_assets: &mut ResMut<Assets<StandardMaterial>>,
+    mesh_assets: &mut ResMut<Assets<Mesh>>,
+    image_assets: &mut ResMut<Assets<Image>>,
+    asset_server: &Res<AssetServer>,
+    icon_cache: &mut ResMut<IconTextureCache>,
+) {
+    let texture_handle: Handle<Image> = match &icon.source {
+        Object3DIconSource::Path(path) => asset_server.load(path.clone()),
+        Object3DIconSource::Builtin(name) => {
+            let raster_size = (icon.size * 2.0).max(64.0) as u32;
+            icon_cache.get_or_insert(name, raster_size, image_assets)
+        }
+    };
+
+    let icon_color = Color::srgba(icon.color.r, icon.color.g, icon.color.b, icon.color.a);
+
+    let material = material_assets.add(StandardMaterial {
+        base_color: icon_color,
+        base_color_texture: Some(texture_handle),
+        alpha_mode: AlphaMode::Blend,
+        unlit: true,
+        double_sided: true,
+        cull_mode: None,
+        ..Default::default()
+    });
+
+    let quad = mesh_assets.add(Mesh::from(bevy::math::primitives::Rectangle::new(1.0, 1.0)));
+
+    let icon_vr = icon.visibility_range.as_ref();
+    let icon_min = icon_vr.map(|vr| vr.min).unwrap_or(0.0);
+    let icon_max = icon_vr.map(|vr| vr.max).unwrap_or(f32::MAX);
+    let icon_fade = icon_vr.map(|vr| vr.fade_distance).unwrap_or(0.0);
+
+    let mesh_vr = mesh_visibility_range;
+    let mesh_min = mesh_vr.map(|vr| vr.min).unwrap_or(0.0);
+    let mesh_max = mesh_vr.map(|vr| vr.max).unwrap_or(f32::MAX);
+
+    commands.entity(parent).insert(Object3DIconState {
+        billboards: HashMap::new(),
+        icon_min_distance: icon_min,
+        icon_max_distance: icon_max,
+        icon_fade_distance: icon_fade,
+        icon_base_alpha: icon.color.a,
+        mesh_min_distance: mesh_min,
+        mesh_max_distance: mesh_max,
+        screen_size_px: icon.size,
+        billboard_material: material,
+        billboard_mesh: quad,
+    });
+}
+
+const ELLIPSOID_GRID_SECTORS: u32 = 20;
+const ELLIPSOID_GRID_STACKS: u32 = 10;
+
+#[allow(clippy::too_many_arguments)]
 pub fn spawn_mesh(
     commands: &mut Commands,
     entity: Entity,
     mesh: &impeller2_wkt::Object3DMesh,
     material_assets: &mut ResMut<Assets<StandardMaterial>>,
     mesh_assets: &mut ResMut<Assets<Mesh>>,
+    mat3_material_assets: &mut ResMut<Assets<Mat3Material>>,
     assets: &Res<AssetServer>,
-) -> Option<EllipsoidVisual> {
+) {
     match mesh {
         impeller2_wkt::Object3DMesh::Glb {
             path,
             scale,
             translate,
             rotate,
+            animations: _,
         } => {
             let url = format!("{path}#Scene0");
             let scene = assets.load(&url);
 
-            // Create transform for offset (translate, rotate, scale)
             let translation = Vec3::new(translate.0, translate.1, translate.2);
             let rotation = Quat::from_euler(
                 EulerRot::XYZ,
@@ -802,8 +1425,6 @@ pub fn spawn_mesh(
                 scale: Vec3::splat(*scale),
             };
 
-            // Create a child entity to hold the scene with the offset transform
-            // This way the parent can be synced with WorldPos without affecting the offset
             commands.spawn((
                 SceneRoot(scene),
                 offset_transform,
@@ -811,6 +1432,7 @@ pub fn spawn_mesh(
                 Visibility::default(),
                 InheritedVisibility::default(),
                 ViewVisibility::default(),
+                Object3DMeshChild,
                 ChildOf(entity),
                 Name::new(format!("object_3d_scene {}", path)),
             ));
@@ -818,7 +1440,6 @@ pub fn spawn_mesh(
             commands
                 .entity(entity)
                 .insert(Name::new(format!("object_3d {}", path)));
-            None
         }
         impeller2_wkt::Object3DMesh::Mesh { mesh, material } => {
             let mut material = material.clone().into_bevy();
@@ -827,13 +1448,29 @@ pub fn spawn_mesh(
                 material.cull_mode = None;
             }
             let material = material_assets.add(material);
-            commands.entity(entity).insert(MeshMaterial3d(material));
             let mesh = mesh.clone().into_bevy();
             let mesh = mesh_assets.add(mesh);
-            commands.entity(entity).insert(Mesh3d(mesh));
-            None
+            commands.spawn((
+                Mesh3d(mesh),
+                MeshMaterial3d(material),
+                Transform::IDENTITY,
+                GlobalTransform::IDENTITY,
+                Visibility::default(),
+                InheritedVisibility::default(),
+                ViewVisibility::default(),
+                Object3DMeshChild,
+                ChildOf(entity),
+                Name::new("object_3d_mesh"),
+            ));
         }
-        impeller2_wkt::Object3DMesh::Ellipsoid { color, .. } => {
+        impeller2_wkt::Object3DMesh::Ellipsoid {
+            color,
+            error_covariance_cholesky,
+            error_confidence_interval: _error_confidence_interval,
+            show_grid,
+            grid_color,
+            ..
+        } => {
             let bevy_color = Color::srgba(color.r, color.g, color.b, color.a);
             let alpha_mode = if color.a < 1.0 {
                 AlphaMode::Blend
@@ -841,21 +1478,83 @@ pub fn spawn_mesh(
                 AlphaMode::Opaque
             };
 
-            let material_handle = material_assets.add(StandardMaterial {
-                base_color: bevy_color,
-                alpha_mode,
-                unlit: false,
-                double_sided: true,
-                cull_mode: None,
-                perceptual_roughness: 0.6,
-                ..Default::default()
-            });
+            if error_covariance_cholesky.is_some() {
+                let initial_linear = Mat3::IDENTITY;
+                let mat3_material = mat3_material_assets.add(Mat3Material {
+                    base: StandardMaterial {
+                        base_color: bevy_color,
+                        alpha_mode,
+                        unlit: false,
+                        double_sided: true,
+                        cull_mode: None,
+                        perceptual_roughness: 0.6,
+                        ..Default::default()
+                    },
+                    extension: Mat3TransformExt {
+                        params: initial_linear.into(),
+                    },
+                });
+                let sphere_handle =
+                    mesh_assets.add(Mesh::from(bevy::math::primitives::Sphere { radius: 1.0 }));
 
-            let mesh_handle =
-                mesh_assets.add(Mesh::from(bevy::math::primitives::Sphere { radius: 1.0 }));
+                let mut child_cmd = commands.spawn((
+                    Mesh3d(sphere_handle),
+                    MeshMaterial3d(mat3_material),
+                    Mat3Params {
+                        linear: initial_linear,
+                    },
+                    Transform::IDENTITY,
+                    GlobalTransform::IDENTITY,
+                    Visibility::default(),
+                    InheritedVisibility::default(),
+                    ViewVisibility::default(),
+                    Object3DMeshChild,
+                    ChildOf(entity),
+                ));
 
-            let child = commands
-                .spawn((
+                if *show_grid {
+                    let grid_mesh = mesh_assets.add(uv_sphere_grid_line_mesh(
+                        1.0,
+                        ELLIPSOID_GRID_SECTORS,
+                        ELLIPSOID_GRID_STACKS,
+                    ));
+                    let grid_bevy_color =
+                        Color::srgba(grid_color.r, grid_color.g, grid_color.b, grid_color.a);
+                    let grid_mat = mat3_material_assets.add(Mat3Material {
+                        base: StandardMaterial {
+                            base_color: grid_bevy_color,
+                            unlit: true,
+                            ..Default::default()
+                        },
+                        extension: Mat3TransformExt {
+                            params: initial_linear.into(),
+                        },
+                    });
+                    child_cmd.with_children(|p| {
+                        p.spawn((
+                            Mesh3d(grid_mesh),
+                            MeshMaterial3d(grid_mat),
+                            bevy::light::NotShadowCaster,
+                            bevy::light::NotShadowReceiver,
+                        ));
+                    });
+                }
+
+                let _child = child_cmd.id();
+            } else {
+                let material_handle = material_assets.add(StandardMaterial {
+                    base_color: bevy_color,
+                    alpha_mode,
+                    unlit: false,
+                    double_sided: true,
+                    cull_mode: None,
+                    perceptual_roughness: 0.6,
+                    ..Default::default()
+                });
+                let mesh_handle =
+                    mesh_assets.add(Mesh::from(bevy::math::primitives::Sphere { radius: 1.0 }));
+
+                let mut child_cmd = commands.spawn((
                     Mesh3d(mesh_handle),
                     MeshMaterial3d(material_handle),
                     Transform::IDENTITY,
@@ -863,16 +1562,219 @@ pub fn spawn_mesh(
                     Visibility::default(),
                     InheritedVisibility::default(),
                     ViewVisibility::default(),
+                    Object3DMeshChild,
                     ChildOf(entity),
-                ))
-                .id();
+                ));
 
-            Some(EllipsoidVisual {
-                child,
-                color: *color,
-                oversized: false,
-                max_extent: 0.0,
-            })
+                if *show_grid {
+                    let grid_mesh = mesh_assets.add(uv_sphere_grid_line_mesh(
+                        1.0,
+                        ELLIPSOID_GRID_SECTORS,
+                        ELLIPSOID_GRID_STACKS,
+                    ));
+                    let grid_bevy_color =
+                        Color::srgba(grid_color.r, grid_color.g, grid_color.b, grid_color.a);
+                    let grid_material = material_assets.add(StandardMaterial {
+                        base_color: grid_bevy_color,
+                        unlit: true,
+                        ..Default::default()
+                    });
+                    child_cmd.with_children(|p| {
+                        p.spawn((
+                            Mesh3d(grid_mesh),
+                            MeshMaterial3d(grid_material),
+                            bevy::light::NotShadowCaster,
+                            bevy::light::NotShadowReceiver,
+                        ));
+                    });
+                }
+
+                let _child = child_cmd.id();
+            }
+
+            commands.entity(entity).insert((
+                EllipsoidVisual {
+                    color: *color,
+                    oversized: false,
+                    max_extent: 0.0,
+                },
+                Name::new("object_3d ellipsoid"),
+            ));
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments, clippy::type_complexity)]
+pub fn update_object_3d_billboard_system(
+    mut commands: Commands,
+    mut objects: Query<(Entity, &mut Object3DIconState, &GlobalTransform), With<WorldPosReceived>>,
+    cameras: Query<
+        (
+            Entity,
+            &Camera,
+            &GlobalTransform,
+            &Projection,
+            Option<&ViewportConfig>,
+        ),
+        With<MainCamera>,
+    >,
+    mut billboard_transforms: Query<&mut Transform, (With<BillboardIcon>, Without<MainCamera>)>,
+    billboard_materials_query: Query<
+        &MeshMaterial3d<StandardMaterial>,
+        (With<BillboardIcon>, Without<MainCamera>),
+    >,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    children_query: Query<&Children>,
+    mesh_child_markers: Query<(), With<Object3DMeshChild>>,
+    mesh3d_query: Query<(), With<Mesh3d>>,
+) {
+    for (parent_entity, mut icon_state, obj_gt) in objects.iter_mut() {
+        let obj_pos = obj_gt.translation();
+        let parent_rotation = obj_gt.to_scale_rotation_translation().1;
+        let mut mesh_layers = RenderLayers::none();
+        let mut seen_cameras: HashSet<Entity> = HashSet::new();
+
+        let icon_min = icon_state.icon_min_distance;
+        let icon_max = icon_state.icon_max_distance;
+        let icon_fade = icon_state.icon_fade_distance;
+        let base_alpha = icon_state.icon_base_alpha;
+        let mesh_min = icon_state.mesh_min_distance;
+        let mesh_max = icon_state.mesh_max_distance;
+        let screen_px = icon_state.screen_size_px;
+        let bb_mesh_handle = icon_state.billboard_mesh.clone();
+        let bb_mat_source = icon_state.billboard_material.clone();
+
+        for (cam_entity, camera, cam_gt, projection, viewport_config) in cameras.iter() {
+            let viewport_h = camera.logical_viewport_size().map(|s| s.y).unwrap_or(0.0);
+            if viewport_h < 1.0 {
+                continue;
+            }
+            let Some(layer) = viewport_config.and_then(|c| c.viewport_layer) else {
+                continue;
+            };
+
+            seen_cameras.insert(cam_entity);
+            let distance = (obj_pos - cam_gt.translation()).length();
+            let shows_billboard = distance >= icon_min && distance <= icon_max;
+            let shows_mesh = distance >= mesh_min && distance <= mesh_max;
+
+            if shows_mesh {
+                mesh_layers = mesh_layers.with(layer);
+            }
+
+            if shows_billboard {
+                let cam_rotation = cam_gt.to_scale_rotation_translation().1;
+                let fov = match projection {
+                    Projection::Perspective(persp) => persp.fov,
+                    _ => std::f32::consts::FRAC_PI_4,
+                };
+                let world_size = distance * screen_px * 2.0 * (fov / 2.0).tan() / viewport_h;
+
+                let mesh_clone = bb_mesh_handle.clone();
+                let mat_clone = bb_mat_source.clone();
+                let cloned_mat_data = materials.get(&mat_clone).cloned();
+                let bb_entity = icon_state.billboards.entry(cam_entity).or_insert_with(|| {
+                    let cloned_mat = if let Some(mat_data) = cloned_mat_data {
+                        materials.add(mat_data)
+                    } else {
+                        mat_clone
+                    };
+                    commands
+                        .spawn((
+                            Mesh3d(mesh_clone),
+                            MeshMaterial3d(cloned_mat),
+                            Transform::IDENTITY,
+                            GlobalTransform::IDENTITY,
+                            Visibility::Hidden,
+                            InheritedVisibility::default(),
+                            ViewVisibility::default(),
+                            RenderLayers::layer(layer),
+                            BillboardIcon,
+                            ChildOf(parent_entity),
+                            Name::new(format!("billboard_icon_cam_{cam_entity}")),
+                        ))
+                        .id()
+                });
+
+                commands
+                    .entity(*bb_entity)
+                    .insert(RenderLayers::layer(layer));
+
+                let alpha = if icon_fade > 0.0 {
+                    let min_fade = if distance < icon_min + icon_fade {
+                        ((distance - icon_min) / icon_fade).clamp(0.0, 1.0)
+                    } else {
+                        1.0
+                    };
+                    let max_fade = if icon_max < f32::MAX && distance > icon_max - icon_fade {
+                        ((icon_max - distance) / icon_fade).clamp(0.0, 1.0)
+                    } else {
+                        1.0
+                    };
+                    min_fade.min(max_fade)
+                } else {
+                    1.0
+                };
+
+                if let Ok(mat_handle) = billboard_materials_query.get(*bb_entity)
+                    && let Some(mat) = materials.get_mut(mat_handle)
+                {
+                    let mut c = mat.base_color;
+                    c.set_alpha(base_alpha * alpha);
+                    mat.base_color = c;
+                }
+
+                if let Ok(mut bb_transform) = billboard_transforms.get_mut(*bb_entity) {
+                    bb_transform.rotation = parent_rotation.inverse() * cam_rotation;
+                    bb_transform.scale = Vec3::splat(world_size);
+                    commands.entity(*bb_entity).insert(Visibility::Inherited);
+                }
+            } else if let Some(bb_entity) = icon_state.billboards.get(&cam_entity) {
+                commands.entity(*bb_entity).insert(RenderLayers::none());
+            }
+        }
+
+        icon_state.billboards.retain(|cam_entity, bb_entity| {
+            if seen_cameras.contains(cam_entity) {
+                true
+            } else {
+                commands.entity(*bb_entity).despawn();
+                false
+            }
+        });
+
+        if let Ok(children) = children_query.get(parent_entity) {
+            for child in children.iter() {
+                if icon_state.billboards.values().any(|bb| *bb == child) {
+                    continue;
+                }
+                if mesh_child_markers.get(child).is_ok() {
+                    propagate_render_layers(
+                        &mut commands,
+                        child,
+                        &mesh_layers,
+                        &children_query,
+                        &mesh3d_query,
+                    );
+                }
+            }
+        }
+    }
+}
+
+fn propagate_render_layers(
+    commands: &mut Commands,
+    entity: Entity,
+    layers: &RenderLayers,
+    children_query: &Query<&Children>,
+    mesh3d_query: &Query<(), With<Mesh3d>>,
+) {
+    if mesh3d_query.get(entity).is_ok() {
+        commands.entity(entity).insert(layers.clone());
+    }
+    if let Ok(children) = children_query.get(entity) {
+        for child in children.iter() {
+            propagate_render_layers(commands, child, layers, children_query, mesh3d_query);
         }
     }
 }
@@ -881,6 +1783,14 @@ pub struct Object3DPlugin;
 
 impl Plugin for Object3DPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(Update, (update_object_3d_system, warn_imported_cameras));
+        app.init_resource::<IconTextureCache>().add_systems(
+            Update,
+            (
+                on_scene_ready.pipe(attach_joint_animations),
+                update_joint_animations,
+                warn_imported_cameras,
+                update_object_3d_billboard_system,
+            ),
+        );
     }
 }

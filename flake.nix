@@ -6,7 +6,7 @@
     ];
   };
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.05";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.11";
     systems.url = "github:nix-systems/default";
     rust-overlay = {
       url = "github:oxalica/rust-overlay";
@@ -27,11 +27,14 @@
   }: let
     rustToolchain = p: p.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
     elodinOverlay = final: prev: {
+      tracy = final.callPackage ./nix/pkgs/tracy.nix {
+        tracy = prev.tracy;
+      };
       elodin = rec {
         elodin-py = final.callPackage ./nix/pkgs/elodin-py.nix {
           inherit rustToolchain;
-          python = final.python312Full;
-          pythonPackages = final.python312Packages;
+          python = final.python313;
+          pythonPackages = final.python313Packages;
         };
         elodin-cli = final.callPackage ./nix/pkgs/elodin-cli.nix {
           inherit rustToolchain;
@@ -40,6 +43,7 @@
           pythonPackages = elodin-py.pythonPackages;
         };
         elodin-db = final.callPackage ./aleph/pkgs/elodin-db.nix {inherit rustToolchain;};
+        elodinsink = final.callPackage ./nix/pkgs/elodinsink.nix {inherit rustToolchain;};
       };
     };
   in
@@ -62,7 +66,7 @@
         shells = pkgs.callPackage ./nix/shell.nix {inherit config rustToolchain;};
       in {
         packages = with pkgs.elodin; {
-          inherit elodin-cli elodin-db;
+          inherit elodin-cli elodin-db elodinsink;
           elodin-py = elodin-py.py;
         };
 

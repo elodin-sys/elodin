@@ -14,7 +14,10 @@ order = 8
 
 ## Usage
 
-- Open: `Cmd+P` on macOS, `Ctrl+P` on Windows/Linux.
+- Open (fresh start): `Cmd+P` on macOS, `Ctrl+P` on Windows/Linux. This clears any existing
+  palette nesting and starts at the top level.
+- Open (resume): `Cmd+Shift+P` on macOS, `Ctrl+Shift+P` on Windows/Linux. This reopens the
+  palette with any existing nested state.
 - Type to filter; use Up/Down arrows to move selection.
 - Enter to run the selected command; Escape to close.
 - Backspace on an empty input returns to the previous page when available.

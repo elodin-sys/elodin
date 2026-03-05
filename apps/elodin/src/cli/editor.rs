@@ -7,6 +7,7 @@ use std::io::{Read, Seek, Write};
 use std::net::{Ipv6Addr, SocketAddr};
 use std::path::PathBuf;
 use std::thread::JoinHandle;
+#[cfg(not(target_os = "windows"))]
 use std::time::Duration;
 use stellarator::util::CancelToken;
 use tokio::runtime::Runtime;
@@ -19,6 +20,16 @@ const DEFAULT_SIM: Simulator = Simulator::None;
 pub struct Args {
     #[clap(name = "addr/path", default_value_t = DEFAULT_SIM)]
     sim: Simulator,
+
+    /// Open this KDL schematic file after connecting to the database.
+    #[clap(long)]
+    pub kdl: Option<PathBuf>,
+
+    /// Replay recorded data as if it were streaming in real time. The timeline
+    /// reveals data progressively as the playback marker advances, simulating
+    /// a live session.
+    #[clap(long)]
+    pub replay: bool,
 }
 
 #[derive(Clone)]
@@ -170,6 +181,14 @@ impl Cli {
         };
         app.insert_resource(BevyCancelToken(cancel_token.clone()))
             .add_systems(Update, check_cancel_token);
+        if args.replay {
+            app.init_resource::<elodin_editor::ReplayMode>();
+        }
+        if let Some(path) = &args.kdl {
+            app.insert_resource(elodin_editor::ui::schematic::InitialKdlPath(Some(
+                path.clone(),
+            )));
+        }
         app.run();
         cancel_token.cancel();
         thread.join().map_err(|_| miette!("join error"))?

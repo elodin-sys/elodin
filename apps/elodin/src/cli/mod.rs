@@ -1,9 +1,11 @@
 use clap::{Parser, Subcommand};
 use miette::Context;
 use miette::IntoDiagnostic;
+#[cfg(not(target_os = "windows"))]
 use miette::miette;
+#[cfg(not(target_os = "windows"))]
 use stellarator::util::CancelToken;
-use tracing_subscriber::{EnvFilter, fmt::time::ChronoLocal};
+use tracing_subscriber::{EnvFilter, fmt::time::ChronoLocal, prelude::*};
 mod editor;
 
 #[derive(Parser, Clone)]
@@ -21,7 +23,7 @@ pub struct Cli {
 enum Commands {
     /// Launch the Elodin editor (default)
     Editor(editor::Args),
-    /// Run an Elodin simulaton in headless mode
+    /// Run an Elodin simulation in headless mode
     #[cfg(not(target_os = "windows"))]
     Run(editor::Args),
 }
@@ -39,17 +41,30 @@ impl Cli {
 
         let filter = EnvFilter::try_from_default_env()
             .or_else(|_| {
-                EnvFilter::try_new(
-                    "s10=info,elodin=info,impeller=info,nox_ecs=info,impeller::bevy=error,error",
-                )
+                EnvFilter::try_new("s10=info,elodin=info,impeller=info,impeller::bevy=error,error")
             })
             .unwrap_or_else(|_| EnvFilter::new("info"));
 
-        let _ = tracing_subscriber::fmt()
+        let fmt_layer = tracing_subscriber::fmt::layer()
             .with_target(false)
-            .with_env_filter(filter)
-            .with_timer(ChronoLocal::new("%Y-%m-%d %H:%M:%S%.3f".to_string()))
+            .with_timer(ChronoLocal::new("%Y-%m-%d %H:%M:%S%.3f".to_string()));
+
+        #[cfg(feature = "tracy")]
+        let init_res = tracing_subscriber::registry()
+            .with(filter)
+            .with(fmt_layer)
+            .with(tracing_tracy::TracyLayer::default())
             .try_init();
+
+        #[cfg(not(feature = "tracy"))]
+        let init_res = tracing_subscriber::registry()
+            .with(filter)
+            .with(fmt_layer)
+            .try_init();
+
+        if let Err(err) = init_res {
+            eprintln!("warning: failed to install global tracing subscriber ({err})");
+        }
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()

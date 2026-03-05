@@ -1,3 +1,4 @@
+use convert_case::Casing;
 use datafusion::common::HashSet;
 use futures_lite::StreamExt;
 use impeller2::registry::VTableRegistry;
@@ -5,7 +6,7 @@ use impeller2::types::{PacketHeader, PacketTy};
 use impeller2::vtable::builder::{
     OpBuilder, component, raw_field, raw_table, schema, timestamp, vtable,
 };
-use impeller2::vtable::{Op, RealizedField, builder};
+use impeller2::vtable::{Op, RealizedField, TIMESTAMP_NS_EXT_ID, builder};
 use impeller2::{
     com_de::Decomponentize,
     registry,
@@ -31,7 +32,7 @@ use std::{
     ops::Range,
     path::{Path, PathBuf},
     sync::{
-        Arc, Condvar, Mutex as StdMutex, RwLock,
+        Arc, RwLock,
         atomic::{self, AtomicBool, AtomicI64, AtomicU64},
     },
     time::{Duration, Instant},
@@ -55,10 +56,24 @@ pub use error::Error;
 pub mod append_log;
 mod arrow;
 pub mod axum;
+pub mod cancellation;
+pub(crate) mod coalescing_sink;
+pub mod drop;
 mod error;
+pub mod export;
+#[cfg(feature = "video-export")]
+pub mod export_videos;
 pub mod fix_timestamps;
+pub mod follow;
+mod follow_stream;
+pub mod merge;
 mod msg_log;
+pub mod prune;
+pub mod time_align;
 pub(crate) mod time_series;
+pub mod trim;
+pub mod truncate;
+pub mod utils;
 mod vtable_stream;
 
 /// Analyzes a VTable to find byte ranges that are used as timestamp sources.
@@ -72,15 +87,59 @@ where
     Fields: impeller2::buf::Buf<impeller2::vtable::Field>,
 {
     let mut ranges = Vec::new();
-    for op in vtable.ops.as_slice() {
+    for (op_idx, op) in vtable.ops.as_slice().iter().enumerate() {
         if let Op::Timestamp { source, .. } = op {
+            debug!(op_idx, "found timestamp operation");
             // Resolve source to get the actual Table op
-            if let Ok(resolved) = vtable.realize(*source, None)
-                && let Some(range) = resolved.as_table_range()
-            {
-                ranges.push((range.start, range.end));
+            match vtable.realize(*source, None) {
+                Ok(resolved) => {
+                    if let Some(range) = resolved.as_table_range() {
+                        debug!(
+                            op_idx,
+                            range_start = range.start,
+                            range_end = range.end,
+                            "timestamp source range resolved"
+                        );
+                        ranges.push((range.start, range.end));
+                    } else {
+                        warn!(
+                            op_idx,
+                            "timestamp operation source resolved but has no table range"
+                        );
+                    }
+                }
+                Err(e) => {
+                    warn!(?e, op_idx, "failed to resolve timestamp operation source");
+                }
             }
         }
+        // Handle nanosecond timestamp ext (same role as Op::Timestamp but source is in ns)
+        if let Op::Ext { data, id, .. } = op
+            && *id == TIMESTAMP_NS_EXT_ID
+        {
+            debug!(op_idx, "found nanosecond timestamp ext");
+            match vtable.realize(*data, None) {
+                Ok(resolved) => {
+                    if let Some(range) = resolved.as_table_range() {
+                        debug!(
+                            op_idx,
+                            range_start = range.start,
+                            range_end = range.end,
+                            "timestamp_ns ext source range resolved"
+                        );
+                        ranges.push((range.start, range.end));
+                    }
+                }
+                Err(e) => {
+                    warn!(?e, op_idx, "failed to resolve timestamp_ns ext data source");
+                }
+            }
+        }
+    }
+    if ranges.is_empty() {
+        debug!("no timestamp source ranges found in vtable");
+    } else {
+        debug!(range_count = ranges.len(), "found timestamp source ranges");
     }
     ranges
 }
@@ -102,129 +161,19 @@ fn field_overlaps_timestamp_source(
     false
 }
 
-pub struct SnapshotBarrier {
-    state: StdMutex<SnapshotState>,
-    cv: Condvar,
+/// Fallback detection: checks if a component name suggests it's a timestamp source.
+/// This is used as a last resort when range-based detection fails.
+/// Only matches clear patterns to avoid false positives.
+fn looks_like_timestamp_source_by_name(component_name: &str) -> bool {
+    let name_upper = component_name.to_uppercase();
+    // Match common timestamp source patterns
+    name_upper.contains("TIME_MONOTONIC")
+        || name_upper.contains("TIMESTAMP_SOURCE")
+        || (name_upper.contains("TIMESTAMP") && name_upper.ends_with("_SOURCE"))
+        || (name_upper.contains("TIME") && name_upper.contains("MONOTONIC"))
 }
 
-#[derive(Default)]
-struct SnapshotState {
-    active_writers: usize,
-    snapshot_active: bool,
-}
-
-pub struct SnapshotWriterGuard<'a> {
-    barrier: &'a SnapshotBarrier,
-    released: bool,
-}
-
-pub struct SnapshotGuard<'a> {
-    barrier: &'a SnapshotBarrier,
-    released: bool,
-}
-
-impl SnapshotBarrier {
-    pub fn new() -> Self {
-        Self {
-            state: StdMutex::new(SnapshotState::default()),
-            cv: Condvar::new(),
-        }
-    }
-
-    pub fn enter_writer(&self) -> SnapshotWriterGuard<'_> {
-        let mut state = self.state.lock().expect("snapshot barrier mutex poisoned");
-        while state.snapshot_active {
-            state = self.cv.wait(state).unwrap();
-        }
-        state.active_writers += 1;
-        SnapshotWriterGuard {
-            barrier: self,
-            released: false,
-        }
-    }
-
-    pub fn begin_snapshot(&self) -> SnapshotGuard<'_> {
-        let mut state = self.state.lock().unwrap();
-        while state.snapshot_active {
-            state = self.cv.wait(state).unwrap();
-        }
-        state.snapshot_active = true;
-        while state.active_writers > 0 {
-            state = self.cv.wait(state).unwrap();
-        }
-        SnapshotGuard {
-            barrier: self,
-            released: false,
-        }
-    }
-
-    fn release_writer(&self) {
-        let mut state = self.state.lock().unwrap();
-        debug_assert!(state.active_writers > 0);
-        if state.active_writers == 0 {
-            return;
-        }
-        state.active_writers -= 1;
-        let should_notify = state.active_writers == 0;
-        drop(state);
-        if should_notify {
-            self.cv.notify_all();
-        }
-    }
-
-    fn finish_snapshot(&self) {
-        let mut state = self.state.lock().unwrap();
-        state.snapshot_active = false;
-        drop(state);
-        self.cv.notify_all();
-    }
-}
-
-impl Default for SnapshotBarrier {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl<'a> SnapshotWriterGuard<'a> {
-    pub fn release(mut self) {
-        if self.released {
-            return;
-        }
-        self.barrier.release_writer();
-        self.released = true;
-    }
-}
-
-impl<'a> Drop for SnapshotWriterGuard<'a> {
-    fn drop(&mut self) {
-        if !self.released {
-            self.barrier.release_writer();
-            self.released = true;
-        }
-    }
-}
-
-impl<'a> SnapshotGuard<'a> {
-    pub fn release(mut self) {
-        if self.released {
-            return;
-        }
-        self.barrier.finish_snapshot();
-        self.released = true;
-    }
-}
-
-impl<'a> Drop for SnapshotGuard<'a> {
-    fn drop(&mut self) {
-        if !self.released {
-            self.barrier.finish_snapshot();
-            self.released = true;
-        }
-    }
-}
-
-fn sync_dir(path: &Path) -> io::Result<()> {
+pub(crate) fn sync_dir(path: &Path) -> io::Result<()> {
     #[cfg(target_family = "unix")]
     {
         let dir = File::open(path)?;
@@ -237,7 +186,7 @@ fn sync_dir(path: &Path) -> io::Result<()> {
     }
 }
 
-fn copy_file_native(src: &Path, dst: &Path) -> Result<(), Error> {
+pub(crate) fn copy_file_native(src: &Path, dst: &Path) -> Result<(), Error> {
     let metadata = fs::metadata(src)?;
     reflink_copy::reflink_or_copy(src, dst)?;
     fs::set_permissions(dst, metadata.permissions())?;
@@ -249,7 +198,7 @@ fn copy_file_native(src: &Path, dst: &Path) -> Result<(), Error> {
     Ok(())
 }
 
-fn copy_dir_native(src: &Path, dst: &Path) -> Result<(), Error> {
+pub(crate) fn copy_dir_native(src: &Path, dst: &Path) -> Result<(), Error> {
     fs::create_dir_all(dst)?;
     for entry in fs::read_dir(src)? {
         let entry = entry?;
@@ -277,7 +226,6 @@ fn copy_dir_native(src: &Path, dst: &Path) -> Result<(), Error> {
 pub struct DB {
     pub vtable_gen: AtomicCell<u64>,
     state: RwLock<State>,
-    snapshot_barrier: SnapshotBarrier,
     pub recording_cell: PlayingCell,
 
     // metadata
@@ -287,6 +235,12 @@ pub struct DB {
     pub earliest_timestamp: AtomicCell<Timestamp>,
     // Wall-clock timestamp at the moment the DB start anchor was set.
     db_start_wall_clock: AtomicCell<Timestamp>,
+    /// When true, last_updated advances with playback position instead of
+
+    /// Component IDs being replicated from a followed source database.
+    /// When a local (non-follower) writer writes to one of these, a warning
+    /// is logged to highlight potential data corruption.
+    pub followed_components: RwLock<HashSet<ComponentId>>,
 }
 
 #[derive(Default)]
@@ -306,7 +260,8 @@ pub struct State {
 
 impl DB {
     pub fn create(path: PathBuf) -> Result<Self, Error> {
-        Self::with_time_step(path, Duration::from_secs_f64(1.0 / 120.0))
+        // Default to 1/60 s which gives 1x real-time at 60 Hz playback frequency.
+        Self::with_time_step(path, Duration::from_secs_f64(1.0 / 60.0))
     }
 
     pub fn with_time_step(path: PathBuf, time_step: Duration) -> Result<Self, Error> {
@@ -319,14 +274,14 @@ impl DB {
             default_stream_time_step: time_step,
             ..Default::default()
         };
-        db_config.set_time_start_timestamp_micros(now.0);
+        db_config.set_version_created(env!("CARGO_PKG_VERSION"));
+        db_config.set_version_last_opened(env!("CARGO_PKG_VERSION"));
         let state = State {
             db_config,
             ..Default::default()
         };
         let db = DB {
             state: RwLock::new(state),
-            snapshot_barrier: SnapshotBarrier::new(),
             recording_cell: PlayingCell::new(true),
             path,
             vtable_gen: AtomicCell::new(0),
@@ -334,6 +289,7 @@ impl DB {
             last_updated: AtomicCell::new(Timestamp(i64::MIN)),
             earliest_timestamp: AtomicCell::new(now),
             db_start_wall_clock: AtomicCell::new(now),
+            followed_components: RwLock::new(HashSet::default()),
         };
         db.save_db_state()?;
         Ok(db)
@@ -354,12 +310,19 @@ impl DB {
     }
 
     pub fn save_db_state(&self) -> Result<(), Error> {
+        let earliest = self.earliest_timestamp.latest();
+        let has_data = self.last_updated.latest().0 != i64::MIN;
+        self.with_state_mut(|state| {
+            if state.db_config.time_start_timestamp_micros().is_none()
+                && has_data
+                && earliest.0 != i64::MAX
+                && earliest.0 != i64::MIN
+            {
+                state.db_config.set_time_start_timestamp_micros(earliest.0);
+            }
+        });
         let db_state = self.db_config();
         db_state.write(self.path.join("db_state"))
-    }
-
-    pub fn begin_snapshot(&self) -> SnapshotGuard<'_> {
-        self.snapshot_barrier.begin_snapshot()
     }
 
     pub fn flush_all(&self) -> Result<(), Error> {
@@ -434,46 +397,6 @@ impl DB {
         Timestamp(start.0.saturating_add(delta))
     }
 
-    pub fn copy_native(&self, target_db_path: impl AsRef<Path>) -> Result<PathBuf, Error> {
-        let final_db_dir = target_db_path.as_ref().to_path_buf();
-        let parent_dir = final_db_dir
-            .parent()
-            .map(Path::to_path_buf)
-            .unwrap_or_else(|| PathBuf::from("."));
-
-        if self.path.starts_with(&final_db_dir) || final_db_dir.starts_with(&self.path) {
-            return Err(Error::Io(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "target directory overlaps database path",
-            )));
-        }
-
-        if final_db_dir.exists() {
-            return Err(Error::Io(io::Error::new(
-                io::ErrorKind::AlreadyExists,
-                "target directory already exists",
-            )));
-        }
-
-        fs::create_dir_all(&parent_dir)?;
-        let tmp_db_dir = {
-            let name = final_db_dir
-                .file_name()
-                .unwrap_or(OsStr::new("db"))
-                .to_string_lossy();
-            parent_dir.join(format!("{}.tmp", name))
-        };
-        if tmp_db_dir.exists() {
-            fs::remove_dir_all(&tmp_db_dir)?;
-        }
-        fs::create_dir_all(&tmp_db_dir)?;
-        copy_dir_native(&self.path, &tmp_db_dir)?;
-        sync_dir(&tmp_db_dir)?;
-        fs::rename(&tmp_db_dir, &final_db_dir)?;
-        sync_dir(&parent_dir)?;
-        Ok(final_db_dir)
-    }
-
     pub fn open(path: PathBuf) -> Result<Self, Error> {
         let mut component_metadata = HashMap::new();
         let mut components = HashMap::new();
@@ -536,7 +459,10 @@ impl DB {
                 if let Some((timestamp, _)) = component.time_series.latest() {
                     last_updated = timestamp.0.max(last_updated);
                 };
-                start_timestamp = start_timestamp.min(component.time_series.start_timestamp().0);
+                let comp_start = component.time_series.start_timestamp().0;
+                if comp_start > 0 {
+                    start_timestamp = start_timestamp.min(comp_start);
+                }
             } else {
                 trace!(
                     component.id = ?component_id.0,
@@ -556,7 +482,9 @@ impl DB {
                     .and_then(|p| p.parse().ok())
                     .ok_or(Error::InvalidMsgId)?;
                 let msg_log = MsgLog::open(path)?;
-                if let Some(first_timestamp) = msg_log.timestamps().first() {
+                if let Some(first_timestamp) = msg_log.timestamps().first()
+                    && first_timestamp.0 > 0
+                {
                     start_timestamp = start_timestamp.min(first_timestamp.0);
                 }
 
@@ -568,7 +496,9 @@ impl DB {
         }
 
         info!(db.path = ?path, "opened db");
-        let db_state = DbConfig::read(db_state_path)?;
+        let mut db_state = DbConfig::read(db_state_path)?;
+        // Update the version that last opened this database
+        db_state.set_version_last_opened(env!("CARGO_PKG_VERSION"));
         let now = Timestamp::now();
         let state = State {
             components,
@@ -579,17 +509,70 @@ impl DB {
         };
         let earliest_timestamp = db_state
             .time_start_timestamp_micros()
+            .filter(|&ts| ts > 0)
             .map(Timestamp)
             .unwrap_or_else(|| {
-                if start_timestamp == i64::MAX {
-                    now
-                } else {
+                if start_timestamp != i64::MAX {
                     Timestamp(start_timestamp)
+                } else if last_updated != i64::MIN {
+                    Timestamp(last_updated)
+                } else {
+                    now
                 }
             });
-        Ok(DB {
+        // Validate: ensure earliest_timestamp is not beyond the actual data range.
+        // This handles databases where time_start_timestamp_micros was set to
+        // wall-clock time but data uses monotonic timestamps (or vice versa).
+        let earliest_timestamp = if start_timestamp != i64::MAX && last_updated != i64::MIN {
+            if earliest_timestamp.0 > last_updated {
+                warn!(
+                    earliest_timestamp = earliest_timestamp.0,
+                    last_updated,
+                    start_timestamp,
+                    "time_start_timestamp_micros in db_state exceeds data range; \
+                     adjusting earliest_timestamp to match data"
+                );
+            }
+            Timestamp(earliest_timestamp.0.min(start_timestamp))
+        } else {
+            earliest_timestamp
+        };
+        // If the > 0 filters caused a degenerate range (earliest >= last_updated),
+        // fall back to scanning the actual first data timestamp from components.
+        // This handles databases where all data legitimately starts at timestamp 0
+        // (e.g., simulations using relative time) without breaking the init-message
+        // filtering for databases with a single outlier point at timestamp 0.
+        let earliest_timestamp = if earliest_timestamp.0 >= last_updated && last_updated != i64::MIN
+        {
+            let actual_first = state
+                .components
+                .iter()
+                .filter(|(id, _)| {
+                    !state
+                        .component_metadata
+                        .get(id)
+                        .map(|m| m.is_timestamp_source())
+                        .unwrap_or(false)
+                })
+                .map(|(_, c)| c.time_series.start_timestamp().0)
+                .filter(|&ts| ts < i64::MAX)
+                .min();
+            if let Some(first) = actual_first {
+                warn!(
+                    earliest_timestamp = earliest_timestamp.0,
+                    last_updated,
+                    actual_first_timestamp = first,
+                    "degenerate earliest_timestamp range; recovering from actual data"
+                );
+                Timestamp(first)
+            } else {
+                earliest_timestamp
+            }
+        } else {
+            earliest_timestamp
+        };
+        let db = DB {
             state: RwLock::new(state),
-            snapshot_barrier: SnapshotBarrier::new(),
             path,
             vtable_gen: AtomicCell::new(0),
             recording_cell: PlayingCell::new(db_state.recording),
@@ -599,21 +582,87 @@ impl DB {
             last_updated: AtomicCell::new(Timestamp(last_updated)),
             earliest_timestamp: AtomicCell::new(earliest_timestamp),
             db_start_wall_clock: AtomicCell::new(now),
-        })
+            followed_components: RwLock::new(HashSet::default()),
+        };
+        // Save updated version info
+        db.save_db_state()?;
+        Ok(db)
     }
 
     pub fn insert_vtable(&self, vtable: VTableMsg) -> Result<(), Error> {
         info!(id = ?vtable.id, "inserting vtable");
-        let _snapshot_guard = self.snapshot_barrier.enter_writer();
 
         // Find byte ranges that are used as timestamp sources
         let timestamp_source_ranges = find_timestamp_source_ranges(&vtable.vtable);
+        debug!(
+            vtable_id = ?vtable.id,
+            timestamp_range_count = timestamp_source_ranges.len(),
+            ranges = ?timestamp_source_ranges,
+            "timestamp source ranges found"
+        );
 
         self.with_state_mut(|state| {
             // We need to iterate over fields to get offset/len for timestamp source detection
             let fields: Vec<_> = vtable.vtable.fields.as_slice().to_vec();
+            debug!(
+                vtable_id = ?vtable.id,
+                field_count = fields.len(),
+                "processing vtable fields"
+            );
 
-            for (field, res) in fields.iter().zip(vtable.vtable.realize_fields(None)) {
+            // Track component IDs that are referenced by timestamp operations
+            let mut timestamp_source_component_ids = std::collections::HashSet::new();
+
+            // First pass: identify components referenced by timestamp operations
+            for op in vtable.vtable.ops.as_slice() {
+                if let Op::Timestamp { source, arg } = op {
+                    // Try to resolve the arg to get the component ID
+                    if let Ok(resolved_arg) = vtable.vtable.realize(*arg, None)
+                        && let Some(comp_id) = resolved_arg.as_component_id()
+                    {
+                        debug!(
+                            component_id = ?comp_id.0,
+                            "timestamp operation references component"
+                        );
+                        // Also check if the source itself resolves to a component
+                        if let Ok(resolved_source) = vtable.vtable.realize(*source, None)
+                            && let Some(source_comp_id) = resolved_source.as_component_id()
+                        {
+                            debug!(
+                                component_id = ?source_comp_id.0,
+                                "timestamp source is itself a component"
+                            );
+                            timestamp_source_component_ids.insert(source_comp_id);
+                        }
+                    }
+                }
+                // Handle nanosecond timestamp ext: data is the ns source, arg is the component
+                if let Op::Ext { data, id, arg } = op
+                    && *id == TIMESTAMP_NS_EXT_ID
+                    && let Ok(resolved_arg) = vtable.vtable.realize(*arg, None)
+                    && let Some(comp_id) = resolved_arg.as_component_id()
+                {
+                    debug!(
+                        component_id = ?comp_id.0,
+                        "timestamp_ns ext references component"
+                    );
+                    if let Ok(resolved_data) = vtable.vtable.realize(*data, None)
+                        && let Some(source_comp_id) = resolved_data.as_component_id()
+                    {
+                        debug!(
+                            component_id = ?source_comp_id.0,
+                            "timestamp_ns ext source is itself a component"
+                        );
+                        timestamp_source_component_ids.insert(source_comp_id);
+                    }
+                }
+            }
+
+            for (field_idx, (field, res)) in fields
+                .iter()
+                .zip(vtable.vtable.realize_fields(None))
+                .enumerate()
+            {
                 let RealizedField {
                     component_id,
                     shape,
@@ -621,11 +670,56 @@ impl DB {
                     ..
                 } = res?;
 
+                // Get component name for logging and fallback detection
+                let component_name = state
+                    .component_metadata
+                    .get(&component_id)
+                    .map(|m| m.name.clone())
+                    .unwrap_or_else(|| component_id.to_string());
+
                 // Check if this field overlaps with any timestamp source range
-                let is_timestamp_source = field_overlaps_timestamp_source(
+                let is_timestamp_source_by_range = field_overlaps_timestamp_source(
                     field.offset.to_index(),
                     field.len as usize,
                     &timestamp_source_ranges,
+                );
+
+                // Also check if this component ID is directly referenced as a timestamp source
+                let is_timestamp_source_by_id =
+                    timestamp_source_component_ids.contains(&component_id);
+
+                // Fallback: check component name pattern (only if other methods didn't detect it)
+                let is_timestamp_source_by_name =
+                    if !is_timestamp_source_by_range && !is_timestamp_source_by_id {
+                        let looks_like = looks_like_timestamp_source_by_name(&component_name);
+                        if looks_like {
+                            debug!(
+                                component_id = ?component_id.0,
+                                component_name = ?component_name,
+                                "fallback detection: component name suggests timestamp source"
+                            );
+                        }
+                        looks_like
+                    } else {
+                        false
+                    };
+
+                let is_timestamp_source = is_timestamp_source_by_range
+                    || is_timestamp_source_by_id
+                    || is_timestamp_source_by_name;
+
+                debug!(
+                    vtable_id = ?vtable.id,
+                    field_idx,
+                    component_id = ?component_id.0,
+                    component_name = ?component_name,
+                    field_offset = field.offset.to_index(),
+                    field_len = field.len,
+                    is_timestamp_source_by_range,
+                    is_timestamp_source_by_id,
+                    is_timestamp_source_by_name,
+                    is_timestamp_source,
+                    "processing field"
                 );
 
                 let component_schema = ComponentSchema::new(ty, shape);
@@ -644,7 +738,6 @@ impl DB {
     }
 
     pub fn push_msg(&self, timestamp: Timestamp, id: PacketId, msg: &[u8]) -> Result<(), Error> {
-        let _snapshot_guard = self.snapshot_barrier.enter_writer();
         let exists = self.with_state(|s| {
             if let Some(msg_log) = s.msg_logs.get(&id) {
                 msg_log.push(timestamp, msg)?;
@@ -661,6 +754,9 @@ impl DB {
             })?;
         }
         self.last_updated.update_max(timestamp);
+        if timestamp.0 > 0 {
+            self.earliest_timestamp.update_min(timestamp);
+        }
         Ok(())
     }
 
@@ -670,7 +766,7 @@ impl DB {
         behavior: FixedRateBehavior,
     ) -> Arc<FixedRateStreamState> {
         let mut state = self.state.write().expect("poisoned lock");
-        state
+        let stream_state = state
             .streams
             .entry(stream_id)
             .or_insert_with(|| {
@@ -685,7 +781,15 @@ impl DB {
                     behavior.frequency,
                 ))
             })
-            .clone()
+            .clone();
+        // Spawn a dedicated tick driver if one hasn't been spawned yet
+        if !stream_state
+            .driver_spawned
+            .swap(true, atomic::Ordering::SeqCst)
+        {
+            stellarator::spawn(run_tick_driver(stream_state.clone()));
+        }
+        stream_state
     }
 }
 
@@ -697,6 +801,41 @@ impl State {
         db_path: &Path,
     ) -> Result<(), Error> {
         self.insert_component_with_timestamp_source_flag(component_id, schema, false, db_path)
+    }
+
+    /// Insert a component with an explicit start_timestamp.
+    /// Used by the follower to match the source's start_timestamp exactly
+    /// so that on-disk binary representations are identical.
+    pub fn insert_component_with_start_timestamp(
+        &mut self,
+        component_id: ComponentId,
+        schema: ComponentSchema,
+        start_timestamp: Timestamp,
+        db_path: &Path,
+    ) -> Result<(), Error> {
+        if self.components.contains_key(&component_id) {
+            return Ok(());
+        }
+        info!(component.id = ?component_id.0, "inserting with explicit start_timestamp");
+        let name = self
+            .component_metadata
+            .get(&component_id)
+            .map(|m| m.name.clone())
+            .unwrap_or_else(|| component_id.to_string());
+        let component =
+            Component::create(db_path, component_id, name.clone(), schema, start_timestamp)?;
+        if !self.component_metadata.contains_key(&component_id) {
+            self.set_component_metadata(
+                ComponentMetadata {
+                    component_id,
+                    name,
+                    metadata: Default::default(),
+                },
+                db_path,
+            )?;
+        }
+        self.components.insert(component_id, component);
+        Ok(())
     }
 
     /// Inserts a component, optionally marking it as a timestamp source.
@@ -722,10 +861,22 @@ impl State {
                 && !existing_meta.is_timestamp_source()
             {
                 existing_meta.set_timestamp_source(true);
-                // Re-save the metadata
-                let metadata_path = db_path.join(component_id.to_string()).join("metadata");
+                // Re-save the metadata - ensure directory exists first
+                let component_metadata_dir = db_path.join(component_id.to_string());
+                if let Err(err) = std::fs::create_dir_all(&component_metadata_dir) {
+                    warn!(
+                        ?err,
+                        ?component_id,
+                        "failed to create component metadata directory"
+                    );
+                }
+                let metadata_path = component_metadata_dir.join("metadata");
                 if let Err(err) = existing_meta.write(&metadata_path) {
-                    warn!(?err, "failed to update timestamp source metadata");
+                    warn!(
+                        ?err,
+                        ?component_id,
+                        "failed to update timestamp source metadata"
+                    );
                 }
             }
             return Ok(());
@@ -746,8 +897,11 @@ impl State {
         if is_timestamp_source {
             component_metadata.set_timestamp_source(true);
         }
-        let component = Component::create(db_path, component_id, name, schema, Timestamp::now())?;
-        if !self.component_metadata.contains_key(&component_id) {
+        let component =
+            Component::create(db_path, component_id, name, schema, Timestamp(i64::MAX))?;
+        // Always update metadata if this is a timestamp source, or if metadata doesn't exist yet
+        // This ensures the timestamp source flag is preserved even if metadata was set earlier
+        if is_timestamp_source || !self.component_metadata.contains_key(&component_id) {
             self.set_component_metadata(component_metadata, db_path)?;
         }
         self.components.insert(component_id, component);
@@ -764,19 +918,37 @@ impl State {
 
     pub fn set_component_metadata(
         &mut self,
-        metadata: ComponentMetadata,
+        mut metadata: ComponentMetadata,
         db_path: &Path,
     ) -> Result<(), Error> {
         let component_metadata_path = db_path.join(metadata.component_id.to_string());
         std::fs::create_dir_all(&component_metadata_path)?;
         let component_metadata_path = component_metadata_path.join("metadata");
+
+        // Preserve existing metadata flags, especially _is_timestamp_source
+        // This is critical because SetComponentMetadata may be called after
+        // insert_component_with_timestamp_source_flag has already set the flag
+        if let Some(existing_metadata) = self.component_metadata.get(&metadata.component_id) {
+            // Preserve the timestamp source flag if it was already set
+            if existing_metadata.is_timestamp_source() {
+                metadata.set_timestamp_source(true);
+            }
+            // Merge other metadata flags from existing metadata
+            for (key, value) in existing_metadata.metadata.iter() {
+                // Only preserve internal flags (starting with _) that aren't being overwritten
+                if key.starts_with('_') && !metadata.metadata.contains_key(key) {
+                    metadata.metadata.insert(key.clone(), value.clone());
+                }
+            }
+        }
+
         if component_metadata_path.exists()
             && ComponentMetadata::read(&component_metadata_path)? == metadata
         {
             return Ok(());
         }
-        info!(component.name= ?metadata.name, component.id = ?metadata.component_id.0, "setting component metadata");
-        metadata.write(component_metadata_path)?;
+        info!(component.name= ?metadata.name, component.id = ?metadata.component_id.0, is_timestamp_source = metadata.is_timestamp_source(), "setting component metadata");
+        metadata.write(&component_metadata_path)?;
         // Sync the name to the Component for better warning messages
         if let Some(component) = self.components.get(&metadata.component_id) {
             component.set_name(metadata.name.clone());
@@ -1031,6 +1203,11 @@ impl Component {
         self.time_series.sync_all()
     }
 
+    /// Returns the raw start_timestamp from the index file header.
+    pub fn index_extra(&self) -> &Timestamp {
+        self.time_series.index_extra()
+    }
+
     /// Truncate the component, clearing all time-series data while preserving the schema.
     pub fn truncate(&self) {
         self.time_series.truncate();
@@ -1044,12 +1221,18 @@ impl Component {
     }
 }
 
-struct DBSink<'a> {
-    components: &'a HashMap<ComponentId, Component>,
-    snapshot_barrier: &'a SnapshotBarrier,
-    last_updated: &'a AtomicCell<Timestamp>,
-    sunk_new_time_series: bool,
-    table_received: Timestamp,
+pub(crate) struct DBSink<'a> {
+    pub(crate) components: &'a HashMap<ComponentId, Component>,
+    pub(crate) component_metadata: &'a HashMap<ComponentId, ComponentMetadata>,
+    pub(crate) last_updated: &'a AtomicCell<Timestamp>,
+    pub(crate) earliest_timestamp: &'a AtomicCell<Timestamp>,
+    pub(crate) sunk_new_time_series: bool,
+    pub(crate) table_received: Timestamp,
+    /// Set of component IDs replicated from a followed source.
+    /// When a non-follower writes to one of these, we warn.
+    pub(crate) followed_components: &'a RwLock<HashSet<ComponentId>>,
+    /// True when the writer is the follower itself (suppresses the warning).
+    pub(crate) is_follower: bool,
 }
 
 impl Decomponentize for DBSink<'_> {
@@ -1060,12 +1243,37 @@ impl Decomponentize for DBSink<'_> {
         value: impeller2::types::ComponentView<'_>,
         timestamp: Option<Timestamp>,
     ) -> Result<(), Error> {
-        let _snapshot_guard = self.snapshot_barrier.enter_writer();
+        // Warn if a non-follower connection writes to a component being
+        // replicated from a followed source.
+        if !self.is_follower
+            && self
+                .followed_components
+                .read()
+                .is_ok_and(|f| f.contains(&component_id))
+        {
+            warn!(
+                component_id = ?component_id,
+                "component is being written by both the followed source and a local connection; \
+                 this may result in data corruption if not intentionally done"
+            );
+        }
         let mut timestamp = timestamp.unwrap_or(self.table_received);
         let value_buf = value.as_bytes();
         let Some(component) = self.components.get(&component_id) else {
             return Err(Error::ComponentNotFound(component_id));
         };
+        // When processing data from a followed source, skip samples that
+        // are not strictly newer than the latest in the local time series.
+        // This prevents duplicates when the follow stream re-sends the
+        // "latest" value that was already written during backfill.
+        if self.is_follower
+            && component
+                .time_series
+                .latest()
+                .is_some_and(|(last_ts, _)| timestamp <= *last_ts)
+        {
+            return Ok(());
+        }
         let time_series_empty = component.time_series.index().is_empty();
         // When timestamps are auto-generated (no explicit timestamp provided), concurrent writers
         // may occasionally observe a slightly newer last timestamp and reject with
@@ -1099,7 +1307,17 @@ impl Decomponentize for DBSink<'_> {
             debug!("sunk new time series for component {}", component_id);
             self.sunk_new_time_series = true;
         }
-        self.last_updated.update_max(timestamp);
+        let is_ts_source = self
+            .component_metadata
+            .get(&component_id)
+            .map(|m| m.is_timestamp_source())
+            .unwrap_or(false);
+        if !is_ts_source {
+            self.last_updated.update_max(timestamp);
+            if timestamp.0 > 0 {
+                self.earliest_timestamp.update_min(timestamp);
+            }
+        }
         Ok(())
     }
 }
@@ -1181,7 +1399,26 @@ async fn handle_conn_inner<A: AsyncRead + AsyncWrite + 'static>(
         let result = handle_packet(&pkt, &db, &mut pkt_tx).await;
         buf = pkt.into_buf().into_inner();
         match result {
-            Ok(_) => {}
+            Ok(PacketAction::Continue) => {}
+            Ok(PacketAction::StartFollowStream {
+                target_packet_size,
+                req_id: follow_req_id,
+            }) => {
+                // The connection is now dedicated to the follow stream.
+                // Take back ownership of the tx Arc and hold the lock for
+                // the lifetime of the follow stream.
+                let follow_tx = pkt_tx.tx;
+                let sink = follow_tx.lock().await;
+                info!("connection entering follow-stream mode");
+                follow_stream::handle_follow_stream(
+                    db,
+                    sink.writer(),
+                    target_packet_size,
+                    follow_req_id,
+                )
+                .await?;
+                return Ok(());
+            }
             Err(err) if err.is_stream_closed() => {}
             Err(err) => {
                 debug!(?err, "error handling packet");
@@ -1198,6 +1435,17 @@ async fn handle_conn_inner<A: AsyncRead + AsyncWrite + 'static>(
         resp_pkt = pkt_tx.pkt.expect("len pkt taken and not given back");
         tx = pkt_tx.tx;
     }
+}
+
+/// Action returned by [`handle_packet`] to signal whether the connection
+/// should continue its normal read loop or switch to a special mode.
+enum PacketAction {
+    Continue,
+    /// Transition the connection into follow-stream mode.
+    StartFollowStream {
+        target_packet_size: u32,
+        req_id: u8,
+    },
 }
 
 pub struct PacketTx<A: AsyncWrite + 'static> {
@@ -1277,8 +1525,9 @@ async fn handle_packet<A: AsyncWrite + 'static>(
     pkt: &Packet<Slice<Vec<u8>>>,
     db: &Arc<DB>,
     tx: &mut PacketTx<A>,
-) -> Result<(), Error> {
+) -> Result<PacketAction, Error> {
     trace!(?pkt, "handling pkt");
+
     match &pkt {
         Packet::Msg(m) if m.id == VTableMsg::ID => {
             let vtable = m.parse::<VTableMsg>()?;
@@ -1321,6 +1570,9 @@ async fn handle_packet<A: AsyncWrite + 'static>(
                 }
                 if let Some(frequency) = set_stream_state.frequency {
                     state.set_frequency(frequency);
+                }
+                if let Some(time_step) = set_stream_state.time_step {
+                    state.set_time_step(time_step);
                 }
                 Ok(())
             })?;
@@ -1369,7 +1621,6 @@ async fn handle_packet<A: AsyncWrite + 'static>(
             tx.send_time_series(id, timestamps, data).await?;
         }
         Packet::Msg(m) if m.id == SetComponentMetadata::ID => {
-            let _snapshot_guard = db.snapshot_barrier.enter_writer();
             let SetComponentMetadata(metadata) = m.parse::<SetComponentMetadata>()?;
             db.with_state_mut(|state| state.set_component_metadata(metadata, &db.path))?;
         }
@@ -1419,7 +1670,18 @@ async fn handle_packet<A: AsyncWrite + 'static>(
                     .values()
                     .map(|c| (c.component_id, c.schema.to_schema()))
                     .collect();
-                DumpSchemaResp { schemas }
+                let start_timestamps = state
+                    .components
+                    .values()
+                    .map(|c| {
+                        let ts = *c.time_series.index_extra();
+                        (c.component_id, ts)
+                    })
+                    .collect();
+                DumpSchemaResp {
+                    schemas,
+                    start_timestamps,
+                }
             });
 
             tx.send_msg(&msg).await?;
@@ -1433,7 +1695,7 @@ async fn handle_packet<A: AsyncWrite + 'static>(
                     let last_updated = db.last_updated.latest();
                     {
                         match tx.send_msg(&LastUpdated(last_updated)).await {
-                            Err(err) if err.is_stream_closed() => {}
+                            Err(err) if err.is_stream_closed() => return,
                             Err(err) => {
                                 warn!(?err, "failed to send packet");
                                 return;
@@ -1441,12 +1703,13 @@ async fn handle_packet<A: AsyncWrite + 'static>(
                             _ => (),
                         }
                     }
-                    db.last_updated.wait_for(|time| time > last_updated).await;
+                    // Wake on any change (not only increase) so rolling windows
+                    // track correctly.
+                    db.last_updated.wait_for(|time| time != last_updated).await;
                 }
             });
         }
         Packet::Msg(m) if m.id == SetDbConfig::ID => {
-            let _snapshot_guard = db.snapshot_barrier.enter_writer();
             let SetDbConfig {
                 recording,
                 metadata,
@@ -1461,7 +1724,6 @@ async fn handle_packet<A: AsyncWrite + 'static>(
                 s.db_config.metadata.extend(metadata);
             });
             db.save_db_state()?;
-            drop(_snapshot_guard);
             tx.send_msg(&db.db_config()).await?;
         }
         Packet::Msg(m) if m.id == GetEarliestTimestamp::ID => {
@@ -1474,20 +1736,28 @@ async fn handle_packet<A: AsyncWrite + 'static>(
         }
         Packet::Table(table) => {
             trace!(table.len = table.buf.len(), "sinking table");
-            db.with_state(|state| {
+            let table_id = table.id;
+            let table_buf_len = table.buf.len();
+            if let Err(err) = db.with_state(|state| {
                 let mut sink = DBSink {
                     components: &state.components,
-                    snapshot_barrier: &db.snapshot_barrier,
+                    component_metadata: &state.component_metadata,
                     last_updated: &db.last_updated,
+                    earliest_timestamp: &db.earliest_timestamp,
                     sunk_new_time_series: false,
                     table_received: db.apply_implicit_timestamp(),
+                    followed_components: &db.followed_components,
+                    is_follower: false,
                 };
                 table.sink(&state.vtable_registry, &mut sink)??;
                 if sink.sunk_new_time_series {
                     db.vtable_gen.fetch_add(1, atomic::Ordering::SeqCst);
                 }
                 Ok::<_, Error>(())
-            })?;
+            }) {
+                debug!(?err, ?table_id, table_buf_len, "error sinking table packet");
+                return Err(err);
+            }
         }
 
         Packet::Msg(m) if m.id == GetDbSettings::ID => {
@@ -1525,29 +1795,253 @@ async fn handle_packet<A: AsyncWrite + 'static>(
             res.await??;
             tx.send_msg(&ArrowIPC { batch: None }).await?;
         }
+        Packet::Msg(m) if m.id == SparklineQuery::ID => {
+            let query = m.parse::<SparklineQuery>()?;
+            let table_name = query.table_name;
+            let max_points = query.max_points as usize;
+
+            // Find the component matching this table name
+            let result = db.with_state(|state| {
+                for component in state.components.values() {
+                    // Skip components without metadata instead of returning None,
+                    // which would abort the search and miss other valid components
+                    let Some(component_metadata) =
+                        state.component_metadata.get(&component.component_id)
+                    else {
+                        continue;
+                    };
+                    let component_name = crate::arrow::sanitize_sql_table_name(
+                        &component_metadata.name.to_case(convert_case::Case::Snake),
+                    );
+
+                    if component_name == table_name {
+                        // Get the raw data as byte slices
+                        let time_bytes = component.time_series.index().data();
+                        let value_bytes = component.time_series.data().data();
+
+                        // Get the number of data points
+                        let timestamp_size = std::mem::size_of::<Timestamp>();
+                        let num_points = time_bytes.len() / timestamp_size;
+
+                        if num_points == 0 {
+                            return Some((vec![], vec![]));
+                        }
+
+                        // Convert timestamps to i64 array
+                        let times: Vec<i64> = (0..num_points)
+                            .map(|i| {
+                                let offset = i * timestamp_size;
+                                let bytes: [u8; 8] = time_bytes[offset..offset + 8]
+                                    .try_into()
+                                    .unwrap_or([0u8; 8]);
+                                i64::from_le_bytes(bytes)
+                            })
+                            .collect();
+
+                        // Extract scalar values from the data column
+                        // For vector types, we take just the first element
+                        let element_size = component.time_series.element_size();
+                        let dim: usize = component.schema.dim.iter().product();
+                        let scalar_size = element_size / dim.max(1);
+
+                        let prim_type = component.schema.prim_type;
+                        let values: Vec<f64> = (0..num_points)
+                            .map(|i| {
+                                let offset = i * element_size;
+                                if offset + scalar_size > value_bytes.len() {
+                                    return f64::NAN;
+                                }
+                                crate::utils::read_prim_as_f64(prim_type, value_bytes, offset)
+                            })
+                            .collect();
+
+                        return Some((times, values));
+                    }
+                }
+                None
+            });
+
+            match result {
+                Some((times, values)) => {
+                    // Apply LTTB downsampling
+                    let (ds_times, ds_values) =
+                        crate::arrow::lttb::lttb_downsample_arrays(&times, &values, max_points);
+
+                    // Build Arrow RecordBatch
+                    use ::arrow::array::{Float64Array, TimestampMicrosecondArray};
+                    use ::arrow::datatypes::{DataType, Field, Schema, TimeUnit};
+                    use ::arrow::record_batch::RecordBatch;
+
+                    let time_array = TimestampMicrosecondArray::from(ds_times);
+                    let value_array = Float64Array::from(ds_values);
+
+                    let schema = Arc::new(Schema::new(vec![
+                        Field::new(
+                            "time",
+                            DataType::Timestamp(TimeUnit::Microsecond, None),
+                            false,
+                        ),
+                        Field::new("value", DataType::Float64, true),
+                    ]));
+
+                    let batch = RecordBatch::try_new(
+                        schema.clone(),
+                        vec![Arc::new(time_array), Arc::new(value_array)],
+                    )
+                    .map_err(Error::Arrow)?;
+
+                    // Serialize to Arrow IPC
+                    let mut buf = vec![];
+                    let mut writer =
+                        ::arrow::ipc::writer::StreamWriter::try_new(&mut buf, &schema)?;
+                    writer.write(&batch)?;
+                    writer.finish()?;
+
+                    tx.send_msg(&ArrowIPC {
+                        batch: Some(Cow::Owned(buf)),
+                    })
+                    .await?;
+                }
+                None => {
+                    // Table not found - send empty result
+                    use ::arrow::datatypes::{DataType, Field, Schema, TimeUnit};
+                    use ::arrow::record_batch::RecordBatch;
+
+                    let schema = Arc::new(Schema::new(vec![
+                        Field::new(
+                            "time",
+                            DataType::Timestamp(TimeUnit::Microsecond, None),
+                            false,
+                        ),
+                        Field::new("value", DataType::Float64, true),
+                    ]));
+
+                    let batch = RecordBatch::new_empty(schema.clone());
+
+                    let mut buf = vec![];
+                    let mut writer =
+                        ::arrow::ipc::writer::StreamWriter::try_new(&mut buf, &schema)?;
+                    writer.write(&batch)?;
+                    writer.finish()?;
+
+                    tx.send_msg(&ArrowIPC {
+                        batch: Some(Cow::Owned(buf)),
+                    })
+                    .await?;
+                }
+            }
+
+            // Send completion marker
+            tx.send_msg(&ArrowIPC { batch: None }).await?;
+        }
+        Packet::Msg(m) if m.id == PlotOverviewQuery::ID => {
+            let query = m.parse::<PlotOverviewQuery>()?;
+            let PlotOverviewQuery {
+                id: request_id,
+                component_id,
+                range,
+                max_points,
+                element_index,
+            } = query;
+
+            let component = db.with_state(|state| {
+                let Some(component) = state.components.get(&component_id) else {
+                    return Err(Error::ComponentNotFound(component_id));
+                };
+                Ok(component.clone())
+            })?;
+
+            // Get the data for the requested range
+            // The range is already in Timestamp format from the query
+            let (timestamps, data) = match component.get_range(&range) {
+                Some(result) => result,
+                None => {
+                    // Range out of bounds - send empty result
+                    tx.send_time_series(request_id, &[], &[]).await?;
+                    return Ok(PacketAction::Continue);
+                }
+            };
+
+            let num_points = timestamps.len();
+            if num_points == 0 {
+                tx.send_time_series(request_id, &[], &[]).await?;
+                return Ok(PacketAction::Continue);
+            }
+
+            // Extract values for the specified element_index
+            let element_size = component.time_series.element_size();
+            let dim: usize = component.schema.dim.iter().product();
+
+            // Validate element_index is within bounds
+            if element_index >= dim {
+                // Invalid element_index - send empty result rather than reading wrong data
+                tracing::warn!(
+                    component_id = ?component_id,
+                    element_index = element_index,
+                    dim = dim,
+                    "PlotOverviewQuery element_index out of bounds"
+                );
+                tx.send_time_series(request_id, &[], &[]).await?;
+                return Ok(PacketAction::Continue);
+            }
+
+            let scalar_size = element_size / dim.max(1);
+            let element_offset = element_index * scalar_size;
+
+            // Convert timestamps to i64 for LTTB (Timestamp wraps i64)
+            let times: Vec<i64> = timestamps.iter().map(|t| t.0).collect();
+
+            // Extract values as f64 for the specified element
+            let prim_type = component.schema.prim_type;
+            let values: Vec<f64> = (0..num_points)
+                .map(|i| {
+                    let offset = i * element_size + element_offset;
+                    if offset + scalar_size > data.len() {
+                        return f64::NAN;
+                    }
+                    crate::utils::read_prim_as_f64(prim_type, data, offset)
+                })
+                .collect();
+
+            // Apply LTTB downsampling
+            let (ds_times, ds_values) =
+                crate::arrow::lttb::lttb_downsample_arrays(&times, &values, max_points as usize);
+
+            // Convert back to the format expected by the client
+            let ds_timestamps: Vec<Timestamp> = ds_times.iter().map(|t| Timestamp(*t)).collect();
+
+            // Convert f64 values back to the original type's byte representation
+            // For simplicity, we'll send as f32 since that's what the plot panel uses internally
+            let ds_data: Vec<u8> = ds_values
+                .iter()
+                .flat_map(|v| (*v as f32).to_le_bytes())
+                .collect();
+
+            tx.send_time_series(request_id, &ds_timestamps, &ds_data)
+                .await?;
+        }
         Packet::Msg(m) if m.id == SetMsgMetadata::ID => {
-            let _snapshot_guard = db.snapshot_barrier.enter_writer();
             let SetMsgMetadata { id, metadata } = m.parse::<SetMsgMetadata>()?;
+            info!(
+                msg.name = %metadata.name,
+                msg.id = ?id,
+                "setting msg metadata"
+            );
             db.with_state_mut(|s| s.set_msg_metadata(id, metadata, &db.path))?;
-            drop(_snapshot_guard);
         }
         Packet::Msg(m) if m.id == MsgStream::ID => {
-            let _snapshot_guard = db.snapshot_barrier.enter_writer();
             let MsgStream { msg_id } = m.parse::<MsgStream>()?;
             let msg_log =
                 db.with_state_mut(|s| s.get_or_insert_msg_log(msg_id, &db.path).cloned())?;
-            drop(_snapshot_guard);
             let req_id = m.req_id;
             stellarator::spawn(handle_msg_stream(msg_id, req_id, msg_log, tx.tx.clone()));
         }
         Packet::Msg(m) if m.id == FixedRateMsgStream::ID => {
-            let _snapshot_guard = db.snapshot_barrier.enter_writer();
             let FixedRateMsgStream { msg_id, fixed_rate } = m.parse::<FixedRateMsgStream>()?;
             let msg_log =
                 db.with_state_mut(|s| s.get_or_insert_msg_log(msg_id, &db.path).cloned())?;
             let stream_state =
                 db.get_or_insert_fixed_rate_state(fixed_rate.stream_id, fixed_rate.behavior);
-            drop(_snapshot_guard);
             stellarator::spawn(handle_fixed_rate_msg_stream(
                 msg_id,
                 m.req_id,
@@ -1635,13 +2129,32 @@ async fn handle_packet<A: AsyncWrite + 'static>(
                 Ok::<_, Error>(())
             })?;
         }
+        Packet::Msg(m) if m.id == FollowStream::ID => {
+            let follow = m.parse::<FollowStream>()?;
+            return Ok(PacketAction::StartFollowStream {
+                target_packet_size: follow.target_packet_size,
+                req_id: m.req_id,
+            });
+        }
+        Packet::Msg(m) if m.id == TimestampedMsgStream::ID => {
+            let stream = m.parse::<TimestampedMsgStream>()?;
+            let msg_log =
+                db.with_state_mut(|s| s.get_or_insert_msg_log(stream.msg_id, &db.path).cloned())?;
+            let req_id = m.req_id;
+            stellarator::spawn(handle_timestamped_msg_stream(
+                stream.msg_id,
+                req_id,
+                msg_log,
+                tx.tx.clone(),
+            ));
+        }
         Packet::Msg(m) => {
             let timestamp = m.timestamp.unwrap_or_else(|| db.apply_implicit_timestamp());
             db.push_msg(timestamp, m.id, &m.buf)?
         }
         _ => {}
     }
-    Ok(())
+    Ok(PacketAction::Continue)
 }
 
 pub async fn handle_msg_stream<A: AsyncWrite>(
@@ -1663,6 +2176,28 @@ pub async fn handle_msg_stream<A: AsyncWrite>(
     }
 }
 
+/// Like [`handle_msg_stream`] but uses `MsgWithTimestamp` packets so the
+/// receiver gets the original source timestamp for each message.
+pub async fn handle_timestamped_msg_stream<A: AsyncWrite>(
+    msg_id: PacketId,
+    req_id: RequestId,
+    msg_log: MsgLog,
+    tx: Arc<Mutex<PacketSink<A>>>,
+) -> Result<(), Error> {
+    let mut pkt = LenPacket::msg_with_timestamp(msg_id, Timestamp(0), 64).with_request_id(req_id);
+    loop {
+        msg_log.wait().await;
+        let Some((timestamp, msg)) = msg_log.latest() else {
+            continue;
+        };
+        let tx = tx.lock().await;
+        pkt.clear();
+        pkt.extend_from_slice(timestamp.as_bytes());
+        pkt.extend_from_slice(msg);
+        rent!(tx.send(pkt).await, pkt)?;
+    }
+}
+
 pub async fn handle_fixed_rate_msg_stream<A: AsyncWrite>(
     msg_id: PacketId,
     req_id: RequestId,
@@ -1672,20 +2207,31 @@ pub async fn handle_fixed_rate_msg_stream<A: AsyncWrite>(
 ) -> Result<(), Error> {
     let mut pkt = LenPacket::msg_with_timestamp(msg_id, Timestamp(0), 64).with_request_id(req_id);
     let mut last_sent_timestamp: Option<Timestamp> = None;
+    let mut current_timestamp;
     loop {
         if !stream_state.wait_for_playing().await {
             return Ok(());
         }
-        let start = Instant::now();
-        let current_timestamp = stream_state.current_timestamp();
+        // Refresh after waking so scrub-while-paused renders the correct tick
+        // (is_scrubbed is consumed by wait_for_playing, so we must pick up
+        // the new current_tick here before using it).
+        current_timestamp = stream_state.current_timestamp();
         let Some((msg_timestamp, msg)) = msg_log.get_nearest(current_timestamp) else {
+            // Wait for data to arrive in the msg_log.
+            // This yields to the runtime (preventing scheduler starvation) without
+            // advancing the stream timestamp, so we don't skip past incoming video frames.
+            msg_log.wait().await;
             continue;
         };
 
         if Some(msg_timestamp) == last_sent_timestamp {
-            stream_state
-                .wait_for_tick(start.elapsed(), current_timestamp)
-                .await;
+            futures_lite::future::race(
+                async {
+                    let _ = stream_state.wait_for_next_tick(current_timestamp).await;
+                },
+                stellarator::sleep(stream_state.sleep_time()),
+            )
+            .await;
             continue;
         }
 
@@ -1698,9 +2244,13 @@ pub async fn handle_fixed_rate_msg_stream<A: AsyncWrite>(
         }
         last_sent_timestamp = Some(msg_timestamp);
 
-        stream_state
-            .wait_for_tick(start.elapsed(), current_timestamp)
-            .await;
+        futures_lite::future::race(
+            async {
+                let _ = stream_state.wait_for_next_tick(current_timestamp).await;
+            },
+            stellarator::sleep(stream_state.sleep_time()),
+        )
+        .await;
     }
 }
 
@@ -1711,6 +2261,8 @@ pub struct FixedRateStreamState {
     is_scrubbed: AtomicBool,
     current_tick: AtomicI64,
     playing_cell: PlayingCell,
+    tick_notify: WaitQueue,
+    driver_spawned: AtomicBool,
 }
 
 impl FixedRateStreamState {
@@ -1727,6 +2279,8 @@ impl FixedRateStreamState {
             current_tick: AtomicI64::new(current_tick.0),
             playing_cell: PlayingCell::new(true),
             frequency: AtomicU64::new(frequency),
+            tick_notify: WaitQueue::new(),
+            driver_spawned: AtomicBool::new(false),
         }
     }
 
@@ -1739,14 +2293,24 @@ impl FixedRateStreamState {
         self.current_tick
             .store(timestamp.0, atomic::Ordering::SeqCst);
         self.playing_cell.wait_cell.wake_all();
+        // Only wake tick consumers when paused (scrubbing while paused).
+        // During playback, the tick driver incorporates the new position on its
+        // next advance via fetch_add on the updated current_tick. Waking
+        // tick_notify here while playing causes the consumer to spin because the
+        // editor sends set_timestamp at its frame rate (~60 Hz), creating a
+        // feedback loop that fights the tick driver.
+        if !self.is_playing() {
+            self.tick_notify.wake_all();
+        }
     }
 
     fn set_frequency(&self, frequency: u64) {
         self.frequency.store(frequency, atomic::Ordering::SeqCst);
     }
 
-    fn time_step(&self) -> Duration {
-        Duration::from_nanos(self.time_step.load(atomic::Ordering::Relaxed))
+    fn set_time_step(&self, time_step: Duration) {
+        self.time_step
+            .store(time_step.as_nanos() as u64, atomic::Ordering::SeqCst);
     }
 
     fn sleep_time(&self) -> Duration {
@@ -1757,14 +2321,28 @@ impl FixedRateStreamState {
         Timestamp(self.current_tick.load(atomic::Ordering::Relaxed))
     }
 
-    fn try_increment_tick(&self, last_timestamp: Timestamp) {
-        let time_step = self.time_step();
-        let _ = self.current_tick.compare_exchange(
-            last_timestamp.0,
-            (last_timestamp + time_step).0,
-            atomic::Ordering::Acquire,
-            atomic::Ordering::Relaxed,
-        );
+    /// Advance the tick by a wall-clock duration scaled by the current speed.
+    /// speed_ratio = time_step_us * frequency / 1_000_000 (sim-µs per real-µs).
+    fn advance_tick_wall(&self, wall_elapsed: Duration) {
+        let time_step_us = self.time_step.load(atomic::Ordering::Relaxed) / 1000;
+        let frequency = self.frequency.load(atomic::Ordering::Relaxed);
+        // advance = wall_elapsed_µs * (time_step_µs * frequency / 1_000_000)
+        // Rewritten to avoid floating point: (wall_µs * ts_µs * freq) / 1_000_000
+        let wall_us = wall_elapsed.as_micros() as i64;
+        let advance_us = wall_us * time_step_us as i64 * frequency as i64 / 1_000_000;
+        if advance_us > 0 {
+            self.current_tick
+                .fetch_add(advance_us, atomic::Ordering::Release);
+            self.tick_notify.wake_all();
+        }
+    }
+
+    async fn wait_for_next_tick(&self, last_seen: Timestamp) -> Timestamp {
+        let _ = self
+            .tick_notify
+            .wait_for(|| self.current_timestamp() != last_seen)
+            .await;
+        self.current_timestamp()
     }
 
     fn is_playing(&self) -> bool {
@@ -1782,17 +2360,44 @@ impl FixedRateStreamState {
             .await
             .is_ok()
     }
+}
 
-    async fn wait_for_tick(&self, elapsed: Duration, last_timestamp: Timestamp) {
-        let sleep_time = self.sleep_time().saturating_sub(elapsed);
+async fn run_tick_driver(state: Arc<FixedRateStreamState>) {
+    #[allow(unused_assignments)]
+    let mut last_advance: Option<Instant> = None;
+    loop {
+        // Wait for playing only (not scrubbed) -- the tick driver does not need
+        // to respond to scrub events. Letting the consumer own the is_scrubbed
+        // flag avoids a race where the driver consumes it first.
+        if !state.playing_cell.wait().await {
+            return;
+        }
+        // Reset the advance anchor as soon as we (re)enter playing. If we were
+        // paused, we just woke from wait() and last_advance was from before the
+        // pause; resetting here ensures the next elapsed doesn't include the
+        // pause duration and we don't jump the playback timestamp on resume.
+        last_advance = Some(Instant::now());
+
+        let sleep_time = state.sleep_time();
+        // Sleep for one tick period, interruptible by play/pause changes.
         futures_lite::future::race(
             async {
-                self.playing_cell.wait_for_change().await;
+                state.playing_cell.wait_for_change().await;
             },
             stellarator::sleep(sleep_time),
         )
         .await;
-        self.try_increment_tick(last_timestamp);
+        // Advance by the exact wall-clock time that elapsed since the last
+        // advance, scaled by the playback speed. This produces smooth
+        // timestamps regardless of cooperative-scheduling jitter: whether the
+        // driver runs after 16 ms or after 150 ms, the advance is always
+        // proportional to real time.
+        if state.is_playing() {
+            let elapsed = last_advance.unwrap().elapsed();
+            state.advance_tick_wall(elapsed);
+        }
+        // When paused, do not reset last_advance here: the next iteration
+        // blocks on wait() until resume, and we reset above when wait() returns.
     }
 }
 
@@ -1839,6 +2444,10 @@ fn handle_stream<A: AsyncWrite + 'static>(
             ));
             debug!(stream.id = ?stream.id, "inserting stream");
             db.with_state_mut(|s| s.streams.insert(stream.id, state.clone()));
+            // Spawn a dedicated tick driver for this stream state
+            if !state.driver_spawned.swap(true, atomic::Ordering::SeqCst) {
+                stellarator::spawn(run_tick_driver(state.clone()));
+            }
             stellarator::spawn(async move {
                 match handle_fixed_stream(tx, req_id, state, db).await {
                     Ok(_) => {}
@@ -1849,6 +2458,15 @@ fn handle_stream<A: AsyncWrite + 'static>(
                 }
             })
         }
+        StreamBehavior::RealTimeBatched => stellarator::spawn(async move {
+            match handle_real_time_stream_batched(tx, req_id, db).await {
+                Ok(_) => {}
+                Err(err) if err.is_stream_closed() => {}
+                Err(err) => {
+                    warn!(?err, "error streaming data");
+                }
+            }
+        }),
     }
 }
 
@@ -1893,8 +2511,10 @@ async fn handle_real_time_stream<A: AsyncWrite + 'static>(
             }
 
             // Send schema for this component
+            let start_ts = *component.index_extra();
             let schema_msg = DumpSchemaResp {
                 schemas: [(component.component_id, schema)].into_iter().collect(),
+                start_timestamps: [(component.component_id, start_ts)].into_iter().collect(),
             };
             {
                 let stream = sink.lock().await;
@@ -1971,6 +2591,111 @@ async fn handle_real_time_component<A: AsyncWrite>(
     }
 }
 
+/// Batched real-time stream handler.
+///
+/// Unlike `handle_real_time_stream` which spawns one task per component (N
+/// tasks, N wake-ups per sim tick), this handler uses a **single task** that
+/// wakes once per `db.last_updated` notification and sends all components'
+/// latest data in one table packet.
+///
+/// Component discovery (metadata + schema) works identically to the original
+/// `handle_real_time_stream`.
+async fn handle_real_time_stream_batched<A: AsyncWrite + 'static>(
+    sink: Arc<Mutex<PacketSink<A>>>,
+    req_id: RequestId,
+    db: Arc<DB>,
+) -> Result<(), Error> {
+    let mut current_gen = u64::MAX;
+    let mut table = LenPacket::table([0; 2], 2048 - 16);
+    let mut components = HashMap::new();
+
+    loop {
+        // Re-check for new components when vtable_gen changes.
+        let vtable_gen = db.vtable_gen.latest();
+        if vtable_gen != current_gen {
+            let new_components: Vec<(Component, Option<ComponentMetadata>, Schema<Vec<u64>>)> = db
+                .with_state(|state| {
+                    let mut new_comps = Vec::new();
+                    for component in state.components.values() {
+                        if components.contains_key(&component.component_id) {
+                            continue;
+                        }
+                        let metadata = state
+                            .get_component_metadata(component.component_id)
+                            .cloned();
+                        let schema = component.schema.to_schema();
+                        new_comps.push((component.clone(), metadata, schema));
+                    }
+                    new_comps
+                });
+
+            // Send metadata and schema for each new component.
+            for (component, metadata, schema) in new_components {
+                if let Some(metadata) = metadata {
+                    let stream = sink.lock().await;
+                    if let Err(err) = stream
+                        .send(metadata.into_len_packet().with_request_id(req_id))
+                        .await
+                        .0
+                    {
+                        debug!(%err, "error sending component metadata");
+                    }
+                }
+
+                let start_ts = *component.index_extra();
+                let schema_msg = DumpSchemaResp {
+                    schemas: [(component.component_id, schema)].into_iter().collect(),
+                    start_timestamps: [(component.component_id, start_ts)].into_iter().collect(),
+                };
+                {
+                    let stream = sink.lock().await;
+                    if let Err(err) = stream
+                        .send(schema_msg.into_len_packet().with_request_id(req_id))
+                        .await
+                        .0
+                    {
+                        debug!(%err, "error sending component schema");
+                    }
+                }
+
+                components.insert(component.component_id, component);
+            }
+
+            // Rebuild the VTable with the full component set.
+            let vtable_msg = DBVisitor.vtable(&components)?;
+            let id: PacketId = fastrand::u16(..).to_le_bytes();
+            table = LenPacket::table(id, 2048 - 16);
+            {
+                let stream = sink.lock().await;
+                stream
+                    .send(
+                        VTableMsg {
+                            id,
+                            vtable: vtable_msg,
+                        }
+                        .with_request_id(req_id),
+                    )
+                    .await
+                    .0?;
+            }
+            current_gen = vtable_gen;
+        }
+
+        // Populate the table with every component's latest data point.
+        table.clear();
+        DBVisitor.populate_table_latest(&components, &mut table);
+
+        // Single lock + send for all components.
+        {
+            let stream = sink.lock().await;
+            rent!(stream.send(table.with_request_id(req_id)).await, table)?;
+        }
+
+        // Wait for the simulation to write new data (1 wake per sim tick).
+        db.last_updated.wait().await;
+    }
+}
+
 async fn handle_fixed_stream<A: AsyncWrite>(
     stream: Arc<Mutex<PacketSink<A>>>,
     req_id: RequestId,
@@ -1980,12 +2705,34 @@ async fn handle_fixed_stream<A: AsyncWrite>(
     let mut current_gen = u64::MAX;
     let mut table = LenPacket::table([0; 2], 2048 - 16);
     let mut components = db.with_state(|state| state.components.clone());
+    let mut current_timestamp;
+
+    // Lightweight profiling: accumulate timings and log every LOG_INTERVAL frames.
+    // Captures both the work time (populate + lock + send) and the wall-clock
+    // frame-to-frame time (work + wait) so we can see scheduling overhead.
+    const LOG_INTERVAL: u64 = 120;
+    let mut frame_count: u64 = 0;
+    let mut accum_populate_us: u64 = 0;
+    let mut accum_lock_us: u64 = 0;
+    let mut accum_send_us: u64 = 0;
+    let mut accum_work_us: u64 = 0;
+    let mut accum_wall_us: u64 = 0;
+    let mut last_frame_wall = Instant::now();
+
     loop {
         if !state.wait_for_playing().await {
             return Ok(());
         }
-        let start = Instant::now();
-        let current_timestamp = state.current_timestamp();
+        // Refresh the timestamp immediately after waking.  When we wake
+        // because of a scrub (is_scrubbed consumed above), current_tick
+        // already holds the scrubbed-to position and we must use it for
+        // the render that follows -- otherwise we'd display a stale frame
+        // and then block again without ever rendering the correct one.
+        current_timestamp = state.current_timestamp();
+        let frame_start = Instant::now();
+        let wall_since_last = last_frame_wall.elapsed();
+        last_frame_wall = frame_start;
+
         let vtable_gen = db.vtable_gen.latest();
         if vtable_gen != current_gen {
             components = db.with_state(|state| state.components.clone());
@@ -1998,30 +2745,78 @@ async fn handle_fixed_stream<A: AsyncWrite>(
             current_gen = vtable_gen;
         }
         table.clear();
-        if let Err(err) = DBVisitor.populate_table(&components, &mut table, current_timestamp) {
+        let t0 = Instant::now();
+        if let Err(err) = DBVisitor
+            .populate_table(&components, &mut table, current_timestamp)
+            .await
+        {
             warn!(?err, "failed to populate table");
         }
+        let populate_elapsed = t0.elapsed();
+        // Yield once more after populating to give the tick driver a chance
+        // to run before we acquire the stream lock.
+        stellarator::yield_now().await;
+        // Pre-serialize the timestamp message before acquiring the lock so the
+        // critical section is limited to the two TCP writes.
+        let ts_pkt = StreamTimestamp {
+            timestamp: current_timestamp,
+            stream_id: state.stream_id,
+        }
+        .with_request_id(req_id);
+        let t1 = Instant::now();
         {
             let stream = stream.lock().await;
-            stream
-                .send(
-                    StreamTimestamp {
-                        timestamp: current_timestamp,
-                        stream_id: state.stream_id,
-                    }
-                    .with_request_id(req_id),
-                )
-                .await
-                .0?;
+            let lock_elapsed = t1.elapsed();
+            let t2 = Instant::now();
+            stream.send(ts_pkt).await.0?;
             rent!(stream.send(table.with_request_id(req_id)).await, table)?;
+            let send_elapsed = t2.elapsed();
+
+            accum_populate_us += populate_elapsed.as_micros() as u64;
+            accum_lock_us += lock_elapsed.as_micros() as u64;
+            accum_send_us += send_elapsed.as_micros() as u64;
         }
-        state
-            .wait_for_tick(start.elapsed(), current_timestamp)
-            .await;
+        let work_elapsed = frame_start.elapsed();
+        accum_work_us += work_elapsed.as_micros() as u64;
+        accum_wall_us += wall_since_last.as_micros() as u64;
+        frame_count += 1;
+
+        if frame_count.is_multiple_of(LOG_INTERVAL) {
+            let n = LOG_INTERVAL as f64;
+            let wall_fps = n / (accum_wall_us as f64 / 1_000_000.0);
+            debug!(
+                populate_avg_ms = accum_populate_us as f64 / n / 1000.0,
+                lock_avg_ms = accum_lock_us as f64 / n / 1000.0,
+                send_avg_ms = accum_send_us as f64 / n / 1000.0,
+                work_avg_ms = accum_work_us as f64 / n / 1000.0,
+                wall_avg_ms = accum_wall_us as f64 / n / 1000.0,
+                wall_fps,
+                components = components.len(),
+                "fixed_stream consumer stats"
+            );
+            accum_populate_us = 0;
+            accum_lock_us = 0;
+            accum_send_us = 0;
+            accum_work_us = 0;
+            accum_wall_us = 0;
+        }
+
+        // Race between the tick notification and a timer so the consumer
+        // updates at least once per sleep_time (~16 ms at 60 Hz).  Under heavy
+        // cooperative-scheduling load the tick driver may run infrequently; this
+        // timer ensures we still pick up its wall-clock-proportional timestamp
+        // advances at a smooth visual rate.
+        futures_lite::future::race(
+            async {
+                let _ = state.wait_for_next_tick(current_timestamp).await;
+            },
+            stellarator::sleep(state.sleep_time()),
+        )
+        .await;
     }
 }
 
-struct DBVisitor;
+pub(crate) struct DBVisitor;
 
 impl DBVisitor {
     fn vtable(&self, components: &HashMap<ComponentId, Component>) -> Result<VTable, Error> {
@@ -2043,22 +2838,85 @@ impl DBVisitor {
         Ok(vtable(fields))
     }
 
-    fn populate_table(
+    /// Populate the table with data for all components at the given timestamp.
+    ///
+    /// Cooperatively yields every `YIELD_EVERY` components so that the tick
+    /// driver and other tasks on the single-threaded stellarator runtime get
+    /// CPU time.  Without these yields, heavy simulations (many components)
+    /// starve the tick driver and produce choppy visual updates at ~6-10 FPS.
+    async fn populate_table(
         &self,
         components: &HashMap<ComponentId, Component>,
         table: &mut LenPacket,
         timestamp: Timestamp,
     ) -> Result<(), Error> {
-        self.visit(components, |entity| {
-            let tick = entity.time_series.start_timestamp().max(timestamp);
-            let Some((timestamp, buf)) = entity.get_nearest(tick) else {
-                return Ok(());
-            };
-            table.push_aligned(timestamp);
-            table.pad_for_type(entity.schema.prim_type);
-            table.extend_from_slice(buf);
-            Ok(())
-        })
+        const YIELD_EVERY: usize = 8;
+        for (i, (_, component)) in components.iter().enumerate() {
+            // Skip components with no data – the VTable builder
+            // (vtable()) excludes them, so we must too.
+            if component.time_series.index().is_empty() {
+                continue;
+            }
+            let tick = component.time_series.start_timestamp().max(timestamp);
+            match component.get_nearest(tick) {
+                Some((ts, buf)) => {
+                    table.push_aligned(ts);
+                    table.pad_for_type(component.schema.prim_type);
+                    table.extend_from_slice(buf);
+                }
+                None => {
+                    // Component has data but not at this timestamp.
+                    // Write zeros to preserve VTable field offset alignment.
+                    table.push_aligned(Timestamp(0));
+                    table.pad_for_type(component.schema.prim_type);
+                    for _ in 0..component.schema.size() {
+                        table.push(0);
+                    }
+                }
+            }
+            if (i + 1) % YIELD_EVERY == 0 {
+                stellarator::yield_now().await;
+            }
+        }
+        Ok(())
+    }
+
+    /// Populate the table with every component's most recent data point.
+    ///
+    /// Used by the `RealTimeBatched` stream handler which always wants the
+    /// freshest value, unlike `populate_table` which looks up data at a
+    /// specific playback timestamp.
+    fn populate_table_latest(
+        &self,
+        components: &HashMap<ComponentId, Component>,
+        table: &mut LenPacket,
+    ) {
+        for (_, component) in components.iter() {
+            // Skip components with no data – the VTable builder
+            // (vtable()) excludes them, so we must too.
+            if component.time_series.index().is_empty() {
+                continue;
+            }
+            let elem_size = component.schema.size();
+            let prim_type = component.schema.prim_type;
+            match component.time_series.latest() {
+                Some((&ts, buf)) => {
+                    table.push_aligned(ts);
+                    table.pad_for_type(prim_type);
+                    table.extend_from_slice(buf);
+                }
+                None => {
+                    // Component has data in index but latest() returned
+                    // None (e.g. data AppendLog shorter than index).
+                    // Write zeros to preserve VTable field offset alignment.
+                    table.push_aligned(Timestamp(0));
+                    table.pad_for_type(prim_type);
+                    for _ in 0..elem_size {
+                        table.push(0);
+                    }
+                }
+            }
+        }
     }
 
     fn visit(
@@ -2090,7 +2948,7 @@ impl PlayingCell {
         self.wait_cell.wake_all();
     }
 
-    fn is_playing(&self) -> bool {
+    pub fn is_playing(&self) -> bool {
         self.is_playing.load(atomic::Ordering::Relaxed)
     }
 
@@ -2107,11 +2965,17 @@ impl MetadataExt for DbConfig {}
 
 pub trait AtomicTimestampExt {
     fn update_max(&self, val: Timestamp);
+    fn update_min(&self, val: Timestamp);
 }
 
 impl AtomicTimestampExt for AtomicCell<Timestamp> {
     fn update_max(&self, val: Timestamp) {
         self.value.fetch_max(val.0, atomic::Ordering::AcqRel);
+        self.wait_queue.wake_all();
+    }
+
+    fn update_min(&self, val: Timestamp) {
+        self.value.fetch_min(val.0, atomic::Ordering::AcqRel);
         self.wait_queue.wake_all();
     }
 }

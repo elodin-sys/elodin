@@ -5,15 +5,14 @@ use std::{
         Arc,
         atomic::{AtomicUsize, Ordering},
     },
-    time::Instant,
 };
 
 use impeller2::{
     types::{
         ComponentView, IntoLenPacket, LenPacket, Msg, PACKET_HEADER_LEN, PacketId, PrimType,
-        RequestId,
+        RequestId, Timestamp,
     },
-    vtable::{Op, RealizedComponent, RealizedOp, VTable},
+    vtable::{Op, RealizedComponent, RealizedOp, TIMESTAMP_NS_EXT_ID, VTable},
 };
 use impeller2_stellar::PacketSink;
 use impeller2_wkt::{ComponentValue, FixedRateBehavior, FixedRateOp, MeanOp, VTableMsg};
@@ -67,6 +66,14 @@ pub async fn handle_vtable_stream<A: AsyncWrite + 'static>(
                 }
                 RealizedOp::Timestamp(t) => {
                     if let Some(range) = t.range {
+                        if range.end - range.start != size_of::<Timestamp>() {
+                            warn!(
+                                range_len = range.end - range.start,
+                                expected = size_of::<Timestamp>(),
+                                "timestamp source range has wrong byte length"
+                            );
+                            return Err(Error::Impeller(impeller2::error::Error::InvalidOp));
+                        }
                         timestamp = Some(range);
                     }
                     realized_op = vtable.realize(t.arg, None)?;
@@ -93,15 +100,30 @@ pub async fn handle_vtable_stream<A: AsyncWrite + 'static>(
                         .clone();
 
                     let state = db.get_or_insert_fixed_rate_state(stream_id, behavior);
+                    let initial_tick = state.current_timestamp();
                     plan.insert(
                         0,
                         StreamStage::FixedRate(FixedRateStage {
                             component,
                             state,
-                            last_tick: Instant::now(),
+                            last_seen_tick: initial_tick,
                         }),
                     );
                     break 'find;
+                }
+                RealizedOp::Ext(ext) if ext.id == TIMESTAMP_NS_EXT_ID => {
+                    if let Some(range) = ext.range {
+                        if range.end - range.start != size_of::<Timestamp>() {
+                            warn!(
+                                range_len = range.end - range.start,
+                                expected = size_of::<Timestamp>(),
+                                "timestamp_ns source range has wrong byte length"
+                            );
+                            return Err(Error::Impeller(impeller2::error::Error::InvalidOp));
+                        }
+                        timestamp = Some(range);
+                    }
+                    realized_op = vtable.realize(ext.arg, None)?;
                 }
                 _ => return Err(Error::Impeller(impeller2::error::Error::InvalidOp)),
             }
@@ -246,7 +268,7 @@ impl Field {
 struct FixedRateStage {
     component: Component,
     state: Arc<FixedRateStreamState>,
-    last_tick: Instant,
+    last_seen_tick: Timestamp,
 }
 
 impl FixedRateStage {
@@ -255,17 +277,19 @@ impl FixedRateStage {
         shard: &Field,
         timestamp_shard: Option<&Field>,
     ) -> Result<bool, Error> {
-        let sleep_time = self
-            .state
-            .sleep_time()
-            .saturating_sub(self.last_tick.elapsed());
+        // Race between the tick notification and a timer so the consumer
+        // updates at least once per sleep_time (~16 ms at 60 Hz).  Under heavy
+        // cooperative-scheduling load the tick driver may run infrequently; this
+        // timer ensures we still pick up its wall-clock-proportional timestamp
+        // advances at a smooth visual rate.
         futures_lite::future::race(
             async {
-                self.state.playing_cell.wait_for_change().await;
+                let _ = self.state.wait_for_next_tick(self.last_seen_tick).await;
             },
-            stellarator::sleep(sleep_time),
+            stellarator::sleep(self.state.sleep_time()),
         )
         .await;
+        self.last_seen_tick = self.state.current_timestamp();
         if self
             .state
             .playing_cell
@@ -293,8 +317,6 @@ impl FixedRateStage {
                 })
                 .await;
         }
-        self.state.try_increment_tick(current_timestamp);
-        self.last_tick = Instant::now();
         Ok(true)
     }
 }

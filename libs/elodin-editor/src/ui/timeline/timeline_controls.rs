@@ -6,10 +6,8 @@ use bevy::prelude::*;
 use bevy_egui::egui;
 use egui::{Ui, load::SizedTexture};
 use impeller2::types::Timestamp;
-use impeller2_bevy::{CurrentStreamId, PacketTx};
-use impeller2_wkt::{
-    CurrentTimestamp, EarliestTimestamp, LastUpdated, SetStreamState, SimulationTimeStep,
-};
+use impeller2_bevy::CurrentStreamId;
+use impeller2_wkt::{CurrentTimestamp, EarliestTimestamp, LastUpdated, SimulationTimeStep};
 use std::convert::TryFrom;
 use std::time::Duration;
 use std::time::Instant;
@@ -19,33 +17,31 @@ use crate::{
     ui::{
         Paused,
         button::EImageButton,
-        colors::{self, ColorExt, get_scheme},
+        colors::{ColorExt, get_scheme},
         theme::configure_combo_box,
-        tiles::{self, set_mode_all},
         time_label::time_label,
         widgets::WidgetSystem,
     },
 };
 
-use super::{StreamTickOrigin, TimelineIcons};
+use super::{PlaybackSpeed, StreamTickOrigin, TimelineIcons};
 
 pub(crate) fn plugin(app: &mut App) {
     app.init_resource::<TimelineStepButtons>();
 }
 
 #[derive(SystemParam)]
-pub struct TimelineControls<'w, 's> {
-    event: Res<'w, PacketTx>,
+pub struct TimelineControls<'w> {
     paused: ResMut<'w, Paused>,
     tick: ResMut<'w, CurrentTimestamp>,
     max_tick: Res<'w, LastUpdated>,
     tick_time: Res<'w, SimulationTimeStep>,
+    playback_speed: Res<'w, PlaybackSpeed>,
     stream_id: Res<'w, CurrentStreamId>,
     earliest_timestamp: Res<'w, EarliestTimestamp>,
     behavior: ResMut<'w, TimeRangeBehavior>,
     tick_origin: ResMut<'w, StreamTickOrigin>,
     step_buttons: ResMut<'w, TimelineStepButtons>,
-    windows_state: Query<'w, 's, &'static mut tiles::WindowState>,
 }
 
 #[derive(Default, Debug, Resource)]
@@ -54,7 +50,7 @@ struct TimelineStepButtons {
     forward: Option<Instant>,
 }
 
-impl WidgetSystem for TimelineControls<'_, '_> {
+impl WidgetSystem for TimelineControls<'_> {
     type Args = TimelineIcons;
     type Output = ();
 
@@ -66,23 +62,21 @@ impl WidgetSystem for TimelineControls<'_, '_> {
     ) {
         let icons = args;
         let TimelineControls {
-            event,
             mut paused,
             mut tick,
             max_tick,
             tick_time,
+            playback_speed,
             stream_id,
             earliest_timestamp,
             mut behavior,
             mut tick_origin,
             mut step_buttons,
-            mut windows_state,
         } = state.get_mut(world);
 
         tick_origin.observe_stream(**stream_id);
         tick_origin.observe_tick(tick.0, earliest_timestamp.0);
 
-        let mut tick_changed = false;
         let tick_step_duration = hifitime::Duration::from_seconds(tick_time.0);
         let tick_step_micros_i128 = tick_step_duration.total_nanoseconds() / 1000;
         let tick_step_micros = i64::try_from(tick_step_micros_i128).unwrap_or(0);
@@ -107,7 +101,6 @@ impl WidgetSystem for TimelineControls<'_, '_> {
 
                             if jump_to_start_btn.clicked() {
                                 tick.0 = earliest_timestamp.0;
-                                tick_changed = true;
                                 tick_origin.request_rebase();
                             }
 
@@ -127,7 +120,6 @@ impl WidgetSystem for TimelineControls<'_, '_> {
 
                                 if first || down.elapsed() > wait_before_advancing {
                                     tick.0.0 -= tick_step_micros;
-                                    tick_changed = true;
                                     if tick.0 <= earliest_timestamp.0 {
                                         tick_origin.request_rebase();
                                     }
@@ -169,8 +161,6 @@ impl WidgetSystem for TimelineControls<'_, '_> {
 
                                 if first || down.elapsed() > wait_before_advancing {
                                     tick.0.0 += tick_step_micros;
-
-                                    tick_changed = true;
                                 }
                             } else {
                                 let _ = step_buttons.forward.take();
@@ -181,16 +171,7 @@ impl WidgetSystem for TimelineControls<'_, '_> {
                             );
 
                             if jump_to_end_btn.clicked() {
-                                tick.0 = Timestamp(max_tick.0.0 - 1);
-                                tick_changed = true;
-                            }
-
-                            ui.add_space(12.0);
-                            let current_mode = colors::current_selection().mode;
-                            let is_dark = current_mode.eq_ignore_ascii_case("dark");
-                            if let Some(mode) = theme_mode_toggle(ui, is_dark) {
-                                let selection = colors::set_active_mode(mode);
-                                set_mode_all(&selection.mode, &mut windows_state);
+                                tick.0 = Timestamp(max_tick.0.0.saturating_sub(1));
                             }
                         },
                     );
@@ -263,16 +244,45 @@ impl WidgetSystem for TimelineControls<'_, '_> {
                                     ui.add_space(8.0);
 
                                     ui.add(egui::Label::new(tick_label).selectable(false));
+
+                                    ui.add_space(24.0);
+
+                                    let speed_text = egui::RichText::new(format_playback_speed(
+                                        playback_speed.0,
+                                    ))
+                                    .color(get_scheme().text_primary);
+                                    ui.add(
+                                        egui::Label::new(speed_text)
+                                            .selectable(false)
+                                            .halign(egui::Align::BOTTOM),
+                                    );
+
+                                    let speed_label = egui::RichText::new("SPEED")
+                                        .color(get_scheme().text_secondary);
+                                    ui.add_space(8.0);
+
+                                    ui.add(egui::Label::new(speed_label).selectable(false));
                                 });
                         },
                     );
                 });
             });
-
-        if tick_changed {
-            event.send_msg(SetStreamState::rewind(**stream_id, tick.0));
-        }
     }
+}
+
+fn format_playback_speed(speed: f64) -> String {
+    if !speed.is_finite() || speed < 0.0 {
+        return "-".to_string();
+    }
+
+    let mut value = format!("{speed:.3}");
+    while value.ends_with('0') {
+        value.pop();
+    }
+    if value.ends_with('.') {
+        value.pop();
+    }
+    format!("{value}x")
 }
 
 fn time_range_selector_button(
@@ -322,118 +332,6 @@ fn time_range_selector_button(
     }
 }
 
-fn theme_mode_toggle(ui: &mut egui::Ui, is_dark: bool) -> Option<&'static str> {
-    let font_id = egui::TextStyle::Button.resolve(ui.style());
-    let active_text = get_scheme().text_primary;
-    let inactive_text = get_scheme().text_secondary;
-    let padding = egui::vec2(12.0, 6.0);
-
-    let dark_galley = ui
-        .painter()
-        .layout_no_wrap("Dark".to_string(), font_id.clone(), active_text);
-    let light_galley =
-        ui.painter()
-            .layout_no_wrap("Light".to_string(), font_id.clone(), active_text);
-    let segment_width = dark_galley.size().x.max(light_galley.size().x) + padding.x * 2.0;
-    let segment_height = dark_galley.size().y.max(light_galley.size().y) + padding.y * 2.0;
-    let size = egui::vec2(segment_width * 2.0, segment_height);
-
-    let mut choice = None;
-    ui.allocate_ui_with_layout(
-        size,
-        egui::Layout::left_to_right(egui::Align::Center),
-        |ui| {
-            let (dark_rect, dark_response) = ui.allocate_exact_size(
-                egui::vec2(segment_width, segment_height),
-                egui::Sense::click(),
-            );
-            let (light_rect, light_response) = ui.allocate_exact_size(
-                egui::vec2(segment_width, segment_height),
-                egui::Sense::click(),
-            );
-
-            let container_rect = dark_rect.union(light_rect);
-            let radius: u8 = 6;
-            let border = get_scheme().border_primary;
-            let base_fill = get_scheme().bg_secondary;
-            ui.painter().rect(
-                container_rect,
-                egui::CornerRadius::same(radius),
-                base_fill,
-                egui::Stroke::new(1.0, border),
-                egui::StrokeKind::Middle,
-            );
-
-            let active_rect = if is_dark { dark_rect } else { light_rect };
-            let active_corner = if is_dark {
-                egui::CornerRadius {
-                    nw: radius,
-                    ne: 0,
-                    sw: radius,
-                    se: 0,
-                }
-            } else {
-                egui::CornerRadius {
-                    nw: 0,
-                    ne: radius,
-                    sw: 0,
-                    se: radius,
-                }
-            };
-            let active_fill_rect = if is_dark {
-                egui::Rect::from_min_max(
-                    egui::pos2(active_rect.min.x + 1.0, active_rect.min.y + 1.0),
-                    egui::pos2(active_rect.max.x - 1.0, active_rect.max.y - 1.0),
-                )
-            } else {
-                egui::Rect::from_min_max(
-                    egui::pos2(dark_rect.max.x, active_rect.min.y + 1.0),
-                    egui::pos2(active_rect.max.x - 1.0, active_rect.max.y - 1.0),
-                )
-            };
-            ui.painter().rect(
-                active_fill_rect,
-                active_corner,
-                get_scheme().bg_primary,
-                egui::Stroke::NONE,
-                egui::StrokeKind::Middle,
-            );
-
-            let divider_x = dark_rect.max.x;
-            ui.painter().line_segment(
-                [
-                    egui::pos2(divider_x, container_rect.min.y + 1.0),
-                    egui::pos2(divider_x, container_rect.max.y - 1.0),
-                ],
-                egui::Stroke::new(1.0, border),
-            );
-
-            ui.painter().text(
-                dark_rect.center(),
-                egui::Align2::CENTER_CENTER,
-                "Dark",
-                font_id.clone(),
-                if is_dark { active_text } else { inactive_text },
-            );
-            ui.painter().text(
-                light_rect.center(),
-                egui::Align2::CENTER_CENTER,
-                "Light",
-                font_id,
-                if is_dark { inactive_text } else { active_text },
-            );
-
-            if dark_response.clicked() {
-                choice = Some("dark");
-            } else if light_response.clicked() {
-                choice = Some("light");
-            }
-        },
-    );
-
-    choice
-}
-
 fn time_range_window(
     behavior: &mut TimeRangeBehavior,
     earliest: Timestamp,
@@ -441,6 +339,8 @@ fn time_range_window(
 ) -> impl FnOnce(&mut egui::Ui) + '_ {
     const VISIBLE_RANGES: &[TimeRangeBehavior] = &[
         TimeRangeBehavior::FULL,
+        TimeRangeBehavior::LAST_5S,
+        TimeRangeBehavior::LAST_15S,
         TimeRangeBehavior::LAST_30S,
         TimeRangeBehavior::LAST_1M,
         TimeRangeBehavior::LAST_5M,

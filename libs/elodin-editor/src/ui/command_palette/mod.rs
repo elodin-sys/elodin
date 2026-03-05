@@ -43,6 +43,32 @@ pub struct CommandPaletteState {
 }
 
 impl CommandPaletteState {
+    pub fn close(&mut self) {
+        self.show = false;
+        self.target_window = None;
+        self.just_opened = false;
+    }
+
+    pub fn reset_to_top_level(&mut self) {
+        self.filter.clear();
+        self.page_stack.clear();
+        self.selected_index = 0;
+        self.auto_open_item = None;
+        self.error = None;
+    }
+
+    pub fn open_palette(&mut self, target_window: Option<Entity>) {
+        self.show = true;
+        self.input_focus = true;
+        self.target_window = target_window;
+        self.just_opened = true;
+    }
+
+    pub fn open_palette_top_level(&mut self, target_window: Option<Entity>) {
+        self.reset_to_top_level();
+        self.open_palette(target_window);
+    }
+
     pub fn open_for_window(&mut self, target_window: Option<Entity>, item: PaletteItem) {
         self.target_window = target_window;
         self.open_item(item);
@@ -133,28 +159,26 @@ impl RootWidgetSystem for CommandPalette<'_, '_> {
             } else {
                 kbd.pressed(&Key::Control)
             };
-            if cmd_pressed && kbd.just_pressed(&Key::Character("p".into())) {
-                command_palette_state.show = !command_palette_state.show;
+            let shift_pressed = kbd.pressed(&Key::Shift);
+            let p_pressed = kbd.just_pressed(&Key::Character("p".into()))
+                || kbd.just_pressed(&Key::Character("P".into()));
+            if cmd_pressed && p_pressed {
                 if command_palette_state.show {
-                    command_palette_state.input_focus = true;
-                    let target_window = focused_window.or(primary_window);
-                    command_palette_state.target_window = target_window;
-                    command_palette_state.just_opened = true;
+                    command_palette_state.close();
                 } else {
-                    command_palette_state.target_window = None;
-                    command_palette_state.just_opened = false;
+                    let target_window = focused_window.or(primary_window);
+                    if shift_pressed {
+                        command_palette_state.open_palette(target_window);
+                    } else {
+                        command_palette_state.open_palette_top_level(target_window);
+                    }
                 }
             }
 
             if kbd.just_pressed(&Key::Escape) {
-                command_palette_state.show = false;
-                command_palette_state.target_window = None;
-                command_palette_state.just_opened = false;
+                command_palette_state.close();
             }
 
-            if !command_palette_state.show {
-                command_palette_state.filter = "".to_string();
-            }
             (
                 command_palette_state.auto_open_item.take(),
                 command_palette_state.filter.clone(),
@@ -194,15 +218,13 @@ impl RootWidgetSystem for PaletteWindow<'_, '_> {
     ) -> Self::Output {
         let (command_palette_icons, auto_open_none, just_opened) = {
             let state_mut = state.get_mut(world);
-            let mut command_palette_state = state_mut.command_palette_state;
+            let command_palette_state = state_mut.command_palette_state;
 
             if command_palette_state.target_window != args {
                 return false;
             }
 
             if !command_palette_state.show {
-                command_palette_state.filter.clear();
-                command_palette_state.page_stack.clear();
                 return false;
             }
 
@@ -223,12 +245,15 @@ impl RootWidgetSystem for PaletteWindow<'_, '_> {
         let palette_min = egui::pos2(screen_rect.center().x - palette_width / 2.0, 64.0);
         let scheme = get_scheme();
 
-        let cmd_window = egui::Window::new("command_palette")
-            .title_bar(false)
-            .resizable(false)
-            .fixed_size(palette_size)
+        let modal_id = egui::Id::new("command_palette");
+        let modal_area = egui::Area::new(modal_id)
+            .kind(egui::UiKind::Modal)
             .fixed_pos(palette_min)
-            .max_height(palette_size.y)
+            .order(egui::Order::Foreground)
+            .interactable(true);
+        let cmd_modal = egui::Modal::new(modal_id)
+            .area(modal_area)
+            .backdrop_color(egui::Color32::TRANSPARENT)
             .frame(egui::Frame {
                 fill: scheme.bg_secondary,
                 stroke: egui::Stroke::new(1.0, with_opacity(scheme.text_primary, 0.005)),
@@ -242,6 +267,8 @@ impl RootWidgetSystem for PaletteWindow<'_, '_> {
                 ..Default::default()
             })
             .show(ctx, |ui| {
+                ui.set_min_size(palette_size);
+                ui.set_max_size(palette_size);
                 ui.style_mut().spacing.item_spacing = egui::vec2(0.0, 0.0);
 
                 let (up, down) = ui.add_widget::<PaletteSearch>(world, "command_palette_search");
@@ -255,11 +282,7 @@ impl RootWidgetSystem for PaletteWindow<'_, '_> {
                 );
             });
 
-        let Some(cmd_window) = cmd_window else {
-            return false;
-        };
-
-        if cmd_window.response.clicked_elsewhere() && auto_open_none && !just_opened {
+        if cmd_modal.backdrop_response.clicked() && auto_open_none && !just_opened {
             let state_mut = state.get_mut(world);
             let mut command_palette_state = state_mut.command_palette_state;
             command_palette_state.show = false;
@@ -349,14 +372,17 @@ impl WidgetSystem for PaletteSearch<'_> {
                     font_id.size = 13.0;
 
                     let mut popped_page = false;
-                    if command_palette_state.filter.is_empty() {
-                        ui.ctx().input(|i| {
-                            if i.key_pressed(egui::Key::Backspace) {
-                                popped_page = true;
-                                command_palette_state.page_stack.pop();
-                                command_palette_state.selected_index = 0;
-                            }
-                        })
+                    let can_pop_page_with_backspace = command_palette_state.filter.is_empty()
+                        && command_palette_state.page_stack.len() > 1;
+                    if can_pop_page_with_backspace {
+                        let backspace_pressed = ui
+                            .ctx()
+                            .input_mut(|i| i.consume_key(Modifiers::NONE, egui::Key::Backspace));
+                        if backspace_pressed {
+                            popped_page = true;
+                            command_palette_state.page_stack.pop();
+                            command_palette_state.selected_index = 0;
+                        }
                     }
 
                     let prompt = command_palette_state

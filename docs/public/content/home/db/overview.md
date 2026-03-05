@@ -13,7 +13,7 @@ order = 7
 icon = ""
 +++
 
-Elodin DB is a time-series database purpose built for flight computers. It is designed as a central telemetry store and message bus. Flight software publish and subscribes to telemetry data and messages from Elodin DB.
+Elodin DB is a time-series database for physical systems. It serves as a central telemetry store and message bus -- on a flight computer, in a ground station, or alongside a simulation. Flight software, sensors, and simulations publish and subscribe to telemetry data and messages through it.
 
 Elodin DB is based on the same ECS system as Elodin Sim (and the rest of the Elodin ecosystem). Elodin DB sorts data into "entities" and "components". Entities are best thought as objects that emit telemetry. For instance an individual sensor would be an entity. A component is a piece of telemetry data that is associated with an entity. For example an accelerator's acceleration reading would be a component. Entities can have multiple components, and each component can be associated with multiple entities.
 
@@ -44,6 +44,14 @@ client = connect("localhost:2240")
 ```
 
 
+### Editor
+
+Connect the Elodin Editor to a running database to visualize telemetry and video in real time:
+
+```sh
+elodin editor 127.0.0.1:2240
+```
+
 ### SQL
 
 You can query Elodin DB via SQL. The easiest way to access this interface is through the REPL where you can run the following command to connect to the database using SQL
@@ -61,3 +69,42 @@ show tables;
 ```
 
 We use Datafusion to power the SQL interface. [Their docs](https://datafusion.apache.org/user-guide/sql/index.html) are the best place for details on the dialect.
+
+## Key Capabilities
+
+**Replay** -- Start a server with `--replay` to play back a recorded database as if data were arriving live. Connected editors scrub through the timeline with full fidelity.
+
+**Follow mode** -- Start a second instance with `--follows <source>` to replicate all data from another running database over a single TCP connection. The follower accepts its own local connections and writers simultaneously.
+
+```sh
+elodin-db run [::]:2241 ./ground-station --follows 192.168.1.10:2240
+```
+
+**Video** -- H.264 video streams (e.g. from GStreamer via `elodinsink`) are stored as timestamped message logs and displayed in the Elodin Editor. Recorded video can be exported to MP4 with `elodin-db export-videos`.
+
+**Export** -- Export component data to Parquet, Arrow IPC, or CSV without a running server: `elodin-db export ./db -o ./out`. Glob filtering and vector flattening are supported.
+
+**Trim** -- Remove data from the beginning or end of a recording without a running server:
+
+```sh
+# Remove the first 3 minutes from a recording
+elodin-db trim --from-start 180000000 ./my-db
+
+# Remove the last 2 minutes from a recording
+elodin-db trim --from-end 120000000 --output ./trimmed ./my-db
+
+# Trim 1 minute from the start and 2 minutes from the end
+elodin-db trim --from-start 60000000 --from-end 120000000 --output ./window ./my-db
+```
+
+**Merge** -- Combine two databases (e.g. SITL and real telemetry) with optional time alignment and component prefixes:
+
+```sh
+# Merge with alignment using playback-relative timestamps (what the Editor shows)
+elodin-db merge -o merged --prefix1 sitl --prefix2 real \
+  --align1 15000000 --align2 14000000 --from-playback-start ./sitl-db ./real-db
+```
+
+Use `--from-playback-start` when alignment timestamps come from the Elodin Editor's playback timeline. Without it, `--align1`/`--align2` are interpreted as absolute timestamps.
+
+**Database tools** -- Additional offline commands for post-processing: `drop` (delete components by name or glob), `prune` (remove empties), `truncate` (clear data, keep schemas), `time-align` (shift timestamps), and `fix-timestamps` (normalize clock sources).

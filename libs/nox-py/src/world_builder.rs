@@ -1,22 +1,35 @@
-use crate::*;
+use crate::PyUntypedArrayExt;
+use crate::archetype::Spawnable;
+use crate::entity::EntityId;
+use crate::error::Error;
+use crate::exec::{PyExec, WorldExec};
+use crate::iree_exec::IREEWorldExec;
+use crate::jax_exec::{JaxExec, JaxWorldExec};
+use crate::step_context::StepContext;
+use crate::system::{CompiledSystemExt, PySystem};
+use crate::{
+    ComponentSchema, TimeStep, World, globals::increment_sim_tick, system::IntoSystem,
+    system::System as _, Frame,
+};
 use ::s10::{GroupRecipe, SimRecipe, cli::run_recipe_with_token};
 use clap::Parser;
 use convert_case::Casing;
-use impeller2::types::{PrimType, Timestamp};
+use impeller2::types::{ComponentId, PrimType, Timestamp};
 use impeller2_wkt::{ComponentMetadata, EntityMetadata};
 use miette::miette;
-use nox_ecs::{ComponentSchema, IntoSystem, System as _, TimeStep, World, increment_sim_tick, nox};
 use numpy::{PyArray, PyArrayMethods, ndarray::IntoDimension};
+use pyo3::exceptions::PyValueError;
+use pyo3::prelude::*;
 use pyo3::{
     IntoPyObjectExt, Py, PyAny,
-    types::{PyDict, PyList},
+    types::{PyDict, PyDictMethods, PyList, PyListMethods},
 };
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::{
     collections::{HashMap, HashSet},
     iter,
     net::SocketAddr,
     path::{Path, PathBuf},
+    sync::Arc,
     time,
 };
 use stellarator::util::CancelToken;
@@ -34,14 +47,19 @@ fn normalize_log_level(level: &str) -> Result<&'static str, Error> {
     }
 }
 
-fn install_signal_handlers(terminate_flag: &Arc<AtomicBool>) {
+fn install_signal_handlers(cancel_token: CancelToken) {
     use signal_hook::consts::signal::*;
-    use signal_hook::flag;
+    use signal_hook::iterator::Signals;
 
-    // Ignore errors for brevity; in real code, handle Result
-    flag::register(SIGINT, terminate_flag.clone()).expect("register SIGINT failed");
-    flag::register(SIGTERM, terminate_flag.clone()).expect("register SIGTERM failed");
-    // Add others if you want: SIGHUP, SIGQUIT, etc.
+    // Note: signal_hook's iterator API is Unix-focused; native Windows support may be limited.
+    // We currently rely on WSL/Linux for Ctrl-C handling. If native Windows is required,
+    // consider switching to the `ctrlc` crate or conditional compilation.
+    let mut signals = Signals::new([SIGINT, SIGTERM]).expect("create signal handler iterator");
+    std::thread::spawn(move || {
+        for _ in signals.forever() {
+            cancel_token.cancel();
+        }
+    });
 }
 
 #[derive(Parser, Debug)]
@@ -224,11 +242,12 @@ impl WorldBuilder {
         interactive = true,
         start_timestamp = None,
         log_level = None,
+        backend = "iree",
     ))]
     pub fn run(
         &mut self,
         py: Python<'_>,
-        sys: System,
+        sys: PySystem,
         sim_time_step: f64,
         run_time_step: Option<f64>,
         default_playback_speed: f64,
@@ -241,6 +260,7 @@ impl WorldBuilder {
         interactive: bool,
         start_timestamp: Option<i64>,
         log_level: Option<String>,
+        backend: &str,
     ) -> Result<Option<String>, Error> {
         let log_level = log_level.as_deref().map(normalize_log_level).transpose()?;
         let filter = if std::env::var("RUST_LOG").is_ok() {
@@ -273,20 +293,17 @@ impl WorldBuilder {
                 no_s10,
                 liveness_port,
             } => {
-                let terminate_flag = Arc::new(AtomicBool::new(false));
-                install_signal_handlers(&terminate_flag);
-                let exec = self.build_uncompiled(
+                let cancel_token = CancelToken::new();
+                install_signal_handlers(cancel_token.clone());
+                let exec = self.build_with_backend(
                     py,
                     sys,
                     sim_time_step,
                     run_time_step,
                     default_playback_speed,
                     max_ticks,
+                    backend,
                 )?;
-                let mut client = nox::Client::cpu()?;
-                if !optimize {
-                    client.disable_optimizations();
-                }
                 let recipes = self.recipes.clone();
                 // Create a cancel token that can be used to gracefully stop s10 recipes
                 // from within the simulation callbacks (e.g., post_step)
@@ -317,7 +334,6 @@ impl WorldBuilder {
                 } else {
                     (None, None)
                 };
-                let exec = exec.compile(client.clone())?;
                 if let Some(port) = liveness_port {
                     stellarator::struc_con::stellar(move || ::s10::liveness::monitor(port));
                 }
@@ -326,26 +342,37 @@ impl WorldBuilder {
                     Some(p) => PathBuf::from(p),
                     None => tempfile::tempdir()?.keep().join("db"),
                 };
+                let cancel_token_for_loop = cancel_token.clone();
                 // Clone cancel tokens for each closure that needs it
                 let pre_step_cancel_token = recipe_cancel_token.clone();
                 let post_step_cancel_token = recipe_cancel_token.clone();
+                let db_server = elodin_db::Server::new(&db_path, addr)
+                    .map_err(|e| {
+                        if matches!(&e, elodin_db::Error::Io(io) if io.kind() == std::io::ErrorKind::AddrInUse) {
+                            crate::Error::Io(std::io::Error::new(
+                                std::io::ErrorKind::AddrInUse,
+                                format!("port {} is already in use — is another elodin instance running? Kill it with: lsof -tiTCP:{} -sTCP:LISTEN | xargs kill -9", addr.port(), addr.port()),
+                            ))
+                        } else {
+                            crate::Error::DB(e)
+                        }
+                    })?;
                 py.allow_threads(|| {
                     let result = stellarator::run(|| {
-                        nox_ecs::impeller2_server::Server::new(
-                            // Here we start the DB with an address.
-                            elodin_db::Server::new(db_path, addr).unwrap(),
-                            exec,
-                        )
-                        .run_with_cancellation(
+                        crate::impeller2_server::Server::new(db_server, exec).run_with_cancellation(
                             move || {
-                                if let Some(ref func) = is_canceled {
+                                let cancelled = if let Some(ref func) = is_canceled {
                                     Python::with_gil(|py| {
                                         func.call0(py).and_then(|result| result.extract::<bool>(py))
                                     })
-                                    .unwrap_or_else(|_| terminate_flag.load(Ordering::Relaxed))
+                                    .unwrap_or(false)
                                 } else {
-                                    terminate_flag.load(Ordering::Relaxed)
+                                    false
+                                };
+                                if cancelled {
+                                    cancel_token_for_loop.cancel();
                                 }
+                                cancelled
                             },
                             move |tick_count,
                                   db: &Arc<elodin_db::DB>,
@@ -417,6 +444,7 @@ impl WorldBuilder {
                             },
                             interactive,
                             start_timestamp.map(Timestamp),
+                            cancel_token,
                         )
                     });
 
@@ -464,6 +492,7 @@ impl WorldBuilder {
                         max_ticks,
                         optimize,
                         db_path,
+                        backend,
                     )?;
                     exec.run(py, ticks, true, None)?;
                     let profile = exec.profile();
@@ -518,26 +547,19 @@ impl WorldBuilder {
                     }
                     let _xla_guard = XlaFlagsGuard(previous_xla_flags);
 
-                    // Build and compile
-                    let exec = self.build_uncompiled(
+                    let mut exec = self.build_with_backend(
                         py,
                         sys,
                         sim_time_step,
                         run_time_step,
                         default_playback_speed,
                         max_ticks,
+                        backend,
                     )?;
 
-                    let mut client = nox::Client::cpu()?;
-                    if !optimize {
-                        client.disable_optimizations();
-                    }
-
-                    let build_time_ms = exec.profiler.build.mean();
-
-                    let compile_start = time::Instant::now();
-                    let mut compiled_exec = exec.compile(client)?;
-                    let compile_time_ms = compile_start.elapsed().as_secs_f64() * 1000.0;
+                    let build_time_ms = exec.profiler_mut().build.mean();
+                    let compile_time_ms = 0.0;
+                    let mut compiled_exec = exec;
 
                     // XLA_FLAGS automatically restored when _xla_guard is dropped here
                     drop(_xla_guard);
@@ -599,15 +621,7 @@ impl WorldBuilder {
                         }
                     }
 
-                    // Get HLO text and save to file
-                    let hlo_text = compiled_exec
-                        .tick_exec
-                        .hlo_module()
-                        .computation()
-                        .to_hlo_text()
-                        .map_err(|e| {
-                            Error::NoxEcs(nox_ecs::Error::Nox(nox_ecs::nox::Error::Xla(e)))
-                        })?;
+                    let hlo_text = String::from("(IREE backend - HLO profiling not available)");
 
                     // Save HLO dump to output directory
                     let hlo_dump_path = output_dir.join("hlo_dump.txt");
@@ -828,8 +842,12 @@ impl WorldBuilder {
                     let mut input_memory_bytes = 0usize;
                     let mut component_memory: Vec<(String, usize)> = Vec::new();
 
-                    for id in &compiled_exec.tick_exec.metadata().arg_ids {
-                        if let Some(col) = compiled_exec.world.column_by_id(*id) {
+                    let arg_ids: Vec<_> = match &compiled_exec {
+                        WorldExec::Iree(e) => e.tick_exec.metadata.arg_ids.clone(),
+                        WorldExec::Jax(e) => e.tick_exec.metadata.arg_ids.clone(),
+                    };
+                    for id in &arg_ids {
+                        if let Some(col) = compiled_exec.world().column_by_id(*id) {
                             let shape_size: usize =
                                 col.schema.shape().iter().map(|&x| x as usize).product();
                             let elem_size = element_size(col.schema.prim_type);
@@ -971,13 +989,13 @@ impl WorldBuilder {
                     let db_dir = tempfile::tempdir()?;
                     let db_dir_path = db_dir.keep();
                     let db = elodin_db::DB::create(db_dir_path.join("db"))?;
-                    nox_ecs::impeller2_server::init_db(
+                    crate::impeller2_server::init_db(
                         &db,
-                        &mut compiled_exec.world,
+                        compiled_exec.world_mut(),
                         impeller2::types::Timestamp::now(),
                     )?;
 
-                    let mut exec_with_db = Exec {
+                    let mut exec_with_db = PyExec {
                         exec: compiled_exec,
                         db: Box::new(db),
                     };
@@ -1018,38 +1036,36 @@ impl WorldBuilder {
         max_ticks = None,
         optimize = false,
         db_path = None,
+        backend = "iree",
     ))]
     pub fn build(
         &mut self,
         py: Python<'_>,
-        system: System,
+        system: PySystem,
         sim_time_step: f64,
         run_time_step: Option<f64>,
         default_playback_speed: f64,
         max_ticks: Option<u64>,
-        optimize: bool,
+        #[allow(unused_variables)] optimize: bool,
         db_path: Option<String>,
-    ) -> Result<Exec, Error> {
-        let exec = self.build_uncompiled(
+        backend: &str,
+    ) -> Result<PyExec, Error> {
+        let mut exec = self.build_with_backend(
             py,
             system,
             sim_time_step,
             run_time_step,
             default_playback_speed,
             max_ticks,
+            backend,
         )?;
-        let mut client = nox::Client::cpu()?;
-        if !optimize {
-            client.disable_optimizations();
-        }
-        let mut exec = exec.compile(client.clone())?;
         let db_path = match db_path {
             Some(p) => PathBuf::from(p),
             None => tempfile::tempdir()?.keep().join("db"),
         };
         let db = elodin_db::DB::create(db_path)?;
-        nox_ecs::impeller2_server::init_db(&db, &mut exec.world, Timestamp::now())?;
-        Ok(Exec {
+        crate::impeller2_server::init_db(&db, exec.world_mut(), Timestamp::now())?;
+        Ok(PyExec {
             exec,
             db: Box::new(db),
         })
@@ -1067,7 +1083,7 @@ impl WorldBuilder {
     pub fn to_jax_func(
         &mut self,
         py: Python<'_>,
-        system: System,
+        system: PySystem,
         sim_time_step: f64,
         run_time_step: Option<f64>,
         default_playback_speed: f64,
@@ -1291,15 +1307,17 @@ impl WorldBuilder {
 }
 
 impl WorldBuilder {
-    fn build_uncompiled(
+    #[allow(clippy::too_many_arguments)]
+    fn build_with_backend(
         &mut self,
         py: Python<'_>,
-        sys: System,
+        sys: PySystem,
         sim_time_step: f64,
         run_time_step: Option<f64>,
         default_playback_speed: f64,
         max_ticks: Option<u64>,
-    ) -> Result<nox_ecs::WorldExec, Error> {
+        backend: &str,
+    ) -> Result<WorldExec, Error> {
         let mut start = time::Instant::now();
         let ts = time::Duration::from_secs_f64(sim_time_step);
         self.world.metadata.sim_time_step = TimeStep(ts);
@@ -1315,19 +1333,44 @@ impl WorldBuilder {
         self.world.set_globals();
 
         let world = std::mem::take(&mut self.world);
-        let xla_exec = increment_sim_tick.pipe(sys).compile(&world)?;
-        let tick_exec = xla_exec.compile_hlo_module(py, &world)?;
+        let compiled_sys = increment_sim_tick.pipe(sys).compile(&world)?;
 
-        let mut exec = nox_ecs::WorldExec::new(world, tick_exec, None);
-        exec.profiler.build.observe(&mut start);
-        Ok(exec)
+        match backend {
+            "jax" => {
+                let tick_exec = JaxExec::new(py, &compiled_sys)?;
+                let mut exec = JaxWorldExec::new(world, tick_exec, None);
+                exec.profiler.build.observe(&mut start);
+                Ok(WorldExec::Jax(exec))
+            }
+            "iree" => match compiled_sys.compile_iree_module(py, &world) {
+                Ok(tick_exec) => {
+                    let mut exec = IREEWorldExec::new(world, tick_exec, None);
+                    exec.profiler.build.observe(&mut start);
+                    Ok(WorldExec::Iree(exec))
+                }
+                Err(iree_err) => {
+                    let msg = format!(
+                        "{iree_err}\n\n\
+                            This simulation uses JAX features not yet supported by the IREE backend.\n\
+                            To run this simulation, set backend=\"jax\" in your w.run() call:\n\n  \
+                            w.run(system, backend=\"jax\", ...)\n\n\
+                            The JAX backend is slower but supports all JAX operations."
+                    );
+                    Err(Error::IreeCompilationFailed(msg))
+                }
+            },
+            other => Err(Error::UnknownCommand(format!(
+                "unknown backend '{}': expected 'iree' or 'jax'",
+                other
+            ))),
+        }
     }
 
     #[allow(clippy::type_complexity)]
     fn build_jited(
         &mut self,
         py: Python<'_>,
-        sys: System,
+        sys: PySystem,
         sim_time_step: f64,
         run_time_step: Option<f64>,
         default_playback_speed: f64,

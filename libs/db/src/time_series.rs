@@ -58,6 +58,18 @@ impl TimeSeries {
         }
     }
 
+    /// Returns the raw `extra` value from the index AppendLog header.
+    /// This is the start_timestamp set at creation time.
+    pub fn index_extra(&self) -> &Timestamp {
+        self.index.extra()
+    }
+
+    /// Overwrite the start_timestamp stored in the index file header.
+    /// Used by the follower to match the source's start_timestamp exactly.
+    pub fn set_start_timestamp(&self, ts: Timestamp) {
+        self.index.set_extra(ts);
+    }
+
     fn timestamps(&self) -> &[Timestamp] {
         <[Timestamp]>::ref_from_bytes(self.index.get(..).expect("couldn't get full range"))
             .expect("mmep unaligned")
@@ -194,5 +206,10 @@ impl TimeSeries {
 
         self.data_waker.wake_all();
         Ok(())
+    }
+
+    /// Returns the number of samples currently stored.
+    pub fn sample_count(&self) -> usize {
+        self.index.len() as usize / size_of::<i64>()
     }
 }

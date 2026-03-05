@@ -3,10 +3,7 @@ use impeller2::com_de::Decomponentize;
 use impeller2::registry::HashMapRegistry;
 use impeller2::types::{ComponentId, ComponentView, Timestamp};
 use impeller2_stellar::Client;
-use impeller2_wkt::{
-    DumpMetadata, DumpMetadataResp, FixedRateBehavior, InitialTimestamp, Stream, StreamBehavior,
-    StreamReply,
-};
+use impeller2_wkt::{DumpMetadata, DumpMetadataResp, Stream, StreamBehavior, StreamReply};
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -27,16 +24,14 @@ pub struct DbClient {
     addr: SocketAddr,
     mappings: InputMappings,
     vtable_registry: HashMapRegistry,
-    replay: bool,
 }
 
 impl DbClient {
-    pub fn new(addr: SocketAddr, mappings: InputMappings, replay: bool) -> Self {
+    pub fn new(addr: SocketAddr, mappings: InputMappings) -> Self {
         Self {
             addr,
             mappings,
             vtable_registry: HashMapRegistry::default(),
-            replay,
         }
     }
 
@@ -96,33 +91,17 @@ impl DbClient {
         // Discover components and build ID -> name mapping
         let components = self.discover_components(&mut client).await?;
 
-        // Select stream behavior based on replay mode
-        let behavior = if self.replay {
-            // Use 60Hz playback with matching timestep for 1x speed
-            // The DB finds the nearest sample for each timestamp, so this works
-            // regardless of the original recording rate
-            const PLAYBACK_HZ: u64 = 60;
-            StreamBehavior::FixedRate(FixedRateBehavior {
-                timestep: 1_000_000_000 / PLAYBACK_HZ, // nanoseconds per tick
-                frequency: PLAYBACK_HZ,
-                initial_timestamp: InitialTimestamp::Earliest,
-            })
-        } else {
-            StreamBehavior::RealTime
+        let stream = Stream {
+            behavior: StreamBehavior::RealTimeBatched,
+            id: 1,
         };
-
-        let stream = Stream { behavior, id: 1 };
 
         let mut sub_stream = client
             .stream(&stream)
             .await
             .context("Failed to create stream subscription")?;
 
-        if self.replay {
-            info!("Subscribed to replay stream (from earliest timestamp)");
-        } else {
-            info!("Subscribed to real-time telemetry stream");
-        }
+        info!("Subscribed to telemetry stream");
 
         // Process incoming telemetry
         loop {

@@ -31,5 +31,6 @@ extend-exclude = [
     "libs/stellarator/maitake",
     "aleph/modules/*.nix",
     "*.age",
+    "libs/muxide",
 ]
 ignore-vcs = true

@@ -4,7 +4,7 @@
 //! data density across time. Useful for identifying gaps or disparities in data.
 
 use std::collections::HashMap;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use arrow::array::{Array, Float64Array, TimestampMicrosecondArray};
 use arrow::record_batch::RecordBatch;
@@ -16,20 +16,28 @@ use bevy_egui::egui::{self, Color32, Pos2, Rect, Sense, Stroke, Vec2};
 use convert_case::{Case, Casing};
 use impeller2::types::{ComponentId, Timestamp};
 use impeller2_bevy::CommandsExt;
-use impeller2_wkt::{ArrowIPC, ErrorResponse, SQLQuery};
+use impeller2_wkt::{ArrowIPC, ErrorResponse, SQLQuery, SparklineQuery};
 
-use crate::{EqlContext, SelectedTimeRange, ui::widgets::WidgetSystem};
+use crate::{
+    EqlContext, SelectedTimeRange,
+    ui::{SelectedObject, tiles::WindowState, widgets::WidgetSystem},
+};
 
-use super::{PaneName, colors::get_scheme};
+use super::{
+    PaneName,
+    colors::{ColorExt, get_scheme},
+};
 
 // Re-export for use in component collection
 use eql;
 
 /// Maximum number of points per series in each sparkline
-const SPARKLINE_MAX_POINTS: usize = 2000;
+const SPARKLINE_MAX_POINTS: usize = 10000;
 
-/// Refresh interval for live data updates
-const SPARKLINE_REFRESH_INTERVAL: Duration = Duration::from_secs(5);
+/// Maximum concurrent queries to avoid RequestId overflow and queue overflow.
+/// RequestId is u8 (max 255), and the BBQ queue can fill if too many large responses arrive.
+/// Reduced to 120 to ensure responses are processed before the queue overflows.
+const MAX_CONCURRENT_QUERIES: usize = 120;
 
 /// A single series of data points (one field/element of a component)
 #[derive(Clone, Debug, Default)]
@@ -60,14 +68,36 @@ pub struct ComponentTimeRanges {
     pub row_counts: HashMap<String, usize>,
     /// Map from component table name to sparkline data
     pub sparklines: HashMap<String, SparklineData>,
-    /// Number of queries still pending
+    /// Number of queries still pending in current batch
     pub pending_queries: usize,
-    /// Total number of queries sent
+    /// Total number of queries across all batches
     pub total_queries: usize,
+    /// Number of queries completed so far
+    pub completed_queries: usize,
     /// State of the query
     pub state: TimeRangeQueryState,
-    /// List of table names to query (cached for phase 2)
+    /// List of table names to query (for batched processing)
     pub tables_to_query: Vec<String>,
+    /// Current batch index for processing
+    pub current_batch: usize,
+    pub row_settings: HashMap<ComponentId, DataOverviewRowSettings>,
+}
+
+#[derive(Clone, Debug)]
+pub struct DataOverviewRowSettings {
+    pub enabled: bool,
+    pub color: Option<Color32>,
+    pub custom_name: Option<String>,
+}
+
+impl Default for DataOverviewRowSettings {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            color: None,
+            custom_name: None,
+        }
+    }
 }
 
 #[derive(Default, Clone)]
@@ -94,10 +124,6 @@ pub struct DataOverviewPane {
     pub zoom_factor: f32,
     /// Horizontal pan offset in microseconds from the data start
     pub pan_offset_us: i64,
-    /// Whether we've triggered the initial query
-    pub query_triggered: bool,
-    /// Last time we refreshed queries (for live updates)
-    pub last_refresh: Option<Instant>,
     /// Cached data time range (min, max) from component queries
     pub cached_data_range: Option<(Timestamp, Timestamp)>,
     /// Last known drag position for pan calculation
@@ -112,8 +138,6 @@ impl Default for DataOverviewPane {
             scroll_offset: 0.0,
             zoom_factor: 1.0,
             pan_offset_us: 0,
-            query_triggered: false,
-            last_refresh: None,
             cached_data_range: None,
             last_drag_pos: None,
         }
@@ -127,7 +151,10 @@ pub struct ComponentTimestampSummary {
     pub label: String,
     pub table_name: String,
     pub color: Color32,
+    pub enabled: bool,
     pub timestamp_range: Option<(Timestamp, Timestamp)>,
+    /// User-defined custom name for display (if set via inspector)
+    pub custom_name: Option<String>,
 }
 
 /// Generate a distinct color for a given row index using golden ratio hue distribution
@@ -179,12 +206,26 @@ fn hue_to_rgb(p: f32, q: f32, mut t: f32) -> f32 {
 }
 
 /// Convert component name to SQL table name using the same conversion as the database.
-/// The database uses `to_case(Case::Snake)` followed by replacing '.' with '_'.
-fn component_to_table_name(full_component_name: &str) -> String {
+/// The database uses `to_case(Case::Snake)` followed by replacing invalid SQL characters.
+pub fn component_to_table_name(full_component_name: &str) -> String {
     // Full component name is like "GpsPosMessage1.VACC"
     // Table name is like "gps_pos_message_1_vacc"
     // Must match the conversion in libs/db/src/arrow/mod.rs
-    full_component_name.to_case(Case::Snake).replace('.', "_")
+    sanitize_sql_table_name(&full_component_name.to_case(Case::Snake))
+}
+
+/// Sanitize a string to be a valid SQL table name.
+/// Replaces invalid characters with underscores.
+fn sanitize_sql_table_name(name: &str) -> String {
+    name.chars()
+        .map(|c| {
+            if c.is_alphanumeric() || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect()
 }
 
 /// Widget for rendering the Data Overview panel
@@ -194,19 +235,23 @@ pub struct DataOverviewWidget<'w, 's> {
     selected_range: Res<'w, SelectedTimeRange>,
     time_ranges: ResMut<'w, ComponentTimeRanges>,
     commands: Commands<'w, 's>,
+    window_states: Query<'w, 's, &'static mut WindowState>,
 }
 
 impl WidgetSystem for DataOverviewWidget<'_, '_> {
-    type Args = DataOverviewPane;
+    type Args = (DataOverviewPane, Entity);
     type Output = DataOverviewPane;
 
     fn ui_system(
         world: &mut World,
         state: &mut SystemState<Self>,
         ui: &mut egui::Ui,
-        mut pane: Self::Args,
+        (mut pane, target_window): Self::Args,
     ) -> Self::Output {
         let mut params = state.get_mut(world);
+        let Ok(mut window_state) = params.window_states.get_mut(target_window) else {
+            return pane;
+        };
 
         let scheme = get_scheme();
         let available_rect = ui.available_rect_before_wrap();
@@ -235,144 +280,189 @@ impl WidgetSystem for DataOverviewWidget<'_, '_> {
 
         let mut component_list: Vec<(ComponentId, String, String)> = Vec::new();
         collect_components(&params.eql_context.0.component_parts, &mut component_list);
-
-        // Check if we should refresh queries for live data
-        let should_refresh = pane
-            .last_refresh
-            .map(|t| t.elapsed() > SPARKLINE_REFRESH_INTERVAL)
-            .unwrap_or(true);
-
-        // Trigger query for timestamp ranges if not started or need refresh
-        let should_query = (!pane.query_triggered && !component_list.is_empty())
-            || (should_refresh
-                && matches!(params.time_ranges.state, TimeRangeQueryState::Ready)
-                && !component_list.is_empty());
-
-        if should_query
-            && matches!(
-                params.time_ranges.state,
-                TimeRangeQueryState::NotStarted | TimeRangeQueryState::Ready
-            )
-        {
-            // Phase 1: Query time ranges and row counts first
-            params.time_ranges.state = TimeRangeQueryState::QueryingTimeRanges(Instant::now());
-            params.time_ranges.total_queries = component_list.len();
-            params.time_ranges.pending_queries = component_list.len();
-            params.time_ranges.tables_to_query =
-                component_list.iter().map(|(_, _, t)| t.clone()).collect();
-            pane.last_refresh = Some(Instant::now());
-
-            // Query each table for time range AND row count
-            for (_, _, table_name) in component_list.iter() {
-                let table_name_clone = table_name.clone();
-                let query = format!(
-                    "SELECT min(time) as min_time, max(time) as max_time, count(*) as row_count FROM {}",
-                    table_name
-                );
-
-                params.commands.send_req_reply(
-                    SQLQuery(query),
-                    move |In(res): In<Result<ArrowIPC<'static>, ErrorResponse>>,
-                          mut time_ranges: ResMut<ComponentTimeRanges>| {
-                        time_ranges.pending_queries = time_ranges.pending_queries.saturating_sub(1);
-
-                        if let Ok(ipc) = res {
-                            let mut decoder = arrow::ipc::reader::StreamDecoder::new();
-                            if let Some(batch_data) = ipc.batch {
-                                let mut buffer =
-                                    arrow::buffer::Buffer::from(batch_data.into_owned());
-                                if let Some(batch) =
-                                    decoder.decode(&mut buffer).ok().and_then(|b| b)
-                                {
-                                    process_time_range_and_count(
-                                        &table_name_clone,
-                                        &batch,
-                                        &mut time_ranges,
-                                    );
-                                }
-                            }
-                        }
-
-                        // When all time range queries complete, transition to phase 2
-                        if time_ranges.pending_queries == 0 {
-                            time_ranges.state =
-                                TimeRangeQueryState::QueryingSparklines(Instant::now());
-                        }
-                        true
-                    },
-                );
+        let mut enabled_tables: Vec<String> = Vec::new();
+        for (component_id, _, table_name) in &component_list {
+            let settings = params
+                .time_ranges
+                .row_settings
+                .entry(*component_id)
+                .or_default();
+            if settings.enabled {
+                enabled_tables.push(table_name.clone());
             }
-            pane.query_triggered = true;
         }
 
-        // Phase 2: Query sparkline data after row counts are known
+        // Initialize Phase 1 when state is NotStarted and we have components
+        if matches!(params.time_ranges.state, TimeRangeQueryState::NotStarted)
+            && !component_list.is_empty()
+        {
+            params.time_ranges.state = TimeRangeQueryState::QueryingTimeRanges(Instant::now());
+            params.time_ranges.total_queries = component_list.len();
+            params.time_ranges.completed_queries = 0;
+            params.time_ranges.current_batch = 0;
+            params.time_ranges.tables_to_query =
+                component_list.iter().map(|(_, _, t)| t.clone()).collect();
+        }
+
+        // Phase 1: Query time ranges in batches to avoid RequestId overflow
+        if matches!(
+            params.time_ranges.state,
+            TimeRangeQueryState::QueryingTimeRanges(_)
+        ) && params.time_ranges.pending_queries == 0
+        {
+            let batch_start = params.time_ranges.current_batch * MAX_CONCURRENT_QUERIES;
+            let batch_end = (batch_start + MAX_CONCURRENT_QUERIES)
+                .min(params.time_ranges.tables_to_query.len());
+
+            if batch_start < params.time_ranges.tables_to_query.len() {
+                // Start next batch
+                let batch_size = batch_end - batch_start;
+                params.time_ranges.pending_queries = batch_size;
+                params.time_ranges.current_batch += 1;
+
+                for table_name in params.time_ranges.tables_to_query[batch_start..batch_end].iter()
+                {
+                    let table_name_clone = table_name.clone();
+                    let query = format!(
+                        "SELECT min(time) as min_time, max(time) as max_time, count(*) as row_count FROM {}",
+                        table_name
+                    );
+
+                    params.commands.send_req_reply(
+                        SQLQuery(query),
+                        move |In(res): In<Result<ArrowIPC<'static>, ErrorResponse>>,
+                              mut time_ranges: ResMut<ComponentTimeRanges>| {
+                            // Only process data batches; completion markers (batch: None) are ignored
+                            // since the handler is removed immediately after processing data.
+                            // This prevents request ID collisions when IDs wrap around.
+                            match res {
+                                Ok(ipc) => {
+                                    if let Some(batch_data) = ipc.batch {
+                                        // Data batch - process it
+                                        let mut decoder = arrow::ipc::reader::StreamDecoder::new();
+                                        let mut buffer =
+                                            arrow::buffer::Buffer::from(batch_data.into_owned());
+                                        if let Some(batch) =
+                                            decoder.decode(&mut buffer).ok().and_then(|b| b)
+                                        {
+                                            process_time_range_and_count(
+                                                &table_name_clone,
+                                                &batch,
+                                                &mut time_ranges,
+                                            );
+                                        }
+                                        // Decrement pending_queries now that we have the data
+                                        time_ranges.pending_queries =
+                                            time_ranges.pending_queries.saturating_sub(1);
+                                        time_ranges.completed_queries += 1;
+                                    }
+                                    // If batch is None (completion marker), just ignore it
+                                    // The handler will be removed either way
+                                }
+                                Err(_) => {
+                                    // Error response - query is done
+                                    time_ranges.pending_queries =
+                                        time_ranges.pending_queries.saturating_sub(1);
+                                    time_ranges.completed_queries += 1;
+                                }
+                            }
+
+                            // Transition to Phase 2 when ALL Phase 1 queries complete
+                            if time_ranges.pending_queries == 0
+                                && time_ranges.completed_queries >= time_ranges.total_queries
+                            {
+                                time_ranges.state =
+                                    TimeRangeQueryState::QueryingSparklines(Instant::now());
+                                time_ranges.current_batch = 0;
+                                time_ranges.completed_queries = 0;
+                            }
+                            // Always return true to remove handler immediately, freeing the request ID
+                            true
+                        },
+                    );
+                }
+            }
+            // Note: Phase 2 transition now happens inside the query handler when all queries complete
+        }
+
+        // Phase 2: Query sparkline data in batches
         if matches!(
             params.time_ranges.state,
             TimeRangeQueryState::QueryingSparklines(_)
         ) && params.time_ranges.pending_queries == 0
         {
-            let tables_to_query = std::mem::take(&mut params.time_ranges.tables_to_query);
+            let batch_start = params.time_ranges.current_batch * MAX_CONCURRENT_QUERIES;
+            let batch_end = (batch_start + MAX_CONCURRENT_QUERIES)
+                .min(params.time_ranges.tables_to_query.len());
 
-            // Safety: if no tables to query, transition directly to Ready
-            if tables_to_query.is_empty() {
+            if batch_start >= params.time_ranges.tables_to_query.len() {
                 params.time_ranges.state = TimeRangeQueryState::Ready;
             } else {
-                params.time_ranges.pending_queries = tables_to_query.len();
-                params.time_ranges.total_queries = tables_to_query.len();
-            }
+                // Start next batch
+                let batch_size = batch_end - batch_start;
+                params.time_ranges.pending_queries = batch_size;
+                params.time_ranges.current_batch += 1;
 
-            for table_name in tables_to_query {
-                let table_name_clone = table_name.clone();
+                for table_name in params.time_ranges.tables_to_query[batch_start..batch_end].iter()
+                {
+                    let table_name_clone = table_name.clone();
 
-                // Build smart sparkline query based on row count
-                let row_count = params
-                    .time_ranges
-                    .row_counts
-                    .get(&table_name)
-                    .copied()
-                    .unwrap_or(0);
+                    // Use SparklineQuery with server-side LTTB downsampling.
+                    // The server extracts just time + first scalar value and applies LTTB,
+                    // returning at most SPARKLINE_MAX_POINTS data points.
+                    // This is resilient to any data size - even millions of rows.
+                    let query = SparklineQuery {
+                        table_name: table_name.clone(),
+                        max_points: SPARKLINE_MAX_POINTS as u32,
+                    };
 
-                let sparkline_query = if row_count <= SPARKLINE_MAX_POINTS {
-                    // Small dataset: fetch all data
-                    format!("SELECT * FROM {} ORDER BY time", table_name)
-                } else {
-                    // Large dataset: use ROW_NUMBER() for server-side downsampling
-                    let step = (row_count / SPARKLINE_MAX_POINTS).max(1);
-                    format!(
-                        "SELECT * FROM (SELECT *, ROW_NUMBER() OVER (ORDER BY time) as rn FROM {}) sub WHERE sub.rn % {} = 1 ORDER BY time",
-                        table_name, step
-                    )
-                };
-
-                params.commands.send_req_reply(
-                    SQLQuery(sparkline_query),
-                    move |In(res): In<Result<ArrowIPC<'static>, ErrorResponse>>,
-                          mut time_ranges: ResMut<ComponentTimeRanges>| {
-                        time_ranges.pending_queries = time_ranges.pending_queries.saturating_sub(1);
-
-                        if let Ok(ipc) = res {
-                            let mut decoder = arrow::ipc::reader::StreamDecoder::new();
-                            if let Some(batch_data) = ipc.batch {
-                                let mut buffer =
-                                    arrow::buffer::Buffer::from(batch_data.into_owned());
-                                if let Some(batch) =
-                                    decoder.decode(&mut buffer).ok().and_then(|b| b)
-                                {
-                                    process_sparkline_result(
-                                        &table_name_clone,
-                                        &batch,
-                                        &mut time_ranges.sparklines,
+                    params.commands.send_req_reply(
+                        query,
+                        move |In(res): In<Result<ArrowIPC<'static>, ErrorResponse>>,
+                              mut time_ranges: ResMut<ComponentTimeRanges>| {
+                            // Only process data batches; completion markers (batch: None) are ignored
+                            // since the handler is removed immediately after processing data.
+                            // This prevents request ID collisions when IDs wrap around.
+                            match res {
+                                Ok(ipc) => {
+                                    if let Some(batch_data) = ipc.batch {
+                                        // Data batch - process it (already downsampled by server)
+                                        let mut decoder = arrow::ipc::reader::StreamDecoder::new();
+                                        let mut buffer =
+                                            arrow::buffer::Buffer::from(batch_data.into_owned());
+                                        if let Some(batch) =
+                                            decoder.decode(&mut buffer).ok().and_then(|b| b)
+                                        {
+                                            process_sparkline_result(
+                                                &table_name_clone,
+                                                &batch,
+                                                &mut time_ranges.sparklines,
+                                            );
+                                        }
+                                        // Decrement pending_queries now that we have the data
+                                        time_ranges.pending_queries =
+                                            time_ranges.pending_queries.saturating_sub(1);
+                                        time_ranges.completed_queries += 1;
+                                    }
+                                    // If batch is None (completion marker), just ignore it
+                                    // The handler will be removed either way
+                                }
+                                Err(e) => {
+                                    // Error response - query is done
+                                    eprintln!(
+                                        "Sparkline {}: query error: {}",
+                                        table_name_clone, e.description
                                     );
+                                    time_ranges.pending_queries =
+                                        time_ranges.pending_queries.saturating_sub(1);
+                                    time_ranges.completed_queries += 1;
                                 }
                             }
-                        }
-
-                        if time_ranges.pending_queries == 0 {
-                            time_ranges.state = TimeRangeQueryState::Ready;
-                        }
-                        true
-                    },
-                );
+                            // Always return true to remove handler immediately, freeing the request ID
+                            true
+                        },
+                    );
+                }
             }
         }
 
@@ -380,13 +470,20 @@ impl WidgetSystem for DataOverviewWidget<'_, '_> {
         let mut summaries: Vec<ComponentTimestampSummary> = Vec::new();
         for (component_id, label, table_name) in component_list.iter() {
             let timestamp_range = params.time_ranges.ranges.get(table_name).copied();
+            let custom_name = params
+                .time_ranges
+                .row_settings
+                .get(component_id)
+                .and_then(|s| s.custom_name.clone());
 
             summaries.push(ComponentTimestampSummary {
                 component_id: *component_id,
                 label: label.clone(),
                 table_name: table_name.clone(),
                 color: Color32::WHITE, // Will be assigned after sorting
+                enabled: true,
                 timestamp_range,
+                custom_name,
             });
         }
 
@@ -401,7 +498,19 @@ impl WidgetSystem for DataOverviewWidget<'_, '_> {
 
         // Assign colors after sorting so adjacent rows have distinct colors
         for (index, summary) in summaries.iter_mut().enumerate() {
-            summary.color = row_color(index);
+            let settings = params
+                .time_ranges
+                .row_settings
+                .entry(summary.component_id)
+                .or_default();
+            if settings.color.is_none() {
+                settings.color = Some(row_color(index));
+            }
+            summary.color = settings.color.unwrap_or_else(|| row_color(index));
+            summary.enabled = settings.enabled;
+            if !summary.enabled {
+                summary.timestamp_range = None;
+            }
         }
 
         // Calculate time range from actual component data ranges
@@ -409,6 +518,7 @@ impl WidgetSystem for DataOverviewWidget<'_, '_> {
         let data_time_range: Option<(Timestamp, Timestamp)> = summaries
             .iter()
             .filter_map(|s| s.timestamp_range)
+            .filter(|(min, _)| min.0 > 0)
             .fold(None, |acc: Option<(Timestamp, Timestamp)>, (min, max)| {
                 Some(match acc {
                     None => (min, max),
@@ -452,6 +562,17 @@ impl WidgetSystem for DataOverviewWidget<'_, '_> {
         let pixels_per_us = timeline_width as f64 / time_span;
         let timeline_start_x = available_rect.min.x + LABEL_WIDTH;
         let timeline_end_x = timeline_start_x + timeline_width;
+        let response = ui.interact(
+            available_rect,
+            ui.id().with("data_overview"),
+            Sense::click_and_drag(),
+        );
+        let click_pos = if response.clicked() {
+            window_state.ui_state.selected_object = SelectedObject::DataOverview;
+            response.interact_pointer_pos()
+        } else {
+            None
+        };
 
         // Header with component count and query status
         let header_height = ROW_HEIGHT;
@@ -468,20 +589,18 @@ impl WidgetSystem for DataOverviewWidget<'_, '_> {
                 format!("Components: {} (loading...)", summaries.len())
             }
             TimeRangeQueryState::QueryingTimeRanges(_) => {
-                let done = params.time_ranges.total_queries - params.time_ranges.pending_queries;
                 format!(
                     "Components: {} (scanning {}/{}...)",
                     summaries.len(),
-                    done,
+                    params.time_ranges.completed_queries,
                     params.time_ranges.total_queries
                 )
             }
             TimeRangeQueryState::QueryingSparklines(_) => {
-                let done = params.time_ranges.total_queries - params.time_ranges.pending_queries;
                 format!(
                     "Components: {} (loading data {}/{}...)",
                     summaries.len(),
-                    done,
+                    params.time_ranges.completed_queries,
                     params.time_ranges.total_queries
                 )
             }
@@ -530,9 +649,26 @@ impl WidgetSystem for DataOverviewWidget<'_, '_> {
                     continue;
                 }
 
+                let is_selected = matches!(
+                    window_state.ui_state.selected_object,
+                    SelectedObject::DataOverviewComponent { component_id }
+                        if component_id == summary.component_id
+                );
+                if let Some(pos) = click_pos
+                    && row_rect.contains(pos)
+                {
+                    window_state.ui_state.selected_object = SelectedObject::DataOverviewComponent {
+                        component_id: summary.component_id,
+                    };
+                }
+
                 // Alternate row background
                 if row_index % 2 == 0 {
                     ui.painter().rect_filled(row_rect, 0.0, scheme.bg_primary);
+                }
+                if is_selected {
+                    ui.painter()
+                        .rect_filled(row_rect, 0.0, scheme.highlight.opacity(0.08));
                 }
 
                 // Draw label with component color
@@ -540,107 +676,126 @@ impl WidgetSystem for DataOverviewWidget<'_, '_> {
                     Rect::from_min_size(row_rect.min, Vec2::new(LABEL_WIDTH, ROW_HEIGHT));
 
                 // Color indicator
+                let indicator_color = if summary.enabled {
+                    summary.color
+                } else {
+                    summary.color.opacity(0.35)
+                };
                 ui.painter().circle_filled(
                     Pos2::new(label_rect.min.x + 8.0, label_rect.center().y),
                     4.0,
-                    summary.color,
+                    indicator_color,
                 );
 
-                // Component name (truncated if needed)
-                let mut label = summary.label.clone();
+                // Component name (use custom_name if set, otherwise original label)
+                let mut label = summary
+                    .custom_name
+                    .clone()
+                    .unwrap_or_else(|| summary.label.clone());
                 if label.len() > 38 {
                     label.truncate(35);
                     label.push_str("...");
                 }
 
+                let label_color = if summary.enabled {
+                    summary.color
+                } else {
+                    summary.color.opacity(0.35)
+                };
                 ui.painter().text(
                     Pos2::new(label_rect.min.x + 16.0, label_rect.center().y),
                     egui::Align2::LEFT_CENTER,
                     label,
                     egui::FontId::proportional(10.0),
-                    summary.color,
+                    label_color,
                 );
 
-                // Draw sparkline if we have data, otherwise fall back to bar
+                // Draw sparkline if we have data with points, otherwise fall back to bar
                 let sparkline = params.time_ranges.sparklines.get(&summary.table_name);
 
-                if let Some(sparkline_data) = sparkline {
-                    if !sparkline_data.series.is_empty() {
-                        // Draw sparklines for each series (field/element)
-                        let row_top = row_rect.min.y + 2.0;
-                        let row_bottom = row_rect.max.y - 2.0;
-                        let row_height = row_bottom - row_top;
-                        let y_range = sparkline_data.y_max - sparkline_data.y_min;
+                // Check if we have valid sparkline data with actual points to draw
+                let has_sparkline_points = sparkline
+                    .map(|s| s.series.iter().any(|series| !series.points.is_empty()))
+                    .unwrap_or(false);
 
-                        let num_series = sparkline_data.series.len();
+                if let Some(sparkline_data) = sparkline
+                    && has_sparkline_points
+                {
+                    // Draw sparklines for each series (field/element)
+                    let row_top = row_rect.min.y + 2.0;
+                    let row_bottom = row_rect.max.y - 2.0;
+                    let row_height = row_bottom - row_top;
+                    let y_range = sparkline_data.y_max - sparkline_data.y_min;
 
-                        for (series_idx, series) in sparkline_data.series.iter().enumerate() {
-                            if series.points.is_empty() {
+                    let num_series = sparkline_data.series.len();
+
+                    for (series_idx, series) in sparkline_data.series.iter().enumerate() {
+                        if series.points.is_empty() {
+                            continue;
+                        }
+
+                        // Generate a color variation for each series
+                        let series_color = if num_series == 1 {
+                            summary.color
+                        } else {
+                            // Vary the hue slightly for each series
+                            let base_color = summary.color;
+                            let (r, g, b, a) = (
+                                base_color.r(),
+                                base_color.g(),
+                                base_color.b(),
+                                base_color.a(),
+                            );
+                            // Shift brightness/saturation for each series
+                            let factor = 0.7 + 0.3 * (series_idx as f32 / num_series.max(1) as f32);
+                            Color32::from_rgba_unmultiplied(
+                                (r as f32 * factor).min(255.0) as u8,
+                                (g as f32 * factor).min(255.0) as u8,
+                                (b as f32 * factor).min(255.0) as u8,
+                                a,
+                            )
+                        };
+
+                        // Build points for the polyline
+                        let mut line_points: Vec<Pos2> = Vec::new();
+
+                        for &(time, value) in &series.points {
+                            // Calculate X position
+                            let x_offset = (time - display_start.0) as f64;
+                            let x = timeline_start_x + (x_offset * pixels_per_us) as f32;
+
+                            // Skip points outside visible area
+                            if x < timeline_start_x || x > timeline_end_x {
                                 continue;
                             }
 
-                            // Generate a color variation for each series
-                            let series_color = if num_series == 1 {
-                                summary.color
+                            // Calculate Y position (inverted: higher values at top)
+                            let y_normalized = if y_range > 0.0 {
+                                (value - sparkline_data.y_min) / y_range
                             } else {
-                                // Vary the hue slightly for each series
-                                let base_color = summary.color;
-                                let (r, g, b, a) = (
-                                    base_color.r(),
-                                    base_color.g(),
-                                    base_color.b(),
-                                    base_color.a(),
-                                );
-                                // Shift brightness/saturation for each series
-                                let factor =
-                                    0.7 + 0.3 * (series_idx as f32 / num_series.max(1) as f32);
-                                Color32::from_rgba_unmultiplied(
-                                    (r as f32 * factor).min(255.0) as u8,
-                                    (g as f32 * factor).min(255.0) as u8,
-                                    (b as f32 * factor).min(255.0) as u8,
-                                    a,
-                                )
+                                0.5
                             };
+                            let y = row_bottom - (y_normalized as f32 * row_height);
 
-                            // Build points for the polyline
-                            let mut line_points: Vec<Pos2> = Vec::new();
+                            line_points.push(Pos2::new(x, y));
+                        }
 
-                            for &(time, value) in &series.points {
-                                // Calculate X position
-                                let x_offset = (time - display_start.0) as f64;
-                                let x = timeline_start_x + (x_offset * pixels_per_us) as f32;
-
-                                // Skip points outside visible area
-                                if x < timeline_start_x || x > timeline_end_x {
-                                    continue;
-                                }
-
-                                // Calculate Y position (inverted: higher values at top)
-                                let y_normalized = if y_range > 0.0 {
-                                    (value - sparkline_data.y_min) / y_range
-                                } else {
-                                    0.5
-                                };
-                                let y = row_bottom - (y_normalized as f32 * row_height);
-
-                                line_points.push(Pos2::new(x, y));
-                            }
-
-                            // Draw the sparkline as a polyline
-                            if line_points.len() >= 2 {
-                                ui.painter().add(egui::Shape::line(
-                                    line_points,
-                                    Stroke::new(1.0, series_color),
-                                ));
-                            } else if line_points.len() == 1 {
-                                // Single point - draw a small circle
-                                ui.painter()
-                                    .circle_filled(line_points[0], 2.0, series_color);
-                            }
+                        // Draw the sparkline as a polyline
+                        if line_points.len() >= 2 {
+                            ui.painter().add(egui::Shape::line(
+                                line_points,
+                                Stroke::new(1.0, series_color),
+                            ));
+                        } else if line_points.len() == 1 {
+                            // Single point - draw a small circle
+                            ui.painter()
+                                .circle_filled(line_points[0], 2.0, series_color);
                         }
                     }
-                } else if let Some((start_ts, end_ts)) = summary.timestamp_range {
-                    // Fallback: Draw bar if we have timestamp data but no sparkline
+                }
+
+                // Fallback: Draw bar if we have timestamp data but no sparkline points
+                if !has_sparkline_points && let Some((start_ts, end_ts)) = summary.timestamp_range {
                     let start_offset = (start_ts.0 - display_start.0) as f64;
                     let end_offset = (end_ts.0 - display_start.0) as f64;
 
@@ -672,13 +827,6 @@ impl WidgetSystem for DataOverviewWidget<'_, '_> {
             timeline_start_x,
             available_rect.y_range(),
             Stroke::new(1.0, scheme.border_primary),
-        );
-
-        // Handle interactions
-        let response = ui.interact(
-            available_rect,
-            ui.id().with("data_overview"),
-            Sense::click_and_drag(),
         );
 
         // Check if pointer is over the timeline area (right of labels)
@@ -817,10 +965,13 @@ fn process_time_range_and_count(
 /// Returns Vec of series, where each series is a Vec of values (one per row)
 fn extract_values_from_array(array: &dyn Array) -> Option<Vec<Vec<f64>>> {
     use arrow::array::{
-        FixedSizeListArray, Float32Array, Int32Array, Int64Array, UInt32Array, UInt64Array,
+        BooleanArray, FixedSizeListArray, Float32Array, Int8Array, Int16Array, Int32Array,
+        Int64Array, ListArray, UInt8Array, UInt16Array, UInt32Array, UInt64Array,
     };
 
     // Handle FixedSizeListArray (vector/matrix types) - return each element as a separate series
+    // NOTE: We use f64::NAN for null rows to preserve array indices, ensuring 1:1
+    // correspondence with the timestamp array.
     if let Some(list_array) = array.as_any().downcast_ref::<FixedSizeListArray>() {
         let values_array = list_array.values();
         let list_size = list_array.value_length() as usize;
@@ -838,12 +989,19 @@ fn extract_values_from_array(array: &dyn Array) -> Option<Vec<Vec<f64>>> {
 
         for row in 0..num_rows {
             if list_array.is_null(row) {
+                // Push NAN for each element to preserve index alignment with timestamps
+                for s in series.iter_mut() {
+                    s.push(f64::NAN);
+                }
                 continue;
             }
             let start = row * list_size;
             for (elem_idx, s) in series.iter_mut().enumerate() {
                 if start + elem_idx < inner_values.len() {
                     s.push(inner_values[start + elem_idx]);
+                } else {
+                    // Push NAN for missing data to preserve index alignment with timestamps
+                    s.push(f64::NAN);
                 }
             }
         }
@@ -851,90 +1009,96 @@ fn extract_values_from_array(array: &dyn Array) -> Option<Vec<Vec<f64>>> {
         return Some(series);
     }
 
+    // Handle ListArray (variable-size lists) - use first element of each row as a single series
+    // For variable-size lists, we can't split into multiple series since sizes vary per row.
+    // Instead, extract the first element of each list to create a single series.
+    if let Some(list_array) = array.as_any().downcast_ref::<ListArray>() {
+        let values_array = list_array.values();
+        let num_rows = list_array.len();
+
+        // Extract inner values as a flat array
+        let inner_series = extract_values_from_array(values_array.as_ref())?;
+        let inner_values = inner_series.into_iter().next()?;
+
+        // For each row, take the first element (or NAN if empty/null)
+        let mut series = Vec::with_capacity(num_rows);
+        for row in 0..num_rows {
+            if list_array.is_null(row) {
+                series.push(f64::NAN);
+                continue;
+            }
+            let start = list_array.value_offsets()[row] as usize;
+            let end = list_array.value_offsets()[row + 1] as usize;
+            if start < end && start < inner_values.len() {
+                series.push(inner_values[start]);
+            } else {
+                series.push(f64::NAN);
+            }
+        }
+
+        return Some(vec![series]);
+    }
+
     // Handle scalar numeric types - return as single series
     // NOTE: We use f64::NAN for null values to preserve array indices.
     // This ensures 1:1 correspondence with the timestamp array, allowing
     // sparklines to show gaps where data is missing.
-    let values: Option<Vec<f64>> = if let Some(vals) = array.as_any().downcast_ref::<Float64Array>()
-    {
-        Some(
-            (0..vals.len())
-                .map(|i| {
-                    if vals.is_null(i) {
-                        f64::NAN
-                    } else {
-                        vals.value(i)
-                    }
-                })
-                .collect(),
-        )
-    } else if let Some(vals) = array.as_any().downcast_ref::<Float32Array>() {
-        Some(
-            (0..vals.len())
-                .map(|i| {
-                    if vals.is_null(i) {
-                        f64::NAN
-                    } else {
-                        vals.value(i) as f64
-                    }
-                })
-                .collect(),
-        )
-    } else if let Some(vals) = array.as_any().downcast_ref::<Int64Array>() {
-        Some(
-            (0..vals.len())
-                .map(|i| {
-                    if vals.is_null(i) {
-                        f64::NAN
-                    } else {
-                        vals.value(i) as f64
-                    }
-                })
-                .collect(),
-        )
-    } else if let Some(vals) = array.as_any().downcast_ref::<Int32Array>() {
-        Some(
-            (0..vals.len())
-                .map(|i| {
-                    if vals.is_null(i) {
-                        f64::NAN
-                    } else {
-                        vals.value(i) as f64
-                    }
-                })
-                .collect(),
-        )
-    } else if let Some(vals) = array.as_any().downcast_ref::<UInt64Array>() {
-        Some(
-            (0..vals.len())
-                .map(|i| {
-                    if vals.is_null(i) {
-                        f64::NAN
-                    } else {
-                        vals.value(i) as f64
-                    }
-                })
-                .collect(),
-        )
-    } else {
-        array.as_any().downcast_ref::<UInt32Array>().map(|vals| {
-            (0..vals.len())
-                .map(|i| {
-                    if vals.is_null(i) {
-                        f64::NAN
-                    } else {
-                        vals.value(i) as f64
-                    }
-                })
-                .collect()
-        })
-    };
 
-    values.map(|v| vec![v])
+    // Helper macro to extract values from a typed array
+    macro_rules! extract_numeric {
+        ($array:expr, $type:ty) => {
+            if let Some(vals) = $array.as_any().downcast_ref::<$type>() {
+                return Some(vec![
+                    (0..vals.len())
+                        .map(|i| {
+                            if vals.is_null(i) {
+                                f64::NAN
+                            } else {
+                                vals.value(i) as f64
+                            }
+                        })
+                        .collect(),
+                ]);
+            }
+        };
+    }
+
+    // Try all numeric types
+    extract_numeric!(array, Float64Array);
+    extract_numeric!(array, Float32Array);
+    extract_numeric!(array, Int64Array);
+    extract_numeric!(array, Int32Array);
+    extract_numeric!(array, Int16Array);
+    extract_numeric!(array, Int8Array);
+    extract_numeric!(array, UInt64Array);
+    extract_numeric!(array, UInt32Array);
+    extract_numeric!(array, UInt16Array);
+    extract_numeric!(array, UInt8Array);
+
+    // Handle boolean as 0.0/1.0
+    if let Some(vals) = array.as_any().downcast_ref::<BooleanArray>() {
+        return Some(vec![
+            (0..vals.len())
+                .map(|i| {
+                    if vals.is_null(i) {
+                        f64::NAN
+                    } else if vals.value(i) {
+                        1.0
+                    } else {
+                        0.0
+                    }
+                })
+                .collect(),
+        ]);
+    }
+
+    None
 }
 
-/// Process sparkline data result from SQL query
-/// Note: Server-side downsampling via ROW_NUMBER() is already applied, so we just parse the data directly
+/// Process sparkline data result from SparklineQuery.
+/// The server has already applied LTTB downsampling and returns a simple schema:
+/// - time: TimestampMicrosecond
+/// - value: Float64 (first scalar element from vector types)
 fn process_sparkline_result(
     table_name: &str,
     batch: &RecordBatch,
@@ -952,11 +1116,11 @@ fn process_sparkline_result(
         return; // Missing time column - skip silently
     };
 
-    // Find first non-time, non-rn column for data (skip 'rn' from ROW_NUMBER query)
+    // Find the value column (from SparklineQuery it's always "value")
     let value_idx = schema
         .fields()
         .iter()
-        .position(|f| f.name() != "time" && f.name() != "rn");
+        .position(|f| f.name() == "value" || (f.name() != "time" && f.name() != "rn"));
     let Some(value_idx) = value_idx else {
         return; // Missing data column - skip silently
     };
@@ -972,46 +1136,45 @@ fn process_sparkline_result(
         return; // Non-timestamp time column - skip silently
     };
 
-    // Extract values from the data column (may be multiple series for vector types)
-    let Some(value_series) = extract_values_from_array(value_array.as_ref()) else {
-        return; // Failed to extract values - skip silently
-    };
-
-    if value_series.is_empty() || value_series[0].is_empty() {
-        return;
-    }
+    // For SparklineQuery, values are always Float64
+    // Fall back to extract_values_from_array for backward compatibility with SQLQuery
+    let values: Vec<f64> =
+        if let Some(float_array) = value_array.as_any().downcast_ref::<Float64Array>() {
+            float_array.values().to_vec()
+        } else {
+            // Fallback for complex types (backward compat with old SQLQuery results)
+            let Some(value_series) = extract_values_from_array(value_array.as_ref()) else {
+                return;
+            };
+            if value_series.is_empty() || value_series[0].is_empty() {
+                return;
+            }
+            value_series[0].clone()
+        };
 
     let point_count = timestamps.len();
 
-    // Build points for each series and track global Y range
-    // No downsampling needed - server already handled it via ROW_NUMBER()
+    // Build points - server already did LTTB downsampling, no client-side downsampling needed
     let mut y_min = f64::INFINITY;
     let mut y_max = f64::NEG_INFINITY;
+    let mut points = Vec::with_capacity(point_count);
 
-    let series: Vec<SparklineSeries> = value_series
-        .iter()
-        .map(|values| {
-            let mut points = Vec::with_capacity(point_count);
-
-            // Iterate timestamps and values together - they have 1:1 correspondence
-            // since extract_values_from_array preserves array indices using NAN for nulls
-            for (i, &value) in values.iter().enumerate() {
-                if timestamps.is_null(i) {
-                    continue;
-                }
-                // Skip NAN values - this creates gaps in the sparkline where data is missing
-                if value.is_nan() {
-                    continue;
-                }
-                let time = timestamps.value(i);
-                points.push((time, value));
-                y_min = y_min.min(value);
-                y_max = y_max.max(value);
-            }
-
-            SparklineSeries { points }
-        })
-        .collect();
+    for (i, &value) in values.iter().enumerate() {
+        if i >= timestamps.len() {
+            break;
+        }
+        if timestamps.is_null(i) {
+            continue;
+        }
+        // Skip NAN values - this creates gaps in the sparkline where data is missing
+        if value.is_nan() {
+            continue;
+        }
+        let time = timestamps.value(i);
+        points.push((time, value));
+        y_min = y_min.min(value);
+        y_max = y_max.max(value);
+    }
 
     // Ensure we have some Y range for flat lines
     if (y_max - y_min).abs() < 1e-10 {
@@ -1022,7 +1185,7 @@ fn process_sparkline_result(
     sparklines.insert(
         table_name.to_string(),
         SparklineData {
-            series,
+            series: vec![SparklineSeries { points }],
             y_min,
             y_max,
             raw_point_count: point_count,
@@ -1032,48 +1195,34 @@ fn process_sparkline_result(
 
 /// System that triggers component time range queries when components become available.
 /// This ensures filtering happens even if the Data Overview panel isn't displayed.
-/// The panel's own refresh logic handles periodic updates for live data.
+/// Queries are run once on load - no periodic refresh.
+/// Initialize time range queries by collecting table names.
+/// The actual batched queries are handled by DataOverviewPane::ui_system to avoid
+/// RequestId overflow (RequestId is u8, max 255 concurrent requests).
 pub fn trigger_time_range_queries(
     eql_context: Res<EqlContext>,
     mut time_ranges: ResMut<ComponentTimeRanges>,
-    mut commands: Commands,
 ) {
-    // Check if we should start queries or handle stale queries
-    let should_start = match &time_ranges.state {
-        TimeRangeQueryState::NotStarted => true,
-        TimeRangeQueryState::QueryingTimeRanges(start)
-        | TimeRangeQueryState::QueryingSparklines(start) => {
-            // Timeout stale queries after 30 seconds and reset to NotStarted
-            if start.elapsed() > Duration::from_secs(30) {
-                time_ranges.state = TimeRangeQueryState::NotStarted;
-                true
-            } else {
-                false
-            }
-        }
-        TimeRangeQueryState::Ready => false, // Panel handles refresh
-        TimeRangeQueryState::Error(_) => true,
-    };
-
-    if !should_start {
+    // Only initialize when state is NotStarted
+    if !matches!(time_ranges.state, TimeRangeQueryState::NotStarted) {
         return;
     }
 
-    // Collect components
+    // Collect table names
     fn collect_table_names(
         parts: &std::collections::BTreeMap<String, eql::ComponentPart>,
-        result: &mut Vec<String>,
+        result: &mut Vec<(ComponentId, String)>,
     ) {
         for part in parts.values() {
             if let Some(component) = &part.component {
                 let table_name = component_to_table_name(&component.name);
-                result.push(table_name);
+                result.push((part.id, table_name));
             }
             collect_table_names(&part.children, result);
         }
     }
 
-    let mut table_names: Vec<String> = Vec::new();
+    let mut table_names: Vec<(ComponentId, String)> = Vec::new();
     collect_table_names(&eql_context.0.component_parts, &mut table_names);
 
     // Skip if no components yet
@@ -1081,45 +1230,10 @@ pub fn trigger_time_range_queries(
         return;
     }
 
-    // Start querying time ranges (phase 1 only - sparklines handled by panel)
+    // Initialize query state - actual queries handled by DataOverviewPane::ui_system
     time_ranges.state = TimeRangeQueryState::QueryingTimeRanges(Instant::now());
     time_ranges.total_queries = table_names.len();
-    time_ranges.pending_queries = table_names.len();
-
-    // Query each table individually
-    for table_name in table_names {
-        let table_name_clone = table_name.clone();
-        let query = format!(
-            "SELECT min(time) as min_time, max(time) as max_time, count(*) as row_count FROM {}",
-            table_name
-        );
-
-        commands.send_req_reply(
-            SQLQuery(query),
-            move |In(res): In<Result<ArrowIPC<'static>, ErrorResponse>>,
-                  mut time_ranges: ResMut<ComponentTimeRanges>| {
-                time_ranges.pending_queries = time_ranges.pending_queries.saturating_sub(1);
-
-                if let Ok(ipc) = res {
-                    let mut decoder = arrow::ipc::reader::StreamDecoder::new();
-                    if let Some(batch_data) = ipc.batch {
-                        let mut buffer = arrow::buffer::Buffer::from(batch_data.into_owned());
-                        if let Some(batch) = decoder.decode(&mut buffer).ok().and_then(|b| b) {
-                            process_time_range_and_count(
-                                &table_name_clone,
-                                &batch,
-                                &mut time_ranges,
-                            );
-                        }
-                    }
-                }
-
-                if time_ranges.pending_queries == 0 {
-                    // Transition to Ready - the panel will handle sparkline queries
-                    time_ranges.state = TimeRangeQueryState::Ready;
-                }
-                true
-            },
-        );
-    }
+    time_ranges.completed_queries = 0;
+    time_ranges.current_batch = 0;
+    time_ranges.tables_to_query = table_names.into_iter().map(|(_a, b)| b).collect();
 }

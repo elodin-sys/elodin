@@ -13,7 +13,7 @@ This monorepo contains the source code for all Elodin simulation and flight soft
   - [`mekf`](./fsw/mekf) (FSW application): A Multiplicative Extended Kalman Filter implementation that fuses sensor data to estimate vehicle attitude.
   - [`sensor-fw`](./fsw/sensor-fw): Aleph expansion board firmware that streams sensor data (IMU, mag, baro) to the Orin over USB/UART.
 - Simulation software
-  - [`nox-py`](./libs/nox-py): Python version of `nox-ecs`, that works with JAX.
+  - [`nox-py`](./libs/nox-py): Python SDK (includes ECS and JAX integration).
 - [Editor](./apps/elodin): 3D viewer and graphing tool for visualizing both simulation and flight data.
 
 <h2 align="center">
@@ -67,6 +67,10 @@ python3 examples/rocket/main.py run
 
 Open the Elodin editor in a new nix develop shell and connect to the local server
 
+```sh
+elodin editor
+```
+
 ---
 
 ## Python SDK Development Setup (Nix-based continued)
@@ -78,9 +82,7 @@ Open the Elodin editor in a new nix develop shell and connect to the local serve
 # In a new terminal
 nix develop
 # build the SDK python wheel
-uv venv --python 3.12 && \
-source .venv/bin/activate && \
-uvx maturin develop --uv --manifest-path=libs/nox-py/Cargo.toml
+install-elodin py
 # use the newly built wheel
 python3 examples/rocket/main.py run
 ```
@@ -117,7 +119,7 @@ just install
 
 ### Python Development (Local Setup)
 ```sh
-uv venv --python 3.12
+uv venv --python 3.13
 source .venv/bin/activate
 uvx maturin develop --uv --manifest-path=libs/nox-py/Cargo.toml
 

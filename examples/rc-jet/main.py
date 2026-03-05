@@ -130,14 +130,28 @@ def setup_world(config: BDXConfig) -> tuple[el.World, el.EntityId, el.EntityId]:
                     graph "bdx.aero_coefs.Cm" name="Pitch Moment Cm"
                 }
             }
+            hsplit name="Navigation" {
+                viewport name="Top-Down View" pos="bdx.world_pos.translate_world(0.0, 0.0, 150.0)" look_at="bdx.world_pos" fov=60.0 show_grid=#true
+                query_plot name="Ground Track (XY)" query="SELECT bdx_world_pos.bdx_world_pos[5], bdx_world_pos.bdx_world_pos[6] FROM bdx_world_pos" type="sql" mode="xy" x_label="X Position (m)" y_label="Y Position (m)" auto_refresh=#true refresh_interval=500 {
+                    color cyan
+                }
+            }
         }
 
         object_3d bdx.world_pos {
             glb path="f22.glb" scale=0.01 translate="(0.0, 0.0, 0.0)" rotate="(0.0, 0.0, 0.0)"
+            icon builtin="flight_takeoff" {
+                visibility_range min=50.0 fade_distance=50.0
+                color 76 175 80
+            }
         }
         
         object_3d target.world_pos {
             glb path="edu-450-v2-drone.glb"
+            icon builtin="adjust" {
+                visibility_range min=50.0 fade_distance=50.0
+                color 244 67 54
+            }
         }
         
         vector_arrow "(1, 0, 0)" origin="bdx.world_pos" scale=1.0 name="Forward (X)" show_name=#true body_frame=#true {
@@ -188,6 +202,6 @@ world.recipe(controller)
 world.run(
     sim_system,
     sim_time_step=config.dt,
-    run_time_step=2 * config.dt,  # Setting this higher than sim allows for real-time control
+    run_time_step=config.dt,
     max_ticks=config.total_ticks,
 )

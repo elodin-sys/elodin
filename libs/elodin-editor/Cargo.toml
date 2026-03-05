@@ -10,12 +10,14 @@ publish = false
 cargo-clippy = []
 inspector = ["dep:bevy-inspector-egui", "bevy_geo_frames/inspector"]
 debug = ["big_space/debug"]
+tracy = ["bevy/trace_tracy"]
 
 [dependencies]
 # math
 nox.path = "../nox"
 nox.default-features = false
 egui_material_icons = "0.5"
+ab_glyph = "0.2"
 
 # bevy
 bevy.version = "0.17"
@@ -57,9 +59,11 @@ impeller2.features = ["hifitime"]
 impeller2-wkt.path = "../../libs/impeller2/wkt"
 impeller2-wkt.features = ["bevy", "nox", "gui", "std"]
 impeller2-kdl.path = "../../libs/impeller2/kdl"
+bevy_mat3_material.path = "../bevy_mat3_material"
 toml.version = "0.8"
 serde = { version = "1.0.196", features = ["derive"] }
 serde_json = "1"
+tracing = "0.1"
 
 # search
 fuzzy-matcher = "0.3.7"
@@ -104,6 +108,7 @@ eql.path = "../db/eql"
 bevy-inspector-egui.version = "0.35"
 bevy-inspector-egui.optional = true
 bevy_defer = "0.15"
+bitvec = "1.0.1"
 
 
 [target.'cfg(target_family = "wasm")'.dependencies]
@@ -132,6 +137,8 @@ impeller2-bevy.path = "../../libs/impeller2/bevy"
 impeller2-bevy.features = ["tcp"]
 impeller2-bevy.default-features = false
 
+# 3D text for ViewCube labels
+bevy_fontmesh = "0.1.4"
 
 # macos
 [target.'cfg(target_os = "macos")'.dependencies]
@@ -151,3 +158,6 @@ image.features = ["png"]
 [target.'cfg(not(target_os = "macos"))'.dependencies]
 openh264 = "0.8"
 pic-scale = "0.6"
+
+# [patch.crates-io]
+# bevy_editor_cam = { path = "../bevy_editor_cam" }

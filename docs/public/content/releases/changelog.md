@@ -13,6 +13,49 @@ order = 1
 +++
 
 
+## v0.16
+
+### v0.16.1
+- **(feat)** Upgrade 3D axes widget to cube with UI affordances like reset-view button. (#456)
+- **(feat)** Add real-time, performant editor playback. (#480)
+- **(feat)** Add `elodin editor --kdl <file.kdl>` CLI option. (#478)
+- **(feat)** Add `elodin-db --replay`. (#471)
+- **(feat)** Add `elodin-db --follow`. (#489)
+- **(feat)** Display replay speed. (#486)
+- **(feat)** Hold `Alt/Option` to reveal zoom-in button. (#492)
+- **(feat)** Animate joints on GLB files via EQL. (#461)
+- **(feat)** Add `Timestamp_NS` to `db.hpp`. (#494)
+- **(feat)** Improve OBS video stream and latency. (#482)
+- **(fix)** Fix RC Jet flicker. (#487)
+- **(fix)** Set editor default playback speed to `1x`. (#485)
+- **(fix)** Make `elodin-db merge time-align` use milliseconds. (#470)
+
+### v0.16.0
+- **(feat)** Add elodin-db subcommands: `info`, `merge`, `prune`, `time-align`, `truncate`, `drop`. (#410, #437)
+- **(feat)** Add `@elodin.map_seq` to preserve `cond()` behavior. (#444)
+- **(feat)** Right-click on tab title shows context menu to open inspector or rename. (#440)
+- **(feat)** Add `pre_step` & `ctx.truncate` to Elodin Sim. (#400)
+- **(feat)** Add `StepContext.write_component()` custom timestamp. (#407)
+- **(feat)** Add Component Name to Time Travel Warning. (#404)
+- **(feat)** Kill recipes via the StepContext. (#413)
+- **(feat)** Inspector/Hierarchy sidebars per window. (#385)
+- **(feat)** Add default Data Overview Panel. (#373)
+- **(feat)** Add Color Schemes UI Palette. (#372)
+- **(feat)** Add Bitcraze Crazyflie Example. (#388)
+- **(feat)** Add Lockstep SITL Example with Betaflight. (#375)
+- **(feat)** Add Rocket Barrowman Example. (#274)
+- **(feat)** Push Betaflight SITL to native 4khz. (#381)
+- **(feat:aleph)** Bump jetpack-nixos dependency. (#372)
+- **(fix)** Fix UDP receive reconnect. (#355)
+- **(fix:aleph)** Fix b2b DT for peripheral support.
+- **(fix:aleph)** Clean up aleph eth and systemd-boot.
+- **(fix:aleph)** Update aleph template.
+- **(chore)** Update Bevy to 0.17. (#399)
+- **(chore)** Update bevy_egui to 0.36.0. (#398)
+- **(chore)** Update Deepstreamer version to 7.1. (#389)
+- **(doc)** Document Command Palette. (#380)
+- **(doc)** Document Color Schemes. (#372)
+
 ## v0.15
 
 ### v0.15.5
@@ -142,7 +185,7 @@ order = 1
   })
 
   ```
-- **(feat)** Add VTableStream to elodin-db. VTableStream lets you specify a vtable for the database to populate, and have data streamed directly into it. You can also specify aggreator operations like `mean`. For example to setup a stream that calculates the mean of every 10 values:
+- **(feat)** Add VTableStream to elodin-db. VTableStream lets you specify a vtable for the database to populate, and have data streamed directly into it. You can also specify aggregator operations like `mean`. For example to setup a stream that calculates the mean of every 10 values:
 
   ```lua
   client:vtable_stream({field(0, 4, mean(10, schema("f32", {}, pair(1, "temp"))))})

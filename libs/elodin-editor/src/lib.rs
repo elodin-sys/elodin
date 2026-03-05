@@ -14,7 +14,7 @@ use bevy::{
     math::{DQuat, DVec3},
     pbr::wireframe::{WireframeConfig, WireframePlugin},
     prelude::*,
-    window::{PresentMode, PrimaryWindow, WindowRef, WindowResolution},
+    window::{PrimaryWindow, WindowRef, WindowResolution},
     winit::{WINIT_WINDOWS, WinitSettings},
 };
 use bevy_editor_cam::{SyncCameraPosition, controller::component::EditorCam};
@@ -29,18 +29,21 @@ use impeller2::types::{ComponentId, OwnedPacket};
 use impeller2::types::{Msg, Timestamp};
 use impeller2_bevy::{
     ComponentMetadataRegistry, ComponentPathRegistry, ComponentSchemaRegistry, ComponentValueMap,
-    CurrentStreamId, EntityMap, PacketHandlerInput, PacketHandlers, PacketTx,
+    EntityMap, PacketHandlerInput, PacketHandlers,
 };
-use impeller2_wkt::{CurrentTimestamp, NewConnection, Object3D, SetStreamState, WorldPos};
+use impeller2_wkt::{CurrentTimestamp, NewConnection, Object3D, WorldPos};
 use impeller2_wkt::{EarliestTimestamp, LastUpdated};
 use nox::Tensor;
 use object_3d::create_object_3d_entity;
+use plugins::frustum::FrustumPlugin;
+use plugins::frustum_intersection::FrustumIntersectionPlugin;
 use plugins::gizmos::GizmoPlugin;
 use plugins::navigation_gizmo::{NavigationGizmoPlugin, RenderLayerAlloc};
+use plugins::view_cube::{ViewCubeConfig, ViewCubePlugin};
 use ui::{
     UI_ORDER_BASE,
     colors::{ColorExt, get_scheme},
-    create_egui_context,
+    create_egui_context, default_present_mode,
     inspector::viewport::set_viewport_pos,
     plot::{CollectedGraphData, gpu::LineHandle},
     tiles,
@@ -48,15 +51,13 @@ use ui::{
 };
 use bevy_geo_frames::{GeoPosition, GeoRotation};
 
+pub mod icon_rasterizer;
+pub mod iter;
 pub mod object_3d;
 mod offset_parse;
-mod plugins;
+pub mod plugins;
 pub mod ui;
 pub mod vector_arrow;
-
-const fn default_present_mode() -> PresentMode {
-    PresentMode::Fifo
-}
 
 #[cfg(not(target_family = "wasm"))]
 pub mod run;
@@ -103,6 +104,10 @@ impl Plugin for EmbeddedAssetPlugin {
         embedded_asset!(app, "assets/icons/plot.png");
         embedded_asset!(app, "assets/icons/viewport.png");
         embedded_asset!(app, "assets/icons/entity.png");
+        // Font for ViewCube labels
+        embedded_asset!(app, "assets/fonts/Roboto-Bold.ttf");
+        // Axes Cube 3D model
+        embedded_asset!(app, "assets/axes-cube.glb");
     }
 }
 
@@ -130,7 +135,9 @@ impl Plugin for EditorPlugin {
         } else {
             bevy::window::CompositeAlphaMode::Opaque
         };
-        let winit_settings = if cfg!(target_os = "macos") {
+        let winit_settings = if cfg!(feature = "tracy") {
+            WinitSettings::continuous()
+        } else if cfg!(target_os = "macos") {
             WinitSettings {
                 focused_mode: bevy::winit::UpdateMode::Reactive {
                     wait: Duration::from_millis(16),
@@ -184,7 +191,7 @@ impl Plugin for EditorPlugin {
                     .disable::<LogPlugin>()
                     .build(),
             )
-            // Note: we added this because bevy 0.17.3 changed it's behavior
+            // Note: we added this because bevy 0.17.3 changed its behavior
             // which broke bevy_editor_cam. See here:
             // https://github.com/aevyrie/bevy_editor_cam/issues/61
             .insert_resource(PickingSettings {
@@ -194,6 +201,10 @@ impl Plugin for EditorPlugin {
             .insert_resource(winit_settings)
             .init_resource::<tiles::ViewportContainsPointer>()
             .add_plugins(bevy_framepace::FramepacePlugin)
+            .insert_resource(
+                bevy_framepace::FramepaceSettings::default()
+                    .with_limiter(bevy_framepace::Limiter::Off),
+            )
             //.add_plugins(DefaultPickingPlugins)
             .add_plugins(bevy_editor_cam::DefaultEditorCamPlugins)
             .add_plugins(big_space::FloatingOriginPlugin::<i128>::new(16_000., 100.))
@@ -201,7 +212,12 @@ impl Plugin for EditorPlugin {
             .add_plugins(EguiPlugin::default())
             .add_plugins(bevy_infinite_grid::InfiniteGridPlugin)
             .add_plugins(NavigationGizmoPlugin)
+            .add_plugins(ViewCubePlugin {
+                config: ViewCubeConfig::editor_mode(),
+            })
             .add_plugins(impeller2_bevy::Impeller2Plugin)
+            .add_plugins(FrustumPlugin)
+            .add_plugins(FrustumIntersectionPlugin)
             .add_plugins(GizmoPlugin)
             .add_plugins(ui::UiPlugin)
             .add_plugins(FrameTimeDiagnosticsPlugin::default())
@@ -217,7 +233,6 @@ impl Plugin for EditorPlugin {
             .add_systems(Update, setup_egui_context)
             //.add_systems(Update, make_entities_selectable)
             .add_systems(PreUpdate, setup_cell)
-            .add_systems(PreUpdate, sync_res::<CurrentTimestamp>)
             .add_systems(PreUpdate, sync_res::<impeller2_wkt::SimulationTimeStep>)
             .add_systems(
                 PreUpdate,
@@ -226,21 +241,32 @@ impl Plugin for EditorPlugin {
             .add_systems(
                 PreUpdate,
                 (
+                    clamp_current_time,
+                    advance_playback,
+                    // Update selection after playback advances to keep line_3d and object_3d in sync.
+                    set_selected_range,
+                    impeller2_bevy::apply_cached_data,
+                    // Keep Object3D WorldPos in lock-step with cached component values
+                    // before transforms are synchronized for rendering.
+                    object_3d::update_object_3d_system,
                     set_floating_origin,
-                    (sync_pos, bevy_geo_frames::big_space::apply_big_translation::<i128>, sync_object_3d, set_viewport_pos),
+                    bevy_geo_frames::big_space::apply_big_translation::<i128>,
+                    sync_object_3d,
+                    set_viewport_pos,
+                    sync_pos,
                 )
                     .chain()
+                    .after(impeller2_bevy::sink)
                     .in_set(PositionSync),
             )
-            .add_systems(Update, sync_paused)
+            .add_systems(Update, impeller2_bevy::backfill_cache)
             .add_systems(Update, ui::data_overview::trigger_time_range_queries)
-            .add_systems(PreUpdate, set_selected_range)
             .add_systems(Update, update_eql_context)
             .add_systems(Update, set_eql_context_range.after(update_eql_context))
             .add_systems(Startup, spawn_ui_cam)
+            .add_systems(Update, ui::video_stream::connect_streams)
             .add_systems(PostUpdate, ui::video_stream::set_visibility)
             .add_systems(PostUpdate, set_clear_color)
-            //.add_systems(Update, clamp_current_time)
             .insert_resource(WireframeConfig {
                 global: false,
                 default_color: Color::WHITE,
@@ -248,6 +274,7 @@ impl Plugin for EditorPlugin {
             .insert_resource(ClearColor(get_scheme().bg_secondary.into_bevy()))
             .insert_resource(TimeRangeBehavior::default())
             .insert_resource(SelectedTimeRange(Timestamp(i64::MIN)..Timestamp(i64::MAX)))
+            .insert_resource(FullTimeRange(Timestamp(0)..Timestamp(1_000_000)))
             .init_resource::<EqlContext>()
             .init_resource::<SyncedObject3d>()
             .init_resource::<ui::data_overview::ComponentTimeRanges>()
@@ -255,7 +282,8 @@ impl Plugin for EditorPlugin {
             .add_plugins(GeoFramePlugin {
                 apply_transforms: false,
                 ..default()
-            });
+            })
+            .add_plugins(bevy_mat3_material::Mat3MaterialPlugin);
         if cfg!(target_os = "windows") || cfg!(target_os = "linux") {
             app.add_systems(Update, handle_drag_resize);
         }
@@ -270,10 +298,11 @@ impl Plugin for EditorPlugin {
         app.add_systems(Update, setup_titlebar);
 
         #[cfg(feature = "inspector")]
-        app.add_systems(Startup, setup_egui_inspector);
-
-        #[cfg(feature = "inspector")]
-        app.add_systems(Update, run_egui_inspector);
+        {
+            app.add_plugins(bevy_inspector_egui::DefaultInspectorConfigPlugin)
+                .add_systems(Startup, setup_egui_inspector)
+                .add_systems(Update, run_egui_inspector);
+        }
 
         // For adding features incompatible with wasm:
         embedded_asset!(app, "./assets/diffuse.ktx2");
@@ -284,6 +313,10 @@ impl Plugin for EditorPlugin {
         app.configure_sets(
             PreUpdate,
             PositionSync.before(bevy_editor_cam::SyncCameraPosition),
+        );
+        app.configure_sets(
+            PostUpdate,
+            bevy_editor_cam::SyncCameraPosition.after(bevy::transform::TransformSystems::Propagate),
         );
     }
 }
@@ -337,6 +370,13 @@ fn setup_egui_global_system(mut egui_global_settings: ResMut<EguiGlobalSettings>
 fn setup_egui_context(mut contexts: Query<&mut EguiContextSettings>) {
     for mut context in &mut contexts {
         context.capture_pointer_input = false;
+        // Workaround for https://github.com/emilk/egui/issues/5008
+        // On Linux, IME activation via set_ime_allowed(true) causes the compositor to
+        // capture Backspace/arrow key events, preventing them from reaching TextEdit.
+        #[cfg(target_os = "linux")]
+        {
+            context.enable_ime = false;
+        }
     }
 }
 
@@ -511,14 +551,6 @@ fn handle_drag_resize(
             let resize_east = cursor_pos.x > size.x - RESIZE_ZONE;
             let resize_north = cursor_pos.y < RESIZE_ZONE;
             let resize_south = cursor_pos.y > size.y - RESIZE_ZONE;
-            if cursor_pos.y < 45.0
-                && !resize_north
-                && !resize_east
-                && !resize_west
-                && mouse_buttons.pressed(MouseButton::Left)
-            {
-                let _ = window.drag_window();
-            }
             let resize_dir = match (resize_west, resize_east, resize_north, resize_south) {
                 (true, _, true, _) => Some(winit::window::ResizeDirection::NorthWest),
                 (_, true, true, _) => Some(winit::window::ResizeDirection::NorthEast),
@@ -687,9 +719,6 @@ fn set_icon_mac() {
     }
 }
 
-#[derive(Component)]
-pub struct EntityConfigured;
-
 pub fn setup_cell(
     query: Query<Entity, (With<WorldPos>, Without<GridCell<i128>>)>,
     mut cmds: Commands,
@@ -733,20 +762,23 @@ impl WorldPosExt for WorldPos {
     }
 }
 
-pub fn sync_paused(
+pub fn advance_playback(
+    time: Res<Time>,
+    mut current_ts: ResMut<CurrentTimestamp>,
     paused: Res<ui::Paused>,
-    event: ResMut<PacketTx>,
-    stream_id: Res<CurrentStreamId>,
+    speed: Res<ui::timeline::PlaybackSpeed>,
+    last_updated: Res<LastUpdated>,
+    earliest: Res<EarliestTimestamp>,
 ) {
-    if paused.is_changed() {
-        event.send_msg(SetStreamState {
-            id: stream_id.0,
-            playing: Some(!paused.0),
-            timestamp: None,
-            time_step: None,
-            frequency: None,
-        })
+    if paused.0 {
+        return;
     }
+    if earliest.0 >= last_updated.0 {
+        return;
+    }
+    let delta_micros = (time.delta_secs_f64() * speed.0 * 1_000_000.0) as i64;
+    let new_ts = Timestamp(current_ts.0.0.saturating_add(delta_micros));
+    current_ts.0 = Timestamp(new_ts.0.clamp(earliest.0.0, last_updated.0.0));
 }
 
 pub fn sync_pos(
@@ -876,6 +908,7 @@ fn sync_object_3d(
     ctx: Res<EqlContext>,
     mut material_assets: ResMut<Assets<StandardMaterial>>,
     mut mesh_assets: ResMut<Assets<Mesh>>,
+    mut mat3_material_assets: ResMut<Assets<bevy_mat3_material::Mat3Material>>,
     mut commands: Commands,
     assets: Res<AssetServer>,
 ) {
@@ -920,6 +953,8 @@ fn sync_object_3d(
             Object3D {
                 eql,
                 mesh: mesh_source,
+                icon: None,
+                mesh_visibility_range: None,
                 aux: (),
                 frame: None,
             },
@@ -927,6 +962,7 @@ fn sync_object_3d(
             &ctx.0,
             &mut material_assets,
             &mut mesh_assets,
+            &mut mat3_material_assets,
             &assets,
         );
         synced_object_3d.0.insert(entity, object_entity);
@@ -941,6 +977,8 @@ fn sync_res<R: Component + Resource + Clone>(q: Query<&R>, mut res: ResMut<R>) {
 
 pub fn setup_clear_state(mut packet_handlers: ResMut<PacketHandlers>, mut commands: Commands) {
     let sys = commands.register_system(clear_state_new_connection);
+    packet_handlers.0.push(sys);
+    let sys = commands.register_system(reset_timestamps_on_new_connection);
     packet_handlers.0.push(sys);
 }
 
@@ -958,6 +996,8 @@ fn clear_state_new_connection(
     mut commands: Commands,
     mut windows_state: Query<(Entity, &mut tiles::WindowState)>,
     primary_window: Single<Entity, With<PrimaryWindow>>,
+    mut telemetry_cache: ResMut<impeller2_bevy::TelemetryCache>,
+    mut backfill_state: ResMut<impeller2_bevy::BackfillState>,
 ) {
     match packet {
         OwnedPacket::Msg(m) if m.id == NewConnection::ID => {}
@@ -969,8 +1009,11 @@ fn clear_state_new_connection(
     component_time_ranges.row_counts.clear();
     component_time_ranges.sparklines.clear();
     component_time_ranges.tables_to_query.clear();
+    component_time_ranges.row_settings.clear();
     component_time_ranges.pending_queries = 0;
     component_time_ranges.total_queries = 0;
+    component_time_ranges.completed_queries = 0;
+    component_time_ranges.current_batch = 0;
     component_time_ranges.state = ui::data_overview::TimeRangeQueryState::NotStarted;
     entity_map.0.retain(|_, entity| {
         if let Ok(mut entity_commands) = commands.get_entity(*entity) {
@@ -1007,6 +1050,25 @@ fn clear_state_new_connection(
     }
     *graph_data = CollectedGraphData::default();
     render_layer_alloc.free_all();
+    *telemetry_cache = impeller2_bevy::TelemetryCache::default();
+    *backfill_state = impeller2_bevy::BackfillState::default();
+}
+
+/// Reset timestamp resources so the next connection initializes correctly.
+/// Registered as a packet handler alongside `clear_state_new_connection`.
+fn reset_timestamps_on_new_connection(
+    PacketHandlerInput { packet, .. }: PacketHandlerInput,
+    mut earliest: ResMut<EarliestTimestamp>,
+    mut latest: ResMut<LastUpdated>,
+    mut current: ResMut<CurrentTimestamp>,
+) {
+    match packet {
+        OwnedPacket::Msg(m) if m.id == NewConnection::ID => {}
+        _ => return,
+    }
+    *earliest = EarliestTimestamp(Timestamp(i64::MAX));
+    *latest = LastUpdated(Timestamp(i64::MIN));
+    current.0 = Timestamp::EPOCH;
 }
 
 #[derive(Resource, Clone)]
@@ -1017,18 +1079,44 @@ impl Default for SelectedTimeRange {
     }
 }
 
+#[derive(Resource, Clone)]
+pub struct FullTimeRange(pub Range<Timestamp>);
+
+/// When present, the Editor operates in replay mode: the timeline reveals data
+/// progressively as `CurrentTimestamp` advances, simulating a live session from
+/// a recorded database.
+#[derive(Resource, Default)]
+pub struct ReplayMode;
+
 pub fn set_selected_range(
     mut selected_range: ResMut<SelectedTimeRange>,
+    mut full_range: ResMut<FullTimeRange>,
     earliest: Res<EarliestTimestamp>,
     latest: Res<LastUpdated>,
+    current_ts: Res<CurrentTimestamp>,
     behavior: Res<TimeRangeBehavior>,
+    replay: Option<Res<ReplayMode>>,
 ) {
-    match behavior.calculate_selected_range(earliest.0, latest.0) {
+    let effective_latest = if replay.is_some() {
+        latest.0.min(current_ts.0)
+    } else {
+        latest.0
+    };
+
+    if earliest.0 < effective_latest {
+        full_range.0 = earliest.0..effective_latest;
+    } else if earliest.0 < latest.0 {
+        full_range.0 = earliest.0..latest.0;
+    }
+
+    match behavior.calculate_selected_range(earliest.0, effective_latest) {
         Ok(range) => {
             selected_range.0 = range;
         }
         Err(TimeRangeError::NoData) => {
-            // Nothing to do yet; keep previous selection until we have a valid dataset.
+            if selected_range.0.start.0 == i64::MIN || selected_range.0.end.0 == i64::MAX {
+                selected_range.0 = Timestamp(0)..Timestamp(1_000_000);
+            }
         }
         Err(TimeRangeError::InvalidRange { start, end }) => {
             bevy::log::warn!(
@@ -1108,6 +1196,8 @@ impl TimeRangeBehavior {
         start: Offset::Earliest(Duration::ZERO),
         end: Offset::Latest(Duration::ZERO),
     };
+    const LAST_5S: Self = Self::last(Duration::from_secs(5));
+    const LAST_15S: Self = Self::last(Duration::from_secs(15));
     const LAST_30S: Self = Self::last(Duration::from_secs(30));
     const LAST_1M: Self = Self::last(Duration::from_secs(60));
     const LAST_5M: Self = Self::last(Duration::from_secs(60 * 5));
@@ -1219,17 +1309,17 @@ fn clamp_range(total_range: Range<Timestamp>, b: Range<Timestamp>) -> Range<Time
 }
 
 pub fn clamp_current_time(
-    range: Res<SelectedTimeRange>,
-    current_timestamp: ResMut<CurrentTimestamp>,
-    packet_tx: Res<PacketTx>,
-    current_stream_id: Res<CurrentStreamId>,
+    earliest: Res<EarliestTimestamp>,
+    latest: Res<LastUpdated>,
+    mut current_timestamp: ResMut<CurrentTimestamp>,
 ) {
-    if range.0.start > range.0.end {
+    if earliest.0 >= latest.0 {
         return;
     }
-    let new_timestamp = current_timestamp.0.clamp(range.0.start, range.0.end);
-    if new_timestamp != current_timestamp.0 {
-        packet_tx.send_msg(SetStreamState::rewind(**current_stream_id, new_timestamp))
+    let previous_timestamp = current_timestamp.0;
+    let new_timestamp = previous_timestamp.clamp(earliest.0, latest.0);
+    if new_timestamp != previous_timestamp {
+        current_timestamp.0 = new_timestamp;
     }
 }
 
@@ -1249,6 +1339,12 @@ pub fn update_eql_context(
         path_reg.0.iter().filter_map(|(id, path)| {
             let schema = component_schema_registry.0.get(id)?;
             let metadata = component_metadata_registry.0.get(id)?;
+
+            // Exclude timestamp source components from the EQL context.
+            if metadata.is_timestamp_source() {
+                return None;
+            }
+
             let mut component = eql::Component::new(metadata.name.clone(), path.id, schema.clone());
             if !metadata.element_names().is_empty() {
                 component.element_names = metadata

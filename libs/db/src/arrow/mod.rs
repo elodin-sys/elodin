@@ -28,9 +28,24 @@ use std::{
 use tracing::{error, info, warn};
 use zerocopy::{Immutable, IntoBytes};
 
+/// Sanitize a string to be a valid SQL table name.
+/// Replaces invalid characters (like '.', '>', '<', '-', etc.) with underscores.
+pub fn sanitize_sql_table_name(name: &str) -> String {
+    name.chars()
+        .map(|c| {
+            if c.is_alphanumeric() || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
+
 use crate::{Component, DB, Error, append_log::AppendLog};
 
 mod fft;
+pub mod lttb;
 use fft::{FftUDF, FrequencyDomainUDF};
 
 impl<T: IntoBytes + Immutable> AppendLog<T> {
@@ -122,7 +137,9 @@ impl Component {
         let name = name.to_string();
         let size = self.schema.dim.iter().product::<usize>();
         let (field, array) = self.as_data_array_range(name.clone(), range);
-        if self.schema.dim.is_empty() || size <= 1 {
+        // Only return early if dim is empty (scalar type, not a FixedSizeList)
+        // When dim is not empty but size == 1, we still need to flatten to extract from FixedSizeList
+        if self.schema.dim.is_empty() {
             return (vec![field], vec![array]);
         }
 
@@ -270,10 +287,9 @@ impl DB {
                     .component_metadata
                     .get(&component.component_id)
                     .unwrap();
-                let component_name = component_metadata
-                    .name
-                    .to_case(convert_case::Case::Snake)
-                    .replace(".", "_");
+                let component_name = sanitize_sql_table_name(
+                    &component_metadata.name.to_case(convert_case::Case::Snake),
+                );
                 let name = component_name.clone();
                 let mem_table = component.as_mem_table(&component_name);
                 ctx.register_table(name, Arc::new(mem_table))?;
@@ -316,110 +332,81 @@ Use a path that exists on the database host."
         };
         let target = format_host_target(&hostname, &resolved);
 
-        match format.clone() {
-            ArchiveFormat::Native => {
-                let snapshot = self.begin_snapshot();
-                self.flush_all()?;
-                let result = self.copy_native(&resolved);
-                drop(snapshot);
-                match result {
-                    Ok(final_path) => {
-                        info!("Saved db to {}", format_host_target(&hostname, &final_path));
-                        Ok(())
+        if let Err(err) = std::fs::create_dir_all(&resolved) {
+            let message = format!("Cannot save db to {}, {}", target, err);
+            error!("{}", message);
+            return Err(Error::Io(io::Error::new(err.kind(), message)));
+        }
+
+        let resolved_dir = resolved.clone();
+        let export_format = format.clone();
+        let flatten_for_csv = matches!(format, ArchiveFormat::Csv);
+        let export: Result<(), Error> = self.with_state(move |state| {
+            for component in state.components.values() {
+                let Some(component_metadata) =
+                    state.component_metadata.get(&component.component_id)
+                else {
+                    continue;
+                };
+
+                let column_name = component_metadata.name.clone();
+                let element_names = component_metadata.element_names();
+
+                let record_batch = if flatten_for_csv {
+                    component.as_flat_record_batch(column_name.clone(), element_names)
+                } else {
+                    component.as_record_batch(column_name.clone())
+                };
+                let schema = record_batch.schema_ref();
+
+                match export_format.clone() {
+                    ArchiveFormat::ArrowIpc => {
+                        let file_name = format!("{column_name}.arrow");
+                        let file_path = resolved_dir.join(file_name);
+                        let mut file = File::create(file_path)?;
+                        let mut writer =
+                            arrow::ipc::writer::FileWriter::try_new(&mut file, schema)?;
+                        writer.write(&record_batch)?;
+                        writer.finish()?;
                     }
-                    Err(Error::Io(source)) => {
-                        let kind = source.kind();
-                        let message = format!("Cannot save db to {}, {}", target, source);
-                        error!("{}", message);
-                        Err(Error::Io(io::Error::new(kind, message)))
+                    #[cfg(feature = "parquet")]
+                    ArchiveFormat::Parquet => {
+                        let file_name = format!("{column_name}.parquet");
+                        let file_path = resolved_dir.join(file_name);
+                        let mut file = File::create(file_path)?;
+                        let mut writer =
+                            parquet::arrow::ArrowWriter::try_new(&mut file, schema.clone(), None)?;
+                        writer.write(&record_batch)?;
+                        writer.close()?;
                     }
-                    Err(err) => {
-                        error!("Cannot save db to {}, {}", target, err);
-                        Err(err)
+                    ArchiveFormat::Csv => {
+                        let file_name = format!("{column_name}.csv");
+                        let file_path = resolved_dir.join(file_name);
+                        let mut file = File::create(file_path)?;
+                        let mut writer = arrow::csv::Writer::new(&mut file);
+                        writer.write(&record_batch)?;
                     }
+                    #[allow(unreachable_patterns)]
+                    _ => return Err(Error::UnsupportedArchiveFormat),
                 }
             }
-            other_format => {
-                if let Err(err) = std::fs::create_dir_all(&resolved) {
-                    let message = format!("Cannot save db to {}, {}", target, err);
-                    error!("{}", message);
-                    return Err(Error::Io(io::Error::new(err.kind(), message)));
-                }
+            Ok(())
+        });
 
-                let resolved_dir = resolved.clone();
-                let export_format = other_format.clone();
-                let flatten_for_csv = matches!(other_format, ArchiveFormat::Csv);
-                let export: Result<(), Error> = self.with_state(move |state| {
-                    for component in state.components.values() {
-                        let Some(component_metadata) =
-                            state.component_metadata.get(&component.component_id)
-                        else {
-                            continue;
-                        };
-
-                        let column_name = component_metadata.name.clone();
-                        let element_names = component_metadata.element_names();
-
-                        let record_batch = if flatten_for_csv {
-                            component.as_flat_record_batch(column_name.clone(), element_names)
-                        } else {
-                            component.as_record_batch(column_name.clone())
-                        };
-                        let schema = record_batch.schema_ref();
-
-                        match export_format.clone() {
-                            ArchiveFormat::ArrowIpc => {
-                                let file_name = format!("{column_name}.arrow");
-                                let file_path = resolved_dir.join(file_name);
-                                let mut file = File::create(file_path)?;
-                                let mut writer =
-                                    arrow::ipc::writer::FileWriter::try_new(&mut file, schema)?;
-                                writer.write(&record_batch)?;
-                                writer.finish()?;
-                            }
-                            #[cfg(feature = "parquet")]
-                            ArchiveFormat::Parquet => {
-                                let file_name = format!("{column_name}.parquet");
-                                let file_path = resolved_dir.join(file_name);
-                                let mut file = File::create(file_path)?;
-                                let mut writer = parquet::arrow::ArrowWriter::try_new(
-                                    &mut file,
-                                    schema.clone(),
-                                    None,
-                                )?;
-                                writer.write(&record_batch)?;
-                                writer.close()?;
-                            }
-                            ArchiveFormat::Csv => {
-                                let file_name = format!("{column_name}.csv");
-                                let file_path = resolved_dir.join(file_name);
-                                let mut file = File::create(file_path)?;
-                                let mut writer = arrow::csv::Writer::new(&mut file);
-                                writer.write(&record_batch)?;
-                            }
-                            #[allow(unreachable_patterns)]
-                            _ => return Err(Error::UnsupportedArchiveFormat),
-                        }
-                    }
-                    Ok(())
-                });
-
-                match export {
-                    Ok(()) => {
-                        info!("Saved db to {}", target);
-                        Ok(())
-                    }
-                    Err(Error::Io(source)) => {
-                        let kind = source.kind();
-                        let message = format!("Cannot save db to {}, {}", target, source);
-                        error!("{}", message);
-                        Err(Error::Io(io::Error::new(kind, message)))
-                    }
-                    Err(err) => {
-                        error!("Cannot save db to {}, {}", target, err);
-                        Err(err)
-                    }
-                }
+        match export {
+            Ok(()) => {
+                info!("Saved db to {}", target);
+                Ok(())
+            }
+            Err(Error::Io(source)) => {
+                let kind = source.kind();
+                let message = format!("Cannot save db to {}, {}", target, source);
+                error!("{}", message);
+                Err(Error::Io(io::Error::new(kind, message)))
+            }
+            Err(err) => {
+                error!("Cannot save db to {}, {}", target, err);
+                Err(err)
             }
         }
     }

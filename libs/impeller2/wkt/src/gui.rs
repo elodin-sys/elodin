@@ -8,6 +8,18 @@ use std::ops::Range;
 use std::time::Duration;
 use strum::{EnumString, IntoStaticStr, VariantNames};
 
+fn default_true() -> bool {
+    true
+}
+
+pub fn default_viewport_frustums_color() -> Color {
+    Color::YELLOW
+}
+
+pub fn default_viewport_frustums_thickness() -> f32 {
+    0.006
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(bound = "T: Serialize + DeserializeOwned")]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::TypePath,))]
@@ -101,6 +113,7 @@ pub enum Panel<T = ()> {
     SchematicTree(Option<String>),
     DataOverview(Option<String>),
     Dashboard(Box<Dashboard<T>>),
+    VideoStream(VideoStream),
 }
 
 impl<T> Panel<T> {
@@ -122,6 +135,7 @@ impl<T> Panel<T> {
             Panel::SchematicTree(name) => name.as_deref().unwrap_or("Tree"),
             Panel::DataOverview(name) => name.as_deref().unwrap_or("Data Overview"),
             Panel::Dashboard(d) => d.root.name.as_deref().unwrap_or("Dashboard"),
+            Panel::VideoStream(v) => v.name.as_deref().unwrap_or("Video Stream"),
         }
     }
 
@@ -166,6 +180,7 @@ impl<T> Panel<T> {
             Panel::DataOverview(name) => Panel::DataOverview(name.clone()),
             Panel::Viewport(v) => Panel::Viewport(v.map_aux(f)),
             Panel::Dashboard(d) => Panel::Dashboard(Box::new(d.map_aux(f))),
+            Panel::VideoStream(v) => Panel::VideoStream(v.clone()),
         }
     }
 
@@ -207,13 +222,31 @@ impl<T> Split<T> {
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
 pub struct Viewport<T = ()> {
     pub fov: f32,
+    #[serde(default)]
+    pub near: Option<f32>,
+    #[serde(default)]
+    pub far: Option<f32>,
+    #[serde(default, alias = "aspect_ratio")]
+    pub aspect: Option<f32>,
     pub active: bool,
     pub show_grid: bool,
     pub show_arrows: bool,
+    #[serde(default)]
+    pub create_frustum: bool,
+    #[serde(default, alias = "show_frustum")]
+    pub show_frustums: bool,
+    #[serde(default = "default_viewport_frustums_color")]
+    pub frustums_color: Color,
+    #[serde(default = "default_viewport_frustums_thickness")]
+    pub frustums_thickness: f32,
+    #[serde(default = "default_true")]
+    pub show_view_cube: bool,
     pub hdr: bool,
     pub name: Option<String>,
     pub pos: Option<String>,
     pub look_at: Option<String>,
+    /// Optional camera up vector in world frame. EQL that evaluates to a 3-vector (e.g. "(0,0,1)" or "pose.direction(0,1,1)" for body-frame direction).
+    pub up: Option<String>,
     #[serde(default)]
     pub frame: Option<bevy_geo_frames::GeoFrame>,
     #[serde(default)]
@@ -225,14 +258,23 @@ impl<T> Viewport<T> {
     pub fn map_aux<U>(&self, f: impl Fn(&T) -> U) -> Viewport<U> {
         Viewport {
             fov: self.fov,
+            near: self.near,
+            far: self.far,
+            aspect: self.aspect,
             active: self.active,
             show_grid: self.show_grid,
             show_arrows: self.show_arrows,
+            create_frustum: self.create_frustum,
+            show_frustums: self.show_frustums,
+            frustums_color: self.frustums_color,
+            frustums_thickness: self.frustums_thickness,
+            show_view_cube: self.show_view_cube,
             hdr: self.hdr,
             name: self.name.clone(),
             pos: self.pos.clone(),
             look_at: self.look_at.clone(),
             frame: self.frame,
+            up: self.up.clone(),
             local_arrows: self.local_arrows.clone(),
             aux: f(&self.aux),
         }
@@ -243,14 +285,23 @@ impl Default for Viewport {
     fn default() -> Self {
         Self {
             fov: 45.0,
+            near: None,
+            far: None,
+            aspect: None,
             active: false,
             show_grid: false,
             show_arrows: true,
+            create_frustum: false,
+            show_frustums: false,
+            frustums_color: default_viewport_frustums_color(),
+            frustums_thickness: default_viewport_frustums_thickness(),
+            show_view_cube: true,
             hdr: false,
             name: None,
             pos: None,
             look_at: None,
             frame: None,
+            up: None,
             local_arrows: Vec::new(),
             aux: (),
         }
@@ -620,6 +671,18 @@ pub fn default_ellipsoid_color() -> Color {
     Color::WHITE
 }
 
+pub fn default_ellipsoid_confidence_interval() -> f32 {
+    70.0
+}
+
+pub fn default_ellipsoid_show_grid() -> bool {
+    false
+}
+
+pub fn default_ellipsoid_grid_color() -> Color {
+    Color::BLACK
+}
+
 pub fn default_glb_scale() -> f32 {
     1.0
 }
@@ -630,6 +693,17 @@ pub fn default_glb_translate() -> (f32, f32, f32) {
 
 pub fn default_glb_rotate() -> (f32, f32, f32) {
     (0.0, 0.0, 0.0)
+}
+
+fn default_glb_animations() -> Vec<JointAnimation> {
+    Vec::new()
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
+pub struct JointAnimation {
+    pub joint_name: String,
+    pub eql_expr: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -643,6 +717,8 @@ pub enum Object3DMesh {
         translate: (f32, f32, f32),
         #[serde(default = "default_glb_rotate")]
         rotate: (f32, f32, f32),
+        #[serde(default = "default_glb_animations")]
+        animations: Vec<JointAnimation>,
     },
     Mesh {
         mesh: Mesh,
@@ -653,6 +729,14 @@ pub enum Object3DMesh {
         scale: String,
         #[serde(default = "default_ellipsoid_color")]
         color: Color,
+        #[serde(default)]
+        error_covariance_cholesky: Option<String>,
+        #[serde(default = "default_ellipsoid_confidence_interval")]
+        error_confidence_interval: f32,
+        #[serde(default = "default_ellipsoid_show_grid")]
+        show_grid: bool,
+        #[serde(default = "default_ellipsoid_grid_color")]
+        grid_color: Color,
     },
 }
 
@@ -664,8 +748,125 @@ impl Object3DMesh {
             scale: default_glb_scale(),
             translate: default_glb_translate(),
             rotate: default_glb_rotate(),
+            animations: default_glb_animations(),
         }
     }
+
+    pub fn path(&self) -> Option<&str> {
+        match self {
+            Self::Glb { path, .. } => Some(path),
+            _ => None,
+        }
+    }
+}
+
+impl fmt::Display for Object3DMesh {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Glb { path, .. } => write!(f, "GLB '{}'", path),
+            Self::Mesh { mesh, .. } => match mesh {
+                Mesh::Sphere { radius } => write!(f, "Sphere(radius={})", radius),
+                Mesh::Box { x, y, z } => write!(f, "Box({}x{}x{})", x, y, z),
+                Mesh::Cylinder { radius, height } => {
+                    write!(f, "Cylinder(radius={}, height={})", radius, height)
+                }
+                Mesh::Plane { width, depth } => write!(f, "Plane({}x{})", width, depth),
+            },
+            Self::Ellipsoid { .. } => write!(f, "Ellipsoid"),
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub enum Object3DIconSource {
+    Path(String),
+    Builtin(String),
+}
+
+pub fn default_icon_color() -> Color {
+    Color {
+        r: 1.0,
+        g: 1.0,
+        b: 1.0,
+        a: 1.0,
+    }
+}
+
+pub fn default_icon_size() -> f32 {
+    32.0
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct VisRange {
+    #[serde(default)]
+    pub min: f32,
+    #[serde(default = "vis_range_default_max")]
+    pub max: f32,
+    #[serde(default)]
+    pub fade_distance: f32,
+}
+
+fn vis_range_default_max() -> f32 {
+    f32::MAX
+}
+
+impl Default for VisRange {
+    fn default() -> Self {
+        Self {
+            min: 0.0,
+            max: f32::MAX,
+            fade_distance: 0.0,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct Object3DIcon {
+    pub source: Object3DIconSource,
+    #[serde(default = "default_icon_color")]
+    pub color: Color,
+    #[serde(default = "default_icon_size")]
+    pub size: f32,
+    #[serde(default)]
+    pub visibility_range: Option<VisRange>,
+}
+
+/// Maps a built-in icon name (snake_case) to its Material Icons Unicode codepoint.
+pub fn builtin_icon_char(name: &str) -> Option<char> {
+    let cp: u32 = match name {
+        "satellite_alt" => 0xeb3a,
+        "satellite" => 0xe562,
+        "rocket_launch" => 0xeb9b,
+        "rocket" => 0xeba5,
+        "flight" => 0xe539,
+        "flight_takeoff" => 0xe53d,
+        "public" => 0xe80b,
+        "language" => 0xe894,
+        "circle" => 0xef4a,
+        "fiber_manual_record" => 0xe061,
+        "star" => 0xe838,
+        "star_outline" => 0xe83a,
+        "location_on" => 0xe0c8,
+        "place" => 0xe55f,
+        "adjust" => 0xe39e,
+        "gps_fixed" => 0xe1b3,
+        "my_location" => 0xe55c,
+        "explore" => 0xe87a,
+        "navigation" => 0xe55d,
+        "near_me" => 0xe569,
+        "diamond" => 0xead5,
+        "hexagon" => 0xeb39,
+        "change_history" => 0xe86b,
+        "lens" => 0xe3fa,
+        "panorama_fish_eye" => 0xe40c,
+        "radio_button_unchecked" => 0xe836,
+        "brightness_1" => 0xe3a6,
+        "flare" => 0xef4e,
+        "wb_sunny" => 0xe430,
+        "bolt" => 0xea0b,
+        _ => return None,
+    };
+    char::from_u32(cp)
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -676,6 +877,9 @@ pub struct Object3D<T = ()> {
     pub mesh: Object3DMesh,
     #[serde(default)]
     pub frame: Option<bevy_geo_frames::GeoFrame>,
+    pub icon: Option<Object3DIcon>,
+    #[serde(default)]
+    pub mesh_visibility_range: Option<VisRange>,
     pub aux: T,
 }
 
@@ -685,6 +889,8 @@ impl<T> Object3D<T> {
             eql: self.eql.clone(),
             mesh: self.mesh.clone(),
             frame: self.frame,
+            icon: self.icon.clone(),
+            mesh_visibility_range: self.mesh_visibility_range.clone(),
             aux: f(&self.aux),
         }
     }
@@ -702,6 +908,14 @@ pub struct ComponentMonitor {
     /// NOTE: It may be nice to allow this to be an EQL expression that we
     /// monitor, which can be a simple component_name.
     pub component_name: String,
+    pub name: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct VideoStream {
+    /// Message name containing H.264 video frames
+    pub msg_name: String,
+    /// Display name for the tile
     pub name: Option<String>,
 }
 
@@ -730,6 +944,15 @@ pub struct QueryPlot<T = ()> {
     pub auto_refresh: bool,
     pub color: Color,
     pub query_type: QueryType,
+    /// Plot mode: TimeSeries (default) or XY for arbitrary X/Y plotting
+    #[serde(default)]
+    pub plot_mode: PlotMode,
+    /// Optional X-axis label (only used in XY mode)
+    #[serde(default)]
+    pub x_label: Option<String>,
+    /// Optional Y-axis label
+    #[serde(default)]
+    pub y_label: Option<String>,
     pub aux: T,
 }
 
@@ -742,6 +965,9 @@ impl<T> QueryPlot<T> {
             auto_refresh: self.auto_refresh,
             color: self.color,
             query_type: self.query_type,
+            plot_mode: self.plot_mode,
+            x_label: self.x_label.clone(),
+            y_label: self.y_label.clone(),
             aux: f(&self.aux),
         }
     }
@@ -752,6 +978,16 @@ pub enum QueryType {
     #[default]
     EQL,
     SQL,
+}
+
+/// Plot mode for query plots - determines how the X-axis is interpreted and displayed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Deserialize, Serialize)]
+pub enum PlotMode {
+    /// Time-series mode: X-axis represents time, labels formatted as durations
+    #[default]
+    TimeSeries,
+    /// XY mode: X-axis represents arbitrary numeric values, labels formatted as numbers
+    XY,
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]

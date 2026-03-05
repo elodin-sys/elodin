@@ -372,6 +372,15 @@ impl ComponentValue {
         }
     }
 
+    pub fn as_view(&self) -> impeller2::types::ComponentView<'_> {
+        impeller2::types::ComponentView::try_from_bytes_shape(
+            self.as_bytes(),
+            self.shape(),
+            self.prim_type(),
+        )
+        .expect("ComponentValue always has valid bytes/shape/type")
+    }
+
     pub fn as_bytes(&self) -> &[u8] {
         match self {
             ComponentValue::U8(x) => x.buf.as_buf().as_bytes(),

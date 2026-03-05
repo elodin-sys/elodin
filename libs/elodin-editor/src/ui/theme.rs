@@ -8,7 +8,7 @@ use crate::ui::colors::{self, get_scheme, with_opacity};
 
 use super::colors::ColorExt;
 
-pub fn set_theme(context: &mut egui::Context) {
+pub fn set_theme(context: &egui::Context) {
     let mut style = (*context.style()).clone();
     let scheme = colors::get_scheme();
 
@@ -60,6 +60,9 @@ pub fn set_theme(context: &mut egui::Context) {
     style.spacing.window_margin = Margin::same(8);
     style.visuals.selection.bg_fill = scheme.highlight.opacity(0.6);
     style.visuals.selection.stroke.color = scheme.highlight;
+
+    // Text cursor (caret) should use text_primary for visibility in both light and dark modes
+    style.visuals.text_cursor.stroke.color = scheme.text_primary;
 
     configure_default_fonts(context);
 

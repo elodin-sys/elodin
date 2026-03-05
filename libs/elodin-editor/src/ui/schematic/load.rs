@@ -1,15 +1,40 @@
+use crate::icon_rasterizer::IconTextureCache;
 use bevy::{ecs::system::SystemParam, prelude::*, window::PrimaryWindow};
 #[cfg(target_os = "macos")]
 use bevy_defer::AsyncCommandsExtension;
 use bevy_egui::egui::{Color32, Id};
 use bevy_infinite_grid::InfiniteGrid;
+use bevy_mat3_material::Mat3Material;
 use egui_tiles::{Container, Tile, TileId};
-use impeller2_bevy::{ComponentPath, ComponentSchemaRegistry};
+use impeller2_bevy::{ComponentPath, ComponentSchemaRegistry, DbMessage};
 use impeller2_kdl::FromKdl;
 use impeller2_kdl::KdlSchematicError;
 use impeller2_wkt::{
     DbConfig, Graph, Line3d, Object3D, Panel, Schematic, VectorArrow3d, Viewport, WindowSchematic,
 };
+
+/// When set (e.g. by CLI `--kdl`), the path is applied to `DbConfig` once so that the schematic
+/// is loaded after connecting to the database.
+#[derive(Resource, Default)]
+pub struct InitialKdlPath(pub Option<PathBuf>);
+
+pub(crate) fn plugin(app: &mut App) {
+    app.init_resource::<InitialKdlPath>();
+}
+
+/// Applies `InitialKdlPath` to `DbConfig` so that `sync_schematic` will load that file.
+/// Runs before `sync_schematic`. Re-applies when the path is missing or different (e.g.
+/// after the connection overwrote DbConfig with metadata) so the schematic loads.
+pub fn apply_initial_kdl_path(
+    mut reader: MessageReader<DbMessage>,
+    initial: Res<InitialKdlPath>,
+) -> Option<PathBuf> {
+    if !reader.read().any(|m| matches!(m, DbMessage::UpdateConfig)) {
+        None
+    } else {
+        initial.0.clone()
+    }
+}
 use miette::{Diagnostic, miette};
 #[cfg(target_os = "linux")]
 use std::time::{Instant, SystemTime};
@@ -72,6 +97,9 @@ pub struct LoadSchematicParams<'w, 's> {
     pub asset_server: Res<'w, AssetServer>,
     pub meshes: ResMut<'w, Assets<Mesh>>,
     pub materials: ResMut<'w, Assets<StandardMaterial>>,
+    pub mat3_materials: ResMut<'w, Assets<Mat3Material>>,
+    pub images: ResMut<'w, Assets<Image>>,
+    pub icon_cache: ResMut<'w, IconTextureCache>,
     pub render_layer_alloc: ResMut<'w, RenderLayerAlloc>,
     pub hdr_enabled: ResMut<'w, HdrEnabled>,
     pub schema_reg: Res<'w, ComponentSchemaRegistry>,
@@ -85,26 +113,37 @@ pub struct LoadSchematicParams<'w, 's> {
 }
 
 pub fn sync_schematic(
+    In(given_path): In<Option<PathBuf>>,
     config: Res<DbConfig>,
     mut params: LoadSchematicParams,
     live_reload_rx: ResMut<SchematicLiveReloadRx>,
     mut modal: ModalDialog,
 ) {
-    if !config.is_changed() {
+    if given_path.is_none() && !config.is_changed() {
         return;
     }
-    if let Some(path) = config.schematic_path() {
-        let path = Path::new(path);
-        if path.try_exists().unwrap_or(false) {
-            if let Err(e) = load_schematic_file(path, &mut params, live_reload_rx) {
+    let has_content_fallback = config.schematic_content().is_some();
+    let path_was_overridden = given_path.is_some();
+    if let Some(path) = given_path.or(config.schematic_path().map(PathBuf::from)) {
+        // NOTE: This path is not resolved yet. We can't test if it exists here.
+        // load_schematic_file resolves it and should do that test there.
+        match load_schematic_file(&path, &mut params, live_reload_rx) {
+            Ok(()) => return,
+            Err(KdlSchematicError::NoSuchFile { .. })
+                if has_content_fallback && !path_was_overridden =>
+            {
+                bevy::log::info!(
+                    "Schematic file {:?} not found; using embedded schematic content fallback",
+                    path.display()
+                );
+            }
+            Err(e) => {
                 modal.dialog_error(
                     format!("Invalid Schematic in {:?}", path.display()),
                     &render_diag(&e),
                 );
                 let report = miette!(e.clone());
                 bevy::log::error!(?report, "Invalid schematic for {path:?}");
-            } else {
-                return;
             }
         }
     }
@@ -116,7 +155,15 @@ pub fn sync_schematic(
         }) else {
             return;
         };
-        params.load_schematic(&schematic, None);
+        match config.schematic_path() {
+            Some(p) => {
+                let base_file = impeller2_kdl::env::schematic_file(Path::new(p));
+                params.load_schematic(&schematic, base_file.parent());
+            }
+            None => {
+                params.load_schematic(&schematic, None);
+            }
+        }
         return;
     }
 
@@ -174,6 +221,11 @@ pub fn load_schematic_file(
     mut live_reload_rx: ResMut<SchematicLiveReloadRx>,
 ) -> Result<(), KdlSchematicError> {
     let resolved_path = impeller2_kdl::env::schematic_file(path);
+    if !resolved_path.try_exists().unwrap_or(false) {
+        return Err(KdlSchematicError::NoSuchFile {
+            path: resolved_path,
+        });
+    }
     let watch_path = resolved_path.clone();
     let (tx, rx) = flume::bounded(1);
     live_reload_rx.set_receiver(rx);
@@ -213,8 +265,8 @@ pub fn load_schematic_file(
     });
     if let Ok(kdl) = std::fs::read_to_string(&resolved_path) {
         let schematic = impeller2_wkt::Schematic::from_kdl(&kdl)?;
-        let base_dir_owned = resolved_path.parent().map(|p| p.to_path_buf());
-        params.load_schematic(&schematic, base_dir_owned.as_deref());
+        let base_dir_maybe = resolved_path.parent();
+        params.load_schematic(&schematic, base_dir_maybe);
         live_reload_rx.record_loaded(&resolved_path);
     }
     Ok(())
@@ -268,11 +320,18 @@ impl LoadSchematicParams<'_, '_> {
             .filter(|elem| matches!(elem, impeller2_wkt::SchematicElem::Panel(_)))
             .count();
         let tabs_parent = tabs_parent_for_panels(&main_state, panel_count);
+        let mut main_ui_state = crate::ui::WindowUiState::default();
 
         for elem in &schematic.elems {
             match elem {
                 impeller2_wkt::SchematicElem::Panel(p) => {
-                    self.spawn_panel(&mut main_state, p, tabs_parent, PanelContext::Main);
+                    self.spawn_panel(
+                        &mut main_state,
+                        &mut main_ui_state,
+                        p,
+                        tabs_parent,
+                        PanelContext::Main,
+                    );
                 }
                 impeller2_wkt::SchematicElem::Object3d(object_3d) => {
                     self.spawn_object_3d(object_3d.clone());
@@ -319,6 +378,9 @@ impl LoadSchematicParams<'_, '_> {
                 }
             }
             let _ = std::mem::replace(&mut window_state.tile_state, main_state);
+            // Apply sidebar visibility from loaded schematic.
+            window_state.ui_state.left_sidebar_visible = main_ui_state.left_sidebar_visible;
+            window_state.ui_state.right_sidebar_visible = main_ui_state.right_sidebar_visible;
             // Resize if necessary.
             //
             #[cfg(not(target_os = "macos"))]
@@ -389,11 +451,13 @@ impl LoadSchematicParams<'_, '_> {
                                 })
                                 .count();
                             let tabs_parent = tabs_parent_for_panels(&tile_state, panel_count);
+                            let mut ui_state = crate::ui::WindowUiState::default();
 
                             for elem in &sec_schematic.elems {
                                 if let impeller2_wkt::SchematicElem::Panel(panel) = elem {
                                     self.spawn_panel(
                                         &mut tile_state,
+                                        &mut ui_state,
                                         panel,
                                         tabs_parent,
                                         PanelContext::Secondary(id),
@@ -423,7 +487,7 @@ impl LoadSchematicParams<'_, '_> {
                                 descriptor,
                                 tile_state,
                                 graph_entities,
-                                ui_state: Default::default(),
+                                ui_state,
                             };
                             self.commands.spawn((id, state));
                         }
@@ -453,15 +517,31 @@ impl LoadSchematicParams<'_, '_> {
         let Ok(expr) = self.eql.0.parse_str(&object_3d.eql) else {
             return;
         };
-        crate::object_3d::create_object_3d_entity(
+        let icon = object_3d.icon.clone();
+        let mesh_vr = object_3d.mesh_visibility_range.clone();
+        let entity = crate::object_3d::create_object_3d_entity(
             &mut self.commands,
             object_3d.clone(),
             expr,
             &self.eql.0,
             &mut self.materials,
             &mut self.meshes,
+            &mut self.mat3_materials,
             &self.asset_server,
         );
+        if let Some(icon) = &icon {
+            crate::object_3d::spawn_billboard_icon(
+                &mut self.commands,
+                entity,
+                icon,
+                mesh_vr.as_ref(),
+                &mut self.materials,
+                &mut self.meshes,
+                &mut self.images,
+                &self.asset_server,
+                &mut self.icon_cache,
+            );
+        }
     }
 
     pub fn spawn_line_3d(&mut self, line_3d: Line3d) {
@@ -525,6 +605,7 @@ impl LoadSchematicParams<'_, '_> {
     fn spawn_panel(
         &mut self,
         tile_state: &mut TileState,
+        ui_state: &mut crate::ui::WindowUiState,
         panel: &Panel,
         parent_id: Option<TileId>,
         context: PanelContext,
@@ -568,7 +649,7 @@ impl LoadSchematicParams<'_, '_> {
                     tile_state.container_titles.insert(tile_id, name);
                 }
                 for (i, panel) in split.panels.iter().enumerate() {
-                    let child_id = self.spawn_panel(tile_state, panel, tile_id, context);
+                    let child_id = self.spawn_panel(tile_state, ui_state, panel, tile_id, context);
                     let Some(tile_id) = tile_id else {
                         continue;
                     };
@@ -599,13 +680,8 @@ impl LoadSchematicParams<'_, '_> {
                     && let Some(Tile::Container(Container::Tabs(root_tabs))) =
                         tile_state.tree.tiles.get(parent_id)
                 {
-                    let has_non_sidebar = root_tabs.children.iter().any(|child_id| {
-                        !crate::ui::tiles::sidebar::tile_is_sidebar(
-                            &tile_state.tree.tiles,
-                            *child_id,
-                        )
-                    });
-                    if !has_non_sidebar {
+                    // Reuse parent if root tabs are empty
+                    if root_tabs.children.is_empty() {
                         reuse_parent = true;
                         tile_id = Some(parent_id);
                         parent_for_children = Some(parent_id);
@@ -622,7 +698,7 @@ impl LoadSchematicParams<'_, '_> {
                 }
 
                 for panel in tabs.iter() {
-                    self.spawn_panel(tile_state, panel, parent_for_children, context);
+                    self.spawn_panel(tile_state, ui_state, panel, parent_for_children, context);
                 }
                 tile_id
             }
@@ -716,14 +792,22 @@ impl LoadSchematicParams<'_, '_> {
                     .name
                     .clone()
                     .unwrap_or_else(|| monitor.component_name.clone());
-                let pane = MonitorPane::new(label, monitor.component_name.clone());
+                let entity = self
+                    .commands
+                    .spawn(super::monitor::MonitorData {
+                        component_name: monitor.component_name.clone(),
+                    })
+                    .id();
+                let pane = MonitorPane::new(entity, label);
                 tile_state.insert_tile(Tile::Pane(Pane::Monitor(pane)), parent_id, false)
             }
             Panel::QueryTable(data) => {
+                let has_query = !data.query.trim().is_empty();
                 let entity = self
                     .commands
                     .spawn(super::query_table::QueryTableData {
                         data: data.clone(),
+                        pending_execution: has_query,
                         ..Default::default()
                     })
                     .id();
@@ -731,7 +815,7 @@ impl LoadSchematicParams<'_, '_> {
                     .name
                     .clone()
                     .filter(|name| !name.trim().is_empty())
-                    .unwrap_or_else(|| "Query".to_string());
+                    .unwrap_or_else(|| "Query Table".to_string());
                 let pane = super::query_table::QueryTablePane {
                     entity,
                     name: label,
@@ -753,7 +837,50 @@ impl LoadSchematicParams<'_, '_> {
                 };
                 tile_state.insert_tile(Tile::Pane(Pane::ActionTile(pane)), parent_id, false)
             }
-            Panel::Inspector | Panel::Hierarchy => None,
+            Panel::VideoStream(video_stream) => {
+                let msg_id = impeller2::types::msg_id(&video_stream.msg_name);
+                let label = video_stream
+                    .name
+                    .clone()
+                    .unwrap_or_else(|| format!("Video Stream {}", video_stream.msg_name));
+
+                let entity = self
+                    .commands
+                    .spawn((
+                        crate::ui::video_stream::VideoStream {
+                            msg_id,
+                            msg_name: video_stream.msg_name.clone(),
+                            ..Default::default()
+                        },
+                        bevy::ui::Node {
+                            position_type: bevy::ui::PositionType::Absolute,
+                            ..Default::default()
+                        },
+                        bevy::prelude::ImageNode {
+                            image_mode: bevy::ui::widget::NodeImageMode::Stretch,
+                            ..Default::default()
+                        },
+                        crate::ui::video_stream::VideoDecoderHandle::default(),
+                        crate::ui::video_stream::VideoFrameCache::default(),
+                    ))
+                    .id();
+
+                let pane = crate::ui::video_stream::VideoStreamPane {
+                    entity,
+                    name: label,
+                };
+                tile_state.insert_tile(Tile::Pane(Pane::VideoStream(pane)), parent_id, false)
+            }
+            // Inspector and Hierarchy are now fixed sidebars, not tile panels.
+            // Set the corresponding sidebar visibility flags so they appear.
+            Panel::Inspector => {
+                ui_state.right_sidebar_visible = true;
+                None
+            }
+            Panel::Hierarchy => {
+                ui_state.left_sidebar_visible = true;
+                None
+            }
             Panel::SchematicTree(name) => {
                 let entity = self.commands.spawn(super::TreeWidgetState::default()).id();
                 let label = name.clone().unwrap_or_else(|| "Tree".to_string());

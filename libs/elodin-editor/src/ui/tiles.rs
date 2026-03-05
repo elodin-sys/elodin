@@ -8,13 +8,17 @@ use bevy::{
     prelude::*,
     window::{Monitor, PrimaryWindow, Window, WindowPosition},
 };
-use bevy_editor_cam::prelude::{EditorCam, EnabledMotion, OrbitConstraint};
+use bevy_editor_cam::{
+    controller::{component::Sensitivity, zoom::ZoomLimits},
+    prelude::{EditorCam, EnabledMotion, OrbitConstraint},
+};
 use bevy_egui::{
     EguiContexts, EguiTextureHandle,
     egui::{self, Color32, CornerRadius, Frame, Id, RichText, Stroke, Ui, Visuals, vec2},
 };
 use egui::UiBuilder;
 use egui::response::Flags;
+use egui_material_icons::{icon_button, icons::*};
 use egui_tiles::{Container, Tile, TileId, Tiles};
 use impeller2_wkt::{Dashboard, Graph, Viewport, WindowRect};
 use smallvec::{SmallVec, smallvec};
@@ -34,7 +38,7 @@ use super::{
     PaneName, SelectedObject, ViewportRect, WindowUiState,
     actions::{ActionTile, ActionTileWidget},
     button::{EImageButton, ETileButton},
-    colors::{self, get_scheme, with_opacity},
+    colors::{self, EColor, get_scheme, with_opacity},
     command_palette::{CommandPaletteState, palette_items},
     dashboard::{DashboardWidget, DashboardWidgetArgs, spawn_dashboard},
     data_overview::{DataOverviewPane, DataOverviewWidget},
@@ -46,7 +50,7 @@ use super::{
     query_plot::QueryPlotData,
     query_table::{QueryTableData, QueryTablePane, QueryTableWidget},
     schematic::{graph_label, viewport_label},
-    video_stream::{IsTileVisible, VideoDecoderHandle, VideoStreamWidgetArgs},
+    video_stream::{IsTileVisible, VideoDecoderHandle, VideoFrameCache, VideoStreamWidgetArgs},
     widgets::{RootWidgetSystem, WidgetSystem, WidgetSystemExt},
 };
 use crate::{
@@ -55,17 +59,28 @@ use crate::{
     plugins::{
         LogicalKeyState,
         gizmos::GIZMO_RENDER_LAYER,
-        navigation_gizmo::{RenderLayerAlloc, spawn_gizmo},
+        navigation_gizmo::{NavGizmoCamera, NavGizmoParent, RenderLayerAlloc},
+        view_cube::{
+            NeedsInitialSnap, ViewCubeConfig, ViewCubeTargetCamera, spawn::spawn_view_cube,
+        },
     },
-    ui::dashboard::NodeUpdaterParams,
+    ui::{colors::ColorExt, dashboard::NodeUpdaterParams},
 };
 
 pub(crate) mod sidebar;
 
-use sidebar::{
-    SidebarKind, SidebarMaskState, apply_share_updates, collect_sidebar_gutter_updates,
-    tab_add_visible, tab_title_visible, tile_is_sidebar,
-};
+use sidebar::tab_add_visible;
+
+pub(crate) const DEFAULT_VIEWPORT_NEAR: f32 = 0.05;
+pub(crate) const DEFAULT_VIEWPORT_FAR: f32 = 5.0;
+
+fn default_viewport_perspective() -> PerspectiveProjection {
+    PerspectiveProjection {
+        near: DEFAULT_VIEWPORT_NEAR,
+        far: DEFAULT_VIEWPORT_FAR,
+        ..PerspectiveProjection::default()
+    }
+}
 
 pub(crate) fn plugin(app: &mut App) {
     app.register_type::<WindowId>()
@@ -81,7 +96,7 @@ fn setup_primary_window_state(
         warn!("No primary window to setup");
         return;
     };
-    // TODO: Setup this descriptor with the path when its known.
+    // TODO: Set the descriptor path once it is known.
     let descriptor = WindowDescriptor::default();
     let state = WindowState {
         descriptor,
@@ -92,9 +107,23 @@ fn setup_primary_window_state(
     commands.entity(id).insert((state, WindowId(0)));
 }
 
+pub fn default_projection_color() -> impeller2_wkt::Color {
+    impeller2_wkt::Color::WHITE
+}
+
 #[derive(Component)]
 pub struct ViewportConfig {
+    pub aspect: Option<f32>,
     pub show_arrows: bool,
+    pub create_frustum: bool,
+    pub show_frustums: bool,
+    /// Compute frustum∩ellipsoid volume, create FrustumCoverage component, display in viewport (no 3D mesh).
+    pub show_coverage_in_viewport: bool,
+    /// Display 2D projection of frustum∩ellipsoid on far plane.
+    pub show_projection_2d: bool,
+    pub projection_color: impeller2_wkt::Color,
+    pub frustums_color: impeller2_wkt::Color,
+    pub frustums_thickness: f32,
     pub viewport_layer: Option<usize>,
 }
 
@@ -116,15 +145,12 @@ pub struct TileIcons {
     pub entity: egui::TextureId,
 }
 
-const SIDEBAR_COLLAPSED_SHARE: f32 = 0.01;
-
 #[derive(Clone)]
 pub struct TileState {
     pub tree: egui_tiles::Tree<Pane>,
     pub tree_actions: SmallVec<[TreeAction; 4]>,
     pub graphs: HashMap<TileId, Entity>,
     pub container_titles: HashMap<TileId, String>,
-    pub sidebar_state: SidebarMaskState,
     tree_id: Id,
 }
 
@@ -466,10 +492,9 @@ pub struct DashboardPane {
 }
 
 impl TileState {
-    fn has_non_sidebar_content(&self) -> bool {
+    fn has_content(&self) -> bool {
         fn visit(tree: &egui_tiles::Tree<Pane>, id: TileId) -> bool {
             match tree.tiles.get(id) {
-                Some(Tile::Pane(pane)) if pane.is_sidebar() => false,
                 Some(Tile::Pane(_)) => true,
                 Some(Tile::Container(container)) => {
                     container.children().any(|child| visit(tree, *child))
@@ -641,12 +666,12 @@ impl TileState {
 
     pub fn create_video_stream_tile(
         &mut self,
-        msg_id: [u8; 2],
+        msg_name: String,
         name: PaneName,
         tile_id: Option<TileId>,
     ) {
         self.tree_actions
-            .push(TreeAction::AddVideoStream(tile_id, msg_id, name));
+            .push(TreeAction::AddVideoStream(tile_id, msg_name, name));
     }
 
     pub fn create_dashboard_tile(
@@ -694,8 +719,6 @@ impl TileState {
                             Pane::ActionTile(action) => ("Action", action.name.as_str()),
                             Pane::VideoStream(video) => ("VideoStream", video.name.as_str()),
                             Pane::Dashboard(dashboard) => ("Dashboard", dashboard.name.as_str()),
-                            Pane::Hierarchy => ("Hierarchy", "Hierarchy"),
-                            Pane::Inspector => ("Inspector", "Inspector"),
                             Pane::SchematicTree(pane) => ("SchematicTree", pane.name.as_str()),
                             Pane::DataOverview(pane) => ("DataOverview", pane.name.as_str()),
                         };
@@ -744,121 +767,8 @@ impl TileState {
         targets
     }
 
-    pub fn create_sidebars_layout(&mut self) {
-        self.tree_actions.push(TreeAction::AddSidebars);
-    }
-
-    fn apply_sidebars_layout(&mut self) {
-        let mut has_hierarchy = false;
-        let mut has_inspector = false;
-        let mut sidebar_ids = Vec::new();
-        for (id, tile) in self.tree.tiles.iter() {
-            match tile {
-                Tile::Pane(Pane::Hierarchy) => {
-                    has_hierarchy = true;
-                    sidebar_ids.push(*id);
-                }
-                Tile::Pane(Pane::Inspector) => {
-                    has_inspector = true;
-                    sidebar_ids.push(*id);
-                }
-                _ => {}
-            }
-        }
-
-        if has_hierarchy && has_inspector {
-            return;
-        }
-
-        if !sidebar_ids.is_empty() {
-            let container_ids: Vec<TileId> = self
-                .tree
-                .tiles
-                .iter()
-                .filter_map(|(id, tile)| matches!(tile, Tile::Container(_)).then_some(*id))
-                .collect();
-
-            for container_id in container_ids {
-                if let Some(Tile::Container(container)) = self.tree.tiles.get_mut(container_id) {
-                    match container {
-                        Container::Tabs(tabs) => {
-                            tabs.children.retain(|child| !sidebar_ids.contains(child));
-                            if let Some(active) = tabs.active
-                                && !tabs.children.contains(&active)
-                            {
-                                tabs.active = tabs.children.first().copied();
-                            }
-                        }
-                        Container::Linear(linear) => {
-                            linear.children.retain(|child| !sidebar_ids.contains(child));
-                        }
-                        Container::Grid(_) => {}
-                    }
-                }
-            }
-        }
-
-        let root_id = self
-            .tree
-            .root()
-            .and_then(|root_id| match self.tree.tiles.get(root_id) {
-                Some(Tile::Pane(pane)) if pane.is_sidebar() => None,
-                _ => Some(root_id),
-            });
-
-        let mut main_content = root_id.unwrap_or_else(|| {
-            let tabs_container = Tile::Container(Container::new_tabs(vec![]));
-            let tabs_id = self.tree.tiles.insert_new(tabs_container);
-            self.tree.root = Some(tabs_id);
-            tabs_id
-        });
-
-        if matches!(self.tree.tiles.get(main_content), Some(Tile::Pane(_))) {
-            let mut tabs = egui_tiles::Tabs::new(vec![main_content]);
-            tabs.set_active(main_content);
-            main_content = self
-                .tree
-                .tiles
-                .insert_new(Tile::Container(Container::Tabs(tabs)));
-        }
-
-        let hierarchy = self.tree.tiles.insert_new(Tile::Pane(Pane::Hierarchy));
-        let inspector = self.tree.tiles.insert_new(Tile::Pane(Pane::Inspector));
-
-        let hier_default = self.sidebar_state.last_hierarchy_share.get_or_insert(0.2);
-        let insp_default = self.sidebar_state.last_inspector_share.get_or_insert(0.2);
-        let hier_share = if self.sidebar_state.hierarchy_masked {
-            SIDEBAR_COLLAPSED_SHARE
-        } else {
-            *hier_default
-        };
-        let insp_share = if self.sidebar_state.inspector_masked {
-            SIDEBAR_COLLAPSED_SHARE
-        } else {
-            *insp_default
-        };
-        let mut center_share = 1.0 - (hier_share + insp_share);
-        if center_share <= 0.0 {
-            center_share = 0.1;
-        }
-
-        let mut linear = egui_tiles::Linear::new(
-            egui_tiles::LinearDir::Horizontal,
-            vec![hierarchy, main_content, inspector],
-        );
-        linear.shares.set_share(hierarchy, hier_share);
-        linear.shares.set_share(main_content, center_share);
-        linear.shares.set_share(inspector, insp_share);
-
-        let root = self
-            .tree
-            .tiles
-            .insert_new(Tile::Container(Container::Linear(linear)));
-        self.tree.root = Some(root);
-    }
-
     pub fn is_empty(&self) -> bool {
-        !self.has_non_sidebar_content()
+        !self.has_content()
     }
 
     pub fn clear(&mut self, commands: &mut Commands, render_layer_alloc: &mut RenderLayerAlloc) {
@@ -871,35 +781,71 @@ impl TileState {
                     if let Some(layer) = viewport.grid_layer {
                         render_layer_alloc.free(layer);
                     }
-                    if let Some(camera) = viewport.camera {
-                        commands.entity(camera).despawn();
+                    if let Some(layer) = viewport.view_cube_layer {
+                        render_layer_alloc.free(layer);
                     }
-                    if let Some(nav_gizmo_camera) = viewport.nav_gizmo_camera {
-                        commands.entity(nav_gizmo_camera).despawn();
+                    if let Some(camera) = viewport.camera
+                        && let Ok(mut e) = commands.get_entity(camera)
+                    {
+                        e.despawn();
                     }
-                    if let Some(nav_gizmo) = viewport.nav_gizmo {
-                        commands.entity(nav_gizmo).despawn();
+                    if let Some(nav_gizmo_camera) = viewport.nav_gizmo_camera
+                        && let Ok(mut e) = commands.get_entity(nav_gizmo_camera)
+                    {
+                        e.despawn();
+                    }
+                    if let Some(nav_gizmo) = viewport.nav_gizmo
+                        && let Ok(mut e) = commands.get_entity(nav_gizmo)
+                    {
+                        e.despawn();
                     }
                 }
                 Tile::Pane(Pane::Graph(graph)) => {
-                    commands.entity(graph.id).despawn();
+                    if let Ok(mut e) = commands.get_entity(graph.id) {
+                        e.despawn();
+                    }
                     if let Some(graph_id) = self.graphs.get(tile_id) {
-                        commands.entity(*graph_id).despawn();
+                        if let Ok(mut e) = commands.get_entity(*graph_id) {
+                            e.despawn();
+                        }
                         self.graphs.remove(tile_id);
                     }
                 }
 
                 Tile::Pane(Pane::VideoStream(pane)) => {
-                    commands.entity(pane.entity).despawn();
+                    if let Ok(mut e) = commands.get_entity(pane.entity) {
+                        e.despawn();
+                    }
+                }
+                Tile::Pane(Pane::ActionTile(pane)) => {
+                    if let Ok(mut e) = commands.get_entity(pane.entity) {
+                        e.despawn();
+                    }
+                }
+                Tile::Pane(Pane::QueryTable(pane)) => {
+                    if let Ok(mut e) = commands.get_entity(pane.entity) {
+                        e.despawn();
+                    }
                 }
                 Tile::Pane(Pane::QueryPlot(pane)) => {
-                    commands.entity(pane.entity).despawn();
+                    if let Ok(mut e) = commands.get_entity(pane.entity) {
+                        e.despawn();
+                    }
                 }
                 Tile::Pane(Pane::SchematicTree(pane)) => {
-                    commands.entity(pane.entity).despawn();
+                    if let Ok(mut e) = commands.get_entity(pane.entity) {
+                        e.despawn();
+                    }
                 }
                 Tile::Pane(Pane::Dashboard(dashboard)) => {
-                    commands.entity(dashboard.entity).despawn();
+                    if let Ok(mut e) = commands.get_entity(dashboard.entity) {
+                        e.despawn();
+                    }
+                }
+                Tile::Pane(Pane::Monitor(monitor)) => {
+                    if let Ok(mut e) = commands.get_entity(monitor.entity) {
+                        e.despawn();
+                    }
                 }
                 _ => {}
             }
@@ -970,25 +916,11 @@ pub enum Pane {
     ActionTile(ActionTilePane),
     VideoStream(super::video_stream::VideoStreamPane),
     Dashboard(DashboardPane),
-    Hierarchy,
-    Inspector,
     SchematicTree(TreePane),
     DataOverview(DataOverviewPane),
 }
 
 impl Pane {
-    pub(crate) fn is_sidebar(&self) -> bool {
-        matches!(self, Pane::Hierarchy | Pane::Inspector)
-    }
-
-    pub(crate) fn sidebar_kind(&self) -> Option<SidebarKind> {
-        match self {
-            Pane::Hierarchy => Some(SidebarKind::Hierarchy),
-            Pane::Inspector => Some(SidebarKind::Inspector),
-            _ => None,
-        }
-    }
-
     fn collect_render_targets(&self, out: &mut PaneRenderTargets) {
         match self {
             Pane::Graph(pane) => out.push_camera(pane.id),
@@ -1006,8 +938,6 @@ impl Pane {
             Pane::Monitor(_)
             | Pane::QueryTable(_)
             | Pane::ActionTile(_)
-            | Pane::Hierarchy
-            | Pane::Inspector
             | Pane::SchematicTree(_)
             | Pane::DataOverview(_) => {}
         }
@@ -1042,8 +972,6 @@ impl Pane {
                 }
                 "Dashboard".to_string()
             }
-            Pane::Hierarchy => "Entities".to_string(),
-            Pane::Inspector => "Inspector".to_string(),
             Pane::SchematicTree(pane) => pane.name.to_string(),
             Pane::DataOverview(pane) => pane.name.to_string(),
         }
@@ -1087,18 +1015,15 @@ impl Pane {
             Pane::DataOverview(pane) => {
                 pane.name = title.to_string();
             }
-            Pane::Hierarchy | Pane::Inspector => {}
         }
         targets
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn ui(
         &mut self,
         ui: &mut Ui,
         icons: &TileIcons,
         world: &mut World,
-        tree_actions: &mut SmallVec<[TreeAction; 4]>,
         target_window: Entity,
     ) -> egui_tiles::UiResponse {
         let content_rect = ui.available_rect_before_wrap();
@@ -1115,7 +1040,102 @@ impl Pane {
                 egui_tiles::UiResponse::None
             }
             Pane::Viewport(pane) => {
-                pane.rect = Some(content_rect);
+                const MONITOR_HEIGHT: f32 = 36.0;
+                let mut show_monitor = false;
+
+                if let Some(cam) = pane.camera {
+                    let mut state = SystemState::<(
+                        Query<&ViewportConfig>,
+                        Query<(
+                            &impeller2_wkt::ComponentMetadata,
+                            &impeller2_bevy::ComponentValue,
+                        )>,
+                    )>::new(world);
+                    let (configs, component_values) = state.get(world);
+                    {
+                        let monitor_enabled = configs
+                            .get(cam)
+                            .map(|c| c.show_frustums && c.show_coverage_in_viewport)
+                            .unwrap_or(false);
+                        let relevant: Vec<_> = component_values
+                            .iter()
+                            .filter_map(|(metadata, value)| {
+                                if !monitor_enabled || !metadata.name.ends_with(".frustum_coverage")
+                                {
+                                    return None;
+                                }
+                                let ratio = match value {
+                                    impeller2_bevy::ComponentValue::F32(array) => {
+                                        nox::ArrayBuf::as_buf(&array.buf).first().copied()
+                                    }
+                                    impeller2_bevy::ComponentValue::F64(array) => {
+                                        nox::ArrayBuf::as_buf(&array.buf).first().map(|v| *v as f32)
+                                    }
+                                    _ => None,
+                                }?;
+                                let label = metadata
+                                    .name
+                                    .strip_suffix(".frustum_coverage")
+                                    .unwrap_or(&metadata.name)
+                                    .to_string();
+                                Some((label, ratio))
+                            })
+                            .collect();
+                        if monitor_enabled {
+                            show_monitor = true;
+                            let viewport_rect = egui::Rect::from_min_max(
+                                content_rect.min,
+                                egui::pos2(content_rect.max.x, content_rect.max.y - MONITOR_HEIGHT),
+                            );
+                            pane.rect = Some(viewport_rect);
+
+                            let monitor_rect = egui::Rect::from_min_max(
+                                egui::pos2(content_rect.min.x, content_rect.max.y - MONITOR_HEIGHT),
+                                content_rect.max,
+                            );
+                            let scheme = super::colors::get_scheme();
+                            ui.painter()
+                                .rect_filled(monitor_rect, 0.0, scheme.bg_secondary);
+                            ui.painter().line_segment(
+                                [monitor_rect.left_top(), monitor_rect.right_top()],
+                                egui::Stroke::new(1.0, scheme.border_primary),
+                            );
+
+                            if relevant.is_empty() {
+                                let text = "Coverage: --".to_string();
+                                let galley = ui.painter().layout_no_wrap(
+                                    text,
+                                    egui::FontId::monospace(14.0),
+                                    scheme.text_secondary,
+                                );
+                                let pos =
+                                    egui::pos2(monitor_rect.min.x + 10.0, monitor_rect.min.y + 8.0);
+                                ui.painter().galley(pos, galley, scheme.text_secondary);
+                            } else {
+                                for (i, (label, ratio)) in relevant.iter().enumerate() {
+                                    let pct = (*ratio * 100.0).clamp(0.0, 100.0);
+                                    let text = format!("{label}: {pct:.1}%");
+                                    let galley = ui.painter().layout_no_wrap(
+                                        text,
+                                        egui::FontId::monospace(14.0),
+                                        scheme.text_primary,
+                                    );
+                                    let pos = egui::pos2(
+                                        monitor_rect.min.x + 10.0,
+                                        monitor_rect.min.y + 8.0 + i as f32 * 20.0,
+                                    );
+                                    ui.painter().galley(pos, galley, scheme.text_primary);
+                                }
+                            }
+                        }
+                    }
+                    state.apply(world);
+                }
+
+                if !show_monitor {
+                    pane.rect = Some(content_rect);
+                }
+
                 egui_tiles::UiResponse::None
             }
             Pane::Monitor(pane) => {
@@ -1163,36 +1183,6 @@ impl Pane {
                 );
                 egui_tiles::UiResponse::None
             }
-            Pane::Hierarchy => {
-                ui.add_widget_with::<HierarchyContent>(
-                    world,
-                    "hierarchy_content",
-                    (
-                        Hierarchy {
-                            search: icons.search,
-                            entity: icons.entity,
-                            chevron: icons.chevron,
-                        },
-                        target_window,
-                    ),
-                );
-                egui_tiles::UiResponse::None
-            }
-            Pane::Inspector => {
-                let inspector_icons = InspectorIcons {
-                    chart: icons.chart,
-                    subtract: icons.subtract,
-                    setting: icons.setting,
-                    search: icons.search,
-                };
-                let actions = ui.add_widget_with::<InspectorContent>(
-                    world,
-                    "inspector_content",
-                    (inspector_icons, true, target_window),
-                );
-                tree_actions.extend(actions);
-                egui_tiles::UiResponse::None
-            }
             Pane::SchematicTree(tree_pane) => {
                 let tree_icons = super::schematic::tree::TreeIcons {
                     chevron: icons.chevron,
@@ -1210,8 +1200,11 @@ impl Pane {
                 egui_tiles::UiResponse::None
             }
             Pane::DataOverview(pane) => {
-                let updated_pane =
-                    ui.add_widget_with::<DataOverviewWidget>(world, "data_overview", pane.clone());
+                let updated_pane = ui.add_widget_with::<DataOverviewWidget>(
+                    world,
+                    "data_overview",
+                    (pane.clone(), target_window),
+                );
                 *pane = updated_pane;
                 egui_tiles::UiResponse::None
             }
@@ -1279,6 +1272,7 @@ pub struct ViewportPane {
     pub name: PaneName,
     pub grid_layer: Option<usize>,
     pub viewport_layer: Option<usize>,
+    pub view_cube_layer: Option<usize>,
 }
 
 impl ViewportPane {
@@ -1390,6 +1384,50 @@ impl ViewportPane {
                 }
             })
             .unwrap_or_default();
+        let up = viewport
+            .up
+            .as_ref()
+            .map(|eql| {
+                let compiled_expr = match eql_ctx.parse_str(eql) {
+                    Ok(expr) => Some(compile_eql_expr(expr)),
+                    Err(e) => {
+                        bevy::log::error!(
+                            "Failed to parse viewport up expression '{}': {}",
+                            eql,
+                            e
+                        );
+                        None
+                    }
+                };
+                EditableEQL {
+                    eql: eql.to_string(),
+                    compiled_expr,
+                }
+            })
+            .unwrap_or_default();
+
+        let perspective_defaults = default_viewport_perspective();
+        let mut perspective = PerspectiveProjection {
+            fov: viewport.fov.to_radians(),
+            ..perspective_defaults
+        };
+        if let Some(near) = viewport.near {
+            perspective.near = near;
+        }
+        if let Some(far) = viewport.far {
+            perspective.far = far;
+        }
+        if let Some(aspect) = viewport.aspect {
+            perspective.aspect_ratio = aspect;
+        }
+        if !(perspective.near > 0.0 && perspective.far > perspective.near) {
+            warn!(
+                "Invalid viewport near/far (near={}, far={}), restoring defaults",
+                perspective.near, perspective.far
+            );
+            perspective.near = DEFAULT_VIEWPORT_NEAR;
+            perspective.far = DEFAULT_VIEWPORT_FAR;
+        }
 
         let mut camera = commands.spawn((
             Transform::default(),
@@ -1398,10 +1436,7 @@ impl ViewportPane {
                 order: 1,
                 ..Default::default()
             },
-            Projection::Perspective(PerspectiveProjection {
-                fov: viewport.fov.to_radians(),
-                ..Default::default()
-            }),
+            Projection::Perspective(perspective),
             Tonemapping::TonyMcMapface,
             Exposure::from_physical_camera(PhysicalCameraParameters {
                 aperture_f_stops: 2.8,
@@ -1417,15 +1452,32 @@ impl ViewportPane {
                     up: Vec3::Y,
                     can_pass_tdc: false,
                 },
+                zoom_limits: ZoomLimits {
+                    min_size_per_pixel: 1e-3,
+                    max_size_per_pixel: 10.0,
+                    zoom_through_objects: false,
+                },
+                sensitivity: Sensitivity {
+                    zoom: 0.2,
+                    ..default()
+                },
                 last_anchor_depth: 2.0,
                 ..Default::default()
             },
             GridHandle { grid: grid_id },
             ViewportConfig {
+                aspect: viewport.aspect,
                 show_arrows: viewport.show_arrows,
+                create_frustum: viewport.create_frustum,
+                show_frustums: viewport.show_frustums,
+                show_coverage_in_viewport: viewport.show_frustums,
+                show_projection_2d: viewport.show_frustums,
+                projection_color: default_projection_color(),
+                frustums_color: viewport.frustums_color,
+                frustums_thickness: viewport.frustums_thickness,
                 viewport_layer,
             },
-            crate::ui::inspector::viewport::Viewport::new(parent, pos, look_at),
+            crate::ui::inspector::viewport::Viewport::new(parent, pos, look_at, up),
             ChildOf(parent),
             Name::new("viewport camera3d"),
         ));
@@ -1440,16 +1492,70 @@ impl ViewportPane {
 
         let camera = camera.id();
 
-        let (nav_gizmo, nav_gizmo_camera) =
-            spawn_gizmo(camera, commands, meshes, materials, render_layer_alloc);
+        if !viewport.show_view_cube {
+            return Self {
+                camera: Some(camera),
+                nav_gizmo: None,
+                nav_gizmo_camera: None,
+                rect: None,
+                name,
+                grid_layer,
+                viewport_layer,
+                view_cube_layer: None,
+            };
+        }
+
+        // Allocate render layer for ViewCube (same approach as navigation_gizmo)
+        let Some(view_cube_layer) = render_layer_alloc.alloc() else {
+            return Self {
+                camera: Some(camera),
+                nav_gizmo: None,
+                nav_gizmo_camera: None,
+                rect: None,
+                name,
+                grid_layer,
+                viewport_layer,
+                view_cube_layer: None,
+            };
+        };
+
+        commands
+            .entity(camera)
+            .insert((ViewCubeTargetCamera, NeedsInitialSnap));
+
+        // Spawn ViewCube with editor mode configuration, only override the per-viewport render layer
+        let mut view_cube_config = ViewCubeConfig::editor_mode();
+        view_cube_config.render_layer = view_cube_layer as u8;
+
+        let spawned = spawn_view_cube(
+            commands,
+            asset_server,
+            meshes,
+            materials,
+            &view_cube_config,
+            camera,
+        );
+
+        // Add NavGizmoParent and NavGizmoCamera to the ViewCube camera
+        // so the existing set_camera_viewport system works on it
+        if let Some(view_cube_camera) = spawned.camera {
+            commands.entity(view_cube_camera).insert((
+                NavGizmoParent {
+                    main_camera: camera,
+                },
+                NavGizmoCamera,
+            ));
+        }
+
         Self {
             camera: Some(camera),
-            nav_gizmo,
-            nav_gizmo_camera,
+            nav_gizmo: Some(spawned.cube_root),
+            nav_gizmo_camera: spawned.camera,
             rect: None,
             name,
             grid_layer,
             viewport_layer,
+            view_cube_layer: Some(view_cube_layer),
         }
     }
 }
@@ -1475,18 +1581,16 @@ impl TileState {
     pub fn new(tree_id: Id) -> Self {
         Self {
             tree: egui_tiles::Tree::new_tabs(tree_id, vec![]),
-            tree_actions: smallvec![TreeAction::AddSidebars],
+            tree_actions: smallvec![],
             graphs: HashMap::new(),
             container_titles: HashMap::new(),
-            sidebar_state: SidebarMaskState::default(),
             tree_id,
         }
     }
 
     fn reset_tree(&mut self) {
         self.tree = egui_tiles::Tree::new_tabs(self.tree_id, vec![]);
-        self.tree_actions = smallvec![TreeAction::AddSidebars];
-        self.sidebar_state = SidebarMaskState::default();
+        self.tree_actions = smallvec![];
     }
 }
 
@@ -1498,13 +1602,6 @@ impl Default for TileState {
 
 fn main_content_rect(tree: &egui_tiles::Tree<Pane>) -> Option<egui::Rect> {
     let root = tree.root()?;
-    if let Some(Tile::Container(Container::Linear(linear))) = tree.tiles.get(root) {
-        for child in &linear.children {
-            if !tile_is_sidebar(&tree.tiles, *child) {
-                return tree.tiles.rect(*child);
-            }
-        }
-    }
     tree.tiles.rect(root)
 }
 
@@ -1515,9 +1612,8 @@ struct TreeBehavior<'w> {
     container_titles: HashMap<TileId, String>,
     read_only: bool,
     target_window: Entity,
+    inspector_visible: bool,
 }
-
-type ShareUpdate = (TileId, TileId, TileId, f32, f32);
 
 #[derive(Clone)]
 pub enum TreeAction {
@@ -1527,13 +1623,15 @@ pub enum TreeAction {
     AddQueryTable(Option<TileId>),
     AddQueryPlot(Option<TileId>),
     AddActionTile(Option<TileId>, PaneName, String),
-    AddVideoStream(Option<TileId>, [u8; 2], PaneName),
+    AddVideoStream(Option<TileId>, String, PaneName),
     AddDashboard(Option<TileId>, Box<impeller2_wkt::Dashboard>, PaneName),
     AddSchematicTree(Option<TileId>),
     AddDataOverview(Option<TileId>),
-    AddSidebars,
     DeleteTab(TileId),
     SelectTile(TileId),
+    OpenInspector(TileId),
+    HideInspector,
+    StartRenaming(TileId),
     RenameContainer(TileId, String),
     RenamePane(TileId, String),
 }
@@ -1541,6 +1639,51 @@ pub enum TreeAction {
 enum TabState {
     Selected,
     Inactive,
+}
+
+impl TreeBehavior<'_> {
+    fn viewport_frustum_dot_color(
+        &mut self,
+        tiles: &Tiles<Pane>,
+        tile_id: TileId,
+    ) -> Option<Color32> {
+        let pane = match tiles.get(tile_id) {
+            Some(Tile::Pane(Pane::Viewport(pane))) => pane,
+            _ => return None,
+        };
+        let camera_entity = pane.camera?;
+        let config = self.world.get::<ViewportConfig>(camera_entity)?;
+        if !config.create_frustum {
+            return None;
+        }
+        Some(config.frustums_color.into_color32())
+    }
+
+    fn paint_tab_title(
+        &self,
+        ui: &egui::Ui,
+        text_rect: egui::Rect,
+        galley: &std::sync::Arc<egui::Galley>,
+        text_color: Color32,
+        dot_color: Option<Color32>,
+    ) {
+        let label_rect = egui::Align2::LEFT_CENTER.align_size_within_rect(galley.size(), text_rect);
+        ui.painter()
+            .galley(label_rect.min, galley.clone(), text_color);
+
+        if let Some(dot_color) = dot_color {
+            let dot_radius = 3.5;
+            let dot_gap = 7.0;
+            let dot_center = egui::pos2(label_rect.max.x + dot_gap, label_rect.center().y);
+            ui.painter()
+                .circle_filled(dot_center, dot_radius, dot_color);
+            ui.painter().circle_stroke(
+                dot_center,
+                dot_radius,
+                egui::Stroke::new(1.0, get_scheme().border_primary),
+            );
+        }
+    }
 }
 
 impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
@@ -1559,13 +1702,7 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
         _tile_id: egui_tiles::TileId,
         pane: &mut Pane,
     ) -> egui_tiles::UiResponse {
-        pane.ui(
-            ui,
-            &self.icons,
-            self.world,
-            &mut self.tree_actions,
-            self.target_window,
-        )
+        pane.ui(ui, &self.icons, self.world, self.target_window)
     }
 
     #[allow(clippy::fn_params_excessive_bools)]
@@ -1577,13 +1714,6 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
         tile_id: egui_tiles::TileId,
         state: &egui_tiles::TabState,
     ) -> egui::Response {
-        if !tab_title_visible(tiles, tile_id) {
-            let min_width = self.tab_title_spacing(ui.visuals()) * 2.0;
-            let (_, rect) = ui.allocate_space(vec2(min_width, ui.available_height()));
-            let response = ui.interact(rect, id, egui::Sense::click_and_drag());
-            return self.on_tab_button(tiles, tile_id, response);
-        }
-
         let tab_state = if state.active {
             TabState::Selected
         } else {
@@ -1599,20 +1729,22 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
             .data(|d| d.get_temp::<bool>(edit_flag_id))
             .unwrap_or(false);
 
-        let title_str: String = if is_container {
+        // Get title: check for custom/edited title first, then container titles, then pane title
+        let title_str: String =
             if let Some(custom) = ui.ctx().data(|d| d.get_temp::<String>(persist_id)) {
                 custom
-            } else if let Some(t) = self.container_titles.get(&tile_id) {
-                t.clone()
-            } else {
-                match tiles.get(tile_id) {
-                    Some(egui_tiles::Tile::Container(c)) => format!("{:?}", c.kind()),
-                    _ => "Container".to_owned(),
+            } else if is_container {
+                if let Some(t) = self.container_titles.get(&tile_id) {
+                    t.clone()
+                } else {
+                    match tiles.get(tile_id) {
+                        Some(egui_tiles::Tile::Container(c)) => format!("{:?}", c.kind()),
+                        _ => "Container".to_owned(),
+                    }
                 }
-            }
-        } else {
-            self.tab_title_for_tile(tiles, tile_id).text().to_string()
-        };
+            } else {
+                self.tab_title_for_tile(tiles, tile_id).text().to_string()
+            };
 
         let mut font_id = egui::TextStyle::Button.resolve(ui.style());
         font_id.size = 11.0;
@@ -1623,9 +1755,15 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
             font_id.clone(),
         );
 
+        let dot_color = if is_container {
+            None
+        } else {
+            self.viewport_frustum_dot_color(tiles, tile_id)
+        };
+        let dot_width = if dot_color.is_some() { 14.0 } else { 0.0 };
         let x_margin = self.tab_title_spacing(ui.visuals());
         let (_, rect) = ui.allocate_space(vec2(
-            galley.size().x + x_margin * 4.0,
+            galley.size().x + x_margin * 4.0 + dot_width,
             ui.available_height(),
         ));
         let text_rect = rect
@@ -1656,16 +1794,32 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
             is_editing = true;
         }
 
+        // Check for rename signal from context menu
+        let rename_signal_id = egui::Id::new(("start_renaming_signal", tile_id));
+        if !self.read_only
+            && !is_editing
+            && ui
+                .ctx()
+                .data(|d| d.get_temp::<bool>(rename_signal_id))
+                .unwrap_or(false)
+        {
+            ui.ctx().data_mut(|d| d.remove::<bool>(rename_signal_id));
+            ui.ctx()
+                .data_mut(|d| d.insert_temp(edit_buf_id, title_str.clone()));
+            ui.ctx().data_mut(|d| d.insert_temp(edit_flag_id, true));
+            is_editing = true;
+        }
+
         if ui.is_rect_visible(rect) && !state.is_being_dragged {
             let scheme = get_scheme();
             let bg_color = match tab_state {
-                TabState::Selected => scheme.text_primary,
+                TabState::Selected => scheme.bg_secondary,
                 TabState::Inactive => scheme.bg_secondary,
             };
 
             let text_color = match tab_state {
-                TabState::Selected => scheme.bg_secondary,
-                TabState::Inactive => with_opacity(scheme.text_primary, 0.6),
+                TabState::Selected => scheme.text_primary,
+                TabState::Inactive => with_opacity(scheme.text_primary, 0.5),
             };
 
             ui.painter().rect_filled(rect, 0.0, bg_color);
@@ -1682,7 +1836,7 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
 
                 let resp = ui
                     .scope(|ui| {
-                        ui.visuals_mut().override_text_color = Some(Color32::BLACK);
+                        ui.visuals_mut().override_text_color = Some(scheme.text_primary);
                         ui.put(
                             edit_rect,
                             egui::TextEdit::singleline(&mut buf)
@@ -1729,13 +1883,7 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
                         font_id.clone(),
                     );
 
-                    ui.painter().galley(
-                        egui::Align2::LEFT_CENTER
-                            .align_size_within_rect(galley.size(), text_rect)
-                            .min,
-                        galley.clone(),
-                        text_color,
-                    );
+                    self.paint_tab_title(ui, text_rect, &galley, text_color, dot_color);
                 } else {
                     ui.ctx().data_mut(|d| d.insert_temp(edit_buf_id, buf));
                     if !resp.has_focus() {
@@ -1743,22 +1891,21 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
                     }
                 }
             } else {
-                ui.painter().galley(
-                    egui::Align2::LEFT_CENTER
-                        .align_size_within_rect(galley.size(), text_rect)
-                        .min,
-                    galley.clone(),
-                    text_color,
-                );
+                self.paint_tab_title(ui, text_rect, &galley, text_color, dot_color);
             }
 
             ui.add_space(-3.0 * x_margin);
+            let is_hovered = response.hovered() || response.has_focus();
             let close_response = ui.add(
                 EImageButton::new(self.icons.close)
                     .scale(1.3, 1.3)
-                    .image_tint(match tab_state {
-                        TabState::Inactive => scheme.text_primary,
-                        TabState::Selected => scheme.bg_primary,
+                    .image_tint(if is_hovered {
+                        match tab_state {
+                            TabState::Inactive => with_opacity(scheme.text_primary, 0.5),
+                            TabState::Selected => scheme.text_primary,
+                        }
+                    } else {
+                        colors::TRANSPARENT
                     })
                     .bg_color(colors::TRANSPARENT)
                     .hovered_bg_color(colors::TRANSPARENT),
@@ -1769,16 +1916,63 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
 
             ui.painter().hline(
                 rect.x_range(),
+                rect.top(),
+                egui::Stroke::new(1.0, scheme.border_primary),
+            );
+            ui.painter().hline(
+                rect.x_range(),
                 rect.bottom(),
                 egui::Stroke::new(1.0, scheme.border_primary),
             );
 
+            // Draw separator lines on both sides of each tab
+            ui.painter().vline(
+                rect.left(),
+                rect.y_range(),
+                egui::Stroke::new(1.0, scheme.border_primary),
+            );
             ui.painter().vline(
                 rect.right(),
                 rect.y_range(),
                 egui::Stroke::new(1.0, scheme.border_primary),
             );
         }
+
+        // Context menu on right-click
+        let inspector_visible = self.inspector_visible;
+        response.context_menu(|ui| {
+            let scheme = get_scheme();
+            ui.style_mut().spacing.item_spacing = egui::vec2(0.0, 4.0);
+            ui.style_mut().visuals.widgets.hovered.bg_fill = scheme.highlight;
+            ui.style_mut().visuals.widgets.hovered.fg_stroke =
+                egui::Stroke::new(1.0, scheme.text_primary);
+            ui.style_mut().visuals.widgets.inactive.bg_fill = colors::TRANSPARENT;
+            ui.style_mut().visuals.widgets.inactive.fg_stroke =
+                egui::Stroke::new(1.0, scheme.text_primary.opacity(0.5));
+
+            egui::Frame::NONE
+                .inner_margin(egui::Margin::same(10))
+                .show(ui, |ui| {
+                    ui.set_min_width(140.0);
+                    let inspector_label = if inspector_visible {
+                        "Hide Inspector"
+                    } else {
+                        "Show Inspector"
+                    };
+                    if ui.button(inspector_label).clicked() {
+                        if inspector_visible {
+                            self.tree_actions.push(TreeAction::HideInspector);
+                        } else {
+                            self.tree_actions.push(TreeAction::OpenInspector(tile_id));
+                        }
+                        ui.close();
+                    }
+                    if ui.button("Rename Tab").clicked() {
+                        self.tree_actions.push(TreeAction::StartRenaming(tile_id));
+                        ui.close();
+                    }
+                });
+        });
 
         self.on_tab_button(tiles, tile_id, response)
     }
@@ -1794,6 +1988,7 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
         } else if button_response.clicked() {
             self.tree_actions.push(TreeAction::SelectTile(tile_id));
         }
+        // Note: double-click is handled in tab_ui for renaming.
         button_response
     }
 
@@ -1807,10 +2002,10 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
 
     fn simplification_options(&self) -> egui_tiles::SimplificationOptions {
         egui_tiles::SimplificationOptions {
-            prune_empty_tabs: false,
+            prune_empty_tabs: true,
             all_panes_must_have_tabs: true,
             join_nested_linear_containers: true,
-            prune_single_child_tabs: false, // Keep tabs container even with single child
+            prune_single_child_tabs: true,
             ..Default::default()
         }
     }
@@ -1909,14 +2104,7 @@ impl<'w, 's> TileSystem<'w, 's> {
         let is_empty_tile_tree = params
             .window_states
             .get(target_id)
-            .map(|(_, _, s)| {
-                let pending_non_sidebar = s
-                    .tile_state
-                    .tree_actions
-                    .iter()
-                    .any(|action| !matches!(action, TreeAction::AddSidebars));
-                !pending_non_sidebar && !s.tile_state.has_non_sidebar_content()
-            })
+            .map(|(_, _, s)| s.tile_state.tree_actions.is_empty() && !s.tile_state.has_content())
             .ok()?;
 
         let icons = TileIcons {
@@ -1948,7 +2136,127 @@ impl<'w, 's> TileSystem<'w, 's> {
         is_empty_tile_tree: bool,
         read_only: bool,
     ) {
+        const SIDEBAR_DEFAULT_WIDTH: f32 = 200.0;
+        const SIDEBAR_MIN_WIDTH: f32 = 100.0;
+        const SIDEBAR_MAX_WIDTH: f32 = 400.0;
+
+        let target_window = match target {
+            Some(t) => t,
+            None => {
+                let Ok(primary) = world
+                    .query_filtered::<Entity, With<PrimaryWindow>>()
+                    .single(world)
+                else {
+                    return;
+                };
+                primary
+            }
+        };
+
+        // Get sidebar visibility state
+        let (left_sidebar_visible, right_sidebar_visible) = {
+            let mut query = world.query::<&WindowState>();
+            if let Ok(window_state) = query.get(world, target_window) {
+                (
+                    window_state.ui_state.left_sidebar_visible,
+                    window_state.ui_state.right_sidebar_visible,
+                )
+            } else {
+                (false, false)
+            }
+        };
+
         let show_empty_overlay = is_empty_tile_tree && !read_only;
+
+        egui_material_icons::initialize(ui.ctx());
+
+        let toolbar_action =
+            render_sidebar_toolbar(ui, left_sidebar_visible, right_sidebar_visible);
+
+        if let Some(action) = toolbar_action {
+            match action {
+                ToolbarAction::LeftSidebar | ToolbarAction::RightSidebar => {
+                    let mut query = world.query::<&mut WindowState>();
+                    if let Ok(mut window_state) = query.get_mut(world, target_window) {
+                        match action {
+                            ToolbarAction::LeftSidebar => {
+                                window_state.ui_state.left_sidebar_visible =
+                                    !window_state.ui_state.left_sidebar_visible;
+                            }
+                            ToolbarAction::RightSidebar => {
+                                window_state.ui_state.right_sidebar_visible =
+                                    !window_state.ui_state.right_sidebar_visible;
+                            }
+                            ToolbarAction::Theme => unreachable!(),
+                        }
+                    }
+                }
+                ToolbarAction::Theme => {
+                    let current = colors::current_selection();
+                    let is_dark = current.mode.eq_ignore_ascii_case("dark");
+                    let new_mode = if is_dark { "light" } else { "dark" };
+                    if colors::scheme_supports_mode(&current.scheme, new_mode) {
+                        colors::apply_scheme_and_mode(&current.scheme, new_mode);
+                        super::theme::set_theme(ui.ctx());
+                        // Update descriptor.mode on all windows so schematic saving persists the correct theme
+                        let mut query = world.query::<&mut WindowState>();
+                        for mut state in query.iter_mut(world) {
+                            state.descriptor.mode = Some(new_mode.to_string());
+                        }
+                    }
+                }
+            }
+        }
+
+        // Left sidebar - Hierarchy (only if visible)
+        if left_sidebar_visible {
+            egui::SidePanel::left("hierarchy_sidebar")
+                .default_width(SIDEBAR_DEFAULT_WIDTH)
+                .width_range(SIDEBAR_MIN_WIDTH..=SIDEBAR_MAX_WIDTH)
+                .resizable(true)
+                .frame(Frame {
+                    fill: get_scheme().bg_primary,
+                    ..Default::default()
+                })
+                .show_inside(ui, |ui| {
+                    let hierarchy_icons = Hierarchy {
+                        search: icons.search,
+                        entity: icons.entity,
+                        chevron: icons.chevron,
+                    };
+                    ui.add_widget_with::<HierarchyContent>(
+                        world,
+                        "hierarchy_sidebar_content",
+                        (hierarchy_icons, target_window),
+                    );
+                });
+        }
+
+        // Right sidebar - Inspector (only if visible)
+        if right_sidebar_visible {
+            egui::SidePanel::right("inspector_sidebar")
+                .default_width(SIDEBAR_DEFAULT_WIDTH)
+                .width_range(SIDEBAR_MIN_WIDTH..=SIDEBAR_MAX_WIDTH)
+                .resizable(true)
+                .frame(Frame {
+                    fill: get_scheme().bg_primary,
+                    ..Default::default()
+                })
+                .show_inside(ui, |ui| {
+                    let inspector_icons = InspectorIcons {
+                        chart: icons.chart,
+                        subtract: icons.subtract,
+                        setting: icons.setting,
+                        search: icons.search,
+                    };
+                    ui.add_widget_with::<InspectorContent>(
+                        world,
+                        "inspector_sidebar_content",
+                        (inspector_icons, true, target_window),
+                    );
+                });
+        }
+
         ui.add_widget_with::<TileLayout>(
             world,
             "tile_layout",
@@ -2012,6 +2320,11 @@ impl RootWidgetSystem for TileSystem<'_, '_> {
         ctx: &mut egui::Context,
         target: Self::Args,
     ) {
+        // Update theme for secondary windows to reflect color scheme changes
+        if target.is_some() {
+            super::theme::set_theme(ctx);
+        }
+
         let Some((icons, is_empty_tile_tree, read_only)) =
             Self::prepare_panel_data(world, state, target)
         else {
@@ -2220,27 +2533,21 @@ impl WidgetSystem for TileLayout<'_, '_> {
             window.unwrap_or(*state_mut.primary_window)
         };
 
-        let (
-            tree,
-            mut tree_actions,
-            sidebar_state,
-            share_updates,
-            empty_overlay_rect,
-            overlay_icons,
-        ) = {
-            let (tab_diffs, container_titles, mut tree, sidebar_state) = {
+        let (tree, mut tree_actions, empty_overlay_rect, overlay_icons) = {
+            let (tab_diffs, container_titles, mut tree, inspector_visible) = {
                 let mut state_mut = state.get_mut(world);
                 let Some(mut window_state) = state_mut.tile_param.target_state(Some(target_window))
                 else {
                     return;
                 };
+                let inspector_visible = window_state.ui_state.right_sidebar_visible;
                 let tile_state = &mut window_state.tile_state;
                 let empty_tree = egui_tiles::Tree::empty(tile_state.tree_id);
                 (
                     std::mem::take(&mut tile_state.tree_actions),
                     tile_state.container_titles.clone(),
                     std::mem::replace(&mut tile_state.tree, empty_tree),
-                    tile_state.sidebar_state,
+                    inspector_visible,
                 )
             };
             let overlay_icons = icons.clone();
@@ -2252,33 +2559,31 @@ impl WidgetSystem for TileLayout<'_, '_> {
                 container_titles,
                 read_only,
                 target_window,
+                inspector_visible,
             };
             tree.ui(&mut behavior, ui);
+
+            // Ensure all Tabs containers have an active tab after drag/drop operations
+            for (_id, tile) in tree.tiles.iter_mut() {
+                if let Tile::Container(Container::Tabs(tabs)) = tile
+                    && !tabs.children.is_empty()
+                {
+                    // If no active tab or active tab is not in children, select the first child
+                    let needs_active =
+                        tabs.active.is_none() || !tabs.children.contains(&tabs.active.unwrap());
+                    if needs_active {
+                        tabs.active = tabs.children.first().copied();
+                    }
+                }
+            }
+
             let empty_overlay_rect = if show_empty_overlay {
                 main_content_rect(&tree).or_else(|| Some(ui.max_rect()))
             } else {
                 None
             };
-            let window_width = ui.ctx().content_rect().width();
-            let gutter_width = (window_width * 0.02).max(12.0);
-            let painter = ui.painter_at(ui.max_rect());
-            let mut sidebar_state = sidebar_state;
-            let share_updates = collect_sidebar_gutter_updates(
-                &mut tree,
-                ui,
-                painter,
-                gutter_width,
-                &mut sidebar_state,
-            );
             let TreeBehavior { tree_actions, .. } = behavior;
-            (
-                tree,
-                tree_actions,
-                sidebar_state,
-                share_updates,
-                empty_overlay_rect,
-                overlay_icons,
-            )
+            (tree, tree_actions, empty_overlay_rect, overlay_icons)
         };
 
         {
@@ -2293,8 +2598,6 @@ impl WidgetSystem for TileLayout<'_, '_> {
                 ..
             } = &mut *window_state;
             let _ = std::mem::replace(&mut tile_state.tree, tree);
-            apply_share_updates(&mut tile_state.tree, &share_updates);
-            tile_state.sidebar_state = sidebar_state;
             state_mut.viewport_contains_pointer.0 = ui.ui_contains_pointer();
 
             for mut editor_cam in state_mut.editor_cam.iter_mut() {
@@ -2325,6 +2628,9 @@ impl WidgetSystem for TileLayout<'_, '_> {
                             if let Some(layer) = viewport.grid_layer {
                                 state_mut.render_layer_alloc.free(layer);
                             }
+                            if let Some(layer) = viewport.view_cube_layer {
+                                state_mut.render_layer_alloc.free(layer);
+                            }
                             if let Some(camera) = viewport.camera {
                                 state_mut.commands.entity(camera).despawn();
                             }
@@ -2344,6 +2650,10 @@ impl WidgetSystem for TileLayout<'_, '_> {
                             state_mut.commands.entity(action.entity).despawn();
                         };
 
+                        if let egui_tiles::Tile::Pane(Pane::Monitor(pane)) = tile {
+                            state_mut.commands.entity(pane.entity).despawn();
+                        };
+
                         if let egui_tiles::Tile::Pane(Pane::VideoStream(pane)) = tile {
                             state_mut.commands.entity(pane.entity).despawn();
                         };
@@ -2360,14 +2670,41 @@ impl WidgetSystem for TileLayout<'_, '_> {
                             state_mut.commands.entity(pane.entity).despawn();
                         };
 
+                        // Find a sibling to select if the deleted tile was active
+                        let sibling_to_select =
+                            tile_state.tree.tiles.iter().find_map(|(parent_id, tile)| {
+                                if let Tile::Container(Container::Tabs(tabs)) = tile
+                                    && tabs.active == Some(tile_id)
+                                    && tabs.children.contains(&tile_id)
+                                {
+                                    // Find a sibling that's not the one being deleted
+                                    let sibling = tabs
+                                        .children
+                                        .iter()
+                                        .find(|&&child| child != tile_id)
+                                        .copied();
+                                    sibling.map(|s| (*parent_id, s))
+                                } else {
+                                    None
+                                }
+                            });
+
                         tile_state.tree.remove_recursively(tile_id);
+
+                        // Select the sibling if we found one
+                        if let Some((parent_id, sibling_id)) = sibling_to_select
+                            && let Some(Tile::Container(Container::Tabs(tabs))) =
+                                tile_state.tree.tiles.get_mut(parent_id)
+                        {
+                            tabs.set_active(sibling_id);
+                        }
 
                         if let Some(graph_id) = tile_state.graphs.get(&tile_id) {
                             state_mut.commands.entity(*graph_id).despawn();
                             tile_state.graphs.remove(&tile_id);
                         }
 
-                        if tile_state.has_non_sidebar_content() {
+                        if tile_state.has_content() {
                             tile_state
                                 .tree
                                 .simplify(&egui_tiles::SimplificationOptions {
@@ -2435,24 +2772,34 @@ impl WidgetSystem for TileLayout<'_, '_> {
                         if read_only {
                             continue;
                         }
-                        let monitor = MonitorPane::new(eql.clone(), eql);
+                        let entity = state_mut
+                            .commands
+                            .spawn(super::monitor::MonitorData {
+                                component_name: eql.clone(),
+                            })
+                            .id();
+                        let monitor = MonitorPane::new(entity, eql.clone());
 
                         let pane = Pane::Monitor(monitor);
                         if let Some(tile_id) =
                             tile_state.insert_tile(Tile::Pane(pane), parent_tile_id, true)
                         {
+                            ui_state.selected_object =
+                                SelectedObject::Monitor { monitor_id: entity };
                             tile_state.tree.make_active(|id, _| id == tile_id);
                         }
                     }
-                    TreeAction::AddVideoStream(parent_tile_id, msg_id, name) => {
+                    TreeAction::AddVideoStream(parent_tile_id, msg_name, name) => {
                         if read_only {
                             continue;
                         }
+                        let msg_id = impeller2::types::msg_id(&msg_name);
                         let entity = state_mut
                             .commands
                             .spawn((
                                 super::video_stream::VideoStream {
                                     msg_id,
+                                    msg_name,
                                     ..Default::default()
                                 },
                                 bevy::ui::Node {
@@ -2464,6 +2811,7 @@ impl WidgetSystem for TileLayout<'_, '_> {
                                     ..Default::default()
                                 },
                                 VideoDecoderHandle::default(),
+                                VideoFrameCache::default(),
                             ))
                             .id();
                         let pane = Pane::VideoStream(super::video_stream::VideoStreamPane {
@@ -2513,19 +2861,68 @@ impl WidgetSystem for TileLayout<'_, '_> {
                                         graph_id: plot.entity,
                                     };
                                 }
+                                Pane::Monitor(monitor) => {
+                                    ui_state.selected_object = SelectedObject::Monitor {
+                                        monitor_id: monitor.entity,
+                                    };
+                                }
+                                Pane::QueryTable(table) => {
+                                    ui_state.selected_object = SelectedObject::QueryTable {
+                                        table_id: table.entity,
+                                    };
+                                }
+                                Pane::DataOverview(_) => {
+                                    ui_state.selected_object = SelectedObject::DataOverview;
+                                }
                                 Pane::Viewport(viewport) => {
                                     if let Some(camera) = viewport.camera {
-                                        ui_state.selected_object =
-                                            SelectedObject::Viewport { camera };
+                                        ui_state.selected_object = SelectedObject::Viewport {
+                                            camera,
+                                            title: viewport.name.clone(),
+                                        };
                                     }
                                 }
                                 _ => {}
                             }
-                            if let Some(kind) = pane.sidebar_kind() {
-                                unmask_sidebar_by_kind(tile_state, kind);
-                            }
-                            unmask_sidebar_by_kind(tile_state, SidebarKind::Inspector);
                         }
+                    }
+                    TreeAction::OpenInspector(tile_id) => {
+                        tile_state.tree.make_active(|id, _| id == tile_id);
+
+                        if let Some(egui_tiles::Tile::Pane(pane)) =
+                            tile_state.tree.tiles.get(tile_id)
+                        {
+                            match pane {
+                                Pane::Graph(graph) => {
+                                    ui_state.selected_object =
+                                        SelectedObject::Graph { graph_id: graph.id };
+                                }
+                                Pane::QueryPlot(plot) => {
+                                    ui_state.selected_object = SelectedObject::Graph {
+                                        graph_id: plot.entity,
+                                    };
+                                }
+                                Pane::Viewport(viewport) => {
+                                    if let Some(camera) = viewport.camera {
+                                        ui_state.selected_object = SelectedObject::Viewport {
+                                            camera,
+                                            title: viewport.name.clone(),
+                                        };
+                                    }
+                                }
+                                _ => {}
+                            }
+                            ui_state.right_sidebar_visible = true;
+                        }
+                    }
+                    TreeAction::HideInspector => {
+                        ui_state.right_sidebar_visible = false;
+                    }
+                    TreeAction::StartRenaming(tile_id) => {
+                        // Signal that this tile should start editing next frame
+                        ui.ctx().data_mut(|d| {
+                            d.insert_temp(egui::Id::new(("start_renaming_signal", tile_id)), true)
+                        });
                     }
                     TreeAction::AddActionTile(parent_tile_id, button_name, lua_code) => {
                         let name = button_name.clone();
@@ -2548,11 +2945,13 @@ impl WidgetSystem for TileLayout<'_, '_> {
                         let entity = state_mut.commands.spawn(QueryTableData::default()).id();
                         let pane = Pane::QueryTable(QueryTablePane {
                             entity,
-                            name: "Query".to_string(),
+                            name: "Query Table".to_string(),
                         });
                         if let Some(tile_id) =
                             tile_state.insert_tile(Tile::Pane(pane), parent_tile_id, true)
                         {
+                            ui_state.selected_object =
+                                SelectedObject::QueryTable { table_id: entity };
                             tile_state.tree.make_active(|id, _| id == tile_id);
                         }
                     }
@@ -2605,14 +3004,9 @@ impl WidgetSystem for TileLayout<'_, '_> {
                         if let Some(tile_id) =
                             tile_state.insert_tile(Tile::Pane(pane), parent_tile_id, true)
                         {
+                            ui_state.selected_object = SelectedObject::DataOverview;
                             tile_state.tree.make_active(|id, _| id == tile_id);
                         }
-                    }
-                    TreeAction::AddSidebars => {
-                        if read_only {
-                            continue;
-                        }
-                        tile_state.apply_sidebars_layout();
                     }
                     TreeAction::RenameContainer(tile_id, title) => {
                         if read_only {
@@ -2660,8 +3054,6 @@ impl WidgetSystem for TileLayout<'_, '_> {
                             cam.try_insert(ViewportRect(None));
                         }
                     }
-                    Pane::Hierarchy => {}
-                    Pane::Inspector => {}
                     Pane::SchematicTree(_) => {}
                     Pane::Graph(graph) => {
                         if visible {
@@ -2716,90 +3108,95 @@ impl WidgetSystem for TileLayout<'_, '_> {
     }
 }
 
-fn unmask_sidebar_on_select(ui_state: &mut TileState, sidebar_tile: TileId, kind: SidebarKind) {
-    fn build_parent_map(tiles: &Tiles<Pane>) -> HashMap<TileId, TileId> {
-        let mut parents = HashMap::new();
-        for (id, tile) in tiles.iter() {
-            if let Tile::Container(container) = tile {
-                for child in container.children() {
-                    parents.insert(*child, *id);
-                }
-            }
-        }
-        parents
-    }
-
-    fn rebalance_linear_shares(
-        linear: &mut egui_tiles::Linear,
-        target_child: TileId,
-        target_frac: f32,
-        min_share: f32,
-    ) {
-        let share_sum: f32 = linear
-            .shares
-            .iter()
-            .map(|(_, s)| s)
-            .sum::<f32>()
-            .max(min_share);
-        let old = linear.shares[target_child];
-        let others_sum = (share_sum - old).max(0.0);
-        let mut target = (share_sum * target_frac).max(min_share);
-        let min_others = min_share * (linear.children.len().saturating_sub(1) as f32);
-        if target > share_sum - min_others {
-            target = (share_sum - min_others).max(min_share);
-        }
-        let factor = if others_sum > 0.0 {
-            (share_sum - target) / others_sum
-        } else {
-            0.0
-        };
-        let children = linear.children.clone();
-        for child in children {
-            if child == target_child {
-                linear.shares.set_share(child, target.max(min_share));
-            } else {
-                let new = (linear.shares[child] * factor).max(min_share);
-                linear.shares.set_share(child, new);
-            }
-        }
-    }
-
-    let target_frac = ui_state.sidebar_state.last_share(kind).unwrap_or(0.2);
-    let min_share = SIDEBAR_COLLAPSED_SHARE;
-    let parents = build_parent_map(&ui_state.tree.tiles);
-    let mut current = Some(sidebar_tile);
-    while let Some(child) = current {
-        let Some(parent) = parents.get(&child).copied() else {
-            break;
-        };
-        if let Some(Tile::Container(Container::Linear(linear))) =
-            ui_state.tree.tiles.get_mut(parent)
-        {
-            rebalance_linear_shares(linear, child, target_frac, min_share);
-        }
-        current = Some(parent);
-    }
-
-    ui_state.sidebar_state.set_masked(kind, false);
-    ui_state
-        .sidebar_state
-        .set_last_share(kind, Some(target_frac));
+enum ToolbarAction {
+    LeftSidebar,
+    RightSidebar,
+    Theme,
 }
 
-fn unmask_sidebar_by_kind(ui_state: &mut TileState, kind: SidebarKind) {
-    let target = ui_state
-        .tree
-        .tiles
-        .iter()
-        .find_map(|(id, tile)| match (kind, tile) {
-            (SidebarKind::Hierarchy, Tile::Pane(Pane::Hierarchy)) => Some(*id),
-            (SidebarKind::Inspector, Tile::Pane(Pane::Inspector)) => Some(*id),
-            _ => None,
+fn render_sidebar_toolbar(
+    ui: &mut egui::Ui,
+    left_visible: bool,
+    right_visible: bool,
+) -> Option<ToolbarAction> {
+    let mut action = None;
+
+    egui::TopBottomPanel::top("sidebar_toggle_toolbar")
+        .exact_height(32.0)
+        .frame(Frame {
+            fill: get_scheme().bg_secondary,
+            stroke: egui::Stroke::new(1.0, get_scheme().border_primary),
+            inner_margin: egui::Margin::symmetric(8, 0),
+            ..Default::default()
+        })
+        .show_inside(ui, |ui| {
+            ui.horizontal_centered(|ui| {
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let old_pad = ui.spacing().button_padding;
+                    ui.style_mut().spacing.button_padding = egui::vec2(2.0, 2.0);
+
+                    let icon_color = get_scheme().text_primary;
+                    ui.visuals_mut().widgets.inactive.fg_stroke.color = icon_color;
+                    ui.visuals_mut().widgets.hovered.fg_stroke.color = icon_color;
+                    ui.visuals_mut().widgets.active.fg_stroke.color = icon_color;
+
+                    let right_icon = if right_visible {
+                        ICON_RIGHT_PANEL_CLOSE
+                    } else {
+                        ICON_RIGHT_PANEL_OPEN
+                    };
+                    let right_resp = icon_button(ui, right_icon);
+                    if right_resp.clicked() {
+                        action = Some(ToolbarAction::RightSidebar);
+                    }
+                    right_resp.on_hover_text(if right_visible {
+                        "Hide right sidebar"
+                    } else {
+                        "Show right sidebar"
+                    });
+
+                    ui.add_space(4.0);
+
+                    let left_icon = if left_visible {
+                        ICON_LEFT_PANEL_CLOSE
+                    } else {
+                        ICON_LEFT_PANEL_OPEN
+                    };
+                    let left_resp = icon_button(ui, left_icon);
+                    if left_resp.clicked() {
+                        action = Some(ToolbarAction::LeftSidebar);
+                    }
+                    left_resp.on_hover_text(if left_visible {
+                        "Hide left sidebar"
+                    } else {
+                        "Show left sidebar"
+                    });
+
+                    ui.add_space(8.0);
+
+                    let current_mode = colors::current_selection().mode;
+                    let is_dark = current_mode.eq_ignore_ascii_case("dark");
+                    let theme_icon = if is_dark {
+                        ICON_LIGHT_MODE
+                    } else {
+                        ICON_DARK_MODE
+                    };
+                    let theme_resp = icon_button(ui, theme_icon);
+                    if theme_resp.clicked() {
+                        action = Some(ToolbarAction::Theme);
+                    }
+                    theme_resp.on_hover_text(if is_dark {
+                        "Switch to light mode"
+                    } else {
+                        "Switch to dark mode"
+                    });
+
+                    ui.style_mut().spacing.button_padding = old_pad;
+                });
+            });
         });
 
-    if let Some(tile_id) = target {
-        unmask_sidebar_on_select(ui_state, tile_id, kind);
-    }
+    action
 }
 
 pub fn shortcuts(

@@ -123,6 +123,16 @@ impl<E: IntoBytes + Immutable> AppendLog<E> {
         &self.header().extra
     }
 
+    /// Overwrite the extra data in the header.
+    /// This is used by the follower to match the source's start_timestamp.
+    pub fn set_extra(&self, extra: E) {
+        unsafe {
+            let ptr = self.map.as_mut_ptr().add(size_of::<AtomicU64>() * 2);
+            let extra_buf = std::slice::from_raw_parts_mut(ptr, size_of::<E>());
+            extra_buf.copy_from_slice(extra.as_bytes());
+        }
+    }
+
     /// The current committed length, excluding the `HEADER_SIZE`
     pub fn len(&self) -> u64 {
         self.committed_len().load(Ordering::Acquire) - size_of::<Header<E>>() as u64

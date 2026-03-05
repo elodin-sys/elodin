@@ -1,6 +1,6 @@
 use std::{
     collections::BTreeMap,
-    path::{Component, Path, PathBuf},
+    path::{Path, PathBuf},
     str::FromStr,
     time::Duration,
 };
@@ -13,7 +13,7 @@ use bevy::{
         system::{Commands, InRef, IntoSystem, Query, Res, ResMut, System},
         world::World,
     },
-    log::{error, info, warn},
+    log::{error, info},
     pbr::{StandardMaterial, wireframe::WireframeConfig},
     prelude::{Deref, DerefMut, Entity, In, Mut, Resource, Transform},
     window::PrimaryWindow,
@@ -22,16 +22,15 @@ use bevy_editor_cam::controller::{component::EditorCam, motion::CurrentMotion};
 use bevy_infinite_grid::InfiniteGrid;
 use egui_tiles::{Tile, TileId};
 use fuzzy_matcher::{FuzzyMatcher, skim::SkimMatcherV2};
-use impeller2::types::{Timestamp, msg_id};
-use impeller2_bevy::{CommandsExt, ComponentPathRegistry, CurrentStreamId, EntityMap, PacketTx};
+use impeller2::types::Timestamp;
+use impeller2_bevy::{ComponentPathRegistry, EntityMap, PacketTx};
 use impeller2_kdl::{
     ToKdl,
     env::{schematic_dir_or_cwd, schematic_file},
 };
 use impeller2_wkt::{
-    ArchiveFormat, ArchiveSaved, ComponentPath, ComponentValue, CurrentTimestamp, DbConfig,
-    EarliestTimestamp, ErrorResponse, IsRecording, LastUpdated, Material, Mesh, Object3D,
-    SaveArchive, SetDbConfig, SetStreamState, SimulationTimeStep,
+    ComponentPath, ComponentValue, CurrentTimestamp, DbConfig, EarliestTimestamp, IsRecording,
+    LastUpdated, Material, Mesh, Object3D, SetDbConfig, SimulationTimeStep,
 };
 use miette::IntoDiagnostic;
 use nox::ArrayBuf;
@@ -48,7 +47,7 @@ use crate::{
             SchematicLiveReloadRx, load_schematic_file,
         },
         tiles::{self, set_mode_all},
-        timeline::{StreamTickOrigin, timeline_slider::UITick},
+        timeline::{PlaybackSpeed, StreamTickOrigin, timeline_slider::UITick},
     },
 };
 
@@ -697,19 +696,6 @@ pub fn create_data_overview(tile_id: Option<TileId>) -> PaletteItem {
     )
 }
 
-pub fn create_sidebars() -> PaletteItem {
-    PaletteItem::new(
-        "Create Sidebars",
-        TILES_LABEL,
-        move |_: In<String>, mut tile_param: TileParam, palette_state: Res<CommandPaletteState>| {
-            let Some(mut tile_state) = tile_param.target(palette_state.target_window) else {
-                return PaletteEvent::Error("Secondary window unavailable".to_string());
-            };
-            tile_state.create_sidebars_layout();
-            PaletteEvent::Exit
-        },
-    )
-}
 pub fn create_video_stream(tile_id: Option<TileId>) -> PaletteItem {
     PaletteItem::new(
         "Create Video Stream",
@@ -728,9 +714,9 @@ pub fn create_video_stream(tile_id: Option<TileId>) -> PaletteItem {
                         else {
                             return PaletteEvent::Error("Secondary window unavailable".to_string());
                         };
-                        let msg_name = msg_name.trim();
+                        let msg_name = msg_name.trim().to_string();
                         let label = format!("Video Stream {}", msg_name);
-                        tile_state.create_video_stream_tile(msg_id(msg_name), label, tile_id);
+                        tile_state.create_video_stream_tile(msg_name, label, tile_id);
                         PaletteEvent::Exit
                     },
                 )
@@ -744,8 +730,7 @@ pub fn create_video_stream(tile_id: Option<TileId>) -> PaletteItem {
 fn set_playback_speed() -> PaletteItem {
     PaletteItem::new("Set Playback Speed", TIME_LABEL, |_: In<String>| {
         let speeds = [
-            0.001, 0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 2.0, 3.0, 4.0, 5.0, 10.0, 20.0, 30.0, 40.0,
-            50.0, 100.0,
+            0.05, 0.1, 0.25, 0.5, 1.0, 2.0, 3.0, 4.0, 5.0, 10.0, 20.0, 30.0, 40.0, 50.0, 100.0,
         ];
         let next_page = PalettePage::new(
             speeds
@@ -754,16 +739,8 @@ fn set_playback_speed() -> PaletteItem {
                     PaletteItem::new(
                         speed.to_string(),
                         "SPEED".to_string(),
-                        move |_: In<String>,
-                              packet_tx: Res<PacketTx>,
-                              stream_id: Res<CurrentStreamId>| {
-                            packet_tx.send_msg(SetStreamState {
-                                id: stream_id.0,
-                                playing: None,
-                                timestamp: None,
-                                time_step: Some(Duration::from_secs_f64(speed / 60.0)),
-                                frequency: None,
-                            });
+                        move |_: In<String>, mut playback_speed: ResMut<PlaybackSpeed>| {
+                            playback_speed.0 = speed;
                             PaletteEvent::Exit
                         },
                     )
@@ -867,8 +844,6 @@ fn goto_tick() -> PaletteItem {
                       mut current_tick: ResMut<CurrentTimestamp>,
                       mut ui_tick: ResMut<UITick>,
                       mut paused: ResMut<Paused>,
-                      stream_id: Res<CurrentStreamId>,
-                      packet_tx: Res<PacketTx>,
                       earliest_timestamp: Res<EarliestTimestamp>,
                       mut tick_origin: ResMut<StreamTickOrigin>,
                       tick_time: Res<SimulationTimeStep>| {
@@ -922,7 +897,6 @@ fn goto_tick() -> PaletteItem {
                     if parsed_tick == 0 {
                         tick_origin.request_rebase();
                     }
-                    packet_tx.send_msg(SetStreamState::rewind(**stream_id, timestamp));
 
                     PaletteEvent::Exit
                 },
@@ -996,131 +970,6 @@ pub fn save_schematic_db() -> PaletteItem {
             PaletteEvent::Exit
         },
     )
-}
-
-fn save_db_native_prompt_item() -> PaletteItem {
-    PaletteItem::new(
-        LabelSource::placeholder("Enter a name for the Save DB directory"),
-        "",
-        |In(input): In<String>, mut commands: Commands| {
-            let trimmed = input.trim();
-            if trimmed.is_empty() {
-                return PaletteEvent::Error("Directory name cannot be empty".to_string());
-            }
-            let raw_path = PathBuf::from(trimmed);
-            let mut path_is_absolute =
-                raw_path.is_absolute() || trimmed.starts_with('/') || trimmed.starts_with('\\');
-            let mut last_component: Option<&std::ffi::OsStr> = None;
-            for component in raw_path.components() {
-                match component {
-                    Component::Normal(part) => {
-                        if part.is_empty() {
-                            return PaletteEvent::Error(
-                                "Path contains an empty segment".to_string(),
-                            );
-                        }
-                        last_component = Some(part);
-                    }
-                    Component::CurDir => {
-                        return PaletteEvent::Error(
-                            "`.` segments are not allowed in the path".to_string(),
-                        );
-                    }
-                    Component::ParentDir => {
-                        return PaletteEvent::Error(
-                            "Path may not traverse outside the workspace".to_string(),
-                        );
-                    }
-                    Component::Prefix(_) | Component::RootDir => {
-                        path_is_absolute = true;
-                    }
-                }
-            }
-            let Some(_name) = last_component.and_then(|c| c.to_str()) else {
-                return PaletteEvent::Error("Invalid directory name".to_string());
-            };
-            let request_path = if path_is_absolute {
-                raw_path.clone()
-            } else {
-                let cwd = match std::env::current_dir() {
-                    Ok(cwd) => cwd,
-                    Err(err) => {
-                        error!(?err, "Failed to resolve workspace directory");
-                        return PaletteEvent::Error(
-                            "Failed to resolve workspace directory".to_string(),
-                        );
-                    }
-                };
-                let target = cwd.join(&raw_path);
-                if target.exists() {
-                    return PaletteEvent::Error("Directory already exists".to_string());
-                }
-                if let Err(err) = target.strip_prefix(&cwd) {
-                    error!(?err, "Save path escaped workspace");
-                    return PaletteEvent::Error(
-                        "Path must stay within the workspace directory".to_string(),
-                    );
-                }
-                raw_path.clone()
-            };
-            commands.send_req_reply(
-                SaveArchive {
-                    path: request_path,
-                    format: ArchiveFormat::Native,
-                },
-                |In(res): In<Result<ArchiveSaved, ErrorResponse>>,
-                 mut palette_state: ResMut<CommandPaletteState>| {
-                    match res {
-                        Ok(saved) => {
-                            let display_path = std::env::current_dir()
-                                .ok()
-                                .and_then(|cwd| {
-                                    saved
-                                        .path
-                                        .strip_prefix(cwd)
-                                        .ok()
-                                        .map(|p| format!("{}", p.display()))
-                                })
-                                .unwrap_or_else(|| saved.path.display().to_string());
-                            info!(path = %display_path, "Saved DB snapshot");
-                    }
-                    Err(err) => {
-                        warn!(?err, "Failed to save DB snapshot");
-                        let message = if err.description.contains("Serde Deserialization Error")
-                        {
-                            "Connected database does not support native DB snapshots. Please update elodin-db and try again.".to_string()
-                        } else {
-                            err.description.clone()
-                        };
-                        palette_state.show = true;
-                        palette_state.filter.clear();
-                        palette_state.input_focus = true;
-                        palette_state.selected_index = 0;
-                        palette_state.page_stack.clear();
-                        palette_state.page_stack.push(save_db_native_prompt_page());
-                        palette_state.auto_open_item = None;
-                        palette_state.error = Some(message);
-                    }
-                }
-                true
-            },
-        );
-            PaletteEvent::Exit
-        },
-    )
-    .default()
-}
-
-fn save_db_native_prompt_page() -> PalettePage {
-    PalettePage::new(vec![save_db_native_prompt_item()]).prompt(
-        "Enter a directory name within the workspace or an absolute path on the database host",
-    )
-}
-
-pub fn save_db_native() -> PaletteItem {
-    PaletteItem::new("Save DB", PRESETS_LABEL, |_name: In<String>| {
-        save_db_native_prompt_page().into_event()
-    })
 }
 
 pub fn clear_schematic() -> PaletteItem {
@@ -1345,6 +1194,7 @@ fn create_object_3d_with_color(eql: String, expr: eql::Expr, mesh: Mesh) -> Pale
                   component_value_maps: Query<&'static ComponentValue>,
                   mut material_assets: ResMut<Assets<StandardMaterial>>,
                   mut mesh_assets: ResMut<Assets<bevy::prelude::Mesh>>,
+                  mut mat3_material_assets: ResMut<Assets<bevy_mat3_material::Mat3Material>>,
                   assets: Res<AssetServer>| {
                 let color_str = color_str.trim();
                 let (r, g, b) =
@@ -1361,6 +1211,8 @@ fn create_object_3d_with_color(eql: String, expr: eql::Expr, mesh: Mesh) -> Pale
                     Object3D {
                         eql: eql.clone(),
                         mesh: mesh_source,
+                        icon: None,
+                        mesh_visibility_range: None,
                         aux: (),
                         frame: None,
                     },
@@ -1368,6 +1220,7 @@ fn create_object_3d_with_color(eql: String, expr: eql::Expr, mesh: Mesh) -> Pale
                     &eql_ctx.0,
                     &mut material_assets,
                     &mut mesh_assets,
+                    &mut mat3_material_assets,
                     &assets,
                 );
 
@@ -1432,16 +1285,18 @@ pub fn create_3d_object() -> PaletteItem {
                                                   eql_ctx: Res<EqlContext>,
                                                   mut material_assets: ResMut<Assets<StandardMaterial>>,
                                                   mut mesh_assets: ResMut<Assets<bevy::prelude::Mesh>>,
+                                                  mut mat3_material_assets: ResMut<Assets<bevy_mat3_material::Mat3Material>>,
                                                   assets: Res<AssetServer>| {
                                                 let obj = impeller2_wkt::Object3DMesh::glb(gltf_path.trim());
 
                                                 crate::object_3d::create_object_3d_entity(
                                                     &mut commands,
-                                                    Object3D { eql: eql.clone(), mesh: obj, aux: (), frame: None },
+                                                    Object3D { eql: eql.clone(), mesh: obj, icon: None, mesh_visibility_range: None, frame: None, aux: () },
                                                     expr.clone(),
                                                     &eql_ctx.0,
                                                     &mut material_assets,
                                                     &mut mesh_assets,
+                                                    &mut mat3_material_assets,
                                                     &assets,
                                                 );
 
@@ -1694,8 +1549,6 @@ impl Default for PalettePage {
             // create_dashboard(None),
             create_data_overview(None),
             create_3d_object(),
-            // Disabled: Save DB is flaky on Linux and we're unsure it's a useful feature.
-            // save_db_native(),
             save_schematic(),
             save_schematic_as(),
             save_schematic_db(),

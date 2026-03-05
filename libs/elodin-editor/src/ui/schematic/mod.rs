@@ -6,7 +6,7 @@ use crate::{
     ui::{
         HdrEnabled, actions, colors,
         colors::EColor,
-        inspector, plot, query_plot, query_table,
+        inspector, monitor, plot, query_plot, query_table,
         tiles::{self, Pane},
         window::compute_window_title,
     },
@@ -17,7 +17,7 @@ use egui_tiles::{Tile, TileId};
 use impeller2_bevy::ComponentMetadataRegistry;
 use impeller2_wkt::{
     ActionPane, ComponentMonitor, ComponentPath, Dashboard, Line3d, Panel, Schematic,
-    SchematicElem, Split, VectorArrow3d, Viewport, WindowSchematic,
+    SchematicElem, Split, VectorArrow3d, VideoStream as WktVideoStream, Viewport, WindowSchematic,
 };
 use bevy_geo_frames::{GeoFrame, GeoPosition};
 
@@ -42,10 +42,12 @@ pub struct CurrentSecondarySchematics(pub Vec<SecondarySchematic>);
 #[derive(SystemParam)]
 pub struct SchematicParam<'w, 's> {
     pub query_tables: Query<'w, 's, &'static query_table::QueryTableData>,
+    pub monitors: Query<'w, 's, &'static monitor::MonitorData>,
     pub action_tiles: Query<'w, 's, &'static actions::ActionTile>,
     pub graph_states: Query<'w, 's, &'static plot::GraphState>,
     pub query_plots: Query<'w, 's, &'static query_plot::QueryPlotData>,
     pub viewports: Query<'w, 's, &'static inspector::viewport::Viewport>,
+    pub projections: Query<'w, 's, &'static Projection>,
     pub viewport_configs: Query<'w, 's, &'static tiles::ViewportConfig>,
     pub camera_grids: Query<'w, 's, &'static GridHandle>,
     pub grid_visibility: Query<'w, 's, &'static Visibility>,
@@ -63,6 +65,7 @@ pub struct SchematicParam<'w, 's> {
     pub windows_state: Query<'w, 's, (&'static tiles::WindowState, &'static tiles::WindowId)>,
     pub primary_window: Single<'w, 's, Entity, With<PrimaryWindow>>,
     pub dashboards: Query<'w, 's, &'static Dashboard<Entity>>,
+    pub video_streams: Query<'w, 's, &'static super::video_stream::VideoStream>,
     pub hdr_enabled: Res<'w, HdrEnabled>,
     pub metadata: Res<'w, ComponentMetadataRegistry>,
     pub geo_positions: Query<'w, 's, &'static GeoPosition>,
@@ -94,7 +97,7 @@ impl SchematicParam<'_, '_> {
             Pane::Dashboard(dashboard) => Some(dashboard.name.clone()),
             Pane::SchematicTree(pane) => Some(pane.name.clone()),
             Pane::DataOverview(pane) => Some(pane.name.clone()),
-            Pane::VideoStream(_) | Pane::Hierarchy | Pane::Inspector => None,
+            Pane::VideoStream(pane) => Some(pane.name.clone()),
         }
     }
 
@@ -135,6 +138,37 @@ impl SchematicParam<'_, '_> {
                     Pane::Viewport(viewport) => {
                         let cam_entity = viewport.camera?;
                         let viewport_data = self.viewports.get(cam_entity).ok()?;
+                        let (fov, near, far) = self
+                            .projections
+                            .get(cam_entity)
+                            .ok()
+                            .and_then(|projection| match projection {
+                                Projection::Perspective(perspective) => {
+                                    let near = if (perspective.near - tiles::DEFAULT_VIEWPORT_NEAR)
+                                        .abs()
+                                        > f32::EPSILON
+                                    {
+                                        Some(perspective.near)
+                                    } else {
+                                        None
+                                    };
+                                    let far = if (perspective.far - tiles::DEFAULT_VIEWPORT_FAR)
+                                        .abs()
+                                        > f32::EPSILON
+                                    {
+                                        Some(perspective.far)
+                                    } else {
+                                        None
+                                    };
+                                    Some((perspective.fov.to_degrees(), near, far))
+                                }
+                                _ => None,
+                            })
+                            .unwrap_or((45.0, None, None));
+
+                        let vp_config = self.viewport_configs.get(cam_entity).ok();
+                        let aspect = vp_config.and_then(|c| c.aspect);
+
                         let mut show_grid = false;
                         if let Ok(grid_handle) = self.camera_grids.get(cam_entity)
                             && let Ok(visibility) = self.grid_visibility.get(grid_handle.grid)
@@ -142,11 +176,16 @@ impl SchematicParam<'_, '_> {
                             show_grid = matches!(*visibility, Visibility::Visible);
                         }
 
-                        let show_arrows = self
-                            .viewport_configs
-                            .get(cam_entity)
-                            .map(|config| config.show_arrows)
-                            .unwrap_or(true);
+                        let show_arrows = vp_config.map(|c| c.show_arrows).unwrap_or(true);
+                        let create_frustum = vp_config.map(|c| c.create_frustum).unwrap_or(false);
+                        let show_frustums = vp_config.map(|c| c.show_frustums).unwrap_or(false);
+                        let frustums_color = vp_config
+                            .map(|c| c.frustums_color)
+                            .unwrap_or_else(impeller2_wkt::default_viewport_frustums_color);
+                        let frustums_thickness = vp_config
+                            .map(|c| c.frustums_thickness)
+                            .unwrap_or_else(impeller2_wkt::default_viewport_frustums_thickness);
+                        let show_view_cube = viewport.view_cube_layer.is_some();
 
                         let local_arrows: Vec<VectorArrow3d> = self
                             .vector_arrows
@@ -165,14 +204,24 @@ impl SchematicParam<'_, '_> {
                             .map(|geo_pos| geo_pos.0).ok();
 
                         Some(Panel::Viewport(Viewport {
-                            fov: 45.0,
+                            fov,
+                            near,
+                            far,
+                            aspect,
                             active: false,
                             show_grid,
                             show_arrows,
+                            create_frustum,
+                            show_frustums,
+                            frustums_color,
+                            frustums_thickness,
+                            show_view_cube,
                             hdr: self.hdr_enabled.0,
                             name: pane_name,
                             pos: Some(viewport_data.pos.eql.clone()),
                             look_at: Some(viewport_data.look_at.eql.clone()),
+                            up: (!viewport_data.up.eql.is_empty())
+                                .then(|| viewport_data.up.eql.clone()),
                             local_arrows,
                             aux: cam_entity,
                             frame,
@@ -214,10 +263,13 @@ impl SchematicParam<'_, '_> {
                         }))
                     }
 
-                    Pane::Monitor(monitor) => Some(Panel::ComponentMonitor(ComponentMonitor {
-                        component_name: monitor.component_name.clone(),
-                        name: pane_name,
-                    })),
+                    Pane::Monitor(monitor) => {
+                        let monitor_data = self.monitors.get(monitor.entity).ok()?;
+                        Some(Panel::ComponentMonitor(ComponentMonitor {
+                            component_name: monitor_data.component_name.clone(),
+                            name: pane_name,
+                        }))
+                    }
 
                     Pane::QueryTable(query_table) => {
                         let query_table_data = self.query_tables.get(query_table.entity).ok()?;
@@ -243,8 +295,13 @@ impl SchematicParam<'_, '_> {
                         }))
                     }
 
-                    // Not exported
-                    Pane::VideoStream(_) => None,
+                    Pane::VideoStream(video_pane) => {
+                        let video_stream = self.video_streams.get(video_pane.entity).ok()?;
+                        Some(Panel::VideoStream(WktVideoStream {
+                            msg_name: video_stream.msg_name.clone(),
+                            name: pane_name,
+                        }))
+                    }
                     Pane::DataOverview(_) => Some(Panel::DataOverview(pane_name)),
 
                     // Structural panes
@@ -258,7 +315,6 @@ impl SchematicParam<'_, '_> {
                         }
                         Some(Panel::Dashboard(Box::new(dashboard)))
                     }
-                    _ => None,
                 }
             }
 
@@ -267,9 +323,6 @@ impl SchematicParam<'_, '_> {
                 egui_tiles::Container::Tabs(t) => {
                     let mut tabs = vec![];
                     for child_id in &t.children {
-                        if tiles::sidebar::tile_is_sidebar(tiles, *child_id) {
-                            continue;
-                        }
                         if let Some(tab) = self.get_panel_from_state(state, *child_id) {
                             tabs.push(tab)
                         }
@@ -287,9 +340,6 @@ impl SchematicParam<'_, '_> {
                     let name = state.get_container_title(tile_id).map(|s| s.to_string());
 
                     for child_id in &linear.children {
-                        if tiles::sidebar::tile_is_sidebar(tiles, *child_id) {
-                            continue;
-                        }
                         if let Some(panel) = self.get_panel_from_state(state, *child_id) {
                             if let Some((_, share)) =
                                 linear.shares.iter().find(|(id, _)| *id == child_id)
@@ -418,10 +468,16 @@ pub struct SchematicPlugin;
 
 impl Plugin for SchematicPlugin {
     fn build(&self, app: &mut App) {
-        app.insert_resource(CurrentSchematic(Default::default()))
+        app.add_plugins(load::plugin)
+            .insert_resource(CurrentSchematic(Default::default()))
             .insert_resource(CurrentSecondarySchematics::default())
             .add_systems(PostUpdate, tiles_to_schematic)
-            .add_systems(PostUpdate, sync_schematic.before(tiles_to_schematic))
+            .add_systems(
+                PostUpdate,
+                load::apply_initial_kdl_path
+                    .pipe(sync_schematic)
+                    .before(tiles_to_schematic),
+            )
             .init_resource::<SchematicLiveReloadRx>()
             .add_systems(PreUpdate, load::schematic_live_reload);
     }

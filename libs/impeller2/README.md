@@ -31,7 +31,7 @@ The project has evolved through several iterations:
 For historical context and a deeper understanding of Impeller2's evolution, review these key pull requests (in chronological order):
 
 - [paracosm#55: Initial protocol design and implementation](https://github.com/elodin-sys/paracosm/pull/55)
-- [paracosm#148: Integrate with editor and nox-ecs](https://github.com/elodin-sys/paracosm/pull/148)
+- [paracosm#148: Integrate with editor and simulation](https://github.com/elodin-sys/paracosm/pull/148)
 - [paracosm#177: Hierarchical component system introduction](https://github.com/elodin-sys/paracosm/pull/177)
 - [paracosm#641: Rename to Impeller](https://github.com/elodin-sys/paracosm/pull/641)
 - [paracosm#763: Transport abstraction and extensibility](https://github.com/elodin-sys/paracosm/pull/763)

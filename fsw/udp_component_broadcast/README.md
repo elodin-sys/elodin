@@ -32,7 +32,7 @@ This enables distributed simulation scenarios like having a target drone chase a
 cd libs/db/examples/udp_component_broadcast
 
 # Create virtual environment
-uv venv --python 3.12 && source .venv/bin/activate
+uv venv --python 3.13 && source .venv/bin/activate
 
 # Install dependencies
 uv pip install -r requirements.txt
@@ -186,7 +186,7 @@ The broadcast uses Protocol Buffers for serialization with two message types:
 
 1. Ensure Rust is installed: `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh`
 2. Activate the virtualenv first: `source .venv/bin/activate`
-3. Make sure you created the venv with Python 3.12
+3. Make sure you created the venv with Python 3.13
 
 ### Connection to Elodin-DB fails
 

@@ -9,12 +9,12 @@ use bevy::{
 use bevy_egui::egui;
 use egui::{CornerRadius, Margin};
 use impeller2::types::Timestamp;
-use impeller2_bevy::{CurrentStreamId, PacketTx};
-use impeller2_wkt::{CurrentTimestamp, EarliestTimestamp, SetStreamState};
+use impeller2_bevy::CurrentStreamId;
+use impeller2_wkt::{CurrentTimestamp, EarliestTimestamp};
 use std::ops::RangeInclusive;
 
 use crate::ui::{
-    colors::get_scheme,
+    colors::{ColorExt, get_scheme},
     time_label::PrettyDuration,
     utils::{MarginSides, Shrink4},
     widgets::WidgetSystem,
@@ -45,6 +45,7 @@ pub struct Timeline<'a> {
     get_set_value: GetSetValue<'a>,
     active_range: RangeInclusive<f64>,
     full_range: RangeInclusive<f64>,
+    focus_range: Option<RangeInclusive<f64>>,
     fps: f64,
     handle_image_id: Option<egui::TextureId>,
     handle_image_tint: egui::Color32,
@@ -95,6 +96,7 @@ impl<'a> Timeline<'a> {
             get_set_value: Box::new(get_set_value),
             full_range: active_range.clone(),
             active_range,
+            focus_range: None,
             handle_image_id: None,
             handle_image_tint: get_scheme().success,
             handle_aspect_ratio: 0.5,
@@ -133,6 +135,11 @@ impl<'a> Timeline<'a> {
 
     pub fn height(mut self, height: f32) -> Self {
         self.height = height;
+        self
+    }
+
+    pub fn focus_range(mut self, range: Option<RangeInclusive<i64>>) -> Self {
+        self.focus_range = range.map(|r| (*r.start() as f64)..=(*r.end() as f64));
         self
     }
 
@@ -227,6 +234,30 @@ impl Timeline<'_> {
                     position_range,
                 ),
             );
+
+            // Focus overlay
+            if let Some(ref focus) = self.focus_range {
+                let focus_start_x =
+                    position_from_value(*focus.start(), self.active_range.clone(), position_range);
+                let focus_end_x =
+                    position_from_value(*focus.end(), self.active_range.clone(), position_range);
+                let overlay_rect =
+                    egui::Rect::from_x_y_ranges(focus_start_x..=focus_end_x, rect.y_range());
+                ui.painter().rect_filled(
+                    overlay_rect,
+                    CornerRadius::ZERO,
+                    get_scheme().success.opacity(0.12),
+                );
+                let edge_stroke = egui::Stroke::new(1.0, get_scheme().success.opacity(0.5));
+                ui.painter().line_segment(
+                    [overlay_rect.left_top(), overlay_rect.left_bottom()],
+                    edge_stroke,
+                );
+                ui.painter().line_segment(
+                    [overlay_rect.right_top(), overlay_rect.right_bottom()],
+                    edge_stroke,
+                );
+            }
 
             // Fixed Max Handle
 
@@ -355,8 +386,8 @@ pub struct UITick(pub i64);
 
 #[derive(SystemParam)]
 pub struct TimelineSlider<'w> {
-    event: Res<'w, PacketTx>,
     tick: ResMut<'w, UITick>,
+    current_timestamp: ResMut<'w, CurrentTimestamp>,
     current_stream_id: Res<'w, CurrentStreamId>,
     tick_origin: ResMut<'w, StreamTickOrigin>,
     earliest_timestamp: Res<'w, EarliestTimestamp>,
@@ -373,8 +404,8 @@ impl WidgetSystem for TimelineSlider<'_> {
         args: Self::Args,
     ) {
         let TimelineSlider {
-            event,
             mut tick,
+            mut current_timestamp,
             current_stream_id,
             mut tick_origin,
             earliest_timestamp,
@@ -397,19 +428,17 @@ impl WidgetSystem for TimelineSlider<'_> {
                     .handle_image_id(handle_icon)
                     .handle_aspect_ratio(12.0 / 30.0)
                     .segments(timeline_args.segment_count)
-                    .fps(timeline_args.frames_per_second),
+                    .fps(timeline_args.frames_per_second)
+                    .focus_range(timeline_args.focus_range),
                 )
                 .on_hover_cursor(egui::CursorIcon::PointingHand);
 
             if response.changed() {
                 let target_timestamp = Timestamp(tick.0);
+                current_timestamp.0 = target_timestamp;
                 if target_timestamp <= earliest_timestamp.0 {
                     tick_origin.request_rebase();
                 }
-                event.send_msg(SetStreamState::rewind(
-                    **current_stream_id,
-                    target_timestamp,
-                ))
             }
         });
     }

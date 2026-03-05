@@ -148,6 +148,7 @@ fn panel(
         Panel::SchematicTree(_) => icons.viewport,
         Panel::DataOverview(_) => icons.viewport,
         Panel::Dashboard(_) => icons.viewport,
+        Panel::VideoStream(_) => icons.viewport,
     };
     let children = p.children();
     let selected = if p.aux().copied() == selected_object.entity() {
@@ -201,6 +202,7 @@ fn panel(
             Panel::Viewport(viewport) => {
                 *selected_object = SelectedObject::Viewport {
                     camera: viewport.aux,
+                    title: p.label().to_string(),
                 }
             }
             Panel::Graph(graph) => {

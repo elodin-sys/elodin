@@ -21,7 +21,7 @@ order = 6
 ### theme
 - Optional top-level node that sets the session UI appearance.
 - `mode`: `"dark"` (default) or `"light"`; drives window decorations and picks the dark/light variant of the color scheme. If a preset does not ship a light variant, the theme stays in dark.
-- `scheme`: name of a color preset. Built-ins are `default`, `eggplant`, `catppuccini-macchiato`, `catppuccini-mocha`, `catppuccini-latte`, and `matrix`; user presets are picked up from any `color_schemes` folder in the asset directory or data directory. Unknown names fall back to `default`. If a user preset shares a name with a built-in, the user version wins. See [color-schemes](./color-schemes.md) for the file layout.
+- `scheme`: name of a color preset. Built-ins are `default`, `eggplant`, `catppuccini-macchiato`, `catppuccini-mocha`, `catppuccini-latte`, and `matrix`; user presets are picked up from any `color_schemes` folder in the asset directory or data directory. Unknown names fall back to `default`. If a user preset shares a name with a built-in, the user version wins. See [color-schemes](/reference/color-schemes) for the file layout.
 - Applies to the whole session; a secondary file can set its own `mode` for its windows, but the active scheme stays the one from the primary schematic.
 - Controls both egui styling (palette) and the window decoration theme (Dark/Light).
 
@@ -36,27 +36,60 @@ order = 6
 - `hsplit` / `vsplit`: children are panels. Child `share=<f32>` controls the weight within the split. `active` (bool) is parsed but not currently used. Optional `name`.
 
 ### panel content
-- `viewport`: `fov` (default 45.0), `active` (bool, default false), `show_grid` (default false), `show_arrows` (default true), `hdr` (default false), `name` (optional label), camera `pos`/`look_at` (optional EQL). Vector arrows can also be declared directly inside the viewport node; those arrows are treated as part of that viewport’s layer and respect its `show_arrows`/`show_grid` settings, allowing you to build a local triad tied to the viewport camera.
+- `viewport`: `fov` (default 45.0), optional `near`/`far` clipping planes (if omitted, camera defaults are `near=0.05` and `far=5.0`; if set, they are applied to the camera projection), optional `aspect` (if omitted, ratio is derived from viewport size), `active` (bool, default false), `show_grid` (default false), `show_arrows` (default true), `create_frustum` (default false; creates that viewport camera frustum), `show_frustums` (default false; shows frustums created by other viewports on this viewport), `frustums_color` (default `yellow`), `frustums_thickness` (default `0.006` world units), `show_view_cube` (default true), `hdr` (default false), `name` (optional label), camera `pos`/`look_at` (optional EQL). Vector arrows can also be declared directly inside the viewport node; those arrows are treated as part of that viewport’s layer and respect its `show_arrows`/`show_grid` settings, allowing you to build a local triad tied to the viewport camera. An `up` (default "(0, 1, 0)") specifies a direction vector in the world frame for the camera.
 - `graph`: positional `eql` (required), `name` (optional), `type` (`line`/`point`/`bar`, default `line`), `lock` (default false), `auto_y_range` (default true), `y_min`/`y_max` (default `0.0..1.0`), child `color` nodes (optional list; otherwise palette).
 - `component_monitor`: `component_name` (required), `name` (optional).
 - `action_pane`: `name` (required pane title), `lua` script (required).
 - `query_table`: `name` (optional), positional `query` (defaults to empty), `type` (`eql` default, or `sql`).
-- `query_plot`: `name` (required pane title), `query` (required), `refresh_interval` in ms (default 1000), `auto_refresh` (default false), `color` (default white), `type` (`eql` default, or `sql`).
+- `query_plot`: `name` (required pane title), `query` (required), `refresh_interval` in ms (default 1000), `auto_refresh` (default false), `color` (default white), `type` (`eql` default, or `sql`), `mode` (`timeseries` default, or `xy` for numeric X-axis labels), `x_label` (optional X-axis label for XY mode), `y_label` (optional Y-axis label).
 - `data_overview`: `name` (optional pane title).
 - `schematic_tree`: `name` (optional pane title). (Hierarchy/Inspector sidebars are implicit and not serialized.)
+- `video_stream`: positional `msg_name` (required; the message name matching the `elodinsink` `msg-name` property), `name` (optional display label; defaults to `"Video Stream <msg_name>"`). Displays an H.264 video stream received by Elodin DB. The video source can be a GStreamer pipeline using `elodinsink`, an OBS Studio SRT stream via a receiver pipeline, or any source that sends H.264 NAL units to Elodin DB. See the [OBS Studio Integration](#obs-studio-integration) section below.
 - `dashboard`: layout node (Bevy UI style). Key properties: `name` (optional), `display` (`flex` default, or `grid`/`block`/`none`), `box_sizing` (`border-box` default or `content-box`), `position_type` (`relative` default or `absolute`), `overflow` (per-axis; defaults visible), `overflow_clip_margin` (visual_box + margin, defaults content-box / 0), sizing (`left`/`right`/`top`/`bottom`/`width`/`height`/`min_*`/`max_*` accept `auto`, `px`, `%`, `vw`, `vh`, `vmin`, `vmax`; default `auto`), `aspect_ratio` (optional f32), alignment (`align_items`/`justify_items`/`align_self`/`justify_self`/`align_content`/`justify_content`, all default to `default` variants), flex (`flex_direction`, `flex_wrap`, `flex_grow` default 0, `flex_shrink` default 1, `flex_basis` default `auto`, `row_gap`/`column_gap` default `auto`), `children` (nested dashboard nodes), colors via `bg`/`background` child (default transparent), `text` (optional), `font_size` (default 16), `text_color` child (default white), spacing via `margin`/`padding`/`border` children with `left`/`right`/`top`/`bottom`.
 
 ### object_3d
 - Positional `eql`: required. Evaluated to a `world_pos`-like value to place the mesh.
 - Mesh child (required, exactly one):
   - `glb`: `path` (required), `scale` (default 1.0), `translate` `(x,y,z)` (default 0s), `rotate` `(deg_x,deg_y,deg_z)` in degrees (default 0s).
+    - `animate` child nodes (optional, multiple): For rigged GLB models, animate specific joints/bones.
+      - `joint`: required string; the exact name of the joint/bone in the GLB file.
+      - `rotation_vector`: required EQL expression; must evaluate to a 3-element vector `(x, y, z)` where:
+        - The vector direction is the rotation axis.
+        - The vector magnitude is the rotation angle in degrees.
+      - Example: `animate joint="Root.Fin_0" rotation_vector="(0, rocket.fin_deflect, 0)"`
   - `sphere`: `radius` (required); `color` (default white).
   - `box`: `x`, `y`, `z` (all required); `color` (default white).
   - `cylinder`: `radius`, `height` (both required); `color` (default white).
   - `plane`: `width`/`depth` (default `size` if set, else 10.0); optional `size` shorthand; `color` (default white).
-  - `ellipsoid`: `scale` (EQL string, default `"(1, 1, 1)"`), `color` (default white).
+  - `ellipsoid`: , `color` (default white), `show_grid` (default `#false`).
+     - Physical measure
+        -`scale` an EQL string, e.g., `"(1, 1, 1)"` in meters
+     - Error measure
+        - `error_covariance_cholesky` as an alternative to specifying the scale
+          and rotation, one can specify the lower triangle cholesky L of the
+          error covariance matrix P = LL^T. Example `"(a,b,c,d,e,f)"` which
+          describes a matrix that looks like this:
+          | a 0 0 |
+          | b c 0 |
+          | d e f |
+        - `error_confidence_interval` (default `70`) the percentage that if this
+          were repeated 100 times, we would expect that in 70 cases, the true
+          value would be within the bounds. In practice this means that the
+          larger the error confidence interval, the larger the ellipsoid.
 
   Mesh nodes support an optional `emissivity=<value>` property (0.0–1.0) to make the material glow (e.g., `sphere radius=0.2 emissivity=0.25 { color yellow }`).
+
+  Mesh nodes and `icon` nodes both support an optional `visibility_range` child node that controls at what camera distances the element is rendered:
+  - `visibility_range`: child node with `min` (default 0) and `max` (default infinity) properties. The element is visible when the camera distance is between `min` and `max`. Both mesh and icon are visible at all distances by default; `visibility_range` is purely opt-in.
+  - `fade_distance` (icon only, default 0): world-unit distance over which the icon fades in at the `min` boundary and fades out at the `max` boundary. For example, `min=50 fade_distance=50` means the icon starts appearing at distance 50 (alpha=0) and reaches full opacity at distance 100. Mesh nodes use hard visibility cutoffs at their `min`/`max` boundaries.
+  - Ranges can overlap (both mesh and icon visible simultaneously) or have gaps.
+- `icon` child (optional): Displays a fixed-size billboard icon at the object's position. Each viewport camera independently evaluates whether to show the icon based on its own distance. The icon always faces the camera and maintains a constant screen pixel size.
+  - Source (exactly one required):
+    - `builtin`: name of a [Material Icons](https://fonts.google.com/icons?icon.set=Material+Icons) glyph (snake_case). Supported names include: `satellite_alt`, `satellite`, `rocket_launch`, `rocket`, `flight`, `flight_takeoff`, `public`, `language`, `circle`, `fiber_manual_record`, `star`, `star_outline`, `location_on`, `place`, `adjust`, `gps_fixed`, `my_location`, `explore`, `navigation`, `near_me`, `diamond`, `hexagon`, `change_history`, `lens`, `panorama_fish_eye`, `radio_button_unchecked`, `brightness_1`, `flare`, `wb_sunny`, `bolt`.
+    - `path`: path to a custom PNG image file (loaded from the assets folder).
+  - `color` child node: tint color for the icon using the standard `color r g b [a]` format or named colors (default white). See Colors in the glossary above.
+  - `visibility_range` child node: `min`, `max`, and `fade_distance` in world units (see above).
+  - `size`: desired screen pixel size of the icon (default 32).
 
 ### line_3d
 - Positional `eql`: required; expects 3 values (or 7 where the last 3 are XYZ).
@@ -111,6 +144,7 @@ panel =
   | query_plot
   | data_overview
   | schematic_tree
+  | video_stream
   | dashboard
   | split
   | tabs
@@ -124,9 +158,16 @@ tabs = "tabs" { panel }+
 
 viewport = "viewport"
          [fov=float]
+         [near=float]
+         [far=float]
+         [aspect=float]
          [active=bool]
          [show_grid=bool]
          [show_arrows=bool]
+         [create_frustum=bool]
+         [show_frustums=bool]
+         [frustums_color=color_name_or_tuple]
+         [frustums_thickness=float]
          [hdr=bool]
          [name=string]
          [pos=eql]
@@ -162,17 +203,24 @@ query_plot = "query_plot"
            [auto_refresh=bool]
            [color]
            [type=eql|sql]
+           [mode=timeseries|xy]
+           [x_label=string]
+           [y_label=string]
 
 data_overview = "data_overview"
               [name=string]
 
 schematic_tree = "schematic_tree"
                [name=string]
+
+video_stream = "video_stream" <msg_name>
+             [name=string]
+
 dashboard      = "dashboard" { dashboard_node }+
 
 object_3d = "object_3d"
           <eql>
-          { glb
+          { glb { animate }*
           | sphere
           | box
           | cylinder
@@ -180,6 +228,22 @@ object_3d = "object_3d"
           | ellipsoid
           }
           [emissivity=float]
+          { [visibility_range] }
+          [icon]
+
+animate = "animate"
+        joint=string
+        rotation_vector=eql
+
+icon = "icon"
+     (builtin=string | path=string)
+     [size=float]
+     { [visibility_range] [color] }
+
+visibility_range = "visibility_range"
+                 [min=float]
+                 [max=float]
+                 [fade_distance=float]
 
 line_3d = "line_3d"
         <eql>
@@ -205,6 +269,54 @@ color = "color"
       )
 ```
 
+## OBS Studio Integration
+
+The `video_stream` panel can display live video from OBS Studio. There are two integration paths:
+
+### SRT Receiver (Recommended)
+
+OBS Studio has built-in SRT (Secure Reliable Transport) support. A GStreamer receiver pipeline on the Elodin server demuxes the MPEG-TS stream and forwards H.264 frames to Elodin DB.
+
+**OBS configuration**: Settings -> Stream -> Custom -> `srt://ELODIN_IP:9000?mode=caller`
+
+**Elodin-side receiver pipeline**:
+
+```bash
+gst-launch-1.0 \
+    srtsrc uri="srt://0.0.0.0:9000?mode=listener" ! \
+    tsdemux ! \
+    h264parse config-interval=-1 ! \
+    queue ! \
+    elodinsink db-address=127.0.0.1:2240 msg-name="obs-camera"
+```
+
+A convenience script and full example are provided in `examples/video-stream/`.
+
+### obs-gstreamer Direct Pipeline (Alternative)
+
+If the [obs-gstreamer](https://github.com/fzwoch/obs-gstreamer) plugin is installed on the OBS machine, H.264 can be piped directly into `elodinsink` without an intermediate process.
+
+**OBS output pipeline** (configured in obs-gstreamer settings):
+
+```
+video. ! h264parse config-interval=-1 ! elodinsink db-address=ELODIN_IP:2240 msg-name="obs-camera" audio. ! fakesink
+```
+
+This requires both `obs-gstreamer` and `elodinsink` to be installed on the OBS machine.
+
+### Recommended OBS Encoder Settings
+
+| Setting | Value |
+|---|---|
+| Encoder | x264 (Software) or NVENC (Hardware) |
+| Rate Control | CBR |
+| Bitrate | 2500–6000 kbps |
+| Keyframe Interval | 2 seconds |
+| Profile | Baseline or Main (High also works) |
+| Tune | `zerolatency` |
+
+> **Important**: Use H.264, not H.265/HEVC. Elodin's video decoder only supports H.264.
+
 ## Examples
 
 Minimal viewport + graph:
@@ -223,6 +335,21 @@ graph "drone.altitude"
       auto_y_range=#true
 ```
 
+Video stream panel (e.g. from OBS Studio):
+
+```kdl
+video_stream "obs-camera" name="OBS Camera"
+```
+
+Viewport + video stream side by side:
+
+```kdl
+hsplit {
+    viewport name="3D View" show_grid=#true share=0.6
+    video_stream "obs-camera" name="OBS Camera" share=0.4
+}
+```
+
 Vector arrow with custom color and label:
 
 ```kdl
@@ -238,3 +365,60 @@ vector_arrow
   color 64 128 255
 }
 ```
+
+Rigged GLB model with animated joints:
+
+The `rotation_vector` is an angle-axis: the direction encodes the axis, and the
+magnitude encodes the angle in degrees.
+
+```kdl
+object_3d rocket.world_pos {
+    glb path="rocket.glb"
+    animate joint="Root.Fin_0" rotation_vector="(0, rocket.fin_deflect[0], 0)"
+    animate joint="Root.Fin_1" rotation_vector="(0, rocket.fin_deflect[1], 0)"
+    animate joint="Root.Fin_2" rotation_vector="(0, rocket.fin_deflect[2], 0)"
+    animate joint="Root.Fin_3" rotation_vector="(0, rocket.fin_deflect[3], 0)"
+}
+```
+
+Distance icon with independent visibility ranges:
+
+```kdl
+object_3d satellite.world_pos {
+    glb path="satellite.glb" {
+        visibility_range max=500.0
+    }
+    icon builtin="satellite_alt" {
+        visibility_range min=500.0
+        color 76 175 80
+    }
+}
+```
+
+Icon with fade-in (both mesh and icon visible by default, icon fades in over 50 units starting at distance 200):
+
+```kdl
+object_3d drone.world_pos {
+    glb path="drone.glb"
+    icon path="drone-icon.png" size=48 {
+        visibility_range min=200.0 fade_distance=50.0
+        color 0 188 212
+    }
+}
+```
+
+Overlapping ranges (both mesh and icon visible between 400 and 600 units):
+
+```kdl
+object_3d rocket.world_pos {
+    glb path="rocket.glb" {
+        visibility_range max=600.0
+    }
+    icon builtin="rocket_launch" {
+        visibility_range min=400.0
+        color 244 67 54
+    }
+}
+```
+
+Browse all available built-in icon names at [Material Icons](https://fonts.google.com/icons?icon.set=Material+Icons) (use the snake_case version of the icon name, e.g. "Satellite Alt" becomes `satellite_alt`).

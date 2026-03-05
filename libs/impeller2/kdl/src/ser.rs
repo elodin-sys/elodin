@@ -2,6 +2,9 @@ use crate::color_names::{color_to_ints, name_from_color};
 use impeller2_wkt::*;
 use kdl::{KdlDocument, KdlEntry, KdlNode};
 
+// Default precision for float properties emitted to KDL.
+const KDL_FLOAT_PRECISION: u32 = 6;
+
 pub fn serialize_schematic<T>(schematic: &Schematic<T>) -> String {
     let mut doc = KdlDocument::new();
 
@@ -65,6 +68,7 @@ fn serialize_panel<T>(panel: &Panel<T>) -> KdlNode {
             node
         }
         Panel::Dashboard(dashboard) => serialize_dashboard(dashboard),
+        Panel::VideoStream(video_stream) => serialize_video_stream(video_stream),
     }
 }
 
@@ -72,10 +76,42 @@ fn push_name_prop(node: &mut KdlNode, name: &str) {
     node.entries_mut().push(KdlEntry::new_prop("name", name));
 }
 
+fn round_float(value: f64, precision: u32) -> f64 {
+    if !value.is_finite() {
+        return value;
+    }
+
+    let factor = 10_f64.powi(precision as i32);
+    let rounded = (value * factor).round() / factor;
+
+    if rounded == 0.0 && rounded.is_sign_negative() {
+        0.0
+    } else {
+        rounded
+    }
+}
+
+fn round_float_default(value: f64) -> f64 {
+    round_float(value, KDL_FLOAT_PRECISION)
+}
+
+fn push_rounded_float_prop(node: &mut KdlNode, name: &str, value: f64) {
+    node.entries_mut()
+        .push(KdlEntry::new_prop(name, round_float_default(value)));
+}
+
 fn push_optional_name_prop(node: &mut KdlNode, name: Option<&str>) {
     if let Some(name) = name {
         push_name_prop(node, name);
     }
+}
+
+fn serialize_video_stream(video_stream: &VideoStream) -> KdlNode {
+    let mut node = KdlNode::new("video_stream");
+    node.entries_mut()
+        .push(KdlEntry::new(video_stream.msg_name.as_str()));
+    push_optional_name_prop(&mut node, video_stream.name.as_deref());
+    node
 }
 
 fn serialize_split<T>(split: &Split<T>, is_horizontal: bool) -> KdlNode {
@@ -94,9 +130,7 @@ fn serialize_split<T>(split: &Split<T>, is_horizontal: bool) -> KdlNode {
         let mut child_node = serialize_panel(panel);
 
         if let Some(&share) = split.shares.get(&i) {
-            child_node
-                .entries_mut()
-                .push(KdlEntry::new_prop("share", share as f64));
+            push_rounded_float_prop(&mut child_node, "share", share as f64);
         }
 
         children.nodes_mut().push(child_node);
@@ -112,8 +146,19 @@ fn serialize_viewport<T>(viewport: &Viewport<T>) -> KdlNode {
     push_optional_name_prop(&mut node, viewport.name.as_deref());
 
     if viewport.fov != 45.0 {
-        node.entries_mut()
-            .push(KdlEntry::new_prop("fov", viewport.fov as f64));
+        push_rounded_float_prop(&mut node, "fov", viewport.fov as f64);
+    }
+
+    if let Some(near) = viewport.near {
+        push_rounded_float_prop(&mut node, "near", near as f64);
+    }
+
+    if let Some(far) = viewport.far {
+        push_rounded_float_prop(&mut node, "far", far as f64);
+    }
+
+    if let Some(aspect) = viewport.aspect {
+        push_rounded_float_prop(&mut node, "aspect", aspect as f64);
     }
 
     if let Some(ref pos) = viewport.pos {
@@ -130,6 +175,10 @@ fn serialize_viewport<T>(viewport: &Viewport<T>) -> KdlNode {
         node.entries_mut()
             .push(KdlEntry::new_prop("frame", <&str>::from(frame)));
     }
+    if let Some(ref up) = viewport.up {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("up", up.clone()));
+    }
 
     if viewport.hdr {
         node.entries_mut().push(KdlEntry::new_prop("hdr", true));
@@ -143,6 +192,49 @@ fn serialize_viewport<T>(viewport: &Viewport<T>) -> KdlNode {
     if !viewport.show_arrows {
         node.entries_mut()
             .push(KdlEntry::new_prop("show_arrows", false));
+    }
+
+    if viewport.create_frustum {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("create_frustum", true));
+    }
+
+    if viewport.show_frustums {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("show_frustums", true));
+    }
+
+    if viewport.frustums_color != default_viewport_frustums_color() {
+        if let Some(name) = name_from_color(&viewport.frustums_color) {
+            node.entries_mut()
+                .push(KdlEntry::new_prop("frustums_color", name));
+        } else {
+            let (r, g, b, a) = color_to_ints(&viewport.frustums_color);
+            if a == 255 {
+                node.entries_mut().push(KdlEntry::new_prop(
+                    "frustums_color",
+                    format!("({r},{g},{b})"),
+                ));
+            } else {
+                node.entries_mut().push(KdlEntry::new_prop(
+                    "frustums_color",
+                    format!("({r},{g},{b},{a})"),
+                ));
+            }
+        }
+    }
+
+    if (viewport.frustums_thickness - default_viewport_frustums_thickness()).abs() > f32::EPSILON {
+        push_rounded_float_prop(
+            &mut node,
+            "frustums_thickness",
+            viewport.frustums_thickness as f64,
+        );
+    }
+
+    if !viewport.show_view_cube {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("show_view_cube", false));
     }
 
     if viewport.active {
@@ -242,10 +334,8 @@ fn serialize_graph<T>(graph: &Graph<T>) -> KdlNode {
 
     // Only serialize y_range if auto_y_range is false and range is not default
     if !graph.auto_y_range && (graph.y_range.start != 0.0 || graph.y_range.end != 1.0) {
-        node.entries_mut()
-            .push(KdlEntry::new_prop("y_min", graph.y_range.start));
-        node.entries_mut()
-            .push(KdlEntry::new_prop("y_max", graph.y_range.end));
+        push_rounded_float_prop(&mut node, "y_min", graph.y_range.start);
+        push_rounded_float_prop(&mut node, "y_max", graph.y_range.end);
     }
 
     for color in &graph.colors {
@@ -327,13 +417,31 @@ fn serialize_query_plot<T>(query_plot: &QueryPlot<T>) -> KdlNode {
         }
     }
 
+    // Serialize plot mode (only if not default TimeSeries)
+    match query_plot.plot_mode {
+        PlotMode::TimeSeries => {} // Default, don't serialize
+        PlotMode::XY => {
+            node.entries_mut().push(KdlEntry::new_prop("mode", "xy"));
+        }
+    }
+
+    // Serialize optional axis labels
+    if let Some(ref x_label) = query_plot.x_label {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("x_label", x_label.clone()));
+    }
+
+    if let Some(ref y_label) = query_plot.y_label {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("y_label", y_label.clone()));
+    }
+
     node
 }
 
 fn serialize_object_3d<T>(obj: &Object3D<T>) -> KdlNode {
     let mut node = KdlNode::new("object_3d");
 
-    // Add the EQL query as the first unnamed entry
     node.entries_mut().push(KdlEntry::new(obj.eql.clone()));
 
     // Add frame attribute if not default (Bevy)
@@ -343,28 +451,98 @@ fn serialize_object_3d<T>(obj: &Object3D<T>) -> KdlNode {
     }
 
     let mut children = KdlDocument::new();
-    children
-        .nodes_mut()
-        .push(serialize_object_3d_mesh(&obj.mesh));
+    let (mut mesh_node, sibling_nodes) = serialize_object_3d_mesh(&obj.mesh);
+
+    if let Some(vr) = &obj.mesh_visibility_range {
+        serialize_visibility_range_to_node(&mut mesh_node, vr);
+    }
+
+    children.nodes_mut().push(mesh_node);
+    for sibling in sibling_nodes {
+        children.nodes_mut().push(sibling);
+    }
+
+    if let Some(icon) = &obj.icon {
+        children.nodes_mut().push(serialize_object_3d_icon(icon));
+    }
+
     node.set_children(children);
 
     node
 }
 
-fn serialize_object_3d_mesh(mesh: &Object3DMesh) -> KdlNode {
+fn serialize_object_3d_icon(icon: &Object3DIcon) -> KdlNode {
+    use impeller2_wkt::{Object3DIconSource, default_icon_size};
+
+    let mut node = KdlNode::new("icon");
+
+    match &icon.source {
+        Object3DIconSource::Path(path) => {
+            node.entries_mut()
+                .push(KdlEntry::new_prop("path", path.clone()));
+        }
+        Object3DIconSource::Builtin(name) => {
+            node.entries_mut()
+                .push(KdlEntry::new_prop("builtin", name.clone()));
+        }
+    }
+
+    let is_default_color =
+        icon.color.r == 1.0 && icon.color.g == 1.0 && icon.color.b == 1.0 && icon.color.a == 1.0;
+    if !is_default_color {
+        serialize_color_to_node(&mut node, &icon.color);
+    }
+
+    if (icon.size - default_icon_size()).abs() > f32::EPSILON {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("size", icon.size as f64));
+    }
+
+    if let Some(vr) = &icon.visibility_range {
+        serialize_visibility_range_to_node(&mut node, vr);
+    }
+
+    node
+}
+
+fn serialize_visibility_range_to_node(node: &mut KdlNode, vr: &impeller2_wkt::VisRange) {
+    let mut vr_node = KdlNode::new("visibility_range");
+
+    if vr.min > 0.0 {
+        push_rounded_float_prop(&mut vr_node, "min", vr.min as f64);
+    }
+    if vr.max < f32::MAX {
+        push_rounded_float_prop(&mut vr_node, "max", vr.max as f64);
+    }
+    if vr.fade_distance > 0.0 {
+        push_rounded_float_prop(&mut vr_node, "fade_distance", vr.fade_distance as f64);
+    }
+
+    if let Some(existing_children) = node.children_mut().as_mut() {
+        existing_children.nodes_mut().push(vr_node);
+    } else {
+        let mut doc = KdlDocument::new();
+        doc.nodes_mut().push(vr_node);
+        node.set_children(doc);
+    }
+}
+
+/// Returns (mesh_node, sibling_nodes) where sibling_nodes are nodes that should be
+/// siblings of the mesh node in the object_3d children (e.g., animate nodes)
+fn serialize_object_3d_mesh(mesh: &Object3DMesh) -> (KdlNode, Vec<KdlNode>) {
     match mesh {
         Object3DMesh::Glb {
             path,
             scale,
             translate,
             rotate,
+            animations,
         } => {
             let mut node = KdlNode::new("glb");
             node.entries_mut()
                 .push(KdlEntry::new_prop("path", path.clone()));
             if *scale != 1.0 {
-                node.entries_mut()
-                    .push(KdlEntry::new_prop("scale", *scale as f64));
+                push_rounded_float_prop(&mut node, "scale", *scale as f64);
             }
             if *translate != (0.0, 0.0, 0.0) {
                 let tuple_str = format!("({}, {}, {})", translate.0, translate.1, translate.2);
@@ -376,53 +554,92 @@ fn serialize_object_3d_mesh(mesh: &Object3DMesh) -> KdlNode {
                 node.entries_mut()
                     .push(KdlEntry::new_prop("rotate", tuple_str));
             }
-            node
+            // Build animate nodes as siblings (not children of glb)
+            let mut animate_nodes = Vec::new();
+            for anim in animations {
+                let mut anim_node = kdl::KdlNode::new("animate");
+                anim_node
+                    .entries_mut()
+                    .push(kdl::KdlEntry::new_prop("joint", anim.joint_name.clone()));
+                anim_node.entries_mut().push(kdl::KdlEntry::new_prop(
+                    "rotation_vector",
+                    anim.eql_expr.clone(),
+                ));
+                animate_nodes.push(anim_node);
+            }
+            (node, animate_nodes)
         }
-        Object3DMesh::Mesh { mesh, material } => match mesh {
-            Mesh::Sphere { radius } => {
-                let mut node = KdlNode::new("sphere");
-                node.entries_mut()
-                    .push(KdlEntry::new_prop("radius", *radius as f64));
-                serialize_material_to_node(&mut node, material);
-                node
-            }
-            Mesh::Box { x, y, z } => {
-                let mut node = KdlNode::new("box");
-                node.entries_mut().push(KdlEntry::new_prop("x", *x as f64));
-                node.entries_mut().push(KdlEntry::new_prop("y", *y as f64));
-                node.entries_mut().push(KdlEntry::new_prop("z", *z as f64));
-                serialize_material_to_node(&mut node, material);
-                node
-            }
-            Mesh::Cylinder { radius, height } => {
-                let mut node = KdlNode::new("cylinder");
-                node.entries_mut()
-                    .push(KdlEntry::new_prop("radius", *radius as f64));
-                node.entries_mut()
-                    .push(KdlEntry::new_prop("height", *height as f64));
-                serialize_material_to_node(&mut node, material);
-                node
-            }
-            Mesh::Plane { width, depth } => {
-                let mut node = KdlNode::new("plane");
-                node.entries_mut()
-                    .push(KdlEntry::new_prop("width", *width as f64));
-                node.entries_mut()
-                    .push(KdlEntry::new_prop("depth", *depth as f64));
-                serialize_material_to_node(&mut node, material);
-                node
-            }
-        },
-        Object3DMesh::Ellipsoid { scale, color } => {
+        Object3DMesh::Mesh { mesh, material } => {
+            let node = match mesh {
+                Mesh::Sphere { radius } => {
+                    let mut node = KdlNode::new("sphere");
+                    push_rounded_float_prop(&mut node, "radius", *radius as f64);
+                    serialize_material_to_node(&mut node, material);
+                    node
+                }
+                Mesh::Box { x, y, z } => {
+                    let mut node = KdlNode::new("box");
+                    push_rounded_float_prop(&mut node, "x", *x as f64);
+                    push_rounded_float_prop(&mut node, "y", *y as f64);
+                    push_rounded_float_prop(&mut node, "z", *z as f64);
+                    serialize_material_to_node(&mut node, material);
+                    node
+                }
+                Mesh::Cylinder { radius, height } => {
+                    let mut node = KdlNode::new("cylinder");
+                    push_rounded_float_prop(&mut node, "radius", *radius as f64);
+                    push_rounded_float_prop(&mut node, "height", *height as f64);
+                    serialize_material_to_node(&mut node, material);
+                    node
+                }
+                Mesh::Plane { width, depth } => {
+                    let mut node = KdlNode::new("plane");
+                    push_rounded_float_prop(&mut node, "width", *width as f64);
+                    push_rounded_float_prop(&mut node, "depth", *depth as f64);
+                    serialize_material_to_node(&mut node, material);
+                    node
+                }
+            };
+            (node, Vec::new())
+        }
+        Object3DMesh::Ellipsoid {
+            scale,
+            color,
+            error_covariance_cholesky,
+            error_confidence_interval,
+            show_grid,
+            grid_color,
+        } => {
             let mut node = KdlNode::new("ellipsoid");
-            node.entries_mut()
-                .push(KdlEntry::new_prop("scale", scale.clone()));
-
+            if let Some(cholesky) = error_covariance_cholesky {
+                node.entries_mut().push(KdlEntry::new_prop(
+                    "error_covariance_cholesky",
+                    cholesky.clone(),
+                ));
+                if *error_confidence_interval
+                    != impeller2_wkt::default_ellipsoid_confidence_interval()
+                {
+                    node.entries_mut().push(KdlEntry::new_prop(
+                        "error_confidence_interval",
+                        *error_confidence_interval as f64,
+                    ));
+                }
+            } else {
+                node.entries_mut()
+                    .push(KdlEntry::new_prop("scale", scale.clone()));
+            }
+            if *show_grid {
+                node.entries_mut()
+                    .push(KdlEntry::new_prop("show_grid", true));
+            }
             if color != &default_ellipsoid_color() {
                 serialize_color_to_node(&mut node, color);
             }
+            if *show_grid && *grid_color != impeller2_wkt::default_ellipsoid_grid_color() {
+                serialize_color_to_node_named(&mut node, grid_color, Some("grid_color"));
+            }
 
-            node
+            (node, Vec::new())
         }
     }
 }
@@ -434,8 +651,7 @@ fn serialize_line_3d<T>(line: &Line3d<T>) -> KdlNode {
     node.entries_mut().push(KdlEntry::new(line.eql.clone()));
 
     if line.line_width != 1.0 {
-        node.entries_mut()
-            .push(KdlEntry::new_prop("line_width", line.line_width as f64));
+        push_rounded_float_prop(&mut node, "line_width", line.line_width as f64);
     }
 
     if let Some(frame) = line.frame {
@@ -463,8 +679,7 @@ fn serialize_vector_arrow<T>(arrow: &VectorArrow3d<T>) -> KdlNode {
     }
 
     if (arrow.scale - 1.0).abs() > f64::EPSILON {
-        node.entries_mut()
-            .push(KdlEntry::new_prop("scale", arrow.scale));
+        push_rounded_float_prop(&mut node, "scale", arrow.scale);
     }
 
     push_optional_name_prop(&mut node, arrow.name.as_deref());
@@ -486,10 +701,11 @@ fn serialize_vector_arrow<T>(arrow: &VectorArrow3d<T>) -> KdlNode {
 
     let thickness = arrow.thickness.value();
     if (thickness - ArrowThickness::default().value()).abs() > f32::EPSILON {
-        node.entries_mut().push(KdlEntry::new_prop(
+        push_rounded_float_prop(
+            &mut node,
             "arrow_thickness",
             ArrowThickness::round_to_precision(thickness) as f64,
-        ));
+        );
     }
 
     match arrow.label_position {
@@ -552,8 +768,7 @@ fn serialize_color_to_node_named(node: &mut KdlNode, color: &Color, name: Option
 fn serialize_material_to_node(node: &mut KdlNode, material: &Material) {
     let emissivity = material.emissivity.clamp(0.0, 1.0);
     if emissivity > 0.0 {
-        node.entries_mut()
-            .push(KdlEntry::new_prop("emissivity", emissivity as f64));
+        push_rounded_float_prop(node, "emissivity", emissivity as f64);
     }
     serialize_color_to_node(node, &material.base_color);
 }
@@ -652,8 +867,7 @@ fn serialize_dashboard_node_properties<T>(node: &mut KdlNode, dashboard_node: &D
     serialize_val_prop(node, "max_height", &dashboard_node.max_height);
 
     if let Some(aspect_ratio) = dashboard_node.aspect_ratio {
-        node.entries_mut()
-            .push(KdlEntry::new_prop("aspect_ratio", aspect_ratio as f64));
+        push_rounded_float_prop(node, "aspect_ratio", aspect_ratio as f64);
     }
 
     // Serialize alignment properties
@@ -714,17 +928,11 @@ fn serialize_dashboard_node_properties<T>(node: &mut KdlNode, dashboard_node: &D
     }
 
     if dashboard_node.flex_grow != 0.0 {
-        node.entries_mut().push(KdlEntry::new_prop(
-            "flex_grow",
-            dashboard_node.flex_grow as f64,
-        ));
+        push_rounded_float_prop(node, "flex_grow", dashboard_node.flex_grow as f64);
     }
 
     if dashboard_node.flex_shrink != 1.0 {
-        node.entries_mut().push(KdlEntry::new_prop(
-            "flex_shrink",
-            dashboard_node.flex_shrink as f64,
-        ));
+        push_rounded_float_prop(node, "flex_shrink", dashboard_node.flex_shrink as f64);
     }
 
     serialize_val_prop(node, "flex_basis", &dashboard_node.flex_basis);
@@ -737,10 +945,7 @@ fn serialize_dashboard_node_properties<T>(node: &mut KdlNode, dashboard_node: &D
     }
 
     if dashboard_node.font_size != 16.0 {
-        node.entries_mut().push(KdlEntry::new_prop(
-            "font_size",
-            dashboard_node.font_size as f64,
-        ));
+        push_rounded_float_prop(node, "font_size", dashboard_node.font_size as f64);
     }
 }
 
@@ -832,13 +1037,22 @@ mod tests {
             .push(SchematicElem::Panel(Panel::Viewport(Viewport {
                 name: Some("main".to_string()),
                 fov: 60.0,
+                near: None,
+                far: None,
+                aspect: None,
                 active: true,
                 show_grid: true,
                 show_arrows: true,
+                create_frustum: false,
+                show_frustums: false,
+                frustums_color: default_viewport_frustums_color(),
+                frustums_thickness: default_viewport_frustums_thickness(),
+                show_view_cube: true,
                 hdr: false,
                 pos: None,
                 look_at: None,
                 frame: None,
+                up: None,
                 local_arrows: Vec::new(),
                 aux: (),
             })));
@@ -852,6 +1066,7 @@ mod tests {
             assert_eq!(viewport.fov, 60.0);
             assert!(viewport.active);
             assert!(viewport.show_grid);
+            assert!(viewport.show_view_cube);
         } else {
             panic!("Expected viewport panel");
         }
@@ -865,13 +1080,22 @@ mod tests {
             .push(SchematicElem::Panel(Panel::Viewport(Viewport {
                 name: Some("main".to_string()),
                 fov: 60.0,
+                near: Some(0.05),
+                far: Some(500.0),
+                aspect: Some(1.7778),
                 active: true,
                 show_grid: true,
                 show_arrows: false,
+                create_frustum: true,
+                show_frustums: true,
+                frustums_color: Color::YALK,
+                frustums_thickness: 0.012,
+                show_view_cube: false,
                 hdr: true,
                 pos: Some("(0,0,0,0, 1,2,3)".to_string()),
                 look_at: Some("(0,0,0,0, 0,0,0)".to_string()),
                 frame: None,
+                up: None,
                 local_arrows: Vec::new(),
                 aux: (),
             })));
@@ -885,11 +1109,19 @@ mod tests {
         let properties = [
             "name=",
             "fov=",
+            "near=",
+            "far=",
+            "aspect=",
             "pos=",
             "look_at=",
             "hdr=",
             "show_grid=",
             "show_arrows=",
+            "create_frustum=",
+            "show_frustums=",
+            "frustums_color=",
+            "frustums_thickness=",
+            "show_view_cube=",
             "active=",
         ];
         let mut indices = Vec::with_capacity(properties.len());
@@ -903,7 +1135,7 @@ mod tests {
         for window in indices.windows(2) {
             assert!(
                 window[0] < window[1],
-                "expected viewport properties in order name → fov → pos → look_at → hdr → show_grid → active: `{viewport_line}`"
+                "expected viewport properties in order name → fov → near → far → aspect → pos → look_at → hdr → show_grid → show_arrows → create_frustum → show_frustums → frustums_color → frustums_thickness → show_view_cube → active: `{viewport_line}`"
             );
         }
     }
@@ -998,6 +1230,8 @@ graph "value" {
                 mesh: Mesh::Sphere { radius: 0.2 },
                 material: Material::with_color(Color::rgb(1.0, 0.0, 0.0)),
             },
+            icon: None,
+            mesh_visibility_range: None,
             aux: (),
         }));
 
@@ -1036,6 +1270,8 @@ graph "value" {
                 },
                 material: Material::with_color(Color::rgb(0.0, 0.5, 1.0)),
             },
+            icon: None,
+            mesh_visibility_range: None,
             aux: (),
         }));
 
@@ -1071,6 +1307,8 @@ graph "value" {
                 mesh: Mesh::Sphere { radius: 0.2 },
                 material: Material::color_with_emissivity(1.0, 1.0, 0.0, 0.25),
             },
+            icon: None,
+            mesh_visibility_range: None,
             aux: (),
         }));
 
@@ -1098,7 +1336,13 @@ graph "value" {
             mesh: Object3DMesh::Ellipsoid {
                 scale: "rocket.scale".to_string(),
                 color: Color::rgba(64.0 / 255.0, 128.0 / 255.0, 1.0, 96.0 / 255.0),
+                error_covariance_cholesky: None,
+                error_confidence_interval: impeller2_wkt::default_ellipsoid_confidence_interval(),
+                show_grid: impeller2_wkt::default_ellipsoid_show_grid(),
+                grid_color: impeller2_wkt::default_ellipsoid_grid_color(),
             },
+            icon: None,
+            mesh_visibility_range: None,
             aux: (),
         }));
 
@@ -1109,12 +1353,20 @@ graph "value" {
         if let SchematicElem::Object3d(obj) = &parsed.elems[0] {
             assert_eq!(obj.eql, "rocket.world_pos");
             match &obj.mesh {
-                Object3DMesh::Ellipsoid { scale, color } => {
+                Object3DMesh::Ellipsoid {
+                    scale,
+                    color,
+                    error_covariance_cholesky,
+                    error_confidence_interval: _,
+                    show_grid: _,
+                    grid_color: _,
+                } => {
                     assert_eq!(scale, "rocket.scale");
                     assert!((color.r - 64.0 / 255.0).abs() < f32::EPSILON);
                     assert!((color.g - 128.0 / 255.0).abs() < f32::EPSILON);
                     assert!((color.b - 1.0).abs() < f32::EPSILON);
                     assert!((color.a - 96.0 / 255.0).abs() < f32::EPSILON);
+                    assert!(error_covariance_cholesky.is_none());
                 }
                 _ => panic!("Expected ellipsoid mesh"),
             }
@@ -1251,13 +1503,22 @@ graph "value" {
             Panel::Viewport(Viewport {
                 name: Some("camera1".to_string()),
                 fov: 45.0,
+                near: None,
+                far: None,
+                aspect: None,
                 active: false,
                 show_grid: false,
                 show_arrows: true,
+                create_frustum: false,
+                show_frustums: false,
+                frustums_color: default_viewport_frustums_color(),
+                frustums_thickness: default_viewport_frustums_thickness(),
+                show_view_cube: true,
                 hdr: false,
                 pos: None,
                 look_at: None,
                 frame: None,
+                up: None,
                 local_arrows: Vec::new(),
                 aux: (),
             }),
@@ -1426,7 +1687,7 @@ tabs {
     graph a.world_pos name="a world_pos"
 }
 object_3d a.world_pos {
-    sphere radius=0.20000000298023224 {
+    sphere radius=0.2 {
         color 255 0 255
     }
 }"#
@@ -1495,5 +1756,37 @@ object_3d a.world_pos {
         } else {
             panic!("Expected dashboard");
         }
+    }
+
+    #[test]
+    fn test_roundtrip_glb_animations() {
+        use impeller2_wkt::{Object3DMesh, SchematicElem};
+        let original = r#"
+object_3d "rocket.world_pos" {
+    glb path="rocket.glb"
+    animate joint="Root.Fin_0" rotation_vector="(0, 1.0, 0)"
+}
+"#;
+        let parsed = parse_schematic(original).unwrap();
+        let SchematicElem::Object3d(parsed_obj) = &parsed.elems[0] else {
+            panic!("Expected Object3d in parsed")
+        };
+        let Object3DMesh::Glb {
+            animations: parsed_anims,
+            ..
+        } = &parsed_obj.mesh
+        else {
+            panic!("Expected Glb mesh in parsed")
+        };
+        assert_eq!(parsed_anims.len(), 1);
+        let serialized = serialize_schematic(&parsed);
+        let reparsed = parse_schematic(&serialized).unwrap();
+        let SchematicElem::Object3d(obj) = &reparsed.elems[0] else {
+            panic!()
+        };
+        let Object3DMesh::Glb { animations, .. } = &obj.mesh else {
+            panic!()
+        };
+        assert_eq!(animations.len(), 1, "serialized:\n{serialized}");
     }
 }

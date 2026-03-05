@@ -2,6 +2,11 @@ use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
 use std::path::PathBuf;
 
+use bevy::ecs::message::Messages;
+use bevy::input::{
+    ButtonInput,
+    mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll, MouseButton, MouseMotion, MouseWheel},
+};
 use bevy::{
     camera::{RenderTarget, Viewport},
     ecs::{
@@ -20,7 +25,9 @@ use bevy_defer::AsyncPlugin;
 use bevy_egui::{
     EguiContext, EguiContexts, EguiPreUpdateSet,
     egui::{self, Color32, Label, RichText},
+    input::EguiWantsInput,
 };
+use tracing::instrument;
 pub(crate) const DEFAULT_SECONDARY_RECT: WindowRect = WindowRect {
     x: 10,
     y: 10,
@@ -108,8 +115,9 @@ pub mod window;
 // Re-export window helpers for existing call sites.
 pub use window::{
     base_window, collect_sorted_screens, default_composite_alpha_mode, default_present_mode,
-    default_window_theme, detect_window_screen, handle_window_close, handle_window_relayout_events,
-    sync_windows, wait_for_winit_window, window_graph_order_base, window_theme_for_mode,
+    default_window_theme, detect_window_screen, handle_window_close, handle_window_destroyed,
+    handle_window_relayout_events, sync_windows, wait_for_winit_window, window_graph_order_base,
+    window_theme_for_mode,
 };
 
 #[cfg(not(target_family = "wasm"))]
@@ -134,9 +142,20 @@ pub enum SelectedObject {
     Entity(EntityPair),
     Viewport {
         camera: Entity,
+        title: String,
     },
     Graph {
         graph_id: Entity,
+    },
+    QueryTable {
+        table_id: Entity,
+    },
+    Monitor {
+        monitor_id: Entity,
+    },
+    DataOverview,
+    DataOverviewComponent {
+        component_id: ComponentId,
     },
     Action {
         action_id: Entity,
@@ -158,8 +177,12 @@ impl SelectedObject {
         match self {
             SelectedObject::None => None,
             SelectedObject::Entity(pair) => Some(pair.bevy),
-            SelectedObject::Viewport { camera } => Some(*camera),
+            SelectedObject::Viewport { camera, .. } => Some(*camera),
             SelectedObject::Graph { graph_id } => Some(*graph_id),
+            SelectedObject::QueryTable { table_id } => Some(*table_id),
+            SelectedObject::Monitor { monitor_id } => Some(*monitor_id),
+            SelectedObject::DataOverview => None,
+            SelectedObject::DataOverviewComponent { .. } => None,
             SelectedObject::Action { action_id } => Some(*action_id),
             SelectedObject::Object3D { entity } => Some(*entity),
             SelectedObject::DashboardNode { entity } => Some(*entity),
@@ -181,6 +204,8 @@ pub struct WindowUiState {
     pub selected_object: SelectedObject,
     pub entity_filter: EntityFilter,
     pub inspector_anchor: InspectorAnchor,
+    pub left_sidebar_visible: bool,
+    pub right_sidebar_visible: bool,
 }
 
 #[derive(Component, Clone)]
@@ -260,6 +285,56 @@ pub struct CameraQuery {
 
 pub struct UiPlugin;
 
+#[derive(Debug, PartialEq, Eq, Clone, Hash, SystemSet)]
+pub struct UiInputConsumerSet;
+
+// This system prevents UI events such as scroll and pan from passing through
+// egui modals and popups to whatever is behind them. The intention is for
+// modals to disable everything other than the modal, but popups allow
+// interactions with other things, except whatever is directly behind the
+// popup. The basic approach is for each popup to set a flag indicating if
+// the pointer is currently over it, then if any flags are true stop
+// propagating events.
+fn suppress_pointer_input_over_popups(
+    egui_wants_input: Res<EguiWantsInput>,
+    mut contexts: Query<&mut EguiContext>,
+    mut mouse_buttons: ResMut<ButtonInput<MouseButton>>,
+    mut mouse_motion_messages: ResMut<Messages<MouseMotion>>,
+    mut mouse_wheel_messages: ResMut<Messages<MouseWheel>>,
+    mut accumulated_motion: ResMut<AccumulatedMouseMotion>,
+    mut accumulated_scroll: ResMut<AccumulatedMouseScroll>,
+) {
+    let mut modal_open = false;
+    let mut pointer_over_popup = false;
+    for mut ctx in contexts.iter_mut() {
+        let ctx = ctx.get_mut();
+        if ctx.memory(|mem| mem.top_modal_layer().is_some()) {
+            modal_open = true;
+        }
+
+        let popup_hovered_id = egui::Id::new("any_popup_hovered");
+        if ctx
+            .data(|data| data.get_temp::<bool>(popup_hovered_id))
+            .unwrap_or(false)
+        {
+            pointer_over_popup = true;
+        }
+
+        ctx.data_mut(|data| data.insert_temp::<bool>(popup_hovered_id, false));
+    }
+
+    let popup_active = egui_wants_input.is_popup_open() && pointer_over_popup;
+    if !(modal_open || popup_active) {
+        return;
+    }
+
+    mouse_motion_messages.clear();
+    mouse_wheel_messages.clear();
+    mouse_buttons.reset_all();
+    accumulated_motion.delta = Vec2::ZERO;
+    accumulated_scroll.delta = Vec2::ZERO;
+}
+
 impl Plugin for UiPlugin {
     fn build(&self, app: &mut App) {
         // Probe ELODIN_KDL_DIR once to inform or warn about an invalid
@@ -280,15 +355,26 @@ impl Plugin for UiPlugin {
             .init_resource::<timeline::StreamTickOrigin>()
             .init_resource::<command_palette::CommandPaletteState>()
             .add_message::<DialogEvent>()
+            .configure_sets(Update, UiInputConsumerSet)
             .add_systems(Update, timeline_slider::sync_ui_tick.before(render_layout))
             .add_systems(Update, actions::spawn_lua_actor)
             .add_systems(Update, update_focused_window)
+            .add_systems(
+                Update,
+                suppress_pointer_input_over_popups.before(UiInputConsumerSet),
+            )
             .add_systems(Update, shortcuts)
-            .add_systems(PreUpdate, sync_windows.before(EguiPreUpdateSet::BeginPass))
+            .add_systems(
+                PreUpdate,
+                sync_windows
+                    .after(impeller2_bevy::sink)
+                    .before(EguiPreUpdateSet::BeginPass),
+            )
             .add_systems(
                 Update,
                 (
                     handle_window_close,
+                    handle_window_destroyed,
                     render_layout,
                     sync_camera_grid_cell,
                     handle_window_relayout_events,
@@ -372,9 +458,20 @@ impl RootWidgetSystem for MainLayout<'_, '_> {
     ) {
         let _state = state.get_mut(world);
 
+        // Update theme every frame to reflect color scheme changes
+        theme::set_theme(ctx);
+
         #[cfg(not(target_family = "wasm"))]
         world.add_root_widget::<status_bar::StatusBar>("status_bar");
 
+        #[cfg(target_os = "macos")]
+        let frame = {
+            // Leave room for the native titlebar controls on the primary window.
+            let mut f = egui::Frame::new();
+            f.inner_margin.top = 32;
+            f
+        };
+        #[cfg(not(target_os = "macos"))]
         let frame = egui::Frame::new();
 
         egui::CentralPanel::default().frame(frame).show(ctx, |ui| {
@@ -451,6 +548,7 @@ impl RootWidgetSystem for ViewportOverlay<'_, '_> {
     }
 }
 
+#[instrument]
 pub fn render_layout(
     world: &mut World,
     mut windows: Local<Vec<(Entity, WindowId)>>,
@@ -583,12 +681,30 @@ fn clamp_viewport_to_window(
     Some((pos, size))
 }
 
+fn fit_size_to_aspect(size: Vec2, aspect: f32) -> Vec2 {
+    if !(aspect > 0.0 && size.x > 0.0 && size.y > 0.0) {
+        return size;
+    }
+
+    let current = size.x / size.y;
+    if current > aspect {
+        Vec2::new(size.y * aspect, size.y)
+    } else {
+        Vec2::new(size.x, size.x / aspect)
+    }
+}
+
+type MainCameraViewportQueryItem = (
+    Entity,
+    &'static ViewportRect,
+    Option<&'static GraphState>,
+    Option<&'static tiles::ViewportConfig>,
+    &'static mut Camera,
+);
+
 fn set_camera_viewport(
     window: Query<(Entity, &Window, &bevy_egui::EguiContextSettings), With<PrimaryWindow>>,
-    mut main_camera_query: Query<
-        (Entity, &ViewportRect, Option<&GraphState>, &mut Camera),
-        With<MainCamera>,
-    >,
+    mut main_camera_query: Query<MainCameraViewportQueryItem, With<MainCamera>>,
     mut entries: Local<Vec<(Entity, bool)>>,
 ) {
     let order_offset = PRIMARY_ORDER_OFFSET;
@@ -598,7 +714,7 @@ fn set_camera_viewport(
     entries.extend(
         main_camera_query
             .iter()
-            .map(|(entity, _, graph_state, _)| (entity, graph_state.is_some())),
+            .map(|(entity, _, graph_state, _, _)| (entity, graph_state.is_some())),
     );
     // Stable ordering: non-graph cameras first, then graphs; break ties by entity id.
     entries.sort_by_key(|(entity, is_graph)| (*is_graph, entity.index()));
@@ -610,7 +726,8 @@ fn set_camera_viewport(
     let window_size: Vec2 = window.physical_size().as_vec2();
 
     for (entity, is_graph) in &entries {
-        let Ok((_, viewport_rect, _graph_state, mut camera)) = main_camera_query.get_mut(*entity)
+        let Ok((_, viewport_rect, _graph_state, viewport_config, mut camera)) =
+            main_camera_query.get_mut(*entity)
         else {
             continue;
         };
@@ -644,8 +761,16 @@ fn set_camera_viewport(
         camera.is_active = true;
         let viewport_pos = available_rect.left_top().to_vec2() * scale_factor;
         let viewport_size = available_rect.size() * scale_factor;
-        let viewport_pos = Vec2::new(viewport_pos.x, viewport_pos.y);
-        let viewport_size = Vec2::new(viewport_size.x, viewport_size.y);
+        let mut viewport_pos = Vec2::new(viewport_pos.x, viewport_pos.y);
+        let mut viewport_size = Vec2::new(viewport_size.x, viewport_size.y);
+
+        if let Some(aspect) = viewport_config.and_then(|config| config.aspect) {
+            let fitted = fit_size_to_aspect(viewport_size, aspect);
+            let pad = (viewport_size - fitted) * 0.5;
+            viewport_pos += pad;
+            viewport_size = fitted;
+        }
+
         if let Some((clamped_pos, clamped_size)) =
             clamp_viewport_to_window(viewport_pos, viewport_size, window_size)
         {

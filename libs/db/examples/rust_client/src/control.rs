@@ -6,7 +6,15 @@ use impeller2_wkt::VTableMsg;
 use std::time::{Duration, Instant};
 use tracing::info;
 
-/// Control module for sending commands to the simulation
+/// Control module for sending commands to the simulation.
+///
+/// **Timestamp guidance for external writers:**
+/// When writing to elodin-db alongside a running simulation, prefer
+/// omitting the explicit timestamp from both the vtable and the packet.
+/// The DB will then apply its own sim-aligned implicit timestamp
+/// (`apply_implicit_timestamp`), keeping external writes on the same
+/// time base as the simulation and avoiding timeline/graph flicker in
+/// the editor.  See `examples/rc-jet/controller` for a working example.
 pub struct ControlSender {
     trim_vtable_id: [u8; 2],
     trim_component_id: ComponentId,

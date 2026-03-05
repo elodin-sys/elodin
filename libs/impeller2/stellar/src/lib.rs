@@ -59,6 +59,11 @@ impl<W: AsyncWrite> PacketSink<W> {
         let (res, inner) = self.writer.write_all(packet.inner).await;
         (res, LenPacket { inner })
     }
+
+    /// Returns a reference to the underlying writer.
+    pub fn writer(&self) -> &W {
+        &self.writer
+    }
 }
 
 pub struct Client {

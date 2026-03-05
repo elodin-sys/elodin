@@ -1,8 +1,7 @@
 //! Defines traits and structures for constructing functions and transforming them into computational graphs.
-use crate::{ArrayTy, Builder, Comp, ConstDim, Noxpr, NoxprFn, NoxprTy, Op, ReprMonad};
-use core::{any, marker::PhantomData};
+use crate::literal::ArrayElement;
+use crate::{ArrayTy, Builder, ConstDim, Noxpr, NoxprFn, NoxprTy, Op, ReprMonad};
 use smallvec::SmallVec;
-use xla::ArrayElement;
 
 /// Represents a computational function that can be converted into an XLA computation.
 pub trait CompFn<T, R>: Send + Sync {
@@ -30,22 +29,6 @@ pub trait CompFn<T, R>: Send + Sync {
         Ok(NoxprFn {
             inner,
             args: builder.params.into_inner(),
-        })
-    }
-
-    /// Converts the computational function into a compiled `Comp` type, which is executable within an XLA environment.
-    ///
-    /// This method is a convenience function that builds the expression and compiles it into a ready-to-execute form.
-    fn build(&self) -> Result<Comp<T, R>, crate::Error>
-    where
-        R: ReprMonad<Op>,
-    {
-        let expr = self.build_expr()?;
-        let op = expr.build(any::type_name::<Self>())?;
-        let comp = op.build()?;
-        Ok(Comp {
-            comp,
-            phantom: PhantomData,
         })
     }
 }

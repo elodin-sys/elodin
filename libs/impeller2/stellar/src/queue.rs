@@ -40,7 +40,7 @@ where
     success();
     let rx = async move {
         loop {
-            let grant_r = incoming_packet_tx.wait_grant(10 * 1024 * 1024).await;
+            let grant_r = incoming_packet_tx.wait_grant(64 * 1024 * 1024).await;
             let grant_r = PacketGrantW::new(grant_r);
             let slice = rx.recv(grant_r).await.into_diagnostic()?;
             let len = slice.range().len();

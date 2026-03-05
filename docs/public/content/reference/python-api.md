@@ -355,7 +355,7 @@ sim = w.run(sys, sim_time_step=1.0 / 120.0)
 
 Elodin has a built-in [6 Degrees of Freedom](https://en.wikipedia.org/wiki/Six_degrees_of_freedom) (6DoF) system
 implementation for simulating [rigid bodies](https://en.m.wikipedia.org/wiki/Rigid_body), such as flight vehicles.
-You can review the implementation [here](https://github.com/elodin-sys/elodin/blob/332957c41f609e1ccee36dbc48750ea59001c817/libs/nox-ecs/src/six_dof.rs).
+You can review the implementation [here](https://github.com/elodin-sys/elodin/blob/main/libs/nox-py/src/six_dof.rs).
 Using the associated [elodin.Body] archetype and prebuilt components, we can create a 6DoF system that aligns closely with this
 [familiar model](https://www.mathworks.com/help/aeroblks/6dofquaternion.html) from Simulink.
 
@@ -375,12 +375,12 @@ Using the associated [elodin.Body] archetype and prebuilt components, we can cre
 - `elodin.Integrator.Rk4` -> [elodin.Integrator]
 
     Runge-Kutta 4th Order (RK4) Integrator: Elodin provides a built-in implementation for a [4th order Runge-Kutta integrator](https://en.wikipedia.org/wiki/Runge%E2%80%93Kutta_methods).
-    The RK4 integrator is a numerical method used to solve ordinary differential equations. You can review the implementation [here](https://github.com/elodin-sys/elodin/blob/332957c41f609e1ccee36dbc48750ea59001c817/libs/nox-ecs/src/integrator/rk4.rs).
+    The RK4 integrator is a numerical method used to solve ordinary differential equations. You can review the implementation [here](https://github.com/elodin-sys/elodin/blob/main/libs/nox-py/src/integrator/rk4.rs).
 
 - `elodin.Integrator.SemiImplicit` -> [elodin.Integrator]
 
     Semi-Implicit Integrator: Elodin provides a built-in implementation for a [semi-implicit Euler integrator](https://en.wikipedia.org/wiki/Semi-implicit_Euler_method).
-    The semi-implicit integrator is a numerical method used to solve ordinary differential equations. You can review the implementation [here](https://github.com/elodin-sys/elodin/blob/332957c41f609e1ccee36dbc48750ea59001c817/libs/nox-ecs/src/integrator/semi_implicit.rs).
+    The semi-implicit integrator is a numerical method used to solve ordinary differential equations. You can review the implementation [here](https://github.com/elodin-sys/elodin/blob/main/libs/nox-py/src/integrator/semi_implicit.rs).
 
 ### _class_ `elodin.Body`
 
@@ -611,6 +611,39 @@ def gravity(f: el.Force, inertia: el.Inertia) -> el.Force:
 @el.system
 def gravity(query: el.Query[el.Force, el.Inertia]) -> el.Query[el.Force]:
     return query.map(
+        el.Force,
+        lambda f, inertia: f + el.SpatialForce(linear=inertia.mass() * jnp.array([0.0, -9.81, 0.0])),
+    )
+```
+
+### `@elodin.map_seq`
+
+`@elodin.map_seq` is similar to `@elodin.map`. In fact they will produce the same results numerically but their performance differs.
+
+`@elodin.map_seq` maps over items sequentially, so it does lose some parallelism, but it also preserves `jax.lax.cond()`'s behavior, which only evaluates one of its consequents. `@elodin.map` translates all `jax.lax.cond()`s to `jax.lax.select()`s, which always evaluates both of its consequents. So in cases where one of your consequents is both expensive and seldom, `@elodin.map_seq` can be faster than `@elodin.map`.
+
+```python
+import elodin as el
+
+@el.map_seq
+def gravity(f: el.Force, inertia: el.Inertia) -> el.Force: ...
+
+@el.map_seq
+def gyro_omega(vel: el.WorldVel) -> GyroOmega: ...
+```
+
+The following systems are equivalent as the `@elodin.map_seq` definition effectively desugars to the `@elodin.system` one:
+
+```python
+import elodin as el
+
+@el.map_seq
+def gravity(f: el.Force, inertia: el.Inertia) -> el.Force:
+    return f + el.SpatialForce(linear=inertia.mass() * jnp.array([0.0, -9.81, 0.0]))
+
+@el.system
+def gravity(query: el.Query[el.Force, el.Inertia]) -> el.Query[el.Force]:
+    return query.map_seq(
         el.Force,
         lambda f, inertia: f + el.SpatialForce(linear=inertia.mass() * jnp.array([0.0, -9.81, 0.0])),
     )

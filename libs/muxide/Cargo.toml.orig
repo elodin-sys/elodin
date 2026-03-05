@@ -1,0 +1,47 @@
+[package]
+name = "muxide"
+version = "0.2.0"
+edition = "2021"
+rust-version = "1.74"
+description = "Minimal-dependency pure-Rust MP4 muxer for recording applications. Includes CLI tool and library API."
+authors = ["Michael A. Kuykendall <michaelallenkuykendall@gmail.com>"]
+readme = "README.md"
+repository = "https://github.com/Michael-A-Kuykendall/muxide"
+homepage = "https://github.com/Michael-A-Kuykendall/muxide"
+documentation = "https://docs.rs/muxide"
+license = "MIT"
+keywords = ["mp4", "video", "muxer", "h264", "multimedia"]
+categories = ["multimedia", "multimedia::encoding", "multimedia::video", "command-line-utilities"]
+exclude = [
+	".github/",
+	".vscode/",
+	"release-notes/",
+	"target/",
+	"**/*.mp4",
+	"**/*.gif",
+	"**/*.rgb",
+	"**/*.h264",
+	"**/*.bak",
+]
+
+[[bin]]
+name = "muxide"
+path = "src/bin/muxide.rs"
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+clap = { version = "4.4", features = ["derive", "color", "suggestions"] }
+indicatif = "0.17"
+anyhow = "1.0"
+thiserror = "1.0"
+
+[dev-dependencies]
+lazy_static = "1.4"
+proptest = "=1.5.0"
+tempfile = "3.0"
+criterion = "0.5"
+
+[[bench]]
+name = "muxing"
+harness = false

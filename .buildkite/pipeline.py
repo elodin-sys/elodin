@@ -73,7 +73,7 @@ test_steps = [
         steps=[
             nix_step(
                 label=":python: pytest",
-                command="pytest libs/nox-py",
+                command="pytest libs/nox-py -o 'pythonpath='",
             ),
             nix_step(
                 label=":python: lint",

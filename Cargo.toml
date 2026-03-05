@@ -11,11 +11,10 @@ resolver = "2"
 members = [
     "libs/elodin-editor",
     "libs/nox",
-    "libs/nox-ecs",
-    "libs/nox-ecs-macros",
+    "libs/elodin-macros",
     "libs/nox-py",
     "libs/nox-frames",
-    "libs/noxla",
+    "libs/iree-runtime",
     "apps/elodin",
     "libs/roci",
     "libs/roci/macros",
@@ -55,11 +54,12 @@ members = [
     "libs/db/examples/rust_client",
     "examples/rc-jet/controller",
     "libs/bevy_geo_frames",
+    "libs/bevy_mat3_material",
  ]
 exclude = ["fsw/sensor-fw", "fsw/blackbox", "docs/memserve"]
 
 [workspace.package]
-version = "0.16.0-alpha.5"
+version = "0.16.2-alpha.0"
 edition = "2024"
 repository = "https://github.com/elodin-sys/elodin"
 
@@ -82,16 +82,12 @@ inherits = "release"
 lto = "thin"
 
 [workspace.dependencies]
-# set workspace version as the version of xla
-xla.package = "noxla"
-xla.path = "libs/noxla"
 roci-macros.path = "libs/roci/macros"
 roci.path = "libs/roci"
 roci.default-features = false
 roci-adcs.path = "libs/roci/adcs"
 nox.path = "libs/nox"
 nox.default-features = false
-nox-ecs.path = "libs/nox-ecs"
 nox-frames.path = "libs/nox-frames"
 wmm.path = "libs/wmm"
 
@@ -103,3 +99,4 @@ debug = true
 bevy_editor_cam = { git = "https://github.com/aevyrie/bevy_editor_cam", rev = "1ae39bda1aa8d547dec4b26747e466ad5b2ab9ab" }
 big_space = { git = "https://github.com/elodin-sys/big_space.git", branch = "no_prop_rot_v0.17" }
 map_3d = { git = "https://github.com/shanecelis/map_3d.git", branch = "feat/sphere" }
+muxide = { path = "libs/muxide" }

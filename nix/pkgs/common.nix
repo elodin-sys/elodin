@@ -12,6 +12,7 @@
         "/apps"
         "/libs"
         "/fsw"
+        "/examples"
         "/.config"
       ];
       matchesSuffix = lib.any (suffix: lib.hasSuffix suffix base) [
@@ -83,7 +84,7 @@
     openssl
     openblas
     xz
-    python312Full
+    python313
     gfortran.cc.lib
   ];
 

@@ -4,8 +4,8 @@
 //! following the pattern from libs/db/examples/rust_client/src/control.rs
 
 use anyhow::Result;
-use impeller2::types::{ComponentId, LenPacket, PrimType, Timestamp};
-use impeller2::vtable::builder::{component, raw_field, raw_table, schema, timestamp, vtable};
+use impeller2::types::{ComponentId, LenPacket, PrimType};
+use impeller2::vtable::builder::{component, raw_field, schema, vtable};
 use impeller2_stellar::Client;
 use impeller2_wkt::VTableMsg;
 use std::time::{Duration, Instant};
@@ -35,18 +35,21 @@ impl ControlSender {
     /// Send the VTable definition for control commands
     ///
     /// ControlCommands is a 4-element f64 array: [elevator, aileron, rudder, throttle]
+    ///
+    /// No explicit timestamp is included in the vtable; the DB will apply its
+    /// own sim-aligned implicit timestamp (`apply_implicit_timestamp`) when
+    /// ingesting rows from this table.  This keeps the controller's writes on
+    /// the same time base as the simulation and avoids timeline flicker in the
+    /// editor.
     pub async fn send_vtable(&self, client: &mut Client) -> Result<()> {
-        // Create VTable with timestamp field and f64[4] array
-        // Layout: [timestamp: 8 bytes][f64 x 4: 32 bytes] = 40 bytes total
-        let time_field = raw_table(0, 8); // First 8 bytes for timestamp
-
+        // Layout: f64 x 4 = 32 bytes (no timestamp field)
         let vtable = vtable(vec![raw_field(
-            8,  // offset after timestamp
+            0,  // offset: start of packet
             32, // 4 * 8 bytes for f64[4]
             schema(
                 PrimType::F64,
                 &[4], // Shape: 4-element array
-                timestamp(time_field, component(self.component_id)),
+                component(self.component_id),
             ),
         )]);
 
@@ -70,12 +73,10 @@ impl ControlSender {
         }
         self.last_send_time = now;
 
-        let timestamp = Timestamp::now();
         let values = input.as_array();
 
-        // Build packet: 8 bytes timestamp + 32 bytes (4 x f64)
-        let mut packet = LenPacket::table(self.vtable_id, 40);
-        packet.extend_aligned(&timestamp.0.to_le_bytes());
+        // Build packet: 4 x f64 = 32 bytes (no explicit timestamp)
+        let mut packet = LenPacket::table(self.vtable_id, 32);
         for value in values {
             packet.extend_aligned(&value.to_le_bytes());
         }

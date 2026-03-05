@@ -161,7 +161,7 @@ impl StepContext {
         // Get the data buffer from the numpy array
         let buf = unsafe {
             if !data.is_c_contiguous() {
-                return Err(Error::PyErr(pyo3::exceptions::PyValueError::new_err(
+                return Err(Error::PyO3(pyo3::exceptions::PyValueError::new_err(
                     "array must be c-style contiguous",
                 )));
             }
@@ -174,7 +174,7 @@ impl StepContext {
 
         self.db.with_state(|state| {
             let component = state.get_component(pair_id).ok_or_else(|| {
-                Error::PyErr(pyo3::exceptions::PyRuntimeError::new_err(format!(
+                Error::PyO3(pyo3::exceptions::PyRuntimeError::new_err(format!(
                     "component '{}' not found in database",
                     pair_name
                 )))
@@ -183,7 +183,7 @@ impl StepContext {
             // Validate buffer size matches schema
             let expected_size = component.schema.size();
             if buf.len() != expected_size {
-                return Err(Error::PyErr(pyo3::exceptions::PyValueError::new_err(
+                return Err(Error::PyO3(pyo3::exceptions::PyValueError::new_err(
                     format!(
                         "data size mismatch: expected {} bytes, got {} bytes",
                         expected_size,
@@ -219,14 +219,14 @@ impl StepContext {
 
         self.db.with_state(|state| {
             let component = state.get_component(pair_id).ok_or_else(|| {
-                Error::PyErr(pyo3::exceptions::PyRuntimeError::new_err(format!(
+                Error::PyO3(pyo3::exceptions::PyRuntimeError::new_err(format!(
                     "component '{}' not found in database",
                     pair_name
                 )))
             })?;
 
             let (_, buf) = component.time_series.latest().ok_or_else(|| {
-                Error::PyErr(pyo3::exceptions::PyRuntimeError::new_err(format!(
+                Error::PyO3(pyo3::exceptions::PyRuntimeError::new_err(format!(
                     "component '{}' has no data",
                     pair_name
                 )))
@@ -409,13 +409,13 @@ impl StepContext {
             let mut ts_map = HashMap::new();
             for (key, value) in ts_dict.iter() {
                 let name: String = key.extract().map_err(|e| {
-                    Error::PyErr(pyo3::exceptions::PyValueError::new_err(format!(
+                    Error::PyO3(pyo3::exceptions::PyValueError::new_err(format!(
                         "write_timestamps key must be a string: {}",
                         e
                     )))
                 })?;
                 let ts: i64 = value.extract().map_err(|e| {
-                    Error::PyErr(pyo3::exceptions::PyValueError::new_err(format!(
+                    Error::PyO3(pyo3::exceptions::PyValueError::new_err(format!(
                         "write_timestamps value for '{}' must be an integer: {}",
                         name, e
                     )))
@@ -435,7 +435,7 @@ impl StepContext {
             let mut data = Vec::new();
             for (key, value) in writes_dict.iter() {
                 let name: String = key.extract().map_err(|e| {
-                    Error::PyErr(pyo3::exceptions::PyValueError::new_err(format!(
+                    Error::PyO3(pyo3::exceptions::PyValueError::new_err(format!(
                         "write key must be a string: {}",
                         e
                     )))
@@ -444,7 +444,7 @@ impl StepContext {
 
                 // Extract numpy array data
                 let array = value.downcast::<PyUntypedArray>().map_err(|_| {
-                    Error::PyErr(pyo3::exceptions::PyValueError::new_err(format!(
+                    Error::PyO3(pyo3::exceptions::PyValueError::new_err(format!(
                         "write value for '{}' must be a numpy array",
                         name
                     )))
@@ -452,7 +452,7 @@ impl StepContext {
 
                 let buf = unsafe {
                     if !array.is_c_contiguous() {
-                        return Err(Error::PyErr(pyo3::exceptions::PyValueError::new_err(
+                        return Err(Error::PyO3(pyo3::exceptions::PyValueError::new_err(
                             format!("array for '{}' must be c-style contiguous", name),
                         )));
                     }
@@ -476,7 +476,7 @@ impl StepContext {
                 // Process all writes first
                 for (name, pair_id, buf) in &write_data {
                     let component = state.get_component(*pair_id).ok_or_else(|| {
-                        Error::PyErr(pyo3::exceptions::PyRuntimeError::new_err(format!(
+                        Error::PyO3(pyo3::exceptions::PyRuntimeError::new_err(format!(
                             "component '{}' not found in database",
                             name
                         )))
@@ -485,7 +485,7 @@ impl StepContext {
                     // Validate buffer size matches schema
                     let expected_size = component.schema.size();
                     if buf.len() != expected_size {
-                        return Err(Error::PyErr(pyo3::exceptions::PyValueError::new_err(
+                        return Err(Error::PyO3(pyo3::exceptions::PyValueError::new_err(
                             format!(
                                 "data size mismatch for '{}': expected {} bytes, got {} bytes",
                                 name,
@@ -507,14 +507,14 @@ impl StepContext {
                 let mut results = HashMap::new();
                 for (name, pair_id) in &read_ids {
                     let component = state.get_component(*pair_id).ok_or_else(|| {
-                        Error::PyErr(pyo3::exceptions::PyRuntimeError::new_err(format!(
+                        Error::PyO3(pyo3::exceptions::PyRuntimeError::new_err(format!(
                             "component '{}' not found in database",
                             name
                         )))
                     })?;
 
                     let (_, buf) = component.time_series.latest().ok_or_else(|| {
-                        Error::PyErr(pyo3::exceptions::PyRuntimeError::new_err(format!(
+                        Error::PyO3(pyo3::exceptions::PyRuntimeError::new_err(format!(
                             "component '{}' has no data",
                             name
                         )))

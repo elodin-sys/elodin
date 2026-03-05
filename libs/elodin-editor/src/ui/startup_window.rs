@@ -189,25 +189,25 @@ impl StartupLayout<'_, '_> {
     }
 
     fn open_file(&mut self, file: PathBuf) {
-        let dirs = dirs();
-
-        let cache_dir = dirs.cache_dir().to_owned();
         self.recent_files.push(
             hifitime::Epoch::now().unwrap(),
             RecentItem::File(file.clone()),
         );
         save_recent_files(&self.recent_files);
 
-        std::thread::spawn(move || {
-            let rt = tokio::runtime::Runtime::new().unwrap();
-            #[cfg(not(target_os = "windows"))]
-            rt.block_on(crate::run::run_recipe(
-                cache_dir,
-                file,
-                stellarator::util::CancelToken::default(),
-            ))
-            .unwrap();
-        });
+        #[cfg(not(target_os = "windows"))]
+        {
+            let cache_dir = dirs().cache_dir().to_owned();
+            std::thread::spawn(move || {
+                let rt = tokio::runtime::Runtime::new().unwrap();
+                rt.block_on(crate::run::run_recipe(
+                    cache_dir,
+                    file,
+                    stellarator::util::CancelToken::default(),
+                ))
+                .unwrap();
+            });
+        }
         self.connect(SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), 2240), true);
         self.switch_to_main();
     }

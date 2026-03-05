@@ -1,8 +1,8 @@
 // use crate::noxpr::batch::{BatchAxis, BatchedExpr};
 use crate::{
-    ArrayTy, BinaryOp, CompFn, DefaultMap, DefaultMappedDim, Dim, DotDimensionNums, Error, Noxpr,
-    NoxprFn, NoxprId, NoxprNode, NoxprTy, ReplaceDim, ReprMonad, Tensor, TensorItem,
-    TraversalError, xla::ElementType,
+    ArrayTy, BinaryOp, CompFn, DefaultMap, DefaultMappedDim, Dim, DotDimensionNums, ElementType,
+    Error, Noxpr, NoxprFn, NoxprId, NoxprNode, NoxprTy, ReplaceDim, ReprMonad, Tensor, TensorItem,
+    TraversalError,
 };
 use core::{
     iter,

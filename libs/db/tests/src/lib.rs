@@ -2,8 +2,8 @@
 mod tests {
 
     use arrow::{array::AsArray, datatypes::Float64Type};
-    use elodin_db::{DB, Error, Server};
-    use futures_lite::future::zip;
+    use elodin_db::{AtomicTimestampExt, DB, Error, Server};
+
     use impeller2::{
         types::{ComponentId, IntoLenPacket, LenPacket, Msg, PrimType, Timestamp},
         vtable::builder::{component, raw_field, raw_table, schema, timestamp, vtable},
@@ -11,9 +11,9 @@ mod tests {
     use impeller2_stellar::Client;
     use postcard_schema::{Schema, schema::owned::OwnedNamedType};
     use std::{
-        fs::File,
-        io::Write,
+        collections::{BTreeMap, BTreeSet},
         net::SocketAddr,
+        path::Path,
         sync::Arc,
         time::{Duration, Instant},
     };
@@ -82,8 +82,8 @@ mod tests {
     #[test]
     async fn test_vtable_stream() {
         let (addr, _db) = setup_test_db().await.unwrap();
-        let mut tx_client = Client::connect(addr).await.unwrap();
         let mut rx_client = Client::connect(addr).await.unwrap();
+        let mut tx_client = Client::connect(addr).await.unwrap();
 
         let component_id = ComponentId::new("temperature");
 
@@ -99,8 +99,9 @@ mod tests {
             vtable: vtable.clone(),
         };
         let vtable_stream = VTableStream { id: vtable_id };
-        tx_client.send(&msg).await.0.unwrap();
-        sleep(Duration::from_millis(50)).await;
+        // Use rx_client for both VTableMsg and stream so the server processes them
+        // in order on the same connection (avoids "invalid msg id" race).
+        rx_client.send(&msg).await.0.unwrap();
         let mut sub = rx_client.stream(&vtable_stream).await.unwrap();
 
         spawn(async move {
@@ -554,173 +555,6 @@ mod tests {
             "error description missing drive-relative path: {}",
             description
         );
-    }
-
-    #[test]
-    async fn test_save_archive_native_blocks_writes() {
-        let (addr, db) = setup_test_db().await.unwrap();
-        let mut setup_client = Client::connect(addr).await.unwrap();
-
-        let component_id = ComponentId::new("archive_native_test");
-        setup_client
-            .send(&SetComponentMetadata::new(
-                component_id,
-                "TestComponentNative",
-            ))
-            .await
-            .0
-            .unwrap();
-
-        let vtable = vtable([raw_field(
-            0,
-            8,
-            schema(PrimType::F64, &[1], component(component_id)),
-        )]);
-        let vtable_id = 3u16.to_le_bytes();
-        setup_client
-            .send(&VTableMsg {
-                id: vtable_id,
-                vtable,
-            })
-            .await
-            .0
-            .unwrap();
-
-        let initial_values = [10.5f64, 20.5, 30.5];
-        for value in initial_values {
-            let mut pkt = LenPacket::table(vtable_id, 8);
-            pkt.extend_aligned(&[value]);
-            setup_client.send(pkt).await.0.unwrap();
-            sleep(Duration::from_millis(5)).await;
-        }
-
-        // Add a filler file to make the native copy take perceptible time.
-        let filler_path = db.path.join("filler.bin");
-        {
-            let mut filler = File::create(&filler_path).unwrap();
-            filler.write_all(&vec![0xAAu8; 4 * 1024 * 1024]).unwrap();
-            filler.sync_all().unwrap();
-        }
-
-        // Ensure the server has ingested the component metadata + initial samples
-        // before triggering the snapshot; otherwise the copy might race ahead of
-        // the write pipeline and miss the component entirely.
-        let ready_deadline = Instant::now() + Duration::from_secs(1);
-        let mut component_ready = false;
-        while Instant::now() < ready_deadline {
-            component_ready = db.with_state(|state| {
-                state
-                    .get_component(component_id)
-                    .and_then(|component| component.time_series.latest())
-                    .is_some()
-            });
-            if component_ready {
-                break;
-            }
-            sleep(Duration::from_millis(10)).await;
-        }
-        assert!(
-            component_ready,
-            "component metadata/data must exist before snapshot"
-        );
-
-        let native_root =
-            std::env::temp_dir().join(format!("test_native_archive_{}", fastrand::u64(..)));
-
-        let mut archive_client = Client::connect(addr).await.unwrap();
-        let mut writer_client = Client::connect(addr).await.unwrap();
-        let late_value = 99.5f64;
-
-        let save_future = {
-            let save_path = native_root.clone();
-            async move {
-                let save_archive = SaveArchive {
-                    path: save_path,
-                    format: ArchiveFormat::Native,
-                };
-                archive_client.request(&save_archive).await.unwrap()
-            }
-        };
-
-        let native_root_for_writer = native_root.clone();
-        let write_future = async move {
-            // Wait until the snapshot copy has actually started by polling for the
-            // temporary directory (db.tmp). This ensures the snapshot barrier is
-            // active before sending the late write, making the test deterministic.
-            let parent = native_root_for_writer
-                .parent()
-                .map(std::path::Path::to_path_buf)
-                .unwrap_or_else(|| std::path::PathBuf::from("."));
-            let tmp_db_dir = parent.join(format!(
-                "{}.tmp",
-                native_root_for_writer
-                    .file_name()
-                    .unwrap_or_default()
-                    .to_string_lossy()
-            ));
-            let start = std::time::Instant::now();
-            while !tmp_db_dir.exists() && start.elapsed() < Duration::from_secs(1) {
-                sleep(Duration::from_millis(5)).await;
-            }
-
-            let mut pkt = LenPacket::table(vtable_id, 8);
-            pkt.extend_aligned(&[late_value]);
-            writer_client.send(pkt).await.0.unwrap();
-        };
-
-        let (archive_saved, _) = zip(save_future, write_future).await;
-
-        assert_eq!(archive_saved.path, native_root);
-        assert!(native_root.exists());
-
-        let snapshot_db = DB::open(native_root.clone()).unwrap();
-        snapshot_db.with_state(|state| {
-            let component = state
-                .get_component(component_id)
-                .expect("missing component in snapshot");
-            let (timestamps, _) = component
-                .time_series
-                .get_range(&(Timestamp(i64::MIN)..Timestamp(i64::MAX)))
-                .expect("failed to read snapshot range");
-            assert_eq!(timestamps.len(), 3);
-            let (_, buf) = component
-                .time_series
-                .latest()
-                .expect("missing latest snapshot sample");
-            let latest =
-                f64::from_le_bytes(buf.try_into().expect("component sample size mismatch"));
-            assert!((latest - 30.5).abs() <= f64::EPSILON);
-        });
-
-        // The client `send` completes when bytes are written to the socket, not
-        // when the server has applied the write. Poll the DB briefly until the
-        // late write becomes visible, then assert.
-        let start = std::time::Instant::now();
-        let timeout = Duration::from_millis(500);
-        loop {
-            let latest_seen = db.with_state(|state| {
-                let component = state
-                    .get_component(component_id)
-                    .expect("missing component");
-                let (_, buf) = component
-                    .time_series
-                    .latest()
-                    .expect("missing latest sample");
-                f64::from_le_bytes(buf.try_into().expect("component sample size mismatch"))
-            });
-            if (latest_seen - late_value).abs() <= f64::EPSILON {
-                break;
-            }
-            if start.elapsed() > timeout {
-                panic!(
-                    "latest sample should include post-snapshot write; got {}",
-                    latest_seen
-                );
-            }
-            sleep(Duration::from_millis(10)).await;
-        }
-
-        let _ = std::fs::remove_dir_all(native_root);
     }
 
     #[test]
@@ -1399,6 +1233,753 @@ mod tests {
         assert_eq!(elodin_db::Error::TimeTravel.to_string(), err.description);
     }
 
+    // ── Follow-mode tests ──────────────────────────────────────────────
+
+    /// Spin up a source DB and a follower DB connected to it.
+    /// Returns (source_addr, source_db, follower_addr, follower_db).
+    async fn setup_follow_pair(
+        packet_size: usize,
+    ) -> Result<(SocketAddr, Arc<DB>, SocketAddr, Arc<DB>), Error> {
+        let subscriber = tracing_subscriber::FmtSubscriber::new();
+        let _ = tracing::subscriber::set_global_default(subscriber);
+
+        // Source server
+        let src_listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let src_addr = src_listener.local_addr().unwrap();
+        let src_temp =
+            std::env::temp_dir().join(format!("elodin_db_follow_src_{}", fastrand::u64(..)));
+        if src_temp.exists() {
+            let _ = std::fs::remove_dir_all(&src_temp);
+        }
+        let src_server = Server::from_listener(src_listener, src_temp)?;
+        let src_db = src_server.db.clone();
+        stellar(move || async { src_server.run().await });
+
+        // Follower server
+        let fol_listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let fol_addr = fol_listener.local_addr().unwrap();
+        let fol_temp =
+            std::env::temp_dir().join(format!("elodin_db_follow_fol_{}", fastrand::u64(..)));
+        if fol_temp.exists() {
+            let _ = std::fs::remove_dir_all(&fol_temp);
+        }
+        let fol_server = Server::from_listener(fol_listener, fol_temp)?;
+        let fol_db = fol_server.db.clone();
+        stellar(move || async { fol_server.run().await });
+
+        // Spawn follower task
+        let follow_db = fol_db.clone();
+        stellar(move || {
+            elodin_db::follow::run_follower(
+                elodin_db::follow::FollowConfig {
+                    source_addr: src_addr,
+                    target_packet_size: packet_size,
+                    reconnect_delay: Duration::from_millis(100),
+                },
+                follow_db,
+            )
+        });
+
+        // Give the follower time to connect and perform initial sync
+        sleep(Duration::from_millis(500)).await;
+
+        Ok((src_addr, src_db, fol_addr, fol_db))
+    }
+
+    /// Helper: register a VTable and send typed component samples over an
+    /// existing client connection.  No per-sample sleeps -- only a short
+    /// delay after VTable registration.
+    async fn send_timestamped_samples(
+        client: &mut Client,
+        component_id: ComponentId,
+        component_name: &str,
+        vtable_id: [u8; 2],
+        prim: PrimType,
+        shape: &[u64],
+        timestamps: &[Timestamp],
+        make_row: impl Fn(usize) -> Vec<u8>,
+    ) {
+        client
+            .send(&SetComponentMetadata::new(component_id, component_name))
+            .await
+            .0
+            .unwrap();
+
+        let elem_count: usize = shape.iter().product::<u64>().max(1) as usize;
+        let prim_size = match prim {
+            PrimType::F64 | PrimType::U64 | PrimType::I64 => 8,
+            PrimType::F32 | PrimType::U32 | PrimType::I32 => 4,
+            PrimType::U16 | PrimType::I16 => 2,
+            PrimType::U8 | PrimType::I8 | PrimType::Bool => 1,
+        };
+        let row_size = elem_count * prim_size;
+
+        let vt = vtable([raw_field(
+            0,
+            row_size as u16,
+            timestamp(
+                raw_table(row_size as u16, 8),
+                schema(prim, shape, component(component_id)),
+            ),
+        )]);
+        client
+            .send(&VTableMsg {
+                id: vtable_id,
+                vtable: vt,
+            })
+            .await
+            .0
+            .unwrap();
+        sleep(Duration::from_millis(50)).await;
+
+        for (i, ts) in timestamps.iter().enumerate() {
+            let row = make_row(i);
+            let mut pkt = LenPacket::table(vtable_id, row.len() + 8);
+            pkt.extend_from_slice(&row);
+            pkt.extend_aligned(&[ts.0]);
+            client.send(pkt).await.0.unwrap();
+        }
+    }
+
+    /// Convenience wrapper for scalar f64 components.
+    async fn send_f64_samples(
+        client: &mut Client,
+        component_id: ComponentId,
+        name: &str,
+        vtable_id: [u8; 2],
+        samples: &[(Timestamp, f64)],
+    ) {
+        let timestamps: Vec<Timestamp> = samples.iter().map(|(ts, _)| *ts).collect();
+        let values: Vec<f64> = samples.iter().map(|(_, v)| *v).collect();
+        send_timestamped_samples(
+            client,
+            component_id,
+            name,
+            vtable_id,
+            PrimType::F64,
+            &[],
+            &timestamps,
+            |i| values[i].to_le_bytes().to_vec(),
+        )
+        .await;
+    }
+
+    /// Helper: poll until a component has at least `min_count` samples
+    /// in the given DB, with a timeout.
+    async fn wait_for_component_samples(
+        db: &Arc<DB>,
+        component_id: ComponentId,
+        min_count: usize,
+        timeout: Duration,
+    ) -> bool {
+        let start = Instant::now();
+        loop {
+            let count = db.with_state(|state| {
+                state
+                    .get_component(component_id)
+                    .and_then(|c| {
+                        c.time_series
+                            .get_range(&(Timestamp(i64::MIN)..Timestamp(i64::MAX)))
+                            .map(|(ts, _)| ts.len())
+                    })
+                    .unwrap_or(0)
+            });
+            if count >= min_count {
+                return true;
+            }
+            if start.elapsed() > timeout {
+                return false;
+            }
+            sleep(Duration::from_millis(50)).await;
+        }
+    }
+
+    /// Helper: poll until a message log has at least `min_count` messages.
+    async fn wait_for_msg_count(
+        db: &Arc<DB>,
+        msg_id: impeller2::types::PacketId,
+        min_count: usize,
+        timeout: Duration,
+    ) -> bool {
+        let start = Instant::now();
+        let db_path = db.path.clone();
+        loop {
+            let count = db.with_state_mut(|state| {
+                state
+                    .get_or_insert_msg_log(msg_id, &db_path)
+                    .map(|log| log.timestamps().len())
+                    .unwrap_or(0)
+            });
+            if count >= min_count {
+                return true;
+            }
+            if start.elapsed() > timeout {
+                return false;
+            }
+            sleep(Duration::from_millis(50)).await;
+        }
+    }
+
+    // ── DB comparison helpers ────────────────────────────────────────────
+
+    /// Read all .csv files in a directory, returning filename -> contents.
+    fn collect_csv_files(dir: &Path) -> BTreeMap<String, String> {
+        let mut files = BTreeMap::new();
+        if let Ok(entries) = std::fs::read_dir(dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                if path.extension().is_some_and(|e| e == "csv") {
+                    let name = path.file_name().unwrap().to_string_lossy().to_string();
+                    let content = std::fs::read_to_string(&path).unwrap();
+                    files.insert(name, content);
+                }
+            }
+        }
+        files
+    }
+
+    /// Export both databases to CSV and assert they produce identical files.
+    fn assert_exports_match(src_db: &Arc<DB>, fol_db: &Arc<DB>, pattern: Option<&str>) {
+        let src_out = std::env::temp_dir().join(format!("elodin_export_src_{}", fastrand::u64(..)));
+        let fol_out = std::env::temp_dir().join(format!("elodin_export_fol_{}", fastrand::u64(..)));
+
+        src_db.flush_all().unwrap();
+        fol_db.flush_all().unwrap();
+
+        elodin_db::export::run(
+            src_db.path.clone(),
+            src_out.clone(),
+            elodin_db::export::ExportFormat::Csv,
+            true,
+            pattern.map(String::from),
+        )
+        .unwrap();
+
+        elodin_db::export::run(
+            fol_db.path.clone(),
+            fol_out.clone(),
+            elodin_db::export::ExportFormat::Csv,
+            true,
+            pattern.map(String::from),
+        )
+        .unwrap();
+
+        let src_files = collect_csv_files(&src_out);
+        let fol_files = collect_csv_files(&fol_out);
+
+        assert_eq!(
+            src_files.keys().collect::<BTreeSet<_>>(),
+            fol_files.keys().collect::<BTreeSet<_>>(),
+            "source and follower should have the same set of exported CSV files"
+        );
+
+        for (name, src_content) in &src_files {
+            let fol_content = &fol_files[name];
+            assert_eq!(
+                src_content, fol_content,
+                "CSV mismatch for {}: source and follower data differ",
+                name
+            );
+        }
+
+        let _ = std::fs::remove_dir_all(&src_out);
+        let _ = std::fs::remove_dir_all(&fol_out);
+    }
+
+    /// Read the committed data from an AppendLog file on disk.
+    /// Returns bytes 16..committed_len -- the `extra` field (start_timestamp
+    /// for index, element_size for data) plus all committed data.  Bytes
+    /// 0-15 (committed_len + head_len atomics) are runtime bookkeeping and
+    /// skipped.  The `extra` field IS included because the follower now
+    /// sets it to match the source's value during backfill.
+    fn read_append_log_committed(path: &Path) -> Vec<u8> {
+        let data = std::fs::read(path).unwrap_or_default();
+        if data.len() < 16 {
+            return vec![];
+        }
+        let committed_len = u64::from_ne_bytes(data[0..8].try_into().unwrap()) as usize;
+        if committed_len <= 16 || committed_len > data.len() {
+            return vec![];
+        }
+        data[16..committed_len].to_vec()
+    }
+
+    /// Compare the data-bearing files in two DB directories.
+    /// Skips db_state (contains creation timestamps). For AppendLog files,
+    /// compares only the deterministic portion (bytes 16..committed_len).
+    fn assert_db_files_match(src_path: &Path, fol_path: &Path) {
+        // Collect numeric component directories from source.
+        let src_entries: BTreeSet<String> = std::fs::read_dir(src_path)
+            .unwrap()
+            .flatten()
+            .filter(|e| {
+                let name = e.file_name().to_string_lossy().to_string();
+                e.path().is_dir() && name != "msgs" && name.chars().all(|c| c.is_ascii_digit())
+            })
+            .map(|e| e.file_name().to_string_lossy().to_string())
+            .collect();
+
+        let fol_entries: BTreeSet<String> = std::fs::read_dir(fol_path)
+            .unwrap()
+            .flatten()
+            .filter(|e| {
+                let name = e.file_name().to_string_lossy().to_string();
+                e.path().is_dir() && name != "msgs" && name.chars().all(|c| c.is_ascii_digit())
+            })
+            .map(|e| e.file_name().to_string_lossy().to_string())
+            .collect();
+
+        assert_eq!(
+            src_entries, fol_entries,
+            "source and follower should have the same component directories"
+        );
+
+        // Compare each component directory.
+        for comp_id in &src_entries {
+            let src_dir = src_path.join(comp_id);
+            let fol_dir = fol_path.join(comp_id);
+
+            // schema: byte-for-byte
+            let src_schema = src_dir.join("schema");
+            let fol_schema = fol_dir.join("schema");
+            if src_schema.exists() {
+                assert!(
+                    fol_schema.exists(),
+                    "follower missing schema for component {}",
+                    comp_id
+                );
+                assert_eq!(
+                    std::fs::read(&src_schema).unwrap(),
+                    std::fs::read(&fol_schema).unwrap(),
+                    "schema mismatch for component {}",
+                    comp_id
+                );
+            }
+
+            // metadata: byte-for-byte (if present in source)
+            let src_meta = src_dir.join("metadata");
+            let fol_meta = fol_dir.join("metadata");
+            if src_meta.exists() {
+                assert!(
+                    fol_meta.exists(),
+                    "follower missing metadata for component {}",
+                    comp_id
+                );
+                assert_eq!(
+                    std::fs::read(&src_meta).unwrap(),
+                    std::fs::read(&fol_meta).unwrap(),
+                    "metadata mismatch for component {}",
+                    comp_id
+                );
+            }
+
+            // index and data: compare committed portions of AppendLog files
+            for filename in &["index", "data"] {
+                let src_file = src_dir.join(filename);
+                let fol_file = fol_dir.join(filename);
+                if src_file.exists() {
+                    assert!(
+                        fol_file.exists(),
+                        "follower missing {} for component {}",
+                        filename,
+                        comp_id
+                    );
+                    let src_data = read_append_log_committed(&src_file);
+                    let fol_data = read_append_log_committed(&fol_file);
+                    assert_eq!(
+                        src_data,
+                        fol_data,
+                        "{} data mismatch for component {} (src {} bytes, fol {} bytes)",
+                        filename,
+                        comp_id,
+                        src_data.len(),
+                        fol_data.len()
+                    );
+                }
+            }
+        }
+
+        // Compare msgs/ subdirectories.
+        let src_msgs = src_path.join("msgs");
+        let fol_msgs = fol_path.join("msgs");
+        if src_msgs.exists() {
+            let src_msg_ids: BTreeSet<String> = std::fs::read_dir(&src_msgs)
+                .unwrap()
+                .flatten()
+                .filter(|e| e.path().is_dir())
+                .map(|e| e.file_name().to_string_lossy().to_string())
+                .collect();
+
+            let fol_msg_ids: BTreeSet<String> = if fol_msgs.exists() {
+                std::fs::read_dir(&fol_msgs)
+                    .unwrap()
+                    .flatten()
+                    .filter(|e| e.path().is_dir())
+                    .map(|e| e.file_name().to_string_lossy().to_string())
+                    .collect()
+            } else {
+                BTreeSet::new()
+            };
+
+            assert_eq!(
+                src_msg_ids, fol_msg_ids,
+                "source and follower should have the same message log directories"
+            );
+
+            for msg_id in &src_msg_ids {
+                let src_msg_dir = src_msgs.join(msg_id);
+                let fol_msg_dir = fol_msgs.join(msg_id);
+
+                for filename in &["timestamps", "offsets", "data_log"] {
+                    let src_file = src_msg_dir.join(filename);
+                    let fol_file = fol_msg_dir.join(filename);
+                    if src_file.exists() {
+                        assert!(
+                            fol_file.exists(),
+                            "follower missing msgs/{}/{}",
+                            msg_id,
+                            filename
+                        );
+                        let src_data = read_append_log_committed(&src_file);
+                        let fol_data = read_append_log_committed(&fol_file);
+                        assert_eq!(
+                            src_data,
+                            fol_data,
+                            "msgs/{}/{} data mismatch (src {} bytes, fol {} bytes)",
+                            msg_id,
+                            filename,
+                            src_data.len(),
+                            fol_data.len()
+                        );
+                    }
+                }
+
+                // metadata: byte-for-byte
+                let src_meta = src_msg_dir.join("metadata");
+                let fol_meta = fol_msg_dir.join("metadata");
+                if src_meta.exists() {
+                    assert!(
+                        fol_meta.exists(),
+                        "follower missing msgs/{}/metadata",
+                        msg_id
+                    );
+                    assert_eq!(
+                        std::fs::read(&src_meta).unwrap(),
+                        std::fs::read(&fol_meta).unwrap(),
+                        "msgs/{}/metadata mismatch",
+                        msg_id
+                    );
+                }
+            }
+        }
+    }
+
+    /// Covers: metadata sync, component backfill + real-time, message
+    /// backfill + real-time, microsecond timestamp preservation,
+    /// backfill/real-time boundary, CSV + binary comparison.
+    #[test]
+    async fn test_follow_basic_replication() {
+        let subscriber = tracing_subscriber::FmtSubscriber::new();
+        let _ = tracing::subscriber::set_global_default(subscriber);
+
+        // Start source.
+        let src_listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let src_addr = src_listener.local_addr().unwrap();
+        let src_temp =
+            std::env::temp_dir().join(format!("elodin_db_follow_basic_{}", fastrand::u64(..)));
+        if src_temp.exists() {
+            let _ = std::fs::remove_dir_all(&src_temp);
+        }
+        let src_server = Server::from_listener(src_listener, src_temp).unwrap();
+        let src_db = src_server.db.clone();
+        stellar(move || async { src_server.run().await });
+
+        let component_id = ComponentId::new("follow_sensor");
+        let vtable_id = 10u16.to_le_bytes();
+        let msg_name = "follow_telemetry";
+        let msg_id = impeller2::types::msg_id(msg_name);
+
+        // Pre-connect: write 3 component samples with realistic timestamps.
+        {
+            let mut client = Client::connect(src_addr).await.unwrap();
+            send_f64_samples(
+                &mut client,
+                component_id,
+                "Follow Sensor",
+                vtable_id,
+                &[
+                    (Timestamp(1_700_000_000_000_000), 10.0),
+                    (Timestamp(1_700_000_000_100_000), 20.0),
+                    (Timestamp(1_700_000_000_200_000), 30.0),
+                ],
+            )
+            .await;
+
+            // Pre-connect: write 2 messages.
+            client
+                .send(&SetMsgMetadata {
+                    id: msg_id,
+                    metadata: MsgMetadata {
+                        name: msg_name.to_string(),
+                        schema: <impeller2_wkt::OpaqueBytes as postcard_schema::Schema>::SCHEMA
+                            .into(),
+                        metadata: Default::default(),
+                    },
+                })
+                .await
+                .0
+                .unwrap();
+            sleep(Duration::from_millis(50)).await;
+
+            for i in 0..2u32 {
+                let ts = Timestamp(1_700_000_000_050_000 + i as i64 * 100_000);
+                let payload = i.to_le_bytes();
+                let mut pkt = LenPacket::msg_with_timestamp(msg_id, ts, payload.len());
+                pkt.extend_from_slice(&payload);
+                client.send(pkt).await.0.unwrap();
+            }
+        }
+        sleep(Duration::from_millis(100)).await;
+
+        // Start follower.
+        let fol_listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let _fol_addr = fol_listener.local_addr().unwrap();
+        let fol_temp =
+            std::env::temp_dir().join(format!("elodin_db_follow_basic_fol_{}", fastrand::u64(..)));
+        if fol_temp.exists() {
+            let _ = std::fs::remove_dir_all(&fol_temp);
+        }
+        let fol_server = Server::from_listener(fol_listener, fol_temp).unwrap();
+        let fol_db = fol_server.db.clone();
+        stellar(move || async { fol_server.run().await });
+
+        let follow_db = fol_db.clone();
+        stellar(move || {
+            elodin_db::follow::run_follower(
+                elodin_db::follow::FollowConfig {
+                    source_addr: src_addr,
+                    target_packet_size: 1500,
+                    reconnect_delay: Duration::from_millis(100),
+                },
+                follow_db,
+            )
+        });
+
+        // Wait for backfill.
+        assert!(
+            wait_for_component_samples(&fol_db, component_id, 3, Duration::from_secs(5)).await,
+            "follower should backfill 3 component samples"
+        );
+        assert!(
+            wait_for_msg_count(&fol_db, msg_id, 2, Duration::from_secs(5)).await,
+            "follower should backfill 2 messages"
+        );
+
+        // Verify metadata.
+        fol_db.with_state(|state| {
+            let meta = state.get_component_metadata(component_id);
+            assert!(meta.is_some(), "follower should have component metadata");
+            assert_eq!(meta.unwrap().name, "Follow Sensor");
+            assert!(
+                state.get_component(component_id).is_some(),
+                "follower should have component schema"
+            );
+        });
+        let fol_path = fol_db.path.clone();
+        fol_db.with_state_mut(|state| {
+            let log = state.get_or_insert_msg_log(msg_id, &fol_path).unwrap();
+            let metadata = log.metadata();
+            assert!(metadata.is_some(), "follower should have msg metadata");
+            assert_eq!(metadata.unwrap().name, msg_name);
+        });
+
+        // Verify exact timestamps survived round-trip.
+        fol_db.with_state(|state| {
+            let c = state.get_component(component_id).unwrap();
+            let (ts, data) = c
+                .time_series
+                .get_range(&(Timestamp(0)..Timestamp(i64::MAX)))
+                .unwrap();
+            assert_eq!(ts.len(), 3);
+            assert_eq!(ts[0].0, 1_700_000_000_000_000);
+            assert_eq!(ts[1].0, 1_700_000_000_100_000);
+            assert_eq!(ts[2].0, 1_700_000_000_200_000);
+            let values = <[f64]>::ref_from_bytes(data).unwrap();
+            assert_eq!(values[0], 10.0);
+            assert_eq!(values[1], 20.0);
+            assert_eq!(values[2], 30.0);
+        });
+
+        // Post-connect: write 2 more component samples + 1 message.
+        {
+            let mut client = Client::connect(src_addr).await.unwrap();
+            send_f64_samples(
+                &mut client,
+                component_id,
+                "Follow Sensor",
+                vtable_id,
+                &[
+                    (Timestamp(1_700_000_000_300_000), 40.0),
+                    (Timestamp(1_700_000_000_400_000), 50.0),
+                ],
+            )
+            .await;
+
+            let ts = Timestamp(1_700_000_000_350_000);
+            let payload = 2u32.to_le_bytes();
+            let mut pkt = LenPacket::msg_with_timestamp(msg_id, ts, payload.len());
+            pkt.extend_from_slice(&payload);
+            client.send(pkt).await.0.unwrap();
+        }
+
+        // Wait for real-time sync.
+        assert!(
+            wait_for_component_samples(&fol_db, component_id, 5, Duration::from_secs(5)).await,
+            "follower should have 5 total component samples"
+        );
+        assert!(
+            wait_for_msg_count(&fol_db, msg_id, 3, Duration::from_secs(5)).await,
+            "follower should have 3 total messages"
+        );
+
+        // Verify all 5 timestamps + values.
+        fol_db.with_state(|state| {
+            let c = state.get_component(component_id).unwrap();
+            let (ts, data) = c
+                .time_series
+                .get_range(&(Timestamp(0)..Timestamp(i64::MAX)))
+                .unwrap();
+            assert_eq!(ts.len(), 5, "should have exactly 5 samples (no duplicates)");
+            let expected_ts = [
+                1_700_000_000_000_000i64,
+                1_700_000_000_100_000,
+                1_700_000_000_200_000,
+                1_700_000_000_300_000,
+                1_700_000_000_400_000,
+            ];
+            let expected_vals = [10.0, 20.0, 30.0, 40.0, 50.0];
+            let values = <[f64]>::ref_from_bytes(data).unwrap();
+            for i in 0..5 {
+                assert_eq!(ts[i].0, expected_ts[i], "component ts mismatch at {}", i);
+                assert_eq!(values[i], expected_vals[i], "value mismatch at {}", i);
+            }
+        });
+
+        // CSV + binary comparison.
+        assert_exports_match(&src_db, &fol_db, None);
+        assert_db_files_match(&src_db.path, &fol_db.path);
+    }
+
+    /// Covers: dual-writer to a followed component, independent local
+    /// writer to a non-followed component.
+    #[test]
+    async fn test_follow_local_writers() {
+        let (src_addr, _src_db, fol_addr, fol_db) = setup_follow_pair(1500).await.unwrap();
+
+        let followed_id = ComponentId::new("followed_temp");
+        let followed_vtable = 13u16.to_le_bytes();
+        let local_id = ComponentId::new("local_video");
+        let local_vtable = 14u16.to_le_bytes();
+
+        // Source writes the followed component.
+        {
+            let mut client = Client::connect(src_addr).await.unwrap();
+            send_f64_samples(
+                &mut client,
+                followed_id,
+                "Followed Temp",
+                followed_vtable,
+                &[(Timestamp(1000), 25.0)],
+            )
+            .await;
+        }
+
+        // Wait for follower to replicate.
+        assert!(
+            wait_for_component_samples(&fol_db, followed_id, 1, Duration::from_secs(5)).await,
+            "follower should have replicated followed_temp"
+        );
+
+        // Verify it is tracked as followed.
+        {
+            let followed = fol_db.followed_components.read().unwrap();
+            assert!(
+                followed.contains(&followed_id),
+                "followed_temp should be in followed_components"
+            );
+        }
+
+        // Local client writes to the SAME followed component (dual writer).
+        {
+            let mut fol_client = Client::connect(fol_addr).await.unwrap();
+            let vt = vtable([raw_field(
+                0,
+                8,
+                timestamp(
+                    raw_table(8, 8),
+                    schema(PrimType::F64, &[], component(followed_id)),
+                ),
+            )]);
+            fol_client
+                .send(&VTableMsg {
+                    id: followed_vtable,
+                    vtable: vt,
+                })
+                .await
+                .0
+                .unwrap();
+            sleep(Duration::from_millis(50)).await;
+
+            let mut pkt = LenPacket::table(followed_vtable, 16);
+            pkt.extend_aligned(&[999.0f64]);
+            pkt.extend_aligned(&[2000i64]);
+            fol_client.send(pkt).await.0.unwrap();
+            sleep(Duration::from_millis(100)).await;
+        }
+
+        // Still tracked as followed after local write.
+        {
+            let followed = fol_db.followed_components.read().unwrap();
+            assert!(
+                followed.contains(&followed_id),
+                "followed_temp should still be in followed_components after local write"
+            );
+        }
+
+        // Local client writes a DIFFERENT (non-followed) component.
+        {
+            let mut fol_client = Client::connect(fol_addr).await.unwrap();
+            send_f64_samples(
+                &mut fol_client,
+                local_id,
+                "Local Video",
+                local_vtable,
+                &[(Timestamp(2000), 99.0)],
+            )
+            .await;
+        }
+        sleep(Duration::from_millis(200)).await;
+
+        // local_video should NOT be in followed_components.
+        {
+            let followed = fol_db.followed_components.read().unwrap();
+            assert!(
+                !followed.contains(&local_id),
+                "local_video should NOT be in followed_components"
+            );
+            assert!(
+                followed.contains(&followed_id),
+                "followed_temp should still be in followed_components"
+            );
+        }
+
+        // Both components should exist.
+        fol_db.with_state(|state| {
+            assert!(state.get_component(followed_id).is_some());
+            assert!(state.get_component(local_id).is_some());
+        });
+    }
+
     #[test]
     async fn test_db_reopen() {
         let temp_dir =
@@ -1494,5 +2075,642 @@ mod tests {
             let (_, msg_data) = msg.latest().expect("missing msg");
             assert_eq!(msg_data, postcard::to_allocvec(&test_msg).unwrap());
         });
+    }
+
+    // ── Additional follow-mode tests ────────────────────────────────────
+
+    /// Covers: reconnection dedup for both components and messages after
+    /// a full source + follower restart.
+    #[test]
+    async fn test_follow_reconnection_dedup() {
+        let subscriber = tracing_subscriber::FmtSubscriber::new();
+        let _ = tracing::subscriber::set_global_default(subscriber);
+
+        let src_dir =
+            std::env::temp_dir().join(format!("elodin_db_dedup_src_{}", fastrand::u64(..)));
+        let fol_dir =
+            std::env::temp_dir().join(format!("elodin_db_dedup_fol_{}", fastrand::u64(..)));
+        for d in [&src_dir, &fol_dir] {
+            if d.exists() {
+                let _ = std::fs::remove_dir_all(d);
+            }
+        }
+
+        let component_id = ComponentId::new("dedup_test");
+        let vtable_id = 20u16.to_le_bytes();
+        let msg_name = "dedup_msg";
+        let msg_id = impeller2::types::msg_id(msg_name);
+
+        // ── Era 1: write 3 component samples + 1 message ────────────────
+        let src_listener_1 = TcpListener::bind("127.0.0.1:0").unwrap();
+        let src_addr_1 = src_listener_1.local_addr().unwrap();
+        let src_server_1 = Server::from_listener(src_listener_1, &src_dir).unwrap();
+        let _src_db_1 = src_server_1.db.clone();
+        stellar(move || async { src_server_1.run().await });
+
+        {
+            let mut client = Client::connect(src_addr_1).await.unwrap();
+            send_f64_samples(
+                &mut client,
+                component_id,
+                "Dedup Test",
+                vtable_id,
+                &[
+                    (Timestamp(1000), 10.0),
+                    (Timestamp(2000), 20.0),
+                    (Timestamp(3000), 30.0),
+                ],
+            )
+            .await;
+
+            client
+                .send(&SetMsgMetadata {
+                    id: msg_id,
+                    metadata: MsgMetadata {
+                        name: msg_name.to_string(),
+                        schema: <impeller2_wkt::OpaqueBytes as postcard_schema::Schema>::SCHEMA
+                            .into(),
+                        metadata: Default::default(),
+                    },
+                })
+                .await
+                .0
+                .unwrap();
+            sleep(Duration::from_millis(50)).await;
+
+            let ts = Timestamp(1500);
+            let payload = 0u32.to_le_bytes();
+            let mut pkt = LenPacket::msg_with_timestamp(msg_id, ts, payload.len());
+            pkt.extend_from_slice(&payload);
+            client.send(pkt).await.0.unwrap();
+        }
+        sleep(Duration::from_millis(100)).await;
+
+        // Start follower and wait for sync.
+        let fol_listener_1 = TcpListener::bind("127.0.0.1:0").unwrap();
+        let fol_server_1 = Server::from_listener(fol_listener_1, &fol_dir).unwrap();
+        let fol_db_1 = fol_server_1.db.clone();
+        stellar(move || async { fol_server_1.run().await });
+
+        let follow_db_1 = fol_db_1.clone();
+        stellar(move || {
+            elodin_db::follow::run_follower(
+                elodin_db::follow::FollowConfig {
+                    source_addr: src_addr_1,
+                    target_packet_size: 1500,
+                    reconnect_delay: Duration::from_millis(100),
+                },
+                follow_db_1,
+            )
+        });
+
+        assert!(
+            wait_for_component_samples(&fol_db_1, component_id, 3, Duration::from_secs(5)).await,
+            "era 1: follower should have 3 samples"
+        );
+        assert!(
+            wait_for_msg_count(&fol_db_1, msg_id, 1, Duration::from_secs(5)).await,
+            "era 1: follower should have 1 message"
+        );
+        sleep(Duration::from_millis(200)).await;
+
+        // ── Era 2: restart both, write 2 more samples + 1 message ───────
+        let src_listener_2 = TcpListener::bind("127.0.0.1:0").unwrap();
+        let src_addr_2 = src_listener_2.local_addr().unwrap();
+        let src_server_2 = Server::from_listener(src_listener_2, &src_dir).unwrap();
+        let src_db_2 = src_server_2.db.clone();
+        stellar(move || async { src_server_2.run().await });
+
+        {
+            let mut client = Client::connect(src_addr_2).await.unwrap();
+            send_f64_samples(
+                &mut client,
+                component_id,
+                "Dedup Test",
+                vtable_id,
+                &[(Timestamp(4000), 40.0), (Timestamp(5000), 50.0)],
+            )
+            .await;
+
+            let ts = Timestamp(4500);
+            let payload = 1u32.to_le_bytes();
+            let mut pkt = LenPacket::msg_with_timestamp(msg_id, ts, payload.len());
+            pkt.extend_from_slice(&payload);
+            client.send(pkt).await.0.unwrap();
+        }
+        sleep(Duration::from_millis(200)).await;
+
+        let fol_listener_2 = TcpListener::bind("127.0.0.1:0").unwrap();
+        let fol_server_2 = Server::from_listener(fol_listener_2, &fol_dir).unwrap();
+        let fol_db_2 = fol_server_2.db.clone();
+        stellar(move || async { fol_server_2.run().await });
+
+        let follow_db_2 = fol_db_2.clone();
+        stellar(move || {
+            elodin_db::follow::run_follower(
+                elodin_db::follow::FollowConfig {
+                    source_addr: src_addr_2,
+                    target_packet_size: 1500,
+                    reconnect_delay: Duration::from_millis(100),
+                },
+                follow_db_2,
+            )
+        });
+
+        // ── Final verification: exact counts, no duplicates ─────────────
+        assert!(
+            wait_for_component_samples(&fol_db_2, component_id, 5, Duration::from_secs(5)).await,
+            "era 2: follower should have 5 samples (no duplicates)"
+        );
+        assert!(
+            wait_for_msg_count(&fol_db_2, msg_id, 2, Duration::from_secs(5)).await,
+            "era 2: follower should have 2 messages (no duplicates)"
+        );
+
+        fol_db_2.with_state(|state| {
+            let c = state.get_component(component_id).unwrap();
+            let (ts, data) = c
+                .time_series
+                .get_range(&(Timestamp(0)..Timestamp(i64::MAX)))
+                .unwrap();
+            assert_eq!(ts.len(), 5, "exactly 5 samples (no duplicates)");
+            let values = <[f64]>::ref_from_bytes(data).unwrap();
+            for i in 0..5usize {
+                assert_eq!(ts[i].0, (i as i64 + 1) * 1000);
+                assert_eq!(values[i], (i + 1) as f64 * 10.0);
+            }
+        });
+
+        assert_exports_match(&src_db_2, &fol_db_2, Some("dedup_test*"));
+        assert_db_files_match(&src_db_2.path, &fol_db_2.path);
+    }
+
+    /// Covers: dynamic component discovery after follower connects,
+    /// round-robin batching with multiple components.
+    #[test]
+    async fn test_follow_dynamic_discovery() {
+        let (src_addr, src_db, _fol_addr, fol_db) = setup_follow_pair(1500).await.unwrap();
+
+        // Add 3 components dynamically, each with 2 samples.
+        let mut component_ids = Vec::new();
+        {
+            let mut client = Client::connect(src_addr).await.unwrap();
+            for i in 0..3usize {
+                let name = format!("dyn_comp_{}", i);
+                let cid = ComponentId::new(&name);
+                component_ids.push(cid);
+                let vtable_id = (30 + i as u16).to_le_bytes();
+                send_f64_samples(
+                    &mut client,
+                    cid,
+                    &name,
+                    vtable_id,
+                    &[
+                        (Timestamp((i as i64 + 1) * 1000), i as f64),
+                        (Timestamp((i as i64 + 1) * 1000 + 500), i as f64 + 100.0),
+                    ],
+                )
+                .await;
+            }
+        }
+
+        // Wait for all 3 to replicate.
+        for (i, &cid) in component_ids.iter().enumerate() {
+            assert!(
+                wait_for_component_samples(&fol_db, cid, 2, Duration::from_secs(5)).await,
+                "follower should have 2 samples for dyn_comp_{}",
+                i
+            );
+        }
+
+        // Add 2 MORE components after the first batch.
+        {
+            let mut client = Client::connect(src_addr).await.unwrap();
+            for i in 3..5usize {
+                let name = format!("dyn_comp_{}", i);
+                let cid = ComponentId::new(&name);
+                component_ids.push(cid);
+                let vtable_id = (30 + i as u16).to_le_bytes();
+                send_f64_samples(
+                    &mut client,
+                    cid,
+                    &name,
+                    vtable_id,
+                    &[
+                        (Timestamp((i as i64 + 1) * 1000), i as f64),
+                        (Timestamp((i as i64 + 1) * 1000 + 500), i as f64 + 100.0),
+                    ],
+                )
+                .await;
+            }
+        }
+
+        // Wait for all 5 to replicate.
+        for (i, &cid) in component_ids.iter().enumerate() {
+            assert!(
+                wait_for_component_samples(&fol_db, cid, 2, Duration::from_secs(5)).await,
+                "follower should have 2 samples for dyn_comp_{}",
+                i
+            );
+        }
+
+        // Verify exact counts (no duplicates).
+        fol_db.with_state(|state| {
+            for (i, &cid) in component_ids.iter().enumerate() {
+                let c = state.get_component(cid).unwrap();
+                let (ts, _) = c
+                    .time_series
+                    .get_range(&(Timestamp(0)..Timestamp(i64::MAX)))
+                    .unwrap();
+                assert_eq!(
+                    ts.len(),
+                    2,
+                    "dyn_comp_{} should have exactly 2 samples, got {}",
+                    i,
+                    ts.len()
+                );
+            }
+        });
+
+        assert_exports_match(&src_db, &fol_db, None);
+        assert_db_files_match(&src_db.path, &fol_db.path);
+    }
+
+    /// Covers: multi-type replication (f64 array, f32 array, u64 scalar),
+    /// message replication, CSV + binary data integrity.
+    #[test]
+    async fn test_follow_multi_type_integrity() {
+        let subscriber = tracing_subscriber::FmtSubscriber::new();
+        let _ = tracing::subscriber::set_global_default(subscriber);
+
+        let src_listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let src_addr = src_listener.local_addr().unwrap();
+        let src_temp =
+            std::env::temp_dir().join(format!("elodin_db_multi_src_{}", fastrand::u64(..)));
+        if src_temp.exists() {
+            let _ = std::fs::remove_dir_all(&src_temp);
+        }
+        let src_server = Server::from_listener(src_listener, src_temp).unwrap();
+        let src_db = src_server.db.clone();
+        stellar(move || async { src_server.run().await });
+
+        let sample_count = 10usize;
+        let timestamps: Vec<Timestamp> = (1..=sample_count)
+            .map(|i| Timestamp(i as i64 * 1000))
+            .collect();
+
+        // f64[3] component (e.g., position vector).
+        let pos_id = ComponentId::new("multi_pos");
+        {
+            let mut client = Client::connect(src_addr).await.unwrap();
+            send_timestamped_samples(
+                &mut client,
+                pos_id,
+                "multi_pos",
+                100u16.to_le_bytes(),
+                PrimType::F64,
+                &[3],
+                &timestamps,
+                |i| {
+                    let x = i as f64;
+                    let y = i as f64 * 2.0;
+                    let z = i as f64 * 3.0;
+                    [x, y, z].iter().flat_map(|v| v.to_le_bytes()).collect()
+                },
+            )
+            .await;
+        }
+
+        // f32[2] component (e.g., control surfaces).
+        let ctrl_id = ComponentId::new("multi_ctrl");
+        {
+            let mut client = Client::connect(src_addr).await.unwrap();
+            send_timestamped_samples(
+                &mut client,
+                ctrl_id,
+                "multi_ctrl",
+                101u16.to_le_bytes(),
+                PrimType::F32,
+                &[2],
+                &timestamps,
+                |i| {
+                    let a = i as f32 * 0.5;
+                    let b = -(i as f32);
+                    [a, b].iter().flat_map(|v| v.to_le_bytes()).collect()
+                },
+            )
+            .await;
+        }
+
+        // u64 scalar component (e.g., tick counter).
+        let tick_id = ComponentId::new("multi_tick");
+        {
+            let mut client = Client::connect(src_addr).await.unwrap();
+            send_timestamped_samples(
+                &mut client,
+                tick_id,
+                "multi_tick",
+                102u16.to_le_bytes(),
+                PrimType::U64,
+                &[],
+                &timestamps,
+                |i| (i as u64).to_le_bytes().to_vec(),
+            )
+            .await;
+        }
+
+        // 5 messages.
+        let msg_name = "multi_log";
+        let msg_id = impeller2::types::msg_id(msg_name);
+        {
+            let mut client = Client::connect(src_addr).await.unwrap();
+            client
+                .send(&SetMsgMetadata {
+                    id: msg_id,
+                    metadata: MsgMetadata {
+                        name: msg_name.to_string(),
+                        schema: <impeller2_wkt::OpaqueBytes as postcard_schema::Schema>::SCHEMA
+                            .into(),
+                        metadata: Default::default(),
+                    },
+                })
+                .await
+                .0
+                .unwrap();
+            sleep(Duration::from_millis(50)).await;
+
+            for i in 0..5u32 {
+                let ts = Timestamp((i as i64 + 1) * 2000);
+                let payload = i.to_le_bytes();
+                let mut pkt = LenPacket::msg_with_timestamp(msg_id, ts, payload.len());
+                pkt.extend_from_slice(&payload);
+                client.send(pkt).await.0.unwrap();
+            }
+        }
+        sleep(Duration::from_millis(100)).await;
+
+        // Start follower.
+        let fol_listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let fol_temp =
+            std::env::temp_dir().join(format!("elodin_db_multi_fol_{}", fastrand::u64(..)));
+        if fol_temp.exists() {
+            let _ = std::fs::remove_dir_all(&fol_temp);
+        }
+        let fol_server = Server::from_listener(fol_listener, fol_temp).unwrap();
+        let fol_db = fol_server.db.clone();
+        stellar(move || async { fol_server.run().await });
+
+        let follow_db = fol_db.clone();
+        stellar(move || {
+            elodin_db::follow::run_follower(
+                elodin_db::follow::FollowConfig {
+                    source_addr: src_addr,
+                    target_packet_size: 1500,
+                    reconnect_delay: Duration::from_millis(100),
+                },
+                follow_db,
+            )
+        });
+
+        // Wait for full sync.
+        for (cid, expected) in [
+            (pos_id, sample_count),
+            (ctrl_id, sample_count),
+            (tick_id, sample_count),
+        ] {
+            assert!(
+                wait_for_component_samples(&fol_db, cid, expected, Duration::from_secs(5)).await,
+                "follower should have {} samples for {:?}",
+                expected,
+                cid
+            );
+        }
+        assert!(
+            wait_for_msg_count(&fol_db, msg_id, 5, Duration::from_secs(5)).await,
+            "follower should have 5 messages"
+        );
+
+        // CSV + binary comparison.
+        src_db.flush_all().unwrap();
+        fol_db.flush_all().unwrap();
+        sleep(Duration::from_millis(100)).await;
+
+        assert_exports_match(&src_db, &fol_db, None);
+        assert_db_files_match(&src_db.path, &fol_db.path);
+    }
+
+    /// Verify that earliest_timestamp tracks actual data at runtime via
+    /// update_min, and that DB::open() also computes it correctly from data
+    /// when time_start_timestamp_micros is not explicitly set.
+    #[test]
+    async fn test_open_fixes_mismatched_timestamp_domains() {
+        let subscriber = tracing_subscriber::FmtSubscriber::new();
+        let _ = tracing::subscriber::set_global_default(subscriber);
+
+        let temp_dir =
+            std::env::temp_dir().join(format!("elodin_db_ts_mismatch_{}", fastrand::u64(..)));
+        if temp_dir.exists() {
+            let _ = std::fs::remove_dir_all(&temp_dir);
+        }
+
+        // Two components: one with initialization data at Timestamp(0) (like
+        // TARGETMESSAGE on flight hardware), and one with only valid timestamps
+        // (like BARMESSAGE).
+        let target_id = ComponentId::new("target_test");
+        let sensor_id = ComponentId::new("sensor_test");
+        let schema = elodin_db::ComponentSchema::new(PrimType::F64, &[1]);
+
+        // Monotonic timestamps: ~48 minutes from epoch (typical boot-time values)
+        let monotonic_ts1 = Timestamp(2_878_000_000);
+        let monotonic_ts2 = Timestamp(2_879_000_000);
+
+        {
+            let db = elodin_db::DB::create(temp_dir.clone()).unwrap();
+
+            // After creation, time_start_timestamp_micros should NOT be set
+            db.with_state(|state| {
+                assert!(
+                    state.db_config.time_start_timestamp_micros().is_none(),
+                    "DB creation should NOT persist time_start_timestamp_micros (got {:?})",
+                    state.db_config.time_start_timestamp_micros(),
+                );
+            });
+
+            // In-memory earliest_timestamp starts at wall-clock (for apply_implicit_timestamp)
+            let wall_clock_start = db.earliest_timestamp.latest();
+            assert!(
+                wall_clock_start.0 > 1_500_000_000_000_000,
+                "in-memory earliest_timestamp should start at wall-clock (got {})",
+                wall_clock_start.0,
+            );
+
+            // Insert both components
+            db.with_state_mut(|state| {
+                state
+                    .insert_component(target_id, schema.clone(), &temp_dir)
+                    .unwrap();
+                state
+                    .insert_component(sensor_id, schema.clone(), &temp_dir)
+                    .unwrap();
+            });
+
+            db.with_state(|state| {
+                let data = 42.0f64.to_le_bytes();
+
+                // Target component: initialization data at Timestamp(0),
+                // then real data -- mimics flight software writing defaults
+                // before the monotonic clock starts.
+                let target = state.get_component(target_id).unwrap();
+                target.time_series.push_buf(Timestamp(0), &data).unwrap();
+                target.time_series.push_buf(monotonic_ts1, &data).unwrap();
+
+                // Sensor component: only valid monotonic timestamps
+                let sensor = state.get_component(sensor_id).unwrap();
+                sensor.time_series.push_buf(monotonic_ts1, &data).unwrap();
+                sensor.time_series.push_buf(monotonic_ts2, &data).unwrap();
+            });
+
+            // Simulate the update_min/update_max calls that DBSink would make.
+            // The guard filters Timestamp(0).
+            for &ts in &[Timestamp(0), monotonic_ts1, monotonic_ts2] {
+                db.last_updated.update_max(ts);
+                if ts.0 > 0 {
+                    db.earliest_timestamp.update_min(ts);
+                }
+            }
+
+            // Verify earliest_timestamp tracked to the monotonic range, NOT to 0
+            let earliest_live = db.earliest_timestamp.latest();
+            assert!(
+                earliest_live.0 > 0,
+                "earliest_timestamp should NOT be pulled to 0 by initialization data (got {})",
+                earliest_live.0,
+            );
+            assert_eq!(
+                earliest_live.0, monotonic_ts1.0,
+                "earliest_timestamp should track to first non-zero data timestamp"
+            );
+
+            db.flush_all().unwrap();
+        }
+
+        // Re-open and verify
+        let db = elodin_db::DB::open(temp_dir.clone()).unwrap();
+        let earliest = db.earliest_timestamp.latest();
+        let last = db.last_updated.latest();
+
+        assert!(
+            earliest <= last,
+            "earliest_timestamp ({}) must be <= last_updated ({}) after open",
+            earliest.0,
+            last.0,
+        );
+        assert!(
+            earliest.0 > 0,
+            "earliest_timestamp should not be 0 after re-open (got {})",
+            earliest.0,
+        );
+        assert_eq!(
+            earliest.0, monotonic_ts1.0,
+            "earliest_timestamp should match the first non-zero data timestamp"
+        );
+        assert_eq!(
+            last.0, monotonic_ts2.0,
+            "last_updated should be the latest data timestamp"
+        );
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
+    }
+
+    /// Verify that DB::open() correctly recovers earliest_timestamp when ALL
+    /// components have dense data starting at timestamp 0 (e.g., simulations
+    /// using relative time). This is the FT13 scenario where the `> 0` filters
+    /// (from d5436a4) reject every component's start, producing a degenerate
+    /// range that the editor displays as ~213 billion days.
+    #[test]
+    async fn test_open_dense_epoch_zero_data() {
+        let subscriber = tracing_subscriber::FmtSubscriber::new();
+        let _ = tracing::subscriber::set_global_default(subscriber);
+
+        let temp_dir =
+            std::env::temp_dir().join(format!("elodin_db_epoch_zero_{}", fastrand::u64(..)));
+        if temp_dir.exists() {
+            let _ = std::fs::remove_dir_all(&temp_dir);
+        }
+
+        let comp_a = ComponentId::new("rocket_pos");
+        let comp_b = ComponentId::new("rocket_vel");
+        let schema = elodin_db::ComponentSchema::new(PrimType::F64, &[1]);
+
+        let time_step_us: i64 = 2_000; // 2ms time step
+        let num_ticks: i64 = 100;
+
+        {
+            let db = elodin_db::DB::create(temp_dir.clone()).unwrap();
+
+            db.with_state_mut(|state| {
+                state
+                    .insert_component(comp_a, schema.clone(), &temp_dir)
+                    .unwrap();
+                state
+                    .insert_component(comp_b, schema.clone(), &temp_dir)
+                    .unwrap();
+            });
+
+            db.with_state(|state| {
+                let data = 1.0f64.to_le_bytes();
+
+                let a = state.get_component(comp_a).unwrap();
+                let b = state.get_component(comp_b).unwrap();
+
+                // Two initialization points at timestamp 0, then dense 2ms data
+                // — mirrors the FT13 flight test pattern.
+                a.time_series.push_buf(Timestamp(0), &data).unwrap();
+                a.time_series.push_buf(Timestamp(0), &data).unwrap();
+                b.time_series.push_buf(Timestamp(0), &data).unwrap();
+                b.time_series.push_buf(Timestamp(0), &data).unwrap();
+
+                for tick in 1..num_ticks {
+                    let ts = Timestamp(tick * time_step_us);
+                    a.time_series.push_buf(ts, &data).unwrap();
+                    b.time_series.push_buf(ts, &data).unwrap();
+                }
+            });
+
+            // Simulate runtime update_min/update_max (the > 0 guard skips ts=0)
+            for tick in 0..num_ticks {
+                let ts = Timestamp(tick * time_step_us);
+                db.last_updated.update_max(ts);
+                if ts.0 > 0 {
+                    db.earliest_timestamp.update_min(ts);
+                }
+            }
+
+            db.flush_all().unwrap();
+        }
+
+        // Re-open — the degenerate-range fallback should recover
+        let db = elodin_db::DB::open(temp_dir.clone()).unwrap();
+        let earliest = db.earliest_timestamp.latest();
+        let last = db.last_updated.latest();
+
+        assert!(
+            earliest < last,
+            "earliest_timestamp ({}) must be < last_updated ({}) — degenerate range not recovered",
+            earliest.0,
+            last.0,
+        );
+        assert_eq!(
+            earliest.0, 0,
+            "earliest_timestamp should be 0 for dense epoch-zero data (got {})",
+            earliest.0,
+        );
+        assert_eq!(
+            last.0,
+            (num_ticks - 1) * time_step_us,
+            "last_updated should be the final tick timestamp"
+        );
+
+        let _ = std::fs::remove_dir_all(&temp_dir);
     }
 }

@@ -25,7 +25,8 @@ edition = "2024"
 # dependency graph
 links = "maitake"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[lib]
+test = false
 
 [features]
 default = ["alloc"]

@@ -4,6 +4,7 @@ use bevy::ecs::{
 };
 use bevy::prelude::*;
 use bevy_egui::{EguiContexts, EguiTextureHandle, egui};
+use impeller2_bevy::CurrentStreamId;
 use impeller2_wkt::{SimulationTimeStep, StreamId};
 use timeline_controls::TimelineControls;
 
@@ -11,7 +12,7 @@ use std::ops::RangeInclusive;
 use timeline_slider::TimelineSlider;
 
 use crate::{
-    SelectedTimeRange,
+    FullTimeRange, SelectedTimeRange, TimeRangeBehavior,
     ui::{colors::get_scheme, images},
 };
 
@@ -21,7 +22,27 @@ pub mod timeline_controls;
 pub mod timeline_slider;
 
 pub(crate) fn plugin(app: &mut App) {
-    app.add_plugins(timeline_controls::plugin);
+    app.add_plugins(timeline_controls::plugin)
+        .init_resource::<PlaybackSpeed>()
+        .add_systems(Update, reset_playback_speed_on_stream_change);
+}
+
+#[derive(bevy::prelude::Resource, Clone, Copy, Debug)]
+pub struct PlaybackSpeed(pub f64);
+
+impl Default for PlaybackSpeed {
+    fn default() -> Self {
+        Self(1.0)
+    }
+}
+
+fn reset_playback_speed_on_stream_change(
+    current_stream_id: Res<CurrentStreamId>,
+    mut playback_speed: ResMut<PlaybackSpeed>,
+) {
+    if current_stream_id.is_changed() {
+        *playback_speed = PlaybackSpeed::default();
+    }
 }
 
 #[derive(bevy::prelude::Resource, Default, Clone, Copy, Debug)]
@@ -78,6 +99,7 @@ pub struct TimelineArgs {
     pub segment_count: u8,
     pub frames_per_second: f64,
     pub active_range: RangeInclusive<i64>,
+    pub focus_range: Option<RangeInclusive<i64>>,
 }
 
 /// Returns a `value` based on the `position` in the timeline
@@ -235,6 +257,8 @@ pub struct TimelinePanel<'w, 's> {
     images: Local<'s, images::Images>,
     tick_time: Res<'w, SimulationTimeStep>,
     selected_time_range: Res<'w, SelectedTimeRange>,
+    full_time_range: Res<'w, FullTimeRange>,
+    time_range_behavior: Res<'w, TimeRangeBehavior>,
 }
 
 impl WidgetSystem for TimelinePanel<'_, '_> {
@@ -251,8 +275,13 @@ impl WidgetSystem for TimelinePanel<'_, '_> {
         let mut contexts = state_mut.contexts;
         let images = state_mut.images;
         let tick_time = state_mut.tick_time;
-        let active_range =
-            state_mut.selected_time_range.0.start.0..=state_mut.selected_time_range.0.end.0;
+        let active_range = state_mut.full_time_range.0.start.0..=state_mut.full_time_range.0.end.0;
+        let is_full = *state_mut.time_range_behavior == TimeRangeBehavior::default();
+        let focus_range = if is_full {
+            None
+        } else {
+            Some(state_mut.selected_time_range.0.start.0..=state_mut.selected_time_range.0.end.0)
+        };
 
         let frames_per_second = 1.0 / tick_time.0;
 
@@ -293,6 +322,7 @@ impl WidgetSystem for TimelinePanel<'_, '_> {
                     segment_count: (available_width / 90.0) as u8,
                     frames_per_second,
                     active_range,
+                    focus_range,
                 };
 
                 ui.horizontal(|ui| {
