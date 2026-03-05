@@ -1,29 +1,41 @@
+use std::os::unix::net::UnixStream;
 use std::time::Duration;
 
 use bevy::{
-    app::{App, Plugin, ScheduleRunnerPlugin, Startup},
-    asset::{AssetPlugin, UnapprovedPathMode},
+    app::{App, AppExit, Plugin, Startup},
+    asset::{AssetPlugin, Assets, UnapprovedPathMode},
     log::LogPlugin,
+    math::{EulerRot, Quat},
     prelude::*,
     window::{ExitCondition, WindowPlugin},
     winit::WinitPlugin,
 };
+use bevy_mat3_material::Mat3Material;
 use big_space::{FloatingOrigin, GridCell};
+use elodin_db::render_bridge::{RenderBridgeServer, RenderRequest};
+use impeller2::types::{self, LenPacket};
+use impeller2_bevy::PacketTx;
+use impeller2_kdl::FromKdl;
+use impeller2_wkt::{CurrentTimestamp, DbConfig, LastUpdated, SchematicElem};
 
-use crate::{PositionSync, sensor_camera::SensorCameraPlugin, sync_pos};
-use impeller2_wkt::{CurrentTimestamp, LastUpdated};
+use crate::object_3d::create_object_3d_entity;
+use crate::sensor_camera::{SensorCamera, SensorCameraConfigs, SensorCameraPlugin};
+use crate::{EqlContext, PositionSync, sync_pos};
 
-/// A headless variant of the editor that provides rendering without a window.
+/// A headless Bevy app dedicated to sensor camera rendering.
 ///
-/// Used by `elodin run` to render sensor camera frames into the DB
-/// without opening a GUI. Includes the same scene loading, entity
-/// transform sync, and sensor camera rendering as the full editor,
-/// but skips all UI (egui, tiles, graphs, video streams, gizmos, etc.).
+/// Used by both `elodin run` (main thread) and `elodin editor` (background
+/// thread). Connects to the simulation's DB via TCP and renders sensor camera
+/// frames on demand when the simulation calls `ctx.render_camera()`.
+///
+/// The custom runner (`headless_sensor_runner`) listens on a Unix domain
+/// socket for render requests from the simulation subprocess, waits for
+/// entity data to arrive, enables the requested camera, renders, then
+/// writes the frame to the DB and responds over the socket.
 pub struct HeadlessEditorPlugin;
 
 impl Plugin for HeadlessEditorPlugin {
     fn build(&self, app: &mut App) {
-        // Asset sources must be registered before DefaultPlugins/AssetPlugin
         app.add_plugins(crate::plugins::WebAssetPlugin)
             .add_plugins(crate::plugins::env_asset_source::plugin)
             .add_plugins(
@@ -40,9 +52,6 @@ impl Plugin for HeadlessEditorPlugin {
                         ..default()
                     }),
             )
-            .add_plugins(ScheduleRunnerPlugin::run_loop(Duration::from_secs_f64(
-                1.0 / 120.0,
-            )))
             .add_plugins(impeller2_bevy::Impeller2Plugin)
             .add_plugins(big_space::FloatingOriginPlugin::<i128>::new(16_000., 100.))
             .add_plugins(bevy_mat3_material::Mat3MaterialPlugin)
@@ -64,16 +73,20 @@ impl Plugin for HeadlessEditorPlugin {
                     .after(advance_headless_timestamp)
                     .in_set(PositionSync),
             )
+            .add_systems(
+                PreUpdate,
+                crate::setup_cell.after(impeller2_bevy::sink),
+            )
             .add_systems(Startup, setup_floating_origin)
+            .add_systems(Startup, setup_headless_lighting)
             .init_resource::<crate::EqlContext>()
             .init_resource::<crate::SyncedObject3d>()
-            .add_systems(Update, crate::update_eql_context);
+            .add_systems(Update, crate::update_eql_context)
+            .add_systems(Update, load_headless_scene)
+            .set_runner(headless_sensor_runner);
     }
 }
 
-/// In headless mode there is no playback UI, so `CurrentTimestamp` must
-/// track the latest simulation tick directly. Without this, entity data
-/// would stay pinned to tick 0 and sensor frame timestamps would be stale.
 fn advance_headless_timestamp(
     last_updated: Res<LastUpdated>,
     mut current_ts: ResMut<CurrentTimestamp>,
@@ -90,4 +103,196 @@ fn setup_floating_origin(mut commands: Commands) {
         Transform::default(),
         GlobalTransform::default(),
     ));
+}
+
+// ---------------------------------------------------------------------------
+// Scene loading
+// ---------------------------------------------------------------------------
+
+fn setup_headless_lighting(mut commands: Commands) {
+    commands.spawn((
+        DirectionalLight {
+            illuminance: 10_000.0,
+            shadows_enabled: false,
+            ..default()
+        },
+        Transform::from_rotation(Quat::from_euler(EulerRot::XYZ, -0.8, 0.4, 0.0)),
+    ));
+}
+
+fn load_headless_scene(
+    config: Res<DbConfig>,
+    mut loaded: Local<bool>,
+    mut commands: Commands,
+    eql: Res<EqlContext>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut mat3_materials: ResMut<Assets<Mat3Material>>,
+    asset_server: Res<AssetServer>,
+) {
+    if *loaded {
+        return;
+    }
+    let Some(content) = config.schematic_content() else {
+        return;
+    };
+    let Ok(schematic) = impeller2_wkt::Schematic::from_kdl(content).inspect_err(|e| {
+        tracing::warn!("Failed to parse schematic KDL: {e}");
+    }) else {
+        return;
+    };
+
+    for elem in &schematic.elems {
+        if let SchematicElem::Object3d(obj) = elem {
+            let Ok(expr) = eql.0.parse_str(&obj.eql) else {
+                tracing::warn!("Failed to parse EQL for object_3d: {}", obj.eql);
+                continue;
+            };
+            create_object_3d_entity(
+                &mut commands,
+                obj.clone(),
+                expr,
+                &eql.0,
+                &mut materials,
+                &mut meshes,
+                &mut mat3_materials,
+                &asset_server,
+            );
+        }
+    }
+    tracing::info!(
+        "Headless scene loaded: {} elements from schematic",
+        schematic.elems.len()
+    );
+    *loaded = true;
+}
+
+// ---------------------------------------------------------------------------
+// Custom runner
+// ---------------------------------------------------------------------------
+
+fn headless_sensor_runner(mut app: App) -> AppExit {
+    app.finish();
+    app.cleanup();
+
+    let server = match RenderBridgeServer::bind() {
+        Ok(s) => s,
+        Err(e) => {
+            tracing::error!("Failed to bind render bridge socket: {e}");
+            return AppExit::Error(1.try_into().unwrap());
+        }
+    };
+
+    // Warm-up: run a few updates so the TCP connection is established,
+    // DB metadata is loaded, and sensor cameras are spawned.
+    for _ in 0..20 {
+        app.update();
+        std::thread::sleep(Duration::from_millis(50));
+    }
+
+    let mut pending: Option<(RenderRequest, UnixStream)> = None;
+    let mut armed_frames = 0u32;
+
+    loop {
+        if let Some(exit) = app.should_exit() {
+            return exit;
+        }
+
+        app.update();
+
+        // Phase 1: camera is armed — check if the render produced a frame.
+        // Bevy's render pipeline may need 2-3 frames after camera activation
+        // to cache the pipeline and produce actual pixel data. We run up to
+        // 4 update cycles before giving up.
+        if armed_frames > 0 {
+            let has_frame = {
+                let rx = app.world().resource::<crate::sensor_camera::SensorFrameReceiver>();
+                !rx.0.is_empty()
+            };
+            if has_frame || armed_frames >= 4 {
+                if let Some((request, stream)) = pending.take() {
+                    send_frame_response(&app, &request, stream);
+                }
+                disable_all_sensor_cameras(app.world_mut());
+                armed_frames = 0;
+            } else {
+                armed_frames += 1;
+            }
+            continue;
+        }
+
+        // Phase 2: check for new render requests via the UDS.
+        if pending.is_none() {
+            if let Some(req) = server.try_recv() {
+                enable_sensor_camera(app.world_mut(), &req.0.camera_name);
+                armed_frames = 1;
+                pending = Some(req);
+            }
+        }
+
+        if pending.is_none() {
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+fn send_frame_response(
+    app: &App,
+    request: &RenderRequest,
+    stream: std::os::unix::net::UnixStream,
+) {
+    let world = app.world();
+    let frame_rx = world.resource::<crate::sensor_camera::SensorFrameReceiver>();
+    if let Ok((camera_name, frame_bytes, _w, _h)) = frame_rx.0.try_recv() {
+        // Send frame bytes directly to the sim over UDS so it can write
+        // them to its local DB without going through TCP (which would
+        // deadlock the sim's stellarator runtime).
+        RenderBridgeServer::respond_with_frame(
+            stream,
+            &camera_name,
+            request.timestamp,
+            &frame_bytes,
+        );
+        // Also write to DB via TCP so the editor's sensor_view panels
+        // can display the frames.
+        if let Some(tx) = world.get_resource::<PacketTx>() {
+            let msg_id = types::msg_id(&camera_name);
+            let mut pkt =
+                LenPacket::msg_with_timestamp(msg_id, request.timestamp, frame_bytes.len());
+            pkt.extend_from_slice(&frame_bytes);
+            let _ = tx.0.try_send(Some(pkt));
+        }
+    } else {
+        RenderBridgeServer::respond_empty(stream);
+    }
+}
+
+fn enable_sensor_camera(world: &mut World, camera_name: &str) {
+    let target_index = {
+        let configs = world.resource::<SensorCameraConfigs>();
+        configs
+            .0
+            .iter()
+            .position(|c| c.camera_name == camera_name)
+    };
+    let Some(target_index) = target_index else {
+        tracing::warn!("render_camera: unknown camera '{camera_name}'");
+        return;
+    };
+
+    let mut query = world.query::<(&SensorCamera, &mut Camera)>();
+    for (sensor, mut camera) in query.iter_mut(world) {
+        camera.is_active = sensor.config_index == target_index;
+    }
+}
+
+fn disable_all_sensor_cameras(world: &mut World) {
+    let mut query = world.query::<(&SensorCamera, &mut Camera)>();
+    for (_, mut camera) in query.iter_mut(world) {
+        camera.is_active = false;
+    }
 }

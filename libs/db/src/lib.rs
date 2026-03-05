@@ -69,6 +69,7 @@ mod follow_stream;
 pub mod merge;
 pub mod msg_log;
 pub mod prune;
+pub mod render_bridge;
 pub mod time_align;
 pub(crate) mod time_series;
 pub mod trim;

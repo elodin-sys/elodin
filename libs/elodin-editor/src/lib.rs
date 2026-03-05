@@ -272,7 +272,9 @@ impl Plugin for EditorPlugin {
             .init_resource::<ui::data_overview::ComponentTimeRanges>()
             .add_plugins(bevy_mat3_material::Mat3MaterialPlugin)
             .add_plugins(object_3d::Object3DPlugin)
-            .add_plugins(sensor_camera::SensorCameraPlugin);
+            .init_resource::<sensor_camera::SensorCameraConfigs>()
+            .add_systems(PreUpdate, load_editor_sensor_configs)
+            .add_systems(Update, sensor_camera::patch_sensor_view_dims);
         if cfg!(target_os = "windows") || cfg!(target_os = "linux") {
             app.add_systems(Update, handle_drag_resize);
         }
@@ -1343,4 +1345,25 @@ pub fn set_eql_context_range(time_range: Res<SelectedTimeRange>, mut eql: ResMut
 
 pub fn dirs() -> directories::ProjectDirs {
     directories::ProjectDirs::from("systems", "elodin", "editor").unwrap()
+}
+
+/// Lightweight config loader for the editor — loads `SensorCameraConfigs`
+/// from DB metadata so that `sensor_view` panels can determine frame
+/// dimensions. The editor does not render sensor cameras itself.
+fn load_editor_sensor_configs(
+    db_config: Res<impeller2_wkt::DbConfig>,
+    mut configs: ResMut<sensor_camera::SensorCameraConfigs>,
+) {
+    if !configs.0.is_empty() {
+        return;
+    }
+    if let Some(json) = db_config.metadata.get("sensor_cameras") {
+        if let Ok(camera_configs) =
+            serde_json::from_str::<Vec<sensor_camera::SensorCameraConfig>>(json)
+        {
+            if !camera_configs.is_empty() {
+                configs.0 = camera_configs;
+            }
+        }
+    }
 }

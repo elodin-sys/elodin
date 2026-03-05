@@ -102,16 +102,37 @@ impl WorldBuilder {
             addr,
             optimize,
         };
-        let group = GroupRecipe {
+        let mut recipes: HashMap<String, ::s10::Recipe> = self
+            .recipes
+            .iter()
+            .map(|(n, r)| (n.clone(), r.clone()))
+            .chain(iter::once(("sim".to_string(), ::s10::Recipe::Sim(sim))))
+            .collect();
+
+        if !self.world.metadata.sensor_cameras.is_empty() {
+            recipes.insert(
+                "render-server".to_string(),
+                ::s10::Recipe::Process(::s10::ProcessRecipe {
+                    cmd: "elodin".to_string(),
+                    process_args: ::s10::ProcessArgs {
+                        args: vec![
+                            "render-server".to_string(),
+                            "--addr".to_string(),
+                            addr.to_string(),
+                        ],
+                        cwd: None,
+                        env: std::collections::HashMap::new(),
+                        restart_policy: ::s10::RestartPolicy::Never,
+                    },
+                    no_watch: true,
+                }),
+            );
+        }
+
+        ::s10::Recipe::Group(GroupRecipe {
             refs: vec![],
-            recipes: self
-                .recipes
-                .iter()
-                .map(|(n, r)| (n.clone(), r.clone()))
-                .chain(iter::once(("sim".to_string(), ::s10::Recipe::Sim(sim))))
-                .collect(),
-        };
-        ::s10::Recipe::Group(group)
+            recipes,
+        })
     }
 }
 
@@ -235,7 +256,6 @@ impl WorldBuilder {
         pos_offset = vec![0.0, 0.0, 0.0],
         look_at_offset = vec![0.0, 0.0, -1.0],
         format = "rgba",
-        fps = 60.0,
         effect = "normal",
         effect_params = None,
     ))]
@@ -251,7 +271,6 @@ impl WorldBuilder {
         pos_offset: Vec<f64>,
         look_at_offset: Vec<f64>,
         format: &str,
-        fps: f32,
         effect: &str,
         effect_params: Option<&Bound<'_, PyDict>>,
     ) -> Result<(), crate::error::Error> {
@@ -313,7 +332,6 @@ impl WorldBuilder {
                 pos_offset: pos_off,
                 look_at_offset: look_off,
                 format: format.to_string(),
-                fps,
                 effect: effect.to_string(),
                 effect_params: parsed_effect_params,
             });

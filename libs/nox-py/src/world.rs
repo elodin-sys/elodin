@@ -45,10 +45,6 @@ pub struct World {
     pub metadata: WorldMetadata,
 }
 
-fn default_fps() -> f32 {
-    60.0
-}
-
 fn default_format() -> String {
     "rgba".to_string()
 }
@@ -66,8 +62,6 @@ pub struct SensorCameraConfig {
     pub look_at_offset: [f64; 3],
     #[serde(default = "default_format")]
     pub format: String,
-    #[serde(default = "default_fps")]
-    pub fps: f32,
     #[serde(default)]
     pub effect: String,
     #[serde(default)]

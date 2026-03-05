@@ -94,6 +94,10 @@ arrow.features = ["canonical_extension_types"]
 # lua
 impeller2-cli.path = "../db/cli"
 
+# db (for render_bridge)
+elodin-db.path = "../db"
+elodin-db.default-features = false
+
 # channels
 flume = "0.11.1"
 crossbeam-channel = "0.5"

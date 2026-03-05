@@ -32,6 +32,13 @@ pub struct Args {
     pub replay: bool,
 }
 
+#[derive(clap::Args, Clone)]
+pub struct RenderServerArgs {
+    /// Address of the Elodin DB to connect to.
+    #[clap(long, default_value = "[::]:2240")]
+    pub addr: SocketAddr,
+}
+
 #[derive(Clone)]
 enum Simulator {
     None,
@@ -194,29 +201,27 @@ impl Cli {
         thread.join().map_err(|_| miette!("join error"))?
     }
 
-    /// Run a simulation with a headless Bevy renderer for sensor cameras.
-    ///
-    /// The headless Bevy app runs on the main thread (required on macOS),
-    /// while the simulation runs on a background thread -- the same pattern
-    /// as `editor()` but without a window or GUI.
+    /// Run a simulation in headless mode. The render-server (if sensor cameras
+    /// are configured) is started as a separate s10-managed process — see the
+    /// auto-registered recipe in `world_builder.rs`.
     #[cfg(not(target_os = "windows"))]
     pub fn run_headless(self, args: Args, rt: Runtime) -> miette::Result<()> {
         let cancel_token = CancelToken::new();
         let thread = self.run_sim(&args, rt, cancel_token.clone())?;
-
-        if let Simulator::File(_) = &args.sim {
-            let mut app = App::new();
-            app.add_plugins(elodin_editor::headless::HeadlessEditorPlugin);
-            app.add_plugins(impeller2_bevy::TcpImpellerPlugin::new(Some(
-                SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), 2240),
-            )));
-            app.insert_resource(BevyCancelToken(cancel_token.clone()));
-            app.add_systems(Update, check_cancel_token);
-            app.run();
-        }
-
+        let result = thread.join().map_err(|_| miette!("join error"))?;
         cancel_token.cancel();
-        thread.join().map_err(|_| miette!("join error"))?
+        result
+    }
+
+    /// Start the headless sensor camera render server. This is spawned as an
+    /// s10-managed child process — not called directly by users.
+    #[cfg(not(target_os = "windows"))]
+    pub fn render_server(self, args: RenderServerArgs) -> miette::Result<()> {
+        let mut app = App::new();
+        app.add_plugins(elodin_editor::headless::HeadlessEditorPlugin);
+        app.add_plugins(impeller2_bevy::TcpImpellerPlugin::new(Some(args.addr)));
+        app.run();
+        Ok(())
     }
 
     pub fn editor_app(&self) -> miette::Result<App> {

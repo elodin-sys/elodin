@@ -22,6 +22,9 @@ enum Commands {
     /// Run an Elodin simulation in headless mode
     #[cfg(not(target_os = "windows"))]
     Run(editor::Args),
+    /// Start the headless sensor camera render server (managed by s10)
+    #[cfg(not(target_os = "windows"))]
+    RenderServer(editor::RenderServerArgs),
 }
 
 impl Cli {
@@ -75,6 +78,8 @@ impl Cli {
             Some(Commands::Editor(args)) => self.clone().editor(args.clone(), rt),
             #[cfg(not(target_os = "windows"))]
             Some(Commands::Run(args)) => self.clone().run_headless(args.clone(), rt),
+            #[cfg(not(target_os = "windows"))]
+            Some(Commands::RenderServer(args)) => self.clone().render_server(args.clone()),
             None => self.clone().editor(editor::Args::default(), rt),
         }
     }

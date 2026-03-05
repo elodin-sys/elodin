@@ -5023,6 +5023,7 @@ dependencies = [
  "egui_material_icons",
  "egui_table",
  "egui_tiles",
+ "elodin-db",
  "eql",
  "fastrand 2.3.0",
  "flume",

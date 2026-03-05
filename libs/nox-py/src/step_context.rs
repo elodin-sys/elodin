@@ -4,6 +4,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
+use std::time::Duration;
 
 use elodin_db::DB;
 use impeller2::types::{ComponentId, PrimType, Timestamp};
@@ -398,6 +399,38 @@ impl StepContext {
         if let Some(token) = &self.recipe_cancel_token {
             token.cancel();
         }
+    }
+
+    /// Trigger the headless Bevy renderer to render a sensor camera and block
+    /// until the frame has been written to the database.
+    ///
+    /// After this call returns, `read_msg(camera_name)` is guaranteed to
+    /// contain the rendered frame at the current simulation timestamp.
+    ///
+    /// Args:
+    ///     camera_name: The sensor camera name in "entity.camera" format
+    ///                  (e.g., "drone.scene_cam")
+    ///
+    /// Raises:
+    ///     RuntimeError: If no render bridge is available (not running under
+    ///                   `elodin run` or `elodin editor`), if the bridge is
+    ///                   disconnected, or if the renderer does not respond
+    ///                   within 5 seconds.
+    fn render_camera(&self, camera_name: &str) -> Result<(), Error> {
+        let timestamp = Timestamp(self.timestamp.load(Ordering::SeqCst));
+        let frame = elodin_db::render_bridge::render_camera_blocking(
+            camera_name,
+            timestamp,
+            Duration::from_secs(10),
+        )
+        .map_err(|e| Error::PyO3(pyo3::exceptions::PyRuntimeError::new_err(e)))?;
+
+        // Write the frame to the local DB so that read_msg() can find it.
+        if let Some(frame) = frame {
+            let msg_id = impeller2::types::msg_id(&frame.camera_name);
+            self.db.push_msg(frame.timestamp, msg_id, &frame.data)?;
+        }
+        Ok(())
     }
 
     /// Perform multiple component reads and writes in a single DB operation.

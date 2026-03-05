@@ -4,11 +4,12 @@ Sensor Camera Test — Bouncing Balls Room
 
 Multiple balls bounce around inside a walled room under gravity.
 Two special balls carry sensor cameras:
-  - Cyan ball:    RGB camera  (60 fps)
-  - Magenta ball: Thermal camera (30 fps)
+  - Cyan ball:    RGB camera  (rendered every 2nd tick via post_step)
+  - Magenta ball: Thermal camera (rendered every 4th tick via post_step)
 
 The cameras look downward from above their host ball, capturing
-the room floor and other balls as they move.
+the room floor and other balls as they move. Rendering is explicitly
+controlled via ctx.render_camera() in the post_step callback.
 
 Usage:
     elodin editor examples/sensor-camera-test/main.py
@@ -118,7 +119,6 @@ world.sensor_camera(
     pos_offset=[0.0, 0.0, 0.5],
     look_at_offset=[6.0, 6.0, 0.0],
     format="rgba",
-    fps=60.0,
 )
 
 world.sensor_camera(
@@ -130,7 +130,6 @@ world.sensor_camera(
     pos_offset=[0.0, 0.0, 0.5],
     look_at_offset=[-6.0, -6.0, 0.0],
     format="rgba",
-    fps=30.0,
     effect="thermal",
     effect_params={"contrast": 1.5, "noise_sigma": 0.02},
 )
@@ -180,31 +179,38 @@ thermal_frames = [0]
 
 
 def post_step(tick, ctx):
-    try:
-        frame = ctx.read_msg("cam_ball_a.scene_cam")
-        if frame is not None and len(frame) > 0:
-            rgb_frames[0] += 1
-            if rgb_frames[0] == 1:
-                arr = np.array(frame)
-                print(
-                    f"[RGB] First frame at tick {tick}: {len(frame)} bytes, "
-                    f"nonzero={np.count_nonzero(arr)}"
-                )
-    except Exception:
-        pass
+    # Render every 2nd tick for RGB (~60 fps at 120 Hz sim), every 4th for thermal (~30 fps)
+    if tick % 2 == 0:
+        try:
+            ctx.render_camera("cam_ball_a.scene_cam")
+            frame = ctx.read_msg("cam_ball_a.scene_cam")
+            if frame is not None and len(frame) > 0:
+                rgb_frames[0] += 1
+                if rgb_frames[0] == 1:
+                    arr = np.array(frame)
+                    print(
+                        f"[RGB] First frame at tick {tick}: {len(frame)} bytes, "
+                        f"nonzero={np.count_nonzero(arr)}"
+                    )
+        except Exception as e:
+            if tick > 10 and rgb_frames[0] == 0:
+                print(f"[RGB] tick {tick}: {e}")
 
-    try:
-        frame = ctx.read_msg("cam_ball_b.thermal_cam")
-        if frame is not None and len(frame) > 0:
-            thermal_frames[0] += 1
-            if thermal_frames[0] == 1:
-                arr = np.array(frame)
-                print(
-                    f"[THERMAL] First frame at tick {tick}: {len(frame)} bytes, "
-                    f"nonzero={np.count_nonzero(arr)}"
-                )
-    except Exception:
-        pass
+    if tick % 4 == 0:
+        try:
+            ctx.render_camera("cam_ball_b.thermal_cam")
+            frame = ctx.read_msg("cam_ball_b.thermal_cam")
+            if frame is not None and len(frame) > 0:
+                thermal_frames[0] += 1
+                if thermal_frames[0] == 1:
+                    arr = np.array(frame)
+                    print(
+                        f"[THERMAL] First frame at tick {tick}: {len(frame)} bytes, "
+                        f"nonzero={np.count_nonzero(arr)}"
+                    )
+        except Exception as e:
+            if tick > 10 and thermal_frames[0] == 0:
+                print(f"[THERMAL] tick {tick}: {e}")
 
     if tick > 0 and tick % 600 == 0:
         print(f"  tick {tick}: rgb={rgb_frames[0]} thermal={thermal_frames[0]} frames")

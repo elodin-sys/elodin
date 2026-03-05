@@ -1,5 +1,5 @@
 use bevy::{
-    app::{App, Plugin, PostUpdate},
+    app::{App, Plugin},
     asset::{Assets, embedded_asset},
     camera::RenderTarget,
     core_pipeline::{
@@ -32,9 +32,8 @@ use bevy::{
     },
 };
 use big_space::GridCell;
-use impeller2::types::{self, ComponentId, LenPacket, Timestamp};
-use impeller2_bevy::{EntityMap, PacketTx};
-use impeller2_wkt::{ComponentValue, DbConfig, LastUpdated};
+use impeller2::types::ComponentId;
+use impeller2_wkt::{DbConfig, LastUpdated};
 use serde::{Deserialize, Serialize};
 
 use crate::object_3d::ComponentArrayExt;
@@ -42,10 +41,6 @@ use crate::object_3d::ComponentArrayExt;
 // ---------------------------------------------------------------------------
 // Config types
 // ---------------------------------------------------------------------------
-
-fn default_fps() -> f32 {
-    60.0
-}
 
 fn default_format() -> String {
     "rgba".to_string()
@@ -64,8 +59,6 @@ pub struct SensorCameraConfig {
     pub look_at_offset: [f64; 3],
     #[serde(default = "default_format")]
     pub format: String,
-    #[serde(default = "default_fps")]
-    pub fps: f32,
     #[serde(default)]
     pub effect: String,
     #[serde(default)]
@@ -108,19 +101,13 @@ struct ImageCopier {
 struct ImageCopiers(pub Vec<ImageCopier>);
 
 #[derive(Resource)]
-struct SensorFrameReceiver(flume::Receiver<(String, Vec<u8>, u32, u32)>);
+pub struct SensorFrameReceiver(pub flume::Receiver<(String, Vec<u8>, u32, u32)>);
 
 #[derive(Resource, Clone)]
 struct SensorFrameSender(flume::Sender<(String, Vec<u8>, u32, u32)>);
 
 #[derive(Resource, Default)]
 struct SensorCamerasSpawned(bool);
-
-/// Tracks the last simulation timestamp at which each camera produced a frame,
-/// keyed by camera name. Used by `throttle_sensor_cameras` to enforce per-camera
-/// frame rate limits in simulation time.
-#[derive(Resource, Default)]
-struct SensorCameraFrameTracker(std::collections::HashMap<String, Timestamp>);
 
 // ---------------------------------------------------------------------------
 // Post-process render graph
@@ -260,7 +247,6 @@ impl Plugin for SensorCameraPlugin {
 
         app.init_resource::<SensorCameraConfigs>()
             .init_resource::<SensorCamerasSpawned>()
-            .init_resource::<SensorCameraFrameTracker>()
             .insert_resource(SensorFrameReceiver(rx))
             .add_plugins((
                 ExtractComponentPlugin::<SensorEffectSettings>::default(),
@@ -275,13 +261,8 @@ impl Plugin for SensorCameraPlugin {
                 PreUpdate,
                 update_sensor_camera_transforms.after(crate::PositionSync),
             )
-            .add_systems(
-                PreUpdate,
-                throttle_sensor_cameras.after(update_sensor_camera_transforms),
-            )
             .add_systems(Update, tick_effect_time)
-            .add_systems(Update, patch_sensor_view_dims)
-            .add_systems(PostUpdate, write_sensor_frames);
+            .add_systems(Update, patch_sensor_view_dims);
 
         if let Some(render_app) = app.get_sub_app_mut(RenderApp) {
             render_app
@@ -410,7 +391,7 @@ fn spawn_sensor_cameras(
             Camera {
                 target: RenderTarget::Image(render_target_handle.into()),
                 order: -(10 + i as isize),
-                is_active: true,
+                is_active: false,
                 ..default()
             },
             Projection::Perspective(perspective),
@@ -451,19 +432,17 @@ fn tick_effect_time(time: Res<Time>, mut query: Query<&mut SensorEffectSettings>
 fn update_sensor_camera_transforms(
     configs: Res<SensorCameraConfigs>,
     mut sensor_cameras: Query<(&SensorCamera, &mut Transform)>,
-    entity_map: Res<EntityMap>,
-    values: Query<&ComponentValue>,
+    cache: Res<impeller2_bevy::TelemetryCache>,
+    last_updated: Res<LastUpdated>,
 ) {
+    let ts = last_updated.0;
     for (sensor_cam, mut transform) in &mut sensor_cameras {
         let Some(config) = configs.0.get(sensor_cam.config_index) else {
             continue;
         };
 
         let world_pos_id = ComponentId::new(&format!("{}.world_pos", config.entity_name));
-        let Some(&bevy_entity) = entity_map.get(&world_pos_id) else {
-            continue;
-        };
-        let Ok(value) = values.get(bevy_entity) else {
+        let Some(value) = cache.get_at_or_before(&world_pos_id, ts) else {
             continue;
         };
 
@@ -622,7 +601,7 @@ fn receive_image_from_buffer(
 
 /// The sensor_view panels may be spawned before SensorCameraConfigs are loaded
 /// from the DB. This system patches their `raw_rgba_dims` once configs arrive.
-fn patch_sensor_view_dims(
+pub fn patch_sensor_view_dims(
     configs: Res<SensorCameraConfigs>,
     mut streams: Query<&mut crate::ui::video_stream::VideoStream>,
 ) {
@@ -639,55 +618,3 @@ fn patch_sensor_view_dims(
     }
 }
 
-// ---------------------------------------------------------------------------
-// Frame rate throttling
-// ---------------------------------------------------------------------------
-
-/// Activates or deactivates each sensor camera based on whether enough
-/// simulation time has elapsed since its last frame. This prevents rendering
-/// frames more often than the configured `fps` and saves GPU work.
-fn throttle_sensor_cameras(
-    last_updated: Res<LastUpdated>,
-    configs: Res<SensorCameraConfigs>,
-    tracker: Res<SensorCameraFrameTracker>,
-    mut cameras: Query<(&SensorCamera, &mut Camera)>,
-) {
-    for (sensor, mut camera) in cameras.iter_mut() {
-        let Some(config) = configs.0.get(sensor.config_index) else {
-            continue;
-        };
-        let interval_micros = (1_000_000.0 / config.fps as f64) as i64;
-        let last = tracker
-            .0
-            .get(&config.camera_name)
-            .copied()
-            .unwrap_or(Timestamp(i64::MIN));
-        camera.is_active = (last_updated.0 .0 - last.0) >= interval_micros;
-    }
-}
-
-// ---------------------------------------------------------------------------
-// DB write-back
-// ---------------------------------------------------------------------------
-
-fn write_sensor_frames(
-    receiver: Res<SensorFrameReceiver>,
-    packet_tx: Option<Res<PacketTx>>,
-    last_updated: Res<LastUpdated>,
-    mut tracker: ResMut<SensorCameraFrameTracker>,
-) {
-    let Some(packet_tx) = packet_tx else {
-        return;
-    };
-
-    while let Ok((camera_name, frame_bytes, _width, _height)) = receiver.0.try_recv() {
-        let msg_id = types::msg_id(&camera_name);
-        let timestamp = last_updated.0;
-
-        let mut pkt = LenPacket::msg_with_timestamp(msg_id, timestamp, frame_bytes.len());
-        pkt.extend_from_slice(&frame_bytes);
-
-        let _ = packet_tx.0.try_send(Some(pkt));
-        tracker.0.insert(camera_name, timestamp);
-    }
-}
