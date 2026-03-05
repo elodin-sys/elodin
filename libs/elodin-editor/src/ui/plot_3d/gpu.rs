@@ -1,11 +1,12 @@
 use std::mem;
 
 use crate::{
-    SelectedTimeRange,
+    MainCamera, SelectedTimeRange,
     ui::plot::{
         Line,
         gpu::{INDEX_BUFFER_LEN, INDEX_BUFFER_SIZE, LineHandle, VALUE_BUFFER_SIZE},
     },
+    ui::tiles::{ViewportConfig, default_playback_accent_color},
 };
 use bevy::camera::visibility::RenderLayers;
 use bevy::shader::Shader;
@@ -21,7 +22,7 @@ use bevy::{
         bundle::Bundle,
         component::Component,
         entity::{ContainsEntity, Entity},
-        query::Has,
+        query::{Has, With},
         schedule::{IntoScheduleConfigs, SystemSet},
         system::{
             Commands, Query, Res, ResMut, SystemState,
@@ -57,7 +58,6 @@ use binding_types::storage_buffer_read_only_sized;
 use impeller2_wkt::CurrentTimestamp;
 
 const LINE_SHADER_HANDLE: Handle<Shader> = uuid_handle!("bfffa3c4-9401-4b6e-b3ab-3564180352f1");
-const PLAYED_TRAIL_COLOR: Color = crate::ui::colors::bevy::GREEN;
 const FUTURE_TRAIL_COLOR: Color = Color::WHITE;
 const FUTURE_TRAIL_ALPHA: f32 = 0.35;
 
@@ -410,6 +410,7 @@ struct CachedSystemState {
         Commands<'static, 'static>,
         Res<'static, SelectedTimeRange>,
         Res<'static, CurrentTimestamp>,
+        Query<'static, 'static, &'static ViewportConfig, With<MainCamera>>,
     )>,
 }
 
@@ -438,11 +439,28 @@ fn extract_lines(
     index_layout: Res<LineIndexLayout>,
 ) {
     main_world.resource_scope(|world, mut cached_state: Mut<CachedSystemState>| {
-        let (mut lines, mut line_assets, mut _main_commands, selected_time_range, current_timestamp) =
-            cached_state.state.get_mut(world);
+        let (
+            mut lines,
+            mut line_assets,
+            mut _main_commands,
+            selected_time_range,
+            current_timestamp,
+            viewport_configs,
+        ) = cached_state.state.get_mut(world);
         let selected_range = selected_time_range.0.clone();
-        let played_trail_color = Vec4::from_array(PLAYED_TRAIL_COLOR.to_linear().to_f32_array());
-        let mut future_trail_color = Vec4::from_array(FUTURE_TRAIL_COLOR.to_linear().to_f32_array());
+        let accent_color = viewport_configs
+            .iter()
+            .next()
+            .map(|config| config.playback_accent_color)
+            .unwrap_or_else(default_playback_accent_color);
+        let played_trail_color = Vec4::new(
+            accent_color.r,
+            accent_color.g,
+            accent_color.b,
+            accent_color.a,
+        );
+        let mut future_trail_color =
+            Vec4::from_array(FUTURE_TRAIL_COLOR.to_linear().to_f32_array());
         future_trail_color.w *= FUTURE_TRAIL_ALPHA;
 
         let played_range = selected_range.start..selected_range.end.min(current_timestamp.0);
@@ -484,12 +502,14 @@ fn extract_lines(
                     return None;
                 }
                 let index_buffers = ['x', 'y', 'z'].map(|axis| {
-                    render_device.create_buffer(&(BufferDescriptor {
-                        label: Some(&format!("Line {} Index Buffer", axis)),
-                        size: (INDEX_BUFFER_LEN * size_of::<u32>()) as u64,
-                        usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
-                        mapped_at_creation: false,
-                    }))
+                    render_device.create_buffer(
+                        &(BufferDescriptor {
+                            label: Some(&format!("Line {} Index Buffer", axis)),
+                            size: (INDEX_BUFFER_LEN * size_of::<u32>()) as u64,
+                            usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
+                            mapped_at_creation: false,
+                        }),
+                    )
                 });
                 let entries = [0, 1, 2].map(|i| BindGroupEntry {
                     binding: i as u32,

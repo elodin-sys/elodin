@@ -1,10 +1,10 @@
 use bevy::{
     ecs::{
         change_detection::DetectChangesMut,
-        system::{ResMut, SystemParam, SystemState},
+        system::{Query, ResMut, SystemParam, SystemState},
         world::World,
     },
-    prelude::{Deref, DerefMut, Res, Resource},
+    prelude::{Deref, DerefMut, Res, Resource, With},
 };
 use bevy_egui::egui;
 use egui::{CornerRadius, Margin};
@@ -13,8 +13,10 @@ use impeller2_bevy::CurrentStreamId;
 use impeller2_wkt::{CurrentTimestamp, EarliestTimestamp};
 use std::ops::RangeInclusive;
 
+use crate::MainCamera;
 use crate::ui::{
-    colors::{ColorExt, get_scheme},
+    colors::{ColorExt, EColor, get_scheme},
+    tiles::{ViewportConfig, default_playback_accent_color},
     time_label::PrettyDuration,
     utils::{MarginSides, Shrink4},
     widgets::WidgetSystem,
@@ -115,6 +117,11 @@ impl<'a> Timeline<'a> {
 
     pub fn handle_aspect_ratio(mut self, handle_aspect_ratio: f32) -> Self {
         self.handle_aspect_ratio = handle_aspect_ratio;
+        self
+    }
+
+    pub fn handle_image_tint(mut self, handle_image_tint: egui::Color32) -> Self {
+        self.handle_image_tint = handle_image_tint;
         self
     }
 
@@ -385,16 +392,17 @@ impl egui::Widget for Timeline<'_> {
 pub struct UITick(pub i64);
 
 #[derive(SystemParam)]
-pub struct TimelineSlider<'w> {
+pub struct TimelineSlider<'w, 's> {
     tick: ResMut<'w, UITick>,
     current_timestamp: ResMut<'w, CurrentTimestamp>,
     current_stream_id: Res<'w, CurrentStreamId>,
     tick_origin: ResMut<'w, StreamTickOrigin>,
     earliest_timestamp: Res<'w, EarliestTimestamp>,
     latest_follow: ResMut<'w, LatestFollow>,
+    viewport_configs: Query<'w, 's, &'static ViewportConfig, With<MainCamera>>,
 }
 
-impl WidgetSystem for TimelineSlider<'_> {
+impl WidgetSystem for TimelineSlider<'_, '_> {
     type Args = (TimelineIcons, TimelineArgs);
     type Output = ();
 
@@ -411,12 +419,18 @@ impl WidgetSystem for TimelineSlider<'_> {
             mut tick_origin,
             earliest_timestamp,
             mut latest_follow,
+            viewport_configs,
         } = state.get_mut(world);
 
         tick_origin.observe_stream(**current_stream_id);
 
         let (icons, timeline_args) = args;
         let handle_icon = icons.handle;
+        let accent_color = viewport_configs
+            .iter()
+            .next()
+            .map(|config| config.playback_accent_color.into_color32())
+            .unwrap_or_else(|| default_playback_accent_color().into_color32());
 
         ui.horizontal(|ui| {
             let response = ui
@@ -428,6 +442,7 @@ impl WidgetSystem for TimelineSlider<'_> {
                     .width(timeline_args.available_width)
                     .height(timeline_args.line_height)
                     .handle_image_id(handle_icon)
+                    .handle_image_tint(accent_color)
                     .handle_aspect_ratio(12.0 / 30.0)
                     .segments(timeline_args.segment_count)
                     .fps(timeline_args.frames_per_second)

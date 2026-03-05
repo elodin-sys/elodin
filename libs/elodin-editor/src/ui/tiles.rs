@@ -111,6 +111,10 @@ pub fn default_projection_color() -> impeller2_wkt::Color {
     impeller2_wkt::Color::WHITE
 }
 
+pub fn default_playback_accent_color() -> impeller2_wkt::Color {
+    impeller2_wkt::Color::from_color32(Color32::from_bevy(colors::bevy::GREEN))
+}
+
 #[derive(Component)]
 pub struct ViewportConfig {
     pub aspect: Option<f32>,
@@ -121,6 +125,7 @@ pub struct ViewportConfig {
     pub show_coverage_in_viewport: bool,
     /// Display 2D projection of frustum∩ellipsoid on far plane.
     pub show_projection_2d: bool,
+    pub playback_accent_color: impeller2_wkt::Color,
     pub projection_color: impeller2_wkt::Color,
     pub frustums_color: impeller2_wkt::Color,
     pub frustums_thickness: f32,
@@ -1462,6 +1467,7 @@ impl ViewportPane {
                 show_frustums: viewport.show_frustums,
                 show_coverage_in_viewport: viewport.show_frustums,
                 show_projection_2d: viewport.show_frustums,
+                playback_accent_color: default_playback_accent_color(),
                 projection_color: default_projection_color(),
                 frustums_color: viewport.frustums_color,
                 frustums_thickness: viewport.frustums_thickness,
