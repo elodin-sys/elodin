@@ -73,7 +73,11 @@
         devShells = with shells; {
           inherit elodin;
           default = shells.elodin;
+          sitl = pkgs.callPackage ./nix/sitl.nix { 
+            elodin-sim = elodin-sim.packages.${system};
+          };
         };
+
 
         formatter = pkgs.alejandra;
       }
