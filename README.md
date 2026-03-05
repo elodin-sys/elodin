@@ -82,9 +82,7 @@ elodin editor
 # In a new terminal
 nix develop
 # build the SDK python wheel
-uv venv --python 3.13 && \
-source .venv/bin/activate && \
-uvx maturin develop --uv --manifest-path=libs/nox-py/Cargo.toml
+install-elodin py
 # use the newly built wheel
 python3 examples/rocket/main.py run
 ```

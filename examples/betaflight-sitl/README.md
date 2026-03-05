@@ -35,9 +35,7 @@ The simulation provides:
 
 2. Python virtual environment with Elodin:
    ```bash
-   uv venv --python 3.13
-   source .venv/bin/activate
-   uvx maturin develop --uv --manifest-path=libs/nox-py/Cargo.toml
+   install-elodin
    ```
 
 3. Betaflight submodule (from repo root):
