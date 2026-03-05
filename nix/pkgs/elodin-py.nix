@@ -10,7 +10,7 @@
   # Import shared configuration
   common = pkgs.callPackage ./common.nix {};
   iree_runtime = pkgs.callPackage ./iree-runtime.nix {};
-  iree_compiler = pkgs.callPackage ./iree-compiler.nix {};
+  iree_compiler = pkgs.callPackage ./iree-compiler.nix {python3 = python;};
   # Direct Rust build using rustPlatform.buildRustPackage
 
   # Extract pname and version directly from Cargo.toml files

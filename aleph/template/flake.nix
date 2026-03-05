@@ -61,7 +61,7 @@
         aleph.overlays.default
       ];
 
-      system.stateVersion = "25.05";
+      system.stateVersion = "25.11";
 
       i18n.supportedLocales = [(config.i18n.defaultLocale + "/UTF-8")];
 

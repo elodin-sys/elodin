@@ -1,5 +1,11 @@
 use bevy::window::{CompositeAlphaMode, PresentMode, Window, WindowTheme};
 
+#[cfg(feature = "tracy")]
+pub const fn default_present_mode() -> PresentMode {
+    PresentMode::AutoNoVsync
+}
+
+#[cfg(not(feature = "tracy"))]
 pub const fn default_present_mode() -> PresentMode {
     PresentMode::Fifo
 }

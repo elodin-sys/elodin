@@ -20,6 +20,9 @@ git clone git@github.com:elodin-sys/elodin.git && cd elodin
 nix develop
 install-elodin
 
+# Set up Python environment
+uv pip install -r examples/rocket-barrowman/requirements.txt
+
 # Run the Streamlit web interface
 examples/rocket-barrowman/run_streamlit.sh
 

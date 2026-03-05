@@ -163,7 +163,7 @@ unsafe impl<const N: usize> IoBuf for &'static [u8; N] {
 /// A slice of an [`IoBuf`]
 ///
 /// IoBuf requires ownership of buffers, so `Slice` allows a user
-/// to slice an `IoBuf` without loosing
+/// to slice an `IoBuf` without losing
 #[derive(Clone)]
 pub struct Slice<T: IoBuf> {
     inner: T,

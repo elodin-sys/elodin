@@ -119,7 +119,7 @@ just install
 
 ### Python Development (Local Setup)
 ```sh
-uv venv --python 3.12
+uv venv --python 3.13
 source .venv/bin/activate
 uvx maturin develop --uv --manifest-path=libs/nox-py/Cargo.toml
 

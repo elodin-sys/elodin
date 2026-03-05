@@ -6,7 +6,7 @@
     ];
   };
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.05";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.11";
     systems.url = "github:nix-systems/default";
     rust-overlay = {
       url = "github:oxalica/rust-overlay";
@@ -33,8 +33,8 @@
       elodin = rec {
         elodin-py = final.callPackage ./nix/pkgs/elodin-py.nix {
           inherit rustToolchain;
-          python = final.python312Full;
-          pythonPackages = final.python312Packages;
+          python = final.python313;
+          pythonPackages = final.python313Packages;
         };
         elodin-cli = final.callPackage ./nix/pkgs/elodin-cli.nix {
           inherit rustToolchain;
@@ -72,7 +72,6 @@
 
         devShells = with shells; {
           inherit elodin;
-          profiling = shells.elodin-profiling;
           default = shells.elodin;
         };
 

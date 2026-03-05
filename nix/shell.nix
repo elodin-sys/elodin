@@ -11,7 +11,7 @@ with pkgs; let
   llvm = llvmPackages_latest;
 
   # Base Python for use with venv (JAX 0.8+ and iree-base-compiler installed via pip)
-  pythonBase = python3.withPackages (ps:
+  pythonBase = python313.withPackages (ps:
     with ps; [
       typing-extensions
       pytest
@@ -53,7 +53,6 @@ with pkgs; let
         buildkite-test-collector-rust
         (rustToolchain pkgs)
         cargo-nextest
-        # Base Python; JAX and IREE installed via pip venv
         pythonBase
         clang
         maturin
@@ -95,6 +94,9 @@ with pkgs; let
         typos
         zola
         rav1e
+
+        # Tracy profiler
+        tracy
       ]
       ++ common.commonNativeBuildInputs
       ++ common.commonBuildInputs
@@ -121,8 +123,7 @@ with pkgs; let
       );
 
     nativeBuildInputs = with pkgs; (
-      lib.optionals pkgs.stdenv.isLinux [autoPatchelfHook]
-      ++ lib.optionals pkgs.stdenv.isDarwin [fixDarwinDylibNames]
+      lib.optionals pkgs.stdenv.isDarwin [fixDarwinDylibNames]
     );
 
     # Environment variables
@@ -213,30 +214,4 @@ with pkgs; let
 in {
   # Unified shell that combines all development environments
   elodin = mkShell (shellAttrs // linuxShellAttrs);
-
-  # Profiling shell adds Tracy GUI without duplicating the base shell definition
-  elodin-profiling = mkShell (
-    (shellAttrs
-      // {
-        name = "elo-profiling-shell";
-        buildInputs = shellAttrs.buildInputs ++ [tracy];
-        shellHook =
-          lib.replaceStrings
-          [
-            "# HOOK"
-          ]
-          [
-            ''
-              echo "Profiling shell:"
-              echo "  • Tracy GUI is available by running 'tracy'"
-              echo "  • Run Elodin with: RUST_LOG=info cargo run --release -p elodin --features tracy"
-              echo ""
-
-              # HOOK
-            ''
-          ]
-          shellAttrs.shellHook;
-      })
-    // linuxShellAttrs
-  );
 }

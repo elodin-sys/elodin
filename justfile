@@ -89,7 +89,7 @@ install:
   [ -n "$DRY_RUN" ] && echo "DRY_RUN enabled."
   echo "🚧 Installing elodin and elodin-db to ~/.nix-profile/bin"
   sh -v ${DRY_RUN:+-n} <<EOF
-    cargo build --release --package elodin --package elodin-db
+    cargo build --release --package elodin --package elodin-db --features tracy
     mkdir -p ~/.nix-profile/bin 2>/dev/null || true
     cp target/release/elodin target/release/elodin-db ~/.nix-profile/bin
   EOF
