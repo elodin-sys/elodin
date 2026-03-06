@@ -31,9 +31,9 @@ fn main() {
     let python = which::which("python3").unwrap();
     println!("cargo:rerun-if-changed={}", python.display());
 
-    let python_lib = std::path::PathBuf::from(
-        run_python_command("import sysconfig; print(sysconfig.get_config_var('LIBDIR'))"),
-    );
+    let python_lib = std::path::PathBuf::from(run_python_command(
+        "import sysconfig; print(sysconfig.get_config_var('LIBDIR'))",
+    ));
 
     let shared_lib_extension = if cfg!(target_os = "macos") {
         "dylib"
