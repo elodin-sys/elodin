@@ -84,12 +84,19 @@ public-changelog:
     fi
   EOF
 
-install:
+install target="all":
   #!/usr/bin/env sh
-  [ -n "$DRY_RUN" ] && echo "DRY_RUN enabled."
-  echo "🚧 Installing elodin and elodin-db to ~/.nix-profile/bin"
-  sh -v ${DRY_RUN:+-n} <<EOF
-    cargo build --release --package elodin --package elodin-db
-    mkdir -p ~/.nix-profile/bin 2>/dev/null || true
-    cp target/release/elodin target/release/elodin-db ~/.nix-profile/bin
-  EOF
+  set -e
+  case "{{target}}" in
+    py)
+      uv venv --python 3.13 --clear
+      . .venv/bin/activate
+      uvx maturin develop --uv --manifest-path=libs/nox-py/Cargo.toml
+      ;;
+    editor) cargo install --path apps/elodin --locked;;
+    db) cargo install --path libs/db --locked;;
+    all) just install py && just install db && just install editor;;
+    *)
+      echo "usage: just install [py|editor|db|all]" >&2
+      exit 1;;
+  esac

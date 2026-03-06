@@ -82,7 +82,7 @@ elodin editor
 # In a new terminal
 nix develop
 # build the SDK python wheel
-install-elodin py
+just install py
 # use the newly built wheel
 python3 examples/rocket/main.py run
 ```
