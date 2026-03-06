@@ -13,7 +13,7 @@ fn default_true() -> bool {
 }
 
 pub fn default_timeline_accent_color() -> Color {
-    Color::YOLK
+    Color::YELLOW
 }
 
 pub fn default_timeline_future_trail_color() -> Color {

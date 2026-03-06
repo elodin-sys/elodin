@@ -27,9 +27,9 @@ order = 6
 
 ### timeline
 - Optional top-level node that configures playback globally for the editor session.
-- `accent_color`: named color or tuple string, default `yolk`. Used by the timeline scrubber, the LIVE badge, and the played segment of 3D trails.
-- `future_trail_color`: named color or tuple string, default `white`. Used by the 3D trail segment that lies ahead of the current playback position.
-- `follow_latest_if_streaming`: bool, default `false`. When enabled, the editor switches to LIVE automatically only after the connected stream proves that it is still advancing. Recorded or static databases keep the default start-from-beginning playback behavior.
+- `accent_color`: named color or tuple string, default `yellow`. Used by the LIVE badge, the timeline playhead cursor, and the played segment of 3D trails.
+- `future_trail_color`: named color or tuple string, default `white`. Used by the timeline latest/end cursor and the 3D trail segment that lies ahead of the current playback position.
+- `follow_latest_if_streaming`: bool, default `#false`. When omitted, the editor keeps the default start-from-beginning playback behavior. Set it to `#true` to switch to LIVE automatically once the connected stream proves that it is still advancing.
 - Applies to the primary schematic only; secondary schematic files do not override the global timeline behavior.
 - These settings are also editable from the Timeline inspector, opened with the gear button in the timeline bar.
 
@@ -142,6 +142,8 @@ timeline = "timeline"
          [accent_color=color_name_or_tuple]
          [future_trail_color=color_name_or_tuple]
          [follow_latest_if_streaming=bool]
+
+When omitted, `follow_latest_if_streaming` defaults to `#false`.
 
 window = "window"
        [path|file|name=string]
