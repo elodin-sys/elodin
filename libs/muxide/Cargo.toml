@@ -52,6 +52,9 @@ categories = [
 license = "MIT"
 repository.workspace = true
 
+[package.metadata.dist]
+dist = false
+
 [lib]
 name = "muxide"
 path = "src/lib.rs"

@@ -807,6 +807,7 @@ mod tests {
     use super::*;
     use impeller2::types::ComponentId;
     use impeller2_wkt::ComponentMetadata;
+    use serial_test::serial;
     use std::collections::HashMap;
     use tempfile::TempDir;
 
@@ -953,6 +954,7 @@ mod tests {
 
     // --from-start 3M: remove first 3s, keep data >= 3M → [3M,4M,5M]
     #[test]
+    #[serial]
     fn test_trim_before_only() {
         let temp = TempDir::new().unwrap();
         let db_path = temp.path().join("db");
@@ -991,6 +993,7 @@ mod tests {
     // --from-end 2M: remove last 2 seconds from end.
     // Data [1M..5M] with end=5M → keep <= 5M-2M = 3M → [1M, 2M, 3M]
     #[test]
+    #[serial]
     fn test_trim_after_only() {
         let temp = TempDir::new().unwrap();
         let db_path = temp.path().join("db");
@@ -1026,6 +1029,7 @@ mod tests {
     // --from-start 2M --from-end 1M: trim 2s from start and 1s from end.
     // Data [1M..5M], start=0, end=5M → keep [0+2M, 5M-1M] = [2M, 4M]
     #[test]
+    #[serial]
     fn test_trim_both() {
         let temp = TempDir::new().unwrap();
         let db_path = temp.path().join("db");
@@ -1059,6 +1063,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_trim_in_place() {
         let temp = TempDir::new().unwrap();
         let db_path = temp.path().join("db");
@@ -1091,6 +1096,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_trim_msg_logs() {
         let temp = TempDir::new().unwrap();
         let db_path = temp.path().join("db");
@@ -1127,6 +1133,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_trim_updates_db_state() {
         let temp = TempDir::new().unwrap();
         let db_path = temp.path().join("db");
@@ -1159,6 +1166,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_trim_dry_run() {
         let temp = TempDir::new().unwrap();
         let db_path = temp.path().join("db");
@@ -1180,6 +1188,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_trim_no_bounds_error() {
         let temp = TempDir::new().unwrap();
         let db_path = temp.path().join("db");
@@ -1192,6 +1201,7 @@ mod tests {
 
     // Trim amounts that exceed the recording duration should error
     #[test]
+    #[serial]
     fn test_trim_exceeds_duration_error() {
         let temp = TempDir::new().unwrap();
         let db_path = temp.path().join("db");
@@ -1214,6 +1224,7 @@ mod tests {
 
     // --from-start with non-zero base: remove first 2s of a recording starting at 100s
     #[test]
+    #[serial]
     fn test_trim_before_relative_to_recording_start() {
         let temp = TempDir::new().unwrap();
         let db_path = temp.path().join("db");
@@ -1265,6 +1276,7 @@ mod tests {
     // --from-end with non-zero base: remove last 2s from a recording starting at 100s
     // Data: base..base+5M, end = base+5M → keep <= (base+5M) - 2M = base+3M
     #[test]
+    #[serial]
     fn test_trim_after_relative_to_recording_end() {
         let temp = TempDir::new().unwrap();
         let db_path = temp.path().join("db");
@@ -1317,6 +1329,7 @@ mod tests {
     // --from-end with a value exceeding the recording duration should produce
     // an empty database (not incorrectly keep the first data point).
     #[test]
+    #[serial]
     fn test_trim_from_end_exceeds_duration_gives_empty() {
         let temp = TempDir::new().unwrap();
         let db_path = temp.path().join("db");
