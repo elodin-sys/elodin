@@ -855,14 +855,11 @@ impl LoadSchematicParams<'_, '_> {
                 tile_state.insert_tile(Tile::Pane(Pane::VideoStream(pane)), parent_id, false)
             }
             Panel::SensorView(sensor_view) => {
-                let msg_id =
-                    impeller2::types::msg_id(&sensor_view.msg_name);
+                let msg_id = impeller2::types::msg_id(&sensor_view.msg_name);
                 let label = sensor_view
                     .name
                     .clone()
-                    .unwrap_or_else(|| {
-                        format!("Sensor View {}", sensor_view.msg_name)
-                    });
+                    .unwrap_or_else(|| format!("Sensor View {}", sensor_view.msg_name));
 
                 let raw_rgba_dims = self
                     .sensor_camera_configs
@@ -897,8 +894,7 @@ impl LoadSchematicParams<'_, '_> {
                     entity,
                     name: label,
                 };
-                tile_state
-                    .insert_tile(Tile::Pane(Pane::SensorView(pane)), parent_id, false)
+                tile_state.insert_tile(Tile::Pane(Pane::SensorView(pane)), parent_id, false)
             }
             // Inspector and Hierarchy are now fixed sidebars, not tile panels.
             // Set the corresponding sidebar visibility flags so they appear.

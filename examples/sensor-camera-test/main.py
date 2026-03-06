@@ -121,18 +121,18 @@ world.sensor_camera(
     format="rgba",
 )
 
-world.sensor_camera(
-    entity=cam_ball_b,
-    name="thermal_cam",
-    width=128,
-    height=128,
-    fov=90.0,
-    pos_offset=[0.0, 0.0, 0.5],
-    look_at_offset=[-6.0, -6.0, 0.0],
-    format="rgba",
-    effect="thermal",
-    effect_params={"contrast": 1.5, "noise_sigma": 0.02},
-)
+# world.sensor_camera(
+#     entity=cam_ball_b,
+#     name="thermal_cam",
+#     width=128,
+#     height=128,
+#     fov=90.0,
+#     pos_offset=[0.0, 0.0, 0.5],
+#     look_at_offset=[-6.0, -6.0, 0.0],
+#     format="rgba",
+#     effect="thermal",
+#     effect_params={"contrast": 1.5, "noise_sigma": 0.02},
+# )
 
 # ── Schematic ────────────────────────────────────────────────────────────────
 
@@ -155,7 +155,6 @@ schematic = """
         viewport name=Main pos="(0,0,0,0, 14,14,10)" look_at="(0,0,0,0, 0,0,1)" show_grid=#true
         vsplit {{
             sensor_view "cam_ball_a.scene_cam" name="RGB Camera (Cyan Ball)"
-            sensor_view "cam_ball_b.thermal_cam" name="Thermal (Magenta Ball)"
         }}
     }}
 {objects}
@@ -175,7 +174,7 @@ system = constraints | el.six_dof(sys=effectors)
 # ── Post-step frame counter ──────────────────────────────────────────────────
 
 rgb_frames = [0]
-thermal_frames = [0]
+# thermal_frames = [0]
 
 
 def post_step(tick, ctx):
@@ -196,24 +195,24 @@ def post_step(tick, ctx):
             if tick > 10 and rgb_frames[0] == 0:
                 print(f"[RGB] tick {tick}: {e}")
 
-    if tick % 4 == 0:
-        try:
-            ctx.render_camera("cam_ball_b.thermal_cam")
-            frame = ctx.read_msg("cam_ball_b.thermal_cam")
-            if frame is not None and len(frame) > 0:
-                thermal_frames[0] += 1
-                if thermal_frames[0] == 1:
-                    arr = np.array(frame)
-                    print(
-                        f"[THERMAL] First frame at tick {tick}: {len(frame)} bytes, "
-                        f"nonzero={np.count_nonzero(arr)}"
-                    )
-        except Exception as e:
-            if tick > 10 and thermal_frames[0] == 0:
-                print(f"[THERMAL] tick {tick}: {e}")
+    # if tick % 4 == 0:
+    #     try:
+    #         ctx.render_camera("cam_ball_b.thermal_cam")
+    #         frame = ctx.read_msg("cam_ball_b.thermal_cam")
+    #         if frame is not None and len(frame) > 0:
+    #             thermal_frames[0] += 1
+    #             if thermal_frames[0] == 1:
+    #                 arr = np.array(frame)
+    #                 print(
+    #                     f"[THERMAL] First frame at tick {tick}: {len(frame)} bytes, "
+    #                     f"nonzero={np.count_nonzero(arr)}"
+    #                 )
+    #     except Exception as e:
+    #         if tick > 10 and thermal_frames[0] == 0:
+    #             print(f"[THERMAL] tick {tick}: {e}")
 
-    if tick > 0 and tick % 600 == 0:
-        print(f"  tick {tick}: rgb={rgb_frames[0]} thermal={thermal_frames[0]} frames")
+    # if tick > 0 and tick % 600 == 0:
+    #     print(f"  tick {tick}: rgb={rgb_frames[0]} thermal={thermal_frames[0]} frames")
 
 
 # ── Run ──────────────────────────────────────────────────────────────────────
@@ -227,4 +226,4 @@ world.run(
     interactive=False,
 )
 
-print(f"\nRGB frames: {rgb_frames[0]}, Thermal frames: {thermal_frames[0]}")
+# print(f"\nRGB frames: {rgb_frames[0]}, Thermal frames: {thermal_frames[0]}")

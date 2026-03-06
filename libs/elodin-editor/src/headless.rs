@@ -17,7 +17,7 @@ use impeller2_kdl::FromKdl;
 use impeller2_wkt::{CurrentTimestamp, DbConfig, LastUpdated, SchematicElem};
 
 use crate::object_3d::create_object_3d_entity;
-use crate::sensor_camera::{SensorCamera, SensorCameraConfigs, SensorCameraPlugin};
+use crate::sensor_camera::{SensorCamera, SensorCameraConfigs, SensorCameraPlugin, SensorCamerasSpawned};
 use crate::{EqlContext, PositionSync, sync_pos};
 
 /// A headless Bevy app dedicated to sensor camera rendering.
@@ -71,10 +71,7 @@ impl Plugin for HeadlessEditorPlugin {
                     .after(advance_headless_timestamp)
                     .in_set(PositionSync),
             )
-            .add_systems(
-                PreUpdate,
-                crate::setup_cell.after(impeller2_bevy::sink),
-            )
+            .add_systems(PreUpdate, crate::setup_cell.after(impeller2_bevy::sink))
             .add_systems(Startup, setup_floating_origin)
             .add_systems(Startup, setup_headless_lighting)
             .init_resource::<crate::EqlContext>()
@@ -158,7 +155,7 @@ fn load_headless_scene(
             );
         }
     }
-    tracing::info!(
+    tracing::debug!(
         "Headless scene loaded: {} elements from schematic",
         schematic.elems.len()
     );
@@ -231,6 +228,14 @@ fn headless_sensor_runner(mut app: App) -> AppExit {
         // Phase 2: check for new render requests via the UDS.
         if pending.is_none() {
             if let Some(req) = server.try_recv() {
+                // Check if cameras are ready before processing
+                let cameras_ready = app.world().resource::<SensorCamerasSpawned>().0;
+                if !cameras_ready {
+                    // Cameras not spawned yet - respond empty and continue warm-up
+                    RenderBridgeServer::respond_empty(req.1);
+                    continue;
+                }
+
                 drain_stale_frames(&app);
                 app.world_mut().resource_mut::<CurrentTimestamp>().0 = req.0.timestamp;
                 enable_sensor_camera(app.world_mut(), &req.0.camera_name);
@@ -249,11 +254,7 @@ fn headless_sensor_runner(mut app: App) -> AppExit {
 // Helpers
 // ---------------------------------------------------------------------------
 
-fn send_frame_response(
-    app: &App,
-    request: &RenderRequest,
-    stream: std::os::unix::net::UnixStream,
-) {
+fn send_frame_response(app: &App, request: &RenderRequest, stream: std::os::unix::net::UnixStream) {
     let world = app.world();
     let frame_rx = world.resource::<crate::sensor_camera::SensorFrameReceiver>();
 
@@ -280,10 +281,7 @@ fn send_frame_response(
 fn enable_sensor_camera(world: &mut World, camera_name: &str) {
     let target_index = {
         let configs = world.resource::<SensorCameraConfigs>();
-        configs
-            .0
-            .iter()
-            .position(|c| c.camera_name == camera_name)
+        configs.0.iter().position(|c| c.camera_name == camera_name)
     };
     let Some(target_index) = target_index else {
         tracing::warn!("render_camera: unknown camera '{camera_name}'");

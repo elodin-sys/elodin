@@ -335,9 +335,7 @@ impl StepContext {
             if let Some(msg_log) = state.get_msg_log(msg_id) {
                 if let Some((_timestamp, buf)) = msg_log.latest() {
                     let data: Vec<u8> = buf.to_vec();
-                    Ok(Some(
-                        numpy::PyArray1::from_vec(py, data).into_any(),
-                    ))
+                    Ok(Some(numpy::PyArray1::from_vec(py, data).into_any()))
                 } else {
                     Ok(None)
                 }

@@ -3,9 +3,9 @@ use bevy::{
     asset::{Assets, embedded_asset},
     camera::RenderTarget,
     core_pipeline::{
+        FullscreenShader,
         core_3d::graph::{Core3d, Node3d},
         tonemapping::Tonemapping,
-        FullscreenShader,
     },
     ecs::query::QueryItem,
     image::Image,
@@ -88,9 +88,14 @@ pub struct SensorEffectSettings {
     pub time: f32,
 }
 
+/// Double-buffered GPU readback state for a single sensor camera.
+/// One buffer can be mapped for CPU read while the other receives the next frame.
 #[derive(Clone, Component)]
 struct ImageCopier {
-    buffer: Buffer,
+    /// Two staging buffers for ping-pong readback.
+    buffers: [Buffer; 2],
+    /// Index of the buffer currently being written to (0 or 1).
+    write_buffer_idx: usize,
     src_image: Handle<Image>,
     camera_name: String,
     width: u32,
@@ -108,7 +113,7 @@ pub struct SensorFrameReceiver(pub flume::Receiver<(String, Vec<u8>, u32, u32)>)
 struct SensorFrameSender(flume::Sender<(String, Vec<u8>, u32, u32)>);
 
 #[derive(Resource, Default)]
-struct SensorCamerasSpawned(bool);
+pub struct SensorCamerasSpawned(pub bool);
 
 // ---------------------------------------------------------------------------
 // Post-process render graph
@@ -308,7 +313,7 @@ fn load_sensor_configs_from_db(
     if let Some(json) = db_config.metadata.get("sensor_cameras") {
         match serde_json::from_str::<Vec<SensorCameraConfig>>(json) {
             Ok(camera_configs) if !camera_configs.is_empty() => {
-                bevy::log::info!(
+                bevy::log::debug!(
                     "Loaded {} sensor camera configs from DB metadata",
                     camera_configs.len()
                 );
@@ -350,15 +355,23 @@ fn spawn_sensor_cameras(
 
         let padded_bytes_per_row =
             RenderDevice::align_copy_bytes_per_row((size.width as usize) * 4);
-        let cpu_buffer = render_device.create_buffer(&BufferDescriptor {
-            label: Some("sensor_camera_readback"),
-            size: padded_bytes_per_row as u64 * size.height as u64,
+        let buffer_size = padded_bytes_per_row as u64 * size.height as u64;
+        let cpu_buffer_0 = render_device.create_buffer(&BufferDescriptor {
+            label: Some("sensor_camera_readback_0"),
+            size: buffer_size,
+            usage: BufferUsages::MAP_READ | BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let cpu_buffer_1 = render_device.create_buffer(&BufferDescriptor {
+            label: Some("sensor_camera_readback_1"),
+            size: buffer_size,
             usage: BufferUsages::MAP_READ | BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
 
         let copier = ImageCopier {
-            buffer: cpu_buffer,
+            buffers: [cpu_buffer_0, cpu_buffer_1],
+            write_buffer_idx: 0,
             src_image: render_target_handle.clone(),
             camera_name: config.camera_name.clone(),
             width: config.width,
@@ -412,7 +425,7 @@ fn spawn_sensor_cameras(
             Name::new(format!("sensor_camera_{}", config.camera_name)),
         ));
 
-        bevy::log::info!(
+        bevy::log::debug!(
             "Spawned sensor camera '{}' ({}x{}, effect={})",
             config.camera_name,
             config.width,
@@ -537,10 +550,12 @@ fn image_copy_driver(
             (src_image.size.width as usize / block_dimensions.0 as usize) * block_size as usize,
         );
 
+        // Use the current write buffer (ping-pong between 0 and 1)
+        let buf_idx = image_copier.write_buffer_idx;
         encoder.copy_texture_to_buffer(
             src_image.texture.as_image_copy(),
             TexelCopyBufferInfo {
-                buffer: &image_copier.buffer,
+                buffer: &image_copier.buffers[buf_idx],
                 layout: TexelCopyBufferLayout {
                     offset: 0,
                     bytes_per_row: Some(
@@ -567,7 +582,10 @@ fn receive_image_from_buffer(
         if !image_copier.is_active {
             continue;
         }
-        let buffer_slice = image_copier.buffer.slice(..);
+
+        let buf_idx = image_copier.write_buffer_idx;
+        let buffer = &image_copier.buffers[buf_idx];
+        let buffer_slice = buffer.slice(..);
 
         let (s, r) = crossbeam_channel::bounded(1);
         buffer_slice.map_async(MapMode::Read, move |result| match result {
@@ -577,6 +595,10 @@ fn receive_image_from_buffer(
             Err(err) => tracing::warn!("Failed to map sensor camera buffer: {err}"),
         });
 
+        // Blocking poll: wait for GPU readback to complete.
+        // For the headless render-server this is required since the simulation
+        // is waiting for the frame. The double-buffer infrastructure is in place
+        // for future async improvements.
         if render_device.poll(PollType::wait()).is_err() {
             continue;
         }
@@ -599,16 +621,13 @@ fn receive_image_from_buffer(
             };
 
             drop(data);
-            image_copier.buffer.unmap();
+            buffer.unmap();
 
-            let _ = sender.0.send((
-                image_copier.camera_name.clone(),
-                frame_data,
-                width,
-                height,
-            ));
+            let _ = sender
+                .0
+                .send((image_copier.camera_name.clone(), frame_data, width, height));
         } else {
-            image_copier.buffer.unmap();
+            buffer.unmap();
         }
     }
 }
@@ -635,4 +654,3 @@ pub fn patch_sensor_view_dims(
         }
     }
 }
-

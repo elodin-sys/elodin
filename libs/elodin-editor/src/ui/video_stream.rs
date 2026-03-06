@@ -193,7 +193,8 @@ impl Default for StreamState {
 #[derive(Component)]
 pub struct VideoFrameCache {
     /// All raw frame data (H.264 NAL or raw RGBA), keyed by timestamp.
-    raw_frames: BTreeMap<Timestamp, Vec<u8>>,
+    /// Wrapped in Arc to avoid cloning large frame buffers on access.
+    raw_frames: BTreeMap<Timestamp, Arc<Vec<u8>>>,
     /// Decoded RGBA frames (LRU-evicted to `max_frames`).
     decoded_frames: BTreeMap<Timestamp, Image>,
     /// Sorted timestamps of known keyframes (IDR NAL units).
@@ -225,6 +226,9 @@ pub struct VideoFrameCache {
     /// (Pagination within the backfill callback fires immediately and is
     /// not rate-limited — only the retry from `connect_streams` is.)
     backfill_retry_at: Option<Instant>,
+    /// Timestamp of the raw RGBA frame currently displayed. Used to skip
+    /// redundant texture uploads when the playback position hasn't changed.
+    last_displayed_ts: Option<Timestamp>,
 }
 
 impl Default for VideoFrameCache {
@@ -242,6 +246,7 @@ impl Default for VideoFrameCache {
             backfill_frontier: Timestamp(i64::MIN),
             backfill_in_flight: false,
             backfill_retry_at: None,
+            last_displayed_ts: None,
         }
     }
 }
@@ -315,16 +320,16 @@ impl VideoFrameCache {
     pub fn get_raw_sequence(&self, from: Timestamp, to: Timestamp) -> Vec<(Timestamp, Vec<u8>)> {
         self.raw_frames
             .range(from..=to)
-            .map(|(t, d)| (*t, d.clone()))
+            .map(|(t, d)| (*t, Arc::unwrap_or_clone(Arc::clone(d))))
             .collect()
     }
 
     /// Get the next raw frame strictly after `ts`.
-    pub fn next_raw_frame_after(&self, ts: Timestamp) -> Option<(Timestamp, &Vec<u8>)> {
+    pub fn next_raw_frame_after(&self, ts: Timestamp) -> Option<(Timestamp, &[u8])> {
         self.raw_frames
             .range((std::ops::Bound::Excluded(ts), std::ops::Bound::Unbounded))
             .next()
-            .map(|(t, d)| (*t, d))
+            .map(|(t, d)| (*t, d.as_slice()))
     }
 
     /// Insert a raw frame and evict oldest entries if over the limit.
@@ -332,7 +337,7 @@ impl VideoFrameCache {
         if is_keyframe(&data) {
             self.record_keyframe(timestamp);
         }
-        self.raw_frames.insert(timestamp, data);
+        self.raw_frames.insert(timestamp, Arc::new(data));
         self.evict_raw_if_needed();
     }
 
@@ -854,23 +859,30 @@ impl super::widgets::WidgetSystem for VideoStreamWidget<'_, '_> {
             }
             StreamState::Active => {
                 if let Some((w, h)) = stream.raw_rgba_dims {
-                    if let Some((_found_ts, data)) = cache.raw_frames.range(..=current_ts).next_back() {
-                        let expected = (w * h * 4) as usize;
-                        let size_ok = data.len() == expected;
-                        if size_ok {
-                            let img = Image::new(
-                                Extent3d {
-                                    width: w,
-                                    height: h,
-                                    depth_or_array_layers: 1,
-                                },
-                                TextureDimension::D2,
-                                data.clone(),
-                                bevy::render::render_resource::TextureFormat::Rgba8UnormSrgb,
-                                RenderAssetUsages::MAIN_WORLD
-                                    | RenderAssetUsages::RENDER_WORLD,
-                            );
-                            stream.current_frame = Some(img);
+                    if let Some((found_ts, data)) =
+                        cache.raw_frames.range(..=current_ts).next_back()
+                    {
+                        // Skip texture update if we're already displaying this frame
+                        if cache.last_displayed_ts != Some(*found_ts) {
+                            let expected = (w * h * 4) as usize;
+                            let size_ok = data.len() == expected;
+                            if size_ok {
+                                // Arc::unwrap_or_clone: O(1) if refcount==1, else clones
+                                let frame_bytes = Arc::unwrap_or_clone(Arc::clone(data));
+                                let img = Image::new(
+                                    Extent3d {
+                                        width: w,
+                                        height: h,
+                                        depth_or_array_layers: 1,
+                                    },
+                                    TextureDimension::D2,
+                                    frame_bytes,
+                                    bevy::render::render_resource::TextureFormat::Rgba8UnormSrgb,
+                                    RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
+                                );
+                                stream.current_frame = Some(img);
+                                cache.last_displayed_ts = Some(*found_ts);
+                            }
                         }
                     }
                 } else {
@@ -910,8 +922,7 @@ impl super::widgets::WidgetSystem for VideoStreamWidget<'_, '_> {
                             cache.next_raw_frame_after(cache.last_decoded_ts.unwrap())
                             && ts.0 <= current_ts.0 + DECODER_NEAR_THRESHOLD_US
                         {
-                            let data = data.clone();
-                            if decoder.process_frame(ts, &data) {
+                            if decoder.process_frame(ts, data) {
                                 cache.last_decoded_ts = Some(ts);
                             }
                         }
@@ -1067,7 +1078,7 @@ pub fn connect_streams(
                         Timestamp(i64::MIN),
                         limit,
                     );
-                    bevy::log::info!(
+                    bevy::log::debug!(
                         "video stream connected: msg_name={}, raw_dims={:?}",
                         stream.msg_name,
                         stream.raw_rgba_dims
@@ -1087,7 +1098,8 @@ pub fn connect_streams(
                 // where the previous backfill left off. Retries are
                 // rate-limited to 1/sec to avoid wrapping the u8 RequestId
                 // counter; pagination within the callback fires immediately.
-                let retry_ok = cache.backfill_retry_at
+                let retry_ok = cache
+                    .backfill_retry_at
                     .map_or(true, |t| t.elapsed().as_secs_f32() >= 1.0);
                 if !cache.backfill_in_flight
                     && retry_ok

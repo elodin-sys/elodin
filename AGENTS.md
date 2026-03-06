@@ -13,25 +13,18 @@ Elodin is an open-source platform for rapid design, testing, and simulation of a
 
 ## Quick Start
 
-### Build Everything (SDK + CLI)
-
-IMPORTANT: The Python venv/wheel is scoped to the nix shell. The SDK build
-and `just install` MUST run inside the same `nix develop` session so that the
-release binaries link against the freshly-built wheel.
-
-```bash
-nix develop -c bash -c '\
-  uv venv --python 3.12 && source .venv/bin/activate && \
-  uvx maturin develop --uv --manifest-path=libs/nox-py/Cargo.toml && \
-  just install'
-```
-
-Or interactively inside an existing `nix develop` shell:
+### Python SDK (always build first, so binaries pick it up)
 
 ```bash
 uv venv --python 3.12 && source .venv/bin/activate
 uvx maturin develop --uv --manifest-path=libs/nox-py/Cargo.toml
-just install
+```
+
+### Elodin CLI and Elodin-DB CLI
+
+```bash
+nix develop                          # Enter unified dev shell (Rust, Python, C/C++, git-lfs)
+just install                         # Build and install Elodin Editor + Elodin DB
 ```
 
 ### CI Checks

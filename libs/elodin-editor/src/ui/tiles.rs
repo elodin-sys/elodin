@@ -2544,7 +2544,10 @@ impl WidgetSystem for TileLayout<'_, '_> {
                             state_mut.commands.entity(pane.entity).despawn();
                         };
 
-                        if let egui_tiles::Tile::Pane(Pane::VideoStream(pane) | Pane::SensorView(pane)) = tile {
+                        if let egui_tiles::Tile::Pane(
+                            Pane::VideoStream(pane) | Pane::SensorView(pane),
+                        ) = tile
+                        {
                             state_mut.commands.entity(pane.entity).despawn();
                         };
 
