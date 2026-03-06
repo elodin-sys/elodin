@@ -77,17 +77,11 @@ with pkgs; let
         skopeo
         gettext
         just
-        docker
-        kubectl
         jq
         yq
         git
         git-filter-repo
         git-lfs
-        (google-cloud-sdk.withExtraComponents (
-          with google-cloud-sdk.components; [gke-gcloud-auth-plugin]
-        ))
-        azure-cli
 
         # Documentation and quality tools
         alejandra

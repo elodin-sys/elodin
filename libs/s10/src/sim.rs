@@ -32,9 +32,6 @@ impl SimRecipe {
         debug!("running sim");
 
         let mut cmd = python_tokio_command()?;
-        if !cfg!(target_os = "linux") {
-            cmd.process_group(0); // NOTE(sphw): this causes all sorts of issues on linux, not sure why
-        }
         let port = crate::liveness::serve_tokio().await?;
         let mut child = cmd
             .arg(&self.path)
@@ -47,7 +44,7 @@ impl SimRecipe {
         tokio::select! {
             _ = cancel_token.wait() => {
                 if let Some(pid) = child.id() {
-                    let _ = nix::sys::signal::killpg(
+                    let _ = nix::sys::signal::kill(
                         nix::unistd::Pid::from_raw(pid as i32),
                         nix::sys::signal::Signal::SIGTERM,
                     );
