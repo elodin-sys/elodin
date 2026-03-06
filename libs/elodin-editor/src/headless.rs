@@ -89,7 +89,7 @@ fn advance_headless_timestamp(
     last_updated: Res<LastUpdated>,
     mut current_ts: ResMut<CurrentTimestamp>,
 ) {
-    if last_updated.0 .0 > i64::MIN {
+    if last_updated.0 > current_ts.0 {
         current_ts.0 = last_updated.0;
     }
 }
@@ -169,6 +169,13 @@ fn load_headless_scene(
 // Custom runner
 // ---------------------------------------------------------------------------
 
+fn drain_stale_frames(app: &App) {
+    let rx = app
+        .world()
+        .resource::<crate::sensor_camera::SensorFrameReceiver>();
+    while rx.0.try_recv().is_ok() {}
+}
+
 fn headless_sensor_runner(mut app: App) -> AppExit {
     app.finish();
     app.cleanup();
@@ -204,7 +211,9 @@ fn headless_sensor_runner(mut app: App) -> AppExit {
         // 4 update cycles before giving up.
         if armed_frames > 0 {
             let has_frame = {
-                let rx = app.world().resource::<crate::sensor_camera::SensorFrameReceiver>();
+                let rx = app
+                    .world()
+                    .resource::<crate::sensor_camera::SensorFrameReceiver>();
                 !rx.0.is_empty()
             };
             if has_frame || armed_frames >= 4 {
@@ -222,6 +231,8 @@ fn headless_sensor_runner(mut app: App) -> AppExit {
         // Phase 2: check for new render requests via the UDS.
         if pending.is_none() {
             if let Some(req) = server.try_recv() {
+                drain_stale_frames(&app);
+                app.world_mut().resource_mut::<CurrentTimestamp>().0 = req.0.timestamp;
                 enable_sensor_camera(app.world_mut(), &req.0.camera_name);
                 armed_frames = 1;
                 pending = Some(req);
@@ -245,7 +256,16 @@ fn send_frame_response(
 ) {
     let world = app.world();
     let frame_rx = world.resource::<crate::sensor_camera::SensorFrameReceiver>();
-    if let Ok((camera_name, frame_bytes, _w, _h)) = frame_rx.0.try_recv() {
+
+    // Drain all queued frames, keeping only the one matching the requested camera.
+    let mut matched_frame: Option<(String, Vec<u8>, u32, u32)> = None;
+    while let Ok(frame) = frame_rx.0.try_recv() {
+        if frame.0 == request.camera_name {
+            matched_frame = Some(frame);
+        }
+    }
+
+    if let Some((camera_name, frame_bytes, _, _)) = matched_frame {
         RenderBridgeServer::respond_with_frame(
             stream,
             &camera_name,

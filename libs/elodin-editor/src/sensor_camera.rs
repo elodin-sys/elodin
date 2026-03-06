@@ -33,7 +33,7 @@ use bevy::{
 };
 use big_space::GridCell;
 use impeller2::types::ComponentId;
-use impeller2_wkt::{DbConfig, LastUpdated};
+use impeller2_wkt::DbConfig;
 use serde::{Deserialize, Serialize};
 
 use crate::object_3d::ComponentArrayExt;
@@ -95,6 +95,7 @@ struct ImageCopier {
     camera_name: String,
     width: u32,
     height: u32,
+    is_active: bool,
 }
 
 #[derive(Clone, Default, Resource)]
@@ -362,6 +363,7 @@ fn spawn_sensor_cameras(
             camera_name: config.camera_name.clone(),
             width: config.width,
             height: config.height,
+            is_active: false,
         };
 
         let perspective = PerspectiveProjection {
@@ -433,9 +435,9 @@ fn update_sensor_camera_transforms(
     configs: Res<SensorCameraConfigs>,
     mut sensor_cameras: Query<(&SensorCamera, &mut Transform)>,
     cache: Res<impeller2_bevy::TelemetryCache>,
-    last_updated: Res<LastUpdated>,
+    current_ts: Res<impeller2_wkt::CurrentTimestamp>,
 ) {
-    let ts = last_updated.0;
+    let ts = current_ts.0;
     for (sensor_cam, mut transform) in &mut sensor_cameras {
         let Some(config) = configs.0.get(sensor_cam.config_index) else {
             continue;
@@ -495,9 +497,19 @@ fn update_sensor_camera_transforms(
 // Render-world systems (GPU readback)
 // ---------------------------------------------------------------------------
 
-fn image_copy_extract(mut commands: Commands, image_copiers: Extract<Query<&ImageCopier>>) {
+fn image_copy_extract(
+    mut commands: Commands,
+    image_copiers: Extract<Query<(&ImageCopier, &Camera)>>,
+) {
     commands.insert_resource(ImageCopiers(
-        image_copiers.iter().cloned().collect::<Vec<ImageCopier>>(),
+        image_copiers
+            .iter()
+            .map(|(copier, camera)| {
+                let mut c = copier.clone();
+                c.is_active = camera.is_active;
+                c
+            })
+            .collect(),
     ));
 }
 
@@ -508,6 +520,9 @@ fn image_copy_driver(
     gpu_images: Res<RenderAssets<bevy::render::texture::GpuImage>>,
 ) {
     for image_copier in image_copiers.0.iter() {
+        if !image_copier.is_active {
+            continue;
+        }
         let Some(src_image) = gpu_images.get(&image_copier.src_image) else {
             continue;
         };
@@ -549,6 +564,9 @@ fn receive_image_from_buffer(
     sender: Res<SensorFrameSender>,
 ) {
     for image_copier in image_copiers.0.iter() {
+        if !image_copier.is_active {
+            continue;
+        }
         let buffer_slice = image_copier.buffer.slice(..);
 
         let (s, r) = crossbeam_channel::bounded(1);

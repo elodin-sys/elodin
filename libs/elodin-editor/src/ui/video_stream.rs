@@ -212,6 +212,19 @@ pub struct VideoFrameCache {
     /// `FixedRateMsgStream`.  Used to detect DB disconnection and trigger
     /// recovery.  `None` until the first live frame arrives.
     last_stream_activity: Option<Instant>,
+    /// Timestamp just past the last frame loaded by the paginated backfill.
+    /// Used by `connect_streams` to continue backfilling from where it left
+    /// off, ensuring all frames eventually make it into the cache even when
+    /// the initial backfill fires before the simulation has produced data.
+    backfill_frontier: Timestamp,
+    /// `true` while a backfill `GetMsgs` request is in-flight. Prevents
+    /// duplicate requests from piling up.
+    backfill_in_flight: bool,
+    /// Wall-clock time of the last backfill retry from `connect_streams`.
+    /// Rate-limited to 1 second to avoid wrapping the u8 RequestId counter.
+    /// (Pagination within the backfill callback fires immediately and is
+    /// not rate-limited — only the retry from `connect_streams` is.)
+    backfill_retry_at: Option<Instant>,
 }
 
 impl Default for VideoFrameCache {
@@ -226,6 +239,9 @@ impl Default for VideoFrameCache {
             seeking: false,
             seek_generation: 0,
             last_stream_activity: None,
+            backfill_frontier: Timestamp(i64::MIN),
+            backfill_in_flight: false,
+            backfill_retry_at: None,
         }
     }
 }
@@ -754,7 +770,12 @@ fn send_backfill_request(
                     last_ts = timestamp;
                     cache.insert_raw(timestamp, data);
                 }
+                if count > 0 {
+                    cache.backfill_frontier = Timestamp(last_ts.0 + 1);
+                }
+                cache.backfill_in_flight = false;
                 if count >= limit {
+                    cache.backfill_in_flight = true;
                     send_backfill_request(
                         &mut cmds,
                         entity,
@@ -833,9 +854,10 @@ impl super::widgets::WidgetSystem for VideoStreamWidget<'_, '_> {
             }
             StreamState::Active => {
                 if let Some((w, h)) = stream.raw_rgba_dims {
-                    if let Some((_ts, data)) = cache.raw_frames.range(..=current_ts).next_back() {
+                    if let Some((_found_ts, data)) = cache.raw_frames.range(..=current_ts).next_back() {
                         let expected = (w * h * 4) as usize;
-                        if data.len() == expected {
+                        let size_ok = data.len() == expected;
+                        if size_ok {
                             let img = Image::new(
                                 Extent3d {
                                     width: w,
@@ -1028,6 +1050,7 @@ pub fn connect_streams(
     )>,
     mut commands: Commands,
     stream_id: Res<CurrentStreamId>,
+    last_updated: Res<impeller2_wkt::LastUpdated>,
 ) {
     for (entity, mut stream, decoder, mut cache) in &mut query {
         match &mut stream.state {
@@ -1036,6 +1059,7 @@ pub fn connect_streams(
                 if *frames_waited >= FRAMES_BEFORE_CONNECT {
                     let msg_id = stream.msg_id;
                     let limit = backfill_frame_limit(stream.raw_rgba_dims);
+                    cache.backfill_in_flight = true;
                     send_backfill_request(
                         &mut commands,
                         entity,
@@ -1058,11 +1082,36 @@ pub fn connect_streams(
                     cache.seeking = false;
                 }
 
+                // Continue backfilling: if the backfill stopped (short page)
+                // but the DB has newer data, request the next page from
+                // where the previous backfill left off. Retries are
+                // rate-limited to 1/sec to avoid wrapping the u8 RequestId
+                // counter; pagination within the callback fires immediately.
+                let retry_ok = cache.backfill_retry_at
+                    .map_or(true, |t| t.elapsed().as_secs_f32() >= 1.0);
+                if !cache.backfill_in_flight
+                    && retry_ok
+                    && cache.backfill_frontier <= last_updated.0
+                {
+                    let msg_id = stream.msg_id;
+                    let limit = backfill_frame_limit(stream.raw_rgba_dims);
+                    cache.backfill_in_flight = true;
+                    cache.backfill_retry_at = Some(Instant::now());
+                    send_backfill_request(
+                        &mut commands,
+                        entity,
+                        msg_id,
+                        cache.backfill_frontier,
+                        limit,
+                    );
+                }
+
                 if let Some(last) = cache.last_stream_activity
                     && last.elapsed().as_secs_f32() > STREAM_RECOVERY_TIMEOUT_SECS
                 {
                     let msg_id = stream.msg_id;
                     let limit = backfill_frame_limit(stream.raw_rgba_dims);
+                    cache.backfill_in_flight = true;
                     send_backfill_request(
                         &mut commands,
                         entity,

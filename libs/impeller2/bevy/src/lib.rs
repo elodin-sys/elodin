@@ -115,6 +115,20 @@ impl TelemetryCache {
     pub fn component_ids(&self) -> impl Iterator<Item = &ComponentId> {
         self.components.keys()
     }
+
+    pub fn max_timestamp_for(&self, component_id: &ComponentId) -> Option<Timestamp> {
+        self.components
+            .get(component_id)
+            .and_then(|m| m.keys().next_back().copied())
+    }
+
+    pub fn entry_count_for(&self, component_id: &ComponentId) -> usize {
+        self.components.get(component_id).map_or(0, |m| m.len())
+    }
+
+    pub fn total_components(&self) -> usize {
+        self.components.len()
+    }
 }
 
 /// Decomponentize implementation that collects component values into a
