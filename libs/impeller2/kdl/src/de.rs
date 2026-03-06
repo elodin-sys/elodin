@@ -137,6 +137,45 @@ fn parse_theme(node: &KdlNode, _src: &str) -> Result<ThemeConfig, KdlSchematicEr
 }
 
 fn parse_timeline(node: &KdlNode, src: &str) -> Result<TimelineConfig, KdlSchematicError> {
+    const TIMELINE_PROPERTIES: &[&str] = &["played_color", "future_color", "follow_latest"];
+    const TIMELINE_CHILDREN: &[&str] = &["played_color", "future_color"];
+
+    for entry in node.entries() {
+        let Some(name) = entry.name() else {
+            return Err(KdlSchematicError::InvalidValue {
+                property: "timeline".to_string(),
+                node: "timeline".to_string(),
+                expected: "named properties only".to_string(),
+                src: src.to_string(),
+                span: node.span(),
+            });
+        };
+
+        if !TIMELINE_PROPERTIES.contains(&name.value()) {
+            return Err(KdlSchematicError::InvalidValue {
+                property: name.value().to_string(),
+                node: "timeline".to_string(),
+                expected: format!("one of: {}", TIMELINE_PROPERTIES.join(", ")),
+                src: src.to_string(),
+                span: node.span(),
+            });
+        }
+    }
+
+    if let Some(children) = node.children() {
+        for child in children.nodes() {
+            if !TIMELINE_CHILDREN.contains(&child.name().value()) {
+                return Err(KdlSchematicError::InvalidValue {
+                    property: child.name().value().to_string(),
+                    node: "timeline".to_string(),
+                    expected: format!("one of: {}", TIMELINE_CHILDREN.join(", ")),
+                    src: src.to_string(),
+                    span: child.span(),
+                });
+            }
+        }
+    }
+
     let parse_timeline_color = |names: &[&str], default: Color| {
         if let Some(value) = names.iter().find_map(|name| node.get(*name)) {
             let raw = value
@@ -173,10 +212,8 @@ fn parse_timeline(node: &KdlNode, src: &str) -> Result<TimelineConfig, KdlSchema
         }
     };
 
-    let played_color =
-        parse_timeline_color(&["played_color"], default_timeline_played_color())?;
-    let future_color =
-        parse_timeline_color(&["future_color"], default_timeline_future_color())?;
+    let played_color = parse_timeline_color(&["played_color"], default_timeline_played_color())?;
+    let future_color = parse_timeline_color(&["future_color"], default_timeline_future_color())?;
 
     let follow_latest = node
         .get("follow_latest")
@@ -1850,8 +1887,7 @@ mod tests {
 
     #[test]
     fn test_parse_timeline_config() {
-        let kdl =
-            r#"timeline played_color="mint" future_color="white" follow_latest=#true"#;
+        let kdl = r#"timeline played_color="mint" future_color="white" follow_latest=#true"#;
         let schematic = parse_schematic(kdl).unwrap();
 
         assert!(schematic.elems.is_empty());
@@ -1864,8 +1900,8 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_timeline_legacy_aliases_are_rejected() {
-        let kdl = r#"timeline playback_color="yalk" future_trail_color="white" latest_live=#true"#;
+    fn test_parse_timeline_unknown_properties_are_rejected() {
+        let kdl = r#"timeline unexpected=#true"#;
         assert!(parse_schematic(kdl).is_err());
     }
 

@@ -26,7 +26,7 @@ use crate::{
 };
 
 use super::{
-    FollowLatestIfStreamingState, LatestFollow, PlaybackSpeed, StreamTickOrigin, TimelineIcons,
+    AutoFollowLatestState, LatestFollow, PlaybackSpeed, StreamTickOrigin, TimelineIcons,
     TimelineSettings,
 };
 
@@ -47,7 +47,7 @@ pub struct TimelineControls<'w, 's> {
     tick_origin: ResMut<'w, StreamTickOrigin>,
     step_buttons: ResMut<'w, TimelineStepButtons>,
     latest_follow: ResMut<'w, LatestFollow>,
-    follow_latest_if_streaming_state: ResMut<'w, FollowLatestIfStreamingState>,
+    auto_follow_latest_state: ResMut<'w, AutoFollowLatestState>,
     timeline_settings: Res<'w, TimelineSettings>,
     focused_window: Res<'w, FocusedWindow>,
     primary_windows: Query<'w, 's, Entity, With<bevy::window::PrimaryWindow>>,
@@ -84,7 +84,7 @@ impl WidgetSystem for TimelineControls<'_, '_> {
             mut tick_origin,
             mut step_buttons,
             mut latest_follow,
-            mut follow_latest_if_streaming_state,
+            mut auto_follow_latest_state,
             timeline_settings,
             focused_window,
             primary_windows,
@@ -119,7 +119,7 @@ impl WidgetSystem for TimelineControls<'_, '_> {
                             );
 
                             if jump_to_start_btn.clicked() {
-                                follow_latest_if_streaming_state.cancel();
+                                auto_follow_latest_state.cancel();
                                 latest_follow.0 = false;
                                 tick.0 = earliest_timestamp.0;
                                 tick_origin.request_rebase();
@@ -133,7 +133,7 @@ impl WidgetSystem for TimelineControls<'_, '_> {
                                 && tick.0 > earliest_timestamp.0
                                 && tick_step_micros > 0
                             {
-                                follow_latest_if_streaming_state.cancel();
+                                auto_follow_latest_state.cancel();
                                 latest_follow.0 = false;
                                 let mut first = false;
                                 let down = step_buttons.back.get_or_insert_with(|| {
@@ -156,7 +156,7 @@ impl WidgetSystem for TimelineControls<'_, '_> {
                                     .add(EImageButton::new(icons.play).scale(btn_scale, btn_scale));
 
                                 if play_btn.clicked() {
-                                    follow_latest_if_streaming_state.cancel();
+                                    auto_follow_latest_state.cancel();
                                     paused.0 = false;
                                 }
                             } else {
@@ -165,7 +165,7 @@ impl WidgetSystem for TimelineControls<'_, '_> {
                                 );
 
                                 if pause_btn.clicked() {
-                                    follow_latest_if_streaming_state.cancel();
+                                    auto_follow_latest_state.cancel();
                                     paused.0 = true;
                                     latest_follow.0 = false;
                                 }
@@ -179,7 +179,7 @@ impl WidgetSystem for TimelineControls<'_, '_> {
                                 && tick.0 < max_tick.0
                                 && tick_step_micros > 0
                             {
-                                follow_latest_if_streaming_state.cancel();
+                                auto_follow_latest_state.cancel();
                                 latest_follow.0 = false;
                                 let mut first = false;
                                 let down = step_buttons.forward.get_or_insert_with(|| {
@@ -199,7 +199,7 @@ impl WidgetSystem for TimelineControls<'_, '_> {
                             );
 
                             if jump_to_end_btn.clicked() {
-                                follow_latest_if_streaming_state.cancel();
+                                auto_follow_latest_state.cancel();
                                 tick.0 = max_tick.0;
                                 paused.0 = false;
                                 latest_follow.0 = replay_mode.is_none();
@@ -323,7 +323,7 @@ impl WidgetSystem for TimelineControls<'_, '_> {
                                         played_color,
                                     );
                                     if latest_enabled && latest_response.clicked() {
-                                        follow_latest_if_streaming_state.cancel();
+                                        auto_follow_latest_state.cancel();
                                         latest_follow.0 = !latest_follow.0;
                                     }
 

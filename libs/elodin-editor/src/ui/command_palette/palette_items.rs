@@ -48,7 +48,7 @@ use crate::{
         },
         tiles::{self, set_mode_all},
         timeline::{
-            FollowLatestIfStreamingState, LatestFollow, PlaybackSpeed, StreamTickOrigin,
+            AutoFollowLatestState, LatestFollow, PlaybackSpeed, StreamTickOrigin,
             timeline_slider::UITick,
         },
     },
@@ -848,9 +848,7 @@ fn goto_tick() -> PaletteItem {
                       mut ui_tick: ResMut<UITick>,
                       mut paused: ResMut<Paused>,
                       mut latest_follow: ResMut<LatestFollow>,
-                      mut follow_latest_if_streaming_state: ResMut<
-                    FollowLatestIfStreamingState,
-                >,
+                      mut auto_follow_latest_state: ResMut<AutoFollowLatestState>,
                       earliest_timestamp: Res<EarliestTimestamp>,
                       mut tick_origin: ResMut<StreamTickOrigin>,
                       tick_time: Res<SimulationTimeStep>| {
@@ -898,7 +896,7 @@ fn goto_tick() -> PaletteItem {
                     };
 
                     let timestamp = Timestamp(target_us);
-                    follow_latest_if_streaming_state.cancel();
+                    auto_follow_latest_state.cancel();
                     paused.0 = true;
                     latest_follow.0 = false;
                     current_tick.0 = timestamp;

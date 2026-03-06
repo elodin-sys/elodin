@@ -28,14 +28,14 @@ pub(crate) fn plugin(app: &mut App) {
         .init_resource::<PlaybackSpeed>()
         .init_resource::<TimelineSettings>()
         .init_resource::<LatestFollow>()
-        .init_resource::<FollowLatestIfStreamingState>()
+        .init_resource::<AutoFollowLatestState>()
         .add_systems(
             Update,
             (
                 reset_playback_speed_on_stream_change,
                 reset_latest_follow_on_stream_change,
-                reset_follow_latest_if_streaming_state,
-                auto_start_follow_latest_if_streaming,
+                reset_auto_follow_latest_state,
+                auto_start_follow_latest,
             ),
         );
 }
@@ -86,16 +86,29 @@ impl From<TimelineSettings> for impeller2_wkt::TimelineConfig {
 }
 
 #[derive(bevy::prelude::Resource, Default, Clone, Copy, Debug)]
-pub(crate) struct FollowLatestIfStreamingState {
+pub(crate) struct AutoFollowLatestState {
     stream_id: Option<StreamId>,
     baseline_latest: Option<impeller2::types::Timestamp>,
     armed: bool,
 }
 
-impl FollowLatestIfStreamingState {
+impl AutoFollowLatestState {
     pub fn cancel(&mut self) {
         self.armed = false;
     }
+}
+
+#[derive(SystemParam)]
+struct AutoFollowLatestParams<'w> {
+    current_stream_id: Res<'w, CurrentStreamId>,
+    timeline_settings: Res<'w, TimelineSettings>,
+    earliest: Res<'w, EarliestTimestamp>,
+    latest: Res<'w, LastUpdated>,
+    replay_mode: Option<Res<'w, crate::ReplayMode>>,
+    current_timestamp: ResMut<'w, CurrentTimestamp>,
+    paused: ResMut<'w, crate::ui::Paused>,
+    latest_follow: ResMut<'w, LatestFollow>,
+    state: ResMut<'w, AutoFollowLatestState>,
 }
 
 fn reset_playback_speed_on_stream_change(
@@ -116,11 +129,11 @@ fn reset_latest_follow_on_stream_change(
     }
 }
 
-fn reset_follow_latest_if_streaming_state(
+fn reset_auto_follow_latest_state(
     current_stream_id: Res<CurrentStreamId>,
     timeline_settings: Res<TimelineSettings>,
     replay_mode: Option<Res<crate::ReplayMode>>,
-    mut state: ResMut<FollowLatestIfStreamingState>,
+    mut state: ResMut<AutoFollowLatestState>,
 ) {
     if replay_mode.is_some() || !timeline_settings.follow_latest {
         state.armed = false;
@@ -135,17 +148,19 @@ fn reset_follow_latest_if_streaming_state(
     }
 }
 
-fn auto_start_follow_latest_if_streaming(
-    current_stream_id: Res<CurrentStreamId>,
-    timeline_settings: Res<TimelineSettings>,
-    earliest: Res<EarliestTimestamp>,
-    latest: Res<LastUpdated>,
-    replay_mode: Option<Res<crate::ReplayMode>>,
-    mut current_timestamp: ResMut<CurrentTimestamp>,
-    mut paused: ResMut<crate::ui::Paused>,
-    mut latest_follow: ResMut<LatestFollow>,
-    mut state: ResMut<FollowLatestIfStreamingState>,
-) {
+fn auto_start_follow_latest(params: AutoFollowLatestParams) {
+    let AutoFollowLatestParams {
+        current_stream_id,
+        timeline_settings,
+        earliest,
+        latest,
+        replay_mode,
+        mut current_timestamp,
+        mut paused,
+        mut latest_follow,
+        mut state,
+    } = params;
+
     if replay_mode.is_some() || !timeline_settings.follow_latest || latest_follow.0 {
         return;
     }

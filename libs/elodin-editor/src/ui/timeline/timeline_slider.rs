@@ -21,7 +21,7 @@ use crate::ui::{
 };
 
 use super::{
-    DurationExt, FollowLatestIfStreamingState, LatestFollow, StreamTickOrigin, TimelineArgs,
+    AutoFollowLatestState, DurationExt, LatestFollow, StreamTickOrigin, TimelineArgs,
     TimelineIcons, TimelineSettings, get_position_range, position_from_value, value_from_position,
 };
 
@@ -404,7 +404,7 @@ pub struct TimelineSlider<'w> {
     tick_origin: ResMut<'w, StreamTickOrigin>,
     earliest_timestamp: Res<'w, EarliestTimestamp>,
     latest_follow: ResMut<'w, LatestFollow>,
-    follow_latest_if_streaming_state: ResMut<'w, FollowLatestIfStreamingState>,
+    auto_follow_latest_state: ResMut<'w, AutoFollowLatestState>,
     timeline_settings: Res<'w, TimelineSettings>,
 }
 
@@ -425,7 +425,7 @@ impl WidgetSystem for TimelineSlider<'_> {
             mut tick_origin,
             earliest_timestamp,
             mut latest_follow,
-            mut follow_latest_if_streaming_state,
+            mut auto_follow_latest_state,
             timeline_settings,
         } = state.get_mut(world);
 
@@ -457,7 +457,7 @@ impl WidgetSystem for TimelineSlider<'_> {
 
             if response.changed() {
                 let target_timestamp = Timestamp(tick.0);
-                follow_latest_if_streaming_state.cancel();
+                auto_follow_latest_state.cancel();
                 latest_follow.0 = false;
                 current_timestamp.0 = target_timestamp;
                 if target_timestamp <= earliest_timestamp.0 {
