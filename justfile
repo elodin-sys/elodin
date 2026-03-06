@@ -92,6 +92,7 @@ install target="all":
       uv venv --python 3.13 --clear
       . .venv/bin/activate
       uvx maturin develop --uv --manifest-path=libs/nox-py/Cargo.toml
+      echo "Venv ready. Run source with `source .venv/bin/activate\` before running examples with python3"
       ;;
     editor) cargo install --path apps/elodin --locked;;
     db) cargo install --path libs/db --locked;;
