@@ -2,7 +2,7 @@
 function install-elodin() {
     case ${1:-all} in
       "py") 
-        uv venv --python 3.12 && \
+        uv venv --python 3.13 --clear && \
         # This can't be script because it sources a file.
         source .venv/bin/activate && \
         uvx maturin develop --uv --manifest-path=libs/nox-py/Cargo.toml

@@ -9,7 +9,7 @@ bevy = "0.17"
 
 [dev-dependencies]
 bevy-inspector-egui = "0.35"
-bevy_editor_cam = "0.7"
+bevy_editor_cam.workspace = true
 
 [lib]
 path = "src/lib.rs"
