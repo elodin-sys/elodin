@@ -139,6 +139,7 @@ pub struct FocusedWindow(pub Option<Entity>);
 pub enum SelectedObject {
     #[default]
     None,
+    Timeline,
     Entity(EntityPair),
     Viewport {
         camera: Entity,
@@ -176,6 +177,7 @@ impl SelectedObject {
     pub fn entity(&self) -> Option<Entity> {
         match self {
             SelectedObject::None => None,
+            SelectedObject::Timeline => None,
             SelectedObject::Entity(pair) => Some(pair.bevy),
             SelectedObject::Viewport { camera, .. } => Some(*camera),
             SelectedObject::Graph { graph_id } => Some(*graph_id),
@@ -226,9 +228,10 @@ pub fn create_egui_context() -> EguiContext {
     bevy_egui_ctx
 }
 
-pub fn shortcuts(
+fn shortcuts(
     mut paused: ResMut<Paused>,
     mut latest_follow: ResMut<timeline::LatestFollow>,
+    mut follow_latest_if_streaming_state: ResMut<timeline::FollowLatestIfStreamingState>,
     command_palette_state: Res<CommandPaletteState>,
     key_state: Res<LogicalKeyState>,
     mut context: Query<&mut EguiContext>,
@@ -239,6 +242,7 @@ pub fn shortcuts(
             .any(|mut c| c.get_mut().memory(|m| m.focused().is_some()));
 
     if !input_has_focus && key_state.just_pressed(&Key::Space) {
+        follow_latest_if_streaming_state.cancel();
         paused.0 = !paused.0;
         if paused.0 {
             latest_follow.0 = false;

@@ -1,12 +1,12 @@
 use std::mem;
 
 use crate::{
-    MainCamera, SelectedTimeRange,
+    SelectedTimeRange,
     ui::plot::{
         Line,
         gpu::{INDEX_BUFFER_LEN, INDEX_BUFFER_SIZE, LineHandle, VALUE_BUFFER_SIZE},
     },
-    ui::tiles::{ViewportConfig, default_playback_accent_color},
+    ui::timeline::TimelineSettings,
 };
 use bevy::camera::visibility::RenderLayers;
 use bevy::shader::Shader;
@@ -22,7 +22,7 @@ use bevy::{
         bundle::Bundle,
         component::Component,
         entity::{ContainsEntity, Entity},
-        query::{Has, With},
+        query::Has,
         schedule::{IntoScheduleConfigs, SystemSet},
         system::{
             Commands, Query, Res, ResMut, SystemState,
@@ -58,7 +58,6 @@ use binding_types::storage_buffer_read_only_sized;
 use impeller2_wkt::CurrentTimestamp;
 
 const LINE_SHADER_HANDLE: Handle<Shader> = uuid_handle!("bfffa3c4-9401-4b6e-b3ab-3564180352f1");
-const FUTURE_TRAIL_COLOR: Color = Color::WHITE;
 const FUTURE_TRAIL_ALPHA: f32 = 0.35;
 
 #[derive(SystemSet, Clone, Debug, Hash, PartialEq, Eq)]
@@ -410,7 +409,7 @@ struct CachedSystemState {
         Commands<'static, 'static>,
         Res<'static, SelectedTimeRange>,
         Res<'static, CurrentTimestamp>,
-        Query<'static, 'static, &'static ViewportConfig, With<MainCamera>>,
+        Res<'static, TimelineSettings>,
     )>,
 }
 
@@ -445,22 +444,22 @@ fn extract_lines(
             mut _main_commands,
             selected_time_range,
             current_timestamp,
-            viewport_configs,
+            timeline_settings,
         ) = cached_state.state.get_mut(world);
         let selected_range = selected_time_range.0.clone();
-        let accent_color = viewport_configs
-            .iter()
-            .next()
-            .map(|config| config.playback_accent_color)
-            .unwrap_or_else(default_playback_accent_color);
+        let accent_color = timeline_settings.accent_color;
         let played_trail_color = Vec4::new(
             accent_color.r,
             accent_color.g,
             accent_color.b,
             accent_color.a,
         );
-        let mut future_trail_color =
-            Vec4::from_array(FUTURE_TRAIL_COLOR.to_linear().to_f32_array());
+        let mut future_trail_color = Vec4::new(
+            timeline_settings.future_trail_color.r,
+            timeline_settings.future_trail_color.g,
+            timeline_settings.future_trail_color.b,
+            timeline_settings.future_trail_color.a,
+        );
         future_trail_color.w *= FUTURE_TRAIL_ALPHA;
 
         let played_range = selected_range.start..selected_range.end.min(current_timestamp.0);

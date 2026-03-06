@@ -11,6 +11,9 @@ pub fn serialize_schematic<T>(schematic: &Schematic<T>) -> String {
     if let Some(theme) = schematic.theme.as_ref() {
         doc.nodes_mut().push(serialize_theme(theme));
     }
+    if let Some(timeline) = schematic.timeline.as_ref() {
+        doc.nodes_mut().push(serialize_timeline(timeline));
+    }
 
     for elem in &schematic.elems {
         let node = serialize_schematic_elem(elem);
@@ -31,6 +34,7 @@ fn serialize_schematic_elem<T>(elem: &SchematicElem<T>) -> KdlNode {
         SchematicElem::VectorArrow(arrow) => serialize_vector_arrow(arrow),
         SchematicElem::Window(window) => serialize_window(window),
         SchematicElem::Theme(theme) => serialize_theme(theme),
+        SchematicElem::Timeline(timeline) => serialize_timeline(timeline),
     }
 }
 
@@ -298,6 +302,55 @@ fn serialize_theme(theme: &ThemeConfig) -> KdlNode {
         node.entries_mut()
             .push(KdlEntry::new_prop("scheme", scheme.clone()));
     }
+    node
+}
+
+fn serialize_timeline(timeline: &TimelineConfig) -> KdlNode {
+    let mut node = KdlNode::new("timeline");
+
+    if timeline.accent_color != default_timeline_accent_color() {
+        if let Some(name) = name_from_color(&timeline.accent_color) {
+            node.entries_mut()
+                .push(KdlEntry::new_prop("accent_color", name));
+        } else {
+            let (r, g, b, a) = color_to_ints(&timeline.accent_color);
+            if a == 255 {
+                node.entries_mut()
+                    .push(KdlEntry::new_prop("accent_color", format!("({r},{g},{b})")));
+            } else {
+                node.entries_mut().push(KdlEntry::new_prop(
+                    "accent_color",
+                    format!("({r},{g},{b},{a})"),
+                ));
+            }
+        }
+    }
+
+    if timeline.future_trail_color != default_timeline_future_trail_color() {
+        if let Some(name) = name_from_color(&timeline.future_trail_color) {
+            node.entries_mut()
+                .push(KdlEntry::new_prop("future_trail_color", name));
+        } else {
+            let (r, g, b, a) = color_to_ints(&timeline.future_trail_color);
+            if a == 255 {
+                node.entries_mut().push(KdlEntry::new_prop(
+                    "future_trail_color",
+                    format!("({r},{g},{b})"),
+                ));
+            } else {
+                node.entries_mut().push(KdlEntry::new_prop(
+                    "future_trail_color",
+                    format!("({r},{g},{b},{a})"),
+                ));
+            }
+        }
+    }
+
+    if timeline.follow_latest_if_streaming {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("follow_latest_if_streaming", true));
+    }
+
     node
 }
 
@@ -1005,6 +1058,31 @@ mod tests {
             expected.a,
             actual.a
         );
+    }
+
+    #[test]
+    fn test_serialize_timeline_config() {
+        let schematic = Schematic::<()> {
+            timeline: Some(TimelineConfig {
+                accent_color: Color::MINT,
+                future_trail_color: Color::HYPERBLUE,
+                follow_latest_if_streaming: true,
+            }),
+            ..Default::default()
+        };
+
+        let serialized = serialize_schematic(&schematic);
+        let parsed = parse_schematic(&serialized).unwrap();
+
+        assert!(serialized.contains("timeline"));
+        assert!(serialized.contains("accent_color="));
+        assert!(serialized.contains("future_trail_color="));
+        assert!(serialized.contains("follow_latest_if_streaming=#true"));
+
+        let timeline = parsed.timeline.expect("timeline config should roundtrip");
+        assert_eq!(timeline.accent_color, Color::MINT);
+        assert_eq!(timeline.future_trail_color, Color::HYPERBLUE);
+        assert!(timeline.follow_latest_if_streaming);
     }
 
     #[test]

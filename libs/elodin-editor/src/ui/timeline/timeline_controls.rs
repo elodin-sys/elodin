@@ -12,21 +12,23 @@ use std::convert::TryFrom;
 use std::time::Duration;
 use std::time::Instant;
 
-use crate::MainCamera;
 use crate::{
     TimeRangeBehavior,
     ui::{
-        Paused,
+        FocusedWindow, Paused, SelectedObject,
         button::EImageButton,
         colors::{ColorExt, EColor, get_scheme},
         theme::configure_combo_box,
-        tiles::{ViewportConfig, default_playback_accent_color},
+        tiles::WindowState,
         time_label::time_label,
         widgets::WidgetSystem,
     },
 };
 
-use super::{LatestFollow, PlaybackSpeed, StreamTickOrigin, TimelineIcons};
+use super::{
+    FollowLatestIfStreamingState, LatestFollow, PlaybackSpeed, StreamTickOrigin, TimelineIcons,
+    TimelineSettings,
+};
 
 pub(crate) fn plugin(app: &mut App) {
     app.init_resource::<TimelineStepButtons>();
@@ -45,8 +47,12 @@ pub struct TimelineControls<'w, 's> {
     tick_origin: ResMut<'w, StreamTickOrigin>,
     step_buttons: ResMut<'w, TimelineStepButtons>,
     latest_follow: ResMut<'w, LatestFollow>,
+    follow_latest_if_streaming_state: ResMut<'w, FollowLatestIfStreamingState>,
+    timeline_settings: Res<'w, TimelineSettings>,
+    focused_window: Res<'w, FocusedWindow>,
+    primary_windows: Query<'w, 's, Entity, With<bevy::window::PrimaryWindow>>,
+    window_states: Query<'w, 's, &'static mut WindowState>,
     replay_mode: Option<Res<'w, crate::ReplayMode>>,
-    viewport_configs: Query<'w, 's, &'static ViewportConfig, With<MainCamera>>,
 }
 
 #[derive(Default, Debug, Resource)]
@@ -78,8 +84,12 @@ impl WidgetSystem for TimelineControls<'_, '_> {
             mut tick_origin,
             mut step_buttons,
             mut latest_follow,
+            mut follow_latest_if_streaming_state,
+            timeline_settings,
+            focused_window,
+            primary_windows,
+            mut window_states,
             replay_mode,
-            viewport_configs,
         } = state.get_mut(world);
 
         tick_origin.observe_stream(**stream_id);
@@ -88,11 +98,7 @@ impl WidgetSystem for TimelineControls<'_, '_> {
         let tick_step_duration = hifitime::Duration::from_seconds(tick_time.0);
         let tick_step_micros_i128 = tick_step_duration.total_nanoseconds() / 1000;
         let tick_step_micros = i64::try_from(tick_step_micros_i128).unwrap_or(0);
-        let accent_color = viewport_configs
-            .iter()
-            .next()
-            .map(|config| config.playback_accent_color.into_color32())
-            .unwrap_or_else(|| default_playback_accent_color().into_color32());
+        let accent_color = timeline_settings.accent_color.into_color32();
         ui.set_height(50.0);
         let typical_mouse_click = Duration::from_millis(85);
         let wait_before_advancing = typical_mouse_click * 2;
@@ -113,6 +119,7 @@ impl WidgetSystem for TimelineControls<'_, '_> {
                             );
 
                             if jump_to_start_btn.clicked() {
+                                follow_latest_if_streaming_state.cancel();
                                 latest_follow.0 = false;
                                 tick.0 = earliest_timestamp.0;
                                 tick_origin.request_rebase();
@@ -126,6 +133,7 @@ impl WidgetSystem for TimelineControls<'_, '_> {
                                 && tick.0 > earliest_timestamp.0
                                 && tick_step_micros > 0
                             {
+                                follow_latest_if_streaming_state.cancel();
                                 latest_follow.0 = false;
                                 let mut first = false;
                                 let down = step_buttons.back.get_or_insert_with(|| {
@@ -148,6 +156,7 @@ impl WidgetSystem for TimelineControls<'_, '_> {
                                     .add(EImageButton::new(icons.play).scale(btn_scale, btn_scale));
 
                                 if play_btn.clicked() {
+                                    follow_latest_if_streaming_state.cancel();
                                     paused.0 = false;
                                 }
                             } else {
@@ -156,6 +165,7 @@ impl WidgetSystem for TimelineControls<'_, '_> {
                                 );
 
                                 if pause_btn.clicked() {
+                                    follow_latest_if_streaming_state.cancel();
                                     paused.0 = true;
                                     latest_follow.0 = false;
                                 }
@@ -169,6 +179,7 @@ impl WidgetSystem for TimelineControls<'_, '_> {
                                 && tick.0 < max_tick.0
                                 && tick_step_micros > 0
                             {
+                                follow_latest_if_streaming_state.cancel();
                                 latest_follow.0 = false;
                                 let mut first = false;
                                 let down = step_buttons.forward.get_or_insert_with(|| {
@@ -188,6 +199,7 @@ impl WidgetSystem for TimelineControls<'_, '_> {
                             );
 
                             if jump_to_end_btn.clicked() {
+                                follow_latest_if_streaming_state.cancel();
                                 tick.0 = max_tick.0;
                                 paused.0 = false;
                                 latest_follow.0 = replay_mode.is_none();
@@ -226,6 +238,23 @@ impl WidgetSystem for TimelineControls<'_, '_> {
                                         .align(egui::RectAlign::TOP_START)
                                         .width(res.rect.width())
                                         .show(ui_func);
+
+                                    let settings_response = ui
+                                        .add(EImageButton::new(icons.setting).scale(1.2, 1.2))
+                                        .on_hover_text("Timeline settings");
+                                    if settings_response.clicked() {
+                                        let target_window = focused_window
+                                            .0
+                                            .or_else(|| primary_windows.iter().next());
+                                        if let Some(target_window) = target_window
+                                            && let Ok(mut window_state) =
+                                                window_states.get_mut(target_window)
+                                        {
+                                            window_state.ui_state.selected_object =
+                                                SelectedObject::Timeline;
+                                            window_state.ui_state.right_sidebar_visible = true;
+                                        }
+                                    }
 
                                     // TIME
 
@@ -294,6 +323,7 @@ impl WidgetSystem for TimelineControls<'_, '_> {
                                         accent_color,
                                     );
                                     if latest_enabled && latest_response.clicked() {
+                                        follow_latest_if_streaming_state.cancel();
                                         latest_follow.0 = !latest_follow.0;
                                     }
 

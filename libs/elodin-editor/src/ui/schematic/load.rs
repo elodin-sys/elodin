@@ -69,6 +69,7 @@ use crate::{
             DashboardPane, GraphPane, Pane, TileState, TreePane, ViewportPane, WindowDescriptor,
             WindowId, WindowState,
         },
+        timeline::TimelineSettings,
     },
     vector_arrow::{VectorArrowState, ViewportArrow},
 };
@@ -102,6 +103,7 @@ pub struct LoadSchematicParams<'w, 's> {
     pub icon_cache: ResMut<'w, IconTextureCache>,
     pub render_layer_alloc: ResMut<'w, RenderLayerAlloc>,
     pub hdr_enabled: ResMut<'w, HdrEnabled>,
+    pub timeline_settings: ResMut<'w, TimelineSettings>,
     pub schema_reg: Res<'w, ComponentSchemaRegistry>,
     pub eql: Res<'w, EqlContext>,
     pub node_updater_params: NodeUpdaterParams<'w, 's>,
@@ -313,6 +315,7 @@ impl LoadSchematicParams<'_, '_> {
         let theme_mode = Some(theme_selection.mode.clone());
         let theme_mode_str = theme_mode.as_deref();
         let mut main_window_descriptor = None;
+        *self.timeline_settings = schematic.timeline.clone().unwrap_or_default().into();
 
         let panel_count = schematic
             .elems
@@ -356,6 +359,7 @@ impl LoadSchematicParams<'_, '_> {
                     }
                 }
                 impeller2_wkt::SchematicElem::Theme(_) => {}
+                impeller2_wkt::SchematicElem::Timeline(_) => {}
             }
         }
 

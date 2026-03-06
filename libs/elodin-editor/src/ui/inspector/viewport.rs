@@ -291,32 +291,6 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
         egui::Frame::NONE
             .inner_margin(egui::Margin::symmetric(8, 8))
             .show(ui, |ui| {
-                let mut playback_color = viewport_config.playback_accent_color.into_color32();
-                ui.horizontal(|ui| {
-                    ui.label(egui::RichText::new("PLAYBACK COLOR").color(scheme.text_secondary));
-                    ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
-                        let swatch = ui.add(
-                            egui::Button::new("")
-                                .fill(playback_color)
-                                .stroke(egui::Stroke::new(1.0, scheme.border_primary))
-                                .corner_radius(egui::CornerRadius::same(10))
-                                .min_size(egui::vec2(20.0, 20.0)),
-                        );
-                        let color_id = ui.auto_id_with("playback_accent_color");
-                        if swatch.clicked() {
-                            egui::Popup::toggle_id(ui.ctx(), color_id);
-                        }
-                        color_popup(ui, &mut playback_color, color_id, &swatch);
-                    });
-                });
-                viewport_config.playback_accent_color =
-                    impeller2_wkt::Color::from_color32(playback_color);
-            });
-
-        ui.separator();
-        egui::Frame::NONE
-            .inner_margin(egui::Margin::symmetric(8, 8))
-            .show(ui, |ui| {
                 let create_button_width = 88.0;
                 ui.horizontal(|ui| {
                     ui.label(egui::RichText::new("FRUSTUM").color(scheme.text_secondary));
