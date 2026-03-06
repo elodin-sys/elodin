@@ -41,6 +41,10 @@ impl WidgetSystem for InspectorTimeline<'_> {
         );
 
         node_color_picker(ui, "PLAYED TRAIL", &mut timeline_settings.accent_color);
-        node_color_picker(ui, "FUTURE TRAIL", &mut timeline_settings.future_trail_color);
+        node_color_picker(
+            ui,
+            "FUTURE TRAIL",
+            &mut timeline_settings.future_trail_color,
+        );
     }
 }
