@@ -1049,7 +1049,6 @@ fn copy_index_with_offset(src_index: &Path, dst_index: &Path, offset: i64) -> Re
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serial_test::serial;
     use std::collections::HashMap;
     use tempfile::TempDir;
 
@@ -1145,7 +1144,6 @@ mod tests {
     }
 
     #[test]
-    #[serial]
     fn test_merge_basic() {
         let temp = TempDir::new().unwrap();
         let db1_path = temp.path().join("db1");
@@ -1202,7 +1200,6 @@ mod tests {
     }
 
     #[test]
-    #[serial]
     fn test_merge_no_prefix() {
         let temp = TempDir::new().unwrap();
         let db1_path = temp.path().join("db1");
@@ -1236,7 +1233,6 @@ mod tests {
     }
 
     #[test]
-    #[serial]
     fn test_merge_schematic_pruned() {
         let temp = TempDir::new().unwrap();
         let db1_path = temp.path().join("db1");
@@ -1277,7 +1273,6 @@ mod tests {
     }
 
     #[test]
-    #[serial]
     fn test_dry_run() {
         let temp = TempDir::new().unwrap();
         let db1_path = temp.path().join("db1");
@@ -1306,7 +1301,6 @@ mod tests {
     }
 
     #[test]
-    #[serial]
     fn test_output_exists_error() {
         let temp = TempDir::new().unwrap();
         let db1_path = temp.path().join("db1");
@@ -1334,7 +1328,6 @@ mod tests {
     }
 
     #[test]
-    #[serial]
     fn test_collect_component_names() {
         let temp = TempDir::new().unwrap();
         let db_path = temp.path().join("db");
@@ -1357,7 +1350,6 @@ mod tests {
     }
 
     #[test]
-    #[serial]
     fn test_check_for_collisions_same_prefix() {
         let temp = TempDir::new().unwrap();
         let db1_path = temp.path().join("db1");
@@ -1380,7 +1372,6 @@ mod tests {
     }
 
     #[test]
-    #[serial]
     fn test_check_for_collisions_cross_prefix() {
         let temp = TempDir::new().unwrap();
         let db1_path = temp.path().join("db1");
@@ -1405,7 +1396,6 @@ mod tests {
     }
 
     #[test]
-    #[serial]
     fn test_check_for_collisions_no_collision_with_different_prefixes() {
         let temp = TempDir::new().unwrap();
         let db1_path = temp.path().join("db1");
@@ -1473,7 +1463,6 @@ mod tests {
     }
 
     #[test]
-    #[serial]
     fn test_copy_index_with_positive_offset() {
         let temp = TempDir::new().unwrap();
         let src_index = temp.path().join("src_index");
@@ -1498,7 +1487,6 @@ mod tests {
     }
 
     #[test]
-    #[serial]
     fn test_copy_index_with_negative_offset() {
         let temp = TempDir::new().unwrap();
         let src_index = temp.path().join("src_index");
@@ -1527,7 +1515,6 @@ mod tests {
     }
 
     #[test]
-    #[serial]
     fn test_copy_index_with_zero_offset() {
         let temp = TempDir::new().unwrap();
         let src_index = temp.path().join("src_index");
@@ -1547,7 +1534,6 @@ mod tests {
     }
 
     #[test]
-    #[serial]
     fn test_copy_index_rejects_malformed_data_length() {
         use std::io::Write;
         let temp = TempDir::new().unwrap();
@@ -1579,7 +1565,6 @@ mod tests {
     }
 
     #[test]
-    #[serial]
     fn test_alignment_validation_both_required() {
         let temp = TempDir::new().unwrap();
         let db1_path = temp.path().join("db1");
@@ -1676,7 +1661,6 @@ mod tests {
     }
 
     #[test]
-    #[serial]
     fn test_merge_with_alignment_db2_shifted_backward() {
         // Test case: DB1 has "boost" event at 15s, DB2 has "boost" event at 45s
         // DB2 is shifted backward by 30s to align with DB1's anchor
@@ -1746,7 +1730,6 @@ mod tests {
     }
 
     #[test]
-    #[serial]
     fn test_merge_with_alignment_db2_shifted_forward() {
         // Test case: DB1 has "boost" event at 45s, DB2 has "boost" event at 15s
         // DB2 is shifted forward by 30s to align with DB1's anchor
@@ -1816,7 +1799,6 @@ mod tests {
     }
 
     #[test]
-    #[serial]
     fn test_merge_wall_clock_to_monotonic() {
         // Test case: User's actual use case
         // DB1 (sitl): Monotonic timestamps starting at 0s (0s - 70s)

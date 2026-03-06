@@ -111,4 +111,3 @@ scuffle-h264 = { version = "0.2", optional = true }
 
 [dev-dependencies]
 tempfile = "3"
-serial_test = "3"

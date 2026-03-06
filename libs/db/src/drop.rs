@@ -348,7 +348,6 @@ fn get_entry_count(index_path: &Path) -> Result<usize, std::io::Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serial_test::serial;
     use std::collections::HashMap;
     use tempfile::TempDir;
 
@@ -531,7 +530,6 @@ mod tests {
     }
 
     #[test]
-    #[serial]
     fn test_run_drop_all() {
         let temp = TempDir::new().unwrap();
         let db_path = temp.path().join("db");
@@ -556,7 +554,6 @@ mod tests {
     }
 
     #[test]
-    #[serial]
     fn test_run_drop_fuzzy() {
         let temp = TempDir::new().unwrap();
         let db_path = temp.path().join("db");
@@ -588,7 +585,6 @@ mod tests {
     }
 
     #[test]
-    #[serial]
     fn test_run_drop_pattern() {
         let temp = TempDir::new().unwrap();
         let db_path = temp.path().join("db");
@@ -620,7 +616,6 @@ mod tests {
     }
 
     #[test]
-    #[serial]
     fn test_dry_run_does_not_modify() {
         let temp = TempDir::new().unwrap();
         let db_path = temp.path().join("db");
@@ -637,7 +632,6 @@ mod tests {
     }
 
     #[test]
-    #[serial]
     fn test_no_matches_found() {
         let temp = TempDir::new().unwrap();
         let db_path = temp.path().join("db");

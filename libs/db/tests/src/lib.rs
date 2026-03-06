@@ -1115,11 +1115,8 @@ mod tests {
             .0
             .unwrap();
 
-        sleep(Duration::from_millis(50)).await;
-
-        let correct_last_updated = db.last_updated.latest();
-
         let last_updated = stream.next().await.unwrap();
+        let correct_last_updated = db.last_updated.latest();
         assert_eq!(correct_last_updated, last_updated.0);
 
         let value = 42.0f64;
@@ -1127,11 +1124,8 @@ mod tests {
         pkt.extend_aligned(&[value]);
         client.send(pkt).await.0.unwrap();
 
-        sleep(Duration::from_millis(50)).await;
-
-        let correct_last_updated = db.last_updated.latest();
-
         let last_updated = stream.next().await.unwrap();
+        let correct_last_updated = db.last_updated.latest();
         assert_eq!(correct_last_updated, last_updated.0);
     }
 
@@ -2016,6 +2010,7 @@ mod tests {
             let listener = TcpListener::bind("127.0.0.1:0").unwrap();
             let addr = listener.local_addr().unwrap();
             let server = Server::from_listener(listener, temp_dir.clone()).unwrap();
+            let db = server.db.clone();
             stellar(move || async { server.run().await });
 
             let mut client = Client::connect(addr).await.unwrap();
@@ -2057,6 +2052,7 @@ mod tests {
             client.send(&test_msg).await.0.unwrap();
 
             sleep(Duration::from_millis(100)).await;
+            db.flush_all().unwrap();
         }
 
         let db = elodin_db::DB::open(temp_dir.clone()).unwrap();
