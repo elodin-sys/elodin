@@ -175,8 +175,9 @@ with pkgs; let
         echo "  • Rust: cargo, clippy, nextest"
         echo "  • Tools: uv, maturin, ruff, just, alejandra"
         echo ""
-        echo "SDK Development (if needed):"
+        echo "Development flow:"
         echo "  • Run 'just install' to build: elodin-py, elodin, and elodin-db"
+        echo "  • don't forget to source the venv with 'source .venv/bin/activate'"
         echo ""
 
         exec ${pkgs.zsh}/bin/zsh
