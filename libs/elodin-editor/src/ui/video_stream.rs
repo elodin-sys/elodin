@@ -1043,6 +1043,11 @@ pub fn connect_streams(
                         Timestamp(i64::MIN),
                         limit,
                     );
+                    bevy::log::info!(
+                        "video stream connected: msg_name={}, raw_dims={:?}",
+                        stream.msg_name,
+                        stream.raw_rgba_dims
+                    );
                     send_stream_request(&mut commands, entity, msg_id, stream_id.0);
                     stream.state = StreamState::Active;
                 }

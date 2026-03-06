@@ -13,8 +13,6 @@ use bevy::{
 use bevy_mat3_material::Mat3Material;
 use big_space::{FloatingOrigin, GridCell};
 use elodin_db::render_bridge::{RenderBridgeServer, RenderRequest};
-use impeller2::types::{self, LenPacket};
-use impeller2_bevy::PacketTx;
 use impeller2_kdl::FromKdl;
 use impeller2_wkt::{CurrentTimestamp, DbConfig, LastUpdated, SchematicElem};
 
@@ -248,24 +246,12 @@ fn send_frame_response(
     let world = app.world();
     let frame_rx = world.resource::<crate::sensor_camera::SensorFrameReceiver>();
     if let Ok((camera_name, frame_bytes, _w, _h)) = frame_rx.0.try_recv() {
-        // Send frame bytes directly to the sim over UDS so it can write
-        // them to its local DB without going through TCP (which would
-        // deadlock the sim's stellarator runtime).
         RenderBridgeServer::respond_with_frame(
             stream,
             &camera_name,
             request.timestamp,
             &frame_bytes,
         );
-        // Also write to DB via TCP so the editor's sensor_view panels
-        // can display the frames.
-        if let Some(tx) = world.get_resource::<PacketTx>() {
-            let msg_id = types::msg_id(&camera_name);
-            let mut pkt =
-                LenPacket::msg_with_timestamp(msg_id, request.timestamp, frame_bytes.len());
-            pkt.extend_from_slice(&frame_bytes);
-            let _ = tx.0.try_send(Some(pkt));
-        }
     } else {
         RenderBridgeServer::respond_empty(stream);
     }

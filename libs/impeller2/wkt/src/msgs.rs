@@ -689,6 +689,10 @@ impl Msg for TimestampedMsgStream {
     const ID: PacketId = [224, 38];
 }
 
+impl Request for TimestampedMsgStream {
+    type Reply<B: IoBuf + Clone> = MsgBuf<B>;
+}
+
 #[derive(Serialize, Deserialize, Default, Debug, Clone, postcard_schema::Schema)]
 pub struct MeanOp {
     pub window: u16,
