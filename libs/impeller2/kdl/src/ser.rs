@@ -308,47 +308,45 @@ fn serialize_theme(theme: &ThemeConfig) -> KdlNode {
 fn serialize_timeline(timeline: &TimelineConfig) -> KdlNode {
     let mut node = KdlNode::new("timeline");
 
-    if timeline.accent_color != default_timeline_accent_color() {
-        if let Some(name) = name_from_color(&timeline.accent_color) {
+    if timeline.played_color != default_timeline_played_color() {
+        if let Some(name) = name_from_color(&timeline.played_color) {
             node.entries_mut()
-                .push(KdlEntry::new_prop("accent_color", name));
+                .push(KdlEntry::new_prop("played_color", name));
         } else {
-            let (r, g, b, a) = color_to_ints(&timeline.accent_color);
+            let (r, g, b, a) = color_to_ints(&timeline.played_color);
             if a == 255 {
                 node.entries_mut()
-                    .push(KdlEntry::new_prop("accent_color", format!("({r},{g},{b})")));
+                    .push(KdlEntry::new_prop("played_color", format!("({r},{g},{b})")));
             } else {
                 node.entries_mut().push(KdlEntry::new_prop(
-                    "accent_color",
+                    "played_color",
                     format!("({r},{g},{b},{a})"),
                 ));
             }
         }
     }
 
-    if timeline.future_trail_color != default_timeline_future_trail_color() {
-        if let Some(name) = name_from_color(&timeline.future_trail_color) {
+    if timeline.future_color != default_timeline_future_color() {
+        if let Some(name) = name_from_color(&timeline.future_color) {
             node.entries_mut()
-                .push(KdlEntry::new_prop("future_trail_color", name));
+                .push(KdlEntry::new_prop("future_color", name));
         } else {
-            let (r, g, b, a) = color_to_ints(&timeline.future_trail_color);
+            let (r, g, b, a) = color_to_ints(&timeline.future_color);
             if a == 255 {
-                node.entries_mut().push(KdlEntry::new_prop(
-                    "future_trail_color",
-                    format!("({r},{g},{b})"),
-                ));
+                node.entries_mut()
+                    .push(KdlEntry::new_prop("future_color", format!("({r},{g},{b})")));
             } else {
                 node.entries_mut().push(KdlEntry::new_prop(
-                    "future_trail_color",
+                    "future_color",
                     format!("({r},{g},{b},{a})"),
                 ));
             }
         }
     }
 
-    if timeline.follow_latest_if_streaming {
+    if timeline.follow_latest {
         node.entries_mut()
-            .push(KdlEntry::new_prop("follow_latest_if_streaming", true));
+            .push(KdlEntry::new_prop("follow_latest", true));
     }
 
     node
@@ -1064,9 +1062,9 @@ mod tests {
     fn test_serialize_timeline_config() {
         let schematic = Schematic::<()> {
             timeline: Some(TimelineConfig {
-                accent_color: Color::MINT,
-                future_trail_color: Color::HYPERBLUE,
-                follow_latest_if_streaming: true,
+                played_color: Color::MINT,
+                future_color: Color::HYPERBLUE,
+                follow_latest: true,
             }),
             ..Default::default()
         };
@@ -1075,14 +1073,14 @@ mod tests {
         let parsed = parse_schematic(&serialized).unwrap();
 
         assert!(serialized.contains("timeline"));
-        assert!(serialized.contains("accent_color="));
-        assert!(serialized.contains("future_trail_color="));
-        assert!(serialized.contains("follow_latest_if_streaming=#true"));
+        assert!(serialized.contains("played_color="));
+        assert!(serialized.contains("future_color="));
+        assert!(serialized.contains("follow_latest=#true"));
 
         let timeline = parsed.timeline.expect("timeline config should roundtrip");
-        assert_eq!(timeline.accent_color, Color::MINT);
-        assert_eq!(timeline.future_trail_color, Color::HYPERBLUE);
-        assert!(timeline.follow_latest_if_streaming);
+        assert_eq!(timeline.played_color, Color::MINT);
+        assert_eq!(timeline.future_color, Color::HYPERBLUE);
+        assert!(timeline.follow_latest);
     }
 
     #[test]

@@ -173,25 +173,20 @@ fn parse_timeline(node: &KdlNode, src: &str) -> Result<TimelineConfig, KdlSchema
         }
     };
 
-    let accent_color = parse_timeline_color(
-        &["accent_color", "playback_color"],
-        default_timeline_accent_color(),
-    )?;
-    let future_trail_color = parse_timeline_color(
-        &["future_trail_color"],
-        default_timeline_future_trail_color(),
-    )?;
+    let played_color =
+        parse_timeline_color(&["played_color"], default_timeline_played_color())?;
+    let future_color =
+        parse_timeline_color(&["future_color"], default_timeline_future_color())?;
 
-    let follow_latest_if_streaming = node
-        .get("follow_latest_if_streaming")
-        .or_else(|| node.get("latest_live"))
+    let follow_latest = node
+        .get("follow_latest")
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
 
     Ok(TimelineConfig {
-        accent_color,
-        future_trail_color,
-        follow_latest_if_streaming,
+        played_color,
+        future_color,
+        follow_latest,
     })
 }
 
@@ -1855,36 +1850,31 @@ mod tests {
 
     #[test]
     fn test_parse_timeline_config() {
-        let kdl = r#"timeline accent_color="mint" future_trail_color="white" follow_latest_if_streaming=#true"#;
+        let kdl =
+            r#"timeline played_color="mint" future_color="white" follow_latest=#true"#;
         let schematic = parse_schematic(kdl).unwrap();
 
         assert!(schematic.elems.is_empty());
         let timeline = schematic
             .timeline
             .expect("timeline config should be parsed");
-        assert_eq!(timeline.accent_color, Color::MINT);
-        assert_eq!(timeline.future_trail_color, Color::WHITE);
-        assert!(timeline.follow_latest_if_streaming);
+        assert_eq!(timeline.played_color, Color::MINT);
+        assert_eq!(timeline.future_color, Color::WHITE);
+        assert!(timeline.follow_latest);
     }
 
     #[test]
-    fn test_parse_timeline_legacy_aliases() {
-        let kdl = r#"timeline playback_color="yalk" latest_live=#true"#;
-        let schematic = parse_schematic(kdl).unwrap();
-
-        let timeline = schematic
-            .timeline
-            .expect("timeline config should be parsed");
-        assert_eq!(timeline.accent_color, Color::YALK);
-        assert!(timeline.follow_latest_if_streaming);
+    fn test_parse_timeline_legacy_aliases_are_rejected() {
+        let kdl = r#"timeline playback_color="yalk" future_trail_color="white" latest_live=#true"#;
+        assert!(parse_schematic(kdl).is_err());
     }
 
     #[test]
     fn test_parse_timeline_child_color() {
         let kdl = r#"
-timeline follow_latest_if_streaming=#true {
-  accent_color mint
-  future_trail_color hyperblue
+timeline follow_latest=#true {
+  played_color mint
+  future_color hyperblue
 }
 "#;
         let schematic = parse_schematic(kdl).unwrap();
@@ -1892,9 +1882,9 @@ timeline follow_latest_if_streaming=#true {
         let timeline = schematic
             .timeline
             .expect("timeline config should be parsed");
-        assert_eq!(timeline.accent_color, Color::MINT);
-        assert_eq!(timeline.future_trail_color, Color::HYPERBLUE);
-        assert!(timeline.follow_latest_if_streaming);
+        assert_eq!(timeline.played_color, Color::MINT);
+        assert_eq!(timeline.future_color, Color::HYPERBLUE);
+        assert!(timeline.follow_latest);
     }
 
     #[test]

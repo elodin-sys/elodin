@@ -433,8 +433,8 @@ impl WidgetSystem for TimelineSlider<'_> {
 
         let (icons, timeline_args) = args;
         let handle_icon = icons.handle;
-        let playhead_color = timeline_settings.accent_color.into_color32();
-        let latest_color = timeline_settings.future_trail_color.into_color32();
+        let playhead_color = timeline_settings.played_color.into_color32();
+        let latest_color = timeline_settings.future_color.into_color32();
 
         ui.horizontal(|ui| {
             let response = ui

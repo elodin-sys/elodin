@@ -447,20 +447,20 @@ fn extract_lines(
             timeline_settings,
         ) = cached_state.state.get_mut(world);
         let selected_range = selected_time_range.0.clone();
-        let accent_color = timeline_settings.accent_color;
+        let played_color = timeline_settings.played_color;
         let played_trail_color = Vec4::new(
-            accent_color.r,
-            accent_color.g,
-            accent_color.b,
-            accent_color.a,
+            played_color.r,
+            played_color.g,
+            played_color.b,
+            played_color.a,
         );
-        let mut future_trail_color = Vec4::new(
-            timeline_settings.future_trail_color.r,
-            timeline_settings.future_trail_color.g,
-            timeline_settings.future_trail_color.b,
-            timeline_settings.future_trail_color.a,
+        let mut future_color = Vec4::new(
+            timeline_settings.future_color.r,
+            timeline_settings.future_color.g,
+            timeline_settings.future_color.b,
+            timeline_settings.future_color.a,
         );
-        future_trail_color.w *= FUTURE_TRAIL_ALPHA;
+        future_color.w *= FUTURE_TRAIL_ALPHA;
 
         let played_range = selected_range.start..selected_range.end.min(current_timestamp.0);
         let future_range = selected_range.start.max(current_timestamp.0)..selected_range.end;
@@ -562,7 +562,7 @@ fn extract_lines(
 
             if let Some(gpu_line) = build_gpu_line(future_range.clone()) {
                 let mut future_uniform = *uniform;
-                future_uniform.color = future_trail_color;
+                future_uniform.color = future_color;
                 commands.spawn((
                     MainEntity::from(entity),
                     LineBundle {

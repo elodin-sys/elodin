@@ -12,11 +12,11 @@ fn default_true() -> bool {
     true
 }
 
-pub fn default_timeline_accent_color() -> Color {
+pub fn default_timeline_played_color() -> Color {
     Color::YELLOW
 }
 
-pub fn default_timeline_future_trail_color() -> Color {
+pub fn default_timeline_future_color() -> Color {
     Color::WHITE
 }
 
@@ -110,20 +110,20 @@ pub struct ThemeConfig {
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub struct TimelineConfig {
-    #[serde(default = "default_timeline_accent_color", alias = "playback_color")]
-    pub accent_color: Color,
-    #[serde(default = "default_timeline_future_trail_color")]
-    pub future_trail_color: Color,
-    #[serde(default, alias = "latest_live")]
-    pub follow_latest_if_streaming: bool,
+    #[serde(default = "default_timeline_played_color")]
+    pub played_color: Color,
+    #[serde(default = "default_timeline_future_color")]
+    pub future_color: Color,
+    #[serde(default)]
+    pub follow_latest: bool,
 }
 
 impl Default for TimelineConfig {
     fn default() -> Self {
         Self {
-            accent_color: default_timeline_accent_color(),
-            future_trail_color: default_timeline_future_trail_color(),
-            follow_latest_if_streaming: false,
+            played_color: default_timeline_played_color(),
+            future_color: default_timeline_future_color(),
+            follow_latest: false,
         }
     }
 }

@@ -98,7 +98,7 @@ impl WidgetSystem for TimelineControls<'_, '_> {
         let tick_step_duration = hifitime::Duration::from_seconds(tick_time.0);
         let tick_step_micros_i128 = tick_step_duration.total_nanoseconds() / 1000;
         let tick_step_micros = i64::try_from(tick_step_micros_i128).unwrap_or(0);
-        let accent_color = timeline_settings.accent_color.into_color32();
+        let played_color = timeline_settings.played_color.into_color32();
         ui.set_height(50.0);
         let typical_mouse_click = Duration::from_millis(85);
         let wait_before_advancing = typical_mouse_click * 2;
@@ -320,7 +320,7 @@ impl WidgetSystem for TimelineControls<'_, '_> {
                                         latest_enabled,
                                         latest_follow.0,
                                         lag_micros,
-                                        accent_color,
+                                        played_color,
                                     );
                                     if latest_enabled && latest_response.clicked() {
                                         follow_latest_if_streaming_state.cancel();
@@ -375,7 +375,7 @@ fn live_follow_button(
     enabled: bool,
     following: bool,
     lag_micros: i64,
-    accent_color: egui::Color32,
+    played_color: egui::Color32,
 ) -> egui::Response {
     let is_delayed = lag_micros > 0;
     let live_label = "LIVE";
@@ -392,11 +392,11 @@ fn live_follow_button(
         )
     } else if following {
         (
-            accent_color,
-            accent_color.opacity(0.9),
+            played_color,
+            played_color.opacity(0.9),
             scheme.bg_secondary.opacity(0.7),
-            accent_color.opacity(0.45),
-            accent_color,
+            played_color.opacity(0.45),
+            played_color,
         )
     } else if is_delayed {
         (

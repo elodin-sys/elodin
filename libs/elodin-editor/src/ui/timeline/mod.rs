@@ -54,9 +54,9 @@ pub struct LatestFollow(pub bool);
 
 #[derive(bevy::prelude::Resource, Clone, Copy, Debug, PartialEq)]
 pub struct TimelineSettings {
-    pub accent_color: impeller2_wkt::Color,
-    pub future_trail_color: impeller2_wkt::Color,
-    pub follow_latest_if_streaming: bool,
+    pub played_color: impeller2_wkt::Color,
+    pub future_color: impeller2_wkt::Color,
+    pub follow_latest: bool,
 }
 
 impl Default for TimelineSettings {
@@ -68,9 +68,9 @@ impl Default for TimelineSettings {
 impl From<impeller2_wkt::TimelineConfig> for TimelineSettings {
     fn from(value: impeller2_wkt::TimelineConfig) -> Self {
         Self {
-            accent_color: value.accent_color,
-            future_trail_color: value.future_trail_color,
-            follow_latest_if_streaming: value.follow_latest_if_streaming,
+            played_color: value.played_color,
+            future_color: value.future_color,
+            follow_latest: value.follow_latest,
         }
     }
 }
@@ -78,9 +78,9 @@ impl From<impeller2_wkt::TimelineConfig> for TimelineSettings {
 impl From<TimelineSettings> for impeller2_wkt::TimelineConfig {
     fn from(value: TimelineSettings) -> Self {
         Self {
-            accent_color: value.accent_color,
-            future_trail_color: value.future_trail_color,
-            follow_latest_if_streaming: value.follow_latest_if_streaming,
+            played_color: value.played_color,
+            future_color: value.future_color,
+            follow_latest: value.follow_latest,
         }
     }
 }
@@ -122,7 +122,7 @@ fn reset_follow_latest_if_streaming_state(
     replay_mode: Option<Res<crate::ReplayMode>>,
     mut state: ResMut<FollowLatestIfStreamingState>,
 ) {
-    if replay_mode.is_some() || !timeline_settings.follow_latest_if_streaming {
+    if replay_mode.is_some() || !timeline_settings.follow_latest {
         state.armed = false;
         state.baseline_latest = None;
         return;
@@ -146,7 +146,7 @@ fn auto_start_follow_latest_if_streaming(
     mut latest_follow: ResMut<LatestFollow>,
     mut state: ResMut<FollowLatestIfStreamingState>,
 ) {
-    if replay_mode.is_some() || !timeline_settings.follow_latest_if_streaming || latest_follow.0 {
+    if replay_mode.is_some() || !timeline_settings.follow_latest || latest_follow.0 {
         return;
     }
 
