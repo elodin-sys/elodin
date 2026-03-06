@@ -50,7 +50,7 @@ categories = [
     "command-line-utilities",
 ]
 license = "MIT"
-repository = "https://github.com/Michael-A-Kuykendall/muxide"
+repository.workspace = true
 
 [lib]
 name = "muxide"
