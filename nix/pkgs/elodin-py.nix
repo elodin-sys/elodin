@@ -106,12 +106,12 @@
       runHook postBuild
     '';
 
-    # Install the wheel
+    # Install the wheel (maturin's output name can vary by platform; copy to fixed name for downstream)
     installPhase = ''
       runHook preInstall
 
       mkdir -p $out
-      cp target/wheels/${wheelName}-${wheelVersion}-${wheelSuffix}.whl $out/
+      cp target/wheels/*.whl "$out/${wheelName}-${wheelVersion}-${wheelSuffix}.whl"
 
       runHook postInstall
     '';
