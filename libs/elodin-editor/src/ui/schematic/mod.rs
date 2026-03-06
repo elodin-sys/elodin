@@ -19,6 +19,7 @@ use impeller2_wkt::{
     ActionPane, ComponentMonitor, ComponentPath, Dashboard, Line3d, Panel, Schematic,
     SchematicElem, Split, VectorArrow3d, VideoStream as WktVideoStream, Viewport, WindowSchematic,
 };
+use bevy_geo_frames::{GeoFrame, GeoPosition};
 
 pub mod tree;
 pub use tree::*;
@@ -67,6 +68,7 @@ pub struct SchematicParam<'w, 's> {
     pub video_streams: Query<'w, 's, &'static super::video_stream::VideoStream>,
     pub hdr_enabled: Res<'w, HdrEnabled>,
     pub metadata: Res<'w, ComponentMetadataRegistry>,
+    pub geo_positions: Query<'w, 's, &'static GeoPosition>,
 }
 
 impl SchematicParam<'_, '_> {
@@ -197,6 +199,9 @@ impl SchematicParam<'_, '_> {
                             })
                             .map(|(_, arrow, _)| arrow.clone())
                             .collect();
+                        let frame: Option<GeoFrame> =
+                            self.geo_positions.get(cam_entity)
+                            .map(|geo_pos| geo_pos.0).ok();
 
                         Some(Panel::Viewport(Viewport {
                             fov,
@@ -219,6 +224,7 @@ impl SchematicParam<'_, '_> {
                                 .then(|| viewport_data.up.eql.clone()),
                             local_arrows,
                             aux: cam_entity,
+                            frame,
                         }))
                     }
 

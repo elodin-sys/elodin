@@ -41,3 +41,6 @@ strum.features = ["derive"]
 mlua.version = "0.10.5"
 mlua.features = ["serialize"]
 mlua.optional = true
+
+bevy_geo_frames.path = "../../bevy_geo_frames"
+bevy_geo_frames.features = ["serde", "big_space"]

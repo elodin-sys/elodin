@@ -511,7 +511,7 @@ class Debug(el.Archetype):
     radius: Radius
 
 
-w = el.World()
+w = el.World(frame=el.Frame.ECI)
 
 sat = w.spawn(
     [

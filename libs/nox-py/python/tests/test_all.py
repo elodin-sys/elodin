@@ -39,7 +39,7 @@ def test_basic_system():
         e: Effect
 
     sys = foo.pipe(bar).pipe(baz)
-    w = el.World()
+    w = el.World(frame=el.Frame.ENU)
     w.spawn(Test(np.array([1.0]), np.array([500.0])), "e1")
     w.spawn(
         [
@@ -66,7 +66,7 @@ def test_basic_system():
 
 
 def test_six_dof():
-    w = el.World()
+    w = el.World(frame=el.Frame.ENU)
     w.spawn(
         el.Body(
             world_pos=el.SpatialTransform(linear=np.array([0.0, 0.0, 0.0])),
@@ -92,7 +92,7 @@ def test_spatial_integration():
         return el.SpatialTransform(linear=linear, angular=angular)
 
     sys = integrate_velocity
-    w = el.World()
+    w = el.World(frame=el.Frame.ENU)
     w.spawn(
         el.Body(
             world_pos=el.SpatialTransform(
@@ -128,7 +128,7 @@ def test_graph():
     def fold_test(graph: el.GraphQuery[E], x: el.Query[X]) -> el.Query[X]:
         return graph.edge_fold(x, x, X, np.array(5.0), lambda x, a, b: x + a + b)
 
-    w = el.World()
+    w = el.World(frame=el.Frame.ENU)
     a = w.spawn(Test(np.array([1.0])), "e1")
     b = w.spawn(Test(np.array([2.0])), "e2")
     c = w.spawn(Test(np.array([2.0])), "e3")
@@ -176,7 +176,7 @@ def test_seed():
         y: Y
 
     sys = foo.pipe(bar).pipe(seed_mul).pipe(seed_sample)
-    w = el.World()
+    w = el.World(frame=el.Frame.ENU)
     w.spawn(Globals(seed=np.array(2)))
     w.spawn(Test(np.array(1.0), np.array(500.0)), "e1")
     w.spawn(Test(np.array(15.0), np.array(500.0)), "e2")
@@ -207,7 +207,7 @@ def test_spatial_vector_algebra():
     def double_vec(v: el.WorldVel) -> el.WorldVel:
         return v + v
 
-    w = el.World()
+    w = el.World(frame=el.Frame.ENU)
     w.spawn(el.Body(world_vel=el.SpatialMotion(linear=np.array([1.0, 0.0, 0.0]))), "e1")
     exec = w.build(double_vec)
     exec.run()
@@ -227,7 +227,7 @@ def test_spatial_vector_algebra():
 
 
 def test_six_dof_ang_vel_int():
-    w = el.World()
+    w = el.World(frame=el.Frame.ENU)
     w.spawn(
         el.Body(
             world_pos=el.SpatialTransform(linear=np.array([0.0, 0.0, 0.0])),
@@ -248,7 +248,7 @@ def test_six_dof_ang_vel_int():
         rtol=1e-5,
     ).all()
 
-    w = el.World()
+    w = el.World(frame=el.Frame.ENU)
     w.spawn(
         el.Body(
             world_pos=el.SpatialTransform(linear=np.array([0.0, 0.0, 0.0])),
@@ -269,7 +269,7 @@ def test_six_dof_ang_vel_int():
         rtol=1e-5,
     ).all()
 
-    w = el.World()
+    w = el.World(frame=el.Frame.ENU)
     w.spawn(
         el.Body(
             world_pos=el.SpatialTransform(linear=np.array([0.0, 0.0, 0.0])),
@@ -297,7 +297,7 @@ def test_six_dof_ang_vel_int():
 #     def constant_torque(_: el.Force) -> el.Force:
 #         return el.SpatialForce(torque=np.array([1.0, 0.0, 0.0]))
 
-#     w = el.World()
+#     w = el.World(frame=el.Frame.ENU)
 #     w.spawn(
 #         el.Body(
 #             world_pos=el.WorldPos(linear=np.array([0.0, 0.0, 0.0])),
@@ -341,7 +341,7 @@ def test_six_dof_ang_vel_int():
 
 
 def test_six_dof_force():
-    w = el.World()
+    w = el.World(frame=el.Frame.ENU)
     w.spawn(
         el.Body(
             world_pos=el.SpatialTransform(linear=np.array([0.0, 0.0, 0.0])),
@@ -522,7 +522,7 @@ def test_external_control_waiting():
         external_control: ExternalControl
 
     # Create world and spawn entity
-    w = el.World()
+    w = el.World(frame=el.Frame.ENU)
     w.spawn(TestWithExternal(np.array(1.0), np.array(0.0)), "e1")
 
     # Build and run the system
