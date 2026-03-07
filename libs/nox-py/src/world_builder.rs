@@ -458,6 +458,12 @@ impl WorldBuilder {
                 // Clone cancel tokens for each closure that needs it
                 let pre_step_cancel_token = recipe_cancel_token.clone();
                 let post_step_cancel_token = recipe_cancel_token.clone();
+                // Shared persistent render bridge client for sensor cameras.
+                // Created lazily on first render_camera() call, reused across all ticks.
+                let render_client: crate::step_context::SharedRenderClient =
+                    std::sync::Arc::new(std::sync::Mutex::new(None));
+                let pre_step_render_client = render_client.clone();
+                let post_step_render_client = render_client;
                 let db_server = elodin_db::Server::new(&db_path, addr)
                     .map_err(|e| {
                         if matches!(&e, elodin_db::Error::Io(io) if io.kind() == std::io::ErrorKind::AddrInUse) {
@@ -504,6 +510,7 @@ impl WorldBuilder {
                                             tick_count,
                                             start_timestamp,
                                             pre_step_cancel_token.clone(),
+                                            pre_step_render_client.clone(),
                                         );
                                         match Py::new(py, ctx) {
                                             Ok(ctx_py) => {
@@ -538,6 +545,7 @@ impl WorldBuilder {
                                             tick_count,
                                             start_timestamp,
                                             post_step_cancel_token.clone(),
+                                            post_step_render_client.clone(),
                                         );
                                         match Py::new(py, ctx) {
                                             Ok(ctx_py) => {

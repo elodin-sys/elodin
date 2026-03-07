@@ -2,18 +2,23 @@
 //! component data directly to the database without needing a separate TCP connection.
 
 use std::collections::HashMap;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use elodin_db::DB;
+use elodin_db::render_bridge::RenderBridgeClient;
 use impeller2::types::{ComponentId, PrimType, Timestamp};
 use numpy::{PyArray1, PyArrayDescrMethods, PyUntypedArray, PyUntypedArrayMethods};
 use pyo3::prelude::*;
-use pyo3::types::PyDict;
+use pyo3::types::{PyDict, PyList};
 use stellarator::util::CancelToken;
 
 use crate::Error;
+
+/// Shared persistent render bridge client.
+/// Created lazily on first render_camera() call, reused across all ticks.
+pub type SharedRenderClient = Arc<Mutex<Option<RenderBridgeClient>>>;
 
 /// Helper function to convert a byte buffer to a numpy array based on primitive type.
 fn buf_to_numpy_array<'py>(py: Python<'py>, buf: &[u8], prim_type: PrimType) -> Bound<'py, PyAny> {
@@ -106,6 +111,8 @@ pub struct StepContext {
     start_timestamp: Timestamp,
     /// Optional cancel token to gracefully terminate s10-managed recipes
     recipe_cancel_token: Option<CancelToken>,
+    /// Shared persistent render bridge client (created lazily on first render call)
+    render_client: SharedRenderClient,
 }
 
 impl StepContext {
@@ -117,6 +124,7 @@ impl StepContext {
         tick: u64,
         start_timestamp: Timestamp,
         recipe_cancel_token: Option<CancelToken>,
+        render_client: SharedRenderClient,
     ) -> Self {
         Self {
             db,
@@ -125,7 +133,46 @@ impl StepContext {
             tick_counter,
             start_timestamp,
             recipe_cancel_token,
+            render_client,
         }
+    }
+
+    /// Internal implementation of render_cameras that handles the persistent client.
+    fn render_cameras_impl(&self, camera_names: &[&str]) -> Result<(), Error> {
+        if camera_names.is_empty() {
+            return Ok(());
+        }
+
+        let timestamp = Timestamp(self.timestamp.load(Ordering::SeqCst));
+
+        // Get or create the persistent render client.
+        let mut guard = self.render_client.lock().map_err(|_| {
+            Error::PyO3(pyo3::exceptions::PyRuntimeError::new_err(
+                "Render client lock poisoned",
+            ))
+        })?;
+
+        // Lazily connect on first use.
+        if guard.is_none() {
+            let client = RenderBridgeClient::connect(Duration::from_secs(30))
+                .map_err(|e| Error::PyO3(pyo3::exceptions::PyRuntimeError::new_err(e)))?;
+            *guard = Some(client);
+        }
+
+        let client = guard.as_mut().unwrap();
+
+        // Send batch render request.
+        let frames = client
+            .render_cameras(camera_names, timestamp)
+            .map_err(|e| Error::PyO3(pyo3::exceptions::PyRuntimeError::new_err(e)))?;
+
+        // Write all frames to the local DB.
+        for frame in frames {
+            let msg_id = impeller2::types::msg_id(&frame.camera_name);
+            self.db.push_msg(frame.timestamp, msg_id, &frame.data)?;
+        }
+
+        Ok(())
     }
 }
 
@@ -415,20 +462,33 @@ impl StepContext {
     ///                   disconnected, or if the renderer does not respond
     ///                   within 5 seconds.
     fn render_camera(&self, camera_name: &str) -> Result<(), Error> {
-        let timestamp = Timestamp(self.timestamp.load(Ordering::SeqCst));
-        let frame = elodin_db::render_bridge::render_camera_blocking(
-            camera_name,
-            timestamp,
-            Duration::from_secs(10),
-        )
-        .map_err(|e| Error::PyO3(pyo3::exceptions::PyRuntimeError::new_err(e)))?;
+        self.render_cameras_impl(&[camera_name])
+    }
 
-        // Write the frame to the local DB so that read_msg() can find it.
-        if let Some(frame) = frame {
-            let msg_id = impeller2::types::msg_id(&frame.camera_name);
-            self.db.push_msg(frame.timestamp, msg_id, &frame.data)?;
-        }
-        Ok(())
+    /// Render multiple sensor cameras in a single batch request.
+    ///
+    /// This is more efficient than calling render_camera() multiple times when
+    /// you have multiple cameras, as it uses a single round-trip to the render
+    /// server and renders all cameras in one GPU frame.
+    ///
+    /// After this call returns, `read_msg(camera_name)` for each camera is
+    /// guaranteed to contain the rendered frame at the current simulation timestamp.
+    ///
+    /// Args:
+    ///     camera_names: List of sensor camera names in "entity.camera" format
+    ///                   (e.g., ["drone.scene_cam", "drone.thermal_cam"])
+    ///
+    /// Raises:
+    ///     RuntimeError: If no render bridge is available, if the bridge is
+    ///                   disconnected, or if the renderer does not respond.
+    fn render_cameras(&self, camera_names: &Bound<'_, PyList>) -> Result<(), Error> {
+        let names: Vec<String> = camera_names.extract().map_err(|e| {
+            Error::PyO3(pyo3::exceptions::PyValueError::new_err(format!(
+                "camera_names must be a list of strings: {e}"
+            )))
+        })?;
+        let name_refs: Vec<&str> = names.iter().map(|s| s.as_str()).collect();
+        self.render_cameras_impl(&name_refs)
     }
 
     /// Perform multiple component reads and writes in a single DB operation.

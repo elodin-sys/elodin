@@ -115,6 +115,12 @@ struct SensorFrameSender(flume::Sender<(String, Vec<u8>, u32, u32)>);
 #[derive(Resource, Default)]
 pub struct SensorCamerasSpawned(pub bool);
 
+/// Controls whether GPU readback is active for this sensor camera.
+/// Separate from Camera.is_active: cameras stay rendering (pipeline warm),
+/// but GPU readback only happens when this is true.
+#[derive(Component, Default)]
+pub struct ReadbackArmed(pub bool);
+
 // ---------------------------------------------------------------------------
 // Post-process render graph
 // ---------------------------------------------------------------------------
@@ -422,6 +428,7 @@ fn spawn_sensor_cameras(
                 time: 0.0,
             },
             copier,
+            ReadbackArmed(false),
             Name::new(format!("sensor_camera_{}", config.camera_name)),
         ));
 
@@ -512,14 +519,16 @@ fn update_sensor_camera_transforms(
 
 fn image_copy_extract(
     mut commands: Commands,
-    image_copiers: Extract<Query<(&ImageCopier, &Camera)>>,
+    image_copiers: Extract<Query<(&ImageCopier, &ReadbackArmed, &Camera)>>,
 ) {
     commands.insert_resource(ImageCopiers(
         image_copiers
             .iter()
-            .map(|(copier, camera)| {
+            .map(|(copier, readback_armed, camera)| {
                 let mut c = copier.clone();
-                c.is_active = camera.is_active;
+                // Use ReadbackArmed if explicitly armed, otherwise fall back to Camera.is_active
+                // for backward compatibility with old headless.rs that only sets Camera.is_active
+                c.is_active = readback_armed.0 || camera.is_active;
                 c
             })
             .collect(),
@@ -651,6 +660,43 @@ pub fn patch_sensor_view_dims(
         }
         if let Some(config) = configs.0.iter().find(|c| c.camera_name == stream.msg_name) {
             stream.raw_rgba_dims = Some((config.width, config.height));
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Headless render server helpers
+// ---------------------------------------------------------------------------
+
+/// Set Camera::is_active for sensor cameras: true only for the given names, false for others.
+/// Ensures only the requested camera(s) are rendered this frame (matches old headless behavior).
+pub fn set_cameras_active_for_request(world: &mut World, camera_names: &[String]) {
+    let configs = world.resource::<SensorCameraConfigs>();
+    let target_indices: Vec<usize> = camera_names
+        .iter()
+        .filter_map(|name| configs.0.iter().position(|c| &c.camera_name == name))
+        .collect();
+
+    let mut query = world.query::<(&SensorCamera, &mut Camera)>();
+    for (sensor, mut camera) in query.iter_mut(world) {
+        camera.is_active = target_indices.contains(&sensor.config_index);
+    }
+}
+
+/// Arm or disarm GPU readback for specific cameras by name.
+/// Called by the headless render server to control which cameras perform
+/// expensive GPU texture-to-buffer copies.
+pub fn set_readback_armed(world: &mut World, camera_names: &[String], armed: bool) {
+    let configs = world.resource::<SensorCameraConfigs>();
+    let target_indices: Vec<usize> = camera_names
+        .iter()
+        .filter_map(|name| configs.0.iter().position(|c| &c.camera_name == name))
+        .collect();
+
+    let mut query = world.query::<(&SensorCamera, &mut ReadbackArmed)>();
+    for (sensor, mut readback) in query.iter_mut(world) {
+        if target_indices.contains(&sensor.config_index) {
+            readback.0 = armed;
         }
     }
 }

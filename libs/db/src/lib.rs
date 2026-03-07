@@ -55,6 +55,7 @@ pub use error::Error;
 
 pub mod append_log;
 mod arrow;
+#[cfg(feature = "axum")]
 pub mod axum;
 pub mod cancellation;
 pub(crate) mod coalescing_sink;

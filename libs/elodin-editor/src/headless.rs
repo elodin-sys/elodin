@@ -1,4 +1,3 @@
-use std::os::unix::net::UnixStream;
 use std::time::Duration;
 
 use bevy::{
@@ -12,12 +11,15 @@ use bevy::{
 };
 use bevy_mat3_material::Mat3Material;
 use big_space::{FloatingOrigin, GridCell};
-use elodin_db::render_bridge::{RenderBridgeServer, RenderRequest};
+use elodin_db::render_bridge::RenderBridgeServer;
 use impeller2_kdl::FromKdl;
 use impeller2_wkt::{CurrentTimestamp, DbConfig, LastUpdated, SchematicElem};
 
 use crate::object_3d::create_object_3d_entity;
-use crate::sensor_camera::{SensorCamera, SensorCameraConfigs, SensorCameraPlugin, SensorCamerasSpawned};
+use crate::sensor_camera::{
+    SensorCamera, SensorCameraPlugin, SensorCamerasSpawned, set_readback_armed,
+    set_cameras_active_for_request,
+};
 use crate::{EqlContext, PositionSync, sync_pos};
 
 /// A headless Bevy app dedicated to sensor camera rendering.
@@ -185,67 +187,92 @@ fn headless_sensor_runner(mut app: App) -> AppExit {
         }
     };
 
-    // Warm-up: run a few updates so the TCP connection is established,
-    // DB metadata is loaded, and sensor cameras are spawned.
-    for _ in 0..20 {
+    // Warm-up: run updates until DB metadata is loaded and sensor cameras are spawned.
+    // This is non-blocking waiting for DB connection + camera spawn.
+    for i in 0..60 {
         app.update();
+        let cameras_ready = app.world().resource::<SensorCamerasSpawned>().0;
+        if cameras_ready {
+            tracing::debug!("Sensor cameras spawned after {i} warm-up cycles");
+            break;
+        }
         std::thread::sleep(Duration::from_millis(50));
     }
 
-    let mut pending: Option<(RenderRequest, UnixStream)> = None;
-    let mut armed_frames = 0u32;
+    // Enable all cameras permanently to keep the render pipeline warm.
+    // GPU readback is controlled separately via set_readback_armed.
+    enable_all_sensor_cameras(app.world_mut());
 
+    // Run a few more updates with cameras active to fully warm the pipeline.
+    for _ in 0..4 {
+        app.update();
+    }
+
+    tracing::debug!("Render server ready, waiting for client connection...");
+
+    // Accept persistent client connection (blocking).
+    if let Err(e) = server.accept_client() {
+        tracing::error!("Failed to accept client connection: {e}");
+        return AppExit::Error(1.try_into().unwrap());
+    }
+    tracing::debug!("Client connected");
+
+    // Main loop: blocking read on persistent connection, single update per request.
     loop {
         if let Some(exit) = app.should_exit() {
             return exit;
         }
 
+        // Block until a batch request arrives (or connection closes).
+        let Some(request) = server.recv_batch() else {
+            tracing::info!("Client disconnected, exiting render server");
+            return AppExit::Success;
+        };
+
+        // Set timestamp for this request.
+        app.world_mut().resource_mut::<CurrentTimestamp>().0 = request.timestamp;
+
+        // Check if cameras are ready.
+        let cameras_ready = app.world().resource::<SensorCamerasSpawned>().0;
+
+        // Always run app.update() so that camera spawn systems can run.
+        // Only arm readback and collect frames when cameras are ready.
+        if cameras_ready {
+            // Drain any stale frames from the queue.
+            drain_stale_frames(&app);
+
+            // Only render the requested camera(s) this frame (matches old per-request behavior).
+            set_cameras_active_for_request(app.world_mut(), &request.camera_names);
+
+            // Arm GPU readback for requested cameras.
+            set_readback_armed(app.world_mut(), &request.camera_names, true);
+        }
+
+        // Run update cycle (allows camera spawning even if not ready yet).
         app.update();
 
-        // Phase 1: camera is armed — check if the render produced a frame.
-        // Bevy's render pipeline may need 2-3 frames after camera activation
-        // to cache the pipeline and produce actual pixel data. We run up to
-        // 4 update cycles before giving up.
-        if armed_frames > 0 {
-            let has_frame = {
-                let rx = app
-                    .world()
-                    .resource::<crate::sensor_camera::SensorFrameReceiver>();
-                !rx.0.is_empty()
-            };
-            if has_frame || armed_frames >= 4 {
-                if let Some((request, stream)) = pending.take() {
-                    send_frame_response(&app, &request, stream);
-                }
-                disable_all_sensor_cameras(app.world_mut());
-                armed_frames = 0;
-            } else {
-                armed_frames += 1;
+        // When cameras are ready: run more updates so the render subapp's Render schedule
+        // (image_copy_driver, receive_image_from_buffer) runs and the frame lands in the channel.
+        if cameras_ready {
+            for _ in 0..3 {
+                app.update();
             }
-            continue;
+            // Re-enable all cameras so the pipeline stays warm for the next request.
+            enable_all_sensor_cameras(app.world_mut());
         }
 
-        // Phase 2: check for new render requests via the UDS.
-        if pending.is_none() {
-            if let Some(req) = server.try_recv() {
-                // Check if cameras are ready before processing
-                let cameras_ready = app.world().resource::<SensorCamerasSpawned>().0;
-                if !cameras_ready {
-                    // Cameras not spawned yet - respond empty and continue warm-up
-                    RenderBridgeServer::respond_empty(req.1);
-                    continue;
-                }
+        if cameras_ready {
+            // Collect rendered frames.
+            let frames = collect_frames(&app, &request.camera_names);
 
-                drain_stale_frames(&app);
-                app.world_mut().resource_mut::<CurrentTimestamp>().0 = req.0.timestamp;
-                enable_sensor_camera(app.world_mut(), &req.0.camera_name);
-                armed_frames = 1;
-                pending = Some(req);
-            }
-        }
+            // Disarm readback to avoid unnecessary GPU copies on idle updates.
+            set_readback_armed(app.world_mut(), &request.camera_names, false);
 
-        if pending.is_none() {
-            std::thread::sleep(Duration::from_millis(1));
+            // Send response with frames.
+            server.respond_batch(request.timestamp, &frames);
+        } else {
+            // Cameras not ready yet, respond empty.
+            server.respond_empty();
         }
     }
 }
@@ -254,49 +281,30 @@ fn headless_sensor_runner(mut app: App) -> AppExit {
 // Helpers
 // ---------------------------------------------------------------------------
 
-fn send_frame_response(app: &App, request: &RenderRequest, stream: std::os::unix::net::UnixStream) {
+/// Enable all sensor cameras permanently (keeps Bevy render pipeline warm).
+fn enable_all_sensor_cameras(world: &mut World) {
+    let mut query = world.query::<(&SensorCamera, &mut Camera)>();
+    for (_, mut camera) in query.iter_mut(world) {
+        camera.is_active = true;
+    }
+}
+
+/// Collect rendered frames from the frame receiver, matching requested camera names.
+fn collect_frames(app: &App, camera_names: &[String]) -> Vec<(String, Vec<u8>)> {
     let world = app.world();
     let frame_rx = world.resource::<crate::sensor_camera::SensorFrameReceiver>();
 
-    // Drain all queued frames, keeping only the one matching the requested camera.
-    let mut matched_frame: Option<(String, Vec<u8>, u32, u32)> = None;
-    while let Ok(frame) = frame_rx.0.try_recv() {
-        if frame.0 == request.camera_name {
-            matched_frame = Some(frame);
-        }
+    let mut frames_map: std::collections::HashMap<String, Vec<u8>> =
+        std::collections::HashMap::new();
+
+    // Drain all queued frames, keeping the latest for each camera.
+    while let Ok((camera_name, frame_bytes, _, _)) = frame_rx.0.try_recv() {
+        frames_map.insert(camera_name, frame_bytes);
     }
 
-    if let Some((camera_name, frame_bytes, _, _)) = matched_frame {
-        RenderBridgeServer::respond_with_frame(
-            stream,
-            &camera_name,
-            request.timestamp,
-            &frame_bytes,
-        );
-    } else {
-        RenderBridgeServer::respond_empty(stream);
-    }
-}
-
-fn enable_sensor_camera(world: &mut World, camera_name: &str) {
-    let target_index = {
-        let configs = world.resource::<SensorCameraConfigs>();
-        configs.0.iter().position(|c| c.camera_name == camera_name)
-    };
-    let Some(target_index) = target_index else {
-        tracing::warn!("render_camera: unknown camera '{camera_name}'");
-        return;
-    };
-
-    let mut query = world.query::<(&SensorCamera, &mut Camera)>();
-    for (sensor, mut camera) in query.iter_mut(world) {
-        camera.is_active = sensor.config_index == target_index;
-    }
-}
-
-fn disable_all_sensor_cameras(world: &mut World) {
-    let mut query = world.query::<(&SensorCamera, &mut Camera)>();
-    for (_, mut camera) in query.iter_mut(world) {
-        camera.is_active = false;
-    }
+    // Return frames in the order they were requested.
+    camera_names
+        .iter()
+        .filter_map(|name| frames_map.remove(name).map(|bytes| (name.clone(), bytes)))
+        .collect()
 }
