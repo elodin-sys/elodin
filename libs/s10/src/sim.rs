@@ -33,7 +33,6 @@ impl SimRecipe {
         debug!("running sim");
 
         let mut cmd = python_tokio_command()?;
-        #[cfg(target_os = "macos")]
         cmd.process_group(0);
         // Close stdin to prevent SIGTTIN when child is in background process group
         cmd.stdin(Stdio::null());
@@ -50,10 +49,7 @@ impl SimRecipe {
             _ = cancel_token.wait() => {
                 if let Some(pid) = child.id() {
                     let pid = nix::unistd::Pid::from_raw(pid as i32);
-                    #[cfg(target_os = "macos")]
                     let _ = nix::sys::signal::killpg(pid, nix::sys::signal::Signal::SIGTERM);
-                    #[cfg(not(target_os = "macos"))]
-                    let _ = nix::sys::signal::kill(pid, nix::sys::signal::Signal::SIGTERM);
                 }
                 tracing::info!("Waiting for sim process to exit");
                 match tokio::time::timeout(Duration::from_secs(2), child.wait()).await {
@@ -64,12 +60,7 @@ impl SimRecipe {
                         tracing::warn!("Sim process did not exit after SIGTERM, forcing kill");
                         if let Some(pid) = child.id() {
                             let pid = nix::unistd::Pid::from_raw(pid as i32);
-                            #[cfg(target_os = "macos")]
                             let _ = nix::sys::signal::killpg(pid, nix::sys::signal::Signal::SIGKILL);
-                            #[cfg(not(target_os = "macos"))]
-                            let _ = child.start_kill();
-                        } else {
-                            let _ = child.start_kill();
                         }
                         let _ = child.wait().await;
                     }
