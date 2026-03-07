@@ -171,6 +171,8 @@ pub struct RenderedFrame {
 /// connection overhead.
 pub struct RenderBridgeClient {
     reader: BufReader<UnixStream>,
+    /// Reused for reading frame data to avoid per-frame allocation.
+    frame_buffer: Vec<u8>,
 }
 
 impl RenderBridgeClient {
@@ -204,6 +206,7 @@ impl RenderBridgeClient {
 
         Ok(Self {
             reader: BufReader::new(stream),
+            frame_buffer: Vec::new(),
         })
     }
 
@@ -294,15 +297,15 @@ impl RenderBridgeClient {
                 .ok_or("Missing camera name")?
                 .to_string();
 
-            let mut frame_data = vec![0u8; frame_len];
+            self.frame_buffer.resize(frame_len, 0);
             self.reader
-                .read_exact(&mut frame_data)
+                .read_exact(&mut self.frame_buffer[..frame_len])
                 .map_err(|e| format!("Failed to read frame data: {e}"))?;
 
             frames.push(RenderedFrame {
                 camera_name,
                 timestamp: Timestamp(resp_timestamp),
-                data: frame_data,
+                data: self.frame_buffer.clone(),
             });
         }
 

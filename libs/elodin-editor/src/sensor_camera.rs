@@ -1,3 +1,5 @@
+use std::time::Instant;
+
 use bevy::{
     app::{App, Plugin},
     asset::{Assets, embedded_asset},
@@ -112,6 +114,10 @@ pub struct SensorFrameReceiver(pub flume::Receiver<(String, Vec<u8>, u32, u32)>)
 #[derive(Resource, Clone)]
 struct SensorFrameSender(flume::Sender<(String, Vec<u8>, u32, u32)>);
 
+/// Reusable buffer for GPU readback to avoid per-frame allocation in receive_image_from_buffer.
+#[derive(Resource, Default)]
+struct ReusableFrameBuffer(Vec<u8>);
+
 #[derive(Resource, Default)]
 pub struct SensorCamerasSpawned(pub bool);
 
@@ -120,6 +126,12 @@ pub struct SensorCamerasSpawned(pub bool);
 /// but GPU readback only happens when this is true.
 #[derive(Component, Default)]
 pub struct ReadbackArmed(pub bool);
+
+/// Marker resource set only in the headless render app. When present, readback is controlled
+/// solely by ReadbackArmed (cameras stay active for pipeline warm). When absent (editor),
+/// readback runs when ReadbackArmed or Camera.is_active is true.
+#[derive(Resource, Default)]
+pub struct HeadlessMode;
 
 // ---------------------------------------------------------------------------
 // Post-process render graph
@@ -279,6 +291,7 @@ impl Plugin for SensorCameraPlugin {
         if let Some(render_app) = app.get_sub_app_mut(RenderApp) {
             render_app
                 .insert_resource(SensorFrameSender(tx))
+                .init_resource::<ReusableFrameBuffer>()
                 .add_systems(ExtractSchedule, image_copy_extract)
                 .add_systems(
                     Render,
@@ -519,20 +532,23 @@ fn update_sensor_camera_transforms(
 
 fn image_copy_extract(
     mut commands: Commands,
+    headless_mode: Option<Res<HeadlessMode>>,
     image_copiers: Extract<Query<(&ImageCopier, &ReadbackArmed, &Camera)>>,
 ) {
-    commands.insert_resource(ImageCopiers(
-        image_copiers
-            .iter()
-            .map(|(copier, readback_armed, camera)| {
-                let mut c = copier.clone();
-                // Use ReadbackArmed if explicitly armed, otherwise fall back to Camera.is_active
-                // for backward compatibility with old headless.rs that only sets Camera.is_active
-                c.is_active = readback_armed.0 || camera.is_active;
-                c
-            })
-            .collect(),
-    ));
+    let headless = headless_mode.is_some();
+    let copiers: Vec<ImageCopier> = image_copiers
+        .iter()
+        .map(|(copier, readback_armed, camera)| {
+            let mut c = copier.clone();
+            c.is_active = if headless {
+                readback_armed.0
+            } else {
+                readback_armed.0 || camera.is_active
+            };
+            c
+        })
+        .collect();
+    commands.insert_resource(ImageCopiers(copiers));
 }
 
 fn image_copy_driver(
@@ -541,6 +557,7 @@ fn image_copy_driver(
     render_queue: Res<RenderQueue>,
     gpu_images: Res<RenderAssets<bevy::render::texture::GpuImage>>,
 ) {
+    let copy_start = Instant::now();
     for image_copier in image_copiers.0.iter() {
         if !image_copier.is_active {
             continue;
@@ -580,12 +597,14 @@ fn image_copy_driver(
 
         render_queue.submit(std::iter::once(encoder.finish()));
     }
+    tracing::debug!(image_copy_driver_ms = copy_start.elapsed().as_secs_f64() * 1000.0);
 }
 
 fn receive_image_from_buffer(
     image_copiers: Res<ImageCopiers>,
     render_device: Res<RenderDevice>,
     sender: Res<SensorFrameSender>,
+    mut reusable: ResMut<ReusableFrameBuffer>,
 ) {
     for image_copier in image_copiers.0.iter() {
         if !image_copier.is_active {
@@ -608,9 +627,14 @@ fn receive_image_from_buffer(
         // For the headless render-server this is required since the simulation
         // is waiting for the frame. The double-buffer infrastructure is in place
         // for future async improvements.
+        let poll_start = Instant::now();
         if render_device.poll(PollType::wait()).is_err() {
             continue;
         }
+        tracing::debug!(
+            receive_image_poll_wait_ms = poll_start.elapsed().as_secs_f64() * 1000.0,
+            camera = %image_copier.camera_name
+        );
 
         if r.recv().is_ok() {
             let data = buffer_slice.get_mapped_range();
@@ -618,23 +642,35 @@ fn receive_image_from_buffer(
             let height = image_copier.height;
             let row_bytes = width as usize * 4;
             let aligned_row_bytes = RenderDevice::align_copy_bytes_per_row(row_bytes);
+            let required_len = (height as usize) * row_bytes;
 
-            let frame_data: Vec<u8> = if row_bytes == aligned_row_bytes {
-                data.to_vec()
+            reusable.0.resize(required_len, 0);
+            let buf = &mut reusable.0[..required_len];
+            if row_bytes == aligned_row_bytes {
+                buf.copy_from_slice(&data[..required_len.min(data.len())]);
             } else {
-                data.chunks(aligned_row_bytes)
+                for (row_idx, chunk) in data
+                    .chunks(aligned_row_bytes)
                     .take(height as usize)
-                    .flat_map(|row| &row[..row_bytes.min(row.len())])
-                    .cloned()
-                    .collect()
-            };
+                    .enumerate()
+                {
+                    let len = row_bytes.min(chunk.len());
+                    let start = row_idx * row_bytes;
+                    if start + len <= buf.len() {
+                        buf[start..start + len].copy_from_slice(&chunk[..len]);
+                    }
+                }
+            }
 
             drop(data);
             buffer.unmap();
 
-            let _ = sender
-                .0
-                .send((image_copier.camera_name.clone(), frame_data, width, height));
+            let _ = sender.0.send((
+                image_copier.camera_name.clone(),
+                reusable.0.clone(),
+                width,
+                height,
+            ));
         } else {
             buffer.unmap();
         }

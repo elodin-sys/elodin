@@ -1,11 +1,27 @@
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use bevy::{
+    a11y::AccessibilityPlugin,
+    animation::AnimationPlugin,
     app::{App, AppExit, Plugin, Startup},
     asset::{AssetPlugin, Assets, UnapprovedPathMode},
+    audio::AudioPlugin,
+    diagnostic::DiagnosticsPlugin,
+    gilrs::GilrsPlugin,
+    gizmos::GizmoPlugin,
+    input::InputPlugin,
     log::LogPlugin,
     math::{EulerRot, Quat},
+    picking::{input::PointerInputPlugin, InteractionPlugin, PickingPlugin},
     prelude::*,
+    render::{pipelined_rendering::PipelinedRenderingPlugin, RenderApp},
+    sprite::SpritePlugin,
+    sprite_render::SpriteRenderPlugin,
+    state::app::StatesPlugin,
+    text::TextPlugin,
+    transform::TransformPlugin,
+    ui::UiPlugin,
+    ui_render::UiRenderPlugin,
     window::{ExitCondition, WindowPlugin},
     winit::WinitPlugin,
 };
@@ -17,8 +33,7 @@ use impeller2_wkt::{CurrentTimestamp, DbConfig, LastUpdated, SchematicElem};
 
 use crate::object_3d::create_object_3d_entity;
 use crate::sensor_camera::{
-    SensorCamera, SensorCameraPlugin, SensorCamerasSpawned, set_readback_armed,
-    set_cameras_active_for_request,
+    HeadlessMode, SensorCamera, SensorCameraPlugin, SensorCamerasSpawned, set_readback_armed,
 };
 use crate::{EqlContext, PositionSync, sync_pos};
 
@@ -47,6 +62,24 @@ impl Plugin for HeadlessEditorPlugin {
                     })
                     .disable::<WinitPlugin>()
                     .disable::<LogPlugin>()
+                    .disable::<PipelinedRenderingPlugin>()
+                    .disable::<TransformPlugin>()
+                    .disable::<DiagnosticsPlugin>()
+                    .disable::<InputPlugin>()
+                    .disable::<AccessibilityPlugin>()
+                    .disable::<AnimationPlugin>()
+                    .disable::<AudioPlugin>()
+                    .disable::<GilrsPlugin>()
+                    .disable::<SpritePlugin>()
+                    .disable::<SpriteRenderPlugin>()
+                    .disable::<TextPlugin>()
+                    .disable::<UiPlugin>()
+                    .disable::<UiRenderPlugin>()
+                    .disable::<GizmoPlugin>()
+                    .disable::<StatesPlugin>()
+                    .disable::<PointerInputPlugin>()
+                    .disable::<PickingPlugin>()
+                    .disable::<InteractionPlugin>()
                     .set(AssetPlugin {
                         unapproved_path_mode: UnapprovedPathMode::Allow,
                         ..default()
@@ -57,6 +90,7 @@ impl Plugin for HeadlessEditorPlugin {
             .add_plugins(bevy_mat3_material::Mat3MaterialPlugin)
             .add_plugins(crate::object_3d::Object3DPlugin)
             .add_plugins(SensorCameraPlugin)
+            .init_resource::<HeadlessMode>()
             .add_systems(
                 PreUpdate,
                 advance_headless_timestamp.after(impeller2_bevy::sink),
@@ -81,6 +115,10 @@ impl Plugin for HeadlessEditorPlugin {
             .add_systems(Update, crate::update_eql_context)
             .add_systems(Update, load_headless_scene)
             .set_runner(headless_sensor_runner);
+
+        if let Some(render_app) = app.get_sub_app_mut(RenderApp) {
+            render_app.init_resource::<HeadlessMode>();
+        }
     }
 }
 
@@ -188,27 +226,24 @@ fn headless_sensor_runner(mut app: App) -> AppExit {
     };
 
     // Warm-up: run updates until DB metadata is loaded and sensor cameras are spawned.
-    // This is non-blocking waiting for DB connection + camera spawn.
-    for i in 0..60 {
+    let mut cameras_enabled = false;
+    for i in 0..120 {
         app.update();
         let cameras_ready = app.world().resource::<SensorCamerasSpawned>().0;
-        if cameras_ready {
-            tracing::debug!("Sensor cameras spawned after {i} warm-up cycles");
+        if cameras_ready && !cameras_enabled {
+            enable_all_sensor_cameras(app.world_mut());
+            cameras_enabled = true;
+            tracing::info!("Sensor cameras spawned and enabled after {i} warm-up cycles");
+            // Run a few more updates with cameras active to fully warm the render pipeline.
+            for _ in 0..4 {
+                app.update();
+            }
             break;
         }
         std::thread::sleep(Duration::from_millis(50));
     }
 
-    // Enable all cameras permanently to keep the render pipeline warm.
-    // GPU readback is controlled separately via set_readback_armed.
-    enable_all_sensor_cameras(app.world_mut());
-
-    // Run a few more updates with cameras active to fully warm the pipeline.
-    for _ in 0..4 {
-        app.update();
-    }
-
-    tracing::debug!("Render server ready, waiting for client connection...");
+    tracing::info!("Render server ready (cameras_enabled={cameras_enabled}), waiting for client connection...");
 
     // Accept persistent client connection (blocking).
     if let Err(e) = server.accept_client() {
@@ -229,49 +264,66 @@ fn headless_sensor_runner(mut app: App) -> AppExit {
             return AppExit::Success;
         };
 
+        let request_start = Instant::now();
+
         // Set timestamp for this request.
         app.world_mut().resource_mut::<CurrentTimestamp>().0 = request.timestamp;
 
         // Check if cameras are ready.
         let cameras_ready = app.world().resource::<SensorCamerasSpawned>().0;
 
-        // Always run app.update() so that camera spawn systems can run.
-        // Only arm readback and collect frames when cameras are ready.
+        // If cameras just became ready (spawned during main loop), enable them now.
+        if cameras_ready && !cameras_enabled {
+            enable_all_sensor_cameras(app.world_mut());
+            cameras_enabled = true;
+            tracing::info!("Sensor cameras late-enabled during main loop");
+            // Warm the pipeline with a few updates before processing the request.
+            for _ in 0..4 {
+                app.update();
+            }
+        }
+
         if cameras_ready {
-            // Drain any stale frames from the queue.
             drain_stale_frames(&app);
-
-            // Only render the requested camera(s) this frame (matches old per-request behavior).
-            set_cameras_active_for_request(app.world_mut(), &request.camera_names);
-
-            // Arm GPU readback for requested cameras.
             set_readback_armed(app.world_mut(), &request.camera_names, true);
         }
 
         // Run update cycle (allows camera spawning even if not ready yet).
+        // With PipelinedRenderingPlugin disabled, Extract + Render run synchronously in one update.
+        let update0_start = Instant::now();
         app.update();
+        tracing::debug!(
+            render_latency_ms = update0_start.elapsed().as_secs_f64() * 1000.0,
+            update_index = 0
+        );
 
-        // When cameras are ready: run more updates so the render subapp's Render schedule
-        // (image_copy_driver, receive_image_from_buffer) runs and the frame lands in the channel.
         if cameras_ready {
-            for _ in 0..3 {
+            let collect_start = Instant::now();
+            let mut frames = collect_frames(&app, &request.camera_names);
+            if frames.is_empty() {
+                let fallback_start = Instant::now();
                 app.update();
+                tracing::debug!(
+                    render_latency_ms = fallback_start.elapsed().as_secs_f64() * 1000.0,
+                    update_index = 1,
+                    fallback = true
+                );
+                frames = collect_frames(&app, &request.camera_names);
             }
-            // Re-enable all cameras so the pipeline stays warm for the next request.
-            enable_all_sensor_cameras(app.world_mut());
-        }
+            tracing::debug!(
+                collect_frames_ms = collect_start.elapsed().as_secs_f64() * 1000.0,
+                frame_count = frames.len()
+            );
 
-        if cameras_ready {
-            // Collect rendered frames.
-            let frames = collect_frames(&app, &request.camera_names);
-
-            // Disarm readback to avoid unnecessary GPU copies on idle updates.
             set_readback_armed(app.world_mut(), &request.camera_names, false);
 
-            // Send response with frames.
+            let respond_start = Instant::now();
             server.respond_batch(request.timestamp, &frames);
+            tracing::debug!(
+                respond_batch_ms = respond_start.elapsed().as_secs_f64() * 1000.0,
+                total_request_ms = request_start.elapsed().as_secs_f64() * 1000.0
+            );
         } else {
-            // Cameras not ready yet, respond empty.
             server.respond_empty();
         }
     }

@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use elodin_db::DB;
 use elodin_db::render_bridge::RenderBridgeClient;
@@ -138,11 +138,16 @@ impl StepContext {
     }
 
     /// Internal implementation of render_cameras that handles the persistent client.
-    fn render_cameras_impl(&self, camera_names: &[&str]) -> Result<(), Error> {
+    /// Returns the rendered frames (also written to DB) so callers can use them without a separate read_msg.
+    fn render_cameras_impl(
+        &self,
+        camera_names: &[&str],
+    ) -> Result<Vec<elodin_db::render_bridge::RenderedFrame>, Error> {
         if camera_names.is_empty() {
-            return Ok(());
+            return Ok(vec![]);
         }
 
+        let total_start = Instant::now();
         let timestamp = Timestamp(self.timestamp.load(Ordering::SeqCst));
 
         // Get or create the persistent render client.
@@ -161,18 +166,28 @@ impl StepContext {
 
         let client = guard.as_mut().unwrap();
 
-        // Send batch render request.
+        // Send batch render request (UDS round-trip).
+        let uds_start = Instant::now();
         let frames = client
             .render_cameras(camera_names, timestamp)
             .map_err(|e| Error::PyO3(pyo3::exceptions::PyRuntimeError::new_err(e)))?;
+        tracing::debug!(
+            render_uds_round_trip_ms = uds_start.elapsed().as_secs_f64() * 1000.0,
+            frame_count = frames.len()
+        );
 
-        // Write all frames to the local DB.
-        for frame in frames {
+        // Write all frames to the local DB (for editor display and compatibility).
+        let db_start = Instant::now();
+        for frame in &frames {
             let msg_id = impeller2::types::msg_id(&frame.camera_name);
             self.db.push_msg(frame.timestamp, msg_id, &frame.data)?;
         }
+        tracing::debug!(
+            render_db_push_ms = db_start.elapsed().as_secs_f64() * 1000.0,
+            total_render_cameras_ms = total_start.elapsed().as_secs_f64() * 1000.0
+        );
 
-        Ok(())
+        Ok(frames)
     }
 }
 
@@ -447,22 +462,33 @@ impl StepContext {
     }
 
     /// Trigger the headless Bevy renderer to render a sensor camera and block
-    /// until the frame has been written to the database.
+    /// until the frame is ready. Returns the frame bytes directly (and writes to DB for editor).
     ///
-    /// After this call returns, `read_msg(camera_name)` is guaranteed to
-    /// contain the rendered frame at the current simulation timestamp.
+    /// Returns a numpy uint8 array of the RGBA frame, or None if no frame was produced.
+    /// Also writes the frame to the database so `read_msg(camera_name)` and the editor can use it.
     ///
     /// Args:
     ///     camera_name: The sensor camera name in "entity.camera" format
     ///                  (e.g., "drone.scene_cam")
+    ///
+    /// Returns:
+    ///     Optional numpy array (uint8) of the frame bytes (RGBA), or None.
     ///
     /// Raises:
     ///     RuntimeError: If no render bridge is available (not running under
     ///                   `elodin run` or `elodin editor`), if the bridge is
     ///                   disconnected, or if the renderer does not respond
     ///                   within 5 seconds.
-    fn render_camera(&self, camera_name: &str) -> Result<(), Error> {
-        self.render_cameras_impl(&[camera_name])
+    fn render_camera<'py>(
+        &self,
+        py: Python<'py>,
+        camera_name: &str,
+    ) -> Result<Option<Bound<'py, PyAny>>, Error> {
+        let frames = self.render_cameras_impl(&[camera_name])?;
+        Ok(frames
+            .into_iter()
+            .next()
+            .map(|f| numpy::PyArray1::from_vec(py, f.data).into_any()))
     }
 
     /// Render multiple sensor cameras in a single batch request.
@@ -488,7 +514,7 @@ impl StepContext {
             )))
         })?;
         let name_refs: Vec<&str> = names.iter().map(|s| s.as_str()).collect();
-        self.render_cameras_impl(&name_refs)
+        self.render_cameras_impl(&name_refs).map(|_| ())
     }
 
     /// Perform multiple component reads and writes in a single DB operation.
