@@ -193,14 +193,6 @@ Single-camera ticks (RGB only) fit within the per-tick budget. Dual-camera ticks
 
 For higher-resolution cameras or more cameras, reduce the render frequency or increase `sim_time_step`.
 
-## Project Structure
-
-```
-examples/sensor-camera/
-├── main.py    # Simulation: entities, cameras, physics, post_step rendering
-└── README.md  # This file
-```
-
 ## Configuration Reference
 
 ### `world.sensor_camera()` Parameters
@@ -232,9 +224,3 @@ examples/sensor-camera/
 ```kdl
 sensor_view "entity.camera_name" name="Display Label"
 ```
-
-## References
-
-- [Betaflight SITL example](../betaflight-sitl/) — Full SITL integration with IMU, motor commands, and lockstep synchronization
-- [Sensor camera architecture](../../ai-context/sensor-camera-final-summary.md) — Internal design and implementation details
-- [Latency optimization](../../ai-context/sensor-camera-latency-optimization-2.md) — Render-server performance tuning
