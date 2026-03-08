@@ -12,8 +12,8 @@ the room floor and other balls as they move. Rendering is explicitly
 controlled via ctx.render_camera() in the post_step callback.
 
 Usage:
-    elodin editor examples/sensor-camera-test/main.py
-    elodin run examples/sensor-camera-test/main.py
+    elodin editor examples/sensor-camera/main.py
+    elodin run examples/sensor-camera/main.py
 """
 
 import elodin as el
@@ -164,7 +164,7 @@ schematic = """
     }}
 """.format(objects="\n".join(object_3d_lines))
 
-world.schematic(schematic, "sensor-camera-test.kdl")
+world.schematic(schematic, "sensor-camera.kdl")
 
 # ── System composition ───────────────────────────────────────────────────────
 
