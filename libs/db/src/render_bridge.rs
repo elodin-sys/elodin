@@ -171,6 +171,7 @@ pub struct RenderedFrame {
 /// connection overhead.
 pub struct RenderBridgeClient {
     reader: BufReader<UnixStream>,
+    writer: BufWriter<UnixStream>,
     /// Reused for reading frame data to avoid per-frame allocation.
     frame_buffer: Vec<u8>,
 }
@@ -204,8 +205,13 @@ impl RenderBridgeClient {
             .set_write_timeout(Some(Duration::from_secs(5)))
             .map_err(|e| format!("Failed to set write timeout: {e}"))?;
 
+        let write_stream = stream
+            .try_clone()
+            .map_err(|e| format!("Failed to clone stream for writer: {e}"))?;
+
         Ok(Self {
             reader: BufReader::new(stream),
+            writer: BufWriter::new(write_stream),
             frame_buffer: Vec::new(),
         })
     }
@@ -231,25 +237,23 @@ impl RenderBridgeClient {
             return Ok(vec![]);
         }
 
-        let stream = self.reader.get_mut();
-
         if camera_names.len() == 1 {
-            writeln!(stream, "RENDER {} {}", camera_names[0], timestamp.0)
+            writeln!(self.writer, "RENDER {} {}", camera_names[0], timestamp.0)
                 .map_err(|e| format!("Failed to send render request: {e}"))?;
         } else {
             writeln!(
-                stream,
+                self.writer,
                 "RENDER_BATCH {} {}",
                 camera_names.len(),
                 timestamp.0
             )
             .map_err(|e| format!("Failed to send batch request: {e}"))?;
             for name in camera_names {
-                writeln!(stream, "{}", name)
+                writeln!(self.writer, "{}", name)
                     .map_err(|e| format!("Failed to send camera name: {e}"))?;
             }
         }
-        stream
+        self.writer
             .flush()
             .map_err(|e| format!("Failed to flush: {e}"))?;
 

@@ -29,7 +29,7 @@ use bevy_mat3_material::Mat3Material;
 use big_space::{FloatingOrigin, GridCell};
 use elodin_db::render_bridge::RenderBridgeServer;
 use impeller2_kdl::FromKdl;
-use impeller2_wkt::{CurrentTimestamp, DbConfig, LastUpdated, SchematicElem};
+use impeller2_wkt::{CurrentTimestamp, DbConfig, SchematicElem};
 
 use crate::object_3d::create_object_3d_entity;
 use crate::sensor_camera::{
@@ -93,10 +93,6 @@ impl Plugin for HeadlessEditorPlugin {
             .init_resource::<HeadlessMode>()
             .add_systems(
                 PreUpdate,
-                advance_headless_timestamp.after(impeller2_bevy::sink),
-            )
-            .add_systems(
-                PreUpdate,
                 (
                     impeller2_bevy::apply_cached_data,
                     crate::object_3d::update_object_3d_system,
@@ -104,7 +100,7 @@ impl Plugin for HeadlessEditorPlugin {
                     sync_pos,
                 )
                     .chain()
-                    .after(advance_headless_timestamp)
+                    .after(impeller2_bevy::sink)
                     .in_set(PositionSync),
             )
             .add_systems(PreUpdate, crate::setup_cell.after(impeller2_bevy::sink))
@@ -119,15 +115,6 @@ impl Plugin for HeadlessEditorPlugin {
         if let Some(render_app) = app.get_sub_app_mut(RenderApp) {
             render_app.init_resource::<HeadlessMode>();
         }
-    }
-}
-
-fn advance_headless_timestamp(
-    last_updated: Res<LastUpdated>,
-    mut current_ts: ResMut<CurrentTimestamp>,
-) {
-    if last_updated.0 > current_ts.0 {
-        current_ts.0 = last_updated.0;
     }
 }
 
