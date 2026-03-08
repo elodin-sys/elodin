@@ -150,7 +150,7 @@ pub struct StepContext {
 }
 
 impl StepContext {
-    /// Create a new StepContext with access to the database and shared tick counter.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         db: Arc<DB>,
         tick_counter: Arc<AtomicU64>,
@@ -232,9 +232,7 @@ impl StepContext {
             }
         }
 
-        tracing::debug!(
-            total_render_cameras_ms = total_start.elapsed().as_secs_f64() * 1000.0
-        );
+        tracing::debug!(total_render_cameras_ms = total_start.elapsed().as_secs_f64() * 1000.0);
 
         Ok(frames)
     }

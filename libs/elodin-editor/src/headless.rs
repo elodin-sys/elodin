@@ -12,9 +12,9 @@ use bevy::{
     input::InputPlugin,
     log::LogPlugin,
     math::{EulerRot, Quat},
-    picking::{input::PointerInputPlugin, InteractionPlugin, PickingPlugin},
+    picking::{InteractionPlugin, PickingPlugin, input::PointerInputPlugin},
     prelude::*,
-    render::{pipelined_rendering::PipelinedRenderingPlugin, RenderApp},
+    render::{RenderApp, pipelined_rendering::PipelinedRenderingPlugin},
     sprite::SpritePlugin,
     sprite_render::SpriteRenderPlugin,
     state::app::StatesPlugin,
@@ -155,6 +155,7 @@ fn setup_headless_lighting(mut commands: Commands) {
     ));
 }
 
+#[allow(clippy::too_many_arguments)]
 fn load_headless_scene(
     config: Res<DbConfig>,
     mut loaded: Local<bool>,
@@ -242,7 +243,9 @@ fn headless_sensor_runner(mut app: App) -> AppExit {
         std::thread::sleep(Duration::from_millis(50));
     }
 
-    tracing::info!("Render server ready (cameras_enabled={cameras_enabled}), waiting for client connection...");
+    tracing::info!(
+        "Render server ready (cameras_enabled={cameras_enabled}), waiting for client connection..."
+    );
 
     // Accept persistent client connection (blocking).
     if let Err(e) = server.accept_client() {
@@ -310,9 +313,7 @@ fn headless_sensor_runner(mut app: App) -> AppExit {
             set_readback_armed(app.world_mut(), &request.camera_names, false);
 
             server.respond_batch(request.timestamp, &frames);
-            tracing::debug!(
-                total_request_ms = request_start.elapsed().as_secs_f64() * 1000.0
-            );
+            tracing::debug!(total_request_ms = request_start.elapsed().as_secs_f64() * 1000.0);
         } else {
             server.respond_empty();
         }

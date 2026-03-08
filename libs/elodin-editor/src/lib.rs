@@ -1365,13 +1365,11 @@ fn load_editor_sensor_configs(
     if !configs.0.is_empty() {
         return;
     }
-    if let Some(json) = db_config.metadata.get("sensor_cameras") {
-        if let Ok(camera_configs) =
+    if let Some(json) = db_config.metadata.get("sensor_cameras")
+        && let Ok(camera_configs) =
             serde_json::from_str::<Vec<sensor_camera::SensorCameraConfig>>(json)
-        {
-            if !camera_configs.is_empty() {
-                configs.0 = camera_configs;
-            }
-        }
+        && !camera_configs.is_empty()
+    {
+        configs.0 = camera_configs;
     }
 }

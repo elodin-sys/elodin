@@ -926,10 +926,9 @@ impl super::widgets::WidgetSystem for VideoStreamWidget<'_, '_> {
                         if let Some((ts, data)) =
                             cache.next_raw_frame_after(cache.last_decoded_ts.unwrap())
                             && ts.0 <= current_ts.0 + DECODER_NEAR_THRESHOLD_US
+                            && decoder.process_frame(ts, data)
                         {
-                            if decoder.process_frame(ts, data) {
-                                cache.last_decoded_ts = Some(ts);
-                            }
+                            cache.last_decoded_ts = Some(ts);
                         }
                     } else if !decoder_near && has_raw {
                         let (seek_start, seek_end) =
@@ -1105,7 +1104,7 @@ pub fn connect_streams(
                 // counter; pagination within the callback fires immediately.
                 let retry_ok = cache
                     .backfill_retry_at
-                    .map_or(true, |t| t.elapsed().as_secs_f32() >= 1.0);
+                    .is_none_or(|t| t.elapsed().as_secs_f32() >= 1.0);
                 if !cache.backfill_in_flight
                     && retry_ok
                     && cache.backfill_frontier <= last_updated.0

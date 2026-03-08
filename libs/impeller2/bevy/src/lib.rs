@@ -701,7 +701,10 @@ impl RequestIdAlloc {
         self.0
     }
 
-    pub fn alloc_next_id_avoiding(&mut self, occupied: &std::collections::HashSet<RequestId>) -> RequestId {
+    pub fn alloc_next_id_avoiding(
+        &mut self,
+        occupied: &std::collections::HashSet<RequestId>,
+    ) -> RequestId {
         for _ in 0..255 {
             self.0 = self.0.wrapping_add(1);
             if self.0 == 0 {
@@ -795,12 +798,9 @@ where
         let system_id = world.register_system(self.system);
 
         let req_id = {
-            let handlers = world
-                .resource::<RequestIdHandlers>();
-            let occupied: std::collections::HashSet<RequestId> =
-                handlers.keys().copied().collect();
-            let mut alloc = world
-                .resource_mut::<RequestIdAlloc>();
+            let handlers = world.resource::<RequestIdHandlers>();
+            let occupied: std::collections::HashSet<RequestId> = handlers.keys().copied().collect();
+            let mut alloc = world.resource_mut::<RequestIdAlloc>();
             alloc.alloc_next_id_avoiding(&occupied)
         };
 
