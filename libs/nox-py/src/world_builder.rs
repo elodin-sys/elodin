@@ -464,6 +464,10 @@ impl WorldBuilder {
                     std::sync::Arc::new(std::sync::Mutex::new(None));
                 let pre_step_render_client = render_client.clone();
                 let post_step_render_client = render_client;
+                let frame_db_writer: crate::step_context::SharedFrameDbWriter =
+                    std::sync::Arc::new(std::sync::Mutex::new(None));
+                let pre_step_frame_db_writer = frame_db_writer.clone();
+                let post_step_frame_db_writer = frame_db_writer;
                 let db_server = elodin_db::Server::new(&db_path, addr)
                     .map_err(|e| {
                         if matches!(&e, elodin_db::Error::Io(io) if io.kind() == std::io::ErrorKind::AddrInUse) {
@@ -511,6 +515,7 @@ impl WorldBuilder {
                                             start_timestamp,
                                             pre_step_cancel_token.clone(),
                                             pre_step_render_client.clone(),
+                                            pre_step_frame_db_writer.clone(),
                                         );
                                         match Py::new(py, ctx) {
                                             Ok(ctx_py) => {
@@ -546,6 +551,7 @@ impl WorldBuilder {
                                             start_timestamp,
                                             post_step_cancel_token.clone(),
                                             post_step_render_client.clone(),
+                                            post_step_frame_db_writer.clone(),
                                         );
                                         match Py::new(py, ctx) {
                                             Ok(ctx_py) => {

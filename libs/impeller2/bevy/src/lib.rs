@@ -272,9 +272,10 @@ fn sink_inner(
     world_sink_state: &mut SystemState<WorldSink>,
 ) -> Result<(), impeller2::error::Error> {
     let mut count = 0;
+    let sink_deadline = std::time::Instant::now() + std::time::Duration::from_millis(8);
     let mut pending_cache_entries: Vec<(ComponentId, Timestamp, ComponentValue)> = Vec::new();
     while let Some(pkt) = packet_rx.try_recv_pkt() {
-        if count > 2048 {
+        if count > 2048 || (count >= 16 && std::time::Instant::now() > sink_deadline) {
             return Ok(());
         }
         count += 1;
@@ -694,9 +695,21 @@ impl Default for RequestIdAlloc {
 impl RequestIdAlloc {
     pub fn alloc_next_id(&mut self) -> RequestId {
         self.0 = self.0.wrapping_add(1);
-        // Skip request ID 0, which is reserved for streaming messages
         if self.0 == 0 {
             self.0 = 1;
+        }
+        self.0
+    }
+
+    pub fn alloc_next_id_avoiding(&mut self, occupied: &std::collections::HashSet<RequestId>) -> RequestId {
+        for _ in 0..255 {
+            self.0 = self.0.wrapping_add(1);
+            if self.0 == 0 {
+                self.0 = 1;
+            }
+            if !occupied.contains(&self.0) {
+                return self.0;
+            }
         }
         self.0
     }
@@ -780,22 +793,20 @@ where
 {
     fn apply(self, world: &mut World) {
         let system_id = world.register_system(self.system);
-        let mut alloc = world
-            .get_resource_mut::<RequestIdAlloc>()
-            .expect("missing packet handlers");
-        let req_id = alloc.alloc_next_id();
 
-        let mut handlers = world
-            .get_resource_mut::<RequestIdHandlers>()
-            .expect("missing packet handlers");
-        // Warn if we're about to overwrite an existing handler - this indicates
-        // request ID collision (IDs being reused before previous queries complete)
-        if let Some(_old) = handlers.insert(req_id, system_id) {
-            bevy::log::warn!(
-                req_id,
-                "RequestId collision: overwriting existing handler! This may cause query failures."
-            );
-        }
+        let req_id = {
+            let handlers = world
+                .resource::<RequestIdHandlers>();
+            let occupied: std::collections::HashSet<RequestId> =
+                handlers.keys().copied().collect();
+            let mut alloc = world
+                .resource_mut::<RequestIdAlloc>();
+            alloc.alloc_next_id_avoiding(&occupied)
+        };
+
+        world
+            .resource_mut::<RequestIdHandlers>()
+            .insert(req_id, system_id);
         let tx = world
             .get_resource_mut::<PacketTx>()
             .expect("missing packet handlers");

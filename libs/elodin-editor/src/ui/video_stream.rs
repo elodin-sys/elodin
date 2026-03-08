@@ -726,13 +726,18 @@ fn send_stream_request(commands: &mut Commands, entity: Entity, msg_id: [u8; 2],
 }
 
 /// Maximum payload size (in bytes) for a single backfill `GetMsgs` batch.
-/// Must stay well under the 64 MB receive-grant ceiling in
-/// `impeller2_stellar::queue::tcp_connect`.
-const BACKFILL_MAX_BATCH_BYTES: usize = 32 * 1024 * 1024;
+/// Sized so that each batch processes within ~10 ms in the editor sink,
+/// avoiding the 80-130 ms stalls that the old 32 MB limit caused when
+/// raw RGBA sensor camera frames accumulated. The paginated backfill
+/// callback requests the next page immediately, keeping total throughput
+/// high while preventing any single response from dominating a frame.
+/// Also kept low enough that two camera streams won't exceed the u8
+/// RequestId space (256) during a full backfill.
+const BACKFILL_MAX_BATCH_BYTES: usize = 5 * 1024 * 1024;
 
 /// Default backfill frame limit for compressed streams (H.264).
-/// At ~50 KB/frame (worst-case OBS keyframe), 200 frames ≈ 10 MB.
-const BACKFILL_FRAME_LIMIT_DEFAULT: usize = 200;
+/// At ~50 KB/frame (worst-case OBS keyframe), 100 frames ≈ 5 MB.
+const BACKFILL_FRAME_LIMIT_DEFAULT: usize = 100;
 
 /// Compute the backfill frame limit for a given frame size.
 fn backfill_frame_limit(raw_rgba_dims: Option<(u32, u32)>) -> usize {

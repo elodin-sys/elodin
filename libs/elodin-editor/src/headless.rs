@@ -234,7 +234,6 @@ fn headless_sensor_runner(mut app: App) -> AppExit {
             enable_all_sensor_cameras(app.world_mut());
             cameras_enabled = true;
             tracing::info!("Sensor cameras spawned and enabled after {i} warm-up cycles");
-            // Run a few more updates with cameras active to fully warm the render pipeline.
             for _ in 0..4 {
                 app.update();
             }
@@ -277,7 +276,6 @@ fn headless_sensor_runner(mut app: App) -> AppExit {
             enable_all_sensor_cameras(app.world_mut());
             cameras_enabled = true;
             tracing::info!("Sensor cameras late-enabled during main loop");
-            // Warm the pipeline with a few updates before processing the request.
             for _ in 0..4 {
                 app.update();
             }
@@ -288,7 +286,6 @@ fn headless_sensor_runner(mut app: App) -> AppExit {
             set_readback_armed(app.world_mut(), &request.camera_names, true);
         }
 
-        // Run update cycle (allows camera spawning even if not ready yet).
         // With PipelinedRenderingPlugin disabled, Extract + Render run synchronously in one update.
         let update0_start = Instant::now();
         app.update();
@@ -298,7 +295,6 @@ fn headless_sensor_runner(mut app: App) -> AppExit {
         );
 
         if cameras_ready {
-            let collect_start = Instant::now();
             let mut frames = collect_frames(&app, &request.camera_names);
             if frames.is_empty() {
                 let fallback_start = Instant::now();
@@ -310,17 +306,11 @@ fn headless_sensor_runner(mut app: App) -> AppExit {
                 );
                 frames = collect_frames(&app, &request.camera_names);
             }
-            tracing::debug!(
-                collect_frames_ms = collect_start.elapsed().as_secs_f64() * 1000.0,
-                frame_count = frames.len()
-            );
 
             set_readback_armed(app.world_mut(), &request.camera_names, false);
 
-            let respond_start = Instant::now();
             server.respond_batch(request.timestamp, &frames);
             tracing::debug!(
-                respond_batch_ms = respond_start.elapsed().as_secs_f64() * 1000.0,
                 total_request_ms = request_start.elapsed().as_secs_f64() * 1000.0
             );
         } else {

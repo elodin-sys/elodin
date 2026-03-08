@@ -6,6 +6,38 @@ use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+/// Background worker that pushes rendered frames to the DB without blocking the
+/// simulation tick. Uses a bounded channel so the sim never blocks — if the
+/// worker is behind, the oldest unsent frame is dropped (editor skips a frame).
+pub struct FrameDbWriter {
+    tx: std::sync::mpsc::SyncSender<(impeller2::types::PacketId, Timestamp, Vec<u8>)>,
+}
+
+impl FrameDbWriter {
+    pub fn new(db: Arc<DB>) -> Self {
+        let (tx, rx) =
+            std::sync::mpsc::sync_channel::<(impeller2::types::PacketId, Timestamp, Vec<u8>)>(8);
+        std::thread::Builder::new()
+            .name("frame-db-writer".into())
+            .spawn(move || {
+                while let Ok((msg_id, ts, data)) = rx.recv() {
+                    if let Err(e) = db.push_msg(ts, msg_id, &data) {
+                        tracing::warn!("Background DB push failed: {e}");
+                    }
+                }
+            })
+            .expect("failed to spawn frame-db-writer thread");
+        Self { tx }
+    }
+
+    pub fn push(&self, msg_id: impeller2::types::PacketId, ts: Timestamp, data: Vec<u8>) {
+        let _ = self.tx.try_send((msg_id, ts, data));
+    }
+}
+
+/// Shared frame DB writer, created lazily alongside the render client.
+pub type SharedFrameDbWriter = Arc<Mutex<Option<FrameDbWriter>>>;
+
 use elodin_db::DB;
 use elodin_db::render_bridge::RenderBridgeClient;
 use impeller2::types::{ComponentId, PrimType, Timestamp};
@@ -113,6 +145,8 @@ pub struct StepContext {
     recipe_cancel_token: Option<CancelToken>,
     /// Shared persistent render bridge client (created lazily on first render call)
     render_client: SharedRenderClient,
+    /// Background writer that pushes rendered frames to DB without blocking the tick
+    frame_db_writer: SharedFrameDbWriter,
 }
 
 impl StepContext {
@@ -125,6 +159,7 @@ impl StepContext {
         start_timestamp: Timestamp,
         recipe_cancel_token: Option<CancelToken>,
         render_client: SharedRenderClient,
+        frame_db_writer: SharedFrameDbWriter,
     ) -> Self {
         Self {
             db,
@@ -134,6 +169,7 @@ impl StepContext {
             start_timestamp,
             recipe_cancel_token,
             render_client,
+            frame_db_writer,
         }
     }
 
@@ -171,19 +207,32 @@ impl StepContext {
         let frames = client
             .render_cameras(camera_names, timestamp)
             .map_err(|e| Error::PyO3(pyo3::exceptions::PyRuntimeError::new_err(e)))?;
+        let uds_ms = uds_start.elapsed().as_secs_f64() * 1000.0;
         tracing::debug!(
-            render_uds_round_trip_ms = uds_start.elapsed().as_secs_f64() * 1000.0,
+            render_uds_round_trip_ms = uds_ms,
             frame_count = frames.len()
         );
 
-        // Write all frames to the local DB (for editor display and compatibility).
-        let db_start = Instant::now();
-        for frame in &frames {
-            let msg_id = impeller2::types::msg_id(&frame.camera_name);
-            self.db.push_msg(frame.timestamp, msg_id, &frame.data)?;
+        // Push frames to DB via the background worker thread. The worker uses a
+        // bounded channel so we never block. We need to clone frame data since the
+        // caller consumes it for the numpy return value.
+        {
+            let mut writer_guard = self.frame_db_writer.lock().map_err(|_| {
+                Error::PyO3(pyo3::exceptions::PyRuntimeError::new_err(
+                    "Frame DB writer lock poisoned",
+                ))
+            })?;
+            if writer_guard.is_none() {
+                *writer_guard = Some(FrameDbWriter::new(self.db.clone()));
+            }
+            let writer = writer_guard.as_ref().unwrap();
+            for frame in &frames {
+                let msg_id = impeller2::types::msg_id(&frame.camera_name);
+                writer.push(msg_id, frame.timestamp, frame.data.clone());
+            }
         }
+
         tracing::debug!(
-            render_db_push_ms = db_start.elapsed().as_secs_f64() * 1000.0,
             total_render_cameras_ms = total_start.elapsed().as_secs_f64() * 1000.0
         );
 

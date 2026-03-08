@@ -397,10 +397,18 @@ async fn tick(
         post_step(tick, &db, &tick_counter, timestamp, start_timestamp);
         if let Some(deadline) = next_tick_deadline.as_mut() {
             let now = Instant::now();
+            let rts = run_time_step.unwrap();
+            // Cap deadline drift: if we're more than 2 tick periods behind,
+            // reset the deadline to now. This prevents a burst of fast ticks
+            // (visible as timeline stutter in the editor) when a one-time
+            // delay occurs, such as the initial render bridge connection.
+            if now > *deadline + rts * 2 {
+                *deadline = now;
+            }
             if *deadline > now {
                 stellarator::sleep(*deadline - now).await;
             }
-            *deadline += run_time_step.unwrap();
+            *deadline += rts;
         }
 
         if tick_counter.load(Ordering::SeqCst) == tick {
