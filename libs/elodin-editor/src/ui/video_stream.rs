@@ -771,9 +771,11 @@ fn send_backfill_request(
         move |In(result): In<Result<MsgBatch, ErrorResponse>>,
               mut caches: Query<&mut VideoFrameCache>,
               mut cmds: Commands| {
-            if let Ok(batch) = result
-                && let Ok(mut cache) = caches.get_mut(entity)
-            {
+            let Ok(mut cache) = caches.get_mut(entity) else {
+                return true;
+            };
+            cache.backfill_in_flight = false;
+            if let Ok(batch) = result {
                 let count = batch.data.len();
                 let mut last_ts = start_from;
                 for (timestamp, data) in batch.data {
@@ -783,7 +785,6 @@ fn send_backfill_request(
                 if count > 0 {
                     cache.backfill_frontier = Timestamp(last_ts.0 + 1);
                 }
-                cache.backfill_in_flight = false;
                 if count >= limit {
                     cache.backfill_in_flight = true;
                     send_backfill_request(

@@ -58,7 +58,7 @@ pub mod sensor_camera;
 pub mod ui;
 pub mod vector_arrow;
 
-#[cfg(not(target_family = "wasm"))]
+#[cfg(all(not(target_family = "wasm"), target_family = "unix"))]
 pub mod headless;
 #[cfg(not(target_family = "wasm"))]
 pub mod run;
