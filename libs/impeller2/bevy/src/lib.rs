@@ -809,7 +809,10 @@ where
                 "RequestId space exhausted — all 255 IDs are in use, dropping request"
             );
             if let Err(err) = world.unregister_system(system_id) {
-                bevy::log::error!(?err, "failed to unregister system after RequestId exhaustion");
+                bevy::log::error!(
+                    ?err,
+                    "failed to unregister system after RequestId exhaustion"
+                );
             }
             return;
         };
@@ -818,10 +821,7 @@ where
             .resource_mut::<RequestIdHandlers>()
             .insert(req_id, system_id)
         {
-            bevy::log::warn!(
-                req_id,
-                "RequestId collision — overwriting existing handler"
-            );
+            bevy::log::warn!(req_id, "RequestId collision — overwriting existing handler");
             if let Err(err) = world.unregister_system(old) {
                 bevy::log::error!(?err, "failed to unregister collided system");
             }

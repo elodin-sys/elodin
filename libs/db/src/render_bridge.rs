@@ -25,8 +25,10 @@ pub struct BatchRenderRequest {
 pub struct RenderBridgeServer {
     listener: UnixListener,
     path: PathBuf,
-    /// Persistent client connection (accepted once, reused for all requests)
-    client: Mutex<Option<BufReader<UnixStream>>>,
+    /// Persistent client connection (accepted once, reused for all requests).
+    /// The stream is cloned so reads and writes use independent buffered wrappers,
+    /// preventing protocol desynchronization from shared BufReader/BufWriter state.
+    client: Mutex<Option<(BufReader<UnixStream>, BufWriter<UnixStream>)>>,
 }
 
 impl RenderBridgeServer {
@@ -55,8 +57,10 @@ impl RenderBridgeServer {
         let (stream, _) = self.listener.accept()?;
         stream.set_nonblocking(false)?;
         stream.set_read_timeout(None)?;
+        let write_stream = stream.try_clone()?;
         let reader = BufReader::new(stream);
-        *self.client.lock().unwrap() = Some(reader);
+        let writer = BufWriter::new(write_stream);
+        *self.client.lock().unwrap() = Some((reader, writer));
         Ok(())
     }
 
@@ -70,7 +74,7 @@ impl RenderBridgeServer {
     /// Returns None if the connection was closed.
     pub fn recv_batch(&self) -> Option<BatchRenderRequest> {
         let mut guard = self.client.lock().unwrap();
-        let reader = guard.as_mut()?;
+        let (reader, _) = guard.as_mut()?;
 
         let mut line = String::new();
         match reader.read_line(&mut line) {
@@ -121,12 +125,10 @@ impl RenderBridgeServer {
     /// Send batch response with multiple frames back to the client.
     /// Format: "FRAMES {count} {timestamp}\n" followed by "{camera_name} {len}\n{bytes}" for each frame.
     pub fn respond_batch(&self, timestamp: Timestamp, frames: &[(String, Vec<u8>)]) {
-        let guard = self.client.lock().unwrap();
-        let Some(reader) = guard.as_ref() else {
+        let mut guard = self.client.lock().unwrap();
+        let Some((_, writer)) = guard.as_mut() else {
             return;
         };
-        let stream = reader.get_ref();
-        let mut writer = BufWriter::new(stream);
 
         let _ = writeln!(writer, "FRAMES {} {}", frames.len(), timestamp.0);
         for (camera_name, frame_bytes) in frames {
@@ -138,12 +140,10 @@ impl RenderBridgeServer {
 
     /// Send an empty response (no frames rendered).
     pub fn respond_empty(&self) {
-        let guard = self.client.lock().unwrap();
-        let Some(reader) = guard.as_ref() else {
+        let mut guard = self.client.lock().unwrap();
+        let Some((_, writer)) = guard.as_mut() else {
             return;
         };
-        let stream = reader.get_ref();
-        let mut writer = BufWriter::new(stream);
         let _ = writeln!(writer, "FRAMES 0 0");
         let _ = writer.flush();
     }
@@ -305,7 +305,7 @@ impl RenderBridgeClient {
             frames.push(RenderedFrame {
                 camera_name,
                 timestamp: Timestamp(resp_timestamp),
-                data: self.frame_buffer.clone(),
+                data: self.frame_buffer[..frame_len].to_vec(),
             });
         }
 

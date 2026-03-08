@@ -65,12 +65,11 @@ pub struct SensorEffectSettings {
 
 /// Double-buffered GPU readback state for a single sensor camera.
 /// One buffer can be mapped for CPU read while the other receives the next frame.
+/// The active buffer index is tracked in the render-world `BufferToggle` resource
+/// so it persists across extract rebuilds.
 #[derive(Clone, Component)]
 struct ImageCopier {
-    /// Two staging buffers for ping-pong readback.
     buffers: [Buffer; 2],
-    /// Index of the buffer currently being written to (0 or 1).
-    write_buffer_idx: usize,
     src_image: Handle<Image>,
     camera_name: String,
     width: u32,
@@ -90,6 +89,12 @@ struct SensorFrameSender(flume::Sender<(String, Vec<u8>, u32, u32)>);
 /// Reusable buffer for GPU readback to avoid per-frame allocation in receive_image_from_buffer.
 #[derive(Resource, Default)]
 struct ReusableFrameBuffer(Vec<u8>);
+
+/// Render-world resource that persists buffer toggle state across frames.
+/// The extract system rebuilds `ImageCopiers` each frame (resetting `write_buffer_idx`),
+/// so we track the actual ping-pong indices here.
+#[derive(Resource, Default)]
+struct BufferToggle(Vec<usize>);
 
 #[derive(Resource, Default)]
 pub struct SensorCamerasSpawned(pub bool);
@@ -258,13 +263,13 @@ impl Plugin for SensorCameraPlugin {
                 PreUpdate,
                 update_sensor_camera_transforms.after(crate::PositionSync),
             )
-            .add_systems(Update, tick_effect_time)
-            .add_systems(Update, patch_sensor_view_dims);
+            .add_systems(Update, tick_effect_time);
 
         if let Some(render_app) = app.get_sub_app_mut(RenderApp) {
             render_app
                 .insert_resource(SensorFrameSender(tx))
                 .init_resource::<ReusableFrameBuffer>()
+                .init_resource::<BufferToggle>()
                 .add_systems(ExtractSchedule, image_copy_extract)
                 .add_systems(
                     Render,
@@ -293,7 +298,7 @@ impl Plugin for SensorCameraPlugin {
 // Main-world systems
 // ---------------------------------------------------------------------------
 
-fn load_sensor_configs_from_db(
+pub fn load_sensor_configs_from_db(
     db_config: Res<DbConfig>,
     mut configs: ResMut<SensorCameraConfigs>,
     spawned: Res<SensorCamerasSpawned>,
@@ -363,7 +368,6 @@ fn spawn_sensor_cameras(
 
         let copier = ImageCopier {
             buffers: [cpu_buffer_0, cpu_buffer_1],
-            write_buffer_idx: 0,
             src_image: render_target_handle.clone(),
             camera_name: config.camera_name.clone(),
             width: config.width,
@@ -529,9 +533,10 @@ fn image_copy_driver(
     render_device: Res<RenderDevice>,
     render_queue: Res<RenderQueue>,
     gpu_images: Res<RenderAssets<bevy::render::texture::GpuImage>>,
+    buffer_toggle: Res<BufferToggle>,
 ) {
     let copy_start = Instant::now();
-    for image_copier in image_copiers.0.iter() {
+    for (i, image_copier) in image_copiers.0.iter().enumerate() {
         if !image_copier.is_active {
             continue;
         }
@@ -549,8 +554,7 @@ fn image_copy_driver(
             (src_image.size.width as usize / block_dimensions.0 as usize) * block_size as usize,
         );
 
-        // Use the current write buffer (ping-pong between 0 and 1)
-        let buf_idx = image_copier.write_buffer_idx;
+        let buf_idx = buffer_toggle.0.get(i).copied().unwrap_or(0);
         encoder.copy_texture_to_buffer(
             src_image.texture.as_image_copy(),
             TexelCopyBufferInfo {
@@ -578,13 +582,18 @@ fn receive_image_from_buffer(
     render_device: Res<RenderDevice>,
     sender: Res<SensorFrameSender>,
     mut reusable: ResMut<ReusableFrameBuffer>,
+    mut buffer_toggle: ResMut<BufferToggle>,
 ) {
-    for image_copier in image_copiers.0.iter() {
+    if buffer_toggle.0.len() < image_copiers.0.len() {
+        buffer_toggle.0.resize(image_copiers.0.len(), 0);
+    }
+
+    for (i, image_copier) in image_copiers.0.iter().enumerate() {
         if !image_copier.is_active {
             continue;
         }
 
-        let buf_idx = image_copier.write_buffer_idx;
+        let buf_idx = buffer_toggle.0[i];
         let buffer = &image_copier.buffers[buf_idx];
         let buffer_slice = buffer.slice(..);
 
@@ -648,6 +657,8 @@ fn receive_image_from_buffer(
         } else {
             buffer.unmap();
         }
+
+        buffer_toggle.0[i] = 1 - buf_idx;
     }
 }
 

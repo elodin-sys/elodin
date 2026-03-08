@@ -75,12 +75,16 @@ fn main() {
         );
     }
 
-    let stdlib_path =
-        run_python_command(&python, "import sysconfig; print(sysconfig.get_path('stdlib'))");
+    let stdlib_path = run_python_command(
+        &python,
+        "import sysconfig; print(sysconfig.get_path('stdlib'))",
+    );
     println!("cargo:rustc-env=PYTHON_STDLIB_PATH={}", stdlib_path);
 
-    let purelib_path =
-        run_python_command(&python, "import sysconfig; print(sysconfig.get_path('purelib'))");
+    let purelib_path = run_python_command(
+        &python,
+        "import sysconfig; print(sysconfig.get_path('purelib'))",
+    );
     println!("cargo:rustc-env=PYTHON_PURELIB_PATH={}", purelib_path);
 
     println!("cargo:rerun-if-env-changed=VIRTUAL_ENV");
