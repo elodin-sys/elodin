@@ -704,17 +704,17 @@ impl RequestIdAlloc {
     pub fn alloc_next_id_avoiding(
         &mut self,
         occupied: &std::collections::HashSet<RequestId>,
-    ) -> RequestId {
+    ) -> Option<RequestId> {
         for _ in 0..255 {
             self.0 = self.0.wrapping_add(1);
             if self.0 == 0 {
                 self.0 = 1;
             }
             if !occupied.contains(&self.0) {
-                return self.0;
+                return Some(self.0);
             }
         }
-        self.0
+        None
     }
 }
 
@@ -804,9 +804,29 @@ where
             alloc.alloc_next_id_avoiding(&occupied)
         };
 
-        world
+        let Some(req_id) = req_id else {
+            bevy::log::warn!(
+                "RequestId space exhausted — all 255 IDs are in use, dropping request"
+            );
+            if let Err(err) = world.unregister_system(system_id) {
+                bevy::log::error!(?err, "failed to unregister system after RequestId exhaustion");
+            }
+            return;
+        };
+
+        if let Some(old) = world
             .resource_mut::<RequestIdHandlers>()
-            .insert(req_id, system_id);
+            .insert(req_id, system_id)
+        {
+            bevy::log::warn!(
+                req_id,
+                "RequestId collision — overwriting existing handler"
+            );
+            if let Err(err) = world.unregister_system(old) {
+                bevy::log::error!(?err, "failed to unregister collided system");
+            }
+        }
+
         let tx = world
             .get_resource_mut::<PacketTx>()
             .expect("missing packet handlers");

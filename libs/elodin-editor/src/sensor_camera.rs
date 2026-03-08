@@ -620,7 +620,8 @@ fn receive_image_from_buffer(
             reusable.0.resize(required_len, 0);
             let buf = &mut reusable.0[..required_len];
             if row_bytes == aligned_row_bytes {
-                buf.copy_from_slice(&data[..required_len.min(data.len())]);
+                let copy_len = required_len.min(data.len());
+                buf[..copy_len].copy_from_slice(&data[..copy_len]);
             } else {
                 for (row_idx, chunk) in data
                     .chunks(aligned_row_bytes)
