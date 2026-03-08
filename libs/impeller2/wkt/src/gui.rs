@@ -918,6 +918,29 @@ pub struct SensorView {
     pub name: Option<String>,
 }
 
+fn default_format() -> String {
+    "rgba".to_string()
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SensorCameraConfig {
+    pub entity_name: String,
+    pub camera_name: String,
+    pub width: u32,
+    pub height: u32,
+    pub fov_degrees: f32,
+    pub near: f32,
+    pub far: f32,
+    pub pos_offset: [f64; 3],
+    pub look_at_offset: [f64; 3],
+    #[serde(default = "default_format")]
+    pub format: String,
+    #[serde(default)]
+    pub effect: String,
+    #[serde(default)]
+    pub effect_params: HashMap<String, f64>,
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
 pub struct QueryTable {

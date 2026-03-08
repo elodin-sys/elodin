@@ -35,37 +35,10 @@ use bevy::{
 };
 use big_space::GridCell;
 use impeller2::types::ComponentId;
+pub use impeller2_wkt::SensorCameraConfig;
 use impeller2_wkt::DbConfig;
-use serde::{Deserialize, Serialize};
 
 use crate::object_3d::ComponentArrayExt;
-
-// ---------------------------------------------------------------------------
-// Config types
-// ---------------------------------------------------------------------------
-
-fn default_format() -> String {
-    "rgba".to_string()
-}
-
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub struct SensorCameraConfig {
-    pub entity_name: String,
-    pub camera_name: String,
-    pub width: u32,
-    pub height: u32,
-    pub fov_degrees: f32,
-    pub near: f32,
-    pub far: f32,
-    pub pos_offset: [f64; 3],
-    pub look_at_offset: [f64; 3],
-    #[serde(default = "default_format")]
-    pub format: String,
-    #[serde(default)]
-    pub effect: String,
-    #[serde(default)]
-    pub effect_params: std::collections::HashMap<String, f64>,
-}
 
 #[derive(Resource, Default, Debug, Clone)]
 pub struct SensorCameraConfigs(pub Vec<SensorCameraConfig>);
@@ -703,21 +676,6 @@ pub fn patch_sensor_view_dims(
 // ---------------------------------------------------------------------------
 // Headless render server helpers
 // ---------------------------------------------------------------------------
-
-/// Set Camera::is_active for sensor cameras: true only for the given names, false for others.
-/// Ensures only the requested camera(s) are rendered this frame (matches old headless behavior).
-pub fn set_cameras_active_for_request(world: &mut World, camera_names: &[String]) {
-    let configs = world.resource::<SensorCameraConfigs>();
-    let target_indices: Vec<usize> = camera_names
-        .iter()
-        .filter_map(|name| configs.0.iter().position(|c| &c.camera_name == name))
-        .collect();
-
-    let mut query = world.query::<(&SensorCamera, &mut Camera)>();
-    for (sensor, mut camera) in query.iter_mut(world) {
-        camera.is_active = target_indices.contains(&sensor.config_index);
-    }
-}
 
 /// Arm or disarm GPU readback for specific cameras by name.
 /// Called by the headless render server to control which cameras perform
