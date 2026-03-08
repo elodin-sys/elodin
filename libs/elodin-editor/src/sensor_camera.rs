@@ -35,8 +35,8 @@ use bevy::{
 };
 use big_space::GridCell;
 use impeller2::types::ComponentId;
-pub use impeller2_wkt::SensorCameraConfig;
 use impeller2_wkt::DbConfig;
+pub use impeller2_wkt::SensorCameraConfig;
 
 use crate::object_3d::ComponentArrayExt;
 
