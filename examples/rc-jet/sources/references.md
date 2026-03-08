@@ -46,7 +46,7 @@ These are the JSBSim/OpenRocket‑level things worth reading, even if you don’
 * Has a battle‑tested **6‑DOF rigid‑body formulation**, atmosphere, gravity, and an aero coefficient architecture (coefficient tables, polynomials, etc.).
 * Python wheels exist, so you can experiment quickly from Python and mirror the structure in Elodin.
 
-**JSBSim‑UAVs** – collection of JSBSim aircraft XMLs for small UAVs, including RC‑scale models such as EPP FPV and Giant Big Stik. ([GitHub][5])
+**JSBSim‑UAVs** – collection of JSBSim aircraft XMLs for small UAVs, including RC‑scale models such as EPP FPV and Giant Big Stick. ([GitHub][5])
 
 What to crib:
 

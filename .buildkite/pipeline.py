@@ -37,7 +37,7 @@ test_steps = [
             nix_step(
                 emoji=":crab:",
                 label="cargo test",
-                command="cargo test --release -- -Z unstable-options --format json --report-time | buildkite-test-collector",
+                command="cargo test --release --workspace --exclude elodin-db --exclude elodin-db-tests --exclude muxide -- -Z unstable-options --format json --report-time | buildkite-test-collector && cargo test --release -p elodin-db --lib -- --test-threads=1 -Z unstable-options --format json --report-time | buildkite-test-collector && cargo test --release -p elodin-db-tests -- --test-threads=1 -Z unstable-options --format json --report-time | buildkite-test-collector",
                 env={
                     "RUSTC_BOOTSTRAP": "1",
                     "BUILDKITE_ANALYTICS_TOKEN": "R6hH2MNhtMdbfQWhDd9cvZfo",
@@ -73,7 +73,7 @@ test_steps = [
         steps=[
             nix_step(
                 label=":python: pytest",
-                command="pytest libs/nox-py",
+                command="pytest libs/nox-py -o 'pythonpath='",
             ),
             nix_step(
                 label=":python: lint",

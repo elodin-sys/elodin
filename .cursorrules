@@ -4,6 +4,7 @@ Rules:
 - Always use the `nix develop` shell when developing changes
 - Always use `uv` inside the nix shell for Python everything
 - Don't ever commit changes to git, that's for the developer to do
+- Be extremely concise with comments, and only add when the code doesn't self document
 - When suggesting new dependencies, make sure to check they are well supported and maintained
 - Never use unsafe Rust code
 - Run all activities from the repository root

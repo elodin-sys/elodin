@@ -30,9 +30,10 @@ fn main() {
     std::fs::create_dir_all(&python_dir).unwrap();
     let python = which::which("python3").unwrap();
     println!("cargo:rerun-if-changed={}", python.display());
-    let python = std::fs::canonicalize(python).unwrap();
-    let python_home = python.parent().unwrap().parent().unwrap();
-    let python_lib = python_home.join("lib");
+
+    let python_lib = std::path::PathBuf::from(run_python_command(
+        "import sysconfig; print(sysconfig.get_config_var('LIBDIR'))",
+    ));
 
     let shared_lib_extension = if cfg!(target_os = "macos") {
         "dylib"

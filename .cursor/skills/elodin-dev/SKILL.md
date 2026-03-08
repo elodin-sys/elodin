@@ -58,13 +58,7 @@ nix develop --command "cargo build"      # One-off command
 ## Build Commands
 
 ```bash
-# Editor + DB (installs to ~/.nix-profile/bin)
 just install
-
-# Python SDK wheel (for running/testing simulations)
-uv venv --python 3.12
-source .venv/bin/activate
-uvx maturin develop --uv --manifest-path=libs/nox-py/Cargo.toml
 
 # Run an example
 elodin editor examples/three-body/main.py

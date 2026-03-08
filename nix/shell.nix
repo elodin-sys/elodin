@@ -11,7 +11,7 @@ with pkgs; let
   llvm = llvmPackages_latest;
 
   # Base Python for use with venv (JAX 0.8+ and iree-base-compiler installed via pip)
-  pythonBase = python3.withPackages (ps:
+  pythonBase = python313.withPackages (ps:
     with ps; [
       typing-extensions
       pytest
@@ -53,7 +53,6 @@ with pkgs; let
         buildkite-test-collector-rust
         (rustToolchain pkgs)
         cargo-nextest
-        # Base Python; JAX and IREE installed via pip venv
         pythonBase
         clang
         maturin
@@ -78,22 +77,20 @@ with pkgs; let
         skopeo
         gettext
         just
-        docker
-        kubectl
         jq
         yq
+        git
         git-filter-repo
         git-lfs
-        (google-cloud-sdk.withExtraComponents (
-          with google-cloud-sdk.components; [gke-gcloud-auth-plugin]
-        ))
-        azure-cli
 
         # Documentation and quality tools
         alejandra
         typos
         zola
         rav1e
+
+        # Tracy profiler
+        tracy
       ]
       ++ common.commonNativeBuildInputs
       ++ common.commonBuildInputs
@@ -120,8 +117,7 @@ with pkgs; let
       );
 
     nativeBuildInputs = with pkgs; (
-      lib.optionals pkgs.stdenv.isLinux [autoPatchelfHook]
-      ++ lib.optionals pkgs.stdenv.isDarwin [fixDarwinDylibNames]
+      lib.optionals pkgs.stdenv.isDarwin [fixDarwinDylibNames]
     );
 
     # Environment variables
@@ -146,7 +142,6 @@ with pkgs; let
     );
 
     doCheck = false;
-
     shellHook = ''
       case "$(uname -s)" in
         Linux*)
@@ -170,7 +165,6 @@ with pkgs; let
       ])}:''${LD_LIBRARY_PATH}"
         ;;
       esac
-
       # start the shell if we're in an interactive shell
       if [[ $- == *i* ]]; then
         echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -179,14 +173,11 @@ with pkgs; let
         echo ""
         echo "Environment ready:"
         echo "  • Rust: cargo, clippy, nextest"
-        echo "  • Tools: uv, maturin, ruff, just, kubectl, gcloud"
-        echo "  • Shell tools: eza, bat, delta, fzf, ripgrep, zoxide"
+        echo "  • Tools: uv, maturin, ruff, just, alejandra"
         echo ""
-        echo "SDK Development (if needed):"
-        echo "  "
-        echo "uv venv --python 3.12"
-        echo "source .venv/bin/activate"
-        echo "uvx maturin develop --uv --manifest-path=libs/nox-py/Cargo.toml"
+        echo "Development flow:"
+        echo "  • Run 'just install' to build: elodin-py, elodin, and elodin-db"
+        echo "  • don't forget to source the venv with 'source .venv/bin/activate'"
         echo ""
 
         exec ${pkgs.zsh}/bin/zsh
@@ -199,30 +190,4 @@ with pkgs; let
 in {
   # Unified shell that combines all development environments
   elodin = mkShell (shellAttrs // linuxShellAttrs);
-
-  # Profiling shell adds Tracy GUI without duplicating the base shell definition
-  elodin-profiling = mkShell (
-    (shellAttrs
-      // {
-        name = "elo-profiling-shell";
-        buildInputs = shellAttrs.buildInputs ++ [tracy];
-        shellHook =
-          lib.replaceStrings
-          [
-            "exec ${pkgs.zsh}/bin/zsh"
-          ]
-          [
-            ''
-              echo "Profiling shell:"
-              echo "  • Tracy GUI is available by running 'tracy'"
-              echo "  • Run Elodin with: RUST_LOG=info cargo run --release -p elodin --features tracy"
-              echo ""
-
-              exec ${pkgs.zsh}/bin/zsh
-            ''
-          ]
-          shellAttrs.shellHook;
-      })
-    // linuxShellAttrs
-  );
 }

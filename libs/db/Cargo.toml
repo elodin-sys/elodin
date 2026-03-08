@@ -106,7 +106,7 @@ hostname = "0.4.1"
 reflink-copy = "0.1.28"
 
 # video export
-muxide = { version = "0.2", optional = true }
+muxide = { workspace = true, optional = true }
 scuffle-h264 = { version = "0.2", optional = true }
 
 [dev-dependencies]

@@ -4,27 +4,20 @@ Elodin is an open-source platform for rapid design, testing, and simulation of a
 
 ## Rules
 
-- Always use the `nix develop` shell when developing changes
-- Always use `uv` inside the nix shell for Python everything
+- Always use the `nix develop` shell when developing changes.
+- Always use `uv` inside the nix shell for Python everything (`just install` sets this up).
 - Don't commit changes to git — that's for the developer to do
-- When suggesting new dependencies, check they are well supported and maintained
-- Never use unsafe Rust code
-- Run all activities from the repository root
+- When suggesting new dependencies, check they are well supported and maintained.
+- Never use unsafe Rust code.
+- Run all activities from the repository root.
 
 ## Quick Start
 
 ### Python SDK (always build first, so binaries pick it up)
 
 ```bash
-uv venv --python 3.12 && source .venv/bin/activate
-uvx maturin develop --uv --manifest-path=libs/nox-py/Cargo.toml
-```
-
-### Elodin CLI and Elodin-DB CLI
-
-```bash
-nix develop                          # Enter unified dev shell (Rust, Python, C/C++, git-lfs)
-just install                         # Build and install Elodin Editor + Elodin DB
+nix develop
+just install
 ```
 
 ### CI Checks

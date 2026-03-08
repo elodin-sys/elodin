@@ -1144,18 +1144,33 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
         &self,
         range: Range<Timestamp>,
     ) -> impl Iterator<Item = IndexChunk> + '_ {
-        self.range_iter(range).filter_map(|c| {
+        self.range_iter(range.clone()).filter_map(move |c| {
             let gpu = c.data.gpu.lock();
             let gpu = gpu.as_ref()?;
 
-            let index_chunk = gpu.as_index_chunk::<f32>(c.summary.len);
+            let mut index_chunk = gpu.as_index_chunk::<f32>(c.summary.len);
+
+            // Clip to the visible timestamp interval within each chunk.
+            let start_offset = c.timestamps.partition_point(|&t| t < range.start);
+            let end_offset = c.timestamps.partition_point(|&t| t <= range.end);
+            if end_offset <= start_offset {
+                return None;
+            }
+            index_chunk.range.start = index_chunk.range.start.saturating_add(start_offset as u32);
+            index_chunk.len = end_offset.saturating_sub(start_offset);
 
             #[cfg(debug_assertions)]
             {
                 let timestamp = c.timestamps_float.gpu.lock();
                 let timestamp = timestamp.as_ref()?;
+                let mut timestamp_chunk = timestamp.as_index_chunk::<f32>(c.summary.len);
+                timestamp_chunk.range.start = timestamp_chunk
+                    .range
+                    .start
+                    .saturating_add(start_offset as u32);
+                timestamp_chunk.len = end_offset.saturating_sub(start_offset);
 
-                assert_eq!(index_chunk, timestamp.as_index_chunk::<f32>(c.summary.len));
+                assert_eq!(index_chunk, timestamp_chunk);
             }
 
             Some(index_chunk)

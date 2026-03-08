@@ -54,6 +54,7 @@ use bevy_render::{
 };
 use big_space::GridCell;
 use binding_types::storage_buffer_read_only_sized;
+use impeller2_wkt::CurrentTimestamp;
 
 const LINE_SHADER_HANDLE: Handle<Shader> = uuid_handle!("bfffa3c4-9401-4b6e-b3ab-3564180352f1");
 
@@ -405,6 +406,7 @@ struct CachedSystemState {
         ResMut<'static, Assets<Line>>,
         Commands<'static, 'static>,
         Res<'static, SelectedTimeRange>,
+        Res<'static, CurrentTimestamp>,
     )>,
 }
 
@@ -433,18 +435,25 @@ fn extract_lines(
     index_layout: Res<LineIndexLayout>,
 ) {
     main_world.resource_scope(|world, mut cached_state: Mut<CachedSystemState>| {
-        let (mut lines, mut line_assets, mut main_commands, selected_time_range) =
+        let (mut lines, mut line_assets, mut main_commands, selected_time_range, current_timestamp) =
             cached_state.state.get_mut(world);
+        let selected_range = selected_time_range.0.clone();
+        let can_draw_visible_range = current_timestamp.0 >= selected_range.start;
+        let visible_range = selected_range.start..selected_range.end.min(current_timestamp.0);
+        let queue_range = if can_draw_visible_range {
+            visible_range.clone()
+        } else {
+            // No visible span at the current timestamp; keep a degenerate range
+            // so GPU buffers still initialize without drawing future samples.
+            selected_range.start..selected_range.start
+        };
         'outer: for (entity, line_handles, config, uniform, gpu_line) in lines.iter_mut() {
             for line in &line_handles.0 {
                 let Some(line) = line_assets.get_mut(line) else {
                     continue 'outer;
                 };
-                line.data.queue_load_range(
-                    selected_time_range.0.clone(),
-                    &render_queue,
-                    &render_device,
-                );
+                line.data
+                    .queue_load_range(queue_range.clone(), &render_queue, &render_device);
             }
 
             let index_buffers = if let Some(ref gpu_line) = gpu_line {
@@ -503,13 +512,16 @@ fn extract_lines(
                 render_device.create_bind_group("line indexes", &index_layout.layout, &entries)
             };
             let counts = [0, 1, 2].map(|i| {
+                if !can_draw_visible_range {
+                    return 0;
+                }
                 let line = &line_handles.0[i];
                 let line = line_assets.get(line).expect("line missing");
                 let index_buffer = &index_buffers[i];
                 line.data.write_to_index_buffer(
                     index_buffer,
                     &render_queue,
-                    selected_time_range.0.clone(),
+                    visible_range.clone(),
                     INDEX_BUFFER_LEN,
                 )
             });

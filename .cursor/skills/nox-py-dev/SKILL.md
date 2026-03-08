@@ -10,10 +10,7 @@ nox-py is the Elodin Python SDK — PyO3 bindings that bridge Python simulations
 ## Build & Test
 
 ```bash
-# Build the Python wheel (from repo root, inside nix develop)
-uv venv --python 3.12
-source .venv/bin/activate
-uvx maturin develop --uv --manifest-path=libs/nox-py/Cargo.toml
+just install py
 
 # Run tests
 pytest libs/nox-py/tests/
