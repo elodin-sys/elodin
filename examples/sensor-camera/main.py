@@ -221,7 +221,7 @@ world.run(
     system,
     sim_time_step=SIM_TIME_STEP,
     run_time_step=SIM_TIME_STEP,
-    max_ticks=36000,
+    max_ticks=18000,
     post_step=post_step,
     interactive=False,
 )
