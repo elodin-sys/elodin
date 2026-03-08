@@ -62,7 +62,7 @@ just install
 
 elodin --version
 
-python3 examples/rocket/main.py run
+.venv/bin/python examples/rocket/main.py run
 ```
 
 Open the Elodin editor in a new nix develop shell and connect to the local server
@@ -82,9 +82,9 @@ elodin editor
 # In a new terminal
 nix develop
 # build the SDK python wheel
-install-elodin py
-# use the newly built wheel
-python3 examples/rocket/main.py run
+just install py
+# use the newly built wheel (venv is not active in this shell)
+.venv/bin/python examples/rocket/main.py run
 ```
 
 Open the Elodin editor and connect to the local server

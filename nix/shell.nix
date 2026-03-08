@@ -77,17 +77,11 @@ with pkgs; let
         skopeo
         gettext
         just
-        docker
-        kubectl
         jq
         yq
         git
         git-filter-repo
         git-lfs
-        (google-cloud-sdk.withExtraComponents (
-          with google-cloud-sdk.components; [gke-gcloud-auth-plugin]
-        ))
-        azure-cli
 
         # Documentation and quality tools
         alejandra
@@ -171,10 +165,6 @@ with pkgs; let
       ])}:''${LD_LIBRARY_PATH}"
         ;;
       esac
-      export REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
-      if [ -f "$REPO_ROOT/nix/shellrc" ]; then
-        export NIX_SHELLRC="$REPO_ROOT/nix/shellrc"
-      fi
       # start the shell if we're in an interactive shell
       if [[ $- == *i* ]]; then
         echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -183,26 +173,12 @@ with pkgs; let
         echo ""
         echo "Environment ready:"
         echo "  • Rust: cargo, clippy, nextest"
-        echo "  • Tools: uv, maturin, ruff, just, kubectl, gcloud"
-        echo "  • Shell tools: eza, bat, delta, fzf, ripgrep, zoxide"
+        echo "  • Tools: uv, maturin, ruff, just, alejandra"
         echo ""
-        echo "SDK Development (if needed):"
-        echo "  • Run 'install-elodin' to provide: elodin-py, elodin, and elodin-db"
-        # NIX_SHELLRC_READY promises the shell will consume the rc file. We can't test that it
-        # has happened because it won't happen until the new zsh is exec'd. And we can't ensure that
-        # it did happen once exec'd unless we could run commands in that shell--which is exactly the
-        # kind of facility that we get by asking the user to source "$NIX_SHELLRC".
-        if [ "''${NIX_SHELLRC_READY:-0}" -ne 1 ]; then
-            echo "WARNING: No 'install-elodin' shell function available. Run this to fix:" >&2;
-            echo ""
-            echo 'source $NIX_SHELLRC;' >&2;
-            echo ""
-            echo "Or add this to your .zshrc to fix permanently:" >&2;
-            echo 'export NIX_SHELLRC_READY=1; [[ -n "$NIX_SHELLRC" ]] && source "$NIX_SHELLRC"' >&2;
-        fi
+        echo "Development flow:"
+        echo "  • Run 'just install' to build: elodin-py, elodin, and elodin-db"
+        echo "  • don't forget to source the venv with 'source .venv/bin/activate'"
         echo ""
-
-        # HOOK
 
         exec ${pkgs.zsh}/bin/zsh
       fi
