@@ -41,8 +41,9 @@ fn main() {
         "so"
     };
 
-    let pyo3_config = pyo3_build_config::get();
-    let lib_name = pyo3_config.lib_name.as_ref().unwrap();
+    let lib_name = run_python_command(
+        "import sys; print(f'python{sys.version_info.major}.{sys.version_info.minor}')",
+    );
     let shared_lib = python_lib.join(format!("lib{}.{}", lib_name, shared_lib_extension));
 
     // copy the shared library to the output python directory if it exists:

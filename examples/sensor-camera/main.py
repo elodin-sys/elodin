@@ -137,17 +137,17 @@ world.sensor_camera(
 # ── Schematic ────────────────────────────────────────────────────────────────
 
 BALL_COLORS = {
-    "cam_ball_a": "0 220 220",      # cyan
-    "cam_ball_b": "220 0 220",      # magenta
-    "ball_1": "255 140 0",          # orange
-    "ball_2": "255 255 100",        # yellow
-    "ball_3": "100 255 100",        # green
+    "cam_ball_a": "0 220 220",  # cyan
+    "cam_ball_b": "220 0 220",  # magenta
+    "ball_1": "255 140 0",  # orange
+    "ball_2": "255 255 100",  # yellow
+    "ball_3": "100 255 100",  # green
 }
 
 object_3d_lines = []
 for name, color in BALL_COLORS.items():
     object_3d_lines.append(
-        f'    object_3d {name}.world_pos {{ sphere radius={BALL_RADIUS} {{ color {color} }} }}'
+        f"    object_3d {name}.world_pos {{ sphere radius={BALL_RADIUS} {{ color {color} }} }}"
     )
 
 schematic = """

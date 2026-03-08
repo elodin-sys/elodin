@@ -8996,7 +8996,6 @@ dependencies = [
  "numpy",
  "paste",
  "pyo3",
- "pyo3-build-config",
  "seq-macro",
  "serde",
  "smallvec",
