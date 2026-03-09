@@ -8,6 +8,7 @@ use crate::{
         colors::EColor,
         inspector, monitor, plot, query_plot, query_table,
         tiles::{self, Pane},
+        timeline::TimelineSettings,
         window::compute_window_title,
     },
     vector_arrow::ViewportArrow,
@@ -66,6 +67,7 @@ pub struct SchematicParam<'w, 's> {
     pub dashboards: Query<'w, 's, &'static Dashboard<Entity>>,
     pub video_streams: Query<'w, 's, &'static super::video_stream::VideoStream>,
     pub hdr_enabled: Res<'w, HdrEnabled>,
+    pub timeline_settings: Res<'w, TimelineSettings>,
     pub metadata: Res<'w, ComponentMetadataRegistry>,
 }
 
@@ -447,6 +449,7 @@ pub fn tiles_to_schematic(
     }
 
     schematic.elems.extend(window_elems);
+    schematic.timeline = Some((*param.timeline_settings).into());
     if let Ok((state, _)) = param.windows_state.get(*param.primary_window)
         && let Some(mode) = state.descriptor.mode.clone()
     {

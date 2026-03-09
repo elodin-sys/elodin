@@ -12,6 +12,14 @@ fn default_true() -> bool {
     true
 }
 
+pub fn default_timeline_played_color() -> Color {
+    Color::YELLOW
+}
+
+pub fn default_timeline_future_color() -> Color {
+    Color::WHITE
+}
+
 pub fn default_viewport_frustums_color() -> Color {
     Color::YELLOW
 }
@@ -28,6 +36,8 @@ pub struct Schematic<T = ()> {
     pub elems: Vec<SchematicElem<T>>,
     #[serde(default)]
     pub theme: Option<ThemeConfig>,
+    #[serde(default)]
+    pub timeline: Option<TimelineConfig>,
 }
 
 #[cfg(feature = "bevy")]
@@ -43,6 +53,7 @@ impl<T> Default for Schematic<T> {
         Self {
             elems: Default::default(),
             theme: None,
+            timeline: None,
         }
     }
 }
@@ -56,6 +67,7 @@ pub enum SchematicElem<T = ()> {
     VectorArrow(VectorArrow3d<T>),
     Window(WindowSchematic),
     Theme(ThemeConfig),
+    Timeline(TimelineConfig),
 }
 
 impl<T> SchematicElem<T> {
@@ -67,6 +79,7 @@ impl<T> SchematicElem<T> {
             SchematicElem::VectorArrow(arrow) => SchematicElem::VectorArrow(arrow.map_aux(|_| ())),
             SchematicElem::Window(window) => SchematicElem::Window(window),
             SchematicElem::Theme(theme) => SchematicElem::Theme(theme.clone()),
+            SchematicElem::Timeline(timeline) => SchematicElem::Timeline(timeline.clone()),
         }
     }
 }
@@ -93,6 +106,26 @@ pub struct WindowSchematic {
 pub struct ThemeConfig {
     pub mode: Option<String>,
     pub scheme: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct TimelineConfig {
+    #[serde(default = "default_timeline_played_color")]
+    pub played_color: Color,
+    #[serde(default = "default_timeline_future_color")]
+    pub future_color: Color,
+    #[serde(default)]
+    pub follow_latest: bool,
+}
+
+impl Default for TimelineConfig {
+    fn default() -> Self {
+        Self {
+            played_color: default_timeline_played_color(),
+            future_color: default_timeline_future_color(),
+            follow_latest: false,
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
