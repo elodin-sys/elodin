@@ -355,14 +355,20 @@ fn format_playback_speed(speed: f64) -> String {
 }
 
 fn format_lag_counter(micros: i64) -> String {
-    if micros <= 0 {
+    let micros = micros.max(0);
+    if micros == 0 {
         return "0ms".to_owned();
     }
 
+    if micros >= 3_600_000_000 {
+        return format!("+{:.1}h", micros as f64 / 3_600_000_000.0);
+    }
+    if micros >= 60_000_000 {
+        return format!("+{:.1}m", micros as f64 / 60_000_000.0);
+    }
     if micros >= 1_000_000 {
         return format!("+{:.1}s", micros as f64 / 1_000_000.0);
     }
-
     if micros >= 1_000 {
         return format!("+{}ms", micros / 1_000);
     }
@@ -430,7 +436,7 @@ fn live_follow_button(
         .layout_no_wrap("LIVE".to_owned(), font_id.clone(), live_text_color)
         .size()
         .x;
-    let counter_fixed_width = ["0ms", "+9999ms", "+9999us", "+999.9s"]
+    let counter_fixed_width = ["0ms", "+9999ms", "+9999us", "+999.9s", "+99.9m", "+99.9h"]
         .into_iter()
         .map(|sample| {
             ui.painter()
