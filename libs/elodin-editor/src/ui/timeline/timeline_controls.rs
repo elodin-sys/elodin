@@ -114,9 +114,9 @@ impl WidgetSystem for TimelineControls<'_, '_> {
                             let btn_scale = 1.4;
                             ui.spacing_mut().item_spacing.x = 8.0;
 
-                            let jump_to_start_btn = ui.add(
-                                EImageButton::new(icons.jump_to_start).scale(btn_scale, btn_scale),
-                            );
+                            let jump_to_start_btn = ui
+                                .add(EImageButton::new(icons.jump_to_start).scale(btn_scale, btn_scale))
+                                .on_hover_text("Jump to start");
 
                             if jump_to_start_btn.clicked() {
                                 auto_follow_latest_state.cancel();
@@ -194,9 +194,9 @@ impl WidgetSystem for TimelineControls<'_, '_> {
                                 let _ = step_buttons.forward.take();
                             }
 
-                            let jump_to_end_btn = ui.add(
-                                EImageButton::new(icons.jump_to_end).scale(btn_scale, btn_scale),
-                            );
+                            let jump_to_end_btn = ui
+                                .add(EImageButton::new(icons.jump_to_end).scale(btn_scale, btn_scale))
+                                .on_hover_text("Jump to end");
 
                             if jump_to_end_btn.clicked() {
                                 auto_follow_latest_state.cancel();
