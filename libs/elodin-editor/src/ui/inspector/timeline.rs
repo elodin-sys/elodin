@@ -42,13 +42,25 @@ impl WidgetSystem for InspectorTimeline<'_> {
 
         node_color_picker(ui, "PLAYED TRAIL", &mut timeline_settings.played_color);
         node_color_picker(ui, "FUTURE TRAIL", &mut timeline_settings.future_color);
-        ui.add_space(8.0);
-        ui.checkbox(&mut timeline_settings.follow_latest, "Follow latest")
-            .on_hover_text("Auto-start following when new data arrives");
 
-        ui.add(
-            egui::Slider::new(&mut timeline_settings.future_trail_alpha, 0.0..=1.0)
-                .text("Future trail alpha"),
-        );
+        egui::Frame::NONE
+            .inner_margin(egui::Margin::symmetric(0, 8))
+            .show(ui, |ui| {
+                ui.label(egui::RichText::new("FUTURE TRAIL ALPHA").color(scheme.text_secondary));
+
+                ui.label(
+                    egui::RichText::new(format!("{:.2}", timeline_settings.future_trail_alpha))
+                        .monospace()
+                        .color(scheme.text_primary),
+                );
+
+                ui.add_space(8.0);
+                ui.style_mut().visuals.widgets.inactive.bg_fill = scheme.bg_secondary;
+                ui.add_sized(
+                    [140.0, ui.spacing().interact_size.y],
+                    egui::Slider::new(&mut timeline_settings.future_trail_alpha, 0.0..=1.0)
+                        .show_value(false),
+                );
+            });
     }
 }
