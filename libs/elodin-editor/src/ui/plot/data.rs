@@ -14,7 +14,9 @@ use impeller2_bevy::{
     CommandsExt, ComponentSchemaRegistry, ComponentValueMap, EntityMap, PacketGrantR,
     PacketHandlerInput, PacketHandlers,
 };
-use impeller2_wkt::{CurrentTimestamp, EarliestTimestamp, GetTimeSeries, PlotOverviewQuery};
+use impeller2_wkt::{
+    CurrentTimestamp, EarliestTimestamp, GetTimeSeries, LastUpdated, PlotOverviewQuery,
+};
 use itertools::{Itertools, MinMaxResult};
 use nodit::NoditMap;
 use nodit::interval::ii;
@@ -351,7 +353,9 @@ pub fn handle_time_series(
             if last_timestamp >= &range.end {
                 return;
             }
-            range.start = *last_timestamp;
+            // GetTimeSeries returns the end bound inclusively, so reusing the
+            // terminal timestamp overlaps the next page with the current chunk.
+            range.start = next_timestamp(*last_timestamp);
 
             if range.start >= range.end {
                 return;
@@ -407,6 +411,8 @@ pub fn queue_timestamp_read(
     mut graph_data: ResMut<CollectedGraphData>,
     mut lines: ResMut<Assets<Line>>,
     earliest_timestamp: Res<EarliestTimestamp>,
+    latest_timestamp: Res<LastUpdated>,
+    replay_mode: Option<Res<crate::ReplayMode>>,
 ) {
     if selected_range.0.end.0 == i64::MIN
         || selected_range.0.start.0 == i64::MAX
@@ -416,16 +422,22 @@ pub fn queue_timestamp_read(
         return;
     }
 
+    let query_range = data_query_range(
+        selected_range.0.clone(),
+        earliest_timestamp.0,
+        latest_timestamp.0,
+        replay_mode.is_some(),
+    );
+    if query_range.start >= query_range.end {
+        return;
+    }
+
     // Simple volume-based decision: use overview for large time ranges (> 10 minutes)
     // This covers two use cases:
     // 1. Live telemetry: data span is small (< 10 minutes) -> direct chunked loading
     // 2. Historical datasets: data span is large (> 10 minutes) -> use LTTB overview first
     const TEN_MINUTES_MICROS: i64 = 600_000_000; // 10 minutes in microseconds
-    let range_duration = selected_range
-        .0
-        .end
-        .0
-        .saturating_sub(selected_range.0.start.0);
+    let range_duration = query_range.end.0.saturating_sub(query_range.start.0);
     let use_overview = range_duration > TEN_MINUTES_MICROS;
 
     for (&component_id, component) in graph_data.components.iter_mut() {
@@ -462,7 +474,7 @@ pub fn queue_timestamp_read(
                 let query = PlotOverviewQuery {
                     id: packet_id,
                     component_id,
-                    range: selected_range.0.clone(),
+                    range: query_range.clone(),
                     max_points: OVERVIEW_MAX_POINTS as u32,
                     element_index,
                 };
@@ -490,30 +502,43 @@ pub fn queue_timestamp_read(
             continue;
         }
 
-        let mut process_range = |range: Range<Timestamp>| {
+        let mut process_range = |mut range: Range<Timestamp>| {
             let packet_id = fastrand::u16(..).to_le_bytes();
 
-            match component.request_states.get(&range.start) {
-                // Rerequest chunks if we have not received a response for 10 seconds
-                Some(RequestState::Requested(time)) if time.elapsed() > Duration::from_secs(10) => {
-                }
+            loop {
+                match component.request_states.get(&range.start) {
+                    // Rerequest chunks if we have not received a response for 10 seconds
+                    Some(RequestState::Requested(time))
+                        if time.elapsed() > Duration::from_secs(10) =>
+                    {
+                        break;
+                    }
 
-                // Recheck if we have a potentially incomplete chunk.
-                // We first check if the chunk is not full, indicating that it existed at the end of available data
-                // or at the end of the previously requested time range. We check if it was the chunk at the end of the previously requested
-                // range by checking if the last time stamp is less than the end of the range
-                Some(RequestState::Returned {
-                    len,
-                    last_timestamp,
-                }) if *len < CHUNK_LEN
-                    && last_timestamp
-                        .map(|t| t < selected_range.0.end)
-                        .unwrap_or_default() => {}
-                // Skip the chunk if it was already requested
-                Some(RequestState::Returned { .. }) | Some(RequestState::Requested(_)) => {
-                    return;
+                    // When the visible range grows (replay mode), extend the tail
+                    // from the last returned timestamp instead of replacing the
+                    // whole partial chunk from its original start.
+                    Some(RequestState::Returned {
+                        len,
+                        last_timestamp,
+                    }) if *len < CHUNK_LEN
+                        && last_timestamp
+                            .map(|t| t < query_range.end)
+                            .unwrap_or_default() =>
+                    {
+                        let Some(last_timestamp) = *last_timestamp else {
+                            return;
+                        };
+                        range.start = next_timestamp(last_timestamp);
+                        if range.start >= range.end {
+                            return;
+                        }
+                    }
+                    // Skip the chunk if it was already requested
+                    Some(RequestState::Returned { .. }) | Some(RequestState::Requested(_)) => {
+                        return;
+                    }
+                    None => break,
                 }
-                None => {}
             }
 
             component
@@ -559,15 +584,25 @@ pub fn queue_timestamp_read(
             line.last_queried = Some(Instant::now());
             line.data
                 .tree
-                .gaps_trimmed(nodit::interval::ie(
-                    selected_range.0.start.0,
-                    selected_range.0.end.0,
-                ))
+                .gaps_trimmed(nodit::interval::ie(query_range.start.0, query_range.end.0))
                 .map(|i| Timestamp(i.start())..Timestamp(i.end()))
                 .for_each(process_range)
         } else {
-            process_range(selected_range.0.clone());
+            process_range(query_range.clone());
         }
+    }
+}
+
+fn data_query_range(
+    selected_range: Range<Timestamp>,
+    earliest: Timestamp,
+    latest: Timestamp,
+    replay_mode: bool,
+) -> Range<Timestamp> {
+    if replay_mode && earliest < latest {
+        earliest..latest
+    } else {
+        selected_range
     }
 }
 
@@ -639,9 +674,13 @@ fn next_range(
         && let Some(chunk) = line.data.range_iter(current_range.clone()).next()
         && chunk.summary.start_timestamp <= current_range.start
     {
-        current_range.start = chunk.summary.end_timestamp;
+        current_range.start = next_timestamp(chunk.summary.end_timestamp);
     }
     current_range
+}
+
+fn next_timestamp(timestamp: Timestamp) -> Timestamp {
+    Timestamp(timestamp.0.saturating_add(1))
 }
 
 #[derive(Asset, TypePath, Default)]
@@ -1131,11 +1170,19 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
     }
 
     pub fn draw_index_count(&self, range: Range<Timestamp>) -> (usize, usize) {
+        self.range_index_stats(range)
+    }
+
+    pub fn range_index_stats(&self, range: Range<Timestamp>) -> (usize, usize) {
         let mut chunks = 0;
         let mut total_count = 0;
-        for chunk in self.draw_index_chunk_iter(range) {
+        for chunk in self.range_iter(range.clone()) {
+            let Some((start_offset, end_offset)) = chunk_visible_offsets(&chunk.timestamps, &range)
+            else {
+                continue;
+            };
             chunks += 1;
-            total_count += chunk.into_index_iter().count() + 6;
+            total_count += end_offset.saturating_sub(start_offset) + 6;
         }
         (chunks, total_count)
     }
@@ -1151,11 +1198,7 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
             let mut index_chunk = gpu.as_index_chunk::<f32>(c.summary.len);
 
             // Clip to the visible timestamp interval within each chunk.
-            let start_offset = c.timestamps.partition_point(|&t| t < range.start);
-            let end_offset = c.timestamps.partition_point(|&t| t <= range.end);
-            if end_offset <= start_offset {
-                return None;
-            }
+            let (start_offset, end_offset) = chunk_visible_offsets(&c.timestamps, &range)?;
             index_chunk.range.start = index_chunk.range.start.saturating_add(start_offset as u32);
             index_chunk.len = end_offset.saturating_sub(start_offset);
 
@@ -1184,6 +1227,35 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
         line_visible_range: Range<Timestamp>,
         pixel_width: usize,
     ) -> u32 {
+        self.write_to_index_buffer_with_sampling_range(
+            index_buffer,
+            render_queue,
+            line_visible_range.clone(),
+            line_visible_range,
+            pixel_width,
+        )
+    }
+
+    pub fn write_to_index_buffer_with_sampling_range(
+        &self,
+        index_buffer: &Buffer,
+        render_queue: &RenderQueue,
+        line_visible_range: Range<Timestamp>,
+        sampling_range: Range<Timestamp>,
+        pixel_width: usize,
+    ) -> u32 {
+        let (chunk_count, index_count) = self.range_index_stats(sampling_range);
+        let step = index_sampling_step(chunk_count, index_count, pixel_width);
+        self.write_to_index_buffer_with_step(index_buffer, render_queue, line_visible_range, step)
+    }
+
+    pub fn write_to_index_buffer_with_step(
+        &self,
+        index_buffer: &Buffer,
+        render_queue: &RenderQueue,
+        line_visible_range: Range<Timestamp>,
+        step: usize,
+    ) -> u32 {
         let mut view = render_queue
             .write_buffer_with(
                 index_buffer,
@@ -1191,14 +1263,6 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
                 NonZeroU64::new((INDEX_BUFFER_LEN * 4) as u64).unwrap(),
             )
             .expect("no write buf");
-        let (chunk_count, index_count) = self.draw_index_count(line_visible_range.clone());
-        let desired_index_len = INDEX_BUFFER_LEN.min(pixel_width * 4);
-        let divisor = desired_index_len.saturating_sub(2 * chunk_count);
-        let step = if divisor != 0 {
-            index_count.div_ceil(divisor).max(1)
-        } else {
-            1
-        };
         let mut view = &mut view[..];
         let mut count = 0;
         for chunk in self.draw_index_chunk_iter(line_visible_range) {
@@ -1253,6 +1317,105 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
                     .store(true, atomic::Ordering::SeqCst);
             }
         }
+    }
+}
+
+fn chunk_visible_offsets(
+    timestamps: &[Timestamp],
+    range: &Range<Timestamp>,
+) -> Option<(usize, usize)> {
+    let start_offset = timestamps.partition_point(|&t| t < range.start);
+    let end_offset = timestamps.partition_point(|&t| t <= range.end);
+    (end_offset > start_offset).then_some((start_offset, end_offset))
+}
+
+pub fn index_sampling_step(chunk_count: usize, index_count: usize, pixel_width: usize) -> usize {
+    let desired_index_len = INDEX_BUFFER_LEN.min(pixel_width * 4);
+    let divisor = desired_index_len.saturating_sub(2 * chunk_count);
+    if divisor != 0 {
+        index_count.div_ceil(divisor).max(1)
+    } else {
+        1
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn next_timestamp_advances_by_one_microsecond() {
+        assert_eq!(next_timestamp(Timestamp(41)), Timestamp(42));
+    }
+
+    #[test]
+    fn next_timestamp_saturates_at_i64_max() {
+        assert_eq!(next_timestamp(Timestamp(i64::MAX)), Timestamp(i64::MAX));
+    }
+
+    #[test]
+    fn next_range_skips_the_last_timestamp_of_the_existing_chunk() {
+        let mut lines = Assets::<Line>::default();
+        let handle = lines.add(Line::default());
+        let line = lines.get_mut(&handle).expect("line asset should exist");
+        let chunk = Chunk::from_iter(
+            &[Timestamp(10), Timestamp(20)],
+            Timestamp(0),
+            [1.0_f32, 2.0_f32].into_iter(),
+        )
+        .expect("chunk should exist");
+        line.data.insert(chunk);
+
+        let mut component = PlotDataComponent::new("test", vec![]);
+        component.lines.insert(0, handle);
+
+        let next = next_range(Timestamp(10)..Timestamp(30), &component, &lines);
+        assert_eq!(next.start, Timestamp(21));
+        assert_eq!(next.end, Timestamp(30));
+    }
+
+    #[test]
+    fn replay_query_range_uses_full_available_extent() {
+        let range = data_query_range(
+            Timestamp(50)..Timestamp(75),
+            Timestamp(10),
+            Timestamp(100),
+            true,
+        );
+        assert_eq!(range, Timestamp(10)..Timestamp(100));
+    }
+
+    #[test]
+    fn non_replay_query_range_stays_visible_window() {
+        let range = data_query_range(
+            Timestamp(50)..Timestamp(75),
+            Timestamp(10),
+            Timestamp(100),
+            false,
+        );
+        assert_eq!(range, Timestamp(50)..Timestamp(75));
+    }
+
+    #[test]
+    fn range_index_stats_uses_cpu_timestamps() {
+        let mut tree = LineTree::<f32>::default();
+        let chunk = Chunk::from_iter(
+            &[Timestamp(10), Timestamp(20), Timestamp(30), Timestamp(40)],
+            Timestamp(0),
+            [1.0_f32, 2.0_f32, 3.0_f32, 4.0_f32].into_iter(),
+        )
+        .expect("chunk should exist");
+        tree.insert(chunk);
+
+        let (chunk_count, index_count) = tree.range_index_stats(Timestamp(15)..Timestamp(35));
+        assert_eq!(chunk_count, 1);
+        assert_eq!(index_count, 8);
+    }
+
+    #[test]
+    fn index_sampling_step_matches_index_budget() {
+        assert_eq!(index_sampling_step(1, 100, 100), 1);
+        assert_eq!(index_sampling_step(1, 1_000, 100), 3);
     }
 }
 

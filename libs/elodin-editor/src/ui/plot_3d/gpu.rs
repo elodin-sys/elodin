@@ -55,7 +55,7 @@ use bevy_render::{
 };
 use big_space::GridCell;
 use binding_types::storage_buffer_read_only_sized;
-use impeller2_wkt::CurrentTimestamp;
+use impeller2_wkt::{CurrentTimestamp, EarliestTimestamp, LastUpdated};
 
 const LINE_SHADER_HANDLE: Handle<Shader> = uuid_handle!("bfffa3c4-9401-4b6e-b3ab-3564180352f1");
 const FUTURE_TRAIL_ALPHA: f32 = 0.35;
@@ -408,6 +408,8 @@ struct CachedSystemState {
         ResMut<'static, Assets<Line>>,
         Commands<'static, 'static>,
         Res<'static, SelectedTimeRange>,
+        Res<'static, EarliestTimestamp>,
+        Res<'static, LastUpdated>,
         Res<'static, CurrentTimestamp>,
         Res<'static, TimelineSettings>,
     )>,
@@ -438,15 +440,23 @@ fn extract_lines(
     index_layout: Res<LineIndexLayout>,
 ) {
     main_world.resource_scope(|world, mut cached_state: Mut<CachedSystemState>| {
+        let replay_mode = world.contains_resource::<crate::ReplayMode>();
         let (
             mut lines,
             mut line_assets,
             mut _main_commands,
             selected_time_range,
+            earliest_timestamp,
+            latest_timestamp,
             current_timestamp,
             timeline_settings,
         ) = cached_state.state.get_mut(world);
         let selected_range = selected_time_range.0.clone();
+        let sampling_range = if replay_mode && earliest_timestamp.0 < latest_timestamp.0 {
+            earliest_timestamp.0..latest_timestamp.0
+        } else {
+            selected_range.clone()
+        };
         let played_color = timeline_settings.played_color;
         let played_trail_color = Vec4::new(
             played_color.r,
@@ -473,6 +483,32 @@ fn extract_lines(
                 line.data
                     .queue_load_range(selected_range.clone(), &render_queue, &render_device);
             }
+
+            // Replay grows the revealed prefix every frame. If the decimation
+            // step is derived from only that prefix, the full trail gets
+            // resampled whenever it crosses a threshold, which shows up as
+            // flicker. Keep the reveal clipped by CurrentTimestamp, but derive
+            // the stride from the fixed recording extent.
+            let line_stats = [0, 1, 2].map(|i| {
+                let line = &line_handles.0[i];
+                let line = line_assets.get(line).expect("line missing");
+                line.data.range_index_stats(sampling_range.clone())
+            });
+            let sampling_chunk_count = line_stats
+                .iter()
+                .map(|(chunks, _)| *chunks)
+                .max()
+                .unwrap_or(0);
+            let sampling_index_count = line_stats
+                .iter()
+                .map(|(_, count)| *count)
+                .max()
+                .unwrap_or(0);
+            let sampling_step = crate::ui::plot::data::index_sampling_step(
+                sampling_chunk_count,
+                sampling_index_count,
+                INDEX_BUFFER_LEN,
+            );
 
             let values_bind_group = if let Some(ref gpu_line) = gpu_line {
                 gpu_line.values_bind_group.clone()
@@ -523,11 +559,11 @@ fn extract_lines(
                 let counts = [0, 1, 2].map(|i| {
                     let line = &line_handles.0[i];
                     let line = line_assets.get(line).expect("line missing");
-                    line.data.write_to_index_buffer(
+                    line.data.write_to_index_buffer_with_step(
                         &index_buffers[i],
                         &render_queue,
                         range.clone(),
-                        INDEX_BUFFER_LEN,
+                        sampling_step,
                     )
                 });
                 let count = counts.into_iter().min().unwrap_or_default();
