@@ -56,6 +56,7 @@ pub struct LatestFollow(pub bool);
 pub struct TimelineSettings {
     pub played_color: impeller2_wkt::Color,
     pub future_color: impeller2_wkt::Color,
+    pub future_trail_alpha: f32,
     pub follow_latest: bool,
 }
 
@@ -70,6 +71,7 @@ impl From<impeller2_wkt::TimelineConfig> for TimelineSettings {
         Self {
             played_color: value.played_color,
             future_color: value.future_color,
+            future_trail_alpha: 0.35,
             follow_latest: value.follow_latest,
         }
     }

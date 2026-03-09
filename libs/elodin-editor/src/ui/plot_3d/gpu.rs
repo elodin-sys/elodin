@@ -58,7 +58,6 @@ use binding_types::storage_buffer_read_only_sized;
 use impeller2_wkt::{CurrentTimestamp, EarliestTimestamp, LastUpdated};
 
 const LINE_SHADER_HANDLE: Handle<Shader> = uuid_handle!("bfffa3c4-9401-4b6e-b3ab-3564180352f1");
-const FUTURE_TRAIL_ALPHA: f32 = 0.35;
 
 #[derive(SystemSet, Clone, Debug, Hash, PartialEq, Eq)]
 pub enum PlotSystem {
@@ -470,7 +469,7 @@ fn extract_lines(
             timeline_settings.future_color.b,
             timeline_settings.future_color.a,
         );
-        future_color.w *= FUTURE_TRAIL_ALPHA;
+        future_color.w *= timeline_settings.future_trail_alpha;
 
         let played_range = selected_range.start..selected_range.end.min(current_timestamp.0);
         let future_range = selected_range.start.max(current_timestamp.0)..selected_range.end;
