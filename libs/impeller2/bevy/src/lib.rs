@@ -300,10 +300,13 @@ fn sink_inner(
     let mut count = 0;
     let sink_deadline = std::time::Instant::now() + std::time::Duration::from_millis(8);
     let mut pending_cache_entries: Vec<(ComponentId, Timestamp, ComponentValue)> = Vec::new();
-    while let Some(pkt) = packet_rx.try_recv_pkt() {
+    loop {
         if count > 2048 || (count >= 16 && std::time::Instant::now() > sink_deadline) {
             return Ok(());
         }
+        let Some(pkt) = packet_rx.try_recv_pkt() else {
+            break;
+        };
         count += 1;
         {
             let pkt_id = match &pkt {
@@ -484,6 +487,9 @@ pub fn msg_sink(world: &mut World, msg_sink_state: &mut SystemState<MsgSinkState
     let sink_deadline = std::time::Instant::now() + std::time::Duration::from_millis(8);
     let mut count = 0;
     loop {
+        if count > 2048 || (count >= 16 && std::time::Instant::now() > sink_deadline) {
+            return;
+        }
         let pkt = {
             let MsgSinkState { mut msg_rx } = msg_sink_state.get_mut(world);
             msg_rx.try_recv_pkt()
@@ -491,9 +497,6 @@ pub fn msg_sink(world: &mut World, msg_sink_state: &mut SystemState<MsgSinkState
         let Some(pkt) = pkt else {
             break;
         };
-        if count > 2048 || (count >= 16 && std::time::Instant::now() > sink_deadline) {
-            return;
-        }
         count += 1;
         let pkt_id = match &pkt {
             OwnedPacket::Msg(m) => m.id,
@@ -1213,11 +1216,10 @@ pub fn new_connection_packets(stream_id: StreamId) -> impl Iterator<Item = LenPa
     .into_iter()
 }
 
-/// Initial packets for the msg TCP connection. Sends only SubscribeLastUpdated
-/// so LastUpdated stays current for backfill retry decisions; main connection
-/// handles DumpMetadata and Stream.
+/// Initial packets for the msg TCP connection. Returns empty; main connection
+/// handles DumpMetadata, Stream, and subscriptions.
 pub fn msg_connection_packets(_stream_id: StreamId) -> impl Iterator<Item = LenPacket> {
-    [SubscribeLastUpdated.into_len_packet()].into_iter()
+    std::iter::empty()
 }
 
 pub trait ComponentValueExt {

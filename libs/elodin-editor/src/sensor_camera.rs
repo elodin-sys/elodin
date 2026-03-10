@@ -648,9 +648,10 @@ fn receive_image_from_buffer(
             drop(data);
             buffer.unmap();
 
+            let frame = std::mem::take(&mut reusable.0);
             let _ = sender.0.send((
                 image_copier.camera_name.clone(),
-                reusable.0.clone(),
+                frame,
                 width,
                 height,
             ));
