@@ -143,7 +143,7 @@ pub fn spawn_msg_tcp_connect(
                     &mut outgoing_packet_rx,
                     &mut incoming_packet_tx,
                     stream_id,
-                    &|_| std::iter::empty::<LenPacket>(),
+                    &crate::msg_connection_packets,
                     || {},
                 )
                 .await

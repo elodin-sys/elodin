@@ -274,6 +274,13 @@ impl WorldBuilder {
         effect: &str,
         effect_params: Option<&Bound<'_, PyDict>>,
     ) -> Result<(), crate::error::Error> {
+        if name.chars().any(|c| c.is_whitespace()) {
+            return Err(crate::error::Error::PyO3(
+                pyo3::exceptions::PyValueError::new_err(
+                    "sensor_camera name must not contain whitespace (use dot-separated identifiers, e.g. 'scene_cam')",
+                ),
+            ));
+        }
         let entity_meta = self
             .world
             .metadata
