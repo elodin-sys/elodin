@@ -259,44 +259,36 @@ impl StepContext {
         }
     }
 
-    /// Internal implementation of render_cameras that handles the persistent client.
-    /// Returns the rendered frames (also written to DB) so callers can use them without a separate read_msg.
-    fn render_cameras_impl(
-        &self,
-        camera_names: &[&str],
-    ) -> Result<Vec<elodin_db::render_bridge::RenderedFrame>, Error> {
-        if camera_names.is_empty() {
-            return Ok(vec![]);
-        }
-
+    /// Internal implementation of render_camera that avoids the batch Vec path.
+    /// Returns the rendered frame bytes (also written to DB) so callers can turn
+    /// them into a NumPy array without an extra copy inside the socket read loop.
+    fn render_camera_impl(&self, camera_name: &str) -> Result<Option<Vec<u8>>, Error> {
         let total_start = Instant::now();
         let timestamp = Timestamp(self.timestamp.load(Ordering::SeqCst));
 
         // Get or create the persistent render client.
-        let mut guard = self.render_client.lock().map_err(|_| {
-            Error::PyO3(pyo3::exceptions::PyRuntimeError::new_err(
-                "Render client lock poisoned",
-            ))
-        })?;
+        let (frame, client_metrics) = {
+            let mut guard = self.render_client.lock().map_err(|_| {
+                Error::PyO3(pyo3::exceptions::PyRuntimeError::new_err(
+                    "Render client lock poisoned",
+                ))
+            })?;
 
-        // Lazily connect on first use.
-        if guard.is_none() {
-            let client = RenderBridgeClient::connect(Duration::from_secs(30))
-                .map_err(|e| Error::PyO3(pyo3::exceptions::PyRuntimeError::new_err(e)))?;
-            *guard = Some(client);
-        }
+            // Lazily connect on first use.
+            if guard.is_none() {
+                let client = RenderBridgeClient::connect(Duration::from_secs(30))
+                    .map_err(|e| Error::PyO3(pyo3::exceptions::PyRuntimeError::new_err(e)))?;
+                *guard = Some(client);
+            }
 
-        let client = guard.as_mut().unwrap();
+            let client = guard.as_mut().unwrap();
+            client
+                .render_camera_with_metrics(camera_name, timestamp)
+                .map_err(|e| Error::PyO3(pyo3::exceptions::PyRuntimeError::new_err(e)))?
+        };
 
-        let (frames, client_metrics) = client
-            .render_cameras_with_metrics(camera_names, timestamp)
-            .map_err(|e| Error::PyO3(pyo3::exceptions::PyRuntimeError::new_err(e)))?;
-
-        // Push frames to DB via the background worker thread. The worker uses a
-        // bounded channel so we never block. We need to clone frame data since the
-        // caller consumes it for the numpy return value.
         let mut db_enqueue_ms = 0.0;
-        {
+        if let Some(ref frame) = frame {
             let mut writer_guard = self.frame_db_writer.lock().map_err(|_| {
                 Error::PyO3(pyo3::exceptions::PyRuntimeError::new_err(
                     "Frame DB writer lock poisoned",
@@ -306,23 +298,21 @@ impl StepContext {
                 *writer_guard = Some(FrameDbWriter::new(self.db.clone()));
             }
             let writer = writer_guard.as_ref().unwrap();
-            for frame in &frames {
-                let msg_id = impeller2::types::msg_id(&frame.camera_name);
-                let enqueue_start = Instant::now();
-                writer.push(msg_id, frame.timestamp, frame.data.clone());
-                db_enqueue_ms += elapsed_ms(enqueue_start);
-            }
+            let msg_id = impeller2::types::msg_id(camera_name);
+            let enqueue_start = Instant::now();
+            writer.push(msg_id, frame.timestamp, frame.data.clone());
+            db_enqueue_ms += elapsed_ms(enqueue_start);
         }
 
         log_render_client_metrics(
-            "render_cameras_returned",
+            "render_camera_returned",
             elapsed_ms(total_start),
             client_metrics,
             db_enqueue_ms,
-            frames.len(),
+            usize::from(frame.is_some()),
         );
 
-        Ok(frames)
+        Ok(frame.map(|frame| frame.data))
     }
 
     /// Batch render path for the Python `render_cameras()` API.
@@ -681,11 +671,9 @@ impl StepContext {
         py: Python<'py>,
         camera_name: &str,
     ) -> Result<Option<Bound<'py, PyAny>>, Error> {
-        let frames = self.render_cameras_impl(&[camera_name])?;
-        Ok(frames
-            .into_iter()
-            .next()
-            .map(|f| numpy::PyArray1::from_vec(py, f.data).into_any()))
+        Ok(self
+            .render_camera_impl(camera_name)?
+            .map(|frame| numpy::PyArray1::from_vec(py, frame).into_any()))
     }
 
     /// Render multiple sensor cameras in a single batch request.

@@ -277,6 +277,12 @@ pub struct RenderedFrame {
     pub data: Vec<u8>,
 }
 
+/// Owned frame payload for the single-camera fast path.
+pub struct OwnedRenderedCameraFrame {
+    pub timestamp: Timestamp,
+    pub data: Vec<u8>,
+}
+
 /// Persistent client connection to the render bridge server.
 /// Created once and reused for all render requests to avoid per-request
 /// connection overhead.
@@ -333,8 +339,36 @@ impl RenderBridgeClient {
         camera_name: &str,
         timestamp: Timestamp,
     ) -> Result<Option<RenderedFrame>, String> {
-        let frames = self.render_cameras(&[camera_name], timestamp)?;
-        Ok(frames.into_iter().next())
+        let (frame, _metrics) = self.render_camera_with_metrics(camera_name, timestamp)?;
+        Ok(frame.map(|frame| RenderedFrame {
+            camera_name: camera_name.to_string(),
+            timestamp: frame.timestamp,
+            data: frame.data,
+        }))
+    }
+
+    /// Render a single camera and return its frame payload directly along with
+    /// client-side transport metrics.
+    pub fn render_camera_with_metrics(
+        &mut self,
+        camera_name: &str,
+        timestamp: Timestamp,
+    ) -> Result<(Option<OwnedRenderedCameraFrame>, RenderBridgeClientMetrics), String> {
+        let mut rendered_frame = None;
+        let metrics = self.render_cameras_owned_into(
+            &[camera_name],
+            timestamp,
+            |_camera_name, frame_timestamp, data| {
+                if rendered_frame.is_none() {
+                    rendered_frame = Some(OwnedRenderedCameraFrame {
+                        timestamp: frame_timestamp,
+                        data,
+                    });
+                }
+                Ok(())
+            },
+        )?;
+        Ok((rendered_frame, metrics))
     }
 
     fn send_render_request(
