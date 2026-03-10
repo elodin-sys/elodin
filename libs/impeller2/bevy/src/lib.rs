@@ -1019,21 +1019,19 @@ where
         let request = self.request.with_request_id(req_id);
         let sent = world
             .get_resource_mut::<MsgPacketTx>()
-            .and_then(|msg_tx| msg_tx.0.try_send(Some(request.clone())).ok())
-            .is_some()
-            || world
-                .get_resource_mut::<PacketTx>()
-                .and_then(|tx| tx.0.try_send(Some(request.clone())).ok())
-                .is_some();
+            .and_then(|msg_tx| msg_tx.0.try_send(Some(request)).ok())
+            .is_some();
         if !sent {
             let mut handlers = world
                 .get_resource_mut::<MsgRequestIdHandlers>()
-                .expect("missing packet handlers");
+                .expect("missing MsgRequestIdHandlers");
             handlers.remove(&req_id);
             if let Err(err) = world.unregister_system(system_id) {
                 bevy::log::error!(?err, "failed to unregister msg reply handler");
             }
-            bevy::log::warn!("failed to send msg request (no MsgPacketTx or PacketTx)");
+            bevy::log::error!(
+                "msg connection not available — cannot send request; ensure the editor/run process is connected to Elodin DB so sensor camera and msg backfill work"
+            );
         }
     }
 }

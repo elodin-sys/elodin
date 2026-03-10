@@ -304,11 +304,9 @@ fn headless_sensor_runner(mut app: App) -> AppExit {
                 break;
             }
             tracing::debug!(total_request_ms = request_start.elapsed().as_secs_f64() * 1000.0);
-        } else {
-            if let Err(e) = server.respond_empty() {
-                tracing::warn!("Render bridge write failed, client disconnected: {e}");
-                break;
-            }
+        } else if let Err(e) = server.respond_empty() {
+            tracing::warn!("Render bridge write failed, client disconnected: {e}");
+            break;
         }
     }
     AppExit::Success
