@@ -33,8 +33,8 @@ use render_bridge::RenderBridgeServer;
 
 use crate::object_3d::create_object_3d_entity;
 use crate::sensor_camera::{
-    HeadlessMode, SensorCameraPlugin, SensorCamerasSpawned, set_all_sensor_cameras_active,
-    set_readback_armed, set_sensor_cameras_active,
+    HeadlessMode, SensorCameraPlugin, SensorCameraRenderMetrics, SensorCamerasSpawned,
+    set_all_sensor_cameras_active, set_readback_armed, set_sensor_cameras_active,
 };
 use crate::{EqlContext, PositionSync, sync_pos};
 
@@ -294,6 +294,10 @@ fn headless_sensor_runner(mut app: App) -> AppExit {
         let update0_start = Instant::now();
         app.update();
         let update0_ms = elapsed_ms(update0_start);
+        let render_metrics = app
+            .get_sub_app_mut(RenderApp)
+            .map(|render_app| *render_app.world().resource::<SensorCameraRenderMetrics>())
+            .unwrap_or_default();
 
         if cameras_ready {
             let collect0_start = Instant::now();
@@ -322,10 +326,13 @@ fn headless_sensor_runner(mut app: App) -> AppExit {
             set_sensor_cameras_active(app.world_mut(), &request.camera_names, false);
 
             let respond_start = Instant::now();
-            if let Err(e) = server.respond_batch(request.timestamp, &frames) {
-                tracing::warn!("Render bridge write failed, client disconnected: {e}");
-                break;
-            }
+            let respond_metrics = match server.respond_batch(request.timestamp, &frames) {
+                Ok(metrics) => metrics,
+                Err(e) => {
+                    tracing::warn!("Render bridge write failed, client disconnected: {e}");
+                    break;
+                }
+            };
             let respond_ms = elapsed_ms(respond_start);
             let total_request_ms = elapsed_ms(request_start);
             if total_request_ms > RENDER_CRITICAL_MS {
@@ -339,6 +346,17 @@ fn headless_sensor_runner(mut app: App) -> AppExit {
                     fallback_update_ms,
                     collect1_ms,
                     respond_ms,
+                    respond_header_write_ms = respond_metrics.response_header_write_ms,
+                    respond_frame_header_write_ms = respond_metrics.frame_header_write_ms,
+                    respond_frame_bytes_write_ms = respond_metrics.frame_bytes_write_ms,
+                    respond_flush_ms = respond_metrics.flush_ms,
+                    respond_frame_count = respond_metrics.frame_count,
+                    respond_total_bytes = respond_metrics.total_bytes,
+                    image_copy_driver_ms = render_metrics.image_copy_driver_ms,
+                    image_copy_count = render_metrics.image_copy_count,
+                    receive_image_poll_wait_ms = render_metrics.receive_image_poll_wait_ms,
+                    receive_image_from_buffer_ms = render_metrics.receive_image_from_buffer_ms,
+                    readback_camera_count = render_metrics.readback_camera_count,
                     frames_after_update0,
                     final_frame_count,
                     "Render request exceeded critical latency budget"
@@ -354,6 +372,17 @@ fn headless_sensor_runner(mut app: App) -> AppExit {
                     fallback_update_ms,
                     collect1_ms,
                     respond_ms,
+                    respond_header_write_ms = respond_metrics.response_header_write_ms,
+                    respond_frame_header_write_ms = respond_metrics.frame_header_write_ms,
+                    respond_frame_bytes_write_ms = respond_metrics.frame_bytes_write_ms,
+                    respond_flush_ms = respond_metrics.flush_ms,
+                    respond_frame_count = respond_metrics.frame_count,
+                    respond_total_bytes = respond_metrics.total_bytes,
+                    image_copy_driver_ms = render_metrics.image_copy_driver_ms,
+                    image_copy_count = render_metrics.image_copy_count,
+                    receive_image_poll_wait_ms = render_metrics.receive_image_poll_wait_ms,
+                    receive_image_from_buffer_ms = render_metrics.receive_image_from_buffer_ms,
+                    readback_camera_count = render_metrics.readback_camera_count,
                     frames_after_update0,
                     final_frame_count,
                     "Render request exceeded target latency"

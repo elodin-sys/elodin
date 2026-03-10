@@ -8,6 +8,10 @@ use impeller2::types::Timestamp;
 
 const ENV_KEY: &str = "ELODIN_RENDER_BRIDGE_SOCK";
 
+fn elapsed_ms(start: Instant) -> f64 {
+    start.elapsed().as_secs_f64() * 1000.0
+}
+
 // ---------------------------------------------------------------------------
 // Batch render request (multiple cameras in one request)
 // ---------------------------------------------------------------------------
@@ -16,6 +20,27 @@ const ENV_KEY: &str = "ELODIN_RENDER_BRIDGE_SOCK";
 pub struct BatchRenderRequest {
     pub camera_names: Vec<String>,
     pub timestamp: Timestamp,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct RenderBridgeRespondMetrics {
+    pub response_header_write_ms: f64,
+    pub frame_header_write_ms: f64,
+    pub frame_bytes_write_ms: f64,
+    pub flush_ms: f64,
+    pub frame_count: usize,
+    pub total_bytes: usize,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct RenderBridgeClientMetrics {
+    pub send_request_ms: f64,
+    pub response_header_read_ms: f64,
+    pub frame_header_read_ms: f64,
+    pub frame_data_read_ms: f64,
+    pub on_frame_ms: f64,
+    pub frame_count: usize,
+    pub total_bytes: usize,
 }
 
 // ---------------------------------------------------------------------------
@@ -175,31 +200,45 @@ impl RenderBridgeServer {
         &self,
         timestamp: Timestamp,
         frames: &[(String, Vec<u8>)],
-    ) -> std::io::Result<()> {
+    ) -> std::io::Result<RenderBridgeRespondMetrics> {
         let mut guard = self.client.lock().unwrap();
         let Some((_, writer)) = guard.as_mut() else {
-            return Ok(());
+            return Ok(RenderBridgeRespondMetrics::default());
         };
 
+        let mut metrics = RenderBridgeRespondMetrics {
+            frame_count: frames.len(),
+            ..Default::default()
+        };
+
+        let response_header_start = Instant::now();
         if let Err(e) = writeln!(writer, "FRAMES {} {}", frames.len(), timestamp.0) {
             *guard = None;
             return Err(e);
         }
+        metrics.response_header_write_ms = elapsed_ms(response_header_start);
         for (camera_name, frame_bytes) in frames {
+            let frame_header_start = Instant::now();
             if let Err(e) = writeln!(writer, "{} {}", camera_name, frame_bytes.len()) {
                 *guard = None;
                 return Err(e);
             }
+            metrics.frame_header_write_ms += elapsed_ms(frame_header_start);
+            let frame_bytes_start = Instant::now();
             if let Err(e) = writer.write_all(frame_bytes) {
                 *guard = None;
                 return Err(e);
             }
+            metrics.frame_bytes_write_ms += elapsed_ms(frame_bytes_start);
+            metrics.total_bytes += frame_bytes.len();
         }
+        let flush_start = Instant::now();
         if let Err(e) = writer.flush() {
             *guard = None;
             return Err(e);
         }
-        Ok(())
+        metrics.flush_ms = elapsed_ms(flush_start);
+        Ok(metrics)
     }
 
     /// Send an empty response (no frames rendered).
@@ -298,17 +337,12 @@ impl RenderBridgeClient {
         Ok(frames.into_iter().next())
     }
 
-    /// Render multiple cameras in a single batch request.
-    /// Returns a Vec of rendered frames (may be fewer than requested if some cameras fail).
-    pub fn render_cameras(
+    fn send_render_request(
         &mut self,
         camera_names: &[&str],
         timestamp: Timestamp,
-    ) -> Result<Vec<RenderedFrame>, String> {
-        if camera_names.is_empty() {
-            return Ok(vec![]);
-        }
-
+    ) -> Result<f64, String> {
+        let send_request_start = Instant::now();
         if camera_names.len() == 1 {
             writeln!(self.writer, "RENDER {} {}", camera_names[0], timestamp.0)
                 .map_err(|e| format!("Failed to send render request: {e}"))?;
@@ -329,10 +363,31 @@ impl RenderBridgeClient {
             .flush()
             .map_err(|e| format!("Failed to flush: {e}"))?;
 
+        Ok(elapsed_ms(send_request_start))
+    }
+
+    fn render_cameras_buffered_into<F>(
+        &mut self,
+        camera_names: &[&str],
+        timestamp: Timestamp,
+        mut on_frame: F,
+    ) -> Result<RenderBridgeClientMetrics, String>
+    where
+        F: FnMut(String, Timestamp, &mut Vec<u8>) -> Result<(), String>,
+    {
+        let mut metrics = RenderBridgeClientMetrics::default();
+        if camera_names.is_empty() {
+            return Ok(metrics);
+        }
+
+        metrics.send_request_ms = self.send_render_request(camera_names, timestamp)?;
+
+        let response_header_start = Instant::now();
         let mut response_line = String::new();
         self.reader
             .read_line(&mut response_line)
             .map_err(|e| format!("Render timeout or read error: {e}"))?;
+        metrics.response_header_read_ms = elapsed_ms(response_header_start);
 
         let response_line = response_line.trim_end();
 
@@ -354,12 +409,13 @@ impl RenderBridgeClient {
             .parse()
             .map_err(|_| "Invalid timestamp in response")?;
 
-        let mut frames = Vec::with_capacity(count);
         for _ in 0..count {
+            let frame_header_start = Instant::now();
             let mut frame_header = String::new();
             self.reader
                 .read_line(&mut frame_header)
                 .map_err(|e| format!("Failed to read frame header: {e}"))?;
+            metrics.frame_header_read_ms += elapsed_ms(frame_header_start);
 
             let frame_header = frame_header.trim_end();
             let mut header_parts = frame_header.rsplitn(2, ' ');
@@ -374,17 +430,101 @@ impl RenderBridgeClient {
                 .to_string();
 
             self.frame_buffer.resize(frame_len, 0);
+            let frame_data_start = Instant::now();
             self.reader
                 .read_exact(&mut self.frame_buffer[..frame_len])
                 .map_err(|e| format!("Failed to read frame data: {e}"))?;
+            metrics.frame_data_read_ms += elapsed_ms(frame_data_start);
+            metrics.frame_count += 1;
+            metrics.total_bytes += frame_len;
 
-            frames.push(RenderedFrame {
+            let on_frame_start = Instant::now();
+            on_frame(
                 camera_name,
-                timestamp: Timestamp(resp_timestamp),
-                data: self.frame_buffer[..frame_len].to_vec(),
-            });
+                Timestamp(resp_timestamp),
+                &mut self.frame_buffer,
+            )?;
+            metrics.on_frame_ms += elapsed_ms(on_frame_start);
         }
 
+        Ok(metrics)
+    }
+
+    /// Render multiple cameras and stream each decoded frame to a callback.
+    /// This avoids building an intermediate Vec when the caller only needs to
+    /// consume or forward the frame bytes.
+    pub fn render_cameras_into<F>(
+        &mut self,
+        camera_names: &[&str],
+        timestamp: Timestamp,
+        mut on_frame: F,
+    ) -> Result<RenderBridgeClientMetrics, String>
+    where
+        F: FnMut(&str, Timestamp, &[u8]) -> Result<(), String>,
+    {
+        self.render_cameras_buffered_into(
+            camera_names,
+            timestamp,
+            |camera_name, frame_timestamp, buffer| {
+                on_frame(&camera_name, frame_timestamp, &buffer[..])
+            },
+        )
+    }
+
+    /// Render multiple cameras and move each decoded frame into the callback.
+    /// This avoids a second copy when the caller needs to take ownership of the
+    /// frame bytes immediately (for example, handing them to the DB writer).
+    pub fn render_cameras_owned_into<F>(
+        &mut self,
+        camera_names: &[&str],
+        timestamp: Timestamp,
+        mut on_frame: F,
+    ) -> Result<RenderBridgeClientMetrics, String>
+    where
+        F: FnMut(String, Timestamp, Vec<u8>) -> Result<(), String>,
+    {
+        self.render_cameras_buffered_into(
+            camera_names,
+            timestamp,
+            |camera_name, frame_timestamp, buffer| {
+                on_frame(camera_name, frame_timestamp, std::mem::take(buffer))
+            },
+        )
+    }
+
+    /// Render multiple cameras in a single batch request.
+    /// Returns a Vec of rendered frames (may be fewer than requested if some cameras fail)
+    /// plus timing metrics for the client-side transport path.
+    pub fn render_cameras_with_metrics(
+        &mut self,
+        camera_names: &[&str],
+        timestamp: Timestamp,
+    ) -> Result<(Vec<RenderedFrame>, RenderBridgeClientMetrics), String> {
+        let mut frames = Vec::new();
+        let metrics = self.render_cameras_into(
+            camera_names,
+            timestamp,
+            |camera_name, frame_timestamp, data| {
+                frames.push(RenderedFrame {
+                    camera_name: camera_name.to_string(),
+                    timestamp: frame_timestamp,
+                    data: data.to_vec(),
+                });
+                Ok(())
+            },
+        )?;
+
+        Ok((frames, metrics))
+    }
+
+    /// Render multiple cameras in a single batch request.
+    /// Returns a Vec of rendered frames (may be fewer than requested if some cameras fail).
+    pub fn render_cameras(
+        &mut self,
+        camera_names: &[&str],
+        timestamp: Timestamp,
+    ) -> Result<Vec<RenderedFrame>, String> {
+        let (frames, _metrics) = self.render_cameras_with_metrics(camera_names, timestamp)?;
         Ok(frames)
     }
 }

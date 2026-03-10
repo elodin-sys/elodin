@@ -112,6 +112,18 @@ pub struct ReadbackArmed(pub bool);
 #[derive(Resource, Default)]
 pub struct HeadlessMode;
 
+/// Per-frame timing snapshot for the headless sensor camera render path.
+/// Stored in the render world so the headless runner can attribute time spent
+/// inside `app.update()` to the GPU copy / readback stages.
+#[derive(Resource, Default, Clone, Copy)]
+pub struct SensorCameraRenderMetrics {
+    pub image_copy_driver_ms: f64,
+    pub image_copy_count: usize,
+    pub receive_image_poll_wait_ms: f64,
+    pub receive_image_from_buffer_ms: f64,
+    pub readback_camera_count: usize,
+}
+
 // ---------------------------------------------------------------------------
 // Post-process render graph
 // ---------------------------------------------------------------------------
@@ -270,6 +282,7 @@ impl Plugin for SensorCameraPlugin {
         if let Some(render_app) = app.get_sub_app_mut(RenderApp) {
             render_app
                 .insert_resource(SensorFrameSender(tx))
+                .init_resource::<SensorCameraRenderMetrics>()
                 .init_resource::<ReusableFrameBuffer>()
                 .init_resource::<BufferToggle>()
                 .add_systems(ExtractSchedule, image_copy_extract)
@@ -536,6 +549,7 @@ fn image_copy_driver(
     render_queue: Res<RenderQueue>,
     gpu_images: Res<RenderAssets<bevy::render::texture::GpuImage>>,
     buffer_toggle: Res<BufferToggle>,
+    mut metrics: ResMut<SensorCameraRenderMetrics>,
 ) {
     let copy_start = Instant::now();
     let mut encoder = render_device.create_command_encoder(&CommandEncoderDescriptor::default());
@@ -579,8 +593,10 @@ fn image_copy_driver(
     if copy_count > 0 {
         render_queue.submit(std::iter::once(encoder.finish()));
     }
+    metrics.image_copy_driver_ms = copy_start.elapsed().as_secs_f64() * 1000.0;
+    metrics.image_copy_count = copy_count;
     tracing::debug!(
-        image_copy_driver_ms = copy_start.elapsed().as_secs_f64() * 1000.0,
+        image_copy_driver_ms = metrics.image_copy_driver_ms,
         copy_count
     );
 }
@@ -591,6 +607,7 @@ fn receive_image_from_buffer(
     sender: Res<SensorFrameSender>,
     mut reusable: ResMut<ReusableFrameBuffer>,
     mut buffer_toggle: ResMut<BufferToggle>,
+    mut metrics: ResMut<SensorCameraRenderMetrics>,
 ) {
     let cam_count = image_copiers.0.len();
     if buffer_toggle.0.len() < cam_count {
@@ -610,6 +627,10 @@ fn receive_image_from_buffer(
         crossbeam_channel::Receiver<()>,
     );
 
+    let receive_start = Instant::now();
+    metrics.receive_image_poll_wait_ms = 0.0;
+    metrics.receive_image_from_buffer_ms = 0.0;
+    metrics.readback_camera_count = 0;
     let mut pending = Vec::<PendingReadback<'_>>::new();
 
     for (i, image_copier) in image_copiers.0.iter().enumerate() {
@@ -644,14 +665,19 @@ fn receive_image_from_buffer(
         return;
     }
 
+    metrics.readback_camera_count = pending.len();
+
     // Wait once for all requested camera readbacks instead of serializing
     // a full GPU poll per camera.
     let poll_start = Instant::now();
     if render_device.poll(PollType::wait()).is_err() {
+        metrics.receive_image_poll_wait_ms = poll_start.elapsed().as_secs_f64() * 1000.0;
+        metrics.receive_image_from_buffer_ms = receive_start.elapsed().as_secs_f64() * 1000.0;
         return;
     }
+    metrics.receive_image_poll_wait_ms = poll_start.elapsed().as_secs_f64() * 1000.0;
     tracing::debug!(
-        receive_image_poll_wait_ms = poll_start.elapsed().as_secs_f64() * 1000.0,
+        receive_image_poll_wait_ms = metrics.receive_image_poll_wait_ms,
         camera_count = pending.len()
     );
 
@@ -693,6 +719,8 @@ fn receive_image_from_buffer(
 
         buffer_toggle.0[i] = 1 - buf_idx;
     }
+
+    metrics.receive_image_from_buffer_ms = receive_start.elapsed().as_secs_f64() * 1000.0;
 }
 
 // ---------------------------------------------------------------------------
