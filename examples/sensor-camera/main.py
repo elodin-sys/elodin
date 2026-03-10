@@ -179,8 +179,27 @@ thermal_frames = [0]
 
 
 def post_step(tick, ctx):
+
+    if tick % 4 == 0:
+        try:
+            ctx.render_cameras(["cam_ball_a.scene_cam", "cam_ball_b.thermal_cam"])
+            rgb_frames[0] += 1
+            thermal_frames[0] += 1
+            if thermal_frames[0] == 1:
+                for name in ["cam_ball_a.scene_cam", "cam_ball_b.thermal_cam"]:
+                    frame = ctx.read_msg(name)
+                    if frame is not None:
+                        arr = np.asarray(frame)
+                        print(
+                            f"[{name}] First frame at tick {tick}: {len(frame)} bytes, "
+                            f"nonzero={np.count_nonzero(arr)}"
+                        )
+        except Exception as e:
+            if tick > 10 and thermal_frames[0] == 0:
+                print(f"[render] tick {tick}: {e}")
+    
     # Render every 2nd tick for RGB (~60 fps at 120 Hz sim)
-    if tick % 2 == 0:
+    elif tick % 2 == 0:
         try:
             # Single camera render (returns frame directly; or use ctx.render_cameras([...]) for batch)
             frame = ctx.render_camera("cam_ball_a.scene_cam")
@@ -195,21 +214,6 @@ def post_step(tick, ctx):
         except Exception as e:
             if tick > 10 and rgb_frames[0] == 0:
                 print(f"[RGB] tick {tick}: {e}")
-
-    if tick % 4 == 0:
-        try:
-            frame = ctx.render_camera("cam_ball_b.thermal_cam")
-            if frame is not None and len(frame) > 0:
-                thermal_frames[0] += 1
-                if thermal_frames[0] == 1:
-                    arr = np.array(frame)
-                    print(
-                        f"[THERMAL] First frame at tick {tick}: {len(frame)} bytes, "
-                        f"nonzero={np.count_nonzero(arr)}"
-                    )
-        except Exception as e:
-            if tick > 10 and thermal_frames[0] == 0:
-                print(f"[THERMAL] tick {tick}: {e}")
 
     if tick > 0 and tick % 600 == 0:
         print(f"  tick {tick}: rgb={rgb_frames[0]} thermal={thermal_frames[0]} frames")

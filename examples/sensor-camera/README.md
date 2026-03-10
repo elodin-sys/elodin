@@ -6,8 +6,15 @@ This example demonstrates Elodin's **sensor camera** feature: synthetic camera i
 
 Five colored balls bounce around a walled room under gravity. Two of them carry sensor cameras:
 
-- **Cyan ball** — RGB camera (640×480, rendered at 60 fps)
-- **Magenta ball** — Thermal camera (128×128, rendered at 30 fps, iron-bow colormap)
+- **Cyan ball** — RGB camera (640×480)
+- **Magenta ball** — Thermal camera (128×128, iron-bow colormap)
+
+The `post_step` callback demonstrates **both** render API styles:
+
+- **Every 4th tick (30 fps)** — `ctx.render_cameras()` batches both cameras in a single round-trip to the render-server.
+- **Every other 2nd tick (the 2nd ticks that aren't 4th ticks)** — `ctx.render_camera()` renders only the RGB camera, returning the frame directly as a numpy array.
+
+This means the RGB camera renders at 60 fps total (batch + single ticks) while the thermal camera renders at 30 fps (batch ticks only).
 
 The editor displays a 3D viewport alongside live sensor camera feeds using `sensor_view` panels.
 
@@ -43,9 +50,10 @@ Sensor camera rendering runs in a **separate headless process** managed by s10. 
 ```
 Simulation (Python + nox-py)
   │
-  │  ctx.render_camera("cam_ball_a.scene_cam")
+  │  ctx.render_cameras(["..scene_cam", "..thermal_cam"])   ← batch
+  │  ctx.render_camera("..scene_cam")                       ← single
   │    └─── UDS request ──▶  Render-Server (headless Bevy)
-  │                            • Receives RENDER request
+  │                            • Receives RENDER / RENDER_BATCH request
   │                            • Sets entity transforms to request timestamp
   │                            • Runs app.update() (GPU render + readback)
   │    ◄─── UDS response ──   • Returns RGBA pixel bytes
@@ -82,28 +90,28 @@ The camera transform is computed each frame from the entity's `world_pos` plus t
 
 #### Rendering in post_step
 
+The example uses both render APIs in the same `post_step` callback:
+
 ```python
 def post_step(tick, ctx):
-    # Render at 60 fps (every 2nd tick of a 120 Hz sim)
-    if tick % 2 == 0:
+    # Every 4th tick: batch both cameras in one round-trip
+    if tick % 4 == 0:
+        ctx.render_cameras(["drone.scene_cam", "drone.thermal_cam"])
+        rgb = ctx.read_msg("drone.scene_cam")
+        thermal = ctx.read_msg("drone.thermal_cam")
+
+    # Every other 2nd tick: single camera, frame returned directly
+    elif tick % 2 == 0:
         frame = ctx.render_camera("drone.scene_cam")
-        # frame is a numpy uint8 array of RGBA pixels (W × H × 4)
         if frame is not None:
             rgba = np.asarray(frame).reshape(480, 640, 4)
-            # Feed to your vision algorithm, SLAM pipeline, etc.
 ```
 
-`render_camera()` blocks until the frame is ready and returns the pixel data directly as a numpy array. This is the lockstep synchronization point — the simulation does not advance until the frame is produced.
+**`render_cameras()`** renders multiple cameras in a single UDS round-trip. After it returns, use `ctx.read_msg()` to retrieve each frame from the database.
 
-For multiple cameras, you can render them sequentially:
+**`render_camera()`** renders one camera and returns the frame directly as a numpy array — no separate read needed.
 
-```python
-def post_step(tick, ctx):
-    if tick % 2 == 0:
-        rgb_frame = ctx.render_camera("drone.scene_cam")
-    if tick % 4 == 0:
-        thermal_frame = ctx.render_camera("drone.thermal_cam")
-```
+Both calls block until the frame is ready, ensuring the simulation does not advance until the render-server has produced the requested frames.
 
 #### Displaying in the editor
 
@@ -157,14 +165,13 @@ def post_step(tick, ctx):
     motors = betaflight_bridge.step(fdm, rc_packet)
     ctx.write_component("drone.motor_command", motors)
 
-    # 3. Render camera and feed to vision algorithm
+    # 3. Render cameras and feed to vision algorithm
     if tick % 2 == 0:  # 60 fps at 120 Hz sim
-        frame = ctx.render_camera("drone.forward_cam")
-        if frame is not None:
-            rgba = np.asarray(frame).reshape(480, 640, 4)
-            # Run optical flow, SLAM, target detection, etc.
+        ctx.render_cameras(["drone.forward_cam", "drone.thermal_cam"])
+        rgb = ctx.read_msg("drone.forward_cam")
+        if rgb is not None:
+            rgba = np.asarray(rgb).reshape(480, 640, 4)
             vision_result = run_vision_pipeline(rgba)
-            # Feed vision output back into the simulation
             ctx.write_component("drone.vision_target", vision_result)
 ```
 
@@ -180,16 +187,16 @@ This pattern gives you deterministic, reproducible testing of the full sensor st
 
 ### Performance Budget
 
-At a 120 Hz simulation with `render_camera()` called every 2nd tick (60 fps):
+At a 120 Hz simulation with rendering every 2nd tick:
 
 | Operation | Time | Budget |
 |-----------|------|--------|
 | Physics tick | ~0.5 ms | |
-| RGB render (640×480) | ~5-8 ms | |
-| Thermal render (128×128) | ~3-5 ms | |
+| Single render — `render_camera()` (RGB 640×480) | ~5-8 ms | |
+| Batch render — `render_cameras()` (RGB + thermal) | ~8-12 ms | |
 | **Per-tick budget** | **8.33 ms** | 1/120 s |
 
-Single-camera ticks (RGB only) fit within the per-tick budget. Dual-camera ticks (RGB + thermal) slightly exceed it, but the simulation catches up on non-render ticks. At steady state, the simulation maintains real-time pace.
+Single-camera ticks fit within the per-tick budget. Batch ticks slightly exceed it, but the simulation catches up on non-render ticks. At steady state, the simulation maintains real-time pace. The batch approach avoids the overhead of two separate round-trips on dual-camera ticks.
 
 For higher-resolution cameras or more cameras, reduce the render frequency or increase `sim_time_step`.
 
