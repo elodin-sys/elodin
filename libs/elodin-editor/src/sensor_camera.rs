@@ -101,14 +101,14 @@ struct BufferToggle(Vec<usize>);
 pub struct SensorCamerasSpawned(pub bool);
 
 /// Controls whether GPU readback is active for this sensor camera.
-/// Separate from Camera.is_active: cameras stay rendering (pipeline warm),
-/// but GPU readback only happens when this is true.
+/// Separate from Camera.is_active so headless rendering can request readback
+/// only for the cameras needed by the current render batch.
 #[derive(Component, Default)]
 pub struct ReadbackArmed(pub bool);
 
-/// Marker resource set only in the headless render app. When present, readback is controlled
-/// solely by ReadbackArmed (cameras stay active for pipeline warm). When absent (editor),
-/// readback runs when ReadbackArmed or Camera.is_active is true.
+/// Marker resource set only in the headless render app. When present, readback
+/// is controlled solely by ReadbackArmed. When absent (editor), readback runs
+/// when ReadbackArmed or Camera.is_active is true.
 #[derive(Resource, Default)]
 pub struct HeadlessMode;
 
@@ -538,6 +538,9 @@ fn image_copy_driver(
     buffer_toggle: Res<BufferToggle>,
 ) {
     let copy_start = Instant::now();
+    let mut encoder = render_device.create_command_encoder(&CommandEncoderDescriptor::default());
+    let mut copy_count = 0usize;
+
     for (i, image_copier) in image_copiers.0.iter().enumerate() {
         if !image_copier.is_active {
             continue;
@@ -545,9 +548,6 @@ fn image_copy_driver(
         let Some(src_image) = gpu_images.get(&image_copier.src_image) else {
             continue;
         };
-
-        let mut encoder =
-            render_device.create_command_encoder(&CommandEncoderDescriptor::default());
 
         let block_dimensions = src_image.texture_format.block_dimensions();
         let block_size = src_image.texture_format.block_copy_size(None).unwrap();
@@ -573,10 +573,16 @@ fn image_copy_driver(
             },
             src_image.size,
         );
+        copy_count += 1;
+    }
 
+    if copy_count > 0 {
         render_queue.submit(std::iter::once(encoder.finish()));
     }
-    tracing::debug!(image_copy_driver_ms = copy_start.elapsed().as_secs_f64() * 1000.0);
+    tracing::debug!(
+        image_copy_driver_ms = copy_start.elapsed().as_secs_f64() * 1000.0,
+        copy_count
+    );
 }
 
 fn receive_image_from_buffer(
@@ -593,6 +599,18 @@ fn receive_image_from_buffer(
     if reusable.0.len() < cam_count {
         reusable.0.resize_with(cam_count, Vec::new);
     }
+
+    type PendingReadback<'a> = (
+        usize,
+        usize,
+        String,
+        u32,
+        u32,
+        bevy::render::render_resource::BufferSlice<'a>,
+        crossbeam_channel::Receiver<()>,
+    );
+
+    let mut pending = Vec::<PendingReadback<'_>>::new();
 
     for (i, image_copier) in image_copiers.0.iter().enumerate() {
         if !image_copier.is_active {
@@ -611,23 +629,36 @@ fn receive_image_from_buffer(
             Err(err) => tracing::warn!("Failed to map sensor camera buffer: {err}"),
         });
 
-        // Blocking poll: wait for GPU readback to complete.
-        // For the headless render-server this is required since the simulation
-        // is waiting for the frame. The double-buffer infrastructure is in place
-        // for future async improvements.
-        let poll_start = Instant::now();
-        if render_device.poll(PollType::wait()).is_err() {
-            continue;
-        }
-        tracing::debug!(
-            receive_image_poll_wait_ms = poll_start.elapsed().as_secs_f64() * 1000.0,
-            camera = %image_copier.camera_name
-        );
+        pending.push((
+            i,
+            buf_idx,
+            image_copier.camera_name.clone(),
+            image_copier.width,
+            image_copier.height,
+            buffer_slice,
+            r,
+        ));
+    }
 
+    if pending.is_empty() {
+        return;
+    }
+
+    // Wait once for all requested camera readbacks instead of serializing
+    // a full GPU poll per camera.
+    let poll_start = Instant::now();
+    if render_device.poll(PollType::wait()).is_err() {
+        return;
+    }
+    tracing::debug!(
+        receive_image_poll_wait_ms = poll_start.elapsed().as_secs_f64() * 1000.0,
+        camera_count = pending.len()
+    );
+
+    for (i, buf_idx, camera_name, width, height, buffer_slice, r) in pending {
+        let buffer = &image_copiers.0[i].buffers[buf_idx];
         if r.recv().is_ok() {
             let data = buffer_slice.get_mapped_range();
-            let width = image_copier.width;
-            let height = image_copier.height;
             let row_bytes = width as usize * 4;
             let aligned_row_bytes = RenderDevice::align_copy_bytes_per_row(row_bytes);
             let required_len = (height as usize) * row_bytes;
@@ -654,12 +685,8 @@ fn receive_image_from_buffer(
             drop(data);
             buffer.unmap();
 
-            let _ = sender.0.send((
-                image_copier.camera_name.clone(),
-                reusable.0[i].clone(),
-                width,
-                height,
-            ));
+            let frame = std::mem::take(&mut reusable.0[i]);
+            let _ = sender.0.send((camera_name, frame, width, height));
         } else {
             buffer.unmap();
         }
@@ -711,5 +738,29 @@ pub fn set_readback_armed(world: &mut World, camera_names: &[String], armed: boo
         if target_indices.contains(&sensor.config_index) {
             readback.0 = armed;
         }
+    }
+}
+
+/// Enable or disable specific sensor cameras by name.
+pub fn set_sensor_cameras_active(world: &mut World, camera_names: &[String], active: bool) {
+    let configs = world.resource::<SensorCameraConfigs>();
+    let target_indices: Vec<usize> = camera_names
+        .iter()
+        .filter_map(|name| configs.0.iter().position(|c| &c.camera_name == name))
+        .collect();
+
+    let mut query = world.query::<(&SensorCamera, &mut Camera)>();
+    for (sensor, mut camera) in query.iter_mut(world) {
+        if target_indices.contains(&sensor.config_index) {
+            camera.is_active = active;
+        }
+    }
+}
+
+/// Enable or disable all sensor cameras.
+pub fn set_all_sensor_cameras_active(world: &mut World, active: bool) {
+    let mut query = world.query::<(&SensorCamera, &mut Camera)>();
+    for (_, mut camera) in query.iter_mut(world) {
+        camera.is_active = active;
     }
 }

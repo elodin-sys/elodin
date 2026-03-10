@@ -10,17 +10,19 @@ use std::time::{Duration, Instant};
 /// simulation tick. Uses a bounded channel so the sim never blocks — if the
 /// worker is behind, the oldest unsent frame is dropped (editor skips a frame).
 pub struct FrameDbWriter {
-    tx: std::sync::mpsc::SyncSender<(impeller2::types::PacketId, Timestamp, Vec<u8>)>,
+    tx: crossbeam_channel::Sender<(impeller2::types::PacketId, Timestamp, Vec<u8>)>,
+    rx: crossbeam_channel::Receiver<(impeller2::types::PacketId, Timestamp, Vec<u8>)>,
 }
 
 impl FrameDbWriter {
     pub fn new(db: Arc<DB>) -> Self {
         let (tx, rx) =
-            std::sync::mpsc::sync_channel::<(impeller2::types::PacketId, Timestamp, Vec<u8>)>(8);
+            crossbeam_channel::bounded::<(impeller2::types::PacketId, Timestamp, Vec<u8>)>(8);
+        let worker_rx = rx.clone();
         std::thread::Builder::new()
             .name("frame-db-writer".into())
             .spawn(move || {
-                while let Ok((msg_id, ts, data)) = rx.recv() {
+                while let Ok((msg_id, ts, data)) = worker_rx.recv() {
                     let mut result = db.push_msg(ts, msg_id, &data);
                     // Single writer per msg_id (this thread) makes truncate-then-push atomic for that log.
                     if matches!(result.as_ref(), Err(elodin_db::Error::MapOverflow)) {
@@ -33,11 +35,27 @@ impl FrameDbWriter {
                 }
             })
             .expect("failed to spawn frame-db-writer thread");
-        Self { tx }
+        Self { tx, rx }
     }
 
     pub fn push(&self, msg_id: impeller2::types::PacketId, ts: Timestamp, data: Vec<u8>) {
-        let _ = self.tx.try_send((msg_id, ts, data));
+        let item = (msg_id, ts, data);
+        match self.tx.try_send(item) {
+            Ok(()) => {}
+            Err(crossbeam_channel::TrySendError::Full(item)) => {
+                let _ = self.rx.try_recv();
+                if self.tx.try_send(item).is_err() {
+                    tracing::debug!(
+                        "Frame DB queue still full after dropping oldest pending frame"
+                    );
+                } else {
+                    tracing::debug!("Frame DB queue full, dropped oldest pending frame");
+                }
+            }
+            Err(crossbeam_channel::TrySendError::Disconnected(_)) => {
+                tracing::warn!("Frame DB writer disconnected");
+            }
+        }
     }
 }
 

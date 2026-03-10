@@ -9036,6 +9036,7 @@ dependencies = [
  "bytes",
  "clap 4.5.53",
  "convert_case 0.8.0",
+ "crossbeam-channel",
  "directories",
  "elodin-db",
  "elodin-macros",

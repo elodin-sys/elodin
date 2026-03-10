@@ -33,9 +33,13 @@ use render_bridge::RenderBridgeServer;
 
 use crate::object_3d::create_object_3d_entity;
 use crate::sensor_camera::{
-    HeadlessMode, SensorCamera, SensorCameraPlugin, SensorCamerasSpawned, set_readback_armed,
+    HeadlessMode, SensorCameraPlugin, SensorCamerasSpawned, set_all_sensor_cameras_active,
+    set_readback_armed, set_sensor_cameras_active,
 };
 use crate::{EqlContext, PositionSync, sync_pos};
+
+const RENDER_TARGET_MS: f64 = 5.0;
+const RENDER_CRITICAL_MS: f64 = 8.0;
 
 /// A headless Bevy app dedicated to sensor camera rendering.
 ///
@@ -110,7 +114,7 @@ impl Plugin for HeadlessEditorPlugin {
             .init_resource::<crate::EqlContext>()
             .init_resource::<crate::SyncedObject3d>()
             .add_systems(Update, crate::update_eql_context)
-            .add_systems(Update, load_headless_scene)
+            .add_systems(Update, load_headless_scene.after(crate::update_eql_context))
             .set_runner(headless_sensor_runner);
 
         if let Some(render_app) = app.get_sub_app_mut(RenderApp) {
@@ -202,6 +206,10 @@ fn drain_stale_frames(app: &App) {
     while rx.0.try_recv().is_ok() {}
 }
 
+fn elapsed_ms(start: Instant) -> f64 {
+    start.elapsed().as_secs_f64() * 1000.0
+}
+
 fn headless_sensor_runner(mut app: App) -> AppExit {
     app.finish();
     app.cleanup();
@@ -220,12 +228,13 @@ fn headless_sensor_runner(mut app: App) -> AppExit {
         app.update();
         let cameras_ready = app.world().resource::<SensorCamerasSpawned>().0;
         if cameras_ready && !cameras_enabled {
-            enable_all_sensor_cameras(app.world_mut());
+            set_all_sensor_cameras_active(app.world_mut(), true);
             cameras_enabled = true;
             tracing::info!("Sensor cameras spawned and enabled after {i} warm-up cycles");
             for _ in 0..4 {
                 app.update();
             }
+            set_all_sensor_cameras_active(app.world_mut(), false);
             break;
         }
         std::thread::sleep(Duration::from_millis(50));
@@ -257,6 +266,7 @@ fn headless_sensor_runner(mut app: App) -> AppExit {
         let request_start = Instant::now();
 
         // Set timestamp for this request.
+        let setup_start = Instant::now();
         app.world_mut().resource_mut::<CurrentTimestamp>().0 = request.timestamp;
 
         // Check if cameras are ready.
@@ -264,52 +274,91 @@ fn headless_sensor_runner(mut app: App) -> AppExit {
 
         // If cameras just became ready (spawned during main loop), enable them now.
         if cameras_ready && !cameras_enabled {
-            enable_all_sensor_cameras(app.world_mut());
+            set_all_sensor_cameras_active(app.world_mut(), true);
             cameras_enabled = true;
             tracing::info!("Sensor cameras late-enabled during main loop");
             for _ in 0..4 {
                 app.update();
             }
+            set_all_sensor_cameras_active(app.world_mut(), false);
         }
 
         if cameras_ready {
+            set_sensor_cameras_active(app.world_mut(), &request.camera_names, true);
             drain_stale_frames(&app);
             set_readback_armed(app.world_mut(), &request.camera_names, true);
         }
+        let setup_ms = elapsed_ms(setup_start);
 
         // With PipelinedRenderingPlugin disabled, Extract + Render run synchronously in one update.
         let update0_start = Instant::now();
         app.update();
-        tracing::debug!(
-            render_latency_ms = update0_start.elapsed().as_secs_f64() * 1000.0,
-            update_index = 0
-        );
+        let update0_ms = elapsed_ms(update0_start);
 
         if cameras_ready {
+            let collect0_start = Instant::now();
             let mut frames = collect_frames(&app, &request.camera_names);
-            if frames.len() < request.camera_names.len() {
-                let fallback_start = Instant::now();
-                app.update();
-                tracing::debug!(
-                    render_latency_ms = fallback_start.elapsed().as_secs_f64() * 1000.0,
-                    update_index = 1,
-                    fallback = true
-                );
-                let more = collect_frames(&app, &request.camera_names);
-                for (name, data) in more {
-                    if !frames.iter().any(|(n, _)| n == &name) {
-                        frames.push((name, data));
+            let collect0_ms = elapsed_ms(collect0_start);
+            let frames_after_update0 = frames.len();
+            let (fallback_used, fallback_update_ms, collect1_ms) =
+                if frames.len() < request.camera_names.len() {
+                    let fallback_start = Instant::now();
+                    app.update();
+                    let fallback_update_ms = elapsed_ms(fallback_start);
+                    let collect1_start = Instant::now();
+                    let more = collect_frames(&app, &request.camera_names);
+                    for (name, data) in more {
+                        if !frames.iter().any(|(existing, _)| existing == &name) {
+                            frames.push((name, data));
+                        }
                     }
-                }
-            }
+                    (true, fallback_update_ms, elapsed_ms(collect1_start))
+                } else {
+                    (false, 0.0, 0.0)
+                };
+            let final_frame_count = frames.len();
 
             set_readback_armed(app.world_mut(), &request.camera_names, false);
+            set_sensor_cameras_active(app.world_mut(), &request.camera_names, false);
 
+            let respond_start = Instant::now();
             if let Err(e) = server.respond_batch(request.timestamp, &frames) {
                 tracing::warn!("Render bridge write failed, client disconnected: {e}");
                 break;
             }
-            tracing::debug!(total_request_ms = request_start.elapsed().as_secs_f64() * 1000.0);
+            let respond_ms = elapsed_ms(respond_start);
+            let total_request_ms = elapsed_ms(request_start);
+            if total_request_ms > RENDER_CRITICAL_MS {
+                tracing::warn!(
+                    total_request_ms,
+                    camera_count = request.camera_names.len(),
+                    setup_ms,
+                    update0_ms,
+                    collect0_ms,
+                    fallback_used,
+                    fallback_update_ms,
+                    collect1_ms,
+                    respond_ms,
+                    frames_after_update0,
+                    final_frame_count,
+                    "Render request exceeded critical latency budget"
+                );
+            } else if total_request_ms > RENDER_TARGET_MS {
+                tracing::info!(
+                    total_request_ms,
+                    camera_count = request.camera_names.len(),
+                    setup_ms,
+                    update0_ms,
+                    collect0_ms,
+                    fallback_used,
+                    fallback_update_ms,
+                    collect1_ms,
+                    respond_ms,
+                    frames_after_update0,
+                    final_frame_count,
+                    "Render request exceeded target latency"
+                );
+            }
         } else if let Err(e) = server.respond_empty() {
             tracing::warn!("Render bridge write failed, client disconnected: {e}");
             break;
@@ -321,14 +370,6 @@ fn headless_sensor_runner(mut app: App) -> AppExit {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-/// Enable all sensor cameras permanently (keeps Bevy render pipeline warm).
-fn enable_all_sensor_cameras(world: &mut World) {
-    let mut query = world.query::<(&SensorCamera, &mut Camera)>();
-    for (_, mut camera) in query.iter_mut(world) {
-        camera.is_active = true;
-    }
-}
 
 /// Collect rendered frames from the frame receiver, matching requested camera names.
 fn collect_frames(app: &App, camera_names: &[String]) -> Vec<(String, Vec<u8>)> {

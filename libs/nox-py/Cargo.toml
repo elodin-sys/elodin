@@ -89,6 +89,7 @@ paste = "1.0.14"
 
 # impeller connections
 thingbuf = "0.1.6"
+crossbeam-channel = "0.5"
 
 # serialize
 arrow = { version = "55", default-features = false, features = ["ipc"] }
