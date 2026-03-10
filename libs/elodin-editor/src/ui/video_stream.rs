@@ -703,7 +703,7 @@ pub struct VideoStreamWidget<'w, 's> {
 /// The callback **only** inserts raw frames into the cache and records
 /// keyframe timestamps.  It never touches the decoder.
 fn send_stream_request(commands: &mut Commands, entity: Entity, msg_id: [u8; 2], stream_id: u64) {
-    commands.send_req_reply_raw(
+    commands.send_msg_req_reply_raw(
         FixedRateMsgStream {
             msg_id,
             fixed_rate: FixedRateOp {
@@ -762,7 +762,7 @@ fn send_backfill_request(
     start_from: Timestamp,
     limit: usize,
 ) {
-    commands.send_req_reply(
+    commands.send_msg_req_reply(
         GetMsgs {
             msg_id,
             range: start_from..Timestamp(i64::MAX),
