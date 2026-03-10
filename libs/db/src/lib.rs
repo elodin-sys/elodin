@@ -763,6 +763,16 @@ impl DB {
         Ok(())
     }
 
+    /// Truncate a specific message log (clears all messages, preserves metadata).
+    /// Used when the log hits MapOverflow so sensor camera frames can continue.
+    pub fn truncate_msg_log(&self, id: PacketId) {
+        self.with_state_mut(|s| {
+            if let Some(log) = s.msg_logs.get(&id) {
+                log.truncate();
+            }
+        });
+    }
+
     pub fn get_or_insert_fixed_rate_state(
         &self,
         stream_id: StreamId,

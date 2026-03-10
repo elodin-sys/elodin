@@ -982,7 +982,10 @@ where
                 .get_resource_mut::<RequestIdHandlers>()
                 .expect("missing packet handlers");
             handlers.remove(&req_id);
-            bevy::log::warn!("failed to send msg msg (no PacketTx)");
+            if let Err(err) = world.unregister_system(system_id) {
+                bevy::log::error!(?err, "failed to unregister msg reply handler");
+            }
+            bevy::log::warn!("failed to send msg request (no MsgPacketTx)");
         }
     }
 }

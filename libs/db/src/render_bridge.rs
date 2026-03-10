@@ -71,81 +71,153 @@ impl RenderBridgeServer {
 
     /// Read the next batch render request from the persistent client connection.
     /// Blocks until a request arrives or the connection closes.
-    /// Returns None if the connection was closed.
+    /// Returns None only if the connection was closed (EOF or I/O error).
+    /// Malformed or unknown command lines are logged and skipped; the next line is read.
     pub fn recv_batch(&self) -> Option<BatchRenderRequest> {
         let mut guard = self.client.lock().unwrap();
         let (reader, _) = guard.as_mut()?;
 
-        let mut line = String::new();
-        match reader.read_line(&mut line) {
-            Ok(0) => {
-                *guard = None;
-                return None;
-            }
-            Ok(_) => {}
-            Err(_) => {
-                *guard = None;
-                return None;
-            }
-        }
-
-        let line = line.trim_end();
-        let mut parts = line.splitn(3, ' ');
-        let cmd = parts.next()?;
-
-        match cmd {
-            "RENDER" => {
-                let camera_name = parts.next()?.to_string();
-                let timestamp: i64 = parts.next()?.parse().ok()?;
-                Some(BatchRenderRequest {
-                    camera_names: vec![camera_name],
-                    timestamp: Timestamp(timestamp),
-                })
-            }
-            "RENDER_BATCH" => {
-                let count: usize = parts.next()?.parse().ok()?;
-                let timestamp: i64 = parts.next()?.parse().ok()?;
-                let mut camera_names = Vec::with_capacity(count);
-                for _ in 0..count {
-                    let mut cam_line = String::new();
-                    if reader.read_line(&mut cam_line).ok()? == 0 {
-                        return None;
-                    }
-                    camera_names.push(cam_line.trim_end().to_string());
+        loop {
+            let mut line = String::new();
+            match reader.read_line(&mut line) {
+                Ok(0) => {
+                    *guard = None;
+                    return None;
                 }
-                Some(BatchRenderRequest {
-                    camera_names,
-                    timestamp: Timestamp(timestamp),
-                })
+                Ok(_) => {}
+                Err(_) => {
+                    *guard = None;
+                    return None;
+                }
             }
-            _ => None,
+
+            let line = line.trim_end();
+            let mut parts = line.splitn(3, ' ');
+            let Some(cmd) = parts.next() else {
+                tracing::warn!("Render bridge: empty command line, skipping");
+                continue;
+            };
+
+            match cmd {
+                "RENDER" => {
+                    let Some(camera_name) = parts.next().map(String::from) else {
+                        tracing::warn!("Render bridge: RENDER missing camera name, skipping");
+                        continue;
+                    };
+                    let Some(timestamp_str) = parts.next() else {
+                        tracing::warn!("Render bridge: RENDER missing timestamp, skipping");
+                        continue;
+                    };
+                    let Ok(timestamp) = timestamp_str.parse::<i64>() else {
+                        tracing::warn!(
+                            "Render bridge: RENDER invalid timestamp '{timestamp_str}', skipping"
+                        );
+                        continue;
+                    };
+                    return Some(BatchRenderRequest {
+                        camera_names: vec![camera_name],
+                        timestamp: Timestamp(timestamp),
+                    });
+                }
+                "RENDER_BATCH" => {
+                    let Some(count_str) = parts.next() else {
+                        tracing::warn!("Render bridge: RENDER_BATCH missing count, skipping");
+                        continue;
+                    };
+                    let Ok(count) = count_str.parse::<usize>() else {
+                        tracing::warn!(
+                            "Render bridge: RENDER_BATCH invalid count '{count_str}', skipping"
+                        );
+                        continue;
+                    };
+                    let Some(timestamp_str) = parts.next() else {
+                        tracing::warn!("Render bridge: RENDER_BATCH missing timestamp, skipping");
+                        continue;
+                    };
+                    let Ok(timestamp) = timestamp_str.parse::<i64>() else {
+                        tracing::warn!(
+                            "Render bridge: RENDER_BATCH invalid timestamp '{timestamp_str}', skipping"
+                        );
+                        continue;
+                    };
+                    let mut camera_names = Vec::with_capacity(count);
+                    for _ in 0..count {
+                        let mut cam_line = String::new();
+                        match reader.read_line(&mut cam_line) {
+                            Ok(0) => {
+                                *guard = None;
+                                return None;
+                            }
+                            Ok(_) => camera_names.push(cam_line.trim_end().to_string()),
+                            Err(_) => {
+                                *guard = None;
+                                return None;
+                            }
+                        }
+                    }
+                    return Some(BatchRenderRequest {
+                        camera_names,
+                        timestamp: Timestamp(timestamp),
+                    });
+                }
+                _ => {
+                    tracing::warn!("Render bridge: unknown command '{cmd}', skipping");
+                    continue;
+                }
+            }
         }
     }
 
     /// Send batch response with multiple frames back to the client.
     /// Format: "FRAMES {count} {timestamp}\n" followed by "{camera_name} {len}\n{bytes}" for each frame.
-    pub fn respond_batch(&self, timestamp: Timestamp, frames: &[(String, Vec<u8>)]) {
+    /// On write error, disconnects the client and returns the error.
+    pub fn respond_batch(
+        &self,
+        timestamp: Timestamp,
+        frames: &[(String, Vec<u8>)],
+    ) -> std::io::Result<()> {
         let mut guard = self.client.lock().unwrap();
         let Some((_, writer)) = guard.as_mut() else {
-            return;
+            return Ok(());
         };
 
-        let _ = writeln!(writer, "FRAMES {} {}", frames.len(), timestamp.0);
-        for (camera_name, frame_bytes) in frames {
-            let _ = writeln!(writer, "{} {}", camera_name, frame_bytes.len());
-            let _ = writer.write_all(frame_bytes);
+        if let Err(e) = writeln!(writer, "FRAMES {} {}", frames.len(), timestamp.0) {
+            *guard = None;
+            return Err(e);
         }
-        let _ = writer.flush();
+        for (camera_name, frame_bytes) in frames {
+            if let Err(e) = writeln!(writer, "{} {}", camera_name, frame_bytes.len()) {
+                *guard = None;
+                return Err(e);
+            }
+            if let Err(e) = writer.write_all(frame_bytes) {
+                *guard = None;
+                return Err(e);
+            }
+        }
+        if let Err(e) = writer.flush() {
+            *guard = None;
+            return Err(e);
+        }
+        Ok(())
     }
 
     /// Send an empty response (no frames rendered).
-    pub fn respond_empty(&self) {
+    /// On write error, disconnects the client and returns the error.
+    pub fn respond_empty(&self) -> std::io::Result<()> {
         let mut guard = self.client.lock().unwrap();
         let Some((_, writer)) = guard.as_mut() else {
-            return;
+            return Ok(());
         };
-        let _ = writeln!(writer, "FRAMES 0 0");
-        let _ = writer.flush();
+        if let Err(e) = writeln!(writer, "FRAMES 0 0") {
+            *guard = None;
+            return Err(e);
+        }
+        if let Err(e) = writer.flush() {
+            *guard = None;
+            return Err(e);
+        }
+        Ok(())
     }
 }
 

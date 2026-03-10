@@ -179,7 +179,6 @@ thermal_frames = [0]
 
 
 def post_step(tick, ctx):
-
     if tick % 4 == 0:
         try:
             ctx.render_cameras(["cam_ball_a.scene_cam", "cam_ball_b.thermal_cam"])
@@ -197,7 +196,7 @@ def post_step(tick, ctx):
         except Exception as e:
             if tick > 10 and thermal_frames[0] == 0:
                 print(f"[render] tick {tick}: {e}")
-    
+
     # Render every 2nd tick for RGB (~60 fps at 120 Hz sim)
     elif tick % 2 == 0:
         try:

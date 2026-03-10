@@ -1106,9 +1106,7 @@ pub fn connect_streams(
                 let retry_ok = cache
                     .backfill_retry_at
                     .is_none_or(|t| t.elapsed().as_secs_f32() >= 1.0);
-                if !cache.backfill_in_flight
-                    && retry_ok
-                    && cache.backfill_frontier <= last_updated.0
+                if !cache.backfill_in_flight && retry_ok && cache.backfill_frontier < last_updated.0
                 {
                     let msg_id = stream.msg_id;
                     let limit = backfill_frame_limit(stream.raw_rgba_dims);

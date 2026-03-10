@@ -299,12 +299,19 @@ fn headless_sensor_runner(mut app: App) -> AppExit {
 
             set_readback_armed(app.world_mut(), &request.camera_names, false);
 
-            server.respond_batch(request.timestamp, &frames);
+            if let Err(e) = server.respond_batch(request.timestamp, &frames) {
+                tracing::warn!("Render bridge write failed, client disconnected: {e}");
+                break;
+            }
             tracing::debug!(total_request_ms = request_start.elapsed().as_secs_f64() * 1000.0);
         } else {
-            server.respond_empty();
+            if let Err(e) = server.respond_empty() {
+                tracing::warn!("Render bridge write failed, client disconnected: {e}");
+                break;
+            }
         }
     }
+    AppExit::Success
 }
 
 // ---------------------------------------------------------------------------
