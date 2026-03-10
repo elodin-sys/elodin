@@ -2243,9 +2243,15 @@ pub async fn handle_fixed_rate_msg_stream<A: AsyncWrite + Send + Sync>(
         };
 
         if Some(msg_timestamp) == last_sent_timestamp {
-            futures_lite::future::race(msg_log.wait(), async {
-                let _ = stream_state.wait_for_next_tick(current_timestamp).await;
-            })
+            futures_lite::future::race(
+                msg_log.wait(),
+                futures_lite::future::race(
+                    async {
+                        let _ = stream_state.wait_for_next_tick(current_timestamp).await;
+                    },
+                    stellarator::sleep(stream_state.sleep_time()),
+                ),
+            )
             .await;
             continue;
         }
