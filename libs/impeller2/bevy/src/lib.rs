@@ -972,11 +972,14 @@ where
         }
 
         let request = self.request.with_request_id(req_id);
-        let sent = if let Some(msg_tx) = world.get_resource_mut::<MsgPacketTx>() {
-            msg_tx.0.try_send(Some(request.clone())).is_ok()
-        } else {
-            false
-        };
+        let sent = world
+            .get_resource_mut::<MsgPacketTx>()
+            .and_then(|msg_tx| msg_tx.0.try_send(Some(request.clone())).ok())
+            .is_some()
+            || world
+                .get_resource_mut::<PacketTx>()
+                .and_then(|tx| tx.0.try_send(Some(request.clone())).ok())
+                .is_some();
         if !sent {
             let mut handlers = world
                 .get_resource_mut::<RequestIdHandlers>()
@@ -985,7 +988,7 @@ where
             if let Err(err) = world.unregister_system(system_id) {
                 bevy::log::error!(?err, "failed to unregister msg reply handler");
             }
-            bevy::log::warn!("failed to send msg request (no MsgPacketTx)");
+            bevy::log::warn!("failed to send msg request (no MsgPacketTx or PacketTx)");
         }
     }
 }
