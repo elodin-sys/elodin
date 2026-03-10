@@ -6,7 +6,7 @@ use bevy::{
     app::{App, AppExit, Plugin, Startup},
     asset::{AssetPlugin, Assets, UnapprovedPathMode},
     audio::AudioPlugin,
-    diagnostic::DiagnosticsPlugin,
+    diagnostic::{DiagnosticsPlugin, DiagnosticsStore},
     gilrs::GilrsPlugin,
     gizmos::GizmoPlugin,
     input::InputPlugin,
@@ -90,6 +90,7 @@ impl Plugin for HeadlessEditorPlugin {
             .add_plugins(bevy_mat3_material::Mat3MaterialPlugin)
             .add_plugins(crate::object_3d::Object3DPlugin)
             .add_plugins(SensorCameraPlugin)
+            .init_resource::<DiagnosticsStore>()
             .init_resource::<HeadlessMode>()
             .add_systems(
                 PreUpdate,

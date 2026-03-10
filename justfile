@@ -102,6 +102,10 @@ install target="all":
       cargo build --release -p elodin-db
       install -m 755 target/release/elodin-db "${CARGO_HOME:-$HOME/.cargo}/bin/"
       ;;
+    tracy)
+      just install py && cargo build --release -p elodin -p elodin-db --features tracy
+      install -m 755 target/release/elodin target/release/elodin-db "${CARGO_HOME:-$HOME/.cargo}/bin/"
+      ;;
     all) just install py && just install editor && just install db;;
     *)
       echo "usage: just install [py|editor|db|all]" >&2
