@@ -154,9 +154,24 @@ impl Plugin for HeadlessEditorPlugin {
                         record_after_prepare_meshes
                             .after(RenderSystems::PrepareMeshes)
                             .before(RenderSystems::ManageViews),
+                        record_after_clear_view_attachments
+                            .after(bevy::render::view::clear_view_attachments)
+                            .before(bevy::render::view::prepare_view_attachments),
+                        record_after_prepare_view_attachments
+                            .after(bevy::render::view::prepare_view_attachments)
+                            .before(bevy::render::view::prepare_view_targets),
+                        record_after_prepare_view_targets
+                            .after(bevy::render::view::prepare_view_targets)
+                            .before(record_after_manage_views),
                         record_after_manage_views
                             .after(RenderSystems::ManageViews)
                             .before(RenderSystems::Queue),
+                        record_after_queue_meshes
+                            .after(RenderSystems::QueueMeshes)
+                            .before(RenderSystems::QueueSweep),
+                        record_after_queue_sweep
+                            .after(RenderSystems::QueueSweep)
+                            .before(record_after_queue),
                         record_after_queue
                             .after(RenderSystems::Queue)
                             .before(RenderSystems::PhaseSort),
@@ -329,7 +344,14 @@ struct HeadlessMainScheduleTimingState {
 struct HeadlessRenderScheduleMetrics {
     extract_commands_ms: f64,
     prepare_meshes_ms: f64,
+    manage_views_clear_view_attachments_ms: f64,
+    manage_views_prepare_view_attachments_ms: f64,
+    manage_views_prepare_view_targets_ms: f64,
+    manage_views_other_ms: f64,
     manage_views_ms: f64,
+    queue_before_sweep_ms: f64,
+    queue_sweep_ms: f64,
+    queue_after_sweep_ms: f64,
     queue_ms: f64,
     phase_sort_ms: f64,
     prepare_resources_ms: f64,
@@ -341,6 +363,14 @@ struct HeadlessRenderScheduleMetrics {
     render_ms: f64,
     cleanup_ms: f64,
     post_cleanup_ms: f64,
+    extracted_camera_count: usize,
+    extracted_view_count: usize,
+    view_target_count: usize,
+    view_depth_texture_count: usize,
+    view_prepass_texture_count: usize,
+    view_transmission_texture_count: usize,
+    no_indirect_drawing_view_count: usize,
+    occlusion_culling_view_count: usize,
 }
 
 #[derive(Debug, Default, Resource)]
@@ -348,7 +378,12 @@ struct HeadlessRenderScheduleTimingState {
     frame_start: Option<Instant>,
     after_extract_commands: Option<Instant>,
     after_prepare_meshes: Option<Instant>,
+    after_clear_view_attachments: Option<Instant>,
+    after_prepare_view_attachments: Option<Instant>,
+    after_prepare_view_targets: Option<Instant>,
     after_manage_views: Option<Instant>,
+    after_queue_sweep: Option<Instant>,
+    after_queue_meshes: Option<Instant>,
     after_queue: Option<Instant>,
     after_phase_sort: Option<Instant>,
     after_prepare_resources: Option<Instant>,
@@ -530,8 +565,28 @@ fn record_after_prepare_meshes(mut state: ResMut<HeadlessRenderScheduleTimingSta
     mark_now(&mut state.after_prepare_meshes);
 }
 
+fn record_after_clear_view_attachments(mut state: ResMut<HeadlessRenderScheduleTimingState>) {
+    mark_now(&mut state.after_clear_view_attachments);
+}
+
+fn record_after_prepare_view_attachments(mut state: ResMut<HeadlessRenderScheduleTimingState>) {
+    mark_now(&mut state.after_prepare_view_attachments);
+}
+
+fn record_after_prepare_view_targets(mut state: ResMut<HeadlessRenderScheduleTimingState>) {
+    mark_now(&mut state.after_prepare_view_targets);
+}
+
 fn record_after_manage_views(mut state: ResMut<HeadlessRenderScheduleTimingState>) {
     mark_now(&mut state.after_manage_views);
+}
+
+fn record_after_queue_meshes(mut state: ResMut<HeadlessRenderScheduleTimingState>) {
+    mark_now(&mut state.after_queue_meshes);
+}
+
+fn record_after_queue_sweep(mut state: ResMut<HeadlessRenderScheduleTimingState>) {
+    mark_now(&mut state.after_queue_sweep);
 }
 
 fn record_after_queue(mut state: ResMut<HeadlessRenderScheduleTimingState>) {
@@ -575,12 +630,44 @@ fn record_after_cleanup(mut state: ResMut<HeadlessRenderScheduleTimingState>) {
 fn finalize_headless_render_schedule_metrics(
     state: Res<HeadlessRenderScheduleTimingState>,
     mut metrics: ResMut<HeadlessRenderScheduleMetrics>,
+    extracted_cameras: Query<(), With<bevy::render::camera::ExtractedCamera>>,
+    extracted_views: Query<(), With<bevy::render::view::ExtractedView>>,
+    view_targets: Query<(), With<bevy::render::view::ViewTarget>>,
+    view_depth_textures: Query<(), With<bevy::render::view::ViewDepthTexture>>,
+    view_prepass_textures: Query<(), With<bevy::core_pipeline::prepass::ViewPrepassTextures>>,
+    view_transmission_textures: Query<
+        (),
+        With<bevy::core_pipeline::core_3d::ViewTransmissionTexture>,
+    >,
+    no_indirect_drawing_views: Query<(), With<bevy::render::view::NoIndirectDrawing>>,
+    occlusion_culling_views: Query<
+        (),
+        With<bevy::render::experimental::occlusion_culling::OcclusionCulling>,
+    >,
 ) {
     let frame_end = Instant::now();
     metrics.extract_commands_ms = elapsed_between(state.frame_start, state.after_extract_commands);
     metrics.prepare_meshes_ms =
         elapsed_between(state.after_extract_commands, state.after_prepare_meshes);
+    metrics.manage_views_clear_view_attachments_ms = elapsed_between(
+        state.after_prepare_meshes,
+        state.after_clear_view_attachments,
+    );
+    metrics.manage_views_prepare_view_attachments_ms = elapsed_between(
+        state.after_clear_view_attachments,
+        state.after_prepare_view_attachments,
+    );
+    metrics.manage_views_prepare_view_targets_ms = elapsed_between(
+        state.after_prepare_view_attachments,
+        state.after_prepare_view_targets,
+    );
+    metrics.manage_views_other_ms =
+        elapsed_between(state.after_prepare_view_targets, state.after_manage_views);
     metrics.manage_views_ms = elapsed_between(state.after_prepare_meshes, state.after_manage_views);
+    metrics.queue_before_sweep_ms =
+        elapsed_between(state.after_manage_views, state.after_queue_meshes);
+    metrics.queue_sweep_ms = elapsed_between(state.after_queue_meshes, state.after_queue_sweep);
+    metrics.queue_after_sweep_ms = elapsed_between(state.after_queue_sweep, state.after_queue);
     metrics.queue_ms = elapsed_between(state.after_manage_views, state.after_queue);
     metrics.phase_sort_ms = elapsed_between(state.after_queue, state.after_phase_sort);
     metrics.prepare_resources_ms =
@@ -603,6 +690,14 @@ fn finalize_headless_render_schedule_metrics(
     metrics.render_ms = elapsed_between(state.after_prepare, state.after_render);
     metrics.cleanup_ms = elapsed_between(state.after_render, state.after_cleanup);
     metrics.post_cleanup_ms = elapsed_between(state.after_cleanup, Some(frame_end));
+    metrics.extracted_camera_count = extracted_cameras.iter().len();
+    metrics.extracted_view_count = extracted_views.iter().len();
+    metrics.view_target_count = view_targets.iter().len();
+    metrics.view_depth_texture_count = view_depth_textures.iter().len();
+    metrics.view_prepass_texture_count = view_prepass_textures.iter().len();
+    metrics.view_transmission_texture_count = view_transmission_textures.iter().len();
+    metrics.no_indirect_drawing_view_count = no_indirect_drawing_views.iter().len();
+    metrics.occlusion_culling_view_count = occlusion_culling_views.iter().len();
 }
 
 fn run_headless_update(app: &mut App) -> HeadlessUpdateBreakdown {
@@ -841,8 +936,25 @@ fn headless_sensor_runner(mut app: App) -> AppExit {
                         update0_breakdown.render_schedule.extract_commands_ms,
                     update0_render_prepare_meshes_ms =
                         update0_breakdown.render_schedule.prepare_meshes_ms,
+                    update0_render_manage_views_clear_view_attachments_ms = update0_breakdown
+                        .render_schedule
+                        .manage_views_clear_view_attachments_ms,
+                    update0_render_manage_views_prepare_view_attachments_ms = update0_breakdown
+                        .render_schedule
+                        .manage_views_prepare_view_attachments_ms,
+                    update0_render_manage_views_prepare_view_targets_ms = update0_breakdown
+                        .render_schedule
+                        .manage_views_prepare_view_targets_ms,
+                    update0_render_manage_views_other_ms =
+                        update0_breakdown.render_schedule.manage_views_other_ms,
                     update0_render_manage_views_ms =
                         update0_breakdown.render_schedule.manage_views_ms,
+                    update0_render_queue_before_sweep_ms =
+                        update0_breakdown.render_schedule.queue_before_sweep_ms,
+                    update0_render_queue_sweep_ms =
+                        update0_breakdown.render_schedule.queue_sweep_ms,
+                    update0_render_queue_after_sweep_ms =
+                        update0_breakdown.render_schedule.queue_after_sweep_ms,
                     update0_render_queue_ms = update0_breakdown.render_schedule.queue_ms,
                     update0_render_phase_sort_ms = update0_breakdown.render_schedule.phase_sort_ms,
                     update0_render_prepare_resources_ms =
@@ -861,6 +973,25 @@ fn headless_sensor_runner(mut app: App) -> AppExit {
                     update0_render_cleanup_ms = update0_breakdown.render_schedule.cleanup_ms,
                     update0_render_post_cleanup_ms =
                         update0_breakdown.render_schedule.post_cleanup_ms,
+                    update0_render_extracted_camera_count =
+                        update0_breakdown.render_schedule.extracted_camera_count,
+                    update0_render_extracted_view_count =
+                        update0_breakdown.render_schedule.extracted_view_count,
+                    update0_render_view_target_count =
+                        update0_breakdown.render_schedule.view_target_count,
+                    update0_render_view_depth_texture_count =
+                        update0_breakdown.render_schedule.view_depth_texture_count,
+                    update0_render_view_prepass_texture_count =
+                        update0_breakdown.render_schedule.view_prepass_texture_count,
+                    update0_render_view_transmission_texture_count = update0_breakdown
+                        .render_schedule
+                        .view_transmission_texture_count,
+                    update0_render_no_indirect_drawing_view_count = update0_breakdown
+                        .render_schedule
+                        .no_indirect_drawing_view_count,
+                    update0_render_occlusion_culling_view_count = update0_breakdown
+                        .render_schedule
+                        .occlusion_culling_view_count,
                     update0_main_clear_trackers_ms = update0_breakdown.main_clear_trackers_ms,
                     collect0_ms,
                     fallback_used,
@@ -925,8 +1056,25 @@ fn headless_sensor_runner(mut app: App) -> AppExit {
                         fallback_breakdown.render_schedule.extract_commands_ms,
                     fallback_render_prepare_meshes_ms =
                         fallback_breakdown.render_schedule.prepare_meshes_ms,
+                    fallback_render_manage_views_clear_view_attachments_ms = fallback_breakdown
+                        .render_schedule
+                        .manage_views_clear_view_attachments_ms,
+                    fallback_render_manage_views_prepare_view_attachments_ms = fallback_breakdown
+                        .render_schedule
+                        .manage_views_prepare_view_attachments_ms,
+                    fallback_render_manage_views_prepare_view_targets_ms = fallback_breakdown
+                        .render_schedule
+                        .manage_views_prepare_view_targets_ms,
+                    fallback_render_manage_views_other_ms =
+                        fallback_breakdown.render_schedule.manage_views_other_ms,
                     fallback_render_manage_views_ms =
                         fallback_breakdown.render_schedule.manage_views_ms,
+                    fallback_render_queue_before_sweep_ms =
+                        fallback_breakdown.render_schedule.queue_before_sweep_ms,
+                    fallback_render_queue_sweep_ms =
+                        fallback_breakdown.render_schedule.queue_sweep_ms,
+                    fallback_render_queue_after_sweep_ms =
+                        fallback_breakdown.render_schedule.queue_after_sweep_ms,
                     fallback_render_queue_ms = fallback_breakdown.render_schedule.queue_ms,
                     fallback_render_phase_sort_ms =
                         fallback_breakdown.render_schedule.phase_sort_ms,
@@ -947,6 +1095,26 @@ fn headless_sensor_runner(mut app: App) -> AppExit {
                     fallback_render_cleanup_ms = fallback_breakdown.render_schedule.cleanup_ms,
                     fallback_render_post_cleanup_ms =
                         fallback_breakdown.render_schedule.post_cleanup_ms,
+                    fallback_render_extracted_camera_count =
+                        fallback_breakdown.render_schedule.extracted_camera_count,
+                    fallback_render_extracted_view_count =
+                        fallback_breakdown.render_schedule.extracted_view_count,
+                    fallback_render_view_target_count =
+                        fallback_breakdown.render_schedule.view_target_count,
+                    fallback_render_view_depth_texture_count =
+                        fallback_breakdown.render_schedule.view_depth_texture_count,
+                    fallback_render_view_prepass_texture_count = fallback_breakdown
+                        .render_schedule
+                        .view_prepass_texture_count,
+                    fallback_render_view_transmission_texture_count = fallback_breakdown
+                        .render_schedule
+                        .view_transmission_texture_count,
+                    fallback_render_no_indirect_drawing_view_count = fallback_breakdown
+                        .render_schedule
+                        .no_indirect_drawing_view_count,
+                    fallback_render_occlusion_culling_view_count = fallback_breakdown
+                        .render_schedule
+                        .occlusion_culling_view_count,
                     fallback_main_clear_trackers_ms = fallback_breakdown.main_clear_trackers_ms,
                     collect1_ms,
                     respond_ms,
