@@ -412,30 +412,39 @@ fn spawn_sensor_cameras(
             _ => (0u32, 0.0, 0.0),
         };
 
-        commands.spawn((
-            Camera3d::default(),
-            Camera {
-                target: RenderTarget::Image(render_target_handle.into()),
-                order: -(10 + i as isize),
-                is_active: false,
-                ..default()
-            },
-            Projection::Perspective(perspective),
-            Tonemapping::None,
-            Transform::from_xyz(0.0, 5.0, 0.0).looking_at(Vec3::ZERO, Vec3::Y),
-            GlobalTransform::default(),
-            GridCell::<i128>::default(),
-            SensorCamera { config_index: i },
-            SensorEffectSettings {
-                effect_type,
-                param_a,
-                param_b,
-                time: 0.0,
-            },
-            copier,
-            ReadbackArmed(false),
-            Name::new(format!("sensor_camera_{}", config.camera_name)),
-        ));
+        commands
+            .spawn((
+                Camera3d {
+                    // Sensor cameras do not need screen-space transmission; disable
+                    // its extra render work in the headless render-server path.
+                    screen_space_specular_transmission_steps: 0,
+                    ..default()
+                },
+                Camera {
+                    target: RenderTarget::Image(render_target_handle.into()),
+                    order: -(10 + i as isize),
+                    is_active: false,
+                    ..default()
+                },
+                Projection::Perspective(perspective),
+                Tonemapping::None,
+                Transform::from_xyz(0.0, 5.0, 0.0).looking_at(Vec3::ZERO, Vec3::Y),
+                GlobalTransform::default(),
+                GridCell::<i128>::default(),
+                SensorCamera { config_index: i },
+                copier,
+                ReadbackArmed(false),
+                Name::new(format!("sensor_camera_{}", config.camera_name)),
+            ))
+            .insert_if(
+                SensorEffectSettings {
+                    effect_type,
+                    param_a,
+                    param_b,
+                    time: 0.0,
+                },
+                || effect_type != 0,
+            );
 
         bevy::log::debug!(
             "Spawned sensor camera '{}' ({}x{}, effect={})",
