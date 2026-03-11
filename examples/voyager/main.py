@@ -24,6 +24,11 @@ PLANETS = [
     {"spice_name": "URANUS BARYCENTER", "entity_name": "uranus", "radius": 8000000000.0, "color": "mint"},
     {"spice_name": "NEPTUNE BARYCENTER", "entity_name": "neptune", "radius": 8000000000.0, "color": "hyperblue"},
 ]
+PROBES = [
+    {"spice_name": "VOYAGER 1", "entity_name": "voyager1", "radius": 4000000000.0, "color": "white"},
+    {"spice_name": "VOYAGER 2", "entity_name": "voyager2", "radius": 4000000000.0, "color": "turquoise"},
+]
+BODIES = PLANETS + PROBES
 
 
 w = el.World()
@@ -40,17 +45,17 @@ sun = w.spawn(
 )
 
 
-for planet in PLANETS:
-    init_state, _ = spice.spkezr(planet["spice_name"], start_time_et, 'ECLIPJ2000', 'NONE', 'SUN')
+for body in BODIES:
+    init_state, _ = spice.spkezr(body["spice_name"], start_time_et, 'ECLIPJ2000', 'NONE', 'SUN')
 
     init_pos = jnp.array(init_state[:3]) * 1000.0
     init_vel = jnp.array(init_state[3:]) * 1000.0
 
-    print(planet["spice_name"])
+    print(body["spice_name"])
     print(init_pos)
     print(init_vel)
 
-    planet = w.spawn(
+    w.spawn(
         [
             el.Body(
                 world_pos=el.WorldPos(linear=init_pos),
@@ -58,24 +63,24 @@ for planet in PLANETS:
                 inertia=el.Inertia(1.0 / G),
             ),
         ],
-        name=planet["entity_name"],
+        name=body["entity_name"],
     )
 
 
 def pre_step(tick: int, ctx: el.StepContext):
     current_time_et = start_time_et + tick * SIM_TIME_STEP
 
-    for planet in PLANETS:
-        state, _ = spice.spkezr(planet["spice_name"], current_time_et, 'ECLIPJ2000', 'NONE', 'SUN')
+    for body in BODIES:
+        state, _ = spice.spkezr(body["spice_name"], current_time_et, 'ECLIPJ2000', 'NONE', 'SUN')
         pos_m = np.asarray(state[:3], dtype=np.float64) * 1000.0
         vel_ms = np.asarray(state[3:], dtype=np.float64) * 1000.0
 
         ctx.write_component(
-            f"{planet['entity_name']}.world_pos",
+            f"{body['entity_name']}.world_pos",
             np.array([0.0, 0.0, 0.0, 1.0, pos_m[0], pos_m[1], pos_m[2]], dtype=np.float64),
         )
         ctx.write_component(
-            f"{planet['entity_name']}.world_vel",
+            f"{body['entity_name']}.world_vel",
             np.array([0.0, 0.0, 0.0, vel_ms[0], vel_ms[1], vel_ms[2]], dtype=np.float64),
         )
 
@@ -139,16 +144,16 @@ def pre_step(tick: int, ctx: el.StepContext):
 #w.spawn(GravityConstraint(c, a), name="C -> A")
 #w.spawn(GravityConstraint(c, b), name="C -> B")
 
-planet_objects = "\n".join(
-    f"""    object_3d {planet["entity_name"]}.world_pos {{
-        sphere radius={planet["radius"]} emissivity=1.0 {{
-            color {planet["color"]}
+body_objects = "\n".join(
+    f"""    object_3d {body["entity_name"]}.world_pos {{
+        sphere radius={body["radius"]} emissivity=1.0 {{
+            color {body["color"]}
         }}
     }}
-    line_3d {planet["entity_name"]}.world_pos line_width=1.0 perspective=#false {{
+    line_3d {body["entity_name"]}.world_pos line_width=1.0 perspective=#false {{
         color yolk
     }}"""
-    for planet in PLANETS
+    for body in BODIES
 )
 
 w.schematic("""
@@ -172,8 +177,8 @@ w.schematic("""
             color yellow
         }}
     }}
-{planet_objects}
-""".format(planet_objects=planet_objects))
+{body_objects}
+""".format(body_objects=body_objects))
 
 sys = el.six_dof()
-sim = w.run(sys, SIM_TIME_STEP, run_time_step=1 / 120.0, pre_step=pre_step, max_ticks=1000)
+sim = w.run(sys, SIM_TIME_STEP, run_time_step=1 / 120.0, pre_step=pre_step, max_ticks=10000)
