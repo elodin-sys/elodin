@@ -1,5 +1,4 @@
-{ pkgs }:
-
+{pkgs}:
 pkgs.mkShell {
   name = "elodin-run";
   packages = [
@@ -14,4 +13,3 @@ pkgs.mkShell {
   shellHook = ''
   '';
 }
-
