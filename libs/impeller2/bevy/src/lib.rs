@@ -456,11 +456,11 @@ fn sink_inner(
         }
         world_sink_state.apply(world);
     }
-    if !pending_cache_entries.is_empty() {
-        if let Some(mut cache) = world.get_resource_mut::<TelemetryCache>() {
-            for (cid, ts, val) in pending_cache_entries.drain(..) {
-                cache.insert(cid, ts, val);
-            }
+    if !pending_cache_entries.is_empty()
+        && let Some(mut cache) = world.get_resource_mut::<TelemetryCache>()
+    {
+        for (cid, ts, val) in pending_cache_entries.drain(..) {
+            cache.insert(cid, ts, val);
         }
     }
     Ok(())

@@ -74,7 +74,7 @@ test_steps = [
             nix_step(
                 label=":python: pytest",
                 flake=".#run",
-                command="source .venv/bin/activate && pytest libs/nox-py -o 'pythonpath='",
+                command="pytest libs/nox-py -o 'pythonpath='",
             ),
             nix_step(
                 label=":python: lint",
@@ -89,27 +89,27 @@ test_steps = [
             nix_step(
                 label=":python: ball",
                 flake=".#run",
-                command="source .venv/bin/activate && python3 examples/ball/main.py bench --ticks 100 --profile",
+                command="python3 examples/ball/main.py bench --ticks 100 --profile",
             ),
             nix_step(
                 label=":python: drone",
                 flake=".#run",
-                command="source .venv/bin/activate && python3 examples/drone/main.py bench --ticks 100 --profile",
+                command="python3 examples/drone/main.py bench --ticks 100 --profile",
             ),
             nix_step(
                 label=":python: rocket",
                 flake=".#run",
-                command="source .venv/bin/activate && python3 examples/rocket/main.py bench --ticks 100 --profile",
+                command="python3 examples/rocket/main.py bench --ticks 100 --profile",
             ),
             nix_step(
                 label=":python: three-body",
                 flake=".#run",
-                command="source .venv/bin/activate && python3 examples/three-body/main.py bench --ticks 100 --profile",
+                command="python3 examples/three-body/main.py bench --ticks 100 --profile",
             ),
             nix_step(
                 label=":python: cube-sat",
                 flake=".#run",
-                command="source .venv/bin/activate && python3 examples/cube-sat/main.py bench --ticks 100 --profile",
+                command="python3 examples/cube-sat/main.py bench --ticks 100 --profile",
             ),
         ],
     ),
