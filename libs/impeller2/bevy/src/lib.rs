@@ -117,6 +117,43 @@ pub struct TelemetryCache {
     generation: u64,
 }
 
+#[derive(Clone, Copy, Debug, Default)]
+pub struct ApplyCachedDataHotComponent {
+    pub component_id: Option<ComponentId>,
+    pub bytes: usize,
+}
+
+#[derive(Clone, Copy, Debug, Default, Resource)]
+pub struct ApplyCachedDataMetrics {
+    pub skipped: bool,
+    pub scanned_component_count: usize,
+    pub applied_component_count: usize,
+    pub missing_entity_count: usize,
+    pub total_bytes: usize,
+    pub inplace_copy_component_count: usize,
+    pub cloned_replace_component_count: usize,
+    pub inserted_component_count: usize,
+    pub adapter_count: usize,
+    pub top_components: [ApplyCachedDataHotComponent; 3],
+}
+
+impl ApplyCachedDataMetrics {
+    fn record_component(&mut self, component_id: ComponentId, bytes: usize) {
+        let mut slot = Some(ApplyCachedDataHotComponent {
+            component_id: Some(component_id),
+            bytes,
+        });
+        for hot in &mut self.top_components {
+            if slot.is_none() {
+                break;
+            }
+            if hot.bytes < slot.expect("slot checked above").bytes {
+                std::mem::swap(hot, slot.as_mut().expect("slot checked above"));
+            }
+        }
+    }
+}
+
 impl TelemetryCache {
     pub fn insert(&mut self, component_id: ComponentId, ts: Timestamp, value: ComponentValue) {
         let series = self.components.entry(component_id).or_default();
@@ -176,32 +213,45 @@ pub fn apply_cached_data(
     mut entity_map: ResMut<EntityMap>,
     mut query: Query<&mut ComponentValue>,
     adapters: bevy::prelude::Res<ComponentAdapters>,
+    mut apply_metrics: bevy::prelude::ResMut<ApplyCachedDataMetrics>,
     mut commands: Commands,
     mut last_applied: bevy::prelude::Local<(Timestamp, u64)>,
 ) {
+    *apply_metrics = ApplyCachedDataMetrics::default();
     let ts = current_ts.0;
     let cache_gen = cache.generation;
     if ts == last_applied.0 && cache_gen == last_applied.1 {
+        apply_metrics.skipped = true;
         return;
     }
     *last_applied = (ts, cache_gen);
     for (&component_id, series) in &cache.components {
+        apply_metrics.scanned_component_count += 1;
         let Some((_, value)) = series.range(..=ts).next_back() else {
             continue;
         };
         let Some(&entity) = entity_map.get(&component_id) else {
+            apply_metrics.missing_entity_count += 1;
             continue;
         };
+        let value_bytes = value.as_bytes().len();
+        apply_metrics.applied_component_count += 1;
+        apply_metrics.total_bytes += value_bytes;
+        apply_metrics.record_component(component_id, value_bytes);
         if let Ok(mut cv) = query.get_mut(entity) {
             if cv.prim_type() == value.prim_type() && cv.shape() == value.shape() {
                 cv.copy_from_view(value.as_view());
+                apply_metrics.inplace_copy_component_count += 1;
             } else {
                 *cv = value.clone();
+                apply_metrics.cloned_replace_component_count += 1;
             }
         } else {
             commands.entity(entity).insert(value.clone());
+            apply_metrics.inserted_component_count += 1;
         }
         if let Some(adapter) = adapters.get(&component_id) {
+            apply_metrics.adapter_count += 1;
             let view = value.as_view();
             adapter.insert(&mut commands, &mut entity_map, component_id, view);
         }
@@ -895,6 +945,7 @@ impl Plugin for Impeller2Plugin {
             .init_resource::<MsgRequestIdAlloc>()
             .init_resource::<DbConfig>()
             .init_resource::<TelemetryCache>()
+            .init_resource::<ApplyCachedDataMetrics>()
             .init_resource::<BackfillState>();
     }
 }

@@ -1,4 +1,7 @@
-use std::time::{Duration, Instant};
+use std::{
+    fmt::Write as _,
+    time::{Duration, Instant},
+};
 
 use bevy::{
     a11y::AccessibilityPlugin,
@@ -305,6 +308,7 @@ struct HeadlessMainScheduleMetrics {
     update_eql_context_ms: f64,
     load_headless_scene_ms: f64,
     other_ms: f64,
+    apply_cached_data: impeller2_bevy::ApplyCachedDataMetrics,
 }
 
 #[derive(Debug, Default, Resource)]
@@ -377,34 +381,53 @@ fn snapshot_headless_main_schedule_metrics(
     world: &mut World,
     total_main_schedule_ms: f64,
 ) -> HeadlessMainScheduleMetrics {
-    let state = world.resource::<HeadlessMainScheduleTimingState>();
+    let (
+        setup_cell_ms,
+        apply_cached_data_ms,
+        update_object_3d_system_ms,
+        queue_object_3d_sync_candidates_ms,
+        sync_object_3d_ms,
+        sync_pos_ms,
+        update_eql_context_ms,
+        load_headless_scene_ms,
+    ) = {
+        let state = world.resource::<HeadlessMainScheduleTimingState>();
+        (
+            elapsed_between(state.after_sink, state.after_setup_cell),
+            elapsed_between(state.after_setup_cell, state.after_apply_cached_data),
+            elapsed_between(
+                state.after_apply_cached_data,
+                state.after_update_object_3d_system,
+            ),
+            elapsed_between(
+                state.after_update_object_3d_system,
+                state.after_queue_object_3d_sync_candidates,
+            ),
+            elapsed_between(
+                state.after_queue_object_3d_sync_candidates,
+                state.after_sync_object_3d,
+            ),
+            elapsed_between(state.after_sync_object_3d, state.after_sync_pos),
+            elapsed_between(
+                state.before_update_eql_context,
+                state.after_update_eql_context,
+            ),
+            elapsed_between(
+                state.after_update_eql_context,
+                state.after_load_headless_scene,
+            ),
+        )
+    };
     let mut metrics = HeadlessMainScheduleMetrics {
-        setup_cell_ms: elapsed_between(state.after_sink, state.after_setup_cell),
-        apply_cached_data_ms: elapsed_between(
-            state.after_setup_cell,
-            state.after_apply_cached_data,
-        ),
-        update_object_3d_system_ms: elapsed_between(
-            state.after_apply_cached_data,
-            state.after_update_object_3d_system,
-        ),
-        queue_object_3d_sync_candidates_ms: elapsed_between(
-            state.after_update_object_3d_system,
-            state.after_queue_object_3d_sync_candidates,
-        ),
-        sync_object_3d_ms: elapsed_between(
-            state.after_queue_object_3d_sync_candidates,
-            state.after_sync_object_3d,
-        ),
-        sync_pos_ms: elapsed_between(state.after_sync_object_3d, state.after_sync_pos),
-        update_eql_context_ms: elapsed_between(
-            state.before_update_eql_context,
-            state.after_update_eql_context,
-        ),
-        load_headless_scene_ms: elapsed_between(
-            state.after_update_eql_context,
-            state.after_load_headless_scene,
-        ),
+        setup_cell_ms,
+        apply_cached_data_ms,
+        update_object_3d_system_ms,
+        queue_object_3d_sync_candidates_ms,
+        sync_object_3d_ms,
+        sync_pos_ms,
+        update_eql_context_ms,
+        load_headless_scene_ms,
+        apply_cached_data: *world.resource::<impeller2_bevy::ApplyCachedDataMetrics>(),
         ..default()
     };
     let measured_ms = metrics.setup_cell_ms
@@ -417,6 +440,34 @@ fn snapshot_headless_main_schedule_metrics(
         + metrics.load_headless_scene_ms;
     metrics.other_ms = (total_main_schedule_ms - measured_ms).max(0.0);
     metrics
+}
+
+fn format_apply_cached_data_top_components(
+    world: &World,
+    metrics: impeller2_bevy::ApplyCachedDataMetrics,
+) -> String {
+    let Some(metadata_reg) = world.get_resource::<impeller2_bevy::ComponentMetadataRegistry>()
+    else {
+        return String::new();
+    };
+    let mut out = String::new();
+    for hot in metrics.top_components {
+        let Some(component_id) = hot.component_id else {
+            continue;
+        };
+        if hot.bytes == 0 {
+            continue;
+        }
+        let name = metadata_reg
+            .get_metadata(&component_id)
+            .map(|metadata| metadata.name.as_str())
+            .unwrap_or("unknown");
+        if !out.is_empty() {
+            out.push(',');
+        }
+        let _ = write!(&mut out, "{}({})={}", name, component_id, hot.bytes);
+    }
+    out
 }
 
 fn reset_headless_render_schedule_timing(world: &mut World) {
@@ -716,6 +767,16 @@ fn headless_sensor_runner(mut app: App) -> AppExit {
             let respond_ms = elapsed_ms(respond_start);
             let total_request_ms = elapsed_ms(request_start);
             if total_request_ms > RENDER_CRITICAL_MS {
+                let update0_main_apply_cached_data_top_components =
+                    format_apply_cached_data_top_components(
+                        app.world(),
+                        update0_breakdown.main_schedule.apply_cached_data,
+                    );
+                let fallback_main_apply_cached_data_top_components =
+                    format_apply_cached_data_top_components(
+                        app.world(),
+                        fallback_breakdown.main_schedule.apply_cached_data,
+                    );
                 tracing::warn!(
                     total_request_ms,
                     camera_count = request.camera_names.len(),
@@ -725,6 +786,42 @@ fn headless_sensor_runner(mut app: App) -> AppExit {
                     update0_main_setup_cell_ms = update0_breakdown.main_schedule.setup_cell_ms,
                     update0_main_apply_cached_data_ms =
                         update0_breakdown.main_schedule.apply_cached_data_ms,
+                    update0_main_apply_cached_data_skipped =
+                        update0_breakdown.main_schedule.apply_cached_data.skipped,
+                    update0_main_apply_cached_data_scanned_component_count = update0_breakdown
+                        .main_schedule
+                        .apply_cached_data
+                        .scanned_component_count,
+                    update0_main_apply_cached_data_applied_component_count = update0_breakdown
+                        .main_schedule
+                        .apply_cached_data
+                        .applied_component_count,
+                    update0_main_apply_cached_data_missing_entity_count = update0_breakdown
+                        .main_schedule
+                        .apply_cached_data
+                        .missing_entity_count,
+                    update0_main_apply_cached_data_total_bytes = update0_breakdown
+                        .main_schedule
+                        .apply_cached_data
+                        .total_bytes,
+                    update0_main_apply_cached_data_inplace_copy_component_count = update0_breakdown
+                        .main_schedule
+                        .apply_cached_data
+                        .inplace_copy_component_count,
+                    update0_main_apply_cached_data_cloned_replace_component_count =
+                        update0_breakdown
+                            .main_schedule
+                            .apply_cached_data
+                            .cloned_replace_component_count,
+                    update0_main_apply_cached_data_inserted_component_count = update0_breakdown
+                        .main_schedule
+                        .apply_cached_data
+                        .inserted_component_count,
+                    update0_main_apply_cached_data_adapter_count = update0_breakdown
+                        .main_schedule
+                        .apply_cached_data
+                        .adapter_count,
+                    update0_main_apply_cached_data_top_components,
                     update0_main_update_object_3d_system_ms =
                         update0_breakdown.main_schedule.update_object_3d_system_ms,
                     update0_main_queue_object_3d_sync_candidates_ms = update0_breakdown
@@ -772,6 +869,43 @@ fn headless_sensor_runner(mut app: App) -> AppExit {
                     fallback_main_setup_cell_ms = fallback_breakdown.main_schedule.setup_cell_ms,
                     fallback_main_apply_cached_data_ms =
                         fallback_breakdown.main_schedule.apply_cached_data_ms,
+                    fallback_main_apply_cached_data_skipped =
+                        fallback_breakdown.main_schedule.apply_cached_data.skipped,
+                    fallback_main_apply_cached_data_scanned_component_count = fallback_breakdown
+                        .main_schedule
+                        .apply_cached_data
+                        .scanned_component_count,
+                    fallback_main_apply_cached_data_applied_component_count = fallback_breakdown
+                        .main_schedule
+                        .apply_cached_data
+                        .applied_component_count,
+                    fallback_main_apply_cached_data_missing_entity_count = fallback_breakdown
+                        .main_schedule
+                        .apply_cached_data
+                        .missing_entity_count,
+                    fallback_main_apply_cached_data_total_bytes = fallback_breakdown
+                        .main_schedule
+                        .apply_cached_data
+                        .total_bytes,
+                    fallback_main_apply_cached_data_inplace_copy_component_count =
+                        fallback_breakdown
+                            .main_schedule
+                            .apply_cached_data
+                            .inplace_copy_component_count,
+                    fallback_main_apply_cached_data_cloned_replace_component_count =
+                        fallback_breakdown
+                            .main_schedule
+                            .apply_cached_data
+                            .cloned_replace_component_count,
+                    fallback_main_apply_cached_data_inserted_component_count = fallback_breakdown
+                        .main_schedule
+                        .apply_cached_data
+                        .inserted_component_count,
+                    fallback_main_apply_cached_data_adapter_count = fallback_breakdown
+                        .main_schedule
+                        .apply_cached_data
+                        .adapter_count,
+                    fallback_main_apply_cached_data_top_components,
                     fallback_main_update_object_3d_system_ms =
                         fallback_breakdown.main_schedule.update_object_3d_system_ms,
                     fallback_main_queue_object_3d_sync_candidates_ms = fallback_breakdown
@@ -832,6 +966,16 @@ fn headless_sensor_runner(mut app: App) -> AppExit {
                     "Render request exceeded critical latency budget"
                 );
             } else if total_request_ms > RENDER_TARGET_MS {
+                let update0_main_apply_cached_data_top_components =
+                    format_apply_cached_data_top_components(
+                        app.world(),
+                        update0_breakdown.main_schedule.apply_cached_data,
+                    );
+                let fallback_main_apply_cached_data_top_components =
+                    format_apply_cached_data_top_components(
+                        app.world(),
+                        fallback_breakdown.main_schedule.apply_cached_data,
+                    );
                 tracing::info!(
                     total_request_ms,
                     camera_count = request.camera_names.len(),
@@ -841,6 +985,42 @@ fn headless_sensor_runner(mut app: App) -> AppExit {
                     update0_main_setup_cell_ms = update0_breakdown.main_schedule.setup_cell_ms,
                     update0_main_apply_cached_data_ms =
                         update0_breakdown.main_schedule.apply_cached_data_ms,
+                    update0_main_apply_cached_data_skipped =
+                        update0_breakdown.main_schedule.apply_cached_data.skipped,
+                    update0_main_apply_cached_data_scanned_component_count = update0_breakdown
+                        .main_schedule
+                        .apply_cached_data
+                        .scanned_component_count,
+                    update0_main_apply_cached_data_applied_component_count = update0_breakdown
+                        .main_schedule
+                        .apply_cached_data
+                        .applied_component_count,
+                    update0_main_apply_cached_data_missing_entity_count = update0_breakdown
+                        .main_schedule
+                        .apply_cached_data
+                        .missing_entity_count,
+                    update0_main_apply_cached_data_total_bytes = update0_breakdown
+                        .main_schedule
+                        .apply_cached_data
+                        .total_bytes,
+                    update0_main_apply_cached_data_inplace_copy_component_count = update0_breakdown
+                        .main_schedule
+                        .apply_cached_data
+                        .inplace_copy_component_count,
+                    update0_main_apply_cached_data_cloned_replace_component_count =
+                        update0_breakdown
+                            .main_schedule
+                            .apply_cached_data
+                            .cloned_replace_component_count,
+                    update0_main_apply_cached_data_inserted_component_count = update0_breakdown
+                        .main_schedule
+                        .apply_cached_data
+                        .inserted_component_count,
+                    update0_main_apply_cached_data_adapter_count = update0_breakdown
+                        .main_schedule
+                        .apply_cached_data
+                        .adapter_count,
+                    update0_main_apply_cached_data_top_components,
                     update0_main_update_object_3d_system_ms =
                         update0_breakdown.main_schedule.update_object_3d_system_ms,
                     update0_main_queue_object_3d_sync_candidates_ms = update0_breakdown
@@ -888,6 +1068,43 @@ fn headless_sensor_runner(mut app: App) -> AppExit {
                     fallback_main_setup_cell_ms = fallback_breakdown.main_schedule.setup_cell_ms,
                     fallback_main_apply_cached_data_ms =
                         fallback_breakdown.main_schedule.apply_cached_data_ms,
+                    fallback_main_apply_cached_data_skipped =
+                        fallback_breakdown.main_schedule.apply_cached_data.skipped,
+                    fallback_main_apply_cached_data_scanned_component_count = fallback_breakdown
+                        .main_schedule
+                        .apply_cached_data
+                        .scanned_component_count,
+                    fallback_main_apply_cached_data_applied_component_count = fallback_breakdown
+                        .main_schedule
+                        .apply_cached_data
+                        .applied_component_count,
+                    fallback_main_apply_cached_data_missing_entity_count = fallback_breakdown
+                        .main_schedule
+                        .apply_cached_data
+                        .missing_entity_count,
+                    fallback_main_apply_cached_data_total_bytes = fallback_breakdown
+                        .main_schedule
+                        .apply_cached_data
+                        .total_bytes,
+                    fallback_main_apply_cached_data_inplace_copy_component_count =
+                        fallback_breakdown
+                            .main_schedule
+                            .apply_cached_data
+                            .inplace_copy_component_count,
+                    fallback_main_apply_cached_data_cloned_replace_component_count =
+                        fallback_breakdown
+                            .main_schedule
+                            .apply_cached_data
+                            .cloned_replace_component_count,
+                    fallback_main_apply_cached_data_inserted_component_count = fallback_breakdown
+                        .main_schedule
+                        .apply_cached_data
+                        .inserted_component_count,
+                    fallback_main_apply_cached_data_adapter_count = fallback_breakdown
+                        .main_schedule
+                        .apply_cached_data
+                        .adapter_count,
+                    fallback_main_apply_cached_data_top_components,
                     fallback_main_update_object_3d_system_ms =
                         fallback_breakdown.main_schedule.update_object_3d_system_ms,
                     fallback_main_queue_object_3d_sync_candidates_ms = fallback_breakdown
