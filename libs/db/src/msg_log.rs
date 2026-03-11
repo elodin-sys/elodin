@@ -61,17 +61,6 @@ impl MsgLog {
     }
 
     pub fn push(&self, timestamp: Timestamp, msg: &[u8]) -> Result<(), Error> {
-        match self.try_push(timestamp, msg) {
-            Ok(()) => Ok(()),
-            Err(Error::MapOverflow) => {
-                self.truncate();
-                self.try_push(timestamp, msg)
-            }
-            Err(e) => Err(e),
-        }
-    }
-
-    fn try_push(&self, timestamp: Timestamp, msg: &[u8]) -> Result<(), Error> {
         self.bufs.insert_msg(msg)?;
         self.timestamps.write(&timestamp.to_le_bytes())?;
         self.waker.wake_all();

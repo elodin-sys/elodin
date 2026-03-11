@@ -229,6 +229,8 @@ pub struct VideoFrameCache {
     /// Timestamp of the raw RGBA frame currently displayed. Used to skip
     /// redundant texture uploads when the playback position hasn't changed.
     last_displayed_ts: Option<Timestamp>,
+    /// When false, raw frames are RGBA (sensor camera); skip H.264 keyframe scan.
+    pub is_h264: bool,
 }
 
 impl Default for VideoFrameCache {
@@ -247,6 +249,17 @@ impl Default for VideoFrameCache {
             backfill_in_flight: false,
             backfill_retry_at: None,
             last_displayed_ts: None,
+            is_h264: true,
+        }
+    }
+}
+
+impl VideoFrameCache {
+    /// For sensor_view tiles: raw RGBA frames, no H.264 keyframe scan.
+    pub fn for_raw_rgba() -> Self {
+        Self {
+            is_h264: false,
+            ..Self::default()
         }
     }
 }
@@ -334,7 +347,7 @@ impl VideoFrameCache {
 
     /// Insert a raw frame and evict oldest entries if over the limit.
     pub fn insert_raw(&mut self, timestamp: Timestamp, data: Vec<u8>) {
-        if is_keyframe(&data) {
+        if self.is_h264 && is_keyframe(&data) {
             self.record_keyframe(timestamp);
         }
         self.raw_frames.insert(timestamp, Arc::new(data));
