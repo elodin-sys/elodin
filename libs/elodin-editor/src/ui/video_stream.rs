@@ -1169,7 +1169,7 @@ pub fn connect_streams(
                         &mut commands,
                         entity,
                         msg_id,
-                        Timestamp(i64::MIN),
+                        cache.backfill_frontier,
                         limit,
                     );
                     send_stream_request(&mut commands, entity, msg_id, stream_id.0);
