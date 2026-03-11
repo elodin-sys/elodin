@@ -1,6 +1,11 @@
 #![recursion_limit = "256"]
 
-use std::{collections::HashMap, ops::Range, sync::Arc, time::Duration};
+use std::{
+    collections::{HashMap, HashSet},
+    ops::Range,
+    sync::Arc,
+    time::Duration,
+};
 
 use crate::plugins::editor_cam_touch;
 use bevy::{
@@ -251,6 +256,7 @@ impl Plugin for EditorPlugin {
                     // Keep Object3D WorldPos in lock-step with cached component values
                     // before transforms are synchronized for rendering.
                     object_3d::update_object_3d_system,
+                    queue_object_3d_sync_candidates,
                     set_floating_origin,
                     sync_object_3d,
                     set_viewport_pos,
@@ -277,6 +283,7 @@ impl Plugin for EditorPlugin {
             .insert_resource(SelectedTimeRange(Timestamp(i64::MIN)..Timestamp(i64::MAX)))
             .insert_resource(FullTimeRange(Timestamp(0)..Timestamp(1_000_000)))
             .init_resource::<EqlContext>()
+            .init_resource::<PendingObject3dSync>()
             .init_resource::<SyncedObject3d>()
             .init_resource::<ui::data_overview::ComponentTimeRanges>()
             .add_plugins(bevy_mat3_material::Mat3MaterialPlugin)
@@ -786,7 +793,7 @@ pub fn follow_latest(
 }
 
 pub fn sync_pos(
-    mut query: Query<(&mut Transform, &mut GridCell<i128>, &WorldPos)>,
+    mut query: Query<(&mut Transform, &mut GridCell<i128>, &WorldPos), Changed<WorldPos>>,
     floating_origin: Res<FloatingOriginSettings>,
 ) {
     // return;
@@ -895,14 +902,25 @@ impl BevyExt for impeller2_wkt::Material {
 #[derive(Default, Resource)]
 pub struct SyncedObject3d(HashMap<Entity, Entity>);
 
+#[derive(Default, Resource)]
+pub struct PendingObject3dSync(HashSet<Entity>);
+
+pub fn queue_object_3d_sync_candidates(
+    added_world_pos: Query<Entity, (Added<impeller2_wkt::WorldPos>, With<ComponentId>)>,
+    mut pending_object_3d: ResMut<PendingObject3dSync>,
+) {
+    pending_object_3d.0.extend(added_world_pos.iter());
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn sync_object_3d(
-    query: Query<(Entity, &ComponentId), With<impeller2_wkt::WorldPos>>,
+    query: Query<&ComponentId, (With<impeller2_wkt::WorldPos>, With<ComponentId>)>,
     meshes: Query<&impeller2_wkt::Mesh>,
     materials: Query<&impeller2_wkt::Material>,
     glbs: Query<&impeller2_wkt::Glb>,
     mut synced_object_3d: ResMut<SyncedObject3d>,
-    entity_map: ResMut<EntityMap>,
+    mut pending_object_3d: ResMut<PendingObject3dSync>,
+    entity_map: Res<EntityMap>,
     path_reg: Res<ComponentPathRegistry>,
     ctx: Res<EqlContext>,
     mut material_assets: ResMut<Assets<StandardMaterial>>,
@@ -911,14 +929,25 @@ pub fn sync_object_3d(
     mut commands: Commands,
     assets: Res<AssetServer>,
 ) {
-    for (entity, id) in &query {
+    if pending_object_3d.0.is_empty() {
+        return;
+    }
+    let pending_entities = std::mem::take(&mut pending_object_3d.0);
+    for entity in pending_entities {
         if synced_object_3d.0.contains_key(&entity) {
             continue;
         }
-        let Some(path) = path_reg.get(id) else {
+        let Ok(id) = query.get(entity) else {
             continue;
         };
-        let parent = path.path.first().unwrap();
+        let Some(path) = path_reg.get(id) else {
+            pending_object_3d.0.insert(entity);
+            continue;
+        };
+        let Some(parent) = path.path.first() else {
+            pending_object_3d.0.insert(entity);
+            continue;
+        };
 
         let glb = entity_map
             .get(&ComponentId::new(&format!(
@@ -945,11 +974,15 @@ pub fn sync_object_3d(
                 mesh: mesh.clone(),
                 material: mat.clone(),
             },
-            _ => continue,
+            _ => {
+                pending_object_3d.0.insert(entity);
+                continue;
+            }
         };
 
         let eql = format!("{}.world_pos", &parent.name);
         let Ok(expr) = ctx.0.parse_str(&eql) else {
+            pending_object_3d.0.insert(entity);
             continue;
         };
 
@@ -995,6 +1028,7 @@ fn clear_state_new_connection(
     mut graph_data: ResMut<CollectedGraphData>,
     lines: Query<Entity, With<LineHandle>>,
     mut synced_glbs: ResMut<SyncedObject3d>,
+    mut pending_object_3d: ResMut<PendingObject3dSync>,
     mut eql_context: ResMut<EqlContext>,
     mut component_time_ranges: ResMut<ui::data_overview::ComponentTimeRanges>,
     mut commands: Commands,
@@ -1034,6 +1068,7 @@ fn clear_state_new_connection(
         }
     }
     synced_glbs.0.clear();
+    pending_object_3d.0.clear();
     let primary_id: Entity = *primary_window;
     let Ok(mut primary_state) = windows_state.get_mut(primary_id) else {
         return;

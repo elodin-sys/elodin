@@ -101,6 +101,7 @@ impl Plugin for HeadlessEditorPlugin {
                 (
                     impeller2_bevy::apply_cached_data,
                     crate::object_3d::update_object_3d_system,
+                    crate::queue_object_3d_sync_candidates,
                     crate::sync_object_3d,
                     sync_pos,
                 )
@@ -112,6 +113,7 @@ impl Plugin for HeadlessEditorPlugin {
             .add_systems(Startup, setup_floating_origin)
             .add_systems(Startup, setup_headless_lighting)
             .init_resource::<crate::EqlContext>()
+            .init_resource::<crate::PendingObject3dSync>()
             .init_resource::<crate::SyncedObject3d>()
             .add_systems(Update, crate::update_eql_context)
             .add_systems(Update, load_headless_scene.after(crate::update_eql_context))
