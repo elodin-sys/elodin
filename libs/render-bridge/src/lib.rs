@@ -5,11 +5,24 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use impeller2::types::Timestamp;
+use socket2::SockRef;
 
 const ENV_KEY: &str = "ELODIN_RENDER_BRIDGE_SOCK";
+const RENDER_BRIDGE_SOCKET_BUFFER_BYTES: usize = 4 * 1024 * 1024;
+const RENDER_BRIDGE_STREAM_BUFFER_BYTES: usize = 256 * 1024;
 
 fn elapsed_ms(start: Instant) -> f64 {
     start.elapsed().as_secs_f64() * 1000.0
+}
+
+fn configure_stream_buffers(stream: &UnixStream) {
+    let socket = SockRef::from(stream);
+    if let Err(err) = socket.set_send_buffer_size(RENDER_BRIDGE_SOCKET_BUFFER_BYTES) {
+        tracing::warn!("Failed to enlarge render bridge send buffer: {err}");
+    }
+    if let Err(err) = socket.set_recv_buffer_size(RENDER_BRIDGE_SOCKET_BUFFER_BYTES) {
+        tracing::warn!("Failed to enlarge render bridge recv buffer: {err}");
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -82,9 +95,10 @@ impl RenderBridgeServer {
         let (stream, _) = self.listener.accept()?;
         stream.set_nonblocking(false)?;
         stream.set_read_timeout(None)?;
+        configure_stream_buffers(&stream);
         let write_stream = stream.try_clone()?;
-        let reader = BufReader::new(stream);
-        let writer = BufWriter::new(write_stream);
+        let reader = BufReader::with_capacity(RENDER_BRIDGE_STREAM_BUFFER_BYTES, stream);
+        let writer = BufWriter::with_capacity(RENDER_BRIDGE_STREAM_BUFFER_BYTES, write_stream);
         *self.client.lock().unwrap() = Some((reader, writer));
         Ok(())
     }
@@ -321,14 +335,15 @@ impl RenderBridgeClient {
         stream
             .set_write_timeout(Some(Duration::from_secs(5)))
             .map_err(|e| format!("Failed to set write timeout: {e}"))?;
+        configure_stream_buffers(&stream);
 
         let write_stream = stream
             .try_clone()
             .map_err(|e| format!("Failed to clone stream for writer: {e}"))?;
 
         Ok(Self {
-            reader: BufReader::new(stream),
-            writer: BufWriter::new(write_stream),
+            reader: BufReader::with_capacity(RENDER_BRIDGE_STREAM_BUFFER_BYTES, stream),
+            writer: BufWriter::with_capacity(RENDER_BRIDGE_STREAM_BUFFER_BYTES, write_stream),
             frame_buffer: Vec::new(),
         })
     }

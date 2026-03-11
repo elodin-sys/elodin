@@ -63,6 +63,7 @@ miette.features = ["fancy"]
 tracing = "0.1.40"
 tracing-subscriber = { version = "0.3.18", features = ["env-filter", "chrono"] }
 hifitime.version = "4.0"
+socket2 = { version = "0.5", features = ["all"] }
 
 # rand
 fastrand = "2.2.0"

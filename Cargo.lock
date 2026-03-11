@@ -5030,6 +5030,7 @@ dependencies = [
  "serde_json",
  "signal-hook",
  "smallvec",
+ "socket2 0.5.10",
  "stellarator",
  "tempfile",
  "thingbuf",
