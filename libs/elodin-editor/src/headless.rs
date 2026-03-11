@@ -142,6 +142,18 @@ impl Plugin for HeadlessEditorPlugin {
                         record_after_phase_sort
                             .after(RenderSystems::PhaseSort)
                             .before(RenderSystems::Prepare),
+                        record_after_prepare_resources
+                            .after(RenderSystems::PrepareResources)
+                            .before(RenderSystems::PrepareResourcesCollectPhaseBuffers),
+                        record_after_prepare_resources_collect_phase_buffers
+                            .after(RenderSystems::PrepareResourcesCollectPhaseBuffers)
+                            .before(RenderSystems::PrepareResourcesFlush),
+                        record_after_prepare_resources_flush
+                            .after(RenderSystems::PrepareResourcesFlush)
+                            .before(RenderSystems::PrepareBindGroups),
+                        record_after_prepare_bind_groups
+                            .after(RenderSystems::PrepareBindGroups)
+                            .before(record_after_prepare),
                         record_after_prepare
                             .after(RenderSystems::Prepare)
                             .before(RenderSystems::Render),
@@ -270,6 +282,11 @@ struct HeadlessRenderScheduleMetrics {
     manage_views_ms: f64,
     queue_ms: f64,
     phase_sort_ms: f64,
+    prepare_resources_ms: f64,
+    prepare_resources_collect_phase_buffers_ms: f64,
+    prepare_resources_flush_ms: f64,
+    prepare_bind_groups_ms: f64,
+    prepare_other_ms: f64,
     prepare_ms: f64,
     render_ms: f64,
     cleanup_ms: f64,
@@ -284,6 +301,10 @@ struct HeadlessRenderScheduleTimingState {
     after_manage_views: Option<Instant>,
     after_queue: Option<Instant>,
     after_phase_sort: Option<Instant>,
+    after_prepare_resources: Option<Instant>,
+    after_prepare_resources_collect_phase_buffers: Option<Instant>,
+    after_prepare_resources_flush: Option<Instant>,
+    after_prepare_bind_groups: Option<Instant>,
     after_prepare: Option<Instant>,
     after_render: Option<Instant>,
     after_cleanup: Option<Instant>,
@@ -330,6 +351,24 @@ fn record_after_phase_sort(mut state: ResMut<HeadlessRenderScheduleTimingState>)
     mark_now(&mut state.after_phase_sort);
 }
 
+fn record_after_prepare_resources(mut state: ResMut<HeadlessRenderScheduleTimingState>) {
+    mark_now(&mut state.after_prepare_resources);
+}
+
+fn record_after_prepare_resources_collect_phase_buffers(
+    mut state: ResMut<HeadlessRenderScheduleTimingState>,
+) {
+    mark_now(&mut state.after_prepare_resources_collect_phase_buffers);
+}
+
+fn record_after_prepare_resources_flush(mut state: ResMut<HeadlessRenderScheduleTimingState>) {
+    mark_now(&mut state.after_prepare_resources_flush);
+}
+
+fn record_after_prepare_bind_groups(mut state: ResMut<HeadlessRenderScheduleTimingState>) {
+    mark_now(&mut state.after_prepare_bind_groups);
+}
+
 fn record_after_prepare(mut state: ResMut<HeadlessRenderScheduleTimingState>) {
     mark_now(&mut state.after_prepare);
 }
@@ -353,6 +392,22 @@ fn finalize_headless_render_schedule_metrics(
     metrics.manage_views_ms = elapsed_between(state.after_prepare_meshes, state.after_manage_views);
     metrics.queue_ms = elapsed_between(state.after_manage_views, state.after_queue);
     metrics.phase_sort_ms = elapsed_between(state.after_queue, state.after_phase_sort);
+    metrics.prepare_resources_ms =
+        elapsed_between(state.after_phase_sort, state.after_prepare_resources);
+    metrics.prepare_resources_collect_phase_buffers_ms = elapsed_between(
+        state.after_prepare_resources,
+        state.after_prepare_resources_collect_phase_buffers,
+    );
+    metrics.prepare_resources_flush_ms = elapsed_between(
+        state.after_prepare_resources_collect_phase_buffers,
+        state.after_prepare_resources_flush,
+    );
+    metrics.prepare_bind_groups_ms = elapsed_between(
+        state.after_prepare_resources_flush,
+        state.after_prepare_bind_groups,
+    );
+    metrics.prepare_other_ms =
+        elapsed_between(state.after_prepare_bind_groups, state.after_prepare);
     metrics.prepare_ms = elapsed_between(state.after_phase_sort, state.after_prepare);
     metrics.render_ms = elapsed_between(state.after_prepare, state.after_render);
     metrics.cleanup_ms = elapsed_between(state.after_render, state.after_cleanup);
@@ -534,6 +589,17 @@ fn headless_sensor_runner(mut app: App) -> AppExit {
                         update0_breakdown.render_schedule.manage_views_ms,
                     update0_render_queue_ms = update0_breakdown.render_schedule.queue_ms,
                     update0_render_phase_sort_ms = update0_breakdown.render_schedule.phase_sort_ms,
+                    update0_render_prepare_resources_ms =
+                        update0_breakdown.render_schedule.prepare_resources_ms,
+                    update0_render_prepare_resources_collect_phase_buffers_ms = update0_breakdown
+                        .render_schedule
+                        .prepare_resources_collect_phase_buffers_ms,
+                    update0_render_prepare_resources_flush_ms =
+                        update0_breakdown.render_schedule.prepare_resources_flush_ms,
+                    update0_render_prepare_bind_groups_ms =
+                        update0_breakdown.render_schedule.prepare_bind_groups_ms,
+                    update0_render_prepare_other_ms =
+                        update0_breakdown.render_schedule.prepare_other_ms,
                     update0_render_prepare_ms = update0_breakdown.render_schedule.prepare_ms,
                     update0_render_render_ms = update0_breakdown.render_schedule.render_ms,
                     update0_render_cleanup_ms = update0_breakdown.render_schedule.cleanup_ms,
@@ -555,6 +621,18 @@ fn headless_sensor_runner(mut app: App) -> AppExit {
                     fallback_render_queue_ms = fallback_breakdown.render_schedule.queue_ms,
                     fallback_render_phase_sort_ms =
                         fallback_breakdown.render_schedule.phase_sort_ms,
+                    fallback_render_prepare_resources_ms =
+                        fallback_breakdown.render_schedule.prepare_resources_ms,
+                    fallback_render_prepare_resources_collect_phase_buffers_ms = fallback_breakdown
+                        .render_schedule
+                        .prepare_resources_collect_phase_buffers_ms,
+                    fallback_render_prepare_resources_flush_ms = fallback_breakdown
+                        .render_schedule
+                        .prepare_resources_flush_ms,
+                    fallback_render_prepare_bind_groups_ms =
+                        fallback_breakdown.render_schedule.prepare_bind_groups_ms,
+                    fallback_render_prepare_other_ms =
+                        fallback_breakdown.render_schedule.prepare_other_ms,
                     fallback_render_prepare_ms = fallback_breakdown.render_schedule.prepare_ms,
                     fallback_render_render_ms = fallback_breakdown.render_schedule.render_ms,
                     fallback_render_cleanup_ms = fallback_breakdown.render_schedule.cleanup_ms,
@@ -587,6 +665,30 @@ fn headless_sensor_runner(mut app: App) -> AppExit {
                     update0_main_schedule_ms = update0_breakdown.main_schedule_ms,
                     update0_render_extract_ms = update0_breakdown.render_extract_ms,
                     update0_render_app_ms = update0_breakdown.render_app_ms,
+                    update0_render_extract_commands_ms =
+                        update0_breakdown.render_schedule.extract_commands_ms,
+                    update0_render_prepare_meshes_ms =
+                        update0_breakdown.render_schedule.prepare_meshes_ms,
+                    update0_render_manage_views_ms =
+                        update0_breakdown.render_schedule.manage_views_ms,
+                    update0_render_queue_ms = update0_breakdown.render_schedule.queue_ms,
+                    update0_render_phase_sort_ms = update0_breakdown.render_schedule.phase_sort_ms,
+                    update0_render_prepare_resources_ms =
+                        update0_breakdown.render_schedule.prepare_resources_ms,
+                    update0_render_prepare_resources_collect_phase_buffers_ms = update0_breakdown
+                        .render_schedule
+                        .prepare_resources_collect_phase_buffers_ms,
+                    update0_render_prepare_resources_flush_ms =
+                        update0_breakdown.render_schedule.prepare_resources_flush_ms,
+                    update0_render_prepare_bind_groups_ms =
+                        update0_breakdown.render_schedule.prepare_bind_groups_ms,
+                    update0_render_prepare_other_ms =
+                        update0_breakdown.render_schedule.prepare_other_ms,
+                    update0_render_prepare_ms = update0_breakdown.render_schedule.prepare_ms,
+                    update0_render_render_ms = update0_breakdown.render_schedule.render_ms,
+                    update0_render_cleanup_ms = update0_breakdown.render_schedule.cleanup_ms,
+                    update0_render_post_cleanup_ms =
+                        update0_breakdown.render_schedule.post_cleanup_ms,
                     update0_main_clear_trackers_ms = update0_breakdown.main_clear_trackers_ms,
                     collect0_ms,
                     fallback_used,
@@ -594,6 +696,32 @@ fn headless_sensor_runner(mut app: App) -> AppExit {
                     fallback_main_schedule_ms = fallback_breakdown.main_schedule_ms,
                     fallback_render_extract_ms = fallback_breakdown.render_extract_ms,
                     fallback_render_app_ms = fallback_breakdown.render_app_ms,
+                    fallback_render_extract_commands_ms =
+                        fallback_breakdown.render_schedule.extract_commands_ms,
+                    fallback_render_prepare_meshes_ms =
+                        fallback_breakdown.render_schedule.prepare_meshes_ms,
+                    fallback_render_manage_views_ms =
+                        fallback_breakdown.render_schedule.manage_views_ms,
+                    fallback_render_queue_ms = fallback_breakdown.render_schedule.queue_ms,
+                    fallback_render_phase_sort_ms =
+                        fallback_breakdown.render_schedule.phase_sort_ms,
+                    fallback_render_prepare_resources_ms =
+                        fallback_breakdown.render_schedule.prepare_resources_ms,
+                    fallback_render_prepare_resources_collect_phase_buffers_ms = fallback_breakdown
+                        .render_schedule
+                        .prepare_resources_collect_phase_buffers_ms,
+                    fallback_render_prepare_resources_flush_ms = fallback_breakdown
+                        .render_schedule
+                        .prepare_resources_flush_ms,
+                    fallback_render_prepare_bind_groups_ms =
+                        fallback_breakdown.render_schedule.prepare_bind_groups_ms,
+                    fallback_render_prepare_other_ms =
+                        fallback_breakdown.render_schedule.prepare_other_ms,
+                    fallback_render_prepare_ms = fallback_breakdown.render_schedule.prepare_ms,
+                    fallback_render_render_ms = fallback_breakdown.render_schedule.render_ms,
+                    fallback_render_cleanup_ms = fallback_breakdown.render_schedule.cleanup_ms,
+                    fallback_render_post_cleanup_ms =
+                        fallback_breakdown.render_schedule.post_cleanup_ms,
                     fallback_main_clear_trackers_ms = fallback_breakdown.main_clear_trackers_ms,
                     collect1_ms,
                     respond_ms,
