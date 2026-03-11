@@ -208,9 +208,9 @@ impl Cli {
     pub fn run_headless(self, args: Args, rt: Runtime) -> miette::Result<()> {
         let cancel_token = CancelToken::new();
         let thread = self.run_sim(&args, rt, cancel_token.clone())?;
-        let result = thread.join().map_err(|_| miette!("join error"))?;
+        let result = thread.join().map_err(|_| miette!("join error"));
         cancel_token.cancel();
-        result
+        result?
     }
 
     /// Start the headless sensor camera render server. This is spawned as an
