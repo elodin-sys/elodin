@@ -301,11 +301,11 @@ fn sink_inner(
     let sink_deadline = std::time::Instant::now() + std::time::Duration::from_millis(8);
     let mut pending_cache_entries: Vec<(ComponentId, Timestamp, ComponentValue)> = Vec::new();
     loop {
-        if !pending_cache_entries.is_empty() {
-            if let Some(mut cache) = world.get_resource_mut::<TelemetryCache>() {
-                for (cid, ts, val) in pending_cache_entries.drain(..) {
-                    cache.insert(cid, ts, val);
-                }
+        if !pending_cache_entries.is_empty()
+            && let Some(mut cache) = world.get_resource_mut::<TelemetryCache>()
+        {
+            for (cid, ts, val) in pending_cache_entries.drain(..) {
+                cache.insert(cid, ts, val);
             }
         }
         if count > 2048 || (count >= 16 && std::time::Instant::now() > sink_deadline) {
