@@ -1,0 +1,31 @@
+warning: Git tree '/Users/benoitprieur/Desktop/Dir.nosync/elodin' is dirty
+Using saved setting for 'extra-substituters = https://elodin-nix-cache.s3.us-west-2.amazonaws.com' from ~/.local/share/nix/trusted-settings.json.
+Using saved setting for 'extra-trusted-public-keys = elodin-cache-1:vvbmIQvTOjcBjIs8Ri7xlT2I3XAmeJyF5mNlWB+fIwM=' from ~/.local/share/nix/trusted-settings.json.
+building '/nix/store/mss0124852w1jcsj00q6344ryil018f8-ppqsort-iree-patched.drv'...
+error: Cannot build '/nix/store/mss0124852w1jcsj00q6344ryil018f8-ppqsort-iree-patched.drv'.
+       Reason: builder failed with exit code 1.
+       Output paths:
+         /nix/store/r3kmf1v8wa4c2qajzvy57hj276mdjfm8-ppqsort-iree-patched
+       Last 12 log lines:
+       > Traceback (most recent call last):
+       >   File "<stdin>", line 4, in <module>
+       >   File "/nix/store/cx9v7as3xwg2sfcysza1zqayjnh1za7m-python3-3.13.11/lib/python3.13/pathlib/_local.py", line 546, in read_text
+       >     return PathBase.read_text(self, encoding, errors, newline)
+       >            ~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+       >   File "/nix/store/cx9v7as3xwg2sfcysza1zqayjnh1za7m-python3-3.13.11/lib/python3.13/pathlib/_abc.py", line 632, in read_text
+       >     with self.open(mode='r', encoding=encoding, errors=errors, newline=newline) as f:
+       >          ~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+       >   File "/nix/store/cx9v7as3xwg2sfcysza1zqayjnh1za7m-python3-3.13.11/lib/python3.13/pathlib/_local.py", line 537, in open
+       >     return io.open(self, mode, buffering, encoding, errors, newline)
+       >            ~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+       > FileNotFoundError: [Errno 2] No such file or directory: '$out/include/ppqsort.h'
+       For full logs, run:
+         nix-store -l /nix/store/mss0124852w1jcsj00q6344ryil018f8-ppqsort-iree-patched.drv
+error: Cannot build '/nix/store/fy2vq54f0vcv95q3jrj39f3alw3h515a-iree-runtime-3.10.0.drv'.
+       Reason: 1 dependency failed.
+       Output paths:
+         /nix/store/jky14rnqr4ny0v7b2p6yf6nqrj8wz7nh-iree-runtime-3.10.0
+error: Cannot build '/nix/store/wyw2vljzna8h6qdpmj2givhjlyc7yhjy-elo-unified-shell-env.drv'.
+       Reason: 1 dependency failed.
+       Output paths:
+         /nix/store/fm4xgwxv7dhf0hv2gy0h1lvg5x7018fc-elo-unified-shell-env
