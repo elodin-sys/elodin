@@ -96,27 +96,45 @@ impl Plugin for HeadlessEditorPlugin {
             .add_plugins(SensorCameraPlugin)
             .init_resource::<DiagnosticsStore>()
             .init_resource::<HeadlessMode>()
+            .init_resource::<HeadlessMainScheduleTimingState>()
+            .init_resource::<HeadlessMainScheduleMetrics>()
             .add_systems(
                 PreUpdate,
                 (
+                    record_after_sink,
+                    crate::setup_cell,
+                    record_after_setup_cell,
                     impeller2_bevy::apply_cached_data,
+                    record_after_apply_cached_data,
                     crate::object_3d::update_object_3d_system,
+                    record_after_update_object_3d_system,
                     crate::queue_object_3d_sync_candidates,
+                    record_after_queue_object_3d_sync_candidates,
                     crate::sync_object_3d,
+                    record_after_sync_object_3d,
                     sync_pos,
+                    record_after_sync_pos,
                 )
                     .chain()
                     .after(impeller2_bevy::sink)
                     .in_set(PositionSync),
             )
-            .add_systems(PreUpdate, crate::setup_cell.after(impeller2_bevy::sink))
             .add_systems(Startup, setup_floating_origin)
             .add_systems(Startup, setup_headless_lighting)
             .init_resource::<crate::EqlContext>()
             .init_resource::<crate::PendingObject3dSync>()
             .init_resource::<crate::SyncedObject3d>()
-            .add_systems(Update, crate::update_eql_context)
-            .add_systems(Update, load_headless_scene.after(crate::update_eql_context))
+            .add_systems(
+                Update,
+                (
+                    record_before_update_eql_context,
+                    crate::update_eql_context,
+                    record_after_update_eql_context,
+                    load_headless_scene,
+                    record_after_load_headless_scene,
+                )
+                    .chain(),
+            )
             .set_runner(headless_sensor_runner);
 
         if let Some(render_app) = app.get_sub_app_mut(RenderApp) {
@@ -263,6 +281,7 @@ struct HeadlessUpdateBreakdown {
     render_extract_ms: f64,
     render_app_ms: f64,
     main_clear_trackers_ms: f64,
+    main_schedule: HeadlessMainScheduleMetrics,
     render_schedule: HeadlessRenderScheduleMetrics,
 }
 
@@ -273,6 +292,33 @@ impl HeadlessUpdateBreakdown {
             + self.render_app_ms
             + self.main_clear_trackers_ms
     }
+}
+
+#[derive(Clone, Copy, Debug, Default, Resource)]
+struct HeadlessMainScheduleMetrics {
+    setup_cell_ms: f64,
+    apply_cached_data_ms: f64,
+    update_object_3d_system_ms: f64,
+    queue_object_3d_sync_candidates_ms: f64,
+    sync_object_3d_ms: f64,
+    sync_pos_ms: f64,
+    update_eql_context_ms: f64,
+    load_headless_scene_ms: f64,
+    other_ms: f64,
+}
+
+#[derive(Debug, Default, Resource)]
+struct HeadlessMainScheduleTimingState {
+    after_sink: Option<Instant>,
+    after_setup_cell: Option<Instant>,
+    after_apply_cached_data: Option<Instant>,
+    after_update_object_3d_system: Option<Instant>,
+    after_queue_object_3d_sync_candidates: Option<Instant>,
+    after_sync_object_3d: Option<Instant>,
+    after_sync_pos: Option<Instant>,
+    before_update_eql_context: Option<Instant>,
+    after_update_eql_context: Option<Instant>,
+    after_load_headless_scene: Option<Instant>,
 }
 
 #[derive(Clone, Copy, Debug, Default, Resource)]
@@ -321,6 +367,58 @@ fn elapsed_between(start: Option<Instant>, end: Option<Instant>) -> f64 {
     }
 }
 
+fn reset_headless_main_schedule_timing(world: &mut World) {
+    *world.resource_mut::<HeadlessMainScheduleTimingState>() =
+        HeadlessMainScheduleTimingState::default();
+    *world.resource_mut::<HeadlessMainScheduleMetrics>() = HeadlessMainScheduleMetrics::default();
+}
+
+fn snapshot_headless_main_schedule_metrics(
+    world: &mut World,
+    total_main_schedule_ms: f64,
+) -> HeadlessMainScheduleMetrics {
+    let state = world.resource::<HeadlessMainScheduleTimingState>();
+    let mut metrics = HeadlessMainScheduleMetrics {
+        setup_cell_ms: elapsed_between(state.after_sink, state.after_setup_cell),
+        apply_cached_data_ms: elapsed_between(
+            state.after_setup_cell,
+            state.after_apply_cached_data,
+        ),
+        update_object_3d_system_ms: elapsed_between(
+            state.after_apply_cached_data,
+            state.after_update_object_3d_system,
+        ),
+        queue_object_3d_sync_candidates_ms: elapsed_between(
+            state.after_update_object_3d_system,
+            state.after_queue_object_3d_sync_candidates,
+        ),
+        sync_object_3d_ms: elapsed_between(
+            state.after_queue_object_3d_sync_candidates,
+            state.after_sync_object_3d,
+        ),
+        sync_pos_ms: elapsed_between(state.after_sync_object_3d, state.after_sync_pos),
+        update_eql_context_ms: elapsed_between(
+            state.before_update_eql_context,
+            state.after_update_eql_context,
+        ),
+        load_headless_scene_ms: elapsed_between(
+            state.after_update_eql_context,
+            state.after_load_headless_scene,
+        ),
+        ..default()
+    };
+    let measured_ms = metrics.setup_cell_ms
+        + metrics.apply_cached_data_ms
+        + metrics.update_object_3d_system_ms
+        + metrics.queue_object_3d_sync_candidates_ms
+        + metrics.sync_object_3d_ms
+        + metrics.sync_pos_ms
+        + metrics.update_eql_context_ms
+        + metrics.load_headless_scene_ms;
+    metrics.other_ms = (total_main_schedule_ms - measured_ms).max(0.0);
+    metrics
+}
+
 fn reset_headless_render_schedule_timing(world: &mut World) {
     let mut state = world.resource_mut::<HeadlessRenderScheduleTimingState>();
     *state = HeadlessRenderScheduleTimingState {
@@ -333,6 +431,48 @@ fn reset_headless_render_schedule_timing(world: &mut World) {
 
 fn record_after_extract_commands(mut state: ResMut<HeadlessRenderScheduleTimingState>) {
     mark_now(&mut state.after_extract_commands);
+}
+
+fn record_after_sink(mut state: ResMut<HeadlessMainScheduleTimingState>) {
+    mark_now(&mut state.after_sink);
+}
+
+fn record_after_setup_cell(mut state: ResMut<HeadlessMainScheduleTimingState>) {
+    mark_now(&mut state.after_setup_cell);
+}
+
+fn record_after_apply_cached_data(mut state: ResMut<HeadlessMainScheduleTimingState>) {
+    mark_now(&mut state.after_apply_cached_data);
+}
+
+fn record_after_update_object_3d_system(mut state: ResMut<HeadlessMainScheduleTimingState>) {
+    mark_now(&mut state.after_update_object_3d_system);
+}
+
+fn record_after_queue_object_3d_sync_candidates(
+    mut state: ResMut<HeadlessMainScheduleTimingState>,
+) {
+    mark_now(&mut state.after_queue_object_3d_sync_candidates);
+}
+
+fn record_after_sync_object_3d(mut state: ResMut<HeadlessMainScheduleTimingState>) {
+    mark_now(&mut state.after_sync_object_3d);
+}
+
+fn record_after_sync_pos(mut state: ResMut<HeadlessMainScheduleTimingState>) {
+    mark_now(&mut state.after_sync_pos);
+}
+
+fn record_before_update_eql_context(mut state: ResMut<HeadlessMainScheduleTimingState>) {
+    mark_now(&mut state.before_update_eql_context);
+}
+
+fn record_after_update_eql_context(mut state: ResMut<HeadlessMainScheduleTimingState>) {
+    mark_now(&mut state.after_update_eql_context);
+}
+
+fn record_after_load_headless_scene(mut state: ResMut<HeadlessMainScheduleTimingState>) {
+    mark_now(&mut state.after_load_headless_scene);
 }
 
 fn record_after_prepare_meshes(mut state: ResMut<HeadlessRenderScheduleTimingState>) {
@@ -419,9 +559,12 @@ fn run_headless_update(app: &mut App) -> HeadlessUpdateBreakdown {
     let sub_apps = app.sub_apps_mut();
     let (main_app, render_sub_apps) = (&mut sub_apps.main, &mut sub_apps.sub_apps);
 
+    reset_headless_main_schedule_timing(main_app.world_mut());
     let main_schedule_start = Instant::now();
     main_app.run_default_schedule();
     breakdown.main_schedule_ms = elapsed_ms(main_schedule_start);
+    breakdown.main_schedule =
+        snapshot_headless_main_schedule_metrics(main_app.world_mut(), breakdown.main_schedule_ms);
 
     if let Some(render_app) = render_sub_apps.get_mut(&RenderApp.intern()) {
         let render_extract_start = Instant::now();
@@ -579,6 +722,22 @@ fn headless_sensor_runner(mut app: App) -> AppExit {
                     setup_ms,
                     update0_ms,
                     update0_main_schedule_ms = update0_breakdown.main_schedule_ms,
+                    update0_main_setup_cell_ms = update0_breakdown.main_schedule.setup_cell_ms,
+                    update0_main_apply_cached_data_ms =
+                        update0_breakdown.main_schedule.apply_cached_data_ms,
+                    update0_main_update_object_3d_system_ms =
+                        update0_breakdown.main_schedule.update_object_3d_system_ms,
+                    update0_main_queue_object_3d_sync_candidates_ms = update0_breakdown
+                        .main_schedule
+                        .queue_object_3d_sync_candidates_ms,
+                    update0_main_sync_object_3d_ms =
+                        update0_breakdown.main_schedule.sync_object_3d_ms,
+                    update0_main_sync_pos_ms = update0_breakdown.main_schedule.sync_pos_ms,
+                    update0_main_update_eql_context_ms =
+                        update0_breakdown.main_schedule.update_eql_context_ms,
+                    update0_main_load_headless_scene_ms =
+                        update0_breakdown.main_schedule.load_headless_scene_ms,
+                    update0_main_other_ms = update0_breakdown.main_schedule.other_ms,
                     update0_render_extract_ms = update0_breakdown.render_extract_ms,
                     update0_render_app_ms = update0_breakdown.render_app_ms,
                     update0_render_extract_commands_ms =
@@ -610,6 +769,22 @@ fn headless_sensor_runner(mut app: App) -> AppExit {
                     fallback_used,
                     fallback_update_ms,
                     fallback_main_schedule_ms = fallback_breakdown.main_schedule_ms,
+                    fallback_main_setup_cell_ms = fallback_breakdown.main_schedule.setup_cell_ms,
+                    fallback_main_apply_cached_data_ms =
+                        fallback_breakdown.main_schedule.apply_cached_data_ms,
+                    fallback_main_update_object_3d_system_ms =
+                        fallback_breakdown.main_schedule.update_object_3d_system_ms,
+                    fallback_main_queue_object_3d_sync_candidates_ms = fallback_breakdown
+                        .main_schedule
+                        .queue_object_3d_sync_candidates_ms,
+                    fallback_main_sync_object_3d_ms =
+                        fallback_breakdown.main_schedule.sync_object_3d_ms,
+                    fallback_main_sync_pos_ms = fallback_breakdown.main_schedule.sync_pos_ms,
+                    fallback_main_update_eql_context_ms =
+                        fallback_breakdown.main_schedule.update_eql_context_ms,
+                    fallback_main_load_headless_scene_ms =
+                        fallback_breakdown.main_schedule.load_headless_scene_ms,
+                    fallback_main_other_ms = fallback_breakdown.main_schedule.other_ms,
                     fallback_render_extract_ms = fallback_breakdown.render_extract_ms,
                     fallback_render_app_ms = fallback_breakdown.render_app_ms,
                     fallback_render_extract_commands_ms =
@@ -663,6 +838,22 @@ fn headless_sensor_runner(mut app: App) -> AppExit {
                     setup_ms,
                     update0_ms,
                     update0_main_schedule_ms = update0_breakdown.main_schedule_ms,
+                    update0_main_setup_cell_ms = update0_breakdown.main_schedule.setup_cell_ms,
+                    update0_main_apply_cached_data_ms =
+                        update0_breakdown.main_schedule.apply_cached_data_ms,
+                    update0_main_update_object_3d_system_ms =
+                        update0_breakdown.main_schedule.update_object_3d_system_ms,
+                    update0_main_queue_object_3d_sync_candidates_ms = update0_breakdown
+                        .main_schedule
+                        .queue_object_3d_sync_candidates_ms,
+                    update0_main_sync_object_3d_ms =
+                        update0_breakdown.main_schedule.sync_object_3d_ms,
+                    update0_main_sync_pos_ms = update0_breakdown.main_schedule.sync_pos_ms,
+                    update0_main_update_eql_context_ms =
+                        update0_breakdown.main_schedule.update_eql_context_ms,
+                    update0_main_load_headless_scene_ms =
+                        update0_breakdown.main_schedule.load_headless_scene_ms,
+                    update0_main_other_ms = update0_breakdown.main_schedule.other_ms,
                     update0_render_extract_ms = update0_breakdown.render_extract_ms,
                     update0_render_app_ms = update0_breakdown.render_app_ms,
                     update0_render_extract_commands_ms =
@@ -694,6 +885,22 @@ fn headless_sensor_runner(mut app: App) -> AppExit {
                     fallback_used,
                     fallback_update_ms,
                     fallback_main_schedule_ms = fallback_breakdown.main_schedule_ms,
+                    fallback_main_setup_cell_ms = fallback_breakdown.main_schedule.setup_cell_ms,
+                    fallback_main_apply_cached_data_ms =
+                        fallback_breakdown.main_schedule.apply_cached_data_ms,
+                    fallback_main_update_object_3d_system_ms =
+                        fallback_breakdown.main_schedule.update_object_3d_system_ms,
+                    fallback_main_queue_object_3d_sync_candidates_ms = fallback_breakdown
+                        .main_schedule
+                        .queue_object_3d_sync_candidates_ms,
+                    fallback_main_sync_object_3d_ms =
+                        fallback_breakdown.main_schedule.sync_object_3d_ms,
+                    fallback_main_sync_pos_ms = fallback_breakdown.main_schedule.sync_pos_ms,
+                    fallback_main_update_eql_context_ms =
+                        fallback_breakdown.main_schedule.update_eql_context_ms,
+                    fallback_main_load_headless_scene_ms =
+                        fallback_breakdown.main_schedule.load_headless_scene_ms,
+                    fallback_main_other_ms = fallback_breakdown.main_schedule.other_ms,
                     fallback_render_extract_ms = fallback_breakdown.render_extract_ms,
                     fallback_render_app_ms = fallback_breakdown.render_app_ms,
                     fallback_render_extract_commands_ms =
