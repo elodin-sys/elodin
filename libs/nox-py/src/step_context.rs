@@ -21,14 +21,7 @@ impl FrameDbWriter {
             .name("frame-db-writer".into())
             .spawn(move || {
                 while let Ok((msg_id, ts, data)) = rx.recv() {
-                    let mut result = db.push_msg(ts, msg_id, &data);
-                    if let Err(ref e) = result
-                        && matches!(e, elodin_db::Error::MapOverflow)
-                    {
-                        db.truncate_msg_log(msg_id);
-                        result = db.push_msg(ts, msg_id, &data);
-                    }
-                    if let Err(e) = result {
+                    if let Err(e) = db.push_msg(ts, msg_id, &data) {
                         tracing::warn!("Background DB push failed: {e}");
                     }
                 }

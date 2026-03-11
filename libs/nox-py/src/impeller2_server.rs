@@ -137,13 +137,18 @@ pub fn init_db(
         if let Some(content) = &world.metadata.schematic {
             state.db_config.set_schematic_content(content.clone());
         }
-        if !world.metadata.sensor_cameras.is_empty()
-            && let Ok(json) = serde_json::to_string(&world.metadata.sensor_cameras)
-        {
-            state
-                .db_config
-                .metadata
-                .insert("sensor_cameras".to_string(), json);
+        if !world.metadata.sensor_cameras.is_empty() {
+            match serde_json::to_string(&world.metadata.sensor_cameras) {
+                Ok(json) => {
+                    state
+                        .db_config
+                        .metadata
+                        .insert("sensor_cameras".to_string(), json);
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to serialize sensor_cameras metadata: {e}");
+                }
+            }
         }
         for entity_metadata in world.entity_metadata().values() {
             state.set_component_metadata(

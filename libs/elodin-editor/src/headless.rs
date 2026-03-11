@@ -287,7 +287,7 @@ fn headless_sensor_runner(mut app: App) -> AppExit {
 
         if cameras_ready {
             let mut frames = collect_frames(&app, &request.camera_names);
-            if frames.is_empty() {
+            if frames.len() < request.camera_names.len() {
                 let fallback_start = Instant::now();
                 app.update();
                 tracing::debug!(
@@ -295,7 +295,12 @@ fn headless_sensor_runner(mut app: App) -> AppExit {
                     update_index = 1,
                     fallback = true
                 );
-                frames = collect_frames(&app, &request.camera_names);
+                let more = collect_frames(&app, &request.camera_names);
+                for (name, data) in more {
+                    if !frames.iter().any(|(n, _)| n == &name) {
+                        frames.push((name, data));
+                    }
+                }
             }
 
             set_readback_armed(app.world_mut(), &request.camera_names, false);

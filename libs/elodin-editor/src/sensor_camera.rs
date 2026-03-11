@@ -86,9 +86,10 @@ pub struct SensorFrameReceiver(pub flume::Receiver<(String, Vec<u8>, u32, u32)>)
 #[derive(Resource, Clone)]
 struct SensorFrameSender(flume::Sender<(String, Vec<u8>, u32, u32)>);
 
-/// Reusable buffer for GPU readback to avoid per-frame allocation in receive_image_from_buffer.
+/// Per-camera reusable buffers for GPU readback to avoid per-frame allocation.
+/// Indexed by camera position in the `ImageCopiers` list.
 #[derive(Resource, Default)]
-struct ReusableFrameBuffer(Vec<u8>);
+struct ReusableFrameBuffer(Vec<Vec<u8>>);
 
 /// Render-world resource that persists buffer toggle state across frames.
 /// The extract system rebuilds `ImageCopiers` each frame (resetting `write_buffer_idx`),
@@ -584,8 +585,12 @@ fn receive_image_from_buffer(
     mut reusable: ResMut<ReusableFrameBuffer>,
     mut buffer_toggle: ResMut<BufferToggle>,
 ) {
-    if buffer_toggle.0.len() < image_copiers.0.len() {
-        buffer_toggle.0.resize(image_copiers.0.len(), 0);
+    let cam_count = image_copiers.0.len();
+    if buffer_toggle.0.len() < cam_count {
+        buffer_toggle.0.resize(cam_count, 0);
+    }
+    if reusable.0.len() < cam_count {
+        reusable.0.resize_with(cam_count, Vec::new);
     }
 
     for (i, image_copier) in image_copiers.0.iter().enumerate() {
@@ -626,8 +631,8 @@ fn receive_image_from_buffer(
             let aligned_row_bytes = RenderDevice::align_copy_bytes_per_row(row_bytes);
             let required_len = (height as usize) * row_bytes;
 
-            reusable.0.resize(required_len, 0);
-            let buf = &mut reusable.0[..required_len];
+            reusable.0[i].resize(required_len, 0);
+            let buf = &mut reusable.0[i][..required_len];
             if row_bytes == aligned_row_bytes {
                 let copy_len = required_len.min(data.len());
                 buf[..copy_len].copy_from_slice(&data[..copy_len]);
@@ -648,7 +653,7 @@ fn receive_image_from_buffer(
             drop(data);
             buffer.unmap();
 
-            let frame = std::mem::take(&mut reusable.0);
+            let frame = std::mem::take(&mut reusable.0[i]);
             let _ = sender.0.send((
                 image_copier.camera_name.clone(),
                 frame,
