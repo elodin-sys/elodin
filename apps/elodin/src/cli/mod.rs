@@ -5,7 +5,12 @@ use tracing_subscriber::{EnvFilter, fmt::time::ChronoLocal, prelude::*};
 mod editor;
 
 #[derive(Parser, Clone)]
-#[command(author, version, about, long_about = None)]
+#[command(
+    author,
+    version = concat!(env!("CARGO_PKG_VERSION"), " ", env!("GIT_HASH")),
+    about,
+    long_about = None
+)]
 pub struct Cli {
     #[arg(short, long, default_value = "https://app.elodin.systems")]
     url: String,

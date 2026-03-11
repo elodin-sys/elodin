@@ -9,7 +9,11 @@ use tracing::info;
 use tracing_subscriber::EnvFilter;
 
 #[derive(Parser, Clone)]
-#[command(version, about, long_about = None)]
+#[command(
+    version = concat!(env!("CARGO_PKG_VERSION"), " ", env!("GIT_HASH")),
+    about,
+    long_about = None
+)]
 pub struct Cli {
     #[command(subcommand)]
     command: Commands,
