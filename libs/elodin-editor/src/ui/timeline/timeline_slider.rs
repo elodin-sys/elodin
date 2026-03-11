@@ -1,10 +1,10 @@
 use bevy::{
     ecs::{
         change_detection::DetectChangesMut,
-        system::{ResMut, SystemParam, SystemState},
+        system::{Res, ResMut, SystemParam, SystemState},
         world::World,
     },
-    prelude::{Deref, DerefMut, Res, Resource},
+    prelude::{Deref, DerefMut, Resource},
 };
 use bevy_egui::egui;
 use egui::{CornerRadius, Margin};
@@ -14,15 +14,15 @@ use impeller2_wkt::{CurrentTimestamp, EarliestTimestamp};
 use std::ops::RangeInclusive;
 
 use crate::ui::{
-    colors::{ColorExt, get_scheme},
+    colors::{ColorExt, EColor, get_scheme},
     time_label::PrettyDuration,
     utils::{MarginSides, Shrink4},
     widgets::WidgetSystem,
 };
 
 use super::{
-    DurationExt, StreamTickOrigin, TimelineArgs, TimelineIcons, get_position_range,
-    position_from_value, value_from_position,
+    AutoFollowLatestState, DurationExt, LatestFollow, StreamTickOrigin, TimelineArgs,
+    TimelineIcons, TimelineSettings, get_position_range, position_from_value, value_from_position,
 };
 
 // ----------------------------------------------------------------------------
@@ -49,6 +49,7 @@ pub struct Timeline<'a> {
     fps: f64,
     handle_image_id: Option<egui::TextureId>,
     handle_image_tint: egui::Color32,
+    max_handle_image_tint: egui::Color32,
     handle_aspect_ratio: f32,
     segments: u8,
     label_font_size: f32,
@@ -99,6 +100,7 @@ impl<'a> Timeline<'a> {
             focus_range: None,
             handle_image_id: None,
             handle_image_tint: get_scheme().success,
+            max_handle_image_tint: get_scheme().success,
             handle_aspect_ratio: 0.5,
             segments: 12,
             label_font_size: 10.0,
@@ -115,6 +117,16 @@ impl<'a> Timeline<'a> {
 
     pub fn handle_aspect_ratio(mut self, handle_aspect_ratio: f32) -> Self {
         self.handle_aspect_ratio = handle_aspect_ratio;
+        self
+    }
+
+    pub fn handle_image_tint(mut self, handle_image_tint: egui::Color32) -> Self {
+        self.handle_image_tint = handle_image_tint;
+        self
+    }
+
+    pub fn max_handle_image_tint(mut self, max_handle_image_tint: egui::Color32) -> Self {
+        self.max_handle_image_tint = max_handle_image_tint;
         self
     }
 
@@ -269,7 +281,7 @@ impl Timeline<'_> {
                     image_id,
                     max_handle_rect,
                     egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0)),
-                    get_scheme().text_primary,
+                    self.max_handle_image_tint,
                 );
             }
 
@@ -391,6 +403,9 @@ pub struct TimelineSlider<'w> {
     current_stream_id: Res<'w, CurrentStreamId>,
     tick_origin: ResMut<'w, StreamTickOrigin>,
     earliest_timestamp: Res<'w, EarliestTimestamp>,
+    latest_follow: ResMut<'w, LatestFollow>,
+    auto_follow_latest_state: ResMut<'w, AutoFollowLatestState>,
+    timeline_settings: Res<'w, TimelineSettings>,
 }
 
 impl WidgetSystem for TimelineSlider<'_> {
@@ -409,12 +424,17 @@ impl WidgetSystem for TimelineSlider<'_> {
             current_stream_id,
             mut tick_origin,
             earliest_timestamp,
+            mut latest_follow,
+            mut auto_follow_latest_state,
+            timeline_settings,
         } = state.get_mut(world);
 
         tick_origin.observe_stream(**current_stream_id);
 
         let (icons, timeline_args) = args;
         let handle_icon = icons.handle;
+        let playhead_color = timeline_settings.played_color.into_color32();
+        let latest_color = timeline_settings.future_color.into_color32();
 
         ui.horizontal(|ui| {
             let response = ui
@@ -426,6 +446,8 @@ impl WidgetSystem for TimelineSlider<'_> {
                     .width(timeline_args.available_width)
                     .height(timeline_args.line_height)
                     .handle_image_id(handle_icon)
+                    .handle_image_tint(playhead_color)
+                    .max_handle_image_tint(latest_color)
                     .handle_aspect_ratio(12.0 / 30.0)
                     .segments(timeline_args.segment_count)
                     .fps(timeline_args.frames_per_second)
@@ -435,6 +457,8 @@ impl WidgetSystem for TimelineSlider<'_> {
 
             if response.changed() {
                 let target_timestamp = Timestamp(tick.0);
+                auto_follow_latest_state.cancel();
+                latest_follow.0 = false;
                 current_timestamp.0 = target_timestamp;
                 if target_timestamp <= earliest_timestamp.0 {
                     tick_origin.request_rebase();

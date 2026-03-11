@@ -1,5 +1,5 @@
 use bevy::ecs::{
-    system::{Res, ResMut, SystemParam, SystemState},
+    system::{Query, Res, ResMut, SystemParam, SystemState},
     world::World,
 };
 use bevy::prelude::*;
@@ -15,23 +15,27 @@ use std::time::Instant;
 use crate::{
     TimeRangeBehavior,
     ui::{
-        Paused,
+        FocusedWindow, Paused, SelectedObject,
         button::EImageButton,
-        colors::{ColorExt, get_scheme},
+        colors::{ColorExt, EColor, get_scheme},
         theme::configure_combo_box,
+        tiles::WindowState,
         time_label::time_label,
         widgets::WidgetSystem,
     },
 };
 
-use super::{PlaybackSpeed, StreamTickOrigin, TimelineIcons};
+use super::{
+    AutoFollowLatestState, LatestFollow, PlaybackSpeed, StreamTickOrigin, TimelineIcons,
+    TimelineSettings,
+};
 
 pub(crate) fn plugin(app: &mut App) {
     app.init_resource::<TimelineStepButtons>();
 }
 
 #[derive(SystemParam)]
-pub struct TimelineControls<'w> {
+pub struct TimelineControls<'w, 's> {
     paused: ResMut<'w, Paused>,
     tick: ResMut<'w, CurrentTimestamp>,
     max_tick: Res<'w, LastUpdated>,
@@ -42,6 +46,13 @@ pub struct TimelineControls<'w> {
     behavior: ResMut<'w, TimeRangeBehavior>,
     tick_origin: ResMut<'w, StreamTickOrigin>,
     step_buttons: ResMut<'w, TimelineStepButtons>,
+    latest_follow: ResMut<'w, LatestFollow>,
+    auto_follow_latest_state: ResMut<'w, AutoFollowLatestState>,
+    timeline_settings: Res<'w, TimelineSettings>,
+    focused_window: Res<'w, FocusedWindow>,
+    primary_windows: Query<'w, 's, Entity, With<bevy::window::PrimaryWindow>>,
+    window_states: Query<'w, 's, &'static mut WindowState>,
+    replay_mode: Option<Res<'w, crate::ReplayMode>>,
 }
 
 #[derive(Default, Debug, Resource)]
@@ -50,7 +61,7 @@ struct TimelineStepButtons {
     forward: Option<Instant>,
 }
 
-impl WidgetSystem for TimelineControls<'_> {
+impl WidgetSystem for TimelineControls<'_, '_> {
     type Args = TimelineIcons;
     type Output = ();
 
@@ -72,6 +83,13 @@ impl WidgetSystem for TimelineControls<'_> {
             mut behavior,
             mut tick_origin,
             mut step_buttons,
+            mut latest_follow,
+            mut auto_follow_latest_state,
+            timeline_settings,
+            focused_window,
+            primary_windows,
+            mut window_states,
+            replay_mode,
         } = state.get_mut(world);
 
         tick_origin.observe_stream(**stream_id);
@@ -80,6 +98,7 @@ impl WidgetSystem for TimelineControls<'_> {
         let tick_step_duration = hifitime::Duration::from_seconds(tick_time.0);
         let tick_step_micros_i128 = tick_step_duration.total_nanoseconds() / 1000;
         let tick_step_micros = i64::try_from(tick_step_micros_i128).unwrap_or(0);
+        let played_color = timeline_settings.played_color.into_color32();
         ui.set_height(50.0);
         let typical_mouse_click = Duration::from_millis(85);
         let wait_before_advancing = typical_mouse_click * 2;
@@ -95,11 +114,16 @@ impl WidgetSystem for TimelineControls<'_> {
                             let btn_scale = 1.4;
                             ui.spacing_mut().item_spacing.x = 8.0;
 
-                            let jump_to_start_btn = ui.add(
-                                EImageButton::new(icons.jump_to_start).scale(btn_scale, btn_scale),
-                            );
+                            let jump_to_start_btn = ui
+                                .add(
+                                    EImageButton::new(icons.jump_to_start)
+                                        .scale(btn_scale, btn_scale),
+                                )
+                                .on_hover_text("Jump to start");
 
                             if jump_to_start_btn.clicked() {
+                                auto_follow_latest_state.cancel();
+                                latest_follow.0 = false;
                                 tick.0 = earliest_timestamp.0;
                                 tick_origin.request_rebase();
                             }
@@ -112,6 +136,8 @@ impl WidgetSystem for TimelineControls<'_> {
                                 && tick.0 > earliest_timestamp.0
                                 && tick_step_micros > 0
                             {
+                                auto_follow_latest_state.cancel();
+                                latest_follow.0 = false;
                                 let mut first = false;
                                 let down = step_buttons.back.get_or_insert_with(|| {
                                     first = true;
@@ -133,6 +159,7 @@ impl WidgetSystem for TimelineControls<'_> {
                                     .add(EImageButton::new(icons.play).scale(btn_scale, btn_scale));
 
                                 if play_btn.clicked() {
+                                    auto_follow_latest_state.cancel();
                                     paused.0 = false;
                                 }
                             } else {
@@ -141,7 +168,9 @@ impl WidgetSystem for TimelineControls<'_> {
                                 );
 
                                 if pause_btn.clicked() {
+                                    auto_follow_latest_state.cancel();
                                     paused.0 = true;
+                                    latest_follow.0 = false;
                                 }
                             }
 
@@ -153,6 +182,8 @@ impl WidgetSystem for TimelineControls<'_> {
                                 && tick.0 < max_tick.0
                                 && tick_step_micros > 0
                             {
+                                auto_follow_latest_state.cancel();
+                                latest_follow.0 = false;
                                 let mut first = false;
                                 let down = step_buttons.forward.get_or_insert_with(|| {
                                     first = true;
@@ -166,12 +197,18 @@ impl WidgetSystem for TimelineControls<'_> {
                                 let _ = step_buttons.forward.take();
                             }
 
-                            let jump_to_end_btn = ui.add(
-                                EImageButton::new(icons.jump_to_end).scale(btn_scale, btn_scale),
-                            );
+                            let jump_to_end_btn = ui
+                                .add(
+                                    EImageButton::new(icons.jump_to_end)
+                                        .scale(btn_scale, btn_scale),
+                                )
+                                .on_hover_text("Jump to end");
 
                             if jump_to_end_btn.clicked() {
-                                tick.0 = Timestamp(max_tick.0.0.saturating_sub(1));
+                                auto_follow_latest_state.cancel();
+                                tick.0 = max_tick.0;
+                                paused.0 = false;
+                                latest_follow.0 = replay_mode.is_none();
                             }
                         },
                     );
@@ -207,6 +244,23 @@ impl WidgetSystem for TimelineControls<'_> {
                                         .align(egui::RectAlign::TOP_START)
                                         .width(res.rect.width())
                                         .show(ui_func);
+
+                                    let settings_response = ui
+                                        .add(EImageButton::new(icons.setting).scale(1.2, 1.2))
+                                        .on_hover_text("Timeline settings");
+                                    if settings_response.clicked() {
+                                        let target_window = focused_window
+                                            .0
+                                            .or_else(|| primary_windows.iter().next());
+                                        if let Some(target_window) = target_window
+                                            && let Ok(mut window_state) =
+                                                window_states.get_mut(target_window)
+                                        {
+                                            window_state.ui_state.selected_object =
+                                                SelectedObject::Timeline;
+                                            window_state.ui_state.right_sidebar_visible = true;
+                                        }
+                                    }
 
                                     // TIME
 
@@ -262,6 +316,27 @@ impl WidgetSystem for TimelineControls<'_> {
                                     ui.add_space(8.0);
 
                                     ui.add(egui::Label::new(speed_label).selectable(false));
+
+                                    ui.add_space(16.0);
+
+                                    let latest_enabled = replay_mode.is_none();
+                                    let lag_micros = max_tick.0.0.saturating_sub(tick.0.0);
+                                    let latest_response = live_follow_button(
+                                        ui,
+                                        latest_enabled,
+                                        latest_follow.0,
+                                        lag_micros,
+                                        played_color,
+                                    );
+                                    if latest_enabled && latest_response.clicked() {
+                                        auto_follow_latest_state.cancel();
+                                        latest_follow.0 = !latest_follow.0;
+                                    }
+
+                                    if latest_follow.0 {
+                                        paused.0 = false;
+                                        tick.0 = max_tick.0;
+                                    }
                                 });
                         },
                     );
@@ -283,6 +358,171 @@ fn format_playback_speed(speed: f64) -> String {
         value.pop();
     }
     format!("{value}x")
+}
+
+fn format_lag_counter(micros: i64) -> String {
+    let micros = micros.max(0);
+    if micros == 0 {
+        return "0ms".to_owned();
+    }
+
+    if micros >= 3_600_000_000 {
+        return format!("+{:.1}h", micros as f64 / 3_600_000_000.0);
+    }
+    if micros >= 60_000_000 {
+        return format!("+{:.1}m", micros as f64 / 60_000_000.0);
+    }
+    if micros >= 1_000_000 {
+        return format!("+{:.1}s", micros as f64 / 1_000_000.0);
+    }
+    if micros >= 1_000 {
+        return format!("+{}ms", micros / 1_000);
+    }
+
+    format!("+{micros}us")
+}
+
+fn live_follow_button(
+    ui: &mut egui::Ui,
+    enabled: bool,
+    following: bool,
+    lag_micros: i64,
+    played_color: egui::Color32,
+) -> egui::Response {
+    let is_delayed = lag_micros > 0;
+    let live_label = "LIVE";
+    let counter_label = format_lag_counter(lag_micros);
+
+    let scheme = get_scheme();
+    let (live_text_color, counter_text_color, fill_color, stroke_color, dot_color) = if !enabled {
+        (
+            scheme.text_tertiary,
+            scheme.text_tertiary.opacity(0.7),
+            scheme.bg_primary,
+            scheme.border_primary.opacity(0.25),
+            scheme.text_tertiary.opacity(0.4),
+        )
+    } else if following {
+        (
+            played_color,
+            played_color.opacity(0.9),
+            scheme.bg_secondary.opacity(0.7),
+            played_color.opacity(0.45),
+            played_color,
+        )
+    } else if is_delayed {
+        (
+            scheme.text_primary,
+            scheme.text_primary,
+            scheme.bg_secondary.opacity(0.7),
+            scheme.border_primary.opacity(0.75),
+            scheme.text_secondary,
+        )
+    } else {
+        (
+            scheme.text_secondary,
+            scheme.text_secondary,
+            scheme.bg_secondary.opacity(0.6),
+            scheme.border_primary.opacity(0.55),
+            scheme.text_tertiary.opacity(0.8),
+        )
+    };
+
+    let font_id = egui::TextStyle::Button.resolve(ui.style());
+    let live_galley =
+        ui.painter()
+            .layout_no_wrap(live_label.to_owned(), font_id.clone(), live_text_color);
+    let counter_galley =
+        ui.painter()
+            .layout_no_wrap(counter_label.clone(), font_id.clone(), counter_text_color);
+    let dot_radius = 3.0;
+    let height = (live_galley.size().y.max(counter_galley.size().y) + 8.0).max(22.0);
+    let live_fixed_width = ui
+        .painter()
+        .layout_no_wrap("LIVE".to_owned(), font_id.clone(), live_text_color)
+        .size()
+        .x;
+    let counter_fixed_width = ["0ms", "+9999ms", "+9999us", "+999.9s", "+99.9m", "+99.9h"]
+        .into_iter()
+        .map(|sample| {
+            ui.painter()
+                .layout_no_wrap(sample.to_owned(), font_id.clone(), counter_text_color)
+                .size()
+                .x
+        })
+        .fold(counter_galley.size().x, f32::max);
+    let width = 32.0 + live_fixed_width + 10.0 + counter_fixed_width;
+
+    let sense = if enabled {
+        egui::Sense::click()
+    } else {
+        egui::Sense::hover()
+    };
+    let (rect, response) = ui.allocate_exact_size(egui::vec2(width, height), sense);
+
+    if ui.is_rect_visible(rect) {
+        let hover = enabled && response.hovered();
+        let pressed = enabled && response.is_pointer_button_down_on();
+        let fill = if pressed {
+            fill_color.opacity(0.85)
+        } else if hover {
+            fill_color.opacity(0.92)
+        } else {
+            fill_color
+        };
+
+        ui.painter().rect(
+            rect,
+            egui::CornerRadius::same(10),
+            fill,
+            egui::Stroke::new(1.0, stroke_color),
+            egui::StrokeKind::Middle,
+        );
+
+        let dot_center = egui::pos2(rect.left() + 10.0, rect.center().y);
+        ui.painter()
+            .circle_filled(dot_center, dot_radius, dot_color);
+        let live_pos = egui::pos2(rect.left() + 18.0, rect.center().y);
+        ui.painter().text(
+            live_pos,
+            egui::Align2::LEFT_CENTER,
+            live_label,
+            font_id.clone(),
+            live_text_color,
+        );
+
+        let separator_x = live_pos.x + live_fixed_width + 5.0;
+        ui.painter().line_segment(
+            [
+                egui::pos2(separator_x, rect.top() + 4.0),
+                egui::pos2(separator_x, rect.bottom() - 4.0),
+            ],
+            egui::Stroke::new(1.0, stroke_color.opacity(0.65)),
+        );
+        ui.painter().text(
+            egui::pos2(separator_x + 6.0, rect.center().y),
+            egui::Align2::LEFT_CENTER,
+            counter_label,
+            font_id,
+            counter_text_color,
+        );
+    }
+
+    let response = if enabled {
+        response.on_hover_cursor(egui::CursorIcon::PointingHand)
+    } else {
+        response
+    };
+
+    let hover_text = if !enabled {
+        "Disabled in replay mode"
+    } else if following {
+        "Following latest data"
+    } else {
+        "Click to jump to latest and keep following"
+    };
+
+    response.on_hover_text(hover_text)
 }
 
 fn time_range_selector_button(

@@ -25,6 +25,7 @@ pub mod graph;
 pub mod monitor;
 pub mod object3d;
 pub mod query_table;
+pub mod timeline;
 pub mod viewport;
 
 mod widgets;
@@ -33,7 +34,8 @@ pub use widgets::*;
 use self::{
     dashboard::InspectorDashboardNode, data_overview::InspectorDataOverview,
     entity::InspectorEntity, graph::InspectorGraph, monitor::InspectorMonitor,
-    object3d::InspectorObject3D, query_table::InspectorQueryTable, viewport::InspectorViewport,
+    object3d::InspectorObject3D, query_table::InspectorQueryTable, timeline::InspectorTimeline,
+    viewport::InspectorViewport,
 };
 
 pub struct InspectorIcons {
@@ -47,7 +49,7 @@ fn empty_inspector_ui(ui: &mut egui::Ui) -> egui::Response {
     ui.with_layout(
         egui::Layout::centered_and_justified(egui::Direction::TopDown),
         |ui| {
-            let text = egui::RichText::new("SELECT AN ENTITY OR TABLE TO INSPECT")
+            let text = egui::RichText::new("SELECT SOMETHING TO INSPECT")
                 .color(colors::with_opacity(get_scheme().text_tertiary, 0.6));
             ui.add(egui::Label::new(text));
         },
@@ -103,6 +105,14 @@ impl WidgetSystem for InspectorContent<'_, '_> {
                             ui.vertical(|ui| match selected_object {
                                 SelectedObject::None => {
                                     ui.add(empty_inspector());
+                                    Default::default()
+                                }
+                                SelectedObject::Timeline => {
+                                    ui.add_widget_with::<InspectorTimeline>(
+                                        world,
+                                        "inspector_timeline",
+                                        (),
+                                    );
                                     Default::default()
                                 }
                                 SelectedObject::Entity(pair) => ui

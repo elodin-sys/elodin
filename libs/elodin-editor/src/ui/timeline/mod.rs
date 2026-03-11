@@ -5,7 +5,9 @@ use bevy::ecs::{
 use bevy::prelude::*;
 use bevy_egui::{EguiContexts, EguiTextureHandle, egui};
 use impeller2_bevy::CurrentStreamId;
-use impeller2_wkt::{SimulationTimeStep, StreamId};
+use impeller2_wkt::{
+    CurrentTimestamp, EarliestTimestamp, LastUpdated, SimulationTimeStep, StreamId,
+};
 use timeline_controls::TimelineControls;
 
 use std::ops::RangeInclusive;
@@ -24,7 +26,18 @@ pub mod timeline_slider;
 pub(crate) fn plugin(app: &mut App) {
     app.add_plugins(timeline_controls::plugin)
         .init_resource::<PlaybackSpeed>()
-        .add_systems(Update, reset_playback_speed_on_stream_change);
+        .init_resource::<TimelineSettings>()
+        .init_resource::<LatestFollow>()
+        .init_resource::<AutoFollowLatestState>()
+        .add_systems(
+            Update,
+            (
+                reset_playback_speed_on_stream_change,
+                reset_latest_follow_on_stream_change,
+                reset_auto_follow_latest_state,
+                auto_start_follow_latest,
+            ),
+        );
 }
 
 #[derive(bevy::prelude::Resource, Clone, Copy, Debug)]
@@ -36,12 +49,144 @@ impl Default for PlaybackSpeed {
     }
 }
 
+#[derive(bevy::prelude::Resource, Default, Clone, Copy, Debug)]
+pub struct LatestFollow(pub bool);
+
+#[derive(bevy::prelude::Resource, Clone, Copy, Debug, PartialEq)]
+pub struct TimelineSettings {
+    pub played_color: impeller2_wkt::Color,
+    pub future_color: impeller2_wkt::Color,
+    pub future_trail_alpha: f32,
+    pub follow_latest: bool,
+}
+
+impl Default for TimelineSettings {
+    fn default() -> Self {
+        Self::from(impeller2_wkt::TimelineConfig::default())
+    }
+}
+
+impl From<impeller2_wkt::TimelineConfig> for TimelineSettings {
+    fn from(value: impeller2_wkt::TimelineConfig) -> Self {
+        Self {
+            played_color: value.played_color,
+            future_color: value.future_color,
+            future_trail_alpha: 0.35,
+            follow_latest: value.follow_latest,
+        }
+    }
+}
+
+impl From<TimelineSettings> for impeller2_wkt::TimelineConfig {
+    fn from(value: TimelineSettings) -> Self {
+        Self {
+            played_color: value.played_color,
+            future_color: value.future_color,
+            follow_latest: value.follow_latest,
+        }
+    }
+}
+
+#[derive(bevy::prelude::Resource, Default, Clone, Copy, Debug)]
+pub(crate) struct AutoFollowLatestState {
+    stream_id: Option<StreamId>,
+    baseline_latest: Option<impeller2::types::Timestamp>,
+    armed: bool,
+}
+
+impl AutoFollowLatestState {
+    pub fn cancel(&mut self) {
+        self.armed = false;
+    }
+}
+
+#[derive(SystemParam)]
+struct AutoFollowLatestParams<'w> {
+    current_stream_id: Res<'w, CurrentStreamId>,
+    timeline_settings: Res<'w, TimelineSettings>,
+    earliest: Res<'w, EarliestTimestamp>,
+    latest: Res<'w, LastUpdated>,
+    replay_mode: Option<Res<'w, crate::ReplayMode>>,
+    current_timestamp: ResMut<'w, CurrentTimestamp>,
+    paused: ResMut<'w, crate::ui::Paused>,
+    latest_follow: ResMut<'w, LatestFollow>,
+    state: ResMut<'w, AutoFollowLatestState>,
+}
+
 fn reset_playback_speed_on_stream_change(
     current_stream_id: Res<CurrentStreamId>,
     mut playback_speed: ResMut<PlaybackSpeed>,
 ) {
     if current_stream_id.is_changed() {
         *playback_speed = PlaybackSpeed::default();
+    }
+}
+
+fn reset_latest_follow_on_stream_change(
+    current_stream_id: Res<CurrentStreamId>,
+    mut latest_follow: ResMut<LatestFollow>,
+) {
+    if current_stream_id.is_changed() {
+        latest_follow.0 = false;
+    }
+}
+
+fn reset_auto_follow_latest_state(
+    current_stream_id: Res<CurrentStreamId>,
+    timeline_settings: Res<TimelineSettings>,
+    replay_mode: Option<Res<crate::ReplayMode>>,
+    mut state: ResMut<AutoFollowLatestState>,
+) {
+    if replay_mode.is_some() || !timeline_settings.follow_latest {
+        state.armed = false;
+        state.baseline_latest = None;
+        return;
+    }
+
+    if current_stream_id.is_changed() || timeline_settings.is_changed() {
+        state.stream_id = Some(**current_stream_id);
+        state.baseline_latest = None;
+        state.armed = true;
+    }
+}
+
+fn auto_start_follow_latest(params: AutoFollowLatestParams) {
+    let AutoFollowLatestParams {
+        current_stream_id,
+        timeline_settings,
+        earliest,
+        latest,
+        replay_mode,
+        mut current_timestamp,
+        mut paused,
+        mut latest_follow,
+        mut state,
+    } = params;
+
+    if replay_mode.is_some() || !timeline_settings.follow_latest || latest_follow.0 {
+        return;
+    }
+
+    if state.stream_id != Some(**current_stream_id) {
+        state.stream_id = Some(**current_stream_id);
+        state.baseline_latest = None;
+        state.armed = true;
+    }
+    if !state.armed || earliest.0.0 == i64::MAX || latest.0.0 == i64::MIN {
+        return;
+    }
+
+    match state.baseline_latest {
+        None => {
+            state.baseline_latest = Some(latest.0);
+        }
+        Some(baseline_latest) if latest.0 > baseline_latest => {
+            latest_follow.0 = true;
+            paused.0 = false;
+            current_timestamp.0 = latest.0;
+            state.armed = false;
+        }
+        Some(_) => {}
     }
 }
 
@@ -248,6 +393,7 @@ pub struct TimelineIcons {
     pub add: egui::TextureId,
     pub remove: egui::TextureId,
     pub range_loop: egui::TextureId,
+    pub setting: egui::TextureId,
     pub vertical_chevrons: egui::TextureId,
 }
 
@@ -298,6 +444,7 @@ impl WidgetSystem for TimelinePanel<'_, '_> {
             add: contexts.add_image(EguiTextureHandle::Weak(images.icon_add.id())),
             remove: contexts.add_image(EguiTextureHandle::Weak(images.icon_subtract.id())),
             range_loop: contexts.add_image(EguiTextureHandle::Weak(images.icon_loop.id())),
+            setting: contexts.add_image(EguiTextureHandle::Weak(images.icon_setting.id())),
             vertical_chevrons: contexts
                 .add_image(EguiTextureHandle::Weak(images.icon_vertical_chevrons.id())),
         };

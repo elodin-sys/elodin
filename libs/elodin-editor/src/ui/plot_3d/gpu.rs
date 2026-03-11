@@ -6,6 +6,7 @@ use crate::{
         Line,
         gpu::{INDEX_BUFFER_LEN, INDEX_BUFFER_SIZE, LineHandle, VALUE_BUFFER_SIZE},
     },
+    ui::timeline::TimelineSettings,
 };
 use bevy::camera::visibility::RenderLayers;
 use bevy::shader::Shader;
@@ -54,7 +55,7 @@ use bevy_render::{
 };
 use big_space::GridCell;
 use binding_types::storage_buffer_read_only_sized;
-use impeller2_wkt::CurrentTimestamp;
+use impeller2_wkt::{CurrentTimestamp, EarliestTimestamp, LastUpdated};
 
 const LINE_SHADER_HANDLE: Handle<Shader> = uuid_handle!("bfffa3c4-9401-4b6e-b3ab-3564180352f1");
 
@@ -406,7 +407,10 @@ struct CachedSystemState {
         ResMut<'static, Assets<Line>>,
         Commands<'static, 'static>,
         Res<'static, SelectedTimeRange>,
+        Res<'static, EarliestTimestamp>,
+        Res<'static, LastUpdated>,
         Res<'static, CurrentTimestamp>,
+        Res<'static, TimelineSettings>,
     )>,
 }
 
@@ -435,41 +439,75 @@ fn extract_lines(
     index_layout: Res<LineIndexLayout>,
 ) {
     main_world.resource_scope(|world, mut cached_state: Mut<CachedSystemState>| {
-        let (mut lines, mut line_assets, mut main_commands, selected_time_range, current_timestamp) =
-            cached_state.state.get_mut(world);
+        let replay_mode = world.contains_resource::<crate::ReplayMode>();
+        let (
+            mut lines,
+            mut line_assets,
+            mut _main_commands,
+            selected_time_range,
+            earliest_timestamp,
+            latest_timestamp,
+            current_timestamp,
+            timeline_settings,
+        ) = cached_state.state.get_mut(world);
         let selected_range = selected_time_range.0.clone();
-        let can_draw_visible_range = current_timestamp.0 >= selected_range.start;
-        let visible_range = selected_range.start..selected_range.end.min(current_timestamp.0);
-        let queue_range = if can_draw_visible_range {
-            visible_range.clone()
+        let sampling_range = if replay_mode && earliest_timestamp.0 < latest_timestamp.0 {
+            earliest_timestamp.0..latest_timestamp.0
         } else {
-            // No visible span at the current timestamp; keep a degenerate range
-            // so GPU buffers still initialize without drawing future samples.
-            selected_range.start..selected_range.start
+            selected_range.clone()
         };
+        let played_color = timeline_settings.played_color;
+        let played_trail_color = Vec4::new(
+            played_color.r,
+            played_color.g,
+            played_color.b,
+            played_color.a,
+        );
+        let mut future_color = Vec4::new(
+            timeline_settings.future_color.r,
+            timeline_settings.future_color.g,
+            timeline_settings.future_color.b,
+            timeline_settings.future_color.a,
+        );
+        future_color.w *= timeline_settings.future_trail_alpha;
+
+        let played_range = selected_range.start..selected_range.end.min(current_timestamp.0);
+        let future_range = selected_range.start.max(current_timestamp.0)..selected_range.end;
+
         'outer: for (entity, line_handles, config, uniform, gpu_line) in lines.iter_mut() {
             for line in &line_handles.0 {
                 let Some(line) = line_assets.get_mut(line) else {
                     continue 'outer;
                 };
                 line.data
-                    .queue_load_range(queue_range.clone(), &render_queue, &render_device);
+                    .queue_load_range(selected_range.clone(), &render_queue, &render_device);
             }
 
-            let index_buffers = if let Some(ref gpu_line) = gpu_line {
-                gpu_line.index_buffers.clone()
-            } else {
-                ['x', 'y', 'z'].map(|axis| {
-                    render_device.create_buffer(
-                        &(BufferDescriptor {
-                            label: Some(&format!("Line {} Index Buffer", axis)),
-                            size: (INDEX_BUFFER_LEN * size_of::<u32>()) as u64,
-                            usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
-                            mapped_at_creation: false,
-                        }),
-                    )
-                })
-            };
+            // Replay grows the revealed prefix every frame. If the decimation
+            // step is derived from only that prefix, the full trail gets
+            // resampled whenever it crosses a threshold, which shows up as
+            // flicker. Keep the reveal clipped by CurrentTimestamp, but derive
+            // the stride from the fixed recording extent.
+            let line_stats = [0, 1, 2].map(|i| {
+                let line = &line_handles.0[i];
+                let line = line_assets.get(line).expect("line missing");
+                line.data.range_index_stats(sampling_range.clone())
+            });
+            let sampling_chunk_count = line_stats
+                .iter()
+                .map(|(chunks, _)| *chunks)
+                .max()
+                .unwrap_or(0);
+            let sampling_index_count = line_stats
+                .iter()
+                .map(|(_, count)| *count)
+                .max()
+                .unwrap_or(0);
+            let sampling_step = crate::ui::plot::data::index_sampling_step(
+                sampling_chunk_count,
+                sampling_index_count,
+                INDEX_BUFFER_LEN,
+            );
 
             let values_bind_group = if let Some(ref gpu_line) = gpu_line {
                 gpu_line.values_bind_group.clone()
@@ -493,59 +531,87 @@ fn extract_lines(
                 render_device.create_bind_group("line values", &values_layout.layout, &entries)
             };
 
-            let index_bind_group = if let Some(ref gpu_line) = gpu_line {
-                gpu_line.index_bind_group.clone()
-            } else {
-                let entries = [0, 1, 2].map(|i| {
-                    let buffer = &index_buffers[i];
-                    let entry = BindGroupEntry {
-                        binding: i as u32,
-                        resource: BindingResource::Buffer(BufferBinding {
-                            buffer: &buffer,
-                            offset: 0,
-                            size: Some(INDEX_BUFFER_SIZE),
-                        }),
-                    };
-
-                    entry
-                });
-                render_device.create_bind_group("line indexes", &index_layout.layout, &entries)
-            };
-            let counts = [0, 1, 2].map(|i| {
-                if !can_draw_visible_range {
-                    return 0;
+            let mut build_gpu_line = |range: std::ops::Range<impeller2::types::Timestamp>| {
+                if range.start >= range.end {
+                    return None;
                 }
-                let line = &line_handles.0[i];
-                let line = line_assets.get(line).expect("line missing");
-                let index_buffer = &index_buffers[i];
-                line.data.write_to_index_buffer(
-                    index_buffer,
-                    &render_queue,
-                    visible_range.clone(),
-                    INDEX_BUFFER_LEN,
-                )
-            });
-            let count = counts.into_iter().min().unwrap_or_default();
-            let gpu_line = GpuLine {
-                values_bind_group,
-                index_bind_group,
-                index_buffers,
-                count,
+                let index_buffers = ['x', 'y', 'z'].map(|axis| {
+                    render_device.create_buffer(
+                        &(BufferDescriptor {
+                            label: Some(&format!("Line {} Index Buffer", axis)),
+                            size: (INDEX_BUFFER_LEN * size_of::<u32>()) as u64,
+                            usage: BufferUsages::STORAGE | BufferUsages::COPY_DST,
+                            mapped_at_creation: false,
+                        }),
+                    )
+                });
+                let entries = [0, 1, 2].map(|i| BindGroupEntry {
+                    binding: i as u32,
+                    resource: BindingResource::Buffer(BufferBinding {
+                        buffer: &index_buffers[i],
+                        offset: 0,
+                        size: Some(INDEX_BUFFER_SIZE),
+                    }),
+                });
+                let index_bind_group =
+                    render_device.create_bind_group("line indexes", &index_layout.layout, &entries);
+                let counts = [0, 1, 2].map(|i| {
+                    let line = &line_handles.0[i];
+                    let line = line_assets.get(line).expect("line missing");
+                    line.data.write_to_index_buffer_with_step(
+                        &index_buffers[i],
+                        &render_queue,
+                        range.clone(),
+                        sampling_step,
+                    )
+                });
+                let count = counts.into_iter().min().unwrap_or_default();
+                if count < 2 {
+                    return None;
+                }
+                Some(GpuLine {
+                    values_bind_group: values_bind_group.clone(),
+                    index_bind_group,
+                    index_buffers,
+                    count,
+                })
             };
 
-            commands.spawn((
-                MainEntity::from(entity),
-                LineBundle {
-                    line: line_handles.clone(),
-                    config: config.clone(),
-                    uniform: *uniform,
-                    global_transform: GlobalTransform::default(),
-                    transform: Transform::default(),
-                    grid_cell: GridCell::default(),
-                },
-                gpu_line,
-                TemporaryRenderEntity,
-            ));
+            if let Some(gpu_line) = build_gpu_line(played_range.clone()) {
+                let mut played_uniform = *uniform;
+                played_uniform.color = played_trail_color;
+                commands.spawn((
+                    MainEntity::from(entity),
+                    LineBundle {
+                        line: line_handles.clone(),
+                        config: config.clone(),
+                        uniform: played_uniform,
+                        global_transform: GlobalTransform::default(),
+                        transform: Transform::default(),
+                        grid_cell: GridCell::default(),
+                    },
+                    gpu_line,
+                    TemporaryRenderEntity,
+                ));
+            }
+
+            if let Some(gpu_line) = build_gpu_line(future_range.clone()) {
+                let mut future_uniform = *uniform;
+                future_uniform.color = future_color;
+                commands.spawn((
+                    MainEntity::from(entity),
+                    LineBundle {
+                        line: line_handles.clone(),
+                        config: config.clone(),
+                        uniform: future_uniform,
+                        global_transform: GlobalTransform::default(),
+                        transform: Transform::default(),
+                        grid_cell: GridCell::default(),
+                    },
+                    gpu_line,
+                    TemporaryRenderEntity,
+                ));
+            }
         }
         cached_state.state.apply(world)
     })

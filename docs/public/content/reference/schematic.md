@@ -14,7 +14,7 @@ order = 6
 
 ## Glossary
 
-- Top-level nodes: `panel` variants, `object_3d`, `line_3d`, `vector_arrow`, `window`.
+- Top-level nodes: `theme`, `timeline`, `panel` variants, `object_3d`, `line_3d`, `vector_arrow`, `window`.
 - EQL: expressions are evaluated in the runtime EQL context. Vector-like fields expect 3 components; `world_pos` is a 7-component array (quat + position).
 - Colors: `color r g b [a]` or named (`black`, `white`, `blue`, `red`, `orange`, `yellow`, `yalk`, `pink`, `cyan`, `gray`, `green`, `mint`, `turquoise`, `slate`, `pumpkin`, `yolk`, `peach`, `reddish`, `hyperblue`); alpha optional. Colors can be inline or in `color`/`colour` child nodes. Defaults to white when omitted unless noted.
 
@@ -24,6 +24,14 @@ order = 6
 - `scheme`: name of a color preset. Built-ins are `default`, `eggplant`, `catppuccini-macchiato`, `catppuccini-mocha`, `catppuccini-latte`, and `matrix`; user presets are picked up from any `color_schemes` folder in the asset directory or data directory. Unknown names fall back to `default`. If a user preset shares a name with a built-in, the user version wins. See [color-schemes](/reference/color-schemes) for the file layout.
 - Applies to the whole session; a secondary file can set its own `mode` for its windows, but the active scheme stays the one from the primary schematic.
 - Controls both egui styling (palette) and the window decoration theme (Dark/Light).
+
+### timeline
+- Optional top-level node that configures playback globally for the editor session.
+- `played_color`: named color or tuple string, default `yellow`. Used by the LIVE badge, the timeline playhead cursor, and the played segment of 3D trails.
+- `future_color`: named color or tuple string, default `white`. Used by the timeline latest/end cursor and the 3D trail segment that lies ahead of the current playback position.
+- `follow_latest`: bool, default `#false`. When omitted, the editor keeps the default start-from-beginning playback behavior. Set it to `#true` to switch to LIVE automatically once the connected stream proves that it is still advancing.
+- Applies to the primary schematic only; secondary schematic files do not override the global timeline behavior.
+- These settings are also editable from the Timeline inspector, opened with the gear button in the timeline bar.
 
 ### window
 - `path`/`file`/`name`: optional secondary schematic file. Relative paths resolve against the parent schematic directory (or CWD). If absent, the entry configures the primary window instead of loading a secondary file.
@@ -119,6 +127,7 @@ Legend: parentheses group alternatives; `|` means “or”; square brackets `[..
 ```kdl
 schematic =
   ( theme
+  | timeline
   | window
   | panel
   | object_3d
@@ -129,6 +138,13 @@ schematic =
 theme = "theme"
       [mode=dark|light]
       [scheme=string]
+
+timeline = "timeline"
+         [played_color=color_name_or_tuple]
+         [future_color=color_name_or_tuple]
+         [follow_latest=bool]
+
+When omitted, `follow_latest` defaults to `#false`.
 
 window = "window"
        [path|file|name=string]

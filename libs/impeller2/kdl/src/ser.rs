@@ -11,6 +11,9 @@ pub fn serialize_schematic<T>(schematic: &Schematic<T>) -> String {
     if let Some(theme) = schematic.theme.as_ref() {
         doc.nodes_mut().push(serialize_theme(theme));
     }
+    if let Some(timeline) = schematic.timeline.as_ref() {
+        doc.nodes_mut().push(serialize_timeline(timeline));
+    }
 
     for elem in &schematic.elems {
         let node = serialize_schematic_elem(elem);
@@ -31,6 +34,7 @@ fn serialize_schematic_elem<T>(elem: &SchematicElem<T>) -> KdlNode {
         SchematicElem::VectorArrow(arrow) => serialize_vector_arrow(arrow),
         SchematicElem::Window(window) => serialize_window(window),
         SchematicElem::Theme(theme) => serialize_theme(theme),
+        SchematicElem::Timeline(timeline) => serialize_timeline(timeline),
     }
 }
 
@@ -307,6 +311,53 @@ fn serialize_theme(theme: &ThemeConfig) -> KdlNode {
         node.entries_mut()
             .push(KdlEntry::new_prop("scheme", scheme.clone()));
     }
+    node
+}
+
+fn serialize_timeline(timeline: &TimelineConfig) -> KdlNode {
+    let mut node = KdlNode::new("timeline");
+
+    if timeline.played_color != default_timeline_played_color() {
+        if let Some(name) = name_from_color(&timeline.played_color) {
+            node.entries_mut()
+                .push(KdlEntry::new_prop("played_color", name));
+        } else {
+            let (r, g, b, a) = color_to_ints(&timeline.played_color);
+            if a == 255 {
+                node.entries_mut()
+                    .push(KdlEntry::new_prop("played_color", format!("({r},{g},{b})")));
+            } else {
+                node.entries_mut().push(KdlEntry::new_prop(
+                    "played_color",
+                    format!("({r},{g},{b},{a})"),
+                ));
+            }
+        }
+    }
+
+    if timeline.future_color != default_timeline_future_color() {
+        if let Some(name) = name_from_color(&timeline.future_color) {
+            node.entries_mut()
+                .push(KdlEntry::new_prop("future_color", name));
+        } else {
+            let (r, g, b, a) = color_to_ints(&timeline.future_color);
+            if a == 255 {
+                node.entries_mut()
+                    .push(KdlEntry::new_prop("future_color", format!("({r},{g},{b})")));
+            } else {
+                node.entries_mut().push(KdlEntry::new_prop(
+                    "future_color",
+                    format!("({r},{g},{b},{a})"),
+                ));
+            }
+        }
+    }
+
+    if timeline.follow_latest {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("follow_latest", true));
+    }
+
     node
 }
 
@@ -1014,6 +1065,31 @@ mod tests {
             expected.a,
             actual.a
         );
+    }
+
+    #[test]
+    fn test_serialize_timeline_config() {
+        let schematic = Schematic::<()> {
+            timeline: Some(TimelineConfig {
+                played_color: Color::MINT,
+                future_color: Color::HYPERBLUE,
+                follow_latest: true,
+            }),
+            ..Default::default()
+        };
+
+        let serialized = serialize_schematic(&schematic);
+        let parsed = parse_schematic(&serialized).unwrap();
+
+        assert!(serialized.contains("timeline"));
+        assert!(serialized.contains("played_color="));
+        assert!(serialized.contains("future_color="));
+        assert!(serialized.contains("follow_latest=#true"));
+
+        let timeline = parsed.timeline.expect("timeline config should roundtrip");
+        assert_eq!(timeline.played_color, Color::MINT);
+        assert_eq!(timeline.future_color, Color::HYPERBLUE);
+        assert!(timeline.follow_latest);
     }
 
     #[test]
