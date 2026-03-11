@@ -30,7 +30,7 @@ use bevy::{
             *,
         },
         renderer::{RenderContext, RenderDevice, RenderQueue},
-        view::ViewTarget,
+        view::{Msaa, ViewTarget},
     },
 };
 use big_space::GridCell;
@@ -424,10 +424,15 @@ fn spawn_sensor_cameras(
                     target: RenderTarget::Image(render_target_handle.into()),
                     order: -(10 + i as isize),
                     is_active: false,
+                    // Sensor cameras render into dedicated images and never need
+                    // MSAA writeback from earlier camera outputs.
+                    msaa_writeback: false,
                     ..default()
                 },
                 Projection::Perspective(perspective),
                 Tonemapping::None,
+                // Favor render-server throughput over editor-quality anti-aliasing.
+                Msaa::Off,
                 Transform::from_xyz(0.0, 5.0, 0.0).looking_at(Vec3::ZERO, Vec3::Y),
                 GlobalTransform::default(),
                 GridCell::<i128>::default(),
