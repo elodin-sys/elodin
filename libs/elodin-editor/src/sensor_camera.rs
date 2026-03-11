@@ -30,7 +30,7 @@ use bevy::{
             *,
         },
         renderer::{RenderContext, RenderDevice, RenderQueue},
-        view::{Msaa, ViewTarget},
+        view::{Msaa, NoIndirectDrawing, ViewTarget},
     },
 };
 use big_space::GridCell;
@@ -433,6 +433,9 @@ fn spawn_sensor_cameras(
                 Tonemapping::None,
                 // Favor render-server throughput over editor-quality anti-aliasing.
                 Msaa::Off,
+                // Sensor cameras are latency-sensitive offscreen views; prefer the
+                // simpler direct draw path over Bevy's indirect preprocessing path.
+                NoIndirectDrawing,
                 Transform::from_xyz(0.0, 5.0, 0.0).looking_at(Vec3::ZERO, Vec3::Y),
                 GlobalTransform::default(),
                 GridCell::<i128>::default(),
