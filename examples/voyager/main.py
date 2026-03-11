@@ -15,20 +15,26 @@ spice.furnsh('spice/kernels.tm')
 start_time_et = spice.utc2et('1977-09-05T13:58:37')
 
 PLANETS = [
-    {"spice_name": "MERCURY BARYCENTER", "entity_name": "mercury", "radius": 2000000000.0, "color": "bone"},
-    {"spice_name": "VENUS BARYCENTER", "entity_name": "venus", "radius": 3000000000.0, "color": "peach"},
-    {"spice_name": "EARTH", "entity_name": "earth", "radius": 6000000000.0, "color": "blue"},
-    {"spice_name": "MARS BARYCENTER", "entity_name": "mars", "radius": 4000000000.0, "color": "red"},
-    {"spice_name": "JUPITER BARYCENTER", "entity_name": "jupiter", "radius": 12000000000.0, "color": "yolk"},
-    {"spice_name": "SATURN BARYCENTER", "entity_name": "saturn", "radius": 10000000000.0, "color": "yellow"},
-    {"spice_name": "URANUS BARYCENTER", "entity_name": "uranus", "radius": 8000000000.0, "color": "mint"},
-    {"spice_name": "NEPTUNE BARYCENTER", "entity_name": "neptune", "radius": 8000000000.0, "color": "hyperblue"},
+    {"spice_name": "MERCURY BARYCENTER", "entity_name": "mercury", "radius": 2000000000.0, "color": "bone", "mass": 3.3011e23},
+    {"spice_name": "VENUS BARYCENTER", "entity_name": "venus", "radius": 3000000000.0, "color": "peach", "mass": 4.8675e24},
+    {"spice_name": "EARTH", "entity_name": "earth", "radius": 6000000000.0, "color": "blue", "mass": 5.97219e24},
+    {"spice_name": "MARS BARYCENTER", "entity_name": "mars", "radius": 4000000000.0, "color": "red", "mass": 6.4171e23},
+    {"spice_name": "JUPITER BARYCENTER", "entity_name": "jupiter", "radius": 12000000000.0, "color": "yolk", "mass": 1.898125e27},
+    {"spice_name": "SATURN BARYCENTER", "entity_name": "saturn", "radius": 10000000000.0, "color": "yellow", "mass": 5.6834e26},
+    {"spice_name": "URANUS BARYCENTER", "entity_name": "uranus", "radius": 8000000000.0, "color": "mint", "mass": 8.6813e25},
+    {"spice_name": "NEPTUNE BARYCENTER", "entity_name": "neptune", "radius": 8000000000.0, "color": "hyperblue", "mass": 1.02413e26},
 ]
 PROBES = [
-    {"spice_name": "VOYAGER 1", "entity_name": "voyager1", "radius": 4000000000.0, "color": "white"},
-    {"spice_name": "VOYAGER 2", "entity_name": "voyager2", "radius": 4000000000.0, "color": "turquoise"},
+    {"spice_name": "VOYAGER 1", "entity_name": "voyager1", "radius": 4000000000.0, "color": "white", "mass": 825.0},
+    {"spice_name": "VOYAGER 2", "entity_name": "voyager2", "radius": 4000000000.0, "color": "turquoise", "mass": 825.0},
 ]
-BODIES = PLANETS + PROBES
+TRUTH_PROBES = [
+    {"spice_name": "VOYAGER 1", "entity_name": "voyager1_truth", "radius": 2500000000.0, "color": "bone", "mass": 825.0},
+    {"spice_name": "VOYAGER 2", "entity_name": "voyager2_truth", "radius": 2500000000.0, "color": "mint", "mass": 825.0},
+]
+EPHEMERIS_BODIES = PLANETS
+DISPLAY_BODIES = PLANETS + PROBES + TRUTH_PROBES
+SUN_MASS = 1.9885e30
 
 
 w = el.World()
@@ -38,14 +44,15 @@ sun = w.spawn(
         el.Body(
             world_pos=el.WorldPos(linear=jnp.array([0.0, 0.0, 0.0])),
             world_vel=el.WorldVel(linear=jnp.array([0.0, 0.0, 0.0])),
-            inertia=el.Inertia(1.0 / G),
+            inertia=el.Inertia(SUN_MASS),
         ),
     ],
     name="Sun",
 )
 
+body_entity_ids = {"Sun": sun}
 
-for body in BODIES:
+for body in EPHEMERIS_BODIES + PROBES + TRUTH_PROBES:
     init_state, _ = spice.spkezr(body["spice_name"], start_time_et, 'ECLIPJ2000', 'NONE', 'SUN')
 
     init_pos = jnp.array(init_state[:3]) * 1000.0
@@ -55,12 +62,12 @@ for body in BODIES:
     print(init_pos)
     print(init_vel)
 
-    w.spawn(
+    body_entity_ids[body["entity_name"]] = w.spawn(
         [
             el.Body(
                 world_pos=el.WorldPos(linear=init_pos),
                 world_vel=el.WorldVel(linear=init_vel),
-                inertia=el.Inertia(1.0 / G),
+                inertia=el.Inertia(body["mass"]),
             ),
         ],
         name=body["entity_name"],
@@ -70,7 +77,7 @@ for body in BODIES:
 def pre_step(tick: int, ctx: el.StepContext):
     current_time_et = start_time_et + tick * SIM_TIME_STEP
 
-    for body in BODIES:
+    for body in EPHEMERIS_BODIES + TRUTH_PROBES:
         state, _ = spice.spkezr(body["spice_name"], current_time_et, 'ECLIPJ2000', 'NONE', 'SUN')
         pos_m = np.asarray(state[:3], dtype=np.float64) * 1000.0
         vel_ms = np.asarray(state[3:], dtype=np.float64) * 1000.0
@@ -84,65 +91,47 @@ def pre_step(tick: int, ctx: el.StepContext):
             np.array([0.0, 0.0, 0.0, vel_ms[0], vel_ms[1], vel_ms[2]], dtype=np.float64),
         )
 
-#c = w.spawn(
-#    [
-#        el.Body(
-#            world_pos=el.WorldPos(linear=jnp.array([-0.2291782474, 0, 0])),
-#            world_vel=el.WorldVel(linear=jnp.array([0, 0.6233673964, 0.0])),
-#            inertia=el.Inertia(1.0 / G),
-#        ),
-#    ],
-#    name="C",
-#)
-#
-## Define a new "gravity edge" component type
-#GravityEdge = el.Annotated[el.Edge, el.Component("gravity_edge", el.ComponentType.Edge)]
-#
-#
-## Define a new "gravity constraint" archetype using the gravity edge component
-#@el.dataclass
-#class GravityConstraint(el.Archetype):
-#    a: GravityEdge
-#
-#    def __init__(self, a: el.EntityId, b: el.EntityId):
-#        self.a = GravityEdge(a, b)
-#
-#
-## Define a new system to apply gravity by iterating over all gravity edge components
-#@el.system
-#def gravity(
-#    graph: el.GraphQuery[GravityEdge],
-#    query: el.Query[el.WorldPos, el.Inertia],
-#) -> el.Query[el.Force]:
-#    # Create a fold function to take an accumulator and the query results for the
-#    # left and right entities, and apply Newton's law of universal gravitation:
-#    def gravity_fn(force, a_pos, a_inertia, b_pos, b_inertia):
-#        r = a_pos.linear() - b_pos.linear()
-#        m = a_inertia.mass()
-#        M = b_inertia.mass()
-#        norm = la.norm(r)
-#        f = G * M * m * r / (norm * norm * norm)
-#        # returns the updated force value applied to the left entity this tick
-#        return el.Force(linear=force.force() - f)
-#
-#    return graph.edge_fold(
-#        left_query=query,  # i.e. fetches WorldPos and Inertia components from A
-#        right_query=query,  # reusing the same query for B
-#        return_type=el.Force,  # matching the system query return type
-#        init_value=el.Force(),  # initial value for the fold function accumulator
-#        fold_fn=gravity_fn,  # the fold function to apply to each edge, that you defined above
-#    )
+
+GravityEdge = el.Annotated[el.Edge, el.Component("gravity_edge", el.ComponentType.Edge)]
 
 
-## Add the gravity constraint entities to the world
-#w.spawn(GravityConstraint(a, b), name="A -> B")
-#w.spawn(GravityConstraint(b, a), name="B -> A")
-#
-#w.spawn(GravityConstraint(a, c), name="A -> C")
-#w.spawn(GravityConstraint(b, c), name="B -> C")
-#
-#w.spawn(GravityConstraint(c, a), name="C -> A")
-#w.spawn(GravityConstraint(c, b), name="C -> B")
+@el.dataclass
+class GravityConstraint(el.Archetype):
+    a: GravityEdge
+
+    def __init__(self, a: el.EntityId, b: el.EntityId):
+        self.a = GravityEdge(a, b)
+
+
+@el.system
+def gravity(
+    graph: el.GraphQuery[GravityEdge],
+    query: el.Query[el.WorldPos, el.Inertia],
+) -> el.Query[el.Force]:
+    def gravity_fn(force, a_pos, a_inertia, b_pos, b_inertia):
+        r = a_pos.linear() - b_pos.linear()
+        m = a_inertia.mass()
+        M = b_inertia.mass()
+        norm = la.norm(r)
+        f = G * M * m * r / (norm * norm * norm)
+        return el.Force(linear=force.force() - f)
+
+    return graph.edge_fold(
+        left_query=query,
+        right_query=query,
+        return_type=el.Force,
+        init_value=el.Force(),
+        fold_fn=gravity_fn,
+    )
+
+
+for probe in PROBES:
+    probe_id = body_entity_ids[probe["entity_name"]]
+    for source_name in ["Sun", *[planet["entity_name"] for planet in PLANETS]]:
+        w.spawn(
+            GravityConstraint(probe_id, body_entity_ids[source_name]),
+            name=f"{probe['entity_name']} -> {source_name}",
+        )
 
 body_objects = "\n".join(
     f"""    object_3d {body["entity_name"]}.world_pos {{
@@ -153,7 +142,7 @@ body_objects = "\n".join(
     line_3d {body["entity_name"]}.world_pos line_width=1.0 perspective=#false {{
         color yolk
     }}"""
-    for body in BODIES
+    for body in DISPLAY_BODIES
 )
 
 w.schematic("""
@@ -180,5 +169,5 @@ w.schematic("""
 {body_objects}
 """.format(body_objects=body_objects))
 
-sys = el.six_dof()
+sys = el.six_dof(sys=gravity)
 sim = w.run(sys, SIM_TIME_STEP, run_time_step=1 / 120.0, pre_step=pre_step, max_ticks=10000)
