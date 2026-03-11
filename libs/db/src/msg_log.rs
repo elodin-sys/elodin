@@ -72,11 +72,8 @@ impl MsgLog {
     }
 
     fn try_push(&self, timestamp: Timestamp, msg: &[u8]) -> Result<(), Error> {
+        self.bufs.insert_msg(msg)?;
         self.timestamps.write(&timestamp.to_le_bytes())?;
-        if let Err(e) = self.bufs.insert_msg(msg) {
-            self.truncate();
-            return Err(e);
-        }
         self.waker.wake_all();
         Ok(())
     }
