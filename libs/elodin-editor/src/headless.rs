@@ -14,7 +14,7 @@ use bevy::{
     math::{EulerRot, Quat},
     picking::{InteractionPlugin, PickingPlugin, input::PointerInputPlugin},
     prelude::*,
-    render::{RenderApp, pipelined_rendering::PipelinedRenderingPlugin},
+    render::{Render, RenderApp, RenderSystems, pipelined_rendering::PipelinedRenderingPlugin},
     sprite::SpritePlugin,
     sprite_render::SpriteRenderPlugin,
     state::app::StatesPlugin,
@@ -120,7 +120,40 @@ impl Plugin for HeadlessEditorPlugin {
             .set_runner(headless_sensor_runner);
 
         if let Some(render_app) = app.get_sub_app_mut(RenderApp) {
-            render_app.init_resource::<HeadlessMode>();
+            render_app
+                .init_resource::<HeadlessMode>()
+                .init_resource::<HeadlessRenderScheduleTimingState>()
+                .init_resource::<HeadlessRenderScheduleMetrics>()
+                .add_systems(
+                    Render,
+                    (
+                        record_after_extract_commands
+                            .after(RenderSystems::ExtractCommands)
+                            .before(RenderSystems::PrepareMeshes),
+                        record_after_prepare_meshes
+                            .after(RenderSystems::PrepareMeshes)
+                            .before(RenderSystems::ManageViews),
+                        record_after_manage_views
+                            .after(RenderSystems::ManageViews)
+                            .before(RenderSystems::Queue),
+                        record_after_queue
+                            .after(RenderSystems::Queue)
+                            .before(RenderSystems::PhaseSort),
+                        record_after_phase_sort
+                            .after(RenderSystems::PhaseSort)
+                            .before(RenderSystems::Prepare),
+                        record_after_prepare
+                            .after(RenderSystems::Prepare)
+                            .before(RenderSystems::Render),
+                        record_after_render
+                            .after(RenderSystems::Render)
+                            .before(RenderSystems::Cleanup),
+                        record_after_cleanup
+                            .after(RenderSystems::Cleanup)
+                            .before(RenderSystems::PostCleanup),
+                        finalize_headless_render_schedule_metrics.after(RenderSystems::PostCleanup),
+                    ),
+                );
         }
     }
 }
@@ -218,6 +251,7 @@ struct HeadlessUpdateBreakdown {
     render_extract_ms: f64,
     render_app_ms: f64,
     main_clear_trackers_ms: f64,
+    render_schedule: HeadlessRenderScheduleMetrics,
 }
 
 impl HeadlessUpdateBreakdown {
@@ -227,6 +261,102 @@ impl HeadlessUpdateBreakdown {
             + self.render_app_ms
             + self.main_clear_trackers_ms
     }
+}
+
+#[derive(Clone, Copy, Debug, Default, Resource)]
+struct HeadlessRenderScheduleMetrics {
+    extract_commands_ms: f64,
+    prepare_meshes_ms: f64,
+    manage_views_ms: f64,
+    queue_ms: f64,
+    phase_sort_ms: f64,
+    prepare_ms: f64,
+    render_ms: f64,
+    cleanup_ms: f64,
+    post_cleanup_ms: f64,
+}
+
+#[derive(Debug, Default, Resource)]
+struct HeadlessRenderScheduleTimingState {
+    frame_start: Option<Instant>,
+    after_extract_commands: Option<Instant>,
+    after_prepare_meshes: Option<Instant>,
+    after_manage_views: Option<Instant>,
+    after_queue: Option<Instant>,
+    after_phase_sort: Option<Instant>,
+    after_prepare: Option<Instant>,
+    after_render: Option<Instant>,
+    after_cleanup: Option<Instant>,
+}
+
+fn mark_now(slot: &mut Option<Instant>) {
+    *slot = Some(Instant::now());
+}
+
+fn elapsed_between(start: Option<Instant>, end: Option<Instant>) -> f64 {
+    match (start, end) {
+        (Some(start), Some(end)) => end.saturating_duration_since(start).as_secs_f64() * 1000.0,
+        _ => 0.0,
+    }
+}
+
+fn reset_headless_render_schedule_timing(world: &mut World) {
+    let mut state = world.resource_mut::<HeadlessRenderScheduleTimingState>();
+    *state = HeadlessRenderScheduleTimingState {
+        frame_start: Some(Instant::now()),
+        ..default()
+    };
+    *world.resource_mut::<HeadlessRenderScheduleMetrics>() =
+        HeadlessRenderScheduleMetrics::default();
+}
+
+fn record_after_extract_commands(mut state: ResMut<HeadlessRenderScheduleTimingState>) {
+    mark_now(&mut state.after_extract_commands);
+}
+
+fn record_after_prepare_meshes(mut state: ResMut<HeadlessRenderScheduleTimingState>) {
+    mark_now(&mut state.after_prepare_meshes);
+}
+
+fn record_after_manage_views(mut state: ResMut<HeadlessRenderScheduleTimingState>) {
+    mark_now(&mut state.after_manage_views);
+}
+
+fn record_after_queue(mut state: ResMut<HeadlessRenderScheduleTimingState>) {
+    mark_now(&mut state.after_queue);
+}
+
+fn record_after_phase_sort(mut state: ResMut<HeadlessRenderScheduleTimingState>) {
+    mark_now(&mut state.after_phase_sort);
+}
+
+fn record_after_prepare(mut state: ResMut<HeadlessRenderScheduleTimingState>) {
+    mark_now(&mut state.after_prepare);
+}
+
+fn record_after_render(mut state: ResMut<HeadlessRenderScheduleTimingState>) {
+    mark_now(&mut state.after_render);
+}
+
+fn record_after_cleanup(mut state: ResMut<HeadlessRenderScheduleTimingState>) {
+    mark_now(&mut state.after_cleanup);
+}
+
+fn finalize_headless_render_schedule_metrics(
+    state: Res<HeadlessRenderScheduleTimingState>,
+    mut metrics: ResMut<HeadlessRenderScheduleMetrics>,
+) {
+    let frame_end = Instant::now();
+    metrics.extract_commands_ms = elapsed_between(state.frame_start, state.after_extract_commands);
+    metrics.prepare_meshes_ms =
+        elapsed_between(state.after_extract_commands, state.after_prepare_meshes);
+    metrics.manage_views_ms = elapsed_between(state.after_prepare_meshes, state.after_manage_views);
+    metrics.queue_ms = elapsed_between(state.after_manage_views, state.after_queue);
+    metrics.phase_sort_ms = elapsed_between(state.after_queue, state.after_phase_sort);
+    metrics.prepare_ms = elapsed_between(state.after_phase_sort, state.after_prepare);
+    metrics.render_ms = elapsed_between(state.after_prepare, state.after_render);
+    metrics.cleanup_ms = elapsed_between(state.after_render, state.after_cleanup);
+    metrics.post_cleanup_ms = elapsed_between(state.after_cleanup, Some(frame_end));
 }
 
 fn run_headless_update(app: &mut App) -> HeadlessUpdateBreakdown {
@@ -244,8 +374,12 @@ fn run_headless_update(app: &mut App) -> HeadlessUpdateBreakdown {
         breakdown.render_extract_ms = elapsed_ms(render_extract_start);
 
         let render_app_start = Instant::now();
-        render_app.update();
+        reset_headless_render_schedule_timing(render_app.world_mut());
+        render_app.world_mut().run_schedule(Render);
         breakdown.render_app_ms = elapsed_ms(render_app_start);
+        breakdown.render_schedule = *render_app
+            .world()
+            .resource::<HeadlessRenderScheduleMetrics>();
     }
 
     let clear_trackers_start = Instant::now();
@@ -392,6 +526,19 @@ fn headless_sensor_runner(mut app: App) -> AppExit {
                     update0_main_schedule_ms = update0_breakdown.main_schedule_ms,
                     update0_render_extract_ms = update0_breakdown.render_extract_ms,
                     update0_render_app_ms = update0_breakdown.render_app_ms,
+                    update0_render_extract_commands_ms =
+                        update0_breakdown.render_schedule.extract_commands_ms,
+                    update0_render_prepare_meshes_ms =
+                        update0_breakdown.render_schedule.prepare_meshes_ms,
+                    update0_render_manage_views_ms =
+                        update0_breakdown.render_schedule.manage_views_ms,
+                    update0_render_queue_ms = update0_breakdown.render_schedule.queue_ms,
+                    update0_render_phase_sort_ms = update0_breakdown.render_schedule.phase_sort_ms,
+                    update0_render_prepare_ms = update0_breakdown.render_schedule.prepare_ms,
+                    update0_render_render_ms = update0_breakdown.render_schedule.render_ms,
+                    update0_render_cleanup_ms = update0_breakdown.render_schedule.cleanup_ms,
+                    update0_render_post_cleanup_ms =
+                        update0_breakdown.render_schedule.post_cleanup_ms,
                     update0_main_clear_trackers_ms = update0_breakdown.main_clear_trackers_ms,
                     collect0_ms,
                     fallback_used,
@@ -399,6 +546,20 @@ fn headless_sensor_runner(mut app: App) -> AppExit {
                     fallback_main_schedule_ms = fallback_breakdown.main_schedule_ms,
                     fallback_render_extract_ms = fallback_breakdown.render_extract_ms,
                     fallback_render_app_ms = fallback_breakdown.render_app_ms,
+                    fallback_render_extract_commands_ms =
+                        fallback_breakdown.render_schedule.extract_commands_ms,
+                    fallback_render_prepare_meshes_ms =
+                        fallback_breakdown.render_schedule.prepare_meshes_ms,
+                    fallback_render_manage_views_ms =
+                        fallback_breakdown.render_schedule.manage_views_ms,
+                    fallback_render_queue_ms = fallback_breakdown.render_schedule.queue_ms,
+                    fallback_render_phase_sort_ms =
+                        fallback_breakdown.render_schedule.phase_sort_ms,
+                    fallback_render_prepare_ms = fallback_breakdown.render_schedule.prepare_ms,
+                    fallback_render_render_ms = fallback_breakdown.render_schedule.render_ms,
+                    fallback_render_cleanup_ms = fallback_breakdown.render_schedule.cleanup_ms,
+                    fallback_render_post_cleanup_ms =
+                        fallback_breakdown.render_schedule.post_cleanup_ms,
                     fallback_main_clear_trackers_ms = fallback_breakdown.main_clear_trackers_ms,
                     collect1_ms,
                     respond_ms,
