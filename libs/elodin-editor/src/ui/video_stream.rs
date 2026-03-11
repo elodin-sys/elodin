@@ -1122,16 +1122,15 @@ pub fn connect_streams(
                     cache.seeking = false;
                 }
 
-                if cache.backfill_in_flight {
-                    if let Some(started) = cache.backfill_started_at {
-                        if started.elapsed().as_secs_f32() >= BACKFILL_TIMEOUT_SECS {
-                            bevy::log::warn!(
-                                "backfill_in_flight stuck for {BACKFILL_TIMEOUT_SECS}s, resetting"
-                            );
-                            cache.backfill_in_flight = false;
-                            cache.backfill_started_at = None;
-                        }
-                    }
+                if cache.backfill_in_flight
+                    && let Some(started) = cache.backfill_started_at
+                    && started.elapsed().as_secs_f32() >= BACKFILL_TIMEOUT_SECS
+                {
+                    bevy::log::warn!(
+                        "backfill_in_flight stuck for {BACKFILL_TIMEOUT_SECS}s, resetting"
+                    );
+                    cache.backfill_in_flight = false;
+                    cache.backfill_started_at = None;
                 }
 
                 // Continue backfilling: if the backfill stopped (short page)
