@@ -1,7 +1,7 @@
 { pkgs }:
 
 pkgs.mkShell {
-  name = "sitl";
+  name = "elodin-run";
   packages = [
     pkgs.elodin.elodin-py.py
     pkgs.elodin.elodin-cli
