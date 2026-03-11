@@ -5,14 +5,14 @@ import spiceypy as spice
 import numpy as np
 
 #SIM_TIME_STEP = 1.0 / 120.0
-#SIM_TIME_STEP = 3600.0
-SIM_TIME_STEP = 86400.0
+SIM_TIME_STEP = 3600.0
+#SIM_TIME_STEP = 86400.0
 # Set the gravitational constant for Newton's law of universal gravitation
 G = 6.6743e-11
 
 spice.furnsh('spice/kernels.tm')
 
-start_time_et = spice.utc2et('1977-09-05T13:58:37')
+start_time_et = spice.utc2et('1978-01-01T00:00:00')
 
 PLANETS = [
     {"spice_name": "MERCURY BARYCENTER", "entity_name": "mercury", "radius": 2000000000.0, "color": "bone", "mass": 3.3011e23},
@@ -170,4 +170,4 @@ w.schematic("""
 """.format(body_objects=body_objects))
 
 sys = el.six_dof(sys=gravity)
-sim = w.run(sys, SIM_TIME_STEP, run_time_step=1 / 120.0, pre_step=pre_step, max_ticks=10000)
+sim = w.run(sys, SIM_TIME_STEP, run_time_step=1 / 120.0, pre_step=pre_step)
