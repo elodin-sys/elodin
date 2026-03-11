@@ -185,15 +185,19 @@ pub fn apply_cached_data(
         return;
     }
     *last_applied = (ts, cache_gen);
-    for component_id in cache.component_ids().copied().collect::<Vec<_>>() {
-        let Some(value) = cache.get_at_or_before(&component_id, ts) else {
+    for (&component_id, series) in &cache.components {
+        let Some((_, value)) = series.range(..=ts).next_back() else {
             continue;
         };
         let Some(&entity) = entity_map.get(&component_id) else {
             continue;
         };
         if let Ok(mut cv) = query.get_mut(entity) {
-            *cv = value.clone();
+            if cv.prim_type() == value.prim_type() && cv.shape() == value.shape() {
+                cv.copy_from_view(value.as_view());
+            } else {
+                *cv = value.clone();
+            }
         } else {
             commands.entity(entity).insert(value.clone());
         }
