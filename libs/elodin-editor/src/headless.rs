@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 use bevy::{
     a11y::AccessibilityPlugin,
     animation::AnimationPlugin,
-    app::{App, AppExit, Plugin, Startup},
+    app::{App, AppExit, AppLabel, Plugin, Startup},
     asset::{AssetPlugin, Assets, UnapprovedPathMode},
     audio::AudioPlugin,
     diagnostic::{DiagnosticsPlugin, DiagnosticsStore},
@@ -212,6 +212,49 @@ fn elapsed_ms(start: Instant) -> f64 {
     start.elapsed().as_secs_f64() * 1000.0
 }
 
+#[derive(Clone, Copy, Debug, Default)]
+struct HeadlessUpdateBreakdown {
+    main_schedule_ms: f64,
+    render_extract_ms: f64,
+    render_app_ms: f64,
+    main_clear_trackers_ms: f64,
+}
+
+impl HeadlessUpdateBreakdown {
+    fn total_ms(self) -> f64 {
+        self.main_schedule_ms
+            + self.render_extract_ms
+            + self.render_app_ms
+            + self.main_clear_trackers_ms
+    }
+}
+
+fn run_headless_update(app: &mut App) -> HeadlessUpdateBreakdown {
+    let mut breakdown = HeadlessUpdateBreakdown::default();
+    let sub_apps = app.sub_apps_mut();
+    let (main_app, render_sub_apps) = (&mut sub_apps.main, &mut sub_apps.sub_apps);
+
+    let main_schedule_start = Instant::now();
+    main_app.run_default_schedule();
+    breakdown.main_schedule_ms = elapsed_ms(main_schedule_start);
+
+    if let Some(render_app) = render_sub_apps.get_mut(&RenderApp.intern()) {
+        let render_extract_start = Instant::now();
+        render_app.extract(main_app.world_mut());
+        breakdown.render_extract_ms = elapsed_ms(render_extract_start);
+
+        let render_app_start = Instant::now();
+        render_app.update();
+        breakdown.render_app_ms = elapsed_ms(render_app_start);
+    }
+
+    let clear_trackers_start = Instant::now();
+    main_app.world_mut().clear_trackers();
+    breakdown.main_clear_trackers_ms = elapsed_ms(clear_trackers_start);
+
+    breakdown
+}
+
 fn headless_sensor_runner(mut app: App) -> AppExit {
     app.finish();
     app.cleanup();
@@ -227,14 +270,14 @@ fn headless_sensor_runner(mut app: App) -> AppExit {
     // Warm-up: run updates until DB metadata is loaded and sensor cameras are spawned.
     let mut cameras_enabled = false;
     for i in 0..120 {
-        app.update();
+        run_headless_update(&mut app);
         let cameras_ready = app.world().resource::<SensorCamerasSpawned>().0;
         if cameras_ready && !cameras_enabled {
             set_all_sensor_cameras_active(app.world_mut(), true);
             cameras_enabled = true;
             tracing::info!("Sensor cameras spawned and enabled after {i} warm-up cycles");
             for _ in 0..4 {
-                app.update();
+                run_headless_update(&mut app);
             }
             set_all_sensor_cameras_active(app.world_mut(), false);
             break;
@@ -280,7 +323,7 @@ fn headless_sensor_runner(mut app: App) -> AppExit {
             cameras_enabled = true;
             tracing::info!("Sensor cameras late-enabled during main loop");
             for _ in 0..4 {
-                app.update();
+                run_headless_update(&mut app);
             }
             set_all_sensor_cameras_active(app.world_mut(), false);
         }
@@ -293,9 +336,8 @@ fn headless_sensor_runner(mut app: App) -> AppExit {
         let setup_ms = elapsed_ms(setup_start);
 
         // With PipelinedRenderingPlugin disabled, Extract + Render run synchronously in one update.
-        let update0_start = Instant::now();
-        app.update();
-        let update0_ms = elapsed_ms(update0_start);
+        let update0_breakdown = run_headless_update(&mut app);
+        let update0_ms = update0_breakdown.total_ms();
         let render_metrics = app
             .get_sub_app_mut(RenderApp)
             .map(|render_app| *render_app.world().resource::<SensorCameraRenderMetrics>())
@@ -306,11 +348,10 @@ fn headless_sensor_runner(mut app: App) -> AppExit {
             let mut frames = collect_frames(&app, &request.camera_names);
             let collect0_ms = elapsed_ms(collect0_start);
             let frames_after_update0 = frames.len();
-            let (fallback_used, fallback_update_ms, collect1_ms) =
+            let (fallback_used, fallback_update_ms, fallback_breakdown, collect1_ms) =
                 if frames.len() < request.camera_names.len() {
-                    let fallback_start = Instant::now();
-                    app.update();
-                    let fallback_update_ms = elapsed_ms(fallback_start);
+                    let fallback_breakdown = run_headless_update(&mut app);
+                    let fallback_update_ms = fallback_breakdown.total_ms();
                     let collect1_start = Instant::now();
                     let more = collect_frames(&app, &request.camera_names);
                     for (name, data) in more {
@@ -318,9 +359,14 @@ fn headless_sensor_runner(mut app: App) -> AppExit {
                             frames.push((name, data));
                         }
                     }
-                    (true, fallback_update_ms, elapsed_ms(collect1_start))
+                    (
+                        true,
+                        fallback_update_ms,
+                        fallback_breakdown,
+                        elapsed_ms(collect1_start),
+                    )
                 } else {
-                    (false, 0.0, 0.0)
+                    (false, 0.0, HeadlessUpdateBreakdown::default(), 0.0)
                 };
             let final_frame_count = frames.len();
 
@@ -343,9 +389,17 @@ fn headless_sensor_runner(mut app: App) -> AppExit {
                     camera_count = request.camera_names.len(),
                     setup_ms,
                     update0_ms,
+                    update0_main_schedule_ms = update0_breakdown.main_schedule_ms,
+                    update0_render_extract_ms = update0_breakdown.render_extract_ms,
+                    update0_render_app_ms = update0_breakdown.render_app_ms,
+                    update0_main_clear_trackers_ms = update0_breakdown.main_clear_trackers_ms,
                     collect0_ms,
                     fallback_used,
                     fallback_update_ms,
+                    fallback_main_schedule_ms = fallback_breakdown.main_schedule_ms,
+                    fallback_render_extract_ms = fallback_breakdown.render_extract_ms,
+                    fallback_render_app_ms = fallback_breakdown.render_app_ms,
+                    fallback_main_clear_trackers_ms = fallback_breakdown.main_clear_trackers_ms,
                     collect1_ms,
                     respond_ms,
                     respond_header_write_ms = respond_metrics.response_header_write_ms,
@@ -369,9 +423,17 @@ fn headless_sensor_runner(mut app: App) -> AppExit {
                     camera_count = request.camera_names.len(),
                     setup_ms,
                     update0_ms,
+                    update0_main_schedule_ms = update0_breakdown.main_schedule_ms,
+                    update0_render_extract_ms = update0_breakdown.render_extract_ms,
+                    update0_render_app_ms = update0_breakdown.render_app_ms,
+                    update0_main_clear_trackers_ms = update0_breakdown.main_clear_trackers_ms,
                     collect0_ms,
                     fallback_used,
                     fallback_update_ms,
+                    fallback_main_schedule_ms = fallback_breakdown.main_schedule_ms,
+                    fallback_render_extract_ms = fallback_breakdown.render_extract_ms,
+                    fallback_render_app_ms = fallback_breakdown.render_app_ms,
+                    fallback_main_clear_trackers_ms = fallback_breakdown.main_clear_trackers_ms,
                     collect1_ms,
                     respond_ms,
                     respond_header_write_ms = respond_metrics.response_header_write_ms,
