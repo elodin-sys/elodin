@@ -113,6 +113,10 @@ const MAX_RAW_FRAMES: usize = 50_000;
 /// a dropped DB connection.
 const STREAM_RECOVERY_TIMEOUT_SECS: f32 = 30.0;
 
+/// If backfill_in_flight has been true this long with no callback, reset it
+/// (e.g. MsgPacketTx channel full or RequestId exhausted).
+const BACKFILL_TIMEOUT_SECS: f32 = 10.0;
+
 // ---------------------------------------------------------------------------
 // H.264 keyframe detection
 // ---------------------------------------------------------------------------
@@ -226,6 +230,9 @@ pub struct VideoFrameCache {
     /// (Pagination within the backfill callback fires immediately and is
     /// not rate-limited — only the retry from `connect_streams` is.)
     backfill_retry_at: Option<Instant>,
+    /// When the current backfill request was sent; used to auto-reset
+    /// `backfill_in_flight` if the reply never arrives (e.g. channel full).
+    backfill_started_at: Option<Instant>,
     /// Timestamp of the raw RGBA frame currently displayed. Used to skip
     /// redundant texture uploads when the playback position hasn't changed.
     last_displayed_ts: Option<Timestamp>,
@@ -248,6 +255,7 @@ impl Default for VideoFrameCache {
             backfill_frontier: Timestamp(i64::MIN),
             backfill_in_flight: false,
             backfill_retry_at: None,
+            backfill_started_at: None,
             last_displayed_ts: None,
             is_h264: true,
         }
@@ -788,6 +796,7 @@ fn send_backfill_request(
                 return true;
             };
             cache.backfill_in_flight = false;
+            cache.backfill_started_at = None;
             if let Ok(batch) = result {
                 let count = batch.data.len();
                 let mut last_ts = start_from;
@@ -800,6 +809,7 @@ fn send_backfill_request(
                 }
                 if count >= limit {
                     cache.backfill_in_flight = true;
+                    cache.backfill_started_at = Some(Instant::now());
                     send_backfill_request(
                         &mut cmds,
                         entity,
@@ -1089,6 +1099,7 @@ pub fn connect_streams(
                     let msg_id = stream.msg_id;
                     let limit = backfill_frame_limit(stream.raw_rgba_dims);
                     cache.backfill_in_flight = true;
+                    cache.backfill_started_at = Some(Instant::now());
                     send_backfill_request(
                         &mut commands,
                         entity,
@@ -1111,6 +1122,18 @@ pub fn connect_streams(
                     cache.seeking = false;
                 }
 
+                if cache.backfill_in_flight {
+                    if let Some(started) = cache.backfill_started_at {
+                        if started.elapsed().as_secs_f32() >= BACKFILL_TIMEOUT_SECS {
+                            bevy::log::warn!(
+                                "backfill_in_flight stuck for {BACKFILL_TIMEOUT_SECS}s, resetting"
+                            );
+                            cache.backfill_in_flight = false;
+                            cache.backfill_started_at = None;
+                        }
+                    }
+                }
+
                 // Continue backfilling: if the backfill stopped (short page)
                 // but the DB has newer data, request the next page from
                 // where the previous backfill left off. Retries are
@@ -1124,6 +1147,7 @@ pub fn connect_streams(
                     let msg_id = stream.msg_id;
                     let limit = backfill_frame_limit(stream.raw_rgba_dims);
                     cache.backfill_in_flight = true;
+                    cache.backfill_started_at = Some(Instant::now());
                     cache.backfill_retry_at = Some(Instant::now());
                     send_backfill_request(
                         &mut commands,
@@ -1140,6 +1164,7 @@ pub fn connect_streams(
                     let msg_id = stream.msg_id;
                     let limit = backfill_frame_limit(stream.raw_rgba_dims);
                     cache.backfill_in_flight = true;
+                    cache.backfill_started_at = Some(Instant::now());
                     send_backfill_request(
                         &mut commands,
                         entity,
