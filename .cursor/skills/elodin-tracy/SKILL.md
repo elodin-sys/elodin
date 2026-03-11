@@ -12,6 +12,8 @@ description: Profile Elodin with Tracy. Use when profiling the editor, simulatio
 
 ## 1. Quick Start
 
+**Linux only.** Tracy profiling (both the GUI and IREE runtime tracing) requires Linux. On macOS, `just install tracy` will abort with an explanation. Use a Linux machine or an OrbStack NixOS VM (see the `elodin-nix` skill) for profiling workflows.
+
 ```bash
 nix develop
 just install tracy

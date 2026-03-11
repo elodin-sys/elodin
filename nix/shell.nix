@@ -8,15 +8,19 @@ with pkgs; let
   # Import shared configuration
   common = pkgs.callPackage ./pkgs/common.nix {};
   iree_runtime = pkgs.callPackage ./pkgs/iree-runtime.nix {};
-  iree_runtime_tracy = pkgs.callPackage ./pkgs/iree-runtime.nix {
-    enableTracing = true;
-    tracySrc = fetchFromGitHub {
-      owner = "wolfpld";
-      repo = "tracy";
-      rev = "5479a42ef9346b64e6d1b860ae58aa8abdb0c7f6";
-      hash = "sha256-4J8b+72k+xpeT6KsrkioF1xfWEBsGg2eLRg9iONxP/I=";
-    };
-  };
+  iree_runtime_tracy =
+    if pkgs.stdenv.isLinux
+    then
+      pkgs.callPackage ./pkgs/iree-runtime.nix {
+        enableTracing = true;
+        tracySrc = fetchFromGitHub {
+          owner = "wolfpld";
+          repo = "tracy";
+          rev = "5479a42ef9346b64e6d1b860ae58aa8abdb0c7f6";
+          hash = "sha256-4J8b+72k+xpeT6KsrkioF1xfWEBsGg2eLRg9iONxP/I=";
+        };
+      }
+    else null;
   llvm = llvmPackages_latest;
 
   # Base Python for use with venv (JAX 0.8+ and iree-base-compiler installed via pip)
@@ -97,10 +101,6 @@ with pkgs; let
         typos
         zola
         rav1e
-
-        # Tracy profiler
-        tracy
-        iree_runtime_tracy
       ]
       ++ common.commonNativeBuildInputs
       ++ common.commonBuildInputs
@@ -115,6 +115,9 @@ with pkgs; let
           fontconfig
           lldb
           autoPatchelfHook
+          # Tracy profiler (Linux-only: requires std::jthread, not in Apple libc++)
+          tracy
+          iree_runtime_tracy
         ]
       )
       # macOS-specific dependencies
@@ -132,7 +135,7 @@ with pkgs; let
     # Environment variables
     LIBCLANG_PATH = "${libclang.lib}/lib";
     IREE_RUNTIME_DIR = "${iree_runtime}";
-    IREE_RUNTIME_TRACY_DIR = "${iree_runtime_tracy}";
+    IREE_RUNTIME_TRACY_DIR = lib.optionalString pkgs.stdenv.isLinux "${iree_runtime_tracy}";
 
     # The nox-py cdylib (.so) carries a DF_STATIC_TLS flag that forces glibc
     # to allocate ~10 KB from the tiny static-TLS surplus on dlopen.  Raise

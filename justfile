@@ -103,6 +103,12 @@ install target="all":
       install -m 755 target/release/elodin-db "${CARGO_HOME:-$HOME/.cargo}/bin/"
       ;;
     tracy)
+      if [ "$(uname -s)" = "Darwin" ]; then
+        echo "error: Tracy profiling is only supported on Linux." >&2
+        echo "Tracy depends on C++20 features (std::jthread) not available in Apple's libc++." >&2
+        echo "Use a Linux machine or an OrbStack NixOS VM for profiling." >&2
+        exit 1
+      fi
       uv venv --python 3.13 --clear
       . .venv/bin/activate
       uvx maturin develop --uv --manifest-path=libs/nox-py/Cargo.toml -F tracy
