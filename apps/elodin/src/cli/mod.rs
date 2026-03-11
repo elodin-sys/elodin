@@ -38,14 +38,23 @@ impl Cli {
             std::process::exit(0);
         }
 
-        #[cfg(feature = "tracy")]
-        {
+        // TracyClient binds its port from a C++ static constructor (before
+        // main), so TRACY_PORT must be in the environment before the process
+        // starts.  If it isn't set yet, re-exec with the correct port so the
+        // Tracy client picks it up on the next load.
+        #[cfg(all(feature = "tracy", not(target_os = "windows")))]
+        if std::env::var("TRACY_PORT").is_err() {
             let port = match &self.command {
-                #[cfg(not(target_os = "windows"))]
                 Some(Commands::RenderServer(_)) => "8088",
                 _ => "8087",
             };
-            unsafe { std::env::set_var("TRACY_PORT", port) };
+            use std::os::unix::process::CommandExt;
+            let exe = std::env::current_exe().expect("failed to get current exe path");
+            let err = std::process::Command::new(exe)
+                .args(&std::env::args().collect::<Vec<_>>()[1..])
+                .env("TRACY_PORT", port)
+                .exec();
+            return Err(miette::miette!("re-exec failed: {err}"));
         }
 
         let filter = EnvFilter::try_from_default_env()
