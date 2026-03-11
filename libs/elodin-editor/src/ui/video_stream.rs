@@ -756,19 +756,17 @@ fn send_stream_request(commands: &mut Commands, entity: Entity, msg_id: [u8; 2],
 /// RequestId space (256) during a full backfill.
 const BACKFILL_MAX_BATCH_BYTES: usize = 5 * 1024 * 1024;
 
-/// Default backfill frame limit for compressed streams (H.264).
-/// At ~50 KB/frame (worst-case OBS keyframe), 100 frames ≈ 5 MB.
-const BACKFILL_FRAME_LIMIT_DEFAULT: usize = 100;
+/// Assumed max raw RGBA frame size when dims unknown (640×480×4).
+/// Keeps first backfill page within BACKFILL_MAX_BATCH_BYTES for replay DBs.
+const BACKFILL_ASSUMED_MAX_RAW_FRAME: usize = 640 * 480 * 4;
 
-/// Compute the backfill frame limit for a given frame size.
+/// Compute the backfill frame limit from a byte budget.
 fn backfill_frame_limit(raw_rgba_dims: Option<(u32, u32)>) -> usize {
-    if let Some((w, h)) = raw_rgba_dims {
-        let frame_bytes = w as usize * h as usize * 4;
-        if frame_bytes > 0 {
-            return (BACKFILL_MAX_BATCH_BYTES / frame_bytes).max(1);
-        }
-    }
-    BACKFILL_FRAME_LIMIT_DEFAULT
+    let frame_bytes = match raw_rgba_dims {
+        Some((w, h)) => (w as usize * h as usize * 4).max(1),
+        None => BACKFILL_ASSUMED_MAX_RAW_FRAME,
+    };
+    (BACKFILL_MAX_BATCH_BYTES / frame_bytes).max(1)
 }
 
 /// Paginated `GetMsgs` backfill: fetch historical raw data from the DB
