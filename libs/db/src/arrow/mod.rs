@@ -16,6 +16,7 @@ use futures_lite::{Stream, StreamExt, pin};
 use impeller2::types::{PrimType, Timestamp};
 use impeller2_wkt::ArchiveFormat;
 use std::{
+    collections::HashMap,
     fs::File,
     io,
     ops::{Bound, RangeBounds},
@@ -90,6 +91,15 @@ impl Component {
         name: impl ToString,
         range: R,
     ) -> (FieldRef, ArrayRef) {
+        self.as_data_array_range_with_metadata(name, range, None)
+    }
+
+    pub fn as_data_array_range_with_metadata<R: RangeBounds<usize>>(
+        &self,
+        name: impl ToString,
+        range: R,
+        element_names: Option<&str>,
+    ) -> (FieldRef, ArrayRef) {
         let size = self.schema.dim.iter().product::<usize>() as i32;
         let buf = self.time_series.data();
         let element_size = self.time_series.element_size();
@@ -117,12 +127,17 @@ impl Component {
             return (inner_field, array);
         }
 
-        let field = Arc::new(Field::new_fixed_size_list(
+        let mut field = Arc::new(Field::new_fixed_size_list(
             name.to_string(),
             inner_field.clone(),
             size,
             false,
         ));
+        if let Some(ens) = element_names {
+            let mut meta = HashMap::new();
+            meta.insert("element_names".to_string(), ens.to_string());
+            field = Arc::new((*field).clone().with_metadata(meta));
+        }
         let array = FixedSizeListArray::new(inner_field, size, array, None);
         let array = Arc::new(array);
         (field, array)
@@ -195,7 +210,7 @@ impl Component {
     }
 
     pub fn as_record_batch(&self, name: impl ToString) -> RecordBatch {
-        self.as_record_batch_range(name, ..)
+        self.as_record_batch_range_with_element_names(name, .., None)
     }
 
     pub fn as_record_batch_range(
@@ -203,8 +218,18 @@ impl Component {
         name: impl ToString,
         range: impl RangeBounds<usize> + Clone,
     ) -> RecordBatch {
+        self.as_record_batch_range_with_element_names(name, range, None)
+    }
+
+    fn as_record_batch_range_with_element_names(
+        &self,
+        name: impl ToString,
+        range: impl RangeBounds<usize> + Clone,
+        element_names: Option<&str>,
+    ) -> RecordBatch {
         let name = name.to_string();
-        let (data_field, data_array) = self.as_data_array_range(name.clone(), range.clone());
+        let (data_field, data_array) =
+            self.as_data_array_range_with_metadata(name.clone(), range.clone(), element_names);
         let time_array = self.as_time_series_array_range(range);
         let len = data_array.len().min(time_array.len());
         let time_field = Arc::new(Field::new(
@@ -217,6 +242,14 @@ impl Component {
 
         RecordBatch::try_new(Arc::new(Schema::new(fields)), columns)
             .expect("record batch params wrong")
+    }
+
+    pub fn as_record_batch_with_element_names(
+        &self,
+        name: impl ToString,
+        element_names: &str,
+    ) -> RecordBatch {
+        self.as_record_batch_range_with_element_names(name, .., Some(element_names))
     }
 
     pub fn as_flat_record_batch(&self, name: impl ToString, element_names: &str) -> RecordBatch {
@@ -255,7 +288,19 @@ impl Component {
             .with_infinite_table(true)
     }
     pub fn as_mem_table(&self, name: impl ToString) -> MemTable {
-        let record_batch = self.as_record_batch(name);
+        self.as_mem_table_with_element_names(name, "")
+    }
+
+    pub fn as_mem_table_with_element_names(
+        &self,
+        name: impl ToString,
+        element_names: &str,
+    ) -> MemTable {
+        let record_batch = if element_names.is_empty() {
+            self.as_record_batch(name)
+        } else {
+            self.as_record_batch_with_element_names(name, element_names)
+        };
         let schema = record_batch.schema();
         let record_batches = vec![record_batch];
         MemTable::try_new(schema, vec![record_batches])
@@ -291,7 +336,10 @@ impl DB {
                     &component_metadata.name.to_case(convert_case::Case::Snake),
                 );
                 let name = component_name.clone();
-                let mem_table = component.as_mem_table(&component_name);
+                let mem_table = component.as_mem_table_with_element_names(
+                    &component_name,
+                    component_metadata.element_names(),
+                );
                 ctx.register_table(name, Arc::new(mem_table))?;
 
                 let stream_name = format!("{component_name}_stream");
