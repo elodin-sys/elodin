@@ -121,7 +121,9 @@ impl WorldBuilder {
                             addr.to_string(),
                         ],
                         cwd: None,
-                        env: std::collections::HashMap::new(),
+                        env: std::collections::HashMap::from([
+                            ("TRACY_PORT".to_string(), "8088".to_string()),
+                        ]),
                         restart_policy: ::s10::RestartPolicy::Never,
                     },
                     no_watch: true,

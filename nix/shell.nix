@@ -8,6 +8,15 @@ with pkgs; let
   # Import shared configuration
   common = pkgs.callPackage ./pkgs/common.nix {};
   iree_runtime = pkgs.callPackage ./pkgs/iree-runtime.nix {};
+  iree_runtime_tracy = pkgs.callPackage ./pkgs/iree-runtime.nix {
+    enableTracing = true;
+    tracySrc = fetchFromGitHub {
+      owner = "wolfpld";
+      repo = "tracy";
+      rev = "5479a42ef9346b64e6d1b860ae58aa8abdb0c7f6";
+      hash = "sha256-4J8b+72k+xpeT6KsrkioF1xfWEBsGg2eLRg9iONxP/I=";
+    };
+  };
   llvm = llvmPackages_latest;
 
   # Base Python for use with venv (JAX 0.8+ and iree-base-compiler installed via pip)
@@ -91,6 +100,7 @@ with pkgs; let
 
         # Tracy profiler
         tracy
+        iree_runtime_tracy
       ]
       ++ common.commonNativeBuildInputs
       ++ common.commonBuildInputs
@@ -105,7 +115,6 @@ with pkgs; let
           fontconfig
           lldb
           autoPatchelfHook
-          config.packages.elodin-py.py
         ]
       )
       # macOS-specific dependencies
@@ -123,6 +132,7 @@ with pkgs; let
     # Environment variables
     LIBCLANG_PATH = "${libclang.lib}/lib";
     IREE_RUNTIME_DIR = "${iree_runtime}";
+    IREE_RUNTIME_TRACY_DIR = "${iree_runtime_tracy}";
 
     # GStreamer plugin path for elodinsink
     GST_PLUGIN_PATH = lib.makeSearchPathOutput "lib" "lib/gstreamer-1.0" [

@@ -38,6 +38,16 @@ impl Cli {
             std::process::exit(0);
         }
 
+        #[cfg(feature = "tracy")]
+        {
+            let port = match &self.command {
+                #[cfg(not(target_os = "windows"))]
+                Some(Commands::RenderServer(_)) => "8088",
+                _ => "8087",
+            };
+            unsafe { std::env::set_var("TRACY_PORT", port) };
+        }
+
         let filter = EnvFilter::try_from_default_env()
             .or_else(|_| {
                 EnvFilter::try_new("s10=info,elodin=info,impeller=info,impeller::bevy=error,error")

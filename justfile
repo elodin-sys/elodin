@@ -103,8 +103,13 @@ install target="all":
       install -m 755 target/release/elodin-db "${CARGO_HOME:-$HOME/.cargo}/bin/"
       ;;
     tracy)
-      just install py && cargo build --release -p elodin -p elodin-db --features tracy
-      install -m 755 target/release/elodin target/release/elodin-db "${CARGO_HOME:-$HOME/.cargo}/bin/"
+      uv venv --python 3.13 --clear
+      . .venv/bin/activate
+      uvx maturin develop --uv --manifest-path=libs/nox-py/Cargo.toml -F tracy
+      echo "Venv ready. Run source with \`source .venv/bin/activate\` before running examples with python3"
+      cargo build --release -p elodin -p elodin-db --features tracy
+      install -m 755 target/release/elodin "${CARGO_HOME:-$HOME/.cargo}/bin/"
+      install -m 755 target/release/elodin-db "${CARGO_HOME:-$HOME/.cargo}/bin/"
       ;;
     all) just install py && just install editor && just install db;;
     *)

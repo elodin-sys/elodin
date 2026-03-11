@@ -2,10 +2,17 @@
   lib,
   stdenv,
   fetchFromGitHub,
+  fetchurl,
+  runCommand,
   cmake,
   ninja,
   python3,
   git,
+  pkg-config,
+  zstd,
+  gnused,
+  enableTracing ? false,
+  tracySrc ? null,
   ...
 }: let
   version = "3.10.0";
@@ -23,6 +30,41 @@
     rev = "99bdb2127d1fa1cff444bbefb814e105c7d20c45";
     hash = "sha256-d/7BDynAUsH20bGqyh4HLKKgqCeGlTRQRvqX5dmpMLg=";
   };
+
+  capstoneSrc = fetchFromGitHub {
+    owner = "capstone-engine";
+    repo = "capstone";
+    rev = "97db712c91e964718f9cc300e81b9cf76b31a22e";
+    hash = "sha256-oKRu3P1inWueEMIpL0uI2ayCMHZ9FIVotil4sqwLqH4=";
+  };
+
+  ppqsortRaw = fetchFromGitHub {
+    owner = "GabTux";
+    repo = "PPQSort";
+    rev = "4b964020d67b435dae7ebac7b8f5ecea1f421c58";
+    hash = "sha256-myMOKIq7veA/p+mRsMuecWPUI1Xh7z+38sJF1J7bGYM=";
+  };
+
+  cpmSrc = fetchurl {
+    url = "https://github.com/cpm-cmake/CPM.cmake/releases/download/v0.38.7/CPM.cmake";
+    hash = "sha256-g+XrcbK7uLHyrTjxlQKHoFdiTjhcI49gh/lM38RK+cU=";
+  };
+
+  packageProjectSrc = fetchFromGitHub {
+    owner = "TheLartians";
+    repo = "PackageProject.cmake";
+    rev = "v1.11.1";
+    hash = "sha256-E7WZSYDlss5bidbiWL1uX41Oh6JxBRtfhYsFU19kzIw=";
+  };
+
+  ppqsortSrc =
+    runCommand "ppqsort-iree-patched" {
+      nativeBuildInputs = [gnused];
+    } ''
+      cp -R ${ppqsortRaw} $out
+      chmod -R u+w $out
+      sed -i 's#https://github.com/cpm-cmake/CPM.cmake/releases/download/v''${CPM_DOWNLOAD_VERSION}/CPM.cmake#file://${cpmSrc}#' $out/cmake/CPM.cmake
+    '';
 in
   stdenv.mkDerivation {
     pname = "iree-runtime";
@@ -44,9 +86,22 @@ in
       rmdir $sourceRoot/third_party/benchmark 2>/dev/null || true
       cp -r ${benchmark} $sourceRoot/third_party/benchmark
       chmod -R u+w $sourceRoot/third_party/benchmark
+
+      ${lib.optionalString (enableTracing && tracySrc != null) ''
+        rmdir $sourceRoot/third_party/tracy 2>/dev/null || true
+        cp -r ${tracySrc} $sourceRoot/third_party/tracy
+        chmod -R u+w $sourceRoot/third_party/tracy
+      ''}
     '';
 
-    nativeBuildInputs = [cmake ninja python3 git];
+    nativeBuildInputs = [cmake ninja python3 git]
+      ++ lib.optionals enableTracing [pkg-config];
+
+    buildInputs = lib.optionals enableTracing [zstd];
+
+    # Tracy's capture server code triggers _FORTIFY_SOURCE buffer overflow
+    # detection with Nix's default hardening flags.
+    hardeningDisable = lib.optionals enableTracing ["fortify"];
 
     cmakeFlags = [
       "-DIREE_BUILD_COMPILER=OFF"
@@ -77,6 +132,15 @@ in
       # the build (nix sandboxes have no network access). Defaults to ON
       # on Linux.
       "-DIREE_ENABLE_LIBBACKTRACE=OFF"
+    ]
+    ++ lib.optionals enableTracing [
+      "-DIREE_ENABLE_RUNTIME_TRACING=ON"
+      "-DIREE_TRACING_MODE=2"
+      "-DIREE_TRACING_PROVIDER=tracy"
+      "-DIREE_BUILD_TRACY=ON"
+      "-DFETCHCONTENT_SOURCE_DIR_CAPSTONE=${capstoneSrc}"
+      "-DFETCHCONTENT_SOURCE_DIR_PPQSORT=${ppqsortSrc}"
+      "-DCPM_PackageProject.cmake_SOURCE=${packageProjectSrc}"
     ];
 
     # Install headers and static libraries
@@ -95,6 +159,14 @@ in
       # Remove non-header files from include dir
       find $out/include -type f ! -name '*.h' -delete
       find $out/include -type d -empty -delete
+
+      ${lib.optionalString enableTracing ''
+        # Install iree-tracy-capture built from the same Tracy source
+        find $NIX_BUILD_TOP -name iree-tracy-capture -type f -executable | head -1 | while read f; do
+          mkdir -p $out/bin
+          cp "$f" $out/bin/
+        done
+      ''}
 
       runHook postInstall
     '';
