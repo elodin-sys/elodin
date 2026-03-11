@@ -760,10 +760,14 @@ const BACKFILL_MAX_BATCH_BYTES: usize = 5 * 1024 * 1024;
 /// Keeps first backfill page within BACKFILL_MAX_BATCH_BYTES for replay DBs.
 const BACKFILL_ASSUMED_MAX_RAW_FRAME: usize = 640 * 480 * 4;
 
+/// Typical H.264 frame size when dims unknown (~25–50 KB); avoids 4-frame batch for video_stream.
+const BACKFILL_ASSUMED_H264_FRAME: usize = 50 * 1024;
+
 /// Compute the backfill frame limit from a byte budget.
-fn backfill_frame_limit(raw_rgba_dims: Option<(u32, u32)>) -> usize {
+fn backfill_frame_limit(raw_rgba_dims: Option<(u32, u32)>, is_h264: bool) -> usize {
     let frame_bytes = match raw_rgba_dims {
         Some((w, h)) => (w as usize * h as usize * 4).max(1),
+        None if is_h264 => BACKFILL_ASSUMED_H264_FRAME,
         None => BACKFILL_ASSUMED_MAX_RAW_FRAME,
     };
     (BACKFILL_MAX_BATCH_BYTES / frame_bytes).max(1)
@@ -894,8 +898,7 @@ impl super::widgets::WidgetSystem for VideoStreamWidget<'_, '_> {
                             let expected = (w * h * 4) as usize;
                             let size_ok = data.len() == expected;
                             if size_ok {
-                                // Arc::unwrap_or_clone: O(1) if refcount==1, else clones
-                                let frame_bytes = Arc::unwrap_or_clone(Arc::clone(data));
+                                let frame_bytes = data.as_ref().clone();
                                 let img = Image::new(
                                     Extent3d {
                                         width: w,
@@ -1095,7 +1098,7 @@ pub fn connect_streams(
                 *frames_waited += 1;
                 if *frames_waited >= FRAMES_BEFORE_CONNECT {
                     let msg_id = stream.msg_id;
-                    let limit = backfill_frame_limit(stream.raw_rgba_dims);
+                    let limit = backfill_frame_limit(stream.raw_rgba_dims, cache.is_h264);
                     cache.backfill_in_flight = true;
                     cache.backfill_started_at = Some(Instant::now());
                     send_backfill_request(
@@ -1142,7 +1145,7 @@ pub fn connect_streams(
                 if !cache.backfill_in_flight && retry_ok && cache.backfill_frontier < last_updated.0
                 {
                     let msg_id = stream.msg_id;
-                    let limit = backfill_frame_limit(stream.raw_rgba_dims);
+                    let limit = backfill_frame_limit(stream.raw_rgba_dims, cache.is_h264);
                     cache.backfill_in_flight = true;
                     cache.backfill_started_at = Some(Instant::now());
                     cache.backfill_retry_at = Some(Instant::now());
@@ -1159,7 +1162,7 @@ pub fn connect_streams(
                     && last.elapsed().as_secs_f32() > STREAM_RECOVERY_TIMEOUT_SECS
                 {
                     let msg_id = stream.msg_id;
-                    let limit = backfill_frame_limit(stream.raw_rgba_dims);
+                    let limit = backfill_frame_limit(stream.raw_rgba_dims, cache.is_h264);
                     cache.backfill_in_flight = true;
                     cache.backfill_started_at = Some(Instant::now());
                     send_backfill_request(

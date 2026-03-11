@@ -919,6 +919,9 @@ where
                 .get_resource_mut::<PacketIdHandlers>()
                 .expect("missing packet handlers");
             handlers.remove(&self.packet_id);
+            if let Err(unreg) = world.unregister_system(system_id) {
+                bevy::log::error!(?unreg, "failed to unregister system after send failure");
+            }
             bevy::log::warn!(?err, "failed to send msg");
         }
     }
@@ -976,6 +979,9 @@ where
                 .get_resource_mut::<RequestIdHandlers>()
                 .expect("missing packet handlers");
             handlers.remove(&req_id);
+            if let Err(unreg) = world.unregister_system(system_id) {
+                bevy::log::error!(?unreg, "failed to unregister system after send failure");
+            }
             bevy::log::warn!(?err, "failed to send msg");
         }
     }

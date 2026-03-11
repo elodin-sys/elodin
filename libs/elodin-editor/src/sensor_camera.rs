@@ -255,6 +255,7 @@ impl Plugin for SensorCameraPlugin {
                 ExtractComponentPlugin::<SensorEffectSettings>::default(),
                 UniformComponentPlugin::<SensorEffectSettings>::default(),
             ))
+            // Headless path only; editor registers load_sensor_configs_from_db in lib.rs.
             .add_systems(PreUpdate, load_sensor_configs_from_db)
             .add_systems(
                 PreUpdate,
@@ -684,6 +685,7 @@ pub fn patch_sensor_view_dims(
         if stream.raw_rgba_dims.is_some() {
             continue;
         }
+        // Only set dims when msg_name matches a sensor camera config; H.264 video_stream names (e.g. obs_stream) never match.
         if let Some(config) = configs.0.iter().find(|c| c.camera_name == stream.msg_name) {
             stream.raw_rgba_dims = Some((config.width, config.height));
         }
