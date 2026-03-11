@@ -1339,6 +1339,12 @@ pub fn update_eql_context(
     if path_reg.0.is_empty() {
         return;
     };
+    if !component_metadata_registry.is_changed()
+        && !component_schema_registry.is_changed()
+        && !path_reg.is_changed()
+    {
+        return;
+    }
     eql_context.0 = eql::Context::from_leaves(
         path_reg.0.iter().filter_map(|(id, path)| {
             let schema = component_schema_registry.0.get(id)?;
