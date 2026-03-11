@@ -64,8 +64,7 @@ test_steps = [
         label="nox-py",
         key="nox-py",
         # this step is just to verify that the package can be imported
-        # nix does all the actual work of building nox-py and installing it in the environment
-        command="python -c 'import elodin; print(elodin.__version__)'",
+        command="just install py && python -c 'import elodin; print(elodin.__version__)'",
     ),
     group(
         name=":python: python",

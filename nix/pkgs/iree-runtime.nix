@@ -94,7 +94,8 @@ in
       ''}
     '';
 
-    nativeBuildInputs = [cmake ninja python3 git]
+    nativeBuildInputs =
+      [cmake ninja python3 git]
       ++ lib.optionals enableTracing [pkg-config];
 
     buildInputs = lib.optionals enableTracing [zstd];
@@ -103,45 +104,46 @@ in
     # detection with Nix's default hardening flags.
     hardeningDisable = lib.optionals enableTracing ["fortify"];
 
-    cmakeFlags = [
-      "-DIREE_BUILD_COMPILER=OFF"
-      "-DIREE_BUILD_TESTS=OFF"
-      "-DIREE_BUILD_SAMPLES=OFF"
+    cmakeFlags =
+      [
+        "-DIREE_BUILD_COMPILER=OFF"
+        "-DIREE_BUILD_TESTS=OFF"
+        "-DIREE_BUILD_SAMPLES=OFF"
 
-      # HAL drivers for CPU execution
-      "-DIREE_HAL_DRIVER_DEFAULTS=OFF"
-      "-DIREE_HAL_DRIVER_LOCAL_SYNC=ON"
-      "-DIREE_HAL_DRIVER_LOCAL_TASK=ON"
+        # HAL drivers for CPU execution
+        "-DIREE_HAL_DRIVER_DEFAULTS=OFF"
+        "-DIREE_HAL_DRIVER_LOCAL_SYNC=ON"
+        "-DIREE_HAL_DRIVER_LOCAL_TASK=ON"
 
-      # Executable loaders (all three needed for full platform support)
-      "-DIREE_HAL_EXECUTABLE_LOADER_DEFAULTS=OFF"
-      "-DIREE_HAL_EXECUTABLE_LOADER_EMBEDDED_ELF=ON"
-      "-DIREE_HAL_EXECUTABLE_LOADER_SYSTEM_LIBRARY=ON"
-      "-DIREE_HAL_EXECUTABLE_LOADER_VMVX_MODULE=ON"
+        # Executable loaders (all three needed for full platform support)
+        "-DIREE_HAL_EXECUTABLE_LOADER_DEFAULTS=OFF"
+        "-DIREE_HAL_EXECUTABLE_LOADER_EMBEDDED_ELF=ON"
+        "-DIREE_HAL_EXECUTABLE_LOADER_SYSTEM_LIBRARY=ON"
+        "-DIREE_HAL_EXECUTABLE_LOADER_VMVX_MODULE=ON"
 
-      # Executable plugins
-      "-DIREE_HAL_EXECUTABLE_PLUGIN_SYSTEM_LIBRARY=ON"
+        # Executable plugins
+        "-DIREE_HAL_EXECUTABLE_PLUGIN_SYSTEM_LIBRARY=ON"
 
-      # Static libraries
-      "-DBUILD_SHARED_LIBS=OFF"
+        # Static libraries
+        "-DBUILD_SHARED_LIBS=OFF"
 
-      # Disable optional features not needed for our use case
-      "-DIREE_ENABLE_CPUINFO=OFF"
-      "-DIREE_BUILD_TRACY=OFF"
-      # Prevent FetchContent from trying to git-clone libbacktrace during
-      # the build (nix sandboxes have no network access). Defaults to ON
-      # on Linux.
-      "-DIREE_ENABLE_LIBBACKTRACE=OFF"
-    ]
-    ++ lib.optionals enableTracing [
-      "-DIREE_ENABLE_RUNTIME_TRACING=ON"
-      "-DIREE_TRACING_MODE=2"
-      "-DIREE_TRACING_PROVIDER=tracy"
-      "-DIREE_BUILD_TRACY=ON"
-      "-DFETCHCONTENT_SOURCE_DIR_CAPSTONE=${capstoneSrc}"
-      "-DFETCHCONTENT_SOURCE_DIR_PPQSORT=${ppqsortSrc}"
-      "-DCPM_PackageProject.cmake_SOURCE=${packageProjectSrc}"
-    ];
+        # Disable optional features not needed for our use case
+        "-DIREE_ENABLE_CPUINFO=OFF"
+        "-DIREE_BUILD_TRACY=OFF"
+        # Prevent FetchContent from trying to git-clone libbacktrace during
+        # the build (nix sandboxes have no network access). Defaults to ON
+        # on Linux.
+        "-DIREE_ENABLE_LIBBACKTRACE=OFF"
+      ]
+      ++ lib.optionals enableTracing [
+        "-DIREE_ENABLE_RUNTIME_TRACING=ON"
+        "-DIREE_TRACING_MODE=2"
+        "-DIREE_TRACING_PROVIDER=tracy"
+        "-DIREE_BUILD_TRACY=ON"
+        "-DFETCHCONTENT_SOURCE_DIR_CAPSTONE=${capstoneSrc}"
+        "-DFETCHCONTENT_SOURCE_DIR_PPQSORT=${ppqsortSrc}"
+        "-DCPM_PackageProject.cmake_SOURCE=${packageProjectSrc}"
+      ];
 
     # Install headers and static libraries
     installPhase = ''
