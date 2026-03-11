@@ -64,7 +64,7 @@ test_steps = [
         label="nox-py",
         key="nox-py",
         # this step is just to verify that the package can be imported
-        command="just install py && python -c 'import elodin; print(elodin.__version__)'",
+        command="just install py && source .venv/bin/activate && python -c 'import elodin; print(elodin.__version__)'",
     ),
     group(
         name=":python: python",
@@ -72,7 +72,7 @@ test_steps = [
         steps=[
             nix_step(
                 label=":python: pytest",
-                command="pytest libs/nox-py -o 'pythonpath='",
+                command="source .venv/bin/activate && pytest libs/nox-py -o 'pythonpath='",
             ),
             nix_step(
                 label=":python: lint",
@@ -86,23 +86,23 @@ test_steps = [
         steps=[
             nix_step(
                 label=":python: ball",
-                command="python3 examples/ball/main.py bench --ticks 100 --profile",
+                command="source .venv/bin/activate && python3 examples/ball/main.py bench --ticks 100 --profile",
             ),
             nix_step(
                 label=":python: drone",
-                command="python3 examples/drone/main.py bench --ticks 100 --profile",
+                command="source .venv/bin/activate && python3 examples/drone/main.py bench --ticks 100 --profile",
             ),
             nix_step(
                 label=":python: rocket",
-                command="python3 examples/rocket/main.py bench --ticks 100 --profile",
+                command="source .venv/bin/activate && python3 examples/rocket/main.py bench --ticks 100 --profile",
             ),
             nix_step(
                 label=":python: three-body",
-                command="python3 examples/three-body/main.py bench --ticks 100 --profile",
+                command="source .venv/bin/activate && python3 examples/three-body/main.py bench --ticks 100 --profile",
             ),
             nix_step(
                 label=":python: cube-sat",
-                command="python3 examples/cube-sat/main.py bench --ticks 100 --profile",
+                command="source .venv/bin/activate && python3 examples/cube-sat/main.py bench --ticks 100 --profile",
             ),
         ],
     ),

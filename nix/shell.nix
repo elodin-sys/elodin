@@ -134,6 +134,11 @@ with pkgs; let
     IREE_RUNTIME_DIR = "${iree_runtime}";
     IREE_RUNTIME_TRACY_DIR = "${iree_runtime_tracy}";
 
+    # The nox-py cdylib (.so) carries a DF_STATIC_TLS flag that forces glibc
+    # to allocate ~10 KB from the tiny static-TLS surplus on dlopen.  Raise
+    # the surplus so Python can import the extension without ENOMEM.
+    GLIBC_TUNABLES = "glibc.rtld.optional_static_tls=16384";
+
     # GStreamer plugin path for elodinsink
     GST_PLUGIN_PATH = lib.makeSearchPathOutput "lib" "lib/gstreamer-1.0" [
       gst_all_1.gstreamer
