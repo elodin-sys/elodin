@@ -3,9 +3,20 @@ use bevy::prelude::*;
 #[cfg(not(target_os = "windows"))]
 use miette::{Context, IntoDiagnostic, miette};
 #[cfg(not(target_os = "windows"))]
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 #[cfg(not(target_os = "windows"))]
 use stellarator::util::CancelToken;
+
+#[cfg(not(target_os = "windows"))]
+fn render_bridge_socket_path() -> PathBuf {
+    let file_name = format!("elodin-render-{}.sock", std::process::id());
+    let tmp_root = Path::new("/tmp");
+    if tmp_root.exists() {
+        tmp_root.join(file_name)
+    } else {
+        std::env::temp_dir().join(file_name)
+    }
+}
 
 #[cfg(not(target_os = "windows"))]
 pub async fn run_recipe(
@@ -63,12 +74,9 @@ pub async fn run_recipe(
 
     // Set the render bridge socket path so both the render-server and
     // simulation child processes inherit it via the environment.
-    let sock_path = std::env::temp_dir().join(format!("elodin-render-{}", std::process::id()));
-    // SAFETY: set_var is not thread-safe, but this is the only writer of
-    // ELODIN_RENDER_BRIDGE_SOCK; we do not read it in this process. Only
-    // child processes spawned later by recipe.watch() read it. The caller
-    // must ensure run_recipe is not invoked concurrently with other code
-    // that reads this variable.
+    let sock_path = render_bridge_socket_path();
+    info!(render_bridge_sock = %sock_path.display(), "Using render bridge socket path");
+    // SAFETY: called before spawning child processes via recipe.watch().
     unsafe {
         std::env::set_var("ELODIN_RENDER_BRIDGE_SOCK", &sock_path);
     }
