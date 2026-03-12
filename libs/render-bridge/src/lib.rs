@@ -1,15 +1,27 @@
 use std::io::{BufRead, BufReader, BufWriter, Read, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use impeller2::types::Timestamp;
 
 const ENV_KEY: &str = "ELODIN_RENDER_BRIDGE_SOCK";
 
-fn elapsed_ms(start: Instant) -> f64 {
+pub fn elapsed_ms(start: Instant) -> f64 {
     start.elapsed().as_secs_f64() * 1000.0
+}
+
+pub fn sensor_camera_probe_logs_enabled() -> bool {
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    *ENABLED.get_or_init(|| {
+        std::env::var("ELODIN_SENSOR_CAMERA_LOG_METRICS")
+            .map(|v| {
+                let normalized = v.trim().to_ascii_lowercase();
+                matches!(normalized.as_str(), "1" | "true" | "yes")
+            })
+            .unwrap_or(false)
+    })
 }
 
 // ---------------------------------------------------------------------------

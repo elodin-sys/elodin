@@ -1,4 +1,3 @@
-use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
 use bevy::{
@@ -200,19 +199,11 @@ fn load_headless_scene(
 // ---------------------------------------------------------------------------
 
 fn elapsed_ms(start: Instant) -> f64 {
-    start.elapsed().as_secs_f64() * 1000.0
+    render_bridge::elapsed_ms(start)
 }
 
 fn sensor_camera_probe_logs_enabled() -> bool {
-    static ENABLED: OnceLock<bool> = OnceLock::new();
-    *ENABLED.get_or_init(|| {
-        std::env::var("ELODIN_SENSOR_CAMERA_LOG_METRICS")
-            .map(|v| {
-                let normalized = v.trim().to_ascii_lowercase();
-                matches!(normalized.as_str(), "1" | "true" | "yes")
-            })
-            .unwrap_or(false)
-    })
+    render_bridge::sensor_camera_probe_logs_enabled()
 }
 
 #[derive(Clone, Copy, Debug, Default)]

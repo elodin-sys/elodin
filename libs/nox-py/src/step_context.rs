@@ -3,7 +3,7 @@
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 /// Background worker that pushes rendered frames to the DB without blocking the
@@ -59,19 +59,11 @@ use crate::Error;
 pub type SharedRenderClient = Arc<Mutex<Option<RenderBridgeClient>>>;
 
 fn elapsed_ms(start: Instant) -> f64 {
-    start.elapsed().as_secs_f64() * 1000.0
+    elodin_db::render_bridge::elapsed_ms(start)
 }
 
 fn sensor_camera_probe_logs_enabled() -> bool {
-    static ENABLED: OnceLock<bool> = OnceLock::new();
-    *ENABLED.get_or_init(|| {
-        std::env::var("ELODIN_SENSOR_CAMERA_LOG_METRICS")
-            .map(|v| {
-                let normalized = v.trim().to_ascii_lowercase();
-                matches!(normalized.as_str(), "1" | "true" | "yes")
-            })
-            .unwrap_or(false)
-    })
+    elodin_db::render_bridge::sensor_camera_probe_logs_enabled()
 }
 
 fn log_render_client_metrics(
