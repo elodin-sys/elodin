@@ -7,7 +7,7 @@ mod editor;
 #[derive(Parser, Clone)]
 #[command(
     author,
-    version = concat!(env!("CARGO_PKG_VERSION"), " ", env!("GIT_HASH")),
+    version = concat!(env!("CARGO_PKG_VERSION"), "+", env!("GIT_HASH")),
     about,
     long_about = None
 )]
