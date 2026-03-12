@@ -68,7 +68,12 @@ impl Default for LogCache {
 
 impl LogCache {
     fn insert(&mut self, ts: Timestamp, entry: LogEntry) {
-        self.entries.entry(ts).or_default().push(entry);
+        let bucket = self.entries.entry(ts).or_default();
+        // Backfill and live stream can overlap in replay DBs; suppress exact duplicates.
+        if bucket.iter().any(|existing| existing == &entry) {
+            return;
+        }
+        bucket.push(entry);
         self.total_count += 1;
 
         while self.total_count > MAX_LOG_ENTRIES {
@@ -92,7 +97,7 @@ impl LogCache {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LogEntry {
     pub level: u8,
     pub message: String,
