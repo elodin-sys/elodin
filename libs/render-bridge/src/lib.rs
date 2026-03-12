@@ -8,6 +8,10 @@ use impeller2::types::Timestamp;
 
 const ENV_KEY: &str = "ELODIN_RENDER_BRIDGE_SOCK";
 
+fn elapsed_ms(start: Instant) -> f64 {
+    start.elapsed().as_secs_f64() * 1000.0
+}
+
 // ---------------------------------------------------------------------------
 // Batch render request (multiple cameras in one request)
 // ---------------------------------------------------------------------------
@@ -16,6 +20,27 @@ const ENV_KEY: &str = "ELODIN_RENDER_BRIDGE_SOCK";
 pub struct BatchRenderRequest {
     pub camera_names: Vec<String>,
     pub timestamp: Timestamp,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct RenderBridgeRespondMetrics {
+    pub response_header_write_ms: f64,
+    pub frame_header_write_ms: f64,
+    pub frame_bytes_write_ms: f64,
+    pub flush_ms: f64,
+    pub frame_count: usize,
+    pub total_bytes: usize,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct RenderBridgeClientMetrics {
+    pub send_request_ms: f64,
+    pub response_header_read_ms: f64,
+    pub frame_header_read_ms: f64,
+    pub frame_data_read_ms: f64,
+    pub on_frame_ms: f64,
+    pub frame_count: usize,
+    pub total_bytes: usize,
 }
 
 // ---------------------------------------------------------------------------
@@ -175,31 +200,62 @@ impl RenderBridgeServer {
         &self,
         timestamp: Timestamp,
         frames: &[(String, Vec<u8>)],
-    ) -> std::io::Result<()> {
+    ) -> std::io::Result<RenderBridgeRespondMetrics> {
+        let respond_span = tracing::info_span!(
+            "render_bridge_respond_batch",
+            timestamp = timestamp.0,
+            frame_count = frames.len(),
+            total_bytes = tracing::field::Empty,
+            frame_bytes_write_ms = tracing::field::Empty,
+        );
+        let _respond_span = respond_span.enter();
         let mut guard = self.client.lock().unwrap();
         let Some((_, writer)) = guard.as_mut() else {
-            return Ok(());
+            return Ok(RenderBridgeRespondMetrics::default());
+        };
+        let mut metrics = RenderBridgeRespondMetrics {
+            frame_count: frames.len(),
+            ..Default::default()
         };
 
+        let response_header_start = Instant::now();
         if let Err(e) = writeln!(writer, "FRAMES {} {}", frames.len(), timestamp.0) {
             *guard = None;
             return Err(e);
         }
+        metrics.response_header_write_ms = elapsed_ms(response_header_start);
         for (camera_name, frame_bytes) in frames {
-            if let Err(e) = writeln!(writer, "{} {}", camera_name, frame_bytes.len()) {
-                *guard = None;
-                return Err(e);
+            {
+                let _span = tracing::info_span!(
+                    "render_bridge_write_frame",
+                    camera_name = camera_name.as_str(),
+                    frame_len = frame_bytes.len()
+                )
+                .entered();
+                let frame_header_start = Instant::now();
+                if let Err(e) = writeln!(writer, "{} {}", camera_name, frame_bytes.len()) {
+                    *guard = None;
+                    return Err(e);
+                }
+                metrics.frame_header_write_ms += elapsed_ms(frame_header_start);
+                let frame_bytes_start = Instant::now();
+                if let Err(e) = writer.write_all(frame_bytes) {
+                    *guard = None;
+                    return Err(e);
+                }
+                metrics.frame_bytes_write_ms += elapsed_ms(frame_bytes_start);
             }
-            if let Err(e) = writer.write_all(frame_bytes) {
-                *guard = None;
-                return Err(e);
-            }
+            metrics.total_bytes += frame_bytes.len();
         }
+        let flush_start = Instant::now();
         if let Err(e) = writer.flush() {
             *guard = None;
             return Err(e);
         }
-        Ok(())
+        metrics.flush_ms = elapsed_ms(flush_start);
+        respond_span.record("total_bytes", metrics.total_bytes);
+        respond_span.record("frame_bytes_write_ms", metrics.frame_bytes_write_ms);
+        Ok(metrics)
     }
 
     /// Send an empty response (no frames rendered).
@@ -298,17 +354,18 @@ impl RenderBridgeClient {
         Ok(frames.into_iter().next())
     }
 
-    /// Render multiple cameras in a single batch request.
-    /// Returns a Vec of rendered frames (may be fewer than requested if some cameras fail).
-    pub fn render_cameras(
+    fn send_render_request(
         &mut self,
         camera_names: &[&str],
         timestamp: Timestamp,
-    ) -> Result<Vec<RenderedFrame>, String> {
-        if camera_names.is_empty() {
-            return Ok(vec![]);
-        }
-
+    ) -> Result<f64, String> {
+        let _span = tracing::info_span!(
+            "render_bridge_send_request",
+            camera_count = camera_names.len(),
+            timestamp = timestamp.0
+        )
+        .entered();
+        let send_request_start = Instant::now();
         if camera_names.len() == 1 {
             writeln!(self.writer, "RENDER {} {}", camera_names[0], timestamp.0)
                 .map_err(|e| format!("Failed to send render request: {e}"))?;
@@ -328,15 +385,49 @@ impl RenderBridgeClient {
         self.writer
             .flush()
             .map_err(|e| format!("Failed to flush: {e}"))?;
+        Ok(elapsed_ms(send_request_start))
+    }
+
+    fn render_cameras_buffered_into<F>(
+        &mut self,
+        camera_names: &[&str],
+        timestamp: Timestamp,
+        mut on_frame: F,
+    ) -> Result<RenderBridgeClientMetrics, String>
+    where
+        F: FnMut(String, Timestamp, &mut Vec<u8>) -> Result<(), String>,
+    {
+        let request_span = tracing::info_span!(
+            "render_bridge_client_request",
+            camera_count = camera_names.len(),
+            timestamp = timestamp.0,
+            frame_count = tracing::field::Empty,
+            total_bytes = tracing::field::Empty,
+            response_header_read_ms = tracing::field::Empty,
+            frame_header_read_ms = tracing::field::Empty,
+            frame_data_read_ms = tracing::field::Empty,
+            on_frame_ms = tracing::field::Empty,
+        );
+        let _request_span = request_span.enter();
+        let mut metrics = RenderBridgeClientMetrics::default();
+        if camera_names.is_empty() {
+            return Ok(metrics);
+        }
+
+        metrics.send_request_ms = self.send_render_request(camera_names, timestamp)?;
 
         let mut response_line = String::new();
-        self.reader
-            .read_line(&mut response_line)
-            .map_err(|e| format!("Render timeout or read error: {e}"))?;
+        {
+            let _span = tracing::info_span!("render_bridge_read_response_header").entered();
+            let response_header_start = Instant::now();
+            self.reader
+                .read_line(&mut response_line)
+                .map_err(|e| format!("Render timeout or read error: {e}"))?;
+            metrics.response_header_read_ms = elapsed_ms(response_header_start);
+        }
+        request_span.record("response_header_read_ms", metrics.response_header_read_ms);
 
         let response_line = response_line.trim_end();
-
-        // Parse "FRAMES {count} {timestamp}"
         let mut parts = response_line.splitn(3, ' ');
         let cmd = parts.next().unwrap_or("");
         if cmd != "FRAMES" {
@@ -353,13 +444,18 @@ impl RenderBridgeClient {
             .ok_or("Missing timestamp in response")?
             .parse()
             .map_err(|_| "Invalid timestamp in response")?;
+        request_span.record("frame_count", count);
 
-        let mut frames = Vec::with_capacity(count);
         for _ in 0..count {
             let mut frame_header = String::new();
-            self.reader
-                .read_line(&mut frame_header)
-                .map_err(|e| format!("Failed to read frame header: {e}"))?;
+            {
+                let _span = tracing::info_span!("render_bridge_read_frame_header").entered();
+                let frame_header_start = Instant::now();
+                self.reader
+                    .read_line(&mut frame_header)
+                    .map_err(|e| format!("Failed to read frame header: {e}"))?;
+                metrics.frame_header_read_ms += elapsed_ms(frame_header_start);
+            }
 
             let frame_header = frame_header.trim_end();
             let mut header_parts = frame_header.rsplitn(2, ' ');
@@ -374,17 +470,75 @@ impl RenderBridgeClient {
                 .to_string();
 
             self.frame_buffer.resize(frame_len, 0);
-            self.reader
-                .read_exact(&mut self.frame_buffer[..frame_len])
-                .map_err(|e| format!("Failed to read frame data: {e}"))?;
+            {
+                let _span = tracing::info_span!(
+                    "render_bridge_read_frame_bytes",
+                    camera_name = camera_name.as_str(),
+                    frame_len
+                )
+                .entered();
+                let frame_data_start = Instant::now();
+                self.reader
+                    .read_exact(&mut self.frame_buffer[..frame_len])
+                    .map_err(|e| format!("Failed to read frame data: {e}"))?;
+                metrics.frame_data_read_ms += elapsed_ms(frame_data_start);
+            }
+            metrics.frame_count += 1;
+            metrics.total_bytes += frame_len;
 
-            frames.push(RenderedFrame {
-                camera_name,
-                timestamp: Timestamp(resp_timestamp),
-                data: self.frame_buffer[..frame_len].to_vec(),
-            });
+            {
+                let _span = tracing::info_span!(
+                    "render_bridge_on_frame",
+                    camera_name = camera_name.as_str()
+                )
+                .entered();
+                let on_frame_start = Instant::now();
+                on_frame(
+                    camera_name,
+                    Timestamp(resp_timestamp),
+                    &mut self.frame_buffer,
+                )?;
+                metrics.on_frame_ms += elapsed_ms(on_frame_start);
+            }
         }
 
+        request_span.record("total_bytes", metrics.total_bytes);
+        request_span.record("frame_header_read_ms", metrics.frame_header_read_ms);
+        request_span.record("frame_data_read_ms", metrics.frame_data_read_ms);
+        request_span.record("on_frame_ms", metrics.on_frame_ms);
+
+        Ok(metrics)
+    }
+
+    pub fn render_cameras_with_metrics(
+        &mut self,
+        camera_names: &[&str],
+        timestamp: Timestamp,
+    ) -> Result<(Vec<RenderedFrame>, RenderBridgeClientMetrics), String> {
+        let mut frames = Vec::new();
+        let metrics = self.render_cameras_buffered_into(
+            camera_names,
+            timestamp,
+            |camera_name, frame_timestamp, buffer| {
+                frames.push(RenderedFrame {
+                    camera_name,
+                    timestamp: frame_timestamp,
+                    data: buffer.clone(),
+                });
+                Ok(())
+            },
+        )?;
+        Ok((frames, metrics))
+    }
+
+    /// Render multiple cameras in a single batch request.
+    /// Returns a Vec of rendered frames (may be fewer than requested if some cameras fail).
+    pub fn render_cameras(
+        &mut self,
+        camera_names: &[&str],
+        timestamp: Timestamp,
+    ) -> Result<Vec<RenderedFrame>, String> {
+        let (frames, _metrics) = self.render_cameras_with_metrics(camera_names, timestamp)?;
         Ok(frames)
     }
 }

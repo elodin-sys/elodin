@@ -112,6 +112,13 @@ pub struct ReadbackArmed(pub bool);
 #[derive(Resource, Default)]
 pub struct HeadlessMode;
 
+#[derive(Clone, Copy, Debug, Default, Resource)]
+pub struct SensorCameraRenderMetrics {
+    pub image_copy_driver_ms: f64,
+    pub receive_image_poll_wait_ms: f64,
+    pub receive_image_from_buffer_ms: f64,
+}
+
 // ---------------------------------------------------------------------------
 // Post-process render graph
 // ---------------------------------------------------------------------------
@@ -272,6 +279,7 @@ impl Plugin for SensorCameraPlugin {
                 .insert_resource(SensorFrameSender(tx))
                 .init_resource::<ReusableFrameBuffer>()
                 .init_resource::<BufferToggle>()
+                .init_resource::<SensorCameraRenderMetrics>()
                 .add_systems(ExtractSchedule, image_copy_extract)
                 .add_systems(
                     Render,
@@ -536,7 +544,9 @@ fn image_copy_driver(
     render_queue: Res<RenderQueue>,
     gpu_images: Res<RenderAssets<bevy::render::texture::GpuImage>>,
     buffer_toggle: Res<BufferToggle>,
+    mut metrics: ResMut<SensorCameraRenderMetrics>,
 ) {
+    let _span = tracing::info_span!("sensor_camera_image_copy_driver").entered();
     let copy_start = Instant::now();
     for (i, image_copier) in image_copiers.0.iter().enumerate() {
         if !image_copier.is_active {
@@ -576,7 +586,7 @@ fn image_copy_driver(
 
         render_queue.submit(std::iter::once(encoder.finish()));
     }
-    tracing::debug!(image_copy_driver_ms = copy_start.elapsed().as_secs_f64() * 1000.0);
+    metrics.image_copy_driver_ms = copy_start.elapsed().as_secs_f64() * 1000.0;
 }
 
 fn receive_image_from_buffer(
@@ -585,7 +595,14 @@ fn receive_image_from_buffer(
     sender: Res<SensorFrameSender>,
     mut reusable: ResMut<ReusableFrameBuffer>,
     mut buffer_toggle: ResMut<BufferToggle>,
+    mut metrics: ResMut<SensorCameraRenderMetrics>,
 ) {
+    let receive_span = tracing::info_span!(
+        "sensor_camera_receive_image_from_buffer",
+        receive_image_poll_wait_ms = tracing::field::Empty,
+        receive_image_from_buffer_ms = tracing::field::Empty,
+    );
+    let _receive_span = receive_span.enter();
     let cam_count = image_copiers.0.len();
     if buffer_toggle.0.len() < cam_count {
         buffer_toggle.0.resize(cam_count, 0);
@@ -593,6 +610,10 @@ fn receive_image_from_buffer(
     if reusable.0.len() < cam_count {
         reusable.0.resize_with(cam_count, Vec::new);
     }
+
+    metrics.receive_image_poll_wait_ms = 0.0;
+    metrics.receive_image_from_buffer_ms = 0.0;
+    let receive_start = Instant::now();
 
     for (i, image_copier) in image_copiers.0.iter().enumerate() {
         if !image_copier.is_active {
@@ -615,14 +636,18 @@ fn receive_image_from_buffer(
         // For the headless render-server this is required since the simulation
         // is waiting for the frame. The double-buffer infrastructure is in place
         // for future async improvements.
-        let poll_start = Instant::now();
-        if render_device.poll(PollType::wait()).is_err() {
-            continue;
+        {
+            let _span = tracing::info_span!(
+                "sensor_camera_poll_wait",
+                camera_name = image_copier.camera_name.as_str()
+            )
+            .entered();
+            let poll_start = Instant::now();
+            if render_device.poll(PollType::wait()).is_err() {
+                continue;
+            }
+            metrics.receive_image_poll_wait_ms += poll_start.elapsed().as_secs_f64() * 1000.0;
         }
-        tracing::debug!(
-            receive_image_poll_wait_ms = poll_start.elapsed().as_secs_f64() * 1000.0,
-            camera = %image_copier.camera_name
-        );
 
         if r.recv().is_ok() {
             let data = buffer_slice.get_mapped_range();
@@ -666,6 +691,16 @@ fn receive_image_from_buffer(
 
         buffer_toggle.0[i] = 1 - buf_idx;
     }
+
+    metrics.receive_image_from_buffer_ms = receive_start.elapsed().as_secs_f64() * 1000.0;
+    receive_span.record(
+        "receive_image_poll_wait_ms",
+        metrics.receive_image_poll_wait_ms,
+    );
+    receive_span.record(
+        "receive_image_from_buffer_ms",
+        metrics.receive_image_from_buffer_ms,
+    );
 }
 
 // ---------------------------------------------------------------------------

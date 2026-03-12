@@ -45,7 +45,7 @@ impl FrameDbWriter {
 pub type SharedFrameDbWriter = Arc<Mutex<Option<FrameDbWriter>>>;
 
 use elodin_db::DB;
-use elodin_db::render_bridge::RenderBridgeClient;
+use elodin_db::render_bridge::{RenderBridgeClient, RenderBridgeClientMetrics};
 use impeller2::types::{ComponentId, PrimType, Timestamp};
 use numpy::{PyArray1, PyArrayDescrMethods, PyUntypedArray, PyUntypedArrayMethods};
 use pyo3::prelude::*;
@@ -57,6 +57,63 @@ use crate::Error;
 /// Shared persistent render bridge client.
 /// Created lazily on first render_camera() call, reused across all ticks.
 pub type SharedRenderClient = Arc<Mutex<Option<RenderBridgeClient>>>;
+
+const RENDER_CLIENT_TARGET_MS: f64 = 5.0;
+const RENDER_CLIENT_CRITICAL_MS: f64 = 8.0;
+
+fn elapsed_ms(start: Instant) -> f64 {
+    start.elapsed().as_secs_f64() * 1000.0
+}
+
+fn log_render_client_metrics(
+    operation: &'static str,
+    total_ms: f64,
+    metrics: RenderBridgeClientMetrics,
+    db_enqueue_ms: f64,
+    db_enqueue_count: usize,
+) {
+    let span = tracing::info_span!(
+        "render_client_operation",
+        render_operation = operation,
+        total_render_client_ms = tracing::field::Empty,
+        client_send_request_ms = tracing::field::Empty,
+        client_response_header_read_ms = tracing::field::Empty,
+        client_frame_header_read_ms = tracing::field::Empty,
+        client_frame_data_read_ms = tracing::field::Empty,
+        client_on_frame_ms = tracing::field::Empty,
+        db_enqueue_ms = tracing::field::Empty,
+        db_enqueue_count,
+        client_frame_count = tracing::field::Empty,
+        client_total_bytes = tracing::field::Empty,
+    );
+    let _span = span.enter();
+    span.record("total_render_client_ms", total_ms);
+    span.record("client_send_request_ms", metrics.send_request_ms);
+    span.record(
+        "client_response_header_read_ms",
+        metrics.response_header_read_ms,
+    );
+    span.record("client_frame_header_read_ms", metrics.frame_header_read_ms);
+    span.record("client_frame_data_read_ms", metrics.frame_data_read_ms);
+    span.record("client_on_frame_ms", metrics.on_frame_ms);
+    span.record("db_enqueue_ms", db_enqueue_ms);
+    span.record("client_frame_count", metrics.frame_count);
+    span.record("client_total_bytes", metrics.total_bytes);
+
+    if total_ms > RENDER_CLIENT_CRITICAL_MS {
+        tracing::warn!(
+            render_operation = operation,
+            total_render_client_ms = total_ms,
+            "Render client path exceeded critical latency budget"
+        );
+    } else if total_ms > RENDER_CLIENT_TARGET_MS {
+        tracing::info!(
+            render_operation = operation,
+            total_render_client_ms = total_ms,
+            "Render client path exceeded target latency"
+        );
+    }
+}
 
 /// Helper function to convert a byte buffer to a numpy array based on primitive type.
 fn buf_to_numpy_array<'py>(py: Python<'py>, buf: &[u8], prim_type: PrimType) -> Bound<'py, PyAny> {
@@ -191,6 +248,12 @@ impl StepContext {
 
         let total_start = Instant::now();
         let timestamp = Timestamp(self.timestamp.load(Ordering::SeqCst));
+        let _span = tracing::info_span!(
+            "step_context_render_cameras",
+            camera_count = camera_names.len(),
+            timestamp = timestamp.0
+        )
+        .entered();
 
         // Get or create the persistent render client.
         let mut guard = self.render_client.lock().map_err(|_| {
@@ -208,20 +271,14 @@ impl StepContext {
 
         let client = guard.as_mut().unwrap();
 
-        // Send batch render request (UDS round-trip).
-        let uds_start = Instant::now();
-        let frames = client
-            .render_cameras(camera_names, timestamp)
+        let (frames, client_metrics) = client
+            .render_cameras_with_metrics(camera_names, timestamp)
             .map_err(|e| Error::PyO3(pyo3::exceptions::PyRuntimeError::new_err(e)))?;
-        let uds_ms = uds_start.elapsed().as_secs_f64() * 1000.0;
-        tracing::debug!(
-            render_uds_round_trip_ms = uds_ms,
-            frame_count = frames.len()
-        );
 
         // Push frames to DB via the background worker thread. The worker uses a
         // bounded channel so we never block. We need to clone frame data since the
         // caller consumes it for the numpy return value.
+        let mut db_enqueue_ms = 0.0;
         {
             let mut writer_guard = self.frame_db_writer.lock().map_err(|_| {
                 Error::PyO3(pyo3::exceptions::PyRuntimeError::new_err(
@@ -234,11 +291,19 @@ impl StepContext {
             let writer = writer_guard.as_ref().unwrap();
             for frame in &frames {
                 let msg_id = impeller2::types::msg_id(&frame.camera_name);
+                let enqueue_start = Instant::now();
                 writer.push(msg_id, frame.timestamp, frame.data.clone());
+                db_enqueue_ms += elapsed_ms(enqueue_start);
             }
         }
 
-        tracing::debug!(total_render_cameras_ms = total_start.elapsed().as_secs_f64() * 1000.0);
+        log_render_client_metrics(
+            "render_cameras_returned",
+            elapsed_ms(total_start),
+            client_metrics,
+            db_enqueue_ms,
+            frames.len(),
+        );
 
         Ok(frames)
     }
