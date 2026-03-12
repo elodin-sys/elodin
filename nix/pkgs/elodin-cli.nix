@@ -2,6 +2,7 @@
   pkgs,
   rustToolchain,
   lib,
+  gitRev ? "unknown",
   elodinPy,
   python,
   pythonPackages,
@@ -43,6 +44,8 @@
       ++ lib.optionals pkgs.stdenv.isLinux common.linuxGraphicsAudioDeps;
 
     doCheck = false;
+
+    GIT_HASH = gitRev;
 
     postInstall = ''
       wrapProgram $out/bin/elodin \

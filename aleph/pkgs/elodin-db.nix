@@ -2,6 +2,7 @@
   pkgs,
   rustToolchain,
   lib,
+  gitRev ? "unknown",
   ...
 }: let
   pname = "elodin-db";
@@ -28,6 +29,8 @@
 
     HOST_CC = "${pkgs.stdenv.cc.nativePrefix}cc";
     TARGET_CC = "${pkgs.stdenv.cc.targetPrefix}cc";
+
+    GIT_HASH = gitRev;
 
     doCheck = false;
   };

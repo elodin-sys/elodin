@@ -26,7 +26,7 @@
     ...
   }: let
     rustToolchain = p: p.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
-    elodinOverlay = final: prev: {
+    elodinOverlay = gitRev: final: prev: {
       tracy = final.callPackage ./nix/pkgs/tracy.nix {
         tracy = prev.tracy;
       };
@@ -37,27 +37,32 @@
           pythonPackages = final.python313Packages;
         };
         elodin-cli = final.callPackage ./nix/pkgs/elodin-cli.nix {
-          inherit rustToolchain;
+          inherit rustToolchain gitRev;
           elodinPy = elodin-py.py;
           python = elodin-py.python;
           pythonPackages = elodin-py.pythonPackages;
         };
-        elodin-db = final.callPackage ./aleph/pkgs/elodin-db.nix {inherit rustToolchain;};
+        elodin-db = final.callPackage ./aleph/pkgs/elodin-db.nix {
+          inherit rustToolchain gitRev;
+        };
         elodinsink = final.callPackage ./nix/pkgs/elodinsink.nix {inherit rustToolchain;};
       };
     };
   in
     # overlays are system-agnostic ⇒ define them at top level
     {
-      overlays.default = elodinOverlay;
+      overlays.default = elodinOverlay "unknown";
     }
     // flake-utils.lib.eachDefaultSystem (
       system: let
+        gitRev =
+          nixpkgs.lib.substring 0 7
+          (self.shortRev or self.dirtyShortRev or self.rev or self.dirtyRev or "unknown");
         pkgs = import nixpkgs {
           inherit system;
           overlays = [
             rust-overlay.overlays.default
-            elodinOverlay
+            (elodinOverlay gitRev)
           ];
         };
 
