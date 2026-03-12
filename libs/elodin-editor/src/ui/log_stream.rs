@@ -4,8 +4,10 @@ use bevy::prelude::{Commands, Component, Entity, Query, Res, World};
 use egui::{self, Color32, RichText, ScrollArea};
 use impeller2::types::{OwnedPacket, Timestamp};
 use impeller2_bevy::{CommandsExt, CurrentStreamId, PacketGrantR};
-use impeller2_wkt::{ErrorResponse, FixedRateMsgStream, FixedRateOp, GetMsgs, MsgBatch};
-use std::collections::VecDeque;
+use impeller2_wkt::{
+    CurrentTimestamp, ErrorResponse, FixedRateMsgStream, FixedRateOp, GetMsgs, MsgBatch,
+};
+use std::collections::BTreeMap;
 use std::time::Instant;
 
 use super::PaneName;
@@ -45,7 +47,8 @@ impl Default for ConnectionState {
 
 #[derive(Component)]
 pub struct LogCache {
-    pub entries: VecDeque<(Timestamp, LogEntry)>,
+    pub entries: BTreeMap<Timestamp, Vec<LogEntry>>,
+    pub total_count: usize,
     pub last_stream_activity: Option<Instant>,
     auto_scroll: bool,
     filter_level: u8,
@@ -54,10 +57,37 @@ pub struct LogCache {
 impl Default for LogCache {
     fn default() -> Self {
         Self {
-            entries: VecDeque::new(),
+            entries: BTreeMap::new(),
+            total_count: 0,
             last_stream_activity: None,
             auto_scroll: true,
             filter_level: 0,
+        }
+    }
+}
+
+impl LogCache {
+    fn insert(&mut self, ts: Timestamp, entry: LogEntry) {
+        self.entries.entry(ts).or_default().push(entry);
+        self.total_count += 1;
+
+        while self.total_count > MAX_LOG_ENTRIES {
+            let Some(oldest_ts) = self.entries.keys().next().copied() else {
+                break;
+            };
+
+            let mut remove_bucket = false;
+            if let Some(bucket) = self.entries.get_mut(&oldest_ts) {
+                if !bucket.is_empty() {
+                    bucket.remove(0);
+                    self.total_count -= 1;
+                }
+                remove_bucket = bucket.is_empty();
+            }
+
+            if remove_bucket {
+                self.entries.remove(&oldest_ts);
+            }
         }
     }
 }
@@ -138,11 +168,8 @@ fn send_stream_request(commands: &mut Commands, entity: Entity, msg_id: [u8; 2],
                 && let Ok(mut cache) = caches.get_mut(entity)
                 && let Some(entry) = parse_log_entry(&msg_buf.buf)
             {
-                cache.entries.push_back((timestamp, entry));
+                cache.insert(timestamp, entry);
                 cache.last_stream_activity = Some(Instant::now());
-                if cache.entries.len() > MAX_LOG_ENTRIES {
-                    cache.entries.pop_front();
-                }
             }
             false
         },
@@ -167,11 +194,8 @@ fn send_backfill_request(
                     if let Ok(mut cache) = caches.get_mut(entity) {
                         for (ts, data) in &batch.data {
                             if let Some(entry) = parse_log_entry(data) {
-                                cache.entries.push_back((*ts, entry));
+                                cache.insert(*ts, entry);
                             }
-                        }
-                        while cache.entries.len() > MAX_LOG_ENTRIES {
-                            cache.entries.pop_front();
                         }
                     }
                 }
@@ -207,8 +231,9 @@ pub fn connect_streams(
                     let msg_id = state.msg_id;
                     let start = cache
                         .entries
-                        .back()
-                        .map(|(timestamp, _)| Timestamp(timestamp.0 + 1))
+                        .keys()
+                        .next_back()
+                        .map(|timestamp| Timestamp(timestamp.0 + 1))
                         .unwrap_or(Timestamp(i64::MIN));
                     send_backfill_request(&mut commands, entity, msg_id, start);
                     send_stream_request(&mut commands, entity, msg_id, stream_id.0);
@@ -229,6 +254,7 @@ pub struct LogWidgetQuery {
 #[derive(SystemParam)]
 pub struct LogStreamWidget<'w, 's> {
     query: Query<'w, 's, LogWidgetQuery>,
+    current_time: Res<'w, CurrentTimestamp>,
 }
 
 impl super::widgets::WidgetSystem for LogStreamWidget<'_, '_> {
@@ -242,6 +268,7 @@ impl super::widgets::WidgetSystem for LogStreamWidget<'_, '_> {
         LogStreamWidgetArgs { entity }: Self::Args,
     ) -> Self::Output {
         let mut state = state.get_mut(world);
+        let current_ts = state.current_time.0;
         let Ok(LogWidgetQueryItem {
             state: log_state,
             mut cache,
@@ -251,6 +278,13 @@ impl super::widgets::WidgetSystem for LogStreamWidget<'_, '_> {
         };
 
         ui.vertical(|ui| {
+            let filtered: Vec<_> = cache
+                .entries
+                .range(..=current_ts)
+                .flat_map(|(ts, entries)| entries.iter().map(move |entry| (*ts, entry.clone())))
+                .filter(|(_, entry)| entry.level >= cache.filter_level)
+                .collect();
+
             // Toolbar
             ui.horizontal(|ui| {
                 ui.label(
@@ -297,7 +331,7 @@ impl super::widgets::WidgetSystem for LogStreamWidget<'_, '_> {
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.label(
-                        RichText::new(format!("{} entries", cache.entries.len()))
+                        RichText::new(format!("{} entries", filtered.len()))
                             .small()
                             .color(Color32::from_rgb(120, 120, 120)),
                     );
@@ -308,18 +342,13 @@ impl super::widgets::WidgetSystem for LogStreamWidget<'_, '_> {
 
             // Log entries
             let row_height = 18.0;
-            let filtered: Vec<_> = cache
-                .entries
-                .iter()
-                .filter(|(_, entry)| entry.level >= cache.filter_level)
-                .collect();
 
             ScrollArea::vertical()
                 .auto_shrink([false, false])
                 .stick_to_bottom(cache.auto_scroll)
                 .show_rows(ui, row_height, filtered.len(), |ui, row_range| {
                     for i in row_range {
-                        if let Some((ts, entry)) = filtered.get(i).map(|e| (&e.0, &e.1)) {
+                        if let Some((ts, entry)) = filtered.get(i) {
                             ui.horizontal(|ui| {
                                 let ts_secs = ts.0 as f64 / 1_000_000.0;
                                 ui.label(
