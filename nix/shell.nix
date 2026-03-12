@@ -204,6 +204,10 @@ with pkgs; let
   };
   linuxShellAttrs = lib.optionalAttrs pkgs.stdenv.isLinux (
     common.linuxGraphicsEnv {inherit pkgs;}
+    // {
+      CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER = "clang";
+      CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER = "clang";
+    }
   );
 in {
   # Unified shell that combines all development environments
