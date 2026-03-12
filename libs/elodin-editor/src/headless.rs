@@ -9,7 +9,8 @@ use bevy::{
     app::{App, AppExit, AppLabel, Plugin, Startup},
     asset::{AssetPlugin, Assets, UnapprovedPathMode},
     audio::AudioPlugin,
-    diagnostic::{DiagnosticsPlugin, DiagnosticsStore},
+    diagnostic::{DiagnosticsPlugin, DiagnosticsStore, FrameCount},
+    ecs::system::IntoSystem,
     gilrs::GilrsPlugin,
     gizmos::GizmoPlugin,
     input::InputPlugin,
@@ -145,6 +146,7 @@ impl Plugin for HeadlessEditorPlugin {
                 .init_resource::<HeadlessMode>()
                 .init_resource::<HeadlessRenderScheduleTimingState>()
                 .init_resource::<HeadlessRenderScheduleMetrics>()
+                .init_resource::<HeadlessViewUniformPrepareMetrics>()
                 .add_systems(
                     Render,
                     (
@@ -232,6 +234,7 @@ impl Plugin for HeadlessEditorPlugin {
                         ),
                     ),
                 );
+            install_headless_prepare_view_uniforms_override(render_app);
         }
     }
 }
@@ -385,6 +388,9 @@ struct HeadlessRenderScheduleMetrics {
     queue_ms: f64,
     phase_sort_ms: f64,
     prepare_resources_view_uniforms_ms: f64,
+    prepare_resources_view_uniforms_clear_ms: f64,
+    prepare_resources_view_uniforms_build_ms: f64,
+    prepare_resources_view_uniforms_write_buffer_ms: f64,
     prepare_resources_clusters_ms: f64,
     prepare_resources_core_3d_depth_textures_ms: f64,
     prepare_resources_core_3d_transmission_textures_ms: f64,
@@ -410,6 +416,13 @@ struct HeadlessRenderScheduleMetrics {
     view_transmission_texture_count: usize,
     no_indirect_drawing_view_count: usize,
     occlusion_culling_view_count: usize,
+}
+
+#[derive(Clone, Copy, Debug, Default, Resource)]
+struct HeadlessViewUniformPrepareMetrics {
+    clear_ms: f64,
+    build_ms: f64,
+    write_buffer_ms: f64,
 }
 
 #[derive(Debug, Default, Resource)]
@@ -557,6 +570,141 @@ fn reset_headless_render_schedule_timing(world: &mut World) {
     };
     *world.resource_mut::<HeadlessRenderScheduleMetrics>() =
         HeadlessRenderScheduleMetrics::default();
+    *world.resource_mut::<HeadlessViewUniformPrepareMetrics>() =
+        HeadlessViewUniformPrepareMetrics::default();
+}
+
+fn install_headless_prepare_view_uniforms_override(render_app: &mut bevy::app::SubApp) {
+    render_app.edit_schedule(Render, |schedule| {
+        let Some(system_key) = schedule
+            .graph()
+            .systems
+            .iter()
+            .find_map(|(key, system, _)| {
+                system
+                    .name()
+                    .ends_with("prepare_view_uniforms")
+                    .then_some(key)
+            })
+        else {
+            tracing::warn!(
+                "Failed to find bevy_render::view::prepare_view_uniforms for headless override"
+            );
+            return;
+        };
+        let Some(system) = schedule.graph_mut().systems.get_mut(system_key) else {
+            tracing::warn!(
+                "Failed to mutate prepare_view_uniforms system slot for headless override"
+            );
+            return;
+        };
+        system.system = Box::new(
+            IntoSystem::into_system(headless_prepare_view_uniforms)
+                .with_name("bevy_render::view::prepare_view_uniforms"),
+        );
+    });
+}
+
+fn headless_prepare_view_uniforms(
+    mut commands: Commands,
+    render_device: Res<bevy::render::renderer::RenderDevice>,
+    render_queue: Res<bevy::render::renderer::RenderQueue>,
+    mut view_uniforms: ResMut<bevy::render::view::ViewUniforms>,
+    views: Query<(
+        Entity,
+        Option<&bevy::render::camera::ExtractedCamera>,
+        &bevy::render::view::ExtractedView,
+        Option<&bevy::camera::primitives::Frustum>,
+        Option<&bevy::render::camera::TemporalJitter>,
+        Option<&bevy::render::camera::MipBias>,
+        Option<&bevy::camera::MainPassResolutionOverride>,
+    )>,
+    frame_count: Res<FrameCount>,
+    mut metrics: ResMut<HeadlessViewUniformPrepareMetrics>,
+) {
+    let clear_start = Instant::now();
+    view_uniforms.uniforms.clear();
+    metrics.clear_ms = elapsed_ms(clear_start);
+
+    if views.is_empty() {
+        return;
+    }
+
+    let frame_count = frame_count.0;
+    let default_exposure = bevy::camera::Exposure::default().exposure();
+    let build_start = Instant::now();
+    for (
+        entity,
+        extracted_camera,
+        extracted_view,
+        frustum,
+        temporal_jitter,
+        mip_bias,
+        resolution_override,
+    ) in &views
+    {
+        let viewport = extracted_view.viewport.as_vec4();
+        let mut main_pass_viewport = viewport;
+        if let Some(resolution_override) = resolution_override {
+            main_pass_viewport.z = resolution_override.0.x as f32;
+            main_pass_viewport.w = resolution_override.0.y as f32;
+        }
+
+        let unjittered_projection = extracted_view.clip_from_view;
+        let mut clip_from_view = unjittered_projection;
+        if let Some(temporal_jitter) = temporal_jitter {
+            temporal_jitter.jitter_projection(
+                &mut clip_from_view,
+                Vec2::new(main_pass_viewport.z, main_pass_viewport.w),
+            );
+        }
+
+        let view_from_clip = clip_from_view.inverse();
+        let world_from_view = extracted_view.world_from_view.to_matrix();
+        let view_from_world = world_from_view.inverse();
+        let clip_from_world = if temporal_jitter.is_some() {
+            clip_from_view * view_from_world
+        } else {
+            extracted_view
+                .clip_from_world
+                .unwrap_or_else(|| clip_from_view * view_from_world)
+        };
+        let frustum = frustum
+            .map(|frustum| frustum.half_spaces.map(|half_space| half_space.normal_d()))
+            .unwrap_or([Vec4::ZERO; 6]);
+
+        let offset = view_uniforms
+            .uniforms
+            .push(&bevy::render::view::ViewUniform {
+                clip_from_world,
+                unjittered_clip_from_world: unjittered_projection * view_from_world,
+                world_from_clip: world_from_view * view_from_clip,
+                world_from_view,
+                view_from_world,
+                clip_from_view,
+                view_from_clip,
+                world_position: extracted_view.world_from_view.translation(),
+                exposure: extracted_camera
+                    .map(|camera| camera.exposure)
+                    .unwrap_or(default_exposure),
+                viewport,
+                main_pass_viewport,
+                frustum,
+                color_grading: extracted_view.color_grading.clone().into(),
+                mip_bias: mip_bias.map_or(0.0, |mip_bias| mip_bias.0),
+                frame_count,
+            });
+        commands
+            .entity(entity)
+            .insert(bevy::render::view::ViewUniformOffset { offset });
+    }
+    metrics.build_ms = elapsed_ms(build_start);
+
+    let write_buffer_start = Instant::now();
+    view_uniforms
+        .uniforms
+        .write_buffer(&render_device, &render_queue);
+    metrics.write_buffer_ms = elapsed_ms(write_buffer_start);
 }
 
 fn record_after_extract_commands(mut state: ResMut<HeadlessRenderScheduleTimingState>) {
@@ -698,6 +846,7 @@ fn record_after_cleanup(mut state: ResMut<HeadlessRenderScheduleTimingState>) {
 fn finalize_headless_render_schedule_metrics(
     state: Res<HeadlessRenderScheduleTimingState>,
     mut metrics: ResMut<HeadlessRenderScheduleMetrics>,
+    view_uniform_prepare_metrics: Res<HeadlessViewUniformPrepareMetrics>,
     extracted_cameras: Query<(), With<bevy::render::camera::ExtractedCamera>>,
     extracted_views: Query<(), With<bevy::render::view::ExtractedView>>,
     view_uniform_offsets: Query<(), With<bevy::render::view::ViewUniformOffset>>,
@@ -743,6 +892,10 @@ fn finalize_headless_render_schedule_metrics(
     metrics.phase_sort_ms = elapsed_between(state.after_queue, state.after_phase_sort);
     metrics.prepare_resources_view_uniforms_ms =
         elapsed_between(state.after_phase_sort, state.after_prepare_view_uniforms);
+    metrics.prepare_resources_view_uniforms_clear_ms = view_uniform_prepare_metrics.clear_ms;
+    metrics.prepare_resources_view_uniforms_build_ms = view_uniform_prepare_metrics.build_ms;
+    metrics.prepare_resources_view_uniforms_write_buffer_ms =
+        view_uniform_prepare_metrics.write_buffer_ms;
     metrics.prepare_resources_clusters_ms = elapsed_between(
         state.after_prepare_view_uniforms,
         state.after_prepare_clusters,
@@ -1061,6 +1214,16 @@ fn headless_sensor_runner(mut app: App) -> AppExit {
                     update0_render_prepare_resources_view_uniforms_ms = update0_breakdown
                         .render_schedule
                         .prepare_resources_view_uniforms_ms,
+                    update0_render_prepare_resources_view_uniforms_clear_ms = update0_breakdown
+                        .render_schedule
+                        .prepare_resources_view_uniforms_clear_ms,
+                    update0_render_prepare_resources_view_uniforms_build_ms = update0_breakdown
+                        .render_schedule
+                        .prepare_resources_view_uniforms_build_ms,
+                    update0_render_prepare_resources_view_uniforms_write_buffer_ms =
+                        update0_breakdown
+                            .render_schedule
+                            .prepare_resources_view_uniforms_write_buffer_ms,
                     update0_render_prepare_resources_clusters_ms = update0_breakdown
                         .render_schedule
                         .prepare_resources_clusters_ms,
@@ -1208,6 +1371,16 @@ fn headless_sensor_runner(mut app: App) -> AppExit {
                     fallback_render_prepare_resources_view_uniforms_ms = fallback_breakdown
                         .render_schedule
                         .prepare_resources_view_uniforms_ms,
+                    fallback_render_prepare_resources_view_uniforms_clear_ms = fallback_breakdown
+                        .render_schedule
+                        .prepare_resources_view_uniforms_clear_ms,
+                    fallback_render_prepare_resources_view_uniforms_build_ms = fallback_breakdown
+                        .render_schedule
+                        .prepare_resources_view_uniforms_build_ms,
+                    fallback_render_prepare_resources_view_uniforms_write_buffer_ms =
+                        fallback_breakdown
+                            .render_schedule
+                            .prepare_resources_view_uniforms_write_buffer_ms,
                     fallback_render_prepare_resources_clusters_ms = fallback_breakdown
                         .render_schedule
                         .prepare_resources_clusters_ms,
@@ -1370,6 +1543,16 @@ fn headless_sensor_runner(mut app: App) -> AppExit {
                     update0_render_prepare_resources_view_uniforms_ms = update0_breakdown
                         .render_schedule
                         .prepare_resources_view_uniforms_ms,
+                    update0_render_prepare_resources_view_uniforms_clear_ms = update0_breakdown
+                        .render_schedule
+                        .prepare_resources_view_uniforms_clear_ms,
+                    update0_render_prepare_resources_view_uniforms_build_ms = update0_breakdown
+                        .render_schedule
+                        .prepare_resources_view_uniforms_build_ms,
+                    update0_render_prepare_resources_view_uniforms_write_buffer_ms =
+                        update0_breakdown
+                            .render_schedule
+                            .prepare_resources_view_uniforms_write_buffer_ms,
                     update0_render_prepare_resources_clusters_ms = update0_breakdown
                         .render_schedule
                         .prepare_resources_clusters_ms,
@@ -1500,6 +1683,16 @@ fn headless_sensor_runner(mut app: App) -> AppExit {
                     fallback_render_prepare_resources_view_uniforms_ms = fallback_breakdown
                         .render_schedule
                         .prepare_resources_view_uniforms_ms,
+                    fallback_render_prepare_resources_view_uniforms_clear_ms = fallback_breakdown
+                        .render_schedule
+                        .prepare_resources_view_uniforms_clear_ms,
+                    fallback_render_prepare_resources_view_uniforms_build_ms = fallback_breakdown
+                        .render_schedule
+                        .prepare_resources_view_uniforms_build_ms,
+                    fallback_render_prepare_resources_view_uniforms_write_buffer_ms =
+                        fallback_breakdown
+                            .render_schedule
+                            .prepare_resources_view_uniforms_write_buffer_ms,
                     fallback_render_prepare_resources_clusters_ms = fallback_breakdown
                         .render_schedule
                         .prepare_resources_clusters_ms,
