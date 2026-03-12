@@ -83,9 +83,7 @@ def fmt_dist(title: str, vals: list[float]) -> None:
         f"p50={stats.p50:.3f} p90={stats.p90:.3f} p95={stats.p95:.3f} "
         f"p99={stats.p99:.3f} min={stats.minimum:.3f} max={stats.maximum:.3f}"
     )
-    print(
-        f"  <5ms={stats.lt5_pct:.2f}%  <8ms={stats.lt8_pct:.2f}%  <=8ms={stats.le8_pct:.2f}%"
-    )
+    print(f"  <5ms={stats.lt5_pct:.2f}%  <8ms={stats.lt8_pct:.2f}%  <=8ms={stats.le8_pct:.2f}%")
 
 
 def parse_perf_line(line: str) -> dict[str, float] | None:
