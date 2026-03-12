@@ -5,6 +5,7 @@ Summarize sensor-camera performance from an elodin run log.
 Prints:
  - PERF interpretation against real-time tick budget
  - Distribution stats for total_request_ms and total_render_client_ms
+ - Explicit 5-8ms goal checks with clear verdicts
 """
 
 from __future__ import annotations
@@ -37,6 +38,12 @@ class DistStats:
     lt5_pct: float
     lt8_pct: float
     le8_pct: float
+
+
+def pct_le(vals: list[float], threshold: float) -> float:
+    if not vals:
+        return 0.0
+    return 100.0 * sum(1 for v in vals if v <= threshold) / len(vals)
 
 
 def percentile(sorted_vals: list[float], p: float) -> float:
@@ -102,6 +109,30 @@ def main() -> int:
         default=1.0 / 120.0,
         help="Simulation time step in seconds used to compute real-time budget.",
     )
+    parser.add_argument(
+        "--goal-low-ms",
+        type=float,
+        default=5.0,
+        help="Lower goal bound in ms (informational target).",
+    )
+    parser.add_argument(
+        "--goal-ms",
+        type=float,
+        default=8.0,
+        help="Critical budget in ms for <= checks.",
+    )
+    parser.add_argument(
+        "--goal-p95-ms",
+        type=float,
+        default=8.0,
+        help="Target p95 in ms for render-path checks.",
+    )
+    parser.add_argument(
+        "--goal-under-pct",
+        type=float,
+        default=90.0,
+        help="Target percentage of samples <= goal-ms for render-path checks.",
+    )
     args = parser.parse_args()
 
     perf_entries: list[dict[str, float]] = []
@@ -145,6 +176,8 @@ def main() -> int:
     max_ticks = perf.get("max_ticks")
     elapsed_s = perf.get("elapsed_s")
     rtf = perf.get("rtf")
+    goal_low_ms = args.goal_low_ms
+    goal_ms = args.goal_ms
 
     avg_tick_from_elapsed_ms = None
     if max_ticks and elapsed_s and max_ticks > 0:
@@ -166,12 +199,15 @@ def main() -> int:
             f"From elapsed/max_ticks: {elapsed_s:.3f}s/{int(max_ticks)} = "
             f"{avg_tick_from_elapsed_ms:.3f} ms/tick"
         )
-        if avg_tick_from_elapsed_ms <= 5.0:
-            print("Budget status: within 5ms target")
-        elif avg_tick_from_elapsed_ms <= 8.0:
-            print("Budget status: above 5ms target, within 8ms critical budget")
+        if avg_tick_from_elapsed_ms <= goal_low_ms:
+            print(f"Budget status: within {goal_low_ms:.1f}ms target")
+        elif avg_tick_from_elapsed_ms <= goal_ms:
+            print(
+                f"Budget status: above {goal_low_ms:.1f}ms target, "
+                f"within {goal_ms:.1f}ms critical budget"
+            )
         else:
-            print("Budget status: above 8ms critical budget")
+            print(f"Budget status: above {goal_ms:.1f}ms critical budget")
 
     print("\n=== Render Path Distributions ===")
     fmt_dist("total_request_ms (all)", total_request)
@@ -187,6 +223,45 @@ def main() -> int:
             f"total_render_client_ms (db_enqueue_count={enq_count})",
             total_render_client_by_enqueue[enq_count],
         )
+
+    print("\n=== 5-8ms Goal Check ===")
+    if avg_tick_from_elapsed_ms is not None:
+        tick_ok = avg_tick_from_elapsed_ms <= goal_ms
+        tick_status = "OK" if tick_ok else "KO"
+        print(
+            f"system_tick_ms: {avg_tick_from_elapsed_ms:.3f} "
+            f"(target <= {goal_ms:.3f}) -> {tick_status}"
+        )
+    else:
+        print("system_tick_ms: unavailable -> UNKNOWN")
+
+    def print_goal_line(name: str, vals: list[float]) -> str:
+        stats = compute_dist(vals)
+        if stats is None:
+            print(f"{name}: no samples -> UNKNOWN")
+            return "UNKNOWN"
+        le_goal_pct = pct_le(vals, goal_ms)
+        p95_ok = stats.p95 <= args.goal_p95_ms
+        pct_ok = le_goal_pct >= args.goal_under_pct
+        status = "OK" if p95_ok and pct_ok else "KO"
+        print(
+            f"{name}: p95={stats.p95:.3f}ms (<= {args.goal_p95_ms:.3f}), "
+            f"<= {goal_ms:.3f}ms={le_goal_pct:.2f}% (>= {args.goal_under_pct:.2f}%) -> {status}"
+        )
+        return status
+
+    req_status = print_goal_line("total_request_ms", total_request)
+    cli_status = print_goal_line("total_render_client_ms", total_render_client)
+
+    statuses = [s for s in [req_status, cli_status] if s != "UNKNOWN"]
+    if not statuses:
+        overall = "UNKNOWN"
+    elif all(s == "OK" for s in statuses):
+        overall = "OK"
+    else:
+        overall = "KO"
+    print(f"overall_render_path: {overall}")
+
     if not total_request and not total_render_client:
         print(
             "\nnote: no total_*_ms probe lines found in log "

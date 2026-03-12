@@ -9,6 +9,10 @@ set -euo pipefail
 : "${ELODIN_SENSOR_CAMERA_MIN_RGB_FRAMES:=500}"
 : "${ELODIN_SENSOR_CAMERA_MIN_THERMAL_FRAMES:=250}"
 : "${ELODIN_SENSOR_CAMERA_SIM_TIME_STEP:=0.008333333333333333}"
+: "${ELODIN_SENSOR_CAMERA_GOAL_LOW_MS:=5.0}"
+: "${ELODIN_SENSOR_CAMERA_GOAL_MS:=8.0}"
+: "${ELODIN_SENSOR_CAMERA_GOAL_P95_MS:=8.0}"
+: "${ELODIN_SENSOR_CAMERA_GOAL_UNDER_PCT:=90.0}"
 : "${ELODIN_SENSOR_CAMERA_ENFORCE_THRESHOLDS:=0}"
 : "${ELODIN_SENSOR_CAMERA_LOG_METRICS:=1}"
 : "${ELODIN_SENSOR_CAMERA_CAPTURE_TRACY:=0}"
@@ -25,6 +29,10 @@ echo "  min_rtf=${ELODIN_SENSOR_CAMERA_MIN_RTF}"
 echo "  min_rgb_fps=${ELODIN_SENSOR_CAMERA_MIN_RGB_FPS}"
 echo "  min_thermal_fps=${ELODIN_SENSOR_CAMERA_MIN_THERMAL_FPS}"
 echo "  sim_time_step=${ELODIN_SENSOR_CAMERA_SIM_TIME_STEP}"
+echo "  goal_low_ms=${ELODIN_SENSOR_CAMERA_GOAL_LOW_MS}"
+echo "  goal_ms=${ELODIN_SENSOR_CAMERA_GOAL_MS}"
+echo "  goal_p95_ms=${ELODIN_SENSOR_CAMERA_GOAL_P95_MS}"
+echo "  goal_under_pct=${ELODIN_SENSOR_CAMERA_GOAL_UNDER_PCT}"
 echo "  enforce_thresholds=${ELODIN_SENSOR_CAMERA_ENFORCE_THRESHOLDS}"
 echo "  log_metrics_probes=${ELODIN_SENSOR_CAMERA_LOG_METRICS}"
 echo "  capture_tracy=${ELODIN_SENSOR_CAMERA_CAPTURE_TRACY}"
@@ -165,7 +173,11 @@ fi
 echo
 python3 scripts/ci/sensor_camera_log_summary.py \
   "${log_file}" \
-  --sim-time-step "${ELODIN_SENSOR_CAMERA_SIM_TIME_STEP}" || true
+  --sim-time-step "${ELODIN_SENSOR_CAMERA_SIM_TIME_STEP}" \
+  --goal-low-ms "${ELODIN_SENSOR_CAMERA_GOAL_LOW_MS}" \
+  --goal-ms "${ELODIN_SENSOR_CAMERA_GOAL_MS}" \
+  --goal-p95-ms "${ELODIN_SENSOR_CAMERA_GOAL_P95_MS}" \
+  --goal-under-pct "${ELODIN_SENSOR_CAMERA_GOAL_UNDER_PCT}" || true
 echo
 
 extract_metric() {
