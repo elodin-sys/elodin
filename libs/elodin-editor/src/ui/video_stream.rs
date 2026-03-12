@@ -893,25 +893,39 @@ impl super::widgets::WidgetSystem for VideoStreamWidget<'_, '_> {
                     if let Some((found_ts, data)) =
                         cache.raw_frames.range(..=current_ts).next_back()
                     {
-                        // Skip texture update if we're already displaying this frame
-                        if cache.last_displayed_ts != Some(*found_ts) {
+                        let found_ts = *found_ts;
+                        if cache.last_displayed_ts != Some(found_ts) {
                             let expected = (w * h * 4) as usize;
-                            let size_ok = data.len() == expected;
-                            if size_ok {
-                                let frame_bytes = data.as_ref().clone();
-                                let img = Image::new(
-                                    Extent3d {
-                                        width: w,
-                                        height: h,
-                                        depth_or_array_layers: 1,
-                                    },
-                                    TextureDimension::D2,
-                                    frame_bytes,
-                                    bevy::render::render_resource::TextureFormat::Rgba8UnormSrgb,
-                                    RenderAssetUsages::MAIN_WORLD | RenderAssetUsages::RENDER_WORLD,
-                                );
-                                stream.current_frame = Some(img);
-                                cache.last_displayed_ts = Some(*found_ts);
+                            if data.len() == expected {
+                                let data = Arc::clone(data);
+                                let mut wrote_direct = false;
+                                if let Some(existing) = state.images.get_mut(&image_node.image)
+                                    && existing.width() == w
+                                    && existing.height() == h
+                                    && let Some(dst) = &mut existing.data
+                                {
+                                    dst.copy_from_slice(&data);
+                                    wrote_direct = true;
+                                }
+                                if !wrote_direct {
+                                    let img = Image::new(
+                                        Extent3d {
+                                            width: w,
+                                            height: h,
+                                            depth_or_array_layers: 1,
+                                        },
+                                        TextureDimension::D2,
+                                        (*data).clone(),
+                                        bevy::render::render_resource::TextureFormat::Rgba8UnormSrgb,
+                                        RenderAssetUsages::MAIN_WORLD
+                                            | RenderAssetUsages::RENDER_WORLD,
+                                    );
+                                    image_node.image = state.images.add(img);
+                                }
+                                if stream.size == Vec2::ZERO {
+                                    stream.size = Vec2::new(w as f32, h as f32);
+                                }
+                                cache.last_displayed_ts = Some(found_ts);
                             }
                         }
                     }
