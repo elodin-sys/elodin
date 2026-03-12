@@ -105,12 +105,15 @@
           elodin-py = elodin-py.py;
         };
 
-        devShells = with shells; {
-          inherit elodin;
-          default = shells.elodin;
-          run = pkgs.callPackage ./nix/run.nix {};
-          tracy = pkgs.callPackage ./nix/tracy.nix {};
-        };
+        devShells =
+          (with shells; {
+            inherit elodin;
+            default = shells.elodin;
+            run = pkgs.callPackage ./nix/run.nix {};
+          })
+          // pkgs.lib.optionalAttrs pkgs.stdenv.isLinux {
+            tracy = pkgs.callPackage ./nix/tracy.nix {};
+          };
 
         formatter = pkgs.alejandra;
       }
