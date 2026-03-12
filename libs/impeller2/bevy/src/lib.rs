@@ -9,7 +9,7 @@ use bevy::{
 use bevy::{ecs::system::SystemParam, prelude::World};
 use bevy::{
     ecs::system::SystemState,
-    prelude::{Commands, Component, Deref, DerefMut, Entity, Query, ResMut, Resource},
+    prelude::{Commands, Component, Deref, DerefMut, Entity, Query, Res, ResMut, Resource},
 };
 use impeller2::types::IntoLenPacket;
 use impeller2::types::RequestId;
@@ -202,58 +202,70 @@ impl Decomponentize for CacheCollector {
     }
 }
 
+#[derive(SystemParam)]
+pub struct ApplyCachedDataParams<'w, 's> {
+    entity_map: ResMut<'w, EntityMap>,
+    query: Query<'w, 's, &'static mut ComponentValue>,
+    adapters: Res<'w, ComponentAdapters>,
+    apply_metrics: ResMut<'w, ApplyCachedDataMetrics>,
+    commands: Commands<'w, 's>,
+    last_applied: bevy::prelude::Local<'s, (Timestamp, u64)>,
+}
+
 /// Bevy system that reads the TelemetryCache at `CurrentTimestamp` and
 /// overwrites entity `ComponentValue` components and adapted components
 /// (like `WorldPos`) with the cached data. This allows the viewport to
 /// display data at any timestamp the user scrubs to, without waiting for
 /// the DB stream to deliver it.
 pub fn apply_cached_data(
-    current_ts: bevy::prelude::Res<CurrentTimestamp>,
-    cache: bevy::prelude::Res<TelemetryCache>,
-    mut entity_map: ResMut<EntityMap>,
-    mut query: Query<&mut ComponentValue>,
-    adapters: bevy::prelude::Res<ComponentAdapters>,
-    mut apply_metrics: bevy::prelude::ResMut<ApplyCachedDataMetrics>,
-    mut commands: Commands,
-    mut last_applied: bevy::prelude::Local<(Timestamp, u64)>,
+    current_ts: Res<CurrentTimestamp>,
+    cache: Res<TelemetryCache>,
+    mut params: ApplyCachedDataParams,
 ) {
-    *apply_metrics = ApplyCachedDataMetrics::default();
+    *params.apply_metrics = ApplyCachedDataMetrics::default();
     let ts = current_ts.0;
     let cache_gen = cache.generation;
-    if ts == last_applied.0 && cache_gen == last_applied.1 {
-        apply_metrics.skipped = true;
+    if ts == params.last_applied.0 && cache_gen == params.last_applied.1 {
+        params.apply_metrics.skipped = true;
         return;
     }
-    *last_applied = (ts, cache_gen);
+    *params.last_applied = (ts, cache_gen);
     for (&component_id, series) in &cache.components {
-        apply_metrics.scanned_component_count += 1;
+        params.apply_metrics.scanned_component_count += 1;
         let Some((_, value)) = series.range(..=ts).next_back() else {
             continue;
         };
-        let Some(&entity) = entity_map.get(&component_id) else {
-            apply_metrics.missing_entity_count += 1;
+        let Some(&entity) = params.entity_map.get(&component_id) else {
+            params.apply_metrics.missing_entity_count += 1;
             continue;
         };
         let value_bytes = value.as_bytes().len();
-        apply_metrics.applied_component_count += 1;
-        apply_metrics.total_bytes += value_bytes;
-        apply_metrics.record_component(component_id, value_bytes);
-        if let Ok(mut cv) = query.get_mut(entity) {
+        params.apply_metrics.applied_component_count += 1;
+        params.apply_metrics.total_bytes += value_bytes;
+        params
+            .apply_metrics
+            .record_component(component_id, value_bytes);
+        if let Ok(mut cv) = params.query.get_mut(entity) {
             if cv.prim_type() == value.prim_type() && cv.shape() == value.shape() {
                 cv.copy_from_view(value.as_view());
-                apply_metrics.inplace_copy_component_count += 1;
+                params.apply_metrics.inplace_copy_component_count += 1;
             } else {
                 *cv = value.clone();
-                apply_metrics.cloned_replace_component_count += 1;
+                params.apply_metrics.cloned_replace_component_count += 1;
             }
         } else {
-            commands.entity(entity).insert(value.clone());
-            apply_metrics.inserted_component_count += 1;
+            params.commands.entity(entity).insert(value.clone());
+            params.apply_metrics.inserted_component_count += 1;
         }
-        if let Some(adapter) = adapters.get(&component_id) {
-            apply_metrics.adapter_count += 1;
+        if let Some(adapter) = params.adapters.get(&component_id) {
+            params.apply_metrics.adapter_count += 1;
             let view = value.as_view();
-            adapter.insert(&mut commands, &mut entity_map, component_id, view);
+            adapter.insert(
+                &mut params.commands,
+                &mut params.entity_map,
+                component_id,
+                view,
+            );
         }
     }
 }
