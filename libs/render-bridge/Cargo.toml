@@ -10,4 +10,5 @@ description = "Unix socket IPC for headless sensor camera rendering"
 [dependencies]
 impeller2.path = "../impeller2"
 impeller2.default-features = false
+socket2 = { version = "0.5", features = ["all"] }
 tracing = "0.1"

@@ -757,7 +757,9 @@ pub fn update_object_3d_system(
             && let Ok(component_value) = compiled_expr.execute(&entity_map, &component_value_maps)
             && let Some(world_pos) = component_value.as_world_pos()
         {
-            *pos = world_pos;
+            if *pos != world_pos {
+                *pos = world_pos;
+            }
             if !has_received {
                 commands.entity(entity).insert(WorldPosReceived);
             }

@@ -26,7 +26,7 @@ use pyo3::{
 };
 use std::{
     collections::{HashMap, HashSet},
-    iter,
+    env, iter,
     net::SocketAddr,
     path::{Path, PathBuf},
     sync::Arc,
@@ -60,6 +60,38 @@ fn install_signal_handlers(cancel_token: CancelToken) {
             cancel_token.cancel();
         }
     });
+}
+
+fn select_render_server_cmd(
+    env_override: Option<PathBuf>,
+    current_exe: Option<PathBuf>,
+) -> Option<PathBuf> {
+    if let Some(path) = env_override {
+        return Some(path);
+    }
+    let current_exe = current_exe?;
+    let stem = current_exe.file_stem()?.to_str()?;
+    if stem == "elodin" {
+        Some(current_exe)
+    } else {
+        None
+    }
+}
+
+fn resolve_render_server_cmd() -> String {
+    let env_override = env::var_os("ELODIN_BIN").map(PathBuf::from);
+    let current_exe = env::current_exe().ok();
+    if let Some(path) = select_render_server_cmd(env_override, current_exe) {
+        let resolved = path.to_string_lossy().into_owned();
+        info!(render_server_cmd = %resolved, "Launching render-server with resolved elodin binary");
+        resolved
+    } else {
+        info!(
+            render_server_cmd = "elodin",
+            "Launching render-server from PATH; set ELODIN_BIN to override"
+        );
+        "elodin".to_string()
+    }
 }
 
 #[derive(Parser, Debug)]
@@ -102,6 +134,7 @@ impl WorldBuilder {
             addr,
             optimize,
         };
+        let render_server_cmd = resolve_render_server_cmd();
         let mut recipes: HashMap<String, ::s10::Recipe> = self
             .recipes
             .iter()
@@ -113,7 +146,7 @@ impl WorldBuilder {
             recipes.insert(
                 "render-server".to_string(),
                 ::s10::Recipe::Process(::s10::ProcessRecipe {
-                    cmd: "elodin".to_string(),
+                    cmd: render_server_cmd,
                     process_args: ::s10::ProcessArgs {
                         args: vec![
                             "render-server".to_string(),
@@ -136,6 +169,33 @@ impl WorldBuilder {
             refs: vec![],
             recipes,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::select_render_server_cmd;
+    use std::path::PathBuf;
+
+    #[test]
+    fn prefer_explicit_env_override() {
+        let selected = select_render_server_cmd(
+            Some(PathBuf::from("/tmp/custom-elodin")),
+            Some(PathBuf::from("/tmp/elodin")),
+        );
+        assert_eq!(selected, Some(PathBuf::from("/tmp/custom-elodin")));
+    }
+
+    #[test]
+    fn accept_current_exe_named_elodin() {
+        let selected = select_render_server_cmd(None, Some(PathBuf::from("/tmp/elodin")));
+        assert_eq!(selected, Some(PathBuf::from("/tmp/elodin")));
+    }
+
+    #[test]
+    fn reject_unrelated_current_exe() {
+        let selected = select_render_server_cmd(None, Some(PathBuf::from("/tmp/python")));
+        assert_eq!(selected, None);
     }
 }
 
