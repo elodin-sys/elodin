@@ -11187,6 +11187,7 @@ name = "render-bridge"
 version = "0.16.2-alpha.0"
 dependencies = [
  "impeller2",
+ "socket2 0.5.10",
  "tracing",
 ]
 
