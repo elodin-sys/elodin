@@ -50,11 +50,11 @@ libs/iree-runtime/
     error.rs          # Error type with full IREE status message extraction
   tests/
     fixtures/
-      simple_mul.mlir       # f32 element-wise multiply source
-      simple_mul.vmfb       # Precompiled for llvm-cpu
-      simple_add_f64.mlir   # f64 element-wise add source
-      simple_add_f64.vmfb   # Precompiled with f64 support
-    integration.rs          # 4 integration tests
+      *.mlir                # MLIR sources
+      x86_64/*.vmfb         # Precompiled for x86_64 (CI)
+      aarch64/*.vmfb        # Precompiled for aarch64 (e.g. Apple Silicon)
+      compile_fixtures.sh   # Regenerate .vmfb for current host
+    integration.rs          # Integration tests (select arch via cfg!(target_arch))
 ```
 
 ## Public API
@@ -119,28 +119,22 @@ The crate will not build outside the nix shell because `IREE_RUNTIME_DIR` must p
 
 ## Compiling VMFB Test Fixtures
 
-Test fixtures are precompiled `.vmfb` files checked into `tests/fixtures/`. To regenerate or create new ones:
+Fixtures live in `tests/fixtures/` with architecture-specific subdirectories: `x86_64/` and `aarch64/`. The integration tests choose the correct set via `cfg!(target_arch)`. Both sets are checked in so CI (x86_64) and Mac/ARM developers get passing tests without manual steps.
+
+To regenerate fixtures (e.g. after an IREE version upgrade or when adding a new MLIR module):
 
 ```bash
-# Install the IREE compiler (in a venv, not the nix Python)
+# Install the IREE compiler (version must match nix/pkgs/iree-runtime.nix, currently 3.10.0)
 uv venv /tmp/iree-venv --python 3.13
 source /tmp/iree-venv/bin/activate
 uv pip install iree-base-compiler==3.10.0
 
-# Compile f32 module (no target triple -- produces cross-platform VMFB)
-iree-compile --iree-hal-target-backends=llvm-cpu \
-  simple_mul.mlir -o simple_mul.vmfb
-
-# Compile f64 module (critical flags for physics simulations)
-iree-compile --iree-hal-target-backends=llvm-cpu \
-  --iree-vm-target-extension-f64 \
-  --iree-input-demote-f64-to-f32=false \
-  simple_add_f64.mlir -o simple_add_f64.vmfb
+# From libs/iree-runtime/tests/fixtures/, compile for current host arch
+cd libs/iree-runtime/tests/fixtures
+./compile_fixtures.sh
 ```
 
-The `iree-base-compiler` version must match the IREE runtime version in `nix/pkgs/iree-runtime.nix` (currently 3.10.0).
-
-Do NOT use `--iree-llvmcpu-target-triple` for checked-in fixtures -- omitting it produces host-independent VMFBs that work on both aarch64 and x86_64 CI runners.
+The script compiles all `.mlir` files into `x86_64/` or `aarch64/` based on `uname -m`. Omitting the target triple makes `iree-compile` use the host architecture. When upgrading IREE or adding fixtures, regenerate **both** `x86_64/` and `aarch64/` (run the script on an x86_64 and an aarch64 host, or use CI for x86_64 and a Mac for aarch64).
 
 ## Nix Integration
 
@@ -190,7 +184,7 @@ Without both `--iree-vm-target-extension-f64` and `--iree-input-demote-f64-to-f3
 3. Check if submodule commits changed for `flatcc` and `benchmark` (query GitHub API for the new tag's `third_party/` contents) and update their `rev` and `hash`
 4. Run `nix develop` to rebuild (first build of a new version takes several minutes)
 5. Install the matching `iree-base-compiler` version in a venv
-6. Recompile all `.vmfb` fixtures in `tests/fixtures/` with the new compiler
+6. Recompile fixtures for both architectures: run `compile_fixtures.sh` in `tests/fixtures/` on x86_64 and aarch64 (or use CI + local Mac)
 7. Run `cargo test -p iree-runtime` to verify
 
 ## Key Integration Points
