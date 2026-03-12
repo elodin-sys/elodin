@@ -1,3 +1,4 @@
+#![allow(clippy::needless_doctest_main)]
 //! The `git_inspect` module provides git helpers for build.rs scripts.
 //!
 //! Standard usage might look like this:
