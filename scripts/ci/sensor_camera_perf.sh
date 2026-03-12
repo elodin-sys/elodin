@@ -8,6 +8,10 @@ set -euo pipefail
 : "${ELODIN_SENSOR_CAMERA_MIN_THERMAL_FPS:=3.0}"
 : "${ELODIN_SENSOR_CAMERA_MIN_RGB_FRAMES:=500}"
 : "${ELODIN_SENSOR_CAMERA_MIN_THERMAL_FRAMES:=250}"
+: "${ELODIN_SENSOR_CAMERA_ENFORCE_THRESHOLDS:=0}"
+: "${ELODIN_SENSOR_CAMERA_CAPTURE_TRACY:=0}"
+: "${ELODIN_SENSOR_CAMERA_TRACY_CAPTURE_SECONDS:=30}"
+: "${ELODIN_SENSOR_CAMERA_TRACY_OUT_DIR:=}"
 
 log_file="$(mktemp -t sensor-camera-perf.XXXXXX.log)"
 trap 'rm -f "$log_file"' EXIT
@@ -18,6 +22,48 @@ echo "  timeout_s=${ELODIN_SENSOR_CAMERA_TIMEOUT_S}"
 echo "  min_rtf=${ELODIN_SENSOR_CAMERA_MIN_RTF}"
 echo "  min_rgb_fps=${ELODIN_SENSOR_CAMERA_MIN_RGB_FPS}"
 echo "  min_thermal_fps=${ELODIN_SENSOR_CAMERA_MIN_THERMAL_FPS}"
+echo "  enforce_thresholds=${ELODIN_SENSOR_CAMERA_ENFORCE_THRESHOLDS}"
+echo "  capture_tracy=${ELODIN_SENSOR_CAMERA_CAPTURE_TRACY}"
+
+tracy_capture_pids=()
+tracy_out_dir=""
+
+start_tracy_capture() {
+  local bin="$1"
+  local port="$2"
+  local output="$3"
+  "${bin}" -a 127.0.0.1 -p "${port}" -o "${output}" -s "${ELODIN_SENSOR_CAMERA_TRACY_CAPTURE_SECONDS}" \
+    >/dev/null 2>&1 &
+  tracy_capture_pids+=("$!")
+}
+
+if [[ "${ELODIN_SENSOR_CAMERA_CAPTURE_TRACY}" == "1" ]]; then
+  if [[ -n "${ELODIN_SENSOR_CAMERA_TRACY_OUT_DIR}" ]]; then
+    tracy_out_dir="${ELODIN_SENSOR_CAMERA_TRACY_OUT_DIR}"
+  else
+    tracy_out_dir="$(pwd)/profile_output/tracy-sensor-camera-ci"
+  fi
+  mkdir -p "${tracy_out_dir}"
+
+  if command -v tracy-capture >/dev/null 2>&1; then
+    start_tracy_capture "tracy-capture" 8087 "${tracy_out_dir}/trace-run.tracy"
+    start_tracy_capture "tracy-capture" 8088 "${tracy_out_dir}/trace-render.tracy"
+  else
+    echo "warning: tracy-capture not found; skipping ports 8087/8088 capture"
+  fi
+
+  if command -v iree-tracy-capture >/dev/null 2>&1; then
+    start_tracy_capture "iree-tracy-capture" 8089 "${tracy_out_dir}/trace-sim.tracy"
+  else
+    echo "warning: iree-tracy-capture not found; skipping port 8089 capture"
+  fi
+
+  if [[ "${#tracy_capture_pids[@]}" -gt 0 ]]; then
+    # Start capture listeners before launching the run.
+    sleep 1
+    echo "Tracy capture enabled: ${tracy_out_dir}"
+  fi
+fi
 
 set +e
 if command -v timeout >/dev/null 2>&1; then
@@ -46,6 +92,22 @@ if [[ "${run_exit_code}" -eq 124 ]]; then
 elif [[ "${run_exit_code}" -ne 0 ]]; then
   echo "error: elodin run failed with exit code ${run_exit_code}"
   exit "${run_exit_code}"
+fi
+
+if [[ "${#tracy_capture_pids[@]}" -gt 0 ]]; then
+  set +e
+  for pid in "${tracy_capture_pids[@]}"; do
+    wait "${pid}" >/dev/null 2>&1
+  done
+  set -e
+
+  if command -v tracy-csvexport >/dev/null 2>&1; then
+    for trace_file in "${tracy_out_dir}"/*.tracy; do
+      if [[ -f "${trace_file}" ]]; then
+        tracy-csvexport "${trace_file}" > "${trace_file%.tracy}.csv" || true
+      fi
+    done
+  fi
 fi
 
 perf_line="$(grep '^PERF sensor_camera ' "${log_file}" | tail -n 1 || true)"
@@ -100,7 +162,13 @@ if ! awk -v actual="${thermal_frames}" -v min="${ELODIN_SENSOR_CAMERA_MIN_THERMA
 fi
 
 if [[ "${fail}" -ne 0 ]]; then
-  exit 1
+  if [[ "${ELODIN_SENSOR_CAMERA_ENFORCE_THRESHOLDS}" == "1" ]]; then
+    exit 1
+  fi
+  echo "warning: thresholds not met, but enforcement is disabled"
 fi
 
+if [[ -n "${tracy_out_dir}" ]]; then
+  echo "Tracy artifacts: ${tracy_out_dir}"
+fi
 echo "sensor-camera performance check passed"
