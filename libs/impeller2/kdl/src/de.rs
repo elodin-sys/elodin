@@ -308,6 +308,7 @@ fn parse_panel(node: &KdlNode, kdl_src: &str) -> Result<Panel, KdlSchematicError
         "dashboard" => parse_dashboard(node),
         "video_stream" => parse_video_stream(node),
         "sensor_view" => parse_sensor_view(node),
+        "log_stream" => parse_log_stream(node),
         _ => Err(KdlSchematicError::UnknownNode {
             node_type: node.name().to_string(),
             src: kdl_src.to_string(),
@@ -667,6 +668,20 @@ fn parse_sensor_view(node: &KdlNode) -> Result<Panel, KdlSchematicError> {
     let name = parse_name(node);
 
     Ok(Panel::SensorView(SensorView { msg_name, name }))
+}
+
+fn parse_log_stream(node: &KdlNode) -> Result<Panel, KdlSchematicError> {
+    let msg_name = node
+        .entries()
+        .iter()
+        .find(|e| e.name().is_none())
+        .and_then(|e| e.value().as_string())
+        .unwrap_or_default()
+        .to_string();
+
+    let name = parse_name(node);
+
+    Ok(Panel::LogStream(LogStream { msg_name, name }))
 }
 
 fn parse_query_table(node: &KdlNode) -> Result<Panel, KdlSchematicError> {

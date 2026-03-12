@@ -547,6 +547,21 @@ pub fn opaque_bytes_msg_schema() -> OwnedNamedType {
     <OpaqueBytes as PostcardSchema>::SCHEMA.into()
 }
 
+/// A structured log entry for flight-software text logging via [`MsgLog`].
+///
+/// Level values: 0 = trace, 1 = debug, 2 = info, 3 = warn, 4 = error.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, postcard_schema::Schema)]
+pub struct LogEntry {
+    pub level: u8,
+    pub message: String,
+}
+
+/// Returns the schema for [`LogEntry`], for use in [`MsgMetadata`] when the
+/// stream carries structured log messages.
+pub fn log_entry_msg_schema() -> OwnedNamedType {
+    <LogEntry as PostcardSchema>::SCHEMA.into()
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct MsgMetadata {
     pub name: String,

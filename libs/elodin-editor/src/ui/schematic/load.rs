@@ -900,6 +900,31 @@ impl LoadSchematicParams<'_, '_> {
                 };
                 tile_state.insert_tile(Tile::Pane(Pane::SensorView(pane)), parent_id, false)
             }
+            Panel::LogStream(log_stream) => {
+                let msg_id = impeller2::types::msg_id(&log_stream.msg_name);
+                let label = log_stream
+                    .name
+                    .clone()
+                    .unwrap_or_else(|| format!("Log Stream {}", log_stream.msg_name));
+
+                let entity = self
+                    .commands
+                    .spawn((
+                        crate::ui::log_stream::LogStreamState {
+                            msg_id,
+                            msg_name: log_stream.msg_name.clone(),
+                            ..Default::default()
+                        },
+                        crate::ui::log_stream::LogCache::default(),
+                    ))
+                    .id();
+
+                let pane = crate::ui::log_stream::LogStreamPane {
+                    entity,
+                    name: label,
+                };
+                tile_state.insert_tile(Tile::Pane(Pane::LogStream(pane)), parent_id, false)
+            }
             // Inspector and Hierarchy are now fixed sidebars, not tile panels.
             // Set the corresponding sidebar visibility flags so they appear.
             Panel::Inspector => {

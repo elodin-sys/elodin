@@ -96,6 +96,7 @@ pub mod hierarchy;
 pub mod images;
 pub mod inspector;
 pub mod label;
+pub mod log_stream;
 pub mod modal;
 pub mod monitor;
 pub mod plot;
