@@ -27,9 +27,9 @@ use bevy::{
 };
 use bevy_mat3_material::Mat3Material;
 use big_space::{FloatingOrigin, GridCell};
-use render_bridge::RenderBridgeServer;
 use impeller2_kdl::FromKdl;
 use impeller2_wkt::{CurrentTimestamp, DbConfig, SchematicElem};
+use render_bridge::RenderBridgeServer;
 
 use crate::object_3d::create_object_3d_entity;
 use crate::sensor_camera::{
