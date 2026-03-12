@@ -1,3 +1,4 @@
+use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
 use bevy::{
@@ -200,6 +201,18 @@ fn load_headless_scene(
 
 fn elapsed_ms(start: Instant) -> f64 {
     start.elapsed().as_secs_f64() * 1000.0
+}
+
+fn sensor_camera_probe_logs_enabled() -> bool {
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    *ENABLED.get_or_init(|| {
+        std::env::var("ELODIN_SENSOR_CAMERA_LOG_METRICS")
+            .map(|v| {
+                let normalized = v.trim().to_ascii_lowercase();
+                matches!(normalized.as_str(), "1" | "true" | "yes")
+            })
+            .unwrap_or(false)
+    })
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -444,6 +457,15 @@ fn headless_sensor_runner(mut app: App) -> AppExit {
 
             let total_request_ms = elapsed_ms(request_start);
             request_span.record("total_request_ms", total_request_ms);
+            if sensor_camera_probe_logs_enabled() {
+                tracing::info!(
+                    total_request_ms,
+                    camera_count = request.camera_names.len(),
+                    final_frame_count,
+                    fallback_used,
+                    "sensor_camera_probe_request"
+                );
+            }
         } else if let Err(e) = server.respond_empty() {
             tracing::warn!("Render bridge write failed, client disconnected: {e}");
             break;

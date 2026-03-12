@@ -114,7 +114,7 @@ test_steps = [
             nix_step(
                 label=":python: sensor-camera",
                 flake=".#run",
-                command="ELODIN_SENSOR_CAMERA_CAPTURE_TRACY=1 ELODIN_SENSOR_CAMERA_ENFORCE_THRESHOLDS=0 ./scripts/ci/sensor_camera_perf.sh",
+                command="ELODIN_SENSOR_CAMERA_CAPTURE_TRACY=1 ELODIN_SENSOR_CAMERA_ENFORCE_THRESHOLDS=0 ELODIN_SENSOR_CAMERA_LOG_METRICS=1 ./scripts/ci/sensor_camera_perf.sh",
             ),
         ],
     ),

@@ -8,7 +8,9 @@ set -euo pipefail
 : "${ELODIN_SENSOR_CAMERA_MIN_THERMAL_FPS:=3.0}"
 : "${ELODIN_SENSOR_CAMERA_MIN_RGB_FRAMES:=500}"
 : "${ELODIN_SENSOR_CAMERA_MIN_THERMAL_FRAMES:=250}"
+: "${ELODIN_SENSOR_CAMERA_SIM_TIME_STEP:=0.008333333333333333}"
 : "${ELODIN_SENSOR_CAMERA_ENFORCE_THRESHOLDS:=0}"
+: "${ELODIN_SENSOR_CAMERA_LOG_METRICS:=1}"
 : "${ELODIN_SENSOR_CAMERA_CAPTURE_TRACY:=0}"
 : "${ELODIN_SENSOR_CAMERA_TRACY_CAPTURE_SECONDS:=30}"
 : "${ELODIN_SENSOR_CAMERA_TRACY_OUT_DIR:=}"
@@ -22,7 +24,9 @@ echo "  timeout_s=${ELODIN_SENSOR_CAMERA_TIMEOUT_S}"
 echo "  min_rtf=${ELODIN_SENSOR_CAMERA_MIN_RTF}"
 echo "  min_rgb_fps=${ELODIN_SENSOR_CAMERA_MIN_RGB_FPS}"
 echo "  min_thermal_fps=${ELODIN_SENSOR_CAMERA_MIN_THERMAL_FPS}"
+echo "  sim_time_step=${ELODIN_SENSOR_CAMERA_SIM_TIME_STEP}"
 echo "  enforce_thresholds=${ELODIN_SENSOR_CAMERA_ENFORCE_THRESHOLDS}"
+echo "  log_metrics_probes=${ELODIN_SENSOR_CAMERA_LOG_METRICS}"
 echo "  capture_tracy=${ELODIN_SENSOR_CAMERA_CAPTURE_TRACY}"
 
 tracy_capture_pids=()
@@ -69,21 +73,63 @@ set +e
 if command -v timeout >/dev/null 2>&1; then
   ELODIN_SENSOR_CAMERA_MAX_TICKS="${ELODIN_SENSOR_CAMERA_MAX_TICKS}" \
   ELODIN_SENSOR_CAMERA_PROFILE=1 \
+  ELODIN_SENSOR_CAMERA_LOG_METRICS="${ELODIN_SENSOR_CAMERA_LOG_METRICS}" \
   timeout --signal=INT "${ELODIN_SENSOR_CAMERA_TIMEOUT_S}" \
     elodin run examples/sensor-camera/main.py 2>&1 | tee "${log_file}"
   run_exit_code="${PIPESTATUS[0]}"
 elif command -v gtimeout >/dev/null 2>&1; then
   ELODIN_SENSOR_CAMERA_MAX_TICKS="${ELODIN_SENSOR_CAMERA_MAX_TICKS}" \
   ELODIN_SENSOR_CAMERA_PROFILE=1 \
+  ELODIN_SENSOR_CAMERA_LOG_METRICS="${ELODIN_SENSOR_CAMERA_LOG_METRICS}" \
   gtimeout --signal=INT "${ELODIN_SENSOR_CAMERA_TIMEOUT_S}" \
     elodin run examples/sensor-camera/main.py 2>&1 | tee "${log_file}"
   run_exit_code="${PIPESTATUS[0]}"
 else
-  echo "warning: timeout/gtimeout command not found, running without timeout"
+  echo "warning: timeout/gtimeout command not found, using Python timeout fallback"
   ELODIN_SENSOR_CAMERA_MAX_TICKS="${ELODIN_SENSOR_CAMERA_MAX_TICKS}" \
   ELODIN_SENSOR_CAMERA_PROFILE=1 \
-  elodin run examples/sensor-camera/main.py 2>&1 | tee "${log_file}"
-  run_exit_code="${PIPESTATUS[0]}"
+  ELODIN_SENSOR_CAMERA_LOG_METRICS="${ELODIN_SENSOR_CAMERA_LOG_METRICS}" \
+  python3 - "${ELODIN_SENSOR_CAMERA_TIMEOUT_S}" "${log_file}" <<'PY'
+import os
+import signal
+import subprocess
+import sys
+
+timeout_s = float(sys.argv[1])
+log_path = sys.argv[2]
+cmd = ["elodin", "run", "examples/sensor-camera/main.py"]
+proc = subprocess.Popen(
+    cmd,
+    stdout=subprocess.PIPE,
+    stderr=subprocess.STDOUT,
+    text=True,
+    start_new_session=True,
+    env=os.environ.copy(),
+)
+
+timed_out = False
+output = ""
+try:
+    output, _ = proc.communicate(timeout=timeout_s)
+except subprocess.TimeoutExpired:
+    timed_out = True
+    os.killpg(proc.pid, signal.SIGINT)
+    try:
+        output, _ = proc.communicate(timeout=2)
+    except subprocess.TimeoutExpired:
+        os.killpg(proc.pid, signal.SIGKILL)
+        output, _ = proc.communicate()
+
+with open(log_path, "w", encoding="utf-8", errors="replace") as f:
+    f.write(output)
+sys.stdout.write(output)
+sys.stdout.flush()
+
+if timed_out:
+    sys.exit(124)
+sys.exit(proc.returncode if proc.returncode is not None else 1)
+PY
+  run_exit_code="$?"
 fi
 set -e
 
@@ -115,6 +161,12 @@ if [[ -z "${perf_line}" ]]; then
   echo "error: PERF line not found in output"
   exit 1
 fi
+
+echo
+python3 scripts/ci/sensor_camera_log_summary.py \
+  "${log_file}" \
+  --sim-time-step "${ELODIN_SENSOR_CAMERA_SIM_TIME_STEP}" || true
+echo
 
 extract_metric() {
   local key="$1"

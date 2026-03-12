@@ -3,7 +3,7 @@
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 /// Background worker that pushes rendered frames to the DB without blocking the
@@ -60,6 +60,18 @@ pub type SharedRenderClient = Arc<Mutex<Option<RenderBridgeClient>>>;
 
 fn elapsed_ms(start: Instant) -> f64 {
     start.elapsed().as_secs_f64() * 1000.0
+}
+
+fn sensor_camera_probe_logs_enabled() -> bool {
+    static ENABLED: OnceLock<bool> = OnceLock::new();
+    *ENABLED.get_or_init(|| {
+        std::env::var("ELODIN_SENSOR_CAMERA_LOG_METRICS")
+            .map(|v| {
+                let normalized = v.trim().to_ascii_lowercase();
+                matches!(normalized.as_str(), "1" | "true" | "yes")
+            })
+            .unwrap_or(false)
+    })
 }
 
 fn log_render_client_metrics(
@@ -280,9 +292,28 @@ impl StepContext {
             }
         }
 
+        let total_render_client_ms = elapsed_ms(total_start);
+        if sensor_camera_probe_logs_enabled() {
+            tracing::info!(
+                total_render_client_ms,
+                render_operation = "render_cameras_returned",
+                camera_count = camera_names.len(),
+                db_enqueue_count = frames.len(),
+                client_send_request_ms = client_metrics.send_request_ms,
+                client_response_header_read_ms = client_metrics.response_header_read_ms,
+                client_frame_header_read_ms = client_metrics.frame_header_read_ms,
+                client_frame_data_read_ms = client_metrics.frame_data_read_ms,
+                client_on_frame_ms = client_metrics.on_frame_ms,
+                db_enqueue_ms,
+                client_frame_count = client_metrics.frame_count,
+                client_total_bytes = client_metrics.total_bytes,
+                "sensor_camera_probe_render_client"
+            );
+        }
+
         log_render_client_metrics(
             "render_cameras_returned",
-            elapsed_ms(total_start),
+            total_render_client_ms,
             client_metrics,
             db_enqueue_ms,
             frames.len(),
