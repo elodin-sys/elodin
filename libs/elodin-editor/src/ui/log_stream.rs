@@ -43,12 +43,23 @@ impl Default for ConnectionState {
     }
 }
 
-#[derive(Component, Default)]
+#[derive(Component)]
 pub struct LogCache {
     pub entries: BTreeMap<Timestamp, LogEntry>,
     pub last_stream_activity: Option<Instant>,
     auto_scroll: bool,
     filter_level: u8,
+}
+
+impl Default for LogCache {
+    fn default() -> Self {
+        Self {
+            entries: BTreeMap::new(),
+            last_stream_activity: None,
+            auto_scroll: true,
+            filter_level: 0,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
