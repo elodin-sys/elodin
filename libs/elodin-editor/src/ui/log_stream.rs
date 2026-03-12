@@ -5,6 +5,7 @@ use egui::{self, Color32, RichText, ScrollArea};
 use impeller2::types::{OwnedPacket, Timestamp};
 use impeller2_bevy::{CommandsExt, CurrentStreamId, PacketGrantR};
 use impeller2_wkt::{ErrorResponse, FixedRateMsgStream, FixedRateOp, GetMsgs, MsgBatch};
+use std::collections::VecDeque;
 use std::time::Instant;
 
 use super::PaneName;
@@ -44,7 +45,7 @@ impl Default for ConnectionState {
 
 #[derive(Component)]
 pub struct LogCache {
-    pub entries: Vec<(Timestamp, LogEntry)>,
+    pub entries: VecDeque<(Timestamp, LogEntry)>,
     pub last_stream_activity: Option<Instant>,
     auto_scroll: bool,
     filter_level: u8,
@@ -53,7 +54,7 @@ pub struct LogCache {
 impl Default for LogCache {
     fn default() -> Self {
         Self {
-            entries: Vec::new(),
+            entries: VecDeque::new(),
             last_stream_activity: None,
             auto_scroll: true,
             filter_level: 0,
@@ -137,10 +138,10 @@ fn send_stream_request(commands: &mut Commands, entity: Entity, msg_id: [u8; 2],
                 && let Ok(mut cache) = caches.get_mut(entity)
                 && let Some(entry) = parse_log_entry(&msg_buf.buf)
             {
-                cache.entries.push((timestamp, entry));
+                cache.entries.push_back((timestamp, entry));
                 cache.last_stream_activity = Some(Instant::now());
                 if cache.entries.len() > MAX_LOG_ENTRIES {
-                    cache.entries.remove(0);
+                    cache.entries.pop_front();
                 }
             }
             false
@@ -166,11 +167,11 @@ fn send_backfill_request(
                     if let Ok(mut cache) = caches.get_mut(entity) {
                         for (ts, data) in &batch.data {
                             if let Some(entry) = parse_log_entry(data) {
-                                cache.entries.push((*ts, entry));
+                                cache.entries.push_back((*ts, entry));
                             }
                         }
                         while cache.entries.len() > MAX_LOG_ENTRIES {
-                            cache.entries.remove(0);
+                            cache.entries.pop_front();
                         }
                     }
                 }
@@ -206,8 +207,8 @@ pub fn connect_streams(
                     let msg_id = state.msg_id;
                     let start = cache
                         .entries
-                        .last()
-                        .map(|(timestamp, _)| *timestamp)
+                        .back()
+                        .map(|(timestamp, _)| Timestamp(timestamp.0 + 1))
                         .unwrap_or(Timestamp(i64::MIN));
                     send_backfill_request(&mut commands, entity, msg_id, start);
                     send_stream_request(&mut commands, entity, msg_id, stream_id.0);
