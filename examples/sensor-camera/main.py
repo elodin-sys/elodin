@@ -20,8 +20,14 @@ import elodin as el
 import jax
 import jax.numpy as jnp
 import numpy as np
+import os
+import sys
+import time
 
 SIM_TIME_STEP = 1.0 / 120.0
+MAX_TICKS = int(os.getenv("ELODIN_SENSOR_CAMERA_MAX_TICKS", "18000"))
+PROFILE = os.getenv("ELODIN_SENSOR_CAMERA_PROFILE", "0") == "1"
+EMIT_PERF = PROFILE and len(sys.argv) > 1 and sys.argv[1] == "run"
 BALL_RADIUS = 0.3
 BOUNDARY = 5.0
 BOUNCINESS = 0.95
@@ -220,13 +226,31 @@ def post_step(tick, ctx):
 
 # ── Run ──────────────────────────────────────────────────────────────────────
 
+wall_start = time.perf_counter() if EMIT_PERF else None
 world.run(
     system,
     sim_time_step=SIM_TIME_STEP,
     run_time_step=SIM_TIME_STEP,
-    max_ticks=18000,
+    max_ticks=MAX_TICKS,
     post_step=post_step,
     interactive=False,
 )
 
 print(f"\nRGB frames: {rgb_frames[0]}, Thermal frames: {thermal_frames[0]}")
+if EMIT_PERF and wall_start is not None:
+    wall_elapsed_s = time.perf_counter() - wall_start
+    sim_elapsed_s = MAX_TICKS * SIM_TIME_STEP
+    rtf = sim_elapsed_s / wall_elapsed_s if wall_elapsed_s > 0 else 0.0
+    rgb_fps = rgb_frames[0] / wall_elapsed_s if wall_elapsed_s > 0 else 0.0
+    thermal_fps = thermal_frames[0] / wall_elapsed_s if wall_elapsed_s > 0 else 0.0
+    print(
+        "PERF sensor_camera "
+        f"max_ticks={MAX_TICKS} "
+        f"elapsed_s={wall_elapsed_s:.3f} "
+        f"sim_s={sim_elapsed_s:.3f} "
+        f"rtf={rtf:.3f} "
+        f"rgb_frames={rgb_frames[0]} "
+        f"thermal_frames={thermal_frames[0]} "
+        f"rgb_fps={rgb_fps:.3f} "
+        f"thermal_fps={thermal_fps:.3f}"
+    )

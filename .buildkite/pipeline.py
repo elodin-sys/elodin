@@ -111,6 +111,11 @@ test_steps = [
                 flake=".#run",
                 command="python3 examples/cube-sat/main.py bench --ticks 100 --profile",
             ),
+            nix_step(
+                label=":python: sensor-camera",
+                flake=".#run",
+                command="./scripts/ci/sensor_camera_perf.sh",
+            ),
         ],
     ),
     nix_step(label="alejandra", command="alejandra -c ."),
