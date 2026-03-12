@@ -65,67 +65,67 @@
       chmod -R u+w $out
       sed -i 's#https://github.com/cpm-cmake/CPM.cmake/releases/download/v''${CPM_DOWNLOAD_VERSION}/CPM.cmake#file://${cpmSrc}#' $out/cmake/CPM.cmake
       ${lib.optionalString stdenv.isDarwin ''
-        python <<'PY'
-import os
-from pathlib import Path
+                python <<'PY'
+        import os
+        from pathlib import Path
 
-header = Path(os.environ["out"]) / "include" / "ppqsort.h"
-text = header.read_text()
+        header = Path(os.environ["out"]) / "include" / "ppqsort.h"
+        text = header.read_text()
 
-text = text.replace(
-    """#ifdef FORCE_CPP
-    #include "ppqsort/parallel/cpp/mainloop_par.h"
-#else
-    #ifdef _OPENMP
-        #include "ppqsort/parallel/openmp/mainloop_par.h"
-    #else
-        #include "ppqsort/parallel/cpp/mainloop_par.h"
-    #endif
-#endif
-""",
-    """#ifdef FORCE_CPP
-    #include "ppqsort/parallel/cpp/mainloop_par.h"
-#else
-    #ifdef __APPLE__
-        // libc++ on current Darwin targets does not expose the C++20
-        // jthread/stop_token API needed by PPQSort's parallel backend.
-        // Keep Tracy enabled, but fall back to the sequential sorter here.
-    #elif defined(_OPENMP)
-        #include "ppqsort/parallel/openmp/mainloop_par.h"
-    #else
-        #include "ppqsort/parallel/cpp/mainloop_par.h"
-    #endif
-#endif
-""",
-)
+        text = text.replace(
+            """#ifdef FORCE_CPP
+            #include "ppqsort/parallel/cpp/mainloop_par.h"
+        #else
+            #ifdef _OPENMP
+                #include "ppqsort/parallel/openmp/mainloop_par.h"
+            #else
+                #include "ppqsort/parallel/cpp/mainloop_par.h"
+            #endif
+        #endif
+        """,
+            """#ifdef FORCE_CPP
+            #include "ppqsort/parallel/cpp/mainloop_par.h"
+        #else
+            #ifdef __APPLE__
+                // libc++ on current Darwin targets does not expose the C++20
+                // jthread/stop_token API needed by PPQSort's parallel backend.
+                // Keep Tracy enabled, but fall back to the sequential sorter here.
+            #elif defined(_OPENMP)
+                #include "ppqsort/parallel/openmp/mainloop_par.h"
+            #else
+                #include "ppqsort/parallel/cpp/mainloop_par.h"
+            #endif
+        #endif
+        """,
+        )
 
-text = text.replace(
-    """       } else if constexpr (execution::_is_same_decay_v<ExecutionPolicy, decltype(execution::par)>) {
-           par_ppqsort(std::forward<T>(args)...);
-       } else if constexpr (execution::_is_same_decay_v<ExecutionPolicy, decltype(execution::seq_force_branchless)>) {
-           seq_ppqsort<true>(std::forward<T>(args)...);
-       } else if constexpr (execution::_is_same_decay_v<ExecutionPolicy, decltype(execution::par_force_branchless)>) {
-           par_ppqsort<true>(std::forward<T>(args)...);
-""",
-    """       } else if constexpr (execution::_is_same_decay_v<ExecutionPolicy, decltype(execution::par)>) {
-#ifdef __APPLE__
-           seq_ppqsort(std::forward<T>(args)...);
-#else
-           par_ppqsort(std::forward<T>(args)...);
-#endif
-       } else if constexpr (execution::_is_same_decay_v<ExecutionPolicy, decltype(execution::seq_force_branchless)>) {
-           seq_ppqsort<true>(std::forward<T>(args)...);
-       } else if constexpr (execution::_is_same_decay_v<ExecutionPolicy, decltype(execution::par_force_branchless)>) {
-#ifdef __APPLE__
-           seq_ppqsort<true>(std::forward<T>(args)...);
-#else
-           par_ppqsort<true>(std::forward<T>(args)...);
-#endif
-""",
-)
+        text = text.replace(
+            """       } else if constexpr (execution::_is_same_decay_v<ExecutionPolicy, decltype(execution::par)>) {
+                   par_ppqsort(std::forward<T>(args)...);
+               } else if constexpr (execution::_is_same_decay_v<ExecutionPolicy, decltype(execution::seq_force_branchless)>) {
+                   seq_ppqsort<true>(std::forward<T>(args)...);
+               } else if constexpr (execution::_is_same_decay_v<ExecutionPolicy, decltype(execution::par_force_branchless)>) {
+                   par_ppqsort<true>(std::forward<T>(args)...);
+        """,
+            """       } else if constexpr (execution::_is_same_decay_v<ExecutionPolicy, decltype(execution::par)>) {
+        #ifdef __APPLE__
+                   seq_ppqsort(std::forward<T>(args)...);
+        #else
+                   par_ppqsort(std::forward<T>(args)...);
+        #endif
+               } else if constexpr (execution::_is_same_decay_v<ExecutionPolicy, decltype(execution::seq_force_branchless)>) {
+                   seq_ppqsort<true>(std::forward<T>(args)...);
+               } else if constexpr (execution::_is_same_decay_v<ExecutionPolicy, decltype(execution::par_force_branchless)>) {
+        #ifdef __APPLE__
+                   seq_ppqsort<true>(std::forward<T>(args)...);
+        #else
+                   par_ppqsort<true>(std::forward<T>(args)...);
+        #endif
+        """,
+        )
 
-header.write_text(text)
-PY
+        header.write_text(text)
+        PY
       ''}
     '';
 in
