@@ -768,6 +768,34 @@ and running the simulation. The <code>World</code> object also provides helper m
 </ul>
 </li>
 <li>
+<p><code>sensor_camera(entity, name, width, height, fov=90.0, near=0.01, far=1000.0, pos_offset=[0,0,0], look_at_offset=[0,0,0], format="rgba", effect="normal", effect_params={})</code> -&gt; None</p>
+<p>Register a virtual sensor camera on an entity. The camera renders offscreen frames on demand via a headless GPU render-server process. Frames are produced by calling <code>ctx.render_camera()</code> in a <code>post_step</code> callback.</p>
+<ul>
+<li><code>entity</code> : <a href="/reference/python-api/#class-elodin-entityid">elodin.EntityId</a>, the entity the camera is attached to.</li>
+<li><code>name</code> : <code>string</code>, the camera name. Combined with the entity name to form the full identifier (e.g., entity <code>"drone"</code> + name <code>"scene_cam"</code> → <code>"drone.scene_cam"</code>).</li>
+<li><code>width</code> : <code>int</code>, frame width in pixels.</li>
+<li><code>height</code> : <code>int</code>, frame height in pixels.</li>
+<li><code>fov</code> : <code>float</code>, vertical field of view in degrees, defaults to <code>90.0</code>.</li>
+<li><code>near</code> : <code>float</code>, near clipping plane, defaults to <code>0.01</code>.</li>
+<li><code>far</code> : <code>float</code>, far clipping plane, defaults to <code>1000.0</code>.</li>
+<li><code>pos_offset</code> : <code>list[float]</code>, camera position offset from the entity origin in the entity's body frame, defaults to <code>[0, 0, 0]</code>.</li>
+<li><code>look_at_offset</code> : <code>list[float]</code>, look-at direction offset in the entity's body frame, defaults to <code>[0, 0, 0]</code>.</li>
+<li><code>format</code> : <code>string</code>, pixel format, defaults to <code>"rgba"</code>.</li>
+<li><code>effect</code> : <code>string</code>, GPU post-process effect: <code>"normal"</code>, <code>"thermal"</code>, <code>"night_vision"</code>, or <code>"depth"</code>. Defaults to <code>"normal"</code>.</li>
+<li><code>effect_params</code> : <code>dict</code>, effect-specific parameters (e.g., <code>{"contrast": 1.5, "noise_sigma": 0.02}</code> for thermal).</li>
+</ul>
+<p>The camera transform follows the entity: as the entity moves and rotates, the camera position and look-at point rotate with it in body frame.</p>
+<div class="el-notice warning container-fluid">
+    <div class="row g-0 align-items-center">
+        <div class="col-1" style="padding: 4px">
+            <i class="bx bx-error-circle" style="font-size: 1.5rem"></i>
+        </div>
+        <div class="col-15"><p><code>sensor_camera</code> only registers the camera. No rendering occurs until <code>ctx.render_camera()</code> is called in a <code>post_step</code> callback. This gives you explicit control over render timing and frame rate.</p>
+</div>
+    </div>
+</div>
+</li>
+<li>
 <p><code>run(system, sim_time_step, run_time_step, default_playback_speed, max_ticks, optimize, is_canceled, pre_step, post_step, db_path, interactive, start_timestamp)</code> -&gt; None</p>
 <p>Run the simulation.</p>
 <ul>
@@ -851,6 +879,39 @@ and running the simulation. The <code>World</code> object also provides helper m
 </div>
     </div>
 </div>
+</li>
+<li>
+<p><code>render_camera(camera_name)</code> -&gt; <code>numpy.ndarray | None</code></p>
+<p>Trigger the headless render-server to render a sensor camera and <strong>block</strong> until the frame is ready. Returns the frame as a numpy uint8 array of raw RGBA pixel data, or <code>None</code> if no frame was produced (e.g., during render pipeline warmup). Also writes the frame to the database so the editor's <code>sensor_view</code> panels can display it.</p>
+<ul>
+<li><code>camera_name</code> : <code>string</code>, the full camera name in <code>"entity.camera"</code> format (e.g., <code>"drone.scene_cam"</code>)</li>
+</ul>
+<p>Raises <code>RuntimeError</code> if no render bridge is available (not running under <code>elodin run</code> or <code>elodin editor</code>).</p>
+<div class="el-notice warning container-fluid">
+    <div class="row g-0 align-items-center">
+        <div class="col-1" style="padding: 4px">
+            <i class="bx bx-error-circle" style="font-size: 1.5rem"></i>
+        </div>
+        <div class="col-15"><p><code>render_camera()</code> is a blocking call — the simulation does not advance until the frame is produced. This ensures deterministic, timestamp-correct frames for SITL workflows where flight software needs the camera image before computing the next control command.</p>
+</div>
+    </div>
+</div>
+</li>
+<li>
+<p><code>render_cameras(camera_names)</code> -&gt; None</p>
+<p>Render multiple sensor cameras in a single batch request. More efficient than calling <code>render_camera()</code> multiple times when rendering multiple cameras on the same tick, as it uses a single round-trip to the render-server.</p>
+<ul>
+<li><code>camera_names</code> : <code>list[str]</code>, list of camera names in <code>"entity.camera"</code> format (e.g., <code>["drone.scene_cam", "drone.thermal_cam"]</code>)</li>
+</ul>
+<p>After this call returns, <code>read_msg(camera_name)</code> for each camera contains the rendered frame at the current simulation timestamp.</p>
+</li>
+<li>
+<p><code>read_msg(msg_name)</code> -&gt; <code>numpy.ndarray | None</code></p>
+<p>Read the latest message payload from the database as a numpy byte array. Used to read sensor camera frames that were rendered by <code>render_camera()</code> or <code>render_cameras()</code>.</p>
+<ul>
+<li><code>msg_name</code> : <code>string</code>, the message name (e.g., <code>"drone.scene_cam"</code>)</li>
+</ul>
+<p>Returns a numpy uint8 array containing the message payload, or <code>None</code> if no message exists.</p>
 </li>
 <li>
 <p><code>truncate()</code> -&gt; None</p>
