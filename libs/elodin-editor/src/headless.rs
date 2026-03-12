@@ -38,9 +38,6 @@ use crate::sensor_camera::{
 };
 use crate::{EqlContext, PositionSync, sync_pos};
 
-const RENDER_TARGET_MS: f64 = 5.0;
-const RENDER_CRITICAL_MS: f64 = 8.0;
-
 /// A headless Bevy app dedicated to sensor camera rendering.
 ///
 /// Used by both `elodin run` (main thread) and `elodin editor` (background
@@ -447,23 +444,6 @@ fn headless_sensor_runner(mut app: App) -> AppExit {
 
             let total_request_ms = elapsed_ms(request_start);
             request_span.record("total_request_ms", total_request_ms);
-            if total_request_ms > RENDER_CRITICAL_MS {
-                tracing::warn!(
-                    total_request_ms,
-                    camera_count = request.camera_names.len(),
-                    final_frame_count,
-                    fallback_used,
-                    "Render request exceeded critical latency budget"
-                );
-            } else if total_request_ms > RENDER_TARGET_MS {
-                tracing::info!(
-                    total_request_ms,
-                    camera_count = request.camera_names.len(),
-                    final_frame_count,
-                    fallback_used,
-                    "Render request exceeded target latency"
-                );
-            }
         } else if let Err(e) = server.respond_empty() {
             tracing::warn!("Render bridge write failed, client disconnected: {e}");
             break;

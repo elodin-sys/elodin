@@ -58,9 +58,6 @@ use crate::Error;
 /// Created lazily on first render_camera() call, reused across all ticks.
 pub type SharedRenderClient = Arc<Mutex<Option<RenderBridgeClient>>>;
 
-const RENDER_CLIENT_TARGET_MS: f64 = 5.0;
-const RENDER_CLIENT_CRITICAL_MS: f64 = 8.0;
-
 fn elapsed_ms(start: Instant) -> f64 {
     start.elapsed().as_secs_f64() * 1000.0
 }
@@ -99,20 +96,6 @@ fn log_render_client_metrics(
     span.record("db_enqueue_ms", db_enqueue_ms);
     span.record("client_frame_count", metrics.frame_count);
     span.record("client_total_bytes", metrics.total_bytes);
-
-    if total_ms > RENDER_CLIENT_CRITICAL_MS {
-        tracing::warn!(
-            render_operation = operation,
-            total_render_client_ms = total_ms,
-            "Render client path exceeded critical latency budget"
-        );
-    } else if total_ms > RENDER_CLIENT_TARGET_MS {
-        tracing::info!(
-            render_operation = operation,
-            total_render_client_ms = total_ms,
-            "Render client path exceeded target latency"
-        );
-    }
 }
 
 /// Helper function to convert a byte buffer to a numpy array based on primitive type.
