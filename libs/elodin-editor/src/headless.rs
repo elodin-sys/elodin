@@ -1,8 +1,13 @@
 use std::{
     fmt::Write as _,
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
     time::{Duration, Instant},
 };
 
+use bevy::ecs::system::{RunSystemError, ScheduleSystem, System, SystemParamValidationError};
 use bevy::{
     a11y::AccessibilityPlugin,
     animation::AnimationPlugin,
@@ -146,6 +151,7 @@ impl Plugin for HeadlessEditorPlugin {
                 .init_resource::<HeadlessMode>()
                 .init_resource::<HeadlessRenderScheduleTimingState>()
                 .init_resource::<HeadlessRenderScheduleMetrics>()
+                .init_resource::<HeadlessPrepareResourcesProbe>()
                 .init_resource::<HeadlessViewUniformPrepareMetrics>()
                 .add_systems(
                     Render,
@@ -234,6 +240,7 @@ impl Plugin for HeadlessEditorPlugin {
                         ),
                     ),
                 );
+            install_headless_prepare_resources_probes(render_app);
             install_headless_prepare_view_uniforms_override(render_app);
         }
     }
@@ -391,6 +398,11 @@ struct HeadlessRenderScheduleMetrics {
     prepare_resources_view_uniforms_clear_ms: f64,
     prepare_resources_view_uniforms_build_ms: f64,
     prepare_resources_view_uniforms_write_buffer_ms: f64,
+    prepare_resources_globals_buffer_ms: f64,
+    prepare_resources_uniform_components_ms: f64,
+    prepare_resources_gpu_component_array_buffers_ms: f64,
+    prepare_resources_gpu_readback_prepare_buffers_ms: f64,
+    prepare_resources_before_view_uniforms_other_ms: f64,
     prepare_resources_clusters_ms: f64,
     prepare_resources_core_3d_depth_textures_ms: f64,
     prepare_resources_core_3d_transmission_textures_ms: f64,
@@ -423,6 +435,161 @@ struct HeadlessViewUniformPrepareMetrics {
     clear_ms: f64,
     build_ms: f64,
     write_buffer_ms: f64,
+}
+
+#[derive(Debug, Clone, Copy)]
+enum HeadlessPrepareResourcesProbeKind {
+    GlobalsBuffer,
+    UniformComponents,
+    GpuComponentArrayBuffers,
+    GpuReadbackPrepareBuffers,
+}
+
+#[derive(Debug, Default)]
+struct HeadlessPrepareResourcesProbeInner {
+    globals_buffer_ns: AtomicU64,
+    uniform_components_ns: AtomicU64,
+    gpu_component_array_buffers_ns: AtomicU64,
+    gpu_readback_prepare_buffers_ns: AtomicU64,
+}
+
+impl HeadlessPrepareResourcesProbeInner {
+    fn reset(&self) {
+        self.globals_buffer_ns.store(0, Ordering::Relaxed);
+        self.uniform_components_ns.store(0, Ordering::Relaxed);
+        self.gpu_component_array_buffers_ns
+            .store(0, Ordering::Relaxed);
+        self.gpu_readback_prepare_buffers_ns
+            .store(0, Ordering::Relaxed);
+    }
+
+    fn record(&self, kind: HeadlessPrepareResourcesProbeKind, elapsed: Duration) {
+        let elapsed_ns = elapsed.as_nanos().min(u64::MAX as u128) as u64;
+        match kind {
+            HeadlessPrepareResourcesProbeKind::GlobalsBuffer => {
+                self.globals_buffer_ns
+                    .fetch_add(elapsed_ns, Ordering::Relaxed);
+            }
+            HeadlessPrepareResourcesProbeKind::UniformComponents => {
+                self.uniform_components_ns
+                    .fetch_add(elapsed_ns, Ordering::Relaxed);
+            }
+            HeadlessPrepareResourcesProbeKind::GpuComponentArrayBuffers => {
+                self.gpu_component_array_buffers_ns
+                    .fetch_add(elapsed_ns, Ordering::Relaxed);
+            }
+            HeadlessPrepareResourcesProbeKind::GpuReadbackPrepareBuffers => {
+                self.gpu_readback_prepare_buffers_ns
+                    .fetch_add(elapsed_ns, Ordering::Relaxed);
+            }
+        }
+    }
+
+    fn snapshot(&self) -> HeadlessPrepareResourcesProbeSnapshot {
+        HeadlessPrepareResourcesProbeSnapshot {
+            globals_buffer_ms: self.globals_buffer_ns.load(Ordering::Relaxed) as f64 / 1_000_000.0,
+            uniform_components_ms: self.uniform_components_ns.load(Ordering::Relaxed) as f64
+                / 1_000_000.0,
+            gpu_component_array_buffers_ms: self
+                .gpu_component_array_buffers_ns
+                .load(Ordering::Relaxed) as f64
+                / 1_000_000.0,
+            gpu_readback_prepare_buffers_ms: self
+                .gpu_readback_prepare_buffers_ns
+                .load(Ordering::Relaxed) as f64
+                / 1_000_000.0,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+struct HeadlessPrepareResourcesProbeSnapshot {
+    globals_buffer_ms: f64,
+    uniform_components_ms: f64,
+    gpu_component_array_buffers_ms: f64,
+    gpu_readback_prepare_buffers_ms: f64,
+}
+
+#[derive(Resource, Clone, Default)]
+struct HeadlessPrepareResourcesProbe(Arc<HeadlessPrepareResourcesProbeInner>);
+
+struct HeadlessTimedScheduleSystem {
+    inner: ScheduleSystem,
+    kind: HeadlessPrepareResourcesProbeKind,
+    probe: Arc<HeadlessPrepareResourcesProbeInner>,
+}
+
+impl HeadlessTimedScheduleSystem {
+    fn new(
+        inner: ScheduleSystem,
+        kind: HeadlessPrepareResourcesProbeKind,
+        probe: Arc<HeadlessPrepareResourcesProbeInner>,
+    ) -> Self {
+        Self { inner, kind, probe }
+    }
+}
+
+impl System for HeadlessTimedScheduleSystem {
+    type In = ();
+    type Out = ();
+
+    fn name(&self) -> bevy::utils::prelude::DebugName {
+        self.inner.name()
+    }
+
+    fn type_id(&self) -> std::any::TypeId {
+        self.inner.type_id()
+    }
+
+    fn flags(&self) -> bevy::ecs::system::SystemStateFlags {
+        self.inner.flags()
+    }
+
+    unsafe fn run_unsafe(
+        &mut self,
+        input: bevy::prelude::SystemIn<'_, Self>,
+        world: bevy::ecs::world::unsafe_world_cell::UnsafeWorldCell,
+    ) -> Result<Self::Out, RunSystemError> {
+        let start = Instant::now();
+        let result = unsafe { self.inner.run_unsafe(input, world) };
+        self.probe.record(self.kind, start.elapsed());
+        result
+    }
+
+    fn apply_deferred(&mut self, world: &mut World) {
+        self.inner.apply_deferred(world);
+    }
+
+    fn queue_deferred(&mut self, world: bevy::ecs::world::DeferredWorld) {
+        self.inner.queue_deferred(world);
+    }
+
+    unsafe fn validate_param_unsafe(
+        &mut self,
+        world: bevy::ecs::world::unsafe_world_cell::UnsafeWorldCell,
+    ) -> Result<(), SystemParamValidationError> {
+        unsafe { self.inner.validate_param_unsafe(world) }
+    }
+
+    fn initialize(&mut self, world: &mut World) -> bevy::ecs::query::FilteredAccessSet {
+        self.inner.initialize(world)
+    }
+
+    fn check_change_tick(&mut self, check: bevy::ecs::component::CheckChangeTicks) {
+        self.inner.check_change_tick(check);
+    }
+
+    fn default_system_sets(&self) -> Vec<bevy::ecs::schedule::InternedSystemSet> {
+        self.inner.default_system_sets()
+    }
+
+    fn get_last_run(&self) -> bevy::ecs::component::Tick {
+        self.inner.get_last_run()
+    }
+
+    fn set_last_run(&mut self, last_run: bevy::ecs::component::Tick) {
+        self.inner.set_last_run(last_run);
+    }
 }
 
 #[derive(Debug, Default, Resource)]
@@ -572,6 +739,7 @@ fn reset_headless_render_schedule_timing(world: &mut World) {
         HeadlessRenderScheduleMetrics::default();
     *world.resource_mut::<HeadlessViewUniformPrepareMetrics>() =
         HeadlessViewUniformPrepareMetrics::default();
+    world.resource::<HeadlessPrepareResourcesProbe>().0.reset();
 }
 
 fn install_headless_prepare_view_uniforms_override(render_app: &mut bevy::app::SubApp) {
@@ -602,6 +770,55 @@ fn install_headless_prepare_view_uniforms_override(render_app: &mut bevy::app::S
             IntoSystem::into_system(headless_prepare_view_uniforms)
                 .with_name("bevy_render::view::prepare_view_uniforms"),
         );
+    });
+}
+
+fn noop_schedule_system() {}
+
+fn prepare_resources_probe_kind_for_name(name: &str) -> Option<HeadlessPrepareResourcesProbeKind> {
+    if name.ends_with("prepare_globals_buffer") {
+        Some(HeadlessPrepareResourcesProbeKind::GlobalsBuffer)
+    } else if name.contains("prepare_uniform_components") {
+        Some(HeadlessPrepareResourcesProbeKind::UniformComponents)
+    } else if name.contains("prepare_gpu_component_array_buffers") {
+        Some(HeadlessPrepareResourcesProbeKind::GpuComponentArrayBuffers)
+    } else if name.contains("gpu_readback") && name.ends_with("prepare_buffers") {
+        Some(HeadlessPrepareResourcesProbeKind::GpuReadbackPrepareBuffers)
+    } else {
+        None
+    }
+}
+
+fn install_headless_prepare_resources_probes(render_app: &mut bevy::app::SubApp) {
+    let probe = render_app
+        .world()
+        .resource::<HeadlessPrepareResourcesProbe>()
+        .0
+        .clone();
+    render_app.edit_schedule(Render, |schedule| {
+        let system_keys: Vec<_> = schedule
+            .graph()
+            .systems
+            .iter()
+            .filter_map(|(key, system, _)| {
+                prepare_resources_probe_kind_for_name(&system.name().to_string())
+                    .map(|kind| (key, kind))
+            })
+            .collect();
+
+        for (system_key, kind) in system_keys {
+            let Some(system) = schedule.graph_mut().systems.get_mut(system_key) else {
+                continue;
+            };
+            let inner = std::mem::replace(
+                &mut system.system,
+                Box::new(
+                    IntoSystem::into_system(noop_schedule_system)
+                        .with_name("headless::noop_prepare_resources_probe_placeholder"),
+                ),
+            );
+            system.system = Box::new(HeadlessTimedScheduleSystem::new(inner, kind, probe.clone()));
+        }
     });
 }
 
@@ -847,6 +1064,7 @@ fn finalize_headless_render_schedule_metrics(
     state: Res<HeadlessRenderScheduleTimingState>,
     mut metrics: ResMut<HeadlessRenderScheduleMetrics>,
     view_uniform_prepare_metrics: Res<HeadlessViewUniformPrepareMetrics>,
+    prepare_resources_probe: Res<HeadlessPrepareResourcesProbe>,
     extracted_cameras: Query<(), With<bevy::render::camera::ExtractedCamera>>,
     extracted_views: Query<(), With<bevy::render::view::ExtractedView>>,
     view_uniform_offsets: Query<(), With<bevy::render::view::ViewUniformOffset>>,
@@ -866,6 +1084,7 @@ fn finalize_headless_render_schedule_metrics(
     >,
 ) {
     let frame_end = Instant::now();
+    let prepare_resources_probe = prepare_resources_probe.0.snapshot();
     metrics.extract_commands_ms = elapsed_between(state.frame_start, state.after_extract_commands);
     metrics.prepare_meshes_ms =
         elapsed_between(state.after_extract_commands, state.after_prepare_meshes);
@@ -896,6 +1115,22 @@ fn finalize_headless_render_schedule_metrics(
     metrics.prepare_resources_view_uniforms_build_ms = view_uniform_prepare_metrics.build_ms;
     metrics.prepare_resources_view_uniforms_write_buffer_ms =
         view_uniform_prepare_metrics.write_buffer_ms;
+    metrics.prepare_resources_globals_buffer_ms = prepare_resources_probe.globals_buffer_ms;
+    metrics.prepare_resources_uniform_components_ms = prepare_resources_probe.uniform_components_ms;
+    metrics.prepare_resources_gpu_component_array_buffers_ms =
+        prepare_resources_probe.gpu_component_array_buffers_ms;
+    metrics.prepare_resources_gpu_readback_prepare_buffers_ms =
+        prepare_resources_probe.gpu_readback_prepare_buffers_ms;
+    let view_uniforms_inner_ms = metrics.prepare_resources_view_uniforms_clear_ms
+        + metrics.prepare_resources_view_uniforms_build_ms
+        + metrics.prepare_resources_view_uniforms_write_buffer_ms;
+    let before_view_uniforms_known_ms = metrics.prepare_resources_globals_buffer_ms
+        + metrics.prepare_resources_uniform_components_ms
+        + metrics.prepare_resources_gpu_component_array_buffers_ms
+        + metrics.prepare_resources_gpu_readback_prepare_buffers_ms
+        + view_uniforms_inner_ms;
+    metrics.prepare_resources_before_view_uniforms_other_ms =
+        (metrics.prepare_resources_view_uniforms_ms - before_view_uniforms_known_ms).max(0.0);
     metrics.prepare_resources_clusters_ms = elapsed_between(
         state.after_prepare_view_uniforms,
         state.after_prepare_clusters,
@@ -1224,6 +1459,24 @@ fn headless_sensor_runner(mut app: App) -> AppExit {
                         update0_breakdown
                             .render_schedule
                             .prepare_resources_view_uniforms_write_buffer_ms,
+                    update0_render_prepare_resources_globals_buffer_ms = update0_breakdown
+                        .render_schedule
+                        .prepare_resources_globals_buffer_ms,
+                    update0_render_prepare_resources_uniform_components_ms = update0_breakdown
+                        .render_schedule
+                        .prepare_resources_uniform_components_ms,
+                    update0_render_prepare_resources_gpu_component_array_buffers_ms =
+                        update0_breakdown
+                            .render_schedule
+                            .prepare_resources_gpu_component_array_buffers_ms,
+                    update0_render_prepare_resources_gpu_readback_prepare_buffers_ms =
+                        update0_breakdown
+                            .render_schedule
+                            .prepare_resources_gpu_readback_prepare_buffers_ms,
+                    update0_render_prepare_resources_before_view_uniforms_other_ms =
+                        update0_breakdown
+                            .render_schedule
+                            .prepare_resources_before_view_uniforms_other_ms,
                     update0_render_prepare_resources_clusters_ms = update0_breakdown
                         .render_schedule
                         .prepare_resources_clusters_ms,
@@ -1381,6 +1634,24 @@ fn headless_sensor_runner(mut app: App) -> AppExit {
                         fallback_breakdown
                             .render_schedule
                             .prepare_resources_view_uniforms_write_buffer_ms,
+                    fallback_render_prepare_resources_globals_buffer_ms = fallback_breakdown
+                        .render_schedule
+                        .prepare_resources_globals_buffer_ms,
+                    fallback_render_prepare_resources_uniform_components_ms = fallback_breakdown
+                        .render_schedule
+                        .prepare_resources_uniform_components_ms,
+                    fallback_render_prepare_resources_gpu_component_array_buffers_ms =
+                        fallback_breakdown
+                            .render_schedule
+                            .prepare_resources_gpu_component_array_buffers_ms,
+                    fallback_render_prepare_resources_gpu_readback_prepare_buffers_ms =
+                        fallback_breakdown
+                            .render_schedule
+                            .prepare_resources_gpu_readback_prepare_buffers_ms,
+                    fallback_render_prepare_resources_before_view_uniforms_other_ms =
+                        fallback_breakdown
+                            .render_schedule
+                            .prepare_resources_before_view_uniforms_other_ms,
                     fallback_render_prepare_resources_clusters_ms = fallback_breakdown
                         .render_schedule
                         .prepare_resources_clusters_ms,
@@ -1553,6 +1824,24 @@ fn headless_sensor_runner(mut app: App) -> AppExit {
                         update0_breakdown
                             .render_schedule
                             .prepare_resources_view_uniforms_write_buffer_ms,
+                    update0_render_prepare_resources_globals_buffer_ms = update0_breakdown
+                        .render_schedule
+                        .prepare_resources_globals_buffer_ms,
+                    update0_render_prepare_resources_uniform_components_ms = update0_breakdown
+                        .render_schedule
+                        .prepare_resources_uniform_components_ms,
+                    update0_render_prepare_resources_gpu_component_array_buffers_ms =
+                        update0_breakdown
+                            .render_schedule
+                            .prepare_resources_gpu_component_array_buffers_ms,
+                    update0_render_prepare_resources_gpu_readback_prepare_buffers_ms =
+                        update0_breakdown
+                            .render_schedule
+                            .prepare_resources_gpu_readback_prepare_buffers_ms,
+                    update0_render_prepare_resources_before_view_uniforms_other_ms =
+                        update0_breakdown
+                            .render_schedule
+                            .prepare_resources_before_view_uniforms_other_ms,
                     update0_render_prepare_resources_clusters_ms = update0_breakdown
                         .render_schedule
                         .prepare_resources_clusters_ms,
@@ -1693,6 +1982,24 @@ fn headless_sensor_runner(mut app: App) -> AppExit {
                         fallback_breakdown
                             .render_schedule
                             .prepare_resources_view_uniforms_write_buffer_ms,
+                    fallback_render_prepare_resources_globals_buffer_ms = fallback_breakdown
+                        .render_schedule
+                        .prepare_resources_globals_buffer_ms,
+                    fallback_render_prepare_resources_uniform_components_ms = fallback_breakdown
+                        .render_schedule
+                        .prepare_resources_uniform_components_ms,
+                    fallback_render_prepare_resources_gpu_component_array_buffers_ms =
+                        fallback_breakdown
+                            .render_schedule
+                            .prepare_resources_gpu_component_array_buffers_ms,
+                    fallback_render_prepare_resources_gpu_readback_prepare_buffers_ms =
+                        fallback_breakdown
+                            .render_schedule
+                            .prepare_resources_gpu_readback_prepare_buffers_ms,
+                    fallback_render_prepare_resources_before_view_uniforms_other_ms =
+                        fallback_breakdown
+                            .render_schedule
+                            .prepare_resources_before_view_uniforms_other_ms,
                     fallback_render_prepare_resources_clusters_ms = fallback_breakdown
                         .render_schedule
                         .prepare_resources_clusters_ms,
