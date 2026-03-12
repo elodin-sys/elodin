@@ -148,58 +148,88 @@ impl Plugin for HeadlessEditorPlugin {
                 .add_systems(
                     Render,
                     (
-                        record_after_extract_commands
-                            .after(RenderSystems::ExtractCommands)
-                            .before(RenderSystems::PrepareMeshes),
-                        record_after_prepare_meshes
-                            .after(RenderSystems::PrepareMeshes)
-                            .before(RenderSystems::ManageViews),
-                        record_after_clear_view_attachments
-                            .after(bevy::render::view::clear_view_attachments)
-                            .before(bevy::render::view::prepare_view_attachments),
-                        record_after_prepare_view_attachments
-                            .after(bevy::render::view::prepare_view_attachments)
-                            .before(bevy::render::view::prepare_view_targets),
-                        record_after_prepare_view_targets
-                            .after(bevy::render::view::prepare_view_targets)
-                            .before(record_after_manage_views),
-                        record_after_manage_views
-                            .after(RenderSystems::ManageViews)
-                            .before(RenderSystems::Queue),
-                        record_after_queue_meshes
-                            .after(RenderSystems::QueueMeshes)
-                            .before(RenderSystems::QueueSweep),
-                        record_after_queue_sweep
-                            .after(RenderSystems::QueueSweep)
-                            .before(record_after_queue),
-                        record_after_queue
-                            .after(RenderSystems::Queue)
-                            .before(RenderSystems::PhaseSort),
-                        record_after_phase_sort
-                            .after(RenderSystems::PhaseSort)
-                            .before(RenderSystems::Prepare),
-                        record_after_prepare_resources
-                            .after(RenderSystems::PrepareResources)
-                            .before(RenderSystems::PrepareResourcesCollectPhaseBuffers),
-                        record_after_prepare_resources_collect_phase_buffers
-                            .after(RenderSystems::PrepareResourcesCollectPhaseBuffers)
-                            .before(RenderSystems::PrepareResourcesFlush),
-                        record_after_prepare_resources_flush
-                            .after(RenderSystems::PrepareResourcesFlush)
-                            .before(RenderSystems::PrepareBindGroups),
-                        record_after_prepare_bind_groups
-                            .after(RenderSystems::PrepareBindGroups)
-                            .before(record_after_prepare),
-                        record_after_prepare
-                            .after(RenderSystems::Prepare)
-                            .before(RenderSystems::Render),
-                        record_after_render
-                            .after(RenderSystems::Render)
-                            .before(RenderSystems::Cleanup),
-                        record_after_cleanup
-                            .after(RenderSystems::Cleanup)
-                            .before(RenderSystems::PostCleanup),
-                        finalize_headless_render_schedule_metrics.after(RenderSystems::PostCleanup),
+                        (
+                            record_after_extract_commands
+                                .after(RenderSystems::ExtractCommands)
+                                .before(RenderSystems::PrepareMeshes),
+                            record_after_prepare_meshes
+                                .after(RenderSystems::PrepareMeshes)
+                                .before(RenderSystems::ManageViews),
+                            record_after_clear_view_attachments
+                                .after(bevy::render::view::clear_view_attachments)
+                                .before(bevy::render::view::prepare_view_attachments),
+                            record_after_prepare_view_attachments
+                                .after(bevy::render::view::prepare_view_attachments)
+                                .before(bevy::render::view::prepare_view_targets),
+                            record_after_prepare_view_targets
+                                .after(bevy::render::view::prepare_view_targets)
+                                .before(record_after_manage_views),
+                            record_after_manage_views
+                                .after(RenderSystems::ManageViews)
+                                .before(RenderSystems::Queue),
+                            record_after_queue_meshes
+                                .after(RenderSystems::QueueMeshes)
+                                .before(RenderSystems::QueueSweep),
+                            record_after_queue_sweep
+                                .after(RenderSystems::QueueSweep)
+                                .before(record_after_queue),
+                            record_after_queue
+                                .after(RenderSystems::Queue)
+                                .before(RenderSystems::PhaseSort),
+                            record_after_phase_sort
+                                .after(RenderSystems::PhaseSort)
+                                .before(RenderSystems::Prepare),
+                        ),
+                        (
+                            record_after_prepare_view_uniforms
+                                .after(bevy::render::view::prepare_view_uniforms)
+                                .before(bevy::pbr::prepare_clusters),
+                            record_after_prepare_clusters
+                                .after(bevy::pbr::prepare_clusters)
+                                .before(
+                                    bevy::core_pipeline::core_3d::prepare_core_3d_depth_textures,
+                                ),
+                            record_after_prepare_core_3d_depth_textures
+                                .after(
+                                    bevy::core_pipeline::core_3d::prepare_core_3d_depth_textures,
+                                )
+                                .before(
+                                    bevy::core_pipeline::core_3d::prepare_core_3d_transmission_textures,
+                                ),
+                            record_after_prepare_core_3d_transmission_textures
+                                .after(
+                                    bevy::core_pipeline::core_3d::prepare_core_3d_transmission_textures,
+                                )
+                                .before(bevy::core_pipeline::core_3d::prepare_prepass_textures),
+                            record_after_prepare_prepass_textures
+                                .after(bevy::core_pipeline::core_3d::prepare_prepass_textures)
+                                .before(record_after_prepare_resources),
+                            record_after_prepare_resources
+                                .after(RenderSystems::PrepareResources)
+                                .before(RenderSystems::PrepareResourcesCollectPhaseBuffers),
+                            record_after_prepare_resources_collect_phase_buffers
+                                .after(RenderSystems::PrepareResourcesCollectPhaseBuffers)
+                                .before(RenderSystems::PrepareResourcesFlush),
+                            record_after_prepare_resources_flush
+                                .after(RenderSystems::PrepareResourcesFlush)
+                                .before(RenderSystems::PrepareBindGroups),
+                            record_after_prepare_bind_groups
+                                .after(RenderSystems::PrepareBindGroups)
+                                .before(record_after_prepare),
+                            record_after_prepare
+                                .after(RenderSystems::Prepare)
+                                .before(RenderSystems::Render),
+                        ),
+                        (
+                            record_after_render
+                                .after(RenderSystems::Render)
+                                .before(RenderSystems::Cleanup),
+                            record_after_cleanup
+                                .after(RenderSystems::Cleanup)
+                                .before(RenderSystems::PostCleanup),
+                            finalize_headless_render_schedule_metrics
+                                .after(RenderSystems::PostCleanup),
+                        ),
                     ),
                 );
         }
@@ -354,6 +384,12 @@ struct HeadlessRenderScheduleMetrics {
     queue_after_sweep_ms: f64,
     queue_ms: f64,
     phase_sort_ms: f64,
+    prepare_resources_view_uniforms_ms: f64,
+    prepare_resources_clusters_ms: f64,
+    prepare_resources_core_3d_depth_textures_ms: f64,
+    prepare_resources_core_3d_transmission_textures_ms: f64,
+    prepare_resources_prepass_textures_ms: f64,
+    prepare_resources_other_ms: f64,
     prepare_resources_ms: f64,
     prepare_resources_collect_phase_buffers_ms: f64,
     prepare_resources_flush_ms: f64,
@@ -365,6 +401,9 @@ struct HeadlessRenderScheduleMetrics {
     post_cleanup_ms: f64,
     extracted_camera_count: usize,
     extracted_view_count: usize,
+    view_uniform_offset_count: usize,
+    extracted_cluster_config_count: usize,
+    view_cluster_bindings_count: usize,
     view_target_count: usize,
     view_depth_texture_count: usize,
     view_prepass_texture_count: usize,
@@ -386,6 +425,11 @@ struct HeadlessRenderScheduleTimingState {
     after_queue_meshes: Option<Instant>,
     after_queue: Option<Instant>,
     after_phase_sort: Option<Instant>,
+    after_prepare_view_uniforms: Option<Instant>,
+    after_prepare_clusters: Option<Instant>,
+    after_prepare_core_3d_depth_textures: Option<Instant>,
+    after_prepare_core_3d_transmission_textures: Option<Instant>,
+    after_prepare_prepass_textures: Option<Instant>,
     after_prepare_resources: Option<Instant>,
     after_prepare_resources_collect_phase_buffers: Option<Instant>,
     after_prepare_resources_flush: Option<Instant>,
@@ -597,6 +641,30 @@ fn record_after_phase_sort(mut state: ResMut<HeadlessRenderScheduleTimingState>)
     mark_now(&mut state.after_phase_sort);
 }
 
+fn record_after_prepare_view_uniforms(mut state: ResMut<HeadlessRenderScheduleTimingState>) {
+    mark_now(&mut state.after_prepare_view_uniforms);
+}
+
+fn record_after_prepare_clusters(mut state: ResMut<HeadlessRenderScheduleTimingState>) {
+    mark_now(&mut state.after_prepare_clusters);
+}
+
+fn record_after_prepare_core_3d_depth_textures(
+    mut state: ResMut<HeadlessRenderScheduleTimingState>,
+) {
+    mark_now(&mut state.after_prepare_core_3d_depth_textures);
+}
+
+fn record_after_prepare_core_3d_transmission_textures(
+    mut state: ResMut<HeadlessRenderScheduleTimingState>,
+) {
+    mark_now(&mut state.after_prepare_core_3d_transmission_textures);
+}
+
+fn record_after_prepare_prepass_textures(mut state: ResMut<HeadlessRenderScheduleTimingState>) {
+    mark_now(&mut state.after_prepare_prepass_textures);
+}
+
 fn record_after_prepare_resources(mut state: ResMut<HeadlessRenderScheduleTimingState>) {
     mark_now(&mut state.after_prepare_resources);
 }
@@ -632,6 +700,9 @@ fn finalize_headless_render_schedule_metrics(
     mut metrics: ResMut<HeadlessRenderScheduleMetrics>,
     extracted_cameras: Query<(), With<bevy::render::camera::ExtractedCamera>>,
     extracted_views: Query<(), With<bevy::render::view::ExtractedView>>,
+    view_uniform_offsets: Query<(), With<bevy::render::view::ViewUniformOffset>>,
+    extracted_cluster_configs: Query<(), With<bevy::pbr::ExtractedClusterConfig>>,
+    view_cluster_bindings: Query<(), With<bevy::pbr::ViewClusterBindings>>,
     view_targets: Query<(), With<bevy::render::view::ViewTarget>>,
     view_depth_textures: Query<(), With<bevy::render::view::ViewDepthTexture>>,
     view_prepass_textures: Query<(), With<bevy::core_pipeline::prepass::ViewPrepassTextures>>,
@@ -670,8 +741,33 @@ fn finalize_headless_render_schedule_metrics(
     metrics.queue_after_sweep_ms = elapsed_between(state.after_queue_sweep, state.after_queue);
     metrics.queue_ms = elapsed_between(state.after_manage_views, state.after_queue);
     metrics.phase_sort_ms = elapsed_between(state.after_queue, state.after_phase_sort);
+    metrics.prepare_resources_view_uniforms_ms =
+        elapsed_between(state.after_phase_sort, state.after_prepare_view_uniforms);
+    metrics.prepare_resources_clusters_ms = elapsed_between(
+        state.after_prepare_view_uniforms,
+        state.after_prepare_clusters,
+    );
+    metrics.prepare_resources_core_3d_depth_textures_ms = elapsed_between(
+        state.after_prepare_clusters,
+        state.after_prepare_core_3d_depth_textures,
+    );
+    metrics.prepare_resources_core_3d_transmission_textures_ms = elapsed_between(
+        state.after_prepare_core_3d_depth_textures,
+        state.after_prepare_core_3d_transmission_textures,
+    );
+    metrics.prepare_resources_prepass_textures_ms = elapsed_between(
+        state.after_prepare_core_3d_transmission_textures,
+        state.after_prepare_prepass_textures,
+    );
     metrics.prepare_resources_ms =
         elapsed_between(state.after_phase_sort, state.after_prepare_resources);
+    let prepare_resources_measured_ms = metrics.prepare_resources_view_uniforms_ms
+        + metrics.prepare_resources_clusters_ms
+        + metrics.prepare_resources_core_3d_depth_textures_ms
+        + metrics.prepare_resources_core_3d_transmission_textures_ms
+        + metrics.prepare_resources_prepass_textures_ms;
+    metrics.prepare_resources_other_ms =
+        (metrics.prepare_resources_ms - prepare_resources_measured_ms).max(0.0);
     metrics.prepare_resources_collect_phase_buffers_ms = elapsed_between(
         state.after_prepare_resources,
         state.after_prepare_resources_collect_phase_buffers,
@@ -692,6 +788,9 @@ fn finalize_headless_render_schedule_metrics(
     metrics.post_cleanup_ms = elapsed_between(state.after_cleanup, Some(frame_end));
     metrics.extracted_camera_count = extracted_cameras.iter().len();
     metrics.extracted_view_count = extracted_views.iter().len();
+    metrics.view_uniform_offset_count = view_uniform_offsets.iter().len();
+    metrics.extracted_cluster_config_count = extracted_cluster_configs.iter().len();
+    metrics.view_cluster_bindings_count = view_cluster_bindings.iter().len();
     metrics.view_target_count = view_targets.iter().len();
     metrics.view_depth_texture_count = view_depth_textures.iter().len();
     metrics.view_prepass_texture_count = view_prepass_textures.iter().len();
@@ -959,6 +1058,24 @@ fn headless_sensor_runner(mut app: App) -> AppExit {
                     update0_render_phase_sort_ms = update0_breakdown.render_schedule.phase_sort_ms,
                     update0_render_prepare_resources_ms =
                         update0_breakdown.render_schedule.prepare_resources_ms,
+                    update0_render_prepare_resources_view_uniforms_ms = update0_breakdown
+                        .render_schedule
+                        .prepare_resources_view_uniforms_ms,
+                    update0_render_prepare_resources_clusters_ms = update0_breakdown
+                        .render_schedule
+                        .prepare_resources_clusters_ms,
+                    update0_render_prepare_resources_core_3d_depth_textures_ms = update0_breakdown
+                        .render_schedule
+                        .prepare_resources_core_3d_depth_textures_ms,
+                    update0_render_prepare_resources_core_3d_transmission_textures_ms =
+                        update0_breakdown
+                            .render_schedule
+                            .prepare_resources_core_3d_transmission_textures_ms,
+                    update0_render_prepare_resources_prepass_textures_ms = update0_breakdown
+                        .render_schedule
+                        .prepare_resources_prepass_textures_ms,
+                    update0_render_prepare_resources_other_ms =
+                        update0_breakdown.render_schedule.prepare_resources_other_ms,
                     update0_render_prepare_resources_collect_phase_buffers_ms = update0_breakdown
                         .render_schedule
                         .prepare_resources_collect_phase_buffers_ms,
@@ -977,6 +1094,14 @@ fn headless_sensor_runner(mut app: App) -> AppExit {
                         update0_breakdown.render_schedule.extracted_camera_count,
                     update0_render_extracted_view_count =
                         update0_breakdown.render_schedule.extracted_view_count,
+                    update0_render_view_uniform_offset_count =
+                        update0_breakdown.render_schedule.view_uniform_offset_count,
+                    update0_render_extracted_cluster_config_count = update0_breakdown
+                        .render_schedule
+                        .extracted_cluster_config_count,
+                    update0_render_view_cluster_bindings_count = update0_breakdown
+                        .render_schedule
+                        .view_cluster_bindings_count,
                     update0_render_view_target_count =
                         update0_breakdown.render_schedule.view_target_count,
                     update0_render_view_depth_texture_count =
@@ -1080,6 +1205,26 @@ fn headless_sensor_runner(mut app: App) -> AppExit {
                         fallback_breakdown.render_schedule.phase_sort_ms,
                     fallback_render_prepare_resources_ms =
                         fallback_breakdown.render_schedule.prepare_resources_ms,
+                    fallback_render_prepare_resources_view_uniforms_ms = fallback_breakdown
+                        .render_schedule
+                        .prepare_resources_view_uniforms_ms,
+                    fallback_render_prepare_resources_clusters_ms = fallback_breakdown
+                        .render_schedule
+                        .prepare_resources_clusters_ms,
+                    fallback_render_prepare_resources_core_3d_depth_textures_ms =
+                        fallback_breakdown
+                            .render_schedule
+                            .prepare_resources_core_3d_depth_textures_ms,
+                    fallback_render_prepare_resources_core_3d_transmission_textures_ms =
+                        fallback_breakdown
+                            .render_schedule
+                            .prepare_resources_core_3d_transmission_textures_ms,
+                    fallback_render_prepare_resources_prepass_textures_ms = fallback_breakdown
+                        .render_schedule
+                        .prepare_resources_prepass_textures_ms,
+                    fallback_render_prepare_resources_other_ms = fallback_breakdown
+                        .render_schedule
+                        .prepare_resources_other_ms,
                     fallback_render_prepare_resources_collect_phase_buffers_ms = fallback_breakdown
                         .render_schedule
                         .prepare_resources_collect_phase_buffers_ms,
@@ -1099,6 +1244,14 @@ fn headless_sensor_runner(mut app: App) -> AppExit {
                         fallback_breakdown.render_schedule.extracted_camera_count,
                     fallback_render_extracted_view_count =
                         fallback_breakdown.render_schedule.extracted_view_count,
+                    fallback_render_view_uniform_offset_count =
+                        fallback_breakdown.render_schedule.view_uniform_offset_count,
+                    fallback_render_extracted_cluster_config_count = fallback_breakdown
+                        .render_schedule
+                        .extracted_cluster_config_count,
+                    fallback_render_view_cluster_bindings_count = fallback_breakdown
+                        .render_schedule
+                        .view_cluster_bindings_count,
                     fallback_render_view_target_count =
                         fallback_breakdown.render_schedule.view_target_count,
                     fallback_render_view_depth_texture_count =
@@ -1214,6 +1367,24 @@ fn headless_sensor_runner(mut app: App) -> AppExit {
                     update0_render_phase_sort_ms = update0_breakdown.render_schedule.phase_sort_ms,
                     update0_render_prepare_resources_ms =
                         update0_breakdown.render_schedule.prepare_resources_ms,
+                    update0_render_prepare_resources_view_uniforms_ms = update0_breakdown
+                        .render_schedule
+                        .prepare_resources_view_uniforms_ms,
+                    update0_render_prepare_resources_clusters_ms = update0_breakdown
+                        .render_schedule
+                        .prepare_resources_clusters_ms,
+                    update0_render_prepare_resources_core_3d_depth_textures_ms = update0_breakdown
+                        .render_schedule
+                        .prepare_resources_core_3d_depth_textures_ms,
+                    update0_render_prepare_resources_core_3d_transmission_textures_ms =
+                        update0_breakdown
+                            .render_schedule
+                            .prepare_resources_core_3d_transmission_textures_ms,
+                    update0_render_prepare_resources_prepass_textures_ms = update0_breakdown
+                        .render_schedule
+                        .prepare_resources_prepass_textures_ms,
+                    update0_render_prepare_resources_other_ms =
+                        update0_breakdown.render_schedule.prepare_resources_other_ms,
                     update0_render_prepare_resources_collect_phase_buffers_ms = update0_breakdown
                         .render_schedule
                         .prepare_resources_collect_phase_buffers_ms,
@@ -1228,6 +1399,33 @@ fn headless_sensor_runner(mut app: App) -> AppExit {
                     update0_render_cleanup_ms = update0_breakdown.render_schedule.cleanup_ms,
                     update0_render_post_cleanup_ms =
                         update0_breakdown.render_schedule.post_cleanup_ms,
+                    update0_render_extracted_camera_count =
+                        update0_breakdown.render_schedule.extracted_camera_count,
+                    update0_render_extracted_view_count =
+                        update0_breakdown.render_schedule.extracted_view_count,
+                    update0_render_view_uniform_offset_count =
+                        update0_breakdown.render_schedule.view_uniform_offset_count,
+                    update0_render_extracted_cluster_config_count = update0_breakdown
+                        .render_schedule
+                        .extracted_cluster_config_count,
+                    update0_render_view_cluster_bindings_count = update0_breakdown
+                        .render_schedule
+                        .view_cluster_bindings_count,
+                    update0_render_view_target_count =
+                        update0_breakdown.render_schedule.view_target_count,
+                    update0_render_view_depth_texture_count =
+                        update0_breakdown.render_schedule.view_depth_texture_count,
+                    update0_render_view_prepass_texture_count =
+                        update0_breakdown.render_schedule.view_prepass_texture_count,
+                    update0_render_view_transmission_texture_count = update0_breakdown
+                        .render_schedule
+                        .view_transmission_texture_count,
+                    update0_render_no_indirect_drawing_view_count = update0_breakdown
+                        .render_schedule
+                        .no_indirect_drawing_view_count,
+                    update0_render_occlusion_culling_view_count = update0_breakdown
+                        .render_schedule
+                        .occlusion_culling_view_count,
                     update0_main_clear_trackers_ms = update0_breakdown.main_clear_trackers_ms,
                     collect0_ms,
                     fallback_used,
@@ -1299,6 +1497,26 @@ fn headless_sensor_runner(mut app: App) -> AppExit {
                         fallback_breakdown.render_schedule.phase_sort_ms,
                     fallback_render_prepare_resources_ms =
                         fallback_breakdown.render_schedule.prepare_resources_ms,
+                    fallback_render_prepare_resources_view_uniforms_ms = fallback_breakdown
+                        .render_schedule
+                        .prepare_resources_view_uniforms_ms,
+                    fallback_render_prepare_resources_clusters_ms = fallback_breakdown
+                        .render_schedule
+                        .prepare_resources_clusters_ms,
+                    fallback_render_prepare_resources_core_3d_depth_textures_ms =
+                        fallback_breakdown
+                            .render_schedule
+                            .prepare_resources_core_3d_depth_textures_ms,
+                    fallback_render_prepare_resources_core_3d_transmission_textures_ms =
+                        fallback_breakdown
+                            .render_schedule
+                            .prepare_resources_core_3d_transmission_textures_ms,
+                    fallback_render_prepare_resources_prepass_textures_ms = fallback_breakdown
+                        .render_schedule
+                        .prepare_resources_prepass_textures_ms,
+                    fallback_render_prepare_resources_other_ms = fallback_breakdown
+                        .render_schedule
+                        .prepare_resources_other_ms,
                     fallback_render_prepare_resources_collect_phase_buffers_ms = fallback_breakdown
                         .render_schedule
                         .prepare_resources_collect_phase_buffers_ms,
@@ -1314,6 +1532,34 @@ fn headless_sensor_runner(mut app: App) -> AppExit {
                     fallback_render_cleanup_ms = fallback_breakdown.render_schedule.cleanup_ms,
                     fallback_render_post_cleanup_ms =
                         fallback_breakdown.render_schedule.post_cleanup_ms,
+                    fallback_render_extracted_camera_count =
+                        fallback_breakdown.render_schedule.extracted_camera_count,
+                    fallback_render_extracted_view_count =
+                        fallback_breakdown.render_schedule.extracted_view_count,
+                    fallback_render_view_uniform_offset_count =
+                        fallback_breakdown.render_schedule.view_uniform_offset_count,
+                    fallback_render_extracted_cluster_config_count = fallback_breakdown
+                        .render_schedule
+                        .extracted_cluster_config_count,
+                    fallback_render_view_cluster_bindings_count = fallback_breakdown
+                        .render_schedule
+                        .view_cluster_bindings_count,
+                    fallback_render_view_target_count =
+                        fallback_breakdown.render_schedule.view_target_count,
+                    fallback_render_view_depth_texture_count =
+                        fallback_breakdown.render_schedule.view_depth_texture_count,
+                    fallback_render_view_prepass_texture_count = fallback_breakdown
+                        .render_schedule
+                        .view_prepass_texture_count,
+                    fallback_render_view_transmission_texture_count = fallback_breakdown
+                        .render_schedule
+                        .view_transmission_texture_count,
+                    fallback_render_no_indirect_drawing_view_count = fallback_breakdown
+                        .render_schedule
+                        .no_indirect_drawing_view_count,
+                    fallback_render_occlusion_culling_view_count = fallback_breakdown
+                        .render_schedule
+                        .occlusion_culling_view_count,
                     fallback_main_clear_trackers_ms = fallback_breakdown.main_clear_trackers_ms,
                     collect1_ms,
                     respond_ms,

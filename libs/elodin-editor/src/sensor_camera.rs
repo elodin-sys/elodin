@@ -11,7 +11,6 @@ use bevy::{
     },
     ecs::query::QueryItem,
     image::Image,
-    light::cluster::ClusterConfig,
     math::{DVec3, Vec3},
     prelude::*,
     render::{
@@ -434,11 +433,6 @@ fn spawn_sensor_cameras(
                 Tonemapping::None,
                 // Favor render-server throughput over editor-quality anti-aliasing.
                 Msaa::Off,
-                // Sensor-camera views are latency-sensitive and typically have
-                // simple lighting. A single clustered-light bin preserves
-                // clustered point/spot lights while avoiding the default
-                // per-tile cluster preparation cost.
-                ClusterConfig::Single,
                 // Sensor cameras are latency-sensitive offscreen views; prefer the
                 // simpler direct draw path over Bevy's indirect preprocessing path.
                 NoIndirectDrawing,
