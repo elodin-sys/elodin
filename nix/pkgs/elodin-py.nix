@@ -108,7 +108,7 @@
       runHook preBuild
 
       # Build the wheel with maturin
-      maturin build --offline --target-dir ./target -m libs/nox-py/Cargo.toml --release ${lib.optionalString enableTracy "--features tracy"}
+      maturin build --offline --target-dir ./target -m libs/nox-py/Cargo.toml --release ${lib.optionalString enableTracy "--features publish,tracy"}
 
       runHook postBuild
     '';
