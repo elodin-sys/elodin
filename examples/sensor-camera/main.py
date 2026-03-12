@@ -234,6 +234,7 @@ world.run(
     max_ticks=MAX_TICKS,
     post_step=post_step,
     interactive=False,
+    backend="jax",
 )
 
 print(f"\nRGB frames: {rgb_frames[0]}, Thermal frames: {thermal_frames[0]}")
