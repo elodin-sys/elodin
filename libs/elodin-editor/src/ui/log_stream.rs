@@ -289,7 +289,11 @@ impl super::widgets::WidgetSystem for LogStreamWidget<'_, '_> {
                             .color(Color32::from_rgb(80, 80, 80))
                     };
                     if ui.selectable_label(active, label).clicked() {
-                        cache.filter_level = if active { ((i as u8) + 1).min(4) } else { i as u8 };
+                        cache.filter_level = if active {
+                            ((i as u8) + 1).min(4)
+                        } else {
+                            i as u8
+                        };
                     }
                 }
 
