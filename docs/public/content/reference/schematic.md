@@ -52,6 +52,7 @@ order = 6
 - `query_plot`: `name` (required pane title), `query` (required), `refresh_interval` in ms (default 1000), `auto_refresh` (default false), `color` (default white), `type` (`eql` default, or `sql`), `mode` (`timeseries` default, or `xy` for numeric X-axis labels), `x_label` (optional X-axis label for XY mode), `y_label` (optional Y-axis label).
 - `data_overview`: `name` (optional pane title).
 - `schematic_tree`: `name` (optional pane title). (Hierarchy/Inspector sidebars are implicit and not serialized.)
+- `sensor_view`: positional `camera_name` (required; the full sensor camera name in `"entity.camera"` format, e.g., `"drone.scene_cam"`), `name` (optional display label). Displays raw RGBA frames from a sensor camera registered via `world.sensor_camera()` and rendered by `ctx.render_camera()` in a `post_step` callback. Unlike `video_stream` (which decodes H.264), `sensor_view` displays raw pixel data directly — no codec involved.
 - `video_stream`: positional `msg_name` (required; the message name matching the `elodinsink` `msg-name` property), `name` (optional display label; defaults to `"Video Stream <msg_name>"`). Displays an H.264 video stream received by Elodin DB. The video source can be a GStreamer pipeline using `elodinsink`, an OBS Studio SRT stream via a receiver pipeline, or any source that sends H.264 NAL units to Elodin DB. See the [OBS Studio Integration](#obs-studio-integration) section below.
 - `dashboard`: layout node (Bevy UI style). Key properties: `name` (optional), `display` (`flex` default, or `grid`/`block`/`none`), `box_sizing` (`border-box` default or `content-box`), `position_type` (`relative` default or `absolute`), `overflow` (per-axis; defaults visible), `overflow_clip_margin` (visual_box + margin, defaults content-box / 0), sizing (`left`/`right`/`top`/`bottom`/`width`/`height`/`min_*`/`max_*` accept `auto`, `px`, `%`, `vw`, `vh`, `vmin`, `vmax`; default `auto`), `aspect_ratio` (optional f32), alignment (`align_items`/`justify_items`/`align_self`/`justify_self`/`align_content`/`justify_content`, all default to `default` variants), flex (`flex_direction`, `flex_wrap`, `flex_grow` default 0, `flex_shrink` default 1, `flex_basis` default `auto`, `row_gap`/`column_gap` default `auto`), `children` (nested dashboard nodes), colors via `bg`/`background` child (default transparent), `text` (optional), `font_size` (default 16), `text_color` child (default white), spacing via `margin`/`padding`/`border` children with `left`/`right`/`top`/`bottom`.
 
@@ -160,6 +161,7 @@ panel =
   | query_plot
   | data_overview
   | schematic_tree
+  | sensor_view
   | video_stream
   | dashboard
   | split
@@ -228,6 +230,9 @@ data_overview = "data_overview"
 
 schematic_tree = "schematic_tree"
                [name=string]
+
+sensor_view = "sensor_view" <camera_name>
+            [name=string]
 
 video_stream = "video_stream" <msg_name>
              [name=string]
@@ -349,6 +354,24 @@ viewport name="Main"
 graph "drone.altitude"
       name="Altitude"
       auto_y_range=#true
+```
+
+Sensor camera panel (from `world.sensor_camera()` + `ctx.render_camera()`):
+
+```kdl
+sensor_view "drone.scene_cam" name="Forward Camera"
+```
+
+Viewport + sensor cameras side by side:
+
+```kdl
+hsplit {
+    viewport name="3D View" show_grid=#true
+    vsplit {
+        sensor_view "drone.scene_cam" name="RGB Camera"
+        sensor_view "drone.thermal_cam" name="Thermal"
+    }
+}
 ```
 
 Video stream panel (e.g. from OBS Studio):

@@ -422,7 +422,7 @@ fn decode_video(...) {
 When the video tile starts, it sends a `FixedRateMsgStream` request:
 
 ```rust
-commands.send_req_reply_raw(
+commands.send_msg_req_reply_raw(
     FixedRateMsgStream {
         msg_id: stream.msg_id,
         fixed_rate: FixedRateOp {

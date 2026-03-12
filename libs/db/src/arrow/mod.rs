@@ -10,7 +10,7 @@ use arrow::{
 use convert_case::Casing;
 use datafusion::{
     catalog::streaming::StreamingTable, datasource::MemTable, execution::RecordBatchStream,
-    parquet, physical_plan::streaming::PartitionStream, prelude::SessionContext,
+    physical_plan::streaming::PartitionStream, prelude::SessionContext,
 };
 use futures_lite::{Stream, StreamExt, pin};
 use impeller2::types::{PrimType, Timestamp};

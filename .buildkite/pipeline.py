@@ -63,8 +63,8 @@ test_steps = [
         emoji=":python:",
         label="nox-py",
         key="nox-py",
+        flake=".#run",
         # this step is just to verify that the package can be imported
-        # nix does all the actual work of building nox-py and installing it in the environment
         command="python -c 'import elodin; print(elodin.__version__)'",
     ),
     group(
@@ -73,6 +73,7 @@ test_steps = [
         steps=[
             nix_step(
                 label=":python: pytest",
+                flake=".#run",
                 command="pytest libs/nox-py -o 'pythonpath='",
             ),
             nix_step(
@@ -87,22 +88,27 @@ test_steps = [
         steps=[
             nix_step(
                 label=":python: ball",
+                flake=".#run",
                 command="python3 examples/ball/main.py bench --ticks 100 --profile",
             ),
             nix_step(
                 label=":python: drone",
+                flake=".#run",
                 command="python3 examples/drone/main.py bench --ticks 100 --profile",
             ),
             nix_step(
                 label=":python: rocket",
+                flake=".#run",
                 command="python3 examples/rocket/main.py bench --ticks 100 --profile",
             ),
             nix_step(
                 label=":python: three-body",
+                flake=".#run",
                 command="python3 examples/three-body/main.py bench --ticks 100 --profile",
             ),
             nix_step(
                 label=":python: cube-sat",
+                flake=".#run",
                 command="python3 examples/cube-sat/main.py bench --ticks 100 --profile",
             ),
         ],
