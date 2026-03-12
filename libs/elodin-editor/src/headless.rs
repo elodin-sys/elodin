@@ -27,7 +27,7 @@ use bevy::{
 };
 use bevy_mat3_material::Mat3Material;
 use big_space::{FloatingOrigin, GridCell};
-use elodin_db::render_bridge::RenderBridgeServer;
+use render_bridge::RenderBridgeServer;
 use impeller2_kdl::FromKdl;
 use impeller2_wkt::{CurrentTimestamp, DbConfig, SchematicElem};
 

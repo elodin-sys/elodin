@@ -5023,6 +5023,7 @@ dependencies = [
  "postcard-dyn",
  "postcard-schema",
  "reflink-copy",
+ "render-bridge",
  "rustfft",
  "scuffle-h264",
  "serde",
@@ -5113,7 +5114,6 @@ dependencies = [
  "egui_material_icons",
  "egui_table",
  "egui_tiles",
- "elodin-db",
  "eql",
  "fastrand 2.3.0",
  "flume",
@@ -5142,6 +5142,7 @@ dependencies = [
  "pic-scale",
  "postcard",
  "raw-window-handle 0.5.2",
+ "render-bridge",
  "reqwest",
  "rfd",
  "roaring",
@@ -11178,6 +11179,14 @@ name = "regex-syntax"
 version = "0.8.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7a2d987857b319362043e95f5353c0535c1f58eec5336fdfcf626430af7def58"
+
+[[package]]
+name = "render-bridge"
+version = "0.16.2-alpha.0"
+dependencies = [
+ "impeller2",
+ "tracing",
+]
 
 [[package]]
 name = "renderdoc-sys"
