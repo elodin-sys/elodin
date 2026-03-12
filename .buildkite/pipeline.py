@@ -113,8 +113,8 @@ test_steps = [
             ),
             nix_step(
                 label=":python: sensor-camera",
-                flake=".#run",
-                command="./scripts/ci/sensor_camera_perf.sh",
+                command="just install tracy && source .venv/bin/activate && ./scripts/ci/sensor_camera_perf.sh",
+                env={"ELODIN_SENSOR_CAMERA_CAPTURE_TRACY": "1"},
             ),
         ],
     ),
