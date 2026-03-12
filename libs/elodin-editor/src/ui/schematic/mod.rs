@@ -98,6 +98,7 @@ impl SchematicParam<'_, '_> {
             Pane::SchematicTree(pane) => Some(pane.name.clone()),
             Pane::DataOverview(pane) => Some(pane.name.clone()),
             Pane::VideoStream(pane) => Some(pane.name.clone()),
+            Pane::SensorView(pane) => Some(pane.name.clone()),
         }
     }
 
@@ -294,6 +295,13 @@ impl SchematicParam<'_, '_> {
                     Pane::VideoStream(video_pane) => {
                         let video_stream = self.video_streams.get(video_pane.entity).ok()?;
                         Some(Panel::VideoStream(WktVideoStream {
+                            msg_name: video_stream.msg_name.clone(),
+                            name: pane_name,
+                        }))
+                    }
+                    Pane::SensorView(sv_pane) => {
+                        let video_stream = self.video_streams.get(sv_pane.entity).ok()?;
+                        Some(Panel::SensorView(impeller2_wkt::SensorView {
                             msg_name: video_stream.msg_name.clone(),
                             name: pane_name,
                         }))

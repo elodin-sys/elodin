@@ -6,6 +6,9 @@ repository.workspace = true
 description = "Rust FFI bindings and safe wrappers for the IREE runtime C API"
 links = "iree"
 
+[features]
+tracy = []
+
 [build-dependencies]
 bindgen = "0.72"
 

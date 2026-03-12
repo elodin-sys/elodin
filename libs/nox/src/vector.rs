@@ -125,7 +125,6 @@ impl<T: Field + RealField, const N: usize, R: OwnedRepr> Vector<T, N, R> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::*;
 
     #[test]
     fn test_outer() {

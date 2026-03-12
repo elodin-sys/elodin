@@ -5023,6 +5023,7 @@ dependencies = [
  "postcard-dyn",
  "postcard-schema",
  "reflink-copy",
+ "render-bridge",
  "rustfft",
  "scuffle-h264",
  "serde",
@@ -5107,6 +5108,7 @@ dependencies = [
  "bitvec",
  "const-fnv1a-hash",
  "convert_case 0.7.1",
+ "crossbeam-channel",
  "directories",
  "egui",
  "egui_material_icons",
@@ -5140,6 +5142,7 @@ dependencies = [
  "pic-scale",
  "postcard",
  "raw-window-handle 0.5.2",
+ "render-bridge",
  "reqwest",
  "rfd",
  "roaring",
@@ -8994,7 +8997,6 @@ dependencies = [
  "numpy",
  "paste",
  "pyo3",
- "pyo3-build-config",
  "seq-macro",
  "serde",
  "smallvec",
@@ -11177,6 +11179,14 @@ name = "regex-syntax"
 version = "0.8.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7a2d987857b319362043e95f5353c0535c1f58eec5336fdfcf626430af7def58"
+
+[[package]]
+name = "render-bridge"
+version = "0.16.2-alpha.0"
+dependencies = [
+ "impeller2",
+ "tracing",
+]
 
 [[package]]
 name = "renderdoc-sys"

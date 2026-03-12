@@ -147,6 +147,7 @@ pub enum Panel<T = ()> {
     DataOverview(Option<String>),
     Dashboard(Box<Dashboard<T>>),
     VideoStream(VideoStream),
+    SensorView(SensorView),
 }
 
 impl<T> Panel<T> {
@@ -169,6 +170,7 @@ impl<T> Panel<T> {
             Panel::DataOverview(name) => name.as_deref().unwrap_or("Data Overview"),
             Panel::Dashboard(d) => d.root.name.as_deref().unwrap_or("Dashboard"),
             Panel::VideoStream(v) => v.name.as_deref().unwrap_or("Video Stream"),
+            Panel::SensorView(v) => v.name.as_deref().unwrap_or("Sensor View"),
         }
     }
 
@@ -214,6 +216,7 @@ impl<T> Panel<T> {
             Panel::Viewport(v) => Panel::Viewport(v.map_aux(f)),
             Panel::Dashboard(d) => Panel::Dashboard(Box::new(d.map_aux(f))),
             Panel::VideoStream(v) => Panel::VideoStream(v.clone()),
+            Panel::SensorView(v) => Panel::SensorView(v.clone()),
         }
     }
 
@@ -938,6 +941,37 @@ pub struct VideoStream {
     pub msg_name: String,
     /// Display name for the tile
     pub name: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct SensorView {
+    /// Message name for the sensor camera frame data (e.g. "drone.scene_cam")
+    pub msg_name: String,
+    /// Display name for the tile
+    pub name: Option<String>,
+}
+
+fn default_format() -> String {
+    "rgba".to_string()
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SensorCameraConfig {
+    pub entity_name: String,
+    pub camera_name: String,
+    pub width: u32,
+    pub height: u32,
+    pub fov_degrees: f32,
+    pub near: f32,
+    pub far: f32,
+    pub pos_offset: [f64; 3],
+    pub look_at_offset: [f64; 3],
+    #[serde(default = "default_format")]
+    pub format: String,
+    #[serde(default)]
+    pub effect: String,
+    #[serde(default)]
+    pub effect_params: HashMap<String, f64>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]

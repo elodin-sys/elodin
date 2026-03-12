@@ -77,6 +77,32 @@ impl PacketTx {
     }
 }
 
+#[derive(Resource)]
+pub struct MsgPacketRx(AsyncArcQueueRx);
+
+impl From<AsyncArcQueueRx> for MsgPacketRx {
+    fn from(rx: AsyncArcQueueRx) -> Self {
+        Self(rx)
+    }
+}
+
+impl MsgPacketRx {
+    #[inline]
+    pub fn try_recv_pkt(&mut self) -> Option<OwnedPacket<PacketGrantR>> {
+        self.0.try_recv_pkt()
+    }
+}
+
+#[derive(Resource)]
+pub struct MsgPacketTx(pub thingbuf::mpsc::Sender<Option<LenPacket>>);
+
+impl MsgPacketTx {
+    pub fn send_msg(&self, msg: impl Msg) {
+        let pkt = msg.into_len_packet();
+        let _ = self.0.try_send(Some(pkt));
+    }
+}
+
 #[derive(Debug, Message)]
 pub enum DbMessage {
     UpdateConfig,
@@ -215,7 +241,7 @@ fn send_backfill_page(commands: &mut Commands, component_id: ComponentId, start:
         limit: Some(BACKFILL_CHUNK_SIZE),
     };
 
-    commands.send_req_reply_raw::<_, GetTimeSeries, _>(
+    commands.send_msg_req_reply_raw::<_, GetTimeSeries, _>(
         msg,
         move |pkt: bevy::prelude::InRef<OwnedPacket<PacketGrantR>>,
               mut cache: ResMut<TelemetryCache>,
@@ -272,11 +298,22 @@ fn sink_inner(
     world_sink_state: &mut SystemState<WorldSink>,
 ) -> Result<(), impeller2::error::Error> {
     let mut count = 0;
+    let sink_deadline = std::time::Instant::now() + std::time::Duration::from_millis(8);
     let mut pending_cache_entries: Vec<(ComponentId, Timestamp, ComponentValue)> = Vec::new();
-    while let Some(pkt) = packet_rx.try_recv_pkt() {
-        if count > 2048 {
-            return Ok(());
+    loop {
+        if !pending_cache_entries.is_empty()
+            && let Some(mut cache) = world.get_resource_mut::<TelemetryCache>()
+        {
+            for (cid, ts, val) in pending_cache_entries.drain(..) {
+                cache.insert(cid, ts, val);
+            }
         }
+        if count > 2048 || (count >= 16 && std::time::Instant::now() > sink_deadline) {
+            break;
+        }
+        let Some(pkt) = packet_rx.try_recv_pkt() else {
+            break;
+        };
         count += 1;
         {
             let pkt_id = match &pkt {
@@ -314,10 +351,15 @@ fn sink_inner(
                             world
                                 .get_resource_mut::<RequestIdHandlers>()
                                 .and_then(|mut handlers| handlers.insert(req_id, handler));
+                        } else if let Err(err) = world.unregister_system(handler) {
+                            bevy::log::error!(?err, "unregister request id handler error");
                         }
                     }
                     Err(err) => {
                         bevy::log::error!(?err, "packet id handler error");
+                        if let Err(unreg) = world.unregister_system(handler) {
+                            bevy::log::error!(?unreg, "unregister request id handler error");
+                        }
                     }
                 }
             }
@@ -413,13 +455,12 @@ fn sink_inner(
             OwnedPacket::TimeSeries(_) => {}
         }
         world_sink_state.apply(world);
-
-        if !pending_cache_entries.is_empty()
-            && let Some(mut cache) = world.get_resource_mut::<TelemetryCache>()
-        {
-            for (cid, ts, val) in pending_cache_entries.drain(..) {
-                cache.insert(cid, ts, val);
-            }
+    }
+    if !pending_cache_entries.is_empty()
+        && let Some(mut cache) = world.get_resource_mut::<TelemetryCache>()
+    {
+        for (cid, ts, val) in pending_cache_entries.drain(..) {
+            cache.insert(cid, ts, val);
         }
     }
     Ok(())
@@ -441,6 +482,72 @@ pub fn sink(world: &mut World, world_sink_state: &mut SystemState<WorldSink>) {
             })
         })
     })
+}
+
+#[derive(SystemParam)]
+pub struct MsgSinkState<'w> {
+    msg_rx: ResMut<'w, MsgPacketRx>,
+}
+
+pub fn msg_sink(world: &mut World, msg_sink_state: &mut SystemState<MsgSinkState>) {
+    let sink_deadline = std::time::Instant::now() + std::time::Duration::from_millis(8);
+    let mut count = 0;
+    loop {
+        if count > 2048 || (count >= 16 && std::time::Instant::now() > sink_deadline) {
+            return;
+        }
+        let pkt = {
+            let MsgSinkState { mut msg_rx } = msg_sink_state.get_mut(world);
+            msg_rx.try_recv_pkt()
+        };
+        let Some(pkt) = pkt else {
+            break;
+        };
+        count += 1;
+        let pkt_id = match &pkt {
+            OwnedPacket::Msg(m) => m.id,
+            OwnedPacket::Table(table) => table.id,
+            OwnedPacket::TimeSeries(time_series) => time_series.id,
+        };
+        let handler = world
+            .get_resource_mut::<PacketIdHandlers>()
+            .and_then(|mut handlers| handlers.remove(&pkt_id));
+        if let Some(handler) = handler {
+            if let Err(err) = world.run_system_with(handler, &pkt) {
+                bevy::log::error!(?err, "msg packet id handler error");
+            }
+            if let Err(err) = world.unregister_system(handler) {
+                bevy::log::error!(?err, "unregister packet handler error");
+            }
+        }
+        let req_id = match &pkt {
+            OwnedPacket::Msg(m) => m.req_id,
+            OwnedPacket::Table(table) => table.req_id,
+            OwnedPacket::TimeSeries(time_series) => time_series.req_id,
+        };
+        let handler = world
+            .get_resource_mut::<MsgRequestIdHandlers>()
+            .and_then(|mut handlers| handlers.remove(&req_id));
+        if let Some(handler) = handler {
+            match world.run_system_with(handler, &pkt) {
+                Ok(completed) => {
+                    if !completed {
+                        world
+                            .get_resource_mut::<MsgRequestIdHandlers>()
+                            .and_then(|mut handlers| handlers.insert(req_id, handler));
+                    } else if let Err(err) = world.unregister_system(handler) {
+                        bevy::log::error!(?err, "unregister msg request id handler error");
+                    }
+                }
+                Err(err) => {
+                    bevy::log::error!(?err, "msg request id handler error");
+                    if let Err(unreg) = world.unregister_system(handler) {
+                        bevy::log::error!(?unreg, "unregister msg request id handler error");
+                    }
+                }
+            }
+        }
+    }
 }
 
 #[allow(clippy::type_complexity)]
@@ -472,6 +579,39 @@ impl bevy::prelude::SystemInput for PacketHandlerInput<'_> {
 pub struct RequestIdHandlers(
     pub HashMap<RequestId, SystemId<InRef<'static, OwnedPacket<PacketGrantR>>, bool>>,
 );
+
+#[allow(clippy::type_complexity)]
+#[derive(Resource, Default, Deref, DerefMut)]
+pub struct MsgRequestIdHandlers(
+    pub HashMap<RequestId, SystemId<InRef<'static, OwnedPacket<PacketGrantR>>, bool>>,
+);
+
+#[derive(Resource)]
+pub struct MsgRequestIdAlloc(RequestId);
+
+impl Default for MsgRequestIdAlloc {
+    fn default() -> Self {
+        Self(1)
+    }
+}
+
+impl MsgRequestIdAlloc {
+    pub fn alloc_next_id_avoiding(
+        &mut self,
+        occupied: &std::collections::HashSet<RequestId>,
+    ) -> Option<RequestId> {
+        for _ in 0..255 {
+            self.0 = self.0.wrapping_add(1);
+            if self.0 == 0 {
+                self.0 = 1;
+            }
+            if !occupied.contains(&self.0) {
+                return Some(self.0);
+            }
+        }
+        None
+    }
+}
 
 #[derive(Component, Default, DerefMut, Deref)]
 pub struct ComponentValueMap(pub BTreeMap<ComponentId, ComponentValue>);
@@ -694,11 +834,26 @@ impl Default for RequestIdAlloc {
 impl RequestIdAlloc {
     pub fn alloc_next_id(&mut self) -> RequestId {
         self.0 = self.0.wrapping_add(1);
-        // Skip request ID 0, which is reserved for streaming messages
         if self.0 == 0 {
             self.0 = 1;
         }
         self.0
+    }
+
+    pub fn alloc_next_id_avoiding(
+        &mut self,
+        occupied: &std::collections::HashSet<RequestId>,
+    ) -> Option<RequestId> {
+        for _ in 0..255 {
+            self.0 = self.0.wrapping_add(1);
+            if self.0 == 0 {
+                self.0 = 1;
+            }
+            if !occupied.contains(&self.0) {
+                return Some(self.0);
+            }
+        }
+        None
     }
 }
 
@@ -732,6 +887,8 @@ impl Plugin for Impeller2Plugin {
             .init_resource::<PacketHandlers>()
             .init_resource::<RequestIdHandlers>()
             .init_resource::<RequestIdAlloc>()
+            .init_resource::<MsgRequestIdHandlers>()
+            .init_resource::<MsgRequestIdAlloc>()
             .init_resource::<DbConfig>()
             .init_resource::<TelemetryCache>()
             .init_resource::<BackfillState>();
@@ -762,6 +919,9 @@ where
                 .get_resource_mut::<PacketIdHandlers>()
                 .expect("missing packet handlers");
             handlers.remove(&self.packet_id);
+            if let Err(unreg) = world.unregister_system(system_id) {
+                bevy::log::error!(?unreg, "failed to unregister system after send failure");
+            }
             bevy::log::warn!(?err, "failed to send msg");
         }
     }
@@ -780,22 +940,37 @@ where
 {
     fn apply(self, world: &mut World) {
         let system_id = world.register_system(self.system);
-        let mut alloc = world
-            .get_resource_mut::<RequestIdAlloc>()
-            .expect("missing packet handlers");
-        let req_id = alloc.alloc_next_id();
 
-        let mut handlers = world
-            .get_resource_mut::<RequestIdHandlers>()
-            .expect("missing packet handlers");
-        // Warn if we're about to overwrite an existing handler - this indicates
-        // request ID collision (IDs being reused before previous queries complete)
-        if let Some(_old) = handlers.insert(req_id, system_id) {
+        let req_id = {
+            let handlers = world.resource::<RequestIdHandlers>();
+            let occupied: std::collections::HashSet<RequestId> = handlers.keys().copied().collect();
+            let mut alloc = world.resource_mut::<RequestIdAlloc>();
+            alloc.alloc_next_id_avoiding(&occupied)
+        };
+
+        let Some(req_id) = req_id else {
             bevy::log::warn!(
-                req_id,
-                "RequestId collision: overwriting existing handler! This may cause query failures."
+                "RequestId space exhausted — all 255 IDs are in use, dropping request"
             );
+            if let Err(err) = world.unregister_system(system_id) {
+                bevy::log::error!(
+                    ?err,
+                    "failed to unregister system after RequestId exhaustion"
+                );
+            }
+            return;
+        };
+
+        if let Some(old) = world
+            .resource_mut::<RequestIdHandlers>()
+            .insert(req_id, system_id)
+        {
+            bevy::log::warn!(req_id, "RequestId collision — overwriting existing handler");
+            if let Err(err) = world.unregister_system(old) {
+                bevy::log::error!(?err, "failed to unregister collided system");
+            }
         }
+
         let tx = world
             .get_resource_mut::<PacketTx>()
             .expect("missing packet handlers");
@@ -804,7 +979,74 @@ where
                 .get_resource_mut::<RequestIdHandlers>()
                 .expect("missing packet handlers");
             handlers.remove(&req_id);
+            if let Err(unreg) = world.unregister_system(system_id) {
+                bevy::log::error!(?unreg, "failed to unregister system after send failure");
+            }
             bevy::log::warn!(?err, "failed to send msg");
+        }
+    }
+}
+
+pub struct MsgReplyHandlerCommand<
+    S: System<In = InRef<'static, OwnedPacket<PacketGrantR>>, Out = bool>,
+> {
+    request: LenPacket,
+    system: S,
+}
+
+impl<S> Command for MsgReplyHandlerCommand<S>
+where
+    S: System<In = InRef<'static, OwnedPacket<PacketGrantR>>, Out = bool>,
+{
+    fn apply(self, world: &mut World) {
+        let system_id = world.register_system(self.system);
+
+        let req_id = {
+            let handlers = world.resource::<MsgRequestIdHandlers>();
+            let occupied: std::collections::HashSet<RequestId> = handlers.keys().copied().collect();
+            let mut alloc = world.resource_mut::<MsgRequestIdAlloc>();
+            alloc.alloc_next_id_avoiding(&occupied)
+        };
+
+        let Some(req_id) = req_id else {
+            bevy::log::warn!(
+                "RequestId space exhausted — all 255 IDs are in use, dropping msg request"
+            );
+            if let Err(err) = world.unregister_system(system_id) {
+                bevy::log::error!(
+                    ?err,
+                    "failed to unregister system after RequestId exhaustion"
+                );
+            }
+            return;
+        };
+
+        if let Some(old) = world
+            .resource_mut::<MsgRequestIdHandlers>()
+            .insert(req_id, system_id)
+        {
+            bevy::log::warn!(req_id, "RequestId collision — overwriting existing handler");
+            if let Err(err) = world.unregister_system(old) {
+                bevy::log::error!(?err, "failed to unregister collided system");
+            }
+        }
+
+        let request = self.request.with_request_id(req_id);
+        let sent = world
+            .get_resource_mut::<MsgPacketTx>()
+            .and_then(|msg_tx| msg_tx.0.try_send(Some(request)).ok())
+            .is_some();
+        if !sent {
+            let mut handlers = world
+                .get_resource_mut::<MsgRequestIdHandlers>()
+                .expect("missing MsgRequestIdHandlers");
+            handlers.remove(&req_id);
+            if let Err(err) = world.unregister_system(system_id) {
+                bevy::log::error!(?err, "failed to unregister msg reply handler");
+            }
+            bevy::log::error!(
+                "msg connection not available — cannot send request; ensure the editor/run process is connected to Elodin DB so sensor camera and msg backfill work"
+            );
         }
     }
 }
@@ -822,6 +1064,15 @@ pub trait CommandsExt {
     fn send_req_reply_raw<S, M: Msg + Request, Marker>(&mut self, msg: M, handler: S)
     where
         S: IntoSystem<InRef<'static, OwnedPacket<PacketGrantR>>, bool, Marker>;
+
+    fn send_msg_req_reply_raw<S, M: Msg + Request, Marker>(&mut self, msg: M, handler: S)
+    where
+        S: IntoSystem<InRef<'static, OwnedPacket<PacketGrantR>>, bool, Marker>;
+
+    fn send_msg_req_reply<S, M: Msg + Request, Marker>(&mut self, msg: M, handler: S)
+    where
+        M::Reply<Slice<Vec<u8>>>: Msg + DeserializeOwned + 'static,
+        S: IntoSystem<In<Result<M::Reply<Slice<Vec<u8>>>, ErrorResponse>>, bool, Marker>;
 }
 
 impl CommandsExt for Commands<'_, '_> {
@@ -897,6 +1148,64 @@ impl CommandsExt for Commands<'_, '_> {
         };
         self.queue(cmd);
     }
+
+    fn send_msg_req_reply_raw<S, M: Msg + Request, Marker>(&mut self, msg: M, handler: S)
+    where
+        S: IntoSystem<InRef<'static, OwnedPacket<PacketGrantR>>, bool, Marker>,
+    {
+        let system = IntoSystem::into_system(handler);
+        let cmd = MsgReplyHandlerCommand {
+            request: msg.into_len_packet(),
+            system,
+        };
+        self.queue(cmd);
+    }
+
+    fn send_msg_req_reply<S, M: Msg + Request, Marker>(&mut self, msg: M, handler: S)
+    where
+        M::Reply<Slice<Vec<u8>>>: DeserializeOwned + Msg + 'static,
+        S: IntoSystem<In<Result<M::Reply<Slice<Vec<u8>>>, ErrorResponse>>, bool, Marker>,
+    {
+        fn adapter<R: Msg + DeserializeOwned>(
+            msg: InRef<OwnedPacket<PacketGrantR>>,
+        ) -> Result<R, ErrorResponse> {
+            match &*msg {
+                OwnedPacket::Msg(m) if m.id == ErrorResponse::ID => {
+                    let Ok(m) = m.parse::<ErrorResponse>() else {
+                        return Err(ErrorResponse {
+                            description: "parse failed".to_string(),
+                        });
+                    };
+                    Err(m)
+                }
+                OwnedPacket::Msg(m) if m.id == R::ID => {
+                    let Ok(m) = m.parse::<R>() else {
+                        return Err(ErrorResponse {
+                            description: "parse failed".to_string(),
+                        });
+                    };
+                    Ok(m)
+                }
+                other => {
+                    let desc = match other {
+                        OwnedPacket::Msg(m) => {
+                            format!("wrong msg type: got id={:?}, expected id={:?}", m.id, R::ID)
+                        }
+                        OwnedPacket::Table(_) => "wrong msg type: got Table".to_string(),
+                        OwnedPacket::TimeSeries(_) => "wrong msg type: got TimeSeries".to_string(),
+                    };
+                    Err(ErrorResponse { description: desc })
+                }
+            }
+        }
+        let system = adapter::<M::Reply<Slice<Vec<u8>>>>.pipe(handler);
+        let system = IntoSystem::into_system(system);
+        let cmd = MsgReplyHandlerCommand {
+            request: msg.into_len_packet(),
+            system,
+        };
+        self.queue(cmd);
+    }
 }
 
 pub fn new_connection_packets(stream_id: StreamId) -> impl Iterator<Item = LenPacket> {
@@ -917,6 +1226,12 @@ pub fn new_connection_packets(stream_id: StreamId) -> impl Iterator<Item = LenPa
         DumpSchema.into_len_packet(),
     ]
     .into_iter()
+}
+
+/// Initial packets for the msg TCP connection. Returns empty; main connection
+/// handles DumpMetadata, Stream, and subscriptions.
+pub fn msg_connection_packets(_stream_id: StreamId) -> impl Iterator<Item = LenPacket> {
+    std::iter::empty()
 }
 
 pub trait ComponentValueExt {

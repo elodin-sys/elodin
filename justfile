@@ -94,9 +94,30 @@ install target="all":
       uvx maturin develop --uv --manifest-path=libs/nox-py/Cargo.toml
       echo "Venv ready. Run source with \`source .venv/bin/activate\` before running examples with python3"
       ;;
-    editor) cargo install --path apps/elodin --locked;;
-    db) cargo install --path libs/db --locked;;
-    all) just install py && just install db && just install editor;;
+    editor)
+      cargo build --release -p elodin
+      install -m 755 target/release/elodin "${CARGO_HOME:-$HOME/.cargo}/bin/"
+      ;;
+    db)
+      cargo build --release -p elodin-db
+      install -m 755 target/release/elodin-db "${CARGO_HOME:-$HOME/.cargo}/bin/"
+      ;;
+    tracy)
+      if [ "$(uname -s)" = "Darwin" ]; then
+        echo "error: Tracy profiling is only supported on Linux." >&2
+        echo "Tracy depends on C++20 features (std::jthread) not available in Apple's libc++." >&2
+        echo "Use a Linux machine or an OrbStack NixOS VM for profiling." >&2
+        exit 1
+      fi
+      uv venv --python 3.13 --clear
+      . .venv/bin/activate
+      uvx maturin develop --uv --manifest-path=libs/nox-py/Cargo.toml -F tracy
+      echo "Venv ready. Run source with \`source .venv/bin/activate\` before running examples with python3"
+      cargo build --release -p elodin -p elodin-db --features tracy
+      install -m 755 target/release/elodin "${CARGO_HOME:-$HOME/.cargo}/bin/"
+      install -m 755 target/release/elodin-db "${CARGO_HOME:-$HOME/.cargo}/bin/"
+      ;;
+    all) just install py && just install editor && just install db;;
     *)
       echo "usage: just install [py|editor|db|all]" >&2
       exit 1;;

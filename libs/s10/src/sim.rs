@@ -36,6 +36,7 @@ impl SimRecipe {
         cmd.process_group(0);
         // Close stdin to prevent SIGTTIN when child is in background process group
         cmd.stdin(Stdio::null());
+        cmd.env("TRACY_PORT", "8089");
         let port = crate::liveness::serve_tokio().await?;
         let mut child = cmd
             .arg(&self.path)
@@ -106,6 +107,18 @@ impl SimRecipe {
 }
 
 pub fn python_command() -> Result<std::process::Command, Error> {
+    let venv_python = std::path::Path::new(".venv/bin/python");
+    if venv_python.exists() {
+        let mut cmd = std::process::Command::new(venv_python);
+        // When built with tracy, the nox-py .so is large enough (IREE+TracyClient)
+        // to exceed the default static TLS reservation. Increase the optional
+        // static TLS allocation so dlopen() succeeds. Unlike LD_PRELOAD, this
+        // env var is safe to inherit into child processes (e.g. iree-compile).
+        if std::env::var("TRACY_PORT").is_ok() {
+            cmd.env("GLIBC_TUNABLES", "glibc.rtld.optional_static_tls=16384");
+        }
+        return Ok(cmd);
+    }
     if let Ok(uv) = which("uv") {
         let mut cmd = std::process::Command::new(uv);
         cmd.arg("run");

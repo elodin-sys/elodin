@@ -55,6 +55,7 @@ pub use error::Error;
 
 pub mod append_log;
 mod arrow;
+#[cfg(feature = "axum")]
 pub mod axum;
 pub mod cancellation;
 pub(crate) mod coalescing_sink;
@@ -67,8 +68,10 @@ pub mod fix_timestamps;
 pub mod follow;
 mod follow_stream;
 pub mod merge;
-mod msg_log;
+pub mod msg_log;
 pub mod prune;
+#[cfg(target_family = "unix")]
+pub use render_bridge;
 pub mod time_align;
 pub(crate) mod time_series;
 pub mod trim;
@@ -760,6 +763,16 @@ impl DB {
         Ok(())
     }
 
+    /// Truncate a specific message log (clears all messages, preserves metadata).
+    /// Used when the log hits MapOverflow so sensor camera frames can continue.
+    pub fn truncate_msg_log(&self, id: PacketId) {
+        self.with_state_mut(|s| {
+            if let Some(log) = s.msg_logs.get(&id) {
+                log.truncate();
+            }
+        });
+    }
+
     pub fn get_or_insert_fixed_rate_state(
         &self,
         stream_id: StreamId,
@@ -787,7 +800,8 @@ impl DB {
             .driver_spawned
             .swap(true, atomic::Ordering::SeqCst)
         {
-            stellarator::spawn(run_tick_driver(stream_state.clone()));
+            let driver_state = stream_state.clone();
+            stellarator::struc_con::stellar(move || run_tick_driver(driver_state));
         }
         stream_state
     }
@@ -914,6 +928,10 @@ impl State {
 
     pub fn get_component(&self, component_id: ComponentId) -> Option<&Component> {
         self.components.get(&component_id)
+    }
+
+    pub fn get_msg_log(&self, id: PacketId) -> Option<&MsgLog> {
+        self.msg_logs.get(&id)
     }
 
     pub fn set_component_metadata(
@@ -1381,7 +1399,7 @@ pub async fn handle_conn(stream: TcpStream, db: Arc<DB>) {
     }
 }
 
-async fn handle_conn_inner<A: AsyncRead + AsyncWrite + 'static>(
+async fn handle_conn_inner<A: AsyncRead + AsyncWrite + Send + Sync + 'static>(
     mut tx: Arc<Mutex<PacketSink<OwnedWriter<A>>>>,
     mut rx: PacketStream<OwnedReader<A>>,
     db: Arc<DB>,
@@ -1521,7 +1539,7 @@ impl<A: AsyncWrite + 'static> PacketTx<A> {
     }
 }
 
-async fn handle_packet<A: AsyncWrite + 'static>(
+async fn handle_packet<A: AsyncWrite + Send + Sync + 'static>(
     pkt: &Packet<Slice<Vec<u8>>>,
     db: &Arc<DB>,
     tx: &mut PacketTx<A>,
@@ -2042,13 +2060,13 @@ async fn handle_packet<A: AsyncWrite + 'static>(
                 db.with_state_mut(|s| s.get_or_insert_msg_log(msg_id, &db.path).cloned())?;
             let stream_state =
                 db.get_or_insert_fixed_rate_state(fixed_rate.stream_id, fixed_rate.behavior);
-            stellarator::spawn(handle_fixed_rate_msg_stream(
-                msg_id,
-                m.req_id,
-                msg_log,
-                tx.tx.clone(),
-                stream_state,
-            ));
+            {
+                let req_id = m.req_id;
+                let tx = tx.tx.clone();
+                stellarator::struc_con::stellar(move || {
+                    handle_fixed_rate_msg_stream(msg_id, req_id, msg_log, tx, stream_state)
+                });
+            }
         }
         Packet::Msg(m) if m.id == GetMsgMetadata::ID => {
             let GetMsgMetadata { msg_id } = m.parse::<GetMsgMetadata>()?;
@@ -2198,7 +2216,7 @@ pub async fn handle_timestamped_msg_stream<A: AsyncWrite>(
     }
 }
 
-pub async fn handle_fixed_rate_msg_stream<A: AsyncWrite>(
+pub async fn handle_fixed_rate_msg_stream<A: AsyncWrite + Send + Sync>(
     msg_id: PacketId,
     req_id: RequestId,
     msg_log: MsgLog,
@@ -2226,10 +2244,13 @@ pub async fn handle_fixed_rate_msg_stream<A: AsyncWrite>(
 
         if Some(msg_timestamp) == last_sent_timestamp {
             futures_lite::future::race(
-                async {
-                    let _ = stream_state.wait_for_next_tick(current_timestamp).await;
-                },
-                stellarator::sleep(stream_state.sleep_time()),
+                msg_log.wait(),
+                futures_lite::future::race(
+                    async {
+                        let _ = stream_state.wait_for_next_tick(current_timestamp).await;
+                    },
+                    stellarator::sleep(stream_state.sleep_time()),
+                ),
             )
             .await;
             continue;
@@ -2446,7 +2467,8 @@ fn handle_stream<A: AsyncWrite + 'static>(
             db.with_state_mut(|s| s.streams.insert(stream.id, state.clone()));
             // Spawn a dedicated tick driver for this stream state
             if !state.driver_spawned.swap(true, atomic::Ordering::SeqCst) {
-                stellarator::spawn(run_tick_driver(state.clone()));
+                let driver_state = state.clone();
+                stellarator::struc_con::stellar(move || run_tick_driver(driver_state));
             }
             stellarator::spawn(async move {
                 match handle_fixed_stream(tx, req_id, state, db).await {

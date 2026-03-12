@@ -1,0 +1,13 @@
+[package]
+name = "render-bridge"
+license = "MIT OR Apache-2.0"
+edition = "2024"
+version.workspace = true
+repository.workspace = true
+publish = false
+description = "Unix socket IPC for headless sensor camera rendering"
+
+[dependencies]
+impeller2.path = "../impeller2"
+impeller2.default-features = false
+tracing = "0.1"
