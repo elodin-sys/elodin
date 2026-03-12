@@ -5,7 +5,7 @@ use egui::{self, Color32, RichText, ScrollArea};
 use impeller2::types::{OwnedPacket, Timestamp};
 use impeller2_bevy::{CommandsExt, CurrentStreamId, PacketGrantR};
 use impeller2_wkt::{
-    CurrentTimestamp, ErrorResponse, FixedRateMsgStream, FixedRateOp, GetMsgs, MsgBatch,
+    CurrentTimestamp, ErrorResponse, FixedRateMsgStream, FixedRateOp, GetMsgs, LogEntry, MsgBatch,
 };
 use std::collections::BTreeMap;
 use std::time::Instant;
@@ -97,13 +97,12 @@ impl LogCache {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct LogEntry {
-    pub level: u8,
-    pub message: String,
+trait LogEntryUiExt {
+    fn level_str(&self) -> &'static str;
+    fn level_color(&self) -> Color32;
 }
 
-impl LogEntry {
+impl LogEntryUiExt for LogEntry {
     fn level_str(&self) -> &'static str {
         match self.level {
             0 => "TRACE",
@@ -128,34 +127,7 @@ impl LogEntry {
 }
 
 fn parse_log_entry(data: &[u8]) -> Option<LogEntry> {
-    if data.is_empty() {
-        return None;
-    }
-    let level = data[0];
-    let rest = &data[1..];
-    // Postcard string: varint length prefix then UTF-8 bytes.
-    let (len, consumed) = decode_varint(rest)?;
-    let start = consumed;
-    let end = start + len;
-    if end > rest.len() {
-        return None;
-    }
-    let message = std::str::from_utf8(&rest[start..end]).ok()?.to_string();
-    Some(LogEntry { level, message })
-}
-
-fn decode_varint(data: &[u8]) -> Option<(usize, usize)> {
-    let mut result: usize = 0;
-    for (i, &byte) in data.iter().enumerate() {
-        if i >= 5 {
-            return None;
-        }
-        result |= ((byte & 0x7F) as usize) << (7 * i);
-        if byte & 0x80 == 0 {
-            return Some((result, i + 1));
-        }
-    }
-    None
+    postcard::from_bytes::<LogEntry>(data).ok()
 }
 
 fn send_stream_request(commands: &mut Commands, entity: Entity, msg_id: [u8; 2], stream_id: u64) {
@@ -317,7 +289,7 @@ impl super::widgets::WidgetSystem for LogStreamWidget<'_, '_> {
                             .color(Color32::from_rgb(80, 80, 80))
                     };
                     if ui.selectable_label(active, label).clicked() {
-                        cache.filter_level = if active { (i as u8) + 1 } else { i as u8 };
+                        cache.filter_level = if active { ((i as u8) + 1).min(4) } else { i as u8 };
                     }
                 }
 

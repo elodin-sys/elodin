@@ -4003,20 +4003,36 @@ inline std::vector<uint8_t> set_log_metadata_packet(const std::string& log_name)
     std::vector<uint8_t> buf(sizeof(PacketHeader) + payload_size + 16);
     postcard_slice_t slice;
     postcard_init_slice(&slice, buf.data() + sizeof(PacketHeader), buf.size() - sizeof(PacketHeader));
+    postcard_error_t result;
 
     // SetMsgMetadata.id
-    postcard_encode_u8(&slice, log_msg_id[0]);
-    postcard_encode_u8(&slice, log_msg_id[1]);
+    result = postcard_encode_u8(&slice, log_msg_id[0]);
+    if (result != POSTCARD_SUCCESS) {
+        return {};
+    }
+    result = postcard_encode_u8(&slice, log_msg_id[1]);
+    if (result != POSTCARD_SUCCESS) {
+        return {};
+    }
 
     // MsgMetadata.name
-    postcard_encode_string(&slice, log_name.c_str(), log_name.length());
+    result = postcard_encode_string(&slice, log_name.c_str(), log_name.length());
+    if (result != POSTCARD_SUCCESS) {
+        return {};
+    }
 
     // MsgMetadata.schema (precomputed)
+    if (slice.len + LOG_ENTRY_SCHEMA_LEN > slice.capacity) {
+        return {};
+    }
     std::memcpy(slice.data + slice.len, LOG_ENTRY_SCHEMA_BYTES, LOG_ENTRY_SCHEMA_LEN);
     slice.len += LOG_ENTRY_SCHEMA_LEN;
 
     // MsgMetadata.metadata (empty HashMap)
-    postcard_start_map(&slice, 0);
+    result = postcard_start_map(&slice, 0);
+    if (result != POSTCARD_SUCCESS) {
+        return {};
+    }
 
     // Write packet header
     PacketHeader header {
