@@ -136,8 +136,8 @@ jobs:
             git commit -m "Deploy preview for PR #${{ github.event.pull_request.number }}" || echo "No changes to commit"
           fi
           
-          git pull --rebase origin gh-pages
-          git push origin gh-pages
+            git pull --rebase origin gh-pages
+            git push origin gh-pages
 
       # Comment on PR with preview link
       - name: Comment PR with preview link
