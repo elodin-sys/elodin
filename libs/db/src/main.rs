@@ -753,14 +753,20 @@ template <typename SocketT>
 void send_log(SocketT& sock, const std::string_view log_name, LogLevel level, const std::string_view message)
 {{
     auto id = msg_id(log_name);
-    size_t payload_size = postcard_size_u8() + postcard_size_string(message.length());
 
     uint8_t payload_buf[4096];
     postcard_slice_t slice;
     postcard_init_slice(&slice, payload_buf, sizeof(payload_buf));
 
-    postcard_encode_u8(&slice, static_cast<uint8_t>(level));
-    postcard_encode_string(&slice, message.data(), message.length());
+    postcard_error_t result;
+    result = postcard_encode_u8(&slice, static_cast<uint8_t>(level));
+    if (result != POSTCARD_SUCCESS) {{
+        return;
+    }}
+    result = postcard_encode_string(&slice, message.data(), message.length());
+    if (result != POSTCARD_SUCCESS) {{
+        return;
+    }}
 
     PacketHeader header {{
         .len = static_cast<uint32_t>(slice.len + 4),
