@@ -4,8 +4,14 @@ use iree_runtime::{BufferView, ElementType, Instance, Session};
 use zerocopy::FromBytes;
 
 fn fixture_path(name: &str) -> PathBuf {
+    let arch = if cfg!(target_arch = "aarch64") {
+        "aarch64"
+    } else {
+        "x86_64"
+    };
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("tests/fixtures")
+        .join(arch)
         .join(name)
 }
 
