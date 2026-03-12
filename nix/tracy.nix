@@ -16,5 +16,6 @@ pkgs.mkShell {
       pkgs.elodin.iree_runtime_tracy
     ];
   shellHook = ''
+    export GLIBC_TUNABLES=glibc.rtld.optional_static_tls=4096
   '';
 }
