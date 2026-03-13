@@ -3,6 +3,7 @@ from jax import numpy as jnp
 from jax.numpy import linalg as la
 import spiceypy as spice
 import numpy as np
+from pathlib import Path
 
 #SIM_TIME_STEP = 1.0 / 120.0
 SIM_TIME_STEP = 3600.0
@@ -10,7 +11,16 @@ SIM_TIME_STEP = 3600.0
 # Set the gravitational constant for Newton's law of universal gravitation
 G = 6.6743e-11
 
-spice.furnsh('spice/kernels.tm')
+SPICE_DIR = Path(__file__).resolve().parent / "spice"
+SPICE_KERNELS = [
+    SPICE_DIR / "naif0012.tls",
+    SPICE_DIR / "de440.bsp",
+    SPICE_DIR / "Voyager_1.a54206u_V0.2_merged.bsp",
+    SPICE_DIR / "Voyager_2.m05016u.merged.bsp",
+]
+
+for kernel in SPICE_KERNELS:
+    spice.furnsh(str(kernel))
 
 start_time_et = spice.utc2et('1978-01-01T00:00:00')
 
