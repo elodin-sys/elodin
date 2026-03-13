@@ -148,6 +148,7 @@ pub enum Panel<T = ()> {
     Dashboard(Box<Dashboard<T>>),
     VideoStream(VideoStream),
     SensorView(SensorView),
+    LogStream(LogStream),
 }
 
 impl<T> Panel<T> {
@@ -171,6 +172,7 @@ impl<T> Panel<T> {
             Panel::Dashboard(d) => d.root.name.as_deref().unwrap_or("Dashboard"),
             Panel::VideoStream(v) => v.name.as_deref().unwrap_or("Video Stream"),
             Panel::SensorView(v) => v.name.as_deref().unwrap_or("Sensor View"),
+            Panel::LogStream(l) => l.name.as_deref().unwrap_or("Log Stream"),
         }
     }
 
@@ -217,6 +219,7 @@ impl<T> Panel<T> {
             Panel::Dashboard(d) => Panel::Dashboard(Box::new(d.map_aux(f))),
             Panel::VideoStream(v) => Panel::VideoStream(v.clone()),
             Panel::SensorView(v) => Panel::SensorView(v.clone()),
+            Panel::LogStream(l) => Panel::LogStream(l.clone()),
         }
     }
 
@@ -946,6 +949,14 @@ pub struct VideoStream {
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct SensorView {
     /// Message name for the sensor camera frame data (e.g. "drone.scene_cam")
+    pub msg_name: String,
+    /// Display name for the tile
+    pub name: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct LogStream {
+    /// Message name for the log entry stream (e.g. "fsw.log")
     pub msg_name: String,
     /// Display name for the tile
     pub name: Option<String>,

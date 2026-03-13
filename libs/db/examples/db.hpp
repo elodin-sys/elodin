@@ -1356,11 +1356,11 @@ struct FixedRateBehavior {
   }
 };
 
-class StreamBehavior : public std::variant<std::monostate, FixedRateBehavior> {
+class StreamBehavior : public std::variant<std::monostate, FixedRateBehavior, std::monostate> {
 public:
   static constexpr std::string_view TYPE_NAME = "StreamBehavior";
   // Inherit constructors from std::variant
-  using std::variant<std::monostate, FixedRateBehavior>::variant;
+  using std::variant<std::monostate, FixedRateBehavior, std::monostate>::variant;
 
   
   // Static constructor for unit variant RealTime
@@ -1375,11 +1375,11 @@ public:
   }
   
   const std::monostate* get_real_time() const {
-    return std::get_if<0>((const std::variant<std::monostate, FixedRateBehavior>*)this);
+    return std::get_if<0>((const std::variant<std::monostate, FixedRateBehavior, std::monostate>*)this);
   }
 
   std::monostate* get_real_time() {
-    return std::get_if<0>((std::variant<std::monostate, FixedRateBehavior>*)this);
+    return std::get_if<0>((std::variant<std::monostate, FixedRateBehavior, std::monostate>*)this);
   }
   
 
@@ -1396,11 +1396,32 @@ public:
   }
   
   const FixedRateBehavior* get_fixed_rate() const {
-    return std::get_if<1>((const std::variant<std::monostate, FixedRateBehavior>*)this);
+    return std::get_if<1>((const std::variant<std::monostate, FixedRateBehavior, std::monostate>*)this);
   }
 
   FixedRateBehavior* get_fixed_rate() {
-    return std::get_if<1>((std::variant<std::monostate, FixedRateBehavior>*)this);
+    return std::get_if<1>((std::variant<std::monostate, FixedRateBehavior, std::monostate>*)this);
+  }
+  
+
+  
+  // Static constructor for unit variant RealTimeBatched
+  static StreamBehavior RealTimeBatched() {
+    return StreamBehavior{std::in_place_index<2>, std::monostate{}};
+  }
+  
+
+  // Accessor method for variant RealTimeBatched
+  bool is_real_time_batched() const {
+    return this->index() == 2;
+  }
+  
+  const std::monostate* get_real_time_batched() const {
+    return std::get_if<2>((const std::variant<std::monostate, FixedRateBehavior, std::monostate>*)this);
+  }
+
+  std::monostate* get_real_time_batched() {
+    return std::get_if<2>((std::variant<std::monostate, FixedRateBehavior, std::monostate>*)this);
   }
   
 
@@ -1412,11 +1433,14 @@ public:
     // Tag size (discriminant)
     size += postcard_size_u8(); // Just for the variant tag
 
-    if ([[maybe_unused]] auto val = std::get_if<0>((const std::variant<std::monostate, FixedRateBehavior>*)this)) {
+    if ([[maybe_unused]] auto val = std::get_if<0>((const std::variant<std::monostate, FixedRateBehavior, std::monostate>*)this)) {
         
     }
-    else if ([[maybe_unused]] auto val = std::get_if<1>((const std::variant<std::monostate, FixedRateBehavior>*)this)) {
+    else if ([[maybe_unused]] auto val = std::get_if<1>((const std::variant<std::monostate, FixedRateBehavior, std::monostate>*)this)) {
         size += (*val).encoded_size();
+    }
+    else if ([[maybe_unused]] auto val = std::get_if<2>((const std::variant<std::monostate, FixedRateBehavior, std::monostate>*)this)) {
+        
     }
     
 
@@ -1457,16 +1481,22 @@ public:
   postcard_error_t encode_raw(postcard_slice_t* slice) const {
     postcard_error_t result;
 
-    if ([[maybe_unused]] auto val = std::get_if<0>((std::variant<std::monostate, FixedRateBehavior>*)this)) {
+    if ([[maybe_unused]] auto val = std::get_if<0>((std::variant<std::monostate, FixedRateBehavior, std::monostate>*)this)) {
         result = postcard_encode_u8(slice, 0);
         if (result != POSTCARD_SUCCESS) return result;
         
         if (result != POSTCARD_SUCCESS) return result;
     }
-    else if ([[maybe_unused]] auto val = std::get_if<1>((std::variant<std::monostate, FixedRateBehavior>*)this)) {
+    else if ([[maybe_unused]] auto val = std::get_if<1>((std::variant<std::monostate, FixedRateBehavior, std::monostate>*)this)) {
         result = postcard_encode_u8(slice, 1);
         if (result != POSTCARD_SUCCESS) return result;
         result = (*val).encode_raw(slice);
+        if (result != POSTCARD_SUCCESS) return result;
+    }
+    else if ([[maybe_unused]] auto val = std::get_if<2>((std::variant<std::monostate, FixedRateBehavior, std::monostate>*)this)) {
+        result = postcard_encode_u8(slice, 2);
+        if (result != POSTCARD_SUCCESS) return result;
+        
         if (result != POSTCARD_SUCCESS) return result;
     }
     
@@ -1507,6 +1537,12 @@ public:
             result = val.decode_raw(slice);
             if (result != POSTCARD_SUCCESS) return result;
             this->emplace<1>(val);
+            
+            break;
+        }
+        case 2: {  // RealTimeBatched
+            
+            this->emplace<2>(std::monostate{});
             
             break;
         }
@@ -3197,23 +3233,8 @@ struct VTable {
   std::vector<Op> ops;
   std::vector<Field> fields;
   std::vector<uint8_t> data;
+  
 
-  /// Returns the minimum table buffer size (in bytes) required by this VTable.
-  /// Computed from the maximum (offset + len) across all fields and Table ops.
-  size_t min_table_size() const {
-    size_t max_extent = 0;
-    for (const auto& f : fields) {
-      size_t end = static_cast<size_t>(f.offset) + static_cast<size_t>(f.len);
-      if (end > max_extent) max_extent = end;
-    }
-    for (const auto& op : ops) {
-      if (auto* table_op = op.get_table()) {
-        size_t end = static_cast<size_t>(table_op->offset) + static_cast<size_t>(table_op->len);
-        if (end > max_extent) max_extent = end;
-      }
-    }
-    return max_extent;
-  }
 
   size_t encoded_size() const {
     size_t size = 0;
@@ -3531,7 +3552,6 @@ struct ComponentMetadata {
   uint64_t component_id;
   std::string name;
   std::unordered_map<std::string, std::string> metadata;
-  bool asset;
   
 
 
@@ -3544,7 +3564,6 @@ struct ComponentMetadata {
       size += postcard_size_string(k.length());
       size += postcard_size_string(v.length());
     }
-    size += postcard_size_bool();
     
     return size;
   }
@@ -3592,8 +3611,6 @@ struct ComponentMetadata {
       result = postcard_encode_string(slice, v.c_str(), v.length());
       if(result != POSTCARD_SUCCESS) return result;
     }
-        if(result != POSTCARD_SUCCESS) return result;
-    result = postcard_encode_bool(slice, asset);
         if(result != POSTCARD_SUCCESS) return result;
     
     return POSTCARD_SUCCESS;
@@ -3652,9 +3669,6 @@ struct ComponentMetadata {
         if (result != POSTCARD_SUCCESS) return result;
         metadata[k] = v;
     }
-    if(result != POSTCARD_SUCCESS) return result;
-
-    result = postcard_decode_bool(slice, &asset);
     if(result != POSTCARD_SUCCESS) return result;
 
     
@@ -3725,6 +3739,94 @@ struct SetComponentMetadata {
     postcard_error_t result;
     result = value.decode_raw(slice);
     return result;
+  }
+};
+
+struct LogEntry {
+  static constexpr std::string_view TYPE_NAME = "LogEntry";
+
+  uint8_t level;
+  std::string message;
+  
+
+
+  size_t encoded_size() const {
+    size_t size = 0;
+    size += postcard_size_u8();
+    size += postcard_size_string(message.length());
+    
+    return size;
+  }
+
+  postcard_error_t encode(std::span<uint8_t>& output) const {
+    postcard_slice_t slice;
+    postcard_init_slice(&slice, output.data(), output.size());
+    auto res = encode_raw(&slice);
+    if(res != POSTCARD_SUCCESS) return res;
+    output = output.subspan(0, slice.len);
+    return POSTCARD_SUCCESS;
+  }
+
+  std::vector<uint8_t> encode_vec() const {
+    // Pre-allocate vector with the required size
+    std::vector<uint8_t> vec(encoded_size());
+
+    // Create a span from the vector
+    auto span = std::span<uint8_t>(vec);
+
+    // Encode into the span
+    postcard_slice_t slice;
+    postcard_init_slice(&slice, span.data(), span.size());
+    auto res = encode_raw(&slice);
+
+    // Resize to actual used length if successful
+    if (res == POSTCARD_SUCCESS) {
+      vec.resize(slice.len);
+    } else {
+      vec.clear(); // Clear the vector on error
+    }
+
+    return vec;
+  }
+
+  postcard_error_t encode_raw(postcard_slice_t* slice) const {
+    postcard_error_t result;
+    result = postcard_encode_u8(slice, level);
+        if(result != POSTCARD_SUCCESS) return result;
+    result = postcard_encode_string(slice, message.c_str(), message.length());
+        if(result != POSTCARD_SUCCESS) return result;
+    
+    return POSTCARD_SUCCESS;
+  }
+
+  postcard_error_t decode(std::span<const uint8_t>& input) {
+    postcard_slice_t slice;
+    postcard_init_slice(&slice, const_cast<uint8_t*>(input.data()), input.size());
+    postcard_error_t result = decode_raw(&slice);
+    if (result == POSTCARD_SUCCESS) {
+      // Update the input span to point past the decoded data
+      input = input.subspan(slice.len);
+    }
+    return result;
+  }
+
+  postcard_error_t decode_raw(postcard_slice_t* slice) {
+    postcard_error_t result;
+    result = postcard_decode_u8(slice, &level);
+    if(result != POSTCARD_SUCCESS) return result;
+
+    size_t message_len;
+    result = postcard_decode_string_len(slice, &message_len);
+    if (result != POSTCARD_SUCCESS) return result;
+    message.resize(message_len);
+    if (message_len > 0) {
+        result = postcard_decode_string(slice, message.data(), message_len, message_len);
+        if (result != POSTCARD_SUCCESS) return result;
+    }
+    if(result != POSTCARD_SUCCESS) return result;
+
+    
+    return POSTCARD_SUCCESS;
   }
 };
 
@@ -3854,6 +3956,127 @@ SetComponentMetadata set_component_metadata(std::string name, const std::vector<
             { "element_names", std::move(element_names_str) }
         },
     });
+}
+
+#endif
+
+
+
+#ifndef ELO_DB_LOGGING_H
+#define ELO_DB_LOGGING_H
+
+#include <cstdint>
+#include <cstring>
+#include <string>
+#include <string_view>
+#include <vector>
+
+enum LogLevel : uint8_t {
+    LOG_TRACE = 0,
+    LOG_DEBUG = 1,
+    LOG_INFO  = 2,
+    LOG_WARN  = 3,
+    LOG_ERROR = 4,
+};
+
+// Precomputed postcard-serialized OwnedNamedType for LogEntry.
+static const uint8_t LOG_ENTRY_SCHEMA_BYTES[] = { 0x08, 0x4c, 0x6f, 0x67, 0x45, 0x6e, 0x74, 0x72, 0x79, 0x1a, 0x02, 0x05, 0x6c, 0x65, 0x76, 0x65, 0x6c, 0x02, 0x75, 0x38, 0x02, 0x07, 0x6d, 0x65, 0x73, 0x73, 0x61, 0x67, 0x65, 0x06, 0x53, 0x74, 0x72, 0x69, 0x6e, 0x67, 0x10 };
+static const size_t  LOG_ENTRY_SCHEMA_LEN     = 37;
+
+// PacketId for the SetMsgMetadata message type.
+static const std::array<uint8_t, 2> SET_MSG_METADATA_ID = { 0xe0, 0x1f };
+
+/// Build a SetMsgMetadata packet that registers a LogEntry message log.
+/// Send this once at startup before writing log entries.
+inline std::vector<uint8_t> set_log_metadata_packet(const std::string& log_name)
+{
+    auto log_msg_id = msg_id(log_name);
+
+    // Compute payload size:
+    //   id: 2 bytes (two raw u8)
+    //   metadata.name: varint(len) + len
+    //   metadata.schema: LOG_ENTRY_SCHEMA_LEN
+    //   metadata.metadata: varint(0) for empty map
+    size_t name_enc_size = postcard_size_string(log_name.length());
+    size_t payload_size = 2 + name_enc_size + LOG_ENTRY_SCHEMA_LEN + 1;
+
+    std::vector<uint8_t> buf(sizeof(PacketHeader) + payload_size + 16);
+    postcard_slice_t slice;
+    postcard_init_slice(&slice, buf.data() + sizeof(PacketHeader), buf.size() - sizeof(PacketHeader));
+    postcard_error_t result;
+
+    // SetMsgMetadata.id
+    result = postcard_encode_u8(&slice, log_msg_id[0]);
+    if (result != POSTCARD_SUCCESS) {
+        return {};
+    }
+    result = postcard_encode_u8(&slice, log_msg_id[1]);
+    if (result != POSTCARD_SUCCESS) {
+        return {};
+    }
+
+    // MsgMetadata.name
+    result = postcard_encode_string(&slice, log_name.c_str(), log_name.length());
+    if (result != POSTCARD_SUCCESS) {
+        return {};
+    }
+
+    // MsgMetadata.schema (precomputed)
+    if (slice.len + LOG_ENTRY_SCHEMA_LEN > slice.capacity) {
+        return {};
+    }
+    std::memcpy(slice.data + slice.len, LOG_ENTRY_SCHEMA_BYTES, LOG_ENTRY_SCHEMA_LEN);
+    slice.len += LOG_ENTRY_SCHEMA_LEN;
+
+    // MsgMetadata.metadata (empty HashMap)
+    result = postcard_start_map(&slice, 0);
+    if (result != POSTCARD_SUCCESS) {
+        return {};
+    }
+
+    // Write packet header
+    PacketHeader header {
+        .len = static_cast<uint32_t>(slice.len + 4),
+        .ty = PacketType::MSG,
+        .packet_id = SET_MSG_METADATA_ID,
+        .request_id = 0,
+    };
+    std::memcpy(buf.data(), &header, sizeof(header));
+    buf.resize(sizeof(header) + slice.len);
+    return buf;
+}
+
+/// Send a log entry to the database.
+/// Postcard-encodes a LogEntry (level: u8, message: String) and sends it
+/// as a MSG packet with the given log stream name.
+template <typename SocketT>
+void send_log(SocketT& sock, const std::string_view log_name, LogLevel level, const std::string_view message)
+{
+    auto id = msg_id(log_name);
+
+    uint8_t payload_buf[4096];
+    postcard_slice_t slice;
+    postcard_init_slice(&slice, payload_buf, sizeof(payload_buf));
+
+    postcard_error_t result;
+    result = postcard_encode_u8(&slice, static_cast<uint8_t>(level));
+    if (result != POSTCARD_SUCCESS) {
+        return;
+    }
+    result = postcard_encode_string(&slice, message.data(), message.length());
+    if (result != POSTCARD_SUCCESS) {
+        return;
+    }
+
+    PacketHeader header {
+        .len = static_cast<uint32_t>(slice.len + 4),
+        .ty = PacketType::MSG,
+        .packet_id = id,
+        .request_id = 0,
+    };
+
+    sock.write_all(&header, sizeof(header));
+    sock.write_all(payload_buf, slice.len);
 }
 
 #endif
@@ -4047,16 +4270,6 @@ namespace builder {
         return std::make_shared<OpBuilder>(ext);
     }
 
-    /// Creates a nanosecond-source timestamp operation.
-    /// The DB engine divides the source value by 1000 to produce microseconds
-    /// for the record timestamp. The raw component data is stored unchanged.
-    inline std::shared_ptr<OpBuilder> timestamp_ns(
-        std::shared_ptr<OpBuilder> source,
-        std::shared_ptr<OpBuilder> arg)
-    {
-        return ext({0x01, 0x00}, std::move(source), std::move(arg));
-    }
-
     /// Creates a field builder with the specified offset, length, and argument
     inline FieldBuilder raw_field(uint16_t offset, uint16_t len, std::shared_ptr<OpBuilder> arg)
     {
@@ -4193,24 +4406,6 @@ namespace builder {
         }
 
         return builder.build();
-    }
-
-    /// Creates a VTable and validates that sizeof(T) covers all declared field
-    /// and table-op byte ranges. Throws std::logic_error on mismatch.
-    /// Use this instead of vtable() to catch struct/VTable size mismatches
-    /// at startup rather than getting silent BufferUnderflow errors at runtime.
-    template <typename T>
-    inline VTable checked_vtable(const std::initializer_list<FieldBuilder> fields)
-    {
-        auto vt = vtable(fields);
-        size_t required = vt.min_table_size();
-        if (sizeof(T) < required) {
-            throw std::logic_error(
-                "checked_vtable: sizeof(" + std::string(typeid(T).name()) +
-                ") is " + std::to_string(sizeof(T)) +
-                " but VTable requires at least " + std::to_string(required) + " bytes");
-        }
-        return vt;
     }
 
 // Convenience macro to create a table operation for a struct field

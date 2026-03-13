@@ -404,7 +404,9 @@ async fn main() -> miette::Result<()> {
                     impeller2_wkt::VTableStream::to_cpp()?,
                     impeller2_wkt::ComponentMetadata::to_cpp()?,
                     impeller2_wkt::SetComponentMetadata::to_cpp()?,
+                    impeller2_wkt::LogEntry::to_cpp()?,
                     include_str!("../cpp/helpers.hpp").to_string(),
+                    gen_log_helpers()?,
                     include_str!("../cpp/vtable.hpp").to_string(),
                 ],
             )?;
@@ -647,4 +649,161 @@ fn print_metadata(config: &impeller2_wkt::DbConfig) {
             println!("  {key}: {value}");
         }
     }
+}
+
+/// Generate C++ logging helpers with precomputed LogEntry schema bytes.
+fn gen_log_helpers() -> miette::Result<String> {
+    use impeller2::types::Msg;
+    use impeller2_wkt::{MsgMetadata, SetMsgMetadata, log_entry_msg_schema};
+
+    let schema = log_entry_msg_schema();
+    let set_msg_meta_id = SetMsgMetadata::ID;
+
+    // Precompute a full SetMsgMetadata message for a placeholder name, then extract
+    // the schema bytes. We serialize the full metadata to get the exact postcard
+    // encoding of the OwnedNamedType portion.
+    let placeholder_metadata = MsgMetadata {
+        name: String::new(),
+        schema,
+        metadata: Default::default(),
+    };
+    let metadata_bytes =
+        postcard::to_stdvec(&placeholder_metadata).map_err(|e| miette::miette!("{}", e))?;
+    // The metadata bytes are: varint(0) for empty name, then schema bytes, then varint(0) for empty map.
+    // Skip the leading name length (1 byte for length 0) and trailing map length (1 byte for length 0)
+    // to extract just the schema bytes.
+    let schema_bytes = &metadata_bytes[1..metadata_bytes.len() - 1];
+
+    let bytes_literal = schema_bytes
+        .iter()
+        .map(|b| format!("0x{b:02x}"))
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    Ok(format!(
+        r#"
+#ifndef ELO_DB_LOGGING_H
+#define ELO_DB_LOGGING_H
+
+#include <cstdint>
+#include <cstring>
+#include <string>
+#include <string_view>
+#include <vector>
+
+enum LogLevel : uint8_t {{
+    LOG_TRACE = 0,
+    LOG_DEBUG = 1,
+    LOG_INFO  = 2,
+    LOG_WARN  = 3,
+    LOG_ERROR = 4,
+}};
+
+// Precomputed postcard-serialized OwnedNamedType for LogEntry.
+static const uint8_t LOG_ENTRY_SCHEMA_BYTES[] = {{ {bytes_literal} }};
+static const size_t  LOG_ENTRY_SCHEMA_LEN     = {schema_len};
+
+// PacketId for the SetMsgMetadata message type.
+static const std::array<uint8_t, 2> SET_MSG_METADATA_ID = {{ 0x{id0:02x}, 0x{id1:02x} }};
+
+/// Build a SetMsgMetadata packet that registers a LogEntry message log.
+/// Send this once at startup before writing log entries.
+inline std::vector<uint8_t> set_log_metadata_packet(const std::string& log_name)
+{{
+    auto log_msg_id = msg_id(log_name);
+
+    // Compute payload size:
+    //   id: 2 bytes (two raw u8)
+    //   metadata.name: varint(len) + len
+    //   metadata.schema: LOG_ENTRY_SCHEMA_LEN
+    //   metadata.metadata: varint(0) for empty map
+    size_t name_enc_size = postcard_size_string(log_name.length());
+    size_t payload_size = 2 + name_enc_size + LOG_ENTRY_SCHEMA_LEN + 1;
+
+    std::vector<uint8_t> buf(sizeof(PacketHeader) + payload_size + 16);
+    postcard_slice_t slice;
+    postcard_init_slice(&slice, buf.data() + sizeof(PacketHeader), buf.size() - sizeof(PacketHeader));
+    postcard_error_t result;
+
+    // SetMsgMetadata.id
+    result = postcard_encode_u8(&slice, log_msg_id[0]);
+    if (result != POSTCARD_SUCCESS) {{
+        return {{}};
+    }}
+    result = postcard_encode_u8(&slice, log_msg_id[1]);
+    if (result != POSTCARD_SUCCESS) {{
+        return {{}};
+    }}
+
+    // MsgMetadata.name
+    result = postcard_encode_string(&slice, log_name.c_str(), log_name.length());
+    if (result != POSTCARD_SUCCESS) {{
+        return {{}};
+    }}
+
+    // MsgMetadata.schema (precomputed)
+    if (slice.len + LOG_ENTRY_SCHEMA_LEN > slice.capacity) {{
+        return {{}};
+    }}
+    std::memcpy(slice.data + slice.len, LOG_ENTRY_SCHEMA_BYTES, LOG_ENTRY_SCHEMA_LEN);
+    slice.len += LOG_ENTRY_SCHEMA_LEN;
+
+    // MsgMetadata.metadata (empty HashMap)
+    result = postcard_start_map(&slice, 0);
+    if (result != POSTCARD_SUCCESS) {{
+        return {{}};
+    }}
+
+    // Write packet header
+    PacketHeader header {{
+        .len = static_cast<uint32_t>(slice.len + 4),
+        .ty = PacketType::MSG,
+        .packet_id = SET_MSG_METADATA_ID,
+        .request_id = 0,
+    }};
+    std::memcpy(buf.data(), &header, sizeof(header));
+    buf.resize(sizeof(header) + slice.len);
+    return buf;
+}}
+
+/// Send a log entry to the database.
+/// Postcard-encodes a LogEntry (level: u8, message: String) and sends it
+/// as a MSG packet with the given log stream name.
+template <typename SocketT>
+void send_log(SocketT& sock, const std::string_view log_name, LogLevel level, const std::string_view message)
+{{
+    auto id = msg_id(log_name);
+
+    uint8_t payload_buf[4096];
+    postcard_slice_t slice;
+    postcard_init_slice(&slice, payload_buf, sizeof(payload_buf));
+
+    postcard_error_t result;
+    result = postcard_encode_u8(&slice, static_cast<uint8_t>(level));
+    if (result != POSTCARD_SUCCESS) {{
+        return;
+    }}
+    result = postcard_encode_string(&slice, message.data(), message.length());
+    if (result != POSTCARD_SUCCESS) {{
+        return;
+    }}
+
+    PacketHeader header {{
+        .len = static_cast<uint32_t>(slice.len + 4),
+        .ty = PacketType::MSG,
+        .packet_id = id,
+        .request_id = 0,
+    }};
+
+    sock.write_all(&header, sizeof(header));
+    sock.write_all(payload_buf, slice.len);
+}}
+
+#endif
+"#,
+        bytes_literal = bytes_literal,
+        schema_len = schema_bytes.len(),
+        id0 = set_msg_meta_id[0],
+        id1 = set_msg_meta_id[1],
+    ))
 }

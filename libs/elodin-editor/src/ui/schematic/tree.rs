@@ -151,6 +151,7 @@ fn panel(
         Panel::Dashboard(_) => icons.viewport,
         Panel::VideoStream(_) => icons.viewport,
         Panel::SensorView(_) => icons.viewport,
+        Panel::LogStream(_) => icons.viewport,
     };
     let children = p.children();
     let selected = if p.aux().copied() == selected_object.entity() {

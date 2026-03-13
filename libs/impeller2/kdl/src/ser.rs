@@ -74,6 +74,7 @@ fn serialize_panel<T>(panel: &Panel<T>) -> KdlNode {
         Panel::Dashboard(dashboard) => serialize_dashboard(dashboard),
         Panel::VideoStream(video_stream) => serialize_video_stream(video_stream),
         Panel::SensorView(sensor_view) => serialize_sensor_view(sensor_view),
+        Panel::LogStream(log_stream) => serialize_log_stream(log_stream),
     }
 }
 
@@ -124,6 +125,14 @@ fn serialize_sensor_view(sensor_view: &SensorView) -> KdlNode {
     node.entries_mut()
         .push(KdlEntry::new(sensor_view.msg_name.as_str()));
     push_optional_name_prop(&mut node, sensor_view.name.as_deref());
+    node
+}
+
+fn serialize_log_stream(log_stream: &LogStream) -> KdlNode {
+    let mut node = KdlNode::new("log_stream");
+    node.entries_mut()
+        .push(KdlEntry::new(log_stream.msg_name.as_str()));
+    push_optional_name_prop(&mut node, log_stream.name.as_deref());
     node
 }
 
