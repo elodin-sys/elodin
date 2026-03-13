@@ -63,15 +63,17 @@ import platform
 import json
 import traceback
 import time
+import tempfile
 os.environ["JAX_ENABLE_X64"] = "1"
 jax.config.update("jax_enable_x64", True)
 
 def _artifact_dir():
-    dump_dir = os.environ.get('ELODIN_IREE_DUMP_DIR')
-    if dump_dir:
-        return dump_dir
+    base_dir = os.environ.get('ELODIN_IREE_DUMP_DIR')
+    if not base_dir:
+        base_dir = os.path.join(tempfile.gettempdir(), 'elodin_iree_debug')
+    os.makedirs(base_dir, exist_ok=True)
     stamp = time.strftime('%Y%m%d-%H%M%S')
-    return os.path.join(os.getcwd(), 'elodin_iree_debug', stamp)
+    return tempfile.mkdtemp(prefix=f'{stamp}-', dir=base_dir)
 
 def _write_versions(path, iree_bin):
     versions = {
@@ -121,7 +123,7 @@ def compile_to_vmfb(func, input_arrays, user_extra_flags, system_names):
         "--iree-hal-indirect-command-buffers=false",
     ]
 
-    import tempfile, stat, shutil, subprocess, pathlib, shlex
+    import stat, shutil, subprocess, pathlib, shlex
     from iree.compiler import _mlir_libs
     iree_tools_dir = str(pathlib.Path(_mlir_libs.__file__).parent)
     cc_bin = (
@@ -164,6 +166,7 @@ def compile_to_vmfb(func, input_arrays, user_extra_flags, system_names):
                     '#!/bin/bash',
                     'out=""',
                     'objs=()',
+                    'passthrough=()',
                     'want_shared=0',
                     'args=("$@")',
                     'i=0',
@@ -180,6 +183,11 @@ def compile_to_vmfb(func, input_arrays, user_extra_flags, system_names):
                     '    *.o|*.obj)',
                     '      objs+=("$arg")',
                     '      ;;',
+                    '    -nostdlib|-static)',
+                    '      ;;',
+                    '    *)',
+                    '      passthrough+=("$arg")',
+                    '      ;;',
                     '  esac',
                     '  i=$((i+1))',
                     'done',
@@ -191,9 +199,9 @@ def compile_to_vmfb(func, input_arrays, user_extra_flags, system_names):
                     '  exit 1',
                     'fi',
                     'if [ "$want_shared" -eq 1 ]; then',
-                    f'  exec "{cc_bin}" -shared -o "$out" "${{objs[@]}}" -lm',
+                    f'  exec "{cc_bin}" "${{passthrough[@]}}" -shared -o "$out" "${{objs[@]}}" -lm',
                     'else',
-                    f'  exec "{cc_bin}" -o "$out" "${{objs[@]}}" -lm',
+                    f'  exec "{cc_bin}" "${{passthrough[@]}}" -o "$out" "${{objs[@]}}" -lm',
                     'fi',
                 ]) + '\n')
         os.chmod(wrapper_path, os.stat(wrapper_path).st_mode | stat.S_IEXEC)

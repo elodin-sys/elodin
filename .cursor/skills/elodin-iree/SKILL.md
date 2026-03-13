@@ -215,7 +215,8 @@ When debugging simulation compile failures in `libs/nox-py/src/iree_compile.rs` 
 3. **Use artifact bundles**
    - Set `ELODIN_IREE_DUMP_DIR=/tmp/<name>` to persist:
    - `stablehlo.mlir`, `iree_compile_stderr.txt`, `iree_compile_cmd.sh`, `versions.json`, and `system_names.txt`.
-   - If not setting `ELODIN_IREE_DUMP_DIR`, dumps go under `elodin_iree_debug/<timestamp>`.
+   - Each compile attempt writes to a **unique subdirectory** to prevent overwriting between main and subsystem diagnostic retries.
+   - If not setting `ELODIN_IREE_DUMP_DIR`, dumps default to a temp directory (`$TMPDIR/elodin_iree_debug/...`) so builds do not require a writable CWD.
 
 4. **Interpret stage/class output first**
    - `Failure stage` tells where it broke (`jax_lower`, `stablehlo_emit`, `iree_compile`, etc.).
@@ -237,7 +238,7 @@ Recent drone validation exposed Linux-specific IREE LLVM CPU linker pitfalls:
   - passing explicit linker wrappers for both:
     - `--iree-llvmcpu-system-linker-path=...`
     - `--iree-llvmcpu-embedded-linker-path=...`
-  - wrapper should call `cc`/`clang` from PATH (not hardcoded `/usr/bin/cc`) and link with `-lm`.
+  - wrapper should call `cc`/`clang` from PATH (not hardcoded `/usr/bin/cc`), link with `-lm`, and preserve non-object linker flags instead of silently dropping them.
 
 ### Drone example compatibility notes
 
