@@ -170,16 +170,6 @@ if [[ -z "${perf_line}" ]]; then
   exit 1
 fi
 
-echo
-python3 scripts/ci/sensor_camera_log_summary.py \
-  "${log_file}" \
-  --sim-time-step "${ELODIN_SENSOR_CAMERA_SIM_TIME_STEP}" \
-  --goal-low-ms "${ELODIN_SENSOR_CAMERA_GOAL_LOW_MS}" \
-  --goal-ms "${ELODIN_SENSOR_CAMERA_GOAL_MS}" \
-  --goal-p95-ms "${ELODIN_SENSOR_CAMERA_GOAL_P95_MS}" \
-  --goal-under-pct "${ELODIN_SENSOR_CAMERA_GOAL_UNDER_PCT}" || true
-echo
-
 extract_metric() {
   local key="$1"
   echo "${perf_line}" | tr ' ' '\n' | awk -F= -v key="${key}" '$1 == key {print $2}'
@@ -191,12 +181,60 @@ thermal_fps="$(extract_metric thermal_fps)"
 rgb_frames="$(extract_metric rgb_frames)"
 thermal_frames="$(extract_metric thermal_frames)"
 
-echo "Parsed metrics"
-echo "  rtf=${rtf}"
-echo "  rgb_fps=${rgb_fps}"
-echo "  thermal_fps=${thermal_fps}"
-echo "  rgb_frames=${rgb_frames}"
-echo "  thermal_frames=${thermal_frames}"
+echo
+echo "╔══════════════════════════════════════════════════════════════╗"
+echo "║  PROBES — console metrics (tracing::info + PERF line)      ║"
+echo "╚══════════════════════════════════════════════════════════════╝"
+echo
+echo "Source: main.py PERF line (wall-clock Python)"
+echo "  rtf=${rtf}  rgb_fps=${rgb_fps}  thermal_fps=${thermal_fps}"
+echo "  rgb_frames=${rgb_frames}  thermal_frames=${thermal_frames}"
+echo
+echo "Source: sensor_camera_probe_request (headless.rs render-server)"
+echo "        sensor_camera_probe_render_client (step_context.rs sim)"
+python3 scripts/ci/sensor_camera_log_summary.py \
+  "${log_file}" \
+  --sim-time-step "${ELODIN_SENSOR_CAMERA_SIM_TIME_STEP}" \
+  --goal-low-ms "${ELODIN_SENSOR_CAMERA_GOAL_LOW_MS}" \
+  --goal-ms "${ELODIN_SENSOR_CAMERA_GOAL_MS}" \
+  --goal-p95-ms "${ELODIN_SENSOR_CAMERA_GOAL_P95_MS}" \
+  --goal-under-pct "${ELODIN_SENSOR_CAMERA_GOAL_UNDER_PCT}" || true
+
+echo
+echo "╔══════════════════════════════════════════════════════════════╗"
+echo "║  TRACY — binary traces (spans via tracing crate)           ║"
+echo "╚══════════════════════════════════════════════════════════════╝"
+echo
+if [[ -n "${tracy_out_dir}" ]] && [[ -d "${tracy_out_dir}" ]]; then
+  trace_count=0
+  for trace_file in "${tracy_out_dir}"/*.tracy; do
+    if [[ -f "${trace_file}" ]]; then
+      trace_size="$(du -h "${trace_file}" | cut -f1)"
+      echo "  $(basename "${trace_file}")  ${trace_size}"
+      trace_count=$((trace_count + 1))
+    fi
+  done
+  for csv_file in "${tracy_out_dir}"/*.csv; do
+    if [[ -f "${csv_file}" ]]; then
+      csv_lines="$(wc -l < "${csv_file}" | tr -d ' ')"
+      echo "  $(basename "${csv_file}")  ${csv_lines} lines"
+    fi
+  done
+  if [[ "${trace_count}" -gt 0 ]]; then
+    echo
+    echo "  Artifacts: ${tracy_out_dir}"
+    echo "  Analyze:   tracy-profiler ${tracy_out_dir}/trace-run.tracy"
+  else
+    echo "  No .tracy files captured (capture tools may not have been available)"
+  fi
+else
+  if [[ "${ELODIN_SENSOR_CAMERA_CAPTURE_TRACY}" == "1" ]]; then
+    echo "  Tracy capture was requested but no artifacts were produced"
+  else
+    echo "  Tracy capture disabled (set ELODIN_SENSOR_CAMERA_CAPTURE_TRACY=1 to enable)"
+  fi
+fi
+echo
 
 fail=0
 
@@ -232,7 +270,4 @@ if [[ "${fail}" -ne 0 ]]; then
   echo "warning: thresholds not met, but enforcement is disabled"
 fi
 
-if [[ -n "${tracy_out_dir}" ]]; then
-  echo "Tracy artifacts: ${tracy_out_dir}"
-fi
 echo "sensor-camera performance check passed"
