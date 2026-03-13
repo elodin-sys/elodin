@@ -1583,10 +1583,10 @@ impl WorldBuilder {
         for subsystem in subsystems {
             let name = normalize_system_name(
                 &subsystem
-                .system_names
-                .first()
-                .cloned()
-                .unwrap_or_else(|| "<system>".to_string()),
+                    .system_names
+                    .first()
+                    .cloned()
+                    .unwrap_or_else(|| "<system>".to_string()),
             );
             if !seen.insert(name.clone()) {
                 continue;
