@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import shutil
 import tempfile
 import typing as ty
@@ -24,6 +25,22 @@ def _world_with_value(value: float = 1.0) -> el.World:
     return w
 
 
+def _extract_report_dir_from_error(message: str) -> str:
+    match = re.search(r"Debug artifacts saved to:\s*(.+)", message)
+    assert match is not None, f"missing report dir in error: {message}"
+    return match.group(1).strip()
+
+
+def _latest_report_dir(base_dir: str) -> str:
+    entries = [
+        os.path.join(base_dir, name)
+        for name in os.listdir(base_dir)
+        if os.path.isdir(os.path.join(base_dir, name))
+    ]
+    assert entries, f"no artifact subdirectories created in {base_dir}"
+    return max(entries, key=os.path.getmtime)
+
+
 def test_iree_lowering_error_shows_real_message():
     @el.map
     def explode(_: X) -> X:
@@ -43,26 +60,29 @@ def test_iree_lowering_error_shows_real_message():
 )
 def test_iree_failure_dumps_artifacts():
     @el.map
-    def unsupported(x: X) -> X:
-        return x.at[0].set(x[0] + 1.0)
+    def scale(x: X) -> X:
+        return x * 2.0
 
     dump_dir = tempfile.mkdtemp(prefix="elodin_iree_test_")
     os.environ["ELODIN_IREE_DUMP_DIR"] = dump_dir
+    os.environ["ELODIN_IREE_FLAGS"] = "--iree-no-such-flag"
     try:
         w = _world_with_value()
-        with pytest.raises(RuntimeError, match="iree-compile failed"):
-            w.build(unsupported, backend="iree")
+        with pytest.raises(RuntimeError, match="iree-compile failed") as exc_info:
+            w.build(scale, backend="iree")
 
-        assert os.path.exists(os.path.join(dump_dir, "stablehlo.mlir"))
-        assert os.path.exists(os.path.join(dump_dir, "iree_compile_stderr.txt"))
-        assert os.path.exists(os.path.join(dump_dir, "versions.json"))
+        report_dir = _extract_report_dir_from_error(str(exc_info.value))
+        assert os.path.exists(os.path.join(report_dir, "stablehlo.mlir"))
+        assert os.path.exists(os.path.join(report_dir, "iree_compile_stderr.txt"))
+        assert os.path.exists(os.path.join(report_dir, "versions.json"))
 
-        with open(os.path.join(dump_dir, "versions.json"), encoding="utf-8") as f:
+        with open(os.path.join(report_dir, "versions.json"), encoding="utf-8") as f:
             versions = json.load(f)
         assert "jax" in versions
         assert "python" in versions
     finally:
         os.environ.pop("ELODIN_IREE_DUMP_DIR", None)
+        os.environ.pop("ELODIN_IREE_FLAGS", None)
 
 
 @pytest.mark.skipif(
@@ -79,7 +99,8 @@ def test_iree_flags_env_passthrough():
     try:
         w = _world_with_value()
         w.build(scale, backend="iree")
-        with open(os.path.join(dump_dir, "iree_compile_cmd.sh"), encoding="utf-8") as f:
+        report_dir = _latest_report_dir(dump_dir)
+        with open(os.path.join(report_dir, "iree_compile_cmd.sh"), encoding="utf-8") as f:
             cmd = f.read()
         assert "--iree-opt-const-eval=false" in cmd
     finally:
