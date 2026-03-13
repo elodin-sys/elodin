@@ -1,7 +1,7 @@
 {pkgs}:
 pkgs.mkShell {
   name = "elodin-tracy";
-  GLIBC_TUNABLES = "glibc.rtld.optional_static_tls=4096";
+  GLIBC_TUNABLES = "glibc.rtld.optional_static_tls=65536";
   packages =
     [
       pkgs.elodin.elodin-py-tracy.py
