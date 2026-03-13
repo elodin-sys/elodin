@@ -45,7 +45,7 @@ impl FrameDbWriter {
 pub type SharedFrameDbWriter = Arc<Mutex<Option<FrameDbWriter>>>;
 
 use elodin_db::DB;
-use elodin_db::render_bridge::RenderBridgeClient;
+use elodin_db::render_bridge::{RenderBridgeClient, RenderBridgeClientMetrics};
 use impeller2::types::{ComponentId, PrimType, Timestamp};
 use numpy::{PyArray1, PyArrayDescrMethods, PyUntypedArray, PyUntypedArrayMethods};
 use pyo3::prelude::*;
@@ -57,6 +57,10 @@ use crate::Error;
 /// Shared persistent render bridge client.
 /// Created lazily on first render_camera() call, reused across all ticks.
 pub type SharedRenderClient = Arc<Mutex<Option<RenderBridgeClient>>>;
+
+fn sensor_camera_probe_logs_enabled() -> bool {
+    elodin_db::render_bridge::sensor_camera_probe_logs_enabled()
+}
 
 /// Helper function to convert a byte buffer to a numpy array based on primitive type.
 fn buf_to_numpy_array<'py>(py: Python<'py>, buf: &[u8], prim_type: PrimType) -> Bound<'py, PyAny> {
@@ -189,7 +193,12 @@ impl StepContext {
             return Ok(vec![]);
         }
 
-        let total_start = Instant::now();
+        let profiling = sensor_camera_probe_logs_enabled();
+        let total_start = if profiling {
+            Some(Instant::now())
+        } else {
+            None
+        };
         let timestamp = Timestamp(self.timestamp.load(Ordering::SeqCst));
 
         // Get or create the persistent render client.
@@ -208,20 +217,18 @@ impl StepContext {
 
         let client = guard.as_mut().unwrap();
 
-        // Send batch render request (UDS round-trip).
-        let uds_start = Instant::now();
-        let frames = client
-            .render_cameras(camera_names, timestamp)
-            .map_err(|e| Error::PyO3(pyo3::exceptions::PyRuntimeError::new_err(e)))?;
-        let uds_ms = uds_start.elapsed().as_secs_f64() * 1000.0;
-        tracing::debug!(
-            render_uds_round_trip_ms = uds_ms,
-            frame_count = frames.len()
-        );
+        let (frames, client_metrics) = if profiling {
+            client
+                .render_cameras_with_metrics(camera_names, timestamp)
+                .map_err(|e| Error::PyO3(pyo3::exceptions::PyRuntimeError::new_err(e)))?
+        } else {
+            let frames = client
+                .render_cameras(camera_names, timestamp)
+                .map_err(|e| Error::PyO3(pyo3::exceptions::PyRuntimeError::new_err(e)))?;
+            (frames, RenderBridgeClientMetrics::default())
+        };
 
-        // Push frames to DB via the background worker thread. The worker uses a
-        // bounded channel so we never block. We need to clone frame data since the
-        // caller consumes it for the numpy return value.
+        // Push frames to DB via the background worker thread.
         {
             let mut writer_guard = self.frame_db_writer.lock().map_err(|_| {
                 Error::PyO3(pyo3::exceptions::PyRuntimeError::new_err(
@@ -238,7 +245,22 @@ impl StepContext {
             }
         }
 
-        tracing::debug!(total_render_cameras_ms = total_start.elapsed().as_secs_f64() * 1000.0);
+        if let Some(start) = total_start {
+            let total_render_client_ms = elodin_db::render_bridge::elapsed_ms(start);
+            tracing::info!(
+                total_render_client_ms,
+                camera_count = camera_names.len(),
+                db_enqueue_count = frames.len(),
+                client_send_request_ms = client_metrics.send_request_ms,
+                client_response_header_read_ms = client_metrics.response_header_read_ms,
+                client_frame_header_read_ms = client_metrics.frame_header_read_ms,
+                client_frame_data_read_ms = client_metrics.frame_data_read_ms,
+                client_on_frame_ms = client_metrics.on_frame_ms,
+                client_frame_count = client_metrics.frame_count,
+                client_total_bytes = client_metrics.total_bytes,
+                "sensor_camera_probe_render_client"
+            );
+        }
 
         Ok(frames)
     }

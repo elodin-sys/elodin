@@ -111,6 +111,12 @@ test_steps = [
                 flake=".#run",
                 command="python3 examples/cube-sat/main.py bench --ticks 100 --profile",
             ),
+            nix_step(
+                label=":python: sensor-camera",
+                flake=".#tracy",
+                command="./scripts/ci/sensor_camera_perf.sh",
+                env={"ELODIN_SENSOR_CAMERA_CAPTURE_TRACY": "1"},
+            ),
         ],
     ),
     nix_step(label="alejandra", command="alejandra -c ."),

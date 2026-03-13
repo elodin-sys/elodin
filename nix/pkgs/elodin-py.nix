@@ -5,12 +5,18 @@
   system,
   python,
   pythonPackages,
+  enableTracy ? false,
+  iree_runtime_tracy ? null,
   ...
 }: let
   # Import shared configuration
   common = pkgs.callPackage ./common.nix {};
   iree_runtime = pkgs.callPackage ./iree-runtime.nix {};
   iree_compiler = pkgs.callPackage ./iree-compiler.nix {python3 = python;};
+  iree_runtime_used =
+    if enableTracy
+    then assert iree_runtime_tracy != null; iree_runtime_tracy
+    else iree_runtime;
   # Direct Rust build using rustPlatform.buildRustPackage
 
   # Extract pname and version directly from Cargo.toml files
@@ -71,7 +77,7 @@
     buildInputs = with pkgs;
       [
         python
-        iree_runtime
+        iree_runtime_used
       ]
       ++ common.commonBuildInputs
       ++ lib.optionals stdenv.isDarwin common.darwinDeps
@@ -81,6 +87,7 @@
 
     # Environment variables for the build
     IREE_RUNTIME_DIR = "${iree_runtime}";
+    IREE_RUNTIME_TRACY_DIR = lib.optionalString enableTracy "${iree_runtime_used}";
     OPENSSL_DIR = "${pkgs.openssl.dev}";
     OPENSSL_LIB_DIR = "${pkgs.openssl.out}/lib";
     OPENSSL_INCLUDE_DIR = "${pkgs.openssl.dev}/include/";
@@ -101,7 +108,7 @@
       runHook preBuild
 
       # Build the wheel with maturin
-      maturin build --offline --target-dir ./target -m libs/nox-py/Cargo.toml --release
+      maturin build --offline --target-dir ./target -m libs/nox-py/Cargo.toml --release ${lib.optionalString enableTracy "--features publish,tracy"}
 
       runHook postBuild
     '';
@@ -141,7 +148,7 @@
         ];
       buildInputs =
         [
-          iree_runtime
+          iree_runtime_used
         ]
         ++ lib.optionals pkgs.stdenv.isDarwin [
           pkgs.stdenv.cc.cc.lib # C++ standard library for macOS

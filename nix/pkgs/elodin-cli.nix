@@ -6,6 +6,7 @@
   elodinPy,
   python,
   pythonPackages,
+  enableTracy ? false,
   ...
 }: let
   # Import shared configuration
@@ -42,6 +43,8 @@
       ++ common.commonBuildInputs
       ++ lib.optionals pkgs.stdenv.isDarwin common.darwinDeps
       ++ lib.optionals pkgs.stdenv.isLinux common.linuxGraphicsAudioDeps;
+
+    buildFeatures = lib.optionals enableTracy ["tracy"];
 
     doCheck = false;
 
