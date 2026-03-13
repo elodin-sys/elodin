@@ -58,48 +58,8 @@ use crate::Error;
 /// Created lazily on first render_camera() call, reused across all ticks.
 pub type SharedRenderClient = Arc<Mutex<Option<RenderBridgeClient>>>;
 
-fn elapsed_ms(start: Instant) -> f64 {
-    elodin_db::render_bridge::elapsed_ms(start)
-}
-
 fn sensor_camera_probe_logs_enabled() -> bool {
     elodin_db::render_bridge::sensor_camera_probe_logs_enabled()
-}
-
-fn log_render_client_metrics(
-    operation: &'static str,
-    total_ms: f64,
-    metrics: RenderBridgeClientMetrics,
-    db_enqueue_ms: f64,
-    db_enqueue_count: usize,
-) {
-    let span = tracing::info_span!(
-        "render_client_operation",
-        render_operation = operation,
-        total_render_client_ms = tracing::field::Empty,
-        client_send_request_ms = tracing::field::Empty,
-        client_response_header_read_ms = tracing::field::Empty,
-        client_frame_header_read_ms = tracing::field::Empty,
-        client_frame_data_read_ms = tracing::field::Empty,
-        client_on_frame_ms = tracing::field::Empty,
-        db_enqueue_ms = tracing::field::Empty,
-        db_enqueue_count,
-        client_frame_count = tracing::field::Empty,
-        client_total_bytes = tracing::field::Empty,
-    );
-    let _span = span.enter();
-    span.record("total_render_client_ms", total_ms);
-    span.record("client_send_request_ms", metrics.send_request_ms);
-    span.record(
-        "client_response_header_read_ms",
-        metrics.response_header_read_ms,
-    );
-    span.record("client_frame_header_read_ms", metrics.frame_header_read_ms);
-    span.record("client_frame_data_read_ms", metrics.frame_data_read_ms);
-    span.record("client_on_frame_ms", metrics.on_frame_ms);
-    span.record("db_enqueue_ms", db_enqueue_ms);
-    span.record("client_frame_count", metrics.frame_count);
-    span.record("client_total_bytes", metrics.total_bytes);
 }
 
 /// Helper function to convert a byte buffer to a numpy array based on primitive type.
@@ -233,14 +193,9 @@ impl StepContext {
             return Ok(vec![]);
         }
 
+        let profiling = sensor_camera_probe_logs_enabled();
         let total_start = Instant::now();
         let timestamp = Timestamp(self.timestamp.load(Ordering::SeqCst));
-        let _span = tracing::info_span!(
-            "step_context_render_cameras",
-            camera_count = camera_names.len(),
-            timestamp = timestamp.0
-        )
-        .entered();
 
         // Get or create the persistent render client.
         let mut guard = self.render_client.lock().map_err(|_| {
@@ -258,14 +213,18 @@ impl StepContext {
 
         let client = guard.as_mut().unwrap();
 
-        let (frames, client_metrics) = client
-            .render_cameras_with_metrics(camera_names, timestamp)
-            .map_err(|e| Error::PyO3(pyo3::exceptions::PyRuntimeError::new_err(e)))?;
+        let (frames, client_metrics) = if profiling {
+            client
+                .render_cameras_with_metrics(camera_names, timestamp)
+                .map_err(|e| Error::PyO3(pyo3::exceptions::PyRuntimeError::new_err(e)))?
+        } else {
+            let frames = client
+                .render_cameras(camera_names, timestamp)
+                .map_err(|e| Error::PyO3(pyo3::exceptions::PyRuntimeError::new_err(e)))?;
+            (frames, RenderBridgeClientMetrics::default())
+        };
 
-        // Push frames to DB via the background worker thread. The worker uses a
-        // bounded channel so we never block. We need to clone frame data since the
-        // caller consumes it for the numpy return value.
-        let mut db_enqueue_ms = 0.0;
+        // Push frames to DB via the background worker thread.
         {
             let mut writer_guard = self.frame_db_writer.lock().map_err(|_| {
                 Error::PyO3(pyo3::exceptions::PyRuntimeError::new_err(
@@ -278,17 +237,14 @@ impl StepContext {
             let writer = writer_guard.as_ref().unwrap();
             for frame in &frames {
                 let msg_id = impeller2::types::msg_id(&frame.camera_name);
-                let enqueue_start = Instant::now();
                 writer.push(msg_id, frame.timestamp, frame.data.clone());
-                db_enqueue_ms += elapsed_ms(enqueue_start);
             }
         }
 
-        let total_render_client_ms = elapsed_ms(total_start);
-        if sensor_camera_probe_logs_enabled() {
+        if profiling {
+            let total_render_client_ms = elodin_db::render_bridge::elapsed_ms(total_start);
             tracing::info!(
                 total_render_client_ms,
-                render_operation = "render_cameras_returned",
                 camera_count = camera_names.len(),
                 db_enqueue_count = frames.len(),
                 client_send_request_ms = client_metrics.send_request_ms,
@@ -296,20 +252,11 @@ impl StepContext {
                 client_frame_header_read_ms = client_metrics.frame_header_read_ms,
                 client_frame_data_read_ms = client_metrics.frame_data_read_ms,
                 client_on_frame_ms = client_metrics.on_frame_ms,
-                db_enqueue_ms,
                 client_frame_count = client_metrics.frame_count,
                 client_total_bytes = client_metrics.total_bytes,
                 "sensor_camera_probe_render_client"
             );
         }
-
-        log_render_client_metrics(
-            "render_cameras_returned",
-            total_render_client_ms,
-            client_metrics,
-            db_enqueue_ms,
-            frames.len(),
-        );
 
         Ok(frames)
     }
