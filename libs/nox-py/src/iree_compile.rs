@@ -95,6 +95,15 @@ def _write_versions(path, iree_bin):
     with open(os.path.join(path, 'versions.json'), 'w') as f:
         json.dump(versions, f, indent=2)
 
+def _write_primary_artifacts(path, cmd_text, stablehlo_mlir, system_names, iree_bin):
+    with open(os.path.join(path, 'iree_compile_cmd.sh'), 'w') as f:
+        f.write('#!/usr/bin/env bash\\n' + cmd_text + ' < stablehlo.mlir\\n')
+    with open(os.path.join(path, 'stablehlo.mlir'), 'w') as f:
+        f.write(stablehlo_mlir)
+    with open(os.path.join(path, 'system_names.txt'), 'w') as f:
+        f.write('\\n'.join(system_names or []))
+    _write_versions(path, iree_bin)
+
 def compile_to_vmfb(func, input_arrays, user_extra_flags, system_names):
     try:
         lower_start = time.perf_counter()
@@ -226,22 +235,16 @@ def compile_to_vmfb(func, input_arrays, user_extra_flags, system_names):
     extra.extend(env_flags)
     extra.extend(user_extra_flags or [])
 
-    report_dir = _artifact_dir()
-    os.makedirs(report_dir, exist_ok=True)
+    report_dir = _artifact_dir() if os.environ.get('ELODIN_IREE_DUMP_DIR') else None
 
     out_path = None
     try:
         fd, out_path = tempfile.mkstemp(suffix='.vmfb')
         os.close(fd)
         cmd = [iree_bin, '-', '-o', out_path, '--iree-hal-target-backends=llvm-cpu'] + extra
-        cmd_text = ' '.join(cmd)
-        with open(os.path.join(report_dir, 'iree_compile_cmd.sh'), 'w') as f:
-            f.write('#!/usr/bin/env bash\n' + cmd_text + ' < stablehlo.mlir\n')
-        with open(os.path.join(report_dir, 'stablehlo.mlir'), 'w') as f:
-            f.write(stablehlo_mlir)
-        with open(os.path.join(report_dir, 'system_names.txt'), 'w') as f:
-            f.write('\n'.join(system_names or []))
-        _write_versions(report_dir, iree_bin)
+        cmd_text = shlex.join(cmd)
+        if report_dir is not None:
+            _write_primary_artifacts(report_dir, cmd_text, stablehlo_mlir, system_names, iree_bin)
 
         compile_start = time.perf_counter()
         result = subprocess.run(cmd, input=stablehlo_mlir.encode('utf-8'), capture_output=True)
@@ -251,10 +254,13 @@ def compile_to_vmfb(func, input_arrays, user_extra_flags, system_names):
         # Some environments fail to link trig symbols (cos/sin) for llvm-cpu.
         # Retry with vmvx so users can still run on the IREE backend.
         if result.returncode != 0 and "undefined symbol" in stderr_text and "iree-lld" in stderr_text:
+            if report_dir is None:
+                report_dir = _artifact_dir()
+                _write_primary_artifacts(report_dir, cmd_text, stablehlo_mlir, system_names, iree_bin)
             vmvx_extra = [f for f in extra if not f.startswith('--iree-llvmcpu-')]
             vmvx_cmd = [iree_bin, '-', '-o', out_path, '--iree-hal-target-backends=vmvx'] + vmvx_extra
             with open(os.path.join(report_dir, 'iree_compile_cmd_vmvx.sh'), 'w') as f:
-                f.write('#!/usr/bin/env bash\n' + ' '.join(vmvx_cmd) + ' < stablehlo.mlir\n')
+                f.write('#!/usr/bin/env bash\n' + shlex.join(vmvx_cmd) + ' < stablehlo.mlir\n')
             vmvx_result = subprocess.run(
                 vmvx_cmd,
                 input=stablehlo_mlir.encode('utf-8'),
@@ -281,8 +287,12 @@ def compile_to_vmfb(func, input_arrays, user_extra_flags, system_names):
                 )
 
         compile_ms = (time.perf_counter() - compile_start) * 1000.0
-        with open(os.path.join(report_dir, 'iree_compile_stderr.txt'), 'w') as f:
-            f.write(stderr_text)
+        if result.returncode != 0 and report_dir is None:
+            report_dir = _artifact_dir()
+            _write_primary_artifacts(report_dir, cmd_text, stablehlo_mlir, system_names, iree_bin)
+        if report_dir is not None:
+            with open(os.path.join(report_dir, 'iree_compile_stderr.txt'), 'w') as f:
+                f.write(stderr_text)
         if result.returncode != 0:
             raise RuntimeError(
                 'stage=iree_compile\n'
@@ -292,8 +302,9 @@ def compile_to_vmfb(func, input_arrays, user_extra_flags, system_names):
             )
         with open(out_path, 'rb') as f:
             vmfb = f.read()
-        with open(os.path.join(report_dir, 'module.vmfb'), 'wb') as f:
-            f.write(vmfb)
+        if report_dir is not None:
+            with open(os.path.join(report_dir, 'module.vmfb'), 'wb') as f:
+                f.write(vmfb)
         return {
             'vmfb': vmfb,
             'lower_ms': lower_ms,
