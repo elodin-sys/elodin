@@ -199,3 +199,61 @@ Key lessons:
 - `jax.jit(func, keep_unused=True)` is required to prevent JAX from optimizing away simulation inputs
 - JAX 0.7+ requires tuples (not lists) for `GatherDimensionNumbers` parameters
 - Math functions (`log`, `exp`) may require VMVX backend fallback if embedded ELF linking fails on macOS
+
+## IREE Debugging Playbook (nox-py)
+
+When debugging simulation compile failures in `libs/nox-py/src/iree_compile.rs` and `world_builder.rs`, follow this order:
+
+1. **Run in nix shell first**
+   - Always use `nix develop` for both Rust and Python runs.
+   - Toolchain-dependent linker behavior differs significantly outside nix.
+
+2. **Rebuild editable Python extension after Rust changes**
+   - Rust edits in `libs/nox-py/src/*.rs` are not picked up until reinstall:
+   - `nix develop -c just install py`
+
+3. **Use artifact bundles**
+   - Set `ELODIN_IREE_DUMP_DIR=/tmp/<name>` to persist:
+   - `stablehlo.mlir`, `iree_compile_stderr.txt`, `iree_compile_cmd.sh`, `versions.json`, and `system_names.txt`.
+   - If not setting `ELODIN_IREE_DUMP_DIR`, dumps go under `elodin_iree_debug/<timestamp>`.
+
+4. **Interpret stage/class output first**
+   - `Failure stage` tells where it broke (`jax_lower`, `stablehlo_emit`, `iree_compile`, etc.).
+   - `Failure class` drives next action:
+     - `UnsupportedIreeFeature`: rewrite model/system patterns or temporarily use `backend="jax"`.
+     - `ToolchainMisconfigured`: investigate compiler/linker environment and dump scripts.
+
+### Linux linker learnings (critical)
+
+Recent drone validation exposed Linux-specific IREE LLVM CPU linker pitfalls:
+
+- `undefined symbol: cos/sin` can occur during `iree-lld` linking.
+- Embedded loader can fail const-eval with imports like `_ITM_deregisterTMCloneTable`.
+- Effective mitigations in `iree_compile.rs` include:
+  - forcing non-embedded linking intent (`--iree-llvmcpu-link-embedded=false`)
+  - explicit Linux target triple (`--iree-llvmcpu-target-triple=<arch>-unknown-linux-gnu`)
+  - disabling static linking (`--iree-llvmcpu-link-static=false`)
+  - disabling const eval (`--iree-opt-const-eval=false`)
+  - passing explicit linker wrappers for both:
+    - `--iree-llvmcpu-system-linker-path=...`
+    - `--iree-llvmcpu-embedded-linker-path=...`
+  - wrapper should call `cc`/`clang` from PATH (not hardcoded `/usr/bin/cc`) and link with `-lm`.
+
+### Drone example compatibility notes
+
+- The drone stack previously triggered:
+  - scatter lowering limits from `.at[].set()`
+  - Linux linker/import issues in LLVM CPU codegen
+- Rewriting `.at[].set()` in hot paths to pure array expressions reduces scatter failures and improves compatibility.
+- Validate with:
+  - `nix develop -c bash -lc 'source .venv/bin/activate && uv run --active elodin run examples/drone/main.py'`
+  - success is indicated by simulation startup and normal stop at max tick (no `IREE compilation failed` traceback).
+
+### Cube-sat example compatibility notes
+
+- `examples/cube-sat/main.py` is a useful complementary IREE test case because it exercises graph/query paths distinct from drone.
+- With the current Linux linker wrapper + LLVM CPU flag set, cube-sat compiles and runs on IREE (no compile traceback).
+- This example is long-running; if you only need a compile/runtime smoke test, watch for DB/component initialization logs and then stop manually.
+- A current `jax` `FutureWarning` can appear during runtime:
+  - `scatter inputs have incompatible types ... float64 to int64 ...`
+  - This is not currently fatal, but should be treated as a future-compatibility cleanup item for JAX upgrades.

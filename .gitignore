@@ -34,6 +34,7 @@ __pycache__
 *.pyd
 **/venv/
 **/.venv/
+elodin_iree_debug/
 
 # examples
 betaflight_*

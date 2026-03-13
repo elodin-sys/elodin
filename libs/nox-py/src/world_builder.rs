@@ -3,6 +3,7 @@ use crate::archetype::Spawnable;
 use crate::entity::EntityId;
 use crate::error::Error;
 use crate::exec::{PyExec, WorldExec};
+use crate::iree_diagnostics::classify_failure;
 use crate::iree_exec::IREEWorldExec;
 use crate::jax_exec::{JaxExec, JaxWorldExec};
 use crate::step_context::StepContext;
@@ -365,6 +366,7 @@ impl WorldBuilder {
         start_timestamp = None,
         log_level = None,
         backend = "iree",
+        iree_flags = None,
     ))]
     pub fn run(
         &mut self,
@@ -383,6 +385,7 @@ impl WorldBuilder {
         start_timestamp: Option<i64>,
         log_level: Option<String>,
         backend: &str,
+        iree_flags: Option<Vec<String>>,
     ) -> Result<Option<String>, Error> {
         let log_level = log_level.as_deref().map(normalize_log_level).transpose()?;
         let filter = if std::env::var("RUST_LOG").is_ok() {
@@ -425,6 +428,7 @@ impl WorldBuilder {
                     default_playback_speed,
                     max_ticks,
                     backend,
+                    iree_flags.as_deref().unwrap_or(&[]),
                 )?;
                 let recipes = self.recipes.clone();
                 // Create a cancel token that can be used to gracefully stop s10 recipes
@@ -629,6 +633,7 @@ impl WorldBuilder {
                         optimize,
                         db_path,
                         backend,
+                        iree_flags.clone(),
                     )?;
                     exec.run(py, ticks, true, None)?;
                     let profile = exec.profile();
@@ -691,10 +696,11 @@ impl WorldBuilder {
                         default_playback_speed,
                         max_ticks,
                         backend,
+                        iree_flags.as_deref().unwrap_or(&[]),
                     )?;
 
                     let build_time_ms = exec.profiler_mut().build.mean();
-                    let compile_time_ms = 0.0;
+                    let compile_time_ms = exec.profile().get("compile").copied().unwrap_or(0.0);
                     let mut compiled_exec = exec;
 
                     // XLA_FLAGS automatically restored when _xla_guard is dropped here
@@ -757,7 +763,30 @@ impl WorldBuilder {
                         }
                     }
 
-                    let hlo_text = String::from("(IREE backend - HLO profiling not available)");
+                    let hlo_text = match &compiled_exec {
+                        WorldExec::Iree(e) => {
+                            if let Some(stats) = &e.tick_exec.compile_stats {
+                                format!(
+                                    "IREE compile stage breakdown\n\
+                                     - jax_lower_ms: {:.3}\n\
+                                     - stablehlo_emit_ms: {:.3}\n\
+                                     - iree_compile_ms: {:.3}\n\
+                                     - vmfb_size_bytes: {}\n\
+                                     - num_inputs: {}\n\
+                                     - num_outputs: {}",
+                                    stats.lower_ms,
+                                    stats.stablehlo_emit_ms,
+                                    stats.iree_compile_ms,
+                                    stats.vmfb_size_bytes,
+                                    e.tick_exec.metadata.arg_ids.len(),
+                                    e.tick_exec.metadata.ret_ids.len()
+                                )
+                            } else {
+                                String::from("IREE compile stage breakdown unavailable")
+                            }
+                        }
+                        WorldExec::Jax(_) => String::from("JAX backend profile"),
+                    };
 
                     // Save HLO dump to output directory
                     let hlo_dump_path = output_dir.join("hlo_dump.txt");
@@ -1173,6 +1202,7 @@ impl WorldBuilder {
         optimize = false,
         db_path = None,
         backend = "iree",
+        iree_flags = None,
     ))]
     pub fn build(
         &mut self,
@@ -1185,6 +1215,7 @@ impl WorldBuilder {
         #[allow(unused_variables)] optimize: bool,
         db_path: Option<String>,
         backend: &str,
+        iree_flags: Option<Vec<String>>,
     ) -> Result<PyExec, Error> {
         let mut exec = self.build_with_backend(
             py,
@@ -1194,6 +1225,7 @@ impl WorldBuilder {
             default_playback_speed,
             max_ticks,
             backend,
+            iree_flags.as_deref().unwrap_or(&[]),
         )?;
         let db_path = match db_path {
             Some(p) => PathBuf::from(p),
@@ -1453,6 +1485,7 @@ impl WorldBuilder {
         default_playback_speed: f64,
         max_ticks: Option<u64>,
         backend: &str,
+        extra_iree_flags: &[String],
     ) -> Result<WorldExec, Error> {
         let mut start = time::Instant::now();
         let ts = time::Duration::from_secs_f64(sim_time_step);
@@ -1478,20 +1511,39 @@ impl WorldBuilder {
                 exec.profiler.build.observe(&mut start);
                 Ok(WorldExec::Jax(exec))
             }
-            "iree" => match compiled_sys.compile_iree_module(py, &world) {
-                Ok(tick_exec) => {
+            "iree" => match compiled_sys.compile_iree_module(py, &world, extra_iree_flags) {
+                Ok(result) => {
+                    let tick_exec = result.exec;
                     let mut exec = IREEWorldExec::new(world, tick_exec, None);
                     exec.profiler.build.observe(&mut start);
                     Ok(WorldExec::Iree(exec))
                 }
                 Err(iree_err) => {
-                    let msg = format!(
-                        "{iree_err}\n\n\
-                            This simulation uses JAX features not yet supported by the IREE backend.\n\
-                            To run this simulation, set backend=\"jax\" in your w.run() call:\n\n  \
-                            w.run(system, backend=\"jax\", ...)\n\n\
-                            The JAX backend is slower but supports all JAX operations."
-                    );
+                    let diagnosis = self
+                        .diagnose_subsystems(py, &world, &compiled_sys, extra_iree_flags)
+                        .unwrap_or_default();
+                    let err_text = iree_err.to_string();
+                    let mut msg = err_text.clone();
+                    if !err_text.contains("Failure stage:") {
+                        let report = classify_failure(&err_text);
+                        msg = format!(
+                            "{err_text}\n\nFailure stage: {:?}\nFailure class: {:?}",
+                            report.stage, report.classification
+                        );
+                        if !report.suggestion.is_empty() {
+                            msg.push_str(&format!("\n{}", report.suggestion));
+                        }
+                        if report.should_suggest_jax_fallback() {
+                            msg.push_str(
+                                "\n\nTo temporarily unblock, set backend=\"jax\" in your w.run() call:\n\n  \
+                                 w.run(system, backend=\"jax\", ...)\n\nThe JAX backend is slower but supports all JAX operations.",
+                            );
+                        }
+                    }
+                    if !diagnosis.is_empty() {
+                        msg.push_str("\n\n=== Per-System IREE Compatibility ===\n");
+                        msg.push_str(&diagnosis);
+                    }
                     Err(Error::IreeCompilationFailed(msg))
                 }
             },
@@ -1500,6 +1552,55 @@ impl WorldBuilder {
                 other
             ))),
         }
+    }
+
+    fn diagnose_subsystems(
+        &self,
+        py: Python<'_>,
+        world: &World,
+        compiled_sys: &crate::system::CompiledSystem,
+        extra_iree_flags: &[String],
+    ) -> Result<String, Error> {
+        fn normalize_system_name(raw: &str) -> String {
+            if let Some(i) = raw.find(" at 0x") {
+                let mut s = raw[..i].to_string();
+                if !s.ends_with('>') {
+                    s.push('>');
+                }
+                s
+            } else {
+                raw.to_string()
+            }
+        }
+
+        let subsystems = if compiled_sys.diagnostic_subsystems.is_empty() {
+            vec![compiled_sys.clone()]
+        } else {
+            compiled_sys.diagnostic_subsystems.clone()
+        };
+        let mut seen = std::collections::HashSet::new();
+        let mut out = String::new();
+        for subsystem in subsystems {
+            let name = normalize_system_name(
+                &subsystem
+                .system_names
+                .first()
+                .cloned()
+                .unwrap_or_else(|| "<system>".to_string()),
+            );
+            if !seen.insert(name.clone()) {
+                continue;
+            }
+            match subsystem.compile_iree_module(py, world, extra_iree_flags) {
+                Ok(_) => out.push_str(&format!("[OK]   {name}\n")),
+                Err(err) => {
+                    let err_text = err.to_string();
+                    let one_line = err_text.lines().next().unwrap_or("unknown failure");
+                    out.push_str(&format!("[FAIL] {name} -- {one_line}\n"));
+                }
+            }
+        }
+        Ok(out)
     }
 
     #[allow(clippy::type_complexity)]

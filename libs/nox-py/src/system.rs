@@ -50,6 +50,8 @@ impl<'a> SystemBuilder<'a> {
             },
             inputs: self.inputs.iter().map(|(k, _)| k).copied().collect(),
             outputs: self.vars.keys().copied().collect(),
+            system_names: vec!["<compiled>".to_string()],
+            diagnostic_subsystems: vec![],
         })
     }
 
@@ -98,6 +100,8 @@ pub struct CompiledSystem {
     pub computation: NoxprComp,
     pub inputs: Vec<ComponentId>,
     pub outputs: Vec<ComponentId>,
+    pub system_names: Vec<String>,
+    pub diagnostic_subsystems: Vec<CompiledSystem>,
 }
 
 impl CompiledSystem {
@@ -229,6 +233,8 @@ where
             computation,
             inputs: vec![],
             outputs: component_ids,
+            system_names: vec!["<system>".to_string()],
+            diagnostic_subsystems: vec![],
         })
     }
 }
@@ -357,6 +363,8 @@ macro_rules! impl_system_param {
                             computation,
                             inputs,
                             outputs,
+                            system_names: vec!["<system>".to_string()],
+                            diagnostic_subsystems: vec![],
                         })
                     }
 
@@ -469,8 +477,26 @@ impl<A: System, B: System> System for Pipe<A, B> {
         let b = self.b.compile(world)?;
         let mut inner_builder = SystemBuilder::new(world);
         self.init(&mut inner_builder)?;
-
-        merge_compiled_systems([a, b], &mut inner_builder)
+        let mut merged = merge_compiled_systems([a.clone(), b.clone()], &mut inner_builder)?;
+        merged.system_names = a
+            .system_names
+            .iter()
+            .chain(b.system_names.iter())
+            .cloned()
+            .collect();
+        let mut diagnostic_subsystems = Vec::new();
+        if a.diagnostic_subsystems.is_empty() {
+            diagnostic_subsystems.push(a);
+        } else {
+            diagnostic_subsystems.extend(a.diagnostic_subsystems.clone());
+        }
+        if b.diagnostic_subsystems.is_empty() {
+            diagnostic_subsystems.push(b);
+        } else {
+            diagnostic_subsystems.extend(b.diagnostic_subsystems.clone());
+        }
+        merged.diagnostic_subsystems = diagnostic_subsystems;
+        Ok(merged)
     }
 }
 
@@ -490,6 +516,8 @@ impl System for () {
             computation: NoxprComp::new(func, NoxprTy::Tuple(vec![])),
             inputs: vec![],
             outputs: vec![],
+            system_names: vec!["<empty>".to_string()],
+            diagnostic_subsystems: vec![],
         })
     }
 }
@@ -692,6 +720,8 @@ impl System for PyFnSystem {
             computation: NoxprComp::new(func, ty),
             inputs: input_ids,
             outputs: output_ids,
+            system_names: vec![self.name.clone()],
+            diagnostic_subsystems: vec![],
         })
     }
 }
@@ -701,7 +731,8 @@ pub trait CompiledSystemExt {
         &self,
         py: Python<'_>,
         world: &World,
-    ) -> Result<crate::iree_exec::IREEExec, Error>;
+        extra_iree_flags: &[String],
+    ) -> Result<crate::iree_compile::IreeCompileResult, Error>;
     fn compile_jax_module(&self, py: Python<'_>) -> Result<Py<PyAny>, Error>;
 }
 
@@ -710,8 +741,9 @@ impl CompiledSystemExt for CompiledSystem {
         &self,
         py: Python<'_>,
         world: &World,
-    ) -> Result<crate::iree_exec::IREEExec, Error> {
-        crate::iree_compile::compile_iree_module(py, self, world)
+        extra_iree_flags: &[String],
+    ) -> Result<crate::iree_compile::IreeCompileResult, Error> {
+        crate::iree_compile::compile_iree_module(py, self, world, extra_iree_flags)
     }
 
     fn compile_jax_module(&self, py: Python<'_>) -> Result<Py<PyAny>, Error> {
