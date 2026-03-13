@@ -298,7 +298,11 @@ fn headless_sensor_runner(mut app: App) -> AppExit {
         };
 
         let profiling = sensor_camera_probe_logs_enabled();
-        let request_start = if profiling { Some(Instant::now()) } else { None };
+        let request_start = if profiling {
+            Some(Instant::now())
+        } else {
+            None
+        };
 
         // Set timestamp for this request.
         app.world_mut().resource_mut::<CurrentTimestamp>().0 = request.timestamp;

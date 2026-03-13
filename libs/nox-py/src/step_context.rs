@@ -194,7 +194,11 @@ impl StepContext {
         }
 
         let profiling = sensor_camera_probe_logs_enabled();
-        let total_start = if profiling { Some(Instant::now()) } else { None };
+        let total_start = if profiling {
+            Some(Instant::now())
+        } else {
+            None
+        };
         let timestamp = Timestamp(self.timestamp.load(Ordering::SeqCst));
 
         // Get or create the persistent render client.

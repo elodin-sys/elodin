@@ -27,7 +27,7 @@ import time
 SIM_TIME_STEP = 1.0 / 120.0
 MAX_TICKS = int(os.getenv("ELODIN_SENSOR_CAMERA_MAX_TICKS", "18000"))
 PROFILE = os.getenv("ELODIN_SENSOR_CAMERA_PROFILE", "0") == "1"
-EMIT_PERF = PROFILE and len(sys.argv) > 1 and sys.argv[1] == "run"
+EMIT_PERF = PROFILE and "run" in sys.argv
 BALL_RADIUS = 0.3
 BOUNDARY = 5.0
 BOUNCINESS = 0.95
