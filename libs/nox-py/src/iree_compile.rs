@@ -97,11 +97,11 @@ def _write_versions(path, iree_bin):
 
 def _write_primary_artifacts(path, cmd_text, stablehlo_mlir, system_names, iree_bin):
     with open(os.path.join(path, 'iree_compile_cmd.sh'), 'w') as f:
-        f.write('#!/usr/bin/env bash\\n' + cmd_text + ' < stablehlo.mlir\\n')
+        f.write('#!/usr/bin/env bash\n' + cmd_text + ' < stablehlo.mlir\n')
     with open(os.path.join(path, 'stablehlo.mlir'), 'w') as f:
         f.write(stablehlo_mlir)
     with open(os.path.join(path, 'system_names.txt'), 'w') as f:
-        f.write('\\n'.join(system_names or []))
+        f.write('\n'.join(system_names or []))
     _write_versions(path, iree_bin)
 
 def compile_to_vmfb(func, input_arrays, user_extra_flags, system_names):
