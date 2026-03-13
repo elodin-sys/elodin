@@ -18,6 +18,7 @@ pub mod graph;
 pub mod impeller2_server;
 pub mod integrator;
 pub mod iree_compile;
+pub mod iree_diagnostics;
 pub mod iree_exec;
 pub mod jax_exec;
 pub mod linalg;

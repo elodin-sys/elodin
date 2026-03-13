@@ -20,7 +20,7 @@ pub enum Error {
     Io(#[from] std::io::Error),
     #[error("serde_json {0}")]
     Json(#[from] serde_json::Error),
-    #[error("python error")]
+    #[error("{0}")]
     PyO3(#[from] pyo3::PyErr),
     #[error("db {0}")]
     DB(#[from] elodin_db::Error),
@@ -57,5 +57,32 @@ impl From<Error> for PyErr {
             Error::PyO3(err) => err,
             err => PyRuntimeError::new_err(err.to_string()),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use pyo3::Python;
+
+    #[test]
+    fn test_pyo3_error_preserves_message() {
+        pyo3::prepare_freethreaded_python();
+        Python::with_gil(|py| {
+            let err = py
+                .run(
+                    std::ffi::CString::new("raise RuntimeError('detailed iree-compile error')")
+                        .expect("valid python snippet")
+                        .as_c_str(),
+                    None,
+                    None,
+                )
+                .expect_err("python snippet should fail");
+            let display = Error::PyO3(err).to_string();
+            assert!(
+                display.contains("detailed iree-compile error"),
+                "display was: {display}"
+            );
+        });
     }
 }

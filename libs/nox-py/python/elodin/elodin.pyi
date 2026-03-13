@@ -157,6 +157,8 @@ class WorldBuilder:
         interactive: bool = True,
         start_timestamp: Optional[int] = None,
         log_level: Optional[str] = None,
+        backend: str = "iree",
+        iree_flags: Optional[list[str]] = None,
     ): ...
     def serve(
         self,
@@ -174,7 +176,11 @@ class WorldBuilder:
         sim_time_step: float = 1 / 120.0,
         run_time_step: Optional[float] = None,
         default_playback_speed: float = 1.0,
+        max_ticks: Optional[int] = None,
         optimize: bool = False,
+        db_path: Optional[str] = None,
+        backend: str = "iree",
+        iree_flags: Optional[list[str]] = None,
     ) -> Exec: ...
     def to_jax_func(
         self,
