@@ -170,4 +170,5 @@ w.schematic("""
 """.format(body_objects=body_objects))
 
 sys = el.six_dof(sys=gravity)
-sim = w.run(sys, SIM_TIME_STEP, run_time_step=1 / 120.0, pre_step=pre_step)
+#sim = w.run(sys, SIM_TIME_STEP, run_time_step=1 / 120.0, pre_step=pre_step)
+sim = w.run(sys, SIM_TIME_STEP, pre_step=pre_step)
