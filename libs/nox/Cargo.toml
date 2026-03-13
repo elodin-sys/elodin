@@ -9,7 +9,7 @@ repository = "https://github.com/elodin-sys/elodin"
 [features]
 default = []
 std = ["thiserror/std", "faer/std", "num-traits/std", "nox-array/std"]
-jax = ["pyo3", "pyo3-build-config", "numpy", "noxpr"]
+jax = ["pyo3", "numpy", "noxpr"]
 noxpr = ["boxcar", "paste", "itertools", "indent_write", "std"]
 shared = []
 serde = ["dep:serde", "smallvec/serde"]
@@ -58,5 +58,3 @@ tracing = "0.1"
 
 [build-dependencies]
 which = "6.0.3"
-pyo3-build-config.version = "0.23.0"
-pyo3-build-config.optional = true

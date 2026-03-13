@@ -5,6 +5,7 @@ use bevy::app::{Plugin, PreUpdate};
 use impeller2::types::LenPacket;
 use impeller2_bbq::*;
 use impeller2_stellar::queue::tcp_connect;
+use impeller2_wkt::StreamId;
 use std::sync::Arc;
 use std::sync::atomic::{self, AtomicU64};
 use std::{net::SocketAddr, time::Duration};
@@ -26,6 +27,11 @@ impl Plugin for TcpImpellerPlugin {
         let stream_id = fastrand::u64(..);
         let status = if let Some(addr) = self.addr {
             app.insert_resource(ConnectionAddr(addr));
+            let (msg_tx, msg_rx, msg_outgoing_rx, msg_incoming_tx) = msg_channels();
+            spawn_msg_tcp_connect(addr, msg_outgoing_rx, msg_incoming_tx);
+            app.insert_resource(msg_tx)
+                .insert_resource(msg_rx)
+                .add_systems(PreUpdate, msg_sink);
             spawn_tcp_connect(
                 addr,
                 outgoing_packet_rx,
@@ -56,6 +62,23 @@ pub fn channels() -> (
     (
         PacketTx(outgoing_packet_tx),
         PacketRx(incoming_packet_rx),
+        outgoing_packet_rx,
+        incoming_packet_tx,
+    )
+}
+
+pub fn msg_channels() -> (
+    MsgPacketTx,
+    MsgPacketRx,
+    mpsc::Receiver<Option<LenPacket>>,
+    AsyncArcQueueTx,
+) {
+    let queue = ArcBBQueue::new_with_storage(BoxedSlice::new(QUEUE_LEN));
+    let (incoming_packet_rx, incoming_packet_tx) = queue.framed_split();
+    let (outgoing_packet_tx, outgoing_packet_rx) = mpsc::channel::<Option<LenPacket>>(4096);
+    (
+        MsgPacketTx(outgoing_packet_tx),
+        MsgPacketRx(incoming_packet_rx),
         outgoing_packet_rx,
         incoming_packet_tx,
     )
@@ -104,6 +127,36 @@ pub fn spawn_tcp_connect(
         }
     });
     ret_connection_status
+}
+
+pub fn spawn_msg_tcp_connect(
+    addr: SocketAddr,
+    mut outgoing_packet_rx: mpsc::Receiver<Option<LenPacket>>,
+    mut incoming_packet_tx: AsyncArcQueueTx,
+) {
+    std::thread::spawn(move || {
+        let _: Result<(), miette::Error> = stellarator::run(|| async move {
+            let stream_id = fastrand::u64(..);
+            loop {
+                match tcp_connect(
+                    addr,
+                    &mut outgoing_packet_rx,
+                    &mut incoming_packet_tx,
+                    stream_id,
+                    &crate::msg_connection_packets,
+                    || {},
+                )
+                .await
+                {
+                    Err(err) => {
+                        bevy::log::trace!(?err, "msg connection ended");
+                        stellarator::sleep(Duration::from_millis(250)).await;
+                    }
+                    Ok(_) => return Ok(()),
+                }
+            }
+        });
+    });
 }
 
 #[repr(u64)]

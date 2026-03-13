@@ -96,6 +96,7 @@ impeller2-cli.path = "../db/cli"
 
 # channels
 flume = "0.11.1"
+crossbeam-channel = "0.5"
 
 # parsing
 jiff = "0.2"
@@ -156,6 +157,10 @@ image.features = ["png"]
 [target.'cfg(not(target_os = "macos"))'.dependencies]
 openh264 = "0.8"
 pic-scale = "0.6"
+
+# unix (headless sensor camera render bridge)
+[target.'cfg(unix)'.dependencies]
+render-bridge.path = "../render-bridge"
 
 # [patch.crates-io]
 # bevy_editor_cam = { path = "../bevy_editor_cam" }

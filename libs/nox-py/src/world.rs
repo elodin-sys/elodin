@@ -45,6 +45,8 @@ pub struct World {
     pub metadata: WorldMetadata,
 }
 
+pub use impeller2_wkt::SensorCameraConfig;
+
 #[derive(Debug, PartialEq, Serialize, Deserialize, Clone)]
 pub struct WorldMetadata {
     pub entity_metadata: HashMap<EntityId, EntityMetadata>,
@@ -57,6 +59,8 @@ pub struct WorldMetadata {
     pub max_tick: u64,
     pub schematic_path: Option<PathBuf>,
     pub schematic: Option<String>,
+    #[serde(default)]
+    pub sensor_cameras: Vec<SensorCameraConfig>,
 }
 
 impl MetadataExt for World {}
@@ -74,6 +78,7 @@ impl Default for WorldMetadata {
             max_tick: u64::MAX,
             schematic: None,
             schematic_path: None,
+            sensor_cameras: Vec::new(),
         }
     }
 }

@@ -61,9 +61,24 @@ pub async fn run_recipe(
         .into_diagnostic()
         .with_context(|| format!("failed to parse s10 recipe from file: {}", path.display()))?;
 
+    // Set the render bridge socket path so both the render-server and
+    // simulation child processes inherit it via the environment.
+    let sock_path = std::env::temp_dir().join(format!("elodin-render-{}", std::process::id()));
+    // SAFETY: set_var is not thread-safe, but this is the only writer of
+    // ELODIN_RENDER_BRIDGE_SOCK; we do not read it in this process. Only
+    // child processes spawned later by recipe.watch() read it. The caller
+    // must ensure run_recipe is not invoked concurrently with other code
+    // that reads this variable.
+    unsafe {
+        std::env::set_var("ELODIN_RENDER_BRIDGE_SOCK", &sock_path);
+    }
+
     recipe
         .watch("sim".to_string(), false, cancel_token.clone())
         .await?;
     cancel_token.cancel();
+
+    // Clean up the socket file.
+    let _ = std::fs::remove_file(&sock_path);
     Ok(())
 }

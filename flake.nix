@@ -73,6 +73,7 @@
         devShells = with shells; {
           inherit elodin;
           default = shells.elodin;
+          run = pkgs.callPackage ./nix/run.nix {};
         };
 
         formatter = pkgs.alejandra;
