@@ -26,13 +26,6 @@
     ...
   }: let
     rustToolchain = p: p.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
-    tracySrc = p:
-      p.fetchFromGitHub {
-        owner = "wolfpld";
-        repo = "tracy";
-        rev = "5479a42ef9346b64e6d1b860ae58aa8abdb0c7f6";
-        hash = "sha256-4J8b+72k+xpeT6KsrkioF1xfWEBsGg2eLRg9iONxP/I=";
-      };
 
     elodinOverlay = gitRev: final: prev: {
       tracy = final.callPackage ./nix/pkgs/tracy.nix {
@@ -44,7 +37,7 @@
           then
             final.callPackage ./nix/pkgs/iree-runtime.nix {
               enableTracing = true;
-              tracySrc = tracySrc final;
+              tracySrc = final.tracy.src;
             }
           else null;
 
