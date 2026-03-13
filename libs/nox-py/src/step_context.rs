@@ -194,7 +194,7 @@ impl StepContext {
         }
 
         let profiling = sensor_camera_probe_logs_enabled();
-        let total_start = Instant::now();
+        let total_start = if profiling { Some(Instant::now()) } else { None };
         let timestamp = Timestamp(self.timestamp.load(Ordering::SeqCst));
 
         // Get or create the persistent render client.
@@ -241,8 +241,8 @@ impl StepContext {
             }
         }
 
-        if profiling {
-            let total_render_client_ms = elodin_db::render_bridge::elapsed_ms(total_start);
+        if let Some(start) = total_start {
+            let total_render_client_ms = elodin_db::render_bridge::elapsed_ms(start);
             tracing::info!(
                 total_render_client_ms,
                 camera_count = camera_names.len(),

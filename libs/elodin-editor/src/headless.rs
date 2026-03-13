@@ -298,7 +298,7 @@ fn headless_sensor_runner(mut app: App) -> AppExit {
         };
 
         let profiling = sensor_camera_probe_logs_enabled();
-        let request_start = Instant::now();
+        let request_start = if profiling { Some(Instant::now()) } else { None };
 
         // Set timestamp for this request.
         app.world_mut().resource_mut::<CurrentTimestamp>().0 = request.timestamp;
@@ -344,7 +344,7 @@ fn headless_sensor_runner(mut app: App) -> AppExit {
             if profiling {
                 match server.respond_batch_with_metrics(request.timestamp, &frames) {
                     Ok(respond_metrics) => {
-                        let total_request_ms = elapsed_ms(request_start);
+                        let total_request_ms = elapsed_ms(request_start.unwrap());
                         tracing::info!(
                             total_request_ms,
                             camera_count = request.camera_names.len(),
