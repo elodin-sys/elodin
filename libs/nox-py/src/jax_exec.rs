@@ -110,13 +110,17 @@ impl JaxExec {
         })
     }
 
-    pub fn invoke_in_place(&mut self, world: &mut World) -> Result<TickTimings, Error> {
+    pub fn invoke_in_place(
+        &mut self,
+        world: &mut World,
+        detailed: bool,
+    ) -> Result<TickTimings, Error> {
         Python::with_gil(|py| {
             let np = py.import("numpy")?;
             let jnp = py.import("jax.numpy")?;
             let jax = py.import("jax")?;
 
-            let h2d_start = Instant::now();
+            let h2d_start = detailed.then(Instant::now);
             let mut mutable_args = Vec::with_capacity(self.mutable_inputs.len());
             for input in &self.mutable_inputs {
                 let col = world
@@ -144,14 +148,18 @@ impl JaxExec {
                 }
             }
             let py_args = PyTuple::new(py, call_args)?;
-            let h2d_upload_ms = h2d_start.elapsed().as_secs_f64() * 1000.0;
+            let h2d_upload_ms = h2d_start
+                .map(|s| s.elapsed().as_secs_f64() * 1000.0)
+                .unwrap_or_default();
 
-            let kernel_start = Instant::now();
+            let kernel_start = detailed.then(Instant::now);
             let result = self.jax_fn.call(py, &py_args, None)?;
             jax.call_method1("block_until_ready", (result.bind(py),))?;
-            let kernel_invoke_ms = kernel_start.elapsed().as_secs_f64() * 1000.0;
+            let kernel_invoke_ms = kernel_start
+                .map(|s| s.elapsed().as_secs_f64() * 1000.0)
+                .unwrap_or_default();
 
-            let d2h_start = Instant::now();
+            let d2h_start = detailed.then(Instant::now);
             if self.output_ids.len() == 1 {
                 copy_output_to_world(py, &np, world, self.output_ids[0], result.bind(py))?;
             } else {
@@ -160,7 +168,9 @@ impl JaxExec {
                     copy_output_to_world(py, &np, world, *id, item.bind(py))?;
                 }
             }
-            let d2h_download_ms = d2h_start.elapsed().as_secs_f64() * 1000.0;
+            let d2h_download_ms = d2h_start
+                .map(|s| s.elapsed().as_secs_f64() * 1000.0)
+                .unwrap_or_default();
 
             Ok(TickTimings {
                 h2d_upload_ms,
@@ -232,21 +242,29 @@ impl JaxWorldExec {
         let start = &mut Instant::now();
 
         if let Some(mut startup_exec) = self.startup_exec.take() {
-            startup_exec.invoke_in_place(&mut self.world)?;
+            startup_exec.invoke_in_place(&mut self.world, self.profiler.detailed_timing)?;
         }
 
-        let timings = self.tick_exec.invoke_in_place(&mut self.world)?;
-        let h2d = Duration::from_secs_f64(timings.h2d_upload_ms / 1000.0);
-        let call_setup = Duration::from_secs_f64(timings.call_setup_ms / 1000.0);
-        let kernel = Duration::from_secs_f64(timings.kernel_invoke_ms / 1000.0);
-        let d2h = Duration::from_secs_f64(timings.d2h_download_ms / 1000.0);
-        self.profiler.copy_to_client.observe_duration(h2d);
-        self.profiler.execute_buffers.observe_duration(kernel);
-        self.profiler.copy_to_host.observe_duration(d2h);
-        self.profiler.h2d_upload.observe_duration(h2d);
-        self.profiler.call_setup.observe_duration(call_setup);
-        self.profiler.kernel_invoke.observe_duration(kernel);
-        self.profiler.d2h_download.observe_duration(d2h);
+        let tick_start = Instant::now();
+        let timings = self
+            .tick_exec
+            .invoke_in_place(&mut self.world, self.profiler.detailed_timing)?;
+        let tick_elapsed = tick_start.elapsed();
+        if self.profiler.detailed_timing {
+            let h2d = Duration::from_secs_f64(timings.h2d_upload_ms / 1000.0);
+            let call_setup = Duration::from_secs_f64(timings.call_setup_ms / 1000.0);
+            let kernel = Duration::from_secs_f64(timings.kernel_invoke_ms / 1000.0);
+            let d2h = Duration::from_secs_f64(timings.d2h_download_ms / 1000.0);
+            self.profiler.copy_to_client.observe_duration(h2d);
+            self.profiler.execute_buffers.observe_duration(kernel);
+            self.profiler.copy_to_host.observe_duration(d2h);
+            self.profiler.h2d_upload.observe_duration(h2d);
+            self.profiler.call_setup.observe_duration(call_setup);
+            self.profiler.kernel_invoke.observe_duration(kernel);
+            self.profiler.d2h_download.observe_duration(d2h);
+        } else {
+            self.profiler.execute_buffers.observe_duration(tick_elapsed);
+        }
 
         *start = Instant::now();
         self.world.advance_tick();

@@ -86,6 +86,8 @@ pub enum Args {
         ticks: usize,
         #[arg(long, default_value = "false")]
         profile: bool,
+        #[arg(long, default_value = "false")]
+        detail: bool,
     },
 }
 
@@ -623,6 +625,7 @@ impl WorldBuilder {
             Args::Bench {
                 ticks,
                 profile: enable_profiling,
+                detail: enable_detail,
             } => {
                 if !enable_profiling {
                     // Standard bench mode - just run and show timing
@@ -639,20 +642,23 @@ impl WorldBuilder {
                         device,
                         iree_flags.clone(),
                     )?;
+                    exec.exec.profiler_mut().detailed_timing = enable_detail;
                     exec.run(py, ticks, true, None)?;
                     let profile = exec.profile();
-                    println!("copy_to_client time:  {:.3} ms", profile["copy_to_client"]);
-                    println!("execute_buffers time: {:.3} ms", profile["execute_buffers"]);
-                    println!("copy_to_host time:    {:.3} ms", profile["copy_to_host"]);
-                    println!("h2d_upload time:      {:.3} ms", profile["h2d_upload"]);
-                    println!("call_setup time:      {:.3} ms", profile["call_setup"]);
-                    println!("kernel_invoke time:   {:.3} ms", profile["kernel_invoke"]);
-                    println!("d2h_download time:    {:.3} ms", profile["d2h_download"]);
-                    println!("add_to_history time:  {:.3} ms", profile["add_to_history"]);
                     println!("= tick time:          {:.3} ms", profile["tick"]);
                     println!("build time:           {:.3} ms", profile["build"]);
                     println!("compile time:         {:.3} ms", profile["compile"]);
                     println!("real_time_factor:     {:.3}", profile["real_time_factor"]);
+                    if enable_detail {
+                        println!("copy_to_client time:  {:.3} ms", profile["copy_to_client"]);
+                        println!("execute_buffers time: {:.3} ms", profile["execute_buffers"]);
+                        println!("copy_to_host time:    {:.3} ms", profile["copy_to_host"]);
+                        println!("h2d_upload time:      {:.3} ms", profile["h2d_upload"]);
+                        println!("call_setup time:      {:.3} ms", profile["call_setup"]);
+                        println!("kernel_invoke time:   {:.3} ms", profile["kernel_invoke"]);
+                        println!("d2h_download time:    {:.3} ms", profile["d2h_download"]);
+                        println!("add_to_history time:  {:.3} ms", profile["add_to_history"]);
+                    }
                     Ok(None)
                 } else {
                     // Profiling mode enabled - run full analysis with DOT graph export
@@ -1173,6 +1179,7 @@ impl WorldBuilder {
                         exec: compiled_exec,
                         db: Box::new(db),
                     };
+                    exec_with_db.exec.profiler_mut().detailed_timing = true;
                     exec_with_db.run(py, ticks, true, None)?;
                     let profile = exec_with_db.profile();
 

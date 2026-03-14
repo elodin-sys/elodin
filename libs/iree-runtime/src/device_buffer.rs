@@ -275,6 +275,149 @@ impl DeviceArena {
         error::check(status)
     }
 
+    pub fn copy_slots_from_views_batched(
+        &self,
+        session: &Session,
+        source_views: &[BufferView],
+    ) -> Result<()> {
+        if source_views.len() != self.slots.len() {
+            return Err(error::Error::invalid_argument(format!(
+                "source_views length {} does not match arena slots {}",
+                source_views.len(),
+                self.slots.len()
+            )));
+        }
+        let mut command_buffer: *mut ffi::iree_hal_command_buffer_t = std::ptr::null_mut();
+        let create_status = unsafe {
+            ffi::iree_hal_command_buffer_create(
+                session.device(),
+                ffi::iree_hal_command_buffer_mode_bits_t_IREE_HAL_COMMAND_BUFFER_MODE_ONE_SHOT.0,
+                ffi::iree_hal_command_category_bits_t_IREE_HAL_COMMAND_CATEGORY_TRANSFER.0,
+                !0u64,
+                0,
+                &mut command_buffer,
+            )
+        };
+        error::check(create_status)?;
+
+        struct CommandBufferGuard(*mut ffi::iree_hal_command_buffer_t);
+        impl Drop for CommandBufferGuard {
+            fn drop(&mut self) {
+                if !self.0.is_null() {
+                    unsafe { ffi::iree_hal_command_buffer_release(self.0) };
+                }
+            }
+        }
+        let command_buffer_guard = CommandBufferGuard(command_buffer);
+
+        let begin_status = unsafe { ffi::iree_hal_command_buffer_begin(command_buffer) };
+        error::check(begin_status)?;
+
+        for (slot, source_view) in self.slots.iter().zip(source_views.iter()) {
+            let source_ref = ffi::iree_hal_buffer_ref_t {
+                buffer: source_view.buffer_ptr(),
+                offset: 0,
+                length: slot.byte_len as ffi::iree_device_size_t,
+                ..Default::default()
+            };
+            let target_ref = ffi::iree_hal_buffer_ref_t {
+                buffer: self.buffer.ptr,
+                offset: slot.offset as ffi::iree_device_size_t,
+                length: slot.byte_len as ffi::iree_device_size_t,
+                ..Default::default()
+            };
+            let copy_status = unsafe {
+                ffi::iree_hal_command_buffer_copy_buffer(
+                    command_buffer,
+                    source_ref,
+                    target_ref,
+                    ffi::iree_hal_copy_flag_bits_t_IREE_HAL_COPY_FLAG_NONE
+                        .0
+                        .into(),
+                )
+            };
+            error::check(copy_status)?;
+        }
+
+        let end_status = unsafe { ffi::iree_hal_command_buffer_end(command_buffer) };
+        error::check(end_status)?;
+
+        let mut semaphore: *mut ffi::iree_hal_semaphore_t = std::ptr::null_mut();
+        let semaphore_create_status = unsafe {
+            ffi::iree_hal_semaphore_create(
+                session.device(),
+                !0u64,
+                0,
+                ffi::iree_hal_semaphore_flag_bits_t_IREE_HAL_SEMAPHORE_FLAG_NONE
+                    .0
+                    .into(),
+                &mut semaphore,
+            )
+        };
+        error::check(semaphore_create_status)?;
+
+        struct SemaphoreGuard(*mut ffi::iree_hal_semaphore_t);
+        impl Drop for SemaphoreGuard {
+            fn drop(&mut self) {
+                if !self.0.is_null() {
+                    unsafe { ffi::iree_hal_semaphore_release(self.0) };
+                }
+            }
+        }
+        let semaphore_guard = SemaphoreGuard(semaphore);
+
+        let mut signal_semaphores = [semaphore];
+        let mut signal_values = [1u64];
+        let wait_list = ffi::iree_hal_semaphore_list_t {
+            count: 0,
+            semaphores: std::ptr::null_mut(),
+            payload_values: std::ptr::null_mut(),
+        };
+        let signal_list = ffi::iree_hal_semaphore_list_t {
+            count: signal_semaphores.len(),
+            semaphores: signal_semaphores.as_mut_ptr(),
+            payload_values: signal_values.as_mut_ptr(),
+        };
+        let binding_table = ffi::iree_hal_buffer_binding_table_t {
+            count: 0,
+            bindings: std::ptr::null(),
+        };
+        let execute_status = unsafe {
+            ffi::iree_hal_device_queue_execute(
+                session.device(),
+                !0u64,
+                wait_list,
+                signal_list,
+                command_buffer,
+                binding_table,
+                ffi::iree_hal_execute_flag_bits_t_IREE_HAL_EXECUTE_FLAG_NONE
+                    .0
+                    .into(),
+            )
+        };
+        error::check(execute_status)?;
+
+        let timeout = ffi::iree_timeout_t {
+            type_: ffi::iree_timeout_type_e_IREE_TIMEOUT_ABSOLUTE,
+            nanos: i64::MAX,
+        };
+        let wait_status = unsafe {
+            ffi::iree_hal_semaphore_wait(
+                semaphore,
+                1,
+                timeout,
+                ffi::iree_hal_wait_flag_bits_e_IREE_HAL_WAIT_FLAG_DEFAULT
+                    .0
+                    .into(),
+            )
+        };
+        error::check(wait_status)?;
+
+        drop(semaphore_guard);
+        drop(command_buffer_guard);
+        Ok(())
+    }
+
     pub fn download_all_into(
         &mut self,
         session: &Session,

@@ -14,6 +14,7 @@ pub struct TickTimings {
 
 #[derive(Default, Clone, Debug)]
 pub struct Profiler {
+    pub detailed_timing: bool,
     pub build: RollingMean,
     pub compile: RollingMean,
     pub copy_to_client: RollingMean,
