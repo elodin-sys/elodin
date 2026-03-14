@@ -155,6 +155,34 @@ fn is_snake_case(s: &str) -> bool {
     b == s
 }
 
+#[derive(Clone, Copy)]
+enum BackendEngine {
+    Iree,
+    Jax,
+}
+
+fn parse_backend_config(
+    requested_backend: &str,
+) -> Result<(BackendEngine, &'static str, bool), Error> {
+    let selected = std::env::var("ELODIN_BACKEND")
+        .unwrap_or_else(|_| requested_backend.to_string())
+        .trim()
+        .to_ascii_lowercase();
+    match selected.as_str() {
+        "iree-cpu" | "iree" | "cpu" | "local-task" | "local-sync" => {
+            Ok((BackendEngine::Iree, "cpu", false))
+        }
+        "iree-gpu" | "gpu" => Ok((BackendEngine::Iree, "auto", false)),
+        "cuda" => Ok((BackendEngine::Iree, "cuda", false)),
+        "metal" => Ok((BackendEngine::Iree, "metal", false)),
+        "jax-cpu" | "jax" => Ok((BackendEngine::Jax, "cpu", false)),
+        "jax-gpu" => Ok((BackendEngine::Jax, "gpu", true)),
+        other => Err(Error::UnknownCommand(format!(
+            "unknown backend '{other}': expected one of 'iree-cpu', 'iree-gpu', 'jax-cpu', 'jax-gpu'"
+        ))),
+    }
+}
+
 #[pymethods]
 impl WorldBuilder {
     #[new]
@@ -367,8 +395,7 @@ impl WorldBuilder {
         interactive = true,
         start_timestamp = None,
         log_level = None,
-        backend = "iree",
-        device = "auto",
+        backend = "iree-cpu",
         iree_flags = None,
     ))]
     pub fn run(
@@ -388,7 +415,6 @@ impl WorldBuilder {
         start_timestamp: Option<i64>,
         log_level: Option<String>,
         backend: &str,
-        device: &str,
         iree_flags: Option<Vec<String>>,
     ) -> Result<Option<String>, Error> {
         let log_level = log_level.as_deref().map(normalize_log_level).transpose()?;
@@ -432,7 +458,6 @@ impl WorldBuilder {
                     default_playback_speed,
                     max_ticks,
                     backend,
-                    device,
                     iree_flags.as_deref().unwrap_or(&[]),
                 )?;
                 let recipes = self.recipes.clone();
@@ -639,7 +664,6 @@ impl WorldBuilder {
                         optimize,
                         db_path,
                         backend,
-                        device,
                         iree_flags.clone(),
                     )?;
                     exec.exec.profiler_mut().detailed_timing = enable_detail;
@@ -710,7 +734,6 @@ impl WorldBuilder {
                         default_playback_speed,
                         max_ticks,
                         backend,
-                        device,
                         iree_flags.as_deref().unwrap_or(&[]),
                     )?;
 
@@ -1221,8 +1244,7 @@ impl WorldBuilder {
         max_ticks = None,
         optimize = false,
         db_path = None,
-        backend = "iree",
-        device = "auto",
+        backend = "iree-cpu",
         iree_flags = None,
     ))]
     pub fn build(
@@ -1236,7 +1258,6 @@ impl WorldBuilder {
         #[allow(unused_variables)] optimize: bool,
         db_path: Option<String>,
         backend: &str,
-        device: &str,
         iree_flags: Option<Vec<String>>,
     ) -> Result<PyExec, Error> {
         let mut exec = self.build_with_backend(
@@ -1247,7 +1268,6 @@ impl WorldBuilder {
             default_playback_speed,
             max_ticks,
             backend,
-            device,
             iree_flags.as_deref().unwrap_or(&[]),
         )?;
         let db_path = match db_path {
@@ -1508,9 +1528,9 @@ impl WorldBuilder {
         default_playback_speed: f64,
         max_ticks: Option<u64>,
         backend: &str,
-        iree_device: &str,
         extra_iree_flags: &[String],
     ) -> Result<WorldExec, Error> {
+        let (engine, iree_device, jax_gpu) = parse_backend_config(backend)?;
         let mut start = time::Instant::now();
         let ts = time::Duration::from_secs_f64(sim_time_step);
         self.world.metadata.sim_time_step = TimeStep(ts);
@@ -1528,14 +1548,14 @@ impl WorldBuilder {
         let world = std::mem::take(&mut self.world);
         let compiled_sys = increment_sim_tick.pipe(sys).compile(&world)?;
 
-        match backend {
-            "jax" => {
-                let tick_exec = JaxExec::new(py, &compiled_sys, &world)?;
+        match engine {
+            BackendEngine::Jax => {
+                let tick_exec = JaxExec::new(py, &compiled_sys, &world, jax_gpu)?;
                 let mut exec = JaxWorldExec::new(world, tick_exec, None);
                 exec.profiler.build.observe(&mut start);
                 Ok(WorldExec::Jax(exec))
             }
-            "iree" => {
+            BackendEngine::Iree => {
                 match compiled_sys.compile_iree_module(py, &world, iree_device, extra_iree_flags) {
                     Ok(result) => {
                         let tick_exec = result.exec;
@@ -1566,8 +1586,8 @@ impl WorldBuilder {
                             }
                             if report.should_suggest_jax_fallback() {
                                 msg.push_str(
-                                "\n\nTo temporarily unblock, set backend=\"jax\" in your w.run() call:\n\n  \
-                                 w.run(system, backend=\"jax\", ...)\n\nThe JAX backend is slower but supports all JAX operations.",
+                                "\n\nTo temporarily unblock, set backend=\"jax-cpu\" in your w.run() call:\n\n  \
+                                 w.run(system, backend=\"jax-cpu\", ...)\n\nThe JAX backend is slower but supports all JAX operations.",
                             );
                             }
                         }
@@ -1579,10 +1599,6 @@ impl WorldBuilder {
                     }
                 }
             }
-            other => Err(Error::UnknownCommand(format!(
-                "unknown backend '{}': expected 'iree' or 'jax'",
-                other
-            ))),
         }
     }
 
@@ -1798,7 +1814,7 @@ impl WorldBuilder {
             };
         }
 
-        let jax_exec = xla_exec.compile_jax_module(py, &[])?;
+        let jax_exec = xla_exec.compile_jax_module(py, &[], None)?;
         let dictionary = dict.into_py_any(py)?;
         let entity_dict = entity_dict.into_py_any(py)?;
         let component_entity_dict = component_entity_dict.into_py_any(py)?;

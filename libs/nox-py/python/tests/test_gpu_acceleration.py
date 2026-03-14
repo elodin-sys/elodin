@@ -49,7 +49,7 @@ def test_iree_cuda_compile_smoke():
     w = el.World()
     w.spawn(A(jnp.array([1.0], dtype=jnp.float32)), "e1")
     try:
-        exec = w.build(step, backend="iree", device="cuda")
+        exec = w.build(step, backend="iree-gpu")
     except RuntimeError as exc:
         msg = str(exc)
         if "missing GPU target in #hal.executable.target" in msg:

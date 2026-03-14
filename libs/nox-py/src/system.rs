@@ -738,6 +738,7 @@ pub trait CompiledSystemExt {
         &self,
         py: Python<'_>,
         donate_argnums: &[usize],
+        backend: Option<&str>,
     ) -> Result<Py<PyAny>, Error>;
 }
 
@@ -756,6 +757,7 @@ impl CompiledSystemExt for CompiledSystem {
         &self,
         py: Python<'_>,
         donate_argnums: &[usize],
+        backend: Option<&str>,
     ) -> Result<Py<PyAny>, Error> {
         let func = noxpr_to_callable(self.computation.func.clone());
 
@@ -766,8 +768,11 @@ os.environ.setdefault(
     '--xla_gpu_triton_gemm_any=True --xla_gpu_enable_latency_hiding_scheduler=true',
 )
 import jax
-def build_expr(func, donate_argnums):
-    res = jax.jit(func, keep_unused=True, donate_argnums=tuple(donate_argnums))
+def build_expr(func, donate_argnums, backend):
+    kwargs = {'keep_unused': True, 'donate_argnums': tuple(donate_argnums)}
+    if backend:
+        kwargs['backend'] = backend
+    res = jax.jit(func, **kwargs)
     return res";
 
         let module = PyModule::new(py, "build_expr")?;
@@ -776,7 +781,7 @@ def build_expr(func, donate_argnums):
         py.run(code_cstr.as_ref(), Some(&globals), None)?;
         let fun: Py<PyAny> = module.getattr("build_expr")?.into();
 
-        let comp = fun.call1(py, (func, donate_argnums.to_vec()))?;
+        let comp = fun.call1(py, (func, donate_argnums.to_vec(), backend.map(str::to_string)))?;
 
         Ok(comp)
     }

@@ -27,6 +27,7 @@ struct MutableInputSlot {
 
 pub struct JaxExec {
     pub metadata: ExecMetadata,
+    cpu_backend: bool,
     jax_fn: PyObject,
     np: PyObject,
     jnp: PyObject,
@@ -46,12 +47,22 @@ impl JaxExec {
         py: Python<'_>,
         compiled_system: &CompiledSystem,
         world: &World,
+        gpu: bool,
     ) -> Result<Self, Error> {
         use crate::system::CompiledSystemExt;
 
         let np = py.import("numpy")?;
         let jnp = py.import("jax.numpy")?;
         let jax = py.import("jax")?;
+        if gpu {
+            let gpu_devices = jax.call_method1("devices", ("gpu",))?;
+            let count: usize = gpu_devices.call_method0("__len__")?.extract()?;
+            if count == 0 {
+                return Err(Error::UnknownCommand(
+                    "backend='jax-gpu' requested but no GPU device is available".to_string(),
+                ));
+            }
+        }
 
         let metadata = ExecMetadata {
             arg_ids: compiled_system.inputs.clone(),
@@ -109,7 +120,11 @@ impl JaxExec {
                 )?;
                 let src = src.call_method1("reshape", (shape.clone(),))?;
                 let host_staging = np.call_method1("array", (src,))?;
-                let arr = jnp.call_method1("array", (host_staging,))?;
+                let arr = if gpu {
+                    jnp.call_method1("array", (host_staging,))?
+                } else {
+                    host_staging
+                };
                 constant_inputs.push(arr.unbind());
                 input_bindings.push(InputBinding::Constant(slot));
             }
@@ -146,10 +161,12 @@ impl JaxExec {
                 InputBinding::Constant(_) => None,
             })
             .collect();
-        let jax_fn = compiled_system.compile_jax_module(py, &donate_argnums)?;
+        let target_backend = if gpu { Some("gpu") } else { Some("cpu") };
+        let jax_fn = compiled_system.compile_jax_module(py, &donate_argnums, target_backend)?;
 
         Ok(Self {
             metadata,
+            cpu_backend: !gpu,
             jax_fn,
             np: np.unbind().into(),
             jnp: jnp.unbind().into(),
@@ -197,22 +214,42 @@ impl JaxExec {
                         let parts = PyTuple::new(py, flat_host_parts)?;
                         np.call_method1("concatenate", (parts,))?
                     };
-                    let flat_device = jnp.call_method1("array", (flat_host,))?;
-                    if self.mutable_inputs.len() == 1 {
-                        let reshaped = flat_device
-                            .call_method1("reshape", (self.mutable_inputs[0].shape.clone(),))?;
-                        mutable_args.push(reshaped.unbind());
-                    } else {
-                        let split_points =
-                            PyTuple::new(py, self.mutable_split_points.iter().copied())?;
-                        let split = jnp.call_method1("split", (flat_device, split_points))?;
-                        let split_items: Vec<PyObject> = split.extract()?;
-                        for (part, input) in split_items.into_iter().zip(self.mutable_inputs.iter())
-                        {
-                            let reshaped = part
-                                .bind(py)
-                                .call_method1("reshape", (input.shape.clone(),))?;
+                    if self.cpu_backend {
+                        if self.mutable_inputs.len() == 1 {
+                            let reshaped = flat_host
+                                .call_method1("reshape", (self.mutable_inputs[0].shape.clone(),))?;
                             mutable_args.push(reshaped.unbind());
+                        } else {
+                            let split_points =
+                                PyTuple::new(py, self.mutable_split_points.iter().copied())?;
+                            let split = np.call_method1("split", (flat_host, split_points))?;
+                            let split_items: Vec<PyObject> = split.extract()?;
+                            for (part, input) in split_items.into_iter().zip(self.mutable_inputs.iter())
+                            {
+                                let reshaped = part
+                                    .bind(py)
+                                    .call_method1("reshape", (input.shape.clone(),))?;
+                                mutable_args.push(reshaped.unbind());
+                            }
+                        }
+                    } else {
+                        let flat_device = jnp.call_method1("array", (flat_host,))?;
+                        if self.mutable_inputs.len() == 1 {
+                            let reshaped = flat_device
+                                .call_method1("reshape", (self.mutable_inputs[0].shape.clone(),))?;
+                            mutable_args.push(reshaped.unbind());
+                        } else {
+                            let split_points =
+                                PyTuple::new(py, self.mutable_split_points.iter().copied())?;
+                            let split = jnp.call_method1("split", (flat_device, split_points))?;
+                            let split_items: Vec<PyObject> = split.extract()?;
+                            for (part, input) in split_items.into_iter().zip(self.mutable_inputs.iter())
+                            {
+                                let reshaped = part
+                                    .bind(py)
+                                    .call_method1("reshape", (input.shape.clone(),))?;
+                                mutable_args.push(reshaped.unbind());
+                            }
                         }
                     }
                 } else {
@@ -226,8 +263,12 @@ impl JaxExec {
                             (PyBytes::new(py, col.column.as_slice()), input.np_dtype),
                         )?;
                         let src = src.call_method1("reshape", (input.shape.clone(),))?;
-                        let dev = jnp.call_method1("array", (src,))?;
-                        mutable_args.push(dev.unbind());
+                        if self.cpu_backend {
+                            mutable_args.push(src.unbind());
+                        } else {
+                            let dev = jnp.call_method1("array", (src,))?;
+                            mutable_args.push(dev.unbind());
+                        }
                     }
                 }
             }

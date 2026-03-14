@@ -491,8 +491,7 @@ class World(WorldBuilder):
         interactive: bool = True,
         start_timestamp: Optional[int] = None,
         log_level: Optional[str] = None,
-        backend: str = "iree",
-        device: str = "auto",
+        backend: str = "iree-cpu",
         iree_flags: Optional[list[str]] = None,
     ):
         current_frame = inspect.currentframe()
@@ -516,7 +515,6 @@ class World(WorldBuilder):
             start_timestamp,
             log_level,
             backend,
-            device,
             iree_flags,
         )
         locals = frame.f_locals
@@ -536,8 +534,7 @@ class World(WorldBuilder):
         max_ticks: Optional[int] = None,
         optimize: bool = False,
         db_path: Optional[str] = None,
-        backend: str = "iree",
-        device: str = "auto",
+        backend: str = "iree-cpu",
         iree_flags: Optional[list[str]] = None,
     ) -> Exec:
         return super().build(
@@ -549,7 +546,6 @@ class World(WorldBuilder):
             optimize,
             db_path,
             backend,
-            device,
             iree_flags,
         )
 

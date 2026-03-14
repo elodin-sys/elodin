@@ -140,7 +140,11 @@ def _detect_cuda_target():
     return None
 
 def _resolve_iree_device(requested_device):
-    selected = os.environ.get('ELODIN_IREE_DEVICE', requested_device or 'auto').strip().lower()
+    selected = (requested_device or 'auto').strip().lower()
+    if selected in ('iree-cpu', 'iree'):
+        selected = 'cpu'
+    elif selected in ('iree-gpu', 'gpu'):
+        selected = 'auto'
     if selected in ('cpu', 'local-task', 'local-sync'):
         return 'cpu', 'local-task'
     if selected == 'cuda':
@@ -370,7 +374,11 @@ def compile_to_vmfb(func, input_arrays, user_extra_flags, system_names, requeste
 
         # When auto mode selects CUDA but the CUDA lowering path is not
         # available, retry on llvm-cpu so default runs still succeed.
-        selected_mode = os.environ.get('ELODIN_IREE_DEVICE', requested_device or 'auto').strip().lower()
+        selected_mode = (requested_device or 'auto').strip().lower()
+        if selected_mode in ('iree-cpu', 'iree'):
+            selected_mode = 'cpu'
+        elif selected_mode in ('iree-gpu', 'gpu'):
+            selected_mode = 'auto'
         if compile_target == 'cuda' and selected_mode == 'auto' and result.returncode != 0:
             if report_dir is None:
                 report_dir = _artifact_dir()
@@ -469,7 +477,7 @@ def compile_to_vmfb(func, input_arrays, user_extra_flags, system_names, requeste
             if report.should_suggest_jax_fallback() {
                 rendered.push_str(
                     "\n\nThis simulation appears to use JAX features not yet supported by IREE.\n\
-                     To temporarily unblock, run with backend=\"jax\" (slower).",
+                     To temporarily unblock, run with backend=\"jax-cpu\" (slower).",
                 );
             }
             Error::IreeCompilationFailed(rendered)
