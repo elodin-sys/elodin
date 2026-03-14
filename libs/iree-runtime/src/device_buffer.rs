@@ -241,16 +241,38 @@ impl DeviceArena {
         self.buffer.upload(session, &self.upload_staging, 0)
     }
 
+    pub fn write_slot(&mut self, index: usize, src: &[u8]) -> Result<()> {
+        self.write_slot_to_staging(index, src)
+    }
+
+    pub fn upload_staging(&self, session: &Session) -> Result<()> {
+        self.buffer.upload(session, &self.upload_staging, 0)
+    }
+
     pub fn copy_slot_from_view(
         &self,
         session: &Session,
         slot_index: usize,
         source_view: &BufferView,
     ) -> Result<()> {
-        let source = source_view.buffer();
         let slot = &self.slots[slot_index];
-        self.buffer
-            .copy_from_buffer(session, &source, 0, slot.offset, slot.byte_len)
+        let timeout = ffi::iree_timeout_t {
+            type_: ffi::iree_timeout_type_e_IREE_TIMEOUT_ABSOLUTE,
+            nanos: i64::MAX,
+        };
+        let status = unsafe {
+            ffi::iree_hal_device_transfer_d2d(
+                session.device(),
+                source_view.buffer_ptr(),
+                0,
+                self.buffer.ptr,
+                slot.offset as ffi::iree_device_size_t,
+                slot.byte_len as ffi::iree_device_size_t,
+                ffi::iree_hal_transfer_buffer_flag_bits_t_IREE_HAL_TRANSFER_BUFFER_FLAG_DEFAULT.0,
+                timeout,
+            )
+        };
+        error::check(status)
     }
 
     pub fn download_all_into(

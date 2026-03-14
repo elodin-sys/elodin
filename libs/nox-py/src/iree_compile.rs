@@ -186,6 +186,7 @@ def compile_to_vmfb(func, input_arrays, user_extra_flags, system_names, requeste
         "--iree-vm-target-extension-f64",
         "--iree-input-demote-f64-to-f32=false",
         "--iree-input-type=stablehlo",
+        "--iree-opt-level=O2",
         "--iree-hal-indirect-command-buffers=false",
     ]
 

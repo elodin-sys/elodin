@@ -164,6 +164,7 @@ impl JaxExec {
 
             Ok(TickTimings {
                 h2d_upload_ms,
+                call_setup_ms: 0.0,
                 kernel_invoke_ms,
                 d2h_download_ms,
             })
@@ -236,12 +237,14 @@ impl JaxWorldExec {
 
         let timings = self.tick_exec.invoke_in_place(&mut self.world)?;
         let h2d = Duration::from_secs_f64(timings.h2d_upload_ms / 1000.0);
+        let call_setup = Duration::from_secs_f64(timings.call_setup_ms / 1000.0);
         let kernel = Duration::from_secs_f64(timings.kernel_invoke_ms / 1000.0);
         let d2h = Duration::from_secs_f64(timings.d2h_download_ms / 1000.0);
         self.profiler.copy_to_client.observe_duration(h2d);
         self.profiler.execute_buffers.observe_duration(kernel);
         self.profiler.copy_to_host.observe_duration(d2h);
         self.profiler.h2d_upload.observe_duration(h2d);
+        self.profiler.call_setup.observe_duration(call_setup);
         self.profiler.kernel_invoke.observe_duration(kernel);
         self.profiler.d2h_download.observe_duration(d2h);
 

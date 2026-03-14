@@ -645,6 +645,7 @@ impl WorldBuilder {
                     println!("execute_buffers time: {:.3} ms", profile["execute_buffers"]);
                     println!("copy_to_host time:    {:.3} ms", profile["copy_to_host"]);
                     println!("h2d_upload time:      {:.3} ms", profile["h2d_upload"]);
+                    println!("call_setup time:      {:.3} ms", profile["call_setup"]);
                     println!("kernel_invoke time:   {:.3} ms", profile["kernel_invoke"]);
                     println!("d2h_download time:    {:.3} ms", profile["d2h_download"]);
                     println!("add_to_history time:  {:.3} ms", profile["add_to_history"]);
@@ -1180,6 +1181,7 @@ impl WorldBuilder {
                     println!("execute_buffers time: {:.3} ms", profile["execute_buffers"]);
                     println!("copy_to_host time:    {:.3} ms", profile["copy_to_host"]);
                     println!("h2d_upload time:      {:.3} ms", profile["h2d_upload"]);
+                    println!("call_setup time:      {:.3} ms", profile["call_setup"]);
                     println!("kernel_invoke time:   {:.3} ms", profile["kernel_invoke"]);
                     println!("d2h_download time:    {:.3} ms", profile["d2h_download"]);
                     println!("build time:           {:.3} ms", profile["build"]);

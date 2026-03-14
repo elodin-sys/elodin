@@ -54,6 +54,7 @@ pub struct IREEExec {
     constant_input_arena: Option<iree_runtime::DeviceArena>,
     mutable_input_arena: Option<iree_runtime::DeviceArena>,
     output_arena: Option<iree_runtime::DeviceArena>,
+    call: iree_runtime::Call,
     session: iree_runtime::Session,
     #[allow(dead_code)]
     instance: iree_runtime::Instance,
@@ -88,6 +89,9 @@ impl IREEExec {
             .map_err(|e| Error::IreeRuntimeError(e.to_string()))?;
         session
             .load_vmfb(vmfb)
+            .map_err(|e| Error::IreeRuntimeError(e.to_string()))?;
+        let call = session
+            .call("module.main")
             .map_err(|e| Error::IreeRuntimeError(e.to_string()))?;
 
         let mut output_ids = Vec::new();
@@ -181,6 +185,7 @@ impl IREEExec {
             constant_input_arena,
             mutable_input_arena,
             output_arena,
+            call,
             session,
             instance,
         })
@@ -189,22 +194,20 @@ impl IREEExec {
     pub fn invoke_in_place(&mut self, world: &mut World) -> Result<TickTimings, Error> {
         let h2d_start = Instant::now();
         if let Some(arena) = &mut self.mutable_input_arena {
-            let mut slices = Vec::with_capacity(self.mutable_input_ids.len());
-            for id in &self.mutable_input_ids {
+            for (slot, id) in self.mutable_input_ids.iter().enumerate() {
                 let col = world.column_by_id(*id).ok_or(Error::ComponentNotFound)?;
-                slices.push(col.column.as_slice());
+                arena
+                    .write_slot(slot, col.column.as_slice())
+                    .map_err(|e| Error::IreeRuntimeError(e.to_string()))?;
             }
             arena
-                .upload_all(&self.session, &slices)
+                .upload_staging(&self.session)
                 .map_err(|e| Error::IreeRuntimeError(e.to_string()))?;
         }
         let h2d_upload_ms = h2d_start.elapsed().as_secs_f64() * 1000.0;
 
-        let kernel_start = Instant::now();
-        let mut call = self
-            .session
-            .call("module.main")
-            .map_err(|e| Error::IreeRuntimeError(e.to_string()))?;
+        let call_setup_start = Instant::now();
+        self.call.reset();
         for binding in &self.input_bindings {
             let view = match binding.arena_kind {
                 InputArenaKind::Constant => self
@@ -218,17 +221,23 @@ impl IREEExec {
                     .ok_or_else(|| Error::IreeRuntimeError("missing mutable arena".into()))?
                     .view(binding.slot),
             };
-            call.push_input(view)
+            self.call
+                .push_input(view)
                 .map_err(|e| Error::IreeRuntimeError(e.to_string()))?;
         }
-        call.invoke()
+        let call_setup_ms = call_setup_start.elapsed().as_secs_f64() * 1000.0;
+
+        let kernel_start = Instant::now();
+        self.call
+            .invoke()
             .map_err(|e| Error::IreeRuntimeError(e.to_string()))?;
         let kernel_invoke_ms = kernel_start.elapsed().as_secs_f64() * 1000.0;
 
         let d2h_start = Instant::now();
         if let Some(arena) = &self.output_arena {
             for slot in 0..arena.len() {
-                let output = call
+                let output = self
+                    .call
                     .pop_output()
                     .map_err(|e| Error::IreeRuntimeError(e.to_string()))?;
                 arena
@@ -237,7 +246,8 @@ impl IREEExec {
             }
         } else {
             for id in &self.output_ids {
-                let output = call
+                let output = self
+                    .call
                     .pop_output()
                     .map_err(|e| Error::IreeRuntimeError(e.to_string()))?;
                 let host = world.host.get_mut(id).ok_or(Error::ComponentNotFound)?;
@@ -247,6 +257,7 @@ impl IREEExec {
             }
             return Ok(TickTimings {
                 h2d_upload_ms,
+                call_setup_ms,
                 kernel_invoke_ms,
                 d2h_download_ms: d2h_start.elapsed().as_secs_f64() * 1000.0,
             });
@@ -265,6 +276,7 @@ impl IREEExec {
         }
         Ok(TickTimings {
             h2d_upload_ms,
+            call_setup_ms,
             kernel_invoke_ms,
             d2h_download_ms: d2h_start.elapsed().as_secs_f64() * 1000.0,
         })
@@ -314,12 +326,14 @@ impl IREEWorldExec {
 
         let timings = self.tick_exec.invoke_in_place(&mut self.world)?;
         let h2d = std::time::Duration::from_secs_f64(timings.h2d_upload_ms / 1000.0);
+        let call_setup = std::time::Duration::from_secs_f64(timings.call_setup_ms / 1000.0);
         let kernel = std::time::Duration::from_secs_f64(timings.kernel_invoke_ms / 1000.0);
         let d2h = std::time::Duration::from_secs_f64(timings.d2h_download_ms / 1000.0);
         self.profiler.copy_to_client.observe_duration(h2d);
         self.profiler.execute_buffers.observe_duration(kernel);
         self.profiler.copy_to_host.observe_duration(d2h);
         self.profiler.h2d_upload.observe_duration(h2d);
+        self.profiler.call_setup.observe_duration(call_setup);
         self.profiler.kernel_invoke.observe_duration(kernel);
         self.profiler.d2h_download.observe_duration(d2h);
 
