@@ -734,7 +734,11 @@ pub trait CompiledSystemExt {
         iree_device: &str,
         extra_iree_flags: &[String],
     ) -> Result<crate::iree_compile::IreeCompileResult, Error>;
-    fn compile_jax_module(&self, py: Python<'_>) -> Result<Py<PyAny>, Error>;
+    fn compile_jax_module(
+        &self,
+        py: Python<'_>,
+        donate_argnums: &[usize],
+    ) -> Result<Py<PyAny>, Error>;
 }
 
 impl CompiledSystemExt for CompiledSystem {
@@ -748,13 +752,22 @@ impl CompiledSystemExt for CompiledSystem {
         crate::iree_compile::compile_iree_module(py, self, world, iree_device, extra_iree_flags)
     }
 
-    fn compile_jax_module(&self, py: Python<'_>) -> Result<Py<PyAny>, Error> {
+    fn compile_jax_module(
+        &self,
+        py: Python<'_>,
+        donate_argnums: &[usize],
+    ) -> Result<Py<PyAny>, Error> {
         let func = noxpr_to_callable(self.computation.func.clone());
 
         let py_code = "
+import os
+os.environ.setdefault(
+    'XLA_FLAGS',
+    '--xla_gpu_triton_gemm_any=True --xla_gpu_enable_latency_hiding_scheduler=true',
+)
 import jax
-def build_expr(func):
-    res = jax.jit(func, keep_unused=True)
+def build_expr(func, donate_argnums):
+    res = jax.jit(func, keep_unused=True, donate_argnums=tuple(donate_argnums))
     return res";
 
         let module = PyModule::new(py, "build_expr")?;
@@ -763,7 +776,7 @@ def build_expr(func):
         py.run(code_cstr.as_ref(), Some(&globals), None)?;
         let fun: Py<PyAny> = module.getattr("build_expr")?.into();
 
-        let comp = fun.call1(py, (func,))?;
+        let comp = fun.call1(py, (func, donate_argnums.to_vec()))?;
 
         Ok(comp)
     }

@@ -1798,7 +1798,7 @@ impl WorldBuilder {
             };
         }
 
-        let jax_exec = xla_exec.compile_jax_module(py)?;
+        let jax_exec = xla_exec.compile_jax_module(py, &[])?;
         let dictionary = dict.into_py_any(py)?;
         let entity_dict = entity_dict.into_py_any(py)?;
         let component_entity_dict = component_entity_dict.into_py_any(py)?;

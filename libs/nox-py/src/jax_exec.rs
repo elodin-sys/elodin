@@ -22,16 +22,23 @@ struct MutableInputSlot {
     component_id: ComponentId,
     shape: Vec<i64>,
     np_dtype: &'static str,
-    host_staging: PyObject,
+    element_count: usize,
 }
 
 pub struct JaxExec {
     pub metadata: ExecMetadata,
     jax_fn: PyObject,
+    np: PyObject,
+    jnp: PyObject,
+    jax: PyObject,
     input_bindings: Vec<InputBinding>,
     constant_inputs: Vec<PyObject>,
     mutable_inputs: Vec<MutableInputSlot>,
+    mutable_split_points: Vec<usize>,
+    mutable_common_dtype: Option<&'static str>,
     output_ids: Vec<ComponentId>,
+    output_byte_offsets: Vec<usize>,
+    output_byte_lengths: Vec<usize>,
 }
 
 impl JaxExec {
@@ -42,9 +49,9 @@ impl JaxExec {
     ) -> Result<Self, Error> {
         use crate::system::CompiledSystemExt;
 
-        let jax_fn = compiled_system.compile_jax_module(py)?;
-        let jnp = py.import("jax.numpy")?;
         let np = py.import("numpy")?;
+        let jnp = py.import("jax.numpy")?;
+        let jax = py.import("jax")?;
 
         let metadata = ExecMetadata {
             arg_ids: compiled_system.inputs.clone(),
@@ -62,6 +69,7 @@ impl JaxExec {
         let mut input_bindings = Vec::new();
         let mut constant_inputs = Vec::new();
         let mut mutable_inputs = Vec::new();
+        let mut mutable_dtypes = Vec::new();
         let mut seen_inputs = HashSet::new();
 
         for id in &metadata.arg_ids {
@@ -74,14 +82,14 @@ impl JaxExec {
             let shape: Vec<i64> = std::iter::once(col.len() as i64)
                 .chain(col.schema.shape().iter().map(|&x| x as i64))
                 .collect();
-
-            let host_staging = np.call_method1("empty", (shape.clone(), np_dtype))?;
-            let src = np.call_method1(
-                "frombuffer",
-                (PyBytes::new(py, col.column.as_slice()), np_dtype),
-            )?;
-            let src = src.call_method1("reshape", (shape.clone(),))?;
-            np.call_method1("copyto", (host_staging.clone(), src))?;
+            let element_count = col.len()
+                * col
+                    .schema
+                    .shape()
+                    .iter()
+                    .map(|&dim| dim as usize)
+                    .product::<usize>()
+                    .max(1);
 
             if output_set.contains(id) {
                 let slot = mutable_inputs.len();
@@ -89,24 +97,71 @@ impl JaxExec {
                     component_id: *id,
                     shape,
                     np_dtype,
-                    host_staging: host_staging.unbind(),
+                    element_count,
                 });
+                mutable_dtypes.push(np_dtype);
                 input_bindings.push(InputBinding::Mutable(slot));
             } else {
                 let slot = constant_inputs.len();
+                let src = np.call_method1(
+                    "frombuffer",
+                    (PyBytes::new(py, col.column.as_slice()), np_dtype),
+                )?;
+                let src = src.call_method1("reshape", (shape.clone(),))?;
+                let host_staging = np.call_method1("array", (src,))?;
                 let arr = jnp.call_method1("array", (host_staging,))?;
                 constant_inputs.push(arr.unbind());
                 input_bindings.push(InputBinding::Constant(slot));
             }
         }
 
+        let mut mutable_split_points = Vec::new();
+        let mut running_elements = 0usize;
+        for (idx, input) in mutable_inputs.iter().enumerate() {
+            running_elements += input.element_count;
+            if idx + 1 != mutable_inputs.len() {
+                mutable_split_points.push(running_elements);
+            }
+        }
+        let mutable_common_dtype = mutable_dtypes
+            .first()
+            .copied()
+            .filter(|dtype| mutable_dtypes.iter().all(|d| d == dtype));
+
+        let mut output_byte_offsets = Vec::new();
+        let mut output_byte_lengths = Vec::new();
+        let mut output_running = 0usize;
+        for id in &output_ids {
+            let host = world.host.get(id).ok_or(Error::ComponentNotFound)?;
+            output_byte_offsets.push(output_running);
+            output_byte_lengths.push(host.buffer.len());
+            output_running += host.buffer.len();
+        }
+
+        let donate_argnums: Vec<usize> = input_bindings
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, binding)| match binding {
+                InputBinding::Mutable(_) => Some(idx),
+                InputBinding::Constant(_) => None,
+            })
+            .collect();
+        let jax_fn = compiled_system.compile_jax_module(py, &donate_argnums)?;
+
         Ok(Self {
             metadata,
             jax_fn,
+            np: np.unbind().into(),
+            jnp: jnp.unbind().into(),
+            jax: jax.unbind().into(),
             input_bindings,
             constant_inputs,
             mutable_inputs,
+            mutable_split_points,
+            mutable_common_dtype,
             output_ids,
+            output_byte_offsets,
+            output_byte_lengths,
         })
     }
 
@@ -116,24 +171,65 @@ impl JaxExec {
         detailed: bool,
     ) -> Result<TickTimings, Error> {
         Python::with_gil(|py| {
-            let np = py.import("numpy")?;
-            let jnp = py.import("jax.numpy")?;
-            let jax = py.import("jax")?;
+            let np = self.np.bind(py);
+            let jnp = self.jnp.bind(py);
+            let jax = self.jax.bind(py);
 
             let h2d_start = detailed.then(Instant::now);
-            let mut mutable_args = Vec::with_capacity(self.mutable_inputs.len());
-            for input in &self.mutable_inputs {
-                let col = world
-                    .column_by_id(input.component_id)
-                    .ok_or(Error::ComponentNotFound)?;
-                let src = np.call_method1(
-                    "frombuffer",
-                    (PyBytes::new(py, col.column.as_slice()), input.np_dtype),
-                )?;
-                let src = src.call_method1("reshape", (input.shape.clone(),))?;
-                np.call_method1("copyto", (input.host_staging.bind(py), src))?;
-                let dev = jnp.call_method1("array", (input.host_staging.bind(py),))?;
-                mutable_args.push(dev.unbind());
+            let mut mutable_args: Vec<PyObject> = Vec::with_capacity(self.mutable_inputs.len());
+            if !self.mutable_inputs.is_empty() {
+                if self.mutable_common_dtype.is_some() {
+                    let mut flat_host_parts = Vec::with_capacity(self.mutable_inputs.len());
+                    for input in &self.mutable_inputs {
+                        let col = world
+                            .column_by_id(input.component_id)
+                            .ok_or(Error::ComponentNotFound)?;
+                        let src = np.call_method1(
+                            "frombuffer",
+                            (PyBytes::new(py, col.column.as_slice()), input.np_dtype),
+                        )?;
+                        let flat = src.call_method1("reshape", (-1,))?;
+                        flat_host_parts.push(flat);
+                    }
+                    let flat_host = if flat_host_parts.len() == 1 {
+                        flat_host_parts.pop().expect("one mutable part exists")
+                    } else {
+                        let parts = PyTuple::new(py, flat_host_parts)?;
+                        np.call_method1("concatenate", (parts,))?
+                    };
+                    let flat_device = jnp.call_method1("array", (flat_host,))?;
+                    if self.mutable_inputs.len() == 1 {
+                        let reshaped = flat_device
+                            .call_method1("reshape", (self.mutable_inputs[0].shape.clone(),))?;
+                        mutable_args.push(reshaped.unbind());
+                    } else {
+                        let split_points =
+                            PyTuple::new(py, self.mutable_split_points.iter().copied())?;
+                        let split = jnp.call_method1("split", (flat_device, split_points))?;
+                        let split_items: Vec<PyObject> = split.extract()?;
+                        for (part, input) in split_items.into_iter().zip(self.mutable_inputs.iter())
+                        {
+                            let reshaped = part
+                                .bind(py)
+                                .call_method1("reshape", (input.shape.clone(),))?;
+                            mutable_args.push(reshaped.unbind());
+                        }
+                    }
+                } else {
+                    // Fallback for mixed dtypes: keep per-input uploads.
+                    for input in &self.mutable_inputs {
+                        let col = world
+                            .column_by_id(input.component_id)
+                            .ok_or(Error::ComponentNotFound)?;
+                        let src = np.call_method1(
+                            "frombuffer",
+                            (PyBytes::new(py, col.column.as_slice()), input.np_dtype),
+                        )?;
+                        let src = src.call_method1("reshape", (input.shape.clone(),))?;
+                        let dev = jnp.call_method1("array", (src,))?;
+                        mutable_args.push(dev.unbind());
+                    }
+                }
             }
 
             let mut call_args = Vec::with_capacity(self.input_bindings.len());
@@ -163,9 +259,29 @@ impl JaxExec {
             if self.output_ids.len() == 1 {
                 copy_output_to_world(py, &np, world, self.output_ids[0], result.bind(py))?;
             } else {
+                let mut output_parts = Vec::with_capacity(self.output_ids.len());
                 for (idx, id) in self.output_ids.iter().enumerate() {
                     let item = result.call_method1(py, "__getitem__", (idx,))?;
-                    copy_output_to_world(py, &np, world, *id, item.bind(py))?;
+                    let flat = item.bind(py).call_method1("reshape", (-1,))?;
+                    output_parts.push(flat);
+                    let _ = id;
+                }
+                let flat_device = if output_parts.len() == 1 {
+                    output_parts.pop().expect("one output part exists")
+                } else {
+                    let parts = PyTuple::new(py, output_parts)?;
+                    jnp.call_method1("concatenate", (parts,))?
+                };
+                let flat_host = np.call_method1("asarray", (flat_device,))?;
+                let bytes_obj = flat_host.call_method1("tobytes", ())?;
+                let bytes: &[u8] = bytes_obj.extract()?;
+                for (idx, id) in self.output_ids.iter().enumerate() {
+                    let host_buf = world.host.get_mut(id).ok_or(Error::ComponentNotFound)?;
+                    let offset = self.output_byte_offsets[idx];
+                    let len = self.output_byte_lengths[idx];
+                    host_buf
+                        .buffer
+                        .copy_from_slice(&bytes[offset..offset + len]);
                 }
             }
             let d2h_download_ms = d2h_start
@@ -184,7 +300,7 @@ impl JaxExec {
 
 fn copy_output_to_world(
     _py: Python<'_>,
-    np: &Bound<'_, PyModule>,
+    np: &Bound<'_, PyAny>,
     world: &mut World,
     id: ComponentId,
     value: &Bound<'_, PyAny>,
