@@ -34,6 +34,7 @@ pub struct IREEExec {
     pub metadata: ExecMetadata,
     pub compile_stats: Option<IreeCompileStats>,
     vmfb: Vec<u8>,
+    device_uri: String,
     session: iree_runtime::Session,
     #[allow(dead_code)]
     instance: iree_runtime::Instance,
@@ -47,12 +48,22 @@ impl IREEExec {
         vmfb: &[u8],
         metadata: ExecMetadata,
         compile_stats: Option<IreeCompileStats>,
+        device_uri: &str,
     ) -> Result<Self, Error> {
         let instance =
             iree_runtime::Instance::new().map_err(|e| Error::IreeRuntimeError(e.to_string()))?;
-        let device = instance
-            .create_device("local-task")
-            .map_err(|e| Error::IreeRuntimeError(e.to_string()))?;
+        let device = match instance.create_device(device_uri) {
+            Ok(device) => device,
+            Err(primary_err) if device_uri != "local-task" => instance
+                .create_device("local-task")
+                .map_err(|fallback_err| {
+                    Error::IreeRuntimeError(format!(
+                        "failed to create requested device '{device_uri}': {primary_err}; \
+                         local-task fallback also failed: {fallback_err}"
+                    ))
+                })?,
+            Err(primary_err) => return Err(Error::IreeRuntimeError(primary_err.to_string())),
+        };
         let session = iree_runtime::Session::new(&instance, &device)
             .map_err(|e| Error::IreeRuntimeError(e.to_string()))?;
         session
@@ -62,6 +73,7 @@ impl IREEExec {
             metadata,
             compile_stats,
             vmfb: vmfb.to_vec(),
+            device_uri: device_uri.to_string(),
             session,
             instance,
         })
@@ -99,7 +111,7 @@ impl IREEExec {
                 .map_err(|e| Error::IreeRuntimeError(e.to_string()))?;
             outputs.push(
                 output
-                    .to_bytes()
+                    .to_bytes(&self.session)
                     .map_err(|e| Error::IreeRuntimeError(e.to_string()))?,
             );
         }
@@ -222,6 +234,7 @@ impl IREEWorldExec {
             &self.tick_exec.vmfb,
             self.tick_exec.metadata.clone(),
             self.tick_exec.compile_stats.clone(),
+            &self.tick_exec.device_uri,
         )
         .expect("failed to fork IREE exec");
         Self {

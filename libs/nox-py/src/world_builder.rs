@@ -366,6 +366,7 @@ impl WorldBuilder {
         start_timestamp = None,
         log_level = None,
         backend = "iree",
+        device = "auto",
         iree_flags = None,
     ))]
     pub fn run(
@@ -385,6 +386,7 @@ impl WorldBuilder {
         start_timestamp: Option<i64>,
         log_level: Option<String>,
         backend: &str,
+        device: &str,
         iree_flags: Option<Vec<String>>,
     ) -> Result<Option<String>, Error> {
         let log_level = log_level.as_deref().map(normalize_log_level).transpose()?;
@@ -428,6 +430,7 @@ impl WorldBuilder {
                     default_playback_speed,
                     max_ticks,
                     backend,
+                    device,
                     iree_flags.as_deref().unwrap_or(&[]),
                 )?;
                 let recipes = self.recipes.clone();
@@ -633,6 +636,7 @@ impl WorldBuilder {
                         optimize,
                         db_path,
                         backend,
+                        device,
                         iree_flags.clone(),
                     )?;
                     exec.run(py, ticks, true, None)?;
@@ -696,6 +700,7 @@ impl WorldBuilder {
                         default_playback_speed,
                         max_ticks,
                         backend,
+                        device,
                         iree_flags.as_deref().unwrap_or(&[]),
                     )?;
 
@@ -1202,6 +1207,7 @@ impl WorldBuilder {
         optimize = false,
         db_path = None,
         backend = "iree",
+        device = "auto",
         iree_flags = None,
     ))]
     pub fn build(
@@ -1215,6 +1221,7 @@ impl WorldBuilder {
         #[allow(unused_variables)] optimize: bool,
         db_path: Option<String>,
         backend: &str,
+        device: &str,
         iree_flags: Option<Vec<String>>,
     ) -> Result<PyExec, Error> {
         let mut exec = self.build_with_backend(
@@ -1225,6 +1232,7 @@ impl WorldBuilder {
             default_playback_speed,
             max_ticks,
             backend,
+            device,
             iree_flags.as_deref().unwrap_or(&[]),
         )?;
         let db_path = match db_path {
@@ -1485,6 +1493,7 @@ impl WorldBuilder {
         default_playback_speed: f64,
         max_ticks: Option<u64>,
         backend: &str,
+        iree_device: &str,
         extra_iree_flags: &[String],
     ) -> Result<WorldExec, Error> {
         let mut start = time::Instant::now();
@@ -1511,42 +1520,50 @@ impl WorldBuilder {
                 exec.profiler.build.observe(&mut start);
                 Ok(WorldExec::Jax(exec))
             }
-            "iree" => match compiled_sys.compile_iree_module(py, &world, extra_iree_flags) {
-                Ok(result) => {
-                    let tick_exec = result.exec;
-                    let mut exec = IREEWorldExec::new(world, tick_exec, None);
-                    exec.profiler.build.observe(&mut start);
-                    Ok(WorldExec::Iree(exec))
-                }
-                Err(iree_err) => {
-                    let diagnosis = self
-                        .diagnose_subsystems(py, &world, &compiled_sys, extra_iree_flags)
-                        .unwrap_or_default();
-                    let err_text = iree_err.to_string();
-                    let mut msg = err_text.clone();
-                    if !err_text.contains("Failure stage:") {
-                        let report = classify_failure(&err_text);
-                        msg = format!(
-                            "{err_text}\n\nFailure stage: {:?}\nFailure class: {:?}",
-                            report.stage, report.classification
-                        );
-                        if !report.suggestion.is_empty() {
-                            msg.push_str(&format!("\n{}", report.suggestion));
-                        }
-                        if report.should_suggest_jax_fallback() {
-                            msg.push_str(
+            "iree" => {
+                match compiled_sys.compile_iree_module(py, &world, iree_device, extra_iree_flags) {
+                    Ok(result) => {
+                        let tick_exec = result.exec;
+                        let mut exec = IREEWorldExec::new(world, tick_exec, None);
+                        exec.profiler.build.observe(&mut start);
+                        Ok(WorldExec::Iree(exec))
+                    }
+                    Err(iree_err) => {
+                        let diagnosis = self
+                            .diagnose_subsystems(
+                                py,
+                                &world,
+                                &compiled_sys,
+                                iree_device,
+                                extra_iree_flags,
+                            )
+                            .unwrap_or_default();
+                        let err_text = iree_err.to_string();
+                        let mut msg = err_text.clone();
+                        if !err_text.contains("Failure stage:") {
+                            let report = classify_failure(&err_text);
+                            msg = format!(
+                                "{err_text}\n\nFailure stage: {:?}\nFailure class: {:?}",
+                                report.stage, report.classification
+                            );
+                            if !report.suggestion.is_empty() {
+                                msg.push_str(&format!("\n{}", report.suggestion));
+                            }
+                            if report.should_suggest_jax_fallback() {
+                                msg.push_str(
                                 "\n\nTo temporarily unblock, set backend=\"jax\" in your w.run() call:\n\n  \
                                  w.run(system, backend=\"jax\", ...)\n\nThe JAX backend is slower but supports all JAX operations.",
                             );
+                            }
                         }
+                        if !diagnosis.is_empty() {
+                            msg.push_str("\n\n=== Per-System IREE Compatibility ===\n");
+                            msg.push_str(&diagnosis);
+                        }
+                        Err(Error::IreeCompilationFailed(msg))
                     }
-                    if !diagnosis.is_empty() {
-                        msg.push_str("\n\n=== Per-System IREE Compatibility ===\n");
-                        msg.push_str(&diagnosis);
-                    }
-                    Err(Error::IreeCompilationFailed(msg))
                 }
-            },
+            }
             other => Err(Error::UnknownCommand(format!(
                 "unknown backend '{}': expected 'iree' or 'jax'",
                 other
@@ -1559,6 +1576,7 @@ impl WorldBuilder {
         py: Python<'_>,
         world: &World,
         compiled_sys: &crate::system::CompiledSystem,
+        iree_device: &str,
         extra_iree_flags: &[String],
     ) -> Result<String, Error> {
         fn normalize_system_name(raw: &str) -> String {
@@ -1591,7 +1609,7 @@ impl WorldBuilder {
             if !seen.insert(name.clone()) {
                 continue;
             }
-            match subsystem.compile_iree_module(py, world, extra_iree_flags) {
+            match subsystem.compile_iree_module(py, world, iree_device, extra_iree_flags) {
                 Ok(_) => out.push_str(&format!("[OK]   {name}\n")),
                 Err(err) => {
                     let err_text = err.to_string();

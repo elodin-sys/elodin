@@ -731,6 +731,7 @@ pub trait CompiledSystemExt {
         &self,
         py: Python<'_>,
         world: &World,
+        iree_device: &str,
         extra_iree_flags: &[String],
     ) -> Result<crate::iree_compile::IreeCompileResult, Error>;
     fn compile_jax_module(&self, py: Python<'_>) -> Result<Py<PyAny>, Error>;
@@ -741,9 +742,10 @@ impl CompiledSystemExt for CompiledSystem {
         &self,
         py: Python<'_>,
         world: &World,
+        iree_device: &str,
         extra_iree_flags: &[String],
     ) -> Result<crate::iree_compile::IreeCompileResult, Error> {
-        crate::iree_compile::compile_iree_module(py, self, world, extra_iree_flags)
+        crate::iree_compile::compile_iree_module(py, self, world, iree_device, extra_iree_flags)
     }
 
     fn compile_jax_module(&self, py: Python<'_>) -> Result<Py<PyAny>, Error> {

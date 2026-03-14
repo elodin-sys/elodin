@@ -25,7 +25,8 @@ impl BufferView {
         let params = ffi::iree_hal_buffer_params_t {
             usage: ffi::iree_hal_buffer_usage_bits_t_IREE_HAL_BUFFER_USAGE_DEFAULT.0,
             access: 0,
-            type_: ffi::iree_hal_memory_type_bits_t_IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL.0,
+            type_: ffi::iree_hal_memory_type_bits_t_IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL.0
+                | ffi::iree_hal_memory_type_bits_t_IREE_HAL_MEMORY_TYPE_HOST_VISIBLE.0,
             queue_affinity: 0,
             min_alignment: 0,
         };
@@ -49,17 +50,24 @@ impl BufferView {
         Ok(Self { ptr: view })
     }
 
-    pub fn to_bytes(&self) -> Result<Vec<u8>> {
+    pub fn to_bytes(&self, session: &Session) -> Result<Vec<u8>> {
         let byte_length = unsafe { ffi::iree_hal_buffer_view_byte_length(self.ptr) };
         let buffer = unsafe { ffi::iree_hal_buffer_view_buffer(self.ptr) };
 
         let mut bytes = vec![0u8; byte_length as usize];
+        let timeout = ffi::iree_timeout_t {
+            type_: ffi::iree_timeout_type_e_IREE_TIMEOUT_ABSOLUTE,
+            nanos: i64::MAX,
+        };
         let status = unsafe {
-            ffi::iree_hal_buffer_map_read(
+            ffi::iree_hal_device_transfer_d2h(
+                session.device(),
                 buffer,
                 0,
                 bytes.as_mut_ptr() as *mut std::ffi::c_void,
                 byte_length,
+                ffi::iree_hal_transfer_buffer_flag_bits_t_IREE_HAL_TRANSFER_BUFFER_FLAG_DEFAULT.0,
+                timeout,
             )
         };
         error::check(status)?;
