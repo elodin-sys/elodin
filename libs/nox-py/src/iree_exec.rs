@@ -6,7 +6,7 @@ use impeller2::types::ComponentId;
 use crate::error::Error;
 use crate::exec::ExecMetadata;
 use crate::iree_compile::IreeCompileStats;
-use crate::profile::Profiler;
+use crate::profile::{Profiler, TickTimings};
 use crate::utils::SchemaExt;
 use crate::world::World;
 
@@ -186,7 +186,8 @@ impl IREEExec {
         })
     }
 
-    pub fn invoke_in_place(&mut self, world: &mut World) -> Result<(), Error> {
+    pub fn invoke_in_place(&mut self, world: &mut World) -> Result<TickTimings, Error> {
+        let h2d_start = Instant::now();
         if let Some(arena) = &mut self.mutable_input_arena {
             let mut slices = Vec::with_capacity(self.mutable_input_ids.len());
             for id in &self.mutable_input_ids {
@@ -197,7 +198,9 @@ impl IREEExec {
                 .upload_all(&self.session, &slices)
                 .map_err(|e| Error::IreeRuntimeError(e.to_string()))?;
         }
+        let h2d_upload_ms = h2d_start.elapsed().as_secs_f64() * 1000.0;
 
+        let kernel_start = Instant::now();
         let mut call = self
             .session
             .call("module.main")
@@ -220,7 +223,9 @@ impl IREEExec {
         }
         call.invoke()
             .map_err(|e| Error::IreeRuntimeError(e.to_string()))?;
+        let kernel_invoke_ms = kernel_start.elapsed().as_secs_f64() * 1000.0;
 
+        let d2h_start = Instant::now();
         if let Some(arena) = &self.output_arena {
             for slot in 0..arena.len() {
                 let output = call
@@ -240,7 +245,11 @@ impl IREEExec {
                     .download_into(&self.session, &mut host.buffer)
                     .map_err(|e| Error::IreeRuntimeError(e.to_string()))?;
             }
-            return Ok(());
+            return Ok(TickTimings {
+                h2d_upload_ms,
+                kernel_invoke_ms,
+                d2h_download_ms: d2h_start.elapsed().as_secs_f64() * 1000.0,
+            });
         }
 
         if let Some(arena) = &mut self.output_arena {
@@ -254,7 +263,11 @@ impl IREEExec {
                     .map_err(|e| Error::IreeRuntimeError(e.to_string()))?;
             }
         }
-        Ok(())
+        Ok(TickTimings {
+            h2d_upload_ms,
+            kernel_invoke_ms,
+            d2h_download_ms: d2h_start.elapsed().as_secs_f64() * 1000.0,
+        })
     }
 }
 
@@ -299,9 +312,18 @@ impl IREEWorldExec {
             startup_exec.invoke_in_place(&mut self.world)?;
         }
 
-        self.tick_exec.invoke_in_place(&mut self.world)?;
-        self.profiler.execute_buffers.observe(start);
+        let timings = self.tick_exec.invoke_in_place(&mut self.world)?;
+        let h2d = std::time::Duration::from_secs_f64(timings.h2d_upload_ms / 1000.0);
+        let kernel = std::time::Duration::from_secs_f64(timings.kernel_invoke_ms / 1000.0);
+        let d2h = std::time::Duration::from_secs_f64(timings.d2h_download_ms / 1000.0);
+        self.profiler.copy_to_client.observe_duration(h2d);
+        self.profiler.execute_buffers.observe_duration(kernel);
+        self.profiler.copy_to_host.observe_duration(d2h);
+        self.profiler.h2d_upload.observe_duration(h2d);
+        self.profiler.kernel_invoke.observe_duration(kernel);
+        self.profiler.d2h_download.observe_duration(d2h);
 
+        *start = Instant::now();
         self.world.advance_tick();
         self.profiler.add_to_history.observe(start);
         Ok(())

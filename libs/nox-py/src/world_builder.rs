@@ -644,6 +644,9 @@ impl WorldBuilder {
                     println!("copy_to_client time:  {:.3} ms", profile["copy_to_client"]);
                     println!("execute_buffers time: {:.3} ms", profile["execute_buffers"]);
                     println!("copy_to_host time:    {:.3} ms", profile["copy_to_host"]);
+                    println!("h2d_upload time:      {:.3} ms", profile["h2d_upload"]);
+                    println!("kernel_invoke time:   {:.3} ms", profile["kernel_invoke"]);
+                    println!("d2h_download time:    {:.3} ms", profile["d2h_download"]);
                     println!("add_to_history time:  {:.3} ms", profile["add_to_history"]);
                     println!("= tick time:          {:.3} ms", profile["tick"]);
                     println!("build time:           {:.3} ms", profile["build"]);
@@ -1176,6 +1179,9 @@ impl WorldBuilder {
                     println!("copy_to_client time:  {:.3} ms", profile["copy_to_client"]);
                     println!("execute_buffers time: {:.3} ms", profile["execute_buffers"]);
                     println!("copy_to_host time:    {:.3} ms", profile["copy_to_host"]);
+                    println!("h2d_upload time:      {:.3} ms", profile["h2d_upload"]);
+                    println!("kernel_invoke time:   {:.3} ms", profile["kernel_invoke"]);
+                    println!("d2h_download time:    {:.3} ms", profile["d2h_download"]);
                     println!("build time:           {:.3} ms", profile["build"]);
                     println!("compile time:         {:.3} ms", profile["compile"]);
                     println!("real_time_factor:     {:.3}", profile["real_time_factor"]);
@@ -1515,7 +1521,7 @@ impl WorldBuilder {
 
         match backend {
             "jax" => {
-                let tick_exec = JaxExec::new(py, &compiled_sys)?;
+                let tick_exec = JaxExec::new(py, &compiled_sys, &world)?;
                 let mut exec = JaxWorldExec::new(world, tick_exec, None);
                 exec.profiler.build.observe(&mut start);
                 Ok(WorldExec::Jax(exec))
