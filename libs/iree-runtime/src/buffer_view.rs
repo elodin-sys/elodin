@@ -1,6 +1,8 @@
+use crate::DeviceBuffer;
 use crate::element_type::ElementType;
 use crate::error::{self, Result};
 use crate::ffi;
+use crate::ffi::iree_hal_transfer_buffer_flag_bits_t_IREE_HAL_TRANSFER_BUFFER_FLAG_DEFAULT;
 use crate::session::Session;
 
 pub struct BufferView {
@@ -52,9 +54,20 @@ impl BufferView {
 
     pub fn to_bytes(&self, session: &Session) -> Result<Vec<u8>> {
         let byte_length = unsafe { ffi::iree_hal_buffer_view_byte_length(self.ptr) };
-        let buffer = unsafe { ffi::iree_hal_buffer_view_buffer(self.ptr) };
-
         let mut bytes = vec![0u8; byte_length as usize];
+        self.download_into(session, &mut bytes)?;
+        Ok(bytes)
+    }
+
+    pub fn download_into(&self, session: &Session, target: &mut [u8]) -> Result<()> {
+        let byte_length = self.byte_length();
+        if target.len() != byte_length {
+            return Err(error::Error::invalid_argument(format!(
+                "target length {} does not match view byte length {}",
+                target.len(),
+                byte_length
+            )));
+        }
         let timeout = ffi::iree_timeout_t {
             type_: ffi::iree_timeout_type_e_IREE_TIMEOUT_ABSOLUTE,
             nanos: i64::MAX,
@@ -62,17 +75,29 @@ impl BufferView {
         let status = unsafe {
             ffi::iree_hal_device_transfer_d2h(
                 session.device(),
-                buffer,
+                self.buffer_ptr(),
                 0,
-                bytes.as_mut_ptr() as *mut std::ffi::c_void,
-                byte_length,
-                ffi::iree_hal_transfer_buffer_flag_bits_t_IREE_HAL_TRANSFER_BUFFER_FLAG_DEFAULT.0,
+                target.as_mut_ptr() as *mut std::ffi::c_void,
+                target.len() as ffi::iree_device_size_t,
+                iree_hal_transfer_buffer_flag_bits_t_IREE_HAL_TRANSFER_BUFFER_FLAG_DEFAULT.0,
                 timeout,
             )
         };
-        error::check(status)?;
+        error::check(status)
+    }
 
-        Ok(bytes)
+    pub fn byte_length(&self) -> usize {
+        unsafe { ffi::iree_hal_buffer_view_byte_length(self.ptr) as usize }
+    }
+
+    pub fn buffer(&self) -> DeviceBuffer {
+        let ptr = self.buffer_ptr();
+        unsafe { ffi::iree_hal_buffer_retain(ptr) };
+        DeviceBuffer { ptr }
+    }
+
+    pub(crate) fn buffer_ptr(&self) -> *mut ffi::iree_hal_buffer_t {
+        unsafe { ffi::iree_hal_buffer_view_buffer(self.ptr) }
     }
 
     pub fn shape(&self) -> Vec<i64> {

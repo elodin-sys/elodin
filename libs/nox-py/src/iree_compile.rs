@@ -515,7 +515,7 @@ def compile_to_vmfb(func, input_arrays, user_extra_flags, system_names, requeste
         arg_ids: compiled_system.inputs.clone(),
         ret_ids: compiled_system.outputs.clone(),
     };
-    let exec = IREEExec::new(&vmfb, metadata, Some(stats.clone()), &runtime_device)
+    let exec = IREEExec::new(&vmfb, metadata, Some(stats.clone()), &runtime_device, world)
         .map_err(|e| Error::IreeCompilationFailed(format!("stage=vmfb_load\n{e}")))?;
 
     let report = DiagnosticReport {
