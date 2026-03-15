@@ -12,7 +12,6 @@
   zstd,
   gnused,
   cudaPackages,
-  darwin,
   enableCuda ? false,
   enableMetal ? false,
   enableTracing ? false,
@@ -107,10 +106,6 @@ in
       ++ lib.optionals (enableCuda && stdenv.isLinux) [
         cudaPackages.cuda_cudart
         cudaPackages.cuda_nvcc
-      ]
-      ++ lib.optionals (enableMetal && stdenv.isDarwin) [
-        darwin.apple_sdk.frameworks.Metal
-        darwin.apple_sdk.frameworks.Foundation
       ];
 
     # Tracy's capture server code triggers _FORTIFY_SOURCE buffer overflow
