@@ -169,7 +169,9 @@ fn parse_backend_config(
         .trim()
         .to_ascii_lowercase();
     match selected.as_str() {
-        "iree-cpu" | "iree" | "cpu" | "local-sync" => Ok((BackendEngine::Iree, "local-sync", false)),
+        "iree-cpu" | "iree" | "cpu" | "local-sync" => {
+            Ok((BackendEngine::Iree, "local-sync", false))
+        }
         "local-task" => Ok((BackendEngine::Iree, "local-task", false)),
         "iree-gpu" | "gpu" => Ok((BackendEngine::Iree, "auto", false)),
         "cuda" => Ok((BackendEngine::Iree, "cuda", false)),
