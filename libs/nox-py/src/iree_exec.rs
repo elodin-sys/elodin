@@ -179,23 +179,31 @@ impl IREEExec {
         let d2h_start = detailed.then(Instant::now);
         if let Some(arena) = &self.output_arena {
             self.output_views_scratch.clear();
-            self.output_views_scratch.reserve(arena.len());
-            for _slot in 0..arena.len() {
+            self.output_views_scratch.reserve(self.output_ids.len());
+            let mut seen_outputs = HashSet::new();
+            for ret_id in &self.metadata.ret_ids {
                 let output = self
                     .call
                     .pop_output()
                     .map_err(|e| Error::IreeRuntimeError(e.to_string()))?;
-                self.output_views_scratch.push(output);
+                if seen_outputs.insert(*ret_id) {
+                    self.output_views_scratch.push(output);
+                }
             }
             arena
                 .copy_slots_from_views_batched(&self.session, &self.output_views_scratch)
                 .map_err(|e| Error::IreeRuntimeError(e.to_string()))?;
         } else {
-            for id in &self.output_ids {
+            let mut seen_outputs = HashSet::new();
+            for ret_id in &self.metadata.ret_ids {
                 let output = self
                     .call
                     .pop_output()
                     .map_err(|e| Error::IreeRuntimeError(e.to_string()))?;
+                if !seen_outputs.insert(*ret_id) {
+                    continue;
+                }
+                let id = ret_id;
                 let host = world.host.get_mut(id).ok_or(Error::ComponentNotFound)?;
                 output
                     .download_into(&self.session, &mut host.buffer)

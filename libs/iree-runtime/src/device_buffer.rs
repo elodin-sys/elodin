@@ -346,7 +346,7 @@ impl DeviceArena {
         let semaphore_create_status = unsafe {
             ffi::iree_hal_semaphore_create(
                 session.device(),
-                !0u64,
+                0u64,
                 0,
                 ffi::iree_hal_semaphore_flag_bits_t_IREE_HAL_SEMAPHORE_FLAG_NONE
                     .0
