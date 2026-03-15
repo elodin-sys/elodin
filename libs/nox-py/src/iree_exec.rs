@@ -31,28 +31,14 @@ fn nox_to_iree_element_type(ty: nox::ElementType) -> Result<iree_runtime::Elemen
     }
 }
 
-#[derive(Clone, Copy)]
-enum InputArenaKind {
-    Constant,
-    Mutable,
-}
-
-#[derive(Clone, Copy)]
-struct InputBinding {
-    arena_kind: InputArenaKind,
-    slot: usize,
-}
-
 pub struct IREEExec {
     pub metadata: ExecMetadata,
     pub compile_stats: Option<IreeCompileStats>,
     vmfb: Vec<u8>,
     device_uri: String,
-    mutable_input_ids: Vec<ComponentId>,
+    input_ids: Vec<ComponentId>,
     output_ids: Vec<ComponentId>,
-    input_bindings: Vec<InputBinding>,
-    constant_input_arena: Option<iree_runtime::DeviceArena>,
-    mutable_input_arena: Option<iree_runtime::DeviceArena>,
+    input_arena: Option<iree_runtime::DeviceArena>,
     output_arena: Option<iree_runtime::DeviceArena>,
     output_views_scratch: Vec<iree_runtime::BufferView>,
     call: iree_runtime::Call,
@@ -102,62 +88,23 @@ impl IREEExec {
                 output_ids.push(*id);
             }
         }
-        let output_set: HashSet<ComponentId> = output_ids.iter().copied().collect();
-
-        let mut input_bindings = Vec::new();
-        let mut mutable_input_ids = Vec::new();
-        let mut const_specs = Vec::new();
-        let mut mutable_specs = Vec::new();
-        let mut const_ids = Vec::new();
+        let mut input_ids = Vec::new();
+        let mut input_specs = Vec::new();
         let mut seen_inputs = HashSet::new();
         for id in &metadata.arg_ids {
             if !seen_inputs.insert(*id) {
                 continue;
             }
             let spec = build_buffer_spec(world, *id)?;
-            if output_set.contains(id) {
-                let slot = mutable_specs.len();
-                mutable_specs.push(spec);
-                mutable_input_ids.push(*id);
-                input_bindings.push(InputBinding {
-                    arena_kind: InputArenaKind::Mutable,
-                    slot,
-                });
-            } else {
-                let slot = const_specs.len();
-                const_specs.push(spec);
-                const_ids.push(*id);
-                input_bindings.push(InputBinding {
-                    arena_kind: InputArenaKind::Constant,
-                    slot,
-                });
-            }
+            input_specs.push(spec);
+            input_ids.push(*id);
         }
 
-        let mut constant_input_arena = if const_specs.is_empty() {
+        let input_arena = if input_specs.is_empty() {
             None
         } else {
             Some(
-                iree_runtime::DeviceArena::new(&session, &const_specs)
-                    .map_err(|e| Error::IreeRuntimeError(e.to_string()))?,
-            )
-        };
-        if let Some(arena) = &mut constant_input_arena {
-            let mut slices = Vec::with_capacity(const_ids.len());
-            for id in &const_ids {
-                let col = world.column_by_id(*id).ok_or(Error::ComponentNotFound)?;
-                slices.push(col.column.as_slice());
-            }
-            arena
-                .upload_all(&session, &slices)
-                .map_err(|e| Error::IreeRuntimeError(e.to_string()))?;
-        }
-
-        let mutable_input_arena = if mutable_specs.is_empty() {
-            None
-        } else {
-            Some(
-                iree_runtime::DeviceArena::new(&session, &mutable_specs)
+                iree_runtime::DeviceArena::new(&session, &input_specs)
                     .map_err(|e| Error::IreeRuntimeError(e.to_string()))?,
             )
         };
@@ -180,11 +127,9 @@ impl IREEExec {
             compile_stats,
             vmfb: vmfb.to_vec(),
             device_uri: device_uri.to_string(),
-            mutable_input_ids,
+            input_ids,
             output_ids,
-            input_bindings,
-            constant_input_arena,
-            mutable_input_arena,
+            input_arena,
             output_arena,
             output_views_scratch: Vec::new(),
             call,
@@ -199,8 +144,8 @@ impl IREEExec {
         detailed: bool,
     ) -> Result<TickTimings, Error> {
         let h2d_start = detailed.then(Instant::now);
-        if let Some(arena) = &mut self.mutable_input_arena {
-            for (slot, id) in self.mutable_input_ids.iter().enumerate() {
+        if let Some(arena) = &mut self.input_arena {
+            for (slot, id) in self.input_ids.iter().enumerate() {
                 let col = world.column_by_id(*id).ok_or(Error::ComponentNotFound)?;
                 arena
                     .write_slot(slot, col.column.as_slice())
@@ -216,19 +161,12 @@ impl IREEExec {
 
         let call_setup_start = detailed.then(Instant::now);
         self.call.reset();
-        for binding in &self.input_bindings {
-            let view = match binding.arena_kind {
-                InputArenaKind::Constant => self
-                    .constant_input_arena
-                    .as_ref()
-                    .ok_or_else(|| Error::IreeRuntimeError("missing constant arena".into()))?
-                    .view(binding.slot),
-                InputArenaKind::Mutable => self
-                    .mutable_input_arena
-                    .as_ref()
-                    .ok_or_else(|| Error::IreeRuntimeError("missing mutable arena".into()))?
-                    .view(binding.slot),
-            };
+        for slot in 0..self.input_ids.len() {
+            let view = self
+                .input_arena
+                .as_ref()
+                .ok_or_else(|| Error::IreeRuntimeError("missing input arena".into()))?
+                .view(slot);
             self.call
                 .push_input(view)
                 .map_err(|e| Error::IreeRuntimeError(e.to_string()))?;
