@@ -60,18 +60,11 @@ impl IREEExec {
     ) -> Result<Self, Error> {
         let instance =
             iree_runtime::Instance::new().map_err(|e| Error::IreeRuntimeError(e.to_string()))?;
-        let device = match instance.create_device(device_uri) {
-            Ok(device) => device,
-            Err(primary_err) if device_uri != "local-task" => instance
-                .create_device("local-task")
-                .map_err(|fallback_err| {
-                    Error::IreeRuntimeError(format!(
-                        "failed to create requested device '{device_uri}': {primary_err}; \
-                         local-task fallback also failed: {fallback_err}"
-                    ))
-                })?,
-            Err(primary_err) => return Err(Error::IreeRuntimeError(primary_err.to_string())),
-        };
+        let device = instance.create_device(device_uri).map_err(|err| {
+            Error::IreeRuntimeError(format!(
+                "failed to create requested IREE device '{device_uri}': {err}"
+            ))
+        })?;
         let session = iree_runtime::Session::new(&instance, &device)
             .map_err(|e| Error::IreeRuntimeError(e.to_string()))?;
         session
