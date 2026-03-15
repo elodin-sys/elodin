@@ -145,7 +145,9 @@ def _resolve_iree_device(requested_device):
         selected = 'cpu'
     elif selected in ('iree-gpu', 'gpu'):
         selected = 'auto'
-    if selected in ('cpu', 'local-task', 'local-sync'):
+    if selected in ('cpu', 'local-sync'):
+        return 'cpu', 'local-sync'
+    if selected == 'local-task':
         return 'cpu', 'local-task'
     if selected == 'cuda':
         return 'cuda', 'cuda'
