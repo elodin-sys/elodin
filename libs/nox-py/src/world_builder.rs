@@ -86,6 +86,8 @@ pub enum Args {
         ticks: usize,
         #[arg(long, default_value = "false")]
         profile: bool,
+        #[arg(long, default_value = "false")]
+        detail: bool,
     },
 }
 
@@ -151,6 +153,33 @@ fn is_snake_case(s: &str) -> bool {
         .without_boundaries(&convert_case::Boundary::digits())
         .to_case(convert_case::Case::Snake);
     b == s
+}
+
+#[derive(Clone, Copy)]
+enum BackendEngine {
+    Iree,
+    Jax,
+}
+
+fn parse_backend_config(
+    requested_backend: &str,
+) -> Result<(BackendEngine, &'static str, bool), Error> {
+    let selected = std::env::var("ELODIN_BACKEND")
+        .unwrap_or_else(|_| requested_backend.to_string())
+        .trim()
+        .to_ascii_lowercase();
+    match selected.as_str() {
+        "iree-cpu" | "iree" | "cpu" | "local-sync" => Ok((BackendEngine::Iree, "local-sync", false)),
+        "local-task" => Ok((BackendEngine::Iree, "local-task", false)),
+        "iree-gpu" | "gpu" => Ok((BackendEngine::Iree, "auto", false)),
+        "cuda" => Ok((BackendEngine::Iree, "cuda", false)),
+        "metal" => Ok((BackendEngine::Iree, "metal", false)),
+        "jax-cpu" | "jax" => Ok((BackendEngine::Jax, "cpu", false)),
+        "jax-gpu" => Ok((BackendEngine::Jax, "gpu", true)),
+        other => Err(Error::UnknownCommand(format!(
+            "unknown backend '{other}': expected one of 'iree-cpu', 'iree-gpu', 'local-task', 'local-sync', 'jax-cpu', 'jax-gpu'"
+        ))),
+    }
 }
 
 #[pymethods]
@@ -365,7 +394,7 @@ impl WorldBuilder {
         interactive = true,
         start_timestamp = None,
         log_level = None,
-        backend = "iree",
+        backend = "iree-cpu",
         iree_flags = None,
     ))]
     pub fn run(
@@ -620,6 +649,7 @@ impl WorldBuilder {
             Args::Bench {
                 ticks,
                 profile: enable_profiling,
+                detail: enable_detail,
             } => {
                 if !enable_profiling {
                     // Standard bench mode - just run and show timing
@@ -635,16 +665,23 @@ impl WorldBuilder {
                         backend,
                         iree_flags.clone(),
                     )?;
+                    exec.exec.profiler_mut().detailed_timing = enable_detail;
                     exec.run(py, ticks, true, None)?;
                     let profile = exec.profile();
-                    println!("copy_to_client time:  {:.3} ms", profile["copy_to_client"]);
-                    println!("execute_buffers time: {:.3} ms", profile["execute_buffers"]);
-                    println!("copy_to_host time:    {:.3} ms", profile["copy_to_host"]);
-                    println!("add_to_history time:  {:.3} ms", profile["add_to_history"]);
                     println!("= tick time:          {:.3} ms", profile["tick"]);
                     println!("build time:           {:.3} ms", profile["build"]);
                     println!("compile time:         {:.3} ms", profile["compile"]);
                     println!("real_time_factor:     {:.3}", profile["real_time_factor"]);
+                    if enable_detail {
+                        println!("copy_to_client time:  {:.3} ms", profile["copy_to_client"]);
+                        println!("execute_buffers time: {:.3} ms", profile["execute_buffers"]);
+                        println!("copy_to_host time:    {:.3} ms", profile["copy_to_host"]);
+                        println!("h2d_upload time:      {:.3} ms", profile["h2d_upload"]);
+                        println!("call_setup time:      {:.3} ms", profile["call_setup"]);
+                        println!("kernel_invoke time:   {:.3} ms", profile["kernel_invoke"]);
+                        println!("d2h_download time:    {:.3} ms", profile["d2h_download"]);
+                        println!("add_to_history time:  {:.3} ms", profile["add_to_history"]);
+                    }
                     Ok(None)
                 } else {
                     // Profiling mode enabled - run full analysis with DOT graph export
@@ -1164,6 +1201,7 @@ impl WorldBuilder {
                         exec: compiled_exec,
                         db: Box::new(db),
                     };
+                    exec_with_db.exec.profiler_mut().detailed_timing = true;
                     exec_with_db.run(py, ticks, true, None)?;
                     let profile = exec_with_db.profile();
 
@@ -1171,6 +1209,10 @@ impl WorldBuilder {
                     println!("copy_to_client time:  {:.3} ms", profile["copy_to_client"]);
                     println!("execute_buffers time: {:.3} ms", profile["execute_buffers"]);
                     println!("copy_to_host time:    {:.3} ms", profile["copy_to_host"]);
+                    println!("h2d_upload time:      {:.3} ms", profile["h2d_upload"]);
+                    println!("call_setup time:      {:.3} ms", profile["call_setup"]);
+                    println!("kernel_invoke time:   {:.3} ms", profile["kernel_invoke"]);
+                    println!("d2h_download time:    {:.3} ms", profile["d2h_download"]);
                     println!("build time:           {:.3} ms", profile["build"]);
                     println!("compile time:         {:.3} ms", profile["compile"]);
                     println!("real_time_factor:     {:.3}", profile["real_time_factor"]);
@@ -1201,7 +1243,7 @@ impl WorldBuilder {
         max_ticks = None,
         optimize = false,
         db_path = None,
-        backend = "iree",
+        backend = "iree-cpu",
         iree_flags = None,
     ))]
     pub fn build(
@@ -1487,6 +1529,7 @@ impl WorldBuilder {
         backend: &str,
         extra_iree_flags: &[String],
     ) -> Result<WorldExec, Error> {
+        let (engine, iree_device, jax_gpu) = parse_backend_config(backend)?;
         let mut start = time::Instant::now();
         let ts = time::Duration::from_secs_f64(sim_time_step);
         self.world.metadata.sim_time_step = TimeStep(ts);
@@ -1504,53 +1547,57 @@ impl WorldBuilder {
         let world = std::mem::take(&mut self.world);
         let compiled_sys = increment_sim_tick.pipe(sys).compile(&world)?;
 
-        match backend {
-            "jax" => {
-                let tick_exec = JaxExec::new(py, &compiled_sys)?;
+        match engine {
+            BackendEngine::Jax => {
+                let tick_exec = JaxExec::new(py, &compiled_sys, &world, jax_gpu)?;
                 let mut exec = JaxWorldExec::new(world, tick_exec, None);
                 exec.profiler.build.observe(&mut start);
-                Ok(WorldExec::Jax(exec))
+                Ok(WorldExec::Jax(Box::new(exec)))
             }
-            "iree" => match compiled_sys.compile_iree_module(py, &world, extra_iree_flags) {
-                Ok(result) => {
-                    let tick_exec = result.exec;
-                    let mut exec = IREEWorldExec::new(world, tick_exec, None);
-                    exec.profiler.build.observe(&mut start);
-                    Ok(WorldExec::Iree(exec))
-                }
-                Err(iree_err) => {
-                    let diagnosis = self
-                        .diagnose_subsystems(py, &world, &compiled_sys, extra_iree_flags)
-                        .unwrap_or_default();
-                    let err_text = iree_err.to_string();
-                    let mut msg = err_text.clone();
-                    if !err_text.contains("Failure stage:") {
-                        let report = classify_failure(&err_text);
-                        msg = format!(
-                            "{err_text}\n\nFailure stage: {:?}\nFailure class: {:?}",
-                            report.stage, report.classification
-                        );
-                        if !report.suggestion.is_empty() {
-                            msg.push_str(&format!("\n{}", report.suggestion));
-                        }
-                        if report.should_suggest_jax_fallback() {
-                            msg.push_str(
-                                "\n\nTo temporarily unblock, set backend=\"jax\" in your w.run() call:\n\n  \
-                                 w.run(system, backend=\"jax\", ...)\n\nThe JAX backend is slower but supports all JAX operations.",
+            BackendEngine::Iree => {
+                match compiled_sys.compile_iree_module(py, &world, iree_device, extra_iree_flags) {
+                    Ok(result) => {
+                        let tick_exec = result.exec;
+                        let mut exec = IREEWorldExec::new(world, tick_exec, None);
+                        exec.profiler.build.observe(&mut start);
+                        Ok(WorldExec::Iree(Box::new(exec)))
+                    }
+                    Err(iree_err) => {
+                        let diagnosis = self
+                            .diagnose_subsystems(
+                                py,
+                                &world,
+                                &compiled_sys,
+                                iree_device,
+                                extra_iree_flags,
+                            )
+                            .unwrap_or_default();
+                        let err_text = iree_err.to_string();
+                        let mut msg = err_text.clone();
+                        if !err_text.contains("Failure stage:") {
+                            let report = classify_failure(&err_text);
+                            msg = format!(
+                                "{err_text}\n\nFailure stage: {:?}\nFailure class: {:?}",
+                                report.stage, report.classification
                             );
+                            if !report.suggestion.is_empty() {
+                                msg.push_str(&format!("\n{}", report.suggestion));
+                            }
+                            if report.should_suggest_jax_fallback() {
+                                msg.push_str(
+                                "\n\nTo temporarily unblock, set backend=\"jax-cpu\" in your w.run() call:\n\n  \
+                                 w.run(system, backend=\"jax-cpu\", ...)\n\nThe JAX backend is slower but supports all JAX operations.",
+                            );
+                            }
                         }
+                        if !diagnosis.is_empty() {
+                            msg.push_str("\n\n=== Per-System IREE Compatibility ===\n");
+                            msg.push_str(&diagnosis);
+                        }
+                        Err(Error::IreeCompilationFailed(msg))
                     }
-                    if !diagnosis.is_empty() {
-                        msg.push_str("\n\n=== Per-System IREE Compatibility ===\n");
-                        msg.push_str(&diagnosis);
-                    }
-                    Err(Error::IreeCompilationFailed(msg))
                 }
-            },
-            other => Err(Error::UnknownCommand(format!(
-                "unknown backend '{}': expected 'iree' or 'jax'",
-                other
-            ))),
+            }
         }
     }
 
@@ -1559,6 +1606,7 @@ impl WorldBuilder {
         py: Python<'_>,
         world: &World,
         compiled_sys: &crate::system::CompiledSystem,
+        iree_device: &str,
         extra_iree_flags: &[String],
     ) -> Result<String, Error> {
         fn normalize_system_name(raw: &str) -> String {
@@ -1591,7 +1639,7 @@ impl WorldBuilder {
             if !seen.insert(name.clone()) {
                 continue;
             }
-            match subsystem.compile_iree_module(py, world, extra_iree_flags) {
+            match subsystem.compile_iree_module(py, world, iree_device, extra_iree_flags) {
                 Ok(_) => out.push_str(&format!("[OK]   {name}\n")),
                 Err(err) => {
                     let err_text = err.to_string();
@@ -1765,7 +1813,7 @@ impl WorldBuilder {
             };
         }
 
-        let jax_exec = xla_exec.compile_jax_module(py)?;
+        let jax_exec = xla_exec.compile_jax_module(py, &[], None)?;
         let dictionary = dict.into_py_any(py)?;
         let entity_dict = entity_dict.into_py_any(py)?;
         let component_entity_dict = component_entity_dict.into_py_any(py)?;

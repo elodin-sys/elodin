@@ -48,6 +48,10 @@ impl Call {
         error::check(status)?;
         Ok(BufferView { ptr: view })
     }
+
+    pub fn reset(&mut self) {
+        unsafe { ffi::iree_runtime_call_reset(&mut self.inner) };
+    }
 }
 
 impl Drop for Call {

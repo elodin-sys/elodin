@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::time::Instant;
 
 use impeller2::types::ComponentId;
@@ -5,7 +6,7 @@ use impeller2::types::ComponentId;
 use crate::error::Error;
 use crate::exec::ExecMetadata;
 use crate::iree_compile::IreeCompileStats;
-use crate::profile::Profiler;
+use crate::profile::{Profiler, TickTimings};
 use crate::utils::SchemaExt;
 use crate::world::World;
 
@@ -34,6 +35,13 @@ pub struct IREEExec {
     pub metadata: ExecMetadata,
     pub compile_stats: Option<IreeCompileStats>,
     vmfb: Vec<u8>,
+    device_uri: String,
+    input_ids: Vec<ComponentId>,
+    output_ids: Vec<ComponentId>,
+    input_arena: Option<iree_runtime::DeviceArena>,
+    output_arena: Option<iree_runtime::DeviceArena>,
+    output_views_scratch: Vec<iree_runtime::BufferView>,
+    call: iree_runtime::Call,
     session: iree_runtime::Session,
     #[allow(dead_code)]
     instance: iree_runtime::Instance,
@@ -47,71 +55,203 @@ impl IREEExec {
         vmfb: &[u8],
         metadata: ExecMetadata,
         compile_stats: Option<IreeCompileStats>,
+        device_uri: &str,
+        world: &World,
     ) -> Result<Self, Error> {
         let instance =
             iree_runtime::Instance::new().map_err(|e| Error::IreeRuntimeError(e.to_string()))?;
-        let device = instance
-            .create_device("local-task")
-            .map_err(|e| Error::IreeRuntimeError(e.to_string()))?;
+        let device = instance.create_device(device_uri).map_err(|err| {
+            Error::IreeRuntimeError(format!(
+                "failed to create requested IREE device '{device_uri}': {err}"
+            ))
+        })?;
         let session = iree_runtime::Session::new(&instance, &device)
             .map_err(|e| Error::IreeRuntimeError(e.to_string()))?;
         session
             .load_vmfb(vmfb)
             .map_err(|e| Error::IreeRuntimeError(e.to_string()))?;
+        let call = session
+            .call("module.main")
+            .map_err(|e| Error::IreeRuntimeError(e.to_string()))?;
+
+        let mut output_ids = Vec::new();
+        let mut seen_outputs = HashSet::new();
+        for id in &metadata.ret_ids {
+            if seen_outputs.insert(*id) {
+                output_ids.push(*id);
+            }
+        }
+        let mut input_ids = Vec::new();
+        let mut input_specs = Vec::new();
+        let mut seen_inputs = HashSet::new();
+        for id in &metadata.arg_ids {
+            if !seen_inputs.insert(*id) {
+                continue;
+            }
+            let spec = build_buffer_spec(world, *id)?;
+            input_specs.push(spec);
+            input_ids.push(*id);
+        }
+
+        let input_arena = if input_specs.is_empty() {
+            None
+        } else {
+            Some(
+                iree_runtime::DeviceArena::new(&session, &input_specs)
+                    .map_err(|e| Error::IreeRuntimeError(e.to_string()))?,
+            )
+        };
+
+        let output_arena = if output_ids.is_empty() {
+            None
+        } else {
+            let mut specs = Vec::with_capacity(output_ids.len());
+            for id in &output_ids {
+                specs.push(build_buffer_spec(world, *id)?);
+            }
+            Some(
+                iree_runtime::DeviceArena::new(&session, &specs)
+                    .map_err(|e| Error::IreeRuntimeError(e.to_string()))?,
+            )
+        };
+
         Ok(Self {
             metadata,
             compile_stats,
             vmfb: vmfb.to_vec(),
+            device_uri: device_uri.to_string(),
+            input_ids,
+            output_ids,
+            input_arena,
+            output_arena,
+            output_views_scratch: Vec::new(),
+            call,
             session,
             instance,
         })
     }
 
-    pub fn invoke(
-        &self,
-        inputs: &[InputBuffer<'_>],
-        num_outputs: usize,
-    ) -> Result<Vec<Vec<u8>>, Error> {
-        let mut call = self
-            .session
-            .call("module.main")
-            .map_err(|e| Error::IreeRuntimeError(e.to_string()))?;
-
-        for input in inputs {
-            let buf = iree_runtime::BufferView::from_bytes(
-                &self.session,
-                input.data,
-                &input.shape,
-                input.element_type,
-            )
-            .map_err(|e| Error::IreeRuntimeError(e.to_string()))?;
-            call.push_input(&buf)
+    pub fn invoke_in_place(
+        &mut self,
+        world: &mut World,
+        detailed: bool,
+    ) -> Result<TickTimings, Error> {
+        let h2d_start = detailed.then(Instant::now);
+        if let Some(arena) = &mut self.input_arena {
+            for (slot, id) in self.input_ids.iter().enumerate() {
+                let col = world.column_by_id(*id).ok_or(Error::ComponentNotFound)?;
+                arena
+                    .write_slot(slot, col.column.as_slice())
+                    .map_err(|e| Error::IreeRuntimeError(e.to_string()))?;
+            }
+            arena
+                .upload_staging(&self.session)
                 .map_err(|e| Error::IreeRuntimeError(e.to_string()))?;
         }
+        let h2d_upload_ms = h2d_start
+            .map(|s| s.elapsed().as_secs_f64() * 1000.0)
+            .unwrap_or_default();
 
-        call.invoke()
-            .map_err(|e| Error::IreeRuntimeError(e.to_string()))?;
-
-        let mut outputs = Vec::with_capacity(num_outputs);
-        for _ in 0..num_outputs {
-            let output = call
-                .pop_output()
+        let call_setup_start = detailed.then(Instant::now);
+        self.call.reset();
+        for slot in 0..self.input_ids.len() {
+            let view = self
+                .input_arena
+                .as_ref()
+                .ok_or_else(|| Error::IreeRuntimeError("missing input arena".into()))?
+                .view(slot);
+            self.call
+                .push_input(view)
                 .map_err(|e| Error::IreeRuntimeError(e.to_string()))?;
-            outputs.push(
+        }
+        let call_setup_ms = call_setup_start
+            .map(|s| s.elapsed().as_secs_f64() * 1000.0)
+            .unwrap_or_default();
+
+        let kernel_start = detailed.then(Instant::now);
+        self.call
+            .invoke()
+            .map_err(|e| Error::IreeRuntimeError(e.to_string()))?;
+        let kernel_invoke_ms = kernel_start
+            .map(|s| s.elapsed().as_secs_f64() * 1000.0)
+            .unwrap_or_default();
+
+        let d2h_start = detailed.then(Instant::now);
+        if let Some(arena) = &self.output_arena {
+            self.output_views_scratch.clear();
+            self.output_views_scratch.reserve(self.output_ids.len());
+            let mut seen_outputs = HashSet::new();
+            for ret_id in &self.metadata.ret_ids {
+                let output = self
+                    .call
+                    .pop_output()
+                    .map_err(|e| Error::IreeRuntimeError(e.to_string()))?;
+                if seen_outputs.insert(*ret_id) {
+                    self.output_views_scratch.push(output);
+                }
+            }
+            arena
+                .copy_slots_from_views_batched(&self.session, &self.output_views_scratch)
+                .map_err(|e| Error::IreeRuntimeError(e.to_string()))?;
+        } else {
+            let mut seen_outputs = HashSet::new();
+            for ret_id in &self.metadata.ret_ids {
+                let output = self
+                    .call
+                    .pop_output()
+                    .map_err(|e| Error::IreeRuntimeError(e.to_string()))?;
+                if !seen_outputs.insert(*ret_id) {
+                    continue;
+                }
+                let id = ret_id;
+                let host = world.host.get_mut(id).ok_or(Error::ComponentNotFound)?;
                 output
-                    .to_bytes()
-                    .map_err(|e| Error::IreeRuntimeError(e.to_string()))?,
-            );
+                    .download_into(&self.session, &mut host.buffer)
+                    .map_err(|e| Error::IreeRuntimeError(e.to_string()))?;
+            }
+            return Ok(TickTimings {
+                h2d_upload_ms,
+                call_setup_ms,
+                kernel_invoke_ms,
+                d2h_download_ms: d2h_start
+                    .map(|s| s.elapsed().as_secs_f64() * 1000.0)
+                    .unwrap_or_default(),
+            });
         }
 
-        Ok(outputs)
+        if let Some(arena) = &mut self.output_arena {
+            arena
+                .download_all(&self.session)
+                .map_err(|e| Error::IreeRuntimeError(e.to_string()))?;
+            for (slot, id) in self.output_ids.iter().enumerate() {
+                let host = world.host.get_mut(id).ok_or(Error::ComponentNotFound)?;
+                arena
+                    .copy_slot_to_host(slot, &mut host.buffer)
+                    .map_err(|e| Error::IreeRuntimeError(e.to_string()))?;
+            }
+        }
+        Ok(TickTimings {
+            h2d_upload_ms,
+            call_setup_ms,
+            kernel_invoke_ms,
+            d2h_download_ms: d2h_start
+                .map(|s| s.elapsed().as_secs_f64() * 1000.0)
+                .unwrap_or_default(),
+        })
     }
 }
 
-pub struct InputBuffer<'a> {
-    pub data: &'a [u8],
-    pub shape: Vec<i64>,
-    pub element_type: iree_runtime::ElementType,
+fn build_buffer_spec(world: &World, id: ComponentId) -> Result<iree_runtime::BufferSpec, Error> {
+    let col = world.column_by_id(id).ok_or(Error::ComponentNotFound)?;
+    let element_type = nox_to_iree_element_type(col.schema.element_type())?;
+    let shape: Vec<i64> = std::iter::once(col.len() as i64)
+        .chain(col.schema.shape().iter().map(|&x| x as i64))
+        .collect();
+    Ok(iree_runtime::BufferSpec {
+        byte_len: col.column.len(),
+        shape,
+        element_type,
+    })
 }
 
 pub struct IREEWorldExec {
@@ -138,82 +278,34 @@ impl IREEWorldExec {
     pub fn run(&mut self) -> Result<(), Error> {
         let start = &mut Instant::now();
 
-        if let Some(startup_exec) = self.startup_exec.take() {
-            let arg_ids = startup_exec.metadata.arg_ids.clone();
-            let ret_ids = startup_exec.metadata.ret_ids.clone();
-            let inputs = self.collect_inputs(&arg_ids)?;
-            let outputs = startup_exec.invoke(&inputs, ret_ids.len())?;
-            self.apply_outputs(&ret_ids, outputs)?;
+        if let Some(mut startup_exec) = self.startup_exec.take() {
+            startup_exec.invoke_in_place(&mut self.world, self.profiler.detailed_timing)?;
         }
 
-        let arg_ids = self.tick_exec.metadata.arg_ids.clone();
-        let ret_ids = self.tick_exec.metadata.ret_ids.clone();
-        let inputs = self.collect_inputs(&arg_ids)?;
-        let outputs = self.tick_exec.invoke(&inputs, ret_ids.len())?;
-        self.apply_outputs(&ret_ids, outputs)?;
-        self.profiler.execute_buffers.observe(start);
+        let tick_start = Instant::now();
+        let timings = self
+            .tick_exec
+            .invoke_in_place(&mut self.world, self.profiler.detailed_timing)?;
+        let tick_elapsed = tick_start.elapsed();
+        if self.profiler.detailed_timing {
+            let h2d = std::time::Duration::from_secs_f64(timings.h2d_upload_ms / 1000.0);
+            let call_setup = std::time::Duration::from_secs_f64(timings.call_setup_ms / 1000.0);
+            let kernel = std::time::Duration::from_secs_f64(timings.kernel_invoke_ms / 1000.0);
+            let d2h = std::time::Duration::from_secs_f64(timings.d2h_download_ms / 1000.0);
+            self.profiler.copy_to_client.observe_duration(h2d);
+            self.profiler.execute_buffers.observe_duration(kernel);
+            self.profiler.copy_to_host.observe_duration(d2h);
+            self.profiler.h2d_upload.observe_duration(h2d);
+            self.profiler.call_setup.observe_duration(call_setup);
+            self.profiler.kernel_invoke.observe_duration(kernel);
+            self.profiler.d2h_download.observe_duration(d2h);
+        } else {
+            self.profiler.execute_buffers.observe_duration(tick_elapsed);
+        }
 
+        *start = Instant::now();
         self.world.advance_tick();
         self.profiler.add_to_history.observe(start);
-        Ok(())
-    }
-
-    fn collect_inputs(&self, arg_ids: &[ComponentId]) -> Result<Vec<InputBuffer<'_>>, Error> {
-        let mut visited = std::collections::HashSet::new();
-        let mut inputs = Vec::new();
-
-        for id in arg_ids {
-            if !visited.insert(id) {
-                continue;
-            }
-            let col = self
-                .world
-                .column_by_id(*id)
-                .ok_or(Error::ComponentNotFound)?;
-            let nox_elem = col.schema.element_type();
-            let iree_elem = nox_to_iree_element_type(nox_elem)?;
-            let shape: Vec<i64> = std::iter::once(col.len() as i64)
-                .chain(col.schema.shape().iter().map(|&x| x as i64))
-                .collect();
-            inputs.push(InputBuffer {
-                data: col.column.as_ref(),
-                shape,
-                element_type: iree_elem,
-            });
-        }
-
-        Ok(inputs)
-    }
-
-    fn apply_outputs(
-        &mut self,
-        ret_ids: &[ComponentId],
-        outputs: Vec<Vec<u8>>,
-    ) -> Result<(), Error> {
-        let mut visited = std::collections::HashSet::new();
-        let mut output_idx = 0;
-
-        for id in ret_ids {
-            if !visited.insert(id) {
-                continue;
-            }
-            if output_idx >= outputs.len() {
-                return Err(Error::UnexpectedInput);
-            }
-            let output_bytes = &outputs[output_idx];
-            output_idx += 1;
-
-            let host_buf = self
-                .world
-                .host
-                .get_mut(id)
-                .ok_or(Error::ComponentNotFound)?;
-            if output_bytes.len() != host_buf.buffer.len() {
-                return Err(Error::ValueSizeMismatch);
-            }
-            host_buf.buffer.copy_from_slice(output_bytes);
-        }
-
         Ok(())
     }
 
@@ -222,6 +314,8 @@ impl IREEWorldExec {
             &self.tick_exec.vmfb,
             self.tick_exec.metadata.clone(),
             self.tick_exec.compile_stats.clone(),
+            &self.tick_exec.device_uri,
+            &self.world,
         )
         .expect("failed to fork IREE exec");
         Self {

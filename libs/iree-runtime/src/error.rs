@@ -17,6 +17,13 @@ impl Error {
     pub fn message(&self) -> &str {
         &self.message
     }
+
+    pub(crate) fn invalid_argument(message: impl Into<String>) -> Self {
+        Self {
+            code: 2,
+            message: message.into(),
+        }
+    }
 }
 
 impl fmt::Display for Error {

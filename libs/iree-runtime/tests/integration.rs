@@ -48,7 +48,7 @@ fn test_simple_mul() {
     call.invoke().expect("invoke failed");
 
     let output = call.pop_output().expect("failed to pop output");
-    let output_bytes = output.to_bytes().expect("failed to read output");
+    let output_bytes = output.to_bytes(&session).expect("failed to read output");
     let result: &[f32] = from_bytes(&output_bytes);
 
     assert_eq!(result.len(), 4);
@@ -81,7 +81,7 @@ fn test_f64_support() {
     call.invoke().expect("invoke failed");
 
     let output = call.pop_output().expect("failed to pop output");
-    let output_bytes = output.to_bytes().expect("failed to read output");
+    let output_bytes = output.to_bytes(&session).expect("failed to read output");
     let result: &[f64] = from_bytes(&output_bytes);
 
     assert_eq!(result.len(), 4);
@@ -129,7 +129,7 @@ fn test_multiple_invocations() {
         call.invoke().unwrap();
 
         let output = call.pop_output().unwrap();
-        let output_bytes = output.to_bytes().unwrap();
+        let output_bytes = output.to_bytes(&session).unwrap();
         let result: &[f32] = from_bytes(&output_bytes);
 
         for (i, &val) in result.iter().enumerate() {
@@ -186,7 +186,7 @@ fn test_multidimensional_shapes() {
     assert_eq!(output.shape(), vec![3, 2]);
     assert_eq!(output.element_type(), Some(ElementType::Float32));
 
-    let output_bytes = output.to_bytes().unwrap();
+    let output_bytes = output.to_bytes(&session).unwrap();
     let result: &[f32] = from_bytes(&output_bytes);
     assert_eq!(result.len(), 6);
     for (i, (&got, &want)) in result.iter().zip(expected.iter()).enumerate() {
@@ -221,7 +221,7 @@ fn test_multiple_outputs() {
         .pop_output()
         .expect("failed to pop second output (prod)");
 
-    let sum_bytes = out_sum.to_bytes().unwrap();
+    let sum_bytes = out_sum.to_bytes(&session).unwrap();
     let sum_result: &[f32] = from_bytes(&sum_bytes);
     for (i, (&got, &want)) in sum_result.iter().zip(expected_sum.iter()).enumerate() {
         assert!(
@@ -230,7 +230,7 @@ fn test_multiple_outputs() {
         );
     }
 
-    let prod_bytes = out_prod.to_bytes().unwrap();
+    let prod_bytes = out_prod.to_bytes(&session).unwrap();
     let prod_result: &[f32] = from_bytes(&prod_bytes);
     for (i, (&got, &want)) in prod_result.iter().zip(expected_prod.iter()).enumerate() {
         assert!(
@@ -256,7 +256,7 @@ fn test_integer_roundtrip() {
     call.invoke().expect("identity_i64 invoke failed");
 
     let output = call.pop_output().unwrap();
-    let output_bytes = output.to_bytes().unwrap();
+    let output_bytes = output.to_bytes(&session).unwrap();
     let result: &[i64] = from_bytes(&output_bytes);
 
     assert_eq!(result, &input, "i64 round-trip must be exact byte-for-byte");
@@ -288,7 +288,7 @@ fn test_load_vmfb_from_bytes() {
         .expect("invoke after load_vmfb from bytes failed");
 
     let output = call.pop_output().unwrap();
-    let output_bytes = output.to_bytes().unwrap();
+    let output_bytes = output.to_bytes(&session).unwrap();
     let result: &[f32] = from_bytes(&output_bytes);
     assert_eq!(result, &[20.0, 30.0, 40.0, 50.0]);
 }
@@ -342,7 +342,7 @@ fn test_large_buffer() {
     assert_eq!(buf.shape(), vec![1024]);
     assert_eq!(buf.element_count(), 1024);
 
-    let round_trip = buf.to_bytes().unwrap();
+    let round_trip = buf.to_bytes(&session).unwrap();
     let result: &[f32] = from_bytes(&round_trip);
     assert_eq!(result.len(), 1024);
     for (i, (&got, &want)) in result.iter().zip(large_data.iter()).enumerate() {

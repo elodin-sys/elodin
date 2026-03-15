@@ -48,7 +48,7 @@ def test_iree_lowering_error_shows_real_message():
 
     w = _world_with_value()
     with pytest.raises(RuntimeError) as exc_info:
-        w.build(explode, backend="iree")
+        w.build(explode, backend="iree-cpu")
     message = str(exc_info.value)
     assert "intentional iree diagnostics failure" in message
     assert "python error" not in message.lower()
@@ -69,7 +69,7 @@ def test_iree_failure_dumps_artifacts():
     try:
         w = _world_with_value()
         with pytest.raises(RuntimeError, match="iree-compile failed") as exc_info:
-            w.build(scale, backend="iree")
+            w.build(scale, backend="iree-cpu")
 
         report_dir = _extract_report_dir_from_error(str(exc_info.value))
         assert os.path.exists(os.path.join(report_dir, "stablehlo.mlir"))
@@ -98,7 +98,7 @@ def test_iree_flags_env_passthrough():
     os.environ["ELODIN_IREE_FLAGS"] = "--iree-opt-const-eval=false"
     try:
         w = _world_with_value()
-        w.build(scale, backend="iree")
+        w.build(scale, backend="iree-cpu")
         report_dir = _latest_report_dir(dump_dir)
         with open(os.path.join(report_dir, "iree_compile_cmd.sh"), encoding="utf-8") as f:
             cmd = f.read()
