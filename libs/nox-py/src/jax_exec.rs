@@ -224,7 +224,8 @@ impl JaxExec {
                                 PyTuple::new(py, self.mutable_split_points.iter().copied())?;
                             let split = np.call_method1("split", (flat_host, split_points))?;
                             let split_items: Vec<PyObject> = split.extract()?;
-                            for (part, input) in split_items.into_iter().zip(self.mutable_inputs.iter())
+                            for (part, input) in
+                                split_items.into_iter().zip(self.mutable_inputs.iter())
                             {
                                 let reshaped = part
                                     .bind(py)
@@ -243,7 +244,8 @@ impl JaxExec {
                                 PyTuple::new(py, self.mutable_split_points.iter().copied())?;
                             let split = jnp.call_method1("split", (flat_device, split_points))?;
                             let split_items: Vec<PyObject> = split.extract()?;
-                            for (part, input) in split_items.into_iter().zip(self.mutable_inputs.iter())
+                            for (part, input) in
+                                split_items.into_iter().zip(self.mutable_inputs.iter())
                             {
                                 let reshaped = part
                                     .bind(py)
@@ -298,7 +300,7 @@ impl JaxExec {
 
             let d2h_start = detailed.then(Instant::now);
             if self.output_ids.len() == 1 {
-                copy_output_to_world(py, &np, world, self.output_ids[0], result.bind(py))?;
+                copy_output_to_world(py, np, world, self.output_ids[0], result.bind(py))?;
             } else {
                 let mut output_parts = Vec::with_capacity(self.output_ids.len());
                 for (idx, id) in self.output_ids.iter().enumerate() {

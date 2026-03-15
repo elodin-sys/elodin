@@ -781,7 +781,10 @@ def build_expr(func, donate_argnums, backend):
         py.run(code_cstr.as_ref(), Some(&globals), None)?;
         let fun: Py<PyAny> = module.getattr("build_expr")?.into();
 
-        let comp = fun.call1(py, (func, donate_argnums.to_vec(), backend.map(str::to_string)))?;
+        let comp = fun.call1(
+            py,
+            (func, donate_argnums.to_vec(), backend.map(str::to_string)),
+        )?;
 
         Ok(comp)
     }

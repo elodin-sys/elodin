@@ -1553,7 +1553,7 @@ impl WorldBuilder {
                 let tick_exec = JaxExec::new(py, &compiled_sys, &world, jax_gpu)?;
                 let mut exec = JaxWorldExec::new(world, tick_exec, None);
                 exec.profiler.build.observe(&mut start);
-                Ok(WorldExec::Jax(exec))
+                Ok(WorldExec::Jax(Box::new(exec)))
             }
             BackendEngine::Iree => {
                 match compiled_sys.compile_iree_module(py, &world, iree_device, extra_iree_flags) {
@@ -1561,7 +1561,7 @@ impl WorldBuilder {
                         let tick_exec = result.exec;
                         let mut exec = IREEWorldExec::new(world, tick_exec, None);
                         exec.profiler.build.observe(&mut start);
-                        Ok(WorldExec::Iree(exec))
+                        Ok(WorldExec::Iree(Box::new(exec)))
                     }
                     Err(iree_err) => {
                         let diagnosis = self

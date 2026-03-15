@@ -172,6 +172,8 @@ with pkgs; let
     shellHook = ''
       case "$(uname -s)" in
         Linux*)
+          export CC=clang
+          export CXX=clang++
           # Use existing DISPLAY if set, otherwise default to :0
           if [ -z "$DISPLAY" ]; then
             export DISPLAY=:0
@@ -214,6 +216,8 @@ with pkgs; let
   linuxShellAttrs = lib.optionalAttrs pkgs.stdenv.isLinux (
     common.linuxGraphicsEnv {inherit pkgs;}
     // {
+      CC = "clang";
+      CXX = "clang++";
       CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER = "clang";
       CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER = "clang";
     }
