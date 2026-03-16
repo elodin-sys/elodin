@@ -114,12 +114,11 @@ cam_ball_b = entities["cam_ball_b"]
 
 # ── Sensor Cameras ───────────────────────────────────────────────────────────
 
-scene_cam_res = (320, 240) if sys.platform == "darwin" else (640, 480)
 world.sensor_camera(
     entity=cam_ball_a,
     name="scene_cam",
-    width=scene_cam_res[0],
-    height=scene_cam_res[1],
+    width=640,
+    height=480,
     fov=90.0,
     pos_offset=[0.0, 0.0, 0.5],
     look_at_offset=[6.0, 6.0, 0.0],
