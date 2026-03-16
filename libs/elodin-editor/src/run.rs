@@ -63,7 +63,11 @@ pub async fn run_recipe(
 
     // Set the render bridge socket path so both the render-server and
     // simulation child processes inherit it via the environment.
-    let sock_path = std::env::temp_dir().join(format!("elodin-render-{}", std::process::id()));
+    // Use /tmp directly — std::env::temp_dir() respects $TMPDIR which inside
+    // nix-shell can be a deeply nested path exceeding the 104-byte macOS
+    // Unix socket limit (SUN_LEN).
+    let sock_path =
+        std::path::PathBuf::from("/tmp").join(format!("elodin-render-{}", std::process::id()));
     // SAFETY: set_var is not thread-safe, but this is the only writer of
     // ELODIN_RENDER_BRIDGE_SOCK; we do not read it in this process. Only
     // child processes spawned later by recipe.watch() read it. The caller

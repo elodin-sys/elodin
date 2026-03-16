@@ -417,6 +417,7 @@ fn spawn_sensor_cameras(
             },
             Projection::Perspective(perspective),
             Tonemapping::None,
+            bevy::render::view::Msaa::Off,
             Transform::from_xyz(0.0, 5.0, 0.0).looking_at(Vec3::ZERO, Vec3::Y),
             GlobalTransform::default(),
             GridCell::<i128>::default(),
@@ -548,6 +549,10 @@ fn image_copy_driver(
 ) {
     let _span = tracing::info_span!("sensor_camera_image_copy_driver").entered();
     let copy_start = Instant::now();
+
+    let mut encoder = render_device.create_command_encoder(&CommandEncoderDescriptor::default());
+    let mut any_copies = false;
+
     for (i, image_copier) in image_copiers.0.iter().enumerate() {
         if !image_copier.is_active {
             continue;
@@ -555,9 +560,6 @@ fn image_copy_driver(
         let Some(src_image) = gpu_images.get(&image_copier.src_image) else {
             continue;
         };
-
-        let mut encoder =
-            render_device.create_command_encoder(&CommandEncoderDescriptor::default());
 
         let block_dimensions = src_image.texture_format.block_dimensions();
         let block_size = src_image.texture_format.block_copy_size(None).unwrap();
@@ -583,7 +585,10 @@ fn image_copy_driver(
             },
             src_image.size,
         );
+        any_copies = true;
+    }
 
+    if any_copies {
         render_queue.submit(std::iter::once(encoder.finish()));
     }
     metrics.image_copy_driver_ms = copy_start.elapsed().as_secs_f64() * 1000.0;
@@ -615,11 +620,12 @@ fn receive_image_from_buffer(
     metrics.receive_image_from_buffer_ms = 0.0;
     let receive_start = Instant::now();
 
+    // Phase 1: request async map for all active cameras.
+    let mut pending: Vec<(usize, crossbeam_channel::Receiver<()>)> = Vec::new();
     for (i, image_copier) in image_copiers.0.iter().enumerate() {
         if !image_copier.is_active {
             continue;
         }
-
         let buf_idx = buffer_toggle.0[i];
         let buffer = &image_copier.buffers[buf_idx];
         let buffer_slice = buffer.slice(..);
@@ -631,25 +637,35 @@ fn receive_image_from_buffer(
             }
             Err(err) => tracing::warn!("Failed to map sensor camera buffer: {err}"),
         });
+        pending.push((i, r));
+    }
 
-        // Blocking poll: wait for GPU readback to complete.
-        // For the headless render-server this is required since the simulation
-        // is waiting for the frame. The double-buffer infrastructure is in place
-        // for future async improvements.
-        {
-            let _span = tracing::info_span!(
-                "sensor_camera_poll_wait",
-                camera_name = image_copier.camera_name.as_str()
-            )
-            .entered();
-            let poll_start = Instant::now();
-            if render_device.poll(PollType::wait()).is_err() {
-                continue;
+    if pending.is_empty() {
+        return;
+    }
+
+    // Phase 2: single blocking poll for all pending copies.
+    {
+        let _span = tracing::info_span!("sensor_camera_poll_wait").entered();
+        let poll_start = Instant::now();
+        if render_device.poll(PollType::wait()).is_err() {
+            for (i, _) in &pending {
+                let buf_idx = buffer_toggle.0[*i];
+                image_copiers.0[*i].buffers[buf_idx].unmap();
             }
-            metrics.receive_image_poll_wait_ms += poll_start.elapsed().as_secs_f64() * 1000.0;
+            return;
         }
+        metrics.receive_image_poll_wait_ms = poll_start.elapsed().as_secs_f64() * 1000.0;
+    }
+
+    // Phase 3: read all mapped buffers.
+    for (i, r) in pending {
+        let image_copier = &image_copiers.0[i];
+        let buf_idx = buffer_toggle.0[i];
+        let buffer = &image_copier.buffers[buf_idx];
 
         if r.recv().is_ok() {
+            let buffer_slice = buffer.slice(..);
             let data = buffer_slice.get_mapped_range();
             let width = image_copier.width;
             let height = image_copier.height;
@@ -681,7 +697,7 @@ fn receive_image_from_buffer(
 
             let _ = sender.0.send((
                 image_copier.camera_name.clone(),
-                reusable.0[i].clone(),
+                std::mem::take(&mut reusable.0[i]),
                 width,
                 height,
             ));
