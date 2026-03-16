@@ -7,11 +7,15 @@
 with pkgs; let
   # Import shared configuration
   common = pkgs.callPackage ./pkgs/common.nix {};
-  iree_runtime = pkgs.callPackage ./pkgs/iree-runtime.nix {};
+  iree_runtime = pkgs.callPackage ./pkgs/iree-runtime.nix {
+    enableCuda = pkgs.stdenv.isLinux;
+    enableMetal = pkgs.stdenv.isDarwin;
+  };
   iree_runtime_tracy =
     if pkgs.stdenv.isLinux
     then
       pkgs.callPackage ./pkgs/iree-runtime.nix {
+        enableCuda = true;
         enableTracing = true;
         tracySrc = fetchFromGitHub {
           owner = "wolfpld";
@@ -118,6 +122,7 @@ with pkgs; let
           # Tracy profiler (Linux-only: requires std::jthread, not in Apple libc++)
           tracy
           iree_runtime_tracy
+          cudaPackages.cuda_cudart
         ]
       )
       # macOS-specific dependencies
@@ -156,13 +161,19 @@ with pkgs; let
 
     # Set up library paths for Linux graphics/audio
     LD_LIBRARY_PATH = lib.optionalString pkgs.stdenv.isLinux (
-      common.makeLinuxLibraryPath {inherit pkgs;}
+      lib.makeLibraryPath [
+        cudaPackages.cuda_cudart
+      ]
+      + ":"
+      + common.makeLinuxLibraryPath {inherit pkgs;}
     );
 
     doCheck = false;
     shellHook = ''
       case "$(uname -s)" in
         Linux*)
+          export CC=clang
+          export CXX=clang++
           # Use existing DISPLAY if set, otherwise default to :0
           if [ -z "$DISPLAY" ]; then
             export DISPLAY=:0
@@ -205,6 +216,8 @@ with pkgs; let
   linuxShellAttrs = lib.optionalAttrs pkgs.stdenv.isLinux (
     common.linuxGraphicsEnv {inherit pkgs;}
     // {
+      CC = "clang";
+      CXX = "clang++";
       CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_LINKER = "clang";
       CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER = "clang";
     }

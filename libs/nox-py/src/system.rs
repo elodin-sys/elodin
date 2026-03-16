@@ -731,9 +731,15 @@ pub trait CompiledSystemExt {
         &self,
         py: Python<'_>,
         world: &World,
+        iree_device: &str,
         extra_iree_flags: &[String],
     ) -> Result<crate::iree_compile::IreeCompileResult, Error>;
-    fn compile_jax_module(&self, py: Python<'_>) -> Result<Py<PyAny>, Error>;
+    fn compile_jax_module(
+        &self,
+        py: Python<'_>,
+        donate_argnums: &[usize],
+        backend: Option<&str>,
+    ) -> Result<Py<PyAny>, Error>;
 }
 
 impl CompiledSystemExt for CompiledSystem {
@@ -741,18 +747,32 @@ impl CompiledSystemExt for CompiledSystem {
         &self,
         py: Python<'_>,
         world: &World,
+        iree_device: &str,
         extra_iree_flags: &[String],
     ) -> Result<crate::iree_compile::IreeCompileResult, Error> {
-        crate::iree_compile::compile_iree_module(py, self, world, extra_iree_flags)
+        crate::iree_compile::compile_iree_module(py, self, world, iree_device, extra_iree_flags)
     }
 
-    fn compile_jax_module(&self, py: Python<'_>) -> Result<Py<PyAny>, Error> {
+    fn compile_jax_module(
+        &self,
+        py: Python<'_>,
+        donate_argnums: &[usize],
+        backend: Option<&str>,
+    ) -> Result<Py<PyAny>, Error> {
         let func = noxpr_to_callable(self.computation.func.clone());
 
         let py_code = "
+import os
+os.environ.setdefault(
+    'XLA_FLAGS',
+    '--xla_gpu_triton_gemm_any=True --xla_gpu_enable_latency_hiding_scheduler=true',
+)
 import jax
-def build_expr(func):
-    res = jax.jit(func, keep_unused=True)
+def build_expr(func, donate_argnums, backend):
+    kwargs = {'keep_unused': True, 'donate_argnums': tuple(donate_argnums)}
+    if backend:
+        kwargs['backend'] = backend
+    res = jax.jit(func, **kwargs)
     return res";
 
         let module = PyModule::new(py, "build_expr")?;
@@ -761,7 +781,10 @@ def build_expr(func):
         py.run(code_cstr.as_ref(), Some(&globals), None)?;
         let fun: Py<PyAny> = module.getattr("build_expr")?.into();
 
-        let comp = fun.call1(py, (func,))?;
+        let comp = fun.call1(
+            py,
+            (func, donate_argnums.to_vec(), backend.map(str::to_string)),
+        )?;
 
         Ok(comp)
     }

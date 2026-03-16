@@ -75,7 +75,7 @@ The Elodin simulation world.
     `sensor_camera` only registers the camera. No rendering occurs until `ctx.render_camera()` is called in a `post_step` callback. This gives you explicit control over render timing and frame rate.
     {% end %}
 
-- `run(system, sim_time_step, run_time_step, default_playback_speed, max_ticks, optimize, is_canceled, pre_step, post_step, db_path, interactive, start_timestamp)` -> None
+- `run(system, sim_time_step, run_time_step, default_playback_speed, max_ticks, optimize, is_canceled, pre_step, post_step, db_path, interactive, start_timestamp, log_level, backend, iree_flags)` -> None
 
     Run the simulation.
     - `system` : [elodin.System], the systems to run, can be supplied as a list of systems delineated by pipes.
@@ -91,6 +91,41 @@ The Elodin simulation world.
     - `interactive` : `bool`, optional, controls simulation behavior after reaching `max_ticks`, defaults to `True`. When `True`, the simulation pauses but remains running for continued interaction in the Elodin editor. When `False`, the simulation terminates completely after reaching `max_ticks`.
     - `start_timestamp` : `int`, optional, the starting timestamp for the simulation in microseconds. If `None` (default), uses the current system time (epoch-based). Set to `0` for zero-based timing where the simulation starts at `t=0`.
     - `log_level` : `str`, optional, log level for the embedded Elodin-DB instance (`error`, `warn`, `info`, `debug`, `trace`). Defaults to `info` unless `RUST_LOG` is set.
+    - `backend` : `str`, optional, execution backend. Defaults to `"iree-cpu"`. Common values are `"iree-cpu"`, `"iree-gpu"`, `"jax-cpu"`, and `"jax-gpu"`.
+    - `iree_flags` : `list[str]`, optional, extra compiler flags passed to IREE when using an IREE backend.
+
+- `build(system, sim_time_step, run_time_step, default_playback_speed, max_ticks, optimize, db_path, backend, iree_flags)` -> `elodin.Exec`
+
+    Build and compile the simulation executor without starting the runtime loop.
+    - `system` : [elodin.System], the systems to compile.
+    - `sim_time_step` : `float`, optional, the amount of simulated time between each tick, defaults to `1 / 120.0`.
+    - `run_time_step` : `float | None`, optional, the amount of real time between each tick.
+    - `default_playback_speed` : `float`, optional, the default playback speed used by clients.
+    - `max_ticks` : `integer`, optional, the maximum number of ticks configured on the built executor.
+    - `optimize` : `bool`, optional, enables optimization passes during compilation.
+    - `db_path` : `string`, optional, the path to the database directory.
+    - `backend` : `str`, optional, execution backend. Defaults to `"iree-cpu"`.
+    - `iree_flags` : `list[str]`, optional, extra compiler flags passed to IREE when using an IREE backend.
+
+### Backend Selection
+
+Elodin supports CPU and GPU execution for both IREE and JAX backends. You can choose the backend in code with the `backend` argument or override it at runtime with the `ELODIN_BACKEND` environment variable.
+
+If `ELODIN_BACKEND` is set, it takes precedence over the `backend=` argument passed to `run()` and `build()`.
+
+| Backend | Engine | Device/Target | Notes |
+|---------|--------|---------------|-------|
+| `iree-cpu` | IREE | `local-sync` | Default backend |
+| `iree-gpu` | IREE | `auto` | Auto-selects a GPU driver (CUDA/Metal when available) |
+| `jax-cpu` | JAX | `cpu` | JAX CPU target |
+| `jax-gpu` | JAX | `gpu` | JAX GPU target |
+
+Additional accepted aliases include `iree`, `cpu`, `local-sync`, `local-task`, `gpu`, `cuda`, `metal`, and `jax`.
+
+```bash
+# Force GPU backend regardless of backend= passed in Python
+ELODIN_BACKEND=iree-gpu python main.py
+```
 
 ### _class_ `elodin.EntityId`
 Integer reference identifier for entities in Elodin.
@@ -398,7 +433,7 @@ graph = el.Panel.graph(
 w.spawn(el.Panel.vsplit(camera, graph), name="main_view")
 
 sys = el.six_dof(sys=spin)
-sim = w.run(sys, sim_time_step=1.0 / 120.0)
+sim = w.run(sys, sim_time_step=1.0 / 120.0, backend="iree-cpu")
 ```
 
 <br></br>

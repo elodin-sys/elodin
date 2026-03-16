@@ -7,6 +7,7 @@ Rules:
 - Be extremely concise with comments, and only add when the code doesn't self document
 - When suggesting new dependencies, make sure to check they are well supported and maintained
 - Never use unsafe Rust code
+- Never build in backwards compatibility unless explicitly requested
 - Run all activities from the repository root
 - CI enforces: `cargo fmt`, `cargo test`, `cargo clippy -- -Dwarnings`, `ruff format --check && ruff check --fix`, `alejandra`
 

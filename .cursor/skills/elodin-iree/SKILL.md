@@ -240,21 +240,54 @@ Recent drone validation exposed Linux-specific IREE LLVM CPU linker pitfalls:
     - `--iree-llvmcpu-embedded-linker-path=...`
   - wrapper should call `cc`/`clang` from PATH (not hardcoded `/usr/bin/cc`), link with `-lm`, and preserve non-object linker flags instead of silently dropping them.
 
-### Drone example compatibility notes
 
-- The drone stack previously triggered:
-  - scatter lowering limits from `.at[].set()`
-  - Linux linker/import issues in LLVM CPU codegen
-- Rewriting `.at[].set()` in hot paths to pure array expressions reduces scatter failures and improves compatibility.
-- Validate with:
-  - `nix develop -c bash -lc 'source .venv/bin/activate && uv run --active elodin run examples/drone/main.py'`
-  - success is indicated by simulation startup and normal stop at max tick (no `IREE compilation failed` traceback).
+## IREE Flags Usage (`ELODIN_IREE_FLAGS` and `iree_flags`)
 
-### Cube-sat example compatibility notes
+Elodin supports passing extra `iree-compile` flags through:
 
-- `examples/cube-sat/main.py` is a useful complementary IREE test case because it exercises graph/query paths distinct from drone.
-- With the current Linux linker wrapper + LLVM CPU flag set, cube-sat compiles and runs on IREE (no compile traceback).
-- This example is long-running; if you only need a compile/runtime smoke test, watch for DB/component initialization logs and then stop manually.
-- A current `jax` `FutureWarning` can appear during runtime:
-  - `scatter inputs have incompatible types ... float64 to int64 ...`
-  - This is not currently fatal, but should be treated as a future-compatibility cleanup item for JAX upgrades.
+- Environment variable: `ELODIN_IREE_FLAGS`
+- Python API parameter: `iree_flags=[...]` on `w.run(...)` / `w.build(...)`
+
+Both are useful and intentionally supported.
+
+### When to use `ELODIN_IREE_FLAGS`
+
+- Quick local debugging without changing Python code
+- Session-wide defaults while iterating on compiler behavior
+- Capturing extra diagnostics in CI/local triage runs
+
+Example:
+
+```bash
+ELODIN_IREE_DUMP_DIR=/tmp/elodin_iree_debug \
+ELODIN_IREE_FLAGS="--mlir-timing --mlir-timing-display=list --iree-hal-dump-executable-intermediates-to=/tmp/elodin_iree_debug/llvm" \
+elodin run examples/drone/main.py
+```
+
+### When to use Python `iree_flags`
+
+- Per-call control for a single test/simulation invocation
+- Keeping flag usage explicit in code under test
+
+Example:
+
+```python
+w.run(system, backend="iree", iree_flags=["--iree-opt-const-eval=false"])
+```
+
+### Precedence / composition
+
+- Elodin appends env flags first, then API `iree_flags`.
+- If both set the same option, later arguments generally win (tool-dependent).
+- Prefer API `iree_flags` for targeted overrides; use env flags for broad sessions.
+
+### Common useful flags
+
+- `--mlir-timing --mlir-timing-display=list`: pass timing breakdowns
+- `--iree-hal-dump-executable-intermediates-to=<dir>`: dump lower-level executable artifacts
+- `--iree-opt-const-eval=false`: can avoid const-eval/import failures in some linker scenarios
+
+### Cautions
+
+- Invalid flags fail compilation immediately (helpful for catching typos).
+- Some flags are backend/platform specific; verify against `iree-compile --help`.
