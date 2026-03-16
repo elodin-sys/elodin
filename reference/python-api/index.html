@@ -405,6 +405,11 @@
                         </li>
                         
                         <li>
+                            <a href="/reference/python-api/#backend-selection">Backend Selection</a>
+                            
+                        </li>
+                        
+                        <li>
                             <a href="/reference/python-api/#class-elodin-entityid">class elodin.EntityId</a>
                             
                         </li>
@@ -796,7 +801,7 @@ and running the simulation. The <code>World</code> object also provides helper m
 </div>
 </li>
 <li>
-<p><code>run(system, sim_time_step, run_time_step, default_playback_speed, max_ticks, optimize, is_canceled, pre_step, post_step, db_path, interactive, start_timestamp)</code> -&gt; None</p>
+<p><code>run(system, sim_time_step, run_time_step, default_playback_speed, max_ticks, optimize, is_canceled, pre_step, post_step, db_path, interactive, start_timestamp, log_level, backend, iree_flags)</code> -&gt; None</p>
 <p>Run the simulation.</p>
 <ul>
 <li><code>system</code> : <a href="/reference/python-api/#elodin-system">elodin.System</a>, the systems to run, can be supplied as a list of systems delineated by pipes.</li>
@@ -812,9 +817,39 @@ and running the simulation. The <code>World</code> object also provides helper m
 <li><code>interactive</code> : <code>bool</code>, optional, controls simulation behavior after reaching <code>max_ticks</code>, defaults to <code>True</code>. When <code>True</code>, the simulation pauses but remains running for continued interaction in the Elodin editor. When <code>False</code>, the simulation terminates completely after reaching <code>max_ticks</code>.</li>
 <li><code>start_timestamp</code> : <code>int</code>, optional, the starting timestamp for the simulation in microseconds. If <code>None</code> (default), uses the current system time (epoch-based). Set to <code>0</code> for zero-based timing where the simulation starts at <code>t=0</code>.</li>
 <li><code>log_level</code> : <code>str</code>, optional, log level for the embedded Elodin-DB instance (<code>error</code>, <code>warn</code>, <code>info</code>, <code>debug</code>, <code>trace</code>). Defaults to <code>info</code> unless <code>RUST_LOG</code> is set.</li>
+<li><code>backend</code> : <code>str</code>, optional, execution backend. Defaults to <code>"iree-cpu"</code>. Common values are <code>"iree-cpu"</code>, <code>"iree-gpu"</code>, <code>"jax-cpu"</code>, and <code>"jax-gpu"</code>.</li>
+<li><code>iree_flags</code> : <code>list[str]</code>, optional, extra compiler flags passed to IREE when using an IREE backend.</li>
+</ul>
+</li>
+<li>
+<p><code>build(system, sim_time_step, run_time_step, default_playback_speed, max_ticks, optimize, db_path, backend, iree_flags)</code> -&gt; <code>elodin.Exec</code></p>
+<p>Build and compile the simulation executor without starting the runtime loop.</p>
+<ul>
+<li><code>system</code> : <a href="/reference/python-api/#elodin-system">elodin.System</a>, the systems to compile.</li>
+<li><code>sim_time_step</code> : <code>float</code>, optional, the amount of simulated time between each tick, defaults to <code>1 / 120.0</code>.</li>
+<li><code>run_time_step</code> : <code>float | None</code>, optional, the amount of real time between each tick.</li>
+<li><code>default_playback_speed</code> : <code>float</code>, optional, the default playback speed used by clients.</li>
+<li><code>max_ticks</code> : <code>integer</code>, optional, the maximum number of ticks configured on the built executor.</li>
+<li><code>optimize</code> : <code>bool</code>, optional, enables optimization passes during compilation.</li>
+<li><code>db_path</code> : <code>string</code>, optional, the path to the database directory.</li>
+<li><code>backend</code> : <code>str</code>, optional, execution backend. Defaults to <code>"iree-cpu"</code>.</li>
+<li><code>iree_flags</code> : <code>list[str]</code>, optional, extra compiler flags passed to IREE when using an IREE backend.</li>
 </ul>
 </li>
 </ul>
+<h3 id="backend-selection">Backend Selection</h3>
+<p>Elodin supports CPU and GPU execution for both IREE and JAX backends. You can choose the backend in code with the <code>backend</code> argument or override it at runtime with the <code>ELODIN_BACKEND</code> environment variable.</p>
+<p>If <code>ELODIN_BACKEND</code> is set, it takes precedence over the <code>backend=</code> argument passed to <code>run()</code> and <code>build()</code>.</p>
+<table><thead><tr><th>Backend</th><th>Engine</th><th>Device/Target</th><th>Notes</th></tr></thead><tbody>
+<tr><td><code>iree-cpu</code></td><td>IREE</td><td><code>local-sync</code></td><td>Default backend</td></tr>
+<tr><td><code>iree-gpu</code></td><td>IREE</td><td><code>auto</code></td><td>Auto-selects a GPU driver (CUDA/Metal when available)</td></tr>
+<tr><td><code>jax-cpu</code></td><td>JAX</td><td><code>cpu</code></td><td>JAX CPU target</td></tr>
+<tr><td><code>jax-gpu</code></td><td>JAX</td><td><code>gpu</code></td><td>JAX GPU target</td></tr>
+</tbody></table>
+<p>Additional accepted aliases include <code>iree</code>, <code>cpu</code>, <code>local-sync</code>, <code>local-task</code>, <code>gpu</code>, <code>cuda</code>, <code>metal</code>, and <code>jax</code>.</p>
+<pre data-lang="bash" class="language-bash z-code"><code class="language-bash" data-lang="bash"><span class="z-source z-shell z-bash"><span class="z-comment z-line z-number-sign z-shell"><span class="z-punctuation z-definition z-comment z-begin z-shell">#</span></span><span class="z-comment z-line z-number-sign z-shell"> Force GPU backend regardless of backend= passed in Python</span><span class="z-comment z-line z-number-sign z-shell">
+</span></span><span class="z-source z-shell z-bash"><span class="z-variable z-other z-readwrite z-assignment z-shell">ELODIN_BACKEND</span><span class="z-keyword z-operator z-assignment z-shell">=</span><span class="z-string z-unquoted z-shell">iree-gpu</span> <span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">python</span></span><span class="z-meta z-function-call z-arguments z-shell"> main.py</span>
+</span></code></pre>
 <h3 id="class-elodin-entityid"><em>class</em> <code>elodin.EntityId</code></h3>
 <p>Integer reference identifier for entities in Elodin.</p>
 <h3 id="class-elodin-stepcontext"><em>class</em> <code>elodin.StepContext</code></h3>
@@ -1130,7 +1165,7 @@ and running the simulation. The <code>World</code> object also provides helper m
 </span><span class="z-source z-python"><span class="z-meta z-function-call z-python"><span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">w</span></span><span class="z-meta z-qualified-name z-python"><span class="z-punctuation z-accessor z-dot z-python">.</span></span><span class="z-meta z-qualified-name z-python"><span class="z-variable z-function z-python"><span class="z-meta z-generic-name z-python">spawn</span></span></span></span><span class="z-meta z-function-call z-arguments z-python"><span class="z-punctuation z-section z-arguments z-begin z-python">(</span><span class="z-meta z-function-call z-python"><span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">el</span><span class="z-punctuation z-accessor z-dot z-python">.</span><span class="z-meta z-generic-name z-python">Panel</span></span><span class="z-meta z-qualified-name z-python"><span class="z-punctuation z-accessor z-dot z-python">.</span></span><span class="z-meta z-qualified-name z-python"><span class="z-variable z-function z-python"><span class="z-meta z-generic-name z-python">vsplit</span></span></span></span><span class="z-meta z-function-call z-arguments z-python"><span class="z-punctuation z-section z-arguments z-begin z-python">(</span><span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">camera</span></span><span class="z-punctuation z-separator z-arguments z-python">,</span> <span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">graph</span></span><span class="z-punctuation z-section z-arguments z-end z-python">)</span></span><span class="z-punctuation z-separator z-arguments z-python">,</span> <span class="z-variable z-parameter z-python">name</span><span class="z-keyword z-operator z-assignment z-python">=</span><span class="z-meta z-string z-python"><span class="z-string z-quoted z-double z-python"><span class="z-punctuation z-definition z-string z-begin z-python">&quot;</span></span></span><span class="z-meta z-string z-python"><span class="z-string z-quoted z-double z-python">main_view<span class="z-punctuation z-definition z-string z-end z-python">&quot;</span></span></span><span class="z-punctuation z-section z-arguments z-end z-python">)</span></span>
 </span><span class="z-source z-python">
 </span><span class="z-source z-python"><span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">sys</span></span> <span class="z-keyword z-operator z-assignment z-python">=</span> <span class="z-meta z-function-call z-python"><span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">el</span></span><span class="z-meta z-qualified-name z-python"><span class="z-punctuation z-accessor z-dot z-python">.</span></span><span class="z-meta z-qualified-name z-python"><span class="z-variable z-function z-python"><span class="z-meta z-generic-name z-python">six_dof</span></span></span></span><span class="z-meta z-function-call z-arguments z-python"><span class="z-punctuation z-section z-arguments z-begin z-python">(</span><span class="z-variable z-parameter z-python">sys</span><span class="z-keyword z-operator z-assignment z-python">=</span><span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">spin</span></span><span class="z-punctuation z-section z-arguments z-end z-python">)</span></span>
-</span><span class="z-source z-python"><span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">sim</span></span> <span class="z-keyword z-operator z-assignment z-python">=</span> <span class="z-meta z-function-call z-python"><span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">w</span></span><span class="z-meta z-qualified-name z-python"><span class="z-punctuation z-accessor z-dot z-python">.</span></span><span class="z-meta z-qualified-name z-python"><span class="z-variable z-function z-python"><span class="z-meta z-generic-name z-python">run</span></span></span></span><span class="z-meta z-function-call z-arguments z-python"><span class="z-punctuation z-section z-arguments z-begin z-python">(</span><span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">sys</span></span><span class="z-punctuation z-separator z-arguments z-python">,</span> <span class="z-variable z-parameter z-python">sim_time_step</span><span class="z-keyword z-operator z-assignment z-python">=</span><span class="z-constant z-numeric z-float z-decimal z-python">1<span class="z-punctuation z-separator z-decimal z-python">.</span>0</span> <span class="z-keyword z-operator z-arithmetic z-python">/</span> <span class="z-constant z-numeric z-float z-decimal z-python">120<span class="z-punctuation z-separator z-decimal z-python">.</span>0</span><span class="z-punctuation z-section z-arguments z-end z-python">)</span></span>
+</span><span class="z-source z-python"><span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">sim</span></span> <span class="z-keyword z-operator z-assignment z-python">=</span> <span class="z-meta z-function-call z-python"><span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">w</span></span><span class="z-meta z-qualified-name z-python"><span class="z-punctuation z-accessor z-dot z-python">.</span></span><span class="z-meta z-qualified-name z-python"><span class="z-variable z-function z-python"><span class="z-meta z-generic-name z-python">run</span></span></span></span><span class="z-meta z-function-call z-arguments z-python"><span class="z-punctuation z-section z-arguments z-begin z-python">(</span><span class="z-meta z-qualified-name z-python"><span class="z-meta z-generic-name z-python">sys</span></span><span class="z-punctuation z-separator z-arguments z-python">,</span> <span class="z-variable z-parameter z-python">sim_time_step</span><span class="z-keyword z-operator z-assignment z-python">=</span><span class="z-constant z-numeric z-float z-decimal z-python">1<span class="z-punctuation z-separator z-decimal z-python">.</span>0</span> <span class="z-keyword z-operator z-arithmetic z-python">/</span> <span class="z-constant z-numeric z-float z-decimal z-python">120<span class="z-punctuation z-separator z-decimal z-python">.</span>0</span><span class="z-punctuation z-separator z-arguments z-python">,</span> <span class="z-variable z-parameter z-python">backend</span><span class="z-keyword z-operator z-assignment z-python">=</span><span class="z-meta z-string z-python"><span class="z-string z-quoted z-double z-python"><span class="z-punctuation z-definition z-string z-begin z-python">&quot;</span></span></span><span class="z-meta z-string z-python"><span class="z-string z-quoted z-double z-python">iree-cpu<span class="z-punctuation z-definition z-string z-end z-python">&quot;</span></span></span><span class="z-punctuation z-section z-arguments z-end z-python">)</span></span>
 </span></code></pre>
 <p><br></br></p>
 <h2 id="6-degrees-of-freedom-model">6 Degrees of Freedom Model</h2>
