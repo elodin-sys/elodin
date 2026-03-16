@@ -120,51 +120,44 @@ def create_fin(
 ) -> "trimesh.Trimesh":
     """Create a single trapezoidal fin.
 
-    Fin is created in the YZ plane (matching rocket coordinate system):
-    - Y axis: span direction (0 to span, extends radially outward from body)
-    - Z axis: chord direction (0 to root_chord, along rocket axis)
-    - X axis: thickness direction (perpendicular to fin surface)
+    Fin is created in the XZ plane so one rotation around Z positions it radially:
+    - X axis: span (0 at root on body, span at tip) = radial when rotated
+    - Z axis: chord along rocket axis
+    - Y axis: thickness (perpendicular to fin surface)
     """
     if not TRIMESH_AVAILABLE:
         return None
 
     half_t = thickness / 2
 
-    # Coordinate system: X=thickness, Y=span (radial), Z=chord (axial)
+    # X=radial extent (0=root, span=tip), Z=chord, Y=thickness
     vertices = [
-        # Front face (toward body center, X = -half_t)
-        # Root edge (Y=0, at body surface)
-        [-half_t, 0, 0],  # Root leading edge
-        [-half_t, 0, root_chord],  # Root trailing edge
-        # Tip edge (Y=span, extends outward)
-        [-half_t, span, sweep],  # Tip leading edge
-        [-half_t, span, sweep + tip_chord],  # Tip trailing edge
-        # Back face (away from body center, X = +half_t)
-        [half_t, 0, 0],  # Root leading edge
-        [half_t, 0, root_chord],  # Root trailing edge
-        [half_t, span, sweep],  # Tip leading edge
-        [half_t, span, sweep + tip_chord],  # Tip trailing edge
+        # Front face (Y = -half_t, toward body)
+        [0, -half_t, 0],  # 0 root leading
+        [0, -half_t, root_chord],  # 1 root trailing
+        [span, -half_t, sweep],  # 2 tip leading
+        [span, -half_t, sweep + tip_chord],  # 3 tip trailing
+        # Back face (Y = +half_t)
+        [0, half_t, 0],  # 4 root leading
+        [0, half_t, root_chord],  # 5 root trailing
+        [span, half_t, sweep],  # 6 tip leading
+        [span, half_t, sweep + tip_chord],  # 7 tip trailing
     ]
 
+    # All windings for outward normals (CCW when viewed from outside)
     faces = [
-        # Front face (X = -half_t, toward body) - quad split into 2 triangles
-        [0, 1, 3],  # Root trailing to tip trailing
-        [0, 3, 2],  # Root leading to tip leading
-        # Back face (X = +half_t, away from body) - quad split into 2 triangles
-        [4, 6, 5],  # Root leading to tip leading
-        [4, 7, 6],  # Root trailing to tip trailing
-        # Leading edge (sweep line, Z = 0 to sweep)
-        [0, 2, 6],  # Front to back at leading edge
-        [0, 6, 4],
-        # Trailing edge (Z = root_chord to sweep+tip_chord)
-        [1, 3, 7],  # Front to back at trailing edge
-        [1, 7, 5],
-        # Root edge (at body surface, Y=0, Z = 0 to root_chord)
-        [0, 4, 5],  # Front to back at root
-        [0, 5, 1],
-        # Tip edge (outermost, Y=span, Z = sweep to sweep+tip_chord)
-        [2, 3, 7],  # Front to back at tip
-        [2, 7, 6],
+        [0, 1, 3],
+        [0, 3, 2],
+        [4, 6, 7],
+        [4, 7, 5],
+        [0, 4, 6],
+        [0, 6, 2],
+        [1, 5, 7],
+        [1, 7, 3],
+        [0, 1, 5],
+        [0, 5, 4],
+        [2, 6, 7],
+        [2, 7, 3],
     ]
 
     mesh = trimesh.Trimesh(vertices=vertices, faces=faces)
@@ -192,21 +185,15 @@ def create_fin_set(
         if fin is None:
             continue
 
-        # Fin is created in YZ plane:
-        # - Y = span direction (radial, outward from body, 0 to span)
-        # - Z = chord direction (along rocket axis, 0 to root_chord)
-        # - X = thickness direction (perpendicular to fin)
-
-        # Rotate around Z axis (rocket axis) to position fin radially
+        # Fin is in XZ plane: X=span (radial), Z=chord. Rotate around Z to place at azimuth.
         angle = 2 * np.pi * i / fin_count
         rotation = trimesh.transformations.rotation_matrix(angle, [0, 0, 1])
         fin.apply_transform(rotation)
 
-        # Translate to body surface
-        # After rotation, Y is still the radial direction
-        # Move fin so root (Y=0) is at body_radius from center
-        # The fin root leading edge is at Y=0, Z=0, so translate in Y to body_radius
-        fin.apply_translation([0, body_radius, 0])
+        # Root is at x=0; put it on the cylinder at this angle
+        dx = body_radius * np.cos(angle)
+        dy = body_radius * np.sin(angle)
+        fin.apply_translation([dx, dy, 0])
 
         meshes.append(fin)
 
@@ -538,9 +525,8 @@ def generate_elodin_assets(
     # Build the mesh
     mesh = build_rocket_mesh(config, motor)
 
-    # Rotate mesh to align with Elodin/glTF coordinate expectations
-    # Testing +90° around X axis (opposite direction)
-    rotation = trimesh.transformations.rotation_matrix(np.pi / 2, [1, 0, 0])
+    # Rotate mesh 90° around Y axis before saving (align with Elodin/glTF expectations)
+    rotation = trimesh.transformations.rotation_matrix(np.pi / 2, [0, 1, 0])
     mesh.apply_transform(rotation)
 
     # Center the mesh at origin
