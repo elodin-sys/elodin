@@ -26,8 +26,7 @@ import time
 
 SIM_TIME_STEP = 1.0 / 120.0
 MAX_TICKS = int(os.getenv("ELODIN_SENSOR_CAMERA_MAX_TICKS", "18000"))
-PROFILE = os.getenv("ELODIN_SENSOR_CAMERA_PROFILE", "0") == "1"
-EMIT_PERF = PROFILE and "run" in sys.argv
+EMIT_PERF = "run" in sys.argv
 BALL_RADIUS = 0.3
 BOUNDARY = 5.0
 BOUNCINESS = 0.95
@@ -157,6 +156,7 @@ for name, color in BALL_COLORS.items():
     )
 
 schematic = """
+    timeline follow_latest=#true
     hsplit {{
         viewport name=Main pos="(0,0,0,0, 14,14,10)" look_at="(0,0,0,0, 0,0,1)" show_grid=#true
         vsplit {{

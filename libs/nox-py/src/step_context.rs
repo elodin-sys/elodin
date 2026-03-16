@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 /// Background worker that pushes rendered frames to the DB without blocking the
 /// simulation tick. Uses a bounded channel so the sim never blocks — if the
@@ -45,7 +45,7 @@ impl FrameDbWriter {
 pub type SharedFrameDbWriter = Arc<Mutex<Option<FrameDbWriter>>>;
 
 use elodin_db::DB;
-use elodin_db::render_bridge::{RenderBridgeClient, RenderBridgeClientMetrics};
+use elodin_db::render_bridge::RenderBridgeClient;
 use impeller2::types::{ComponentId, PrimType, Timestamp};
 use numpy::{PyArray1, PyArrayDescrMethods, PyUntypedArray, PyUntypedArrayMethods};
 use pyo3::prelude::*;
@@ -57,10 +57,6 @@ use crate::Error;
 /// Shared persistent render bridge client.
 /// Created lazily on first render_camera() call, reused across all ticks.
 pub type SharedRenderClient = Arc<Mutex<Option<RenderBridgeClient>>>;
-
-fn sensor_camera_probe_logs_enabled() -> bool {
-    elodin_db::render_bridge::sensor_camera_probe_logs_enabled()
-}
 
 /// Helper function to convert a byte buffer to a numpy array based on primitive type.
 fn buf_to_numpy_array<'py>(py: Python<'py>, buf: &[u8], prim_type: PrimType) -> Bound<'py, PyAny> {
@@ -183,32 +179,26 @@ impl StepContext {
         }
     }
 
-    /// Internal implementation of render_cameras that handles the persistent client.
-    /// Returns the rendered frames (also written to DB) so callers can use them without a separate read_msg.
+    /// Render cameras, push frames to DB, and optionally return the first frame.
+    /// When `return_first` is false the frame data is moved into the DB writer
+    /// without cloning (~1.2 MB saved per frame).
     fn render_cameras_impl(
         &self,
         camera_names: &[&str],
-    ) -> Result<Vec<elodin_db::render_bridge::RenderedFrame>, Error> {
+        return_first: bool,
+    ) -> Result<Option<Vec<u8>>, Error> {
         if camera_names.is_empty() {
-            return Ok(vec![]);
+            return Ok(None);
         }
 
-        let profiling = sensor_camera_probe_logs_enabled();
-        let total_start = if profiling {
-            Some(Instant::now())
-        } else {
-            None
-        };
         let timestamp = Timestamp(self.timestamp.load(Ordering::SeqCst));
 
-        // Get or create the persistent render client.
         let mut guard = self.render_client.lock().map_err(|_| {
             Error::PyO3(pyo3::exceptions::PyRuntimeError::new_err(
                 "Render client lock poisoned",
             ))
         })?;
 
-        // Lazily connect on first use.
         if guard.is_none() {
             let client = RenderBridgeClient::connect(Duration::from_secs(30))
                 .map_err(|e| Error::PyO3(pyo3::exceptions::PyRuntimeError::new_err(e)))?;
@@ -216,19 +206,13 @@ impl StepContext {
         }
 
         let client = guard.as_mut().unwrap();
+        let frames = client
+            .render_cameras(camera_names, timestamp)
+            .map_err(|e| Error::PyO3(pyo3::exceptions::PyRuntimeError::new_err(e)))?;
 
-        let (frames, client_metrics) = if profiling {
-            client
-                .render_cameras_with_metrics(camera_names, timestamp)
-                .map_err(|e| Error::PyO3(pyo3::exceptions::PyRuntimeError::new_err(e)))?
-        } else {
-            let frames = client
-                .render_cameras(camera_names, timestamp)
-                .map_err(|e| Error::PyO3(pyo3::exceptions::PyRuntimeError::new_err(e)))?;
-            (frames, RenderBridgeClientMetrics::default())
-        };
-
-        // Push frames to DB via the background worker thread.
+        // Push frames to DB, moving data to avoid cloning.  When
+        // return_first is set, clone only the very first frame's data.
+        let mut first_data = None;
         {
             let mut writer_guard = self.frame_db_writer.lock().map_err(|_| {
                 Error::PyO3(pyo3::exceptions::PyRuntimeError::new_err(
@@ -239,30 +223,16 @@ impl StepContext {
                 *writer_guard = Some(FrameDbWriter::new(self.db.clone()));
             }
             let writer = writer_guard.as_ref().unwrap();
-            for frame in &frames {
+            for (i, frame) in frames.into_iter().enumerate() {
                 let msg_id = impeller2::types::msg_id(&frame.camera_name);
-                writer.push(msg_id, frame.timestamp, frame.data.clone());
+                if return_first && i == 0 {
+                    first_data = Some(frame.data.clone());
+                }
+                writer.push(msg_id, frame.timestamp, frame.data);
             }
         }
 
-        if let Some(start) = total_start {
-            let total_render_client_ms = elodin_db::render_bridge::elapsed_ms(start);
-            tracing::info!(
-                total_render_client_ms,
-                camera_count = camera_names.len(),
-                db_enqueue_count = frames.len(),
-                client_send_request_ms = client_metrics.send_request_ms,
-                client_response_header_read_ms = client_metrics.response_header_read_ms,
-                client_frame_header_read_ms = client_metrics.frame_header_read_ms,
-                client_frame_data_read_ms = client_metrics.frame_data_read_ms,
-                client_on_frame_ms = client_metrics.on_frame_ms,
-                client_frame_count = client_metrics.frame_count,
-                client_total_bytes = client_metrics.total_bytes,
-                "sensor_camera_probe_render_client"
-            );
-        }
-
-        Ok(frames)
+        Ok(first_data)
     }
 }
 
@@ -559,11 +529,8 @@ impl StepContext {
         py: Python<'py>,
         camera_name: &str,
     ) -> Result<Option<Bound<'py, PyAny>>, Error> {
-        let frames = self.render_cameras_impl(&[camera_name])?;
-        Ok(frames
-            .into_iter()
-            .next()
-            .map(|f| numpy::PyArray1::from_vec(py, f.data).into_any()))
+        let data = self.render_cameras_impl(&[camera_name], true)?;
+        Ok(data.map(|d| numpy::PyArray1::from_vec(py, d).into_any()))
     }
 
     /// Render multiple sensor cameras in a single batch request.
@@ -589,7 +556,7 @@ impl StepContext {
             )))
         })?;
         let name_refs: Vec<&str> = names.iter().map(|s| s.as_str()).collect();
-        self.render_cameras_impl(&name_refs).map(|_| ())
+        self.render_cameras_impl(&name_refs, false).map(|_| ())
     }
 
     /// Perform multiple component reads and writes in a single DB operation.
