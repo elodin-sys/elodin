@@ -4,6 +4,7 @@ use impeller2::types::ComponentId;
 
 use crate::error::Error;
 use crate::exec::ExecMetadata;
+use crate::iree_compile::IreeCompileStats;
 use crate::profile::Profiler;
 use crate::utils::SchemaExt;
 use crate::world::World;
@@ -31,6 +32,7 @@ fn nox_to_iree_element_type(ty: nox::ElementType) -> Result<iree_runtime::Elemen
 
 pub struct IREEExec {
     pub metadata: ExecMetadata,
+    pub compile_stats: Option<IreeCompileStats>,
     vmfb: Vec<u8>,
     session: iree_runtime::Session,
     #[allow(dead_code)]
@@ -41,7 +43,11 @@ unsafe impl Send for IREEExec {}
 unsafe impl Sync for IREEExec {}
 
 impl IREEExec {
-    pub fn new(vmfb: &[u8], metadata: ExecMetadata) -> Result<Self, Error> {
+    pub fn new(
+        vmfb: &[u8],
+        metadata: ExecMetadata,
+        compile_stats: Option<IreeCompileStats>,
+    ) -> Result<Self, Error> {
         let instance =
             iree_runtime::Instance::new().map_err(|e| Error::IreeRuntimeError(e.to_string()))?;
         let device = instance
@@ -54,6 +60,7 @@ impl IREEExec {
             .map_err(|e| Error::IreeRuntimeError(e.to_string()))?;
         Ok(Self {
             metadata,
+            compile_stats,
             vmfb: vmfb.to_vec(),
             session,
             instance,
@@ -211,8 +218,12 @@ impl IREEWorldExec {
     }
 
     pub fn fork(&self) -> Self {
-        let tick_exec = IREEExec::new(&self.tick_exec.vmfb, self.tick_exec.metadata.clone())
-            .expect("failed to fork IREE exec");
+        let tick_exec = IREEExec::new(
+            &self.tick_exec.vmfb,
+            self.tick_exec.metadata.clone(),
+            self.tick_exec.compile_stats.clone(),
+        )
+        .expect("failed to fork IREE exec");
         Self {
             world: self.world.clone(),
             tick_exec,
@@ -222,6 +233,17 @@ impl IREEWorldExec {
     }
 
     pub fn profile(&self) -> std::collections::HashMap<&'static str, f64> {
-        self.profiler.profile(self.world.sim_time_step().0)
+        let mut profile = self.profiler.profile(self.world.sim_time_step().0);
+        if let Some(stats) = &self.tick_exec.compile_stats {
+            profile.insert(
+                "compile",
+                stats.lower_ms + stats.stablehlo_emit_ms + stats.iree_compile_ms,
+            );
+            profile.insert("iree_lower", stats.lower_ms);
+            profile.insert("iree_stablehlo_emit", stats.stablehlo_emit_ms);
+            profile.insert("iree_compile", stats.iree_compile_ms);
+            profile.insert("iree_vmfb_size_bytes", stats.vmfb_size_bytes as f64);
+        }
+        profile
     }
 }

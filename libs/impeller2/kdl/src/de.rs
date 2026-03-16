@@ -28,6 +28,7 @@ pub fn parse_schematic(input: &str) -> Result<Schematic, KdlSchematicError> {
         let elem = parse_schematic_elem(node, input)?;
         match elem {
             SchematicElem::Theme(theme) => schematic.theme = Some(theme),
+            SchematicElem::Timeline(timeline) => schematic.timeline = Some(timeline),
             other => schematic.elems.push(other),
         }
     }
@@ -44,6 +45,7 @@ fn parse_schematic_elem(node: &KdlNode, src: &str) -> Result<SchematicElem, KdlS
         }
         "window" => Ok(SchematicElem::Window(parse_window(node, src)?)),
         "theme" => Ok(SchematicElem::Theme(parse_theme(node, src)?)),
+        "timeline" => Ok(SchematicElem::Timeline(parse_timeline(node, src)?)),
         "object_3d" => Ok(SchematicElem::Object3d(parse_object_3d(node, src)?)),
         "line_3d" => Ok(SchematicElem::Line3d(parse_line_3d(node, src)?)),
         "vector_arrow" => Ok(SchematicElem::VectorArrow(parse_vector_arrow(node, src)?)),
@@ -136,6 +138,97 @@ fn parse_theme(node: &KdlNode, _src: &str) -> Result<ThemeConfig, KdlSchematicEr
     Ok(ThemeConfig { mode, scheme })
 }
 
+fn parse_timeline(node: &KdlNode, src: &str) -> Result<TimelineConfig, KdlSchematicError> {
+    const TIMELINE_PROPERTIES: &[&str] = &["played_color", "future_color", "follow_latest"];
+    const TIMELINE_CHILDREN: &[&str] = &["played_color", "future_color"];
+
+    for entry in node.entries() {
+        let Some(name) = entry.name() else {
+            return Err(KdlSchematicError::InvalidValue {
+                property: "timeline".to_string(),
+                node: "timeline".to_string(),
+                expected: "named properties only".to_string(),
+                src: src.to_string(),
+                span: node.span(),
+            });
+        };
+
+        if !TIMELINE_PROPERTIES.contains(&name.value()) {
+            return Err(KdlSchematicError::InvalidValue {
+                property: name.value().to_string(),
+                node: "timeline".to_string(),
+                expected: format!("one of: {}", TIMELINE_PROPERTIES.join(", ")),
+                src: src.to_string(),
+                span: node.span(),
+            });
+        }
+    }
+
+    if let Some(children) = node.children() {
+        for child in children.nodes() {
+            if !TIMELINE_CHILDREN.contains(&child.name().value()) {
+                return Err(KdlSchematicError::InvalidValue {
+                    property: child.name().value().to_string(),
+                    node: "timeline".to_string(),
+                    expected: format!("one of: {}", TIMELINE_CHILDREN.join(", ")),
+                    src: src.to_string(),
+                    span: child.span(),
+                });
+            }
+        }
+    }
+
+    let parse_timeline_color = |names: &[&str], default: Color| {
+        if let Some(value) = names.iter().find_map(|name| node.get(*name)) {
+            let raw = value
+                .as_string()
+                .ok_or_else(|| KdlSchematicError::InvalidValue {
+                    property: names[0].to_string(),
+                    node: "timeline".to_string(),
+                    expected: "a named color or tuple string like \"(255,255,0,200)\"".to_string(),
+                    src: src.to_string(),
+                    span: node.span(),
+                })?;
+            parse_color_from_text(raw).ok_or_else(|| KdlSchematicError::InvalidValue {
+                property: names[0].to_string(),
+                node: "timeline".to_string(),
+                expected: "a named color or tuple string like \"(255,255,0,200)\"".to_string(),
+                src: src.to_string(),
+                span: node.span(),
+            })
+        } else if let Some(child) = node.children().and_then(|children| {
+            children
+                .nodes()
+                .iter()
+                .find(|child| names.contains(&child.name().value()))
+        }) {
+            parse_color_from_node(child).ok_or_else(|| KdlSchematicError::InvalidValue {
+                property: names[0].to_string(),
+                node: "timeline".to_string(),
+                expected: "a named color, RGBA values, or tuple string".to_string(),
+                src: src.to_string(),
+                span: child.span(),
+            })
+        } else {
+            Ok(default)
+        }
+    };
+
+    let played_color = parse_timeline_color(&["played_color"], default_timeline_played_color())?;
+    let future_color = parse_timeline_color(&["future_color"], default_timeline_future_color())?;
+
+    let follow_latest = node
+        .get("follow_latest")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
+    Ok(TimelineConfig {
+        played_color,
+        future_color,
+        follow_latest,
+    })
+}
+
 fn parse_name(node: &KdlNode) -> Option<String> {
     node.get("name")
         .and_then(|v| v.as_string())
@@ -216,6 +309,8 @@ fn parse_panel(node: &KdlNode, kdl_src: &str) -> Result<Panel, KdlSchematicError
         "data_overview" => Ok(Panel::DataOverview(parse_name(node))),
         "dashboard" => parse_dashboard(node),
         "video_stream" => parse_video_stream(node),
+        "sensor_view" => parse_sensor_view(node),
+        "log_stream" => parse_log_stream(node),
         _ => Err(KdlSchematicError::UnknownNode {
             node_type: node.name().to_string(),
             src: kdl_src.to_string(),
@@ -566,6 +661,34 @@ fn parse_video_stream(node: &KdlNode) -> Result<Panel, KdlSchematicError> {
     let name = parse_name(node);
 
     Ok(Panel::VideoStream(VideoStream { msg_name, name }))
+}
+
+fn parse_sensor_view(node: &KdlNode) -> Result<Panel, KdlSchematicError> {
+    let msg_name = node
+        .entries()
+        .iter()
+        .find(|e| e.name().is_none())
+        .and_then(|e| e.value().as_string())
+        .unwrap_or_default()
+        .to_string();
+
+    let name = parse_name(node);
+
+    Ok(Panel::SensorView(SensorView { msg_name, name }))
+}
+
+fn parse_log_stream(node: &KdlNode) -> Result<Panel, KdlSchematicError> {
+    let msg_name = node
+        .entries()
+        .iter()
+        .find(|e| e.name().is_none())
+        .and_then(|e| e.value().as_string())
+        .unwrap_or_default()
+        .to_string();
+
+    let name = parse_name(node);
+
+    Ok(Panel::LogStream(LogStream { msg_name, name }))
 }
 
 fn parse_query_table(node: &KdlNode) -> Result<Panel, KdlSchematicError> {
@@ -1815,6 +1938,44 @@ fn parse_ui_rect_from_node(node: &kdl::KdlNode) -> Option<UiRect> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_parse_timeline_config() {
+        let kdl = r#"timeline played_color="mint" future_color="white" follow_latest=#true"#;
+        let schematic = parse_schematic(kdl).unwrap();
+
+        assert!(schematic.elems.is_empty());
+        let timeline = schematic
+            .timeline
+            .expect("timeline config should be parsed");
+        assert_eq!(timeline.played_color, Color::MINT);
+        assert_eq!(timeline.future_color, Color::WHITE);
+        assert!(timeline.follow_latest);
+    }
+
+    #[test]
+    fn test_parse_timeline_unknown_properties_are_rejected() {
+        let kdl = r#"timeline unexpected=#true"#;
+        assert!(parse_schematic(kdl).is_err());
+    }
+
+    #[test]
+    fn test_parse_timeline_child_color() {
+        let kdl = r#"
+timeline follow_latest=#true {
+  played_color mint
+  future_color hyperblue
+}
+"#;
+        let schematic = parse_schematic(kdl).unwrap();
+
+        let timeline = schematic
+            .timeline
+            .expect("timeline config should be parsed");
+        assert_eq!(timeline.played_color, Color::MINT);
+        assert_eq!(timeline.future_color, Color::HYPERBLUE);
+        assert!(timeline.follow_latest);
+    }
 
     #[test]
     fn test_parse_simple_viewport() {

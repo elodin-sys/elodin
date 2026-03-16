@@ -34,6 +34,7 @@ __pycache__
 *.pyd
 **/venv/
 **/.venv/
+elodin_iree_debug/
 
 # examples
 betaflight_*
@@ -44,6 +45,7 @@ examples/rocket-barrowman/*.log
 **/rocket.glb
 dbs
 video-stream-db/
+logstream-db/
 testvids/
 *.log
 

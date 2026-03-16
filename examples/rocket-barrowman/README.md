@@ -18,7 +18,7 @@ git clone git@github.com:elodin-sys/elodin.git && cd elodin
 
 # Enter nix shell and install elodin
 nix develop
-install-elodin
+just install
 
 # Set up Python environment
 uv pip install -r examples/rocket-barrowman/requirements.txt

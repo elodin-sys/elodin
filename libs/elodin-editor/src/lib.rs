@@ -56,9 +56,12 @@ pub mod iter;
 pub mod object_3d;
 mod offset_parse;
 pub mod plugins;
+pub mod sensor_camera;
 pub mod ui;
 pub mod vector_arrow;
 
+#[cfg(all(not(target_family = "wasm"), target_family = "unix"))]
+pub mod headless;
 #[cfg(not(target_family = "wasm"))]
 pub mod run;
 
@@ -243,6 +246,7 @@ impl Plugin for EditorPlugin {
                 (
                     clamp_current_time,
                     advance_playback,
+                    follow_latest,
                     // Update selection after playback advances to keep line_3d and object_3d in sync.
                     set_selected_range,
                     impeller2_bevy::apply_cached_data,
@@ -265,6 +269,7 @@ impl Plugin for EditorPlugin {
             .add_systems(Update, set_eql_context_range.after(update_eql_context))
             .add_systems(Startup, spawn_ui_cam)
             .add_systems(Update, ui::video_stream::connect_streams)
+            .add_systems(Update, ui::log_stream::connect_streams)
             .add_systems(PostUpdate, ui::video_stream::set_visibility)
             .add_systems(PostUpdate, set_clear_color)
             .insert_resource(WireframeConfig {
@@ -278,12 +283,16 @@ impl Plugin for EditorPlugin {
             .init_resource::<EqlContext>()
             .init_resource::<SyncedObject3d>()
             .init_resource::<ui::data_overview::ComponentTimeRanges>()
+            .add_plugins(bevy_mat3_material::Mat3MaterialPlugin)
             .add_plugins(object_3d::Object3DPlugin)
             .add_plugins(GeoFramePlugin {
                 apply_transforms: false,
                 ..default()
             })
-            .add_plugins(bevy_mat3_material::Mat3MaterialPlugin);
+            .init_resource::<sensor_camera::SensorCameraConfigs>()
+            .init_resource::<sensor_camera::SensorCamerasSpawned>()
+            .add_systems(PreUpdate, sensor_camera::load_sensor_configs_from_db)
+            .add_systems(Update, sensor_camera::patch_sensor_view_dims);
         if cfg!(target_os = "windows") || cfg!(target_os = "linux") {
             app.add_systems(Update, handle_drag_resize);
         }
@@ -781,6 +790,22 @@ pub fn advance_playback(
     current_ts.0 = Timestamp(new_ts.0.clamp(earliest.0.0, last_updated.0.0));
 }
 
+pub fn follow_latest(
+    mut current_ts: ResMut<CurrentTimestamp>,
+    latest: Res<LastUpdated>,
+    earliest: Res<EarliestTimestamp>,
+    latest_follow: Res<ui::timeline::LatestFollow>,
+    replay: Option<Res<ReplayMode>>,
+) {
+    if replay.is_some() || !latest_follow.0 {
+        return;
+    }
+    if earliest.0 >= latest.0 {
+        return;
+    }
+    current_ts.0 = latest.0;
+}
+
 pub fn sync_pos(
     mut query: Query<(&mut Transform, Option<&mut GeoPosition>, Option<&mut GeoRotation>, &mut GridCell<i128>, &WorldPos)>,
     floating_origin: Res<FloatingOriginSettings>,
@@ -894,10 +919,10 @@ impl BevyExt for impeller2_wkt::Material {
 }
 
 #[derive(Default, Resource)]
-struct SyncedObject3d(HashMap<Entity, Entity>);
+pub struct SyncedObject3d(HashMap<Entity, Entity>);
 
 #[allow(clippy::too_many_arguments)]
-fn sync_object_3d(
+pub fn sync_object_3d(
     query: Query<(Entity, &ComponentId), With<impeller2_wkt::WorldPos>>,
     meshes: Query<&impeller2_wkt::Mesh>,
     materials: Query<&impeller2_wkt::Material>,

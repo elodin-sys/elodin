@@ -1,15 +1,16 @@
 use clap::{Parser, Subcommand};
 use miette::Context;
 use miette::IntoDiagnostic;
-#[cfg(not(target_os = "windows"))]
-use miette::miette;
-#[cfg(not(target_os = "windows"))]
-use stellarator::util::CancelToken;
 use tracing_subscriber::{EnvFilter, fmt::time::ChronoLocal, prelude::*};
 mod editor;
 
 #[derive(Parser, Clone)]
-#[command(author, version, about, long_about = None)]
+#[command(
+    author,
+    version = concat!(env!("CARGO_PKG_VERSION"), "+", env!("GIT_HASH")),
+    about,
+    long_about = None
+)]
 pub struct Cli {
     #[arg(short, long, default_value = "https://app.elodin.systems")]
     url: String,
@@ -26,6 +27,9 @@ enum Commands {
     /// Run an Elodin simulation in headless mode
     #[cfg(not(target_os = "windows"))]
     Run(editor::Args),
+    /// Start the headless sensor camera render server (managed by s10)
+    #[cfg(not(target_os = "windows"))]
+    RenderServer(editor::RenderServerArgs),
 }
 
 impl Cli {
@@ -37,6 +41,25 @@ impl Cli {
         if self.markdown_help {
             clap_markdown::print_help_markdown::<Cli>();
             std::process::exit(0);
+        }
+
+        // TracyClient binds its port from a C++ static constructor (before
+        // main), so TRACY_PORT must be in the environment before the process
+        // starts.  If it isn't set yet, re-exec with the correct port so the
+        // Tracy client picks it up on the next load.
+        #[cfg(all(feature = "tracy", not(target_os = "windows")))]
+        if std::env::var("TRACY_PORT").is_err() {
+            let port = match &self.command {
+                Some(Commands::RenderServer(_)) => "8088",
+                _ => "8087",
+            };
+            use std::os::unix::process::CommandExt;
+            let exe = std::env::current_exe().expect("failed to get current exe path");
+            let err = std::process::Command::new(exe)
+                .args(&std::env::args().collect::<Vec<_>>()[1..])
+                .env("TRACY_PORT", port)
+                .exec();
+            return Err(miette::miette!("re-exec failed: {err}"));
         }
 
         let filter = EnvFilter::try_from_default_env()
@@ -78,10 +101,9 @@ impl Cli {
         match &self.command {
             Some(Commands::Editor(args)) => self.clone().editor(args.clone(), rt),
             #[cfg(not(target_os = "windows"))]
-            Some(Commands::Run(args)) => self
-                .run_sim(args, rt, CancelToken::new())?
-                .join()
-                .map_err(|_| miette!("join error"))?,
+            Some(Commands::Run(args)) => self.clone().run_headless(args.clone(), rt),
+            #[cfg(not(target_os = "windows"))]
+            Some(Commands::RenderServer(args)) => self.clone().render_server(args.clone()),
             None => self.clone().editor(editor::Args::default(), rt),
         }
     }

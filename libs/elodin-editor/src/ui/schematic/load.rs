@@ -69,6 +69,7 @@ use crate::{
             DashboardPane, GraphPane, Pane, TileState, TreePane, ViewportPane, WindowDescriptor,
             WindowId, WindowState,
         },
+        timeline::TimelineSettings,
     },
     vector_arrow::{VectorArrowState, ViewportArrow},
 };
@@ -102,9 +103,11 @@ pub struct LoadSchematicParams<'w, 's> {
     pub icon_cache: ResMut<'w, IconTextureCache>,
     pub render_layer_alloc: ResMut<'w, RenderLayerAlloc>,
     pub hdr_enabled: ResMut<'w, HdrEnabled>,
+    pub timeline_settings: ResMut<'w, TimelineSettings>,
     pub schema_reg: Res<'w, ComponentSchemaRegistry>,
     pub eql: Res<'w, EqlContext>,
     pub node_updater_params: NodeUpdaterParams<'w, 's>,
+    pub sensor_camera_configs: Res<'w, crate::sensor_camera::SensorCameraConfigs>,
     cameras: Query<'w, 's, &'static mut Camera>,
     objects_3d: Query<'w, 's, Entity, With<Object3DState>>,
     vector_arrows: Query<'w, 's, Entity, With<VectorArrowState>>,
@@ -313,6 +316,7 @@ impl LoadSchematicParams<'_, '_> {
         let theme_mode = Some(theme_selection.mode.clone());
         let theme_mode_str = theme_mode.as_deref();
         let mut main_window_descriptor = None;
+        *self.timeline_settings = schematic.timeline.clone().unwrap_or_default().into();
 
         let panel_count = schematic
             .elems
@@ -356,6 +360,7 @@ impl LoadSchematicParams<'_, '_> {
                     }
                 }
                 impeller2_wkt::SchematicElem::Theme(_) => {}
+                impeller2_wkt::SchematicElem::Timeline(_) => {}
             }
         }
 
@@ -870,6 +875,73 @@ impl LoadSchematicParams<'_, '_> {
                     name: label,
                 };
                 tile_state.insert_tile(Tile::Pane(Pane::VideoStream(pane)), parent_id, false)
+            }
+            Panel::SensorView(sensor_view) => {
+                let msg_id = impeller2::types::msg_id(&sensor_view.msg_name);
+                let label = sensor_view
+                    .name
+                    .clone()
+                    .unwrap_or_else(|| format!("Sensor View {}", sensor_view.msg_name));
+
+                let raw_rgba_dims = self
+                    .sensor_camera_configs
+                    .0
+                    .iter()
+                    .find(|c| c.camera_name == sensor_view.msg_name)
+                    .map(|c| (c.width, c.height));
+
+                let entity = self
+                    .commands
+                    .spawn((
+                        crate::ui::video_stream::VideoStream {
+                            msg_id,
+                            msg_name: sensor_view.msg_name.clone(),
+                            raw_rgba_dims,
+                            ..Default::default()
+                        },
+                        bevy::ui::Node {
+                            position_type: bevy::ui::PositionType::Absolute,
+                            ..Default::default()
+                        },
+                        bevy::prelude::ImageNode {
+                            image_mode: bevy::ui::widget::NodeImageMode::Stretch,
+                            ..Default::default()
+                        },
+                        crate::ui::video_stream::VideoDecoderHandle::default(),
+                        crate::ui::video_stream::VideoFrameCache::for_raw_rgba(),
+                    ))
+                    .id();
+
+                let pane = crate::ui::video_stream::VideoStreamPane {
+                    entity,
+                    name: label,
+                };
+                tile_state.insert_tile(Tile::Pane(Pane::SensorView(pane)), parent_id, false)
+            }
+            Panel::LogStream(log_stream) => {
+                let msg_id = impeller2::types::msg_id(&log_stream.msg_name);
+                let label = log_stream
+                    .name
+                    .clone()
+                    .unwrap_or_else(|| format!("Log Stream {}", log_stream.msg_name));
+
+                let entity = self
+                    .commands
+                    .spawn((
+                        crate::ui::log_stream::LogStreamState {
+                            msg_id,
+                            msg_name: log_stream.msg_name.clone(),
+                            ..Default::default()
+                        },
+                        crate::ui::log_stream::LogCache::default(),
+                    ))
+                    .id();
+
+                let pane = crate::ui::log_stream::LogStreamPane {
+                    entity,
+                    name: label,
+                };
+                tile_state.insert_tile(Tile::Pane(Pane::LogStream(pane)), parent_id, false)
             }
             // Inspector and Hierarchy are now fixed sidebars, not tile panels.
             // Set the corresponding sidebar visibility flags so they appear.

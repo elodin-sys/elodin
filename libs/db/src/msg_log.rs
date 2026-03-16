@@ -61,6 +61,10 @@ impl MsgLog {
     }
 
     pub fn push(&self, timestamp: Timestamp, msg: &[u8]) -> Result<(), Error> {
+        // Only data_log is guarded; offsets/timestamps overflow is unreachable (~52+ days at 120 Hz), and for messages > 12 B the data guard fires first.
+        if msg.len() > 12 && self.bufs.data_len() + msg.len() as u64 > u32::MAX as u64 {
+            self.truncate();
+        }
         self.bufs.insert_msg(msg)?;
         self.timestamps.write(&timestamp.to_le_bytes())?;
         self.waker.wake_all();
@@ -166,6 +170,10 @@ struct BufLog {
 impl BufLog {
     pub fn bufs(&self) -> &[UmbraBuf] {
         <[UmbraBuf]>::ref_from_bytes(self.offsets.data()).expect("offsets buf invalid")
+    }
+
+    fn data_len(&self) -> u64 {
+        self.data_log.len()
     }
 
     fn sync_all(&self) -> Result<(), Error> {

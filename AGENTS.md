@@ -5,7 +5,7 @@ Elodin is an open-source platform for rapid design, testing, and simulation of a
 ## Rules
 
 - Always use the `nix develop` shell when developing changes.
-- Always use `uv` inside the nix shell for Python everything (the `install-elodin` shell function sets this up).
+- Always use `uv` inside the nix shell for Python everything (`just install` sets this up).
 - Don't commit changes to git — that's for the developer to do
 - When suggesting new dependencies, check they are well supported and maintained.
 - Never use unsafe Rust code.
@@ -17,7 +17,7 @@ Elodin is an open-source platform for rapid design, testing, and simulation of a
 
 ```bash
 nix develop
-install-elodin
+just install
 ```
 
 ### CI Checks

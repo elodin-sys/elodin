@@ -26,38 +26,66 @@
     ...
   }: let
     rustToolchain = p: p.rust-bin.fromRustupToolchainFile ./rust-toolchain.toml;
-    elodinOverlay = final: prev: {
+
+    elodinOverlay = gitRev: final: prev: {
       tracy = final.callPackage ./nix/pkgs/tracy.nix {
         tracy = prev.tracy;
       };
       elodin = rec {
+        iree_runtime_tracy =
+          if final.stdenv.isLinux
+          then
+            final.callPackage ./nix/pkgs/iree-runtime.nix {
+              enableTracing = true;
+              tracySrc = final.tracy.src;
+            }
+          else null;
+
         elodin-py = final.callPackage ./nix/pkgs/elodin-py.nix {
           inherit rustToolchain;
           python = final.python313;
           pythonPackages = final.python313Packages;
         };
+        elodin-py-tracy = final.callPackage ./nix/pkgs/elodin-py.nix {
+          inherit rustToolchain iree_runtime_tracy;
+          python = final.python313;
+          pythonPackages = final.python313Packages;
+          enableTracy = true;
+        };
         elodin-cli = final.callPackage ./nix/pkgs/elodin-cli.nix {
-          inherit rustToolchain;
+          inherit rustToolchain gitRev;
           elodinPy = elodin-py.py;
           python = elodin-py.python;
           pythonPackages = elodin-py.pythonPackages;
         };
-        elodin-db = final.callPackage ./aleph/pkgs/elodin-db.nix {inherit rustToolchain;};
+        elodin-cli-tracy = final.callPackage ./nix/pkgs/elodin-cli.nix {
+          inherit rustToolchain gitRev;
+          elodinPy = elodin-py-tracy.py;
+          python = elodin-py-tracy.python;
+          pythonPackages = elodin-py-tracy.pythonPackages;
+          enableTracy = true;
+        };
+        elodin-db = final.callPackage ./aleph/pkgs/elodin-db.nix {
+          inherit rustToolchain gitRev;
+        };
         elodinsink = final.callPackage ./nix/pkgs/elodinsink.nix {inherit rustToolchain;};
       };
     };
   in
     # overlays are system-agnostic ⇒ define them at top level
     {
-      overlays.default = elodinOverlay;
+      overlays.default = elodinOverlay "unknown";
     }
     // flake-utils.lib.eachDefaultSystem (
       system: let
+        gitRev =
+          nixpkgs.lib.substring 0 7
+          (self.shortRev or self.dirtyShortRev or self.rev or self.dirtyRev or "unknown");
         pkgs = import nixpkgs {
           inherit system;
           overlays = [
             rust-overlay.overlays.default
-            elodinOverlay
+            (elodinOverlay gitRev)
           ];
         };
 
@@ -70,10 +98,15 @@
           elodin-py = elodin-py.py;
         };
 
-        devShells = with shells; {
-          inherit elodin;
-          default = shells.elodin;
-        };
+        devShells =
+          (with shells; {
+            inherit elodin;
+            default = shells.elodin;
+            run = pkgs.callPackage ./nix/run.nix {};
+          })
+          // pkgs.lib.optionalAttrs pkgs.stdenv.isLinux {
+            tracy = pkgs.callPackage ./nix/tracy.nix {};
+          };
 
         formatter = pkgs.alejandra;
       }

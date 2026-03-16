@@ -267,6 +267,41 @@ fn cli_info_command() {
 /// Test CLI info command with valid MP4 file
 #[test]
 fn cli_info_command_valid_file() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let mp4_path = temp_dir.path().join("test_info.mp4");
+
+    // Get the crate directory for fixture paths
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let video_fixture = manifest_dir.join("fixtures/video_samples/frame0_key.264");
+
+    let mux_output = Command::new("cargo")
+        .args([
+            "run",
+            "--bin",
+            "muxide",
+            "--",
+            "mux",
+            "--video",
+            video_fixture.to_str().unwrap(),
+            "--width",
+            "1920",
+            "--height",
+            "1080",
+            "--fps",
+            "30",
+            "--output",
+            mp4_path.to_str().unwrap(),
+        ])
+        .output()
+        .expect("Failed to run mux CLI");
+
+    assert!(
+        mux_output.status.success(),
+        "Mux command failed: {}",
+        String::from_utf8_lossy(&mux_output.stderr)
+    );
+    assert!(mp4_path.exists(), "MP4 file was not created");
+
     let output = Command::new("cargo")
         .args([
             "run",
@@ -274,7 +309,7 @@ fn cli_info_command_valid_file() {
             "muxide",
             "--",
             "info",
-            "fixtures/minimal.mp4",
+            mp4_path.to_str().unwrap(),
         ])
         .output()
         .expect("Failed to run CLI");

@@ -47,7 +47,10 @@ use crate::{
             SchematicLiveReloadRx, load_schematic_file,
         },
         tiles::{self, set_mode_all},
-        timeline::{PlaybackSpeed, StreamTickOrigin, timeline_slider::UITick},
+        timeline::{
+            AutoFollowLatestState, LatestFollow, PlaybackSpeed, StreamTickOrigin,
+            timeline_slider::UITick,
+        },
     },
 };
 
@@ -844,6 +847,8 @@ fn goto_tick() -> PaletteItem {
                       mut current_tick: ResMut<CurrentTimestamp>,
                       mut ui_tick: ResMut<UITick>,
                       mut paused: ResMut<Paused>,
+                      mut latest_follow: ResMut<LatestFollow>,
+                      mut auto_follow_latest_state: ResMut<AutoFollowLatestState>,
                       earliest_timestamp: Res<EarliestTimestamp>,
                       mut tick_origin: ResMut<StreamTickOrigin>,
                       tick_time: Res<SimulationTimeStep>| {
@@ -891,7 +896,9 @@ fn goto_tick() -> PaletteItem {
                     };
 
                     let timestamp = Timestamp(target_us);
+                    auto_follow_latest_state.cancel();
                     paused.0 = true;
+                    latest_follow.0 = false;
                     current_tick.0 = timestamp;
                     ui_tick.0 = timestamp.0;
                     if parsed_tick == 0 {

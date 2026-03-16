@@ -119,6 +119,7 @@ impl WidgetSystem for TreeWidget<'_, '_> {
                     impeller2_wkt::SchematicElem::VectorArrow(_arrow) => {}
                     impeller2_wkt::SchematicElem::Window(_window) => {}
                     impeller2_wkt::SchematicElem::Theme(_) => {}
+                    impeller2_wkt::SchematicElem::Timeline(_) => {}
                 }
             }
         });
@@ -149,6 +150,8 @@ fn panel(
         Panel::DataOverview(_) => icons.viewport,
         Panel::Dashboard(_) => icons.viewport,
         Panel::VideoStream(_) => icons.viewport,
+        Panel::SensorView(_) => icons.viewport,
+        Panel::LogStream(_) => icons.viewport,
     };
     let children = p.children();
     let selected = if p.aux().copied() == selected_object.entity() {

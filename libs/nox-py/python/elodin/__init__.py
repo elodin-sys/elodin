@@ -492,6 +492,7 @@ class World(WorldBuilder):
         start_timestamp: Optional[int] = None,
         log_level: Optional[str] = None,
         backend: str = "iree",
+        iree_flags: Optional[list[str]] = None,
     ):
         current_frame = inspect.currentframe()
         if current_frame is None:
@@ -514,6 +515,7 @@ class World(WorldBuilder):
             start_timestamp,
             log_level,
             backend,
+            iree_flags,
         )
         locals = frame.f_locals
         if not interactive and addr is not None:
@@ -522,6 +524,30 @@ class World(WorldBuilder):
             readline.set_completer(rlcompleter.Completer(locals).complete)
             readline.parse_and_bind("tab: complete")
             code.InteractiveConsole(locals=locals).interact()
+
+    def build(
+        self,
+        system: System,
+        sim_time_step: float = 1 / 120.0,
+        run_time_step: Optional[float] = None,
+        default_playback_speed: float = 1.0,
+        max_ticks: Optional[int] = None,
+        optimize: bool = False,
+        db_path: Optional[str] = None,
+        backend: str = "iree",
+        iree_flags: Optional[list[str]] = None,
+    ) -> Exec:
+        return super().build(
+            system,
+            sim_time_step,
+            run_time_step,
+            default_playback_speed,
+            max_ticks,
+            optimize,
+            db_path,
+            backend,
+            iree_flags,
+        )
 
     def to_jax(
         self,

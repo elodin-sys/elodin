@@ -8,6 +8,7 @@ use crate::{
         colors::EColor,
         inspector, monitor, plot, query_plot, query_table,
         tiles::{self, Pane},
+        timeline::TimelineSettings,
         window::compute_window_title,
     },
     vector_arrow::ViewportArrow,
@@ -66,7 +67,9 @@ pub struct SchematicParam<'w, 's> {
     pub primary_window: Single<'w, 's, Entity, With<PrimaryWindow>>,
     pub dashboards: Query<'w, 's, &'static Dashboard<Entity>>,
     pub video_streams: Query<'w, 's, &'static super::video_stream::VideoStream>,
+    pub log_streams: Query<'w, 's, &'static super::log_stream::LogStreamState>,
     pub hdr_enabled: Res<'w, HdrEnabled>,
+    pub timeline_settings: Res<'w, TimelineSettings>,
     pub metadata: Res<'w, ComponentMetadataRegistry>,
     pub geo_positions: Query<'w, 's, &'static GeoPosition>,
 }
@@ -98,6 +101,8 @@ impl SchematicParam<'_, '_> {
             Pane::SchematicTree(pane) => Some(pane.name.clone()),
             Pane::DataOverview(pane) => Some(pane.name.clone()),
             Pane::VideoStream(pane) => Some(pane.name.clone()),
+            Pane::SensorView(pane) => Some(pane.name.clone()),
+            Pane::LogStream(pane) => Some(pane.name.clone()),
         }
     }
 
@@ -302,6 +307,20 @@ impl SchematicParam<'_, '_> {
                             name: pane_name,
                         }))
                     }
+                    Pane::SensorView(sv_pane) => {
+                        let video_stream = self.video_streams.get(sv_pane.entity).ok()?;
+                        Some(Panel::SensorView(impeller2_wkt::SensorView {
+                            msg_name: video_stream.msg_name.clone(),
+                            name: pane_name,
+                        }))
+                    }
+                    Pane::LogStream(ls_pane) => {
+                        let log_state = self.log_streams.get(ls_pane.entity).ok()?;
+                        Some(Panel::LogStream(impeller2_wkt::LogStream {
+                            msg_name: log_state.msg_name.clone(),
+                            name: pane_name,
+                        }))
+                    }
                     Pane::DataOverview(_) => Some(Panel::DataOverview(pane_name)),
 
                     // Structural panes
@@ -453,6 +472,7 @@ pub fn tiles_to_schematic(
     }
 
     schematic.elems.extend(window_elems);
+    schematic.timeline = Some((*param.timeline_settings).into());
     if let Ok((state, _)) = param.windows_state.get(*param.primary_window)
         && let Some(mode) = state.descriptor.mode.clone()
     {

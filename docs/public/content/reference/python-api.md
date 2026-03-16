@@ -52,6 +52,29 @@ The Elodin simulation world.
     Load a GLB asset as an Elodin Scene Archetype.
     - `url`: the URL or filepath of the GLB asset
 
+- `sensor_camera(entity, name, width, height, fov=90.0, near=0.01, far=1000.0, pos_offset=[0,0,0], look_at_offset=[0,0,0], format="rgba", effect="normal", effect_params={})` -> None
+
+    Register a virtual sensor camera on an entity. The camera renders offscreen frames on demand via a headless GPU render-server process. Frames are produced by calling `ctx.render_camera()` in a `post_step` callback.
+
+    - `entity` : [elodin.EntityId], the entity the camera is attached to.
+    - `name` : `string`, the camera name. Combined with the entity name to form the full identifier (e.g., entity `"drone"` + name `"scene_cam"` → `"drone.scene_cam"`).
+    - `width` : `int`, frame width in pixels.
+    - `height` : `int`, frame height in pixels.
+    - `fov` : `float`, vertical field of view in degrees, defaults to `90.0`.
+    - `near` : `float`, near clipping plane, defaults to `0.01`.
+    - `far` : `float`, far clipping plane, defaults to `1000.0`.
+    - `pos_offset` : `list[float]`, camera position offset from the entity origin in the entity's body frame, defaults to `[0, 0, 0]`.
+    - `look_at_offset` : `list[float]`, look-at direction offset in the entity's body frame, defaults to `[0, 0, 0]`.
+    - `format` : `string`, pixel format, defaults to `"rgba"`.
+    - `effect` : `string`, GPU post-process effect: `"normal"`, `"thermal"`, `"night_vision"`, or `"depth"`. Defaults to `"normal"`.
+    - `effect_params` : `dict`, effect-specific parameters (e.g., `{"contrast": 1.5, "noise_sigma": 0.02}` for thermal).
+
+    The camera transform follows the entity: as the entity moves and rotates, the camera position and look-at point rotate with it in body frame.
+
+    {% alert(kind="notice") %}
+    `sensor_camera` only registers the camera. No rendering occurs until `ctx.render_camera()` is called in a `post_step` callback. This gives you explicit control over render timing and frame rate.
+    {% end %}
+
 - `run(system, sim_time_step, run_time_step, default_playback_speed, max_ticks, optimize, is_canceled, pre_step, post_step, db_path, interactive, start_timestamp)` -> None
 
     Run the simulation.
@@ -127,6 +150,34 @@ Context object passed to `pre_step` and `post_step` callbacks, providing direct 
     {% alert(kind="notice") %}
     Use batch operations when reading or writing multiple components in a single callback for better performance at high tick rates.
     {% end %}
+
+- `render_camera(camera_name)` -> `numpy.ndarray | None`
+
+    Trigger the headless render-server to render a sensor camera and **block** until the frame is ready. Returns the frame as a numpy uint8 array of raw RGBA pixel data, or `None` if no frame was produced (e.g., during render pipeline warmup). Also writes the frame to the database so the editor's `sensor_view` panels can display it.
+
+    - `camera_name` : `string`, the full camera name in `"entity.camera"` format (e.g., `"drone.scene_cam"`)
+
+    Raises `RuntimeError` if no render bridge is available (not running under `elodin run` or `elodin editor`).
+
+    {% alert(kind="notice") %}
+    `render_camera()` is a blocking call — the simulation does not advance until the frame is produced. This ensures deterministic, timestamp-correct frames for SITL workflows where flight software needs the camera image before computing the next control command.
+    {% end %}
+
+- `render_cameras(camera_names)` -> None
+
+    Render multiple sensor cameras in a single batch request. More efficient than calling `render_camera()` multiple times when rendering multiple cameras on the same tick, as it uses a single round-trip to the render-server.
+
+    - `camera_names` : `list[str]`, list of camera names in `"entity.camera"` format (e.g., `["drone.scene_cam", "drone.thermal_cam"]`)
+
+    After this call returns, `read_msg(camera_name)` for each camera contains the rendered frame at the current simulation timestamp.
+
+- `read_msg(msg_name)` -> `numpy.ndarray | None`
+
+    Read the latest message payload from the database as a numpy byte array. Used to read sensor camera frames that were rendered by `render_camera()` or `render_cameras()`.
+
+    - `msg_name` : `string`, the message name (e.g., `"drone.scene_cam"`)
+
+    Returns a numpy uint8 array containing the message payload, or `None` if no message exists.
 
 - `truncate()` -> None
 

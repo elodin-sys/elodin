@@ -718,6 +718,8 @@ impl TileState {
                             Pane::QueryPlot(_) => ("QueryPlot", "QueryPlot"),
                             Pane::ActionTile(action) => ("Action", action.name.as_str()),
                             Pane::VideoStream(video) => ("VideoStream", video.name.as_str()),
+                            Pane::SensorView(sv) => ("SensorView", sv.name.as_str()),
+                            Pane::LogStream(ls) => ("LogStream", ls.name.as_str()),
                             Pane::Dashboard(dashboard) => ("Dashboard", dashboard.name.as_str()),
                             Pane::SchematicTree(pane) => ("SchematicTree", pane.name.as_str()),
                             Pane::DataOverview(pane) => ("DataOverview", pane.name.as_str()),
@@ -812,7 +814,12 @@ impl TileState {
                     }
                 }
 
-                Tile::Pane(Pane::VideoStream(pane)) => {
+                Tile::Pane(Pane::VideoStream(pane) | Pane::SensorView(pane)) => {
+                    if let Ok(mut e) = commands.get_entity(pane.entity) {
+                        e.despawn();
+                    }
+                }
+                Tile::Pane(Pane::LogStream(pane)) => {
                     if let Ok(mut e) = commands.get_entity(pane.entity) {
                         e.despawn();
                     }
@@ -915,6 +922,8 @@ pub enum Pane {
     QueryPlot(super::query_plot::QueryPlotPane),
     ActionTile(ActionTilePane),
     VideoStream(super::video_stream::VideoStreamPane),
+    SensorView(super::video_stream::VideoStreamPane),
+    LogStream(super::log_stream::LogStreamPane),
     Dashboard(DashboardPane),
     SchematicTree(TreePane),
     DataOverview(DataOverviewPane),
@@ -934,10 +943,12 @@ impl Pane {
                 }
             }
             Pane::VideoStream(pane) => out.push_ui_node(pane.entity),
+            Pane::SensorView(pane) => out.push_ui_node(pane.entity),
             Pane::Dashboard(pane) => out.push_ui_node(pane.entity),
             Pane::Monitor(_)
             | Pane::QueryTable(_)
             | Pane::ActionTile(_)
+            | Pane::LogStream(_)
             | Pane::SchematicTree(_)
             | Pane::DataOverview(_) => {}
         }
@@ -966,6 +977,8 @@ impl Pane {
             }
             Pane::ActionTile(action) => action.name.to_string(),
             Pane::VideoStream(video_stream) => video_stream.name.to_string(),
+            Pane::SensorView(sv) => sv.name.to_string(),
+            Pane::LogStream(ls) => ls.name.to_string(),
             Pane::Dashboard(dashboard) => {
                 if let Ok(dash) = dashboards.get(dashboard.entity) {
                     return dash.root.name.as_deref().unwrap_or("Dashboard").to_string();
@@ -1004,6 +1017,12 @@ impl Pane {
             }
             Pane::VideoStream(video) => {
                 video.name = title.to_string();
+            }
+            Pane::SensorView(sv) => {
+                sv.name = title.to_string();
+            }
+            Pane::LogStream(ls) => {
+                ls.name = title.to_string();
             }
             Pane::Dashboard(dashboard) => {
                 dashboard.name = title.to_string();
@@ -1161,13 +1180,23 @@ impl Pane {
                 ui.add_widget_with::<ActionTileWidget>(world, "action_tile", pane.entity);
                 egui_tiles::UiResponse::None
             }
-            Pane::VideoStream(pane) => {
+            Pane::VideoStream(pane) | Pane::SensorView(pane) => {
                 ui.add_widget_with::<super::video_stream::VideoStreamWidget>(
                     world,
                     "video_stream",
                     VideoStreamWidgetArgs {
                         entity: pane.entity,
                         window: target_window,
+                    },
+                );
+                egui_tiles::UiResponse::None
+            }
+            Pane::LogStream(pane) => {
+                ui.add_widget_with::<super::log_stream::LogStreamWidget>(
+                    world,
+                    "log_stream",
+                    super::log_stream::LogStreamWidgetArgs {
+                        entity: pane.entity,
                     },
                 );
                 egui_tiles::UiResponse::None
@@ -2654,7 +2683,14 @@ impl WidgetSystem for TileLayout<'_, '_> {
                             state_mut.commands.entity(pane.entity).despawn();
                         };
 
-                        if let egui_tiles::Tile::Pane(Pane::VideoStream(pane)) = tile {
+                        if let egui_tiles::Tile::Pane(
+                            Pane::VideoStream(pane) | Pane::SensorView(pane),
+                        ) = tile
+                        {
+                            state_mut.commands.entity(pane.entity).despawn();
+                        };
+
+                        if let egui_tiles::Tile::Pane(Pane::LogStream(pane)) = tile {
                             state_mut.commands.entity(pane.entity).despawn();
                         };
 
@@ -3076,8 +3112,8 @@ impl WidgetSystem for TileLayout<'_, '_> {
                             cam.try_insert(ViewportRect(None));
                         }
                     }
-                    Pane::ActionTile(_) => {}
-                    Pane::VideoStream(stream) => {
+                    Pane::ActionTile(_) | Pane::LogStream(_) => {}
+                    Pane::VideoStream(stream) | Pane::SensorView(stream) => {
                         if let Ok(mut stream) = state_mut.commands.get_entity(stream.entity) {
                             stream.try_insert(IsTileVisible(visible));
                         }

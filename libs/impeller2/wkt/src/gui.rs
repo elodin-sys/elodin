@@ -12,6 +12,14 @@ fn default_true() -> bool {
     true
 }
 
+pub fn default_timeline_played_color() -> Color {
+    Color::YELLOW
+}
+
+pub fn default_timeline_future_color() -> Color {
+    Color::WHITE
+}
+
 pub fn default_viewport_frustums_color() -> Color {
     Color::YELLOW
 }
@@ -28,6 +36,8 @@ pub struct Schematic<T = ()> {
     pub elems: Vec<SchematicElem<T>>,
     #[serde(default)]
     pub theme: Option<ThemeConfig>,
+    #[serde(default)]
+    pub timeline: Option<TimelineConfig>,
 }
 
 #[cfg(feature = "bevy")]
@@ -43,6 +53,7 @@ impl<T> Default for Schematic<T> {
         Self {
             elems: Default::default(),
             theme: None,
+            timeline: None,
         }
     }
 }
@@ -56,6 +67,7 @@ pub enum SchematicElem<T = ()> {
     VectorArrow(VectorArrow3d<T>),
     Window(WindowSchematic),
     Theme(ThemeConfig),
+    Timeline(TimelineConfig),
 }
 
 impl<T> SchematicElem<T> {
@@ -67,6 +79,7 @@ impl<T> SchematicElem<T> {
             SchematicElem::VectorArrow(arrow) => SchematicElem::VectorArrow(arrow.map_aux(|_| ())),
             SchematicElem::Window(window) => SchematicElem::Window(window),
             SchematicElem::Theme(theme) => SchematicElem::Theme(theme.clone()),
+            SchematicElem::Timeline(timeline) => SchematicElem::Timeline(timeline.clone()),
         }
     }
 }
@@ -95,6 +108,26 @@ pub struct ThemeConfig {
     pub scheme: Option<String>,
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+pub struct TimelineConfig {
+    #[serde(default = "default_timeline_played_color")]
+    pub played_color: Color,
+    #[serde(default = "default_timeline_future_color")]
+    pub future_color: Color,
+    #[serde(default)]
+    pub follow_latest: bool,
+}
+
+impl Default for TimelineConfig {
+    fn default() -> Self {
+        Self {
+            played_color: default_timeline_played_color(),
+            future_color: default_timeline_future_color(),
+            follow_latest: false,
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(bound = "T: Serialize + DeserializeOwned")]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
@@ -114,6 +147,8 @@ pub enum Panel<T = ()> {
     DataOverview(Option<String>),
     Dashboard(Box<Dashboard<T>>),
     VideoStream(VideoStream),
+    SensorView(SensorView),
+    LogStream(LogStream),
 }
 
 impl<T> Panel<T> {
@@ -136,6 +171,8 @@ impl<T> Panel<T> {
             Panel::DataOverview(name) => name.as_deref().unwrap_or("Data Overview"),
             Panel::Dashboard(d) => d.root.name.as_deref().unwrap_or("Dashboard"),
             Panel::VideoStream(v) => v.name.as_deref().unwrap_or("Video Stream"),
+            Panel::SensorView(v) => v.name.as_deref().unwrap_or("Sensor View"),
+            Panel::LogStream(l) => l.name.as_deref().unwrap_or("Log Stream"),
         }
     }
 
@@ -181,6 +218,8 @@ impl<T> Panel<T> {
             Panel::Viewport(v) => Panel::Viewport(v.map_aux(f)),
             Panel::Dashboard(d) => Panel::Dashboard(Box::new(d.map_aux(f))),
             Panel::VideoStream(v) => Panel::VideoStream(v.clone()),
+            Panel::SensorView(v) => Panel::SensorView(v.clone()),
+            Panel::LogStream(l) => Panel::LogStream(l.clone()),
         }
     }
 
@@ -917,6 +956,45 @@ pub struct VideoStream {
     pub msg_name: String,
     /// Display name for the tile
     pub name: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct SensorView {
+    /// Message name for the sensor camera frame data (e.g. "drone.scene_cam")
+    pub msg_name: String,
+    /// Display name for the tile
+    pub name: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct LogStream {
+    /// Message name for the log entry stream (e.g. "fsw.log")
+    pub msg_name: String,
+    /// Display name for the tile
+    pub name: Option<String>,
+}
+
+fn default_format() -> String {
+    "rgba".to_string()
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SensorCameraConfig {
+    pub entity_name: String,
+    pub camera_name: String,
+    pub width: u32,
+    pub height: u32,
+    pub fov_degrees: f32,
+    pub near: f32,
+    pub far: f32,
+    pub pos_offset: [f64; 3],
+    pub look_at_offset: [f64; 3],
+    #[serde(default = "default_format")]
+    pub format: String,
+    #[serde(default)]
+    pub effect: String,
+    #[serde(default)]
+    pub effect_params: HashMap<String, f64>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]

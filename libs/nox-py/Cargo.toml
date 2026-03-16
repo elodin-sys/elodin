@@ -9,6 +9,7 @@ publish = false
 [features]
 publish = ["pyo3/extension-module", "pyo3/abi3-py310"]
 shared = ["nox/shared"]
+tracy = ["iree-runtime/tracy"]
 
 [package.metadata.maturin]
 name = "elodin"

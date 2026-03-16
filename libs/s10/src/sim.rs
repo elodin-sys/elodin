@@ -1,4 +1,5 @@
 use std::iter;
+use std::process::Stdio;
 use std::{
     net::{Ipv4Addr, SocketAddr},
     path::PathBuf,
@@ -32,9 +33,10 @@ impl SimRecipe {
         debug!("running sim");
 
         let mut cmd = python_tokio_command()?;
-        if !cfg!(target_os = "linux") {
-            cmd.process_group(0); // NOTE(sphw): this causes all sorts of issues on linux, not sure why
-        }
+        cmd.process_group(0);
+        // Close stdin to prevent SIGTTIN when child is in background process group
+        cmd.stdin(Stdio::null());
+        cmd.env("TRACY_PORT", "8089");
         let port = crate::liveness::serve_tokio().await?;
         let mut child = cmd
             .arg(&self.path)
@@ -47,10 +49,8 @@ impl SimRecipe {
         tokio::select! {
             _ = cancel_token.wait() => {
                 if let Some(pid) = child.id() {
-                    let _ = nix::sys::signal::killpg(
-                        nix::unistd::Pid::from_raw(pid as i32),
-                        nix::sys::signal::Signal::SIGTERM,
-                    );
+                    let pid = nix::unistd::Pid::from_raw(pid as i32);
+                    let _ = nix::sys::signal::killpg(pid, nix::sys::signal::Signal::SIGTERM);
                 }
                 tracing::info!("Waiting for sim process to exit");
                 match tokio::time::timeout(Duration::from_secs(2), child.wait()).await {
@@ -59,7 +59,10 @@ impl SimRecipe {
                     }
                     Err(_) => {
                         tracing::warn!("Sim process did not exit after SIGTERM, forcing kill");
-                        let _ = child.start_kill();
+                        if let Some(pid) = child.id() {
+                            let pid = nix::unistd::Pid::from_raw(pid as i32);
+                            let _ = nix::sys::signal::killpg(pid, nix::sys::signal::Signal::SIGKILL);
+                        }
                         let _ = child.wait().await;
                     }
                 }
@@ -104,6 +107,18 @@ impl SimRecipe {
 }
 
 pub fn python_command() -> Result<std::process::Command, Error> {
+    let venv_python = std::path::Path::new(".venv/bin/python");
+    if venv_python.exists() {
+        let mut cmd = std::process::Command::new(venv_python);
+        // When built with tracy, the nox-py .so is large enough (IREE+TracyClient)
+        // to exceed the default static TLS reservation. Increase the optional
+        // static TLS allocation so dlopen() succeeds. Unlike LD_PRELOAD, this
+        // env var is safe to inherit into child processes (e.g. iree-compile).
+        if std::env::var("TRACY_PORT").is_ok() {
+            cmd.env("GLIBC_TUNABLES", "glibc.rtld.optional_static_tls=16384");
+        }
+        return Ok(cmd);
+    }
     if let Ok(uv) = which("uv") {
         let mut cmd = std::process::Command::new(uv);
         cmd.arg("run");

@@ -14,7 +14,7 @@ order = 6
 
 ## Glossary
 
-- Top-level nodes: `panel` variants, `object_3d`, `line_3d`, `vector_arrow`, `window`.
+- Top-level nodes: `theme`, `timeline`, `panel` variants, `object_3d`, `line_3d`, `vector_arrow`, `window`.
 - EQL: expressions are evaluated in the runtime EQL context. Vector-like fields expect 3 components; `world_pos` is a 7-component array (quat + position).
 - Colors: `color r g b [a]` or named (`black`, `white`, `blue`, `red`, `orange`, `yellow`, `yalk`, `pink`, `cyan`, `gray`, `green`, `mint`, `turquoise`, `slate`, `pumpkin`, `yolk`, `peach`, `reddish`, `hyperblue`); alpha optional. Colors can be inline or in `color`/`colour` child nodes. Defaults to white when omitted unless noted.
 
@@ -24,6 +24,14 @@ order = 6
 - `scheme`: name of a color preset. Built-ins are `default`, `eggplant`, `catppuccini-macchiato`, `catppuccini-mocha`, `catppuccini-latte`, and `matrix`; user presets are picked up from any `color_schemes` folder in the asset directory or data directory. Unknown names fall back to `default`. If a user preset shares a name with a built-in, the user version wins. See [color-schemes](/reference/color-schemes) for the file layout.
 - Applies to the whole session; a secondary file can set its own `mode` for its windows, but the active scheme stays the one from the primary schematic.
 - Controls both egui styling (palette) and the window decoration theme (Dark/Light).
+
+### timeline
+- Optional top-level node that configures playback globally for the editor session.
+- `played_color`: named color or tuple string, default `yellow`. Used by the LIVE badge, the timeline playhead cursor, and the played segment of 3D trails.
+- `future_color`: named color or tuple string, default `white`. Used by the timeline latest/end cursor and the 3D trail segment that lies ahead of the current playback position.
+- `follow_latest`: bool, default `#false`. When omitted, the editor keeps the default start-from-beginning playback behavior. Set it to `#true` to switch to LIVE automatically once the connected stream proves that it is still advancing.
+- Applies to the primary schematic only; secondary schematic files do not override the global timeline behavior.
+- These settings are also editable from the Timeline inspector, opened with the gear button in the timeline bar.
 
 ### window
 - `path`/`file`/`name`: optional secondary schematic file. Relative paths resolve against the parent schematic directory (or CWD). If absent, the entry configures the primary window instead of loading a secondary file.
@@ -44,6 +52,7 @@ order = 6
 - `query_plot`: `name` (required pane title), `query` (required), `refresh_interval` in ms (default 1000), `auto_refresh` (default false), `color` (default white), `type` (`eql` default, or `sql`), `mode` (`timeseries` default, or `xy` for numeric X-axis labels), `x_label` (optional X-axis label for XY mode), `y_label` (optional Y-axis label).
 - `data_overview`: `name` (optional pane title).
 - `schematic_tree`: `name` (optional pane title). (Hierarchy/Inspector sidebars are implicit and not serialized.)
+- `sensor_view`: positional `camera_name` (required; the full sensor camera name in `"entity.camera"` format, e.g., `"drone.scene_cam"`), `name` (optional display label). Displays raw RGBA frames from a sensor camera registered via `world.sensor_camera()` and rendered by `ctx.render_camera()` in a `post_step` callback. Unlike `video_stream` (which decodes H.264), `sensor_view` displays raw pixel data directly — no codec involved.
 - `video_stream`: positional `msg_name` (required; the message name matching the `elodinsink` `msg-name` property), `name` (optional display label; defaults to `"Video Stream <msg_name>"`). Displays an H.264 video stream received by Elodin DB. The video source can be a GStreamer pipeline using `elodinsink`, an OBS Studio SRT stream via a receiver pipeline, or any source that sends H.264 NAL units to Elodin DB. See the [OBS Studio Integration](#obs-studio-integration) section below.
 - `dashboard`: layout node (Bevy UI style). Key properties: `name` (optional), `display` (`flex` default, or `grid`/`block`/`none`), `box_sizing` (`border-box` default or `content-box`), `position_type` (`relative` default or `absolute`), `overflow` (per-axis; defaults visible), `overflow_clip_margin` (visual_box + margin, defaults content-box / 0), sizing (`left`/`right`/`top`/`bottom`/`width`/`height`/`min_*`/`max_*` accept `auto`, `px`, `%`, `vw`, `vh`, `vmin`, `vmax`; default `auto`), `aspect_ratio` (optional f32), alignment (`align_items`/`justify_items`/`align_self`/`justify_self`/`align_content`/`justify_content`, all default to `default` variants), flex (`flex_direction`, `flex_wrap`, `flex_grow` default 0, `flex_shrink` default 1, `flex_basis` default `auto`, `row_gap`/`column_gap` default `auto`), `children` (nested dashboard nodes), colors via `bg`/`background` child (default transparent), `text` (optional), `font_size` (default 16), `text_color` child (default white), spacing via `margin`/`padding`/`border` children with `left`/`right`/`top`/`bottom`.
 
@@ -118,6 +127,7 @@ Legend: parentheses group alternatives; `|` means “or”; square brackets `[..
 ```kdl
 schematic =
   ( theme
+  | timeline
   | window
   | panel
   | object_3d
@@ -128,6 +138,13 @@ schematic =
 theme = "theme"
       [mode=dark|light]
       [scheme=string]
+
+timeline = "timeline"
+         [played_color=color_name_or_tuple]
+         [future_color=color_name_or_tuple]
+         [follow_latest=bool]
+
+When omitted, `follow_latest` defaults to `#false`.
 
 window = "window"
        [path|file|name=string]
@@ -144,6 +161,7 @@ panel =
   | query_plot
   | data_overview
   | schematic_tree
+  | sensor_view
   | video_stream
   | dashboard
   | split
@@ -212,6 +230,9 @@ data_overview = "data_overview"
 
 schematic_tree = "schematic_tree"
                [name=string]
+
+sensor_view = "sensor_view" <camera_name>
+            [name=string]
 
 video_stream = "video_stream" <msg_name>
              [name=string]
@@ -333,6 +354,24 @@ viewport name="Main"
 graph "drone.altitude"
       name="Altitude"
       auto_y_range=#true
+```
+
+Sensor camera panel (from `world.sensor_camera()` + `ctx.render_camera()`):
+
+```kdl
+sensor_view "drone.scene_cam" name="Forward Camera"
+```
+
+Viewport + sensor cameras side by side:
+
+```kdl
+hsplit {
+    viewport name="3D View" show_grid=#true
+    vsplit {
+        sensor_view "drone.scene_cam" name="RGB Camera"
+        sensor_view "drone.thermal_cam" name="Thermal"
+    }
+}
 ```
 
 Video stream panel (e.g. from OBS Studio):

@@ -2,9 +2,11 @@
   pkgs,
   rustToolchain,
   lib,
+  gitRev ? "unknown",
   elodinPy,
   python,
   pythonPackages,
+  enableTracy ? false,
   ...
 }: let
   # Import shared configuration
@@ -42,7 +44,11 @@
       ++ lib.optionals pkgs.stdenv.isDarwin common.darwinDeps
       ++ lib.optionals pkgs.stdenv.isLinux common.linuxGraphicsAudioDeps;
 
+    buildFeatures = lib.optionals enableTracy ["tracy"];
+
     doCheck = false;
+
+    GIT_HASH = gitRev;
 
     postInstall = ''
       wrapProgram $out/bin/elodin \

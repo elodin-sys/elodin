@@ -2,15 +2,23 @@ use std::env;
 use std::path::PathBuf;
 
 fn main() {
-    let iree_dir = env::var("IREE_RUNTIME_DIR").unwrap_or_else(|_| {
+    let tracy = env::var("CARGO_FEATURE_TRACY").is_ok();
+
+    let env_var = if tracy {
+        "IREE_RUNTIME_TRACY_DIR"
+    } else {
+        "IREE_RUNTIME_DIR"
+    };
+    let iree_dir = env::var(env_var).unwrap_or_else(|_| {
         panic!(
-            "IREE_RUNTIME_DIR is not set. \
+            "{env_var} is not set. \
              Enter the nix develop shell to set it automatically."
         )
     });
     let iree_dir = PathBuf::from(iree_dir);
 
     println!("cargo:rerun-if-env-changed=IREE_RUNTIME_DIR");
+    println!("cargo:rerun-if-env-changed=IREE_RUNTIME_TRACY_DIR");
 
     let include_dir = iree_dir.join("include");
     let lib_dir = iree_dir.join("lib");
@@ -167,6 +175,10 @@ fn main() {
     println!("cargo:rustc-link-lib=static=flatcc_parsing");
     println!("cargo:rustc-link-lib=static=flatcc_runtime");
     println!("cargo:rustc-link-lib=static=benchmark");
+
+    if tracy {
+        println!("cargo:rustc-link-lib=static=TracyClient");
+    }
 
     // System libraries.
     // Use CARGO_CFG_TARGET_OS (not #[cfg]) for cross-compilation correctness.

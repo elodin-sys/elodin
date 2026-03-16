@@ -35,8 +35,8 @@ winit.version = "0.30.12"
 winit.features = ["rwh_05"]
 raw-window-handle = "0.5"
 bevy_infinite_grid = "0.17"
-big_space = "0.5"
-bevy_editor_cam = "0.7"
+big_space.workspace = true
+bevy_editor_cam.workspace = true
 bevy_framepace = "0.20"
 
 # rand
@@ -98,6 +98,7 @@ impeller2-cli.path = "../db/cli"
 
 # channels
 flume = "0.11.1"
+crossbeam-channel = "0.5"
 
 # parsing
 jiff = "0.2"
@@ -158,6 +159,10 @@ image.features = ["png"]
 [target.'cfg(not(target_os = "macos"))'.dependencies]
 openh264 = "0.8"
 pic-scale = "0.6"
+
+# unix (headless sensor camera render bridge)
+[target.'cfg(unix)'.dependencies]
+render-bridge.path = "../render-bridge"
 
 # [patch.crates-io]
 # bevy_editor_cam = { path = "../bevy_editor_cam" }

@@ -35,7 +35,7 @@ The simulation provides:
 
 2. Python virtual environment with Elodin:
    ```bash
-   install-elodin
+   just install
    ```
 
 3. Betaflight submodule (from repo root):
