@@ -19,6 +19,7 @@ Usage:
 import elodin as el
 import jax
 import jax.numpy as jnp
+import numpy as np
 import os
 import sys
 import time
@@ -179,22 +180,48 @@ system = constraints | el.six_dof(sys=effectors)
 
 # ── Post-step frame counter ──────────────────────────────────────────────────
 
-render_calls = [0]
-
-ALL_CAMS = ["cam_ball_a.scene_cam", "cam_ball_b.thermal_cam"]
+rgb_frames = [0]
+thermal_frames = [0]
 
 
 def post_step(tick, ctx):
     if tick % 4 == 0:
         try:
-            ctx.render_cameras(ALL_CAMS)
-            render_calls[0] += 1
+            ctx.render_cameras(["cam_ball_a.scene_cam", "cam_ball_b.thermal_cam"])
+            rgb_frames[0] += 1
+            thermal_frames[0] += 1
+            if thermal_frames[0] == 1:
+                for name in ["cam_ball_a.scene_cam", "cam_ball_b.thermal_cam"]:
+                    frame = ctx.read_msg(name)
+                    if frame is not None:
+                        arr = np.asarray(frame)
+                        print(
+                            f"[{name}] First frame at tick {tick}: {len(frame)} bytes, "
+                            f"nonzero={np.count_nonzero(arr)}"
+                        )
         except Exception as e:
-            if tick > 10 and render_calls[0] == 0:
+            if tick > 10 and thermal_frames[0] == 0:
                 print(f"[render] tick {tick}: {e}")
 
+    # Render every 2nd tick for RGB (~60 fps at 120 Hz sim)
+    elif tick % 2 == 0:
+        try:
+            # Single camera render (returns frame directly; or use ctx.render_cameras([...]) for batch)
+            frame = ctx.render_camera("cam_ball_a.scene_cam")
+            if frame is not None and len(frame) > 0:
+                rgb_frames[0] += 1
+                if rgb_frames[0] == 1:
+                    arr = np.asarray(frame)
+                    print(
+                        f"[RGB] First frame at tick {tick}: {len(frame)} bytes, "
+                        f"nonzero={np.count_nonzero(arr)}"
+                    )
+        except Exception as e:
+            if tick > 10 and rgb_frames[0] == 0:
+                print(f"[RGB] tick {tick}: {e}")
+
     if tick > 0 and tick % 600 == 0:
-        print(f"  tick {tick}: render_calls={render_calls[0]}")
+        print(f"  tick {tick}: rgb={rgb_frames[0]} thermal={thermal_frames[0]} frames")
 
 
 # ── Run ──────────────────────────────────────────────────────────────────────
@@ -209,18 +236,21 @@ world.run(
     interactive=False,
 )
 
-print(f"\nRender calls: {render_calls[0]}")
+print(f"\nRGB frames: {rgb_frames[0]}, Thermal frames: {thermal_frames[0]}")
 if EMIT_PERF and wall_start is not None:
     wall_elapsed_s = time.perf_counter() - wall_start
     sim_elapsed_s = MAX_TICKS * SIM_TIME_STEP
     rtf = sim_elapsed_s / wall_elapsed_s if wall_elapsed_s > 0 else 0.0
-    render_fps = render_calls[0] / wall_elapsed_s if wall_elapsed_s > 0 else 0.0
+    rgb_fps = rgb_frames[0] / wall_elapsed_s if wall_elapsed_s > 0 else 0.0
+    thermal_fps = thermal_frames[0] / wall_elapsed_s if wall_elapsed_s > 0 else 0.0
     print(
         "PERF sensor_camera "
         f"max_ticks={MAX_TICKS} "
         f"elapsed_s={wall_elapsed_s:.3f} "
         f"sim_s={sim_elapsed_s:.3f} "
         f"rtf={rtf:.3f} "
-        f"render_calls={render_calls[0]} "
-        f"render_fps={render_fps:.3f}"
+        f"rgb_frames={rgb_frames[0]} "
+        f"thermal_frames={thermal_frames[0]} "
+        f"rgb_fps={rgb_fps:.3f} "
+        f"thermal_fps={thermal_fps:.3f}"
     )
