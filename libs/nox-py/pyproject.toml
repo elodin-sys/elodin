@@ -12,7 +12,6 @@ classifiers = [
 ]
 dependencies = [
     "jax>=0.8",
-    "jax-cuda12-plugin[with-cuda]>=0.8; sys_platform == 'linux'",
     "iree-base-compiler>=3.10.0",
     "numpy",
     "typing-extensions",
@@ -24,6 +23,8 @@ dynamic = ["version"]
 
 [project.optional-dependencies]
 tests = ["pytest"]
+# Install for backend="jax-gpu" on Linux. Omit to avoid CUDA plugin init when using IREE only.
+cuda = ["jax-cuda12-plugin[with-cuda]>=0.8; sys_platform == 'linux'"]
 dynamic = []
 
 [tool.maturin]
