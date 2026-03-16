@@ -91,6 +91,7 @@ install target="all":
     py)
       uv venv --python 3.13 --clear
       . .venv/bin/activate
+      rm -f libs/nox-py/python/elodin/elodin*.so
       uvx maturin develop --uv --manifest-path=libs/nox-py/Cargo.toml
       echo "Venv ready. Run source with \`source .venv/bin/activate\` before running examples with python3"
       ;;
@@ -111,6 +112,7 @@ install target="all":
       fi
       uv venv --python 3.13 --clear
       . .venv/bin/activate
+      rm -f libs/nox-py/python/elodin/elodin*.so
       uvx maturin develop --uv --manifest-path=libs/nox-py/Cargo.toml -F tracy
       echo "Venv ready. Run source with \`source .venv/bin/activate\` before running examples with python3"
       cargo build --release -p elodin -p elodin-db --features tracy
