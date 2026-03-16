@@ -1,4 +1,4 @@
-#! @python3@/bin/python3 -B
+#!/usr/bin/env python3
 
 # SPDX-FileCopyrightText: 2022-2023 TII (SSRC) and the Ghaf contributors
 #
