@@ -241,19 +241,13 @@ fn headless_sensor_runner(mut app: App) -> AppExit {
             cameras_enabled = true;
             tracing::info!("Sensor cameras spawned and enabled after {i} warm-up cycles");
 
-            let all_camera_names: Vec<String> = app
-                .world()
-                .resource::<SensorCameraConfigs>()
-                .0
-                .iter()
-                .map(|c| c.camera_name.clone())
-                .collect();
-            set_readback_armed(app.world_mut(), &all_camera_names, true);
+            let names = all_camera_names(&app);
+            set_readback_armed(app.world_mut(), &names, true);
             for _ in 0..4 {
                 run_headless_update(&mut app);
             }
             drain_stale_frames(&app);
-            set_readback_armed(app.world_mut(), &all_camera_names, false);
+            set_readback_armed(app.world_mut(), &names, false);
 
             break;
         }
@@ -273,17 +267,11 @@ fn headless_sensor_runner(mut app: App) -> AppExit {
 
     // Post-connect GPU warm-up.
     if cameras_enabled {
-        let all_camera_names: Vec<String> = app
-            .world()
-            .resource::<SensorCameraConfigs>()
-            .0
-            .iter()
-            .map(|c| c.camera_name.clone())
-            .collect();
-        set_readback_armed(app.world_mut(), &all_camera_names, true);
+        let names = all_camera_names(&app);
+        set_readback_armed(app.world_mut(), &names, true);
         run_headless_update(&mut app);
         drain_stale_frames(&app);
-        set_readback_armed(app.world_mut(), &all_camera_names, false);
+        set_readback_armed(app.world_mut(), &names, false);
         tracing::debug!("Post-connect GPU warm-up complete");
     }
 
@@ -312,6 +300,15 @@ fn headless_sensor_runner(mut app: App) -> AppExit {
 // Helpers
 // ---------------------------------------------------------------------------
 
+fn all_camera_names(app: &App) -> Vec<String> {
+    app.world()
+        .resource::<SensorCameraConfigs>()
+        .0
+        .iter()
+        .map(|c| c.camera_name.clone())
+        .collect()
+}
+
 /// Set timestamp, late-enable cameras if needed, arm readback, and run one
 /// headless update cycle.
 fn render_frame(app: &mut App, request: &BatchRenderRequest, cameras_enabled: &mut bool) {
@@ -322,19 +319,13 @@ fn render_frame(app: &mut App, request: &BatchRenderRequest, cameras_enabled: &m
         enable_all_sensor_cameras(app.world_mut());
         *cameras_enabled = true;
         tracing::info!("Sensor cameras late-enabled during render");
-        let all_camera_names: Vec<String> = app
-            .world()
-            .resource::<SensorCameraConfigs>()
-            .0
-            .iter()
-            .map(|c| c.camera_name.clone())
-            .collect();
-        set_readback_armed(app.world_mut(), &all_camera_names, true);
+        let names = all_camera_names(app);
+        set_readback_armed(app.world_mut(), &names, true);
         for _ in 0..4 {
             run_headless_update(app);
         }
         drain_stale_frames(app);
-        set_readback_armed(app.world_mut(), &all_camera_names, false);
+        set_readback_armed(app.world_mut(), &names, false);
     }
 
     if cameras_ready {
