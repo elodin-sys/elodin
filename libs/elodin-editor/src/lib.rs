@@ -285,7 +285,8 @@ impl Plugin for EditorPlugin {
             .init_resource::<sensor_camera::SensorCameraConfigs>()
             .init_resource::<sensor_camera::SensorCamerasSpawned>()
             .add_systems(PreUpdate, sensor_camera::load_sensor_configs_from_db)
-            .add_systems(Update, sensor_camera::patch_sensor_view_dims);
+            .add_systems(Update, sensor_camera::patch_sensor_view_dims)
+            .add_systems(Update, throttle_for_sensor_cameras);
         if cfg!(target_os = "windows") || cfg!(target_os = "linux") {
             app.add_systems(Update, handle_drag_resize);
         }
@@ -321,6 +322,72 @@ impl Plugin for EditorPlugin {
             bevy_editor_cam::SyncCameraPosition.after(bevy::transform::TransformSystems::Propagate),
         );
     }
+}
+
+/// Reduce editor GPU overhead when sensor cameras share the same GPU.
+///
+/// On macOS (unified memory) the headless render-server and editor compete
+/// for the same GPU, causing thermal throttling.  We apply aggressive
+/// throttling: ~24 fps, shadows off, minimal shadow map.
+///
+/// On Linux/Windows a discrete GPU is typical, so we apply a lighter
+/// policy: ~30 fps with reduced (but not disabled) shadows.
+#[cfg(target_os = "macos")]
+fn throttle_for_sensor_cameras(
+    configs: Res<sensor_camera::SensorCameraConfigs>,
+    db_config: Res<impeller2_wkt::DbConfig>,
+    mut settings: ResMut<bevy_framepace::FramepaceSettings>,
+    mut shadow_map: ResMut<DirectionalLightShadowMap>,
+    mut dir_lights: Query<&mut DirectionalLight>,
+    mut applied: Local<bool>,
+) {
+    if *applied {
+        return;
+    }
+    let detected = !configs.0.is_empty()
+        || db_config.metadata.contains_key("sensor_cameras")
+        || db_config
+            .schematic_content()
+            .is_some_and(|s| s.contains("sensor_view"));
+    if !detected {
+        return;
+    }
+    settings.limiter = bevy_framepace::Limiter::Manual(Duration::from_millis(42));
+    shadow_map.size = 256;
+    for mut light in dir_lights.iter_mut() {
+        light.shadows_enabled = false;
+    }
+    tracing::info!(
+        "Sensor cameras detected — editor throttled to ~24 fps, shadows off (macOS GPU sharing)"
+    );
+    *applied = true;
+}
+
+#[cfg(not(target_os = "macos"))]
+fn throttle_for_sensor_cameras(
+    configs: Res<sensor_camera::SensorCameraConfigs>,
+    db_config: Res<impeller2_wkt::DbConfig>,
+    mut settings: ResMut<bevy_framepace::FramepaceSettings>,
+    mut shadow_map: ResMut<DirectionalLightShadowMap>,
+    mut applied: Local<bool>,
+) {
+    if *applied {
+        return;
+    }
+    let detected = !configs.0.is_empty()
+        || db_config.metadata.contains_key("sensor_cameras")
+        || db_config
+            .schematic_content()
+            .is_some_and(|s| s.contains("sensor_view"));
+    if !detected {
+        return;
+    }
+    settings.limiter = bevy_framepace::Limiter::Manual(Duration::from_millis(33));
+    shadow_map.size = 1024;
+    tracing::info!(
+        "Sensor cameras detected — editor throttled to ~30 fps, shadow map reduced (GPU sharing)"
+    );
+    *applied = true;
 }
 
 #[cfg(feature = "inspector")]
