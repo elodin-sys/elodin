@@ -262,8 +262,12 @@ struct QueryArgs {
         help = "Time column display: omit, datetime, seconds (default), or microseconds"
     )]
     time_format: elodin_db::query::TimeFormat,
-    #[clap(value_name = "COMPONENT", help = "Component name, e.g. drone.position or rocket.world_pos")]
-    eql: String,
+    #[clap(long, value_name = "EQL", help = "EQL query (e.g. component name like drone.position)")]
+    eql: Option<String>,
+    #[clap(long, value_name = "SQL", help = "Raw SQL query")]
+    sql: Option<String>,
+    #[clap(short = 'v', long, help = "Print the SQL (EQL conversion or raw) to stderr")]
+    verbose: bool,
     #[clap(help = "Path to the database directory")]
     dbfile: PathBuf,
 }
@@ -596,6 +600,8 @@ async fn main() -> miette::Result<()> {
             let rt = tokio::runtime::Runtime::new().into_diagnostic()?;
             rt.block_on(elodin_db::query::run(elodin_db::query::QueryArgs {
                 eql: args.eql,
+                sql: args.sql,
+                verbose: args.verbose,
                 dbfile: args.dbfile,
                 head: args.head,
                 tail: args.tail,

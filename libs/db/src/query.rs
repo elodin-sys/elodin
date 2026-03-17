@@ -12,7 +12,6 @@ use futures_lite::StreamExt;
 use impeller2::schema::Schema;
 use miette::IntoDiagnostic;
 use tabled::builder::Builder;
-use eql::SqlOptions;
 
 use crate::DB;
 
@@ -48,8 +47,12 @@ pub enum QueryOutputFormat {
 /// Arguments for the `query` subcommand.
 #[derive(Clone, Debug)]
 pub struct QueryArgs {
-    /// Single component name, e.g. "drone.position" or "rocket.world_pos".
-    pub eql: String,
+    /// EQL query (e.g. component name). Mutually exclusive with `sql`.
+    pub eql: Option<String>,
+    /// Raw SQL query. Mutually exclusive with `eql`.
+    pub sql: Option<String>,
+    /// If true, print the SQL (EQL conversion or raw) to stderr.
+    pub verbose: bool,
     /// Database directory path.
     pub dbfile: PathBuf,
     /// Show only the first N rows.
@@ -69,6 +72,8 @@ pub struct QueryArgs {
 pub async fn run(args: QueryArgs) -> miette::Result<()> {
     let QueryArgs {
         eql,
+        sql,
+        verbose,
         dbfile,
         head,
         tail,
@@ -76,12 +81,6 @@ pub async fn run(args: QueryArgs) -> miette::Result<()> {
         flatten,
         time_format,
     } = args;
-
-    // if eql.trim().contains(',') {
-    //     return Err(miette::miette!(
-    //         "only one component is allowed; do not use comma-separated names"
-    //     ));
-    // }
 
     if !dbfile.exists() {
         return Err(miette::miette!("database path does not exist: {}", dbfile.display()));
@@ -98,30 +97,48 @@ pub async fn run(args: QueryArgs) -> miette::Result<()> {
     let earliest = db.earliest_timestamp.latest();
     let last_ts = db.last_updated.latest();
 
-    let sql = db.with_state(|state| {
-        let components: Vec<Arc<eql::Component>> = state
-            .components
-            .iter()
-            .filter_map(|(id, comp)| {
-                let meta = state.component_metadata.get(id)?;
-                let schema: Schema<Vec<u64>> = comp.schema.to_schema();
-                Some(Arc::new(eql::Component::new(
-                    meta.name.clone(),
-                    *id,
-                    schema,
-                )))
-            })
-            .collect();
-        let ctx = eql::Context::from_leaves(components, earliest, last_ts);
-        let sql = if time_format == TimeFormat::Omit {
-            ctx.sql(eql.trim())
-        } else {
-            ctx.sql_with_options(eql.trim(), &SqlOptions {
-            include_time_column: true
-            })
-        };
-        sql.map_err(|e| miette::miette!("query parse error: {}", e))
-    })?;
+    let sql = match (&eql, &sql) {
+        (Some(eql), None) => db.with_state(|state| {
+            let components: Vec<Arc<eql::Component>> = state
+                .components
+                .iter()
+                .filter_map(|(id, comp)| {
+                    let meta = state.component_metadata.get(id)?;
+                    let schema: Schema<Vec<u64>> = comp.schema.to_schema();
+                    Some(Arc::new(eql::Component::new(
+                        meta.name.clone(),
+                        *id,
+                        schema,
+                    )))
+                })
+                .collect();
+            let ctx = eql::Context::from_leaves(components, earliest, last_ts);
+            let sql = if time_format == TimeFormat::Omit {
+                ctx.sql(eql.trim())
+            } else {
+                ctx.sql_with_options(eql.trim(), &eql::SqlOptions {
+                    include_time_column: true,
+                })
+            };
+            sql
+                .inspect(|sql| if verbose {
+                    eprintln!("EQL to SQL: {}", sql);
+                })
+                .map_err(|e| miette::miette!("query parse error: {}", e))
+        })?,
+        (None, Some(s)) => s.clone(),
+        (Some(_), Some(_)) => {
+            return Err(miette::miette!(
+                "cannot use both --eql and --sql; specify exactly one"
+            ));
+        }
+        (None, None) => {
+            return Err(miette::miette!(
+                "must specify either --eql or --sql"
+            ));
+        }
+    };
+
 
     let mut session = db.as_session_context().into_diagnostic()?;
     db.insert_views(&mut session).await.into_diagnostic()?;
