@@ -269,14 +269,18 @@ impl Expr {
                 }
 
                 if table_names.len() == 1 {
+                    let table = table_names.first().unwrap();
                     let mut select_parts = Vec::new();
+                    if options.include_time_column {
+                        select_parts.push(format!("{}.time", table));
+                    }
                     for element in elements {
                         select_parts.push(element.to_select_part()?);
                     }
                     Ok(format!(
                         "select {} from {}",
                         select_parts.join(", "),
-                        table_names.first().unwrap()
+                        table
                     ))
                 } else {
                     let mut select_parts = Vec::new();

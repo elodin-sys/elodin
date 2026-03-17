@@ -207,9 +207,10 @@ pub async fn run(args: QueryArgs) -> miette::Result<()> {
     slice = time_column_first(&slice).into_diagnostic()?;
 
     let is_table_or_csv = matches!(format, QueryOutputFormat::Table | QueryOutputFormat::Csv);
-    if is_table_or_csv && precision != Precision::Full {
+    if is_table_or_csv && let Precision::Decimals(p) = precision {
         eprintln!(
-            "Note: numeric columns are shown with limited precision. Use --precision full to see all digits."
+            "Note: numeric columns are shown with limited precision ({} decimal places). Use '--precision full' to see all digits.",
+            p,
         );
     }
 
