@@ -13,8 +13,8 @@ use bevy_infinite_grid::InfiniteGrid;
 use bevy_mat3_material::Mat3Material;
 use egui_tiles::{Container, Tile, TileId};
 use impeller2_bevy::{ComponentPath, ComponentSchemaRegistry, DbMessage};
-use impeller2_kdl::FromKdl;
 use impeller2_kdl::KdlSchematicError;
+use impeller2_kdl::{FromKdl, ToKdl};
 use impeller2_wkt::{
     DbConfig, Graph, Line3d, Object3D, Panel, Schematic, VectorArrow3d, Viewport, WindowSchematic,
 };
@@ -318,6 +318,29 @@ pub fn sync_schematic(
 
 fn canonicalize_or_original(path: &Path) -> PathBuf {
     std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+}
+
+fn document_matches_current_snapshot(
+    document: &SchematicDocumentAsset,
+    current_schematic: &crate::ui::schematic::CurrentSchematic,
+    current_secondary: &crate::ui::schematic::CurrentSecondarySchematics,
+) -> bool {
+    if current_schematic.0.to_kdl() != document.root.to_kdl() {
+        return false;
+    }
+
+    if current_secondary.0.len() != document.secondary.len() {
+        return false;
+    }
+
+    current_secondary
+        .0
+        .iter()
+        .map(|secondary| secondary.schematic.to_kdl())
+        .eq(document
+            .secondary
+            .iter()
+            .map(|secondary| secondary.schematic.to_kdl()))
 }
 
 pub(crate) fn filesystem_to_asset_path(path: &Path) -> AssetPath<'static> {
@@ -1261,6 +1284,8 @@ pub fn graph_label(graph: &Graph) -> String {
 
 pub fn schematic_asset_reload(
     mut events: MessageReader<AssetEvent<SchematicDocumentAsset>>,
+    current_schematic: Res<crate::ui::schematic::CurrentSchematic>,
+    current_secondary: Res<crate::ui::schematic::CurrentSecondarySchematics>,
     mut params: LoadSchematicParams,
 ) {
     for event in events.read() {
@@ -1278,6 +1303,13 @@ pub fn schematic_asset_reload(
         let Some(document) = params.document_assets.get(&handle).cloned() else {
             continue;
         };
+        if document_matches_current_snapshot(&document, &current_schematic, &current_secondary) {
+            info!(
+                path = ?save_path,
+                "Skipping schematic reload because saved document matches current snapshot"
+            );
+            continue;
+        }
         let base_dir = save_path.as_deref().and_then(Path::parent);
         info!(
             path = ?save_path,
