@@ -199,11 +199,11 @@ fn extract_outputs(result: &Bound<'_, PyAny>, output_count: usize) -> Result<Vec
         return Ok(Vec::new());
     }
     if output_count == 1 {
-        return Ok(vec![result.clone().unbind().into()]);
+        return Ok(vec![result.clone().unbind()]);
     }
     let mut outputs = Vec::with_capacity(output_count);
     for idx in 0..output_count {
-        outputs.push(result.call_method1("__getitem__", (idx,))?.unbind().into());
+        outputs.push(result.call_method1("__getitem__", (idx,))?.unbind());
     }
     Ok(outputs)
 }

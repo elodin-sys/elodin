@@ -76,13 +76,16 @@ mod tests {
     fn detects_known_overlap_error_variants() {
         let transfer_error = Error {
             code: 3,
-            message: "INVALID_ARGUMENT; source and target ranges must not overlap within the same buffer".to_string(),
+            message:
+                "INVALID_ARGUMENT; source and target ranges must not overlap within the same buffer"
+                    .to_string(),
         };
         assert!(transfer_error.is_overlap_copy_error());
 
         let command_buffer_error = Error {
             code: 3,
-            message: "INVALID_ARGUMENT; source and target ranges overlap within the same buffer".to_string(),
+            message: "INVALID_ARGUMENT; source and target ranges overlap within the same buffer"
+                .to_string(),
         };
         assert!(command_buffer_error.is_overlap_copy_error());
     }
@@ -97,7 +100,9 @@ mod tests {
 
         let wrong_code = Error {
             code: 2,
-            message: "INVALID_ARGUMENT; source and target ranges must not overlap within the same buffer".to_string(),
+            message:
+                "INVALID_ARGUMENT; source and target ranges must not overlap within the same buffer"
+                    .to_string(),
         };
         assert!(!wrong_code.is_overlap_copy_error());
     }

@@ -210,17 +210,17 @@ impl IREEExec {
                 }
             }
 
-            if batch_idx + 1 < batch_ticks {
-                if let Some(input_arena) = &self.input_arena {
-                    for (input_slot, output_slot) in &self.mutable_overlap {
-                        input_arena
-                            .copy_slot_from_view(
-                                &self.session,
-                                *input_slot,
-                                &self.output_views_scratch[*output_slot],
-                            )
-                            .map_err(|e| Error::IreeRuntimeError(e.to_string()))?;
-                    }
+            if batch_idx + 1 < batch_ticks
+                && let Some(input_arena) = &self.input_arena
+            {
+                for (input_slot, output_slot) in &self.mutable_overlap {
+                    input_arena
+                        .copy_slot_from_view(
+                            &self.session,
+                            *input_slot,
+                            &self.output_views_scratch[*output_slot],
+                        )
+                        .map_err(|e| Error::IreeRuntimeError(e.to_string()))?;
                 }
             }
         }
