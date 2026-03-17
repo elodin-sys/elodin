@@ -137,8 +137,8 @@ if "--telemetry" in args:
 else:
     world.run(
         system(),
-        simulation_rate=1.0 / Config.GLOBAL.dt,
-        telemetry_rate=(1.0 / Config.GLOBAL.dt) / 3.0,
+        simulation_rate=Config.GLOBAL.simulation_rate,
+        telemetry_rate=Config.GLOBAL.simulation_rate / 3.0,
         generate_real_time=True,
         max_ticks=int(Config.GLOBAL.total_sim_ticks or 1200),
     )

@@ -906,7 +906,7 @@ if HITL_MODE:
     # Run with HITL post_step
     world.run(
         sys,
-        simulation_rate=1.0 / config.dt,
+        simulation_rate=config.simulation_rate,
         generate_real_time=True,
         max_ticks=config.total_sim_ticks,
         post_step=hitl_post_step,
@@ -927,7 +927,7 @@ else:
     # Run with SITL post_step
     world.run(
         sys,
-        simulation_rate=1.0 / config.dt,
+        simulation_rate=config.simulation_rate,
         # Run it in real-time.
         generate_real_time=True,
         max_ticks=config.total_sim_ticks,

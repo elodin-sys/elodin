@@ -324,10 +324,8 @@ async fn tick(
     let wait_for_write_pair_ids: Vec<PairId> = get_pair_ids(&world, &wait_for_write).unwrap();
     let mut wait_for_write_pair_ids = collect_timestamps(&db, &wait_for_write_pair_ids);
     let generate_real_time = world.world().metadata.generate_real_time;
-    let ticks_per_telemetry = world.world().ticks_per_telemetry();
+    let configured_ticks_per_telemetry = world.world().ticks_per_telemetry();
     let time_step = world.world().sim_time_step().0;
-    let batch_time_step =
-        Duration::from_secs_f64(time_step.as_secs_f64() * ticks_per_telemetry as f64);
     #[rustfmt::skip]
     let should_cancel = || { is_cancelled() || cancel_token.is_cancelled() };
     let mut next_tick_deadline: Option<Instant> = None;
@@ -350,17 +348,25 @@ async fn tick(
         }
         let start = Instant::now();
         if generate_real_time {
-            next_tick_deadline.get_or_insert(start + batch_time_step);
+            // Deadline is set after effective_batch is known for this iteration.
         }
         let tick = tick_counter.load(Ordering::SeqCst);
         let tick_nanos = time_step.as_nanos() * (tick as u128);
         let tick_duration = Duration::from_nanos(tick_nanos.min(u64::MAX as u128) as u64);
         let timestamp = start_timestamp + tick_duration;
-        let end_tick = tick.saturating_add(ticks_per_telemetry.saturating_sub(1));
+        let max_tick = world.world().max_tick();
+        let effective_batch = configured_ticks_per_telemetry.min(max_tick.saturating_sub(tick));
+        let effective_batch = effective_batch.max(1);
+        let effective_batch_time_step =
+            Duration::from_secs_f64(time_step.as_secs_f64() * effective_batch as f64);
+        if generate_real_time {
+            next_tick_deadline.get_or_insert(start + effective_batch_time_step);
+        }
+        let end_tick = tick.saturating_add(effective_batch.saturating_sub(1));
         let end_tick_nanos = time_step.as_nanos() * (end_tick as u128);
         let end_tick_duration = Duration::from_nanos(end_tick_nanos.min(u64::MAX as u128) as u64);
         let batch_end_timestamp = start_timestamp + end_tick_duration;
-        if tick >= world.world().max_tick() {
+        if tick >= max_tick {
             db.recording_cell.set_playing(false);
             world.world_mut().metadata.max_tick = u64::MAX;
             if !interactive {
@@ -381,9 +387,11 @@ async fn tick(
         }
 
         db.with_state(|state| copy_db_to_world(state, &mut world));
+        world.world_mut().metadata.ticks_per_telemetry = effective_batch;
         if let Err(err) = world.run() {
             warn!(?err, "error ticking world");
         }
+        world.world_mut().metadata.ticks_per_telemetry = configured_ticks_per_telemetry;
         db.with_state(|state| {
             if let Err(err) = commit_world_head_unified(
                 state,
@@ -407,7 +415,7 @@ async fn tick(
             return;
         }
         post_step(
-            tick,
+            end_tick,
             &db,
             &tick_counter,
             batch_end_timestamp,
@@ -421,7 +429,7 @@ async fn tick(
                     .unwrap_or(true);
                 if should_warn {
                     let behind_ms = now.duration_since(*deadline).as_secs_f64() * 1000.0;
-                    let target_ms = batch_time_step.as_secs_f64() * 1000.0;
+                    let target_ms = effective_batch_time_step.as_secs_f64() * 1000.0;
                     let factor = if target_ms > 0.0 {
                         (behind_ms + target_ms) / target_ms
                     } else {
@@ -438,17 +446,17 @@ async fn tick(
             // reset the deadline to now. This prevents a burst of fast ticks
             // (visible as timeline stutter in the editor) when a one-time
             // delay occurs, such as the initial render bridge connection.
-            if now > *deadline + batch_time_step * 2 {
+            if now > *deadline + effective_batch_time_step * 2 {
                 *deadline = now;
             }
             if *deadline > now {
                 stellarator::sleep(*deadline - now).await;
             }
-            *deadline += batch_time_step;
+            *deadline += effective_batch_time_step;
         }
 
         if tick_counter.load(Ordering::SeqCst) == tick {
-            tick_counter.fetch_add(ticks_per_telemetry, Ordering::SeqCst);
+            tick_counter.fetch_add(effective_batch, Ordering::SeqCst);
         }
     }
 }
