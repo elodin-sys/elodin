@@ -252,6 +252,11 @@ impl Expr {
 
     /// Converts an EQL Expr to an SQL query string.
     pub fn to_sql(&self, context: &Context) -> Result<String, Error> {
+        self.to_sql_with_options(context, &SqlOptions::default())
+    }
+
+    /// Converts an EQL Expr to an SQL query string with the given options.
+    pub fn to_sql_with_options(&self, context: &Context, options: &SqlOptions) -> Result<String, Error> {
         match self {
             Expr::Tuple(elements) => {
                 if elements.is_empty() {
@@ -368,13 +373,17 @@ impl Expr {
             expr => {
                 let table = expr.to_table()?;
                 let select_part = expr.to_select_part()?;
-                let time_only = select_part == format!("{}.time", table);
-                let sql = if time_only {
-                    format!("select {} from {}", select_part, table)
+                if options.include_time_column {
+                    let time_only = select_part == format!("{}.time", table);
+                    let sql = if time_only {
+                        format!("select {} from {}", select_part, table)
+                    } else {
+                        format!("select {}.time, {} from {}", table, select_part, table)
+                    };
+                    Ok(sql)
                 } else {
-                    format!("select {}.time, {} from {}", table, select_part, table)
-                };
-                Ok(sql)
+                    Ok(format!("select {} from {}", select_part, table))
+                }
             }
         }
     }
@@ -433,6 +442,13 @@ fn default_element_names(shape: &[u64]) -> Vec<String> {
     let mut elems = Vec::new();
     append_elements(shape, "", &mut elems);
     elems
+}
+
+/// Options for SQL generation. Use default for existing behavior.
+#[derive(Clone, Debug, Default)]
+pub struct SqlOptions {
+    /// For single-table selects, include the table's time column as the first column.
+    pub include_time_column: bool,
 }
 
 #[derive(Debug)]
@@ -518,6 +534,16 @@ impl Context {
         let ast = ast_parser::expr(query)?;
         let expr = self.parse(&ast)?;
         expr.to_sql(self)
+    }
+
+    // `ctx.sql(q)` is equivalent to `ctx.self.sql_with_options(query, &SqlOptions::default())`.
+    pub fn sql_with_options(&self, query: &str, options: &SqlOptions) -> Result<String, Error> {
+        let ast = ast_parser::expr(query)?;
+        let expr = self.parse(&ast)?;
+        expr.to_sql_with_options(
+            self,
+            options,
+        )
     }
 
     pub fn parse_str(&self, query: &str) -> Result<Expr, Error> {
@@ -808,7 +834,7 @@ mod tests {
         let result = expr.to_sql(&context);
         assert_eq!(
             result.unwrap(),
-            "select a_world_pos.time, a_world_pos.a_world_pos as 'a.world_pos' from a_world_pos"
+            "select a_world_pos.a_world_pos as 'a.world_pos' from a_world_pos"
         );
     }
 
@@ -865,7 +891,7 @@ mod tests {
         let result = expr.to_sql(&context);
         assert_eq!(
             result.unwrap(),
-            "select a_world_pos.time, a_world_pos.a_world_pos[1] as 'a.world_pos.x' from a_world_pos"
+            "select a_world_pos.a_world_pos[1] as 'a.world_pos.x' from a_world_pos"
         );
 
         // Test second element
@@ -873,7 +899,7 @@ mod tests {
         let result = expr.to_sql(&context);
         assert_eq!(
             result.unwrap(),
-            "select a_world_pos.time, a_world_pos.a_world_pos[2] as 'a.world_pos.y' from a_world_pos"
+            "select a_world_pos.a_world_pos[2] as 'a.world_pos.y' from a_world_pos"
         );
 
         // Test third element
@@ -881,7 +907,7 @@ mod tests {
         let result = expr.to_sql(&context);
         assert_eq!(
             result.unwrap(),
-            "select a_world_pos.time, a_world_pos.a_world_pos[3] as 'a.world_pos.z' from a_world_pos"
+            "select a_world_pos.a_world_pos[3] as 'a.world_pos.z' from a_world_pos"
         );
     }
 

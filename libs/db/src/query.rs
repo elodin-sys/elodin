@@ -12,6 +12,7 @@ use futures_lite::StreamExt;
 use impeller2::schema::Schema;
 use miette::IntoDiagnostic;
 use tabled::builder::Builder;
+use eql::SqlOptions;
 
 use crate::DB;
 
@@ -112,7 +113,14 @@ pub async fn run(args: QueryArgs) -> miette::Result<()> {
             })
             .collect();
         let ctx = eql::Context::from_leaves(components, earliest, last_ts);
-        ctx.sql(eql.trim()).map_err(|e| miette::miette!("query parse error: {}", e))
+        let sql = if time_format == TimeFormat::Omit {
+            ctx.sql(eql.trim())
+        } else {
+            ctx.sql_with_options(eql.trim(), &SqlOptions {
+            include_time_column: true
+            })
+        };
+        sql.map_err(|e| miette::miette!("query parse error: {}", e))
     })?;
 
     let mut session = db.as_session_context().into_diagnostic()?;
