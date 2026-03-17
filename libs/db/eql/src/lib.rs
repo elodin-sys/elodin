@@ -424,6 +424,27 @@ impl Component {
             element_names,
         }
     }
+
+    /// Like `new`, but use the given names for array elements (e.g. `q0`, `q1`, `x`, `y`, `z`).
+    /// If `element_names` is empty, falls back to `default_element_names(schema.dim())`.
+    pub fn new_with_element_names(
+        name: String,
+        id: ComponentId,
+        schema: Schema,
+        element_names: Vec<String>,
+    ) -> Self {
+        let element_names = if element_names.is_empty() {
+            default_element_names(schema.dim())
+        } else {
+            element_names
+        };
+        Self {
+            name,
+            id,
+            schema,
+            element_names,
+        }
+    }
 }
 
 fn default_element_names(shape: &[u64]) -> Vec<String> {

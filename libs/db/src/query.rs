@@ -136,11 +136,23 @@ pub async fn run(args: QueryArgs) -> miette::Result<()> {
                 .filter_map(|(id, comp)| {
                     let meta = state.component_metadata.get(id)?;
                     let schema: Schema<Vec<u64>> = comp.schema.to_schema();
-                    Some(Arc::new(eql::Component::new(
-                        meta.name.clone(),
-                        *id,
-                        schema,
-                    )))
+                    let element_names: Vec<String> = meta
+                        .element_names()
+                        .split(',')
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty())
+                        .collect();
+                    let component = if element_names.is_empty() {
+                        eql::Component::new(meta.name.clone(), *id, schema)
+                    } else {
+                        eql::Component::new_with_element_names(
+                            meta.name.clone(),
+                            *id,
+                            schema,
+                            element_names,
+                        )
+                    };
+                    Some(Arc::new(component))
                 })
                 .collect();
             let ctx = eql::Context::from_leaves(components, earliest, last_ts);
