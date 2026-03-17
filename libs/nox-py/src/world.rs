@@ -54,7 +54,10 @@ pub struct WorldMetadata {
     pub tick: u64,
     pub entity_len: u64,
     pub sim_time_step: TimeStep,
-    pub run_time_step: Option<TimeStep>,
+    #[serde(default)]
+    pub generate_real_time: bool,
+    #[serde(default = "default_ticks_per_telemetry")]
+    pub ticks_per_telemetry: u64,
     pub default_playback_speed: f64,
     pub max_tick: u64,
     pub schematic_path: Option<PathBuf>,
@@ -72,8 +75,9 @@ impl Default for WorldMetadata {
             entity_metadata: Default::default(),
             tick: Default::default(),
             entity_len: Default::default(),
-            run_time_step: Default::default(),
             sim_time_step: Default::default(),
+            generate_real_time: false,
+            ticks_per_telemetry: default_ticks_per_telemetry(),
             default_playback_speed: 1.0,
             max_tick: u64::MAX,
             schematic: None,
@@ -154,8 +158,12 @@ impl World {
         self.metadata.sim_time_step
     }
 
-    pub fn run_time_step(&self) -> Option<TimeStep> {
-        self.metadata.run_time_step
+    pub fn generate_real_time(&self) -> bool {
+        self.metadata.generate_real_time
+    }
+
+    pub fn ticks_per_telemetry(&self) -> u64 {
+        self.metadata.ticks_per_telemetry.max(1)
     }
 
     pub fn max_tick(&self) -> u64 {
@@ -268,6 +276,10 @@ impl World {
     pub fn advance_tick(&mut self) {
         self.metadata.tick += 1;
     }
+}
+
+fn default_ticks_per_telemetry() -> u64 {
+    1
 }
 
 impl Clone for World {

@@ -272,7 +272,11 @@ impl DeviceArena {
                 timeout,
             )
         };
-        error::check(status)
+        match error::check(status) {
+            Ok(()) => Ok(()),
+            Err(err) if err.is_overlap_copy_error() => Ok(()),
+            Err(err) => Err(err),
+        }
     }
 
     pub fn copy_slots_from_views_batched(

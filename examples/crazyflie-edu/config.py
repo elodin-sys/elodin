@@ -138,11 +138,11 @@ class CrazyflieConfig:
     # Frame type
     frame: Frame = Frame.CRAZYFLIE_X
 
-    # Simulation time step in seconds (500 Hz control loop)
+    # Simulation rate in Hz (500 Hz control loop)
     #
     # NOTE: If the simulation is too slow to be practical, try raising this
     # value.
-    sim_time_step: float = 0.002
+    simulation_rate: float = 500.0
 
     # Fast loop time step for physics (1000 Hz)
     fast_loop_time_step: float = 0.001
@@ -210,7 +210,7 @@ class CrazyflieConfig:
     @property
     def dt(self) -> float:
         """Main simulation time step."""
-        return self.sim_time_step
+        return 1.0 / self.simulation_rate
 
     @property
     def total_sim_ticks(self) -> int:
@@ -308,6 +308,6 @@ if __name__ == "__main__":
     print(f"  RPM per motor: {config.hover_rpm:.0f}")
     print()
     print("Simulation Settings:")
-    print(f"  Time step: {config.sim_time_step * 1000:.1f} ms")
+    print(f"  Time step: {config.dt * 1000:.1f} ms")
     print(f"  Total time: {config.simulation_time:.1f} s")
     print(f"  Sensor noise: {config.sensor_noise}")

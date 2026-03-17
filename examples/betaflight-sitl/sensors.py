@@ -248,7 +248,7 @@ def advance_sensor_tick(tick: SensorTick) -> SensorTick:
 
 def create_gyro_bias_drift_system(config: DroneConfig):
     """Create system to drift the gyro bias over time."""
-    dt = config.sim_time_step
+    dt = config.dt
 
     @el.map
     def update_gyro_bias(tick: SensorTick, bias: GyroBias) -> GyroBias:

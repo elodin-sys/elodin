@@ -175,5 +175,9 @@ effectors = apply_wind | friction
 sys = constraints | el.six_dof(sys=effectors, integrator=el.Integrator.SemiImplicit)
 
 sim = world.run(
-    sys, SIM_TIME_STEP, run_time_step=SIM_TIME_STEP, start_timestamp=0, db_path="./logstream-db"
+    sys,
+    simulation_rate=1.0 / SIM_TIME_STEP,
+    generate_real_time=True,
+    start_timestamp=0,
+    db_path="./logstream-db",
 )

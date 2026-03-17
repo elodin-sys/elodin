@@ -78,7 +78,7 @@ import elodin as el
 
 w = el.World()
 # ... build simulation ...
-w.run(system, sim_time_step=1/120.0)
+w.run(system, simulation_rate=120.0)
 ```
 
 ```bash
@@ -108,7 +108,7 @@ elodin run sim.py
 Bypass the Rust NOX compiler for JAX-native execution:
 ```python
 # Useful for JAXMarl integration and custom JAX transformations
-sim = w.to_jax(system, sim_time_step=1/120.0)
+sim = w.to_jax(system, simulation_rate=120.0)
 
 # Step simulation
 sim.step(100)
@@ -126,7 +126,7 @@ jax.vmap(sim.step)(batch_inputs)
 Pre-compile for maximum performance:
 ```python
 exec = w.build(system)              # Uses IREE backend (default)
-exec = w.build(system, backend="jax")  # Uses JAX backend for full compatibility
+exec = w.build(system, backend="jax-cpu")  # Uses JAX backend for full compatibility
 exec.run(1000)  # Run 1000 ticks
 df = exec.history(["satellite.world_pos", "satellite.world_vel"])
 ```
@@ -137,10 +137,12 @@ nox-py supports two execution backends, selected via `backend` parameter on `w.r
 
 | Backend | Default | Tick Execution | Supports All JAX Ops | Performance |
 |---------|---------|----------------|---------------------|-------------|
-| `"iree"` | Yes | Pure Rust (no GIL) | No (some limitations) | Fast |
-| `"jax"` | No | Python/JAX per-tick | Yes | Slower |
+| `"iree-cpu"` | Yes | Pure Rust (no GIL) | No (some limitations) | Fast |
+| `"iree-gpu"` | No | Pure Rust (no GIL) | No (some limitations) | Fastest for large workloads |
+| `"jax-cpu"` | No | Python/JAX per-tick | Yes | Moderate |
+| `"jax-gpu"` | No | Python/JAX per-tick | Yes | Good for JAX-heavy models |
 
-When IREE compilation fails, the error message suggests setting `backend="jax"`.
+When IREE compilation fails, the error message suggests setting `backend="jax-cpu"`.
 
 
 ### 6. External Control Mode (Real-Time with External Inputs)
@@ -155,8 +157,8 @@ ControlInput = ty.Annotated[
 
 # Run simulation in real-time with DB connection
 w.run(system, 
-      sim_time_step=1/120.0,     # Simulation timestep
-      run_time_step=1/120.0,      # Real-time execution rate
+      simulation_rate=120.0,      # Simulation frequency (Hz)
+      generate_real_time=True,    # Real-time execution
       db_addr="0.0.0.0:2240")    # Listen for external connections
 ```
 
@@ -369,7 +371,7 @@ def drag(vel: el.WorldVel) -> el.Force:
 Combine systems with pipes:
 ```python
 physics = gravity | drag | el.six_dof(integrator=el.Integrator.Rk4)
-w.run(physics, sim_time_step=1/120.0)
+w.run(physics, simulation_rate=120.0)
 ```
 
 ### Graph Systems
@@ -431,8 +433,8 @@ def apply_thrust(thrust_cmd: ThrustCommand, force: el.Force) -> el.Force:
 ```python
 # Match simulation rate to real-time for responsive control
 w.run(physics_system,
-      sim_time_step=1/120.0,     # 120Hz simulation
-      run_time_step=1/120.0,      # Real-time playback
+      simulation_rate=120.0,      # 120Hz simulation
+      generate_real_time=True,    # Real-time playback
       db_addr="0.0.0.0:2240")     # Accept external connections
 ```
 
@@ -525,9 +527,42 @@ w.run(system, db_addr="127.0.0.1:2240")
 
 ### GPU Acceleration
 ```python
-# Automatically uses GPU if available via JAX
-exec = w.build(system, optimize=True)
+# Explicit backend selection:
+#   "iree-cpu" (default), "iree-gpu", "jax-cpu", "jax-gpu"
+exec = w.build(system, backend="iree-gpu", optimize=True)
 ```
+
+Use GPU backends when your simulation has substantial parallel work (many entities,
+large per-entity state, or expensive pairwise interactions). For small worlds (1-10
+entities), CPU backends usually win due to GPU launch/transfer overhead.
+
+For strict-realism backend comparison (same 35-body truth scenario on all backends):
+
+```bash
+nix develop --command uv run examples/n-body/benchmark_backends.py
+```
+
+This example simulates the full 35-body solar-system truth dataset with all-pairs gravity,
+updates telemetry at a lower rate than simulation ticks, and overlays truth ghost bodies
+for visual comparison in the editor.
+
+To validate strict-realism fidelity after a run:
+
+```bash
+# Run benchmark (prints db_path[backend] for each run)
+nix develop --command sh -c 'ELODIN_NBODY_BENCH_TICKS=20000 ELODIN_NBODY_BENCH_REPEATS=1 uv run examples/n-body/benchmark_backends.py'
+
+# Export one backend's DB using the printed path
+nix develop --command sh -c 'elodin-db export <db_path_from_benchmark_output> --format csv --output /tmp/n-body-export.csv'
+
+# Compute aggregate error metrics and accuracy coefficient
+nix develop --command sh -c 'ELODIN_NBODY_EXPORT_DIR=/tmp/n-body-export.csv uv run examples/n-body/accuracy_report.py'
+```
+
+Expected behavior for this strict-realism setup:
+- Transfers are typically not the bottleneck (H2D/D2H near zero).
+- Kernel time dominates and can still favor CPU, especially on FP64-light GPUs.
+- GPU becomes more competitive mainly on hardware with strong FP64 throughput or larger parallel workloads.
 
 ### Earth Gravity Models
 
@@ -622,7 +657,7 @@ w.run(el.six_dof(sys=gravity))
 ```python
 # Complete MEKF, LQR control, reaction wheels, and sensor simulation
 sys = sensors | kalman_filter | control | actuators | el.six_dof()
-w.run(sys, sim_time_step=1/120.0)
+w.run(sys, simulation_rate=120.0)
 ```
 
 ### Rocket with Aerodynamics
@@ -669,7 +704,7 @@ def build_drone_swarm():
 class ElodinMARLEnv:
     def __init__(self):
         world, system = build_drone_swarm()
-        self.sim = world.to_jax(system, sim_time_step=1/50.0)
+        self.sim = world.to_jax(system, simulation_rate=50.0)
         self.agents = [f"drone_{i}" for i in range(4)]
         self.num_agents = len(self.agents)
     

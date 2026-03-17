@@ -9,9 +9,9 @@ w.insert(entity_id, more_archetypes)           # Add components to existing enti
 w.insert_asset(el.Mesh.cuboid(1, 1, 1))        # Returns asset handle
 w.shape(mesh_handle, material_handle)           # Create Shape archetype
 w.glb("model.glb")                              # Load GLB as Scene archetype
-w.run(system, sim_time_step=1/120.0, ...)       # Execute simulation
+w.run(system, simulation_rate=120.0, ...)       # Execute simulation
 w.build(system, optimize=True)                  # Build without running
-w.to_jax(system, sim_time_step=1/120.0)         # Export as JAX function
+w.to_jax(system, simulation_rate=120.0)         # Export as JAX function
 ```
 
 ### `w.run()` parameters
@@ -19,8 +19,9 @@ w.to_jax(system, sim_time_step=1/120.0)         # Export as JAX function
 | Parameter | Type | Default | Purpose |
 |-----------|------|---------|---------|
 | `system` | System | required | Composed system pipeline |
-| `sim_time_step` | float | 1/120.0 | Simulated seconds per tick |
-| `run_time_step` | float/None | None (max speed) | Real seconds per tick |
+| `simulation_rate` | float | 120.0 | Simulation frequency in Hz |
+| `generate_real_time` | bool | False | Pace simulation to wall-clock |
+| `telemetry_rate` | float/None | None | Host/DB sync frequency in Hz (defaults to simulation_rate) |
 | `default_playback_speed` | float | 1.0 | Editor playback rate |
 | `max_ticks` | int | None | Stop after N ticks |
 | `optimize` | bool | False | Enable compilation optimizations |

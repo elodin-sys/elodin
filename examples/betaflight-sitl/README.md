@@ -245,7 +245,7 @@ DroneConfig(
     arm_length=0.12,             # meters
     motor_max_thrust=15.0,       # Newtons per motor
     motor_time_constant=0.02,    # seconds
-    sim_time_step=0.000125,      # 8kHz physics (matches Betaflight PID)
+    simulation_rate=8000.0,      # 8kHz physics (matches Betaflight PID)
     sensor_noise=True,           # Enable realistic sensor noise
     # Sensor rates (Aleph hardware defaults)
     gyro_rate=8000.0,            # 8kHz (BMI270 3x IMU)
@@ -499,7 +499,7 @@ lsof -i :5761
 
 **Simulation too slow**: The simulation runs at 8kHz by default to match Betaflight's
 high-performance PID loop. For optimal performance:
-- `sim_time_step = 0.000125` (8kHz) is the default
+- `simulation_rate = 8000.0` (8kHz) is the default
 - Ensure sufficient CPU for both Elodin and Betaflight
 - 8kHz produces ~160,000 ticks for a 20-second simulation
 

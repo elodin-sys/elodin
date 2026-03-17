@@ -35,9 +35,14 @@ impl Profiler {
             + self.add_to_history.mean()
     }
 
-    pub fn profile(&self, time_step: Duration) -> HashMap<&'static str, f64> {
+    pub fn profile(
+        &self,
+        time_step: Duration,
+        ticks_per_telemetry: u64,
+    ) -> HashMap<&'static str, f64> {
         let tick_mean = self.tick_mean();
-        let time_step = time_step.as_secs_f64() * 1000.0;
+        let sim_time_step_ms = time_step.as_secs_f64() * 1000.0;
+        let batch_sim_time_ms = sim_time_step_ms * ticks_per_telemetry.max(1) as f64;
         let profile = [
             ("build", self.build.mean()),
             ("compile", self.compile.mean()),
@@ -50,8 +55,9 @@ impl Profiler {
             ("d2h_download", self.d2h_download.mean()),
             ("add_to_history", self.add_to_history.mean()),
             ("tick", tick_mean),
-            ("time_step", time_step),
-            ("real_time_factor", time_step / tick_mean),
+            ("time_step", sim_time_step_ms),
+            ("ticks_per_telemetry", ticks_per_telemetry as f64),
+            ("real_time_factor", batch_sim_time_ms / tick_mean),
         ];
         profile.into_iter().collect()
     }

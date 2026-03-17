@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::marker::PhantomData;
+use std::time::Duration;
 
 use impeller2::types::ComponentId;
 use impeller2::types::Timestamp;
@@ -113,18 +114,32 @@ impl PyExec {
                 ProgressStyle::with_template("{bar:50} {pos:>6}/{len:6} remaining: {eta}").unwrap(),
             );
         let mut timestamp = Timestamp::now();
-
-        for _ in 0..ticks {
+        let sim_step = self.exec.world().sim_time_step().0;
+        let configured_batch = self.exec.world().ticks_per_telemetry() as usize;
+        let mut remaining = ticks;
+        while remaining > 0 {
+            let this_batch = remaining.min(configured_batch.max(1));
+            if this_batch != configured_batch {
+                self.exec.world_mut().metadata.ticks_per_telemetry = this_batch as u64;
+            }
             self.exec.run()?;
+            if this_batch != configured_batch {
+                self.exec.world_mut().metadata.ticks_per_telemetry = configured_batch as u64;
+            }
+            let commit_offset = Duration::from_secs_f64(
+                sim_step.as_secs_f64() * (this_batch.saturating_sub(1) as f64),
+            );
+            let commit_timestamp = timestamp + commit_offset;
             self.db.with_state(|state| {
                 crate::impeller2_server::commit_world_head_unified(
                     state,
                     &mut self.exec,
-                    timestamp,
+                    commit_timestamp,
                     None,
                 )
             })?;
-            timestamp += self.exec.world().sim_time_step().0;
+            timestamp += Duration::from_secs_f64(sim_step.as_secs_f64() * this_batch as f64);
+            remaining -= this_batch;
 
             if let Some(func) = &is_canceled {
                 let is_canceled = Python::with_gil(|py| {
@@ -136,7 +151,7 @@ impl PyExec {
                 }
             }
             py.check_signals()?;
-            progress_bar.inc(1);
+            progress_bar.inc(this_batch as u64);
         }
         progress_bar.finish_and_clear();
         Ok(())
