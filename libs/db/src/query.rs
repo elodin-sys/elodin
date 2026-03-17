@@ -114,7 +114,10 @@ pub async fn run(args: QueryArgs) -> miette::Result<()> {
     } = args;
 
     if !dbfile.exists() {
-        return Err(miette::miette!("database path does not exist: {}", dbfile.display()));
+        return Err(miette::miette!(
+            "database path does not exist: {}",
+            dbfile.display()
+        ));
     }
     let db_state = dbfile.join("db_state");
     if !db_state.exists() {
@@ -159,15 +162,19 @@ pub async fn run(args: QueryArgs) -> miette::Result<()> {
             let sql = if time_format == TimeFormat::Omit {
                 ctx.sql(eql.trim())
             } else {
-                ctx.sql_with_options(eql.trim(), &eql::SqlOptions {
-                    include_time_column: true,
-                })
+                ctx.sql_with_options(
+                    eql.trim(),
+                    &eql::SqlOptions {
+                        include_time_column: true,
+                    },
+                )
             };
-            sql
-                .inspect(|sql| if verbose {
+            sql.inspect(|sql| {
+                if verbose {
                     eprintln!("EQL to SQL: {}", sql);
-                })
-                .map_err(|e| miette::miette!("query parse error: {}", e))
+                }
+            })
+            .map_err(|e| miette::miette!("query parse error: {}", e))
         })?,
         (None, Some(s)) => s.clone(),
         (Some(_), Some(_)) => {
@@ -176,12 +183,9 @@ pub async fn run(args: QueryArgs) -> miette::Result<()> {
             ));
         }
         (None, None) => {
-            return Err(miette::miette!(
-                "must specify either --eql or --sql"
-            ));
+            return Err(miette::miette!("must specify either --eql or --sql"));
         }
     };
-
 
     let mut session = db.as_session_context().into_diagnostic()?;
     db.insert_views(&mut session).await.into_diagnostic()?;
@@ -198,8 +202,8 @@ pub async fn run(args: QueryArgs) -> miette::Result<()> {
         return Ok(());
     }
 
-    let combined = arrow::compute::concat_batches(batches[0].schema_ref(), &batches)
-        .into_diagnostic()?;
+    let combined =
+        arrow::compute::concat_batches(batches[0].schema_ref(), &batches).into_diagnostic()?;
     let total_rows = combined.num_rows();
 
     let (start, len) = match (head, tail) {
@@ -213,8 +217,7 @@ pub async fn run(args: QueryArgs) -> miette::Result<()> {
 
     let mut slice = combined.slice(start, len);
     if flatten {
-        slice = flatten_record_batch(&slice)
-            .map_err(|e| miette::miette!("flatten: {}", e))?;
+        slice = flatten_record_batch(&slice).map_err(|e| miette::miette!("flatten: {}", e))?;
     }
     slice = time_column_first(&slice).into_diagnostic()?;
 
@@ -352,12 +355,12 @@ fn flatten_record_batch(batch: &RecordBatch) -> Result<RecordBatch, arrow::error
                         (0..num_lists).map(|row| (row * size + j) as i32).collect();
                     let indices_array = Int32Array::from(indices);
                     let element_array = compute::take(values.as_ref(), &indices_array, None)?;
-                    let suffix = if j < element_name_parts.len() && !element_name_parts[j].is_empty()
-                    {
-                        element_name_parts[j].to_string()
-                    } else {
-                        j.to_string()
-                    };
+                    let suffix =
+                        if j < element_name_parts.len() && !element_name_parts[j].is_empty() {
+                            element_name_parts[j].to_string()
+                        } else {
+                            j.to_string()
+                        };
                     let field_name = format!("{}.{}", field.name(), suffix);
                     new_fields.push(Arc::new(Field::new(
                         field_name,
@@ -381,8 +384,8 @@ fn flatten_record_batch(batch: &RecordBatch) -> Result<RecordBatch, arrow::error
 /// Prints a RecordBatch as Arrow IPC stream to stdout.
 fn print_record_batch_arrow_ipc(batch: &RecordBatch) -> miette::Result<()> {
     let mut out = std::io::stdout();
-    let mut writer =
-        arrow::ipc::writer::StreamWriter::try_new(&mut out, batch.schema_ref()).into_diagnostic()?;
+    let mut writer = arrow::ipc::writer::StreamWriter::try_new(&mut out, batch.schema_ref())
+        .into_diagnostic()?;
     writer.write(batch).into_diagnostic()?;
     writer.finish().into_diagnostic()?;
     out.flush().into_diagnostic()?;
@@ -393,12 +396,9 @@ fn print_record_batch_arrow_ipc(batch: &RecordBatch) -> miette::Result<()> {
 /// Prints a RecordBatch as Parquet to stdout.
 fn print_record_batch_parquet(batch: &RecordBatch) -> miette::Result<()> {
     let mut out = std::io::stdout();
-    let mut writer = parquet::arrow::ArrowWriter::try_new(
-        &mut out,
-        batch.schema_ref().clone(),
-        None,
-    )
-    .into_diagnostic()?;
+    let mut writer =
+        parquet::arrow::ArrowWriter::try_new(&mut out, batch.schema_ref().clone(), None)
+            .into_diagnostic()?;
     writer.write(batch).into_diagnostic()?;
     writer.close().into_diagnostic()?;
     out.flush().into_diagnostic()?;

@@ -49,9 +49,7 @@ enum Commands {
     Drop(DropArgs),
     #[command(about = "Display information about a database")]
     Info(InfoArgs),
-    #[command(
-        about = "Query component data from a database file and print results as a table"
-    )]
+    #[command(about = "Query component data from a database file and print results as a table")]
     Query(QueryArgs),
     #[command(
         name = "list-components",
@@ -262,11 +260,19 @@ struct QueryArgs {
         help = "Time column display: omit, datetime, seconds (default), or microseconds"
     )]
     time_format: elodin_db::query::TimeFormat,
-    #[clap(long, value_name = "EQL", help = "EQL query (e.g. component name like drone.position)")]
+    #[clap(
+        long,
+        value_name = "EQL",
+        help = "EQL query (e.g. component name like drone.position)"
+    )]
     eql: Option<String>,
     #[clap(long, value_name = "SQL", help = "Raw SQL query")]
     sql: Option<String>,
-    #[clap(short = 'v', long, help = "Print the SQL (EQL conversion or raw) to stderr")]
+    #[clap(
+        short = 'v',
+        long,
+        help = "Print the SQL (EQL conversion or raw) to stderr"
+    )]
     verbose: bool,
     #[clap(
         short = 'p',
@@ -282,7 +288,11 @@ struct QueryArgs {
 
 #[derive(clap::Args, Clone, Debug)]
 struct ListComponentsArgs {
-    #[clap(long, short, help = "Show first/last timestamp and entry count per component")]
+    #[clap(
+        long,
+        short,
+        help = "Show first/last timestamp and entry count per component"
+    )]
     long: bool,
     #[clap(help = "Path to the database directory")]
     dbfile: PathBuf,

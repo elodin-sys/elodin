@@ -40,10 +40,7 @@ pub fn run(path: PathBuf, long: bool) -> Result<(), Error> {
                     } else {
                         Some(component.time_series.start_timestamp())
                     };
-                    let last_ts = component
-                        .time_series
-                        .latest()
-                        .map(|(t, _)| *t);
+                    let last_ts = component.time_series.latest().map(|(t, _)| *t);
                     let count = component.time_series.sample_count();
                     Some(ComponentRow {
                         name: meta.name.clone(),
@@ -56,8 +53,13 @@ pub fn run(path: PathBuf, long: bool) -> Result<(), Error> {
         });
         rows.sort_by(|a, b| a.name.cmp(&b.name));
 
-        let mut table = Table::new("{:<}  {:<}  {:<}  {:>}")
-            .with_row(Row::new().with_cell("component").with_cell("first").with_cell("last").with_cell("entries"));
+        let mut table = Table::new("{:<}  {:<}  {:<}  {:>}").with_row(
+            Row::new()
+                .with_cell("component")
+                .with_cell("first")
+                .with_cell("last")
+                .with_cell("entries"),
+        );
         for row in rows {
             let first_str = row
                 .first_ts

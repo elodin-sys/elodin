@@ -256,7 +256,11 @@ impl Expr {
     }
 
     /// Converts an EQL Expr to an SQL query string with the given options.
-    pub fn to_sql_with_options(&self, context: &Context, options: &SqlOptions) -> Result<String, Error> {
+    pub fn to_sql_with_options(
+        &self,
+        context: &Context,
+        options: &SqlOptions,
+    ) -> Result<String, Error> {
         match self {
             Expr::Tuple(elements) => {
                 if elements.is_empty() {
@@ -277,11 +281,7 @@ impl Expr {
                     for element in elements {
                         select_parts.push(element.to_select_part()?);
                     }
-                    Ok(format!(
-                        "select {} from {}",
-                        select_parts.join(", "),
-                        table
-                    ))
+                    Ok(format!("select {} from {}", select_parts.join(", "), table))
                 } else {
                     let mut select_parts = Vec::new();
                     for element in elements {
@@ -565,10 +565,7 @@ impl Context {
     pub fn sql_with_options(&self, query: &str, options: &SqlOptions) -> Result<String, Error> {
         let ast = ast_parser::expr(query)?;
         let expr = self.parse(&ast)?;
-        expr.to_sql_with_options(
-            self,
-            options,
-        )
+        expr.to_sql_with_options(self, options)
     }
 
     pub fn parse_str(&self, query: &str) -> Result<Expr, Error> {
