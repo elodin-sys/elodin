@@ -284,7 +284,6 @@ fn print_record_batch_table(
         .iter()
         .enumerate()
         .filter(|(_, f)| time_format != TimeFormat::Omit || f.name() != "time")
-        .map(|(i, f)| (i, f))
         .collect();
     let columns: Vec<String> = col_indices
         .iter()
@@ -417,7 +416,6 @@ fn print_record_batch_csv(
         .iter()
         .enumerate()
         .filter(|(_, f)| time_format != TimeFormat::Omit || f.name() != "time")
-        .map(|(i, f)| (i, f))
         .collect();
     let n_rows = batch.num_rows();
     let mut out = std::io::stdout();
