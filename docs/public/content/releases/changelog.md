@@ -15,6 +15,21 @@ order = 1
 
 ## v0.16
 
+### v0.16.2
+- **(feat)** Enable GPU for JAX backends. (#564)
+- **(feat)** Add IREE diagnostics. (#563)
+- **(feat)** Add Logstream to `elodin-db` and an example. (#561)
+- **(feat)** Reduce redundant frame buffer copies in the sensor camera display pipeline. (#556)
+- **(feat)** Add sensor cameras and Tracy IREE. (#554)
+- **(feat)** Include the git hash with the version shown on the CLI. (#553)
+- **(feat)** Add a new Nix shell: `nix develop .#run`. (#552)
+- **(feat)** UI: Add timeline inspector and Jump-to-Latest button. (#546)
+- **(fix)** UI: Prevent `line_3d` from drawing ahead of `CurrentTimestamp`. (#545)
+- **(chore)** Bump `nixpkgs` on Aleph to 25.11. (#566)
+- **(chore)** Add probe-based performance instrumentation for sensor camera. (#560)
+- **(test)** Add IREE test fixtures for Mac. (#559)
+- **(doc)** Add README to ellipsoid example. (#544)
+
 ### v0.16.1
 - **(feat)** Upgrade 3D axes widget to cube with UI affordances like reset-view button. (#456)
 - **(feat)** Add real-time, performant editor playback. (#480)
