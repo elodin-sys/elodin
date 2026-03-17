@@ -1,5 +1,11 @@
 use crate::icon_rasterizer::IconTextureCache;
-use bevy::{ecs::system::SystemParam, prelude::*, window::PrimaryWindow};
+use bevy::{
+    asset::{AssetEvent, AssetLoadFailedEvent, AssetLoader, AssetPath, io::Reader},
+    ecs::system::SystemParam,
+    prelude::*,
+    reflect::TypePath,
+    window::PrimaryWindow,
+};
 #[cfg(target_os = "macos")]
 use bevy_defer::AsyncCommandsExtension;
 use bevy_egui::egui::{Color32, Id};
@@ -12,14 +18,151 @@ use impeller2_kdl::KdlSchematicError;
 use impeller2_wkt::{
     DbConfig, Graph, Line3d, Object3D, Panel, Schematic, VectorArrow3d, Viewport, WindowSchematic,
 };
+use miette::{Diagnostic, miette};
+use thiserror::Error;
 
 /// When set (e.g. by CLI `--kdl`), the path is applied to `DbConfig` once so that the schematic
 /// is loaded after connecting to the database.
 #[derive(Resource, Default)]
 pub struct InitialKdlPath(pub Option<PathBuf>);
 
+#[derive(Asset, TypePath, Debug, Clone)]
+pub struct SchematicDocumentAsset {
+    pub root: Schematic,
+    pub secondary: Vec<SecondarySchematicAsset>,
+}
+
+#[derive(Debug, Clone)]
+pub struct SecondarySchematicAsset {
+    pub asset_path: AssetPath<'static>,
+    pub schematic: Schematic,
+}
+
+#[derive(Resource, Default, Debug, Clone)]
+pub struct CurrentDocument {
+    pub handle: Option<Handle<SchematicDocumentAsset>>,
+    pub asset_path: Option<AssetPath<'static>>,
+    pub save_path: Option<PathBuf>,
+}
+
+impl CurrentDocument {
+    pub fn clear(&mut self) {
+        self.handle = None;
+        self.asset_path = None;
+        self.save_path = None;
+    }
+
+    pub fn set_file(
+        &mut self,
+        handle: Handle<SchematicDocumentAsset>,
+        asset_path: AssetPath<'static>,
+        save_path: PathBuf,
+    ) {
+        self.handle = Some(handle);
+        self.asset_path = Some(asset_path);
+        self.save_path = Some(save_path);
+    }
+
+    pub fn set_unsaved_content(&mut self, save_path: Option<PathBuf>) {
+        self.handle = None;
+        self.asset_path = None;
+        self.save_path = save_path;
+    }
+
+    fn matches(&self, id: AssetId<SchematicDocumentAsset>) -> bool {
+        self.handle.as_ref().map(Handle::id) == Some(id)
+    }
+}
+
+#[derive(Default)]
+pub struct SchematicDocumentLoader;
+
+#[derive(Debug, Error)]
+pub enum SchematicDocumentLoaderError {
+    #[error("Could not read schematic document: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("Schematic document is not valid UTF-8: {0}")]
+    Utf8(#[from] std::string::FromUtf8Error),
+    #[error(transparent)]
+    RootKdl(#[from] KdlSchematicError),
+    #[error("Could not read secondary schematic {path}: {reason}")]
+    ReadSecondary {
+        path: AssetPath<'static>,
+        reason: String,
+    },
+    #[error("Could not parse secondary schematic {path}")]
+    ParseSecondary {
+        path: AssetPath<'static>,
+        #[source]
+        source: KdlSchematicError,
+    },
+}
+
+impl AssetLoader for SchematicDocumentLoader {
+    type Asset = SchematicDocumentAsset;
+    type Settings = ();
+    type Error = SchematicDocumentLoaderError;
+
+    async fn load(
+        &self,
+        reader: &mut dyn Reader,
+        _settings: &(),
+        load_context: &mut bevy::asset::LoadContext<'_>,
+    ) -> Result<Self::Asset, Self::Error> {
+        let mut bytes = Vec::new();
+        reader.read_to_end(&mut bytes).await?;
+        let root = Schematic::from_kdl(&String::from_utf8(bytes)?)?;
+        let mut secondary = Vec::new();
+        let base_dir = load_context
+            .asset_path()
+            .path()
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_default();
+        let source = load_context.asset_path().source().clone_owned();
+
+        for window in root.elems.iter().filter_map(|elem| match elem {
+            impeller2_wkt::SchematicElem::Window(window) => Some(window),
+            _ => None,
+        }) {
+            let Some(path) = window.path.as_deref() else {
+                continue;
+            };
+            let asset_path =
+                AssetPath::from_path_buf(base_dir.join(path)).with_source(source.clone());
+            let bytes = load_context
+                .read_asset_bytes(asset_path.clone())
+                .await
+                .map_err(|err| SchematicDocumentLoaderError::ReadSecondary {
+                    path: asset_path.clone_owned(),
+                    reason: err.to_string(),
+                })?;
+            let text = String::from_utf8(bytes)?;
+            let schematic = Schematic::from_kdl(&text).map_err(|source| {
+                SchematicDocumentLoaderError::ParseSecondary {
+                    path: asset_path.clone_owned(),
+                    source,
+                }
+            })?;
+            secondary.push(SecondarySchematicAsset {
+                asset_path: asset_path.clone_owned(),
+                schematic,
+            });
+        }
+
+        Ok(SchematicDocumentAsset { root, secondary })
+    }
+
+    fn extensions(&self) -> &[&str] {
+        &["kdl"]
+    }
+}
+
 pub(crate) fn plugin(app: &mut App) {
-    app.init_resource::<InitialKdlPath>();
+    app.init_resource::<InitialKdlPath>()
+        .init_resource::<CurrentDocument>()
+        .init_asset::<SchematicDocumentAsset>()
+        .init_asset_loader::<SchematicDocumentLoader>();
 }
 
 /// Applies `InitialKdlPath` to `DbConfig` so that `sync_schematic` will load that file.
@@ -35,17 +178,10 @@ pub fn apply_initial_kdl_path(
         initial.0.clone()
     }
 }
-use miette::{Diagnostic, miette};
-#[cfg(target_os = "linux")]
-use std::time::{Instant, SystemTime};
 use std::{
     collections::{BTreeMap, HashMap},
     path::{Path, PathBuf},
-    time::Duration,
 };
-
-#[cfg(target_os = "linux")]
-const NOTIFY_SILENCE: Duration = Duration::from_millis(3000);
 
 #[cfg(not(target_os = "macos"))]
 use crate::tiles::WindowRelayout;
@@ -96,6 +232,8 @@ pub struct LoadSchematicParams<'w, 's> {
     pub commands: Commands<'w, 's>,
     primary_window: Single<'w, 's, Entity, With<PrimaryWindow>>,
     pub asset_server: Res<'w, AssetServer>,
+    pub current_document: ResMut<'w, CurrentDocument>,
+    pub document_assets: Res<'w, Assets<SchematicDocumentAsset>>,
     pub meshes: ResMut<'w, Assets<Mesh>>,
     pub materials: ResMut<'w, Assets<StandardMaterial>>,
     pub mat3_materials: ResMut<'w, Assets<Mat3Material>>,
@@ -119,7 +257,6 @@ pub fn sync_schematic(
     In(given_path): In<Option<PathBuf>>,
     config: Res<DbConfig>,
     mut params: LoadSchematicParams,
-    live_reload_rx: ResMut<SchematicLiveReloadRx>,
     mut modal: ModalDialog,
 ) {
     if given_path.is_none() && !config.is_changed() {
@@ -130,7 +267,7 @@ pub fn sync_schematic(
     if let Some(path) = given_path.or(config.schematic_path().map(PathBuf::from)) {
         // NOTE: This path is not resolved yet. We can't test if it exists here.
         // load_schematic_file resolves it and should do that test there.
-        match load_schematic_file(&path, &mut params, live_reload_rx) {
+        match load_schematic_file(&path, &mut params) {
             Ok(()) => return,
             Err(KdlSchematicError::NoSuchFile { .. })
                 if has_content_fallback && !path_was_overridden =>
@@ -161,17 +298,38 @@ pub fn sync_schematic(
         match config.schematic_path() {
             Some(p) => {
                 let base_file = impeller2_kdl::env::schematic_file(Path::new(p));
-                params.load_schematic(&schematic, base_file.parent());
+                params
+                    .current_document
+                    .set_unsaved_content(Some(base_file.clone()));
+                params.load_schematic(&schematic, base_file.parent(), None);
             }
             None => {
-                params.load_schematic(&schematic, None);
+                params.current_document.set_unsaved_content(None);
+                params.load_schematic(&schematic, None, None);
             }
         }
         return;
     }
 
     // No schematic found - create a default Data Overview panel
+    params.current_document.clear();
     params.load_default_data_overview();
+}
+
+fn canonicalize_or_original(path: &Path) -> PathBuf {
+    std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+}
+
+pub(crate) fn filesystem_to_asset_path(path: &Path) -> AssetPath<'static> {
+    let resolved = canonicalize_or_original(path);
+    let source = crate::plugins::kdl_asset_source::KDL_ASSET_SOURCE;
+    if let Ok(root) = impeller2_kdl::env::schematic_dir_or_cwd() {
+        let canonical_root = canonicalize_or_original(&root);
+        if let Ok(relative) = resolved.strip_prefix(&canonical_root) {
+            return AssetPath::from_path_buf(relative.to_path_buf()).with_source(source);
+        }
+    }
+    AssetPath::from_path_buf(resolved).with_source(source)
 }
 
 fn apply_theme(theme: Option<&impeller2_wkt::ThemeConfig>) -> colors::SchemeSelection {
@@ -221,7 +379,6 @@ pub fn render_diag(diagnostic: &dyn Diagnostic) -> String {
 pub fn load_schematic_file(
     path: &Path,
     params: &mut LoadSchematicParams,
-    mut live_reload_rx: ResMut<SchematicLiveReloadRx>,
 ) -> Result<(), KdlSchematicError> {
     let resolved_path = impeller2_kdl::env::schematic_file(path);
     if !resolved_path.try_exists().unwrap_or(false) {
@@ -229,54 +386,28 @@ pub fn load_schematic_file(
             path: resolved_path,
         });
     }
-    let watch_path = resolved_path.clone();
-    let (tx, rx) = flume::bounded(1);
-    live_reload_rx.set_receiver(rx);
-    #[cfg(target_os = "linux")]
-    live_reload_rx.guard_for(Duration::from_millis(2000));
-    std::thread::spawn(move || {
-        let cb_path = watch_path.clone();
-        let mut debouncer = notify_debouncer_mini::new_debouncer(
-            Duration::from_millis(100),
-            move |res: notify_debouncer_mini::DebounceEventResult| {
-                if res.is_err() {
-                    return;
-                }
-
-                if let Ok(kdl) = std::fs::read_to_string(&cb_path) {
-                    let Ok(schematic) = impeller2_wkt::Schematic::from_kdl(&kdl) else {
-                        return;
-                    };
-                    let _ = tx.send(SchematicReloadEvent {
-                        path: cb_path.clone(),
-                        schematic,
-                    });
-                }
-            },
-        )
-        .unwrap();
-        debouncer
-            .watcher()
-            .watch(
-                &watch_path,
-                notify_debouncer_mini::notify::RecursiveMode::NonRecursive,
-            )
-            .unwrap();
-        loop {
-            std::thread::park();
-        }
-    });
-    if let Ok(kdl) = std::fs::read_to_string(&resolved_path) {
-        let schematic = impeller2_wkt::Schematic::from_kdl(&kdl)?;
-        let base_dir_maybe = resolved_path.parent();
-        params.load_schematic(&schematic, base_dir_maybe);
-        live_reload_rx.record_loaded(&resolved_path);
+    let asset_path = filesystem_to_asset_path(&resolved_path);
+    let handle: Handle<SchematicDocumentAsset> = params.asset_server.load(asset_path.clone());
+    params
+        .current_document
+        .set_file(handle.clone(), asset_path, resolved_path.clone());
+    if let Some(document) = params.document_assets.get(&handle).cloned() {
+        params.load_schematic(
+            &document.root,
+            resolved_path.parent(),
+            Some(&document.secondary),
+        );
     }
     Ok(())
 }
 
 impl LoadSchematicParams<'_, '_> {
-    pub fn load_schematic(&mut self, schematic: &Schematic, base_dir: Option<&Path>) {
+    pub fn load_schematic(
+        &mut self,
+        schematic: &Schematic,
+        base_dir: Option<&Path>,
+        secondary_assets: Option<&[SecondarySchematicAsset]>,
+    ) {
         self.render_layer_alloc.free_all();
         for (id, window_id, window_state) in &self.window_states {
             if window_id.is_primary() {
@@ -428,74 +559,29 @@ impl LoadSchematicParams<'_, '_> {
             }
         }
 
+        let mut loaded_secondaries = secondary_assets.unwrap_or(&[]).iter();
         for descriptor in secondary_descriptors {
-            if let Some(path) = descriptor.path.as_ref() {
-                match std::fs::read_to_string(path) {
+            if let Some(secondary) = loaded_secondaries.next() {
+                self.spawn_secondary_window(
+                    &secondary.schematic,
+                    descriptor,
+                    theme_mode.as_deref(),
+                    &theme_selection.scheme,
+                    Some(secondary.asset_path.path()),
+                );
+                continue;
+            }
+
+            if let Some(path) = descriptor.path.clone() {
+                match std::fs::read_to_string(&path) {
                     Ok(kdl) => match impeller2_wkt::Schematic::from_kdl(&kdl) {
-                        Ok(sec_schematic) => {
-                            let theme_mode = sec_schematic
-                                .theme
-                                .as_ref()
-                                .and_then(|t| t.mode.as_deref())
-                                .or(theme_mode.as_deref());
-                            let resolved_mode = theme_mode.map(|mode| {
-                                if colors::scheme_supports_mode(&theme_selection.scheme, mode) {
-                                    mode.to_string()
-                                } else {
-                                    "dark".to_string()
-                                }
-                            });
-                            let id = WindowId::default();
-                            let mut tile_state =
-                                TileState::new(Id::new(("secondary_tab_tree", id.0)));
-                            let panel_count = sec_schematic
-                                .elems
-                                .iter()
-                                .filter(|elem| {
-                                    matches!(elem, impeller2_wkt::SchematicElem::Panel(_))
-                                })
-                                .count();
-                            let tabs_parent = tabs_parent_for_panels(&tile_state, panel_count);
-                            let mut ui_state = crate::ui::WindowUiState::default();
-
-                            for elem in &sec_schematic.elems {
-                                if let impeller2_wkt::SchematicElem::Panel(panel) = elem {
-                                    self.spawn_panel(
-                                        &mut tile_state,
-                                        &mut ui_state,
-                                        panel,
-                                        tabs_parent,
-                                        PanelContext::Secondary(id),
-                                    );
-                                }
-                            }
-
-                            let graph_entities = tile_state.collect_graph_entities();
-                            let descriptor = WindowDescriptor {
-                                mode: resolved_mode,
-                                ..descriptor
-                            };
-                            info!(
-                                path = ?descriptor.path,
-                                "Loaded secondary schematic"
-                            );
-
-                            for &graph in &graph_entities {
-                                if let Ok(mut camera) = self.cameras.get_mut(graph) {
-                                    // Why do we turn their cameras off?
-                                    // Oh, so we can set their `WindowRef` first.
-                                    camera.is_active = false;
-                                }
-                            }
-
-                            let state = WindowState {
-                                descriptor,
-                                tile_state,
-                                graph_entities,
-                                ui_state,
-                            };
-                            self.commands.spawn((id, state));
-                        }
+                        Ok(sec_schematic) => self.spawn_secondary_window(
+                            &sec_schematic,
+                            descriptor,
+                            theme_mode.as_deref(),
+                            &theme_selection.scheme,
+                            Some(path.as_path()),
+                        ),
                         Err(err) => {
                             let diag = render_diag(&err);
                             let report = miette!(err.clone());
@@ -516,6 +602,71 @@ impl LoadSchematicParams<'_, '_> {
                 }
             }
         }
+    }
+
+    fn spawn_secondary_window(
+        &mut self,
+        sec_schematic: &Schematic,
+        descriptor: WindowDescriptor,
+        fallback_theme_mode: Option<&str>,
+        theme_scheme: &str,
+        log_path: Option<&Path>,
+    ) {
+        let theme_mode = sec_schematic
+            .theme
+            .as_ref()
+            .and_then(|t| t.mode.as_deref())
+            .or(fallback_theme_mode);
+        let resolved_mode = theme_mode.map(|mode| {
+            if colors::scheme_supports_mode(theme_scheme, mode) {
+                mode.to_string()
+            } else {
+                "dark".to_string()
+            }
+        });
+        let id = WindowId::default();
+        let mut tile_state = TileState::new(Id::new(("secondary_tab_tree", id.0)));
+        let panel_count = sec_schematic
+            .elems
+            .iter()
+            .filter(|elem| matches!(elem, impeller2_wkt::SchematicElem::Panel(_)))
+            .count();
+        let tabs_parent = tabs_parent_for_panels(&tile_state, panel_count);
+        let mut ui_state = crate::ui::WindowUiState::default();
+
+        for elem in &sec_schematic.elems {
+            if let impeller2_wkt::SchematicElem::Panel(panel) = elem {
+                self.spawn_panel(
+                    &mut tile_state,
+                    &mut ui_state,
+                    panel,
+                    tabs_parent,
+                    PanelContext::Secondary(id),
+                );
+            }
+        }
+
+        let graph_entities = tile_state.collect_graph_entities();
+        let descriptor = WindowDescriptor {
+            mode: resolved_mode,
+            ..descriptor
+        };
+        info!(path = ?log_path, "Loaded secondary schematic");
+
+        for &graph in &graph_entities {
+            if let Ok(mut camera) = self.cameras.get_mut(graph) {
+                // Secondary graph cameras are activated after their WindowRef is assigned.
+                camera.is_active = false;
+            }
+        }
+
+        let state = WindowState {
+            descriptor,
+            tile_state,
+            graph_entities,
+            ui_state,
+        };
+        self.commands.spawn((id, state));
     }
 
     pub fn spawn_object_3d(&mut self, object_3d: Object3D) {
@@ -1108,159 +1259,51 @@ pub fn graph_label(graph: &Graph) -> String {
         .unwrap_or_else(|| "Graph".to_string())
 }
 
-#[derive(Debug)]
-pub struct SchematicReloadEvent {
-    pub path: PathBuf,
-    pub schematic: Schematic,
-}
-
-#[derive(Default, Resource)]
-pub struct SchematicLiveReloadRx {
-    receiver: Option<flume::Receiver<SchematicReloadEvent>>,
-    ignored_paths: HashMap<PathBuf, usize>,
-    #[cfg(target_os = "linux")]
-    load_guard_until: Option<Instant>,
-    #[cfg(target_os = "linux")]
-    last_loaded: HashMap<PathBuf, SystemTime>,
-}
-
-impl SchematicLiveReloadRx {
-    pub fn set_receiver(&mut self, receiver: flume::Receiver<SchematicReloadEvent>) {
-        self.receiver = Some(receiver);
-    }
-
-    pub fn clear(&mut self) {
-        self.receiver = None;
-        self.ignored_paths.clear();
-    }
-
-    pub fn ignore_path(&mut self, path: PathBuf) {
-        let canonical = canonicalize_for_ignore(path);
-        *self.ignored_paths.entry(canonical).or_insert(0) += 1;
-    }
-
-    #[cfg(not(target_os = "linux"))]
-    pub fn guard_for(&mut self, _duration: Duration) {}
-
-    #[cfg(target_os = "linux")]
-    pub fn guard_for(&mut self, duration: Duration) {
-        let candidate = Instant::now() + duration;
-        self.load_guard_until = Some(
-            self.load_guard_until
-                .map(|current| current.max(candidate))
-                .unwrap_or(candidate),
-        );
-    }
-
-    fn should_ignore(&mut self, path: &Path) -> bool {
-        let canonical = canonicalize_for_ignore(path.to_path_buf());
-        if let Some(count) = self.ignored_paths.get_mut(&canonical) {
-            if *count > 1 {
-                *count -= 1;
-            } else {
-                self.ignored_paths.remove(&canonical);
-            }
-            return true;
-        }
-        false
-    }
-
-    #[cfg(target_os = "linux")]
-    fn guard_active(&mut self) -> bool {
-        let now = Instant::now();
-        let mut saw_event = false;
-        if let Some(receiver) = &mut self.receiver {
-            while receiver.try_recv().is_ok() {
-                saw_event = true;
-            }
-        }
-        if saw_event {
-            let deadline = now + NOTIFY_SILENCE;
-            self.load_guard_until = Some(
-                self.load_guard_until
-                    .map(|current| current.max(deadline))
-                    .unwrap_or(deadline),
-            );
-        }
-        if let Some(until) = self.load_guard_until
-            && now < until
-        {
-            return true;
-        }
-        self.load_guard_until = None;
-        false
-    }
-
-    #[cfg(target_os = "linux")]
-    fn has_changed(&mut self, path: &Path) -> bool {
-        let canonical = canonicalize_for_ignore(path.to_path_buf());
-        let metadata = match std::fs::metadata(&canonical) {
-            Ok(meta) => meta,
-            Err(_) => {
-                self.last_loaded.remove(&canonical);
-                return true;
-            }
-        };
-        let modified = match metadata.modified() {
-            Ok(ts) => ts,
-            Err(_) => {
-                self.last_loaded.remove(&canonical);
-                return true;
-            }
-        };
-        let last = self.last_loaded.get(&canonical).copied();
-        let changed = last.map(|ts| modified > ts).unwrap_or(true);
-        if changed {
-            self.last_loaded.insert(canonical, modified);
-        }
-        changed
-    }
-
-    #[cfg(target_os = "linux")]
-    pub fn record_loaded(&mut self, path: &Path) {
-        let canonical = canonicalize_for_ignore(path.to_path_buf());
-        if let Ok(meta) = std::fs::metadata(&canonical)
-            && let Ok(modified) = meta.modified()
-        {
-            self.last_loaded.insert(canonical, modified);
-        }
-    }
-
-    #[cfg(not(target_os = "linux"))]
-    fn has_changed(&mut self, _path: &Path) -> bool {
-        true
-    }
-
-    #[cfg(not(target_os = "linux"))]
-    pub fn record_loaded(&mut self, _path: &Path) {}
-}
-
-fn canonicalize_for_ignore(path: PathBuf) -> PathBuf {
-    std::fs::canonicalize(&path).unwrap_or(path)
-}
-
-pub fn schematic_live_reload(
-    mut rx: ResMut<SchematicLiveReloadRx>,
+pub fn schematic_asset_reload(
+    mut events: MessageReader<AssetEvent<SchematicDocumentAsset>>,
     mut params: LoadSchematicParams,
 ) {
-    #[cfg(target_os = "linux")]
-    if rx.guard_active() {
-        return;
+    for event in events.read() {
+        let id = match event {
+            AssetEvent::LoadedWithDependencies { id } | AssetEvent::Modified { id } => *id,
+            _ => continue,
+        };
+        if !params.current_document.matches(id) {
+            continue;
+        }
+        let Some(handle) = params.current_document.handle.clone() else {
+            continue;
+        };
+        let save_path = params.current_document.save_path.clone();
+        let Some(document) = params.document_assets.get(&handle).cloned() else {
+            continue;
+        };
+        let base_dir = save_path.as_deref().and_then(Path::parent);
+        info!(
+            path = ?save_path,
+            "Refreshing schematic document from assets"
+        );
+        params.load_schematic(&document.root, base_dir, Some(&document.secondary));
     }
-    let Some(receiver) = &mut rx.receiver else {
-        return;
-    };
-    let Ok(event) = receiver.try_recv() else {
-        return;
-    };
-    if rx.should_ignore(&event.path) {
-        return;
+}
+
+pub fn schematic_asset_load_failed(
+    mut events: MessageReader<AssetLoadFailedEvent<SchematicDocumentAsset>>,
+    current_document: Res<CurrentDocument>,
+    mut modal: ModalDialog,
+) {
+    for event in events.read() {
+        if !current_document.matches(event.id) {
+            continue;
+        }
+        modal.dialog_error(
+            format!("Invalid Schematic in {:?}", event.path),
+            &event.error,
+        );
+        error!(
+            path = ?event.path,
+            error = ?event.error,
+            "Failed to load schematic document"
+        );
     }
-    if !rx.has_changed(&event.path) {
-        return;
-    }
-    info!(path = ?event.path, "refreshing schematic");
-    let base_dir = event.path.parent().map(|p| p.to_path_buf());
-    params.load_schematic(&event.schematic, base_dir.as_deref());
-    rx.record_loaded(&event.path);
 }

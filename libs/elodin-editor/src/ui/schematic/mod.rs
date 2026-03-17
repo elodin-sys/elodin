@@ -492,8 +492,13 @@ impl Plugin for SchematicPlugin {
                     .pipe(sync_schematic)
                     .before(tiles_to_schematic),
             )
-            .init_resource::<SchematicLiveReloadRx>()
-            .add_systems(PreUpdate, load::schematic_live_reload);
+            .add_systems(
+                PreUpdate,
+                (
+                    load::schematic_asset_reload,
+                    load::schematic_asset_load_failed,
+                ),
+            );
     }
 }
 

@@ -1,7 +1,3 @@
-use std::collections::{HashMap, HashSet};
-use std::fmt::Write;
-use std::path::PathBuf;
-
 use bevy::ecs::message::Messages;
 use bevy::input::{
     ButtonInput,
@@ -27,6 +23,8 @@ use bevy_egui::{
     egui::{self, Color32, Label, RichText},
     input::EguiWantsInput,
 };
+use std::collections::{HashMap, HashSet};
+use std::fmt::Write;
 use tracing::instrument;
 pub(crate) const DEFAULT_SECONDARY_RECT: WindowRect = WindowRect {
     x: 10,
@@ -69,7 +67,7 @@ use self::colors::get_scheme;
 use self::{command_palette::CommandPaletteState, plot::GraphState, timeline::timeline_slider};
 use impeller2::types::ComponentId;
 use impeller2_bevy::ComponentValueMap;
-use impeller2_wkt::{ComponentMetadata, ComponentValue, DbConfig, WindowRect};
+use impeller2_wkt::{ComponentMetadata, ComponentValue, WindowRect};
 
 use crate::ui::window::window_entity_from_target;
 use crate::{
@@ -650,15 +648,15 @@ fn fix_visibility_hierarchy(
 }
 
 pub(crate) fn update_primary_descriptor_path(
-    db_config: Res<DbConfig>,
+    current_document: Res<schematic::CurrentDocument>,
     mut q: Query<(&tiles::WindowId, &mut tiles::WindowState)>,
 ) {
-    let Some(path) = db_config.schematic_path() else {
+    let Some(path) = current_document.save_path.as_ref() else {
         return;
     };
     for (id, mut state) in q.iter_mut() {
         if id.is_primary() {
-            state.descriptor.path = Some(PathBuf::from(path));
+            state.descriptor.path = Some(path.clone());
         }
     }
 }
