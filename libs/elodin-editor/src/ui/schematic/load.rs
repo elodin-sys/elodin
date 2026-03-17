@@ -1288,6 +1288,7 @@ pub fn schematic_asset_reload(
     current_secondary: Res<crate::ui::schematic::CurrentSecondarySchematics>,
     mut params: LoadSchematicParams,
 ) {
+    let mut saw_current_document_event = false;
     for event in events.read() {
         let id = match event {
             AssetEvent::LoadedWithDependencies { id } | AssetEvent::Modified { id } => *id,
@@ -1296,27 +1297,38 @@ pub fn schematic_asset_reload(
         if !params.current_document.matches(id) {
             continue;
         }
-        let Some(handle) = params.current_document.handle.clone() else {
-            continue;
-        };
-        let save_path = params.current_document.save_path.clone();
-        let Some(document) = params.document_assets.get(&handle).cloned() else {
-            continue;
-        };
-        if document_matches_current_snapshot(&document, &current_schematic, &current_secondary) {
-            info!(
-                path = ?save_path,
-                "Skipping schematic reload because saved document matches current snapshot"
-            );
-            continue;
-        }
-        let base_dir = save_path.as_deref().and_then(Path::parent);
+        saw_current_document_event = true;
+    }
+
+    if !saw_current_document_event {
+        return;
+    }
+
+    let Some(handle) = params.current_document.handle.clone() else {
+        return;
+    };
+    let save_path = params.current_document.save_path.clone();
+    let Some(document) = params.document_assets.get(&handle).cloned() else {
+        return;
+    };
+
+    // Coalesce duplicate asset events for the current document into a single reload.
+    // `load_schematic` uses deferred Commands to despawn and respawn windows, so re-entering it
+    // multiple times in the same frame can leave duplicate secondary windows alive.
+    if document_matches_current_snapshot(&document, &current_schematic, &current_secondary) {
         info!(
             path = ?save_path,
-            "Refreshing schematic document from assets"
+            "Skipping schematic reload because saved document matches current snapshot"
         );
-        params.load_schematic(&document.root, base_dir, Some(&document.secondary));
+        return;
     }
+
+    let base_dir = save_path.as_deref().and_then(Path::parent);
+    info!(
+        path = ?save_path,
+        "Refreshing schematic document from assets"
+    );
+    params.load_schematic(&document.root, base_dir, Some(&document.secondary));
 }
 
 pub fn schematic_asset_load_failed(
