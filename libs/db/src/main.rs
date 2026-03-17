@@ -279,7 +279,7 @@ struct QueryArgs {
         long,
         default_value = "6",
         value_parser = clap::value_parser!(elodin_db::query::Precision),
-        help = "Decimal places for floats (number or 'full'); default 6"
+        help = "Decimal places for floats (number or 'full')"
     )]
     precision: elodin_db::query::Precision,
     #[clap(help = "Path to the database directory")]
