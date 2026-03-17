@@ -15,6 +15,34 @@ use tabled::builder::Builder;
 
 use crate::DB;
 
+/// Decimal places for float display; "full" means no rounding.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Precision {
+    /// Show floats with this many decimal places.
+    Decimals(u32),
+    /// Show full precision (no rounding).
+    Full,
+}
+
+impl Default for Precision {
+    fn default() -> Self {
+        Precision::Decimals(6)
+    }
+}
+
+impl std::str::FromStr for Precision {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s.eq_ignore_ascii_case("full") {
+            return Ok(Precision::Full);
+        }
+        s.parse::<u32>()
+            .map(Precision::Decimals)
+            .map_err(|_| format!("precision must be a number or 'full', got '{}'", s))
+    }
+}
+
 /// How to display the time column in table/CSV output.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, clap::ValueEnum)]
 pub enum TimeFormat {
@@ -53,6 +81,8 @@ pub struct QueryArgs {
     pub sql: Option<String>,
     /// If true, print the SQL (EQL conversion or raw) to stderr.
     pub verbose: bool,
+    /// Decimal places for floats (number or "full"); default 6.
+    pub precision: Precision,
     /// Database directory path.
     pub dbfile: PathBuf,
     /// Show only the first N rows.
@@ -74,6 +104,7 @@ pub async fn run(args: QueryArgs) -> miette::Result<()> {
         eql,
         sql,
         verbose,
+        precision,
         dbfile,
         head,
         tail,
@@ -175,9 +206,16 @@ pub async fn run(args: QueryArgs) -> miette::Result<()> {
     }
     slice = time_column_first(&slice).into_diagnostic()?;
 
+    let is_table_or_csv = matches!(format, QueryOutputFormat::Table | QueryOutputFormat::Csv);
+    if is_table_or_csv && precision != Precision::Full {
+        eprintln!(
+            "Note: numeric columns are shown with limited precision. Use --precision full to see all digits."
+        );
+    }
+
     match format {
-        QueryOutputFormat::Table => print_record_batch_table(&slice, time_format)?,
-        QueryOutputFormat::Csv => print_record_batch_csv(&slice, time_format)?,
+        QueryOutputFormat::Table => print_record_batch_table(&slice, time_format, &precision)?,
+        QueryOutputFormat::Csv => print_record_batch_csv(&slice, time_format, &precision)?,
         QueryOutputFormat::ArrowIpc => {
             eprintln!("Warning: output is binary; pipe to a file (e.g. ... > out.arrow)");
             print_record_batch_arrow_ipc(&slice)?;
@@ -219,7 +257,11 @@ fn time_column_first(batch: &RecordBatch) -> Result<RecordBatch, arrow::error::A
 }
 
 /// Prints a RecordBatch as a terminal table using column names and stringified values.
-fn print_record_batch_table(batch: &RecordBatch, time_format: TimeFormat) -> miette::Result<()> {
+fn print_record_batch_table(
+    batch: &RecordBatch,
+    time_format: TimeFormat,
+    precision: &Precision,
+) -> miette::Result<()> {
     let schema = batch.schema();
     let col_indices: Vec<(usize, &Arc<Field>)> = schema
         .fields()
@@ -240,7 +282,14 @@ fn print_record_batch_table(batch: &RecordBatch, time_format: TimeFormat) -> mie
         let mut row = Vec::with_capacity(col_indices.len());
         for (col_idx, field) in &col_indices {
             let col = batch.column(*col_idx);
-            let s = format_cell(col, i, field.data_type(), Some(field.name()), time_format)?;
+            let s = format_cell(
+                col,
+                i,
+                field.data_type(),
+                Some(field.name()),
+                time_format,
+                precision,
+            )?;
             row.push(s);
         }
         builder.push_record(row);
@@ -344,7 +393,11 @@ fn print_record_batch_parquet(batch: &RecordBatch) -> miette::Result<()> {
 }
 
 /// Prints a RecordBatch as CSV to stdout (same cell formatting as table).
-fn print_record_batch_csv(batch: &RecordBatch, time_format: TimeFormat) -> miette::Result<()> {
+fn print_record_batch_csv(
+    batch: &RecordBatch,
+    time_format: TimeFormat,
+    precision: &Precision,
+) -> miette::Result<()> {
     let schema = batch.schema();
     let col_indices: Vec<(usize, &Arc<Field>)> = schema
         .fields()
@@ -370,7 +423,14 @@ fn print_record_batch_csv(batch: &RecordBatch, time_format: TimeFormat) -> miett
                 write!(out, ",").into_diagnostic()?;
             }
             let col = batch.column(*col_idx);
-            let s = format_cell(col, i, field.data_type(), Some(field.name()), time_format)?;
+            let s = format_cell(
+                col,
+                i,
+                field.data_type(),
+                Some(field.name()),
+                time_format,
+                precision,
+            )?;
             write!(out, "{}", csv_escape(&s)).into_diagnostic()?;
         }
         writeln!(out).into_diagnostic()?;
@@ -393,6 +453,7 @@ fn format_cell(
     data_type: &arrow::datatypes::DataType,
     column_name: Option<&str>,
     time_format: TimeFormat,
+    precision: &Precision,
 ) -> miette::Result<String> {
     use arrow::array::*;
     use arrow::datatypes::DataType;
@@ -437,11 +498,19 @@ fn format_cell(
         }
         DataType::Float32 => {
             let a = col.as_any().downcast_ref::<Float32Array>().unwrap();
-            format!("{}", a.value(row))
+            let x = a.value(row);
+            match precision {
+                Precision::Full => format!("{}", x),
+                Precision::Decimals(n) => format!("{:.1$}", x, *n as usize),
+            }
         }
         DataType::Float64 => {
             let a = col.as_any().downcast_ref::<Float64Array>().unwrap();
-            format!("{}", a.value(row))
+            let x = a.value(row);
+            match precision {
+                Precision::Full => format!("{}", x),
+                Precision::Decimals(n) => format!("{:.1$}", x, *n as usize),
+            }
         }
         DataType::Boolean => {
             let a = col.as_any().downcast_ref::<BooleanArray>().unwrap();
@@ -492,7 +561,7 @@ fn format_cell(
                 let vals = arr.value(row);
                 let len = vals.len();
                 let parts: Vec<String> = (0..len)
-                    .map(|j| format_cell(&vals, j, vals.data_type(), None, time_format))
+                    .map(|j| format_cell(&vals, j, vals.data_type(), None, time_format, precision))
                     .collect::<Result<Vec<_>, _>>()?;
                 format!("[{}]", parts.join(", "))
             } else {

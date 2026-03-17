@@ -268,6 +268,14 @@ struct QueryArgs {
     sql: Option<String>,
     #[clap(short = 'v', long, help = "Print the SQL (EQL conversion or raw) to stderr")]
     verbose: bool,
+    #[clap(
+        short = 'p',
+        long,
+        default_value = "6",
+        value_parser = clap::value_parser!(elodin_db::query::Precision),
+        help = "Decimal places for floats (number or 'full'); default 6"
+    )]
+    precision: elodin_db::query::Precision,
     #[clap(help = "Path to the database directory")]
     dbfile: PathBuf,
 }
@@ -602,6 +610,7 @@ async fn main() -> miette::Result<()> {
                 eql: args.eql,
                 sql: args.sql,
                 verbose: args.verbose,
+                precision: args.precision,
                 dbfile: args.dbfile,
                 head: args.head,
                 tail: args.tail,
