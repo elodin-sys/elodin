@@ -89,6 +89,10 @@ pub struct QueryArgs {
     pub head: Option<usize>,
     /// Show only the last N rows.
     pub tail: Option<usize>,
+    /// Skip N rows from the start; negative = from end of dataset.
+    pub offset: Option<i64>,
+    /// Return at most N rows.
+    pub limit: Option<usize>,
     /// Output format (table, csv, parquet, or arrow-ipc to terminal).
     pub format: QueryOutputFormat,
     /// Flatten vector columns to separate columns (e.g. vel -> vel_x, vel_y, vel_z).
@@ -108,6 +112,8 @@ pub async fn run(args: QueryArgs) -> miette::Result<()> {
         dbfile,
         head,
         tail,
+        offset,
+        limit,
         format,
         flatten,
         time_format,
@@ -206,13 +212,37 @@ pub async fn run(args: QueryArgs) -> miette::Result<()> {
         arrow::compute::concat_batches(batches[0].schema_ref(), &batches).into_diagnostic()?;
     let total_rows = combined.num_rows();
 
-    let (start, len) = match (head, tail) {
-        (Some(n), None) => (0, n.min(total_rows)),
-        (None, Some(n)) => (total_rows.saturating_sub(n), n.min(total_rows)),
-        (Some(_), Some(_)) => {
-            return Err(miette::miette!("cannot use both --head and --tail"));
+    let (start, len) = if head.is_some() || tail.is_some() {
+        if offset.is_some() || limit.is_some() {
+            return Err(miette::miette!(
+                "cannot combine --head/--tail with --offset/--limit"
+            ));
         }
-        (None, None) => (0, total_rows),
+        match (head, tail) {
+            (Some(n), None) => (0, n.min(total_rows)),
+            (None, Some(n)) => (total_rows.saturating_sub(n), n.min(total_rows)),
+            (Some(_), Some(_)) => {
+                return Err(miette::miette!("cannot use both --head and --tail"));
+            }
+            (None, None) => (0, total_rows),
+        }
+    } else if offset.is_some() || limit.is_some() {
+        let start_i = offset.unwrap_or(0);
+        let start = if start_i >= 0 {
+            (start_i as usize).min(total_rows)
+        } else {
+            let from_end = (total_rows as i64)
+                .saturating_add(start_i)
+                .max(0) as usize;
+            from_end.min(total_rows)
+        };
+        let remaining = total_rows.saturating_sub(start);
+        let len = limit
+            .map(|l| l.min(remaining))
+            .unwrap_or(remaining);
+        (start, len)
+    } else {
+        (0, total_rows)
     };
 
     let mut slice = combined.slice(start, len);

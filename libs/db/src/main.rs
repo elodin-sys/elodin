@@ -236,10 +236,22 @@ struct InfoArgs {
 
 #[derive(clap::Args, Clone, Debug)]
 struct QueryArgs {
+    #[clap(
+        long,
+        value_name = "EQL",
+        help = "EQL query (e.g. component name like drone.position)"
+    )]
+    eql: Option<String>,
+    #[clap(long, value_name = "SQL", help = "Raw SQL query")]
+    sql: Option<String>,
     #[clap(long, help = "Show only the first N rows")]
     head: Option<usize>,
     #[clap(long, help = "Show only the last N rows")]
     tail: Option<usize>,
+    #[clap(long, value_name = "N", help = "Skip N rows from the start (negative = from end)", allow_negative_numbers = true)]
+    offset: Option<i64>,
+    #[clap(long, value_name = "N", help = "Return at most N rows")]
+    limit: Option<usize>,
     #[clap(
         long,
         short,
@@ -261,17 +273,9 @@ struct QueryArgs {
     )]
     time_format: elodin_db::query::TimeFormat,
     #[clap(
-        long,
-        value_name = "EQL",
-        help = "EQL query (e.g. component name like drone.position)"
-    )]
-    eql: Option<String>,
-    #[clap(long, value_name = "SQL", help = "Raw SQL query")]
-    sql: Option<String>,
-    #[clap(
         short = 'v',
         long,
-        help = "Print the SQL (EQL conversion or raw) to stderr"
+        help = "Be verbose, e.g., print EQL to SQL conversion."
     )]
     verbose: bool,
     #[clap(
@@ -624,6 +628,8 @@ async fn main() -> miette::Result<()> {
                 dbfile: args.dbfile,
                 head: args.head,
                 tail: args.tail,
+                offset: args.offset,
+                limit: args.limit,
                 format: args.format,
                 flatten: args.flatten,
                 time_format: args.time_format,
