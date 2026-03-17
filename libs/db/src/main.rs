@@ -244,10 +244,6 @@ struct QueryArgs {
     eql: Option<String>,
     #[clap(long, value_name = "SQL", help = "Raw SQL query")]
     sql: Option<String>,
-    #[clap(long, help = "Show only the first N rows")]
-    head: Option<usize>,
-    #[clap(long, help = "Show only the last N rows")]
-    tail: Option<usize>,
     #[clap(long, value_name = "N", help = "Skip N rows from the start (negative = from end)", allow_negative_numbers = true)]
     offset: Option<i64>,
     #[clap(long, value_name = "N", help = "Return at most N rows")]
@@ -626,8 +622,6 @@ async fn main() -> miette::Result<()> {
                 verbose: args.verbose,
                 precision: args.precision,
                 dbfile: args.dbfile,
-                head: args.head,
-                tail: args.tail,
                 offset: args.offset,
                 limit: args.limit,
                 format: args.format,

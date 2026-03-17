@@ -85,10 +85,6 @@ pub struct QueryArgs {
     pub precision: Precision,
     /// Database directory path.
     pub dbfile: PathBuf,
-    /// Show only the first N rows.
-    pub head: Option<usize>,
-    /// Show only the last N rows.
-    pub tail: Option<usize>,
     /// Skip N rows from the start; negative = from end of dataset.
     pub offset: Option<i64>,
     /// Return at most N rows.
@@ -101,8 +97,7 @@ pub struct QueryArgs {
     pub time_format: TimeFormat,
 }
 
-/// Queries the given component from the database at `dbfile`, optionally limiting
-/// to the first `head` or last `tail` rows, and prints the result to stdout.
+/// Queries the database at `dbfile` and prints the result to stdout.
 pub async fn run(args: QueryArgs) -> miette::Result<()> {
     let QueryArgs {
         eql,
@@ -110,8 +105,6 @@ pub async fn run(args: QueryArgs) -> miette::Result<()> {
         verbose,
         precision,
         dbfile,
-        head,
-        tail,
         offset,
         limit,
         format,
@@ -212,21 +205,7 @@ pub async fn run(args: QueryArgs) -> miette::Result<()> {
         arrow::compute::concat_batches(batches[0].schema_ref(), &batches).into_diagnostic()?;
     let total_rows = combined.num_rows();
 
-    let (start, len) = if head.is_some() || tail.is_some() {
-        if offset.is_some() || limit.is_some() {
-            return Err(miette::miette!(
-                "cannot combine --head/--tail with --offset/--limit"
-            ));
-        }
-        match (head, tail) {
-            (Some(n), None) => (0, n.min(total_rows)),
-            (None, Some(n)) => (total_rows.saturating_sub(n), n.min(total_rows)),
-            (Some(_), Some(_)) => {
-                return Err(miette::miette!("cannot use both --head and --tail"));
-            }
-            (None, None) => (0, total_rows),
-        }
-    } else if offset.is_some() || limit.is_some() {
+    let (start, len) = if offset.is_some() || limit.is_some() {
         let start_i = offset.unwrap_or(0);
         let start = if start_i >= 0 {
             (start_i as usize).min(total_rows)
