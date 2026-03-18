@@ -1,6 +1,6 @@
 use std::{io::Write, net::SocketAddr, path::PathBuf};
 
-use clap::{Parser, Subcommand, ValueEnum, ArgAction};
+use clap::{Parser, Subcommand, ValueEnum};
 use elodin_db::Server;
 use impeller2::vtable;
 use miette::IntoDiagnostic;
@@ -49,8 +49,8 @@ enum Commands {
     Drop(DropArgs),
     #[command(about = "Display information about a database")]
     Info(InfoArgs),
-    #[command(about = "Query component data from a database file and print results as a table")]
-    Query(QueryArgs),
+    #[command(about = "Run query from a database file and print results")]
+    Query(elodin_db::query::QueryArgs),
     #[command(
         name = "list-components",
         about = "List all component names in a database"
@@ -232,71 +232,6 @@ pub struct MergeArgs {
 struct InfoArgs {
     #[clap(help = "Path to the database directory (defaults to standard location)")]
     path: Option<PathBuf>,
-}
-
-#[derive(clap::Args, Clone, Debug)]
-struct QueryArgs {
-    #[clap(
-        long,
-        value_name = "EQL",
-        help = "EQL query, e.g., 'rocket.world_pos.x'"
-    )]
-    eql: Option<String>,
-    #[clap(long, value_name = "SQL", help = "SQL query, e.g., 'select rocket_world_pos[5] from rocket_world_pos'")]
-    sql: Option<String>,
-    #[clap(
-        short = 'v',
-        long,
-        action = ArgAction::Count,
-        help = "Be verbose, e.g., print EQL to SQL conversion."
-    )]
-    verbose: u8,
-    #[clap(
-        long,
-        value_name = "N|DURATION",
-        value_parser = clap::value_parser!(elodin_db::query::RowDescription),
-        allow_negative_numbers = true,
-        allow_hyphen_values = true,
-        help = "Skip N rows or duration (e.g., 2.6s, 340000ms, 53000us; negatives mean from end)"
-    )]
-    offset: Option<elodin_db::query::RowDescription>,
-    #[clap(
-        long,
-        value_name = "N|DURATION",
-        value_parser = clap::value_parser!(elodin_db::query::RowDescription),
-        help = "Return at most N rows or duration (e.g. 2.6s, 340000ms, 53000us)"
-    )]
-    limit: Option<elodin_db::query::RowDescription>,
-    #[clap(
-        long,
-        short,
-        value_enum,
-        default_value = "table",
-        help = "Output format"
-    )]
-    format: elodin_db::query::QueryOutputFormat,
-    #[clap(
-        long,
-        help = "Flatten vector columns to separate columns (e.g. vel -> vel.0, vel.1)"
-    )]
-    flatten: bool,
-    #[clap(long, help = "Show row index as the first column (0-based from the full result)")]
-    row_index: bool,
-    #[clap(
-        long,
-        value_enum,
-        help = "Time column display"
-    )]
-    time_format: Option<elodin_db::query::TimeFormat>,
-    #[clap(
-        long,
-        default_value = "6",
-        value_parser = clap::value_parser!(elodin_db::query::Precision),
-        help = "Decimal places for floats (number or 'full')"
-    )]
-    precision: elodin_db::query::Precision,
-    #[clap(help = "Path to the database directory")]
-    dbfile: PathBuf,
 }
 
 #[derive(clap::Args, Clone, Debug)]

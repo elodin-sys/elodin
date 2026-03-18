@@ -15,6 +15,71 @@ use tabled::builder::Builder;
 
 use crate::DB;
 
+#[derive(clap::Args, Clone, Debug)]
+pub struct QueryArgs {
+    #[clap(
+        long,
+        value_name = "EQL",
+        help = "EQL query, e.g., 'rocket.world_pos.x'"
+    )]
+    eql: Option<String>,
+    #[clap(long, value_name = "SQL", help = "SQL query, e.g., 'select rocket_world_pos[5] from rocket_world_pos'")]
+    sql: Option<String>,
+    #[clap(
+        short = 'v',
+        long,
+        action = clap::ArgAction::Count,
+        help = "Be verbose, e.g., print EQL to SQL conversion."
+    )]
+    verbose: u8,
+    #[clap(
+        long,
+        value_name = "N|DURATION",
+        value_parser = clap::value_parser!(RowDescription),
+        allow_negative_numbers = true,
+        allow_hyphen_values = true,
+        help = "Skip N rows or duration (e.g., 2.6s, 340000ms, 53000us; negatives mean from end)"
+    )]
+    offset: Option<RowDescription>,
+    #[clap(
+        long,
+        value_name = "N|DURATION",
+        value_parser = clap::value_parser!(RowDescription),
+        help = "Return at most N rows or duration (e.g. 2.6s, 340000ms, 53000us)"
+    )]
+    limit: Option<RowDescription>,
+    #[clap(
+        long,
+        short,
+        value_enum,
+        default_value = "table",
+        help = "Output format"
+    )]
+    format: QueryOutputFormat,
+    #[clap(
+        long,
+        help = "Flatten vector columns to separate columns (e.g. vel -> vel.0, vel.1)"
+    )]
+    flatten: bool,
+    #[clap(long, help = "Show row index as the first column (0-based from the full result)")]
+    row_index: bool,
+    #[clap(
+        long,
+        value_enum,
+        help = "Time column display"
+    )]
+    time_format: Option<TimeFormat>,
+    #[clap(
+        long,
+        default_value = "6",
+        value_parser = clap::value_parser!(Precision),
+        help = "Decimal places for floats (number or 'full')"
+    )]
+    precision: Precision,
+    #[clap(help = "Path to the database directory")]
+    dbfile: PathBuf,
+}
+
 /// Decimal places for float display; "full" means no rounding.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Precision {
@@ -148,43 +213,16 @@ pub enum TimeFormat {
 /// Output format for query results (always to stdout).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, clap::ValueEnum)]
 pub enum QueryOutputFormat {
-    /// Human-readable table (default).
+    /// Human-readable table (default)
     #[default]
     Table,
-    /// CSV lines.
+    /// Comma-Separated Values (CSV)
     Csv,
-    /// Arrow IPC stream (binary; pipe to a file).
+    /// Arrow IPC stream (binary; pipe to a file)
     ArrowIpc,
-    /// Parquet (binary; pipe to a file).
+    /// Parquet (binary; pipe to a file)
     #[cfg(feature = "parquet")]
     Parquet,
-}
-
-/// Arguments for the `query` subcommand.
-#[derive(Clone, Debug)]
-pub struct QueryArgs {
-    /// EQL query (e.g. component name). Mutually exclusive with `sql`.
-    pub eql: Option<String>,
-    /// Raw SQL query. Mutually exclusive with `eql`.
-    pub sql: Option<String>,
-    /// If true, print the SQL (EQL conversion or raw) to stderr.
-    pub verbose: bool,
-    /// Decimal places for floats (number or "full"); default 6.
-    pub precision: Precision,
-    /// Database directory path.
-    pub dbfile: PathBuf,
-    /// Skip rows from the start (integer or duration, e.g. 10 or 2.6s; negative int = from end).
-    pub offset: Option<RowDescription>,
-    /// Return at most this many rows or this duration (e.g. 10 or 2.6s).
-    pub limit: Option<RowDescription>,
-    /// Output format (table, csv, parquet, or arrow-ipc to terminal).
-    pub format: QueryOutputFormat,
-    /// Flatten vector columns to separate columns (e.g. vel -> vel_x, vel_y, vel_z).
-    pub flatten: bool,
-    /// How to display the time column. If None, inferred from --offset/--limit duration unit, else seconds.
-    pub time_format: Option<TimeFormat>,
-    /// If true, add a first column with the row index (0-based).
-    pub row_index: bool,
 }
 
 /// Infers time display format from offset/limit when they are duration variants.
@@ -279,7 +317,7 @@ pub async fn run(args: QueryArgs) -> miette::Result<()> {
                 )
             };
             sql.inspect(|sql| {
-                if verbose {
+                if verbose > 0{
                     eprintln!("EQL to SQL: {}", sql);
                 }
             })
