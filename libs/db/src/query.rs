@@ -30,6 +30,87 @@ impl Default for Precision {
     }
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub enum RowDescription {
+    /// Number of rows (offset can be negative for "from end").
+    Count(i64),
+    /// Duration in seconds (e.g. "2.6s"; negative = from end, e.g. -1s = 1s before last entry).
+    Second(f64),
+    /// Duration in milliseconds (e.g. "340000ms"; negative = from end).
+    Millisecond(i64),
+    /// Duration in microseconds (e.g. "340000us"; negative = from end).
+    Microsecond(i64),
+    /// Duration in nanoseconds (e.g. "53000ns"; negative = from end).
+    Nanosecond(i64),
+}
+
+impl RowDescription {
+    /// Converts a duration variant to microseconds for time-column comparison. Returns None for Count.
+    fn to_microseconds(&self) -> Option<f64> {
+        match self {
+            RowDescription::Count(_) => None,
+            RowDescription::Second(s) => Some(s * 1_000_000.0),
+            RowDescription::Millisecond(ms) => Some(*ms as f64 * 1_000.0),
+            RowDescription::Microsecond(us) => Some(*us as f64),
+            RowDescription::Nanosecond(ns) => Some(*ns as f64 / 1_000.0),
+        }
+    }
+}
+
+impl std::str::FromStr for RowDescription {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let s = s.trim();
+        if s.is_empty() {
+            return Err("empty row description".to_string());
+        }
+        if let Some(rest) = s.strip_suffix("ms") {
+            if rest.is_empty() {
+                return Err("invalid duration: 'ms' needs a number".to_string());
+            }
+            let n: i64 = rest
+                .parse()
+                .map_err(|_| format!("invalid milliseconds: '{}'", s))?;
+            return Ok(RowDescription::Millisecond(n));
+        }
+        if let Some(us) = s.strip_suffix("us").or_else(|| s.strip_suffix("µs")) {
+            if us.is_empty() {
+                return Err("invalid duration: 'us' needs a number".to_string());
+            }
+            let n: i64 = us
+                .parse()
+                .map_err(|_| format!("invalid microseconds: '{}'", s))?;
+            return Ok(RowDescription::Microsecond(n));
+        }
+        if let Some(ns) = s.strip_suffix("ns") {
+            if ns.is_empty() {
+                return Err("invalid duration: 'ns' needs a number".to_string());
+            }
+            let n: i64 = ns
+                .parse()
+                .map_err(|_| format!("invalid nanoseconds: '{}'", s))?;
+            return Ok(RowDescription::Nanosecond(n));
+        }
+        if let Some(rest) = s.strip_suffix('s') {
+            if rest.is_empty() {
+                return Err("invalid duration: 's' needs a number".to_string());
+            }
+            let n: f64 = rest
+                .parse()
+                .map_err(|_| format!("invalid seconds: '{}'", s))?;
+            return Ok(RowDescription::Second(n));
+        }
+        let n: i64 = s
+            .parse()
+            .map_err(|_| format!(
+                "row description must be an integer or duration (e.g. 10, 2.6s, 340000ms, 53000ns), got '{}'",
+                s
+            ))?;
+        Ok(RowDescription::Count(n))
+    }
+}
+
 impl std::str::FromStr for Precision {
     type Err = String;
 
@@ -53,6 +134,8 @@ pub enum TimeFormat {
     /// Show as seconds since epoch (default).
     #[default]
     Seconds,
+    /// Show as milliseconds since epoch.
+    Milliseconds,
     /// Show as microseconds since epoch.
     Microseconds,
 }
@@ -85,10 +168,10 @@ pub struct QueryArgs {
     pub precision: Precision,
     /// Database directory path.
     pub dbfile: PathBuf,
-    /// Skip N rows from the start; negative = from end of dataset.
-    pub offset: Option<i64>,
-    /// Return at most N rows.
-    pub limit: Option<usize>,
+    /// Skip rows from the start (integer or duration, e.g. 10 or 2.6s; negative int = from end).
+    pub offset: Option<RowDescription>,
+    /// Return at most this many rows or this duration (e.g. 10 or 2.6s).
+    pub limit: Option<RowDescription>,
     /// Output format (table, csv, parquet, or arrow-ipc to terminal).
     pub format: QueryOutputFormat,
     /// Flatten vector columns to separate columns (e.g. vel -> vel_x, vel_y, vel_z).
@@ -205,24 +288,7 @@ pub async fn run(args: QueryArgs) -> miette::Result<()> {
         arrow::compute::concat_batches(batches[0].schema_ref(), &batches).into_diagnostic()?;
     let total_rows = combined.num_rows();
 
-    let (start, len) = if offset.is_some() || limit.is_some() {
-        let start_i = offset.unwrap_or(0);
-        let start = if start_i >= 0 {
-            (start_i as usize).min(total_rows)
-        } else {
-            let from_end = (total_rows as i64)
-                .saturating_add(start_i)
-                .max(0) as usize;
-            from_end.min(total_rows)
-        };
-        let remaining = total_rows.saturating_sub(start);
-        let len = limit
-            .map(|l| l.min(remaining))
-            .unwrap_or(remaining);
-        (start, len)
-    } else {
-        (0, total_rows)
-    };
+    let (start, len) = resolve_slice(&combined, total_rows, offset.as_ref(), limit.as_ref())?;
 
     let mut slice = combined.slice(start, len);
     if flatten {
@@ -257,6 +323,140 @@ pub async fn run(args: QueryArgs) -> miette::Result<()> {
     }
 
     Ok(())
+}
+
+/// Resolves (start, len) from optional offset/limit (row count or duration).
+fn resolve_slice(
+    batch: &RecordBatch,
+    total_rows: usize,
+    offset: Option<&RowDescription>,
+    limit: Option<&RowDescription>,
+) -> miette::Result<(usize, usize)> {
+    if offset.is_none() && limit.is_none() {
+        return Ok((0, total_rows));
+    }
+    let time_us = time_column_microseconds(batch);
+    let needs_time = offset
+        .and_then(RowDescription::to_microseconds)
+        .is_some()
+        || limit.and_then(RowDescription::to_microseconds).is_some();
+    if needs_time && time_us.is_none() {
+        return Err(miette::miette!(
+            "duration for --offset/--limit requires a time column; use --eql or ensure the query selects time"
+        ));
+    }
+    let times = time_us.as_ref();
+    let start = if let Some(off) = offset {
+        match off {
+            RowDescription::Count(n) => {
+                if *n >= 0 {
+                    (*n as usize).min(total_rows)
+                } else {
+                    let from_end = (total_rows as i64).saturating_add(*n).max(0) as usize;
+                    from_end.min(total_rows)
+                }
+            }
+            _ => {
+                let offset_us = off.to_microseconds().unwrap();
+                let times = times.unwrap();
+                let first_us = times[0];
+                let last_us = times[total_rows - 1];
+                if offset_us >= 0.0 {
+                    times
+                        .iter()
+                        .position(|&t| (t as f64) >= first_us as f64 + offset_us)
+                        .unwrap_or(total_rows)
+                        .min(total_rows)
+                } else {
+                    // Negative duration: from end (e.g. -1s = 1 second before last entry)
+                    let threshold = last_us as f64 + offset_us;
+                    times
+                        .iter()
+                        .position(|&t| (t as f64) >= threshold)
+                        .unwrap_or(0)
+                        .min(total_rows)
+                }
+            }
+        }
+    } else {
+        0
+    };
+    let remaining = total_rows.saturating_sub(start);
+    let (final_start, len) = if let Some(lim) = limit {
+        match lim {
+            RowDescription::Count(n) => (start, ((*n).max(0) as usize).min(remaining)),
+            _ => {
+                let limit_us = lim.to_microseconds().unwrap();
+                let times = times.unwrap();
+                let last_us = times[total_rows - 1];
+                if limit_us >= 0.0 {
+                    let start_time_us = times[start];
+                    let mut end = start;
+                    while end < total_rows && (times[end] as f64) < start_time_us as f64 + limit_us {
+                        end += 1;
+                    }
+                    (start, (end - start).min(remaining))
+                } else {
+                    // Negative duration: last |limit_us| of data (e.g. -1s = take last 1 second)
+                    let threshold = last_us as f64 + limit_us;
+                    let start_from_end = times
+                        .iter()
+                        .position(|&t| (t as f64) >= threshold)
+                        .unwrap_or(0)
+                        .min(total_rows);
+                    let effective_start = start.max(start_from_end);
+                    let len = (total_rows - effective_start).min(total_rows);
+                    (effective_start, len)
+                }
+            }
+        }
+    } else {
+        (start, remaining)
+    };
+    Ok((final_start, len))
+}
+
+/// Returns the "time" column as microseconds per row, or None if missing/unsupported type.
+fn time_column_microseconds(batch: &RecordBatch) -> Option<Vec<i64>> {
+    use arrow::array::Array;
+    let schema = batch.schema();
+    let time_idx = schema.fields().iter().position(|f| f.name() == "time")?;
+    let col = batch.column(time_idx);
+    let n = col.len();
+    let mut out = Vec::with_capacity(n);
+    if let Some(a) = col.as_any().downcast_ref::<arrow::array::TimestampMicrosecondArray>() {
+        for i in 0..n {
+            out.push(a.value(i));
+        }
+        return Some(out);
+    }
+    if let Some(a) = col.as_any().downcast_ref::<arrow::array::TimestampMillisecondArray>() {
+        for i in 0..n {
+            out.push(a.value(i).saturating_mul(1000));
+        }
+        return Some(out);
+    }
+    if let Some(a) = col.as_any().downcast_ref::<arrow::array::TimestampNanosecondArray>() {
+        for i in 0..n {
+            out.push(a.value(i) / 1000);
+        }
+        return Some(out);
+    }
+    None
+}
+
+/// Returns the display name for a column; appends the unit for the time column.
+fn column_header_with_unit(name: &str, time_format: TimeFormat) -> String {
+    if name != "time" {
+        return name.to_string();
+    }
+    match time_format {
+        TimeFormat::Omit => name.to_string(),
+        TimeFormat::Seconds => "time (s)".to_string(),
+        TimeFormat::Milliseconds => "time (ms)".to_string(),
+        TimeFormat::Microseconds => "time (μs)".to_string(),
+        TimeFormat::Datetime => "time (UTC)".to_string(),
+    }
 }
 
 /// Reorders columns so "time" is first if present.
@@ -296,7 +496,7 @@ fn print_record_batch_table(
         .collect();
     let columns: Vec<String> = col_indices
         .iter()
-        .map(|(_, f)| f.name().to_string())
+        .map(|(_, f)| column_header_with_unit(f.name(), time_format))
         .collect();
     let n_rows = batch.num_rows();
 
@@ -433,7 +633,8 @@ fn print_record_batch_csv(
         if j > 0 {
             write!(out, ",").into_diagnostic()?;
         }
-        write!(out, "{}", csv_escape(field.name())).into_diagnostic()?;
+        let header = column_header_with_unit(field.name(), time_format);
+        write!(out, "{}", csv_escape(&header)).into_diagnostic()?;
     }
     writeln!(out).into_diagnostic()?;
 
@@ -570,6 +771,9 @@ fn format_cell(
                 }
                 (true, TimeFormat::Seconds) => {
                     format!("{}", value_us as f64 / 1_000_000.0)
+                }
+                (true, TimeFormat::Milliseconds) => {
+                    format!("{}", value_us as f64 / 1_000.0)
                 }
                 (true, TimeFormat::Microseconds) => format!("{}", value_us),
                 (false, _) => format!("{}", hifitime::Epoch::from(Timestamp(value_us))),

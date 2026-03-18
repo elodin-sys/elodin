@@ -244,10 +244,22 @@ struct QueryArgs {
     eql: Option<String>,
     #[clap(long, value_name = "SQL", help = "Raw SQL query")]
     sql: Option<String>,
-    #[clap(long, value_name = "N", help = "Skip N rows from the start (negative = from end)", allow_negative_numbers = true)]
-    offset: Option<i64>,
-    #[clap(long, value_name = "N", help = "Return at most N rows")]
-    limit: Option<usize>,
+    #[clap(
+        long,
+        value_name = "N|DURATION",
+        value_parser = clap::value_parser!(elodin_db::query::RowDescription),
+        allow_negative_numbers = true,
+        allow_hyphen_values = true,
+        help = "Skip rows (integer or duration: 2.6s, 340000ms, 53000ns; negative int = from end)"
+    )]
+    offset: Option<elodin_db::query::RowDescription>,
+    #[clap(
+        long,
+        value_name = "N|DURATION",
+        value_parser = clap::value_parser!(elodin_db::query::RowDescription),
+        help = "Return at most N rows or duration (e.g. 10, 2.6s, 340000ms, 53000ns)"
+    )]
+    limit: Option<elodin_db::query::RowDescription>,
     #[clap(
         long,
         short,
