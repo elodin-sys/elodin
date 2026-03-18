@@ -163,6 +163,3 @@ pic-scale = "0.6"
 # unix (headless sensor camera render bridge)
 [target.'cfg(unix)'.dependencies]
 render-bridge.path = "../render-bridge"
-
-# [patch.crates-io]
-# bevy_editor_cam = { path = "../bevy_editor_cam" }

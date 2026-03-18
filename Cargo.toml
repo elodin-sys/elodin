@@ -97,12 +97,10 @@ inherits = "release"
 debug = true
 
 [workspace.dependencies.bevy_editor_cam]
-git = "https://github.com/aevyrie/bevy_editor_cam"
-rev = "1ae39bda1aa8d547dec4b26747e466ad5b2ab9ab"
+version = "0.7"
 
 [workspace.dependencies.big_space]
-git = "https://github.com/elodin-sys/big_space.git"
-branch = "no_prop_rot_v0.17"
+version = "0.5"
 
 [workspace.dependencies.muxide]
 path = "libs/muxide"
@@ -110,3 +108,5 @@ version = "0.2"
 
 [patch.crates-io]
 map_3d = { git = "https://github.com/shanecelis/map_3d.git", branch = "feat/sphere" }
+big_space = { git = "https://github.com/elodin-sys/big_space.git", branch = "no_prop_rot_v0.17" }
+bevy_editor_cam = { git = "https://github.com/aevyrie/bevy_editor_cam", rev = "1ae39bda1aa8d547dec4b26747e466ad5b2ab9ab" }
