@@ -272,6 +272,8 @@ impl DeviceArena {
                 timeout,
             )
         };
+        // When IREE aliases the output into the same device buffer as the input arena,
+        // the data is already in-place and the d2d copy is a no-op — safe to ignore.
         match error::check(status) {
             Ok(()) => Ok(()),
             Err(err) if err.is_overlap_copy_error() => Ok(()),

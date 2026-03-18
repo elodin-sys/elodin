@@ -387,6 +387,7 @@ async fn tick(
         }
 
         db.with_state(|state| copy_db_to_world(state, &mut world));
+        // Temporarily override so the kernel runs the right number of batched ticks.
         world.world_mut().metadata.ticks_per_telemetry = effective_batch;
         if let Err(err) = world.run() {
             warn!(?err, "error ticking world");
@@ -414,6 +415,8 @@ async fn tick(
         if should_cancel() {
             return;
         }
+        // Called with end_tick (not batch start) because the world state now
+        // reflects the last tick of the batch.
         post_step(
             end_tick,
             &db,

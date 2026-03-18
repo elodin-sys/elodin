@@ -119,6 +119,7 @@ impl PyExec {
         let mut remaining = ticks;
         while remaining > 0 {
             let this_batch = remaining.min(configured_batch.max(1));
+            // Temporarily override so the kernel runs the right number of batched ticks.
             if this_batch != configured_batch {
                 self.exec.world_mut().metadata.ticks_per_telemetry = this_batch as u64;
             }
