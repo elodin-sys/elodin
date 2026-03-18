@@ -11,6 +11,9 @@
   pkg-config,
   zstd,
   gnused,
+  cudaPackages,
+  enableCuda ? false,
+  enableMetal ? false,
   enableTracing ? false,
   tracySrc ? null,
   ...
@@ -98,7 +101,12 @@ in
       [cmake ninja python3 git]
       ++ lib.optionals enableTracing [pkg-config];
 
-    buildInputs = lib.optionals enableTracing [zstd];
+    buildInputs =
+      lib.optionals enableTracing [zstd]
+      ++ lib.optionals (enableCuda && stdenv.isLinux) [
+        cudaPackages.cuda_cudart
+        cudaPackages.cuda_nvcc
+      ];
 
     # Tracy's capture server code triggers _FORTIFY_SOURCE buffer overflow
     # detection with Nix's default hardening flags.
@@ -109,6 +117,7 @@ in
         "-DIREE_BUILD_COMPILER=OFF"
         "-DIREE_BUILD_TESTS=OFF"
         "-DIREE_BUILD_SAMPLES=OFF"
+        "-DIREE_TARGET_BACKEND_CUDA=OFF"
 
         # HAL drivers for CPU execution
         "-DIREE_HAL_DRIVER_DEFAULTS=OFF"
@@ -134,6 +143,12 @@ in
         # the build (nix sandboxes have no network access). Defaults to ON
         # on Linux.
         "-DIREE_ENABLE_LIBBACKTRACE=OFF"
+      ]
+      ++ lib.optionals (enableCuda && stdenv.isLinux) [
+        "-DIREE_HAL_DRIVER_CUDA=ON"
+      ]
+      ++ lib.optionals (enableMetal && stdenv.isDarwin) [
+        "-DIREE_HAL_DRIVER_METAL=ON"
       ]
       ++ lib.optionals enableTracing [
         "-DIREE_ENABLE_RUNTIME_TRACING=ON"

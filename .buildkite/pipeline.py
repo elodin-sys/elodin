@@ -17,12 +17,12 @@ test_steps = [
             nix_step(
                 emoji=":c:",
                 label="db-c-example",
-                command="cd libs/db; cc examples/client.c -lm",
+                command="cd libs/db; clang examples/client.c -lm",
             ),
             nix_step(
                 emoji=":c:",
                 label="db-cpp-example",
-                command="cd libs/db; c++ -std=c++23 examples/client.cpp",
+                command="cd libs/db; clang++ -std=c++23 examples/client.cpp",
             ),
         ],
     ),

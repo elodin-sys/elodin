@@ -6,12 +6,16 @@
   python,
   pythonPackages,
   enableTracy ? false,
+  iree_runtime ?
+    pkgs.callPackage ./iree-runtime.nix {
+      enableCuda = pkgs.stdenv.isLinux;
+      enableMetal = pkgs.stdenv.isDarwin;
+    },
   iree_runtime_tracy ? null,
   ...
 }: let
   # Import shared configuration
   common = pkgs.callPackage ./common.nix {};
-  iree_runtime = pkgs.callPackage ./iree-runtime.nix {};
   iree_compiler = pkgs.callPackage ./iree-compiler.nix {python3 = python;};
   iree_runtime_used =
     if enableTracy

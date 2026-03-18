@@ -1,8 +1,32 @@
 use std::env;
+use std::fs;
 use std::path::PathBuf;
+
+fn link_prefixed_static_libs(lib_dir: &PathBuf, prefix: &str) -> usize {
+    let mut libs: Vec<String> = fs::read_dir(lib_dir)
+        .unwrap_or_else(|e| panic!("Failed to read {}: {e}", lib_dir.display()))
+        .filter_map(Result::ok)
+        .filter_map(|entry| entry.file_name().into_string().ok())
+        .filter(|name| name.starts_with("lib") && name.ends_with(".a"))
+        .filter_map(|name| {
+            name.strip_prefix(&format!("lib{prefix}"))
+                .map(str::to_string)
+        })
+        .filter_map(|name| name.strip_suffix(".a").map(str::to_string))
+        .map(|name| format!("{prefix}{name}"))
+        .collect();
+    libs.sort();
+    libs.dedup();
+    for lib in &libs {
+        println!("cargo:rustc-link-lib=static={lib}");
+    }
+    libs.len()
+}
 
 fn main() {
     let tracy = env::var("CARGO_FEATURE_TRACY").is_ok();
+    let cuda = env::var("CARGO_FEATURE_CUDA").is_ok();
+    let metal = env::var("CARGO_FEATURE_METAL").is_ok();
 
     let env_var = if tracy {
         "IREE_RUNTIME_TRACY_DIR"
@@ -55,6 +79,22 @@ fn main() {
     println!("cargo:rustc-link-lib=static=iree_hal_drivers_local_sync_registration_registration");
     println!("cargo:rustc-link-lib=static=iree_hal_drivers_local_task_task_driver");
     println!("cargo:rustc-link-lib=static=iree_hal_drivers_local_task_registration_registration");
+    if cuda {
+        let linked = link_prefixed_static_libs(&lib_dir, "iree_hal_drivers_cuda_");
+        assert!(
+            linked > 0,
+            "CARGO_FEATURE_CUDA enabled but no CUDA HAL static libs found in {}",
+            lib_dir.display()
+        );
+    }
+    if metal {
+        let linked = link_prefixed_static_libs(&lib_dir, "iree_hal_drivers_metal_");
+        assert!(
+            linked > 0,
+            "CARGO_FEATURE_METAL enabled but no Metal HAL static libs found in {}",
+            lib_dir.display()
+        );
+    }
 
     // Executable loaders
     println!("cargo:rustc-link-lib=static=iree_hal_local_loaders_embedded_elf_loader");
@@ -191,6 +231,9 @@ fn main() {
     } else if target_os == "macos" {
         println!("cargo:rustc-link-lib=c++");
         println!("cargo:rustc-link-lib=framework=Foundation");
+        if metal {
+            println!("cargo:rustc-link-lib=framework=Metal");
+        }
         println!("cargo:rustc-link-lib=framework=Security");
         println!("cargo:rustc-link-lib=dl");
     }

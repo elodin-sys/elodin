@@ -8,6 +8,8 @@ links = "iree"
 
 [features]
 tracy = []
+cuda = []
+metal = []
 
 [build-dependencies]
 bindgen = "0.72"

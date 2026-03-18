@@ -83,6 +83,31 @@ Run an Elodin simulation in headless mode (not available on Windows)
   - A TOML file (e.g., `s10.toml`)
   - A directory containing `main.py` or `s10.toml`
 
+## Python Simulation Subcommands
+
+When you run a simulation Python file directly (for example `python examples/drone/main.py ...`), the embedded simulation CLI supports additional subcommands:
+
+- `run` (default): run the simulation normally.
+- `bench`: run a fixed-tick benchmark and print runtime metrics.
+
+### `bench` options
+
+- `--ticks <N>`: number of ticks to run (default: `1000`)
+- `--profile`: enable full profiling output (including HLO/graph analysis output)
+- `--detail`: include per-phase timing breakdown such as upload, kernel, and download times
+
+### Examples
+
+```bash
+# CPU benchmark
+python examples/drone/main.py bench --ticks 1000
+
+# GPU benchmark with detailed timing
+ELODIN_BACKEND=iree-gpu python examples/drone/main.py bench --ticks 1000 --detail
+
+# Full profiling output
+python examples/drone/main.py bench --ticks 1000 --profile
+```
 
 ---
 

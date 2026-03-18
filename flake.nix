@@ -36,6 +36,7 @@
           if final.stdenv.isLinux
           then
             final.callPackage ./nix/pkgs/iree-runtime.nix {
+              enableCuda = true;
               enableTracing = true;
               tracySrc = final.tracy.src;
             }
@@ -83,6 +84,7 @@
           (self.shortRev or self.dirtyShortRev or self.rev or self.dirtyRev or "unknown");
         pkgs = import nixpkgs {
           inherit system;
+          config.allowUnfree = true;
           overlays = [
             rust-overlay.overlays.default
             (elodinOverlay gitRev)

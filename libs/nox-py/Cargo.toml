@@ -26,7 +26,6 @@ numpy.version = "0.23"
 # nox
 nox.path = "../nox"
 nox.features = ["noxpr", "jax"]
-iree-runtime.path = "../iree-runtime"
 elodin-macros.path = "../elodin-macros"
 
 # types
@@ -99,6 +98,15 @@ env_logger = "0.11.8"
 convert_case = "0.8.0"
 signal-hook = "0.3.18"
 bevy_geo_frames.path ="../bevy_geo_frames"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+iree-runtime = { path = "../iree-runtime", features = ["cuda"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+iree-runtime = { path = "../iree-runtime", features = ["metal"] }
+
+[target.'cfg(not(any(target_os = "linux", target_os = "macos")))'.dependencies]
+iree-runtime = { path = "../iree-runtime" }
 
 [dev-dependencies]
 approx = "0.5"

@@ -1,4 +1,7 @@
-#! @python3@/bin/python3 -B
+#!/usr/bin/env python3
+# NB: The upstream Ghaf script uses `#! @python3@/bin/python3 -B` which
+# requires substituteAll in Nix.  fs.nix copies the script with plain
+# `install`, so we use a standard shebang instead.
 
 # SPDX-FileCopyrightText: 2022-2023 TII (SSRC) and the Ghaf contributors
 #

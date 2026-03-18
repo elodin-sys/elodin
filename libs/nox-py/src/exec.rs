@@ -37,8 +37,8 @@ impl<C: Component> ComponentArray<C> {
 }
 
 pub enum WorldExec {
-    Iree(IREEWorldExec),
-    Jax(JaxWorldExec),
+    Iree(Box<IREEWorldExec>),
+    Jax(Box<JaxWorldExec>),
 }
 
 impl WorldExec {
