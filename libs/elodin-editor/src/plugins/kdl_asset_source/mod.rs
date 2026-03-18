@@ -7,7 +7,7 @@ use notify_debouncer_mini::{
 use std::{
     env,
     path::{Path, PathBuf},
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 pub(crate) const KDL_ASSET_SOURCE: &str = "kdl";
@@ -50,24 +50,8 @@ fn forward_kdl_events(
     events: Vec<DebouncedEvent>,
     sender: &crossbeam_channel::Sender<AssetSourceEvent>,
 ) {
-    let started = Instant::now();
-    let event_count = events.len();
-    let mut modified_assets = 0usize;
-
     for event in events {
-        if send_modified_asset(root, &event.path, sender) {
-            modified_assets += 1;
-        }
-    }
-
-    if modified_assets > 0 {
-        info!(
-            root = ?root,
-            event_count,
-            modified_assets,
-            elapsed_ms = started.elapsed().as_millis(),
-            "Processed debounced KDL watcher events"
-        );
+        let _ = send_modified_asset(root, &event.path, sender);
     }
 }
 

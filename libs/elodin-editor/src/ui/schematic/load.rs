@@ -86,18 +86,33 @@ impl CurrentDocument {
         self.applied_secondary_kdls = secondary_kdls;
     }
 
-    fn matches_applied(&self, document: &SchematicDocumentAsset) -> bool {
-        let Some(root_kdl) = &self.applied_root_kdl else {
-            return false;
-        };
+    fn changed_secondary_indices(&self, document: &SchematicDocumentAsset) -> Option<Vec<usize>> {
+        let root_kdl = self.applied_root_kdl.as_ref()?;
+        if root_kdl != &document.root.to_kdl() {
+            return None;
+        }
+        if self.applied_secondary_kdls.len() != document.secondary.len() {
+            return None;
+        }
 
-        root_kdl == &document.root.to_kdl()
-            && self.applied_secondary_kdls.len() == document.secondary.len()
-            && self
-                .applied_secondary_kdls
+        Some(
+            document
+                .secondary
                 .iter()
-                .zip(document.secondary.iter())
-                .all(|(applied, secondary)| applied == &secondary.schematic.to_kdl())
+                .enumerate()
+                .filter_map(|(index, secondary)| {
+                    (self.applied_secondary_kdls.get(index) != Some(&secondary.schematic.to_kdl()))
+                        .then_some(index)
+                })
+                .collect(),
+        )
+    }
+
+    fn matches_applied(&self, document: &SchematicDocumentAsset) -> bool {
+        matches!(
+            self.changed_secondary_indices(document),
+            Some(changed_indices) if changed_indices.is_empty()
+        )
     }
 }
 
@@ -232,7 +247,6 @@ pub fn apply_initial_kdl_path(
 use std::{
     collections::{BTreeMap, HashMap},
     path::{Path, PathBuf},
-    time::Instant,
 };
 
 #[cfg(not(target_os = "macos"))]
@@ -395,6 +409,11 @@ fn apply_theme(theme: Option<&impeller2_wkt::ThemeConfig>) -> colors::SchemeSele
     colors::set_active_scheme(scheme, mode)
 }
 
+struct WindowDescriptors {
+    main: Option<WindowDescriptor>,
+    secondary: Vec<WindowDescriptor>,
+}
+
 fn resolve_window_descriptor(
     window: &WindowSchematic,
     base_dir: Option<&Path>,
@@ -418,6 +437,41 @@ fn resolve_window_descriptor(
         mode: theme_mode.map(|m| m.to_string()),
         screen_rect: window.screen_rect.or(Some(DEFAULT_SECONDARY_RECT)),
     })
+}
+
+fn collect_window_descriptors(
+    schematic: &Schematic,
+    base_dir: Option<&Path>,
+    theme_mode: Option<&str>,
+) -> WindowDescriptors {
+    let mut main = None;
+    let mut secondary = Vec::new();
+
+    for elem in &schematic.elems {
+        let impeller2_wkt::SchematicElem::Window(window) = elem else {
+            continue;
+        };
+
+        if let Some(descriptor) = resolve_window_descriptor(window, base_dir, theme_mode) {
+            secondary.push(descriptor);
+        } else {
+            main = Some(WindowDescriptor {
+                screen: window.screen.map(|idx| idx as usize),
+                screen_rect: window.screen_rect,
+                ..default()
+            });
+        }
+    }
+
+    WindowDescriptors { main, secondary }
+}
+
+fn applied_secondary_kdls(document: &SchematicDocumentAsset) -> Vec<String> {
+    document
+        .secondary
+        .iter()
+        .map(|secondary| secondary.schematic.to_kdl())
+        .collect()
 }
 
 pub fn render_diag(diagnostic: &dyn Diagnostic) -> String {
@@ -460,7 +514,6 @@ impl LoadSchematicParams<'_, '_> {
         base_dir: Option<&Path>,
         secondary_assets: Option<&[SecondarySchematicAsset]>,
     ) {
-        let apply_started = Instant::now();
         self.render_layer_alloc.free_all();
         for (id, window_id, window_state) in &self.window_states {
             if window_id.is_primary() {
@@ -495,11 +548,10 @@ impl LoadSchematicParams<'_, '_> {
         for entity in self.grid_lines.iter() {
             self.commands.entity(entity).despawn();
         }
-        let mut secondary_descriptors: Vec<WindowDescriptor> = Vec::new();
         let theme_selection = apply_theme(schematic.theme.as_ref());
         let theme_mode = Some(theme_selection.mode.clone());
         let theme_mode_str = theme_mode.as_deref();
-        let mut main_window_descriptor = None;
+        let mut descriptors = collect_window_descriptors(schematic, base_dir, theme_mode_str);
         *self.timeline_settings = schematic.timeline.clone().unwrap_or_default().into();
 
         let panel_count = schematic
@@ -530,19 +582,7 @@ impl LoadSchematicParams<'_, '_> {
                 impeller2_wkt::SchematicElem::VectorArrow(vector_arrow) => {
                     self.spawn_vector_arrow(vector_arrow.clone(), None);
                 }
-                impeller2_wkt::SchematicElem::Window(window) => {
-                    if let Some(descriptor) =
-                        resolve_window_descriptor(window, base_dir, theme_mode_str)
-                    {
-                        secondary_descriptors.push(descriptor);
-                    } else {
-                        main_window_descriptor = Some(WindowDescriptor {
-                            screen: window.screen.map(|idx| idx as usize),
-                            screen_rect: window.screen_rect,
-                            ..default()
-                        });
-                    }
-                }
+                impeller2_wkt::SchematicElem::Window(_) => {}
                 impeller2_wkt::SchematicElem::Theme(_) => {}
                 impeller2_wkt::SchematicElem::Timeline(_) => {}
             }
@@ -554,7 +594,7 @@ impl LoadSchematicParams<'_, '_> {
                 .get_mut(*self.primary_window)
                 .expect("no primary window")
                 .2;
-            match main_window_descriptor {
+            match descriptors.main.take() {
                 Some(d) => {
                     window_state.descriptor.screen = d.screen;
                     window_state.descriptor.screen_rect = d.screen_rect;
@@ -614,7 +654,7 @@ impl LoadSchematicParams<'_, '_> {
 
         let mut applied_secondary_kdls = Vec::new();
         let mut loaded_secondaries = secondary_assets.unwrap_or(&[]).iter();
-        for descriptor in secondary_descriptors {
+        for descriptor in descriptors.secondary {
             if let Some(secondary) = loaded_secondaries.next() {
                 applied_secondary_kdls.push(secondary.schematic.to_kdl());
                 self.spawn_secondary_window(
@@ -663,12 +703,6 @@ impl LoadSchematicParams<'_, '_> {
 
         self.current_document
             .set_applied(schematic, applied_secondary_kdls);
-        info!(
-            path = ?self.current_document.save_path,
-            secondary_window_count = self.current_document.applied_secondary_kdls.len(),
-            elapsed_ms = apply_started.elapsed().as_millis(),
-            "Applied schematic document"
-        );
     }
 
     fn spawn_secondary_window(
@@ -679,6 +713,26 @@ impl LoadSchematicParams<'_, '_> {
         theme_scheme: &str,
         log_path: Option<&Path>,
     ) {
+        let id = WindowId::default();
+        let state = self.build_secondary_window_state(
+            id,
+            sec_schematic,
+            descriptor,
+            fallback_theme_mode,
+            theme_scheme,
+        );
+        info!(path = ?log_path, "Loaded secondary schematic");
+        self.commands.spawn((id, state));
+    }
+
+    fn build_secondary_window_state(
+        &mut self,
+        id: WindowId,
+        sec_schematic: &Schematic,
+        descriptor: WindowDescriptor,
+        fallback_theme_mode: Option<&str>,
+        theme_scheme: &str,
+    ) -> WindowState {
         let theme_mode = sec_schematic
             .theme
             .as_ref()
@@ -691,7 +745,6 @@ impl LoadSchematicParams<'_, '_> {
                 "dark".to_string()
             }
         });
-        let id = WindowId::default();
         let mut tile_state = TileState::new(Id::new(("secondary_tab_tree", id.0)));
         let panel_count = sec_schematic
             .elems
@@ -714,12 +767,6 @@ impl LoadSchematicParams<'_, '_> {
         }
 
         let graph_entities = tile_state.collect_graph_entities();
-        let descriptor = WindowDescriptor {
-            mode: resolved_mode,
-            ..descriptor
-        };
-        info!(path = ?log_path, "Loaded secondary schematic");
-
         for &graph in &graph_entities {
             if let Ok(mut camera) = self.cameras.get_mut(graph) {
                 // Secondary graph cameras are activated after their WindowRef is assigned.
@@ -727,13 +774,93 @@ impl LoadSchematicParams<'_, '_> {
             }
         }
 
-        let state = WindowState {
-            descriptor,
+        WindowState {
+            descriptor: WindowDescriptor {
+                mode: resolved_mode,
+                ..descriptor
+            },
             tile_state,
             graph_entities,
             ui_state,
-        };
-        self.commands.spawn((id, state));
+        }
+    }
+
+    fn reload_secondary_windows(
+        &mut self,
+        document: &SchematicDocumentAsset,
+        base_dir: Option<&Path>,
+        changed_secondary_indices: &[usize],
+    ) -> bool {
+        if changed_secondary_indices.is_empty() {
+            return true;
+        }
+
+        let current_theme = colors::current_selection();
+        let fallback_theme_mode = document
+            .root
+            .theme
+            .as_ref()
+            .and_then(|theme| theme.mode.as_deref())
+            .unwrap_or(&current_theme.mode);
+        let descriptors =
+            collect_window_descriptors(&document.root, base_dir, Some(fallback_theme_mode))
+                .secondary;
+        if descriptors.len() != document.secondary.len() {
+            return false;
+        }
+
+        let mut windows_by_path = HashMap::new();
+        for (entity, window_id, state) in &mut self.window_states {
+            if window_id.is_primary() {
+                continue;
+            }
+            let Some(path) = state.descriptor.path.clone() else {
+                return false;
+            };
+            if windows_by_path.insert(path, entity).is_some() {
+                return false;
+            }
+        }
+
+        for &index in changed_secondary_indices {
+            let Some(descriptor) = descriptors.get(index).cloned() else {
+                return false;
+            };
+            let Some(path) = descriptor.path.clone() else {
+                return false;
+            };
+            let Some(entity) = windows_by_path.get(&path).copied() else {
+                return false;
+            };
+            let Some(secondary) = document.secondary.get(index) else {
+                return false;
+            };
+            let window_id = {
+                let Ok((_, window_id, mut window_state)) = self.window_states.get_mut(entity)
+                else {
+                    return false;
+                };
+                let window_id = *window_id;
+                window_state
+                    .tile_state
+                    .clear(&mut self.commands, &mut self.render_layer_alloc);
+                window_state.graph_entities.clear();
+                window_id
+            };
+            let new_state = self.build_secondary_window_state(
+                window_id,
+                &secondary.schematic,
+                descriptor,
+                Some(fallback_theme_mode),
+                &current_theme.scheme,
+            );
+            let Ok((_, _, mut window_state)) = self.window_states.get_mut(entity) else {
+                return false;
+            };
+            *window_state = new_state;
+        }
+
+        true
     }
 
     pub fn spawn_object_3d(&mut self, object_3d: Object3D) {
@@ -1330,7 +1457,6 @@ pub fn schematic_asset_reload(
     mut events: MessageReader<AssetEvent<SchematicDocumentAsset>>,
     mut params: LoadSchematicParams,
 ) {
-    let reload_started = Instant::now();
     let matching_event_count =
         matching_current_document_event_count(&mut events, &params.current_document);
     if matching_event_count == 0 {
@@ -1346,35 +1472,24 @@ pub fn schematic_asset_reload(
     // Coalesce duplicate asset events for the current document into a single reload.
     // `load_schematic` uses deferred Commands to despawn and respawn windows, so re-entering it
     // multiple times in the same frame can leave duplicate secondary windows alive.
-    let compare_started = Instant::now();
     if params.current_document.matches_applied(&document) {
-        info!(
-            path = ?save_path,
-            event_count = matching_event_count,
-            compare_ms = compare_started.elapsed().as_millis(),
-            reload_ms = reload_started.elapsed().as_millis(),
-            "Skipping schematic reload because saved document matches the applied snapshot"
-        );
+        info!(path = ?save_path, "Skipping schematic reload because saved document matches the applied snapshot");
         return;
     }
 
     let base_dir = save_path.as_deref().and_then(Path::parent);
-    let compare_elapsed = compare_started.elapsed();
-    let apply_started = Instant::now();
-    info!(
-        path = ?save_path,
-        event_count = matching_event_count,
-        "Refreshing schematic document from assets"
-    );
+
+    if let Some(changed_secondary_indices) =
+        params.current_document.changed_secondary_indices(&document)
+        && params.reload_secondary_windows(&document, base_dir, &changed_secondary_indices)
+    {
+        params
+            .current_document
+            .set_applied(&document.root, applied_secondary_kdls(&document));
+        return;
+    }
+
     params.load_schematic(&document.root, base_dir, Some(&document.secondary));
-    info!(
-        path = ?save_path,
-        event_count = matching_event_count,
-        compare_ms = compare_elapsed.as_millis(),
-        apply_ms = apply_started.elapsed().as_millis(),
-        reload_ms = reload_started.elapsed().as_millis(),
-        "Refreshed schematic document from assets"
-    );
 }
 
 pub fn schematic_asset_load_failed(
@@ -1556,6 +1671,34 @@ mod tests {
         current_document.set_applied(&root, vec![applied_secondary.to_kdl()]);
 
         assert!(!current_document.matches_applied(&document));
+        assert_eq!(
+            current_document.changed_secondary_indices(&document),
+            Some(vec![0])
+        );
+    }
+
+    #[test]
+    fn current_document_uses_full_reload_when_root_changes() {
+        let applied_root =
+            Schematic::from_kdl("window path=\"rate-control-panel.kdl\" title=\"Panel A\"\n")
+                .expect("parse root kdl");
+        let updated_root =
+            Schematic::from_kdl("window path=\"rate-control-panel.kdl\" title=\"Panel B\"\n")
+                .expect("parse root kdl");
+        let secondary =
+            Schematic::from_kdl("graph \"drone.gyro\" name=\"Panel A\"\n").expect("parse kdl");
+        let document = SchematicDocumentAsset {
+            root: updated_root,
+            secondary: vec![SecondarySchematicAsset {
+                asset_path: AssetPath::from_path_buf(PathBuf::from("rate-control-panel.kdl")),
+                schematic: secondary.clone(),
+            }],
+        };
+
+        let mut current_document = CurrentDocument::default();
+        current_document.set_applied(&applied_root, vec![secondary.to_kdl()]);
+
+        assert_eq!(current_document.changed_secondary_indices(&document), None);
     }
 
     #[cfg(unix)]

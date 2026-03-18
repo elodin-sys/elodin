@@ -1,7 +1,4 @@
-use std::{
-    collections::HashMap,
-    time::{Duration, Instant},
-};
+use std::{collections::HashMap, time::Duration};
 
 #[cfg(not(target_os = "macos"))]
 use bevy::log::error;
@@ -109,30 +106,12 @@ fn cleanup_secondary_window(entity: Entity, cleanup: &mut WindowCleanup) {
 }
 
 #[cfg(not(target_os = "macos"))]
-fn cloned_window_state(
-    entity: Entity,
-    action: &'static str,
-) -> Result<Option<WindowState>, AccessError> {
+fn cloned_window_state(entity: Entity) -> Result<Option<WindowState>, AccessError> {
     let window_states = AsyncWorld.query::<&WindowState>();
     let Ok(state) = window_states.entity(entity).get_mut(|state| state.clone()) else {
-        info!(
-            window = %entity,
-            action,
-            "Skipping window placement because the entity no longer exists"
-        );
         return Ok(None);
     };
     Ok(Some(state))
-}
-
-#[cfg(not(target_os = "macos"))]
-fn log_window_placement_timing(action: &'static str, window: Entity, started: Instant) {
-    info!(
-        window = %window,
-        action,
-        elapsed_ms = started.elapsed().as_millis(),
-        "Window placement operation finished"
-    );
 }
 
 pub async fn wait_for_winit_window(
@@ -145,11 +124,6 @@ pub async fn wait_for_winit_window(
             WINIT_WINDOWS.with_borrow(|winit_windows| winit_windows.get_window(window_id).is_some())
         });
         if window_ready {
-            info!(
-                window = %window_id,
-                elapsed_ms = start.elapsed().as_millis(),
-                "Winit window became available"
-            );
             return Ok(true);
         }
         AsyncWorld.yield_now().await;
@@ -168,7 +142,6 @@ pub async fn apply_physical_screen_rect(
     screen_index: usize,
     rect: WindowRect,
 ) -> bevy_defer::AccessResult {
-    let started = Instant::now();
     if !wait_for_winit_window(window_entity, WINDOW_READY_TIMEOUT).await? {
         warn!(%window_entity, "apply_physical_screen_rect: winit window not ready");
         return Ok(());
@@ -255,25 +228,12 @@ pub async fn apply_physical_screen_rect(
             window.set_outer_position(physical_pos);
         })
     });
-    info!(
-        window = %window_entity,
-        target_screen = screen_index,
-        rect = ?rect,
-        elapsed_ms = started.elapsed().as_millis(),
-        "mac apply_physical_screen_rect applied"
-    );
     Ok(())
 }
 
 #[cfg(not(target_os = "macos"))]
 async fn apply_window_screen(entity: Entity, screen: usize) -> Result<(), bevy_defer::AccessError> {
-    let started = Instant::now();
-    info!(
-        window = %entity,
-        %screen,
-        "apply_window_screen start"
-    );
-    let Some(mut state) = cloned_window_state(entity, "apply_window_screen")? else {
+    let Some(mut state) = cloned_window_state(entity)? else {
         return Ok(());
     };
     if !wait_for_winit_window(entity, WINDOW_READY_TIMEOUT).await? {
@@ -339,7 +299,6 @@ async fn apply_window_screen(entity: Entity, screen: usize) -> Result<(), bevy_d
             })
         });
     }
-    log_window_placement_timing("apply_window_screen", entity, started);
     Ok(())
 }
 
@@ -427,14 +386,7 @@ async fn apply_window_rect(
     entity: Entity,
     timeout: Duration,
 ) -> Result<(), AccessError> {
-    let started = Instant::now();
-    info!(
-        window = %entity,
-        ?rect,
-        "apply_window_rect start"
-    );
-
-    let Some(state) = cloned_window_state(entity, "apply_window_rect")? else {
+    let Some(state) = cloned_window_state(entity)? else {
         return Ok(());
     };
 
@@ -505,7 +457,6 @@ async fn apply_window_rect(
             })
         });
     }
-    log_window_placement_timing("apply_window_rect", entity, started);
     Ok(())
 }
 
