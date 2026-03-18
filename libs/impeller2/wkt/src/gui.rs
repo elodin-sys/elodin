@@ -70,20 +70,6 @@ pub enum SchematicElem<T = ()> {
     Timeline(TimelineConfig),
 }
 
-impl<T> SchematicElem<T> {
-    pub fn clear_aux(self) -> SchematicElem<()> {
-        match self {
-            SchematicElem::Panel(panel) => SchematicElem::Panel(panel.map_aux(|_| ())),
-            SchematicElem::Object3d(obj) => SchematicElem::Object3d(obj.map_aux(|_| ())),
-            SchematicElem::Line3d(line) => SchematicElem::Line3d(line.map_aux(|_| ())),
-            SchematicElem::VectorArrow(arrow) => SchematicElem::VectorArrow(arrow.map_aux(|_| ())),
-            SchematicElem::Window(window) => SchematicElem::Window(window),
-            SchematicElem::Theme(theme) => SchematicElem::Theme(theme.clone()),
-            SchematicElem::Timeline(timeline) => SchematicElem::Timeline(timeline.clone()),
-        }
-    }
-}
-
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::TypePath))]
 pub struct WindowRect {
