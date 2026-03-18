@@ -276,10 +276,9 @@ struct QueryArgs {
     #[clap(
         long,
         value_enum,
-        default_value = "seconds",
-        help = "Time column display: omit, datetime, seconds (default), or microseconds"
+        help = "Time column display: omit, datetime, s, ms, us (default: seconds, or unit from --offset/--limit if duration)"
     )]
-    time_format: elodin_db::query::TimeFormat,
+    time_format: Option<elodin_db::query::TimeFormat>,
     #[clap(
         short = 'v',
         long,

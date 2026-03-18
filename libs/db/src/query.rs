@@ -128,15 +128,20 @@ impl std::str::FromStr for Precision {
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, clap::ValueEnum)]
 pub enum TimeFormat {
     /// Do not show the time column.
+    #[clap(alias = "none")]
     Omit,
     /// Show as date-time (e.g. 2025-02-27T12:00:00.000 UTC).
+    #[clap(alias = "dt")]
     Datetime,
     /// Show as seconds since epoch (default).
     #[default]
+    #[clap(alias = "s")]
     Seconds,
     /// Show as milliseconds since epoch.
+    #[clap(alias = "ms")]
     Milliseconds,
     /// Show as microseconds since epoch.
+    #[clap(alias = "us", alias = "µs")]
     Microseconds,
 }
 
@@ -176,8 +181,23 @@ pub struct QueryArgs {
     pub format: QueryOutputFormat,
     /// Flatten vector columns to separate columns (e.g. vel -> vel_x, vel_y, vel_z).
     pub flatten: bool,
-    /// How to display the time column: omit, datetime, seconds (default), or microseconds.
-    pub time_format: TimeFormat,
+    /// How to display the time column. If None, inferred from --offset/--limit duration unit, else seconds.
+    pub time_format: Option<TimeFormat>,
+}
+
+/// Infers time display format from offset/limit when they are duration variants.
+fn time_format_from_offset_limit(
+    offset: Option<&RowDescription>,
+    limit: Option<&RowDescription>,
+) -> Option<TimeFormat> {
+    let from = |rd: &RowDescription| match rd {
+        RowDescription::Second(_) => Some(TimeFormat::Seconds),
+        RowDescription::Millisecond(_) => Some(TimeFormat::Milliseconds),
+        RowDescription::Microsecond(_) => Some(TimeFormat::Microseconds),
+        RowDescription::Nanosecond(_) => Some(TimeFormat::Microseconds),
+        RowDescription::Count(_) => None,
+    };
+    offset.and_then(from).or_else(|| limit.and_then(from))
 }
 
 /// Queries the database at `dbfile` and prints the result to stdout.
@@ -194,6 +214,10 @@ pub async fn run(args: QueryArgs) -> miette::Result<()> {
         flatten,
         time_format,
     } = args;
+
+    let time_format = time_format
+        .or_else(|| time_format_from_offset_limit(offset.as_ref(), limit.as_ref()))
+        .unwrap_or(TimeFormat::Seconds);
 
     if !dbfile.exists() {
         return Err(miette::miette!(
