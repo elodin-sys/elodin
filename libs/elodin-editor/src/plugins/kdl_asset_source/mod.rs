@@ -1,13 +1,17 @@
 use bevy::asset::io::{AssetSourceBuilder, AssetSourceEvent, AssetWatcher};
 use bevy::prelude::*;
 use notify_debouncer_mini::{
-    DebounceEventResult, Debouncer, new_debouncer,
+    DebounceEventResult, DebouncedEvent, Debouncer, new_debouncer,
     notify::{self, RecommendedWatcher, RecursiveMode},
 };
-use std::{env, path::PathBuf};
-use std::{path::Path, time::Duration};
+use std::{
+    env,
+    path::{Path, PathBuf},
+    time::{Duration, Instant},
+};
 
 pub(crate) const KDL_ASSET_SOURCE: &str = "kdl";
+const KDL_WATCH_DEBOUNCE: Duration = Duration::from_millis(300);
 
 struct KdlAssetWatcher {
     _watcher: Debouncer<RecommendedWatcher>,
@@ -20,21 +24,9 @@ impl KdlAssetWatcher {
     ) -> Result<Self, notify::Error> {
         let event_root = canonicalize_or_original(&root);
         let mut debouncer = new_debouncer(
-            Duration::from_millis(300),
+            KDL_WATCH_DEBOUNCE,
             move |result: DebounceEventResult| match result {
-                Ok(events) => {
-                    for event in events {
-                        let Some(path) = to_asset_path(&event_root, &event.path) else {
-                            debug!(
-                                root = ?event_root,
-                                event_path = ?event.path,
-                                "Ignoring KDL watcher event outside of asset root"
-                            );
-                            continue;
-                        };
-                        let _ = sender.send(AssetSourceEvent::ModifiedAsset(path));
-                    }
-                }
+                Ok(events) => forward_kdl_events(&event_root, events, &sender),
                 Err(err) => {
                     error!(?err, root = ?event_root, "KDL asset watcher error");
                 }
@@ -53,6 +45,49 @@ fn canonicalize_or_original(path: &Path) -> PathBuf {
     std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
+fn forward_kdl_events(
+    root: &Path,
+    events: Vec<DebouncedEvent>,
+    sender: &crossbeam_channel::Sender<AssetSourceEvent>,
+) {
+    let started = Instant::now();
+    let event_count = events.len();
+    let mut modified_assets = 0usize;
+
+    for event in events {
+        if send_modified_asset(root, &event.path, sender) {
+            modified_assets += 1;
+        }
+    }
+
+    if modified_assets > 0 {
+        info!(
+            root = ?root,
+            event_count,
+            modified_assets,
+            elapsed_ms = started.elapsed().as_millis(),
+            "Processed debounced KDL watcher events"
+        );
+    }
+}
+
+fn send_modified_asset(
+    root: &Path,
+    event_path: &Path,
+    sender: &crossbeam_channel::Sender<AssetSourceEvent>,
+) -> bool {
+    let Some(path) = to_asset_path(root, event_path) else {
+        debug!(
+            root = ?root,
+            event_path = ?event_path,
+            "Ignoring KDL watcher event outside of asset root"
+        );
+        return false;
+    };
+    let _ = sender.send(AssetSourceEvent::ModifiedAsset(path));
+    true
+}
+
 fn to_asset_path(root: &Path, path: &Path) -> Option<PathBuf> {
     if path.extension().and_then(|ext| ext.to_str()) != Some("kdl") {
         return None;
@@ -61,23 +96,25 @@ fn to_asset_path(root: &Path, path: &Path) -> Option<PathBuf> {
         .strip_prefix(root)
         .ok()
         .map(Path::to_path_buf)
-        .or_else(|| {
-            let canonical_root = canonicalize_or_original(root);
-            let canonical_path = canonicalize_or_original(path);
-            canonical_path
-                .strip_prefix(&canonical_root)
-                .ok()
-                .map(Path::to_path_buf)
-        })?;
+        .or_else(|| path_under_canonical_root(root, path))?;
     Some(relative.to_path_buf())
 }
 
-pub(crate) fn plugin(app: &mut App) {
+fn path_under_canonical_root(root: &Path, path: &Path) -> Option<PathBuf> {
+    let canonical_root = canonicalize_or_original(root);
+    let canonical_path = canonicalize_or_original(path);
+    canonical_path
+        .strip_prefix(&canonical_root)
+        .ok()
+        .map(Path::to_path_buf)
+}
+
+fn resolve_kdl_source_root() -> Option<PathBuf> {
     let mut kdl_dir = match impeller2_kdl::env::schematic_dir_or_cwd() {
         Ok(path) => path,
         Err(err) => {
             error!("{err}, cannot register KDL asset source");
-            return;
+            return None;
         }
     };
 
@@ -85,11 +122,36 @@ pub(crate) fn plugin(app: &mut App) {
         let Ok(mut cur_dir) = env::current_dir().inspect_err(|err| {
             error!("Cannot set KDL asset source. Could not get current directory: {err}.")
         }) else {
-            return;
+            return None;
         };
         cur_dir.push(&kdl_dir);
         kdl_dir = cur_dir;
     }
+
+    Some(kdl_dir)
+}
+
+fn log_kdl_source_registration(root: &Path) {
+    if !root.exists() {
+        warn!("KDL asset directory {:?} does not exist.", root.display());
+    } else if !root.is_dir() {
+        warn!(
+            "KDL asset directory {:?} is not a directory.",
+            root.display()
+        );
+    } else {
+        info!(
+            "Registered KDL asset source {:?} at {:?}",
+            KDL_ASSET_SOURCE,
+            root.display()
+        );
+    }
+}
+
+pub(crate) fn plugin(app: &mut App) {
+    let Some(kdl_dir) = resolve_kdl_source_root() else {
+        return;
+    };
 
     let Some(str_path) = kdl_dir.to_str() else {
         error!(
@@ -117,23 +179,7 @@ pub(crate) fn plugin(app: &mut App) {
         }),
     );
 
-    if !kdl_dir.exists() {
-        warn!(
-            "KDL asset directory {:?} does not exist.",
-            kdl_dir.display()
-        );
-    } else if !kdl_dir.is_dir() {
-        warn!(
-            "KDL asset directory {:?} is not a directory.",
-            kdl_dir.display()
-        );
-    } else {
-        info!(
-            "Registered KDL asset source {:?} at {:?}",
-            KDL_ASSET_SOURCE,
-            PathBuf::from(str_path).display()
-        );
-    }
+    log_kdl_source_registration(&kdl_dir);
 }
 
 #[cfg(test)]

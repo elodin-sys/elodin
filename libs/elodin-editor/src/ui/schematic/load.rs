@@ -101,6 +101,30 @@ impl CurrentDocument {
     }
 }
 
+fn cloned_current_document_asset(
+    current_document: &CurrentDocument,
+    document_assets: &Assets<SchematicDocumentAsset>,
+) -> Option<(Option<PathBuf>, SchematicDocumentAsset)> {
+    let handle = current_document.handle.clone()?;
+    let save_path = current_document.save_path.clone();
+    let document = document_assets.get(&handle).cloned()?;
+    Some((save_path, document))
+}
+
+fn matching_current_document_event_count(
+    events: &mut MessageReader<AssetEvent<SchematicDocumentAsset>>,
+    current_document: &CurrentDocument,
+) -> usize {
+    events
+        .read()
+        .filter_map(|event| match event {
+            AssetEvent::LoadedWithDependencies { id } | AssetEvent::Modified { id } => Some(*id),
+            _ => None,
+        })
+        .filter(|id| current_document.matches(*id))
+        .count()
+}
+
 #[derive(Default)]
 pub struct SchematicDocumentLoader;
 
@@ -208,6 +232,7 @@ pub fn apply_initial_kdl_path(
 use std::{
     collections::{BTreeMap, HashMap},
     path::{Path, PathBuf},
+    time::Instant,
 };
 
 #[cfg(not(target_os = "macos"))]
@@ -435,6 +460,7 @@ impl LoadSchematicParams<'_, '_> {
         base_dir: Option<&Path>,
         secondary_assets: Option<&[SecondarySchematicAsset]>,
     ) {
+        let apply_started = Instant::now();
         self.render_layer_alloc.free_all();
         for (id, window_id, window_state) in &self.window_states {
             if window_id.is_primary() {
@@ -637,6 +663,12 @@ impl LoadSchematicParams<'_, '_> {
 
         self.current_document
             .set_applied(schematic, applied_secondary_kdls);
+        info!(
+            path = ?self.current_document.save_path,
+            secondary_window_count = self.current_document.applied_secondary_kdls.len(),
+            elapsed_ms = apply_started.elapsed().as_millis(),
+            "Applied schematic document"
+        );
     }
 
     fn spawn_secondary_window(
@@ -1298,47 +1330,51 @@ pub fn schematic_asset_reload(
     mut events: MessageReader<AssetEvent<SchematicDocumentAsset>>,
     mut params: LoadSchematicParams,
 ) {
-    let mut saw_current_document_event = false;
-    for event in events.read() {
-        let id = match event {
-            AssetEvent::LoadedWithDependencies { id } | AssetEvent::Modified { id } => *id,
-            _ => continue,
-        };
-        if !params.current_document.matches(id) {
-            continue;
-        }
-        saw_current_document_event = true;
-    }
-
-    if !saw_current_document_event {
+    let reload_started = Instant::now();
+    let matching_event_count =
+        matching_current_document_event_count(&mut events, &params.current_document);
+    if matching_event_count == 0 {
         return;
     }
 
-    let Some(handle) = params.current_document.handle.clone() else {
-        return;
-    };
-    let save_path = params.current_document.save_path.clone();
-    let Some(document) = params.document_assets.get(&handle).cloned() else {
+    let Some((save_path, document)) =
+        cloned_current_document_asset(&params.current_document, &params.document_assets)
+    else {
         return;
     };
 
     // Coalesce duplicate asset events for the current document into a single reload.
     // `load_schematic` uses deferred Commands to despawn and respawn windows, so re-entering it
     // multiple times in the same frame can leave duplicate secondary windows alive.
+    let compare_started = Instant::now();
     if params.current_document.matches_applied(&document) {
         info!(
             path = ?save_path,
+            event_count = matching_event_count,
+            compare_ms = compare_started.elapsed().as_millis(),
+            reload_ms = reload_started.elapsed().as_millis(),
             "Skipping schematic reload because saved document matches the applied snapshot"
         );
         return;
     }
 
     let base_dir = save_path.as_deref().and_then(Path::parent);
+    let compare_elapsed = compare_started.elapsed();
+    let apply_started = Instant::now();
     info!(
         path = ?save_path,
+        event_count = matching_event_count,
         "Refreshing schematic document from assets"
     );
     params.load_schematic(&document.root, base_dir, Some(&document.secondary));
+    info!(
+        path = ?save_path,
+        event_count = matching_event_count,
+        compare_ms = compare_elapsed.as_millis(),
+        apply_ms = apply_started.elapsed().as_millis(),
+        reload_ms = reload_started.elapsed().as_millis(),
+        "Refreshed schematic document from assets"
+    );
 }
 
 pub fn schematic_asset_load_failed(
