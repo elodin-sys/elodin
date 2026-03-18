@@ -23,7 +23,11 @@ pub struct QueryArgs {
         help = "EQL query, e.g., 'rocket.world_pos.x'"
     )]
     eql: Option<String>,
-    #[clap(long, value_name = "SQL", help = "SQL query, e.g., 'select rocket_world_pos[5] from rocket_world_pos'")]
+    #[clap(
+        long,
+        value_name = "SQL",
+        help = "SQL query, e.g., 'select rocket_world_pos[5] from rocket_world_pos'"
+    )]
     sql: Option<String>,
     #[clap(
         short = 'v',
@@ -61,13 +65,12 @@ pub struct QueryArgs {
         help = "Flatten vector columns to separate columns (e.g. vel -> vel.0, vel.1)"
     )]
     flatten: bool,
-    #[clap(long, help = "Show row index as the first column (0-based from the full result)")]
-    row_index: bool,
     #[clap(
         long,
-        value_enum,
-        help = "Time column display"
+        help = "Show row index as the first column (0-based from the full result)"
     )]
+    row_index: bool,
+    #[clap(long, value_enum, help = "Time column display")]
     time_format: Option<TimeFormat>,
     #[clap(
         long,
@@ -317,7 +320,7 @@ pub async fn run(args: QueryArgs) -> miette::Result<()> {
                 )
             };
             sql.inspect(|sql| {
-                if verbose > 0{
+                if verbose > 0 {
                     eprintln!("EQL to SQL: {}", sql);
                 }
             })
@@ -370,20 +373,12 @@ pub async fn run(args: QueryArgs) -> miette::Result<()> {
     }
 
     match format {
-        QueryOutputFormat::Table => print_record_batch_table(
-            &slice,
-            time_format,
-            &precision,
-            row_index,
-            start,
-        )?,
-        QueryOutputFormat::Csv => print_record_batch_csv(
-            &slice,
-            time_format,
-            &precision,
-            row_index,
-            start,
-        )?,
+        QueryOutputFormat::Table => {
+            print_record_batch_table(&slice, time_format, &precision, row_index, start)?
+        }
+        QueryOutputFormat::Csv => {
+            print_record_batch_csv(&slice, time_format, &precision, row_index, start)?
+        }
         QueryOutputFormat::ArrowIpc => {
             eprintln!("Warning: output is binary; pipe to a file (e.g. ... > out.arrow)");
             print_record_batch_arrow_ipc(&slice)?;
@@ -413,9 +408,7 @@ fn resolve_slice(
         return Ok((0, total_rows));
     }
     let time_us = time_column_microseconds(batch);
-    let needs_time = offset
-        .and_then(RowDescription::to_microseconds)
-        .is_some()
+    let needs_time = offset.and_then(RowDescription::to_microseconds).is_some()
         || limit.and_then(RowDescription::to_microseconds).is_some();
     if needs_time && time_us.is_none() {
         return Err(miette::miette!(
@@ -469,7 +462,8 @@ fn resolve_slice(
                 if limit_us >= 0.0 {
                     let start_time_us = times[start];
                     let mut end = start;
-                    while end < total_rows && (times[end] as f64) < start_time_us as f64 + limit_us {
+                    while end < total_rows && (times[end] as f64) < start_time_us as f64 + limit_us
+                    {
                         end += 1;
                     }
                     (start, (end - start).min(remaining))
@@ -501,19 +495,28 @@ fn time_column_microseconds(batch: &RecordBatch) -> Option<Vec<i64>> {
     let col = batch.column(time_idx);
     let n = col.len();
     let mut out = Vec::with_capacity(n);
-    if let Some(a) = col.as_any().downcast_ref::<arrow::array::TimestampMicrosecondArray>() {
+    if let Some(a) = col
+        .as_any()
+        .downcast_ref::<arrow::array::TimestampMicrosecondArray>()
+    {
         for i in 0..n {
             out.push(a.value(i));
         }
         return Some(out);
     }
-    if let Some(a) = col.as_any().downcast_ref::<arrow::array::TimestampMillisecondArray>() {
+    if let Some(a) = col
+        .as_any()
+        .downcast_ref::<arrow::array::TimestampMillisecondArray>()
+    {
         for i in 0..n {
             out.push(a.value(i).saturating_mul(1000));
         }
         return Some(out);
     }
-    if let Some(a) = col.as_any().downcast_ref::<arrow::array::TimestampNanosecondArray>() {
+    if let Some(a) = col
+        .as_any()
+        .downcast_ref::<arrow::array::TimestampNanosecondArray>()
+    {
         for i in 0..n {
             out.push(a.value(i) / 1000);
         }
