@@ -1,6 +1,6 @@
 use std::{io::Write, net::SocketAddr, path::PathBuf};
 
-use clap::{Parser, Subcommand, ValueEnum};
+use clap::{Parser, Subcommand, ValueEnum, ArgAction};
 use elodin_db::Server;
 use impeller2::vtable;
 use miette::IntoDiagnostic;
@@ -239,25 +239,32 @@ struct QueryArgs {
     #[clap(
         long,
         value_name = "EQL",
-        help = "EQL query (e.g. component name like drone.position)"
+        help = "EQL query, e.g., 'rocket.world_pos.x'"
     )]
     eql: Option<String>,
-    #[clap(long, value_name = "SQL", help = "Raw SQL query")]
+    #[clap(long, value_name = "SQL", help = "SQL query, e.g., 'select rocket_world_pos[5] from rocket_world_pos'")]
     sql: Option<String>,
+    #[clap(
+        short = 'v',
+        long,
+        action = ArgAction::Count,
+        help = "Be verbose, e.g., print EQL to SQL conversion."
+    )]
+    verbose: u8,
     #[clap(
         long,
         value_name = "N|DURATION",
         value_parser = clap::value_parser!(elodin_db::query::RowDescription),
         allow_negative_numbers = true,
         allow_hyphen_values = true,
-        help = "Skip rows (integer or duration: 2.6s, 340000ms, 53000ns; negative int = from end)"
+        help = "Skip N rows or duration (e.g., 2.6s, 340000ms, 53000us; negatives mean from end)"
     )]
     offset: Option<elodin_db::query::RowDescription>,
     #[clap(
         long,
         value_name = "N|DURATION",
         value_parser = clap::value_parser!(elodin_db::query::RowDescription),
-        help = "Return at most N rows or duration (e.g. 10, 2.6s, 340000ms, 53000ns)"
+        help = "Return at most N rows or duration (e.g. 2.6s, 340000ms, 53000us)"
     )]
     limit: Option<elodin_db::query::RowDescription>,
     #[clap(
@@ -265,7 +272,7 @@ struct QueryArgs {
         short,
         value_enum,
         default_value = "table",
-        help = "Output format: table, csv, arrow-ipc, or parquet (binary formats should be piped to a file)"
+        help = "Output format"
     )]
     format: elodin_db::query::QueryOutputFormat,
     #[clap(
@@ -273,20 +280,15 @@ struct QueryArgs {
         help = "Flatten vector columns to separate columns (e.g. vel -> vel.0, vel.1)"
     )]
     flatten: bool,
+    #[clap(long, help = "Show row index as the first column (0-based from the full result)")]
+    row_index: bool,
     #[clap(
         long,
         value_enum,
-        help = "Time column display: omit, datetime, s, ms, us (default: seconds, or unit from --offset/--limit if duration)"
+        help = "Time column display"
     )]
     time_format: Option<elodin_db::query::TimeFormat>,
     #[clap(
-        short = 'v',
-        long,
-        help = "Be verbose, e.g., print EQL to SQL conversion."
-    )]
-    verbose: bool,
-    #[clap(
-        short = 'p',
         long,
         default_value = "6",
         value_parser = clap::value_parser!(elodin_db::query::Precision),
@@ -627,18 +629,7 @@ async fn main() -> miette::Result<()> {
         Commands::Info(args) => run_info(args),
         Commands::Query(args) => {
             let rt = tokio::runtime::Runtime::new().into_diagnostic()?;
-            rt.block_on(elodin_db::query::run(elodin_db::query::QueryArgs {
-                eql: args.eql,
-                sql: args.sql,
-                verbose: args.verbose,
-                precision: args.precision,
-                dbfile: args.dbfile,
-                offset: args.offset,
-                limit: args.limit,
-                format: args.format,
-                flatten: args.flatten,
-                time_format: args.time_format,
-            }))?;
+            rt.block_on(elodin_db::query::run(args))?;
             Ok(())
         }
         Commands::ListComponents(args) => {
@@ -727,7 +718,7 @@ fn format_duration(duration: std::time::Duration) -> String {
     } else if nanos >= 1_000_000 {
         format!("{} ms", nanos / 1_000_000)
     } else if nanos >= 1_000 {
-        format!("{} us", nanos / 1_000)
+        format!("{} µs", nanos / 1_000)
     } else {
         format!("{} ns", nanos)
     }

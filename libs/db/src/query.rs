@@ -32,15 +32,15 @@ impl Default for Precision {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum RowDescription {
-    /// Number of rows (offset can be negative for "from end").
+    /// Number of rows (negative => from end)
     Count(i64),
-    /// Duration in seconds (e.g. "2.6s"; negative = from end, e.g. -1s = 1s before last entry).
+    /// Duration in seconds (e.g. "1.2s"; negative => from end, e.g. -1s = 1s before last entry)
     Second(f64),
-    /// Duration in milliseconds (e.g. "340000ms"; negative = from end).
+    /// Duration in milliseconds (e.g. "3400ms"; negative => from end)
     Millisecond(i64),
-    /// Duration in microseconds (e.g. "340000us"; negative = from end).
+    /// Duration in microseconds (e.g. "560000µs"; negative => from end)
     Microsecond(i64),
-    /// Duration in nanoseconds (e.g. "53000ns"; negative = from end).
+    /// Duration in nanoseconds (e.g. "78000000ns"; negative => from end)
     Nanosecond(i64),
 }
 
@@ -130,17 +130,17 @@ pub enum TimeFormat {
     /// Do not show the time column.
     #[clap(alias = "none")]
     Omit,
-    /// Show as date-time (e.g. 2025-02-27T12:00:00.000 UTC).
+    /// Show as date-time (e.g. 2025-02-27T12:00:00.000 UTC, alias 'dt').
     #[clap(alias = "dt")]
     Datetime,
-    /// Show as seconds since epoch (default).
+    /// Show as seconds since epoch (default, alias 's').
     #[default]
     #[clap(alias = "s")]
     Seconds,
-    /// Show as milliseconds since epoch.
+    /// Show as milliseconds since epoch (alias 'ms').
     #[clap(alias = "ms")]
     Milliseconds,
-    /// Show as microseconds since epoch.
+    /// Show as microseconds since epoch (alias 'µs' and 'us').
     #[clap(alias = "us", alias = "µs")]
     Microseconds,
 }
@@ -183,6 +183,8 @@ pub struct QueryArgs {
     pub flatten: bool,
     /// How to display the time column. If None, inferred from --offset/--limit duration unit, else seconds.
     pub time_format: Option<TimeFormat>,
+    /// If true, add a first column with the row index (0-based).
+    pub row_index: bool,
 }
 
 /// Infers time display format from offset/limit when they are duration variants.
@@ -213,6 +215,7 @@ pub async fn run(args: QueryArgs) -> miette::Result<()> {
         format,
         flatten,
         time_format,
+        row_index,
     } = args;
 
     let time_format = time_format
@@ -323,14 +326,26 @@ pub async fn run(args: QueryArgs) -> miette::Result<()> {
     let is_table_or_csv = matches!(format, QueryOutputFormat::Table | QueryOutputFormat::Csv);
     if is_table_or_csv && let Precision::Decimals(p) = precision {
         eprintln!(
-            "Note: numeric columns are shown with limited precision ({} decimal places). Use '--precision full' to see all digits.",
+            "Note: numeric columns shown with limited precision: {} decimal places. Use '--precision full' to see all digits.",
             p,
         );
     }
 
     match format {
-        QueryOutputFormat::Table => print_record_batch_table(&slice, time_format, &precision)?,
-        QueryOutputFormat::Csv => print_record_batch_csv(&slice, time_format, &precision)?,
+        QueryOutputFormat::Table => print_record_batch_table(
+            &slice,
+            time_format,
+            &precision,
+            row_index,
+            start,
+        )?,
+        QueryOutputFormat::Csv => print_record_batch_csv(
+            &slice,
+            time_format,
+            &precision,
+            row_index,
+            start,
+        )?,
         QueryOutputFormat::ArrowIpc => {
             eprintln!("Warning: output is binary; pipe to a file (e.g. ... > out.arrow)");
             print_record_batch_arrow_ipc(&slice)?;
@@ -510,6 +525,8 @@ fn print_record_batch_table(
     batch: &RecordBatch,
     time_format: TimeFormat,
     precision: &Precision,
+    row_index: bool,
+    row_index_start: usize,
 ) -> miette::Result<()> {
     let schema = batch.schema();
     let col_indices: Vec<(usize, &Arc<Field>)> = schema
@@ -518,16 +535,22 @@ fn print_record_batch_table(
         .enumerate()
         .filter(|(_, f)| time_format != TimeFormat::Omit || f.name() != "time")
         .collect();
-    let columns: Vec<String> = col_indices
+    let mut columns: Vec<String> = col_indices
         .iter()
         .map(|(_, f)| column_header_with_unit(f.name(), time_format))
         .collect();
+    if row_index {
+        columns.insert(0, "index".to_string());
+    }
     let n_rows = batch.num_rows();
 
     let mut builder = Builder::default();
     builder.push_record(columns);
     for i in 0..n_rows {
-        let mut row = Vec::with_capacity(col_indices.len());
+        let mut row = Vec::with_capacity(col_indices.len() + if row_index { 1 } else { 0 });
+        if row_index {
+            row.push((row_index_start + i).to_string());
+        }
         for (col_idx, field) in &col_indices {
             let col = batch.column(*col_idx);
             let s = format_cell(
@@ -642,6 +665,8 @@ fn print_record_batch_csv(
     batch: &RecordBatch,
     time_format: TimeFormat,
     precision: &Precision,
+    row_index: bool,
+    row_index_start: usize,
 ) -> miette::Result<()> {
     let schema = batch.schema();
     let col_indices: Vec<(usize, &Arc<Field>)> = schema
@@ -653,6 +678,12 @@ fn print_record_batch_csv(
     let n_rows = batch.num_rows();
     let mut out = std::io::stdout();
 
+    if row_index {
+        write!(out, "{}", csv_escape("index")).into_diagnostic()?;
+        if !col_indices.is_empty() {
+            write!(out, ",").into_diagnostic()?;
+        }
+    }
     for (j, (_, field)) in col_indices.iter().enumerate() {
         if j > 0 {
             write!(out, ",").into_diagnostic()?;
@@ -663,6 +694,12 @@ fn print_record_batch_csv(
     writeln!(out).into_diagnostic()?;
 
     for i in 0..n_rows {
+        if row_index {
+            write!(out, "{}", row_index_start + i).into_diagnostic()?;
+            if !col_indices.is_empty() {
+                write!(out, ",").into_diagnostic()?;
+            }
+        }
         for (j, (col_idx, field)) in col_indices.iter().enumerate() {
             if j > 0 {
                 write!(out, ",").into_diagnostic()?;
