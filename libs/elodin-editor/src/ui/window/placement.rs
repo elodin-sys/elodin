@@ -224,14 +224,18 @@ async fn apply_window_screen(entity: Entity, screen: usize) -> Result<(), bevy_d
         %screen,
         "apply_window_screen start"
     );
+    let window_states = AsyncWorld.query::<&WindowState>();
+    let Ok(mut state) = window_states.entity(entity).get_mut(|state| state.clone()) else {
+        info!(
+            window = %entity,
+            "Skipping window screen assignment because the entity no longer exists"
+        );
+        return Ok(());
+    };
     if !wait_for_winit_window(entity, Duration::from_millis(2000)).await? {
         error!(%entity, "Unable to apply window to screen: winit window not found.");
         return Ok(());
     }
-    let window_states = AsyncWorld.query::<&WindowState>();
-    let mut state = window_states
-        .entity(entity)
-        .get_mut(|state| state.clone())?;
     let target_monitor_maybe = AsyncWorld.run(|_world| {
         WINIT_WINDOWS.with_borrow(|winit_windows| {
             let Some(window) = winit_windows.get_window(entity) else {
@@ -385,9 +389,13 @@ async fn apply_window_rect(
     );
 
     let window_states = AsyncWorld.query::<&WindowState>();
-    let state = window_states
-        .entity(entity)
-        .get_mut(|state| state.clone())?;
+    let Ok(state) = window_states.entity(entity).get_mut(|state| state.clone()) else {
+        info!(
+            window = %entity,
+            "Skipping window rect assignment because the entity no longer exists"
+        );
+        return Ok(());
+    };
 
     let is_full_rect = crate::ui::platform::LINUX_MULTI_WINDOW
         && rect.x == 0

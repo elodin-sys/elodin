@@ -495,7 +495,7 @@ impl Plugin for SchematicPlugin {
             .add_systems(
                 PreUpdate,
                 (
-                    load::schematic_asset_reload,
+                    load::schematic_asset_reload.before(crate::ui::sync_windows),
                     load::schematic_asset_load_failed,
                 ),
             );
