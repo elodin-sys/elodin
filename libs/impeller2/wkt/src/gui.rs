@@ -7,7 +7,6 @@ use std::fmt;
 use std::ops::Range;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
-use strum::{EnumString, IntoStaticStr, VariantNames};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 pub struct NodeId(pub u64);
@@ -130,7 +129,6 @@ pub enum Panel {
     Hierarchy,
     SchematicTree(Option<String>),
     DataOverview(Option<String>),
-    Dashboard(Box<Dashboard>),
     VideoStream(VideoStream),
     SensorView(SensorView),
     LogStream(LogStream),
@@ -154,7 +152,6 @@ impl Panel {
             Panel::Hierarchy => "Hierarchy",
             Panel::SchematicTree(name) => name.as_deref().unwrap_or("Tree"),
             Panel::DataOverview(name) => name.as_deref().unwrap_or("Data Overview"),
-            Panel::Dashboard(d) => d.root.name.as_deref().unwrap_or("Dashboard"),
             Panel::VideoStream(v) => v.name.as_deref().unwrap_or("Video Stream"),
             Panel::SensorView(v) => v.name.as_deref().unwrap_or("Sensor View"),
             Panel::LogStream(l) => l.name.as_deref().unwrap_or("Log Stream"),
@@ -189,7 +186,6 @@ impl Panel {
             Panel::Graph(graph) => Some(graph.node_id),
             Panel::QueryPlot(query_plot) => Some(query_plot.node_id),
             Panel::Viewport(v) => Some(v.node_id),
-            Panel::Dashboard(d) => Some(d.node_id),
             _ => None,
         }
     }
@@ -905,295 +901,4 @@ pub enum PlotMode {
     TimeSeries,
     /// XY mode: X-axis represents arbitrary numeric values, labels formatted as numbers
     XY,
-}
-
-#[derive(Debug, Clone, Default, Deserialize, Serialize)]
-#[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
-pub struct Dashboard {
-    pub root: DashboardNode,
-    #[serde(default)]
-    pub node_id: NodeId,
-}
-
-#[derive(Debug, Clone, Default, Deserialize, Serialize)]
-#[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
-pub struct DashboardNode {
-    pub name: Option<String>,
-    pub display: Display,
-    pub box_sizing: BoxSizing,
-    pub position_type: PositionType,
-    pub overflow: Overflow,
-    pub overflow_clip_margin: OverflowClipMargin,
-    pub left: Val,
-    pub right: Val,
-    pub top: Val,
-    pub bottom: Val,
-    pub width: Val,
-    pub height: Val,
-    pub min_width: Val,
-    pub min_height: Val,
-    pub max_width: Val,
-    pub max_height: Val,
-    pub aspect_ratio: Option<f32>,
-    pub align_items: AlignItems,
-    pub justify_items: JustifyItems,
-    pub align_self: AlignSelf,
-    pub justify_self: JustifySelf,
-    pub align_content: AlignContent,
-    pub justify_content: JustifyContent,
-    pub margin: UiRect,
-    pub padding: UiRect,
-    pub border: UiRect,
-    pub flex_direction: FlexDirection,
-    pub flex_wrap: FlexWrap,
-    pub flex_grow: f32,
-    pub flex_shrink: f32,
-    pub flex_basis: Val,
-    pub row_gap: Val,
-    pub column_gap: Val,
-    pub children: Vec<DashboardNode>,
-    pub color: Color,
-    pub text: Option<String>,
-    pub font_size: f32,
-    pub text_color: Color,
-    #[serde(default)]
-    pub node_id: NodeId,
-}
-
-#[derive(
-    Debug, Clone, Copy, Default, Deserialize, Serialize, EnumString, IntoStaticStr, VariantNames,
-)]
-#[strum(serialize_all = "kebab-case")]
-pub enum PositionType {
-    #[default]
-    Relative,
-    Absolute,
-}
-
-#[derive(
-    Debug, Clone, Copy, Default, Deserialize, Serialize, EnumString, IntoStaticStr, VariantNames,
-)]
-#[strum(serialize_all = "kebab-case")]
-pub enum AlignItems {
-    #[default]
-    Default,
-    Start,
-    End,
-    FlexStart,
-    FlexEnd,
-    Center,
-    Baseline,
-    Stretch,
-}
-
-#[derive(
-    Debug, Clone, Copy, Default, Deserialize, Serialize, EnumString, IntoStaticStr, VariantNames,
-)]
-#[strum(serialize_all = "kebab-case")]
-pub enum JustifyItems {
-    #[default]
-    Default,
-    Start,
-    End,
-    Center,
-    Baseline,
-    Stretch,
-}
-
-#[derive(
-    Debug, Clone, Copy, Default, Deserialize, Serialize, EnumString, IntoStaticStr, VariantNames,
-)]
-#[strum(serialize_all = "kebab-case")]
-pub enum Display {
-    #[default]
-    Flex,
-    Grid,
-    Block,
-    None,
-}
-
-#[derive(
-    Debug, Clone, Copy, Default, Deserialize, Serialize, EnumString, IntoStaticStr, VariantNames,
-)]
-#[strum(serialize_all = "kebab-case")]
-pub enum BoxSizing {
-    #[default]
-    BorderBox,
-    ContentBox,
-}
-
-#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize)]
-pub struct Overflow {
-    pub x: OverflowAxis,
-    pub y: OverflowAxis,
-}
-
-#[derive(Debug, Default, Clone, Deserialize, Serialize)]
-pub struct OverflowClipMargin {
-    pub visual_box: OverflowClipBox,
-    pub margin: f32,
-}
-
-#[derive(
-    Debug, Clone, Copy, Default, Deserialize, Serialize, EnumString, IntoStaticStr, VariantNames,
-)]
-#[strum(serialize_all = "kebab-case")]
-pub enum OverflowClipBox {
-    #[default]
-    ContentBox,
-    PaddingBox,
-    BorderBox,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct UiRect {
-    pub left: Val,
-    pub right: Val,
-    pub top: Val,
-    pub bottom: Val,
-}
-
-impl Default for UiRect {
-    fn default() -> Self {
-        Self {
-            left: Val::Px("0.0".to_string()),
-            right: Val::Px("0.0".to_string()),
-            top: Val::Px("0.0".to_string()),
-            bottom: Val::Px("0.0".to_string()),
-        }
-    }
-}
-
-#[derive(
-    Debug, Default, Copy, Clone, Deserialize, Serialize, EnumString, IntoStaticStr, VariantNames,
-)]
-#[strum(serialize_all = "kebab-case")]
-pub enum OverflowAxis {
-    #[default]
-    Visible,
-    Clip,
-    Hidden,
-    Scroll,
-}
-
-#[derive(
-    Debug, Default, Copy, Clone, Deserialize, Serialize, EnumString, IntoStaticStr, VariantNames,
-)]
-#[strum(serialize_all = "kebab-case")]
-pub enum FlexDirection {
-    #[default]
-    Row,
-    Column,
-    RowReverse,
-    ColumnReverse,
-}
-
-#[derive(
-    Debug, Default, Copy, Clone, Deserialize, Serialize, EnumString, IntoStaticStr, VariantNames,
-)]
-#[strum(serialize_all = "kebab-case")]
-pub enum FlexWrap {
-    #[default]
-    NoWrap,
-    Wrap,
-    WrapReverse,
-}
-
-#[derive(Debug, Clone, Default, Deserialize, Serialize)]
-pub enum Val {
-    #[default]
-    Auto,
-    Px(String),
-    Percent(String),
-    Vw(String),
-    Vh(String),
-    VMin(String),
-    VMax(String),
-}
-
-impl Val {
-    pub fn eql(&self) -> &str {
-        match self {
-            Val::Auto => "",
-            Val::Px(v) => v,
-            Val::Percent(v) => v,
-            Val::Vw(v) => v,
-            Val::Vh(v) => v,
-            Val::VMin(v) => v,
-            Val::VMax(v) => v,
-        }
-    }
-}
-
-#[derive(
-    Debug, Default, Copy, Clone, Deserialize, Serialize, EnumString, IntoStaticStr, VariantNames,
-)]
-#[strum(serialize_all = "kebab-case")]
-pub enum AlignSelf {
-    #[default]
-    Auto,
-    Start,
-    End,
-    FlexStart,
-    FlexEnd,
-    Center,
-    Baseline,
-    Stretch,
-}
-
-#[derive(
-    Debug, Default, Copy, Clone, Deserialize, Serialize, EnumString, IntoStaticStr, VariantNames,
-)]
-#[strum(serialize_all = "kebab-case")]
-pub enum JustifySelf {
-    #[default]
-    Auto,
-    Start,
-    End,
-    Center,
-    Baseline,
-    Stretch,
-}
-
-#[derive(
-    Debug, Default, Copy, Clone, Deserialize, Serialize, EnumString, IntoStaticStr, VariantNames,
-)]
-#[strum(serialize_all = "kebab-case")]
-pub enum AlignContent {
-    #[default]
-    Default,
-    Start,
-    End,
-    FlexStart,
-    FlexEnd,
-    Center,
-    Stretch,
-    SpaceBetween,
-    SpaceEvenly,
-    SpaceAround,
-}
-
-#[derive(
-    Debug, Default, Copy, Clone, Deserialize, Serialize, EnumString, IntoStaticStr, VariantNames,
-)]
-#[strum(serialize_all = "kebab-case")]
-pub enum JustifyContent {
-    #[default]
-    Default,
-    Start,
-    End,
-    FlexStart,
-    FlexEnd,
-    Center,
-    Stretch,
-    SpaceBetween,
-    SpaceEvenly,
-    SpaceAround,
-}
-
-#[derive(Debug, Clone, Default, Deserialize, Serialize)]
-pub struct DashboardText {
-    pub text: String,
-    #[serde(default)]
-    pub node_id: NodeId,
 }

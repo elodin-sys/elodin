@@ -4,8 +4,7 @@ use std::collections::HashMap;
 
 /// Maps schematic `NodeId`s to Bevy `Entity`s at runtime.
 ///
-/// Ephemeral bindings are rebuilt every frame by `tiles_to_schematic`;
-/// persistent bindings (e.g. dashboard nodes) survive across frames.
+/// Ephemeral bindings are rebuilt every frame by `tiles_to_schematic`.
 #[derive(Resource, Default)]
 pub struct SchematicBindings {
     map: HashMap<NodeId, Entity>,

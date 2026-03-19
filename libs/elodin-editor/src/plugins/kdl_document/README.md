@@ -39,7 +39,6 @@ A schematic document is a `.kdl` file. The following top-level nodes are recogni
 | `sensor_view` | Raw RGBA sensor camera view |
 | `log_stream` | Scrolling log message viewer |
 | `data_overview` | Auto-generated component overview |
-| `dashboard` | Composite dashboard layout |
 | `schematic_tree` | Schematic tree navigator |
 | `inspector` | Entity inspector sidebar |
 | `hierarchy` | Entity hierarchy sidebar |

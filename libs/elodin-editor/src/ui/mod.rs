@@ -88,7 +88,6 @@ pub mod actions;
 pub mod button;
 pub mod colors;
 pub mod command_palette;
-pub mod dashboard;
 pub mod data_overview;
 pub mod hierarchy;
 pub mod images;
@@ -163,9 +162,6 @@ pub enum SelectedObject {
     Object3D {
         entity: Entity,
     },
-    DashboardNode {
-        entity: Entity,
-    },
 }
 
 impl SelectedObject {
@@ -186,7 +182,6 @@ impl SelectedObject {
             SelectedObject::DataOverviewComponent { .. } => None,
             SelectedObject::Action { action_id } => Some(*action_id),
             SelectedObject::Object3D { entity } => Some(*entity),
-            SelectedObject::DashboardNode { entity } => Some(*entity),
         }
     }
 }
@@ -396,7 +391,6 @@ impl Plugin for UiPlugin {
             .add_systems(Update, sync_hdr)
             .add_systems(Update, tiles::shortcuts)
             .add_systems(Update, query_plot::auto_bounds)
-            .add_systems(Update, dashboard::update_nodes)
             .add_plugins(timeline::plugin)
             .add_plugins(tiles::plugin)
             .add_plugins(SchematicPlugin)

@@ -35,7 +35,6 @@ use crate::{
     ui::{
         DEFAULT_SECONDARY_RECT, HdrEnabled,
         colors::{self, EColor},
-        dashboard::{NodeUpdaterParams, spawn_dashboard},
         data_overview::DataOverviewPane,
         modal::ModalDialog,
         monitor::MonitorPane,
@@ -43,8 +42,8 @@ use crate::{
         query_plot::QueryPlotData,
         schematic::EqlExt,
         tiles::{
-            DashboardPane, GraphPane, Pane, TileState, TreePane, ViewportPane, WindowDescriptor,
-            WindowId, WindowState,
+            GraphPane, Pane, TileState, TreePane, ViewportPane, WindowDescriptor, WindowId,
+            WindowState,
         },
         timeline::TimelineSettings,
     },
@@ -84,7 +83,6 @@ pub struct LoadSchematicParams<'w, 's> {
     pub timeline_settings: ResMut<'w, TimelineSettings>,
     pub schema_reg: Res<'w, ComponentSchemaRegistry>,
     pub eql: Res<'w, EqlContext>,
-    pub node_updater_params: NodeUpdaterParams<'w, 's>,
     pub sensor_camera_configs: Res<'w, crate::sensor_camera::SensorCameraConfigs>,
     cameras: Query<'w, 's, &'static mut Camera>,
     objects_3d: Query<'w, 's, Entity, With<Object3DState>>,
@@ -1000,33 +998,6 @@ impl LoadSchematicParams<'_, '_> {
                     scrub_icon: None,
                 });
                 tile_state.insert_tile(Tile::Pane(pane), parent_id, false)
-            }
-            Panel::Dashboard(dashboard) => {
-                let label = dashboard
-                    .root
-                    .name
-                    .clone()
-                    .unwrap_or_else(|| "Dashboard".to_string());
-                let Ok(dashboard_entity) = spawn_dashboard(
-                    dashboard,
-                    &self.eql.0,
-                    &mut self.commands,
-                    &self.node_updater_params,
-                    &mut self.schematic_bindings,
-                )
-                .inspect_err(|err| {
-                    warn!(?err, "Failed to spawn dashboard");
-                }) else {
-                    return None;
-                };
-                tile_state.insert_tile(
-                    Tile::Pane(Pane::Dashboard(DashboardPane {
-                        entity: dashboard_entity,
-                        name: label,
-                    })),
-                    parent_id,
-                    false,
-                )
             }
         }
     }

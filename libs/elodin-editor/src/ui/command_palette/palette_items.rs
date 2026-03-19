@@ -666,20 +666,6 @@ pub fn create_schematic_tree(tile_id: Option<TileId>) -> PaletteItem {
     )
 }
 
-pub fn create_dashboard(tile_id: Option<TileId>) -> PaletteItem {
-    PaletteItem::new(
-        "Create Dashboard",
-        TILES_LABEL,
-        move |_: In<String>, mut tile_param: TileParam, palette_state: Res<CommandPaletteState>| {
-            let Some(mut tile_state) = tile_param.target(palette_state.target_window) else {
-                return PaletteEvent::Error("Secondary window unavailable".to_string());
-            };
-            tile_state.create_dashboard_tile(Default::default(), "Dashboard".to_string(), tile_id);
-            PaletteEvent::Exit
-        },
-    )
-}
-
 pub fn create_data_overview(tile_id: Option<TileId>) -> PaletteItem {
     PaletteItem::new(
         "Create Data Overview",
@@ -1427,8 +1413,6 @@ pub fn create_tiles(tile_id: TileId) -> PalettePage {
         create_query_plot(Some(tile_id)),
         create_video_stream(Some(tile_id)),
         create_schematic_tree(Some(tile_id)),
-        // Disabled: dashboard flow never shipped and the UX isn't expected yet.
-        // create_dashboard(Some(tile_id)),
         create_data_overview(Some(tile_id)),
     ])
 }
@@ -1497,8 +1481,6 @@ impl Default for PalettePage {
             create_query_plot(None),
             create_video_stream(None),
             create_schematic_tree(None),
-            // Disabled: dashboard flow never shipped and the UX isn't expected yet.
-            // create_dashboard(None),
             create_data_overview(None),
             create_3d_object(),
             save_schematic(),

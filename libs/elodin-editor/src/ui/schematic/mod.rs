@@ -17,8 +17,8 @@ use bevy::{ecs::system::SystemParam, prelude::*, window::PrimaryWindow};
 use egui_tiles::{Tile, TileId};
 use impeller2_bevy::ComponentMetadataRegistry;
 use impeller2_wkt::{
-    ActionPane, ComponentMonitor, ComponentPath, Dashboard, Line3d, Panel, Schematic,
-    SchematicElem, Split, VectorArrow3d, VideoStream as WktVideoStream, Viewport, WindowSchematic,
+    ActionPane, ComponentMonitor, ComponentPath, Line3d, Panel, Schematic, SchematicElem, Split,
+    VectorArrow3d, VideoStream as WktVideoStream, Viewport, WindowSchematic,
 };
 
 pub mod bindings;
@@ -74,7 +74,6 @@ pub struct SchematicParam<'w, 's> {
     pub windows_state: Query<'w, 's, (&'static tiles::WindowState, &'static tiles::WindowId)>,
     pub primary_window: Single<'w, 's, Entity, With<PrimaryWindow>>,
     pub current_document: Res<'w, CurrentDocument>,
-    pub dashboards: Query<'w, 's, &'static Dashboard>,
     pub video_streams: Query<'w, 's, &'static super::video_stream::VideoStream>,
     pub log_streams: Query<'w, 's, &'static super::log_stream::LogStreamState>,
     pub hdr_enabled: Res<'w, HdrEnabled>,
@@ -105,7 +104,6 @@ impl SchematicParam<'_, '_> {
                         .map(|data| data.data.name.clone())
                 }),
             Pane::ActionTile(action) => Some(action.name.clone()),
-            Pane::Dashboard(dashboard) => Some(dashboard.name.clone()),
             Pane::SchematicTree(pane) => Some(pane.name.clone()),
             Pane::DataOverview(pane) => Some(pane.name.clone()),
             Pane::VideoStream(pane) => Some(pane.name.clone()),
@@ -341,17 +339,6 @@ impl SchematicParam<'_, '_> {
 
                     // Structural panes
                     Pane::SchematicTree(_) => Some(Panel::SchematicTree(pane_name)),
-
-                    Pane::Dashboard(dash) => {
-                        let mut dashboard = self.dashboards.get(dash.entity).ok()?.clone();
-                        let node_id = impeller2_wkt::NodeId::next();
-                        bindings.bind_ephemeral(node_id, dash.entity);
-                        dashboard.node_id = node_id;
-                        if let Some(name) = pane_name {
-                            dashboard.root.name = Some(name);
-                        }
-                        Some(Panel::Dashboard(Box::new(dashboard)))
-                    }
                 }
             }
 

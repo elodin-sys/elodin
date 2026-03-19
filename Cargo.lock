@@ -7320,7 +7320,6 @@ dependencies = [
  "postcard-schema",
  "serde",
  "smallvec",
- "strum 0.27.2",
  "zerocopy",
 ]
 
@@ -12347,7 +12346,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "290d54ea6f91c969195bdbcd7442c8c2a2ba87da8bf60a7ee86a235d4bc1e125"
 dependencies = [
  "phf 0.10.1",
- "strum_macros 0.25.3",
+ "strum_macros",
 ]
 
 [[package]]
@@ -12355,9 +12354,6 @@ name = "strum"
 version = "0.27.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "af23d6f6c1a224baef9d3f61e287d2761385a5b88fdab4eb4c6f11aeb54c4bcf"
-dependencies = [
- "strum_macros 0.27.2",
-]
 
 [[package]]
 name = "strum_macros"
@@ -12369,18 +12365,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "rustversion",
- "syn 2.0.111",
-]
-
-[[package]]
-name = "strum_macros"
-version = "0.27.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7695ce3845ea4b33927c055a39dc438a45b059f7c1b3d91d38d10355fb8cbca7"
-dependencies = [
- "heck 0.5.0",
- "proc-macro2",
- "quote",
  "syn 2.0.111",
 ]
 
