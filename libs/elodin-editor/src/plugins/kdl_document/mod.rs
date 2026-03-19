@@ -5,6 +5,7 @@ use bevy::{
 };
 use impeller2_bevy::DbMessage;
 use impeller2_kdl::KdlSchematicError;
+use impeller2_kdl::env::schematic_file;
 use impeller2_kdl::{FromKdl, ToKdl};
 use impeller2_wkt::Schematic;
 use std::path::{Path, PathBuf};
@@ -50,15 +51,22 @@ impl CurrentDocument {
         asset_path: AssetPath<'static>,
         save_path: PathBuf,
     ) {
+        let changed = self.handle.as_ref().map(Handle::id) != Some(handle.id())
+            || self.asset_path.as_ref() != Some(&asset_path)
+            || self.save_path.as_ref() != Some(&save_path);
         self.handle = Some(handle);
         self.asset_path = Some(asset_path);
         self.save_path = Some(save_path);
+        if changed {
+            self.clear_applied();
+        }
     }
 
     pub fn set_unsaved_content(&mut self, save_path: Option<PathBuf>) {
         self.handle = None;
         self.asset_path = None;
         self.save_path = save_path;
+        self.clear_applied();
     }
 
     pub(crate) fn matches(&self, id: AssetId<SchematicDocumentAsset>) -> bool {
@@ -111,6 +119,40 @@ impl CurrentDocument {
 #[derive(Default)]
 pub struct SchematicDocumentLoader;
 
+#[derive(Message, Clone, Debug)]
+pub struct OpenDocumentRequest(pub PathBuf);
+
+#[derive(Message, Clone, Debug)]
+pub struct OpenDocumentFromContentRequest {
+    pub content: String,
+    pub save_path: Option<PathBuf>,
+}
+
+#[derive(Clone, Debug)]
+pub struct SecondaryDocumentSave {
+    pub file_name: String,
+    pub kdl: String,
+}
+
+#[derive(Message, Clone, Debug)]
+pub struct SaveCurrentDocumentRequest {
+    pub path: Option<PathBuf>,
+    pub root_kdl: String,
+    pub secondary: Vec<SecondaryDocumentSave>,
+}
+
+#[derive(Message, Clone, Debug)]
+pub struct DocumentReady {
+    pub save_path: Option<PathBuf>,
+    pub document: SchematicDocumentAsset,
+}
+
+#[derive(Message, Clone, Debug)]
+pub struct DocumentCommandFailed {
+    pub title: String,
+    pub message: String,
+}
+
 #[derive(Debug, Error)]
 pub enum SchematicDocumentLoaderError {
     #[error("Could not read schematic document: {0}")]
@@ -129,6 +171,30 @@ pub enum SchematicDocumentLoaderError {
         path: AssetPath<'static>,
         #[source]
         source: KdlSchematicError,
+    },
+}
+
+#[derive(Debug, Error)]
+pub enum SaveCurrentDocumentError {
+    #[error("No save path is available for the current document")]
+    MissingSavePath,
+    #[error("Could not save schematic to {path}: {source}")]
+    WriteRoot {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("Could not create directory for secondary schematic {path}: {source}")]
+    CreateSecondaryDir {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("Could not save secondary schematic to {path}: {source}")]
+    WriteSecondary {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
     },
 }
 
@@ -197,7 +263,21 @@ pub(crate) fn plugin(app: &mut App) {
     app.init_resource::<InitialKdlPath>()
         .init_resource::<CurrentDocument>()
         .init_asset::<SchematicDocumentAsset>()
-        .init_asset_loader::<SchematicDocumentLoader>();
+        .init_asset_loader::<SchematicDocumentLoader>()
+        .add_message::<OpenDocumentRequest>()
+        .add_message::<OpenDocumentFromContentRequest>()
+        .add_message::<SaveCurrentDocumentRequest>()
+        .add_message::<DocumentReady>()
+        .add_message::<DocumentCommandFailed>()
+        .add_systems(
+            PreUpdate,
+            (
+                handle_open_document_requests,
+                handle_open_document_from_content_requests,
+                handle_save_current_document_requests,
+            )
+                .chain(),
+        );
 }
 
 /// Applies `InitialKdlPath` to `DbConfig` so that `sync_schematic` will load that file.
@@ -230,11 +310,172 @@ pub(crate) fn filesystem_to_asset_path(path: &Path) -> AssetPath<'static> {
     AssetPath::from_path_buf(resolved).with_source(source)
 }
 
+pub fn open_document_path(
+    path: &Path,
+    asset_server: &AssetServer,
+    current_document: &mut CurrentDocument,
+    document_assets: &Assets<SchematicDocumentAsset>,
+) -> Result<Option<SchematicDocumentAsset>, KdlSchematicError> {
+    let resolved_path = schematic_file(path);
+    if !resolved_path.try_exists().unwrap_or(false) {
+        return Err(KdlSchematicError::NoSuchFile {
+            path: resolved_path,
+        });
+    }
+
+    let asset_path = filesystem_to_asset_path(&resolved_path);
+    let handle: Handle<SchematicDocumentAsset> = asset_server.load(asset_path.clone());
+    current_document.set_file(handle.clone(), asset_path, resolved_path);
+    Ok(document_assets.get(&handle).cloned())
+}
+
+pub fn open_document_from_content(
+    content: &str,
+    save_path: Option<PathBuf>,
+    current_document: &mut CurrentDocument,
+) -> Result<SchematicDocumentAsset, KdlSchematicError> {
+    let root = Schematic::from_kdl(content)?;
+    current_document.set_unsaved_content(save_path);
+    Ok(SchematicDocumentAsset {
+        root,
+        secondary: Vec::new(),
+    })
+}
+
+pub fn save_current_document(
+    path: Option<PathBuf>,
+    root_kdl: &str,
+    secondary: &[SecondaryDocumentSave],
+    asset_server: &AssetServer,
+    current_document: &mut CurrentDocument,
+) -> Result<PathBuf, SaveCurrentDocumentError> {
+    let path = path
+        .or_else(|| current_document.save_path.clone())
+        .ok_or(SaveCurrentDocumentError::MissingSavePath)?;
+    let path = Path::new(&path).with_extension("kdl");
+    let dest = schematic_file(&path);
+
+    std::fs::write(&dest, root_kdl).map_err(|source| SaveCurrentDocumentError::WriteRoot {
+        path: dest.clone(),
+        source,
+    })?;
+    write_secondary_schematics(dest.parent().unwrap_or_else(|| Path::new(".")), secondary)?;
+
+    let asset_path = filesystem_to_asset_path(&dest);
+    let handle: Handle<SchematicDocumentAsset> = asset_server.load(asset_path.clone());
+    current_document.set_file(handle, asset_path, dest.clone());
+    Ok(dest)
+}
+
+fn write_secondary_schematics(
+    base_dir: &Path,
+    secondary: &[SecondaryDocumentSave],
+) -> Result<(), SaveCurrentDocumentError> {
+    for entry in secondary {
+        let dest = base_dir.join(&entry.file_name);
+        if let Some(parent) = dest.parent() {
+            std::fs::create_dir_all(parent).map_err(|source| {
+                SaveCurrentDocumentError::CreateSecondaryDir {
+                    path: dest.clone(),
+                    source,
+                }
+            })?;
+        }
+
+        std::fs::write(&dest, &entry.kdl)
+            .map_err(|source| SaveCurrentDocumentError::WriteSecondary { path: dest, source })?;
+    }
+
+    Ok(())
+}
+
+fn handle_open_document_requests(
+    mut requests: MessageReader<OpenDocumentRequest>,
+    asset_server: Res<AssetServer>,
+    document_assets: Res<Assets<SchematicDocumentAsset>>,
+    mut current_document: ResMut<CurrentDocument>,
+    mut ready: MessageWriter<DocumentReady>,
+    mut failed: MessageWriter<DocumentCommandFailed>,
+) {
+    for request in requests.read() {
+        match open_document_path(
+            &request.0,
+            &asset_server,
+            &mut current_document,
+            &document_assets,
+        ) {
+            Ok(Some(document)) => {
+                ready.write(DocumentReady {
+                    save_path: current_document.save_path.clone(),
+                    document,
+                });
+            }
+            Ok(None) => {}
+            Err(error) => {
+                failed.write(DocumentCommandFailed {
+                    title: format!("Invalid Schematic in {}", request.0.display()),
+                    message: error.to_string(),
+                });
+            }
+        }
+    }
+}
+
+fn handle_open_document_from_content_requests(
+    mut requests: MessageReader<OpenDocumentFromContentRequest>,
+    mut current_document: ResMut<CurrentDocument>,
+    mut ready: MessageWriter<DocumentReady>,
+    mut failed: MessageWriter<DocumentCommandFailed>,
+) {
+    for request in requests.read() {
+        match open_document_from_content(
+            &request.content,
+            request.save_path.clone(),
+            &mut current_document,
+        ) {
+            Ok(document) => {
+                ready.write(DocumentReady {
+                    save_path: current_document.save_path.clone(),
+                    document,
+                });
+            }
+            Err(error) => {
+                failed.write(DocumentCommandFailed {
+                    title: "Invalid Schematic".to_string(),
+                    message: error.to_string(),
+                });
+            }
+        }
+    }
+}
+
+fn handle_save_current_document_requests(
+    mut requests: MessageReader<SaveCurrentDocumentRequest>,
+    asset_server: Res<AssetServer>,
+    mut current_document: ResMut<CurrentDocument>,
+    mut failed: MessageWriter<DocumentCommandFailed>,
+) {
+    for request in requests.read() {
+        if let Err(error) = save_current_document(
+            request.path.clone(),
+            &request.root_kdl,
+            &request.secondary,
+            &asset_server,
+            &mut current_document,
+        ) {
+            failed.write(DocumentCommandFailed {
+                title: "Failed to Save Schematic".to_string(),
+                message: error.to_string(),
+            });
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         CurrentDocument, SchematicDocumentAsset, SecondarySchematicAsset,
-        plugin as kdl_document_plugin,
+        open_document_from_content, plugin as kdl_document_plugin,
     };
     use bevy::{
         asset::{AssetPath, AssetPlugin, UnapprovedPathMode},
@@ -458,6 +699,23 @@ mod tests {
         current_document.set_applied(&applied_root, vec![secondary.to_kdl()]);
 
         assert_eq!(current_document.changed_secondary_indices(&document), None);
+    }
+
+    #[test]
+    fn opening_unsaved_content_clears_applied_snapshot() {
+        let root = root_schematic("Panel A");
+        let secondary = secondary_schematic("Panel A");
+        let mut current_document = CurrentDocument::default();
+        current_document.set_applied(&root, vec![secondary.to_kdl()]);
+
+        let document = open_document_from_content(
+            "window path=\"rate-control-panel.kdl\" title=\"Panel A\"\n",
+            Some(PathBuf::from("drone.kdl")),
+            &mut current_document,
+        )
+        .expect("parse kdl");
+
+        assert!(!current_document.matches_applied(&document));
     }
 
     #[cfg(unix)]

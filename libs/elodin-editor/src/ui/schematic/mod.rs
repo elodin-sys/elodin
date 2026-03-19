@@ -24,10 +24,10 @@ use impeller2_wkt::{
 pub mod tree;
 pub use tree::*;
 mod load;
-pub(crate) use crate::plugins::kdl_document::filesystem_to_asset_path;
 pub use crate::plugins::kdl_document::{
-    CurrentDocument, InitialKdlPath, SchematicDocumentAsset, SecondarySchematicAsset,
-    apply_initial_kdl_path,
+    CurrentDocument, DocumentReady, InitialKdlPath, OpenDocumentFromContentRequest,
+    OpenDocumentRequest, SaveCurrentDocumentRequest, SchematicDocumentAsset, SecondaryDocumentSave,
+    SecondarySchematicAsset, apply_initial_kdl_path,
 };
 pub use load::*;
 
@@ -499,7 +499,9 @@ impl Plugin for SchematicPlugin {
             .add_systems(
                 PreUpdate,
                 (
+                    load::apply_document_ready.before(crate::ui::sync_windows),
                     load::schematic_asset_reload.before(crate::ui::sync_windows),
+                    load::show_document_command_failures,
                     load::schematic_asset_load_failed,
                 ),
             );

@@ -56,8 +56,8 @@ use crate::{
     object_3d::Object3DState,
     plugins::{
         kdl_document::{
-            CurrentDocument, SchematicDocumentAsset, SecondarySchematicAsset,
-            filesystem_to_asset_path,
+            CurrentDocument, DocumentCommandFailed, DocumentReady, SchematicDocumentAsset,
+            SecondarySchematicAsset, open_document_from_content, open_document_path,
         },
         navigation_gizmo::RenderLayerAlloc,
     },
@@ -158,26 +158,21 @@ pub fn sync_schematic(
         }
     }
     if let Some(content) = config.schematic_content() {
-        let Ok(schematic) = impeller2_wkt::Schematic::from_kdl(content).inspect_err(|e| {
-            modal.dialog_error("Invalid Schematic", &render_diag(e));
-            let report = miette!(e.clone());
-            bevy::log::error!(?report, "Invalid schematic content")
-        }) else {
+        let save_path = config
+            .schematic_path()
+            .map(Path::new)
+            .map(impeller2_kdl::env::schematic_file);
+        let Ok(document) =
+            open_document_from_content(content, save_path.clone(), &mut params.current_document)
+                .inspect_err(|e| {
+                    modal.dialog_error("Invalid Schematic", &render_diag(e));
+                    let report = miette!(e.clone());
+                    bevy::log::error!(?report, "Invalid schematic content")
+                })
+        else {
             return;
         };
-        match config.schematic_path() {
-            Some(p) => {
-                let base_file = impeller2_kdl::env::schematic_file(Path::new(p));
-                params
-                    .current_document
-                    .set_unsaved_content(Some(base_file.clone()));
-                params.load_schematic(&schematic, base_file.parent(), None);
-            }
-            None => {
-                params.current_document.set_unsaved_content(None);
-                params.load_schematic(&schematic, None, None);
-            }
-        }
+        apply_loaded_document(&mut params, save_path.as_deref(), &document);
         return;
     }
 
@@ -261,6 +256,15 @@ fn applied_secondary_kdls(document: &SchematicDocumentAsset) -> Vec<String> {
         .collect()
 }
 
+fn apply_loaded_document(
+    params: &mut LoadSchematicParams,
+    save_path: Option<&Path>,
+    document: &SchematicDocumentAsset,
+) {
+    let base_dir = save_path.and_then(Path::parent);
+    params.load_schematic(&document.root, base_dir, Some(&document.secondary));
+}
+
 pub fn render_diag(diagnostic: &dyn Diagnostic) -> String {
     let mut buf = String::new();
     miette::GraphicalReportHandler::new_themed(miette::GraphicalTheme::unicode_nocolor())
@@ -274,22 +278,13 @@ pub fn load_schematic_file(
     params: &mut LoadSchematicParams,
 ) -> Result<(), KdlSchematicError> {
     let resolved_path = impeller2_kdl::env::schematic_file(path);
-    if !resolved_path.try_exists().unwrap_or(false) {
-        return Err(KdlSchematicError::NoSuchFile {
-            path: resolved_path,
-        });
-    }
-    let asset_path = filesystem_to_asset_path(&resolved_path);
-    let handle: Handle<SchematicDocumentAsset> = params.asset_server.load(asset_path.clone());
-    params
-        .current_document
-        .set_file(handle.clone(), asset_path, resolved_path.clone());
-    if let Some(document) = params.document_assets.get(&handle).cloned() {
-        params.load_schematic(
-            &document.root,
-            resolved_path.parent(),
-            Some(&document.secondary),
-        );
+    if let Some(document) = open_document_path(
+        path,
+        &params.asset_server,
+        &mut params.current_document,
+        &params.document_assets,
+    )? {
+        apply_loaded_document(&mut *params, Some(resolved_path.as_path()), &document);
     }
     Ok(())
 }
@@ -1264,11 +1259,13 @@ pub fn schematic_asset_reload(
         return;
     }
 
-    let base_dir = save_path.as_deref().and_then(Path::parent);
-
     if let Some(changed_secondary_indices) =
         params.current_document.changed_secondary_indices(&document)
-        && params.reload_secondary_windows(&document, base_dir, &changed_secondary_indices)
+        && params.reload_secondary_windows(
+            &document,
+            save_path.as_deref().and_then(Path::parent),
+            &changed_secondary_indices,
+        )
     {
         params
             .current_document
@@ -1276,7 +1273,26 @@ pub fn schematic_asset_reload(
         return;
     }
 
-    params.load_schematic(&document.root, base_dir, Some(&document.secondary));
+    apply_loaded_document(&mut params, save_path.as_deref(), &document);
+}
+
+pub fn apply_document_ready(
+    mut events: MessageReader<DocumentReady>,
+    mut params: LoadSchematicParams,
+) {
+    let Some(event) = events.read().last().cloned() else {
+        return;
+    };
+    apply_loaded_document(&mut params, event.save_path.as_deref(), &event.document);
+}
+
+pub fn show_document_command_failures(
+    mut errors: MessageReader<DocumentCommandFailed>,
+    mut modal: ModalDialog,
+) {
+    for error in errors.read() {
+        modal.dialog_error(error.title.clone(), &error.message);
+    }
 }
 
 pub fn schematic_asset_load_failed(
