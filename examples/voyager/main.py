@@ -10,6 +10,7 @@ from pathlib import Path
 SIM_TIME_STEP = 3600.0
 #SIM_TIME_STEP = 86400.0
 # Set the gravitational constant for Newton's law of universal gravitation
+SIMULATION_RATE_HZ = 1 / SIM_TIME_STEP
 G = 6.6743e-11
 DEFAULT_DB_PATH = "dbs/voyager"
 DB_PATH_ENV = "DB_PATH"
@@ -27,6 +28,7 @@ for kernel in SPICE_KERNELS:
     spice.furnsh(str(kernel))
 
 start_time_et = spice.utc2et('1978-01-01T00:00:00')
+start_time_epoch_us = 252_452_400_000_000 
 
 PLANETS = [
     {"spice_name": "MERCURY BARYCENTER", "entity_name": "mercury", "radius": 2000000000.0, "color": "bone", "mass": 3.3011e23},
@@ -191,9 +193,10 @@ max_ticks = int(max_ticks_env) if max_ticks_env is not None else None
 #sim = w.run(sys, SIM_TIME_STEP, run_time_step=1 / 120.0, pre_step=pre_step)
 sim = w.run(
     sys,
-    SIM_TIME_STEP,
+    simulation_rate=SIMULATION_RATE_HZ,
     pre_step=pre_step,
     max_ticks=max_ticks,
+    start_timestamp=start_time_epoch_us,
     db_path=str(db_path),
     interactive=False,
 )
