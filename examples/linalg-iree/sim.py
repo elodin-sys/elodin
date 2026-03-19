@@ -80,9 +80,9 @@ def kf_step(state: State, cov: Covariance, info: Info) -> tuple[State, Covarianc
     # Exercise: det / slogdet for log-likelihood
     d = jnp.linalg.det(S)
     sign, logdet = jnp.linalg.slogdet(S)
-    log_lik = -0.5 * (3.0 * jnp.log(2.0 * jnp.pi) + logdet + y @ S_inv @ y)
+    log_likelihood = -0.5 * (3.0 * jnp.log(2.0 * jnp.pi) + logdet + y @ S_inv @ y)
 
-    info_out = jnp.array([log_lik, d, sign])
+    info_out = jnp.array([log_likelihood, d, sign])
     return x_upd, P_upd, info_out
 
 
