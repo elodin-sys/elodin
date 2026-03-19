@@ -96,8 +96,7 @@ impl WidgetSystem for TreeWidget<'_, '_> {
                         &mut spawn_node_params,
                     ),
                     impeller2_wkt::SchematicElem::Object3d(object_3d) => {
-                        let obj_entity =
-                            spawn_node_params.bindings.get(object_3d.node_id);
+                        let obj_entity = spawn_node_params.bindings.get(object_3d.node_id);
                         let selected = if obj_entity == selected_object.entity() {
                             *selected_object != SelectedObject::None
                         } else {
@@ -112,10 +111,10 @@ impl WidgetSystem for TreeWidget<'_, '_> {
                         .leaf(true)
                         .selected(selected)
                         .show(ui, |_| {});
-                        if branch_res.inner.clicked() {
-                            if let Some(entity) = obj_entity {
-                                *selected_object = SelectedObject::Object3D { entity };
-                            }
+                        if branch_res.inner.clicked()
+                            && let Some(entity) = obj_entity
+                        {
+                            *selected_object = SelectedObject::Object3D { entity };
                         }
                     }
                     impeller2_wkt::SchematicElem::Line3d(_line3d) => {}
@@ -239,17 +238,16 @@ fn panel(
     }
     if branch_res.extra_clicked
         && let Panel::Dashboard(d) = p
+        && let Some(dash_entity) = spawn_node_params.bindings.get(d.node_id)
     {
-        if let Some(dash_entity) = spawn_node_params.bindings.get(d.node_id) {
-            spawn_child_node(
-                &DashboardNodePath {
-                    root: dash_entity,
-                    path: smallvec![],
-                },
-                spawn_node_params,
-                dash_entity,
-            );
-        }
+        spawn_child_node(
+            &DashboardNodePath {
+                root: dash_entity,
+                path: smallvec![],
+            },
+            spawn_node_params,
+            dash_entity,
+        );
     }
 }
 
@@ -313,9 +311,7 @@ fn dashboard_node(
             let Some(parent_node) = dashboard.root.get_node_mut(&parent_path) else {
                 return;
             };
-            let Some(parent_entity) =
-                spawn_node_params.bindings.get(parent_node.node_id)
-            else {
+            let Some(parent_entity) = spawn_node_params.bindings.get(parent_node.node_id) else {
                 return;
             };
             let mut path = DashboardNodePath {
@@ -356,13 +352,9 @@ fn dashboard_node(
                 }
                 spawn_node_params.bindings.remove(removed.node_id);
             }
-            if selected {
-                if let Some(parent_e) =
-                    spawn_node_params.bindings.get(parent_node.node_id)
-                {
-                    *selected_object =
-                        SelectedObject::DashboardNode { entity: parent_e };
-                }
+            if selected && let Some(parent_e) = spawn_node_params.bindings.get(parent_node.node_id)
+            {
+                *selected_object = SelectedObject::DashboardNode { entity: parent_e };
             }
         }
     });
@@ -371,10 +363,10 @@ fn dashboard_node(
         spawn_child_node(&path, spawn_node_params, parent);
     }
 
-    if branch_res.inner.clicked() {
-        if let Some(entity) = node_entity {
-            *selected_object = SelectedObject::DashboardNode { entity };
-        }
+    if branch_res.inner.clicked()
+        && let Some(entity) = node_entity
+    {
+        *selected_object = SelectedObject::DashboardNode { entity };
     }
 }
 

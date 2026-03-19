@@ -420,32 +420,37 @@ pub fn tiles_to_schematic(
     schematic.elems.clear();
     bindings.clear_ephemeral();
 
-    if let Some(root_panels) = param
-        .windows_state
-        .get(*param.primary_window)
-        .ok()
-        .map(|(window_state, _)| {
-            param.root_panels_from_state(&window_state.tile_state, &mut bindings)
-        })
+    if let Some(root_panels) =
+        param
+            .windows_state
+            .get(*param.primary_window)
+            .ok()
+            .map(|(window_state, _)| {
+                param.root_panels_from_state(&window_state.tile_state, &mut bindings)
+            })
     {
         schematic
             .elems
             .extend(root_panels.into_iter().map(SchematicElem::Panel))
     }
-    schematic.elems.extend(param.objects_3d.iter().map(|(entity, o)| {
-        let mut obj = o.data.clone();
-        let node_id = impeller2_wkt::NodeId::next();
-        bindings.bind_ephemeral(node_id, entity);
-        obj.node_id = node_id;
-        SchematicElem::Object3d(obj)
-    }));
-    schematic.elems.extend(param.lines_3d.iter().map(|(entity, line)| {
-        let mut l = line.clone();
-        let node_id = impeller2_wkt::NodeId::next();
-        bindings.bind_ephemeral(node_id, entity);
-        l.node_id = node_id;
-        SchematicElem::Line3d(l)
-    }));
+    schematic
+        .elems
+        .extend(param.objects_3d.iter().map(|(entity, o)| {
+            let mut obj = o.data.clone();
+            let node_id = impeller2_wkt::NodeId::next();
+            bindings.bind_ephemeral(node_id, entity);
+            obj.node_id = node_id;
+            SchematicElem::Object3d(obj)
+        }));
+    schematic
+        .elems
+        .extend(param.lines_3d.iter().map(|(entity, line)| {
+            let mut l = line.clone();
+            let node_id = impeller2_wkt::NodeId::next();
+            bindings.bind_ephemeral(node_id, entity);
+            l.node_id = node_id;
+            SchematicElem::Line3d(l)
+        }));
     schematic.elems.extend(
         param
             .vector_arrows

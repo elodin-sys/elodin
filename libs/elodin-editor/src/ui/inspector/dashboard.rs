@@ -127,13 +127,11 @@ impl WidgetSystem for InspectorDashboardNode<'_, '_> {
                 &node_updater_params,
                 &mut bindings,
             ) {
-                if let Some(new_entity) = bindings.get(new.node_id) {
-                    if let Ok(mut window_state) = window_states.get_mut(target_window) {
-                        window_state.ui_state.selected_object =
-                            SelectedObject::DashboardNode {
-                                entity: new_entity,
-                            };
-                    }
+                if let Some(new_entity) = bindings.get(new.node_id)
+                    && let Ok(mut window_state) = window_states.get_mut(target_window)
+                {
+                    window_state.ui_state.selected_object =
+                        SelectedObject::DashboardNode { entity: new_entity };
                 }
                 *node = new;
             }

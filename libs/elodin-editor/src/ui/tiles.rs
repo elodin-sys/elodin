@@ -954,11 +954,7 @@ impl Pane {
         }
     }
 
-    fn title(
-        &self,
-        graph_states: &Query<&GraphState>,
-        dashboards: &Query<&Dashboard>,
-    ) -> String {
+    fn title(&self, graph_states: &Query<&GraphState>, dashboards: &Query<&Dashboard>) -> String {
         match self {
             Pane::Graph(pane) => {
                 if let Ok(graph_state) = graph_states.get(pane.id) {
@@ -1709,8 +1705,7 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
     fn on_edit(&mut self, _edit_action: egui_tiles::EditAction) {}
 
     fn tab_title_for_pane(&mut self, pane: &Pane) -> egui::WidgetText {
-        let mut query =
-            SystemState::<(Query<&GraphState>, Query<&Dashboard>)>::new(self.world);
+        let mut query = SystemState::<(Query<&GraphState>, Query<&Dashboard>)>::new(self.world);
         let (graphs, dashes) = query.get(self.world);
         pane.title(&graphs, &dashes).into()
     }
