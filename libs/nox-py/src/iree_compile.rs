@@ -190,9 +190,12 @@ def compile_to_vmfb(func, input_arrays, user_extra_flags, system_names, requeste
     # Rename to @module so the VMFB function is always "module.main".
     stablehlo_mlir = re.sub(r'module @\S+', 'module @module', stablehlo_mlir, count=1)
 
-    # IREE's arith dialect does not support unsigned integer types.
-    for unsigned, signed in [('ui64', 'i64'), ('ui32', 'i32'), ('ui16', 'i16'), ('ui8', 'i8')]:
-        stablehlo_mlir = stablehlo_mlir.replace(unsigned, signed)
+    # NOTE: Do NOT do a blanket ui64->i64 rewrite here.  While IREE's
+    # arith dialect cannot *legalize* unsigned integer constants, a global
+    # text replacement breaks JAX's random-key generation (threefry PRNG)
+    # which relies on unsigned-integer bit-manipulation semantics.
+    # The customer's U64-component issue must be solved differently (e.g.
+    # by avoiding U64 components or by a targeted MLIR pass).
 
     compile_target, runtime_device = _resolve_iree_device(requested_device)
 
