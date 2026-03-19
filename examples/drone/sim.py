@@ -138,10 +138,10 @@ def world() -> tuple[el.World, el.EntityId]:
 
     world.schematic(
         """
-        theme mode="light" scheme="default"
+        theme mode="dark" scheme="default"
 
         tabs {
-            hsplit name = "Viewport 2222" {
+            hsplit name = "Viewport" {
                 viewport name=Viewport pos="drone.world_pos + (0,0,0,0, 2,2,2)" look_at="drone.world_pos" show_grid=#true active=#true
                 vsplit share=0.4 {
                     graph "drone.angle_desired" name="angle_desired"
@@ -157,6 +157,7 @@ def world() -> tuple[el.World, el.EntityId]:
         }
         
         // important to keep these active as our only regression tests for the multiple window panels
+        window path="examples/drone/motor-panel.kdl"
         window path="examples/drone/rate-control-panel.kdl"
 
         vector_arrow "(1, 0, 0)" origin="drone.world_pos" scale=1.0 name="Drone Velocity X" body_frame=#true

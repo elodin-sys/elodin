@@ -40,7 +40,7 @@ EDU_450_CONFIG = Config(
         ]
     ),
     motor_thrust_curve_path="./motor_thrust_curve.csv",
-    simulation_rate=300.0,
+    sim_time_step=(1.0 / 300.0),
     frame=Frame.QUAD_X,
     fast_loop_time_step=(1.0 / 900.0),
     simulation_time=30.0,
@@ -108,7 +108,7 @@ TALON_QUAD_CONFIG = Config(
     ).T,
     motor_thrust_directions=np.array(motor_thrust_directions),
     motor_thrust_curve_path="./motor_thrust_curve.csv",
-    simulation_rate=300.0,
+    sim_time_step=(1.0 / 300.0),
     frame=Frame.QUAD_X,
     fast_loop_time_step=(1.0 / 900.0),
     simulation_time=30.0,
@@ -137,8 +137,7 @@ if "--telemetry" in args:
 else:
     world.run(
         system(),
-        simulation_rate=Config.GLOBAL.simulation_rate,
-        telemetry_rate=Config.GLOBAL.simulation_rate / 3.0,
-        generate_real_time=True,
+        sim_time_step=Config.GLOBAL.dt,
+        run_time_step=Config.GLOBAL.dt,
         max_ticks=int(Config.GLOBAL.total_sim_ticks or 1200),
     )

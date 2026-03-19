@@ -88,8 +88,8 @@ class Config:
     # Frame type
     frame: Frame
 
-    # Simulation rate in Hz
-    simulation_rate: float
+    # Simulation time step in seconds
+    sim_time_step: float
     # Fast loop time step in seconds
     fast_loop_time_step: float
     # Total simulation time in seconds
@@ -100,7 +100,7 @@ class Config:
 
     @property
     def dt(self) -> float:
-        return 1.0 / self.simulation_rate
+        return self.sim_time_step
 
     @property
     def total_sim_ticks(self) -> int:
