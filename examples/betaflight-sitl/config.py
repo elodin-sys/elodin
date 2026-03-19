@@ -142,11 +142,11 @@ class DroneConfig:
 
     # --- Simulation Settings ---
 
-    # Physics time step in seconds (8kHz for high-performance Betaflight PID loop)
-    # sim_time_step: float = 0.000125  # 8kHz = 125µs
-    sim_time_step: float = 0.000250  # 4kHz = 250µs
-    # sim_time_step: float = 0.000500  # 2kHz = 500µs
-    # sim_time_step: float = 0.001000  # 1kHz = 1000µs
+    # Physics simulation rate in Hz (8kHz for high-performance Betaflight PID loop)
+    # simulation_rate: float = 8000.0  # 125µs
+    simulation_rate: float = 4000.0  # 250µs
+    # simulation_rate: float = 2000.0  # 500µs
+    # simulation_rate: float = 1000.0  # 1000µs
 
     # Total simulation time in seconds
     simulation_time: float = 15.0
@@ -186,12 +186,12 @@ class DroneConfig:
     @property
     def dt(self) -> float:
         """Physics time step."""
-        return self.sim_time_step
+        return 1.0 / self.simulation_rate
 
     @property
     def pid_rate(self) -> float:
         """PID loop rate in Hz (inverse of time step)."""
-        return 1.0 / self.sim_time_step
+        return self.simulation_rate
 
     @property
     def total_sim_ticks(self) -> int:
@@ -396,7 +396,7 @@ if __name__ == "__main__":
         print(f"  Motor {i}: [{pos[0]:+.3f}, {pos[1]:+.3f}, {pos[2]:+.3f}] ({spin})")
     print()
     print("Simulation Settings:")
-    print(f"  Time step:    {config.sim_time_step * 1e6:.1f} µs ({config.pid_rate:.0f} Hz)")
+    print(f"  Time step:    {config.dt * 1e6:.1f} µs ({config.pid_rate:.0f} Hz)")
     print(f"  Duration:     {config.simulation_time:.1f} s")
     print(f"  Total ticks:  {config.total_sim_ticks}")
     print()

@@ -31,7 +31,7 @@ use impeller2_wkt::{
 };
 use serde::de::DeserializeOwned;
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::{BTreeMap, HashMap, VecDeque},
     convert::Infallible,
     marker::PhantomData,
 };
@@ -211,6 +211,7 @@ pub struct BackfillState {
 }
 
 const BACKFILL_CHUNK_SIZE: usize = 4096;
+const BACKFILL_MAX_CONCURRENT: usize = 200;
 
 /// Bevy system that sends paginated `GetTimeSeries` requests for each
 /// known component to populate the `TelemetryCache` with historical data.
@@ -218,10 +219,19 @@ const BACKFILL_CHUNK_SIZE: usize = 4096;
 pub fn backfill_cache(
     metadata_reg: bevy::prelude::Res<ComponentMetadataRegistry>,
     schema_reg: bevy::prelude::Res<ComponentSchemaRegistry>,
+    msg_request_handlers: bevy::prelude::Res<MsgRequestIdHandlers>,
     mut backfill: ResMut<BackfillState>,
     mut commands: Commands,
 ) {
+    if msg_request_handlers.len() >= BACKFILL_MAX_CONCURRENT {
+        return;
+    }
+    let mut dispatched = 0usize;
+    let available = BACKFILL_MAX_CONCURRENT - msg_request_handlers.len();
     for (&component_id, _metadata) in metadata_reg.iter() {
+        if dispatched >= available {
+            break;
+        }
         if backfill.requested.contains(&component_id) {
             continue;
         }
@@ -230,6 +240,7 @@ pub fn backfill_cache(
         }
         backfill.requested.insert(component_id);
         send_backfill_page(&mut commands, component_id, Timestamp(i64::MIN));
+        dispatched += 1;
     }
 }
 
@@ -586,6 +597,11 @@ pub struct MsgRequestIdHandlers(
     pub HashMap<RequestId, SystemId<InRef<'static, OwnedPacket<PacketGrantR>>, bool>>,
 );
 
+type MsgReplySystemId = SystemId<InRef<'static, OwnedPacket<PacketGrantR>>, bool>;
+
+#[derive(Resource, Default, Deref, DerefMut)]
+pub struct MsgRequestQueue(pub VecDeque<(LenPacket, MsgReplySystemId)>);
+
 #[derive(Resource)]
 pub struct MsgRequestIdAlloc(RequestId);
 
@@ -873,6 +889,7 @@ impl Plugin for Impeller2Plugin {
     fn build(&self, app: &mut bevy::prelude::App) {
         app.add_message::<DbMessage>()
             .add_plugins(DefaultAdaptersPlugin)
+            .add_systems(bevy::prelude::Update, flush_msg_request_queue)
             .insert_resource(impeller2_wkt::SimulationTimeStep(0.001))
             .insert_resource(impeller2_wkt::CurrentTimestamp(Timestamp::EPOCH))
             .insert_resource(impeller2_wkt::LastUpdated(Timestamp(i64::MIN)))
@@ -889,6 +906,7 @@ impl Plugin for Impeller2Plugin {
             .init_resource::<RequestIdAlloc>()
             .init_resource::<MsgRequestIdHandlers>()
             .init_resource::<MsgRequestIdAlloc>()
+            .init_resource::<MsgRequestQueue>()
             .init_resource::<DbConfig>()
             .init_resource::<TelemetryCache>()
             .init_resource::<BackfillState>();
@@ -1009,15 +1027,9 @@ where
         };
 
         let Some(req_id) = req_id else {
-            bevy::log::warn!(
-                "RequestId space exhausted — all 255 IDs are in use, dropping msg request"
-            );
-            if let Err(err) = world.unregister_system(system_id) {
-                bevy::log::error!(
-                    ?err,
-                    "failed to unregister system after RequestId exhaustion"
-                );
-            }
+            world
+                .resource_mut::<MsgRequestQueue>()
+                .push_back((self.request, system_id));
             return;
         };
 
@@ -1032,6 +1044,59 @@ where
         }
 
         let request = self.request.with_request_id(req_id);
+        let sent = world
+            .get_resource_mut::<MsgPacketTx>()
+            .and_then(|msg_tx| msg_tx.0.try_send(Some(request)).ok())
+            .is_some();
+        if !sent {
+            let mut handlers = world
+                .get_resource_mut::<MsgRequestIdHandlers>()
+                .expect("missing MsgRequestIdHandlers");
+            handlers.remove(&req_id);
+            if let Err(err) = world.unregister_system(system_id) {
+                bevy::log::error!(?err, "failed to unregister msg reply handler");
+            }
+            bevy::log::error!(
+                "msg connection not available — cannot send request; ensure the editor/run process is connected to Elodin DB so sensor camera and msg backfill work"
+            );
+        }
+    }
+}
+
+pub fn flush_msg_request_queue(world: &mut World) {
+    loop {
+        let Some((request, system_id)) = world
+            .get_resource_mut::<MsgRequestQueue>()
+            .and_then(|mut q| q.pop_front())
+        else {
+            break;
+        };
+
+        let req_id = {
+            let handlers = world.resource::<MsgRequestIdHandlers>();
+            let occupied: std::collections::HashSet<RequestId> = handlers.keys().copied().collect();
+            let mut alloc = world.resource_mut::<MsgRequestIdAlloc>();
+            alloc.alloc_next_id_avoiding(&occupied)
+        };
+
+        let Some(req_id) = req_id else {
+            world
+                .resource_mut::<MsgRequestQueue>()
+                .push_front((request, system_id));
+            break;
+        };
+
+        if let Some(old) = world
+            .resource_mut::<MsgRequestIdHandlers>()
+            .insert(req_id, system_id)
+        {
+            bevy::log::warn!(req_id, "RequestId collision — overwriting existing handler");
+            if let Err(err) = world.unregister_system(old) {
+                bevy::log::error!(?err, "failed to unregister collided system");
+            }
+        }
+
+        let request = request.with_request_id(req_id);
         let sent = world
             .get_resource_mut::<MsgPacketTx>()
             .and_then(|msg_tx| msg_tx.0.try_send(Some(request)).ok())

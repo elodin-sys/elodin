@@ -119,7 +119,7 @@ def create_motor_dynamics(config: DroneConfig):
     Motors have first-order response dynamics:
         thrust' = (commanded - thrust) / time_constant
     """
-    dt = config.sim_time_step
+    dt = config.dt
     tau = config.motor_time_constant
     max_thrust = config.motor_max_thrust
     alpha = dt / (dt + tau)  # First-order filter coefficient
@@ -303,7 +303,7 @@ def create_ground_constraint_system(config: DroneConfig):
 
 def create_time_update_system(config: DroneConfig):
     """Create system to track simulation time."""
-    dt = config.sim_time_step
+    dt = config.dt
 
     @el.map
     def update_time(t: SimTime) -> SimTime:
@@ -381,7 +381,7 @@ def create_physics_system(config: DroneConfig) -> el.System:
 
     # 6-DOF integrator with effectors
     physics = el.six_dof(
-        config.sim_time_step,
+        config.dt,
         effectors,
         integrator=el.Integrator.SemiImplicit,
     )
@@ -408,7 +408,7 @@ if __name__ == "__main__":
     config.set_as_global()
 
     print("Testing physics simulation...")
-    print(f"Config: {config.mass}kg, dt={config.sim_time_step * 1000}ms")
+    print(f"Config: {config.mass}kg, dt={config.dt * 1000}ms")
     print(f"Hover throttle: {config.hover_throttle:.1%}")
 
     # Test 1: Free fall (motors off)

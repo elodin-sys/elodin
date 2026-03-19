@@ -171,7 +171,7 @@ THROTTLE_DUR = 10.0  # Apply throttle (longer for observation)
 # Remaining time is disarm phase
 
 # Calculate max ticks for completion detection
-MAX_TICKS = int(config.simulation_time / config.sim_time_step)
+MAX_TICKS = int(config.simulation_time / config.dt)
 
 # Shared state (using lists for mutable closure)
 bridge = [None]
@@ -218,11 +218,11 @@ def sitl_post_step(tick: int, ctx: el.StepContext):
         warmup_rc = RCPacket(timestamp=0.0, channels=warmup_channels)
 
         warmup_count = 0
-        warmup_packets = int(0.5 / config.sim_time_step)  # 500ms of warmup at PID rate
+        warmup_packets = int(0.5 / config.dt)  # 500ms of warmup at PID rate
         for i in range(warmup_packets):
             try:
-                warmup_fdm.timestamp = i * config.sim_time_step
-                warmup_rc.timestamp = i * config.sim_time_step
+                warmup_fdm.timestamp = i * config.dt
+                warmup_rc.timestamp = i * config.dt
                 bridge[0].step(warmup_fdm, warmup_rc)
                 warmup_count += 1
             except TimeoutError:
@@ -240,7 +240,7 @@ def sitl_post_step(tick: int, ctx: el.StepContext):
 
     # Update timing
     s.tick = tick
-    s.sim_time = tick * config.sim_time_step
+    s.sim_time = tick * config.dt
     t = s.sim_time
 
     # Read actual sensor data from physics simulation using batch operation
@@ -425,9 +425,9 @@ def next_filename(pattern: str) -> str:
 db_filename = next_filename("betaflight_dbXXX")
 world.run(
     system,
-    sim_time_step=config.sim_time_step,
-    run_time_step=config.sim_time_step,
-    max_ticks=int(config.simulation_time / config.sim_time_step),
+    simulation_rate=config.pid_rate,
+    generate_real_time=True,
+    max_ticks=config.total_sim_ticks,
     post_step=sitl_post_step,
     db_path=db_filename,
     interactive=False,

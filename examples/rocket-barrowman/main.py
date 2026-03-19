@@ -661,8 +661,8 @@ def visualize_in_elodin(result: FlightResult, solver: FlightSolver) -> None:
 
     world.run(
         playback_system,
-        sim_time_step=dt,
-        run_time_step=dt,
+        simulation_rate=1.0 / dt,
+        generate_real_time=True,
         default_playback_speed=1.0,
         max_ticks=frame_count,
     )

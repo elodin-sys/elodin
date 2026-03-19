@@ -479,8 +479,9 @@ class World(WorldBuilder):
     def run(
         self,
         system: System,
-        sim_time_step: float = 1 / 120.0,
-        run_time_step: Optional[float] = None,
+        simulation_rate: float = 120.0,
+        generate_real_time: bool = False,
+        telemetry_rate: Optional[float] = None,
         default_playback_speed: float = 1.0,
         max_ticks: Optional[int] = None,
         optimize: bool = False,
@@ -502,8 +503,9 @@ class World(WorldBuilder):
             raise Exception("No previous frame")
         addr = super().run(
             system,
-            sim_time_step,
-            run_time_step,
+            simulation_rate,
+            generate_real_time,
+            telemetry_rate,
             default_playback_speed,
             max_ticks,
             optimize,
@@ -528,8 +530,9 @@ class World(WorldBuilder):
     def build(
         self,
         system: System,
-        sim_time_step: float = 1 / 120.0,
-        run_time_step: Optional[float] = None,
+        simulation_rate: float = 120.0,
+        generate_real_time: bool = False,
+        telemetry_rate: Optional[float] = None,
         default_playback_speed: float = 1.0,
         max_ticks: Optional[int] = None,
         optimize: bool = False,
@@ -539,8 +542,9 @@ class World(WorldBuilder):
     ) -> Exec:
         return super().build(
             system,
-            sim_time_step,
-            run_time_step,
+            simulation_rate,
+            generate_real_time,
+            telemetry_rate,
             default_playback_speed,
             max_ticks,
             optimize,
@@ -552,13 +556,12 @@ class World(WorldBuilder):
     def to_jax(
         self,
         system: System,
-        sim_time_step: float = 1 / 120.0,
-        run_time_step: Optional[float] = None,
+        simulation_rate: float = 120.0,
         default_playback_speed: float = 1.0,
         max_ticks: Optional[int] = None,
     ) -> object:
         obj, ins, outs, state, dictionary, entity_dict, component_entity_dict = super().to_jax_func(
-            system, sim_time_step, run_time_step, default_playback_speed, max_ticks
+            system, simulation_rate, default_playback_speed, max_ticks
         )
         sim_object = jaxsim.JaxSim(
             obj,

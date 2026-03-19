@@ -123,4 +123,8 @@ w.schematic("""
 """)
 
 sys = el.six_dof(sys=gravity)
-sim = w.run(sys, SIM_TIME_STEP, run_time_step=1 / 120.0)
+sim = w.run(
+    sys,
+    simulation_rate=1.0 / SIM_TIME_STEP,
+    generate_real_time=True,
+)

@@ -198,7 +198,7 @@ At a 120 Hz simulation with rendering every 2nd tick:
 
 Single-camera ticks fit within the per-tick budget. Batch ticks slightly exceed it, but the simulation catches up on non-render ticks. At steady state, the simulation maintains real-time pace. The batch approach avoids the overhead of two separate round-trips on dual-camera ticks.
 
-For higher-resolution cameras or more cameras, reduce the render frequency or increase `sim_time_step`.
+For higher-resolution cameras or more cameras, reduce the render frequency or lower `simulation_rate`.
 
 ## Configuration Reference
 

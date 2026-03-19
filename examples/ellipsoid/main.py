@@ -6,7 +6,7 @@ from sim import system, world
 world_instance, _ = world()
 world_instance.run(
     system(),
-    sim_time_step=1.0 / 120.0,
-    run_time_step=1.0 / 120.0,
+    simulation_rate=120.0,
+    generate_real_time=True,
     max_ticks=1200,
 )

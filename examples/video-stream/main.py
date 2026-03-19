@@ -264,5 +264,9 @@ sys = constraints | el.six_dof(sys=effectors, integrator=el.Integrator.SemiImpli
 # Run simulation - real-time simulation is required for this to work, otherwise the video frames will be out of sync with the simulation.
 # db_path stores the database in a known location so it can be replayed and exported after the run.
 sim = world.run(
-    sys, SIM_TIME_STEP, run_time_step=SIM_TIME_STEP, start_timestamp=0, db_path="./video-stream-db"
+    sys,
+    simulation_rate=1.0 / SIM_TIME_STEP,
+    generate_real_time=True,
+    start_timestamp=0,
+    db_path="./video-stream-db",
 )

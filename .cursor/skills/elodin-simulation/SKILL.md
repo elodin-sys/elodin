@@ -40,7 +40,7 @@ def gravity(f: el.Force, inertia: el.Inertia) -> el.Force:
 
 # 4. Compose and run
 sys = el.six_dof(sys=gravity, integrator=el.Integrator.Rk4)
-w.run(sys, sim_time_step=1.0 / 120.0)
+w.run(sys, simulation_rate=120.0)
 ```
 
 ## Core Concepts
@@ -113,7 +113,7 @@ sys = sensors | kalman_filter | control | el.six_dof(sys=effectors)
 el.six_dof(
     sys=effectors,                    # Systems computing el.Force
     integrator=el.Integrator.Rk4,     # or Integrator.SemiImplicit
-    time_step=1/300.0,                # Optional: override sim_time_step
+    time_step=1/300.0,                # Optional: override simulation step
 )
 ```
 
@@ -185,7 +185,7 @@ def post_step(tick: int, ctx: el.StepContext):
     motors = flight_controller.step(accel=data["drone.accel"], gyro=data["drone.gyro"])
     ctx.write_component("drone.motor_command", motors)
 
-w.run(sys, sim_time_step=1/1000.0, post_step=post_step, db_path="sitl_data")
+w.run(sys, simulation_rate=1000.0, post_step=post_step, db_path="sitl_data")
 ```
 
 Mark components as externally controlled to prevent simulation overwrite:
@@ -201,13 +201,23 @@ ThrustCmd = ty.Annotated[jax.Array,
 |------|---------|---------|-----|
 | Editor (GUI) | `elodin editor sim.py` | IREE (default) | Development with 3D visualization |
 | Headless | `elodin run sim.py` | IREE (default) | CI/CD, batch processing |
-| JAX backend | `w.run(sys, backend="jax")` | JAX | When IREE doesn't support certain JAX ops |
+| JAX backend | `w.run(sys, backend="jax-cpu")` | JAX | When IREE doesn't support certain JAX ops |
+| GPU backend | `w.run(sys, backend="iree-gpu")` | IREE CUDA/Metal | Large parallel workloads |
 | JAX-only | `w.to_jax(sys)` | JAX | RL training, `jax.vmap` batching |
 | Compiled | `w.build(sys)` | IREE (default) | Maximum performance |
-| Real-time | `w.run(sys, run_time_step=1/120.0)` | IREE (default) | Match wall-clock time |
+| Real-time | `w.run(sys, simulation_rate=120.0, generate_real_time=True)` | IREE (default) | Match wall-clock time |
 | DB-connected | `w.run(sys, db_addr="0.0.0.0:2240")` | IREE (default) | External clients + Editor |
 
-**Backend selection:** The `backend` parameter defaults to `"iree"` (fast, Python-free tick loop). Set `backend="jax"` for simulations using JAX features IREE does not yet support (e.g. `.at[].set()`, `jnp.linalg.pinv`, complex control flow with `np.block`). When IREE compilation fails, the error message will suggest using `backend="jax"`.
+**Backend selection:** The `backend` parameter defaults to `"iree-cpu"` (fast, Python-free tick loop). Use `"iree-gpu"`/`"jax-gpu"` for high-parallelism workloads. For tiny worlds, CPU backends are usually faster because kernel launch and device transfer overhead dominates compute.
+
+Use `examples/n-body/main.py` as the canonical GPU benchmark. It runs all four backends (`iree-cpu`, `iree-gpu`, `jax-cpu`, `jax-gpu`) side-by-side:
+
+```bash
+nix develop --command ELODIN_BACKEND=iree-gpu elodin run examples/n-body/main.py
+```
+
+To compare backends, run the same command with `ELODIN_BACKEND` set to each of:
+`iree-cpu`, `iree-gpu`, `jax-cpu`, `jax-gpu`.
 
 ## Earth Gravity Models
 
