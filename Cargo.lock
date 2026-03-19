@@ -5001,6 +5001,7 @@ dependencies = [
  "convert_case 0.8.0",
  "datafusion",
  "directories",
+ "eql",
  "fastrand 2.3.0",
  "futures-lite",
  "fuzzy-matcher",
@@ -5031,6 +5032,8 @@ dependencies = [
  "signal-hook",
  "smallvec",
  "stellarator",
+ "tabled",
+ "tabular",
  "tempfile",
  "thingbuf",
  "thiserror 2.0.17",
@@ -12666,6 +12669,15 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 1.0.109",
+]
+
+[[package]]
+name = "tabular"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d9a2882c514780a1973df90de9d68adcd8871bacc9a6331c3f28e6d2ff91a3d1"
+dependencies = [
+ "unicode-width 0.1.14",
 ]
 
 [[package]]

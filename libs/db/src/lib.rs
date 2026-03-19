@@ -67,11 +67,13 @@ pub mod export_videos;
 pub mod fix_timestamps;
 pub mod follow;
 mod follow_stream;
+pub mod list_components;
 pub mod merge;
 pub mod msg_log;
 pub mod prune;
 #[cfg(target_family = "unix")]
 pub use render_bridge;
+pub mod query;
 pub mod time_align;
 pub(crate) mod time_series;
 pub mod trim;
