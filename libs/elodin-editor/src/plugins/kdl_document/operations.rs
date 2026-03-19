@@ -79,6 +79,10 @@ pub fn save_current_document(
     let asset_path = filesystem_to_asset_path(&dest);
     let handle: Handle<SchematicDocumentAsset> = asset_server.load(asset_path.clone());
     current_document.set_file(handle, asset_path, dest.clone());
+    current_document.set_applied_raw(
+        root_kdl.to_string(),
+        secondary.iter().map(|s| s.kdl.clone()).collect(),
+    );
     Ok(dest)
 }
 

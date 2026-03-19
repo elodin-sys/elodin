@@ -77,6 +77,11 @@ impl CurrentDocument {
         self.applied_secondary_kdls = secondary_kdls;
     }
 
+    pub(crate) fn set_applied_raw(&mut self, root_kdl: String, secondary_kdls: Vec<String>) {
+        self.applied_root_kdl = Some(root_kdl);
+        self.applied_secondary_kdls = secondary_kdls;
+    }
+
     pub(crate) fn changed_secondary_indices(
         &self,
         document: &SchematicDocumentAsset,
