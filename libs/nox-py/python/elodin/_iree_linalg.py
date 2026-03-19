@@ -206,18 +206,20 @@ def _qr(a, mode="reduced"):
     k = min(m, n)
     Q = jnp.eye(m, dtype=a.dtype)
     R = a + 0.0
-    idx = jnp.arange(m)
+    row_idx = jnp.arange(m)
+    col_idx = jnp.arange(n)
 
     def body(j, state):
         Q, R = state
-        e_j = jnp.where(idx == j, 1.0, 0.0)
-        r_col = R @ e_j
-        x = jnp.where(idx >= j, r_col, 0.0)
+        e_j_col = jnp.where(col_idx == j, 1.0, 0.0)
+        e_j_row = jnp.where(row_idx == j, 1.0, 0.0)
+        r_col = R @ e_j_col
+        x = jnp.where(row_idx >= j, r_col, 0.0)
         alpha = jnp.sqrt(jnp.dot(x, x))
-        sign = jnp.where(jnp.dot(r_col, e_j) >= 0, 1.0, -1.0)
+        sign = jnp.where(jnp.dot(r_col, e_j_row) >= 0, 1.0, -1.0)
         alpha = sign * alpha
 
-        xj = jnp.dot(x, e_j)
+        xj = jnp.dot(x, e_j_row)
         v = _set_elem(x, j, xj + alpha)
         v_norm_sq = jnp.dot(v, v)
         v_norm_sq = jnp.maximum(v_norm_sq, 1e-30)

@@ -235,10 +235,13 @@ fn numpy_dtype_str(et: nox::ElementType) -> Result<&'static str, Error> {
         nox::ElementType::F32 => Ok("float32"),
         nox::ElementType::S32 => Ok("int32"),
         nox::ElementType::S64 => Ok("int64"),
-        nox::ElementType::U32 => Ok("int32"),
-        nox::ElementType::U64 => Ok("int64"),
-        nox::ElementType::U8 => Ok("int8"),
-        nox::ElementType::U16 => Ok("int16"),
+        // These arms are not reached in practice: PrimTypeExt::to_element_type()
+        // maps all unsigned PrimTypes to signed ElementTypes upstream.  Kept as
+        // correct unsigned mappings for defensive safety.
+        nox::ElementType::U32 => Ok("uint32"),
+        nox::ElementType::U64 => Ok("uint64"),
+        nox::ElementType::U8 => Ok("uint8"),
+        nox::ElementType::U16 => Ok("uint16"),
         nox::ElementType::S8 => Ok("int8"),
         nox::ElementType::S16 => Ok("int16"),
         nox::ElementType::Pred => Ok("bool"),

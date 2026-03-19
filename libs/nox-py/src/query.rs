@@ -619,7 +619,7 @@ pub fn join_many<A, B>(mut a: Query<A>, b: &ComponentArray<B>) -> Query<()> {
             len: ids.len(),
             entity_map: ids,
             phantom_data: PhantomData,
-            batch1,
+            batch1: false,
         }
     }
 }
@@ -650,7 +650,7 @@ pub fn join_query<A, B>(mut a: Query<A>, mut b: Query<B>) -> Query<()> {
             len: ids.len(),
             entity_map: ids,
             phantom_data: PhantomData,
-            batch1,
+            batch1: false,
         }
     }
 }

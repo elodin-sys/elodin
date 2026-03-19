@@ -163,6 +163,20 @@ class TestQR:
         R = _qr(A, mode="r")
         assert R.shape == (4, 4)
 
+    @pytest.mark.parametrize("m,n", [(6, 4), (4, 6), (8, 3), (3, 8)])
+    def test_nonsquare(self, m, n):
+        A = jax.random.normal(jax.random.PRNGKey(30), (m, n))
+        Q, R = _qr(A)
+        k = min(m, n)
+        assert Q.shape == (m, k)
+        assert R.shape == (k, n)
+        recon = Q @ R
+        assert jnp.allclose(A, recon, atol=1e-8), (
+            f"QR non-square ({m}x{n}) reconstruction: max diff={jnp.max(jnp.abs(A - recon))}"
+        )
+        eye_approx = Q.T @ Q
+        assert jnp.allclose(eye_approx, jnp.eye(k), atol=1e-8)
+
 
 # -----------------------------------------------------------------------
 # SVD
