@@ -285,6 +285,7 @@ impl AssetLoader for SchematicDocumentLoader {
 }
 
 pub(crate) fn plugin(app: &mut App) {
+    super::kdl_asset_source::plugin(app);
     app.configure_sets(
         PreUpdate,
         (KdlDocumentSet::Commands, KdlDocumentSet::AssetEvents).chain(),
@@ -732,7 +733,6 @@ mod tests {
 
     fn test_app() -> App {
         let mut app = App::new();
-        super::super::kdl_asset_source::plugin(&mut app);
         app.add_plugins(TaskPoolPlugin::default());
         app.add_plugins(AssetPlugin {
             watch_for_changes_override: Some(true),
