@@ -1,0 +1,24 @@
+hsplit name="Rate Control Panel" {
+    vsplit {
+        graph "drone.rate_pid_state[0], drone.rate_pid_state[1], drone.rate_pid_state[2], drone.rate_pid_state[3], drone.rate_pid_state[4], drone.rate_pid_state[5], drone.rate_pid_state[6], drone.rate_pid_state[7], drone.rate_pid_state[8]" name=drone.rate_pid_state {
+            color 106 155 165
+            color 114 87 179
+            color 198 107 66
+            color 214 164 54
+            color 182 82 45
+            color 66 105 168
+            color 126 191 127
+            color 90 130 144
+            color 100 72 168
+        }
+        component_monitor name=drone.rate_pid_state component_name=drone.rate_pid_state
+    }
+    graph "drone.gyro.x, drone.gyro.y, drone.gyro.z, drone.ang_vel_setpoint.r, drone.ang_vel_setpoint.p, drone.ang_vel_setpoint.y" name="Drone: rate_control" {
+        color 106 155 165
+        color 114 87 179
+        color 198 107 66
+        color 214 164 54
+        color 182 82 45
+        color 66 105 168
+    }
+}

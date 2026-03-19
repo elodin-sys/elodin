@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, path::Path};
 
 use crate::{
     GridHandle,
@@ -37,6 +37,7 @@ pub struct CurrentSchematic(pub Schematic<Entity>);
 
 #[derive(Debug, Clone)]
 pub struct SecondarySchematic {
+    pub window_id: tiles::WindowId,
     pub file_name: String,
     pub title: Option<String>,
     pub schematic: Schematic<Entity>,
@@ -70,6 +71,7 @@ pub struct SchematicParam<'w, 's> {
     >,
     pub windows_state: Query<'w, 's, (&'static tiles::WindowState, &'static tiles::WindowId)>,
     pub primary_window: Single<'w, 's, Entity, With<PrimaryWindow>>,
+    pub current_document: Res<'w, CurrentDocument>,
     pub dashboards: Query<'w, 's, &'static Dashboard<Entity>>,
     pub video_streams: Query<'w, 's, &'static super::video_stream::VideoStream>,
     pub log_streams: Query<'w, 's, &'static super::log_stream::LogStreamState>,
@@ -434,6 +436,7 @@ pub fn tiles_to_schematic(
     secondary.0.clear();
     let mut window_elems = Vec::new();
     let mut name_counts: HashMap<String, usize> = HashMap::new();
+    let root_save_path = param.current_document.save_path.as_deref();
     for (state, window_id) in &param.windows_state {
         let mut file_name: Option<String> = None;
         let mut window_title: Option<String> = None;
@@ -443,9 +446,11 @@ pub fn tiles_to_schematic(
             if computed_title != "Panel" {
                 window_title = Some(computed_title);
             }
-            let base_stem = preferred_secondary_stem(state);
-            let unique_stem = ensure_unique_stem(&mut name_counts, &base_stem);
-            file_name = Some(format!("{unique_stem}.kdl"));
+            file_name = existing_secondary_path(state, root_save_path).or_else(|| {
+                let base_stem = preferred_secondary_stem(state);
+                let unique_stem = ensure_unique_stem(&mut name_counts, &base_stem);
+                Some(format!("{unique_stem}.kdl"))
+            });
 
             let mut window_schematic = Schematic::default();
             window_schematic.elems.extend(
@@ -456,6 +461,7 @@ pub fn tiles_to_schematic(
             );
             if let Some(file_name) = &file_name {
                 secondary.0.push(SecondarySchematic {
+                    window_id: *window_id,
                     file_name: file_name.clone(),
                     title: window_title.clone(),
                     schematic: window_schematic,
@@ -532,6 +538,18 @@ fn preferred_secondary_stem(state: &tiles::WindowState) -> String {
         }
     }
     "secondary".to_string()
+}
+
+fn existing_secondary_path(
+    state: &tiles::WindowState,
+    root_save_path: Option<&Path>,
+) -> Option<String> {
+    let path = state.descriptor.path.as_deref()?;
+    let relative = root_save_path
+        .and_then(Path::parent)
+        .and_then(|root_dir| path.strip_prefix(root_dir).ok())
+        .unwrap_or(path);
+    Some(relative.to_string_lossy().replace('\\', "/"))
 }
 
 pub fn sanitize_to_stem(input: &str) -> String {
@@ -635,5 +653,36 @@ impl EqlExt for eql::Expr {
             }
             _ => vec![],
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::existing_secondary_path;
+    use crate::ui::tiles::WindowDescriptor;
+    use crate::ui::tiles::WindowState;
+    use std::path::PathBuf;
+
+    #[test]
+    fn existing_secondary_path_preserves_path_relative_to_root_document() {
+        let state = WindowState {
+            descriptor: WindowDescriptor {
+                path: Some(PathBuf::from(
+                    "/tmp/project/examples/drone/rate-control-panel.kdl",
+                )),
+                ..Default::default()
+            },
+            graph_entities: Vec::new(),
+            tile_state: crate::ui::tiles::TileState::new(egui::Id::new("test-tree")),
+            ui_state: crate::ui::WindowUiState::default(),
+        };
+
+        let path =
+            existing_secondary_path(&state, Some(std::path::Path::new("/tmp/project/drone.kdl")));
+
+        assert_eq!(
+            path.as_deref(),
+            Some("examples/drone/rate-control-panel.kdl")
+        );
     }
 }

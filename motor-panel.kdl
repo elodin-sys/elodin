@@ -1,0 +1,28 @@
+hsplit name="Motor Panel BBC" {
+    vsplit share=0.4 {
+        graph "drone.motor_input.roll, drone.motor_input.pitch, drone.motor_input.yaw, drone.motor_input.throttle" name=drone.motor_input {
+            color 106 155 165
+            color 114 87 179
+            color 198 107 66
+            color 214 164 54
+        }
+        graph "drone.motor_pwm.m1, drone.motor_pwm.m2, drone.motor_pwm.m3, drone.motor_pwm.m4" name=drone.motor_pwm {
+            color 106 155 165
+            color 114 87 179
+            color 198 107 66
+            color 214 164 54
+        }
+        graph "drone.motor_rpm.m1, drone.motor_rpm.m2, drone.motor_rpm.m3, drone.motor_rpm.m4" name=drone.motor_rpm {
+            color 106 155 165
+            color 114 87 179
+            color 198 107 66
+            color 214 164 54
+        }
+    }
+    graph "drone.thrust[0], drone.thrust[1], drone.thrust[2], drone.thrust[3]" name=drone.thrust {
+        color 106 155 165
+        color 114 87 179
+        color 198 107 66
+        color 214 164 54
+    }
+}

@@ -1,0 +1,71 @@
+theme mode=dark scheme=default
+timeline
+tabs {
+    hsplit name="Viewport 2222" {
+        viewport name=Viewport near=0.1 pos="drone.world_pos + (0,0,0,0, 2,2,2)" look_at=drone.world_pos show_grid=#true
+        vsplit share=0.4 {
+            graph "drone.angle_desired.r, drone.angle_desired.p, drone.angle_desired.y" name=angle_desired {
+                color 106 155 165
+                color 114 87 179
+                color 198 107 66
+            }
+            graph "drone.attitude_target[0], drone.attitude_target[1], drone.attitude_target[2], drone.attitude_target[3], drone.world_pos.q0, drone.world_pos.q1, drone.world_pos.q2, drone.world_pos.q3" name="World Pos" {
+                color 106 155 165
+                color 114 87 179
+                color 198 107 66
+                color 214 164 54
+                color 182 82 45
+                color 66 105 168
+                color 126 191 127
+                color 90 130 144
+            }
+            graph "drone.ang_vel_setpoint.r, drone.ang_vel_setpoint.p, drone.ang_vel_setpoint.y" name=drone.ang_vel_setpoint {
+                color 106 155 165
+                color 114 87 179
+                color 198 107 66
+            }
+        }
+    }
+    vsplit name="Sensor Panel" {
+        graph "drone.gyro.x, drone.gyro.y, drone.gyro.z" name=drone.gyro {
+            color 106 155 165
+            color 114 87 179
+            color 198 107 66
+        }
+        graph "drone.accel.x, drone.accel.y, drone.accel.z" name=drone.accel {
+            color 106 155 165
+            color 114 87 179
+            color 198 107 66
+        }
+        graph "drone.magnetometer.x, drone.magnetometer.y, drone.magnetometer.z" name=drone.magnetometer {
+            color 106 155 165
+            color 114 87 179
+            color 198 107 66
+        }
+    }
+}
+object_3d drone.world_pos {
+    glb path="https://assets.elodin.systems/assets/talon-quad-v2.glb"
+    icon builtin=flight {
+        color 0 188 212
+        visibility_range min=500.0
+    }
+}
+vector_arrow "(1, 0, 0)" origin=drone.world_pos name="Drone Velocity X" body_frame=#true {
+    color white
+}
+vector_arrow "(0, 1, 0)" origin=drone.world_pos name="Drone Velocity Y" body_frame=#true {
+    color white
+}
+vector_arrow "(0, 0, 1)" origin=drone.world_pos name="Drone Velocity Z" body_frame=#true {
+    color white
+}
+window path=motor-panel-bbc.kdl title="Motor Panel BBC" screen=0 {
+    rect 10 10 80 80
+}
+window path=rate-control-panel.kdl title="Rate Control Panel" screen=1 {
+    rect 4 61 89 28
+}
+window screen=2 {
+    rect 5 6 90 92
+}

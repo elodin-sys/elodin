@@ -1189,13 +1189,19 @@ pub fn apply_document_cleared(
 
 pub fn apply_document_saved(
     mut events: MessageReader<DocumentSaved>,
+    secondary: Res<super::CurrentSecondarySchematics>,
     mut windows_state: Query<(&WindowId, &mut WindowState)>,
 ) {
     for event in events.read() {
         info!(path = %event.save_path.display(), "Saved schematic");
+        let base_dir = event.save_path.parent().unwrap_or_else(|| Path::new("."));
         for (id, mut state) in &mut windows_state {
             if id.is_primary() {
                 state.descriptor.path = Some(event.save_path.clone());
+                continue;
+            }
+            if let Some(entry) = secondary.0.iter().find(|entry| entry.window_id == *id) {
+                state.descriptor.path = Some(base_dir.join(&entry.file_name));
             }
         }
     }
