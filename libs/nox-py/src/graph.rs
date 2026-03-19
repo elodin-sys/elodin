@@ -306,6 +306,7 @@ impl<E> GraphQuery<E> {
                     len: from.len,
                     phantom_data: PhantomData,
                     component_id: ComponentId::new("foo"), // TODO(sphw): fix me
+                    batch1: false,
                 });
             }
         }
@@ -408,6 +409,7 @@ impl GraphQueryInner {
                 entity_map,
                 len,
                 phantom_data: PhantomData,
+                batch1: false,
             },
             metadata: vec![metadata],
         }

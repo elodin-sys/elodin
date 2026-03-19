@@ -17,10 +17,12 @@ fn nox_to_iree_element_type(ty: nox::ElementType) -> Result<iree_runtime::Elemen
         nox::ElementType::S16 => Ok(iree_runtime::ElementType::Int16),
         nox::ElementType::S32 => Ok(iree_runtime::ElementType::Int32),
         nox::ElementType::S64 => Ok(iree_runtime::ElementType::Int64),
-        nox::ElementType::U8 => Ok(iree_runtime::ElementType::Uint8),
-        nox::ElementType::U16 => Ok(iree_runtime::ElementType::Uint16),
-        nox::ElementType::U32 => Ok(iree_runtime::ElementType::Uint32),
-        nox::ElementType::U64 => Ok(iree_runtime::ElementType::Uint64),
+        // IREE's arith dialect doesn't support unsigned ints; the StableHLO
+        // ui->i rewrite maps them to signed, so we must match here.
+        nox::ElementType::U8 => Ok(iree_runtime::ElementType::Int8),
+        nox::ElementType::U16 => Ok(iree_runtime::ElementType::Int16),
+        nox::ElementType::U32 => Ok(iree_runtime::ElementType::Int32),
+        nox::ElementType::U64 => Ok(iree_runtime::ElementType::Int64),
         nox::ElementType::F16 => Ok(iree_runtime::ElementType::Float16),
         nox::ElementType::F32 => Ok(iree_runtime::ElementType::Float32),
         nox::ElementType::Bf16 => Ok(iree_runtime::ElementType::BFloat16),
@@ -265,9 +267,13 @@ impl IREEExec {
 fn build_buffer_spec(world: &World, id: ComponentId) -> Result<iree_runtime::BufferSpec, Error> {
     let col = world.column_by_id(id).ok_or(Error::ComponentNotFound)?;
     let element_type = nox_to_iree_element_type(col.schema.element_type())?;
-    let shape: Vec<i64> = std::iter::once(col.len() as i64)
-        .chain(col.schema.shape().iter().map(|&x| x as i64))
-        .collect();
+    let shape: Vec<i64> = if world.batch1 && col.len() <= 1 {
+        col.schema.shape().iter().map(|&x| x as i64).collect()
+    } else {
+        std::iter::once(col.len() as i64)
+            .chain(col.schema.shape().iter().map(|&x| x as i64))
+            .collect()
+    };
     Ok(iree_runtime::BufferSpec {
         byte_len: col.column.len(),
         shape,

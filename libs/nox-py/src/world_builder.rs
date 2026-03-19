@@ -1598,6 +1598,7 @@ impl WorldBuilder {
         }
 
         self.world.set_globals();
+        self.world.batch1 = self.world.is_batch1();
 
         let world = std::mem::take(&mut self.world);
         let compiled_sys = increment_sim_tick.pipe(sys).compile(&world)?;

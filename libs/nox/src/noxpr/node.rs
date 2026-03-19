@@ -1790,6 +1790,25 @@ impl Noxpr {
         Noxpr::new(NoxprNode::Call(Call { comp, args }))
     }
 
+    /// Inline-substitute formal parameters with actual arguments.
+    ///
+    /// Walks `func.inner` replacing each Param that matches a declared arg
+    /// with the corresponding element of `args`. Free variables (Params not
+    /// in `func.args`) are preserved with their original identity — no
+    /// function boundary is created, so captured outer-scope Params remain
+    /// valid.
+    pub fn substitute_params(func: &NoxprFn, args: &[Noxpr]) -> Noxpr {
+        let mut tracer = ReplacementTracer {
+            cache: func
+                .args
+                .iter()
+                .zip(args.iter())
+                .map(|(param, arg)| (param.id(), arg.clone()))
+                .collect(),
+        };
+        tracer.visit(&func.inner)
+    }
+
     /// Retrieves the unique identifier of the `Noxpr` instance.
     pub fn id(&self) -> NoxprId {
         self.id
@@ -2095,7 +2114,7 @@ impl ReplacementTracer {
             return expr.clone();
         }
         let expr = match expr.deref() {
-            NoxprNode::Param(p) => Noxpr::new(NoxprNode::Param(p.clone())),
+            NoxprNode::Param(_) => expr.clone(),
             NoxprNode::Tuple(t) => Noxpr::tuple(t.iter().map(|e| self.visit(e)).collect()),
             NoxprNode::GetTupleElement(g) => {
                 Noxpr::new(NoxprNode::GetTupleElement(GetTupleElement {

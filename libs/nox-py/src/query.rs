@@ -19,6 +19,7 @@ pub struct ComponentArray<T> {
     pub entity_map: BTreeMap<EntityId, usize>,
     pub phantom_data: PhantomData<T>,
     pub component_id: ComponentId,
+    pub batch1: bool,
 }
 
 impl<T> Clone for ComponentArray<T> {
@@ -29,6 +30,7 @@ impl<T> Clone for ComponentArray<T> {
             entity_map: self.entity_map.clone(),
             phantom_data: PhantomData,
             component_id: self.component_id,
+            batch1: self.batch1,
         }
     }
 }
@@ -41,6 +43,7 @@ impl<T> ComponentArray<T> {
             entity_map: self.entity_map,
             len: self.len,
             component_id: self.component_id,
+            batch1: self.batch1,
         }
     }
 
@@ -53,6 +56,10 @@ impl<T: Component> ComponentArray<T> {
     pub fn get(&self, offset: i64) -> T {
         let ty: ArrayTy = T::schema().to_array_ty();
         let shape = ty.shape;
+
+        if self.batch1 && self.len <= 1 {
+            return T::from_inner(self.buffer.clone().reshape(shape));
+        }
 
         let start_indices: SmallVec<_> = once(offset).chain(shape.iter().map(|_| 0)).collect();
         let stop_indices: SmallVec<_> = once(offset + 1).chain(shape.clone()).collect();
@@ -98,6 +105,7 @@ impl<T: Component + 'static> SystemParam for ComponentArray<T> {
                 &self.entity_map,
                 &var.buffer,
                 &self.buffer,
+                self.batch1,
             ));
         }
         Ok(self.buffer.clone())
@@ -111,8 +119,15 @@ pub fn update_var(
     update_entity_map: &BTreeMap<EntityId, usize>,
     old_buffer: &Noxpr,
     update_buffer: &Noxpr,
+    batch1: bool,
 ) -> Noxpr {
     let (old, new, _) = intersect_ids(old_entity_map, update_entity_map);
+    if batch1 {
+        if old.is_empty() {
+            return old_buffer.clone();
+        }
+        return update_buffer.clone();
+    }
     let shape = update_buffer.shape().unwrap();
     old.iter().zip(new.iter()).fold(
         old_buffer.clone(),
@@ -178,6 +193,7 @@ pub struct Query<Param> {
     pub entity_map: BTreeMap<EntityId, usize>,
     pub len: usize,
     pub phantom_data: PhantomData<Param>,
+    pub batch1: bool,
 }
 
 impl<Param> std::fmt::Debug for Query<Param> {
@@ -198,6 +214,7 @@ impl<Param> Clone for Query<Param> {
             entity_map: self.entity_map.clone(),
             len: self.len,
             phantom_data: PhantomData,
+            batch1: self.batch1,
         }
     }
 }
@@ -210,6 +227,7 @@ impl<Param> Query<Param> {
             entity_map: self.entity_map,
             len: self.len,
             phantom_data: PhantomData,
+            batch1: self.batch1,
         }
     }
 }
@@ -388,6 +406,7 @@ impl<G: ComponentGroup> SystemParam for Query<G> {
                 entity_map: self.entity_map.clone(),
                 phantom_data: PhantomData,
                 component_id: id,
+                batch1: self.batch1,
             };
 
             if let Some(var) = builder.vars.get_mut(&id)
@@ -398,6 +417,7 @@ impl<G: ComponentGroup> SystemParam for Query<G> {
                     &self.entity_map,
                     &var.buffer,
                     expr,
+                    self.batch1,
                 ));
                 continue;
             }
@@ -427,6 +447,7 @@ impl<G: ComponentGroup> Query<G> {
                 entity_map: self.entity_map.clone(),
                 phantom_data: PhantomData,
                 component_id: id,
+                batch1: self.batch1,
             };
             builder.vars.insert(id, array);
         } else {
@@ -438,6 +459,7 @@ impl<G: ComponentGroup> Query<G> {
                     entity_map: self.entity_map.clone(),
                     phantom_data: PhantomData,
                     component_id: id,
+                    batch1: self.batch1,
                 };
                 builder.vars.insert(id, array);
             }
@@ -468,8 +490,12 @@ impl<G: ComponentGroup> Query<G> {
             args: builder.params.into_inner(),
         };
 
-        let map_axes: SmallVec<[usize; 4]> = smallvec![0; G::component_count()];
-        let buffer = Noxpr::vmap_with_axis(func, &map_axes, &self.exprs)?;
+        let buffer = if self.batch1 {
+            Noxpr::substitute_params(&func, &self.exprs)
+        } else {
+            let map_axes: SmallVec<[usize; 4]> = smallvec![0; G::component_count()];
+            Noxpr::vmap_with_axis(func, &map_axes, &self.exprs)?
+        };
         let exprs = if O::component_count() == 1 {
             vec![buffer]
         } else {
@@ -482,26 +508,31 @@ impl<G: ComponentGroup> Query<G> {
             len: self.len,
             phantom_data: PhantomData,
             entity_map: self.entity_map.clone(),
+            batch1: self.batch1,
         })
     }
 
     pub fn join<B: Component>(self, other: &ComponentArray<B>) -> Query<G::Append<B>> {
+        let batch1 = self.batch1;
         let q = join_many(self, other);
         Query {
             exprs: q.exprs,
             len: q.len,
             entity_map: q.entity_map,
             phantom_data: PhantomData,
+            batch1,
         }
     }
 
     pub fn join_query<B: ComponentGroup>(self, other: Query<B>) -> Query<(G, B)> {
+        let batch1 = self.batch1;
         let q = join_query(self, other);
         Query {
             exprs: q.exprs,
             len: q.len,
             entity_map: q.entity_map,
             phantom_data: PhantomData,
+            batch1,
         }
     }
 }
@@ -530,6 +561,7 @@ impl<G> Query<G> {
             len: indexes.len(),
             entity_map,
             phantom_data: PhantomData,
+            batch1: self.batch1,
         }
     }
 }
@@ -565,6 +597,7 @@ fn filter_index(indexes: &[u32], buffer: &Noxpr) -> Noxpr {
 }
 
 pub fn join_many<A, B>(mut a: Query<A>, b: &ComponentArray<B>) -> Query<()> {
+    let batch1 = a.batch1;
     if a.entity_map == b.entity_map {
         a.exprs.push(b.buffer.clone());
         Query {
@@ -572,6 +605,7 @@ pub fn join_many<A, B>(mut a: Query<A>, b: &ComponentArray<B>) -> Query<()> {
             entity_map: a.entity_map,
             len: a.len,
             phantom_data: PhantomData,
+            batch1,
         }
     } else {
         let (a_indexes, b_indexes, ids) = intersect_ids(&a.entity_map, &b.entity_map);
@@ -585,11 +619,13 @@ pub fn join_many<A, B>(mut a: Query<A>, b: &ComponentArray<B>) -> Query<()> {
             len: ids.len(),
             entity_map: ids,
             phantom_data: PhantomData,
+            batch1,
         }
     }
 }
 
 pub fn join_query<A, B>(mut a: Query<A>, mut b: Query<B>) -> Query<()> {
+    let batch1 = a.batch1;
     if a.entity_map == b.entity_map {
         a.exprs.append(&mut b.exprs);
         Query {
@@ -597,6 +633,7 @@ pub fn join_query<A, B>(mut a: Query<A>, mut b: Query<B>) -> Query<()> {
             entity_map: a.entity_map,
             len: a.len,
             phantom_data: PhantomData,
+            batch1,
         }
     } else {
         let (a_indexes, b_indexes, ids) = intersect_ids(&a.entity_map, &b.entity_map);
@@ -613,17 +650,20 @@ pub fn join_query<A, B>(mut a: Query<A>, mut b: Query<B>) -> Query<()> {
             len: ids.len(),
             entity_map: ids,
             phantom_data: PhantomData,
+            batch1,
         }
     }
 }
 
 impl<A> From<ComponentArray<A>> for Query<A> {
     fn from(value: ComponentArray<A>) -> Self {
+        let batch1 = value.batch1;
         Query {
             exprs: vec![value.buffer],
             len: value.len,
             entity_map: value.entity_map,
             phantom_data: PhantomData,
+            batch1,
         }
     }
 }
@@ -653,6 +693,7 @@ impl QueryInner {
                 entity_map: metadata.entity_map,
                 len: metadata.len,
                 phantom_data: PhantomData,
+                batch1: metadata.batch1,
             },
             metadata: metadata.metadata,
         })
@@ -664,6 +705,7 @@ impl QueryInner {
         component_ids: Vec<String>,
         args: Vec<PyObject>,
     ) -> Result<QueryInner, Error> {
+        let batch1 = builder.batch1();
         let (query, metadata) = component_ids
             .iter()
             .map(|id| {
@@ -677,6 +719,7 @@ impl QueryInner {
                         entity_map: meta.entity_map,
                         component_id: id,
                         phantom_data: PhantomData,
+                        batch1,
                     },
                     meta.component,
                 ))
@@ -696,6 +739,11 @@ impl QueryInner {
         Ok(Self { query, metadata })
     }
 
+    #[getter]
+    pub fn batch1(&self) -> bool {
+        self.query.batch1
+    }
+
     pub fn map(&self, new_buf: PyObject, metadata: PyComponent) -> QueryInner {
         let expr = Noxpr::jax(new_buf);
         QueryInner {
@@ -704,6 +752,7 @@ impl QueryInner {
                 entity_map: self.query.entity_map.clone(),
                 len: self.query.len,
                 phantom_data: PhantomData,
+                batch1: self.query.batch1,
             },
             metadata: vec![metadata],
         }
@@ -734,6 +783,7 @@ impl QueryInner {
                     &self.query.entity_map,
                     &Noxpr::jax(Python::with_gil(|py| buffer.clone_ref(py))),
                     expr,
+                    self.query.batch1,
                 );
                 outputs.push(out);
             }
@@ -771,6 +821,8 @@ pub struct QueryMetadata {
     pub entity_map: BTreeMap<EntityId, usize>,
     pub len: usize,
     pub metadata: Vec<PyComponent>,
+    #[pyo3(get)]
+    pub batch1: bool,
 }
 
 #[pymethods]

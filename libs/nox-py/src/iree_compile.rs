@@ -47,9 +47,13 @@ pub fn compile_iree_module(
         let col = world.column_by_id(*id).ok_or(Error::ComponentNotFound)?;
         let elem_ty = col.schema.prim_type;
         let dtype = nox::jax::dtype(&elem_ty.to_element_type())?;
-        let shape_vec: Vec<_> = std::iter::once(col.len() as u64)
-            .chain(col.schema.shape().iter().copied())
-            .collect();
+        let shape_vec: Vec<_> = if world.batch1 && col.len() <= 1 {
+            col.schema.shape().iter().copied().collect()
+        } else {
+            std::iter::once(col.len() as u64)
+                .chain(col.schema.shape().iter().copied())
+                .collect()
+        };
         let jnp = py.import("jax.numpy")?;
         let arr = jnp.getattr("zeros")?.call((shape_vec, dtype), None)?;
         input_arrays.push(arr.unbind());
@@ -165,7 +169,7 @@ def _resolve_iree_device(requested_device):
         return 'metal', 'metal'
     return 'cpu', 'local-task'
 
-def compile_to_vmfb(func, input_arrays, user_extra_flags, system_names, requested_device):
+def compile_to_vmfb(func, input_arrays, user_extra_flags, system_names, requested_device, batch1=False):
     try:
         lower_start = time.perf_counter()
         jit_fn = jax.jit(func, keep_unused=True)
@@ -186,6 +190,10 @@ def compile_to_vmfb(func, input_arrays, user_extra_flags, system_names, requeste
     # Rename to @module so the VMFB function is always "module.main".
     stablehlo_mlir = re.sub(r'module @\S+', 'module @module', stablehlo_mlir, count=1)
 
+    # IREE's arith dialect does not support unsigned integer types.
+    for unsigned, signed in [('ui64', 'i64'), ('ui32', 'i32'), ('ui16', 'i16'), ('ui8', 'i8')]:
+        stablehlo_mlir = stablehlo_mlir.replace(unsigned, signed)
+
     compile_target, runtime_device = _resolve_iree_device(requested_device)
 
     extra = [
@@ -193,8 +201,11 @@ def compile_to_vmfb(func, input_arrays, user_extra_flags, system_names, requeste
         "--iree-input-demote-f64-to-f32=false",
         "--iree-input-type=stablehlo",
         "--iree-opt-level=O2",
-        "--iree-hal-indirect-command-buffers=false",
     ]
+    extra.append("--iree-hal-indirect-command-buffers=false")
+    extra.append("--iree-opt-const-eval=false")
+    if batch1:
+        extra.append("--iree-flow-inline-constants-max-byte-length=0")
 
     from iree.compiler import _mlir_libs
     iree_tools_dir = str(pathlib.Path(_mlir_libs.__file__).parent)
@@ -467,6 +478,7 @@ def compile_to_vmfb(func, input_arrays, user_extra_flags, system_names, requeste
                 extra_iree_flags.to_vec(),
                 compiled_system.system_names.clone(),
                 iree_device.to_string(),
+                world.batch1,
             ),
         )
         .map_err(|e| {
