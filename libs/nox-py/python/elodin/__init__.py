@@ -2,6 +2,7 @@
 # ruff: noqa: F405
 import code
 import inspect
+import os
 import re
 import readline
 import rlcompleter
@@ -510,6 +511,7 @@ class World(WorldBuilder):
         frame = current_frame.f_back
         if frame is None:
             raise Exception("No previous frame")
+        db_path = db_path if db_path is not None else os.environ.get("ELODIN_DB_PATH")
         addr = super().run(
             system,
             simulation_rate,

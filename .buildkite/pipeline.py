@@ -89,27 +89,27 @@ test_steps = [
             nix_step(
                 label=":python: ball",
                 flake=".#run",
-                command="python3 examples/ball/main.py bench --ticks 100 --profile",
+                command="bash ./scripts/ci/regress.sh ball examples/ball/main.py",
             ),
             nix_step(
                 label=":python: drone",
                 flake=".#run",
-                command="python3 examples/drone/main.py bench --ticks 100 --profile",
+                command="bash ./scripts/ci/regress.sh drone examples/drone/main.py",
             ),
             nix_step(
                 label=":python: rocket",
                 flake=".#run",
-                command="python3 examples/rocket/main.py bench --ticks 100 --profile",
+                command="bash ./scripts/ci/regress.sh rocket examples/rocket/main.py",
             ),
             nix_step(
                 label=":python: three-body",
                 flake=".#run",
-                command="python3 examples/three-body/main.py bench --ticks 100 --profile",
+                command="bash ./scripts/ci/regress.sh three-body examples/three-body/main.py",
             ),
             nix_step(
                 label=":python: cube-sat",
                 flake=".#run",
-                command="python3 examples/cube-sat/main.py bench --ticks 100 --profile",
+                command="bash ./scripts/ci/regress.sh cube-sat examples/cube-sat/main.py",
             ),
             nix_step(
                 label=":python: sensor-camera",

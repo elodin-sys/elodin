@@ -1,0 +1,13 @@
+{
+  "default": {
+    "abs_tol": 1e-8,
+    "rel_tol": 1e-6
+  },
+  "examples": {
+    "drone": {
+      "abs_tol": 1e-6,
+      "rel_tol": 1e-5,
+      "files": {}
+    }
+  }
+}
