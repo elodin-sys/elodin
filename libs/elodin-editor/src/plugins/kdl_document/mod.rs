@@ -674,6 +674,8 @@ mod tests {
 
     impl Drop for EnvVarGuard {
         fn drop(&mut self) {
+            // SAFETY: These tests serialize all `ELODIN_KDL_DIR` mutations behind `ENV_LOCK`,
+            // so restoring the previous value here cannot race with another test in this module.
             unsafe {
                 if let Some(value) = self.previous.take() {
                     std::env::set_var("ELODIN_KDL_DIR", value);
@@ -686,6 +688,8 @@ mod tests {
 
     fn set_kdl_dir(path: &Path) -> EnvVarGuard {
         let previous = std::env::var_os("ELODIN_KDL_DIR");
+        // SAFETY: This helper is only used in tests that hold `ENV_LOCK`, so mutating the
+        // process environment here is serialized and scoped to the test's lifetime.
         unsafe {
             std::env::set_var("ELODIN_KDL_DIR", path);
         }
