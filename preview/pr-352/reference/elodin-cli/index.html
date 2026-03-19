@@ -202,8 +202,8 @@
             </a>
             <span>
                 <select name="version" class="version-select" disabled>
-                    <option value="v0.16.2-alpha.0" selected>
-                        v0.16.2-alpha.0
+                    <option value="v0.16.2" selected>
+                        v0.16.2
                     </option>
                 </select>
             </span>
@@ -436,6 +436,23 @@
                                 
                                 <li>
                                     <a href="https://docs.elodin.systems/preview/pr-352/reference/elodin-cli/#arguments-1">Arguments</a>
+                                </li>
+                                
+                            </ul>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-352/reference/elodin-cli/#python-simulation-subcommands">Python Simulation Subcommands</a>
+                            
+                            <ul>
+                                
+                                <li>
+                                    <a href="https://docs.elodin.systems/preview/pr-352/reference/elodin-cli/#bench-options">bench options</a>
+                                </li>
+                                
+                                <li>
+                                    <a href="https://docs.elodin.systems/preview/pr-352/reference/elodin-cli/#examples">Examples</a>
                                 </li>
                                 
                             </ul>
@@ -686,7 +703,7 @@
                         </li>
                         
                         <li>
-                            <a href="https://docs.elodin.systems/preview/pr-352/reference/elodin-cli/#elodin-db-export">elodin-db export</a>
+                            <a href="https://docs.elodin.systems/preview/pr-352/reference/elodin-cli/#elodin-db-query">elodin-db query</a>
                             
                             <ul>
                                 
@@ -695,7 +712,36 @@
                                 </li>
                                 
                                 <li>
+                                    <a href="https://docs.elodin.systems/preview/pr-352/reference/elodin-cli/#query-source-required-mutually-exclusive">Query source (required, mutually exclusive)</a>
+                                </li>
+                                
+                                <li>
                                     <a href="https://docs.elodin.systems/preview/pr-352/reference/elodin-cli/#options-9">Options</a>
+                                </li>
+                                
+                                <li>
+                                    <a href="https://docs.elodin.systems/preview/pr-352/reference/elodin-cli/#time-column">Time column</a>
+                                </li>
+                                
+                                <li>
+                                    <a href="https://docs.elodin.systems/preview/pr-352/reference/elodin-cli/#example-7">Example</a>
+                                </li>
+                                
+                            </ul>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-352/reference/elodin-cli/#elodin-db-export">elodin-db export</a>
+                            
+                            <ul>
+                                
+                                <li>
+                                    <a href="https://docs.elodin.systems/preview/pr-352/reference/elodin-cli/#arguments-12">Arguments</a>
+                                </li>
+                                
+                                <li>
+                                    <a href="https://docs.elodin.systems/preview/pr-352/reference/elodin-cli/#options-10">Options</a>
                                 </li>
                                 
                                 <li>
@@ -711,7 +757,7 @@
                                 </li>
                                 
                                 <li>
-                                    <a href="https://docs.elodin.systems/preview/pr-352/reference/elodin-cli/#example-7">Example</a>
+                                    <a href="https://docs.elodin.systems/preview/pr-352/reference/elodin-cli/#example-8">Example</a>
                                 </li>
                                 
                             </ul>
@@ -724,11 +770,11 @@
                             <ul>
                                 
                                 <li>
-                                    <a href="https://docs.elodin.systems/preview/pr-352/reference/elodin-cli/#arguments-12">Arguments</a>
+                                    <a href="https://docs.elodin.systems/preview/pr-352/reference/elodin-cli/#arguments-13">Arguments</a>
                                 </li>
                                 
                                 <li>
-                                    <a href="https://docs.elodin.systems/preview/pr-352/reference/elodin-cli/#options-10">Options</a>
+                                    <a href="https://docs.elodin.systems/preview/pr-352/reference/elodin-cli/#options-11">Options</a>
                                 </li>
                                 
                                 <li>
@@ -736,7 +782,7 @@
                                 </li>
                                 
                                 <li>
-                                    <a href="https://docs.elodin.systems/preview/pr-352/reference/elodin-cli/#example-8">Example</a>
+                                    <a href="https://docs.elodin.systems/preview/pr-352/reference/elodin-cli/#example-9">Example</a>
                                 </li>
                                 
                             </ul>
@@ -772,6 +818,7 @@
 <li><a href="https://docs.elodin.systems/preview/pr-352/reference/elodin-cli/#elodin-db-time-align"><code>elodin-db time-align</code>↴</a></li>
 <li><a href="https://docs.elodin.systems/preview/pr-352/reference/elodin-cli/#elodin-db-drop"><code>elodin-db drop</code>↴</a></li>
 <li><a href="https://docs.elodin.systems/preview/pr-352/reference/elodin-cli/#elodin-db-info"><code>elodin-db info</code>↴</a></li>
+<li><a href="https://docs.elodin.systems/preview/pr-352/reference/elodin-cli/#elodin-db-query"><code>elodin-db query</code>↴</a></li>
 <li><a href="https://docs.elodin.systems/preview/pr-352/reference/elodin-cli/#elodin-db-export"><code>elodin-db export</code>↴</a></li>
 <li><a href="https://docs.elodin.systems/preview/pr-352/reference/elodin-cli/#elodin-db-export-videos"><code>elodin-db export-videos</code>↴</a></li>
 </ul>
@@ -819,6 +866,28 @@ after connecting to a database.</li>
 </ul>
 </li>
 </ul>
+<h2 id="python-simulation-subcommands">Python Simulation Subcommands</h2>
+<p>When you run a simulation Python file directly (for example <code>python examples/drone/main.py ...</code>), the embedded simulation CLI supports additional subcommands:</p>
+<ul>
+<li><code>run</code> (default): run the simulation normally.</li>
+<li><code>bench</code>: run a fixed-tick benchmark and print runtime metrics.</li>
+</ul>
+<h3 id="bench-options"><code>bench</code> options</h3>
+<ul>
+<li><code>--ticks &lt;N&gt;</code>: number of ticks to run (default: <code>1000</code>)</li>
+<li><code>--profile</code>: enable full profiling output (including HLO/graph analysis output)</li>
+<li><code>--detail</code>: include per-phase timing breakdown such as upload, kernel, and download times</li>
+</ul>
+<h3 id="examples">Examples</h3>
+<pre data-lang="bash" class="language-bash z-code"><code class="language-bash" data-lang="bash"><span class="z-source z-shell z-bash"><span class="z-comment z-line z-number-sign z-shell"><span class="z-punctuation z-definition z-comment z-begin z-shell">#</span></span><span class="z-comment z-line z-number-sign z-shell"> CPU benchmark</span><span class="z-comment z-line z-number-sign z-shell">
+</span></span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">python</span></span><span class="z-meta z-function-call z-arguments z-shell"> examples/drone/main.py bench<span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> --</span>ticks</span> 1000</span>
+</span><span class="z-source z-shell z-bash">
+</span><span class="z-source z-shell z-bash"><span class="z-comment z-line z-number-sign z-shell"><span class="z-punctuation z-definition z-comment z-begin z-shell">#</span></span><span class="z-comment z-line z-number-sign z-shell"> GPU benchmark with detailed timing</span><span class="z-comment z-line z-number-sign z-shell">
+</span></span><span class="z-source z-shell z-bash"><span class="z-variable z-other z-readwrite z-assignment z-shell">ELODIN_BACKEND</span><span class="z-keyword z-operator z-assignment z-shell">=</span><span class="z-string z-unquoted z-shell">iree-gpu</span> <span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">python</span></span><span class="z-meta z-function-call z-arguments z-shell"> examples/drone/main.py bench<span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> --</span>ticks</span> 1000<span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> --</span>detail</span></span>
+</span><span class="z-source z-shell z-bash">
+</span><span class="z-source z-shell z-bash"><span class="z-comment z-line z-number-sign z-shell"><span class="z-punctuation z-definition z-comment z-begin z-shell">#</span></span><span class="z-comment z-line z-number-sign z-shell"> Full profiling output</span><span class="z-comment z-line z-number-sign z-shell">
+</span></span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">python</span></span><span class="z-meta z-function-call z-arguments z-shell"> examples/drone/main.py bench<span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> --</span>ticks</span> 1000<span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> --</span>profile</span></span>
+</span></code></pre>
 <hr />
 <h2 id="elodin-db"><code>elodin-db</code></h2>
 <p><strong>Usage:</strong> <code>elodin-db &lt;COMMAND&gt;</code></p>
@@ -834,6 +903,7 @@ after connecting to a database.</li>
 <li><code>time-align</code> — Align component timestamps to a target timestamp</li>
 <li><code>drop</code> — Drop (delete) components from a database</li>
 <li><code>info</code> — Display information about a database</li>
+<li><code>query</code> — Run an EQL or SQL query and print results (table, CSV, parquet, or arrow-ipc)</li>
 <li><code>export</code> — Export database contents to parquet, arrow-ipc, or csv files</li>
 <li><code>export-videos</code> — Export video message logs to MP4 files</li>
 </ul>
@@ -1220,14 +1290,83 @@ after connecting to a database.</li>
 </span><span class="z-source z-shell z-bash"><span class="z-comment z-line z-number-sign z-shell"><span class="z-punctuation z-definition z-comment z-begin z-shell">#</span></span><span class="z-comment z-line z-number-sign z-shell"> Display info for a specific database</span><span class="z-comment z-line z-number-sign z-shell">
 </span></span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">elodin-db</span></span><span class="z-meta z-function-call z-arguments z-shell"> info ./my-database</span>
 </span></code></pre>
+<h2 id="elodin-db-query"><code>elodin-db query</code></h2>
+<p>Run an EQL (Elodin Query Language) or raw SQL query against a database and print the result. Output can be a terminal table, CSV, or binary formats (arrow-ipc, parquet). Does not require a running database server.</p>
+<p><strong>Usage:</strong> <code>elodin-db query [OPTIONS] --eql &lt;EQL&gt; | --sql &lt;SQL&gt; &lt;DBFILE&gt;</code></p>
+<h6 id="arguments-11"><strong>Arguments</strong></h6>
+<ul>
+<li><code>&lt;DBFILE&gt;</code> — Path to the database directory</li>
+</ul>
+<h6 id="query-source-required-mutually-exclusive"><strong>Query source (required, mutually exclusive)</strong></h6>
+<p>You must provide exactly one of:</p>
+<ul>
+<li><code>--eql &lt;EQL&gt;</code> — EQL query (e.g. a component name like <code>rocket.world_pos</code>, or an expression like <code>(rocket.world_pos[0], rocket.world_pos[1])</code>)</li>
+<li><code>--sql &lt;SQL&gt;</code> — Raw SQL query</li>
+</ul>
+<h6 id="options-9"><strong>Options</strong></h6>
+<ul>
+<li>
+<p><code>--offset &lt;N|DURATION&gt;</code> — Skip rows before returning results. Can be:</p>
+<ul>
+<li>An integer: skip that many rows. Negative values count from the end (e.g. <code>-10</code> = start 10 rows before the last).</li>
+<li>A duration: e.g. <code>2.6s</code>, <code>340000ms</code>, <code>53000ns</code>. Negative duration means from the end (e.g. <code>-1s</code> = start 1 second before the last entry).</li>
+</ul>
+</li>
+<li>
+<p><code>--limit &lt;N|DURATION&gt;</code> — Return at most this many rows or this duration. Same formats as <code>--offset</code> (e.g. <code>10</code>, <code>2.6s</code>, <code>340000ms</code>, <code>53000ns</code>).</p>
+</li>
+<li>
+<p><code>-f</code>, <code>--format &lt;FORMAT&gt;</code> — Output format.</p>
+<p>Default value: <code>table</code></p>
+<p>Possible values: <code>table</code>, <code>csv</code>, <code>arrow-ipc</code>, <code>parquet</code></p>
+<p>For <code>arrow-ipc</code> and <code>parquet</code>, output is binary; pipe to a file (e.g. <code>... &gt; out.arrow</code>).</p>
+</li>
+<li>
+<p><code>--flatten</code> — Flatten vector columns into separate scalar columns (e.g. <code>vel</code> → <code>vel.0</code>, <code>vel.1</code>, …). Uses component metadata for column names when available (e.g. <code>q0</code>, <code>q1</code>, <code>x</code>, <code>y</code>, <code>z</code>).</p>
+</li>
+<li>
+<p><code>--time-format &lt;FORMAT&gt;</code> — How to show the time column (when present).</p>
+<p>Possible values: <code>omit</code>, <code>datetime</code>, <code>s</code> (seconds), <code>ms</code> (milliseconds), <code>us</code> (microseconds; aliases: <code>µs</code>). If not set, defaults to seconds, or to the unit implied by a duration in <code>--offset</code> or <code>--limit</code> (e.g. <code>--limit 500ms</code> → time in ms).</p>
+</li>
+<li>
+<p><code>-v</code>, <code>--verbose</code> — Print the SQL used (EQL conversion or raw SQL) to stderr.</p>
+</li>
+<li>
+<p><code>-p</code>, <code>--precision &lt;N|full&gt;</code> — Decimal places for floating-point values in table/CSV. Use a number (default <code>6</code>) or <code>full</code> to show all digits. When not <code>full</code>, a note is printed to stderr suggesting <code>--precision full</code> for full data.</p>
+</li>
+<li>
+<p><code>--row-index</code> — Add a first column <code>index</code> with the 0-based row index in the full result set (useful with <code>--offset</code>/<code>--limit</code> to see which rows are shown).</p>
+</li>
+</ul>
+<h6 id="time-column"><strong>Time column</strong></h6>
+<p>For EQL queries, a <code>time</code> column is included by default (first column) unless <code>--time-format omit</code> is used. The time column header includes the unit (e.g. <code>time (s)</code>, <code>time (μs)</code>, <code>time (UTC)</code>). Elodin stores time in microseconds since epoch.</p>
+<h6 id="example-7"><strong>Example</strong></h6>
+<pre data-lang="bash" class="language-bash z-code"><code class="language-bash" data-lang="bash"><span class="z-source z-shell z-bash"><span class="z-comment z-line z-number-sign z-shell"><span class="z-punctuation z-definition z-comment z-begin z-shell">#</span></span><span class="z-comment z-line z-number-sign z-shell"> First 10 rows of a component as a table</span><span class="z-comment z-line z-number-sign z-shell">
+</span></span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">elodin-db</span></span><span class="z-meta z-function-call z-arguments z-shell"> query<span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> --</span>eql</span> <span class="z-string z-quoted z-double z-shell"><span class="z-punctuation z-definition z-string z-begin z-shell">&quot;</span>rocket.world_pos<span class="z-punctuation z-definition z-string z-end z-shell">&quot;</span></span><span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> --</span>limit</span> 10 ./my-database</span>
+</span><span class="z-source z-shell z-bash">
+</span><span class="z-source z-shell z-bash"><span class="z-comment z-line z-number-sign z-shell"><span class="z-punctuation z-definition z-comment z-begin z-shell">#</span></span><span class="z-comment z-line z-number-sign z-shell"> Last 10 rows, show EQL→SQL on stderr</span><span class="z-comment z-line z-number-sign z-shell">
+</span></span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">elodin-db</span></span><span class="z-meta z-function-call z-arguments z-shell"> query<span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> --</span>eql</span> <span class="z-string z-quoted z-double z-shell"><span class="z-punctuation z-definition z-string z-begin z-shell">&quot;</span>rocket.world_pos<span class="z-punctuation z-definition z-string z-end z-shell">&quot;</span></span><span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> --</span>offset</span><span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> -</span>10</span><span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> -</span>v</span> ./my-database</span>
+</span><span class="z-source z-shell z-bash">
+</span><span class="z-source z-shell z-bash"><span class="z-comment z-line z-number-sign z-shell"><span class="z-punctuation z-definition z-comment z-begin z-shell">#</span></span><span class="z-comment z-line z-number-sign z-shell"> Tuple expression, flattened, with row index and full precision</span><span class="z-comment z-line z-number-sign z-shell">
+</span></span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">elodin-db</span></span><span class="z-meta z-function-call z-arguments z-shell"> query<span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> --</span>eql</span> <span class="z-string z-quoted z-double z-shell"><span class="z-punctuation z-definition z-string z-begin z-shell">&quot;</span>(rocket.world_pos[0], rocket.world_pos[1])<span class="z-punctuation z-definition z-string z-end z-shell">&quot;</span></span><span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> --</span>limit</span> 5<span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> --</span>flatten</span><span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> --</span>row-index</span><span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> -</span>p</span> full ./my-database</span>
+</span><span class="z-source z-shell z-bash">
+</span><span class="z-source z-shell z-bash"><span class="z-comment z-line z-number-sign z-shell"><span class="z-punctuation z-definition z-comment z-begin z-shell">#</span></span><span class="z-comment z-line z-number-sign z-shell"> Raw SQL, output as CSV</span><span class="z-comment z-line z-number-sign z-shell">
+</span></span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">elodin-db</span></span><span class="z-meta z-function-call z-arguments z-shell"> query<span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> --</span>sql</span> <span class="z-string z-quoted z-double z-shell"><span class="z-punctuation z-definition z-string z-begin z-shell">&quot;</span>SELECT time, rocket_world_pos FROM rocket_world_pos LIMIT 100<span class="z-punctuation z-definition z-string z-end z-shell">&quot;</span></span><span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> -</span>f</span> csv ./my-database</span>
+</span><span class="z-source z-shell z-bash">
+</span><span class="z-source z-shell z-bash"><span class="z-comment z-line z-number-sign z-shell"><span class="z-punctuation z-definition z-comment z-begin z-shell">#</span></span><span class="z-comment z-line z-number-sign z-shell"> Duration-based slice: last 2.5 seconds of data, time in seconds</span><span class="z-comment z-line z-number-sign z-shell">
+</span></span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">elodin-db</span></span><span class="z-meta z-function-call z-arguments z-shell"> query<span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> --</span>eql</span> <span class="z-string z-quoted z-double z-shell"><span class="z-punctuation z-definition z-string z-begin z-shell">&quot;</span>drone.position<span class="z-punctuation z-definition z-string z-end z-shell">&quot;</span></span><span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> --</span>offset</span><span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> -</span>2</span>.5s<span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> --</span>limit</span> 2.5s ./my-database</span>
+</span><span class="z-source z-shell z-bash">
+</span><span class="z-source z-shell z-bash"><span class="z-comment z-line z-number-sign z-shell"><span class="z-punctuation z-definition z-comment z-begin z-shell">#</span></span><span class="z-comment z-line z-number-sign z-shell"> Export slice to Parquet (binary; pipe to file)</span><span class="z-comment z-line z-number-sign z-shell">
+</span></span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">elodin-db</span></span><span class="z-meta z-function-call z-arguments z-shell"> query<span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> --</span>eql</span> <span class="z-string z-quoted z-double z-shell"><span class="z-punctuation z-definition z-string z-begin z-shell">&quot;</span>rocket.world_pos<span class="z-punctuation z-definition z-string z-end z-shell">&quot;</span></span><span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> --</span>limit</span> 1000<span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> -</span>f</span> parquet ./my-database <span class="z-keyword z-operator z-assignment z-redirection z-shell">&gt;</span> out.parquet</span>
+</span></code></pre>
 <h2 id="elodin-db-export"><code>elodin-db export</code></h2>
 <p>Export database contents to parquet, arrow-ipc, or csv files without requiring a running server. This is useful for analyzing telemetry data with external tools like pandas, DuckDB, or other data analysis frameworks.</p>
 <p><strong>Usage:</strong> <code>elodin-db export [OPTIONS] --output &lt;OUTPUT&gt; &lt;PATH&gt;</code></p>
-<h6 id="arguments-11"><strong>Arguments</strong></h6>
+<h6 id="arguments-12"><strong>Arguments</strong></h6>
 <ul>
 <li><code>&lt;PATH&gt;</code> — Path to the database directory</li>
 </ul>
-<h6 id="options-9"><strong>Options</strong></h6>
+<h6 id="options-10"><strong>Options</strong></h6>
 <ul>
 <li>
 <p><code>-o</code>, <code>--output &lt;PATH&gt;</code> — Output directory for exported files (required)</p>
@@ -1270,7 +1409,7 @@ after connecting to a database.</li>
 <li><code>*.velocity</code> — export only velocity components</li>
 <li><code>NavNED.*</code> — export only NavNED components</li>
 </ul>
-<h6 id="example-7"><strong>Example</strong></h6>
+<h6 id="example-8"><strong>Example</strong></h6>
 <pre data-lang="bash" class="language-bash z-code"><code class="language-bash" data-lang="bash"><span class="z-source z-shell z-bash"><span class="z-comment z-line z-number-sign z-shell"><span class="z-punctuation z-definition z-comment z-begin z-shell">#</span></span><span class="z-comment z-line z-number-sign z-shell"> Export all components to parquet (default format)</span><span class="z-comment z-line z-number-sign z-shell">
 </span></span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">elodin-db</span></span><span class="z-meta z-function-call z-arguments z-shell"> export ./my-database<span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> -</span>o</span> ./export</span>
 </span><span class="z-source z-shell z-bash">
@@ -1289,11 +1428,11 @@ after connecting to a database.</li>
 <h2 id="elodin-db-export-videos"><code>elodin-db export-videos</code></h2>
 <p>Export video message logs to MP4 files. This command reads H.264 video frames stored as timestamped messages in the database and muxes them into standards-compliant MP4 files (e.g. for playback in QuickTime, VLC, or other players).</p>
 <p><strong>Usage:</strong> <code>elodin-db export-videos [OPTIONS] --output &lt;OUTPUT&gt; &lt;PATH&gt;</code></p>
-<h6 id="arguments-12"><strong>Arguments</strong></h6>
+<h6 id="arguments-13"><strong>Arguments</strong></h6>
 <ul>
 <li><code>&lt;PATH&gt;</code> — Path to the database directory</li>
 </ul>
-<h6 id="options-10"><strong>Options</strong></h6>
+<h6 id="options-11"><strong>Options</strong></h6>
 <ul>
 <li>
 <p><code>-o</code>, <code>--output &lt;PATH&gt;</code> — Output directory for MP4 files (required)</p>
@@ -1313,7 +1452,7 @@ after connecting to a database.</li>
 <li><strong>Schematic</strong>: A <code>video_stream "name"</code> entry in the schematic ties a video tile in the Elodin Editor to that message name; the same name is used when exporting with <code>export-videos</code>.</li>
 </ul>
 <p>Resolution and frame rate are read from the H.264 SPS in the first keyframe; no re-encoding is done. Output files use fast-start layout for web and player compatibility.</p>
-<h6 id="example-8"><strong>Example</strong></h6>
+<h6 id="example-9"><strong>Example</strong></h6>
 <pre data-lang="bash" class="language-bash z-code"><code class="language-bash" data-lang="bash"><span class="z-source z-shell z-bash"><span class="z-comment z-line z-number-sign z-shell"><span class="z-punctuation z-definition z-comment z-begin z-shell">#</span></span><span class="z-comment z-line z-number-sign z-shell"> Export all video streams to an output directory</span><span class="z-comment z-line z-number-sign z-shell">
 </span></span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">elodin-db</span></span><span class="z-meta z-function-call z-arguments z-shell"> export-videos ./my-database<span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> -</span>o</span> ./videos</span>
 </span><span class="z-source z-shell z-bash">

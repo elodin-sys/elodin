@@ -199,8 +199,8 @@
             </a>
             <span>
                 <select name="version" class="version-select" disabled>
-                    <option value="v0.16.2-alpha.0" selected>
-                        v0.16.2-alpha.0
+                    <option value="v0.16.2" selected>
+                        v0.16.2
                     </option>
                 </select>
             </span>
@@ -325,6 +325,11 @@
                     <a href="https://docs.elodin.systems/preview/pr-352/releases/changelog/#v0-16">v0.16</a>
                     
                     <ul>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-352/releases/changelog/#v0-16-2">v0.16.2</a>
+                            
+                        </li>
                         
                         <li>
                             <a href="https://docs.elodin.systems/preview/pr-352/releases/changelog/#v0-16-1">v0.16.1</a>
@@ -700,6 +705,22 @@
               <main class="docs-content col-lg-11 col-xxl-10">
                   <h1>Changelog</h1>
                    <h2 id="v0-16">v0.16</h2>
+<h3 id="v0-16-2">v0.16.2</h3>
+<ul>
+<li><strong>(feat)</strong> Enable GPU for JAX backends. (#564)</li>
+<li><strong>(feat)</strong> Add IREE diagnostics. (#563)</li>
+<li><strong>(feat)</strong> Add Logstream to <code>elodin-db</code> and an example. (#561)</li>
+<li><strong>(feat)</strong> Reduce redundant frame buffer copies in the sensor camera display pipeline. (#556)</li>
+<li><strong>(feat)</strong> Add sensor cameras and Tracy IREE. (#554)</li>
+<li><strong>(feat)</strong> Include the git hash with the version shown on the CLI. (#553)</li>
+<li><strong>(feat)</strong> Add a new Nix shell: <code>nix develop .#run</code>. (#552)</li>
+<li><strong>(feat)</strong> UI: Add timeline inspector and Jump-to-Latest button. (#546)</li>
+<li><strong>(fix)</strong> UI: Prevent <code>line_3d</code> from drawing ahead of <code>CurrentTimestamp</code>. (#545)</li>
+<li><strong>(chore)</strong> Bump <code>nixpkgs</code> on Aleph to 25.11. (#566)</li>
+<li><strong>(chore)</strong> Add probe-based performance instrumentation for sensor camera. (#560)</li>
+<li><strong>(test)</strong> Add IREE test fixtures for Mac. (#559)</li>
+<li><strong>(doc)</strong> Add README to ellipsoid example. (#544)</li>
+</ul>
 <h3 id="v0-16-1">v0.16.1</h3>
 <ul>
 <li><strong>(feat)</strong> Upgrade 3D axes widget to cube with UI affordances like reset-view button. (#456)</li>
