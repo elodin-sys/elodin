@@ -28,6 +28,12 @@ From repository root:
 nix develop .#run --command bash -lc "bash ./scripts/ci/regress.sh ball examples/ball/main.py"
 ```
 
+To refresh one example baseline in place:
+
+```bash
+nix develop .#run --command bash -lc "bash ./scripts/ci/regress.sh --update ball examples/ball/main.py"
+```
+
 To run without profile collection:
 
 ```bash
@@ -52,18 +58,7 @@ It also accepts compatibility names like `<example>-csv` and `<example>-csv-100`
 Refresh one example baseline:
 
 ```bash
-nix develop .#run --command bash -lc '
-set -euo pipefail
-example=ball
-entrypoint=examples/ball/main.py
-tmp="$(mktemp -d -t elodin-baseline-${example}.XXXXXX)"
-db_path="${tmp}/db"
-out_dir="scripts/ci/baseline/${example}"
-rm -rf "${out_dir}"
-mkdir -p "${out_dir}"
-ELODIN_DB_PATH="${db_path}" uv run "${entrypoint}" bench --ticks 100 --profile
-elodin-db export --format csv --flatten --output "${out_dir}" "${db_path}"
-'
+nix develop .#run --command bash -lc "bash ./scripts/ci/regress.sh --update ball examples/ball/main.py"
 ```
 
 Refresh all example baselines:
@@ -80,16 +75,14 @@ for item in \
 do
   example="${item%%:*}"
   entrypoint="${item#*:}"
-  tmp="$(mktemp -d -t elodin-baseline-${example}.XXXXXX)"
-  db_path="${tmp}/db"
-  out_dir="scripts/ci/baseline/${example}"
-  rm -rf "${out_dir}"
-  mkdir -p "${out_dir}"
-  ELODIN_DB_PATH="${db_path}" uv run "${entrypoint}" bench --ticks 100 --profile
-  elodin-db export --format csv --flatten --output "${out_dir}" "${db_path}"
+  bash ./scripts/ci/regress.sh --update "${example}" "${entrypoint}"
 done
 '
 ```
+
+`--update` rewrites the baseline for that example after exporting fresh flattened
+CSV output. If no per-example baseline directory exists yet, it creates one
+under `scripts/ci/baseline/<example>`.
 
 ## Tolerance config
 

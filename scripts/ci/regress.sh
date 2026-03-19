@@ -2,11 +2,38 @@
 set -euo pipefail
 
 usage() {
-  echo "Usage: $0 <example-name> <example-entrypoint>"
+  echo "Usage: $0 [--update] <example-name> <example-entrypoint>"
   echo
   echo "Example:"
   echo "  $0 ball examples/ball/main.py"
+  echo "  $0 --update ball examples/ball/main.py"
 }
+
+update_baseline=0
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --update)
+      update_baseline=1
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    --)
+      shift
+      break
+      ;;
+    -*)
+      echo "FAIL: unknown option: $1"
+      usage
+      exit 1
+      ;;
+    *)
+      break
+      ;;
+  esac
+done
 
 if [[ $# -ne 2 ]]; then
   usage
@@ -66,6 +93,8 @@ if [[ -z "${baseline_dir}" ]]; then
   if compgen -G "${baseline_root}/${example_name}"'*.csv' > /dev/null; then
     baseline_dir="${baseline_root}"
     file_prefix="${example_name}."
+  elif [[ "${update_baseline}" == "1" ]]; then
+    baseline_dir="${baseline_root}/${example_name}"
   else
     echo "FAIL: could not locate baseline directory for example '${example_name}' under ${baseline_root}"
     exit 1
@@ -88,8 +117,7 @@ echo "==> [${example_name}] running benchmark (${example_entrypoint})"
 run_log="${scratch_dir}/run.log"
 ELODIN_DB_PATH="${db_path}" uv run "${example_entrypoint}" "${bench_args[@]}" 2>&1 | tee "${run_log}"
 
-# In profile mode, the underlying bench path may ignore db_path and print the
-# actual created path instead. If that happens, discover and use it.
+# If the runtime reports a different db path in logs, discover and use it.
 if [[ ! -f "${db_path}/db_state" ]]; then
   discovered_db_path="$(
     python3 - "${run_log}" <<'PY'
@@ -116,6 +144,19 @@ fi
 
 echo "==> [${example_name}] exporting telemetry to CSV"
 elodin-db export --format csv --flatten --output "${export_dir}" "${db_path}"
+
+if [[ "${update_baseline}" == "1" ]]; then
+  if [[ "${baseline_dir}" == "${baseline_root}" ]] && [[ -n "${file_prefix}" ]]; then
+    baseline_dir="${baseline_root}/${example_name}"
+    file_prefix=""
+  fi
+
+  echo "==> [${example_name}] updating baseline (${baseline_dir})"
+  rm -rf "${baseline_dir}"
+  mkdir -p "${baseline_dir}"
+  cp -r "${export_dir}/." "${baseline_dir}/"
+  exit 0
+fi
 
 echo "==> [${example_name}] comparing against baseline (${baseline_dir})"
 compare_args=(
