@@ -647,20 +647,6 @@ fn fix_visibility_hierarchy(
     }
 }
 
-pub(crate) fn update_primary_descriptor_path(
-    current_document: Res<schematic::CurrentDocument>,
-    mut q: Query<(&tiles::WindowId, &mut tiles::WindowState)>,
-) {
-    let Some(path) = current_document.save_path.as_ref() else {
-        return;
-    };
-    for (id, mut state) in q.iter_mut() {
-        if id.is_primary() {
-            state.descriptor.path = Some(path.clone());
-        }
-    }
-}
-
 fn clamp_viewport_to_window(
     mut pos: Vec2,
     mut size: Vec2,

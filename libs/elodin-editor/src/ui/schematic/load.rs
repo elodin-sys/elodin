@@ -7,7 +7,6 @@ use bevy_infinite_grid::InfiniteGrid;
 use bevy_mat3_material::Mat3Material;
 use egui_tiles::{Container, Tile, TileId};
 use impeller2_bevy::{ComponentPath, ComponentSchemaRegistry};
-use impeller2_kdl::KdlSchematicError;
 use impeller2_kdl::{FromKdl, ToKdl};
 use impeller2_wkt::{
     DbConfig, Graph, Line3d, Object3D, Panel, Schematic, VectorArrow3d, Viewport, WindowSchematic,
@@ -28,8 +27,8 @@ use crate::{
     plugins::{
         kdl_document::{
             CurrentDocument, DocumentCommandFailed, DocumentLoadFailed, DocumentLoaded,
-            DocumentReloaded, SchematicDocumentAsset, SecondarySchematicAsset,
-            open_document_from_content, open_document_path,
+            DocumentReloaded, DocumentSaved, OpenDocumentFromContentRequest, OpenDocumentRequest,
+            SchematicDocumentAsset, SecondarySchematicAsset,
         },
         navigation_gizmo::RenderLayerAlloc,
     },
@@ -75,7 +74,6 @@ pub struct LoadSchematicParams<'w, 's> {
     primary_window: Single<'w, 's, Entity, With<PrimaryWindow>>,
     pub asset_server: Res<'w, AssetServer>,
     pub current_document: ResMut<'w, CurrentDocument>,
-    pub document_assets: Res<'w, Assets<SchematicDocumentAsset>>,
     pub meshes: ResMut<'w, Assets<Mesh>>,
     pub materials: ResMut<'w, Assets<StandardMaterial>>,
     pub mat3_materials: ResMut<'w, Assets<Mat3Material>>,
@@ -99,7 +97,8 @@ pub fn sync_schematic(
     In(given_path): In<Option<PathBuf>>,
     config: Res<DbConfig>,
     mut params: LoadSchematicParams,
-    mut modal: ModalDialog,
+    mut open_document: MessageWriter<OpenDocumentRequest>,
+    mut open_document_from_content: MessageWriter<OpenDocumentFromContentRequest>,
 ) {
     if given_path.is_none() && !config.is_changed() {
         return;
@@ -107,44 +106,26 @@ pub fn sync_schematic(
     let has_content_fallback = config.schematic_content().is_some();
     let path_was_overridden = given_path.is_some();
     if let Some(path) = given_path.or(config.schematic_path().map(PathBuf::from)) {
-        // NOTE: This path is not resolved yet. We can't test if it exists here.
-        // load_schematic_file resolves it and should do that test there.
-        match load_schematic_file(&path, &mut params) {
-            Ok(()) => return,
-            Err(KdlSchematicError::NoSuchFile { .. })
-                if has_content_fallback && !path_was_overridden =>
-            {
-                bevy::log::info!(
-                    "Schematic file {:?} not found; using embedded schematic content fallback",
-                    path.display()
-                );
-            }
-            Err(e) => {
-                modal.dialog_error(
-                    format!("Invalid Schematic in {:?}", path.display()),
-                    &render_diag(&e),
-                );
-                let report = miette!(e.clone());
-                bevy::log::error!(?report, "Invalid schematic for {path:?}");
-            }
+        let resolved_path = impeller2_kdl::env::schematic_file(&path);
+        if resolved_path.try_exists().unwrap_or(false) {
+            open_document.write(OpenDocumentRequest(path));
+            return;
+        }
+        if has_content_fallback && !path_was_overridden {
+            bevy::log::info!(
+                "Schematic file {:?} not found; using embedded schematic content fallback",
+                resolved_path.display()
+            );
         }
     }
     if let Some(content) = config.schematic_content() {
-        let save_path = config
-            .schematic_path()
-            .map(Path::new)
-            .map(impeller2_kdl::env::schematic_file);
-        let Ok(document) =
-            open_document_from_content(content, save_path.clone(), &mut params.current_document)
-                .inspect_err(|e| {
-                    modal.dialog_error("Invalid Schematic", &render_diag(e));
-                    let report = miette!(e.clone());
-                    bevy::log::error!(?report, "Invalid schematic content")
-                })
-        else {
-            return;
-        };
-        apply_loaded_document(&mut params, save_path.as_deref(), &document);
+        open_document_from_content.write(OpenDocumentFromContentRequest {
+            content: content.to_string(),
+            save_path: config
+                .schematic_path()
+                .map(Path::new)
+                .map(impeller2_kdl::env::schematic_file),
+        });
         return;
     }
 
@@ -243,22 +224,6 @@ pub fn render_diag(diagnostic: &dyn Diagnostic) -> String {
         .render_report(&mut buf, diagnostic)
         .expect("Failed to render diagnostic");
     buf
-}
-
-pub fn load_schematic_file(
-    path: &Path,
-    params: &mut LoadSchematicParams,
-) -> Result<(), KdlSchematicError> {
-    let resolved_path = impeller2_kdl::env::schematic_file(path);
-    if let Some(document) = open_document_path(
-        path,
-        &params.asset_server,
-        &mut params.current_document,
-        &params.document_assets,
-    )? {
-        apply_loaded_document(&mut *params, Some(resolved_path.as_path()), &document);
-    }
-    Ok(())
 }
 
 impl LoadSchematicParams<'_, '_> {
@@ -1250,6 +1215,20 @@ pub fn apply_document_loaded(
         return;
     };
     apply_loaded_document(&mut params, event.save_path.as_deref(), &event.document);
+}
+
+pub fn apply_document_saved(
+    mut events: MessageReader<DocumentSaved>,
+    mut windows_state: Query<(&WindowId, &mut WindowState)>,
+) {
+    for event in events.read() {
+        info!(path = %event.save_path.display(), "Saved schematic");
+        for (id, mut state) in &mut windows_state {
+            if id.is_primary() {
+                state.descriptor.path = Some(event.save_path.clone());
+            }
+        }
+    }
 }
 
 pub fn show_document_command_failures(

@@ -501,6 +501,7 @@ impl Plugin for SchematicPlugin {
                 PreUpdate,
                 (
                     load::apply_document_loaded.before(crate::ui::sync_windows),
+                    load::apply_document_saved,
                     load::apply_document_reloaded.before(crate::ui::sync_windows),
                     load::show_document_command_failures,
                     load::show_document_load_failures,
