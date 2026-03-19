@@ -21,6 +21,8 @@ use impeller2_wkt::{
     SchematicElem, Split, VectorArrow3d, VideoStream as WktVideoStream, Viewport, WindowSchematic,
 };
 
+pub mod bindings;
+pub use bindings::SchematicBindings;
 pub mod tree;
 pub use tree::*;
 mod load;
@@ -33,14 +35,14 @@ pub use crate::plugins::kdl_document::{
 pub use load::*;
 
 #[derive(Resource, Debug, Clone, Deref, DerefMut)]
-pub struct CurrentSchematic(pub Schematic<Entity>);
+pub struct CurrentSchematic(pub Schematic);
 
 #[derive(Debug, Clone)]
 pub struct SecondarySchematic {
     pub window_id: tiles::WindowId,
     pub file_name: String,
     pub title: Option<String>,
-    pub schematic: Schematic<Entity>,
+    pub schematic: Schematic,
 }
 
 #[derive(Resource, Debug, Default, Clone)]
@@ -72,7 +74,7 @@ pub struct SchematicParam<'w, 's> {
     pub windows_state: Query<'w, 's, (&'static tiles::WindowState, &'static tiles::WindowId)>,
     pub primary_window: Single<'w, 's, Entity, With<PrimaryWindow>>,
     pub current_document: Res<'w, CurrentDocument>,
-    pub dashboards: Query<'w, 's, &'static Dashboard<Entity>>,
+    pub dashboards: Query<'w, 's, &'static Dashboard>,
     pub video_streams: Query<'w, 's, &'static super::video_stream::VideoStream>,
     pub log_streams: Query<'w, 's, &'static super::log_stream::LogStreamState>,
     pub hdr_enabled: Res<'w, HdrEnabled>,
@@ -112,24 +114,28 @@ impl SchematicParam<'_, '_> {
         }
     }
 
-    fn root_panels_from_state(&self, state: &tiles::TileState) -> Vec<Panel<Entity>> {
+    fn root_panels_from_state(
+        &self,
+        state: &tiles::TileState,
+        bindings: &mut SchematicBindings,
+    ) -> Vec<Panel> {
         let Some(root_id) = state.tree.root() else {
             return Vec::new();
         };
 
-        match self.get_panel_from_state(state, root_id) {
+        match self.get_panel_from_state(state, root_id, bindings) {
             Some(Panel::Tabs(tabs)) => vec![Panel::Tabs(tabs)],
             Some(panel) => vec![panel],
             None => Vec::new(),
         }
     }
 
-    pub fn get_panel(&self, tile_id: TileId) -> Option<Panel<Entity>> {
+    pub fn get_panel(&self, tile_id: TileId, bindings: &mut SchematicBindings) -> Option<Panel> {
         self.windows_state
             .get(*self.primary_window)
             .ok()
             .and_then(|(window_state, _)| {
-                self.get_panel_from_state(&window_state.tile_state, tile_id)
+                self.get_panel_from_state(&window_state.tile_state, tile_id, bindings)
             })
     }
 
@@ -137,7 +143,8 @@ impl SchematicParam<'_, '_> {
         &self,
         state: &tiles::TileState,
         tile_id: TileId,
-    ) -> Option<Panel<Entity>> {
+        bindings: &mut SchematicBindings,
+    ) -> Option<Panel> {
         let tiles = &state.tree.tiles;
         let tile = tiles.get(tile_id)?;
 
@@ -211,6 +218,8 @@ impl SchematicParam<'_, '_> {
                             .map(|(_, arrow, _)| arrow.clone())
                             .collect();
 
+                        let node_id = impeller2_wkt::NodeId::next();
+                        bindings.bind_ephemeral(node_id, cam_entity);
                         Some(Panel::Viewport(Viewport {
                             fov,
                             near,
@@ -231,7 +240,7 @@ impl SchematicParam<'_, '_> {
                             up: (!viewport_data.up.eql.is_empty())
                                 .then(|| viewport_data.up.eql.clone()),
                             local_arrows,
-                            aux: cam_entity,
+                            node_id,
                         }))
                     }
 
@@ -258,6 +267,8 @@ impl SchematicParam<'_, '_> {
                             eql = graph_state.label.clone();
                         }
 
+                        let node_id = impeller2_wkt::NodeId::next();
+                        bindings.bind_ephemeral(node_id, graph.id);
                         Some(Panel::Graph(impeller2_wkt::Graph {
                             eql,
                             name: pane_name,
@@ -265,7 +276,7 @@ impl SchematicParam<'_, '_> {
                             locked: graph_state.locked,
                             auto_y_range: graph_state.auto_y_range,
                             y_range: graph_state.y_range.clone(),
-                            aux: graph.id,
+                            node_id,
                             colors,
                         }))
                     }
@@ -286,12 +297,15 @@ impl SchematicParam<'_, '_> {
                     }
 
                     Pane::QueryPlot(plot) => {
-                        let query_plot = self.query_plots.get(plot.entity).ok()?;
-                        let mut query_plot = query_plot.data.map_aux(|_| plot.entity);
+                        let query_plot_data = self.query_plots.get(plot.entity).ok()?;
+                        let node_id = impeller2_wkt::NodeId::next();
+                        bindings.bind_ephemeral(node_id, plot.entity);
+                        let mut qp = query_plot_data.data.clone();
+                        qp.node_id = node_id;
                         if let Some(name) = pane_name {
-                            query_plot.name = name;
+                            qp.name = name;
                         }
-                        Some(Panel::QueryPlot(query_plot))
+                        Some(Panel::QueryPlot(qp))
                     }
 
                     Pane::ActionTile(action) => {
@@ -328,9 +342,11 @@ impl SchematicParam<'_, '_> {
                     // Structural panes
                     Pane::SchematicTree(_) => Some(Panel::SchematicTree(pane_name)),
 
-                    // Dashboard
                     Pane::Dashboard(dash) => {
                         let mut dashboard = self.dashboards.get(dash.entity).ok()?.clone();
+                        let node_id = impeller2_wkt::NodeId::next();
+                        bindings.bind_ephemeral(node_id, dash.entity);
+                        dashboard.node_id = node_id;
                         if let Some(name) = pane_name {
                             dashboard.root.name = Some(name);
                         }
@@ -344,7 +360,7 @@ impl SchematicParam<'_, '_> {
                 egui_tiles::Container::Tabs(t) => {
                     let mut tabs = vec![];
                     for child_id in &t.children {
-                        if let Some(tab) = self.get_panel_from_state(state, *child_id) {
+                        if let Some(tab) = self.get_panel_from_state(state, *child_id, bindings) {
                             tabs.push(tab)
                         }
                     }
@@ -361,7 +377,7 @@ impl SchematicParam<'_, '_> {
                     let name = state.get_container_title(tile_id).map(|s| s.to_string());
 
                     for child_id in &linear.children {
-                        if let Some(panel) = self.get_panel_from_state(state, *child_id) {
+                        if let Some(panel) = self.get_panel_from_state(state, *child_id, bindings) {
                             if let Some((_, share)) =
                                 linear.shares.iter().find(|(id, _)| *id == child_id)
                             {
@@ -399,38 +415,49 @@ pub fn tiles_to_schematic(
     param: SchematicParam,
     mut schematic: ResMut<CurrentSchematic>,
     mut secondary: ResMut<CurrentSecondarySchematics>,
+    mut bindings: ResMut<SchematicBindings>,
 ) {
     schematic.elems.clear();
+    bindings.clear_ephemeral();
 
     if let Some(root_panels) = param
         .windows_state
         .get(*param.primary_window)
         .ok()
-        .map(|(window_state, _)| param.root_panels_from_state(&window_state.tile_state))
+        .map(|(window_state, _)| {
+            param.root_panels_from_state(&window_state.tile_state, &mut bindings)
+        })
     {
         schematic
             .elems
             .extend(root_panels.into_iter().map(SchematicElem::Panel))
     }
-    schematic.elems.extend(
-        param
-            .objects_3d
-            .iter()
-            .map(|(entity, o)| o.data.map_aux(|_| entity))
-            .map(SchematicElem::Object3d),
-    );
-    schematic.elems.extend(
-        param
-            .lines_3d
-            .iter()
-            .map(|(entity, line)| SchematicElem::Line3d(line.map_aux(|_| entity))),
-    );
+    schematic.elems.extend(param.objects_3d.iter().map(|(entity, o)| {
+        let mut obj = o.data.clone();
+        let node_id = impeller2_wkt::NodeId::next();
+        bindings.bind_ephemeral(node_id, entity);
+        obj.node_id = node_id;
+        SchematicElem::Object3d(obj)
+    }));
+    schematic.elems.extend(param.lines_3d.iter().map(|(entity, line)| {
+        let mut l = line.clone();
+        let node_id = impeller2_wkt::NodeId::next();
+        bindings.bind_ephemeral(node_id, entity);
+        l.node_id = node_id;
+        SchematicElem::Line3d(l)
+    }));
     schematic.elems.extend(
         param
             .vector_arrows
             .iter()
             .filter(|(_, _, viewport_arrow)| viewport_arrow.is_none())
-            .map(|(entity, arrow, _)| SchematicElem::VectorArrow(arrow.map_aux(|_| entity))),
+            .map(|(entity, arrow, _)| {
+                let mut a = arrow.clone();
+                let node_id = impeller2_wkt::NodeId::next();
+                bindings.bind_ephemeral(node_id, entity);
+                a.node_id = node_id;
+                SchematicElem::VectorArrow(a)
+            }),
     );
 
     secondary.0.clear();
@@ -455,7 +482,7 @@ pub fn tiles_to_schematic(
             let mut window_schematic = Schematic::default();
             window_schematic.elems.extend(
                 param
-                    .root_panels_from_state(&state.tile_state)
+                    .root_panels_from_state(&state.tile_state, &mut bindings)
                     .into_iter()
                     .map(SchematicElem::Panel),
             );
@@ -496,6 +523,7 @@ impl Plugin for SchematicPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(CurrentSchematic(Default::default()))
             .insert_resource(CurrentSecondarySchematics::default())
+            .init_resource::<SchematicBindings>()
             .add_systems(PostUpdate, tiles_to_schematic)
             .add_systems(
                 PostUpdate,

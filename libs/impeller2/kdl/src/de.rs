@@ -547,7 +547,7 @@ fn parse_viewport(node: &KdlNode, kdl_src: &str) -> Result<Panel, KdlSchematicEr
         look_at,
         up,
         local_arrows,
-        aux: (),
+        node_id: NodeId::default(),
     }))
 }
 
@@ -602,7 +602,7 @@ fn parse_graph(node: &KdlNode, src: &str) -> Result<Panel, KdlSchematicError> {
         locked,
         auto_y_range,
         y_range,
-        aux: (),
+        node_id: NodeId::default(),
         colors,
     }))
 }
@@ -780,7 +780,7 @@ fn parse_query_plot(node: &KdlNode, src: &str) -> Result<Panel, KdlSchematicErro
         plot_mode,
         x_label,
         y_label,
-        aux: (),
+        node_id: NodeId::default(),
     }))
 }
 
@@ -878,7 +878,7 @@ fn parse_object_3d(node: &KdlNode, src: &str) -> Result<Object3D, KdlSchematicEr
         mesh,
         icon,
         mesh_visibility_range,
-        aux: (),
+        node_id: NodeId::default(),
     })
 }
 
@@ -1170,7 +1170,7 @@ fn parse_line_3d(node: &KdlNode, src: &str) -> Result<Line3d, KdlSchematicError>
         line_width,
         color,
         perspective,
-        aux: (),
+        node_id: NodeId::default(),
     })
 }
 
@@ -1349,7 +1349,7 @@ fn parse_vector_arrow(node: &KdlNode, src: &str) -> Result<VectorArrow3d, KdlSch
         show_name,
         thickness,
         label_position,
-        aux: (),
+        node_id: NodeId::default(),
     })
 }
 
@@ -1572,10 +1572,13 @@ fn parse_material_from_node(node: &KdlNode) -> Option<Material> {
 fn parse_dashboard(node: &KdlNode) -> Result<Panel, KdlSchematicError> {
     let root = parse_dashboard_node(node)?;
 
-    Ok(Panel::Dashboard(Box::new(Dashboard { root, aux: () })))
+    Ok(Panel::Dashboard(Box::new(Dashboard {
+        root,
+        node_id: NodeId::default(),
+    })))
 }
 
-fn parse_dashboard_node(node: &KdlNode) -> Result<DashboardNode<()>, KdlSchematicError> {
+fn parse_dashboard_node(node: &KdlNode) -> Result<DashboardNode, KdlSchematicError> {
     let display = node
         .get("display")
         .and_then(|v| v.as_string())
@@ -1812,7 +1815,7 @@ fn parse_dashboard_node(node: &KdlNode) -> Result<DashboardNode<()>, KdlSchemati
         text,
         font_size,
         text_color,
-        aux: (),
+        node_id: NodeId::default(),
     })
 }
 

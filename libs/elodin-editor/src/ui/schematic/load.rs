@@ -91,6 +91,7 @@ pub struct LoadSchematicParams<'w, 's> {
     vector_arrows: Query<'w, 's, Entity, With<VectorArrowState>>,
     grid_lines: Query<'w, 's, Entity, With<InfiniteGrid>>,
     window_states: Query<'w, 's, (Entity, &'static WindowId, &'static mut WindowState)>,
+    pub schematic_bindings: ResMut<'w, super::SchematicBindings>,
 }
 
 fn apply_theme(theme: Option<&impeller2_wkt::ThemeConfig>) -> colors::SchemeSelection {
@@ -1011,6 +1012,7 @@ impl LoadSchematicParams<'_, '_> {
                     &self.eql.0,
                     &mut self.commands,
                     &self.node_updater_params,
+                    &mut self.schematic_bindings,
                 )
                 .inspect_err(|err| {
                     warn!(?err, "Failed to spawn dashboard");

@@ -9,7 +9,7 @@ use crate::ui::inspector::search;
 use crate::ui::tiles::WindowState;
 use crate::ui::widgets::WidgetSystem;
 
-use super::CurrentSchematic;
+use super::{CurrentSchematic, SchematicBindings};
 use bevy::ecs::entity::Entity;
 use bevy::ecs::hierarchy::ChildOf;
 use bevy::ecs::system::{Commands, Res, SystemParam};
@@ -32,7 +32,8 @@ struct SpawnNodeParams<'w, 's> {
     eql_ctx: Res<'w, EqlContext>,
     commands: Commands<'w, 's>,
     node_update_params: NodeUpdaterParams<'w, 's>,
-    dashboards: Query<'w, 's, &'static mut Dashboard<Entity>>,
+    dashboards: Query<'w, 's, &'static mut Dashboard>,
+    bindings: ResMut<'w, SchematicBindings>,
 }
 
 pub struct TreeIcons {
@@ -95,7 +96,9 @@ impl WidgetSystem for TreeWidget<'_, '_> {
                         &mut spawn_node_params,
                     ),
                     impeller2_wkt::SchematicElem::Object3d(object_3d) => {
-                        let selected = if Some(object_3d.aux) == selected_object.entity() {
+                        let obj_entity =
+                            spawn_node_params.bindings.get(object_3d.node_id);
+                        let selected = if obj_entity == selected_object.entity() {
                             *selected_object != SelectedObject::None
                         } else {
                             false
@@ -110,9 +113,9 @@ impl WidgetSystem for TreeWidget<'_, '_> {
                         .selected(selected)
                         .show(ui, |_| {});
                         if branch_res.inner.clicked() {
-                            *selected_object = SelectedObject::Object3D {
-                                entity: object_3d.aux,
-                            };
+                            if let Some(entity) = obj_entity {
+                                *selected_object = SelectedObject::Object3D { entity };
+                            }
                         }
                     }
                     impeller2_wkt::SchematicElem::Line3d(_line3d) => {}
@@ -130,7 +133,7 @@ fn panel(
     ui: &mut egui::Ui,
     tree_rect: egui::Rect,
     icons: &TreeIcons,
-    p: &Panel<Entity>,
+    p: &Panel,
     selected_object: &mut SelectedObject,
     spawn_node_params: &mut SpawnNodeParams,
 ) {
@@ -154,7 +157,10 @@ fn panel(
         Panel::LogStream(_) => icons.viewport,
     };
     let children = p.children();
-    let selected = if p.aux().copied() == selected_object.entity() {
+    let resolved_entity = p
+        .node_id()
+        .and_then(|id| spawn_node_params.bindings.get(id));
+    let selected = if resolved_entity == selected_object.entity() {
         *selected_object != SelectedObject::None
     } else {
         false
@@ -172,6 +178,9 @@ fn panel(
     }
     let branch_res = branch.show(ui, |ui| {
         if let Panel::Dashboard(d) = p {
+            let Some(dash_entity) = spawn_node_params.bindings.get(d.node_id) else {
+                return;
+            };
             for (i, child) in d.root.children.iter().enumerate() {
                 dashboard_node(
                     ui,
@@ -180,11 +189,11 @@ fn panel(
                     icons,
                     selected_object,
                     DashboardNodePath {
-                        root: d.aux,
+                        root: dash_entity,
                         path: smallvec![i],
                     },
                     spawn_node_params,
-                    d.aux,
+                    dash_entity,
                 );
             }
         } else {
@@ -203,21 +212,27 @@ fn panel(
     if branch_res.inner.clicked() {
         match p {
             Panel::Viewport(viewport) => {
-                *selected_object = SelectedObject::Viewport {
-                    camera: viewport.aux,
-                    title: p.label().to_string(),
+                if let Some(camera) = spawn_node_params.bindings.get(viewport.node_id) {
+                    *selected_object = SelectedObject::Viewport {
+                        camera,
+                        title: p.label().to_string(),
+                    };
                 }
             }
             Panel::Graph(graph) => {
-                *selected_object = SelectedObject::Graph {
-                    graph_id: graph.aux,
+                if let Some(graph_id) = spawn_node_params.bindings.get(graph.node_id) {
+                    *selected_object = SelectedObject::Graph { graph_id };
                 }
             }
             Panel::QueryPlot(plot) => {
-                *selected_object = SelectedObject::Graph { graph_id: plot.aux }
+                if let Some(graph_id) = spawn_node_params.bindings.get(plot.node_id) {
+                    *selected_object = SelectedObject::Graph { graph_id };
+                }
             }
             Panel::Dashboard(d) => {
-                *selected_object = SelectedObject::DashboardNode { entity: d.aux }
+                if let Some(entity) = spawn_node_params.bindings.get(d.node_id) {
+                    *selected_object = SelectedObject::DashboardNode { entity };
+                }
             }
             _ => {}
         }
@@ -225,14 +240,16 @@ fn panel(
     if branch_res.extra_clicked
         && let Panel::Dashboard(d) = p
     {
-        spawn_child_node(
-            &DashboardNodePath {
-                root: d.aux,
-                path: smallvec![],
-            },
-            spawn_node_params,
-            d.aux,
-        );
+        if let Some(dash_entity) = spawn_node_params.bindings.get(d.node_id) {
+            spawn_child_node(
+                &DashboardNodePath {
+                    root: dash_entity,
+                    path: smallvec![],
+                },
+                spawn_node_params,
+                dash_entity,
+            );
+        }
     }
 }
 
@@ -240,7 +257,7 @@ fn panel(
 fn dashboard_node(
     ui: &mut egui::Ui,
     tree_rect: egui::Rect,
-    node: &DashboardNode<Entity>,
+    node: &DashboardNode,
     icons: &TreeIcons,
     selected_object: &mut SelectedObject,
     path: DashboardNodePath,
@@ -248,8 +265,9 @@ fn dashboard_node(
     parent: Entity,
 ) {
     let children = &node.children;
+    let node_entity = spawn_node_params.bindings.get(node.node_id);
 
-    let selected = if Some(node.aux) == selected_object.entity() {
+    let selected = if node_entity == selected_object.entity() {
         *selected_object != SelectedObject::None
     } else {
         false
@@ -264,6 +282,7 @@ fn dashboard_node(
     .extra_icon(icons.add)
     .selected(selected)
     .show(ui, |ui| {
+        let child_parent = node_entity.unwrap_or(parent);
         for (i, child) in children.iter().enumerate() {
             let mut path = path.clone();
             path.path.push(i);
@@ -275,7 +294,7 @@ fn dashboard_node(
                 selected_object,
                 path,
                 spawn_node_params,
-                node.aux,
+                child_parent,
             );
         }
     });
@@ -294,7 +313,11 @@ fn dashboard_node(
             let Some(parent_node) = dashboard.root.get_node_mut(&parent_path) else {
                 return;
             };
-            let parent_entity = parent_node.aux;
+            let Some(parent_entity) =
+                spawn_node_params.bindings.get(parent_node.node_id)
+            else {
+                return;
+            };
             let mut path = DashboardNodePath {
                 root: path.root,
                 path: parent_path,
@@ -308,6 +331,7 @@ fn dashboard_node(
                 path.root,
                 path.path,
                 &spawn_node_params.node_update_params,
+                &mut spawn_node_params.bindings,
             ) {
                 parent_node.children.push(child);
             }
@@ -325,14 +349,20 @@ fn dashboard_node(
             let Some(index) = path.path.last() else {
                 return;
             };
-            let node = parent_node.children.remove(*index);
-            if let Ok(mut e) = spawn_node_params.commands.get_entity(node.aux) {
-                e.despawn();
+            let removed = parent_node.children.remove(*index);
+            if let Some(e) = spawn_node_params.bindings.get(removed.node_id) {
+                if let Ok(mut e) = spawn_node_params.commands.get_entity(e) {
+                    e.despawn();
+                }
+                spawn_node_params.bindings.remove(removed.node_id);
             }
             if selected {
-                *selected_object = SelectedObject::DashboardNode {
-                    entity: parent_node.aux,
-                };
+                if let Some(parent_e) =
+                    spawn_node_params.bindings.get(parent_node.node_id)
+                {
+                    *selected_object =
+                        SelectedObject::DashboardNode { entity: parent_e };
+                }
             }
         }
     });
@@ -342,7 +372,9 @@ fn dashboard_node(
     }
 
     if branch_res.inner.clicked() {
-        *selected_object = SelectedObject::DashboardNode { entity: node.aux };
+        if let Some(entity) = node_entity {
+            *selected_object = SelectedObject::DashboardNode { entity };
+        }
     }
 }
 
@@ -357,6 +389,7 @@ fn spawn_child_node(
         commands,
         node_update_params,
         dashboards,
+        bindings,
     } = spawn_node_params;
     let mut commands = commands.spawn(ChildOf(parent));
 
@@ -367,13 +400,14 @@ fn spawn_child_node(
         return;
     };
     path.path.push(parent_node.children.len());
-    if let Ok(child) = spawn_node::<()>(
+    if let Ok(child) = spawn_node(
         &Default::default(),
         &eql_ctx.0,
         &mut commands,
         path.root,
         path.path,
         node_update_params,
+        bindings,
     ) {
         parent_node.children.push(child);
     }

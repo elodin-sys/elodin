@@ -5,7 +5,7 @@ use kdl::{KdlDocument, KdlEntry, KdlNode};
 // Default precision for float properties emitted to KDL.
 const KDL_FLOAT_PRECISION: u32 = 6;
 
-pub fn serialize_schematic<T>(schematic: &Schematic<T>) -> String {
+pub fn serialize_schematic(schematic: &Schematic) -> String {
     let mut doc = KdlDocument::new();
 
     if let Some(theme) = schematic.theme.as_ref() {
@@ -26,7 +26,7 @@ pub fn serialize_schematic<T>(schematic: &Schematic<T>) -> String {
     s
 }
 
-fn serialize_schematic_elem<T>(elem: &SchematicElem<T>) -> KdlNode {
+fn serialize_schematic_elem(elem: &SchematicElem) -> KdlNode {
     match elem {
         SchematicElem::Panel(panel) => serialize_panel(panel),
         SchematicElem::Object3d(obj) => serialize_object_3d(obj),
@@ -38,7 +38,7 @@ fn serialize_schematic_elem<T>(elem: &SchematicElem<T>) -> KdlNode {
     }
 }
 
-fn serialize_panel<T>(panel: &Panel<T>) -> KdlNode {
+fn serialize_panel(panel: &Panel) -> KdlNode {
     match panel {
         Panel::Tabs(panels) => {
             let mut node = KdlNode::new("tabs");
@@ -136,7 +136,7 @@ fn serialize_log_stream(log_stream: &LogStream) -> KdlNode {
     node
 }
 
-fn serialize_split<T>(split: &Split<T>, is_horizontal: bool) -> KdlNode {
+fn serialize_split(split: &Split, is_horizontal: bool) -> KdlNode {
     let node_name = if is_horizontal { "hsplit" } else { "vsplit" };
     let mut node = KdlNode::new(node_name);
 
@@ -162,7 +162,7 @@ fn serialize_split<T>(split: &Split<T>, is_horizontal: bool) -> KdlNode {
     node
 }
 
-fn serialize_viewport<T>(viewport: &Viewport<T>) -> KdlNode {
+fn serialize_viewport(viewport: &Viewport) -> KdlNode {
     let mut node = KdlNode::new("viewport");
 
     push_optional_name_prop(&mut node, viewport.name.as_deref());
@@ -370,7 +370,7 @@ fn serialize_timeline(timeline: &TimelineConfig) -> KdlNode {
     node
 }
 
-fn serialize_graph<T>(graph: &Graph<T>) -> KdlNode {
+fn serialize_graph(graph: &Graph) -> KdlNode {
     let mut node = KdlNode::new("graph");
 
     // Add the EQL query as the first unnamed entry
@@ -452,7 +452,7 @@ fn serialize_query_table(query_table: &QueryTable) -> KdlNode {
     node
 }
 
-fn serialize_query_plot<T>(query_plot: &QueryPlot<T>) -> KdlNode {
+fn serialize_query_plot(query_plot: &QueryPlot) -> KdlNode {
     let mut node = KdlNode::new("query_plot");
 
     push_name_prop(&mut node, &query_plot.name);
@@ -504,7 +504,7 @@ fn serialize_query_plot<T>(query_plot: &QueryPlot<T>) -> KdlNode {
     node
 }
 
-fn serialize_object_3d<T>(obj: &Object3D<T>) -> KdlNode {
+fn serialize_object_3d(obj: &Object3D) -> KdlNode {
     let mut node = KdlNode::new("object_3d");
 
     node.entries_mut().push(KdlEntry::new(obj.eql.clone()));
@@ -703,7 +703,7 @@ fn serialize_object_3d_mesh(mesh: &Object3DMesh) -> (KdlNode, Vec<KdlNode>) {
     }
 }
 
-fn serialize_line_3d<T>(line: &Line3d<T>) -> KdlNode {
+fn serialize_line_3d(line: &Line3d) -> KdlNode {
     let mut node = KdlNode::new("line_3d");
 
     // Add the EQL query as the first unnamed entry
@@ -723,7 +723,7 @@ fn serialize_line_3d<T>(line: &Line3d<T>) -> KdlNode {
     node
 }
 
-fn serialize_vector_arrow<T>(arrow: &VectorArrow3d<T>) -> KdlNode {
+fn serialize_vector_arrow(arrow: &VectorArrow3d) -> KdlNode {
     let mut node = KdlNode::new("vector_arrow");
     node.entries_mut().push(KdlEntry::new(arrow.vector.clone()));
 
@@ -822,14 +822,14 @@ fn serialize_material_to_node(node: &mut KdlNode, material: &Material) {
     serialize_color_to_node(node, &material.base_color);
 }
 
-fn serialize_dashboard<T>(dashboard: &Dashboard<T>) -> KdlNode {
+fn serialize_dashboard(dashboard: &Dashboard) -> KdlNode {
     let mut node = serialize_dashboard_node(&dashboard.root);
     node.set_name("dashboard");
 
     node
 }
 
-fn serialize_dashboard_node<T>(dashboard_node: &DashboardNode<T>) -> KdlNode {
+fn serialize_dashboard_node(dashboard_node: &DashboardNode) -> KdlNode {
     let mut node = KdlNode::new("node");
 
     serialize_dashboard_node_properties(&mut node, dashboard_node);
@@ -876,7 +876,7 @@ fn serialize_dashboard_node<T>(dashboard_node: &DashboardNode<T>) -> KdlNode {
     node
 }
 
-fn serialize_dashboard_node_properties<T>(node: &mut KdlNode, dashboard_node: &DashboardNode<T>) {
+fn serialize_dashboard_node_properties(node: &mut KdlNode, dashboard_node: &DashboardNode) {
     if let Some(name) = dashboard_node.name.as_ref() {
         node.entries_mut()
             .push(KdlEntry::new_prop("name", name.as_str()));
@@ -1078,7 +1078,7 @@ mod tests {
 
     #[test]
     fn test_serialize_timeline_config() {
-        let schematic = Schematic::<()> {
+        let schematic = Schematic {
             timeline: Some(TimelineConfig {
                 played_color: Color::MINT,
                 future_color: Color::HYPERBLUE,
@@ -1125,7 +1125,7 @@ mod tests {
                 look_at: None,
                 up: None,
                 local_arrows: Vec::new(),
-                aux: (),
+                node_id: NodeId::default(),
             })));
 
         let serialized = serialize_schematic(&schematic);
@@ -1167,7 +1167,7 @@ mod tests {
                 look_at: Some("(0,0,0,0, 0,0,0)".to_string()),
                 up: None,
                 local_arrows: Vec::new(),
-                aux: (),
+                node_id: NodeId::default(),
             })));
 
         let serialized = serialize_schematic(&schematic);
@@ -1222,7 +1222,7 @@ mod tests {
                 locked: false,
                 auto_y_range: true,
                 y_range: 0.0..1.0,
-                aux: (),
+                node_id: NodeId::default(),
                 colors: vec![],
             })));
 
@@ -1251,7 +1251,7 @@ mod tests {
                 locked: false,
                 auto_y_range: true,
                 y_range: 0.0..1.0,
-                aux: (),
+                node_id: NodeId::default(),
                 colors: vec![Color::rgb(1.0, 0.0, 0.0), Color::rgb(0.0, 1.0, 0.0)],
             })));
 
@@ -1302,7 +1302,7 @@ graph "value" {
             },
             icon: None,
             mesh_visibility_range: None,
-            aux: (),
+            node_id: NodeId::default(),
         }));
 
         let serialized = serialize_schematic(&schematic);
@@ -1342,7 +1342,7 @@ graph "value" {
             },
             icon: None,
             mesh_visibility_range: None,
-            aux: (),
+            node_id: NodeId::default(),
         }));
 
         let serialized = serialize_schematic(&schematic);
@@ -1379,7 +1379,7 @@ graph "value" {
             },
             icon: None,
             mesh_visibility_range: None,
-            aux: (),
+            node_id: NodeId::default(),
         }));
 
         let serialized = serialize_schematic(&schematic);
@@ -1413,7 +1413,7 @@ graph "value" {
             },
             icon: None,
             mesh_visibility_range: None,
-            aux: (),
+            node_id: NodeId::default(),
         }));
 
         let serialized = serialize_schematic(&schematic);
@@ -1468,7 +1468,7 @@ graph "value" {
                 look_at: None,
                 up: None,
                 local_arrows: Vec::new(),
-                aux: (),
+                node_id: NodeId::default(),
             }),
             Panel::Graph(Graph {
                 eql: "data.position".to_string(),
@@ -1477,7 +1477,7 @@ graph "value" {
                 locked: false,
                 auto_y_range: true,
                 y_range: 0.0..1.0,
-                aux: (),
+                node_id: NodeId::default(),
                 colors: vec![],
             }),
         ])));
@@ -1514,7 +1514,7 @@ graph "value" {
             line_width: 2.0,
             color: Color::MINT,
             perspective: false,
-            aux: (),
+            node_id: NodeId::default(),
         }));
 
         let serialized = serialize_schematic(&schematic);
@@ -1547,7 +1547,7 @@ graph "value" {
                 show_name: false,
                 thickness: ArrowThickness::new(1.23456),
                 label_position: LabelPosition::None,
-                aux: (),
+                node_id: NodeId::default(),
             }));
 
         let serialized = serialize_schematic(&schematic);
@@ -1677,7 +1677,7 @@ object_3d a.world_pos {
                 }],
                 ..Default::default()
             },
-            aux: (),
+            node_id: NodeId::default(),
         };
         schematic
             .elems

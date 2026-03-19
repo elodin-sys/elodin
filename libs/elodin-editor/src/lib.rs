@@ -1030,7 +1030,7 @@ pub fn sync_object_3d(
                 mesh: mesh_source,
                 icon: None,
                 mesh_visibility_range: None,
-                aux: (),
+                node_id: Default::default(),
             },
             expr,
             &ctx.0,

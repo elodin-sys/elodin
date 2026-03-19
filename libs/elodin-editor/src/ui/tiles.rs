@@ -957,7 +957,7 @@ impl Pane {
     fn title(
         &self,
         graph_states: &Query<&GraphState>,
-        dashboards: &Query<&Dashboard<Entity>>,
+        dashboards: &Query<&Dashboard>,
     ) -> String {
         match self {
             Pane::Graph(pane) => {
@@ -1257,7 +1257,7 @@ fn apply_pane_title_updates(
     query_plots: &mut Query<'_, '_, &'static mut QueryPlotData>,
     query_tables: &mut Query<'_, '_, &'static mut QueryTableData>,
     action_tiles: &mut Query<'_, '_, &'static mut ActionTile>,
-    dashboards: &mut Query<'_, '_, &'static mut Dashboard<Entity>>,
+    dashboards: &mut Query<'_, '_, &'static mut Dashboard>,
 ) {
     let title = title.to_string();
 
@@ -1710,7 +1710,7 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
 
     fn tab_title_for_pane(&mut self, pane: &Pane) -> egui::WidgetText {
         let mut query =
-            SystemState::<(Query<&GraphState>, Query<&Dashboard<Entity>>)>::new(self.world);
+            SystemState::<(Query<&GraphState>, Query<&Dashboard>)>::new(self.world);
         let (graphs, dashes) = query.get(self.world);
         pane.title(&graphs, &dashes).into()
     }
@@ -2514,12 +2514,13 @@ pub struct TileLayout<'w, 's> {
     cmd_palette_state: ResMut<'w, CommandPaletteState>,
     eql_ctx: Res<'w, EqlContext>,
     node_updater_params: NodeUpdaterParams<'w, 's>,
+    schematic_bindings: ResMut<'w, super::schematic::SchematicBindings>,
     tile_param: crate::ui::command_palette::palette_items::TileParam<'w, 's>,
     graph_states: Query<'w, 's, &'static mut GraphState>,
     query_plots: Query<'w, 's, &'static mut QueryPlotData>,
     query_tables: Query<'w, 's, &'static mut QueryTableData>,
     action_tiles: Query<'w, 's, &'static mut ActionTile>,
-    dashboards: Query<'w, 's, &'static mut Dashboard<Entity>>,
+    dashboards: Query<'w, 's, &'static mut Dashboard>,
 }
 
 #[derive(Clone)]
@@ -2859,6 +2860,7 @@ impl WidgetSystem for TileLayout<'_, '_> {
                             &state_mut.eql_ctx.0,
                             &mut state_mut.commands,
                             &state_mut.node_updater_params,
+                            &mut state_mut.schematic_bindings,
                         ) {
                             Ok(entity) => entity,
                             Err(_) => state_mut.commands.spawn(bevy::ui::Node::default()).id(),

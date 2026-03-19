@@ -4,6 +4,7 @@ use bevy::{ecs::system::SystemParam, prelude::*};
 use impeller2_wkt::{Dashboard, DashboardNode};
 
 use crate::ui::dashboard::DashboardNodePath;
+use crate::ui::schematic::SchematicBindings;
 use crate::{
     EqlContext,
     ui::{
@@ -21,11 +22,12 @@ use crate::{
 #[derive(SystemParam)]
 pub struct InspectorDashboardNode<'w, 's> {
     pub paths: Query<'w, 's, (&'static DashboardNodePath, Option<&'static Children>)>,
-    pub dashboards: Query<'w, 's, &'static mut Dashboard<Entity>>,
+    pub dashboards: Query<'w, 's, &'static mut Dashboard>,
     pub eql_ctx: Res<'w, EqlContext>,
     pub commands: Commands<'w, 's>,
     pub window_states: Query<'w, 's, &'static mut WindowState>,
     pub node_updater_params: NodeUpdaterParams<'w, 's>,
+    pub bindings: ResMut<'w, SchematicBindings>,
 }
 
 impl WidgetSystem for InspectorDashboardNode<'_, '_> {
@@ -46,6 +48,7 @@ impl WidgetSystem for InspectorDashboardNode<'_, '_> {
             mut commands,
             mut window_states,
             node_updater_params,
+            mut bindings,
         } = state.get_mut(world);
         let Ok((path, children)) = paths.get(entity) else {
             ui.colored_label(get_scheme().error, "Node found");
@@ -56,7 +59,7 @@ impl WidgetSystem for InspectorDashboardNode<'_, '_> {
             return;
         };
 
-        let dashboard_entity = dashboard.aux;
+        let dashboard_entity = path.root;
         let Some(node) = dashboard.root.get_node_mut(&path.path) else {
             ui.colored_label(
                 get_scheme().error,
@@ -111,7 +114,10 @@ impl WidgetSystem for InspectorDashboardNode<'_, '_> {
                     commands.entity(child).despawn();
                 }
             }
-            let mut entity = commands.entity(node.aux);
+            let Some(node_entity) = bindings.get(node.node_id) else {
+                return;
+            };
+            let mut entity = commands.entity(node_entity);
             if let Ok(new) = spawn_node(
                 node,
                 &eql_ctx.0,
@@ -119,10 +125,15 @@ impl WidgetSystem for InspectorDashboardNode<'_, '_> {
                 dashboard_entity,
                 path.path.clone(),
                 &node_updater_params,
+                &mut bindings,
             ) {
-                if let Ok(mut window_state) = window_states.get_mut(target_window) {
-                    window_state.ui_state.selected_object =
-                        SelectedObject::DashboardNode { entity: new.aux };
+                if let Some(new_entity) = bindings.get(new.node_id) {
+                    if let Ok(mut window_state) = window_states.get_mut(target_window) {
+                        window_state.ui_state.selected_object =
+                            SelectedObject::DashboardNode {
+                                entity: new_entity,
+                            };
+                    }
                 }
                 *node = new;
             }
@@ -283,12 +294,12 @@ fn font_size_editor(ui: &mut egui::Ui, label: &str, font_size: &mut f32) -> bool
     changed
 }
 
-pub trait DashboardExt<T> {
-    fn get_node_mut(&mut self, path: &[usize]) -> Option<&mut DashboardNode<T>>;
+pub trait DashboardExt {
+    fn get_node_mut(&mut self, path: &[usize]) -> Option<&mut DashboardNode>;
 }
 
-impl<T> DashboardExt<T> for DashboardNode<T> {
-    fn get_node_mut(&mut self, path: &[usize]) -> Option<&mut DashboardNode<T>> {
+impl DashboardExt for DashboardNode {
+    fn get_node_mut(&mut self, path: &[usize]) -> Option<&mut DashboardNode> {
         let Some(index) = path.first() else {
             return Some(self);
         };

@@ -185,6 +185,7 @@ pub fn spawn_dashboard(
     eql: &eql::Context,
     commands: &mut Commands,
     params: &NodeUpdaterParams,
+    bindings: &mut crate::ui::schematic::SchematicBindings,
 ) -> Result<Entity, eql::Error> {
     let mut parent = commands.spawn((
         Node {
@@ -204,10 +205,13 @@ pub fn spawn_dashboard(
         parent_id,
         smallvec![],
         params,
+        bindings,
     )?;
+    let dashboard_node_id = impeller2_wkt::NodeId::next();
+    bindings.bind(dashboard_node_id, parent_id);
     parent.insert(impeller2_wkt::Dashboard {
         root: node,
-        aux: parent_id,
+        node_id: dashboard_node_id,
     });
     parent.insert(DashboardNodePath {
         root: parent_id,
@@ -222,14 +226,15 @@ pub struct DashboardNodePath {
     pub path: SmallVec<[usize; 4]>,
 }
 
-pub fn spawn_node<T>(
-    source: &impeller2_wkt::DashboardNode<T>,
+pub fn spawn_node(
+    source: &impeller2_wkt::DashboardNode,
     eql: &eql::Context,
     commands: &mut EntityCommands,
     root: Entity,
     path: SmallVec<[usize; 4]>,
     params: &NodeUpdaterParams,
-) -> Result<DashboardNode<Entity>, eql::Error> {
+    bindings: &mut crate::ui::schematic::SchematicBindings,
+) -> Result<DashboardNode, eql::Error> {
     let left = compile_val(eql, &source.left);
     let right = compile_val(eql, &source.right);
     let top = compile_val(eql, &source.top);
@@ -451,7 +456,9 @@ pub fn spawn_node<T>(
     if let Some(text_color) = text_color {
         node.insert(text_color);
     }
-    let node = node.id();
+    let entity_id = node.id();
+    let node_id = impeller2_wkt::NodeId::next();
+    bindings.bind(node_id, entity_id);
     let node = DashboardNode {
         name: source.name.clone(),
         display: source.display,
@@ -496,14 +503,14 @@ pub fn spawn_node<T>(
                 let parent_id = commands.id();
                 let mut commands = commands.commands();
                 let mut commands = commands.spawn(ChildOf(parent_id));
-                spawn_node(child, eql, &mut commands, root, path, params)
+                spawn_node(child, eql, &mut commands, root, path, params, bindings)
             })
             .collect::<Result<Vec<_>, _>>()?,
         color: source.color,
         text: source.text.clone(),
         font_size: source.font_size,
         text_color: source.text_color,
-        aux: node,
+        node_id,
     };
     Ok(node)
 }
