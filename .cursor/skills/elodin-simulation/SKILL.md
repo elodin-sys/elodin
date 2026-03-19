@@ -229,6 +229,75 @@ model = EGM08(max_degree=64)          # <2.5ms at degree <=250
 force = model.compute_field(x, y, z, mass)
 ```
 
+## Physics Regression Testing
+
+When changes to the simulation pipeline (Noxpr graph, IREE compilation, shape
+handling, etc.) might alter numeric output, use a database-export diff to detect
+regressions.  The process:
+
+### 1. Capture a baseline on main
+
+```bash
+git stash && git checkout main
+nix develop
+just install
+
+# Run the sim, writing to a dedicated DB path
+BALL_DB_PATH=dbs/ball-main uv run examples/ball/main.py bench --ticks 2000
+
+# Export to flat CSVs (--flatten splits vector columns)
+elodin-db export --format csv --flatten --output exports/ball-main dbs/ball-main
+```
+
+The `BALL_DB_PATH` env var is read by `examples/ball/main.py` and passed to
+`world().run(..., db_path=...)`.  Other examples can be wired the same way.
+
+### 2. Capture the branch under test
+
+```bash
+git checkout <branch> && git stash pop
+nix develop
+just install
+BALL_DB_PATH=dbs/ball-branch uv run examples/ball/main.py bench --ticks 2000
+elodin-db export --format csv --flatten --output exports/ball-branch dbs/ball-branch
+```
+
+### 3. Diff component-by-component (ignoring timestamps)
+
+```bash
+# Quick pass/fail for every physics component:
+for f in ball.world_pos.csv ball.world_vel.csv ball.force.csv ball.wind.csv ball.world_accel.csv; do
+    echo -n "$f: "
+    diff <(cut -d',' -f2- exports/ball-main/$f) \
+         <(cut -d',' -f2- exports/ball-branch/$f) | wc -l
+done
+```
+
+Zero diff lines = bit-for-bit identical physics.  Non-zero tells you which
+component diverged.  Inspect the first differing row to find the tick where
+divergence starts and whether it is a large discrete jump (logic bug) or
+gradual drift (floating-point).
+
+### 4. Interpret results
+
+| Pattern | Likely cause |
+|---------|-------------|
+| All zeros | Physics preserved -- safe to land |
+| One component diverges at tick 1 | Compilation or shape bug -- the compiled VMFB computes something different |
+| Gradual drift accumulating over ticks | Floating-point evaluation order changed (e.g., different StableHLO structure) |
+| Only `wind` diverges | Random-key generation changed (seed dtype, PRNG semantics) |
+
+### Tips
+
+- Use `--ticks 2000` (not 1200) to expose drifts that accumulate.
+- Run all three canonical benchmarks to cover every code path:
+  - `ball` -- single-entity (batch1 path), uses `el.Seed` (U64) + `random.key`
+  - `drone` -- multi-entity, uses `sensor_tick` (U64)
+  - `cube-sat` -- JAX backend (`backend="jax-cpu"`), covers the non-IREE path
+- If you need to dump the StableHLO MLIR for comparison, set
+  `ELODIN_IREE_DUMP_DIR=/tmp/debug` before running.
+- Clean up temp databases after: `rm -rf dbs/ball-main dbs/ball-branch exports/`.
+
 ## Additional Resources
 
 - For the full Python API reference, see [api-reference.md](api-reference.md)
