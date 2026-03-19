@@ -1,3 +1,4 @@
+import os
 import elodin as el
 from jax import numpy as jnp
 from jax.numpy import linalg as la
@@ -10,6 +11,9 @@ SIM_TIME_STEP = 3600.0
 #SIM_TIME_STEP = 86400.0
 # Set the gravitational constant for Newton's law of universal gravitation
 G = 6.6743e-11
+DEFAULT_DB_PATH = "dbs/voyager"
+DB_PATH_ENV = "DB_PATH"
+MAX_TICKS_ENV = "MAX_TICKS"
 
 SPICE_DIR = Path(__file__).resolve().parent / "spice"
 SPICE_KERNELS = [
@@ -180,5 +184,16 @@ w.schematic("""
 """.format(body_objects=body_objects))
 
 sys = el.six_dof(sys=gravity)
+db_path = Path(os.environ.get(DB_PATH_ENV, DEFAULT_DB_PATH))
+max_ticks_env = os.environ.get(MAX_TICKS_ENV)
+max_ticks = int(max_ticks_env) if max_ticks_env is not None else None
+
 #sim = w.run(sys, SIM_TIME_STEP, run_time_step=1 / 120.0, pre_step=pre_step)
-sim = w.run(sys, SIM_TIME_STEP, pre_step=pre_step)
+sim = w.run(
+    sys,
+    SIM_TIME_STEP,
+    pre_step=pre_step,
+    max_ticks=max_ticks,
+    db_path=str(db_path),
+    interactive=False,
+)
