@@ -1408,6 +1408,7 @@ pub fn sync_graphs(
                                 line_visible_range: graph_state.visible_range.clone(),
                                 graph_type: graph_state.graph_type,
                             })
+                            .insert(Name::new("line"))
                             .insert(LineWidgetWidth(graph_state.widget_width as usize))
                             .id();
                         graph_state

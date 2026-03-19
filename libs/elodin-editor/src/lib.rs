@@ -255,6 +255,7 @@ impl Plugin for EditorPlugin {
                     object_3d::update_object_3d_system,
                     set_floating_origin,
                     bevy_geo_frames::big_space::apply_big_translation::<i128>,
+                    bevy_geo_frames::apply_geo_rotation,
                     sync_object_3d,
                     set_viewport_pos,
                     sync_pos,

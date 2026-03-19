@@ -24,5 +24,6 @@ big_space = ["dep:big_space"]
 strum = ["dep:strum", "dep:strum_macros"]
 
 [dev-dependencies]
+bevy-inspector-egui = "0.35"
 bevy_editor_cam = "0.7"
 bevy_infinite_grid = "0.17"

@@ -7,6 +7,7 @@ use bevy_editor_cam::prelude::*;
 use bevy_geo_frames::*;
 use bevy_infinite_grid::{InfiniteGridBundle, InfiniteGridPlugin, InfiniteGridSettings};
 use map_3d::Ellipsoid;
+use std::f64::consts::PI;
 
 /// Marker for the demo cuboid we switch frames on.
 #[derive(Component)]
@@ -59,6 +60,11 @@ fn main() {
         // .add_systems(Update, draw_frame_axes)
         .add_systems(Update, draw_radius_sphere)
         .init_resource::<CurrentFrame>();
+
+    #[cfg(feature = "inspector")]
+    app
+        .add_plugins(bevy_inspector_egui::bevy_egui::EguiPlugin::default())
+        .add_plugins(bevy_inspector_egui::quick::WorldInspectorPlugin::new());
 
     #[cfg(feature = "big_space")]
     app.add_plugins(::big_space::FloatingOriginPlugin::<i128>::new(
@@ -124,7 +130,8 @@ fn setup(
             Transform::default(),
             GeoPosition(GeoFrame::ENU, enu_pos),
             // GeoVelocity(GeoFrame::ENU, DVec3::new(0.1, 0.0, 0.0)),
-            GeoRotation(GeoFrame::ENU, DQuat::IDENTITY),
+            // GeoRotation(GeoFrame::ENU, DQuat::IDENTITY),
+            GeoRotation(GeoFrame::ENU, DQuat::from_rotation_x(0.25 * PI)),
             // GeoAngularVelocity(
             //     GeoFrame::ENU,
             //     // DVec3::new(0.0, 0.0, 10.0_f32.to_radians()),
@@ -133,6 +140,7 @@ fn setup(
             //     DVec3::new(0.0, 0.0, 1.0),
             // ),
             FrameDemo,
+            Name::new("cuboid"),
         ))
         .id();
 

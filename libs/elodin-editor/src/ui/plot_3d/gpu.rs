@@ -34,7 +34,7 @@ use bevy::{
     math::{Mat4, Vec4},
     mesh::VertexBufferLayout,
     pbr::{MeshPipeline, MeshPipelineKey, SetMeshViewBindGroup},
-    prelude::{Color, Deref, Resource},
+    prelude::{Color, Deref, Resource, Reflect},
     render::{
         ExtractSchedule, MainWorld, Render, RenderApp, RenderSystems,
         extract_component::{ComponentUniforms, DynamicUniformIndex, UniformComponentPlugin},
@@ -168,7 +168,7 @@ pub struct LineBundle {
     pub grid_cell: GridCell<i128>,
 }
 
-#[derive(Component, ShaderType, Clone, Copy)]
+#[derive(Component, ShaderType, Clone, Copy, Reflect)]
 pub struct LineUniform {
     pub line_width: f32,
     pub color: Vec4,

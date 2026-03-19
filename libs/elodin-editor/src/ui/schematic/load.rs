@@ -552,6 +552,8 @@ impl LoadSchematicParams<'_, '_> {
     pub fn spawn_line_3d(&mut self, line_3d: Line3d) {
         let frame = line_3d.frame;
         let mut spawn = self.commands.spawn(line_3d);
+        spawn
+            .insert(Name::new("line_3d"));
 
         // Add GeoPosition and GeoRotation if frame is specified
         if let Some(frame) = frame {
