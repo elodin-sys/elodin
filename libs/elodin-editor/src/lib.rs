@@ -160,7 +160,7 @@ impl Plugin for EditorPlugin {
             // .insert_resource(AssetMetaCheck::Never)
             .add_plugins(plugins::WebAssetPlugin)
             .add_plugins(plugins::env_asset_source::plugin)
-            .add_plugins(plugins::kdl_document::plugin)
+            .add_plugins(plugins::kdl_asset_source::plugin)
             .add_plugins(
                 DefaultPlugins
                     .set(WindowPlugin {
@@ -194,6 +194,7 @@ impl Plugin for EditorPlugin {
                     .disable::<LogPlugin>()
                     .build(),
             )
+            .add_plugins(plugins::kdl_document::plugin)
             // Note: we added this because bevy 0.17.3 changed its behavior
             // which broke bevy_editor_cam. See here:
             // https://github.com/aevyrie/bevy_editor_cam/issues/61
