@@ -1,5 +1,5 @@
 use bevy::{
-    asset::{AssetLoader, AssetPath, io::Reader},
+    asset::{AssetEvent, AssetLoadFailedEvent, AssetLoader, AssetPath, io::Reader},
     prelude::*,
     reflect::TypePath,
 };
@@ -119,6 +119,12 @@ impl CurrentDocument {
 #[derive(Default)]
 pub struct SchematicDocumentLoader;
 
+#[derive(SystemSet, Debug, Clone, Hash, PartialEq, Eq)]
+pub enum KdlDocumentSet {
+    Commands,
+    AssetEvents,
+}
+
 #[derive(Message, Clone, Debug)]
 pub struct OpenDocumentRequest(pub PathBuf);
 
@@ -142,7 +148,7 @@ pub struct SaveCurrentDocumentRequest {
 }
 
 #[derive(Message, Clone, Debug)]
-pub struct DocumentReady {
+pub struct DocumentLoaded {
     pub save_path: Option<PathBuf>,
     pub document: SchematicDocumentAsset,
 }
@@ -150,6 +156,23 @@ pub struct DocumentReady {
 #[derive(Message, Clone, Debug)]
 pub struct DocumentCommandFailed {
     pub title: String,
+    pub message: String,
+}
+
+#[derive(Message, Clone, Debug)]
+pub struct DocumentSaved {
+    pub save_path: PathBuf,
+}
+
+#[derive(Message, Clone, Debug)]
+pub struct DocumentReloaded {
+    pub save_path: Option<PathBuf>,
+    pub document: SchematicDocumentAsset,
+}
+
+#[derive(Message, Clone, Debug)]
+pub struct DocumentLoadFailed {
+    pub path: String,
     pub message: String,
 }
 
@@ -258,26 +281,42 @@ impl AssetLoader for SchematicDocumentLoader {
     }
 }
 
+fn init_document_plugin(app: &mut App) {
+    app.configure_sets(
+        PreUpdate,
+        (KdlDocumentSet::Commands, KdlDocumentSet::AssetEvents).chain(),
+    )
+    .init_resource::<InitialKdlPath>()
+    .init_resource::<CurrentDocument>()
+    .init_asset::<SchematicDocumentAsset>()
+    .init_asset_loader::<SchematicDocumentLoader>()
+    .add_message::<OpenDocumentRequest>()
+    .add_message::<OpenDocumentFromContentRequest>()
+    .add_message::<SaveCurrentDocumentRequest>()
+    .add_message::<DocumentLoaded>()
+    .add_message::<DocumentCommandFailed>()
+    .add_message::<DocumentSaved>()
+    .add_message::<DocumentReloaded>()
+    .add_message::<DocumentLoadFailed>()
+    .add_systems(
+        PreUpdate,
+        (
+            handle_open_document_requests,
+            handle_open_document_from_content_requests,
+            handle_save_current_document_requests,
+        )
+            .chain()
+            .in_set(KdlDocumentSet::Commands),
+    )
+    .add_systems(
+        PreUpdate,
+        (emit_document_reloads, emit_document_load_failures).in_set(KdlDocumentSet::AssetEvents),
+    );
+}
+
 pub(crate) fn plugin(app: &mut App) {
     super::kdl_asset_source::plugin(app);
-    app.init_resource::<InitialKdlPath>()
-        .init_resource::<CurrentDocument>()
-        .init_asset::<SchematicDocumentAsset>()
-        .init_asset_loader::<SchematicDocumentLoader>()
-        .add_message::<OpenDocumentRequest>()
-        .add_message::<OpenDocumentFromContentRequest>()
-        .add_message::<SaveCurrentDocumentRequest>()
-        .add_message::<DocumentReady>()
-        .add_message::<DocumentCommandFailed>()
-        .add_systems(
-            PreUpdate,
-            (
-                handle_open_document_requests,
-                handle_open_document_from_content_requests,
-                handle_save_current_document_requests,
-            )
-                .chain(),
-        );
+    init_document_plugin(app);
 }
 
 /// Applies `InitialKdlPath` to `DbConfig` so that `sync_schematic` will load that file.
@@ -389,12 +428,36 @@ fn write_secondary_schematics(
     Ok(())
 }
 
+fn cloned_current_document_asset(
+    current_document: &CurrentDocument,
+    document_assets: &Assets<SchematicDocumentAsset>,
+) -> Option<(Option<PathBuf>, SchematicDocumentAsset)> {
+    let handle = current_document.handle.clone()?;
+    let save_path = current_document.save_path.clone();
+    let document = document_assets.get(&handle).cloned()?;
+    Some((save_path, document))
+}
+
+fn matching_current_document_event_count(
+    events: &mut MessageReader<AssetEvent<SchematicDocumentAsset>>,
+    current_document: &CurrentDocument,
+) -> usize {
+    events
+        .read()
+        .filter_map(|event| match event {
+            AssetEvent::LoadedWithDependencies { id } | AssetEvent::Modified { id } => Some(*id),
+            _ => None,
+        })
+        .filter(|id| current_document.matches(*id))
+        .count()
+}
+
 fn handle_open_document_requests(
     mut requests: MessageReader<OpenDocumentRequest>,
     asset_server: Res<AssetServer>,
     document_assets: Res<Assets<SchematicDocumentAsset>>,
     mut current_document: ResMut<CurrentDocument>,
-    mut ready: MessageWriter<DocumentReady>,
+    mut loaded: MessageWriter<DocumentLoaded>,
     mut failed: MessageWriter<DocumentCommandFailed>,
 ) {
     for request in requests.read() {
@@ -405,7 +468,7 @@ fn handle_open_document_requests(
             &document_assets,
         ) {
             Ok(Some(document)) => {
-                ready.write(DocumentReady {
+                loaded.write(DocumentLoaded {
                     save_path: current_document.save_path.clone(),
                     document,
                 });
@@ -424,7 +487,7 @@ fn handle_open_document_requests(
 fn handle_open_document_from_content_requests(
     mut requests: MessageReader<OpenDocumentFromContentRequest>,
     mut current_document: ResMut<CurrentDocument>,
-    mut ready: MessageWriter<DocumentReady>,
+    mut loaded: MessageWriter<DocumentLoaded>,
     mut failed: MessageWriter<DocumentCommandFailed>,
 ) {
     for request in requests.read() {
@@ -434,7 +497,7 @@ fn handle_open_document_from_content_requests(
             &mut current_document,
         ) {
             Ok(document) => {
-                ready.write(DocumentReady {
+                loaded.write(DocumentLoaded {
                     save_path: current_document.save_path.clone(),
                     document,
                 });
@@ -453,31 +516,74 @@ fn handle_save_current_document_requests(
     mut requests: MessageReader<SaveCurrentDocumentRequest>,
     asset_server: Res<AssetServer>,
     mut current_document: ResMut<CurrentDocument>,
+    mut saved: MessageWriter<DocumentSaved>,
     mut failed: MessageWriter<DocumentCommandFailed>,
 ) {
     for request in requests.read() {
-        if let Err(error) = save_current_document(
+        match save_current_document(
             request.path.clone(),
             &request.root_kdl,
             &request.secondary,
             &asset_server,
             &mut current_document,
         ) {
-            failed.write(DocumentCommandFailed {
-                title: "Failed to Save Schematic".to_string(),
-                message: error.to_string(),
-            });
+            Ok(save_path) => {
+                saved.write(DocumentSaved { save_path });
+            }
+            Err(error) => {
+                failed.write(DocumentCommandFailed {
+                    title: "Failed to Save Schematic".to_string(),
+                    message: error.to_string(),
+                });
+            }
         }
+    }
+}
+
+fn emit_document_reloads(
+    mut events: MessageReader<AssetEvent<SchematicDocumentAsset>>,
+    current_document: Res<CurrentDocument>,
+    document_assets: Res<Assets<SchematicDocumentAsset>>,
+    mut reloaded: MessageWriter<DocumentReloaded>,
+) {
+    if matching_current_document_event_count(&mut events, &current_document) == 0 {
+        return;
+    }
+
+    if let Some((save_path, document)) =
+        cloned_current_document_asset(&current_document, &document_assets)
+    {
+        reloaded.write(DocumentReloaded {
+            save_path,
+            document,
+        });
+    }
+}
+
+fn emit_document_load_failures(
+    mut events: MessageReader<AssetLoadFailedEvent<SchematicDocumentAsset>>,
+    current_document: Res<CurrentDocument>,
+    mut failed: MessageWriter<DocumentLoadFailed>,
+) {
+    for event in events.read() {
+        if !current_document.matches(event.id) {
+            continue;
+        }
+        failed.write(DocumentLoadFailed {
+            path: format!("{:?}", event.path),
+            message: event.error.to_string(),
+        });
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        CurrentDocument, SchematicDocumentAsset, SecondarySchematicAsset,
-        open_document_from_content, plugin as kdl_document_plugin,
+        CurrentDocument, SchematicDocumentAsset, SecondarySchematicAsset, init_document_plugin,
+        open_document_from_content,
     };
     use bevy::{
+        app::TaskPoolPlugin,
         asset::{AssetPath, AssetPlugin, UnapprovedPathMode},
         prelude::*,
     };
@@ -581,13 +687,14 @@ mod tests {
 
     fn test_app() -> App {
         let mut app = App::new();
-        app.add_plugins(MinimalPlugins);
-        kdl_document_plugin(&mut app);
+        super::super::kdl_asset_source::plugin(&mut app);
+        app.add_plugins(TaskPoolPlugin::default());
         app.add_plugins(AssetPlugin {
             watch_for_changes_override: Some(true),
             unapproved_path_mode: UnapprovedPathMode::Allow,
             ..Default::default()
         });
+        init_document_plugin(&mut app);
         app
     }
 

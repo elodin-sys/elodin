@@ -1,10 +1,5 @@
 use crate::icon_rasterizer::IconTextureCache;
-use bevy::{
-    asset::{AssetEvent, AssetLoadFailedEvent},
-    ecs::system::SystemParam,
-    prelude::*,
-    window::PrimaryWindow,
-};
+use bevy::{ecs::system::SystemParam, prelude::*, window::PrimaryWindow};
 #[cfg(target_os = "macos")]
 use bevy_defer::AsyncCommandsExtension;
 use bevy_egui::egui::{Color32, Id};
@@ -18,30 +13,6 @@ use impeller2_wkt::{
     DbConfig, Graph, Line3d, Object3D, Panel, Schematic, VectorArrow3d, Viewport, WindowSchematic,
 };
 use miette::{Diagnostic, miette};
-
-fn cloned_current_document_asset(
-    current_document: &CurrentDocument,
-    document_assets: &Assets<SchematicDocumentAsset>,
-) -> Option<(Option<PathBuf>, SchematicDocumentAsset)> {
-    let handle = current_document.handle.clone()?;
-    let save_path = current_document.save_path.clone();
-    let document = document_assets.get(&handle).cloned()?;
-    Some((save_path, document))
-}
-
-fn matching_current_document_event_count(
-    events: &mut MessageReader<AssetEvent<SchematicDocumentAsset>>,
-    current_document: &CurrentDocument,
-) -> usize {
-    events
-        .read()
-        .filter_map(|event| match event {
-            AssetEvent::LoadedWithDependencies { id } | AssetEvent::Modified { id } => Some(*id),
-            _ => None,
-        })
-        .filter(|id| current_document.matches(*id))
-        .count()
-}
 use std::{
     collections::{BTreeMap, HashMap},
     path::{Path, PathBuf},
@@ -56,8 +27,9 @@ use crate::{
     object_3d::Object3DState,
     plugins::{
         kdl_document::{
-            CurrentDocument, DocumentCommandFailed, DocumentReady, SchematicDocumentAsset,
-            SecondarySchematicAsset, open_document_from_content, open_document_path,
+            CurrentDocument, DocumentCommandFailed, DocumentLoadFailed, DocumentLoaded,
+            DocumentReloaded, SchematicDocumentAsset, SecondarySchematicAsset,
+            open_document_from_content, open_document_path,
         },
         navigation_gizmo::RenderLayerAlloc,
     },
@@ -1235,21 +1207,15 @@ pub fn graph_label(graph: &Graph) -> String {
         .unwrap_or_else(|| "Graph".to_string())
 }
 
-pub fn schematic_asset_reload(
-    mut events: MessageReader<AssetEvent<SchematicDocumentAsset>>,
+pub fn apply_document_reloaded(
+    mut events: MessageReader<DocumentReloaded>,
     mut params: LoadSchematicParams,
 ) {
-    let matching_event_count =
-        matching_current_document_event_count(&mut events, &params.current_document);
-    if matching_event_count == 0 {
-        return;
-    }
-
-    let Some((save_path, document)) =
-        cloned_current_document_asset(&params.current_document, &params.document_assets)
-    else {
+    let Some(event) = events.read().last().cloned() else {
         return;
     };
+    let save_path = event.save_path;
+    let document = event.document;
 
     // Coalesce duplicate asset events for the current document into a single reload.
     // `load_schematic` uses deferred Commands to despawn and respawn windows, so re-entering it
@@ -1276,8 +1242,8 @@ pub fn schematic_asset_reload(
     apply_loaded_document(&mut params, save_path.as_deref(), &document);
 }
 
-pub fn apply_document_ready(
-    mut events: MessageReader<DocumentReady>,
+pub fn apply_document_loaded(
+    mut events: MessageReader<DocumentLoaded>,
     mut params: LoadSchematicParams,
 ) {
     let Some(event) = events.read().last().cloned() else {
@@ -1295,23 +1261,15 @@ pub fn show_document_command_failures(
     }
 }
 
-pub fn schematic_asset_load_failed(
-    mut events: MessageReader<AssetLoadFailedEvent<SchematicDocumentAsset>>,
-    current_document: Res<CurrentDocument>,
+pub fn show_document_load_failures(
+    mut events: MessageReader<DocumentLoadFailed>,
     mut modal: ModalDialog,
 ) {
     for event in events.read() {
-        if !current_document.matches(event.id) {
-            continue;
-        }
         modal.dialog_error(
-            format!("Invalid Schematic in {:?}", event.path),
-            &event.error,
+            format!("Invalid Schematic in {}", event.path),
+            &event.message,
         );
-        error!(
-            path = ?event.path,
-            error = ?event.error,
-            "Failed to load schematic document"
-        );
+        error!(path = %event.path, error = %event.message, "Failed to load schematic document");
     }
 }
