@@ -284,7 +284,7 @@ impl AssetLoader for SchematicDocumentLoader {
     }
 }
 
-fn init_document_plugin(app: &mut App) {
+pub(crate) fn plugin(app: &mut App) {
     app.configure_sets(
         PreUpdate,
         (KdlDocumentSet::Commands, KdlDocumentSet::AssetEvents).chain(),
@@ -316,11 +316,6 @@ fn init_document_plugin(app: &mut App) {
         PreUpdate,
         (emit_document_reloads, emit_document_load_failures).in_set(KdlDocumentSet::AssetEvents),
     );
-}
-
-pub(crate) fn plugin(app: &mut App) {
-    super::kdl_asset_source::plugin(app);
-    init_document_plugin(app);
 }
 
 /// Applies `InitialKdlPath` to `DbConfig` so that document sync can load that file.
@@ -625,8 +620,8 @@ fn emit_document_load_failures(
 #[cfg(test)]
 mod tests {
     use super::{
-        CurrentDocument, SchematicDocumentAsset, SecondarySchematicAsset, init_document_plugin,
-        open_document_from_content,
+        CurrentDocument, SchematicDocumentAsset, SecondarySchematicAsset,
+        open_document_from_content, plugin,
     };
     use bevy::{
         app::TaskPoolPlugin,
@@ -740,7 +735,7 @@ mod tests {
             unapproved_path_mode: UnapprovedPathMode::Allow,
             ..Default::default()
         });
-        init_document_plugin(&mut app);
+        plugin(&mut app);
         app
     }
 
