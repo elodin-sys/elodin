@@ -160,7 +160,7 @@ impl Plugin for EditorPlugin {
             // .insert_resource(AssetMetaCheck::Never)
             .add_plugins(plugins::WebAssetPlugin)
             .add_plugins(plugins::env_asset_source::plugin)
-            .add_plugins(plugins::kdl_asset_source::plugin)
+            .add_plugins(plugins::kdl_document::plugin)
             .add_plugins(
                 DefaultPlugins
                     .set(WindowPlugin {

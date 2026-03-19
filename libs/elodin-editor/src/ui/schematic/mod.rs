@@ -24,6 +24,11 @@ use impeller2_wkt::{
 pub mod tree;
 pub use tree::*;
 mod load;
+pub(crate) use crate::plugins::kdl_document::filesystem_to_asset_path;
+pub use crate::plugins::kdl_document::{
+    CurrentDocument, InitialKdlPath, SchematicDocumentAsset, SecondarySchematicAsset,
+    apply_initial_kdl_path,
+};
 pub use load::*;
 
 #[derive(Resource, Debug, Clone, Deref, DerefMut)]
@@ -482,13 +487,12 @@ pub struct SchematicPlugin;
 
 impl Plugin for SchematicPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(load::plugin)
-            .insert_resource(CurrentSchematic(Default::default()))
+        app.insert_resource(CurrentSchematic(Default::default()))
             .insert_resource(CurrentSecondarySchematics::default())
             .add_systems(PostUpdate, tiles_to_schematic)
             .add_systems(
                 PostUpdate,
-                load::apply_initial_kdl_path
+                apply_initial_kdl_path
                     .pipe(sync_schematic)
                     .before(tiles_to_schematic),
             )

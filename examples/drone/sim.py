@@ -141,7 +141,7 @@ def world() -> tuple[el.World, el.EntityId]:
         theme mode="dark" scheme="default"
 
         tabs {
-            hsplit name = "Viewport" {
+            hsplit name = "Viewport 2222" {
                 viewport name=Viewport pos="drone.world_pos + (0,0,0,0, 2,2,2)" look_at="drone.world_pos" show_grid=#true active=#true
                 vsplit share=0.4 {
                     graph "drone.angle_desired" name="angle_desired"
