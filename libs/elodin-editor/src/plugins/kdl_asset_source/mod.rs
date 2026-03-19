@@ -172,31 +172,44 @@ mod tests {
     use bevy::asset::io::AssetSourceEvent;
     use std::{
         fs,
-        path::PathBuf,
+        path::{Path, PathBuf},
         time::Duration,
         time::{SystemTime, UNIX_EPOCH},
     };
 
-    fn temp_test_dir(name: &str) -> PathBuf {
-        let unique = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("time went backwards")
-            .as_nanos();
-        let path = std::env::temp_dir().join(format!("elodin-kdl-watcher-{name}-{unique}"));
-        fs::create_dir_all(&path).expect("create temp dir");
-        path
+    struct TempTestDir(PathBuf);
+
+    impl TempTestDir {
+        fn new(name: &str) -> Self {
+            let unique = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("time went backwards")
+                .as_nanos();
+            let path = std::env::temp_dir().join(format!("elodin-kdl-watcher-{name}-{unique}"));
+            fs::create_dir_all(&path).expect("create temp dir");
+            Self(path)
+        }
+
+        fn path(&self) -> &Path {
+            &self.0
+        }
+    }
+
+    impl Drop for TempTestDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
     }
 
     #[test]
     fn to_asset_path_returns_relative_path_for_kdl_file() {
-        let root = temp_test_dir("relative");
-        let file = root.join("drone.kdl");
+        let root = TempTestDir::new("relative");
+        let file = root.path().join("drone.kdl");
         fs::write(&file, "viewport").expect("write kdl");
 
-        let asset_path = to_asset_path(&root, &file);
+        let asset_path = to_asset_path(root.path(), &file);
 
         assert_eq!(asset_path, Some(PathBuf::from("drone.kdl")));
-        fs::remove_dir_all(root).expect("cleanup temp dir");
     }
 
     #[cfg(unix)]
@@ -204,10 +217,10 @@ mod tests {
     fn to_asset_path_handles_symlinked_root() {
         use std::os::unix::fs::symlink;
 
-        let temp = temp_test_dir("symlink");
-        let real_root = temp.join("real");
+        let temp = TempTestDir::new("symlink");
+        let real_root = temp.path().join("real");
         fs::create_dir_all(&real_root).expect("create real root");
-        let linked_root = temp.join("linked");
+        let linked_root = temp.path().join("linked");
         symlink(&real_root, &linked_root).expect("create symlink root");
 
         let file = real_root.join("drone.kdl");
@@ -216,7 +229,6 @@ mod tests {
         let asset_path = to_asset_path(&linked_root, &file);
 
         assert_eq!(asset_path, Some(PathBuf::from("drone.kdl")));
-        fs::remove_dir_all(temp).expect("cleanup temp dir");
     }
 
     #[cfg(unix)]
@@ -225,10 +237,10 @@ mod tests {
         use crossbeam_channel::unbounded;
         use std::os::unix::fs::symlink;
 
-        let temp = temp_test_dir("watcher-symlink");
-        let real_root = temp.join("real");
+        let temp = TempTestDir::new("watcher-symlink");
+        let real_root = temp.path().join("real");
         fs::create_dir_all(&real_root).expect("create real root");
-        let linked_root = temp.join("linked");
+        let linked_root = temp.path().join("linked");
         symlink(&real_root, &linked_root).expect("create symlink root");
 
         let file = real_root.join("drone.kdl");
@@ -248,7 +260,5 @@ mod tests {
             event,
             AssetSourceEvent::ModifiedAsset(PathBuf::from("drone.kdl"))
         );
-
-        fs::remove_dir_all(temp).expect("cleanup temp dir");
     }
 }

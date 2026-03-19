@@ -1539,6 +1539,30 @@ mod tests {
         ENV_LOCK.get_or_init(|| Mutex::new(()))
     }
 
+    struct TempTestDir(PathBuf);
+
+    impl TempTestDir {
+        fn new(name: &str) -> Self {
+            let unique = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("time went backwards")
+                .as_nanos();
+            let path = std::env::temp_dir().join(format!("elodin-schematic-load-{name}-{unique}"));
+            fs::create_dir_all(&path).expect("create temp dir");
+            Self(path)
+        }
+
+        fn path(&self) -> &Path {
+            &self.0
+        }
+    }
+
+    impl Drop for TempTestDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
     struct EnvVarGuard {
         previous: Option<OsString>,
     }
@@ -1555,22 +1579,46 @@ mod tests {
         }
     }
 
-    fn temp_test_dir(name: &str) -> PathBuf {
-        let unique = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("time went backwards")
-            .as_nanos();
-        let path = std::env::temp_dir().join(format!("elodin-schematic-load-{name}-{unique}"));
-        fs::create_dir_all(&path).expect("create temp dir");
-        path
-    }
-
     fn set_kdl_dir(path: &Path) -> EnvVarGuard {
         let previous = std::env::var_os("ELODIN_KDL_DIR");
         unsafe {
             std::env::set_var("ELODIN_KDL_DIR", path);
         }
         EnvVarGuard { previous }
+    }
+
+    fn root_schematic(title: &str) -> Schematic {
+        Schematic::from_kdl(&format!(
+            "window path=\"rate-control-panel.kdl\" title=\"{title}\"\n"
+        ))
+        .expect("parse root kdl")
+    }
+
+    fn secondary_schematic(name: &str) -> Schematic {
+        Schematic::from_kdl(&format!("graph \"drone.gyro\" name=\"{name}\"\n")).expect("parse kdl")
+    }
+
+    fn single_secondary_document(root_title: &str, secondary_name: &str) -> SchematicDocumentAsset {
+        SchematicDocumentAsset {
+            root: root_schematic(root_title),
+            secondary: vec![SecondarySchematicAsset {
+                asset_path: AssetPath::from_path_buf(PathBuf::from("rate-control-panel.kdl")),
+                schematic: secondary_schematic(secondary_name),
+            }],
+        }
+    }
+
+    fn write_test_document(root: &Path, root_title: &str, secondary_name: &str) {
+        fs::write(
+            root.join("drone.kdl"),
+            format!("window path=\"rate-control-panel.kdl\" title=\"{root_title}\"\n"),
+        )
+        .expect("write root kdl");
+        fs::write(
+            root.join("rate-control-panel.kdl"),
+            format!("graph \"drone.gyro\" name=\"{secondary_name}\"\n"),
+        )
+        .expect("write secondary kdl");
     }
 
     fn test_app() -> App {
@@ -1629,20 +1677,38 @@ mod tests {
         })
     }
 
+    #[cfg(unix)]
+    fn load_symlinked_document(
+        name: &str,
+        root_title: &str,
+        secondary_name: &str,
+    ) -> (
+        TempTestDir,
+        EnvVarGuard,
+        App,
+        Handle<SchematicDocumentAsset>,
+    ) {
+        use std::os::unix::fs::symlink;
+
+        let temp = TempTestDir::new(name);
+        let real_root = temp.path().join("real");
+        fs::create_dir_all(&real_root).expect("create real root");
+        let linked_root = temp.path().join("linked");
+        symlink(&real_root, &linked_root).expect("create symlink root");
+
+        write_test_document(&real_root, root_title, secondary_name);
+
+        let var_guard = set_kdl_dir(&linked_root);
+        let mut app = test_app();
+        let handle = load_document(&mut app);
+        (temp, var_guard, app, handle)
+    }
+
     #[test]
     fn current_document_matches_equivalent_applied_document() {
-        let root =
-            Schematic::from_kdl("window path=\"rate-control-panel.kdl\" title=\"Panel A\"\n")
-                .expect("parse root kdl");
-        let secondary =
-            Schematic::from_kdl("graph \"drone.gyro\" name=\"Panel A\"\n").expect("parse kdl");
-        let document = SchematicDocumentAsset {
-            root: root.clone(),
-            secondary: vec![SecondarySchematicAsset {
-                asset_path: AssetPath::from_path_buf(PathBuf::from("rate-control-panel.kdl")),
-                schematic: secondary.clone(),
-            }],
-        };
+        let root = root_schematic("Panel A");
+        let secondary = secondary_schematic("Panel A");
+        let document = single_secondary_document("Panel A", "Panel A");
 
         let mut current_document = CurrentDocument::default();
         current_document.set_applied(&root, vec![secondary.to_kdl()]);
@@ -1652,20 +1718,9 @@ mod tests {
 
     #[test]
     fn current_document_detects_secondary_changes() {
-        let root =
-            Schematic::from_kdl("window path=\"rate-control-panel.kdl\" title=\"Panel A\"\n")
-                .expect("parse root kdl");
-        let applied_secondary =
-            Schematic::from_kdl("graph \"drone.gyro\" name=\"Panel A\"\n").expect("parse kdl");
-        let updated_secondary =
-            Schematic::from_kdl("graph \"drone.gyro\" name=\"Panel B\"\n").expect("parse kdl");
-        let document = SchematicDocumentAsset {
-            root: root.clone(),
-            secondary: vec![SecondarySchematicAsset {
-                asset_path: AssetPath::from_path_buf(PathBuf::from("rate-control-panel.kdl")),
-                schematic: updated_secondary,
-            }],
-        };
+        let root = root_schematic("Panel A");
+        let applied_secondary = secondary_schematic("Panel A");
+        let document = single_secondary_document("Panel A", "Panel B");
 
         let mut current_document = CurrentDocument::default();
         current_document.set_applied(&root, vec![applied_secondary.to_kdl()]);
@@ -1679,21 +1734,9 @@ mod tests {
 
     #[test]
     fn current_document_uses_full_reload_when_root_changes() {
-        let applied_root =
-            Schematic::from_kdl("window path=\"rate-control-panel.kdl\" title=\"Panel A\"\n")
-                .expect("parse root kdl");
-        let updated_root =
-            Schematic::from_kdl("window path=\"rate-control-panel.kdl\" title=\"Panel B\"\n")
-                .expect("parse root kdl");
-        let secondary =
-            Schematic::from_kdl("graph \"drone.gyro\" name=\"Panel A\"\n").expect("parse kdl");
-        let document = SchematicDocumentAsset {
-            root: updated_root,
-            secondary: vec![SecondarySchematicAsset {
-                asset_path: AssetPath::from_path_buf(PathBuf::from("rate-control-panel.kdl")),
-                schematic: secondary.clone(),
-            }],
-        };
+        let applied_root = root_schematic("Panel A");
+        let secondary = secondary_schematic("Panel A");
+        let document = single_secondary_document("Panel B", "Panel A");
 
         let mut current_document = CurrentDocument::default();
         current_document.set_applied(&applied_root, vec![secondary.to_kdl()]);
@@ -1704,29 +1747,9 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn root_document_reloads_when_root_kdl_changes_under_symlinked_dir() {
-        use std::os::unix::fs::symlink;
-
         let _env_guard = env_lock().lock().expect("env lock");
-        let temp = temp_test_dir("root-reload");
-        let real_root = temp.join("real");
-        fs::create_dir_all(&real_root).expect("create real root");
-        let linked_root = temp.join("linked");
-        symlink(&real_root, &linked_root).expect("create symlink root");
-
-        fs::write(
-            real_root.join("drone.kdl"),
-            "window path=\"rate-control-panel.kdl\" title=\"Panel A\"\n",
-        )
-        .expect("write root kdl");
-        fs::write(
-            real_root.join("rate-control-panel.kdl"),
-            "graph \"drone.gyro\" name=\"Panel A\"\n",
-        )
-        .expect("write secondary kdl");
-
-        let _var_guard = set_kdl_dir(&linked_root);
-        let mut app = test_app();
-        let handle = load_document(&mut app);
+        let (temp, _var_guard, mut app, handle) =
+            load_symlinked_document("root-reload", "Panel A", "Panel A");
 
         wait_for(&mut app, Duration::from_secs(10), |app| {
             app.world()
@@ -1737,7 +1760,7 @@ mod tests {
         });
 
         fs::write(
-            real_root.join("drone.kdl"),
+            temp.path().join("real").join("drone.kdl"),
             "window path=\"rate-control-panel.kdl\" title=\"Panel B\"\n",
         )
         .expect("update root kdl");
@@ -1752,35 +1775,14 @@ mod tests {
 
         assert_eq!(window_title(&reloaded), Some("Panel B"));
         drop(app);
-        fs::remove_dir_all(temp).expect("cleanup temp dir");
     }
 
     #[cfg(unix)]
     #[test]
     fn root_document_reloads_when_secondary_kdl_changes_under_symlinked_dir() {
-        use std::os::unix::fs::symlink;
-
         let _env_guard = env_lock().lock().expect("env lock");
-        let temp = temp_test_dir("secondary-reload");
-        let real_root = temp.join("real");
-        fs::create_dir_all(&real_root).expect("create real root");
-        let linked_root = temp.join("linked");
-        symlink(&real_root, &linked_root).expect("create symlink root");
-
-        fs::write(
-            real_root.join("drone.kdl"),
-            "window path=\"rate-control-panel.kdl\" title=\"Panel A\"\n",
-        )
-        .expect("write root kdl");
-        fs::write(
-            real_root.join("rate-control-panel.kdl"),
-            "graph \"drone.gyro\" name=\"Panel A\"\n",
-        )
-        .expect("write secondary kdl");
-
-        let _var_guard = set_kdl_dir(&linked_root);
-        let mut app = test_app();
-        let handle = load_document(&mut app);
+        let (temp, _var_guard, mut app, handle) =
+            load_symlinked_document("secondary-reload", "Panel A", "Panel A");
 
         wait_for(&mut app, Duration::from_secs(10), |app| {
             app.world()
@@ -1791,7 +1793,7 @@ mod tests {
         });
 
         fs::write(
-            real_root.join("rate-control-panel.kdl"),
+            temp.path().join("real").join("rate-control-panel.kdl"),
             "graph \"drone.gyro\" name=\"Panel B\"\n",
         )
         .expect("update secondary kdl");
@@ -1806,6 +1808,5 @@ mod tests {
 
         assert_eq!(first_secondary_graph_name(&reloaded), Some("Panel B"));
         drop(app);
-        fs::remove_dir_all(temp).expect("cleanup temp dir");
     }
 }
