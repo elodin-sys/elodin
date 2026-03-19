@@ -9,7 +9,7 @@ use egui_tiles::{Container, Tile, TileId};
 use impeller2_bevy::{ComponentPath, ComponentSchemaRegistry};
 use impeller2_kdl::{FromKdl, ToKdl};
 use impeller2_wkt::{
-    DbConfig, Graph, Line3d, Object3D, Panel, Schematic, VectorArrow3d, Viewport, WindowSchematic,
+    Graph, Line3d, Object3D, Panel, Schematic, VectorArrow3d, Viewport, WindowSchematic,
 };
 use miette::{Diagnostic, miette};
 use std::{
@@ -26,9 +26,9 @@ use crate::{
     object_3d::Object3DState,
     plugins::{
         kdl_document::{
-            CurrentDocument, DocumentCommandFailed, DocumentLoadFailed, DocumentLoaded,
-            DocumentReloaded, DocumentSaved, OpenDocumentFromContentRequest, OpenDocumentRequest,
-            SchematicDocumentAsset, SecondarySchematicAsset,
+            CurrentDocument, DocumentCleared, DocumentCommandFailed, DocumentLoadFailed,
+            DocumentLoaded, DocumentReloaded, DocumentSaved, SchematicDocumentAsset,
+            SecondarySchematicAsset,
         },
         navigation_gizmo::RenderLayerAlloc,
     },
@@ -93,46 +93,6 @@ pub struct LoadSchematicParams<'w, 's> {
     window_states: Query<'w, 's, (Entity, &'static WindowId, &'static mut WindowState)>,
 }
 
-pub fn sync_schematic(
-    In(given_path): In<Option<PathBuf>>,
-    config: Res<DbConfig>,
-    mut params: LoadSchematicParams,
-    mut open_document: MessageWriter<OpenDocumentRequest>,
-    mut open_document_from_content: MessageWriter<OpenDocumentFromContentRequest>,
-) {
-    if given_path.is_none() && !config.is_changed() {
-        return;
-    }
-    let has_content_fallback = config.schematic_content().is_some();
-    let path_was_overridden = given_path.is_some();
-    if let Some(path) = given_path.or(config.schematic_path().map(PathBuf::from)) {
-        let resolved_path = impeller2_kdl::env::schematic_file(&path);
-        if resolved_path.try_exists().unwrap_or(false) {
-            open_document.write(OpenDocumentRequest(path));
-            return;
-        }
-        if has_content_fallback && !path_was_overridden {
-            bevy::log::info!(
-                "Schematic file {:?} not found; using embedded schematic content fallback",
-                resolved_path.display()
-            );
-        }
-    }
-    if let Some(content) = config.schematic_content() {
-        open_document_from_content.write(OpenDocumentFromContentRequest {
-            content: content.to_string(),
-            save_path: config
-                .schematic_path()
-                .map(Path::new)
-                .map(impeller2_kdl::env::schematic_file),
-        });
-        return;
-    }
-
-    // No schematic found - create a default Data Overview panel
-    params.current_document.clear();
-    params.load_default_data_overview();
-}
 fn apply_theme(theme: Option<&impeller2_wkt::ThemeConfig>) -> colors::SchemeSelection {
     let current = colors::current_selection();
     let scheme = theme
@@ -1215,6 +1175,16 @@ pub fn apply_document_loaded(
         return;
     };
     apply_loaded_document(&mut params, event.save_path.as_deref(), &event.document);
+}
+
+pub fn apply_document_cleared(
+    mut events: MessageReader<DocumentCleared>,
+    mut params: LoadSchematicParams,
+) {
+    if events.read().next().is_none() {
+        return;
+    }
+    params.load_default_data_overview();
 }
 
 pub fn apply_document_saved(

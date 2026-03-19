@@ -7,7 +7,7 @@ use impeller2_bevy::DbMessage;
 use impeller2_kdl::KdlSchematicError;
 use impeller2_kdl::env::schematic_file;
 use impeller2_kdl::{FromKdl, ToKdl};
-use impeller2_wkt::Schematic;
+use impeller2_wkt::{DbConfig, Schematic};
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 
@@ -176,6 +176,9 @@ pub struct DocumentLoadFailed {
     pub message: String,
 }
 
+#[derive(Message, Clone, Debug)]
+pub struct DocumentCleared;
+
 #[derive(Debug, Error)]
 pub enum SchematicDocumentLoaderError {
     #[error("Could not read schematic document: {0}")]
@@ -298,6 +301,7 @@ fn init_document_plugin(app: &mut App) {
     .add_message::<DocumentSaved>()
     .add_message::<DocumentReloaded>()
     .add_message::<DocumentLoadFailed>()
+    .add_message::<DocumentCleared>()
     .add_systems(
         PreUpdate,
         (
@@ -319,8 +323,8 @@ pub(crate) fn plugin(app: &mut App) {
     init_document_plugin(app);
 }
 
-/// Applies `InitialKdlPath` to `DbConfig` so that `sync_schematic` will load that file.
-/// Runs before `sync_schematic`. Re-applies when the path is missing or different (e.g.
+/// Applies `InitialKdlPath` to `DbConfig` so that document sync can load that file.
+/// Runs before `sync_document_from_config`. Re-applies when the path is missing or different (e.g.
 /// after the connection overwrote DbConfig with metadata) so the schematic loads.
 pub fn apply_initial_kdl_path(
     mut reader: MessageReader<DbMessage>,
@@ -331,6 +335,48 @@ pub fn apply_initial_kdl_path(
     } else {
         initial.0.clone()
     }
+}
+
+pub fn sync_document_from_config(
+    In(given_path): In<Option<PathBuf>>,
+    config: Res<DbConfig>,
+    mut current_document: ResMut<CurrentDocument>,
+    mut open_document: MessageWriter<OpenDocumentRequest>,
+    mut open_document_from_content: MessageWriter<OpenDocumentFromContentRequest>,
+    mut cleared: MessageWriter<DocumentCleared>,
+) {
+    if given_path.is_none() && !config.is_changed() {
+        return;
+    }
+
+    let has_content_fallback = config.schematic_content().is_some();
+    let path_was_overridden = given_path.is_some();
+
+    if let Some(path) = given_path.or(config.schematic_path().map(PathBuf::from)) {
+        let resolved_path = schematic_file(&path);
+        if resolved_path.try_exists().unwrap_or(false) {
+            open_document.write(OpenDocumentRequest(path));
+            return;
+        }
+
+        if has_content_fallback && !path_was_overridden {
+            bevy::log::info!(
+                "Schematic file {:?} not found; using embedded schematic content fallback",
+                resolved_path.display()
+            );
+        }
+    }
+
+    if let Some(content) = config.schematic_content() {
+        open_document_from_content.write(OpenDocumentFromContentRequest {
+            content: content.to_string(),
+            save_path: config.schematic_path().map(Path::new).map(schematic_file),
+        });
+        return;
+    }
+
+    current_document.clear();
+    cleared.write(DocumentCleared);
 }
 
 fn canonicalize_or_original(path: &Path) -> PathBuf {
