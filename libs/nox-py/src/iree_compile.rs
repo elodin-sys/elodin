@@ -170,10 +170,12 @@ def _resolve_iree_device(requested_device):
     return 'cpu', 'local-task'
 
 def compile_to_vmfb(func, input_arrays, user_extra_flags, system_names, requested_device, batch1=False):
+    from elodin._iree_linalg import iree_safe_linalg
     try:
         lower_start = time.perf_counter()
         jit_fn = jax.jit(func, keep_unused=True)
-        lowered = jit_fn.lower(*input_arrays)
+        with iree_safe_linalg():
+            lowered = jit_fn.lower(*input_arrays)
         lower_ms = (time.perf_counter() - lower_start) * 1000.0
     except Exception:
         raise RuntimeError("stage=jax_lower\n" + traceback.format_exc())
@@ -203,7 +205,7 @@ def compile_to_vmfb(func, input_arrays, user_extra_flags, system_names, requeste
         "--iree-vm-target-extension-f64",
         "--iree-input-demote-f64-to-f32=false",
         "--iree-input-type=stablehlo",
-        "--iree-opt-level=O2",
+        "--iree-opt-level=O1",
     ]
     extra.append("--iree-hal-indirect-command-buffers=false")
     extra.append("--iree-opt-const-eval=false")
