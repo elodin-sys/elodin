@@ -301,6 +301,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    #[ignore = "requires OS file watcher events; run with --ignored"]
     fn root_document_reloads_when_root_kdl_changes_under_symlinked_dir() {
         let _env_guard = env_lock().lock().expect("env lock");
         let (temp, _var_guard, mut app, handle) =
@@ -334,6 +335,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    #[ignore = "requires OS file watcher events; run with --ignored"]
     fn root_document_reloads_when_secondary_kdl_changes_under_symlinked_dir() {
         let _env_guard = env_lock().lock().expect("env lock");
         let (temp, _var_guard, mut app, handle) =

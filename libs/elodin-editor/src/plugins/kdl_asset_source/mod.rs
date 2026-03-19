@@ -233,6 +233,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    #[ignore = "requires OS file watcher events; run with --ignored"]
     fn watcher_emits_modified_asset_for_symlinked_root() {
         use crossbeam_channel::unbounded;
         use std::os::unix::fs::symlink;
