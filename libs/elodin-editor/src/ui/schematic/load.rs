@@ -1119,7 +1119,7 @@ pub fn apply_document_reloaded(
     // `load_schematic` uses deferred Commands to despawn and respawn windows, so re-entering it
     // multiple times in the same frame can leave duplicate secondary windows alive.
     if params.current_document.matches_applied(&document) {
-        info!(path = ?save_path, "Skipping schematic reload because saved document matches the applied snapshot");
+        trace!(path = ?save_path, "Skipping schematic reload because saved document matches the applied snapshot");
         return;
     }
 
