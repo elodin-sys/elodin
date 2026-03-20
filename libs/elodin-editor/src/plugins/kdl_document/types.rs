@@ -88,6 +88,7 @@ pub enum KdlDocumentSet {
 
 #[derive(Clone, Debug)]
 pub struct WindowDocumentSave {
+    pub window_id: u32,
     pub file_name: String,
     pub kdl: String,
 }

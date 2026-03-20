@@ -93,7 +93,17 @@ pub(super) fn handle_save_current_document_requests(
             &mut current_document,
         ) {
             Ok(save_path) => {
-                saved.write(DocumentSaved { save_path });
+                saved.write(DocumentSaved {
+                    save_path,
+                    windows: request
+                        .windows
+                        .iter()
+                        .map(|w| SavedWindowInfo {
+                            window_id: w.window_id,
+                            file_name: w.file_name.clone(),
+                        })
+                        .collect(),
+                });
             }
             Err(error) => {
                 failed.write(DocumentCommandFailed {

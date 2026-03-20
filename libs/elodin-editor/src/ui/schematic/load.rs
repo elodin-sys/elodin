@@ -1147,7 +1147,6 @@ pub fn apply_document_cleared(
 
 pub fn apply_document_saved(
     mut events: MessageReader<DocumentSaved>,
-    window_schematics: Res<super::CurrentWindowSchematics>,
     mut windows_state: Query<(&WindowId, &mut WindowState)>,
 ) {
     for event in events.read() {
@@ -1158,12 +1157,8 @@ pub fn apply_document_saved(
                 state.descriptor.path = Some(event.save_path.clone());
                 continue;
             }
-            if let Some(entry) = window_schematics
-                .0
-                .iter()
-                .find(|entry| entry.window_id == *id)
-            {
-                state.descriptor.path = Some(base_dir.join(&entry.file_name));
+            if let Some(info) = event.windows.iter().find(|w| w.window_id == id.0) {
+                state.descriptor.path = Some(base_dir.join(&info.file_name));
             }
         }
     }

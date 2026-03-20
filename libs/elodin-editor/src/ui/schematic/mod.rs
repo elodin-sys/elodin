@@ -29,8 +29,8 @@ mod load;
 pub use crate::plugins::kdl_document::{
     CurrentDocument, DocumentCleared, DocumentLoadFailed, DocumentLoaded, DocumentReloaded,
     DocumentSaved, InitialKdlPath, KdlDocumentSet, OpenDocumentFromContentRequest,
-    OpenDocumentRequest, SaveCurrentDocumentRequest, SchematicDocumentAsset, SchematicWindow,
-    WindowDocumentSave, apply_initial_kdl_path, sync_document_from_config,
+    OpenDocumentRequest, SaveCurrentDocumentRequest, SavedWindowInfo, SchematicDocumentAsset,
+    SchematicWindow, WindowDocumentSave, apply_initial_kdl_path, sync_document_from_config,
 };
 pub use load::*;
 

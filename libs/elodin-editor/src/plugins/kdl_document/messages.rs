@@ -14,9 +14,16 @@ pub struct DocumentCommandFailed {
     pub message: String,
 }
 
+#[derive(Clone, Debug)]
+pub struct SavedWindowInfo {
+    pub window_id: u32,
+    pub file_name: String,
+}
+
 #[derive(Message, Clone, Debug)]
 pub struct DocumentSaved {
     pub save_path: PathBuf,
+    pub windows: Vec<SavedWindowInfo>,
 }
 
 #[derive(Message, Clone, Debug)]

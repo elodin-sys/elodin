@@ -983,6 +983,7 @@ fn window_document_saves(window_schematics: &CurrentWindowSchematics) -> Vec<Win
         .0
         .iter()
         .map(|entry| WindowDocumentSave {
+            window_id: entry.window_id.0,
             file_name: entry.file_name.clone(),
             kdl: entry.schematic.to_kdl(),
         })
