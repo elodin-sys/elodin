@@ -31,10 +31,15 @@ impl<'a> SystemBuilder<'a> {
             Noxpr::tuple(output.collect())
         };
 
-        let mut tys = self
-            .vars
-            .keys()
-            .map(|id| NoxprTy::ArrayTy(self.world.column_by_id(*id).unwrap().buffer_ty()));
+        let batch1 = self.world.batch1;
+        let mut tys = self.vars.keys().map(|id| {
+            NoxprTy::ArrayTy(
+                self.world
+                    .column_by_id(*id)
+                    .unwrap()
+                    .buffer_ty_batch1(batch1),
+            )
+        });
 
         let ty = if self.vars.len() == 1 {
             tys.next().expect("iterator empty")
@@ -65,8 +70,11 @@ impl<'a> SystemBuilder<'a> {
             .ok_or(Error::ComponentNotFound)
             .unwrap();
         let len = column.len();
+        let batch1 = self.world.batch1;
         let mut ty: ArrayTy = column.schema.clone().to_array_ty();
-        ty.shape.insert(0, len as i64);
+        if !(batch1 && len <= 1) {
+            ty.shape.insert(0, len as i64);
+        }
         let op = Noxpr::parameter(
             self.inputs.len() as i64,
             nox::NoxprTy::ArrayTy(ty),
@@ -80,6 +88,7 @@ impl<'a> SystemBuilder<'a> {
             len,
             entity_map: column.entity_map(),
             component_id: id,
+            batch1,
         };
         self.vars.insert(id, arr);
         Ok(())
@@ -108,6 +117,7 @@ impl CompiledSystem {
     pub fn insert_into_builder(self, builder: &mut SystemBuilder) -> Result<(), Error> {
         let mut args = vec![];
         let world = &mut builder.world;
+        let batch1 = world.batch1;
         let vars = &mut builder.vars;
         let inputs = &mut builder.inputs;
         for id in self.inputs {
@@ -119,17 +129,20 @@ impl CompiledSystem {
                     .ok_or(Error::ComponentNotFound)
                     .unwrap();
                 let mut ty: ArrayTy = col.schema.to_array_ty();
-                ty.shape.insert(0, col.len() as i64);
+                let len = col.len();
+                if !(batch1 && len <= 1) {
+                    ty.shape.insert(0, len as i64);
+                }
                 let ty = nox::NoxprTy::ArrayTy(ty);
                 let var = Noxpr::parameter(vars.len() as i64, ty, vars.len().to_string());
                 inputs.push((id, var.clone()));
-                let len = col.len();
                 let arr = ComponentArray {
                     buffer: var,
                     phantom_data: PhantomData,
                     len,
                     entity_map: col.entity_map(),
                     component_id: id,
+                    batch1,
                 };
 
                 vars.insert(id, arr.clone());
@@ -151,6 +164,7 @@ impl CompiledSystem {
                 len,
                 entity_map: col.entity_map(),
                 component_id: id,
+                batch1,
             };
 
             vars.insert(self.outputs[0], arr);
@@ -168,6 +182,7 @@ impl CompiledSystem {
                     len,
                     entity_map: col.entity_map(),
                     component_id: *id,
+                    batch1,
                 };
 
                 vars.insert(*id, arr);
@@ -342,9 +357,10 @@ macro_rules! impl_system_param {
                         let outputs = Ret::component_ids().collect::<Vec<_>>();
                         let noxpr = output.output(builder)?;
                         let args = builder.inputs.iter().map(|(_, v)| v).cloned().collect::<Vec<_>>();
+                        let batch1 = builder.world.batch1;
                         let mut tys = outputs
                             .iter()
-                            .map(|id| NoxprTy::ArrayTy(builder.world.column_by_id(*id).unwrap().buffer_ty()));
+                            .map(|id| NoxprTy::ArrayTy(builder.world.column_by_id(*id).unwrap().buffer_ty_batch1(batch1)));
 
                         let ty = if outputs.len() == 1 {
                             tys.next().unwrap()
@@ -663,6 +679,7 @@ impl System for PyFnSystem {
         let builder = SystemBuilder::new(world);
         let mut py_builder = PySystemBuilder {
             total_edges: GraphQuery::<TotalEdge>::param(&builder)?.edges,
+            batch1_flag: world.batch1,
             ..Default::default()
         };
         for id in output_ids.iter() {
@@ -698,10 +715,16 @@ impl System for PyFnSystem {
                 .collect();
             py_builder.edge_map.insert(id, edges);
         }
-        let mut tys = self
-            .output_ids
-            .iter()
-            .map(|id| NoxprTy::ArrayTy(builder.world.column_by_id(*id).unwrap().buffer_ty()));
+        let batch1 = builder.world.batch1;
+        let mut tys = self.output_ids.iter().map(|id| {
+            NoxprTy::ArrayTy(
+                builder
+                    .world
+                    .column_by_id(*id)
+                    .unwrap()
+                    .buffer_ty_batch1(batch1),
+            )
+        });
 
         let ty = if self.output_ids.len() == 1 {
             tys.next().unwrap()
@@ -796,6 +819,7 @@ pub struct PySystemBuilder {
     arg_map: HashMap<ComponentId, (ArgMetadata, usize)>,
     pub edge_map: HashMap<ComponentId, Vec<crate::graph::Edge>>,
     pub total_edges: Vec<crate::graph::Edge>,
+    pub batch1_flag: bool,
 }
 
 #[derive(Clone)]
@@ -809,6 +833,10 @@ pub struct ArgMetadata {
 impl PySystemBuilder {
     pub fn get_var(&self, id: ComponentId) -> Option<(ArgMetadata, usize)> {
         self.arg_map.get(&id).cloned()
+    }
+
+    pub fn batch1(&self) -> bool {
+        self.batch1_flag
     }
 }
 

@@ -43,6 +43,8 @@ pub struct World {
     pub host: Buffers,
     pub dirty_components: HashSet<ComponentId>,
     pub metadata: WorldMetadata,
+    #[serde(default)]
+    pub batch1: bool,
 }
 
 pub use impeller2_wkt::SensorCameraConfig;
@@ -93,6 +95,7 @@ impl Default for World {
             host: Default::default(),
             dirty_components: Default::default(),
             metadata: Default::default(),
+            batch1: false,
         };
 
         world.add_globals();
@@ -261,6 +264,19 @@ impl World {
         })
     }
 
+    pub fn is_batch1(&self) -> bool {
+        self.host.iter().all(|(id, col)| {
+            let Some((schema, _)) = self.metadata.component_map.get(id) else {
+                return true;
+            };
+            let size = schema.size();
+            if size == 0 {
+                return true;
+            }
+            col.buffer.len() / size <= 1
+        })
+    }
+
     pub fn entity_ids(&self) -> HashSet<EntityId> {
         self.host
             .values()
@@ -289,6 +305,7 @@ impl Clone for World {
             host: self.host.clone(),
             dirty_components,
             metadata: self.metadata.clone(),
+            batch1: self.batch1,
         }
     }
 }
@@ -346,6 +363,14 @@ impl<'a, B: 'a + AsRef<[u8]>> ColumnRef<'a, B> {
     pub fn buffer_ty(&self) -> ArrayTy {
         let mut array_ty = self.schema.to_array_ty();
         array_ty.shape.insert(0, self.len() as i64);
+        array_ty
+    }
+
+    pub fn buffer_ty_batch1(&self, batch1: bool) -> ArrayTy {
+        let mut array_ty = self.schema.to_array_ty();
+        if !(batch1 && self.len() <= 1) {
+            array_ty.shape.insert(0, self.len() as i64);
+        }
         array_ty
     }
 }

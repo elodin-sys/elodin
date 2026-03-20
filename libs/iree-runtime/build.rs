@@ -149,16 +149,12 @@ fn main() {
     println!("cargo:rustc-link-lib=static=iree_base_base");
     println!("cargo:rustc-link-lib=static=iree_base_internal_arena");
     println!("cargo:rustc-link-lib=static=iree_base_internal_atomic_slist");
-    println!("cargo:rustc-link-lib=static=iree_base_internal_bitmap");
     println!("cargo:rustc-link-lib=static=iree_base_internal_cpu");
     println!("cargo:rustc-link-lib=static=iree_base_internal_dynamic_library");
     println!("cargo:rustc-link-lib=static=iree_base_internal_event_pool");
-    println!("cargo:rustc-link-lib=static=iree_base_internal_flags");
     println!("cargo:rustc-link-lib=static=iree_base_internal_fpu_state");
     println!("cargo:rustc-link-lib=static=iree_base_internal_memory");
     println!("cargo:rustc-link-lib=static=iree_base_internal_path");
-    println!("cargo:rustc-link-lib=static=iree_base_internal_synchronization");
-    println!("cargo:rustc-link-lib=static=iree_base_internal_threading");
     println!("cargo:rustc-link-lib=static=iree_base_internal_time");
     println!("cargo:rustc-link-lib=static=iree_base_internal_wait_handle");
     println!("cargo:rustc-link-lib=static=iree_base_loop_sync");
@@ -215,6 +211,7 @@ fn main() {
     println!("cargo:rustc-link-lib=static=flatcc_parsing");
     println!("cargo:rustc-link-lib=static=flatcc_runtime");
     println!("cargo:rustc-link-lib=static=benchmark");
+    println!("cargo:rustc-link-lib=static=printf_printf");
 
     if tracy {
         println!("cargo:rustc-link-lib=static=TracyClient");

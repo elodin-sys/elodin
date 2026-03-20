@@ -26,13 +26,18 @@ impl<C: Component> ComponentArray<C> {
         func: impl CompFn<(C,), O>,
     ) -> Result<ComponentArray<O>, Error> {
         let func = func.build_expr()?;
-        let buffer = Noxpr::vmap_with_axis(func, &[0], std::slice::from_ref(&self.buffer))?;
+        let buffer = if self.batch1 {
+            Noxpr::substitute_params(&func, std::slice::from_ref(&self.buffer))
+        } else {
+            Noxpr::vmap_with_axis(func, &[0], std::slice::from_ref(&self.buffer))?
+        };
         Ok(ComponentArray {
             buffer,
             len: self.len,
             phantom_data: PhantomData,
             entity_map: self.entity_map.clone(),
             component_id: O::COMPONENT_ID,
+            batch1: self.batch1,
         })
     }
 }

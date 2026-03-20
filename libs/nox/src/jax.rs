@@ -458,6 +458,9 @@ pub fn dtype(elem: &ElementType) -> Result<&'static str, Error> {
         ElementType::S16 => Ok("int16"),
         ElementType::S32 => Ok("int32"),
         ElementType::S64 => Ok("int64"),
+        // These arms are not reached in practice: PrimTypeExt::to_element_type()
+        // maps all unsigned PrimTypes to signed ElementTypes upstream.  Kept as
+        // correct unsigned mappings for defensive safety.
         ElementType::U8 => Ok("uint8"),
         ElementType::U16 => Ok("uint16"),
         ElementType::U32 => Ok("uint32"),

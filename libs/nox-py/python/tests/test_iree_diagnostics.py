@@ -106,3 +106,33 @@ def test_iree_flags_env_passthrough():
     finally:
         os.environ.pop("ELODIN_IREE_DUMP_DIR", None)
         os.environ.pop("ELODIN_IREE_FLAGS", None)
+
+
+@pytest.mark.skipif(
+    shutil.which("iree-compile") is None, reason="iree-compile not available in test env"
+)
+def test_iree_default_flags_do_not_duplicate_const_eval():
+    @el.map
+    def scale(x: X) -> X:
+        return x * 2.0
+
+    dump_dir = tempfile.mkdtemp(prefix="elodin_iree_default_flags_test_")
+    old_dump_dir = os.environ.get("ELODIN_IREE_DUMP_DIR")
+    old_flags = os.environ.pop("ELODIN_IREE_FLAGS", None)
+    os.environ["ELODIN_IREE_DUMP_DIR"] = dump_dir
+    try:
+        w = _world_with_value()
+        w.build(scale, backend="iree-cpu")
+        report_dir = _latest_report_dir(dump_dir)
+        with open(os.path.join(report_dir, "iree_compile_cmd.sh"), encoding="utf-8") as f:
+            cmd = f.read()
+        assert cmd.count("--iree-opt-const-eval=false") == 1
+    finally:
+        if old_dump_dir is None:
+            os.environ.pop("ELODIN_IREE_DUMP_DIR", None)
+        else:
+            os.environ["ELODIN_IREE_DUMP_DIR"] = old_dump_dir
+        if old_flags is None:
+            os.environ.pop("ELODIN_IREE_FLAGS", None)
+        else:
+            os.environ["ELODIN_IREE_FLAGS"] = old_flags
