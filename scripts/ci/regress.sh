@@ -45,7 +45,6 @@ example_entrypoint="$2"
 baseline_root="${BASELINE_ROOT:-scripts/ci/baseline}"
 tolerances_file="${TOLERANCES_FILE:-${baseline_root}/tolerances.json}"
 ticks="${REGRESSION_TICKS:-100}"
-enable_profile="${REGRESSION_ENABLE_PROFILE:-1}"
 file_prefix=""
 
 if [[ ! -f "${example_entrypoint}" ]]; then
@@ -106,21 +105,24 @@ trap 'rm -rf "${scratch_dir}"' EXIT
 
 db_path="${scratch_dir}/db"
 export_dir="${scratch_dir}/csv"
+metrics_path="${scratch_dir}/profile-metrics.json"
 mkdir -p "${db_path}" "${export_dir}"
 
-bench_args=(bench --ticks "${ticks}")
-if [[ "${enable_profile}" == "1" ]]; then
-  bench_args+=(--profile)
-fi
+bench_args=(bench --ticks "${ticks}" --profile)
 
 echo "==> [${example_name}] running benchmark (${example_entrypoint})"
 run_log="${scratch_dir}/run.log"
 ELODIN_DB_PATH="${db_path}" uv run "${example_entrypoint}" "${bench_args[@]}" 2>&1 | tee "${run_log}"
 
+uv run python3 scripts/ci/extract_profile_metrics.py \
+  --run-log "${run_log}" \
+  --ticks "${ticks}" \
+  --output "${metrics_path}"
+
 # If the runtime reports a different db path in logs, discover and use it.
 if [[ ! -f "${db_path}/db_state" ]]; then
   discovered_db_path="$(
-    python3 - "${run_log}" <<'PY'
+    uv run python3 - "${run_log}" <<'PY'
 import re
 import sys
 from pathlib import Path
@@ -155,6 +157,7 @@ if [[ "${update_baseline}" == "1" ]]; then
   rm -rf "${baseline_dir}"
   mkdir -p "${baseline_dir}"
   cp -r "${export_dir}/." "${baseline_dir}/"
+  cp "${metrics_path}" "${baseline_dir}/profile-metrics.json"
   exit 0
 fi
 
@@ -169,5 +172,25 @@ if [[ -n "${file_prefix}" ]]; then
   compare_args+=(--file-prefix "${file_prefix}")
 fi
 
-uv run python3 scripts/ci/compare_baseline_csv.py "${compare_args[@]}"
+csv_status=0
+if uv run python3 scripts/ci/compare_baseline_csv.py "${compare_args[@]}"; then
+  :
+else
+  csv_status=$?
+fi
+
+perf_status=0
+if uv run python3 scripts/ci/compare_profile_metrics.py \
+  --example "${example_name}" \
+  --baseline "${baseline_dir}/profile-metrics.json" \
+  --candidate "${metrics_path}" \
+  --tolerances "${tolerances_file}"; then
+  :
+else
+  perf_status=$?
+fi
+
+if [[ "${csv_status}" -ne 0 || "${perf_status}" -ne 0 ]]; then
+  exit 1
+fi
 

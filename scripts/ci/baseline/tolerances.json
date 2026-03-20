@@ -9,5 +9,22 @@
       "rel_tol": 1e-5,
       "files": {}
     }
+  },
+  "performance": {
+    "default": {
+      "build_time_ms": {
+        "abs_tol": 250.0,
+        "rel_tol": 0.15
+      },
+      "compile_time_ms": {
+        "abs_tol": 250.0,
+        "rel_tol": 0.15
+      },
+      "real_time_factor": {
+        "abs_tol": 6.0,
+        "rel_tol": 0.1
+      }
+    },
+    "examples": {}
   }
 }
