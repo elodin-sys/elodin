@@ -596,6 +596,12 @@ fn filter_index(indexes: &[u32], buffer: &Noxpr) -> Noxpr {
     )
 }
 
+fn empty_batch1_expr(buffer: &Noxpr) -> Noxpr {
+    let mut shape = buffer.shape().unwrap();
+    shape.insert(0, 1);
+    filter_index(&[], &buffer.clone().reshape(shape))
+}
+
 pub fn join_many<A, B>(mut a: Query<A>, b: &ComponentArray<B>) -> Query<()> {
     let batch1 = a.batch1;
     if a.entity_map == b.entity_map {
@@ -610,10 +616,17 @@ pub fn join_many<A, B>(mut a: Query<A>, b: &ComponentArray<B>) -> Query<()> {
     } else {
         let (a_indexes, b_indexes, ids) = intersect_ids(&a.entity_map, &b.entity_map);
         let mut exprs = a.exprs;
-        for expr in &mut exprs {
-            *expr = filter_index(&a_indexes, expr);
+        if batch1 && b.batch1 && ids.is_empty() {
+            for expr in &mut exprs {
+                *expr = empty_batch1_expr(expr);
+            }
+            exprs.push(empty_batch1_expr(&b.buffer));
+        } else {
+            for expr in &mut exprs {
+                *expr = filter_index(&a_indexes, expr);
+            }
+            exprs.push(filter_index(&b_indexes, &b.buffer));
         }
-        exprs.push(filter_index(&b_indexes, &b.buffer));
         Query {
             exprs,
             len: ids.len(),
@@ -625,7 +638,8 @@ pub fn join_many<A, B>(mut a: Query<A>, b: &ComponentArray<B>) -> Query<()> {
 }
 
 pub fn join_query<A, B>(mut a: Query<A>, mut b: Query<B>) -> Query<()> {
-    let batch1 = a.batch1;
+    let a_batch1 = a.batch1;
+    let b_batch1 = b.batch1;
     if a.entity_map == b.entity_map {
         a.exprs.append(&mut b.exprs);
         Query {
@@ -633,15 +647,24 @@ pub fn join_query<A, B>(mut a: Query<A>, mut b: Query<B>) -> Query<()> {
             entity_map: a.entity_map,
             len: a.len,
             phantom_data: PhantomData,
-            batch1,
+            batch1: a_batch1,
         }
     } else {
         let (a_indexes, b_indexes, ids) = intersect_ids(&a.entity_map, &b.entity_map);
-        for expr in &mut a.exprs {
-            *expr = filter_index(&a_indexes, expr);
-        }
-        for expr in &mut b.exprs {
-            *expr = filter_index(&b_indexes, expr);
+        if a_batch1 && b_batch1 && ids.is_empty() {
+            for expr in &mut a.exprs {
+                *expr = empty_batch1_expr(expr);
+            }
+            for expr in &mut b.exprs {
+                *expr = empty_batch1_expr(expr);
+            }
+        } else {
+            for expr in &mut a.exprs {
+                *expr = filter_index(&a_indexes, expr);
+            }
+            for expr in &mut b.exprs {
+                *expr = filter_index(&b_indexes, expr);
+            }
         }
         let mut exprs = a.exprs;
         exprs.append(&mut b.exprs);
@@ -829,6 +852,66 @@ pub struct QueryMetadata {
 impl QueryMetadata {
     pub fn merge(&mut self, other: QueryMetadata) {
         self.metadata.extend(other.metadata);
+    }
+}
+
+#[cfg(test)]
+mod batch1_join_tests {
+    use super::*;
+    use nox::NoxprTy;
+
+    fn entity_map(entity_id: u64) -> BTreeMap<EntityId, usize> {
+        BTreeMap::from([(EntityId(entity_id), 0)])
+    }
+
+    fn batch1_expr(number: i64, name: &str) -> Noxpr {
+        Noxpr::parameter(
+            number,
+            NoxprTy::ArrayTy(ArrayTy {
+                element_type: ElementType::F64,
+                shape: smallvec![3],
+            }),
+            name.to_owned(),
+        )
+    }
+
+    fn batch1_query(number: i64, name: &str, entity_id: u64) -> Query<()> {
+        Query {
+            exprs: vec![batch1_expr(number, name)],
+            entity_map: entity_map(entity_id),
+            len: 1,
+            phantom_data: PhantomData,
+            batch1: true,
+        }
+    }
+
+    fn batch1_array(number: i64, name: &str, entity_id: u64) -> ComponentArray<()> {
+        ComponentArray {
+            buffer: batch1_expr(number, name),
+            len: 1,
+            entity_map: entity_map(entity_id),
+            phantom_data: PhantomData,
+            component_id: ComponentId::new(name),
+            batch1: true,
+        }
+    }
+
+    fn assert_empty_batched(joined: &Query<()>) {
+        assert!(!joined.batch1);
+        assert_eq!(joined.len, 0);
+        assert!(joined.entity_map.is_empty());
+        assert_eq!(joined.exprs[0].shape().unwrap().as_slice(), &[0, 3]);
+        assert_eq!(joined.exprs[1].shape().unwrap().as_slice(), &[0, 3]);
+    }
+
+    #[test]
+    fn batch1_mismatched_joins_stay_structurally_valid() {
+        let a = batch1_query(0, "lhs", 1);
+        let b = batch1_array(1, "rhs", 2);
+        let c = batch1_query(2, "rhs-query", 2);
+
+        assert_empty_batched(&join_many(a.clone(), &b));
+        assert_empty_batched(&join_query(a, c));
     }
 }
 
