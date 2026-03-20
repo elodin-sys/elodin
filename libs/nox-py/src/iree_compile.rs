@@ -169,6 +169,12 @@ def _resolve_iree_device(requested_device):
         return 'metal', 'metal'
     return 'cpu', 'local-task'
 
+def _prefer_indirect_command_buffers(stablehlo_mlir):
+    # IREE 3.11 regressed in both directions here: threefry-based PRNG modules
+    # fail when indirect command buffers are disabled, while rocket's
+    # map_coordinates/dynamic-slice-heavy kernel fails when they stay enabled.
+    return 'threefry' in stablehlo_mlir.lower()
+
 def compile_to_vmfb(func, input_arrays, user_extra_flags, system_names, requested_device, batch1=False):
     from elodin._iree_linalg import iree_safe_linalg
     try:
@@ -206,6 +212,8 @@ def compile_to_vmfb(func, input_arrays, user_extra_flags, system_names, requeste
         "--iree-input-type=stablehlo",
         "--iree-opt-level=O1",
     ]
+    if not _prefer_indirect_command_buffers(stablehlo_mlir):
+        extra.append("--iree-hal-indirect-command-buffers=false")
     extra.append("--iree-opt-const-eval=false")
     if batch1:
         extra.append("--iree-flow-inline-constants-max-byte-length=0")
