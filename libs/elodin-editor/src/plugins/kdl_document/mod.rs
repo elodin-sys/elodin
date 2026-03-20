@@ -1,8 +1,12 @@
+mod commands;
 mod loader;
+mod messages;
 mod operations;
 mod systems;
 mod types;
 
+pub use commands::*;
+pub use messages::*;
 pub use operations::{apply_initial_kdl_path, sync_document_from_config};
 pub use types::*;
 

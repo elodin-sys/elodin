@@ -7,6 +7,8 @@ use impeller2_kdl::env::schematic_file;
 use impeller2_wkt::{DbConfig, Schematic};
 use std::path::{Path, PathBuf};
 
+use super::commands::*;
+use super::messages::*;
 use super::types::*;
 
 fn canonicalize_or_original(path: &Path) -> PathBuf {

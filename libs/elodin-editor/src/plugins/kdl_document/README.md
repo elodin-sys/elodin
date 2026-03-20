@@ -6,10 +6,28 @@ Manages the lifecycle of KDL schematic documents: loading, saving, reloading, an
 - Registers `SchematicDocumentAsset` as a Bevy asset with a dedicated `AssetLoader`.
 - Loads root and window (multi-window) KDL schematics as a document tree using Bevy asset handles.
 - Provides a message-based command API (`OpenDocumentRequest`, `SaveCurrentDocumentRequest`, `OpenDocumentFromContentRequest`).
-- Emits lifecycle events: `DocumentLoaded`, `DocumentSaved`, `DocumentReloaded`, `DocumentLoadFailed`, `DocumentCommandFailed`, `DocumentCleared`.
+- Emits lifecycle messages: `DocumentLoaded`, `DocumentSaved`, `DocumentReloaded`, `DocumentLoadFailed`, `DocumentCommandFailed`, `DocumentCleared`.
 - Tracks the current document via `CurrentDocument`, with per-window change detection via Bevy `AssetEvent`s.
 - Bridges `DbConfig` metadata into document loading via `apply_initial_kdl_path` / `sync_document_from_config`.
 - Integrates with the `kdl_asset_source` plugin for hot-reload via the Bevy asset pipeline.
+
+## Module structure
+
+```
+kdl_document/
+├── mod.rs          — Plugin registration, system wiring, re-exports
+├── types.rs        — Domain types (assets, resources, errors)
+├── commands.rs     — Incoming request messages (open, save)
+├── messages.rs     — Outgoing notification messages (loaded, saved, reloaded, …)
+├── loader.rs       — SchematicDocumentAsset loader (Bevy AssetLoader impl)
+├── operations.rs   — Imperative helpers (open from content, save to disk)
+├── systems.rs      — Bevy systems (handle commands, emit asset events)
+└── README.md
+```
+
+- **commands.rs** — Messages consumed by systems in this plugin (requests from the UI).
+- **messages.rs** — Messages emitted by systems in this plugin (notifications to the UI).
+- **types.rs** — Shared domain types used across the plugin: assets, resources, errors.
 
 ## Main API
 - `plugin(app)` — registers the plugin.
@@ -19,7 +37,7 @@ Manages the lifecycle of KDL schematic documents: loading, saving, reloading, an
 - `OpenDocumentRequest(PathBuf)` — message to load a KDL file.
 - `OpenDocumentFromContentRequest` — message to load from inline KDL content.
 - `SaveCurrentDocumentRequest` — message to save the current schematic to disk.
-- `DocumentLoaded`, `DocumentReloaded`, `DocumentSaved`, `DocumentCleared`, `DocumentLoadFailed`, `DocumentCommandFailed` — lifecycle events.
+- `DocumentLoaded`, `DocumentReloaded`, `DocumentSaved`, `DocumentCleared`, `DocumentLoadFailed`, `DocumentCommandFailed` — lifecycle messages.
 
 ## Allowed KDL schema
 

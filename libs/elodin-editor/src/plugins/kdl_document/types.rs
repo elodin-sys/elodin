@@ -86,61 +86,11 @@ pub enum KdlDocumentSet {
     AssetEvents,
 }
 
-#[derive(Message, Clone, Debug)]
-pub struct OpenDocumentRequest(pub PathBuf);
-
-#[derive(Message, Clone, Debug)]
-pub struct OpenDocumentFromContentRequest {
-    pub content: String,
-    pub save_path: Option<PathBuf>,
-}
-
 #[derive(Clone, Debug)]
 pub struct WindowDocumentSave {
     pub file_name: String,
     pub kdl: String,
 }
-
-#[derive(Message, Clone, Debug)]
-pub struct SaveCurrentDocumentRequest {
-    pub path: Option<PathBuf>,
-    pub root_kdl: String,
-    pub windows: Vec<WindowDocumentSave>,
-}
-
-#[derive(Message, Clone, Debug)]
-pub struct DocumentLoaded {
-    pub save_path: Option<PathBuf>,
-    pub document: SchematicDocumentAsset,
-}
-
-#[derive(Message, Clone, Debug)]
-pub struct DocumentCommandFailed {
-    pub title: String,
-    pub message: String,
-}
-
-#[derive(Message, Clone, Debug)]
-pub struct DocumentSaved {
-    pub save_path: PathBuf,
-}
-
-#[derive(Message, Clone, Debug)]
-pub struct DocumentReloaded {
-    pub save_path: Option<PathBuf>,
-    pub document: SchematicDocumentAsset,
-    /// Indices of windows whose assets changed. Empty means full reload.
-    pub changed_window_indices: Vec<usize>,
-}
-
-#[derive(Message, Clone, Debug)]
-pub struct DocumentLoadFailed {
-    pub path: String,
-    pub message: String,
-}
-
-#[derive(Message, Clone, Debug)]
-pub struct DocumentCleared;
 
 #[derive(Debug, Error)]
 pub enum SchematicDocumentLoaderError {

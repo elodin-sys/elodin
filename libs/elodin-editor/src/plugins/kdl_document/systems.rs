@@ -2,6 +2,8 @@ use bevy::asset::{AssetEvent, AssetLoadFailedEvent};
 use bevy::prelude::*;
 use std::path::PathBuf;
 
+use super::commands::*;
+use super::messages::*;
 use super::operations::{open_document_from_content, open_document_path, save_current_document};
 use super::types::*;
 
