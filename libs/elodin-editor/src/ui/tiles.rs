@@ -1363,11 +1363,14 @@ impl ViewportPane {
             Name::new("viewport"),
         ));
 
-        // Add GeoPosition and GeoRotation if frame is specified
+        // Add GeoPosition and GeoRotation if frame is specified.
         if let Some(frame) = viewport.frame {
             parent_cmd.insert((
                 bevy_geo_frames::GeoPosition(frame, transform.translation.as_dvec3()),
-                bevy_geo_frames::GeoRotation(frame, transform.rotation.as_dquat()),
+                // We're punting on controlling the camera orientation with
+                // GeoRotation for the moment. The issue is an identity rotation in ENU
+                // is a +pi/2 on the x-axis.
+                // bevy_geo_frames::GeoRotation(frame, transform.rotation.as_dquat()),
             ));
         }
 

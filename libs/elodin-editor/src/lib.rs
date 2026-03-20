@@ -254,11 +254,11 @@ impl Plugin for EditorPlugin {
                     // before transforms are synchronized for rendering.
                     object_3d::update_object_3d_system,
                     set_floating_origin,
-                    bevy_geo_frames::big_space::apply_big_translation::<i128>,
-                    bevy_geo_frames::apply_geo_rotation,
                     sync_object_3d,
                     set_viewport_pos,
                     sync_pos,
+                    bevy_geo_frames::apply_geo_rotation,
+                    bevy_geo_frames::big_space::apply_big_translation::<i128>,
                 )
                     .chain()
                     .after(impeller2_bevy::sink)
@@ -875,7 +875,7 @@ pub fn follow_latest(
 }
 
 pub fn sync_pos(
-    mut query: Query<(&mut Transform, Option<&mut GeoPosition>, Option<&mut GeoRotation>, &mut GridCell<i128>, &WorldPos)>,
+    mut query: Query<(&mut Transform, Option<&mut GeoPosition>, Option<&mut GeoRotation>, &mut GridCell<i128>, &WorldPos), Changed<WorldPos>>,
     floating_origin: Res<FloatingOriginSettings>,
 ) {
     query
@@ -885,19 +885,22 @@ pub fn sync_pos(
                 geo_pos.1 = world_pos.pos();
             }
             if let Some(ref mut geo_rot) = geo_rot {
+                // att() is in ENU. We have to do a conversion if geo_rot.0 isn't ENU.
                 geo_rot.1 = world_pos.att();
             }
-            if geo_pos.is_none() || geo_rot.is_none() {
-                // We only update the transform here if both geo_pos and geo_rot
-                // aren't present. Otherwise it's fully determined by them.
 
+            if geo_pos.is_none() {
+                // We only update the transform here if geo_pos is not present.
                 let pos = world_pos.bevy_pos();
-                let att = world_pos.bevy_att();
                 let (new_grid_cell, translation) = floating_origin.translation_to_grid(pos);
                 *grid_cell = new_grid_cell;
+                transform.translation = translation;
+            }
+            if geo_rot.is_none() {
+                // We only update the transform here if geo_rot is not present.
+                let att = world_pos.bevy_att();
                 // Preserve the existing scale when updating position and rotation
                 transform.rotation = att.as_quat();
-                transform.translation = translation;
             }
         });
 }
