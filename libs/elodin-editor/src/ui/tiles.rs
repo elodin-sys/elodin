@@ -7,6 +7,7 @@ use bevy::{
     post_process::bloom::Bloom,
     prelude::*,
     window::{Monitor, PrimaryWindow, Window, WindowPosition},
+    math::{DVec3, DQuat},
 };
 use bevy_editor_cam::{
     controller::{component::Sensitivity, zoom::ZoomLimits},

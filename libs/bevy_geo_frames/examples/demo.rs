@@ -79,13 +79,17 @@ fn setup(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
+    geo_ctx: Res<GeoContext>,
 ) {
     // Camera with editor controls
+    let transform = Transform::from_xyz(30.0, 20.0, 30.0).looking_at(Vec3::ZERO, Vec3::Y);
     let _camera_id = commands
         .spawn((
+            GeoPosition::from_transform(GeoFrame::ENU, &transform, &geo_ctx),
+            GeoRotation::from_transform(GeoFrame::ENU, &transform, &geo_ctx),
             Camera3d::default(),
-            Transform::from_xyz(30.0, 20.0, 30.0).looking_at(Vec3::ZERO, Vec3::Y),
             EditorCam::default(),
+            Transform::default(),
         ))
         .id();
     #[cfg(feature = "big_space")]

@@ -343,10 +343,14 @@ impl GeoPosition {
                 .transform_point3(v),
         )
     }
+
+    /// Create from a Bevy Transform's translation.
+    pub fn from_transform(frame: GeoFrame, transform: &Transform, context: &GeoContext) -> Self {
+        Self::from_bevy(frame, transform.translation, context)
+    }
 }
 
 impl GeoRotation {
-
     /// Convert orientation to Bevy.
     pub fn to_bevy(&self, context: &GeoContext) -> DQuat {
         let frame = self.0;
@@ -359,8 +363,13 @@ impl GeoRotation {
         let v = v_bevy.into();
         GeoRotation(
             frame,
-            DQuat::from_mat3(&GeoFrame::bevy_R_(&frame, context)).inverse()*v,
+            DQuat::from_mat3(&GeoFrame::bevy_R_(&frame, context)).inverse() * v,
         )
+    }
+
+    /// Create from a Bevy Transform's rotation.
+    pub fn from_transform(frame: GeoFrame, transform: &Transform, context: &GeoContext) -> Self {
+        Self::from_bevy(frame, transform.rotation.as_dquat(), context)
     }
 }
 

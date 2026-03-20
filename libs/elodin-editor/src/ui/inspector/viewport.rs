@@ -7,6 +7,7 @@ use bevy::{
 };
 use bevy_editor_cam::prelude::EditorCam;
 use bevy_egui::egui::{self, Align};
+use bevy_geo_frames::{GeoFrame, GeoPosition, GeoRotation};
 use bevy_infinite_grid::InfiniteGrid;
 use impeller2_bevy::EntityMap;
 use impeller2_wkt::{ComponentValue, QueryType, WorldPos};
