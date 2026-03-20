@@ -69,6 +69,7 @@
       elodinsink = ./modules/elodinsink.nix;
     };
     devModules = {
+      aleph-cuda = ./modules/aleph-cuda.nix;
       aleph-dev = ./modules/aleph-dev.nix;
     };
     defaultModule = {config, ...}: {
