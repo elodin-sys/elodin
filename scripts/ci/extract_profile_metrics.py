@@ -11,9 +11,7 @@ from pathlib import Path
 
 METRIC_PATTERNS = {
     "build_time_ms": re.compile(r"^build time:\s*([0-9]+(?:\.[0-9]+)?)\s*ms\s*$", re.MULTILINE),
-    "compile_time_ms": re.compile(
-        r"^compile time:\s*([0-9]+(?:\.[0-9]+)?)\s*ms\s*$", re.MULTILINE
-    ),
+    "compile_time_ms": re.compile(r"^compile time:\s*([0-9]+(?:\.[0-9]+)?)\s*ms\s*$", re.MULTILINE),
     "real_time_factor": re.compile(r"^real_time_factor:\s*([0-9]+(?:\.[0-9]+)?)\s*$", re.MULTILINE),
 }
 

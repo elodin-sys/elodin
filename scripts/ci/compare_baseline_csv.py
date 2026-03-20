@@ -111,13 +111,23 @@ def _load_tolerances(path: Path) -> dict:
 
 def _resolve_tolerance(config: dict, example: str, rel_path: str) -> Tolerance:
     defaults = config.get("default", {}) if isinstance(config.get("default", {}), dict) else {}
-    examples_cfg = config.get("examples", {}) if isinstance(config.get("examples", {}), dict) else {}
-    example_cfg = examples_cfg.get(example, {}) if isinstance(examples_cfg.get(example, {}), dict) else {}
-    files_cfg = example_cfg.get("files", {}) if isinstance(example_cfg.get("files", {}), dict) else {}
+    examples_cfg = (
+        config.get("examples", {}) if isinstance(config.get("examples", {}), dict) else {}
+    )
+    example_cfg = (
+        examples_cfg.get(example, {}) if isinstance(examples_cfg.get(example, {}), dict) else {}
+    )
+    files_cfg = (
+        example_cfg.get("files", {}) if isinstance(example_cfg.get("files", {}), dict) else {}
+    )
     file_cfg = files_cfg.get(rel_path, {}) if isinstance(files_cfg.get(rel_path, {}), dict) else {}
 
-    abs_tol = float(file_cfg.get("abs_tol", example_cfg.get("abs_tol", defaults.get("abs_tol", 0.0))))
-    rel_tol = float(file_cfg.get("rel_tol", example_cfg.get("rel_tol", defaults.get("rel_tol", 0.0))))
+    abs_tol = float(
+        file_cfg.get("abs_tol", example_cfg.get("abs_tol", defaults.get("abs_tol", 0.0)))
+    )
+    rel_tol = float(
+        file_cfg.get("rel_tol", example_cfg.get("rel_tol", defaults.get("rel_tol", 0.0)))
+    )
     return Tolerance(abs_tol=abs_tol, rel_tol=rel_tol)
 
 
@@ -210,7 +220,9 @@ def _compare_file(
                     f"(baseline={baseline_raw!r}, candidate={candidate_raw!r})"
                 )
 
-    return FileStats(rel_path=rel_path, rows=len(baseline_rows), max_abs=max_abs, max_rel=max_rel), None
+    return FileStats(
+        rel_path=rel_path, rows=len(baseline_rows), max_abs=max_abs, max_rel=max_rel
+    ), None
 
 
 def main() -> int:

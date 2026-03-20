@@ -108,13 +108,19 @@ export_dir="${scratch_dir}/csv"
 metrics_path="${scratch_dir}/profile-metrics.json"
 mkdir -p "${db_path}" "${export_dir}"
 
+python_bin="${PYTHON:-python3}"
+if ! command -v "${python_bin}" >/dev/null 2>&1; then
+  echo "FAIL: python interpreter not found: ${python_bin}"
+  exit 1
+fi
+
 bench_args=(bench --ticks "${ticks}" --profile)
 
 echo "==> [${example_name}] running benchmark (${example_entrypoint})"
 run_log="${scratch_dir}/run.log"
-ELODIN_DB_PATH="${db_path}" uv run "${example_entrypoint}" "${bench_args[@]}" 2>&1 | tee "${run_log}"
+ELODIN_DB_PATH="${db_path}" "${python_bin}" "${example_entrypoint}" "${bench_args[@]}" 2>&1 | tee "${run_log}"
 
-uv run python3 scripts/ci/extract_profile_metrics.py \
+"${python_bin}" scripts/ci/extract_profile_metrics.py \
   --run-log "${run_log}" \
   --ticks "${ticks}" \
   --output "${metrics_path}"
@@ -122,7 +128,7 @@ uv run python3 scripts/ci/extract_profile_metrics.py \
 # If the runtime reports a different db path in logs, discover and use it.
 if [[ ! -f "${db_path}/db_state" ]]; then
   discovered_db_path="$(
-    uv run python3 - "${run_log}" <<'PY'
+    "${python_bin}" - "${run_log}" <<'PY'
 import re
 import sys
 from pathlib import Path
@@ -173,14 +179,14 @@ if [[ -n "${file_prefix}" ]]; then
 fi
 
 csv_status=0
-if uv run python3 scripts/ci/compare_baseline_csv.py "${compare_args[@]}"; then
+if "${python_bin}" scripts/ci/compare_baseline_csv.py "${compare_args[@]}"; then
   :
 else
   csv_status=$?
 fi
 
 perf_status=0
-if uv run python3 scripts/ci/compare_profile_metrics.py \
+if "${python_bin}" scripts/ci/compare_profile_metrics.py \
   --example "${example_name}" \
   --baseline "${baseline_dir}/profile-metrics.json" \
   --candidate "${metrics_path}" \

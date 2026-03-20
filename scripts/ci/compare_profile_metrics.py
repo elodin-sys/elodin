@@ -54,10 +54,18 @@ def _load_json(path: Path) -> dict:
 
 
 def _load_tolerance(config: dict, example: str, metric: str) -> MetricTolerance:
-    perf_cfg = config.get("performance", {}) if isinstance(config.get("performance", {}), dict) else {}
-    default_cfg = perf_cfg.get("default", {}) if isinstance(perf_cfg.get("default", {}), dict) else {}
-    examples_cfg = perf_cfg.get("examples", {}) if isinstance(perf_cfg.get("examples", {}), dict) else {}
-    example_cfg = examples_cfg.get(example, {}) if isinstance(examples_cfg.get(example, {}), dict) else {}
+    perf_cfg = (
+        config.get("performance", {}) if isinstance(config.get("performance", {}), dict) else {}
+    )
+    default_cfg = (
+        perf_cfg.get("default", {}) if isinstance(perf_cfg.get("default", {}), dict) else {}
+    )
+    examples_cfg = (
+        perf_cfg.get("examples", {}) if isinstance(perf_cfg.get("examples", {}), dict) else {}
+    )
+    example_cfg = (
+        examples_cfg.get(example, {}) if isinstance(examples_cfg.get(example, {}), dict) else {}
+    )
 
     default_metric_cfg = (
         default_cfg.get(metric, {}) if isinstance(default_cfg.get(metric, {}), dict) else {}
