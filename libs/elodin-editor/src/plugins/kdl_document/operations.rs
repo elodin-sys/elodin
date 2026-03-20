@@ -53,14 +53,14 @@ pub fn open_document_from_content(
     current_document.set_unsaved_content(save_path);
     Ok(SchematicDocumentAsset {
         root,
-        secondary: Vec::new(),
+        windows: Vec::new(),
     })
 }
 
 pub fn save_current_document(
     path: Option<PathBuf>,
     root_kdl: &str,
-    secondary: &[SecondaryDocumentSave],
+    windows: &[WindowDocumentSave],
     asset_server: &AssetServer,
     current_document: &mut CurrentDocument,
 ) -> Result<PathBuf, SaveCurrentDocumentError> {
@@ -74,27 +74,24 @@ pub fn save_current_document(
         path: dest.clone(),
         source,
     })?;
-    write_secondary_schematics(dest.parent().unwrap_or_else(|| Path::new(".")), secondary)?;
+    write_window_schematics(dest.parent().unwrap_or_else(|| Path::new(".")), windows)?;
 
     let asset_path = filesystem_to_asset_path(&dest);
     let handle: Handle<SchematicDocumentAsset> = asset_server.load(asset_path.clone());
     current_document.set_file(handle, asset_path, dest.clone());
-    current_document.set_applied_raw(
-        root_kdl.to_string(),
-        secondary.iter().map(|s| s.kdl.clone()).collect(),
-    );
+    current_document.suppress_next_reload = true;
     Ok(dest)
 }
 
-fn write_secondary_schematics(
+fn write_window_schematics(
     base_dir: &Path,
-    secondary: &[SecondaryDocumentSave],
+    windows: &[WindowDocumentSave],
 ) -> Result<(), SaveCurrentDocumentError> {
-    for entry in secondary {
+    for entry in windows {
         let dest = base_dir.join(&entry.file_name);
         if let Some(parent) = dest.parent() {
             std::fs::create_dir_all(parent).map_err(|source| {
-                SaveCurrentDocumentError::CreateSecondaryDir {
+                SaveCurrentDocumentError::CreateWindowDir {
                     path: dest.clone(),
                     source,
                 }
@@ -102,7 +99,7 @@ fn write_secondary_schematics(
         }
 
         std::fs::write(&dest, &entry.kdl)
-            .map_err(|source| SaveCurrentDocumentError::WriteSecondary { path: dest, source })?;
+            .map_err(|source| SaveCurrentDocumentError::WriteWindow { path: dest, source })?;
     }
 
     Ok(())

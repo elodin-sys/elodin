@@ -4,10 +4,10 @@ Manages the lifecycle of KDL schematic documents: loading, saving, reloading, an
 
 ## What it does
 - Registers `SchematicDocumentAsset` as a Bevy asset with a dedicated `AssetLoader`.
-- Loads root and secondary (multi-window) KDL schematics as a single document.
+- Loads root and window (multi-window) KDL schematics as a document tree using Bevy asset handles.
 - Provides a message-based command API (`OpenDocumentRequest`, `SaveCurrentDocumentRequest`, `OpenDocumentFromContentRequest`).
 - Emits lifecycle events: `DocumentLoaded`, `DocumentSaved`, `DocumentReloaded`, `DocumentLoadFailed`, `DocumentCommandFailed`, `DocumentCleared`.
-- Tracks the current document via `CurrentDocument`, with change detection based on applied KDL snapshots.
+- Tracks the current document via `CurrentDocument`, with per-window change detection via Bevy `AssetEvent`s.
 - Bridges `DbConfig` metadata into document loading via `apply_initial_kdl_path` / `sync_document_from_config`.
 - Integrates with the `kdl_asset_source` plugin for hot-reload via the Bevy asset pipeline.
 

@@ -1,6 +1,5 @@
 use bevy::{asset::AssetPath, prelude::*, reflect::TypePath};
 use impeller2_kdl::KdlSchematicError;
-use impeller2_kdl::ToKdl;
 use impeller2_wkt::Schematic;
 use std::path::PathBuf;
 use thiserror::Error;
@@ -13,13 +12,19 @@ pub struct InitialKdlPath(pub Option<PathBuf>);
 #[derive(Asset, TypePath, Debug, Clone)]
 pub struct SchematicDocumentAsset {
     pub root: Schematic,
-    pub secondary: Vec<SecondarySchematicAsset>,
+    pub windows: Vec<SchematicWindow>,
 }
 
 #[derive(Debug, Clone)]
-pub struct SecondarySchematicAsset {
+pub struct SchematicWindow {
+    pub handle: Handle<SchematicDocumentAsset>,
     pub asset_path: AssetPath<'static>,
-    pub schematic: Schematic,
+}
+
+impl bevy::asset::VisitAssetDependencies for SchematicWindow {
+    fn visit_dependencies(&self, visit: &mut impl FnMut(bevy::asset::UntypedAssetId)) {
+        self.handle.visit_dependencies(visit);
+    }
 }
 
 #[derive(Resource, Default, Debug, Clone)]
@@ -27,8 +32,7 @@ pub struct CurrentDocument {
     pub handle: Option<Handle<SchematicDocumentAsset>>,
     pub asset_path: Option<AssetPath<'static>>,
     pub save_path: Option<PathBuf>,
-    applied_root_kdl: Option<String>,
-    applied_secondary_kdls: Vec<String>,
+    pub(crate) suppress_next_reload: bool,
 }
 
 impl CurrentDocument {
@@ -36,7 +40,7 @@ impl CurrentDocument {
         self.handle = None;
         self.asset_path = None;
         self.save_path = None;
-        self.clear_applied();
+        self.suppress_next_reload = false;
     }
 
     pub fn set_file(
@@ -45,73 +49,31 @@ impl CurrentDocument {
         asset_path: AssetPath<'static>,
         save_path: PathBuf,
     ) {
-        let changed = self.handle.as_ref().map(Handle::id) != Some(handle.id())
-            || self.asset_path.as_ref() != Some(&asset_path)
-            || self.save_path.as_ref() != Some(&save_path);
         self.handle = Some(handle);
         self.asset_path = Some(asset_path);
         self.save_path = Some(save_path);
-        if changed {
-            self.clear_applied();
-        }
     }
 
     pub fn set_unsaved_content(&mut self, save_path: Option<PathBuf>) {
         self.handle = None;
         self.asset_path = None;
         self.save_path = save_path;
-        self.clear_applied();
+        self.suppress_next_reload = false;
     }
 
     pub(crate) fn matches(&self, id: AssetId<SchematicDocumentAsset>) -> bool {
         self.handle.as_ref().map(Handle::id) == Some(id)
     }
 
-    fn clear_applied(&mut self) {
-        self.applied_root_kdl = None;
-        self.applied_secondary_kdls.clear();
-    }
-
-    pub(crate) fn set_applied(&mut self, root: &Schematic, secondary_kdls: Vec<String>) {
-        self.applied_root_kdl = Some(root.to_kdl());
-        self.applied_secondary_kdls = secondary_kdls;
-    }
-
-    pub(crate) fn set_applied_raw(&mut self, root_kdl: String, secondary_kdls: Vec<String>) {
-        self.applied_root_kdl = Some(root_kdl);
-        self.applied_secondary_kdls = secondary_kdls;
-    }
-
-    pub(crate) fn changed_secondary_indices(
+    pub(crate) fn window_handles(
         &self,
-        document: &SchematicDocumentAsset,
-    ) -> Option<Vec<usize>> {
-        let root_kdl = self.applied_root_kdl.as_ref()?;
-        if root_kdl != &document.root.to_kdl() {
-            return None;
-        }
-        if self.applied_secondary_kdls.len() != document.secondary.len() {
-            return None;
-        }
-
-        Some(
-            document
-                .secondary
-                .iter()
-                .enumerate()
-                .filter_map(|(index, secondary)| {
-                    (self.applied_secondary_kdls.get(index) != Some(&secondary.schematic.to_kdl()))
-                        .then_some(index)
-                })
-                .collect(),
-        )
-    }
-
-    pub(crate) fn matches_applied(&self, document: &SchematicDocumentAsset) -> bool {
-        matches!(
-            self.changed_secondary_indices(document),
-            Some(changed_indices) if changed_indices.is_empty()
-        )
+        assets: &Assets<SchematicDocumentAsset>,
+    ) -> Vec<AssetId<SchematicDocumentAsset>> {
+        self.handle
+            .as_ref()
+            .and_then(|h| assets.get(h))
+            .map(|doc| doc.windows.iter().map(|w| w.handle.id()).collect())
+            .unwrap_or_default()
     }
 }
 
@@ -134,7 +96,7 @@ pub struct OpenDocumentFromContentRequest {
 }
 
 #[derive(Clone, Debug)]
-pub struct SecondaryDocumentSave {
+pub struct WindowDocumentSave {
     pub file_name: String,
     pub kdl: String,
 }
@@ -143,7 +105,7 @@ pub struct SecondaryDocumentSave {
 pub struct SaveCurrentDocumentRequest {
     pub path: Option<PathBuf>,
     pub root_kdl: String,
-    pub secondary: Vec<SecondaryDocumentSave>,
+    pub windows: Vec<WindowDocumentSave>,
 }
 
 #[derive(Message, Clone, Debug)]
@@ -167,6 +129,8 @@ pub struct DocumentSaved {
 pub struct DocumentReloaded {
     pub save_path: Option<PathBuf>,
     pub document: SchematicDocumentAsset,
+    /// Indices of windows whose assets changed. Empty means full reload.
+    pub changed_window_indices: Vec<usize>,
 }
 
 #[derive(Message, Clone, Debug)]
@@ -186,17 +150,6 @@ pub enum SchematicDocumentLoaderError {
     Utf8(#[from] std::string::FromUtf8Error),
     #[error(transparent)]
     RootKdl(#[from] KdlSchematicError),
-    #[error("Could not read secondary schematic {path}: {reason}")]
-    ReadSecondary {
-        path: AssetPath<'static>,
-        reason: String,
-    },
-    #[error("Could not parse secondary schematic {path}")]
-    ParseSecondary {
-        path: AssetPath<'static>,
-        #[source]
-        source: KdlSchematicError,
-    },
 }
 
 #[derive(Debug, Error)]
@@ -209,14 +162,14 @@ pub enum SaveCurrentDocumentError {
         #[source]
         source: std::io::Error,
     },
-    #[error("Could not create directory for secondary schematic {path}: {source}")]
-    CreateSecondaryDir {
+    #[error("Could not create directory for window schematic {path}: {source}")]
+    CreateWindowDir {
         path: PathBuf,
         #[source]
         source: std::io::Error,
     },
-    #[error("Could not save secondary schematic to {path}: {source}")]
-    WriteSecondary {
+    #[error("Could not save window schematic to {path}: {source}")]
+    WriteWindow {
         path: PathBuf,
         #[source]
         source: std::io::Error,

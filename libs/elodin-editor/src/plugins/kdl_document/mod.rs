@@ -49,16 +49,14 @@ pub(crate) fn plugin(app: &mut App) {
 #[cfg(test)]
 mod tests {
     use super::{
-        CurrentDocument, SchematicDocumentAsset, SecondarySchematicAsset,
-        operations::open_document_from_content, plugin,
+        CurrentDocument, SchematicDocumentAsset, operations::open_document_from_content, plugin,
     };
     use bevy::{
         app::TaskPoolPlugin,
         asset::{AssetPath, AssetPlugin, UnapprovedPathMode},
         prelude::*,
     };
-    use impeller2_kdl::{FromKdl, ToKdl};
-    use impeller2_wkt::{Panel, Schematic, SchematicElem};
+    use impeller2_wkt::SchematicElem;
     use std::{
         ffi::OsString,
         fs,
@@ -125,28 +123,7 @@ mod tests {
         EnvVarGuard { previous }
     }
 
-    fn root_schematic(title: &str) -> Schematic {
-        Schematic::from_kdl(&format!(
-            "window path=\"rate-control-panel.kdl\" title=\"{title}\"\n"
-        ))
-        .expect("parse root kdl")
-    }
-
-    fn secondary_schematic(name: &str) -> Schematic {
-        Schematic::from_kdl(&format!("graph \"drone.gyro\" name=\"{name}\"\n")).expect("parse kdl")
-    }
-
-    fn single_secondary_document(root_title: &str, secondary_name: &str) -> SchematicDocumentAsset {
-        SchematicDocumentAsset {
-            root: root_schematic(root_title),
-            secondary: vec![SecondarySchematicAsset {
-                asset_path: AssetPath::from_path_buf(PathBuf::from("rate-control-panel.kdl")),
-                schematic: secondary_schematic(secondary_name),
-            }],
-        }
-    }
-
-    fn write_test_document(root: &Path, root_title: &str, secondary_name: &str) {
+    fn write_test_document(root: &Path, root_title: &str, window_name: &str) {
         fs::write(
             root.join("drone.kdl"),
             format!("window path=\"rate-control-panel.kdl\" title=\"{root_title}\"\n"),
@@ -154,9 +131,9 @@ mod tests {
         .expect("write root kdl");
         fs::write(
             root.join("rate-control-panel.kdl"),
-            format!("graph \"drone.gyro\" name=\"{secondary_name}\"\n"),
+            format!("graph \"drone.gyro\" name=\"{window_name}\"\n"),
         )
-        .expect("write secondary kdl");
+        .expect("write window kdl");
     }
 
     fn test_app() -> App {
@@ -202,24 +179,51 @@ mod tests {
         })
     }
 
-    fn first_secondary_graph_name(doc: &SchematicDocumentAsset) -> Option<&str> {
-        doc.secondary.first().and_then(|secondary| {
-            secondary
-                .schematic
-                .elems
-                .iter()
-                .find_map(|elem| match elem {
-                    SchematicElem::Panel(Panel::Graph(graph)) => graph.name.as_deref(),
-                    _ => None,
-                })
+    fn first_window_graph_name<'a>(
+        doc: &SchematicDocumentAsset,
+        assets: &'a Assets<SchematicDocumentAsset>,
+    ) -> Option<&'a str> {
+        let window = doc.windows.first()?;
+        let window_doc = assets.get(&window.handle)?;
+        window_doc.root.elems.iter().find_map(|elem| match elem {
+            SchematicElem::Panel(impeller2_wkt::Panel::Graph(graph)) => graph.name.as_deref(),
+            _ => None,
         })
+    }
+
+    #[test]
+    fn suppress_next_reload_flag() {
+        let mut current_document = CurrentDocument::default();
+        assert!(!current_document.suppress_next_reload);
+
+        current_document.suppress_next_reload = true;
+        assert!(current_document.suppress_next_reload);
+
+        current_document.clear();
+        assert!(!current_document.suppress_next_reload);
+    }
+
+    #[test]
+    fn opening_unsaved_content_clears_suppress_flag() {
+        let mut current_document = CurrentDocument::default();
+        current_document.suppress_next_reload = true;
+
+        let _document = open_document_from_content(
+            "window path=\"rate-control-panel.kdl\" title=\"Panel A\"\n",
+            Some(PathBuf::from("drone.kdl")),
+            &mut current_document,
+        )
+        .expect("parse kdl");
+
+        assert!(!current_document.suppress_next_reload);
+        assert!(current_document.handle.is_none());
     }
 
     #[cfg(unix)]
     fn load_symlinked_document(
         name: &str,
         root_title: &str,
-        secondary_name: &str,
+        window_name: &str,
     ) -> (
         TempTestDir,
         EnvVarGuard,
@@ -234,69 +238,12 @@ mod tests {
         let linked_root = temp.path().join("linked");
         symlink(&real_root, &linked_root).expect("create symlink root");
 
-        write_test_document(&real_root, root_title, secondary_name);
+        write_test_document(&real_root, root_title, window_name);
 
         let var_guard = set_kdl_dir(&linked_root);
         let mut app = test_app();
         let handle = load_document(&mut app);
         (temp, var_guard, app, handle)
-    }
-
-    #[test]
-    fn current_document_matches_equivalent_applied_document() {
-        let root = root_schematic("Panel A");
-        let secondary = secondary_schematic("Panel A");
-        let document = single_secondary_document("Panel A", "Panel A");
-
-        let mut current_document = CurrentDocument::default();
-        current_document.set_applied(&root, vec![secondary.to_kdl()]);
-
-        assert!(current_document.matches_applied(&document));
-    }
-
-    #[test]
-    fn current_document_detects_secondary_changes() {
-        let root = root_schematic("Panel A");
-        let applied_secondary = secondary_schematic("Panel A");
-        let document = single_secondary_document("Panel A", "Panel B");
-
-        let mut current_document = CurrentDocument::default();
-        current_document.set_applied(&root, vec![applied_secondary.to_kdl()]);
-
-        assert!(!current_document.matches_applied(&document));
-        assert_eq!(
-            current_document.changed_secondary_indices(&document),
-            Some(vec![0])
-        );
-    }
-
-    #[test]
-    fn current_document_uses_full_reload_when_root_changes() {
-        let applied_root = root_schematic("Panel A");
-        let secondary = secondary_schematic("Panel A");
-        let document = single_secondary_document("Panel B", "Panel A");
-
-        let mut current_document = CurrentDocument::default();
-        current_document.set_applied(&applied_root, vec![secondary.to_kdl()]);
-
-        assert_eq!(current_document.changed_secondary_indices(&document), None);
-    }
-
-    #[test]
-    fn opening_unsaved_content_clears_applied_snapshot() {
-        let root = root_schematic("Panel A");
-        let secondary = secondary_schematic("Panel A");
-        let mut current_document = CurrentDocument::default();
-        current_document.set_applied(&root, vec![secondary.to_kdl()]);
-
-        let document = open_document_from_content(
-            "window path=\"rate-control-panel.kdl\" title=\"Panel A\"\n",
-            Some(PathBuf::from("drone.kdl")),
-            &mut current_document,
-        )
-        .expect("parse kdl");
-
-        assert!(!current_document.matches_applied(&document));
     }
 
     #[cfg(unix)]
@@ -336,34 +283,34 @@ mod tests {
     #[cfg(unix)]
     #[test]
     #[ignore = "requires OS file watcher events; run with --ignored"]
-    fn root_document_reloads_when_secondary_kdl_changes_under_symlinked_dir() {
+    fn root_document_reloads_when_window_kdl_changes_under_symlinked_dir() {
         let _env_guard = env_lock().lock().expect("env lock");
         let (temp, _var_guard, mut app, handle) =
-            load_symlinked_document("secondary-reload", "Panel A", "Panel A");
+            load_symlinked_document("window-reload", "Panel A", "Panel A");
 
         wait_for(&mut app, Duration::from_secs(10), |app| {
-            app.world()
-                .resource::<Assets<SchematicDocumentAsset>>()
-                .get(&handle)
-                .filter(|doc| first_secondary_graph_name(doc) == Some("Panel A"))
-                .cloned()
+            let assets = app.world().resource::<Assets<SchematicDocumentAsset>>();
+            let doc = assets.get(&handle)?;
+            first_window_graph_name(doc, assets)
+                .filter(|name| *name == "Panel A")
+                .map(|_| doc.clone())
         });
 
         fs::write(
             temp.path().join("real").join("rate-control-panel.kdl"),
             "graph \"drone.gyro\" name=\"Panel B\"\n",
         )
-        .expect("update secondary kdl");
+        .expect("update window kdl");
 
         let reloaded = wait_for(&mut app, Duration::from_secs(10), |app| {
-            app.world()
-                .resource::<Assets<SchematicDocumentAsset>>()
-                .get(&handle)
-                .filter(|doc| first_secondary_graph_name(doc) == Some("Panel B"))
-                .cloned()
+            let assets = app.world().resource::<Assets<SchematicDocumentAsset>>();
+            let doc = assets.get(&handle)?;
+            first_window_graph_name(doc, assets)
+                .filter(|name| *name == "Panel B")
+                .map(|_| doc.clone())
         });
 
-        assert_eq!(first_secondary_graph_name(&reloaded), Some("Panel B"));
+        assert!(reloaded.windows.len() == 1);
         drop(app);
     }
 }

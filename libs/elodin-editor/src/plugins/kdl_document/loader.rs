@@ -4,8 +4,7 @@ use impeller2_wkt::Schematic;
 use std::path::Path;
 
 use super::types::{
-    SchematicDocumentAsset, SchematicDocumentLoader, SchematicDocumentLoaderError,
-    SecondarySchematicAsset,
+    SchematicDocumentAsset, SchematicDocumentLoader, SchematicDocumentLoaderError, SchematicWindow,
 };
 
 impl AssetLoader for SchematicDocumentLoader {
@@ -22,7 +21,7 @@ impl AssetLoader for SchematicDocumentLoader {
         let mut bytes = Vec::new();
         reader.read_to_end(&mut bytes).await?;
         let root = Schematic::from_kdl(&String::from_utf8(bytes)?)?;
-        let mut secondary = Vec::new();
+        let mut windows = Vec::new();
         let base_dir = load_context
             .asset_path()
             .path()
@@ -40,27 +39,14 @@ impl AssetLoader for SchematicDocumentLoader {
             };
             let asset_path =
                 AssetPath::from_path_buf(base_dir.join(path)).with_source(source.clone());
-            let bytes = load_context
-                .read_asset_bytes(asset_path.clone())
-                .await
-                .map_err(|err| SchematicDocumentLoaderError::ReadSecondary {
-                    path: asset_path.clone_owned(),
-                    reason: err.to_string(),
-                })?;
-            let text = String::from_utf8(bytes)?;
-            let schematic = Schematic::from_kdl(&text).map_err(|source| {
-                SchematicDocumentLoaderError::ParseSecondary {
-                    path: asset_path.clone_owned(),
-                    source,
-                }
-            })?;
-            secondary.push(SecondarySchematicAsset {
+            let handle = load_context.load(asset_path.clone());
+            windows.push(SchematicWindow {
+                handle,
                 asset_path: asset_path.clone_owned(),
-                schematic,
             });
         }
 
-        Ok(SchematicDocumentAsset { root, secondary })
+        Ok(SchematicDocumentAsset { root, windows })
     }
 
     fn extensions(&self) -> &[&str] {

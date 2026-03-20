@@ -15,20 +15,6 @@ fn cloned_current_document_asset(
     Some((save_path, document))
 }
 
-fn matching_current_document_event_count(
-    events: &mut MessageReader<AssetEvent<SchematicDocumentAsset>>,
-    current_document: &CurrentDocument,
-) -> usize {
-    events
-        .read()
-        .filter_map(|event| match event {
-            AssetEvent::LoadedWithDependencies { id } | AssetEvent::Modified { id } => Some(*id),
-            _ => None,
-        })
-        .filter(|id| current_document.matches(*id))
-        .count()
-}
-
 pub(super) fn handle_open_document_requests(
     mut requests: MessageReader<OpenDocumentRequest>,
     asset_server: Res<AssetServer>,
@@ -100,7 +86,7 @@ pub(super) fn handle_save_current_document_requests(
         match save_current_document(
             request.path.clone(),
             &request.root_kdl,
-            &request.secondary,
+            &request.windows,
             &asset_server,
             &mut current_document,
         ) {
@@ -119,13 +105,48 @@ pub(super) fn handle_save_current_document_requests(
 
 pub(super) fn emit_document_reloads(
     mut events: MessageReader<AssetEvent<SchematicDocumentAsset>>,
-    current_document: Res<CurrentDocument>,
+    mut current_document: ResMut<CurrentDocument>,
     document_assets: Res<Assets<SchematicDocumentAsset>>,
     mut reloaded: MessageWriter<DocumentReloaded>,
 ) {
-    if matching_current_document_event_count(&mut events, &current_document) == 0 {
+    let window_handles = current_document.window_handles(&document_assets);
+    let mut root_changed = false;
+    let mut changed_window_indices = Vec::new();
+
+    for event in events.read() {
+        let id = match event {
+            AssetEvent::LoadedWithDependencies { id } | AssetEvent::Modified { id } => *id,
+            _ => continue,
+        };
+
+        if current_document.matches(id) {
+            root_changed = true;
+        }
+        for (i, window_id) in window_handles.iter().enumerate() {
+            if *window_id == id {
+                changed_window_indices.push(i);
+            }
+        }
+    }
+
+    if !root_changed && changed_window_indices.is_empty() {
         return;
     }
+
+    if current_document.suppress_next_reload {
+        current_document.suppress_next_reload = false;
+        return;
+    }
+
+    // When only window sub-assets changed (not the root), report the specific indices.
+    // When the root changed, report an empty vec to signal a full reload.
+    let changed = if root_changed && changed_window_indices.is_empty() {
+        Vec::new()
+    } else if !root_changed {
+        changed_window_indices
+    } else {
+        Vec::new()
+    };
 
     if let Some((save_path, document)) =
         cloned_current_document_asset(&current_document, &document_assets)
@@ -133,6 +154,7 @@ pub(super) fn emit_document_reloads(
         reloaded.write(DocumentReloaded {
             save_path,
             document,
+            changed_window_indices: changed,
         });
     }
 }
@@ -140,10 +162,12 @@ pub(super) fn emit_document_reloads(
 pub(super) fn emit_document_load_failures(
     mut events: MessageReader<AssetLoadFailedEvent<SchematicDocumentAsset>>,
     current_document: Res<CurrentDocument>,
+    document_assets: Res<Assets<SchematicDocumentAsset>>,
     mut failed: MessageWriter<DocumentLoadFailed>,
 ) {
+    let window_handles = current_document.window_handles(&document_assets);
     for event in events.read() {
-        if !current_document.matches(event.id) {
+        if !current_document.matches(event.id) && !window_handles.contains(&event.id) {
             continue;
         }
         failed.write(DocumentLoadFailed {

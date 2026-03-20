@@ -38,8 +38,8 @@ use crate::{
         command_palette::CommandPaletteState,
         plot::{GraphBundle, default_component_values},
         schematic::{
-            CurrentSchematic, CurrentSecondarySchematics, LoadSchematicParams, OpenDocumentRequest,
-            SaveCurrentDocumentRequest, SecondaryDocumentSave,
+            CurrentSchematic, CurrentWindowSchematics, LoadSchematicParams, OpenDocumentRequest,
+            SaveCurrentDocumentRequest, WindowDocumentSave,
         },
         tiles::{self, set_mode_all},
         timeline::{
@@ -920,13 +920,13 @@ pub fn save_schematic() -> PaletteItem {
 
 fn queue_save_schematic_now(
     schematic: Res<CurrentSchematic>,
-    secondary: Res<CurrentSecondarySchematics>,
+    window_schematics: Res<CurrentWindowSchematics>,
     mut requests: MessageWriter<SaveCurrentDocumentRequest>,
 ) {
     requests.write(SaveCurrentDocumentRequest {
         path: None,
         root_kdl: schematic.0.to_kdl(),
-        secondary: secondary_document_saves(&secondary),
+        windows: window_document_saves(&window_schematics),
     });
 }
 
@@ -965,12 +965,12 @@ pub fn save_schematic_inner() -> PaletteItem {
         "",
         move |In(name): In<String>,
               schematic: Res<CurrentSchematic>,
-              secondary: Res<CurrentSecondarySchematics>,
+              window_schematics: Res<CurrentWindowSchematics>,
               mut requests: MessageWriter<SaveCurrentDocumentRequest>| {
             requests.write(SaveCurrentDocumentRequest {
                 path: Some(PathBuf::from(name)),
                 root_kdl: schematic.0.to_kdl(),
-                secondary: secondary_document_saves(&secondary),
+                windows: window_document_saves(&window_schematics),
             });
             PaletteEvent::Exit
         },
@@ -978,11 +978,11 @@ pub fn save_schematic_inner() -> PaletteItem {
     .default()
 }
 
-fn secondary_document_saves(secondary: &CurrentSecondarySchematics) -> Vec<SecondaryDocumentSave> {
-    secondary
+fn window_document_saves(window_schematics: &CurrentWindowSchematics) -> Vec<WindowDocumentSave> {
+    window_schematics
         .0
         .iter()
-        .map(|entry| SecondaryDocumentSave {
+        .map(|entry| WindowDocumentSave {
             file_name: entry.file_name.clone(),
             kdl: entry.schematic.to_kdl(),
         })

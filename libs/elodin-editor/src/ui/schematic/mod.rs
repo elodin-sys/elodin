@@ -29,8 +29,8 @@ mod load;
 pub use crate::plugins::kdl_document::{
     CurrentDocument, DocumentCleared, DocumentLoadFailed, DocumentLoaded, DocumentReloaded,
     DocumentSaved, InitialKdlPath, KdlDocumentSet, OpenDocumentFromContentRequest,
-    OpenDocumentRequest, SaveCurrentDocumentRequest, SchematicDocumentAsset, SecondaryDocumentSave,
-    SecondarySchematicAsset, apply_initial_kdl_path, sync_document_from_config,
+    OpenDocumentRequest, SaveCurrentDocumentRequest, SchematicDocumentAsset, SchematicWindow,
+    WindowDocumentSave, apply_initial_kdl_path, sync_document_from_config,
 };
 pub use load::*;
 
@@ -38,7 +38,7 @@ pub use load::*;
 pub struct CurrentSchematic(pub Schematic);
 
 #[derive(Debug, Clone)]
-pub struct SecondarySchematic {
+pub struct WindowSchematicEntry {
     pub window_id: tiles::WindowId,
     pub file_name: String,
     pub title: Option<String>,
@@ -46,7 +46,7 @@ pub struct SecondarySchematic {
 }
 
 #[derive(Resource, Debug, Default, Clone)]
-pub struct CurrentSecondarySchematics(pub Vec<SecondarySchematic>);
+pub struct CurrentWindowSchematics(pub Vec<WindowSchematicEntry>);
 
 #[derive(SystemParam)]
 pub struct SchematicParam<'w, 's> {
@@ -401,7 +401,7 @@ impl SchematicParam<'_, '_> {
 pub fn tiles_to_schematic(
     param: SchematicParam,
     mut schematic: ResMut<CurrentSchematic>,
-    mut secondary: ResMut<CurrentSecondarySchematics>,
+    mut window_schematics: ResMut<CurrentWindowSchematics>,
     mut bindings: ResMut<SchematicBindings>,
 ) {
     schematic.elems.clear();
@@ -452,7 +452,7 @@ pub fn tiles_to_schematic(
             }),
     );
 
-    secondary.0.clear();
+    window_schematics.0.clear();
     let mut window_elems = Vec::new();
     let mut name_counts: HashMap<String, usize> = HashMap::new();
     for (state, window_id) in &param.windows_state {
@@ -464,23 +464,23 @@ pub fn tiles_to_schematic(
             if computed_title != "Panel" {
                 window_title = Some(computed_title);
             }
-            let base_stem = preferred_secondary_stem(state);
+            let base_stem = preferred_window_stem(state);
             let unique_stem = ensure_unique_stem(&mut name_counts, &base_stem);
             file_name = Some(format!("{unique_stem}.kdl"));
 
-            let mut window_schematic = Schematic::default();
-            window_schematic.elems.extend(
+            let mut win_schematic = Schematic::default();
+            win_schematic.elems.extend(
                 param
                     .root_panels_from_state(&state.tile_state, &mut bindings)
                     .into_iter()
                     .map(SchematicElem::Panel),
             );
             if let Some(file_name) = &file_name {
-                secondary.0.push(SecondarySchematic {
+                window_schematics.0.push(WindowSchematicEntry {
                     window_id: *window_id,
                     file_name: file_name.clone(),
                     title: window_title.clone(),
-                    schematic: window_schematic,
+                    schematic: win_schematic,
                 });
             }
         }
@@ -511,7 +511,7 @@ pub struct SchematicPlugin;
 impl Plugin for SchematicPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(CurrentSchematic(Default::default()))
-            .insert_resource(CurrentSecondarySchematics::default())
+            .insert_resource(CurrentWindowSchematics::default())
             .init_resource::<SchematicBindings>()
             .add_systems(PostUpdate, tiles_to_schematic)
             .add_systems(
@@ -535,7 +535,7 @@ impl Plugin for SchematicPlugin {
     }
 }
 
-fn preferred_secondary_stem(state: &tiles::WindowState) -> String {
+fn preferred_window_stem(state: &tiles::WindowState) -> String {
     if let Some(title) = state.descriptor.title.as_deref() {
         let stem = sanitize_to_stem(title);
         if !stem.is_empty() {
@@ -554,7 +554,7 @@ fn preferred_secondary_stem(state: &tiles::WindowState) -> String {
             return stem;
         }
     }
-    "secondary".to_string()
+    "window".to_string()
 }
 
 pub fn sanitize_to_stem(input: &str) -> String {
@@ -574,7 +574,7 @@ pub fn sanitize_to_stem(input: &str) -> String {
 }
 
 fn ensure_unique_stem(counts: &mut HashMap<String, usize>, stem: &str) -> String {
-    let base = if stem.is_empty() { "secondary" } else { stem };
+    let base = if stem.is_empty() { "window" } else { stem };
     let entry = counts.entry(base.to_string()).or_insert(0);
     let current = *entry;
     *entry += 1;
