@@ -513,26 +513,24 @@ impl<G: ComponentGroup> Query<G> {
     }
 
     pub fn join<B: Component>(self, other: &ComponentArray<B>) -> Query<G::Append<B>> {
-        let batch1 = self.batch1;
         let q = join_many(self, other);
         Query {
             exprs: q.exprs,
             len: q.len,
             entity_map: q.entity_map,
             phantom_data: PhantomData,
-            batch1,
+            batch1: q.batch1,
         }
     }
 
     pub fn join_query<B: ComponentGroup>(self, other: Query<B>) -> Query<(G, B)> {
-        let batch1 = self.batch1;
         let q = join_query(self, other);
         Query {
             exprs: q.exprs,
             len: q.len,
             entity_map: q.entity_map,
             phantom_data: PhantomData,
-            batch1,
+            batch1: q.batch1,
         }
     }
 }
@@ -858,7 +856,15 @@ impl QueryMetadata {
 #[cfg(test)]
 mod batch1_join_tests {
     use super::*;
+    use elodin_macros::{Component, ReprMonad};
     use nox::NoxprTy;
+    use nox::{Op, OwnedRepr, Scalar};
+
+    #[derive(Component, ReprMonad)]
+    struct Lhs<R: OwnedRepr = Op>(Scalar<f64, R>);
+
+    #[derive(Component, ReprMonad)]
+    struct Rhs<R: OwnedRepr = Op>(Scalar<f64, R>);
 
     fn entity_map(entity_id: u64) -> BTreeMap<EntityId, usize> {
         BTreeMap::from([(EntityId(entity_id), 0)])
@@ -885,6 +891,16 @@ mod batch1_join_tests {
         }
     }
 
+    fn typed_batch1_query<T: Component>(number: i64, name: &str, entity_id: u64) -> Query<T> {
+        Query {
+            exprs: vec![batch1_expr(number, name)],
+            entity_map: entity_map(entity_id),
+            len: 1,
+            phantom_data: PhantomData,
+            batch1: true,
+        }
+    }
+
     fn batch1_array(number: i64, name: &str, entity_id: u64) -> ComponentArray<()> {
         ComponentArray {
             buffer: batch1_expr(number, name),
@@ -896,7 +912,22 @@ mod batch1_join_tests {
         }
     }
 
-    fn assert_empty_batched(joined: &Query<()>) {
+    fn typed_batch1_array<T: Component>(
+        number: i64,
+        name: &str,
+        entity_id: u64,
+    ) -> ComponentArray<T> {
+        ComponentArray {
+            buffer: batch1_expr(number, name),
+            len: 1,
+            entity_map: entity_map(entity_id),
+            phantom_data: PhantomData,
+            component_id: T::COMPONENT_ID,
+            batch1: true,
+        }
+    }
+
+    fn assert_empty_batched<G>(joined: &Query<G>) {
         assert!(!joined.batch1);
         assert_eq!(joined.len, 0);
         assert!(joined.entity_map.is_empty());
@@ -912,6 +943,16 @@ mod batch1_join_tests {
 
         assert_empty_batched(&join_many(a.clone(), &b));
         assert_empty_batched(&join_query(a, c));
+    }
+
+    #[test]
+    fn batch1_join_wrappers_preserve_free_function_batch1() {
+        let a = typed_batch1_query::<Lhs>(0, "lhs", 1);
+        let b = typed_batch1_array::<Rhs>(1, "rhs", 2);
+        let c = typed_batch1_query::<Rhs>(2, "rhs-query", 2);
+
+        assert_empty_batched(&a.clone().join(&b));
+        assert_empty_batched(&a.join_query(c));
     }
 }
 
