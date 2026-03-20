@@ -1326,6 +1326,7 @@ graph "value" {
             },
             icon: None,
             mesh_visibility_range: None,
+            frame:None,
             aux: (),
         }));
 
@@ -1366,6 +1367,7 @@ graph "value" {
             },
             icon: None,
             mesh_visibility_range: None,
+            frame:None,
             aux: (),
         }));
 
@@ -1403,6 +1405,7 @@ graph "value" {
             },
             icon: None,
             mesh_visibility_range: None,
+            frame: None,
             aux: (),
         }));
 
@@ -1437,6 +1440,7 @@ graph "value" {
             },
             icon: None,
             mesh_visibility_range: None,
+            frame: None,
             aux: (),
         }));
 
@@ -1479,6 +1483,8 @@ graph "value" {
                 material: Material::with_color(Color::ORANGE),
             },
             frame: Some(GeoFrame::NED),
+            mesh_visibility_range: None,
+            icon: None,
             aux: (),
         }));
 
@@ -1508,6 +1514,8 @@ graph "value" {
                 material: Material::with_color(Color::WHITE),
             },
             frame: None, // Default (no frame)
+            icon: None,
+            mesh_visibility_range: None,
             aux: (),
         }));
 
@@ -1534,7 +1542,9 @@ graph "value" {
                 look_at: None,
                 frame: Some(GeoFrame::NED),
                 local_arrows: Vec::new(),
+                aspect: None,
                 aux: (),
+                ..Default::default()
             })));
 
         let serialized = serialize_schematic(&schematic);

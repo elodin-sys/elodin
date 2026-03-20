@@ -12,9 +12,11 @@ use super::components::FaceDirection;
 /// Supported coordinate systems
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum CoordinateSystem {
-    /// East-North-Up: X=East, Y=Up, Z=North (aviation/robotics)
+    /// East-North-Up: X=East, Y=Up, Z=North
     #[default]
     ENU,
+    /// North-East-Down: X=North, Y=East, Z=Down (aviation/aerospace)
+    NED,
 }
 
 /// Axis definition with label, direction, and color
@@ -57,6 +59,33 @@ impl CoordinateSystem {
                     direction: Vec3::Z,
                     color: Color::srgb(0.2, 0.8, 0.2), // Green (North)
                     color_dim: Color::srgb(0.15, 0.5, 0.15),
+                },
+            ],
+            // NED mapped to Bevy's Y-up coordinate system:
+            // NED +X (North) → Bevy -Z (green)
+            // NED +Y (East)  → Bevy +X (red)
+            // NED +Z (Down)  → Bevy -Y (blue)
+            CoordinateSystem::NED => [
+                AxisDefinition {
+                    positive_label: "N",
+                    negative_label: "S",
+                    direction: Vec3::NEG_Z,
+                    color: Color::srgb(0.2, 0.8, 0.2), // Green (North)
+                    color_dim: Color::srgb(0.15, 0.5, 0.15),
+                },
+                AxisDefinition {
+                    positive_label: "E",
+                    negative_label: "W",
+                    direction: Vec3::X,
+                    color: Color::srgb(0.9, 0.2, 0.2), // Red (East)
+                    color_dim: Color::srgb(0.6, 0.15, 0.15),
+                },
+                AxisDefinition {
+                    positive_label: "D",
+                    negative_label: "U",
+                    direction: Vec3::NEG_Y,
+                    color: Color::srgb(0.2, 0.4, 0.9), // Blue (Down)
+                    color_dim: Color::srgb(0.15, 0.3, 0.6),
                 },
             ],
         }
@@ -189,6 +218,7 @@ impl ViewCubeConfig {
     pub fn system_axis_correction(system: CoordinateSystem) -> Quat {
         match system {
             CoordinateSystem::ENU => Quat::from_rotation_y(PI),
+            CoordinateSystem::NED => Quat::from_rotation_y(PI),
         }
     }
 
@@ -224,5 +254,25 @@ mod tests {
         assert_eq!(west.position, Vec3::X);
         assert_eq!(up.position, Vec3::Y);
         assert_eq!(south.position, Vec3::NEG_Z);
+    }
+
+    #[test]
+    fn ned_face_labels_have_correct_directions() {
+        let labels = CoordinateSystem::NED.get_face_labels(1.0);
+
+        let north = label_by_text(&labels, "N");
+        let south = label_by_text(&labels, "S");
+        let east = label_by_text(&labels, "E");
+        let west = label_by_text(&labels, "W");
+        let down = label_by_text(&labels, "D");
+        let up = label_by_text(&labels, "U");
+
+        // NED: North is -Z in Bevy, East is +X, Down is -Y
+        assert_eq!(north.direction, FaceDirection::South); // -Z maps to South in Bevy terms
+        assert_eq!(south.direction, FaceDirection::North); // +Z maps to North in Bevy terms
+        assert_eq!(east.direction, FaceDirection::East);   // +X maps to East
+        assert_eq!(west.direction, FaceDirection::West);   // -X maps to West
+        assert_eq!(down.direction, FaceDirection::Down);   // -Y maps to Down
+        assert_eq!(up.direction, FaceDirection::Up);       // +Y maps to Up
     }
 }

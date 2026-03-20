@@ -289,7 +289,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn axis_visual_configs_match_requested_xyz_rbg_mapping() {
+    fn enu_axis_visual_configs_match_requested_xyz_rbg_mapping() {
         let axis_configs = axis_visual_configs(CoordinateSystem::ENU);
 
         assert_eq!(axis_configs[0].0, Vec3::NEG_X);
@@ -322,7 +322,7 @@ mod tests {
     }
 
     #[test]
-    fn axis_origin_layout_maps_to_visual_west_bottom_south_corner() {
+    fn enu_axis_origin_layout_maps_to_visual_west_bottom_south_corner() {
         let local_origin = axis_origin_for_visual_layout(0.5, 0.04);
         let correction = ViewCubeConfig::system_axis_correction(CoordinateSystem::ENU);
         let visual_origin = correction * local_origin;
@@ -339,6 +339,89 @@ mod tests {
             visual_origin.z > 0.0,
             "origin should be on visual south side"
         );
+    }
+
+    #[test]
+    fn ned_axis_visual_configs_returns_correct_colors() {
+        let axis_configs = axis_visual_configs(CoordinateSystem::NED);
+
+        // Visual axes should still be X, Y, Z labels
+        assert_eq!(axis_configs[0].2, "X");
+        assert_eq!(axis_configs[1].2, "Z");
+        assert_eq!(axis_configs[2].2, "Y");
+
+        let logical_axes = CoordinateSystem::NED.get_axes();
+
+        // NED: East is +X in Bevy, so find the axis with direction.x > 0.9
+        let east_color = logical_axes
+            .iter()
+            .find(|axis| axis.direction.x > 0.9)
+            .map(|axis| axis.color)
+            .expect("east color for NED");
+
+        // NED: Down is -Y in Bevy, so find the axis with direction.y < -0.9
+        let down_color = logical_axes
+            .iter()
+            .find(|axis| axis.direction.y < -0.9)
+            .map(|axis| axis.color)
+            .expect("down color for NED");
+
+        // NED: North is -Z in Bevy, so find the axis with direction.z < -0.9
+        let north_color = logical_axes
+            .iter()
+            .find(|axis| axis.direction.z < -0.9)
+            .map(|axis| axis.color)
+            .expect("north color for NED");
+
+        // axis_visual_configs maps by Bevy direction:
+        // - X visual axis gets color from axis with |direction.x| > 0.9 (East in NED)
+        // - Y visual axis gets color from axis with |direction.y| > 0.9 (Down in NED)
+        // - Z visual axis gets color from axis with |direction.z| > 0.9 (North in NED)
+        assert_eq!(axis_configs[0].1, east_color);
+        assert_eq!(axis_configs[1].1, down_color);
+        assert_eq!(axis_configs[2].1, north_color);
+    }
+
+    #[test]
+    fn ned_axis_origin_layout_maps_to_visual_west_bottom_south_corner() {
+        let local_origin = axis_origin_for_visual_layout(0.5, 0.04);
+        let correction = ViewCubeConfig::system_axis_correction(CoordinateSystem::NED);
+        let visual_origin = correction * local_origin;
+
+        // NED uses the same Y-PI correction as ENU, so the visual origin
+        // should be in the same position (west, bottom, south corner)
+        assert!(
+            visual_origin.x < 0.0,
+            "origin should be on visual west side"
+        );
+        assert!(
+            visual_origin.y < 0.0,
+            "origin should be on visual bottom side"
+        );
+        assert!(
+            visual_origin.z > 0.0,
+            "origin should be on visual south side"
+        );
+    }
+
+    #[test]
+    fn ned_has_correct_axis_labels() {
+        let axes = CoordinateSystem::NED.get_axes();
+
+        // NED axes: North (+X), East (+Y), Down (+Z) in NED frame
+        // Mapped to Bevy: North = -Z, East = +X, Down = -Y
+        let north_axis = axes.iter().find(|a| a.positive_label == "N").expect("North axis");
+        let east_axis = axes.iter().find(|a| a.positive_label == "E").expect("East axis");
+        let down_axis = axes.iter().find(|a| a.positive_label == "D").expect("Down axis");
+
+        assert_eq!(north_axis.direction, Vec3::NEG_Z);
+        assert_eq!(north_axis.negative_label, "S");
+
+        assert_eq!(east_axis.direction, Vec3::X);
+        assert_eq!(east_axis.negative_label, "W");
+
+        assert_eq!(down_axis.direction, Vec3::NEG_Y);
+        assert_eq!(down_axis.negative_label, "U");
     }
 }
 

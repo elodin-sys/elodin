@@ -62,7 +62,8 @@ use crate::{
         gizmos::GIZMO_RENDER_LAYER,
         navigation_gizmo::{NavGizmoCamera, NavGizmoParent, RenderLayerAlloc},
         view_cube::{
-            NeedsInitialSnap, ViewCubeConfig, ViewCubeTargetCamera, spawn::spawn_view_cube,
+            CoordinateSystem, NeedsInitialSnap, ViewCubeConfig, ViewCubeTargetCamera,
+            spawn::spawn_view_cube,
         },
     },
     ui::{colors::ColorExt, dashboard::NodeUpdaterParams},
@@ -1559,6 +1560,16 @@ impl ViewportPane {
         // Spawn ViewCube with editor mode configuration, only override the per-viewport render layer
         let mut view_cube_config = ViewCubeConfig::editor_mode();
         view_cube_config.render_layer = view_cube_layer as u8;
+
+        // Set coordinate system based on viewport's geo frame
+        if let Some(frame) = viewport.frame {
+            view_cube_config.system = match frame {
+                bevy_geo_frames::GeoFrame::NED => CoordinateSystem::NED,
+                bevy_geo_frames::GeoFrame::ENU => CoordinateSystem::ENU,
+                bevy_geo_frames::GeoFrame::ECEF => CoordinateSystem::ENU, // Default to ENU for ECEF
+            };
+            info!("Setting frame to {:?}", &view_cube_config.system);
+        }
 
         let spawned = spawn_view_cube(
             commands,
