@@ -12,7 +12,7 @@ classifiers = [
 ]
 dependencies = [
     "jax==0.8.1",
-    "iree-base-compiler==3.10.0",
+    "iree-base-compiler==3.11.0",
     "numpy",
     "typing-extensions",
     "polars",

@@ -11,25 +11,26 @@
   libxml2,
   ...
 }: let
-  version = "3.10.0";
+  version = "3.11.0";
+  wheelTag = "cp312-abi3";
 
   # Platform-specific wheel URLs and hashes from PyPI
   # Hash format: sha256-<base64> (SRI format)
   wheelInfo =
     if stdenv.isDarwin
     then {
-      url = "https://files.pythonhosted.org/packages/6f/ab/0a36a64a5f38b04ee8ada47780d0893a77c9c4741158fbb878d3cbcbc5a1/iree_base_compiler-3.10.0-cp313-cp313-macosx_13_0_universal2.whl";
-      hash = "sha256-rRlZjGd9CpxsHpr4DmE5CL7BHgIPKzANVRH6lksFXjA=";
+      url = "https://files.pythonhosted.org/packages/4c/1f/ae45ccb7edef9eead14eacb0e8b472ce3d72ee3863a0f9eb6c916e09e6e3/iree_base_compiler-${version}-${wheelTag}-macosx_13_0_universal2.whl";
+      hash = "sha256-Lp/IiLkERmKhTuugG2MC11phGPaIdGmdz4+cfpkaTuI=";
     }
     else if stdenv.hostPlatform.system == "x86_64-linux"
     then {
-      url = "https://files.pythonhosted.org/packages/df/22/6590fb777060c870106f58234646c328a3675ca6e5b5463682b850fc8a27/iree_base_compiler-3.10.0-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl";
-      hash = "sha256-vjAqXFOHa9y9qUJbiI25cIlX0ROtxYvu1vg6RFFbtBI=";
+      url = "https://files.pythonhosted.org/packages/47/9c/f7cd82016c869ceb37b787b628608b68225c9e7bc46e0de9f18a9932ef3c/iree_base_compiler-${version}-${wheelTag}-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl";
+      hash = "sha256-mfwzaTdUBUhfEdpUGnXvKxU9Up+jcSwdl3HJijXiZp4=";
     }
     else if stdenv.hostPlatform.system == "aarch64-linux"
     then {
-      url = "https://files.pythonhosted.org/packages/33/13/c14d9378c4a15ac80aa1fa6fb4e78457ab8f0f5dd88c205954e5965c5c5e/iree_base_compiler-3.10.0-cp313-cp313-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl";
-      hash = "sha256-4kajF+UDU5uzmg/8Mv8pshbqeN0tRyOB0Z2vKdYIix8=";
+      url = "https://files.pythonhosted.org/packages/24/a3/67dda13e131479d17a5f8c63c0e43bd6674ddc5ff84d49f77b9155a917f8/iree_base_compiler-${version}-${wheelTag}-manylinux_2_27_aarch64.manylinux_2_28_aarch64.whl";
+      hash = "sha256-GuqTT9wuvh3WTl8gY6lt5nWjXwtIVvndt2st9Y3++4c=";
     }
     else throw "Unsupported platform: ${stdenv.hostPlatform.system}";
 
