@@ -206,7 +206,6 @@ def compile_to_vmfb(func, input_arrays, user_extra_flags, system_names, requeste
         "--iree-input-type=stablehlo",
         "--iree-opt-level=O1",
     ]
-    extra.append("--iree-hal-indirect-command-buffers=false")
     extra.append("--iree-opt-const-eval=false")
     if batch1:
         extra.append("--iree-flow-inline-constants-max-byte-length=0")
