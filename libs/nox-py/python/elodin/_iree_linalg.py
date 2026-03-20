@@ -240,6 +240,51 @@ def _qr(a, mode="reduced"):
 
 
 # ---------------------------------------------------------------------------
+# Orthonormal basis completion
+# ---------------------------------------------------------------------------
+
+
+def _complete_orthonormal_basis(U):
+    """Extend orthonormal columns of ``U`` to a full square basis."""
+    U = jnp.asarray(U)
+    m, k = U.shape
+    if k >= m:
+        return U[:, :m]
+
+    basis = jnp.concatenate(
+        [U, jnp.zeros((m, m - k), dtype=U.dtype)],
+        axis=1,
+    )
+    eye = jnp.eye(m, dtype=U.dtype)
+
+    def body(i, state):
+        basis, filled = state
+        v = eye[:, i]
+
+        def orthogonalize(j, v):
+            bj = basis[:, j]
+            proj = jnp.dot(bj, v)
+            return jnp.where(j < filled, v - proj * bj, v)
+
+        v = lax.fori_loop(0, m, orthogonalize, v)
+        norm = jnp.sqrt(jnp.maximum(jnp.dot(v, v), 0.0))
+        valid = jnp.logical_and(filled < m, norm > 1e-10)
+        safe_norm = jnp.where(valid, norm, 1.0)
+        v = v / safe_norm
+        basis = lax.cond(
+            valid,
+            lambda basis: _set_col(basis, filled, v),
+            lambda basis: basis,
+            basis,
+        )
+        filled = jnp.where(valid, filled + 1, filled)
+        return basis, filled
+
+    basis, _ = lax.fori_loop(0, m, body, (basis, jnp.int32(k)))
+    return basis
+
+
+# ---------------------------------------------------------------------------
 # SVD  (one-sided Jacobi, scatter-free)
 # ---------------------------------------------------------------------------
 
@@ -319,12 +364,14 @@ def _svd(a, full_matrices=True, compute_uv=True):
     sigma = sigma[order]
     U_out = U_out[:, order]
     V = V[:, order]
+    U_reduced = U_out[:, :k]
 
     if not compute_uv:
         return sigma[:k]
     if full_matrices:
-        return U_out, sigma[:k], V.T
-    return U_out[:, :k], sigma[:k], V[:, :k].T
+        U_full = _complete_orthonormal_basis(U_reduced) if m > k else U_reduced
+        return U_full, sigma[:k], V.T
+    return U_reduced, sigma[:k], V[:, :k].T
 
 
 # ---------------------------------------------------------------------------
@@ -455,6 +502,8 @@ def _scipy_solve(
     transposed=False,
 ):
     """Drop-in for ``jax.scipy.linalg.solve``."""
+    if transposed:
+        a = jnp.swapaxes(a, -1, -2)
     return _solve(a, b)
 
 

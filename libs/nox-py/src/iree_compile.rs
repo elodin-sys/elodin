@@ -307,12 +307,10 @@ def compile_to_vmfb(func, input_arrays, user_extra_flags, system_names, requeste
         if platform.system() == "Darwin":
             arch = 'arm64' if machine == 'arm64' else 'x86_64'
             extra.append('--iree-llvmcpu-target-triple=' + arch + '-apple-darwin')
-            extra.append('--iree-opt-const-eval=false')
         else:
             arch = 'aarch64' if machine in ('aarch64', 'arm64') else 'x86_64'
             extra.append('--iree-llvmcpu-target-triple=' + arch + '-unknown-linux-gnu')
             extra.append('--iree-llvmcpu-link-static=false')
-            extra.append('--iree-opt-const-eval=false')
 
     target_args = []
     compile_backend = compile_target

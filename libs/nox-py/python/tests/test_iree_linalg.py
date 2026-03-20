@@ -205,6 +205,22 @@ class TestSVD:
         s = _svd(A, compute_uv=False)
         assert s.shape == (3,)
 
+    @pytest.mark.parametrize("m,n", [(6, 4), (4, 6)])
+    def test_full_matrices_nonsquare_shapes(self, m, n):
+        A = jax.random.normal(jax.random.PRNGKey(31), (m, n))
+        U_ref, s_ref, Vt_ref = jnp.linalg.svd(A, full_matrices=True)
+        U, s, Vt = _svd(A, full_matrices=True)
+        k = min(m, n)
+        recon = U[:, :k] @ jnp.diag(s) @ Vt[:k, :]
+
+        assert U.shape == U_ref.shape
+        assert s.shape == s_ref.shape
+        assert Vt.shape == Vt_ref.shape
+        assert jnp.allclose(A, recon, atol=1e-6), (
+            f"SVD full-matrices non-square ({m}x{n}) reconstruction: "
+            f"max diff={jnp.max(jnp.abs(A - recon))}"
+        )
+
 
 # -----------------------------------------------------------------------
 # Det / Slogdet
@@ -268,6 +284,14 @@ class TestScipySolve:
         b = jax.random.normal(jax.random.PRNGKey(22), (4,))
         x = _scipy_solve(A, b)
         assert jnp.allclose(A @ x, b, atol=1e-8)
+
+    def test_transposed(self):
+        A = _well_conditioned(jax.random.PRNGKey(32), 4)
+        b = jax.random.normal(jax.random.PRNGKey(33), (4,))
+        x_ref = jnp.linalg.solve(A.T, b)
+        x = _scipy_solve(A, b, transposed=True)
+        assert jnp.allclose(x, x_ref, atol=1e-8)
+        assert jnp.allclose(A.T @ x, b, atol=1e-8)
 
 
 class TestLUWrapper:
