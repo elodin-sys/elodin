@@ -16,7 +16,7 @@ pub struct DocumentCommandFailed {
 
 #[derive(Clone, Debug)]
 pub struct SavedWindowInfo {
-    pub window_id: u32,
+    pub window_id: crate::ui::tiles::WindowId,
     pub file_name: String,
 }
 

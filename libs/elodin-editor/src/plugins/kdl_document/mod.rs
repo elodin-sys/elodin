@@ -196,21 +196,23 @@ mod tests {
     }
 
     #[test]
-    fn suppress_next_reload_flag() {
+    fn suppress_ids_cleared_on_clear() {
         let mut current_document = CurrentDocument::default();
-        assert!(!current_document.suppress_next_reload);
+        assert!(current_document.suppress_ids.is_empty());
 
-        current_document.suppress_next_reload = true;
-        assert!(current_document.suppress_next_reload);
+        let fake_handle = Handle::<SchematicDocumentAsset>::default();
+        current_document.suppress_ids.insert(fake_handle.id());
+        assert!(!current_document.suppress_ids.is_empty());
 
         current_document.clear();
-        assert!(!current_document.suppress_next_reload);
+        assert!(current_document.suppress_ids.is_empty());
     }
 
     #[test]
-    fn opening_unsaved_content_clears_suppress_flag() {
+    fn opening_unsaved_content_clears_suppress_ids() {
         let mut current_document = CurrentDocument::default();
-        current_document.suppress_next_reload = true;
+        let fake_handle = Handle::<SchematicDocumentAsset>::default();
+        current_document.suppress_ids.insert(fake_handle.id());
 
         let _document = open_document_from_content(
             "window path=\"rate-control-panel.kdl\" title=\"Panel A\"\n",
@@ -219,7 +221,7 @@ mod tests {
         )
         .expect("parse kdl");
 
-        assert!(!current_document.suppress_next_reload);
+        assert!(current_document.suppress_ids.is_empty());
         assert!(current_document.handle.is_none());
     }
 

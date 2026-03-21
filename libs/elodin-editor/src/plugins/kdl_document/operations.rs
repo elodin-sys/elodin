@@ -11,9 +11,7 @@ use super::commands::*;
 use super::messages::*;
 use super::types::*;
 
-fn canonicalize_or_original(path: &Path) -> PathBuf {
-    std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
-}
+use crate::plugins::kdl_asset_source::canonicalize_or_original;
 
 pub(crate) fn filesystem_to_asset_path(path: &Path) -> AssetPath<'static> {
     let resolved = canonicalize_or_original(path);
@@ -80,8 +78,9 @@ pub fn save_current_document(
 
     let asset_path = filesystem_to_asset_path(&dest);
     let handle: Handle<SchematicDocumentAsset> = asset_server.load(asset_path.clone());
+    let root_id = handle.id();
     current_document.set_file(handle, asset_path, dest.clone());
-    current_document.suppress_next_reload = true;
+    current_document.suppress_ids.insert(root_id);
     Ok(dest)
 }
 

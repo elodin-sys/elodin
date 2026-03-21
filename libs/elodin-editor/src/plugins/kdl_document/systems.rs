@@ -122,6 +122,15 @@ pub(super) fn emit_document_reloads(
     mut reloaded: MessageWriter<DocumentReloaded>,
 ) {
     let window_handles = current_document.window_handles(&document_assets);
+
+    // Lazily expand the suppress set to include window sub-asset IDs once they
+    // become available (they aren't known at save time).
+    if !current_document.suppress_ids.is_empty() {
+        current_document
+            .suppress_ids
+            .extend(window_handles.iter().copied());
+    }
+
     let mut root_changed = false;
     let mut changed_window_indices = Vec::new();
 
@@ -131,13 +140,22 @@ pub(super) fn emit_document_reloads(
             _ => continue,
         };
 
-        if current_document.matches(id) {
+        let is_root = current_document.matches(id);
+        let window_idx = window_handles.iter().position(|wid| *wid == id);
+
+        if !is_root && window_idx.is_none() {
+            continue;
+        }
+
+        if current_document.suppress_ids.remove(&id) {
+            continue;
+        }
+
+        if is_root {
             root_changed = true;
         }
-        for (i, window_id) in window_handles.iter().enumerate() {
-            if *window_id == id {
-                changed_window_indices.push(i);
-            }
+        if let Some(i) = window_idx {
+            changed_window_indices.push(i);
         }
     }
 
@@ -145,19 +163,15 @@ pub(super) fn emit_document_reloads(
         return;
     }
 
-    if current_document.suppress_next_reload {
-        current_document.suppress_next_reload = false;
-        return;
-    }
+    // Genuine external changes detected; discard any remaining suppress IDs.
+    current_document.suppress_ids.clear();
 
-    // When only window sub-assets changed (not the root), report the specific indices.
+    // When only window sub-assets changed, report the specific indices.
     // When the root changed, report an empty vec to signal a full reload.
-    let changed = if root_changed && changed_window_indices.is_empty() {
+    let changed = if root_changed {
         Vec::new()
-    } else if !root_changed {
-        changed_window_indices
     } else {
-        Vec::new()
+        changed_window_indices
     };
 
     if let Some((save_path, document)) =

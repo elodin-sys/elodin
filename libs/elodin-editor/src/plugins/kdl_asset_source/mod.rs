@@ -41,7 +41,7 @@ impl KdlAssetWatcher {
 
 impl AssetWatcher for KdlAssetWatcher {}
 
-fn canonicalize_or_original(path: &Path) -> PathBuf {
+pub(crate) fn canonicalize_or_original(path: &Path) -> PathBuf {
     std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
 }
 

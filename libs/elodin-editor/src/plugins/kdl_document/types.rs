@@ -1,6 +1,7 @@
 use bevy::{asset::AssetPath, prelude::*, reflect::TypePath};
 use impeller2_kdl::KdlSchematicError;
 use impeller2_wkt::Schematic;
+use std::collections::HashSet;
 use std::path::PathBuf;
 use thiserror::Error;
 
@@ -32,7 +33,9 @@ pub struct CurrentDocument {
     pub handle: Option<Handle<SchematicDocumentAsset>>,
     pub asset_path: Option<AssetPath<'static>>,
     pub save_path: Option<PathBuf>,
-    pub(crate) suppress_next_reload: bool,
+    /// Asset IDs whose next reload event should be suppressed (e.g. after a save).
+    /// Expanded lazily to include window sub-asset IDs in `emit_document_reloads`.
+    pub(crate) suppress_ids: HashSet<AssetId<SchematicDocumentAsset>>,
 }
 
 impl CurrentDocument {
@@ -40,7 +43,7 @@ impl CurrentDocument {
         self.handle = None;
         self.asset_path = None;
         self.save_path = None;
-        self.suppress_next_reload = false;
+        self.suppress_ids.clear();
     }
 
     pub fn set_file(
@@ -58,7 +61,7 @@ impl CurrentDocument {
         self.handle = None;
         self.asset_path = None;
         self.save_path = save_path;
-        self.suppress_next_reload = false;
+        self.suppress_ids.clear();
     }
 
     pub(crate) fn matches(&self, id: AssetId<SchematicDocumentAsset>) -> bool {
@@ -88,7 +91,7 @@ pub enum KdlDocumentSet {
 
 #[derive(Clone, Debug)]
 pub struct WindowDocumentSave {
-    pub window_id: u32,
+    pub window_id: crate::ui::tiles::WindowId,
     pub file_name: String,
     pub kdl: String,
 }

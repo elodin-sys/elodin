@@ -1157,7 +1157,7 @@ pub fn apply_document_saved(
                 state.descriptor.path = Some(event.save_path.clone());
                 continue;
             }
-            if let Some(info) = event.windows.iter().find(|w| w.window_id == id.0) {
+            if let Some(info) = event.windows.iter().find(|w| w.window_id == *id) {
                 state.descriptor.path = Some(base_dir.join(&info.file_name));
             }
         }
