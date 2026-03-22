@@ -23,6 +23,7 @@ with lib; let
       pkgs.coreutils
       pkgs.gcc-arm-embedded
       pkgs.lsof
+      pkgs.openocd
       pkgs.procps
       pkgs.stm32flash
       pkgs.systemd
@@ -140,6 +141,7 @@ in {
         ExecStart = "${cBlinkyFlash}/bin/c-blinky-flash-service";
         TimeoutStartSec = "90s";
         Environment = [
+          "ALEPH_FLASH_MCU_METHOD=uart"
           "ALEPH_FLASH_MCU_ADDR=0x08000000"
           "ALEPH_FLASH_MCU_PORT=${cfg.serialPort}"
           "ALEPH_FLASH_MCU_BAUD=${toString cfg.bootloaderBaudRate}"

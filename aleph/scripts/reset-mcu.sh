@@ -73,6 +73,9 @@ case "${1:-}" in
   --bootloader)
     enter_bootloader
     ;;
+  --boot0-high)
+    start_boot0_holder
+    ;;
   --release-boot0)
     kill_boot0_holder
     ;;
@@ -86,10 +89,10 @@ case "${1:-}" in
     boot_application
     ;;
   --help)
-    echo "Usage: $0 [--bootloader|--app|--release-boot0|--nrst-low|--nrst-high]"
+    echo "Usage: $0 [--bootloader|--app|--boot0-high|--release-boot0|--nrst-low|--nrst-high]"
     ;;
   *)
-    echo "Usage: $0 [--bootloader|--app|--release-boot0|--nrst-low|--nrst-high]" >&2
+    echo "Usage: $0 [--bootloader|--app|--boot0-high|--release-boot0|--nrst-low|--nrst-high]" >&2
     exit 1
     ;;
 esac
