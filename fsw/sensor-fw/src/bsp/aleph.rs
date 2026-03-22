@@ -392,7 +392,7 @@ pub fn clock_cfg(pwr: pac::PWR) -> clocks::Clocks {
         vos_range: clocks::VosRange::VOS1,
         can_src: clocks::CanSrc::Hse,
         usb_src: clocks::UsbSrc::Pll3Q,
-        hse_bypass: true,
+        hse_bypass: false,
         ..Default::default()
     };
 

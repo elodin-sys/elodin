@@ -60,6 +60,7 @@
     };
     fswModules = {
       c-blinky = ./modules/c-blinky.nix;
+      sensor-fw = ./modules/sensor-fw.nix;
       elodin-db = ./modules/elodin-db.nix;
       aleph-serial-bridge = ./modules/aleph-serial-bridge.nix;
       tegrastats-bridge = ./modules/tegrastats-bridge.nix;
@@ -137,7 +138,14 @@
           inherit system;
           modules =
             builtins.attrValues baseModules
-            ++ builtins.attrValues fswModules
+            ++ builtins.attrValues (builtins.removeAttrs fswModules ["sensor-fw"])
+            ++ builtins.attrValues devModules;
+        };
+        sensor-fw = nixpkgs.lib.nixosSystem {
+          inherit system;
+          modules =
+            builtins.attrValues baseModules
+            ++ builtins.attrValues (builtins.removeAttrs fswModules ["c-blinky"])
             ++ builtins.attrValues devModules;
         };
         installer = installerSystem ({...}: {
