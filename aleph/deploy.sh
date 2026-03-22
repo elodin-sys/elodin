@@ -3,6 +3,20 @@
 set -eu
 
 # Default values
+script_dir="$(cd "$(dirname "$0")" && pwd)"
+repo_root="$(cd "$script_dir/.." && pwd)"
+tracked_flake_ref="git+file://${repo_root}?dir=aleph"
+working_tree_flake_ref="path:${repo_root}?dir=aleph"
+flake_ref="$tracked_flake_ref"
+
+if git -C "$repo_root" status --porcelain --untracked-files=all -- aleph fsw libs apps examples .config | awk '
+  BEGIN { found = 0 }
+  /^\?\?/ { found = 1; exit }
+  END { exit found ? 0 : 1 }
+'; then
+  flake_ref="$working_tree_flake_ref"
+fi
+
 default_user="${USER}"
 default_host="fde1:2240:a1ef::1"
 default_config="default"
@@ -62,7 +76,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 # Construct the target path with the selected configuration
-target=".#nixosConfigurations.$config.config.system.build.toplevel"
+target="${flake_ref}#nixosConfigurations.$config.config.system.build.toplevel"
 
 log_info "Using host: $host, user: $user, configuration: $config"
 if [ "$no_aleph_builder" = true ]; then

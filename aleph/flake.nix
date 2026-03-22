@@ -59,6 +59,7 @@
       wifi = ./modules/wifi.nix;
     };
     fswModules = {
+      c-blinky = ./modules/c-blinky.nix;
       elodin-db = ./modules/elodin-db.nix;
       aleph-serial-bridge = ./modules/aleph-serial-bridge.nix;
       tegrastats-bridge = ./modules/tegrastats-bridge.nix;

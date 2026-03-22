@@ -45,6 +45,7 @@
         # aleph-cuda # opt-in CUDA, cuDNN, TensorRT, DeepStream, and GPU Python tooling
 
         # default fsw
+        c-blinky # deploy-time STM32 bring-up firmware flashed from the Orin during activation
         mekf # a basic attitude mekf that runs on the sensor data from the expansion board
         msp-osd # MSP DisplayPort OSD for FPV goggles, displays attitude from MEKF
 

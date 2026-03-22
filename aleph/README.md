@@ -94,6 +94,17 @@ The deploy script will:
 - Activate the new configuration
 - Create a new bootloader entry
 
+When the default `c-blinky` module is enabled, activation also starts the `c-blinky-flash` one-shot service. That service flashes the packaged STM32 firmware from the deployed closure by driving `BOOT0` on carrier GPIO9, pulsing `NRST` on carrier GPIO11, and running `stm32flash` against `/dev/ttyTHS1` before `serial-bridge` starts. Once the STM32 boots back into the application, `serial-bridge` forwards the MCU log lines into Elodin-DB on the `aleph.c-blinky.log` message stream. The older custom expansion board reference used an I2C expander for reset; the open-source board uses the direct GPIO11 reset path instead.
+
+Useful verification commands on Aleph:
+
+```bash
+journalctl -u c-blinky-flash -n 50 --no-pager
+journalctl -u serial-bridge -n 50 --no-pager
+```
+
+In the Editor, add a `log_stream "aleph.c-blinky.log" name="STM32 c-blinky"` pane to watch the bridged MCU logs live.
+
 To revert to the previous configuration, reboot and select the previous bootloader entry from the boot menu.
 
 NOTE: The bootloader can only be accessed via the serial console. So, you'll need to switch the USB-C cable to the debugger port (left-most USB-C port).

@@ -191,8 +191,8 @@ static void system_init(void) {
 }
 
 static void clock_config(void) {
-    // Enable 24MHz HSE (external clock, bypass mode)
-    RCC_CR |= RCC_CR_HSEBYP | RCC_CR_HSEON;
+    // Enable 24MHz HSE crystal
+    RCC_CR |= RCC_CR_HSEON;
     WAIT_FOR(RCC_CR & RCC_CR_HSERDY, "FAULT: HSE failed to start");
 
     // Disable PLL1 before configuration
