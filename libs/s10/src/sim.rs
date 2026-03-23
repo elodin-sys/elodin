@@ -85,12 +85,28 @@ fn signal_process_tree(root_pid: nix::unistd::Pid, signal: nix::sys::signal::Sig
     }
 }
 
+#[cfg(all(unix, not(target_os = "linux")))]
+fn configure_sim_command(cmd: &mut Command) {
+    cmd.process_group(0);
+}
+
+#[cfg(target_os = "linux")]
+fn configure_sim_command(_cmd: &mut Command) {}
+
+#[cfg(all(unix, not(target_os = "linux")))]
+fn signal_process_group(root_pid: nix::unistd::Pid, signal: nix::sys::signal::Signal) {
+    let _ = nix::sys::signal::killpg(root_pid, signal);
+}
+
+#[cfg(target_os = "linux")]
+fn signal_process_group(_root_pid: nix::unistd::Pid, _signal: nix::sys::signal::Signal) {}
+
 impl SimRecipe {
     pub async fn run(self, cancel_token: CancelToken) -> Result<(), Error> {
         debug!("running sim");
 
         let mut cmd = python_tokio_command()?;
-        cmd.process_group(0);
+        configure_sim_command(&mut cmd);
         // Close stdin to prevent SIGTTIN when child is in background process group
         cmd.stdin(Stdio::null());
         cmd.env("TRACY_PORT", "8089");
@@ -107,7 +123,7 @@ impl SimRecipe {
         tokio::select! {
             _ = cancel_token.wait() => {
                 if let Some(pid) = child_pid {
-                    let _ = nix::sys::signal::killpg(pid, nix::sys::signal::Signal::SIGTERM);
+                    signal_process_group(pid, nix::sys::signal::Signal::SIGTERM);
                     signal_process_tree(pid, nix::sys::signal::Signal::SIGTERM);
                 }
                 tracing::info!("Waiting for sim process tree to exit");
@@ -118,7 +134,7 @@ impl SimRecipe {
                     Err(_) => {
                         tracing::warn!("Sim process did not exit after SIGTERM, forcing kill");
                         if let Some(pid) = child_pid {
-                            let _ = nix::sys::signal::killpg(pid, nix::sys::signal::Signal::SIGKILL);
+                            signal_process_group(pid, nix::sys::signal::Signal::SIGKILL);
                             signal_process_tree(pid, nix::sys::signal::Signal::SIGKILL);
                         }
                         let _ = child.start_kill();
