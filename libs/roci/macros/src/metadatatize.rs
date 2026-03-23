@@ -35,6 +35,11 @@ pub fn metadatatize(input: TokenStream) -> TokenStream {
                 .as_ref()
                 .expect("only named field allowed")
                 .to_string();
+            let name = if let Some(parent) = &parent {
+                format!("{parent}.{name}")
+            } else {
+                name
+            };
             let component_id = field.component_id();
 
             let component_id = if let Some(parent) = &parent {

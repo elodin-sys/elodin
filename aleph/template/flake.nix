@@ -44,9 +44,9 @@
         aleph-dev # general on-device development tools like git, uv, editors, and Python
         # aleph-cuda # opt-in CUDA, cuDNN, TensorRT, DeepStream, and GPU Python tooling
 
-        # default fsw (pick one: c-blinky OR sensor-fw, they are mutually exclusive)
-        c-blinky # deploy-time STM32 bring-up firmware flashed from the Orin during activation
-        # sensor-fw # full sensor firmware: streams IMU/mag/baro data to elodin-db at 1 Mbaud
+        # default fsw (pick one: sensor-fw OR c-blinky, they are mutually exclusive)
+        sensor-fw # full sensor firmware: streams IMU/mag/baro data to elodin-db at 1 Mbaud
+        # c-blinky # deploy-time STM32 bring-up firmware flashed from the Orin during activation
         mekf # a basic attitude mekf that runs on the sensor data from the expansion board
         msp-osd # MSP DisplayPort OSD for FPV goggles, displays attitude from MEKF
 
@@ -179,21 +179,21 @@
     # installer is setup to be flashed to a usb drive, and contains the
     # aleph-installer tool. This tool lets you install the system to the nvme
     # drive
-    nixosModules.sensor-fw = {config, ...}: {
+    nixosModules.c-blinky = {config, ...}: {
       imports = [
         nixosModules.default
-        aleph.nixosModules.sensor-fw
+        aleph.nixosModules.c-blinky
       ];
-      services.c-blinky.enable = false;
+      services.sensor-fw.enable = false;
     };
     nixosConfigurations = {
       default = nixpkgs.lib.nixosSystem {
         inherit system;
         modules = [nixosModules.default];
       };
-      sensor-fw = nixpkgs.lib.nixosSystem {
+      c-blinky = nixpkgs.lib.nixosSystem {
         inherit system;
-        modules = [nixosModules.sensor-fw];
+        modules = [nixosModules.c-blinky];
       };
     };
     packages.aarch64-linux = {

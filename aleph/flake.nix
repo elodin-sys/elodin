@@ -138,14 +138,14 @@
           inherit system;
           modules =
             builtins.attrValues baseModules
-            ++ builtins.attrValues (builtins.removeAttrs fswModules ["sensor-fw"])
+            ++ builtins.attrValues (builtins.removeAttrs fswModules ["c-blinky"])
             ++ builtins.attrValues devModules;
         };
-        sensor-fw = nixpkgs.lib.nixosSystem {
+        c-blinky = nixpkgs.lib.nixosSystem {
           inherit system;
           modules =
             builtins.attrValues baseModules
-            ++ builtins.attrValues (builtins.removeAttrs fswModules ["c-blinky"])
+            ++ builtins.attrValues (builtins.removeAttrs fswModules ["sensor-fw"])
             ++ builtins.attrValues devModules;
         };
         installer = installerSystem ({...}: {

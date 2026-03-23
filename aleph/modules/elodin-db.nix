@@ -24,7 +24,7 @@ in {
     };
     dbUniqueOnBoot = lib.mkOption {
       type = lib.types.bool;
-      default = false;
+      default = true;
       description = ''
         Whether to automatically create a unique db on boot. This is useful if you are using a different time source (such as CLOCK_MONOTONIC).
       '';
@@ -76,9 +76,18 @@ in {
     systemd.services."elodin-db-default" = lib.mkIf (cfg.autostart && cfg.dbUniqueOnBoot) {
       after = ["network.target"];
       wantedBy = ["multi-user.target"];
+      restartIfChanged = true;
       description = "Start a unique elodin-db instance for this boot";
       serviceConfig = {
         Type = "oneshot";
+        RemainAfterExit = true;
+        ExecStartPre = pkgs.writeShellScript "elodin-db-stop-old" ''
+          export PATH="${lib.makeBinPath [pkgs.coreutils pkgs.gawk pkgs.systemd]}:$PATH"
+          for unit in $(systemctl list-units --type=service --plain --no-legend 'elodin-db@*' | awk '{print $1}'); do
+            systemctl stop "$unit" 2>/dev/null || true
+          done
+          sleep 1
+        '';
         ExecStart = pkgs.writeShellScript "elodin-db-default" ''
           TIMESTAMP=$(date +%Y%m%d-%H%M%S)
           systemctl start "elodin-db@default-$TIMESTAMP.service"
