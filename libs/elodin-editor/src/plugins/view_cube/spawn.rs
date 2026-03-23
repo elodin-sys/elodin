@@ -145,49 +145,20 @@ fn spawn_overlay_camera(
 
 fn axis_visual_configs(system: CoordinateSystem) -> [(Vec3, Color, &'static str); 3] {
     let axes = system.get_axes();
-    let east_color = axes
-        .iter()
-        .find(|axis| axis.direction.x.abs() > 0.9)
-        .map(|axis| axis.color)
-        .unwrap_or(Color::srgb(0.9, 0.2, 0.2));
-    let up_color = axes
-        .iter()
-        .find(|axis| axis.direction.y.abs() > 0.9)
-        .map(|axis| axis.color)
-        .unwrap_or(Color::srgb(0.2, 0.4, 0.9));
-    let north_color = axes
-        .iter()
-        .find(|axis| axis.direction.z.abs() > 0.9)
-        .map(|axis| axis.color)
-        .unwrap_or(Color::srgb(0.2, 0.8, 0.2));
-
     // Visual mapping requested for ENU view cube:
-    // - X must point opposite local +X
-    // - Y/Z labels are swapped while preserving blue/green axis colors
     [
-        (Vec3::NEG_X, east_color, "X"),
-        (Vec3::Y, up_color, "Z"),
-        (Vec3::Z, north_color, "Y"),
+        (axes[0].direction, axes[0].color, "X"),
+        (axes[1].direction, axes[1].color, "Y"),
+        (axes[2].direction, axes[2].color, "Z"),
     ]
-}
-
-fn axis_origin_for_visual_layout(cube_half_extent: f32, axis_center_offset: f32) -> Vec3 {
-    // In synced mode the cube receives a Y-PI correction.
-    // Use local corner (+X, -Y, -Z) so it appears at visual (W, bottom, S),
-    // then offset outward by axis radius so shafts sit on cube borders.
-    Vec3::new(
-        cube_half_extent + axis_center_offset,
-        -cube_half_extent - axis_center_offset,
-        -cube_half_extent - axis_center_offset,
-    )
 }
 
 /// Spawn RGB axes extending from the bottom-left-back corner of the cube
 fn spawn_axes(
     commands: &mut Commands,
-    asset_server: &Res<AssetServer>,
-    meshes: &mut ResMut<Assets<Mesh>>,
-    materials: &mut ResMut<Assets<StandardMaterial>>,
+    asset_server: &AssetServer,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
     config: &ViewCubeConfig,
     render_layers: Option<RenderLayers>,
     parent: Entity,
@@ -205,9 +176,10 @@ fn spawn_axes(
     // `axis_visual_configs` defines final visual axis directions/labels/colors.
     // Keep shafts on cube borders (no extra surface gap).
     let axis_center_offset = axis_radius + AXIS_SURFACE_GAP;
-    let axis_origin = axis_origin_for_visual_layout(CUBE_HALF_EXTENT, axis_center_offset);
-
     let axis_configs = axis_visual_configs(config.system);
+    let points_to: Vec3 = axis_configs.iter().map(|axis_config| axis_config.0).sum();
+    let axis_origin = -points_to * (CUBE_HALF_EXTENT + axis_center_offset);
+
 
     let shaft_mesh = meshes.add(Cylinder::new(axis_radius, axis_length));
     let font: Handle<FontMesh> =

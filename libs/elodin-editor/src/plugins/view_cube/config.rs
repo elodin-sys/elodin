@@ -2,6 +2,7 @@
 
 use bevy::prelude::*;
 use std::f32::consts::{FRAC_PI_2, PI};
+use bevy_geo_frames::GeoFrame;
 
 use super::components::FaceDirection;
 
@@ -10,13 +11,13 @@ use super::components::FaceDirection;
 // ============================================================================
 
 /// Supported coordinate systems
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub enum CoordinateSystem {
-    /// East-North-Up: X=East, Y=Up, Z=North
-    #[default]
-    ENU,
-    /// North-East-Down: X=North, Y=East, Z=Down (aviation/aerospace)
-    NED,
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct CoordinateSystem(pub GeoFrame);
+
+impl Default for CoordinateSystem {
+    fn default() -> Self {
+        CoordinateSystem(GeoFrame::ENU)
+    }
 }
 
 /// Axis definition with label, direction, and color
@@ -24,21 +25,23 @@ pub enum CoordinateSystem {
 pub struct AxisDefinition {
     pub positive_label: &'static str,
     pub negative_label: &'static str,
+    /// Positive direction in Bevy coordinate system.
     pub direction: Vec3,
     pub color: Color,
     pub color_dim: Color,
 }
 
 impl CoordinateSystem {
-    /// Get the three axis definitions for this coordinate system
+    /// Get the three axis definitions for XYZ in this coordinate system.
     pub fn get_axes(&self) -> [AxisDefinition; 3] {
-        match self {
+        match self.0 {
+            GeoFrame::ENU =>
             // ENU mapped to Bevy's Y-up coordinate system:
-            // Bevy +X (right) → East (red)
-            // Bevy +Y (up)    → Up (blue)
-            // Bevy +Z (fwd)   → North (green)
+            // East (red)    -> Bevy +X
+            // North (green) -> Bevy -Z
+            // Up (blue)     -> Bevy +Y
             // See: https://docs.elodin.systems/reference/coords/
-            CoordinateSystem::ENU => [
+            [
                 AxisDefinition {
                     positive_label: "E",
                     negative_label: "W",
@@ -47,47 +50,49 @@ impl CoordinateSystem {
                     color_dim: Color::srgb(0.6, 0.15, 0.15),
                 },
                 AxisDefinition {
+                    positive_label: "N",
+                    negative_label: "S",
+                    direction: Vec3::NEG_Z,
+                    color: Color::srgb(0.2, 0.8, 0.2), // Green
+                    color_dim: Color::srgb(0.15, 0.5, 0.15),
+                },
+                AxisDefinition {
                     positive_label: "U",
                     negative_label: "D",
                     direction: Vec3::Y,
-                    color: Color::srgb(0.2, 0.4, 0.9), // Blue (Up)
+                    color: Color::srgb(0.2, 0.4, 0.9), // Blue
                     color_dim: Color::srgb(0.15, 0.3, 0.6),
                 },
-                AxisDefinition {
-                    positive_label: "N",
-                    negative_label: "S",
-                    direction: Vec3::Z,
-                    color: Color::srgb(0.2, 0.8, 0.2), // Green (North)
-                    color_dim: Color::srgb(0.15, 0.5, 0.15),
-                },
             ],
+            GeoFrame::NED =>
             // NED mapped to Bevy's Y-up coordinate system:
-            // NED +X (North) → Bevy -Z (green)
-            // NED +Y (East)  → Bevy +X (red)
-            // NED +Z (Down)  → Bevy -Y (blue)
-            CoordinateSystem::NED => [
+            // North (red)  -> Bevy -Z
+            // East (green) -> Bevy +X
+            // Down (blue)  -> Bevy -Y
+            [
                 AxisDefinition {
                     positive_label: "N",
                     negative_label: "S",
                     direction: Vec3::NEG_Z,
-                    color: Color::srgb(0.2, 0.8, 0.2), // Green (North)
-                    color_dim: Color::srgb(0.15, 0.5, 0.15),
+                    color: Color::srgb(0.9, 0.2, 0.2), // Red
+                    color_dim: Color::srgb(0.6, 0.15, 0.15),
                 },
                 AxisDefinition {
                     positive_label: "E",
                     negative_label: "W",
                     direction: Vec3::X,
-                    color: Color::srgb(0.9, 0.2, 0.2), // Red (East)
-                    color_dim: Color::srgb(0.6, 0.15, 0.15),
+                    color: Color::srgb(0.2, 0.8, 0.2), // Green
+                    color_dim: Color::srgb(0.15, 0.5, 0.15),
                 },
                 AxisDefinition {
                     positive_label: "D",
                     negative_label: "U",
                     direction: Vec3::NEG_Y,
-                    color: Color::srgb(0.2, 0.4, 0.9), // Blue (Down)
+                    color: Color::srgb(0.2, 0.4, 0.9), // Blue
                     color_dim: Color::srgb(0.15, 0.3, 0.6),
                 },
             ],
+            x => todo!("Unsupported frame {x:?}"),
         }
     }
 
@@ -100,13 +105,12 @@ impl CoordinateSystem {
         for axis in &axes {
             // The synced cube applies a Y-PI correction to match camera conventions.
             // Mirror X-only for label placement so E/W appear on expected visual faces.
-            let visual_direction = Self::face_label_visual_direction(axis.direction);
 
             // Positive face label.
             labels.push(FaceLabelConfig {
                 text: axis.positive_label,
-                position: visual_direction * face_offset,
-                rotation: Self::get_rotation_for_direction(visual_direction),
+                position: axis.direction * face_offset,
+                rotation: Self::get_rotation_for_direction(axis.direction),
                 color: axis.color,
                 direction: Self::direction_to_face(axis.direction),
             });
@@ -114,17 +118,13 @@ impl CoordinateSystem {
             // Opposite face label.
             labels.push(FaceLabelConfig {
                 text: axis.negative_label,
-                position: -visual_direction * face_offset,
-                rotation: Self::get_rotation_for_direction(-visual_direction),
+                position: -axis.direction * face_offset,
+                rotation: Self::get_rotation_for_direction(-axis.direction),
                 color: axis.color_dim,
                 direction: Self::direction_to_face(-axis.direction),
             });
         }
         labels
-    }
-
-    fn face_label_visual_direction(dir: Vec3) -> Vec3 {
-        if dir.x.abs() > 0.9 { -dir } else { dir }
     }
 
     fn get_rotation_for_direction(dir: Vec3) -> Quat {
@@ -197,7 +197,7 @@ pub struct ViewCubeConfig {
 impl Default for ViewCubeConfig {
     fn default() -> Self {
         Self {
-            system: CoordinateSystem::ENU,
+            system: CoordinateSystem(GeoFrame::ENU),
             scale: 0.6,
             rotation_increment: 15.0 * PI / 180.0,
             camera_distance: 2.5,
@@ -214,18 +214,6 @@ impl ViewCubeConfig {
         Self::default()
     }
 
-    /// Base correction for Bevy's camera forward (-Z) vs cube face orientation (+Z).
-    pub fn system_axis_correction(system: CoordinateSystem) -> Quat {
-        match system {
-            CoordinateSystem::ENU => Quat::from_rotation_y(PI),
-            CoordinateSystem::NED => Quat::from_rotation_y(PI),
-        }
-    }
-
-    /// Full correction applied when syncing the cube to the camera.
-    pub fn effective_axis_correction(&self) -> Quat {
-        Self::system_axis_correction(self.system) * self.axis_correction
-    }
 }
 
 #[cfg(test)]
@@ -256,23 +244,4 @@ mod tests {
         assert_eq!(south.position, Vec3::NEG_Z);
     }
 
-    #[test]
-    fn ned_face_labels_have_correct_directions() {
-        let labels = CoordinateSystem::NED.get_face_labels(1.0);
-
-        let north = label_by_text(&labels, "N");
-        let south = label_by_text(&labels, "S");
-        let east = label_by_text(&labels, "E");
-        let west = label_by_text(&labels, "W");
-        let down = label_by_text(&labels, "D");
-        let up = label_by_text(&labels, "U");
-
-        // NED: North is -Z in Bevy, East is +X, Down is -Y
-        assert_eq!(north.direction, FaceDirection::South); // -Z maps to South in Bevy terms
-        assert_eq!(south.direction, FaceDirection::North); // +Z maps to North in Bevy terms
-        assert_eq!(east.direction, FaceDirection::East);   // +X maps to East
-        assert_eq!(west.direction, FaceDirection::West);   // -X maps to West
-        assert_eq!(down.direction, FaceDirection::Down);   // -Y maps to Down
-        assert_eq!(up.direction, FaceDirection::Up);       // +Y maps to Up
-    }
 }

@@ -1563,11 +1563,7 @@ impl ViewportPane {
 
         // Set coordinate system based on viewport's geo frame
         if let Some(frame) = viewport.frame {
-            view_cube_config.system = match frame {
-                bevy_geo_frames::GeoFrame::NED => CoordinateSystem::NED,
-                bevy_geo_frames::GeoFrame::ENU => CoordinateSystem::ENU,
-                bevy_geo_frames::GeoFrame::ECEF => CoordinateSystem::ENU, // Default to ENU for ECEF
-            };
+            view_cube_config.system = CoordinateSystem(frame);
             info!("Setting frame to {:?}", &view_cube_config.system);
         }
 
