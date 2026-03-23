@@ -542,8 +542,13 @@ pub fn apply_transforms(
 /// System: convert `GeoRotation` into `Transform.rotation`.
 pub fn apply_geo_rotation(
     ctx: Res<GeoContext>,
-    mut q: Query<(&GeoRotation, &mut Transform), Changed<GeoRotation>>,
-) {
+    // PERFORMANCE NOTE: We should be able to only apply this when changed, but
+    // there was an issue with the lines_3d when I did this. Removing the
+    // qualifier should be possible to re-enable if we track down who else is
+    // writing to the transform in the lines_3d case.
+    // 
+    // mut q: Query<(&GeoRotation, &mut Transform), Changed<GeoRotation>>,
+    mut q: Query<(&GeoRotation, &mut Transform)>) {
     for (geo_rot, mut transform) in &mut q {
         transform.rotation = geo_rot.to_bevy(&ctx).as_quat();
     }
