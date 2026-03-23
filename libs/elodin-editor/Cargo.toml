@@ -21,6 +21,7 @@ ab_glyph = "0.2"
 
 # bevy
 bevy.version = "0.17"
+bevy.features = ["file_watcher"]
 bevy_render.version = "0.17"
 bevy_color.version = "0.17"
 bevy_egui.version = "0.38.0"
@@ -120,7 +121,6 @@ tokio = { version = "1.34", features = ["rt-multi-thread", "net"] }
 directories = "5.0"
 rfd = "0.15.2"
 s10.path = "../s10"
-notify-debouncer-mini = "0.6.0"
 
 # async
 stellarator.path = "../../libs/stellarator"
