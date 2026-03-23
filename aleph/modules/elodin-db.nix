@@ -77,6 +77,7 @@ in {
       after = ["network.target"];
       wantedBy = ["multi-user.target"];
       restartIfChanged = true;
+      restartTriggers = [elodin-db];
       description = "Start a unique elodin-db instance for this boot";
       serviceConfig = {
         Type = "oneshot";

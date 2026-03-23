@@ -27,7 +27,7 @@ pub fn metadatatize(input: TokenStream) -> TokenStream {
     let impeller_wkt = quote! { #crate_name::impeller2_wkt };
     let fields = data.take_struct().unwrap();
 
-    let metadata_items = fields.fields.iter().map(|field| {
+    let metadata_items = fields.fields.iter().filter(|f| !f.timestamp && !f.skip).map(|field| {
         let ty = &field.ty;
         if !field.nest {
             let name = field

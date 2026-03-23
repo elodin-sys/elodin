@@ -13,6 +13,28 @@ use stellarator::{io::SplitExt, struc_con::Joinable};
 use zerocopy::{FromBytes, Immutable, IntoBytes};
 
 use blackbox::Record;
+use impeller2::types::Timestamp;
+
+#[derive(roci::AsVTable, roci::Metadatatize)]
+#[roci(parent = "aleph")]
+#[repr(C)]
+struct BridgeRecord {
+    #[roci(timestamp)]
+    time: i64,
+    ts: u32,
+    mag: [f32; 3],
+    gyro: [f32; 3],
+    accel: [f32; 3],
+    mag_temp: f32,
+    mag_sample: u32,
+    baro: f32,
+    baro_temp: f32,
+    vin: f32,
+    vbat: f32,
+    aux_current: f32,
+    rtc_vbat: f32,
+    cpu_temp: f32,
+}
 
 const LOG_STREAM_NAME: &str = "aleph.c-blinky.log";
 const LOG_STREAM_ID: PacketId = msg_id(LOG_STREAM_NAME);
@@ -108,7 +130,7 @@ pub async fn connect() -> anyhow::Result<()> {
     tx.send(&SetComponentMetadata::new("aleph", "aleph"))
         .await
         .0?;
-    tx.init_world::<Record>(id).await?;
+    tx.init_world::<BridgeRecord>(id).await?;
     tx.send(&SetMsgMetadata {
         id: LOG_STREAM_ID,
         metadata: MsgMetadata {
@@ -155,7 +177,8 @@ pub async fn connect() -> anyhow::Result<()> {
             match frame.push(data) {
                 Ok(Some(decoded)) => match parse_bridge_frame(decoded) {
                     Some(BridgeFrame::LegacyRecord(record)) => {
-                        let mut table = LenPacket::table(id, 64);
+                        let mut table = LenPacket::table(id, 8 + record.len());
+                        table.extend_from_slice(&Timestamp::now().0.to_le_bytes());
                         table.extend_from_slice(record);
                         tx.send(table).await.0?;
                     }

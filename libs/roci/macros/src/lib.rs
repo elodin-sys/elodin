@@ -18,6 +18,10 @@ struct Field {
     component_id: Option<String>,
     #[darling(skip, default)]
     nest: bool,
+    #[darling(default)]
+    timestamp: bool,
+    #[darling(default)]
+    skip: bool,
 }
 
 impl Field {

@@ -1,5 +1,5 @@
 use clap::Parser;
-use impeller2::types::{LenPacket, PacketId};
+use impeller2::types::{LenPacket, PacketId, Timestamp};
 use impeller2_stellar::Client;
 use mlua::LuaSerdeExt;
 use nox::{
@@ -24,7 +24,10 @@ pub struct Input {
 
 #[derive(AsVTable, Metadatatize, IntoBytes, Immutable, Debug)]
 #[roci(parent = "aleph")]
+#[repr(C)]
 pub struct Output {
+    #[roci(timestamp)]
+    pub time: i64,
     pub q_hat: Quat<f64>,
     pub b_hat: Vec3<f64>,
     pub gyro_est: Vec3<f64>,
@@ -63,8 +66,9 @@ async fn connect(config: &Config) -> anyhow::Result<()> {
         );
         let world_pos = nox::SpatialTransform::from_angular(mekf.q_hat);
         let gyro_est = mekf.omega - mekf.b_hat;
-        let mut table = LenPacket::table(id, 64);
+        let mut table = LenPacket::table(id, core::mem::size_of::<Output>());
         let output = Output {
+            time: Timestamp::now().0,
             q_hat: mekf.q_hat,
             world_pos,
             b_hat: mekf.b_hat,
