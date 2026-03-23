@@ -556,7 +556,7 @@ impl LoadSchematicParams<'_, '_> {
             .insert(Name::new("line_3d"));
 
         // Add GeoPosition and GeoRotation if frame is specified
-        if let Some(frame) = frame {
+        if let Some(frame) = frame.or(Some(bevy_geo_frames::GeoFrame::ENU)) {
             spawn.insert((
                 bevy_geo_frames::GeoPosition(frame, bevy::math::DVec3::ZERO),
                 bevy_geo_frames::GeoRotation(frame, bevy::math::DQuat::IDENTITY),
