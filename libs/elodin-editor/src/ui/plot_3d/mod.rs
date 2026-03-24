@@ -12,7 +12,7 @@ use bevy::{
         query::{With, Without},
         system::{Commands, Query, Res, ResMut},
     },
-    math::{Mat4, Vec4, DQuat},
+    math::{DQuat, Mat4, Vec4},
 };
 use bevy_geo_frames::{GeoContext, GeoFrame, GeoRotation};
 use big_space::GridCell;

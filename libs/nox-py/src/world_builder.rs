@@ -9,8 +9,8 @@ use crate::jax_exec::{JaxExec, JaxWorldExec};
 use crate::step_context::StepContext;
 use crate::system::{CompiledSystemExt, PySystem};
 use crate::{
-    ComponentSchema, TimeStep, World, globals::increment_sim_tick, system::IntoSystem,
-    system::System as _, Frame,
+    ComponentSchema, Frame, TimeStep, World, globals::increment_sim_tick, system::IntoSystem,
+    system::System as _,
 };
 use ::s10::{GroupRecipe, SimRecipe, cli::run_recipe_with_token};
 use clap::Parser;

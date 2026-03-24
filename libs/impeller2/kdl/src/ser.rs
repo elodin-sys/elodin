@@ -855,9 +855,9 @@ fn serialize_material_to_node(node: &mut KdlNode, material: &Material) {
 #[cfg(test)]
 mod tests {
 
-    use bevy_geo_frames::GeoFrame;
     use super::*;
     use crate::parse_schematic;
+    use bevy_geo_frames::GeoFrame;
 
     const COLOR_EPSILON: f32 = 1.0 / 255.0 + 1e-6;
 
@@ -1116,7 +1116,7 @@ graph "value" {
             },
             icon: None,
             mesh_visibility_range: None,
-            frame:None,
+            frame: None,
             node_id: NodeId::default(),
         }));
 
@@ -1157,7 +1157,7 @@ graph "value" {
             },
             icon: None,
             mesh_visibility_range: None,
-            frame:None,
+            frame: None,
             node_id: NodeId::default(),
         }));
 
@@ -1691,7 +1691,10 @@ viewport name=main"#;
     fn test_schematic_without_coordinate_frame() {
         let original = r#"viewport name="main""#;
         let parsed = parse_schematic(original).unwrap();
-        assert_eq!(parsed.frame, None, "Schematic without coordinate node should have None frame");
+        assert_eq!(
+            parsed.frame, None,
+            "Schematic without coordinate node should have None frame"
+        );
 
         let serialized = serialize_schematic(&parsed);
         assert!(
@@ -1715,7 +1718,11 @@ viewport name="main" frame="ENU"
 
         // Check viewport has its own ENU frame
         if let SchematicElem::Panel(Panel::Viewport(viewport)) = &parsed.elems[0] {
-            assert_eq!(viewport.frame, Some(GeoFrame::ENU), "Viewport should have ENU frame");
+            assert_eq!(
+                viewport.frame,
+                Some(GeoFrame::ENU),
+                "Viewport should have ENU frame"
+            );
         } else {
             panic!("Expected viewport panel");
         }
@@ -1751,7 +1758,11 @@ viewport name="main" frame="NED"
 
         // Check viewport has its own ENU frame
         if let SchematicElem::Panel(Panel::Viewport(viewport)) = &parsed.elems[0] {
-            assert_eq!(viewport.frame, Some(GeoFrame::NED), "Viewport should have ENU frame");
+            assert_eq!(
+                viewport.frame,
+                Some(GeoFrame::NED),
+                "Viewport should have ENU frame"
+            );
         } else {
             panic!("Expected viewport panel");
         }

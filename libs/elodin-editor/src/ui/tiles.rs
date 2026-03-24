@@ -1277,12 +1277,12 @@ impl ViewportPane {
         };
 
         // Swap axis colors for NED frame (X=North=Green, Z axis shows East=Red)
-        let (x_axis_color, z_axis_color) =
-            if viewport.frame == Some(bevy_geo_frames::GeoFrame::NED) {
-                (crate::ui::colors::bevy::GREEN, crate::ui::colors::bevy::RED)
-            } else {
-                (crate::ui::colors::bevy::RED, crate::ui::colors::bevy::GREEN)
-            };
+        let (x_axis_color, z_axis_color) = if viewport.frame == Some(bevy_geo_frames::GeoFrame::NED)
+        {
+            (crate::ui::colors::bevy::GREEN, crate::ui::colors::bevy::RED)
+        } else {
+            (crate::ui::colors::bevy::RED, crate::ui::colors::bevy::GREEN)
+        };
 
         let grid_id = commands
             .spawn((
@@ -1303,9 +1303,8 @@ impl ViewportPane {
             ))
             .id();
 
-        let transform = 
-            Transform::from_translation(Vec3::new(5.0, 5.0, 10.0))
-                .looking_at(Vec3::ZERO, Vec3::Y);
+        let transform =
+            Transform::from_translation(Vec3::new(5.0, 5.0, 10.0)).looking_at(Vec3::ZERO, Vec3::Y);
         let mut parent_cmd = commands.spawn((
             GlobalTransform::default(),
             transform.clone(),

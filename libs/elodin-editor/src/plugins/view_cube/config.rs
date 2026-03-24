@@ -1,8 +1,8 @@
 //! Configuration for the ViewCube widget
 
 use bevy::prelude::*;
-use std::f32::consts::{FRAC_PI_2, PI};
 use bevy_geo_frames::GeoFrame;
+use std::f32::consts::{FRAC_PI_2, PI};
 
 use super::components::FaceDirection;
 
@@ -41,57 +41,61 @@ impl CoordinateSystem {
             // North (green) -> Bevy -Z
             // Up (blue)     -> Bevy +Y
             // See: https://docs.elodin.systems/reference/coords/
-            [
-                AxisDefinition {
-                    positive_label: "E",
-                    negative_label: "W",
-                    direction: Vec3::X,
-                    color: Color::srgb(0.9, 0.2, 0.2), // Red
-                    color_dim: Color::srgb(0.6, 0.15, 0.15),
-                },
-                AxisDefinition {
-                    positive_label: "N",
-                    negative_label: "S",
-                    direction: Vec3::NEG_Z,
-                    color: Color::srgb(0.2, 0.8, 0.2), // Green
-                    color_dim: Color::srgb(0.15, 0.5, 0.15),
-                },
-                AxisDefinition {
-                    positive_label: "U",
-                    negative_label: "D",
-                    direction: Vec3::Y,
-                    color: Color::srgb(0.2, 0.4, 0.9), // Blue
-                    color_dim: Color::srgb(0.15, 0.3, 0.6),
-                },
-            ],
+            {
+                [
+                    AxisDefinition {
+                        positive_label: "E",
+                        negative_label: "W",
+                        direction: Vec3::X,
+                        color: Color::srgb(0.9, 0.2, 0.2), // Red
+                        color_dim: Color::srgb(0.6, 0.15, 0.15),
+                    },
+                    AxisDefinition {
+                        positive_label: "N",
+                        negative_label: "S",
+                        direction: Vec3::NEG_Z,
+                        color: Color::srgb(0.2, 0.8, 0.2), // Green
+                        color_dim: Color::srgb(0.15, 0.5, 0.15),
+                    },
+                    AxisDefinition {
+                        positive_label: "U",
+                        negative_label: "D",
+                        direction: Vec3::Y,
+                        color: Color::srgb(0.2, 0.4, 0.9), // Blue
+                        color_dim: Color::srgb(0.15, 0.3, 0.6),
+                    },
+                ]
+            }
             GeoFrame::NED =>
             // NED mapped to Bevy's Y-up coordinate system:
             // North (red)  -> Bevy -Z
             // East (green) -> Bevy +X
             // Down (blue)  -> Bevy -Y
-            [
-                AxisDefinition {
-                    positive_label: "N",
-                    negative_label: "S",
-                    direction: Vec3::NEG_Z,
-                    color: Color::srgb(0.9, 0.2, 0.2), // Red
-                    color_dim: Color::srgb(0.6, 0.15, 0.15),
-                },
-                AxisDefinition {
-                    positive_label: "E",
-                    negative_label: "W",
-                    direction: Vec3::X,
-                    color: Color::srgb(0.2, 0.8, 0.2), // Green
-                    color_dim: Color::srgb(0.15, 0.5, 0.15),
-                },
-                AxisDefinition {
-                    positive_label: "D",
-                    negative_label: "U",
-                    direction: Vec3::NEG_Y,
-                    color: Color::srgb(0.2, 0.4, 0.9), // Blue
-                    color_dim: Color::srgb(0.15, 0.3, 0.6),
-                },
-            ],
+            {
+                [
+                    AxisDefinition {
+                        positive_label: "N",
+                        negative_label: "S",
+                        direction: Vec3::NEG_Z,
+                        color: Color::srgb(0.9, 0.2, 0.2), // Red
+                        color_dim: Color::srgb(0.6, 0.15, 0.15),
+                    },
+                    AxisDefinition {
+                        positive_label: "E",
+                        negative_label: "W",
+                        direction: Vec3::X,
+                        color: Color::srgb(0.2, 0.8, 0.2), // Green
+                        color_dim: Color::srgb(0.15, 0.5, 0.15),
+                    },
+                    AxisDefinition {
+                        positive_label: "D",
+                        negative_label: "U",
+                        direction: Vec3::NEG_Y,
+                        color: Color::srgb(0.2, 0.4, 0.9), // Blue
+                        color_dim: Color::srgb(0.15, 0.3, 0.6),
+                    },
+                ]
+            }
             x => todo!("Unsupported frame {x:?}"),
         }
     }
@@ -213,7 +217,6 @@ impl ViewCubeConfig {
     pub fn editor_mode() -> Self {
         Self::default()
     }
-
 }
 
 #[cfg(test)]
@@ -243,5 +246,4 @@ mod tests {
         assert_eq!(up.position, Vec3::Y);
         assert_eq!(south.position, Vec3::Z);
     }
-
 }

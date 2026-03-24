@@ -3,6 +3,7 @@ use bevy::{ecs::system::SystemParam, prelude::*, window::PrimaryWindow};
 #[cfg(target_os = "macos")]
 use bevy_defer::AsyncCommandsExtension;
 use bevy_egui::egui::{Color32, Id};
+use bevy_geo_frames::GeoContext;
 use bevy_infinite_grid::InfiniteGrid;
 use bevy_mat3_material::Mat3Material;
 use egui_tiles::{Container, Tile, TileId};
@@ -16,7 +17,6 @@ use std::{
     collections::{BTreeMap, HashMap},
     path::{Path, PathBuf},
 };
-use bevy_geo_frames::GeoContext;
 
 #[cfg(not(target_os = "macos"))]
 use crate::tiles::WindowRelayout;
@@ -77,17 +77,28 @@ fn apply_fallback_frame_to_panel(
             }
             Panel::Viewport(v)
         }
-        Panel::Tabs(panels) => {
-            Panel::Tabs(panels.iter().map(|p| apply_fallback_frame_to_panel(p, fallback_frame)).collect())
-        }
+        Panel::Tabs(panels) => Panel::Tabs(
+            panels
+                .iter()
+                .map(|p| apply_fallback_frame_to_panel(p, fallback_frame))
+                .collect(),
+        ),
         Panel::HSplit(split) => {
             let mut s = split.clone();
-            s.panels = s.panels.iter().map(|p| apply_fallback_frame_to_panel(p, fallback_frame)).collect();
+            s.panels = s
+                .panels
+                .iter()
+                .map(|p| apply_fallback_frame_to_panel(p, fallback_frame))
+                .collect();
             Panel::HSplit(s)
         }
         Panel::VSplit(split) => {
             let mut s = split.clone();
-            s.panels = s.panels.iter().map(|p| apply_fallback_frame_to_panel(p, fallback_frame)).collect();
+            s.panels = s
+                .panels
+                .iter()
+                .map(|p| apply_fallback_frame_to_panel(p, fallback_frame))
+                .collect();
             Panel::VSplit(s)
         }
         other => other.clone(),
@@ -623,8 +634,7 @@ impl LoadSchematicParams<'_, '_> {
     pub fn spawn_line_3d(&mut self, line_3d: Line3d) {
         let frame = line_3d.frame;
         let mut spawn = self.commands.spawn(line_3d);
-        spawn
-            .insert(Name::new("line_3d"));
+        spawn.insert(Name::new("line_3d"));
 
         // Add GeoPosition and GeoRotation if frame is specified
         if let Some(frame) = frame.or(Some(bevy_geo_frames::GeoFrame::ENU)) {

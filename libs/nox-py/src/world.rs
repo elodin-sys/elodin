@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use crate::utils::SchemaExt;
+use bevy_geo_frames::GeoFrame;
 use bytemuck::Pod;
 use elodin_db::{ComponentSchema, MetadataExt};
 use impeller2::com_de::FromComponentView;
@@ -10,7 +11,6 @@ use impeller2::{
     component::Component,
     types::{ComponentView, EntityId},
 };
-use bevy_geo_frames::GeoFrame;
 use impeller2_wkt::{ComponentMetadata, EntityMetadata};
 
 use crate::error::Error;

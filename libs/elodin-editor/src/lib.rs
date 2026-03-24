@@ -21,9 +21,10 @@ use bevy_editor_cam::{SyncCameraPosition, controller::component::EditorCam};
 #[cfg(feature = "inspector")]
 use bevy_egui::EguiContext;
 use bevy_egui::{EguiContextSettings, EguiGlobalSettings, EguiPlugin};
+use bevy_geo_frames::GeoFramePlugin;
+use bevy_geo_frames::{GeoContext, GeoFrame, GeoPosition, GeoRotation};
 use bevy_picking::PickingSettings;
 use bevy_render::alpha::AlphaMode;
-use bevy_geo_frames::GeoFramePlugin;
 use big_space::{FloatingOrigin, FloatingOriginSettings, GridCell};
 use impeller2::types::{ComponentId, OwnedPacket};
 use impeller2::types::{Msg, Timestamp};
@@ -49,7 +50,6 @@ use ui::{
     tiles,
     utils::FriendlyEpoch,
 };
-use bevy_geo_frames::{GeoFrame, GeoPosition, GeoRotation, GeoContext};
 
 /// Global coordinate frame resource set by the schematic's top-level `coordinate` node.
 /// Individual elements (viewport, object_3d, line_3d, vector_arrow) use this as a fallback
@@ -885,13 +885,21 @@ pub fn follow_latest(
 }
 
 pub fn sync_pos(
-    mut query: Query<(&mut Transform, Option<&mut GeoPosition>, Option<&mut GeoRotation>, &mut GridCell<i128>, &WorldPos), Changed<WorldPos>>,
+    mut query: Query<
+        (
+            &mut Transform,
+            Option<&mut GeoPosition>,
+            Option<&mut GeoRotation>,
+            &mut GridCell<i128>,
+            &WorldPos,
+        ),
+        Changed<WorldPos>,
+    >,
     geo_context: Res<GeoContext>,
     floating_origin: Res<FloatingOriginSettings>,
 ) {
-    query
-        .iter_mut()
-        .for_each(|(mut transform, mut geo_pos, mut geo_rot, mut grid_cell, world_pos)| {
+    query.iter_mut().for_each(
+        |(mut transform, mut geo_pos, mut geo_rot, mut grid_cell, world_pos)| {
             if let Some(ref mut geo_pos) = geo_pos {
                 geo_pos.1 = world_pos.pos();
             }
@@ -914,7 +922,8 @@ pub fn sync_pos(
                 // Preserve the existing scale when updating position and rotation
                 transform.rotation = att.as_quat();
             }
-        });
+        },
+    );
 }
 
 fn sanitize_editor_cam_anchor_depth(mut cams: Query<(Entity, &mut EditorCam)>) {
@@ -1031,16 +1040,16 @@ pub fn sync_object_3d(
         let parent = path.path.first().unwrap();
 
         let glb = entity_map
-            .get(&ComponentId::from_pair(&parent.name,
-                "asset_handle_glb"))
+            .get(&ComponentId::from_pair(&parent.name, "asset_handle_glb"))
             .and_then(|e| glbs.get(*e).ok());
         let mesh = entity_map
-            .get(&ComponentId::from_pair(&parent.name,
-                "asset_handle_mesh"))
+            .get(&ComponentId::from_pair(&parent.name, "asset_handle_mesh"))
             .and_then(|e| meshes.get(*e).ok());
         let material = entity_map
-            .get(&ComponentId::from_pair(&parent.name,
-                "asset_handle_material"))
+            .get(&ComponentId::from_pair(
+                &parent.name,
+                "asset_handle_material",
+            ))
             .and_then(|e| materials.get(*e).ok());
 
         let mesh_source = match (glb, mesh, material) {

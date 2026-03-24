@@ -4,8 +4,8 @@ use bevy::log::warn_once;
 use bevy::math::{DQuat, DVec3};
 use bevy::prelude::Mesh;
 use bevy::prelude::*;
-use bevy_geo_frames::{GeoPosition, GeoRotation};
 use bevy::scene::{SceneInstance, SceneRoot, SceneSpawner};
+use bevy_geo_frames::{GeoPosition, GeoRotation};
 use bevy_mat3_material::{Mat3Material, Mat3Params, Mat3TransformExt, uv_sphere_grid_line_mesh};
 use bevy_render::alpha::AlphaMode;
 use big_space::GridCell;
@@ -20,9 +20,9 @@ use crate::icon_rasterizer::IconTextureCache;
 use crate::iter::JoinDisplayExt;
 use crate::ui::tiles::ViewportConfig;
 use crate::{BevyExt, EqlContext, MainCamera, plugins::navigation_gizmo::NavGizmoCamera};
+use bevy_geo_frames::GeoContext;
 use std::collections::{HashMap, HashSet};
 use std::fmt;
-use bevy_geo_frames::GeoContext;
 
 type ImportedCameraFilter = (Added<Camera>, Without<NavGizmoCamera>, Without<MainCamera>);
 

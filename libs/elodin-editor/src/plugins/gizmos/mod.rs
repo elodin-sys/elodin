@@ -16,6 +16,7 @@ use bevy::{
     text::{TextColor, TextFont},
     transform::components::Transform,
 };
+use bevy_geo_frames::{GeoContext, GeoFrame, GeoPosition, GeoRotation};
 use bevy_render::alpha::AlphaMode;
 use big_space::FloatingOriginSettings;
 use impeller2::types::ComponentId;
@@ -24,7 +25,6 @@ use impeller2_wkt::{
     BodyAxes, Color as WktColor, ComponentValue as WktComponentValue, LabelPosition, VectorArrow3d,
 };
 use std::collections::{HashMap, HashSet};
-use bevy_geo_frames::{GeoContext, GeoPosition, GeoRotation, GeoFrame};
 
 use crate::{
     MainCamera, WorldPosExt,
@@ -267,7 +267,8 @@ fn render_vector_arrow(
             continue;
         }
 
-        let Some(result) = evaluate_vector_arrow(arrow, &state, &entity_map, &component_values, &geo_context)
+        let Some(result) =
+            evaluate_vector_arrow(arrow, &state, &entity_map, &component_values, &geo_context)
         else {
             if logged_missing.insert(entity) {
                 info!(

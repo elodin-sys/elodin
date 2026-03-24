@@ -180,7 +180,6 @@ fn spawn_axes(
     let points_to: Vec3 = axis_configs.iter().map(|axis_config| axis_config.0).sum();
     let axis_origin = -points_to * (CUBE_HALF_EXTENT + axis_center_offset);
 
-
     let shaft_mesh = meshes.add(Cylinder::new(axis_radius, axis_length));
     let font: Handle<FontMesh> =
         asset_server.load("embedded://elodin_editor/assets/fonts/Roboto-Bold.ttf");
@@ -271,7 +270,6 @@ mod tests {
         assert_eq!(axis_configs[1].2, "Y");
         assert_eq!(axis_configs[2].0, Vec3::Y);
         assert_eq!(axis_configs[2].2, "Z");
-
     }
 
     #[test]
@@ -284,9 +282,7 @@ mod tests {
         assert_eq!(axis_configs[2].2, "Z");
 
         let logical_axes = CoordinateSystem(GeoFrame::NED).get_axes();
-
     }
-
 
     #[test]
     fn ned_has_correct_axis_labels() {
@@ -294,9 +290,18 @@ mod tests {
 
         // NED axes: North (+X), East (+Y), Down (+Z) in NED frame
         // Mapped to Bevy: North = -Z, East = +X, Down = -Y
-        let north_axis = axes.iter().find(|a| a.positive_label == "N").expect("North axis");
-        let east_axis = axes.iter().find(|a| a.positive_label == "E").expect("East axis");
-        let down_axis = axes.iter().find(|a| a.positive_label == "D").expect("Down axis");
+        let north_axis = axes
+            .iter()
+            .find(|a| a.positive_label == "N")
+            .expect("North axis");
+        let east_axis = axes
+            .iter()
+            .find(|a| a.positive_label == "E")
+            .expect("East axis");
+        let down_axis = axes
+            .iter()
+            .find(|a| a.positive_label == "D")
+            .expect("Down axis");
 
         assert_eq!(north_axis.direction, Vec3::NEG_Z);
         assert_eq!(north_axis.negative_label, "S");

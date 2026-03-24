@@ -34,7 +34,7 @@ use bevy::{
     math::{Mat4, Vec4},
     mesh::VertexBufferLayout,
     pbr::{MeshPipeline, MeshPipelineKey, SetMeshViewBindGroup},
-    prelude::{Color, Deref, Resource, Reflect},
+    prelude::{Color, Deref, Reflect, Resource},
     render::{
         ExtractSchedule, MainWorld, Render, RenderApp, RenderSystems,
         extract_component::{ComponentUniforms, DynamicUniformIndex, UniformComponentPlugin},

@@ -25,12 +25,12 @@ use bevy::{
     window::{ExitCondition, WindowPlugin},
     winit::WinitPlugin,
 };
+use bevy_geo_frames::GeoContext;
 use bevy_mat3_material::Mat3Material;
 use big_space::{FloatingOrigin, GridCell};
 use impeller2_kdl::FromKdl;
 use impeller2_wkt::{CurrentTimestamp, DbConfig, SchematicElem};
 use render_bridge::{BatchRenderRequest, RenderBridgeServer};
-use bevy_geo_frames::GeoContext;
 
 use crate::object_3d::create_object_3d_entity;
 use crate::sensor_camera::{
@@ -192,7 +192,7 @@ fn load_headless_scene(
                 &mut meshes,
                 &mut mat3_materials,
                 &asset_server,
-                &geo_context
+                &geo_context,
             );
         }
     }

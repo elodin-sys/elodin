@@ -45,7 +45,10 @@ pub enum Present {
 /// Bevy world: +X=East, +Y=Up, +Z=South (so North = -Z).
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Reflect)]
-#[cfg_attr(feature = "strum", derive(strum_macros::IntoStaticStr, strum_macros::EnumString))]
+#[cfg_attr(
+    feature = "strum",
+    derive(strum_macros::IntoStaticStr, strum_macros::EnumString)
+)]
 pub enum GeoFrame {
     /// East-North-Up: +X=East, +Y=North, +Z=Up
     ENU,
@@ -392,7 +395,6 @@ impl GeoRotation {
 pub struct GeoVelocity(pub GeoFrame, pub DVec3);
 
 impl GeoVelocity {
-
     /// Convert vector to Bevy.
     pub fn to_bevy(&self, context: &GeoContext) -> DVec3 {
         GeoFrame::bevy_R_(&self.0, context) * self.1
@@ -451,25 +453,26 @@ impl Plugin for GeoFramePlugin {
         app
             .register_type_data::<f32, bevy_inspector_egui::inspector_egui_impls::InspectorEguiImpl>()
             .register_type_data::<f64, bevy_inspector_egui::inspector_egui_impls::InspectorEguiImpl>();
-        app
-            .register_type::<GeoPosition>()
+        app.register_type::<GeoPosition>()
             .register_type::<GeoRotation>()
             .register_type::<GeoVelocity>()
             .register_type::<GeoAngularVelocity>()
             .insert_resource(ctx)
             // Integrate in frame space each Update
-            .add_systems(Update, (integrate_geo_motion,
-                                  integrate_geo_orientation,
-                                  touch_geo_on_context_change));
+            .add_systems(
+                Update,
+                (
+                    integrate_geo_motion,
+                    integrate_geo_orientation,
+                    touch_geo_on_context_change,
+                ),
+            );
         if self.apply_transforms {
             // Then convert to Bevy before transform propagation
             #[cfg(not(feature = "big_space"))]
             app.add_systems(
                 PostUpdate,
-                (
-                    apply_transforms,
-                    apply_geo_rotation,
-                )
+                (apply_transforms, apply_geo_rotation)
                     .chain()
                     .before(TransformSystems::Propagate),
             );
@@ -557,9 +560,10 @@ pub fn apply_geo_rotation(
     // there was an issue with the lines_3d when I did this. Removing the
     // qualifier should be possible to re-enable if we track down who else is
     // writing to the transform in the lines_3d case.
-    // 
+    //
     // mut q: Query<(&GeoRotation, &mut Transform), Changed<GeoRotation>>,
-    mut q: Query<(&GeoRotation, &mut Transform)>) {
+    mut q: Query<(&GeoRotation, &mut Transform)>,
+) {
     for (geo_rot, mut transform) in &mut q {
         transform.rotation = geo_rot.to_bevy(&ctx).as_quat();
     }
@@ -705,7 +709,6 @@ mod tests {
         let geo_rotation = GeoRotation::from_bevy(GeoFrame::ENU, DQuat::IDENTITY, &ctx);
         assert_ne!(geo_rotation.1.as_quat(), Quat::IDENTITY);
         assert_eq!(geo_rotation.to_bevy(&ctx).as_quat(), Quat::IDENTITY);
-
     }
 
     #[test]

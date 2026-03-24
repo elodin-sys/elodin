@@ -1,13 +1,12 @@
 use crate::color_names::color_from_name;
-use impeller2_wkt::{
-    ArrowThickness, Color, Schematic, SchematicElem, ThemeConfig, VectorArrow3d,
-    WindowSchematic,
-};
 use bevy_geo_frames::GeoFrame;
+use impeller2_wkt::{
+    ArrowThickness, Color, Schematic, SchematicElem, ThemeConfig, VectorArrow3d, WindowSchematic,
+};
 use kdl::{KdlDocument, KdlNode};
 use std::collections::HashMap;
-use std::time::Duration;
 use std::str::FromStr;
+use std::time::Duration;
 
 use impeller2_wkt::*;
 
@@ -1978,7 +1977,8 @@ object_3d "a.world_pos" {
 
     #[test]
     fn test_parse_viewport_with_frame() {
-        let kdl = r#"viewport name="main" frame="NED" pos="(0,0,0,0, 8,2,4)" look_at="(0,0,0,0, 0,0,3)""#;
+        let kdl =
+            r#"viewport name="main" frame="NED" pos="(0,0,0,0, 8,2,4)" look_at="(0,0,0,0, 0,0,3)""#;
         let schematic = parse_schematic(kdl).unwrap();
 
         assert_eq!(schematic.elems.len(), 1);

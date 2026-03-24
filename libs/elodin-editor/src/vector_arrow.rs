@@ -1,5 +1,5 @@
 use bevy::{math::DVec3, prelude::*};
-use impeller2_wkt::{ComponentValue};
+use impeller2_wkt::ComponentValue;
 use nox::ArrayBuf;
 use std::collections::HashMap;
 
@@ -56,5 +56,5 @@ fn tail_to_vec3(mut iter: impl DoubleEndedIterator<Item = f64>) -> Option<DVec3>
     let z = iter.next_back()?;
     let y = iter.next_back()?;
     let x = iter.next_back()?;
-    Some(DVec3::new(x,y,z))
+    Some(DVec3::new(x, y, z))
 }

@@ -14,13 +14,13 @@ use crate::{
     vector_arrow::ViewportArrow,
 };
 use bevy::{ecs::system::SystemParam, prelude::*, window::PrimaryWindow};
+use bevy_geo_frames::{GeoFrame, GeoPosition};
 use egui_tiles::{Tile, TileId};
 use impeller2_bevy::ComponentMetadataRegistry;
 use impeller2_wkt::{
     ActionPane, ComponentMonitor, ComponentPath, Line3d, Panel, Schematic, SchematicElem, Split,
     VectorArrow3d, VideoStream as WktVideoStream, Viewport, WindowSchematic,
 };
-use bevy_geo_frames::{GeoFrame, GeoPosition};
 
 pub mod bindings;
 pub use bindings::SchematicBindings;
@@ -218,9 +218,11 @@ impl SchematicParam<'_, '_> {
                             })
                             .map(|(_, arrow, _)| arrow.clone())
                             .collect();
-                        let frame: Option<GeoFrame> =
-                            self.geo_positions.get(cam_entity)
-                            .map(|geo_pos| geo_pos.0).ok();
+                        let frame: Option<GeoFrame> = self
+                            .geo_positions
+                            .get(cam_entity)
+                            .map(|geo_pos| geo_pos.0)
+                            .ok();
 
                         let node_id = impeller2_wkt::NodeId::next();
                         bindings.bind_ephemeral(node_id, cam_entity);
