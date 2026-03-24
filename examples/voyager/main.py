@@ -31,22 +31,23 @@ start_time_et = spice.utc2et('1978-01-01T00:00:00')
 start_time_epoch_us = 252_452_400_000_000 
 
 PLANETS = [
-    {"spice_name": "MERCURY BARYCENTER", "entity_name": "mercury", "radius": 2000000000.0, "color": "bone", "mass": 3.3011e23},
-    {"spice_name": "VENUS BARYCENTER", "entity_name": "venus", "radius": 3000000000.0, "color": "peach", "mass": 4.8675e24},
-    {"spice_name": "EARTH", "entity_name": "earth", "radius": 6000000000.0, "color": "blue", "mass": 5.97219e24},
-    {"spice_name": "MARS BARYCENTER", "entity_name": "mars", "radius": 4000000000.0, "color": "red", "mass": 6.4171e23},
-    {"spice_name": "JUPITER BARYCENTER", "entity_name": "jupiter", "radius": 12000000000.0, "color": "yolk", "mass": 1.898125e27},
-    {"spice_name": "SATURN BARYCENTER", "entity_name": "saturn", "radius": 10000000000.0, "color": "yellow", "mass": 5.6834e26},
-    {"spice_name": "URANUS BARYCENTER", "entity_name": "uranus", "radius": 8000000000.0, "color": "mint", "mass": 8.6813e25},
-    {"spice_name": "NEPTUNE BARYCENTER", "entity_name": "neptune", "radius": 8000000000.0, "color": "hyperblue", "mass": 1.02413e26},
+    {"spice_name": "MERCURY BARYCENTER", "entity_name": "mercury", "radius": 2000000000.0, "color": "white", "trail_color": "white 220", "mass": 3.3011e23},
+    {"spice_name": "VENUS BARYCENTER", "entity_name": "venus", "radius": 3000000000.0, "color": "peach", "trail_color": "peach 220", "mass": 4.8675e24},
+    {"spice_name": "EARTH", "entity_name": "earth", "radius": 6000000000.0, "color": "hyperblue", "trail_color": "hyperblue 220", "mass": 5.97219e24},
+    {"spice_name": "MARS BARYCENTER", "entity_name": "mars", "radius": 4000000000.0, "color": "red", "trail_color": "red 220", "mass": 6.4171e23},
+    {"spice_name": "JUPITER BARYCENTER", "entity_name": "jupiter", "radius": 12000000000.0, "color": "orange", "trail_color": "orange 220", "mass": 1.898125e27},
+    {"spice_name": "SATURN BARYCENTER", "entity_name": "saturn", "radius": 10000000000.0, "color": "yolk", "trail_color": "yolk 220", "mass": 5.6834e26},
+    {"spice_name": "URANUS BARYCENTER", "entity_name": "uranus", "radius": 8000000000.0, "color": "cyan", "trail_color": "cyan 220", "mass": 8.6813e25},
+    {"spice_name": "NEPTUNE BARYCENTER", "entity_name": "neptune", "radius": 8000000000.0, "color": "blue", "trail_color": "blue 220", "mass": 1.02413e26},
 ]
+PROBE_RADIUS = 4000000000.0
 PROBES = [
-    {"spice_name": "VOYAGER 1", "entity_name": "voyager1", "radius": 4000000000.0, "color": "white", "mass": 825.0},
-    {"spice_name": "VOYAGER 2", "entity_name": "voyager2", "radius": 4000000000.0, "color": "turquoise", "mass": 825.0},
+    {"spice_name": "VOYAGER 1", "entity_name": "voyager1", "radius": PROBE_RADIUS, "color": "red", "trail_color": "red 235", "mass": 825.0},
+    {"spice_name": "VOYAGER 2", "entity_name": "voyager2", "radius": PROBE_RADIUS, "color": "red", "trail_color": "red 235", "mass": 825.0},
 ]
 TRUTH_PROBES = [
-    {"spice_name": "VOYAGER 1", "entity_name": "voyager1_truth", "radius": 2500000000.0, "color": "bone", "mass": 825.0},
-    {"spice_name": "VOYAGER 2", "entity_name": "voyager2_truth", "radius": 2500000000.0, "color": "mint", "mass": 825.0},
+    {"spice_name": "VOYAGER 1", "entity_name": "voyager1_truth", "radius": PROBE_RADIUS, "color": "green", "trail_color": "green 235", "mass": 825.0},
+    {"spice_name": "VOYAGER 2", "entity_name": "voyager2_truth", "radius": PROBE_RADIUS, "color": "green", "trail_color": "green 235", "mass": 825.0},
 ]
 EPHEMERIS_BODIES = PLANETS
 DISPLAY_BODIES = PLANETS + PROBES + TRUTH_PROBES
@@ -151,12 +152,12 @@ for probe in PROBES:
 
 body_objects = "\n".join(
     f"""    object_3d {body["entity_name"]}.world_pos {{
-        sphere radius={body["radius"]} emissivity=1.0 {{
+        sphere radius={body["radius"]} {{
             color {body["color"]}
         }}
     }}
     line_3d {body["entity_name"]}.world_pos line_width=1.0 perspective=#false {{
-        color yolk
+        color {body["trail_color"]}
     }}"""
     for body in DISPLAY_BODIES
 )
@@ -178,7 +179,7 @@ w.schematic("""
         }}
     }}
     object_3d sun.world_pos {{
-        sphere radius=40000000000.0 emissivity=1.0 {{
+        sphere radius=40000000000.0 emissivity=0.25 {{
             color yellow
         }}
     }}
@@ -188,7 +189,7 @@ w.schematic("""
 sys = el.six_dof(sys=gravity)
 db_path = Path(os.environ.get(DB_PATH_ENV, DEFAULT_DB_PATH))
 max_ticks_env = os.environ.get(MAX_TICKS_ENV)
-max_ticks = int(max_ticks_env) if max_ticks_env is not None else None
+max_ticks = int(max_ticks_env) if max_ticks_env is not None else 50_000_000_000
 
 #sim = w.run(sys, SIM_TIME_STEP, run_time_step=1 / 120.0, pre_step=pre_step)
 sim = w.run(

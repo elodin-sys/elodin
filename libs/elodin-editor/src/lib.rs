@@ -951,11 +951,7 @@ impl BevyExt for impeller2_wkt::Material {
         };
 
         bevy::prelude::StandardMaterial {
-            base_color: if emissivity > 0.0 {
-                boosted_color
-            } else {
-                base_color
-            },
+            base_color,
             alpha_mode,
             emissive: emissive.into(),
             ..Default::default()
