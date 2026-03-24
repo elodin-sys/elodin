@@ -22,6 +22,7 @@ use crate::ui::tiles::ViewportConfig;
 use crate::{BevyExt, EqlContext, MainCamera, plugins::navigation_gizmo::NavGizmoCamera};
 use std::collections::{HashMap, HashSet};
 use std::fmt;
+use bevy_geo_frames::GeoContext;
 
 type ImportedCameraFilter = (Added<Camera>, Without<NavGizmoCamera>, Without<MainCamera>);
 
@@ -1242,10 +1243,11 @@ pub fn create_object_3d_entity(
     data: impeller2_wkt::Object3D,
     expr: eql::Expr,
     ctx: &eql::Context,
-    material_assets: &mut ResMut<Assets<StandardMaterial>>,
-    mesh_assets: &mut ResMut<Assets<Mesh>>,
-    mat3_material_assets: &mut ResMut<Assets<Mat3Material>>,
-    assets: &Res<AssetServer>,
+    material_assets: &mut Assets<StandardMaterial>,
+    mesh_assets: &mut Assets<Mesh>,
+    mat3_material_assets: &mut Assets<Mat3Material>,
+    assets: &AssetServer,
+    geo_context: &GeoContext,
 ) -> Entity {
     let (scale_expr, scale_error) = match &data.mesh {
         impeller2_wkt::Object3DMesh::Ellipsoid {
@@ -1307,7 +1309,7 @@ pub fn create_object_3d_entity(
             ViewVisibility::default(),
             GridCell::<i128>::default(),
             impeller2_wkt::WorldPos::default(),
-            Name::new("object_3d"),
+            Name::new(format!("object_3d {}", &data.mesh)),
         ))
         .id();
 
@@ -1315,7 +1317,7 @@ pub fn create_object_3d_entity(
     if let Some(frame) = geo_frame {
         commands.entity(entity_id).insert((
             GeoPosition(frame, DVec3::ZERO),
-            GeoRotation(frame, DQuat::IDENTITY),
+            GeoRotation::from_bevy(frame, DQuat::IDENTITY, geo_context),
         ));
     }
 
@@ -1396,10 +1398,10 @@ pub fn spawn_mesh(
     commands: &mut Commands,
     entity: Entity,
     mesh: &impeller2_wkt::Object3DMesh,
-    material_assets: &mut ResMut<Assets<StandardMaterial>>,
-    mesh_assets: &mut ResMut<Assets<Mesh>>,
-    mat3_material_assets: &mut ResMut<Assets<Mat3Material>>,
-    assets: &Res<AssetServer>,
+    material_assets: &mut Assets<StandardMaterial>,
+    mesh_assets: &mut Assets<Mesh>,
+    mat3_material_assets: &mut Assets<Mat3Material>,
+    assets: &AssetServer,
 ) {
     match mesh {
         impeller2_wkt::Object3DMesh::Glb {

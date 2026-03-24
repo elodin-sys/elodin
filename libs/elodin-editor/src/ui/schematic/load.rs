@@ -16,6 +16,7 @@ use std::{
     collections::{BTreeMap, HashMap},
     path::{Path, PathBuf},
 };
+use bevy_geo_frames::GeoContext;
 
 #[cfg(not(target_os = "macos"))]
 use crate::tiles::WindowRelayout;
@@ -113,6 +114,7 @@ pub struct LoadSchematicParams<'w, 's> {
     pub timeline_settings: ResMut<'w, TimelineSettings>,
     pub schema_reg: Res<'w, ComponentSchemaRegistry>,
     pub eql: Res<'w, EqlContext>,
+    pub geo_context: Res<'w, GeoContext>,
     pub sensor_camera_configs: Res<'w, crate::sensor_camera::SensorCameraConfigs>,
     pub coordinate: ResMut<'w, crate::Coordinate>,
     cameras: Query<'w, 's, &'static mut Camera>,
@@ -601,6 +603,7 @@ impl LoadSchematicParams<'_, '_> {
             &mut self.meshes,
             &mut self.mat3_materials,
             &self.asset_server,
+            &self.geo_context,
         );
         if let Some(icon) = &icon {
             crate::object_3d::spawn_billboard_icon(

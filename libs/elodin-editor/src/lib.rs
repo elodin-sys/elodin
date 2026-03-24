@@ -49,7 +49,7 @@ use ui::{
     tiles,
     utils::FriendlyEpoch,
 };
-use bevy_geo_frames::{GeoFrame, GeoPosition, GeoRotation};
+use bevy_geo_frames::{GeoFrame, GeoPosition, GeoRotation, GeoContext};
 
 /// Global coordinate frame resource set by the schematic's top-level `coordinate` node.
 /// Individual elements (viewport, object_3d, line_3d, vector_arrow) use this as a fallback
@@ -886,6 +886,7 @@ pub fn follow_latest(
 
 pub fn sync_pos(
     mut query: Query<(&mut Transform, Option<&mut GeoPosition>, Option<&mut GeoRotation>, &mut GridCell<i128>, &WorldPos), Changed<WorldPos>>,
+    geo_context: Res<GeoContext>,
     floating_origin: Res<FloatingOriginSettings>,
 ) {
     query
@@ -896,7 +897,8 @@ pub fn sync_pos(
             }
             if let Some(ref mut geo_rot) = geo_rot {
                 // att() is in ENU. We have to do a conversion if geo_rot.0 isn't ENU.
-                geo_rot.1 = world_pos.att();
+                **geo_rot = GeoRotation::from_bevy(geo_rot.0, world_pos.bevy_att(), &geo_context);
+                //geo_rot.1 = world_pos.att();
             }
 
             if geo_pos.is_none() {
@@ -1017,6 +1019,7 @@ pub fn sync_object_3d(
     mut mat3_material_assets: ResMut<Assets<bevy_mat3_material::Mat3Material>>,
     mut commands: Commands,
     assets: Res<AssetServer>,
+    geo_context: Res<GeoContext>,
 ) {
     for (entity, id) in &query {
         if synced_object_3d.0.contains_key(&entity) {
@@ -1070,6 +1073,7 @@ pub fn sync_object_3d(
             &mut mesh_assets,
             &mut mat3_material_assets,
             &assets,
+            &geo_context,
         );
         synced_object_3d.0.insert(entity, object_entity);
     }

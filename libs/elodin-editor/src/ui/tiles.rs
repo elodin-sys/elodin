@@ -7,7 +7,6 @@ use bevy::{
     post_process::bloom::Bloom,
     prelude::*,
     window::{Monitor, PrimaryWindow, Window, WindowPosition},
-    math::{DVec3, DQuat},
 };
 use bevy_editor_cam::{
     controller::{component::Sensitivity, zoom::ZoomLimits},
@@ -1318,10 +1317,7 @@ impl ViewportPane {
         if let Some(frame) = viewport.frame {
             parent_cmd.insert((
                 bevy_geo_frames::GeoPosition(frame, transform.translation.as_dvec3()),
-                // We're punting on controlling the camera orientation with
-                // GeoRotation for the moment. The issue is an identity rotation in ENU
-                // is a +pi/2 on the x-axis.
-                // bevy_geo_frames::GeoRotation(frame, transform.rotation.as_dquat()),
+                bevy_geo_frames::GeoRotation(frame, transform.rotation.as_dquat()),
             ));
         }
 

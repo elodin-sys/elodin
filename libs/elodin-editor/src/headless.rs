@@ -30,6 +30,7 @@ use big_space::{FloatingOrigin, GridCell};
 use impeller2_kdl::FromKdl;
 use impeller2_wkt::{CurrentTimestamp, DbConfig, SchematicElem};
 use render_bridge::{BatchRenderRequest, RenderBridgeServer};
+use bevy_geo_frames::GeoContext;
 
 use crate::object_3d::create_object_3d_entity;
 use crate::sensor_camera::{
@@ -156,6 +157,7 @@ fn load_headless_scene(
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut mat3_materials: ResMut<Assets<Mat3Material>>,
     asset_server: Res<AssetServer>,
+    geo_context: Res<GeoContext>,
 ) {
     if *loaded {
         return;
@@ -190,6 +192,7 @@ fn load_headless_scene(
                 &mut meshes,
                 &mut mat3_materials,
                 &asset_server,
+                &geo_context
             );
         }
     }

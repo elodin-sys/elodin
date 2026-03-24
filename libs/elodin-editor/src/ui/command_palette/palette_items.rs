@@ -29,6 +29,7 @@ use impeller2_wkt::{
     Material, Mesh, Object3D, SetDbConfig, SimulationTimeStep,
 };
 use nox::ArrayBuf;
+use bevy_geo_frames::GeoContext;
 
 use crate::{
     EqlContext, MainCamera, Offset, SelectedTimeRange, TimeRangeBehavior, TimeRangeError,
@@ -1135,7 +1136,9 @@ fn create_object_3d_with_color(eql: String, expr: eql::Expr, mesh: Mesh) -> Pale
                   mut material_assets: ResMut<Assets<StandardMaterial>>,
                   mut mesh_assets: ResMut<Assets<bevy::prelude::Mesh>>,
                   mut mat3_material_assets: ResMut<Assets<bevy_mat3_material::Mat3Material>>,
-                  assets: Res<AssetServer>| {
+                  assets: Res<AssetServer>,
+                  geo_context: Res<GeoContext>
+            | {
                 let color_str = color_str.trim();
                 let (r, g, b) =
                     parse_color(color_str, &eql_ctx.0, &entity_map, component_value_maps)
@@ -1162,6 +1165,7 @@ fn create_object_3d_with_color(eql: String, expr: eql::Expr, mesh: Mesh) -> Pale
                     &mut mesh_assets,
                     &mut mat3_material_assets,
                     &assets,
+                    &geo_context
                 );
 
                 PaletteEvent::Exit
@@ -1226,7 +1230,9 @@ pub fn create_3d_object() -> PaletteItem {
                                                   mut material_assets: ResMut<Assets<StandardMaterial>>,
                                                   mut mesh_assets: ResMut<Assets<bevy::prelude::Mesh>>,
                                                   mut mat3_material_assets: ResMut<Assets<bevy_mat3_material::Mat3Material>>,
-                                                  assets: Res<AssetServer>| {
+                                                  assets: Res<AssetServer>,
+                                                  geo_context: Res<GeoContext>
+                                                | {
                                                 let obj = impeller2_wkt::Object3DMesh::glb(gltf_path.trim());
 
                                                 crate::object_3d::create_object_3d_entity(
@@ -1238,6 +1244,7 @@ pub fn create_3d_object() -> PaletteItem {
                                                     &mut mesh_assets,
                                                     &mut mat3_material_assets,
                                                     &assets,
+                                                    &geo_context
                                                 );
 
                                                 PaletteEvent::Exit

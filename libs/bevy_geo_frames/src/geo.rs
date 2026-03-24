@@ -1,3 +1,9 @@
+//! The mathematical convention used in this code is this:
+//!
+//! A rotation matrix R from frame ENU to the frame Bevy is written as
+//! ${bevy}_R_{enu}. So given a vector v in ENU, we'd produce the v in Bevy with
+//! a right-multiplication as $v_{bevy} = {bevy}_R_{enu} * v_{enu}$. This
+//! convention was chosen so that frames can be easily checked by adjacency.
 #![allow(non_snake_case)]
 use bevy::math::{DMat3, DMat4, DQuat, DVec3};
 use bevy::prelude::*;
@@ -367,6 +373,11 @@ impl GeoRotation {
         )
     }
 
+    pub fn as_frame(&self, to_frame: GeoFrame, context: &GeoContext) -> GeoRotation {
+        let R = to_frame._R_(&self.0, context);
+        GeoRotation(to_frame, DQuat::from_mat3(&R) * self.1)
+    }
+
     /// Create from a Bevy Transform's rotation.
     pub fn from_transform(frame: GeoFrame, transform: &Transform, context: &GeoContext) -> Self {
         Self::from_bevy(frame, transform.rotation.as_dquat(), context)
@@ -689,6 +700,15 @@ mod tests {
     }
 
     #[test]
+    fn test_as_frame() {
+        let ctx = dummy_ctx();
+        let geo_rotation = GeoRotation::from_bevy(GeoFrame::ENU, DQuat::IDENTITY, &ctx);
+        assert_ne!(geo_rotation.1.as_quat(), Quat::IDENTITY);
+        assert_eq!(geo_rotation.to_bevy(&ctx).as_quat(), Quat::IDENTITY);
+
+    }
+
+    #[test]
     fn enu_r_ned_mul_vector_123() {
         let v_ned = DVec3::new(1.0, 2.0, 3.0);
         let v_enu = GeoFrame::enu_R_ned() * v_ned;
@@ -703,7 +723,6 @@ mod tests {
         let ctx_sphere = ctx_plane.clone().with_present(Present::Sphere);
 
         let bevy_R_ecef_s = GeoFrame::bevy_R_(&GeoFrame::ECEF, &ctx_sphere);
-
         let ecef_R_enu_s = GeoFrame::ecef_R_(&GeoFrame::ENU, &ctx_sphere.origin);
         let bevy_R_enu_s = GeoFrame::bevy_R_(&GeoFrame::ENU, &ctx_sphere);
 

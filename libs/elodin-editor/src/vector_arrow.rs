@@ -1,9 +1,8 @@
 use bevy::{math::DVec3, prelude::*};
-use impeller2_wkt::{ComponentValue, WorldPos};
-use nox::{ArrayBuf, Quaternion, Vector3};
+use impeller2_wkt::{ComponentValue};
+use nox::ArrayBuf;
 use std::collections::HashMap;
 
-use crate::WorldPosExt;
 use crate::object_3d::CompiledExpr;
 
 #[derive(Component)]
