@@ -364,7 +364,7 @@ impl GeoRotation {
     pub fn to_bevy(&self, context: &GeoContext) -> DQuat {
         let frame = self.0;
         let local_rot = self.1;
-        DQuat::from_mat3(&GeoFrame::bevy_R_(&frame, &context)) * local_rot
+        DQuat::from_mat3(&GeoFrame::bevy_R_(&frame, context)) * local_rot
     }
 
     /// Convert orientation from Bevy.

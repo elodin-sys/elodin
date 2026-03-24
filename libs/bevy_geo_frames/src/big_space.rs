@@ -28,6 +28,7 @@ pub fn plugin<P: GridPrecision>(app: &mut App) {
 
 /// Applies the same transforms as [crate::apply_transforms] but excludes
 /// components with a [GridCell].
+#[allow(clippy::type_complexity)]
 pub fn apply_little_transforms<P: GridPrecision>(
     ctx: ResMut<GeoContext>,
     mut q: Query<(&GeoPosition, &mut Transform), (Changed<GeoPosition>, Without<GridCell<P>>)>,
