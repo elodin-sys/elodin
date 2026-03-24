@@ -701,7 +701,7 @@ impl WorldBuilder {
                         default_playback_speed,
                         max_ticks,
                         optimize,
-                        db_path,
+                        db_path.clone(),
                         backend,
                         iree_flags.clone(),
                     )?;
@@ -1236,9 +1236,11 @@ impl WorldBuilder {
                     }
 
                     // Runtime analysis follows
-                    let db_dir = tempfile::tempdir()?;
-                    let db_dir_path = db_dir.keep();
-                    let db = elodin_db::DB::create(db_dir_path.join("db"))?;
+                    let db_path = match db_path {
+                        Some(p) => PathBuf::from(p),
+                        None => tempfile::tempdir()?.keep().join("db"),
+                    };
+                    let db = elodin_db::DB::create(db_path)?;
                     crate::impeller2_server::init_db(
                         &db,
                         compiled_exec.world_mut(),
@@ -1598,6 +1600,7 @@ impl WorldBuilder {
         }
 
         self.world.set_globals();
+        self.world.batch1 = self.world.is_batch1();
 
         let world = std::mem::take(&mut self.world);
         let compiled_sys = increment_sim_tick.pipe(sys).compile(&world)?;

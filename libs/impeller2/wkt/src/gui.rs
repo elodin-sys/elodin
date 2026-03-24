@@ -1,12 +1,23 @@
 use crate::Color;
 use impeller2::component::Asset;
 use impeller2::types::EntityId;
-use serde::{Deserialize, Deserializer, Serialize, Serializer, de, de::DeserializeOwned};
+use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 use std::collections::HashMap;
 use std::fmt;
 use std::ops::Range;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
-use strum::{EnumString, IntoStaticStr, VariantNames};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
+pub struct NodeId(pub u64);
+
+static NODE_ID_COUNTER: AtomicU64 = AtomicU64::new(1);
+
+impl NodeId {
+    pub fn next() -> Self {
+        Self(NODE_ID_COUNTER.fetch_add(1, Ordering::Relaxed))
+    }
+}
 
 fn default_true() -> bool {
     true
@@ -28,12 +39,11 @@ pub fn default_viewport_frustums_thickness() -> f32 {
     0.006
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone)]
-#[serde(bound = "T: Serialize + DeserializeOwned")]
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::TypePath,))]
 #[cfg_attr(feature = "bevy", type_path = "impeller2::wkt::gui::Schematic")]
-pub struct Schematic<T = ()> {
-    pub elems: Vec<SchematicElem<T>>,
+pub struct Schematic {
+    pub elems: Vec<SchematicElem>,
     #[serde(default)]
     pub theme: Option<ThemeConfig>,
     #[serde(default)]
@@ -48,40 +58,15 @@ impl bevy::asset::VisitAssetDependencies for Schematic {
     fn visit_dependencies(&self, _visit: &mut impl FnMut(bevy::asset::UntypedAssetId)) {}
 }
 
-impl<T> Default for Schematic<T> {
-    fn default() -> Self {
-        Self {
-            elems: Default::default(),
-            theme: None,
-            timeline: None,
-        }
-    }
-}
-
 #[derive(Serialize, Deserialize, Debug, Clone)]
-#[serde(bound = "T: Serialize + DeserializeOwned")]
-pub enum SchematicElem<T = ()> {
-    Panel(Panel<T>),
-    Object3d(Object3D<T>),
-    Line3d(Line3d<T>),
-    VectorArrow(VectorArrow3d<T>),
+pub enum SchematicElem {
+    Panel(Panel),
+    Object3d(Object3D),
+    Line3d(Line3d),
+    VectorArrow(VectorArrow3d),
     Window(WindowSchematic),
     Theme(ThemeConfig),
     Timeline(TimelineConfig),
-}
-
-impl<T> SchematicElem<T> {
-    pub fn clear_aux(self) -> SchematicElem<()> {
-        match self {
-            SchematicElem::Panel(panel) => SchematicElem::Panel(panel.map_aux(|_| ())),
-            SchematicElem::Object3d(obj) => SchematicElem::Object3d(obj.map_aux(|_| ())),
-            SchematicElem::Line3d(line) => SchematicElem::Line3d(line.map_aux(|_| ())),
-            SchematicElem::VectorArrow(arrow) => SchematicElem::VectorArrow(arrow.map_aux(|_| ())),
-            SchematicElem::Window(window) => SchematicElem::Window(window),
-            SchematicElem::Theme(theme) => SchematicElem::Theme(theme.clone()),
-            SchematicElem::Timeline(timeline) => SchematicElem::Timeline(timeline.clone()),
-        }
-    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -129,29 +114,27 @@ impl Default for TimelineConfig {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
-#[serde(bound = "T: Serialize + DeserializeOwned")]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
-pub enum Panel<T = ()> {
-    Viewport(Viewport<T>),
-    VSplit(Split<T>),
-    HSplit(Split<T>),
-    Graph(Graph<T>),
+pub enum Panel {
+    Viewport(Viewport),
+    VSplit(Split),
+    HSplit(Split),
+    Graph(Graph),
     ComponentMonitor(ComponentMonitor),
     ActionPane(ActionPane),
     QueryTable(QueryTable),
-    QueryPlot(QueryPlot<T>),
-    Tabs(Vec<Panel<T>>),
+    QueryPlot(QueryPlot),
+    Tabs(Vec<Panel>),
     Inspector,
     Hierarchy,
     SchematicTree(Option<String>),
     DataOverview(Option<String>),
-    Dashboard(Box<Dashboard<T>>),
     VideoStream(VideoStream),
     SensorView(SensorView),
     LogStream(LogStream),
 }
 
-impl<T> Panel<T> {
+impl Panel {
     pub fn label(&self) -> &str {
         match self {
             Panel::Viewport(viewport) => viewport.name.as_deref().unwrap_or("Viewport"),
@@ -169,21 +152,20 @@ impl<T> Panel<T> {
             Panel::Hierarchy => "Hierarchy",
             Panel::SchematicTree(name) => name.as_deref().unwrap_or("Tree"),
             Panel::DataOverview(name) => name.as_deref().unwrap_or("Data Overview"),
-            Panel::Dashboard(d) => d.root.name.as_deref().unwrap_or("Dashboard"),
             Panel::VideoStream(v) => v.name.as_deref().unwrap_or("Video Stream"),
             Panel::SensorView(v) => v.name.as_deref().unwrap_or("Sensor View"),
             Panel::LogStream(l) => l.name.as_deref().unwrap_or("Log Stream"),
         }
     }
 
-    pub fn collapse(&self) -> &Panel<T> {
+    pub fn collapse(&self) -> &Panel {
         match self {
             Panel::Tabs(panels) if panels.len() == 1 => panels[0].collapse(),
             this => this,
         }
     }
 
-    pub fn children(&self) -> &[Panel<T>] {
+    pub fn children(&self) -> &[Panel] {
         match self {
             Panel::HSplit(split) | Panel::VSplit(split) => &split.panels,
             Panel::Tabs(panels) => panels,
@@ -191,7 +173,7 @@ impl<T> Panel<T> {
         }
     }
 
-    pub fn children_mut(&mut self) -> &mut [Panel<T>] {
+    pub fn children_mut(&mut self) -> &mut [Panel] {
         match self {
             Panel::HSplit(split) | Panel::VSplit(split) => &mut split.panels,
             Panel::Tabs(panels) => panels,
@@ -199,67 +181,29 @@ impl<T> Panel<T> {
         }
     }
 
-    pub fn map_aux<U>(&self, f: impl Fn(&T) -> U) -> Panel<U> {
+    pub fn node_id(&self) -> Option<NodeId> {
         match self {
-            Panel::HSplit(split) => Panel::HSplit(split.map_aux(f)),
-            Panel::VSplit(split) => Panel::VSplit(split.map_aux(f)),
-            Panel::Tabs(panels) => Panel::Tabs(panels.iter().map(|p| p.map_aux(&f)).collect()),
-            Panel::Graph(graph) => Panel::Graph(graph.map_aux(f)),
-            Panel::ComponentMonitor(component_monitor) => {
-                Panel::ComponentMonitor(component_monitor.clone())
-            }
-            Panel::ActionPane(action_pane) => Panel::ActionPane(action_pane.clone()),
-            Panel::QueryTable(query_table) => Panel::QueryTable(query_table.clone()),
-            Panel::QueryPlot(query_plot) => Panel::QueryPlot(query_plot.map_aux(f)),
-            Panel::Hierarchy => Panel::Hierarchy,
-            Panel::SchematicTree(name) => Panel::SchematicTree(name.clone()),
-            Panel::Inspector => Panel::Inspector,
-            Panel::DataOverview(name) => Panel::DataOverview(name.clone()),
-            Panel::Viewport(v) => Panel::Viewport(v.map_aux(f)),
-            Panel::Dashboard(d) => Panel::Dashboard(Box::new(d.map_aux(f))),
-            Panel::VideoStream(v) => Panel::VideoStream(v.clone()),
-            Panel::SensorView(v) => Panel::SensorView(v.clone()),
-            Panel::LogStream(l) => Panel::LogStream(l.clone()),
-        }
-    }
-
-    pub fn aux(&self) -> Option<&T> {
-        match self {
-            Panel::Graph(graph) => Some(&graph.aux),
-            Panel::QueryPlot(query_plot) => Some(&query_plot.aux),
-            Panel::Viewport(v) => Some(&v.aux),
-            Panel::Dashboard(d) => Some(&d.aux),
+            Panel::Graph(graph) => Some(graph.node_id),
+            Panel::QueryPlot(query_plot) => Some(query_plot.node_id),
+            Panel::Viewport(v) => Some(v.node_id),
             _ => None,
         }
     }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
-#[serde(bound = "T: Serialize + DeserializeOwned")]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
-pub struct Split<T = ()> {
-    pub panels: Vec<Panel<T>>,
+pub struct Split {
+    pub panels: Vec<Panel>,
     pub shares: HashMap<usize, f32>,
     pub active: bool,
     #[serde(default)]
     pub name: Option<String>,
 }
 
-impl<T> Split<T> {
-    pub fn map_aux<U>(&self, f: impl Fn(&T) -> U) -> Split<U> {
-        Split {
-            panels: self.panels.iter().map(|p| p.map_aux(&f)).collect(),
-            shares: self.shares.clone(),
-            active: self.active,
-            name: self.name.clone(),
-        }
-    }
-}
-
 #[derive(Serialize, Deserialize, Debug, Clone)]
-#[serde(bound = "T: Serialize + DeserializeOwned")]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
-pub struct Viewport<T = ()> {
+pub struct Viewport {
     pub fov: f32,
     #[serde(default)]
     pub near: Option<f32>,
@@ -288,33 +232,8 @@ pub struct Viewport<T = ()> {
     pub up: Option<String>,
     #[serde(default)]
     pub local_arrows: Vec<VectorArrow3d>,
-    pub aux: T,
-}
-
-impl<T> Viewport<T> {
-    pub fn map_aux<U>(&self, f: impl Fn(&T) -> U) -> Viewport<U> {
-        Viewport {
-            fov: self.fov,
-            near: self.near,
-            far: self.far,
-            aspect: self.aspect,
-            active: self.active,
-            show_grid: self.show_grid,
-            show_arrows: self.show_arrows,
-            create_frustum: self.create_frustum,
-            show_frustums: self.show_frustums,
-            frustums_color: self.frustums_color,
-            frustums_thickness: self.frustums_thickness,
-            show_view_cube: self.show_view_cube,
-            hdr: self.hdr,
-            name: self.name.clone(),
-            pos: self.pos.clone(),
-            look_at: self.look_at.clone(),
-            up: self.up.clone(),
-            local_arrows: self.local_arrows.clone(),
-            aux: f(&self.aux),
-        }
-    }
+    #[serde(default)]
+    pub node_id: NodeId,
 }
 
 impl Default for Viewport {
@@ -338,7 +257,7 @@ impl Default for Viewport {
             look_at: None,
             up: None,
             local_arrows: Vec::new(),
-            aux: (),
+            node_id: NodeId::default(),
         }
     }
 }
@@ -348,9 +267,8 @@ impl Asset for Panel {
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Default)]
-#[serde(bound = "T: Serialize + DeserializeOwned")]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
-pub struct Graph<T = ()> {
+pub struct Graph {
     pub eql: String,
     pub name: Option<String>,
     #[serde(default)]
@@ -359,23 +277,9 @@ pub struct Graph<T = ()> {
     pub locked: bool,
     pub auto_y_range: bool,
     pub y_range: Range<f64>,
-    pub aux: T,
+    #[serde(default)]
+    pub node_id: NodeId,
     pub colors: Vec<crate::Color>,
-}
-
-impl<T> Graph<T> {
-    pub fn map_aux<U>(&self, f: impl Fn(&T) -> U) -> Graph<U> {
-        Graph {
-            eql: self.eql.clone(),
-            name: self.name.clone(),
-            graph_type: self.graph_type,
-            locked: self.locked,
-            auto_y_range: self.auto_y_range,
-            y_range: self.y_range.clone(),
-            aux: f(&self.aux),
-            colors: self.colors.clone(),
-        }
-    }
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, Hash, PartialEq, Eq, Debug, Default)]
@@ -388,55 +292,43 @@ pub enum GraphType {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(bound = "T: Serialize + DeserializeOwned")]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
-pub struct Line3d<T = ()> {
+pub struct Line3d {
     pub eql: String,
     pub line_width: f32,
     pub color: Color,
     pub perspective: bool,
-    pub aux: T,
+    #[serde(default)]
+    pub node_id: NodeId,
 }
 
-impl<T> Line3d<T> {
-    pub fn map_aux<U>(&self, f: impl Fn(&T) -> U) -> Line3d<U> {
-        Line3d {
-            eql: self.eql.clone(),
-            line_width: self.line_width,
-            color: self.color,
-            perspective: self.perspective,
-            aux: f(&self.aux),
-        }
-    }
-}
-
-impl<T: Serialize + DeserializeOwned> Asset for Line3d<T> {
+impl Asset for Line3d {
     const NAME: &'static str = "line_3d";
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(bound = "T: Serialize + DeserializeOwned")]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
-pub struct VectorArrow3d<T = ()> {
+pub struct VectorArrow3d {
     pub vector: String,
     pub origin: Option<String>,
-    #[serde(default = "VectorArrow3d::<T>::default_scale")]
+    #[serde(default = "VectorArrow3d::default_scale")]
     pub scale: f64,
     pub name: Option<String>,
-    #[serde(default = "VectorArrow3d::<T>::default_color")]
+    #[serde(default = "VectorArrow3d::default_color")]
     pub color: Color,
     #[serde(default)]
     #[serde(alias = "in_body_frame")]
     pub body_frame: bool,
     #[serde(default)]
     pub normalize: bool,
-    #[serde(default = "VectorArrow3d::<T>::default_show_name")]
+    #[serde(default = "VectorArrow3d::default_show_name")]
     pub show_name: bool,
-    #[serde(default = "VectorArrow3d::<T>::default_thickness")]
+    #[serde(default = "VectorArrow3d::default_thickness")]
     pub thickness: ArrowThickness,
-    #[serde(default = "VectorArrow3d::<T>::default_label_position")]
+    #[serde(default = "VectorArrow3d::default_label_position")]
     pub label_position: LabelPosition,
-    pub aux: T,
+    #[serde(default)]
+    pub node_id: NodeId,
 }
 
 #[derive(Default, Debug, Clone, Serialize, Deserialize)]
@@ -558,7 +450,7 @@ impl Default for ArrowThickness {
     }
 }
 
-impl<T> VectorArrow3d<T> {
+impl VectorArrow3d {
     fn default_scale() -> f64 {
         1.0
     }
@@ -578,25 +470,9 @@ impl<T> VectorArrow3d<T> {
     fn default_label_position() -> LabelPosition {
         LabelPosition::default()
     }
-
-    pub fn map_aux<U>(&self, f: impl Fn(&T) -> U) -> VectorArrow3d<U> {
-        VectorArrow3d {
-            vector: self.vector.clone(),
-            origin: self.origin.clone(),
-            scale: self.scale,
-            name: self.name.clone(),
-            color: self.color,
-            body_frame: self.body_frame,
-            normalize: self.normalize,
-            show_name: self.show_name,
-            thickness: self.thickness,
-            label_position: self.label_position.clone(),
-            aux: f(&self.aux),
-        }
-    }
 }
 
-impl<T: Serialize + DeserializeOwned> Asset for VectorArrow3d<T> {
+impl Asset for VectorArrow3d {
     const NAME: &'static str = "vector_arrow";
 }
 
@@ -899,28 +775,16 @@ pub fn builtin_icon_char(name: &str) -> Option<char> {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-#[serde(bound = "T: Serialize + DeserializeOwned")]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
-pub struct Object3D<T = ()> {
+pub struct Object3D {
     pub eql: String,
     pub mesh: Object3DMesh,
     #[serde(default)]
     pub icon: Option<Object3DIcon>,
     #[serde(default)]
     pub mesh_visibility_range: Option<VisRange>,
-    pub aux: T,
-}
-
-impl<T> Object3D<T> {
-    pub fn map_aux<U>(&self, f: impl FnOnce(&T) -> U) -> Object3D<U> {
-        Object3D {
-            eql: self.eql.clone(),
-            mesh: self.mesh.clone(),
-            icon: self.icon.clone(),
-            mesh_visibility_range: self.mesh_visibility_range.clone(),
-            aux: f(&self.aux),
-        }
-    }
+    #[serde(default)]
+    pub node_id: NodeId,
 }
 
 impl Asset for Object3D {
@@ -1002,8 +866,7 @@ pub struct ActionPane {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
-#[serde(bound = "T: Serialize + DeserializeOwned")]
-pub struct QueryPlot<T = ()> {
+pub struct QueryPlot {
     pub name: String,
     pub query: String,
     pub refresh_interval: Duration,
@@ -1019,24 +882,8 @@ pub struct QueryPlot<T = ()> {
     /// Optional Y-axis label
     #[serde(default)]
     pub y_label: Option<String>,
-    pub aux: T,
-}
-
-impl<T> QueryPlot<T> {
-    pub fn map_aux<U>(&self, f: impl Fn(&T) -> U) -> QueryPlot<U> {
-        QueryPlot {
-            name: self.name.clone(),
-            query: self.query.clone(),
-            refresh_interval: self.refresh_interval,
-            auto_refresh: self.auto_refresh,
-            color: self.color,
-            query_type: self.query_type,
-            plot_mode: self.plot_mode,
-            x_label: self.x_label.clone(),
-            y_label: self.y_label.clone(),
-            aux: f(&self.aux),
-        }
-    }
+    #[serde(default)]
+    pub node_id: NodeId,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Deserialize, Serialize)]
@@ -1054,356 +901,4 @@ pub enum PlotMode {
     TimeSeries,
     /// XY mode: X-axis represents arbitrary numeric values, labels formatted as numbers
     XY,
-}
-
-#[derive(Debug, Clone, Default, Deserialize, Serialize)]
-#[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
-pub struct Dashboard<T = ()> {
-    pub root: DashboardNode<T>,
-    pub aux: T,
-}
-
-impl<T> Dashboard<T> {
-    pub fn map_aux<U>(&self, f: impl Fn(&T) -> U) -> Dashboard<U> {
-        Dashboard {
-            root: self.root.map_aux(&f),
-            aux: f(&self.aux),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Default, Deserialize, Serialize)]
-#[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
-pub struct DashboardNode<T> {
-    pub name: Option<String>,
-    pub display: Display,
-    pub box_sizing: BoxSizing,
-    pub position_type: PositionType,
-    pub overflow: Overflow,
-    pub overflow_clip_margin: OverflowClipMargin,
-    pub left: Val,
-    pub right: Val,
-    pub top: Val,
-    pub bottom: Val,
-    pub width: Val,
-    pub height: Val,
-    pub min_width: Val,
-    pub min_height: Val,
-    pub max_width: Val,
-    pub max_height: Val,
-    pub aspect_ratio: Option<f32>,
-    pub align_items: AlignItems,
-    pub justify_items: JustifyItems,
-    pub align_self: AlignSelf,
-    pub justify_self: JustifySelf,
-    pub align_content: AlignContent,
-    pub justify_content: JustifyContent,
-    pub margin: UiRect,
-    pub padding: UiRect,
-    pub border: UiRect,
-    pub flex_direction: FlexDirection,
-    pub flex_wrap: FlexWrap,
-    pub flex_grow: f32,
-    pub flex_shrink: f32,
-    pub flex_basis: Val,
-    pub row_gap: Val,
-    pub column_gap: Val,
-    pub children: Vec<DashboardNode<T>>,
-    pub color: Color,
-    pub text: Option<String>,
-    pub font_size: f32,
-    pub text_color: Color,
-    pub aux: T,
-}
-
-impl<T> DashboardNode<T> {
-    pub fn map_aux<U>(&self, f: impl Fn(&T) -> U) -> DashboardNode<U> {
-        DashboardNode {
-            name: self.name.clone(),
-            display: self.display,
-            box_sizing: self.box_sizing,
-            position_type: self.position_type,
-            overflow: self.overflow,
-            overflow_clip_margin: self.overflow_clip_margin.clone(),
-            left: self.left.clone(),
-            right: self.right.clone(),
-            top: self.top.clone(),
-            bottom: self.bottom.clone(),
-            width: self.width.clone(),
-            height: self.height.clone(),
-            min_width: self.min_width.clone(),
-            min_height: self.min_height.clone(),
-            max_width: self.max_width.clone(),
-            max_height: self.max_height.clone(),
-            aspect_ratio: self.aspect_ratio,
-            align_items: self.align_items,
-            justify_items: self.justify_items,
-            align_self: self.align_self,
-            justify_self: self.justify_self,
-            align_content: self.align_content,
-            justify_content: self.justify_content,
-            margin: self.margin.clone(),
-            padding: self.padding.clone(),
-            border: self.border.clone(),
-            flex_direction: self.flex_direction,
-            flex_wrap: self.flex_wrap,
-            flex_grow: self.flex_grow,
-            flex_shrink: self.flex_shrink,
-            flex_basis: self.flex_basis.clone(),
-            row_gap: self.row_gap.clone(),
-            column_gap: self.column_gap.clone(),
-            children: self.children.iter().map(|c| c.map_aux(&f)).collect(),
-            color: self.color,
-            text: self.text.clone(),
-            font_size: self.font_size,
-            text_color: self.text_color,
-            aux: f(&self.aux),
-        }
-    }
-}
-
-#[derive(
-    Debug, Clone, Copy, Default, Deserialize, Serialize, EnumString, IntoStaticStr, VariantNames,
-)]
-#[strum(serialize_all = "kebab-case")]
-pub enum PositionType {
-    #[default]
-    Relative,
-    Absolute,
-}
-
-#[derive(
-    Debug, Clone, Copy, Default, Deserialize, Serialize, EnumString, IntoStaticStr, VariantNames,
-)]
-#[strum(serialize_all = "kebab-case")]
-pub enum AlignItems {
-    #[default]
-    Default,
-    Start,
-    End,
-    FlexStart,
-    FlexEnd,
-    Center,
-    Baseline,
-    Stretch,
-}
-
-#[derive(
-    Debug, Clone, Copy, Default, Deserialize, Serialize, EnumString, IntoStaticStr, VariantNames,
-)]
-#[strum(serialize_all = "kebab-case")]
-pub enum JustifyItems {
-    #[default]
-    Default,
-    Start,
-    End,
-    Center,
-    Baseline,
-    Stretch,
-}
-
-#[derive(
-    Debug, Clone, Copy, Default, Deserialize, Serialize, EnumString, IntoStaticStr, VariantNames,
-)]
-#[strum(serialize_all = "kebab-case")]
-pub enum Display {
-    #[default]
-    Flex,
-    Grid,
-    Block,
-    None,
-}
-
-#[derive(
-    Debug, Clone, Copy, Default, Deserialize, Serialize, EnumString, IntoStaticStr, VariantNames,
-)]
-#[strum(serialize_all = "kebab-case")]
-pub enum BoxSizing {
-    #[default]
-    BorderBox,
-    ContentBox,
-}
-
-#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize)]
-pub struct Overflow {
-    pub x: OverflowAxis,
-    pub y: OverflowAxis,
-}
-
-#[derive(Debug, Default, Clone, Deserialize, Serialize)]
-pub struct OverflowClipMargin {
-    pub visual_box: OverflowClipBox,
-    pub margin: f32,
-}
-
-#[derive(
-    Debug, Clone, Copy, Default, Deserialize, Serialize, EnumString, IntoStaticStr, VariantNames,
-)]
-#[strum(serialize_all = "kebab-case")]
-pub enum OverflowClipBox {
-    #[default]
-    ContentBox,
-    PaddingBox,
-    BorderBox,
-}
-
-#[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct UiRect {
-    pub left: Val,
-    pub right: Val,
-    pub top: Val,
-    pub bottom: Val,
-}
-
-impl Default for UiRect {
-    fn default() -> Self {
-        Self {
-            left: Val::Px("0.0".to_string()),
-            right: Val::Px("0.0".to_string()),
-            top: Val::Px("0.0".to_string()),
-            bottom: Val::Px("0.0".to_string()),
-        }
-    }
-}
-
-#[derive(
-    Debug, Default, Copy, Clone, Deserialize, Serialize, EnumString, IntoStaticStr, VariantNames,
-)]
-#[strum(serialize_all = "kebab-case")]
-pub enum OverflowAxis {
-    #[default]
-    Visible,
-    Clip,
-    Hidden,
-    Scroll,
-}
-
-#[derive(
-    Debug, Default, Copy, Clone, Deserialize, Serialize, EnumString, IntoStaticStr, VariantNames,
-)]
-#[strum(serialize_all = "kebab-case")]
-pub enum FlexDirection {
-    #[default]
-    Row,
-    Column,
-    RowReverse,
-    ColumnReverse,
-}
-
-#[derive(
-    Debug, Default, Copy, Clone, Deserialize, Serialize, EnumString, IntoStaticStr, VariantNames,
-)]
-#[strum(serialize_all = "kebab-case")]
-pub enum FlexWrap {
-    #[default]
-    NoWrap,
-    Wrap,
-    WrapReverse,
-}
-
-#[derive(Debug, Clone, Default, Deserialize, Serialize)]
-pub enum Val {
-    #[default]
-    Auto,
-    Px(String),
-    Percent(String),
-    Vw(String),
-    Vh(String),
-    VMin(String),
-    VMax(String),
-}
-
-impl Val {
-    pub fn eql(&self) -> &str {
-        match self {
-            Val::Auto => "",
-            Val::Px(v) => v,
-            Val::Percent(v) => v,
-            Val::Vw(v) => v,
-            Val::Vh(v) => v,
-            Val::VMin(v) => v,
-            Val::VMax(v) => v,
-        }
-    }
-}
-
-#[derive(
-    Debug, Default, Copy, Clone, Deserialize, Serialize, EnumString, IntoStaticStr, VariantNames,
-)]
-#[strum(serialize_all = "kebab-case")]
-pub enum AlignSelf {
-    #[default]
-    Auto,
-    Start,
-    End,
-    FlexStart,
-    FlexEnd,
-    Center,
-    Baseline,
-    Stretch,
-}
-
-#[derive(
-    Debug, Default, Copy, Clone, Deserialize, Serialize, EnumString, IntoStaticStr, VariantNames,
-)]
-#[strum(serialize_all = "kebab-case")]
-pub enum JustifySelf {
-    #[default]
-    Auto,
-    Start,
-    End,
-    Center,
-    Baseline,
-    Stretch,
-}
-
-#[derive(
-    Debug, Default, Copy, Clone, Deserialize, Serialize, EnumString, IntoStaticStr, VariantNames,
-)]
-#[strum(serialize_all = "kebab-case")]
-pub enum AlignContent {
-    #[default]
-    Default,
-    Start,
-    End,
-    FlexStart,
-    FlexEnd,
-    Center,
-    Stretch,
-    SpaceBetween,
-    SpaceEvenly,
-    SpaceAround,
-}
-
-#[derive(
-    Debug, Default, Copy, Clone, Deserialize, Serialize, EnumString, IntoStaticStr, VariantNames,
-)]
-#[strum(serialize_all = "kebab-case")]
-pub enum JustifyContent {
-    #[default]
-    Default,
-    Start,
-    End,
-    FlexStart,
-    FlexEnd,
-    Center,
-    Stretch,
-    SpaceBetween,
-    SpaceEvenly,
-    SpaceAround,
-}
-
-#[derive(Debug, Clone, Default, Deserialize, Serialize)]
-pub struct DashboardText<T = ()> {
-    pub text: String,
-    pub aux: T,
-}
-
-impl<T> DashboardText<T> {
-    pub fn map_aux<U>(&self, f: impl FnOnce(&T) -> U) -> DashboardText<U> {
-        DashboardText {
-            text: self.text.clone(),
-            aux: f(&self.aux),
-        }
-    }
 }

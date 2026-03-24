@@ -1,7 +1,3 @@
-use std::collections::{HashMap, HashSet};
-use std::fmt::Write;
-use std::path::PathBuf;
-
 use bevy::ecs::message::Messages;
 use bevy::input::{
     ButtonInput,
@@ -27,6 +23,8 @@ use bevy_egui::{
     egui::{self, Color32, Label, RichText},
     input::EguiWantsInput,
 };
+use std::collections::{HashMap, HashSet};
+use std::fmt::Write;
 use tracing::instrument;
 pub(crate) const DEFAULT_SECONDARY_RECT: WindowRect = WindowRect {
     x: 10,
@@ -69,7 +67,7 @@ use self::colors::get_scheme;
 use self::{command_palette::CommandPaletteState, plot::GraphState, timeline::timeline_slider};
 use impeller2::types::ComponentId;
 use impeller2_bevy::ComponentValueMap;
-use impeller2_wkt::{ComponentMetadata, ComponentValue, DbConfig, WindowRect};
+use impeller2_wkt::{ComponentMetadata, ComponentValue, WindowRect};
 
 use crate::ui::window::window_entity_from_target;
 use crate::{
@@ -90,7 +88,6 @@ pub mod actions;
 pub mod button;
 pub mod colors;
 pub mod command_palette;
-pub mod dashboard;
 pub mod data_overview;
 pub mod hierarchy;
 pub mod images;
@@ -165,9 +162,6 @@ pub enum SelectedObject {
     Object3D {
         entity: Entity,
     },
-    DashboardNode {
-        entity: Entity,
-    },
 }
 
 impl SelectedObject {
@@ -188,7 +182,6 @@ impl SelectedObject {
             SelectedObject::DataOverviewComponent { .. } => None,
             SelectedObject::Action { action_id } => Some(*action_id),
             SelectedObject::Object3D { entity } => Some(*entity),
-            SelectedObject::DashboardNode { entity } => Some(*entity),
         }
     }
 }
@@ -398,7 +391,6 @@ impl Plugin for UiPlugin {
             .add_systems(Update, sync_hdr)
             .add_systems(Update, tiles::shortcuts)
             .add_systems(Update, query_plot::auto_bounds)
-            .add_systems(Update, dashboard::update_nodes)
             .add_plugins(timeline::plugin)
             .add_plugins(tiles::plugin)
             .add_plugins(SchematicPlugin)
@@ -645,20 +637,6 @@ fn fix_visibility_hierarchy(
             commands
                 .entity(parent_entity)
                 .insert(GlobalTransform::default());
-        }
-    }
-}
-
-pub(crate) fn update_primary_descriptor_path(
-    db_config: Res<DbConfig>,
-    mut q: Query<(&tiles::WindowId, &mut tiles::WindowState)>,
-) {
-    let Some(path) = db_config.schematic_path() else {
-        return;
-    };
-    for (id, mut state) in q.iter_mut() {
-        if id.is_primary() {
-            state.descriptor.path = Some(PathBuf::from(path));
         }
     }
 }

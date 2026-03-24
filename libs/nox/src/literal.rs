@@ -167,10 +167,14 @@ macro_rules! impl_array_element {
     };
 }
 
-impl_array_element!(u8, U8, 1);
-impl_array_element!(u16, U16, 2);
-impl_array_element!(u32, U32, 4);
-impl_array_element!(u64, U64, 8);
+// Map unsigned Rust types to signed ElementType variants so that the Noxpr
+// computation graph (and hence JAX/IREE) never produces unsigned-typed
+// constants, which IREE's arith dialect cannot legalize.  Bit layout is
+// identical; arithmetic (add, sub, mul, bitwise) is unaffected.
+impl_array_element!(u8, S8, 1);
+impl_array_element!(u16, S16, 2);
+impl_array_element!(u32, S32, 4);
+impl_array_element!(u64, S64, 8);
 impl_array_element!(i8, S8, 1);
 impl_array_element!(i16, S16, 2);
 impl_array_element!(i32, S32, 4);

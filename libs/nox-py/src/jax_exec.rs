@@ -74,9 +74,13 @@ impl JaxExec {
 
             let col = world.column_by_id(*id).ok_or(Error::ComponentNotFound)?;
             let np_dtype = numpy_dtype_str(col.schema.element_type())?;
-            let shape: Vec<i64> = std::iter::once(col.len() as i64)
-                .chain(col.schema.shape().iter().map(|&x| x as i64))
-                .collect();
+            let shape: Vec<i64> = if world.batch1 && col.len() <= 1 {
+                col.schema.shape().iter().map(|&x| x as i64).collect()
+            } else {
+                std::iter::once(col.len() as i64)
+                    .chain(col.schema.shape().iter().map(|&x| x as i64))
+                    .collect()
+            };
             inputs.push(InputSlot {
                 component_id: *id,
                 shape,
@@ -231,6 +235,9 @@ fn numpy_dtype_str(et: nox::ElementType) -> Result<&'static str, Error> {
         nox::ElementType::F32 => Ok("float32"),
         nox::ElementType::S32 => Ok("int32"),
         nox::ElementType::S64 => Ok("int64"),
+        // These arms are not reached in practice: PrimTypeExt::to_element_type()
+        // maps all unsigned PrimTypes to signed ElementTypes upstream.  Kept as
+        // correct unsigned mappings for defensive safety.
         nox::ElementType::U32 => Ok("uint32"),
         nox::ElementType::U64 => Ok("uint64"),
         nox::ElementType::U8 => Ok("uint8"),

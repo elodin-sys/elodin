@@ -14,3 +14,5 @@ This folder gathers the Bevy utilities and plugins used by the Elodin editor.
 | `view_cube` (Cube-Viewer) | 2026-02-12 | Active | Current interactive Cube-Viewer (snap/zoom buttons, synchronized overlay rendering). | [README.md](view_cube/README.md) |
 | `frustum` | 2026-02-19 | Active | Draws created viewport frustums (`create_frustum`) onto viewports that opt in (`show_frustums`), with per-source color/thickness. | [README.md](frustum/README.md) |
 | `frustum_intersection` | 2026-02-24 | Active | Volume coverage (frustum∩ellipsoid) and 2D projection on far plane; Inspector controls are gated by `show_frustums` and ellipsoid detection. | [README.md](frustum_intersection/README.md) |
+| `kdl_asset_source` | 2026-03-18 | Active | Registers a custom Bevy `AssetSource` for `.kdl` files, using Bevy's built-in `FileWatcher` for hot-reload. | [README.md](kdl_asset_source/README.md) |
+| `kdl_document` | 2026-03-18 | Active | KDL schematic document lifecycle: loading, saving, hot-reload, and message-based command API. | [README.md](kdl_document/README.md) |

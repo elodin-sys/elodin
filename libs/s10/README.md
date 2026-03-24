@@ -312,7 +312,7 @@ S10 follows these principles:
 
 ## Limitations
 
-- Process group management (`process_group(0)`) is disabled on Linux due to compatibility issues
+- Linux sim shutdown uses direct process-tree signalling instead of `process_group(0)` / `killpg`
 - Windows support is limited (no `sim` recipe type)
 - Watch mode may not detect all filesystem events on network drives
 

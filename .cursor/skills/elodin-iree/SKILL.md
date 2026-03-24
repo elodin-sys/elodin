@@ -124,10 +124,10 @@ Fixtures live in `tests/fixtures/` with architecture-specific subdirectories: `x
 To regenerate fixtures (e.g. after an IREE version upgrade or when adding a new MLIR module):
 
 ```bash
-# Install the IREE compiler (version must match nix/pkgs/iree-runtime.nix, currently 3.10.0)
+# Install the IREE compiler (version must match nix/pkgs/iree-runtime.nix, currently 3.11.0)
 uv venv /tmp/iree-venv --python 3.13
 source /tmp/iree-venv/bin/activate
-uv pip install iree-base-compiler==3.10.0
+uv pip install iree-base-compiler==3.11.0
 
 # From libs/iree-runtime/tests/fixtures/, compile for current host arch
 cd libs/iree-runtime/tests/fixtures
@@ -140,10 +140,10 @@ The script compiles all `.mlir` files into `x86_64/` or `aarch64/` based on `una
 
 The IREE C runtime library is built from source via nix:
 
-- **Package**: `nix/pkgs/iree-runtime.nix` builds IREE v3.10.0 with CMake
+- **Package**: `nix/pkgs/iree-runtime.nix` builds IREE v3.11.0 with CMake
 - **Shell**: `nix/shell.nix` imports it and sets `IREE_RUNTIME_DIR`
 - **Build flags**: Runtime-only (`IREE_BUILD_COMPILER=OFF`), static libs, CPU drivers (`local-sync` + `local-task`), embedded ELF + VMVX executable loaders
-- **Submodules**: Only `flatcc` and `benchmark` are needed (not LLVM -- that's compiler-only)
+- **Submodules**: Runtime builds vendor `flatcc`, `benchmark`, and `printf` (not LLVM -- that's compiler-only)
 
 The nix package produces:
 - `$IREE_RUNTIME_DIR/include/iree/runtime/api.h` (and transitive headers)

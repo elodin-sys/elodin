@@ -5,7 +5,7 @@ use kdl::{KdlDocument, KdlEntry, KdlNode};
 // Default precision for float properties emitted to KDL.
 const KDL_FLOAT_PRECISION: u32 = 6;
 
-pub fn serialize_schematic<T>(schematic: &Schematic<T>) -> String {
+pub fn serialize_schematic(schematic: &Schematic) -> String {
     let mut doc = KdlDocument::new();
 
     if let Some(theme) = schematic.theme.as_ref() {
@@ -26,7 +26,7 @@ pub fn serialize_schematic<T>(schematic: &Schematic<T>) -> String {
     s
 }
 
-fn serialize_schematic_elem<T>(elem: &SchematicElem<T>) -> KdlNode {
+fn serialize_schematic_elem(elem: &SchematicElem) -> KdlNode {
     match elem {
         SchematicElem::Panel(panel) => serialize_panel(panel),
         SchematicElem::Object3d(obj) => serialize_object_3d(obj),
@@ -38,7 +38,7 @@ fn serialize_schematic_elem<T>(elem: &SchematicElem<T>) -> KdlNode {
     }
 }
 
-fn serialize_panel<T>(panel: &Panel<T>) -> KdlNode {
+fn serialize_panel(panel: &Panel) -> KdlNode {
     match panel {
         Panel::Tabs(panels) => {
             let mut node = KdlNode::new("tabs");
@@ -71,7 +71,6 @@ fn serialize_panel<T>(panel: &Panel<T>) -> KdlNode {
             push_optional_name_prop(&mut node, name.as_deref());
             node
         }
-        Panel::Dashboard(dashboard) => serialize_dashboard(dashboard),
         Panel::VideoStream(video_stream) => serialize_video_stream(video_stream),
         Panel::SensorView(sensor_view) => serialize_sensor_view(sensor_view),
         Panel::LogStream(log_stream) => serialize_log_stream(log_stream),
@@ -136,7 +135,7 @@ fn serialize_log_stream(log_stream: &LogStream) -> KdlNode {
     node
 }
 
-fn serialize_split<T>(split: &Split<T>, is_horizontal: bool) -> KdlNode {
+fn serialize_split(split: &Split, is_horizontal: bool) -> KdlNode {
     let node_name = if is_horizontal { "hsplit" } else { "vsplit" };
     let mut node = KdlNode::new(node_name);
 
@@ -162,7 +161,7 @@ fn serialize_split<T>(split: &Split<T>, is_horizontal: bool) -> KdlNode {
     node
 }
 
-fn serialize_viewport<T>(viewport: &Viewport<T>) -> KdlNode {
+fn serialize_viewport(viewport: &Viewport) -> KdlNode {
     let mut node = KdlNode::new("viewport");
 
     push_optional_name_prop(&mut node, viewport.name.as_deref());
@@ -370,7 +369,7 @@ fn serialize_timeline(timeline: &TimelineConfig) -> KdlNode {
     node
 }
 
-fn serialize_graph<T>(graph: &Graph<T>) -> KdlNode {
+fn serialize_graph(graph: &Graph) -> KdlNode {
     let mut node = KdlNode::new("graph");
 
     // Add the EQL query as the first unnamed entry
@@ -452,7 +451,7 @@ fn serialize_query_table(query_table: &QueryTable) -> KdlNode {
     node
 }
 
-fn serialize_query_plot<T>(query_plot: &QueryPlot<T>) -> KdlNode {
+fn serialize_query_plot(query_plot: &QueryPlot) -> KdlNode {
     let mut node = KdlNode::new("query_plot");
 
     push_name_prop(&mut node, &query_plot.name);
@@ -504,7 +503,7 @@ fn serialize_query_plot<T>(query_plot: &QueryPlot<T>) -> KdlNode {
     node
 }
 
-fn serialize_object_3d<T>(obj: &Object3D<T>) -> KdlNode {
+fn serialize_object_3d(obj: &Object3D) -> KdlNode {
     let mut node = KdlNode::new("object_3d");
 
     node.entries_mut().push(KdlEntry::new(obj.eql.clone()));
@@ -703,7 +702,7 @@ fn serialize_object_3d_mesh(mesh: &Object3DMesh) -> (KdlNode, Vec<KdlNode>) {
     }
 }
 
-fn serialize_line_3d<T>(line: &Line3d<T>) -> KdlNode {
+fn serialize_line_3d(line: &Line3d) -> KdlNode {
     let mut node = KdlNode::new("line_3d");
 
     // Add the EQL query as the first unnamed entry
@@ -723,7 +722,7 @@ fn serialize_line_3d<T>(line: &Line3d<T>) -> KdlNode {
     node
 }
 
-fn serialize_vector_arrow<T>(arrow: &VectorArrow3d<T>) -> KdlNode {
+fn serialize_vector_arrow(arrow: &VectorArrow3d) -> KdlNode {
     let mut node = KdlNode::new("vector_arrow");
     node.entries_mut().push(KdlEntry::new(arrow.vector.clone()));
 
@@ -822,226 +821,6 @@ fn serialize_material_to_node(node: &mut KdlNode, material: &Material) {
     serialize_color_to_node(node, &material.base_color);
 }
 
-fn serialize_dashboard<T>(dashboard: &Dashboard<T>) -> KdlNode {
-    let mut node = serialize_dashboard_node(&dashboard.root);
-    node.set_name("dashboard");
-
-    node
-}
-
-fn serialize_dashboard_node<T>(dashboard_node: &DashboardNode<T>) -> KdlNode {
-    let mut node = KdlNode::new("node");
-
-    serialize_dashboard_node_properties(&mut node, dashboard_node);
-
-    let mut children = KdlDocument::new();
-
-    // Add special child nodes for margin, padding, border if they're not default
-    if !is_ui_rect_default(&dashboard_node.margin) {
-        let mut margin_node = KdlNode::new("margin");
-        serialize_ui_rect_to_node(&mut margin_node, &dashboard_node.margin);
-        children.nodes_mut().push(margin_node);
-    }
-
-    if !is_ui_rect_default(&dashboard_node.padding) {
-        let mut padding_node = KdlNode::new("padding");
-        serialize_ui_rect_to_node(&mut padding_node, &dashboard_node.padding);
-        children.nodes_mut().push(padding_node);
-    }
-
-    if !is_ui_rect_default(&dashboard_node.border) {
-        let mut border_node = KdlNode::new("border");
-        serialize_ui_rect_to_node(&mut border_node, &dashboard_node.border);
-        children.nodes_mut().push(border_node);
-    }
-
-    if dashboard_node.color.a > 0.0 {
-        let mut bg_node = KdlNode::new("bg");
-        serialize_color_to_node(&mut bg_node, &dashboard_node.color);
-        children.nodes_mut().push(bg_node);
-    }
-
-    // let mut text_color_node = KdlNode::new("text_color");
-    // serialize_color_to_node_named(&mut text_color_node, &dashboard_node.text_color, Some("text_color"));
-    // children.nodes_mut().push(text_color_node);
-
-    // Add regular children
-    for child in &dashboard_node.children {
-        children.nodes_mut().push(serialize_dashboard_node(child));
-    }
-
-    node.set_children(children);
-
-    serialize_color_to_node_named(&mut node, &dashboard_node.text_color, Some("text_color"));
-    node
-}
-
-fn serialize_dashboard_node_properties<T>(node: &mut KdlNode, dashboard_node: &DashboardNode<T>) {
-    if let Some(name) = dashboard_node.name.as_ref() {
-        node.entries_mut()
-            .push(KdlEntry::new_prop("name", name.as_str()));
-    }
-
-    if !matches!(dashboard_node.display, Display::Flex) {
-        node.entries_mut().push(KdlEntry::new_prop(
-            "display",
-            <&str>::from(dashboard_node.display),
-        ));
-    }
-
-    if !matches!(dashboard_node.box_sizing, BoxSizing::BorderBox) {
-        node.entries_mut().push(KdlEntry::new_prop(
-            "box_sizing",
-            <&str>::from(dashboard_node.box_sizing),
-        ));
-    }
-
-    if !matches!(dashboard_node.position_type, PositionType::Relative) {
-        node.entries_mut().push(KdlEntry::new_prop(
-            "position_type",
-            <&str>::from(dashboard_node.position_type),
-        ));
-    }
-
-    // Serialize Val properties
-    serialize_val_prop(node, "left", &dashboard_node.left);
-    serialize_val_prop(node, "right", &dashboard_node.right);
-    serialize_val_prop(node, "top", &dashboard_node.top);
-    serialize_val_prop(node, "bottom", &dashboard_node.bottom);
-    serialize_val_prop(node, "width", &dashboard_node.width);
-    serialize_val_prop(node, "height", &dashboard_node.height);
-    serialize_val_prop(node, "min_width", &dashboard_node.min_width);
-    serialize_val_prop(node, "min_height", &dashboard_node.min_height);
-    serialize_val_prop(node, "max_width", &dashboard_node.max_width);
-    serialize_val_prop(node, "max_height", &dashboard_node.max_height);
-
-    if let Some(aspect_ratio) = dashboard_node.aspect_ratio {
-        push_rounded_float_prop(node, "aspect_ratio", aspect_ratio as f64);
-    }
-
-    // Serialize alignment properties
-    if !matches!(dashboard_node.align_items, AlignItems::Default) {
-        node.entries_mut().push(KdlEntry::new_prop(
-            "align_items",
-            <&str>::from(dashboard_node.align_items),
-        ));
-    }
-
-    if !matches!(dashboard_node.justify_items, JustifyItems::Default) {
-        node.entries_mut().push(KdlEntry::new_prop(
-            "justify_items",
-            <&str>::from(dashboard_node.justify_items),
-        ));
-    }
-
-    if !matches!(dashboard_node.align_self, AlignSelf::Auto) {
-        node.entries_mut().push(KdlEntry::new_prop(
-            "align_self",
-            <&str>::from(dashboard_node.align_self),
-        ));
-    }
-
-    if !matches!(dashboard_node.justify_self, JustifySelf::Auto) {
-        node.entries_mut().push(KdlEntry::new_prop(
-            "justify_self",
-            <&str>::from(dashboard_node.justify_self),
-        ));
-    }
-
-    if !matches!(dashboard_node.align_content, AlignContent::Default) {
-        node.entries_mut().push(KdlEntry::new_prop(
-            "align_content",
-            <&str>::from(dashboard_node.align_content),
-        ));
-    }
-
-    if !matches!(dashboard_node.justify_content, JustifyContent::Default) {
-        node.entries_mut().push(KdlEntry::new_prop(
-            "justify_content",
-            <&str>::from(dashboard_node.justify_content),
-        ));
-    }
-
-    if !matches!(dashboard_node.flex_direction, FlexDirection::Row) {
-        node.entries_mut().push(KdlEntry::new_prop(
-            "flex_direction",
-            <&str>::from(dashboard_node.flex_direction),
-        ));
-    }
-
-    if !matches!(dashboard_node.flex_wrap, FlexWrap::NoWrap) {
-        node.entries_mut().push(KdlEntry::new_prop(
-            "flex_wrap",
-            <&str>::from(dashboard_node.flex_wrap),
-        ));
-    }
-
-    if dashboard_node.flex_grow != 0.0 {
-        push_rounded_float_prop(node, "flex_grow", dashboard_node.flex_grow as f64);
-    }
-
-    if dashboard_node.flex_shrink != 1.0 {
-        push_rounded_float_prop(node, "flex_shrink", dashboard_node.flex_shrink as f64);
-    }
-
-    serialize_val_prop(node, "flex_basis", &dashboard_node.flex_basis);
-    serialize_val_prop(node, "row_gap", &dashboard_node.row_gap);
-    serialize_val_prop(node, "column_gap", &dashboard_node.column_gap);
-
-    if let Some(ref text) = dashboard_node.text {
-        node.entries_mut()
-            .push(KdlEntry::new_prop("text", text.clone()));
-    }
-
-    if dashboard_node.font_size != 16.0 {
-        push_rounded_float_prop(node, "font_size", dashboard_node.font_size as f64);
-    }
-}
-
-fn serialize_val_prop(node: &mut KdlNode, prop_name: &str, val: &Val) {
-    match val {
-        Val::Auto => {}
-        Val::Px(s) => {
-            node.entries_mut()
-                .push(KdlEntry::new_prop(prop_name, format!("{}px", s)));
-        }
-        Val::Percent(s) => {
-            node.entries_mut()
-                .push(KdlEntry::new_prop(prop_name, format!("{}%", s)));
-        }
-        Val::Vw(s) => {
-            node.entries_mut()
-                .push(KdlEntry::new_prop(prop_name, format!("{}vw", s)));
-        }
-        Val::Vh(s) => {
-            node.entries_mut()
-                .push(KdlEntry::new_prop(prop_name, format!("{}vh", s)));
-        }
-        Val::VMin(s) => {
-            node.entries_mut()
-                .push(KdlEntry::new_prop(prop_name, format!("{}vmin", s)));
-        }
-        Val::VMax(s) => {
-            node.entries_mut()
-                .push(KdlEntry::new_prop(prop_name, format!("{}vmax", s)));
-        }
-    }
-}
-
-fn serialize_ui_rect_to_node(node: &mut KdlNode, ui_rect: &UiRect) {
-    serialize_val_prop(node, "left", &ui_rect.left);
-    serialize_val_prop(node, "right", &ui_rect.right);
-    serialize_val_prop(node, "top", &ui_rect.top);
-    serialize_val_prop(node, "bottom", &ui_rect.bottom);
-}
-
-fn is_ui_rect_default(ui_rect: &UiRect) -> bool {
-    matches!(ui_rect.left, Val::Px(ref s) if s == "0.0")
-        && matches!(ui_rect.right, Val::Px(ref s) if s == "0.0")
-        && matches!(ui_rect.top, Val::Px(ref s) if s == "0.0")
-        && matches!(ui_rect.bottom, Val::Px(ref s) if s == "0.0")
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1078,7 +857,7 @@ mod tests {
 
     #[test]
     fn test_serialize_timeline_config() {
-        let schematic = Schematic::<()> {
+        let schematic = Schematic {
             timeline: Some(TimelineConfig {
                 played_color: Color::MINT,
                 future_color: Color::HYPERBLUE,
@@ -1125,7 +904,7 @@ mod tests {
                 look_at: None,
                 up: None,
                 local_arrows: Vec::new(),
-                aux: (),
+                node_id: NodeId::default(),
             })));
 
         let serialized = serialize_schematic(&schematic);
@@ -1167,7 +946,7 @@ mod tests {
                 look_at: Some("(0,0,0,0, 0,0,0)".to_string()),
                 up: None,
                 local_arrows: Vec::new(),
-                aux: (),
+                node_id: NodeId::default(),
             })));
 
         let serialized = serialize_schematic(&schematic);
@@ -1222,7 +1001,7 @@ mod tests {
                 locked: false,
                 auto_y_range: true,
                 y_range: 0.0..1.0,
-                aux: (),
+                node_id: NodeId::default(),
                 colors: vec![],
             })));
 
@@ -1251,7 +1030,7 @@ mod tests {
                 locked: false,
                 auto_y_range: true,
                 y_range: 0.0..1.0,
-                aux: (),
+                node_id: NodeId::default(),
                 colors: vec![Color::rgb(1.0, 0.0, 0.0), Color::rgb(0.0, 1.0, 0.0)],
             })));
 
@@ -1302,7 +1081,7 @@ graph "value" {
             },
             icon: None,
             mesh_visibility_range: None,
-            aux: (),
+            node_id: NodeId::default(),
         }));
 
         let serialized = serialize_schematic(&schematic);
@@ -1342,7 +1121,7 @@ graph "value" {
             },
             icon: None,
             mesh_visibility_range: None,
-            aux: (),
+            node_id: NodeId::default(),
         }));
 
         let serialized = serialize_schematic(&schematic);
@@ -1379,7 +1158,7 @@ graph "value" {
             },
             icon: None,
             mesh_visibility_range: None,
-            aux: (),
+            node_id: NodeId::default(),
         }));
 
         let serialized = serialize_schematic(&schematic);
@@ -1413,7 +1192,7 @@ graph "value" {
             },
             icon: None,
             mesh_visibility_range: None,
-            aux: (),
+            node_id: NodeId::default(),
         }));
 
         let serialized = serialize_schematic(&schematic);
@@ -1468,7 +1247,7 @@ graph "value" {
                 look_at: None,
                 up: None,
                 local_arrows: Vec::new(),
-                aux: (),
+                node_id: NodeId::default(),
             }),
             Panel::Graph(Graph {
                 eql: "data.position".to_string(),
@@ -1477,7 +1256,7 @@ graph "value" {
                 locked: false,
                 auto_y_range: true,
                 y_range: 0.0..1.0,
-                aux: (),
+                node_id: NodeId::default(),
                 colors: vec![],
             }),
         ])));
@@ -1514,7 +1293,7 @@ graph "value" {
             line_width: 2.0,
             color: Color::MINT,
             perspective: false,
-            aux: (),
+            node_id: NodeId::default(),
         }));
 
         let serialized = serialize_schematic(&schematic);
@@ -1547,7 +1326,7 @@ graph "value" {
                 show_name: false,
                 thickness: ArrowThickness::new(1.23456),
                 label_position: LabelPosition::None,
-                aux: (),
+                node_id: NodeId::default(),
             }));
 
         let serialized = serialize_schematic(&schematic);
@@ -1654,54 +1433,6 @@ object_3d a.world_pos {
         assert_eq!(r#"graph "rocket.fin_deflect[0]" name=Fin"#, serialized);
         let reparsed = parse_schematic(&serialized).unwrap();
         assert_eq!(parsed.elems.len(), reparsed.elems.len());
-    }
-
-    #[test]
-    fn test_serialize_dashboard_with_font_and_color() {
-        let mut schematic = Schematic::default();
-        let dashboard = Dashboard {
-            root: DashboardNode {
-                name: Some("Styled Dashboard".to_string()),
-                display: Display::Flex,
-                flex_direction: FlexDirection::Column,
-                text: Some("Hello World".to_string()),
-                font_size: 24.0,
-                text_color: Color::TURQUOISE,
-                children: vec![DashboardNode {
-                    width: Val::Px("100.0".to_string()),
-                    height: Val::Px("50.0".to_string()),
-                    text: Some("Child Text".to_string()),
-                    font_size: 12.0,
-                    text_color: Color::MINT,
-                    ..Default::default()
-                }],
-                ..Default::default()
-            },
-            aux: (),
-        };
-        schematic
-            .elems
-            .push(SchematicElem::Panel(Panel::Dashboard(Box::new(dashboard))));
-
-        let serialized = serialize_schematic(&schematic);
-        println!("{}", serialized);
-        let parsed = parse_schematic(&serialized).unwrap();
-
-        assert_eq!(parsed.elems.len(), 1);
-        if let SchematicElem::Panel(Panel::Dashboard(dashboard)) = &parsed.elems[0] {
-            assert_eq!(dashboard.root.name, Some("Styled Dashboard".to_string()));
-            assert_eq!(dashboard.root.font_size, 24.0);
-            assert_color_close(dashboard.root.text_color, Color::TURQUOISE);
-            assert_eq!(dashboard.root.text, Some("Hello World".to_string()));
-
-            assert_eq!(dashboard.root.children.len(), 1);
-            let child_node = &dashboard.root.children[0];
-            assert_eq!(child_node.font_size, 12.0);
-            assert_color_close(child_node.text_color, Color::MINT);
-            assert_eq!(child_node.text, Some("Child Text".to_string()));
-        } else {
-            panic!("Expected dashboard");
-        }
     }
 
     #[test]
