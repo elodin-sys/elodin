@@ -29,6 +29,7 @@ pub fn parse_schematic(input: &str) -> Result<Schematic, KdlSchematicError> {
         match elem {
             SchematicElem::Theme(theme) => schematic.theme = Some(theme),
             SchematicElem::Timeline(timeline) => schematic.timeline = Some(timeline),
+            SchematicElem::Coordinate(frame) => schematic.frame = Some(frame),
             other => schematic.elems.push(other),
         }
     }
@@ -47,6 +48,7 @@ fn parse_schematic_elem(node: &KdlNode, src: &str) -> Result<SchematicElem, KdlS
         "object_3d" => Ok(SchematicElem::Object3d(parse_object_3d(node, src)?)),
         "line_3d" => Ok(SchematicElem::Line3d(parse_line_3d(node, src)?)),
         "vector_arrow" => Ok(SchematicElem::VectorArrow(parse_vector_arrow(node, src)?)),
+        "coordinate" => Ok(SchematicElem::Coordinate(parse_coordinate(node, src)?)),
         _ => Err(KdlSchematicError::UnknownNode {
             node_type: node.name().to_string(),
             src: src.to_string(),
@@ -224,6 +226,26 @@ fn parse_timeline(node: &KdlNode, src: &str) -> Result<TimelineConfig, KdlSchema
         played_color,
         future_color,
         follow_latest,
+    })
+}
+
+fn parse_coordinate(node: &KdlNode, src: &str) -> Result<GeoFrame, KdlSchematicError> {
+    let frame_str = node
+        .get("frame")
+        .and_then(|v| v.as_string())
+        .ok_or_else(|| KdlSchematicError::MissingProperty {
+            property: "frame".to_string(),
+            node: "coordinate".to_string(),
+            src: src.to_string(),
+            span: node.span(),
+        })?;
+
+    GeoFrame::from_str(frame_str).map_err(|_| KdlSchematicError::InvalidValue {
+        property: "frame".to_string(),
+        node: "coordinate".to_string(),
+        expected: "ENU, NED, or ECEF".to_string(),
+        src: src.to_string(),
+        span: node.span(),
     })
 }
 

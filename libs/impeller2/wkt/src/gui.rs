@@ -48,6 +48,8 @@ pub struct Schematic {
     pub theme: Option<ThemeConfig>,
     #[serde(default)]
     pub timeline: Option<TimelineConfig>,
+    #[serde(default)]
+    pub frame: Option<bevy_geo_frames::GeoFrame>,
 }
 
 #[cfg(feature = "bevy")]
@@ -67,6 +69,7 @@ pub enum SchematicElem {
     Window(WindowSchematic),
     Theme(ThemeConfig),
     Timeline(TimelineConfig),
+    Coordinate(bevy_geo_frames::GeoFrame),
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, Default, PartialEq, Eq)]

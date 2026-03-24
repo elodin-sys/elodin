@@ -8,6 +8,9 @@ const KDL_FLOAT_PRECISION: u32 = 6;
 pub fn serialize_schematic(schematic: &Schematic) -> String {
     let mut doc = KdlDocument::new();
 
+    if let Some(frame) = schematic.frame {
+        doc.nodes_mut().push(serialize_coordinate(frame));
+    }
     if let Some(theme) = schematic.theme.as_ref() {
         doc.nodes_mut().push(serialize_theme(theme));
     }
@@ -35,7 +38,15 @@ fn serialize_schematic_elem(elem: &SchematicElem) -> KdlNode {
         SchematicElem::Window(window) => serialize_window(window),
         SchematicElem::Theme(theme) => serialize_theme(theme),
         SchematicElem::Timeline(timeline) => serialize_timeline(timeline),
+        SchematicElem::Coordinate(frame) => serialize_coordinate(*frame),
     }
+}
+
+fn serialize_coordinate(frame: bevy_geo_frames::GeoFrame) -> KdlNode {
+    let mut node = KdlNode::new("coordinate");
+    node.entries_mut()
+        .push(KdlEntry::new_prop("frame", <&str>::from(frame)));
+    node
 }
 
 fn serialize_panel(panel: &Panel) -> KdlNode {
