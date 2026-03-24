@@ -81,6 +81,7 @@ pub struct SchematicParam<'w, 's> {
     pub timeline_settings: Res<'w, TimelineSettings>,
     pub metadata: Res<'w, ComponentMetadataRegistry>,
     pub geo_positions: Query<'w, 's, &'static GeoPosition>,
+    pub coordinate: Res<'w, crate::Coordinate>,
 }
 
 impl SchematicParam<'_, '_> {
@@ -411,6 +412,7 @@ pub fn tiles_to_schematic(
     mut bindings: ResMut<SchematicBindings>,
 ) {
     schematic.elems.clear();
+    schematic.frame = param.coordinate.0;
     bindings.clear_ephemeral();
 
     if let Some(root_panels) =
