@@ -26,9 +26,10 @@ def world(seed: int = 0) -> el.World:
 
     world.schematic(
         """
+        coordinate frame=NED
         hsplit {
             tabs {
-                viewport name=Viewport frame="NED" pos="(0,0,0,0, 2,8,-4)" look_at="(0,0,0,0, 0,0,-3)" hdr=#true show_grid=#true active=#true
+                viewport name=Viewport frame="NED" pos="(0,0,0,0, 8,2,-4)" look_at="(0,0,0,0, 0,0,-3)" hdr=#true show_grid=#true active=#true
                 inspector
             }
         }

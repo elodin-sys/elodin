@@ -37,7 +37,7 @@ def test_gravity_enu_ned() -> Tuple[bool, str]:
 
     # --- ENU Simulation ---
     print("\nRunning ENU simulation...")
-    w_enu = el.World(frame=el.Frame.ENU)
+    w_enu = el.World()
     w_enu.spawn(
         el.Body(
             world_pos=el.SpatialTransform(linear=jnp.array([0.0, 0.0, initial_height])),
