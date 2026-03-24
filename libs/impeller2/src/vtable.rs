@@ -734,6 +734,19 @@ pub mod builder {
     }
 }
 
+#[cfg(feature = "alloc")]
+pub trait AsVTable {
+    fn populate_vtable_fields(
+        builder: &mut alloc::vec::Vec<builder::FieldBuilder>,
+    ) -> Result<(), crate::error::Error>;
+
+    fn as_vtable() -> VTable {
+        let mut fields = alloc::vec::Vec::new();
+        Self::populate_vtable_fields(&mut fields).expect("vtable failed to form");
+        builder::vtable(fields)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use core::convert::Infallible;

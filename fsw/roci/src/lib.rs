@@ -7,25 +7,18 @@ mod system_fn;
 
 pub use impeller2;
 pub use impeller2::com_de::{Componentize, Decomponentize};
+pub use impeller2::vtable::AsVTable;
 pub use impeller2_wkt;
-pub use roci_macros::{AsVTable, Componentize, Decomponentize, Metadatatize};
+pub use impeller2_wkt::Metadatatize;
+pub use db_macros::{AsVTable, Componentize, Decomponentize, Metadatatize};
+pub use impeller2_stellar::{SinkExt, StreamExt, Subscription};
 pub use system_fn::*;
-pub use vtable::AsVTable;
 pub use zerocopy;
 
 pub mod combinators;
 #[cfg(feature = "csv")]
 pub mod csv;
 pub mod drivers;
-mod vtable;
-
-#[cfg(feature = "stellar")]
-pub mod tcp;
-
-#[cfg(feature = "std")]
-pub mod metadata;
-#[cfg(feature = "std")]
-pub use metadata::Metadatatize;
 
 pub trait System {
     type World: Default + Decomponentize<Error = Infallible> + Componentize;

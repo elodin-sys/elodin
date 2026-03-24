@@ -3,7 +3,7 @@ use impeller2::types::{LenPacket, Msg, PacketId, msg_id};
 use impeller2_wkt::{
     MsgMetadata, MsgStream, SetComponentMetadata, SetMsgMetadata, log_entry_msg_schema,
 };
-use roci::tcp::SinkExt;
+use impeller2_stellar::SinkExt;
 use serde::{Deserialize, Serialize};
 use std::{env, net::SocketAddr, time::Duration};
 use stellarator::io::{AsyncRead, AsyncWrite};
@@ -15,11 +15,11 @@ use zerocopy::{FromBytes, Immutable, IntoBytes};
 use blackbox::Record;
 use impeller2::types::Timestamp;
 
-#[derive(roci::AsVTable, roci::Metadatatize)]
-#[roci(parent = "aleph")]
+#[derive(db_macros::AsVTable, db_macros::Metadatatize)]
+#[db(parent = "aleph")]
 #[repr(C)]
 struct BridgeRecord {
-    #[roci(timestamp)]
+    #[db(timestamp)]
     time: i64,
     ts: u32,
     mag: [f32; 3],

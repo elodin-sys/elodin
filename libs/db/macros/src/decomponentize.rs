@@ -7,7 +7,7 @@ use quote::quote;
 use syn::{DeriveInput, Generics, Ident, parse_macro_input};
 
 #[derive(Debug, FromDeriveInput)]
-#[darling(attributes(roci), supports(struct_named))]
+#[darling(attributes(db), supports(struct_named))]
 pub struct Decomponentize {
     ident: Ident,
     generics: Generics,
@@ -16,7 +16,7 @@ pub struct Decomponentize {
 }
 
 pub fn decomponentize(input: TokenStream) -> TokenStream {
-    let crate_name = crate::roci_crate_name();
+    let impeller = crate::impeller_crate_name();
     let input = parse_macro_input!(input as DeriveInput);
     let Decomponentize {
         ident,
@@ -25,7 +25,6 @@ pub fn decomponentize(input: TokenStream) -> TokenStream {
         parent,
     } = Decomponentize::from_derive_input(&input).unwrap();
     let where_clause = &generics.where_clause;
-    let impeller = quote! { #crate_name::impeller2 };
     let fields = data.take_struct().unwrap();
     let if_arms = fields.fields.iter().map(|field| {
         let ty = &field.ty;
@@ -62,7 +61,7 @@ pub fn decomponentize(input: TokenStream) -> TokenStream {
         }
     });
     quote! {
-        impl #crate_name::Decomponentize for #ident #generics #where_clause {
+        impl #impeller::com_de::Decomponentize for #ident #generics #where_clause {
             type Error = core::convert::Infallible;
             fn apply_value(&mut self,
                             component_id: #impeller::types::ComponentId,

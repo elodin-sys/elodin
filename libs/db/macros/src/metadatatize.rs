@@ -5,7 +5,7 @@ use quote::quote;
 use syn::{DeriveInput, Generics, Ident, parse_macro_input};
 
 #[derive(Debug, FromDeriveInput)]
-#[darling(attributes(roci), supports(struct_named))]
+#[darling(attributes(db), supports(struct_named))]
 pub struct Metadatatize {
     ident: Ident,
     generics: Generics,
@@ -14,7 +14,8 @@ pub struct Metadatatize {
 }
 
 pub fn metadatatize(input: TokenStream) -> TokenStream {
-    let crate_name = crate::roci_crate_name();
+    let impeller = crate::impeller_crate_name();
+    let impeller_wkt = crate::wkt_crate_name();
     let input = parse_macro_input!(input as DeriveInput);
     let Metadatatize {
         ident,
@@ -23,8 +24,6 @@ pub fn metadatatize(input: TokenStream) -> TokenStream {
         parent,
     } = Metadatatize::from_derive_input(&input).unwrap();
     let where_clause = &generics.where_clause;
-    let impeller = quote! { #crate_name::impeller2 };
-    let impeller_wkt = quote! { #crate_name::impeller2_wkt };
     let fields = data.take_struct().unwrap();
 
     let metadata_items = fields.fields.iter().filter(|f| !f.timestamp && !f.skip).map(|field| {
@@ -56,12 +55,12 @@ pub fn metadatatize(input: TokenStream) -> TokenStream {
             }
         } else {
             quote! {
-                .chain(<#ty as #crate_name::Metadatatize>::metadata())
+                .chain(<#ty as #impeller_wkt::Metadatatize>::metadata())
             }
         }
     });
     quote! {
-        impl #crate_name::Metadatatize for #ident #generics #where_clause {
+        impl #impeller_wkt::Metadatatize for #ident #generics #where_clause {
             fn metadata() -> impl Iterator<Item = #impeller_wkt::ComponentMetadata> {
                 core::iter::empty()
                 #(#metadata_items)*

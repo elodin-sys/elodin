@@ -6,16 +6,14 @@ use nox::{
     array::{Mat3, Quat, SpatialTransform, Vec3},
     tensor,
 };
-use roci::{
-    AsVTable, Metadatatize,
-    tcp::{SinkExt, StreamExt},
-};
+use db_macros::{AsVTable, Metadatatize};
+use impeller2_stellar::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use std::{net::SocketAddr, path::PathBuf};
 use zerocopy::{Immutable, IntoBytes, KnownLayout, TryFromBytes};
 
 #[derive(AsVTable, Default, Debug, Clone, TryFromBytes, Immutable, KnownLayout)]
-#[roci(parent = "aleph")]
+#[db(parent = "aleph")]
 pub struct Input {
     pub mag: Vec3<f32>,
     pub accel: Vec3<f32>,
@@ -23,10 +21,10 @@ pub struct Input {
 }
 
 #[derive(AsVTable, Metadatatize, IntoBytes, Immutable, Debug)]
-#[roci(parent = "aleph")]
+#[db(parent = "aleph")]
 #[repr(C)]
 pub struct Output {
-    #[roci(timestamp)]
+    #[db(timestamp)]
     pub time: i64,
     pub q_hat: Quat<f64>,
     pub b_hat: Vec3<f64>,

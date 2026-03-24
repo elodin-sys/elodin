@@ -5,7 +5,7 @@ use quote::quote;
 use syn::{DeriveInput, Generics, Ident, parse_macro_input};
 
 #[derive(Debug, FromDeriveInput)]
-#[darling(attributes(roci), supports(struct_named))]
+#[darling(attributes(db), supports(struct_named))]
 pub struct Componentize {
     ident: Ident,
     generics: Generics,
@@ -14,7 +14,7 @@ pub struct Componentize {
 }
 
 pub fn componentize(input: TokenStream) -> TokenStream {
-    let crate_name = crate::roci_crate_name();
+    let impeller = crate::impeller_crate_name();
     let input = parse_macro_input!(input as DeriveInput);
     let Componentize {
         ident,
@@ -23,7 +23,6 @@ pub fn componentize(input: TokenStream) -> TokenStream {
         parent,
     } = Componentize::from_derive_input(&input).unwrap();
     let where_clause = &generics.where_clause;
-    let impeller = quote! { #crate_name::impeller2 };
     let fields = data.take_struct().unwrap();
     let sink_calls = fields.fields.iter().map(|field| {
         let component_id = field.component_id();
@@ -50,8 +49,8 @@ pub fn componentize(input: TokenStream) -> TokenStream {
     });
 
     quote! {
-        impl #crate_name::Componentize for #ident #generics #where_clause {
-            fn sink_columns(&self, output: &mut impl #crate_name::Decomponentize) {
+        impl #impeller::com_de::Componentize for #ident #generics #where_clause {
+            fn sink_columns(&self, output: &mut impl #impeller::com_de::Decomponentize) {
                 use #impeller::com_de::AsComponentView;
                 #(#sink_calls)*
             }

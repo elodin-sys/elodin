@@ -125,6 +125,7 @@ dependencies = [
  "anyhow",
  "blackbox",
  "cobs 0.2.3",
+ "db-macros",
  "fastrand 2.3.0",
  "futures-lite",
  "impeller2",
@@ -132,7 +133,6 @@ dependencies = [
  "impeller2-stellar",
  "impeller2-wkt",
  "postcard-schema",
- "roci",
  "serde",
  "stellarator",
  "zerocopy",
@@ -157,12 +157,12 @@ name = "aleph-status"
 version = "0.16.3-alpha.0"
 dependencies = [
  "anyhow",
+ "db-macros",
  "image",
  "impeller2",
  "impeller2-stellar",
  "impeller2-wkt",
  "nu-ansi-term 0.49.0",
- "roci",
  "roci-adcs",
  "stellarator",
  "sysinfo 0.34.2",
@@ -2823,7 +2823,6 @@ dependencies = [
 name = "blackbox"
 version = "0.16.3-alpha.0"
 dependencies = [
- "roci",
  "zerocopy",
 ]
 
@@ -4656,6 +4655,18 @@ dependencies = [
  "recursive",
  "regex",
  "sqlparser",
+]
+
+[[package]]
+name = "db-macros"
+version = "0.16.3-alpha.0"
+dependencies = [
+ "convert_case 0.6.0",
+ "darling 0.20.11",
+ "proc-macro-crate",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.111",
 ]
 
 [[package]]
@@ -7293,6 +7304,7 @@ name = "impeller2-stellar"
 version = "0.16.3-alpha.0"
 dependencies = [
  "bbq2",
+ "fastrand 2.3.0",
  "futures-concurrency",
  "futures-lite",
  "impeller2",
@@ -7300,6 +7312,7 @@ dependencies = [
  "impeller2-wkt",
  "miette 7.6.0",
  "postcard",
+ "postcard-schema",
  "serde",
  "stellarator",
  "thingbuf",
@@ -8036,13 +8049,13 @@ version = "0.16.3-alpha.0"
 dependencies = [
  "anyhow",
  "clap 4.5.53",
+ "db-macros",
  "fastrand 2.3.0",
  "impeller2",
  "impeller2-stellar",
  "impeller2-wkt",
  "mlua",
  "nox",
- "roci",
  "roci-adcs",
  "serde",
  "stellarator",
@@ -8293,13 +8306,13 @@ version = "0.16.3-alpha.0"
 dependencies = [
  "anyhow",
  "clap 4.5.53",
+ "db-macros",
  "fastrand 2.3.0",
  "impeller2",
  "impeller2-stellar",
  "impeller2-wkt",
  "mlua",
  "nox",
- "roci",
  "roci-adcs",
  "serde",
  "stellarator",
@@ -9057,7 +9070,6 @@ dependencies = [
  "paste",
  "postcard",
  "pyo3",
- "roci-adcs",
  "s10",
  "serde",
  "serde_json",
@@ -11309,6 +11321,7 @@ dependencies = [
  "anyhow",
  "bbq2",
  "csv",
+ "db-macros",
  "fastrand 2.3.0",
  "heapless 0.8.0",
  "impeller2",
@@ -11319,7 +11332,6 @@ dependencies = [
  "nox",
  "postcard",
  "postcard-schema",
- "roci-macros",
  "serde",
  "stellarator",
  "thingbuf",
@@ -11334,18 +11346,6 @@ version = "0.16.3-alpha.0"
 dependencies = [
  "approx",
  "nox",
-]
-
-[[package]]
-name = "roci-macros"
-version = "0.16.3-alpha.0"
-dependencies = [
- "convert_case 0.6.0",
- "darling 0.20.11",
- "proc-macro-crate",
- "proc-macro2",
- "quote",
- "syn 2.0.111",
 ]
 
 [[package]]
@@ -12728,12 +12728,12 @@ name = "tegrastats-bridge"
 version = "0.16.3-alpha.0"
 dependencies = [
  "anyhow",
+ "db-macros",
  "fastrand 2.3.0",
  "futures-concurrency",
  "impeller2",
  "impeller2-stellar",
  "impeller2-wkt",
- "roci",
  "stellarator",
  "sysinfo 0.34.2",
  "zerocopy",

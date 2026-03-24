@@ -1,11 +1,9 @@
 use std::{fmt::Display, net::SocketAddr, sync::OnceLock};
 
 use nu_ansi_term::{Color, Style};
-use roci::{
-    AsVTable,
-    tcp::StreamExt,
-    zerocopy::{Immutable, KnownLayout, TryFromBytes},
-};
+use db_macros::AsVTable;
+use impeller2_stellar::StreamExt;
+use zerocopy::{Immutable, KnownLayout, TryFromBytes};
 
 use viuer::KittySupport;
 
@@ -150,7 +148,7 @@ fn print_os_info() {
 
 async fn print_sensor_info() -> anyhow::Result<()> {
     #[derive(AsVTable, Default, Debug, Clone, TryFromBytes, Immutable, KnownLayout)]
-    #[roci(parent = "aleph")]
+    #[db(parent = "aleph")]
     struct SensorInfo {
         pub mag: [f32; 3],
         pub gyro: [f32; 3],
@@ -207,7 +205,7 @@ async fn print_sensor_info() -> anyhow::Result<()> {
 
 async fn print_soc_telem() -> anyhow::Result<()> {
     #[derive(AsVTable, Default, Debug, Clone, TryFromBytes, Immutable, KnownLayout)]
-    #[roci(parent = "aleph")]
+    #[db(parent = "aleph")]
     struct HWTelem {
         pub cpu_usage: [f32; 8],
         pub cpu_freq: [f32; 8],

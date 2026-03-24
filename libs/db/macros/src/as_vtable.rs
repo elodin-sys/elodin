@@ -5,7 +5,7 @@ use quote::quote;
 use syn::{DeriveInput, Generics, Ident, parse_macro_input};
 
 #[derive(Debug, FromDeriveInput)]
-#[darling(attributes(roci), supports(struct_named))]
+#[darling(attributes(db), supports(struct_named))]
 pub struct AsVTable {
     ident: Ident,
     generics: Generics,
@@ -14,7 +14,7 @@ pub struct AsVTable {
 }
 
 pub fn as_vtable(input: TokenStream) -> TokenStream {
-    let crate_name = crate::roci_crate_name();
+    let impeller = crate::impeller_crate_name();
     let input = parse_macro_input!(input as DeriveInput);
     let AsVTable {
         ident,
@@ -23,7 +23,6 @@ pub fn as_vtable(input: TokenStream) -> TokenStream {
         parent,
     } = AsVTable::from_derive_input(&input).unwrap();
     let where_clause = &generics.where_clause;
-    let impeller = quote! { #crate_name::impeller2 };
     let fields = data.take_struct().unwrap();
 
     let ts_field = fields.fields.iter().find(|f| f.timestamp);
@@ -78,12 +77,12 @@ pub fn as_vtable(input: TokenStream) -> TokenStream {
             }
         } else {
             quote! {
-                <#ty as #crate_name::AsVTable>::populate_vtable_builder(builder)?;
+                <#ty as #impeller::vtable::AsVTable>::populate_vtable_builder(builder)?;
             }
         }
     });
     quote! {
-        impl #crate_name::AsVTable for #ident #generics #where_clause {
+        impl #impeller::vtable::AsVTable for #ident #generics #where_clause {
             fn populate_vtable_fields(builder: &mut Vec<#impeller::vtable::builder::FieldBuilder>) -> Result<(), #impeller::error::Error> {
                 #ts_token
                 #(#vtable_items)*

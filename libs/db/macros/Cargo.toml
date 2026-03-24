@@ -1,9 +1,9 @@
 [package]
-name = "roci-macros"
+name = "db-macros"
 license = "MIT OR Apache-2.0"
 version.workspace = true
 edition = "2024"
-description = "Macros for roci."
+description = "Derive macros for sending component data to Elodin DB."
 repository = "https://github.com/elodin-sys/elodin"
 
 [lib]
