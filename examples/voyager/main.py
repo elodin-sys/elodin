@@ -166,7 +166,6 @@ w.schematic("""
     hsplit {{
         tabs share=0.2 {{
             hierarchy
-            schematic_tree
         }}
         tabs share=0.6 {{
             //viewport name=Viewport pos="(0,0,0,0,0,0,100)" look_at="(0,0,0,0,0,0,0)" hdr=#true
