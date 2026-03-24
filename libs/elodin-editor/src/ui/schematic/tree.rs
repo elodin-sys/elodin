@@ -1,38 +1,25 @@
 use std::f32;
 
-use crate::EqlContext;
 use crate::ui::SelectedObject;
 use crate::ui::colors::{ColorExt, get_scheme};
-use crate::ui::dashboard::{DashboardNodePath, NodeUpdaterParams, spawn_node};
-use crate::ui::inspector::dashboard::DashboardExt;
 use crate::ui::inspector::search;
 use crate::ui::tiles::WindowState;
 use crate::ui::widgets::WidgetSystem;
 
-use super::CurrentSchematic;
+use super::{CurrentSchematic, SchematicBindings};
 use bevy::ecs::entity::Entity;
-use bevy::ecs::hierarchy::ChildOf;
-use bevy::ecs::system::{Commands, Res, SystemParam};
+use bevy::ecs::system::SystemParam;
 use bevy::prelude::{Component, Query, ResMut};
 use egui::collapsing_header::CollapsingState;
 use egui::load::SizedTexture;
-use impeller2_wkt::{Dashboard, DashboardNode, Panel};
-use smallvec::smallvec;
+use impeller2_wkt::Panel;
 
 #[derive(SystemParam)]
 pub struct TreeWidget<'w, 's> {
     schematic: ResMut<'w, CurrentSchematic>,
     state: Query<'w, 's, &'static mut TreeWidgetState>,
     window_states: Query<'w, 's, &'static mut WindowState>,
-    spawn_node_params: SpawnNodeParams<'w, 's>,
-}
-
-#[derive(SystemParam)]
-struct SpawnNodeParams<'w, 's> {
-    eql_ctx: Res<'w, EqlContext>,
-    commands: Commands<'w, 's>,
-    node_update_params: NodeUpdaterParams<'w, 's>,
-    dashboards: Query<'w, 's, &'static mut Dashboard<Entity>>,
+    bindings: ResMut<'w, SchematicBindings>,
 }
 
 pub struct TreeIcons {
@@ -41,7 +28,6 @@ pub struct TreeIcons {
     pub viewport: egui::TextureId,
     pub plot: egui::TextureId,
     pub container: egui::TextureId,
-    pub add: egui::TextureId,
 }
 
 #[derive(Component, Default)]
@@ -64,7 +50,7 @@ impl WidgetSystem for TreeWidget<'_, '_> {
             schematic,
             mut state,
             mut window_states,
-            mut spawn_node_params,
+            bindings,
         } = state.get_mut(world);
         let Ok(mut window_state) = window_states.get_mut(target_window) else {
             return;
@@ -86,16 +72,12 @@ impl WidgetSystem for TreeWidget<'_, '_> {
         egui::ScrollArea::vertical().show(ui, |ui| {
             for elem in &schematic.elems {
                 match elem {
-                    impeller2_wkt::SchematicElem::Panel(p) => panel(
-                        ui,
-                        max_rect,
-                        &icons,
-                        p,
-                        selected_object,
-                        &mut spawn_node_params,
-                    ),
+                    impeller2_wkt::SchematicElem::Panel(p) => {
+                        panel(ui, max_rect, &icons, p, selected_object, &bindings)
+                    }
                     impeller2_wkt::SchematicElem::Object3d(object_3d) => {
-                        let selected = if Some(object_3d.aux) == selected_object.entity() {
+                        let obj_entity = bindings.get(object_3d.node_id);
+                        let selected = if obj_entity == selected_object.entity() {
                             *selected_object != SelectedObject::None
                         } else {
                             false
@@ -109,10 +91,10 @@ impl WidgetSystem for TreeWidget<'_, '_> {
                         .leaf(true)
                         .selected(selected)
                         .show(ui, |_| {});
-                        if branch_res.inner.clicked() {
-                            *selected_object = SelectedObject::Object3D {
-                                entity: object_3d.aux,
-                            };
+                        if branch_res.inner.clicked()
+                            && let Some(entity) = obj_entity
+                        {
+                            *selected_object = SelectedObject::Object3D { entity };
                         }
                     }
                     impeller2_wkt::SchematicElem::Line3d(_line3d) => {}
@@ -130,9 +112,9 @@ fn panel(
     ui: &mut egui::Ui,
     tree_rect: egui::Rect,
     icons: &TreeIcons,
-    p: &Panel<Entity>,
+    p: &Panel,
     selected_object: &mut SelectedObject,
-    spawn_node_params: &mut SpawnNodeParams,
+    bindings: &SchematicBindings,
 ) {
     let p = p.collapse();
     let icon = match p {
@@ -148,234 +130,47 @@ fn panel(
         Panel::Hierarchy => icons.viewport,
         Panel::SchematicTree(_) => icons.viewport,
         Panel::DataOverview(_) => icons.viewport,
-        Panel::Dashboard(_) => icons.viewport,
         Panel::VideoStream(_) => icons.viewport,
         Panel::SensorView(_) => icons.viewport,
         Panel::LogStream(_) => icons.viewport,
     };
     let children = p.children();
-    let selected = if p.aux().copied() == selected_object.entity() {
+    let resolved_entity = p.node_id().and_then(|id| bindings.get(id));
+    let selected = if resolved_entity == selected_object.entity() {
         *selected_object != SelectedObject::None
     } else {
         false
     };
-    let leaf = if let Panel::Dashboard(d) = p {
-        d.root.children.is_empty()
-    } else {
-        children.is_empty()
-    };
-    let mut branch = Branch::new(p.label().to_string(), icon, icons.chevron, tree_rect)
-        .leaf(leaf)
+    let branch = Branch::new(p.label().to_string(), icon, icons.chevron, tree_rect)
+        .leaf(children.is_empty())
         .selected(selected);
-    if let Panel::Dashboard(_) = p {
-        branch = branch.extra_icon(icons.add);
-    }
     let branch_res = branch.show(ui, |ui| {
-        if let Panel::Dashboard(d) = p {
-            for (i, child) in d.root.children.iter().enumerate() {
-                dashboard_node(
-                    ui,
-                    tree_rect,
-                    child,
-                    icons,
-                    selected_object,
-                    DashboardNodePath {
-                        root: d.aux,
-                        path: smallvec![i],
-                    },
-                    spawn_node_params,
-                    d.aux,
-                );
-            }
-        } else {
-            for child in children {
-                panel(
-                    ui,
-                    tree_rect,
-                    icons,
-                    child,
-                    selected_object,
-                    spawn_node_params,
-                );
-            }
+        for child in children {
+            panel(ui, tree_rect, icons, child, selected_object, bindings);
         }
     });
     if branch_res.inner.clicked() {
         match p {
             Panel::Viewport(viewport) => {
-                *selected_object = SelectedObject::Viewport {
-                    camera: viewport.aux,
-                    title: p.label().to_string(),
+                if let Some(camera) = bindings.get(viewport.node_id) {
+                    *selected_object = SelectedObject::Viewport {
+                        camera,
+                        title: p.label().to_string(),
+                    };
                 }
             }
             Panel::Graph(graph) => {
-                *selected_object = SelectedObject::Graph {
-                    graph_id: graph.aux,
+                if let Some(graph_id) = bindings.get(graph.node_id) {
+                    *selected_object = SelectedObject::Graph { graph_id };
                 }
             }
             Panel::QueryPlot(plot) => {
-                *selected_object = SelectedObject::Graph { graph_id: plot.aux }
-            }
-            Panel::Dashboard(d) => {
-                *selected_object = SelectedObject::DashboardNode { entity: d.aux }
+                if let Some(graph_id) = bindings.get(plot.node_id) {
+                    *selected_object = SelectedObject::Graph { graph_id };
+                }
             }
             _ => {}
         }
-    }
-    if branch_res.extra_clicked
-        && let Panel::Dashboard(d) = p
-    {
-        spawn_child_node(
-            &DashboardNodePath {
-                root: d.aux,
-                path: smallvec![],
-            },
-            spawn_node_params,
-            d.aux,
-        );
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-fn dashboard_node(
-    ui: &mut egui::Ui,
-    tree_rect: egui::Rect,
-    node: &DashboardNode<Entity>,
-    icons: &TreeIcons,
-    selected_object: &mut SelectedObject,
-    path: DashboardNodePath,
-    spawn_node_params: &mut SpawnNodeParams,
-    parent: Entity,
-) {
-    let children = &node.children;
-
-    let selected = if Some(node.aux) == selected_object.entity() {
-        *selected_object != SelectedObject::None
-    } else {
-        false
-    };
-    let branch_res = Branch::new(
-        node.name.as_deref().unwrap_or("node").to_string(),
-        icons.container,
-        icons.chevron,
-        tree_rect,
-    )
-    .leaf(children.is_empty())
-    .extra_icon(icons.add)
-    .selected(selected)
-    .show(ui, |ui| {
-        for (i, child) in children.iter().enumerate() {
-            let mut path = path.clone();
-            path.path.push(i);
-            dashboard_node(
-                ui,
-                tree_rect,
-                child,
-                icons,
-                selected_object,
-                path,
-                spawn_node_params,
-                node.aux,
-            );
-        }
-    });
-
-    branch_res.inner.context_menu(|ui| {
-        ui.spacing_mut().button_padding = egui::vec2(4.0, 4.0);
-        if ui.button("Add Child").clicked() {
-            spawn_child_node(&path, spawn_node_params, parent);
-        }
-        if ui.button("Duplicate").clicked() {
-            let Ok(mut dashboard) = spawn_node_params.dashboards.get_mut(path.root) else {
-                return;
-            };
-            let mut parent_path = path.path.clone();
-            parent_path.pop();
-            let Some(parent_node) = dashboard.root.get_node_mut(&parent_path) else {
-                return;
-            };
-            let parent_entity = parent_node.aux;
-            let mut path = DashboardNodePath {
-                root: path.root,
-                path: parent_path,
-            };
-            path.path.push(parent_node.children.len());
-            let mut commands = spawn_node_params.commands.spawn(ChildOf(parent_entity));
-            if let Ok(child) = spawn_node(
-                node,
-                &spawn_node_params.eql_ctx.0,
-                &mut commands,
-                path.root,
-                path.path,
-                &spawn_node_params.node_update_params,
-            ) {
-                parent_node.children.push(child);
-            }
-        }
-        if ui.button("Delete").clicked() {
-            let Ok(mut dashboard) = spawn_node_params.dashboards.get_mut(path.root) else {
-                return;
-            };
-            let Some(parent_node) = dashboard
-                .root
-                .get_node_mut(&path.path[..path.path.len().saturating_sub(1)])
-            else {
-                return;
-            };
-            let Some(index) = path.path.last() else {
-                return;
-            };
-            let node = parent_node.children.remove(*index);
-            if let Ok(mut e) = spawn_node_params.commands.get_entity(node.aux) {
-                e.despawn();
-            }
-            if selected {
-                *selected_object = SelectedObject::DashboardNode {
-                    entity: parent_node.aux,
-                };
-            }
-        }
-    });
-
-    if branch_res.extra_clicked {
-        spawn_child_node(&path, spawn_node_params, parent);
-    }
-
-    if branch_res.inner.clicked() {
-        *selected_object = SelectedObject::DashboardNode { entity: node.aux };
-    }
-}
-
-fn spawn_child_node(
-    path: &DashboardNodePath,
-    spawn_node_params: &mut SpawnNodeParams,
-    parent: Entity,
-) {
-    let mut path = path.clone();
-    let SpawnNodeParams {
-        eql_ctx,
-        commands,
-        node_update_params,
-        dashboards,
-    } = spawn_node_params;
-    let mut commands = commands.spawn(ChildOf(parent));
-
-    let Ok(mut dashboard) = dashboards.get_mut(path.root) else {
-        return;
-    };
-    let Some(parent_node) = dashboard.root.get_node_mut(&path.path) else {
-        return;
-    };
-    path.path.push(parent_node.children.len());
-    if let Ok(child) = spawn_node::<()>(
-        &Default::default(),
-        &eql_ctx.0,
-        &mut commands,
-        path.root,
-        path.path,
-        node_update_params,
-    ) {
-        parent_node.children.push(child);
     }
 }
 

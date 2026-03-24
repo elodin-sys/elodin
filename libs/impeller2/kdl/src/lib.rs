@@ -74,7 +74,7 @@ pub trait FromKdl {
         Self: Sized;
 }
 
-impl<T> ToKdl for impeller2_wkt::Schematic<T> {
+impl ToKdl for impeller2_wkt::Schematic {
     fn to_kdl(&self) -> String {
         serialize_schematic(self)
     }

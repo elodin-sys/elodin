@@ -4,7 +4,6 @@ use impeller2_wkt::{
 };
 use kdl::{KdlDocument, KdlNode};
 use std::collections::HashMap;
-use std::str::FromStr;
 use std::time::Duration;
 
 use impeller2_wkt::*;
@@ -38,9 +37,7 @@ fn parse_schematic_elem(node: &KdlNode, src: &str) -> Result<SchematicElem, KdlS
     match node.name().value() {
         "tabs" | "hsplit" | "vsplit" | "viewport" | "graph" | "component_monitor"
         | "action_pane" | "query_table" | "query_plot" | "inspector" | "hierarchy"
-        | "schematic_tree" | "data_overview" | "dashboard" => {
-            Ok(SchematicElem::Panel(parse_panel(node, src)?))
-        }
+        | "schematic_tree" | "data_overview" => Ok(SchematicElem::Panel(parse_panel(node, src)?)),
         "window" => Ok(SchematicElem::Window(parse_window(node, src)?)),
         "theme" => Ok(SchematicElem::Theme(parse_theme(node, src)?)),
         "timeline" => Ok(SchematicElem::Timeline(parse_timeline(node, src)?)),
@@ -305,7 +302,6 @@ fn parse_panel(node: &KdlNode, kdl_src: &str) -> Result<Panel, KdlSchematicError
         "hierarchy" => Ok(Panel::Hierarchy),
         "schematic_tree" => Ok(Panel::SchematicTree(parse_name(node))),
         "data_overview" => Ok(Panel::DataOverview(parse_name(node))),
-        "dashboard" => parse_dashboard(node),
         "video_stream" => parse_video_stream(node),
         "sensor_view" => parse_sensor_view(node),
         "log_stream" => parse_log_stream(node),
@@ -547,7 +543,7 @@ fn parse_viewport(node: &KdlNode, kdl_src: &str) -> Result<Panel, KdlSchematicEr
         look_at,
         up,
         local_arrows,
-        aux: (),
+        node_id: NodeId::default(),
     }))
 }
 
@@ -602,7 +598,7 @@ fn parse_graph(node: &KdlNode, src: &str) -> Result<Panel, KdlSchematicError> {
         locked,
         auto_y_range,
         y_range,
-        aux: (),
+        node_id: NodeId::default(),
         colors,
     }))
 }
@@ -780,7 +776,7 @@ fn parse_query_plot(node: &KdlNode, src: &str) -> Result<Panel, KdlSchematicErro
         plot_mode,
         x_label,
         y_label,
-        aux: (),
+        node_id: NodeId::default(),
     }))
 }
 
@@ -878,7 +874,7 @@ fn parse_object_3d(node: &KdlNode, src: &str) -> Result<Object3D, KdlSchematicEr
         mesh,
         icon,
         mesh_visibility_range,
-        aux: (),
+        node_id: NodeId::default(),
     })
 }
 
@@ -1170,7 +1166,7 @@ fn parse_line_3d(node: &KdlNode, src: &str) -> Result<Line3d, KdlSchematicError>
         line_width,
         color,
         perspective,
-        aux: (),
+        node_id: NodeId::default(),
     })
 }
 
@@ -1349,7 +1345,7 @@ fn parse_vector_arrow(node: &KdlNode, src: &str) -> Result<VectorArrow3d, KdlSch
         show_name,
         thickness,
         label_position,
-        aux: (),
+        node_id: NodeId::default(),
     })
 }
 
@@ -1566,348 +1562,6 @@ fn parse_material_from_node(node: &KdlNode) -> Option<Material> {
             base_color: color,
             emissivity,
         }
-    })
-}
-
-fn parse_dashboard(node: &KdlNode) -> Result<Panel, KdlSchematicError> {
-    let root = parse_dashboard_node(node)?;
-
-    Ok(Panel::Dashboard(Box::new(Dashboard { root, aux: () })))
-}
-
-fn parse_dashboard_node(node: &KdlNode) -> Result<DashboardNode<()>, KdlSchematicError> {
-    let display = node
-        .get("display")
-        .and_then(|v| v.as_string())
-        .and_then(|s| Display::from_str(s).ok())
-        .unwrap_or_default();
-
-    let box_sizing = node
-        .get("box_sizing")
-        .and_then(|v| v.as_string())
-        .and_then(|s| BoxSizing::from_str(s).ok())
-        .unwrap_or_default();
-
-    let position_type = node
-        .get("position_type")
-        .and_then(|v| v.as_string())
-        .and_then(|s| PositionType::from_str(s).ok())
-        .unwrap_or_default();
-
-    let overflow = node
-        .get("overflow")
-        .and_then(parse_overflow_from_value)
-        .unwrap_or(Overflow {
-            x: OverflowAxis::Visible,
-            y: OverflowAxis::Visible,
-        });
-
-    let overflow_clip_margin = node
-        .get("overflow_clip_margin")
-        .and_then(parse_overflow_clip_margin_from_value)
-        .unwrap_or(OverflowClipMargin {
-            visual_box: OverflowClipBox::ContentBox,
-            margin: 0.0,
-        });
-
-    let left = node
-        .get("left")
-        .map(parse_val_from_value)
-        .unwrap_or(Val::Auto);
-    let right = node
-        .get("right")
-        .map(parse_val_from_value)
-        .unwrap_or(Val::Auto);
-    let top = node
-        .get("top")
-        .map(parse_val_from_value)
-        .unwrap_or(Val::Auto);
-    let bottom = node
-        .get("bottom")
-        .map(parse_val_from_value)
-        .unwrap_or(Val::Auto);
-    let width = node
-        .get("width")
-        .map(parse_val_from_value)
-        .unwrap_or(Val::Auto);
-    let height = node
-        .get("height")
-        .map(parse_val_from_value)
-        .unwrap_or(Val::Auto);
-    let min_width = node
-        .get("min_width")
-        .map(parse_val_from_value)
-        .unwrap_or(Val::Auto);
-    let min_height = node
-        .get("min_height")
-        .map(parse_val_from_value)
-        .unwrap_or(Val::Auto);
-    let max_width = node
-        .get("max_width")
-        .map(parse_val_from_value)
-        .unwrap_or(Val::Auto);
-    let max_height = node
-        .get("max_height")
-        .map(parse_val_from_value)
-        .unwrap_or(Val::Auto);
-
-    let aspect_ratio = node
-        .get("aspect_ratio")
-        .and_then(|v| v.as_float())
-        .map(|f| f as f32);
-
-    let align_items = node
-        .get("align_items")
-        .and_then(|v| v.as_string())
-        .and_then(|s| AlignItems::from_str(s).ok())
-        .unwrap_or_default();
-
-    let justify_items = node
-        .get("justify_items")
-        .and_then(|v| v.as_string())
-        .and_then(|s| JustifyItems::from_str(s).ok())
-        .unwrap_or_default();
-
-    let align_self = node
-        .get("align_self")
-        .and_then(|v| v.as_string())
-        .and_then(|s| AlignSelf::from_str(s).ok())
-        .unwrap_or_default();
-
-    let justify_self = node
-        .get("justify_self")
-        .and_then(|v| v.as_string())
-        .and_then(|s| JustifySelf::from_str(s).ok())
-        .unwrap_or_default();
-
-    let align_content = node
-        .get("align_content")
-        .and_then(|v| v.as_string())
-        .and_then(|s| AlignContent::from_str(s).ok())
-        .unwrap_or_default();
-
-    let justify_content = node
-        .get("justify_content")
-        .and_then(|v| v.as_string())
-        .and_then(|s| JustifyContent::from_str(s).ok())
-        .unwrap_or_default();
-
-    let flex_direction = node
-        .get("flex_direction")
-        .and_then(|v| v.as_string())
-        .and_then(|s| FlexDirection::from_str(s).ok())
-        .unwrap_or_default();
-
-    let flex_wrap = node
-        .get("flex_wrap")
-        .and_then(|v| v.as_string())
-        .and_then(|s| FlexWrap::from_str(s).ok())
-        .unwrap_or_default();
-
-    let flex_grow = node
-        .get("flex_grow")
-        .and_then(|v| v.as_float())
-        .map(|f| f as f32)
-        .unwrap_or(0.0);
-    let flex_shrink = node
-        .get("flex_shrink")
-        .and_then(|v| v.as_float())
-        .map(|f| f as f32)
-        .unwrap_or(1.0);
-    let flex_basis = node
-        .get("flex_basis")
-        .map(parse_val_from_value)
-        .unwrap_or(Val::Auto);
-
-    let row_gap = node
-        .get("row_gap")
-        .map(parse_val_from_value)
-        .unwrap_or(Val::Auto);
-    let column_gap = node
-        .get("column_gap")
-        .map(parse_val_from_value)
-        .unwrap_or(Val::Auto);
-
-    let text = node
-        .get("text")
-        .and_then(|v| v.as_string())
-        .map(|s| s.to_string());
-
-    let font_size = node
-        .get("font_size")
-        .and_then(|v| v.as_float())
-        .map(|f| f as f32)
-        .unwrap_or(16.0);
-
-    let name = parse_name(node);
-
-    let mut margin = UiRect::default();
-    let mut padding = UiRect::default();
-    let mut border = UiRect::default();
-    let mut color = Color::TRANSPARENT;
-    let mut text_color = Color::WHITE;
-
-    let mut children = Vec::new();
-    if let Some(child_nodes) = node.children() {
-        for child in child_nodes.nodes() {
-            match child.name().value() {
-                "text_color" => {
-                    text_color = parse_color_from_node(child).unwrap_or(Color::WHITE);
-                }
-                "bg" | "background" => {
-                    color = parse_color_from_node(child).unwrap_or(Color::TRANSPARENT);
-                }
-                "margin" => {
-                    margin = parse_ui_rect_from_node(child).unwrap_or_default();
-                }
-                "padding" => {
-                    padding = parse_ui_rect_from_node(child).unwrap_or_default();
-                }
-                "border" => {
-                    border = parse_ui_rect_from_node(child).unwrap_or_default();
-                }
-                _ => {
-                    children.push(parse_dashboard_node(child)?);
-                }
-            }
-        }
-    }
-
-    Ok(DashboardNode {
-        name,
-        display,
-        box_sizing,
-        position_type,
-        overflow,
-        overflow_clip_margin,
-        left,
-        right,
-        top,
-        bottom,
-        width,
-        height,
-        min_width,
-        min_height,
-        max_width,
-        max_height,
-        aspect_ratio,
-        align_items,
-        justify_items,
-        align_self,
-        justify_self,
-        align_content,
-        justify_content,
-        margin,
-        padding,
-        border,
-        flex_direction,
-        flex_wrap,
-        flex_grow,
-        flex_shrink,
-        flex_basis,
-        row_gap,
-        column_gap,
-        children,
-        color,
-        text,
-        font_size,
-        text_color,
-        aux: (),
-    })
-}
-
-fn parse_overflow_axis(s: &str) -> OverflowAxis {
-    match s {
-        "visible" => OverflowAxis::Visible,
-        "clip" => OverflowAxis::Clip,
-        "hidden" => OverflowAxis::Hidden,
-        "scroll" => OverflowAxis::Scroll,
-        _ => Default::default(),
-    }
-}
-
-fn parse_val_from_value(value: &kdl::KdlValue) -> Val {
-    if let Some(s) = value.as_string() {
-        match s {
-            "auto" => Val::Auto,
-            s if s.ends_with("px") => {
-                let px = s.trim_end_matches("px").trim();
-                Val::Px(px.to_string())
-            }
-            s if s.ends_with("%") => {
-                let percent = s.trim_end_matches("%").trim();
-                Val::Percent(percent.to_string())
-            }
-            s if s.ends_with("vw") => {
-                let vw = s.trim_end_matches("vw").trim();
-                Val::Vw(vw.to_string())
-            }
-            s if s.ends_with("vh") => {
-                let vh = s.trim_end_matches("vh").trim();
-                Val::Vh(vh.to_string())
-            }
-            s if s.ends_with("vmin") => {
-                let vmin = s.trim_end_matches("vmin").trim();
-                Val::VMin(vmin.to_string())
-            }
-            s if s.ends_with("vmax") => {
-                let vmax = s.trim_end_matches("vmax").trim();
-                Val::VMax(vmax.to_string())
-            }
-            _ => Val::Auto,
-        }
-    } else if let Some(f) = value.as_float() {
-        Val::Px((f as f32).to_string())
-    } else if let Some(i) = value.as_integer() {
-        Val::Px((i as f32).to_string())
-    } else {
-        Val::Auto
-    }
-}
-
-fn parse_overflow_from_value(value: &kdl::KdlValue) -> Option<Overflow> {
-    if let Some(s) = value.as_string() {
-        let axis = parse_overflow_axis(s);
-        Some(Overflow { x: axis, y: axis })
-    } else {
-        None
-    }
-}
-
-fn parse_overflow_clip_margin_from_value(value: &kdl::KdlValue) -> Option<OverflowClipMargin> {
-    if value.as_string().is_some() {
-        Some(OverflowClipMargin {
-            visual_box: OverflowClipBox::ContentBox,
-            margin: 0.0,
-        })
-    } else {
-        None
-    }
-}
-
-fn parse_ui_rect_from_node(node: &kdl::KdlNode) -> Option<UiRect> {
-    let left = node
-        .get("left")
-        .map(parse_val_from_value)
-        .unwrap_or_default();
-    let right = node
-        .get("right")
-        .map(parse_val_from_value)
-        .unwrap_or_default();
-    let top = node
-        .get("top")
-        .map(parse_val_from_value)
-        .unwrap_or_default();
-    let bottom = node
-        .get("bottom")
-        .map(parse_val_from_value)
-        .unwrap_or_default();
-
-    Some(UiRect {
-        left,
-        right,
-        top,
-        bottom,
     })
 }
 
@@ -2604,69 +2258,6 @@ object_3d "a.world_pos" {
             assert_eq!(monitor.component_name, "a.world_pos");
         } else {
             panic!("Expected component_monitor");
-        }
-    }
-
-    #[test]
-    fn test_parse_dashboard_with_font_and_color() {
-        let kdl = r#"
-dashboard name="Styled Dashboard" {
-    node display="flex" flex_direction="column" text="Hello World" font_size=24.0  {
-        text_color color="blue"
-        node width="100px" height="50px" text="Child Text" font_size=12.0 {
-            text_color color="mint"
-        }
-    }
-}
-"#;
-        let schematic = parse_schematic(kdl).unwrap();
-
-        assert_eq!(schematic.elems.len(), 1);
-        if let SchematicElem::Panel(Panel::Dashboard(dashboard)) = &schematic.elems[0] {
-            assert_eq!(dashboard.root.name, Some("Styled Dashboard".to_string()));
-            assert_eq!(dashboard.root.children.len(), 1);
-
-            let node = &dashboard.root.children[0];
-            assert!(matches!(node.display, Display::Flex));
-            assert_eq!(node.font_size, 24.0);
-            assert_eq!(node.text_color, Color::rgb(0.0, 0.0, 1.0));
-            assert_eq!(node.text, Some("Hello World".to_string()));
-
-            assert_eq!(node.children.len(), 1);
-            let child_node = &node.children[0];
-            assert_eq!(child_node.font_size, 12.0);
-            assert_eq!(child_node.text_color, Color::MINT);
-            assert_eq!(child_node.text, Some("Child Text".to_string()));
-        } else {
-            panic!("Expected dashboard");
-        }
-    }
-
-    #[test]
-    fn test_parse_dashboard() {
-        let kdl = r#"
-dashboard name="Test Dashboard" {
-    node display="flex" flex_direction="column" {
-        text "Hello World"
-        node width="100px" height="50px" {
-            text "Child Text"
-        }
-    }
-}
-"#;
-        let schematic = parse_schematic(kdl).unwrap();
-
-        assert_eq!(schematic.elems.len(), 1);
-        if let SchematicElem::Panel(Panel::Dashboard(dashboard)) = &schematic.elems[0] {
-            assert_eq!(dashboard.root.name, Some("Test Dashboard".to_string()));
-            assert_eq!(dashboard.root.children.len(), 1);
-
-            let node = &dashboard.root.children[0];
-            assert!(matches!(node.display, Display::Flex));
-            assert!(matches!(node.flex_direction, FlexDirection::Column));
-            assert_eq!(node.children.len(), 2);
-        } else {
-            panic!("Expected dashboard panel");
         }
     }
 

@@ -18,7 +18,6 @@ use crate::ui::{
 };
 
 pub mod action;
-pub mod dashboard;
 pub mod data_overview;
 pub mod entity;
 pub mod graph;
@@ -32,10 +31,9 @@ mod widgets;
 pub use widgets::*;
 
 use self::{
-    dashboard::InspectorDashboardNode, data_overview::InspectorDataOverview,
-    entity::InspectorEntity, graph::InspectorGraph, monitor::InspectorMonitor,
-    object3d::InspectorObject3D, query_table::InspectorQueryTable, timeline::InspectorTimeline,
-    viewport::InspectorViewport,
+    data_overview::InspectorDataOverview, entity::InspectorEntity, graph::InspectorGraph,
+    monitor::InspectorMonitor, object3d::InspectorObject3D, query_table::InspectorQueryTable,
+    timeline::InspectorTimeline, viewport::InspectorViewport,
 };
 
 pub struct InspectorIcons {
@@ -182,14 +180,6 @@ impl WidgetSystem for InspectorContent<'_, '_> {
                                         world,
                                         "inspector_object3d",
                                         (icons, entity),
-                                    );
-                                    Default::default()
-                                }
-                                SelectedObject::DashboardNode { entity } => {
-                                    ui.add_widget_with::<InspectorDashboardNode>(
-                                        world,
-                                        "inspector_dashboard_node",
-                                        (entity, target_window),
                                     );
                                     Default::default()
                                 }

@@ -51,6 +51,7 @@ pub fn sync_windows(
 
         if let Some(mut window) = window_maybe {
             window.window_theme = window_theme_for_mode(state.descriptor.mode.as_deref());
+            window.title = compute_window_title(&state);
             existing_map.insert(*marker, entity);
             for (index, &graph) in state.graph_entities.iter().enumerate() {
                 if let Ok(mut camera) = cameras.get_mut(graph) {

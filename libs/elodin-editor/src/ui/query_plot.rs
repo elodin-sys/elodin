@@ -70,7 +70,7 @@ impl Default for QueryPlotData {
                 plot_mode: PlotMode::TimeSeries,
                 x_label: None,
                 y_label: None,
-                aux: (),
+                node_id: Default::default(),
             },
             state: Default::default(),
             auto_color: true,

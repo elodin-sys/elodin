@@ -20,7 +20,7 @@ use egui::UiBuilder;
 use egui::response::Flags;
 use egui_material_icons::{icon_button, icons::*};
 use egui_tiles::{Container, Tile, TileId, Tiles};
-use impeller2_wkt::{Dashboard, Graph, Viewport, WindowRect};
+use impeller2_wkt::{Graph, Viewport, WindowRect};
 use smallvec::{SmallVec, smallvec};
 use std::collections::{BTreeMap, HashMap};
 use std::{
@@ -40,7 +40,6 @@ use super::{
     button::{EImageButton, ETileButton},
     colors::{self, EColor, get_scheme, with_opacity},
     command_palette::{CommandPaletteState, palette_items},
-    dashboard::{DashboardWidget, DashboardWidgetArgs, spawn_dashboard},
     data_overview::{DataOverviewPane, DataOverviewWidget},
     hierarchy::{Hierarchy, HierarchyContent},
     images,
@@ -64,7 +63,7 @@ use crate::{
             NeedsInitialSnap, ViewCubeConfig, ViewCubeTargetCamera, spawn::spawn_view_cube,
         },
     },
-    ui::{colors::ColorExt, dashboard::NodeUpdaterParams},
+    ui::colors::ColorExt,
 };
 
 pub(crate) mod sidebar;
@@ -485,12 +484,6 @@ pub struct TreePane {
     pub name: PaneName,
 }
 
-#[derive(Clone)]
-pub struct DashboardPane {
-    pub entity: Entity,
-    pub name: PaneName,
-}
-
 impl TileState {
     fn has_content(&self) -> bool {
         fn visit(tree: &egui_tiles::Tree<Pane>, id: TileId) -> bool {
@@ -674,16 +667,6 @@ impl TileState {
             .push(TreeAction::AddVideoStream(tile_id, msg_name, name));
     }
 
-    pub fn create_dashboard_tile(
-        &mut self,
-        dashboard: impeller2_wkt::Dashboard,
-        name: PaneName,
-        tile_id: Option<TileId>,
-    ) {
-        self.tree_actions
-            .push(TreeAction::AddDashboard(tile_id, Box::new(dashboard), name));
-    }
-
     pub fn create_tree_tile(&mut self, tile_id: Option<TileId>) {
         self.tree_actions
             .push(TreeAction::AddSchematicTree(tile_id));
@@ -720,7 +703,6 @@ impl TileState {
                             Pane::VideoStream(video) => ("VideoStream", video.name.as_str()),
                             Pane::SensorView(sv) => ("SensorView", sv.name.as_str()),
                             Pane::LogStream(ls) => ("LogStream", ls.name.as_str()),
-                            Pane::Dashboard(dashboard) => ("Dashboard", dashboard.name.as_str()),
                             Pane::SchematicTree(pane) => ("SchematicTree", pane.name.as_str()),
                             Pane::DataOverview(pane) => ("DataOverview", pane.name.as_str()),
                         };
@@ -844,11 +826,6 @@ impl TileState {
                         e.despawn();
                     }
                 }
-                Tile::Pane(Pane::Dashboard(dashboard)) => {
-                    if let Ok(mut e) = commands.get_entity(dashboard.entity) {
-                        e.despawn();
-                    }
-                }
                 Tile::Pane(Pane::Monitor(monitor)) => {
                     if let Ok(mut e) = commands.get_entity(monitor.entity) {
                         e.despawn();
@@ -924,7 +901,6 @@ pub enum Pane {
     VideoStream(super::video_stream::VideoStreamPane),
     SensorView(super::video_stream::VideoStreamPane),
     LogStream(super::log_stream::LogStreamPane),
-    Dashboard(DashboardPane),
     SchematicTree(TreePane),
     DataOverview(DataOverviewPane),
 }
@@ -944,7 +920,6 @@ impl Pane {
             }
             Pane::VideoStream(pane) => out.push_ui_node(pane.entity),
             Pane::SensorView(pane) => out.push_ui_node(pane.entity),
-            Pane::Dashboard(pane) => out.push_ui_node(pane.entity),
             Pane::Monitor(_)
             | Pane::QueryTable(_)
             | Pane::ActionTile(_)
@@ -954,11 +929,7 @@ impl Pane {
         }
     }
 
-    fn title(
-        &self,
-        graph_states: &Query<&GraphState>,
-        dashboards: &Query<&Dashboard<Entity>>,
-    ) -> String {
+    fn title(&self, graph_states: &Query<&GraphState>) -> String {
         match self {
             Pane::Graph(pane) => {
                 if let Ok(graph_state) = graph_states.get(pane.id) {
@@ -979,12 +950,6 @@ impl Pane {
             Pane::VideoStream(video_stream) => video_stream.name.to_string(),
             Pane::SensorView(sv) => sv.name.to_string(),
             Pane::LogStream(ls) => ls.name.to_string(),
-            Pane::Dashboard(dashboard) => {
-                if let Ok(dash) = dashboards.get(dashboard.entity) {
-                    return dash.root.name.as_deref().unwrap_or("Dashboard").to_string();
-                }
-                "Dashboard".to_string()
-            }
             Pane::SchematicTree(pane) => pane.name.to_string(),
             Pane::DataOverview(pane) => pane.name.to_string(),
         }
@@ -1023,10 +988,6 @@ impl Pane {
             }
             Pane::LogStream(ls) => {
                 ls.name = title.to_string();
-            }
-            Pane::Dashboard(dashboard) => {
-                dashboard.name = title.to_string();
-                targets.dashboard_id = Some(dashboard.entity);
             }
             Pane::SchematicTree(tree) => {
                 tree.name = title.to_string();
@@ -1201,17 +1162,6 @@ impl Pane {
                 );
                 egui_tiles::UiResponse::None
             }
-            Pane::Dashboard(pane) => {
-                ui.add_widget_with::<DashboardWidget>(
-                    world,
-                    "dashboard",
-                    DashboardWidgetArgs {
-                        entity: pane.entity,
-                        window: target_window,
-                    },
-                );
-                egui_tiles::UiResponse::None
-            }
             Pane::SchematicTree(tree_pane) => {
                 let tree_icons = super::schematic::tree::TreeIcons {
                     chevron: icons.chevron,
@@ -1219,7 +1169,6 @@ impl Pane {
                     container: icons.container,
                     plot: icons.plot,
                     viewport: icons.viewport,
-                    add: icons.add,
                 };
                 ui.add_widget_with::<super::schematic::tree::TreeWidget>(
                     world,
@@ -1247,7 +1196,6 @@ struct PaneTitleTargets {
     query_plot_id: Option<Entity>,
     query_table_id: Option<Entity>,
     action_tile_id: Option<Entity>,
-    dashboard_id: Option<Entity>,
 }
 
 fn apply_pane_title_updates(
@@ -1257,7 +1205,6 @@ fn apply_pane_title_updates(
     query_plots: &mut Query<'_, '_, &'static mut QueryPlotData>,
     query_tables: &mut Query<'_, '_, &'static mut QueryTableData>,
     action_tiles: &mut Query<'_, '_, &'static mut ActionTile>,
-    dashboards: &mut Query<'_, '_, &'static mut Dashboard<Entity>>,
 ) {
     let title = title.to_string();
 
@@ -1282,13 +1229,7 @@ fn apply_pane_title_updates(
     if let Some(action_tile_id) = targets.action_tile_id
         && let Ok(mut action_tile) = action_tiles.get_mut(action_tile_id)
     {
-        action_tile.button_name = title.clone();
-    }
-
-    if let Some(dashboard_id) = targets.dashboard_id
-        && let Ok(mut dashboard) = dashboards.get_mut(dashboard_id)
-    {
-        dashboard.root.name = Some(title);
+        action_tile.button_name = title;
     }
 }
 
@@ -1643,7 +1584,6 @@ pub enum TreeAction {
     AddQueryPlot(Option<TileId>),
     AddActionTile(Option<TileId>, PaneName, String),
     AddVideoStream(Option<TileId>, String, PaneName),
-    AddDashboard(Option<TileId>, Box<impeller2_wkt::Dashboard>, PaneName),
     AddSchematicTree(Option<TileId>),
     AddDataOverview(Option<TileId>),
     DeleteTab(TileId),
@@ -1709,10 +1649,9 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
     fn on_edit(&mut self, _edit_action: egui_tiles::EditAction) {}
 
     fn tab_title_for_pane(&mut self, pane: &Pane) -> egui::WidgetText {
-        let mut query =
-            SystemState::<(Query<&GraphState>, Query<&Dashboard<Entity>>)>::new(self.world);
-        let (graphs, dashes) = query.get(self.world);
-        pane.title(&graphs, &dashes).into()
+        let mut query = SystemState::<Query<&GraphState>>::new(self.world);
+        let graphs = query.get(self.world);
+        pane.title(&graphs).into()
     }
 
     fn pane_ui(
@@ -2513,13 +2452,11 @@ pub struct TileLayout<'w, 's> {
     primary_window: Single<'w, 's, Entity, With<PrimaryWindow>>,
     cmd_palette_state: ResMut<'w, CommandPaletteState>,
     eql_ctx: Res<'w, EqlContext>,
-    node_updater_params: NodeUpdaterParams<'w, 's>,
     tile_param: crate::ui::command_palette::palette_items::TileParam<'w, 's>,
     graph_states: Query<'w, 's, &'static mut GraphState>,
     query_plots: Query<'w, 's, &'static mut QueryPlotData>,
     query_tables: Query<'w, 's, &'static mut QueryTableData>,
     action_tiles: Query<'w, 's, &'static mut ActionTile>,
-    dashboards: Query<'w, 's, &'static mut Dashboard<Entity>>,
 }
 
 #[derive(Clone)]
@@ -2850,27 +2787,6 @@ impl WidgetSystem for TileLayout<'_, '_> {
                             tile_state.tree.make_active(|id, _| id == tile_id);
                         }
                     }
-                    TreeAction::AddDashboard(parent_tile_id, dashboard, name) => {
-                        if read_only {
-                            continue;
-                        }
-                        let entity = match spawn_dashboard(
-                            &dashboard,
-                            &state_mut.eql_ctx.0,
-                            &mut state_mut.commands,
-                            &state_mut.node_updater_params,
-                        ) {
-                            Ok(entity) => entity,
-                            Err(_) => state_mut.commands.spawn(bevy::ui::Node::default()).id(),
-                        };
-                        let pane = Pane::Dashboard(DashboardPane { entity, name });
-                        if let Some(tile_id) =
-                            tile_state.insert_tile(Tile::Pane(pane), parent_tile_id, true)
-                        {
-                            tile_state.tree.make_active(|id, _| id == tile_id);
-                        }
-                    }
-
                     TreeAction::SelectTile(tile_id) => {
                         tile_state.tree.make_active(|id, _| id == tile_id);
 
@@ -3056,7 +2972,6 @@ impl WidgetSystem for TileLayout<'_, '_> {
                                 &mut state_mut.query_plots,
                                 &mut state_mut.query_tables,
                                 &mut state_mut.action_tiles,
-                                &mut state_mut.dashboards,
                             );
                         }
                     }
@@ -3109,11 +3024,6 @@ impl WidgetSystem for TileLayout<'_, '_> {
                         }
                     }
 
-                    Pane::Dashboard(dash) => {
-                        if let Ok(mut stream) = state_mut.commands.get_entity(dash.entity) {
-                            stream.try_insert(IsTileVisible(visible));
-                        }
-                    }
                     Pane::DataOverview(_) => {}
                 }
             }

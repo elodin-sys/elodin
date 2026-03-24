@@ -2,7 +2,6 @@ use std::{
     collections::BTreeMap,
     path::{Path, PathBuf},
     str::FromStr,
-    time::Duration,
 };
 
 use bevy::{
@@ -13,9 +12,9 @@ use bevy::{
         system::{Commands, InRef, IntoSystem, Query, Res, ResMut, System},
         world::World,
     },
-    log::{error, info},
+    log::error,
     pbr::{StandardMaterial, wireframe::WireframeConfig},
-    prelude::{Deref, DerefMut, Entity, In, Mut, Resource, Transform},
+    prelude::{Deref, DerefMut, Entity, In, MessageWriter, Mut, Resource, Transform},
     window::PrimaryWindow,
 };
 use bevy_editor_cam::controller::{component::EditorCam, motion::CurrentMotion};
@@ -24,15 +23,11 @@ use egui_tiles::{Tile, TileId};
 use fuzzy_matcher::{FuzzyMatcher, skim::SkimMatcherV2};
 use impeller2::types::Timestamp;
 use impeller2_bevy::{ComponentPathRegistry, EntityMap, PacketTx};
-use impeller2_kdl::{
-    ToKdl,
-    env::{schematic_dir_or_cwd, schematic_file},
-};
+use impeller2_kdl::{ToKdl, env::schematic_dir_or_cwd};
 use impeller2_wkt::{
-    ComponentPath, ComponentValue, CurrentTimestamp, DbConfig, EarliestTimestamp, IsRecording,
-    LastUpdated, Material, Mesh, Object3D, SetDbConfig, SimulationTimeStep,
+    ComponentPath, ComponentValue, CurrentTimestamp, EarliestTimestamp, IsRecording, LastUpdated,
+    Material, Mesh, Object3D, SetDbConfig, SimulationTimeStep,
 };
-use miette::IntoDiagnostic;
 use nox::ArrayBuf;
 
 use crate::{
@@ -43,8 +38,8 @@ use crate::{
         command_palette::CommandPaletteState,
         plot::{GraphBundle, default_component_values},
         schematic::{
-            CurrentSchematic, CurrentSecondarySchematics, LoadSchematicParams,
-            SchematicLiveReloadRx, load_schematic_file,
+            CurrentSchematic, CurrentWindowSchematics, LoadSchematicParams, OpenDocumentRequest,
+            SaveCurrentDocumentRequest, WindowDocumentSave,
         },
         tiles::{self, set_mode_all},
         timeline::{
@@ -671,20 +666,6 @@ pub fn create_schematic_tree(tile_id: Option<TileId>) -> PaletteItem {
     )
 }
 
-pub fn create_dashboard(tile_id: Option<TileId>) -> PaletteItem {
-    PaletteItem::new(
-        "Create Dashboard",
-        TILES_LABEL,
-        move |_: In<String>, mut tile_param: TileParam, palette_state: Res<CommandPaletteState>| {
-            let Some(mut tile_state) = tile_param.target(palette_state.target_window) else {
-                return PaletteEvent::Error("Secondary window unavailable".to_string());
-            };
-            tile_state.create_dashboard_tile(Default::default(), "Dashboard".to_string(), tile_id);
-            PaletteEvent::Exit
-        },
-    )
-}
-
 pub fn create_data_overview(tile_id: Option<TileId>) -> PaletteItem {
     PaletteItem::new(
         "Create Data Overview",
@@ -928,38 +909,25 @@ pub fn save_schematic() -> PaletteItem {
         "Save Schematic",
         PRESETS_LABEL,
         |_name: In<String>, mut commands: Commands| {
-            // Refresh primary path + descriptors, rebuild schematics, then serialize in a dedicated system.
-            commands.run_system_cached(crate::ui::update_primary_descriptor_path);
+            // Capture descriptors/screens, rebuild schematics, then serialize in a dedicated system.
             commands.run_system_cached(crate::ui::capture_window_screens_oneoff);
             commands.run_system_cached(crate::ui::schematic::tiles_to_schematic);
-            commands.run_system_cached(save_schematic_now);
+            commands.run_system_cached(queue_save_schematic_now);
             PaletteEvent::Exit
         },
     )
 }
 
-fn save_schematic_now(
-    db_config: Res<DbConfig>,
+fn queue_save_schematic_now(
     schematic: Res<CurrentSchematic>,
-    secondary: Res<CurrentSecondarySchematics>,
-    mut live_reload: ResMut<SchematicLiveReloadRx>,
+    window_schematics: Res<CurrentWindowSchematics>,
+    mut requests: MessageWriter<SaveCurrentDocumentRequest>,
 ) {
-    let Some(path) = db_config.schematic_path() else {
-        return;
-    };
-    live_reload.guard_for(Duration::from_millis(2000));
-    let kdl = schematic.0.to_kdl();
-    let path = Path::new(path).with_extension("kdl");
-    let dest = schematic_file(&path);
-    if let Err(e) = std::fs::write(&dest, kdl) {
-        error!(?e, "saving schematic to {:?}", dest.display());
-    } else {
-        info!("saved schematic to {:?}", dest.display());
-        live_reload.ignore_path(dest.clone());
-        live_reload.record_loaded(&dest);
-        let base_dir = dest.parent().unwrap_or_else(|| Path::new("."));
-        write_secondary_schematics(base_dir, &secondary, &mut live_reload);
-    }
+    requests.write(SaveCurrentDocumentRequest {
+        path: None,
+        root_kdl: schematic.0.to_kdl(),
+        windows: window_document_saves(&window_schematics),
+    });
 }
 
 pub fn save_schematic_db() -> PaletteItem {
@@ -983,9 +951,9 @@ pub fn clear_schematic() -> PaletteItem {
     PaletteItem::new(
         "Clear Schematic",
         PRESETS_LABEL,
-        |_: In<String>, mut params: LoadSchematicParams, mut rx: ResMut<SchematicLiveReloadRx>| {
-            params.load_schematic(&impeller2_wkt::Schematic::default(), None);
-            rx.clear();
+        |_: In<String>, mut params: LoadSchematicParams| {
+            params.current_document.clear();
+            params.load_schematic(&impeller2_wkt::Schematic::default(), None, None);
             PaletteEvent::Exit
         },
     )
@@ -997,53 +965,29 @@ pub fn save_schematic_inner() -> PaletteItem {
         "",
         move |In(name): In<String>,
               schematic: Res<CurrentSchematic>,
-              secondary: Res<CurrentSecondarySchematics>,
-              mut live_reload: ResMut<SchematicLiveReloadRx>| {
-            let kdl = schematic.0.to_kdl();
-            let path = PathBuf::from(name).with_extension("kdl");
-            let dest = schematic_file(&path);
-            live_reload.guard_for(Duration::from_millis(2000));
-            if let Err(e) = std::fs::write(&dest, kdl) {
-                error!(?e, "saving schematic");
-            } else {
-                info!("saved schematic to {:?}", dest.display());
-                live_reload.ignore_path(dest.clone());
-                let base_dir = dest.parent().unwrap_or_else(|| Path::new("."));
-                write_secondary_schematics(base_dir, &secondary, &mut live_reload);
-            }
+              window_schematics: Res<CurrentWindowSchematics>,
+              mut requests: MessageWriter<SaveCurrentDocumentRequest>| {
+            requests.write(SaveCurrentDocumentRequest {
+                path: Some(PathBuf::from(name)),
+                root_kdl: schematic.0.to_kdl(),
+                windows: window_document_saves(&window_schematics),
+            });
             PaletteEvent::Exit
         },
     )
     .default()
 }
 
-fn write_secondary_schematics(
-    base_dir: &Path,
-    secondary: &CurrentSecondarySchematics,
-    live_reload: &mut SchematicLiveReloadRx,
-) {
-    for entry in &secondary.0 {
-        let dest = base_dir.join(&entry.file_name);
-        if let Some(parent) = dest.parent()
-            && let Err(e) = std::fs::create_dir_all(parent)
-        {
-            error!(
-                ?e,
-                path = %dest.display(),
-                "creating directory for secondary schematic"
-            );
-            continue;
-        }
-
-        let kdl = entry.schematic.to_kdl();
-        if let Err(e) = std::fs::write(&dest, kdl) {
-            error!(?e, path = %dest.display(), "saving secondary schematic");
-        } else {
-            info!(path = %dest.display(), "saved secondary schematic");
-            live_reload.ignore_path(dest.clone());
-            live_reload.record_loaded(&dest);
-        }
-    }
+fn window_document_saves(window_schematics: &CurrentWindowSchematics) -> Vec<WindowDocumentSave> {
+    window_schematics
+        .0
+        .iter()
+        .map(|entry| WindowDocumentSave {
+            window_id: entry.window_id,
+            file_name: entry.file_name.clone(),
+            kdl: entry.schematic.to_kdl(),
+        })
+        .collect()
 }
 
 pub fn load_schematic() -> PaletteItem {
@@ -1086,8 +1030,7 @@ pub fn load_schematic_picker() -> PaletteItem {
         "Use File Dialog",
         "",
         |_: In<String>,
-         mut params: LoadSchematicParams,
-         rx: ResMut<SchematicLiveReloadRx>,
+         mut requests: MessageWriter<OpenDocumentRequest>,
          mut last_dir: ResMut<DialogLastPath>| {
             let mut dialog = rfd::FileDialog::new().add_filter("kdl", &["kdl"]);
             if let Some(dir) = last_dir.take().or_else(|| schematic_dir_or_cwd().ok()) {
@@ -1095,12 +1038,7 @@ pub fn load_schematic_picker() -> PaletteItem {
             }
             if let Some(path) = dialog.pick_file() {
                 **last_dir = path.parent().map(PathBuf::from);
-                info!("PATH {:?}", path.display());
-                if let Err(err) =
-                    load_schematic_file(dbg!(&path), &mut params, rx).into_diagnostic()
-                {
-                    return PaletteEvent::Error(err.to_string());
-                }
+                requests.write(OpenDocumentRequest(path));
             }
             PaletteEvent::Exit
         },
@@ -1116,14 +1054,9 @@ fn load_schematic_inner(path: &Path) -> Option<PaletteItem> {
         PaletteItem::new(
             name,
             "",
-            move |_: In<String>,
-                  mut params: LoadSchematicParams,
-                  rx: ResMut<SchematicLiveReloadRx>| {
-                if let Err(err) = load_schematic_file(&path, &mut params, rx) {
-                    PaletteEvent::Error(err.to_string())
-                } else {
-                    PaletteEvent::Exit
-                }
+            move |_: In<String>, mut requests: MessageWriter<OpenDocumentRequest>| {
+                requests.write(OpenDocumentRequest(path.clone()));
+                PaletteEvent::Exit
             },
         )
     })
@@ -1220,7 +1153,7 @@ fn create_object_3d_with_color(eql: String, expr: eql::Expr, mesh: Mesh) -> Pale
                         mesh: mesh_source,
                         icon: None,
                         mesh_visibility_range: None,
-                        aux: (),
+                        node_id: Default::default(),
                     },
                     expr.clone(),
                     &eql_ctx.0,
@@ -1297,7 +1230,7 @@ pub fn create_3d_object() -> PaletteItem {
 
                                                 crate::object_3d::create_object_3d_entity(
                                                     &mut commands,
-                                                    Object3D { eql: eql.clone(), mesh: obj, icon: None, mesh_visibility_range: None, aux: () },
+                                                    Object3D { eql: eql.clone(), mesh: obj, icon: None, mesh_visibility_range: None, node_id: Default::default() },
                                                     expr.clone(),
                                                     &eql_ctx.0,
                                                     &mut material_assets,
@@ -1481,8 +1414,6 @@ pub fn create_tiles(tile_id: TileId) -> PalettePage {
         create_query_plot(Some(tile_id)),
         create_video_stream(Some(tile_id)),
         create_schematic_tree(Some(tile_id)),
-        // Disabled: dashboard flow never shipped and the UX isn't expected yet.
-        // create_dashboard(Some(tile_id)),
         create_data_overview(Some(tile_id)),
     ])
 }
@@ -1551,8 +1482,6 @@ impl Default for PalettePage {
             create_query_plot(None),
             create_video_stream(None),
             create_schematic_tree(None),
-            // Disabled: dashboard flow never shipped and the UX isn't expected yet.
-            // create_dashboard(None),
             create_data_overview(None),
             create_3d_object(),
             save_schematic(),
