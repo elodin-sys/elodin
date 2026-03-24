@@ -16,7 +16,7 @@ DEFAULT_DB_PATH = "dbs/voyager"
 DB_PATH_ENV = "DB_PATH"
 MAX_TICKS_ENV = "MAX_TICKS"
 
-SPICE_DIR = Path(__file__).resolve().parent / "spice"
+SPICE_DIR = Path(__file__).resolve().parent / "nasa_spice_data"
 SPICE_KERNELS = [
     SPICE_DIR / "naif0012.tls",
     SPICE_DIR / "de440.bsp",
