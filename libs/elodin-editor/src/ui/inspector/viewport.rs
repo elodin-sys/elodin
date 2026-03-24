@@ -467,10 +467,9 @@ pub fn set_viewport_pos(
                 && let Some(look_at) = val.as_world_pos()
             {
                 let dir = (look_at.pos - pos.pos).normalize();
-                // Default up vector depends on frame: NED has Z-down, so up is -Z in frame coords
-                let default_up_dir = match viewport.frame {
-                    Some(GeoFrame::NED) => nox::Vec3::z_axis(),
-                    _ => nox::Vec3::z_axis(),
+                let dir = match viewport.frame {
+                    Some(GeoFrame::NED) => nox::Vec3::new(dir.y(), dir.x(), -dir.z()),
+                    _ => dir,
                 };
                 let up_vec = viewport
                     .up
@@ -486,7 +485,7 @@ pub fn set_viewport_pos(
                             None
                         }
                     })
-                    .unwrap_or(default_up_dir);
+                    .unwrap_or(nox::Vec3::z_axis());
                 pos.att = nox::Quaternion::look_at_rh(dir, up_vec);
             }
         }
