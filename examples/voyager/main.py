@@ -189,7 +189,7 @@ w.schematic("""
 sys = el.six_dof(sys=gravity)
 db_path = Path(os.environ.get(DB_PATH_ENV, DEFAULT_DB_PATH))
 max_ticks_env = os.environ.get(MAX_TICKS_ENV)
-max_ticks = int(max_ticks_env) if max_ticks_env is not None else 50_000_000_000
+max_ticks = int(max_ticks_env) if max_ticks_env is not None else None
 
 #sim = w.run(sys, SIM_TIME_STEP, run_time_step=1 / 120.0, pre_step=pre_step)
 sim = w.run(
