@@ -1520,7 +1520,7 @@ impl ViewportPane {
                 frustums_thickness: viewport.frustums_thickness,
                 viewport_layer,
             },
-            crate::ui::inspector::viewport::Viewport::new(parent, pos, look_at, up),
+            crate::ui::inspector::viewport::Viewport::new(parent, pos, look_at, up, viewport.frame),
             ChildOf(parent),
             Name::new("viewport camera3d"),
         ));
