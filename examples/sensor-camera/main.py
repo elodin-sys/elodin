@@ -229,8 +229,8 @@ def post_step(tick, ctx):
 wall_start = time.perf_counter() if EMIT_PERF else None
 world.run(
     system,
-    sim_time_step=SIM_TIME_STEP,
-    run_time_step=SIM_TIME_STEP,
+    simulation_rate=1.0 / SIM_TIME_STEP,
+    generate_real_time=True,
     max_ticks=MAX_TICKS,
     post_step=post_step,
     interactive=False,

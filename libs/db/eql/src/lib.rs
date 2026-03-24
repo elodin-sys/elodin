@@ -252,6 +252,15 @@ impl Expr {
 
     /// Converts an EQL Expr to an SQL query string.
     pub fn to_sql(&self, context: &Context) -> Result<String, Error> {
+        self.to_sql_with_options(context, &SqlOptions::default())
+    }
+
+    /// Converts an EQL Expr to an SQL query string with the given options.
+    pub fn to_sql_with_options(
+        &self,
+        context: &Context,
+        options: &SqlOptions,
+    ) -> Result<String, Error> {
         match self {
             Expr::Tuple(elements) => {
                 if elements.is_empty() {
@@ -264,15 +273,15 @@ impl Expr {
                 }
 
                 if table_names.len() == 1 {
+                    let table = table_names.first().unwrap();
                     let mut select_parts = Vec::new();
+                    if options.include_time_column {
+                        select_parts.push(format!("{}.time", table));
+                    }
                     for element in elements {
                         select_parts.push(element.to_select_part()?);
                     }
-                    Ok(format!(
-                        "select {} from {}",
-                        select_parts.join(", "),
-                        table_names.first().unwrap()
-                    ))
+                    Ok(format!("select {} from {}", select_parts.join(", "), table))
                 } else {
                     let mut select_parts = Vec::new();
                     for element in elements {
@@ -365,11 +374,21 @@ impl Expr {
                 "cannot convert string literal to SQL".to_string(),
             )),
             Expr::Formula(formula, expr) => formula.to_sql(expr, context),
-            expr => Ok(format!(
-                "select {} from {}",
-                expr.to_select_part()?,
-                expr.to_table()?
-            )),
+            expr => {
+                let table = expr.to_table()?;
+                let select_part = expr.to_select_part()?;
+                if options.include_time_column {
+                    let time_only = select_part == format!("{}.time", table);
+                    let sql = if time_only {
+                        format!("select {} from {}", select_part, table)
+                    } else {
+                        format!("select {}.time, {} from {}", table, select_part, table)
+                    };
+                    Ok(sql)
+                } else {
+                    Ok(format!("select {} from {}", select_part, table))
+                }
+            }
         }
     }
 }
@@ -405,6 +424,27 @@ impl Component {
             element_names,
         }
     }
+
+    /// Like `new`, but use the given names for array elements (e.g. `q0`, `q1`, `x`, `y`, `z`).
+    /// If `element_names` is empty, falls back to `default_element_names(schema.dim())`.
+    pub fn new_with_element_names(
+        name: String,
+        id: ComponentId,
+        schema: Schema,
+        element_names: Vec<String>,
+    ) -> Self {
+        let element_names = if element_names.is_empty() {
+            default_element_names(schema.dim())
+        } else {
+            element_names
+        };
+        Self {
+            name,
+            id,
+            schema,
+            element_names,
+        }
+    }
 }
 
 fn default_element_names(shape: &[u64]) -> Vec<String> {
@@ -427,6 +467,13 @@ fn default_element_names(shape: &[u64]) -> Vec<String> {
     let mut elems = Vec::new();
     append_elements(shape, "", &mut elems);
     elems
+}
+
+/// Options for SQL generation. Use default for existing behavior.
+#[derive(Clone, Debug, Default)]
+pub struct SqlOptions {
+    /// For single-table selects, include the table's time column as the first column.
+    pub include_time_column: bool,
 }
 
 #[derive(Debug)]
@@ -512,6 +559,13 @@ impl Context {
         let ast = ast_parser::expr(query)?;
         let expr = self.parse(&ast)?;
         expr.to_sql(self)
+    }
+
+    // `ctx.sql(q)` is equivalent to `ctx.self.sql_with_options(query, &SqlOptions::default())`.
+    pub fn sql_with_options(&self, query: &str, options: &SqlOptions) -> Result<String, Error> {
+        let ast = ast_parser::expr(query)?;
+        let expr = self.parse(&ast)?;
+        expr.to_sql_with_options(self, options)
     }
 
     pub fn parse_str(&self, query: &str) -> Result<Expr, Error> {

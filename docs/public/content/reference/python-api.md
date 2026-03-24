@@ -75,12 +75,13 @@ The Elodin simulation world.
     `sensor_camera` only registers the camera. No rendering occurs until `ctx.render_camera()` is called in a `post_step` callback. This gives you explicit control over render timing and frame rate.
     {% end %}
 
-- `run(system, sim_time_step, run_time_step, default_playback_speed, max_ticks, optimize, is_canceled, pre_step, post_step, db_path, interactive, start_timestamp, log_level, backend, iree_flags)` -> None
+- `run(system, simulation_rate, generate_real_time, telemetry_rate, default_playback_speed, max_ticks, optimize, is_canceled, pre_step, post_step, db_path, interactive, start_timestamp, log_level, backend, iree_flags)` -> None
 
     Run the simulation.
     - `system` : [elodin.System], the systems to run, can be supplied as a list of systems delineated by pipes.
-    - `sim_time_step` : `float`, optional, the amount of simulated time between each tick, defaults to `1 / 120.0`.
-    - `run_time_step` : `float | None`, optional, the amount of real time between each tick. By default it is `None` and runs at max speed. For real-time playback set to same value as `sim_time_step`.
+    - `simulation_rate` : `float`, optional, simulation frequency in Hz. Defaults to `120.0`.
+    - `generate_real_time` : `bool`, optional, if `True`, pace tick generation to real time (default `False`).
+    - `telemetry_rate` : `float | None`, optional, DB commit/sync frequency in Hz. Defaults to `simulation_rate`. Must evenly divide `simulation_rate`.
     - `default_playback_speed` : `float`, optional, the default playback speed of the Elodin client when running this simulation, defaults to 1.0 (real-time).
     - `max_ticks` : `integer`, optional, the maximum number of ticks to run the simulation for before stopping.
     - `optimize` : `bool`, optional flag to enable runtime optimizations for the simulation code, defaults to `False`. If optimizations are enabled, the simulation will start slower but run faster.
@@ -94,12 +95,13 @@ The Elodin simulation world.
     - `backend` : `str`, optional, execution backend. Defaults to `"iree-cpu"`. Common values are `"iree-cpu"`, `"iree-gpu"`, `"jax-cpu"`, and `"jax-gpu"`.
     - `iree_flags` : `list[str]`, optional, extra compiler flags passed to IREE when using an IREE backend.
 
-- `build(system, sim_time_step, run_time_step, default_playback_speed, max_ticks, optimize, db_path, backend, iree_flags)` -> `elodin.Exec`
+- `build(system, simulation_rate, generate_real_time, telemetry_rate, default_playback_speed, max_ticks, optimize, db_path, backend, iree_flags)` -> `elodin.Exec`
 
     Build and compile the simulation executor without starting the runtime loop.
     - `system` : [elodin.System], the systems to compile.
-    - `sim_time_step` : `float`, optional, the amount of simulated time between each tick, defaults to `1 / 120.0`.
-    - `run_time_step` : `float | None`, optional, the amount of real time between each tick.
+    - `simulation_rate` : `float`, optional, simulation frequency in Hz (ticks per second), defaults to `120.0`.
+    - `generate_real_time` : `bool`, optional, when `True`, paces simulation to real-time wall clock speed. Defaults to `False`.
+    - `telemetry_rate` : `float | None`, optional, telemetry/writeback frequency in Hz. Defaults to `simulation_rate` when unset.
     - `default_playback_speed` : `float`, optional, the default playback speed used by clients.
     - `max_ticks` : `integer`, optional, the maximum number of ticks configured on the built executor.
     - `optimize` : `bool`, optional, enables optimization passes during compilation.
@@ -144,7 +146,7 @@ Context object passed to `pre_step` and `post_step` callbacks, providing direct 
 
 - `timestamp` -> `int`
 
-    The current simulation timestamp in microseconds since epoch. This value is calculated as `start_timestamp + (tick * sim_time_step)`.
+    The current simulation timestamp in microseconds since epoch. This value is calculated as `start_timestamp + (tick * (1.0 / simulation_rate))`.
 
 #### Methods
 
@@ -283,7 +285,7 @@ def sitl_post_step(tick: int, ctx: el.StepContext):
 # Run simulation with SITL callback
 world.run(
     system,
-    sim_time_step=1/1000.0,  # 1kHz for flight controller
+    simulation_rate=1000.0,  # 1kHz for flight controller
     max_ticks=MAX_TICKS,
     post_step=sitl_post_step,
     db_path="sitl_data",
@@ -433,7 +435,7 @@ graph = el.Panel.graph(
 w.spawn(el.Panel.vsplit(camera, graph), name="main_view")
 
 sys = el.six_dof(sys=spin)
-sim = w.run(sys, sim_time_step=1.0 / 120.0, backend="iree-cpu")
+sim = w.run(sys, simulation_rate=120.0, backend="iree-cpu")
 ```
 
 <br></br>
@@ -452,7 +454,7 @@ Using the associated [elodin.Body] archetype and prebuilt components, we can cre
     as effectors using the provided `integrator` and simulated in a world with a given `time_step`.
 
     - `time_step` : `float`, The time step used when integrating a body's acceleration into its velocity and position. Defaults
-    to the `sim_time_step` provided in World.run(...) if unset
+    to the simulation step (`1.0 / simulation_rate`) provided in `World.run(...)` if unset
     - `sys` : one or more [elodin.System] instances used as effectors
     - `integrator` : [elodin.Integrator], default is `Integrator.Rk4`
 

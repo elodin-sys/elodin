@@ -27,6 +27,7 @@ pub struct JaxExec {
     jax: PyObject,
     inputs: Vec<InputSlot>,
     output_ids: Vec<ComponentId>,
+    mutable_overlap: Vec<(usize, usize)>,
 }
 
 impl JaxExec {
@@ -73,9 +74,13 @@ impl JaxExec {
 
             let col = world.column_by_id(*id).ok_or(Error::ComponentNotFound)?;
             let np_dtype = numpy_dtype_str(col.schema.element_type())?;
-            let shape: Vec<i64> = std::iter::once(col.len() as i64)
-                .chain(col.schema.shape().iter().map(|&x| x as i64))
-                .collect();
+            let shape: Vec<i64> = if world.batch1 && col.len() <= 1 {
+                col.schema.shape().iter().map(|&x| x as i64).collect()
+            } else {
+                std::iter::once(col.len() as i64)
+                    .chain(col.schema.shape().iter().map(|&x| x as i64))
+                    .collect()
+            };
             inputs.push(InputSlot {
                 component_id: *id,
                 shape,
@@ -83,6 +88,20 @@ impl JaxExec {
             });
         }
 
+        let mut output_slot_by_id = std::collections::HashMap::new();
+        for (slot, id) in output_ids.iter().enumerate() {
+            output_slot_by_id.insert(*id, slot);
+        }
+        let mutable_overlap = inputs
+            .iter()
+            .enumerate()
+            .filter_map(|(input_slot, slot)| {
+                output_slot_by_id
+                    .get(&slot.component_id)
+                    .copied()
+                    .map(|output_slot| (input_slot, output_slot))
+            })
+            .collect();
         let donate_argnums: Vec<usize> = Vec::new();
         let target_backend = if gpu { Some("gpu") } else { Some("cpu") };
         let jax_fn = compiled_system.compile_jax_module(py, &donate_argnums, target_backend)?;
@@ -96,6 +115,7 @@ impl JaxExec {
             jax: jax.unbind().into(),
             inputs,
             output_ids,
+            mutable_overlap,
         })
     }
 
@@ -104,13 +124,23 @@ impl JaxExec {
         world: &mut World,
         detailed: bool,
     ) -> Result<TickTimings, Error> {
+        self.invoke_batch(world, 1, detailed)
+    }
+
+    pub fn invoke_batch(
+        &mut self,
+        world: &mut World,
+        n: u64,
+        detailed: bool,
+    ) -> Result<TickTimings, Error> {
+        let batch_ticks = n.max(1) as usize;
         Python::with_gil(|py| {
             let np = self.np.bind(py);
             let jnp = self.jnp.bind(py);
             let jax = self.jax.bind(py);
 
             let h2d_start = detailed.then(Instant::now);
-            let mut call_args = Vec::with_capacity(self.inputs.len());
+            let mut device_inputs = Vec::with_capacity(self.inputs.len());
             for input in &self.inputs {
                 let col = world
                     .column_by_id(input.component_id)
@@ -121,32 +151,38 @@ impl JaxExec {
                 )?;
                 let src = src.call_method1("reshape", (input.shape.clone(),))?;
                 if self.cpu_backend {
-                    call_args.push(src.unbind());
+                    device_inputs.push(src.unbind());
                 } else {
                     let dev = jnp.call_method1("array", (src,))?;
-                    call_args.push(dev.unbind());
+                    device_inputs.push(dev.unbind());
                 }
             }
-            let py_args = PyTuple::new(py, call_args)?;
             let h2d_upload_ms = h2d_start
                 .map(|s| s.elapsed().as_secs_f64() * 1000.0)
                 .unwrap_or_default();
 
             let kernel_start = detailed.then(Instant::now);
-            let result = self.jax_fn.call(py, &py_args, None)?;
-            jax.call_method1("block_until_ready", (result.bind(py),))?;
+            let mut final_outputs: Vec<PyObject> = Vec::new();
+            for batch_idx in 0..batch_ticks {
+                let py_args = PyTuple::new(py, device_inputs.iter().map(|arg| arg.clone_ref(py)))?;
+                let result = self.jax_fn.call(py, &py_args, None)?;
+                jax.call_method1("block_until_ready", (result.bind(py),))?;
+                let outputs = extract_outputs(result.bind(py), self.output_ids.len())?;
+                if batch_idx + 1 < batch_ticks {
+                    for (input_slot, output_slot) in &self.mutable_overlap {
+                        device_inputs[*input_slot] = outputs[*output_slot].clone_ref(py);
+                    }
+                } else {
+                    final_outputs = outputs;
+                }
+            }
             let kernel_invoke_ms = kernel_start
                 .map(|s| s.elapsed().as_secs_f64() * 1000.0)
                 .unwrap_or_default();
 
             let d2h_start = detailed.then(Instant::now);
-            if self.output_ids.len() == 1 {
-                copy_output_to_world(py, np, world, self.output_ids[0], result.bind(py))?;
-            } else {
-                for (idx, id) in self.output_ids.iter().enumerate() {
-                    let item = result.call_method1(py, "__getitem__", (idx,))?;
-                    copy_output_to_world(py, np, world, *id, item.bind(py))?;
-                }
+            for (idx, id) in self.output_ids.iter().enumerate() {
+                copy_output_to_world(py, np, world, *id, final_outputs[idx].bind(py))?;
             }
             let d2h_download_ms = d2h_start
                 .map(|s| s.elapsed().as_secs_f64() * 1000.0)
@@ -162,6 +198,19 @@ impl JaxExec {
     }
 }
 
+fn extract_outputs(result: &Bound<'_, PyAny>, output_count: usize) -> Result<Vec<PyObject>, Error> {
+    if output_count == 0 {
+        return Ok(Vec::new());
+    }
+    if output_count == 1 {
+        return Ok(vec![result.clone().unbind()]);
+    }
+    let mut outputs = Vec::with_capacity(output_count);
+    for idx in 0..output_count {
+        outputs.push(result.call_method1("__getitem__", (idx,))?.unbind());
+    }
+    Ok(outputs)
+}
 fn copy_output_to_world(
     _py: Python<'_>,
     np: &Bound<'_, PyAny>,
@@ -186,6 +235,9 @@ fn numpy_dtype_str(et: nox::ElementType) -> Result<&'static str, Error> {
         nox::ElementType::F32 => Ok("float32"),
         nox::ElementType::S32 => Ok("int32"),
         nox::ElementType::S64 => Ok("int64"),
+        // These arms are not reached in practice: PrimTypeExt::to_element_type()
+        // maps all unsigned PrimTypes to signed ElementTypes upstream.  Kept as
+        // correct unsigned mappings for defensive safety.
         nox::ElementType::U32 => Ok("uint32"),
         nox::ElementType::U64 => Ok("uint64"),
         nox::ElementType::U8 => Ok("uint8"),
@@ -220,15 +272,18 @@ impl JaxWorldExec {
 
     pub fn run(&mut self) -> Result<(), Error> {
         let start = &mut Instant::now();
+        let ticks_per_telemetry = self.world.ticks_per_telemetry();
 
         if let Some(mut startup_exec) = self.startup_exec.take() {
             startup_exec.invoke_in_place(&mut self.world, self.profiler.detailed_timing)?;
         }
 
         let tick_start = Instant::now();
-        let timings = self
-            .tick_exec
-            .invoke_in_place(&mut self.world, self.profiler.detailed_timing)?;
+        let timings = self.tick_exec.invoke_batch(
+            &mut self.world,
+            ticks_per_telemetry,
+            self.profiler.detailed_timing,
+        )?;
         let tick_elapsed = tick_start.elapsed();
         if self.profiler.detailed_timing {
             let h2d = Duration::from_secs_f64(timings.h2d_upload_ms / 1000.0);
@@ -247,12 +302,17 @@ impl JaxWorldExec {
         }
 
         *start = Instant::now();
-        self.world.advance_tick();
+        for _ in 0..ticks_per_telemetry {
+            self.world.advance_tick();
+        }
         self.profiler.add_to_history.observe(start);
         Ok(())
     }
 
     pub fn profile(&self) -> std::collections::HashMap<&'static str, f64> {
-        self.profiler.profile(self.world.sim_time_step().0)
+        self.profiler.profile(
+            self.world.sim_time_step().0,
+            self.world.ticks_per_telemetry(),
+        )
     }
 }

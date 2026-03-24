@@ -160,6 +160,40 @@ enum BackendEngine {
     Jax,
 }
 
+fn validate_rates(
+    simulation_rate: f64,
+    telemetry_rate: Option<f64>,
+) -> Result<(time::Duration, u64), Error> {
+    if simulation_rate <= 0.0 {
+        return Err(Error::UnknownCommand(format!(
+            "simulation_rate must be > 0 Hz, got {}",
+            simulation_rate
+        )));
+    }
+    let sim_time_step = time::Duration::from_secs_f64(1.0 / simulation_rate);
+    let ticks_per_telemetry = match telemetry_rate {
+        Some(rate) => {
+            if rate <= 0.0 {
+                return Err(Error::UnknownCommand(format!(
+                    "telemetry_rate must be > 0 Hz, got {}",
+                    rate
+                )));
+            }
+            let ratio = simulation_rate / rate;
+            let rounded = ratio.round();
+            if (ratio - rounded).abs() > 1e-9 || rounded < 1.0 {
+                return Err(Error::UnknownCommand(format!(
+                    "telemetry_rate ({} Hz) must evenly divide simulation_rate ({} Hz); got ratio {}",
+                    rate, simulation_rate, ratio
+                )));
+            }
+            rounded as u64
+        }
+        None => 1,
+    };
+    Ok((sim_time_step, ticks_per_telemetry.max(1)))
+}
+
 fn parse_backend_config(
     requested_backend: &str,
 ) -> Result<(BackendEngine, &'static str, bool), Error> {
@@ -388,8 +422,9 @@ impl WorldBuilder {
     #[allow(clippy::too_many_arguments)]
     #[pyo3(signature = (
         sys,
-        sim_time_step = 1.0 / 120.0,
-        run_time_step = None,
+        simulation_rate = 120.0,
+        generate_real_time = false,
+        telemetry_rate = None,
         default_playback_speed = 1.0,
         max_ticks = None,
         optimize = false,
@@ -407,8 +442,9 @@ impl WorldBuilder {
         &mut self,
         py: Python<'_>,
         sys: PySystem,
-        sim_time_step: f64,
-        run_time_step: Option<f64>,
+        simulation_rate: f64,
+        generate_real_time: bool,
+        telemetry_rate: Option<f64>,
         default_playback_speed: f64,
         max_ticks: Option<u64>,
         optimize: bool,
@@ -458,8 +494,9 @@ impl WorldBuilder {
                 let exec = self.build_with_backend(
                     py,
                     sys,
-                    sim_time_step,
-                    run_time_step,
+                    simulation_rate,
+                    generate_real_time,
+                    telemetry_rate,
                     default_playback_speed,
                     max_ticks,
                     backend,
@@ -662,19 +699,24 @@ impl WorldBuilder {
                     let mut exec = self.build(
                         py,
                         sys,
-                        sim_time_step,
-                        run_time_step,
+                        simulation_rate,
+                        generate_real_time,
+                        telemetry_rate,
                         default_playback_speed,
                         max_ticks,
                         optimize,
-                        db_path,
+                        db_path.clone(),
                         backend,
                         iree_flags.clone(),
                     )?;
                     exec.exec.profiler_mut().detailed_timing = enable_detail;
                     exec.run(py, ticks, true, None)?;
                     let profile = exec.profile();
-                    println!("= tick time:          {:.3} ms", profile["tick"]);
+                    let tpt = profile.get("ticks_per_telemetry").copied().unwrap_or(1.0) as u64;
+                    println!(
+                        "= tick time:          {:.3} ms (batch of {} ticks)",
+                        profile["tick"], tpt
+                    );
                     println!("build time:           {:.3} ms", profile["build"]);
                     println!("compile time:         {:.3} ms", profile["compile"]);
                     println!("real_time_factor:     {:.3}", profile["real_time_factor"]);
@@ -684,7 +726,10 @@ impl WorldBuilder {
                         println!("copy_to_host time:    {:.3} ms", profile["copy_to_host"]);
                         println!("h2d_upload time:      {:.3} ms", profile["h2d_upload"]);
                         println!("call_setup time:      {:.3} ms", profile["call_setup"]);
-                        println!("kernel_invoke time:   {:.3} ms", profile["kernel_invoke"]);
+                        println!(
+                            "kernel_invoke time:   {:.3} ms ({} invocations)",
+                            profile["kernel_invoke"], tpt
+                        );
                         println!("d2h_download time:    {:.3} ms", profile["d2h_download"]);
                         println!("add_to_history time:  {:.3} ms", profile["add_to_history"]);
                     }
@@ -734,8 +779,9 @@ impl WorldBuilder {
                     let mut exec = self.build_with_backend(
                         py,
                         sys,
-                        sim_time_step,
-                        run_time_step,
+                        simulation_rate,
+                        generate_real_time,
+                        telemetry_rate,
                         default_playback_speed,
                         max_ticks,
                         backend,
@@ -1194,9 +1240,11 @@ impl WorldBuilder {
                     }
 
                     // Runtime analysis follows
-                    let db_dir = tempfile::tempdir()?;
-                    let db_dir_path = db_dir.keep();
-                    let db = elodin_db::DB::create(db_dir_path.join("db"))?;
+                    let db_path = match db_path {
+                        Some(p) => PathBuf::from(p),
+                        None => tempfile::tempdir()?.keep().join("db"),
+                    };
+                    let db = elodin_db::DB::create(db_path)?;
                     crate::impeller2_server::init_db(
                         &db,
                         compiled_exec.world_mut(),
@@ -1211,13 +1259,21 @@ impl WorldBuilder {
                     exec_with_db.run(py, ticks, true, None)?;
                     let profile = exec_with_db.profile();
 
+                    let tpt = profile.get("ticks_per_telemetry").copied().unwrap_or(1.0) as u64;
                     println!("\n[Runtime Metrics]");
+                    println!(
+                        "tick time:            {:.3} ms (batch of {} ticks)",
+                        profile["tick"], tpt
+                    );
                     println!("copy_to_client time:  {:.3} ms", profile["copy_to_client"]);
                     println!("execute_buffers time: {:.3} ms", profile["execute_buffers"]);
                     println!("copy_to_host time:    {:.3} ms", profile["copy_to_host"]);
                     println!("h2d_upload time:      {:.3} ms", profile["h2d_upload"]);
                     println!("call_setup time:      {:.3} ms", profile["call_setup"]);
-                    println!("kernel_invoke time:   {:.3} ms", profile["kernel_invoke"]);
+                    println!(
+                        "kernel_invoke time:   {:.3} ms ({} invocations)",
+                        profile["kernel_invoke"], tpt
+                    );
                     println!("d2h_download time:    {:.3} ms", profile["d2h_download"]);
                     println!("build time:           {:.3} ms", profile["build"]);
                     println!("compile time:         {:.3} ms", profile["compile"]);
@@ -1243,8 +1299,9 @@ impl WorldBuilder {
     #[allow(clippy::too_many_arguments)]
     #[pyo3(signature = (
         system,
-        sim_time_step = 1.0 / 120.0,
-        run_time_step = None,
+        simulation_rate = 120.0,
+        generate_real_time = false,
+        telemetry_rate = None,
         default_playback_speed = 1.0,
         max_ticks = None,
         optimize = false,
@@ -1256,8 +1313,9 @@ impl WorldBuilder {
         &mut self,
         py: Python<'_>,
         system: PySystem,
-        sim_time_step: f64,
-        run_time_step: Option<f64>,
+        simulation_rate: f64,
+        generate_real_time: bool,
+        telemetry_rate: Option<f64>,
         default_playback_speed: f64,
         max_ticks: Option<u64>,
         #[allow(unused_variables)] optimize: bool,
@@ -1268,8 +1326,9 @@ impl WorldBuilder {
         let mut exec = self.build_with_backend(
             py,
             system,
-            sim_time_step,
-            run_time_step,
+            simulation_rate,
+            generate_real_time,
+            telemetry_rate,
             default_playback_speed,
             max_ticks,
             backend,
@@ -1291,8 +1350,7 @@ impl WorldBuilder {
     #[allow(clippy::type_complexity)]
     #[pyo3(signature = (
         system,
-        sim_time_step = 1.0 / 120.0,
-        run_time_step = None,
+        simulation_rate = 120.0,
         default_playback_speed = 1.0,
         max_ticks = None,
     ))]
@@ -1300,8 +1358,7 @@ impl WorldBuilder {
         &mut self,
         py: Python<'_>,
         system: PySystem,
-        sim_time_step: f64,
-        run_time_step: Option<f64>,
+        simulation_rate: f64,
         default_playback_speed: f64,
         max_ticks: Option<u64>,
     ) -> Result<
@@ -1320,8 +1377,7 @@ impl WorldBuilder {
             .build_jited(
                 py,
                 system,
-                sim_time_step,
-                run_time_step,
+                simulation_rate,
                 default_playback_speed,
                 max_ticks,
             )?;
@@ -1528,8 +1584,9 @@ impl WorldBuilder {
         &mut self,
         py: Python<'_>,
         sys: PySystem,
-        sim_time_step: f64,
-        run_time_step: Option<f64>,
+        simulation_rate: f64,
+        generate_real_time: bool,
+        telemetry_rate: Option<f64>,
         default_playback_speed: f64,
         max_ticks: Option<u64>,
         backend: &str,
@@ -1537,18 +1594,17 @@ impl WorldBuilder {
     ) -> Result<WorldExec, Error> {
         let (engine, iree_device, jax_gpu) = parse_backend_config(backend)?;
         let mut start = time::Instant::now();
-        let ts = time::Duration::from_secs_f64(sim_time_step);
+        let (ts, ticks_per_telemetry) = validate_rates(simulation_rate, telemetry_rate)?;
         self.world.metadata.sim_time_step = TimeStep(ts);
+        self.world.metadata.generate_real_time = generate_real_time;
+        self.world.metadata.ticks_per_telemetry = ticks_per_telemetry;
         self.world.metadata.default_playback_speed = default_playback_speed;
-        if let Some(ts) = run_time_step {
-            let ts = time::Duration::from_secs_f64(ts);
-            self.world.metadata.run_time_step = Some(TimeStep(ts));
-        }
         if let Some(max_ticks) = max_ticks {
             self.world.metadata.max_tick = max_ticks;
         }
 
         self.world.set_globals();
+        self.world.batch1 = self.world.is_batch1();
 
         let world = std::mem::take(&mut self.world);
         let compiled_sys = increment_sim_tick.pipe(sys).compile(&world)?;
@@ -1662,8 +1718,7 @@ impl WorldBuilder {
         &mut self,
         py: Python<'_>,
         sys: PySystem,
-        sim_time_step: f64,
-        run_time_step: Option<f64>,
+        simulation_rate: f64,
         default_playback_speed: f64,
         max_ticks: Option<u64>,
     ) -> Result<
@@ -1678,13 +1733,11 @@ impl WorldBuilder {
         ),
         Error,
     > {
-        let ts = time::Duration::from_secs_f64(sim_time_step);
+        let (ts, _) = validate_rates(simulation_rate, None)?;
         self.world.metadata.sim_time_step = TimeStep(ts);
+        self.world.metadata.generate_real_time = false;
+        self.world.metadata.ticks_per_telemetry = 1;
         self.world.metadata.default_playback_speed = default_playback_speed;
-        if let Some(ts) = run_time_step {
-            let ts = time::Duration::from_secs_f64(ts);
-            self.world.metadata.run_time_step = Some(TimeStep(ts));
-        }
         if let Some(max_ticks) = max_ticks {
             self.world.metadata.max_tick = max_ticks;
         }

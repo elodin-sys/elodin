@@ -44,6 +44,8 @@ pub struct World {
     pub host: Buffers,
     pub dirty_components: HashSet<ComponentId>,
     pub metadata: WorldMetadata,
+    #[serde(default)]
+    pub batch1: bool,
 }
 
 pub use impeller2_wkt::SensorCameraConfig;
@@ -55,7 +57,10 @@ pub struct WorldMetadata {
     pub tick: u64,
     pub entity_len: u64,
     pub sim_time_step: TimeStep,
-    pub run_time_step: Option<TimeStep>,
+    #[serde(default)]
+    pub generate_real_time: bool,
+    #[serde(default = "default_ticks_per_telemetry")]
+    pub ticks_per_telemetry: u64,
     pub default_playback_speed: f64,
     pub max_tick: u64,
     pub schematic_path: Option<PathBuf>,
@@ -74,8 +79,9 @@ impl Default for WorldMetadata {
             entity_metadata: Default::default(),
             tick: Default::default(),
             entity_len: Default::default(),
-            run_time_step: Default::default(),
             sim_time_step: Default::default(),
+            generate_real_time: false,
+            ticks_per_telemetry: default_ticks_per_telemetry(),
             default_playback_speed: 1.0,
             max_tick: u64::MAX,
             schematic: None,
@@ -92,6 +98,7 @@ impl Default for World {
             host: Default::default(),
             dirty_components: Default::default(),
             metadata: Default::default(),
+            batch1: false,
         };
 
         world.add_globals();
@@ -157,8 +164,12 @@ impl World {
         self.metadata.sim_time_step
     }
 
-    pub fn run_time_step(&self) -> Option<TimeStep> {
-        self.metadata.run_time_step
+    pub fn generate_real_time(&self) -> bool {
+        self.metadata.generate_real_time
+    }
+
+    pub fn ticks_per_telemetry(&self) -> u64 {
+        self.metadata.ticks_per_telemetry.max(1)
     }
 
     pub fn max_tick(&self) -> u64 {
@@ -256,6 +267,19 @@ impl World {
         })
     }
 
+    pub fn is_batch1(&self) -> bool {
+        self.host.iter().all(|(id, col)| {
+            let Some((schema, _)) = self.metadata.component_map.get(id) else {
+                return true;
+            };
+            let size = schema.size();
+            if size == 0 {
+                return true;
+            }
+            col.buffer.len() / size <= 1
+        })
+    }
+
     pub fn entity_ids(&self) -> HashSet<EntityId> {
         self.host
             .values()
@@ -273,6 +297,10 @@ impl World {
     }
 }
 
+fn default_ticks_per_telemetry() -> u64 {
+    1
+}
+
 impl Clone for World {
     fn clone(&self) -> Self {
         let dirty_components = self.host.keys().copied().collect();
@@ -280,6 +308,7 @@ impl Clone for World {
             host: self.host.clone(),
             dirty_components,
             metadata: self.metadata.clone(),
+            batch1: self.batch1,
         }
     }
 }
@@ -337,6 +366,14 @@ impl<'a, B: 'a + AsRef<[u8]>> ColumnRef<'a, B> {
     pub fn buffer_ty(&self) -> ArrayTy {
         let mut array_ty = self.schema.to_array_ty();
         array_ty.shape.insert(0, self.len() as i64);
+        array_ty
+    }
+
+    pub fn buffer_ty_batch1(&self, batch1: bool) -> ArrayTy {
+        let mut array_ty = self.schema.to_array_ty();
+        if !(batch1 && self.len() <= 1) {
+            array_ty.shape.insert(0, self.len() as i64);
+        }
         array_ty
     }
 }

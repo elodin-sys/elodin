@@ -2,6 +2,7 @@
 # ruff: noqa: F405
 import code
 import inspect
+import os
 import re
 import readline
 import rlcompleter
@@ -87,6 +88,7 @@ class Query(Generic[Unpack[A]]):
         self.inner = inner
         self.component_data = component_data
         self.component_classes = component_classes
+        self.batch1 = getattr(inner, "batch1", False)
 
     def map(
         self,
@@ -103,13 +105,18 @@ class Query(Generic[Unpack[A]]):
             (out_tps,) if not isinstance(out_tps, tuple) else out_tps
         )
 
-        buf = jax.vmap(
-            lambda b: f(
-                *[from_array(cls, x) for (x, cls) in zip(b, self.component_classes)]  # type: ignore
-            ),
-            in_axes=0,
-            out_axes=0,
-        )(self.bufs)
+        if self.batch1:
+            buf = f(
+                *[from_array(cls, x) for (x, cls) in zip(self.bufs, self.component_classes)]  # type: ignore
+            )
+        else:
+            buf = jax.vmap(
+                lambda b: f(
+                    *[from_array(cls, x) for (x, cls) in zip(b, self.component_classes)]  # type: ignore
+                ),
+                in_axes=0,
+                out_axes=0,
+            )(self.bufs)
         (bufs, _) = tree_flatten(buf)
         inner = None
         component_data = []
@@ -140,30 +147,30 @@ class Query(Generic[Unpack[A]]):
         out_tps_tuple: Tuple[Annotated[Any, Component], ...] = (
             (out_tps,) if not isinstance(out_tps, tuple) else out_tps
         )
-        batch_size = self.bufs[0].shape[0] if len(self.bufs) > 0 else 0
 
-        # For single entity or use_vmap=False, call function directly
-        # without vmap. This preserves jax.lax.cond semantics: only one
-        # branch executes.
-        def call_single(idx):
-            args = [from_array(cls, b[idx]) for (b, cls) in zip(self.bufs, self.component_classes)]
-            return f(*args)
-
-        if batch_size == 0:
-            bufs = []
-        elif batch_size == 1:
-            result = call_single(0)
-            # Flatten and wrap each leaf in batch dimension.
-            flat, _ = tree_flatten(result)
-            bufs = [jax.numpy.expand_dims(b, axis=0) for b in flat]
+        if self.batch1:
+            result = f(*[from_array(cls, b) for (b, cls) in zip(self.bufs, self.component_classes)])
+            (bufs, _) = tree_flatten(result)
         else:
-            # Multiple entities without vmap: use sequential loop.
-            results = [call_single(i) for i in range(batch_size)]
-            # Flatten first result to get structure, then stack
-            # corresponding elements from all results.
-            first_flat, _ = tree_flatten(results[0])
-            all_flat = [tree_flatten(r)[0] for r in results]
-            bufs = [jax.numpy.stack([af[j] for af in all_flat]) for j in range(len(first_flat))]
+            batch_size = self.bufs[0].shape[0] if len(self.bufs) > 0 else 0
+
+            def call_single(idx):
+                args = [
+                    from_array(cls, b[idx]) for (b, cls) in zip(self.bufs, self.component_classes)
+                ]
+                return f(*args)
+
+            if batch_size == 0:
+                bufs = []
+            elif batch_size == 1:
+                result = call_single(0)
+                flat, _ = tree_flatten(result)
+                bufs = [jax.numpy.expand_dims(b, axis=0) for b in flat]
+            else:
+                results = [call_single(i) for i in range(batch_size)]
+                first_flat, _ = tree_flatten(results[0])
+                all_flat = [tree_flatten(r)[0] for r in results]
+                bufs = [jax.numpy.stack([af[j] for af in all_flat]) for j in range(len(first_flat))]
         inner = None
         component_data = []
         component_classes = []
@@ -217,7 +224,10 @@ class Query(Generic[Unpack[A]]):
         if len(self.bufs) > 1:
             raise Exception("Cannot index into a query with multiple inputs")
         cls = self.component_classes[0]
-        return from_array(cls, self.bufs[0][index])
+        buf = self.bufs[0]
+        if self.batch1:
+            return from_array(cls, buf)
+        return from_array(cls, buf[index])
 
 
 def map(
@@ -479,8 +489,9 @@ class World(WorldBuilder):
     def run(
         self,
         system: System,
-        sim_time_step: float = 1 / 120.0,
-        run_time_step: Optional[float] = None,
+        simulation_rate: float = 120.0,
+        generate_real_time: bool = False,
+        telemetry_rate: Optional[float] = None,
         default_playback_speed: float = 1.0,
         max_ticks: Optional[int] = None,
         optimize: bool = False,
@@ -500,10 +511,12 @@ class World(WorldBuilder):
         frame = current_frame.f_back
         if frame is None:
             raise Exception("No previous frame")
+        db_path = db_path if db_path is not None else os.environ.get("ELODIN_DB_PATH")
         addr = super().run(
             system,
-            sim_time_step,
-            run_time_step,
+            simulation_rate,
+            generate_real_time,
+            telemetry_rate,
             default_playback_speed,
             max_ticks,
             optimize,
@@ -528,8 +541,9 @@ class World(WorldBuilder):
     def build(
         self,
         system: System,
-        sim_time_step: float = 1 / 120.0,
-        run_time_step: Optional[float] = None,
+        simulation_rate: float = 120.0,
+        generate_real_time: bool = False,
+        telemetry_rate: Optional[float] = None,
         default_playback_speed: float = 1.0,
         max_ticks: Optional[int] = None,
         optimize: bool = False,
@@ -539,8 +553,9 @@ class World(WorldBuilder):
     ) -> Exec:
         return super().build(
             system,
-            sim_time_step,
-            run_time_step,
+            simulation_rate,
+            generate_real_time,
+            telemetry_rate,
             default_playback_speed,
             max_ticks,
             optimize,
@@ -552,13 +567,12 @@ class World(WorldBuilder):
     def to_jax(
         self,
         system: System,
-        sim_time_step: float = 1 / 120.0,
-        run_time_step: Optional[float] = None,
+        simulation_rate: float = 120.0,
         default_playback_speed: float = 1.0,
         max_ticks: Optional[int] = None,
     ) -> object:
         obj, ins, outs, state, dictionary, entity_dict, component_entity_dict = super().to_jax_func(
-            system, sim_time_step, run_time_step, default_playback_speed, max_ticks
+            system, simulation_rate, default_playback_speed, max_ticks
         )
         sim_object = jaxsim.JaxSim(
             obj,

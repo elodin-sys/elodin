@@ -201,7 +201,7 @@ world.recipe(controller)
 # Run simulation in real-time mode for responsive RC control
 world.run(
     sim_system,
-    sim_time_step=config.dt,
-    run_time_step=config.dt,
+    simulation_rate=1.0 / config.dt,
+    generate_real_time=True,
     max_ticks=config.total_ticks,
 )

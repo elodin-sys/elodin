@@ -682,7 +682,7 @@ exec = w.run(
         | earth_point,
         integrator=el.Integrator.SemiImplicit,
     ),
-    sim_time_step=SIM_TIME_STEP,
+    simulation_rate=1.0 / SIM_TIME_STEP,
     default_playback_speed=60.0,
     max_ticks=60 * 20 * 60,
     optimize=True,

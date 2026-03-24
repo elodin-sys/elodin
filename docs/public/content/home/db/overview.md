@@ -15,9 +15,9 @@ icon = ""
 
 Elodin DB is a time-series database for physical systems. It serves as a central telemetry store and message bus -- on a flight computer, in a ground station, or alongside a simulation. Flight software, sensors, and simulations publish and subscribe to telemetry data and messages through it.
 
-Elodin DB is based on the same ECS system as Elodin Sim (and the rest of the Elodin ecosystem). Elodin DB sorts data into "entities" and "components". Entities are best thought as objects that emit telemetry. For instance an individual sensor would be an entity. A component is a piece of telemetry data that is associated with an entity. For example an accelerator's acceleration reading would be a component. Entities can have multiple components, and each component can be associated with multiple entities.
+Elodin DB is based on the same ECS system as Elodin Sim (and the rest of the Elodin ecosystem). Elodin DB sorts data into "entities" and "components". Entities are best thought of as objects that emit telemetry. For instance an individual sensor would be an entity. A component is a piece of telemetry data that is associated with an entity. For example an accelerometer's acceleration reading would be a component. Entities can have multiple components, and each component can be associated with multiple entities.
 
-Elodin DB chiefly communicates over `impeller` -- Elodin's lightweight message protocol designed for flight software. In addition to `impeller`, Elodin DB can be queries via SQL and results are returned in the Arrow IPC format.
+Elodin DB chiefly communicates over `impeller` -- Elodin's lightweight message protocol designed for flight software. In addition to `impeller`, Elodin DB can be queried via SQL and results are returned in the Arrow IPC format.
 
 ## Quick Start
 

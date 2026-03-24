@@ -6,6 +6,8 @@ pub mod frustum;
 pub(crate) mod frustum_common;
 pub mod frustum_intersection;
 pub mod gizmos;
+pub(crate) mod kdl_asset_source;
+pub(crate) mod kdl_document;
 mod logical_key;
 pub mod navigation_gizmo;
 pub mod view_cube;

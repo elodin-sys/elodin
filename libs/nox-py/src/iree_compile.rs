@@ -47,9 +47,13 @@ pub fn compile_iree_module(
         let col = world.column_by_id(*id).ok_or(Error::ComponentNotFound)?;
         let elem_ty = col.schema.prim_type;
         let dtype = nox::jax::dtype(&elem_ty.to_element_type())?;
-        let shape_vec: Vec<_> = std::iter::once(col.len() as u64)
-            .chain(col.schema.shape().iter().copied())
-            .collect();
+        let shape_vec: Vec<_> = if world.batch1 && col.len() <= 1 {
+            col.schema.shape().iter().copied().collect()
+        } else {
+            std::iter::once(col.len() as u64)
+                .chain(col.schema.shape().iter().copied())
+                .collect()
+        };
         let jnp = py.import("jax.numpy")?;
         let arr = jnp.getattr("zeros")?.call((shape_vec, dtype), None)?;
         input_arrays.push(arr.unbind());
@@ -165,11 +169,19 @@ def _resolve_iree_device(requested_device):
         return 'metal', 'metal'
     return 'cpu', 'local-task'
 
-def compile_to_vmfb(func, input_arrays, user_extra_flags, system_names, requested_device):
+def _prefer_indirect_command_buffers(stablehlo_mlir):
+    # IREE 3.11 regressed in both directions here: threefry-based PRNG modules
+    # fail when indirect command buffers are disabled, while rocket's
+    # map_coordinates/dynamic-slice-heavy kernel fails when they stay enabled.
+    return 'threefry' in stablehlo_mlir.lower()
+
+def compile_to_vmfb(func, input_arrays, user_extra_flags, system_names, requested_device, batch1=False):
+    from elodin._iree_linalg import iree_safe_linalg
     try:
         lower_start = time.perf_counter()
         jit_fn = jax.jit(func, keep_unused=True)
-        lowered = jit_fn.lower(*input_arrays)
+        with iree_safe_linalg():
+            lowered = jit_fn.lower(*input_arrays)
         lower_ms = (time.perf_counter() - lower_start) * 1000.0
     except Exception:
         raise RuntimeError("stage=jax_lower\n" + traceback.format_exc())
@@ -186,15 +198,25 @@ def compile_to_vmfb(func, input_arrays, user_extra_flags, system_names, requeste
     # Rename to @module so the VMFB function is always "module.main".
     stablehlo_mlir = re.sub(r'module @\S+', 'module @module', stablehlo_mlir, count=1)
 
+    # Unsigned-to-signed integer mapping for IREE compatibility is handled
+    # at the dtype boundary (jax.rs dtype(), iree_exec.rs, jax_exec.rs)
+    # so that user-declared U64/U32 components never produce ui64/ui32
+    # in the StableHLO.  Do NOT do a blanket text replacement here --
+    # it would corrupt JAX-internal threefry PRNG bit-manipulation.
+
     compile_target, runtime_device = _resolve_iree_device(requested_device)
 
     extra = [
         "--iree-vm-target-extension-f64",
         "--iree-input-demote-f64-to-f32=false",
         "--iree-input-type=stablehlo",
-        "--iree-opt-level=O2",
-        "--iree-hal-indirect-command-buffers=false",
+        "--iree-opt-level=O1",
     ]
+    if not _prefer_indirect_command_buffers(stablehlo_mlir):
+        extra.append("--iree-hal-indirect-command-buffers=false")
+    extra.append("--iree-opt-const-eval=false")
+    if batch1:
+        extra.append("--iree-flow-inline-constants-max-byte-length=0")
 
     from iree.compiler import _mlir_libs
     iree_tools_dir = str(pathlib.Path(_mlir_libs.__file__).parent)
@@ -292,12 +314,10 @@ def compile_to_vmfb(func, input_arrays, user_extra_flags, system_names, requeste
         if platform.system() == "Darwin":
             arch = 'arm64' if machine == 'arm64' else 'x86_64'
             extra.append('--iree-llvmcpu-target-triple=' + arch + '-apple-darwin')
-            extra.append('--iree-opt-const-eval=false')
         else:
             arch = 'aarch64' if machine in ('aarch64', 'arm64') else 'x86_64'
             extra.append('--iree-llvmcpu-target-triple=' + arch + '-unknown-linux-gnu')
             extra.append('--iree-llvmcpu-link-static=false')
-            extra.append('--iree-opt-const-eval=false')
 
     target_args = []
     compile_backend = compile_target
@@ -467,6 +487,7 @@ def compile_to_vmfb(func, input_arrays, user_extra_flags, system_names, requeste
                 extra_iree_flags.to_vec(),
                 compiled_system.system_names.clone(),
                 iree_device.to_string(),
+                world.batch1,
             ),
         )
         .map_err(|e| {

@@ -25,6 +25,9 @@
         ".jinja"
         ".py"
         ".proto"
+        # Markdown isn't code but some of our code does `include_str!()`. and
+        # the build will fail if they are not present.
+        ".md"
       ];
     in
       (type == "directory" && matchesPrefix) || matchesSuffix;

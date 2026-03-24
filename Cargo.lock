@@ -1468,6 +1468,7 @@ dependencies = [
  "futures-io",
  "futures-lite",
  "js-sys",
+ "notify-debouncer-full",
  "parking_lot",
  "ron 0.10.1",
  "serde",
@@ -5021,6 +5022,7 @@ dependencies = [
  "convert_case 0.8.0",
  "datafusion",
  "directories",
+ "eql",
  "fastrand 2.3.0",
  "futures-lite",
  "fuzzy-matcher",
@@ -5051,6 +5053,8 @@ dependencies = [
  "signal-hook",
  "smallvec",
  "stellarator",
+ "tabled",
+ "tabular",
  "tempfile",
  "thingbuf",
  "thiserror 2.0.18",
@@ -5152,7 +5156,6 @@ dependencies = [
  "jiff",
  "miette 7.6.0",
  "nodit",
- "notify-debouncer-mini",
  "nox",
  "objc2 0.5.2",
  "objc2-app-kit 0.2.2",
@@ -5646,6 +5649,15 @@ dependencies = [
  "num_cpus",
  "pkg-config",
  "vcpkg",
+]
+
+[[package]]
+name = "file-id"
+version = "0.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e1fc6a637b6dc58414714eddd9170ff187ecb0933d4c7024d1abbd23a3cc26e9"
+dependencies = [
+ "windows-sys 0.60.2",
 ]
 
 [[package]]
@@ -7342,7 +7354,6 @@ dependencies = [
  "postcard-schema",
  "serde",
  "smallvec",
- "strum 0.27.2",
  "zerocopy",
 ]
 
@@ -9042,15 +9053,16 @@ dependencies = [
 ]
 
 [[package]]
-name = "notify-debouncer-mini"
-version = "0.6.0"
+name = "notify-debouncer-full"
+version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a689eb4262184d9a1727f9087cd03883ea716682ab03ed24efec57d7716dccb8"
+checksum = "d2d88b1a7538054351c8258338df7c931a590513fb3745e8c15eb9ff4199b8d1"
 dependencies = [
+ "file-id",
  "log",
  "notify 8.2.0",
  "notify-types",
- "tempfile",
+ "walkdir",
 ]
 
 [[package]]
@@ -12510,9 +12522,6 @@ name = "strum"
 version = "0.27.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "af23d6f6c1a224baef9d3f61e287d2761385a5b88fdab4eb4c6f11aeb54c4bcf"
-dependencies = [
- "strum_macros 0.27.2",
-]
 
 [[package]]
 name = "strum_macros"
@@ -12824,6 +12833,15 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 1.0.109",
+]
+
+[[package]]
+name = "tabular"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d9a2882c514780a1973df90de9d68adcd8871bacc9a6331c3f28e6d2ff91a3d1"
+dependencies = [
+ "unicode-width 0.1.14",
 ]
 
 [[package]]

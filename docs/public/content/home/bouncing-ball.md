@@ -102,7 +102,7 @@ def system() -> el.System:
 #### Running the Simulation
 With everything set up, we can now run the simulation:
 ```python
-world().run(system(), sim_time_step=SIM_TIME_STEP, max_ticks=1200)
+world().run(system(), simulation_rate=1.0 / SIM_TIME_STEP, max_ticks=1200)
 ```
 
 {% alert(kind="info") %}

@@ -221,8 +221,8 @@ This client demonstrates bidirectional communication with simulations, allowing 
 2. **Simulation Setup**: Run the simulation in real-time mode:
    ```python
    w.run(system, 
-         sim_time_step=1/120.0,
-         run_time_step=1/120.0)  # Real-time execution
+         simulation_rate=120.0,
+         generate_real_time=True)  # Real-time execution
    ```
 
 3. **Client Control**: The Rust client calculates and sends control commands:

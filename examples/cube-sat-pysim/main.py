@@ -643,7 +643,7 @@ sys = el.six_dof(
     integrator=el.Integrator.SemiImplicit,
 )
 
-sim = w.to_jax(sys, SIM_TIME_STEP)
+sim = w.to_jax(sys, simulation_rate=1.0 / SIM_TIME_STEP)
 att_est = []
 for index in range(0, 500):
     sim.step(1)

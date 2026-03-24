@@ -34,8 +34,6 @@ serde.features = ["derive"]
 postcard.version = "1.1"
 postcard-schema.version = "0.2"
 postcard-schema.features = ["use-std"]
-strum.version = "0.27"
-strum.features = ["derive"]
 
 # lua
 mlua.version = "0.10.5"

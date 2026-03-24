@@ -1,6 +1,8 @@
 use std::iter;
 use std::process::Stdio;
 use std::{
+    collections::HashSet,
+    fs,
     net::{Ipv4Addr, SocketAddr},
     path::PathBuf,
 };
@@ -28,12 +30,83 @@ fn default_addr() -> SocketAddr {
     SocketAddr::new(Ipv4Addr::new(0, 0, 0, 0).into(), 2240)
 }
 
+#[cfg(target_os = "linux")]
+fn collect_process_tree(root_pid: nix::unistd::Pid) -> Vec<nix::unistd::Pid> {
+    let mut stack = vec![root_pid];
+    let mut seen = HashSet::new();
+    let mut pids = Vec::new();
+
+    while let Some(pid) = stack.pop() {
+        if !seen.insert(pid.as_raw()) {
+            continue;
+        }
+
+        pids.push(pid);
+        let tasks_dir = format!("/proc/{}/task", pid.as_raw());
+        let Ok(tasks) = fs::read_dir(tasks_dir) else {
+            continue;
+        };
+
+        for task in tasks.flatten() {
+            let children_path = task.path().join("children");
+            let Ok(children) = fs::read_to_string(children_path) else {
+                continue;
+            };
+
+            for child in children
+                .split_whitespace()
+                .filter_map(|raw| raw.parse::<i32>().ok())
+            {
+                stack.push(nix::unistd::Pid::from_raw(child));
+            }
+        }
+    }
+
+    pids
+}
+
+#[cfg(not(target_os = "linux"))]
+fn collect_process_tree(root_pid: nix::unistd::Pid) -> Vec<nix::unistd::Pid> {
+    vec![root_pid]
+}
+
+#[cfg(unix)]
+fn signal_process_tree(root_pid: nix::unistd::Pid, signal: nix::sys::signal::Signal) {
+    let pids = collect_process_tree(root_pid);
+    tracing::debug!(
+        root_pid = root_pid.as_raw(),
+        pid_count = pids.len(),
+        ?signal,
+        "signalling sim process tree"
+    );
+
+    for pid in pids.into_iter().rev() {
+        let _ = nix::sys::signal::kill(pid, signal);
+    }
+}
+
+#[cfg(all(unix, not(target_os = "linux")))]
+fn configure_sim_command(cmd: &mut Command) {
+    cmd.process_group(0);
+}
+
+#[cfg(target_os = "linux")]
+fn configure_sim_command(_cmd: &mut Command) {}
+
+#[cfg(all(unix, not(target_os = "linux")))]
+fn signal_process_group(root_pid: nix::unistd::Pid, signal: nix::sys::signal::Signal) {
+    let _ = nix::sys::signal::killpg(root_pid, signal);
+}
+
+#[cfg(target_os = "linux")]
+fn signal_process_group(_root_pid: nix::unistd::Pid, _signal: nix::sys::signal::Signal) {}
+
 impl SimRecipe {
     pub async fn run(self, cancel_token: CancelToken) -> Result<(), Error> {
         debug!("running sim");
 
         let mut cmd = python_tokio_command()?;
-        cmd.process_group(0);
+        configure_sim_command(&mut cmd);
         // Close stdin to prevent SIGTTIN when child is in background process group
         cmd.stdin(Stdio::null());
         cmd.env("TRACY_PORT", "8089");
@@ -45,24 +118,26 @@ impl SimRecipe {
             .arg("--liveness-port")
             .arg(port.to_string())
             .spawn()?;
+        let child_pid = child.id().map(|pid| nix::unistd::Pid::from_raw(pid as i32));
 
         tokio::select! {
             _ = cancel_token.wait() => {
-                if let Some(pid) = child.id() {
-                    let pid = nix::unistd::Pid::from_raw(pid as i32);
-                    let _ = nix::sys::signal::killpg(pid, nix::sys::signal::Signal::SIGTERM);
+                if let Some(pid) = child_pid {
+                    signal_process_group(pid, nix::sys::signal::Signal::SIGTERM);
+                    signal_process_tree(pid, nix::sys::signal::Signal::SIGTERM);
                 }
-                tracing::info!("Waiting for sim process to exit");
+                tracing::info!("Waiting for sim process tree to exit");
                 match tokio::time::timeout(Duration::from_secs(2), child.wait()).await {
                     Ok(res) => {
                         let _ = res;
                     }
                     Err(_) => {
                         tracing::warn!("Sim process did not exit after SIGTERM, forcing kill");
-                        if let Some(pid) = child.id() {
-                            let pid = nix::unistd::Pid::from_raw(pid as i32);
-                            let _ = nix::sys::signal::killpg(pid, nix::sys::signal::Signal::SIGKILL);
+                        if let Some(pid) = child_pid {
+                            signal_process_group(pid, nix::sys::signal::Signal::SIGKILL);
+                            signal_process_tree(pid, nix::sys::signal::Signal::SIGKILL);
                         }
+                        let _ = child.start_kill();
                         let _ = child.wait().await;
                     }
                 }

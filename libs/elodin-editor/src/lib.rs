@@ -162,6 +162,7 @@ impl Plugin for EditorPlugin {
             // .insert_resource(AssetMetaCheck::Never)
             .add_plugins(plugins::WebAssetPlugin)
             .add_plugins(plugins::env_asset_source::plugin)
+            .add_plugins(plugins::kdl_asset_source::plugin)
             .add_plugins(
                 DefaultPlugins
                     .set(WindowPlugin {
@@ -184,6 +185,7 @@ impl Plugin for EditorPlugin {
                         ..default()
                     })
                     .set(AssetPlugin {
+                        watch_for_changes_override: Some(true),
                         unapproved_path_mode: UnapprovedPathMode::Allow,
                         // NOTE: `Processed` interferes with WebAssetPlugin.
                         // mode: AssetMode::Processed,
@@ -194,6 +196,7 @@ impl Plugin for EditorPlugin {
                     .disable::<LogPlugin>()
                     .build(),
             )
+            .add_plugins(plugins::kdl_document::plugin)
             // Note: we added this because bevy 0.17.3 changed its behavior
             // which broke bevy_editor_cam. See here:
             // https://github.com/aevyrie/bevy_editor_cam/issues/61
@@ -1051,8 +1054,8 @@ pub fn sync_object_3d(
                 mesh: mesh_source,
                 icon: None,
                 mesh_visibility_range: None,
-                aux: (),
                 frame: None,
+                node_id: Default::default(),
             },
             expr,
             &ctx.0,

@@ -18,7 +18,7 @@
   tracySrc ? null,
   ...
 }: let
-  version = "3.10.0";
+  version = "3.11.0";
 
   flatcc = fetchFromGitHub {
     owner = "dvidelabs";
@@ -30,8 +30,15 @@
   benchmark = fetchFromGitHub {
     owner = "google";
     repo = "benchmark";
-    rev = "99bdb2127d1fa1cff444bbefb814e105c7d20c45";
-    hash = "sha256-d/7BDynAUsH20bGqyh4HLKKgqCeGlTRQRvqX5dmpMLg=";
+    rev = "192ef10025eb2c4cdd392bc502f0c852196baa48";
+    hash = "sha256-Mm4pG7zMB00iof32CxreoNBFnduPZTMp3reHMCIAFPQ=";
+  };
+
+  printf = fetchFromGitHub {
+    owner = "eyalroz";
+    repo = "printf";
+    rev = "f1b728cbd5c6e10dc1f140f1574edfd1ccdcbedb";
+    hash = "sha256-HHp6uKEJv3HWEGgIBjeMsCXUSIPYTLwofjcDTswgSuA=";
   };
 
   capstoneSrc = fetchFromGitHub {
@@ -74,10 +81,10 @@ in
     inherit version;
 
     src = fetchFromGitHub {
-      owner = "iree-org";
+      owner = "openxla";
       repo = "iree";
       rev = "v${version}";
-      hash = "sha256-6phU7ypXdvWBujnIzKGbYyABFAEb7U4miukelxNC4Gw=";
+      hash = "sha256-2NHWLhhCoCHJGWN+ZPZm44pOeksr3fTpLH7X0hkThWw=";
     };
 
     postUnpack = ''
@@ -89,6 +96,10 @@ in
       rmdir $sourceRoot/third_party/benchmark 2>/dev/null || true
       cp -r ${benchmark} $sourceRoot/third_party/benchmark
       chmod -R u+w $sourceRoot/third_party/benchmark
+
+      rmdir $sourceRoot/third_party/printf 2>/dev/null || true
+      cp -r ${printf} $sourceRoot/third_party/printf
+      chmod -R u+w $sourceRoot/third_party/printf
 
       ${lib.optionalString (enableTracing && tracySrc != null) ''
         rmdir $sourceRoot/third_party/tracy 2>/dev/null || true

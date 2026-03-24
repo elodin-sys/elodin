@@ -32,6 +32,7 @@ This document contains the help content for the Elodin command-line programs.
 * [`elodin-db time-align`↴](#elodin-db-time-align)
 * [`elodin-db drop`↴](#elodin-db-drop)
 * [`elodin-db info`↴](#elodin-db-info)
+* [`elodin-db query`↴](#elodin-db-query)
 * [`elodin-db export`↴](#elodin-db-export)
 * [`elodin-db export-videos`↴](#elodin-db-export-videos)
 
@@ -127,6 +128,7 @@ python examples/drone/main.py bench --ticks 1000 --profile
 * `time-align` — Align component timestamps to a target timestamp
 * `drop` — Drop (delete) components from a database
 * `info` — Display information about a database
+* `query` — Run an EQL or SQL query and print results (table, CSV, parquet, or arrow-ipc)
 * `export` — Export database contents to parquet, arrow-ipc, or csv files
 * `export-videos` — Export video message logs to MP4 files
 
@@ -535,6 +537,78 @@ elodin-db info
 
 # Display info for a specific database
 elodin-db info ./my-database
+```
+
+
+## `elodin-db query`
+
+Run an EQL (Elodin Query Language) or raw SQL query against a database and print the result. Output can be a terminal table, CSV, or binary formats (arrow-ipc, parquet). Does not require a running database server.
+
+**Usage:** `elodin-db query [OPTIONS] --eql <EQL> | --sql <SQL> <DBFILE>`
+
+###### **Arguments**
+
+* `<DBFILE>` — Path to the database directory
+
+###### **Query source (required, mutually exclusive)**
+
+You must provide exactly one of:
+
+* `--eql <EQL>` — EQL query (e.g. a component name like `rocket.world_pos`, or an expression like `(rocket.world_pos[0], rocket.world_pos[1])`)
+* `--sql <SQL>` — Raw SQL query
+
+###### **Options**
+
+* `--offset <N|DURATION>` — Skip rows before returning results. Can be:
+  - An integer: skip that many rows. Negative values count from the end (e.g. `-10` = start 10 rows before the last).
+  - A duration: e.g. `2.6s`, `340000ms`, `53000ns`. Negative duration means from the end (e.g. `-1s` = start 1 second before the last entry).
+
+* `--limit <N|DURATION>` — Return at most this many rows or this duration. Same formats as `--offset` (e.g. `10`, `2.6s`, `340000ms`, `53000ns`).
+
+* `-f`, `--format <FORMAT>` — Output format.
+
+  Default value: `table`
+
+  Possible values: `table`, `csv`, `arrow-ipc`, `parquet`
+
+  For `arrow-ipc` and `parquet`, output is binary; pipe to a file (e.g. `... > out.arrow`).
+
+* `--flatten` — Flatten vector columns into separate scalar columns (e.g. `vel` → `vel.0`, `vel.1`, …). Uses component metadata for column names when available (e.g. `q0`, `q1`, `x`, `y`, `z`).
+
+* `--time-format <FORMAT>` — How to show the time column (when present).
+
+  Possible values: `omit`, `datetime`, `s` (seconds), `ms` (milliseconds), `us` (microseconds; aliases: `µs`). If not set, defaults to seconds, or to the unit implied by a duration in `--offset` or `--limit` (e.g. `--limit 500ms` → time in ms).
+
+* `-v`, `--verbose` — Print the SQL used (EQL conversion or raw SQL) to stderr.
+
+* `-p`, `--precision <N|full>` — Decimal places for floating-point values in table/CSV. Use a number (default `6`) or `full` to show all digits. When not `full`, a note is printed to stderr suggesting `--precision full` for full data.
+
+* `--row-index` — Add a first column `index` with the 0-based row index in the full result set (useful with `--offset`/`--limit` to see which rows are shown).
+
+###### **Time column**
+
+For EQL queries, a `time` column is included by default (first column) unless `--time-format omit` is used. The time column header includes the unit (e.g. `time (s)`, `time (μs)`, `time (UTC)`). Elodin stores time in microseconds since epoch.
+
+###### **Example**
+
+```bash
+# First 10 rows of a component as a table
+elodin-db query --eql "rocket.world_pos" --limit 10 ./my-database
+
+# Last 10 rows, show EQL→SQL on stderr
+elodin-db query --eql "rocket.world_pos" --offset -10 -v ./my-database
+
+# Tuple expression, flattened, with row index and full precision
+elodin-db query --eql "(rocket.world_pos[0], rocket.world_pos[1])" --limit 5 --flatten --row-index -p full ./my-database
+
+# Raw SQL, output as CSV
+elodin-db query --sql "SELECT time, rocket_world_pos FROM rocket_world_pos LIMIT 100" -f csv ./my-database
+
+# Duration-based slice: last 2.5 seconds of data, time in seconds
+elodin-db query --eql "drone.position" --offset -2.5s --limit 2.5s ./my-database
+
+# Export slice to Parquet (binary; pipe to file)
+elodin-db query --eql "rocket.world_pos" --limit 1000 -f parquet ./my-database > out.parquet
 ```
 
 

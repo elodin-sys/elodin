@@ -25,7 +25,7 @@ def bounce(pos: el.WorldPos, vel: el.WorldVel) -> el.WorldVel:
     )
 
 sys = bounce | el.six_dof(sys=gravity)
-w.run(sys, sim_time_step=1.0 / 120.0)
+w.run(sys, simulation_rate=120.0)
 ```
 
 Key patterns:
@@ -112,7 +112,7 @@ Key patterns:
 `examples/cube-sat-pysim/` — Pure JAX execution for RL training.
 
 ```python
-sim = w.to_jax(system, sim_time_step=1/120.0)
+sim = w.to_jax(system, simulation_rate=120.0)
 sim.step(100)
 state = sim.get_state("attitude", "satellite")
 sim.set_state("attitude", "satellite", new_quaternion)
@@ -142,7 +142,7 @@ def post_step(tick: int, ctx: el.StepContext):
     )
     ctx.write_component("drone.motor_command", motors)
 
-w.run(sys, sim_time_step=1/8000.0, post_step=post_step)
+w.run(sys, simulation_rate=8000.0, post_step=post_step)
 ```
 
 Key patterns:

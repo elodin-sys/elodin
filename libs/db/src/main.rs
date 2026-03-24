@@ -49,6 +49,13 @@ enum Commands {
     Drop(DropArgs),
     #[command(about = "Display information about a database")]
     Info(InfoArgs),
+    #[command(about = "Run query from a database file and print results")]
+    Query(elodin_db::query::QueryArgs),
+    #[command(
+        name = "list-components",
+        about = "List all component names in a database"
+    )]
+    ListComponents(ListComponentsArgs),
     #[command(about = "Export database contents to parquet, arrow-ipc, or csv files")]
     Export(ExportArgs),
     #[cfg(feature = "video-export")]
@@ -228,6 +235,18 @@ struct InfoArgs {
 }
 
 #[derive(clap::Args, Clone, Debug)]
+struct ListComponentsArgs {
+    #[clap(
+        long,
+        short,
+        help = "Show first/last timestamp and entry count per component"
+    )]
+    long: bool,
+    #[clap(help = "Path to the database directory")]
+    dbfile: PathBuf,
+}
+
+#[derive(clap::Args, Clone, Debug)]
 struct ExportArgs {
     #[clap(help = "Path to the database directory")]
     path: PathBuf,
@@ -301,6 +320,7 @@ async fn main() -> miette::Result<()> {
     };
 
     let _ = tracing_subscriber::fmt::fmt()
+        .with_writer(std::io::stderr)
         .with_target(false)
         .with_env_filter(filter)
         .with_timer(tracing_subscriber::fmt::time::ChronoLocal::new(
@@ -542,6 +562,14 @@ async fn main() -> miette::Result<()> {
             elodin_db::drop::run(path, match_mode, dry_run, yes).into_diagnostic()
         }
         Commands::Info(args) => run_info(args),
+        Commands::Query(args) => {
+            let rt = tokio::runtime::Runtime::new().into_diagnostic()?;
+            rt.block_on(elodin_db::query::run(args))?;
+            Ok(())
+        }
+        Commands::ListComponents(args) => {
+            elodin_db::list_components::run(args.dbfile, args.long).into_diagnostic()
+        }
         Commands::Export(ExportArgs {
             path,
             output,
@@ -625,7 +653,7 @@ fn format_duration(duration: std::time::Duration) -> String {
     } else if nanos >= 1_000_000 {
         format!("{} ms", nanos / 1_000_000)
     } else if nanos >= 1_000 {
-        format!("{} us", nanos / 1_000)
+        format!("{} µs", nanos / 1_000)
     } else {
         format!("{} ns", nanos)
     }

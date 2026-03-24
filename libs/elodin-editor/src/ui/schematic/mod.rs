@@ -17,28 +17,37 @@ use bevy::{ecs::system::SystemParam, prelude::*, window::PrimaryWindow};
 use egui_tiles::{Tile, TileId};
 use impeller2_bevy::ComponentMetadataRegistry;
 use impeller2_wkt::{
-    ActionPane, ComponentMonitor, ComponentPath, Dashboard, Line3d, Panel, Schematic,
-    SchematicElem, Split, VectorArrow3d, VideoStream as WktVideoStream, Viewport, WindowSchematic,
+    ActionPane, ComponentMonitor, ComponentPath, Line3d, Panel, Schematic, SchematicElem, Split,
+    VectorArrow3d, VideoStream as WktVideoStream, Viewport, WindowSchematic,
 };
 use bevy_geo_frames::{GeoFrame, GeoPosition};
 
+pub mod bindings;
+pub use bindings::SchematicBindings;
 pub mod tree;
 pub use tree::*;
 mod load;
+pub use crate::plugins::kdl_document::{
+    CurrentDocument, DocumentCleared, DocumentLoadFailed, DocumentLoaded, DocumentReloaded,
+    DocumentSaved, InitialKdlPath, KdlDocumentSet, OpenDocumentFromContentRequest,
+    OpenDocumentRequest, SaveCurrentDocumentRequest, SavedWindowInfo, SchematicDocumentAsset,
+    SchematicWindow, WindowDocumentSave, apply_initial_kdl_path, sync_document_from_config,
+};
 pub use load::*;
 
 #[derive(Resource, Debug, Clone, Deref, DerefMut)]
-pub struct CurrentSchematic(pub Schematic<Entity>);
+pub struct CurrentSchematic(pub Schematic);
 
 #[derive(Debug, Clone)]
-pub struct SecondarySchematic {
+pub struct WindowSchematicEntry {
+    pub window_id: tiles::WindowId,
     pub file_name: String,
     pub title: Option<String>,
-    pub schematic: Schematic<Entity>,
+    pub schematic: Schematic,
 }
 
 #[derive(Resource, Debug, Default, Clone)]
-pub struct CurrentSecondarySchematics(pub Vec<SecondarySchematic>);
+pub struct CurrentWindowSchematics(pub Vec<WindowSchematicEntry>);
 
 #[derive(SystemParam)]
 pub struct SchematicParam<'w, 's> {
@@ -65,7 +74,7 @@ pub struct SchematicParam<'w, 's> {
     >,
     pub windows_state: Query<'w, 's, (&'static tiles::WindowState, &'static tiles::WindowId)>,
     pub primary_window: Single<'w, 's, Entity, With<PrimaryWindow>>,
-    pub dashboards: Query<'w, 's, &'static Dashboard<Entity>>,
+    pub current_document: Res<'w, CurrentDocument>,
     pub video_streams: Query<'w, 's, &'static super::video_stream::VideoStream>,
     pub log_streams: Query<'w, 's, &'static super::log_stream::LogStreamState>,
     pub hdr_enabled: Res<'w, HdrEnabled>,
@@ -97,7 +106,6 @@ impl SchematicParam<'_, '_> {
                         .map(|data| data.data.name.clone())
                 }),
             Pane::ActionTile(action) => Some(action.name.clone()),
-            Pane::Dashboard(dashboard) => Some(dashboard.name.clone()),
             Pane::SchematicTree(pane) => Some(pane.name.clone()),
             Pane::DataOverview(pane) => Some(pane.name.clone()),
             Pane::VideoStream(pane) => Some(pane.name.clone()),
@@ -106,24 +114,28 @@ impl SchematicParam<'_, '_> {
         }
     }
 
-    fn root_panels_from_state(&self, state: &tiles::TileState) -> Vec<Panel<Entity>> {
+    fn root_panels_from_state(
+        &self,
+        state: &tiles::TileState,
+        bindings: &mut SchematicBindings,
+    ) -> Vec<Panel> {
         let Some(root_id) = state.tree.root() else {
             return Vec::new();
         };
 
-        match self.get_panel_from_state(state, root_id) {
+        match self.get_panel_from_state(state, root_id, bindings) {
             Some(Panel::Tabs(tabs)) => vec![Panel::Tabs(tabs)],
             Some(panel) => vec![panel],
             None => Vec::new(),
         }
     }
 
-    pub fn get_panel(&self, tile_id: TileId) -> Option<Panel<Entity>> {
+    pub fn get_panel(&self, tile_id: TileId, bindings: &mut SchematicBindings) -> Option<Panel> {
         self.windows_state
             .get(*self.primary_window)
             .ok()
             .and_then(|(window_state, _)| {
-                self.get_panel_from_state(&window_state.tile_state, tile_id)
+                self.get_panel_from_state(&window_state.tile_state, tile_id, bindings)
             })
     }
 
@@ -131,7 +143,8 @@ impl SchematicParam<'_, '_> {
         &self,
         state: &tiles::TileState,
         tile_id: TileId,
-    ) -> Option<Panel<Entity>> {
+        bindings: &mut SchematicBindings,
+    ) -> Option<Panel> {
         let tiles = &state.tree.tiles;
         let tile = tiles.get(tile_id)?;
 
@@ -208,6 +221,8 @@ impl SchematicParam<'_, '_> {
                             self.geo_positions.get(cam_entity)
                             .map(|geo_pos| geo_pos.0).ok();
 
+                        let node_id = impeller2_wkt::NodeId::next();
+                        bindings.bind_ephemeral(node_id, cam_entity);
                         Some(Panel::Viewport(Viewport {
                             fov,
                             near,
@@ -228,8 +243,8 @@ impl SchematicParam<'_, '_> {
                             up: (!viewport_data.up.eql.is_empty())
                                 .then(|| viewport_data.up.eql.clone()),
                             local_arrows,
-                            aux: cam_entity,
                             frame,
+                            node_id,
                         }))
                     }
 
@@ -256,6 +271,8 @@ impl SchematicParam<'_, '_> {
                             eql = graph_state.label.clone();
                         }
 
+                        let node_id = impeller2_wkt::NodeId::next();
+                        bindings.bind_ephemeral(node_id, graph.id);
                         Some(Panel::Graph(impeller2_wkt::Graph {
                             eql,
                             name: pane_name,
@@ -263,7 +280,7 @@ impl SchematicParam<'_, '_> {
                             locked: graph_state.locked,
                             auto_y_range: graph_state.auto_y_range,
                             y_range: graph_state.y_range.clone(),
-                            aux: graph.id,
+                            node_id,
                             colors,
                         }))
                     }
@@ -284,12 +301,15 @@ impl SchematicParam<'_, '_> {
                     }
 
                     Pane::QueryPlot(plot) => {
-                        let query_plot = self.query_plots.get(plot.entity).ok()?;
-                        let mut query_plot = query_plot.data.map_aux(|_| plot.entity);
+                        let query_plot_data = self.query_plots.get(plot.entity).ok()?;
+                        let node_id = impeller2_wkt::NodeId::next();
+                        bindings.bind_ephemeral(node_id, plot.entity);
+                        let mut qp = query_plot_data.data.clone();
+                        qp.node_id = node_id;
                         if let Some(name) = pane_name {
-                            query_plot.name = name;
+                            qp.name = name;
                         }
-                        Some(Panel::QueryPlot(query_plot))
+                        Some(Panel::QueryPlot(qp))
                     }
 
                     Pane::ActionTile(action) => {
@@ -325,15 +345,6 @@ impl SchematicParam<'_, '_> {
 
                     // Structural panes
                     Pane::SchematicTree(_) => Some(Panel::SchematicTree(pane_name)),
-
-                    // Dashboard
-                    Pane::Dashboard(dash) => {
-                        let mut dashboard = self.dashboards.get(dash.entity).ok()?.clone();
-                        if let Some(name) = pane_name {
-                            dashboard.root.name = Some(name);
-                        }
-                        Some(Panel::Dashboard(Box::new(dashboard)))
-                    }
                 }
             }
 
@@ -342,7 +353,7 @@ impl SchematicParam<'_, '_> {
                 egui_tiles::Container::Tabs(t) => {
                     let mut tabs = vec![];
                     for child_id in &t.children {
-                        if let Some(tab) = self.get_panel_from_state(state, *child_id) {
+                        if let Some(tab) = self.get_panel_from_state(state, *child_id, bindings) {
                             tabs.push(tab)
                         }
                     }
@@ -359,7 +370,7 @@ impl SchematicParam<'_, '_> {
                     let name = state.get_container_title(tile_id).map(|s| s.to_string());
 
                     for child_id in &linear.children {
-                        if let Some(panel) = self.get_panel_from_state(state, *child_id) {
+                        if let Some(panel) = self.get_panel_from_state(state, *child_id, bindings) {
                             if let Some((_, share)) =
                                 linear.shares.iter().find(|(id, _)| *id == child_id)
                             {
@@ -396,42 +407,58 @@ impl SchematicParam<'_, '_> {
 pub fn tiles_to_schematic(
     param: SchematicParam,
     mut schematic: ResMut<CurrentSchematic>,
-    mut secondary: ResMut<CurrentSecondarySchematics>,
+    mut window_schematics: ResMut<CurrentWindowSchematics>,
+    mut bindings: ResMut<SchematicBindings>,
 ) {
     schematic.elems.clear();
+    bindings.clear_ephemeral();
 
-    if let Some(root_panels) = param
-        .windows_state
-        .get(*param.primary_window)
-        .ok()
-        .map(|(window_state, _)| param.root_panels_from_state(&window_state.tile_state))
+    if let Some(root_panels) =
+        param
+            .windows_state
+            .get(*param.primary_window)
+            .ok()
+            .map(|(window_state, _)| {
+                param.root_panels_from_state(&window_state.tile_state, &mut bindings)
+            })
     {
         schematic
             .elems
             .extend(root_panels.into_iter().map(SchematicElem::Panel))
     }
-    schematic.elems.extend(
-        param
-            .objects_3d
-            .iter()
-            .map(|(entity, o)| o.data.map_aux(|_| entity))
-            .map(SchematicElem::Object3d),
-    );
-    schematic.elems.extend(
-        param
-            .lines_3d
-            .iter()
-            .map(|(entity, line)| SchematicElem::Line3d(line.map_aux(|_| entity))),
-    );
+    schematic
+        .elems
+        .extend(param.objects_3d.iter().map(|(entity, o)| {
+            let mut obj = o.data.clone();
+            let node_id = impeller2_wkt::NodeId::next();
+            bindings.bind_ephemeral(node_id, entity);
+            obj.node_id = node_id;
+            SchematicElem::Object3d(obj)
+        }));
+    schematic
+        .elems
+        .extend(param.lines_3d.iter().map(|(entity, line)| {
+            let mut l = line.clone();
+            let node_id = impeller2_wkt::NodeId::next();
+            bindings.bind_ephemeral(node_id, entity);
+            l.node_id = node_id;
+            SchematicElem::Line3d(l)
+        }));
     schematic.elems.extend(
         param
             .vector_arrows
             .iter()
             .filter(|(_, _, viewport_arrow)| viewport_arrow.is_none())
-            .map(|(entity, arrow, _)| SchematicElem::VectorArrow(arrow.map_aux(|_| entity))),
+            .map(|(entity, arrow, _)| {
+                let mut a = arrow.clone();
+                let node_id = impeller2_wkt::NodeId::next();
+                bindings.bind_ephemeral(node_id, entity);
+                a.node_id = node_id;
+                SchematicElem::VectorArrow(a)
+            }),
     );
 
-    secondary.0.clear();
+    window_schematics.0.clear();
     let mut window_elems = Vec::new();
     let mut name_counts: HashMap<String, usize> = HashMap::new();
     for (state, window_id) in &param.windows_state {
@@ -443,22 +470,23 @@ pub fn tiles_to_schematic(
             if computed_title != "Panel" {
                 window_title = Some(computed_title);
             }
-            let base_stem = preferred_secondary_stem(state);
+            let base_stem = preferred_window_stem(state);
             let unique_stem = ensure_unique_stem(&mut name_counts, &base_stem);
             file_name = Some(format!("{unique_stem}.kdl"));
 
-            let mut window_schematic = Schematic::default();
-            window_schematic.elems.extend(
+            let mut win_schematic = Schematic::default();
+            win_schematic.elems.extend(
                 param
-                    .root_panels_from_state(&state.tile_state)
+                    .root_panels_from_state(&state.tile_state, &mut bindings)
                     .into_iter()
                     .map(SchematicElem::Panel),
             );
             if let Some(file_name) = &file_name {
-                secondary.0.push(SecondarySchematic {
+                window_schematics.0.push(WindowSchematicEntry {
+                    window_id: *window_id,
                     file_name: file_name.clone(),
                     title: window_title.clone(),
-                    schematic: window_schematic,
+                    schematic: win_schematic,
                 });
             }
         }
@@ -488,22 +516,32 @@ pub struct SchematicPlugin;
 
 impl Plugin for SchematicPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins(load::plugin)
-            .insert_resource(CurrentSchematic(Default::default()))
-            .insert_resource(CurrentSecondarySchematics::default())
+        app.insert_resource(CurrentSchematic(Default::default()))
+            .insert_resource(CurrentWindowSchematics::default())
+            .init_resource::<SchematicBindings>()
             .add_systems(PostUpdate, tiles_to_schematic)
             .add_systems(
                 PostUpdate,
-                load::apply_initial_kdl_path
-                    .pipe(sync_schematic)
+                apply_initial_kdl_path
+                    .pipe(sync_document_from_config)
                     .before(tiles_to_schematic),
             )
-            .init_resource::<SchematicLiveReloadRx>()
-            .add_systems(PreUpdate, load::schematic_live_reload);
+            .add_systems(
+                PreUpdate,
+                (
+                    load::apply_document_cleared,
+                    load::apply_document_loaded.before(crate::ui::sync_windows),
+                    load::apply_document_saved,
+                    load::apply_document_reloaded.before(crate::ui::sync_windows),
+                    load::show_document_command_failures,
+                    load::show_document_load_failures,
+                )
+                    .after(KdlDocumentSet::AssetEvents),
+            );
     }
 }
 
-fn preferred_secondary_stem(state: &tiles::WindowState) -> String {
+fn preferred_window_stem(state: &tiles::WindowState) -> String {
     if let Some(title) = state.descriptor.title.as_deref() {
         let stem = sanitize_to_stem(title);
         if !stem.is_empty() {
@@ -522,7 +560,7 @@ fn preferred_secondary_stem(state: &tiles::WindowState) -> String {
             return stem;
         }
     }
-    "secondary".to_string()
+    "window".to_string()
 }
 
 pub fn sanitize_to_stem(input: &str) -> String {
@@ -542,7 +580,7 @@ pub fn sanitize_to_stem(input: &str) -> String {
 }
 
 fn ensure_unique_stem(counts: &mut HashMap<String, usize>, stem: &str) -> String {
-    let base = if stem.is_empty() { "secondary" } else { stem };
+    let base = if stem.is_empty() { "window" } else { stem };
     let entry = counts.entry(base.to_string()).or_insert(0);
     let current = *entry;
     *entry += 1;
