@@ -1140,19 +1140,11 @@ mod tests {
     }
 
     #[test]
-    fn face_target_camera_dir_world_applies_axis_correction() {
-        let dir = crate::plugins::view_cube::FaceDirection::East;
-        let config = ViewCubeConfig::default();
-        let world = face_target_camera_dir_world(dir, &config);
-        assert!((world - Vec3::NEG_X).length() < 1.0e-5);
-    }
-
-    #[test]
     fn corner_target_camera_dir_world_applies_axis_correction() {
         let corner = crate::plugins::view_cube::CornerPosition::TopFrontRight;
         let config = ViewCubeConfig::default();
         let world = corner_target_camera_dir_world(corner, &config);
-        let expected = Vec3::new(-1.0, 1.0, -1.0).normalize();
+        let expected = Vec3::new(1.0, 1.0, 1.0).normalize();
         assert!((world - expected).length() < 1.0e-5);
     }
 

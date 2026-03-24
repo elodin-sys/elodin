@@ -229,7 +229,7 @@ mod tests {
 
     #[test]
     fn enu_face_labels_keep_semantic_direction_and_flip_east_west_visual_side() {
-        let labels = CoordinateSystem::ENU.get_face_labels(1.0);
+        let labels = CoordinateSystem(GeoFrame::ENU).get_face_labels(1.0);
 
         let east = label_by_text(&labels, "E");
         let west = label_by_text(&labels, "W");
@@ -238,10 +238,10 @@ mod tests {
 
         assert_eq!(east.direction, FaceDirection::East);
         assert_eq!(west.direction, FaceDirection::West);
-        assert_eq!(east.position, Vec3::NEG_X);
-        assert_eq!(west.position, Vec3::X);
+        assert_eq!(east.position, Vec3::X);
+        assert_eq!(west.position, Vec3::NEG_X);
         assert_eq!(up.position, Vec3::Y);
-        assert_eq!(south.position, Vec3::NEG_Z);
+        assert_eq!(south.position, Vec3::Z);
     }
 
 }

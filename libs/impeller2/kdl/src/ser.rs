@@ -1275,7 +1275,7 @@ graph "value" {
             frame: Some(GeoFrame::NED),
             mesh_visibility_range: None,
             icon: None,
-            aux: (),
+            node_id: NodeId::next(),
         }));
 
         let serialized = serialize_schematic(&schematic);
@@ -1306,7 +1306,7 @@ graph "value" {
             frame: None, // Default (no frame)
             icon: None,
             mesh_visibility_range: None,
-            aux: (),
+            node_id: NodeId::next(),
         }));
 
         let serialized = serialize_schematic(&schematic);
@@ -1333,7 +1333,6 @@ graph "value" {
                 frame: Some(GeoFrame::NED),
                 local_arrows: Vec::new(),
                 aspect: None,
-                aux: (),
                 ..Default::default()
             })));
 
@@ -1353,7 +1352,7 @@ graph "value" {
             color: Color::WHITE,
             perspective: true,
             frame: Some(GeoFrame::ENU),
-            aux: (),
+            node_id: NodeId::next(),
         }));
 
         let serialized = serialize_schematic(&schematic);
@@ -1380,7 +1379,7 @@ graph "value" {
                 thickness: ArrowThickness::default(),
                 label_position: LabelPosition::None,
                 frame: Some(GeoFrame::ECEF),
-                aux: (),
+                node_id: NodeId::next(),
             }));
 
         let serialized = serialize_schematic(&schematic);
@@ -1634,5 +1633,142 @@ object_3d "rocket.world_pos" {
             panic!()
         };
         assert_eq!(animations.len(), 1, "serialized:\n{serialized}");
+    }
+
+    #[test]
+    fn test_roundtrip_coordinate_frame_ned() {
+        let original = r#"coordinate frame="NED"
+
+viewport name="main"
+"#;
+        let parsed = parse_schematic(original).unwrap();
+        assert_eq!(
+            parsed.frame,
+            Some(bevy_geo_frames::GeoFrame::NED),
+            "Parsed schematic should have NED frame"
+        );
+
+        // Check viewport has its own ENU frame
+        if let SchematicElem::Panel(Panel::Viewport(viewport)) = &parsed.elems[0] {
+            assert_eq!(viewport.frame, None, "Viewport should have no frame");
+        } else {
+            panic!("Expected viewport panel");
+        }
+        let serialized = serialize_schematic(&parsed);
+
+        let expected = r#"coordinate frame=NED
+viewport name=main"#;
+        assert_eq!(serialized, expected, "Full serialized output");
+
+        let reparsed = parse_schematic(&serialized).unwrap();
+        assert_eq!(
+            reparsed.frame,
+            Some(bevy_geo_frames::GeoFrame::NED),
+            "Re-parsed schematic should preserve NED frame"
+        );
+    }
+
+    #[test]
+    fn test_roundtrip_coordinate_frame_enu() {
+        let original = r#"coordinate frame="ENU"
+
+viewport name="main"
+"#;
+        let parsed = parse_schematic(original).unwrap();
+        assert_eq!(parsed.frame, Some(bevy_geo_frames::GeoFrame::ENU));
+
+        let serialized = serialize_schematic(&parsed);
+
+        let expected = r#"coordinate frame=ENU
+viewport name=main"#;
+        assert_eq!(serialized, expected, "Full serialized output");
+
+        let reparsed = parse_schematic(&serialized).unwrap();
+        assert_eq!(reparsed.frame, Some(bevy_geo_frames::GeoFrame::ENU));
+    }
+
+    #[test]
+    fn test_schematic_without_coordinate_frame() {
+        let original = r#"viewport name="main""#;
+        let parsed = parse_schematic(original).unwrap();
+        assert_eq!(parsed.frame, None, "Schematic without coordinate node should have None frame");
+
+        let serialized = serialize_schematic(&parsed);
+        assert!(
+            !serialized.contains("coordinate"),
+            "Serialized output should not contain coordinate when frame is None"
+        );
+    }
+
+    #[test]
+    fn test_roundtrip_global_and_local_frames() {
+        let original = r#"coordinate frame="NED"
+
+viewport name="main" frame="ENU"
+"#;
+        let parsed = parse_schematic(original).unwrap();
+        assert_eq!(
+            parsed.frame,
+            Some(bevy_geo_frames::GeoFrame::NED),
+            "Global frame should be NED"
+        );
+
+        // Check viewport has its own ENU frame
+        if let SchematicElem::Panel(Panel::Viewport(viewport)) = &parsed.elems[0] {
+            assert_eq!(viewport.frame, Some(GeoFrame::ENU), "Viewport should have ENU frame");
+        } else {
+            panic!("Expected viewport panel");
+        }
+
+        let serialized = serialize_schematic(&parsed);
+
+        let expected = r#"coordinate frame=NED
+viewport name=main frame=ENU"#;
+        assert_eq!(serialized, expected, "Full serialized output");
+
+        // Verify round-trip preserves both frames
+        let reparsed = parse_schematic(&serialized).unwrap();
+        assert_eq!(reparsed.frame, Some(bevy_geo_frames::GeoFrame::NED));
+        if let SchematicElem::Panel(Panel::Viewport(viewport)) = &reparsed.elems[0] {
+            assert_eq!(viewport.frame, Some(GeoFrame::ENU));
+        } else {
+            panic!("Expected viewport panel after reparse");
+        }
+    }
+
+    #[test]
+    fn test_roundtrip_same_global_and_local_frames() {
+        let original = r#"coordinate frame="NED"
+
+viewport name="main" frame="NED"
+"#;
+        let parsed = parse_schematic(original).unwrap();
+        assert_eq!(
+            parsed.frame,
+            Some(bevy_geo_frames::GeoFrame::NED),
+            "Global frame should be NED"
+        );
+
+        // Check viewport has its own ENU frame
+        if let SchematicElem::Panel(Panel::Viewport(viewport)) = &parsed.elems[0] {
+            assert_eq!(viewport.frame, Some(GeoFrame::NED), "Viewport should have ENU frame");
+        } else {
+            panic!("Expected viewport panel");
+        }
+
+        let serialized = serialize_schematic(&parsed);
+
+        let expected = r#"coordinate frame=NED
+viewport name=main frame=NED"#;
+        assert_eq!(serialized, expected, "Full serialized output");
+
+        // Verify round-trip preserves both frames
+        let reparsed = parse_schematic(&serialized).unwrap();
+        assert_eq!(reparsed.frame, Some(bevy_geo_frames::GeoFrame::NED));
+        if let SchematicElem::Panel(Panel::Viewport(viewport)) = &reparsed.elems[0] {
+            assert_eq!(viewport.frame, Some(GeoFrame::NED));
+        } else {
+            panic!("Expected viewport panel after reparse");
+        }
     }
 }

@@ -49,7 +49,13 @@ use ui::{
     tiles,
     utils::FriendlyEpoch,
 };
-use bevy_geo_frames::{GeoPosition, GeoRotation};
+use bevy_geo_frames::{GeoFrame, GeoPosition, GeoRotation};
+
+/// Global coordinate frame resource set by the schematic's top-level `coordinate` node.
+/// Individual elements (viewport, object_3d, line_3d, vector_arrow) use this as a fallback
+/// when they don't specify their own frame.
+#[derive(Resource, Default, Clone, Copy, Debug)]
+pub struct Coordinate(pub Option<GeoFrame>);
 
 pub mod icon_rasterizer;
 pub mod iter;
@@ -285,6 +291,7 @@ impl Plugin for EditorPlugin {
             .insert_resource(SelectedTimeRange(Timestamp(i64::MIN)..Timestamp(i64::MAX)))
             .insert_resource(FullTimeRange(Timestamp(0)..Timestamp(1_000_000)))
             .init_resource::<EqlContext>()
+            .init_resource::<Coordinate>()
             .init_resource::<SyncedObject3d>()
             .init_resource::<ui::data_overview::ComponentTimeRanges>()
             .add_plugins(bevy_mat3_material::Mat3MaterialPlugin)

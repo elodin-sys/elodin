@@ -64,6 +64,35 @@ fn tabs_parent_for_panels(tile_state: &TileState, panel_count: usize) -> Option<
     }
 }
 
+fn apply_fallback_frame_to_panel(
+    panel: &Panel,
+    fallback_frame: Option<bevy_geo_frames::GeoFrame>,
+) -> Panel {
+    match panel {
+        Panel::Viewport(viewport) => {
+            let mut v = viewport.clone();
+            if v.frame.is_none() {
+                v.frame = fallback_frame;
+            }
+            Panel::Viewport(v)
+        }
+        Panel::Tabs(panels) => {
+            Panel::Tabs(panels.iter().map(|p| apply_fallback_frame_to_panel(p, fallback_frame)).collect())
+        }
+        Panel::HSplit(split) => {
+            let mut s = split.clone();
+            s.panels = s.panels.iter().map(|p| apply_fallback_frame_to_panel(p, fallback_frame)).collect();
+            Panel::HSplit(s)
+        }
+        Panel::VSplit(split) => {
+            let mut s = split.clone();
+            s.panels = s.panels.iter().map(|p| apply_fallback_frame_to_panel(p, fallback_frame)).collect();
+            Panel::VSplit(s)
+        }
+        other => other.clone(),
+    }
+}
+
 #[derive(Component)]
 pub struct SyncedViewport;
 
@@ -85,6 +114,7 @@ pub struct LoadSchematicParams<'w, 's> {
     pub schema_reg: Res<'w, ComponentSchemaRegistry>,
     pub eql: Res<'w, EqlContext>,
     pub sensor_camera_configs: Res<'w, crate::sensor_camera::SensorCameraConfigs>,
+    pub coordinate: ResMut<'w, crate::Coordinate>,
     cameras: Query<'w, 's, &'static mut Camera>,
     objects_3d: Query<'w, 's, Entity, With<Object3DState>>,
     vector_arrows: Query<'w, 's, Entity, With<VectorArrowState>>,
@@ -185,6 +215,9 @@ impl LoadSchematicParams<'_, '_> {
         base_dir: Option<&Path>,
         window_assets: Option<&[SchematicWindow]>,
     ) {
+        // Set global coordinate frame from schematic
+        self.coordinate.0 = schematic.frame;
+
         self.render_layer_alloc.free_all();
         for (id, window_id, window_state) in &self.window_states {
             if window_id.is_primary() {
@@ -231,29 +264,44 @@ impl LoadSchematicParams<'_, '_> {
         let tabs_parent = tabs_parent_for_panels(&main_state, panel_count);
         let mut main_ui_state = crate::ui::WindowUiState::default();
 
+        let fallback_frame = self.coordinate.0;
         for elem in &schematic.elems {
             match elem {
                 impeller2_wkt::SchematicElem::Panel(p) => {
+                    let p = apply_fallback_frame_to_panel(p, fallback_frame);
                     self.spawn_panel(
                         &mut main_state,
                         &mut main_ui_state,
-                        p,
+                        &p,
                         tabs_parent,
                         PanelContext::Main,
                     );
                 }
                 impeller2_wkt::SchematicElem::Object3d(object_3d) => {
-                    self.spawn_object_3d(object_3d.clone());
+                    let mut obj = object_3d.clone();
+                    if obj.frame.is_none() {
+                        obj.frame = fallback_frame;
+                    }
+                    self.spawn_object_3d(obj);
                 }
                 impeller2_wkt::SchematicElem::Line3d(line_3d) => {
-                    self.spawn_line_3d(line_3d.clone());
+                    let mut line = line_3d.clone();
+                    if line.frame.is_none() {
+                        line.frame = fallback_frame;
+                    }
+                    self.spawn_line_3d(line);
                 }
                 impeller2_wkt::SchematicElem::VectorArrow(vector_arrow) => {
-                    self.spawn_vector_arrow(vector_arrow.clone(), None);
+                    let mut arrow = vector_arrow.clone();
+                    if arrow.frame.is_none() {
+                        arrow.frame = fallback_frame;
+                    }
+                    self.spawn_vector_arrow(arrow, None);
                 }
                 impeller2_wkt::SchematicElem::Window(_) => {}
                 impeller2_wkt::SchematicElem::Theme(_) => {}
                 impeller2_wkt::SchematicElem::Timeline(_) => {}
+                impeller2_wkt::SchematicElem::Coordinate(_) => {}
             }
         }
 
