@@ -1,8 +1,6 @@
 use std::iter;
 use std::process::Stdio;
 use std::{
-    collections::HashSet,
-    fs,
     net::{Ipv4Addr, SocketAddr},
     path::PathBuf,
 };
