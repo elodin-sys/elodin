@@ -1,9 +1,9 @@
 use anyhow::Context;
 use impeller2::types::{LenPacket, Msg, PacketId, msg_id};
+use impeller2_stellar::SinkExt;
 use impeller2_wkt::{
     MsgMetadata, MsgStream, SetComponentMetadata, SetMsgMetadata, log_entry_msg_schema,
 };
-use impeller2_stellar::SinkExt;
 use serde::{Deserialize, Serialize};
 use std::{env, net::SocketAddr, time::Duration};
 use stellarator::io::{AsyncRead, AsyncWrite};

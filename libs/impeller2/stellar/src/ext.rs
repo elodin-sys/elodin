@@ -2,7 +2,7 @@ use impeller2::buf::{Slice, deref};
 use impeller2::types::{Msg, PacketId};
 use impeller2::vtable::AsVTable;
 use impeller2_wkt::{
-    MsgMetadata, Metadatatize, SetComponentMetadata, SetMsgMetadata, StreamReply, VTableMsg,
+    Metadatatize, MsgMetadata, SetComponentMetadata, SetMsgMetadata, StreamReply, VTableMsg,
     VTableStream,
 };
 use std::future::Future;
@@ -20,9 +20,8 @@ pub trait SinkExt {
         &self,
         vtable_id: PacketId,
     ) -> impl Future<Output = Result<(), Error>>;
-    fn init_msg<M: postcard_schema::Schema + Msg>(
-        &self,
-    ) -> impl Future<Output = Result<(), Error>>;
+    fn init_msg<M: postcard_schema::Schema + Msg>(&self)
+    -> impl Future<Output = Result<(), Error>>;
 }
 
 impl<W: AsyncWrite> SinkExt for crate::PacketSink<W> {

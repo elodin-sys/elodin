@@ -1,8 +1,8 @@
 use std::{fmt::Display, net::SocketAddr, sync::OnceLock};
 
-use nu_ansi_term::{Color, Style};
 use db_macros::AsVTable;
 use impeller2_stellar::StreamExt;
+use nu_ansi_term::{Color, Style};
 use zerocopy::{Immutable, KnownLayout, TryFromBytes};
 
 use viuer::KittySupport;

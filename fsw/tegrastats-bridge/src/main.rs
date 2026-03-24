@@ -1,7 +1,7 @@
+use db_macros::{AsVTable, Metadatatize};
 use futures_concurrency::future::Join;
 use impeller2::types::{LenPacket, PacketId, Timestamp};
 use impeller2_stellar::Client;
-use db_macros::{AsVTable, Metadatatize};
 use impeller2_stellar::SinkExt;
 use std::{mem, net::SocketAddr, time::Duration};
 use stellarator::{fs::File, rent};
