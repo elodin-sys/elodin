@@ -1,6 +1,9 @@
 use std::{
     net::SocketAddr,
-    sync::Arc,
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
     time::{Duration, Instant},
 };
 
@@ -12,7 +15,7 @@ use impeller2::{
 };
 use impeller2_stellar::Client;
 use impeller2_wkt::{SubscribeLastUpdated, VTableMsg};
-use stellarator::{net::TcpListener, sleep, spawn, struc_con::stellar, sync::WaitQueue};
+use stellarator::{net::TcpListener, sleep, spawn, struc_con::stellar};
 
 #[derive(Parser)]
 #[command(about = "Elodin-DB throughput benchmark")]
@@ -48,46 +51,129 @@ struct BenchResult {
     duration_secs: f64,
     total_writes: u64,
     throughput_writes_per_sec: f64,
+    target_writes_per_sec: f64,
+    achieved_ratio: f64,
+    data_volume_mb: f64,
+    data_rate_mb_per_sec: f64,
+    effective_freq_per_component: f64,
     with_reader: bool,
     clients: usize,
+    per_second_throughput: Vec<u64>,
+    send_latency_p50_us: u64,
+    send_latency_p95_us: u64,
+    send_latency_p99_us: u64,
+    send_latency_max_us: u64,
 }
 
 impl BenchResult {
     fn print_human(&self) {
-        eprintln!("=== elodin-db benchmark ===");
-        eprintln!("scenario:     {}", self.scenario);
-        eprintln!("components:   {}", self.components);
-        eprintln!("frequency:    {} Hz", self.frequency);
-        eprintln!("clients:      {}", self.clients);
-        eprintln!("with_reader:  {}", self.with_reader);
-        eprintln!("duration:     {:.2}s", self.duration_secs);
-        eprintln!("total_writes: {}", self.total_writes);
+        eprintln!("╔══════════════════════════════════════════════╗");
+        eprintln!("║          elodin-db benchmark results         ║");
+        eprintln!("╠══════════════════════════════════════════════╣");
+        eprintln!("║ scenario:      {:<30}║", self.scenario);
+        eprintln!("║ components:    {:<30}║", self.components);
+        eprintln!("║ frequency:     {:<27} Hz ║", self.frequency);
+        eprintln!("║ clients:       {:<30}║", self.clients);
+        eprintln!("║ with_reader:   {:<30}║", self.with_reader);
+        eprintln!("╠══════════════════════════════════════════════╣");
         eprintln!(
-            "throughput:   {:.0} writes/sec",
+            "║ duration:      {:<28.2}s ║",
+            self.duration_secs
+        );
+        eprintln!("║ total_writes:  {:<30}║", self.total_writes);
+        eprintln!(
+            "║ throughput:    {:<23.0} writes/s ║",
             self.throughput_writes_per_sec
         );
+        eprintln!(
+            "║ target:        {:<23.0} writes/s ║",
+            self.target_writes_per_sec
+        );
+        eprintln!(
+            "║ achieved:      {:<28.1}% ║",
+            self.achieved_ratio * 100.0
+        );
+        eprintln!("╠══════════════════════════════════════════════╣");
+        eprintln!(
+            "║ data volume:   {:<27.2} MB ║",
+            self.data_volume_mb
+        );
+        eprintln!(
+            "║ data rate:     {:<24.2} MB/s ║",
+            self.data_rate_mb_per_sec
+        );
+        eprintln!(
+            "║ effective freq:{:<27.1} Hz ║",
+            self.effective_freq_per_component
+        );
+        eprintln!("╠══════════════════════════════════════════════╣");
+        eprintln!(
+            "║ send latency p50:  {:<23} µs ║",
+            self.send_latency_p50_us
+        );
+        eprintln!(
+            "║ send latency p95:  {:<23} µs ║",
+            self.send_latency_p95_us
+        );
+        eprintln!(
+            "║ send latency p99:  {:<23} µs ║",
+            self.send_latency_p99_us
+        );
+        eprintln!(
+            "║ send latency max:  {:<23} µs ║",
+            self.send_latency_max_us
+        );
+        eprintln!("╠══════════════════════════════════════════════╣");
+        eprintln!("║ per-second throughput (writes/s):            ║");
+        for (i, &t) in self.per_second_throughput.iter().enumerate() {
+            eprintln!("║   t={:<3}s  {:<35}║", i + 1, t);
+        }
+        eprintln!("╚══════════════════════════════════════════════╝");
     }
 
     fn print_json(&self) {
+        let per_sec: Vec<String> = self.per_second_throughput.iter().map(|v| v.to_string()).collect();
         println!(
-            "{{\
-            \"scenario\":\"{}\",\
-            \"components\":{},\
-            \"frequency\":{},\
-            \"duration_secs\":{:.3},\
-            \"total_writes\":{},\
-            \"throughput_writes_per_sec\":{:.1},\
-            \"with_reader\":{},\
-            \"clients\":{}\
-            }}",
+            concat!(
+                "{{",
+                "\"scenario\":\"{}\",",
+                "\"components\":{},",
+                "\"frequency\":{},",
+                "\"clients\":{},",
+                "\"with_reader\":{},",
+                "\"duration_secs\":{:.3},",
+                "\"total_writes\":{},",
+                "\"throughput_writes_per_sec\":{:.1},",
+                "\"target_writes_per_sec\":{:.1},",
+                "\"achieved_ratio\":{:.4},",
+                "\"data_volume_mb\":{:.2},",
+                "\"data_rate_mb_per_sec\":{:.2},",
+                "\"effective_freq_per_component\":{:.1},",
+                "\"send_latency_p50_us\":{},",
+                "\"send_latency_p95_us\":{},",
+                "\"send_latency_p99_us\":{},",
+                "\"send_latency_max_us\":{},",
+                "\"per_second_throughput\":[{}]",
+                "}}"
+            ),
             self.scenario,
             self.components,
             self.frequency,
+            self.clients,
+            self.with_reader,
             self.duration_secs,
             self.total_writes,
             self.throughput_writes_per_sec,
-            self.with_reader,
-            self.clients,
+            self.target_writes_per_sec,
+            self.achieved_ratio,
+            self.data_volume_mb,
+            self.data_rate_mb_per_sec,
+            self.effective_freq_per_component,
+            self.send_latency_p50_us,
+            self.send_latency_p95_us,
+            self.send_latency_p99_us,
+            self.send_latency_max_us,
+            per_sec.join(","),
         );
     }
 }
@@ -171,50 +257,84 @@ async fn run_benchmark(
 
     sleep(Duration::from_millis(100)).await;
 
-    // Optionally connect a reader (simulates an Editor follow stream)
     if with_reader {
         let reader_addr = addr;
         stellar(move || run_reader(reader_addr));
     }
 
-    // Distribute components across clients
     let components_per_client = distribute(num_components, num_clients);
 
-    let done = Arc::new(WaitQueue::new());
+    // Shared counters for per-second sampling
+    let write_counter = Arc::new(AtomicU64::new(0));
+    // Collect send latencies (in microseconds) from all clients
+    let latencies = Arc::new(std::sync::Mutex::new(Vec::<u64>::new()));
+
     let start = Instant::now();
     let target_duration = Duration::from_secs(duration_secs);
     let interval = Duration::from_secs_f64(1.0 / frequency as f64);
 
+    // Spawn per-second sampler
+    let sampler_counter = write_counter.clone();
+    let sampler_duration = duration_secs;
+    let sampler = spawn(async move {
+        let mut per_second = Vec::new();
+        for _ in 0..sampler_duration {
+            let before = sampler_counter.load(Ordering::Relaxed);
+            sleep(Duration::from_secs(1)).await;
+            let after = sampler_counter.load(Ordering::Relaxed);
+            per_second.push(after - before);
+        }
+        per_second
+    });
+
     let mut handles = Vec::new();
     let mut vtable_base: u16 = 1;
 
-    for (client_idx, &n) in components_per_client.iter().enumerate() {
+    for &n in components_per_client.iter() {
         let base = vtable_base;
         vtable_base += n as u16;
-        let done = done.clone();
+        let counter = write_counter.clone();
+        let lat = latencies.clone();
 
         handles.push(spawn(run_writer(
             addr,
-            client_idx,
             n,
             base,
             interval,
             target_duration,
-            done,
+            counter,
+            lat,
         )));
     }
 
-    // Wait for all writers to finish
     for handle in handles {
         let _ = handle.await;
     }
 
     let elapsed = start.elapsed();
-
-    // Count total writes via the DB
+    let per_second_throughput = sampler.await.unwrap_or_default();
     let total_writes = count_total_samples(addr, num_components).await;
 
-    // Cleanup
+    // Compute latency percentiles
+    let mut lat_samples = latencies.lock().unwrap().clone();
+    lat_samples.sort_unstable();
+    let (p50, p95, p99, max) = if lat_samples.is_empty() {
+        (0, 0, 0, 0)
+    } else {
+        let len = lat_samples.len();
+        (
+            lat_samples[len * 50 / 100],
+            lat_samples[len * 95 / 100],
+            lat_samples[len.saturating_sub(1).min(len * 99 / 100)],
+            lat_samples[len - 1],
+        )
+    };
+
+    let target_writes_per_sec = num_components as f64 * frequency as f64;
+    let throughput = total_writes as f64 / elapsed.as_secs_f64();
+    let data_bytes = total_writes * 8; // f64 = 8 bytes per write
+    let data_volume_mb = data_bytes as f64 / (1024.0 * 1024.0);
+
     let _ = std::fs::remove_dir_all(&temp_dir);
 
     BenchResult {
@@ -223,24 +343,33 @@ async fn run_benchmark(
         frequency,
         duration_secs: elapsed.as_secs_f64(),
         total_writes,
-        throughput_writes_per_sec: total_writes as f64 / elapsed.as_secs_f64(),
+        throughput_writes_per_sec: throughput,
+        target_writes_per_sec,
+        achieved_ratio: throughput / target_writes_per_sec,
+        data_volume_mb,
+        data_rate_mb_per_sec: data_volume_mb / elapsed.as_secs_f64(),
+        effective_freq_per_component: throughput / num_components as f64,
         with_reader,
         clients: num_clients,
+        per_second_throughput,
+        send_latency_p50_us: p50,
+        send_latency_p95_us: p95,
+        send_latency_p99_us: p99,
+        send_latency_max_us: max,
     }
 }
 
 async fn run_writer(
     addr: SocketAddr,
-    _client_idx: usize,
     num_components: usize,
     vtable_base: u16,
     interval: Duration,
     target_duration: Duration,
-    _done: Arc<WaitQueue>,
+    write_counter: Arc<AtomicU64>,
+    latencies: Arc<std::sync::Mutex<Vec<u64>>>,
 ) -> u64 {
     let mut client = Client::connect(addr).await.unwrap();
 
-    // Register VTables -- one per component, each a scalar f64
     for i in 0..num_components {
         let vtable_id = (vtable_base + i as u16).to_le_bytes();
         let comp_name = format!("bench_comp_{}", vtable_base as usize + i);
@@ -264,8 +393,12 @@ async fn run_writer(
 
     let start = Instant::now();
     let mut writes: u64 = 0;
+    let mut local_latencies = Vec::new();
+    // Sample latency every N ticks to avoid measurement overhead
+    let sample_every = 10;
 
     while start.elapsed() < target_duration {
+        let tick_start = Instant::now();
         for i in 0..num_components {
             let vtable_id = (vtable_base + i as u16).to_le_bytes();
             let value = writes as f64;
@@ -274,7 +407,17 @@ async fn run_writer(
             client.send(pkt).await.0.unwrap();
             writes += 1;
         }
+        write_counter.fetch_add(num_components as u64, Ordering::Relaxed);
+
+        if writes.is_multiple_of(num_components as u64 * sample_every) {
+            local_latencies.push(tick_start.elapsed().as_micros() as u64);
+        }
+
         sleep(interval).await;
+    }
+
+    if let Ok(mut global) = latencies.lock() {
+        global.extend_from_slice(&local_latencies);
     }
 
     writes

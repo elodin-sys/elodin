@@ -125,7 +125,17 @@ test_steps = [
             nix_step(
                 emoji=":racehorse:",
                 label="perf-elodin-db",
-                command="cargo build --release -p elodin-db --bin elodin-db-bench && ./target/release/elodin-db-bench --scenario customer",
+                command=" && ".join([
+                    "cargo build --release -p elodin-db --bin elodin-db-bench",
+                    "echo '--- :racehorse: scenario: customer'",
+                    "./target/release/elodin-db-bench --scenario customer",
+                    "echo '--- :racehorse: scenario: high-freq'",
+                    "./target/release/elodin-db-bench --scenario high-freq",
+                    "echo '--- :racehorse: scenario: high-fanout'",
+                    "./target/release/elodin-db-bench --scenario high-fanout",
+                    "echo '--- :racehorse: scenario: stress'",
+                    "./target/release/elodin-db-bench --scenario stress",
+                ]),
             ),
         ],
     ),
