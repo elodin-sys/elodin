@@ -3,7 +3,6 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use crate::utils::SchemaExt;
-use bevy_geo_frames::GeoFrame;
 use bytemuck::Pod;
 use elodin_db::{ComponentSchema, MetadataExt};
 use impeller2::com_de::FromComponentView;
@@ -65,7 +64,6 @@ pub struct WorldMetadata {
     pub max_tick: u64,
     pub schematic_path: Option<PathBuf>,
     pub schematic: Option<String>,
-    pub frame: GeoFrame,
     #[serde(default)]
     pub sensor_cameras: Vec<SensorCameraConfig>,
 }
@@ -86,7 +84,6 @@ impl Default for WorldMetadata {
             max_tick: u64::MAX,
             schematic: None,
             schematic_path: None,
-            frame: GeoFrame::ENU, // Default for internal use only
             sensor_cameras: Vec::new(),
         }
     }
