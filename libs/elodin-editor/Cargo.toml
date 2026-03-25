@@ -20,8 +20,7 @@ egui_material_icons = "0.5"
 ab_glyph = "0.2"
 
 # bevy
-bevy.version = "0.17"
-bevy.features = ["file_watcher"]
+bevy = { workspace = true, features = ["file_watcher"] }
 bevy_render.version = "0.17"
 bevy_color.version = "0.17"
 bevy_egui.version = "0.38.0"
@@ -31,8 +30,11 @@ egui.version = "0.33.3"
 egui.features = ["rayon"]
 egui_tiles = "0.14"
 egui_table = "0.5"
-winit.version = "0.30.12"
-winit.features = ["rwh_05"]
+winit = { version = "0.30.12", default-features = false, features = [
+  "rwh_05",
+  "rwh_06",
+  "x11",
+] }
 raw-window-handle = "0.5"
 bevy_infinite_grid = "0.17"
 big_space.workspace = true
