@@ -1263,6 +1263,7 @@ impl Decomponentize for DBSink<'_> {
         value: impeller2::types::ComponentView<'_>,
         timestamp: Option<Timestamp>,
     ) -> Result<(), Error> {
+        let _span = tracing::trace_span!("apply_value", %component_id).entered();
         // Warn if a non-follower connection writes to a component being
         // replicated from a followed source.
         if !self.is_follower
@@ -1406,6 +1407,7 @@ async fn handle_conn_inner<A: AsyncRead + AsyncWrite + Send + Sync + 'static>(
     mut rx: PacketStream<OwnedReader<A>>,
     db: Arc<DB>,
 ) -> Result<(), Error> {
+    let _conn_span = tracing::info_span!("handle_conn").entered();
     let mut buf = vec![0u8; 8 * 1024 * 1024];
     let mut resp_pkt = LenPacket::new(PacketTy::Msg, [0, 0], 8 * 1024 * 1024);
     loop {
@@ -1546,6 +1548,7 @@ async fn handle_packet<A: AsyncWrite + Send + Sync + 'static>(
     db: &Arc<DB>,
     tx: &mut PacketTx<A>,
 ) -> Result<PacketAction, Error> {
+    let _pkt_span = tracing::info_span!("handle_packet").entered();
     trace!(?pkt, "handling pkt");
 
     match &pkt {
@@ -1755,6 +1758,7 @@ async fn handle_packet<A: AsyncWrite + Send + Sync + 'static>(
             tx.send_msg(&settings).await?;
         }
         Packet::Table(table) => {
+            let _table_span = tracing::info_span!("sink_table").entered();
             trace!(table.len = table.buf.len(), "sinking table");
             let table_id = table.id;
             let table_buf_len = table.buf.len();

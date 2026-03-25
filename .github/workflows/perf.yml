@@ -1,0 +1,43 @@
+name: Performance
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  db-throughput:
+    name: elodin-db throughput
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - uses: DeterminateSystems/nix-installer-action@main
+      - uses: DeterminateSystems/magic-nix-cache-action@main
+
+      - name: Build benchmark
+        run: nix develop --command cargo build --release -p elodin-db --bin elodin-db-bench
+
+      - name: Run customer scenario (400 components, 250Hz, with reader)
+        run: |
+          nix develop --command ./target/release/elodin-db-bench --scenario customer --json > results.json
+          cat results.json
+
+      - name: Check throughput
+        run: |
+          THROUGHPUT=$(jq .throughput_writes_per_sec results.json)
+          echo "Throughput: $THROUGHPUT writes/sec"
+          if (( $(echo "$THROUGHPUT < 50000" | bc -l) )); then
+            echo "::error::Throughput $THROUGHPUT writes/sec is below 50k threshold"
+            exit 1
+          fi
+          echo "::notice::Throughput $THROUGHPUT writes/sec (threshold: 50000)"
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: db-perf-results
+          path: results.json

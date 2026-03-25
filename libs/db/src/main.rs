@@ -7,6 +7,8 @@ use miette::IntoDiagnostic;
 use postcard_c_codegen::SchemaExt;
 use tracing::info;
 use tracing_subscriber::EnvFilter;
+#[cfg(feature = "tracy")]
+use tracing_subscriber::prelude::*;
 
 #[derive(Parser, Clone)]
 #[command(
@@ -313,12 +315,42 @@ async fn main() -> miette::Result<()> {
         Commands::Run(args) => args.log_level,
         _ => LogLevel::Info,
     };
+
+    // TracyClient binds its port from a C++ static constructor (before main),
+    // so TRACY_PORT must be in the environment before the process starts.
+    #[cfg(all(feature = "tracy", not(target_os = "windows")))]
+    if std::env::var("TRACY_PORT").is_err() {
+        use std::os::unix::process::CommandExt;
+        let exe = std::env::current_exe().expect("failed to get current exe path");
+        let err = std::process::Command::new(exe)
+            .args(&std::env::args().collect::<Vec<_>>()[1..])
+            .env("TRACY_PORT", "8090")
+            .exec();
+        return Err(miette::miette!("re-exec failed: {err}"));
+    }
+
     let filter = if std::env::var("RUST_LOG").is_ok() {
         EnvFilter::builder().from_env_lossy()
     } else {
         EnvFilter::builder().parse_lossy(format!("elodin_db={}", log_level.as_str()))
     };
 
+    #[cfg(feature = "tracy")]
+    {
+        let fmt_layer = tracing_subscriber::fmt::layer()
+            .with_writer(std::io::stderr)
+            .with_target(false)
+            .with_timer(tracing_subscriber::fmt::time::ChronoLocal::new(
+                "%Y-%m-%d %H:%M:%S%.3f".to_string(),
+            ));
+        let _ = tracing_subscriber::registry()
+            .with(filter)
+            .with(fmt_layer)
+            .with(tracing_tracy::TracyLayer::default())
+            .try_init();
+    }
+
+    #[cfg(not(feature = "tracy"))]
     let _ = tracing_subscriber::fmt::fmt()
         .with_writer(std::io::stderr)
         .with_target(false)
