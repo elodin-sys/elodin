@@ -5,17 +5,7 @@ set -eu
 # Default values
 script_dir="$(cd "$(dirname "$0")" && pwd)"
 repo_root="$(cd "$script_dir/.." && pwd)"
-tracked_flake_ref="git+file://${repo_root}?dir=aleph"
-working_tree_flake_ref="path:${repo_root}?dir=aleph"
-flake_ref="$tracked_flake_ref"
-
-if git -C "$repo_root" status --porcelain --untracked-files=all -- aleph fsw libs apps examples .config | awk '
-  BEGIN { found = 0 }
-  /^\?\?/ { found = 1; exit }
-  END { exit found ? 0 : 1 }
-'; then
-  flake_ref="$working_tree_flake_ref"
-fi
+flake_ref="git+file://${repo_root}?dir=aleph"
 
 default_user="${USER}"
 default_host="fde1:2240:a1ef::1"
