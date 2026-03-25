@@ -5,7 +5,7 @@ version.workspace = true
 edition = "2024"
 
 [features]
-bevy = ["dep:bevy", "std", "gui"]
+bevy = ["dep:bevy", "std", "gui", "dep:bevy_geo_frames"]
 nox = ["dep:nox"]
 gui = ["nox"]
 std = ["impeller2/std", "postcard-schema/use-std"]
@@ -42,3 +42,4 @@ mlua.optional = true
 
 bevy_geo_frames.path = "../../bevy_geo_frames"
 bevy_geo_frames.features = ["serde", "big_space"]
+bevy_geo_frames.optional = true
