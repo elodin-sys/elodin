@@ -1,5 +1,7 @@
 #!/bin/sh -e
 
+nrst_method="${ALEPH_NRST_METHOD:-gpio}"
+
 boot0_pidfile="${ALEPH_BOOT0_PIDFILE:-/run/reset-mcu-boot0.pid}"
 boot0_chip="${ALEPH_BOOT0_GPIOCHIP:-gpiochip0}"
 boot0_line="${ALEPH_BOOT0_GPIOLINE:-144}"
@@ -7,6 +9,10 @@ boot0_line="${ALEPH_BOOT0_GPIOLINE:-144}"
 nrst_pidfile="${ALEPH_NRST_PIDFILE:-/run/reset-mcu-nrst.pid}"
 nrst_chip="${ALEPH_NRST_GPIOCHIP:-gpiochip0}"
 nrst_line="${ALEPH_NRST_GPIOLINE:-106}"
+
+nrst_i2c_bus="${ALEPH_NRST_I2C_BUS:-7}"
+nrst_i2c_addr="${ALEPH_NRST_I2C_ADDR:-0x74}"
+nrst_i2c_pin="${ALEPH_NRST_I2C_PIN:-4}"
 
 kill_gpio_holder() {
   pidfile="$1"
@@ -24,18 +30,56 @@ kill_gpio_holder() {
   pkill -f "$pattern" 2>/dev/null || true
 }
 
-set_nrst_low() {
+# --- GPIO NRST (open-source board) ---
+
+gpio_set_nrst_low() {
   kill_nrst_holder
   gpioset --mode=signal "$nrst_chip" "$nrst_line=0" >/dev/null 2>&1 &
   nrst_pid="$!"
   printf '%s\n' "$nrst_pid" > "$nrst_pidfile"
 }
 
-set_nrst_high() {
+gpio_set_nrst_high() {
   kill_nrst_holder
   gpioset --mode=signal "$nrst_chip" "$nrst_line=1" >/dev/null 2>&1 &
   nrst_pid="$!"
   printf '%s\n' "$nrst_pid" > "$nrst_pidfile"
+}
+
+# --- I2C NRST via TCAL9539 expander (custom board) ---
+
+i2c_configure_nrst_output() {
+  cfg=$(i2cget -y "$nrst_i2c_bus" "$nrst_i2c_addr" 0x06)
+  i2cset -y "$nrst_i2c_bus" "$nrst_i2c_addr" 0x06 $(( cfg & ~(1 << nrst_i2c_pin) ))
+}
+
+i2c_set_nrst_low() {
+  i2c_configure_nrst_output
+  val=$(i2cget -y "$nrst_i2c_bus" "$nrst_i2c_addr" 0x02)
+  i2cset -y "$nrst_i2c_bus" "$nrst_i2c_addr" 0x02 $(( val & ~(1 << nrst_i2c_pin) ))
+}
+
+i2c_set_nrst_high() {
+  val=$(i2cget -y "$nrst_i2c_bus" "$nrst_i2c_addr" 0x02)
+  i2cset -y "$nrst_i2c_bus" "$nrst_i2c_addr" 0x02 $(( val | (1 << nrst_i2c_pin) ))
+}
+
+# --- Dispatch ---
+
+set_nrst_low() {
+  case "$nrst_method" in
+    gpio) gpio_set_nrst_low ;;
+    i2c)  i2c_set_nrst_low ;;
+    *)    echo "Unknown NRST method: $nrst_method" >&2; exit 1 ;;
+  esac
+}
+
+set_nrst_high() {
+  case "$nrst_method" in
+    gpio) gpio_set_nrst_high ;;
+    i2c)  i2c_set_nrst_high ;;
+    *)    echo "Unknown NRST method: $nrst_method" >&2; exit 1 ;;
+  esac
 }
 
 kill_boot0_holder() {

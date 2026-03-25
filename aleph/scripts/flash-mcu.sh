@@ -129,20 +129,44 @@ case "$flash_method" in
       exit 1
     fi
 
-    echo "Entering STM32 bootloader on $flash_port"
+    try_probe_bootloader() {
+      attempts=0
+      max_attempts=5
+      while ! uart_probe_bootloader; do
+        attempts=$((attempts + 1))
+        if [ "$attempts" -ge "$max_attempts" ]; then
+          return 1
+        fi
+        sleep 0.1
+      done
+      return 0
+    }
+
+    echo "Entering STM32 bootloader on $flash_port (GPIO reset)"
+    export ALEPH_NRST_METHOD=gpio
     uart_enter_bootloader
     bootloader_entered=1
 
-    attempts=0
-    max_attempts=5
-    while ! uart_probe_bootloader; do
-      attempts=$((attempts + 1))
-      if [ "$attempts" -ge "$max_attempts" ]; then
-        echo "Timed out waiting for STM32 bootloader on $flash_port" >&2
+    if ! try_probe_bootloader; then
+      echo "GPIO reset did not reach bootloader, trying I2C expander reset"
+      ALEPH_NRST_METHOD=gpio reset-mcu --app || true
+      bootloader_entered=0
+
+      export ALEPH_NRST_METHOD=i2c
+      reset-mcu --nrst-low
+      sleep 1
+      reset-mcu --boot0-high
+      sleep 3
+      configure_uart
+      reset-mcu --nrst-high
+      sleep 2
+      bootloader_entered=1
+
+      if ! try_probe_bootloader; then
+        echo "Both GPIO and I2C reset methods failed on $flash_port" >&2
         exit 1
       fi
-      sleep 0.1
-    done
+    fi
 
     echo "Flashing $fw_bin to $flash_addr via $flash_port"
     uart_flash_firmware "$fw_bin"
