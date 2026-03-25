@@ -91,6 +91,7 @@ pub enum Args {
     },
 }
 
+#[derive(Default)]
 #[pyclass(subclass)]
 pub struct WorldBuilder {
     pub world: World,
@@ -221,11 +222,7 @@ fn parse_backend_config(
 impl WorldBuilder {
     #[new]
     pub fn new() -> Self {
-        let world = World::default();
-        Self {
-            world,
-            recipes: HashMap::new(),
-        }
+        Self::default()
     }
     #[pyo3(signature = (spawnable, name=None, id=None))]
     pub fn spawn(

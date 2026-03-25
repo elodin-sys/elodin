@@ -280,8 +280,6 @@ mod tests {
         assert_eq!(axis_configs[0].2, "X");
         assert_eq!(axis_configs[1].2, "Y");
         assert_eq!(axis_configs[2].2, "Z");
-
-        let logical_axes = CoordinateSystem(GeoFrame::NED).get_axes();
     }
 
     #[test]

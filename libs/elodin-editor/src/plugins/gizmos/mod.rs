@@ -201,15 +201,15 @@ pub fn evaluate_vector_arrow(
         };
         if let Some(world_pos) = origin_value.as_world_pos() {
             if let Some(frame) = arrow.frame {
-                start_world = GeoPosition(frame, world_pos.pos()).to_bevy(&geo_context);
-                rotation = GeoRotation(frame, world_pos.att()).to_bevy(&geo_context);
+                start_world = GeoPosition(frame, world_pos.pos()).to_bevy(geo_context);
+                rotation = GeoRotation(frame, world_pos.att()).to_bevy(geo_context);
             } else {
                 start_world = world_pos.bevy_pos();
                 rotation = world_pos.bevy_att();
             }
         } else if let Some(origin) = component_value_tail_to_vec3(&origin_value) {
             if let Some(frame) = arrow.frame {
-                start_world = GeoPosition(frame, origin).to_bevy(&geo_context);
+                start_world = GeoPosition(frame, origin).to_bevy(geo_context);
             } else {
                 start_world = origin;
             }
