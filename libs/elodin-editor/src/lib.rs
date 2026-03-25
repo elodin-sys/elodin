@@ -884,6 +884,7 @@ pub fn follow_latest(
     current_ts.0 = latest.0;
 }
 
+#[allow(clippy::type_complexity)]
 pub fn sync_pos(
     mut query: Query<
         (

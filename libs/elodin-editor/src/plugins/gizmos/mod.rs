@@ -216,7 +216,7 @@ pub fn evaluate_vector_arrow(
         }
     }
 
-    direction = GeoFrame::bevy_R_(&arrow.frame.unwrap_or(GeoFrame::ENU), &geo_context) * direction;
+    direction = GeoFrame::bevy_R_(&arrow.frame.unwrap_or(GeoFrame::ENU), geo_context) * direction;
 
     if arrow.body_frame {
         direction = rotation * direction;

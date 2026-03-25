@@ -307,7 +307,7 @@ pub fn drag_nav_gizmo(
     if first_drag {
         commands.entity(drag_target).insert(DraggedMarker);
         editor_cam.end_move();
-        let anchor = camera_anchor_from_transform(&transform);
+        let anchor = camera_anchor_from_transform(transform);
         editor_cam.start_orbit(anchor);
     }
     let delta = drag.delta
