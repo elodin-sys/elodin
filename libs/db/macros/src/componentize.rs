@@ -24,7 +24,7 @@ pub fn componentize(input: TokenStream) -> TokenStream {
     } = Componentize::from_derive_input(&input).unwrap();
     let where_clause = &generics.where_clause;
     let fields = data.take_struct().unwrap();
-    let sink_calls = fields.fields.iter().map(|field| {
+    let sink_calls = fields.fields.iter().filter(|f| !f.timestamp && !f.skip).map(|field| {
         let component_id_str = field.component_id_str();
         let component_id_str = if let Some(parent) = &parent {
             format!("{parent}.{component_id_str}")

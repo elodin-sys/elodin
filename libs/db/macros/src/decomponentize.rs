@@ -26,7 +26,7 @@ pub fn decomponentize(input: TokenStream) -> TokenStream {
     } = Decomponentize::from_derive_input(&input).unwrap();
     let where_clause = &generics.where_clause;
     let fields = data.take_struct().unwrap();
-    let if_arms = fields.fields.iter().map(|field| {
+    let if_arms = fields.fields.iter().filter(|f| !f.timestamp && !f.skip).map(|field| {
         let ty = &field.ty;
         let ident = &field.ident;
         let name = field
