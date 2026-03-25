@@ -492,7 +492,7 @@ def fin_control(fd: FinDeflect, fc: FinControl, mach: Mach) -> FinDeflect:
     return fd
 
 
-w = el.World(frame=el.Frame.ENU)
+w = el.World()
 rocket = w.spawn(
     [
         el.Body(

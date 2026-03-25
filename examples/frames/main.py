@@ -57,7 +57,7 @@ def test_gravity_enu_ned() -> Tuple[bool, str]:
 
     # --- NED Simulation ---
     print("Running NED simulation...")
-    w_ned = el.World(frame=el.Frame.NED)
+    w_ned = el.World()
     w_ned.spawn(
         el.Body(
             # In NED, +Z is down, so we start at -10 (which means 10 units up)
@@ -136,9 +136,9 @@ def test_inertial_frames() -> Tuple[bool, str]:
     ticks = 240  # 2 seconds
     G = 6.6743e-11
 
-    def create_two_body_world(frame):
-        """Create a two-body gravitational system in the specified frame."""
-        w = el.World(frame=frame)
+    def create_two_body_world():
+        """Create a two-body gravitational system."""
+        w = el.World()
 
         # Central body (like Earth, but scaled down for faster dynamics)
         center = w.spawn(
@@ -195,7 +195,7 @@ def test_inertial_frames() -> Tuple[bool, str]:
 
     # --- ECI Simulation ---
     print("\nRunning ECI simulation...")
-    w_eci, center_eci, orbiter_eci = create_two_body_world(el.Frame.ECI)
+    w_eci, center_eci, orbiter_eci = create_two_body_world()
     w_eci.spawn(GravityConstraint(center_eci, orbiter_eci))
     w_eci.spawn(GravityConstraint(orbiter_eci, center_eci))
 
@@ -205,7 +205,7 @@ def test_inertial_frames() -> Tuple[bool, str]:
 
     # --- GCRF Simulation ---
     print("Running GCRF simulation...")
-    w_gcrf, center_gcrf, orbiter_gcrf = create_two_body_world(el.Frame.GCRF)
+    w_gcrf, center_gcrf, orbiter_gcrf = create_two_body_world()
     w_gcrf.spawn(GravityConstraint(center_gcrf, orbiter_gcrf))
     w_gcrf.spawn(GravityConstraint(orbiter_gcrf, center_gcrf))
 
@@ -275,7 +275,7 @@ def test_energy_conservation() -> Tuple[bool, str]:
     mass = 1.0
     g = 9.81
 
-    w = el.World(frame=el.Frame.ENU)
+    w = el.World()
     w.spawn(
         el.Body(
             world_pos=el.SpatialTransform(linear=jnp.array([0.0, 0.0, initial_height])),

@@ -9,7 +9,7 @@ use crate::jax_exec::{JaxExec, JaxWorldExec};
 use crate::step_context::StepContext;
 use crate::system::{CompiledSystemExt, PySystem};
 use crate::{
-    ComponentSchema, Frame, TimeStep, World, globals::increment_sim_tick, system::IntoSystem,
+    ComponentSchema, TimeStep, World, globals::increment_sim_tick, system::IntoSystem,
     system::System as _,
 };
 use ::s10::{GroupRecipe, SimRecipe, cli::run_recipe_with_token};
@@ -220,9 +220,8 @@ fn parse_backend_config(
 #[pymethods]
 impl WorldBuilder {
     #[new]
-    pub fn new(frame: Frame) -> Self {
+    pub fn new() -> Self {
         let mut world = World::default();
-        world.metadata.frame = frame.into();
         Self {
             world,
             recipes: HashMap::new(),
