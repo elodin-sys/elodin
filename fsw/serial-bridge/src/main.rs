@@ -148,7 +148,11 @@ pub async fn connect() -> anyhow::Result<()> {
     .await
     .0?;
     let mut port = stellarator::serial::SerialPort::open(&serial_port).await?;
-    port.set_baud(stellarator::serial::Baud::Other(serial_baud))?;
+    port.set_baud(match serial_baud {
+        9600 => stellarator::serial::Baud::B9600,
+        115200 => stellarator::serial::Baud::B115200,
+        _ => stellarator::serial::Baud::Other(serial_baud),
+    })?;
     let (port_rx, port_tx) = port.split();
 
     let write = stellarator::struc_con::stellar::<anyhow::Result<()>, _, _>(move || async move {

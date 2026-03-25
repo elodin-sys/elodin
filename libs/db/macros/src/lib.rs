@@ -25,6 +25,7 @@ struct Field {
 }
 
 impl Field {
+    #[allow(dead_code)]
     pub fn component_id(&self) -> proc_macro2::TokenStream {
         let impeller = crate::impeller_crate_name();
         match &self.component_id {
