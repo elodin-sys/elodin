@@ -4,10 +4,13 @@ set -euo pipefail
 tracy_out="$(pwd)/profile_output/tracy-db-perf"
 mkdir -p "${tracy_out}"
 
-# ── Build with Tracy ─────────────────────────────────────────────────────────
-cargo build --release -p elodin-db --bin elodin-db-bench --features tracy
-
+# Binary is pre-built by the pipeline's pre_command step (default nix shell with cargo).
 bench_bin="./target/release/elodin-db-bench"
+
+if [[ ! -x "${bench_bin}" ]]; then
+  echo "error: ${bench_bin} not found -- build with: cargo build --release -p elodin-db --bin elodin-db-bench --features tracy"
+  exit 1
+fi
 
 scenarios=(customer high-freq high-fanout stress)
 

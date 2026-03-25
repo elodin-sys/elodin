@@ -125,6 +125,7 @@ test_steps = [
             nix_step(
                 emoji=":racehorse:",
                 label="perf-elodin-db",
+                pre_command="nix develop --command bash -c 'cargo build --release -p elodin-db --bin elodin-db-bench --features tracy'",
                 flake=".#tracy",
                 command="bash ./scripts/ci/db_perf.sh",
             ),
