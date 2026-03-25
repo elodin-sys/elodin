@@ -161,8 +161,41 @@ impl BenchResult {
     }
 }
 
+fn init_tracing() {
+    use tracing_subscriber::EnvFilter;
+
+    let filter = if std::env::var("RUST_LOG").is_ok() {
+        EnvFilter::builder().from_env_lossy()
+    } else {
+        EnvFilter::builder().parse_lossy("elodin_db=trace")
+    };
+
+    #[cfg(feature = "tracy")]
+    {
+        use tracing_subscriber::prelude::*;
+        let fmt_layer = tracing_subscriber::fmt::layer()
+            .with_writer(std::io::stderr)
+            .with_target(false);
+        let _ = tracing_subscriber::registry()
+            .with(filter)
+            .with(fmt_layer)
+            .with(tracing_tracy::TracyLayer::default())
+            .try_init();
+    }
+
+    #[cfg(not(feature = "tracy"))]
+    {
+        let _ = tracing_subscriber::fmt::fmt()
+            .with_writer(std::io::stderr)
+            .with_target(false)
+            .with_env_filter(filter)
+            .try_init();
+    }
+}
+
 #[stellarator::main]
 async fn main() {
+    init_tracing();
     let mut args = Args::parse();
 
     if let Some(scenario) = &args.scenario {
