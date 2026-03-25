@@ -59,6 +59,8 @@
       wifi = ./modules/wifi.nix;
     };
     fswModules = {
+      c-blinky = ./modules/c-blinky.nix;
+      sensor-fw = ./modules/sensor-fw.nix;
       elodin-db = ./modules/elodin-db.nix;
       aleph-serial-bridge = ./modules/aleph-serial-bridge.nix;
       tegrastats-bridge = ./modules/tegrastats-bridge.nix;
@@ -69,6 +71,7 @@
       elodinsink = ./modules/elodinsink.nix;
     };
     devModules = {
+      aleph-cuda = ./modules/aleph-cuda.nix;
       aleph-dev = ./modules/aleph-dev.nix;
     };
     defaultModule = {config, ...}: {
@@ -135,7 +138,14 @@
           inherit system;
           modules =
             builtins.attrValues baseModules
-            ++ builtins.attrValues fswModules
+            ++ builtins.attrValues (builtins.removeAttrs fswModules ["c-blinky"])
+            ++ builtins.attrValues devModules;
+        };
+        c-blinky = nixpkgs.lib.nixosSystem {
+          inherit system;
+          modules =
+            builtins.attrValues baseModules
+            ++ builtins.attrValues (builtins.removeAttrs fswModules ["sensor-fw"])
             ++ builtins.attrValues devModules;
         };
         installer = installerSystem ({...}: {

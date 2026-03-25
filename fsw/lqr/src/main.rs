@@ -1,21 +1,19 @@
 use clap::Parser;
+use db_macros::{AsVTable, Metadatatize};
 use impeller2::types::{LenPacket, PacketId};
 use impeller2_stellar::Client;
+use impeller2_stellar::{SinkExt, StreamExt};
 use mlua::LuaSerdeExt;
 use nox::{
     array::{Quat, Vec3},
     tensor,
-};
-use roci::{
-    AsVTable, Metadatatize,
-    tcp::{SinkExt, StreamExt},
 };
 use serde::{Deserialize, Serialize};
 use std::{net::SocketAddr, path::PathBuf};
 use zerocopy::{Immutable, IntoBytes, KnownLayout, TryFromBytes};
 
 #[derive(AsVTable, Default, Debug, Clone, TryFromBytes, Immutable, KnownLayout)]
-#[roci(parent = "aleph")]
+#[db(parent = "aleph")]
 pub struct Input {
     pub gyro_est: Vec3<f64>,
     pub q_hat: Quat<f64>,
@@ -23,7 +21,7 @@ pub struct Input {
 }
 
 #[derive(AsVTable, Metadatatize, IntoBytes, Immutable, Debug)]
-#[roci(parent = "aleph")]
+#[db(parent = "aleph")]
 pub struct Output {
     pub control_torque: Vec3<f64>,
 }

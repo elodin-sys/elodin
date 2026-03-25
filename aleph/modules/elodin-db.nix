@@ -46,9 +46,10 @@ in {
   };
 
   config = lib.mkIf cfg.enable {
-    # Create template elodin-db service
     systemd.services."elodin-db@" = {
       after = ["network.target"];
+      stopIfChanged = false;
+      restartIfChanged = false;
       description = "Start elodin-db under the folder '%i'";
       serviceConfig = {
         Type = "exec";
@@ -59,22 +60,51 @@ in {
       };
     };
 
-    systemd.services."elodin-db-default" = lib.mkIf cfg.autostart {
+    systemd.services.elodin-db = lib.mkIf (cfg.autostart && !cfg.dbUniqueOnBoot) {
       after = ["network.target"];
       wantedBy = ["multi-user.target"];
-      description = "Start the default elodin-db instance";
+      description = "Elodin-DB telemetry database";
       serviceConfig = {
+        Type = "exec";
+        User = "root";
+        ExecStart = "${elodin-db}/bin/elodin-db run [::]:2240 --http-addr [::]:2248 ${cfg.dbFolderName}/default";
+        KillSignal = "SIGINT";
+        Restart = "on-failure";
+        RestartSec = "5s";
+        Environment = "RUST_LOG=info";
+      };
+    };
+
+    systemd.services."elodin-db-default" = lib.mkIf (cfg.autostart && cfg.dbUniqueOnBoot) {
+      after = ["network.target"];
+      wantedBy = ["multi-user.target"];
+      restartIfChanged = true;
+      restartTriggers = config.environment.systemPackages;
+      description = "Start a unique elodin-db instance for this boot";
+      serviceConfig = let
+        stopScript = pkgs.writeShellScript "elodin-db-stop-old" ''
+          export PATH="${lib.makeBinPath [pkgs.coreutils pkgs.gawk pkgs.iproute2 pkgs.systemd]}:$PATH"
+          for unit in $(systemctl list-units --type=service --state=active --plain --no-legend 'elodin-db@*' | awk '{print $1}'); do
+            echo "Stopping $unit"
+            systemctl stop "$unit" || true
+          done
+          # Wait for port 2240 to be free (up to 10 seconds)
+          for i in $(seq 1 20); do
+            if ! ss -tlnp | grep -q ':2240 '; then
+              break
+            fi
+            sleep 0.5
+          done
+        '';
+      in {
         Type = "oneshot";
-        ExecStart = pkgs.writeShellScript "elodin-db-default" (
-          if cfg.dbUniqueOnBoot
-          then ''
-            TIMESTAMP=$(date +%Y%m%d-%H%M%S)
-            systemctl start "elodin-db@default-$TIMESTAMP.service"
-          ''
-          else ''
-            systemctl start "elodin-db@default.service"
-          ''
-        );
+        RemainAfterExit = true;
+        ExecStartPre = stopScript;
+        ExecStop = stopScript;
+        ExecStart = pkgs.writeShellScript "elodin-db-default" ''
+          TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+          systemctl start "elodin-db@default-$TIMESTAMP.service"
+        '';
       };
     };
 

@@ -1,4 +1,4 @@
-use roci::tcp::SinkExt;
+use impeller2_stellar::SinkExt;
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use stellarator::io::SplitExt;

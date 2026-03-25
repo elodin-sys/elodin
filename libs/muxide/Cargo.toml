@@ -50,7 +50,7 @@ categories = [
     "command-line-utilities",
 ]
 license = "MIT"
-repository.workspace = true
+repository = "https://github.com/elodin-sys/elodin"
 
 [package.metadata.dist]
 dist = false

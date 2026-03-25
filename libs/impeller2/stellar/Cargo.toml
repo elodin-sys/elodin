@@ -30,6 +30,13 @@ serde.features = ["derive"]
 postcard.version = "1.0.10"
 postcard.features = ["alloc", "experimental-derive"]
 
+# schema
+postcard-schema.version = "0.2"
+postcard-schema.features = ["use-std"]
+
+# rand
+fastrand = "2.2.0"
+
 # errors
 thiserror = "2.0"
 miette.version = "7.2"

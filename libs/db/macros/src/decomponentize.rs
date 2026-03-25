@@ -7,7 +7,7 @@ use quote::quote;
 use syn::{DeriveInput, Generics, Ident, parse_macro_input};
 
 #[derive(Debug, FromDeriveInput)]
-#[darling(attributes(roci), supports(struct_named))]
+#[darling(attributes(db), supports(struct_named))]
 pub struct Decomponentize {
     ident: Ident,
     generics: Generics,
@@ -16,7 +16,7 @@ pub struct Decomponentize {
 }
 
 pub fn decomponentize(input: TokenStream) -> TokenStream {
-    let crate_name = crate::roci_crate_name();
+    let impeller = crate::impeller_crate_name();
     let input = parse_macro_input!(input as DeriveInput);
     let Decomponentize {
         ident,
@@ -25,9 +25,8 @@ pub fn decomponentize(input: TokenStream) -> TokenStream {
         parent,
     } = Decomponentize::from_derive_input(&input).unwrap();
     let where_clause = &generics.where_clause;
-    let impeller = quote! { #crate_name::impeller2 };
     let fields = data.take_struct().unwrap();
-    let if_arms = fields.fields.iter().map(|field| {
+    let if_arms = fields.fields.iter().filter(|f| !f.timestamp && !f.skip).map(|field| {
         let ty = &field.ty;
         let ident = &field.ident;
         let name = field
@@ -36,14 +35,13 @@ pub fn decomponentize(input: TokenStream) -> TokenStream {
             .expect("only named field allowed")
             .to_string()
             .to_case(Case::UpperSnake);
-        let component_id = field.component_id();
-
-        let component_id = if let Some(parent) = &parent {
-            format!("{parent}.{component_id}")
+        let component_id_str = field.component_id_str();
+        let component_id_str = if let Some(parent) = &parent {
+            format!("{parent}.{component_id_str}")
         } else {
-            component_id.to_string()
+            component_id_str
         };
-        let component_id = quote! { #impeller::types::ComponentId::new(#component_id) };
+        let component_id = quote! { #impeller::types::ComponentId::new(#component_id_str) };
         if !field.nest {
         let const_name = format!("{name}_ID");
             let const_name = syn::Ident::new(&const_name, Span::call_site());
@@ -62,7 +60,7 @@ pub fn decomponentize(input: TokenStream) -> TokenStream {
         }
     });
     quote! {
-        impl #crate_name::Decomponentize for #ident #generics #where_clause {
+        impl #impeller::com_de::Decomponentize for #ident #generics #where_clause {
             type Error = core::convert::Infallible;
             fn apply_value(&mut self,
                             component_id: #impeller::types::ComponentId,

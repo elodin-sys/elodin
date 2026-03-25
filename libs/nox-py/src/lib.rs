@@ -29,7 +29,6 @@ pub mod six_dof;
 pub mod spatial;
 pub mod step_context;
 pub mod system;
-pub mod ukf;
 pub mod utils;
 pub mod world;
 pub mod world_builder;
@@ -167,7 +166,6 @@ pub fn elodin(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(skew, m)?)?;
     m.add_function(wrap_pyfunction!(_get_cache_dir, m)?)?;
     m.add("__version__", env!("CARGO_PKG_VERSION"))?;
-    ukf::register(m)?;
     s10::register(m)?;
     env_logger::init();
     // Safety: called during single-threaded module init before any threads are spawned

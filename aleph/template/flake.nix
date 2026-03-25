@@ -41,9 +41,12 @@
         # default tooling
         aleph-setup # a setup tool that guides you through setting up wifi and a user on first login
         aleph-base # a set of default configuration options that make developing on aleph easier
-        aleph-dev # a default set of packages like cuda, opencv, and git that make developing on aleph easier
+        aleph-dev # general on-device development tools like git, uv, editors, and Python
+        # aleph-cuda # opt-in CUDA, cuDNN, TensorRT, DeepStream, and GPU Python tooling
 
-        # default fsw
+        # default fsw (pick one: sensor-fw OR c-blinky, they are mutually exclusive)
+        sensor-fw # full sensor firmware: streams IMU/mag/baro data to elodin-db at 1 Mbaud
+        # c-blinky # deploy-time STM32 bring-up firmware flashed from the Orin during activation
         mekf # a basic attitude mekf that runs on the sensor data from the expansion board
         msp-osd # MSP DisplayPort OSD for FPV goggles, displays attitude from MEKF
 
@@ -176,10 +179,21 @@
     # installer is setup to be flashed to a usb drive, and contains the
     # aleph-installer tool. This tool lets you install the system to the nvme
     # drive
+    nixosModules.c-blinky = {config, ...}: {
+      imports = [
+        nixosModules.default
+        aleph.nixosModules.c-blinky
+      ];
+      services.sensor-fw.enable = false;
+    };
     nixosConfigurations = {
       default = nixpkgs.lib.nixosSystem {
         inherit system;
         modules = [nixosModules.default];
+      };
+      c-blinky = nixpkgs.lib.nixosSystem {
+        inherit system;
+        modules = [nixosModules.c-blinky];
       };
     };
     packages.aarch64-linux = {

@@ -1,19 +1,25 @@
+use db_macros::{AsVTable, Metadatatize};
 use futures_concurrency::future::Join;
-use impeller2::types::{LenPacket, PacketId};
+use impeller2::types::{LenPacket, PacketId, Timestamp};
 use impeller2_stellar::Client;
-use roci::{AsVTable, Metadatatize, tcp::SinkExt};
+use impeller2_stellar::SinkExt;
 use std::{mem, net::SocketAddr, time::Duration};
 use stellarator::{fs::File, rent};
 use sysinfo::CpuRefreshKind;
 use zerocopy::{Immutable, IntoBytes};
 
 #[derive(AsVTable, Metadatatize, IntoBytes, Immutable, Debug)]
-#[roci(parent = "aleph")]
+#[db(parent = "aleph")]
+#[repr(C)]
 pub struct Output {
+    #[db(timestamp)]
+    pub time: i64,
     pub cpu_usage: [f32; 8],
     pub cpu_freq: [f32; 8],
     pub thermal_zones: [f32; 10],
     pub gpu_usage: f32,
+    #[db(skip)]
+    _pad: u32,
 }
 
 async fn connect() -> anyhow::Result<()> {
@@ -58,10 +64,12 @@ async fn connect() -> anyhow::Result<()> {
         }
 
         let output = Output {
+            time: Timestamp::now().0,
             thermal_zones,
             cpu_usage,
             gpu_usage: gpu_load,
             cpu_freq,
+            _pad: 0,
         };
         table.extend_from_slice(output.as_bytes());
         rent!(client.send(table).await, table)?;

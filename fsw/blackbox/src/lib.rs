@@ -1,10 +1,8 @@
-#![cfg_attr(not(any(test, feature = "std")), no_std)]
+#![no_std]
 
 #[derive(
     zerocopy::FromBytes, zerocopy::IntoBytes, zerocopy::Immutable, zerocopy::KnownLayout, Clone,
 )]
-#[cfg_attr(feature = "roci", derive(roci::AsVTable, roci::Metadatatize))]
-#[cfg_attr(feature = "roci", roci(parent = "aleph"))]
 #[repr(C)]
 pub struct Record {
     pub ts: u32, // in milliseconds

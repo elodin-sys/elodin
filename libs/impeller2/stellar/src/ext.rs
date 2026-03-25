@@ -1,14 +1,17 @@
 use impeller2::buf::{Slice, deref};
 use impeller2::types::{Msg, PacketId};
-use impeller2_stellar::{Client, Error, SubStream};
-use impeller2_wkt::{MsgMetadata, SetMsgMetadata, StreamReply, VTableMsg, VTableStream};
+use impeller2::vtable::AsVTable;
+use impeller2_wkt::{
+    Metadatatize, MsgMetadata, SetComponentMetadata, SetMsgMetadata, StreamReply, VTableMsg,
+    VTableStream,
+};
 use std::future::Future;
 use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
 use stellarator::io::AsyncWrite;
 use zerocopy::{Immutable, KnownLayout};
 
-use crate::{AsVTable, Metadatatize};
+use crate::{Client, Error, SubStream};
 
 pub trait SinkExt {
     fn send_vtable<V: AsVTable>(&self, id: PacketId) -> impl Future<Output = Result<(), Error>>;
@@ -21,7 +24,7 @@ pub trait SinkExt {
     -> impl Future<Output = Result<(), Error>>;
 }
 
-impl<W: AsyncWrite> SinkExt for impeller2_stellar::PacketSink<W> {
+impl<W: AsyncWrite> SinkExt for crate::PacketSink<W> {
     async fn send_vtable<V: AsVTable>(&self, id: PacketId) -> Result<(), Error> {
         let vtable = V::as_vtable();
         self.send(&(VTableMsg { id, vtable })).await.0?;
@@ -30,9 +33,7 @@ impl<W: AsyncWrite> SinkExt for impeller2_stellar::PacketSink<W> {
 
     async fn send_metadata<V: Metadatatize>(&self) -> Result<(), Error> {
         for metadata in V::metadata() {
-            self.send(&impeller2_wkt::SetComponentMetadata(metadata))
-                .await
-                .0?;
+            self.send(&SetComponentMetadata(metadata)).await.0?;
         }
         Ok(())
     }
