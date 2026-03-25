@@ -5,6 +5,7 @@
 //! a right-multiplication as $v_{bevy} = {bevy}_R_{enu} * v_{enu}$. This
 //! convention was chosen so that frames can be easily checked by adjacency.
 #![allow(non_snake_case)]
+use crate::GeoFrame;
 use bevy::math::{DMat3, DMat4, DQuat, DVec3};
 use bevy::prelude::*;
 use map_3d::Ellipsoid;
