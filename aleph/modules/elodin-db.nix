@@ -48,6 +48,8 @@ in {
   config = lib.mkIf cfg.enable {
     systemd.services."elodin-db@" = {
       after = ["network.target"];
+      stopIfChanged = false;
+      restartIfChanged = false;
       description = "Start elodin-db under the folder '%i'";
       serviceConfig = {
         Type = "exec";

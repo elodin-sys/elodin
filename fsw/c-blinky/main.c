@@ -227,12 +227,14 @@ static void uart_log(U8 level, const char* msg) {
 
 static void delay_us(U32 us) {
     U32 ticks = ((U64)us * SYSTICK_FREQ) / 1000000;
-    if (ticks > 1) {
-        SYSTICK_RVR = ticks - 1;
+    while (ticks > 1) {
+        U32 load = (ticks - 1 > 0xFFFFFF) ? 0xFFFFFF : ticks - 1;
+        SYSTICK_RVR = load;
         SYSTICK_CVR = 0;
         SYSTICK_CSR = SYSTICK_CSR_CLKSOURCE | SYSTICK_CSR_ENABLE;
         while (!(SYSTICK_CSR & (1 << 16)));
         SYSTICK_CSR = 0;
+        ticks -= load + 1;
     }
 }
 

@@ -7,61 +7,10 @@
 with lib; let
   cfg = config.services.c-blinky;
 
-  resetMcu = pkgs.writeShellApplication {
-    name = "reset-mcu";
-    runtimeInputs = [
-      pkgs.coreutils
-      pkgs.i2c-tools
-      pkgs.libgpiod_1
-      pkgs.procps
-    ];
-    text = builtins.readFile ../scripts/reset-mcu.sh;
-  };
-
-  flashMcu = pkgs.writeShellApplication {
-    name = "flash-mcu";
-    runtimeInputs = [
-      pkgs.coreutils
-      pkgs.gcc-arm-embedded
-      pkgs.lsof
-      pkgs.openocd
-      pkgs.procps
-      pkgs.stm32flash
-      pkgs.systemd
-      resetMcu
-    ];
-    text = builtins.readFile ../scripts/flash-mcu.sh;
-  };
-
-  cBlinkyFlash = pkgs.writeShellApplication {
-    name = "c-blinky-flash-service";
-    runtimeInputs = [
-      pkgs.coreutils
-      flashMcu
-    ];
-    text = ''
-      marker="$STATE_DIRECTORY/last-flashed-package"
-      desired_signature="${concatStringsSep "|" [
-        (toString cfg.package)
-        (toString flashMcu)
-        cfg.serialPort
-        (toString cfg.bootloaderBaudRate)
-        cfg.boot0GpioChip
-        (toString cfg.boot0GpioLine)
-        cfg.resetGpioChip
-        (toString cfg.resetGpioLine)
-      ]}"
-      desired_firmware="${cfg.package}/firmware.bin"
-
-      if [ -f "$marker" ] && [ "$(cat "$marker")" = "$desired_signature" ]; then
-        echo "c-blinky firmware already flashed from $desired_firmware"
-        exit 0
-      fi
-
-      echo "Flashing c-blinky firmware from $desired_firmware"
-      flash-mcu --bin "$desired_firmware"
-      printf '%s\n' "$desired_signature" > "$marker"
-    '';
+  flash = import ../lib/mk-mcu-flash-service.nix {
+    inherit pkgs lib cfg;
+    name = "c-blinky";
+    timeoutSec = "90s";
   };
 in {
   options.services.c-blinky = {
@@ -126,36 +75,7 @@ in {
   config = mkIf cfg.enable {
     environment.systemPackages = [cfg.package];
 
-    systemd.services.c-blinky-flash = {
-      description = "Flash c-blinky onto the Aleph STM32H7";
-      wantedBy = mkIf cfg.autostart ["multi-user.target"];
-      before = ["serial-bridge.service"];
-      restartIfChanged = true;
-      restartTriggers = [cfg.package];
-
-      serviceConfig = {
-        Type = "oneshot";
-        RemainAfterExit = true;
-        User = "root";
-        Group = "root";
-        StateDirectory = "c-blinky-flash";
-        ExecStart = "${cBlinkyFlash}/bin/c-blinky-flash-service";
-        TimeoutStartSec = "90s";
-        Environment = [
-          "ALEPH_FLASH_MCU_METHOD=uart"
-          "ALEPH_FLASH_MCU_ADDR=0x08000000"
-          "ALEPH_FLASH_MCU_PORT=${cfg.serialPort}"
-          "ALEPH_FLASH_MCU_BAUD=${toString cfg.bootloaderBaudRate}"
-          "ALEPH_FLASH_MCU_BRIDGE_UNIT=serial-bridge.service"
-          "ALEPH_BOOT0_GPIOCHIP=${cfg.boot0GpioChip}"
-          "ALEPH_BOOT0_GPIOLINE=${toString cfg.boot0GpioLine}"
-          "ALEPH_NRST_GPIOCHIP=${cfg.resetGpioChip}"
-          "ALEPH_NRST_GPIOLINE=${toString cfg.resetGpioLine}"
-        ];
-        StandardOutput = "journal";
-        StandardError = "journal";
-      };
-    };
+    systemd.services.c-blinky-flash = flash.serviceAttrs;
 
     systemd.services.serial-bridge = {
       after = ["c-blinky-flash.service"];

@@ -167,7 +167,7 @@ Built by Nix (`aleph/pkgs/c-blinky.nix`) using `arm-none-eabi-gcc`. Produces `fi
 
 ## Elodin-DB on Aleph
 
-The `elodin-db.nix` module defaults to `dbUniqueOnBoot = false`, running a single persistent elodin-db instance at `/db/default` on port 2240. This survives redeploys cleanly (systemd restarts only if the binary changes). Set `dbUniqueOnBoot = true` for timestamped per-boot directories.
+The `elodin-db.nix` module defaults to `dbUniqueOnBoot = true`, creating a fresh timestamped elodin-db instance on each deploy/boot at `/db/default-YYYYMMDD-HHMMSS` on port 2240. The `elodin-db-default` oneshot manages the lifecycle: it stops any old `elodin-db@*` template instances and waits for port 2240 to be free before starting the new one. The template service has `stopIfChanged = false; restartIfChanged = false` so NixOS activation never races with it. Set `dbUniqueOnBoot = false` for a single persistent `/db/default` instance.
 
 Connect from a development machine: `elodin editor <aleph-ip>:2240`
 
