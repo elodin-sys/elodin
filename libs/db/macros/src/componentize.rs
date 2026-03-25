@@ -24,28 +24,32 @@ pub fn componentize(input: TokenStream) -> TokenStream {
     } = Componentize::from_derive_input(&input).unwrap();
     let where_clause = &generics.where_clause;
     let fields = data.take_struct().unwrap();
-    let sink_calls = fields.fields.iter().filter(|f| !f.timestamp && !f.skip).map(|field| {
-        let component_id_str = field.component_id_str();
-        let component_id_str = if let Some(parent) = &parent {
-            format!("{parent}.{component_id_str}")
-        } else {
-            component_id_str
-        };
-        let ident = field.ident.as_ref().expect("only named fields allowed");
-        if !field.nest {
-            quote! {
-                let _ = output.apply_value(
-                    #impeller::types::ComponentId::new(#component_id_str),
-                    self.#ident.as_component_view(),
-                    None
-                );
+    let sink_calls = fields
+        .fields
+        .iter()
+        .filter(|f| !f.timestamp && !f.skip)
+        .map(|field| {
+            let component_id_str = field.component_id_str();
+            let component_id_str = if let Some(parent) = &parent {
+                format!("{parent}.{component_id_str}")
+            } else {
+                component_id_str
+            };
+            let ident = field.ident.as_ref().expect("only named fields allowed");
+            if !field.nest {
+                quote! {
+                    let _ = output.apply_value(
+                        #impeller::types::ComponentId::new(#component_id_str),
+                        self.#ident.as_component_view(),
+                        None
+                    );
+                }
+            } else {
+                quote! {
+                    self.#ident.sink_columns(output);
+                }
             }
-        } else {
-            quote! {
-                self.#ident.sink_columns(output);
-            }
-        }
-    });
+        });
 
     quote! {
         impl #impeller::com_de::Componentize for #ident #generics #where_clause {
