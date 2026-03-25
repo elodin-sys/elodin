@@ -164,27 +164,30 @@ impl BenchResult {
 fn init_tracing() {
     use tracing_subscriber::EnvFilter;
 
-    let filter = if std::env::var("RUST_LOG").is_ok() {
-        EnvFilter::builder().from_env_lossy()
-    } else {
-        EnvFilter::builder().parse_lossy("elodin_db=trace")
-    };
-
     #[cfg(feature = "tracy")]
     {
         use tracing_subscriber::prelude::*;
+        // fmt only gets warn+ to avoid flooding stderr; Tracy gets trace-level spans
+        let fmt_filter = EnvFilter::builder().parse_lossy("warn");
+        let tracy_filter = EnvFilter::builder().parse_lossy("elodin_db=trace");
         let fmt_layer = tracing_subscriber::fmt::layer()
             .with_writer(std::io::stderr)
-            .with_target(false);
+            .with_target(false)
+            .with_filter(fmt_filter);
+        let tracy_layer = tracing_tracy::TracyLayer::default().with_filter(tracy_filter);
         let _ = tracing_subscriber::registry()
-            .with(filter)
             .with(fmt_layer)
-            .with(tracing_tracy::TracyLayer::default())
+            .with(tracy_layer)
             .try_init();
     }
 
     #[cfg(not(feature = "tracy"))]
     {
+        let filter = if std::env::var("RUST_LOG").is_ok() {
+            EnvFilter::builder().from_env_lossy()
+        } else {
+            EnvFilter::builder().parse_lossy("elodin_db=info")
+        };
         let _ = tracing_subscriber::fmt::fmt()
             .with_writer(std::io::stderr)
             .with_target(false)
