@@ -25,18 +25,17 @@ pub fn componentize(input: TokenStream) -> TokenStream {
     let where_clause = &generics.where_clause;
     let fields = data.take_struct().unwrap();
     let sink_calls = fields.fields.iter().map(|field| {
-        let component_id = field.component_id();
-
-        let component_id = if let Some(parent) = &parent {
-            format!("{parent}.{component_id}")
+        let component_id_str = field.component_id_str();
+        let component_id_str = if let Some(parent) = &parent {
+            format!("{parent}.{component_id_str}")
         } else {
-            component_id.to_string()
+            component_id_str
         };
         let ident = field.ident.as_ref().expect("only named fields allowed");
         if !field.nest {
             quote! {
                 let _ = output.apply_value(
-                    #impeller::types::ComponentId::new(#component_id),
+                    #impeller::types::ComponentId::new(#component_id_str),
                     self.#ident.as_component_view(),
                     None
                 );

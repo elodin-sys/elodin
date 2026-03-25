@@ -35,14 +35,13 @@ pub fn decomponentize(input: TokenStream) -> TokenStream {
             .expect("only named field allowed")
             .to_string()
             .to_case(Case::UpperSnake);
-        let component_id = field.component_id();
-
-        let component_id = if let Some(parent) = &parent {
-            format!("{parent}.{component_id}")
+        let component_id_str = field.component_id_str();
+        let component_id_str = if let Some(parent) = &parent {
+            format!("{parent}.{component_id_str}")
         } else {
-            component_id.to_string()
+            component_id_str
         };
-        let component_id = quote! { #impeller::types::ComponentId::new(#component_id) };
+        let component_id = quote! { #impeller::types::ComponentId::new(#component_id_str) };
         if !field.nest {
         let const_name = format!("{name}_ID");
             let const_name = syn::Ident::new(&const_name, Span::call_site());
