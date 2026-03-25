@@ -90,6 +90,10 @@ impl Plugin for HeadlessEditorPlugin {
             .add_plugins(impeller2_bevy::Impeller2Plugin)
             .add_plugins(big_space::FloatingOriginPlugin::<i128>::new(16_000., 100.))
             .add_plugins(bevy_mat3_material::Mat3MaterialPlugin)
+            .add_plugins(GeoFramePlugin {
+                apply_transforms: false,
+                ..default()
+            })
             .add_plugins(SensorCameraPlugin)
             .init_resource::<DiagnosticsStore>()
             .init_resource::<HeadlessMode>()
@@ -99,6 +103,8 @@ impl Plugin for HeadlessEditorPlugin {
                     impeller2_bevy::apply_cached_data,
                     crate::object_3d::update_object_3d_system,
                     crate::sync_object_3d,
+                    bevy_geo_frames::apply_geo_rotation,
+                    bevy_geo_frames::big_space::apply_big_translation::<i128>,
                     sync_pos,
                 )
                     .chain()

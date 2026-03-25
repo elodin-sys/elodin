@@ -113,6 +113,7 @@ test_steps = [
             ),
             nix_step(
                 label=":python: frames",
+                flake=".#run",
                 command="python3 examples/frames/main.py",
             ),
             nix_step(
