@@ -76,10 +76,7 @@ impl BenchResult {
         eprintln!("║ clients:       {:<30}║", self.clients);
         eprintln!("║ with_reader:   {:<30}║", self.with_reader);
         eprintln!("╠══════════════════════════════════════════════╣");
-        eprintln!(
-            "║ duration:      {:<28.2}s ║",
-            self.duration_secs
-        );
+        eprintln!("║ duration:      {:<28.2}s ║", self.duration_secs);
         eprintln!("║ total_writes:  {:<30}║", self.total_writes);
         eprintln!(
             "║ throughput:    {:<23.0} writes/s ║",
@@ -89,15 +86,9 @@ impl BenchResult {
             "║ target:        {:<23.0} writes/s ║",
             self.target_writes_per_sec
         );
-        eprintln!(
-            "║ achieved:      {:<28.1}% ║",
-            self.achieved_ratio * 100.0
-        );
+        eprintln!("║ achieved:      {:<28.1}% ║", self.achieved_ratio * 100.0);
         eprintln!("╠══════════════════════════════════════════════╣");
-        eprintln!(
-            "║ data volume:   {:<27.2} MB ║",
-            self.data_volume_mb
-        );
+        eprintln!("║ data volume:   {:<27.2} MB ║", self.data_volume_mb);
         eprintln!(
             "║ data rate:     {:<24.2} MB/s ║",
             self.data_rate_mb_per_sec
@@ -107,22 +98,10 @@ impl BenchResult {
             self.effective_freq_per_component
         );
         eprintln!("╠══════════════════════════════════════════════╣");
-        eprintln!(
-            "║ send latency p50:  {:<23} µs ║",
-            self.send_latency_p50_us
-        );
-        eprintln!(
-            "║ send latency p95:  {:<23} µs ║",
-            self.send_latency_p95_us
-        );
-        eprintln!(
-            "║ send latency p99:  {:<23} µs ║",
-            self.send_latency_p99_us
-        );
-        eprintln!(
-            "║ send latency max:  {:<23} µs ║",
-            self.send_latency_max_us
-        );
+        eprintln!("║ send latency p50:  {:<23} µs ║", self.send_latency_p50_us);
+        eprintln!("║ send latency p95:  {:<23} µs ║", self.send_latency_p95_us);
+        eprintln!("║ send latency p99:  {:<23} µs ║", self.send_latency_p99_us);
+        eprintln!("║ send latency max:  {:<23} µs ║", self.send_latency_max_us);
         eprintln!("╠══════════════════════════════════════════════╣");
         eprintln!("║ per-second throughput (writes/s):            ║");
         for (i, &t) in self.per_second_throughput.iter().enumerate() {
@@ -132,7 +111,11 @@ impl BenchResult {
     }
 
     fn print_json(&self) {
-        let per_sec: Vec<String> = self.per_second_throughput.iter().map(|v| v.to_string()).collect();
+        let per_sec: Vec<String> = self
+            .per_second_throughput
+            .iter()
+            .map(|v| v.to_string())
+            .collect();
         println!(
             concat!(
                 "{{",
