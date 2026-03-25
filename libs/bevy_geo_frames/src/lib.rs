@@ -11,13 +11,12 @@ pub use geo::*;
 /// Units: meters, seconds.
 /// Bevy world: +X=East, +Y=Up, +Z=South (so North = -Z).
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(feature = "bevy", derive(bevy::prelude::Reflect))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 #[cfg_attr(
     feature = "strum",
     derive(strum_macros::IntoStaticStr, strum_macros::EnumString)
 )]
-
-#[cfg_attr(feature = "bevy", derive(bevy::prelude::Reflect))]
 pub enum GeoFrame {
     /// East-North-Up: +X=East, +Y=North, +Z=Up
     ENU,

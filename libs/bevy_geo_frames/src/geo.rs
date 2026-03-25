@@ -39,7 +39,6 @@ pub enum Present {
     Sphere,
 }
 
-
 /// Where the Bevy world origin lives on Earth.
 ///
 /// Used to turn ECEF positions into local ENU, then ENU → Bevy.
@@ -215,7 +214,7 @@ impl GeoFrame {
     /// The general rotation matrix for ${self}_R_{from}$ of the two
     /// coordinate frames.
     pub fn _R_(&self, from: &GeoFrame, context: &GeoContext) -> DMat3 {
-        use GeoFrame::*;
+        use crate::GeoFrame::*;
         match (*from, *self) {
             (x, y) if x == y => DMat3::IDENTITY,
             (ENU, NED) => DMat3::from_cols(DVec3::Y, DVec3::X, DVec3::NEG_Y),
