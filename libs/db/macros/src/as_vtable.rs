@@ -76,7 +76,7 @@ pub fn as_vtable(input: TokenStream) -> TokenStream {
             }
         } else {
             quote! {
-                <#ty as #impeller::vtable::AsVTable>::populate_vtable_builder(builder)?;
+                <#ty as #impeller::vtable::AsVTable>::populate_vtable_fields(builder)?;
             }
         }
     });
