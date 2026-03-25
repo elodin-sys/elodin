@@ -43,16 +43,15 @@ pub fn metadatatize(input: TokenStream) -> TokenStream {
                 } else {
                     name
                 };
-                let component_id = field.component_id();
-
-                let component_id = if let Some(parent) = &parent {
-                    format!("{parent}.{component_id}")
+                let component_id_str = field.component_id_str();
+                let component_id_str = if let Some(parent) = &parent {
+                    format!("{parent}.{component_id_str}")
                 } else {
-                    component_id.to_string()
+                    component_id_str
                 };
                 quote! {
                     .chain(core::iter::once(#impeller_wkt::ComponentMetadata {
-                        component_id: #impeller::types::ComponentId::new(#component_id),
+                        component_id: #impeller::types::ComponentId::new(#component_id_str),
                         name: #name.to_string(),
                         metadata: Default::default(),
                     }))

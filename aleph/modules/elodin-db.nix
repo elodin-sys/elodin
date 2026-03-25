@@ -77,18 +77,28 @@ in {
       after = ["network.target"];
       wantedBy = ["multi-user.target"];
       restartIfChanged = true;
-      restartTriggers = [elodin-db];
+      restartTriggers = config.environment.systemPackages;
       description = "Start a unique elodin-db instance for this boot";
-      serviceConfig = {
+      serviceConfig = let
+        stopScript = pkgs.writeShellScript "elodin-db-stop-old" ''
+          export PATH="${lib.makeBinPath [pkgs.coreutils pkgs.gawk pkgs.iproute2 pkgs.systemd]}:$PATH"
+          for unit in $(systemctl list-units --type=service --state=active --plain --no-legend 'elodin-db@*' | awk '{print $1}'); do
+            echo "Stopping $unit"
+            systemctl stop "$unit" || true
+          done
+          # Wait for port 2240 to be free (up to 10 seconds)
+          for i in $(seq 1 20); do
+            if ! ss -tlnp | grep -q ':2240 '; then
+              break
+            fi
+            sleep 0.5
+          done
+        '';
+      in {
         Type = "oneshot";
         RemainAfterExit = true;
-        ExecStartPre = pkgs.writeShellScript "elodin-db-stop-old" ''
-          export PATH="${lib.makeBinPath [pkgs.coreutils pkgs.gawk pkgs.systemd]}:$PATH"
-          for unit in $(systemctl list-units --type=service --plain --no-legend 'elodin-db@*' | awk '{print $1}'); do
-            systemctl stop "$unit" 2>/dev/null || true
-          done
-          sleep 1
-        '';
+        ExecStartPre = stopScript;
+        ExecStop = stopScript;
         ExecStart = pkgs.writeShellScript "elodin-db-default" ''
           TIMESTAMP=$(date +%Y%m%d-%H%M%S)
           systemctl start "elodin-db@default-$TIMESTAMP.service"

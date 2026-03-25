@@ -38,13 +38,12 @@ pub fn as_vtable(input: TokenStream) -> TokenStream {
 
     let vtable_items = fields.fields.iter().map(|field| {
         let ty = &field.ty;
-        let component_id = field.component_id();
-        let component_id =
-            if let Some(parent) = &parent {
-                format!("{parent}.{component_id}")
-            }else {
-                component_id.to_string()
-            };
+        let component_id_str = field.component_id_str();
+        let component_id_str = if let Some(parent) = &parent {
+            format!("{parent}.{component_id_str}")
+        } else {
+            component_id_str
+        };
         let ident = &field.ident;
         let has_ts = ts_field.is_some();
         if field.timestamp || field.skip {
@@ -55,7 +54,7 @@ pub fn as_vtable(input: TokenStream) -> TokenStream {
                 #impeller::vtable::builder::schema(
                     schema.prim_type(),
                     schema.dim(),
-                    #impeller::vtable::builder::component(#component_id)
+                    #impeller::vtable::builder::component(#component_id_str)
                 )
             };
             let arg = if has_ts {

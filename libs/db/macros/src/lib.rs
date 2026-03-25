@@ -39,6 +39,17 @@ impl Field {
             }
         }
     }
+
+    pub fn component_id_str(&self) -> String {
+        match &self.component_id {
+            Some(c) => c.clone(),
+            None => self
+                .ident
+                .as_ref()
+                .expect("field must have ident")
+                .to_string(),
+        }
+    }
 }
 
 #[proc_macro_derive(Componentize, attributes(db))]
