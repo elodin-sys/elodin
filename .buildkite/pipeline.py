@@ -48,11 +48,6 @@ test_steps = [
                 label="cargo fmt",
                 command="cargo fmt --check && cargo fmt --check --manifest-path fsw/sensor-fw/Cargo.toml",
             ),
-            nix_step(
-                emoji=":crab:",
-                label="db-perf",
-                command="cargo build --release -p elodin-db --bin elodin-db-bench && ./target/release/elodin-db-bench --scenario customer",
-            ),
         ],
     ),
     group(
@@ -121,6 +116,16 @@ test_steps = [
                 flake=".#tracy",
                 command="./scripts/ci/sensor_camera_perf.sh",
                 env={"ELODIN_SENSOR_CAMERA_CAPTURE_TRACY": "1"},
+            ),
+        ],
+    ),
+    group(
+        name=":racehorse: performance",
+        steps=[
+            nix_step(
+                emoji=":racehorse:",
+                label="perf-elodin-db",
+                command="cargo build --release -p elodin-db --bin elodin-db-bench && ./target/release/elodin-db-bench --scenario customer",
             ),
         ],
     ),
