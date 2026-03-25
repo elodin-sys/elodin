@@ -174,7 +174,7 @@ impl GeoFrame {
         DMat4::from_mat3_translation(R, O)
     }
 
-    /// The general tranformation matrix for ${self}_M_{from}$ of the two
+    /// The general transformation matrix for ${self}_M_{from}$ of the two
     /// coordinate frames.
     pub fn _M_(&self, from: &GeoFrame, context: &GeoContext) -> DMat4 {
         let R = self._R_(from, context);
@@ -278,7 +278,7 @@ impl GeoFrame {
         }
     }
 
-    /// The tranformation matrix for $ecef_M_{from}$ of the two
+    /// The transformation matrix for $ecef_M_{from}$ of the two
     /// coordinate frames.
     pub fn ecef_M_(from: &Self, context: &GeoContext) -> DMat4 {
         let R = Self::ecef_R_(from, &context.origin);
