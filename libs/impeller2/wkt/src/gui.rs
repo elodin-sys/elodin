@@ -304,7 +304,6 @@ pub struct Line3d {
     pub line_width: f32,
     pub color: Color,
     pub perspective: bool,
-    #[cfg(feature = "bevy")]
     #[serde(default)]
     pub frame: Option<bevy_geo_frames::GeoFrame>,
     pub node_id: NodeId,
@@ -335,7 +334,6 @@ pub struct VectorArrow3d {
     pub thickness: ArrowThickness,
     #[serde(default = "VectorArrow3d::default_label_position")]
     pub label_position: LabelPosition,
-    #[cfg(feature = "bevy")]
     #[serde(default)]
     pub frame: Option<bevy_geo_frames::GeoFrame>,
     pub node_id: NodeId,
@@ -789,7 +787,6 @@ pub fn builtin_icon_char(name: &str) -> Option<char> {
 pub struct Object3D {
     pub eql: String,
     pub mesh: Object3DMesh,
-    #[cfg(feature = "bevy")]
     #[serde(default)]
     pub frame: Option<bevy_geo_frames::GeoFrame>,
     pub icon: Option<Object3DIcon>,

@@ -39,36 +39,6 @@ pub enum Present {
     Sphere,
 }
 
-/// Coordinate frames used in the sim.
-///
-/// Units: meters, seconds.
-/// Bevy world: +X=East, +Y=Up, +Z=South (so North = -Z).
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Reflect)]
-#[cfg_attr(
-    feature = "strum",
-    derive(strum_macros::IntoStaticStr, strum_macros::EnumString)
-)]
-pub enum GeoFrame {
-    /// East-North-Up: +X=East, +Y=North, +Z=Up
-    ENU,
-    /// North-East-Down: +X=North, +Y=East, +Z=Down
-    NED,
-    /// Earth-Centered Earth-Fixed
-    /// +X through (lat=0, lon=0) equator
-    /// +Y through (lat=0, lon=90°E) equator
-    /// +Z through North Pole
-    ECEF,
-    // Leaving out these time-dependent coordinate frames for the moment.
-
-    // /// Earth-Centered Inertial
-    // /// +X to vernal equinox, +Y 90°E, +Z North Pole
-    // ECI,
-    // /// Geocentric Celestial Reference Frame (inertial, J2000)
-    // /// Sometimes called the International Celestial Reference Frame (ICRF)
-    // /// Approximated as ECI here.
-    // GCRF,
-}
 
 /// Where the Bevy world origin lives on Earth.
 ///

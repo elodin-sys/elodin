@@ -19,4 +19,5 @@ miette.features = ["fancy"]
 tracing = "0.1.41"
 
 bevy_geo_frames.path = "../../bevy_geo_frames"
-bevy_geo_frames.features = ["serde", "big_space"]
+bevy_geo_frames.default-features = false
+bevy_geo_frames.features = ["strum", "serde"]

@@ -221,7 +221,7 @@ fn parse_backend_config(
 impl WorldBuilder {
     #[new]
     pub fn new() -> Self {
-        let mut world = World::default();
+        let world = World::default();
         Self {
             world,
             recipes: HashMap::new(),
