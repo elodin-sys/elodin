@@ -38,6 +38,7 @@ use crate::sensor_camera::{
     SensorCamerasSpawned, set_readback_armed,
 };
 use crate::{EqlContext, PositionSync, sync_pos};
+use bevy_geo_frames::GeoFramePlugin;
 
 /// A headless Bevy app dedicated to sensor camera rendering.
 ///
