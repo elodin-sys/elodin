@@ -48,6 +48,11 @@ test_steps = [
                 label="cargo fmt",
                 command="cargo fmt --check && cargo fmt --check --manifest-path fsw/sensor-fw/Cargo.toml",
             ),
+            nix_step(
+                emoji=":crab:",
+                label="db-perf",
+                command="cargo build --release -p elodin-db --bin elodin-db-bench && ./target/release/elodin-db-bench --scenario customer",
+            ),
         ],
     ),
     group(
