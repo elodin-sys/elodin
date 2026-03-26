@@ -193,6 +193,8 @@ async fn run_follower_inner(config: &FollowConfig, db: &Arc<DB>) -> Result<(), E
         for &cid in schema_resp.schemas.keys() {
             followed.insert(cid);
         }
+        db.has_followed_components
+            .store(!followed.is_empty(), std::sync::atomic::Ordering::Release);
     }
 
     // Track message timestamps for dedup.
@@ -253,6 +255,8 @@ async fn run_follower_inner(config: &FollowConfig, db: &Arc<DB>) -> Result<(), E
                 let cid = metadata.component_id;
                 db.with_state_mut(|s| s.set_component_metadata(metadata, &db.path))?;
                 db.followed_components.write().unwrap().insert(cid);
+                db.has_followed_components
+                    .store(true, std::sync::atomic::Ordering::Release);
             }
 
             // DumpSchemaResp – create new components.
@@ -274,6 +278,8 @@ async fn run_follower_inner(config: &FollowConfig, db: &Arc<DB>) -> Result<(), E
                         )
                     })?;
                     db.followed_components.write().unwrap().insert(component_id);
+                    db.has_followed_components
+                        .store(true, std::sync::atomic::Ordering::Release);
                 }
             }
 
@@ -364,6 +370,7 @@ async fn run_follower_inner(config: &FollowConfig, db: &Arc<DB>) -> Result<(), E
                         sunk_new_time_series: false,
                         table_received: db.apply_implicit_timestamp(),
                         followed_components: &db.followed_components,
+                        has_followed_components: db.has_followed_components.load(std::sync::atomic::Ordering::Acquire),
                         is_follower: true,
                     };
                     match table.sink(&state.vtable_registry, &mut sink) {

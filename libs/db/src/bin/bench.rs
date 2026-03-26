@@ -389,46 +389,49 @@ async fn run_writer(
 ) -> u64 {
     let mut client = Client::connect(addr).await.unwrap();
 
-    for i in 0..num_components {
-        let vtable_id = (vtable_base + i as u16).to_le_bytes();
-        let comp_name = format!("bench_comp_{}", vtable_base as usize + i);
-        let comp_id = ComponentId::new(&comp_name);
-        let vt = vtable([raw_field(
-            0,
-            8,
-            schema(PrimType::F64, &[], component(comp_id)),
-        )]);
-        client
-            .send(&VTableMsg {
-                id: vtable_id,
-                vtable: vt,
-            })
-            .await
-            .0
-            .unwrap();
-    }
+    // Register ONE vtable with all components as fields.
+    // Each field is an f64 at a different offset in the table payload.
+    let batched_vtable_id = vtable_base.to_le_bytes();
+    let fields: Vec<_> = (0..num_components)
+        .map(|i| {
+            let comp_name = format!("bench_comp_{}", vtable_base as usize + i);
+            let comp_id = ComponentId::new(&comp_name);
+            raw_field((i * 8) as u16, 8, schema(PrimType::F64, &[], component(comp_id)))
+        })
+        .collect();
+    let vt = vtable(fields);
+    client
+        .send(&VTableMsg {
+            id: batched_vtable_id,
+            vtable: vt,
+        })
+        .await
+        .0
+        .unwrap();
 
     sleep(Duration::from_millis(50)).await;
 
     let start = Instant::now();
-    let mut writes: u64 = 0;
+    let mut ticks: u64 = 0;
     let mut local_latencies = Vec::new();
-    // Sample latency every N ticks to avoid measurement overhead
-    let sample_every = 10;
+    let sample_every = 10u64;
 
     while start.elapsed() < target_duration {
         let tick_start = Instant::now();
+
+        // Single packet carries all component values for this tick
+        let payload_size = num_components * 8;
+        let mut pkt = LenPacket::table(batched_vtable_id, payload_size);
         for i in 0..num_components {
-            let vtable_id = (vtable_base + i as u16).to_le_bytes();
-            let value = writes as f64;
-            let mut pkt = LenPacket::table(vtable_id, 8);
+            let value = (ticks * num_components as u64 + i as u64) as f64;
             pkt.extend_aligned(&[value]);
-            client.send(pkt).await.0.unwrap();
-            writes += 1;
         }
+        client.send(pkt).await.0.unwrap();
+
+        ticks += 1;
         write_counter.fetch_add(num_components as u64, Ordering::Relaxed);
 
-        if writes.is_multiple_of(num_components as u64 * sample_every) {
+        if ticks.is_multiple_of(sample_every) {
             local_latencies.push(tick_start.elapsed().as_micros() as u64);
         }
 
@@ -439,7 +442,7 @@ async fn run_writer(
         global.extend_from_slice(&local_latencies);
     }
 
-    writes
+    ticks * num_components as u64
 }
 
 async fn run_reader(addr: SocketAddr) {
