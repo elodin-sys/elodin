@@ -1,21 +1,19 @@
 use clap::Parser;
-use impeller2::types::{LenPacket, PacketId};
+use db_macros::{AsVTable, Metadatatize};
+use impeller2::types::{LenPacket, PacketId, Timestamp};
 use impeller2_stellar::Client;
+use impeller2_stellar::{SinkExt, StreamExt};
 use mlua::LuaSerdeExt;
 use nox::{
     array::{Mat3, Quat, SpatialTransform, Vec3},
     tensor,
-};
-use roci::{
-    AsVTable, Metadatatize,
-    tcp::{SinkExt, StreamExt},
 };
 use serde::{Deserialize, Serialize};
 use std::{net::SocketAddr, path::PathBuf};
 use zerocopy::{Immutable, IntoBytes, KnownLayout, TryFromBytes};
 
 #[derive(AsVTable, Default, Debug, Clone, TryFromBytes, Immutable, KnownLayout)]
-#[roci(parent = "aleph")]
+#[db(parent = "aleph")]
 pub struct Input {
     pub mag: Vec3<f32>,
     pub accel: Vec3<f32>,
@@ -23,8 +21,11 @@ pub struct Input {
 }
 
 #[derive(AsVTable, Metadatatize, IntoBytes, Immutable, Debug)]
-#[roci(parent = "aleph")]
+#[db(parent = "aleph")]
+#[repr(C)]
 pub struct Output {
+    #[db(timestamp)]
+    pub time: i64,
     pub q_hat: Quat<f64>,
     pub b_hat: Vec3<f64>,
     pub gyro_est: Vec3<f64>,
@@ -63,8 +64,9 @@ async fn connect(config: &Config) -> anyhow::Result<()> {
         );
         let world_pos = nox::SpatialTransform::from_angular(mekf.q_hat);
         let gyro_est = mekf.omega - mekf.b_hat;
-        let mut table = LenPacket::table(id, 64);
+        let mut table = LenPacket::table(id, core::mem::size_of::<Output>());
         let output = Output {
+            time: Timestamp::now().0,
             q_hat: mekf.q_hat,
             world_pos,
             b_hat: mekf.b_hat,

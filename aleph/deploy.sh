@@ -3,6 +3,10 @@
 set -eu
 
 # Default values
+script_dir="$(cd "$(dirname "$0")" && pwd)"
+repo_root="$(cd "$script_dir/.." && pwd)"
+flake_ref="git+file://${repo_root}?dir=aleph"
+
 default_user="${USER}"
 default_host="fde1:2240:a1ef::1"
 default_config="default"
@@ -62,7 +66,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 # Construct the target path with the selected configuration
-target=".#nixosConfigurations.$config.config.system.build.toplevel"
+target="${flake_ref}#nixosConfigurations.$config.config.system.build.toplevel"
 
 log_info "Using host: $host, user: $user, configuration: $config"
 if [ "$no_aleph_builder" = true ]; then

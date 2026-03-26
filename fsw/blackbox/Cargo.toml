@@ -5,10 +5,5 @@ edition.workspace = true
 repository.workspace = true
 publish = false
 
-[features]
-roci = ["dep:roci", "std"]
-std = ["roci/std"]
-
 [dependencies]
 zerocopy = { version = "0.8.13", features = ["derive"] }
-roci = { path = "../../libs/roci", default-features = false, optional = true }

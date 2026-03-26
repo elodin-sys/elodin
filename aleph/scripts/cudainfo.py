@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 import ctypes
+import glob
 import os
 import platform
+import re
+import shutil
 import subprocess
 import sys
 
@@ -11,18 +14,6 @@ def print_section(title):
     print(f"\n{'=' * 80}")
     print(f"   {title}")
     print(f"{'=' * 80}")
-
-
-def check_libraries(libraries):
-    """Check if libraries can be loaded"""
-    results = {}
-    for lib_name in libraries:
-        try:
-            ctypes.CDLL(lib_name)
-            results[lib_name] = "✅ LOADED"
-        except Exception as e:
-            results[lib_name] = f"❌ FAILED: {str(e)}"
-    return results
 
 
 def run_command(cmd, timeout=2):
@@ -37,6 +28,145 @@ def run_command(cmd, timeout=2):
         return f"Error (exit code {e.returncode}): {e.output}"
     except Exception as e:
         return f"Error: {str(e)}"
+
+
+def unique_items(items):
+    """Preserve order while dropping empty or duplicate items"""
+    result = []
+    seen = set()
+    for item in items:
+        if not item or item in seen:
+            continue
+        result.append(item)
+        seen.add(item)
+    return result
+
+
+def split_path_var(value):
+    """Split a PATH-like environment variable into entries"""
+    if not value:
+        return []
+    return [entry for entry in value.split(os.pathsep) if entry]
+
+
+def get_library_search_paths():
+    """Get library search paths from the environment and common runtime locations"""
+    search_paths = split_path_var(os.environ.get("LD_LIBRARY_PATH")) + split_path_var(
+        os.environ.get("LIBRARY_PATH")
+    )
+    search_paths += [
+        "/run/current-system/sw/lib",
+        "/run/opengl-driver/lib",
+        "/usr/lib",
+        "/lib",
+    ]
+    return [path for path in unique_items(search_paths) if os.path.isdir(path)]
+
+
+def find_first_match(patterns, search_paths):
+    """Find the first matching file for a set of glob patterns"""
+    for pattern in patterns:
+        for search_path in search_paths:
+            matches = sorted(glob.glob(os.path.join(search_path, pattern)))
+            if matches:
+                return matches[0]
+    return None
+
+
+def check_library_status(spec):
+    """Check whether a library can be found and loaded"""
+    resolved_path = find_first_match(spec["patterns"], get_library_search_paths())
+    candidates = unique_items(([resolved_path] if resolved_path else []) + spec["names"])
+    errors = []
+
+    for candidate in candidates:
+        try:
+            ctypes.CDLL(candidate)
+            return {
+                "label": spec["label"],
+                "required": spec["required"],
+                "status": "loaded",
+                "path": resolved_path or candidate,
+                "error": None,
+            }
+        except OSError as error:
+            errors.append(f"{candidate}: {error}")
+
+    if resolved_path:
+        status = "failed"
+    elif spec["required"]:
+        status = "missing"
+    else:
+        status = "optional-missing"
+
+    return {
+        "label": spec["label"],
+        "required": spec["required"],
+        "status": status,
+        "path": resolved_path,
+        "error": " | ".join(errors) if errors else None,
+    }
+
+
+def format_library_status(result):
+    """Render a readable library status line"""
+    label = result["label"]
+    if not result["required"]:
+        label = f"{label} (optional)"
+
+    if result["status"] == "loaded":
+        return f"{label}: ✅ LOADED ({result['path']})"
+    if result["status"] == "optional-missing":
+        return f"{label}: ℹ️ NOT INSTALLED"
+    if result["status"] == "missing":
+        return f"{label}: ❌ NOT FOUND"
+    return f"{label}: ❌ FOUND BUT FAILED TO LOAD: {result['error']}"
+
+
+def parse_l4t_version(release_info):
+    """Parse Jetson Linux release text into an L4T version string"""
+    match = re.search(r"R(\d+).+REVISION:\s*([0-9.]+)", release_info)
+    if not match:
+        return None
+    return f"{match.group(1)}.{match.group(2)}"
+
+
+def get_cuda_toolchain_info():
+    """Gather CUDA toolchain and header discovery information"""
+    nvcc_path = shutil.which("nvcc")
+    cuda_roots = unique_items(
+        [
+            os.environ.get("CUDA_PATH"),
+            os.environ.get("CUDA_HOME"),
+            os.environ.get("CUDA_ROOT"),
+            os.environ.get("CUDAToolkit_ROOT"),
+        ]
+    )
+
+    include_paths = []
+    for cuda_root in cuda_roots:
+        include_paths.extend(
+            [
+                os.path.join(cuda_root, "include"),
+                os.path.join(cuda_root, "targets", "aarch64-linux", "include"),
+            ]
+        )
+
+    for var_name in ["CUPY_INCLUDE_PATH", "CPATH", "C_INCLUDE_PATH", "CPLUS_INCLUDE_PATH"]:
+        include_paths.extend(split_path_var(os.environ.get(var_name)))
+
+    include_paths = [path for path in unique_items(include_paths) if os.path.isdir(path)]
+    header_paths = [
+        path for path in include_paths if os.path.exists(os.path.join(path, "cuda_runtime.h"))
+    ]
+
+    return {
+        "nvcc_path": nvcc_path,
+        "nvcc_version": run_command("nvcc --version", timeout=5) if nvcc_path else None,
+        "cuda_roots": cuda_roots,
+        "include_paths": include_paths,
+        "header_paths": header_paths,
+    }
 
 
 def get_memory_info():
@@ -174,9 +304,8 @@ def get_jetson_info():
             release_info = f.read().strip()
             info["tegra_release"] = release_info
 
-            # Parse L4T version
-            if "R" in release_info and "REVISION" in release_info:
-                l4t_version = release_info.split("R")[1].split()[0]
+            l4t_version = parse_l4t_version(release_info)
+            if l4t_version:
                 info["l4t_version"] = l4t_version
 
     return info
@@ -258,6 +387,7 @@ def test_cuda_workflow():
         "result_verification": {"success": False, "error": None},
         "overall": False,
     }
+    context = None
 
     try:
         # Step 1: Initialize CUDA context
@@ -362,10 +492,14 @@ def test_cuda_workflow():
 
     except Exception:
         # We'll let the individual step error messages explain what went wrong
-        pass
+        for step_name, details in result.items():
+            if step_name == "overall":
+                continue
+            if not details["success"] and details["error"] is None:
+                details["error"] = "Not run due to earlier failure"
     finally:
         # Clean up - Release CUDA context if it was created
-        if result["context_init"]["success"]:
+        if context is not None:
             try:
                 context.pop()
             except Exception:
@@ -383,24 +517,90 @@ def main():
 
     # Get CPU info
     cpu_info = run_command("cat /proc/cpuinfo | grep 'model name' | uniq")
-    print(f"CPU: {cpu_info.split(':')[1].strip()}")
+    cpu_summary = cpu_info.strip().splitlines()[0] if cpu_info.strip() else "Unknown"
+    if ":" in cpu_summary:
+        cpu_summary = cpu_summary.split(":", 1)[1].strip()
+    print(f"CPU: {cpu_summary}")
 
     print_section("ENVIRONMENT VARIABLES")
-    for var in ["LD_LIBRARY_PATH", "CUDA_OVERRIDE_DRIVER_VERSION", "PATH"]:
+    for var in [
+        "CUDA_PATH",
+        "CUDA_HOME",
+        "CUDA_ROOT",
+        "CUDAToolkit_ROOT",
+        "CUPY_INCLUDE_PATH",
+        "CPATH",
+        "C_INCLUDE_PATH",
+        "CPLUS_INCLUDE_PATH",
+        "LIBRARY_PATH",
+        "LD_LIBRARY_PATH",
+        "NVCC_PREPEND_FLAGS",
+        "CUDA_OVERRIDE_DRIVER_VERSION",
+        "PATH",
+    ]:
         print(f"{var}: {os.environ.get(var, 'Not set')}")
 
-    # Check CUDA libraries
+    print_section("CUDA TOOLCHAIN CHECK")
+    toolchain_info = get_cuda_toolchain_info()
+    if toolchain_info["nvcc_path"]:
+        print(f"nvcc: {toolchain_info['nvcc_path']}")
+        print(toolchain_info["nvcc_version"].strip())
+    else:
+        print("nvcc: Not found in PATH")
+
+    if toolchain_info["cuda_roots"]:
+        print("\nCUDA roots:")
+        for cuda_root in toolchain_info["cuda_roots"]:
+            print(f"  - {cuda_root}")
+    else:
+        print("\nCUDA roots: Not set")
+
+    if toolchain_info["header_paths"]:
+        print("\ncuda_runtime.h found in:")
+        for header_path in toolchain_info["header_paths"]:
+            print(f"  - {header_path}")
+    else:
+        print("\ncuda_runtime.h: Not found in configured include paths")
+        if toolchain_info["include_paths"]:
+            print("Include paths searched:")
+            for include_path in toolchain_info["include_paths"]:
+                print(f"  - {include_path}")
+
     print_section("CUDA LIBRARY CHECK")
     cuda_libs = [
-        "libcuda.so.1",  # CUDA driver
-        "libcudart.so.11.0",  # CUDA runtime
-        "libnvinfer.so.8",  # TensorRT
-        "libcudnn.so.8",  # cuDNN
-        "libnvonnxparser.so.8",  # ONNX parser for TensorRT
+        {
+            "label": "CUDA driver",
+            "names": ["libcuda.so.1"],
+            "patterns": ["libcuda.so.1", "libcuda.so*"],
+            "required": True,
+        },
+        {
+            "label": "CUDA runtime",
+            "names": ["libcudart.so", "libcudart.so.12", "libcudart.so.11.0"],
+            "patterns": ["libcudart.so", "libcudart.so.*"],
+            "required": True,
+        },
+        {
+            "label": "cuDNN",
+            "names": ["libcudnn.so", "libcudnn.so.9", "libcudnn.so.8"],
+            "patterns": ["libcudnn.so", "libcudnn.so.*"],
+            "required": False,
+        },
+        {
+            "label": "TensorRT",
+            "names": ["libnvinfer.so", "libnvinfer.so.10", "libnvinfer.so.8"],
+            "patterns": ["libnvinfer.so", "libnvinfer.so.*"],
+            "required": False,
+        },
+        {
+            "label": "TensorRT ONNX parser",
+            "names": ["libnvonnxparser.so", "libnvonnxparser.so.10", "libnvonnxparser.so.8"],
+            "patterns": ["libnvonnxparser.so", "libnvonnxparser.so.*"],
+            "required": False,
+        },
     ]
-    lib_results = check_libraries(cuda_libs)
-    for lib, result in lib_results.items():
-        print(f"{lib}: {result}")
+    for spec in cuda_libs:
+        print(format_library_status(check_library_status(spec)))
 
     # Check for NVIDIA devices
     print_section("NVIDIA DEVICES")
@@ -441,7 +641,7 @@ def main():
         print(f"TensorRT version: {trt.__version__}")
         print(f"TensorRT path: {trt.__file__}")
     except ImportError:
-        print("TensorRT Python package not found")
+        print("TensorRT Python package not installed (optional on the current Aleph image)")
     except Exception as e:
         print(f"Error importing TensorRT: {e}")
 
@@ -452,7 +652,15 @@ def main():
 
         print(f"ONNX Runtime version: {ort.__version__}")
         print(f"ONNX Runtime path: {ort.__file__}")
-        print(f"Available providers: {ort.get_available_providers()}")
+        providers = ort.get_available_providers()
+        print(f"Available providers: {providers}")
+        print(
+            f"CUDA Execution Provider: {'✅ AVAILABLE' if 'CUDAExecutionProvider' in providers else '❌ NOT AVAILABLE'}"
+        )
+        print(
+            "TensorRT Execution Provider: "
+            f"{'✅ AVAILABLE' if 'TensorrtExecutionProvider' in providers else '❌ NOT AVAILABLE'}"
+        )
 
         # Skip the actual inference test as it's too slow
         print("\nProviders are available. Skipping inference test for speed.")
@@ -489,6 +697,9 @@ def main():
     if "l4t_version" in jetson_info:
         print(f"L4T Version: {jetson_info['l4t_version']}")
 
+    if "tegra_release" in jetson_info:
+        print(f"Release: {jetson_info['tegra_release']}")
+
     if os.path.exists("/sys/devices/virtual/dmi/id/bios_version"):
         print("\nBIOS/Firmware version:")
         print(run_command("cat /sys/devices/virtual/dmi/id/bios_version"))
@@ -498,29 +709,35 @@ def main():
     print("Checking Jetson GPU status...")
 
     # Try nvpmodel (most reliable and quick tool)
-    nvpmodel = run_command("nvpmodel -q")
-    if "Error" not in nvpmodel and len(nvpmodel.strip()) > 0:
-        print("\nnvpmodel output:")
-        print(nvpmodel)
+    if shutil.which("nvpmodel"):
+        nvpmodel = run_command("nvpmodel -q")
+        if "Error" not in nvpmodel and len(nvpmodel.strip()) > 0:
+            print("\nnvpmodel output:")
+            print(nvpmodel)
+        else:
+            print("nvpmodel is installed but did not return usable output")
     else:
-        print("nvpmodel not available or requires root access")
+        print("nvpmodel not available")
 
     # Try jetson_clocks (quick status check)
-    jetson_clocks = run_command("jetson_clocks --show")
-    if "Error" not in jetson_clocks and len(jetson_clocks.strip()) > 0:
-        gpu_clock_lines = []
-        for line in jetson_clocks.splitlines():
-            if "GPU" in line:
-                gpu_clock_lines.append(line)
+    if shutil.which("jetson_clocks"):
+        jetson_clocks = run_command("jetson_clocks --show")
+        if "Error" not in jetson_clocks and len(jetson_clocks.strip()) > 0:
+            gpu_clock_lines = []
+            for line in jetson_clocks.splitlines():
+                if "GPU" in line:
+                    gpu_clock_lines.append(line)
 
-        if gpu_clock_lines:
-            print("\nGPU Clock Information:")
-            for line in gpu_clock_lines:
-                print(line)
+            if gpu_clock_lines:
+                print("\nGPU Clock Information:")
+                for line in gpu_clock_lines:
+                    print(line)
+            else:
+                print("\nNo GPU clock information available")
         else:
-            print("\nNo GPU clock information available")
+            print("jetson_clocks is installed but did not return usable output")
     else:
-        print("jetson_clocks not available or requires root access")
+        print("jetson_clocks not available")
 
     # Simple test to check if CUDA can initialize
     print_section("CUDA INITIALIZATION TEST")

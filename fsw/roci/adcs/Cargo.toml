@@ -7,7 +7,7 @@ edition = "2024"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-nox.path = "../../nox"
+nox.workspace = true
 nox.default-features = false
 
 [dev-dependencies]

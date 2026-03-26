@@ -16,9 +16,9 @@ members = [
     "libs/nox-frames",
     "libs/iree-runtime",
     "apps/elodin",
-    "libs/roci",
-    "libs/roci/macros",
-    "libs/roci/adcs",
+    "fsw/roci",
+    "libs/db/macros",
+    "fsw/roci/adcs",
     "libs/wmm",
     "libs/s10",
     "libs/impeller2",
@@ -57,7 +57,7 @@ members = [
     "libs/bevy_geo_frames",
     "libs/bevy_mat3_material",
  ]
-exclude = ["fsw/sensor-fw", "fsw/blackbox", "docs/memserve"]
+exclude = ["fsw/sensor-fw", "fsw/blackbox", "libs/muxide", "docs/memserve"]
 
 [workspace.package]
 version = "0.16.3-alpha.0"
@@ -83,10 +83,10 @@ inherits = "release"
 lto = "thin"
 
 [workspace.dependencies]
-roci-macros.path = "libs/roci/macros"
-roci.path = "libs/roci"
+db-macros.path = "libs/db/macros"
+roci.path = "fsw/roci"
 roci.default-features = false
-roci-adcs.path = "libs/roci/adcs"
+roci-adcs.path = "fsw/roci/adcs"
 nox.path = "libs/nox"
 nox.default-features = false
 nox-frames.path = "libs/nox-frames"

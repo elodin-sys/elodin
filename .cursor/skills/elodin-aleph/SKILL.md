@@ -61,6 +61,7 @@ Configuration is in `aleph/flake.nix`, composed from modules in `aleph/modules/`
 ### Flight Software Services
 | Module | Purpose |
 |--------|---------|
+| `c-blinky.nix` | STM32 firmware flash-on-deploy + serial-bridge ordering |
 | `elodin-db.nix` | Elodin-DB telemetry database service |
 | `aleph-serial-bridge.nix` | Sensor data from serial → Elodin-DB |
 | `mekf.nix` | MEKF attitude estimation service |
@@ -104,8 +105,9 @@ These Rust applications in `fsw/` run as NixOS services on Aleph:
 
 | Application | Path | Purpose |
 |-------------|------|---------|
+| `c-blinky` | `fsw/c-blinky/` | STM32H747 bare-metal LED blink + UART COBS logging |
 | `sensor-fw` | `fsw/sensor-fw/` | STM32H747 firmware: IMU, mag, baro → USB/UART |
-| `serial-bridge` | `fsw/serial-bridge/` | Serial port → Elodin-DB |
+| `serial-bridge` | `fsw/serial-bridge/` | Serial port → Elodin-DB (parses EL COBS frames) |
 | `mekf` | `fsw/mekf/` | Sensor fusion for attitude estimation |
 | `msp-osd` | `fsw/msp-osd/` | OSD telemetry display for FPV |
 | `gstreamer` | `fsw/gstreamer/` | H.264 video → Elodin-DB (`elodinsink`) |
@@ -131,14 +133,43 @@ For unbootable or corrupted systems:
 
 ```bash
 # Reset the STM32 MCU
-aleph/scripts/reset-mcu.sh
+reset-mcu --app                    # Boot application firmware
+reset-mcu --bootloader             # Enter ROM bootloader (BOOT0 high + NRST pulse)
+reset-mcu --nrst-low               # Hold NRST low
+reset-mcu --nrst-high              # Release NRST high
+reset-mcu --boot0-high             # Hold BOOT0 high
 
-# Flash new firmware
-aleph/scripts/flash-mcu.sh
-
-# Scan for Aleph devices on network
-aleph/scripts/aleph-scan.sh
+# Flash firmware (default: UART via stm32flash)
+flash-mcu --bin firmware.bin       # Flash binary to 0x08000000
+flash-mcu --elf firmware.elf       # Flash ELF (objcopy to bin first)
+# Override method: ALEPH_FLASH_MCU_METHOD=swd flash-mcu --elf firmware.elf
 ```
+
+## STM32H747 UART Flashing
+
+The STM32 is flashed from the Orin via the ROM UART bootloader using `stm32flash` at 19200 8E1 on `/dev/ttyTHS1`. The NixOS service `c-blinky-flash` handles this automatically during `deploy.sh`.
+
+**Critical timing requirement**: The STM32H747 ROM bootloader has a narrow interface detection window (~100ms) after NRST release. The `stm32flash` 0x7F sync byte must arrive during this window. If missed, the ROM falls to a dual-core sync handler and hangs forever. The `flash-mcu.sh` UART path handles this with tight timing: NRST low -> BOOT0 high -> NRST release -> 100ms -> stm32flash.
+
+**Tegra UART quirk**: `stm32flash` cannot set termios flags on `ttyTHS*` devices. The script pre-configures the port with `stty` before calling `stm32flash`.
+
+**GPIO mapping** (open-source expansion board):
+- BOOT0: gpiochip0 line 144 (B2B pin 33)
+- NRST: gpiochip0 line 106 (B2B pin 36)
+
+## STM32 Firmware (c-blinky)
+
+`fsw/c-blinky/main.c` is bare-metal C for the STM32H747 CM7 core. Runs on HSI at 64MHz (no PLL). Outputs COBS-encoded EL log frames on USART1 PA9 (TX) at 115200 8N1. The `serial-bridge` service parses these frames and forwards them to elodin-db as `aleph.c-blinky.log`.
+
+EL frame wire format: `0x00 | COBS(['E','L', ver=1, kind=1, level, ...msg...]) | 0x00`
+
+Built by Nix (`aleph/pkgs/c-blinky.nix`) using `arm-none-eabi-gcc`. Produces `firmware.elf` and `firmware.bin`.
+
+## Elodin-DB on Aleph
+
+The `elodin-db.nix` module defaults to `dbUniqueOnBoot = true`, creating a fresh timestamped elodin-db instance on each deploy/boot at `/db/default-YYYYMMDD-HHMMSS` on port 2240. The `elodin-db-default` oneshot manages the lifecycle: it stops any old `elodin-db@*` template instances and waits for port 2240 to be free before starting the new one. The template service has `stopIfChanged = false; restartIfChanged = false` so NixOS activation never races with it. Set `dbUniqueOnBoot = false` for a single persistent `/db/default` instance.
+
+Connect from a development machine: `elodin editor <aleph-ip>:2240`
 
 ## Key References
 

@@ -15,6 +15,9 @@ use stellarator::{
     net::TcpStream,
 };
 
+pub mod ext;
+pub use ext::*;
+
 #[cfg(feature = "queue")]
 pub mod queue;
 
