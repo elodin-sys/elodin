@@ -89,6 +89,7 @@ w.spawn(GravityConstraint(c, a), name="C -> A")
 w.spawn(GravityConstraint(c, b), name="C -> B")
 
 w.schematic("""
+    coordinate frame=ECEF // This is not exactly correct. HCI would be the right system for this perhaps.
     hsplit {
         tabs share=0.2 {
             hierarchy

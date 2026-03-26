@@ -633,6 +633,7 @@ w.spawn(CSSRel(el.Edge(css_5, sat)), name="CSS 5 -> Sat")
 
 w.schematic(
     """
+    coordinate frame=ECEF
     vsplit {
         hsplit share=0.6 {
             tabs {

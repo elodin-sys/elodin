@@ -208,6 +208,7 @@ def _kdl_color(rgb: tuple[int, int, int]) -> str:
 def _build_schematic() -> str:
     lines: list[str] = [
         """
+coordinate frame=ECEF
 timeline follow_latest=#true
 
 tabs {
