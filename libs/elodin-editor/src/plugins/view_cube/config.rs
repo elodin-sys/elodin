@@ -96,7 +96,36 @@ impl CoordinateSystem {
                     },
                 ]
             }
-            x => todo!("Unsupported frame {x:?}"),
+            GeoFrame::ECEF =>
+            // NED mapped to Bevy's Y-up coordinate system:
+            // North (red)  -> Bevy -Z
+            // East (green) -> Bevy +X
+            // Down (blue)  -> Bevy -Y
+            {
+                [
+                    AxisDefinition {
+                        positive_label: "+X",
+                        negative_label: "-X",
+                        direction: Vec3::X,
+                        color: Color::srgb(0.9, 0.2, 0.2), // Red
+                        color_dim: Color::srgb(0.6, 0.15, 0.15),
+                    },
+                    AxisDefinition {
+                        positive_label: "+Y",
+                        negative_label: "-Y",
+                        direction: Vec3::Y,
+                        color: Color::srgb(0.2, 0.8, 0.2), // Green
+                        color_dim: Color::srgb(0.15, 0.5, 0.15),
+                    },
+                    AxisDefinition {
+                        positive_label: "+Z",
+                        negative_label: "-Z",
+                        direction: Vec3::Z,
+                        color: Color::srgb(0.2, 0.4, 0.9), // Blue
+                        color_dim: Color::srgb(0.15, 0.3, 0.6),
+                    },
+                ]
+            }
         }
     }
 
