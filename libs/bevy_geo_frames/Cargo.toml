@@ -24,6 +24,7 @@ serde = ["dep:serde"]
 inspector = ["dep:bevy-inspector-egui"]
 big_space = ["dep:big_space"]
 strum = ["dep:strum", "dep:strum_macros"]
+default_enu = []
 
 [dev-dependencies]
 bevy-inspector-egui = "0.35"
