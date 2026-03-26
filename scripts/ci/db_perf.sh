@@ -12,12 +12,12 @@ if [[ ! -x "${bench_bin}" ]]; then
   exit 1
 fi
 
-scenarios=(customer high-freq high-fanout stress)
+run_bench() {
+  local label="$1"
+  shift
+  echo "--- :racehorse: ${label}"
 
-for scenario in "${scenarios[@]}"; do
-  echo "--- :racehorse: scenario: ${scenario}"
-
-  trace_file="${tracy_out}/trace-db-${scenario}.tracy"
+  trace_file="${tracy_out}/trace-db-${label}.tracy"
 
   # Start Tracy capture on port 8090 (elodin-db) before the bench
   tracy-capture -a 127.0.0.1 -p 8090 -o "${trace_file}" -s 30 >/dev/null 2>&1 &
@@ -27,7 +27,7 @@ for scenario in "${scenarios[@]}"; do
   # Run the bench -- TRACY_PORT is read by TracyClient's static constructor.
   # Exit 141 (SIGPIPE) is expected when tracy-capture disconnects; treat as success.
   set +e
-  TRACY_PORT=8090 "${bench_bin}" --scenario "${scenario}"
+  TRACY_PORT=8090 "${bench_bin}" "$@"
   rc=$?
   set -e
   if [[ "${rc}" -ne 0 ]] && [[ "${rc}" -ne 141 ]]; then
@@ -47,7 +47,7 @@ for scenario in "${scenarios[@]}"; do
 
     if [[ -s "${csv_file}" ]]; then
       echo ""
-      echo "Tracy zone statistics (${scenario}):"
+      echo "Tracy zone statistics (${label}):"
       echo "──────────────────────────────────────────────────"
       head -1 "${csv_file}"
       # sort|head triggers SIGPIPE when head closes early; harmless, suppress it
@@ -57,4 +57,11 @@ for scenario in "${scenarios[@]}"; do
   fi
 
   echo ""
-done
+}
+
+# Customer scenario defaults to per-component; also run in batch for comparison
+run_bench "customer"       --scenario customer
+run_bench "customer-batch" --scenario customer --mode batch
+run_bench "high-freq"      --scenario high-freq
+run_bench "high-fanout"    --scenario high-fanout
+run_bench "stress"         --scenario stress

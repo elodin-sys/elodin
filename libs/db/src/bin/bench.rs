@@ -1,4 +1,5 @@
 use std::{
+    fmt,
     net::SocketAddr,
     sync::{
         Arc,
@@ -17,6 +18,22 @@ use impeller2_stellar::Client;
 use impeller2_wkt::{SubscribeLastUpdated, VTableMsg};
 use stellarator::{net::TcpListener, sleep, spawn, struc_con::stellar};
 
+#[derive(ValueEnum, Clone, Copy, Default)]
+enum SendMode {
+    #[default]
+    Batch,
+    PerComponent,
+}
+
+impl fmt::Display for SendMode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            SendMode::Batch => write!(f, "batch"),
+            SendMode::PerComponent => write!(f, "per-component"),
+        }
+    }
+}
+
 #[derive(Parser)]
 #[command(about = "Elodin-DB throughput benchmark")]
 struct Args {
@@ -34,6 +51,8 @@ struct Args {
     json: bool,
     #[arg(long, value_enum)]
     scenario: Option<Scenario>,
+    #[arg(long, value_enum, default_value_t = SendMode::Batch)]
+    mode: SendMode,
 }
 
 #[derive(ValueEnum, Clone)]
@@ -46,6 +65,7 @@ enum Scenario {
 
 struct BenchResult {
     scenario: String,
+    mode: SendMode,
     components: usize,
     frequency: u32,
     duration_secs: f64,
@@ -71,6 +91,7 @@ impl BenchResult {
         eprintln!("║          elodin-db benchmark results         ║");
         eprintln!("╠══════════════════════════════════════════════╣");
         eprintln!("║ scenario:      {:<30}║", self.scenario);
+        eprintln!("║ mode:          {:<30}║", self.mode);
         eprintln!("║ components:    {:<30}║", self.components);
         eprintln!("║ frequency:     {:<27} Hz ║", self.frequency);
         eprintln!("║ clients:       {:<30}║", self.clients);
@@ -120,6 +141,7 @@ impl BenchResult {
             concat!(
                 "{{",
                 "\"scenario\":\"{}\",",
+                "\"mode\":\"{}\",",
                 "\"components\":{},",
                 "\"frequency\":{},",
                 "\"clients\":{},",
@@ -140,6 +162,7 @@ impl BenchResult {
                 "}}"
             ),
             self.scenario,
+            self.mode,
             self.components,
             self.frequency,
             self.clients,
@@ -207,6 +230,7 @@ async fn main() {
                 args.components = 400;
                 args.frequency = 250;
                 args.with_reader = true;
+                args.mode = SendMode::PerComponent;
             }
             Scenario::HighFreq => {
                 args.components = 50;
@@ -244,6 +268,7 @@ async fn main() {
         args.duration,
         args.clients,
         args.with_reader,
+        args.mode,
         &scenario_name,
     )
     .await;
@@ -261,6 +286,7 @@ async fn run_benchmark(
     duration_secs: u64,
     num_clients: usize,
     with_reader: bool,
+    mode: SendMode,
     scenario_name: &str,
 ) -> BenchResult {
     let temp_dir = std::env::temp_dir().join(format!("elodin_db_bench_{}", std::process::id()));
@@ -281,18 +307,13 @@ async fn run_benchmark(
         stellar(move || run_reader(reader_addr));
     }
 
-    let components_per_client = distribute(num_components, num_clients);
-
-    // Shared counters for per-second sampling
     let write_counter = Arc::new(AtomicU64::new(0));
-    // Collect send latencies (in microseconds) from all clients
     let latencies = Arc::new(std::sync::Mutex::new(Vec::<u64>::new()));
 
     let start = Instant::now();
     let target_duration = Duration::from_secs(duration_secs);
     let interval = Duration::from_secs_f64(1.0 / frequency as f64);
 
-    // Spawn per-second sampler
     let sampler_counter = write_counter.clone();
     let sampler_duration = duration_secs;
     let sampler = spawn(async move {
@@ -307,23 +328,42 @@ async fn run_benchmark(
     });
 
     let mut handles = Vec::new();
-    let mut vtable_base: u16 = 1;
 
-    for &n in components_per_client.iter() {
-        let base = vtable_base;
-        vtable_base += n as u16;
-        let counter = write_counter.clone();
-        let lat = latencies.clone();
-
-        handles.push(spawn(run_writer(
-            addr,
-            n,
-            base,
-            interval,
-            target_duration,
-            counter,
-            lat,
-        )));
+    match mode {
+        SendMode::Batch => {
+            let components_per_client = distribute(num_components, num_clients);
+            let mut vtable_base: u16 = 1;
+            for &n in components_per_client.iter() {
+                let base = vtable_base;
+                vtable_base += n as u16;
+                let counter = write_counter.clone();
+                let lat = latencies.clone();
+                handles.push(spawn(run_writer_batch(
+                    addr,
+                    n,
+                    base,
+                    interval,
+                    target_duration,
+                    counter,
+                    lat,
+                )));
+            }
+        }
+        SendMode::PerComponent => {
+            for i in 0..num_components {
+                let counter = write_counter.clone();
+                let lat = latencies.clone();
+                let comp_idx = i as u16 + 1;
+                handles.push(spawn(run_writer_per_component(
+                    addr,
+                    comp_idx,
+                    interval,
+                    target_duration,
+                    counter,
+                    lat,
+                )));
+            }
+        }
     }
 
     for handle in handles {
@@ -334,7 +374,6 @@ async fn run_benchmark(
     let per_second_throughput = sampler.await.unwrap_or_default();
     let total_writes = count_total_samples(addr, num_components).await;
 
-    // Compute latency percentiles
     let mut lat_samples = latencies.lock().unwrap().clone();
     lat_samples.sort_unstable();
     let (p50, p95, p99, max) = if lat_samples.is_empty() {
@@ -351,13 +390,14 @@ async fn run_benchmark(
 
     let target_writes_per_sec = num_components as f64 * frequency as f64;
     let throughput = total_writes as f64 / elapsed.as_secs_f64();
-    let data_bytes = total_writes * 8; // f64 = 8 bytes per write
+    let data_bytes = total_writes * 8;
     let data_volume_mb = data_bytes as f64 / (1024.0 * 1024.0);
 
     let _ = std::fs::remove_dir_all(&temp_dir);
 
     BenchResult {
         scenario: scenario_name.to_string(),
+        mode,
         components: num_components,
         frequency,
         duration_secs: elapsed.as_secs_f64(),
@@ -369,7 +409,10 @@ async fn run_benchmark(
         data_rate_mb_per_sec: data_volume_mb / elapsed.as_secs_f64(),
         effective_freq_per_component: throughput / num_components as f64,
         with_reader,
-        clients: num_clients,
+        clients: match mode {
+            SendMode::Batch => num_clients,
+            SendMode::PerComponent => num_components,
+        },
         per_second_throughput,
         send_latency_p50_us: p50,
         send_latency_p95_us: p95,
@@ -378,7 +421,7 @@ async fn run_benchmark(
     }
 }
 
-async fn run_writer(
+async fn run_writer_batch(
     addr: SocketAddr,
     num_components: usize,
     vtable_base: u16,
@@ -389,8 +432,6 @@ async fn run_writer(
 ) -> u64 {
     let mut client = Client::connect(addr).await.unwrap();
 
-    // Register ONE vtable with all components as fields.
-    // Each field is an f64 at a different offset in the table payload.
     let batched_vtable_id = vtable_base.to_le_bytes();
     let fields: Vec<_> = (0..num_components)
         .map(|i| {
@@ -423,7 +464,6 @@ async fn run_writer(
     while start.elapsed() < target_duration {
         let tick_start = Instant::now();
 
-        // Single packet carries all component values for this tick
         let payload_size = num_components * 8;
         let mut pkt = LenPacket::table(batched_vtable_id, payload_size);
         for i in 0..num_components {
@@ -447,6 +487,67 @@ async fn run_writer(
     }
 
     ticks * num_components as u64
+}
+
+/// Each component gets its own TCP connection and VTable (1 field each).
+/// This mirrors the pattern used in `db.hpp` where each writer handles a
+/// single component independently.
+async fn run_writer_per_component(
+    addr: SocketAddr,
+    comp_idx: u16,
+    interval: Duration,
+    target_duration: Duration,
+    write_counter: Arc<AtomicU64>,
+    latencies: Arc<std::sync::Mutex<Vec<u64>>>,
+) -> u64 {
+    let mut client = Client::connect(addr).await.unwrap();
+
+    let vtable_id = comp_idx.to_le_bytes();
+    let comp_name = format!("bench_comp_{}", comp_idx);
+    let comp_id = ComponentId::new(&comp_name);
+    let vt = vtable(vec![raw_field(
+        0,
+        8,
+        schema(PrimType::F64, &[], component(comp_id)),
+    )]);
+    client
+        .send(&VTableMsg {
+            id: vtable_id,
+            vtable: vt,
+        })
+        .await
+        .0
+        .unwrap();
+
+    sleep(Duration::from_millis(50)).await;
+
+    let start = Instant::now();
+    let mut ticks: u64 = 0;
+    let mut local_latencies = Vec::new();
+    let sample_every = 10u64;
+
+    while start.elapsed() < target_duration {
+        let tick_start = Instant::now();
+
+        let mut pkt = LenPacket::table(vtable_id, 8);
+        pkt.extend_aligned(&[ticks as f64]);
+        client.send(pkt).await.0.unwrap();
+
+        ticks += 1;
+        write_counter.fetch_add(1, Ordering::Relaxed);
+
+        if ticks.is_multiple_of(sample_every) {
+            local_latencies.push(tick_start.elapsed().as_micros() as u64);
+        }
+
+        sleep(interval).await;
+    }
+
+    if let Ok(mut global) = latencies.lock() {
+        global.extend_from_slice(&local_latencies);
+    }
+
+    ticks
 }
 
 async fn run_reader(addr: SocketAddr) {

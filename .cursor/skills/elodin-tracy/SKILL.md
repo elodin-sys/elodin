@@ -125,11 +125,14 @@ The `apply_value` and `push_buf` spans use `trace_span!` to minimize overhead at
 A throughput benchmark is available:
 
 ```bash
-# Customer scenario: 400 components at 250Hz with a reader
+# Customer scenario: 400 components at 250Hz, per-component connections, with a reader
 elodin-db-bench --scenario customer --json
 
+# Same workload but batched into single-table packets (faster)
+elodin-db-bench --scenario customer --mode batch --json
+
 # Custom configuration
-elodin-db-bench --components 1000 --frequency 100 --duration 20
+elodin-db-bench --components 1000 --frequency 100 --duration 20 --mode per-component
 ```
 
 ---
