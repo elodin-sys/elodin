@@ -49,9 +49,9 @@ for scenario in "${scenarios[@]}"; do
       echo ""
       echo "Tracy zone statistics (${scenario}):"
       echo "──────────────────────────────────────────────────"
-      # Print header + top 20 zones sorted by total time (column 4)
       head -1 "${csv_file}"
-      tail -n +2 "${csv_file}" | sort -t',' -k4 -rn | head -20
+      # sort|head triggers SIGPIPE when head closes early; harmless, suppress it
+      tail -n +2 "${csv_file}" | sort -t',' -k4 -rn | head -20 || true
       echo "──────────────────────────────────────────────────"
     fi
   fi
