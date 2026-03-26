@@ -473,7 +473,22 @@
                 </li>
                 
                 <li>
-                    <a href="https://docs.elodin.systems/preview/pr-352/home/aleph/fc-board-flash/#flashing-from-the-orin-nx">Flashing from the Orin NX</a>
+                    <a href="https://docs.elodin.systems/preview/pr-352/home/aleph/fc-board-flash/#flashing-from-the-orin-nx-via-deploy-sh">Flashing from the Orin NX via deploy.sh</a>
+                    
+                </li>
+                
+                <li>
+                    <a href="https://docs.elodin.systems/preview/pr-352/home/aleph/fc-board-flash/#verifying-the-flash">Verifying the Flash</a>
+                    
+                </li>
+                
+                <li>
+                    <a href="https://docs.elodin.systems/preview/pr-352/home/aleph/fc-board-flash/#viewing-logs-in-the-editor">Viewing Logs in the Editor</a>
+                    
+                </li>
+                
+                <li>
+                    <a href="https://docs.elodin.systems/preview/pr-352/home/aleph/fc-board-flash/#manual-flashing-on-aleph">Manual Flashing on Aleph</a>
                     
                 </li>
                 
@@ -488,8 +503,7 @@
                   <p class="lead">Flash and debug firmware on the Expansion Board</p>
                    <p>The expansion board has a built-in RP2040-based programmer that is pre-flashed with <a href="https://github.com/elodin-sys/debugprobe">debugprobe firmware</a>
 that allows it to function as a CMSIS-DAP probe. This makes it easy to flash new firmware onto the FC board over USB using standard tools such as
-<a href="https://probe.rs/docs/getting-started/installation">probe-rs</a> or <a href="https://openocd.org/">OpenOCD</a>. We recommend using probe-rs because it has less of a configuration burden, and
-has out-of-the-box support for RTT (Real-Time Transfer) logging.</p>
+<a href="https://probe.rs/docs/getting-started/installation">probe-rs</a> or <a href="https://openocd.org/">OpenOCD</a>.</p>
 <h3 id="building-the-expansion-boards-default-firmware">Building the expansion boards default firmware</h3>
 <p>Clone the <code>elodin</code> repository and navigate to the <code>fsw</code> directory:</p>
 <pre data-lang="sh" class="language-sh z-code"><code class="language-sh" data-lang="sh"><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">git</span></span><span class="z-meta z-function-call z-arguments z-shell"> clone https://github.com/elodin-sys/elodin.git</span>
@@ -501,10 +515,45 @@ when connected to the Base Board, or alternatively can follow the instructions i
 from the included SD card.</p>
 <img src="/assets/aleph-flash-fc.jpg" alt="aleph-flash-fc"/>
 <br></br>
-<h3 id="flashing-from-the-orin-nx">Flashing from the Orin NX</h3>
-<p>You can flash the STM32H7 from the Orin NX. This is useful if you are pushing out new firmware updates to the STM32 over the air. In an Orin NX terminal session run the following command. Replace <code>&lt;elf path&gt;</code> with the path to your firmware payload in the ELF file format</p>
-<pre class="z-code"><code><span class="z-text z-plain">sudo flash-mcu --elf &lt;elf path&gt;
+<h3 id="flashing-from-the-orin-nx-via-deploy-sh">Flashing from the Orin NX via <code>deploy.sh</code></h3>
+<p>Aleph can also flash the STM32H7 from the Orin NX during a normal NixOS deploy. This is the preferred bring-up path for <code>fsw/c-blinky</code> because it packages the firmware into the Aleph closure, deploys it to the target, flashes it over the board-to-board link, and forwards the MCU log output into Elodin-DB.</p>
+<p>From the <code>aleph/</code> directory:</p>
+<pre data-lang="sh" class="language-sh z-code"><code class="language-sh" data-lang="sh"><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">nix</span></span><span class="z-meta z-function-call z-arguments z-shell"> build<span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> --</span>accept-flake-config</span> .#packages.aarch64-linux.toplevel<span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> --</span>show-trace</span></span>
+</span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">./deploy.sh</span></span><span class="z-meta z-function-call z-arguments z-shell"><span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> -</span>h</span> 192.168.4.188<span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> -</span>u</span> root</span>
 </span></code></pre>
+<p>The deploy activates a <code>c-blinky-flash</code> one-shot service on Aleph. That service:</p>
+<ol>
+<li>Uses the packaged <code>firmware.bin</code> from the deployed closure</li>
+<li>Stops <code>serial-bridge</code> so <code>/dev/ttyTHS1</code> is free for flashing</li>
+<li>Drives <code>BOOT0</code> over carrier GPIO9 and pulses <code>NRST</code> over carrier GPIO11</li>
+<li>Configures <code>/dev/ttyTHS1</code> for <code>19200 8E1</code></li>
+<li>Probes the STM32 ROM UART bootloader with <code>stm32flash</code></li>
+<li>Writes the application image to <code>0x08000000</code></li>
+<li>Resets the STM32 back into the flashed application</li>
+<li>Starts <code>serial-bridge</code> again so Linux can ingest the MCU logs</li>
+</ol>
+<p>The open-source expansion board uses the direct GPIO11 reset path above. The older custom reference board used an I2C expander for <code>NRST</code>, so bring-up notes from that flow need to be translated accordingly.</p>
+<h3 id="verifying-the-flash">Verifying the Flash</h3>
+<p>On the Aleph host, check the flash service:</p>
+<pre data-lang="sh" class="language-sh z-code"><code class="language-sh" data-lang="sh"><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">journalctl</span></span><span class="z-meta z-function-call z-arguments z-shell"><span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> -</span>u</span> c-blinky-flash<span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> -</span>n</span> 50<span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> --</span>no-pager</span></span>
+</span></code></pre>
+<p>Then confirm the serial bridge is receiving the MCU log frames:</p>
+<pre data-lang="sh" class="language-sh z-code"><code class="language-sh" data-lang="sh"><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">journalctl</span></span><span class="z-meta z-function-call z-arguments z-shell"><span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> -</span>u</span> serial-bridge<span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> -</span>n</span> 50<span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> --</span>no-pager</span></span>
+</span></code></pre>
+<p>If the flash unit reports <code>Timed out waiting for STM32 bootloader on /dev/ttyTHS1</code>, the STM32 did not answer the ROM bootloader probe and the board-to-board flashing path still needs hardware-level debugging on that Aleph.</p>
+<p><code>c-blinky</code> emits <code>INFO</code> log messages such as <code>c-blinky boot</code>, <code>LED: ON</code>, and <code>LED: OFF</code> over the board-to-board UART.</p>
+<h3 id="viewing-logs-in-the-editor">Viewing Logs in the Editor</h3>
+<p><code>serial-bridge</code> forwards the MCU lines into Elodin-DB as <code>LogEntry</code> messages on the <code>aleph.c-blinky.log</code> stream.</p>
+<p>Open the Editor against the Aleph database and add a log panel such as:</p>
+<pre data-lang="kdl" class="language-kdl z-code"><code class="language-kdl" data-lang="kdl"><span class="z-source z-kdl"><span class="z-text z-plain">l</span><span class="z-text z-plain">o</span><span class="z-text z-plain">g</span><span class="z-text z-plain">_</span><span class="z-text z-plain">s</span><span class="z-text z-plain">t</span><span class="z-text z-plain">r</span><span class="z-text z-plain">e</span><span class="z-text z-plain">a</span><span class="z-text z-plain">m</span><span class="z-text z-plain"> </span><span class="z-text z-plain">&quot;</span><span class="z-text z-plain">a</span><span class="z-text z-plain">l</span><span class="z-text z-plain">e</span><span class="z-text z-plain">p</span><span class="z-text z-plain">h</span><span class="z-text z-plain">.</span><span class="z-text z-plain">c</span><span class="z-text z-plain">-</span><span class="z-text z-plain">b</span><span class="z-text z-plain">l</span><span class="z-text z-plain">i</span><span class="z-text z-plain">n</span><span class="z-text z-plain">k</span><span class="z-text z-plain">y</span><span class="z-text z-plain">.</span><span class="z-text z-plain">l</span><span class="z-text z-plain">o</span><span class="z-text z-plain">g</span><span class="z-text z-plain">&quot;</span><span class="z-text z-plain"> </span><span class="z-text z-plain">n</span><span class="z-text z-plain">a</span><span class="z-text z-plain">m</span><span class="z-text z-plain">e</span><span class="z-text z-plain">=</span><span class="z-text z-plain">&quot;</span><span class="z-text z-plain">S</span><span class="z-text z-plain">T</span><span class="z-text z-plain">M</span><span class="z-text z-plain">3</span><span class="z-text z-plain">2</span><span class="z-text z-plain"> </span><span class="z-text z-plain">c</span><span class="z-text z-plain">-</span><span class="z-text z-plain">b</span><span class="z-text z-plain">l</span><span class="z-text z-plain">i</span><span class="z-text z-plain">n</span><span class="z-text z-plain">k</span><span class="z-text z-plain">y</span><span class="z-text z-plain">&quot;</span>
+</span></code></pre>
+<p>You should see the <code>c-blinky boot</code> message followed by alternating <code>LED: ON</code> and <code>LED: OFF</code> entries.</p>
+<h3 id="manual-flashing-on-aleph">Manual Flashing on Aleph</h3>
+<p>If you need to bypass deploy-driven flashing and run the tool directly on the Orin NX:</p>
+<pre data-lang="sh" class="language-sh z-code"><code class="language-sh" data-lang="sh"><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">sudo</span></span><span class="z-meta z-function-call z-arguments z-shell"> flash-mcu<span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> --</span>elf</span> <span class="z-keyword z-operator z-assignment z-redirection z-shell">&lt;</span>elf path<span class="z-keyword z-operator z-assignment z-redirection z-shell">&gt;</span>
+</span></span><span class="z-source z-shell z-bash"><span class="z-comment z-line z-number-sign z-shell"><span class="z-punctuation z-definition z-comment z-begin z-shell">#</span></span><span class="z-comment z-line z-number-sign z-shell"> or, if you already have a raw binary:</span><span class="z-comment z-line z-number-sign z-shell">
+</span></span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">sudo</span></span><span class="z-meta z-function-call z-arguments z-shell"> flash-mcu<span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> --</span>bin</span> <span class="z-keyword z-operator z-assignment z-redirection z-shell">&lt;</span>bin path<span class="z-keyword z-operator z-assignment z-redirection z-shell">&gt;</span>
+</span></span></code></pre>
 
                   
 <div class="footer-line-padding"></div>
