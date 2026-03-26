@@ -16,7 +16,7 @@ use bevy::{
     text::{TextColor, TextFont},
     transform::components::Transform,
 };
-use bevy_geo_frames::{GeoContext, GeoFrame, GeoPosition, GeoRotation};
+use bevy_geo_frames::prelude::*;
 use bevy_render::alpha::AlphaMode;
 use big_space::FloatingOriginSettings;
 use impeller2::types::ComponentId;
@@ -96,7 +96,7 @@ impl Plugin for GizmoPlugin {
         );
         app.add_systems(
             bevy::app::PostUpdate,
-            cleanup_removed_arrows.after(render_vector_arrow),
+            cleanup_removed_arrows,
         );
         app.add_systems(Update, render_body_axis);
         // Bevy UI labels for arrows - runs in PostUpdate after transforms are finalized
@@ -200,7 +200,8 @@ pub fn evaluate_vector_arrow(
             return None;
         };
         if let Some(world_pos) = origin_value.as_world_pos() {
-            if let Some(frame) = arrow.frame {
+            // Use ENU if no frame is specified.
+            if let Some(frame) = arrow.frame.or_default() {
                 start_world = GeoPosition(frame, world_pos.pos()).to_bevy(geo_context);
                 rotation = GeoRotation(frame, world_pos.att()).to_bevy(geo_context);
             } else {
@@ -208,7 +209,8 @@ pub fn evaluate_vector_arrow(
                 rotation = world_pos.bevy_att();
             }
         } else if let Some(origin) = component_value_tail_to_vec3(&origin_value) {
-            if let Some(frame) = arrow.frame {
+            // Use ENU if no frame is specified.
+            if let Some(frame) = arrow.frame.or_default() {
                 start_world = GeoPosition(frame, origin).to_bevy(geo_context);
             } else {
                 start_world = origin;

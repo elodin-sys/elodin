@@ -20,7 +20,7 @@ use crate::icon_rasterizer::IconTextureCache;
 use crate::iter::JoinDisplayExt;
 use crate::ui::tiles::ViewportConfig;
 use crate::{BevyExt, EqlContext, MainCamera, plugins::navigation_gizmo::NavGizmoCamera};
-use bevy_geo_frames::GeoContext;
+use bevy_geo_frames::prelude::*;
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 
@@ -1313,8 +1313,8 @@ pub fn create_object_3d_entity(
         ))
         .id();
 
-    // Add GeoPosition and GeoRotation components if a geo frame is specified
-    if let Some(frame) = geo_frame {
+    // Add GeoPosition and GeoRotation components.
+    if let Some(frame) = geo_frame.or_default() {
         commands.entity(entity_id).insert((
             GeoPosition(frame, DVec3::ZERO),
             GeoRotation::from_bevy(frame, DQuat::IDENTITY, geo_context),

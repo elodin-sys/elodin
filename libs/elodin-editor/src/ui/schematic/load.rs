@@ -3,7 +3,7 @@ use bevy::{ecs::system::SystemParam, prelude::*, window::PrimaryWindow};
 #[cfg(target_os = "macos")]
 use bevy_defer::AsyncCommandsExtension;
 use bevy_egui::egui::{Color32, Id};
-use bevy_geo_frames::GeoContext;
+use bevy_geo_frames::prelude::*;
 use bevy_infinite_grid::InfiniteGrid;
 use bevy_mat3_material::Mat3Material;
 use egui_tiles::{Container, Tile, TileId};
@@ -636,8 +636,8 @@ impl LoadSchematicParams<'_, '_> {
         let mut spawn = self.commands.spawn(line_3d);
         spawn.insert(Name::new("line_3d"));
 
-        // Add GeoPosition and GeoRotation if frame is specified
-        if let Some(frame) = frame.or(Some(bevy_geo_frames::GeoFrame::ENU)) {
+        // Add GeoPosition and GeoRotation; use ENU if no frame is specified.
+        if let Some(frame) = frame.or_default() {
             spawn.insert((
                 bevy_geo_frames::GeoPosition(frame, bevy::math::DVec3::ZERO),
                 bevy_geo_frames::GeoRotation(frame, bevy::math::DQuat::IDENTITY),
@@ -677,8 +677,8 @@ impl LoadSchematicParams<'_, '_> {
             },
         ));
 
-        // Add GeoPosition and GeoRotation if frame is specified
-        if let Some(frame) = frame {
+        // Add GeoPosition and GeoRotation; use ENU if no frame is specified.
+        if let Some(frame) = frame.or_default() {
             spawn.insert((
                 bevy_geo_frames::GeoPosition(frame, bevy::math::DVec3::ZERO),
                 bevy_geo_frames::GeoRotation(frame, bevy::math::DQuat::IDENTITY),

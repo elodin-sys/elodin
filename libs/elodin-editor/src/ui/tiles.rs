@@ -12,6 +12,7 @@ use bevy_editor_cam::{
     controller::{component::Sensitivity, zoom::ZoomLimits},
     prelude::{EditorCam, EnabledMotion, OrbitConstraint},
 };
+use bevy_geo_frames::prelude::*;
 use bevy_egui::{
     EguiContexts, EguiTextureHandle,
     egui::{self, Color32, CornerRadius, Frame, Id, RichText, Stroke, Ui, Visuals, vec2},
@@ -1312,8 +1313,8 @@ impl ViewportPane {
             Name::new("viewport"),
         ));
 
-        // Add GeoPosition and GeoRotation if frame is specified.
-        if let Some(frame) = viewport.frame {
+        // Add GeoPosition and GeoRotation; use ENU if no frame is specified.
+        if let Some(frame) = viewport.frame.or_default() {
             parent_cmd.insert((
                 bevy_geo_frames::GeoPosition(frame, transform.translation.as_dvec3()),
                 bevy_geo_frames::GeoRotation(frame, transform.rotation.as_dquat()),
