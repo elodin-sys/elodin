@@ -1,4 +1,11 @@
 ///$(which true);FLAGS="--std=c++23";THIS_FILE="$(cd "$(dirname "$0")"; pwd -P)/$(basename "$0")";OUT_FILE="/tmp/build-cache/$THIS_FILE";mkdir -p "$(dirname "$OUT_FILE")";test "$THIS_FILE" -ot "$OUT_FILE" || $(which clang++ || which g++) $FLAGS "$THIS_FILE" -o "$OUT_FILE" || exit $?;exec bash -c "exec -a \"$0\" \"$OUT_FILE\" $([ $# -eq 0 ] || printf ' "%s"' "$@")"
+//
+// Recommended pattern: batch all components into a single VTable and send
+// one table packet per tick. This minimizes per-packet overhead (protocol
+// parsing, write-lock acquisition, vtable lookup, mmap write) by amortizing
+// it across all components.
+//
+// Compare with client-per-component.cpp for the simpler alternative.
 
 #include <arpa/inet.h>
 #include <cstdint>
@@ -96,7 +103,6 @@ private:
     int fd_ = -1;
 };
 
-// Thread function to read from a socket connection
 void reader_thread_func(const char* ip, uint16_t port)
 {
     try {
@@ -106,7 +112,6 @@ void reader_thread_func(const char* ip, uint16_t port)
             .id = { 2, 0 },
         });
 
-        // Read loop
         while (true) {
             auto data = std::vector<uint8_t>(1024);
             auto len = read_sock.read(data.data(), data.size());
@@ -114,8 +119,6 @@ void reader_thread_func(const char* ip, uint16_t port)
                 std::println("Reader thread: connection closed");
                 break;
             }
-
-            // std::println("Reader thread received data: {} bytes", len);
         }
     } catch (const std::exception& e) {
         std::cerr << "Reader thread error: " << e.what() << std::endl;
@@ -128,18 +131,19 @@ try {
     const char* ip = "127.0.0.1";
     const uint16_t port = 2240;
 
-    // Connect the main socket for writing
-    std::println("Main thread: connecting writer socket");
+    std::println("Connecting writer socket (batched mode)");
     auto sock = Socket(ip, port);
+
+    // One VTable with all 6 sensor components sharing a single time source.
+    // The server decomposes this into individual time series on write.
     auto time = builder::raw_table(0, 8);
     auto table = builder::vtable({
         field<SensorData, &SensorData::mag>(schema(PrimType::F32(), { 3 }, timestamp(time, component("vehicle.imu.mag")))),
-        field<SensorData, &SensorData::mag>(schema(PrimType::F32(), { 3 }, timestamp(time, component("vehicle.imu.mag")))),
-        // field<SensorData, &SensorData::gyro>(schema(PrimType::F32(), { 3 }, timestamp(time, component("vehicle.imu.gyro")))),
-        // field<SensorData, &SensorData::accel>(schema(PrimType::F32(), { 3 }, timestamp(time, component("vehicle.imu.accel")))),
-        // field<SensorData, &SensorData::temp>(schema(PrimType::F32(), {}, timestamp(time, component("vehicle.temp")))),
-        // field<SensorData, &SensorData::pressure>(schema(PrimType::F32(), {}, timestamp(time, component("vehicle.pressure")))),
-        // field<SensorData, &SensorData::humidity>(schema(PrimType::F32(), {}, timestamp(time, component("vehicle.humidity")))),
+        field<SensorData, &SensorData::gyro>(schema(PrimType::F32(), { 3 }, timestamp(time, component("vehicle.imu.gyro")))),
+        field<SensorData, &SensorData::accel>(schema(PrimType::F32(), { 3 }, timestamp(time, component("vehicle.imu.accel")))),
+        field<SensorData, &SensorData::temp>(schema(PrimType::F32(), {}, timestamp(time, component("vehicle.temp")))),
+        field<SensorData, &SensorData::pressure>(schema(PrimType::F32(), {}, timestamp(time, component("vehicle.pressure")))),
+        field<SensorData, &SensorData::humidity>(schema(PrimType::F32(), {}, timestamp(time, component("vehicle.humidity")))),
     });
 
     sock.send(VTableMsg {
@@ -153,8 +157,6 @@ try {
     sock.send(set_component_metadata("vehicle.pressure"));
     sock.send(set_component_metadata("vehicle.humidity"));
 
-    // Start the reader thread
-    std::println("Main thread: starting reader thread");
     std::thread reader(reader_thread_func, ip, port);
 
     auto sensor_data = SensorData {
@@ -165,8 +167,10 @@ try {
         .pressure = 2.0,
         .humidity = 3.0
     };
+
+    // One packet per tick carries ALL 6 components.
+    // At 1kHz this is 1,000 packets/s (not 6,000).
     while (true) {
-        // send sin wave data continuously
         auto table_header = PacketHeader {
             .len = 4 + sizeof(sensor_data),
             .ty = PacketType::TABLE,
@@ -182,10 +186,9 @@ try {
         usleep(1000);
     }
 
-    // We should never reach here, but if we do:
     reader.join();
     return 0;
 } catch (const std::exception& e) {
-    std::cerr << "Main thread error: " << e.what() << std::endl;
+    std::cerr << "Error: " << e.what() << std::endl;
     return 1;
 }
