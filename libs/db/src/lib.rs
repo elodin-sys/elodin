@@ -1780,7 +1780,9 @@ async fn handle_packet<A: AsyncWrite + Send + Sync + 'static>(
                     sunk_new_time_series: false,
                     table_received: db.apply_implicit_timestamp(),
                     followed_components: &db.followed_components,
-                    has_followed_components: db.has_followed_components.load(std::sync::atomic::Ordering::Acquire),
+                    has_followed_components: db
+                        .has_followed_components
+                        .load(std::sync::atomic::Ordering::Acquire),
                     is_follower: false,
                 };
                 table.sink(&state.vtable_registry, &mut sink)??;

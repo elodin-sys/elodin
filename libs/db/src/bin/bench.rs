@@ -396,7 +396,11 @@ async fn run_writer(
         .map(|i| {
             let comp_name = format!("bench_comp_{}", vtable_base as usize + i);
             let comp_id = ComponentId::new(&comp_name);
-            raw_field((i * 8) as u16, 8, schema(PrimType::F64, &[], component(comp_id)))
+            raw_field(
+                (i * 8) as u16,
+                8,
+                schema(PrimType::F64, &[], component(comp_id)),
+            )
         })
         .collect();
     let vt = vtable(fields);

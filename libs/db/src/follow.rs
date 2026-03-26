@@ -370,7 +370,9 @@ async fn run_follower_inner(config: &FollowConfig, db: &Arc<DB>) -> Result<(), E
                         sunk_new_time_series: false,
                         table_received: db.apply_implicit_timestamp(),
                         followed_components: &db.followed_components,
-                        has_followed_components: db.has_followed_components.load(std::sync::atomic::Ordering::Acquire),
+                        has_followed_components: db
+                            .has_followed_components
+                            .load(std::sync::atomic::Ordering::Acquire),
                         is_follower: true,
                     };
                     match table.sink(&state.vtable_registry, &mut sink) {
