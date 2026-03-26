@@ -94,10 +94,7 @@ impl Plugin for GizmoPlugin {
             bevy::app::PreUpdate,
             render_vector_arrow.after(crate::PositionSync),
         );
-        app.add_systems(
-            bevy::app::PostUpdate,
-            cleanup_removed_arrows,
-        );
+        app.add_systems(bevy::app::PostUpdate, cleanup_removed_arrows);
         app.add_systems(Update, render_body_axis);
         // Bevy UI labels for arrows - runs in PostUpdate after transforms are finalized
         app.add_systems(
@@ -223,7 +220,8 @@ pub fn evaluate_vector_arrow(
         direction = rotation * direction;
     } else {
         // World-frame vectors need geo-frame to Bevy transformation
-        direction = GeoFrame::bevy_R_(&arrow.frame.unwrap_or(GeoFrame::ENU), geo_context) * direction;
+        direction =
+            GeoFrame::bevy_R_(&arrow.frame.unwrap_or(GeoFrame::ENU), geo_context) * direction;
     }
 
     let end_world = start_world + direction;

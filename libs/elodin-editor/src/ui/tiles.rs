@@ -12,11 +12,11 @@ use bevy_editor_cam::{
     controller::{component::Sensitivity, zoom::ZoomLimits},
     prelude::{EditorCam, EnabledMotion, OrbitConstraint},
 };
-use bevy_geo_frames::prelude::*;
 use bevy_egui::{
     EguiContexts, EguiTextureHandle,
     egui::{self, Color32, CornerRadius, Frame, Id, RichText, Stroke, Ui, Visuals, vec2},
 };
+use bevy_geo_frames::prelude::*;
 use egui::UiBuilder;
 use egui::response::Flags;
 use egui_material_icons::{icon_button, icons::*};

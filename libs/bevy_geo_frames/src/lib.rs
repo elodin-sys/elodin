@@ -63,9 +63,13 @@ impl OrDefault for Option<GeoFrame> {
     /// If [GeoFrame] does not impl `Default`, this is an identity function.
     fn or_default(self) -> Option<GeoFrame> {
         #[cfg(feature = "default_enu")]
-        { self.or(Some(GeoFrame::default())) }
+        {
+            self.or(Some(GeoFrame::default()))
+        }
         #[cfg(not(feature = "default_enu"))]
-        { self }
+        {
+            self
+        }
     }
 }
 
