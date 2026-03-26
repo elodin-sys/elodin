@@ -21,8 +21,13 @@ test_steps = [
             ),
             nix_step(
                 emoji=":c:",
-                label="db-cpp-example",
-                command="cd libs/db; clang++ -std=c++23 examples/client.cpp",
+                label="db-cpp-batched",
+                command="cd libs/db; clang++ -std=c++23 examples/client-batched.cpp",
+            ),
+            nix_step(
+                emoji=":c:",
+                label="db-cpp-per-component",
+                command="cd libs/db; clang++ -std=c++23 examples/client-per-component.cpp",
             ),
         ],
     ),
