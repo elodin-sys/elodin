@@ -216,10 +216,12 @@ pub fn evaluate_vector_arrow(
         }
     }
 
-    direction = GeoFrame::bevy_R_(&arrow.frame.unwrap_or(GeoFrame::ENU), geo_context) * direction;
-
     if arrow.body_frame {
+        // Body-frame vectors are rotated by the body's orientation directly to Bevy world
         direction = rotation * direction;
+    } else {
+        // World-frame vectors need geo-frame to Bevy transformation
+        direction = GeoFrame::bevy_R_(&arrow.frame.unwrap_or(GeoFrame::ENU), geo_context) * direction;
     }
 
     let end_world = start_world + direction;
