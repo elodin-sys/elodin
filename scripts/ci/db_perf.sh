@@ -24,8 +24,16 @@ for scenario in "${scenarios[@]}"; do
   tracy_pid=$!
   sleep 0.5
 
-  # Run the bench -- TRACY_PORT is read by TracyClient's static constructor
+  # Run the bench -- TRACY_PORT is read by TracyClient's static constructor.
+  # Exit 141 (SIGPIPE) is expected when tracy-capture disconnects; treat as success.
+  set +e
   TRACY_PORT=8090 "${bench_bin}" --scenario "${scenario}"
+  rc=$?
+  set -e
+  if [[ "${rc}" -ne 0 ]] && [[ "${rc}" -ne 141 ]]; then
+    echo "error: bench exited with status ${rc}"
+    exit "${rc}"
+  fi
 
   # Wait for tracy-capture to finish
   set +e
