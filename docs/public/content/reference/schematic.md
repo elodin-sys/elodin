@@ -14,9 +14,16 @@ order = 6
 
 ## Glossary
 
-- Top-level nodes: `theme`, `timeline`, `panel` variants, `object_3d`, `line_3d`, `vector_arrow`, `window`.
+- Top-level nodes: `coordinate`, `theme`, `timeline`, `panel` variants, `object_3d`, `line_3d`, `vector_arrow`, `window`.
 - EQL: expressions are evaluated in the runtime EQL context. Vector-like fields expect 3 components; `world_pos` is a 7-component array (quat + position).
 - Colors: `color r g b [a]` or named (`black`, `white`, `blue`, `red`, `orange`, `yellow`, `yalk`, `pink`, `cyan`, `gray`, `green`, `mint`, `turquoise`, `slate`, `pumpkin`, `yolk`, `peach`, `reddish`, `hyperblue`); alpha optional. Colors can be inline or in `color`/`colour` child nodes. Defaults to white when omitted unless noted.
+- Coordinate frames: `ENU` (East-North-Up), `NED` (North-East-Down), `ECEF` (Earth-Centered Earth-Fixed). Bevy uses a Y-up right-handed system; the `frame` attribute handles the conversion.
+
+### coordinate
+- Optional top-level node that sets the global coordinate frame for the schematic.
+- `frame`: `"ENU"` (default), `"NED"`, or `"ECEF"`.
+- Elements (`viewport`, `object_3d`, `line_3d`, `vector_arrow`) that don't specify their own `frame` attribute inherit this global frame.
+- Example: `coordinate frame="NED"` sets the entire schematic to use North-East-Down coordinates.
 
 ### theme
 - Optional top-level node that sets the session UI appearance.
@@ -44,7 +51,7 @@ order = 6
 - `hsplit` / `vsplit`: children are panels. Child `share=<f32>` controls the weight within the split. `active` (bool) is parsed but not currently used. Optional `name`.
 
 ### panel content
-- `viewport`: `fov` (default 45.0), optional `near`/`far` clipping planes (if omitted, camera defaults are `near=0.05` and `far=5.0`; if set, they are applied to the camera projection), optional `aspect` (if omitted, ratio is derived from viewport size), `active` (bool, default false), `show_grid` (default false), `show_arrows` (default true), `create_frustum` (default false; creates that viewport camera frustum), `show_frustums` (default false; shows frustums created by other viewports on this viewport), `frustums_color` (default `yellow`), `frustums_thickness` (default `0.006` world units), `show_view_cube` (default true), `hdr` (default false), `name` (optional label), camera `pos`/`look_at` (optional EQL). Vector arrows can also be declared directly inside the viewport node; those arrows are treated as part of that viewport’s layer and respect its `show_arrows`/`show_grid` settings, allowing you to build a local triad tied to the viewport camera. An `up` (default "(0, 1, 0)") specifies a direction vector in the world frame for the camera.
+- `viewport`: `fov` (default 45.0), optional `near`/`far` clipping planes (if omitted, camera defaults are `near=0.05` and `far=5.0`; if set, they are applied to the camera projection), optional `aspect` (if omitted, ratio is derived from viewport size), `active` (bool, default false), `show_grid` (default false), `show_arrows` (default true), `create_frustum` (default false; creates that viewport camera frustum), `show_frustums` (default false; shows frustums created by other viewports on this viewport), `frustums_color` (default `yellow`), `frustums_thickness` (default `0.006` world units), `show_view_cube` (default true), `hdr` (default false), `name` (optional label), `frame` (optional; `ENU`, `NED`, or `ECEF`; inherits from global `coordinate` if omitted), camera `pos`/`look_at` (optional EQL). Vector arrows can also be declared directly inside the viewport node; those arrows are treated as part of that viewport’s layer and respect its `show_arrows`/`show_grid` settings, allowing you to build a local triad tied to the viewport camera. An `up` (default depends on frame: `(0,0,1)` for ENU, `(0,0,-1)` for NED) specifies a direction vector in the frame coordinates for the camera. When `frame` is set, the ViewCube and grid axis colors adjust to match the coordinate system (e.g., NED swaps X/Z axis colors).
 - `graph`: positional `eql` (required), `name` (optional), `type` (`line`/`point`/`bar`, default `line`), `lock` (default false), `auto_y_range` (default true), `y_min`/`y_max` (default `0.0..1.0`), child `color` nodes (optional list; otherwise palette).
 - `component_monitor`: `component_name` (required), `name` (optional).
 - `action_pane`: `name` (required pane title), `lua` script (required).
@@ -58,6 +65,7 @@ order = 6
 
 ### object_3d
 - Positional `eql`: required. Evaluated to a `world_pos`-like value to place the mesh.
+- `frame`: optional; `ENU`, `NED`, or `ECEF`. Specifies the coordinate frame for interpreting position and orientation. Inherits from global `coordinate` if omitted.
 - Mesh child (required, exactly one):
   - `glb`: `path` (required), `scale` (default 1.0), `translate` `(x,y,z)` (default 0s), `rotate` `(deg_x,deg_y,deg_z)` in degrees (default 0s).
     - `animate` child nodes (optional, multiple): For rigged GLB models, animate specific joints/bones.
@@ -102,6 +110,7 @@ order = 6
 
 ### line_3d
 - Positional `eql`: required; expects 3 values (or 7 where the last 3 are XYZ).
+- `frame`: optional; `ENU`, `NED`, or `ECEF`. Specifies the coordinate frame for interpreting the line points. Inherits from global `coordinate` if omitted.
 - `line_width`: default 1.0.
 - `color`: default white.
 - `perspective`: default true (set false for screen-space lines).
@@ -109,6 +118,7 @@ order = 6
 ### vector_arrow
 - `vector`: EQL expression yielding a 3-component vector (required).
 - `origin`: EQL for arrow base; `world_pos` or 3-tuple (optional).
+- `frame`: optional; `ENU`, `NED`, or `ECEF`. Specifies the coordinate frame for interpreting the vector and origin. Inherits from global `coordinate` if omitted.
 - `scale`: numeric multiplier (default 1.0).
 - `normalize`: `#true`/`#false`; normalize before scaling (default false).
 - `body_frame` / `in_body_frame`: apply origin rotation to the vector (default false).
@@ -126,7 +136,8 @@ Legend: parentheses group alternatives; `|` means “or”; square brackets `[..
 
 ```kdl
 schematic =
-  ( theme
+  ( coordinate
+  | theme
   | timeline
   | window
   | panel
@@ -134,6 +145,9 @@ schematic =
   | line_3d
   | vector_arrow
   )*
+
+coordinate = "coordinate"
+           frame=ENU|NED|ECEF
 
 theme = "theme"
       [mode=dark|light]
@@ -188,6 +202,7 @@ viewport = "viewport"
          [frustums_thickness=float]
          [hdr=bool]
          [name=string]
+         [frame=ENU|NED|ECEF]
          [pos=eql]
          [look_at=eql]
          { vector_arrow }
@@ -241,6 +256,7 @@ dashboard      = "dashboard" { dashboard_node }+
 
 object_3d = "object_3d"
           <eql>
+          [frame=ENU|NED|ECEF]
           { glb { animate }*
           | sphere
           | box
@@ -268,12 +284,14 @@ visibility_range = "visibility_range"
 
 line_3d = "line_3d"
         <eql>
+        [frame=ENU|NED|ECEF]
         [line_width=float]
         [color]
         [perspective=bool]
 
 vector_arrow = "vector_arrow"
              <vector-eql>
+             [frame=ENU|NED|ECEF]
              [origin=eql]
              [scale=float]
              [normalize=bool]
@@ -355,6 +373,31 @@ graph "drone.altitude"
       name="Altitude"
       auto_y_range=#true
 ```
+
+NED coordinate frame with objects:
+
+```kdl
+coordinate frame="NED"
+
+viewport name="Main"
+         show_grid=#true
+         pos="(0,0,0,1, 0,10,0)"
+         look_at="(0,0,0,0, 0,0,0)"
+
+object_3d rocket.world_pos {
+    glb path="rocket.glb"
+}
+
+line_3d rocket.world_pos line_width=2.0 {
+    color white
+}
+
+vector_arrow "rocket.velocity" origin="rocket.world_pos" scale=0.5 {
+    color cyan
+}
+```
+
+In this example, all elements use the NED (North-East-Down) coordinate frame. The camera is positioned 10 meters East and looks at the origin. Individual elements can override the global frame with their own `frame` attribute.
 
 Sensor camera panel (from `world.sensor_camera()` + `ctx.render_camera()`):
 
