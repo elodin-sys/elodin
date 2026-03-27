@@ -42,6 +42,7 @@ pub async fn handle_follow_stream<W: AsyncWrite>(
     target_packet_size: u32,
     req_id: u8,
 ) -> Result<(), Error> {
+    let _span = tracing::info_span!("follow_stream").entered();
     let target = target_packet_size as usize;
     let mut sink = CoalescingSink::new(writer, target, FLUSH_INTERVAL);
 

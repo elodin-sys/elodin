@@ -43,6 +43,7 @@ Each Elodin process uses a dedicated Tracy port so they can be profiled independ
 | Editor / `elodin run` | 8087 |
 | Render server | 8088 |
 | Simulation (IREE) | 8089 |
+| Elodin-DB | 8090 |
 
 When using the Tracy GUI, connect to each port separately. When using `tracy-capture`, specify the port with `-p`.
 
@@ -107,6 +108,33 @@ The simulation runs as a Python subprocess (spawned by `s10`). When `just instal
 
 Both processes connect to Tracy independently over TCP. The Tracy UI displays them on a unified timeline.
 
+### Elodin-DB Process
+
+When built with `--features tracy`, the `elodin-db` binary (`libs/db/src/main.rs`) adds a `TracyLayer` to its tracing subscriber on port 8090. Instrumented hot paths:
+
+- **`handle_conn`** -- per-connection lifetime
+- **`handle_packet`** -- per-packet dispatch
+- **`sink_table`** -- table decomposition + write-lock acquisition (the primary write path)
+- **`apply_value`** (trace-level) -- per-component write within a table
+- **`push_buf`** (trace-level) -- mmap append to index + data files
+- **`follow_stream`** -- follow/replication egress path
+- **`coalescing_flush`** (trace-level) -- TCP write coalescing
+
+The `apply_value` and `push_buf` spans use `trace_span!` to minimize overhead at default log levels. Set `RUST_LOG=trace` or connect Tracy to capture them.
+
+A throughput benchmark is available:
+
+```bash
+# Customer scenario: 400 components at 250Hz, per-component connections, with a reader
+elodin-db-bench --scenario customer --json
+
+# Same workload but batched into single-table packets (faster)
+elodin-db-bench --scenario customer --mode batch --json
+
+# Custom configuration
+elodin-db-bench --components 1000 --frequency 100 --duration 20 --mode per-component
+```
+
 ---
 
 ## 3. Build Details
@@ -114,13 +142,14 @@ Both processes connect to Tracy independently over TCP. The Tracy UI displays th
 ### What `just install tracy` does
 
 1. Builds `nox-py` (Python extension) with `maturin develop -F tracy`, which activates `iree-runtime/tracy` and links against the Tracy-instrumented IREE runtime (`$IREE_RUNTIME_TRACY_DIR`)
-2. Builds the `elodin` editor binary with `cargo build --release -p elodin --features tracy`, which activates `bevy/trace_tracy` and adds `tracing-tracy`
+2. Builds the `elodin` editor and `elodin-db` binaries with `cargo build --release -p elodin -p elodin-db --features tracy`, which activates `bevy/trace_tracy` and adds `tracing-tracy` to both processes
 
 ### Feature chain
 
 ```
 apps/elodin          tracy = ["elodin-editor/tracy", "bevy/trace_tracy", "dep:tracing-tracy"]
 libs/elodin-editor   tracy = ["bevy/trace_tracy"]
+libs/db              tracy = ["dep:tracing-tracy"]  (adds TracyLayer to subscriber, port 8090)
 libs/nox-py          tracy = ["iree-runtime/tracy"]
 libs/iree-runtime    tracy = []  (selects IREE_RUNTIME_TRACY_DIR in build.rs, links TracyClient)
 ```

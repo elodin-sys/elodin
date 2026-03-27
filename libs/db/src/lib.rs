@@ -246,6 +246,9 @@ pub struct DB {
     /// When a local (non-follower) writer writes to one of these, a warning
     /// is logged to highlight potential data corruption.
     pub followed_components: RwLock<HashSet<ComponentId>>,
+    /// Fast-path flag: true when `followed_components` is non-empty.
+    /// Avoids acquiring the read lock on every `apply_value` call.
+    has_followed_components: std::sync::atomic::AtomicBool,
 }
 
 #[derive(Default)]
@@ -295,6 +298,7 @@ impl DB {
             earliest_timestamp: AtomicCell::new(now),
             db_start_wall_clock: AtomicCell::new(now),
             followed_components: RwLock::new(HashSet::default()),
+            has_followed_components: std::sync::atomic::AtomicBool::new(false),
         };
         db.save_db_state()?;
         Ok(db)
@@ -588,6 +592,7 @@ impl DB {
             earliest_timestamp: AtomicCell::new(earliest_timestamp),
             db_start_wall_clock: AtomicCell::new(now),
             followed_components: RwLock::new(HashSet::default()),
+            has_followed_components: std::sync::atomic::AtomicBool::new(false),
         };
         // Save updated version info
         db.save_db_state()?;
@@ -1251,6 +1256,8 @@ pub(crate) struct DBSink<'a> {
     /// Set of component IDs replicated from a followed source.
     /// When a non-follower writes to one of these, we warn.
     pub(crate) followed_components: &'a RwLock<HashSet<ComponentId>>,
+    /// Fast-path: skip the lock when no followed components exist.
+    pub(crate) has_followed_components: bool,
     /// True when the writer is the follower itself (suppresses the warning).
     pub(crate) is_follower: bool,
 }
@@ -1263,9 +1270,12 @@ impl Decomponentize for DBSink<'_> {
         value: impeller2::types::ComponentView<'_>,
         timestamp: Option<Timestamp>,
     ) -> Result<(), Error> {
+        let _span = tracing::trace_span!("apply_value", %component_id).entered();
         // Warn if a non-follower connection writes to a component being
-        // replicated from a followed source.
+        // replicated from a followed source. The atomic flag avoids
+        // acquiring the RwLock on every call when no follow is active.
         if !self.is_follower
+            && self.has_followed_components
             && self
                 .followed_components
                 .read()
@@ -1406,6 +1416,7 @@ async fn handle_conn_inner<A: AsyncRead + AsyncWrite + Send + Sync + 'static>(
     mut rx: PacketStream<OwnedReader<A>>,
     db: Arc<DB>,
 ) -> Result<(), Error> {
+    let _conn_span = tracing::info_span!("handle_conn").entered();
     let mut buf = vec![0u8; 8 * 1024 * 1024];
     let mut resp_pkt = LenPacket::new(PacketTy::Msg, [0, 0], 8 * 1024 * 1024);
     loop {
@@ -1546,6 +1557,7 @@ async fn handle_packet<A: AsyncWrite + Send + Sync + 'static>(
     db: &Arc<DB>,
     tx: &mut PacketTx<A>,
 ) -> Result<PacketAction, Error> {
+    let _pkt_span = tracing::info_span!("handle_packet").entered();
     trace!(?pkt, "handling pkt");
 
     match &pkt {
@@ -1755,6 +1767,7 @@ async fn handle_packet<A: AsyncWrite + Send + Sync + 'static>(
             tx.send_msg(&settings).await?;
         }
         Packet::Table(table) => {
+            let _table_span = tracing::info_span!("sink_table").entered();
             trace!(table.len = table.buf.len(), "sinking table");
             let table_id = table.id;
             let table_buf_len = table.buf.len();
@@ -1767,6 +1780,9 @@ async fn handle_packet<A: AsyncWrite + Send + Sync + 'static>(
                     sunk_new_time_series: false,
                     table_received: db.apply_implicit_timestamp(),
                     followed_components: &db.followed_components,
+                    has_followed_components: db
+                        .has_followed_components
+                        .load(std::sync::atomic::Ordering::Acquire),
                     is_follower: false,
                 };
                 table.sink(&state.vtable_registry, &mut sink)??;
