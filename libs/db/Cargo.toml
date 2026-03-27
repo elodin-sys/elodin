@@ -23,6 +23,7 @@ default = ["axum", "parquet", "video-export"]
 axum = ["dep:axum", "dep:axum-streams", "dep:serde_json", "dep:tokio"]
 parquet = ["dep:parquet"]
 video-export = ["dep:muxide", "dep:scuffle-h264"]
+tracy = ["dep:tracing-tracy"]
 
 [dependencies]
 # ser-de
@@ -61,7 +62,8 @@ miette.features = ["fancy"]
 
 # logs
 tracing = "0.1.40"
-tracing-subscriber = { version = "0.3.18", features = ["env-filter", "chrono"] }
+tracing-subscriber = { version = "0.3.18", features = ["env-filter", "chrono", "registry"] }
+tracing-tracy = { version = "0.11", optional = true }
 hifitime.version = "4.0"
 
 # rand
@@ -116,6 +118,10 @@ scuffle-h264 = { version = "0.2", optional = true }
 
 [target.'cfg(unix)'.dependencies]
 render-bridge.path = "../render-bridge"
+
+[[bin]]
+name = "elodin-db-bench"
+path = "src/bin/bench.rs"
 
 [dev-dependencies]
 tempfile = "3"

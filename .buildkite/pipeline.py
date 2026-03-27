@@ -21,8 +21,13 @@ test_steps = [
             ),
             nix_step(
                 emoji=":c:",
-                label="db-cpp-example",
-                command="cd libs/db; clang++ -std=c++23 examples/client.cpp",
+                label="db-cpp-batched",
+                command="cd libs/db; clang++ -std=c++23 examples/client-batched.cpp",
+            ),
+            nix_step(
+                emoji=":c:",
+                label="db-cpp-per-component",
+                command="cd libs/db; clang++ -std=c++23 examples/client-per-component.cpp",
             ),
         ],
     ),
@@ -116,6 +121,18 @@ test_steps = [
                 flake=".#tracy",
                 command="./scripts/ci/sensor_camera_perf.sh",
                 env={"ELODIN_SENSOR_CAMERA_CAPTURE_TRACY": "1"},
+            ),
+        ],
+    ),
+    group(
+        name=":racehorse: performance",
+        steps=[
+            nix_step(
+                emoji=":racehorse:",
+                label="perf-elodin-db",
+                pre_command="nix develop --command bash -c 'cargo build --release -p elodin-db --bin elodin-db-bench --features tracy'",
+                flake=".#tracy",
+                command="bash ./scripts/ci/db_perf.sh",
             ),
         ],
     ),

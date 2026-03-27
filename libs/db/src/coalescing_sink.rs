@@ -88,6 +88,7 @@ impl<'a, W: AsyncWrite> CoalescingSink<'a, W> {
             return Ok(());
         }
 
+        let _span = tracing::trace_span!("coalescing_flush").entered();
         let buf = std::mem::replace(&mut self.buffer, Vec::with_capacity(self.target_size));
         let (res, _buf) = self.writer.write_all(buf).await;
         self.last_flush = Instant::now();

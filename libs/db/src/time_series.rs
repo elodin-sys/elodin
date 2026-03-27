@@ -177,6 +177,7 @@ impl TimeSeries {
     }
 
     pub fn push_buf(&self, timestamp: Timestamp, buf: &[u8]) -> Result<(), Error> {
+        let _span = tracing::trace_span!("push_buf").entered();
         let len = self.index.len() as usize;
 
         // check if timestamp is greater than the last timestamp
