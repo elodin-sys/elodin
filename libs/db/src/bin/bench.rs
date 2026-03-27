@@ -372,7 +372,7 @@ async fn run_benchmark(
 
     let elapsed = start.elapsed();
     let per_second_throughput = sampler.await.unwrap_or_default();
-    let total_writes = count_total_samples(addr, num_components).await;
+    let total_writes = count_total_samples(addr, num_components, mode, num_clients).await;
 
     let mut lat_samples = latencies.lock().unwrap().clone();
     lat_samples.sort_unstable();
@@ -560,22 +560,48 @@ async fn run_reader(addr: SocketAddr) {
     }
 }
 
-async fn count_total_samples(addr: SocketAddr, num_components: usize) -> u64 {
+async fn count_total_samples(
+    addr: SocketAddr,
+    num_components: usize,
+    mode: SendMode,
+    num_clients: usize,
+) -> u64 {
     sleep(Duration::from_millis(200)).await;
 
     let mut client = Client::connect(addr).await.unwrap();
     let mut total: u64 = 0;
 
-    for i in 0..num_components {
-        let comp_name = format!("bench_comp_{}", i + 1);
-        let comp_id = ComponentId::new(&comp_name);
+    use impeller2::types::Timestamp;
+    use impeller2_wkt::GetTimeSeries;
 
-        use impeller2::types::Timestamp;
-        use impeller2_wkt::GetTimeSeries;
+    // Build the (vtable_id, comp_name) pairs matching writer registration.
+    let pairs: Vec<([u8; 2], String)> = match mode {
+        SendMode::PerComponent => (0..num_components)
+            .map(|i| {
+                let idx = (i as u16) + 1;
+                (idx.to_le_bytes(), format!("bench_comp_{}", idx))
+            })
+            .collect(),
+        SendMode::Batch => {
+            let dist = distribute(num_components, num_clients);
+            let mut out = Vec::with_capacity(num_components);
+            let mut vtable_base: u16 = 1;
+            for &n in &dist {
+                let vt_id = vtable_base.to_le_bytes();
+                for offset in 0..n {
+                    let name = format!("bench_comp_{}", vtable_base as usize + offset);
+                    out.push((vt_id, name));
+                }
+                vtable_base += n as u16;
+            }
+            out
+        }
+    };
 
-        let vtable_id = ((i + 1) as u16).to_le_bytes();
+    for (vtable_id, comp_name) in &pairs {
+        let comp_id = ComponentId::new(comp_name);
         let query = GetTimeSeries {
-            id: vtable_id,
+            id: *vtable_id,
             range: Timestamp(0)..Timestamp(i64::MAX),
             component_id: comp_id,
             limit: None,
