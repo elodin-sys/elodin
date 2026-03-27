@@ -350,13 +350,17 @@ async fn run_benchmark(
             }
         }
         SendMode::PerComponent => {
-            for i in 0..num_components {
+            let components_per_client = distribute(num_components, num_clients);
+            let mut comp_base: u16 = 1;
+            for &n in components_per_client.iter() {
+                let base = comp_base;
+                comp_base += n as u16;
                 let counter = write_counter.clone();
                 let lat = latencies.clone();
-                let comp_idx = i as u16 + 1;
                 handles.push(spawn(run_writer_per_component(
                     addr,
-                    comp_idx,
+                    base,
+                    n,
                     interval,
                     target_duration,
                     counter,
@@ -409,10 +413,7 @@ async fn run_benchmark(
         data_rate_mb_per_sec: data_volume_mb / elapsed.as_secs_f64(),
         effective_freq_per_component: throughput / num_components as f64,
         with_reader,
-        clients: match mode {
-            SendMode::Batch => num_clients,
-            SendMode::PerComponent => num_components,
-        },
+        clients: num_clients,
         per_second_throughput,
         send_latency_p50_us: p50,
         send_latency_p95_us: p95,
@@ -489,12 +490,15 @@ async fn run_writer_batch(
     ticks * num_components as u64
 }
 
-/// Each component gets its own TCP connection and VTable (1 field each).
-/// This mirrors the pattern used in `db.hpp` where each writer handles a
-/// single component independently.
+/// Sends one packet per component per tick over a shared connection.
+/// Each component gets its own 1-field VTable, so the server still pays
+/// per-packet overhead (protocol parse, write-lock, vtable lookup, mmap)
+/// for every component -- but we avoid opening N TCP connections which
+/// would exhaust io_uring memory on resource-constrained CI.
 async fn run_writer_per_component(
     addr: SocketAddr,
-    comp_idx: u16,
+    comp_base: u16,
+    num_components: usize,
     interval: Duration,
     target_duration: Duration,
     write_counter: Arc<AtomicU64>,
@@ -502,22 +506,28 @@ async fn run_writer_per_component(
 ) -> u64 {
     let mut client = Client::connect(addr).await.unwrap();
 
-    let vtable_id = comp_idx.to_le_bytes();
-    let comp_name = format!("bench_comp_{}", comp_idx);
-    let comp_id = ComponentId::new(&comp_name);
-    let vt = vtable(vec![raw_field(
-        0,
-        8,
-        schema(PrimType::F64, &[], component(comp_id)),
-    )]);
-    client
-        .send(&VTableMsg {
-            id: vtable_id,
-            vtable: vt,
-        })
-        .await
-        .0
-        .unwrap();
+    let vtable_ids: Vec<[u8; 2]> = (0..num_components)
+        .map(|i| (comp_base + i as u16).to_le_bytes())
+        .collect();
+
+    for (i, vtable_id) in vtable_ids.iter().enumerate() {
+        let idx = comp_base + i as u16;
+        let comp_name = format!("bench_comp_{}", idx);
+        let comp_id = ComponentId::new(&comp_name);
+        let vt = vtable(vec![raw_field(
+            0,
+            8,
+            schema(PrimType::F64, &[], component(comp_id)),
+        )]);
+        client
+            .send(&VTableMsg {
+                id: *vtable_id,
+                vtable: vt,
+            })
+            .await
+            .0
+            .unwrap();
+    }
 
     sleep(Duration::from_millis(50)).await;
 
@@ -529,12 +539,14 @@ async fn run_writer_per_component(
     while start.elapsed() < target_duration {
         let tick_start = Instant::now();
 
-        let mut pkt = LenPacket::table(vtable_id, 8);
-        pkt.extend_aligned(&[ticks as f64]);
-        client.send(pkt).await.0.unwrap();
+        for vtable_id in &vtable_ids {
+            let mut pkt = LenPacket::table(*vtable_id, 8);
+            pkt.extend_aligned(&[ticks as f64]);
+            client.send(pkt).await.0.unwrap();
+        }
 
         ticks += 1;
-        write_counter.fetch_add(1, Ordering::Relaxed);
+        write_counter.fetch_add(num_components as u64, Ordering::Relaxed);
 
         if ticks.is_multiple_of(sample_every) {
             local_latencies.push(tick_start.elapsed().as_micros() as u64);
@@ -547,7 +559,7 @@ async fn run_writer_per_component(
         global.extend_from_slice(&local_latencies);
     }
 
-    ticks
+    ticks * num_components as u64
 }
 
 async fn run_reader(addr: SocketAddr) {
