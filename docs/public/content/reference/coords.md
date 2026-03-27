@@ -18,20 +18,29 @@ axes as (red, green, blue) respectively. Also, all coordinate systems are right-
 
 ## Configuring the World Frame
 
-When creating a world in Elodin, you must explicitly specify the coordinate frame convention. This ensures clarity and prevents ambiguity about the coordinate system being used:
+When creating a world in Elodin, you ought to specify the coordinate frame convention. This ensures clarity and prevents ambiguity about the coordinate system being used. This is done in the schematic KDL:
 
-```python
-import elodin as el
+```kdl
+// Present world with ENU (East-North-Up) frame for terrestrial vehicles.
+coordinate frame="ENU"
 
-# Create a world with ENU (East-North-Up) frame for terrestrial vehicles
-world = el.World(frame=el.Frame.ENU)
+// Or use NED (North-East-Down) for aviation applications.
+coordinate frame="NED"
 
-# Or use NED (North-East-Down) for aviation applications
-world = el.World(frame=el.Frame.NED)
-
-# Or use ECI for orbital mechanics
-world = el.World(frame=el.Frame.ECI)
+// Or use ECI for orbital mechanics.
+coordinate frame="ECEF"
 ```
+
+If there is an object that uses a different convention, you can specify a coordinate frame for that particular object:
+
+```kdl
+object_3d frame="NED" ball.world_pos {
+    sphere radius=0.2 {
+        color orange
+    }
+}
+```
+If no coordinate frame is specified, then ENU is used by default.
 
 ### Supported Frame Conventions
 
@@ -40,6 +49,11 @@ world = el.World(frame=el.Frame.ECI)
 | **ENU** | East | North | Up | [0, 0, -9.81] | Terrestrial vehicles (drones, cars, robots) |
 | **NED** | North | East | Down | [0, 0, 9.81] | Aviation, marine navigation |
 | **ECEF** | 0° Long | 90° E | N Pole | Position-dependent | GPS, Earth surface mapping |
+
+### Not Yet Supported Frame Conventions
+
+| Frame | +X Axis | +Y Axis | +Z Axis | Gravity* | Use Case |
+|-------|---------|---------|---------|----------|----------|
 | **ECI** | Vernal Equinox | 90° E | N Pole | Position-dependent | Low Earth orbit |
 | **GCRF** | J2000 | 90° E | N Pole | N/A | Deep space, inertial reference |
 

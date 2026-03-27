@@ -76,7 +76,7 @@ Run simulations like any Python script:
 # sim.py
 import elodin as el
 
-w = el.World(frame=el.Frame.ENU)
+w = el.World()
 # ... build simulation ...
 w.run(system, simulation_rate=120.0)
 ```
@@ -331,7 +331,7 @@ This feature is useful for:
 ### World
 Container for all components and systems:
 ```python
-w = el.World(frame=el.Frame.ENU)
+w = el.World()
 ```
 
 ### Hierarchical Components & Archetypes
@@ -683,7 +683,7 @@ from jaxmarl import make
 
 # Define Elodin simulation for drone swarm
 def build_drone_swarm():
-    w = el.World(frame=el.Frame.ENU)
+    w = el.World()
     
     # Spawn multiple drones
     for i in range(4):

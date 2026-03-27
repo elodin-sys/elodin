@@ -101,7 +101,6 @@ The configurable frame system is working correctly.
 
 ## Key Takeaways
 
-- Always explicitly specify the frame when creating a world: `el.World(frame=el.Frame.ENU)`
 - Gravity direction changes with frame convention:
   - ENU: `[0, 0, -9.81]` (up is +Z)
   - NED: `[0, 0, +9.81]` (down is +Z)
