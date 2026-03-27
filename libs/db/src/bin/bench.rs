@@ -51,8 +51,8 @@ struct Args {
     json: bool,
     #[arg(long, value_enum)]
     scenario: Option<Scenario>,
-    #[arg(long, value_enum, default_value_t = SendMode::Batch)]
-    mode: SendMode,
+    #[arg(long, value_enum)]
+    mode: Option<SendMode>,
 }
 
 #[derive(ValueEnum, Clone)]
@@ -230,7 +230,7 @@ async fn main() {
                 args.components = 400;
                 args.frequency = 250;
                 args.with_reader = true;
-                args.mode = SendMode::PerComponent;
+                args.mode = args.mode.or(Some(SendMode::PerComponent));
             }
             Scenario::HighFreq => {
                 args.components = 50;
@@ -268,7 +268,7 @@ async fn main() {
         args.duration,
         args.clients,
         args.with_reader,
-        args.mode,
+        args.mode.unwrap_or_default(),
         &scenario_name,
     )
     .await;
