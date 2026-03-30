@@ -13,6 +13,7 @@ use bevy::shader::Shader;
 use bevy::{
     app::{Plugin, PostUpdate},
     asset::{AssetApp, Assets, Handle, load_internal_asset, uuid_handle},
+    transform::TransformSystems,
     color::ColorToComponents,
     core_pipeline::{
         core_3d::{CORE_3D_DEPTH_FORMAT, Transparent3d},
@@ -71,7 +72,10 @@ impl Plugin for Plot3dGpuPlugin {
         app.add_plugins(UniformComponentPlugin::<LineUniform>::default())
             .init_resource::<CachedSystemState>()
             .init_asset::<Line>()
-            .add_systems(PostUpdate, update_uniform_model);
+            .add_systems(
+                PostUpdate,
+                update_uniform_model.after(TransformSystems::Propagate),
+            );
 
         load_internal_asset!(app, LINE_SHADER_HANDLE, "./line.wgsl", Shader::from_wgsl);
         let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
