@@ -8,7 +8,7 @@ publish = false
 
 [features]
 cargo-clippy = []
-inspector = ["dep:bevy-inspector-egui"]
+inspector = ["dep:bevy-inspector-egui", "bevy_geo_frames/inspector"]
 debug = ["big_space/debug"]
 tracy = ["bevy/trace_tracy"]
 
@@ -20,18 +20,27 @@ egui_material_icons = "0.5"
 ab_glyph = "0.2"
 
 # bevy
-bevy.version = "0.17"
-bevy.features = ["file_watcher"]
+bevy = { workspace = true, features = [
+  "file_watcher",
+  "android_shared_stdcxx",
+  "bevy_audio",
+  "vorbis",
+] }
 bevy_render.version = "0.17"
 bevy_color.version = "0.17"
 bevy_egui.version = "0.38.0"
 bevy_picking = "0.17"
+bevy_geo_frames.path = "../bevy_geo_frames"
+bevy_geo_frames.features = [ "big_space", "default_enu" ]
 egui.version = "0.33.3"
 egui.features = ["rayon"]
 egui_tiles = "0.14"
 egui_table = "0.5"
-winit.version = "0.30.12"
-winit.features = ["rwh_05"]
+winit = { version = "0.30.12", default-features = false, features = [
+  "rwh_05",
+  "rwh_06",
+  "x11",
+] }
 raw-window-handle = "0.5"
 bevy_infinite_grid = "0.17"
 big_space.workspace = true
@@ -137,7 +146,7 @@ impeller2-bevy.features = ["tcp"]
 impeller2-bevy.default-features = false
 
 # 3D text for ViewCube labels
-bevy_fontmesh = "0.1.4"
+bevy_fontmesh = "0.1.8"
 
 # macos
 [target.'cfg(target_os = "macos")'.dependencies]
@@ -161,6 +170,3 @@ pic-scale = "0.6"
 # unix (headless sensor camera render bridge)
 [target.'cfg(unix)'.dependencies]
 render-bridge.path = "../render-bridge"
-
-# [patch.crates-io]
-# bevy_editor_cam = { path = "../bevy_editor_cam" }

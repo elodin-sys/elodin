@@ -17,3 +17,7 @@ thiserror = "2.0"
 miette.version = "7.0"
 miette.features = ["fancy"]
 tracing = "0.1.41"
+
+bevy_geo_frames.path = "../../bevy_geo_frames"
+bevy_geo_frames.default-features = false
+bevy_geo_frames.features = ["strum", "serde"]

@@ -56,8 +56,9 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     let index_x_b = index_x_buffer[vertex.instance_index + 1];
     let index_y_b = index_y_buffer[vertex.instance_index + 1];
     let index_z_b = index_z_buffer[vertex.instance_index + 1];
-    let point_a = vec3(x_values[index_x_a], z_values[index_z_a], -y_values[index_y_a],);
-    let point_b = vec3(x_values[index_x_b],  z_values[index_z_b], -y_values[index_y_b]);
+    // Let's not assume ENU here.
+    let point_a = vec3(x_values[index_x_a], y_values[index_y_a], z_values[index_z_a]);
+    let point_b = vec3(x_values[index_x_b], y_values[index_y_b], z_values[index_z_b]);
 
     // algorithm based on https://wwwtyro.net/2019/11/18/instanced-lines.html
     var clip0 = view.clip_from_world * line_uniform.model * vec4(point_a, 1.0);

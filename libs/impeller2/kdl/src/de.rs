@@ -1,9 +1,11 @@
 use crate::color_names::color_from_name;
+use bevy_geo_frames::GeoFrame;
 use impeller2_wkt::{
     ArrowThickness, Color, Schematic, SchematicElem, ThemeConfig, VectorArrow3d, WindowSchematic,
 };
 use kdl::{KdlDocument, KdlNode};
 use std::collections::HashMap;
+use std::str::FromStr;
 use std::time::Duration;
 
 use impeller2_wkt::*;
@@ -26,6 +28,7 @@ pub fn parse_schematic(input: &str) -> Result<Schematic, KdlSchematicError> {
         match elem {
             SchematicElem::Theme(theme) => schematic.theme = Some(theme),
             SchematicElem::Timeline(timeline) => schematic.timeline = Some(timeline),
+            SchematicElem::Coordinate(frame) => schematic.frame = Some(frame),
             other => schematic.elems.push(other),
         }
     }
@@ -44,6 +47,7 @@ fn parse_schematic_elem(node: &KdlNode, src: &str) -> Result<SchematicElem, KdlS
         "object_3d" => Ok(SchematicElem::Object3d(parse_object_3d(node, src)?)),
         "line_3d" => Ok(SchematicElem::Line3d(parse_line_3d(node, src)?)),
         "vector_arrow" => Ok(SchematicElem::VectorArrow(parse_vector_arrow(node, src)?)),
+        "coordinate" => Ok(SchematicElem::Coordinate(parse_coordinate(node, src)?)),
         _ => Err(KdlSchematicError::UnknownNode {
             node_type: node.name().to_string(),
             src: src.to_string(),
@@ -221,6 +225,26 @@ fn parse_timeline(node: &KdlNode, src: &str) -> Result<TimelineConfig, KdlSchema
         played_color,
         future_color,
         follow_latest,
+    })
+}
+
+fn parse_coordinate(node: &KdlNode, src: &str) -> Result<GeoFrame, KdlSchematicError> {
+    let frame_str = node
+        .get("frame")
+        .and_then(|v| v.as_string())
+        .ok_or_else(|| KdlSchematicError::MissingProperty {
+            property: "frame".to_string(),
+            node: "coordinate".to_string(),
+            src: src.to_string(),
+            span: node.span(),
+        })?;
+
+    GeoFrame::from_str(frame_str).map_err(|_| KdlSchematicError::InvalidValue {
+        property: "frame".to_string(),
+        node: "coordinate".to_string(),
+        expected: "ENU, NED, or ECEF".to_string(),
+        src: src.to_string(),
+        span: node.span(),
     })
 }
 
@@ -502,6 +526,10 @@ fn parse_viewport(node: &KdlNode, kdl_src: &str) -> Result<Panel, KdlSchematicEr
             }
         });
 
+    let frame = node
+        .get("frame")
+        .and_then(|v| v.as_string())
+        .and_then(|s| GeoFrame::from_str(s).ok());
     let up = node
         .get("up")
         .and_then(|v| v.as_string())
@@ -541,6 +569,7 @@ fn parse_viewport(node: &KdlNode, kdl_src: &str) -> Result<Panel, KdlSchematicEr
         name,
         pos,
         look_at,
+        frame,
         up,
         local_arrows,
         node_id: NodeId::default(),
@@ -794,6 +823,10 @@ fn parse_object_3d(node: &KdlNode, src: &str) -> Result<Object3D, KdlSchematicEr
         })?
         .to_string();
 
+    let frame = node
+        .get("frame")
+        .and_then(|v| v.as_string())
+        .and_then(|s| GeoFrame::from_str(s).ok());
     let mut icon = None;
     let mut mesh_visibility_range = None;
 
@@ -872,6 +905,7 @@ fn parse_object_3d(node: &KdlNode, src: &str) -> Result<Object3D, KdlSchematicEr
     Ok(Object3D {
         eql,
         mesh,
+        frame,
         icon,
         mesh_visibility_range,
         node_id: NodeId::default(),
@@ -1161,11 +1195,17 @@ fn parse_line_3d(node: &KdlNode, src: &str) -> Result<Line3d, KdlSchematicError>
         .and_then(|v| v.as_bool())
         .unwrap_or(true);
 
+    let frame = node
+        .get("frame")
+        .and_then(|v| v.as_string())
+        .and_then(|s| GeoFrame::from_str(s).ok());
+
     Ok(Line3d {
         eql,
         line_width,
         color,
         perspective,
+        frame,
         node_id: NodeId::default(),
     })
 }
@@ -1334,6 +1374,11 @@ fn parse_vector_arrow(node: &KdlNode, src: &str) -> Result<VectorArrow3d, KdlSch
 
     let color = parse_color_from_node_or_children(node, None).unwrap_or(Color::WHITE);
 
+    let frame = node
+        .get("frame")
+        .and_then(|v| v.as_string())
+        .and_then(|s| GeoFrame::from_str(s).ok());
+
     Ok(VectorArrow3d {
         vector,
         origin,
@@ -1345,6 +1390,7 @@ fn parse_vector_arrow(node: &KdlNode, src: &str) -> Result<VectorArrow3d, KdlSch
         show_name,
         thickness,
         label_position,
+        frame,
         node_id: NodeId::default(),
     })
 }
@@ -1871,6 +1917,104 @@ object_3d "a.world_pos" {
             }
         } else {
             panic!("Expected object_3d");
+        }
+    }
+
+    #[test]
+    fn test_parse_object_3d_with_ned_frame() {
+        let kdl = r#"
+object_3d frame="NED" "ball.world_pos" {
+    sphere radius=0.2 {
+        color orange
+    }
+}
+"#;
+        let schematic = parse_schematic(kdl).unwrap();
+
+        assert_eq!(schematic.elems.len(), 1);
+        if let SchematicElem::Object3d(obj) = &schematic.elems[0] {
+            assert_eq!(obj.eql, "ball.world_pos");
+            assert!(matches!(obj.frame, Some(GeoFrame::NED)));
+        } else {
+            panic!("Expected object_3d");
+        }
+    }
+
+    #[test]
+    fn test_parse_object_3d_with_enu_frame() {
+        let kdl = r#"
+object_3d "entity.world_pos" frame="ENU" {
+    glb path="model.glb"
+}
+"#;
+        let schematic = parse_schematic(kdl).unwrap();
+
+        assert_eq!(schematic.elems.len(), 1);
+        if let SchematicElem::Object3d(obj) = &schematic.elems[0] {
+            assert_eq!(obj.eql, "entity.world_pos");
+            assert!(matches!(obj.frame, Some(GeoFrame::ENU)));
+        } else {
+            panic!("Expected object_3d");
+        }
+    }
+
+    #[test]
+    fn test_parse_object_3d_default_frame() {
+        let kdl = r#"
+object_3d "a.world_pos" {
+    sphere radius=0.5
+}
+"#;
+        let schematic = parse_schematic(kdl).unwrap();
+
+        assert_eq!(schematic.elems.len(), 1);
+        if let SchematicElem::Object3d(obj) = &schematic.elems[0] {
+            assert!(obj.frame.is_none());
+        } else {
+            panic!("Expected object_3d");
+        }
+    }
+
+    #[test]
+    fn test_parse_viewport_with_frame() {
+        let kdl =
+            r#"viewport name="main" frame="NED" pos="(0,0,0,0, 8,2,4)" look_at="(0,0,0,0, 0,0,3)""#;
+        let schematic = parse_schematic(kdl).unwrap();
+
+        assert_eq!(schematic.elems.len(), 1);
+        if let SchematicElem::Panel(Panel::Viewport(viewport)) = &schematic.elems[0] {
+            assert_eq!(viewport.name, Some("main".to_string()));
+            assert!(matches!(viewport.frame, Some(GeoFrame::NED)));
+        } else {
+            panic!("Expected viewport panel");
+        }
+    }
+
+    #[test]
+    fn test_parse_line_3d_with_frame() {
+        let kdl = r#"line_3d frame="NED" "ball.world_pos" line_width=2.0"#;
+        let schematic = parse_schematic(kdl).unwrap();
+
+        assert_eq!(schematic.elems.len(), 1);
+        if let SchematicElem::Line3d(line) = &schematic.elems[0] {
+            assert_eq!(line.eql, "ball.world_pos");
+            assert!(matches!(line.frame, Some(GeoFrame::NED)));
+        } else {
+            panic!("Expected line_3d");
+        }
+    }
+
+    #[test]
+    fn test_parse_vector_arrow_with_frame() {
+        let kdl = r#"vector_arrow frame="ENU" "ball.velocity" origin="ball.world_pos""#;
+        let schematic = parse_schematic(kdl).unwrap();
+
+        assert_eq!(schematic.elems.len(), 1);
+        if let SchematicElem::VectorArrow(arrow) = &schematic.elems[0] {
+            assert_eq!(arrow.vector, "ball.velocity");
+            assert!(matches!(arrow.frame, Some(GeoFrame::ENU)));
+        } else {
+            panic!("Expected vector_arrow");
         }
     }
 

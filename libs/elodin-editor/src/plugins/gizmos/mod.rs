@@ -16,6 +16,7 @@ use bevy::{
     text::{TextColor, TextFont},
     transform::components::Transform,
 };
+use bevy_geo_frames::prelude::*;
 use bevy_render::alpha::AlphaMode;
 use big_space::FloatingOriginSettings;
 use impeller2::types::ComponentId;
@@ -93,10 +94,7 @@ impl Plugin for GizmoPlugin {
             bevy::app::PreUpdate,
             render_vector_arrow.after(crate::PositionSync),
         );
-        app.add_systems(
-            bevy::app::PostUpdate,
-            cleanup_removed_arrows.after(render_vector_arrow),
-        );
+        app.add_systems(bevy::app::PostUpdate, cleanup_removed_arrows);
         app.add_systems(Update, render_body_axis);
         // Bevy UI labels for arrows - runs in PostUpdate after transforms are finalized
         app.add_systems(
@@ -167,6 +165,7 @@ pub fn evaluate_vector_arrow(
     state: &VectorArrowState,
     entity_map: &EntityMap,
     component_values: &Query<'_, '_, &'static WktComponentValue>,
+    geo_context: &GeoContext,
 ) -> Option<EvaluatedVectorArrow> {
     let Some(vector_expr) = &state.vector_expr else {
         return None;
@@ -198,15 +197,31 @@ pub fn evaluate_vector_arrow(
             return None;
         };
         if let Some(world_pos) = origin_value.as_world_pos() {
-            start_world = world_pos.bevy_pos();
-            rotation = world_pos.bevy_att();
+            // Use ENU if no frame is specified.
+            if let Some(frame) = arrow.frame.or_default() {
+                start_world = GeoPosition(frame, world_pos.pos()).to_bevy(geo_context);
+                rotation = GeoRotation(frame, world_pos.att()).to_bevy(geo_context);
+            } else {
+                start_world = world_pos.bevy_pos();
+                rotation = world_pos.bevy_att();
+            }
         } else if let Some(origin) = component_value_tail_to_vec3(&origin_value) {
-            start_world = origin;
+            // Use ENU if no frame is specified.
+            if let Some(frame) = arrow.frame.or_default() {
+                start_world = GeoPosition(frame, origin).to_bevy(geo_context);
+            } else {
+                start_world = origin;
+            }
         }
     }
 
     if arrow.body_frame {
+        // Body-frame vectors are rotated by the body's orientation directly to Bevy world
         direction = rotation * direction;
+    } else {
+        // World-frame vectors need geo-frame to Bevy transformation
+        direction =
+            GeoFrame::bevy_R_(&arrow.frame.unwrap_or(GeoFrame::ENU), geo_context) * direction;
     }
 
     let end_world = start_world + direction;
@@ -234,6 +249,7 @@ fn render_vector_arrow(
     viewport_arrows: Query<&ViewportArrow>,
     mut logged_missing: Local<HashSet<Entity>>,
     mut logged_small: Local<HashSet<Entity>>,
+    geo_context: Res<GeoContext>,
 ) {
     let main_camera_data: Vec<_> = main_cameras.iter().collect();
     let mut camera_index: HashMap<Entity, usize> = HashMap::new();
@@ -253,7 +269,8 @@ fn render_vector_arrow(
             continue;
         }
 
-        let Some(result) = evaluate_vector_arrow(arrow, &state, &entity_map, &component_values)
+        let Some(result) =
+            evaluate_vector_arrow(arrow, &state, &entity_map, &component_values, &geo_context)
         else {
             if logged_missing.insert(entity) {
                 info!(

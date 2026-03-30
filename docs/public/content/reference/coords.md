@@ -16,16 +16,74 @@ order = 2
 The default coordinate systems used in Elodin align with the editor's representation of the (X, Y, Z)
 axes as (red, green, blue) respectively. Also, all coordinate systems are right-handed.
 
-### Local Geodetic World Frame
+## Configuring the World Frame
+
+When creating a world in Elodin, you ought to specify the coordinate frame convention. This ensures clarity and prevents ambiguity about the coordinate system being used. This is done in the schematic KDL:
+
+```kdl
+// Present world with ENU (East-North-Up) frame for terrestrial vehicles.
+coordinate frame="ENU"
+
+// Or use NED (North-East-Down) for aviation applications.
+coordinate frame="NED"
+
+// Or use ECI for orbital mechanics.
+coordinate frame="ECEF"
+```
+
+If there is an object that uses a different convention, you can specify a coordinate frame for that particular object:
+
+```kdl
+object_3d frame="NED" ball.world_pos {
+    sphere radius=0.2 {
+        color orange
+    }
+}
+```
+If no coordinate frame is specified, then ENU is used by default.
+
+### Supported Frame Conventions
+
+| Frame | +X Axis | +Y Axis | +Z Axis | Gravity* | Use Case |
+|-------|---------|---------|---------|----------|----------|
+| **ENU** | East | North | Up | [0, 0, -9.81] | Terrestrial vehicles (drones, cars, robots) |
+| **NED** | North | East | Down | [0, 0, 9.81] | Aviation, marine navigation |
+| **ECEF** | 0° Long | 90° E | N Pole | Position-dependent | GPS, Earth surface mapping |
+
+### Not Yet Supported Frame Conventions
+
+| Frame | +X Axis | +Y Axis | +Z Axis | Gravity* | Use Case |
+|-------|---------|---------|---------|----------|----------|
+| **ECI** | Vernal Equinox | 90° E | N Pole | Position-dependent | Low Earth orbit |
+| **GCRF** | J2000 | 90° E | N Pole | N/A | Deep space, inertial reference |
+
+*For frames with constant gravity vectors. GCRF has no constant gravity.
+
+### Local Geodetic World Frames
 
 {% image(href="/assets/coordinates") %}Elodin Default Coordinate System{% end %}
 
-A local geodetic world frame is commonly used for terrestrial vehicles and is represented using
-the [East, North, Up (ENU)](https://en.wikipedia.org/wiki/Local_tangent_plane_coordinates#Local_east,_north,_up_(ENU)_coordinates)
+Local geodetic world frames are commonly used for terrestrial vehicles. Elodin supports two conventions:
+
+#### ENU (East-North-Up)
+
+The [East, North, Up (ENU)](https://en.wikipedia.org/wiki/Local_tangent_plane_coordinates#Local_east,_north,_up_(ENU)_coordinates)
 coordinate system where:
 - +X: East
 - +Y: North
 - +Z: Up
+
+This frame is commonly used for robotics, ground vehicles, and general simulation work.
+
+#### NED (North-East-Down)
+
+The [North, East, Down (NED)](https://en.wikipedia.org/wiki/Local_tangent_plane_coordinates#Local_north,_east,_down_(NED)_coordinates)
+coordinate system where:
+- +X: North
+- +Y: East
+- +Z: Down
+
+This frame is the standard in aviation and marine applications. Note that gravity points in the +Z direction in NED.
 
 ### Geocentric World Frame
 

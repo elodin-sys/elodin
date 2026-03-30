@@ -18,6 +18,7 @@ use bevy::{
     window::PrimaryWindow,
 };
 use bevy_editor_cam::controller::{component::EditorCam, motion::CurrentMotion};
+use bevy_geo_frames::GeoContext;
 use bevy_infinite_grid::InfiniteGrid;
 use egui_tiles::{Tile, TileId};
 use fuzzy_matcher::{FuzzyMatcher, skim::SkimMatcherV2};
@@ -1135,7 +1136,8 @@ fn create_object_3d_with_color(eql: String, expr: eql::Expr, mesh: Mesh) -> Pale
                   mut material_assets: ResMut<Assets<StandardMaterial>>,
                   mut mesh_assets: ResMut<Assets<bevy::prelude::Mesh>>,
                   mut mat3_material_assets: ResMut<Assets<bevy_mat3_material::Mat3Material>>,
-                  assets: Res<AssetServer>| {
+                  assets: Res<AssetServer>,
+                  geo_context: Res<GeoContext>| {
                 let color_str = color_str.trim();
                 let (r, g, b) =
                     parse_color(color_str, &eql_ctx.0, &entity_map, component_value_maps)
@@ -1153,6 +1155,7 @@ fn create_object_3d_with_color(eql: String, expr: eql::Expr, mesh: Mesh) -> Pale
                         mesh: mesh_source,
                         icon: None,
                         mesh_visibility_range: None,
+                        frame: None,
                         node_id: Default::default(),
                     },
                     expr.clone(),
@@ -1161,6 +1164,7 @@ fn create_object_3d_with_color(eql: String, expr: eql::Expr, mesh: Mesh) -> Pale
                     &mut mesh_assets,
                     &mut mat3_material_assets,
                     &assets,
+                    &geo_context,
                 );
 
                 PaletteEvent::Exit
@@ -1225,18 +1229,21 @@ pub fn create_3d_object() -> PaletteItem {
                                                   mut material_assets: ResMut<Assets<StandardMaterial>>,
                                                   mut mesh_assets: ResMut<Assets<bevy::prelude::Mesh>>,
                                                   mut mat3_material_assets: ResMut<Assets<bevy_mat3_material::Mat3Material>>,
-                                                  assets: Res<AssetServer>| {
+                                                  assets: Res<AssetServer>,
+                                                  geo_context: Res<GeoContext>
+                                                | {
                                                 let obj = impeller2_wkt::Object3DMesh::glb(gltf_path.trim());
 
                                                 crate::object_3d::create_object_3d_entity(
                                                     &mut commands,
-                                                    Object3D { eql: eql.clone(), mesh: obj, icon: None, mesh_visibility_range: None, node_id: Default::default() },
+                                                    Object3D { eql: eql.clone(), mesh: obj, icon: None, mesh_visibility_range: None, frame: None, node_id: Default::default() },
                                                     expr.clone(),
                                                     &eql_ctx.0,
                                                     &mut material_assets,
                                                     &mut mesh_assets,
                                                     &mut mat3_material_assets,
                                                     &assets,
+                                                    &geo_context
                                                 );
 
                                                 PaletteEvent::Exit

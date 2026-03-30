@@ -377,7 +377,7 @@ fn edge_interaction_context(
 
     let (_, cam_rotation, _) = camera_global.to_scale_rotation_translation();
     let cube_rotation = if config.sync_with_camera {
-        cam_rotation.conjugate() * config.effective_axis_correction()
+        cam_rotation.conjugate() * config.axis_correction
     } else {
         cube_global.unwrap_or(Quat::IDENTITY)
     };

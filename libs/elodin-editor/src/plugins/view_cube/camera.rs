@@ -138,7 +138,7 @@ pub fn sync_view_cube_rotation(
         };
 
         let (_, rotation, _) = main_camera_transform.to_scale_rotation_translation();
-        cube_transform.rotation = rotation.conjugate() * config.effective_axis_correction();
+        cube_transform.rotation = rotation.conjugate() * config.axis_correction;
     }
 }
 
@@ -336,7 +336,7 @@ pub fn handle_view_cube_editor(
             .ok()
             .map(GlobalTransform::rotation);
         let cube_rotation = if config.sync_with_camera {
-            global_rotation.conjugate() * config.effective_axis_correction()
+            global_rotation.conjugate() * config.axis_correction
         } else {
             cube_global.unwrap_or(Quat::IDENTITY)
         };
@@ -669,7 +669,7 @@ fn corner_target_camera_dir_world(
 
 fn direction_target_camera_dir_world(local_dir: Vec3, config: &ViewCubeConfig) -> Vec3 {
     if config.sync_with_camera {
-        (config.effective_axis_correction() * local_dir).normalize_or_zero()
+        (config.axis_correction * local_dir).normalize_or_zero()
     } else {
         local_dir.normalize_or_zero()
     }
@@ -1140,19 +1140,11 @@ mod tests {
     }
 
     #[test]
-    fn face_target_camera_dir_world_applies_axis_correction() {
-        let dir = crate::plugins::view_cube::FaceDirection::East;
-        let config = ViewCubeConfig::default();
-        let world = face_target_camera_dir_world(dir, &config);
-        assert!((world - Vec3::NEG_X).length() < 1.0e-5);
-    }
-
-    #[test]
     fn corner_target_camera_dir_world_applies_axis_correction() {
         let corner = crate::plugins::view_cube::CornerPosition::TopFrontRight;
         let config = ViewCubeConfig::default();
         let world = corner_target_camera_dir_world(corner, &config);
-        let expected = Vec3::new(-1.0, 1.0, -1.0).normalize();
+        let expected = Vec3::new(1.0, 1.0, 1.0).normalize();
         assert!((world - expected).length() < 1.0e-5);
     }
 

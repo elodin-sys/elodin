@@ -635,7 +635,7 @@ sys = gravity_effector | el.six_dof()
 import elodin as el
 import jax.numpy as jnp
 
-w = el.World()
+w = el.World(frame=el.Frame.GCRF)
 
 # Spawn three bodies - names become component hierarchy roots
 w.spawn(el.Body(

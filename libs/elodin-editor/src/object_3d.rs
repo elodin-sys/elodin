@@ -1,9 +1,11 @@
 use bevy::camera::visibility::RenderLayers;
 use bevy::ecs::{hierarchy::ChildOf, relationship::Relationship};
 use bevy::log::warn_once;
+use bevy::math::{DQuat, DVec3};
 use bevy::prelude::Mesh;
 use bevy::prelude::*;
 use bevy::scene::{SceneInstance, SceneRoot, SceneSpawner};
+use bevy_geo_frames::{GeoPosition, GeoRotation};
 use bevy_mat3_material::{Mat3Material, Mat3Params, Mat3TransformExt, uv_sphere_grid_line_mesh};
 use bevy_render::alpha::AlphaMode;
 use big_space::GridCell;
@@ -18,6 +20,7 @@ use crate::icon_rasterizer::IconTextureCache;
 use crate::iter::JoinDisplayExt;
 use crate::ui::tiles::ViewportConfig;
 use crate::{BevyExt, EqlContext, MainCamera, plugins::navigation_gizmo::NavGizmoCamera};
+use bevy_geo_frames::prelude::*;
 use std::collections::{HashMap, HashSet};
 use std::fmt;
 
@@ -1240,10 +1243,11 @@ pub fn create_object_3d_entity(
     data: impeller2_wkt::Object3D,
     expr: eql::Expr,
     ctx: &eql::Context,
-    material_assets: &mut ResMut<Assets<StandardMaterial>>,
-    mesh_assets: &mut ResMut<Assets<Mesh>>,
-    mat3_material_assets: &mut ResMut<Assets<Mat3Material>>,
-    assets: &Res<AssetServer>,
+    material_assets: &mut Assets<StandardMaterial>,
+    mesh_assets: &mut Assets<Mesh>,
+    mat3_material_assets: &mut Assets<Mat3Material>,
+    assets: &AssetServer,
+    geo_context: &GeoContext,
 ) -> Entity {
     let (scale_expr, scale_error) = match &data.mesh {
         impeller2_wkt::Object3DMesh::Ellipsoid {
@@ -1286,6 +1290,8 @@ pub fn create_object_3d_entity(
         _ => Vec::new(),
     };
 
+    let geo_frame = data.frame;
+
     let entity_id = commands
         .spawn((
             Object3DState {
@@ -1303,9 +1309,17 @@ pub fn create_object_3d_entity(
             ViewVisibility::default(),
             GridCell::<i128>::default(),
             impeller2_wkt::WorldPos::default(),
-            Name::new("object_3d"),
+            Name::new(format!("object_3d {}", &data.mesh)),
         ))
         .id();
+
+    // Add GeoPosition and GeoRotation components.
+    if let Some(frame) = geo_frame.or_default() {
+        commands.entity(entity_id).insert((
+            GeoPosition(frame, DVec3::ZERO),
+            GeoRotation::from_bevy(frame, DQuat::IDENTITY, geo_context),
+        ));
+    }
 
     spawn_mesh(
         commands,
@@ -1384,10 +1398,10 @@ pub fn spawn_mesh(
     commands: &mut Commands,
     entity: Entity,
     mesh: &impeller2_wkt::Object3DMesh,
-    material_assets: &mut ResMut<Assets<StandardMaterial>>,
-    mesh_assets: &mut ResMut<Assets<Mesh>>,
-    mat3_material_assets: &mut ResMut<Assets<Mat3Material>>,
-    assets: &Res<AssetServer>,
+    material_assets: &mut Assets<StandardMaterial>,
+    mesh_assets: &mut Assets<Mesh>,
+    mat3_material_assets: &mut Assets<Mat3Material>,
+    assets: &AssetServer,
 ) {
     match mesh {
         impeller2_wkt::Object3DMesh::Glb {

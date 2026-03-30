@@ -7,6 +7,7 @@ use bevy::{
 };
 use bevy_editor_cam::prelude::EditorCam;
 use bevy_egui::egui::{self, Align};
+use bevy_geo_frames::GeoFrame;
 use bevy_infinite_grid::InfiniteGrid;
 use impeller2_bevy::EntityMap;
 use impeller2_wkt::{ComponentValue, QueryType, WorldPos};
@@ -46,6 +47,8 @@ pub struct Viewport {
     pub look_at: EditableEQL,
     /// Optional camera up vector in world frame. EQL that evaluates to a 3-vector (e.g. "(0,0,1)" or "pose.direction(0,1,1)").
     pub up: EditableEQL,
+    /// Optional geo frame for interpreting position and rotation.
+    pub frame: Option<GeoFrame>,
 }
 
 impl Viewport {
@@ -54,12 +57,14 @@ impl Viewport {
         pos: EditableEQL,
         look_at: EditableEQL,
         up: EditableEQL,
+        frame: Option<GeoFrame>,
     ) -> Self {
         Self {
             parent_entity,
             pos,
             look_at,
             up,
+            frame,
         }
     }
 }
@@ -462,6 +467,10 @@ pub fn set_viewport_pos(
                 && let Some(look_at) = val.as_world_pos()
             {
                 let dir = (look_at.pos - pos.pos).normalize();
+                let dir = match viewport.frame {
+                    Some(GeoFrame::NED) => nox::Vec3::new(dir.y(), dir.x(), -dir.z()),
+                    _ => dir,
+                };
                 let up_vec = viewport
                     .up
                     .compiled_expr
@@ -476,7 +485,7 @@ pub fn set_viewport_pos(
                             None
                         }
                     })
-                    .unwrap_or_else(nox::Vec3::z_axis);
+                    .unwrap_or(nox::Vec3::z_axis());
                 pos.att = nox::Quaternion::look_at_rh(dir, up_vec);
             }
         }

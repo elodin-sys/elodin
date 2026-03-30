@@ -21,6 +21,8 @@ use bevy_editor_cam::{SyncCameraPosition, controller::component::EditorCam};
 #[cfg(feature = "inspector")]
 use bevy_egui::EguiContext;
 use bevy_egui::{EguiContextSettings, EguiGlobalSettings, EguiPlugin};
+use bevy_geo_frames::GeoFramePlugin;
+use bevy_geo_frames::{GeoContext, GeoFrame, GeoPosition, GeoRotation};
 use bevy_picking::PickingSettings;
 use bevy_render::alpha::AlphaMode;
 use big_space::{FloatingOrigin, FloatingOriginSettings, GridCell};
@@ -48,6 +50,12 @@ use ui::{
     tiles,
     utils::FriendlyEpoch,
 };
+
+/// Global coordinate frame resource set by the schematic's top-level `coordinate` node.
+/// Individual elements (viewport, object_3d, line_3d, vector_arrow) use this as a fallback
+/// when they don't specify their own frame.
+#[derive(Resource, Default, Clone, Copy, Debug)]
+pub struct Coordinate(pub Option<GeoFrame>);
 
 pub mod icon_rasterizer;
 pub mod iter;
@@ -258,6 +266,8 @@ impl Plugin for EditorPlugin {
                     sync_object_3d,
                     set_viewport_pos,
                     sync_pos,
+                    bevy_geo_frames::apply_geo_rotation,
+                    bevy_geo_frames::big_space::apply_big_translation::<i128>,
                 )
                     .chain()
                     .after(impeller2_bevy::sink)
@@ -281,10 +291,15 @@ impl Plugin for EditorPlugin {
             .insert_resource(SelectedTimeRange(Timestamp(i64::MIN)..Timestamp(i64::MAX)))
             .insert_resource(FullTimeRange(Timestamp(0)..Timestamp(1_000_000)))
             .init_resource::<EqlContext>()
+            .init_resource::<Coordinate>()
             .init_resource::<SyncedObject3d>()
             .init_resource::<ui::data_overview::ComponentTimeRanges>()
             .add_plugins(bevy_mat3_material::Mat3MaterialPlugin)
             .add_plugins(object_3d::Object3DPlugin)
+            .add_plugins(GeoFramePlugin {
+                apply_transforms: false,
+                ..default()
+            })
             .init_resource::<sensor_camera::SensorCameraConfigs>()
             .init_resource::<sensor_camera::SensorCamerasSpawned>()
             .add_systems(PreUpdate, sensor_camera::load_sensor_configs_from_db)
@@ -804,6 +819,9 @@ pub fn setup_cell(
 pub trait WorldPosExt {
     fn bevy_pos(&self) -> DVec3;
     fn bevy_att(&self) -> DQuat;
+
+    fn pos(&self) -> DVec3;
+    fn att(&self) -> DQuat;
 }
 
 impl WorldPosExt for WorldPos {
@@ -812,12 +830,22 @@ impl WorldPosExt for WorldPos {
         DVec3::new(x, z, -y)
     }
 
+    fn pos(&self) -> DVec3 {
+        let [x, y, z] = self.pos.parts().map(Tensor::into_buf);
+        DVec3::new(x, y, z)
+    }
+
     fn bevy_att(&self) -> DQuat {
         let [i, j, k, w] = self.att.parts().map(Tensor::into_buf);
         let x = i;
         let y = k;
         let z = -j;
         DQuat::from_xyzw(x, y, z, w)
+    }
+
+    fn att(&self) -> DQuat {
+        let [i, j, k, w] = self.att.parts().map(Tensor::into_buf);
+        DQuat::from_xyzw(i, j, k, w)
     }
 }
 
@@ -856,27 +884,47 @@ pub fn follow_latest(
     current_ts.0 = latest.0;
 }
 
+#[allow(clippy::type_complexity)]
 pub fn sync_pos(
-    mut query: Query<(&mut Transform, &mut GridCell<i128>, &WorldPos)>,
+    mut query: Query<
+        (
+            &mut Transform,
+            Option<&mut GeoPosition>,
+            Option<&mut GeoRotation>,
+            &mut GridCell<i128>,
+            &WorldPos,
+        ),
+        Changed<WorldPos>,
+    >,
+    geo_context: Res<GeoContext>,
     floating_origin: Res<FloatingOriginSettings>,
 ) {
-    // return;
-    query
-        .iter_mut()
-        .for_each(|(mut transform, mut grid_cell, world_pos)| {
-            // Converts from Z-up to Y-up
-            let pos = world_pos.bevy_pos();
-            let att = world_pos.bevy_att();
-            let (new_grid_cell, translation) = floating_origin.translation_to_grid(pos);
-            *grid_cell = new_grid_cell;
-            // Preserve the existing scale when updating position and rotation
-            let existing_scale = transform.scale;
-            *transform = bevy::prelude::Transform {
-                translation,
-                rotation: att.as_quat(),
-                scale: existing_scale,
+    query.iter_mut().for_each(
+        |(mut transform, mut geo_pos, mut geo_rot, mut grid_cell, world_pos)| {
+            if let Some(ref mut geo_pos) = geo_pos {
+                geo_pos.1 = world_pos.pos();
             }
-        });
+            if let Some(ref mut geo_rot) = geo_rot {
+                // att() is in ENU. We have to do a conversion if geo_rot.0 isn't ENU.
+                **geo_rot = GeoRotation::from_bevy(geo_rot.0, world_pos.bevy_att(), &geo_context);
+                //geo_rot.1 = world_pos.att();
+            }
+
+            if geo_pos.is_none() {
+                // We only update the transform here if geo_pos is not present.
+                let pos = world_pos.bevy_pos();
+                let (new_grid_cell, translation) = floating_origin.translation_to_grid(pos);
+                *grid_cell = new_grid_cell;
+                transform.translation = translation;
+            }
+            if geo_rot.is_none() {
+                // We only update the transform here if geo_rot is not present.
+                let att = world_pos.bevy_att();
+                // Preserve the existing scale when updating position and rotation
+                transform.rotation = att.as_quat();
+            }
+        },
+    );
 }
 
 fn sanitize_editor_cam_anchor_depth(mut cams: Query<(Entity, &mut EditorCam)>) {
@@ -977,6 +1025,7 @@ pub fn sync_object_3d(
     mut mat3_material_assets: ResMut<Assets<bevy_mat3_material::Mat3Material>>,
     mut commands: Commands,
     assets: Res<AssetServer>,
+    geo_context: Res<GeoContext>,
 ) {
     for (entity, id) in &query {
         if synced_object_3d.0.contains_key(&entity) {
@@ -988,22 +1037,16 @@ pub fn sync_object_3d(
         let parent = path.path.first().unwrap();
 
         let glb = entity_map
-            .get(&ComponentId::new(&format!(
-                "{}.asset_handle_glb",
-                parent.name
-            )))
+            .get(&ComponentId::from_pair(&parent.name, "asset_handle_glb"))
             .and_then(|e| glbs.get(*e).ok());
         let mesh = entity_map
-            .get(&ComponentId::new(&format!(
-                "{}.asset_handle_mesh",
-                parent.name
-            )))
+            .get(&ComponentId::from_pair(&parent.name, "asset_handle_mesh"))
             .and_then(|e| meshes.get(*e).ok());
         let material = entity_map
-            .get(&ComponentId::new(&format!(
-                "{}.asset_handle_material",
-                parent.name
-            )))
+            .get(&ComponentId::from_pair(
+                &parent.name,
+                "asset_handle_material",
+            ))
             .and_then(|e| materials.get(*e).ok());
 
         let mesh_source = match (glb, mesh, material) {
@@ -1027,6 +1070,7 @@ pub fn sync_object_3d(
                 mesh: mesh_source,
                 icon: None,
                 mesh_visibility_range: None,
+                frame: None,
                 node_id: Default::default(),
             },
             expr,
@@ -1035,6 +1079,7 @@ pub fn sync_object_3d(
             &mut mesh_assets,
             &mut mat3_material_assets,
             &assets,
+            &geo_context,
         );
         synced_object_3d.0.insert(entity, object_entity);
     }

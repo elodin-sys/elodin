@@ -91,8 +91,8 @@ pub enum Args {
     },
 }
 
-#[pyclass(subclass)]
 #[derive(Default)]
+#[pyclass(subclass)]
 pub struct WorldBuilder {
     pub world: World,
     pub recipes: HashMap<String, ::s10::Recipe>,

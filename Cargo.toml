@@ -54,6 +54,7 @@ members = [
     "libs/impeller2/kdl",
     "libs/db/examples/rust_client",
     "examples/rc-jet/controller",
+    "libs/bevy_geo_frames",
     "libs/bevy_mat3_material",
  ]
 exclude = ["fsw/sensor-fw", "fsw/blackbox", "libs/muxide", "docs/memserve"]
@@ -96,13 +97,70 @@ inherits = "release"
 debug = true
 
 [workspace.dependencies.bevy_editor_cam]
-git = "https://github.com/aevyrie/bevy_editor_cam"
-rev = "1ae39bda1aa8d547dec4b26747e466ad5b2ab9ab"
+version = "0.7"
+
+[workspace.dependencies.bevy]
+version = "0.17"
+default-features = false
+features = [
+  "std",
+  "async_executor",
+  "android-game-activity",
+  "animation",
+  "bevy_asset",
+  "bevy_color",
+  "bevy_core_pipeline",
+  "bevy_post_process",
+  "bevy_anti_alias",
+  "bevy_gilrs",
+  "bevy_gizmos",
+  "bevy_gltf",
+  "bevy_input_focus",
+  "bevy_log",
+  "bevy_mesh_picking_backend",
+  "bevy_pbr",
+  "bevy_picking",
+  "bevy_render",
+  "bevy_scene",
+  "bevy_image",
+  "bevy_mesh",
+  "bevy_camera",
+  "bevy_light",
+  "bevy_shader",
+  "bevy_sprite",
+  "bevy_sprite_picking_backend",
+  "bevy_sprite_render",
+  "bevy_state",
+  "bevy_text",
+  "bevy_ui",
+  "bevy_ui_picking_backend",
+  "bevy_ui_render",
+  "bevy_window",
+  "bevy_winit",
+  "custom_cursor",
+  "default_font",
+  "hdr",
+  "ktx2",
+  "multi_threaded",
+  "png",
+  "reflect_auto_register",
+  "smaa_luts",
+  "sysinfo_plugin",
+  "tonemapping_luts",
+  "webgl2",
+  "x11",
+  "debug",
+  "zstd_rust",
+]
 
 [workspace.dependencies.big_space]
-git = "https://github.com/elodin-sys/big_space.git"
-branch = "no_prop_rot_v0.17"
+version = "0.5"
 
 [workspace.dependencies.muxide]
 path = "libs/muxide"
 version = "0.2"
+
+[patch.crates-io]
+map_3d = { git = "https://github.com/shanecelis/map_3d.git", branch = "feat/sphere" }
+big_space = { git = "https://github.com/elodin-sys/big_space.git", branch = "no_prop_rot_v0.17" }
+bevy_editor_cam = { git = "https://github.com/aevyrie/bevy_editor_cam", rev = "1ae39bda1aa8d547dec4b26747e466ad5b2ab9ab" }

@@ -1,0 +1,32 @@
+[package]
+name = "bevy_geo_frames"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "bevy_geo_frames"
+path = "src/lib.rs"
+
+[dependencies]
+bevy.workspace = true
+bevy.optional = true
+big_space = { version = "0.5.0", optional = true }
+map_3d = "0.1.5"
+serde = { version = "1", features = ["derive"], optional = true }
+strum = { version = "0.27.2", optional = true }
+strum_macros = { version = "0.27.2", optional = true }
+bevy-inspector-egui = { version = "0.35", optional = true }
+
+[features]
+default = [ "strum", "bevy" ]
+bevy = [ "dep:bevy"]
+serde = ["dep:serde"]
+inspector = ["dep:bevy-inspector-egui"]
+big_space = ["dep:big_space"]
+strum = ["dep:strum", "dep:strum_macros"]
+default_enu = []
+
+[dev-dependencies]
+bevy-inspector-egui = "0.35"
+bevy_editor_cam = "0.7"
+bevy_infinite_grid = "0.17"

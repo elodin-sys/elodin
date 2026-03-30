@@ -12,8 +12,9 @@ use bevy::{
         query::{With, Without},
         system::{Commands, Query, Res, ResMut},
     },
-    math::{Mat4, Vec4},
+    math::{DQuat, Mat4, Vec4},
 };
+use bevy_geo_frames::{GeoContext, GeoFrame, GeoRotation};
 use big_space::GridCell;
 use eql;
 use impeller2_bevy::{CommandsExt, ComponentMetadataRegistry, EntityMap};
@@ -40,6 +41,7 @@ pub fn sync_line_plot_3d(
     eql_ctx: Res<EqlContext>,
     mut collected_graph_data: ResMut<CollectedGraphData>,
     metadata_store: Res<ComponentMetadataRegistry>,
+    geo_ctx: Option<Res<GeoContext>>,
 ) {
     for (entity, line_plot) in line_plot_3d_query.iter() {
         // Parse and compile the EQL expression
@@ -99,6 +101,9 @@ pub fn sync_line_plot_3d(
                 transform: Default::default(),
                 grid_cell: GridCell::default(),
             });
+            if let Some(frame) = line_plot.frame {
+                entity.try_insert(GeoRotation(frame, DQuat::IDENTITY));
+            }
         }
     }
     for (line_plot, mut uniform) in uniforms.iter_mut() {

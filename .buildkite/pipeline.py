@@ -117,6 +117,11 @@ test_steps = [
                 command="bash ./scripts/ci/regress.sh cube-sat examples/cube-sat/main.py",
             ),
             nix_step(
+                label=":python: frames",
+                flake=".#run",
+                command="python3 examples/frames/main.py",
+            ),
+            nix_step(
                 label=":python: sensor-camera",
                 flake=".#tracy",
                 command="./scripts/ci/sensor_camera_perf.sh",

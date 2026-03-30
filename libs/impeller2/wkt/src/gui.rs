@@ -48,6 +48,8 @@ pub struct Schematic {
     pub theme: Option<ThemeConfig>,
     #[serde(default)]
     pub timeline: Option<TimelineConfig>,
+    #[serde(default)]
+    pub frame: Option<bevy_geo_frames::GeoFrame>,
 }
 
 #[cfg(feature = "bevy")]
@@ -67,6 +69,7 @@ pub enum SchematicElem {
     Window(WindowSchematic),
     Theme(ThemeConfig),
     Timeline(TimelineConfig),
+    Coordinate(bevy_geo_frames::GeoFrame),
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -231,6 +234,8 @@ pub struct Viewport {
     /// Optional camera up vector in world frame. EQL that evaluates to a 3-vector (e.g. "(0,0,1)" or "pose.direction(0,1,1)" for body-frame direction).
     pub up: Option<String>,
     #[serde(default)]
+    pub frame: Option<bevy_geo_frames::GeoFrame>,
+    #[serde(default)]
     pub local_arrows: Vec<VectorArrow3d>,
     #[serde(default)]
     pub node_id: NodeId,
@@ -255,6 +260,7 @@ impl Default for Viewport {
             name: None,
             pos: None,
             look_at: None,
+            frame: None,
             up: None,
             local_arrows: Vec::new(),
             node_id: NodeId::default(),
@@ -299,6 +305,7 @@ pub struct Line3d {
     pub color: Color,
     pub perspective: bool,
     #[serde(default)]
+    pub frame: Option<bevy_geo_frames::GeoFrame>,
     pub node_id: NodeId,
 }
 
@@ -328,6 +335,7 @@ pub struct VectorArrow3d {
     #[serde(default = "VectorArrow3d::default_label_position")]
     pub label_position: LabelPosition,
     #[serde(default)]
+    pub frame: Option<bevy_geo_frames::GeoFrame>,
     pub node_id: NodeId,
 }
 
@@ -780,6 +788,7 @@ pub struct Object3D {
     pub eql: String,
     pub mesh: Object3DMesh,
     #[serde(default)]
+    pub frame: Option<bevy_geo_frames::GeoFrame>,
     pub icon: Option<Object3DIcon>,
     #[serde(default)]
     pub mesh_visibility_range: Option<VisRange>,

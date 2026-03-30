@@ -5,7 +5,7 @@ edition = "2021"
 license = "MIT OR Apache-2.0"
 
 [dependencies]
-bevy = "0.17"
+bevy.workspace = true
 
 [dev-dependencies]
 bevy-inspector-egui = "0.35"

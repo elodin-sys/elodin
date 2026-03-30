@@ -34,7 +34,7 @@ use bevy::{
     math::{Mat4, Vec4},
     mesh::VertexBufferLayout,
     pbr::{MeshPipeline, MeshPipelineKey, SetMeshViewBindGroup},
-    prelude::{Color, Deref, Resource},
+    prelude::{Color, Deref, Reflect, Resource},
     render::{
         ExtractSchedule, MainWorld, Render, RenderApp, RenderSystems,
         extract_component::{ComponentUniforms, DynamicUniformIndex, UniformComponentPlugin},
@@ -46,6 +46,7 @@ use bevy::{
         renderer::{RenderDevice, RenderQueue},
         view::{ExtractedView, Msaa, ViewTarget},
     },
+    transform::TransformSystems,
     transform::components::{GlobalTransform, Transform},
 };
 use bevy_render::{
@@ -71,7 +72,10 @@ impl Plugin for Plot3dGpuPlugin {
         app.add_plugins(UniformComponentPlugin::<LineUniform>::default())
             .init_resource::<CachedSystemState>()
             .init_asset::<Line>()
-            .add_systems(PostUpdate, update_uniform_model);
+            .add_systems(
+                PostUpdate,
+                update_uniform_model.after(TransformSystems::Propagate),
+            );
 
         load_internal_asset!(app, LINE_SHADER_HANDLE, "./line.wgsl", Shader::from_wgsl);
         let Some(render_app) = app.get_sub_app_mut(RenderApp) else {
@@ -168,7 +172,7 @@ pub struct LineBundle {
     pub grid_cell: GridCell<i128>,
 }
 
-#[derive(Component, ShaderType, Clone, Copy)]
+#[derive(Component, ShaderType, Clone, Copy, Reflect)]
 pub struct LineUniform {
     pub line_width: f32,
     pub color: Vec4,

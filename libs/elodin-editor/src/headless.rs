@@ -25,6 +25,7 @@ use bevy::{
     window::{ExitCondition, WindowPlugin},
     winit::WinitPlugin,
 };
+use bevy_geo_frames::GeoContext;
 use bevy_mat3_material::Mat3Material;
 use big_space::{FloatingOrigin, GridCell};
 use impeller2_kdl::FromKdl;
@@ -37,6 +38,7 @@ use crate::sensor_camera::{
     SensorCamerasSpawned, set_readback_armed,
 };
 use crate::{EqlContext, PositionSync, sync_pos};
+use bevy_geo_frames::GeoFramePlugin;
 
 /// A headless Bevy app dedicated to sensor camera rendering.
 ///
@@ -89,6 +91,10 @@ impl Plugin for HeadlessEditorPlugin {
             .add_plugins(impeller2_bevy::Impeller2Plugin)
             .add_plugins(big_space::FloatingOriginPlugin::<i128>::new(16_000., 100.))
             .add_plugins(bevy_mat3_material::Mat3MaterialPlugin)
+            .add_plugins(GeoFramePlugin {
+                apply_transforms: false,
+                ..default()
+            })
             .add_plugins(SensorCameraPlugin)
             .init_resource::<DiagnosticsStore>()
             .init_resource::<HeadlessMode>()
@@ -98,6 +104,8 @@ impl Plugin for HeadlessEditorPlugin {
                     impeller2_bevy::apply_cached_data,
                     crate::object_3d::update_object_3d_system,
                     crate::sync_object_3d,
+                    bevy_geo_frames::apply_geo_rotation,
+                    bevy_geo_frames::big_space::apply_big_translation::<i128>,
                     sync_pos,
                 )
                     .chain()
@@ -156,6 +164,7 @@ fn load_headless_scene(
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut mat3_materials: ResMut<Assets<Mat3Material>>,
     asset_server: Res<AssetServer>,
+    geo_context: Res<GeoContext>,
 ) {
     if *loaded {
         return;
@@ -190,6 +199,7 @@ fn load_headless_scene(
                 &mut meshes,
                 &mut mat3_materials,
                 &asset_server,
+                &geo_context,
             );
         }
     }

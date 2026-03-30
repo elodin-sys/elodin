@@ -1,8 +1,6 @@
 use std::iter;
 use std::process::Stdio;
 use std::{
-    collections::HashSet,
-    fs,
     net::{Ipv4Addr, SocketAddr},
     path::PathBuf,
 };
@@ -14,6 +12,8 @@ use which::which;
 use crate::DEFAULT_WATCH_TIMEOUT;
 use crate::{error::Error, watch::watch};
 use std::time::Duration;
+#[cfg(target_os = "linux")]
+use std::{collections::HashSet, fs};
 
 #[derive(serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "kebab-case")]

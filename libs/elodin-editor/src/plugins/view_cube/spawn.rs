@@ -145,49 +145,20 @@ fn spawn_overlay_camera(
 
 fn axis_visual_configs(system: CoordinateSystem) -> [(Vec3, Color, &'static str); 3] {
     let axes = system.get_axes();
-    let east_color = axes
-        .iter()
-        .find(|axis| axis.direction.x.abs() > 0.9)
-        .map(|axis| axis.color)
-        .unwrap_or(Color::srgb(0.9, 0.2, 0.2));
-    let up_color = axes
-        .iter()
-        .find(|axis| axis.direction.y.abs() > 0.9)
-        .map(|axis| axis.color)
-        .unwrap_or(Color::srgb(0.2, 0.4, 0.9));
-    let north_color = axes
-        .iter()
-        .find(|axis| axis.direction.z.abs() > 0.9)
-        .map(|axis| axis.color)
-        .unwrap_or(Color::srgb(0.2, 0.8, 0.2));
-
     // Visual mapping requested for ENU view cube:
-    // - X must point opposite local +X
-    // - Y/Z labels are swapped while preserving blue/green axis colors
     [
-        (Vec3::NEG_X, east_color, "X"),
-        (Vec3::Y, up_color, "Z"),
-        (Vec3::Z, north_color, "Y"),
+        (axes[0].direction, axes[0].color, "X"),
+        (axes[1].direction, axes[1].color, "Y"),
+        (axes[2].direction, axes[2].color, "Z"),
     ]
-}
-
-fn axis_origin_for_visual_layout(cube_half_extent: f32, axis_center_offset: f32) -> Vec3 {
-    // In synced mode the cube receives a Y-PI correction.
-    // Use local corner (+X, -Y, -Z) so it appears at visual (W, bottom, S),
-    // then offset outward by axis radius so shafts sit on cube borders.
-    Vec3::new(
-        cube_half_extent + axis_center_offset,
-        -cube_half_extent - axis_center_offset,
-        -cube_half_extent - axis_center_offset,
-    )
 }
 
 /// Spawn RGB axes extending from the bottom-left-back corner of the cube
 fn spawn_axes(
     commands: &mut Commands,
-    asset_server: &Res<AssetServer>,
-    meshes: &mut ResMut<Assets<Mesh>>,
-    materials: &mut ResMut<Assets<StandardMaterial>>,
+    asset_server: &AssetServer,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
     config: &ViewCubeConfig,
     render_layers: Option<RenderLayers>,
     parent: Entity,
@@ -205,9 +176,9 @@ fn spawn_axes(
     // `axis_visual_configs` defines final visual axis directions/labels/colors.
     // Keep shafts on cube borders (no extra surface gap).
     let axis_center_offset = axis_radius + AXIS_SURFACE_GAP;
-    let axis_origin = axis_origin_for_visual_layout(CUBE_HALF_EXTENT, axis_center_offset);
-
     let axis_configs = axis_visual_configs(config.system);
+    let points_to: Vec3 = axis_configs.iter().map(|axis_config| axis_config.0).sum();
+    let axis_origin = -points_to * (CUBE_HALF_EXTENT + axis_center_offset);
 
     let shaft_mesh = meshes.add(Cylinder::new(axis_radius, axis_length));
     let font: Handle<FontMesh> =
@@ -287,58 +258,57 @@ fn spawn_axes(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bevy_geo_frames::GeoFrame;
 
     #[test]
-    fn axis_visual_configs_match_requested_xyz_rbg_mapping() {
-        let axis_configs = axis_visual_configs(CoordinateSystem::ENU);
+    fn enu_axis_visual_configs_match_requested_xyz_rbg_mapping() {
+        let axis_configs = axis_visual_configs(CoordinateSystem(GeoFrame::ENU));
 
-        assert_eq!(axis_configs[0].0, Vec3::NEG_X);
+        assert_eq!(axis_configs[0].0, Vec3::X);
         assert_eq!(axis_configs[0].2, "X");
-        assert_eq!(axis_configs[1].0, Vec3::Y);
-        assert_eq!(axis_configs[1].2, "Z");
-        assert_eq!(axis_configs[2].0, Vec3::Z);
-        assert_eq!(axis_configs[2].2, "Y");
-
-        let logical_axes = CoordinateSystem::ENU.get_axes();
-        let east_color = logical_axes
-            .iter()
-            .find(|axis| axis.direction == Vec3::X)
-            .map(|axis| axis.color)
-            .expect("east color");
-        let up_color = logical_axes
-            .iter()
-            .find(|axis| axis.direction == Vec3::Y)
-            .map(|axis| axis.color)
-            .expect("up color");
-        let north_color = logical_axes
-            .iter()
-            .find(|axis| axis.direction == Vec3::Z)
-            .map(|axis| axis.color)
-            .expect("north color");
-
-        assert_eq!(axis_configs[0].1, east_color);
-        assert_eq!(axis_configs[1].1, up_color);
-        assert_eq!(axis_configs[2].1, north_color);
+        assert_eq!(axis_configs[1].0, Vec3::NEG_Z);
+        assert_eq!(axis_configs[1].2, "Y");
+        assert_eq!(axis_configs[2].0, Vec3::Y);
+        assert_eq!(axis_configs[2].2, "Z");
     }
 
     #[test]
-    fn axis_origin_layout_maps_to_visual_west_bottom_south_corner() {
-        let local_origin = axis_origin_for_visual_layout(0.5, 0.04);
-        let correction = ViewCubeConfig::system_axis_correction(CoordinateSystem::ENU);
-        let visual_origin = correction * local_origin;
+    fn ned_axis_visual_configs_returns_correct_colors() {
+        let axis_configs = axis_visual_configs(CoordinateSystem(GeoFrame::NED));
 
-        assert!(
-            visual_origin.x < 0.0,
-            "origin should be on visual west side"
-        );
-        assert!(
-            visual_origin.y < 0.0,
-            "origin should be on visual bottom side"
-        );
-        assert!(
-            visual_origin.z > 0.0,
-            "origin should be on visual south side"
-        );
+        // Visual axes should still be X, Y, Z labels
+        assert_eq!(axis_configs[0].2, "X");
+        assert_eq!(axis_configs[1].2, "Y");
+        assert_eq!(axis_configs[2].2, "Z");
+    }
+
+    #[test]
+    fn ned_has_correct_axis_labels() {
+        let axes = CoordinateSystem(GeoFrame::NED).get_axes();
+
+        // NED axes: North (+X), East (+Y), Down (+Z) in NED frame
+        // Mapped to Bevy: North = -Z, East = +X, Down = -Y
+        let north_axis = axes
+            .iter()
+            .find(|a| a.positive_label == "N")
+            .expect("North axis");
+        let east_axis = axes
+            .iter()
+            .find(|a| a.positive_label == "E")
+            .expect("East axis");
+        let down_axis = axes
+            .iter()
+            .find(|a| a.positive_label == "D")
+            .expect("Down axis");
+
+        assert_eq!(north_axis.direction, Vec3::NEG_Z);
+        assert_eq!(north_axis.negative_label, "S");
+
+        assert_eq!(east_axis.direction, Vec3::X);
+        assert_eq!(east_axis.negative_label, "W");
+
+        assert_eq!(down_axis.direction, Vec3::NEG_Y);
+        assert_eq!(down_axis.negative_label, "U");
     }
 }
 

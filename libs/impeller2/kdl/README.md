@@ -11,16 +11,33 @@ Serializer/deserializer for `impeller2_wkt::Schematic` to and from KDL.
 
 The parser accepts these root nodes:
 
+- `coordinate`: sets the global coordinate frame (`frame=ENU|NED|ECEF`)
 - `theme`
+- `timeline`
 - `window`
 - Panel roots: `tabs`, `hsplit`, `vsplit`, `viewport`, `graph`, `component_monitor`, `action_pane`, `query_table`, `query_plot`, `inspector`, `hierarchy`, `schematic_tree`, `data_overview`, `dashboard`
 - Scene roots: `object_3d`, `line_3d`, `vector_arrow`
+
+## Coordinate Frame
+
+The optional `coordinate` node sets a global coordinate frame for the schematic. Elements that don't specify their own `frame` attribute inherit this global frame.
+
+```kdl
+coordinate frame="NED"
+```
+
+Supported frames:
+- `ENU`: East-North-Up (default Bevy convention)
+- `NED`: North-East-Down (common in aerospace)
+- `ECEF`: Earth-Centered Earth-Fixed
+
+Individual elements (`viewport`, `object_3d`, `line_3d`, `vector_arrow`) can override the global frame with their own `frame` attribute.
 
 ## Panel Nodes
 
 - `tabs { ... }`: container of panels.
 - `hsplit` / `vsplit`: container of panels. Child `share=<f32>` controls split weight.
-- `viewport`: camera panel (`fov`, `active`, `show_grid`, `show_arrows`, `show_view_cube`, `hdr`, `name`, `pos`, `look_at`) and optional local child `vector_arrow` nodes.
+- `viewport`: camera panel (`fov`, `active`, `show_grid`, `show_arrows`, `show_view_cube`, `hdr`, `name`, `pos`, `look_at`, `frame`) and optional local child `vector_arrow` nodes.
 - `graph`: positional EQL string + optional `name`, `type` (`line|point|bar`), `lock`, `auto_y_range`, `y_min`, `y_max`, child `color` nodes.
 - `component_monitor`: requires `component_name`; optional `name`.
 - `action_pane`: requires `name` and `lua`.
@@ -52,7 +69,9 @@ viewport name="Fin Orientation"
 
 ## Scene Nodes
 
-- `object_3d <eql> { ... }`: one mesh child is required.
+All scene nodes support an optional `frame` attribute (`ENU`, `NED`, or `ECEF`) that specifies the coordinate frame for interpreting position and orientation. If omitted, the global `coordinate` frame is used.
+
+- `object_3d <eql> [frame=ENU|NED|ECEF] { ... }`: one mesh child is required.
   - `glb path=... [scale=1.0] [translate="(x,y,z)"] [rotate="(deg_x,deg_y,deg_z)"]`
   - `sphere radius=...`
   - `box x=... y=... z=...`
@@ -60,8 +79,8 @@ viewport name="Fin Orientation"
   - `plane [size=10.0] [width=size] [depth=size]`
   - `ellipsoid [scale="(1, 1, 1)"]`
   - mesh nodes support optional `color` and optional `emissivity` (clamped to `[0.0, 1.0]` on serialization).
-- `line_3d <eql> [line_width=1.0] [color] [perspective=#true]`
-- `vector_arrow <vector-eql> [origin] [scale=1.0] [name] [body_frame|in_body_frame=#false] [normalize=#false] [show_name|display_name=#true] [arrow_thickness=0.1] [label_position] [color]`
+- `line_3d <eql> [frame=ENU|NED|ECEF] [line_width=1.0] [color] [perspective=#true]`
+- `vector_arrow <vector-eql> [frame=ENU|NED|ECEF] [origin] [scale=1.0] [name] [body_frame|in_body_frame=#false] [normalize=#false] [show_name|display_name=#true] [arrow_thickness=0.1] [label_position] [color]`
 
 ## Defaults And Aliases
 

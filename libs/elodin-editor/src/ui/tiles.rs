@@ -16,6 +16,7 @@ use bevy_egui::{
     EguiContexts, EguiTextureHandle,
     egui::{self, Color32, CornerRadius, Frame, Id, RichText, Stroke, Ui, Visuals, vec2},
 };
+use bevy_geo_frames::prelude::*;
 use egui::UiBuilder;
 use egui::response::Flags;
 use egui_material_icons::{icon_button, icons::*};
@@ -60,7 +61,8 @@ use crate::{
         gizmos::GIZMO_RENDER_LAYER,
         navigation_gizmo::{NavGizmoCamera, NavGizmoParent, RenderLayerAlloc},
         view_cube::{
-            NeedsInitialSnap, ViewCubeConfig, ViewCubeTargetCamera, spawn::spawn_view_cube,
+            CoordinateSystem, NeedsInitialSnap, ViewCubeConfig, ViewCubeTargetCamera,
+            spawn::spawn_view_cube,
         },
     },
     ui::colors::ColorExt,
@@ -1274,14 +1276,23 @@ impl ViewportPane {
         } else {
             Visibility::Hidden
         };
+
+        // Swap axis colors for NED frame (X=North=Green, Z axis shows East=Red)
+        let (x_axis_color, z_axis_color) = if viewport.frame == Some(bevy_geo_frames::GeoFrame::NED)
+        {
+            (crate::ui::colors::bevy::GREEN, crate::ui::colors::bevy::RED)
+        } else {
+            (crate::ui::colors::bevy::RED, crate::ui::colors::bevy::GREEN)
+        };
+
         let grid_id = commands
             .spawn((
                 bevy_infinite_grid::InfiniteGridBundle {
                     settings: bevy_infinite_grid::InfiniteGridSettings {
                         minor_line_color: Color::srgba(1.0, 1.0, 1.0, 0.02),
                         major_line_color: Color::srgba(1.0, 1.0, 1.0, 0.05),
-                        z_axis_color: crate::ui::colors::bevy::GREEN,
-                        x_axis_color: crate::ui::colors::bevy::RED,
+                        z_axis_color,
+                        x_axis_color,
                         fadeout_distance: 50_000.0,
                         scale: 0.1,
                         ..Default::default()
@@ -1293,15 +1304,24 @@ impl ViewportPane {
             ))
             .id();
 
-        let parent = commands
-            .spawn((
-                GlobalTransform::default(),
-                Transform::from_translation(Vec3::new(5.0, 5.0, 10.0))
-                    .looking_at(Vec3::ZERO, Vec3::Y),
-                impeller2_wkt::WorldPos::default(),
-                Name::new("viewport"),
-            ))
-            .id();
+        let transform =
+            Transform::from_translation(Vec3::new(5.0, 5.0, 10.0)).looking_at(Vec3::ZERO, Vec3::Y);
+        let mut parent_cmd = commands.spawn((
+            GlobalTransform::default(),
+            transform,
+            impeller2_wkt::WorldPos::default(),
+            Name::new("viewport"),
+        ));
+
+        // Add GeoPosition and GeoRotation; use ENU if no frame is specified.
+        if let Some(frame) = viewport.frame.or_default() {
+            parent_cmd.insert((
+                bevy_geo_frames::GeoPosition(frame, transform.translation.as_dvec3()),
+                bevy_geo_frames::GeoRotation(frame, transform.rotation.as_dquat()),
+            ));
+        }
+
+        let parent = parent_cmd.id();
         let pos = viewport
             .pos
             .as_ref()
@@ -1437,7 +1457,7 @@ impl ViewportPane {
                 frustums_thickness: viewport.frustums_thickness,
                 viewport_layer,
             },
-            crate::ui::inspector::viewport::Viewport::new(parent, pos, look_at, up),
+            crate::ui::inspector::viewport::Viewport::new(parent, pos, look_at, up, viewport.frame),
             ChildOf(parent),
             Name::new("viewport camera3d"),
         ));
@@ -1486,6 +1506,12 @@ impl ViewportPane {
         // Spawn ViewCube with editor mode configuration, only override the per-viewport render layer
         let mut view_cube_config = ViewCubeConfig::editor_mode();
         view_cube_config.render_layer = view_cube_layer as u8;
+
+        // Set coordinate system based on viewport's geo frame
+        if let Some(frame) = viewport.frame {
+            view_cube_config.system = CoordinateSystem(frame);
+            info!("Setting frame to {:?}", &view_cube_config.system);
+        }
 
         let spawned = spawn_view_cube(
             commands,

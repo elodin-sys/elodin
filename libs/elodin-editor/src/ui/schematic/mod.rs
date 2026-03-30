@@ -14,6 +14,7 @@ use crate::{
     vector_arrow::ViewportArrow,
 };
 use bevy::{ecs::system::SystemParam, prelude::*, window::PrimaryWindow};
+use bevy_geo_frames::{GeoFrame, GeoPosition};
 use egui_tiles::{Tile, TileId};
 use impeller2_bevy::ComponentMetadataRegistry;
 use impeller2_wkt::{
@@ -79,6 +80,8 @@ pub struct SchematicParam<'w, 's> {
     pub hdr_enabled: Res<'w, HdrEnabled>,
     pub timeline_settings: Res<'w, TimelineSettings>,
     pub metadata: Res<'w, ComponentMetadataRegistry>,
+    pub geo_positions: Query<'w, 's, &'static GeoPosition>,
+    pub coordinate: Res<'w, crate::Coordinate>,
 }
 
 impl SchematicParam<'_, '_> {
@@ -215,6 +218,11 @@ impl SchematicParam<'_, '_> {
                             })
                             .map(|(_, arrow, _)| arrow.clone())
                             .collect();
+                        let frame: Option<GeoFrame> = self
+                            .geo_positions
+                            .get(cam_entity)
+                            .map(|geo_pos| geo_pos.0)
+                            .ok();
 
                         let node_id = impeller2_wkt::NodeId::next();
                         bindings.bind_ephemeral(node_id, cam_entity);
@@ -238,6 +246,7 @@ impl SchematicParam<'_, '_> {
                             up: (!viewport_data.up.eql.is_empty())
                                 .then(|| viewport_data.up.eql.clone()),
                             local_arrows,
+                            frame,
                             node_id,
                         }))
                     }
@@ -405,6 +414,7 @@ pub fn tiles_to_schematic(
     mut bindings: ResMut<SchematicBindings>,
 ) {
     schematic.elems.clear();
+    schematic.frame = param.coordinate.0;
     bindings.clear_ephemeral();
 
     if let Some(root_panels) =

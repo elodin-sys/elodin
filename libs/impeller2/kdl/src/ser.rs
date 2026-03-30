@@ -8,6 +8,9 @@ const KDL_FLOAT_PRECISION: u32 = 6;
 pub fn serialize_schematic(schematic: &Schematic) -> String {
     let mut doc = KdlDocument::new();
 
+    if let Some(frame) = schematic.frame {
+        doc.nodes_mut().push(serialize_coordinate(frame));
+    }
     if let Some(theme) = schematic.theme.as_ref() {
         doc.nodes_mut().push(serialize_theme(theme));
     }
@@ -35,7 +38,15 @@ fn serialize_schematic_elem(elem: &SchematicElem) -> KdlNode {
         SchematicElem::Window(window) => serialize_window(window),
         SchematicElem::Theme(theme) => serialize_theme(theme),
         SchematicElem::Timeline(timeline) => serialize_timeline(timeline),
+        SchematicElem::Coordinate(frame) => serialize_coordinate(*frame),
     }
+}
+
+fn serialize_coordinate(frame: bevy_geo_frames::GeoFrame) -> KdlNode {
+    let mut node = KdlNode::new("coordinate");
+    node.entries_mut()
+        .push(KdlEntry::new_prop("frame", <&str>::from(frame)));
+    node
 }
 
 fn serialize_panel(panel: &Panel) -> KdlNode {
@@ -192,6 +203,10 @@ fn serialize_viewport(viewport: &Viewport) -> KdlNode {
             .push(KdlEntry::new_prop("look_at", look_at.clone()));
     }
 
+    if let Some(frame) = viewport.frame {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("frame", <&str>::from(frame)));
+    }
     if let Some(ref up) = viewport.up {
         node.entries_mut()
             .push(KdlEntry::new_prop("up", up.clone()));
@@ -508,6 +523,12 @@ fn serialize_object_3d(obj: &Object3D) -> KdlNode {
 
     node.entries_mut().push(KdlEntry::new(obj.eql.clone()));
 
+    // Add frame attribute if not default (Bevy)
+    if let Some(frame) = obj.frame {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("frame", <&str>::from(frame)));
+    }
+
     let mut children = KdlDocument::new();
     let (mut mesh_node, sibling_nodes) = serialize_object_3d_mesh(&obj.mesh);
 
@@ -712,6 +733,11 @@ fn serialize_line_3d(line: &Line3d) -> KdlNode {
         push_rounded_float_prop(&mut node, "line_width", line.line_width as f64);
     }
 
+    if let Some(frame) = line.frame {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("frame", <&str>::from(frame)));
+    }
+
     serialize_color_to_node(&mut node, &line.color);
 
     if !line.perspective {
@@ -777,6 +803,11 @@ fn serialize_vector_arrow(arrow: &VectorArrow3d) -> KdlNode {
         }
     }
 
+    if let Some(frame) = arrow.frame {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("frame", <&str>::from(frame)));
+    }
+
     serialize_color_to_node(&mut node, &arrow.color);
 
     node
@@ -823,8 +854,10 @@ fn serialize_material_to_node(node: &mut KdlNode, material: &Material) {
 
 #[cfg(test)]
 mod tests {
+
     use super::*;
     use crate::parse_schematic;
+    use bevy_geo_frames::GeoFrame;
 
     const COLOR_EPSILON: f32 = 1.0 / 255.0 + 1e-6;
 
@@ -902,6 +935,7 @@ mod tests {
                 hdr: false,
                 pos: None,
                 look_at: None,
+                frame: None,
                 up: None,
                 local_arrows: Vec::new(),
                 node_id: NodeId::default(),
@@ -944,6 +978,7 @@ mod tests {
                 hdr: true,
                 pos: Some("(0,0,0,0, 1,2,3)".to_string()),
                 look_at: Some("(0,0,0,0, 0,0,0)".to_string()),
+                frame: None,
                 up: None,
                 local_arrows: Vec::new(),
                 node_id: NodeId::default(),
@@ -1081,6 +1116,7 @@ graph "value" {
             },
             icon: None,
             mesh_visibility_range: None,
+            frame: None,
             node_id: NodeId::default(),
         }));
 
@@ -1121,6 +1157,7 @@ graph "value" {
             },
             icon: None,
             mesh_visibility_range: None,
+            frame: None,
             node_id: NodeId::default(),
         }));
 
@@ -1158,6 +1195,7 @@ graph "value" {
             },
             icon: None,
             mesh_visibility_range: None,
+            frame: None,
             node_id: NodeId::default(),
         }));
 
@@ -1192,6 +1230,7 @@ graph "value" {
             },
             icon: None,
             mesh_visibility_range: None,
+            frame: None,
             node_id: NodeId::default(),
         }));
 
@@ -1225,6 +1264,132 @@ graph "value" {
     }
 
     #[test]
+    fn test_serialize_object_3d_with_frame() {
+        let mut schematic = Schematic::default();
+        schematic.elems.push(SchematicElem::Object3d(Object3D {
+            eql: "ball.world_pos".to_string(),
+            mesh: Object3DMesh::Mesh {
+                mesh: Mesh::Sphere { radius: 0.2 },
+                material: Material::with_color(Color::ORANGE),
+            },
+            frame: Some(GeoFrame::NED),
+            mesh_visibility_range: None,
+            icon: None,
+            node_id: NodeId::next(),
+        }));
+
+        let serialized = serialize_schematic(&schematic);
+        assert!(
+            serialized.contains("frame=NED") || serialized.contains(r#"frame="NED""#),
+            "serialized output should contain frame=NED, got:\n{serialized}"
+        );
+
+        let parsed = parse_schematic(&serialized).unwrap();
+        assert_eq!(parsed.elems.len(), 1);
+        if let SchematicElem::Object3d(obj) = &parsed.elems[0] {
+            assert_eq!(obj.eql, "ball.world_pos");
+            assert!(matches!(obj.frame, Some(GeoFrame::NED)));
+        } else {
+            panic!("Expected object_3d");
+        }
+    }
+
+    #[test]
+    fn test_serialize_object_3d_default_frame_not_serialized() {
+        let mut schematic = Schematic::default();
+        schematic.elems.push(SchematicElem::Object3d(Object3D {
+            eql: "entity.world_pos".to_string(),
+            mesh: Object3DMesh::Mesh {
+                mesh: Mesh::Sphere { radius: 0.5 },
+                material: Material::with_color(Color::WHITE),
+            },
+            frame: None, // Default (no frame)
+            icon: None,
+            mesh_visibility_range: None,
+            node_id: NodeId::next(),
+        }));
+
+        let serialized = serialize_schematic(&schematic);
+        assert!(
+            !serialized.contains("frame="),
+            "default None frame should not be serialized, got:\n{serialized}"
+        );
+    }
+
+    #[test]
+    fn test_serialize_viewport_with_frame() {
+        let mut schematic = Schematic::default();
+        schematic
+            .elems
+            .push(SchematicElem::Panel(Panel::Viewport(Viewport {
+                name: Some("main".to_string()),
+                fov: 45.0,
+                active: false,
+                show_grid: false,
+                show_arrows: true,
+                hdr: false,
+                pos: Some("(0,0,0,0, 8,2,4)".to_string()),
+                look_at: None,
+                frame: Some(GeoFrame::NED),
+                local_arrows: Vec::new(),
+                aspect: None,
+                ..Default::default()
+            })));
+
+        let serialized = serialize_schematic(&schematic);
+        assert!(
+            serialized.contains("frame=NED") || serialized.contains(r#"frame="NED""#),
+            "serialized output should contain frame=NED, got:\n{serialized}"
+        );
+    }
+
+    #[test]
+    fn test_serialize_line_3d_with_frame() {
+        let mut schematic = Schematic::default();
+        schematic.elems.push(SchematicElem::Line3d(Line3d {
+            eql: "ball.world_pos".to_string(),
+            line_width: 2.0,
+            color: Color::WHITE,
+            perspective: true,
+            frame: Some(GeoFrame::ENU),
+            node_id: NodeId::next(),
+        }));
+
+        let serialized = serialize_schematic(&schematic);
+        assert!(
+            serialized.contains("frame=ENU") || serialized.contains(r#"frame="ENU""#),
+            "serialized output should contain frame=ENU, got:\n{serialized}"
+        );
+    }
+
+    #[test]
+    fn test_serialize_vector_arrow_with_frame() {
+        let mut schematic = Schematic::default();
+        schematic
+            .elems
+            .push(SchematicElem::VectorArrow(VectorArrow3d {
+                vector: "ball.velocity".to_string(),
+                origin: Some("ball.world_pos".to_string()),
+                scale: 1.0,
+                name: None,
+                color: Color::WHITE,
+                body_frame: false,
+                normalize: false,
+                show_name: true,
+                thickness: ArrowThickness::default(),
+                label_position: LabelPosition::None,
+                frame: Some(GeoFrame::ECEF),
+                node_id: NodeId::next(),
+            }));
+
+        let serialized = serialize_schematic(&schematic);
+        assert!(
+            serialized.contains("frame=ECEF") || serialized.contains(r#"frame="ECEF""#),
+            "serialized output should contain frame=ECEF, got:\n{serialized}"
+        );
+    }
+
+    #[test]
     fn test_serialize_tabs_with_children() {
         let mut schematic = Schematic::default();
         schematic.elems.push(SchematicElem::Panel(Panel::Tabs(vec![
@@ -1245,6 +1410,7 @@ graph "value" {
                 hdr: false,
                 pos: None,
                 look_at: None,
+                frame: None,
                 up: None,
                 local_arrows: Vec::new(),
                 node_id: NodeId::default(),
@@ -1293,6 +1459,7 @@ graph "value" {
             line_width: 2.0,
             color: Color::MINT,
             perspective: false,
+            frame: None,
             node_id: NodeId::default(),
         }));
 
@@ -1326,6 +1493,7 @@ graph "value" {
                 show_name: false,
                 thickness: ArrowThickness::new(1.23456),
                 label_position: LabelPosition::None,
+                frame: None,
                 node_id: NodeId::default(),
             }));
 
@@ -1465,5 +1633,153 @@ object_3d "rocket.world_pos" {
             panic!()
         };
         assert_eq!(animations.len(), 1, "serialized:\n{serialized}");
+    }
+
+    #[test]
+    fn test_roundtrip_coordinate_frame_ned() {
+        let original = r#"coordinate frame="NED"
+
+viewport name="main"
+"#;
+        let parsed = parse_schematic(original).unwrap();
+        assert_eq!(
+            parsed.frame,
+            Some(bevy_geo_frames::GeoFrame::NED),
+            "Parsed schematic should have NED frame"
+        );
+
+        // Check viewport has its own ENU frame
+        if let SchematicElem::Panel(Panel::Viewport(viewport)) = &parsed.elems[0] {
+            assert_eq!(viewport.frame, None, "Viewport should have no frame");
+        } else {
+            panic!("Expected viewport panel");
+        }
+        let serialized = serialize_schematic(&parsed);
+
+        let expected = r#"coordinate frame=NED
+viewport name=main"#;
+        assert_eq!(serialized, expected, "Full serialized output");
+
+        let reparsed = parse_schematic(&serialized).unwrap();
+        assert_eq!(
+            reparsed.frame,
+            Some(bevy_geo_frames::GeoFrame::NED),
+            "Re-parsed schematic should preserve NED frame"
+        );
+    }
+
+    #[test]
+    fn test_roundtrip_coordinate_frame_enu() {
+        let original = r#"coordinate frame="ENU"
+
+viewport name="main"
+"#;
+        let parsed = parse_schematic(original).unwrap();
+        assert_eq!(parsed.frame, Some(bevy_geo_frames::GeoFrame::ENU));
+
+        let serialized = serialize_schematic(&parsed);
+
+        let expected = r#"coordinate frame=ENU
+viewport name=main"#;
+        assert_eq!(serialized, expected, "Full serialized output");
+
+        let reparsed = parse_schematic(&serialized).unwrap();
+        assert_eq!(reparsed.frame, Some(bevy_geo_frames::GeoFrame::ENU));
+    }
+
+    #[test]
+    fn test_schematic_without_coordinate_frame() {
+        let original = r#"viewport name="main""#;
+        let parsed = parse_schematic(original).unwrap();
+        assert_eq!(
+            parsed.frame, None,
+            "Schematic without coordinate node should have None frame"
+        );
+
+        let serialized = serialize_schematic(&parsed);
+        assert!(
+            !serialized.contains("coordinate"),
+            "Serialized output should not contain coordinate when frame is None"
+        );
+    }
+
+    #[test]
+    fn test_roundtrip_global_and_local_frames() {
+        let original = r#"coordinate frame="NED"
+
+viewport name="main" frame="ENU"
+"#;
+        let parsed = parse_schematic(original).unwrap();
+        assert_eq!(
+            parsed.frame,
+            Some(bevy_geo_frames::GeoFrame::NED),
+            "Global frame should be NED"
+        );
+
+        // Check viewport has its own ENU frame
+        if let SchematicElem::Panel(Panel::Viewport(viewport)) = &parsed.elems[0] {
+            assert_eq!(
+                viewport.frame,
+                Some(GeoFrame::ENU),
+                "Viewport should have ENU frame"
+            );
+        } else {
+            panic!("Expected viewport panel");
+        }
+
+        let serialized = serialize_schematic(&parsed);
+
+        let expected = r#"coordinate frame=NED
+viewport name=main frame=ENU"#;
+        assert_eq!(serialized, expected, "Full serialized output");
+
+        // Verify round-trip preserves both frames
+        let reparsed = parse_schematic(&serialized).unwrap();
+        assert_eq!(reparsed.frame, Some(bevy_geo_frames::GeoFrame::NED));
+        if let SchematicElem::Panel(Panel::Viewport(viewport)) = &reparsed.elems[0] {
+            assert_eq!(viewport.frame, Some(GeoFrame::ENU));
+        } else {
+            panic!("Expected viewport panel after reparse");
+        }
+    }
+
+    #[test]
+    fn test_roundtrip_same_global_and_local_frames() {
+        let original = r#"coordinate frame="NED"
+
+viewport name="main" frame="NED"
+"#;
+        let parsed = parse_schematic(original).unwrap();
+        assert_eq!(
+            parsed.frame,
+            Some(bevy_geo_frames::GeoFrame::NED),
+            "Global frame should be NED"
+        );
+
+        // Check viewport has its own ENU frame
+        if let SchematicElem::Panel(Panel::Viewport(viewport)) = &parsed.elems[0] {
+            assert_eq!(
+                viewport.frame,
+                Some(GeoFrame::NED),
+                "Viewport should have ENU frame"
+            );
+        } else {
+            panic!("Expected viewport panel");
+        }
+
+        let serialized = serialize_schematic(&parsed);
+
+        let expected = r#"coordinate frame=NED
+viewport name=main frame=NED"#;
+        assert_eq!(serialized, expected, "Full serialized output");
+
+        // Verify round-trip preserves both frames
+        let reparsed = parse_schematic(&serialized).unwrap();
+        assert_eq!(reparsed.frame, Some(bevy_geo_frames::GeoFrame::NED));
+        if let SchematicElem::Panel(Panel::Viewport(viewport)) = &reparsed.elems[0] {
+            assert_eq!(viewport.frame, Some(GeoFrame::NED));
+        } else {
+            panic!("Expected viewport panel after reparse");
+        }
     }
 }
