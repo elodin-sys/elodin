@@ -392,31 +392,60 @@
             <ul>
                 
                 <li>
-                    <a href="/reference/coords/#local-geodetic-world-frame">Local Geodetic World Frame</a>
-                    
-                </li>
-                
-                <li>
-                    <a href="/reference/coords/#geocentric-world-frame">Geocentric World Frame</a>
+                    <a href="/reference/coords/#configuring-the-world-frame">Configuring the World Frame</a>
                     
                     <ul>
                         
                         <li>
-                            <a href="/reference/coords/#ecef">ECEF</a>
+                            <a href="/reference/coords/#supported-frame-conventions">Supported Frame Conventions</a>
                             
                         </li>
                         
                         <li>
-                            <a href="/reference/coords/#eci">ECI</a>
+                            <a href="/reference/coords/#not-yet-supported-frame-conventions">Not Yet Supported Frame Conventions</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="/reference/coords/#local-geodetic-world-frames">Local Geodetic World Frames</a>
+                            
+                            <ul>
+                                
+                                <li>
+                                    <a href="/reference/coords/#enu-east-north-up">ENU (East-North-Up)</a>
+                                </li>
+                                
+                                <li>
+                                    <a href="/reference/coords/#ned-north-east-down">NED (North-East-Down)</a>
+                                </li>
+                                
+                            </ul>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="/reference/coords/#geocentric-world-frame">Geocentric World Frame</a>
+                            
+                            <ul>
+                                
+                                <li>
+                                    <a href="/reference/coords/#ecef">ECEF</a>
+                                </li>
+                                
+                                <li>
+                                    <a href="/reference/coords/#eci">ECI</a>
+                                </li>
+                                
+                            </ul>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="/reference/coords/#body-frame">Body Frame</a>
                             
                         </li>
                         
                     </ul>
-                    
-                </li>
-                
-                <li>
-                    <a href="/reference/coords/#body-frame">Body Frame</a>
                     
                 </li>
                 
@@ -429,19 +458,61 @@
                   <h1>Coordinate Systems</h1>
                    <p>The default coordinate systems used in Elodin align with the editor's representation of the (X, Y, Z)
 axes as (red, green, blue) respectively. Also, all coordinate systems are right-handed.</p>
-<h3 id="local-geodetic-world-frame">Local Geodetic World Frame</h3>
+<h2 id="configuring-the-world-frame">Configuring the World Frame</h2>
+<p>When creating a world in Elodin, you ought to specify the coordinate frame convention. This ensures clarity and prevents ambiguity about the coordinate system being used. This is done in the schematic KDL:</p>
+<pre data-lang="kdl" class="language-kdl z-code"><code class="language-kdl" data-lang="kdl"><span class="z-source z-kdl"><span class="z-text z-plain">/</span><span class="z-text z-plain">/</span><span class="z-text z-plain"> </span><span class="z-text z-plain">P</span><span class="z-text z-plain">r</span><span class="z-text z-plain">e</span><span class="z-text z-plain">s</span><span class="z-text z-plain">e</span><span class="z-text z-plain">n</span><span class="z-text z-plain">t</span><span class="z-text z-plain"> </span><span class="z-text z-plain">w</span><span class="z-text z-plain">o</span><span class="z-text z-plain">r</span><span class="z-text z-plain">l</span><span class="z-text z-plain">d</span><span class="z-text z-plain"> </span><span class="z-text z-plain">w</span><span class="z-text z-plain">i</span><span class="z-text z-plain">t</span><span class="z-text z-plain">h</span><span class="z-text z-plain"> </span><span class="z-text z-plain">E</span><span class="z-text z-plain">N</span><span class="z-text z-plain">U</span><span class="z-text z-plain"> </span><span class="z-text z-plain">(</span><span class="z-text z-plain">E</span><span class="z-text z-plain">a</span><span class="z-text z-plain">s</span><span class="z-text z-plain">t</span><span class="z-text z-plain">-</span><span class="z-text z-plain">N</span><span class="z-text z-plain">o</span><span class="z-text z-plain">r</span><span class="z-text z-plain">t</span><span class="z-text z-plain">h</span><span class="z-text z-plain">-</span><span class="z-text z-plain">U</span><span class="z-text z-plain">p</span><span class="z-text z-plain">)</span><span class="z-text z-plain"> </span><span class="z-text z-plain">f</span><span class="z-text z-plain">r</span><span class="z-text z-plain">a</span><span class="z-text z-plain">m</span><span class="z-text z-plain">e</span><span class="z-text z-plain"> </span><span class="z-text z-plain">f</span><span class="z-text z-plain">o</span><span class="z-text z-plain">r</span><span class="z-text z-plain"> </span><span class="z-text z-plain">t</span><span class="z-text z-plain">e</span><span class="z-text z-plain">r</span><span class="z-text z-plain">r</span><span class="z-text z-plain">e</span><span class="z-text z-plain">s</span><span class="z-text z-plain">t</span><span class="z-text z-plain">r</span><span class="z-text z-plain">i</span><span class="z-text z-plain">a</span><span class="z-text z-plain">l</span><span class="z-text z-plain"> </span><span class="z-text z-plain">v</span><span class="z-text z-plain">e</span><span class="z-text z-plain">h</span><span class="z-text z-plain">i</span><span class="z-text z-plain">c</span><span class="z-text z-plain">l</span><span class="z-text z-plain">e</span><span class="z-text z-plain">s</span><span class="z-text z-plain">.</span>
+</span><span class="z-source z-kdl"><span class="z-text z-plain">c</span><span class="z-text z-plain">o</span><span class="z-text z-plain">o</span><span class="z-text z-plain">r</span><span class="z-text z-plain">d</span><span class="z-text z-plain">i</span><span class="z-text z-plain">n</span><span class="z-text z-plain">a</span><span class="z-text z-plain">t</span><span class="z-text z-plain">e</span><span class="z-text z-plain"> </span><span class="z-text z-plain">f</span><span class="z-text z-plain">r</span><span class="z-text z-plain">a</span><span class="z-text z-plain">m</span><span class="z-text z-plain">e</span><span class="z-text z-plain">=</span><span class="z-text z-plain">&quot;</span><span class="z-text z-plain">E</span><span class="z-text z-plain">N</span><span class="z-text z-plain">U</span><span class="z-text z-plain">&quot;</span>
+</span><span class="z-source z-kdl">
+</span><span class="z-source z-kdl"><span class="z-text z-plain">/</span><span class="z-text z-plain">/</span><span class="z-text z-plain"> </span><span class="z-text z-plain">O</span><span class="z-text z-plain">r</span><span class="z-text z-plain"> </span><span class="z-text z-plain">u</span><span class="z-text z-plain">s</span><span class="z-text z-plain">e</span><span class="z-text z-plain"> </span><span class="z-text z-plain">N</span><span class="z-text z-plain">E</span><span class="z-text z-plain">D</span><span class="z-text z-plain"> </span><span class="z-text z-plain">(</span><span class="z-text z-plain">N</span><span class="z-text z-plain">o</span><span class="z-text z-plain">r</span><span class="z-text z-plain">t</span><span class="z-text z-plain">h</span><span class="z-text z-plain">-</span><span class="z-text z-plain">E</span><span class="z-text z-plain">a</span><span class="z-text z-plain">s</span><span class="z-text z-plain">t</span><span class="z-text z-plain">-</span><span class="z-text z-plain">D</span><span class="z-text z-plain">o</span><span class="z-text z-plain">w</span><span class="z-text z-plain">n</span><span class="z-text z-plain">)</span><span class="z-text z-plain"> </span><span class="z-text z-plain">f</span><span class="z-text z-plain">o</span><span class="z-text z-plain">r</span><span class="z-text z-plain"> </span><span class="z-text z-plain">a</span><span class="z-text z-plain">v</span><span class="z-text z-plain">i</span><span class="z-text z-plain">a</span><span class="z-text z-plain">t</span><span class="z-text z-plain">i</span><span class="z-text z-plain">o</span><span class="z-text z-plain">n</span><span class="z-text z-plain"> </span><span class="z-text z-plain">a</span><span class="z-text z-plain">p</span><span class="z-text z-plain">p</span><span class="z-text z-plain">l</span><span class="z-text z-plain">i</span><span class="z-text z-plain">c</span><span class="z-text z-plain">a</span><span class="z-text z-plain">t</span><span class="z-text z-plain">i</span><span class="z-text z-plain">o</span><span class="z-text z-plain">n</span><span class="z-text z-plain">s</span><span class="z-text z-plain">.</span>
+</span><span class="z-source z-kdl"><span class="z-text z-plain">c</span><span class="z-text z-plain">o</span><span class="z-text z-plain">o</span><span class="z-text z-plain">r</span><span class="z-text z-plain">d</span><span class="z-text z-plain">i</span><span class="z-text z-plain">n</span><span class="z-text z-plain">a</span><span class="z-text z-plain">t</span><span class="z-text z-plain">e</span><span class="z-text z-plain"> </span><span class="z-text z-plain">f</span><span class="z-text z-plain">r</span><span class="z-text z-plain">a</span><span class="z-text z-plain">m</span><span class="z-text z-plain">e</span><span class="z-text z-plain">=</span><span class="z-text z-plain">&quot;</span><span class="z-text z-plain">N</span><span class="z-text z-plain">E</span><span class="z-text z-plain">D</span><span class="z-text z-plain">&quot;</span>
+</span><span class="z-source z-kdl">
+</span><span class="z-source z-kdl"><span class="z-text z-plain">/</span><span class="z-text z-plain">/</span><span class="z-text z-plain"> </span><span class="z-text z-plain">O</span><span class="z-text z-plain">r</span><span class="z-text z-plain"> </span><span class="z-text z-plain">u</span><span class="z-text z-plain">s</span><span class="z-text z-plain">e</span><span class="z-text z-plain"> </span><span class="z-text z-plain">E</span><span class="z-text z-plain">C</span><span class="z-text z-plain">I</span><span class="z-text z-plain"> </span><span class="z-text z-plain">f</span><span class="z-text z-plain">o</span><span class="z-text z-plain">r</span><span class="z-text z-plain"> </span><span class="z-text z-plain">o</span><span class="z-text z-plain">r</span><span class="z-text z-plain">b</span><span class="z-text z-plain">i</span><span class="z-text z-plain">t</span><span class="z-text z-plain">a</span><span class="z-text z-plain">l</span><span class="z-text z-plain"> </span><span class="z-text z-plain">m</span><span class="z-text z-plain">e</span><span class="z-text z-plain">c</span><span class="z-text z-plain">h</span><span class="z-text z-plain">a</span><span class="z-text z-plain">n</span><span class="z-text z-plain">i</span><span class="z-text z-plain">c</span><span class="z-text z-plain">s</span><span class="z-text z-plain">.</span>
+</span><span class="z-source z-kdl"><span class="z-text z-plain">c</span><span class="z-text z-plain">o</span><span class="z-text z-plain">o</span><span class="z-text z-plain">r</span><span class="z-text z-plain">d</span><span class="z-text z-plain">i</span><span class="z-text z-plain">n</span><span class="z-text z-plain">a</span><span class="z-text z-plain">t</span><span class="z-text z-plain">e</span><span class="z-text z-plain"> </span><span class="z-text z-plain">f</span><span class="z-text z-plain">r</span><span class="z-text z-plain">a</span><span class="z-text z-plain">m</span><span class="z-text z-plain">e</span><span class="z-text z-plain">=</span><span class="z-text z-plain">&quot;</span><span class="z-text z-plain">E</span><span class="z-text z-plain">C</span><span class="z-text z-plain">E</span><span class="z-text z-plain">F</span><span class="z-text z-plain">&quot;</span>
+</span></code></pre>
+<p>If there is an object that uses a different convention, you can specify a coordinate frame for that particular object:</p>
+<pre data-lang="kdl" class="language-kdl z-code"><code class="language-kdl" data-lang="kdl"><span class="z-source z-kdl"><span class="z-text z-plain">o</span><span class="z-text z-plain">b</span><span class="z-text z-plain">j</span><span class="z-text z-plain">e</span><span class="z-text z-plain">c</span><span class="z-text z-plain">t</span><span class="z-text z-plain">_</span><span class="z-text z-plain">3</span><span class="z-text z-plain">d</span><span class="z-text z-plain"> </span><span class="z-text z-plain">f</span><span class="z-text z-plain">r</span><span class="z-text z-plain">a</span><span class="z-text z-plain">m</span><span class="z-text z-plain">e</span><span class="z-text z-plain">=</span><span class="z-text z-plain">&quot;</span><span class="z-text z-plain">N</span><span class="z-text z-plain">E</span><span class="z-text z-plain">D</span><span class="z-text z-plain">&quot;</span><span class="z-text z-plain"> </span><span class="z-text z-plain">b</span><span class="z-text z-plain">a</span><span class="z-text z-plain">l</span><span class="z-text z-plain">l</span><span class="z-text z-plain">.</span><span class="z-text z-plain">w</span><span class="z-text z-plain">o</span><span class="z-text z-plain">r</span><span class="z-text z-plain">l</span><span class="z-text z-plain">d</span><span class="z-text z-plain">_</span><span class="z-text z-plain">p</span><span class="z-text z-plain">o</span><span class="z-text z-plain">s</span><span class="z-text z-plain"> </span><span class="z-text z-plain">{</span>
+</span><span class="z-source z-kdl"><span class="z-text z-plain"> </span><span class="z-text z-plain"> </span><span class="z-text z-plain"> </span><span class="z-text z-plain"> </span><span class="z-text z-plain">s</span><span class="z-text z-plain">p</span><span class="z-text z-plain">h</span><span class="z-text z-plain">e</span><span class="z-text z-plain">r</span><span class="z-text z-plain">e</span><span class="z-text z-plain"> </span><span class="z-text z-plain">r</span><span class="z-text z-plain">a</span><span class="z-text z-plain">d</span><span class="z-text z-plain">i</span><span class="z-text z-plain">u</span><span class="z-text z-plain">s</span><span class="z-text z-plain">=</span><span class="z-text z-plain">0</span><span class="z-text z-plain">.</span><span class="z-text z-plain">2</span><span class="z-text z-plain"> </span><span class="z-text z-plain">{</span>
+</span><span class="z-source z-kdl"><span class="z-text z-plain"> </span><span class="z-text z-plain"> </span><span class="z-text z-plain"> </span><span class="z-text z-plain"> </span><span class="z-text z-plain"> </span><span class="z-text z-plain"> </span><span class="z-text z-plain"> </span><span class="z-text z-plain"> </span><span class="z-text z-plain">c</span><span class="z-text z-plain">o</span><span class="z-text z-plain">l</span><span class="z-text z-plain">o</span><span class="z-text z-plain">r</span><span class="z-text z-plain"> </span><span class="z-text z-plain">o</span><span class="z-text z-plain">r</span><span class="z-text z-plain">a</span><span class="z-text z-plain">n</span><span class="z-text z-plain">g</span><span class="z-text z-plain">e</span>
+</span><span class="z-source z-kdl"><span class="z-text z-plain"> </span><span class="z-text z-plain"> </span><span class="z-text z-plain"> </span><span class="z-text z-plain"> </span><span class="z-text z-plain">}</span>
+</span><span class="z-source z-kdl"><span class="z-text z-plain">}</span>
+</span></code></pre>
+<p>If no coordinate frame is specified, then ENU is used by default.</p>
+<h3 id="supported-frame-conventions">Supported Frame Conventions</h3>
+<table><thead><tr><th>Frame</th><th>+X Axis</th><th>+Y Axis</th><th>+Z Axis</th><th>Gravity*</th><th>Use Case</th></tr></thead><tbody>
+<tr><td><strong>ENU</strong></td><td>East</td><td>North</td><td>Up</td><td>[0, 0, -9.81]</td><td>Terrestrial vehicles (drones, cars, robots)</td></tr>
+<tr><td><strong>NED</strong></td><td>North</td><td>East</td><td>Down</td><td>[0, 0, 9.81]</td><td>Aviation, marine navigation</td></tr>
+<tr><td><strong>ECEF</strong></td><td>0° Long</td><td>90° E</td><td>N Pole</td><td>Position-dependent</td><td>GPS, Earth surface mapping</td></tr>
+</tbody></table>
+<h3 id="not-yet-supported-frame-conventions">Not Yet Supported Frame Conventions</h3>
+<table><thead><tr><th>Frame</th><th>+X Axis</th><th>+Y Axis</th><th>+Z Axis</th><th>Gravity*</th><th>Use Case</th></tr></thead><tbody>
+<tr><td><strong>ECI</strong></td><td>Vernal Equinox</td><td>90° E</td><td>N Pole</td><td>Position-dependent</td><td>Low Earth orbit</td></tr>
+<tr><td><strong>GCRF</strong></td><td>J2000</td><td>90° E</td><td>N Pole</td><td>N/A</td><td>Deep space, inertial reference</td></tr>
+</tbody></table>
+<p>*For frames with constant gravity vectors. GCRF has no constant gravity.</p>
+<h3 id="local-geodetic-world-frames">Local Geodetic World Frames</h3>
 <p>
     <img class="light-only" src="&#x2F;assets&#x2F;coordinates-light.png" alt="Elodin Default Coordinate System Light" />
     <img class="dark-only" src="&#x2F;assets&#x2F;coordinates-dark.png" alt="Elodin Default Coordinate System Dark" />
 </p>
-<p>A local geodetic world frame is commonly used for terrestrial vehicles and is represented using
-the <a href="https://en.wikipedia.org/wiki/Local_tangent_plane_coordinates#Local_east,_north,_up_(ENU)_coordinates">East, North, Up (ENU)</a>
+<p>Local geodetic world frames are commonly used for terrestrial vehicles. Elodin supports two conventions:</p>
+<h4 id="enu-east-north-up">ENU (East-North-Up)</h4>
+<p>The <a href="https://en.wikipedia.org/wiki/Local_tangent_plane_coordinates#Local_east,_north,_up_(ENU)_coordinates">East, North, Up (ENU)</a>
 coordinate system where:</p>
 <ul>
 <li>+X: East</li>
 <li>+Y: North</li>
 <li>+Z: Up</li>
 </ul>
+<p>This frame is commonly used for robotics, ground vehicles, and general simulation work.</p>
+<h4 id="ned-north-east-down">NED (North-East-Down)</h4>
+<p>The <a href="https://en.wikipedia.org/wiki/Local_tangent_plane_coordinates#Local_north,_east,_down_(NED)_coordinates">North, East, Down (NED)</a>
+coordinate system where:</p>
+<ul>
+<li>+X: North</li>
+<li>+Y: East</li>
+<li>+Z: Down</li>
+</ul>
+<p>This frame is the standard in aviation and marine applications. Note that gravity points in the +Z direction in NED.</p>
 <h3 id="geocentric-world-frame">Geocentric World Frame</h3>
 <p>A geodetic world frame is represented using either the <a href="https://en.wikipedia.org/wiki/Earth-centered,_Earth-fixed_coordinate_system">Earth-Centered, Earth-Fixed (ECEF)</a>
 or the <a href="https://en.wikipedia.org/wiki/Earth-centered_inertial">Earth-Centered Inertial (ECI)</a> coordinate system. ECEF is useful for
