@@ -374,7 +374,7 @@ impl GeoVelocity {
     pub fn from_bevy(frame: &GeoFrame, v_bevy: impl Into<DVec3>, context: &GeoContext) -> Self {
         let v = v_bevy.into();
         let w = GeoFrame::bevy_R_(frame, context).transpose() * v;
-        GeoVelocity(*frame, GeoFrame::bevy_R_(frame, context).transpose() * w)
+        GeoVelocity(*frame, w)
     }
 }
 
@@ -483,10 +483,6 @@ pub fn integrate_geo_orientation(
 
     for (mut geo_rot, ang) in &mut q {
         let rot0_R_ang0 = geo_rot.0._R_(&ang.0, &ctx);
-        if geo_rot.0 != ang.0 {
-            // We're punting.
-            continue;
-        }
         let omega = rot0_R_ang0 * ang.1;
         let delta = DQuat::from_scaled_axis(omega * dt);
         geo_rot.1 = delta * geo_rot.1;
