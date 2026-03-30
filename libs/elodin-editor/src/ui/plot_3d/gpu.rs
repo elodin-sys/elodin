@@ -13,7 +13,6 @@ use bevy::shader::Shader;
 use bevy::{
     app::{Plugin, PostUpdate},
     asset::{AssetApp, Assets, Handle, load_internal_asset, uuid_handle},
-    transform::TransformSystems,
     color::ColorToComponents,
     core_pipeline::{
         core_3d::{CORE_3D_DEPTH_FORMAT, Transparent3d},
@@ -47,6 +46,7 @@ use bevy::{
         renderer::{RenderDevice, RenderQueue},
         view::{ExtractedView, Msaa, ViewTarget},
     },
+    transform::TransformSystems,
     transform::components::{GlobalTransform, Transform},
 };
 use bevy_render::{
