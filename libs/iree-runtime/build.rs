@@ -235,6 +235,52 @@ fn main() {
         println!("cargo:rustc-link-lib=dl");
     }
 
+    // Compile the elodin_lapack VM module (C -> static lib)
+    let lapack_src_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap()).join("src");
+    let lapack_src = lapack_src_dir.join("lapack_module.c");
+    if lapack_src.exists() {
+        println!("cargo:rerun-if-changed={}", lapack_src.display());
+        println!(
+            "cargo:rerun-if-changed={}",
+            lapack_src_dir.join("lapack_module.h").display()
+        );
+        let mut build = cc::Build::new();
+        build
+            .file(&lapack_src)
+            .include(&include_dir)
+            .include(&lapack_src_dir)
+            .warnings(false);
+
+        // Bake the OpenBLAS library path into the C code so it can dlopen
+        // the exact matching library at runtime.
+        if let Ok(openblas_dir) = env::var("OPENBLAS_DIR") {
+            let openblas_lib_dir = PathBuf::from(&openblas_dir).join("lib");
+            if let Ok(entries) = fs::read_dir(&openblas_lib_dir) {
+                for entry in entries.flatten() {
+                    let name = entry.file_name().to_string_lossy().to_string();
+                    // Find the real .so (not a symlink) -- e.g. libopenblasp-r0.3.30.so
+                    if name.starts_with("libopenblas")
+                        && name.ends_with(".so")
+                        && !name.contains(".so.")
+                    {
+                        // Resolve symlinks to get the canonical nix store path
+                        let resolved =
+                            fs::canonicalize(entry.path()).unwrap_or_else(|_| entry.path());
+                        build.define(
+                            "ELODIN_OPENBLAS_PATH",
+                            Some(format!("\"{}\"", resolved.display()).as_str()),
+                        );
+                        break;
+                    }
+                }
+            }
+        }
+
+        build.compile("elodin_lapack");
+    }
+
+    println!("cargo:rerun-if-env-changed=OPENBLAS_DIR");
+
     // Run bindgen
     let bindings = bindgen::Builder::default()
         .header(include_dir.join("iree/runtime/api.h").to_str().unwrap())

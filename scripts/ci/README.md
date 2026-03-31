@@ -21,7 +21,7 @@ The comparison is tolerance-based for numeric values and ignores columns named
 - `compare_profile_metrics.py` - tolerance-based profile metric comparator
 - `extract_profile_metrics.py` - run-log parser for profile metrics
 - `baseline/tolerances.json` - default and per-example tolerances
-- `baseline/<example>/...` - known-good CSV exports plus `profile-metrics.json`
+- `baseline/<example>/...` or `baseline/<example>-csv/...` - known-good CSV exports plus `profile-metrics.json`
 
 ## Local usage
 
@@ -31,16 +31,35 @@ From repository root:
 nix develop .#run --command bash -lc "bash ./scripts/ci/regress.sh ball examples/ball/main.py"
 ```
 
+To check all currently baselined regression examples:
+
+```bash
+nix develop .#run --command bash -lc "bash ./scripts/ci/regress.sh --all"
+```
+
 To refresh one example baseline in place:
 
 ```bash
 nix develop .#run --command bash -lc "bash ./scripts/ci/regress.sh --update ball examples/ball/main.py"
 ```
 
+To refresh all currently baselined regression examples:
+
+```bash
+nix develop .#run --command bash -lc "bash ./scripts/ci/regress.sh --all --update"
+```
+
+`--all` only runs examples that already have a baseline directory under
+`scripts/ci/baseline`. It does not scan every `examples/*/main.py`.
+
 ## Baseline layout
 
 The runner looks for per-example baseline directories under `scripts/ci/baseline`.
-Recommended naming is one directory per example:
+`--all` scans subdirectories that contain `profile-metrics.json`, normalizes
+compatibility names such as `ball-csv` back to `ball`, and runs
+`examples/<example>/main.py`.
+
+Preferred naming is one directory per example:
 
 - `scripts/ci/baseline/ball`
 - `scripts/ci/baseline/drone`
@@ -48,7 +67,9 @@ Recommended naming is one directory per example:
 - `scripts/ci/baseline/three-body`
 - `scripts/ci/baseline/cube-sat`
 
-It also accepts compatibility names like `<example>-csv` and `<example>-csv-100`.
+It also accepts compatibility names like `<example>-csv` and
+`<example>-csv-100`. The checked-in baselines currently use those compatibility
+names.
 
 ## Refreshing baselines
 
@@ -61,20 +82,7 @@ nix develop .#run --command bash -lc "bash ./scripts/ci/regress.sh --update ball
 Refresh all example baselines:
 
 ```bash
-nix develop .#run --command bash -lc '
-set -euo pipefail
-for item in \
-  "ball:examples/ball/main.py" \
-  "drone:examples/drone/main.py" \
-  "rocket:examples/rocket/main.py" \
-  "three-body:examples/three-body/main.py" \
-  "cube-sat:examples/cube-sat/main.py"
-do
-  example="${item%%:*}"
-  entrypoint="${item#*:}"
-  bash ./scripts/ci/regress.sh --update "${example}" "${entrypoint}"
-done
-'
+nix develop .#run --command bash -lc "bash ./scripts/ci/regress.sh --all --update"
 ```
 
 `--update` rewrites the baseline for that example after exporting fresh flattened

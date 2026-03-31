@@ -30,7 +30,7 @@ impl BufferView {
             type_: ffi::iree_hal_memory_type_bits_t_IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL.0
                 | ffi::iree_hal_memory_type_bits_t_IREE_HAL_MEMORY_TYPE_HOST_VISIBLE.0,
             queue_affinity: 0,
-            min_alignment: 0,
+            min_alignment: 64,
         };
 
         let mut view: *mut ffi::iree_hal_buffer_view_t = std::ptr::null_mut();

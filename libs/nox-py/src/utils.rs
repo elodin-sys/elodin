@@ -13,9 +13,10 @@ pub trait PrimTypeExt {
 impl PrimTypeExt for PrimType {
     fn to_element_type(&self) -> ElementType {
         match self {
-            // Map unsigned → signed: IREE's arith dialect cannot legalize
-            // unsigned-typed constants.  Bit layout is identical so the raw
-            // buffer round-trip is transparent.
+            // Elodin targets JAX→StableHLO→IREE, all of which use signless
+            // integers.  Map unsigned to signed so JAX's type promotion
+            // lattice never mixes uint64+int64 (which promotes to float64
+            // and breaks index computations).  Bit layout is identical.
             impeller2::types::PrimType::U8 => ElementType::S8,
             impeller2::types::PrimType::U16 => ElementType::S16,
             impeller2::types::PrimType::U32 => ElementType::S32,

@@ -1,0 +1,35 @@
+--- a/compiler/plugins/input/StableHLO/Conversion/Passes.cpp
++++ b/compiler/plugins/input/StableHLO/Conversion/Passes.cpp
+@@ -13,3 +13,6 @@
+ #include "mlir/Conversion/SCFToControlFlow/SCFToControlFlow.h"
++#include "mlir/Dialect/ControlFlow/IR/ControlFlowOps.h"
++#include "mlir/Dialect/SCF/IR/SCF.h"
+ #include "mlir/Conversion/ShapeToStandard/ShapeToStandard.h"
++#include "mlir/Transforms/DialectConversion.h"
+ #include "mlir/Dialect/Func/IR/FuncOps.h"
+@@ -89,4 +92,25 @@
+       mlir::stablehlo::createChloLegalizeToStablehloPass());
++  passManager.addPass(createModulePass([](ModuleOp moduleOp) {
++    MLIRContext *ctx = moduleOp.getContext();
++    moduleOp.walk([&](func::FuncOp funcOp) {
++      if (funcOp.isDeclaration())
++        return;
++      bool hasIf = false;
++      funcOp.walk([&](scf::IfOp) { hasIf = true; });
++      if (!hasIf)
++        return;
++
++      RewritePatternSet patterns(ctx);
++      mlir::populateSCFToControlFlowConversionPatterns(patterns);
++
++      ConversionTarget target(*ctx);
++      target.addIllegalOp<scf::IfOp>();
++      target.addLegalOp<cf::BranchOp, cf::CondBranchOp>();
++      target.markUnknownOpDynamicallyLegal([](Operation *) { return true; });
++
++      (void)applyPartialConversion(funcOp, target, std::move(patterns));
++    });
++  }, "elodin-lower-scf-if-to-cf"));
+   passManager.addPass(createConvertStableHloToIreeInputDialects());
+   passManager.addPass(createReconcileUnrealizedCastsPass());
+ 

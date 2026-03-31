@@ -1,0 +1,255 @@
+--- a/compiler/plugins/input/StableHLO/Conversion/StableHLOCustomCalls.cpp
++++ b/compiler/plugins/input/StableHLO/Conversion/StableHLOCustomCalls.cpp
+@@ -18,6 +18,7 @@
+ #include "mlir/IR/BuiltinTypes.h"
+ #include "mlir/IR/ImplicitLocOpBuilder.h"
+ #include "mlir/IR/TypeUtilities.h"
++#include "mlir/Dialect/Func/IR/FuncOps.h"
+ #include "mlir/Interfaces/FunctionInterfaces.h"
+ #include "mlir/Support/LogicalResult.h"
+ #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
+@@ -239,6 +240,218 @@
+   }
+ };
+ 
++// ===----------------------------------------------------------------------===//
++// LAPACK solve-pattern rewriter & dead while-loop removal
++// ===----------------------------------------------------------------------===//
++// JAX's jnp.linalg.solve emits: lapack_dgetrf_ffi (LU) -> stablehlo.while
++// (pivot permutation) -> _lu_solve (two dtrsm calls).  IREE's stream scheduler
++// cannot thread external func.call results across while-loop region boundaries,
++// causing a dominance error.  Fix: replace the whole function body with a single
++// lapack_dgetrs_ffi custom_call (the runtime does LU + solve in one shot).
++
++static void rewriteSolvePattern(func::FuncOp f) {
++  if (f.isDeclaration() || f.getNumArguments() != 2)
++    return;
++  bool hasDgetrf = false, hasWhile = false, hasLuSolve = false;
++  f.walk([&](Operation *op) {
++    StringRef name = op->getName().getStringRef();
++    if (name == "stablehlo.custom_call") {
++      if (auto a = op->getAttrOfType<StringAttr>("call_target_name"))
++        if (a.getValue().starts_with("lapack_dgetrf"))
++          hasDgetrf = true;
++    } else if (name == "stablehlo.while") {
++      hasWhile = true;
++    } else if (name == "func.call") {
++      if (auto a = op->getAttrOfType<FlatSymbolRefAttr>("callee"))
++        if (a.getValue().starts_with("_lu_solve"))
++          hasLuSolve = true;
++    }
++  });
++  if (!(hasDgetrf && hasWhile && hasLuSolve))
++    return;
++
++  Block &body = f.getBody().front();
++  Value A = f.getArgument(0);
++  Value B = f.getArgument(1);
++  auto resultType = f.getResultTypes()[0];
++  auto loc = f.getLoc();
++  auto *ctx = f.getContext();
++
++  while (!body.empty())
++    body.back().erase();
++
++  OpBuilder builder(ctx);
++  builder.setInsertionPointToStart(&body);
++
++  auto bTy = dyn_cast<RankedTensorType>(B.getType());
++  bool matrixRHS = bTy && bTy.getRank() == 2;
++
++  Value dgetrsB = B;
++  Type  dgetrsResultType = resultType;
++  if (matrixRHS) {
++    auto sh = bTy.getShape();
++    auto tTy = RankedTensorType::get({sh[1], sh[0]}, bTy.getElementType());
++    OperationState ts(loc, "stablehlo.transpose");
++    ts.addTypes({tTy});
++    ts.addOperands({B});
++    ts.addAttribute("permutation", DenseI64ArrayAttr::get(ctx, {1, 0}));
++    dgetrsB = builder.create(ts)->getResult(0);
++    dgetrsResultType = tTy;
++  }
++
++  auto i32 = RankedTensorType::get({}, IntegerType::get(ctx, 32));
++  OperationState st(loc, "stablehlo.custom_call");
++  st.addTypes({dgetrsResultType, i32});
++  st.addOperands({A, dgetrsB});
++  st.addAttribute("call_target_name",
++                   builder.getStringAttr("lapack_dgetrs_ffi"));
++  st.addAttribute("backend_config", builder.getStringAttr(""));
++  Value result = builder.create(st)->getResult(0);
++
++  if (matrixRHS) {
++    OperationState ts2(loc, "stablehlo.transpose");
++    ts2.addTypes({resultType});
++    ts2.addOperands({result});
++    ts2.addAttribute("permutation", DenseI64ArrayAttr::get(ctx, {1, 0}));
++    result = builder.create(ts2)->getResult(0);
++  }
++
++  func::ReturnOp::create(builder, loc, ValueRange{result});
++}
++
++// Remove stablehlo.while ops whose results are all unused.
++// JAX's slogdet emits dgetrf + while (pivot permutation) but never consumes
++// the while-loop outputs.  Without removal the dead while triggers the same
++// dominance error as solve.
++static void removeDeadWhileLoops(func::FuncOp f) {
++  SmallVector<Operation *> dead;
++  f.walk([&](Operation *op) {
++    if (op->getName().getStringRef() != "stablehlo.while")
++      return;
++    for (Value r : op->getResults())
++      if (!r.use_empty()) return;
++    dead.push_back(op);
++  });
++  for (Operation *op : dead)
++    op->erase();
++}
++
++// ===----------------------------------------------------------------------===//
++// Scatter-into-constant rewriter
++// ===----------------------------------------------------------------------===//
++// JAX's `.at[idx].set(val)` on a freshly-created array produces:
++//   %c = stablehlo.constant dense<0> : tensor<Nxtype>
++//   %r = stablehlo.scatter(%c, %idx, %val) ...
++// IREE 3.11.0 llvm-cpu cannot distribute the linalg.fill (from the constant)
++// and the scatter write in the same workgroup.  Fix: convert eligible scatters
++// into stablehlo.dynamic_update_slice, which IREE distributes correctly.
++
++struct ScatterIntoConstantRewriter final
++    : OpRewritePattern<mlir::stablehlo::ScatterOp> {
++  using Base::Base;
++
++  LogicalResult matchAndRewrite(mlir::stablehlo::ScatterOp op,
++                                PatternRewriter &rewriter) const final {
++    if (op.getInputs().size() != 1 || op.getUpdates().size() != 1)
++      return failure();
++
++    Value operand = op.getInputs()[0];
++    if (!operand.getDefiningOp() ||
++        operand.getDefiningOp()->getName().getStringRef() != "stablehlo.constant")
++      return failure();
++
++    auto operandTy = dyn_cast<RankedTensorType>(operand.getType());
++    if (!operandTy || operandTy.getRank() != 1)
++      return failure();
++
++    auto dimNumbers = op.getScatterDimensionNumbers();
++    if (dimNumbers.getInsertedWindowDims().size() != 1 ||
++        dimNumbers.getInsertedWindowDims()[0] != 0 ||
++        dimNumbers.getScatterDimsToOperandDims().size() != 1 ||
++        dimNumbers.getScatterDimsToOperandDims()[0] != 0)
++      return failure();
++
++    if (!op.getUniqueIndices())
++      return failure();
++
++    Value scatterIndices = op.getScatterIndices();
++    Value update = op.getUpdates()[0];
++
++    auto updateTy = dyn_cast<RankedTensorType>(update.getType());
++    if (!updateTy || updateTy.getNumElements() != 1)
++      return failure();
++
++    auto loc = op.getLoc();
++
++    auto sliceTy = RankedTensorType::get({1}, operandTy.getElementType());
++    OperationState reshapeSt(loc, "stablehlo.reshape");
++    reshapeSt.addTypes({sliceTy});
++    reshapeSt.addOperands({update});
++    Value reshapedUpdate = rewriter.create(reshapeSt)->getResult(0);
++
++    auto idxTy = dyn_cast<RankedTensorType>(scatterIndices.getType());
++    if (!idxTy)
++      return failure();
++    auto idxScalarTy = RankedTensorType::get({}, idxTy.getElementType());
++    Value idx = scatterIndices;
++
++    if (idxTy.getRank() >= 1) {
++      OperationState reshapeIdx(loc, "stablehlo.reshape");
++      reshapeIdx.addTypes({idxScalarTy});
++      reshapeIdx.addOperands({scatterIndices});
++      idx = rewriter.create(reshapeIdx)->getResult(0);
++    }
++
++    OperationState dusSt(loc, "stablehlo.dynamic_update_slice");
++    dusSt.addTypes({operandTy});
++    dusSt.addOperands({operand, reshapedUpdate, idx});
++    Operation *dus = rewriter.create(dusSt);
++
++    rewriter.replaceOp(op, dus->getResults());
++    return success();
++  }
++};
++
++// ===----------------------------------------------------------------------===//
++// LAPACK FFI custom_call lowering
++// ===----------------------------------------------------------------------===//
++
++struct LapackCustomCallRewriter final
++    : OpRewritePattern<mlir::stablehlo::CustomCallOp> {
++  using Base::Base;
++
++  LogicalResult matchAndRewrite(mlir::stablehlo::CustomCallOp op,
++                                PatternRewriter &rewriter) const final {
++    StringRef target = op.getCallTargetName();
++    if (!target.starts_with("lapack_"))
++      return failure();
++    StringRef lapackName = target.drop_front(7);
++    if (lapackName.ends_with("_ffi"))
++      lapackName = lapackName.drop_back(4);
++    std::string suffix;
++    for (auto ty : op.getOperandTypes()) {
++      if (auto shaped = dyn_cast<ShapedType>(ty)) {
++        for (int64_t dim : shaped.getShape())
++          suffix += "_" + std::to_string(dim);
++      }
++    }
++    std::string funcName = ("elodin_lapack." + lapackName + suffix).str();
++    auto funcType = rewriter.getFunctionType(
++        op.getOperandTypes(), op.getResultTypes());
++    auto moduleOp = op->getParentOfType<ModuleOp>();
++    if (moduleOp && !moduleOp.lookupSymbol(funcName)) {
++      OpBuilder::InsertionGuard guard(rewriter);
++      rewriter.setInsertionPointToStart(moduleOp.getBody());
++      auto funcOp = func::FuncOp::create(
++          rewriter, op.getLoc(), funcName, funcType);
++      funcOp.setVisibility(SymbolTable::Visibility::Private);
++    }
++    rewriter.replaceOpWithNewOp<func::CallOp>(
++        op, funcName, op.getResultTypes(), op.getOperands());
++    return success();
++  }
++};
++
+ //===----------------------------------------------------------------------===//
+ // Pass Definition.
+ //===----------------------------------------------------------------------===//
+@@ -246,8 +459,9 @@
+ struct LegalizeStableHLOCustomCalls final
+     : impl::LegalizeStableHLOCustomCallsBase<LegalizeStableHLOCustomCalls> {
+   void getDependentDialects(DialectRegistry &registry) const override {
+-    registry.insert<arith::ArithDialect, linalg::LinalgDialect, scf::SCFDialect,
+-                    mlir::stablehlo::StablehloDialect, tensor::TensorDialect>();
++    registry.insert<arith::ArithDialect, func::FuncDialect, linalg::LinalgDialect,
++                    scf::SCFDialect, mlir::stablehlo::StablehloDialect,
++                    tensor::TensorDialect>();
+   }
+ 
+   void runOnOperation() override {
+@@ -255,7 +469,12 @@
+     MLIRContext *ctx = f.getContext();
+ 
++    if (auto funcOp = dyn_cast<func::FuncOp>(f.getOperation())) {
++      rewriteSolvePattern(funcOp);
++      removeDeadWhileLoops(funcOp);
++    }
++
+     RewritePatternSet patterns(ctx);
+-    patterns.add<HouseholderReflectorRewriter, ShapeAssertionDrop>(ctx);
++    patterns.add<HouseholderReflectorRewriter, ShapeAssertionDrop, ScatterIntoConstantRewriter, LapackCustomCallRewriter>(ctx);
+     if (failed(applyPatternsGreedily(f, std::move(patterns)))) {
+       signalPassFailure();
+     }

@@ -36,6 +36,9 @@ __pycache__
 **/.venv/
 elodin_iree_debug/
 
+# Optional MLIR regression fixtures (customer artifacts, too large for git)
+**/*.stablehlo.mlir
+
 # examples
 betaflight_*
 eeprom.bin
@@ -54,3 +57,4 @@ testvids/
 
 # Compiled native libraries (macOS/Linux)
 *.dylib
+1/2026*

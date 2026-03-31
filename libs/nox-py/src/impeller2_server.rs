@@ -326,10 +326,16 @@ async fn tick(
     let generate_real_time = world.world().metadata.generate_real_time;
     let configured_ticks_per_telemetry = world.world().ticks_per_telemetry();
     let time_step = world.world().sim_time_step().0;
+    let detailed_timing = std::env::var("ELODIN_IREE_DETAILED_TIMING").is_ok();
+    if detailed_timing {
+        world.profiler_mut().detailed_timing = true;
+        info!("detailed IREE timing enabled (ELODIN_IREE_DETAILED_TIMING)");
+    }
     #[rustfmt::skip]
     let should_cancel = || { is_cancelled() || cancel_token.is_cancelled() };
     let mut next_tick_deadline: Option<Instant> = None;
     let mut last_behind_warning: Option<Instant> = None;
+    let mut last_timing_log: Option<Instant> = None;
     loop {
         if should_cancel() {
             return;
@@ -386,13 +392,22 @@ async fn tick(
             continue;
         }
 
+        let copy_in_start = detailed_timing.then(Instant::now);
         db.with_state(|state| copy_db_to_world(state, &mut world));
+        let copy_in_ms = copy_in_start
+            .map(|s| s.elapsed().as_secs_f64() * 1000.0)
+            .unwrap_or(0.0);
         // Temporarily override so the kernel runs the right number of batched ticks.
         world.world_mut().metadata.ticks_per_telemetry = effective_batch;
+        let run_start = detailed_timing.then(Instant::now);
         if let Err(err) = world.run() {
             warn!(?err, "error ticking world");
         }
+        let run_ms = run_start
+            .map(|s| s.elapsed().as_secs_f64() * 1000.0)
+            .unwrap_or(0.0);
         world.world_mut().metadata.ticks_per_telemetry = configured_ticks_per_telemetry;
+        let commit_start = detailed_timing.then(Instant::now);
         db.with_state(|state| {
             if let Err(err) = commit_world_head_unified(
                 state,
@@ -403,7 +418,14 @@ async fn tick(
                 warn!(?err, "error committing head");
             }
         });
+        let commit_ms = commit_start
+            .map(|s| s.elapsed().as_secs_f64() * 1000.0)
+            .unwrap_or(0.0);
         db.last_updated.update_max(batch_end_timestamp);
+        if detailed_timing {
+            let wall_ms = start.elapsed().as_secs_f64() * 1000.0;
+            tracing::trace!(wall_ms, copy_in_ms, run_ms, commit_ms, "server tick phases",);
+        }
         while !wait_for_write_pair_ids.is_empty()
             && !timestamps_changed(&db, &mut wait_for_write_pair_ids).unwrap_or(false)
         {
@@ -438,7 +460,7 @@ async fn tick(
                     } else {
                         0.0
                     };
-                    warn!(
+                    info!(
                         "simulation cannot achieve real-time; {:.2}ms behind target {:.2}ms/tick ({:.2}x behind)",
                         behind_ms, target_ms, factor
                     );
@@ -456,6 +478,26 @@ async fn tick(
                 stellarator::sleep(*deadline - now).await;
             }
             *deadline += effective_batch_time_step;
+        }
+        if detailed_timing {
+            let now = Instant::now();
+            let should_log = last_timing_log
+                .map(|last| now.duration_since(last) >= Duration::from_secs(2))
+                .unwrap_or(true);
+            if should_log {
+                let profile = world.profile();
+                let h2d = profile.get("h2d_upload").copied().unwrap_or(0.0);
+                let kernel = profile.get("kernel_invoke").copied().unwrap_or(0.0);
+                let d2h = profile.get("d2h_download").copied().unwrap_or(0.0);
+                let history = profile.get("add_to_history").copied().unwrap_or(0.0);
+                let tick_total = profile.get("tick").copied().unwrap_or(0.0);
+                let rtf = profile.get("real_time_factor").copied().unwrap_or(0.0);
+                info!(
+                    "tick breakdown: total={:.3}ms (h2d={:.3}ms kernel={:.3}ms d2h={:.3}ms history={:.3}ms) RTF={:.2}x",
+                    tick_total, h2d, kernel, d2h, history, rtf,
+                );
+                last_timing_log = Some(now);
+            }
         }
 
         if tick_counter.load(Ordering::SeqCst) == tick {

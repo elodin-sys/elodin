@@ -76,11 +76,21 @@ impl Session {
         error::check(status)
     }
 
+    /// Append a pre-created VM module to the session.
+    /// Must be called before loading a VMFB that imports functions from the module.
+    ///
+    /// # Safety
+    /// `module` must be a valid, non-null IREE VM module pointer.
+    pub unsafe fn append_module(&self, module: *mut ffi::iree_vm_module_t) -> Result<()> {
+        let status = unsafe { ffi::iree_runtime_session_append_module(self.ptr, module) };
+        error::check(status)
+    }
+
     pub fn call(&self, function_name: &str) -> Result<Call> {
         Call::new(self, function_name)
     }
 
-    pub(crate) fn device(&self) -> *mut ffi::iree_hal_device_t {
+    pub fn device(&self) -> *mut ffi::iree_hal_device_t {
         unsafe { ffi::iree_runtime_session_device(self.ptr) }
     }
 

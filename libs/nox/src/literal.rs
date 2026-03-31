@@ -167,10 +167,10 @@ macro_rules! impl_array_element {
     };
 }
 
-// Map unsigned Rust types to signed ElementType variants so that the Noxpr
-// computation graph (and hence JAX/IREE) never produces unsigned-typed
-// constants, which IREE's arith dialect cannot legalize.  Bit layout is
-// identical; arithmetic (add, sub, mul, bitwise) is unaffected.
+// Elodin targets JAX→StableHLO→IREE, all of which use signless integers.
+// Map unsigned Rust types to signed ElementType so JAX's type promotion
+// lattice never mixes uint64+int64 (which promotes to float64).
+// Bit layout is identical; arithmetic is unaffected.
 impl_array_element!(u8, S8, 1);
 impl_array_element!(u16, S16, 2);
 impl_array_element!(u32, S32, 4);

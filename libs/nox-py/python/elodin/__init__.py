@@ -1,8 +1,14 @@
 # ruff: noqa: F403
 # ruff: noqa: F405
+import os
+
+# Disable OpenBLAS multi-threading before any imports that load it (numpy/scipy).
+# IREE manages its own thread pool; OpenBLAS thread initialization from an IREE
+# worker thread context causes segfaults.
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+
 import code
 import inspect
-import os
 import re
 import readline
 import rlcompleter
@@ -167,10 +173,18 @@ class Query(Generic[Unpack[A]]):
                 flat, _ = tree_flatten(result)
                 bufs = [jax.numpy.expand_dims(b, axis=0) for b in flat]
             else:
-                results = [call_single(i) for i in range(batch_size)]
-                first_flat, _ = tree_flatten(results[0])
-                all_flat = [tree_flatten(r)[0] for r in results]
-                bufs = [jax.numpy.stack([af[j] for af in all_flat]) for j in range(len(first_flat))]
+
+                def scan_body(carry, entity_inputs):
+                    args = [
+                        from_array(cls, x)
+                        for (x, cls) in zip(entity_inputs, self.component_classes)
+                    ]
+                    result = f(*args)
+                    flat, _ = tree_flatten(result)
+                    return carry, flat
+
+                _, output_flat = jax.lax.scan(scan_body, None, self.bufs)
+                bufs = list(output_flat)
         inner = None
         component_data = []
         component_classes = []
@@ -332,34 +346,91 @@ class GraphQuery(Generic[E]):
         init_value: T,
         fold_fn: Callable[..., T],
     ) -> "Query[T]":
+        def _concat_outputs(
+            existing: list[jax.typing.ArrayLike],
+            new: list[jax.typing.ArrayLike],
+        ) -> list[jax.typing.ArrayLike]:
+            if not existing:
+                return new
+            merged: list[jax.typing.ArrayLike] = []
+            for x, y in zip(existing, new):
+                x_ndim = x.ndim
+                y_ndim = y.ndim
+                if x_ndim == 0 and y_ndim == 0:
+                    merged.append(jax.numpy.stack([x, y]))
+                elif x_ndim == y_ndim:
+                    merged.append(jax.numpy.concatenate([x, y], axis=0))
+                elif x_ndim + 1 == y_ndim:
+                    merged.append(
+                        jax.numpy.concatenate([jax.numpy.expand_dims(x, axis=0), y], axis=0)
+                    )
+                elif y_ndim + 1 == x_ndim:
+                    merged.append(
+                        jax.numpy.concatenate([x, jax.numpy.expand_dims(y, axis=0)], axis=0)
+                    )
+                else:
+                    raise ValueError("graph edge_fold produced incompatible output ranks")
+            return merged
+
         out_bufs: list[jax.typing.ArrayLike] = []
         bufs = self.inner.arrays(left_query.inner, right_query.inner)
         init_value_flat, init_value_tree = tree_flatten(init_value)
-        for _, (f, to) in bufs.items():
+        for edge_count, (f, to) in bufs.items():
+            source_singleton = left_query.batch1 or all(
+                bucket.ndim == original.ndim - 1 for bucket, original in zip(f, left_query.bufs)
+            )
 
-            def vmap_inner(a):
-                (f, to) = a
+            if source_singleton:
+                left_args = [
+                    from_array(data, x) for (x, data) in zip(f, left_query.component_classes)
+                ]
 
-                def scan_inner(xs, to):
-                    xs = tree_unflatten(init_value_tree, xs)
-                    args = [
-                        from_array(data, x) for (x, data) in zip(f, left_query.component_classes)
-                    ] + [
+                if edge_count == 0:
+                    new_bufs = list(init_value_flat)
+                elif edge_count == 1:
+                    args = left_args + [
                         from_array(data, x) for (x, data) in zip(to, right_query.component_classes)
                     ]
-                    o = fold_fn(xs, *args)
-                    o_flat, _ = tree_flatten(o)
-                    return (o_flat, 0)
+                    folded = fold_fn(init_value, *args)
+                    (new_bufs, _) = tree_flatten(folded)
+                else:
 
-                scan_out = jax.lax.scan(scan_inner, init_value_flat, to)[0]
-                return scan_out
+                    def scan_inner(xs, to):
+                        xs = tree_unflatten(init_value_tree, xs)
+                        args = left_args + [
+                            from_array(data, x)
+                            for (x, data) in zip(to, right_query.component_classes)
+                        ]
+                        o = fold_fn(xs, *args)
+                        o_flat, _ = tree_flatten(o)
+                        return (o_flat, 0)
 
-            buf = jax.vmap(vmap_inner)((f, to))
-            (new_bufs, _) = tree_flatten(buf)
-            if len(out_bufs) == 0:
-                out_bufs = new_bufs
+                    new_bufs = list(jax.lax.scan(scan_inner, init_value_flat, to)[0])
             else:
-                out_bufs = [jax.numpy.concatenate([x, y]) for (x, y) in zip(out_bufs, new_bufs)]
+
+                def vmap_inner(a):
+                    (f, to) = a
+
+                    def scan_inner(xs, to):
+                        xs = tree_unflatten(init_value_tree, xs)
+                        args = [
+                            from_array(data, x)
+                            for (x, data) in zip(f, left_query.component_classes)
+                        ] + [
+                            from_array(data, x)
+                            for (x, data) in zip(to, right_query.component_classes)
+                        ]
+                        o = fold_fn(xs, *args)
+                        o_flat, _ = tree_flatten(o)
+                        return (o_flat, 0)
+
+                    scan_out = jax.lax.scan(scan_inner, init_value_flat, to)[0]
+                    return scan_out
+
+                buf = jax.vmap(vmap_inner)((f, to))
+                (new_bufs, _) = tree_flatten(buf)
+
+            out_bufs = _concat_outputs(out_bufs, list(new_bufs))
         component_data = Component.of(return_type)
         return Query(
             self.inner.map(

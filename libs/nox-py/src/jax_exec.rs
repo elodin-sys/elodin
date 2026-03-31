@@ -55,6 +55,10 @@ impl JaxExec {
         let metadata = ExecMetadata {
             arg_ids: compiled_system.inputs.clone(),
             ret_ids: compiled_system.outputs.clone(),
+            arg_slots: compiled_system.input_slots.clone(),
+            ret_slots: compiled_system.output_slots.clone(),
+            has_singleton_lowering: compiled_system.has_singleton_lowering,
+            promoted_constants: vec![],
         };
         let mut output_ids = Vec::new();
         let mut seen_outputs = HashSet::new();
@@ -67,23 +71,18 @@ impl JaxExec {
         let mut inputs = Vec::new();
         let mut seen_inputs = HashSet::new();
 
-        for id in &metadata.arg_ids {
-            if !seen_inputs.insert(*id) {
+        for slot in &metadata.arg_slots {
+            if !seen_inputs.insert(slot.component_id) {
                 continue;
             }
 
-            let col = world.column_by_id(*id).ok_or(Error::ComponentNotFound)?;
+            let col = world
+                .column_by_id(slot.component_id)
+                .ok_or(Error::ComponentNotFound)?;
             let np_dtype = numpy_dtype_str(col.schema.element_type())?;
-            let shape: Vec<i64> = if world.batch1 && col.len() <= 1 {
-                col.schema.shape().iter().map(|&x| x as i64).collect()
-            } else {
-                std::iter::once(col.len() as i64)
-                    .chain(col.schema.shape().iter().map(|&x| x as i64))
-                    .collect()
-            };
             inputs.push(InputSlot {
-                component_id: *id,
-                shape,
+                component_id: slot.component_id,
+                shape: slot.shape.clone(),
                 np_dtype,
             });
         }
@@ -235,9 +234,6 @@ fn numpy_dtype_str(et: nox::ElementType) -> Result<&'static str, Error> {
         nox::ElementType::F32 => Ok("float32"),
         nox::ElementType::S32 => Ok("int32"),
         nox::ElementType::S64 => Ok("int64"),
-        // These arms are not reached in practice: PrimTypeExt::to_element_type()
-        // maps all unsigned PrimTypes to signed ElementTypes upstream.  Kept as
-        // correct unsigned mappings for defensive safety.
         nox::ElementType::U32 => Ok("uint32"),
         nox::ElementType::U64 => Ok("uint64"),
         nox::ElementType::U8 => Ok("uint8"),

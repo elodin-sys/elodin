@@ -851,6 +851,8 @@ impl WorldBuilder {
                     let hlo_text = match &compiled_exec {
                         WorldExec::Iree(e) => {
                             if let Some(stats) = &e.tick_exec.compile_stats {
+                                let n_in = e.tick_exec.metadata.arg_ids.len();
+                                let n_out = e.tick_exec.metadata.ret_ids.len();
                                 format!(
                                     "IREE compile stage breakdown\n\
                                      - jax_lower_ms: {:.3}\n\
@@ -863,8 +865,8 @@ impl WorldBuilder {
                                     stats.stablehlo_emit_ms,
                                     stats.iree_compile_ms,
                                     stats.vmfb_size_bytes,
-                                    e.tick_exec.metadata.arg_ids.len(),
-                                    e.tick_exec.metadata.ret_ids.len()
+                                    n_in,
+                                    n_out,
                                 )
                             } else {
                                 String::from("IREE compile stage breakdown unavailable")
@@ -1600,7 +1602,6 @@ impl WorldBuilder {
         }
 
         self.world.set_globals();
-        self.world.batch1 = self.world.is_batch1();
 
         let world = std::mem::take(&mut self.world);
         let compiled_sys = increment_sim_tick.pipe(sys).compile(&world)?;
@@ -1613,7 +1614,13 @@ impl WorldBuilder {
                 Ok(WorldExec::Jax(Box::new(exec)))
             }
             BackendEngine::Iree => {
-                match compiled_sys.compile_iree_module(py, &world, iree_device, extra_iree_flags) {
+                match compiled_sys.compile_iree_module(
+                    py,
+                    &world,
+                    iree_device,
+                    extra_iree_flags,
+                    "primary_system",
+                ) {
                     Ok(result) => {
                         let tick_exec = result.exec;
                         let mut exec = IREEWorldExec::new(world, tick_exec, None);
@@ -1632,24 +1639,33 @@ impl WorldBuilder {
                             .unwrap_or_default();
                         let err_text = iree_err.to_string();
                         let mut msg = err_text.clone();
+                        let primary_report = classify_failure(&err_text);
                         if !err_text.contains("Failure stage:") {
-                            let report = classify_failure(&err_text);
                             msg = format!(
                                 "{err_text}\n\nFailure stage: {:?}\nFailure class: {:?}",
-                                report.stage, report.classification
+                                primary_report.stage, primary_report.classification
                             );
-                            if !report.suggestion.is_empty() {
-                                msg.push_str(&format!("\n{}", report.suggestion));
+                            if !primary_report.suggestion.is_empty() {
+                                msg.push_str(&format!("\n{}", primary_report.suggestion));
                             }
-                            if report.should_suggest_jax_fallback() {
+                            if primary_report.should_suggest_jax_fallback() {
                                 msg.push_str(
-                                "\n\nTo temporarily unblock, set backend=\"jax-cpu\" in your w.run() call:\n\n  \
-                                 w.run(system, backend=\"jax-cpu\", ...)\n\nThe JAX backend is slower but supports all JAX operations.",
-                            );
+                                    "\n\nTo temporarily unblock, set backend=\"jax-cpu\" in your w.run() call:\n\n  \
+                                     w.run(system, backend=\"jax-cpu\", ...)\n\nThe JAX backend is slower but supports all JAX operations.",
+                                );
                             }
                         }
+                        if let Some(report_dir) = &primary_report.report_dir
+                            && !msg.contains("Primary failure artifacts:")
+                        {
+                            msg.push_str(&format!("\n\nPrimary failure artifacts: {report_dir}"));
+                        }
                         if !diagnosis.is_empty() {
-                            msg.push_str("\n\n=== Per-System IREE Compatibility ===\n");
+                            msg.push_str(
+                                "\n\n=== Follow-on Per-System IREE Compatibility ===\n\
+                                 These results come from compiling individual subsystems after the original fused-system failure.\n\
+                                 They may not match the original failure site shown above.\n",
+                            );
                             msg.push_str(&diagnosis);
                         }
                         Err(Error::IreeCompilationFailed(msg))
@@ -1697,12 +1713,21 @@ impl WorldBuilder {
             if !seen.insert(name.clone()) {
                 continue;
             }
-            match subsystem.compile_iree_module(py, world, iree_device, extra_iree_flags) {
+            match subsystem.compile_iree_module(
+                py,
+                world,
+                iree_device,
+                extra_iree_flags,
+                "subsystem_diagnostic",
+            ) {
                 Ok(_) => out.push_str(&format!("[OK]   {name}\n")),
                 Err(err) => {
                     let err_text = err.to_string();
                     let one_line = err_text.lines().next().unwrap_or("unknown failure");
                     out.push_str(&format!("[FAIL] {name} -- {one_line}\n"));
+                    if let Some(report_dir) = classify_failure(&err_text).report_dir {
+                        out.push_str(&format!("       artifacts: {report_dir}\n"));
+                    }
                 }
             }
         }
@@ -1763,8 +1788,16 @@ impl WorldBuilder {
             let component = world.column_by_id(*id).unwrap();
             let schema = component.schema;
             let data = component.column;
-            let mut dim = schema.dim.to_vec();
-            dim.insert(0, component.entities.len() / 8);
+            let dim = xla_exec
+                .input_slots
+                .iter()
+                .find(|slot| slot.component_id == *id)
+                .map(|slot| slot.shape.iter().map(|&x| x as usize).collect::<Vec<_>>())
+                .unwrap_or_else(|| {
+                    let mut shape = schema.dim.to_vec();
+                    shape.insert(0, component.entities.len() / 8);
+                    shape
+                });
 
             let comp_name = component.metadata.name.clone();
             dict.set_item(id.0, &comp_name)?;

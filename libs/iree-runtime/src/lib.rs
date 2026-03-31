@@ -7,6 +7,7 @@ mod device_buffer;
 mod element_type;
 mod error;
 mod instance;
+pub mod lapack;
 mod session;
 
 pub use buffer_view::BufferView;

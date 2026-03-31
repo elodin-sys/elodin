@@ -47,6 +47,25 @@ impl<T> ComponentArray<T> {
         }
     }
 
+    pub(crate) fn new(
+        buffer: Noxpr,
+        len: usize,
+        entity_map: BTreeMap<EntityId, usize>,
+        component_id: ComponentId,
+        current_batch1: bool,
+    ) -> Self {
+        let batch1 = batch1_enabled(&entity_map, len);
+        let buffer = normalize_expr(&buffer, current_batch1, batch1);
+        ComponentArray {
+            buffer,
+            len,
+            entity_map,
+            phantom_data: PhantomData,
+            component_id,
+            batch1,
+        }
+    }
+
     pub fn buffer(&self) -> &Noxpr {
         &self.buffer
     }
@@ -122,24 +141,26 @@ pub fn update_var(
     batch1: bool,
 ) -> Noxpr {
     let (old, new, _) = intersect_ids(old_entity_map, update_entity_map);
-    if batch1 {
+    if old_entity_map.len() == 1 {
         if old.is_empty() {
             return old_buffer.clone();
         }
-        return update_buffer.clone();
+        let update = filter_expr(&new, update_buffer, batch1);
+        return squeeze_entity_axis(&update);
     }
-    let shape = update_buffer.shape().unwrap();
-    old.iter().zip(new.iter()).fold(
+    let update = filter_expr(&new, update_buffer, batch1);
+    let shape = update.shape().unwrap();
+    old.iter().enumerate().fold(
         old_buffer.clone(),
-        |buffer, (existing_index, update_index)| {
+        |buffer, (ordered_index, existing_index)| {
             let mut start = shape.clone();
-            start[0] = *update_index as i64;
+            start[0] = ordered_index as i64;
             for x in start.iter_mut().skip(1) {
                 *x = 0;
             }
             let mut stop = shape.clone();
-            stop[0] = *update_index as i64 + 1;
-            let start = std::iter::once(*update_index as i64)
+            stop[0] = ordered_index as i64 + 1;
+            let start = std::iter::once(ordered_index as i64)
                 .chain(std::iter::repeat_n(0, shape.len() - 1))
                 .collect();
             let existing_index = std::iter::once((*existing_index as i64).constant())
@@ -147,7 +168,7 @@ pub fn update_var(
                 .collect();
             buffer.dynamic_update_slice(
                 existing_index,
-                update_buffer
+                update
                     .clone()
                     .slice(start, stop, shape.iter().map(|_| 1).collect()),
             )
@@ -220,6 +241,26 @@ impl<Param> Clone for Query<Param> {
 }
 
 impl<Param> Query<Param> {
+    pub(crate) fn new(
+        exprs: Vec<Noxpr>,
+        entity_map: BTreeMap<EntityId, usize>,
+        len: usize,
+        current_batch1: bool,
+    ) -> Self {
+        let batch1 = batch1_enabled(&entity_map, len);
+        let exprs = exprs
+            .into_iter()
+            .map(|expr| normalize_expr(&expr, current_batch1, batch1))
+            .collect();
+        Query {
+            exprs,
+            entity_map,
+            len,
+            phantom_data: PhantomData,
+            batch1,
+        }
+    }
+
     #[inline(always)]
     pub(crate) fn transmute<B>(self) -> Query<B> {
         Query {
@@ -400,14 +441,13 @@ impl<G: ComponentGroup> SystemParam for Query<G> {
     fn output(&self, builder: &mut SystemBuilder) -> Result<Noxpr, Error> {
         let mut outputs = vec![];
         for (expr, id) in self.exprs.iter().zip(G::component_ids()) {
-            let array: ComponentArray<()> = ComponentArray {
-                buffer: expr.clone(),
-                len: self.len,
-                entity_map: self.entity_map.clone(),
-                phantom_data: PhantomData,
-                component_id: id,
-                batch1: self.batch1,
-            };
+            let array: ComponentArray<()> = ComponentArray::new(
+                expr.clone(),
+                self.len,
+                self.entity_map.clone(),
+                id,
+                self.batch1,
+            );
 
             if let Some(var) = builder.vars.get_mut(&id)
                 && var.entity_map != self.entity_map
@@ -441,26 +481,19 @@ impl<G: ComponentGroup> Query<G> {
         let output = self.output(builder).unwrap();
         if G::component_ids().count() == 1 {
             let id = G::component_ids().next().unwrap();
-            let array: ComponentArray<()> = ComponentArray {
-                buffer: output,
-                len: self.len,
-                entity_map: self.entity_map.clone(),
-                phantom_data: PhantomData,
-                component_id: id,
-                batch1: self.batch1,
-            };
+            let array: ComponentArray<()> =
+                ComponentArray::new(output, self.len, self.entity_map.clone(), id, self.batch1);
             builder.vars.insert(id, array);
         } else {
             for (i, id) in G::component_ids().enumerate() {
                 let expr = output.get_tuple_element(i);
-                let array: ComponentArray<()> = ComponentArray {
-                    buffer: expr.clone(),
-                    len: self.len,
-                    entity_map: self.entity_map.clone(),
-                    phantom_data: PhantomData,
-                    component_id: id,
-                    batch1: self.batch1,
-                };
+                let array: ComponentArray<()> = ComponentArray::new(
+                    expr.clone(),
+                    self.len,
+                    self.entity_map.clone(),
+                    id,
+                    self.batch1,
+                );
                 builder.vars.insert(id, array);
             }
         }
@@ -503,13 +536,12 @@ impl<G: ComponentGroup> Query<G> {
                 .map(|i| buffer.get_tuple_element(i))
                 .collect()
         };
-        Ok(Query {
+        Ok(Query::new(
             exprs,
-            len: self.len,
-            phantom_data: PhantomData,
-            entity_map: self.entity_map.clone(),
-            batch1: self.batch1,
-        })
+            self.entity_map.clone(),
+            self.len,
+            self.batch1,
+        ))
     }
 
     pub fn join<B: Component>(self, other: &ComponentArray<B>) -> Query<G::Append<B>> {
@@ -545,7 +577,7 @@ impl<G> Query<G> {
         let exprs = self
             .exprs
             .iter()
-            .map(|expr| filter_index(&indexes, expr))
+            .map(|expr| filter_expr(&indexes, expr, self.batch1))
             .collect();
         let entity_map = self
             .entity_map
@@ -554,13 +586,7 @@ impl<G> Query<G> {
             .enumerate()
             .map(|(index, (id, _))| (*id, index))
             .collect();
-        Query {
-            exprs,
-            len: indexes.len(),
-            entity_map,
-            phantom_data: PhantomData,
-            batch1: self.batch1,
-        }
+        Query::new(exprs, entity_map, indexes.len(), false)
     }
 }
 
@@ -594,122 +620,118 @@ fn filter_index(indexes: &[u32], buffer: &Noxpr) -> Noxpr {
     )
 }
 
-fn batch1_to_batched_expr(buffer: &Noxpr) -> Noxpr {
+pub(crate) fn batch1_enabled(entity_map: &BTreeMap<EntityId, usize>, len: usize) -> bool {
+    len == 1 && entity_map.len() == 1
+}
+
+pub(crate) fn batch1_to_batched_expr(buffer: &Noxpr) -> Noxpr {
     let mut shape = buffer.shape().unwrap();
     shape.insert(0, 1);
     buffer.clone().reshape(shape)
 }
 
-fn empty_batch1_expr(buffer: &Noxpr) -> Noxpr {
-    filter_index(&[], &batch1_to_batched_expr(buffer))
+pub(crate) fn squeeze_entity_axis(buffer: &Noxpr) -> Noxpr {
+    let mut shape = buffer.shape().unwrap();
+    if shape.first() == Some(&1) {
+        shape.remove(0);
+        buffer.clone().reshape(shape)
+    } else {
+        buffer.clone()
+    }
+}
+
+pub(crate) fn normalize_expr(buffer: &Noxpr, current_batch1: bool, target_batch1: bool) -> Noxpr {
+    match (current_batch1, target_batch1) {
+        (true, true) | (false, false) => buffer.clone(),
+        (true, false) => batch1_to_batched_expr(buffer),
+        (false, true) => squeeze_entity_axis(buffer),
+    }
+}
+
+pub(crate) fn filter_expr(indexes: &[u32], buffer: &Noxpr, batch1: bool) -> Noxpr {
+    if batch1 {
+        filter_index(indexes, &batch1_to_batched_expr(buffer))
+    } else {
+        filter_index(indexes, buffer)
+    }
+}
+
+fn filter_expr_to_target(
+    indexes: &[u32],
+    buffer: &Noxpr,
+    current_batch1: bool,
+    target_batch1: bool,
+) -> Noxpr {
+    if current_batch1 && target_batch1 && indexes.len() == 1 && indexes[0] == 0 {
+        return buffer.clone();
+    }
+    let filtered = filter_expr(indexes, buffer, current_batch1);
+    normalize_expr(&filtered, false, target_batch1)
 }
 
 pub fn join_many<A, B>(mut a: Query<A>, b: &ComponentArray<B>) -> Query<()> {
-    let a_batch1 = a.batch1;
-    let b_batch1 = b.batch1;
     if a.entity_map == b.entity_map {
-        if a_batch1 && !b_batch1 {
-            for expr in &mut a.exprs {
-                *expr = batch1_to_batched_expr(expr);
-            }
-        }
-        a.exprs.push(if b_batch1 && !a_batch1 {
-            batch1_to_batched_expr(&b.buffer)
-        } else {
-            b.buffer.clone()
-        });
-        Query {
-            exprs: a.exprs,
-            entity_map: a.entity_map,
-            len: a.len,
-            phantom_data: PhantomData,
-            batch1: a_batch1 && b_batch1,
-        }
+        let target_batch1 = batch1_enabled(&a.entity_map, a.len);
+        a.exprs = a
+            .exprs
+            .into_iter()
+            .map(|expr| normalize_expr(&expr, a.batch1, target_batch1))
+            .collect();
+        a.exprs
+            .push(normalize_expr(&b.buffer, b.batch1, target_batch1));
+        Query::new(a.exprs, a.entity_map, a.len, target_batch1)
     } else {
         let (a_indexes, b_indexes, ids) = intersect_ids(&a.entity_map, &b.entity_map);
-        let mut exprs = a.exprs;
-        if a_batch1 && b_batch1 && ids.is_empty() {
-            for expr in &mut exprs {
-                *expr = empty_batch1_expr(expr);
-            }
-            exprs.push(empty_batch1_expr(&b.buffer));
-        } else {
-            for expr in &mut exprs {
-                *expr = filter_index(&a_indexes, expr);
-            }
-            exprs.push(filter_index(&b_indexes, &b.buffer));
-        }
-        Query {
-            exprs,
-            len: ids.len(),
-            entity_map: ids,
-            phantom_data: PhantomData,
-            batch1: false,
-        }
+        let target_batch1 = batch1_enabled(&ids, a_indexes.len());
+        let mut exprs = a
+            .exprs
+            .into_iter()
+            .map(|expr| filter_expr_to_target(&a_indexes, &expr, a.batch1, target_batch1))
+            .collect::<Vec<_>>();
+        exprs.push(filter_expr_to_target(
+            &b_indexes,
+            &b.buffer,
+            b.batch1,
+            target_batch1,
+        ));
+        Query::new(exprs, ids, a_indexes.len(), target_batch1)
     }
 }
 
 pub fn join_query<A, B>(mut a: Query<A>, mut b: Query<B>) -> Query<()> {
-    let a_batch1 = a.batch1;
-    let b_batch1 = b.batch1;
     if a.entity_map == b.entity_map {
-        if a_batch1 && !b_batch1 {
-            for expr in &mut a.exprs {
-                *expr = batch1_to_batched_expr(expr);
-            }
+        let target_batch1 = batch1_enabled(&a.entity_map, a.len);
+        for expr in &mut a.exprs {
+            *expr = normalize_expr(expr, a.batch1, target_batch1);
         }
-        if b_batch1 && !a_batch1 {
-            for expr in &mut b.exprs {
-                *expr = batch1_to_batched_expr(expr);
-            }
+        for expr in &mut b.exprs {
+            *expr = normalize_expr(expr, b.batch1, target_batch1);
         }
         a.exprs.append(&mut b.exprs);
-        Query {
-            exprs: a.exprs,
-            entity_map: a.entity_map,
-            len: a.len,
-            phantom_data: PhantomData,
-            batch1: a_batch1 && b_batch1,
-        }
+        Query::new(a.exprs, a.entity_map, a.len, target_batch1)
     } else {
         let (a_indexes, b_indexes, ids) = intersect_ids(&a.entity_map, &b.entity_map);
-        if a_batch1 && b_batch1 && ids.is_empty() {
-            for expr in &mut a.exprs {
-                *expr = empty_batch1_expr(expr);
-            }
-            for expr in &mut b.exprs {
-                *expr = empty_batch1_expr(expr);
-            }
-        } else {
-            for expr in &mut a.exprs {
-                *expr = filter_index(&a_indexes, expr);
-            }
-            for expr in &mut b.exprs {
-                *expr = filter_index(&b_indexes, expr);
-            }
+        let target_batch1 = batch1_enabled(&ids, a_indexes.len());
+        for expr in &mut a.exprs {
+            *expr = filter_expr_to_target(&a_indexes, expr, a.batch1, target_batch1);
+        }
+        for expr in &mut b.exprs {
+            *expr = filter_expr_to_target(&b_indexes, expr, b.batch1, target_batch1);
         }
         let mut exprs = a.exprs;
         exprs.append(&mut b.exprs);
-        Query {
-            exprs,
-            len: ids.len(),
-            entity_map: ids,
-            phantom_data: PhantomData,
-            batch1: false,
-        }
+        Query::new(exprs, ids, a_indexes.len(), target_batch1)
     }
 }
 
 impl<A> From<ComponentArray<A>> for Query<A> {
     fn from(value: ComponentArray<A>) -> Self {
-        let batch1 = value.batch1;
-        Query {
-            exprs: vec![value.buffer],
-            len: value.len,
-            entity_map: value.entity_map,
-            phantom_data: PhantomData,
-            batch1,
-        }
+        Query::new(
+            vec![value.buffer],
+            value.entity_map,
+            value.len,
+            value.batch1,
+        )
     }
 }
 
@@ -733,13 +755,12 @@ impl QueryInner {
         metadata: QueryMetadata,
     ) -> Result<QueryInner, Error> {
         Ok(QueryInner {
-            query: Query {
-                exprs: arrays.into_iter().map(Noxpr::jax).collect(),
-                entity_map: metadata.entity_map,
-                len: metadata.len,
-                phantom_data: PhantomData,
-                batch1: metadata.batch1,
-            },
+            query: Query::new(
+                arrays.into_iter().map(Noxpr::jax).collect(),
+                metadata.entity_map,
+                metadata.len,
+                metadata.batch1,
+            ),
             metadata: metadata.metadata,
         })
     }
@@ -750,7 +771,6 @@ impl QueryInner {
         component_ids: Vec<String>,
         args: Vec<PyObject>,
     ) -> Result<QueryInner, Error> {
-        let batch1 = builder.batch1();
         let (query, metadata) = component_ids
             .iter()
             .map(|id| {
@@ -758,14 +778,13 @@ impl QueryInner {
                 let (meta, i) = builder.get_var(id).ok_or(Error::ComponentNotFound)?;
                 let buffer = args.get(i).ok_or(Error::ComponentNotFound)?;
                 Ok::<_, Error>((
-                    ComponentArray {
-                        buffer: Noxpr::jax(Python::with_gil(|py| buffer.clone_ref(py))),
-                        len: meta.len,
-                        entity_map: meta.entity_map,
-                        component_id: id,
-                        phantom_data: PhantomData,
-                        batch1,
-                    },
+                    ComponentArray::<()>::new(
+                        Noxpr::jax(Python::with_gil(|py| buffer.clone_ref(py))),
+                        meta.len,
+                        meta.entity_map,
+                        id,
+                        meta.len == 1,
+                    ),
                     meta.component,
                 ))
             })
@@ -792,13 +811,12 @@ impl QueryInner {
     pub fn map(&self, new_buf: PyObject, metadata: PyComponent) -> QueryInner {
         let expr = Noxpr::jax(new_buf);
         QueryInner {
-            query: Query {
-                exprs: vec![expr],
-                entity_map: self.query.entity_map.clone(),
-                len: self.query.len,
-                phantom_data: PhantomData,
-                batch1: self.query.batch1,
-            },
+            query: Query::new(
+                vec![expr],
+                self.query.entity_map.clone(),
+                self.query.len,
+                self.query.batch1,
+            ),
             metadata: vec![metadata],
         }
     }
@@ -882,7 +900,7 @@ mod batch1_join_tests {
     use super::*;
     use elodin_macros::{Component, ReprMonad};
     use nox::NoxprTy;
-    use nox::{Op, OwnedRepr, Scalar};
+    use nox::{NoxprNode, Op, OwnedRepr, Scalar};
 
     #[derive(Component, ReprMonad)]
     struct Lhs<R: OwnedRepr = Op>(Scalar<f64, R>);
@@ -892,6 +910,10 @@ mod batch1_join_tests {
 
     fn entity_map(entity_id: u64) -> BTreeMap<EntityId, usize> {
         BTreeMap::from([(EntityId(entity_id), 0)])
+    }
+
+    fn two_entity_map() -> BTreeMap<EntityId, usize> {
+        BTreeMap::from([(EntityId(1), 0), (EntityId(2), 1)])
     }
 
     fn batch1_expr(number: i64, name: &str) -> Noxpr {
@@ -911,6 +933,17 @@ mod batch1_join_tests {
             NoxprTy::ArrayTy(ArrayTy {
                 element_type: ElementType::F64,
                 shape: smallvec![1, 3],
+            }),
+            name.to_owned(),
+        )
+    }
+
+    fn batched_expr_two_entities(number: i64, name: &str) -> Noxpr {
+        Noxpr::parameter(
+            number,
+            NoxprTy::ArrayTy(ArrayTy {
+                element_type: ElementType::F64,
+                shape: smallvec![2, 3],
             }),
             name.to_owned(),
         )
@@ -941,6 +974,16 @@ mod batch1_join_tests {
             exprs: vec![batched_expr(number, name)],
             entity_map: entity_map(entity_id),
             len: 1,
+            phantom_data: PhantomData,
+            batch1: false,
+        }
+    }
+
+    fn batched_query_two_entities(number: i64, name: &str) -> Query<()> {
+        Query {
+            exprs: vec![batched_expr_two_entities(number, name)],
+            entity_map: two_entity_map(),
+            len: 2,
             phantom_data: PhantomData,
             batch1: false,
         }
@@ -991,12 +1034,12 @@ mod batch1_join_tests {
         assert_eq!(joined.exprs[1].shape().unwrap().as_slice(), &[0, 3]);
     }
 
-    fn assert_singleton_batched<G>(joined: &Query<G>) {
-        assert!(!joined.batch1);
+    fn assert_singleton_local<G>(joined: &Query<G>) {
+        assert!(joined.batch1);
         assert_eq!(joined.len, 1);
         assert_eq!(joined.entity_map, entity_map(1));
-        assert_eq!(joined.exprs[0].shape().unwrap().as_slice(), &[1, 3]);
-        assert_eq!(joined.exprs[1].shape().unwrap().as_slice(), &[1, 3]);
+        assert_eq!(joined.exprs[0].shape().unwrap().as_slice(), &[3]);
+        assert_eq!(joined.exprs[1].shape().unwrap().as_slice(), &[3]);
     }
 
     #[test]
@@ -1020,27 +1063,64 @@ mod batch1_join_tests {
     }
 
     #[test]
-    fn mixed_batch1_join_many_normalizes_to_batched_shapes() {
-        assert_singleton_batched(&join_many(
+    fn mixed_batch1_join_many_recovers_local_singleton() {
+        assert_singleton_local(&join_many(
             batch1_query(0, "lhs", 1),
             &batched_array(1, "rhs", 1),
         ));
-        assert_singleton_batched(&join_many(
+        assert_singleton_local(&join_many(
             batched_query(2, "lhs", 1),
             &batch1_array(3, "rhs", 1),
         ));
     }
 
     #[test]
-    fn mixed_batch1_join_query_normalizes_to_batched_shapes() {
-        assert_singleton_batched(&join_query(
+    fn mixed_batch1_join_many_keeps_batch1_expr_direct() {
+        let joined = join_many(batch1_query(0, "lhs", 1), &batched_array(1, "rhs", 1));
+
+        assert!(matches!(&*joined.exprs[0].node, NoxprNode::Param(_)));
+    }
+
+    #[test]
+    fn mixed_batch1_join_query_recovers_local_singleton() {
+        assert_singleton_local(&join_query(
             batch1_query(0, "lhs", 1),
             batched_query(1, "rhs", 1),
         ));
-        assert_singleton_batched(&join_query(
+        assert_singleton_local(&join_query(
             batched_query(2, "lhs", 1),
             batch1_query(3, "rhs", 1),
         ));
+    }
+
+    #[test]
+    fn mixed_batch1_join_query_keeps_batch1_expr_direct() {
+        let joined = join_query(batch1_query(0, "lhs", 1), batched_query(1, "rhs", 1));
+
+        assert!(matches!(&*joined.exprs[0].node, NoxprNode::Param(_)));
+    }
+
+    #[test]
+    fn filtering_singleton_from_batched_query_recovers_batch1() {
+        let filtered = batched_query_two_entities(0, "lhs").filter(&[EntityId(1)]);
+
+        assert!(filtered.batch1);
+        assert_eq!(filtered.len, 1);
+        assert_eq!(filtered.entity_map, entity_map(1));
+        assert_eq!(filtered.exprs[0].shape().unwrap().as_slice(), &[3]);
+    }
+
+    #[test]
+    fn singleton_updates_rebatch_into_broader_world_buffer() {
+        let updated = update_var(
+            &two_entity_map(),
+            &entity_map(1),
+            &batched_expr_two_entities(0, "world"),
+            &batch1_expr(1, "local"),
+            true,
+        );
+
+        assert_eq!(updated.shape().unwrap().as_slice(), &[2, 3]);
     }
 }
 

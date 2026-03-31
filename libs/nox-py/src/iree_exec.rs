@@ -2,12 +2,62 @@ use std::collections::HashSet;
 use std::time::Instant;
 
 use impeller2::types::ComponentId;
+use tracing::trace;
 
 use crate::error::Error;
-use crate::exec::ExecMetadata;
+use crate::exec::{ExecMetadata, ExecSlotMetadata};
 use crate::iree_compile::IreeCompileStats;
 use crate::profile::{Profiler, TickTimings};
 use crate::utils::SchemaExt;
+
+fn iree_debug_data() -> bool {
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var("ELODIN_IREE_DEBUG_DATA").is_ok())
+}
+
+fn dump_slot_f64(
+    label: &str,
+    slot_idx: usize,
+    component_id: ComponentId,
+    shape: &[i64],
+    data: &[u8],
+) {
+    let n_f64 = data.len() / 8;
+    let max_show = n_f64.min(8);
+    let mut vals = Vec::with_capacity(max_show);
+    let mut has_nan = false;
+    let mut has_inf = false;
+    let mut all_zero = true;
+    for i in 0..n_f64 {
+        let bytes: [u8; 8] = data[i * 8..(i + 1) * 8].try_into().unwrap_or([0; 8]);
+        let v = f64::from_le_bytes(bytes);
+        if v.is_nan() {
+            has_nan = true;
+        }
+        if v.is_infinite() {
+            has_inf = true;
+        }
+        if v != 0.0 {
+            all_zero = false;
+        }
+        if i < max_show {
+            vals.push(v);
+        }
+    }
+    let flag = if has_nan {
+        " *** NAN ***"
+    } else if has_inf {
+        " *** INF ***"
+    } else if all_zero {
+        " (all zeros)"
+    } else {
+        ""
+    };
+    eprintln!(
+        "[IREE_DEBUG] {label} slot={slot_idx} comp={component_id:?} shape={shape:?} bytes={} f64s={n_f64}{flag} vals={vals:?}",
+        data.len()
+    );
+}
 use crate::world::World;
 
 fn nox_to_iree_element_type(ty: nox::ElementType) -> Result<iree_runtime::ElementType, Error> {
@@ -17,9 +67,6 @@ fn nox_to_iree_element_type(ty: nox::ElementType) -> Result<iree_runtime::Elemen
         nox::ElementType::S16 => Ok(iree_runtime::ElementType::Int16),
         nox::ElementType::S32 => Ok(iree_runtime::ElementType::Int32),
         nox::ElementType::S64 => Ok(iree_runtime::ElementType::Int64),
-        // These arms are not reached in practice: PrimTypeExt::to_element_type()
-        // maps all unsigned PrimTypes to signed ElementTypes upstream.  Kept as
-        // correct unsigned mappings for defensive safety.
         nox::ElementType::U8 => Ok(iree_runtime::ElementType::Uint8),
         nox::ElementType::U16 => Ok(iree_runtime::ElementType::Uint16),
         nox::ElementType::U32 => Ok(iree_runtime::ElementType::Uint32),
@@ -45,6 +92,7 @@ pub struct IREEExec {
     input_arena: Option<iree_runtime::DeviceArena>,
     output_arena: Option<iree_runtime::DeviceArena>,
     output_views_scratch: Vec<iree_runtime::BufferView>,
+    promoted_constant_views: Vec<iree_runtime::BufferView>,
     call: iree_runtime::Call,
     session: iree_runtime::Session,
     #[allow(dead_code)]
@@ -71,6 +119,16 @@ impl IREEExec {
         })?;
         let session = iree_runtime::Session::new(&instance, &device)
             .map_err(|e| Error::IreeRuntimeError(e.to_string()))?;
+
+        // Register the elodin_lapack module (provides SVD, Cholesky, LU, QR,
+        // solve, eigh via OpenBLAS). Must be appended before loading the VMFB
+        // so the VM can resolve elodin_lapack.* imports.
+        if let Ok(lapack_module) =
+            unsafe { iree_runtime::lapack::create_module(instance.vm_instance(), session.device()) }
+        {
+            let _ = unsafe { session.append_module(lapack_module) };
+        }
+
         session
             .load_vmfb(vmfb)
             .map_err(|e| Error::IreeRuntimeError(e.to_string()))?;
@@ -88,13 +146,13 @@ impl IREEExec {
         let mut input_ids = Vec::new();
         let mut input_specs = Vec::new();
         let mut seen_inputs = HashSet::new();
-        for id in &metadata.arg_ids {
-            if !seen_inputs.insert(*id) {
+        for slot in &metadata.arg_slots {
+            if !seen_inputs.insert(slot.component_id) {
                 continue;
             }
-            let spec = build_buffer_spec(world, *id)?;
+            let spec = build_buffer_spec(world, slot)?;
             input_specs.push(spec);
-            input_ids.push(*id);
+            input_ids.push(slot.component_id);
         }
 
         let input_arena = if input_specs.is_empty() {
@@ -111,13 +169,84 @@ impl IREEExec {
         } else {
             let mut specs = Vec::with_capacity(output_ids.len());
             for id in &output_ids {
-                specs.push(build_buffer_spec(world, *id)?);
+                let slot = metadata
+                    .ret_slots
+                    .iter()
+                    .find(|slot| slot.component_id == *id)
+                    .ok_or(Error::ComponentNotFound)?;
+                specs.push(build_buffer_spec(world, slot)?);
             }
             Some(
                 iree_runtime::DeviceArena::new(&session, &specs)
                     .map_err(|e| Error::IreeRuntimeError(e.to_string()))?,
             )
         };
+
+        if iree_debug_data() {
+            eprintln!("[IREE_DEBUG] === IREEExec::new slot ordering ===");
+            for (i, slot) in metadata.arg_slots.iter().enumerate() {
+                let col = world.column_by_id(slot.component_id);
+                let col_bytes = col.map(|c| c.column.len()).unwrap_or(0);
+                let comp_name = world
+                    .metadata
+                    .component_map
+                    .get(&slot.component_id)
+                    .map(|(_, m)| m.name.as_str())
+                    .unwrap_or("?");
+                let deduped = input_ids.contains(&slot.component_id);
+                eprintln!(
+                    "[IREE_DEBUG]   arg_slot[{i}] comp={comp_name} id={:?} shape={:?} elided={} col_bytes={col_bytes} deduped_in={deduped}",
+                    slot.component_id, slot.shape, slot.entity_axis_elided,
+                );
+            }
+            eprintln!("[IREE_DEBUG]   input_ids (deduped, in push_input order):");
+            for (i, id) in input_ids.iter().enumerate() {
+                let comp_name = world
+                    .metadata
+                    .component_map
+                    .get(id)
+                    .map(|(_, m)| m.name.as_str())
+                    .unwrap_or("?");
+                let col = world.column_by_id(*id);
+                let col_bytes = col.map(|c| c.column.len()).unwrap_or(0);
+                let slot = metadata.arg_slots.iter().find(|s| s.component_id == *id);
+                let shape = slot.map(|s| s.shape.as_slice()).unwrap_or(&[]);
+                let expected_bytes = shape.iter().product::<i64>() as usize * 8;
+                let mismatch = col_bytes != expected_bytes;
+                eprintln!(
+                    "[IREE_DEBUG]     [{i}] {comp_name} col_bytes={col_bytes} shape={shape:?} expected_bytes={expected_bytes}{}",
+                    if mismatch {
+                        " *** SIZE MISMATCH ***"
+                    } else {
+                        ""
+                    }
+                );
+            }
+            eprintln!("[IREE_DEBUG]   output_ids:");
+            for (i, id) in output_ids.iter().enumerate() {
+                let comp_name = world
+                    .metadata
+                    .component_map
+                    .get(id)
+                    .map(|(_, m)| m.name.as_str())
+                    .unwrap_or("?");
+                let col = world.column_by_id(*id);
+                let col_bytes = col.map(|c| c.column.len()).unwrap_or(0);
+                let slot = metadata.ret_slots.iter().find(|s| s.component_id == *id);
+                let shape = slot.map(|s| s.shape.as_slice()).unwrap_or(&[]);
+                let expected_bytes = shape.iter().product::<i64>() as usize * 8;
+                let mismatch = col_bytes != expected_bytes;
+                eprintln!(
+                    "[IREE_DEBUG]     [{i}] {comp_name} col_bytes={col_bytes} shape={shape:?} expected_bytes={expected_bytes}{}",
+                    if mismatch {
+                        " *** SIZE MISMATCH ***"
+                    } else {
+                        ""
+                    }
+                );
+            }
+            eprintln!("[IREE_DEBUG] === end slot ordering ===");
+        }
 
         let mut output_slot_by_id = std::collections::HashMap::new();
         for (slot, id) in output_ids.iter().enumerate() {
@@ -133,6 +262,22 @@ impl IREEExec {
                     .map(|output_slot| (input_slot, output_slot))
             })
             .collect();
+
+        let mut promoted_constant_views = Vec::new();
+        for spec in &metadata.promoted_constants {
+            let element_type = nox_to_iree_element_type(spec.element_type)?;
+            let view = iree_runtime::BufferView::from_bytes(
+                &session,
+                &spec.data,
+                &spec.shape,
+                element_type,
+            )
+            .map_err(|e| {
+                Error::IreeRuntimeError(format!("promoted constant '{}': {e}", spec.name))
+            })?;
+            promoted_constant_views.push(view);
+        }
+
         Ok(Self {
             metadata,
             compile_stats,
@@ -144,6 +289,7 @@ impl IREEExec {
             input_arena,
             output_arena,
             output_views_scratch: Vec::new(),
+            promoted_constant_views,
             call,
             session,
             instance,
@@ -169,6 +315,19 @@ impl IREEExec {
         if let Some(arena) = &mut self.input_arena {
             for (slot, id) in self.input_ids.iter().enumerate() {
                 let col = world.column_by_id(*id).ok_or(Error::ComponentNotFound)?;
+                if iree_debug_data() {
+                    let comp_name = world
+                        .metadata
+                        .component_map
+                        .get(id)
+                        .map(|(_, m)| m.name.as_str())
+                        .unwrap_or("?");
+                    let slot_meta = self.compile_stats.as_ref().map(|_| "");
+                    let arg_slot = std::iter::empty::<&ExecSlotMetadata>().next();
+                    let _ = (slot_meta, arg_slot);
+                    dump_slot_f64("INPUT", slot, *id, &[], col.column.as_slice());
+                    eprintln!("[IREE_DEBUG]   ^ name={comp_name}");
+                }
                 arena
                     .write_slot(slot, col.column.as_slice())
                     .map_err(|e| Error::IreeRuntimeError(e.to_string()))?;
@@ -194,6 +353,11 @@ impl IREEExec {
                     .view(slot);
                 self.call
                     .push_input(view)
+                    .map_err(|e| Error::IreeRuntimeError(e.to_string()))?;
+            }
+            for cv in &self.promoted_constant_views {
+                self.call
+                    .push_input(cv)
                     .map_err(|e| Error::IreeRuntimeError(e.to_string()))?;
             }
 
@@ -244,6 +408,16 @@ impl IREEExec {
                 arena
                     .copy_slot_to_host(slot, &mut host.buffer)
                     .map_err(|e| Error::IreeRuntimeError(e.to_string()))?;
+                if iree_debug_data() {
+                    let comp_name = world
+                        .metadata
+                        .component_map
+                        .get(id)
+                        .map(|(_, m)| m.name.as_str())
+                        .unwrap_or("?");
+                    dump_slot_f64("OUTPUT", slot, *id, &[], &host.buffer);
+                    eprintln!("[IREE_DEBUG]   ^ name={comp_name}");
+                }
             }
         } else {
             for (slot, id) in self.output_ids.iter().enumerate() {
@@ -251,6 +425,16 @@ impl IREEExec {
                 self.output_views_scratch[slot]
                     .download_into(&self.session, &mut host.buffer)
                     .map_err(|e| Error::IreeRuntimeError(e.to_string()))?;
+                if iree_debug_data() {
+                    let comp_name = world
+                        .metadata
+                        .component_map
+                        .get(id)
+                        .map(|(_, m)| m.name.as_str())
+                        .unwrap_or("?");
+                    dump_slot_f64("OUTPUT", slot, *id, &[], &host.buffer);
+                    eprintln!("[IREE_DEBUG]   ^ name={comp_name}");
+                }
             }
         }
         let d2h_download_ms = d2h_start
@@ -265,19 +449,17 @@ impl IREEExec {
     }
 }
 
-fn build_buffer_spec(world: &World, id: ComponentId) -> Result<iree_runtime::BufferSpec, Error> {
-    let col = world.column_by_id(id).ok_or(Error::ComponentNotFound)?;
+fn build_buffer_spec(
+    world: &World,
+    slot: &ExecSlotMetadata,
+) -> Result<iree_runtime::BufferSpec, Error> {
+    let col = world
+        .column_by_id(slot.component_id)
+        .ok_or(Error::ComponentNotFound)?;
     let element_type = nox_to_iree_element_type(col.schema.element_type())?;
-    let shape: Vec<i64> = if world.batch1 && col.len() <= 1 {
-        col.schema.shape().iter().map(|&x| x as i64).collect()
-    } else {
-        std::iter::once(col.len() as i64)
-            .chain(col.schema.shape().iter().map(|&x| x as i64))
-            .collect()
-    };
     Ok(iree_runtime::BufferSpec {
         byte_len: col.column.len(),
-        shape,
+        shape: slot.shape.clone(),
         element_type,
     })
 }
@@ -330,6 +512,14 @@ impl IREEWorldExec {
             self.profiler.call_setup.observe_duration(call_setup);
             self.profiler.kernel_invoke.observe_duration(kernel);
             self.profiler.d2h_download.observe_duration(d2h);
+            trace!(
+                h2d_ms = timings.h2d_upload_ms,
+                kernel_ms = timings.kernel_invoke_ms,
+                d2h_ms = timings.d2h_download_ms,
+                total_ms = tick_elapsed.as_secs_f64() * 1000.0,
+                batch = ticks_per_telemetry,
+                "iree tick",
+            );
         } else {
             self.profiler.execute_buffers.observe_duration(tick_elapsed);
         }

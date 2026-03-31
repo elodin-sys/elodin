@@ -769,6 +769,30 @@ pub(crate) fn broadcast_dims(lhs: &[i64], rhs: &[i64]) -> Option<SmallVec<[i64; 
         .collect()
 }
 
+fn cobroadcast_binary_operands(lhs: Noxpr, rhs: Noxpr) -> (Noxpr, Noxpr) {
+    let Some(lhs_shape) = lhs.shape() else {
+        return (lhs, rhs);
+    };
+    let Some(rhs_shape) = rhs.shape() else {
+        return (lhs, rhs);
+    };
+    let Some(shape) = broadcast_dims(&lhs_shape, &rhs_shape) else {
+        return (lhs, rhs);
+    };
+
+    let lhs = if lhs_shape == shape {
+        lhs
+    } else {
+        lhs.broadcast_to(shape.clone())
+    };
+    let rhs = if rhs_shape == shape {
+        rhs
+    } else {
+        rhs.broadcast_to(shape)
+    };
+    (lhs, rhs)
+}
+
 /// Represents a generalized dot product operation for matrix or tensor multiplication.
 #[derive(Debug, PartialEq, Eq)]
 pub struct DotGeneral {
@@ -1219,22 +1243,26 @@ impl Noxpr {
 
     /// Creates a greater-or-equal comparison between two `Noxpr`.
     pub fn greater_or_equal(self, rhs: Noxpr) -> Self {
-        Self::new(NoxprNode::GreaterOrEqual(BinaryOp { lhs: self, rhs }))
+        let (lhs, rhs) = cobroadcast_binary_operands(self, rhs);
+        Self::new(NoxprNode::GreaterOrEqual(BinaryOp { lhs, rhs }))
     }
 
     /// Creates a less-or-equal comparison between two `Noxpr`.
     pub fn less_or_equal(self, rhs: Noxpr) -> Self {
-        Self::new(NoxprNode::LessOrEqual(BinaryOp { lhs: self, rhs }))
+        let (lhs, rhs) = cobroadcast_binary_operands(self, rhs);
+        Self::new(NoxprNode::LessOrEqual(BinaryOp { lhs, rhs }))
     }
 
     /// Creates a less-than comparison between two `Noxpr`.
     pub fn less(self, rhs: Noxpr) -> Self {
-        Self::new(NoxprNode::Less(BinaryOp { lhs: self, rhs }))
+        let (lhs, rhs) = cobroadcast_binary_operands(self, rhs);
+        Self::new(NoxprNode::Less(BinaryOp { lhs, rhs }))
     }
 
     /// Creates a equality comparison between two `Noxpr`.
     pub fn eq(self, rhs: Noxpr) -> Self {
-        Self::new(NoxprNode::Equal(BinaryOp { lhs: self, rhs }))
+        let (lhs, rhs) = cobroadcast_binary_operands(self, rhs);
+        Self::new(NoxprNode::Equal(BinaryOp { lhs, rhs }))
     }
 
     /// Element-wise arc tangent of two `Noxpr`.
@@ -2130,13 +2158,21 @@ impl ReplacementTracer {
             NoxprNode::Div(x) => Noxpr::new(NoxprNode::Div(self.visit_binary_op(x))),
             NoxprNode::And(x) => Noxpr::new(NoxprNode::And(self.visit_binary_op(x))),
             NoxprNode::GreaterOrEqual(x) => {
-                Noxpr::new(NoxprNode::GreaterOrEqual(self.visit_binary_op(x)))
+                let BinaryOp { lhs, rhs } = self.visit_binary_op(x);
+                lhs.greater_or_equal(rhs)
             }
             NoxprNode::LessOrEqual(x) => {
-                Noxpr::new(NoxprNode::LessOrEqual(self.visit_binary_op(x)))
+                let BinaryOp { lhs, rhs } = self.visit_binary_op(x);
+                lhs.less_or_equal(rhs)
             }
-            NoxprNode::Less(x) => Noxpr::new(NoxprNode::Less(self.visit_binary_op(x))),
-            NoxprNode::Equal(x) => Noxpr::new(NoxprNode::Equal(self.visit_binary_op(x))),
+            NoxprNode::Less(x) => {
+                let BinaryOp { lhs, rhs } = self.visit_binary_op(x);
+                lhs.less(rhs)
+            }
+            NoxprNode::Equal(x) => {
+                let BinaryOp { lhs, rhs } = self.visit_binary_op(x);
+                lhs.eq(rhs)
+            }
             NoxprNode::Atan2(x) => Noxpr::new(NoxprNode::Atan2(self.visit_binary_op(x))),
             NoxprNode::Or(x) => Noxpr::new(NoxprNode::Or(self.visit_binary_op(x))),
             NoxprNode::Dot(x) => Noxpr::new(NoxprNode::Dot(self.visit_binary_op(x))),
@@ -2570,8 +2606,20 @@ impl PrettyPrintTracer {
                 )?;
                 Ok(num)
             }
-            NoxprNode::Call(_) => {
+            NoxprNode::Call(c) => {
+                let args = c
+                    .args
+                    .iter()
+                    .map(|arg| self.visit(arg, writer))
+                    .collect::<Result<Vec<_>, _>>()?;
                 let num = self.print_var(id, writer)?;
+                write!(writer, "call(comp_id = {:?}, args = [", c.comp.id)?;
+                for arg in args {
+                    write!(writer, "var_{arg}, ")?;
+                }
+                write!(writer, "], ret_ty = ")?;
+                c.comp.ty.pretty_print(writer)?;
+                write!(writer, ")")?;
                 Ok(num)
             }
             NoxprNode::Cholesky(c) => {
@@ -2611,6 +2659,38 @@ impl PrettyPrintTracer {
 
 #[cfg(test)]
 mod tests {
+    use crate::{ArrayTy, ElementType, NoxprFn, NoxprNode, NoxprScalarExt, NoxprTy};
+
+    fn assert_compare_rhs_broadcasted(expr: crate::Noxpr) {
+        let binary_op = match &*expr.node {
+            NoxprNode::GreaterOrEqual(binary_op)
+            | NoxprNode::LessOrEqual(binary_op)
+            | NoxprNode::Less(binary_op)
+            | NoxprNode::Equal(binary_op) => binary_op,
+            other => panic!("expected comparison node, got {other:?}"),
+        };
+
+        assert_eq!(
+            binary_op.lhs.shape(),
+            Some(smallvec::smallvec![1]),
+            "lhs should keep the length-1 shape"
+        );
+        assert_eq!(
+            binary_op.rhs.shape(),
+            Some(smallvec::smallvec![1]),
+            "rhs should be explicitly broadcast to the length-1 shape"
+        );
+        assert!(
+            matches!(
+                &*binary_op.rhs.node,
+                NoxprNode::BroadcastInDim(broadcast)
+                    if broadcast.sizes.as_slice() == [1_i64]
+                        && broadcast.broadcast_dims.is_empty()
+            ),
+            "rhs should be represented as an explicit scalar broadcast"
+        );
+    }
+
     #[test]
     fn test_broadcast_dims() {
         let a = &[1, 6];
@@ -2620,9 +2700,49 @@ mod tests {
     }
 
     #[test]
-    fn test_children_iterator() {
-        use crate::{NoxprNode, NoxprScalarExt};
+    fn test_compare_builders_cobroadcast_scalar_and_length_one_tensor() {
+        let vector = 2.0f64.constant().reshape(smallvec::smallvec![1]);
+        let scalar = 1.0f64.constant();
 
+        assert_compare_rhs_broadcasted(vector.clone().eq(scalar.clone()));
+        assert_compare_rhs_broadcasted(vector.clone().less(scalar.clone()));
+        assert_compare_rhs_broadcasted(vector.clone().less_or_equal(scalar.clone()));
+        assert_compare_rhs_broadcasted(vector.greater_or_equal(scalar));
+    }
+
+    #[test]
+    fn test_substitute_params_rebroadcasts_compare_when_shapes_change() {
+        let lhs = crate::Noxpr::parameter(
+            0,
+            NoxprTy::ArrayTy(ArrayTy {
+                element_type: ElementType::F64,
+                shape: smallvec::smallvec![],
+            }),
+            "lhs".to_string(),
+        );
+        let rhs = crate::Noxpr::parameter(
+            1,
+            NoxprTy::ArrayTy(ArrayTy {
+                element_type: ElementType::F64,
+                shape: smallvec::smallvec![],
+            }),
+            "rhs".to_string(),
+        );
+        let func = NoxprFn::new(vec![lhs.clone(), rhs.clone()], lhs.eq(rhs));
+
+        let substituted = crate::Noxpr::substitute_params(
+            &func,
+            &[
+                2.0f64.constant().reshape(smallvec::smallvec![1]),
+                1.0f64.constant(),
+            ],
+        );
+
+        assert_compare_rhs_broadcasted(substituted);
+    }
+
+    #[test]
+    fn test_children_iterator() {
         let a = 1.0f32.constant();
         let b = 2.0f32.constant();
         let add = a + b;
@@ -2641,8 +2761,6 @@ mod tests {
 
     #[test]
     fn test_children_iterator_unary() {
-        use crate::{NoxprNode, NoxprScalarExt};
-
         let a = 4.0f32.constant();
         let sqrt = a.sqrt();
 
@@ -2659,8 +2777,6 @@ mod tests {
 
     #[test]
     fn test_children_iterator_leaf() {
-        use crate::NoxprScalarExt;
-
         let a = 1.0f32.constant();
         let children: Vec<_> = a.node.children().collect();
         assert_eq!(children.len(), 0);
