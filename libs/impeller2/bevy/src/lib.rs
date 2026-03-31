@@ -143,14 +143,15 @@ impl TelemetryCache {
     }
 }
 
-/// Decomponentize implementation that collects component values into a
-/// Vec for later insertion into the TelemetryCache.
-struct CacheCollector {
-    collected: Vec<(ComponentId, Timestamp, ComponentValue)>,
+/// Single vtable pass for incoming tables: append samples to the pending cache
+/// buffer and run [`WorldSink`] entity/path setup in the same traversal.
+struct TableCacheAndWorldSink<'a, 'w, 's> {
+    pending_cache: &'a mut Vec<(ComponentId, Timestamp, ComponentValue)>,
+    world: &'a mut WorldSink<'w, 's>,
 }
 
-impl Decomponentize for CacheCollector {
-    type Error = core::convert::Infallible;
+impl Decomponentize for TableCacheAndWorldSink<'_, '_, '_> {
+    type Error = Infallible;
     fn apply_value(
         &mut self,
         component_id: ComponentId,
@@ -159,8 +160,9 @@ impl Decomponentize for CacheCollector {
     ) -> Result<(), Infallible> {
         if let Some(ts) = timestamp {
             let value = ComponentValue::from_view(view);
-            self.collected.push((component_id, ts, value));
+            self.pending_cache.push((component_id, ts, value));
         }
+        self.world.apply_value(component_id, view, timestamp)?;
         Ok(())
     }
 }
@@ -438,12 +440,11 @@ fn sink_inner(
                 world_sink.schema_reg.0.extend(dump_schema.schemas);
             }
             OwnedPacket::Table(table) => {
-                let mut collector = CacheCollector {
-                    collected: Vec::new(),
+                let mut combined = TableCacheAndWorldSink {
+                    pending_cache: &mut pending_cache_entries,
+                    world: &mut world_sink,
                 };
-                let _ = table.sink(vtable_registry, &mut collector);
-                pending_cache_entries.extend(collector.collected);
-                let _ = table.sink(vtable_registry, &mut world_sink)?;
+                let _ = table.sink(vtable_registry, &mut combined)?;
             }
             OwnedPacket::Msg(m) if m.id == EarliestTimestamp::ID => {
                 let new_earliest = m.parse::<EarliestTimestamp>()?;
