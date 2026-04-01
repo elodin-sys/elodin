@@ -212,10 +212,10 @@
 +        op.getOperandTypes(), op.getResultTypes());
 +    auto moduleOp = op->getParentOfType<ModuleOp>();
 +    if (moduleOp && !moduleOp.lookupSymbol(funcName)) {
-+      OpBuilder::InsertionGuard guard(rewriter);
-+      rewriter.setInsertionPointToStart(moduleOp.getBody());
++      OpBuilder moduleBuilder(moduleOp.getContext());
++      moduleBuilder.setInsertionPointToStart(moduleOp.getBody());
 +      auto funcOp = func::FuncOp::create(
-+          rewriter, op.getLoc(), funcName, funcType);
++          moduleBuilder, op.getLoc(), funcName, funcType);
 +      funcOp.setVisibility(SymbolTable::Visibility::Private);
 +    }
 +    rewriter.replaceOpWithNewOp<func::CallOp>(

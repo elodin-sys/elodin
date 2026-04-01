@@ -7,24 +7,25 @@
  #include "mlir/Conversion/ShapeToStandard/ShapeToStandard.h"
 +#include "mlir/Transforms/DialectConversion.h"
  #include "mlir/Dialect/Func/IR/FuncOps.h"
-@@ -89,4 +92,22 @@
+@@ -89,4 +92,23 @@
        mlir::stablehlo::createChloLegalizeToStablehloPass());
 +  passManager.addPass(createModulePass([](ModuleOp moduleOp) {
 +    MLIRContext *ctx = moduleOp.getContext();
-+    RewritePatternSet patterns(ctx);
-+    mlir::populateSCFToControlFlowConversionPatterns(patterns);
 +
 +    ConversionTarget target(*ctx);
-+    target.addIllegalOp<scf::IfOp>();
++    target.addDynamicallyLegalOp<scf::IfOp>([](scf::IfOp ifOp) {
++      return ifOp->getParentOfType<scf::ForOp>() != nullptr ||
++             ifOp->getParentOfType<scf::WhileOp>() != nullptr;
++    });
 +    target.addLegalOp<cf::BranchOp, cf::CondBranchOp>();
 +    target.markUnknownOpDynamicallyLegal([](Operation *) { return true; });
 +
 +    moduleOp.walk([&](func::FuncOp funcOp) {
 +      if (funcOp.isDeclaration())
 +        return;
-+      RewritePatternSet localPatterns(ctx);
-+      mlir::populateSCFToControlFlowConversionPatterns(localPatterns);
-+      (void)applyPartialConversion(funcOp, target, std::move(localPatterns));
++      RewritePatternSet patterns(ctx);
++      mlir::populateSCFToControlFlowConversionPatterns(patterns);
++      (void)applyPartialConversion(funcOp, target, std::move(patterns));
 +    });
 +  }, "elodin-lower-scf-if-to-cf"));
    passManager.addPass(createConvertStableHloToIreeInputDialects());
