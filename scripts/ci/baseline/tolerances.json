@@ -25,6 +25,31 @@
         "rel_tol": 0.1
       }
     },
-    "examples": {}
+    "examples": {
+      "ball": {
+        "build_time_ms": {
+          "rel_tol": 1.05
+        },
+        "compile_time_ms": {
+          "rel_tol": 1.05
+        }
+      },
+      "drone": {
+        "build_time_ms": {
+          "rel_tol": 1.15
+        },
+        "compile_time_ms": {
+          "rel_tol": 1.15
+        }
+      },
+      "rocket": {
+        "build_time_ms": {
+          "rel_tol": 1.05
+        },
+        "compile_time_ms": {
+          "rel_tol": 1.05
+        }
+      }
+    }
   }
 }
