@@ -18,9 +18,7 @@ THRESHOLDS_MEAN_US = {
     "sensor_camera_image_copy_driver": 10_000,
 }
 
-REPORT_SPANS = (
-    "impeller2_table_sink",
-)
+REPORT_SPANS = ("impeller2_table_sink",)
 
 
 def _parse_mean_us(row: dict[str, str]) -> float | None:
