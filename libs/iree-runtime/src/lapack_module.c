@@ -49,8 +49,6 @@ static LAPACKE_dsyevd_fn fn_dsyevd;
 
 typedef void (*openblas_set_num_threads_fn)(int);
 
-typedef void (*openblas_set_num_threads_fn)(int);
-
 static void elodin_lapack_load_from(void* lib) {
   fn_dgesdd = (LAPACKE_dgesdd_fn)dlsym(lib, "LAPACKE_dgesdd");
   fn_dpotrf = (LAPACKE_dpotrf_fn)dlsym(lib, "LAPACKE_dpotrf");
@@ -220,33 +218,53 @@ static iree_status_t elodin_lapack_dgesdd(
   if (!A) return iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "dgesdd: null");
   int m = VIEW_DIM(A, 0), n = VIEW_DIM(A, 1), k = m < n ? m : n;
 
+  iree_status_t status = iree_ok_status();
   double* a = (double*)malloc(m * n * sizeof(double));
   double* s = (double*)calloc(k, sizeof(double));
   double* u = (double*)calloc(m * k, sizeof(double));
   double* vt = (double*)calloc(k * n, sizeof(double));
+  iree_hal_buffer_view_t *oa = NULL, *os = NULL, *ou = NULL, *ovt = NULL, *oi = NULL;
 
-  iree_hal_buffer_mapping_t am; double* asrc;
-  IREE_RETURN_IF_ERROR(map_f64(A, &am, &asrc));
-  memcpy(a, asrc, m * n * sizeof(double));
-  iree_hal_buffer_unmap_range(&am);
+  if (!a || !s || !u || !vt) {
+    status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED, "dgesdd: malloc");
+    goto cleanup;
+  }
 
-  lapack_int info = fn_dgesdd(LAPACK_ROW_MAJOR, 'S', m, n, a, n, s, u, k, vt, n);
+  { iree_hal_buffer_mapping_t am; double* asrc;
+    status = map_f64(A, &am, &asrc);
+    if (!iree_status_is_ok(status)) goto cleanup;
+    memcpy(a, asrc, m * n * sizeof(double));
+    iree_hal_buffer_unmap_range(&am);
+  }
 
-  iree_hal_dim_t sha[] = {m, n}, shs[] = {k}, shu[] = {m, k}, shvt[] = {k, n};
-  iree_hal_buffer_view_t *oa=0, *os=0, *ou=0, *ovt=0, *oi=0;
-  IREE_RETURN_IF_ERROR(alloc_f64_view(st->device, sha, 2, a, m*n*sizeof(double), &oa));
-  IREE_RETURN_IF_ERROR(alloc_f64_view(st->device, shs, 1, s, k*sizeof(double), &os));
-  IREE_RETURN_IF_ERROR(alloc_f64_view(st->device, shu, 2, u, m*k*sizeof(double), &ou));
-  IREE_RETURN_IF_ERROR(alloc_f64_view(st->device, shvt, 2, vt, k*n*sizeof(double), &ovt));
-  IREE_RETURN_IF_ERROR(alloc_i32_scalar(st->device, (int32_t)info, &oi));
+  { lapack_int info = fn_dgesdd(LAPACK_ROW_MAJOR, 'S', m, n, a, n, s, u, k, vt, n);
+    iree_hal_dim_t sha[] = {m, n}, shs[] = {k}, shu[] = {m, k}, shvt[] = {k, n};
+    status = alloc_f64_view(st->device, sha, 2, a, m*n*sizeof(double), &oa);
+    if (!iree_status_is_ok(status)) goto cleanup;
+    status = alloc_f64_view(st->device, shs, 1, s, k*sizeof(double), &os);
+    if (!iree_status_is_ok(status)) goto cleanup;
+    status = alloc_f64_view(st->device, shu, 2, u, m*k*sizeof(double), &ou);
+    if (!iree_status_is_ok(status)) goto cleanup;
+    status = alloc_f64_view(st->device, shvt, 2, vt, k*n*sizeof(double), &ovt);
+    if (!iree_status_is_ok(status)) goto cleanup;
+    status = alloc_i32_scalar(st->device, (int32_t)info, &oi);
+    if (!iree_status_is_ok(status)) goto cleanup;
+  }
+
+  iree_vm_ref_wrap_assign(oa, iree_hal_buffer_view_type(), &rets->r0); oa = NULL;
+  iree_vm_ref_wrap_assign(os, iree_hal_buffer_view_type(), &rets->r1); os = NULL;
+  iree_vm_ref_wrap_assign(ou, iree_hal_buffer_view_type(), &rets->r2); ou = NULL;
+  iree_vm_ref_wrap_assign(ovt, iree_hal_buffer_view_type(), &rets->r3); ovt = NULL;
+  iree_vm_ref_wrap_assign(oi, iree_hal_buffer_view_type(), &rets->r4); oi = NULL;
+
+cleanup:
   free(a); free(s); free(u); free(vt);
-
-  iree_vm_ref_wrap_assign(oa, iree_hal_buffer_view_type(), &rets->r0);
-  iree_vm_ref_wrap_assign(os, iree_hal_buffer_view_type(), &rets->r1);
-  iree_vm_ref_wrap_assign(ou, iree_hal_buffer_view_type(), &rets->r2);
-  iree_vm_ref_wrap_assign(ovt, iree_hal_buffer_view_type(), &rets->r3);
-  iree_vm_ref_wrap_assign(oi, iree_hal_buffer_view_type(), &rets->r4);
-  return iree_ok_status();
+  if (oa) iree_hal_buffer_view_release(oa);
+  if (os) iree_hal_buffer_view_release(os);
+  if (ou) iree_hal_buffer_view_release(ou);
+  if (ovt) iree_hal_buffer_view_release(ovt);
+  if (oi) iree_hal_buffer_view_release(oi);
+  return status;
 }
 
 // =========================================================================
@@ -262,27 +280,41 @@ static iree_status_t elodin_lapack_dpotrf(
   if (!A) return iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "dpotrf: null");
   int n = VIEW_DIM(A, 0);
 
+  iree_status_t status = iree_ok_status();
   double* a = (double*)malloc(n * n * sizeof(double));
-  iree_hal_buffer_mapping_t am; double* as;
-  IREE_RETURN_IF_ERROR(map_f64(A, &am, &as));
-  memcpy(a, as, n * n * sizeof(double));
-  iree_hal_buffer_unmap_range(&am);
+  iree_hal_buffer_view_t *ol = NULL, *oi = NULL;
 
-  lapack_int info = fn_dpotrf(LAPACK_ROW_MAJOR, 'L', n, a, n);
+  if (!a) {
+    status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED, "dpotrf: malloc");
+    goto cleanup;
+  }
 
-  // Zero out upper triangle (LAPACKE only writes the lower)
-  for (int i = 0; i < n; ++i)
-    for (int j = i + 1; j < n; ++j)
-      a[i * n + j] = 0.0;
+  { iree_hal_buffer_mapping_t am; double* as;
+    status = map_f64(A, &am, &as);
+    if (!iree_status_is_ok(status)) goto cleanup;
+    memcpy(a, as, n * n * sizeof(double));
+    iree_hal_buffer_unmap_range(&am);
+  }
 
-  iree_hal_dim_t sh[] = {n, n};
-  iree_hal_buffer_view_t *ol = 0, *oi = 0;
-  IREE_RETURN_IF_ERROR(alloc_f64_view(st->device, sh, 2, a, n*n*sizeof(double), &ol));
-  IREE_RETURN_IF_ERROR(alloc_i32_scalar(st->device, (int32_t)info, &oi));
+  { lapack_int info = fn_dpotrf(LAPACK_ROW_MAJOR, 'L', n, a, n);
+    for (int i = 0; i < n; ++i)
+      for (int j = i + 1; j < n; ++j)
+        a[i * n + j] = 0.0;
+    iree_hal_dim_t sh[] = {n, n};
+    status = alloc_f64_view(st->device, sh, 2, a, n*n*sizeof(double), &ol);
+    if (!iree_status_is_ok(status)) goto cleanup;
+    status = alloc_i32_scalar(st->device, (int32_t)info, &oi);
+    if (!iree_status_is_ok(status)) goto cleanup;
+  }
+
+  iree_vm_ref_wrap_assign(ol, iree_hal_buffer_view_type(), &rets->r0); ol = NULL;
+  iree_vm_ref_wrap_assign(oi, iree_hal_buffer_view_type(), &rets->r1); oi = NULL;
+
+cleanup:
   free(a);
-  iree_vm_ref_wrap_assign(ol, iree_hal_buffer_view_type(), &rets->r0);
-  iree_vm_ref_wrap_assign(oi, iree_hal_buffer_view_type(), &rets->r1);
-  return iree_ok_status();
+  if (ol) iree_hal_buffer_view_release(ol);
+  if (oi) iree_hal_buffer_view_release(oi);
+  return status;
 }
 
 // =========================================================================
@@ -298,30 +330,50 @@ static iree_status_t elodin_lapack_dgetrf(
   if (!A) return iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "dgetrf: null");
   int m = VIEW_DIM(A, 0), n = VIEW_DIM(A, 1), k = m < n ? m : n;
 
+  iree_status_t status = iree_ok_status();
   double* a = (double*)malloc(m * n * sizeof(double));
   lapack_int* ipiv = (lapack_int*)calloc(k, sizeof(lapack_int));
+  int32_t* piv32 = NULL;
+  iree_hal_buffer_view_t *olu = NULL, *op = NULL, *oi = NULL;
 
-  iree_hal_buffer_mapping_t am; double* as;
-  IREE_RETURN_IF_ERROR(map_f64(A, &am, &as));
-  memcpy(a, as, m * n * sizeof(double));
-  iree_hal_buffer_unmap_range(&am);
+  if (!a || !ipiv) {
+    status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED, "dgetrf: malloc");
+    goto cleanup;
+  }
 
-  lapack_int info = fn_dgetrf(LAPACK_ROW_MAJOR, m, n, a, n, ipiv);
+  { iree_hal_buffer_mapping_t am; double* as;
+    status = map_f64(A, &am, &as);
+    if (!iree_status_is_ok(status)) goto cleanup;
+    memcpy(a, as, m * n * sizeof(double));
+    iree_hal_buffer_unmap_range(&am);
+  }
 
-  // LAPACKE returns 1-based pivots; convert to 0-based
-  int32_t* piv32 = (int32_t*)calloc(k, sizeof(int32_t));
-  for (int i = 0; i < k; ++i) piv32[i] = (int32_t)(ipiv[i] - 1);
+  { lapack_int info = fn_dgetrf(LAPACK_ROW_MAJOR, m, n, a, n, ipiv);
+    piv32 = (int32_t*)calloc(k, sizeof(int32_t));
+    if (!piv32) {
+      status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED, "dgetrf: malloc");
+      goto cleanup;
+    }
+    for (int i = 0; i < k; ++i) piv32[i] = (int32_t)(ipiv[i] - 1);
+    iree_hal_dim_t shlu[] = {m, n}, shp[] = {k};
+    status = alloc_f64_view(st->device, shlu, 2, a, m*n*sizeof(double), &olu);
+    if (!iree_status_is_ok(status)) goto cleanup;
+    status = alloc_i32_view(st->device, shp, 1, piv32, k*sizeof(int32_t), &op);
+    if (!iree_status_is_ok(status)) goto cleanup;
+    status = alloc_i32_scalar(st->device, (int32_t)info, &oi);
+    if (!iree_status_is_ok(status)) goto cleanup;
+  }
 
-  iree_hal_dim_t shlu[] = {m, n}, shp[] = {k};
-  iree_hal_buffer_view_t *olu = 0, *op = 0, *oi = 0;
-  IREE_RETURN_IF_ERROR(alloc_f64_view(st->device, shlu, 2, a, m*n*sizeof(double), &olu));
-  IREE_RETURN_IF_ERROR(alloc_i32_view(st->device, shp, 1, piv32, k*sizeof(int32_t), &op));
-  IREE_RETURN_IF_ERROR(alloc_i32_scalar(st->device, (int32_t)info, &oi));
+  iree_vm_ref_wrap_assign(olu, iree_hal_buffer_view_type(), &rets->r0); olu = NULL;
+  iree_vm_ref_wrap_assign(op, iree_hal_buffer_view_type(), &rets->r1); op = NULL;
+  iree_vm_ref_wrap_assign(oi, iree_hal_buffer_view_type(), &rets->r2); oi = NULL;
+
+cleanup:
   free(a); free(ipiv); free(piv32);
-  iree_vm_ref_wrap_assign(olu, iree_hal_buffer_view_type(), &rets->r0);
-  iree_vm_ref_wrap_assign(op, iree_hal_buffer_view_type(), &rets->r1);
-  iree_vm_ref_wrap_assign(oi, iree_hal_buffer_view_type(), &rets->r2);
-  return iree_ok_status();
+  if (olu) iree_hal_buffer_view_release(olu);
+  if (op) iree_hal_buffer_view_release(op);
+  if (oi) iree_hal_buffer_view_release(oi);
+  return status;
 }
 
 // =========================================================================
@@ -337,24 +389,40 @@ static iree_status_t elodin_lapack_dgeqrf(
   if (!A) return iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "dgeqrf: null");
   int m = VIEW_DIM(A, 0), n = VIEW_DIM(A, 1), k = m < n ? m : n;
 
+  iree_status_t status = iree_ok_status();
   double* a = (double*)malloc(m * n * sizeof(double));
   double* tau = (double*)calloc(k, sizeof(double));
+  iree_hal_buffer_view_t *oh = NULL, *ot = NULL;
 
-  iree_hal_buffer_mapping_t am; double* as;
-  IREE_RETURN_IF_ERROR(map_f64(A, &am, &as));
-  memcpy(a, as, m * n * sizeof(double));
-  iree_hal_buffer_unmap_range(&am);
+  if (!a || !tau) {
+    status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED, "dgeqrf: malloc");
+    goto cleanup;
+  }
+
+  { iree_hal_buffer_mapping_t am; double* as;
+    status = map_f64(A, &am, &as);
+    if (!iree_status_is_ok(status)) goto cleanup;
+    memcpy(a, as, m * n * sizeof(double));
+    iree_hal_buffer_unmap_range(&am);
+  }
 
   fn_dgeqrf(LAPACK_ROW_MAJOR, m, n, a, n, tau);
 
-  iree_hal_dim_t shh[] = {m, n}, sht[] = {k};
-  iree_hal_buffer_view_t *oh = 0, *ot = 0;
-  IREE_RETURN_IF_ERROR(alloc_f64_view(st->device, shh, 2, a, m*n*sizeof(double), &oh));
-  IREE_RETURN_IF_ERROR(alloc_f64_view(st->device, sht, 1, tau, k*sizeof(double), &ot));
+  { iree_hal_dim_t shh[] = {m, n}, sht[] = {k};
+    status = alloc_f64_view(st->device, shh, 2, a, m*n*sizeof(double), &oh);
+    if (!iree_status_is_ok(status)) goto cleanup;
+    status = alloc_f64_view(st->device, sht, 1, tau, k*sizeof(double), &ot);
+    if (!iree_status_is_ok(status)) goto cleanup;
+  }
+
+  iree_vm_ref_wrap_assign(oh, iree_hal_buffer_view_type(), &rets->r0); oh = NULL;
+  iree_vm_ref_wrap_assign(ot, iree_hal_buffer_view_type(), &rets->r1); ot = NULL;
+
+cleanup:
   free(a); free(tau);
-  iree_vm_ref_wrap_assign(oh, iree_hal_buffer_view_type(), &rets->r0);
-  iree_vm_ref_wrap_assign(ot, iree_hal_buffer_view_type(), &rets->r1);
-  return iree_ok_status();
+  if (oh) iree_hal_buffer_view_release(oh);
+  if (ot) iree_hal_buffer_view_release(ot);
+  return status;
 }
 
 // =========================================================================
@@ -371,31 +439,52 @@ static iree_status_t elodin_lapack_dorgqr(
   if (!HH || !TAU) return iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "dorgqr: null");
   int m = VIEW_DIM(HH, 0), n = VIEW_DIM(HH, 1), k = m < n ? m : n;
 
+  iree_status_t status = iree_ok_status();
   double* a = (double*)malloc(m * n * sizeof(double));
   double* tau = (double*)malloc(k * sizeof(double));
+  double* q = NULL;
+  iree_hal_buffer_view_t* oq = NULL;
 
-  iree_hal_buffer_mapping_t hm, tm; double* hs; double* ts;
-  IREE_RETURN_IF_ERROR(map_f64(HH, &hm, &hs));
-  memcpy(a, hs, m * n * sizeof(double));
-  iree_hal_buffer_unmap_range(&hm);
-  IREE_RETURN_IF_ERROR(map_f64(TAU, &tm, &ts));
-  memcpy(tau, ts, k * sizeof(double));
-  iree_hal_buffer_unmap_range(&tm);
+  if (!a || !tau) {
+    status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED, "dorgqr: malloc");
+    goto cleanup;
+  }
+
+  { iree_hal_buffer_mapping_t hm; double* hs;
+    status = map_f64(HH, &hm, &hs);
+    if (!iree_status_is_ok(status)) goto cleanup;
+    memcpy(a, hs, m * n * sizeof(double));
+    iree_hal_buffer_unmap_range(&hm);
+  }
+  { iree_hal_buffer_mapping_t tm; double* ts;
+    status = map_f64(TAU, &tm, &ts);
+    if (!iree_status_is_ok(status)) goto cleanup;
+    memcpy(tau, ts, k * sizeof(double));
+    iree_hal_buffer_unmap_range(&tm);
+  }
 
   fn_dorgqr(LAPACK_ROW_MAJOR, m, k, k, a, n, tau);
 
-  // Extract first k columns as Q[m,k] from a[m,n]
-  double* q = (double*)malloc(m * k * sizeof(double));
+  q = (double*)malloc(m * k * sizeof(double));
+  if (!q) {
+    status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED, "dorgqr: malloc");
+    goto cleanup;
+  }
   for (int i = 0; i < m; ++i)
     for (int j = 0; j < k; ++j)
       q[i * k + j] = a[i * n + j];
 
-  iree_hal_dim_t shq[] = {m, k};
-  iree_hal_buffer_view_t* oq = 0;
-  IREE_RETURN_IF_ERROR(alloc_f64_view(st->device, shq, 2, q, m*k*sizeof(double), &oq));
+  { iree_hal_dim_t shq[] = {m, k};
+    status = alloc_f64_view(st->device, shq, 2, q, m*k*sizeof(double), &oq);
+    if (!iree_status_is_ok(status)) goto cleanup;
+  }
+
+  iree_vm_ref_wrap_assign(oq, iree_hal_buffer_view_type(), &rets->r0); oq = NULL;
+
+cleanup:
   free(a); free(tau); free(q);
-  iree_vm_ref_wrap_assign(oq, iree_hal_buffer_view_type(), &rets->r0);
-  return iree_ok_status();
+  if (oq) iree_hal_buffer_view_release(oq);
+  return status;
 }
 
 // =========================================================================
@@ -415,52 +504,68 @@ static iree_status_t elodin_lapack_dtrsm(
 
   int n = VIEW_DIM(VA, 0);
   int b_rank = VIEW_RANK(VB);
-
-  int nrhs;
   int matrix_rhs = (b_rank >= 2);
-  if (matrix_rhs) {
-    nrhs = VIEW_DIM(VB, 0);
-  } else {
-    nrhs = 1;
-  }
+  int nrhs = matrix_rhs ? VIEW_DIM(VB, 0) : 1;
 
+  iree_status_t status = iree_ok_status();
   double* a = (double*)malloc(n * n * sizeof(double));
   double* b = (double*)malloc(n * nrhs * sizeof(double));
+  double* bt = NULL;
+  iree_hal_buffer_view_t* ox = NULL;
 
-  iree_hal_buffer_mapping_t am, bm; double* as; double* bs;
-  IREE_RETURN_IF_ERROR(map_f64(VA, &am, &as));
-  memcpy(a, as, n * n * sizeof(double));
-  iree_hal_buffer_unmap_range(&am);
-  IREE_RETURN_IF_ERROR(map_f64(VB, &bm, &bs));
-  if (matrix_rhs) {
-    for (int i = 0; i < n; ++i)
-      for (int j = 0; j < nrhs; ++j)
-        b[i * nrhs + j] = bs[j * n + i];
-  } else {
-    memcpy(b, bs, n * sizeof(double));
+  if (!a || !b) {
+    status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED, "dtrsm: malloc");
+    goto cleanup;
   }
-  iree_hal_buffer_unmap_range(&bm);
 
-  int ldb = matrix_rhs ? nrhs : 1;
-  fn_dtrsm(CblasRowMajor, CblasLeft, CblasLower, CblasNoTrans, CblasNonUnit,
-           n, nrhs, 1.0, a, n, b, ldb);
+  { iree_hal_buffer_mapping_t am; double* as;
+    status = map_f64(VA, &am, &as);
+    if (!iree_status_is_ok(status)) goto cleanup;
+    memcpy(a, as, n * n * sizeof(double));
+    iree_hal_buffer_unmap_range(&am);
+  }
+  { iree_hal_buffer_mapping_t bm; double* bs;
+    status = map_f64(VB, &bm, &bs);
+    if (!iree_status_is_ok(status)) goto cleanup;
+    if (matrix_rhs) {
+      for (int i = 0; i < n; ++i)
+        for (int j = 0; j < nrhs; ++j)
+          b[i * nrhs + j] = bs[j * n + i];
+    } else {
+      memcpy(b, bs, n * sizeof(double));
+    }
+    iree_hal_buffer_unmap_range(&bm);
+  }
 
-  iree_hal_buffer_view_t* ox = 0;
+  { int ldb = matrix_rhs ? nrhs : 1;
+    fn_dtrsm(CblasRowMajor, CblasLeft, CblasLower, CblasNoTrans, CblasNonUnit,
+             n, nrhs, 1.0, a, n, b, ldb);
+  }
+
   if (matrix_rhs) {
-    double* bt = (double*)malloc(nrhs * n * sizeof(double));
+    bt = (double*)malloc(nrhs * n * sizeof(double));
+    if (!bt) {
+      status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED, "dtrsm: malloc");
+      goto cleanup;
+    }
     for (int i = 0; i < nrhs; ++i)
       for (int j = 0; j < n; ++j)
         bt[i * n + j] = b[j * nrhs + i];
     iree_hal_dim_t sh_t[] = {(iree_hal_dim_t)nrhs, (iree_hal_dim_t)n};
-    IREE_RETURN_IF_ERROR(alloc_f64_view(st->device, sh_t, 2, bt, nrhs*n*sizeof(double), &ox));
-    free(bt);
+    status = alloc_f64_view(st->device, sh_t, 2, bt, nrhs*n*sizeof(double), &ox);
+    if (!iree_status_is_ok(status)) goto cleanup;
   } else {
     iree_hal_dim_t sh1[] = {(iree_hal_dim_t)n};
-    IREE_RETURN_IF_ERROR(alloc_f64_view(st->device, sh1, 1, b, n*sizeof(double), &ox));
+    status = alloc_f64_view(st->device, sh1, 1, b, n*sizeof(double), &ox);
+    if (!iree_status_is_ok(status)) goto cleanup;
   }
-  free(a); free(b);
-  iree_vm_ref_wrap_assign(ox, iree_hal_buffer_view_type(), &rets->r0);
-  return iree_ok_status();
+
+  iree_vm_ref_wrap_assign(ox, iree_hal_buffer_view_type(), &rets->r0); ox = NULL;
+
+cleanup:
+  free(a); free(b); free(bt);
+  if (ox) iree_hal_buffer_view_release(ox);
+  return status;
 }
 
 // =========================================================================
@@ -476,26 +581,43 @@ static iree_status_t elodin_lapack_dsyevd(
   if (!A) return iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "dsyevd: null");
   int n = VIEW_DIM(A, 0);
 
+  iree_status_t status = iree_ok_status();
   double* a = (double*)malloc(n * n * sizeof(double));
   double* w = (double*)calloc(n, sizeof(double));
+  iree_hal_buffer_view_t *ov = NULL, *ow = NULL, *oi = NULL;
 
-  iree_hal_buffer_mapping_t am; double* as;
-  IREE_RETURN_IF_ERROR(map_f64(A, &am, &as));
-  memcpy(a, as, n * n * sizeof(double));
-  iree_hal_buffer_unmap_range(&am);
+  if (!a || !w) {
+    status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED, "dsyevd: malloc");
+    goto cleanup;
+  }
 
-  lapack_int info = fn_dsyevd(LAPACK_ROW_MAJOR, 'V', 'L', n, a, n, w);
+  { iree_hal_buffer_mapping_t am; double* as;
+    status = map_f64(A, &am, &as);
+    if (!iree_status_is_ok(status)) goto cleanup;
+    memcpy(a, as, n * n * sizeof(double));
+    iree_hal_buffer_unmap_range(&am);
+  }
 
-  iree_hal_dim_t shv[] = {n, n}, shw[] = {n};
-  iree_hal_buffer_view_t *ov = 0, *ow = 0, *oi = 0;
-  IREE_RETURN_IF_ERROR(alloc_f64_view(st->device, shv, 2, a, n*n*sizeof(double), &ov));
-  IREE_RETURN_IF_ERROR(alloc_f64_view(st->device, shw, 1, w, n*sizeof(double), &ow));
-  IREE_RETURN_IF_ERROR(alloc_i32_scalar(st->device, (int32_t)info, &oi));
+  { lapack_int info = fn_dsyevd(LAPACK_ROW_MAJOR, 'V', 'L', n, a, n, w);
+    iree_hal_dim_t shv[] = {n, n}, shw[] = {n};
+    status = alloc_f64_view(st->device, shv, 2, a, n*n*sizeof(double), &ov);
+    if (!iree_status_is_ok(status)) goto cleanup;
+    status = alloc_f64_view(st->device, shw, 1, w, n*sizeof(double), &ow);
+    if (!iree_status_is_ok(status)) goto cleanup;
+    status = alloc_i32_scalar(st->device, (int32_t)info, &oi);
+    if (!iree_status_is_ok(status)) goto cleanup;
+  }
+
+  iree_vm_ref_wrap_assign(ov, iree_hal_buffer_view_type(), &rets->r0); ov = NULL;
+  iree_vm_ref_wrap_assign(ow, iree_hal_buffer_view_type(), &rets->r1); ow = NULL;
+  iree_vm_ref_wrap_assign(oi, iree_hal_buffer_view_type(), &rets->r2); oi = NULL;
+
+cleanup:
   free(a); free(w);
-  iree_vm_ref_wrap_assign(ov, iree_hal_buffer_view_type(), &rets->r0);
-  iree_vm_ref_wrap_assign(ow, iree_hal_buffer_view_type(), &rets->r1);
-  iree_vm_ref_wrap_assign(oi, iree_hal_buffer_view_type(), &rets->r2);
-  return iree_ok_status();
+  if (ov) iree_hal_buffer_view_release(ov);
+  if (ow) iree_hal_buffer_view_release(ow);
+  if (oi) iree_hal_buffer_view_release(oi);
+  return status;
 }
 
 // =========================================================================
@@ -516,66 +638,80 @@ static iree_status_t elodin_lapack_dgetrs(
   if (!VA || !VB) return iree_make_status(IREE_STATUS_INVALID_ARGUMENT, "dgetrs: null");
   int n = VIEW_DIM(VA, 0);
   int b_rank = VIEW_RANK(VB);
-
-  int nrhs;
   int matrix_rhs = (b_rank >= 2);
-  if (matrix_rhs) {
-    nrhs = VIEW_DIM(VB, 0);
-  } else {
-    nrhs = 1;
-  }
+  int nrhs = matrix_rhs ? VIEW_DIM(VB, 0) : 1;
 
+  iree_status_t status = iree_ok_status();
   double* a = (double*)malloc(n * n * sizeof(double));
   double* b = (double*)malloc(n * nrhs * sizeof(double));
   lapack_int* ipiv = (lapack_int*)calloc(n, sizeof(lapack_int));
+  double* bt = NULL;
+  iree_hal_buffer_view_t *ox = NULL, *oi = NULL;
 
   if (!a || !b || !ipiv) {
-    free(a); free(b); free(ipiv);
-    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED, "dgetrs: malloc failed");
+    status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED, "dgetrs: malloc");
+    goto cleanup;
   }
 
-  iree_hal_buffer_mapping_t am, bm; double *as, *bs;
-  IREE_RETURN_IF_ERROR(map_f64(VA, &am, &as));
-  memcpy(a, as, n * n * sizeof(double));
-  iree_hal_buffer_unmap_range(&am);
-  IREE_RETURN_IF_ERROR(map_f64(VB, &bm, &bs));
-  if (matrix_rhs) {
-    for (int i = 0; i < n; ++i)
-      for (int j = 0; j < nrhs; ++j)
-        b[i * nrhs + j] = bs[j * n + i];
-  } else {
-    memcpy(b, bs, n * sizeof(double));
+  { iree_hal_buffer_mapping_t am; double* as;
+    status = map_f64(VA, &am, &as);
+    if (!iree_status_is_ok(status)) goto cleanup;
+    memcpy(a, as, n * n * sizeof(double));
+    iree_hal_buffer_unmap_range(&am);
   }
-  iree_hal_buffer_unmap_range(&bm);
-
-  int ldb = matrix_rhs ? nrhs : 1;
-  lapack_int info = fn_dgetrf(LAPACK_ROW_MAJOR, n, n, a, n, ipiv);
-  if (info == 0) {
-    lapack_int info2 = fn_dgetrs(LAPACK_ROW_MAJOR, 'N', n, nrhs, a, n, ipiv, b, ldb);
-    if (info2 != 0) info = info2;
-  }
-  if (info != 0) {
-    for (int i = 0; i < n * nrhs; ++i) b[i] = 0.0;
+  { iree_hal_buffer_mapping_t bm; double* bs;
+    status = map_f64(VB, &bm, &bs);
+    if (!iree_status_is_ok(status)) goto cleanup;
+    if (matrix_rhs) {
+      for (int i = 0; i < n; ++i)
+        for (int j = 0; j < nrhs; ++j)
+          b[i * nrhs + j] = bs[j * n + i];
+    } else {
+      memcpy(b, bs, n * sizeof(double));
+    }
+    iree_hal_buffer_unmap_range(&bm);
   }
 
-  iree_hal_buffer_view_t *ox = 0, *oi = 0;
-  if (matrix_rhs) {
-    double* bt = (double*)malloc(nrhs * n * sizeof(double));
-    for (int i = 0; i < nrhs; ++i)
-      for (int j = 0; j < n; ++j)
-        bt[i * n + j] = b[j * nrhs + i];
-    iree_hal_dim_t sh_t[] = {(iree_hal_dim_t)nrhs, (iree_hal_dim_t)n};
-    IREE_RETURN_IF_ERROR(alloc_f64_view(st->device, sh_t, 2, bt, nrhs*n*sizeof(double), &ox));
-    free(bt);
-  } else {
-    iree_hal_dim_t sh1[] = {(iree_hal_dim_t)n};
-    IREE_RETURN_IF_ERROR(alloc_f64_view(st->device, sh1, 1, b, n*sizeof(double), &ox));
+  { int ldb = matrix_rhs ? nrhs : 1;
+    lapack_int info = fn_dgetrf(LAPACK_ROW_MAJOR, n, n, a, n, ipiv);
+    if (info == 0) {
+      lapack_int info2 = fn_dgetrs(LAPACK_ROW_MAJOR, 'N', n, nrhs, a, n, ipiv, b, ldb);
+      if (info2 != 0) info = info2;
+    }
+    if (info != 0) {
+      for (int i = 0; i < n * nrhs; ++i) b[i] = 0.0;
+    }
+
+    if (matrix_rhs) {
+      bt = (double*)malloc(nrhs * n * sizeof(double));
+      if (!bt) {
+        status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED, "dgetrs: malloc");
+        goto cleanup;
+      }
+      for (int i = 0; i < nrhs; ++i)
+        for (int j = 0; j < n; ++j)
+          bt[i * n + j] = b[j * nrhs + i];
+      iree_hal_dim_t sh_t[] = {(iree_hal_dim_t)nrhs, (iree_hal_dim_t)n};
+      status = alloc_f64_view(st->device, sh_t, 2, bt, nrhs*n*sizeof(double), &ox);
+      if (!iree_status_is_ok(status)) goto cleanup;
+    } else {
+      iree_hal_dim_t sh1[] = {(iree_hal_dim_t)n};
+      status = alloc_f64_view(st->device, sh1, 1, b, n*sizeof(double), &ox);
+      if (!iree_status_is_ok(status)) goto cleanup;
+    }
+
+    status = alloc_i32_scalar(st->device, (int32_t)info, &oi);
+    if (!iree_status_is_ok(status)) goto cleanup;
   }
-  IREE_RETURN_IF_ERROR(alloc_i32_scalar(st->device, (int32_t)info, &oi));
-  free(a); free(b); free(ipiv);
-  iree_vm_ref_wrap_assign(ox, iree_hal_buffer_view_type(), &rets->r0);
-  iree_vm_ref_wrap_assign(oi, iree_hal_buffer_view_type(), &rets->r1);
-  return iree_ok_status();
+
+  iree_vm_ref_wrap_assign(ox, iree_hal_buffer_view_type(), &rets->r0); ox = NULL;
+  iree_vm_ref_wrap_assign(oi, iree_hal_buffer_view_type(), &rets->r1); oi = NULL;
+
+cleanup:
+  free(a); free(b); free(ipiv); free(bt);
+  if (ox) iree_hal_buffer_view_release(ox);
+  if (oi) iree_hal_buffer_view_release(oi);
+  return status;
 }
 
 // =========================================================================
@@ -699,18 +835,29 @@ iree_status_t elodin_lapack_module_create(
         "LAPACK symbols not found (no OpenBLAS loaded in process)");
   }
 
-  static elodin_lapack_module_t module_storage;
-  module_storage.host_allocator = alloc;
-  module_storage.device = device;
+  // Heap-allocate per-instance so multiple modules (e.g. from fork)
+  // each keep their own device pointer.
+  elodin_lapack_module_t* mod =
+      (elodin_lapack_module_t*)calloc(1, sizeof(elodin_lapack_module_t));
+  if (!mod) {
+    return iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED,
+        "elodin_lapack: module alloc failed");
+  }
+  mod->host_allocator = alloc;
+  mod->device = device;
 
   iree_vm_module_t iface;
-  IREE_RETURN_IF_ERROR(iree_vm_module_initialize(&iface, &module_storage));
+  iree_status_t status = iree_vm_module_initialize(&iface, mod);
+  if (!iree_status_is_ok(status)) { free(mod); return status; }
   iface.alloc_state = elodin_lapack_alloc_state;
   iface.free_state = elodin_lapack_free_state;
 
-  IREE_RETURN_IF_ERROR(iree_vm_native_module_create(
-      &iface, &elodin_lapack_descriptor_, instance, alloc, out_module));
+  status = iree_vm_native_module_create(
+      &iface, &elodin_lapack_descriptor_, instance, alloc, out_module);
+  if (!iree_status_is_ok(status)) { free(mod); return status; }
 
+  // The native module's built-in lookup is deterministic for a given
+  // descriptor so a single static pointer is safe across instances.
   elodin_lapack_original_lookup = (*out_module)->lookup_function;
   (*out_module)->lookup_function = elodin_lapack_lookup_function;
   return iree_ok_status();

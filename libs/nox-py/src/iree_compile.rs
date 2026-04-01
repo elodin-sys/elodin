@@ -389,23 +389,58 @@ def _extract_large_constants(mlir_text, threshold_bytes=None):
         else:
             threshold_bytes = 1_048_576  # 1 MB default
 
-    pattern = re.compile(
+    dense_pat = re.compile(
         r'\s+%\S+\s*=\s*stablehlo\.constant\s+dense<"0x([0-9a-fA-F]+)">\s*:\s*tensor<([^>]+)>'
     )
+    resource_const_pat = re.compile(
+        r'\s+%\S+\s*=\s*stablehlo\.constant\s+dense_resource<(\w+)>\s*:\s*tensor<([^>]+)>'
+    )
+    resource_blob_pat = re.compile(
+        r'\s+(\w+)\s*:\s*"0x([0-9a-fA-F]+)"'
+    )
 
+    # First pass: collect resource blob hex data from the MLIR metadata
+    # section (after {-#).  Scanning the module body would false-match
+    # hex strings in backend_config or serialized constant attrs.
+    resource_data = {}
+    in_resource_section = False
+    for line in mlir_text.split('\n'):
+        if '{-#' in line:
+            in_resource_section = True
+        if not in_resource_section:
+            continue
+        blob_m = resource_blob_pat.match(line)
+        if blob_m:
+            resource_data[blob_m.group(1)] = blob_m.group(2)
+
+    # Second pass: scan constant definitions in module order.
+    # Threshold uses strictly-greater to match the compiler pass.
     extracted = []
     for line in mlir_text.split('\n'):
-        m = pattern.match(line)
-        if not m:
+        m = dense_pat.match(line)
+        if m:
+            hex_data, shape_dtype = m.groups()
+            raw_bytes = bytes.fromhex(hex_data)
+            if len(raw_bytes) <= threshold_bytes:
+                continue
+            parts = shape_dtype.split('x')
+            dtype_str = parts[-1]
+            shape = [int(d) for d in parts[:-1]]
+            extracted.append((raw_bytes, shape, dtype_str))
             continue
-        hex_data, shape_dtype = m.groups()
-        raw_bytes = bytes.fromhex(hex_data)
-        if len(raw_bytes) < threshold_bytes:
-            continue
-        parts = shape_dtype.split('x')
-        dtype_str = parts[-1]
-        shape = [int(d) for d in parts[:-1]]
-        extracted.append((raw_bytes, shape, dtype_str))
+        m = resource_const_pat.match(line)
+        if m:
+            blob_name, shape_dtype = m.groups()
+            hex_data = resource_data.get(blob_name)
+            if not hex_data:
+                continue
+            raw_bytes = bytes.fromhex(hex_data)
+            if len(raw_bytes) <= threshold_bytes:
+                continue
+            parts = shape_dtype.split('x')
+            dtype_str = parts[-1]
+            shape = [int(d) for d in parts[:-1]]
+            extracted.append((raw_bytes, shape, dtype_str))
 
     if extracted:
         total_mb = sum(len(b) for b, _, _ in extracted) / 1e6
@@ -897,11 +932,15 @@ def compile_to_vmfb(
                     "bf16" => nox::ElementType::Bf16,
                     "f32" => nox::ElementType::F32,
                     "f64" => nox::ElementType::F64,
-                    "i8" => nox::ElementType::S8,
-                    "i16" => nox::ElementType::S16,
-                    "i32" => nox::ElementType::S32,
-                    "i64" => nox::ElementType::S64,
-                    _ => nox::ElementType::F64,
+                    "i1" | "i8" | "ui8" => nox::ElementType::S8,
+                    "i16" | "ui16" => nox::ElementType::S16,
+                    "i32" | "ui32" => nox::ElementType::S32,
+                    "i64" | "ui64" => nox::ElementType::S64,
+                    other => {
+                        return Err(Error::IreeCompilationFailed(format!(
+                            "unsupported dtype '{other}' in promoted constant"
+                        )));
+                    }
                 };
                 promoted_constants.push(crate::exec::ConstantSpec {
                     name: format!("promoted_{}", promoted_constants.len()),
