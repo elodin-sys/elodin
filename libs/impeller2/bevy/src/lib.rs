@@ -438,6 +438,7 @@ fn sink_inner(
                 world_sink.schema_reg.0.extend(dump_schema.schemas);
             }
             OwnedPacket::Table(table) => {
+                let _span = tracing::info_span!("impeller2_table_sink").entered();
                 let mut collector = CacheCollector {
                     collected: Vec::new(),
                 };
