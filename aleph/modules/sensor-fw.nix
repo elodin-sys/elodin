@@ -70,6 +70,17 @@ in {
       default = 106;
       description = "GPIO line used to pulse STM32 NRST on the open-source expansion board.";
     };
+
+    gps.model = mkOption {
+      type = types.nullOr (types.enum ["m10q" "m9n"]);
+      default = null;
+      description = ''
+        u-blox GPS module connected on the J7 connector.
+        Set to "m10q" for SAM-M10Q or "m9n" for NEO-M9N / M9N-5883.
+        When set, GPS-disciplined timestamping is automatically enabled.
+        When null (default), no GPS is expected and timestamping uses wall-clock.
+      '';
+    };
   };
 
   config = mkIf cfg.enable {
@@ -79,6 +90,15 @@ in {
         message = "services.sensor-fw and services.c-blinky are mutually exclusive (both flash the STM32).";
       }
     ];
+
+    services.sensor-fw.package = mkDefault (pkgs.sensor-fw.override {
+      gpsBaudRate =
+        if cfg.gps.model == "m9n"
+        then 38400
+        else 9600;
+    });
+
+    services.serial-bridge.gpsClockSource = mkDefault (cfg.gps.model != null);
 
     environment.systemPackages = [cfg.package];
 

@@ -20,7 +20,7 @@ const ELRS_PERIOD: fugit::MicrosDuration<u64> = ELRS_RATE.into_duration();
 const CAN_RATE: fugit::Hertz<u64> = fugit::Hertz::<u64>::Hz(10);
 const CAN_PERIOD: fugit::MicrosDuration<u64> = CAN_RATE.into_duration();
 
-const USB_LOG_RATE: fugit::Hertz<u64> = fugit::Hertz::<u64>::Hz(50);
+const USB_LOG_RATE: fugit::Hertz<u64> = fugit::Hertz::<u64>::Hz(10);
 const USB_LOG_PERIOD: fugit::MicrosDuration<u64> = USB_LOG_RATE.into_duration();
 
 /// Tracks which hardware components initialized successfully
@@ -30,8 +30,11 @@ struct HardwareStatus {
     usb_hub: bool,
     bmm350: bool,
     bmp581: bool,
-    bmi270: bool,
+    bmi270_i2c: bool,
+    bmi270_spi: bool,
     fram: bool,
+    gps: bool,
+    compass: bool,
 }
 
 impl HardwareStatus {
@@ -72,16 +75,40 @@ impl HardwareStatus {
             }
         );
         defmt::info!(
-            "BMI270 (IMU):   {}",
-            if self.bmi270 {
+            "BMI270 I2C:     {}",
+            if self.bmi270_i2c {
                 "✓ Ready"
             } else {
-                "✗ Failed"
+                "✗ Not detected"
+            }
+        );
+        defmt::info!(
+            "BMI270 SPI:     {}",
+            if self.bmi270_spi {
+                "✓ Ready"
+            } else {
+                "✗ Not detected"
             }
         );
         defmt::info!(
             "FRAM:           {}",
             if self.fram {
+                "✓ Ready"
+            } else {
+                "✗ Not detected"
+            }
+        );
+        defmt::info!(
+            "GPS (UBX):      {}",
+            if self.gps {
+                "✓ UART ready"
+            } else {
+                "✗ Not configured"
+            }
+        );
+        defmt::info!(
+            "Compass (Ext):  {}",
+            if self.compass {
                 "✓ Ready"
             } else {
                 "✗ Not detected"
@@ -94,13 +121,16 @@ impl HardwareStatus {
             self.usb_hub,
             self.bmm350,
             self.bmp581,
-            self.bmi270,
+            self.bmi270_i2c,
+            self.bmi270_spi,
             self.fram,
+            self.gps,
+            self.compass,
         ]
         .iter()
         .filter(|&&x| x)
         .count();
-        defmt::info!("Ready: {}/6 devices", ready_count);
+        defmt::info!("Ready: {}/9 devices", ready_count);
     }
 }
 
@@ -117,6 +147,7 @@ fn main() -> ! {
         green_led,
         blue_led,
         mut amber_led,
+        pk1: spi5_cs,
 
         // GPIO connector pins
         mut gpio,
@@ -143,21 +174,21 @@ fn main() -> ! {
     let mut blue_led = led::PeriodicLed::new(blue_led, 200u32.millis());
 
     let elrs_uart = Box::new(healing_usart::HealingUsart::new(usart::Usart::new(
-        dp.USART2,
+        dp.UART8,
         crsf::CRSF_BAUDRATE,
         usart::UsartConfig::default(),
         &clock_cfg,
     )));
-    defmt::info!("Configured ELRS UART");
+    defmt::info!("Configured ELRS UART (UART8)");
     let mut crsf = crsf::CrsfReceiver::new(elrs_uart);
 
     let uart_bridge = Box::new(healing_usart::HealingUsart::new(usart::Usart::new(
         dp.USART1,
-        1000000,
+        1_000_000,
         usart::UsartConfig::default(),
         &clock_cfg,
     )));
-    defmt::info!("Configured UART bridge");
+    defmt::info!("Configured UART bridge (2 Mbaud)");
 
     let mut debug_uart = Box::new(healing_usart::HealingUsart::new(usart::Usart::new(
         dp.USART6,
@@ -166,6 +197,14 @@ fn main() -> ! {
         &clock_cfg,
     )));
     defmt::info!("Configured debug UART");
+
+    let gps_uart = Box::new(healing_usart::HealingUsart::new(usart::Usart::new(
+        dp.USART2,
+        ubx::GPS_BAUDRATE,
+        usart::UsartConfig::default(),
+        &clock_cfg,
+    )));
+    defmt::info!("Configured GPS UART (USART2 @ {})", ubx::GPS_BAUDRATE);
 
     // Generate a 600kHz PWM signal on TIM3
     let pwm_timer = dp.TIM3.timer(600.kHz(), Default::default(), &clock_cfg);
@@ -284,12 +323,12 @@ fn main() -> ! {
 
     let mut bmi270 = match bmi270::Bmi270::new(&mut i2c2_dma, bmi270::Address::Low, &mut delay) {
         Ok(sensor) => {
-            defmt::info!("Configured BMI270");
-            hw_status.bmi270 = true;
+            defmt::info!("Configured BMI270 (I2C)");
+            hw_status.bmi270_i2c = true;
             Some(sensor)
         }
         Err(e) => {
-            defmt::warn!("Failed to initialize BMI270: {:?}", e);
+            defmt::warn!("Failed to initialize BMI270 I2C: {:?}", e);
             None
         }
     };
@@ -340,16 +379,91 @@ fn main() -> ! {
         };
     }
 
-    // Print hardware initialization report
+    let mut bmi270_spi = match bmi270_spi::Bmi270Spi::new(dp.SPI5, spi5_cs, &mut delay) {
+        Ok(sensor) => {
+            defmt::info!("Configured BMI270 (SPI)");
+            hw_status.bmi270_spi = true;
+            Some(sensor)
+        }
+        Err(e) => {
+            defmt::warn!("Failed to initialize BMI270 SPI: {:?}", e);
+            None
+        }
+    };
+
+    // I2C4 for external compass (QMC5883L on J7)
+    let i2c4_raw = i2c::I2c::new(
+        dp.I2C4,
+        i2c::I2cConfig {
+            speed: i2c::I2cSpeed::Standard100K,
+            ..Default::default()
+        },
+        &clock_cfg,
+    );
+    let i2c::I2c { regs, cfg } = i2c4_raw;
+    let mut i2c4 = i2c::I2c {
+        regs: regs.into(),
+        cfg,
+    };
+    defmt::info!("Configured I2C4 for external compass");
+
+    // GPS via UBX on USART2 (J7)
+    let mut gps = ubx::Ubx::new(gps_uart, &mut delay);
+    hw_status.gps = true;
+    defmt::info!("Configured UBX GPS driver");
+
+    // Print hardware initialization report (before compass, so bridge is ready for diagnostics)
+    let mut cmd_bridge = command::CommandBridge::new(uart_bridge);
+
+    let mut ext_compass = match qmc5883l::Qmc5883l::new(&mut i2c4, &mut delay) {
+        Ok(sensor) => {
+            defmt::info!("Configured QMC5883L external compass");
+            hw_status.compass = true;
+            Some(sensor)
+        }
+        Err(e) => {
+            defmt::warn!("Failed to initialize QMC5883L: {:?}", e);
+            None
+        }
+    };
+
     hw_status.print_report();
 
-    let mut cmd_bridge = command::CommandBridge::new(uart_bridge);
+    let imu_count = bmi270.is_some() as u32 + bmi270_spi.is_some() as u32;
+    let decimation = if imu_count >= 2 { 4 } else { 2 };
+    let mut integrator = coning_sculling::ConingScullingIntegrator::new(decimation);
+    let mut last_imu_time = monotonic.now();
+    defmt::info!(
+        "Coning/sculling: {} IMU(s), N={}, target ~800 Hz",
+        imu_count,
+        decimation
+    );
+
+    let mut i2c_samples_sec: u32 = 0;
+    let mut spi_samples_sec: u32 = 0;
+    let mut imu_out_sec: u32 = 0;
+    let mut last_diag = monotonic.now();
+    let mut last_i2c_gyro: [f32; 3] = [0.0; 3];
+    let mut last_i2c_accel: [f32; 3] = [0.0; 3];
+    let mut last_spi_gyro: [f32; 3] = [0.0; 3];
+    let mut last_spi_accel: [f32; 3] = [0.0; 3];
+    let mut last_out_gyro: [f32; 3] = [0.0; 3];
+    let mut last_out_accel: [f32; 3] = [0.0; 3];
+    let mut last_dt_us: u64 = 0;
+    let mut loop_count: u32 = 0;
+    let mut max_loop_cycles: u32 = 0;
+    let mut uart_tx_cycles: u32 = 0;
+    let mut loop_start_cycles: u32 = cortex_m::peripheral::DWT::cycle_count();
+    let mut tx_ok: u32 = 0;
+    let mut tx_err: u32 = 0;
+    let mut tx_bytes: u64 = 0;
+    let mut repoll_samples: u32 = 0;
+    let mut repoll_emits: u32 = 0;
 
     let mut last_elrs_update = monotonic.now();
     let mut last_dshot_update = monotonic.now();
     let mut last_can_update = monotonic.now();
     let mut last_usb_log = monotonic.now();
-
     let usb_alloc = usb_serial::usb_bus(
         dp.OTG2_HS_GLOBAL,
         dp.OTG2_HS_DEVICE,
@@ -360,6 +474,14 @@ fn main() -> ! {
 
     amber_led.set_low();
     loop {
+        let cyc = cortex_m::peripheral::DWT::cycle_count();
+        let iter_cycles = cyc.wrapping_sub(loop_start_cycles);
+        loop_start_cycles = cyc;
+        if iter_cycles > max_loop_cycles {
+            max_loop_cycles = iter_cycles;
+        }
+        loop_count += 1;
+
         let now = monotonic.now();
         let ts = now.duration_since_epoch();
         usb.poll();
@@ -387,12 +509,6 @@ fn main() -> ! {
         } else if now.checked_duration_since(last_usb_log).unwrap() > USB_LOG_PERIOD {
             last_usb_log = now;
             let record = blackbox::Record {
-                ts: ts.to_millis() as u32,
-                mag: bmm350.as_ref().map_or([0.0; 3], |s| s.data.mag),
-                gyro: bmi270.as_ref().map_or([0.0; 3], |s| s.gyro_dps),
-                accel: bmi270.as_ref().map_or([0.0; 3], |s| s.accel_g),
-                mag_temp: bmm350.as_ref().map_or(0.0, |s| s.data.temp),
-                mag_sample: bmm350.as_ref().map_or(0, |s| s.data.sample),
                 baro: bmp581.as_ref().map_or(0.0, |s| s.data.pressure_pascal),
                 baro_temp: bmp581.as_ref().map_or(0.0, |s| s.data.temp_c),
                 vin: monitor.data.vin,
@@ -401,7 +517,7 @@ fn main() -> ! {
                 rtc_vbat: monitor.data.rtc_vbat,
                 cpu_temp: monitor.data.cpu_temp,
             };
-            cmd_bridge.write_record(&record);
+            let _ = cmd_bridge.write_record(&record);
         }
 
         if let Some(command) = cmd_bridge.read() {
@@ -413,22 +529,235 @@ fn main() -> ! {
         let mag_updated = bmm350
             .as_mut()
             .is_some_and(|s| s.update(&mut i2c3_dma, now));
-        if let Some(ref mut s) = bmi270 {
-            let _ = s.update(&mut i2c2_dma, now);
+        // IMU: poll both BMI270s, feed into coning/sculling integrator, emit at ~800 Hz
+        let i2c_imu_updated = bmi270
+            .as_mut()
+            .is_some_and(|s| s.update(&mut i2c2_dma, now));
+        let spi_imu_updated = bmi270_spi.as_mut().is_some_and(|s| s.update(now));
+
+        let mag = bmm350.as_ref().map_or([0.0; 3], |s| s.data.mag);
+
+        macro_rules! feed_integrator {
+            ($gyro:expr, $accel:expr) => {{
+                let imu_now = monotonic.now();
+                let dt_us = imu_now
+                    .checked_duration_since(last_imu_time)
+                    .map_or(1, |d| d.ticks().max(1));
+                last_imu_time = imu_now;
+                last_dt_us = dt_us;
+                let dt = dt_us as f32 / 1_000_000.0;
+                if let Some(out) = integrator.push($gyro, $accel, dt) {
+                    imu_out_sec += 1;
+                    last_out_gyro = out.gyro;
+                    last_out_accel = out.accel;
+                    let record = blackbox::ImuRecord {
+                        accel: out.accel,
+                        gyro: out.gyro,
+                        mag,
+                    };
+                    let c0 = cortex_m::peripheral::DWT::cycle_count();
+                    let (ok, len) = cmd_bridge.write_imu_record(&record);
+                    uart_tx_cycles += cortex_m::peripheral::DWT::cycle_count().wrapping_sub(c0);
+                    if ok {
+                        tx_ok += 1;
+                        tx_bytes += len as u64;
+                    } else {
+                        tx_err += 1;
+                    }
+                    true
+                } else {
+                    false
+                }
+            }};
         }
+
+        macro_rules! poll_i2c {
+            () => {
+                if bmi270
+                    .as_mut()
+                    .is_some_and(|s| s.update(&mut i2c2_dma, monotonic.now()))
+                {
+                    let s = bmi270.as_ref().unwrap();
+                    i2c_samples_sec += 1;
+                    let gyro = [s.gyro_dps[0], s.gyro_dps[1], -s.gyro_dps[2]];
+                    let accel = [s.accel_g[0], s.accel_g[1], -s.accel_g[2]];
+                    last_i2c_gyro = gyro;
+                    last_i2c_accel = accel;
+                    repoll_samples += 1;
+                    if feed_integrator!(gyro, accel) {
+                        repoll_emits += 1;
+                    }
+                }
+            };
+        }
+
+        if i2c_imu_updated {
+            let s = bmi270.as_ref().unwrap();
+            i2c_samples_sec += 1;
+            // I2C BMI270 (U16, back of PCB): convert to FRD body frame
+            let gyro = [s.gyro_dps[0], s.gyro_dps[1], -s.gyro_dps[2]];
+            let accel = [s.accel_g[0], s.accel_g[1], -s.accel_g[2]];
+            last_i2c_gyro = gyro;
+            last_i2c_accel = accel;
+            if feed_integrator!(gyro, accel) {
+                poll_i2c!();
+            }
+        }
+        if spi_imu_updated {
+            let s = bmi270_spi.as_ref().unwrap();
+            spi_samples_sec += 1;
+            // SPI BMI270 (U18, front of PCB): align to I2C + convert to FRD
+            let gyro = [-s.gyro_dps[0], s.gyro_dps[1], s.gyro_dps[2]];
+            let accel = [-s.accel_g[0], s.accel_g[1], s.accel_g[2]];
+            last_spi_gyro = gyro;
+            last_spi_accel = accel;
+            if feed_integrator!(gyro, accel) {
+                poll_i2c!();
+            }
+        }
+
+        if now.checked_duration_since(last_diag).unwrap() > fugit::MicrosDuration::<u64>::secs(1) {
+            last_diag = now;
+            use core::fmt::Write as FmtWrite;
+            let mut log_buf = heapless::String::<86>::new();
+            let _ = write!(
+                log_buf,
+                "i2c={}/s spi={}/s out={}/s dt={}us",
+                i2c_samples_sec, spi_samples_sec, imu_out_sec, last_dt_us,
+            );
+            let _ = cmd_bridge.write_log(log_buf.as_bytes());
+
+            log_buf.clear();
+            let _ = write!(
+                log_buf,
+                "I2C g=[{:.1},{:.1},{:.1}] a=[{:.3},{:.3},{:.3}]",
+                last_i2c_gyro[0],
+                last_i2c_gyro[1],
+                last_i2c_gyro[2],
+                last_i2c_accel[0],
+                last_i2c_accel[1],
+                last_i2c_accel[2],
+            );
+            let _ = cmd_bridge.write_log(log_buf.as_bytes());
+
+            if spi_samples_sec > 0 {
+                log_buf.clear();
+                let _ = write!(
+                    log_buf,
+                    "SPI g=[{:.1},{:.1},{:.1}] a=[{:.3},{:.3},{:.3}]",
+                    last_spi_gyro[0],
+                    last_spi_gyro[1],
+                    last_spi_gyro[2],
+                    last_spi_accel[0],
+                    last_spi_accel[1],
+                    last_spi_accel[2],
+                );
+                let _ = cmd_bridge.write_log(log_buf.as_bytes());
+            }
+
+            log_buf.clear();
+            let _ = write!(
+                log_buf,
+                "OUT g=[{:.1},{:.1},{:.1}] a=[{:.3},{:.3},{:.3}]",
+                last_out_gyro[0],
+                last_out_gyro[1],
+                last_out_gyro[2],
+                last_out_accel[0],
+                last_out_accel[1],
+                last_out_accel[2],
+            );
+            let _ = cmd_bridge.write_log(log_buf.as_bytes());
+
+            log_buf.clear();
+            let _ = write!(
+                log_buf,
+                "loops={}/s max={}us tx={}us",
+                loop_count,
+                max_loop_cycles / 400,
+                uart_tx_cycles / 400,
+            );
+            let _ = cmd_bridge.write_log(log_buf.as_bytes());
+
+            log_buf.clear();
+            let _ = write!(
+                log_buf,
+                "tx: {}ok {}err {}KB/s repoll: {}/{}",
+                tx_ok,
+                tx_err,
+                tx_bytes / 1024,
+                repoll_samples,
+                repoll_emits,
+            );
+            let _ = cmd_bridge.write_log(log_buf.as_bytes());
+
+            i2c_samples_sec = 0;
+            spi_samples_sec = 0;
+            imu_out_sec = 0;
+            loop_count = 0;
+            max_loop_cycles = 0;
+            uart_tx_cycles = 0;
+            tx_ok = 0;
+            tx_err = 0;
+            tx_bytes = 0;
+            repoll_samples = 0;
+            repoll_emits = 0;
+        }
+
         if let Some(ref mut s) = bmp581 {
             let _ = s.update(&mut i2c3_dma, now);
         }
         let _ = monitor.update(now);
 
+        // GPS: poll UART for new UBX frames
+        if gps.update() {
+            let d = &gps.data;
+            let record = blackbox::GpsRecord {
+                unix_epoch_ms: d.unix_epoch_ms,
+                itow: d.itow,
+                lat: d.lat,
+                lon: d.lon,
+                alt_msl: d.alt_msl,
+                alt_wgs84: d.alt_wgs84,
+                vel_ned: [d.vel_n, d.vel_e, d.vel_d],
+                ground_speed: d.ground_speed as u32,
+                heading_motion: d.heading_motion,
+                h_acc: d.h_acc,
+                v_acc: d.v_acc,
+                s_acc: d.s_acc,
+                fix_type: d.fix_type,
+                satellites: d.satellites,
+                valid_flags: d.valid_flags,
+                _pad: 0,
+            };
+            let _ = cmd_bridge.write_gps_record(&record);
+            if gps.fix_count % 5 == 1 {
+                defmt::info!(
+                    "GPS fix={} sats={} lat={} lon={} h_acc={}mm",
+                    d.fix_type,
+                    d.satellites,
+                    d.lat,
+                    d.lon,
+                    d.h_acc,
+                );
+            }
+        }
+
+        // External compass: poll I2C4
+        let compass_updated = ext_compass
+            .as_mut()
+            .is_some_and(|s| s.update(&mut i2c4, now));
+        if compass_updated {
+            let c = &ext_compass.as_ref().unwrap().data;
+            let record = blackbox::CompassRecord {
+                mag: [c.mag_x, c.mag_y, c.mag_z],
+                status: c.status,
+                _pad: 0,
+            };
+            let _ = cmd_bridge.write_compass_record(&record);
+        }
+
         if mag_updated {
             let record = blackbox::Record {
-                ts: ts.to_millis() as u32,
-                mag: bmm350.as_ref().map_or([0.0; 3], |s| s.data.mag),
-                gyro: bmi270.as_ref().map_or([0.0; 3], |s| s.gyro_dps),
-                accel: bmi270.as_ref().map_or([0.0; 3], |s| s.accel_g),
-                mag_temp: bmm350.as_ref().map_or(0.0, |s| s.data.temp),
-                mag_sample: bmm350.as_ref().map_or(0, |s| s.data.sample),
                 baro: bmp581.as_ref().map_or(0.0, |s| s.data.pressure_pascal),
                 baro_temp: bmp581.as_ref().map_or(0.0, |s| s.data.temp_c),
                 vin: monitor.data.vin,

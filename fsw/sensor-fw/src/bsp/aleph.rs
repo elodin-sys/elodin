@@ -227,11 +227,11 @@ impl Pins {
             pd7: Pin::new(Port::D, 7, PinMode::Alt(5)),
             pg10: Pin::new(Port::G, 10, PinMode::Alt(5)), // CS pin typically used as GPIO
 
-            // SPI5, AF: 5
+            // SPI5, AF: 5 (CS managed as GPIO for software control)
             pk0: Pin::new(Port::K, 0, PinMode::Alt(5)),
             pj11: Pin::new(Port::J, 11, PinMode::Alt(5)),
             pj10: Pin::new(Port::J, 10, PinMode::Alt(5)),
-            pk1: Pin::new(Port::K, 1, PinMode::Alt(5)), // CS pin typically used as GPIO
+            pk1: Pin::new(Port::K, 1, PinMode::Output),
 
             // CAN1, AF: 9
             ph14: Pin::new(Port::H, 14, PinMode::Alt(9)),

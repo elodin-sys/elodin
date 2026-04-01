@@ -45,7 +45,7 @@
         # aleph-cuda # opt-in CUDA, cuDNN, TensorRT, DeepStream, and GPU Python tooling
 
         # default fsw (pick one: sensor-fw OR c-blinky, they are mutually exclusive)
-        sensor-fw # full sensor firmware: streams IMU/mag/baro data to elodin-db at 1 Mbaud
+        sensor-fw # full sensor firmware: streams IMU/mag/baro/GPS data to elodin-db
         # c-blinky # deploy-time STM32 bring-up firmware flashed from the Orin during activation
         mekf # a basic attitude mekf that runs on the sensor data from the expansion board
         msp-osd # MSP DisplayPort OSD for FPV goggles, displays attitude from MEKF
@@ -83,6 +83,11 @@
       #   dbUniqueOnBoot = true;            # Create unique db folder on each boot
       #   openFirewall = true;              # Open ports 2240 and 2248
       # };
+
+      # GPS module (optional, connected on J7)
+      # Uncomment ONE line to enable GPS-disciplined timestamping:
+      # services.sensor-fw.gps.model = "m10q";   # SAM-M10Q (9600 baud)
+      # services.sensor-fw.gps.model = "m9n";    # NEO-M9N / M9N-5883 (38400 baud)
 
       # Enable MSP OSD service (uses MEKF attitude output by default)
       services.msp-osd = {

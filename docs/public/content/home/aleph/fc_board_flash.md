@@ -80,12 +80,12 @@ If the flash unit reports `Timed out waiting for STM32 bootloader on /dev/ttyTHS
 
 ### Viewing Logs in the Editor
 
-`serial-bridge` forwards the MCU lines into Elodin-DB as `LogEntry` messages on the `aleph.c-blinky.log` stream.
+`serial-bridge` forwards the MCU lines into Elodin-DB as `LogEntry` messages on the `aleph.stm32.log` stream.
 
 Open the Editor against the Aleph database and add a log panel such as:
 
 ```kdl
-log_stream "aleph.c-blinky.log" name="STM32 c-blinky"
+log_stream "aleph.stm32.log" name="STM32 c-blinky"
 ```
 
 You should see the `c-blinky boot` message followed by alternating `LED: ON` and `LED: OFF` entries.

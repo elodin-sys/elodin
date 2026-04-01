@@ -148,56 +148,65 @@ fn print_os_info() {
 
 async fn print_sensor_info() -> anyhow::Result<()> {
     #[derive(AsVTable, Default, Debug, Clone, TryFromBytes, Immutable, KnownLayout)]
-    #[db(parent = "aleph")]
-    struct SensorInfo {
-        pub mag: [f32; 3],
-        pub gyro: [f32; 3],
+    #[db(parent = "imu")]
+    struct ImuInfo {
         pub accel: [f32; 3],
+        pub gyro: [f32; 3],
+        pub mag: [f32; 3],
+    }
+
+    #[derive(AsVTable, Default, Debug, Clone, TryFromBytes, Immutable, KnownLayout)]
+    #[db(parent = "aleph")]
+    struct AlephInfo {
         pub baro: f32,
         pub q_hat: [f64; 4],
     }
 
     const COLOR: Color = Color::Purple;
 
-    let mut client =
-        impeller2_stellar::Client::connect(SocketAddr::new([127, 0, 0, 1].into(), 2240)).await?;
-    let mut sub = client.subscribe::<SensorInfo>().await?;
-    let info = sub.next().await?;
+    let addr = SocketAddr::new([127, 0, 0, 1].into(), 2240);
+    let mut imu_client = impeller2_stellar::Client::connect(addr).await?;
+    let mut imu_sub = imu_client.subscribe::<ImuInfo>().await?;
+    let imu = imu_sub.next().await?;
+
+    let mut aleph_client = impeller2_stellar::Client::connect(addr).await?;
+    let mut aleph_sub = aleph_client.subscribe::<AlephInfo>().await?;
+    let aleph = aleph_sub.next().await?;
 
     print_header("Sensors", COLOR);
 
     println!(
         "{} {} {:.3?}",
         divider_line(COLOR),
-        COLOR.bold().paint("Mag"),
-        info.mag
+        COLOR.bold().paint("Accel"),
+        imu.accel
     );
 
     println!(
         "{} {} {:.3?}",
         divider_line(COLOR),
         COLOR.bold().paint("Gyro"),
-        info.gyro
+        imu.gyro
     );
 
     println!(
         "{} {} {:.3?}",
         divider_line(COLOR),
-        COLOR.bold().paint("Accel"),
-        info.accel
+        COLOR.bold().paint("Mag"),
+        imu.mag
     );
 
     println!(
         "{} {} {:.3?}",
         divider_line(COLOR),
         COLOR.bold().paint("Baro"),
-        info.baro
+        aleph.baro
     );
     println!(
         "{} {} {:.3?}",
         divider_line(COLOR),
         COLOR.bold().paint("Attitude (Quat)"),
-        info.q_hat
+        aleph.q_hat
     );
 
     Ok(())
