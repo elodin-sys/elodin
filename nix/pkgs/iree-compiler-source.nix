@@ -144,6 +144,22 @@ in
 
       # Static libraries
       "-DBUILD_SHARED_LIBS=OFF"
+
+      # IREE compiler-specific flags / optimizations
+      # Only build LLVM backends for architectures we actually target.
+      # X86 for CI/dev machines, AArch64 for Apple Silicon and Jetson Orin.
+      "-DLLVM_TARGETS_TO_BUILD=X86;AArch64"
+      "-DLLVM_ENABLE_ASSERTIONS=OFF"
+      "-DIREE_ENABLE_ASSERTIONS=OFF"
+      # VMVX backend not used for compilation (only needed in runtime for fallback)
+      "-DIREE_TARGET_BACKEND_VMVX=OFF"
+
+      # The C output format is not used by Elodin
+      "-DIREE_OUTPUT_FORMAT_C=OFF"
+
+      # TFLite bindings not needed
+      "-DIREE_BUILD_BINDINGS_TFLITE=OFF"
+      "-DIREE_BUILD_BINDINGS_TFLITE_JAVA=OFF"
     ];
 
     # Note: we don't restrict --target because partial builds have dependency
