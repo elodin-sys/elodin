@@ -13,8 +13,7 @@
   patchelf ? null,
   ...
 }:
-  assert stdenv.isLinux -> musl != null;
-  let
+assert stdenv.isLinux -> musl != null; let
   version = "3.11.0";
 
   # Same IREE source as iree-runtime.nix
@@ -116,47 +115,48 @@ in
     # Host tools built during compilation need libstdc++ (Linux) or libc++ (macOS)
     LD_LIBRARY_PATH = lib.optionalString stdenv.isLinux (lib.makeLibraryPath [stdenv.cc.cc.lib]);
 
-    cmakeFlags = [
-      "-DIREE_BUILD_COMPILER=ON"
-      "-DIREE_BUILD_TESTS=OFF"
-      "-DIREE_BUILD_SAMPLES=OFF"
+    cmakeFlags =
+      [
+        "-DIREE_BUILD_COMPILER=ON"
+        "-DIREE_BUILD_TESTS=OFF"
+        "-DIREE_BUILD_SAMPLES=OFF"
 
-      "-DIREE_TARGET_BACKEND_DEFAULTS=OFF"
-      "-DIREE_TARGET_BACKEND_LLVM_CPU=ON"
+        "-DIREE_TARGET_BACKEND_DEFAULTS=OFF"
+        "-DIREE_TARGET_BACKEND_LLVM_CPU=ON"
 
-      "-DIREE_HAL_DRIVER_DEFAULTS=OFF"
-      "-DIREE_HAL_DRIVER_LOCAL_SYNC=ON"
-      "-DIREE_HAL_DRIVER_LOCAL_TASK=ON"
+        "-DIREE_HAL_DRIVER_DEFAULTS=OFF"
+        "-DIREE_HAL_DRIVER_LOCAL_SYNC=ON"
+        "-DIREE_HAL_DRIVER_LOCAL_TASK=ON"
 
-      "-DIREE_HAL_EXECUTABLE_LOADER_DEFAULTS=OFF"
-      "-DIREE_HAL_EXECUTABLE_LOADER_EMBEDDED_ELF=ON"
-      "-DIREE_HAL_EXECUTABLE_LOADER_SYSTEM_LIBRARY=ON"
-      "-DIREE_HAL_EXECUTABLE_LOADER_VMVX_MODULE=ON"
+        "-DIREE_HAL_EXECUTABLE_LOADER_DEFAULTS=OFF"
+        "-DIREE_HAL_EXECUTABLE_LOADER_EMBEDDED_ELF=ON"
+        "-DIREE_HAL_EXECUTABLE_LOADER_SYSTEM_LIBRARY=ON"
+        "-DIREE_HAL_EXECUTABLE_LOADER_VMVX_MODULE=ON"
 
-      "-DIREE_INPUT_STABLEHLO=ON"
-      "-DIREE_INPUT_TORCH=OFF"
-      "-DIREE_INPUT_TOSA=OFF"
+        "-DIREE_INPUT_STABLEHLO=ON"
+        "-DIREE_INPUT_TORCH=OFF"
+        "-DIREE_INPUT_TOSA=OFF"
 
-      "-DIREE_ENABLE_CPUINFO=OFF"
-      "-DIREE_BUILD_TRACY=OFF"
-      "-DIREE_ENABLE_LIBBACKTRACE=OFF"
-      "-DIREE_BUILD_BENCHMARKS=OFF"
-      "-DBENCHMARK_ENABLE_TESTING=OFF"
-      "-DBENCHMARK_ENABLE_GTEST_TESTS=OFF"
-      "-DBENCHMARK_USE_BUNDLED_GTEST=OFF"
+        "-DIREE_ENABLE_CPUINFO=OFF"
+        "-DIREE_BUILD_TRACY=OFF"
+        "-DIREE_ENABLE_LIBBACKTRACE=OFF"
+        "-DIREE_BUILD_BENCHMARKS=OFF"
+        "-DBENCHMARK_ENABLE_TESTING=OFF"
+        "-DBENCHMARK_ENABLE_GTEST_TESTS=OFF"
+        "-DBENCHMARK_USE_BUNDLED_GTEST=OFF"
 
-      "-DBUILD_SHARED_LIBS=OFF"
+        "-DBUILD_SHARED_LIBS=OFF"
 
-      # X86 for CI/dev machines, AArch64 for Apple Silicon and Jetson Orin.
-      "-DLLVM_TARGETS_TO_BUILD=X86;AArch64"
-      "-DLLVM_ENABLE_ASSERTIONS=OFF"
-      "-DIREE_ENABLE_ASSERTIONS=OFF"
-      "-DIREE_TARGET_BACKEND_VMVX=OFF"
-      "-DIREE_OUTPUT_FORMAT_C=OFF"
-      "-DIREE_BUILD_BINDINGS_TFLITE=OFF"
-      "-DIREE_BUILD_BINDINGS_TFLITE_JAVA=OFF"
-    ]
-    ++ lib.optional stdenv.isLinux "-DIREE_ENABLE_LLD=ON";
+        # X86 for CI/dev machines, AArch64 for Apple Silicon and Jetson Orin.
+        "-DLLVM_TARGETS_TO_BUILD=X86;AArch64"
+        "-DLLVM_ENABLE_ASSERTIONS=OFF"
+        "-DIREE_ENABLE_ASSERTIONS=OFF"
+        "-DIREE_TARGET_BACKEND_VMVX=OFF"
+        "-DIREE_OUTPUT_FORMAT_C=OFF"
+        "-DIREE_BUILD_BINDINGS_TFLITE=OFF"
+        "-DIREE_BUILD_BINDINGS_TFLITE_JAVA=OFF"
+      ]
+      ++ lib.optional stdenv.isLinux "-DIREE_ENABLE_LLD=ON";
 
     # Note: we don't restrict --target because partial builds have dependency
     # ordering issues with ukernel bitcode generation. The full build is needed.
