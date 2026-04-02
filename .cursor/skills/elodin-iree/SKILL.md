@@ -346,4 +346,4 @@ If a simulation uses matrix sizes not in the pre-registered set (3, 4, 6, 9, 12)
 
 ### dgetrs NaN semantics
 
-`elodin_lapack_dgetrs` in `lapack_module.c` calls `LAPACKE_dgetrs` even for singular matrices (`info >= 0` from `dgetrf`) and fills the output with NaN when `info < 0` (bad arguments), matching JAX's error-handling behavior.
+`elodin_lapack_dgetrs` in `lapack_module.c` calls `LAPACKE_dgetrs` even for singular matrices (`info >= 0` from `dgetrf`), letting NaN/Inf propagate naturally from the zero diagonal of U. For bad arguments (`info < 0` from `dgetrf`, or `info2 < 0` from `dgetrs`), the output is filled with NaN. This matches JAX's native `linalg.solve` behavior.

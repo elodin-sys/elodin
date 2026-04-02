@@ -74,7 +74,10 @@ static void elodin_lapack_resolve_symbols(void) {
   }
 #endif
 
-  // Fallback: try standard library names
+  // Fallback: try standard library names.
+  // NOTE: lapack_int is int64_t (matching Nix's USE64BITINT OpenBLAS).
+  // These fallback candidates are best-effort for development only;
+  // a system library built with 32-bit lapack_int will ABI-mismatch.
   static const char* candidates[] = {
     "libopenblas.so.0", "libopenblas.so",
     "liblapack.so.3", "liblapack.so", NULL
@@ -674,12 +677,15 @@ static iree_status_t elodin_lapack_dgetrs(
 
   { int ldb = matrix_rhs ? nrhs : 1;
     lapack_int info = fn_dgetrf(LAPACK_ROW_MAJOR, n, n, a, n, ipiv);
-    if (info == 0) {
+    if (info >= 0) {
+      // Proceed even for singular matrices (info > 0) -- NaN/Inf propagates
+      // from the zero diagonal of U, matching JAX's native solve behavior.
       lapack_int info2 = fn_dgetrs(LAPACK_ROW_MAJOR, 'N', n, nrhs, a, n, ipiv, b, ldb);
-      if (info2 != 0) info = info2;
-    }
-    if (info != 0) {
-      for (int i = 0; i < n * nrhs; ++i) b[i] = 0.0;
+      if (info2 < 0) {
+        for (int i = 0; i < n * nrhs; ++i) b[i] = NAN;
+      }
+    } else {
+      for (int i = 0; i < n * nrhs; ++i) b[i] = NAN;
     }
 
     if (matrix_rhs) {
@@ -830,7 +836,8 @@ iree_status_t elodin_lapack_module_create(
   *out_module = NULL;
 
   elodin_lapack_resolve_symbols();
-  if (!fn_dgesdd) {
+  if (!fn_dgesdd || !fn_dpotrf || !fn_dgetrf || !fn_dgetrs ||
+      !fn_dtrsm  || !fn_dgeqrf || !fn_dorgqr || !fn_dsyevd) {
     return iree_make_status(IREE_STATUS_UNAVAILABLE,
         "LAPACK symbols not found (no OpenBLAS loaded in process)");
   }
