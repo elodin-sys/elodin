@@ -673,7 +673,12 @@ fn main() -> ! {
             let _ = write!(
                 log_buf,
                 "i2c={}/s spi={}/s out={}/s dt avg={}us min={}us b={}",
-                i2c_samples_sec, spi_samples_sec, imu_out_sec, avg_combined_dt, min_combined_dt, imu_bunched,
+                i2c_samples_sec,
+                spi_samples_sec,
+                imu_out_sec,
+                avg_combined_dt,
+                min_combined_dt,
+                imu_bunched,
             );
             let _ = cmd_bridge.write_log(log_buf.as_bytes());
 
