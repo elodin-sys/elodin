@@ -2,6 +2,7 @@
   pkgs,
   rustToolchain,
   lib,
+  gpsBaudRate ? 9600,
   ...
 }: let
   pname = "sensor-fw";
@@ -99,7 +100,9 @@ in
       directory = "${cargoVendorDir}"
       CARGO_CFG
 
-      cargo build --target ${target} --release --bin fw --offline
+      cargo build --target ${target} --release --bin fw --offline ${
+        lib.optionalString (gpsBaudRate == 38400) "--features gps-38400"
+      }
 
       arm-none-eabi-objcopy -O binary target/${target}/release/fw firmware.bin
       arm-none-eabi-size target/${target}/release/fw

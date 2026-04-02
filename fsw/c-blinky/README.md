@@ -30,7 +30,7 @@ configures `/dev/ttyTHS1` for `19200 8E1`, and writes `firmware.bin` with
 
 After flashing, `c-blinky` emits COBS-framed UART log messages on the
 board-to-board link. `serial-bridge` forwards those messages into Elodin-DB on
-the `aleph.c-blinky.log` stream, which can be viewed in an Editor
+the `aleph.stm32.log` stream, which can be viewed in an Editor
 `log_stream` pane.
 
 ## Clock Configuration

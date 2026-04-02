@@ -47,6 +47,10 @@ blackbox = { path = "../blackbox" }
 usbd-serial = "0.1"
 usb-device = "0.2.9"
 
+[features]
+default = []
+gps-38400 = []
+
 [dev-dependencies]
 defmt-test = "0.3"
 

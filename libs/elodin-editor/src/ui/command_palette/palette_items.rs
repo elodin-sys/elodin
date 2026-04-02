@@ -712,6 +712,35 @@ pub fn create_video_stream(tile_id: Option<TileId>) -> PaletteItem {
     )
 }
 
+pub fn create_log_stream(tile_id: Option<TileId>) -> PaletteItem {
+    PaletteItem::new(
+        "Create Log Stream",
+        TILES_LABEL,
+        move |_: In<String>| -> PaletteEvent {
+            PalettePage::new(vec![
+                PaletteItem::new(
+                    LabelSource::placeholder("Enter the name of the message log stream"),
+                    "",
+                    move |In(msg_name): In<String>,
+                          mut tile_param: TileParam,
+                          palette_state: Res<CommandPaletteState>| {
+                        let Some(mut tile_state) = tile_param.target(palette_state.target_window)
+                        else {
+                            return PaletteEvent::Error("Secondary window unavailable".to_string());
+                        };
+                        let msg_name = msg_name.trim().to_string();
+                        let label = format!("Log Stream {}", msg_name);
+                        tile_state.create_log_stream_tile(msg_name, label, tile_id);
+                        PaletteEvent::Exit
+                    },
+                )
+                .default(),
+            ])
+            .into_event()
+        },
+    )
+}
+
 fn set_playback_speed() -> PaletteItem {
     PaletteItem::new("Set Playback Speed", TIME_LABEL, |_: In<String>| {
         let speeds = [
@@ -1420,6 +1449,7 @@ pub fn create_tiles(tile_id: TileId) -> PalettePage {
         create_query_table(Some(tile_id)),
         create_query_plot(Some(tile_id)),
         create_video_stream(Some(tile_id)),
+        create_log_stream(Some(tile_id)),
         create_schematic_tree(Some(tile_id)),
         create_data_overview(Some(tile_id)),
     ])
@@ -1488,6 +1518,7 @@ impl Default for PalettePage {
             create_query_table(None),
             create_query_plot(None),
             create_video_stream(None),
+            create_log_stream(None),
             create_schematic_tree(None),
             create_data_overview(None),
             create_3d_object(),

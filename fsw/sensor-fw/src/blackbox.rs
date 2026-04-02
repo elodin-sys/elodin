@@ -18,7 +18,7 @@ type File<'a> =
 const RESET_PERIOD: fugit::MicrosDuration<u32> = fugit::MicrosDuration::<u32>::millis(100);
 const MIN_CLUSTER_SIZE: usize = 512 * 8;
 
-pub use ::blackbox::Record;
+pub use ::blackbox::{CompassRecord, GpsRecord, ImuRecord, Record};
 
 pub struct SdmmcFs {
     sdmmc: sdmmc::Sdmmc,
