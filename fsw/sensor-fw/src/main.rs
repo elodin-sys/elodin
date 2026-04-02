@@ -450,7 +450,12 @@ fn main() -> ! {
     let mut last_spi_accel: [f32; 3] = [0.0; 3];
     let mut last_out_gyro: [f32; 3] = [0.0; 3];
     let mut last_out_accel: [f32; 3] = [0.0; 3];
-    let mut last_dt_us: u64 = 0;
+    let mut imu_dt_sum_us: u64 = 0;
+    let mut imu_dt_count: u32 = 0;
+    let mut imu_dt_min_us: u64 = u64::MAX;
+    let mut imu_bunched: u32 = 0;
+    let mut last_any_imu_time = monotonic.now();
+    let mut last_any_imu_was_i2c: bool = false;
     let mut loop_count: u32 = 0;
     let mut max_loop_cycles: u32 = 0;
     let mut uart_tx_cycles: u32 = 0;
@@ -533,21 +538,47 @@ fn main() -> ! {
             .as_mut()
             .is_some_and(|s| s.update(&mut i2c3_dma, now));
         // IMU: poll both BMI270s, feed into coning/sculling integrator, emit at ~800 Hz
+        // Active interleave: when one sensor fires, defer the other to prevent bunching
+        let interleave_gap = fugit::MicrosDuration::<u32>::micros(200);
         let i2c_imu_updated = bmi270
             .as_mut()
             .is_some_and(|s| s.update(&mut i2c2_dma, now));
-        let spi_imu_updated = bmi270_spi.as_mut().is_some_and(|s| s.update(now));
+        let spi_imu_updated = if i2c_imu_updated {
+            if let Some(ref mut spi) = bmi270_spi {
+                let earliest = now + interleave_gap;
+                if spi.next_update < earliest {
+                    spi.next_update = earliest;
+                }
+            }
+            false
+        } else {
+            bmi270_spi.as_mut().is_some_and(|s| s.update(now))
+        };
 
         let mag = bmm350.as_ref().map_or([0.0; 3], |s| s.data.mag);
 
         macro_rules! feed_integrator {
-            ($gyro:expr, $accel:expr, $last_time:expr) => {{
+            ($gyro:expr, $accel:expr, $last_time:expr, $track_interleave:expr, $is_i2c:expr) => {{
                 let imu_now = monotonic.now();
                 let dt_us = imu_now
                     .checked_duration_since($last_time)
                     .map_or(1, |d| d.ticks().max(1));
                 $last_time = imu_now;
-                last_dt_us = dt_us;
+                if $track_interleave {
+                    let combined_dt = imu_now
+                        .checked_duration_since(last_any_imu_time)
+                        .map_or(0, |d| d.ticks());
+                    last_any_imu_time = imu_now;
+                    imu_dt_sum_us += combined_dt;
+                    imu_dt_count += 1;
+                    if combined_dt < imu_dt_min_us {
+                        imu_dt_min_us = combined_dt;
+                    }
+                    if combined_dt < 100 && $is_i2c == last_any_imu_was_i2c {
+                        imu_bunched += 1;
+                    }
+                    last_any_imu_was_i2c = $is_i2c;
+                }
                 let dt = dt_us as f32 / 1_000_000.0;
                 if let Some(out) = integrator.push($gyro, $accel, dt) {
                     imu_out_sec += 1;
@@ -587,7 +618,7 @@ fn main() -> ! {
                     last_i2c_gyro = gyro;
                     last_i2c_accel = accel;
                     repoll_samples += 1;
-                    if feed_integrator!(gyro, accel, last_i2c_imu_time) {
+                    if feed_integrator!(gyro, accel, last_i2c_imu_time, false, true) {
                         repoll_emits += 1;
                     }
                 }
@@ -602,11 +633,17 @@ fn main() -> ! {
             let accel = [s.accel_g[0], s.accel_g[1], -s.accel_g[2]];
             last_i2c_gyro = gyro;
             last_i2c_accel = accel;
-            if feed_integrator!(gyro, accel, last_i2c_imu_time) {
+            if feed_integrator!(gyro, accel, last_i2c_imu_time, true, true) {
                 poll_i2c!();
             }
         }
         if spi_imu_updated {
+            if let Some(ref mut i2c) = bmi270 {
+                let earliest = now + interleave_gap;
+                if i2c.next_update < earliest {
+                    i2c.next_update = earliest;
+                }
+            }
             let s = bmi270_spi.as_ref().unwrap();
             spi_samples_sec += 1;
             // SPI BMI270 (U18, front of PCB): align to I2C + convert to FRD
@@ -614,7 +651,7 @@ fn main() -> ! {
             let accel = [-s.accel_g[0], s.accel_g[1], s.accel_g[2]];
             last_spi_gyro = gyro;
             last_spi_accel = accel;
-            if feed_integrator!(gyro, accel, last_spi_imu_time) {
+            if feed_integrator!(gyro, accel, last_spi_imu_time, true, false) {
                 poll_i2c!();
             }
         }
@@ -622,11 +659,21 @@ fn main() -> ! {
         if now.checked_duration_since(last_diag).unwrap() > fugit::MicrosDuration::<u64>::secs(1) {
             last_diag = now;
             use core::fmt::Write as FmtWrite;
+            let avg_combined_dt = if imu_dt_count > 0 {
+                imu_dt_sum_us / imu_dt_count as u64
+            } else {
+                0
+            };
+            let min_combined_dt = if imu_dt_min_us == u64::MAX {
+                0
+            } else {
+                imu_dt_min_us
+            };
             let mut log_buf = heapless::String::<86>::new();
             let _ = write!(
                 log_buf,
-                "i2c={}/s spi={}/s out={}/s dt={}us",
-                i2c_samples_sec, spi_samples_sec, imu_out_sec, last_dt_us,
+                "i2c={}/s spi={}/s out={}/s dt avg={}us min={}us b={}",
+                i2c_samples_sec, spi_samples_sec, imu_out_sec, avg_combined_dt, min_combined_dt, imu_bunched,
             );
             let _ = cmd_bridge.write_log(log_buf.as_bytes());
 
@@ -705,6 +752,10 @@ fn main() -> ! {
             i2c_samples_sec = 0;
             spi_samples_sec = 0;
             imu_out_sec = 0;
+            imu_dt_sum_us = 0;
+            imu_dt_count = 0;
+            imu_dt_min_us = u64::MAX;
+            imu_bunched = 0;
             loop_count = 0;
             max_loop_cycles = 0;
             uart_tx_cycles = 0;

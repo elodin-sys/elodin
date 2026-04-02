@@ -93,7 +93,7 @@ pub struct Bmi270Spi {
     pub gyro_dps: [f32; 3],
     pub accel_g: [f32; 3],
     pub sample_count: u32,
-    next_update: Instant,
+    pub next_update: Instant,
 }
 
 impl Bmi270Spi {

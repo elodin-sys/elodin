@@ -136,7 +136,7 @@ pub struct Bmi270 {
     pub accel_g: [f32; 3],
     pub sample_count: u32,
     raw_data: [i16; 6], //[accel_x, accel_y, accel_z, gyro_x, gyro_y, gyro_z]
-    next_update: Instant,
+    pub next_update: Instant,
 }
 
 impl Bmi270 {
