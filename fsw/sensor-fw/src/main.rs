@@ -432,7 +432,8 @@ fn main() -> ! {
     let imu_count = bmi270.is_some() as u32 + bmi270_spi.is_some() as u32;
     let decimation = if imu_count >= 2 { 4 } else { 2 };
     let mut integrator = coning_sculling::ConingScullingIntegrator::new(decimation);
-    let mut last_imu_time = monotonic.now();
+    let mut last_i2c_imu_time = monotonic.now();
+    let mut last_spi_imu_time = monotonic.now();
     defmt::info!(
         "Coning/sculling: {} IMU(s), N={}, target ~800 Hz",
         imu_count,
@@ -540,12 +541,12 @@ fn main() -> ! {
         let mag = bmm350.as_ref().map_or([0.0; 3], |s| s.data.mag);
 
         macro_rules! feed_integrator {
-            ($gyro:expr, $accel:expr) => {{
+            ($gyro:expr, $accel:expr, $last_time:expr) => {{
                 let imu_now = monotonic.now();
                 let dt_us = imu_now
-                    .checked_duration_since(last_imu_time)
+                    .checked_duration_since($last_time)
                     .map_or(1, |d| d.ticks().max(1));
-                last_imu_time = imu_now;
+                $last_time = imu_now;
                 last_dt_us = dt_us;
                 let dt = dt_us as f32 / 1_000_000.0;
                 if let Some(out) = integrator.push($gyro, $accel, dt) {
@@ -586,7 +587,7 @@ fn main() -> ! {
                     last_i2c_gyro = gyro;
                     last_i2c_accel = accel;
                     repoll_samples += 1;
-                    if feed_integrator!(gyro, accel) {
+                    if feed_integrator!(gyro, accel, last_i2c_imu_time) {
                         repoll_emits += 1;
                     }
                 }
@@ -601,7 +602,7 @@ fn main() -> ! {
             let accel = [s.accel_g[0], s.accel_g[1], -s.accel_g[2]];
             last_i2c_gyro = gyro;
             last_i2c_accel = accel;
-            if feed_integrator!(gyro, accel) {
+            if feed_integrator!(gyro, accel, last_i2c_imu_time) {
                 poll_i2c!();
             }
         }
@@ -613,7 +614,7 @@ fn main() -> ! {
             let accel = [-s.accel_g[0], s.accel_g[1], s.accel_g[2]];
             last_spi_gyro = gyro;
             last_spi_accel = accel;
-            if feed_integrator!(gyro, accel) {
+            if feed_integrator!(gyro, accel, last_spi_imu_time) {
                 poll_i2c!();
             }
         }
