@@ -69,18 +69,25 @@ static void elodin_lapack_resolve_symbols(void) {
 
 #ifdef ELODIN_OPENBLAS_PATH
   {
-    void* lib = dlopen(ELODIN_OPENBLAS_PATH, RTLD_NOW | RTLD_LOCAL | RTLD_NODELETE | RTLD_DEEPBIND);
+#ifdef __APPLE__
+    int dlopen_flags = RTLD_NOW | RTLD_LOCAL;
+#else
+    int dlopen_flags = RTLD_NOW | RTLD_LOCAL | RTLD_NODELETE | RTLD_DEEPBIND;
+#endif
+    void* lib = dlopen(ELODIN_OPENBLAS_PATH, dlopen_flags);
     if (lib) { elodin_lapack_load_from(lib); return; }
   }
 #endif
 
-  // Fallback: try standard library names.
-  // NOTE: lapack_int is int64_t (matching Nix's USE64BITINT OpenBLAS).
-  // These fallback candidates are best-effort for development only;
-  // a system library built with 32-bit lapack_int will ABI-mismatch.
+  // Fallback: try standard library names (best-effort for development only).
   static const char* candidates[] = {
+#ifdef __APPLE__
+    "libopenblas.dylib",
+#else
     "libopenblas.so.0", "libopenblas.so",
-    "liblapack.so.3", "liblapack.so", NULL
+    "liblapack.so.3", "liblapack.so",
+#endif
+    NULL
   };
   for (int i = 0; candidates[i]; ++i) {
     void* lib = dlopen(candidates[i], RTLD_NOW | RTLD_LOCAL | RTLD_NODELETE);

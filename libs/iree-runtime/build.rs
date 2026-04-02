@@ -255,15 +255,20 @@ fn main() {
         // the exact matching library at runtime.
         if let Ok(openblas_dir) = env::var("OPENBLAS_DIR") {
             let openblas_lib_dir = PathBuf::from(&openblas_dir).join("lib");
+            let is_macos = env::var("CARGO_CFG_TARGET_OS")
+                .map(|os| os == "macos")
+                .unwrap_or(false);
             if let Ok(entries) = fs::read_dir(&openblas_lib_dir) {
                 for entry in entries.flatten() {
                     let name = entry.file_name().to_string_lossy().to_string();
-                    // Find the real .so (not a symlink) -- e.g. libopenblasp-r0.3.30.so
-                    if name.starts_with("libopenblas")
-                        && name.ends_with(".so")
-                        && !name.contains(".so.")
-                    {
-                        // Resolve symlinks to get the canonical nix store path
+                    let is_shared_lib = if is_macos {
+                        name.starts_with("libopenblas") && name.ends_with(".dylib")
+                    } else {
+                        name.starts_with("libopenblas")
+                            && name.ends_with(".so")
+                            && !name.contains(".so.")
+                    };
+                    if is_shared_lib {
                         let resolved =
                             fs::canonicalize(entry.path()).unwrap_or_else(|_| entry.path());
                         build.define(

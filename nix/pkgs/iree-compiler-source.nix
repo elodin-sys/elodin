@@ -7,9 +7,14 @@
   python3,
   git,
   lld,
-  musl,
+  musl ? null,
+  darwin ? {},
+  fixDarwinDylibNames ? null,
+  patchelf ? null,
   ...
-}: let
+}:
+  assert stdenv.isLinux -> musl != null;
+  let
   version = "3.11.0";
 
   # Same IREE source as iree-runtime.nix
@@ -100,40 +105,38 @@ in
       chmod -R u+w $sourceRoot/third_party/printf
     '';
 
-    nativeBuildInputs = [cmake ninja python3 git lld];
+    nativeBuildInputs =
+      [cmake ninja python3 git]
+      ++ lib.optionals stdenv.isLinux [lld patchelf]
+      ++ lib.optionals stdenv.isDarwin [
+        (darwin.cctools or null)
+        fixDarwinDylibNames
+      ];
 
-    # Host tools built during compilation need libstdc++
-    LD_LIBRARY_PATH = lib.makeLibraryPath [stdenv.cc.cc.lib];
+    # Host tools built during compilation need libstdc++ (Linux) or libc++ (macOS)
+    LD_LIBRARY_PATH = lib.optionalString stdenv.isLinux (lib.makeLibraryPath [stdenv.cc.cc.lib]);
 
     cmakeFlags = [
       "-DIREE_BUILD_COMPILER=ON"
       "-DIREE_BUILD_TESTS=OFF"
       "-DIREE_BUILD_SAMPLES=OFF"
 
-      # Only build llvm-cpu backend (our target)
       "-DIREE_TARGET_BACKEND_DEFAULTS=OFF"
       "-DIREE_TARGET_BACKEND_LLVM_CPU=ON"
 
-      # HAL drivers needed for compiler (ConstEval requires local-task)
       "-DIREE_HAL_DRIVER_DEFAULTS=OFF"
       "-DIREE_HAL_DRIVER_LOCAL_SYNC=ON"
       "-DIREE_HAL_DRIVER_LOCAL_TASK=ON"
 
-      # Executable loaders
       "-DIREE_HAL_EXECUTABLE_LOADER_DEFAULTS=OFF"
       "-DIREE_HAL_EXECUTABLE_LOADER_EMBEDDED_ELF=ON"
       "-DIREE_HAL_EXECUTABLE_LOADER_SYSTEM_LIBRARY=ON"
       "-DIREE_HAL_EXECUTABLE_LOADER_VMVX_MODULE=ON"
 
-      # Input dialects
       "-DIREE_INPUT_STABLEHLO=ON"
       "-DIREE_INPUT_TORCH=OFF"
       "-DIREE_INPUT_TOSA=OFF"
 
-      # Use lld for faster linking
-      "-DIREE_ENABLE_LLD=ON"
-
-      # Disable features not needed
       "-DIREE_ENABLE_CPUINFO=OFF"
       "-DIREE_BUILD_TRACY=OFF"
       "-DIREE_ENABLE_LIBBACKTRACE=OFF"
@@ -142,25 +145,18 @@ in
       "-DBENCHMARK_ENABLE_GTEST_TESTS=OFF"
       "-DBENCHMARK_USE_BUNDLED_GTEST=OFF"
 
-      # Static libraries
       "-DBUILD_SHARED_LIBS=OFF"
 
-      # IREE compiler-specific flags / optimizations
-      # Only build LLVM backends for architectures we actually target.
       # X86 for CI/dev machines, AArch64 for Apple Silicon and Jetson Orin.
       "-DLLVM_TARGETS_TO_BUILD=X86;AArch64"
       "-DLLVM_ENABLE_ASSERTIONS=OFF"
       "-DIREE_ENABLE_ASSERTIONS=OFF"
-      # VMVX backend not used for compilation (only needed in runtime for fallback)
       "-DIREE_TARGET_BACKEND_VMVX=OFF"
-
-      # The C output format is not used by Elodin
       "-DIREE_OUTPUT_FORMAT_C=OFF"
-
-      # TFLite bindings not needed
       "-DIREE_BUILD_BINDINGS_TFLITE=OFF"
       "-DIREE_BUILD_BINDINGS_TFLITE_JAVA=OFF"
-    ];
+    ]
+    ++ lib.optional stdenv.isLinux "-DIREE_ENABLE_LLD=ON";
 
     # Note: we don't restrict --target because partial builds have dependency
     # ordering issues with ukernel bitcode generation. The full build is needed.
@@ -170,28 +166,55 @@ in
 
       mkdir -p $out/bin $out/lib $out/libexec
 
-      # Install the compiler binary and shared library
       cp tools/iree-compile $out/bin/
-      find lib -name "libIREECompiler.so*" -exec cp -P {} $out/lib/ \;
+      ${
+        if stdenv.isDarwin
+        then ''find lib -name "libIREECompiler.dylib*" -exec cp -P {} $out/lib/ \;''
+        else ''find lib -name "libIREECompiler.so*" -exec cp -P {} $out/lib/ \;''
+      }
 
-      # Install the real iree-lld into libexec, then create a wrapper in bin/
-      # that appends musl's libc.a so f64 math symbols (sin, cos, log, exp)
-      # are available during embedded ELF linking.
       find . -name "iree-lld" -type f -executable | head -1 | while read f; do
         cp "$f" $out/libexec/iree-lld
       done
-      printf '#!/bin/sh\nexec "%s" "$@" "%s"\n' \
-        "$out/libexec/iree-lld" "${musl}/lib/libc.a" \
-        > $out/bin/iree-lld
+      ${
+        if stdenv.isLinux
+        then ''
+          # Wrapper appends musl libc.a so f64 math symbols (sin, cos, log, exp)
+          # are resolved during embedded ELF linking.
+          printf '#!/bin/sh\nexec "%s" "$@" "%s"\n' \
+            "$out/libexec/iree-lld" "${musl}/lib/libc.a" \
+            > $out/bin/iree-lld
+        ''
+        else ''
+          # macOS system linker provides libm; no musl wrapper needed.
+          printf '#!/bin/sh\nexec "%s" "$@"\n' \
+            "$out/libexec/iree-lld" \
+            > $out/bin/iree-lld
+        ''
+      }
       chmod +x $out/bin/iree-lld
 
-      # Fix RPATH so binaries find shared libraries and libstdc++
-      for f in $out/bin/iree-compile $out/libexec/iree-lld; do
-        patchelf --set-rpath "$out/lib:${stdenv.cc.cc.lib}/lib" "$f" || true
-      done
-      for f in $out/lib/*.so*; do
-        patchelf --set-rpath "${stdenv.cc.cc.lib}/lib" "$f" || true
-      done
+      ${
+        if stdenv.isLinux
+        then ''
+          for f in $out/bin/iree-compile $out/libexec/iree-lld; do
+            patchelf --set-rpath "$out/lib:${stdenv.cc.cc.lib}/lib" "$f" || true
+          done
+          for f in $out/lib/*.so*; do
+            patchelf --set-rpath "${stdenv.cc.cc.lib}/lib" "$f" || true
+          done
+        ''
+        else ''
+          # Fix RPATH for macOS: point binaries at $out/lib for libIREECompiler.dylib
+          for f in $out/bin/iree-compile $out/libexec/iree-lld; do
+            install_name_tool -add_rpath "$out/lib" "$f" 2>/dev/null || true
+            install_name_tool -add_rpath "${stdenv.cc.cc.lib}/lib" "$f" 2>/dev/null || true
+          done
+          for f in $out/lib/*.dylib*; do
+            install_name_tool -id "$f" "$f" 2>/dev/null || true
+          done
+        ''
+      }
 
       runHook postInstall
     '';

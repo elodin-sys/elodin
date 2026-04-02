@@ -16,6 +16,7 @@
 }: let
   # Import shared configuration
   common = pkgs.callPackage ./common.nix {};
+  openblas64 = pkgs.openblas.override {blas64 = true;};
   iree_compiler = pkgs.callPackage ./iree-compiler.nix {python3 = python;};
   iree_compiler_source = pkgs.callPackage ./iree-compiler-source.nix {};
   iree_runtime_used =
@@ -93,7 +94,7 @@
     # Environment variables for the build
     IREE_RUNTIME_DIR = "${iree_runtime}";
     IREE_RUNTIME_TRACY_DIR = lib.optionalString enableTracy "${iree_runtime_used}";
-    OPENBLAS_DIR = "${pkgs.openblas}";
+    OPENBLAS_DIR = "${openblas64}";
     OPENSSL_DIR = "${pkgs.openssl.dev}";
     OPENSSL_LIB_DIR = "${pkgs.openssl.out}/lib";
     OPENSSL_INCLUDE_DIR = "${pkgs.openssl.dev}/include/";

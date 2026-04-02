@@ -604,6 +604,22 @@ def compile_to_vmfb(
         if platform.system() == "Darwin":
             arch = 'arm64' if machine == 'arm64' else 'x86_64'
             extra.append('--iree-llvmcpu-target-triple=' + arch + '-apple-darwin')
+            extra.append('--iree-llvmcpu-link-embedded=false')
+            extra.append('--iree-opt-const-eval=false')
+            cc = shutil.which('cc') or shutil.which('clang')
+            if cc:
+                wrapper = os.path.join(tempfile.gettempdir(), 'elodin_darwin_cc_wrapper.sh')
+                with open(wrapper, 'w') as wf:
+                    wf.write('#!/bin/sh\n')
+                    wf.write('for a do shift; case "$a" in\n')
+                    wf.write('  -static) ;;\n')
+                    wf.write('  -dylib) set -- "$@" -dynamiclib ;;\n')
+                    wf.write('  -flat_namespace) set -- "$@" -Wl,-flat_namespace ;;\n')
+                    wf.write('  *) set -- "$@" "$a" ;;\n')
+                    wf.write('esac; done\n')
+                    wf.write('exec ' + shlex.quote(cc) + ' "$@"\n')
+                os.chmod(wrapper, 0o755)
+                extra.append('--iree-llvmcpu-system-linker-path=' + wrapper)
         else:
             arch = 'aarch64' if machine in ('aarch64', 'arm64') else 'x86_64'
             extra.append('--iree-llvmcpu-target-triple=' + arch + '-unknown-linux-gnu')

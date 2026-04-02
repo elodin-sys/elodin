@@ -194,7 +194,7 @@ if c: print(c)
         --iree-dispatch-creation-enable-aggressive-fusion=true \
         --iree-llvmcpu-enable-ukernels=all \
         --iree-flow-inline-constants-max-byte-length=0 \
-        --iree-llvmcpu-target-triple=x86_64-unknown-linux-gnu \
+        --iree-llvmcpu-target-triple="${iree_triple}" \
         --iree-llvmcpu-target-cpu=host \
         < "${mlir_fixture}" 2>"${scratch_dir}/mlir_compile.log"; then
       echo "PASS: MLIR fixture $(basename "${mlir_fixture}") compiled successfully"
@@ -399,6 +399,13 @@ baseline_root="${BASELINE_ROOT:-scripts/ci/baseline}"
 tolerances_file="${TOLERANCES_FILE:-${baseline_root}/tolerances.json}"
 ticks="${REGRESSION_TICKS:-100}"
 python_bin="${PYTHON:-python3}"
+
+case "$(uname -s)-$(uname -m)" in
+  Darwin-arm64)  iree_triple="arm64-apple-darwin" ;;
+  Darwin-x86_64) iree_triple="x86_64-apple-darwin" ;;
+  Linux-aarch64) iree_triple="aarch64-unknown-linux-gnu" ;;
+  *)             iree_triple="x86_64-unknown-linux-gnu" ;;
+esac
 
 if [[ ! -d "${baseline_root}" ]]; then
   echo "FAIL: baseline root not found: ${baseline_root}"
