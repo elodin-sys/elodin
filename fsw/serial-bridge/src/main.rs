@@ -137,6 +137,72 @@ impl GpsClock {
     }
 }
 
+struct ClockState {
+    gps_mode: bool,
+    clock: Option<GpsClock>,
+    dropped: u64,
+}
+
+impl ClockState {
+    fn new(gps_mode: bool) -> Self {
+        Self {
+            gps_mode,
+            clock: None,
+            dropped: 0,
+        }
+    }
+
+    fn sensor_ts(&mut self) -> Option<Timestamp> {
+        if !self.gps_mode {
+            return Some(Timestamp::now());
+        }
+        if let Some(clock) = self.clock.as_mut() {
+            return Some(clock.timestamp());
+        }
+        self.dropped += 1;
+        if self.dropped % GPS_WAIT_LOG_INTERVAL == 1 {
+            println!(
+                "waiting for GPS clock lock, dropping non-GPS frame (count={})",
+                self.dropped
+            );
+        }
+        None
+    }
+
+    fn gps_ts(&mut self, unix_epoch_ms: i64) -> Option<Timestamp> {
+        if !self.gps_mode {
+            return Some(Timestamp::now());
+        }
+        if unix_epoch_ms <= 0 {
+            self.dropped += 1;
+            if self.dropped % GPS_WAIT_LOG_INTERVAL == 1 {
+                println!(
+                    "waiting for valid GPS UTC time, dropping GPS frame (count={})",
+                    self.dropped
+                );
+            }
+            return None;
+        }
+        if let Some(clock) = self.clock.as_mut() {
+            Some(
+                clock
+                    .emit_gps_timestamp(unix_epoch_ms)
+                    .unwrap_or(Timestamp::now()),
+            )
+        } else {
+            let anchor_us = unix_epoch_ms.saturating_mul(1000);
+            let mut clock = GpsClock::new(anchor_us);
+            let ts = clock
+                .emit_gps_timestamp(unix_epoch_ms)
+                .unwrap_or(Timestamp(anchor_us));
+            self.clock = Some(clock);
+            self.dropped = 0;
+            println!("GPS clock locked at unix_epoch_ms={}", unix_epoch_ms);
+            Some(ts)
+        }
+    }
+}
+
 fn main() -> anyhow::Result<()> {
     stellarator::run(run)
 }
@@ -247,14 +313,17 @@ pub async fn connect() -> anyhow::Result<()> {
     let tx = impeller2_stellar::PacketSink::new(tx);
     let mut rx = impeller2_stellar::PacketStream::new(rx);
 
+    let gps_clock_mode = gps_clock_enabled();
+    if gps_clock_mode {
+        println!("GPS-disciplined timestamping enabled");
+    } else {
+        println!("GPS-disciplined timestamping disabled");
+    }
+
     let id: PacketId = fastrand::u16(..).to_le_bytes();
-    let gps_id: PacketId = fastrand::u16(..).to_le_bytes();
     let compass_id: PacketId = fastrand::u16(..).to_le_bytes();
     let imu_id: PacketId = fastrand::u16(..).to_le_bytes();
     tx.send(&SetComponentMetadata::new("aleph", "aleph"))
-        .await
-        .0?;
-    tx.send(&SetComponentMetadata::new("ublox", "ublox"))
         .await
         .0?;
     tx.send(&SetComponentMetadata::new("qmc5883l", "qmc5883l"))
@@ -262,9 +331,20 @@ pub async fn connect() -> anyhow::Result<()> {
         .0?;
     tx.send(&SetComponentMetadata::new("imu", "imu")).await.0?;
     tx.init_world::<BridgeRecord>(id).await?;
-    tx.init_world::<GpsBridgeRecord>(gps_id).await?;
     tx.init_world::<CompassBridgeRecord>(compass_id).await?;
     tx.init_world::<ImuBridgeRecord>(imu_id).await?;
+
+    let gps_id: PacketId = if gps_clock_mode {
+        let id: PacketId = fastrand::u16(..).to_le_bytes();
+        tx.send(&SetComponentMetadata::new("ublox", "ublox"))
+            .await
+            .0?;
+        tx.init_world::<GpsBridgeRecord>(id).await?;
+        id
+    } else {
+        [0, 0]
+    };
+
     tx.send(&SetMsgMetadata {
         id: LOG_STREAM_ID,
         metadata: MsgMetadata {
@@ -288,12 +368,6 @@ pub async fn connect() -> anyhow::Result<()> {
         _ => stellarator::serial::Baud::Other(serial_baud),
     })?;
     let (port_rx, port_tx) = port.split();
-    let gps_clock_mode = gps_clock_enabled();
-    if gps_clock_mode {
-        println!("GPS-disciplined timestamping enabled");
-    } else {
-        println!("GPS-disciplined timestamping disabled");
-    }
 
     let write = stellarator::struc_con::stellar::<anyhow::Result<()>, _, _>(move || async move {
         let mut buf = vec![0; 256];
@@ -315,8 +389,7 @@ pub async fn connect() -> anyhow::Result<()> {
     let read = stellarator::struc_con::stellar(move || async move {
         let mut buf = vec![0u8; 4096];
         let mut frame = impeller2_frame::FrameDecoder::<Vec<u8>>::default();
-        let mut gps_clock: Option<GpsClock> = None;
-        let mut dropped_waiting_for_gps: u64 = 0;
+        let mut clock_state = ClockState::new(gps_clock_mode);
         let mut imu_rx: u64 = 0;
         let mut imu_sent: u64 = 0;
         let mut imu_dropped_gps: u64 = 0;
@@ -363,21 +436,8 @@ pub async fn connect() -> anyhow::Result<()> {
                         frames_decoded += 1;
                         match parse_bridge_frame(decoded) {
                             Some(BridgeFrame::LegacyRecord(record)) => {
-                                let timestamp = if gps_clock_mode {
-                                    if let Some(clock) = gps_clock.as_mut() {
-                                        clock.timestamp()
-                                    } else {
-                                        dropped_waiting_for_gps += 1;
-                                        if dropped_waiting_for_gps % GPS_WAIT_LOG_INTERVAL == 1 {
-                                            println!(
-                                                "waiting for GPS clock lock, dropping non-GPS frame (count={})",
-                                                dropped_waiting_for_gps
-                                            );
-                                        }
-                                        continue;
-                                    }
-                                } else {
-                                    Timestamp::now()
+                                let Some(timestamp) = clock_state.sensor_ts() else {
+                                    continue;
                                 };
                                 let mut table = LenPacket::table(id, 8 + record.len());
                                 table.extend_from_slice(&timestamp.0.to_le_bytes());
@@ -391,42 +451,12 @@ pub async fn connect() -> anyhow::Result<()> {
                                 };
                                 tx.send(&entry).await.0?;
                             }
-                            Some(BridgeFrame::Gps(payload)) => {
-                                let timestamp = if gps_clock_mode {
-                                    let mut unix_epoch_ms_bytes = [0u8; 8];
-                                    unix_epoch_ms_bytes.copy_from_slice(&payload[..8]);
-                                    let unix_epoch_ms = i64::from_le_bytes(unix_epoch_ms_bytes);
-                                    if unix_epoch_ms <= 0 {
-                                        dropped_waiting_for_gps += 1;
-                                        if dropped_waiting_for_gps % GPS_WAIT_LOG_INTERVAL == 1 {
-                                            println!(
-                                                "waiting for valid GPS UTC time, dropping GPS frame (count={})",
-                                                dropped_waiting_for_gps
-                                            );
-                                        }
-                                        continue;
-                                    }
-
-                                    if let Some(clock) = gps_clock.as_mut() {
-                                        clock
-                                            .emit_gps_timestamp(unix_epoch_ms)
-                                            .unwrap_or(Timestamp::now())
-                                    } else {
-                                        let anchor_us = unix_epoch_ms.saturating_mul(1000);
-                                        let mut clock = GpsClock::new(anchor_us);
-                                        let ts = clock
-                                            .emit_gps_timestamp(unix_epoch_ms)
-                                            .unwrap_or(Timestamp(anchor_us));
-                                        gps_clock = Some(clock);
-                                        dropped_waiting_for_gps = 0;
-                                        println!(
-                                            "GPS clock locked at unix_epoch_ms={}",
-                                            unix_epoch_ms
-                                        );
-                                        ts
-                                    }
-                                } else {
-                                    Timestamp::now()
+                            Some(BridgeFrame::Gps(payload)) if gps_clock_mode => {
+                                let mut unix_epoch_ms_bytes = [0u8; 8];
+                                unix_epoch_ms_bytes.copy_from_slice(&payload[..8]);
+                                let unix_epoch_ms = i64::from_le_bytes(unix_epoch_ms_bytes);
+                                let Some(timestamp) = clock_state.gps_ts(unix_epoch_ms) else {
+                                    continue;
                                 };
                                 let mut table = LenPacket::table(gps_id, 8 + payload.len());
                                 table.extend_from_slice(&timestamp.0.to_le_bytes());
@@ -434,21 +464,8 @@ pub async fn connect() -> anyhow::Result<()> {
                                 tx.send(table).await.0?;
                             }
                             Some(BridgeFrame::Compass(payload)) => {
-                                let timestamp = if gps_clock_mode {
-                                    if let Some(clock) = gps_clock.as_mut() {
-                                        clock.timestamp()
-                                    } else {
-                                        dropped_waiting_for_gps += 1;
-                                        if dropped_waiting_for_gps % GPS_WAIT_LOG_INTERVAL == 1 {
-                                            println!(
-                                                "waiting for GPS clock lock, dropping non-GPS frame (count={})",
-                                                dropped_waiting_for_gps
-                                            );
-                                        }
-                                        continue;
-                                    }
-                                } else {
-                                    Timestamp::now()
+                                let Some(timestamp) = clock_state.sensor_ts() else {
+                                    continue;
                                 };
                                 let mut table = LenPacket::table(compass_id, 8 + payload.len());
                                 table.extend_from_slice(&timestamp.0.to_le_bytes());
@@ -457,22 +474,9 @@ pub async fn connect() -> anyhow::Result<()> {
                             }
                             Some(BridgeFrame::Imu(payload)) => {
                                 imu_rx += 1;
-                                let timestamp = if gps_clock_mode {
-                                    if let Some(clock) = gps_clock.as_mut() {
-                                        clock.timestamp()
-                                    } else {
-                                        imu_dropped_gps += 1;
-                                        dropped_waiting_for_gps += 1;
-                                        if dropped_waiting_for_gps % GPS_WAIT_LOG_INTERVAL == 1 {
-                                            println!(
-                                                "waiting for GPS clock lock, dropping non-GPS frame (count={})",
-                                                dropped_waiting_for_gps
-                                            );
-                                        }
-                                        continue;
-                                    }
-                                } else {
-                                    Timestamp::now()
+                                let Some(timestamp) = clock_state.sensor_ts() else {
+                                    imu_dropped_gps += 1;
+                                    continue;
                                 };
                                 let mut table = LenPacket::table(imu_id, 8 + payload.len());
                                 table.extend_from_slice(&timestamp.0.to_le_bytes());
@@ -480,6 +484,7 @@ pub async fn connect() -> anyhow::Result<()> {
                                 tx.send(table).await.0?;
                                 imu_sent += 1;
                             }
+                            Some(BridgeFrame::Gps(_)) => {}
                             None => {
                                 parse_fails += 1;
                             }
