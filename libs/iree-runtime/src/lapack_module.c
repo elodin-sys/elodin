@@ -829,6 +829,12 @@ static void elodin_lapack_free_state(void* self, iree_vm_module_state_t* state) 
   iree_allocator_free(((elodin_lapack_module_t*)self)->host_allocator, s);
 }
 
+static void elodin_lapack_destroy(void* self) {
+  elodin_lapack_module_t* mod = (elodin_lapack_module_t*)self;
+  if (mod->device) iree_hal_device_release(mod->device);
+  free(mod);
+}
+
 iree_status_t elodin_lapack_module_create(
     iree_vm_instance_t* instance, iree_hal_device_t* device,
     iree_allocator_t alloc, iree_vm_module_t** out_module) {
@@ -852,16 +858,18 @@ iree_status_t elodin_lapack_module_create(
   }
   mod->host_allocator = alloc;
   mod->device = device;
+  iree_hal_device_retain(device);
 
   iree_vm_module_t iface;
   iree_status_t status = iree_vm_module_initialize(&iface, mod);
-  if (!iree_status_is_ok(status)) { free(mod); return status; }
+  if (!iree_status_is_ok(status)) { iree_hal_device_release(device); free(mod); return status; }
   iface.alloc_state = elodin_lapack_alloc_state;
   iface.free_state = elodin_lapack_free_state;
+  iface.destroy = elodin_lapack_destroy;
 
   status = iree_vm_native_module_create(
       &iface, &elodin_lapack_descriptor_, instance, alloc, out_module);
-  if (!iree_status_is_ok(status)) { free(mod); return status; }
+  if (!iree_status_is_ok(status)) { iree_hal_device_release(device); free(mod); return status; }
 
   // The native module's built-in lookup is deterministic for a given
   // descriptor so a single static pointer is safe across instances.
