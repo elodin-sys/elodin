@@ -24,6 +24,12 @@ in {
       default = 115200;
       description = "Baud rate used when opening the Aleph STM32 board-to-board serial device.";
     };
+
+    gpsClockSource = lib.mkOption {
+      type = lib.types.bool;
+      default = false;
+      description = "Use GPS-derived timestamps for all sensor data. When enabled, no records are written until GPS time is valid.";
+    };
   };
 
   config = lib.mkIf cfg.enable {
@@ -40,6 +46,7 @@ in {
           "RUST_LOG=debug"
           "ALEPH_SERIAL_BRIDGE_PORT=${cfg.serialPort}"
           "ALEPH_SERIAL_BRIDGE_BAUD=${toString cfg.baudRate}"
+          "ALEPH_SERIAL_BRIDGE_GPS_CLOCK=${lib.boolToString cfg.gpsClockSource}"
         ];
       };
     };

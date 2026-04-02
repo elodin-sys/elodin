@@ -13,11 +13,11 @@ use std::{net::SocketAddr, path::PathBuf};
 use zerocopy::{Immutable, IntoBytes, KnownLayout, TryFromBytes};
 
 #[derive(AsVTable, Default, Debug, Clone, TryFromBytes, Immutable, KnownLayout)]
-#[db(parent = "aleph")]
+#[db(parent = "imu")]
 pub struct Input {
-    pub mag: Vec3<f32>,
     pub accel: Vec3<f32>,
     pub gyro: Vec3<f32>,
+    pub mag: Vec3<f32>,
 }
 
 #[derive(AsVTable, Metadatatize, IntoBytes, Immutable, Debug)]
@@ -47,10 +47,8 @@ async fn connect(config: &Config) -> anyhow::Result<()> {
     let mut sub = client.subscribe::<Input>().await?;
     loop {
         let input = sub.next().await?;
-        mekf.omega = Vec3::from_buf(input.gyro.into_buf().map(|x| x.to_radians() as f64))
-            * tensor![-1., -1., 1.];
-        let accel =
-            Vec3::from_buf(input.accel.into_buf().map(|x| x as f64)) * tensor![-1.0, -1.0, 1.0];
+        mekf.omega = Vec3::from_buf(input.gyro.into_buf().map(|x| x.to_radians() as f64));
+        let accel = Vec3::from_buf(input.accel.into_buf().map(|x| x as f64));
         let mag = Vec3::from_buf(input.mag.into_buf().map(|x| x as f64));
         let mag = mag - config.mag_cal.b;
         let mag = config.mag_cal.a.dot(&mag);
@@ -160,7 +158,7 @@ impl Default for Mekf {
             mag_sigma: 3e-4,
             gyro_sigma: 0.008f64.to_radians(),
             gyro_bias_sigma: 0.001f64,
-            dt: 1.0 / 50.0,
+            dt: 1.0 / 800.0,
             mag_ref: Vec3::new(22.382, 5.157, -41.567),
         }
     }

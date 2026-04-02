@@ -78,8 +78,8 @@ in {
     systemd.services."elodin-db-default" = lib.mkIf (cfg.autostart && cfg.dbUniqueOnBoot) {
       after = ["network.target"];
       wantedBy = ["multi-user.target"];
-      restartIfChanged = true;
-      restartTriggers = config.environment.systemPackages;
+      stopIfChanged = false;
+      restartIfChanged = false;
       description = "Start a unique elodin-db instance for this boot";
       serviceConfig = let
         stopScript = pkgs.writeShellScript "elodin-db-stop-old" ''
@@ -106,6 +106,16 @@ in {
           systemctl start "elodin-db@default-$TIMESTAMP.service"
         '';
       };
+    };
+
+    system.activationScripts.restartElodinDb = lib.mkIf (cfg.autostart && cfg.dbUniqueOnBoot) {
+      text = ''
+        if [ -d /run/systemd/system ] && \
+           /run/current-system/sw/bin/systemctl is-active --quiet elodin-db-default.service 2>/dev/null; then
+          echo "restarting elodin-db-default for fresh database..."
+          /run/current-system/sw/bin/systemctl restart elodin-db-default.service || true
+        fi
+      '';
     };
 
     environment.systemPackages = [elodin-db];

@@ -12,24 +12,10 @@ fn main() {
     input_file.read_to_end(&mut input).unwrap();
     let mut input = input.as_slice();
 
-    println!(
-        "ts,mag_x,mag_y,mag_z,gyro_x,gyro_y,gyro_z,accel_x,accel_y,accel_z,mag_temp,mag_sample,baro,baro_temp,vin,vbat,aux_current,rtc_vbat,cpu_temp"
-    );
+    println!("baro,baro_temp,vin,vbat,aux_current,rtc_vbat,cpu_temp");
     while let Ok((record, remaining)) = Record::read_from_prefix(input) {
         println!(
-            "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
-            record.ts,
-            record.mag[0],
-            record.mag[1],
-            record.mag[2],
-            record.gyro[0],
-            record.gyro[1],
-            record.gyro[2],
-            record.accel[0],
-            record.accel[1],
-            record.accel[2],
-            record.mag_temp,
-            record.mag_sample,
+            "{},{},{},{},{},{},{}",
             record.baro,
             record.baro_temp,
             record.vin,

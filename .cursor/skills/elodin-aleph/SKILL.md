@@ -159,7 +159,7 @@ The STM32 is flashed from the Orin via the ROM UART bootloader using `stm32flash
 
 ## STM32 Firmware (c-blinky)
 
-`fsw/c-blinky/main.c` is bare-metal C for the STM32H747 CM7 core. Runs on HSI at 64MHz (no PLL). Outputs COBS-encoded EL log frames on USART1 PA9 (TX) at 115200 8N1. The `serial-bridge` service parses these frames and forwards them to elodin-db as `aleph.c-blinky.log`.
+`fsw/c-blinky/main.c` is bare-metal C for the STM32H747 CM7 core. Runs on HSI at 64MHz (no PLL). Outputs COBS-encoded EL log frames on USART1 PA9 (TX) at 115200 8N1. The `serial-bridge` service parses these frames and forwards them to elodin-db as `aleph.stm32.log`.
 
 EL frame wire format: `0x00 | COBS(['E','L', ver=1, kind=1, level, ...msg...]) | 0x00`
 

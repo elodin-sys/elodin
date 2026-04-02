@@ -669,6 +669,16 @@ impl TileState {
             .push(TreeAction::AddVideoStream(tile_id, msg_name, name));
     }
 
+    pub fn create_log_stream_tile(
+        &mut self,
+        msg_name: String,
+        name: PaneName,
+        tile_id: Option<TileId>,
+    ) {
+        self.tree_actions
+            .push(TreeAction::AddLogStream(tile_id, msg_name, name));
+    }
+
     pub fn create_tree_tile(&mut self, tile_id: Option<TileId>) {
         self.tree_actions
             .push(TreeAction::AddSchematicTree(tile_id));
@@ -1610,6 +1620,7 @@ pub enum TreeAction {
     AddQueryPlot(Option<TileId>),
     AddActionTile(Option<TileId>, PaneName, String),
     AddVideoStream(Option<TileId>, String, PaneName),
+    AddLogStream(Option<TileId>, String, PaneName),
     AddSchematicTree(Option<TileId>),
     AddDataOverview(Option<TileId>),
     DeleteTab(TileId),
@@ -2804,6 +2815,32 @@ impl WidgetSystem for TileLayout<'_, '_> {
                             ))
                             .id();
                         let pane = Pane::VideoStream(super::video_stream::VideoStreamPane {
+                            entity,
+                            name: name.clone(),
+                        });
+                        if let Some(tile_id) =
+                            tile_state.insert_tile(Tile::Pane(pane), parent_tile_id, true)
+                        {
+                            tile_state.tree.make_active(|id, _| id == tile_id);
+                        }
+                    }
+                    TreeAction::AddLogStream(parent_tile_id, msg_name, name) => {
+                        if read_only {
+                            continue;
+                        }
+                        let msg_id = impeller2::types::msg_id(&msg_name);
+                        let entity = state_mut
+                            .commands
+                            .spawn((
+                                super::log_stream::LogStreamState {
+                                    msg_id,
+                                    msg_name,
+                                    ..Default::default()
+                                },
+                                super::log_stream::LogCache::default(),
+                            ))
+                            .id();
+                        let pane = Pane::LogStream(super::log_stream::LogStreamPane {
                             entity,
                             name: name.clone(),
                         });

@@ -141,6 +141,30 @@
             ++ builtins.attrValues (builtins.removeAttrs fswModules ["c-blinky"])
             ++ builtins.attrValues devModules;
         };
+        m10q = nixpkgs.lib.nixosSystem {
+          inherit system;
+          modules =
+            builtins.attrValues baseModules
+            ++ builtins.attrValues (builtins.removeAttrs fswModules ["c-blinky"])
+            ++ builtins.attrValues devModules
+            ++ [
+              ({...}: {
+                services.sensor-fw.gps.model = "m10q";
+              })
+            ];
+        };
+        m9n = nixpkgs.lib.nixosSystem {
+          inherit system;
+          modules =
+            builtins.attrValues baseModules
+            ++ builtins.attrValues (builtins.removeAttrs fswModules ["c-blinky"])
+            ++ builtins.attrValues devModules
+            ++ [
+              ({...}: {
+                services.sensor-fw.gps.model = "m9n";
+              })
+            ];
+        };
         c-blinky = nixpkgs.lib.nixosSystem {
           inherit system;
           modules =
