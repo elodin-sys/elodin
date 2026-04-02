@@ -158,7 +158,7 @@ impl Default for Mekf {
             mag_sigma: 3e-4,
             gyro_sigma: 0.008f64.to_radians(),
             gyro_bias_sigma: 0.001f64,
-            dt: 1.0 / 1400.0,
+            dt: 1.0 / 800.0,
             mag_ref: Vec3::new(22.382, 5.157, -41.567),
         }
     }
