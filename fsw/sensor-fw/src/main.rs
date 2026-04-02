@@ -188,7 +188,7 @@ fn main() -> ! {
         usart::UsartConfig::default(),
         &clock_cfg,
     )));
-    defmt::info!("Configured UART bridge (2 Mbaud)");
+    defmt::info!("Configured UART bridge (1 Mbaud)");
 
     let mut debug_uart = Box::new(healing_usart::HealingUsart::new(usart::Usart::new(
         dp.USART6,
@@ -409,6 +409,7 @@ fn main() -> ! {
 
     // GPS via UBX on USART2 (J7) -- liveness tracked at runtime
     let mut gps = ubx::Ubx::new(gps_uart, &mut delay);
+    hw_status.gps = true;
     defmt::info!("Configured UBX GPS driver");
 
     // Print hardware initialization report (before compass, so bridge is ready for diagnostics)
