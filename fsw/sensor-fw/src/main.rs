@@ -407,9 +407,8 @@ fn main() -> ! {
     };
     defmt::info!("Configured I2C4 for external compass");
 
-    // GPS via UBX on USART2 (J7)
+    // GPS via UBX on USART2 (J7) -- liveness tracked at runtime
     let mut gps = ubx::Ubx::new(gps_uart, &mut delay);
-    hw_status.gps = true;
     defmt::info!("Configured UBX GPS driver");
 
     // Print hardware initialization report (before compass, so bridge is ready for diagnostics)
@@ -459,6 +458,8 @@ fn main() -> ! {
     let mut tx_bytes: u64 = 0;
     let mut repoll_samples: u32 = 0;
     let mut repoll_emits: u32 = 0;
+    let mut last_fix_count: u32 = 0;
+    let mut gps_ever_seen: bool = false;
 
     let mut last_elrs_update = monotonic.now();
     let mut last_dshot_update = monotonic.now();
@@ -678,6 +679,12 @@ fn main() -> ! {
             );
             let _ = cmd_bridge.write_log(log_buf.as_bytes());
 
+            let gps_alive = gps.fix_count > last_fix_count;
+            if gps_alive {
+                gps_ever_seen = true;
+            }
+            last_fix_count = gps.fix_count;
+
             log_buf.clear();
             let _ = write!(
                 log_buf,
@@ -688,6 +695,9 @@ fn main() -> ! {
                 repoll_samples,
                 repoll_emits,
             );
+            if gps_ever_seen {
+                let _ = write!(log_buf, " gps:{}", if gps_alive { "ok" } else { "--" });
+            }
             let _ = cmd_bridge.write_log(log_buf.as_bytes());
 
             i2c_samples_sec = 0;
@@ -719,7 +729,7 @@ fn main() -> ! {
                 alt_msl: d.alt_msl,
                 alt_wgs84: d.alt_wgs84,
                 vel_ned: [d.vel_n, d.vel_e, d.vel_d],
-                ground_speed: d.ground_speed as u32,
+                ground_speed: d.ground_speed.max(0) as u32,
                 heading_motion: d.heading_motion,
                 h_acc: d.h_acc,
                 v_acc: d.v_acc,

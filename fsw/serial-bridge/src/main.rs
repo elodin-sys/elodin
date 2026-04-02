@@ -133,7 +133,7 @@ impl GpsClock {
         let candidate_us = unix_epoch_ms.saturating_mul(1000);
         self.update(unix_epoch_ms);
         self.last_emitted_us = self.last_emitted_us.max(candidate_us);
-        Some(Timestamp(candidate_us))
+        Some(Timestamp(self.last_emitted_us))
     }
 }
 
