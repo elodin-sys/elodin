@@ -13,6 +13,7 @@ metal = []
 
 [build-dependencies]
 bindgen = "0.72"
+cc = "1"
 
 [dev-dependencies]
 zerocopy = { version = "0.8", features = ["derive"] }

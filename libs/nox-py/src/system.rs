@@ -1,11 +1,125 @@
 use std::{collections::BTreeMap, marker::PhantomData, sync::Arc};
 
 use crate::World;
+use crate::exec::ExecSlotMetadata;
+use crate::query::normalize_expr;
 use crate::utils::SchemaExt;
 use impeller2::types::ComponentId;
 use nox::{ArrayTy, Noxpr, NoxprComp, NoxprFn, NoxprId, NoxprTy};
 
-use crate::{ComponentArray, Error};
+use crate::{ComponentArray, ComponentSchema, Error};
+
+fn singleton_column(len: usize) -> bool {
+    len == 1
+}
+
+fn column_array_ty(schema: &ComponentSchema, len: usize) -> (ArrayTy, bool) {
+    let singleton = singleton_column(len);
+    let mut ty: ArrayTy = schema.clone().to_array_ty();
+    if !singleton {
+        ty.shape.insert(0, len as i64);
+    }
+    (ty, singleton)
+}
+
+fn slot_metadata_from_shape(
+    component_id: ComponentId,
+    shape: Vec<i64>,
+    schema: &ComponentSchema,
+) -> ExecSlotMetadata {
+    let entity_axis_elided = shape == schema.shape().iter().map(|&x| x as i64).collect::<Vec<_>>();
+    ExecSlotMetadata {
+        component_id,
+        shape,
+        entity_axis_elided,
+    }
+}
+
+fn slot_metadata_from_column(
+    component_id: ComponentId,
+    world: &World,
+) -> Result<ExecSlotMetadata, Error> {
+    let col = world
+        .column_by_id(component_id)
+        .ok_or(Error::ComponentNotFound)?;
+    let (ty, _) = column_array_ty(col.schema, col.len());
+    Ok(slot_metadata_from_shape(
+        component_id,
+        ty.shape.iter().copied().collect(),
+        col.schema,
+    ))
+}
+
+fn slot_metadata_from_component_array(
+    component_id: ComponentId,
+    array: &ComponentArray<()>,
+    world: &World,
+) -> Result<ExecSlotMetadata, Error> {
+    let col = world
+        .column_by_id(component_id)
+        .ok_or(Error::ComponentNotFound)?;
+    let shape = if array.batch1 {
+        col.schema.shape().iter().map(|&dim| dim as i64).collect()
+    } else {
+        std::iter::once(array.len as i64)
+            .chain(col.schema.shape().iter().map(|&dim| dim as i64))
+            .collect()
+    };
+    Ok(slot_metadata_from_shape(component_id, shape, col.schema))
+}
+
+fn output_slots_from_vars(
+    output_ids: &[ComponentId],
+    vars: &BTreeMap<ComponentId, ComponentArray<()>>,
+    world: &World,
+) -> Result<Vec<ExecSlotMetadata>, Error> {
+    output_ids
+        .iter()
+        .map(|id| {
+            let array = vars.get(id).ok_or(Error::ComponentNotFound)?;
+            slot_metadata_from_component_array(*id, array, world)
+        })
+        .collect()
+}
+
+fn has_singleton_lowering(
+    input_slots: &[ExecSlotMetadata],
+    output_slots: &[ExecSlotMetadata],
+) -> bool {
+    input_slots
+        .iter()
+        .chain(output_slots.iter())
+        .any(|slot| slot.entity_axis_elided)
+}
+
+fn output_ty_from_slots(
+    output_slots: &[ExecSlotMetadata],
+    world: &World,
+) -> Result<NoxprTy, Error> {
+    if output_slots.len() == 1 {
+        let slot = &output_slots[0];
+        let col = world
+            .column_by_id(slot.component_id)
+            .ok_or(Error::ComponentNotFound)?;
+        Ok(NoxprTy::ArrayTy(ArrayTy {
+            element_type: col.schema.element_type(),
+            shape: slot.shape.clone().into_iter().collect(),
+        }))
+    } else {
+        Ok(NoxprTy::Tuple(
+            output_slots
+                .iter()
+                .map(|slot| {
+                    let col = world.column_by_id(slot.component_id).unwrap();
+                    NoxprTy::ArrayTy(ArrayTy {
+                        element_type: col.schema.element_type(),
+                        shape: slot.shape.clone().into_iter().collect(),
+                    })
+                })
+                .collect(),
+        ))
+    }
+}
 
 pub struct SystemBuilder<'a> {
     pub vars: BTreeMap<ComponentId, ComponentArray<()>>,
@@ -30,22 +144,14 @@ impl<'a> SystemBuilder<'a> {
         } else {
             Noxpr::tuple(output.collect())
         };
-
-        let batch1 = self.world.batch1;
-        let mut tys = self.vars.keys().map(|id| {
-            NoxprTy::ArrayTy(
-                self.world
-                    .column_by_id(*id)
-                    .unwrap()
-                    .buffer_ty_batch1(batch1),
-            )
-        });
-
-        let ty = if self.vars.len() == 1 {
-            tys.next().expect("iterator empty")
-        } else {
-            NoxprTy::Tuple(tys.collect())
-        };
+        let input_slots = self
+            .inputs
+            .iter()
+            .map(|(id, _)| slot_metadata_from_column(*id, self.world))
+            .collect::<Result<Vec<_>, _>>()?;
+        let output_ids = self.vars.keys().copied().collect::<Vec<_>>();
+        let output_slots = output_slots_from_vars(&output_ids, &self.vars, self.world)?;
+        let ty = output_ty_from_slots(&output_slots, self.world)?;
         let func = NoxprFn::new(inputs, output);
         Ok(CompiledSystem {
             computation: NoxprComp {
@@ -54,9 +160,12 @@ impl<'a> SystemBuilder<'a> {
                 ty,
             },
             inputs: self.inputs.iter().map(|(k, _)| k).copied().collect(),
-            outputs: self.vars.keys().copied().collect(),
+            outputs: output_ids,
             system_names: vec!["<compiled>".to_string()],
             diagnostic_subsystems: vec![],
+            input_slots: input_slots.clone(),
+            output_slots: output_slots.clone(),
+            has_singleton_lowering: has_singleton_lowering(&input_slots, &output_slots),
         })
     }
 
@@ -70,11 +179,7 @@ impl<'a> SystemBuilder<'a> {
             .ok_or(Error::ComponentNotFound)
             .unwrap();
         let len = column.len();
-        let batch1 = self.world.batch1;
-        let mut ty: ArrayTy = column.schema.clone().to_array_ty();
-        if !(batch1 && len <= 1) {
-            ty.shape.insert(0, len as i64);
-        }
+        let (ty, batch1) = column_array_ty(column.schema, len);
         let op = Noxpr::parameter(
             self.inputs.len() as i64,
             nox::NoxprTy::ArrayTy(ty),
@@ -111,39 +216,43 @@ pub struct CompiledSystem {
     pub outputs: Vec<ComponentId>,
     pub system_names: Vec<String>,
     pub diagnostic_subsystems: Vec<CompiledSystem>,
+    pub input_slots: Vec<ExecSlotMetadata>,
+    pub output_slots: Vec<ExecSlotMetadata>,
+    pub has_singleton_lowering: bool,
 }
 
 impl CompiledSystem {
     pub fn insert_into_builder(self, builder: &mut SystemBuilder) -> Result<(), Error> {
         let mut args = vec![];
         let world = &mut builder.world;
-        let batch1 = world.batch1;
         let vars = &mut builder.vars;
         let inputs = &mut builder.inputs;
         for id in self.inputs {
+            let slot = self
+                .input_slots
+                .iter()
+                .find(|slot| slot.component_id == id)
+                .ok_or(Error::ComponentNotFound)?;
             if let Some(op) = vars.get(&id) {
-                args.push(op.clone());
+                args.push(normalize_arg_for_slot(op, slot));
             } else {
                 let col = world
                     .column_by_id(id)
                     .ok_or(Error::ComponentNotFound)
                     .unwrap();
-                let mut ty: ArrayTy = col.schema.to_array_ty();
-                let len = col.len();
-                if !(batch1 && len <= 1) {
-                    ty.shape.insert(0, len as i64);
-                }
-                let ty = nox::NoxprTy::ArrayTy(ty);
+                let ty = nox::NoxprTy::ArrayTy(ArrayTy {
+                    element_type: col.schema.element_type(),
+                    shape: slot.shape.clone().into_iter().collect(),
+                });
                 let var = Noxpr::parameter(vars.len() as i64, ty, vars.len().to_string());
                 inputs.push((id, var.clone()));
-                let arr = ComponentArray {
-                    buffer: var,
-                    phantom_data: PhantomData,
-                    len,
-                    entity_map: col.entity_map(),
-                    component_id: id,
-                    batch1,
-                };
+                let arr = ComponentArray::new(
+                    var,
+                    col.len(),
+                    col.entity_map(),
+                    id,
+                    slot.entity_axis_elided,
+                );
 
                 vars.insert(id, arr.clone());
                 args.push(arr);
@@ -153,43 +262,52 @@ impl CompiledSystem {
         let out = Noxpr::call(self.computation, args);
         if self.outputs.len() == 1 {
             let id = self.outputs[0];
+            let slot = &self.output_slots[0];
             let col = world
                 .column_by_id(id)
                 .ok_or(Error::ComponentNotFound)
                 .unwrap();
-            let len = col.len();
-            let arr = ComponentArray {
-                buffer: out,
-                phantom_data: PhantomData,
-                len,
-                entity_map: col.entity_map(),
-                component_id: id,
-                batch1,
-            };
+            let arr = ComponentArray::new(
+                out,
+                col.len(),
+                col.entity_map(),
+                id,
+                slot.entity_axis_elided,
+            );
 
             vars.insert(self.outputs[0], arr);
         } else {
-            for (i, id) in self.outputs.iter().enumerate() {
+            for (i, (id, slot)) in self
+                .outputs
+                .iter()
+                .zip(self.output_slots.iter())
+                .enumerate()
+            {
                 let col = world
                     .column_by_id(*id)
                     .ok_or(Error::ComponentNotFound)
                     .unwrap();
-                let len = col.len();
                 let out = out.get_tuple_element(i);
-                let arr = ComponentArray {
-                    buffer: out,
-                    phantom_data: PhantomData,
-                    len,
-                    entity_map: col.entity_map(),
-                    component_id: *id,
-                    batch1,
-                };
+                let arr = ComponentArray::new(
+                    out,
+                    col.len(),
+                    col.entity_map(),
+                    *id,
+                    slot.entity_axis_elided,
+                );
 
                 vars.insert(*id, arr);
             }
         }
         Ok(())
     }
+}
+
+fn normalize_arg_for_slot(arg: &ComponentArray<()>, slot: &ExecSlotMetadata) -> ComponentArray<()> {
+    let mut arg = arg.clone();
+    arg.buffer = normalize_expr(&arg.buffer, arg.batch1, slot.entity_axis_elided);
+    arg.batch1 = slot.entity_axis_elided;
+    arg
 }
 
 pub struct SystemOutput {
@@ -237,7 +355,8 @@ where
         let output = (self.func)();
         let component_ids = Ret::component_ids().collect::<Vec<_>>();
         let noxpr = output.output(&mut builder)?;
-        let ty = noxpr.ty().unwrap();
+        let output_slots = output_slots_from_vars(&component_ids, &builder.vars, world)?;
+        let ty = output_ty_from_slots(&output_slots, world)?;
         let func = NoxprFn::new(vec![], noxpr);
         let computation = NoxprComp {
             func: Arc::new(func),
@@ -250,6 +369,9 @@ where
             outputs: component_ids,
             system_names: vec!["<system>".to_string()],
             diagnostic_subsystems: vec![],
+            input_slots: vec![],
+            output_slots: output_slots.clone(),
+            has_singleton_lowering: has_singleton_lowering(&[], &output_slots),
         })
     }
 }
@@ -356,17 +478,14 @@ macro_rules! impl_system_param {
                         let output = (self.func)($($ty,)*);
                         let outputs = Ret::component_ids().collect::<Vec<_>>();
                         let noxpr = output.output(builder)?;
+                        let output_slots = output_slots_from_vars(&outputs, &builder.vars, builder.world)?;
                         let args = builder.inputs.iter().map(|(_, v)| v).cloned().collect::<Vec<_>>();
-                        let batch1 = builder.world.batch1;
-                        let mut tys = outputs
+                        let input_slots = builder
+                            .inputs
                             .iter()
-                            .map(|id| NoxprTy::ArrayTy(builder.world.column_by_id(*id).unwrap().buffer_ty_batch1(batch1)));
-
-                        let ty = if outputs.len() == 1 {
-                            tys.next().unwrap()
-                        } else {
-                            NoxprTy::Tuple(tys.collect())
-                        };
+                            .map(|(id, _)| slot_metadata_from_column(*id, builder.world))
+                            .collect::<Result<Vec<_>, _>>()?;
+                        let ty = output_ty_from_slots(&output_slots, builder.world)?;
 
                         let func = NoxprFn::new(args, noxpr);
                         let computation = NoxprComp {
@@ -381,6 +500,9 @@ macro_rules! impl_system_param {
                             outputs,
                             system_names: vec!["<system>".to_string()],
                             diagnostic_subsystems: vec![],
+                            input_slots: input_slots.clone(),
+                            output_slots: output_slots.clone(),
+                            has_singleton_lowering: has_singleton_lowering(&input_slots, &output_slots),
                         })
                     }
 
@@ -534,6 +656,9 @@ impl System for () {
             outputs: vec![],
             system_names: vec!["<empty>".to_string()],
             diagnostic_subsystems: vec![],
+            input_slots: vec![],
+            output_slots: vec![],
+            has_singleton_lowering: false,
         })
     }
 }
@@ -605,8 +730,8 @@ use pyo3::prelude::*;
 use pyo3::types::IntoPyDict;
 use std::collections::HashMap;
 
+use crate::PyComponent;
 use crate::graph::{EdgeComponent, GraphQuery, TotalEdge};
-use crate::{ComponentSchema, PyComponent};
 use nox::{NoxprNode, jax::JaxNoxprFn};
 
 #[pyclass]
@@ -679,7 +804,6 @@ impl System for PyFnSystem {
         let builder = SystemBuilder::new(world);
         let mut py_builder = PySystemBuilder {
             total_edges: GraphQuery::<TotalEdge>::param(&builder)?.edges,
-            batch1_flag: world.batch1,
             ..Default::default()
         };
         for id in output_ids.iter() {
@@ -715,21 +839,59 @@ impl System for PyFnSystem {
                 .collect();
             py_builder.edge_map.insert(id, edges);
         }
-        let batch1 = builder.world.batch1;
-        let mut tys = self.output_ids.iter().map(|id| {
-            NoxprTy::ArrayTy(
-                builder
+        let input_slots = input_ids
+            .iter()
+            .map(|id| {
+                let col = builder
                     .world
                     .column_by_id(*id)
-                    .unwrap()
-                    .buffer_ty_batch1(batch1),
-            )
-        });
-
-        let ty = if self.output_ids.len() == 1 {
-            tys.next().unwrap()
+                    .ok_or(Error::ComponentNotFound)?;
+                let (ty, _) = column_array_ty(col.schema, col.len());
+                Ok::<_, Error>(slot_metadata_from_shape(
+                    *id,
+                    ty.shape.iter().copied().collect(),
+                    col.schema,
+                ))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let output_slots = output_ids
+            .iter()
+            .map(|id| {
+                let col = builder
+                    .world
+                    .column_by_id(*id)
+                    .ok_or(Error::ComponentNotFound)?;
+                let (ty, _) = column_array_ty(col.schema, col.len());
+                Ok::<_, Error>(slot_metadata_from_shape(
+                    *id,
+                    ty.shape.iter().copied().collect(),
+                    col.schema,
+                ))
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let ty = if output_slots.len() == 1 {
+            let slot = &output_slots[0];
+            let col = builder
+                .world
+                .column_by_id(slot.component_id)
+                .ok_or(Error::ComponentNotFound)?;
+            NoxprTy::ArrayTy(ArrayTy {
+                element_type: col.schema.element_type(),
+                shape: slot.shape.clone().into_iter().collect(),
+            })
         } else {
-            NoxprTy::Tuple(tys.collect())
+            NoxprTy::Tuple(
+                output_slots
+                    .iter()
+                    .map(|slot| {
+                        let col = builder.world.column_by_id(slot.component_id).unwrap();
+                        NoxprTy::ArrayTy(ArrayTy {
+                            element_type: col.schema.element_type(),
+                            shape: slot.shape.clone().into_iter().collect(),
+                        })
+                    })
+                    .collect(),
+            )
         };
         let func = Python::with_gil(|py| {
             let func = sys.call1(py, (py_builder,))?;
@@ -745,6 +907,9 @@ impl System for PyFnSystem {
             outputs: output_ids,
             system_names: vec![self.name.clone()],
             diagnostic_subsystems: vec![],
+            input_slots: input_slots.clone(),
+            output_slots: output_slots.clone(),
+            has_singleton_lowering: has_singleton_lowering(&input_slots, &output_slots),
         })
     }
 }
@@ -756,6 +921,7 @@ pub trait CompiledSystemExt {
         world: &World,
         iree_device: &str,
         extra_iree_flags: &[String],
+        compile_origin: &str,
     ) -> Result<crate::iree_compile::IreeCompileResult, Error>;
     fn compile_jax_module(
         &self,
@@ -772,8 +938,16 @@ impl CompiledSystemExt for CompiledSystem {
         world: &World,
         iree_device: &str,
         extra_iree_flags: &[String],
+        compile_origin: &str,
     ) -> Result<crate::iree_compile::IreeCompileResult, Error> {
-        crate::iree_compile::compile_iree_module(py, self, world, iree_device, extra_iree_flags)
+        crate::iree_compile::compile_iree_module(
+            py,
+            self,
+            world,
+            iree_device,
+            extra_iree_flags,
+            compile_origin,
+        )
     }
 
     fn compile_jax_module(
@@ -819,7 +993,6 @@ pub struct PySystemBuilder {
     arg_map: HashMap<ComponentId, (ArgMetadata, usize)>,
     pub edge_map: HashMap<ComponentId, Vec<crate::graph::Edge>>,
     pub total_edges: Vec<crate::graph::Edge>,
-    pub batch1_flag: bool,
 }
 
 #[derive(Clone)]
@@ -833,10 +1006,6 @@ pub struct ArgMetadata {
 impl PySystemBuilder {
     pub fn get_var(&self, id: ComponentId) -> Option<(ArgMetadata, usize)> {
         self.arg_map.get(&id).cloned()
-    }
-
-    pub fn batch1(&self) -> bool {
-        self.batch1_flag
     }
 }
 
@@ -896,4 +1065,37 @@ pub fn noxpr_to_callable(func: Arc<NoxprFn>) -> Py<PyAny> {
     };
 
     Python::with_gil(|py| func.into_py_any(py).unwrap())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::{collections::BTreeMap, marker::PhantomData};
+
+    use impeller2::types::{ComponentId, EntityId};
+
+    use super::{ComponentArray, ExecSlotMetadata, normalize_arg_for_slot};
+    use nox::NoxprScalarExt;
+
+    #[test]
+    fn normalize_arg_for_slot_rebatches_batch1_vector_inputs() {
+        let component_id = ComponentId::new("slot_norm_diag");
+        let arg = ComponentArray {
+            buffer: 1.0f64.constant().reshape(smallvec::smallvec![1]),
+            len: 1,
+            entity_map: BTreeMap::from([(EntityId(1), 0)]),
+            phantom_data: PhantomData,
+            component_id,
+            batch1: true,
+        };
+        let slot = ExecSlotMetadata {
+            component_id,
+            shape: vec![1, 1],
+            entity_axis_elided: false,
+        };
+
+        let normalized = normalize_arg_for_slot(&arg, &slot);
+
+        assert!(!normalized.batch1);
+        assert_eq!(normalized.buffer.shape().unwrap().as_slice(), &[1, 1]);
+    }
 }

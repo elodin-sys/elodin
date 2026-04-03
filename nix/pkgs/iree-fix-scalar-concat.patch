@@ -1,0 +1,68 @@
+--- a/compiler/plugins/input/StableHLO/Conversion/Preprocessing/Canonicalization.cpp	2026-03-24 18:42:54.525043896 -0700
++++ b/compiler/plugins/input/StableHLO/Conversion/Preprocessing/Canonicalization.cpp	2026-03-24 18:43:36.229422406 -0700
+@@ -538,6 +538,56 @@
+   }
+ };
+ 
++// Rewrite scalar 1D concatenations to 2D to avoid a tiling bug where
++// IREE generates invalid tensor.expand_shape ops on odd-sized 1D results
++// (e.g. tensor<3xf64> -> tensor<2x1xf64>).
++struct ScalarConcatTo2D final
++    : OpRewritePattern<mlir::stablehlo::ConcatenateOp> {
++  using Base::Base;
++
++  LogicalResult matchAndRewrite(mlir::stablehlo::ConcatenateOp op,
++                                PatternRewriter &rewriter) const override {
++    // Only match dim=0 concatenations.
++    if (op.getDimension() != 0)
++      return failure();
++
++    auto resultType = dyn_cast<RankedTensorType>(op.getType());
++    if (!resultType || resultType.getRank() != 1 || !resultType.hasStaticShape())
++      return failure();
++
++    // All inputs must be tensor<1xTy>.
++    Type elemTy = resultType.getElementType();
++    for (Value input : op.getInputs()) {
++      auto inputType = dyn_cast<RankedTensorType>(input.getType());
++      if (!inputType || inputType.getRank() != 1 ||
++          inputType.getDimSize(0) != 1 || inputType.getElementType() != elemTy)
++        return failure();
++    }
++
++    int64_t n = op.getInputs().size();
++    if (n < 2)
++      return failure();
++
++    Location loc = op.getLoc();
++    auto reshape2DType = RankedTensorType::get({1, 1}, elemTy);
++    auto catType = RankedTensorType::get({n, 1}, elemTy);
++
++    SmallVector<Value> reshaped;
++    reshaped.reserve(n);
++    for (Value input : op.getInputs()) {
++      reshaped.push_back(
++          rewriter.create<mlir::stablehlo::ReshapeOp>(loc, reshape2DType, input));
++    }
++
++    auto cat2D = rewriter.create<mlir::stablehlo::ConcatenateOp>(
++        loc, catType, reshaped, rewriter.getI64IntegerAttr(0));
++
++    rewriter.replaceOpWithNewOp<mlir::stablehlo::ReshapeOp>(
++        op, resultType, cat2D);
++    return success();
++  }
++};
++
+ struct ConcatenateOpCanon final
+     : OpRewritePattern<mlir::stablehlo::ConcatenateOp> {
+   using Base::Base;
+@@ -1234,7 +1284,7 @@
+       // Reduce op.
+       NoopReduceOpCanon, EmptyReduceOpCanon,
+       // Shape manipulation(-ish) ops.
+-      ConcatenateOpCanon, ConvertOpCanon, DynamicReshapeOpCanon, GatherOpCanon,
++      ScalarConcatTo2D, ConcatenateOpCanon, ConvertOpCanon, DynamicReshapeOpCanon, GatherOpCanon,
+       ReshapeOpCanon, MergeConsecutiveReshapes, TransposeIsReshape,
+       // Types.
+       ZeroExtentTensorCanon>(context, benefit);

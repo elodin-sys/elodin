@@ -67,6 +67,8 @@ def test_iree_cuda_compile_smoke():
             pytest.skip(
                 "IREE CUDA compiler in the current environment cannot configure cuda-nvptx targets"
             )
+        if "failed to create requested IREE device 'cuda'" in msg or "CUDA driver library" in msg:
+            pytest.skip("IREE CUDA runtime is unavailable in this environment")
         raise
     exec.run(1)
     history = exec.history(["e1.x32_gpu_smoke"])

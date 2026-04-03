@@ -1,0 +1,26 @@
+--- a/third_party/llvm-project/mlir/lib/AsmParser/AttributeParser.cpp	2026-03-23 18:00:01.238526961 -0700
++++ b/third_party/llvm-project/mlir/lib/AsmParser/AttributeParser.cpp	2026-03-23 18:00:13.240916772 -0700
+@@ -718,6 +718,23 @@
+   if (parseElementAttrHexValues(p, *hexStorage, data))
+     return nullptr;
+ 
++  // Newer MLIR versions (e.g. in JAX/jaxlib) serialize i1 dense attributes
++  // with packed bits (1 bit per element, ceil(N/8) bytes).  This MLIR version
++  // expects byte-per-element (1 byte per i1).  Detect and unpack.
++  if (auto intTy = dyn_cast<IntegerType>(elementType)) {
++    if (intTy.getWidth() == 1) {
++      int64_t numElements = type.getNumElements();
++      size_t packedBytes = (numElements + CHAR_BIT - 1) / CHAR_BIT;
++      if (static_cast<int64_t>(data.size()) == static_cast<int64_t>(packedBytes) &&
++          data.size() != static_cast<size_t>(numElements)) {
++        std::string unpacked(numElements, '\0');
++        for (int64_t i = 0; i < numElements; ++i)
++          unpacked[i] = (data[i / CHAR_BIT] >> (i % CHAR_BIT)) & 1;
++        data = std::move(unpacked);
++      }
++    }
++  }
++
+   ArrayRef<char> rawData(data);
+   if (!DenseElementsAttr::isValidRawBuffer(type, rawData)) {
+     p.emitError(loc) << "elements hex data size is invalid for provided type: "

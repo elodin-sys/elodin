@@ -1,0 +1,6 @@
+{
+  "build_time_ms": 4000.0,
+  "compile_time_ms": 4000.0,
+  "real_time_factor": 0.1,
+  "ticks": 100
+}

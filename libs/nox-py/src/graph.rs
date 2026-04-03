@@ -10,6 +10,7 @@ use nox::{
 };
 use std::{collections::BTreeMap, marker::PhantomData};
 
+use crate::query::normalize_expr;
 use crate::{ComponentArray, ComponentGroup, Query};
 
 #[derive(Clone)]
@@ -178,6 +179,16 @@ pub fn exprs_from_edges_queries<A, B>(
     f_query: Query<A>,
     t_query: Query<B>,
 ) -> BTreeMap<usize, (Query<A>, Query<B>)> {
+    fn add_source_axis(buffer: &Noxpr) -> Noxpr {
+        let mut shape = buffer.shape().unwrap();
+        shape.insert(0, 1);
+        buffer.clone().reshape(shape)
+    }
+
+    fn source_batched_expr(buffer: &Noxpr, batch1: bool) -> Noxpr {
+        add_source_axis(&normalize_expr(buffer, batch1, false))
+    }
+
     let mut from_map = BTreeMap::new();
     for edge in edges {
         let vec: &mut Vec<EntityId> = from_map.entry(edge.from).or_default();
@@ -189,31 +200,34 @@ pub fn exprs_from_edges_queries<A, B>(
         if from.len == 0 {
             continue;
         }
-        let mut to = t_query.filter(&ids);
+        let to = t_query.filter(&ids);
         match exprs.entry(to.len) {
             std::collections::btree_map::Entry::Occupied(mut o) => {
                 let (o_from, o_to) = o.get_mut();
+                if o_from.batch1 {
+                    for a in &mut o_from.exprs {
+                        *a = normalize_expr(a, true, false);
+                    }
+                    for a in &mut o_to.exprs {
+                        *a = source_batched_expr(a, o_to.batch1);
+                    }
+                    o_from.batch1 = false;
+                    o_to.batch1 = false;
+                }
                 for (a, b) in o_from.exprs.iter_mut().zip(from.exprs.iter()) {
-                    *a = Noxpr::concat_in_dim(vec![a.clone(), b.clone()], 0);
+                    let b = normalize_expr(b, from.batch1, false);
+                    *a = Noxpr::concat_in_dim(vec![a.clone(), b], 0);
                 }
                 o_from.len += from.len;
                 for (a, b) in o_to.exprs.iter_mut().zip(to.exprs.iter()) {
-                    let mut b_shape = b.shape().unwrap();
-                    b_shape.insert(0, 1);
-                    let b = b.clone().reshape(b_shape);
-                    *a = Noxpr::concat_in_dim(vec![a.clone(), b], 0);
+                    *a =
+                        Noxpr::concat_in_dim(vec![a.clone(), source_batched_expr(b, to.batch1)], 0);
                 }
                 o_from.entity_map.insert(from_id, o_from.entity_map.len());
                 o_to.entity_map.extend(to.entity_map);
                 o_to.len += to.len;
             }
             std::collections::btree_map::Entry::Vacant(s) => {
-                for b in to.exprs.iter_mut() {
-                    let mut b_shape = b.shape().unwrap();
-                    b_shape.insert(0, 1);
-
-                    *b = b.clone().reshape(b_shape);
-                }
                 s.insert((from, to));
             }
         }
@@ -251,63 +265,95 @@ impl<E> GraphQuery<E> {
         let mut output_array: Option<ComponentArray<I>> = None;
         let exprs = exprs_from_edges_queries(&self.edges, from_query.clone(), to_query.clone());
         for (len, (from, to)) in exprs.iter() {
-            let axis: Vec<usize> =
-                std::iter::repeat_n(0, from.exprs.len() + to.exprs.len()).collect::<Vec<_>>();
-            let vmap_args = from
-                .exprs
-                .iter()
-                .cloned()
-                .chain(to.exprs.iter().cloned())
-                .collect::<Vec<_>>();
-            let vmap_fn_args = scan_func.args[1..]
-                .iter()
-                .enumerate()
-                .map(|(i, a)| {
-                    let shape = a.shape().unwrap();
-                    let element_type = a.element_type().unwrap();
-                    Noxpr::parameter(
-                        i as i64,
-                        NoxprTy::ArrayTy(ArrayTy {
-                            element_type,
-                            shape: shape.clone(),
-                        }),
-                        format!("vmap_{}", i),
-                    )
-                })
-                .collect::<Vec<_>>();
-            let scan_args = vmap_fn_args[..from.exprs.len()]
-                .iter()
-                .map(|e| {
-                    let mut shape = e.shape().unwrap();
-                    shape.insert(0, *len as i64);
-                    let broadcast_dims = (1..shape.len()).map(|x| x as i64).collect();
-                    e.clone().broadcast_in_dim(shape, broadcast_dims)
-                })
-                .chain(vmap_fn_args[from.exprs.len()..].iter().cloned())
-                .collect::<Vec<_>>();
-            let vmap_fn = NoxprFn {
-                args: vmap_fn_args.clone(),
-                inner: Noxpr::scan(scan_args, init_op.clone(), scan_func.clone()),
-            };
-            let buffer = Noxpr::vmap_with_axis(vmap_fn, &axis, &vmap_args).unwrap();
-            if let Some(output_array) = output_array.as_mut() {
-                output_array.buffer =
-                    Noxpr::concat_in_dim(vec![output_array.buffer.clone(), buffer], 0);
-                for (id, index) in from.entity_map.iter() {
-                    output_array
-                        .entity_map
-                        .insert(*id, index + output_array.len);
+            let buffer = if from.batch1 {
+                if *len == 1 && to.batch1 {
+                    let args = std::iter::once(init_op.clone())
+                        .chain(from.exprs.iter().cloned())
+                        .chain(to.exprs.iter().cloned())
+                        .collect::<Vec<_>>();
+                    Noxpr::substitute_params(&scan_func, &args)
+                } else {
+                    let scan_args = from
+                        .exprs
+                        .iter()
+                        .map(|e| {
+                            let mut shape = e.shape().unwrap();
+                            shape.insert(0, *len as i64);
+                            let broadcast_dims = (1..shape.len()).map(|x| x as i64).collect();
+                            e.clone().broadcast_in_dim(shape, broadcast_dims)
+                        })
+                        .chain(to.exprs.iter().map(|e| normalize_expr(e, to.batch1, false)))
+                        .collect::<Vec<_>>();
+                    Noxpr::scan(scan_args, init_op.clone(), scan_func.clone())
                 }
-                output_array.len += from.len;
             } else {
-                output_array = Some(ComponentArray {
+                let axis: Vec<usize> =
+                    std::iter::repeat_n(0, from.exprs.len() + to.exprs.len()).collect::<Vec<_>>();
+                let vmap_args = from
+                    .exprs
+                    .iter()
+                    .cloned()
+                    .chain(to.exprs.iter().cloned())
+                    .collect::<Vec<_>>();
+                let vmap_fn_args = scan_func.args[1..]
+                    .iter()
+                    .enumerate()
+                    .map(|(i, a)| {
+                        let shape = a.shape().unwrap();
+                        let element_type = a.element_type().unwrap();
+                        Noxpr::parameter(
+                            i as i64,
+                            NoxprTy::ArrayTy(ArrayTy {
+                                element_type,
+                                shape: shape.clone(),
+                            }),
+                            format!("vmap_{}", i),
+                        )
+                    })
+                    .collect::<Vec<_>>();
+                let scan_args = vmap_fn_args[..from.exprs.len()]
+                    .iter()
+                    .map(|e| {
+                        let mut shape = e.shape().unwrap();
+                        shape.insert(0, *len as i64);
+                        let broadcast_dims = (1..shape.len()).map(|x| x as i64).collect();
+                        e.clone().broadcast_in_dim(shape, broadcast_dims)
+                    })
+                    .chain(vmap_fn_args[from.exprs.len()..].iter().cloned())
+                    .collect::<Vec<_>>();
+                let vmap_fn = NoxprFn {
+                    args: vmap_fn_args.clone(),
+                    inner: Noxpr::scan(scan_args, init_op.clone(), scan_func.clone()),
+                };
+                Noxpr::vmap_with_axis(vmap_fn, &axis, &vmap_args).unwrap()
+            };
+            if let Some(existing) = output_array.take() {
+                let mut entity_map = existing.entity_map.clone();
+                for (id, index) in from.entity_map.iter() {
+                    entity_map.insert(*id, index + existing.len);
+                }
+                let buffer = Noxpr::concat_in_dim(
+                    vec![
+                        normalize_expr(&existing.buffer, existing.batch1, false),
+                        normalize_expr(&buffer, from.batch1, false),
+                    ],
+                    0,
+                );
+                output_array = Some(ComponentArray::new(
                     buffer,
-                    entity_map: from.entity_map.clone(),
-                    len: from.len,
-                    phantom_data: PhantomData,
-                    component_id: ComponentId::new("foo"), // TODO(sphw): fix me
-                    batch1: false,
-                });
+                    existing.len + from.len,
+                    entity_map,
+                    existing.component_id,
+                    false,
+                ));
+            } else {
+                output_array = Some(ComponentArray::new(
+                    buffer,
+                    from.len,
+                    from.entity_map.clone(),
+                    ComponentId::new("foo"), // TODO(sphw): fix me
+                    from.batch1,
+                ));
             }
         }
         output_array.unwrap()
@@ -404,13 +450,7 @@ impl GraphQueryInner {
         }
         let expr = Noxpr::jax(new_buf);
         QueryInner {
-            query: Query {
-                exprs: vec![expr],
-                entity_map,
-                len,
-                phantom_data: PhantomData,
-                batch1: false,
-            },
+            query: Query::new(vec![expr], entity_map, len, len == 1),
             metadata: vec![metadata],
         }
     }
@@ -456,6 +496,70 @@ impl PyEdge {
     #[staticmethod]
     fn from_array(_arr: PyObject) -> Self {
         todo!()
+    }
+}
+
+#[cfg(test)]
+mod batch1_graph_tests {
+    use super::*;
+    use nox::{ElementType, NoxprTy};
+
+    fn two_entity_map() -> BTreeMap<EntityId, usize> {
+        BTreeMap::from([(EntityId(1), 0), (EntityId(2), 1)])
+    }
+
+    fn batched_query(number: i64, name: &str) -> Query<()> {
+        Query {
+            exprs: vec![Noxpr::parameter(
+                number,
+                NoxprTy::ArrayTy(ArrayTy {
+                    element_type: ElementType::F64,
+                    shape: smallvec::smallvec![2, 3],
+                }),
+                name.to_owned(),
+            )],
+            entity_map: two_entity_map(),
+            len: 2,
+            phantom_data: PhantomData,
+            batch1: false,
+        }
+    }
+
+    #[test]
+    fn singleton_edge_groups_recover_local_singletons() {
+        let groups = exprs_from_edges_queries(
+            &[Edge::new(EntityId(1), EntityId(2))],
+            batched_query(0, "from"),
+            batched_query(1, "to"),
+        );
+
+        let (from, to) = groups.get(&1).expect("singleton edge group");
+        assert_eq!(from.len, 1);
+        assert_eq!(to.len, 1);
+        assert!(from.batch1);
+        assert!(to.batch1);
+        assert_eq!(from.exprs[0].shape().unwrap().as_slice(), &[3]);
+        assert_eq!(to.exprs[0].shape().unwrap().as_slice(), &[3]);
+    }
+
+    #[test]
+    fn multi_source_single_edge_groups_rebatch_on_append() {
+        let groups = exprs_from_edges_queries(
+            &[
+                Edge::new(EntityId(1), EntityId(2)),
+                Edge::new(EntityId(2), EntityId(1)),
+            ],
+            batched_query(0, "from"),
+            batched_query(1, "to"),
+        );
+
+        let (from, to) = groups.get(&1).expect("two-source edge group");
+        assert_eq!(from.len, 2);
+        assert_eq!(to.len, 2);
+        assert!(!from.batch1);
+        assert!(!to.batch1);
+        assert_eq!(from.exprs[0].shape().unwrap().as_slice(), &[2, 3]);
+        assert_eq!(to.exprs[0].shape().unwrap().as_slice(), &[2, 1, 3]);
     }
 }
 

@@ -16,7 +16,9 @@
 }: let
   # Import shared configuration
   common = pkgs.callPackage ./common.nix {};
+  openblas64 = pkgs.openblas.override {blas64 = true;};
   iree_compiler = pkgs.callPackage ./iree-compiler.nix {python3 = python;};
+  iree_compiler_source = pkgs.callPackage ./iree-compiler-source.nix {};
   iree_runtime_used =
     if enableTracy
     then assert iree_runtime_tracy != null; iree_runtime_tracy
@@ -92,6 +94,7 @@
     # Environment variables for the build
     IREE_RUNTIME_DIR = "${iree_runtime}";
     IREE_RUNTIME_TRACY_DIR = lib.optionalString enableTracy "${iree_runtime_used}";
+    OPENBLAS_DIR = "${openblas64}";
     OPENSSL_DIR = "${pkgs.openssl.dev}";
     OPENSSL_LIB_DIR = "${pkgs.openssl.out}/lib";
     OPENSSL_INCLUDE_DIR = "${pkgs.openssl.dev}/include/";
@@ -145,7 +148,8 @@
           polars
           pytest
           matplotlib
-          iree_compiler # IREE compiler for JIT compilation
+          iree_compiler # IREE compiler Python package for iree.compiler imports
+          iree_compiler_source # Source-built iree-compile binary (patchable)
         ]
         ++ lib.optionals pkgs.stdenv.isDarwin [
           pkgs.libcxx # C++ standard library runtime
@@ -167,6 +171,11 @@
           darwin.cctools
         ]
       );
+      postFixup = ''
+        for d in $out/lib/python*/site-packages/elodin; do
+          echo "${iree_compiler_source}" > "$d/_iree_compiler_dir"
+        done
+      '';
     };
   py = elodin pythonPackages;
 in {

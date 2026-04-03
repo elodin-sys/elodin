@@ -27,8 +27,10 @@ w.run(system, backend="jax")    # Full JAX compatibility, Python per-tick
 
 IREE does not yet support all JAX operations. Known unsupported patterns:
 - `.at[].set()` scatter patterns (IREE scatter validation too strict)
-- `jnp.linalg.{pinv, svd, solve, eig}` (LAPACK custom calls)
+- `jnp.linalg.pinv` (not yet wired to `elodin_lapack`)
 - Complex control flow with `np.block` in loops (`tensor.expand_shape` limitation)
+
+Most linalg operations (`svd`, `solve`, `cholesky`, `qr`, `det`, `slogdet`, `eigh`, `inv`) are supported via the `elodin_lapack` VM module.
 
 When IREE compilation fails, a helpful error message tells the user to set `backend="jax"`.
 
@@ -138,12 +140,13 @@ The script compiles all `.mlir` files into `x86_64/` or `aarch64/` based on `una
 
 ## Nix Integration
 
-The IREE C runtime library is built from source via nix:
+Both the IREE runtime and compiler are built from source via nix:
 
-- **Package**: `nix/pkgs/iree-runtime.nix` builds IREE v3.11.0 with CMake
-- **Shell**: `nix/shell.nix` imports it and sets `IREE_RUNTIME_DIR`
-- **Build flags**: Runtime-only (`IREE_BUILD_COMPILER=OFF`), static libs, CPU drivers (`local-sync` + `local-task`), embedded ELF + VMVX executable loaders
-- **Submodules**: Runtime builds vendor `flatcc`, `benchmark`, and `printf` (not LLVM -- that's compiler-only)
+- **Runtime package**: `nix/pkgs/iree-runtime.nix` builds IREE v3.11.0 with CMake (runtime-only: `IREE_BUILD_COMPILER=OFF`)
+- **Compiler package**: `nix/pkgs/iree-compiler-source.nix` builds `iree-compile` and `iree-lld` from source. This is where `iree-fix-lapack-custom-call.patch` is applied. Modifying the patch triggers a full LLVM/MLIR/IREE C++ rebuild (~20-40 min on a fast machine).
+- **Shell**: `nix/shell.nix` imports both and sets `IREE_RUNTIME_DIR` and `IREE_COMPILER_DIR`
+- **Build flags**: Runtime: static libs, CPU drivers (`local-sync` + `local-task`), embedded ELF + VMVX executable loaders. Compiler: llvm-cpu backend, StableHLO input.
+- **Submodules**: Runtime vendors `flatcc`, `benchmark`, and `printf`. Compiler additionally vendors `llvm-project` and `stablehlo`.
 
 The nix package produces:
 - `$IREE_RUNTIME_DIR/include/iree/runtime/api.h` (and transitive headers)
@@ -291,3 +294,56 @@ w.run(system, backend="iree", iree_flags=["--iree-opt-const-eval=false"])
 
 - Invalid flags fail compilation immediately (helpful for catching typos).
 - Some flags are backend/platform specific; verify against `iree-compile --help`.
+
+---
+
+## elodin_lapack VM Module (LAPACK via OpenBLAS)
+
+The `elodin_lapack` VM module provides native LAPACK functions to the IREE runtime, replacing the deleted `_iree_linalg.py` pure-JAX workaround. It enables `jnp.linalg.svd`, `solve`, `cholesky`, `qr`, `det`, `slogdet`, `eigh`, and `inv` to compile and run through IREE.
+
+### Architecture
+
+```
+JAX linalg op (e.g. jnp.linalg.svd)
+    → stablehlo.custom_call @lapack_dgesdd_ffi
+    → [iree-fix-lapack-custom-call.patch] func.call @elodin_lapack.dgesdd_6_6
+    → [IREE VM] vm.call @elodin_lapack.dgesdd_6_6
+    → [lapack_module.c] LAPACKE_dgesdd() via dlopen'd OpenBLAS
+
+jnp.linalg.solve (special case — fused by SolvePatternRewriter):
+    → stablehlo.custom_call @lapack_dgetrf_ffi + stablehlo.while + dtrsm
+    → [rewriteSolvePattern] stablehlo.custom_call @lapack_dgetrs_ffi  (single call)
+    → [LapackCustomCallRewriter] func.call @elodin_lapack.dgetrs_3_3_3
+    → [lapack_module.c] LAPACKE_dgetrf() + LAPACKE_dgetrs() via OpenBLAS
+```
+
+### Key files
+
+- `libs/iree-runtime/src/lapack_module.c` -- C implementation (LAPACKE API, dlopen, shape-suffixed exports)
+- `libs/iree-runtime/src/lapack_module.h` -- public header
+- `libs/iree-runtime/src/lapack.rs` -- Rust FFI (`unsafe fn create_module()` -- unsafe because it takes raw IREE pointers)
+- `libs/iree-runtime/build.rs` -- compiles lapack_module.c, bakes in OpenBLAS path
+- `nix/pkgs/iree-fix-lapack-custom-call.patch` -- compiler patch (func.call conversion + SolvePatternRewriter + dead while-loop removal)
+- `nix/pkgs/iree-compiler-source.nix` -- nix derivation for source-built IREE compiler (applies the patch)
+- `examples/linalg-iree/` -- regression test exercising all LAPACK operations
+
+### Design decisions
+
+- **LAPACKE C API** (not Fortran): avoids hidden string-length parameters and calling convention issues that caused segfaults with the Fortran API across different compilers/platforms.
+- **dlopen at runtime**: avoids link-time ABI mismatches between the OpenBLAS version used at build time and the one available at runtime. The Nix store path is baked in via `ELODIN_OPENBLAS_PATH` define.
+- **func.call** (no `nosideeffects`): the compiler patch converts custom_calls to standard `func.call` ops without `nosideeffects`, so IREE treats them as sequential host operations. The patch also includes `rewriteSolvePattern()` which fuses JAX's multi-step solve IR (`dgetrf` + `stablehlo.while` pivot loop + `dtrsm` x2) into a single `dgetrs` custom_call before conversion. This eliminates a fatal MLIR dominance error caused by external call results crossing while-loop region boundaries. A companion `removeDeadWhileLoops()` erases unused while loops (e.g. in `slogdet`).
+- **Shape-suffixed exports**: each unique operand-shape combination gets its own export name (e.g., `dgesdd_3_3`, `dgesdd_6_6`). The export table must be alphabetically sorted (IREE VM binary search). All variants map to the same underlying LAPACKE function.
+
+### Adding a new matrix size
+
+If a simulation uses matrix sizes not in the pre-registered set (3, 4, 6, 9, 12), add entries to the alphabetically-sorted export and function tables in `lapack_module.c`. The implementation is shape-generic -- only the export name needs to match.
+
+### Solve pattern fusion
+
+`jnp.linalg.solve` generates `lapack_dgetrf_ffi` + `stablehlo.while` (pivot permutation) + `_lu_solve` (two `lapack_dtrsm_ffi` calls). IREE's stream scheduler cannot thread external `func.call` results across while-loop region boundaries, causing a fatal MLIR dominance error. The compiler patch fixes this with `rewriteSolvePattern()`: it detects functions containing this pattern (2-arg function with dgetrf + while + _lu_solve) and replaces the entire body with a single `lapack_dgetrs_ffi` custom_call. For matrix RHS, transposes are inserted before/after to match JAX's column-major convention.
+
+`jnp.linalg.slogdet` also emits `dgetrf` + while, but the while-loop outputs are unused. `removeDeadWhileLoops()` erases these, preventing the same dominance error.
+
+### dgetrs NaN semantics
+
+`elodin_lapack_dgetrs` in `lapack_module.c` calls `LAPACKE_dgetrs` even for singular matrices (`info >= 0` from `dgetrf`), letting NaN/Inf propagate naturally from the zero diagonal of U. For bad arguments (`info < 0` from `dgetrf`, or `info2 < 0` from `dgetrs`), the output is filled with NaN. This matches JAX's native `linalg.solve` behavior.

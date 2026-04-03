@@ -92,29 +92,9 @@ test_steps = [
         depends_on=["nox-py"],
         steps=[
             nix_step(
-                label=":python: ball",
+                label=":python: regress.sh examples",
                 flake=".#run",
-                command="bash ./scripts/ci/regress.sh ball examples/ball/main.py",
-            ),
-            nix_step(
-                label=":python: drone",
-                flake=".#run",
-                command="bash ./scripts/ci/regress.sh drone examples/drone/main.py",
-            ),
-            nix_step(
-                label=":python: rocket",
-                flake=".#run",
-                command="bash ./scripts/ci/regress.sh rocket examples/rocket/main.py",
-            ),
-            nix_step(
-                label=":python: three-body",
-                flake=".#run",
-                command="bash ./scripts/ci/regress.sh three-body examples/three-body/main.py",
-            ),
-            nix_step(
-                label=":python: cube-sat",
-                flake=".#run",
-                command="bash ./scripts/ci/regress.sh cube-sat examples/cube-sat/main.py",
+                command="bash ./scripts/ci/regress.sh --all",
             ),
             nix_step(
                 label=":python: frames",

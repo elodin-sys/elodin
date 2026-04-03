@@ -7,10 +7,14 @@
 with pkgs; let
   # Import shared configuration
   common = pkgs.callPackage ./pkgs/common.nix {};
+  # ILP64 OpenBLAS (64-bit lapack_int) for the elodin_lapack IREE VM module.
+  # The standard pkgs.openblas uses 32-bit integers; lapack_module.c requires 64-bit.
+  openblas64 = pkgs.openblas.override {blas64 = true;};
   iree_runtime = pkgs.callPackage ./pkgs/iree-runtime.nix {
     enableCuda = pkgs.stdenv.isLinux;
     enableMetal = pkgs.stdenv.isDarwin;
   };
+  iree_compiler_source = pkgs.callPackage ./pkgs/iree-compiler-source.nix {};
   iree_runtime_tracy =
     if pkgs.stdenv.isLinux
     then
@@ -41,6 +45,9 @@ with pkgs; let
     name = "elo-unified-shell";
     buildInputs =
       [
+        # IREE compiler built from source (for patching)
+        iree_compiler_source
+
         # Interactive bash (required for nix develop to work properly)
         bashInteractive
 
@@ -140,7 +147,9 @@ with pkgs; let
     # Environment variables
     LIBCLANG_PATH = "${libclang.lib}/lib";
     IREE_RUNTIME_DIR = "${iree_runtime}";
+    IREE_COMPILER_DIR = "${iree_compiler_source}";
     IREE_RUNTIME_TRACY_DIR = lib.optionalString pkgs.stdenv.isLinux "${iree_runtime_tracy}";
+    OPENBLAS_DIR = "${openblas64}";
 
     # The nox-py cdylib (.so) carries a DF_STATIC_TLS flag that forces glibc
     # to allocate ~10 KB from the tiny static-TLS surplus on dlopen.  Raise

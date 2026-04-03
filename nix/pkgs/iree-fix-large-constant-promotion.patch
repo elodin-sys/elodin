@@ -1,0 +1,232 @@
+--- a/compiler/plugins/input/StableHLO/Conversion/StableHLOCustomCalls.cpp	2026-03-28 19:10:19.329101536 -0700
++++ b/compiler/plugins/input/StableHLO/Conversion/StableHLOCustomCalls.cpp	2026-03-28 21:05:10.737036095 -0700
+@@ -11,6 +11,8 @@
+ #include "compiler/plugins/input/StableHLO/Conversion/Preprocessing/Rewriters.h"
+ #include "compiler/plugins/input/StableHLO/Conversion/Rewriters.h"
+ #include "llvm/ADT/STLExtras.h"
++#include "llvm/ADT/DenseMap.h"
++#include "llvm/ADT/SetVector.h"
+ #include "mlir/Dialect/Arith/IR/Arith.h"
+ #include "mlir/Dialect/Linalg/IR/Linalg.h"
+ #include "mlir/Dialect/SCF/IR/SCF.h"
+@@ -18,6 +20,8 @@
+ #include "mlir/IR/BuiltinTypes.h"
+ #include "mlir/IR/ImplicitLocOpBuilder.h"
+ #include "mlir/IR/TypeUtilities.h"
++#include "mlir/IR/SymbolTable.h"
++#include "mlir/IR/DialectResourceBlobManager.h"
+ #include "mlir/Dialect/Func/IR/FuncOps.h"
+ #include "mlir/Interfaces/FunctionInterfaces.h"
+ #include "mlir/Support/LogicalResult.h"
+@@ -29,6 +33,152 @@
+ 
+ namespace mlir::iree_compiler::stablehlo {
+ 
++
++// ===----------------------------------------------------------------------===//
++// Large-constant promotion
++// ===----------------------------------------------------------------------===//
++
++static constexpr int64_t kDefaultPromoteThresholdBytes = 1 * 1024 * 1024;
++
++static int64_t getPromoteThreshold() {
++  if (const char *env = std::getenv("ELODIN_IREE_CONSTANT_PROMOTE_THRESHOLD")) {
++    int64_t val = std::atoll(env);
++    if (val >= 0) return val;
++  }
++  return kDefaultPromoteThresholdBytes;
++}
++
++static llvm::DenseMap<StringRef, SmallVector<func::CallOp>>
++buildCallerMap(ModuleOp moduleOp) {
++  llvm::DenseMap<StringRef, SmallVector<func::CallOp>> callerMap;
++  moduleOp.walk([&](func::CallOp callOp) {
++    callerMap[callOp.getCallee()].push_back(callOp);
++  });
++  return callerMap;
++}
++
++static SmallVector<func::FuncOp>
++findCallChain(func::FuncOp mainFunc, func::FuncOp targetFunc,
++              ModuleOp moduleOp,
++              const llvm::DenseMap<StringRef, SmallVector<func::CallOp>> &callerMap) {
++  if (mainFunc == targetFunc)
++    return {mainFunc};
++  llvm::DenseMap<func::FuncOp, func::FuncOp> parent;
++  SmallVector<func::FuncOp> queue;
++  queue.push_back(targetFunc);
++  parent[targetFunc] = nullptr;
++  while (!queue.empty()) {
++    func::FuncOp current = queue.pop_back_val();
++    StringRef currentName = current.getSymName();
++    auto it = callerMap.find(currentName);
++    if (it == callerMap.end())
++      continue;
++    for (func::CallOp callOp : it->second) {
++      auto callerFunc = callOp->getParentOfType<func::FuncOp>();
++      if (!callerFunc || parent.count(callerFunc))
++        continue;
++      parent[callerFunc] = current;
++      if (callerFunc == mainFunc) {
++        SmallVector<func::FuncOp> chain;
++        func::FuncOp node = mainFunc;
++        while (node) {
++          chain.push_back(node);
++          auto pIt = parent.find(node);
++          node = (pIt != parent.end()) ? pIt->second : nullptr;
++        }
++        return chain;
++      }
++      queue.push_back(callerFunc);
++    }
++  }
++  return {};
++}
++
++static void promoteConstant(
++    mlir::stablehlo::ConstantOp constOp,
++    func::FuncOp mainFunc,
++    ModuleOp moduleOp,
++    const llvm::DenseMap<StringRef, SmallVector<func::CallOp>> &callerMap) {
++  auto containingFunc = constOp->getParentOfType<func::FuncOp>();
++  if (!containingFunc) return;
++  auto chain = findCallChain(mainFunc, containingFunc, moduleOp, callerMap);
++  if (chain.empty()) return;
++  Type constType = constOp.getResult().getType();
++  Location loc = constOp.getLoc();
++  MLIRContext *ctx = moduleOp.getContext();
++  {
++    auto funcType = containingFunc.getFunctionType();
++    SmallVector<Type> newInputs(funcType.getInputs());
++    newInputs.push_back(constType);
++    containingFunc.setFunctionType(
++        FunctionType::get(ctx, newInputs, funcType.getResults()));
++    BlockArgument newArg =
++        containingFunc.getBody().front().addArgument(constType, loc);
++    constOp.getResult().replaceAllUsesWith(newArg);
++    constOp.erase();
++  }
++  for (int i = chain.size() - 2; i >= 0; --i) {
++    func::FuncOp callerFunc = chain[i];
++    func::FuncOp calleeFunc = chain[i + 1];
++    auto callerType = callerFunc.getFunctionType();
++    SmallVector<Type> newInputs(callerType.getInputs());
++    newInputs.push_back(constType);
++    callerFunc.setFunctionType(
++        FunctionType::get(ctx, newInputs, callerType.getResults()));
++    BlockArgument newCallerArg =
++        callerFunc.getBody().front().addArgument(constType, loc);
++    StringRef calleeName = calleeFunc.getSymName();
++    callerFunc.walk([&](func::CallOp callOp) {
++      if (callOp.getCallee() == calleeName) {
++        callOp.getOperandsMutable().append(newCallerArg);
++      }
++    });
++  }
++}
++
++void promoteLargeConstants(ModuleOp moduleOp) {
++  int64_t threshold = getPromoteThreshold();
++  if (threshold == 0) return;
++  func::FuncOp mainFunc;
++  moduleOp.walk([&](func::FuncOp f) {
++    if (f.isPublic() && f.getSymName() == "main")
++      mainFunc = f;
++  });
++  if (!mainFunc) return;
++  SmallVector<mlir::stablehlo::ConstantOp> largeConstants;
++  moduleOp.walk([&](mlir::stablehlo::ConstantOp op) {
++    auto attr = op.getValue();
++    if (auto dense = dyn_cast<DenseElementsAttr>(attr)) {
++      if ((int64_t)dense.getRawData().size() > threshold)
++        largeConstants.push_back(op);
++    } else if (auto res = dyn_cast<DenseResourceElementsAttr>(attr)) {
++      auto blob = res.getRawHandle().getBlob();
++      if (blob && (int64_t)blob->getData().size() > threshold)
++        largeConstants.push_back(op);
++    }
++  });
++  if (largeConstants.empty()) return;
++  auto callerMap = buildCallerMap(moduleOp);
++  int promoted = 0;
++  int64_t totalBytes = 0;
++  for (auto constOp : largeConstants) {
++    int64_t bytes = 0;
++    if (auto dense = dyn_cast<DenseElementsAttr>(constOp.getValue()))
++      bytes = dense.getRawData().size();
++    else if (auto res = dyn_cast<DenseResourceElementsAttr>(constOp.getValue())) {
++      auto blob = res.getRawHandle().getBlob();
++      if (blob) bytes = blob->getData().size();
++    }
++    promoteConstant(constOp, mainFunc, moduleOp, callerMap);
++    ++promoted;
++    totalBytes += bytes;
++  }
++  if (promoted > 0) {
++    llvm::errs() << "[elodin] promoted " << promoted << " large constant(s) ("
++                 << (totalBytes / (1024 * 1024)) << " MB) to runtime buffers\n";
++  }
++}
++
+ #define GEN_PASS_DEF_LEGALIZESTABLEHLOCUSTOMCALLS
+ #include "compiler/plugins/input/StableHLO/Conversion/Passes.h.inc"
+ 
+
+--- a/compiler/plugins/input/StableHLO/Conversion/Passes.cpp	2026-03-28 19:13:07.561294214 -0700
++++ b/compiler/plugins/input/StableHLO/Conversion/Passes.cpp	2026-03-28 19:14:17.803217000 -0700
+@@ -22,6 +22,9 @@
+ #include "stablehlo/transforms/Passes.h"
+ 
+ namespace mlir::iree_compiler::stablehlo {
++
++extern void promoteLargeConstants(ModuleOp moduleOp);
++
+ namespace {
+ #define GEN_PASS_REGISTRATION
+ #include "compiler/plugins/input/StableHLO/Conversion/Passes.h.inc" // IWYU pragma: export
+@@ -49,6 +52,8 @@
+   passManager.addNestedPass<func::FuncOp>(mlir::createCanonicalizerPass());
+   passManager.addNestedPass<func::FuncOp>(createStableHLOCanonicalize());
+   passManager.addNestedPass<func::FuncOp>(mlir::createCSEPass());
++  passManager.addPass(
++      createModulePass([](ModuleOp m) { promoteLargeConstants(m); }));
+   passManager.addNestedPass<func::FuncOp>(createLegalizeStableHLOCustomCalls());
+   passManager.addNestedPass<func::FuncOp>(
+       stablehlo::createLegalizeControlFlow());
+
+--- a/compiler/plugins/input/StableHLO/Conversion/Passes.h	2026-03-28 19:13:07.565032481 -0700
++++ b/compiler/plugins/input/StableHLO/Conversion/Passes.h	2026-03-28 19:14:17.803261774 -0700
+@@ -8,6 +8,8 @@
+ #define IREE_COMPILER_PLUGINS_INPUT_STABLEHLO_CONVERSION_PASSES_H_
+ 
+ #include "compiler/plugins/input/StableHLO/Conversion/PassDetail.h"
++#include "mlir/IR/BuiltinOps.h"
++#include "mlir/Dialect/Func/IR/FuncOps.h"
+ #include "mlir/Pass/Pass.h"
+ 
+ namespace mlir::iree_compiler::stablehlo {
+@@ -32,6 +34,24 @@
+ 
+ void registerStableHLOConversionPasses();
+ 
++
++inline std::unique_ptr<OperationPass<ModuleOp>>
++createModulePass(std::function<void(ModuleOp)> body,
++                 StringRef name = "elodin-promote-large-constants") {
++  struct LambdaPass : public PassWrapper<LambdaPass, OperationPass<ModuleOp>> {
++    std::function<void(ModuleOp)> fn;
++    StringRef passName;
++    LambdaPass(std::function<void(ModuleOp)> f, StringRef n)
++        : fn(std::move(f)), passName(n) {}
++    StringRef getArgument() const override { return passName; }
++    StringRef getDescription() const override {
++      return "Elodin: promote large constants to function parameters";
++    }
++    void runOnOperation() override { fn(getOperation()); }
++  };
++  return std::make_unique<LambdaPass>(std::move(body), name);
++}
++
+ } // namespace mlir::iree_compiler::stablehlo
+ 
+ #endif // IREE_COMPILER_PLUGINS_INPUT_STABLEHLO_CONVERSION_PASSES_H_

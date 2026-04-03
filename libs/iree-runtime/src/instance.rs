@@ -28,6 +28,10 @@ impl Instance {
         })
     }
 
+    pub fn vm_instance(&self) -> *mut ffi::iree_vm_instance_t {
+        unsafe { ffi::iree_runtime_instance_vm_instance(self.ptr) }
+    }
+
     pub fn create_device(&self, device_uri: &str) -> Result<Device> {
         let uri = CString::new(device_uri).expect("device URI must not contain null bytes");
         let uri_view = ffi::iree_string_view_t {

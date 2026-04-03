@@ -140,7 +140,8 @@ def main() -> int:
         return 1
 
     failures: list[str] = []
-    summaries: list[str] = []
+    rtf_baseline = 0.0
+    rtf_candidate = 0.0
 
     for metric in METRIC_ORDER:
         tol = _load_tolerance(config, args.example, metric)
@@ -150,6 +151,10 @@ def main() -> int:
         allowed = max(tol.abs_tol, abs(baseline_value) * tol.rel_tol)
         rel_regression = regression / max(abs(baseline_value), 1e-30)
 
+        if metric == "real_time_factor":
+            rtf_baseline = baseline_value
+            rtf_candidate = candidate_value
+
         if regression > allowed:
             direction = "slower" if metric in HIGHER_IS_WORSE else "lower"
             failures.append(
@@ -158,7 +163,13 @@ def main() -> int:
                 f"regression={regression:.3e}, rel_regression={rel_regression:.3e}, "
                 f"allowed={allowed:.3e}, abs_tol={tol.abs_tol:.3e}, rel_tol={tol.rel_tol:.3e})"
             )
-        summaries.append(f"{metric}={candidate_value:.6f}")
+
+    rtf_pct = ((rtf_candidate - rtf_baseline) / max(abs(rtf_baseline), 1e-30)) * 100
+    rtf_sign = "+" if rtf_pct >= 0 else ""
+    rtf_detail = f"{rtf_candidate:.1f}x (baseline {rtf_baseline:.1f}x, {rtf_sign}{rtf_pct:.1f}%)"
+
+    # Machine-readable line for regress.sh summary collection
+    print(f"RTF_DELTA: {args.example} {rtf_baseline:.3f} {rtf_candidate:.3f} {rtf_pct:.1f}")
 
     if failures:
         print(f"FAIL: profile metric regression(s) detected for example '{args.example}'")
@@ -166,10 +177,8 @@ def main() -> int:
             print(f"  - {failure}")
         return 1
 
-    print(
-        f"PASS: {args.example} profile metrics within tolerance "
-        f"(ticks={candidate_ticks}, {', '.join(summaries)})"
-    )
+    print(f"PASS: {args.example} profile metrics within tolerance (ticks={candidate_ticks})")
+    print(f"  real_time_factor: {rtf_detail}")
     return 0
 
 

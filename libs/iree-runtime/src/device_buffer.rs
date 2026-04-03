@@ -30,7 +30,7 @@ impl DeviceBuffer {
             type_: ffi::iree_hal_memory_type_bits_t_IREE_HAL_MEMORY_TYPE_DEVICE_LOCAL.0
                 | ffi::iree_hal_memory_type_bits_t_IREE_HAL_MEMORY_TYPE_HOST_VISIBLE.0,
             queue_affinity: 0,
-            min_alignment: 0,
+            min_alignment: 64,
         };
         let mut out: *mut ffi::iree_hal_buffer_t = std::ptr::null_mut();
         let status = unsafe {
@@ -174,7 +174,7 @@ impl DeviceArena {
         let mut total_len = 0usize;
         let mut offsets = Vec::with_capacity(specs.len());
         for spec in specs {
-            let aligned = align_up(total_len, 16);
+            let aligned = align_up(total_len, 64);
             offsets.push(aligned);
             total_len = aligned + spec.byte_len;
         }

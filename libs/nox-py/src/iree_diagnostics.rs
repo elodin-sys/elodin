@@ -88,6 +88,37 @@ pub fn classify_failure(error_text: &str) -> DiagnosticReport {
             FailureClass::UnsupportedIreeFeature,
             "Detected scatter lowering limitation (often from .at[].set()). Rewrite that pattern or use backend=\"jax\" for now.".to_string(),
         )
+    } else if lower.contains("failed to legalize operation 'stablehlo.compare'")
+        && lower.contains("explicitly marked illegal")
+    {
+        matched_patterns.push("stablehlo.compare legalization failure".to_string());
+        (
+            FailureClass::UnsupportedIreeFeature,
+            "Detected a stablehlo.compare legalization failure. This is often caused by scalar-vs-singleton broadcast mismatches in singleton-lowered systems; inspect `stablehlo.mlir`, `iree_compile_stderr.txt`, and `compile_context.json`.".to_string(),
+        )
+    } else if lower.contains("does not dominate this use") {
+        matched_patterns.push("control-flow dominance failure".to_string());
+        (
+            FailureClass::UnsupportedIreeFeature,
+            "Detected an MLIR dominance failure during IREE compilation (commonly from large control-flow regions such as `jax.lax.cond` lowered to `stablehlo.case`). Inspect `stablehlo.mlir`, `iree_compile_stderr.txt`, and `compile_context.json`.".to_string(),
+        )
+    } else if lower.contains("elements hex data size is invalid for provided type")
+        && lower.contains("xi1")
+    {
+        matched_patterns.push("packed i1 dense constant parse failure".to_string());
+        (
+            FailureClass::VersionMismatch,
+            "Detected a packed-boolean StableHLO constant parse failure. This looks like a JAX/StableHLO/IREE compatibility issue; inspect `stablehlo.mlir`, `iree_compile_stderr.txt`, and `compile_context.json` before changing model code.".to_string(),
+        )
+    } else if lower.contains("no function")
+        && lower.contains("exported by module")
+        && lower.contains("elodin_lapack")
+    {
+        matched_patterns.push("elodin_lapack function not found".to_string());
+        (
+            FailureClass::ToolchainMisconfigured,
+            "The IREE runtime LAPACK module does not export a function the compiled module requires. This usually means the elodin package is outdated; rebuild and reinstall.".to_string(),
+        )
     } else if lower.contains("custom_call") {
         matched_patterns.push("custom_call unsupported".to_string());
         (
@@ -112,12 +143,12 @@ pub fn classify_failure(error_text: &str) -> DiagnosticReport {
     } else if matches!(stage, FailureStage::JaxLower | FailureStage::StablehloEmit) {
         (
             FailureClass::JaxLoweringError,
-            "JAX lowering failed before IREE compilation. Inspect the Python traceback and generated StableHLO artifact.".to_string(),
+            "JAX lowering failed before IREE compilation. Inspect the stage-specific traceback file in the dump directory; `stablehlo.mlir` may be absent if lowering failed before StableHLO emission.".to_string(),
         )
     } else {
         (
             FailureClass::Unknown,
-            "Unknown failure. Use dumped artifacts (StableHLO + stderr + command) to reproduce and investigate.".to_string(),
+            "Unknown failure. Use the dumped artifacts (`compile_context.json`, traceback/StableHLO, stderr, and command) to reproduce and investigate.".to_string(),
         )
     };
 
@@ -155,6 +186,54 @@ mod tests {
     fn classifies_scatter_issue() {
         let r = classify_failure("'iree_linalg_ext.scatter' op dimension map is invalid");
         assert_eq!(r.classification, FailureClass::UnsupportedIreeFeature);
+    }
+
+    #[test]
+    fn classifies_compare_legalization_issue() {
+        let r = classify_failure(
+            "stage=iree_compile\niree-compile failed (code 1):\n\
+             <stdin>:1057:12: error: failed to legalize operation 'stablehlo.compare' \
+             that was explicitly marked illegal",
+        );
+        assert_eq!(r.classification, FailureClass::UnsupportedIreeFeature);
+        assert!(
+            r.matched_patterns
+                .contains(&"stablehlo.compare legalization failure".to_string())
+        );
+    }
+
+    #[test]
+    fn classifies_dominance_failure() {
+        let r = classify_failure(
+            "stage=iree_compile\niree-compile failed (code 1):\n\
+             error: operand #0 does not dominate this use",
+        );
+        assert_eq!(r.classification, FailureClass::UnsupportedIreeFeature);
+        assert!(
+            r.matched_patterns
+                .contains(&"control-flow dominance failure".to_string())
+        );
+    }
+
+    #[test]
+    fn classifies_packed_i1_parse_issue() {
+        let r = classify_failure(
+            "error: elements hex data size is invalid for provided type: 'tensor<81x4xi1>'",
+        );
+        assert_eq!(r.classification, FailureClass::VersionMismatch);
+    }
+
+    #[test]
+    fn classifies_lapack_module_missing_function() {
+        let r = classify_failure(
+            "stage=vmfb_load\nIREE runtime error: NOT_FOUND; \
+             no function `dgetrs_2_2_2` exported by module `elodin_lapack`",
+        );
+        assert_eq!(r.classification, FailureClass::ToolchainMisconfigured);
+        assert!(
+            r.matched_patterns
+                .contains(&"elodin_lapack function not found".to_string())
+        );
     }
 
     #[test]

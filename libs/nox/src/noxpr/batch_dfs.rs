@@ -1495,4 +1495,14 @@ mod tests {
         let out_axis = BatchAxis::Mapped { index: 0, size: 1 };
         compare_batch_results(&expr, out_axis).unwrap();
     }
+
+    #[test]
+    fn test_scalar_and_length_one_compare_consistency() {
+        let vector = 2.0f64.constant().reshape(smallvec::smallvec![1]);
+        let scalar = 1.0f64.constant();
+        let expr = vector.less_or_equal(scalar);
+
+        let out_axis = BatchAxis::Mapped { index: 0, size: 1 };
+        compare_batch_results(&expr, out_axis).unwrap();
+    }
 }

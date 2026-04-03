@@ -10,6 +10,125 @@ use crate::system::{CompiledSystem, noxpr_to_callable};
 use crate::utils::PrimTypeExt;
 use crate::world::World;
 
+fn collect_noxpr_artifacts(compiled_system: &CompiledSystem) -> Vec<(String, String)> {
+    let mut artifacts = vec![(
+        "noxpr.txt".to_string(),
+        format!("{}", compiled_system.computation.func.as_ref()),
+    )];
+    let mut seen_exprs = HashSet::new();
+    let mut seen_call_comps = HashSet::new();
+    let mut seen_scan_funcs = HashSet::new();
+    let mut call_index = 0usize;
+    let mut scan_index = 0usize;
+    collect_noxpr_artifacts_from_expr(
+        &compiled_system.computation.func.inner,
+        &mut artifacts,
+        &mut seen_exprs,
+        &mut seen_call_comps,
+        &mut seen_scan_funcs,
+        &mut call_index,
+        &mut scan_index,
+    );
+    artifacts
+}
+
+fn collect_noxpr_artifacts_from_expr(
+    expr: &nox::Noxpr,
+    artifacts: &mut Vec<(String, String)>,
+    seen_exprs: &mut HashSet<nox::NoxprId>,
+    seen_call_comps: &mut HashSet<nox::NoxprId>,
+    seen_scan_funcs: &mut HashSet<nox::NoxprId>,
+    call_index: &mut usize,
+    scan_index: &mut usize,
+) {
+    if !seen_exprs.insert(expr.id()) {
+        return;
+    }
+
+    match expr.node.as_ref() {
+        nox::NoxprNode::Call(call) => {
+            if seen_call_comps.insert(call.comp.id) {
+                artifacts.push((
+                    format!("noxpr_call_{:03}.txt", *call_index),
+                    format!("{}", call.comp.func.as_ref()),
+                ));
+                *call_index += 1;
+                collect_noxpr_artifacts_from_expr(
+                    &call.comp.func.inner,
+                    artifacts,
+                    seen_exprs,
+                    seen_call_comps,
+                    seen_scan_funcs,
+                    call_index,
+                    scan_index,
+                );
+            }
+            for arg in &call.args {
+                collect_noxpr_artifacts_from_expr(
+                    arg,
+                    artifacts,
+                    seen_exprs,
+                    seen_call_comps,
+                    seen_scan_funcs,
+                    call_index,
+                    scan_index,
+                );
+            }
+        }
+        nox::NoxprNode::Scan(scan) => {
+            if seen_scan_funcs.insert(scan.scan_fn.inner.id()) {
+                artifacts.push((
+                    format!("noxpr_scan_{:03}.txt", *scan_index),
+                    format!("{}", scan.scan_fn),
+                ));
+                *scan_index += 1;
+                collect_noxpr_artifacts_from_expr(
+                    &scan.scan_fn.inner,
+                    artifacts,
+                    seen_exprs,
+                    seen_call_comps,
+                    seen_scan_funcs,
+                    call_index,
+                    scan_index,
+                );
+            }
+            for input in &scan.inputs {
+                collect_noxpr_artifacts_from_expr(
+                    input,
+                    artifacts,
+                    seen_exprs,
+                    seen_call_comps,
+                    seen_scan_funcs,
+                    call_index,
+                    scan_index,
+                );
+            }
+            collect_noxpr_artifacts_from_expr(
+                &scan.initial_state,
+                artifacts,
+                seen_exprs,
+                seen_call_comps,
+                seen_scan_funcs,
+                call_index,
+                scan_index,
+            );
+        }
+        _ => {
+            for child in expr.node.children() {
+                collect_noxpr_artifacts_from_expr(
+                    child,
+                    artifacts,
+                    seen_exprs,
+                    seen_call_comps,
+                    seen_scan_funcs,
+                    call_index,
+                    scan_index,
+                );
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct IreeCompileStats {
     pub lower_ms: f64,
@@ -30,34 +149,27 @@ pub fn compile_iree_module(
     world: &World,
     iree_device: &str,
     extra_iree_flags: &[String],
+    compile_origin: &str,
 ) -> Result<IreeCompileResult, Error> {
     let func = noxpr_to_callable(compiled_system.computation.func.clone());
+    let noxpr_artifacts = collect_noxpr_artifacts(compiled_system);
 
     let mut input_arrays = vec![];
     let mut visited_ids = HashSet::new();
 
-    for id in compiled_system
-        .inputs
-        .iter()
-        .chain(compiled_system.outputs.iter())
-    {
-        if visited_ids.contains(id) {
+    for slot in &compiled_system.input_slots {
+        if !visited_ids.insert(slot.component_id) {
             continue;
         }
-        let col = world.column_by_id(*id).ok_or(Error::ComponentNotFound)?;
+        let col = world
+            .column_by_id(slot.component_id)
+            .ok_or(Error::ComponentNotFound)?;
         let elem_ty = col.schema.prim_type;
         let dtype = nox::jax::dtype(&elem_ty.to_element_type())?;
-        let shape_vec: Vec<_> = if world.batch1 && col.len() <= 1 {
-            col.schema.shape().iter().copied().collect()
-        } else {
-            std::iter::once(col.len() as u64)
-                .chain(col.schema.shape().iter().copied())
-                .collect()
-        };
+        let shape_vec: Vec<_> = slot.shape.iter().map(|&dim| dim as u64).collect();
         let jnp = py.import("jax.numpy")?;
         let arr = jnp.getattr("zeros")?.call((shape_vec, dtype), None)?;
         input_arrays.push(arr.unbind());
-        visited_ids.insert(id);
     }
 
     let py_code = r#"
@@ -69,10 +181,8 @@ import json
 import traceback
 import time
 import tempfile
-import pathlib
 import shlex
 import shutil
-import stat
 import subprocess
 os.environ["JAX_ENABLE_X64"] = "1"
 jax.config.update("jax_enable_x64", True)
@@ -105,13 +215,94 @@ def _write_versions(path, iree_bin):
     with open(os.path.join(path, 'versions.json'), 'w') as f:
         json.dump(versions, f, indent=2)
 
+def _write_text(path, filename, text):
+    with open(os.path.join(path, filename), 'w') as f:
+        f.write(text)
+
+def _write_json(path, filename, payload):
+    with open(os.path.join(path, filename), 'w') as f:
+        json.dump(payload, f, indent=2, sort_keys=True)
+
+def _normalize_system_name(name):
+    if ' at 0x' in name:
+        name = name.split(' at 0x', maxsplit=1)[0]
+        if not name.endswith('>'):
+            name += '>'
+    return name
+
+def _input_summaries(input_arrays):
+    summaries = []
+    for arr in input_arrays or []:
+        shape = None
+        dtype = None
+        try:
+            shape = [int(dim) for dim in arr.shape]
+        except Exception:
+            pass
+        try:
+            dtype = str(arr.dtype)
+        except Exception:
+            pass
+        summaries.append({'shape': shape, 'dtype': dtype})
+    return summaries
+
+def _update_compile_context(path, **updates):
+    context_path = os.path.join(path, 'compile_context.json')
+    context = {}
+    if os.path.exists(context_path):
+        try:
+            with open(context_path, encoding='utf-8') as f:
+                context = json.load(f)
+        except Exception:
+            context = {}
+    context.update(updates)
+    _write_json(path, 'compile_context.json', context)
+
+def _write_base_artifacts(
+    path,
+    system_names,
+    iree_bin,
+    compile_origin,
+    requested_device,
+    has_singleton_lowering,
+    user_extra_flags,
+    env_flags,
+    input_arrays,
+    noxpr_artifacts,
+):
+    _write_text(path, 'system_names.txt', '\n'.join(system_names or []))
+    artifact_names = []
+    for filename, text in noxpr_artifacts or []:
+        _write_text(path, filename, text)
+        artifact_names.append(filename)
+    _write_versions(path, iree_bin or 'unresolved')
+    _update_compile_context(
+        path,
+        compile_origin=compile_origin,
+        is_subsystem_diagnostic=(compile_origin == 'subsystem_diagnostic'),
+        requested_device=requested_device,
+        has_singleton_lowering=bool(has_singleton_lowering),
+        system_names=system_names or [],
+        display_system_names=[_normalize_system_name(name) for name in (system_names or [])],
+        user_extra_flags=list(user_extra_flags or []),
+        env_flags=list(env_flags or []),
+        input_arrays=_input_summaries(input_arrays),
+        noxpr_artifact=artifact_names[0] if artifact_names else None,
+        noxpr_artifacts=artifact_names,
+        report_stage='initialized',
+    )
+
+def _write_placeholder_compile_cmd(path, reason):
+    _write_text(
+        path,
+        'iree_compile_cmd.sh',
+        '#!/usr/bin/env bash\n' + '# unavailable: ' + reason + '\n',
+    )
+
 def _write_primary_artifacts(path, cmd_text, stablehlo_mlir, system_names, iree_bin):
-    with open(os.path.join(path, 'iree_compile_cmd.sh'), 'w') as f:
-        f.write('#!/usr/bin/env bash\n' + cmd_text + ' < stablehlo.mlir\n')
-    with open(os.path.join(path, 'stablehlo.mlir'), 'w') as f:
-        f.write(stablehlo_mlir)
-    with open(os.path.join(path, 'system_names.txt'), 'w') as f:
-        f.write('\n'.join(system_names or []))
+    _write_text(path, 'iree_compile_cmd.sh', '#!/usr/bin/env bash\n' + cmd_text + ' < stablehlo.mlir\n')
+    _write_text(path, 'stablehlo.mlir', stablehlo_mlir)
+    _write_text(path, 'system_names.txt', '\n'.join(system_names or []))
     _write_versions(path, iree_bin)
 
 def _detect_cuda_target():
@@ -175,16 +366,168 @@ def _prefer_indirect_command_buffers(stablehlo_mlir):
     # map_coordinates/dynamic-slice-heavy kernel fails when they stay enabled.
     return 'threefry' in stablehlo_mlir.lower()
 
-def compile_to_vmfb(func, input_arrays, user_extra_flags, system_names, requested_device, batch1=False):
-    from elodin._iree_linalg import iree_safe_linalg
+def _extract_large_constants(mlir_text, threshold_bytes=None):
+    """Scan the StableHLO MLIR for large constants and extract their raw bytes.
+
+    The IREE compiler pass (promoteLargeConstants in StableHLOCustomCalls.cpp)
+    handles the MLIR structural rewrite (adding parameters, threading call
+    chains).  This function only extracts the byte data so the Elodin runtime
+    can supply it as additional input buffers.
+
+    The MLIR text is NOT modified -- the compiler pass handles that.
+
+    Returns (mlir_text_unchanged, extracted_list) where extracted_list contains
+    (raw_bytes, shape_list, dtype_str) tuples for each constant that the
+    compiler pass will promote.
+    """
+    if threshold_bytes is None:
+        env_val = os.environ.get('ELODIN_IREE_CONSTANT_PROMOTE_THRESHOLD')
+        if env_val is not None:
+            threshold_bytes = int(env_val)
+            if threshold_bytes == 0:
+                return mlir_text, []
+        else:
+            threshold_bytes = 1_048_576  # 1 MB default
+
+    dense_pat = re.compile(
+        r'\s+%\S+\s*=\s*stablehlo\.constant\s+dense<"0x([0-9a-fA-F]+)">\s*:\s*tensor<([^>]+)>'
+    )
+    resource_const_pat = re.compile(
+        r'\s+%\S+\s*=\s*stablehlo\.constant\s+dense_resource<(\w+)>\s*:\s*tensor<([^>]+)>'
+    )
+    resource_blob_pat = re.compile(
+        r'\s+(\w+)\s*:\s*"0x([0-9a-fA-F]+)"'
+    )
+
+    # First pass: collect resource blob hex data from the MLIR metadata
+    # section (after {-#).  Scanning the module body would false-match
+    # hex strings in backend_config or serialized constant attrs.
+    resource_data = {}
+    in_resource_section = False
+    for line in mlir_text.split('\n'):
+        if '{-#' in line:
+            in_resource_section = True
+        if not in_resource_section:
+            continue
+        blob_m = resource_blob_pat.match(line)
+        if blob_m:
+            resource_data[blob_m.group(1)] = blob_m.group(2)
+
+    # Second pass: scan constant definitions in module order.
+    # Threshold uses strictly-greater to match the compiler pass.
+    extracted = []
+    for line in mlir_text.split('\n'):
+        m = dense_pat.match(line)
+        if m:
+            hex_data, shape_dtype = m.groups()
+            raw_bytes = bytes.fromhex(hex_data)
+            if len(raw_bytes) <= threshold_bytes:
+                continue
+            parts = shape_dtype.split('x')
+            dtype_str = parts[-1]
+            shape = [int(d) for d in parts[:-1]]
+            extracted.append((raw_bytes, shape, dtype_str))
+            continue
+        m = resource_const_pat.match(line)
+        if m:
+            blob_name, shape_dtype = m.groups()
+            hex_data = resource_data.get(blob_name)
+            if not hex_data:
+                continue
+            raw_bytes = bytes.fromhex(hex_data)
+            if len(raw_bytes) <= threshold_bytes:
+                continue
+            parts = shape_dtype.split('x')
+            dtype_str = parts[-1]
+            shape = [int(d) for d in parts[:-1]]
+            extracted.append((raw_bytes, shape, dtype_str))
+
+    if extracted:
+        total_mb = sum(len(b) for b, _, _ in extracted) / 1e6
+        import sys as _sys
+        print(f'[elodin] found {len(extracted)} large constant(s) ({total_mb:.1f} MB) for promotion',
+              file=_sys.stderr)
+
+    return mlir_text, extracted
+
+def compile_to_vmfb(
+    func,
+    input_arrays,
+    user_extra_flags,
+    system_names,
+    requested_device,
+    has_singleton_lowering=False,
+    compile_origin='primary_system',
+    noxpr_artifacts=(),
+):
+    env_flags = shlex.split(os.environ.get('ELODIN_IREE_FLAGS', ''))
+    report_dir = _artifact_dir() if os.environ.get('ELODIN_IREE_DUMP_DIR') else None
+    if report_dir is not None:
+        _write_base_artifacts(
+            report_dir,
+            system_names,
+            shutil.which('iree-compile'),
+            compile_origin,
+            requested_device,
+            has_singleton_lowering,
+            user_extra_flags,
+            env_flags,
+            input_arrays,
+            noxpr_artifacts,
+        )
     try:
         lower_start = time.perf_counter()
         jit_fn = jax.jit(func, keep_unused=True)
-        with iree_safe_linalg():
-            lowered = jit_fn.lower(*input_arrays)
+        lowered = jit_fn.lower(*input_arrays)
         lower_ms = (time.perf_counter() - lower_start) * 1000.0
     except Exception:
-        raise RuntimeError("stage=jax_lower\n" + traceback.format_exc())
+        traceback_text = traceback.format_exc()
+        if report_dir is None:
+            report_dir = _artifact_dir()
+            _write_base_artifacts(
+                report_dir,
+                system_names,
+                shutil.which('iree-compile'),
+                compile_origin,
+                requested_device,
+                has_singleton_lowering,
+                user_extra_flags,
+                env_flags,
+                input_arrays,
+                noxpr_artifacts,
+            )
+        _write_text(report_dir, 'jax_lower_traceback.txt', traceback_text)
+        _write_placeholder_compile_cmd(
+            report_dir,
+            'jax lowering failed before iree-compile command construction',
+        )
+        _update_compile_context(
+            report_dir,
+            report_stage='jax_lower_failed',
+            failure_stage='jax_lower',
+        )
+        hint = ''
+        lower_tb = traceback_text.lower()
+        if 'scatter inputs have incompatible types' in lower_tb or (
+            'index type must be an integer' in lower_tb and 'float64' in lower_tb
+        ):
+            hint = (
+                '\n\n--- Unsigned integer type detected ---\n'
+                'A system function uses unsigned integer types (e.g. jnp.uint64) which\n'
+                'are incompatible with JAX type promotion. When uint64 values interact\n'
+                'with int64, JAX promotes to float64, breaking index computations.\n\n'
+                'Fix: change dtype=jnp.uint64 to dtype=jnp.int64 in your system function.\n'
+                '     Values like state codes, entity IDs, and counters do not need unsigned types.\n\n'
+                'Set ELODIN_IREE_DUMP_DIR and check the per-system diagnostic to identify\n'
+                'which system function contains the unsigned type.\n'
+            )
+        raise RuntimeError(
+            "stage=jax_lower\n"
+            + traceback_text
+            + hint
+            + '\n\nDebug artifacts saved to: '
+            + report_dir
+        )
 
     try:
         emit_start = time.perf_counter()
@@ -192,17 +535,52 @@ def compile_to_vmfb(func, input_arrays, user_extra_flags, system_names, requeste
         stablehlo_mlir = str(stablehlo_module)
         stablehlo_emit_ms = (time.perf_counter() - emit_start) * 1000.0
     except Exception:
-        raise RuntimeError("stage=stablehlo_emit\n" + traceback.format_exc())
+        traceback_text = traceback.format_exc()
+        if report_dir is None:
+            report_dir = _artifact_dir()
+            _write_base_artifacts(
+                report_dir,
+                system_names,
+                shutil.which('iree-compile'),
+                compile_origin,
+                requested_device,
+                has_singleton_lowering,
+                user_extra_flags,
+                env_flags,
+                input_arrays,
+                noxpr_artifacts,
+            )
+        _write_text(report_dir, 'stablehlo_emit_traceback.txt', traceback_text)
+        _write_placeholder_compile_cmd(
+            report_dir,
+            'stablehlo emission failed before iree-compile command construction',
+        )
+        _update_compile_context(
+            report_dir,
+            report_stage='stablehlo_emit_failed',
+            failure_stage='stablehlo_emit',
+            lower_ms=lower_ms,
+        )
+        raise RuntimeError(
+            "stage=stablehlo_emit\n"
+            + traceback_text
+            + '\n\nDebug artifacts saved to: '
+            + report_dir
+        )
 
     # JAX names the MLIR module after the jitted function (e.g. @jit_fn).
     # Rename to @module so the VMFB function is always "module.main".
     stablehlo_mlir = re.sub(r'module @\S+', 'module @module', stablehlo_mlir, count=1)
 
-    # Unsigned-to-signed integer mapping for IREE compatibility is handled
-    # at the dtype boundary (jax.rs dtype(), iree_exec.rs, jax_exec.rs)
-    # so that user-declared U64/U32 components never produce ui64/ui32
-    # in the StableHLO.  Do NOT do a blanket text replacement here --
-    # it would corrupt JAX-internal threefry PRNG bit-manipulation.
+    # Extract large constant data for runtime-side upload.
+    # The IREE compiler pass (promoteLargeConstants) handles the MLIR rewrite.
+    stablehlo_mlir, promoted_constants = _extract_large_constants(stablehlo_mlir)
+
+    # Integer signedness: PrimTypeExt maps all unsigned PrimTypes to signed
+    # ElementTypes (S64 etc.) so that JAX's type promotion lattice never
+    # mixes uint64+int64 (which promotes to float64).  StableHLO and IREE
+    # use signless integers anyway.  Do NOT do a blanket text replacement
+    # here -- it would corrupt JAX-internal threefry PRNG bit-manipulation.
 
     compile_target, runtime_device = _resolve_iree_device(requested_device)
 
@@ -210,114 +588,42 @@ def compile_to_vmfb(func, input_arrays, user_extra_flags, system_names, requeste
         "--iree-vm-target-extension-f64",
         "--iree-input-demote-f64-to-f32=false",
         "--iree-input-type=stablehlo",
-        "--iree-opt-level=O1",
+        "--iree-opt-level=O2",
+        "--iree-stream-partitioning-favor=max-concurrency",
+        "--iree-dispatch-creation-enable-aggressive-fusion=true",
+        "--iree-llvmcpu-enable-ukernels=all",
     ]
-    if not _prefer_indirect_command_buffers(stablehlo_mlir):
+    disable_indirect_command_buffers = not _prefer_indirect_command_buffers(stablehlo_mlir)
+    if disable_indirect_command_buffers:
         extra.append("--iree-hal-indirect-command-buffers=false")
-    extra.append("--iree-opt-const-eval=false")
-    if batch1:
+    if has_singleton_lowering:
         extra.append("--iree-flow-inline-constants-max-byte-length=0")
 
-    from iree.compiler import _mlir_libs
-    iree_tools_dir = str(pathlib.Path(_mlir_libs.__file__).parent)
-
-    wrapper_path = None
-    cc_bin = (
-        os.environ.get('ELODIN_IREE_CC')
-        or shutil.which('clang')
-        or os.environ.get('CC')
-        or shutil.which('cc')
-        or '/usr/bin/cc'
-    )
-
-    # Some CUDA/Metal compilations still route select executables through the
-    # llvm-cpu linker path. Keep this enabled globally so trig/libm symbols
-    # resolve consistently across mixed backend modules.
-    extra.append('--iree-llvmcpu-link-embedded=false')
     if platform.system() in ("Darwin", "Linux"):
         machine = platform.machine()
-
-        fd, wrapper_path = tempfile.mkstemp(suffix='.sh', prefix='iree_cc_')
-        with os.fdopen(fd, 'w') as wf:
-            if platform.system() == "Darwin":
-                wf.write('\n'.join([
-                    '#!/bin/bash',
-                    'filtered=()',
-                    'for arg in "$@"; do',
-                    '  case "$arg" in',
-                    '    -static) ;;',
-                    '    -dylib) filtered+=("-dynamiclib") ;;',
-                    '    -flat_namespace) filtered+=("-Wl,-flat_namespace") ;;',
-                    '    *) filtered+=("$arg") ;;',
-                    '  esac',
-                    'done',
-                    f'exec "{cc_bin}" "${{filtered[@]}}"',
-                ]) + '\n')
-            else:
-                wf.write('\n'.join([
-                    '#!/bin/bash',
-                    'out=""',
-                    'objs=()',
-                    'passthrough=()',
-                    'want_shared=0',
-                    'args=("$@")',
-                    'i=0',
-                    'while [ $i -lt ${#args[@]} ]; do',
-                    '  arg="${args[$i]}"',
-                    '  case "$arg" in',
-                    '    -o)',
-                    '      i=$((i+1))',
-                    '      out="${args[$i]}"',
-                    '      ;;',
-                    '    -shared|-dylib)',
-                    '      want_shared=1',
-                    '      ;;',
-                    '    *.o|*.obj)',
-                    '      objs+=("$arg")',
-                    '      ;;',
-                    '    -nostdlib|-static)',
-                    '      ;;',
-                    '    *)',
-                    '      passthrough+=("$arg")',
-                    '      ;;',
-                    '  esac',
-                    '  i=$((i+1))',
-                    'done',
-                    'if [ -z "$out" ]; then',
-                    '  out="/tmp/iree_linked_$$.so"',
-                    'fi',
-                    'if [ ${#objs[@]} -eq 0 ]; then',
-                    '  echo "IREE linker wrapper: no object files in args: $*" >&2',
-                    '  exit 1',
-                    'fi',
-                    'rsp="$(mktemp /tmp/iree_objs_XXXXXX.rsp)"',
-                    'trap \'rm -f "$rsp"\' EXIT',
-                    '{',
-                    '  printf "%s\\n" "${passthrough[@]}"',
-                    '  if [ "$want_shared" -eq 1 ]; then',
-                    '    printf "%s\\n" -shared',
-                    '  fi',
-                    '  printf "%s\\n" -o "$out"',
-                    '  printf "%s\\n" "${objs[@]}"',
-                    '  printf "%s\\n" -lm',
-                    '} > "$rsp"',
-                    'if [ "$want_shared" -eq 1 ]; then',
-                    f'  exec "{cc_bin}" @"$rsp"',
-                    'else',
-                    f'  exec "{cc_bin}" @"$rsp"',
-                    'fi',
-                ]) + '\n')
-        os.chmod(wrapper_path, os.stat(wrapper_path).st_mode | stat.S_IEXEC)
-        extra.append('--iree-llvmcpu-system-linker-path=' + wrapper_path)
-        extra.append('--iree-llvmcpu-embedded-linker-path=' + wrapper_path)
-
         if platform.system() == "Darwin":
             arch = 'arm64' if machine == 'arm64' else 'x86_64'
             extra.append('--iree-llvmcpu-target-triple=' + arch + '-apple-darwin')
+            extra.append('--iree-llvmcpu-link-embedded=false')
+            extra.append('--iree-opt-const-eval=false')
+            cc = shutil.which('cc') or shutil.which('clang')
+            if cc:
+                wrapper = os.path.join(tempfile.gettempdir(), 'elodin_darwin_cc_wrapper.sh')
+                with open(wrapper, 'w') as wf:
+                    wf.write('#!/bin/sh\n')
+                    wf.write('for a do shift; case "$a" in\n')
+                    wf.write('  -static) ;;\n')
+                    wf.write('  -dylib) set -- "$@" -dynamiclib ;;\n')
+                    wf.write('  -flat_namespace) set -- "$@" -Wl,-flat_namespace ;;\n')
+                    wf.write('  *) set -- "$@" "$a" ;;\n')
+                    wf.write('esac; done\n')
+                    wf.write('exec ' + shlex.quote(cc) + ' "$@"\n')
+                os.chmod(wrapper, 0o755)
+                extra.append('--iree-llvmcpu-system-linker-path=' + wrapper)
         else:
             arch = 'aarch64' if machine in ('aarch64', 'arm64') else 'x86_64'
             extra.append('--iree-llvmcpu-target-triple=' + arch + '-unknown-linux-gnu')
-            extra.append('--iree-llvmcpu-link-static=false')
+        extra.append('--iree-llvmcpu-target-cpu=host')
 
     target_args = []
     compile_backend = compile_target
@@ -332,15 +638,44 @@ def compile_to_vmfb(func, input_arrays, user_extra_flags, system_names, requeste
     else:
         target_args.append('--iree-hal-target-backends=llvm-cpu')
 
-    iree_bin = shutil.which('iree-compile')
-    if iree_bin is None:
-        iree_bin = iree_tools_dir + '/iree-compile'
+    iree_bin = None
 
-    env_flags = shlex.split(os.environ.get('ELODIN_IREE_FLAGS', ''))
+    # 1. Baked-in path from nix-built elodin package
+    try:
+        import importlib.resources
+        _ref = importlib.resources.files('elodin').joinpath('_iree_compiler_dir')
+        if _ref.is_file():
+            _dir = _ref.read_text().strip()
+            _candidate = os.path.join(_dir, 'bin', 'iree-compile')
+            if os.path.isfile(_candidate):
+                iree_bin = _candidate
+    except Exception:
+        pass
+
+    # 2. Explicit env var (for dev shell / maturin develop)
+    if iree_bin is None:
+        compiler_dir = os.environ.get('IREE_COMPILER_DIR', '')
+        if compiler_dir:
+            candidate = os.path.join(compiler_dir, 'bin', 'iree-compile')
+            if os.path.isfile(candidate):
+                iree_bin = candidate
+
+    # 3. PATH fallback (venv/bin/iree-compile in nix shells)
+    if iree_bin is None:
+        candidate = shutil.which('iree-compile')
+        if candidate:
+            iree_bin = candidate
+
+    if iree_bin is None:
+        raise RuntimeError(
+            "stage=config\n"
+            "iree-compile not found. The source-built IREE compiler is required.\n"
+            "Nix package: ensure elodin is installed via nix (the package bakes in the compiler path).\n"
+            "Dev shell: set IREE_COMPILER_DIR to the iree-compiler-source nix store path."
+        )
+
     extra.extend(env_flags)
     extra.extend(user_extra_flags or [])
-
-    report_dir = _artifact_dir() if os.environ.get('ELODIN_IREE_DUMP_DIR') else None
 
     out_path = None
     try:
@@ -350,49 +685,24 @@ def compile_to_vmfb(func, input_arrays, user_extra_flags, system_names, requeste
         cmd_text = shlex.join(cmd)
         if report_dir is not None:
             _write_primary_artifacts(report_dir, cmd_text, stablehlo_mlir, system_names, iree_bin)
+            _update_compile_context(
+                report_dir,
+                report_stage='ready_to_compile',
+                compile_target=compile_target,
+                runtime_device=runtime_device,
+                target_args=target_args,
+                effective_iree_flags=extra,
+                cmd_text=cmd_text,
+                lower_ms=lower_ms,
+                stablehlo_emit_ms=stablehlo_emit_ms,
+                stablehlo_byte_len=len(stablehlo_mlir.encode('utf-8')),
+                indirect_command_buffers_disabled=disable_indirect_command_buffers,
+                singleton_inline_constants_disabled=bool(has_singleton_lowering),
+            )
 
         compile_start = time.perf_counter()
         result = subprocess.run(cmd, input=stablehlo_mlir.encode('utf-8'), capture_output=True)
         stderr_text = result.stderr.decode('utf-8', errors='replace')
-        # Some environments fail to link trig symbols (cos/sin) for llvm-cpu.
-        # Retry with vmvx so users can still run on the IREE backend.
-        if (
-            compile_target == 'cpu'
-            and result.returncode != 0
-            and "undefined symbol" in stderr_text
-            and "iree-lld" in stderr_text
-        ):
-            if report_dir is None:
-                report_dir = _artifact_dir()
-                _write_primary_artifacts(report_dir, cmd_text, stablehlo_mlir, system_names, iree_bin)
-            vmvx_extra = [f for f in extra if not f.startswith('--iree-llvmcpu-')]
-            vmvx_cmd = [iree_bin, '-', '-o', out_path, '--iree-hal-target-backends=vmvx'] + vmvx_extra
-            with open(os.path.join(report_dir, 'iree_compile_cmd_vmvx.sh'), 'w') as f:
-                f.write('#!/usr/bin/env bash\n' + shlex.join(vmvx_cmd) + ' < stablehlo.mlir\n')
-            vmvx_result = subprocess.run(
-                vmvx_cmd,
-                input=stablehlo_mlir.encode('utf-8'),
-                capture_output=True,
-            )
-            vmvx_stderr = vmvx_result.stderr.decode('utf-8', errors='replace')
-            if vmvx_result.returncode == 0:
-                result = vmvx_result
-                compile_backend = 'vmvx'
-                stderr_text = (
-                    "Primary llvm-cpu compile failed; vmvx fallback succeeded.\n\n"
-                    "=== llvm-cpu stderr ===\n"
-                    + stderr_text
-                    + "\n\n=== vmvx stderr ===\n"
-                    + vmvx_stderr
-                )
-            else:
-                stderr_text = (
-                    "Primary llvm-cpu compile failed and vmvx fallback also failed.\n\n"
-                    "=== llvm-cpu stderr ===\n"
-                    + stderr_text
-                    + "\n\n=== vmvx stderr ===\n"
-                    + vmvx_stderr
-                )
 
         # When auto mode selects CUDA but the CUDA lowering path is not
         # available, retry on llvm-cpu so default runs still succeed.
@@ -404,7 +714,33 @@ def compile_to_vmfb(func, input_arrays, user_extra_flags, system_names, requeste
         if compile_target == 'cuda' and selected_mode == 'auto' and result.returncode != 0:
             if report_dir is None:
                 report_dir = _artifact_dir()
+                _write_base_artifacts(
+                    report_dir,
+                    system_names,
+                    iree_bin,
+                    compile_origin,
+                    requested_device,
+                    has_singleton_lowering,
+                    user_extra_flags,
+                    env_flags,
+                    input_arrays,
+                    noxpr_artifacts,
+                )
                 _write_primary_artifacts(report_dir, cmd_text, stablehlo_mlir, system_names, iree_bin)
+                _update_compile_context(
+                    report_dir,
+                    report_stage='ready_to_compile',
+                    compile_target=compile_target,
+                    runtime_device=runtime_device,
+                    target_args=target_args,
+                    effective_iree_flags=extra,
+                    cmd_text=cmd_text,
+                    lower_ms=lower_ms,
+                    stablehlo_emit_ms=stablehlo_emit_ms,
+                    stablehlo_byte_len=len(stablehlo_mlir.encode('utf-8')),
+                    indirect_command_buffers_disabled=disable_indirect_command_buffers,
+                    singleton_inline_constants_disabled=bool(has_singleton_lowering),
+                )
             cpu_cmd = [iree_bin, '-', '-o', out_path, '--iree-hal-target-backends=llvm-cpu'] + extra
             with open(os.path.join(report_dir, 'iree_compile_cmd_cpu_fallback.sh'), 'w') as f:
                 f.write('#!/usr/bin/env bash\n' + shlex.join(cpu_cmd) + ' < stablehlo.mlir\n')
@@ -437,10 +773,43 @@ def compile_to_vmfb(func, input_arrays, user_extra_flags, system_names, requeste
         compile_ms = (time.perf_counter() - compile_start) * 1000.0
         if result.returncode != 0 and report_dir is None:
             report_dir = _artifact_dir()
+            _write_base_artifacts(
+                report_dir,
+                system_names,
+                iree_bin,
+                compile_origin,
+                requested_device,
+                has_singleton_lowering,
+                user_extra_flags,
+                env_flags,
+                input_arrays,
+                noxpr_artifacts,
+            )
             _write_primary_artifacts(report_dir, cmd_text, stablehlo_mlir, system_names, iree_bin)
+            _update_compile_context(
+                report_dir,
+                report_stage='ready_to_compile',
+                compile_target=compile_target,
+                runtime_device=runtime_device,
+                target_args=target_args,
+                effective_iree_flags=extra,
+                cmd_text=cmd_text,
+                lower_ms=lower_ms,
+                stablehlo_emit_ms=stablehlo_emit_ms,
+                stablehlo_byte_len=len(stablehlo_mlir.encode('utf-8')),
+                indirect_command_buffers_disabled=disable_indirect_command_buffers,
+                singleton_inline_constants_disabled=bool(has_singleton_lowering),
+            )
         if report_dir is not None:
             with open(os.path.join(report_dir, 'iree_compile_stderr.txt'), 'w') as f:
                 f.write(stderr_text)
+            _update_compile_context(
+                report_dir,
+                report_stage='iree_compile_failed' if result.returncode != 0 else 'iree_compile_succeeded',
+                compile_backend=compile_backend,
+                runtime_device=runtime_device,
+                iree_compile_ms=compile_ms,
+            )
         if result.returncode != 0:
             raise RuntimeError(
                 'stage=iree_compile\n'
@@ -453,6 +822,11 @@ def compile_to_vmfb(func, input_arrays, user_extra_flags, system_names, requeste
         if report_dir is not None:
             with open(os.path.join(report_dir, 'module.vmfb'), 'wb') as f:
                 f.write(vmfb)
+            _update_compile_context(
+                report_dir,
+                vmfb_size_bytes=len(vmfb),
+                module_vmfb_path='module.vmfb',
+            )
         return {
             'vmfb': vmfb,
             'lower_ms': lower_ms,
@@ -462,13 +836,11 @@ def compile_to_vmfb(func, input_arrays, user_extra_flags, system_names, requeste
             'report_dir': report_dir,
             'compile_backend': compile_backend,
             'runtime_device': runtime_device,
+            'promoted_constants': promoted_constants,
         }
     finally:
         if out_path:
             try: os.unlink(out_path)
-            except: pass
-        if wrapper_path:
-            try: os.unlink(wrapper_path)
             except: pass
 "#;
 
@@ -487,7 +859,9 @@ def compile_to_vmfb(func, input_arrays, user_extra_flags, system_names, requeste
                 extra_iree_flags.to_vec(),
                 compiled_system.system_names.clone(),
                 iree_device.to_string(),
-                world.batch1,
+                compiled_system.has_singleton_lowering,
+                compile_origin.to_string(),
+                noxpr_artifacts,
             ),
         )
         .map_err(|e| {
@@ -502,6 +876,23 @@ def compile_to_vmfb(func, input_arrays, user_extra_flags, system_names, requeste
                     "\n\nThis simulation appears to use JAX features not yet supported by IREE.\n\
                      To temporarily unblock, run with backend=\"jax-cpu\" (slower).",
                 );
+            }
+            if let Some(report_dir) = &report.report_dir {
+                let stage_hint = match report.stage {
+                    iree_diagnostics::FailureStage::JaxLower => {
+                        "Inspect `jax_lower_traceback.txt` and `compile_context.json`."
+                    }
+                    iree_diagnostics::FailureStage::StablehloEmit => {
+                        "Inspect `stablehlo_emit_traceback.txt` and `compile_context.json`."
+                    }
+                    iree_diagnostics::FailureStage::IreeCompile => {
+                        "Inspect `iree_compile_stderr.txt`, `stablehlo.mlir`, and `compile_context.json`."
+                    }
+                    _ => "Inspect `compile_context.json` and the dumped artifacts in this directory.",
+                };
+                rendered.push_str(&format!(
+                    "\n\nDebug artifacts directory: {report_dir}\n{stage_hint}"
+                ));
             }
             Error::IreeCompilationFailed(rendered)
         })?;
@@ -543,9 +934,47 @@ def compile_to_vmfb(func, input_arrays, user_extra_flags, system_names, requeste
         .and_then(|x| x.extract::<String>().ok())
         .unwrap_or_else(|| "local-task".to_string());
 
+    let mut promoted_constants = Vec::new();
+    if let Some(pc_list) = result.get_item("promoted_constants")?
+        && let Ok(py_list) = pc_list.downcast::<pyo3::types::PyList>()
+    {
+        for item in py_list.iter() {
+            if let Ok(tup) = item.downcast::<pyo3::types::PyTuple>() {
+                let data: Vec<u8> = tup.get_item(0)?.extract()?;
+                let shape: Vec<i64> = tup.get_item(1)?.extract()?;
+                let dtype_str: String = tup.get_item(2)?.extract()?;
+                let element_type = match dtype_str.as_str() {
+                    "f16" => nox::ElementType::F16,
+                    "bf16" => nox::ElementType::Bf16,
+                    "f32" => nox::ElementType::F32,
+                    "f64" => nox::ElementType::F64,
+                    "i1" | "i8" | "ui8" => nox::ElementType::S8,
+                    "i16" | "ui16" => nox::ElementType::S16,
+                    "i32" | "ui32" => nox::ElementType::S32,
+                    "i64" | "ui64" => nox::ElementType::S64,
+                    other => {
+                        return Err(Error::IreeCompilationFailed(format!(
+                            "unsupported dtype '{other}' in promoted constant"
+                        )));
+                    }
+                };
+                promoted_constants.push(crate::exec::ConstantSpec {
+                    name: format!("promoted_{}", promoted_constants.len()),
+                    data,
+                    shape,
+                    element_type,
+                });
+            }
+        }
+    }
+
     let metadata = ExecMetadata {
         arg_ids: compiled_system.inputs.clone(),
         ret_ids: compiled_system.outputs.clone(),
+        arg_slots: compiled_system.input_slots.clone(),
+        ret_slots: compiled_system.output_slots.clone(),
+        has_singleton_lowering: compiled_system.has_singleton_lowering,
+        promoted_constants,
     };
     let exec = IREEExec::new(&vmfb, metadata, Some(stats.clone()), &runtime_device, world)
         .map_err(|e| Error::IreeCompilationFailed(format!("stage=vmfb_load\n{e}")))?;

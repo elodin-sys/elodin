@@ -10,6 +10,7 @@ pkgs.mkShell {
     pkgs.which
     pkgs.lesspipe
   ];
+
   shellHook = ''
   '';
 }

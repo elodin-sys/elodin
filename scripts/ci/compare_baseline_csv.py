@@ -294,10 +294,32 @@ def main() -> int:
     max_abs = max((item.max_abs for item in stats), default=0.0)
     max_rel = max((item.max_rel for item in stats), default=0.0)
     row_total = sum(item.rows for item in stats)
-    print(
-        f"PASS: {args.example} regression check succeeded "
-        f"({len(stats)} files, {row_total} rows, max_abs={max_abs:.3e}, max_rel={max_rel:.3e})"
-    )
+
+    worst_abs_file = max(stats, key=lambda s: s.max_abs) if stats else None
+    worst_rel_file = max(stats, key=lambda s: s.max_rel) if stats else None
+
+    default_tol = _resolve_tolerance(tolerance_cfg, args.example, "__default__")
+
+    print(f"PASS: {args.example} regression check succeeded ({len(stats)} files, {row_total} rows)")
+    if max_abs == 0.0 and max_rel == 0.0:
+        print(
+            f"  bit-for-bit identical (tol: abs={default_tol.abs_tol:.0e}, rel={default_tol.rel_tol:.0e})"
+        )
+    else:
+        abs_pct = (max_abs / default_tol.abs_tol * 100) if default_tol.abs_tol > 0 else float("inf")
+        rel_pct = (max_rel / default_tol.rel_tol * 100) if default_tol.rel_tol > 0 else float("inf")
+        print(
+            f"  max_abs={max_abs:.3e} ({abs_pct:.1f}% of tol {default_tol.abs_tol:.0e})"
+            f"  max_rel={max_rel:.3e} ({rel_pct:.1f}% of tol {default_tol.rel_tol:.0e})"
+        )
+        if worst_abs_file and worst_abs_file.max_abs > 0:
+            print(f"  worst file (abs): {worst_abs_file.rel_path} ({worst_abs_file.max_abs:.3e})")
+        if (
+            worst_rel_file
+            and worst_rel_file.max_rel > 0
+            and worst_rel_file.rel_path != (worst_abs_file.rel_path if worst_abs_file else "")
+        ):
+            print(f"  worst file (rel): {worst_rel_file.rel_path} ({worst_rel_file.max_rel:.3e})")
     return 0
 
 
