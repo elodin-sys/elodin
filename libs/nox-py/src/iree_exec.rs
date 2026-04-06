@@ -463,7 +463,9 @@ impl IREEExec {
                     staged.download_all(&self.session).iree_err()?;
                     for (slot, id) in self.output_ids.iter().enumerate() {
                         let host = world.host.get_mut(id).ok_or(Error::ComponentNotFound)?;
-                        staged.copy_slot_to_host(slot, &mut host.buffer).iree_err()?;
+                        staged
+                            .copy_slot_to_host(slot, &mut host.buffer)
+                            .iree_err()?;
                         if debug {
                             let comp_name = world
                                 .metadata

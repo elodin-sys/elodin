@@ -184,7 +184,7 @@ impl BufferMapping {
         }
         unsafe {
             std::slice::from_raw_parts_mut(
-                self.inner.contents.data as *mut u8,
+                self.inner.contents.data,
                 self.inner.contents.data_length,
             )
         }
