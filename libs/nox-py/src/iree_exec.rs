@@ -96,7 +96,6 @@ pub struct IREEExec {
     mutable_overlap: Vec<(usize, usize)>,
     /// Pre-computed mask: true for ret_ids indices whose ComponentId appears for the first time.
     output_keep_mask: Vec<bool>,
-    cpu_device: bool,
     input_arena: Option<Arena>,
     output_arena: Option<Arena>,
     output_views_scratch: Vec<iree_runtime::BufferView>,
@@ -299,7 +298,6 @@ impl IREEExec {
             output_ids,
             mutable_overlap,
             output_keep_mask,
-            cpu_device,
             input_arena,
             output_arena,
             output_views_scratch: Vec::with_capacity(output_count),
