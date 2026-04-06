@@ -439,18 +439,40 @@ impl IREEExec {
                     mapped
                         .copy_slots_from_views_direct(&self.session, &self.output_views_scratch)
                         .iree_err()?;
-                    for (slot, id) in self.output_ids.iter().enumerate() {
-                        let host = world.host.get_mut(id).ok_or(Error::ComponentNotFound)?;
-                        mapped.download_slot(slot, &mut host.buffer).iree_err()?;
-                        if debug {
+                    {
+                        let id_to_slot: std::collections::HashMap<ComponentId, usize> = self
+                            .output_ids
+                            .iter()
+                            .enumerate()
+                            .map(|(i, id)| (*id, i))
+                            .collect();
+                        let mut ordered: Vec<(usize, &mut [u8])> =
+                            Vec::with_capacity(self.output_ids.len());
+                        for (id, col) in world.host.iter_mut() {
+                            if let Some(&slot) = id_to_slot.get(id) {
+                                ordered.push((slot, col.buffer.as_mut_slice()));
+                            }
+                        }
+                        if ordered.len() != self.output_ids.len() {
+                            return Err(Error::ComponentNotFound);
+                        }
+                        ordered.sort_by_key(|(idx, _)| *idx);
+                        let mut host_slices: Vec<&mut [u8]> =
+                            ordered.into_iter().map(|(_, s)| s).collect();
+                        mapped.download_all_into(&mut host_slices).iree_err()?;
+                    }
+                    if debug {
+                        for (slot, id) in self.output_ids.iter().enumerate() {
                             let comp_name = world
                                 .metadata
                                 .component_map
                                 .get(id)
                                 .map(|(_, m)| m.name.as_str())
                                 .unwrap_or("?");
-                            dump_slot_f64("OUTPUT", slot, *id, &[], &host.buffer);
-                            eprintln!("[IREE_DEBUG]   ^ name={comp_name}");
+                            if let Some(host) = world.host.get(id) {
+                                dump_slot_f64("OUTPUT", slot, *id, &[], &host.buffer);
+                                eprintln!("[IREE_DEBUG]   ^ name={comp_name}");
+                            }
                         }
                     }
                 }

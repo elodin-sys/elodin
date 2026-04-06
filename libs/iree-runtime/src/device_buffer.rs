@@ -675,6 +675,14 @@ impl MappedArena {
         let buf = mapping.as_mut_slice();
         for &(slot_idx, src) in slot_data {
             let slot = &self.slots[slot_idx];
+            if src.len() != slot.byte_len {
+                return Err(error::Error::invalid_argument(format!(
+                    "upload_slots: slot {} source length {} does not match slot length {}",
+                    slot_idx,
+                    src.len(),
+                    slot.byte_len
+                )));
+            }
             buf[slot.offset..slot.offset + slot.byte_len].copy_from_slice(src);
         }
         Ok(())
@@ -692,6 +700,31 @@ impl MappedArena {
         }
         let mapping = self.buffer.map_read()?;
         target.copy_from_slice(&mapping.as_slice()[slot.offset..slot.offset + slot.byte_len]);
+        Ok(())
+    }
+
+    pub fn download_all_into(&self, host_slices: &mut [&mut [u8]]) -> Result<()> {
+        if host_slices.len() != self.slots.len() {
+            return Err(error::Error::invalid_argument(format!(
+                "host_slices length {} does not match arena slots {}",
+                host_slices.len(),
+                self.slots.len()
+            )));
+        }
+        let mapping = self.buffer.map_read()?;
+        let buf = mapping.as_slice();
+        for (i, dst) in host_slices.iter_mut().enumerate() {
+            let slot = &self.slots[i];
+            if dst.len() != slot.byte_len {
+                return Err(error::Error::invalid_argument(format!(
+                    "host slice {} length {} does not match arena slot length {}",
+                    i,
+                    dst.len(),
+                    slot.byte_len
+                )));
+            }
+            dst.copy_from_slice(&buf[slot.offset..slot.offset + slot.byte_len]);
+        }
         Ok(())
     }
 
@@ -730,6 +763,13 @@ impl MappedArena {
         session: &Session,
         source_views: &[BufferView],
     ) -> Result<()> {
+        if source_views.len() != self.slots.len() {
+            return Err(error::Error::invalid_argument(format!(
+                "source_views length {} does not match arena slots {}",
+                source_views.len(),
+                self.slots.len()
+            )));
+        }
         let timeout = ffi::iree_timeout_t {
             type_: ffi::iree_timeout_type_e_IREE_TIMEOUT_ABSOLUTE,
             nanos: i64::MAX,
