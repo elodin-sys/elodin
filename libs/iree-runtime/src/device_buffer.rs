@@ -509,45 +509,6 @@ impl DeviceArena {
         Ok(())
     }
 
-    pub fn copy_slots_from_views_direct(
-        &self,
-        session: &Session,
-        source_views: &[BufferView],
-    ) -> Result<()> {
-        if source_views.len() != self.slots.len() {
-            return Err(error::Error::invalid_argument(format!(
-                "source_views length {} does not match arena slots {}",
-                source_views.len(),
-                self.slots.len()
-            )));
-        }
-        let timeout = ffi::iree_timeout_t {
-            type_: ffi::iree_timeout_type_e_IREE_TIMEOUT_ABSOLUTE,
-            nanos: i64::MAX,
-        };
-        for (slot, source_view) in self.slots.iter().zip(source_views.iter()) {
-            let status = unsafe {
-                ffi::iree_hal_device_transfer_d2d(
-                    session.device(),
-                    source_view.buffer_ptr(),
-                    0,
-                    self.buffer.ptr,
-                    slot.offset as ffi::iree_device_size_t,
-                    slot.byte_len as ffi::iree_device_size_t,
-                    ffi::iree_hal_transfer_buffer_flag_bits_t_IREE_HAL_TRANSFER_BUFFER_FLAG_DEFAULT
-                        .0,
-                    timeout,
-                )
-            };
-            match error::check(status) {
-                Ok(()) => {}
-                Err(err) if err.is_overlap_copy_error() => {}
-                Err(err) => return Err(err),
-            }
-        }
-        Ok(())
-    }
-
     pub fn download_all_into(
         &mut self,
         session: &Session,
@@ -685,21 +646,6 @@ impl MappedArena {
             }
             buf[slot.offset..slot.offset + slot.byte_len].copy_from_slice(src);
         }
-        Ok(())
-    }
-
-    /// Read a single slot from device memory via mapped read.
-    pub fn download_slot(&self, index: usize, target: &mut [u8]) -> Result<()> {
-        let slot = &self.slots[index];
-        if target.len() != slot.byte_len {
-            return Err(error::Error::invalid_argument(format!(
-                "target length {} does not match arena slot length {}",
-                target.len(),
-                slot.byte_len
-            )));
-        }
-        let mapping = self.buffer.map_read()?;
-        target.copy_from_slice(&mapping.as_slice()[slot.offset..slot.offset + slot.byte_len]);
         Ok(())
     }
 
