@@ -207,13 +207,14 @@ fn parse_backend_config(
             Ok((BackendEngine::Iree, "local-sync", false))
         }
         "local-task" => Ok((BackendEngine::Iree, "local-task", false)),
+        "iree-inline" => Ok((BackendEngine::Iree, "inline", false)),
         "iree-gpu" | "gpu" => Ok((BackendEngine::Iree, "auto", false)),
         "cuda" => Ok((BackendEngine::Iree, "cuda", false)),
         "metal" => Ok((BackendEngine::Iree, "metal", false)),
         "jax-cpu" | "jax" => Ok((BackendEngine::Jax, "cpu", false)),
         "jax-gpu" => Ok((BackendEngine::Jax, "gpu", true)),
         other => Err(Error::UnknownCommand(format!(
-            "unknown backend '{other}': expected one of 'iree-cpu', 'iree-gpu', 'local-task', 'local-sync', 'jax-cpu', 'jax-gpu'"
+            "unknown backend '{other}': expected one of 'iree-cpu', 'iree-gpu', 'iree-inline', 'local-task', 'local-sync', 'jax-cpu', 'jax-gpu'"
         ))),
     }
 }

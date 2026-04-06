@@ -114,7 +114,7 @@ run_example() (
   local discovered_db_path=""
   local csv_status=0
   local perf_status=0
-  local -a bench_args=(bench --ticks "${ticks}" --profile)
+  local -a bench_args=(bench --ticks "${ticks}" --profile --detail)
   local -a compare_args=()
 
   if [[ ! -f "${example_entrypoint}" ]]; then

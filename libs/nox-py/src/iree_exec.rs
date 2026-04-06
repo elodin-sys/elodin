@@ -4,7 +4,7 @@ use std::time::Instant;
 use impeller2::types::ComponentId;
 use tracing::trace;
 
-use crate::error::Error;
+use crate::error::{Error, IreeResultExt};
 use crate::exec::{ExecMetadata, ExecSlotMetadata};
 use crate::iree_compile::IreeCompileStats;
 use crate::profile::{Profiler, TickTimings};
@@ -81,6 +81,11 @@ fn nox_to_iree_element_type(ty: nox::ElementType) -> Result<iree_runtime::Elemen
     }
 }
 
+enum Arena {
+    Staged(iree_runtime::DeviceArena),
+    Mapped(iree_runtime::MappedArena),
+}
+
 pub struct IREEExec {
     pub metadata: ExecMetadata,
     pub compile_stats: Option<IreeCompileStats>,
@@ -89,8 +94,11 @@ pub struct IREEExec {
     input_ids: Vec<ComponentId>,
     output_ids: Vec<ComponentId>,
     mutable_overlap: Vec<(usize, usize)>,
-    input_arena: Option<iree_runtime::DeviceArena>,
-    output_arena: Option<iree_runtime::DeviceArena>,
+    /// Pre-computed mask: true for ret_ids indices whose ComponentId appears for the first time.
+    output_keep_mask: Vec<bool>,
+    cpu_device: bool,
+    input_arena: Option<Arena>,
+    output_arena: Option<Arena>,
     output_views_scratch: Vec<iree_runtime::BufferView>,
     promoted_constant_views: Vec<iree_runtime::BufferView>,
     call: iree_runtime::Call,
@@ -110,39 +118,36 @@ impl IREEExec {
         device_uri: &str,
         world: &World,
     ) -> Result<Self, Error> {
-        let instance =
-            iree_runtime::Instance::new().map_err(|e| Error::IreeRuntimeError(e.to_string()))?;
+        let instance = iree_runtime::Instance::new().iree_err()?;
         let device = instance.create_device(device_uri).map_err(|err| {
             Error::IreeRuntimeError(format!(
                 "failed to create requested IREE device '{device_uri}': {err}"
             ))
         })?;
-        let session = iree_runtime::Session::new(&instance, &device)
-            .map_err(|e| Error::IreeRuntimeError(e.to_string()))?;
+        let session = iree_runtime::Session::new(&instance, &device).iree_err()?;
 
-        // Register the elodin_lapack module (provides SVD, Cholesky, LU, QR,
-        // solve, eigh via OpenBLAS). Must be appended before loading the VMFB
-        // so the VM can resolve elodin_lapack.* imports.
         if let Ok(lapack_module) =
             unsafe { iree_runtime::lapack::create_module(instance.vm_instance(), session.device()) }
         {
             let _ = unsafe { session.append_module(lapack_module) };
         }
 
-        session
-            .load_vmfb(vmfb)
-            .map_err(|e| Error::IreeRuntimeError(e.to_string()))?;
-        let call = session
-            .call("module.main")
-            .map_err(|e| Error::IreeRuntimeError(e.to_string()))?;
+        session.load_vmfb(vmfb).iree_err()?;
+        let call = session.call("module.main").iree_err()?;
 
         let mut output_ids = Vec::new();
         let mut seen_outputs = HashSet::new();
+        let mut output_keep_mask = Vec::with_capacity(metadata.ret_ids.len());
         for id in &metadata.ret_ids {
-            if seen_outputs.insert(*id) {
+            let is_new = seen_outputs.insert(*id);
+            output_keep_mask.push(is_new);
+            if is_new {
                 output_ids.push(*id);
             }
         }
+
+        let cpu_device = matches!(device_uri, "local-sync" | "local-task");
+
         let mut input_ids = Vec::new();
         let mut input_specs = Vec::new();
         let mut seen_inputs = HashSet::new();
@@ -155,13 +160,22 @@ impl IREEExec {
             input_ids.push(slot.component_id);
         }
 
+        let make_arena = |specs: &[iree_runtime::BufferSpec]| -> Result<Arena, Error> {
+            if cpu_device {
+                Ok(Arena::Mapped(
+                    iree_runtime::MappedArena::new(&session, specs).iree_err()?,
+                ))
+            } else {
+                Ok(Arena::Staged(
+                    iree_runtime::DeviceArena::new(&session, specs).iree_err()?,
+                ))
+            }
+        };
+
         let input_arena = if input_specs.is_empty() {
             None
         } else {
-            Some(
-                iree_runtime::DeviceArena::new(&session, &input_specs)
-                    .map_err(|e| Error::IreeRuntimeError(e.to_string()))?,
-            )
+            Some(make_arena(&input_specs)?)
         };
 
         let output_arena = if output_ids.is_empty() {
@@ -176,10 +190,7 @@ impl IREEExec {
                     .ok_or(Error::ComponentNotFound)?;
                 specs.push(build_buffer_spec(world, slot)?);
             }
-            Some(
-                iree_runtime::DeviceArena::new(&session, &specs)
-                    .map_err(|e| Error::IreeRuntimeError(e.to_string()))?,
-            )
+            Some(make_arena(&specs)?)
         };
 
         if iree_debug_data() {
@@ -278,6 +289,7 @@ impl IREEExec {
             promoted_constant_views.push(view);
         }
 
+        let output_count = output_ids.len();
         Ok(Self {
             metadata,
             compile_stats,
@@ -286,9 +298,11 @@ impl IREEExec {
             input_ids,
             output_ids,
             mutable_overlap,
+            output_keep_mask,
+            cpu_device,
             input_arena,
             output_arena,
-            output_views_scratch: Vec::new(),
+            output_views_scratch: Vec::with_capacity(output_count),
             promoted_constant_views,
             call,
             session,
@@ -311,68 +325,84 @@ impl IREEExec {
         detailed: bool,
     ) -> Result<TickTimings, Error> {
         let batch_ticks = n.max(1) as usize;
+        let debug = iree_debug_data();
+
         let h2d_start = detailed.then(Instant::now);
         if let Some(arena) = &mut self.input_arena {
-            for (slot, id) in self.input_ids.iter().enumerate() {
-                let col = world.column_by_id(*id).ok_or(Error::ComponentNotFound)?;
-                if iree_debug_data() {
-                    let comp_name = world
-                        .metadata
-                        .component_map
-                        .get(id)
-                        .map(|(_, m)| m.name.as_str())
-                        .unwrap_or("?");
-                    let slot_meta = self.compile_stats.as_ref().map(|_| "");
-                    let arg_slot = std::iter::empty::<&ExecSlotMetadata>().next();
-                    let _ = (slot_meta, arg_slot);
-                    dump_slot_f64("INPUT", slot, *id, &[], col.column.as_slice());
-                    eprintln!("[IREE_DEBUG]   ^ name={comp_name}");
+            match arena {
+                Arena::Mapped(mapped) => {
+                    let slot_data: Vec<(usize, &[u8])> = self
+                        .input_ids
+                        .iter()
+                        .enumerate()
+                        .map(|(slot, id)| {
+                            let col = world.column_by_id(*id).ok_or(Error::ComponentNotFound)?;
+                            if debug {
+                                let comp_name = world
+                                    .metadata
+                                    .component_map
+                                    .get(id)
+                                    .map(|(_, m)| m.name.as_str())
+                                    .unwrap_or("?");
+                                dump_slot_f64("INPUT", slot, *id, &[], col.column.as_slice());
+                                eprintln!("[IREE_DEBUG]   ^ name={comp_name}");
+                            }
+                            Ok((slot, col.column.as_slice()))
+                        })
+                        .collect::<Result<Vec<_>, Error>>()?;
+                    mapped.upload_slots(&slot_data).iree_err()?;
                 }
-                arena
-                    .write_slot(slot, col.column.as_slice())
-                    .map_err(|e| Error::IreeRuntimeError(e.to_string()))?;
+                Arena::Staged(staged) => {
+                    for (slot, id) in self.input_ids.iter().enumerate() {
+                        let col = world.column_by_id(*id).ok_or(Error::ComponentNotFound)?;
+                        if debug {
+                            let comp_name = world
+                                .metadata
+                                .component_map
+                                .get(id)
+                                .map(|(_, m)| m.name.as_str())
+                                .unwrap_or("?");
+                            dump_slot_f64("INPUT", slot, *id, &[], col.column.as_slice());
+                            eprintln!("[IREE_DEBUG]   ^ name={comp_name}");
+                        }
+                        staged.write_slot(slot, col.column.as_slice()).iree_err()?;
+                    }
+                    staged.upload_staging(&self.session).iree_err()?;
+                }
             }
-            arena
-                .upload_staging(&self.session)
-                .map_err(|e| Error::IreeRuntimeError(e.to_string()))?;
         }
         let h2d_upload_ms = h2d_start
             .map(|s| s.elapsed().as_secs_f64() * 1000.0)
             .unwrap_or_default();
 
         let kernel_start = detailed.then(Instant::now);
-        self.output_views_scratch.clear();
-        self.output_views_scratch.reserve(self.output_ids.len());
         for batch_idx in 0..batch_ticks {
             self.call.reset();
-            for slot in 0..self.input_ids.len() {
-                let view = self
-                    .input_arena
-                    .as_ref()
-                    .ok_or_else(|| Error::IreeRuntimeError("missing input arena".into()))?
-                    .view(slot);
-                self.call
-                    .push_input(view)
-                    .map_err(|e| Error::IreeRuntimeError(e.to_string()))?;
+            if let Some(input_arena) = self.input_arena.as_ref() {
+                let n = self.input_ids.len();
+                match input_arena {
+                    Arena::Mapped(m) => {
+                        for slot in 0..n {
+                            self.call.push_input(m.view(slot)).iree_err()?;
+                        }
+                    }
+                    Arena::Staged(s) => {
+                        for slot in 0..n {
+                            self.call.push_input(s.view(slot)).iree_err()?;
+                        }
+                    }
+                }
             }
             for cv in &self.promoted_constant_views {
-                self.call
-                    .push_input(cv)
-                    .map_err(|e| Error::IreeRuntimeError(e.to_string()))?;
+                self.call.push_input(cv).iree_err()?;
             }
 
-            self.call
-                .invoke()
-                .map_err(|e| Error::IreeRuntimeError(e.to_string()))?;
+            self.call.invoke().iree_err()?;
 
             self.output_views_scratch.clear();
-            let mut seen_outputs = HashSet::new();
-            for ret_id in &self.metadata.ret_ids {
-                let output = self
-                    .call
-                    .pop_output()
-                    .map_err(|e| Error::IreeRuntimeError(e.to_string()))?;
-                if seen_outputs.insert(*ret_id) {
+            for keep in &self.output_keep_mask {
+                let output = self.call.pop_output().iree_err()?;
+                if *keep {
                     self.output_views_scratch.push(output);
                 }
             }
@@ -380,14 +410,23 @@ impl IREEExec {
             if batch_idx + 1 < batch_ticks
                 && let Some(input_arena) = &self.input_arena
             {
-                for (input_slot, output_slot) in &self.mutable_overlap {
-                    input_arena
-                        .copy_slot_from_view(
-                            &self.session,
-                            *input_slot,
-                            &self.output_views_scratch[*output_slot],
-                        )
-                        .map_err(|e| Error::IreeRuntimeError(e.to_string()))?;
+                for &(input_slot, output_slot) in &self.mutable_overlap {
+                    match input_arena {
+                        Arena::Mapped(m) => m
+                            .copy_slot_from_view(
+                                &self.session,
+                                input_slot,
+                                &self.output_views_scratch[output_slot],
+                            )
+                            .iree_err()?,
+                        Arena::Staged(s) => s
+                            .copy_slot_from_view(
+                                &self.session,
+                                input_slot,
+                                &self.output_views_scratch[output_slot],
+                            )
+                            .iree_err()?,
+                    }
                 }
             }
         }
@@ -397,26 +436,45 @@ impl IREEExec {
 
         let d2h_start = detailed.then(Instant::now);
         if let Some(arena) = &mut self.output_arena {
-            arena
-                .copy_slots_from_views_batched(&self.session, &self.output_views_scratch)
-                .map_err(|e| Error::IreeRuntimeError(e.to_string()))?;
-            arena
-                .download_all(&self.session)
-                .map_err(|e| Error::IreeRuntimeError(e.to_string()))?;
-            for (slot, id) in self.output_ids.iter().enumerate() {
-                let host = world.host.get_mut(id).ok_or(Error::ComponentNotFound)?;
-                arena
-                    .copy_slot_to_host(slot, &mut host.buffer)
-                    .map_err(|e| Error::IreeRuntimeError(e.to_string()))?;
-                if iree_debug_data() {
-                    let comp_name = world
-                        .metadata
-                        .component_map
-                        .get(id)
-                        .map(|(_, m)| m.name.as_str())
-                        .unwrap_or("?");
-                    dump_slot_f64("OUTPUT", slot, *id, &[], &host.buffer);
-                    eprintln!("[IREE_DEBUG]   ^ name={comp_name}");
+            match arena {
+                Arena::Mapped(mapped) => {
+                    mapped
+                        .copy_slots_from_views_direct(&self.session, &self.output_views_scratch)
+                        .iree_err()?;
+                    for (slot, id) in self.output_ids.iter().enumerate() {
+                        let host = world.host.get_mut(id).ok_or(Error::ComponentNotFound)?;
+                        mapped.download_slot(slot, &mut host.buffer).iree_err()?;
+                        if debug {
+                            let comp_name = world
+                                .metadata
+                                .component_map
+                                .get(id)
+                                .map(|(_, m)| m.name.as_str())
+                                .unwrap_or("?");
+                            dump_slot_f64("OUTPUT", slot, *id, &[], &host.buffer);
+                            eprintln!("[IREE_DEBUG]   ^ name={comp_name}");
+                        }
+                    }
+                }
+                Arena::Staged(staged) => {
+                    staged
+                        .copy_slots_from_views_batched(&self.session, &self.output_views_scratch)
+                        .iree_err()?;
+                    staged.download_all(&self.session).iree_err()?;
+                    for (slot, id) in self.output_ids.iter().enumerate() {
+                        let host = world.host.get_mut(id).ok_or(Error::ComponentNotFound)?;
+                        staged.copy_slot_to_host(slot, &mut host.buffer).iree_err()?;
+                        if debug {
+                            let comp_name = world
+                                .metadata
+                                .component_map
+                                .get(id)
+                                .map(|(_, m)| m.name.as_str())
+                                .unwrap_or("?");
+                            dump_slot_f64("OUTPUT", slot, *id, &[], &host.buffer);
+                            eprintln!("[IREE_DEBUG]   ^ name={comp_name}");
+                        }
+                    }
                 }
             }
         } else {
@@ -424,8 +482,8 @@ impl IREEExec {
                 let host = world.host.get_mut(id).ok_or(Error::ComponentNotFound)?;
                 self.output_views_scratch[slot]
                     .download_into(&self.session, &mut host.buffer)
-                    .map_err(|e| Error::IreeRuntimeError(e.to_string()))?;
-                if iree_debug_data() {
+                    .iree_err()?;
+                if debug {
                     let comp_name = world
                         .metadata
                         .component_map

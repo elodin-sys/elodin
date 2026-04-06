@@ -13,7 +13,7 @@ mod session;
 pub use buffer_view::BufferView;
 pub use call::Call;
 pub use device::Device;
-pub use device_buffer::{BufferSpec, DeviceArena, DeviceBuffer};
+pub use device_buffer::{BufferMapping, BufferSpec, DeviceArena, DeviceBuffer, MappedArena};
 pub use element_type::ElementType;
 pub use error::{Error, Result};
 pub use instance::Instance;

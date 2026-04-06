@@ -344,6 +344,8 @@ def _resolve_iree_device(requested_device):
         return 'cpu', 'local-sync'
     if selected == 'local-task':
         return 'cpu', 'local-task'
+    if selected == 'inline':
+        return 'inline', 'local-sync'
     if selected == 'cuda':
         return 'cuda', 'cuda'
     if selected == 'metal':
@@ -352,7 +354,7 @@ def _resolve_iree_device(requested_device):
         raise RuntimeError(
             "stage=config\n"
             + f"invalid IREE device '{selected}': expected one of "
-            + "'auto', 'cpu', 'cuda', 'metal', 'local-task', 'local-sync'"
+            + "'auto', 'cpu', 'cuda', 'metal', 'inline', 'local-task', 'local-sync'"
         )
     if platform.system() == 'Linux' and shutil.which('nvidia-smi') is not None:
         return 'cuda', 'cuda'
@@ -584,20 +586,26 @@ def compile_to_vmfb(
 
     compile_target, runtime_device = _resolve_iree_device(requested_device)
 
+    is_cpu_target = compile_target in ('cpu', 'inline')
     extra = [
         "--iree-vm-target-extension-f64",
         "--iree-input-demote-f64-to-f32=false",
         "--iree-input-type=stablehlo",
-        "--iree-opt-level=O2",
-        "--iree-stream-partitioning-favor=max-concurrency",
+        "--iree-opt-level=O3" if is_cpu_target else "--iree-opt-level=O2",
         "--iree-dispatch-creation-enable-aggressive-fusion=true",
         "--iree-llvmcpu-enable-ukernels=all",
     ]
+    if not is_cpu_target:
+        extra.append("--iree-stream-partitioning-favor=max-concurrency")
+    if is_cpu_target:
+        extra.append("--iree-opt-strip-assertions=true")
     disable_indirect_command_buffers = not _prefer_indirect_command_buffers(stablehlo_mlir)
     if disable_indirect_command_buffers:
         extra.append("--iree-hal-indirect-command-buffers=false")
     if has_singleton_lowering:
         extra.append("--iree-flow-inline-constants-max-byte-length=0")
+    if os.environ.get('ELODIN_IREE_DUMP_DIR'):
+        extra.append("--iree-scheduling-dump-statistics-format=json")
 
     if platform.system() in ("Darwin", "Linux"):
         machine = platform.machine()
@@ -635,6 +643,10 @@ def compile_to_vmfb(
             target_args.append('--iree-hal-target-device=cuda')
     elif compile_target == 'metal':
         target_args.append('--iree-hal-target-backends=metal-spirv')
+    elif compile_target == 'inline':
+        target_args.append('--iree-hal-target-backends=llvm-cpu')
+        extra.append('--iree-execution-model=inline-dynamic')
+        compile_backend = 'llvm-cpu'
     else:
         target_args.append('--iree-hal-target-backends=llvm-cpu')
 
