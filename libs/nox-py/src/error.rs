@@ -60,6 +60,17 @@ impl From<Error> for PyErr {
     }
 }
 
+pub(crate) trait IreeResultExt<T> {
+    fn iree_err(self) -> Result<T, Error>;
+}
+
+impl<T> IreeResultExt<T> for iree_runtime::Result<T> {
+    #[inline]
+    fn iree_err(self) -> Result<T, Error> {
+        self.map_err(|e| Error::IreeRuntimeError(e.to_string()))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

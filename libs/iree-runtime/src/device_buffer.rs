@@ -1,3 +1,5 @@
+use std::mem::MaybeUninit;
+
 use crate::buffer_view::BufferView;
 use crate::element_type::ElementType;
 use crate::error::{self, Result};
@@ -159,6 +161,89 @@ impl Drop for DeviceBuffer {
         if !self.ptr.is_null() {
             unsafe { ffi::iree_hal_buffer_release(self.ptr) };
         }
+    }
+}
+
+pub struct BufferMapping {
+    inner: ffi::iree_hal_buffer_mapping_t,
+}
+
+impl BufferMapping {
+    pub fn as_slice(&self) -> &[u8] {
+        if self.inner.contents.data.is_null() || self.inner.contents.data_length == 0 {
+            return &[];
+        }
+        unsafe {
+            std::slice::from_raw_parts(self.inner.contents.data, self.inner.contents.data_length)
+        }
+    }
+
+    pub fn as_mut_slice(&mut self) -> &mut [u8] {
+        if self.inner.contents.data.is_null() || self.inner.contents.data_length == 0 {
+            return &mut [];
+        }
+        unsafe {
+            std::slice::from_raw_parts_mut(
+                self.inner.contents.data,
+                self.inner.contents.data_length,
+            )
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        self.inner.contents.data_length
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.inner.contents.data_length == 0
+    }
+}
+
+impl Drop for BufferMapping {
+    fn drop(&mut self) {
+        unsafe { ffi::iree_hal_buffer_unmap_range(&mut self.inner) };
+    }
+}
+
+impl DeviceBuffer {
+    pub fn map_read(&self) -> Result<BufferMapping> {
+        let byte_len = self.byte_len();
+        let mut mapping = MaybeUninit::<ffi::iree_hal_buffer_mapping_t>::uninit();
+        let status = unsafe {
+            ffi::iree_hal_buffer_map_range(
+                self.ptr,
+                ffi::iree_hal_mapping_mode_bits_t_IREE_HAL_MAPPING_MODE_SCOPED.0 as _,
+                ffi::iree_hal_memory_access_bits_t_IREE_HAL_MEMORY_ACCESS_READ.0 as _,
+                0,
+                byte_len as ffi::iree_device_size_t,
+                mapping.as_mut_ptr(),
+            )
+        };
+        error::check(status)?;
+        Ok(BufferMapping {
+            inner: unsafe { mapping.assume_init() },
+        })
+    }
+
+    pub fn map_write(&self) -> Result<BufferMapping> {
+        let byte_len = self.byte_len();
+        let access = ffi::iree_hal_memory_access_bits_t_IREE_HAL_MEMORY_ACCESS_WRITE.0
+            | ffi::iree_hal_memory_access_bits_t_IREE_HAL_MEMORY_ACCESS_READ.0;
+        let mut mapping = MaybeUninit::<ffi::iree_hal_buffer_mapping_t>::uninit();
+        let status = unsafe {
+            ffi::iree_hal_buffer_map_range(
+                self.ptr,
+                ffi::iree_hal_mapping_mode_bits_t_IREE_HAL_MAPPING_MODE_SCOPED.0 as _,
+                access as _,
+                0,
+                byte_len as ffi::iree_device_size_t,
+                mapping.as_mut_ptr(),
+            )
+        };
+        error::check(status)?;
+        Ok(BufferMapping {
+            inner: unsafe { mapping.assume_init() },
+        })
     }
 }
 
@@ -494,4 +579,167 @@ impl DeviceArena {
 fn align_up(value: usize, alignment: usize) -> usize {
     let mask = alignment - 1;
     (value + mask) & !mask
+}
+
+struct MappedSlot {
+    offset: usize,
+    byte_len: usize,
+    _subspan: DeviceBuffer,
+    view: BufferView,
+}
+
+/// Like `DeviceArena` but uses `iree_hal_buffer_map_range` instead of
+/// staging buffers + HAL transfers. Only safe on CPU backends where
+/// device memory is host-visible.
+pub struct MappedArena {
+    buffer: DeviceBuffer,
+    slots: Vec<MappedSlot>,
+}
+
+impl MappedArena {
+    pub fn new(session: &Session, specs: &[BufferSpec]) -> Result<Self> {
+        let mut total_len = 0usize;
+        let mut offsets = Vec::with_capacity(specs.len());
+        for spec in specs {
+            let aligned = align_up(total_len, 64);
+            offsets.push(aligned);
+            total_len = aligned + spec.byte_len;
+        }
+
+        let buffer = DeviceBuffer::allocate(session, total_len.max(1))?;
+        let mut slots = Vec::with_capacity(specs.len());
+        for (spec, offset) in specs.iter().zip(offsets.into_iter()) {
+            let subspan = buffer.subspan(offset, spec.byte_len)?;
+            let view = subspan.create_view(
+                &spec.shape,
+                spec.element_type,
+                ffi::iree_hal_encoding_types_t_IREE_HAL_ENCODING_TYPE_DENSE_ROW_MAJOR.0,
+            )?;
+            slots.push(MappedSlot {
+                offset,
+                byte_len: spec.byte_len,
+                _subspan: subspan,
+                view,
+            });
+        }
+
+        Ok(Self { buffer, slots })
+    }
+
+    pub fn view(&self, index: usize) -> &BufferView {
+        &self.slots[index].view
+    }
+
+    /// Write all slots into device memory via a single mapped write.
+    pub fn upload_slots(&self, slot_data: &[(usize, &[u8])]) -> Result<()> {
+        let mut mapping = self.buffer.map_write()?;
+        let buf = mapping.as_mut_slice();
+        for &(slot_idx, src) in slot_data {
+            let slot = &self.slots[slot_idx];
+            if src.len() != slot.byte_len {
+                return Err(error::Error::invalid_argument(format!(
+                    "upload_slots: slot {} source length {} does not match slot length {}",
+                    slot_idx,
+                    src.len(),
+                    slot.byte_len
+                )));
+            }
+            buf[slot.offset..slot.offset + slot.byte_len].copy_from_slice(src);
+        }
+        Ok(())
+    }
+
+    pub fn download_all_into(&self, host_slices: &mut [&mut [u8]]) -> Result<()> {
+        if host_slices.len() != self.slots.len() {
+            return Err(error::Error::invalid_argument(format!(
+                "host_slices length {} does not match arena slots {}",
+                host_slices.len(),
+                self.slots.len()
+            )));
+        }
+        let mapping = self.buffer.map_read()?;
+        let buf = mapping.as_slice();
+        for (i, dst) in host_slices.iter_mut().enumerate() {
+            let slot = &self.slots[i];
+            if dst.len() != slot.byte_len {
+                return Err(error::Error::invalid_argument(format!(
+                    "host slice {} length {} does not match arena slot length {}",
+                    i,
+                    dst.len(),
+                    slot.byte_len
+                )));
+            }
+            dst.copy_from_slice(&buf[slot.offset..slot.offset + slot.byte_len]);
+        }
+        Ok(())
+    }
+
+    pub fn copy_slot_from_view(
+        &self,
+        session: &Session,
+        slot_index: usize,
+        source_view: &BufferView,
+    ) -> Result<()> {
+        let slot = &self.slots[slot_index];
+        let timeout = ffi::iree_timeout_t {
+            type_: ffi::iree_timeout_type_e_IREE_TIMEOUT_ABSOLUTE,
+            nanos: i64::MAX,
+        };
+        let status = unsafe {
+            ffi::iree_hal_device_transfer_d2d(
+                session.device(),
+                source_view.buffer_ptr(),
+                0,
+                self.buffer.ptr,
+                slot.offset as ffi::iree_device_size_t,
+                slot.byte_len as ffi::iree_device_size_t,
+                ffi::iree_hal_transfer_buffer_flag_bits_t_IREE_HAL_TRANSFER_BUFFER_FLAG_DEFAULT.0,
+                timeout,
+            )
+        };
+        match error::check(status) {
+            Ok(()) => Ok(()),
+            Err(err) if err.is_overlap_copy_error() => Ok(()),
+            Err(err) => Err(err),
+        }
+    }
+
+    pub fn copy_slots_from_views_direct(
+        &self,
+        session: &Session,
+        source_views: &[BufferView],
+    ) -> Result<()> {
+        if source_views.len() != self.slots.len() {
+            return Err(error::Error::invalid_argument(format!(
+                "source_views length {} does not match arena slots {}",
+                source_views.len(),
+                self.slots.len()
+            )));
+        }
+        let timeout = ffi::iree_timeout_t {
+            type_: ffi::iree_timeout_type_e_IREE_TIMEOUT_ABSOLUTE,
+            nanos: i64::MAX,
+        };
+        for (slot, source_view) in self.slots.iter().zip(source_views.iter()) {
+            let status = unsafe {
+                ffi::iree_hal_device_transfer_d2d(
+                    session.device(),
+                    source_view.buffer_ptr(),
+                    0,
+                    self.buffer.ptr,
+                    slot.offset as ffi::iree_device_size_t,
+                    slot.byte_len as ffi::iree_device_size_t,
+                    ffi::iree_hal_transfer_buffer_flag_bits_t_IREE_HAL_TRANSFER_BUFFER_FLAG_DEFAULT
+                        .0,
+                    timeout,
+                )
+            };
+            match error::check(status) {
+                Ok(()) => {}
+                Err(err) if err.is_overlap_copy_error() => {}
+                Err(err) => return Err(err),
+            }
+        }
+        Ok(())
+    }
 }
