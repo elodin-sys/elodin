@@ -149,24 +149,6 @@ typedef struct elodin_lapack_state_t {
 // 64-byte alignment covers AVX-512 (64B), AVX2 (32B), and SSE (16B).
 #define ELODIN_BUFFER_ALIGNMENT 64
 
-static iree_status_t alloc_f64_view(
-    iree_hal_device_t* device,
-    const iree_hal_dim_t* shape, iree_host_size_t rank,
-    const double* data, iree_host_size_t bytes,
-    iree_hal_buffer_view_t** out) {
-  iree_hal_buffer_params_t p = {0};
-  p.usage = IREE_HAL_BUFFER_USAGE_DEFAULT;
-  p.access = IREE_HAL_MEMORY_ACCESS_ALL;
-  p.type = IREE_HAL_MEMORY_TYPE_HOST_LOCAL | IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE;
-  p.queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
-  p.min_alignment = ELODIN_BUFFER_ALIGNMENT;
-  return iree_hal_buffer_view_allocate_buffer_copy(
-      device, iree_hal_device_allocator(device),
-      rank, shape, IREE_HAL_ELEMENT_TYPE_FLOAT_64,
-      IREE_HAL_ENCODING_TYPE_DENSE_ROW_MAJOR, p,
-      iree_make_const_byte_span(data, bytes), out);
-}
-
 static iree_status_t alloc_i32_scalar(
     iree_hal_device_t* device, int32_t value,
     iree_hal_buffer_view_t** out) {
@@ -210,6 +192,77 @@ static iree_status_t map_f64(iree_hal_buffer_view_t* v,
   return iree_ok_status();
 }
 
+// Allocate a HAL buffer, map it for read/write, and wrap as a buffer_view.
+// The caller gets a writable host pointer to pass directly to LAPACK.
+// The caller MUST call iree_hal_buffer_unmap_range(out_mapping) when done.
+static iree_status_t alloc_f64_mapped(
+    iree_hal_device_t* device,
+    iree_allocator_t host_allocator,
+    const iree_hal_dim_t* shape, iree_host_size_t rank,
+    iree_host_size_t bytes,
+    iree_hal_buffer_view_t** out_view,
+    iree_hal_buffer_mapping_t* out_mapping,
+    double** out_ptr) {
+  iree_hal_buffer_params_t p = {0};
+  p.usage = IREE_HAL_BUFFER_USAGE_DEFAULT;
+  p.access = IREE_HAL_MEMORY_ACCESS_ALL;
+  p.type = IREE_HAL_MEMORY_TYPE_HOST_LOCAL | IREE_HAL_MEMORY_TYPE_DEVICE_VISIBLE;
+  p.queue_affinity = IREE_HAL_QUEUE_AFFINITY_ANY;
+  p.min_alignment = ELODIN_BUFFER_ALIGNMENT;
+
+  iree_hal_buffer_t* buf = NULL;
+  IREE_RETURN_IF_ERROR(iree_hal_allocator_allocate_buffer(
+      iree_hal_device_allocator(device), p,
+      (iree_device_size_t)bytes, &buf));
+
+  iree_status_t status = iree_hal_buffer_map_range(
+      buf, IREE_HAL_MAPPING_MODE_SCOPED,
+      IREE_HAL_MEMORY_ACCESS_ALL, 0, (iree_device_size_t)bytes, out_mapping);
+  if (!iree_status_is_ok(status)) {
+    iree_hal_buffer_release(buf);
+    return status;
+  }
+  *out_ptr = (double*)out_mapping->contents.data;
+
+  status = iree_hal_buffer_view_create(
+      buf, rank, shape,
+      IREE_HAL_ELEMENT_TYPE_FLOAT_64,
+      IREE_HAL_ENCODING_TYPE_DENSE_ROW_MAJOR,
+      host_allocator, out_view);
+  iree_hal_buffer_release(buf);
+  if (!iree_status_is_ok(status)) {
+    iree_hal_buffer_unmap_range(out_mapping);
+  }
+  return status;
+}
+
+// Stack-or-heap allocation for small temporary buffers.
+// Matrices <= 16x16 (2048 bytes) go on the stack; larger ones fall back to
+// malloc. All customer workloads use matrices <= 6x6.
+#define ELODIN_STACK_MAX_DOUBLES (16 * 16)
+#define ELODIN_STACK_MAX_INTS 16
+
+#define STACK_OR_HEAP_F64(name, count) \
+    double name##_stack_[ELODIN_STACK_MAX_DOUBLES]; \
+    int name##_on_heap_ = ((count) > ELODIN_STACK_MAX_DOUBLES); \
+    double* name = name##_on_heap_ \
+        ? (double*)malloc((count) * sizeof(double)) : name##_stack_
+
+#define STACK_OR_HEAP_I64(name, count) \
+    lapack_int name##_stack_[ELODIN_STACK_MAX_INTS]; \
+    int name##_on_heap_ = ((count) > ELODIN_STACK_MAX_INTS); \
+    lapack_int* name = name##_on_heap_ \
+        ? (lapack_int*)malloc((count) * sizeof(lapack_int)) : name##_stack_
+
+#define STACK_OR_HEAP_I32(name, count) \
+    int32_t name##_stack_[ELODIN_STACK_MAX_INTS]; \
+    int name##_on_heap_ = ((count) > ELODIN_STACK_MAX_INTS); \
+    int32_t* name = name##_on_heap_ \
+        ? (int32_t*)malloc((count) * sizeof(int32_t)) : name##_stack_
+
+#define STACK_FREE(name) \
+    do { if (name##_on_heap_) free(name); } while(0)
+
 
 #define VIEW_DIM(v, d) ((int)iree_hal_buffer_view_shape_dim((v), (d)))
 #define VIEW_RANK(v) ((int)iree_hal_buffer_view_shape_rank((v)))
@@ -218,6 +271,7 @@ static iree_status_t map_f64(iree_hal_buffer_view_t* v,
 // =========================================================================
 // dgesdd: SVD  (LAPACKE row-major API)
 // Sig: (A[m,n]) -> (A_work[m,n], S[k], U[m,k], Vt[k,n], info scalar i32)
+// Zero heap allocs: LAPACK writes directly into mapped HAL output buffers.
 // =========================================================================
 
 static iree_status_t elodin_lapack_dgesdd(
@@ -229,16 +283,28 @@ static iree_status_t elodin_lapack_dgesdd(
   int m = VIEW_DIM(A, 0), n = VIEW_DIM(A, 1), k = m < n ? m : n;
 
   iree_status_t status = iree_ok_status();
-  double* a = (double*)malloc(m * n * sizeof(double));
-  double* s = (double*)calloc(k, sizeof(double));
-  double* u = (double*)calloc(m * k, sizeof(double));
-  double* vt = (double*)calloc(k * n, sizeof(double));
   iree_hal_buffer_view_t *oa = NULL, *os = NULL, *ou = NULL, *ovt = NULL, *oi = NULL;
+  iree_hal_buffer_mapping_t map_a, map_s, map_u, map_vt;
+  double *a = NULL, *s = NULL, *u = NULL, *vt = NULL;
+  int mapped_a = 0, mapped_s = 0, mapped_u = 0, mapped_vt = 0;
 
-  if (!a || !s || !u || !vt) {
-    status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED, "dgesdd: malloc");
-    goto cleanup;
-  }
+  iree_hal_dim_t sha[] = {m, n}, shs[] = {k}, shu[] = {m, k}, shvt[] = {k, n};
+
+  status = alloc_f64_mapped(st->device, st->host_allocator, sha, 2, m*n*sizeof(double), &oa, &map_a, &a);
+  if (!iree_status_is_ok(status)) goto cleanup;
+  mapped_a = 1;
+
+  status = alloc_f64_mapped(st->device, st->host_allocator, shs, 1, k*sizeof(double), &os, &map_s, &s);
+  if (!iree_status_is_ok(status)) goto cleanup;
+  mapped_s = 1;
+
+  status = alloc_f64_mapped(st->device, st->host_allocator, shu, 2, m*k*sizeof(double), &ou, &map_u, &u);
+  if (!iree_status_is_ok(status)) goto cleanup;
+  mapped_u = 1;
+
+  status = alloc_f64_mapped(st->device, st->host_allocator, shvt, 2, k*n*sizeof(double), &ovt, &map_vt, &vt);
+  if (!iree_status_is_ok(status)) goto cleanup;
+  mapped_vt = 1;
 
   { iree_hal_buffer_mapping_t am; double* asrc;
     status = map_f64(A, &am, &asrc);
@@ -248,15 +314,10 @@ static iree_status_t elodin_lapack_dgesdd(
   }
 
   { lapack_int info = fn_dgesdd(LAPACK_ROW_MAJOR, 'S', m, n, a, n, s, u, k, vt, n);
-    iree_hal_dim_t sha[] = {m, n}, shs[] = {k}, shu[] = {m, k}, shvt[] = {k, n};
-    status = alloc_f64_view(st->device, sha, 2, a, m*n*sizeof(double), &oa);
-    if (!iree_status_is_ok(status)) goto cleanup;
-    status = alloc_f64_view(st->device, shs, 1, s, k*sizeof(double), &os);
-    if (!iree_status_is_ok(status)) goto cleanup;
-    status = alloc_f64_view(st->device, shu, 2, u, m*k*sizeof(double), &ou);
-    if (!iree_status_is_ok(status)) goto cleanup;
-    status = alloc_f64_view(st->device, shvt, 2, vt, k*n*sizeof(double), &ovt);
-    if (!iree_status_is_ok(status)) goto cleanup;
+    iree_hal_buffer_unmap_range(&map_a);  mapped_a = 0;
+    iree_hal_buffer_unmap_range(&map_s);  mapped_s = 0;
+    iree_hal_buffer_unmap_range(&map_u);  mapped_u = 0;
+    iree_hal_buffer_unmap_range(&map_vt); mapped_vt = 0;
     status = alloc_i32_scalar(st->device, (int32_t)info, &oi);
     if (!iree_status_is_ok(status)) goto cleanup;
   }
@@ -268,7 +329,10 @@ static iree_status_t elodin_lapack_dgesdd(
   iree_vm_ref_wrap_assign(oi, iree_hal_buffer_view_type(), &rets->r4); oi = NULL;
 
 cleanup:
-  free(a); free(s); free(u); free(vt);
+  if (mapped_a)  iree_hal_buffer_unmap_range(&map_a);
+  if (mapped_s)  iree_hal_buffer_unmap_range(&map_s);
+  if (mapped_u)  iree_hal_buffer_unmap_range(&map_u);
+  if (mapped_vt) iree_hal_buffer_unmap_range(&map_vt);
   if (oa) iree_hal_buffer_view_release(oa);
   if (os) iree_hal_buffer_view_release(os);
   if (ou) iree_hal_buffer_view_release(ou);
@@ -280,6 +344,7 @@ cleanup:
 // =========================================================================
 // dpotrf: Cholesky (LAPACKE row-major API)
 // Sig: (A[n,n]) -> (L[n,n], info scalar i32)
+// Zero heap allocs: LAPACK writes directly into mapped HAL output buffer.
 // =========================================================================
 
 static iree_status_t elodin_lapack_dpotrf(
@@ -291,13 +356,15 @@ static iree_status_t elodin_lapack_dpotrf(
   int n = VIEW_DIM(A, 0);
 
   iree_status_t status = iree_ok_status();
-  double* a = (double*)malloc(n * n * sizeof(double));
   iree_hal_buffer_view_t *ol = NULL, *oi = NULL;
+  iree_hal_buffer_mapping_t map_l;
+  double* a = NULL;
+  int mapped_l = 0;
 
-  if (!a) {
-    status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED, "dpotrf: malloc");
-    goto cleanup;
-  }
+  iree_hal_dim_t sh[] = {n, n};
+  status = alloc_f64_mapped(st->device, st->host_allocator, sh, 2, n*n*sizeof(double), &ol, &map_l, &a);
+  if (!iree_status_is_ok(status)) goto cleanup;
+  mapped_l = 1;
 
   { iree_hal_buffer_mapping_t am; double* as;
     status = map_f64(A, &am, &as);
@@ -310,9 +377,7 @@ static iree_status_t elodin_lapack_dpotrf(
     for (int i = 0; i < n; ++i)
       for (int j = i + 1; j < n; ++j)
         a[i * n + j] = 0.0;
-    iree_hal_dim_t sh[] = {n, n};
-    status = alloc_f64_view(st->device, sh, 2, a, n*n*sizeof(double), &ol);
-    if (!iree_status_is_ok(status)) goto cleanup;
+    iree_hal_buffer_unmap_range(&map_l); mapped_l = 0;
     status = alloc_i32_scalar(st->device, (int32_t)info, &oi);
     if (!iree_status_is_ok(status)) goto cleanup;
   }
@@ -321,7 +386,7 @@ static iree_status_t elodin_lapack_dpotrf(
   iree_vm_ref_wrap_assign(oi, iree_hal_buffer_view_type(), &rets->r1); oi = NULL;
 
 cleanup:
-  free(a);
+  if (mapped_l) iree_hal_buffer_unmap_range(&map_l);
   if (ol) iree_hal_buffer_view_release(ol);
   if (oi) iree_hal_buffer_view_release(oi);
   return status;
@@ -330,6 +395,7 @@ cleanup:
 // =========================================================================
 // dgetrf: LU factorization (LAPACKE row-major API)
 // Sig: (A[m,n]) -> (LU[m,n], pivots[k]i32, info scalar i32)
+// LAPACK writes LU directly into mapped HAL buffer; pivots use stack alloc.
 // =========================================================================
 
 static iree_status_t elodin_lapack_dgetrf(
@@ -341,15 +407,22 @@ static iree_status_t elodin_lapack_dgetrf(
   int m = VIEW_DIM(A, 0), n = VIEW_DIM(A, 1), k = m < n ? m : n;
 
   iree_status_t status = iree_ok_status();
-  double* a = (double*)malloc(m * n * sizeof(double));
-  lapack_int* ipiv = (lapack_int*)calloc(k, sizeof(lapack_int));
-  int32_t* piv32 = NULL;
+  STACK_OR_HEAP_I64(ipiv, k);
+  STACK_OR_HEAP_I32(piv32, k);
   iree_hal_buffer_view_t *olu = NULL, *op = NULL, *oi = NULL;
+  iree_hal_buffer_mapping_t map_lu;
+  double* a = NULL;
+  int mapped_lu = 0;
 
-  if (!a || !ipiv) {
-    status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED, "dgetrf: malloc");
+  if (!ipiv || !piv32) {
+    status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED, "dgetrf: alloc");
     goto cleanup;
   }
+
+  iree_hal_dim_t shlu[] = {m, n};
+  status = alloc_f64_mapped(st->device, st->host_allocator, shlu, 2, m*n*sizeof(double), &olu, &map_lu, &a);
+  if (!iree_status_is_ok(status)) goto cleanup;
+  mapped_lu = 1;
 
   { iree_hal_buffer_mapping_t am; double* as;
     status = map_f64(A, &am, &as);
@@ -359,15 +432,9 @@ static iree_status_t elodin_lapack_dgetrf(
   }
 
   { lapack_int info = fn_dgetrf(LAPACK_ROW_MAJOR, m, n, a, n, ipiv);
-    piv32 = (int32_t*)calloc(k, sizeof(int32_t));
-    if (!piv32) {
-      status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED, "dgetrf: malloc");
-      goto cleanup;
-    }
+    iree_hal_buffer_unmap_range(&map_lu); mapped_lu = 0;
     for (int i = 0; i < k; ++i) piv32[i] = (int32_t)(ipiv[i] - 1);
-    iree_hal_dim_t shlu[] = {m, n}, shp[] = {k};
-    status = alloc_f64_view(st->device, shlu, 2, a, m*n*sizeof(double), &olu);
-    if (!iree_status_is_ok(status)) goto cleanup;
+    iree_hal_dim_t shp[] = {k};
     status = alloc_i32_view(st->device, shp, 1, piv32, k*sizeof(int32_t), &op);
     if (!iree_status_is_ok(status)) goto cleanup;
     status = alloc_i32_scalar(st->device, (int32_t)info, &oi);
@@ -379,7 +446,9 @@ static iree_status_t elodin_lapack_dgetrf(
   iree_vm_ref_wrap_assign(oi, iree_hal_buffer_view_type(), &rets->r2); oi = NULL;
 
 cleanup:
-  free(a); free(ipiv); free(piv32);
+  if (mapped_lu) iree_hal_buffer_unmap_range(&map_lu);
+  STACK_FREE(ipiv);
+  STACK_FREE(piv32);
   if (olu) iree_hal_buffer_view_release(olu);
   if (op) iree_hal_buffer_view_release(op);
   if (oi) iree_hal_buffer_view_release(oi);
@@ -389,6 +458,7 @@ cleanup:
 // =========================================================================
 // dgeqrf: QR factorization (LAPACKE row-major API)
 // Sig: (A[m,n]) -> (householder[m,n], tau[k])
+// Zero heap allocs: LAPACK writes directly into mapped HAL output buffers.
 // =========================================================================
 
 static iree_status_t elodin_lapack_dgeqrf(
@@ -400,14 +470,20 @@ static iree_status_t elodin_lapack_dgeqrf(
   int m = VIEW_DIM(A, 0), n = VIEW_DIM(A, 1), k = m < n ? m : n;
 
   iree_status_t status = iree_ok_status();
-  double* a = (double*)malloc(m * n * sizeof(double));
-  double* tau = (double*)calloc(k, sizeof(double));
   iree_hal_buffer_view_t *oh = NULL, *ot = NULL;
+  iree_hal_buffer_mapping_t map_h, map_t;
+  double *a = NULL, *tau = NULL;
+  int mapped_h = 0, mapped_t = 0;
 
-  if (!a || !tau) {
-    status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED, "dgeqrf: malloc");
-    goto cleanup;
-  }
+  iree_hal_dim_t shh[] = {m, n}, sht[] = {k};
+
+  status = alloc_f64_mapped(st->device, st->host_allocator, shh, 2, m*n*sizeof(double), &oh, &map_h, &a);
+  if (!iree_status_is_ok(status)) goto cleanup;
+  mapped_h = 1;
+
+  status = alloc_f64_mapped(st->device, st->host_allocator, sht, 1, k*sizeof(double), &ot, &map_t, &tau);
+  if (!iree_status_is_ok(status)) goto cleanup;
+  mapped_t = 1;
 
   { iree_hal_buffer_mapping_t am; double* as;
     status = map_f64(A, &am, &as);
@@ -418,18 +494,15 @@ static iree_status_t elodin_lapack_dgeqrf(
 
   fn_dgeqrf(LAPACK_ROW_MAJOR, m, n, a, n, tau);
 
-  { iree_hal_dim_t shh[] = {m, n}, sht[] = {k};
-    status = alloc_f64_view(st->device, shh, 2, a, m*n*sizeof(double), &oh);
-    if (!iree_status_is_ok(status)) goto cleanup;
-    status = alloc_f64_view(st->device, sht, 1, tau, k*sizeof(double), &ot);
-    if (!iree_status_is_ok(status)) goto cleanup;
-  }
+  iree_hal_buffer_unmap_range(&map_h); mapped_h = 0;
+  iree_hal_buffer_unmap_range(&map_t); mapped_t = 0;
 
   iree_vm_ref_wrap_assign(oh, iree_hal_buffer_view_type(), &rets->r0); oh = NULL;
   iree_vm_ref_wrap_assign(ot, iree_hal_buffer_view_type(), &rets->r1); ot = NULL;
 
 cleanup:
-  free(a); free(tau);
+  if (mapped_h) iree_hal_buffer_unmap_range(&map_h);
+  if (mapped_t) iree_hal_buffer_unmap_range(&map_t);
   if (oh) iree_hal_buffer_view_release(oh);
   if (ot) iree_hal_buffer_view_release(ot);
   return status;
@@ -438,6 +511,7 @@ cleanup:
 // =========================================================================
 // dorgqr: Generate Q from Householder reflectors (LAPACKE row-major API)
 // Sig: (householder[m,n], tau[k]) -> Q[m,k]
+// Uses stack alloc for working buffers; extracts Q directly into mapped HAL.
 // =========================================================================
 
 static iree_status_t elodin_lapack_dorgqr(
@@ -450,13 +524,15 @@ static iree_status_t elodin_lapack_dorgqr(
   int m = VIEW_DIM(HH, 0), n = VIEW_DIM(HH, 1), k = m < n ? m : n;
 
   iree_status_t status = iree_ok_status();
-  double* a = (double*)malloc(m * n * sizeof(double));
-  double* tau = (double*)malloc(k * sizeof(double));
-  double* q = NULL;
+  STACK_OR_HEAP_F64(a, m * n);
+  STACK_OR_HEAP_F64(tau, k);
   iree_hal_buffer_view_t* oq = NULL;
+  iree_hal_buffer_mapping_t map_q;
+  double* q = NULL;
+  int mapped_q = 0;
 
   if (!a || !tau) {
-    status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED, "dorgqr: malloc");
+    status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED, "dorgqr: alloc");
     goto cleanup;
   }
 
@@ -475,24 +551,23 @@ static iree_status_t elodin_lapack_dorgqr(
 
   fn_dorgqr(LAPACK_ROW_MAJOR, m, k, k, a, n, tau);
 
-  q = (double*)malloc(m * k * sizeof(double));
-  if (!q) {
-    status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED, "dorgqr: malloc");
-    goto cleanup;
-  }
+  iree_hal_dim_t shq[] = {m, k};
+  status = alloc_f64_mapped(st->device, st->host_allocator, shq, 2, m*k*sizeof(double), &oq, &map_q, &q);
+  if (!iree_status_is_ok(status)) goto cleanup;
+  mapped_q = 1;
+
   for (int i = 0; i < m; ++i)
     for (int j = 0; j < k; ++j)
       q[i * k + j] = a[i * n + j];
 
-  { iree_hal_dim_t shq[] = {m, k};
-    status = alloc_f64_view(st->device, shq, 2, q, m*k*sizeof(double), &oq);
-    if (!iree_status_is_ok(status)) goto cleanup;
-  }
+  iree_hal_buffer_unmap_range(&map_q); mapped_q = 0;
 
   iree_vm_ref_wrap_assign(oq, iree_hal_buffer_view_type(), &rets->r0); oq = NULL;
 
 cleanup:
-  free(a); free(tau); free(q);
+  if (mapped_q) iree_hal_buffer_unmap_range(&map_q);
+  STACK_FREE(a);
+  STACK_FREE(tau);
   if (oq) iree_hal_buffer_view_release(oq);
   return status;
 }
@@ -502,6 +577,7 @@ cleanup:
 // Sig: (A[n,n], B) -> X
 // Same transpose convention as dgetrs: rank-2 B arrives transposed from
 // the compiler.  Always transpose back for CBLAS, transpose result to match.
+// Uses stack alloc for working buffers; writes output into mapped HAL.
 // =========================================================================
 
 static iree_status_t elodin_lapack_dtrsm(
@@ -518,13 +594,15 @@ static iree_status_t elodin_lapack_dtrsm(
   int nrhs = matrix_rhs ? VIEW_DIM(VB, 0) : 1;
 
   iree_status_t status = iree_ok_status();
-  double* a = (double*)malloc(n * n * sizeof(double));
-  double* b = (double*)malloc(n * nrhs * sizeof(double));
-  double* bt = NULL;
+  STACK_OR_HEAP_F64(a, n * n);
+  STACK_OR_HEAP_F64(b, n * nrhs);
   iree_hal_buffer_view_t* ox = NULL;
+  iree_hal_buffer_mapping_t map_x;
+  double* xptr = NULL;
+  int mapped_x = 0;
 
   if (!a || !b) {
-    status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED, "dtrsm: malloc");
+    status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED, "dtrsm: alloc");
     goto cleanup;
   }
 
@@ -553,27 +631,29 @@ static iree_status_t elodin_lapack_dtrsm(
   }
 
   if (matrix_rhs) {
-    bt = (double*)malloc(nrhs * n * sizeof(double));
-    if (!bt) {
-      status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED, "dtrsm: malloc");
-      goto cleanup;
-    }
+    iree_hal_dim_t sh_t[] = {(iree_hal_dim_t)nrhs, (iree_hal_dim_t)n};
+    status = alloc_f64_mapped(st->device, st->host_allocator, sh_t, 2, nrhs*n*sizeof(double), &ox, &map_x, &xptr);
+    if (!iree_status_is_ok(status)) goto cleanup;
+    mapped_x = 1;
     for (int i = 0; i < nrhs; ++i)
       for (int j = 0; j < n; ++j)
-        bt[i * n + j] = b[j * nrhs + i];
-    iree_hal_dim_t sh_t[] = {(iree_hal_dim_t)nrhs, (iree_hal_dim_t)n};
-    status = alloc_f64_view(st->device, sh_t, 2, bt, nrhs*n*sizeof(double), &ox);
-    if (!iree_status_is_ok(status)) goto cleanup;
+        xptr[i * n + j] = b[j * nrhs + i];
+    iree_hal_buffer_unmap_range(&map_x); mapped_x = 0;
   } else {
     iree_hal_dim_t sh1[] = {(iree_hal_dim_t)n};
-    status = alloc_f64_view(st->device, sh1, 1, b, n*sizeof(double), &ox);
+    status = alloc_f64_mapped(st->device, st->host_allocator, sh1, 1, n*sizeof(double), &ox, &map_x, &xptr);
     if (!iree_status_is_ok(status)) goto cleanup;
+    mapped_x = 1;
+    memcpy(xptr, b, n * sizeof(double));
+    iree_hal_buffer_unmap_range(&map_x); mapped_x = 0;
   }
 
   iree_vm_ref_wrap_assign(ox, iree_hal_buffer_view_type(), &rets->r0); ox = NULL;
 
 cleanup:
-  free(a); free(b); free(bt);
+  if (mapped_x) iree_hal_buffer_unmap_range(&map_x);
+  STACK_FREE(a);
+  STACK_FREE(b);
   if (ox) iree_hal_buffer_view_release(ox);
   return status;
 }
@@ -581,6 +661,7 @@ cleanup:
 // =========================================================================
 // dsyevd: Symmetric eigendecomposition (LAPACKE row-major API)
 // Sig: (A[n,n]) -> (eigvecs[n,n], eigvals[n], info scalar i32)
+// Zero heap allocs: LAPACK writes directly into mapped HAL output buffers.
 // =========================================================================
 
 static iree_status_t elodin_lapack_dsyevd(
@@ -592,14 +673,20 @@ static iree_status_t elodin_lapack_dsyevd(
   int n = VIEW_DIM(A, 0);
 
   iree_status_t status = iree_ok_status();
-  double* a = (double*)malloc(n * n * sizeof(double));
-  double* w = (double*)calloc(n, sizeof(double));
   iree_hal_buffer_view_t *ov = NULL, *ow = NULL, *oi = NULL;
+  iree_hal_buffer_mapping_t map_v, map_w;
+  double *a = NULL, *w = NULL;
+  int mapped_v = 0, mapped_w = 0;
 
-  if (!a || !w) {
-    status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED, "dsyevd: malloc");
-    goto cleanup;
-  }
+  iree_hal_dim_t shv[] = {n, n}, shw[] = {n};
+
+  status = alloc_f64_mapped(st->device, st->host_allocator, shv, 2, n*n*sizeof(double), &ov, &map_v, &a);
+  if (!iree_status_is_ok(status)) goto cleanup;
+  mapped_v = 1;
+
+  status = alloc_f64_mapped(st->device, st->host_allocator, shw, 1, n*sizeof(double), &ow, &map_w, &w);
+  if (!iree_status_is_ok(status)) goto cleanup;
+  mapped_w = 1;
 
   { iree_hal_buffer_mapping_t am; double* as;
     status = map_f64(A, &am, &as);
@@ -609,11 +696,8 @@ static iree_status_t elodin_lapack_dsyevd(
   }
 
   { lapack_int info = fn_dsyevd(LAPACK_ROW_MAJOR, 'V', 'L', n, a, n, w);
-    iree_hal_dim_t shv[] = {n, n}, shw[] = {n};
-    status = alloc_f64_view(st->device, shv, 2, a, n*n*sizeof(double), &ov);
-    if (!iree_status_is_ok(status)) goto cleanup;
-    status = alloc_f64_view(st->device, shw, 1, w, n*sizeof(double), &ow);
-    if (!iree_status_is_ok(status)) goto cleanup;
+    iree_hal_buffer_unmap_range(&map_v); mapped_v = 0;
+    iree_hal_buffer_unmap_range(&map_w); mapped_w = 0;
     status = alloc_i32_scalar(st->device, (int32_t)info, &oi);
     if (!iree_status_is_ok(status)) goto cleanup;
   }
@@ -623,7 +707,8 @@ static iree_status_t elodin_lapack_dsyevd(
   iree_vm_ref_wrap_assign(oi, iree_hal_buffer_view_type(), &rets->r2); oi = NULL;
 
 cleanup:
-  free(a); free(w);
+  if (mapped_v) iree_hal_buffer_unmap_range(&map_v);
+  if (mapped_w) iree_hal_buffer_unmap_range(&map_w);
   if (ov) iree_hal_buffer_view_release(ov);
   if (ow) iree_hal_buffer_view_release(ow);
   if (oi) iree_hal_buffer_view_release(oi);
@@ -637,6 +722,7 @@ cleanup:
 // (B_t = transpose(B_orig)).  We always transpose it back for LAPACK and
 // transpose the result to match.  The double-transpose (compiler + here)
 // cancels out, producing correct A^{-1} * B_orig for any B.
+// Uses stack alloc for working buffers; writes output into mapped HAL.
 // =========================================================================
 
 static iree_status_t elodin_lapack_dgetrs(
@@ -652,14 +738,16 @@ static iree_status_t elodin_lapack_dgetrs(
   int nrhs = matrix_rhs ? VIEW_DIM(VB, 0) : 1;
 
   iree_status_t status = iree_ok_status();
-  double* a = (double*)malloc(n * n * sizeof(double));
-  double* b = (double*)malloc(n * nrhs * sizeof(double));
-  lapack_int* ipiv = (lapack_int*)calloc(n, sizeof(lapack_int));
-  double* bt = NULL;
+  STACK_OR_HEAP_F64(a, n * n);
+  STACK_OR_HEAP_F64(b, n * nrhs);
+  STACK_OR_HEAP_I64(ipiv, n);
   iree_hal_buffer_view_t *ox = NULL, *oi = NULL;
+  iree_hal_buffer_mapping_t map_x;
+  double* xptr = NULL;
+  int mapped_x = 0;
 
   if (!a || !b || !ipiv) {
-    status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED, "dgetrs: malloc");
+    status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED, "dgetrs: alloc");
     goto cleanup;
   }
 
@@ -685,8 +773,6 @@ static iree_status_t elodin_lapack_dgetrs(
   { int ldb = matrix_rhs ? nrhs : 1;
     lapack_int info = fn_dgetrf(LAPACK_ROW_MAJOR, n, n, a, n, ipiv);
     if (info >= 0) {
-      // Proceed even for singular matrices (info > 0) -- NaN/Inf propagates
-      // from the zero diagonal of U, matching JAX's native solve behavior.
       lapack_int info2 = fn_dgetrs(LAPACK_ROW_MAJOR, 'N', n, nrhs, a, n, ipiv, b, ldb);
       if (info2 < 0) {
         for (int i = 0; i < n * nrhs; ++i) b[i] = NAN;
@@ -696,21 +782,21 @@ static iree_status_t elodin_lapack_dgetrs(
     }
 
     if (matrix_rhs) {
-      bt = (double*)malloc(nrhs * n * sizeof(double));
-      if (!bt) {
-        status = iree_make_status(IREE_STATUS_RESOURCE_EXHAUSTED, "dgetrs: malloc");
-        goto cleanup;
-      }
+      iree_hal_dim_t sh_t[] = {(iree_hal_dim_t)nrhs, (iree_hal_dim_t)n};
+      status = alloc_f64_mapped(st->device, st->host_allocator, sh_t, 2, nrhs*n*sizeof(double), &ox, &map_x, &xptr);
+      if (!iree_status_is_ok(status)) goto cleanup;
+      mapped_x = 1;
       for (int i = 0; i < nrhs; ++i)
         for (int j = 0; j < n; ++j)
-          bt[i * n + j] = b[j * nrhs + i];
-      iree_hal_dim_t sh_t[] = {(iree_hal_dim_t)nrhs, (iree_hal_dim_t)n};
-      status = alloc_f64_view(st->device, sh_t, 2, bt, nrhs*n*sizeof(double), &ox);
-      if (!iree_status_is_ok(status)) goto cleanup;
+          xptr[i * n + j] = b[j * nrhs + i];
+      iree_hal_buffer_unmap_range(&map_x); mapped_x = 0;
     } else {
       iree_hal_dim_t sh1[] = {(iree_hal_dim_t)n};
-      status = alloc_f64_view(st->device, sh1, 1, b, n*sizeof(double), &ox);
+      status = alloc_f64_mapped(st->device, st->host_allocator, sh1, 1, n*sizeof(double), &ox, &map_x, &xptr);
       if (!iree_status_is_ok(status)) goto cleanup;
+      mapped_x = 1;
+      memcpy(xptr, b, n * sizeof(double));
+      iree_hal_buffer_unmap_range(&map_x); mapped_x = 0;
     }
 
     status = alloc_i32_scalar(st->device, (int32_t)info, &oi);
@@ -721,7 +807,10 @@ static iree_status_t elodin_lapack_dgetrs(
   iree_vm_ref_wrap_assign(oi, iree_hal_buffer_view_type(), &rets->r1); oi = NULL;
 
 cleanup:
-  free(a); free(b); free(ipiv); free(bt);
+  if (mapped_x) iree_hal_buffer_unmap_range(&map_x);
+  STACK_FREE(a);
+  STACK_FREE(b);
+  STACK_FREE(ipiv);
   if (ox) iree_hal_buffer_view_release(ox);
   if (oi) iree_hal_buffer_view_release(oi);
   return status;
@@ -855,8 +944,6 @@ iree_status_t elodin_lapack_module_create(
         "LAPACK symbols not found (no OpenBLAS loaded in process)");
   }
 
-  // Heap-allocate per-instance so multiple modules (e.g. from fork)
-  // each keep their own device pointer.
   elodin_lapack_module_t* mod =
       (elodin_lapack_module_t*)calloc(1, sizeof(elodin_lapack_module_t));
   if (!mod) {
@@ -878,8 +965,6 @@ iree_status_t elodin_lapack_module_create(
       &iface, &elodin_lapack_descriptor_, instance, alloc, out_module);
   if (!iree_status_is_ok(status)) { iree_hal_device_release(device); free(mod); return status; }
 
-  // The native module's built-in lookup is deterministic for a given
-  // descriptor so a single static pointer is safe across instances.
   elodin_lapack_original_lookup = (*out_module)->lookup_function;
   (*out_module)->lookup_function = elodin_lapack_lookup_function;
   return iree_ok_status();
