@@ -145,6 +145,7 @@ Key crates used in the editor:
 
 ## Key References
 
+- Bevy performance tips (ECS, 0.17): [docs/internal/bevy-performance-tips.md](../../../docs/internal/bevy-performance-tips.md)
 - Editor README: [apps/elodin/README.md](../../../apps/elodin/README.md)
 - KDL schematic syntax: [docs/public/content/reference/schematic.md](../../../docs/public/content/reference/schematic.md)
 - Command palette reference: [docs/public/content/reference/command-palette.md](../../../docs/public/content/reference/command-palette.md)
