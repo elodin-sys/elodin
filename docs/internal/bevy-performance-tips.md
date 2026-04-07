@@ -1,8 +1,12 @@
-# Bevy performance tips
+# Bevy Performance Tips
 
-Short patterns that help the Elodin Editor stay responsive. 
+Short patterns to help the Elodin Editor stay responsive. 
 
 (This doc was written with Elodin targeting Bevy 0.17.)
+
+## Profiling Bevy systems with Tracy
+
+Before trying to optimize anything, it is a good practice to measure its performance first and find the hot spots. You might turn a section of code into a zero-alloc, no clone, and it may have negligible impact because it is only called once. See the [Elodin Tracy skill document](../../.cursor/skills/elodin-tracy/SKILL.md) for how to prepare and run the profiler with Elodin.
 
 ## Use `Local<T>` for heap-backed, per-system state
 
@@ -24,7 +28,7 @@ fn collect_targets(mut commands: Commands, candidates: Query<Entity, With<Target
 
 ### After
 
-Reuse the same heap storage, system-private.
+Reuse the same heap storage, system-private. If it can not be system-private, create a `Resource`.
 
 ```rust
 fn collect_targets(
@@ -72,9 +76,9 @@ fn sync_world_labels(transforms: Query<(Entity, &Transform), Changed<Transform>>
 
 Note: When you check for `Changed<Transform>`, be aware that the display position could change due to it being in a scene hierarchy, e.g., its parent's `Transform` could have changed. If you want to ensure you capture any change of position, no matter where it comes from, use `Changed<GlobalTransform>` and check the `GlobalTransform` which will have the display position of the object.
 
-## Derived query filters: Package up your filter
+## Derived query filters: Bundle up your filter
 
-This is not a performance tip per se, but more of an ergonomic tip when using query filters.
+This is not a performance tip per se, but an ergonomic tip when using query filters.
 
 ### Before
 
@@ -135,7 +139,7 @@ fn main() {
 }
 ```
 
-### After
+### After with `run_system_cached`
 
 A cheap per-frame system only checks input; heavy systems run only when needed, via `run_system_cached`.
 
@@ -163,7 +167,7 @@ fn main() {
 }
 ```
 
-### Better Still `run_if`
+### After with `run_if`
 
 An even better means of achieving the above is to use the `run_if`, which when it returns false the `SystemParam`s for `save_to_disk` are not evaluated. 
 
@@ -255,44 +259,6 @@ Other options (no full code here):
 
 - Dedicated schedule + throttling: Define a [`ScheduleLabel`](https://docs.rs/bevy/0.17.3/bevy/ecs/schedule/trait.ScheduleLabel.html), register systems on that schedule, and drive it from a lightweight system using [`Time`](https://docs.rs/bevy/0.17.3/bevy/time/struct.Time.html) / [`Timer`](https://docs.rs/bevy/0.17.3/bevy/time/struct.Timer.html) with [`run_if`](https://docs.rs/bevy/0.17.3/bevy/ecs/schedule/common_conditions/index.html) or by calling [`World::run_schedule`](https://docs.rs/bevy/0.17.3/bevy/ecs/world/struct.World.html#method.run_schedule) when your guard says it is time.
 
-## Profiling Bevy systems with Tracy
-
-[Tracy](https://github.com/wolfpld/tracy) shows where frame time goes, including Bevy schedules and individual systems, when the editor is built with tracing wired to Tracy.
-
-In this repo:
-
-1. Build and run the Tracy workflow from the dev shell (see [elodin-tracy skill](../../.cursor/skills/elodin-tracy/SKILL.md)): `nix develop`, `just install tracy`, then run the editor (for example `elodin editor examples/sensor-camera/main.py`).
-2. Start the Tracy GUI (`tracy`) and connect to the editor client. The editor uses Tracy port 8087 by default (see the skill’s port table for render server, simulation, and DB).
-3. With the `tracy` feature, `elodin-editor` enables Bevy’s `trace_tracy` integration (`libs/elodin-editor/Cargo.toml`). That instruments systems and schedules into Tracy zones without extra Bevy-specific code in your systems.
-4. Rust [`tracing`](https://docs.rs/tracing) spans also show up as zones (the `elodin` binary installs a `TracyLayer`). Use `#[tracing::instrument]` or `tracing::info_span!` on hot editor code; raise `RUST_LOG` (e.g. `debug`) if spans are filtered out by the default env filter.
-
-### Before
-
-Hot path invisible in Tracy as its own zone.
-
-```rust
-fn rebuild_graph_cache(graph: Res<GraphLayout>) {
-    // This work is expensive and appears only as parent frame time unless Bevy adds a label.
-    let _ = graph.0.len();
-}
-```
-
-### After
-
-Explicit zone plus optional function name in traces.
-
-```rust
-#[tracing::instrument(skip(graph))]
-fn rebuild_graph_cache(graph: Res<GraphLayout>) {
-    let _ = graph.0.len();
-}
-```
-
-Note: `skip(graph)` tells [`#[tracing::instrument]`](https://docs.rs/tracing/0.1/tracing/attr.instrument.html) not to attach the `graph` argument as a span field. By default the macro would try to record every parameter (usually via `Debug`), which is noisy for large values, can fail if a type has no useful `Debug`, and is rarely needed when you only want a named zone in Tracy.
-
-Platform note: Tracy profiling for Elodin is Linux-oriented in practice (GUI, sampling, and subprocess ports). On macOS, follow the skill’s guidance (e.g. Linux host or OrbStack NixOS VM).
-
-For capture CLI, simultaneous editor + sim traces, troubleshooting (vsync, `TRACY_NO_EXIT`, sudo for sampling), and IREE/sim tracing, use the full skill rather than duplicating it here.
 
 ## More ECS and tooling tips
 
@@ -433,88 +399,88 @@ frame 1: A -> maybe_read(true) reads "enter key pressed" -> B deletes file
 
 ### Before
 
-Visit every matching entity every frame even when you only need one-time setup.
+Visit every power-up on every frame even when the only reason to refresh them is an occasional input (here, a key press).
 
 ```rust
 #[derive(Component)]
 struct PowerUp;
 
-fn poll_power_ups(query: Query<Entity, With<PowerUp>>) {
+fn poll_power_ups(query: Query<Entity, With<PowerUp>>, keyboard: Res<ButtonInput<KeyCode>>) {
     for entity in &query {
-        check_state(entity); // For example, re-check state for every power-up on each tick.
+        if keyboard.just_pressed(KeyCode::KeyR) {
+            // Check entity....
+        }
     }
 }
 ```
 
-### After
+### After with Event
 
-Handler runs when `PowerUp` is added.
+Pressing R triggers a custom [`Event`](https://docs.rs/bevy/0.17.3/bevy/ecs/event/trait.Event.html). An observer runs immediately and performs the same refresh work for all power-ups.
 
 ```rust
-use bevy::prelude::*;
-
 #[derive(Component)]
 struct PowerUp;
+
+#[derive(Event)]
+struct RefreshPowerUps;
+
+fn detect_refresh_key(mut commands: Commands, keyboard: Res<ButtonInput<KeyCode>>) {
+    if keyboard.just_pressed(KeyCode::KeyR) {
+        commands.trigger(RefreshPowerUps);
+    }
+}
+
+fn refresh_all_on_event(_: On<RefreshPowerUps>, query: Query<Entity, With<PowerUp>>) {
+    for entity in &query {
+        // Check entity....
+    }
+}
 
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
-        .add_observer(|event: On<Add, PowerUp>| {
-            // This runs only when the component is added.
-            check_state(event.target());
-        })
+        .add_observer(refresh_all_on_event)
+        .add_systems(Update, detect_refresh_key)
         .run();
 }
 ```
 
+### After with Message
 
-### Diagnostics vs Tracy
-
-Bevy’s built-in [diagnostics](https://docs.rs/bevy/0.17.3/bevy/diagnostic/index.html) (e.g. frame time, FPS plugins where enabled) are good for quick checks in-app. Use Tracy (section above) when you need per-system breakdowns, cross-thread timelines, and correlation with Rust `tracing` spans. Pick the tool to match how deep you need to go.
-
-### Before
-
-No built-in frame stats.
+Pressing R enqueues the same intent as a custom [`Message`](https://docs.rs/bevy/0.17.3/bevy/ecs/message/trait.Message.html). A normal system reads it during the schedule, so handling order matches system ordering instead of running inline at the trigger site.
 
 ```rust
-App::new()
-    .add_plugins(DefaultPlugins)
-    .run();
+#[derive(Component)]
+struct PowerUp;
+
+#[derive(Message)]
+struct RefreshPowerUps;
+
+fn detect_refresh_key(mut writer: MessageWriter<RefreshPowerUps>, keyboard: Res<ButtonInput<KeyCode>>) {
+    if keyboard.just_pressed(KeyCode::KeyR) {
+        writer.write(RefreshPowerUps);
+    }
+}
+
+fn refresh_on_message(
+    mut reader: MessageReader<RefreshPowerUps>,
+    query: Query<Entity, With<PowerUp>>,
+) {
+    for message in reader.read() {
+        for entity in &query {
+            // Check entity....
+        }
+    }
+}
+
+fn main() {
+    App::new()
+        .add_plugins(DefaultPlugins)
+        .add_message::<RefreshPowerUps>()
+        .add_systems(Update, (detect_refresh_key, 
+                              refresh_all_on_message).chain())
+        .run();
+}
 ```
 
-### After
-
-Frame time and FPS diagnostics for quick inspection.
-
-```rust
-use bevy::diagnostic::{FrameTimeDiagnosticsPlugin, LogDiagnosticsPlugin};
-
-App::new()
-    .add_plugins(DefaultPlugins)
-    .add_plugins(FrameTimeDiagnosticsPlugin::default())
-    .add_plugins(LogDiagnosticsPlugin::default())
-    .run();
-```
-
-### Trim `bevy` features for minimal binaries
-
-For headless tools, tests, or crates that only need a slice of the engine, depend on `bevy` with `default-features = false` and enable only the subsystems you need (see Bevy’s crate features in [`Cargo.toml`](https://docs.rs/crate/bevy/0.17.3/source/Cargo.toml)). That cuts compile time and binary size, which speeds iteration even when runtime FPS is unchanged.
-
-### Before
-
-```toml
-bevy = "0.17"
-```
-
-### After
-
-Illustrative—pick features to match your crate.
-
-```toml
-bevy = { version = "0.17", default-features = false, features = [
-    "bevy_asset",
-    "bevy_log",
-    "bevy_window",
-    "bevy_winit",
-] }
-```

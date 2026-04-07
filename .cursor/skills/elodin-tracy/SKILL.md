@@ -230,6 +230,16 @@ The current `EnvFilter` (`s10=info,elodin=info,impeller=info,...`) controls whic
 RUST_LOG=debug elodin editor examples/sensor-camera/main.py
 ```
 
+#### Instrument Options
+
+```rust
+#[tracing::instrument(skip(graph))]
+fn my_hot_function() {
+    // Entire function is a Tracy zone.
+}
+
+The `skip(graph)` option tells [`#[tracing::instrument]`](https://docs.rs/tracing/0.1/tracing/attr.instrument.html) not to attach the `graph` argument as a span field. By default the macro would try to record every parameter (usually via `Debug`), which is noisy for large values, can fail if a type has no useful `Debug`, and is rarely needed when you only want a named zone in Tracy.
+
 ### IREE (simulation internals)
 
 IREE's instrumentation uses C macros defined in `iree/base/tracing.h`:
