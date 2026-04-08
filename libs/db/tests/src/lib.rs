@@ -1,7 +1,10 @@
 #[cfg(test)]
 mod tests {
 
-    use arrow::{array::AsArray, datatypes::Float64Type};
+    use arrow::{
+        array::{AsArray, BooleanArray},
+        datatypes::Float64Type,
+    };
     use elodin_db::{AtomicTimestampExt, DB, Error, Server};
 
     use impeller2::{
@@ -213,6 +216,97 @@ mod tests {
         let arr = arr.values();
         let arr = arr.as_primitive::<Float64Type>();
         assert_eq!(arr.values(), &[0.0, 10.0, 20.0, 30.0, 40.0]);
+    }
+
+    /// Writes `true` every timestep. Raw `GetTimeSeries` matches; SQL uses Arrow `bool_ref`, which
+    /// currently treats each byte as 8 packed bits (first row true, rest false). Fails until fixed.
+    #[test]
+    async fn test_bool_sql_round_trip_all_true() {
+        let (addr, _db) = setup_test_db().await.unwrap();
+        let mut client = Client::connect(addr).await.unwrap();
+
+        let component_id = ComponentId::new("sim.flag_enabled");
+
+        client
+            .send(&SetComponentMetadata::new(component_id, "flag_enabled"))
+            .await
+            .0
+            .unwrap();
+
+        // Bool byte, pad to i64, then timestamp (matches `extend_from_slice` + `extend_aligned`).
+        let vtable = vtable([raw_field(
+            0,
+            1,
+            timestamp(
+                raw_table(8, 8),
+                schema(PrimType::Bool, &[], component(component_id)),
+            ),
+        )]);
+
+        let vtable_id = 1u16.to_le_bytes();
+        client
+            .send(&VTableMsg {
+                id: vtable_id,
+                vtable,
+            })
+            .await
+            .0
+            .unwrap();
+
+        let num_steps: usize = 8;
+        for step in 0..num_steps {
+            let ts = Timestamp(1000 * (step as i64 + 1));
+            let mut pkt = LenPacket::table(vtable_id, 16);
+            pkt.extend_from_slice(&[1u8]);
+            pkt.extend_aligned(&[ts.0]);
+            client.send(pkt).await.0.unwrap();
+        }
+
+        sleep(Duration::from_millis(100)).await;
+
+        let query = GetTimeSeries {
+            id: vtable_id,
+            range: Timestamp(0)..Timestamp(100_000),
+            component_id,
+            limit: None,
+        };
+        let ts_reply = client.request(&query).await.unwrap();
+        let raw = ts_reply.data().unwrap();
+        assert_eq!(raw.len(), num_steps);
+        assert!(
+            raw.iter().all(|&b| b != 0),
+            "on-disk bytes should be non-zero (true) for every sample: {:?}",
+            raw
+        );
+
+        let sql = "SELECT * FROM flag_enabled";
+        let mut stream = client.stream(&SQLQuery(sql.to_string())).await.unwrap();
+        let mut batches = vec![];
+        loop {
+            let msg = stream.next().await.unwrap();
+            let Some(batch) = msg.batch else {
+                break;
+            };
+            let mut decoder = arrow::ipc::reader::StreamDecoder::new();
+            let mut buffer = arrow::buffer::Buffer::from(batch.into_owned());
+            if let Some(batch) = decoder.decode(&mut buffer).unwrap() {
+                batches.push(batch);
+            }
+        }
+        let batch = &batches[0];
+        let arr = batch
+            .column_by_name("flag_enabled")
+            .unwrap()
+            .as_any()
+            .downcast_ref::<BooleanArray>()
+            .expect("flag_enabled should be a boolean column");
+        assert_eq!(arr.len(), num_steps);
+        for i in 0..num_steps {
+            assert!(
+                arr.value(i),
+                "row {i}: expected true (SQL/Arrow bool decode must match stored bytes)"
+            );
+        }
     }
 
     #[test]
