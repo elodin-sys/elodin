@@ -1,7 +1,7 @@
 use arrow::{
     array::{
-        Array, ArrayRef, ArrowPrimitiveType, BooleanArray, BooleanBufferBuilder,
-        FixedSizeListArray, Int32Array, PrimitiveArray, RecordBatch, TimestampMicrosecondArray,
+        Array, ArrayRef, ArrowPrimitiveType, BooleanArray, FixedSizeListArray, Int32Array,
+        PrimitiveArray, RecordBatch, TimestampMicrosecondArray,
     },
     buffer::{BooleanBuffer, Buffer, ScalarBuffer},
     compute,
