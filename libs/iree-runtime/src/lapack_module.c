@@ -229,10 +229,12 @@ static iree_status_t alloc_f64_mapped(
       IREE_HAL_ELEMENT_TYPE_FLOAT_64,
       IREE_HAL_ENCODING_TYPE_DENSE_ROW_MAJOR,
       host_allocator, out_view);
-  iree_hal_buffer_release(buf);
   if (!iree_status_is_ok(status)) {
     iree_hal_buffer_unmap_range(out_mapping);
+    iree_hal_buffer_release(buf);
+    return status;
   }
+  iree_hal_buffer_release(buf);
   return status;
 }
 
@@ -243,22 +245,25 @@ static iree_status_t alloc_f64_mapped(
 #define ELODIN_STACK_MAX_INTS 16
 
 #define STACK_OR_HEAP_F64(name, count) \
+    const size_t name##_count_ = (size_t)(count); \
     double name##_stack_[ELODIN_STACK_MAX_DOUBLES]; \
-    int name##_on_heap_ = ((count) > ELODIN_STACK_MAX_DOUBLES); \
+    int name##_on_heap_ = (name##_count_ > ELODIN_STACK_MAX_DOUBLES); \
     double* name = name##_on_heap_ \
-        ? (double*)malloc((count) * sizeof(double)) : name##_stack_
+        ? (double*)malloc(name##_count_ * sizeof(double)) : name##_stack_
 
 #define STACK_OR_HEAP_I64(name, count) \
+    const size_t name##_count_ = (size_t)(count); \
     lapack_int name##_stack_[ELODIN_STACK_MAX_INTS]; \
-    int name##_on_heap_ = ((count) > ELODIN_STACK_MAX_INTS); \
+    int name##_on_heap_ = (name##_count_ > ELODIN_STACK_MAX_INTS); \
     lapack_int* name = name##_on_heap_ \
-        ? (lapack_int*)malloc((count) * sizeof(lapack_int)) : name##_stack_
+        ? (lapack_int*)malloc(name##_count_ * sizeof(lapack_int)) : name##_stack_
 
 #define STACK_OR_HEAP_I32(name, count) \
+    const size_t name##_count_ = (size_t)(count); \
     int32_t name##_stack_[ELODIN_STACK_MAX_INTS]; \
-    int name##_on_heap_ = ((count) > ELODIN_STACK_MAX_INTS); \
+    int name##_on_heap_ = (name##_count_ > ELODIN_STACK_MAX_INTS); \
     int32_t* name = name##_on_heap_ \
-        ? (int32_t*)malloc((count) * sizeof(int32_t)) : name##_stack_
+        ? (int32_t*)malloc(name##_count_ * sizeof(int32_t)) : name##_stack_
 
 #define STACK_FREE(name) \
     do { if (name##_on_heap_) free(name); } while(0)
@@ -297,14 +302,17 @@ static iree_status_t elodin_lapack_dgesdd(
   status = alloc_f64_mapped(st->device, st->host_allocator, shs, 1, k*sizeof(double), &os, &map_s, &s);
   if (!iree_status_is_ok(status)) goto cleanup;
   mapped_s = 1;
+  memset(s, 0, k * sizeof(double));
 
   status = alloc_f64_mapped(st->device, st->host_allocator, shu, 2, m*k*sizeof(double), &ou, &map_u, &u);
   if (!iree_status_is_ok(status)) goto cleanup;
   mapped_u = 1;
+  memset(u, 0, m * k * sizeof(double));
 
   status = alloc_f64_mapped(st->device, st->host_allocator, shvt, 2, k*n*sizeof(double), &ovt, &map_vt, &vt);
   if (!iree_status_is_ok(status)) goto cleanup;
   mapped_vt = 1;
+  memset(vt, 0, k * n * sizeof(double));
 
   { iree_hal_buffer_mapping_t am; double* asrc;
     status = map_f64(A, &am, &asrc);
@@ -484,6 +492,7 @@ static iree_status_t elodin_lapack_dgeqrf(
   status = alloc_f64_mapped(st->device, st->host_allocator, sht, 1, k*sizeof(double), &ot, &map_t, &tau);
   if (!iree_status_is_ok(status)) goto cleanup;
   mapped_t = 1;
+  memset(tau, 0, k * sizeof(double));
 
   { iree_hal_buffer_mapping_t am; double* as;
     status = map_f64(A, &am, &as);
@@ -492,7 +501,12 @@ static iree_status_t elodin_lapack_dgeqrf(
     iree_hal_buffer_unmap_range(&am);
   }
 
-  fn_dgeqrf(LAPACK_ROW_MAJOR, m, n, a, n, tau);
+  { lapack_int info = fn_dgeqrf(LAPACK_ROW_MAJOR, m, n, a, n, tau);
+    if (info != 0) {
+      memset(a, 0, m * n * sizeof(double));
+      memset(tau, 0, k * sizeof(double));
+    }
+  }
 
   iree_hal_buffer_unmap_range(&map_h); mapped_h = 0;
   iree_hal_buffer_unmap_range(&map_t); mapped_t = 0;
@@ -687,6 +701,7 @@ static iree_status_t elodin_lapack_dsyevd(
   status = alloc_f64_mapped(st->device, st->host_allocator, shw, 1, n*sizeof(double), &ow, &map_w, &w);
   if (!iree_status_is_ok(status)) goto cleanup;
   mapped_w = 1;
+  memset(w, 0, n * sizeof(double));
 
   { iree_hal_buffer_mapping_t am; double* as;
     status = map_f64(A, &am, &as);
