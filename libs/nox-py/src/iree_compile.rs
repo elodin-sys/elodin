@@ -1002,8 +1002,15 @@ def compile_to_vmfb(
         promoted_constants,
     };
     let inline_dynamic = compile_target == "inline";
-    let exec = IREEExec::new(&vmfb, metadata, Some(stats.clone()), &runtime_device, inline_dynamic, world)
-        .map_err(|e| Error::IreeCompilationFailed(format!("stage=vmfb_load\n{e}")))?;
+    let exec = IREEExec::new(
+        &vmfb,
+        metadata,
+        Some(stats.clone()),
+        &runtime_device,
+        inline_dynamic,
+        world,
+    )
+    .map_err(|e| Error::IreeCompilationFailed(format!("stage=vmfb_load\n{e}")))?;
 
     let report = DiagnosticReport {
         stage: iree_diagnostics::FailureStage::IreeCompile,

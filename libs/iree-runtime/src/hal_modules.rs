@@ -1,4 +1,4 @@
-use crate::{error, ffi, Result};
+use crate::{Result, error, ffi};
 use std::ptr;
 
 /// Register the `hal_inline` and `hal_loader` VM modules on a session.
