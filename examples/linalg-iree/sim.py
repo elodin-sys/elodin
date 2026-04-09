@@ -131,9 +131,7 @@ class UintOpsArchetype(el.Archetype):
     op_transition: OpTransition = field(
         default_factory=lambda: jnp.array([1, 2, 3, 0], dtype=jnp.uint64)
     )
-    op_state: OpState = field(
-        default_factory=lambda: jnp.array([0, 0, 0, 0], dtype=jnp.uint64)
-    )
+    op_state: OpState = field(default_factory=lambda: jnp.array([0, 0, 0, 0], dtype=jnp.uint64))
 
 
 DT = 1.0 / SIMULATION_RATE
@@ -340,9 +338,7 @@ def uint_override_step(transition: OpTransition) -> OpTransition:
 
 
 @el.map
-def uint_use_step(
-    transition: OpTransition, op_state: OpState
-) -> OpState:
+def uint_use_step(transition: OpTransition, op_state: OpState) -> OpState:
     prev_state = op_state[0]
     looked_up = transition[prev_state % 4]
 
@@ -404,4 +400,12 @@ def world() -> el.World:
 
 
 def system() -> el.System:
-    return mat_rhs_step | small2_step | kf3_step | ekf6_step | mode_step | uint_override_step | uint_use_step
+    return (
+        mat_rhs_step
+        | small2_step
+        | kf3_step
+        | ekf6_step
+        | mode_step
+        | uint_override_step
+        | uint_use_step
+    )
