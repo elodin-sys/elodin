@@ -1,0 +1,80 @@
+diff --git a/compiler/src/iree/compiler/Modules/HAL/Inline/IR/HALInlineDialect.cpp b/compiler/src/iree/compiler/Modules/HAL/Inline/IR/HALInlineDialect.cpp
+index 461a557..8225d4c 100644
+--- a/compiler/src/iree/compiler/Modules/HAL/Inline/IR/HALInlineDialect.cpp
++++ b/compiler/src/iree/compiler/Modules/HAL/Inline/IR/HALInlineDialect.cpp
+@@ -12,6 +12,7 @@
+ #include "iree/compiler/Modules/HAL/Inline/hal_inline.imports.h"
+ #include "llvm/Support/SourceMgr.h"
+ #include "mlir/IR/DialectImplementation.h"
++#include "mlir/Transforms/InliningUtils.h"
+ #include "mlir/IR/OpImplementation.h"
+ #include "mlir/Parser/Parser.h"
+ 
+@@ -19,6 +20,18 @@ namespace mlir::iree_compiler::IREE::HAL::Inline {
+ 
+ namespace {
+ 
++struct HALInlineInlinerInterface : public DialectInlinerInterface {
++  using DialectInlinerInterface::DialectInlinerInterface;
++  bool isLegalToInline(Operation *, Region *, bool,
++                       IRMapping &) const final {
++    return true;
++  }
++  bool isLegalToInline(Region *, Region *, bool,
++                       IRMapping &) const final {
++    return true;
++  }
++};
++
+ class HALInlineToVMConversionInterface : public VMConversionDialectInterface {
+ public:
+   using VMConversionDialectInterface::VMConversionDialectInterface;
+@@ -45,7 +58,7 @@ public:
+ 
+ HALInlineDialect::HALInlineDialect(MLIRContext *context)
+     : Dialect(getDialectNamespace(), context, TypeID::get<HALInlineDialect>()) {
+-  addInterfaces<HALInlineToVMConversionInterface>();
++  addInterfaces<HALInlineInlinerInterface, HALInlineToVMConversionInterface>();
+ 
+ #define GET_OP_LIST
+   addOperations<
+diff --git a/compiler/src/iree/compiler/Modules/HAL/Loader/IR/HALLoaderDialect.cpp b/compiler/src/iree/compiler/Modules/HAL/Loader/IR/HALLoaderDialect.cpp
+index e34c1e8..e5b34e7 100644
+--- a/compiler/src/iree/compiler/Modules/HAL/Loader/IR/HALLoaderDialect.cpp
++++ b/compiler/src/iree/compiler/Modules/HAL/Loader/IR/HALLoaderDialect.cpp
+@@ -12,6 +12,7 @@
+ #include "iree/compiler/Modules/HAL/Loader/hal_loader.imports.h"
+ #include "llvm/Support/SourceMgr.h"
+ #include "mlir/IR/DialectImplementation.h"
++#include "mlir/Transforms/InliningUtils.h"
+ #include "mlir/IR/OpImplementation.h"
+ #include "mlir/Parser/Parser.h"
+ 
+@@ -19,6 +20,18 @@ namespace mlir::iree_compiler::IREE::HAL::Loader {
+ 
+ namespace {
+ 
++struct HALLoaderInlinerInterface : public DialectInlinerInterface {
++  using DialectInlinerInterface::DialectInlinerInterface;
++  bool isLegalToInline(Operation *, Region *, bool,
++                       IRMapping &) const final {
++    return true;
++  }
++  bool isLegalToInline(Region *, Region *, bool,
++                       IRMapping &) const final {
++    return true;
++  }
++};
++
+ class HALLoaderToVMConversionInterface : public VMConversionDialectInterface {
+ public:
+   using VMConversionDialectInterface::VMConversionDialectInterface;
+@@ -45,7 +58,7 @@ public:
+ 
+ HALLoaderDialect::HALLoaderDialect(MLIRContext *context)
+     : Dialect(getDialectNamespace(), context, TypeID::get<HALLoaderDialect>()) {
+-  addInterfaces<HALLoaderToVMConversionInterface>();
++  addInterfaces<HALLoaderInlinerInterface, HALLoaderToVMConversionInterface>();
+ 
+ #define GET_OP_LIST
+   addOperations<

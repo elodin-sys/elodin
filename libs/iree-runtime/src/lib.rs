@@ -6,6 +6,7 @@ mod device;
 mod device_buffer;
 mod element_type;
 mod error;
+pub mod hal_modules;
 mod instance;
 pub mod lapack;
 mod session;

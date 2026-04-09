@@ -289,6 +289,30 @@ fn main() {
     // Run bindgen
     let bindings = bindgen::Builder::default()
         .header(include_dir.join("iree/runtime/api.h").to_str().unwrap())
+        .header(
+            include_dir
+                .join("iree/modules/hal/inline/module.h")
+                .to_str()
+                .unwrap(),
+        )
+        .header(
+            include_dir
+                .join("iree/modules/hal/loader/module.h")
+                .to_str()
+                .unwrap(),
+        )
+        .header(
+            include_dir
+                .join("iree/hal/local/loaders/embedded_elf_loader.h")
+                .to_str()
+                .unwrap(),
+        )
+        .header(
+            include_dir
+                .join("iree/hal/local/loaders/system_library_loader.h")
+                .to_str()
+                .unwrap(),
+        )
         .clang_arg(format!("-I{}", include_dir.display()))
         .allowlist_function("iree_.*")
         .allowlist_type("iree_.*")

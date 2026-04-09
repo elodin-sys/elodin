@@ -644,6 +644,14 @@ def compile_to_vmfb(
     elif compile_target == 'metal':
         target_args.append('--iree-hal-target-backends=metal-spirv')
     elif compile_target == 'inline':
+        if platform.system() == 'Darwin':
+            raise RuntimeError(
+                "stage=config\n"
+                "The iree-inline backend is not supported on macOS. "
+                "macOS requires system dylib linking (--iree-llvmcpu-link-embedded=false) "
+                "which is incompatible with the inline-dynamic execution model. "
+                "Use backend='iree-cpu' on macOS."
+            )
         target_args.append('--iree-hal-target-backends=llvm-cpu')
         extra.append('--iree-execution-model=inline-dynamic')
         compile_backend = 'llvm-cpu'
@@ -847,6 +855,7 @@ def compile_to_vmfb(
             'vmfb_size_bytes': len(vmfb),
             'report_dir': report_dir,
             'compile_backend': compile_backend,
+            'compile_target': compile_target,
             'runtime_device': runtime_device,
             'promoted_constants': promoted_constants,
         }
@@ -945,6 +954,10 @@ def compile_to_vmfb(
         .get_item("runtime_device")?
         .and_then(|x| x.extract::<String>().ok())
         .unwrap_or_else(|| "local-task".to_string());
+    let compile_target = result
+        .get_item("compile_target")?
+        .and_then(|x| x.extract::<String>().ok())
+        .unwrap_or_default();
 
     let mut promoted_constants = Vec::new();
     if let Some(pc_list) = result.get_item("promoted_constants")?
@@ -988,7 +1001,8 @@ def compile_to_vmfb(
         has_singleton_lowering: compiled_system.has_singleton_lowering,
         promoted_constants,
     };
-    let exec = IREEExec::new(&vmfb, metadata, Some(stats.clone()), &runtime_device, world)
+    let inline_dynamic = compile_target == "inline";
+    let exec = IREEExec::new(&vmfb, metadata, Some(stats.clone()), &runtime_device, inline_dynamic, world)
         .map_err(|e| Error::IreeCompilationFailed(format!("stage=vmfb_load\n{e}")))?;
 
     let report = DiagnosticReport {

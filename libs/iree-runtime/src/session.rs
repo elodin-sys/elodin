@@ -90,6 +90,10 @@ impl Session {
         Call::new(self, function_name)
     }
 
+    pub fn raw_ptr(&self) -> *mut ffi::iree_runtime_session_t {
+        self.ptr
+    }
+
     pub fn device(&self) -> *mut ffi::iree_hal_device_t {
         unsafe { ffi::iree_runtime_session_device(self.ptr) }
     }
