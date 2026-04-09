@@ -70,9 +70,9 @@ mod follow_stream;
 pub mod list_components;
 pub mod merge;
 pub mod msg_log;
-pub mod prune;
 #[cfg(feature = "profile")]
 pub mod profile_stats;
+pub mod prune;
 #[cfg(target_family = "unix")]
 pub use render_bridge;
 pub mod query;
@@ -1382,7 +1382,8 @@ impl Decomponentize for DBSink<'_> {
             let av_ns = _av_start.elapsed().as_nanos() as u64;
             profile_stats::APPLY_VALUE_NS.fetch_add(av_ns, std::sync::atomic::Ordering::Relaxed);
             profile_stats::APPLY_VALUE_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            profile_stats::APPLY_VALUE_MAX_NS.fetch_max(av_ns, std::sync::atomic::Ordering::Relaxed);
+            profile_stats::APPLY_VALUE_MAX_NS
+                .fetch_max(av_ns, std::sync::atomic::Ordering::Relaxed);
         }
 
         Ok(())
@@ -1819,8 +1820,10 @@ async fn handle_packet<A: AsyncWrite + Send + Sync + 'static>(
                 #[cfg(feature = "profile")]
                 {
                     let rwlock_ns = rwlock_start.elapsed().as_nanos() as u64;
-                    profile_stats::RWLOCK_ACQUIRE_NS.fetch_add(rwlock_ns, std::sync::atomic::Ordering::Relaxed);
-                    profile_stats::RWLOCK_ACQUIRE_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                    profile_stats::RWLOCK_ACQUIRE_NS
+                        .fetch_add(rwlock_ns, std::sync::atomic::Ordering::Relaxed);
+                    profile_stats::RWLOCK_ACQUIRE_COUNT
+                        .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 }
 
                 let mut sink = DBSink {
@@ -1846,15 +1849,23 @@ async fn handle_packet<A: AsyncWrite + Send + Sync + 'static>(
                     let vt_ns = vt_start.elapsed().as_nanos() as u64;
                     // vtable_resolve = total sink time minus apply_value time
                     // (apply_value is measured inside DBSink, so the difference is vtable overhead)
-                    let av_before = profile_stats::APPLY_VALUE_NS.load(std::sync::atomic::Ordering::Relaxed);
-                    let av_count_before = profile_stats::APPLY_VALUE_COUNT.load(std::sync::atomic::Ordering::Relaxed);
+                    let av_before =
+                        profile_stats::APPLY_VALUE_NS.load(std::sync::atomic::Ordering::Relaxed);
+                    let av_count_before =
+                        profile_stats::APPLY_VALUE_COUNT.load(std::sync::atomic::Ordering::Relaxed);
                     let _ = (av_before, av_count_before); // used below
                     profile_stats::VTABLE_RESOLVE_NS.fetch_add(
-                        vt_ns.saturating_sub(profile_stats::APPLY_VALUE_NS.load(std::sync::atomic::Ordering::Relaxed).saturating_sub(av_before)),
+                        vt_ns.saturating_sub(
+                            profile_stats::APPLY_VALUE_NS
+                                .load(std::sync::atomic::Ordering::Relaxed)
+                                .saturating_sub(av_before),
+                        ),
                         std::sync::atomic::Ordering::Relaxed,
                     );
                     profile_stats::VTABLE_RESOLVE_FIELDS.fetch_add(
-                        profile_stats::APPLY_VALUE_COUNT.load(std::sync::atomic::Ordering::Relaxed).saturating_sub(av_count_before),
+                        profile_stats::APPLY_VALUE_COUNT
+                            .load(std::sync::atomic::Ordering::Relaxed)
+                            .saturating_sub(av_count_before),
                         std::sync::atomic::Ordering::Relaxed,
                     );
                 }
@@ -1873,7 +1884,8 @@ async fn handle_packet<A: AsyncWrite + Send + Sync + 'static>(
             #[cfg(feature = "profile")]
             {
                 let tick_ns = _tick_start.elapsed().as_nanos() as u64;
-                profile_stats::SINK_TABLE_NS.fetch_add(tick_ns, std::sync::atomic::Ordering::Relaxed);
+                profile_stats::SINK_TABLE_NS
+                    .fetch_add(tick_ns, std::sync::atomic::Ordering::Relaxed);
                 profile_stats::SINK_TABLE_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                 profile_stats::record_tick(tick_ns);
             }
