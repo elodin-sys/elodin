@@ -477,6 +477,16 @@ def compile_to_vmfb(
             input_arrays,
             noxpr_artifacts,
         )
+    import numpy as _np
+    input_arrays = [
+        a.view(_np.int64) if hasattr(a, 'dtype') and a.dtype == _np.uint64
+        else a.view(_np.int32) if hasattr(a, 'dtype') and a.dtype == _np.uint32
+        else a.view(_np.int16) if hasattr(a, 'dtype') and a.dtype == _np.uint16
+        else a.view(_np.int8) if hasattr(a, 'dtype') and a.dtype == _np.uint8
+        else a
+        for a in input_arrays
+    ]
+
     try:
         lower_start = time.perf_counter()
         jit_fn = jax.jit(func, keep_unused=True)
@@ -509,20 +519,6 @@ def compile_to_vmfb(
             failure_stage='jax_lower',
         )
         hint = ''
-        lower_tb = traceback_text.lower()
-        if 'scatter inputs have incompatible types' in lower_tb or (
-            'index type must be an integer' in lower_tb and 'float64' in lower_tb
-        ):
-            hint = (
-                '\n\n--- Unsigned integer type detected ---\n'
-                'A system function uses unsigned integer types (e.g. jnp.uint64) which\n'
-                'are incompatible with JAX type promotion. When uint64 values interact\n'
-                'with int64, JAX promotes to float64, breaking index computations.\n\n'
-                'Fix: change dtype=jnp.uint64 to dtype=jnp.int64 in your system function.\n'
-                '     Values like state codes, entity IDs, and counters do not need unsigned types.\n\n'
-                'Set ELODIN_IREE_DUMP_DIR and check the per-system diagnostic to identify\n'
-                'which system function contains the unsigned type.\n'
-            )
         raise RuntimeError(
             "stage=jax_lower\n"
             + traceback_text

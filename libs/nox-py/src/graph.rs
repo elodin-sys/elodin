@@ -58,7 +58,7 @@ impl ReprMonad<Op> for Edge {
         Noxpr::constant(
             Literal::vector(&[self.from.0, self.to.0]),
             ArrayTy {
-                element_type: nox::ElementType::U64,
+                element_type: nox::ElementType::S64,
                 shape: smallvec::smallvec![2],
             },
         )

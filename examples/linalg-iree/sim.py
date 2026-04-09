@@ -9,6 +9,7 @@ Exercises every JAX linalg operation used in aerospace simulations:
   - eigh (symmetric eigendecomposition)
   - norm (vector/matrix norms)
   - .at[idx].set() scatter-into-constant (mode selector)
+  - U64-typed components with uint64 transition tables and indexed access
 
 Uses both @el.map and @el.map_seq to exercise both compilation paths.
 """
@@ -78,6 +79,20 @@ MatRhsState = ty.Annotated[
     el.Component("mrhs_state", el.ComponentType(el.PrimitiveType.F64, (3, 2))),
 ]
 
+# --- Components (uint64 ops -- exercises U64 components with scatter/index) ---
+# Mirrors the customer's OpTransition / OpState pattern from sim_FT19.py where
+# a uint64 transition table is indexed by a state value and combined with
+# scatter-into-constant in a fused system pipeline.
+
+OpTransition = ty.Annotated[
+    jnp.ndarray,
+    el.Component("op_transition", el.ComponentType(el.PrimitiveType.U64, (4,))),
+]
+OpState = ty.Annotated[
+    jnp.ndarray,
+    el.Component("op_state", el.ComponentType(el.PrimitiveType.U64, (4,))),
+]
+
 # --- Archetypes ---
 
 
@@ -109,6 +124,16 @@ class MatRhsArchetype(el.Archetype):
 @el.dataclass
 class ModeArchetype(el.Archetype):
     mode_state: ModeState = field(default_factory=lambda: jnp.zeros(4, dtype=jnp.int64))
+
+
+@el.dataclass
+class UintOpsArchetype(el.Archetype):
+    op_transition: OpTransition = field(
+        default_factory=lambda: jnp.array([1, 2, 3, 0], dtype=jnp.uint64)
+    )
+    op_state: OpState = field(
+        default_factory=lambda: jnp.array([0, 0, 0, 0], dtype=jnp.uint64)
+    )
 
 
 DT = 1.0 / SIMULATION_RATE
@@ -301,6 +326,37 @@ def mode_step(mode_state: ModeState) -> ModeState:
     return result.at[idx].set(jnp.int64(1))
 
 
+# --- Uint64 transition step (exercises U64 components + indexed scatter) ---
+# Matches the customer pattern: a uint64 transition table indexed by current
+# state, with scatter-into-constant for output assembly.
+
+
+@el.map
+def uint_transition_step(
+    transition: OpTransition, op_state: OpState
+) -> tuple[OpTransition, OpState]:
+    # Mirrors customer sim_FT19.py: a U64-typed transition table is indexed by
+    # current state, combined with jnp.where and scatter-into-constant.
+    # PrimTypeExt maps U64 → S64 so parameters arrive as int64; the function
+    # uses int64 dtype to stay consistent with the presented type.
+    transition_table = jnp.array([1, 2, 3, 0], dtype=jnp.int64)
+
+    prev_state = op_state[0]
+    looked_up = transition_table[prev_state % 4]
+
+    switch = prev_state < 3
+    new_state = jnp.where(switch, looked_up, prev_state)
+
+    result = jnp.zeros(4, dtype=jnp.int64)
+    result = result.at[new_state % 4].set(jnp.int64(1))
+
+    new_op = jnp.array(
+        [new_state, op_state[1] + 1, op_state[2], op_state[3]],
+        dtype=jnp.int64,
+    )
+    return transition_table, new_op
+
+
 def world() -> el.World:
     w = el.World()
     w.spawn(
@@ -336,8 +392,15 @@ def world() -> el.World:
         ),
         name="mode_sel",
     )
+    w.spawn(
+        UintOpsArchetype(
+            op_transition=jnp.array([1, 2, 3, 0], dtype=jnp.uint64),
+            op_state=jnp.array([0, 0, 0, 0], dtype=jnp.uint64),
+        ),
+        name="uint_ops",
+    )
     return w
 
 
 def system() -> el.System:
-    return mat_rhs_step | small2_step | kf3_step | ekf6_step | mode_step
+    return mat_rhs_step | small2_step | kf3_step | ekf6_step | mode_step | uint_transition_step

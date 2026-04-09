@@ -1812,7 +1812,7 @@ impl WorldBuilder {
 
             match schema.prim_type {
                 PrimType::U8 => {
-                    let slice = <[u8]>::ref_from_bytes(data).unwrap();
+                    let slice = <[i8]>::ref_from_bytes(data).unwrap();
                     let py_array = PyArray::from_slice(py, slice)
                         .reshape(dim.into_dimension())
                         .unwrap();
@@ -1820,7 +1820,7 @@ impl WorldBuilder {
                     state.push(py_array.into_py_any(py)?);
                 }
                 PrimType::U16 => {
-                    let slice = <[u16]>::ref_from_bytes(data).unwrap();
+                    let slice = <[i16]>::ref_from_bytes(data).unwrap();
                     let py_array = PyArray::from_slice(py, slice)
                         .reshape(dim.into_dimension())
                         .unwrap();
@@ -1828,7 +1828,7 @@ impl WorldBuilder {
                     state.push(py_array.into_py_any(py)?);
                 }
                 PrimType::U32 => {
-                    let slice = <[u32]>::ref_from_bytes(data).unwrap();
+                    let slice = <[i32]>::ref_from_bytes(data).unwrap();
                     let py_array = PyArray::from_slice(py, slice)
                         .reshape(dim.into_dimension())
                         .unwrap();
@@ -1836,7 +1836,7 @@ impl WorldBuilder {
                     state.push(py_array.into_py_any(py)?);
                 }
                 PrimType::U64 => {
-                    let slice = <[u64]>::ref_from_bytes(data).unwrap();
+                    let slice = <[i64]>::ref_from_bytes(data).unwrap();
                     let py_array = PyArray::from_slice(py, slice)
                         .reshape(dim.into_dimension())
                         .unwrap();
