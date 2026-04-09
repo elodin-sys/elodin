@@ -214,7 +214,14 @@ impl ProfileSnapshot {
         }
     }
 
-    pub fn generate_report(&self, scenario: &str, components: usize, frequency: u32, duration_secs: u64, mode: &str) -> String {
+    pub fn generate_report(
+        &self,
+        scenario: &str,
+        components: usize,
+        frequency: u32,
+        duration_secs: u64,
+        mode: &str,
+    ) -> String {
         let total = self.sink_table_ns;
         let mut report = String::with_capacity(8192);
 
@@ -227,16 +234,36 @@ impl ProfileSnapshot {
         report.push_str(&format!("| Frequency | {} Hz |\n", frequency));
         report.push_str(&format!("| Duration | {} s |\n", duration_secs));
         report.push_str(&format!("| Mode | {} |\n", mode));
-        report.push_str(&format!("| Total ticks recorded | {} |\n", self.tick_durations.len()));
-        report.push_str(&format!("| Total `sink_table` calls | {} |\n\n", self.sink_table_count));
+        report.push_str(&format!(
+            "| Total ticks recorded | {} |\n",
+            self.tick_durations.len()
+        ));
+        report.push_str(&format!(
+            "| Total `sink_table` calls | {} |\n\n",
+            self.sink_table_count
+        ));
 
         // Tick latency distribution
         report.push_str("## Tick Latency Distribution\n\n");
         report.push_str("| Percentile | Latency |\n|---|---|\n");
-        for (label, p) in [("p50", 50.0), ("p75", 75.0), ("p90", 90.0), ("p95", 95.0), ("p99", 99.0), ("max", 100.0)] {
-            report.push_str(&format!("| {} | {:.1} µs |\n", label, Self::ns_to_us(self.percentile(p))));
+        for (label, p) in [
+            ("p50", 50.0),
+            ("p75", 75.0),
+            ("p90", 90.0),
+            ("p95", 95.0),
+            ("p99", 99.0),
+            ("max", 100.0),
+        ] {
+            report.push_str(&format!(
+                "| {} | {:.1} µs |\n",
+                label,
+                Self::ns_to_us(self.percentile(p))
+            ));
         }
-        report.push_str(&format!("| mean | {:.1} µs |\n\n", Self::ns_to_us(self.mean_tick_ns())));
+        report.push_str(&format!(
+            "| mean | {:.1} µs |\n\n",
+            Self::ns_to_us(self.mean_tick_ns())
+        ));
 
         // Phase breakdown
         report.push_str("## Phase Breakdown (cumulative)\n\n");
@@ -244,17 +271,72 @@ impl ProfileSnapshot {
         report.push_str("|---|---|---|---|---|---|\n");
 
         let phases: &[(&str, u64, u64, &str)] = &[
-            ("RwLock acquire", self.rwlock_acquire_ns, self.rwlock_acquire_count, "`lib.rs` `db.with_state()`"),
-            ("VTable resolve", self.vtable_resolve_ns, self.vtable_resolve_fields, "`vtable.rs` `realize_fields()`"),
-            ("apply_value total", self.apply_value_ns, self.apply_value_count, "`lib.rs` `DBSink::apply_value()`"),
-            ("  push_buf", self.push_buf_ns, self.push_buf_count, "`time_series.rs` `push_buf()`"),
-            ("    data write", self.push_buf_data_write_ns, self.push_buf_count, "`append_log.rs` `data.write()`"),
-            ("    index write", self.push_buf_index_write_ns, self.push_buf_count, "`append_log.rs` `index.write()`"),
-            ("    timestamp check", self.push_buf_ts_check_ns, self.push_buf_count, "`time_series.rs` last_ts read"),
-            ("  wake_all (data)", self.wake_all_data_waker_ns, self.apply_value_count, "`time_series.rs` `data_waker`"),
-            ("  wake_all (last_upd)", self.wake_all_last_updated_ns, self.apply_value_count, "`lib.rs` `update_max()`"),
-            ("  wake_all (earliest)", self.wake_all_earliest_ts_ns, self.apply_value_count, "`lib.rs` `update_min()`"),
-            ("  HashMap lookup", self.hashmap_lookup_ns, self.hashmap_lookup_count, "`lib.rs` `components.get()`"),
+            (
+                "RwLock acquire",
+                self.rwlock_acquire_ns,
+                self.rwlock_acquire_count,
+                "`lib.rs` `db.with_state()`",
+            ),
+            (
+                "VTable resolve",
+                self.vtable_resolve_ns,
+                self.vtable_resolve_fields,
+                "`vtable.rs` `realize_fields()`",
+            ),
+            (
+                "apply_value total",
+                self.apply_value_ns,
+                self.apply_value_count,
+                "`lib.rs` `DBSink::apply_value()`",
+            ),
+            (
+                "  push_buf",
+                self.push_buf_ns,
+                self.push_buf_count,
+                "`time_series.rs` `push_buf()`",
+            ),
+            (
+                "    data write",
+                self.push_buf_data_write_ns,
+                self.push_buf_count,
+                "`append_log.rs` `data.write()`",
+            ),
+            (
+                "    index write",
+                self.push_buf_index_write_ns,
+                self.push_buf_count,
+                "`append_log.rs` `index.write()`",
+            ),
+            (
+                "    timestamp check",
+                self.push_buf_ts_check_ns,
+                self.push_buf_count,
+                "`time_series.rs` last_ts read",
+            ),
+            (
+                "  wake_all (data)",
+                self.wake_all_data_waker_ns,
+                self.apply_value_count,
+                "`time_series.rs` `data_waker`",
+            ),
+            (
+                "  wake_all (last_upd)",
+                self.wake_all_last_updated_ns,
+                self.apply_value_count,
+                "`lib.rs` `update_max()`",
+            ),
+            (
+                "  wake_all (earliest)",
+                self.wake_all_earliest_ts_ns,
+                self.apply_value_count,
+                "`lib.rs` `update_min()`",
+            ),
+            (
+                "  HashMap lookup",
+                self.hashmap_lookup_ns,
+                self.hashmap_lookup_count,
+                "`lib.rs` `components.get()`",
+            ),
         ];
 
         for (name, ns, count, source) in phases {
@@ -273,33 +355,47 @@ impl ProfileSnapshot {
         report.push_str("\n## Identified Bottlenecks\n\n");
 
         let mut bottlenecks: Vec<(&str, u64, String)> = vec![
-            ("wake_all() cascade", self.wake_all_data_waker_ns + self.wake_all_last_updated_ns + self.wake_all_earliest_ts_ns,
-             format!(
-                 "{} total calls ({}/tick). `update_min` rarely changes the value but calls `wake_all()` unconditionally. \
+            (
+                "wake_all() cascade",
+                self.wake_all_data_waker_ns
+                    + self.wake_all_last_updated_ns
+                    + self.wake_all_earliest_ts_ns,
+                format!(
+                    "{} total calls ({}/tick). `update_min` rarely changes the value but calls `wake_all()` unconditionally. \
                   `update_max` is called {}× per tick with the same timestamp — only the first matters.",
-                 self.wake_all_count,
-                 self.wake_all_count / self.sink_table_count.max(1),
-                 self.apply_value_count / self.sink_table_count.max(1),
-             )),
-            ("VTable realize chain", self.vtable_resolve_ns,
-             format!(
-                 "{} field resolutions ({}/tick). Each field triggers ~7 recursive `realize()` calls. \
+                    self.wake_all_count,
+                    self.wake_all_count / self.sink_table_count.max(1),
+                    self.apply_value_count / self.sink_table_count.max(1),
+                ),
+            ),
+            (
+                "VTable realize chain",
+                self.vtable_resolve_ns,
+                format!(
+                    "{} field resolutions ({}/tick). Each field triggers ~7 recursive `realize()` calls. \
                   The VTable structure is static — results could be cached after first resolve.",
-                 self.vtable_resolve_fields,
-                 self.vtable_resolve_fields / self.sink_table_count.max(1),
-             )),
-            ("push_buf Mutex churn", self.push_buf_data_write_ns + self.push_buf_index_write_ns,
-             format!(
-                 "2 Mutex acquisitions per component per tick = {} lock/unlock pairs. \
+                    self.vtable_resolve_fields,
+                    self.vtable_resolve_fields / self.sink_table_count.max(1),
+                ),
+            ),
+            (
+                "push_buf Mutex churn",
+                self.push_buf_data_write_ns + self.push_buf_index_write_ns,
+                format!(
+                    "2 Mutex acquisitions per component per tick = {} lock/unlock pairs. \
                   Uncontested in single-client batch mode but still ~20 ns each.",
-                 self.push_buf_count * 2,
-             )),
-            ("HashMap lookups", self.hashmap_lookup_ns,
-             format!(
-                 "{} lookups. With {} components the table fits in L2 cache, \
+                    self.push_buf_count * 2,
+                ),
+            ),
+            (
+                "HashMap lookups",
+                self.hashmap_lookup_ns,
+                format!(
+                    "{} lookups. With {} components the table fits in L2 cache, \
                   but pointer chasing to heap-allocated Components causes cache misses.",
-                 self.hashmap_lookup_count, components,
-             )),
+                    self.hashmap_lookup_count, components,
+                ),
+            ),
         ];
 
         bottlenecks.sort_by(|a, b| b.1.cmp(&a.1));
@@ -334,14 +430,16 @@ impl ProfileSnapshot {
         if self.push_buf_max_ns > self.mean_tick_ns() / 2 {
             report.push_str(
                 "> **Warning:** A single `push_buf` call took more than half the mean tick time. \
-                 This is likely a **mmap page fault** on first write to a new 4 KB page.\n\n"
+                 This is likely a **mmap page fault** on first write to a new 4 KB page.\n\n",
             );
         }
 
         // Recommendations
         report.push_str("## Optimization Recommendations\n\n");
 
-        let wake_total = self.wake_all_data_waker_ns + self.wake_all_last_updated_ns + self.wake_all_earliest_ts_ns;
+        let wake_total = self.wake_all_data_waker_ns
+            + self.wake_all_last_updated_ns
+            + self.wake_all_earliest_ts_ns;
         if Self::pct_of(wake_total, total) > 15.0 {
             report.push_str(&format!(
                 "1. **Debounce `wake_all()` in `apply_value`** — Currently {:.0}% of tick time. \
@@ -360,10 +458,14 @@ impl ProfileSnapshot {
             ));
         }
 
-        if Self::pct_of(self.push_buf_data_write_ns + self.push_buf_index_write_ns, total) > 10.0 {
+        if Self::pct_of(
+            self.push_buf_data_write_ns + self.push_buf_index_write_ns,
+            total,
+        ) > 10.0
+        {
             report.push_str(
                 "3. **Batch mmap commits** — Instead of 2 separate `AppendLog::write()` calls \
-                 (data + index) per component, accumulate all writes and commit once per tick.\n\n"
+                 (data + index) per component, accumulate all writes and commit once per tick.\n\n",
             );
         }
 

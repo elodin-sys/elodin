@@ -75,11 +75,41 @@ struct ScenarioConfig {
 }
 
 const ALL_SCENARIOS: &[ScenarioConfig] = &[
-    ScenarioConfig { name: "customer (per-component)", components: 400, frequency: 250, with_reader: true, mode: SendMode::PerComponent },
-    ScenarioConfig { name: "customer (batch)", components: 400, frequency: 250, with_reader: true, mode: SendMode::Batch },
-    ScenarioConfig { name: "high-freq", components: 50, frequency: 1000, with_reader: false, mode: SendMode::Batch },
-    ScenarioConfig { name: "high-fanout", components: 1000, frequency: 100, with_reader: false, mode: SendMode::Batch },
-    ScenarioConfig { name: "stress", components: 400, frequency: 1000, with_reader: true, mode: SendMode::Batch },
+    ScenarioConfig {
+        name: "customer (per-component)",
+        components: 400,
+        frequency: 250,
+        with_reader: true,
+        mode: SendMode::PerComponent,
+    },
+    ScenarioConfig {
+        name: "customer (batch)",
+        components: 400,
+        frequency: 250,
+        with_reader: true,
+        mode: SendMode::Batch,
+    },
+    ScenarioConfig {
+        name: "high-freq",
+        components: 50,
+        frequency: 1000,
+        with_reader: false,
+        mode: SendMode::Batch,
+    },
+    ScenarioConfig {
+        name: "high-fanout",
+        components: 1000,
+        frequency: 100,
+        with_reader: false,
+        mode: SendMode::Batch,
+    },
+    ScenarioConfig {
+        name: "stress",
+        components: 400,
+        frequency: 1000,
+        with_reader: true,
+        mode: SendMode::Batch,
+    },
 ];
 
 #[stellarator::main]
@@ -95,11 +125,25 @@ async fn main() {
             eprintln!("\n=== Running scenario: {} ===\n", sc.name);
             profile_stats::reset_all();
 
-            run_benchmark(sc.components, sc.frequency, args.duration, args.clients, sc.with_reader, sc.mode).await;
+            run_benchmark(
+                sc.components,
+                sc.frequency,
+                args.duration,
+                args.clients,
+                sc.with_reader,
+                sc.mode,
+            )
+            .await;
             sleep(Duration::from_millis(200)).await;
 
             let snap = profile_stats::snapshot();
-            let report = snap.generate_report(sc.name, sc.components, sc.frequency, args.duration, &sc.mode.to_string());
+            let report = snap.generate_report(
+                sc.name,
+                sc.components,
+                sc.frequency,
+                args.duration,
+                &sc.mode.to_string(),
+            );
             full_report.push_str(&report);
             full_report.push_str("\n---\n\n");
         }
@@ -142,25 +186,45 @@ async fn main() {
     }
 
     let mode = args.mode.unwrap_or_default();
-    let scenario_name = args.scenario.as_ref().map(|s| match s {
-        Scenario::Customer => "customer",
-        Scenario::CustomerBatch => "customer-batch",
-        Scenario::HighFreq => "high-freq",
-        Scenario::HighFanout => "high-fanout",
-        Scenario::Stress => "stress",
-    }).unwrap_or("custom");
+    let scenario_name = args
+        .scenario
+        .as_ref()
+        .map(|s| match s {
+            Scenario::Customer => "customer",
+            Scenario::CustomerBatch => "customer-batch",
+            Scenario::HighFreq => "high-freq",
+            Scenario::HighFanout => "high-fanout",
+            Scenario::Stress => "stress",
+        })
+        .unwrap_or("custom");
 
     profile_stats::reset_all();
 
-    eprintln!("Running benchmark: {} components, {} Hz, {}, {} s ...",
-        args.components, args.frequency, mode, args.duration);
+    eprintln!(
+        "Running benchmark: {} components, {} Hz, {}, {} s ...",
+        args.components, args.frequency, mode, args.duration
+    );
 
-    run_benchmark(args.components, args.frequency, args.duration, args.clients, args.with_reader, mode).await;
+    run_benchmark(
+        args.components,
+        args.frequency,
+        args.duration,
+        args.clients,
+        args.with_reader,
+        mode,
+    )
+    .await;
 
     sleep(Duration::from_millis(200)).await;
 
     let snap = profile_stats::snapshot();
-    let report = snap.generate_report(scenario_name, args.components, args.frequency, args.duration, &mode.to_string());
+    let report = snap.generate_report(
+        scenario_name,
+        args.components,
+        args.frequency,
+        args.duration,
+        &mode.to_string(),
+    );
 
     std::fs::write(&args.output, &report).expect("failed to write report");
     eprintln!("\nReport written to {}", args.output);
@@ -230,7 +294,14 @@ async fn run_benchmark(
                 let base = vtable_base;
                 vtable_base += n as u16;
                 let counter = write_counter.clone();
-                handles.push(spawn(run_writer_batch(addr, n, base, interval, target_duration, counter)));
+                handles.push(spawn(run_writer_batch(
+                    addr,
+                    n,
+                    base,
+                    interval,
+                    target_duration,
+                    counter,
+                )));
             }
         }
         SendMode::PerComponent => {
@@ -240,7 +311,14 @@ async fn run_benchmark(
                 let base = comp_base;
                 comp_base += n as u16;
                 let counter = write_counter.clone();
-                handles.push(spawn(run_writer_per_component(addr, base, n, interval, target_duration, counter)));
+                handles.push(spawn(run_writer_per_component(
+                    addr,
+                    base,
+                    n,
+                    interval,
+                    target_duration,
+                    counter,
+                )));
             }
         }
     }
@@ -276,7 +354,14 @@ async fn run_writer_batch(
         })
         .collect();
     let vt = vtable(fields);
-    client.send(&VTableMsg { id: batched_vtable_id, vtable: vt }).await.0.unwrap();
+    client
+        .send(&VTableMsg {
+            id: batched_vtable_id,
+            vtable: vt,
+        })
+        .await
+        .0
+        .unwrap();
     sleep(Duration::from_millis(50)).await;
 
     let start = Instant::now();
@@ -315,8 +400,19 @@ async fn run_writer_per_component(
         let idx = comp_base + i as u16;
         let comp_name = format!("bench_comp_{}", idx);
         let comp_id = ComponentId::new(&comp_name);
-        let vt = vtable(vec![raw_field(0, 8, schema(PrimType::F64, &[], component(comp_id)))]);
-        client.send(&VTableMsg { id: *vtable_id, vtable: vt }).await.0.unwrap();
+        let vt = vtable(vec![raw_field(
+            0,
+            8,
+            schema(PrimType::F64, &[], component(comp_id)),
+        )]);
+        client
+            .send(&VTableMsg {
+                id: *vtable_id,
+                vtable: vt,
+            })
+            .await
+            .0
+            .unwrap();
     }
     sleep(Duration::from_millis(50)).await;
 
