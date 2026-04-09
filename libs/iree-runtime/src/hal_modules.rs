@@ -28,6 +28,7 @@ pub unsafe fn register_inline_modules(
     error::check(status)?;
     let status = unsafe { ffi::iree_runtime_session_append_module(session, inline_module) };
     error::check(status)?;
+    unsafe { ffi::iree_vm_module_release(inline_module) };
 
     let mut loaders: Vec<*mut ffi::iree_hal_executable_loader_t> = Vec::new();
 
@@ -70,8 +71,13 @@ pub unsafe fn register_inline_modules(
         )
     };
     error::check(status)?;
+    for &loader in &loaders {
+        unsafe { ffi::iree_hal_executable_loader_release(loader) };
+    }
+
     let status = unsafe { ffi::iree_runtime_session_append_module(session, loader_module) };
     error::check(status)?;
+    unsafe { ffi::iree_vm_module_release(loader_module) };
 
     Ok(())
 }

@@ -131,6 +131,7 @@ impl IREEExec {
             unsafe { iree_runtime::lapack::create_module(instance.vm_instance(), session.device()) }
         {
             let _ = unsafe { session.append_module(lapack_module) };
+            unsafe { iree_runtime::vm_module_release(lapack_module) };
         }
 
         if inline_dynamic {
