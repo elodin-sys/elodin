@@ -91,6 +91,7 @@ pub struct IREEExec {
     pub compile_stats: Option<IreeCompileStats>,
     vmfb: Vec<u8>,
     device_uri: String,
+    inline_dynamic: bool,
     input_ids: Vec<ComponentId>,
     output_ids: Vec<ComponentId>,
     mutable_overlap: Vec<(usize, usize)>,
@@ -115,6 +116,7 @@ impl IREEExec {
         metadata: ExecMetadata,
         compile_stats: Option<IreeCompileStats>,
         device_uri: &str,
+        inline_dynamic: bool,
         world: &World,
     ) -> Result<Self, Error> {
         let instance = iree_runtime::Instance::new().iree_err()?;
@@ -129,6 +131,18 @@ impl IREEExec {
             unsafe { iree_runtime::lapack::create_module(instance.vm_instance(), session.device()) }
         {
             let _ = unsafe { session.append_module(lapack_module) };
+            unsafe { iree_runtime::vm_module_release(lapack_module) };
+        }
+
+        if inline_dynamic {
+            unsafe {
+                iree_runtime::hal_modules::register_inline_modules(
+                    instance.vm_instance(),
+                    session.device(),
+                    session.raw_ptr(),
+                )
+            }
+            .iree_err()?;
         }
 
         session.load_vmfb(vmfb).iree_err()?;
@@ -294,6 +308,7 @@ impl IREEExec {
             compile_stats,
             vmfb: vmfb.to_vec(),
             device_uri: device_uri.to_string(),
+            inline_dynamic,
             input_ids,
             output_ids,
             mutable_overlap,
@@ -618,6 +633,7 @@ impl IREEWorldExec {
             self.tick_exec.metadata.clone(),
             self.tick_exec.compile_stats.clone(),
             &self.tick_exec.device_uri,
+            self.tick_exec.inline_dynamic,
             &self.world,
         )
         .expect("failed to fork IREE exec");
