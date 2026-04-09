@@ -55,7 +55,7 @@ pub(crate) fn check(status: ffi::iree_status_t) -> Result<()> {
 }
 
 fn status_to_string(status: ffi::iree_status_t) -> String {
-    let mut buffer = [0i8; 1024];
+    let mut buffer = [0 as std::os::raw::c_char; 1024];
     let mut length: usize = 0;
     let ok =
         unsafe { ffi::iree_status_format(status, buffer.len(), buffer.as_mut_ptr(), &mut length) };
