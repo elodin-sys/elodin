@@ -28,8 +28,9 @@ fn extract_tar_zstd_sparse(archive: &Path, dest: &Path) {
     let tar_bin = "gtar";
     let status = Command::new(tar_bin)
         .arg("-x")
-        .arg("-I")
-        .arg("zstd")
+        // .arg("-I")
+        // .arg("zstd")
+        .arg("--zstd")
         .arg("--sparse")
         .arg("-f")
         .arg(archive)

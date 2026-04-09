@@ -127,6 +127,11 @@ path = "src/bin/bench.rs"
 name = "query_cli_goldie"
 path = "tests_query/query_cli_goldie.rs"
 
+[[test]]
+name = "prim_types_fixture_goldie"
+path = "tests_query/prim_types_fixture_goldie.rs"
+
 [dev-dependencies]
 goldie = "0.6"
 tempfile = "3"
+zerocopy.version = "0.8.2"
