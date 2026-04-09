@@ -77,6 +77,9 @@
   # Common macOS dependencies
   darwinDeps = with pkgs; [
     libiconv
+    #gnutar
+    # Expose GNU tar as `gnutar` so tests/scripts can call it without shadowing bsdtar `tar`.
+    (writeShellScriptBin "gtar" ''exec ${gnutar}/bin/tar "$@"'')
   ];
 
   # Common build dependencies
@@ -84,6 +87,7 @@
     openssl
     openblas
     xz
+    zstd
     python313
     gfortran.cc.lib
   ];
