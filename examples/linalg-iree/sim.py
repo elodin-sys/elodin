@@ -326,35 +326,36 @@ def mode_step(mode_state: ModeState) -> ModeState:
     return result.at[idx].set(jnp.int64(1))
 
 
-# --- Uint64 transition step (exercises U64 components + indexed scatter) ---
-# Matches the customer pattern: a uint64 transition table indexed by current
-# state, with scatter-into-constant for output assembly.
+# --- Uint64 transition steps (exercises U64 components across fused-system boundary) ---
+# Mirrors the customer's sim_FT19.py two-function pattern:
+#   operation_state_override: writes a uint64 transition table (returns uint64)
+#   transition_states: reads the table, mixes with int64 via jnp.where, uses as index
+# The JaxTracer bitcast fix normalizes the uint64 Call output to int64 at the
+# fused-system boundary so the downstream jnp.where doesn't promote to float64.
 
 
 @el.map
-def uint_transition_step(
-    transition: OpTransition, op_state: OpState
-) -> tuple[OpTransition, OpState]:
-    # Mirrors customer sim_FT19.py: a U64-typed transition table is indexed by
-    # current state, combined with jnp.where and scatter-into-constant.
-    # PrimTypeExt maps U64 → S64 so parameters arrive as int64; the function
-    # uses int64 dtype to stay consistent with the presented type.
-    transition_table = jnp.array([1, 2, 3, 0], dtype=jnp.int64)
+def uint_override_step(transition: OpTransition) -> OpTransition:
+    return jnp.array([1, 2, 3, 0], dtype=jnp.uint64)
 
+
+@el.map
+def uint_use_step(
+    transition: OpTransition, op_state: OpState
+) -> OpState:
     prev_state = op_state[0]
-    looked_up = transition_table[prev_state % 4]
+    looked_up = transition[prev_state % 4]
 
     switch = prev_state < 3
     new_state = jnp.where(switch, looked_up, prev_state)
 
     result = jnp.zeros(4, dtype=jnp.int64)
-    result = result.at[new_state % 4].set(jnp.int64(1))
+    result = result.at[new_state % 4].set(1)
 
-    new_op = jnp.array(
+    return jnp.array(
         [new_state, op_state[1] + 1, op_state[2], op_state[3]],
         dtype=jnp.int64,
     )
-    return transition_table, new_op
 
 
 def world() -> el.World:
@@ -403,4 +404,4 @@ def world() -> el.World:
 
 
 def system() -> el.System:
-    return mat_rhs_step | small2_step | kf3_step | ekf6_step | mode_step | uint_transition_step
+    return mat_rhs_step | small2_step | kf3_step | ekf6_step | mode_step | uint_override_step | uint_use_step
