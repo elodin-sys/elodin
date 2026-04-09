@@ -177,11 +177,15 @@ impl TimeSeries {
     }
 
     pub fn push_buf(&self, timestamp: Timestamp, buf: &[u8]) -> Result<(), Error> {
+        #[cfg(feature = "profile")]
+        let _pb_start = std::time::Instant::now();
+
         let _span = tracing::trace_span!("push_buf").entered();
         let len = self.index.len() as usize;
 
-        // check if timestamp is greater than the last timestamp
-        // to ensure index is ordered
+        #[cfg(feature = "profile")]
+        let _ts_check_start = std::time::Instant::now();
+
         if len > 0 {
             let last_timestamp = self
                 .index
@@ -199,13 +203,63 @@ impl TimeSeries {
             }
         }
 
-        // write new data to head of data writer
+        #[cfg(feature = "profile")]
+        {
+            use crate::profile_stats;
+            profile_stats::PUSH_BUF_TS_CHECK_NS.fetch_add(
+                _ts_check_start.elapsed().as_nanos() as u64,
+                std::sync::atomic::Ordering::Relaxed,
+            );
+        }
+
+        #[cfg(feature = "profile")]
+        let _dw_start = std::time::Instant::now();
+
         self.data.write(buf)?;
 
-        // always write index last so we get consistent reads
+        #[cfg(feature = "profile")]
+        {
+            use crate::profile_stats;
+            profile_stats::PUSH_BUF_DATA_WRITE_NS.fetch_add(
+                _dw_start.elapsed().as_nanos() as u64,
+                std::sync::atomic::Ordering::Relaxed,
+            );
+        }
+
+        #[cfg(feature = "profile")]
+        let _iw_start = std::time::Instant::now();
+
         self.index.write(&timestamp.to_le_bytes())?;
 
+        #[cfg(feature = "profile")]
+        {
+            use crate::profile_stats;
+            profile_stats::PUSH_BUF_INDEX_WRITE_NS.fetch_add(
+                _iw_start.elapsed().as_nanos() as u64,
+                std::sync::atomic::Ordering::Relaxed,
+            );
+        }
+
+        #[cfg(feature = "profile")]
+        let _wake_start = std::time::Instant::now();
+
         self.data_waker.wake_all();
+
+        #[cfg(feature = "profile")]
+        {
+            use crate::profile_stats;
+            profile_stats::WAKE_ALL_DATA_WAKER_NS.fetch_add(
+                _wake_start.elapsed().as_nanos() as u64,
+                std::sync::atomic::Ordering::Relaxed,
+            );
+            profile_stats::WAKE_ALL_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+
+            let pb_ns = _pb_start.elapsed().as_nanos() as u64;
+            profile_stats::PUSH_BUF_NS.fetch_add(pb_ns, std::sync::atomic::Ordering::Relaxed);
+            profile_stats::PUSH_BUF_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            profile_stats::PUSH_BUF_MAX_NS.fetch_max(pb_ns, std::sync::atomic::Ordering::Relaxed);
+        }
+
         Ok(())
     }
 

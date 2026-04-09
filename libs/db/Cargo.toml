@@ -24,6 +24,7 @@ axum = ["dep:axum", "dep:axum-streams", "dep:serde_json", "dep:tokio"]
 parquet = ["dep:parquet"]
 video-export = ["dep:muxide", "dep:scuffle-h264"]
 tracy = ["dep:tracing-tracy"]
+profile = []
 
 [dependencies]
 # ser-de
@@ -122,6 +123,11 @@ render-bridge.path = "../render-bridge"
 [[bin]]
 name = "elodin-db-bench"
 path = "src/bin/bench.rs"
+
+[[bin]]
+name = "elodin-db-profile"
+path = "src/bin/profile.rs"
+required-features = ["profile"]
 
 [dev-dependencies]
 tempfile = "3"

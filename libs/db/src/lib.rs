@@ -71,6 +71,8 @@ pub mod list_components;
 pub mod merge;
 pub mod msg_log;
 pub mod prune;
+#[cfg(feature = "profile")]
+pub mod profile_stats;
 #[cfg(target_family = "unix")]
 pub use render_bridge;
 pub mod query;
@@ -1270,10 +1272,10 @@ impl Decomponentize for DBSink<'_> {
         value: impeller2::types::ComponentView<'_>,
         timestamp: Option<Timestamp>,
     ) -> Result<(), Error> {
+        #[cfg(feature = "profile")]
+        let _av_start = std::time::Instant::now();
+
         let _span = tracing::trace_span!("apply_value", %component_id).entered();
-        // Warn if a non-follower connection writes to a component being
-        // replicated from a followed source. The atomic flag avoids
-        // acquiring the RwLock on every call when no follow is active.
         if !self.is_follower
             && self.has_followed_components
             && self
@@ -1289,13 +1291,21 @@ impl Decomponentize for DBSink<'_> {
         }
         let mut timestamp = timestamp.unwrap_or(self.table_received);
         let value_buf = value.as_bytes();
+
+        #[cfg(feature = "profile")]
+        let _hm_start = std::time::Instant::now();
+
         let Some(component) = self.components.get(&component_id) else {
             return Err(Error::ComponentNotFound(component_id));
         };
-        // When processing data from a followed source, skip samples that
-        // are not strictly newer than the latest in the local time series.
-        // This prevents duplicates when the follow stream re-sends the
-        // "latest" value that was already written during backfill.
+
+        #[cfg(feature = "profile")]
+        {
+            let hm_ns = _hm_start.elapsed().as_nanos() as u64;
+            profile_stats::HASHMAP_LOOKUP_NS.fetch_add(hm_ns, std::sync::atomic::Ordering::Relaxed);
+            profile_stats::HASHMAP_LOOKUP_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
+
         if self.is_follower
             && component
                 .time_series
@@ -1305,17 +1315,12 @@ impl Decomponentize for DBSink<'_> {
             return Ok(());
         }
         let time_series_empty = component.time_series.index().is_empty();
-        // When timestamps are auto-generated (no explicit timestamp provided), concurrent writers
-        // may occasionally observe a slightly newer last timestamp and reject with
-        // TimeTravel. In that case, clamp the timestamp to last+1 and retry.
         if let Err(err) = component.time_series.push_buf(timestamp, value_buf) {
             match err {
                 Error::TimeTravel if timestamp == self.table_received => {
-                    // Retry with a monotonic bump based on the latest sample seen.
                     let mut attempts = 0u8;
                     loop {
                         if let Some((last_ts, _)) = component.time_series.latest() {
-                            // ensure strictly non-decreasing order
                             timestamp = Timestamp(last_ts.0.saturating_add(1));
                         } else {
                             timestamp = self.table_received;
@@ -1343,11 +1348,45 @@ impl Decomponentize for DBSink<'_> {
             .map(|m| m.is_timestamp_source())
             .unwrap_or(false);
         if !is_ts_source {
+            #[cfg(feature = "profile")]
+            let _w1 = std::time::Instant::now();
+
             self.last_updated.update_max(timestamp);
+
+            #[cfg(feature = "profile")]
+            {
+                profile_stats::WAKE_ALL_LAST_UPDATED_NS.fetch_add(
+                    _w1.elapsed().as_nanos() as u64,
+                    std::sync::atomic::Ordering::Relaxed,
+                );
+                profile_stats::WAKE_ALL_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            }
+
             if timestamp.0 > 0 {
+                #[cfg(feature = "profile")]
+                let _w2 = std::time::Instant::now();
+
                 self.earliest_timestamp.update_min(timestamp);
+
+                #[cfg(feature = "profile")]
+                {
+                    profile_stats::WAKE_ALL_EARLIEST_TS_NS.fetch_add(
+                        _w2.elapsed().as_nanos() as u64,
+                        std::sync::atomic::Ordering::Relaxed,
+                    );
+                    profile_stats::WAKE_ALL_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                }
             }
         }
+
+        #[cfg(feature = "profile")]
+        {
+            let av_ns = _av_start.elapsed().as_nanos() as u64;
+            profile_stats::APPLY_VALUE_NS.fetch_add(av_ns, std::sync::atomic::Ordering::Relaxed);
+            profile_stats::APPLY_VALUE_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            profile_stats::APPLY_VALUE_MAX_NS.fetch_max(av_ns, std::sync::atomic::Ordering::Relaxed);
+        }
+
         Ok(())
     }
 }
@@ -1767,11 +1806,25 @@ async fn handle_packet<A: AsyncWrite + Send + Sync + 'static>(
             tx.send_msg(&settings).await?;
         }
         Packet::Table(table) => {
+            #[cfg(feature = "profile")]
+            let _tick_start = std::time::Instant::now();
+
             let _table_span = tracing::info_span!("sink_table").entered();
             trace!(table.len = table.buf.len(), "sinking table");
             let table_id = table.id;
             let table_buf_len = table.buf.len();
+
+            #[cfg(feature = "profile")]
+            let rwlock_start = std::time::Instant::now();
+
             if let Err(err) = db.with_state(|state| {
+                #[cfg(feature = "profile")]
+                {
+                    let rwlock_ns = rwlock_start.elapsed().as_nanos() as u64;
+                    profile_stats::RWLOCK_ACQUIRE_NS.fetch_add(rwlock_ns, std::sync::atomic::Ordering::Relaxed);
+                    profile_stats::RWLOCK_ACQUIRE_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                }
+
                 let mut sink = DBSink {
                     components: &state.components,
                     component_metadata: &state.component_metadata,
@@ -1785,6 +1838,26 @@ async fn handle_packet<A: AsyncWrite + Send + Sync + 'static>(
                         .load(std::sync::atomic::Ordering::Acquire),
                     is_follower: false,
                 };
+                #[cfg(feature = "profile")]
+                {
+                    let vt_start = std::time::Instant::now();
+                    table.sink(&state.vtable_registry, &mut sink)??;
+                    let vt_ns = vt_start.elapsed().as_nanos() as u64;
+                    // vtable_resolve = total sink time minus apply_value time
+                    // (apply_value is measured inside DBSink, so the difference is vtable overhead)
+                    let av_before = profile_stats::APPLY_VALUE_NS.load(std::sync::atomic::Ordering::Relaxed);
+                    let av_count_before = profile_stats::APPLY_VALUE_COUNT.load(std::sync::atomic::Ordering::Relaxed);
+                    let _ = (av_before, av_count_before); // used below
+                    profile_stats::VTABLE_RESOLVE_NS.fetch_add(
+                        vt_ns.saturating_sub(profile_stats::APPLY_VALUE_NS.load(std::sync::atomic::Ordering::Relaxed).saturating_sub(av_before)),
+                        std::sync::atomic::Ordering::Relaxed,
+                    );
+                    profile_stats::VTABLE_RESOLVE_FIELDS.fetch_add(
+                        profile_stats::APPLY_VALUE_COUNT.load(std::sync::atomic::Ordering::Relaxed).saturating_sub(av_count_before),
+                        std::sync::atomic::Ordering::Relaxed,
+                    );
+                }
+                #[cfg(not(feature = "profile"))]
                 table.sink(&state.vtable_registry, &mut sink)??;
                 if sink.sunk_new_time_series {
                     db.vtable_gen.fetch_add(1, atomic::Ordering::SeqCst);
@@ -1793,6 +1866,14 @@ async fn handle_packet<A: AsyncWrite + Send + Sync + 'static>(
             }) {
                 debug!(?err, ?table_id, table_buf_len, "error sinking table packet");
                 return Err(err);
+            }
+
+            #[cfg(feature = "profile")]
+            {
+                let tick_ns = _tick_start.elapsed().as_nanos() as u64;
+                profile_stats::SINK_TABLE_NS.fetch_add(tick_ns, std::sync::atomic::Ordering::Relaxed);
+                profile_stats::SINK_TABLE_COUNT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                profile_stats::record_tick(tick_ns);
             }
         }
 
