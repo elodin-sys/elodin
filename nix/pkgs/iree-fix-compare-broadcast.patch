@@ -8,59 +8,65 @@
  #include "iree/compiler/Dialect/Util/Transforms/Passes.h"
  #include "iree/compiler/InputConversion/Common/Passes.h"
  #include "mlir/Conversion/ReconcileUnrealizedCasts/ReconcileUnrealizedCasts.h"
-@@ -83,6 +84,55 @@
-   // Convert to Linalg. After this point, StableHLO will be eliminated.
-   passManager.addNestedPass<func::FuncOp>(
-       stablehlo::createLegalizeShapeComputations());
+@@ -90,3 +91,61 @@
+  }, "elodin-lower-scf-if-to-cf"));
 +
-+  // Elodin: broadcast mismatched element-wise operand shapes.
-+  // After InlinerPass + CanonicalizerPass, reshape ops can be folded away,
-+  // leaving stablehlo.compare ops with operands of different ranks
-+  // (e.g., tensor<1xf64> vs tensor<f64>).  StableHLO requires same-shaped
-+  // operands, so ConvertStableHloToLinalgExt rejects them.
++  // Elodin: hoist stablehlo.convert past stablehlo.reshape to prevent
++  // ConvertStableHloToIreeInputDialects from creating shape mismatches.
++  //
++  // When a reshape reduces rank (tensor<1xT> -> tensor<T>) and is followed
++  // by a convert that changes element type (tensor<T> -> tensor<U>), the
++  // partial conversion in ConvertStableHloToIreeInputDialects remaps values
++  // so that the convert fires on the pre-reshape input, producing
++  // tensor<1xU> instead of tensor<U>.  Downstream stablehlo.compare ops
++  // then have mismatched shapes (tensor<1xU> vs tensor<U>).
++  //
++  // Fix: swap the order to (convert, then reshape) so that the convert
++  // preserves shape and the reshape only changes shape.
 +  passManager.addPass(createModulePass([](ModuleOp moduleOp) {
 +    moduleOp.walk([](func::FuncOp funcOp) {
 +      if (funcOp.isDeclaration())
 +        return;
-+      OpBuilder builder(funcOp.getContext());
-+      SmallVector<mlir::stablehlo::CompareOp> compOps;
-+      funcOp.walk([&](mlir::stablehlo::CompareOp op) {
-+        auto lhsTy = mlir::dyn_cast<RankedTensorType>(op.getLhs().getType());
-+        auto rhsTy = mlir::dyn_cast<RankedTensorType>(op.getRhs().getType());
-+        if (lhsTy && rhsTy && lhsTy != rhsTy)
-+          compOps.push_back(op);
++      SmallVector<mlir::stablehlo::ConvertOp> converts;
++      funcOp.walk([&](mlir::stablehlo::ConvertOp cvt) {
++        auto reshapeOp =
++            cvt.getOperand().getDefiningOp<mlir::stablehlo::ReshapeOp>();
++        if (!reshapeOp)
++          return;
++        auto inTy = mlir::dyn_cast<RankedTensorType>(
++            reshapeOp.getOperand().getType());
++        auto midTy = mlir::dyn_cast<RankedTensorType>(reshapeOp.getType());
++        auto outTy = mlir::dyn_cast<RankedTensorType>(cvt.getType());
++        if (!inTy || !midTy || !outTy)
++          return;
++        if (inTy.getElementType() == outTy.getElementType())
++          return;
++        if (midTy.getRank() >= inTy.getRank())
++          return;
++        converts.push_back(cvt);
 +      });
-+      for (auto op : compOps) {
-+        auto lhsTy = mlir::cast<RankedTensorType>(op.getLhs().getType());
-+        auto rhsTy = mlir::cast<RankedTensorType>(op.getRhs().getType());
-+        auto targetShape = lhsTy.getRank() >= rhsTy.getRank()
-+                               ? lhsTy.getShape()
-+                               : rhsTy.getShape();
-+        builder.setInsertionPoint(op);
-+        auto loc = op.getLoc();
-+        auto bcast = [&](Value v, RankedTensorType vTy) -> Value {
-+          if (vTy.getShape() == targetShape)
-+            return v;
-+          SmallVector<int64_t> dims;
-+          int64_t off = (int64_t)targetShape.size() - vTy.getRank();
-+          for (int64_t i = 0; i < vTy.getRank(); ++i)
-+            dims.push_back(i + off);
-+          auto bcastTy = RankedTensorType::get(targetShape, vTy.getElementType());
-+          return builder.create<mlir::stablehlo::BroadcastInDimOp>(
-+              loc, bcastTy, v, builder.getDenseI64ArrayAttr(dims));
-+        };
-+        Value lhs = bcast(op.getLhs(), lhsTy);
-+        Value rhs = bcast(op.getRhs(), rhsTy);
-+        auto newOp = builder.create<mlir::stablehlo::CompareOp>(
-+            loc, lhs, rhs, op.getComparisonDirection());
-+        if (op.getCompareType())
-+          newOp.setCompareType(*op.getCompareType());
-+        op.replaceAllUsesWith(newOp.getResult());
-+        op.erase();
++      for (auto cvt : converts) {
++        auto reshapeOp =
++            cvt.getOperand().getDefiningOp<mlir::stablehlo::ReshapeOp>();
++        auto inTy = mlir::cast<RankedTensorType>(
++            reshapeOp.getOperand().getType());
++        auto outTy = mlir::cast<RankedTensorType>(cvt.getType());
++        auto convertedTy = RankedTensorType::get(
++            inTy.getShape(), outTy.getElementType());
++
++        OpBuilder builder(cvt);
++        auto loc = cvt.getLoc();
++        auto newConvert = builder.create<mlir::stablehlo::ConvertOp>(
++            loc, convertedTy, reshapeOp.getOperand());
++        auto newReshape = builder.create<mlir::stablehlo::ReshapeOp>(
++            loc, outTy, newConvert);
++        cvt.replaceAllUsesWith(newReshape.getResult());
++        cvt.erase();
++        if (reshapeOp->use_empty())
++          reshapeOp.erase();
 +      }
 +    });
-+  }, "elodin-broadcast-mismatched-shapes"));
++  }, "elodin-hoist-convert-past-reshape"));
 +
-   passManager.addNestedPass<func::FuncOp>(
-       stablehlo::createConvertStableHloToLinalgExt());
-   passManager.addNestedPass<func::FuncOp>(
+  passManager.addPass(createConvertStableHloToIreeInputDialects());
+  passManager.addPass(createReconcileUnrealizedCastsPass());

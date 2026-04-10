@@ -85,9 +85,6 @@ StableHLO input from JAX
 ... InlinerPass, Canonicalize, CSE, LegalizeShapeComputations ...
     |
     v
-[elodin-broadcast-mismatched-shapes]  <-- Patch 9 (module-level pass)
-    |
-    v
 [ConvertStableHloToLinalgExt]
     |
     v
@@ -95,6 +92,9 @@ StableHLO input from JAX
     |
     v
 [elodin-lower-scf-if-to-cf]  <-- Patch 8 (module-level pass)
+    |
+    v
+[elodin-hoist-convert-past-reshape]  <-- Patch 9 (module-level pass)
     |
     v
 [ConvertStableHloToIreeInputDialects]
@@ -284,19 +284,19 @@ The fix was chosen from three analyzed options (documented in `big-fix.md`). Opt
 
 ### 3.9 `iree-fix-compare-broadcast.patch`
 
-**Layer:** Module-level pass (`elodin-broadcast-mismatched-shapes`), registered after the InlinerPass + CanonicalizerPass + CSEPass and immediately before `ConvertStableHloToLinalgExt`
+**Layer:** Module-level pass (`elodin-hoist-convert-past-reshape`), registered immediately before `ConvertStableHloToIreeInputDialects` (after `elodin-lower-scf-if-to-cf`)
 
 **File modified:** `Passes.cpp`
 
-**Problem:** After the InlinerPass re-inlines all outlined functions into `@main` and the CanonicalizerPass runs, `stablehlo.reshape` ops can be folded into `stablehlo.convert` ops. This changes a `convert(reshape(tensor<1xi64>) -> tensor<i64>) -> tensor<f64>` sequence into a direct `convert(tensor<1xi64>) -> tensor<1xf64>`, producing `tensor<1xf64>` where the original function had `tensor<f64>`. When this value participates in a `stablehlo.compare` with a scalar constant (`tensor<f64>`), the operand shapes mismatch: `(tensor<1xf64>, tensor<f64>)`. StableHLO requires same-shaped operands, so `ConvertStableHloToLinalgExt` rejects the op.
+**Problem:** When a `stablehlo.reshape` reduces rank (e.g., `tensor<1xi64>` to `tensor<i64>`) and is followed by a `stablehlo.convert` that changes element type (e.g., `tensor<i64>` to `tensor<f64>`), the `ConvertStableHloToIreeInputDialects` partial conversion remaps values so that the convert fires on the pre-reshape input. This produces `tensor<1xf64>` instead of `tensor<f64>`, and downstream `stablehlo.compare` ops then have mismatched shapes (`tensor<1xf64>` vs `tensor<f64>`).
 
-Discovered via customer FT19 simulation: `jnp.uint64` literals inside `@el.map` function bodies trigger JAX type promotion (`uint64 + int64 -> float64`). The promoted `float64` values flow through the inliner with the shape mismatch. The error manifests as: `failed to legalize operation 'stablehlo.compare' that was explicitly marked illegal: (tensor<1xf64>, tensor<f64>) -> tensor<i1>`.
+Discovered via customer FT19 simulation: `jnp.uint64` literals inside `@el.map` function bodies trigger JAX type promotion (`uint64 + int64 -> float64`). The promoted `float64` values flow through `reshape -> convert` chains. When `ConvertStableHloToIreeInputDialects` remaps these, the compare shape mismatch surfaces as: `failed to legalize operation 'stablehlo.compare' that was explicitly marked illegal: (tensor<1xf64>, tensor<f64>) -> tensor<i1>`.
 
-**Fix:** Adds a module-level pass that walks every `func::FuncOp` for `stablehlo::CompareOp` ops with mismatched operand ranks. For each, inserts `stablehlo::BroadcastInDimOp` on the lower-rank operand to align shapes with the higher-rank operand, then replaces the compare with one using the aligned operands. Preserves the original `comparison_direction` and `compare_type` attributes.
+**Fix:** Adds a module-level pass that hoists `stablehlo.convert` past `stablehlo.reshape` when the reshape reduces rank and the convert changes element type. The rewrite swaps `reshape(tensor<1xT>) -> convert(tensor<T> -> tensor<U>)` into `convert(tensor<1xT> -> tensor<1xU>) -> reshape(tensor<1xU> -> tensor<U>)`. This ensures the convert preserves shape and the reshape only changes shape, preventing `ConvertStableHloToIreeInputDialects` from creating mismatched operands.
 
-**Lines of code:** ~49 lines in `Passes.cpp` (pass body), ~1 line include.
+**Lines of code:** ~58 lines in `Passes.cpp` (pass body), ~1 line include.
 
-**When to remove:** When IREE's InlinerPass + CanonicalizerPass no longer fold reshapes in a way that introduces shape mismatches in element-wise ops, or when `ConvertStableHloToLinalgExt` gains built-in broadcasting support for mismatched operands.
+**When to remove:** When upstream MLIR fixes the `DialectConversion` value-remapping that causes shape changes during partial conversion in `ConvertStableHloToIreeInputDialects`.
 
 ---
 
