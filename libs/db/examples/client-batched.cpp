@@ -36,8 +36,6 @@ struct SensorData {
     float temp;
     float pressure;
     float humidity;
-    bool a;
-    uint8_t b;
 };
 
 class Socket {
@@ -146,8 +144,6 @@ try {
         field<SensorData, &SensorData::temp>(schema(PrimType::F32(), {}, timestamp(time, component("vehicle.temp")))),
         field<SensorData, &SensorData::pressure>(schema(PrimType::F32(), {}, timestamp(time, component("vehicle.pressure")))),
         field<SensorData, &SensorData::humidity>(schema(PrimType::F32(), {}, timestamp(time, component("vehicle.humidity")))),
-        field<SensorData, &SensorData::a>(schema(PrimType::Bool(), {}, timestamp(time, component("vehicle.a")))),
-        field<SensorData, &SensorData::b>(schema(PrimType::U8(), {}, timestamp(time, component("vehicle.b")))),
     });
 
     sock.send(VTableMsg {
@@ -160,8 +156,6 @@ try {
     sock.send(set_component_metadata("vehicle.temp"));
     sock.send(set_component_metadata("vehicle.pressure"));
     sock.send(set_component_metadata("vehicle.humidity"));
-    sock.send(set_component_metadata("vehicle.a"));
-    sock.send(set_component_metadata("vehicle.b"));
 
     std::thread reader(reader_thread_func, ip, port);
 
@@ -171,15 +165,12 @@ try {
         .accel = { 0.0, 0.0, 0.0 },
         .temp = 0.0,
         .pressure = 2.0,
-        .humidity = 3.0,
-        .a = false,
-        .b = 0,
+        .humidity = 3.0
     };
 
     // One packet per tick carries ALL 6 components.
     // At 1kHz this is 1,000 packets/s (not 6,000).
-    // while (true) {
-    for (int i = 0; i < 16; i++) {
+    while (true) {
         auto table_header = PacketHeader {
             .len = 4 + sizeof(sensor_data),
             .ty = PacketType::TABLE,
@@ -189,10 +180,7 @@ try {
 
         sensor_data.time = system_clock::now().time_since_epoch() / microseconds(1);
         sensor_data.temp = std::sin(static_cast<double>(sensor_data.time) / 1000000.0);
-        sensor_data.b++;
-        sensor_data.a = !sensor_data.a;
 
-        // std::cerr << "Writing";
         sock.write_all(&table_header, sizeof(table_header));
         sock.write_all(&sensor_data, sizeof(sensor_data));
         usleep(1000);
