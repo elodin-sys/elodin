@@ -374,6 +374,9 @@ async fn run_follower_inner(config: &FollowConfig, db: &Arc<DB>) -> Result<(), E
                             .has_followed_components
                             .load(std::sync::atomic::Ordering::Acquire),
                         is_follower: true,
+                        batch_max_ts: Timestamp(i64::MIN),
+                        batch_min_ts: Timestamp(i64::MAX),
+                        batch_has_ts: false,
                     };
                     match table.sink(&state.vtable_registry, &mut sink) {
                         Ok(Ok(())) => {}
@@ -384,6 +387,7 @@ async fn run_follower_inner(config: &FollowConfig, db: &Arc<DB>) -> Result<(), E
                             warn!(?e, "vtable error in follow-stream table");
                         }
                     }
+                    sink.flush_timestamps();
                     if sink.sunk_new_time_series {
                         db.vtable_gen
                             .value
