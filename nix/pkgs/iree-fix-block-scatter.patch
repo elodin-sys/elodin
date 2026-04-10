@@ -1,0 +1,149 @@
+--- a/compiler/plugins/input/StableHLO/Conversion/StableHLOCustomCalls.cpp
++++ b/compiler/plugins/input/StableHLO/Conversion/StableHLOCustomCalls.cpp
+@@ -239,6 +239,138 @@
+   }
+ };
+ 
++// ===----------------------------------------------------------------------===//
++// Block scatter -> dynamic_update_slice rewriter
++// ===----------------------------------------------------------------------===//
++//
++// JAX's `.at[row:row+n, col:col+n].set(block)` on a matrix produces:
++//   stablehlo.scatter(%operand, %indices, %update) {
++//     scatter_dimension_numbers = #stablehlo.scatter<
++//       update_window_dims = [0, 1],
++//       scatter_dims_to_operand_dims = [0, 1]>,
++//     unique_indices = true }
++//
++// IREE 3.11.0's LinalgExt scatter verifier rejects the lowered op because the
++// indices rank does not satisfy the batchRank+1 constraint for indexDepth=2.
++//
++// Fix: rewrite eligible multi-dim scatters into stablehlo.dynamic_update_slice,
++// which IREE handles correctly.  This generalises ScatterIntoConstantRewriter
++// (which only handles 1D, single-element, constant-operand scatters).
++//
++// Match criteria:
++//   - single input, single update
++//   - unique_indices = true
++//   - scatter body is identity (yield second block arg = replacement)
++//   - inserted_window_dims is empty
++//   - update_window_dims = [0 .. update_rank-1]  (entire update is the window)
++//   - scatter_dims_to_operand_dims sequential from 0
++//   - does NOT require constant operand (handles chained scatters)
++
++struct BlockScatterToDynamicUpdateSlice final
++    : OpRewritePattern<mlir::stablehlo::ScatterOp> {
++  using Base::Base;
++
++  LogicalResult matchAndRewrite(mlir::stablehlo::ScatterOp op,
++                                PatternRewriter &rewriter) const final {
++    if (op.getInputs().size() != 1 || op.getUpdates().size() != 1)
++      return failure();
++    if (!op.getUniqueIndices())
++      return failure();
++
++    // Check the scatter body is a pure replacement (yield second block arg).
++    Region &body = op.getUpdateComputation();
++    if (!body.hasOneBlock())
++      return failure();
++    auto &block = body.front();
++    auto yieldOp =
++        dyn_cast<mlir::stablehlo::ReturnOp>(block.getTerminator());
++    if (!yieldOp || yieldOp.getNumOperands() != 1)
++      return failure();
++    if (yieldOp.getOperand(0) != block.getArgument(1))
++      return failure();
++
++    auto dimNumbers = op.getScatterDimensionNumbers();
++
++    // inserted_window_dims must be empty.
++    if (!dimNumbers.getInsertedWindowDims().empty())
++      return failure();
++
++    Value update = op.getUpdates()[0];
++    auto updateTy = dyn_cast<RankedTensorType>(update.getType());
++    if (!updateTy)
++      return failure();
++    int64_t updateRank = updateTy.getRank();
++
++    // update_window_dims must be [0, 1, ..., updateRank-1].
++    auto uwDims = dimNumbers.getUpdateWindowDims();
++    if (static_cast<int64_t>(uwDims.size()) != updateRank)
++      return failure();
++    for (int64_t i = 0; i < updateRank; ++i)
++      if (uwDims[i] != i)
++        return failure();
++
++    // scatter_dims_to_operand_dims must be sequential from 0.
++    auto sdtod = dimNumbers.getScatterDimsToOperandDims();
++    int64_t indexDepth = sdtod.size();
++    for (int64_t i = 0; i < indexDepth; ++i)
++      if (sdtod[i] != i)
++        return failure();
++
++    Value operand = op.getInputs()[0];
++    auto operandTy = dyn_cast<RankedTensorType>(operand.getType());
++    if (!operandTy)
++      return failure();
++
++    Value scatterIndices = op.getScatterIndices();
++    auto idxTy = dyn_cast<RankedTensorType>(scatterIndices.getType());
++    if (!idxTy)
++      return failure();
++
++    auto loc = op.getLoc();
++    auto idxElemTy = idxTy.getElementType();
++    auto scalarIdxTy = RankedTensorType::get({}, idxElemTy);
++
++    // Extract individual scalar start indices from the index vector.
++    SmallVector<Value> startIndices;
++    for (int64_t i = 0; i < indexDepth; ++i) {
++      OperationState sliceSt(loc, "stablehlo.slice");
++      sliceSt.addTypes({RankedTensorType::get({1}, idxElemTy)});
++      sliceSt.addOperands({scatterIndices});
++      sliceSt.addAttribute(
++          "start_indices", rewriter.getDenseI64ArrayAttr({i}));
++      sliceSt.addAttribute(
++          "limit_indices", rewriter.getDenseI64ArrayAttr({i + 1}));
++      sliceSt.addAttribute(
++          "strides", rewriter.getDenseI64ArrayAttr({1}));
++      Value sliced = rewriter.create(sliceSt)->getResult(0);
++
++      OperationState reshapeSt(loc, "stablehlo.reshape");
++      reshapeSt.addTypes({scalarIdxTy});
++      reshapeSt.addOperands({sliced});
++      startIndices.push_back(
++          rewriter.create(reshapeSt)->getResult(0));
++    }
++
++    // Pad with zero for operand dims not covered by scatter indices.
++    for (int64_t i = indexDepth; i < operandTy.getRank(); ++i) {
++      auto zeroAttr = DenseElementsAttr::get(
++          scalarIdxTy, rewriter.getIntegerAttr(idxElemTy, 0));
++      startIndices.push_back(
++          rewriter.create<mlir::stablehlo::ConstantOp>(loc, zeroAttr));
++    }
++
++    OperationState dusSt(loc, "stablehlo.dynamic_update_slice");
++    dusSt.addTypes({operandTy});
++    SmallVector<Value> dusOperands = {operand, update};
++    dusOperands.append(startIndices.begin(), startIndices.end());
++    dusSt.addOperands(dusOperands);
++    Operation *dus = rewriter.create(dusSt);
++
++    rewriter.replaceOp(op, dus->getResults());
++    return success();
++  }
++};
++
+ // ===----------------------------------------------------------------------===//
+ // IEEE 754 power(x, 0) = 1 fixup
+ // ===----------------------------------------------------------------------===//
+@@ -523,7 +655,7 @@
+ 
+     RewritePatternSet patterns(ctx);
+-    patterns.add<HouseholderReflectorRewriter, ShapeAssertionDrop, ScatterIntoConstantRewriter, LapackCustomCallRewriter>(ctx);
++    patterns.add<HouseholderReflectorRewriter, ShapeAssertionDrop, ScatterIntoConstantRewriter, BlockScatterToDynamicUpdateSlice, LapackCustomCallRewriter>(ctx);
+     if (failed(applyPatternsGreedily(f, std::move(patterns)))) {
+       signalPassFailure();
+     }

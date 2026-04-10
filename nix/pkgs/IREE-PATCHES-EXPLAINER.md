@@ -15,7 +15,7 @@ Two separate nix derivations handle IREE:
 
 | Derivation | File | Patches | Purpose |
 |---|---|---|---|
-| `iree-compiler-source` | `nix/pkgs/iree-compiler-source.nix` | 7 custom patches | Builds `iree-compile` + `iree-lld` from IREE v3.11.0 source |
+| `iree-compiler-source` | `nix/pkgs/iree-compiler-source.nix` | 9 custom patches | Builds `iree-compile` + `iree-lld` from IREE v3.11.0 source |
 | `iree-runtime` | `nix/pkgs/iree-runtime.nix` | None | Builds IREE C runtime static libraries (headers + ~115 `.a` files) |
 
 The `nix/shell.nix` wires both into the dev environment:
@@ -30,7 +30,7 @@ The compiler vendors `llvm-project`, `stablehlo`, `flatcc`, `benchmark`, and `pr
 
 ### 2.1 Nix Patch Application Order
 
-Nix applies patches sequentially in the array order declared in `iree-compiler-source.nix` (lines 66-74). Each patch modifies the IREE source tree before CMake runs:
+Nix applies patches sequentially in the array order declared in `iree-compiler-source.nix`. Each patch modifies the IREE source tree before CMake runs:
 
 | # | Patch file | Target file(s) |
 |---|---|---|
@@ -38,11 +38,13 @@ Nix applies patches sequentially in the array order declared in `iree-compiler-s
 | 2 | `iree-fix-scalar-concat.patch` | `compiler/.../Preprocessing/Canonicalization.cpp` |
 | 3 | `iree-fix-lapack-custom-call.patch` | `compiler/.../Conversion/StableHLOCustomCalls.cpp` |
 | 4 | `iree-fix-power-zero.patch` | `compiler/.../Conversion/StableHLOCustomCalls.cpp` |
-| 5 | `iree-fix-large-constant-promotion.patch` | `StableHLOCustomCalls.cpp`, `Passes.cpp`, `Passes.h` |
-| 6 | `iree-fix-case-to-if.patch` | `StableHLOCustomCalls.cpp`, `Passes.cpp` |
-| 7 | `iree-fix-scf-to-cf.patch` | `Passes.cpp` |
+| 5 | `iree-fix-block-scatter.patch` | `compiler/.../Conversion/StableHLOCustomCalls.cpp` |
+| 6 | `iree-fix-large-constant-promotion.patch` | `StableHLOCustomCalls.cpp`, `Passes.cpp`, `Passes.h` |
+| 7 | `iree-fix-case-to-if.patch` | `StableHLOCustomCalls.cpp`, `Passes.cpp` |
+| 8 | `iree-fix-scf-to-cf.patch` | `Passes.cpp` |
+| 9 | `iree-fix-inline-initializer.patch` | `HALInlineDialect.cpp`, `HALLoaderDialect.cpp` |
 
-Patches 3-6 all modify `StableHLOCustomCalls.cpp`. They apply cleanly because each inserts at different line offsets. Patches 5-7 all modify `Passes.cpp`, each appending at different pipeline positions.
+Patches 3-7 all modify `StableHLOCustomCalls.cpp`. They apply cleanly because each inserts at different line offsets. Patches 6-8 all modify `Passes.cpp`, each appending at different pipeline positions.
 
 ### 2.2 MLIR Pass Pipeline Execution Order
 
@@ -61,18 +63,19 @@ StableHLO input from JAX
 [CSE]
     |
     v
-[elodin-promote-large-constants]  <-- Patch 5 (module-level pass)
+[elodin-promote-large-constants]  <-- Patch 6 (module-level pass)
     |
     v
-[elodin-outline-case-ops]  <-- Patch 6 (module-level pass)
+[elodin-outline-case-ops]  <-- Patch 7 (module-level pass)
     |
     v
-[LegalizeStableHLOCustomCalls]  <-- Patches 3 + 4 (per-function pass)
-    |   fixupPowerZeroExponent  (Patch 4)
-    |   rewriteSolvePattern     (Patch 3)
-    |   removeDeadWhileLoops    (Patch 3)
-    |   LapackCustomCallRewriter   (Patch 3)
-    |   ScatterIntoConstantRewriter (Patch 3)
+[LegalizeStableHLOCustomCalls]  <-- Patches 3, 4, 5 (per-function pass)
+    |   fixupPowerZeroExponent             (Patch 4)
+    |   rewriteSolvePattern                (Patch 3)
+    |   removeDeadWhileLoops               (Patch 3)
+    |   LapackCustomCallRewriter           (Patch 3)
+    |   ScatterIntoConstantRewriter        (Patch 3)
+    |   BlockScatterToDynamicUpdateSlice   (Patch 5)
     |
     v
 [LegalizeControlFlow]  (stablehlo.case -> scf.if)
@@ -85,7 +88,7 @@ StableHLO input from JAX
 [ChloLegalizeToStablehlo]
     |
     v
-[elodin-lower-scf-if-to-cf]  <-- Patch 7 (module-level pass)
+[elodin-lower-scf-if-to-cf]  <-- Patch 8 (module-level pass)
     |
     v
 [ConvertStableHloToIreeInputDialects]
@@ -96,8 +99,8 @@ StableHLO input from JAX
 
 Two distinct pipeline phases:
 
-- **Early pipeline** (StableHLO preprocessing): patches 2, 5, 6, 3, 4 all run before `LegalizeControlFlow` converts `stablehlo.case` to `scf.if`.
-- **Late pipeline** (post-inliner): patch 7 runs after the `InlinerPass` has re-inlined everything into `@main`, right before the partial conversion that triggers the dominance bug.
+- **Early pipeline** (StableHLO preprocessing): patches 2, 6, 7, 3, 4, 5 all run before `LegalizeControlFlow` converts `stablehlo.case` to `scf.if`.
+- **Late pipeline** (post-inliner): patch 8 runs after the `InlinerPass` has re-inlined everything into `@main`, right before the partial conversion that triggers the dominance bug.
 
 ---
 
@@ -147,7 +150,7 @@ Two distinct pipeline phases:
 
 1. **`LapackCustomCallRewriter`** -- Rewrites `stablehlo.custom_call @lapack_*_ffi` to `func.call @elodin_lapack.*` with dimension-suffixed names (e.g., `@elodin_lapack.dgesdd_6_6`). Declares the function as a private `func.func` in the module if not already present. At runtime, these resolve to the `elodin_lapack` VM module in `libs/iree-runtime/src/lapack_module.c`.
 
-2. **`ScatterIntoConstantRewriter`** -- Converts scatter-into-constant patterns (`stablehlo.scatter` on a `stablehlo.constant` operand) into `stablehlo.dynamic_update_slice`. Only matches 1D operands with single-element updates and `unique_indices=true`.
+2. **`ScatterIntoConstantRewriter`** -- Converts scatter-into-constant patterns (`stablehlo.scatter` on a `stablehlo.constant` operand) into `stablehlo.dynamic_update_slice`. Only matches 1D operands with single-element updates and `unique_indices=true`. **Note:** This rewriter is now subsumed by `BlockScatterToDynamicUpdateSlice` (patch 5), which handles any rank, any update size, and non-constant operands. Can be removed in a future cleanup.
 
 3. **`rewriteSolvePattern()`** -- Replaces JAX's `jnp.linalg.solve` IR pattern (`lapack_dgetrf_ffi` + `stablehlo.while` pivot loop + `_lu_solve` with two `dtrsm` calls) with a single `lapack_dgetrs_ffi` custom_call. For matrix RHS, inserts transposes before/after. This prevents a fatal MLIR dominance error caused by external `func.call` results crossing while-loop region boundaries.
 
@@ -183,7 +186,35 @@ When `y==0`, the select short-circuits the broken `exp(y*log(x))` expansion.
 
 ---
 
-### 3.5 `iree-fix-large-constant-promotion.patch`
+### 3.5 `iree-fix-block-scatter.patch`
+
+**Layer:** StableHLO custom call legalization (runs in `LegalizeStableHLOCustomCalls` per-function pass, as a greedy pattern alongside LAPACK and 1D scatter rewriters)
+
+**File modified:** `compiler/plugins/input/StableHLO/Conversion/StableHLOCustomCalls.cpp`
+
+**Problem:** JAX's `.at[row:row+n, col:col+n].set(block)` on matrices produces `stablehlo.scatter` ops with multi-dimensional indices (`scatter_dims_to_operand_dims = [0, 1]`). IREE 3.11.0's `iree_linalg_ext.scatter` verifier rejects the lowered op because the indices rank does not satisfy the `batchRank + 1` constraint for `indexDepth = 2`. This blocks any customer simulation that builds matrices via chained block-slice assignments (e.g., EKF Jacobian construction with 18x18 matrices).
+
+Discovered via customer FT19 simulation: the navigation EKF builds an 18x18 Jacobian `G` via five chained `.at[0:3, 0:3].set(...)` calls. Each produces a 2D scatter that IREE cannot lower.
+
+**Fix:** Adds `BlockScatterToDynamicUpdateSlice` rewrite pattern. Matches `stablehlo.scatter` ops where:
+- Single input, single update
+- `unique_indices = true`
+- Scatter body is identity (yields the update value, not an accumulation)
+- `inserted_window_dims` is empty (no window dim collapsing)
+- `update_window_dims` covers all update dimensions `[0, 1, ..., rank-1]`
+- `scatter_dims_to_operand_dims` is sequential from 0
+
+Rewrites to `stablehlo.dynamic_update_slice` by extracting individual scalar start indices from the scatter indices tensor (via `stablehlo.slice` + `stablehlo.reshape`) and padding with zero for operand dimensions not covered by scatter indices. Does NOT require a constant operand, so chained scatters (where each `.set()` feeds into the next) are all rewritten.
+
+**Relationship to `ScatterIntoConstantRewriter` (Patch 3):** `BlockScatterToDynamicUpdateSlice` is strictly more general: it handles any rank, any update size, and non-constant operands. `ScatterIntoConstantRewriter` only handles 1D, single-element, constant-operand scatters. Both are registered; `ScatterIntoConstantRewriter` fires first for the narrow case it was designed for. In a future cleanup, `ScatterIntoConstantRewriter` can be removed entirely since `BlockScatterToDynamicUpdateSlice` subsumes all its matched patterns.
+
+**Lines of code:** ~132 lines inserted.
+
+**When to remove:** When IREE fixes the `iree_linalg_ext.scatter` verifier/lowering to handle the multi-dimensional index patterns that StableHLO scatter produces for block-slice updates.
+
+---
+
+### 3.6 `iree-fix-large-constant-promotion.patch`
 
 **Layer:** Module-level pass (`elodin-promote-large-constants`), registered before `LegalizeStableHLOCustomCalls`
 
@@ -205,7 +236,7 @@ When `y==0`, the select short-circuits the broken `exp(y*log(x))` expansion.
 
 ---
 
-### 3.6 `iree-fix-case-to-if.patch`
+### 3.7 `iree-fix-case-to-if.patch`
 
 **Layer:** Module-level pass (`elodin-outline-case-ops`), registered before `LegalizeStableHLOCustomCalls`
 
@@ -227,7 +258,7 @@ Registered as a module-level pass in `Passes.cpp` via `createModulePass`, runnin
 
 ---
 
-### 3.7 `iree-fix-scf-to-cf.patch`
+### 3.8 `iree-fix-scf-to-cf.patch`
 
 **Layer:** Module-level pass (`elodin-lower-scf-if-to-cf`), registered late in the pipeline right before `ConvertStableHloToIreeInputDialects`
 
@@ -249,23 +280,24 @@ The fix was chosen from three analyzed options (documented in `big-fix.md`). Opt
 
 ### 4.1 File Overlap
 
-Five of seven patches modify files in `compiler/plugins/input/StableHLO/Conversion/`:
+Seven of nine patches modify files in `compiler/plugins/input/StableHLO/Conversion/`:
 
 | File | Patches |
 |---|---|
-| `StableHLOCustomCalls.cpp` | 3, 4, 5, 6 |
-| `Passes.cpp` | 5, 6, 7 |
-| `Passes.h` | 5 |
+| `StableHLOCustomCalls.cpp` | 3, 4, 5, 6, 7 |
+| `Passes.cpp` | 6, 7, 8 |
+| `Passes.h` | 6 |
 | `Preprocessing/Canonicalization.cpp` | 2 |
 | `third_party/.../AttributeParser.cpp` | 1 |
+| `HALInlineDialect.cpp`, `HALLoaderDialect.cpp` | 9 |
 
-Patches 3 and 4 both insert code at the same `StableHLOCustomCalls.cpp` insertion point (before the pass definition block), but at different line offsets. Patch 4 is applied after patch 3, so it inserts relative to the already-patched file. Similarly, patches 5, 6, and 7 each append to `Passes.cpp` at progressively later pipeline positions.
+Patches 3, 4, and 5 all insert code at similar positions in `StableHLOCustomCalls.cpp` (before the pass definition block), but at different line offsets. Each is applied after the previous, so it inserts relative to the already-patched file. Similarly, patches 6, 7, and 8 each append to `Passes.cpp` at progressively later pipeline positions.
 
 Because multiple patches modify overlapping files with offset-dependent hunks, **patch application order matters**. Reordering patches in the nix array can cause fuzz/offset failures. This was observed during development: patch 6's Attempt 3 failed because the code landed at the wrong file position due to ambiguous context matching.
 
 ### 4.2 Shared Infrastructure
 
-Patch 5 introduces the `createModulePass` helper in `Passes.h`:
+Patch 6 introduces the `createModulePass` helper in `Passes.h`:
 
 ```cpp
 inline std::unique_ptr<OperationPass<ModuleOp>>
@@ -274,31 +306,31 @@ createModulePass(std::function<void(ModuleOp)> body,
 ```
 
 This adapter is the foundation for all three module-level Elodin passes:
-- Patch 5: `elodin-promote-large-constants` (default name)
-- Patch 6: `elodin-outline-case-ops`
-- Patch 7: `elodin-lower-scf-if-to-cf`
+- Patch 6: `elodin-promote-large-constants` (default name)
+- Patch 7: `elodin-outline-case-ops`
+- Patch 8: `elodin-lower-scf-if-to-cf`
 
 ### 4.3 Pipeline Ordering Dependencies
 
 The pass execution order creates implicit dependencies between patches:
 
-1. **Patch 5 before Patch 6:** Constants must be promoted before case outlining, because outlining clones the case op body. If a large constant lives inside a case branch, promoting it first avoids duplicating the constant into the outlined function.
+1. **Patch 6 before Patch 7:** Constants must be promoted before case outlining, because outlining clones the case op body. If a large constant lives inside a case branch, promoting it first avoids duplicating the constant into the outlined function.
 
-2. **Patch 6 before Patches 3/4:** Outlining isolates case ops into separate functions before `LegalizeStableHLOCustomCalls` runs. This ensures the LAPACK rewriters and power-zero fixup see clean function bodies without case ops that could confuse pattern matching.
+2. **Patch 7 before Patches 3/4/5:** Outlining isolates case ops into separate functions before `LegalizeStableHLOCustomCalls` runs. This ensures the LAPACK rewriters, power-zero fixup, and scatter rewriters see clean function bodies without case ops that could confuse pattern matching.
 
-3. **Patches 3/4 before LegalizeControlFlow:** The solve pattern rewriter (patch 3) must replace `stablehlo.while` ops before `LegalizeControlFlow` converts `stablehlo.case` to `scf.if`. If the while ops persisted into `scf.if` lowering, they would create additional dominance issues.
+3. **Patches 3/4/5 before LegalizeControlFlow:** The solve pattern rewriter (patch 3) must replace `stablehlo.while` ops before `LegalizeControlFlow` converts `stablehlo.case` to `scf.if`. The block scatter rewriter (patch 5) must convert multi-dim scatters to `dynamic_update_slice` before they reach the LinalgExt lowering.
 
-4. **Patch 7 after InlinerPass:** Patch 7 runs in the late pipeline, after the InlinerPass has re-inlined all functions into `@main`. At this point, patch 6's outlining has been undone. Patch 7 converts `scf.if` to flat control flow right before the conversion pass where the dominance bug lives.
+4. **Patch 8 after InlinerPass:** Patch 8 runs in the late pipeline, after the InlinerPass has re-inlined all functions into `@main`. At this point, patch 7's outlining has been undone. Patch 8 converts `scf.if` to flat control flow right before the conversion pass where the dominance bug lives.
 
-### 4.4 The Layered Defense (Patches 6 + 7)
+### 4.4 The Layered Defense (Patches 7 + 8)
 
-Patches 6 and 7 address the same root problem (the MLIR `DialectConversion` dominance bug) from two angles:
+Patches 7 and 8 address the same root problem (the MLIR `DialectConversion` dominance bug) from two angles:
 
-- **Patch 6 (early pipeline):** Outlines `stablehlo.case` ops so that patch 3's LAPACK rewriters process clean functions. Without this, solve patterns inside case branches would not be rewritten before control-flow legalization.
+- **Patch 7 (early pipeline):** Outlines `stablehlo.case` ops so that patches 3/5's LAPACK and scatter rewriters process clean functions. Without this, solve patterns inside case branches would not be rewritten before control-flow legalization.
 
-- **Patch 7 (late pipeline):** After the InlinerPass re-inlines everything (undoing patch 6's outlining), patch 7 converts all `scf.if` ops to flat `cf.cond_br`/`cf.br`. With no region-holding ops, the partial conversion cannot trigger the dominance bug.
+- **Patch 8 (late pipeline):** After the InlinerPass re-inlines everything (undoing patch 7's outlining), patch 8 converts all `scf.if` ops to flat `cf.cond_br`/`cf.br`. With no region-holding ops, the partial conversion cannot trigger the dominance bug.
 
-Together they form a layered defense: patch 6 ensures correct LAPACK lowering in the early pipeline, and patch 7 prevents the dominance crash in the late pipeline.
+Together they form a layered defense: patch 7 ensures correct LAPACK/scatter lowering in the early pipeline, and patch 8 prevents the dominance crash in the late pipeline.
 
 ---
 
@@ -316,14 +348,16 @@ postUnpack: vendor submodules
     |  flatcc, benchmark, printf
     |
     v
-patches: apply 7 patches sequentially
+patches: apply 9 patches sequentially
     |  1. i1 hex parsing (LLVM/MLIR)
     |  2. scalar concat (StableHLO canonicalization)
     |  3. LAPACK custom call (StableHLO conversion)
     |  4. power zero (StableHLO conversion)
-    |  5. large constant promotion (StableHLO conversion + pipeline)
-    |  6. case outlining (StableHLO conversion + pipeline)
-    |  7. SCF-to-CF lowering (pipeline)
+    |  5. block scatter (StableHLO conversion)
+    |  6. large constant promotion (StableHLO conversion + pipeline)
+    |  7. case outlining (StableHLO conversion + pipeline)
+    |  8. SCF-to-CF lowering (pipeline)
+    |  9. inline initializer (HAL Inline/Loader)
     |
     v
 CMake build (ninja)
@@ -376,9 +410,11 @@ At runtime, `libs/nox-py/src/iree_compile.rs` locates `iree-compile` via `IREE_C
 
 ### 6.2 Code Maintainability
 
-**Consolidate overlapping patches:** Patches 3, 4, 5, and 6 all modify `StableHLOCustomCalls.cpp`. Consolidating them into one or two larger patches would eliminate fuzz/offset drift risk. Patch 6's Attempt 3 failed precisely because a hunk landed at the wrong file position due to ambiguous context matching. A single unified patch for all `StableHLOCustomCalls.cpp` changes would be immune to this class of error.
+**Consolidate overlapping patches:** Patches 3, 4, 5, 6, and 7 all modify `StableHLOCustomCalls.cpp`. Consolidating them into one or two larger patches would eliminate fuzz/offset drift risk. A single unified patch for all `StableHLOCustomCalls.cpp` changes would be immune to the class of error where hunks land at wrong positions due to ambiguous context matching.
 
-**Evaluate patch 6 necessity:** Now that patch 7 addresses the dominance bug at the root (eliminating `scf.if` before partial conversion), investigate whether patch 6 (case outlining) is still required. Patch 6 serves two purposes: (a) isolating case ops during early pipeline for LAPACK rewriter correctness, and (b) preventing the dominance error. Purpose (b) is now handled by patch 7. If purpose (a) can be validated independently, and if removing patch 6 does not break customer artifacts, it would be a significant simplification.
+**Remove `ScatterIntoConstantRewriter` (Patch 3):** `BlockScatterToDynamicUpdateSlice` (patch 5) is strictly more general -- it handles any operand rank, any update size, non-constant operands, and chained scatters. The 1D `ScatterIntoConstantRewriter` in patch 3 is now redundant. Once the block scatter patch has been validated in production across all customer simulations, `ScatterIntoConstantRewriter` can be removed from patch 3 and the `patterns.add<>` list, reducing code complexity and one fewer pattern for the greedy rewriter to evaluate.
+
+**Evaluate patch 7 necessity:** Now that patch 8 addresses the dominance bug at the root (eliminating `scf.if` before partial conversion), investigate whether patch 7 (case outlining) is still required. Patch 7 serves two purposes: (a) isolating case ops during early pipeline for LAPACK rewriter correctness, and (b) preventing the dominance error. Purpose (b) is now handled by patch 8. If purpose (a) can be validated independently, and if removing patch 7 does not break customer artifacts, it would be a significant simplification.
 
 **Document env vars in SKILL.md:** The `ELODIN_IREE_CONSTANT_PROMOTE_THRESHOLD` environment variable (patch 5) is not documented in `.cursor/skills/elodin-iree/SKILL.md`. It should be added alongside the existing `ELODIN_IREE_FLAGS` and `ELODIN_IREE_DUMP_DIR` documentation.
 
@@ -394,9 +430,11 @@ At runtime, `libs/nox-py/src/iree_compile.rs` locates `iree-compile` via `IREE_C
 | 2 (scalar concat) | IREE tiling pass fix | IREE fixes `tensor.expand_shape` for odd-sized 1D |
 | 3 (LAPACK) | IREE LAPACK support | IREE natively supports LAPACK custom_calls |
 | 4 (power zero) | LLVM `math.powf` fix | LLVM PRs [#124402](https://github.com/llvm/llvm-project/pull/124402), [#126338](https://github.com/llvm/llvm-project/pull/126338) land in IREE's bundled LLVM |
-| 5 (constants) | IREE constant handling | IREE improves large-constant hoisting in inner functions |
-| 6 (case outline) | MLIR DialectConversion fix | Dominance bug is resolved upstream; may also be removable if patch 7 alone suffices |
-| 7 (SCF-to-CF) | MLIR DialectConversion fix | Upstream MLIR fixes value-remapping for region-holding ops, or IREE moves to full conversion |
+| 5 (block scatter) | IREE LinalgExt scatter fix | IREE fixes `iree_linalg_ext.scatter` verifier/lowering for multi-dim index patterns from StableHLO |
+| 6 (constants) | IREE constant handling | IREE improves large-constant hoisting in inner functions |
+| 7 (case outline) | MLIR DialectConversion fix | Dominance bug is resolved upstream; may also be removable if patch 8 alone suffices |
+| 8 (SCF-to-CF) | MLIR DialectConversion fix | Upstream MLIR fixes value-remapping for region-holding ops, or IREE moves to full conversion |
+| 9 (inline init) | IREE HAL inliner interfaces | IREE adds `DialectInlinerInterface` to HAL Inline/Loader dialects |
 
 ---
 

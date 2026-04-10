@@ -354,6 +354,28 @@ def uint_use_step(transition: OpTransition, op_state: OpState) -> OpState:
     )
 
 
+# --- Block scatter step (exercises 2D .at[slice,slice].set() on matrices) ---
+# Mirrors the customer's EKF Jacobian construction in navigation.py where an
+# 18x18 matrix is built via chained .at[row:row+3, col:col+3].set(block).
+# IREE's iree_linalg_ext.scatter verifier rejects the multi-dimensional scatter
+# that JAX emits for this pattern; our compiler patch rewrites it to
+# stablehlo.dynamic_update_slice.
+
+
+@el.map
+def block_scatter_step(cov: Cov6) -> Cov6:
+    G = (
+        jnp.zeros((6, 6))
+        .at[0:3, 0:3]
+        .set(jnp.eye(3) * 0.99)
+        .at[0:3, 3:6]
+        .set(DT * jnp.eye(3))
+        .at[3:6, 3:6]
+        .set(jnp.eye(3) * 0.99)
+    )
+    return G @ cov @ G.T + 0.001 * jnp.eye(6)
+
+
 def world() -> el.World:
     w = el.World()
     w.spawn(
@@ -408,4 +430,5 @@ def system() -> el.System:
         | mode_step
         | uint_override_step
         | uint_use_step
+        | block_scatter_step
     )

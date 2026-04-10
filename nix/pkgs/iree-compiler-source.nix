@@ -72,6 +72,7 @@ in
       ./iree-fix-scalar-concat.patch
       ./iree-fix-lapack-custom-call.patch
       ./iree-fix-power-zero.patch
+      ./iree-fix-block-scatter.patch
       ./iree-fix-large-constant-promotion.patch
       ./iree-fix-case-to-if.patch
       ./iree-fix-scf-to-cf.patch
