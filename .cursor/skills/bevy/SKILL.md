@@ -1,12 +1,27 @@
+---
+name: bevy
+description: Tips for working with a Bevy application
+---
+
+# Tips for Bevy Applications
+
+> Bevy is an Entity Component System game engine built in Rust.
+> https://github.com/bevyengine/bevy | Apache-2.0 and MIT licensed
+
+* * *
+
+
 # Bevy Performance Tips
 
 Short patterns to help the Elodin Editor stay responsive. 
 
 (This doc was written with Elodin targeting Bevy 0.17.)
 
+
+
 ## Profiling Bevy systems with Tracy
 
-Before trying to optimize anything, it is a good practice to measure its performance first and find the hot spots. You might turn a section of code into a zero-alloc, no clone, and it may have negligible impact because it is only called once. See the [Elodin Tracy skill document](../../.cursor/skills/elodin-tracy/SKILL.md) for how to prepare and run the profiler with Elodin.
+Before trying to optimize anything, it is a good practice to measure its performance first and find the hot spots. You might turn a section of code into a zero-alloc, no clone, and it may have negligible impact because it is only called once. See the [Elodin Tracy skill document](../elodin-tracy/SKILL.md) for how to prepare and run the profiler with Elodin.
 
 ## Use `Local<T>` for heap-backed, per-system state
 
@@ -43,6 +58,40 @@ fn collect_targets(
 ```
 
 Note: `Vec::new()` does not allocate but the first insertion does. Thus a `Vec` on a seldom executed branch, can be left as-is.
+
+### Beware `format!` in systems
+
+You should also be wary of strings. Any call to `format!` allocates a string.
+```rust
+fn system_c(windows: Query<Entity, With<&Window>>) {
+    for id in &windows {
+        let s = format!("ID is {}", id);
+    }
+}
+```
+You can use `Local<String>` as I did before but for this string:
+
+```rust
+fn system_d(windows: Query<Entity, With<&Window>>,
+            mut s: Local<String>) {
+    for id in &windows {
+        s.clear()
+        let _ = write!(s, "ID is {}", id);
+    }
+}
+```
+
+But maybe you're not even in a system. Maybe you're in some other Rust code, then you can still minimize your allocations doing something like this:
+
+```rust
+fn deep_dark_code(...) {
+    let mut s = String::new();
+    for id in &windows {
+        s.clear();
+        let _ = write!(s, "ID is {}", id);
+    }
+}
+```
 
 ## Query filters: Limit what is evaluated
 
@@ -371,7 +420,7 @@ It is easier to reason about where messages are handled than where events are ha
 
 #### Message Reading Gotcha
 
-There is a caveat to message reading. Message reading buffers for two frames, which means if you only read every other frame, you will still get all the messages. However, if you have a system like the one below that early exits on a condition, then you may get messages you don't expect.
+There is a caveat to message reading. Message reading buffers for two frames, which means if you only read every other frame, you will still get all the messages. However, if you have a system like the one below that early exits on a condition, then you may get messages you did not expect.
 
 ```rust
 fn maybe_read(run: In(bool), messages: MessageReader<M>) {
@@ -384,13 +433,13 @@ fn maybe_read(run: In(bool), messages: MessageReader<M>) {
 }
 ```
 
-If a system A emits message M0 and let us say it is important for frame 0 and only frame 0 but `maybe_read` does not read the message, the message will persist to the next frame where it was not emitted, which can have frustrating effects. 
+If a system A emits message M0 that is important for frame 0 and only frame 0 but `maybe_read` does not read the message, the message will persist to the next frame where it was not emitted, which can have frustrating effects. 
 
 ```
 frame 0: A emits M0 -> maybe_read(false)
 frame 1: A -> maybe_read(true) reads M0
 ```
-How bad can it be? (The author had a spurious input bug that persisted for over a year due to a case like this.)
+How bad can it be? The author had a spurious input bug that persisted for over a year due to a case like this: The colon ':' key would pull up a text field, and sometimes that text field would be polluted with a ':' as its first character.
 
 ```
 frame 0: A emits "enter key pressed" -> maybe_read(false) -> B shows dialog for delete file?
@@ -399,7 +448,7 @@ frame 1: A -> maybe_read(true) reads "enter key pressed" -> B deletes file
 
 ### Before
 
-Visit every power-up on every frame even when the only reason to refresh them is an occasional input (here, a key press).
+Consider an example where we do work when a PowerUp is added. Initially we visit every power-up on every frame even when the only reason to refresh them is an occasional input (here, a key press).
 
 ```rust
 #[derive(Component)]
@@ -484,3 +533,117 @@ fn main() {
 }
 ```
 
+In general using messages is recommended over events since their handling is better controlled and they're easier to reason about unless there is an overriding concern or ergonomics.
+
+# Bevy Async
+
+Use `bevy_defer` for async.
+
+A lot of state was kept in structs to essentially handle asynchronous, multi-frame operations. Many a bespoke state machine was made. If you are bit by a case like this in the future, and don't have a suitable async solution like `bevy_defer`, I'd recommend doing something like this:
+
+```rust
+enum StateMachine {
+     A,
+     B { a: u32 },
+     C { a: u32, b: String },
+     D { a: String },
+     E,
+}
+
+fn poor_mans_async(state: &mut StateMachine) {
+    match state {
+        StateMachine::A => {
+            *state = StateMachine::B { a: 0 };
+        }
+        StateMachine::B { a } => {
+            *a += 1;
+            if a >= 100 {
+                *state = StateMachine::C { a, b: String::from("hi") };
+            }
+        }
+        // ...
+    }
+}
+
+fn run_poor_mans_async() {
+    let mut state = StateMachine::A;
+    while state != StateMachine::E {
+        poor_mans_async(&mut state);
+    }
+}
+```
+
+The above is essentially what async writes for us when we write code that looks like the following:
+
+```rust
+async fn rich_mans_async() -> Result<(), AccessWorld> {
+     let mut a = 0;
+     AsyncWorld.yield_now().await?;
+     while a < 100 {
+         a += 1;
+         AsyncWorld.yield_now().await?;
+     }
+     let b = String::from("hi");
+     // ...
+}
+```
+
+Luckily, `bevy_defer` is an excellent library that allows us to access Bevy resources within an async context. It will not let you keep resources or references once you return from an async context via `.await`, so many times it'll hand you a Bevy resource to a closure to ensure that no references to it are kept between `.await`s.
+
+Use `bevy_defer` if you have an operation that runs asynchronously over multiple frames that requires timing or coordination.
+
+# Bevy Ergonomics
+
+## Avoid type names that contain "Secondary" or "Primary".
+
+We had two distinct code paths: one for the primary window, and another for secondary windows. This was codified in the type names that would sometimes impede them from code reuse. I have tried to unify these things where appropriate. 
+
+## Consider using an event or message if your enum has a no-operation variant.
+
+We had a `RelayoutWindowPhase` which is used to move windows to screens and change their dimensions. It had an `Idle` variant; `Idle` did nothing. In such cases it may be the case that you want to fire an event or send a message to have it do something.
+
+## Prefer field access to bare accessory methods.
+
+It was considered good practice in OO to always shield access to fields via a method or property accessor.
+
+```rust
+struct A {
+    a: usize,
+    b: u32,
+}
+
+impl A {
+    fn a(&self) -> usize {
+        self.a
+    }
+
+    fn a_mut(&mut self) -> &mut usize {
+        &mut self.a
+    }
+}
+```
+If you have bare accessors like the above, it is preferred to increase the visibility of your fields to `pub(crate)` or `pub` and manipulate the fields directly. It's clearer in the code what's happening. It's more performant. Many things that OO accessors aimed to guard against can't happen in Rust:
+
+a. No one can stick `NULL` where some other value ought to be.
+b. No one can write into your value unless they have a `&mut` or owned value.
+
+One exception to this preference is when implementing traits, which cannot express field constraints.
+
+## Prefer .chain() to many .before() and .after() constraints in scheduling.
+
+If you have systems that look like this:
+```rust
+app
+    .add_systems(Update, a.before(b))
+    .add_systems(Update, b.before(c))
+    .add_systems(Update, c.before(d))
+    .add_systems(Update, d.before(e));
+```
+Consider using a chain instead.
+```rust
+app
+    .add_systems(Update, (a,
+                          b,
+                          c,
+                          d).chain());
+```
