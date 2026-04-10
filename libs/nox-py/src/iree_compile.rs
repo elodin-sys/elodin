@@ -577,8 +577,16 @@ def compile_to_vmfb(
     # Integer signedness: PrimTypeExt maps all unsigned PrimTypes to signed
     # ElementTypes (S64 etc.) so that JAX's type promotion lattice never
     # mixes uint64+int64 (which promotes to float64).  StableHLO and IREE
-    # use signless integers anyway.  Do NOT do a blanket text replacement
-    # here -- it would corrupt JAX-internal threefry PRNG bit-manipulation.
+    # use signless integers anyway.
+    #
+    # Replace ui64 with i64 in the MLIR text.  This is safe because:
+    #   - PrimTypeExt already maps U64 -> S64 throughout the pipeline
+    #   - StableHLO/IREE signless integers have identical bit patterns
+    #   - Customer values are small (state machine states 0-4)
+    # Do NOT replace ui32/ui16/ui8: JAX's threefry PRNG uses uint32
+    # internally and stablehlo.convert ui32 -> f64 would produce wrong
+    # values for PRNG outputs > 2^31.
+    stablehlo_mlir = stablehlo_mlir.replace('ui64', 'i64')
 
     compile_target, runtime_device = _resolve_iree_device(requested_device)
 

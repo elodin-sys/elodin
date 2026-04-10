@@ -10,6 +10,7 @@ Exercises every JAX linalg operation used in aerospace simulations:
   - norm (vector/matrix norms)
   - .at[idx].set() scatter-into-constant (mode selector)
   - U64-typed components with uint64 transition tables and indexed access
+  - uint64 literals inside function body mixed with int64 inputs (promotion cascade)
 
 Uses both @el.map and @el.map_seq to exercise both compilation paths.
 """
@@ -376,6 +377,28 @@ def block_scatter_step(cov: Cov6) -> Cov6:
     return G @ cov @ G.T + 0.001 * jnp.eye(6)
 
 
+# --- Uint64 internal body (exercises uint64 literals inside function body) ---
+# Mirrors the customer's sensors.py:update_staged_noise_state pattern where
+# jnp.uint64 constants are created INSIDE the function body and compared/mixed
+# with int64 inputs via jnp.where.  This triggers JAX's uint64+int64 -> float64
+# type promotion, producing stablehlo.compare ops with FLOAT comparison_type
+# on singleton-lowered tensors (tensor<1xf64> vs tensor<f64> shape mismatch).
+# Unlike uint_override_step/uint_use_step which only exercise uint64 at RETURN
+# boundaries (handled by sanitize_unsigned_to_signed), this exercises uint64
+# at the INTERNAL operation level.
+
+
+@el.map
+def uint_internal_step(op_state: OpState) -> OpState:
+    threshold_cross = op_state[0] <= jnp.uint64(3)
+    new_val = jnp.where(threshold_cross, jnp.uint64(1), op_state[0])
+
+    active = op_state[1] <= jnp.uint64(10)
+    counter = jnp.where(active, op_state[1] + jnp.uint64(1), op_state[1])
+
+    return jnp.array([new_val, counter, op_state[2], op_state[3]], dtype=jnp.uint64)
+
+
 def world() -> el.World:
     w = el.World()
     w.spawn(
@@ -430,5 +453,6 @@ def system() -> el.System:
         | mode_step
         | uint_override_step
         | uint_use_step
+        | uint_internal_step
         | block_scatter_step
     )

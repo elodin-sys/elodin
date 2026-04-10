@@ -15,7 +15,7 @@ Two separate nix derivations handle IREE:
 
 | Derivation | File | Patches | Purpose |
 |---|---|---|---|
-| `iree-compiler-source` | `nix/pkgs/iree-compiler-source.nix` | 9 custom patches | Builds `iree-compile` + `iree-lld` from IREE v3.11.0 source |
+| `iree-compiler-source` | `nix/pkgs/iree-compiler-source.nix` | 10 custom patches | Builds `iree-compile` + `iree-lld` from IREE v3.11.0 source |
 | `iree-runtime` | `nix/pkgs/iree-runtime.nix` | None | Builds IREE C runtime static libraries (headers + ~115 `.a` files) |
 
 The `nix/shell.nix` wires both into the dev environment:
@@ -42,9 +42,10 @@ Nix applies patches sequentially in the array order declared in `iree-compiler-s
 | 6 | `iree-fix-large-constant-promotion.patch` | `StableHLOCustomCalls.cpp`, `Passes.cpp`, `Passes.h` |
 | 7 | `iree-fix-case-to-if.patch` | `StableHLOCustomCalls.cpp`, `Passes.cpp` |
 | 8 | `iree-fix-scf-to-cf.patch` | `Passes.cpp` |
-| 9 | `iree-fix-inline-initializer.patch` | `HALInlineDialect.cpp`, `HALLoaderDialect.cpp` |
+| 9 | `iree-fix-compare-broadcast.patch` | `Passes.cpp` |
+| 10 | `iree-fix-inline-initializer.patch` | `HALInlineDialect.cpp`, `HALLoaderDialect.cpp` |
 
-Patches 3-7 all modify `StableHLOCustomCalls.cpp`. They apply cleanly because each inserts at different line offsets. Patches 6-8 all modify `Passes.cpp`, each appending at different pipeline positions.
+Patches 3-7 all modify `StableHLOCustomCalls.cpp`. They apply cleanly because each inserts at different line offsets. Patches 6-9 all modify `Passes.cpp`, each appending at different pipeline positions.
 
 ### 2.2 MLIR Pass Pipeline Execution Order
 
@@ -81,8 +82,13 @@ StableHLO input from JAX
 [LegalizeControlFlow]  (stablehlo.case -> scf.if)
     |
     v
-... InlinerPass, Canonicalize, CSE, LegalizeShapeComputations,
-    ConvertStableHloToLinalgExt ...
+... InlinerPass, Canonicalize, CSE, LegalizeShapeComputations ...
+    |
+    v
+[elodin-broadcast-mismatched-shapes]  <-- Patch 9 (module-level pass)
+    |
+    v
+[ConvertStableHloToLinalgExt]
     |
     v
 [ChloLegalizeToStablehlo]
@@ -276,16 +282,34 @@ The fix was chosen from three analyzed options (documented in `big-fix.md`). Opt
 
 ---
 
+### 3.9 `iree-fix-compare-broadcast.patch`
+
+**Layer:** Module-level pass (`elodin-broadcast-mismatched-shapes`), registered after the InlinerPass + CanonicalizerPass + CSEPass and immediately before `ConvertStableHloToLinalgExt`
+
+**File modified:** `Passes.cpp`
+
+**Problem:** After the InlinerPass re-inlines all outlined functions into `@main` and the CanonicalizerPass runs, `stablehlo.reshape` ops can be folded into `stablehlo.convert` ops. This changes a `convert(reshape(tensor<1xi64>) -> tensor<i64>) -> tensor<f64>` sequence into a direct `convert(tensor<1xi64>) -> tensor<1xf64>`, producing `tensor<1xf64>` where the original function had `tensor<f64>`. When this value participates in a `stablehlo.compare` with a scalar constant (`tensor<f64>`), the operand shapes mismatch: `(tensor<1xf64>, tensor<f64>)`. StableHLO requires same-shaped operands, so `ConvertStableHloToLinalgExt` rejects the op.
+
+Discovered via customer FT19 simulation: `jnp.uint64` literals inside `@el.map` function bodies trigger JAX type promotion (`uint64 + int64 -> float64`). The promoted `float64` values flow through the inliner with the shape mismatch. The error manifests as: `failed to legalize operation 'stablehlo.compare' that was explicitly marked illegal: (tensor<1xf64>, tensor<f64>) -> tensor<i1>`.
+
+**Fix:** Adds a module-level pass that walks every `func::FuncOp` for `stablehlo::CompareOp` ops with mismatched operand ranks. For each, inserts `stablehlo::BroadcastInDimOp` on the lower-rank operand to align shapes with the higher-rank operand, then replaces the compare with one using the aligned operands. Preserves the original `comparison_direction` and `compare_type` attributes.
+
+**Lines of code:** ~49 lines in `Passes.cpp` (pass body), ~1 line include.
+
+**When to remove:** When IREE's InlinerPass + CanonicalizerPass no longer fold reshapes in a way that introduces shape mismatches in element-wise ops, or when `ConvertStableHloToLinalgExt` gains built-in broadcasting support for mismatched operands.
+
+---
+
 ## 4. Patch Interaction Map
 
 ### 4.1 File Overlap
 
-Seven of nine patches modify files in `compiler/plugins/input/StableHLO/Conversion/`:
+Eight of ten patches modify files in `compiler/plugins/input/StableHLO/Conversion/`:
 
 | File | Patches |
 |---|---|
 | `StableHLOCustomCalls.cpp` | 3, 4, 5, 6, 7 |
-| `Passes.cpp` | 6, 7, 8 |
+| `Passes.cpp` | 6, 7, 8, 9 |
 | `Passes.h` | 6 |
 | `Preprocessing/Canonicalization.cpp` | 2 |
 | `third_party/.../AttributeParser.cpp` | 1 |
@@ -434,7 +458,8 @@ At runtime, `libs/nox-py/src/iree_compile.rs` locates `iree-compile` via `IREE_C
 | 6 (constants) | IREE constant handling | IREE improves large-constant hoisting in inner functions |
 | 7 (case outline) | MLIR DialectConversion fix | Dominance bug is resolved upstream; may also be removable if patch 8 alone suffices |
 | 8 (SCF-to-CF) | MLIR DialectConversion fix | Upstream MLIR fixes value-remapping for region-holding ops, or IREE moves to full conversion |
-| 9 (inline init) | IREE HAL inliner interfaces | IREE adds `DialectInlinerInterface` to HAL Inline/Loader dialects |
+| 9 (compare broadcast) | IREE InlinerPass shape folding | IREE's InlinerPass + CanonicalizerPass no longer fold reshapes into shape mismatches, or ConvertStableHloToLinalgExt gains broadcasting support |
+| 10 (inline init) | IREE HAL inliner interfaces | IREE adds `DialectInlinerInterface` to HAL Inline/Loader dialects |
 
 ---
 

@@ -76,6 +76,7 @@ in
       ./iree-fix-large-constant-promotion.patch
       ./iree-fix-case-to-if.patch
       ./iree-fix-scf-to-cf.patch
+      ./iree-fix-compare-broadcast.patch
       ./iree-fix-inline-initializer.patch
     ];
 

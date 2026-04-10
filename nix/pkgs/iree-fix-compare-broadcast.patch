@@ -1,0 +1,66 @@
+--- a/compiler/plugins/input/StableHLO/Conversion/Passes.cpp
++++ b/compiler/plugins/input/StableHLO/Conversion/Passes.cpp
+@@ -7,6 +7,7 @@
+ #include "compiler/plugins/input/StableHLO/Conversion/Passes.h"
+ 
+ #include "compiler/plugins/input/StableHLO/Conversion/Preprocessing/Passes.h"
++#include "stablehlo/dialect/StablehloOps.h"
+ #include "iree/compiler/Dialect/Util/Transforms/Passes.h"
+ #include "iree/compiler/InputConversion/Common/Passes.h"
+ #include "mlir/Conversion/ReconcileUnrealizedCasts/ReconcileUnrealizedCasts.h"
+@@ -83,6 +84,55 @@
+   // Convert to Linalg. After this point, StableHLO will be eliminated.
+   passManager.addNestedPass<func::FuncOp>(
+       stablehlo::createLegalizeShapeComputations());
++
++  // Elodin: broadcast mismatched element-wise operand shapes.
++  // After InlinerPass + CanonicalizerPass, reshape ops can be folded away,
++  // leaving stablehlo.compare ops with operands of different ranks
++  // (e.g., tensor<1xf64> vs tensor<f64>).  StableHLO requires same-shaped
++  // operands, so ConvertStableHloToLinalgExt rejects them.
++  passManager.addPass(createModulePass([](ModuleOp moduleOp) {
++    moduleOp.walk([](func::FuncOp funcOp) {
++      if (funcOp.isDeclaration())
++        return;
++      OpBuilder builder(funcOp.getContext());
++      SmallVector<mlir::stablehlo::CompareOp> compOps;
++      funcOp.walk([&](mlir::stablehlo::CompareOp op) {
++        auto lhsTy = mlir::dyn_cast<RankedTensorType>(op.getLhs().getType());
++        auto rhsTy = mlir::dyn_cast<RankedTensorType>(op.getRhs().getType());
++        if (lhsTy && rhsTy && lhsTy != rhsTy)
++          compOps.push_back(op);
++      });
++      for (auto op : compOps) {
++        auto lhsTy = mlir::cast<RankedTensorType>(op.getLhs().getType());
++        auto rhsTy = mlir::cast<RankedTensorType>(op.getRhs().getType());
++        auto targetShape = lhsTy.getRank() >= rhsTy.getRank()
++                               ? lhsTy.getShape()
++                               : rhsTy.getShape();
++        builder.setInsertionPoint(op);
++        auto loc = op.getLoc();
++        auto bcast = [&](Value v, RankedTensorType vTy) -> Value {
++          if (vTy.getShape() == targetShape)
++            return v;
++          SmallVector<int64_t> dims;
++          int64_t off = (int64_t)targetShape.size() - vTy.getRank();
++          for (int64_t i = 0; i < vTy.getRank(); ++i)
++            dims.push_back(i + off);
++          auto bcastTy = RankedTensorType::get(targetShape, vTy.getElementType());
++          return builder.create<mlir::stablehlo::BroadcastInDimOp>(
++              loc, bcastTy, v, builder.getDenseI64ArrayAttr(dims));
++        };
++        Value lhs = bcast(op.getLhs(), lhsTy);
++        Value rhs = bcast(op.getRhs(), rhsTy);
++        auto newOp = builder.create<mlir::stablehlo::CompareOp>(
++            loc, lhs, rhs, op.getComparisonDirection());
++        if (op.getCompareType())
++          newOp.setCompareType(*op.getCompareType());
++        op.replaceAllUsesWith(newOp.getResult());
++        op.erase();
++      }
++    });
++  }, "elodin-broadcast-mismatched-shapes"));
++
+   passManager.addNestedPass<func::FuncOp>(
+       stablehlo::createConvertStableHloToLinalgExt());
+   passManager.addNestedPass<func::FuncOp>(
