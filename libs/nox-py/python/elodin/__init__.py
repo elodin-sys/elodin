@@ -47,8 +47,8 @@ jax.config.update("jax_enable_x64", True)
 
 Self = TypeVar("Self")
 
-_UNSIGNED_ATTRS = ["uint64", "uint32", "uint16", "uint8"]
-_SIGNED_MAP = {"uint64": "int64", "uint32": "int32", "uint16": "int16", "uint8": "int8"}
+_UNSIGNED_ATTRS = ["uint64"]
+_SIGNED_MAP = {"uint64": "int64"}
 
 
 @contextlib.contextmanager

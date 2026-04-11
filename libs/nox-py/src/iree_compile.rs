@@ -480,9 +480,6 @@ def compile_to_vmfb(
     import numpy as _np
     input_arrays = [
         a.view(_np.int64) if hasattr(a, 'dtype') and a.dtype == _np.uint64
-        else a.view(_np.int32) if hasattr(a, 'dtype') and a.dtype == _np.uint32
-        else a.view(_np.int16) if hasattr(a, 'dtype') and a.dtype == _np.uint16
-        else a.view(_np.int8) if hasattr(a, 'dtype') and a.dtype == _np.uint8
         else a
         for a in input_arrays
     ]

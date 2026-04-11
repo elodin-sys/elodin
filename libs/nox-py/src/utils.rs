@@ -13,13 +13,13 @@ pub trait PrimTypeExt {
 impl PrimTypeExt for PrimType {
     fn to_element_type(&self) -> ElementType {
         match self {
-            // Elodin targets JAX→StableHLO→IREE, all of which use signless
-            // integers.  Map unsigned to signed so JAX's type promotion
-            // lattice never mixes uint64+int64 (which promotes to float64
-            // and breaks index computations).  Bit layout is identical.
-            impeller2::types::PrimType::U8 => ElementType::S8,
-            impeller2::types::PrimType::U16 => ElementType::S16,
-            impeller2::types::PrimType::U32 => ElementType::S32,
+            // Only U64 is mapped to S64: JAX promotes uint64+int64 -> float64,
+            // breaking index computations. Smaller unsigned types (U8/U16/U32)
+            // are kept as-is because JAX widens them to int64 without float
+            // promotion, and uint32 is required for JAX PRNG key material.
+            impeller2::types::PrimType::U8 => ElementType::U8,
+            impeller2::types::PrimType::U16 => ElementType::U16,
+            impeller2::types::PrimType::U32 => ElementType::U32,
             impeller2::types::PrimType::U64 => ElementType::S64,
             impeller2::types::PrimType::I8 => ElementType::S8,
             impeller2::types::PrimType::I16 => ElementType::S16,
