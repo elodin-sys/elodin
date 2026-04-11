@@ -274,7 +274,46 @@ PY
     perf_status=$?
   fi
 
-  if [[ "${csv_status}" -ne 0 || "${perf_status}" -ne 0 || "${mlir_status}" -ne 0 ]]; then
+  # Structural check: the StableHLO MLIR must not contain _where functions
+  # that convert integer types to float64.  These are the smoking gun of
+  # uint64 type promotion: when jnp.uint64 mixes with int64 in the trace,
+  # JAX creates _where variants like (i1, i64, i64) -> f64 with internal
+  # stablehlo.convert i64 -> f64.  These produce structurally different IREE
+  # kernels that cause numerical divergence in long-running simulations.
+  #
+  # A correctly sanitized trace has _where(i1, i64, i64) -> i64 (direct
+  # select, no float promotion).
+  local struct_status=0
+  if [[ "${example_name}" == "linalg-iree" ]]; then
+    local dump_dir="${scratch_dir}/iree_dump"
+    mkdir -p "${dump_dir}"
+    local stablehlo_mlir="${dump_dir}/stablehlo.mlir"
+    # Re-compile with ELODIN_IREE_DUMP_DIR to capture the StableHLO MLIR.
+    ELODIN_IREE_DUMP_DIR="${dump_dir}" \
+      ELODIN_DB_PATH="${scratch_dir}/db_struct" \
+      "${python_bin}" "${example_entrypoint}" bench --ticks 5 > /dev/null 2>&1 || true
+    # Find the stablehlo.mlir in the dump (it may be in a timestamped subdir).
+    stablehlo_mlir="$(find "${dump_dir}" -name 'stablehlo.mlir' -type f 2>/dev/null | head -1)"
+    if [[ -n "${stablehlo_mlir}" ]]; then
+      # Count _where functions that convert i64 -> f64 (the type-promotion smoking gun).
+      # Pattern: func @_where_<N>(...i64..., ...i64...) -> ...f64 followed by convert i64 -> f64
+      local bad_wheres
+      bad_wheres="$(grep -c 'func.*@_where.*i64.*i64.*-> tensor<f64>' "${stablehlo_mlir}" 2>/dev/null)" || bad_wheres=0
+      if [[ "${bad_wheres}" -gt 0 ]]; then
+        echo "FAIL: uint64 type promotion detected in StableHLO (${bad_wheres} _where functions convert i64->f64)"
+        echo "  These _where variants cause structurally different IREE kernels,"
+        echo "  producing numerical divergence in customer simulations."
+        grep 'func.*@_where.*i64.*i64.*-> tensor<f64>' "${stablehlo_mlir}" | head -3
+        struct_status=1
+      else
+        echo "PASS: no uint64 type promotion in StableHLO _where functions"
+      fi
+    else
+      echo "SKIP: no stablehlo.mlir found in dump (ELODIN_IREE_DUMP_DIR may not be supported)"
+    fi
+  fi
+
+  if [[ "${csv_status}" -ne 0 || "${perf_status}" -ne 0 || "${mlir_status}" -ne 0 || "${struct_status}" -ne 0 ]]; then
     return 1
   fi
 )

@@ -28,7 +28,11 @@ from typing import (
     Union,
 )
 
+import contextlib
+import functools
+
 import jax
+import jax.numpy as jnp
 import numpy
 from jax.tree_util import tree_flatten, tree_unflatten
 from typing_extensions import TypeVarTuple, Unpack
@@ -42,6 +46,34 @@ __doc__ = elodin.__doc__
 jax.config.update("jax_enable_x64", True)
 
 Self = TypeVar("Self")
+
+_UNSIGNED_ATTRS = ["uint64", "uint32", "uint16", "uint8"]
+_SIGNED_MAP = {"uint64": "int64", "uint32": "int32", "uint16": "int16", "uint8": "int8"}
+
+
+@contextlib.contextmanager
+def _signed_integer_context():
+    """Redirect jnp.uint64 etc. to signed equivalents during JAX tracing.
+
+    IREE/StableHLO uses signless integers, so uint64 and int64 must produce
+    identical JAX trace graphs.  Without this, jnp.uint64 literals in user
+    function bodies trigger JAX type promotion (uint64+int64 -> float64),
+    creating structurally different _where functions that cause numerical
+    divergence in IREE-compiled simulations.
+    """
+    saved = {}
+    for attr in _UNSIGNED_ATTRS:
+        for mod in (jnp, numpy):
+            orig = getattr(mod, attr, None)
+            repl = getattr(mod, _SIGNED_MAP[attr], None)
+            if orig is not None and repl is not None:
+                saved[(mod, attr)] = orig
+                setattr(mod, attr, repl)
+    try:
+        yield
+    finally:
+        for (mod, attr), orig in saved.items():
+            setattr(mod, attr, orig)
 
 
 def system(func) -> System:
@@ -111,6 +143,12 @@ class Query(Generic[Unpack[A]]):
             (out_tps,) if not isinstance(out_tps, tuple) else out_tps
         )
 
+        _orig_f = f
+        @functools.wraps(_orig_f)
+        def f(*a, **kw):
+            with _signed_integer_context():
+                return _orig_f(*a, **kw)
+
         if self.batch1:
             buf = f(
                 *[from_array(cls, x) for (x, cls) in zip(self.bufs, self.component_classes)]  # type: ignore
@@ -153,6 +191,12 @@ class Query(Generic[Unpack[A]]):
         out_tps_tuple: Tuple[Annotated[Any, Component], ...] = (
             (out_tps,) if not isinstance(out_tps, tuple) else out_tps
         )
+
+        _orig_f = f
+        @functools.wraps(_orig_f)
+        def f(*a, **kw):
+            with _signed_integer_context():
+                return _orig_f(*a, **kw)
 
         if self.batch1:
             result = f(*[from_array(cls, b) for (b, cls) in zip(self.bufs, self.component_classes)])

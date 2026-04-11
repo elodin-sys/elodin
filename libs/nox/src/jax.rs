@@ -74,10 +74,10 @@ impl JaxTracer {
                 ElementType::S16 => literal_to_arr::<i16>(&c.data, &c.ty.shape, &self.jnp)?,
                 ElementType::S32 => literal_to_arr::<i32>(&c.data, &c.ty.shape, &self.jnp)?,
                 ElementType::S64 => literal_to_arr::<i64>(&c.data, &c.ty.shape, &self.jnp)?,
-                ElementType::U8 => literal_to_arr::<u8>(&c.data, &c.ty.shape, &self.jnp)?,
-                ElementType::U16 => literal_to_arr::<u16>(&c.data, &c.ty.shape, &self.jnp)?,
-                ElementType::U32 => literal_to_arr::<u32>(&c.data, &c.ty.shape, &self.jnp)?,
-                ElementType::U64 => literal_to_arr::<u64>(&c.data, &c.ty.shape, &self.jnp)?,
+                ElementType::U8 => literal_to_arr::<i8>(&c.data, &c.ty.shape, &self.jnp)?,
+                ElementType::U16 => literal_to_arr::<i16>(&c.data, &c.ty.shape, &self.jnp)?,
+                ElementType::U32 => literal_to_arr::<i32>(&c.data, &c.ty.shape, &self.jnp)?,
+                ElementType::U64 => literal_to_arr::<i64>(&c.data, &c.ty.shape, &self.jnp)?,
                 ElementType::F32 => literal_to_arr::<f32>(&c.data, &c.ty.shape, &self.jnp)?,
                 // ElementType::F16 => literal_to_arr::<F16>(&c.data, &c.ty.shape, &self.jnp)?,
                 // ElementType::Bf16 => literal_to_arr::<Bf16>(&c.data, &c.ty.shape, &self.jnp)?,
@@ -304,12 +304,10 @@ impl JaxTracer {
                     .map(|x| self.visit(x))
                     .collect::<Result<Vec<_>, _>>()?;
                 let call_fn = self.visit_comp(&c.comp);
-                let lax = &self.lax;
                 Python::with_gil(|py| {
                     let call_fn = call_fn.into_py_any(py)?;
                     let tuple = PyTuple::new(py, args.into_iter()).unwrap();
-                    let result = call_fn.call1(py, &tuple)?;
-                    sanitize_unsigned_to_signed(py, lax, &result)
+                    call_fn.call1(py, &tuple)
                 })?
             }
             NoxprNode::Cholesky(c) => {
@@ -460,10 +458,10 @@ pub fn dtype(elem: &ElementType) -> Result<&'static str, Error> {
         ElementType::S16 => Ok("int16"),
         ElementType::S32 => Ok("int32"),
         ElementType::S64 => Ok("int64"),
-        ElementType::U8 => Ok("uint8"),
-        ElementType::U16 => Ok("uint16"),
-        ElementType::U32 => Ok("uint32"),
-        ElementType::U64 => Ok("uint64"),
+        ElementType::U8 => Ok("int8"),
+        ElementType::U16 => Ok("int16"),
+        ElementType::U32 => Ok("int32"),
+        ElementType::U64 => Ok("int64"),
         ElementType::F32 => Ok("float32"),
         ElementType::F64 => Ok("float64"),
         ElementType::Pred => Ok("bool"),
@@ -486,47 +484,6 @@ pub fn call_comp_fn<T, R: ReprMonad<crate::Op>>(
         Python::with_gil(|py| tracer.cache.insert(arg_id, py_arg.clone_ref(py)));
     }
     tracer.visit(&func.inner)
-}
-
-/// Bitcast unsigned integer JAX values to their signed equivalents.
-/// StableHLO/IREE uses signless integers; this prevents JAX's type promotion
-/// from converting uint64+int64 → float64 at fused-system boundaries.
-fn sanitize_unsigned_to_signed(
-    py: Python<'_>,
-    _lax: &PyObject,
-    value: &PyObject,
-) -> PyResult<PyObject> {
-    static SANITIZE_FN: std::sync::OnceLock<PyObject> = std::sync::OnceLock::new();
-    let sanitize = SANITIZE_FN.get_or_init(|| {
-        Python::with_gil(|py| {
-            let code = std::ffi::CString::new(concat!(
-                "import jax, jax.numpy as jnp\n",
-                "_unsigned_to_signed = {\n",
-                "    jnp.dtype('uint64'): jnp.int64,\n",
-                "    jnp.dtype('uint32'): jnp.int32,\n",
-                "    jnp.dtype('uint16'): jnp.int16,\n",
-                "    jnp.dtype('uint8'):  jnp.int8,\n",
-                "}\n",
-                "def _cast(x):\n",
-                "    dt = getattr(x, 'dtype', None)\n",
-                "    if dt is not None and dt in _unsigned_to_signed:\n",
-                "        return jax.lax.bitcast_convert_type(x, _unsigned_to_signed[dt])\n",
-                "    return x\n",
-                "def sanitize(val):\n",
-                "    return jax.tree.map(_cast, val)\n",
-            ))
-            .unwrap();
-            let globals = PyDict::new(py);
-            py.run(&code, Some(&globals), None).unwrap();
-            globals
-                .get_item("sanitize")
-                .unwrap()
-                .unwrap()
-                .into_py_any(py)
-                .unwrap()
-        })
-    });
-    sanitize.call1(py, (value,))
 }
 
 #[cfg(test)]
