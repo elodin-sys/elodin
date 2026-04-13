@@ -1260,6 +1260,26 @@ pub(crate) struct DBSink<'a> {
     pub(crate) has_followed_components: bool,
     /// True when the writer is the follower itself (suppresses the warning).
     pub(crate) is_follower: bool,
+    /// Tracks the maximum timestamp seen across all apply_value calls in this
+    /// batch. Flushed once via `flush_timestamps()` after the batch completes,
+    /// avoiding per-component `wake_all()` overhead.
+    batch_max_ts: Timestamp,
+    /// Tracks the minimum positive timestamp seen in this batch.
+    batch_min_ts: Timestamp,
+    batch_has_ts: bool,
+}
+
+impl DBSink<'_> {
+    /// Flush the accumulated max/min timestamps to the shared atomics.
+    /// Call once after `table.sink()` instead of per-component.
+    pub(crate) fn flush_timestamps(&self) {
+        if self.batch_has_ts {
+            self.last_updated.update_max(self.batch_max_ts);
+            if self.batch_min_ts.0 < i64::MAX {
+                self.earliest_timestamp.update_min(self.batch_min_ts);
+            }
+        }
+    }
 }
 
 impl Decomponentize for DBSink<'_> {
@@ -1343,10 +1363,13 @@ impl Decomponentize for DBSink<'_> {
             .map(|m| m.is_timestamp_source())
             .unwrap_or(false);
         if !is_ts_source {
-            self.last_updated.update_max(timestamp);
-            if timestamp.0 > 0 {
-                self.earliest_timestamp.update_min(timestamp);
+            if timestamp > self.batch_max_ts {
+                self.batch_max_ts = timestamp;
             }
+            if timestamp.0 > 0 && timestamp < self.batch_min_ts {
+                self.batch_min_ts = timestamp;
+            }
+            self.batch_has_ts = true;
         }
         Ok(())
     }
@@ -1784,8 +1807,12 @@ async fn handle_packet<A: AsyncWrite + Send + Sync + 'static>(
                         .has_followed_components
                         .load(std::sync::atomic::Ordering::Acquire),
                     is_follower: false,
+                    batch_max_ts: Timestamp(i64::MIN),
+                    batch_min_ts: Timestamp(i64::MAX),
+                    batch_has_ts: false,
                 };
                 table.sink(&state.vtable_registry, &mut sink)??;
+                sink.flush_timestamps();
                 if sink.sunk_new_time_series {
                     db.vtable_gen.fetch_add(1, atomic::Ordering::SeqCst);
                 }
