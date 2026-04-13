@@ -66,9 +66,7 @@ impl WidgetSystem for MonitorWidget<'_, '_> {
         };
 
         let ts = current_timestamp.0;
-        let mut from_cache = telemetry_cache
-            .get_at_or_before(&component_id, ts)
-            .cloned();
+        let mut from_cache = telemetry_cache.get_at_or_before(&component_id, ts).cloned();
         if from_cache.is_none() && !telemetry_cache.has_series(&component_id) {
             from_cache = component_value_query.get(*entity).ok().cloned();
         }
@@ -114,11 +112,7 @@ fn render_no_sample_at_playhead(ui: &mut egui::Ui, metadata: &ComponentMetadata)
                         ui.set_width(120. - 8.);
                         ui.set_height(50.);
                         ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
-                            let label = names
-                                .get(dim_i)
-                                .copied()
-                                .unwrap_or("")
-                                .to_string();
+                            let label = names.get(dim_i).copied().unwrap_or("").to_string();
                             let label = if label.is_empty() {
                                 format!("{dim_i:?}")
                             } else {
@@ -145,7 +139,11 @@ fn render_no_sample_at_playhead(ui: &mut egui::Ui, metadata: &ComponentMetadata)
     });
 }
 
-fn render_component_value_cards(ui: &mut egui::Ui, metadata: &ComponentMetadata, value: &mut ComponentValue) {
+fn render_component_value_cards(
+    ui: &mut egui::Ui,
+    metadata: &ComponentMetadata,
+    value: &mut ComponentValue,
+) {
     let width = ui.max_rect().width();
     ui.horizontal_wrapped(|ui| {
         ui.set_width(width);

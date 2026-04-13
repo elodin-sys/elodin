@@ -59,7 +59,12 @@ fn build_sample(prim: PrimType, shape: &[usize], step: usize, tag: u8) -> Vec<u8
     let st = step as i64;
     match prim {
         PrimType::U8 => (0..n)
-            .map(|i| (step as u8).wrapping_add(tag).wrapping_add(i as u8).wrapping_mul(3))
+            .map(|i| {
+                (step as u8)
+                    .wrapping_add(tag)
+                    .wrapping_add(i as u8)
+                    .wrapping_mul(3)
+            })
             .collect(),
         PrimType::U16 => {
             let v: Vec<u16> = (0..n)
@@ -102,12 +107,7 @@ fn build_sample(prim: PrimType, shape: &[usize], step: usize, tag: u8) -> Vec<u8
         }
         PrimType::I16 => {
             let v: Vec<i16> = (0..n)
-                .map(|i| {
-                    -300i16
-                        + (st as i16).wrapping_mul(11)
-                        + (tag as i16)
-                        + (i as i16)
-                })
+                .map(|i| -300i16 + (st as i16).wrapping_mul(11) + (tag as i16) + (i as i16))
                 .collect();
             v.as_slice().as_bytes().to_vec()
         }
@@ -137,21 +137,13 @@ fn build_sample(prim: PrimType, shape: &[usize], step: usize, tag: u8) -> Vec<u8
             .collect(),
         PrimType::F32 => {
             let v: Vec<f32> = (0..n)
-                .map(|i| {
-                    (step as f32) * 1.25
-                        + (tag as f32) * 0.0625
-                        + (i as f32) * 0.00390625
-                })
+                .map(|i| (step as f32) * 1.25 + (tag as f32) * 0.0625 + (i as f32) * 0.00390625)
                 .collect();
             v.as_slice().as_bytes().to_vec()
         }
         PrimType::F64 => {
             let v: Vec<f64> = (0..n)
-                .map(|i| {
-                    (step as f64) * 1.125
-                        + (tag as f64) * 0.03125
-                        + (i as f64) * 0.001953125
-                })
+                .map(|i| (step as f64) * 1.125 + (tag as f64) * 0.03125 + (i as f64) * 0.001953125)
                 .collect();
             v.as_slice().as_bytes().to_vec()
         }
@@ -234,7 +226,9 @@ fn snapshot_fixture_bytes(db_root: &Path) -> String {
 
     let mut doc = String::new();
     doc.push_str("# prim_types fixture: on-disk bytes (no db_state).\n");
-    doc.push_str("# index/data = full committed prefix [0..committed_len); schema/metadata = full file.\n\n");
+    doc.push_str(
+        "# index/data = full committed prefix [0..committed_len); schema/metadata = full file.\n\n",
+    );
 
     for p in paths {
         let rel = rel_path(db_root, &p);
@@ -311,10 +305,7 @@ fn prim_types_fixture_on_disk_and_roundtrip() {
     goldie::Builder::new(
         env!("CARGO_MANIFEST_DIR"),
         "tests_query/prim_types_fixture_goldie.rs",
-        concat!(
-            module_path!(),
-            "::prim_types_fixture_on_disk_and_roundtrip"
-        ),
+        concat!(module_path!(), "::prim_types_fixture_on_disk_and_roundtrip"),
     )
     .golden_dir(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests_query/testdata"))
     .build()
