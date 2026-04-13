@@ -1,5 +1,6 @@
 .DS_Store
 target
+.cache
 out.png
 out.rrd
 .idea

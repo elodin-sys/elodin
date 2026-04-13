@@ -155,7 +155,7 @@ def world() -> tuple[el.World, el.EntityId]:
                 graph "drone.magnetometer"
             }
         }
-        
+
         // important to keep these active as our only regression tests for the multiple window panels
         window path="examples/drone/motor-panel.kdl"
         window path="examples/drone/rate-control-panel.kdl"
