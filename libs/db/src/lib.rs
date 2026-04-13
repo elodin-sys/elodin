@@ -3105,12 +3105,16 @@ pub trait AtomicTimestampExt {
 
 impl AtomicTimestampExt for AtomicCell<Timestamp> {
     fn update_max(&self, val: Timestamp) {
-        self.value.fetch_max(val.0, atomic::Ordering::AcqRel);
-        self.wait_queue.wake_all();
+        let prev = self.value.fetch_max(val.0, atomic::Ordering::AcqRel);
+        if val.0 > prev {
+            self.wait_queue.wake_all();
+        }
     }
 
     fn update_min(&self, val: Timestamp) {
-        self.value.fetch_min(val.0, atomic::Ordering::AcqRel);
-        self.wait_queue.wake_all();
+        let prev = self.value.fetch_min(val.0, atomic::Ordering::AcqRel);
+        if val.0 < prev {
+            self.wait_queue.wake_all();
+        }
     }
 }

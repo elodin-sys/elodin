@@ -1,9 +1,9 @@
+//! Lightweight profiling counters for elodin-db hot paths.
+//! All counters are global atomics — no allocation on the hot path.
+//! Enabled only with `--features profile`.
+
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
-
-/// Lightweight profiling counters for elodin-db hot paths.
-/// All counters are global atomics — no allocation on the hot path.
-/// Enabled only with `--features profile`.
 
 // ── Phase timers (cumulative nanoseconds) ───────────────────
 
@@ -37,6 +37,7 @@ pub static HASHMAP_LOOKUP_COUNT: AtomicU64 = AtomicU64::new(0);
 // ── Per-tick histograms (ring buffer of recent ticks) ───────
 
 pub static TICK_NS_RING: [AtomicU64; RING_SIZE] = {
+    #[allow(clippy::declare_interior_mutable_const)]
     const INIT: AtomicU64 = AtomicU64::new(0);
     [INIT; RING_SIZE]
 };
@@ -225,10 +226,10 @@ impl ProfileSnapshot {
         let total = self.sink_table_ns;
         let mut report = String::with_capacity(8192);
 
-        report.push_str(&format!("# elodin-db Profiling Report\n\n"));
+        report.push_str("# elodin-db Profiling Report\n\n");
         report.push_str(&format!("**Generated:** {}\n\n", chrono_now()));
         report.push_str("## Configuration\n\n");
-        report.push_str(&format!("| Parameter | Value |\n|---|---|\n"));
+        report.push_str("| Parameter | Value |\n|---|---|\n");
         report.push_str(&format!("| Scenario | {} |\n", scenario));
         report.push_str(&format!("| Components | {} |\n", components));
         report.push_str(&format!("| Frequency | {} Hz |\n", frequency));
@@ -354,19 +355,40 @@ impl ProfileSnapshot {
         // Bottleneck analysis
         report.push_str("\n## Identified Bottlenecks\n\n");
 
+        let wake_total_ns = self.wake_all_data_waker_ns
+            + self.wake_all_last_updated_ns
+            + self.wake_all_earliest_ts_ns;
+        let wake_meta_ns = self.wake_all_last_updated_ns + self.wake_all_earliest_ts_ns;
+        let data_share_pct = if wake_total_ns > 0 {
+            (self.wake_all_data_waker_ns as f64 / wake_total_ns as f64) * 100.0
+        } else {
+            0.0
+        };
+
+        let wake_explanation = format!(
+            "{} profiled `wake_all` calls (~{}/`sink_table`). \
+             Split: {:.0}% of combined row time in `push_buf` `data_waker`, {:.0}% in `update_max`/`update_min` rows \
+             (those rows include the atomic `fetch_*`, not only `wake_all`). \
+             Metadata waiters are woken only when `fetch_max`/`fetch_min` changes the stored value.",
+            self.wake_all_count,
+            self.wake_all_count / self.sink_table_count.max(1),
+            if wake_total_ns > 0 {
+                (self.wake_all_data_waker_ns as f64 / wake_total_ns as f64) * 100.0
+            } else {
+                0.0
+            },
+            if wake_total_ns > 0 {
+                (wake_meta_ns as f64 / wake_total_ns as f64) * 100.0
+            } else {
+                0.0
+            },
+        );
+
         let mut bottlenecks: Vec<(&str, u64, String)> = vec![
             (
-                "wake_all() cascade",
-                self.wake_all_data_waker_ns
-                    + self.wake_all_last_updated_ns
-                    + self.wake_all_earliest_ts_ns,
-                format!(
-                    "{} total calls ({}/tick). `update_min` rarely changes the value but calls `wake_all()` unconditionally. \
-                  `update_max` is called {}× per tick with the same timestamp — only the first matters.",
-                    self.wake_all_count,
-                    self.wake_all_count / self.sink_table_count.max(1),
-                    self.apply_value_count / self.sink_table_count.max(1),
-                ),
+                "`wake_all` latency (data + metadata)",
+                wake_total_ns,
+                wake_explanation,
             ),
             (
                 "VTable realize chain",
@@ -434,28 +456,41 @@ impl ProfileSnapshot {
             );
         }
 
-        // Recommendations
+        // Recommendations (numbered sequentially based on what triggers)
         report.push_str("## Optimization Recommendations\n\n");
 
-        let wake_total = self.wake_all_data_waker_ns
-            + self.wake_all_last_updated_ns
-            + self.wake_all_earliest_ts_ns;
-        if Self::pct_of(wake_total, total) > 15.0 {
-            report.push_str(&format!(
-                "1. **Debounce `wake_all()` in `apply_value`** — Currently {:.0}% of tick time. \
-                 Call `update_max`/`update_min` once after the entire batch instead of per-component. \
-                 Skip `wake_all()` when the atomic value didn't actually change.\n\n",
-                Self::pct_of(wake_total, total),
-            ));
-        }
+        let mut n: usize = 1;
+        let wake_total = wake_total_ns;
 
         if Self::pct_of(self.vtable_resolve_ns, total) > 20.0 {
             report.push_str(&format!(
-                "2. **Cache VTable resolution** — Currently {:.0}% of tick time. \
+                "{}. **Cache VTable resolution** — Currently {:.0}% of `sink_table` time. \
                  Pre-compile the field→component mapping on first `apply()` and reuse it on subsequent ticks, \
                  bypassing the recursive `realize()` chain.\n\n",
+                n,
                 Self::pct_of(self.vtable_resolve_ns, total),
             ));
+            n += 1;
+        }
+
+        if Self::pct_of(wake_total, total) > 12.0 {
+            if data_share_pct >= 55.0 {
+                report.push_str(&format!(
+                    "{}. **`data_waker` after `push_buf`** — {:.0}% of `sink_table` time is in profiled `wake_all` calls, \
+                     mostly the per-write data notification. Consider fewer wake points or batch-level subscriber updates.\n\n",
+                    n,
+                    Self::pct_of(wake_total, total),
+                ));
+            } else {
+                report.push_str(&format!(
+                    "{}. **Residual `wake_all` cost** — {:.0}% of `sink_table` time. \
+                     `last_updated` / `earliest_timestamp` already skip `wake_all` when the atomic is unchanged; \
+                     if this stays high, profile `WaitQueue` fan-out and the `data_waker` path.\n\n",
+                    n,
+                    Self::pct_of(wake_total, total),
+                ));
+            }
+            n += 1;
         }
 
         if Self::pct_of(
@@ -463,10 +498,16 @@ impl ProfileSnapshot {
             total,
         ) > 10.0
         {
-            report.push_str(
-                "3. **Batch mmap commits** — Instead of 2 separate `AppendLog::write()` calls \
+            report.push_str(&format!(
+                "{}. **Batch mmap commits** — Instead of 2 separate `AppendLog::write()` calls \
                  (data + index) per component, accumulate all writes and commit once per tick.\n\n",
-            );
+                n,
+            ));
+            n += 1;
+        }
+
+        if n == 1 {
+            report.push_str("_No automated suggestions above report thresholds._\n\n");
         }
 
         report
