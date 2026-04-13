@@ -515,7 +515,7 @@ fn bool_ref<T: IntoBytes + Immutable, R: RangeBounds<usize>>(
     // Impeller uses one byte per bool; Arrow's BooleanBuffer is bit-packed.
     // Wire format is one byte per logical bool (PrimType::Bool size). Arrow packs
     // booleans by bit; BooleanBuffer::new(..., len) expects len in bits, so using
-    // buffer.len() as the bit count mis-read the first byte as eight values.
+    // buffer.len() as the bit count misread the first byte as eight values.
     let bits = BooleanBuffer::collect_bool(bytes.len(), |i| bytes[i] != 0);
     Arc::new(BooleanArray::new(bits, None))
 }
