@@ -84,8 +84,11 @@
     openssl
     openblas
     xz
+    zstd
     python313
     gfortran.cc.lib
+    # Expose GNU tar as `gnutar` so tests/scripts can call it without shadowing bsdtar `tar`.
+    (writeShellScriptBin "gtar" ''exec ${gnutar}/bin/tar "$@"'')
   ];
 
   # Common native build inputs

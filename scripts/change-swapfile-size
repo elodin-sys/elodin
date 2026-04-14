@@ -1,0 +1,38 @@
+#!/bin/bash -e
+# change-swapfile-size
+
+function usage() {
+    cat << 'EOF'
+Usage: $0 [-hn] <SIZE> [SWAPFILE]
+       -h show usage (this)
+       -n dry run
+e.g., change-swapfile-size 16G /swap.img
+EOF
+}
+dry_run=0;
+prefix="";
+while getopts hn                         opt; do
+  case $opt in
+      n) prefix="echo";
+         dry_run=1;;
+      h) usage;
+         exit 0;;
+      *) echo "error: invalid option given." >&2; usage >&2; exit 2;;
+  esac
+done
+shift $[ OPTIND - 1 ];
+
+if [ $# -lt 1 ] || [ $# -gt 2 ]; then
+    usage >&2;
+    exit  2;
+fi
+size="$1";
+file="${2-/swap.img}";
+if [ $(uname) != "Linux" ]; then
+    echo "error: This script is for Linux only." >&2;
+    exit 1;
+fi
+$prefix sudo swapoff $file;
+$prefix sudo fallocate -l $size $file;
+$prefix sudo mkswap $file;
+$prefix sudo swapon $file;

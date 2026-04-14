@@ -138,6 +138,11 @@ impl TelemetryCache {
         series.range(..=ts).next_back().map(|(_, v)| v)
     }
 
+    /// True when any samples have been cached for this component.
+    pub fn has_series(&self, component_id: &ComponentId) -> bool {
+        self.components.contains_key(component_id)
+    }
+
     pub fn component_ids(&self) -> impl Iterator<Item = &ComponentId> {
         self.components.keys()
     }

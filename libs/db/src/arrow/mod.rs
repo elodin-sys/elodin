@@ -511,9 +511,13 @@ fn bool_ref<T: IntoBytes + Immutable, R: RangeBounds<usize>>(
     element_size: usize,
 ) -> ArrayRef {
     let buffer = buf.as_arrow_buffer_range(range, element_size);
-    let len = buffer.len();
-    let buf = BooleanBuffer::new(buffer, 0, len);
-    Arc::new(BooleanArray::new(buf, None))
+    let bytes = buffer.as_slice();
+    // Impeller uses one byte per bool; Arrow's BooleanBuffer is bit-packed.
+    // Wire format is one byte per logical bool (PrimType::Bool size). Arrow packs
+    // booleans by bit; BooleanBuffer::new(..., len) expects len in bits, so using
+    // buffer.len() as the bit count misread the first byte as eight values.
+    let bits = BooleanBuffer::collect_bool(bytes.len(), |i| bytes[i] != 0);
+    Arc::new(BooleanArray::new(bits, None))
 }
 
 fn array_ref<P: ArrowPrimitiveType, T: IntoBytes + Immutable>(
