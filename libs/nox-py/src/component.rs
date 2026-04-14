@@ -68,21 +68,26 @@ impl PyComponent {
     }
 }
 
+fn validate_component_name(name: &str) -> Result<(), Error> {
+    if name.is_empty() {
+        return Err(PyValueError::new_err("component name must not be empty").into());
+    }
+    if name.contains(char::is_whitespace) {
+        return Err(PyValueError::new_err(format!(
+            "component name {:?} contains whitespace; \
+             use snake_case or dot.separated names instead",
+            name
+        ))
+        .into());
+    }
+    Ok(())
+}
+
 #[pymethods]
 impl PyComponent {
     #[setter]
     pub fn set_name(&mut self, name: String) -> Result<(), Error> {
-        if name.contains(char::is_whitespace) {
-            return Err(PyValueError::new_err(format!(
-                "component name {:?} contains whitespace; \
-                 use snake_case or dot.separated names instead",
-                name
-            ))
-            .into());
-        }
-        if name.is_empty() {
-            return Err(PyValueError::new_err("component name must not be empty").into());
-        }
+        validate_component_name(&name)?;
         self.name = name;
         Ok(())
     }
@@ -95,18 +100,7 @@ impl PyComponent {
         ty: Option<ComponentType>,
         metadata: HashMap<String, PyObject>,
     ) -> Result<Self, Error> {
-        if name.contains(char::is_whitespace) {
-            return Err(PyValueError::new_err(format!(
-                "component name {:?} contains whitespace; \
-                 use snake_case or dot.separated names instead",
-                name
-            ))
-            .into());
-        }
-
-        if name.is_empty() {
-            return Err(PyValueError::new_err("component name must not be empty").into());
-        }
+        validate_component_name(&name)?;
 
         let metadata = metadata
             .into_iter()
@@ -447,6 +441,7 @@ impl ShapeIndexer {
 
 #[cfg(test)]
 mod tests {
+    use super::validate_component_name;
     use crate::{Seed, WorldPos};
     use impeller2::component::Component;
     use nox::Op;
@@ -459,27 +454,40 @@ mod tests {
 
     #[test]
     fn validate_component_name_rejects_whitespace() {
-        // Validation logic is tested via the helper since PyComponent::new
-        // requires a Python interpreter. Test the core rule here.
-        let bad_names = ["my component", "hello\tworld", "new\nline", " leading", "trailing "];
+        let bad_names = [
+            "my component",
+            "hello\tworld",
+            "new\nline",
+            " leading",
+            "trailing ",
+        ];
         for name in bad_names {
             assert!(
-                name.contains(char::is_whitespace),
-                "test setup: {:?} should contain whitespace",
-                name
+                validate_component_name(name).is_err(),
+                "{name:?} should be rejected"
             );
         }
     }
 
     #[test]
     fn validate_component_name_accepts_valid() {
-        let good_names = ["world_pos", "rocket.fin_control", "my_component", "x", "a.b.c"];
+        let good_names = [
+            "world_pos",
+            "rocket.fin_control",
+            "my_component",
+            "x",
+            "a.b.c",
+        ];
         for name in good_names {
             assert!(
-                !name.contains(char::is_whitespace),
-                "test setup: {:?} should not contain whitespace",
-                name
+                validate_component_name(name).is_ok(),
+                "{name:?} should be accepted"
             );
         }
+    }
+
+    #[test]
+    fn validate_component_name_rejects_empty() {
+        assert!(validate_component_name("").is_err());
     }
 }
