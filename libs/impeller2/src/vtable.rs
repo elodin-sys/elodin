@@ -48,6 +48,11 @@
 
 use core::ops::Range;
 
+#[cfg(feature = "alloc")]
+extern crate alloc;
+#[cfg(feature = "alloc")]
+use alloc::vec::Vec;
+
 use serde::{Deserialize, Serialize};
 use zerocopy::{FromBytes, IntoBytes, TryFromBytes};
 
@@ -201,6 +206,8 @@ pub struct RealizedTimestamp {
     pub timestamp: Option<Timestamp>,
     pub range: Option<Range<usize>>,
     pub arg: OpRef,
+    /// True when the source is nanoseconds (timestamp_ns ext); divide by 1000 for microseconds.
+    pub is_ns: bool,
 }
 
 /// A slice of a table realized from an operation
@@ -235,9 +242,29 @@ pub enum RealizedOp<'a> {
 pub struct RealizedField<'a> {
     pub component_id: ComponentId,
     pub shape: &'a [usize],
+    /// Schema dimensions backing [`Self::shape`].
+    pub dim: &'a [u64],
     pub ty: PrimType,
     pub view: Option<ComponentView<'a>>,
     pub timestamp: Option<Timestamp>,
+    /// When set, the row timestamp must be re-read from this byte range on each table packet.
+    pub timestamp_source_range: Option<Range<usize>>,
+    /// When `true`, [`Self::timestamp_source_range`] holds nanoseconds (`/ 1000` for microseconds).
+    pub timestamp_source_is_ns: bool,
+}
+
+/// Precomputed per-field dispatch for [`apply_table_dispatch_plan`].
+#[cfg(feature = "alloc")]
+#[derive(Debug, Clone)]
+pub struct TableDispatchEntry {
+    pub component_id: ComponentId,
+    pub ty: PrimType,
+    pub dim: Vec<u64>,
+    pub value_offset: usize,
+    pub value_len: usize,
+    pub timestamp_fixed: Option<Timestamp>,
+    pub timestamp_source_range: Option<Range<usize>>,
+    pub timestamp_source_is_ns: bool,
 }
 
 impl<'a> RealizedOp<'a> {
@@ -352,6 +379,7 @@ impl<Ops: Buf<Op>, Data: Buf<u8>, Fields: Buf<Field>> VTable<Ops, Data, Fields> 
                     timestamp,
                     arg: *arg,
                     range: source.as_table_range(),
+                    is_ns: false,
                 }))
             }
             Op::None => Ok(RealizedOp::None),
@@ -376,6 +404,90 @@ impl<Ops: Buf<Op>, Data: Buf<u8>, Fields: Buf<Field>> VTable<Ops, Data, Fields> 
         }
     }
 
+    /// Evaluates a single [`Field`] the same way [`Self::realize_fields`] does.
+    pub fn realize_field<'a>(
+        &'a self,
+        field: &'a Field,
+        table: Option<&'a [u8]>,
+    ) -> Result<RealizedField<'a>, Error> {
+        let mut realized_op = self.realize(field.arg, table)?;
+        let mut timestamp: Option<RealizedTimestamp> = None;
+        let mut schema: Option<RealizedSchema<'_>> = None;
+        loop {
+            match realized_op {
+                RealizedOp::Component(ref component) => {
+                    let RealizedComponent { component_id } = *component;
+
+                    let schema = schema.as_ref().ok_or(Error::SchemaNotFound)?;
+                    // NOTE(sphw): bogan version of zerocopy::transmute_ref
+                    // In the future this will need to also support 32 bit systems
+                    // remove when https://github.com/google/zerocopy/pull/2428 is merged and released
+                    let shape: &[usize] = <[usize]>::ref_from_bytes(schema.dim.as_bytes())?;
+                    let view = if let Some(table) = table {
+                        let offset = field.offset.to_index();
+                        let data = table
+                            .get(offset..offset + field.len as usize)
+                            .ok_or(Error::BufferUnderflow)?;
+                        Some(ComponentView::try_from_bytes_shape(data, shape, schema.ty)?)
+                    } else {
+                        None
+                    };
+                    let (timestamp, timestamp_source_range, timestamp_source_is_ns) =
+                        match &timestamp {
+                            None => (None, None, false),
+                            Some(t) => {
+                                if t.range.is_some() {
+                                    (None, t.range.clone(), t.is_ns)
+                                } else {
+                                    (t.timestamp, None, false)
+                                }
+                            }
+                        };
+                    return Ok(RealizedField {
+                        component_id,
+                        view,
+                        timestamp,
+                        timestamp_source_range,
+                        timestamp_source_is_ns,
+                        shape,
+                        dim: schema.dim,
+                        ty: schema.ty,
+                    });
+                }
+                RealizedOp::Schema(s) => {
+                    let s = schema.insert(s);
+                    realized_op = self.realize(s.arg, table)?;
+                }
+                RealizedOp::Timestamp(t) => {
+                    let t = timestamp.insert(t);
+                    realized_op = self.realize(t.arg, table)?;
+                }
+                RealizedOp::Ext(e) => {
+                    if e.id == TIMESTAMP_NS_EXT_ID {
+                        // Convert nanosecond timestamp to microseconds.
+                        // When table is None (e.g. during VTable registration),
+                        // e.data is empty so we skip reading the value -- only
+                        // the structural walk matters in that case.
+                        let ts = if e.data.len() >= core::mem::size_of::<Timestamp>() {
+                            let ns = Timestamp::read_from_bytes(e.data)?;
+                            Some(Timestamp(ns.0 / 1000))
+                        } else {
+                            None
+                        };
+                        timestamp = Some(RealizedTimestamp {
+                            timestamp: ts,
+                            arg: e.arg,
+                            range: e.range.clone(),
+                            is_ns: true,
+                        });
+                    }
+                    realized_op = self.realize(e.arg, table)?;
+                }
+                _ => return Err(Error::InvalidOp),
+            }
+        }
+    }
+
     /// Evaluated each `field`, returning a `RealizedField`
     ///
     /// `realized_fields` loops through each field, turning each [`Offset`] into a reference, and evaluating any [`Op`]
@@ -386,69 +498,9 @@ impl<Ops: Buf<Op>, Data: Buf<u8>, Fields: Buf<Field>> VTable<Ops, Data, Fields> 
         &'a self,
         table: Option<&'a [u8]>,
     ) -> impl Iterator<Item = Result<RealizedField<'a>, Error>> + 'a {
-        self.fields.iter().map(move |field| {
-            let mut realized_op = self.realize(field.arg, table)?;
-            let mut timestamp: Option<RealizedTimestamp> = None;
-            let mut schema: Option<RealizedSchema<'_>> = None;
-            loop {
-                match realized_op {
-                    RealizedOp::Component(ref component) => {
-                        let RealizedComponent { component_id } = *component;
-
-                        let schema = schema.as_ref().ok_or(Error::SchemaNotFound)?;
-                        // NOTE(sphw): bogan version of zerocopy::transmute_ref
-                        // In the future this will need to also support 32 bit systems
-                        // remove when https://github.com/google/zerocopy/pull/2428 is merged and released
-                        let shape: &[usize] = <[usize]>::ref_from_bytes(schema.dim.as_bytes())?;
-                        let view = if let Some(table) = table {
-                            let offset = field.offset.to_index();
-                            let data = table
-                                .get(offset..offset + field.len as usize)
-                                .ok_or(Error::BufferUnderflow)?;
-                            Some(ComponentView::try_from_bytes_shape(data, shape, schema.ty)?)
-                        } else {
-                            None
-                        };
-                        return Ok(RealizedField {
-                            component_id,
-                            view,
-                            timestamp: timestamp.and_then(|t| t.timestamp),
-                            shape,
-                            ty: schema.ty,
-                        });
-                    }
-                    RealizedOp::Schema(s) => {
-                        let s = schema.insert(s);
-                        realized_op = self.realize(s.arg, table)?;
-                    }
-                    RealizedOp::Timestamp(t) => {
-                        let t = timestamp.insert(t);
-                        realized_op = self.realize(t.arg, table)?;
-                    }
-                    RealizedOp::Ext(e) => {
-                        if e.id == TIMESTAMP_NS_EXT_ID {
-                            // Convert nanosecond timestamp to microseconds.
-                            // When table is None (e.g. during VTable registration),
-                            // e.data is empty so we skip reading the value -- only
-                            // the structural walk matters in that case.
-                            let ts = if e.data.len() >= core::mem::size_of::<Timestamp>() {
-                                let ns = Timestamp::read_from_bytes(e.data)?;
-                                Some(Timestamp(ns.0 / 1000))
-                            } else {
-                                None
-                            };
-                            timestamp = Some(RealizedTimestamp {
-                                timestamp: ts,
-                                arg: e.arg,
-                                range: e.range.clone(),
-                            });
-                        }
-                        realized_op = self.realize(e.arg, table)?;
-                    }
-                    _ => return Err(Error::InvalidOp),
-                }
-            }
-        })
+        self.fields
+            .iter()
+            .map(move |field| self.realize_field(field, table))
     }
 
     /// Parses the passed in table, and sinks the values into the sink
@@ -462,18 +514,124 @@ impl<Ops: Buf<Op>, Data: Buf<u8>, Fields: Buf<Field>> VTable<Ops, Data, Fields> 
         sink: &mut D,
     ) -> Result<Result<(), D::Error>, Error> {
         for res in self.realize_fields(Some(table)) {
-            let RealizedField {
-                component_id,
-                view,
-                timestamp,
-                ..
-            } = res?;
-            let view = view.expect("table not found");
-            if let Err(err) = sink.apply_value(component_id, view, timestamp) {
+            let rf = res?;
+            let ts = Self::resolve_apply_timestamp(table, &rf)?;
+            let view = rf.view.expect("table not found");
+            if let Err(err) = sink.apply_value(rf.component_id, view, ts) {
                 return Ok(Err(err));
             }
         }
         Ok(Ok(()))
+    }
+
+    fn resolve_apply_timestamp(
+        table: &[u8],
+        rf: &RealizedField<'_>,
+    ) -> Result<Option<Timestamp>, Error> {
+        if let Some(r) = &rf.timestamp_source_range {
+            let data = table
+                .get(r.clone())
+                .ok_or(Error::BufferUnderflow)?
+                .get(..core::mem::size_of::<Timestamp>())
+                .ok_or(Error::BufferUnderflow)?;
+            let t = Timestamp::read_from_bytes(data)?;
+            Ok(Some(if rf.timestamp_source_is_ns {
+                Timestamp(t.0 / 1000)
+            } else {
+                t
+            }))
+        } else {
+            Ok(rf.timestamp)
+        }
+    }
+}
+
+/// Applies a precomputed [`TableDispatchEntry`] plan (see [`VTable::build_table_dispatch_plan`]).
+#[cfg(feature = "alloc")]
+pub fn apply_table_dispatch_plan<D: Decomponentize>(
+    plan: &[TableDispatchEntry],
+    table: &[u8],
+    sink: &mut D,
+) -> Result<Result<(), D::Error>, Error> {
+    for e in plan {
+        let dim = e.dim.as_slice();
+        let shape = <[usize]>::ref_from_bytes(dim.as_bytes())?;
+        let data = table
+            .get(e.value_offset..e.value_offset + e.value_len)
+            .ok_or(Error::BufferUnderflow)?;
+        let view = ComponentView::try_from_bytes_shape(data, shape, e.ty)?;
+        let ts = if let Some(r) = &e.timestamp_source_range {
+            let slice = table
+                .get(r.clone())
+                .ok_or(Error::BufferUnderflow)?
+                .get(..core::mem::size_of::<Timestamp>())
+                .ok_or(Error::BufferUnderflow)?;
+            let t = Timestamp::read_from_bytes(slice)?;
+            Some(if e.timestamp_source_is_ns {
+                Timestamp(t.0 / 1000)
+            } else {
+                t
+            })
+        } else {
+            e.timestamp_fixed
+        };
+        if let Err(err) = sink.apply_value(e.component_id, view, ts) {
+            return Ok(Err(err));
+        }
+    }
+    Ok(Ok(()))
+}
+
+#[cfg(feature = "alloc")]
+impl<Ops: Buf<Op>, Data: Buf<u8>, Fields: Buf<Field>> VTable<Ops, Data, Fields> {
+    /// Builds a static dispatch plan for repeated `apply` on table buffers of sufficient length.
+    pub fn build_table_dispatch_plan(&self) -> Result<Vec<TableDispatchEntry>, Error> {
+        let mut need = 0usize;
+        for field in self.fields.iter() {
+            need = need.max(field.offset.to_index() + field.len as usize);
+        }
+        for op in self.ops.as_slice() {
+            if let Op::Table { offset, len } = op {
+                need = need.max(offset.to_index() + *len as usize);
+            }
+        }
+        let mut probe = vec![0u8; need.max(1)];
+        for _ in 0..64 {
+            let mut out = Vec::with_capacity(self.fields.len());
+            let mut ok = true;
+            for field in self.fields.iter() {
+                match self.realize_field(field, Some(&probe)) {
+                    Ok(rf) => {
+                        if rf.view.is_none() {
+                            ok = false;
+                            break;
+                        }
+                        let offset = field.offset.to_index();
+                        out.push(TableDispatchEntry {
+                            component_id: rf.component_id,
+                            ty: rf.ty,
+                            dim: rf.dim.to_vec(),
+                            value_offset: offset,
+                            value_len: field.len as usize,
+                            timestamp_fixed: rf.timestamp,
+                            timestamp_source_range: rf.timestamp_source_range.clone(),
+                            timestamp_source_is_ns: rf.timestamp_source_is_ns,
+                        });
+                    }
+                    Err(Error::BufferUnderflow) => {
+                        ok = false;
+                        break;
+                    }
+                    Err(e) => return Err(e),
+                }
+            }
+            if ok {
+                return Ok(out);
+            }
+            let next = probe.len().saturating_mul(2).max(probe.len() + 256);
+            probe.resize(next, 0);
+        }
+        Err(Error::InvalidOp)
     }
 }
 
@@ -835,5 +993,59 @@ mod tests {
         let bar = sink.f64_components.get(&ComponentId::new("bar")).unwrap();
         assert_eq!(bar.buf.as_buf(), &[5.0]);
         assert_eq!(sink.timestamp, Some(foo.timestamp));
+    }
+
+    #[test]
+    fn test_dispatch_plan_matches_apply() {
+        use super::apply_table_dispatch_plan;
+        use super::builder::*;
+
+        #[derive(IntoBytes, Immutable)]
+        struct Foo {
+            timestamp: Timestamp,
+            test: [f32; 4],
+            bar: f64,
+        }
+
+        let time = table!(Foo::timestamp);
+        let v = vtable([
+            field!(
+                Foo::test,
+                schema(
+                    PrimType::F32,
+                    &[4],
+                    timestamp(time.clone(), component("test")),
+                ),
+            ),
+            field!(
+                Foo::bar,
+                schema(PrimType::F64, &[], timestamp(time, component("bar")))
+            ),
+        ]);
+
+        let plan = v.build_table_dispatch_plan().expect("plan");
+        let foo = Foo {
+            timestamp: Timestamp(1000),
+            test: [1.0, 2.0, 3.0, 4.0],
+            bar: 5.0,
+        };
+        let bytes = foo.as_bytes();
+
+        let mut sink_apply = TestSink::default();
+        v.apply(bytes, &mut sink_apply).unwrap().unwrap();
+        let mut sink_plan = TestSink::default();
+        apply_table_dispatch_plan(&plan, bytes, &mut sink_plan)
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(sink_apply.timestamp, sink_plan.timestamp);
+        assert_eq!(
+            sink_apply.f32_components.get(&ComponentId::new("test")),
+            sink_plan.f32_components.get(&ComponentId::new("test"))
+        );
+        assert_eq!(
+            sink_apply.f64_components.get(&ComponentId::new("bar")),
+            sink_plan.f64_components.get(&ComponentId::new("bar"))
+        );
     }
 }
