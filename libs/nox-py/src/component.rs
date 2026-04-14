@@ -444,6 +444,11 @@ mod tests {
     use crate::{Seed, WorldPos};
     use impeller2::component::Component;
     use nox::Op;
+    use pyo3::prepare_freethreaded_python;
+
+    fn init_python() {
+        prepare_freethreaded_python();
+    }
 
     #[test]
     fn component_names() {
@@ -453,6 +458,8 @@ mod tests {
 
     #[test]
     fn validate_component_name_rejects_whitespace() {
+        init_python();
+
         let bad_names = [
             "my component",
             "hello\tworld",
@@ -496,7 +503,9 @@ mod tests {
 
     #[test]
     fn validate_component_name_rejects_empty() {
+        init_python();
+
         let err = validate_component_name("").unwrap_err().to_string();
-        assert_eq!(err, "component name must not be empty");
+        assert_eq!(err, "ValueError: component name must not be empty");
     }
 }
