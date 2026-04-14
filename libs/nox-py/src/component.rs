@@ -185,7 +185,6 @@ impl PyComponent {
         }
 
         if component_data.ty.is_none() {
-            println!("{:?}", component_data);
             return Err(PyValueError::new_err("component type not found").into());
         }
         Ok(component_data)
@@ -467,6 +466,15 @@ mod tests {
                 "{name:?} should be rejected"
             );
         }
+
+        let err = validate_component_name("my component")
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("contains whitespace"), "error was: {err}");
+        assert!(
+            err.contains("snake_case or dot.separated"),
+            "error was: {err}"
+        );
     }
 
     #[test]
@@ -488,6 +496,7 @@ mod tests {
 
     #[test]
     fn validate_component_name_rejects_empty() {
-        assert!(validate_component_name("").is_err());
+        let err = validate_component_name("").unwrap_err().to_string();
+        assert_eq!(err, "component name must not be empty");
     }
 }
