@@ -24,7 +24,7 @@ use impeller2_wkt::*;
 use stellarator::{io::SplitExt, net::TcpStream};
 use tracing::{debug, info, warn};
 
-use crate::{AtomicTimestampExt, ComponentSchema, DB, DBSink, Error};
+use crate::{AtomicTimestampExt, ComponentSchema, DB, Error};
 
 /// Configuration for a follower connection.
 pub struct FollowConfig {
@@ -361,41 +361,7 @@ async fn run_follower_inner(config: &FollowConfig, db: &Arc<DB>) -> Result<(), E
 
             // Table – decomponentize and write to local DB.
             Packet::Table(table) => {
-                db.with_state(|state| -> Result<(), Error> {
-                    let mut sink = DBSink {
-                        components: &state.components,
-                        component_metadata: &state.component_metadata,
-                        last_updated: &db.last_updated,
-                        earliest_timestamp: &db.earliest_timestamp,
-                        sunk_new_time_series: false,
-                        table_received: db.apply_implicit_timestamp(),
-                        followed_components: &db.followed_components,
-                        has_followed_components: db
-                            .has_followed_components
-                            .load(std::sync::atomic::Ordering::Acquire),
-                        is_follower: true,
-                        batch_max_ts: Timestamp(i64::MIN),
-                        batch_min_ts: Timestamp(i64::MAX),
-                        batch_has_ts: false,
-                    };
-                    match table.sink(&state.vtable_registry, &mut sink) {
-                        Ok(Ok(())) => {}
-                        Ok(Err(e)) => {
-                            warn!(?e, "error decomponentizing follow-stream table");
-                        }
-                        Err(e) => {
-                            warn!(?e, "vtable error in follow-stream table");
-                        }
-                    }
-                    sink.flush_timestamps();
-                    if sink.sunk_new_time_series {
-                        db.vtable_gen
-                            .value
-                            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-                        db.vtable_gen.wait_queue.wake_all();
-                    }
-                    Ok(())
-                })?;
+                db.sink_decomponentize_table(table, true, true)?;
             }
 
             // MsgWithTimestamp – write message with original timestamp,

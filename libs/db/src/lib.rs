@@ -6,14 +6,16 @@ use impeller2::types::{PacketHeader, PacketTy};
 use impeller2::vtable::builder::{
     OpBuilder, component, raw_field, raw_table, schema, timestamp, vtable,
 };
-use impeller2::vtable::{Op, RealizedField, TIMESTAMP_NS_EXT_ID, builder};
+use impeller2::vtable::{
+    Op, RealizedField, TIMESTAMP_NS_EXT_ID, apply_table_dispatch_plan, builder,
+};
 use impeller2::{
     com_de::Decomponentize,
     registry,
     schema::Schema,
     types::{
-        ComponentId, ComponentView, IntoLenPacket, LenPacket, Msg, OwnedPacket as Packet, PacketId,
-        PrimType, RequestId, Timestamp,
+        ComponentId, ComponentView, IntoLenPacket, LenPacket, Msg, OwnedPacket as Packet,
+        OwnedTable, PacketId, PrimType, RequestId, Timestamp,
     },
     vtable::VTable,
 };
@@ -38,7 +40,7 @@ use std::{
     time::{Duration, Instant},
 };
 use stellarator::{
-    buf::Slice,
+    buf::{IoBuf, Slice},
     io::{AsyncRead, AsyncWrite, OwnedReader, OwnedWriter, SplitExt},
     net::{TcpListener, TcpStream, UdpSocket},
     rent,
@@ -253,8 +255,9 @@ pub struct DB {
 
 #[derive(Default)]
 pub struct State {
-    components: HashMap<ComponentId, Component>,
-    component_metadata: HashMap<ComponentId, ComponentMetadata>,
+    components: Arc<HashMap<ComponentId, Component>>,
+    component_metadata: Arc<HashMap<ComponentId, ComponentMetadata>>,
+    table_dispatch_plans: HashMap<PacketId, Arc<Vec<impeller2::vtable::TableDispatchEntry>>>,
 
     msg_logs: HashMap<PacketId, MsgLog>,
 
@@ -510,8 +513,8 @@ impl DB {
         db_state.set_version_last_opened(env!("CARGO_PKG_VERSION"));
         let now = Timestamp::now();
         let state = State {
-            components,
-            component_metadata,
+            components: Arc::new(components),
+            component_metadata: Arc::new(component_metadata),
             msg_logs,
             db_config: db_state.clone(),
             ..Default::default()
@@ -741,7 +744,24 @@ impl DB {
                 )?;
                 self.vtable_gen.fetch_add(1, atomic::Ordering::SeqCst);
             }
-            state.vtable_registry.map.insert(vtable.id, vtable.vtable);
+            let vtable_id = vtable.id;
+            let plan = match vtable.vtable.build_table_dispatch_plan() {
+                Ok(entries) => Some(Arc::new(entries)),
+                Err(e) => {
+                    warn!(
+                        ?e,
+                        vtable_id = ?vtable_id,
+                        "could not build table dispatch plan; using dynamic realize path"
+                    );
+                    None
+                }
+            };
+            state.vtable_registry.map.insert(vtable_id, vtable.vtable);
+            if let Some(p) = plan {
+                state.table_dispatch_plans.insert(vtable_id, p);
+            } else {
+                state.table_dispatch_plans.remove(&vtable_id);
+            }
             Ok::<_, Error>(())
         })?;
         Ok(())
@@ -812,6 +832,89 @@ impl DB {
         }
         stream_state
     }
+
+    pub(crate) fn sink_decomponentize_table<B: IoBuf>(
+        &self,
+        table: &OwnedTable<B>,
+        is_follower: bool,
+        suppress_apply_errors: bool,
+    ) -> Result<(), Error> {
+        let table_id = table.id;
+        let table_buf_len = table.buf.len();
+        let table_bytes: &[u8] = &table.buf;
+
+        let (components, component_metadata, plan_opt) = self.with_state(|state| {
+            (
+                state.components.clone(),
+                state.component_metadata.clone(),
+                state.table_dispatch_plans.get(&table_id).cloned(),
+            )
+        });
+
+        let mut sink = DBSink {
+            components: components.as_ref(),
+            component_metadata: component_metadata.as_ref(),
+            last_updated: &self.last_updated,
+            earliest_timestamp: &self.earliest_timestamp,
+            sunk_new_time_series: false,
+            table_received: self.apply_implicit_timestamp(),
+            followed_components: &self.followed_components,
+            has_followed_components: self
+                .has_followed_components
+                .load(std::sync::atomic::Ordering::Acquire),
+            is_follower,
+            batch_max_ts: Timestamp(i64::MIN),
+            batch_min_ts: Timestamp(i64::MAX),
+            batch_has_ts: false,
+        };
+
+        let apply_out = if let Some(plan) = plan_opt {
+            apply_table_dispatch_plan(plan.as_slice(), table_bytes, &mut sink)
+        } else {
+            self.with_state(|state| {
+                let vtable = state
+                    .vtable_registry
+                    .get(&table_id)
+                    .ok_or(impeller2::error::Error::VTableNotFound(table_id))?;
+                vtable.apply(table_bytes, &mut sink)
+            })
+        };
+
+        let apply_err = match apply_out {
+            Ok(Ok(())) => None,
+            Ok(Err(e)) => Some(e),
+            Err(e) => Some(Error::from(e)),
+        };
+
+        sink.flush_timestamps();
+        if sink.sunk_new_time_series {
+            self.vtable_gen
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        }
+
+        match apply_err {
+            None => Ok(()),
+            Some(e) => {
+                if suppress_apply_errors {
+                    warn!(
+                        err = ?e,
+                        ?table_id,
+                        table_buf_len,
+                        "error decomponentizing table packet"
+                    );
+                    Ok(())
+                } else {
+                    debug!(
+                        err = ?e,
+                        ?table_id,
+                        table_buf_len,
+                        "error sinking table packet"
+                    );
+                    Err(e)
+                }
+            }
+        }
+    }
 }
 
 impl State {
@@ -855,7 +958,7 @@ impl State {
                 db_path,
             )?;
         }
-        self.components.insert(component_id, component);
+        Arc::make_mut(&mut self.components).insert(component_id, component);
         Ok(())
     }
 
@@ -878,7 +981,8 @@ impl State {
             }
             // If this component is a timestamp source, update the metadata
             if is_timestamp_source
-                && let Some(existing_meta) = self.component_metadata.get_mut(&component_id)
+                && let Some(existing_meta) =
+                    Arc::make_mut(&mut self.component_metadata).get_mut(&component_id)
                 && !existing_meta.is_timestamp_source()
             {
                 existing_meta.set_timestamp_source(true);
@@ -925,7 +1029,7 @@ impl State {
         if is_timestamp_source || !self.component_metadata.contains_key(&component_id) {
             self.set_component_metadata(component_metadata, db_path)?;
         }
-        self.components.insert(component_id, component);
+        Arc::make_mut(&mut self.components).insert(component_id, component);
         Ok(())
     }
 
@@ -978,8 +1082,7 @@ impl State {
         if let Some(component) = self.components.get(&metadata.component_id) {
             component.set_name(metadata.name.clone());
         }
-        self.component_metadata
-            .insert(metadata.component_id, metadata);
+        Arc::make_mut(&mut self.component_metadata).insert(metadata.component_id, metadata);
         Ok(())
     }
 
@@ -1794,30 +1897,7 @@ async fn handle_packet<A: AsyncWrite + Send + Sync + 'static>(
             trace!(table.len = table.buf.len(), "sinking table");
             let table_id = table.id;
             let table_buf_len = table.buf.len();
-            if let Err(err) = db.with_state(|state| {
-                let mut sink = DBSink {
-                    components: &state.components,
-                    component_metadata: &state.component_metadata,
-                    last_updated: &db.last_updated,
-                    earliest_timestamp: &db.earliest_timestamp,
-                    sunk_new_time_series: false,
-                    table_received: db.apply_implicit_timestamp(),
-                    followed_components: &db.followed_components,
-                    has_followed_components: db
-                        .has_followed_components
-                        .load(std::sync::atomic::Ordering::Acquire),
-                    is_follower: false,
-                    batch_max_ts: Timestamp(i64::MIN),
-                    batch_min_ts: Timestamp(i64::MAX),
-                    batch_has_ts: false,
-                };
-                table.sink(&state.vtable_registry, &mut sink)??;
-                sink.flush_timestamps();
-                if sink.sunk_new_time_series {
-                    db.vtable_gen.fetch_add(1, atomic::Ordering::SeqCst);
-                }
-                Ok::<_, Error>(())
-            }) {
+            if let Err(err) = db.sink_decomponentize_table(table, false, false) {
                 debug!(?err, ?table_id, table_buf_len, "error sinking table packet");
                 return Err(err);
             }
@@ -2806,7 +2886,7 @@ async fn handle_fixed_stream<A: AsyncWrite>(
             let stream = stream.lock().await;
             let id: PacketId = state.stream_id.to_le_bytes()[..2].try_into().unwrap();
             table = LenPacket::table(id, 2048 - 16);
-            let vtable = DBVisitor.vtable(&components)?;
+            let vtable = DBVisitor.vtable(components.as_ref())?;
             let msg = VTableMsg { id, vtable };
             stream.send(msg.with_request_id(req_id)).await.0?;
             current_gen = vtable_gen;
@@ -2814,7 +2894,7 @@ async fn handle_fixed_stream<A: AsyncWrite>(
         table.clear();
         let t0 = Instant::now();
         if let Err(err) = DBVisitor
-            .populate_table(&components, &mut table, current_timestamp)
+            .populate_table(components.as_ref(), &mut table, current_timestamp)
             .await
         {
             warn!(?err, "failed to populate table");
