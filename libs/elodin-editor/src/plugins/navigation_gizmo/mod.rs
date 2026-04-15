@@ -13,13 +13,11 @@ use std::{collections::HashMap, f32::consts};
 mod render_layer_alloc;
 pub use render_layer_alloc::{AllocatedRenderLayer, RenderLayerAlloc};
 
-
 pub struct NavigationGizmoPlugin;
 
 impl Plugin for NavigationGizmoPlugin {
     fn build(&self, app: &mut App) {
-        app
-            .init_resource::<NavGizmoAnchorState>()
+        app.init_resource::<NavGizmoAnchorState>()
             .add_systems(PostUpdate, set_camera_viewport)
             .add_systems(PostUpdate, sync_nav_camera)
             .add_plugins(MeshPickingPlugin)

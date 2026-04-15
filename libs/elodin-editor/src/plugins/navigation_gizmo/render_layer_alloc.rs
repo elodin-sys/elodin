@@ -18,7 +18,6 @@ use std::sync::Arc;
 pub(crate) fn plugin(app: &mut App) {
     app.init_resource::<RenderLayerAlloc>()
         .add_systems(First, process_dropped_render_layer_leases);
-
 }
 
 /// When the last [`Arc`] to this value is dropped, the layer index is pushed to
@@ -29,7 +28,7 @@ pub struct RenderLayerLease {
     dropped: Arc<SegQueue<usize>>,
 }
 
-/// This is where the magic happens. 
+/// This is where the magic happens.
 impl Drop for RenderLayerLease {
     fn drop(&mut self) {
         self.dropped.push(self.layer);
@@ -47,7 +46,6 @@ impl std::fmt::Debug for RenderLayerLease {
 fn render_layer_mask(layer: usize) -> RenderLayers {
     RenderLayers::none().with(layer)
 }
-
 
 /// Tracks render layers in use. The [`SegQueue`] is shared with every [`RenderLayerLease`] via
 /// [`Arc`]; cloning a lease’s [`Arc`] delays freeing until all clones drop.
