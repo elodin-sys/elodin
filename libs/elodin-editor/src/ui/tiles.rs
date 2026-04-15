@@ -60,7 +60,7 @@ use crate::{
         LogicalKeyState,
         gizmos::GIZMO_RENDER_LAYER,
         navigation_gizmo::{
-            AllocatedRenderLayer, NavGizmoCamera, NavGizmoParent, RenderLayerAlloc,
+            RenderLayerLease, NavGizmoCamera, NavGizmoParent, RenderLayerAllocator,
         },
         view_cube::{
             CoordinateSystem, NeedsInitialSnap, ViewCubeConfig, ViewCubeTargetCamera,
@@ -127,7 +127,6 @@ pub struct ViewportConfig {
     pub projection_color: impeller2_wkt::Color,
     pub frustums_color: impeller2_wkt::Color,
     pub frustums_thickness: f32,
-    pub viewport_layer: Option<usize>,
 }
 
 #[derive(Clone)]
@@ -1257,14 +1256,14 @@ impl ViewportPane {
         asset_server: &Res<AssetServer>,
         meshes: &mut ResMut<Assets<Mesh>>,
         materials: &mut ResMut<Assets<StandardMaterial>>,
-        render_layer_alloc: &mut ResMut<RenderLayerAlloc>,
+        render_layer_alloc: &mut ResMut<RenderLayerAllocator>,
         eql_ctx: &eql::Context,
         viewport: &Viewport,
         name: PaneName,
     ) -> Self {
         let mut main_camera_layers = RenderLayers::default().with(GIZMO_RENDER_LAYER);
         let mut grid_layers = RenderLayers::none();
-        let mut grid_lease: Option<AllocatedRenderLayer> = None;
+        let mut grid_lease: Option<RenderLayerLease> = None;
         let grid_layer = if let Some(lease) = render_layer_alloc.alloc() {
             let layer = lease.layer();
             grid_lease = Some(lease);
@@ -1275,7 +1274,7 @@ impl ViewportPane {
             None
         };
 
-        let mut viewport_lease: Option<AllocatedRenderLayer> = None;
+        let mut viewport_lease: Option<RenderLayerLease> = None;
         let viewport_layer = if let Some(lease) = render_layer_alloc.alloc() {
             let layer = lease.layer();
             viewport_lease = Some(lease);
@@ -2498,7 +2497,7 @@ pub struct TileLayout<'w, 's> {
     asset_server: Res<'w, AssetServer>,
     meshes: ResMut<'w, Assets<Mesh>>,
     materials: ResMut<'w, Assets<StandardMaterial>>,
-    render_layer_alloc: ResMut<'w, RenderLayerAlloc>,
+    render_layer_alloc: ResMut<'w, RenderLayerAllocator>,
     viewport_contains_pointer: ResMut<'w, ViewportContainsPointer>,
     editor_cam: Query<'w, 's, &'static mut EditorCam, With<MainCamera>>,
     primary_window: Single<'w, 's, Entity, With<PrimaryWindow>>,

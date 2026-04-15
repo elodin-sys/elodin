@@ -15,8 +15,7 @@ use impeller2_wkt::ComponentValue;
 use std::collections::HashMap;
 
 use super::components::{
-    AxisLabelBillboard, RotationArrow, ViewCubeCamera, ViewCubeLink, ViewCubeRenderLayer,
-    ViewCubeRoot, ViewportActionButton,
+    AxisLabelBillboard, RotationArrow, ViewCubeCamera, ViewCubeLink, ViewCubeRoot, ViewportActionButton,
 };
 use super::config::ViewCubeConfig;
 use super::events::ViewCubeEvent;

@@ -3,14 +3,14 @@
 Navigation gizmo support and camera-overlay synchronization helpers.
 
 ## What it does
-- Provides render-layer allocation (`RenderLayerAlloc`).
+- Provides render-layer allocation (`RenderLayerAllocator`).
 - Provides shared components (`NavGizmoParent`, `NavGizmoCamera`).
 - Keeps overlay camera viewport/rotation synchronized with the main camera.
 - Still contains legacy `spawn_gizmo` behavior for the previous 3D nav gizmo.
 
 ## Main API
 - `NavigationGizmoPlugin`
-- `RenderLayerAlloc`
+- `RenderLayerAllocator`
 - `NavGizmoParent`
 - `NavGizmoCamera`
 - `spawn_gizmo` (legacy)

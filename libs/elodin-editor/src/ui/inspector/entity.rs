@@ -16,7 +16,7 @@ use impeller2_wkt::{ComponentMetadata, MetadataExt};
 use smallvec::SmallVec;
 
 use crate::{
-    plugins::navigation_gizmo::RenderLayerAlloc,
+    plugins::navigation_gizmo::RenderLayerAllocator,
     ui::{
         EntityPair,
         colors::get_scheme,
@@ -39,7 +39,7 @@ pub struct InspectorEntity<'w, 's> {
     metadata_query: Query<'w, 's, &'static mut ComponentMetadata>,
     metadata_store: Res<'w, ComponentMetadataRegistry>,
     path_reg: Res<'w, ComponentPathRegistry>,
-    render_layer_alloc: ResMut<'w, RenderLayerAlloc>,
+    render_layer_alloc: ResMut<'w, RenderLayerAllocator>,
     filter: ResMut<'w, ComponentFilter>,
 }
 

@@ -1,7 +1,7 @@
 //! Handle render layer allocation and deallocation. One allocates a
-//! `AllocatedRenderLayer` component from the `RenderLayerAlloc` resource. Add
+//! `RenderLayerLease` component from the `RenderLayerAllocator` resource. Add
 //! it and its `Renderlayer` to whatever entity needs it. When all the
-//! `AllocatedRenderLayer`s are dropped, then the allocated render layer is
+//! `RenderLayerLease`s are dropped, then the allocated render layer is
 //! freed for use again.
 //!
 //! This can work with any render layer, and it uses the bits to find the next
@@ -16,28 +16,28 @@ use crossbeam_queue::SegQueue;
 use std::sync::Arc;
 
 pub(crate) fn plugin(app: &mut App) {
-    app.init_resource::<RenderLayerAlloc>()
+    app.init_resource::<RenderLayerAllocator>()
         .add_systems(First, process_dropped_render_layer_leases);
 }
 
 /// When the last [`Arc`] to this value is dropped, the layer index is pushed to
 /// the shared queue; [`process_dropped_render_layer_leases`] then frees that
-/// layer from [`RenderLayerAlloc`].
-pub struct RenderLayerLease {
+/// layer from [`RenderLayerAllocator`].
+pub struct RenderLayerLeaseInner {
     pub layer: usize,
     dropped: Arc<SegQueue<usize>>,
 }
 
 /// This is where the magic happens.
-impl Drop for RenderLayerLease {
+impl Drop for RenderLayerLeaseInner {
     fn drop(&mut self) {
         self.dropped.push(self.layer);
     }
 }
 
-impl std::fmt::Debug for RenderLayerLease {
+impl std::fmt::Debug for RenderLayerLeaseInner {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("RenderLayerLease")
+        f.debug_struct("RenderLayerLeaseInner")
             .field("layer", &self.layer)
             .finish_non_exhaustive()
     }
@@ -47,23 +47,23 @@ fn render_layer_mask(layer: usize) -> RenderLayers {
     RenderLayers::none().with(layer)
 }
 
-/// Tracks render layers in use. The [`SegQueue`] is shared with every [`RenderLayerLease`] via
+/// Tracks render layers in use. The [`SegQueue`] is shared with every [`RenderLayerLeaseInner`] via
 /// [`Arc`]; cloning a lease’s [`Arc`] delays freeing until all clones drop.
 #[derive(Resource)]
-pub struct RenderLayerAlloc {
+pub struct RenderLayerAllocator {
     in_use: RenderLayers,
     dropped: Arc<SegQueue<usize>>,
 }
 
-impl std::fmt::Debug for RenderLayerAlloc {
+impl std::fmt::Debug for RenderLayerAllocator {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("RenderLayerAlloc")
+        f.debug_struct("RenderLayerAllocator")
             .field("in_use", &self.in_use)
             .finish_non_exhaustive()
     }
 }
 
-impl RenderLayerAlloc {
+impl RenderLayerAllocator {
     /// Layers never returned from [`Self::alloc`]: Bevy default (0) and [`GIZMO_RENDER_LAYER`].
     pub fn reserved() -> RenderLayers {
         RenderLayers::layer(0).with(GIZMO_RENDER_LAYER)
@@ -83,16 +83,16 @@ impl RenderLayerAlloc {
         None
     }
 
-    /// Current union of in-use layers (including [`RenderLayerAlloc::reserved`]).
+    /// Current union of in-use layers (including [`RenderLayerAllocator::reserved`]).
     pub fn in_use(&self) -> RenderLayers {
         self.in_use.clone()
     }
 
     /// Allocates the lowest free render layer below `65_536`, excluding [`Self::reserved`].
-    pub fn alloc(&mut self) -> Option<AllocatedRenderLayer> {
+    pub fn alloc(&mut self) -> Option<RenderLayerLease> {
         let n = self.first_free_layer_index(&self.in_use)?;
         self.in_use = self.in_use.union(&render_layer_mask(n));
-        Some(AllocatedRenderLayer(Arc::new(RenderLayerLease {
+        Some(RenderLayerLease(Arc::new(RenderLayerLeaseInner {
             layer: n,
             dropped: Arc::clone(&self.dropped),
         })))
@@ -123,14 +123,14 @@ impl RenderLayerAlloc {
         }
     }
 
-    /// Resets dynamic allocations while keeping [`RenderLayerAlloc::reserved`] layers blocked.
+    /// Resets dynamic allocations while keeping [`RenderLayerAllocator::reserved`] layers blocked.
     pub fn free_all(&mut self) {
         while self.dropped.pop().is_some() {}
         self.in_use = Self::reserved();
     }
 }
 
-impl Default for RenderLayerAlloc {
+impl Default for RenderLayerAllocator {
     fn default() -> Self {
         Self {
             in_use: Self::reserved(),
@@ -139,16 +139,16 @@ impl Default for RenderLayerAlloc {
     }
 }
 
-fn process_dropped_render_layer_leases(mut alloc: ResMut<RenderLayerAlloc>) {
+fn process_dropped_render_layer_leases(mut alloc: ResMut<RenderLayerAllocator>) {
     alloc.drain_dropped();
 }
 
-/// Bevy component: holds [`Arc<RenderLayerLease>`]. Cloning the component clones the [`Arc`], so
+/// Bevy component: holds [`Arc<RenderLayerLeaseInner>`]. Cloning the component clones the [`Arc`], so
 /// the layer stays reserved until every clone is dropped (then one queue push, one free).
 #[derive(Component, Clone, Debug)]
-pub struct AllocatedRenderLayer(pub Arc<RenderLayerLease>);
+pub struct RenderLayerLease(pub Arc<RenderLayerLeaseInner>);
 
-impl AllocatedRenderLayer {
+impl RenderLayerLease {
     /// Return the layer number.
     pub fn layer(&self) -> usize {
         self.0.layer
@@ -166,7 +166,7 @@ mod tests {
 
     #[test]
     fn test_render_layer_alloc() {
-        let mut default = RenderLayerAlloc::default();
+        let mut default = RenderLayerAllocator::default();
         let a = default.alloc().expect("layer 1");
         let b = default.alloc().expect("layer 2");
         assert_eq!(a.layer(), 1);
@@ -175,7 +175,7 @@ mod tests {
 
     #[test]
     fn test_lease_drop_frees_after_drain() {
-        let mut alloc = RenderLayerAlloc::default();
+        let mut alloc = RenderLayerAllocator::default();
         let lease = alloc.alloc().expect("layer 1");
         assert_eq!(lease.layer(), 1);
         drop(lease);
@@ -186,7 +186,7 @@ mod tests {
 
     #[test]
     fn test_arc_clone_delays_free_until_last_drop() {
-        let mut alloc = RenderLayerAlloc::default();
+        let mut alloc = RenderLayerAllocator::default();
         let a = alloc.alloc().expect("layer 1");
         let b = Arc::clone(&a.0);
         drop(a);
@@ -197,5 +197,5 @@ mod tests {
         alloc.drain_dropped();
         let d = alloc.alloc().expect("layer 1 free again");
         assert_eq!(d.layer(), 1);
-    }
+    
 }

@@ -39,7 +39,7 @@ use object_3d::create_object_3d_entity;
 use plugins::frustum::FrustumPlugin;
 use plugins::frustum_intersection::FrustumIntersectionPlugin;
 use plugins::gizmos::GizmoPlugin;
-use plugins::navigation_gizmo::{NavigationGizmoPlugin, RenderLayerAlloc};
+use plugins::navigation_gizmo::{NavigationGizmoPlugin, RenderLayerAllocator};
 use plugins::view_cube::{ViewCubeConfig, ViewCubePlugin};
 use ui::{
     UI_ORDER_BASE,
@@ -1102,7 +1102,7 @@ pub fn setup_clear_state(mut packet_handlers: ResMut<PacketHandlers>, mut comman
 fn clear_state_new_connection(
     PacketHandlerInput { packet, .. }: PacketHandlerInput,
     mut entity_map: ResMut<EntityMap>,
-    mut render_layer_alloc: ResMut<RenderLayerAlloc>,
+    mut render_layer_alloc: ResMut<RenderLayerAllocator>,
     mut value_map: Query<&mut ComponentValueMap>,
     mut graph_data: ResMut<CollectedGraphData>,
     lines: Query<Entity, With<LineHandle>>,

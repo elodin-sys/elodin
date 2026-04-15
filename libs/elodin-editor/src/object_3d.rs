@@ -1831,6 +1831,7 @@ pub fn update_object_3d_billboard_system(
             let Some(layer) = viewport_config.and_then(|c| c.viewport_layer) else {
                 continue;
             };
+            let render_layers = layer.render_layers();
 
             seen_cameras.insert(cam_entity);
             let distance = (obj_pos - cam_gt.translation()).length();
@@ -1867,7 +1868,7 @@ pub fn update_object_3d_billboard_system(
                             Visibility::Hidden,
                             InheritedVisibility::default(),
                             ViewVisibility::default(),
-                            RenderLayers::layer(layer),
+                            render_layers,
                             BillboardIcon,
                             ChildOf(parent_entity),
                             Name::new(format!("billboard_icon_cam_{cam_entity}")),
@@ -1877,7 +1878,7 @@ pub fn update_object_3d_billboard_system(
 
                 commands
                     .entity(*bb_entity)
-                    .insert(RenderLayers::layer(layer));
+                    .insert(render_layers);
 
                 let alpha = if icon_fade > 0.0 {
                     let min_fade = if distance < icon_min + icon_fade {

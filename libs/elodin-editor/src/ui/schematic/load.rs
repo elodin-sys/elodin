@@ -31,7 +31,7 @@ use crate::{
             DocumentLoaded, DocumentReloaded, DocumentSaved, SchematicDocumentAsset,
             SchematicWindow,
         },
-        navigation_gizmo::RenderLayerAlloc,
+        navigation_gizmo::RenderLayerAllocator,
     },
     ui::{
         DEFAULT_SECONDARY_RECT, HdrEnabled,
@@ -120,7 +120,7 @@ pub struct LoadSchematicParams<'w, 's> {
     pub mat3_materials: ResMut<'w, Assets<Mat3Material>>,
     pub images: ResMut<'w, Assets<Image>>,
     pub icon_cache: ResMut<'w, IconTextureCache>,
-    pub render_layer_alloc: ResMut<'w, RenderLayerAlloc>,
+    pub render_layer_alloc: ResMut<'w, RenderLayerAllocator>,
     pub hdr_enabled: ResMut<'w, HdrEnabled>,
     pub timeline_settings: ResMut<'w, TimelineSettings>,
     pub schema_reg: Res<'w, ComponentSchemaRegistry>,

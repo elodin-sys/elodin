@@ -11,7 +11,7 @@ use bevy_egui::EguiContexts;
 use std::{collections::HashMap, f32::consts};
 
 mod render_layer_alloc;
-pub use render_layer_alloc::{AllocatedRenderLayer, RenderLayerAlloc};
+pub use render_layer_alloc::{RenderLayerLease, RenderLayerAllocator};
 
 pub struct NavigationGizmoPlugin;
 
@@ -127,7 +127,7 @@ pub fn spawn_gizmo(
     commands: &mut Commands,
     meshes: &mut ResMut<Assets<Mesh>>,
     materials: &mut ResMut<Assets<StandardMaterial>>,
-    render_layer_alloc: &mut ResMut<RenderLayerAlloc>,
+    render_layer_alloc: &mut ResMut<RenderLayerAllocator>,
 ) -> (Option<Entity>, Option<Entity>) {
     let Some(lease) = render_layer_alloc.alloc() else {
         return (None, None);

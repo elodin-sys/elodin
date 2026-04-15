@@ -33,10 +33,6 @@ pub struct ViewCubeLink {
 #[derive(Component)]
 pub struct ViewCubeCamera;
 
-/// Stores the render layer for this ViewCube instance
-#[derive(Component)]
-pub struct ViewCubeRenderLayer(pub usize);
-
 // ============================================================================
 // Cube Elements
 // ============================================================================

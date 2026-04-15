@@ -33,7 +33,7 @@ use nox::ArrayBuf;
 
 use crate::{
     EqlContext, MainCamera, Offset, SelectedTimeRange, TimeRangeBehavior, TimeRangeError,
-    plugins::navigation_gizmo::RenderLayerAlloc,
+    plugins::navigation_gizmo::RenderLayerAllocator,
     ui::{
         FocusedWindow, HdrEnabled, Paused, colors,
         command_palette::CommandPaletteState,
@@ -440,7 +440,7 @@ fn graph_parts(
                 move |_: In<String>,
                       query: Query<&ComponentValue>,
                       entity_map: Res<EntityMap>,
-                      mut render_layer_alloc: ResMut<RenderLayerAlloc>,
+                      mut render_layer_alloc: ResMut<RenderLayerAllocator>,
                       mut tile_param: TileParam,
                       path_reg: Res<ComponentPathRegistry>,
                       palette_state: Res<CommandPaletteState>| {
