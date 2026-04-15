@@ -251,7 +251,7 @@ impl LoadSchematicParams<'_, '_> {
                 .2;
             std::mem::take(&mut window_state.tile_state)
         };
-        main_state.clear(&mut self.commands, &mut self.render_layer_alloc);
+        main_state.clear(&mut self.commands);
         self.hdr_enabled.0 = false;
         for entity in self.objects_3d.iter() {
             self.commands.entity(entity).despawn();
@@ -577,9 +577,7 @@ impl LoadSchematicParams<'_, '_> {
                     return false;
                 };
                 let window_id = *window_id;
-                window_state
-                    .tile_state
-                    .clear(&mut self.commands, &mut self.render_layer_alloc);
+                window_state.tile_state.clear(&mut self.commands);
                 window_state.graph_entities.clear();
                 window_id
             };

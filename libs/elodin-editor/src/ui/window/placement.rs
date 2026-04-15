@@ -21,12 +21,9 @@ use winit::{
     window::Window as WinitWindow,
 };
 
-use crate::{
-    plugins::navigation_gizmo::RenderLayerAlloc,
-    ui::{
-        FocusedWindow,
-        tiles::{WindowId, WindowRelayout, WindowState},
-    },
+use crate::ui::{
+    FocusedWindow,
+    tiles::{WindowId, WindowRelayout, WindowState},
 };
 
 const WINDOW_READY_TIMEOUT: Duration = Duration::from_millis(2000);
@@ -39,7 +36,6 @@ const WINDOW_RECT_APPLY_TIMEOUT: Duration = Duration::from_millis(1000);
 pub struct WindowCleanup<'w, 's> {
     primary: Query<'w, 's, &'static WindowId, With<PrimaryWindow>>,
     window_states: Query<'w, 's, (Entity, &'static WindowId, &'static mut WindowState)>,
-    render_layer_alloc: ResMut<'w, RenderLayerAlloc>,
     focused_window: ResMut<'w, FocusedWindow>,
     commands: Commands<'w, 's>,
     exit: MessageWriter<'w, AppExit>,
@@ -94,9 +90,7 @@ pub fn handle_window_destroyed(
 
 fn cleanup_secondary_window(entity: Entity, cleanup: &mut WindowCleanup) {
     if let Ok((_, _, mut window_state)) = cleanup.window_states.get_mut(entity) {
-        window_state
-            .tile_state
-            .clear(&mut cleanup.commands, &mut cleanup.render_layer_alloc);
+        window_state.tile_state.clear(&mut cleanup.commands);
         window_state.graph_entities.clear();
     }
 

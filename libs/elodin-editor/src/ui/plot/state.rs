@@ -13,7 +13,7 @@ use impeller2_wkt::GraphType;
 
 use super::gpu::LineVisibleRange;
 use crate::MainCamera;
-use crate::plugins::navigation_gizmo::RenderLayerAlloc;
+use crate::plugins::navigation_gizmo::{AllocatedRenderLayer, RenderLayerAlloc};
 use crate::ui::{ViewportRect, colors};
 
 pub type GraphStateComponent = Vec<(bool, egui::Color32)>;
@@ -28,6 +28,7 @@ pub struct GraphBundle {
     pub tonemapping: Tonemapping,
     pub viewport_rect: ViewportRect,
     pub render_layers: RenderLayers,
+    pub allocated_layer: AllocatedRenderLayer,
     pub main_camera: MainCamera,
 }
 
@@ -60,10 +61,10 @@ impl GraphBundle {
         components: BTreeMap<ComponentPath, GraphStateComponent>,
         label: String,
     ) -> Self {
-        let Some(layer) = render_layer_alloc.alloc() else {
+        let Some(allocated_layer) = render_layer_alloc.alloc() else {
             todo!("ran out of layers")
         };
-        let render_layers = RenderLayers::layer(layer);
+        let render_layers = allocated_layer.render_layers();
         let graph_state = GraphState {
             components,
             enabled_lines: BTreeMap::new(),
@@ -105,6 +106,7 @@ impl GraphBundle {
             viewport_rect: ViewportRect(None),
             main_camera: MainCamera,
             render_layers,
+            allocated_layer,
         }
     }
 }

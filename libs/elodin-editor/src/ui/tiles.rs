@@ -59,7 +59,9 @@ use crate::{
     plugins::{
         LogicalKeyState,
         gizmos::GIZMO_RENDER_LAYER,
-        navigation_gizmo::{NavGizmoCamera, NavGizmoParent, RenderLayerAlloc},
+        navigation_gizmo::{
+            AllocatedRenderLayer, NavGizmoCamera, NavGizmoParent, RenderLayerAlloc,
+        },
         view_cube::{
             CoordinateSystem, NeedsInitialSnap, ViewCubeConfig, ViewCubeTargetCamera,
             spawn::spawn_view_cube,
@@ -767,19 +769,10 @@ impl TileState {
         !self.has_content()
     }
 
-    pub fn clear(&mut self, commands: &mut Commands, render_layer_alloc: &mut RenderLayerAlloc) {
+    pub fn clear(&mut self, commands: &mut Commands) {
         for (tile_id, tile) in self.tree.tiles.iter() {
             match tile {
                 Tile::Pane(Pane::Viewport(viewport)) => {
-                    if let Some(layer) = viewport.viewport_layer {
-                        render_layer_alloc.free(layer);
-                    }
-                    if let Some(layer) = viewport.grid_layer {
-                        render_layer_alloc.free(layer);
-                    }
-                    if let Some(layer) = viewport.view_cube_layer {
-                        render_layer_alloc.free(layer);
-                    }
                     if let Some(camera) = viewport.camera
                         && let Ok(mut e) = commands.get_entity(camera)
                     {
@@ -1271,15 +1264,26 @@ impl ViewportPane {
     ) -> Self {
         let mut main_camera_layers = RenderLayers::default().with(GIZMO_RENDER_LAYER);
         let mut grid_layers = RenderLayers::none();
-        let grid_layer = render_layer_alloc.alloc();
-        if let Some(layer) = grid_layer {
+        let mut grid_lease: Option<AllocatedRenderLayer> = None;
+        let grid_layer = if let Some(lease) = render_layer_alloc.alloc() {
+            let layer = lease.layer();
+            grid_lease = Some(lease);
             main_camera_layers = main_camera_layers.with(layer);
             grid_layers = grid_layers.with(layer);
-        }
-        let viewport_layer = render_layer_alloc.alloc();
-        if let Some(layer) = viewport_layer {
+            Some(layer)
+        } else {
+            None
+        };
+
+        let mut viewport_lease: Option<AllocatedRenderLayer> = None;
+        let viewport_layer = if let Some(lease) = render_layer_alloc.alloc() {
+            let layer = lease.layer();
+            viewport_lease = Some(lease);
             main_camera_layers = main_camera_layers.with(layer);
-        }
+            Some(layer)
+        } else {
+            None
+        };
 
         let grid_visibility = if viewport.show_grid {
             Visibility::Visible
@@ -1313,6 +1317,10 @@ impl ViewportPane {
                 grid_layers,
             ))
             .id();
+
+        if let Some(lease) = grid_lease {
+            commands.entity(grid_id).insert(lease);
+        }
 
         let transform =
             Transform::from_translation(Vec3::new(5.0, 5.0, 10.0)).looking_at(Vec3::ZERO, Vec3::Y);
@@ -1482,6 +1490,10 @@ impl ViewportPane {
 
         let camera = camera.id();
 
+        if let Some(lease) = viewport_lease {
+            commands.entity(camera).insert(lease);
+        }
+
         if !viewport.show_view_cube {
             return Self {
                 camera: Some(camera),
@@ -1496,7 +1508,7 @@ impl ViewportPane {
         }
 
         // Allocate render layer for ViewCube (same approach as navigation_gizmo)
-        let Some(view_cube_layer) = render_layer_alloc.alloc() else {
+        let Some(view_cube_lease) = render_layer_alloc.alloc() else {
             return Self {
                 camera: Some(camera),
                 nav_gizmo: None,
@@ -1508,6 +1520,7 @@ impl ViewportPane {
                 view_cube_layer: None,
             };
         };
+        let view_cube_layer = view_cube_lease.layer();
 
         commands
             .entity(camera)
@@ -1542,6 +1555,8 @@ impl ViewportPane {
                 NavGizmoCamera,
             ));
         }
+
+        commands.entity(spawned.cube_root).insert(view_cube_lease);
 
         Self {
             camera: Some(camera),
@@ -2615,15 +2630,6 @@ impl WidgetSystem for TileLayout<'_, '_> {
                         };
 
                         if let egui_tiles::Tile::Pane(Pane::Viewport(viewport)) = tile {
-                            if let Some(layer) = viewport.viewport_layer {
-                                state_mut.render_layer_alloc.free(layer);
-                            }
-                            if let Some(layer) = viewport.grid_layer {
-                                state_mut.render_layer_alloc.free(layer);
-                            }
-                            if let Some(layer) = viewport.view_cube_layer {
-                                state_mut.render_layer_alloc.free(layer);
-                            }
                             if let Some(camera) = viewport.camera {
                                 state_mut.commands.entity(camera).despawn();
                             }

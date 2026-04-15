@@ -1150,10 +1150,7 @@ fn clear_state_new_connection(
     let Ok(mut primary_state) = windows_state.get_mut(primary_id) else {
         return;
     };
-    primary_state
-        .1
-        .tile_state
-        .clear(&mut commands, &mut render_layer_alloc);
+    primary_state.1.tile_state.clear(&mut commands);
     for (entity, secondary) in &windows_state {
         if entity == primary_id {
             // We don't despawn the primary window ever.
