@@ -1,3 +1,14 @@
+///! Handle render layer allocation and deallocation. One allocates a
+///! `AllocatedRenderLayer` component from the `RenderLayerAlloc` resource. Add
+///! it and its `Renderlayer` to whatever entity needs it. When all the
+///! `AllocatedRenderLayer`s are dropped, then the allocated render layer is
+///! freed for use again.
+///!
+///! This can work with any render layer, and it uses the bits to find the next
+///! available layer, so its fast and uses the lowest available number first.
+///!
+///! This module was created to avoid a maximum limit of 64 that were not
+///! deallocated.
 use crate::plugins::gizmos::GIZMO_RENDER_LAYER;
 use bevy::camera::visibility::RenderLayers;
 use bevy::prelude::*;
