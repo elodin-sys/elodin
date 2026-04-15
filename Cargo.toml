@@ -9,6 +9,7 @@ resolver = "2"
 #
 # default-members = ["apps/elodin"]
 members = [
+    "libs/hamann-chen-line",
     "libs/elodin-editor",
     "libs/nox",
     "libs/elodin-macros",

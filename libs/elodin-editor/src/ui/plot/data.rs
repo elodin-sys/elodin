@@ -34,12 +34,37 @@ use std::{collections::BTreeMap, fmt::Debug, ops::Range};
 
 use crate::ui::plot::gpu::INDEX_BUFFER_LEN;
 use crate::{SelectedTimeRange, TimeRangeBehavior};
+use hamann_chen_line::{select_polyline3_indices, select_time_value_indices};
 
 use super::PlotBounds;
 
 /// Maximum points to request for overview data (LTTB downsampled)
 /// Must be <= CHUNK_LEN to fit within a single GPU buffer shard
 pub const OVERVIEW_MAX_POINTS: usize = CHUNK_LEN;
+
+/// Tuning for optional downsampling of live `LineTree` data (see `maybe_compress_all_graph_lines`).
+#[derive(Resource, Clone, Debug)]
+pub struct CurveCompressSettings {
+    pub enabled: bool,
+    pub compress_after_total_points: usize,
+    pub compress_to_points: usize,
+    /// Fraction of the **last** samples (by time order) left uncompressed after a pass.
+    /// `0.0` = compress the whole series (subject to `compress_to_points`).  
+    /// `0.2` ≈ keep the last 20 % at full resolution; Hamann–Chen applies only to the leading ~80 %.
+    pub keep_recent_fraction: f32,
+}
+
+impl Default for CurveCompressSettings {
+    fn default() -> Self {
+        let cap = CHUNK_COUNT.saturating_mul(CHUNK_LEN);
+        Self {
+            enabled: true,
+            compress_after_total_points: cap.saturating_mul(3) / 4,
+            compress_to_points: cap / 2,
+            keep_recent_fraction: 0.0,
+        }
+    }
+}
 
 #[derive(Clone, Debug)]
 pub struct PlotDataComponent {
@@ -144,6 +169,7 @@ pub fn pkt_handler(
     mut lines: ResMut<Assets<Line>>,
     tick: Res<CurrentTimestamp>,
     earliest_timestamp: Res<EarliestTimestamp>,
+    curve_compress: Res<CurveCompressSettings>,
 ) {
     let mut tick = *tick;
     if let OwnedPacket::Table(table) = packet {
@@ -163,7 +189,137 @@ pub fn pkt_handler(
         ) {
             warn_once!(?err, "graph sink failed");
         }
+        maybe_compress_all_graph_lines(
+            &mut collected_graph_data,
+            &mut lines,
+            earliest_timestamp.0,
+            &curve_compress,
+        );
     }
+}
+
+/// Keeps live telemetry within GPU / index-buffer budgets by merging oversize series.
+pub fn maybe_compress_all_graph_lines(
+    graph_data: &mut CollectedGraphData,
+    lines: &mut Assets<Line>,
+    earliest: Timestamp,
+    settings: &CurveCompressSettings,
+) {
+    if !settings.enabled {
+        return;
+    }
+    for component in graph_data.components.values_mut() {
+        let handles: Vec<Handle<Line>> = component.lines.values().cloned().collect();
+        if handles.len() == 3 && try_joint_triline_compress(lines, &handles, earliest, settings) {
+            continue;
+        }
+        for line_handle in &handles {
+            let Some(line) = lines.get_mut(line_handle) else {
+                continue;
+            };
+            line.maybe_compress_live(earliest, settings);
+        }
+    }
+}
+
+fn try_joint_triline_compress(
+    lines: &mut Assets<Line>,
+    handles: &[Handle<Line>],
+    earliest: Timestamp,
+    settings: &CurveCompressSettings,
+) -> bool {
+    if handles.len() != 3 {
+        return false;
+    }
+    let (hx, hy, hz) = (&handles[0], &handles[1], &handles[2]);
+    let (lx, ly, lz) = match (lines.get(hx), lines.get(hy), lines.get(hz)) {
+        (Some(x), Some(y), Some(z)) => (x, y, z),
+        _ => return false,
+    };
+    if lx.data.total_points() <= settings.compress_after_total_points {
+        return false;
+    }
+    let (tsx, vx) = lx.data.flattened_time_series();
+    let (tsy, vy) = ly.data.flattened_time_series();
+    let (tsz, vz) = lz.data.flattened_time_series();
+    if tsx.len() != tsy.len() || tsx.len() != tsz.len() {
+        return false;
+    }
+    if tsx
+        .iter()
+        .zip(&tsy)
+        .zip(&tsz)
+        .any(|((&a, &b), &c)| a != b || a != c)
+    {
+        return false;
+    }
+    if tsx.len() < 3 {
+        return false;
+    }
+    let n = tsx.len();
+    let pos: Vec<bevy::prelude::Vec3> = vx
+        .iter()
+        .zip(vy.iter())
+        .zip(vz.iter())
+        .map(|((&x, &y), &z)| bevy::prelude::Vec3::new(x, y, z))
+        .collect();
+
+    let keep = recent_tail_keep_count(n, settings.keep_recent_fraction);
+    let split = n.saturating_sub(keep);
+
+    let (new_ts, new_x, new_y, new_z) = if settings.keep_recent_fraction > 0.0 && split >= 3 {
+        let budget = settings.compress_to_points.saturating_sub(keep).max(2);
+        let target_old = budget.min(split).max(2);
+        let pos_old = &pos[..split];
+        let idx = select_polyline3_indices(pos_old, target_old);
+        if idx.len() < 2 {
+            return false;
+        }
+        let mut new_ts: Vec<Timestamp> = idx.iter().map(|&i| tsx[i]).collect();
+        let mut new_x: Vec<f32> = idx.iter().map(|&i| vx[i]).collect();
+        let mut new_y: Vec<f32> = idx.iter().map(|&i| vy[i]).collect();
+        let mut new_z: Vec<f32> = idx.iter().map(|&i| vz[i]).collect();
+        if let (Some(tl), Some(tr)) = (new_ts.last(), tsx.get(split))
+            && *tl == *tr
+        {
+            new_ts.pop();
+            new_x.pop();
+            new_y.pop();
+            new_z.pop();
+        }
+        new_ts.extend_from_slice(&tsx[split..]);
+        new_x.extend_from_slice(&vx[split..]);
+        new_y.extend_from_slice(&vy[split..]);
+        new_z.extend_from_slice(&vz[split..]);
+        (new_ts, new_x, new_y, new_z)
+    } else {
+        let target = settings.compress_to_points.max(2).min(n);
+        let idx = select_polyline3_indices(&pos, target);
+        if idx.len() < 2 {
+            return false;
+        }
+        let new_ts: Vec<Timestamp> = idx.iter().map(|&i| tsx[i]).collect();
+        let new_x: Vec<f32> = idx.iter().map(|&i| vx[i]).collect();
+        let new_y: Vec<f32> = idx.iter().map(|&i| vy[i]).collect();
+        let new_z: Vec<f32> = idx.iter().map(|&i| vz[i]).collect();
+        (new_ts, new_x, new_y, new_z)
+    };
+    let Some(xl) = lines.get_mut(hx) else {
+        return false;
+    };
+    xl.data
+        .rebuild_from_time_value_pairs(earliest, &new_ts, &new_x);
+    let Some(yl) = lines.get_mut(hy) else {
+        return false;
+    };
+    yl.data
+        .rebuild_from_time_value_pairs(earliest, &new_ts, &new_y);
+    let Some(zl) = lines.get_mut(hz) else {
+        return false;
+    };
+    zl.data
+        .rebuild_from_time_value_pairs(earliest, &new_ts, &new_z);
+    true
 }
 
 pub fn setup_pkt_handler(mut packet_handlers: ResMut<PacketHandlers>, mut commands: Commands) {
@@ -690,6 +846,16 @@ pub struct Line {
     pub last_queried: Option<Instant>,
 }
 
+impl Line {
+    fn maybe_compress_live(&mut self, earliest: Timestamp, settings: &CurveCompressSettings) {
+        let total = self.data.total_points();
+        if total <= settings.compress_after_total_points {
+            return;
+        }
+        self.data.compress_time_value_hamann(earliest, settings);
+    }
+}
+
 #[derive(Asset, TypePath, Default)]
 pub struct XYLine {
     pub label: String,
@@ -1079,6 +1245,14 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
         );
     }
 
+    pub fn total_points(&self) -> usize {
+        self.tree.iter().map(|(_, c)| c.summary.len).sum()
+    }
+
+    pub fn chunk_count(&self) -> usize {
+        self.tree.iter().count()
+    }
+
     pub fn range_summary(&self, range: Range<Timestamp>) -> ChunkSummary<D> {
         self.range_iter(range)
             .fold(ChunkSummary::default(), |mut xs, x| {
@@ -1320,6 +1494,138 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
     }
 }
 
+fn release_line_chunk_gpu(
+    chunk: &mut Chunk<f32>,
+    data_alloc: &mut Option<BufferShardAlloc>,
+    ts_alloc: &mut Option<BufferShardAlloc>,
+) {
+    if let Some(alloc) = data_alloc
+        && let Some(gpu) = chunk.data.gpu.lock().take()
+    {
+        alloc.dealloc(gpu);
+        chunk.data.gpu_dirty.store(true, atomic::Ordering::SeqCst);
+    }
+    if let Some(alloc) = ts_alloc
+        && let Some(gpu) = chunk.timestamps_float.gpu.lock().take()
+    {
+        alloc.dealloc(gpu);
+        chunk
+            .timestamps_float
+            .gpu_dirty
+            .store(true, atomic::Ordering::SeqCst);
+    }
+}
+
+impl LineTree<f32> {
+    pub fn flattened_time_series(&self) -> (Vec<Timestamp>, Vec<f32>) {
+        let mut ts = Vec::new();
+        let mut vs = Vec::new();
+        for (_, chunk) in self.tree.iter() {
+            for (&t, &v) in chunk.timestamps.iter().zip(chunk.data.cpu().iter()) {
+                ts.push(t);
+                vs.push(v);
+            }
+        }
+        (ts, vs)
+    }
+
+    fn clear_tree_release_gpu(&mut self) {
+        let old = std::mem::take(&mut self.tree);
+        for (_, mut chunk) in old {
+            release_line_chunk_gpu(
+                &mut chunk,
+                &mut self.data_buffer_shard_alloc,
+                &mut self.timestamp_buffer_shard_alloc,
+            );
+        }
+    }
+
+    /// Drop existing chunks (releasing GPU shards) and insert `new_ts` / `new_v` in `CHUNK_LEN` shards.
+    pub fn rebuild_from_time_value_pairs(
+        &mut self,
+        earliest: Timestamp,
+        new_ts: &[Timestamp],
+        new_v: &[f32],
+    ) {
+        self.clear_tree_release_gpu();
+        let n = new_ts.len().min(new_v.len());
+        let mut offset = 0usize;
+        while offset < n {
+            let end = (offset + CHUNK_LEN).min(n);
+            if let Some(chunk) = Chunk::from_iter(
+                &new_ts[offset..end],
+                earliest,
+                new_v[offset..end].iter().copied(),
+            ) {
+                self.insert(chunk);
+            }
+            offset = end;
+        }
+    }
+
+    /// Hamann–Chen in `(t, y)`; optional [`CurveCompressSettings::keep_recent_fraction`] leaves a
+    /// suffix of recent samples uncompressed.
+    pub fn compress_time_value_hamann(
+        &mut self,
+        earliest: Timestamp,
+        settings: &CurveCompressSettings,
+    ) {
+        let (ts_all, v_all) = self.flattened_time_series();
+        let n = ts_all.len();
+        if n < 3 {
+            return;
+        }
+
+        let keep = recent_tail_keep_count(n, settings.keep_recent_fraction);
+        let split = n.saturating_sub(keep);
+
+        if settings.keep_recent_fraction > 0.0 && split >= 3 {
+            let old_ts = &ts_all[..split];
+            let old_v = &v_all[..split];
+            let recent_ts = &ts_all[split..];
+            let recent_v = &v_all[split..];
+            let budget = settings.compress_to_points.saturating_sub(keep).max(2);
+            let target_old = budget.min(split).max(2);
+            let t_rel: Vec<f32> = old_ts.iter().map(|t| (t.0 - earliest.0) as f32).collect();
+            let idx = select_time_value_indices(&t_rel, old_v, target_old);
+            if idx.len() < 2 {
+                return;
+            }
+            let mut new_ts: Vec<Timestamp> = idx.iter().map(|&i| old_ts[i]).collect();
+            let mut new_v: Vec<f32> = idx.iter().map(|&i| old_v[i]).collect();
+            if let (Some(tl), Some(tr)) = (new_ts.last(), recent_ts.first())
+                && *tl == *tr
+            {
+                new_ts.pop();
+                new_v.pop();
+            }
+            new_ts.extend_from_slice(recent_ts);
+            new_v.extend_from_slice(recent_v);
+            self.rebuild_from_time_value_pairs(earliest, &new_ts, &new_v);
+            return;
+        }
+
+        let target = settings.compress_to_points.max(2).min(n);
+        let t_rel: Vec<f32> = ts_all.iter().map(|t| (t.0 - earliest.0) as f32).collect();
+        let idx = select_time_value_indices(&t_rel, &v_all, target);
+        if idx.len() < 2 {
+            return;
+        }
+        let new_ts: Vec<Timestamp> = idx.iter().map(|&i| ts_all[i]).collect();
+        let new_v: Vec<f32> = idx.iter().map(|&i| v_all[i]).collect();
+        self.rebuild_from_time_value_pairs(earliest, &new_ts, &new_v);
+    }
+}
+
+fn recent_tail_keep_count(n: usize, keep_recent_fraction: f32) -> usize {
+    if n == 0 || keep_recent_fraction <= 0.0 {
+        return 0;
+    }
+    let f = keep_recent_fraction.clamp(0.0_f32, 0.999_f32);
+    let keep = (n as f32 * f).ceil() as usize;
+    keep.min(n.saturating_sub(1))
+}
+
 fn chunk_visible_offsets(
     timestamps: &[Timestamp],
     range: &Range<Timestamp>,
@@ -1330,13 +1636,17 @@ fn chunk_visible_offsets(
 }
 
 pub fn index_sampling_step(chunk_count: usize, index_count: usize, pixel_width: usize) -> usize {
-    let desired_index_len = INDEX_BUFFER_LEN.min(pixel_width * 4);
-    let divisor = desired_index_len.saturating_sub(2 * chunk_count);
-    if divisor != 0 {
-        index_count.div_ceil(divisor).max(1)
-    } else {
-        1
+    let desired_index_len = INDEX_BUFFER_LEN.min(pixel_width.max(1) * 4);
+    // Per-chunk index overhead: leading sentinel, first point, strided interior, last point,
+    // trailing sentinel (see `write_to_index_buffer_with_step`).
+    const PER_CHUNK_OVERHEAD: usize = 6;
+    let overhead = PER_CHUNK_OVERHEAD.saturating_mul(chunk_count.max(1));
+    let divisor = desired_index_len.saturating_sub(overhead);
+    if divisor > 0 {
+        return index_count.div_ceil(divisor).max(1);
     }
+    // Many chunks: `2 * chunk_count` alone can exceed the index budget — never fall back to step 1.
+    index_count.div_ceil(desired_index_len.max(1)).max(1)
 }
 
 #[cfg(test)]
@@ -1416,6 +1726,24 @@ mod tests {
     fn index_sampling_step_matches_index_budget() {
         assert_eq!(index_sampling_step(1, 100, 100), 1);
         assert_eq!(index_sampling_step(1, 1_000, 100), 3);
+    }
+
+    #[test]
+    fn index_sampling_step_many_chunks_never_returns_one() {
+        let step = index_sampling_step(5000, 1_000_000, 1920);
+        assert!(step > 1, "step={step}");
+    }
+
+    #[test]
+    fn recent_tail_keep_count_zero_fraction_is_zero() {
+        assert_eq!(recent_tail_keep_count(100, 0.0), 0);
+    }
+
+    #[test]
+    fn recent_tail_keep_count_respects_fraction_and_caps_at_n_minus_one() {
+        assert_eq!(recent_tail_keep_count(100, 0.2), 20);
+        assert_eq!(recent_tail_keep_count(5, 0.2), 1);
+        assert_eq!(recent_tail_keep_count(100, 1.0), 99);
     }
 }
 
