@@ -1,11 +1,15 @@
 //! Hamann–Chen (1994) curvature-based polyline sampling.
 //!
+//! Implementation is a direct port of the algorithm in Shane Celis’s C#
+//! [`PiecewiseLinearCurveApproximation.cs`](https://gist.github.com/shanecelis/2e0ffd790e31507fba04dd56f806667a)
+//! (curvature samples, `xbars` / `ss` / `ki` filtering, interval walk, endpoints). Inverting
+//! cumulative curvature along arc length uses trapezoidal integration on `s` and linear
+//! interpolation instead of Math.NET `LinearSpline` + `RobustNewtonRaphson` from that gist.
+//!
 //! - **2D** — [`select_polyline2_indices`] for a planar polyline, and [`select_time_value_indices`]
 //!   for `(t, y)` graph data (same algorithm in the `(t,y)` plane).
 //! - **3D** — [`select_polyline3_indices`] for a spatial polyline (local osculating 2D frame per
-//!   vertex, then the same curvature construction as in the reference).
-//!
-//! Reference: <https://gist.github.com/shanecelis/2e0ffd790e31507fba04dd56f806667a>
+//!   vertex, then the same 2D curvature construction as above on each triangle).
 
 use glam::{Vec2, Vec3};
 
