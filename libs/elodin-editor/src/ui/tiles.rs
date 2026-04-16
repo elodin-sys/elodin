@@ -1528,11 +1528,10 @@ impl ViewportPane {
 
         commands
             .entity(camera)
-            .insert((ViewCubeTargetCamera, NeedsInitialSnap));
+            .insert((ViewCubeTargetCamera, NeedsInitialSnap, view_cube_lease.clone()));
 
         // Spawn ViewCube with editor mode configuration, only override the per-viewport render layer
         let mut view_cube_config = ViewCubeConfig::editor_mode();
-        view_cube_config.render_layer = view_cube_layer as u8;
 
         // Set coordinate system based on viewport's geo frame
         if let Some(frame) = viewport.frame {
@@ -1546,6 +1545,7 @@ impl ViewportPane {
             meshes,
             materials,
             &view_cube_config,
+            view_cube_lease.clone(),
             camera,
         );
 
@@ -1560,7 +1560,7 @@ impl ViewportPane {
             ));
         }
 
-        commands.entity(spawned.cube_root).insert(view_cube_lease);
+        commands.entity(spawned.cube_root).insert(view_cube_lease.clone());
 
         Self {
             camera: Some(camera),

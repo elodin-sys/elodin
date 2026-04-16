@@ -8,6 +8,7 @@ use bevy::prelude::*;
 use bevy_fontmesh::prelude::*;
 use std::f32::consts::{FRAC_PI_2, PI};
 
+use crate::plugins::render_layer_alloc::{RenderLayerLease};
 use super::components::*;
 use super::config::*;
 use super::theme::ViewCubeColors;
@@ -37,10 +38,9 @@ pub fn spawn_view_cube(
     meshes: &mut ResMut<Assets<Mesh>>,
     materials: &mut ResMut<Assets<StandardMaterial>>,
     config: &ViewCubeConfig,
+    render_layer_lease: RenderLayerLease,
     main_camera_entity: Entity,
 ) -> SpawnedViewCube {
-    // TODO: Need to know where this render_layer comes from.
-    let render_layers = RenderLayers::none().with(config.render_layer as usize);
 
     // Load the axes-cube.glb (embedded)
     let scene = asset_server.load("embedded://elodin_editor/assets/axes-cube.glb#Scene0");
@@ -58,10 +58,9 @@ pub fn spawn_view_cube(
         ViewCubeLink {
             main_camera: main_camera_entity,
         },
-        //TODO: This needs to be corrected.
-        //ViewCubeRenderLayer(config.render_layer as usize),
         Name::new("view_cube_root"),
-        render_layers.clone(),
+        render_layer_lease.render_layers(),
+        render_layer_lease.clone(),
     ));
 
     let cube_root = cube_root_cmd.id();
@@ -73,8 +72,8 @@ pub fn spawn_view_cube(
         meshes,
         materials,
         config,
-        Some(render_layers.clone()),
         cube_root,
+        Some(&render_layer_lease),
     );
 
     // Spawn 3D text labels on cube faces (as children of cube root)
@@ -83,18 +82,20 @@ pub fn spawn_view_cube(
         asset_server,
         materials,
         config,
-        Some(render_layers.clone()),
+        Some(&render_layer_lease),
         cube_root,
     );
 
-    let gizmo_camera = spawn_overlay_camera(commands, config, main_camera_entity);
+    let gizmo_camera = spawn_overlay_camera(commands, config, main_camera_entity,
+        Some(&render_layer_lease),
+    );
     spawn_rotation_arrows(
         commands,
         asset_server,
         meshes,
         materials,
         gizmo_camera,
-        Some(render_layers.clone()),
+        Some(&render_layer_lease),
     );
     spawn_viewport_action_buttons(
         commands,
@@ -102,7 +103,7 @@ pub fn spawn_view_cube(
         meshes,
         materials,
         gizmo_camera,
-        Some(render_layers),
+        Some(&render_layer_lease),
     );
 
     SpawnedViewCube {
@@ -116,10 +117,9 @@ fn spawn_overlay_camera(
     commands: &mut Commands,
     config: &ViewCubeConfig,
     main_camera: Entity,
+    render_layer_lease: Option<&RenderLayerLease>,
 ) -> Entity {
-    let render_layers = RenderLayers::layer(config.render_layer as usize);
-
-    commands
+    let mut overlay_cmd = commands
         .spawn((
             Transform::from_xyz(0.0, 0.0, config.camera_distance).looking_at(Vec3::ZERO, Vec3::Y),
             Camera {
@@ -130,12 +130,15 @@ fn spawn_overlay_camera(
                 ..default()
             },
             Camera3d::default(),
-            render_layers,
             ViewCubeCamera,
             ViewCubeLink { main_camera },
             Name::new("view_cube_camera"),
-        ))
-        .id()
+        ));
+
+    if let Some(lease) = render_layer_lease.clone() {
+        overlay_cmd.insert((lease.render_layers(), lease.clone()));
+    }
+    overlay_cmd.id()
 }
 
 // ============================================================================
@@ -159,8 +162,8 @@ fn spawn_axes(
     meshes: &mut Assets<Mesh>,
     materials: &mut Assets<StandardMaterial>,
     config: &ViewCubeConfig,
-    render_layers: Option<RenderLayers>,
     parent: Entity,
+    render_layer_lease: Option<&RenderLayerLease>,
 ) {
     const AXIS_SCALE_BUMP: f32 = 0.95;
     const CUBE_HALF_EXTENT: f32 = 0.5;
@@ -213,8 +216,8 @@ fn spawn_axes(
             ChildOf(parent),
             Name::new(format!("axis_{}_shaft", name)),
         ));
-        if let Some(layers) = render_layers.clone() {
-            shaft_cmd.insert(layers);
+        if let Some(lease) = render_layer_lease.clone() {
+            shaft_cmd.insert((lease.render_layers(), lease.clone()));
         }
 
         let label_pos = axis_origin + direction * axis_label_distance;
@@ -248,8 +251,8 @@ fn spawn_axes(
             ChildOf(parent),
             Name::new(format!("axis_{}_label", name)),
         ));
-        if let Some(layers) = render_layers.clone() {
-            label_cmd.insert(layers);
+        if let Some(lease) = render_layer_lease.clone() {
+            label_cmd.insert((lease.render_layers(), lease.clone()));
         }
     }
 }
@@ -322,7 +325,7 @@ fn spawn_face_labels(
     asset_server: &Res<AssetServer>,
     materials: &mut ResMut<Assets<StandardMaterial>>,
     config: &ViewCubeConfig,
-    render_layers: Option<RenderLayers>,
+    render_layer_lease: Option<&RenderLayerLease>,
     parent: Entity,
 ) {
     // Load the embedded font for ViewCube labels
@@ -371,8 +374,8 @@ fn spawn_face_labels(
             ChildOf(parent),
             Name::new(format!("label_{}", label.text)),
         ));
-        if let Some(layers) = render_layers.clone() {
-            label_cmd.insert(layers);
+        if let Some(lease) = render_layer_lease.clone() {
+            label_cmd.insert((lease.render_layers(), lease.clone()));
         }
     }
 }
@@ -388,7 +391,7 @@ fn spawn_rotation_arrows(
     meshes: &mut ResMut<Assets<Mesh>>,
     materials: &mut ResMut<Assets<StandardMaterial>>,
     camera_entity: Entity,
-    render_layers: Option<RenderLayers>,
+    render_layer_lease: Option<&RenderLayerLease>,
 ) {
     let colors = ViewCubeColors::default();
     let arrow_color = colors.arrow_normal;
@@ -469,8 +472,9 @@ fn spawn_rotation_arrows(
             direction,
             Name::new(format!("rotation_arrow_{:?}", direction)),
         ));
-        if let Some(layers) = render_layers.clone() {
-            arrow_cmd.insert(layers);
+        if let Some(lease) = render_layer_lease.clone() {
+            arrow_cmd.insert((lease.render_layers(),
+                              lease.clone()));
         }
         arrow_cmd.insert(ChildOf(camera_entity));
         let arrow_entity = arrow_cmd.id();
@@ -482,8 +486,8 @@ fn spawn_rotation_arrows(
             ChildOf(arrow_entity),
             Name::new(format!("rotation_arrow_{:?}_hitbox", direction)),
         ));
-        if let Some(layers) = render_layers.clone() {
-            hitbox_cmd.insert(layers);
+        if let Some(lease) = render_layer_lease.clone() {
+            hitbox_cmd.insert((lease.render_layers(), lease.clone()));
         }
     }
 
@@ -526,8 +530,8 @@ fn spawn_rotation_arrows(
             direction,
             Name::new(format!("rotation_arrow_{:?}", direction)),
         ));
-        if let Some(layers) = render_layers.clone() {
-            arrow_cmd.insert(layers);
+        if let Some(lease) = render_layer_lease.clone() {
+            arrow_cmd.insert((lease.render_layers(), lease.clone()));
         }
         arrow_cmd.insert(ChildOf(camera_entity));
         let arrow_entity = arrow_cmd.id();
@@ -539,8 +543,8 @@ fn spawn_rotation_arrows(
             ChildOf(arrow_entity),
             Name::new(format!("rotation_arrow_{:?}_hitbox", direction)),
         ));
-        if let Some(layers) = render_layers.clone() {
-            hitbox_cmd.insert(layers);
+        if let Some(lease) = render_layer_lease.clone() {
+            hitbox_cmd.insert((lease.render_layers(), lease.clone()));
         }
     }
 }
@@ -559,7 +563,7 @@ fn spawn_viewport_action_buttons(
     meshes: &mut ResMut<Assets<Mesh>>,
     materials: &mut ResMut<Assets<StandardMaterial>>,
     camera_entity: Entity,
-    render_layers: Option<RenderLayers>,
+    render_layer_lease: Option<&RenderLayerLease>,
 ) {
     let colors = ViewCubeColors::default();
     let button_color = colors.arrow_normal;
@@ -601,8 +605,8 @@ fn spawn_viewport_action_buttons(
         ViewportActionButton::Reset,
         Name::new("viewport_action_button_Reset"),
     ));
-    if let Some(layers) = render_layers.clone() {
-        reset_cmd.insert(layers);
+    if let Some(lease) = render_layer_lease.clone() {
+        reset_cmd.insert((lease.render_layers(), lease.clone()));
     }
     reset_cmd.insert(ChildOf(camera_entity));
     let reset_button = reset_cmd.id();
@@ -613,8 +617,8 @@ fn spawn_viewport_action_buttons(
         ChildOf(reset_button),
         Name::new("viewport_action_button_Reset_hitbox"),
     ));
-    if let Some(layers) = render_layers.clone() {
-        reset_hitbox_cmd.insert(layers);
+    if let Some(lease) = render_layer_lease.clone() {
+        reset_hitbox_cmd.insert((lease.render_layers(), lease.clone()));
     }
 
     // Circular zoom-out button for clearer visual hierarchy.
@@ -636,8 +640,8 @@ fn spawn_viewport_action_buttons(
         ))
         .id();
     let mut zoom_button_cmd = commands.entity(zoom_button);
-    if let Some(layers) = render_layers.clone() {
-        zoom_button_cmd.insert(layers.clone());
+    if let Some(lease) = render_layer_lease.clone() {
+        zoom_button_cmd.insert((lease.render_layers(), lease.clone()));
     }
     zoom_button_cmd.insert(ChildOf(camera_entity));
 
@@ -662,8 +666,8 @@ fn spawn_viewport_action_buttons(
         ChildOf(zoom_button),
         Name::new("viewport_action_button_ZoomOut_icon"),
     ));
-    if let Some(layers) = render_layers.clone() {
-        zoom_icon_cmd.insert(layers);
+    if let Some(lease) = render_layer_lease.clone() {
+        zoom_icon_cmd.insert((lease.render_layers(), lease.clone()));
     }
 
     let mut zoom_hitbox_cmd = commands.spawn((
@@ -673,8 +677,8 @@ fn spawn_viewport_action_buttons(
         ChildOf(zoom_button),
         Name::new("viewport_action_button_ZoomOut_hitbox"),
     ));
-    if let Some(layers) = render_layers.clone() {
-        zoom_hitbox_cmd.insert(layers);
+    if let Some(lease) = render_layer_lease.clone() {
+        zoom_hitbox_cmd.insert((lease.render_layers(), lease.clone()));
     }
 }
 
