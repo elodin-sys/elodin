@@ -16,7 +16,8 @@ use crossbeam_queue::SegQueue;
 use std::sync::Arc;
 
 pub(crate) fn plugin(app: &mut App) {
-    app.init_resource::<RenderLayerAllocator>()
+    app.register_type::<RenderLayerAllocator>()
+        .init_resource::<RenderLayerAllocator>()
         .add_systems(First, process_dropped_render_layer_leases);
 }
 
@@ -49,9 +50,12 @@ fn render_layer_mask(layer: usize) -> RenderLayers {
 
 /// Tracks render layers in use. The [`SegQueue`] is shared with every [`RenderLayerLeaseInner`] via
 /// [`Arc`]; cloning a lease’s [`Arc`] delays freeing until all clones drop.
-#[derive(Resource)]
+#[derive(Resource, Reflect)]
+#[reflect(Resource)]
 pub struct RenderLayerAllocator {
     in_use: RenderLayers,
+    pub reserved: RenderLayers,
+    #[reflect(ignore)]
     dropped: Arc<SegQueue<usize>>,
 }
 
@@ -64,11 +68,6 @@ impl std::fmt::Debug for RenderLayerAllocator {
 }
 
 impl RenderLayerAllocator {
-    /// Layers never returned from [`Self::alloc`]: Bevy default (0) and [`GIZMO_RENDER_LAYER`].
-    pub fn reserved() -> RenderLayers {
-        RenderLayers::layer(0).with(GIZMO_RENDER_LAYER)
-    }
-
     /// Return the first free layer index.
     fn first_free_layer_index(&self, in_use: &RenderLayers) -> Option<usize> {
         let bits = in_use.bits();
@@ -83,12 +82,12 @@ impl RenderLayerAllocator {
         None
     }
 
-    /// Current union of in-use layers (including [`RenderLayerAllocator::reserved`]).
+    /// Current union of in-use layers.
     pub fn in_use(&self) -> RenderLayers {
         self.in_use.clone()
     }
 
-    /// Allocates the lowest free render layer below `65_536`, excluding [`Self::reserved`].
+    /// Allocates the lowest free render layer excluding [`self.reserved`].
     pub fn alloc(&mut self) -> Option<RenderLayerLease> {
         let n = self.first_free_layer_index(&self.in_use)?;
         self.in_use = self.in_use.union(&render_layer_mask(n));
@@ -102,7 +101,7 @@ impl RenderLayerAllocator {
     /// if a reserved layer is given or the layer was not allocated.
     fn free(&mut self, layer: usize) -> bool {
         let mask = render_layer_mask(layer);
-        if Self::reserved().intersects(&mask) {
+        if self.reserved.intersects(&mask) {
             return false;
         }
         if self.in_use.intersects(&mask) {
@@ -118,22 +117,24 @@ impl RenderLayerAllocator {
     pub fn drain_dropped(&mut self) {
         while let Some(layer) = self.dropped.pop() {
             if !self.free(layer) {
-                warn!("Could notfree render layer {layer}.");
+                warn!("Could not free render layer {layer}.");
             }
         }
     }
 
-    /// Resets dynamic allocations while keeping [`RenderLayerAllocator::reserved`] layers blocked.
+    /// Resets dynamic allocations.
     pub fn free_all(&mut self) {
         while self.dropped.pop().is_some() {}
-        self.in_use = Self::reserved();
+        self.in_use = self.reserved.clone();
     }
 }
 
 impl Default for RenderLayerAllocator {
     fn default() -> Self {
+        let reserved = RenderLayers::layer(0).with(GIZMO_RENDER_LAYER);
         Self {
-            in_use: Self::reserved(),
+            in_use: reserved.clone(),
+            reserved,
             dropped: Arc::new(SegQueue::new()),
         }
     }
