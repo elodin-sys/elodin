@@ -84,6 +84,11 @@ pub trait Formula: Send + Sync + std::fmt::Debug {
             expr.to_table()?
         ))
     }
+
+    /// When this formula is `cast`, the resolved target type for editor-side evaluation.
+    fn editor_cast_target(&self) -> Option<cast::CastTarget> {
+        None
+    }
 }
 
 /// A formula registry that allows dynamic registration and lookup of formulas

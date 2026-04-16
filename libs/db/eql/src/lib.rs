@@ -16,7 +16,9 @@ use peg::error::ParseError;
 
 pub mod formulas;
 
-use formulas::{Formula, FormulaRegistry, create_default_registry};
+use formulas::{FormulaRegistry, create_default_registry};
+
+pub use formulas::{CastTarget, Formula};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum AstNode<'input> {

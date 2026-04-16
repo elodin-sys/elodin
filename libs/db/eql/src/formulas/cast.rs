@@ -2,7 +2,7 @@ use crate::{Context, Error, Expr};
 use std::sync::Arc;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum CastTarget {
+pub enum CastTarget {
     U8,
     U16,
     U32,
@@ -82,6 +82,10 @@ impl Cast {
 impl super::Formula for Cast {
     fn name(&self) -> &'static str {
         "cast"
+    }
+
+    fn editor_cast_target(&self) -> Option<CastTarget> {
+        self.target
     }
 
     fn parse(&self, recv: Expr, args: &[Expr]) -> Result<Expr, Error> {

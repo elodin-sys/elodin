@@ -23,6 +23,7 @@ use crate::{BevyExt, EqlContext, MainCamera, plugins::navigation_gizmo::NavGizmo
 use bevy_geo_frames::prelude::*;
 use std::collections::{HashMap, HashSet};
 use std::fmt;
+use std::sync::Arc;
 
 type ImportedCameraFilter = (Added<Camera>, Without<NavGizmoCamera>, Without<MainCamera>);
 
@@ -206,14 +207,87 @@ fn extract_spatial(val: ComponentValue) -> Result<[f64; 7], String> {
 /// Extract a scalar f64 from component value
 fn extract_scalar(val: ComponentValue) -> Result<f64, String> {
     use nox::ArrayBuf;
-    let ComponentValue::F64(arr) = val else {
-        return Err("must be a number".to_string());
+    let empty = || Err("cannot be empty".to_string());
+    let v = match val {
+        ComponentValue::F64(arr) => {
+            let d = arr.buf.as_buf();
+            if d.is_empty() {
+                return empty();
+            }
+            d[0]
+        }
+        ComponentValue::F32(arr) => {
+            let d = arr.buf.as_buf();
+            if d.is_empty() {
+                return empty();
+            }
+            d[0] as f64
+        }
+        ComponentValue::U8(arr) => {
+            let d = arr.buf.as_buf();
+            if d.is_empty() {
+                return empty();
+            }
+            d[0] as f64
+        }
+        ComponentValue::U16(arr) => {
+            let d = arr.buf.as_buf();
+            if d.is_empty() {
+                return empty();
+            }
+            d[0] as f64
+        }
+        ComponentValue::U32(arr) => {
+            let d = arr.buf.as_buf();
+            if d.is_empty() {
+                return empty();
+            }
+            d[0] as f64
+        }
+        ComponentValue::U64(arr) => {
+            let d = arr.buf.as_buf();
+            if d.is_empty() {
+                return empty();
+            }
+            d[0] as f64
+        }
+        ComponentValue::I8(arr) => {
+            let d = arr.buf.as_buf();
+            if d.is_empty() {
+                return empty();
+            }
+            d[0] as f64
+        }
+        ComponentValue::I16(arr) => {
+            let d = arr.buf.as_buf();
+            if d.is_empty() {
+                return empty();
+            }
+            d[0] as f64
+        }
+        ComponentValue::I32(arr) => {
+            let d = arr.buf.as_buf();
+            if d.is_empty() {
+                return empty();
+            }
+            d[0] as f64
+        }
+        ComponentValue::I64(arr) => {
+            let d = arr.buf.as_buf();
+            if d.is_empty() {
+                return empty();
+            }
+            d[0] as f64
+        }
+        ComponentValue::Bool(arr) => {
+            let d = arr.buf.as_buf();
+            if d.is_empty() {
+                return empty();
+            }
+            if d[0] { 1.0 } else { 0.0 }
+        }
     };
-    let d = arr.buf.as_buf();
-    if d.is_empty() {
-        return Err("cannot be empty".to_string());
-    }
-    Ok(d[0])
+    Ok(v)
 }
 
 /// Build result array from quaternion and position
@@ -230,13 +304,130 @@ fn build_vec3_result(v: (f64, f64, f64)) -> ComponentValue {
     ComponentValue::F64(result_array)
 }
 
+fn component_buf_as_f64_vec(value: &ComponentValue) -> Result<Vec<f64>, String> {
+    use nox::ArrayBuf;
+    Ok(match value {
+        ComponentValue::U8(a) => a.buf.as_buf().iter().map(|&x| x as f64).collect(),
+        ComponentValue::U16(a) => a.buf.as_buf().iter().map(|&x| x as f64).collect(),
+        ComponentValue::U32(a) => a.buf.as_buf().iter().map(|&x| x as f64).collect(),
+        ComponentValue::U64(a) => a.buf.as_buf().iter().map(|&x| x as f64).collect(),
+        ComponentValue::I8(a) => a.buf.as_buf().iter().map(|&x| x as f64).collect(),
+        ComponentValue::I16(a) => a.buf.as_buf().iter().map(|&x| x as f64).collect(),
+        ComponentValue::I32(a) => a.buf.as_buf().iter().map(|&x| x as f64).collect(),
+        ComponentValue::I64(a) => a.buf.as_buf().iter().map(|&x| x as f64).collect(),
+        ComponentValue::Bool(a) => a
+            .buf
+            .as_buf()
+            .iter()
+            .map(|&b| if b { 1.0 } else { 0.0 })
+            .collect(),
+        ComponentValue::F32(a) => a.buf.as_buf().iter().map(|&x| x as f64).collect(),
+        ComponentValue::F64(a) => a.buf.as_buf().to_vec(),
+    })
+}
+
+fn promote_component_to_f64(value: ComponentValue) -> Result<Array<f64, nox::Dyn>, String> {
+    use smallvec::SmallVec;
+    match value {
+        ComponentValue::F64(arr) => Ok(arr),
+        other => {
+            let data = component_buf_as_f64_vec(&other)?;
+            let shape_sv: SmallVec<[usize; 4]> = SmallVec::from_slice(other.shape());
+            Array::from_shape_vec(shape_sv, data)
+                .ok_or_else(|| "invalid array shape when promoting to f64".to_string())
+        }
+    }
+}
+
+fn cast_dyn_array_from_field<T: nox::Field>(
+    shape_sv: &smallvec::SmallVec<[usize; 4]>,
+    flat: Vec<T>,
+) -> Result<Array<T, nox::Dyn>, String> {
+    Array::from_shape_vec(shape_sv.clone(), flat)
+        .ok_or_else(|| "cast: shape does not match data length".to_string())
+}
+
+fn cast_component_value(
+    value: ComponentValue,
+    target: eql::CastTarget,
+) -> Result<ComponentValue, String> {
+    use nox::ArrayBuf;
+    use smallvec::SmallVec;
+    let sh = value.shape();
+    let data = component_buf_as_f64_vec(&value)?;
+    let shape_sv: SmallVec<[usize; 4]> = SmallVec::from_slice(sh);
+    match target {
+        eql::CastTarget::U8 => {
+            let mut arr = Array::<u8, nox::Dyn>::zeroed(sh);
+            for (s, &x) in arr.buf.as_mut_buf().iter_mut().zip(&data) {
+                *s = x as u8;
+            }
+            Ok(ComponentValue::U8(arr))
+        }
+        eql::CastTarget::U16 => Ok(ComponentValue::U16(cast_dyn_array_from_field(
+            &shape_sv,
+            data.iter().map(|&x| x as u16).collect(),
+        )?)),
+        eql::CastTarget::U32 => Ok(ComponentValue::U32(cast_dyn_array_from_field(
+            &shape_sv,
+            data.iter().map(|&x| x as u32).collect(),
+        )?)),
+        eql::CastTarget::U64 => Ok(ComponentValue::U64(cast_dyn_array_from_field(
+            &shape_sv,
+            data.iter().map(|&x| x as u64).collect(),
+        )?)),
+        eql::CastTarget::I8 => {
+            let mut arr = Array::<i8, nox::Dyn>::zeroed(sh);
+            for (s, &x) in arr.buf.as_mut_buf().iter_mut().zip(&data) {
+                *s = x as i8;
+            }
+            Ok(ComponentValue::I8(arr))
+        }
+        eql::CastTarget::I16 => Ok(ComponentValue::I16(cast_dyn_array_from_field(
+            &shape_sv,
+            data.iter().map(|&x| x as i16).collect(),
+        )?)),
+        eql::CastTarget::I32 => Ok(ComponentValue::I32(cast_dyn_array_from_field(
+            &shape_sv,
+            data.iter().map(|&x| x as i32).collect(),
+        )?)),
+        eql::CastTarget::I64 => Ok(ComponentValue::I64(cast_dyn_array_from_field(
+            &shape_sv,
+            data.iter().map(|&x| x as i64).collect(),
+        )?)),
+        eql::CastTarget::Bool => {
+            let mut arr = Array::<bool, nox::Dyn>::zeroed(sh);
+            for (s, &x) in arr.buf.as_mut_buf().iter_mut().zip(&data) {
+                *s = x != 0.0;
+            }
+            Ok(ComponentValue::Bool(arr))
+        }
+        eql::CastTarget::F32 => Ok(ComponentValue::F32(cast_dyn_array_from_field(
+            &shape_sv,
+            data.iter().map(|&x| x as f32).collect(),
+        )?)),
+        eql::CastTarget::F64 => Ok(ComponentValue::F64(cast_dyn_array_from_field(
+            &shape_sv, data,
+        )?)),
+    }
+}
+
 /// Compiles a formula expression into a runtime closure
-fn compile_formula(formula_name: &str, inner_expr: eql::Expr) -> CompiledExpr {
-    match formula_name {
+fn compile_formula(formula: Arc<dyn eql::Formula>, inner_expr: eql::Expr) -> CompiledExpr {
+    if let Some(target) = formula.editor_cast_target() {
+        let inner_compiled = compile_eql_expr(inner_expr);
+        return CompiledExpr::closure(move |entity_map, component_values| {
+            let v = inner_compiled.execute(entity_map, component_values)?;
+            cast_component_value(v, target)
+        });
+    }
+
+    let n = formula.name();
+    match n {
         // Single-axis rotation formulas (body and world frame)
         "rotate_x" | "rotate_y" | "rotate_z" | "rotate_world_x" | "rotate_world_y"
         | "rotate_world_z" => {
-            let (axis, frame) = match formula_name {
+            let (axis, frame) = match n {
                 "rotate_x" => (0, Frame::Body),
                 "rotate_y" => (1, Frame::Body),
                 "rotate_z" => (2, Frame::Body),
@@ -247,11 +438,11 @@ fn compile_formula(formula_name: &str, inner_expr: eql::Expr) -> CompiledExpr {
             };
 
             let eql::Expr::Tuple(elements) = inner_expr else {
-                let error = format!("{} requires tuple expression", formula_name);
+                let error = format!("{n} requires tuple expression");
                 return CompiledExpr::closure(move |_, _| Err(error.clone()));
             };
             if elements.len() != 2 {
-                let error = format!("{} requires receiver and angle", formula_name);
+                let error = format!("{n} requires receiver and angle");
                 return CompiledExpr::closure(move |_, _| Err(error.clone()));
             }
 
@@ -279,21 +470,18 @@ fn compile_formula(formula_name: &str, inner_expr: eql::Expr) -> CompiledExpr {
 
         // Multi-axis rotation (body and world frame)
         "rotate" | "rotate_world" => {
-            let frame = if formula_name == "rotate" {
+            let frame = if n == "rotate" {
                 Frame::Body
             } else {
                 Frame::World
             };
 
             let eql::Expr::Tuple(elements) = inner_expr else {
-                let error = format!("{} requires tuple expression", formula_name);
+                let error = format!("{n} requires tuple expression");
                 return CompiledExpr::closure(move |_, _| Err(error.clone()));
             };
             if elements.len() != 4 {
-                let error = format!(
-                    "{} requires receiver and three angles (x, y, z)",
-                    formula_name
-                );
+                let error = format!("{n} requires receiver and three angles (x, y, z)");
                 return CompiledExpr::closure(move |_, _| Err(error.clone()));
             }
 
@@ -333,7 +521,7 @@ fn compile_formula(formula_name: &str, inner_expr: eql::Expr) -> CompiledExpr {
         // Single-axis translation (body and world frame)
         "translate_x" | "translate_y" | "translate_z" | "translate_world_x"
         | "translate_world_y" | "translate_world_z" => {
-            let (axis, frame) = match formula_name {
+            let (axis, frame) = match n {
                 "translate_x" => (0, Frame::Body),
                 "translate_y" => (1, Frame::Body),
                 "translate_z" => (2, Frame::Body),
@@ -344,11 +532,11 @@ fn compile_formula(formula_name: &str, inner_expr: eql::Expr) -> CompiledExpr {
             };
 
             let eql::Expr::Tuple(elements) = inner_expr else {
-                let error = format!("{} requires tuple expression", formula_name);
+                let error = format!("{n} requires tuple expression");
                 return CompiledExpr::closure(move |_, _| Err(error.clone()));
             };
             if elements.len() != 2 {
-                let error = format!("{} requires receiver and distance", formula_name);
+                let error = format!("{n} requires receiver and distance");
                 return CompiledExpr::closure(move |_, _| Err(error.clone()));
             }
 
@@ -384,21 +572,18 @@ fn compile_formula(formula_name: &str, inner_expr: eql::Expr) -> CompiledExpr {
 
         // Multi-axis translation (body and world frame)
         "translate" | "translate_world" => {
-            let frame = if formula_name == "translate" {
+            let frame = if n == "translate" {
                 Frame::Body
             } else {
                 Frame::World
             };
 
             let eql::Expr::Tuple(elements) = inner_expr else {
-                let error = format!("{} requires tuple expression", formula_name);
+                let error = format!("{n} requires tuple expression");
                 return CompiledExpr::closure(move |_, _| Err(error.clone()));
             };
             if elements.len() != 4 {
-                let error = format!(
-                    "{} requires receiver and three distances (x, y, z)",
-                    formula_name
-                );
+                let error = format!("{n} requires receiver and three distances (x, y, z)");
                 return CompiledExpr::closure(move |_, _| Err(error.clone()));
             }
 
@@ -461,10 +646,7 @@ fn compile_formula(formula_name: &str, inner_expr: eql::Expr) -> CompiledExpr {
         }
 
         _ => {
-            let error = format!(
-                "formula '{}' is not supported in editor runtime",
-                formula_name
-            );
+            let error = format!("formula '{n}' is not supported in editor runtime");
             CompiledExpr::closure(move |_, _| Err(error.clone()))
         }
     }
@@ -560,28 +742,23 @@ pub fn compile_eql_expr(expression: eql::Expr) -> CompiledExpr {
                 let left_val = left_compiled.execute(entity_map, component_value_maps)?;
                 let right_val = right_compiled.execute(entity_map, component_value_maps)?;
 
-                match (left_val, right_val) {
-                    (ComponentValue::F64(left), ComponentValue::F64(right)) => {
-                        if !nox::array::can_broadcast(left.shape(), right.shape()) {
-                            return Err(
-                                "binary operation requires arrays be broadcastable".to_string()
-                            );
-                        }
-                        let result = match op {
-                            eql::BinaryOp::Add => left.add(&right),
-                            eql::BinaryOp::Sub => left.sub(&right),
-                            eql::BinaryOp::Mul => left.mul(&right),
-                            eql::BinaryOp::Div => left.div(&right),
-                        };
-
-                        Ok(ComponentValue::F64(result))
-                    }
-                    _ => Err("binary operations only supported for F64 arrays".to_string()),
+                let left = promote_component_to_f64(left_val)?;
+                let right = promote_component_to_f64(right_val)?;
+                if !nox::array::can_broadcast(left.shape(), right.shape()) {
+                    return Err("binary operation requires arrays be broadcastable".to_string());
                 }
+                let result = match op {
+                    eql::BinaryOp::Add => left.add(&right),
+                    eql::BinaryOp::Sub => left.sub(&right),
+                    eql::BinaryOp::Mul => left.mul(&right),
+                    eql::BinaryOp::Div => left.div(&right),
+                };
+
+                Ok(ComponentValue::F64(result))
             })
         }
         Expr::FloatLiteral(f) => CompiledExpr::Value(ComponentValue::F64(nox::array!(f).to_dyn())),
-        Expr::Formula(formula, inner_expr) => compile_formula(formula.name(), *inner_expr),
+        Expr::Formula(formula, inner_expr) => compile_formula(formula, *inner_expr),
         expr => {
             let error = format!("{:?} can't be converted to a component value", expr);
             CompiledExpr::closure(move |_, _| Err(error.clone()))
