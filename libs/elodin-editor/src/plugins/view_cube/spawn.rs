@@ -8,10 +8,10 @@ use bevy::prelude::*;
 use bevy_fontmesh::prelude::*;
 use std::f32::consts::{FRAC_PI_2, PI};
 
-use crate::plugins::render_layer_alloc::{RenderLayerLease};
 use super::components::*;
 use super::config::*;
 use super::theme::ViewCubeColors;
+use crate::plugins::render_layer_alloc::RenderLayerLease;
 
 pub(crate) fn plugin(app: &mut App) {
     app.add_systems(PreUpdate, swap_zoom_buttons_on_alt);
@@ -41,7 +41,6 @@ pub fn spawn_view_cube(
     render_layer_lease: RenderLayerLease,
     main_camera_entity: Entity,
 ) -> SpawnedViewCube {
-
     // Load the axes-cube.glb (embedded)
     let scene = asset_server.load("embedded://elodin_editor/assets/axes-cube.glb#Scene0");
 
@@ -86,7 +85,10 @@ pub fn spawn_view_cube(
         cube_root,
     );
 
-    let gizmo_camera = spawn_overlay_camera(commands, config, main_camera_entity,
+    let gizmo_camera = spawn_overlay_camera(
+        commands,
+        config,
+        main_camera_entity,
         Some(&render_layer_lease),
     );
     spawn_rotation_arrows(
@@ -119,21 +121,20 @@ fn spawn_overlay_camera(
     main_camera: Entity,
     render_layer_lease: Option<&RenderLayerLease>,
 ) -> Entity {
-    let mut overlay_cmd = commands
-        .spawn((
-            Transform::from_xyz(0.0, 0.0, config.camera_distance).looking_at(Vec3::ZERO, Vec3::Y),
-            Camera {
-                order: 3, // Match navigation_gizmo camera order
-                // NOTE: Don't clear on the ViewCube camera because the
-                // MainCamera already cleared the window.
-                clear_color: ClearColorConfig::None,
-                ..default()
-            },
-            Camera3d::default(),
-            ViewCubeCamera,
-            ViewCubeLink { main_camera },
-            Name::new("view_cube_camera"),
-        ));
+    let mut overlay_cmd = commands.spawn((
+        Transform::from_xyz(0.0, 0.0, config.camera_distance).looking_at(Vec3::ZERO, Vec3::Y),
+        Camera {
+            order: 3, // Match navigation_gizmo camera order
+            // NOTE: Don't clear on the ViewCube camera because the
+            // MainCamera already cleared the window.
+            clear_color: ClearColorConfig::None,
+            ..default()
+        },
+        Camera3d::default(),
+        ViewCubeCamera,
+        ViewCubeLink { main_camera },
+        Name::new("view_cube_camera"),
+    ));
 
     if let Some(lease) = render_layer_lease.clone() {
         overlay_cmd.insert((lease.render_layers(), lease.clone()));
@@ -473,8 +474,7 @@ fn spawn_rotation_arrows(
             Name::new(format!("rotation_arrow_{:?}", direction)),
         ));
         if let Some(lease) = render_layer_lease.clone() {
-            arrow_cmd.insert((lease.render_layers(),
-                              lease.clone()));
+            arrow_cmd.insert((lease.render_layers(), lease.clone()));
         }
         arrow_cmd.insert(ChildOf(camera_entity));
         let arrow_entity = arrow_cmd.id();

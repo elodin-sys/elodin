@@ -18,9 +18,9 @@ use smallvec::smallvec;
 
 use crate::icon_rasterizer::IconTextureCache;
 use crate::iter::JoinDisplayExt;
+use crate::plugins::render_layer_alloc::{RenderLayerAllocator, RenderLayerLease};
 use crate::ui::tiles::ViewportConfig;
 use crate::{BevyExt, EqlContext, MainCamera, plugins::navigation_gizmo::NavGizmoCamera};
-use crate::plugins::render_layer_alloc::{RenderLayerAllocator, RenderLayerLease};
 use bevy_geo_frames::prelude::*;
 use std::collections::{HashMap, HashSet};
 use std::fmt;
@@ -1825,7 +1825,9 @@ pub fn update_object_3d_billboard_system(
         let bb_mesh_handle = icon_state.billboard_mesh.clone();
         let bb_mat_source = icon_state.billboard_material.clone();
 
-        for (cam_entity, camera, cam_gt, projection, viewport_config, render_layer_lease) in cameras.iter() {
+        for (cam_entity, camera, cam_gt, projection, viewport_config, render_layer_lease) in
+            cameras.iter()
+        {
             let viewport_h = camera.logical_viewport_size().map(|s| s.y).unwrap_or(0.0);
             if viewport_h < 1.0 {
                 continue;
@@ -1879,9 +1881,7 @@ pub fn update_object_3d_billboard_system(
                         .id()
                 });
 
-                commands
-                    .entity(*bb_entity)
-                    .insert(render_layers);
+                commands.entity(*bb_entity).insert(render_layers);
 
                 let alpha = if icon_fade > 0.0 {
                     let min_fade = if distance < icon_min + icon_fade {

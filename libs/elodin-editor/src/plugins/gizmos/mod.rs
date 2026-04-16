@@ -26,7 +26,7 @@ use impeller2_wkt::{
 };
 use std::collections::{HashMap, HashSet};
 
-use crate::plugins::render_layer_alloc::{RenderLayerLease};
+use crate::plugins::render_layer_alloc::RenderLayerLease;
 use crate::{
     MainCamera, WorldPosExt,
     object_3d::ComponentArrayExt,
@@ -326,7 +326,8 @@ fn render_vector_arrow(
         let mut seen_cameras: HashSet<Entity> = HashSet::new();
 
         let mut render_for_camera = |idx: usize| {
-            let (cam_entity, cam, proj, cam_tf, viewport_config, render_layer_lease) = main_camera_data[idx];
+            let (cam_entity, cam, proj, cam_tf, viewport_config, render_layer_lease) =
+                main_camera_data[idx];
             seen_cameras.insert(cam_entity);
 
             let show_arrows = viewport_config

@@ -273,8 +273,11 @@ fn draw_viewport_frustums(mut params: FrustumDrawParams<'_, '_>, mut commands: C
 
         camera_positions.insert(camera_entity, global_transform.translation());
         if config.show_frustums {
-            targets.push((camera_entity, render_layer_lease.render_layers(),
-                          render_layer_lease));
+            targets.push((
+                camera_entity,
+                render_layer_lease.render_layers(),
+                render_layer_lease,
+            ));
         }
 
         if !config.create_frustum {

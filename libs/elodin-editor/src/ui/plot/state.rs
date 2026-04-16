@@ -13,7 +13,7 @@ use impeller2_wkt::GraphType;
 
 use super::gpu::LineVisibleRange;
 use crate::MainCamera;
-use crate::plugins::render_layer_alloc::{RenderLayerLease, RenderLayerAllocator};
+use crate::plugins::render_layer_alloc::{RenderLayerAllocator, RenderLayerLease};
 use crate::ui::{ViewportRect, colors};
 
 pub type GraphStateComponent = Vec<(bool, egui::Color32)>;

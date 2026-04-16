@@ -1,5 +1,5 @@
+use crate::plugins::render_layer_alloc::RenderLayerLease;
 use crate::ui::tiles::ViewportConfig;
-use crate::plugins::render_layer_alloc::{RenderLayerLease};
 use bevy::prelude::*;
 
 pub type MainViewportQueryItem = (

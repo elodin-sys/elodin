@@ -59,9 +59,8 @@ use crate::{
     plugins::{
         LogicalKeyState,
         gizmos::GIZMO_RENDER_LAYER,
-        render_layer_alloc::{RenderLayerLease, RenderLayerAllocator},
-        navigation_gizmo::{
-            NavGizmoCamera, NavGizmoParent, },
+        navigation_gizmo::{NavGizmoCamera, NavGizmoParent},
+        render_layer_alloc::{RenderLayerAllocator, RenderLayerLease},
         view_cube::{
             CoordinateSystem, NeedsInitialSnap, ViewCubeConfig, ViewCubeTargetCamera,
             spawn::spawn_view_cube,
@@ -1274,9 +1273,8 @@ impl ViewportPane {
             None
         };
 
-        let viewport_lease: Option<RenderLayerLease> = render_layer_alloc
-            .alloc()
-            .inspect(|lease| {
+        let viewport_lease: Option<RenderLayerLease> =
+            render_layer_alloc.alloc().inspect(|lease| {
                 main_camera_layers = main_camera_layers.union(&lease.render_layers());
             });
 
@@ -1475,10 +1473,7 @@ impl ViewportPane {
         ));
 
         if let Some(viewport_lease) = viewport_lease.as_ref() {
-            camera.insert((
-            viewport_lease.render_layers(),
-            viewport_lease.clone(),
-                ));
+            camera.insert((viewport_lease.render_layers(), viewport_lease.clone()));
         }
 
         camera.insert(Bloom { ..default() });
@@ -1493,8 +1488,7 @@ impl ViewportPane {
 
         let viewport_layer = viewport_lease.map(|lease| {
             let layer = lease.layer();
-            commands.entity(camera)
-                    .insert(lease);
+            commands.entity(camera).insert(lease);
             layer
         });
 
@@ -1526,9 +1520,11 @@ impl ViewportPane {
         };
         let view_cube_layer = view_cube_lease.layer();
 
-        commands
-            .entity(camera)
-            .insert((ViewCubeTargetCamera, NeedsInitialSnap, view_cube_lease.clone()));
+        commands.entity(camera).insert((
+            ViewCubeTargetCamera,
+            NeedsInitialSnap,
+            view_cube_lease.clone(),
+        ));
 
         // Spawn ViewCube with editor mode configuration, only override the per-viewport render layer
         let mut view_cube_config = ViewCubeConfig::editor_mode();
@@ -1560,7 +1556,9 @@ impl ViewportPane {
             ));
         }
 
-        commands.entity(spawned.cube_root).insert(view_cube_lease.clone());
+        commands
+            .entity(spawned.cube_root)
+            .insert(view_cube_lease.clone());
 
         Self {
             camera: Some(camera),

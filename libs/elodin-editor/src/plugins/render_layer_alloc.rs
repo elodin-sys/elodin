@@ -198,5 +198,4 @@ mod tests {
         let d = alloc.alloc().expect("layer 1 free again");
         assert_eq!(d.layer(), 1);
     }
-    
 }
