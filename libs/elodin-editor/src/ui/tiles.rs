@@ -59,9 +59,9 @@ use crate::{
     plugins::{
         LogicalKeyState,
         gizmos::GIZMO_RENDER_LAYER,
+        render_layer_alloc::{RenderLayerLease, RenderLayerAllocator},
         navigation_gizmo::{
-            RenderLayerLease, NavGizmoCamera, NavGizmoParent, RenderLayerAllocator,
-        },
+            NavGizmoCamera, NavGizmoParent, },
         view_cube::{
             CoordinateSystem, NeedsInitialSnap, ViewCubeConfig, ViewCubeTargetCamera,
             spawn::spawn_view_cube,
@@ -1274,15 +1274,11 @@ impl ViewportPane {
             None
         };
 
-        let mut viewport_lease: Option<RenderLayerLease> = None;
-        let viewport_layer = if let Some(lease) = render_layer_alloc.alloc() {
-            let layer = lease.layer();
-            viewport_lease = Some(lease);
-            main_camera_layers = main_camera_layers.with(layer);
-            Some(layer)
-        } else {
-            None
-        };
+        let viewport_lease: Option<RenderLayerLease> = render_layer_alloc
+            .alloc()
+            .inspect(|lease| {
+                main_camera_layers = main_camera_layers.union(&lease.render_layers());
+            });
 
         let grid_visibility = if viewport.show_grid {
             Visibility::Visible
@@ -1472,12 +1468,18 @@ impl ViewportPane {
                 projection_color: default_projection_color(),
                 frustums_color: viewport.frustums_color,
                 frustums_thickness: viewport.frustums_thickness,
-                viewport_layer,
             },
             crate::ui::inspector::viewport::Viewport::new(parent, pos, look_at, up, viewport.frame),
             ChildOf(parent),
             Name::new("viewport camera3d"),
         ));
+
+        if let Some(viewport_lease) = viewport_lease.as_ref() {
+            camera.insert((
+            viewport_lease.render_layers(),
+            viewport_lease.clone(),
+                ));
+        }
 
         camera.insert(Bloom { ..default() });
         camera.insert(EnvironmentMapLight {
@@ -1489,9 +1491,12 @@ impl ViewportPane {
 
         let camera = camera.id();
 
-        if let Some(lease) = viewport_lease {
-            commands.entity(camera).insert(lease);
-        }
+        let viewport_layer = viewport_lease.map(|lease| {
+            let layer = lease.layer();
+            commands.entity(camera)
+                    .insert(lease);
+            layer
+        });
 
         if !viewport.show_view_cube {
             return Self {

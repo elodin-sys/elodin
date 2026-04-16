@@ -31,7 +31,7 @@ use crate::{
             DocumentLoaded, DocumentReloaded, DocumentSaved, SchematicDocumentAsset,
             SchematicWindow,
         },
-        navigation_gizmo::RenderLayerAllocator,
+        render_layer_alloc::RenderLayerAllocator,
     },
     ui::{
         DEFAULT_SECONDARY_RECT, HdrEnabled,

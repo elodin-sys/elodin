@@ -10,6 +10,7 @@ pub(crate) mod kdl_asset_source;
 pub(crate) mod kdl_document;
 mod logical_key;
 pub mod navigation_gizmo;
+pub mod render_layer_alloc;
 pub mod view_cube;
 mod web_asset;
 

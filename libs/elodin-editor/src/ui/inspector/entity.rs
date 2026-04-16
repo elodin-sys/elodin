@@ -16,7 +16,7 @@ use impeller2_wkt::{ComponentMetadata, MetadataExt};
 use smallvec::SmallVec;
 
 use crate::{
-    plugins::navigation_gizmo::RenderLayerAllocator,
+    plugins::render_layer_alloc::RenderLayerAllocator,
     ui::{
         EntityPair,
         colors::get_scheme,

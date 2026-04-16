@@ -10,8 +10,7 @@ use bevy_editor_cam::prelude::EnabledMotion;
 use bevy_egui::EguiContexts;
 use std::{collections::HashMap, f32::consts};
 
-mod render_layer_alloc;
-pub use render_layer_alloc::{RenderLayerLease, RenderLayerAllocator};
+use super::render_layer_alloc::{self, RenderLayerLease, RenderLayerAllocator};
 
 pub struct NavigationGizmoPlugin;
 

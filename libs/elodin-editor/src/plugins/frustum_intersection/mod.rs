@@ -368,7 +368,7 @@ fn draw_frustum_ellipsoid_intersections(
     let mut sources = Vec::new();
     let mut targets = Vec::new();
 
-    for (camera_entity, camera, projection, global_transform, config) in
+    for (camera_entity, camera, projection, global_transform, config, render_layer_lease) in
         params.main_viewports.iter()
     {
         if !camera.is_active {
@@ -378,14 +378,15 @@ fn draw_frustum_ellipsoid_intersections(
         let Some(config) = config else {
             continue;
         };
-        let Some(viewport_layer) = config.viewport_layer else {
+        let Some(render_layer_lease) = render_layer_lease else {
             continue;
         };
 
         if config.show_frustums && (config.show_coverage_in_viewport || config.show_projection_2d) {
             targets.push((
                 camera_entity,
-                RenderLayers::layer(viewport_layer),
+                render_layer_lease.render_layers(),
+                render_layer_lease,
                 config.projection_color,
                 config.show_coverage_in_viewport,
                 config.show_projection_2d,
@@ -491,7 +492,7 @@ fn draw_frustum_ellipsoid_intersections(
     let mut desired_lights = Vec::new();
     let mut desired_tint_overlays = Vec::new();
     let mut coverage_layers = RenderLayers::none();
-    for (_, render_layers, _, show_coverage, _) in &targets {
+    for (_, render_layers, render_layer_lease, _, show_coverage, _) in &targets {
         if *show_coverage {
             coverage_layers = coverage_layers.union(render_layers);
         }
@@ -499,7 +500,7 @@ fn draw_frustum_ellipsoid_intersections(
     let any_target_wants_coverage = coverage_layers.iter().next().is_some();
     let any_target_wants_projection = targets
         .iter()
-        .any(|(_, _, _, _, show_projection)| *show_projection);
+        .any(|(_, _, _, _, _, show_projection)| *show_projection);
     // Per-ellipsoid max coverage ratio across all frustums. Empty when coverage is disabled.
     let mut ellipsoid_max_ratio: HashMap<Entity, f32> = if any_target_wants_coverage {
         ellipsoids
@@ -543,6 +544,7 @@ fn draw_frustum_ellipsoid_intersections(
             for (
                 target_camera,
                 render_layers,
+                render_layer_lease,
                 target_projection_color,
                 _show_coverage,
                 target_show_projection,

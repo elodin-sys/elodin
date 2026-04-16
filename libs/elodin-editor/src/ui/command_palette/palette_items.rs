@@ -33,7 +33,7 @@ use nox::ArrayBuf;
 
 use crate::{
     EqlContext, MainCamera, Offset, SelectedTimeRange, TimeRangeBehavior, TimeRangeError,
-    plugins::navigation_gizmo::RenderLayerAllocator,
+    plugins::render_layer_alloc::RenderLayerAllocator,
     ui::{
         FocusedWindow, HdrEnabled, Paused, colors,
         command_palette::CommandPaletteState,

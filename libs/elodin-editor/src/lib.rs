@@ -39,7 +39,8 @@ use object_3d::create_object_3d_entity;
 use plugins::frustum::FrustumPlugin;
 use plugins::frustum_intersection::FrustumIntersectionPlugin;
 use plugins::gizmos::GizmoPlugin;
-use plugins::navigation_gizmo::{NavigationGizmoPlugin, RenderLayerAllocator};
+use plugins::navigation_gizmo::{NavigationGizmoPlugin};
+use plugins::render_layer_alloc::{RenderLayerAllocator};
 use plugins::view_cube::{ViewCubeConfig, ViewCubePlugin};
 use ui::{
     UI_ORDER_BASE,

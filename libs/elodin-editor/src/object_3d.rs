@@ -20,6 +20,7 @@ use crate::icon_rasterizer::IconTextureCache;
 use crate::iter::JoinDisplayExt;
 use crate::ui::tiles::ViewportConfig;
 use crate::{BevyExt, EqlContext, MainCamera, plugins::navigation_gizmo::NavGizmoCamera};
+use crate::plugins::render_layer_alloc::{RenderLayerAllocator, RenderLayerLease};
 use bevy_geo_frames::prelude::*;
 use std::collections::{HashMap, HashSet};
 use std::fmt;
@@ -1794,6 +1795,7 @@ pub fn update_object_3d_billboard_system(
             &GlobalTransform,
             &Projection,
             Option<&ViewportConfig>,
+            Option<&RenderLayerLease>,
         ),
         With<MainCamera>,
     >,
@@ -1823,15 +1825,15 @@ pub fn update_object_3d_billboard_system(
         let bb_mesh_handle = icon_state.billboard_mesh.clone();
         let bb_mat_source = icon_state.billboard_material.clone();
 
-        for (cam_entity, camera, cam_gt, projection, viewport_config) in cameras.iter() {
+        for (cam_entity, camera, cam_gt, projection, viewport_config, render_layer_lease) in cameras.iter() {
             let viewport_h = camera.logical_viewport_size().map(|s| s.y).unwrap_or(0.0);
             if viewport_h < 1.0 {
                 continue;
             }
-            let Some(layer) = viewport_config.and_then(|c| c.viewport_layer) else {
+            let Some(render_layer_lease) = render_layer_lease else {
                 continue;
             };
-            let render_layers = layer.render_layers();
+            let render_layers = render_layer_lease.render_layers();
 
             seen_cameras.insert(cam_entity);
             let distance = (obj_pos - cam_gt.translation()).length();
@@ -1839,7 +1841,7 @@ pub fn update_object_3d_billboard_system(
             let shows_mesh = distance >= mesh_min && distance <= mesh_max;
 
             if shows_mesh {
-                mesh_layers = mesh_layers.with(layer);
+                mesh_layers = mesh_layers.union(&render_layers);
             }
 
             if shows_billboard {
@@ -1868,7 +1870,8 @@ pub fn update_object_3d_billboard_system(
                             Visibility::Hidden,
                             InheritedVisibility::default(),
                             ViewVisibility::default(),
-                            render_layers,
+                            render_layers.clone(),
+                            render_layer_lease.clone(),
                             BillboardIcon,
                             ChildOf(parent_entity),
                             Name::new(format!("billboard_icon_cam_{cam_entity}")),

@@ -39,7 +39,8 @@ pub fn spawn_view_cube(
     config: &ViewCubeConfig,
     main_camera_entity: Entity,
 ) -> SpawnedViewCube {
-    let render_layers = Some(RenderLayers::layer(config.render_layer as usize));
+    // TODO: Need to know where this render_layer comes from.
+    let render_layers = RenderLayers::none().with(config.render_layer as usize);
 
     // Load the axes-cube.glb (embedded)
     let scene = asset_server.load("embedded://elodin_editor/assets/axes-cube.glb#Scene0");
@@ -57,13 +58,11 @@ pub fn spawn_view_cube(
         ViewCubeLink {
             main_camera: main_camera_entity,
         },
-        ViewCubeRenderLayer(config.render_layer as usize),
+        //TODO: This needs to be corrected.
+        //ViewCubeRenderLayer(config.render_layer as usize),
         Name::new("view_cube_root"),
+        render_layers.clone(),
     ));
-
-    if let Some(layers) = render_layers.clone() {
-        cube_root_cmd.insert(layers);
-    }
 
     let cube_root = cube_root_cmd.id();
 
@@ -74,7 +73,7 @@ pub fn spawn_view_cube(
         meshes,
         materials,
         config,
-        render_layers.clone(),
+        Some(render_layers.clone()),
         cube_root,
     );
 
@@ -84,7 +83,7 @@ pub fn spawn_view_cube(
         asset_server,
         materials,
         config,
-        render_layers.clone(),
+        Some(render_layers.clone()),
         cube_root,
     );
 
@@ -95,7 +94,7 @@ pub fn spawn_view_cube(
         meshes,
         materials,
         gizmo_camera,
-        render_layers.clone(),
+        Some(render_layers.clone()),
     );
     spawn_viewport_action_buttons(
         commands,
@@ -103,7 +102,7 @@ pub fn spawn_view_cube(
         meshes,
         materials,
         gizmo_camera,
-        render_layers,
+        Some(render_layers),
     );
 
     SpawnedViewCube {
