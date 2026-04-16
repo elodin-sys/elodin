@@ -2517,7 +2517,7 @@ object_3d "rocket.world_pos" {
         assert_eq!(animations[0].joint_name, "Root.Fin_0");
         assert_eq!(
             animations[0].eql_expr,
-            "(0, .actual_position.cast(f32)/1000.0 - 22, 0)"
+            "(0, test_fixture0.actual_position.cast(f32)/1000.0 - 22, 0)"
         );
     }
 
