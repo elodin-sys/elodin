@@ -1992,14 +1992,14 @@ mod joint_eql_cast_tests {
     #[test]
     fn joint_rotation_vector_string_with_cast_evaluates_like_kdl_example() {
         let component = Arc::new(eql::Component::new(
-            "CANOPENMOTORMESSAGE0.ACTUAL_POSITION".to_string(),
-            ComponentId::new("CANOPENMOTORMESSAGE0.ACTUAL_POSITION"),
+            "test_fixture0.actual_position".to_string(),
+            ComponentId::new("test_fixture0.actual_position"),
             Schema::new(PrimType::I32, [1usize]).unwrap(),
         ));
         let component_id = component.id;
         let ctx = eql::Context::from_leaves([component], Timestamp(0), Timestamp(1000));
         let kdl_rotation_vector =
-            "(0, CANOPENMOTORMESSAGE0.ACTUAL_POSITION.cast(f32)/1000.0 - 22, 0)";
+            "(0, test_fixture0.actual_position.cast(f32)/1000.0 - 22, 0)";
         let compiled = compile_eql_expr(
             ctx.parse_str(kdl_rotation_vector)
                 .expect("parse joint rotation_vector EQL"),

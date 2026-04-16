@@ -2503,7 +2503,7 @@ object_3d "rocket.world_pos" {
         let kdl = r#"
 object_3d "rocket.world_pos" {
     glb path="model.glb"
-    animate joint="Root.Fin_0" rotation_vector="(0, CANOPENMOTORMESSAGE0.ACTUAL_POSITION.cast(f32)/1000.0 - 22, 0)"
+    animate joint="Root.Fin_0" rotation_vector="(0, test_fixture0.actual_position.cast(f32)/1000.0 - 22, 0)"
 }
 "#;
         let schematic = parse_schematic(kdl).unwrap();
@@ -2517,7 +2517,7 @@ object_3d "rocket.world_pos" {
         assert_eq!(animations[0].joint_name, "Root.Fin_0");
         assert_eq!(
             animations[0].eql_expr,
-            "(0, CANOPENMOTORMESSAGE0.ACTUAL_POSITION.cast(f32)/1000.0 - 22, 0)"
+            "(0, .actual_position.cast(f32)/1000.0 - 22, 0)"
         );
     }
 
