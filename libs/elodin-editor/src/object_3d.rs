@@ -1998,8 +1998,7 @@ mod joint_eql_cast_tests {
         ));
         let component_id = component.id;
         let ctx = eql::Context::from_leaves([component], Timestamp(0), Timestamp(1000));
-        let kdl_rotation_vector =
-            "(0, test_fixture0.actual_position.cast(f32)/1000.0 - 22, 0)";
+        let kdl_rotation_vector = "(0, test_fixture0.actual_position.cast(f32)/1000.0 - 22, 0)";
         let compiled = compile_eql_expr(
             ctx.parse_str(kdl_rotation_vector)
                 .expect("parse joint rotation_vector EQL"),
