@@ -1973,3 +1973,58 @@ impl Plugin for Object3DPlugin {
         );
     }
 }
+
+#[cfg(test)]
+mod joint_eql_cast_tests {
+    use std::collections::HashMap;
+    use std::sync::Arc;
+
+    use bevy::ecs::system::SystemState;
+    use bevy::prelude::{Query, World};
+    use impeller2::schema::Schema;
+    use impeller2::types::{ComponentId, PrimType, Timestamp};
+    use impeller2_bevy::EntityMap;
+    use impeller2_wkt::ComponentValue;
+    use nox::{Array, ArrayBuf};
+
+    use super::compile_eql_expr;
+
+    #[test]
+    fn joint_rotation_vector_string_with_cast_evaluates_like_kdl_example() {
+        let component = Arc::new(eql::Component::new(
+            "CANOPENMOTORMESSAGE0.ACTUAL_POSITION".to_string(),
+            ComponentId::new("CANOPENMOTORMESSAGE0.ACTUAL_POSITION"),
+            Schema::new(PrimType::I32, [1usize]).unwrap(),
+        ));
+        let component_id = component.id;
+        let ctx = eql::Context::from_leaves([component], Timestamp(0), Timestamp(1000));
+        let kdl_rotation_vector =
+            "(0, CANOPENMOTORMESSAGE0.ACTUAL_POSITION.cast(f32)/1000.0 - 22, 0)";
+        let compiled = compile_eql_expr(
+            ctx.parse_str(kdl_rotation_vector)
+                .expect("parse joint rotation_vector EQL"),
+        );
+
+        let mut world = World::new();
+        let arr = Array::<i32, nox::Dyn>::from_shape_vec(smallvec::smallvec![1], vec![42_000])
+            .expect("i32 telemetry buffer");
+        let entity = world.spawn(ComponentValue::I32(arr)).id();
+        let entity_map = EntityMap(HashMap::from([(component_id, entity)]));
+
+        let mut system_state: SystemState<(Query<'static, 'static, &ComponentValue>,)> =
+            SystemState::new(&mut world);
+        let (q,) = system_state.get(&world);
+        let out = compiled
+            .execute(&entity_map, &q)
+            .expect("editor EQL runtime evaluation");
+
+        let ComponentValue::F64(arr) = &out else {
+            panic!("expected F64 tuple result, got {out:?}");
+        };
+        let buf = arr.buf.as_buf();
+        assert_eq!(buf.len(), 3, "tuple length");
+        assert!((buf[0] - 0.0).abs() < 1e-9);
+        assert!((buf[1] - 20.0).abs() < 1e-6, "y = 42000/1000 - 22");
+        assert!((buf[2] - 0.0).abs() < 1e-9);
+    }
+}
