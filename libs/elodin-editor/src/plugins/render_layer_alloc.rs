@@ -73,6 +73,13 @@ impl std::fmt::Debug for RenderLayerAllocator {
 
 impl RenderLayerAllocator {
     /// Return the first free layer index.
+    ///
+    /// We probe one virtual word past `bits.len()`: that word is conceptually
+    /// all zeros (no layer used yet) and lets us return a layer beyond the
+    /// current bitset size — `RenderLayers` is a growable `SmallVec<u64>`, so
+    /// `union` will extend the storage on the next allocation. Without that
+    /// extra iteration the allocator would re-introduce the historical 64-layer
+    /// cap as soon as the first word filled up.
     fn first_free_layer_index(&self, in_use: &RenderLayers) -> Option<usize> {
         let bits = in_use.bits();
         for word_index in 0..bits.len() + 1 {
@@ -197,6 +204,49 @@ mod tests {
                 lease.layer(),
             );
         }
+    }
+
+    #[test]
+    fn test_alloc_grows_past_64_layers() {
+        // Locks in the intent of the `+ 1` in `first_free_layer_index`: the
+        // allocator must hand out layers beyond the first 64-bit word once the
+        // word fills up, instead of returning `None` like the legacy
+        // `RenderLayerAlloc`.
+        let mut alloc = RenderLayerAllocator::default();
+        let mut leases = Vec::new();
+        let mut max_layer = 0;
+        for _ in 0..200 {
+            let lease = alloc.alloc().expect("allocator must not exhaust");
+            max_layer = max_layer.max(lease.layer());
+            leases.push(lease);
+        }
+        assert!(
+            max_layer >= 64,
+            "expected to allocate past layer 63, got max layer {max_layer}",
+        );
+        assert!(
+            alloc.in_use().bits().len() >= 2,
+            "in_use bitset should have grown past one 64-bit word",
+        );
+    }
+
+    #[test]
+    fn test_alloc_returns_layer_64_when_first_word_is_full() {
+        // Direct trace of the scenario the supposed bug report describes:
+        // after layers 1..=63 (plus reserved 0/30/31) are taken, the next
+        // alloc must return layer 64, not None.
+        let mut alloc = RenderLayerAllocator::default();
+        let mut leases = Vec::new();
+        for _ in 0..61 {
+            leases.push(alloc.alloc().expect("layer < 64"));
+        }
+        assert_eq!(
+            alloc.in_use().bits(),
+            &[u64::MAX],
+            "first 64-bit word should be saturated",
+        );
+        let next = alloc.alloc().expect("layer 64 must be available");
+        assert_eq!(next.layer(), 64);
     }
 
     #[test]
