@@ -231,7 +231,6 @@ impl LoadSchematicParams<'_, '_> {
         // Set global coordinate frame from schematic
         self.coordinate.0 = schematic.frame;
 
-        self.render_layer_alloc.free_all();
         for (id, window_id, window_state) in &self.window_states {
             if window_id.is_primary() {
                 continue;

@@ -122,11 +122,6 @@ impl RenderLayerAllocator {
         }
     }
 
-    /// Resets dynamic allocations.
-    pub fn free_all(&mut self) {
-        while self.dropped.pop().is_some() {}
-        self.in_use = self.reserved.clone();
-    }
 }
 
 impl Default for RenderLayerAllocator {

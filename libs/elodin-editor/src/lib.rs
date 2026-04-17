@@ -1163,7 +1163,6 @@ fn clear_state_new_connection(
         commands.entity(entity).despawn();
     }
     *graph_data = CollectedGraphData::default();
-    render_layer_alloc.free_all();
     *telemetry_cache = impeller2_bevy::TelemetryCache::default();
     *backfill_state = impeller2_bevy::BackfillState::default();
 }
