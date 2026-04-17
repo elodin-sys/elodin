@@ -60,7 +60,7 @@ use crate::{
         LogicalKeyState,
         gizmos::GIZMO_RENDER_LAYER,
         navigation_gizmo::{NavGizmoCamera, NavGizmoParent},
-        render_layer_alloc::{RenderLayerAllocator, RenderLayerLease},
+        render_layer_alloc::{GRID_RENDER_LAYER, RenderLayerAllocator, RenderLayerLease},
         view_cube::{
             CoordinateSystem, NeedsInitialSnap, ViewCubeConfig, ViewCubeTargetCamera,
             spawn::spawn_view_cube,
@@ -1243,7 +1243,6 @@ pub struct ViewportPane {
     pub nav_gizmo_camera: Option<Entity>,
     pub rect: Option<egui::Rect>,
     pub name: PaneName,
-    pub grid_layer: Option<usize>,
     pub viewport_layer: Option<usize>,
     pub view_cube_layer: Option<usize>,
 }
@@ -1260,18 +1259,12 @@ impl ViewportPane {
         viewport: &Viewport,
         name: PaneName,
     ) -> Self {
-        let mut main_camera_layers = RenderLayers::default().with(GIZMO_RENDER_LAYER);
-        let mut grid_layers = RenderLayers::none();
-        let mut grid_lease: Option<RenderLayerLease> = None;
-        let grid_layer = if let Some(lease) = render_layer_alloc.alloc() {
-            let layer = lease.layer();
-            grid_lease = Some(lease);
-            main_camera_layers = main_camera_layers.with(layer);
-            grid_layers = grid_layers.with(layer);
-            Some(layer)
-        } else {
-            None
-        };
+        // The grid render layer is reserved and shared by every viewport, so we
+        // never allocate one per viewport. See `RenderLayerAllocator::default`.
+        let mut main_camera_layers = RenderLayers::default()
+            .with(GIZMO_RENDER_LAYER)
+            .with(GRID_RENDER_LAYER);
+        let grid_layers = RenderLayers::layer(GRID_RENDER_LAYER);
 
         let viewport_lease: Option<RenderLayerLease> =
             render_layer_alloc.alloc().inspect(|lease| {
@@ -1310,10 +1303,6 @@ impl ViewportPane {
                 grid_layers,
             ))
             .id();
-
-        if let Some(lease) = grid_lease {
-            commands.entity(grid_id).insert(lease);
-        }
 
         let transform =
             Transform::from_translation(Vec3::new(5.0, 5.0, 10.0)).looking_at(Vec3::ZERO, Vec3::Y);
@@ -1495,7 +1484,6 @@ impl ViewportPane {
                 nav_gizmo_camera: None,
                 rect: None,
                 name,
-                grid_layer,
                 viewport_layer,
                 view_cube_layer: None,
             };
@@ -1509,7 +1497,6 @@ impl ViewportPane {
                 nav_gizmo_camera: None,
                 rect: None,
                 name,
-                grid_layer,
                 viewport_layer,
                 view_cube_layer: None,
             };
@@ -1564,7 +1551,6 @@ impl ViewportPane {
             nav_gizmo_camera: spawned.camera,
             rect: None,
             name,
-            grid_layer,
             viewport_layer,
             view_cube_layer: Some(view_cube_layer),
         }

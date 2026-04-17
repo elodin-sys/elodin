@@ -15,6 +15,10 @@ use bevy::prelude::*;
 use crossbeam_queue::SegQueue;
 use std::sync::Arc;
 
+/// Render layer shared by every viewport's infinite grid. Reserved so it is
+/// never handed out by [`RenderLayerAllocator::alloc`].
+pub const GRID_RENDER_LAYER: usize = 31;
+
 pub(crate) fn plugin(app: &mut App) {
     app.register_type::<RenderLayerAllocator>()
         .init_resource::<RenderLayerAllocator>()
@@ -125,7 +129,9 @@ impl RenderLayerAllocator {
 
 impl Default for RenderLayerAllocator {
     fn default() -> Self {
-        let reserved = RenderLayers::layer(0).with(GIZMO_RENDER_LAYER);
+        let reserved = RenderLayers::layer(0)
+            .with(GIZMO_RENDER_LAYER)
+            .with(GRID_RENDER_LAYER);
         Self {
             in_use: reserved.clone(),
             reserved,
@@ -177,6 +183,20 @@ mod tests {
         alloc.drain_dropped();
         let again = alloc.alloc().expect("layer 1 again");
         assert_eq!(again.layer(), 1);
+    }
+
+    #[test]
+    fn test_reserved_layers_are_never_allocated() {
+        let mut alloc = RenderLayerAllocator::default();
+        let reserved = alloc.reserved.clone();
+        for _ in 0..64 {
+            let lease = alloc.alloc().expect("plenty of layers available");
+            assert!(
+                !reserved.intersects(&lease.render_layers()),
+                "alloc returned a reserved layer: {}",
+                lease.layer(),
+            );
+        }
     }
 
     #[test]
