@@ -1,7 +1,6 @@
 //! Spawning functions for the ViewCube widget
 
 use bevy::camera::ClearColorConfig;
-use bevy::camera::visibility::RenderLayers;
 use bevy::ecs::hierarchy::ChildOf;
 use bevy::picking::prelude::*;
 use bevy::prelude::*;
@@ -48,7 +47,7 @@ pub fn spawn_view_cube(
     // Visibility::Inherited once every descendant has been assigned the correct
     // RenderLayers, preventing the GLB children from briefly appearing on all
     // cameras via the default layer 0.
-    let mut cube_root_cmd = commands.spawn((
+    let cube_root_cmd = commands.spawn((
         SceneRoot(scene),
         Transform::from_xyz(0.0, 0.0, 0.0).with_scale(Vec3::splat(config.scale)),
         Visibility::Hidden,
@@ -136,7 +135,7 @@ fn spawn_overlay_camera(
         Name::new("view_cube_camera"),
     ));
 
-    if let Some(lease) = render_layer_lease.clone() {
+    if let Some(lease) = render_layer_lease {
         overlay_cmd.insert((lease.render_layers(), lease.clone()));
     }
     overlay_cmd.id()
@@ -217,7 +216,7 @@ fn spawn_axes(
             ChildOf(parent),
             Name::new(format!("axis_{}_shaft", name)),
         ));
-        if let Some(lease) = render_layer_lease.clone() {
+        if let Some(lease) = render_layer_lease {
             shaft_cmd.insert((lease.render_layers(), lease.clone()));
         }
 
@@ -252,7 +251,7 @@ fn spawn_axes(
             ChildOf(parent),
             Name::new(format!("axis_{}_label", name)),
         ));
-        if let Some(lease) = render_layer_lease.clone() {
+        if let Some(lease) = render_layer_lease {
             label_cmd.insert((lease.render_layers(), lease.clone()));
         }
     }
@@ -375,7 +374,7 @@ fn spawn_face_labels(
             ChildOf(parent),
             Name::new(format!("label_{}", label.text)),
         ));
-        if let Some(lease) = render_layer_lease.clone() {
+        if let Some(lease) = render_layer_lease {
             label_cmd.insert((lease.render_layers(), lease.clone()));
         }
     }
@@ -473,7 +472,7 @@ fn spawn_rotation_arrows(
             direction,
             Name::new(format!("rotation_arrow_{:?}", direction)),
         ));
-        if let Some(lease) = render_layer_lease.clone() {
+        if let Some(lease) = render_layer_lease {
             arrow_cmd.insert((lease.render_layers(), lease.clone()));
         }
         arrow_cmd.insert(ChildOf(camera_entity));
@@ -486,7 +485,7 @@ fn spawn_rotation_arrows(
             ChildOf(arrow_entity),
             Name::new(format!("rotation_arrow_{:?}_hitbox", direction)),
         ));
-        if let Some(lease) = render_layer_lease.clone() {
+        if let Some(lease) = render_layer_lease {
             hitbox_cmd.insert((lease.render_layers(), lease.clone()));
         }
     }
@@ -530,7 +529,7 @@ fn spawn_rotation_arrows(
             direction,
             Name::new(format!("rotation_arrow_{:?}", direction)),
         ));
-        if let Some(lease) = render_layer_lease.clone() {
+        if let Some(lease) = render_layer_lease {
             arrow_cmd.insert((lease.render_layers(), lease.clone()));
         }
         arrow_cmd.insert(ChildOf(camera_entity));
@@ -543,7 +542,7 @@ fn spawn_rotation_arrows(
             ChildOf(arrow_entity),
             Name::new(format!("rotation_arrow_{:?}_hitbox", direction)),
         ));
-        if let Some(lease) = render_layer_lease.clone() {
+        if let Some(lease) = render_layer_lease {
             hitbox_cmd.insert((lease.render_layers(), lease.clone()));
         }
     }
@@ -605,7 +604,7 @@ fn spawn_viewport_action_buttons(
         ViewportActionButton::Reset,
         Name::new("viewport_action_button_Reset"),
     ));
-    if let Some(lease) = render_layer_lease.clone() {
+    if let Some(lease) = render_layer_lease {
         reset_cmd.insert((lease.render_layers(), lease.clone()));
     }
     reset_cmd.insert(ChildOf(camera_entity));
@@ -617,7 +616,7 @@ fn spawn_viewport_action_buttons(
         ChildOf(reset_button),
         Name::new("viewport_action_button_Reset_hitbox"),
     ));
-    if let Some(lease) = render_layer_lease.clone() {
+    if let Some(lease) = render_layer_lease {
         reset_hitbox_cmd.insert((lease.render_layers(), lease.clone()));
     }
 
@@ -640,7 +639,7 @@ fn spawn_viewport_action_buttons(
         ))
         .id();
     let mut zoom_button_cmd = commands.entity(zoom_button);
-    if let Some(lease) = render_layer_lease.clone() {
+    if let Some(lease) = render_layer_lease {
         zoom_button_cmd.insert((lease.render_layers(), lease.clone()));
     }
     zoom_button_cmd.insert(ChildOf(camera_entity));
@@ -666,7 +665,7 @@ fn spawn_viewport_action_buttons(
         ChildOf(zoom_button),
         Name::new("viewport_action_button_ZoomOut_icon"),
     ));
-    if let Some(lease) = render_layer_lease.clone() {
+    if let Some(lease) = render_layer_lease {
         zoom_icon_cmd.insert((lease.render_layers(), lease.clone()));
     }
 
@@ -677,7 +676,7 @@ fn spawn_viewport_action_buttons(
         ChildOf(zoom_button),
         Name::new("viewport_action_button_ZoomOut_hitbox"),
     ));
-    if let Some(lease) = render_layer_lease.clone() {
+    if let Some(lease) = render_layer_lease {
         zoom_hitbox_cmd.insert((lease.render_layers(), lease.clone()));
     }
 }

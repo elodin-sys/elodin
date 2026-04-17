@@ -1472,10 +1472,6 @@ impl ViewportPane {
             Name::new("viewport camera3d"),
         ));
 
-        if let Some(viewport_lease) = viewport_lease.as_ref() {
-            camera.insert((viewport_lease.render_layers(), viewport_lease.clone()));
-        }
-
         camera.insert(Bloom { ..default() });
         camera.insert(EnvironmentMapLight {
             diffuse_map: asset_server.load("embedded://elodin_editor/assets/diffuse.ktx2"),
@@ -1520,11 +1516,13 @@ impl ViewportPane {
         };
         let view_cube_layer = view_cube_lease.layer();
 
-        commands.entity(camera).insert((
-            ViewCubeTargetCamera,
-            NeedsInitialSnap,
-            view_cube_lease.clone(),
-        ));
+        // Do not insert `view_cube_lease` here: the main camera already carries the viewport
+        // `RenderLayerLease`, and a second lease would replace it (single component), breaking
+        // anything that reads the lease (e.g. vector arrows). The cube root and overlay camera
+        // still own clones of this lease.
+        commands
+            .entity(camera)
+            .insert((ViewCubeTargetCamera, NeedsInitialSnap));
 
         // Spawn ViewCube with editor mode configuration, only override the per-viewport render layer
         let mut view_cube_config = ViewCubeConfig::editor_mode();

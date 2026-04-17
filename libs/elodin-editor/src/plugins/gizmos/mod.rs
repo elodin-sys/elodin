@@ -51,6 +51,7 @@ type MainCameraQueryItem<'w> = (
     &'w Projection,
     &'w GlobalTransform,
     Option<&'w ViewportConfig>,
+    Option<&'w RenderLayers>,
     Option<&'w RenderLayerLease>,
 );
 
@@ -260,7 +261,7 @@ fn render_vector_arrow(
     }
     let has_show_arrows = main_camera_data
         .iter()
-        .any(|(_, _, _, _, config, _)| config.as_ref().map(|c| c.show_arrows).unwrap_or(true));
+        .any(|(_, _, _, _, config, _, _)| config.as_ref().map(|c| c.show_arrows).unwrap_or(true));
 
     for (entity, arrow, mut state) in vector_arrows.iter_mut() {
         if !has_show_arrows {
@@ -326,7 +327,7 @@ fn render_vector_arrow(
         let mut seen_cameras: HashSet<Entity> = HashSet::new();
 
         let mut render_for_camera = |idx: usize| {
-            let (cam_entity, cam, proj, cam_tf, viewport_config, render_layer_lease) =
+            let (cam_entity, cam, proj, cam_tf, viewport_config, camera_layers, render_layer_lease) =
                 main_camera_data[idx];
             seen_cameras.insert(cam_entity);
 
@@ -346,14 +347,16 @@ fn render_vector_arrow(
                 return;
             }
 
-            let Some(render_layer_lease) = render_layer_lease else {
-                if let Some(visual) = state.visuals.remove(&cam_entity) {
-                    hide_arrow_visual(&mut commands, &visual);
+            let arrow_layers = match (camera_layers, render_layer_lease) {
+                (Some(layers), _) => layers.clone(),
+                (None, Some(lease)) => lease.render_layers(),
+                (None, None) => {
+                    if let Some(visual) = state.visuals.remove(&cam_entity) {
+                        hide_arrow_visual(&mut commands, &visual);
+                    }
+                    return;
                 }
-                return;
             };
-
-            let arrow_layers = render_layer_lease.render_layers();
 
             let world_per_px = world_units_per_pixel(cam, proj, cam_tf, start);
             let shaft_radius = (TARGET_DIAMETER_PX * 0.5 * world_per_px)

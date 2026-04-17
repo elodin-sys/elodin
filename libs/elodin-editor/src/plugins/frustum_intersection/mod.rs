@@ -492,7 +492,7 @@ fn draw_frustum_ellipsoid_intersections(
     let mut desired_lights = Vec::new();
     let mut desired_tint_overlays = Vec::new();
     let mut coverage_layers = RenderLayers::none();
-    for (_, render_layers, render_layer_lease, _, show_coverage, _) in &targets {
+    for (_, render_layers, _render_layer_lease, _, show_coverage, _) in &targets {
         if *show_coverage {
             coverage_layers = coverage_layers.union(render_layers);
         }
@@ -544,7 +544,7 @@ fn draw_frustum_ellipsoid_intersections(
             for (
                 target_camera,
                 render_layers,
-                render_layer_lease,
+                _render_layer_lease,
                 target_projection_color,
                 _show_coverage,
                 target_show_projection,

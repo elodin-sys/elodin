@@ -332,7 +332,7 @@ fn draw_viewport_frustums(mut params: FrustumDrawParams<'_, '_>, mut commands: C
             &mut params.material_cache,
         );
         let segments = frustum_segments(points);
-        for (target_camera, render_layers, render_layers_lease) in &targets {
+        for (target_camera, render_layers, _render_layers_lease) in &targets {
             if source_camera == *target_camera {
                 continue;
             }
