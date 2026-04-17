@@ -121,7 +121,6 @@ impl RenderLayerAllocator {
             }
         }
     }
-
 }
 
 impl Default for RenderLayerAllocator {
