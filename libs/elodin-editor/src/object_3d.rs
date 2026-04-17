@@ -1789,16 +1789,8 @@ pub fn update_object_3d_billboard_system(
     mut commands: Commands,
     mut objects: Query<(Entity, &mut Object3DIconState, &GlobalTransform), With<WorldPosReceived>>,
     cameras: Query<
-        (
-            Entity,
-            &Camera,
-            &GlobalTransform,
-            &Projection,
-            Option<&ViewportConfig>,
-            Option<&RenderLayers>,
-            Option<&RenderLayerLease>,
-        ),
-        With<MainCamera>,
+        (Entity, &Camera, &GlobalTransform, &Projection, &RenderLayerLease),
+        (With<MainCamera>, With<ViewportConfig>),
     >,
     mut billboard_transforms: Query<&mut Transform, (With<BillboardIcon>, Without<MainCamera>)>,
     billboard_materials_query: Query<
@@ -1826,26 +1818,16 @@ pub fn update_object_3d_billboard_system(
         let bb_mesh_handle = icon_state.billboard_mesh.clone();
         let bb_mat_source = icon_state.billboard_material.clone();
 
-        for (
-            cam_entity,
-            camera,
-            cam_gt,
-            projection,
-            _viewport_config,
-            camera_layers,
-            render_layer_lease,
-        ) in cameras.iter()
-        {
+        for (cam_entity, camera, cam_gt, projection, render_layer_lease) in cameras.iter() {
             let viewport_h = camera.logical_viewport_size().map(|s| s.y).unwrap_or(0.0);
             if viewport_h < 1.0 {
                 continue;
             }
-            let Some(lease) = render_layer_lease else {
-                continue;
-            };
-            let render_layers = camera_layers
-                .cloned()
-                .unwrap_or_else(|| lease.render_layers());
+            // Billboards and mesh visibility must stay isolated to the
+            // viewport-specific lease layer. Reusing the camera's full
+            // RenderLayers mask would also copy shared layers like 0 / gizmo /
+            // grid and make icons leak into other viewports.
+            let render_layers = render_layer_lease.render_layers();
 
             seen_cameras.insert(cam_entity);
             let distance = (obj_pos - cam_gt.translation()).length();
@@ -1883,7 +1865,7 @@ pub fn update_object_3d_billboard_system(
                             InheritedVisibility::default(),
                             ViewVisibility::default(),
                             render_layers.clone(),
-                            lease.clone(),
+                            render_layer_lease.clone(),
                             BillboardIcon,
                             ChildOf(parent_entity),
                             Name::new(format!("billboard_icon_cam_{cam_entity}")),
