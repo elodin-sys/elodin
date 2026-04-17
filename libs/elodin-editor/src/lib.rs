@@ -40,6 +40,7 @@ use plugins::frustum::FrustumPlugin;
 use plugins::frustum_intersection::FrustumIntersectionPlugin;
 use plugins::gizmos::GizmoPlugin;
 use plugins::navigation_gizmo::NavigationGizmoPlugin;
+use plugins::render_layer_alloc;
 use plugins::view_cube::{ViewCubeConfig, ViewCubePlugin};
 use ui::{
     UI_ORDER_BASE,
@@ -223,6 +224,7 @@ impl Plugin for EditorPlugin {
             .add_plugins(EmbeddedAssetPlugin)
             .add_plugins(EguiPlugin::default())
             .add_plugins(bevy_infinite_grid::InfiniteGridPlugin)
+            .add_plugins(render_layer_alloc::plugin)
             .add_plugins(NavigationGizmoPlugin)
             .add_plugins(ViewCubePlugin {
                 config: ViewCubeConfig::editor_mode(),

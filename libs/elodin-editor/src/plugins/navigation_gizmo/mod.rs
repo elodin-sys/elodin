@@ -10,7 +10,7 @@ use bevy_editor_cam::prelude::EnabledMotion;
 use bevy_egui::EguiContexts;
 use std::{collections::HashMap, f32::consts};
 
-use super::render_layer_alloc::{self, RenderLayerAllocator};
+use super::render_layer_alloc::RenderLayerAllocator;
 
 pub struct NavigationGizmoPlugin;
 
@@ -19,8 +19,7 @@ impl Plugin for NavigationGizmoPlugin {
         app.init_resource::<NavGizmoAnchorState>()
             .add_systems(PostUpdate, set_camera_viewport)
             .add_systems(PostUpdate, sync_nav_camera)
-            .add_plugins(MeshPickingPlugin)
-            .add_plugins(render_layer_alloc::plugin);
+            .add_plugins(MeshPickingPlugin);
     }
 }
 

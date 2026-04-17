@@ -1,6 +1,6 @@
 //! Handle render layer allocation and deallocation. One allocates a
 //! `RenderLayerLease` component from the `RenderLayerAllocator` resource. Add
-//! it and its `Renderlayer` to whatever entity needs it. When all the
+//! it and its `RenderLayers` to whatever entity needs it. When all the
 //! `RenderLayerLease`s are dropped, then the allocated render layer is
 //! freed for use again.
 //!
