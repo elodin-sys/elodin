@@ -1541,9 +1541,11 @@ impl ViewportPane {
             ));
         }
 
-        commands
-            .entity(spawned.cube_root)
-            .insert(view_cube_lease.clone());
+        // `cube_root` already received `view_cube_lease` inside `spawn_view_cube`.
+        // Re-inserting it here would silently drop the previous component (Bevy
+        // overwrites same-typed components on insert) — see the `debug_assert!`
+        // in `EntityCommandsExt::insert_render_layer_lease`.
+        let _ = view_cube_lease;
 
         Self {
             camera: Some(camera),
