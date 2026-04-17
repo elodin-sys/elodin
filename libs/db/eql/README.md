@@ -54,6 +54,7 @@ Anything not listed is not part of the current language (as of **September 29, 2
 | **Formula: atan2(y, x)** | `y.atan2(x)` | Two-argument arctangent | One arg. Computes atan2(y, x) in SQL. Receiver is y, argument is x. |
 | **Formula: degrees(radians)** | `expr.degrees()` | Convert radians to degrees | No args. Converts angle from radians to degrees using PostgreSQL `degrees()` function. |
 | **Formula: clip(value, min, max)** | `value.clip(min, max)` | Clamp value between min and max | Two args. Expands to `GREATEST(min, LEAST(value, max))` in SQL. |
+| **Formula: cast(type)** | `expr.cast(f64)`, `expr.cast("f64")` | Explicitly convert a scalar expression to another primitive type | One arg. Supports `u8`, `u16`, `u32`, `u64`, `i8`, `i16`, `i32`, `i64`, `bool`, `f32`, `f64`. Emits `CAST(expr AS ...)` in SQL. |
 | **Formula: sqrt(x)** | `expr.sqrt()` | Square root | No args. Computes square root using PostgreSQL `sqrt()` function. |
 | **Formula: abs(x)** | `expr.abs()` | Absolute value | No args. Computes absolute value using PostgreSQL `abs()` function. |
 | **Formula: arccos(x)** | `expr.arccos()` | Inverse cosine (arccosine) | No args. Computes arccosine using PostgreSQL `acos()` function. |
@@ -73,6 +74,7 @@ Anything not listed is not part of the current language (as of **September 29, 2
 | `atan2`  | `a.velocity.y.atan2(a.velocity.x)`  |        1 | `atan2(a_velocity.a_velocity[2], a_velocity.a_velocity[1])` | 2 |
 | `degrees`| `a.angle.degrees()`                 |        0 | `degrees(a_angle.a_angle)`                |        1 |
 | `clip`   | `a.value.clip(0.0, 100.0)`         |        2 | `GREATEST(0.0, LEAST(a_value.a_value, 100.0))` | 3 |
+| `cast`   | `a.value.cast(f64)`                |        1 | `CAST(a_value.a_value AS DOUBLE)`              | 1 |
 | `sqrt`   | `a.value.sqrt()`                   |        0 | `sqrt(a_value.a_value)`                   |        1 |
 
 ## EQL → SQL Examples
@@ -99,6 +101,7 @@ Anything not listed is not part of the current language (as of **September 29, 2
 | `a.velocity.y.atan2(a.velocity.x)` | `select atan2(a_velocity.a_velocity[2], a_velocity.a_velocity[1]) as "atan2(a.velocity.y, a.velocity.x)" from a_velocity;` | Compute two-argument arctangent (angle from y and x components). |
 | `a.angle.degrees()` | `select degrees(a_angle.a_angle) as "degrees(a.angle)" from a_angle;` | Convert angle from radians to degrees. |
 | `a.value.clip(0.0, 100.0)` | `select GREATEST(0.0, LEAST(a_value.a_value, 100.0)) as "clip(a.value)" from a_value;` | Clamp value between 0.0 and 100.0. |
+| `a.counter.cast(f64) + 1.0` | `select CAST(a_counter.a_counter AS DOUBLE) + 1.0 from a_counter;` | Explicit cast before float arithmetic on an integer signal. |
 | `a.value.sqrt()` | `select sqrt(a_value.a_value) as "sqrt(a.value)" from a_value;` | Compute square root. |
 | `a.value.abs()` | `select abs(a_value.a_value) as "abs(a.value)" from a_value;` | Compute absolute value. |
 | `a.value.arccos()` | `select acos(a_value.a_value) as "arccos(a.value)" from a_value;` | Compute arccosine (inverse cosine). |

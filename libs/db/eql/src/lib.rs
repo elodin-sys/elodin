@@ -16,7 +16,9 @@ use peg::error::ParseError;
 
 pub mod formulas;
 
-use formulas::{Formula, FormulaRegistry, create_default_registry};
+use formulas::{FormulaRegistry, create_default_registry};
+
+pub use formulas::{CastTarget, Formula};
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum AstNode<'input> {
@@ -496,6 +498,14 @@ impl Default for Context {
 }
 
 impl Context {
+    fn parse_method_arg(&self, method_name: &str, ast_node: &AstNode) -> Result<Expr, Error> {
+        match (method_name, ast_node) {
+            // `cast(f64)` reads naturally, but bare identifiers normally parse as component names.
+            ("cast", AstNode::Ident(name)) => Ok(Expr::StringLiteral(name.to_string())),
+            _ => self.parse(ast_node),
+        }
+    }
+
     pub fn from_leaves(
         components: impl IntoIterator<Item = Arc<Component>>,
         earliest_timestamp: Timestamp,
@@ -612,7 +622,7 @@ impl Context {
                 let recv = self.parse(recv)?;
                 let args = ast_nodes
                     .iter()
-                    .map(|ast_node| self.parse(ast_node))
+                    .map(|ast_node| self.parse_method_arg(cow.as_ref(), ast_node))
                     .collect::<Result<Vec<_>, _>>()?;
                 if let Some(formula) = self.formula_registry.get(cow.as_ref()) {
                     formula.parse(recv, &args)
