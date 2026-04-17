@@ -168,6 +168,43 @@ impl RenderLayerLease {
     }
 }
 
+/// Insertion helper for [`RenderLayerLease`].
+///
+/// `RenderLayerLease` is a regular Bevy component, so a second `insert` on the
+/// same entity silently overwrites the first. The dropped `Arc` then frees the
+/// layer back to the [`RenderLayerAllocator`], which reuses it for an unrelated
+/// viewport. Two viewports end up sharing one render layer — visually visible
+/// as cross-rendered frustums or gizmos.
+///
+/// Always go through [`EntityCommandsExt::insert_render_layer_lease`] when
+/// touching an entity that already exists. In debug builds it panics on the
+/// duplicate insertion; in release it falls back to a single insert (the
+/// historical behaviour).
+pub trait EntityCommandsExt {
+    /// Insert a [`RenderLayerLease`] together with its [`RenderLayers`] mask.
+    /// Panics in debug if the entity already holds a `RenderLayerLease`.
+    fn insert_render_layer_lease(&mut self, lease: RenderLayerLease) -> &mut Self;
+}
+
+impl EntityCommandsExt for EntityCommands<'_> {
+    fn insert_render_layer_lease(&mut self, lease: RenderLayerLease) -> &mut Self {
+        let layers = lease.render_layers();
+        self.queue(move |mut entity: EntityWorldMut| {
+            debug_assert!(
+                entity.get::<RenderLayerLease>().is_none(),
+                "RenderLayerLease already present on entity {:?}: a second insert \
+                 would silently drop the previous lease and free its render layer \
+                 while other entities may still rely on it (two viewports sharing \
+                 one layer). Use a child entity, or remove the existing lease \
+                 explicitly first.",
+                entity.id()
+            );
+            entity.insert((lease, layers));
+        });
+        self
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -247,6 +284,53 @@ mod tests {
         );
         let next = alloc.alloc().expect("layer 64 must be available");
         assert_eq!(next.layer(), 64);
+    }
+
+    #[test]
+    #[should_panic(expected = "RenderLayerLease already present")]
+    fn test_insert_render_layer_lease_panics_on_double_insert() {
+        // Reproduces the silent-overwrite bug the helper guards against:
+        // inserting a second RenderLayerLease on an entity that already holds
+        // one would drop the first Arc and free its layer behind the back of
+        // any other entity still pointing at it.
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.init_resource::<RenderLayerAllocator>();
+
+        let mut alloc = app.world_mut().resource_mut::<RenderLayerAllocator>();
+        let lease_a = alloc.alloc().expect("layer 1");
+        let lease_b = alloc.alloc().expect("layer 2");
+
+        let entity = app.world_mut().spawn_empty().id();
+        let mut commands = app.world_mut().commands();
+        commands
+            .entity(entity)
+            .insert_render_layer_lease(lease_a)
+            .insert_render_layer_lease(lease_b);
+        app.world_mut().flush();
+    }
+
+    #[test]
+    fn test_insert_render_layer_lease_inserts_lease_and_layers() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.init_resource::<RenderLayerAllocator>();
+
+        let lease = app
+            .world_mut()
+            .resource_mut::<RenderLayerAllocator>()
+            .alloc()
+            .expect("layer 1");
+        let expected_layers = lease.render_layers();
+
+        let entity = app.world_mut().spawn_empty().id();
+        let mut commands = app.world_mut().commands();
+        commands.entity(entity).insert_render_layer_lease(lease);
+        app.world_mut().flush();
+
+        let entity_ref = app.world().entity(entity);
+        assert!(entity_ref.contains::<RenderLayerLease>());
+        assert_eq!(entity_ref.get::<RenderLayers>(), Some(&expected_layers));
     }
 
     #[test]
