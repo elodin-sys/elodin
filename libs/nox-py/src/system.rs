@@ -915,14 +915,6 @@ impl System for PyFnSystem {
 }
 
 pub trait CompiledSystemExt {
-    fn compile_iree_module(
-        &self,
-        py: Python<'_>,
-        world: &World,
-        iree_device: &str,
-        extra_iree_flags: &[String],
-        compile_origin: &str,
-    ) -> Result<crate::iree_compile::IreeCompileResult, Error>;
     fn compile_jax_module(
         &self,
         py: Python<'_>,
@@ -932,24 +924,6 @@ pub trait CompiledSystemExt {
 }
 
 impl CompiledSystemExt for CompiledSystem {
-    fn compile_iree_module(
-        &self,
-        py: Python<'_>,
-        world: &World,
-        iree_device: &str,
-        extra_iree_flags: &[String],
-        compile_origin: &str,
-    ) -> Result<crate::iree_compile::IreeCompileResult, Error> {
-        crate::iree_compile::compile_iree_module(
-            py,
-            self,
-            world,
-            iree_device,
-            extra_iree_flags,
-            compile_origin,
-        )
-    }
-
     fn compile_jax_module(
         &self,
         py: Python<'_>,

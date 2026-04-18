@@ -167,14 +167,10 @@ macro_rules! impl_array_element {
     };
 }
 
-// Elodin targets JAX→StableHLO→IREE, all of which use signless integers.
-// Map unsigned Rust types to signed ElementType so JAX's type promotion
-// lattice never mixes uint64+int64 (which promotes to float64).
-// Bit layout is identical; arithmetic is unaffected.
-impl_array_element!(u8, S8, 1);
-impl_array_element!(u16, S16, 2);
-impl_array_element!(u32, S32, 4);
-impl_array_element!(u64, S64, 8);
+impl_array_element!(u8, U8, 1);
+impl_array_element!(u16, U16, 2);
+impl_array_element!(u32, U32, 4);
+impl_array_element!(u64, U64, 8);
 impl_array_element!(i8, S8, 1);
 impl_array_element!(i16, S16, 2);
 impl_array_element!(i32, S32, 4);

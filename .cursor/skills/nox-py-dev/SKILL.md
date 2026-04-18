@@ -5,7 +5,7 @@ description: Contribute to the Elodin Python SDK (nox-py). Use when editing PyO3
 
 # nox-py Development
 
-nox-py is the Elodin Python SDK — PyO3 bindings that bridge Python simulations to the Rust ECS engine (in nox-py/src/), the NOX tensor compiler (→ IREE / JAX), and Impeller2 telemetry.
+nox-py is the Elodin Python SDK — PyO3 bindings that bridge Python simulations to the Rust ECS engine (in nox-py/src/), the NOX tensor compiler (→ cranelift / JAX), and Impeller2 telemetry.
 
 ## Build & Test
 
@@ -41,8 +41,6 @@ libs/nox-py/src/lib.rs       ← PyO3 module registration
     ├── spatial.rs            ← SpatialTransform, SpatialMotion, SpatialForce, SpatialInertia
     ├── entity.rs             ← EntityId management
     ├── exec.rs               ← WorldExec enum (Iree/Jax), profiling, DB integration
-    ├── iree_compile.rs       ← JAX → StableHLO → VMFB compilation pipeline
-    ├── iree_exec.rs          ← IREEExec, IREEWorldExec (Python-free tick loop)
     ├── jax_exec.rs           ← JaxExec, JaxWorldExec (JAX JIT per-tick execution)
     ├── step_context.rs       ← StepContext for pre/post step callbacks
     ├── impeller_client.rs    ← Impeller2 client for DB connection
@@ -56,7 +54,7 @@ libs/nox-py/src/lib.rs       ← PyO3 module registration
 libs/nox/                     ← Tensor library, symbolic backend
     │
     ▼
-libs/iree-runtime/            ← Rust FFI bindings for IREE C runtime API
+libs/cranelift-mlir/          ← Pure Rust StableHLO runtime
 ```
 
 ## Python API Surface
@@ -84,16 +82,13 @@ Earth gravity models. EGM08 is a high-fidelity spherical harmonics model; J2 is 
 Central orchestrator. Handles `World.spawn()`, `World.insert()`, `World.run()`, `World.build()`, `World.to_jax()`. This is where simulation execution modes branch.
 
 ### `system.rs`
-Compiles Python-defined systems into executable computations via IREE (default) or JAX. Handles the `@system`, `@map`, `@map_seq` decorator logic on the Rust side. System composition (pipe `|`) is implemented here.
+Compiles Python-defined systems into executable computations via cranelift (default) or JAX. Handles the `@system`, `@map`, `@map_seq` decorator logic on the Rust side. System composition (pipe `|`) is implemented here.
 
 ### `exec.rs`
 Defines `WorldExec` enum with `Iree(IREEWorldExec)` and `Jax(JaxWorldExec)` variants. Both implement the same interface for tick execution, profiling, and DB integration. The `backend` parameter in `w.run()` / `w.build()` selects which variant is used.
 
-### `iree_compile.rs` / `iree_exec.rs`
-IREE backend: compiles Noxpr graph → JAX → StableHLO MLIR → `iree-compile` → VMFB, then executes each tick via the IREE C runtime with no Python/GIL involvement.
-
 ### `jax_exec.rs`
-JAX backend: compiles Noxpr graph → `jax.jit()` callable, then executes each tick by calling the JAX function via PyO3. Slower than IREE but supports all JAX operations.
+JAX backend: compiles Noxpr graph → `jax.jit()` callable, then executes each tick by calling the JAX function via PyO3. Slower than cranelift but supports all JAX operations and the GPU.
 
 ### `component.rs`
 Maps Python `Component` annotations to component schemas. Handles type inference, metadata, and the `ComponentType` / `PrimitiveType` hierarchy.

@@ -12,7 +12,7 @@ use datafusion::{
     catalog::streaming::StreamingTable, datasource::MemTable, execution::RecordBatchStream,
     physical_plan::streaming::PartitionStream, prelude::SessionContext,
 };
-use futures_lite::{Stream, StreamExt, pin};
+use futures_lite::{Stream, StreamExt};
 use impeller2::types::{PrimType, Timestamp};
 use impeller2_wkt::ArchiveFormat;
 use std::{

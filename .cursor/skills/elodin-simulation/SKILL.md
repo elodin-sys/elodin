@@ -199,25 +199,25 @@ ThrustCmd = ty.Annotated[jax.Array,
 
 | Mode | Command | Backend | Use |
 |------|---------|---------|-----|
-| Editor (GUI) | `elodin editor sim.py` | IREE (default) | Development with 3D visualization |
-| Headless | `elodin run sim.py` | IREE (default) | CI/CD, batch processing |
-| JAX backend | `w.run(sys, backend="jax-cpu")` | JAX | When IREE doesn't support certain JAX ops |
-| GPU backend | `w.run(sys, backend="iree-gpu")` | IREE CUDA/Metal | Large parallel workloads |
+| Editor (GUI) | `elodin editor sim.py` | cranelift (default) | Development with 3D visualization |
+| Headless | `elodin run sim.py` | cranelift (default) | CI/CD, batch processing |
+| JAX backend | `w.run(sys, backend="jax-cpu")` | JAX | When cranelift doesn't support certain JAX ops |
+| GPU backend | `w.run(sys, backend="jax-gpu")` | JAX GPU | Large parallel workloads |
 | JAX-only | `w.to_jax(sys)` | JAX | RL training, `jax.vmap` batching |
-| Compiled | `w.build(sys)` | IREE (default) | Maximum performance |
-| Real-time | `w.run(sys, simulation_rate=120.0, generate_real_time=True)` | IREE (default) | Match wall-clock time |
-| DB-connected | `w.run(sys, db_addr="0.0.0.0:2240")` | IREE (default) | External clients + Editor |
+| Compiled | `w.build(sys)` | cranelift (default) | Maximum performance |
+| Real-time | `w.run(sys, simulation_rate=120.0, generate_real_time=True)` | cranelift (default) | Match wall-clock time |
+| DB-connected | `w.run(sys, db_addr="0.0.0.0:2240")` | cranelift (default) | External clients + Editor |
 
-**Backend selection:** The `backend` parameter defaults to `"iree-cpu"` (fast, Python-free tick loop). Use `"iree-gpu"`/`"jax-gpu"` for high-parallelism workloads. For tiny worlds, CPU backends are usually faster because kernel launch and device transfer overhead dominates compute.
+**Backend selection:** The `backend` parameter defaults to `"cranelift"` — a pure-Rust StableHLO JIT that runs the entire tick as a single native function call, with no Python in the hot loop. Use `"jax-gpu"` for high-parallelism workloads that benefit from GPU execution. For tiny worlds, the CPU `cranelift` backend is usually fastest because kernel launch and device-transfer overhead dominates compute.
 
-Use `examples/n-body/main.py` as the canonical GPU benchmark. It runs all four backends (`iree-cpu`, `iree-gpu`, `jax-cpu`, `jax-gpu`) side-by-side:
+Use `examples/n-body/main.py` as the canonical benchmark. It runs the supported backends (`cranelift`, `jax-cpu`, `jax-gpu`) side-by-side:
 
 ```bash
-nix develop --command ELODIN_BACKEND=iree-gpu elodin run examples/n-body/main.py
+nix develop --command ELODIN_BACKEND=jax-gpu elodin run examples/n-body/main.py
 ```
 
 To compare backends, run the same command with `ELODIN_BACKEND` set to each of:
-`iree-cpu`, `iree-gpu`, `jax-cpu`, `jax-gpu`.
+`cranelift`, `jax-cpu`, `jax-gpu`.
 
 ## Earth Gravity Models
 
@@ -231,7 +231,7 @@ force = model.compute_field(x, y, z, mass)
 
 ## Physics Regression Testing
 
-When changes to the simulation pipeline (Noxpr graph, IREE compilation, shape
+When changes to the simulation pipeline (Noxpr graph, cranelift-mlir compilation, shape
 handling, etc.) might alter numeric output, use a database-export diff to detect
 regressions.  The process:
 

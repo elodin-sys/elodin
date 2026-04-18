@@ -2,10 +2,16 @@
 # ruff: noqa: F405
 import os
 
-# Disable OpenBLAS multi-threading before any imports that load it (numpy/scipy).
-# IREE manages its own thread pool; OpenBLAS thread initialization from an IREE
-# worker thread context causes segfaults.
-os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+# Restrict JAX to CPU unless the user explicitly opted into `jax-gpu`.
+# JAX is only used as a StableHLO lowering helper for the default cranelift
+# backend (and for CPU execution with `jax-cpu`), so a CPU-only JAX is correct
+# in both cases. This also silences `jax._src.xla_bridge`'s "CUDA-enabled
+# jaxlib is not installed" warning at init. Users who want GPU execution
+# should set `ELODIN_BACKEND=jax-gpu` before importing elodin; that both
+# skips this branch and, if the GPU jaxlib is missing, surfaces a clear hard
+# error instead of a silent fallback.
+if os.environ.get("ELODIN_BACKEND", "").strip().lower() != "jax-gpu":
+    os.environ.setdefault("JAX_PLATFORMS", "cpu")
 
 import code
 import inspect
@@ -573,8 +579,7 @@ class World(WorldBuilder):
         interactive: bool = True,
         start_timestamp: Optional[int] = None,
         log_level: Optional[str] = None,
-        backend: str = "iree-cpu",
-        iree_flags: Optional[list[str]] = None,
+        backend: str = "cranelift",
     ):
         current_frame = inspect.currentframe()
         if current_frame is None:
@@ -599,7 +604,6 @@ class World(WorldBuilder):
             start_timestamp,
             log_level,
             backend,
-            iree_flags,
         )
         locals = frame.f_locals
         if not interactive and addr is not None:
@@ -619,8 +623,7 @@ class World(WorldBuilder):
         max_ticks: Optional[int] = None,
         optimize: bool = False,
         db_path: Optional[str] = None,
-        backend: str = "iree-cpu",
-        iree_flags: Optional[list[str]] = None,
+        backend: str = "cranelift",
     ) -> Exec:
         return super().build(
             system,
@@ -632,7 +635,6 @@ class World(WorldBuilder):
             optimize,
             db_path,
             backend,
-            iree_flags,
         )
 
     def to_jax(

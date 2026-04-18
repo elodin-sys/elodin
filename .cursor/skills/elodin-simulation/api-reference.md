@@ -25,7 +25,7 @@ w.to_jax(system, simulation_rate=120.0)         # Export as JAX function
 | `default_playback_speed` | float | 1.0 | Editor playback rate |
 | `max_ticks` | int | None | Stop after N ticks |
 | `optimize` | bool | False | Enable compilation optimizations |
-| `backend` | str | "iree" | Execution backend: `"iree"` (default, fast) or `"jax"` (full JAX compatibility) |
+| `backend` | str | "cranelift" | Execution backend: `"cranelift"` (default, fast) or `"jax"` (full JAX compatibility) |
 | `pre_step` | Callable | None | `(tick, StepContext) -> None` before each tick |
 | `post_step` | Callable | None | `(tick, StepContext) -> None` after each tick |
 | `db_path` | str | None | Database directory path |

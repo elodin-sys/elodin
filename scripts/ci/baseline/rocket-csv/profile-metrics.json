@@ -1,6 +1,6 @@
 {
-  "build_time_ms": 6000.0,
-  "compile_time_ms": 6000.0,
-  "real_time_factor": 2.302,
+  "build_time_ms": 299.335,
+  "compile_time_ms": 0.0,
+  "real_time_factor": 30.985,
   "ticks": 100
 }

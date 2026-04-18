@@ -34,7 +34,6 @@ __pycache__
 *.pyd
 **/venv/
 **/.venv/
-elodin_iree_debug/
 
 # Optional MLIR regression fixtures (customer artifacts, too large for git)
 **/*.stablehlo.mlir
@@ -51,6 +50,7 @@ video-stream-db/
 logstream-db/
 testvids/
 *.log
+**/testdata/*
 
 # macOS debug symbols
 *.dSYM/

@@ -267,7 +267,6 @@ impl JaxWorldExec {
     }
 
     pub fn run(&mut self) -> Result<(), Error> {
-        let start = &mut Instant::now();
         let ticks_per_telemetry = self.world.ticks_per_telemetry();
 
         if let Some(mut startup_exec) = self.startup_exec.take() {
@@ -297,11 +296,11 @@ impl JaxWorldExec {
             self.profiler.execute_buffers.observe_duration(tick_elapsed);
         }
 
-        *start = Instant::now();
+        let mut start = Instant::now();
         for _ in 0..ticks_per_telemetry {
             self.world.advance_tick();
         }
-        self.profiler.add_to_history.observe(start);
+        self.profiler.add_to_history.observe(&mut start);
         Ok(())
     }
 

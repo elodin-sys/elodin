@@ -1126,8 +1126,8 @@ mod batch1_join_tests {
 
 // --- Tests ---
 
-// Query tests disabled during XLA->IREE migration. They require a full
-// compile+execute pipeline which now needs Python/IREE at runtime.
+// Query tests disabled. They require a full compile+execute pipeline
+// which needs Python/JAX at runtime.
 #[cfg(any())]
 mod tests {
     use super::*;

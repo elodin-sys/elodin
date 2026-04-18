@@ -563,7 +563,7 @@ mod batch1_graph_tests {
     }
 }
 
-// Graph tests disabled during XLA->IREE migration (use WorldBuilder::run() which requires XLA).
+// Graph tests disabled (require WorldBuilder::run() which needs a full Python/JAX runtime).
 #[cfg(any())]
 mod tests {
 

@@ -29,14 +29,14 @@ Editor (live visualization):
 elodin editor examples/n-body/main.py
 ```
 
-Headless (with GPU):
+Headless:
 
 ```bash
-ELODIN_BACKEND=iree-gpu elodin run examples/n-body/main.py
+elodin run examples/n-body/main.py
 ```
 
 Useful env vars:
-- `ELODIN_BACKEND`: `iree-cpu`, `iree-gpu`, `jax-cpu`, `jax-gpu`
+- `ELODIN_BACKEND`: `cranelift` (default), `jax-cpu`, `jax-gpu`
 - `ELODIN_NBODY_MAX_TICKS`: override max ticks for quick runs
 - `DBNAME`: explicit DB directory path
 
@@ -44,7 +44,7 @@ By default the example combines:
 - `examples/n-body/planets_truth.csv`
 - `examples/n-body/moons_truth.csv`
 
-## Backend Benchmark (All 4 Backends)
+## Backend Benchmark
 
 Run the matrix:
 
@@ -52,20 +52,9 @@ Run the matrix:
 ELODIN_NBODY_BENCH_TICKS=20000 ELODIN_NBODY_BENCH_REPEATS=1 uv run examples/n-body/benchmark_backends.py
 ```
 
-Recorded median results from this branch (`ticks=20000`, `repeats=1`):
-
-| backend | tick_ms | kernel_ms | h2d_ms | d2h_ms | real_time_factor |
-|---|---:|---:|---:|---:|---:|
-| `iree-cpu` | 2321.497 | 2321.487 | 0.004 | 0.007 | 37217.361 |
-| `iree-gpu` | 11915.744 | 11912.800 | 0.199 | 2.745 | 7250.911 |
-| `jax-cpu` | 591.461 | 590.688 | 0.056 | 0.717 | 146078.977 |
-| `jax-gpu` | 1603.125 | 1595.964 | 5.423 | 1.738 | 53894.735 |
-
 The benchmark script prints `db_path[backend]` for each run and stores logs at:
-- `/tmp/n-body-bench-iree-cpu.log`
-- `/tmp/n-body-bench-iree-gpu.log`
+- `/tmp/n-body-bench-cranelift.log`
 - `/tmp/n-body-bench-jax-cpu.log`
-- `/tmp/n-body-bench-jax-gpu.log`
 
 ## Accuracy Report
 

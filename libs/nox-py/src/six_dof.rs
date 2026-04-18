@@ -202,8 +202,7 @@ where
     }
 }
 
-// Six-DOF integration tests removed during XLA->IREE migration.
-// Validated via end-to-end: `elodin run examples/ball/main.py` etc.
+// Six-DOF integration tests validated via end-to-end: `elodin run examples/ball/main.py` etc.
 
 #[cfg(any())]
 mod _xla_tests {

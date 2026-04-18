@@ -60,7 +60,7 @@ pub struct NodeId {
     bits: B7,
 }
 
-#[derive(Copy, Clone, Debug, BitfieldSpecifier, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, BitfieldSpecifier, PartialEq, Eq, Default)]
 #[bits = 5]
 pub enum Priority {
     Exceptional = 0, // Highest priority
@@ -70,6 +70,7 @@ pub enum Priority {
     Nominal = 4,
     Low = 5,
     Slow = 6,
+    #[default]
     Optional = 7, // Lowest priority
 }
 
@@ -307,12 +308,6 @@ impl Priority {
 impl defmt::Format for Priority {
     fn format(&self, fmt: defmt::Formatter) {
         defmt::write!(fmt, "{}", self.as_str())
-    }
-}
-
-impl Default for Priority {
-    fn default() -> Self {
-        Self::Optional
     }
 }
 

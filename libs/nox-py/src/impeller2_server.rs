@@ -17,7 +17,6 @@ use tracing::{info, warn};
 
 use crate::World;
 use crate::exec::WorldExec;
-use crate::iree_exec::IREEWorldExec;
 
 pub struct Server {
     db: elodin_db::Server,
@@ -248,15 +247,6 @@ pub fn get_pair_ids(world: &WorldExec, components: &[ComponentId]) -> Result<Vec
     Ok(results)
 }
 
-pub fn commit_world_head(
-    state: &State,
-    world: &mut IREEWorldExec,
-    timestamp: Timestamp,
-    exclusions: Option<&HashSet<ComponentId>>,
-) -> Result<(), Error> {
-    commit_world_head_for_world(state, &mut world.world, timestamp, exclusions)
-}
-
 pub fn commit_world_head_unified(
     state: &State,
     exec: &mut crate::exec::WorldExec,
@@ -326,16 +316,29 @@ async fn tick(
     let generate_real_time = world.world().metadata.generate_real_time;
     let configured_ticks_per_telemetry = world.world().ticks_per_telemetry();
     let time_step = world.world().sim_time_step().0;
-    let detailed_timing = std::env::var("ELODIN_IREE_DETAILED_TIMING").is_ok();
+    let detailed_timing = std::env::var("ELODIN_DETAILED_TIMING").is_ok();
     if detailed_timing {
         world.profiler_mut().detailed_timing = true;
-        info!("detailed IREE timing enabled (ELODIN_IREE_DETAILED_TIMING)");
+        info!("detailed timing enabled (ELODIN_DETAILED_TIMING)");
     }
     #[rustfmt::skip]
     let should_cancel = || { is_cancelled() || cancel_token.is_cancelled() };
     let mut next_tick_deadline: Option<Instant> = None;
     let mut last_behind_warning: Option<Instant> = None;
     let mut last_timing_log: Option<Instant> = None;
+    // Always-on per-phase timing summary. Dropping `metrics` prints
+    // the one-block stdout summary on any exit (cancel, max_tick,
+    // panic unwind). See `crate::tick_metrics` for the format.
+    let mut metrics = crate::tick_metrics::TickMetrics::new();
+    // Feed the summary header its rate context: simulation_rate is
+    // 1 / sim_time_step; telemetry_rate is simulation_rate divided
+    // by ticks_per_telemetry. The summary uses these to annotate
+    // the steps line when rates differ.
+    {
+        let simulation_rate_hz = 1.0 / time_step.as_secs_f64();
+        let telemetry_rate_hz = simulation_rate_hz / (configured_ticks_per_telemetry.max(1) as f64);
+        metrics.set_rates(simulation_rate_hz, telemetry_rate_hz);
+    }
     loop {
         if should_cancel() {
             return;
@@ -384,7 +387,9 @@ async fn tick(
                 );
             }
         }
+        let pre_step_start = Instant::now();
         pre_step(tick, &db, &tick_counter, timestamp, start_timestamp);
+        metrics.observe_pre_step(pre_step_start.elapsed());
 
         if tick_counter.load(Ordering::SeqCst) < tick {
             db.last_updated.store(Timestamp(i64::MIN));
@@ -392,22 +397,30 @@ async fn tick(
             continue;
         }
 
-        let copy_in_start = detailed_timing.then(Instant::now);
+        let copy_in_start = Instant::now();
         db.with_state(|state| copy_db_to_world(state, &mut world));
-        let copy_in_ms = copy_in_start
-            .map(|s| s.elapsed().as_secs_f64() * 1000.0)
-            .unwrap_or(0.0);
+        let copy_in_elapsed = copy_in_start.elapsed();
+        metrics.observe_copy_db_to_world(copy_in_elapsed);
+        let copy_in_ms = if detailed_timing {
+            copy_in_elapsed.as_secs_f64() * 1000.0
+        } else {
+            0.0
+        };
         // Temporarily override so the kernel runs the right number of batched ticks.
         world.world_mut().metadata.ticks_per_telemetry = effective_batch;
-        let run_start = detailed_timing.then(Instant::now);
+        let run_start = Instant::now();
         if let Err(err) = world.run() {
             warn!(?err, "error ticking world");
         }
-        let run_ms = run_start
-            .map(|s| s.elapsed().as_secs_f64() * 1000.0)
-            .unwrap_or(0.0);
+        let run_elapsed = run_start.elapsed();
+        metrics.observe_world_run(run_elapsed);
+        let run_ms = if detailed_timing {
+            run_elapsed.as_secs_f64() * 1000.0
+        } else {
+            0.0
+        };
         world.world_mut().metadata.ticks_per_telemetry = configured_ticks_per_telemetry;
-        let commit_start = detailed_timing.then(Instant::now);
+        let commit_start = Instant::now();
         db.with_state(|state| {
             if let Err(err) = commit_world_head_unified(
                 state,
@@ -418,27 +431,35 @@ async fn tick(
                 warn!(?err, "error committing head");
             }
         });
-        let commit_ms = commit_start
-            .map(|s| s.elapsed().as_secs_f64() * 1000.0)
-            .unwrap_or(0.0);
+        let commit_elapsed = commit_start.elapsed();
+        metrics.observe_commit(commit_elapsed);
+        let commit_ms = if detailed_timing {
+            commit_elapsed.as_secs_f64() * 1000.0
+        } else {
+            0.0
+        };
         db.last_updated.update_max(batch_end_timestamp);
         if detailed_timing {
             let wall_ms = start.elapsed().as_secs_f64() * 1000.0;
             tracing::trace!(wall_ms, copy_in_ms, run_ms, commit_ms, "server tick phases",);
         }
+        let wait_for_write_start = Instant::now();
         while !wait_for_write_pair_ids.is_empty()
             && !timestamps_changed(&db, &mut wait_for_write_pair_ids).unwrap_or(false)
         {
             stellarator::sleep(Duration::from_millis(1)).await;
             if should_cancel() {
+                metrics.observe_wait_for_write(wait_for_write_start.elapsed());
                 return;
             }
         }
+        metrics.observe_wait_for_write(wait_for_write_start.elapsed());
         if should_cancel() {
             return;
         }
         // Called with end_tick (not batch start) because the world state now
         // reflects the last tick of the batch.
+        let post_step_start = Instant::now();
         post_step(
             end_tick,
             &db,
@@ -446,7 +467,9 @@ async fn tick(
             batch_end_timestamp,
             start_timestamp,
         );
+        metrics.observe_post_step(post_step_start.elapsed());
         if generate_real_time && let Some(deadline) = next_tick_deadline.as_mut() {
+            let pacing_start = Instant::now();
             let now = Instant::now();
             if now > *deadline {
                 let should_warn = last_behind_warning
@@ -478,6 +501,7 @@ async fn tick(
                 stellarator::sleep(*deadline - now).await;
             }
             *deadline += effective_batch_time_step;
+            metrics.observe_real_time_pacing(pacing_start.elapsed());
         }
         if detailed_timing {
             let now = Instant::now();
@@ -503,6 +527,14 @@ async fn tick(
         if tick_counter.load(Ordering::SeqCst) == tick {
             tick_counter.fetch_add(effective_batch, Ordering::SeqCst);
         }
+        // One completed simulation cycle; `effective_batch` is the
+        // number of sim steps `world.run()` executed inside it.
+        metrics.cycles = metrics.cycles.saturating_add(1);
+        metrics.steps = metrics.steps.saturating_add(effective_batch);
+        // Record the full wall time of this loop iteration (pre_step
+        // through real_time_pacing). Feeds the "mean cycle" value
+        // in the summary header.
+        metrics.observe_total_cycle(start.elapsed());
     }
 }
 

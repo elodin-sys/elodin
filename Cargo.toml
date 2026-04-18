@@ -14,7 +14,6 @@ members = [
     "libs/elodin-macros",
     "libs/nox-py",
     "libs/nox-frames",
-    "libs/iree-runtime",
     "apps/elodin",
     "fsw/roci",
     "libs/db/macros",
@@ -56,6 +55,7 @@ members = [
     "examples/rc-jet/controller",
     "libs/bevy_geo_frames",
     "libs/bevy_mat3_material",
+    "libs/cranelift-mlir",
  ]
 exclude = ["fsw/sensor-fw", "fsw/blackbox", "libs/muxide", "docs/memserve"]
 
