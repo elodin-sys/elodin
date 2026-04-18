@@ -1789,7 +1789,13 @@ pub fn update_object_3d_billboard_system(
     mut commands: Commands,
     mut objects: Query<(Entity, &mut Object3DIconState, &GlobalTransform), With<WorldPosReceived>>,
     cameras: Query<
-        (Entity, &Camera, &GlobalTransform, &Projection, &RenderLayerLease),
+        (
+            Entity,
+            &Camera,
+            &GlobalTransform,
+            &Projection,
+            &RenderLayerLease,
+        ),
         (With<MainCamera>, With<ViewportConfig>),
     >,
     mut billboard_transforms: Query<&mut Transform, (With<BillboardIcon>, Without<MainCamera>)>,
