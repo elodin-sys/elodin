@@ -151,9 +151,7 @@ def main() -> int:
     call_deltas.sort(key=lambda t: abs(t[3]), reverse=True)
     print(f"  {'name':<24} {'base calls':>12} {'new calls':>12} {'delta':>12}")
     for name, b_ic, n_ic, d in call_deltas[:10]:
-        print(
-            f"  {name:<24} {fmt_ns(b_ic):>12} {fmt_ns(n_ic):>12} {fmt_ns(d):>12}"
-        )
+        print(f"  {name:<24} {fmt_ns(b_ic):>12} {fmt_ns(n_ic):>12} {fmt_ns(d):>12}")
     print()
 
     # SIMD utilization.
@@ -183,15 +181,9 @@ def main() -> int:
         nb = n_mar.get(f"{direction}_bytes", 0)
         bn = b_mar.get(f"{direction}_total_ns", 0)
         nn = n_mar.get(f"{direction}_total_ns", 0)
-        print(
-            f"  {direction:<20} calls: {bc:>10} → {nc:>10} ({pct_delta(bc, nc)})"
-        )
-        print(
-            f"  {'':<20} bytes: {bb:>10} → {nb:>10} ({pct_delta(bb, nb)})"
-        )
-        print(
-            f"  {'':<20} time:  {fmt_ns(bn):>10} → {fmt_ns(nn):>10} ({pct_delta(bn, nn)})"
-        )
+        print(f"  {direction:<20} calls: {bc:>10} → {nc:>10} ({pct_delta(bc, nc)})")
+        print(f"  {'':<20} bytes: {bb:>10} → {nb:>10} ({pct_delta(bb, nb)})")
+        print(f"  {'':<20} time:  {fmt_ns(bn):>10} → {fmt_ns(nn):>10} ({pct_delta(bn, nn)})")
     print()
 
     # Transcendental split (libm scalar fallback vs wide-SIMD batch).
@@ -220,10 +212,7 @@ def main() -> int:
 
     # Hot-edge deltas.
     def edges_by_key(report):
-        return {
-            (e["parent_name"], e["callee_name"]): e
-            for e in report.get("call_graph", [])
-        }
+        return {(e["parent_name"], e["callee_name"]): e for e in report.get("call_graph", [])}
 
     b_edges = edges_by_key(base)
     n_edges = edges_by_key(new)
@@ -249,6 +238,7 @@ def main() -> int:
     b_op = base.get("op_category_timing", []) or []
     n_op = new.get("op_category_timing", []) or []
     if b_op and n_op:
+
         def op_map(rows):
             return {r.get("name"): r for r in rows}
 

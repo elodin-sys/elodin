@@ -65,3 +65,9 @@ every stderr report all land flat under `/tmp/dbg/`. See
 
 See [ARCHITECTURE.md](ARCHITECTURE.md) for details on the checkpoint tool and bisection
 technique.
+
+Dependency documentation sources:
+[Cranelift JIT](https://github.com/bytecodealliance/wasmtime/blob/main/cranelift/docs/index.md)
+[OpenXLA - StableHLO](https://openxla.org/stablehlo)
+[faer - linear algebra library](https://faer.veganb.tw/docs/getting-started/introduction/)
+[Wide](https://docs.rs/wide/latest/wide/)
