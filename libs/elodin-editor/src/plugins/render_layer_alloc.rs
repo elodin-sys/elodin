@@ -177,12 +177,12 @@ impl RenderLayerLease {
 /// as cross-rendered frustums or gizmos.
 ///
 /// Always go through [`EntityCommandsExt::insert_render_layer_lease`] when
-/// touching an entity that already exists. In debug builds it panics on the
-/// duplicate insertion; in release it falls back to a single insert (the
-/// historical behaviour).
+/// touching an entity that already exists. Test builds panic on duplicate
+/// insertion so CI catches the misuse; non-test builds keep the historical
+/// permissive behavior.
 pub trait EntityCommandsExt {
     /// Insert a [`RenderLayerLease`] together with its [`RenderLayers`] mask.
-    /// Panics in debug if the entity already holds a `RenderLayerLease`.
+    /// Test builds panic if the entity already holds a `RenderLayerLease`.
     fn insert_render_layer_lease(&mut self, lease: RenderLayerLease) -> &mut Self;
 }
 
@@ -190,7 +190,8 @@ impl EntityCommandsExt for EntityCommands<'_> {
     fn insert_render_layer_lease(&mut self, lease: RenderLayerLease) -> &mut Self {
         let layers = lease.render_layers();
         self.queue(move |mut entity: EntityWorldMut| {
-            debug_assert!(
+            #[cfg(test)]
+            assert!(
                 entity.get::<RenderLayerLease>().is_none(),
                 "RenderLayerLease already present on entity {:?}: a second insert \
                  would silently drop the previous lease and free its render layer \
