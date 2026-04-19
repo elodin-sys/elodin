@@ -8,8 +8,8 @@ use nox::{CompFn, Noxpr};
 use serde::{Deserialize, Serialize};
 
 use crate::component::Component;
+use crate::cranelift_exec::CraneliftWorldExec;
 use crate::error::Error;
-use crate::iree_exec::IREEWorldExec;
 use crate::jax_exec::JaxWorldExec;
 use crate::query::ComponentArray;
 use crate::world::World;
@@ -21,23 +21,11 @@ pub struct ExecSlotMetadata {
     pub entity_axis_elided: bool,
 }
 
-#[derive(Clone)]
-pub struct ConstantSpec {
-    pub name: String,
-    pub data: Vec<u8>,
-    pub shape: Vec<i64>,
-    pub element_type: nox::ElementType,
-}
-
 #[derive(Serialize, Deserialize, Clone)]
 pub struct ExecMetadata {
     pub arg_ids: Vec<ComponentId>,
     pub ret_ids: Vec<ComponentId>,
     pub arg_slots: Vec<ExecSlotMetadata>,
-    pub ret_slots: Vec<ExecSlotMetadata>,
-    pub has_singleton_lowering: bool,
-    #[serde(skip)]
-    pub promoted_constants: Vec<ConstantSpec>,
 }
 
 impl<C: Component> ComponentArray<C> {
@@ -63,43 +51,43 @@ impl<C: Component> ComponentArray<C> {
 }
 
 pub enum WorldExec {
-    Iree(Box<IREEWorldExec>),
     Jax(Box<JaxWorldExec>),
+    Cranelift(Box<CraneliftWorldExec>),
 }
 
 impl WorldExec {
     pub fn run(&mut self) -> Result<(), Error> {
         match self {
-            Self::Iree(e) => e.run(),
             Self::Jax(e) => e.run(),
+            Self::Cranelift(e) => e.run(),
         }
     }
 
     pub fn world(&self) -> &World {
         match self {
-            Self::Iree(e) => &e.world,
             Self::Jax(e) => &e.world,
+            Self::Cranelift(e) => &e.world,
         }
     }
 
     pub fn world_mut(&mut self) -> &mut World {
         match self {
-            Self::Iree(e) => &mut e.world,
             Self::Jax(e) => &mut e.world,
+            Self::Cranelift(e) => &mut e.world,
         }
     }
 
     pub fn profile(&self) -> HashMap<&'static str, f64> {
         match self {
-            Self::Iree(e) => e.profile(),
             Self::Jax(e) => e.profile(),
+            Self::Cranelift(e) => e.profile(),
         }
     }
 
     pub fn profiler_mut(&mut self) -> &mut crate::profile::Profiler {
         match self {
-            Self::Iree(e) => &mut e.profiler,
             Self::Jax(e) => &mut e.profiler,
+            Self::Cranelift(e) => &mut e.profiler,
         }
     }
 }

@@ -3,8 +3,6 @@ use crate::archetype::Spawnable;
 use crate::entity::EntityId;
 use crate::error::Error;
 use crate::exec::{PyExec, WorldExec};
-use crate::iree_diagnostics::classify_failure;
-use crate::iree_exec::IREEWorldExec;
 use crate::jax_exec::{JaxExec, JaxWorldExec};
 use crate::step_context::StepContext;
 use crate::system::{CompiledSystemExt, PySystem};
@@ -157,8 +155,8 @@ fn is_snake_case(s: &str) -> bool {
 
 #[derive(Clone, Copy)]
 enum BackendEngine {
-    Iree,
     Jax,
+    Cranelift,
 }
 
 fn validate_rates(
@@ -203,18 +201,11 @@ fn parse_backend_config(
         .trim()
         .to_ascii_lowercase();
     match selected.as_str() {
-        "iree-cpu" | "iree" | "cpu" | "local-sync" => {
-            Ok((BackendEngine::Iree, "local-sync", false))
-        }
-        "local-task" => Ok((BackendEngine::Iree, "local-task", false)),
-        "iree-inline" => Ok((BackendEngine::Iree, "inline", false)),
-        "iree-gpu" | "gpu" => Ok((BackendEngine::Iree, "auto", false)),
-        "cuda" => Ok((BackendEngine::Iree, "cuda", false)),
-        "metal" => Ok((BackendEngine::Iree, "metal", false)),
+        "cranelift" | "cpu" => Ok((BackendEngine::Cranelift, "cpu", false)),
         "jax-cpu" | "jax" => Ok((BackendEngine::Jax, "cpu", false)),
         "jax-gpu" => Ok((BackendEngine::Jax, "gpu", true)),
         other => Err(Error::UnknownCommand(format!(
-            "unknown backend '{other}': expected one of 'iree-cpu', 'iree-gpu', 'iree-inline', 'local-task', 'local-sync', 'jax-cpu', 'jax-gpu'"
+            "unknown backend '{other}': expected one of 'cranelift', 'cpu', 'jax-cpu', 'jax-gpu'"
         ))),
     }
 }
@@ -432,8 +423,7 @@ impl WorldBuilder {
         interactive = true,
         start_timestamp = None,
         log_level = None,
-        backend = "iree-cpu",
-        iree_flags = None,
+        backend = "cranelift",
     ))]
     pub fn run(
         &mut self,
@@ -453,7 +443,6 @@ impl WorldBuilder {
         start_timestamp: Option<i64>,
         log_level: Option<String>,
         backend: &str,
-        iree_flags: Option<Vec<String>>,
     ) -> Result<Option<String>, Error> {
         let log_level = log_level.as_deref().map(normalize_log_level).transpose()?;
         let filter = if std::env::var("RUST_LOG").is_ok() {
@@ -497,7 +486,6 @@ impl WorldBuilder {
                     default_playback_speed,
                     max_ticks,
                     backend,
-                    iree_flags.as_deref().unwrap_or(&[]),
                 )?;
                 let recipes = self.recipes.clone();
                 // Create a cancel token that can be used to gracefully stop s10 recipes
@@ -563,99 +551,130 @@ impl WorldBuilder {
                         }
                     })?;
                 py.allow_threads(|| {
-                    let result = stellarator::run(|| {
-                        crate::impeller2_server::Server::new(db_server, exec).run_with_cancellation(
-                            move || {
-                                let cancelled = if let Some(ref func) = is_canceled {
-                                    Python::with_gil(|py| {
-                                        func.call0(py).and_then(|result| result.extract::<bool>(py))
-                                    })
-                                    .unwrap_or(false)
-                                } else {
-                                    false
-                                };
-                                if cancelled {
-                                    cancel_token_for_loop.cancel();
-                                }
-                                cancelled
-                            },
-                            move |tick_count,
-                                  db: &Arc<elodin_db::DB>,
-                                  tick_counter: &Arc<std::sync::atomic::AtomicU64>,
-                                  timestamp: Timestamp,
-                                  start_timestamp: Timestamp| {
-                                if let Some(ref func) = pre_step {
-                                    Python::with_gil(|py| {
-                                        let tick_count_py = tick_count
-                                            .into_bound_py_any(py)
-                                            .unwrap_or_else(|_| py.None().into_bound(py));
-                                        // Create StepContext with DB access for reading/writing components
-                                        let ctx = StepContext::new(
-                                            db.clone(),
-                                            tick_counter.clone(),
-                                            timestamp,
-                                            tick_count,
-                                            start_timestamp,
-                                            pre_step_cancel_token.clone(),
-                                            pre_step_render_client.clone(),
-                                            pre_step_frame_db_writer.clone(),
-                                        );
-                                        match Py::new(py, ctx) {
-                                            Ok(ctx_py) => {
-                                                if let Err(e) =
-                                                    func.call1(py, (tick_count_py, ctx_py))
-                                                {
-                                                    tracing::warn!("pre_step error {e}");
-                                                }
+                    // Run the async executor (and therefore the JIT tick_fn) on a
+                    // dedicated thread with a 256 MB stack. Large customer simulations
+                    // compile many Cranelift ExplicitSlot buffers per function; the
+                    // default 8 MB main-thread stack is insufficient for ticks that
+                    // chain hundreds of large intermediate tensors. This matches the
+                    // stack size used by `cranelift-mlir`'s checkpoint verifier.
+                    let handle = std::thread::Builder::new()
+                        .name("elodin-sim-runtime".into())
+                        .stack_size(256 * 1024 * 1024)
+                        .spawn(move || {
+                            stellarator::run(|| {
+                                crate::impeller2_server::Server::new(db_server, exec)
+                                    .run_with_cancellation(
+                                        move || {
+                                            let cancelled = if let Some(ref func) = is_canceled {
+                                                Python::with_gil(|py| {
+                                                    func.call0(py).and_then(|result| {
+                                                        result.extract::<bool>(py)
+                                                    })
+                                                })
+                                                .unwrap_or(false)
+                                            } else {
+                                                false
+                                            };
+                                            if cancelled {
+                                                cancel_token_for_loop.cancel();
                                             }
-                                            Err(e) => {
-                                                tracing::warn!("failed to create StepContext: {e}");
+                                            cancelled
+                                        },
+                                        move |tick_count,
+                                              db: &Arc<elodin_db::DB>,
+                                              tick_counter: &Arc<std::sync::atomic::AtomicU64>,
+                                              timestamp: Timestamp,
+                                              start_timestamp: Timestamp| {
+                                            if let Some(ref func) = pre_step {
+                                                Python::with_gil(|py| {
+                                                    let tick_count_py = tick_count
+                                                        .into_bound_py_any(py)
+                                                        .unwrap_or_else(|_| {
+                                                            py.None().into_bound(py)
+                                                        });
+                                                    let ctx = StepContext::new(
+                                                        db.clone(),
+                                                        tick_counter.clone(),
+                                                        timestamp,
+                                                        tick_count,
+                                                        start_timestamp,
+                                                        pre_step_cancel_token.clone(),
+                                                        pre_step_render_client.clone(),
+                                                        pre_step_frame_db_writer.clone(),
+                                                    );
+                                                    match Py::new(py, ctx) {
+                                                        Ok(ctx_py) => {
+                                                            if let Err(e) = func
+                                                                .call1(py, (tick_count_py, ctx_py))
+                                                            {
+                                                                tracing::warn!(
+                                                                    "pre_step error {e}"
+                                                                );
+                                                            }
+                                                        }
+                                                        Err(e) => {
+                                                            tracing::warn!(
+                                                                "failed to create StepContext: {e}"
+                                                            );
+                                                        }
+                                                    }
+                                                });
                                             }
-                                        }
-                                    });
-                                }
-                            },
-                            move |tick_count,
-                                  db: &Arc<elodin_db::DB>,
-                                  tick_counter: &Arc<std::sync::atomic::AtomicU64>,
-                                  timestamp: Timestamp,
-                                  start_timestamp: Timestamp| {
-                                if let Some(ref func) = post_step {
-                                    Python::with_gil(|py| {
-                                        let tick_count_py = tick_count
-                                            .into_bound_py_any(py)
-                                            .unwrap_or_else(|_| py.None().into_bound(py));
-                                        // Create StepContext with DB access for reading/writing components
-                                        let ctx = StepContext::new(
-                                            db.clone(),
-                                            tick_counter.clone(),
-                                            timestamp,
-                                            tick_count,
-                                            start_timestamp,
-                                            post_step_cancel_token.clone(),
-                                            post_step_render_client.clone(),
-                                            post_step_frame_db_writer.clone(),
-                                        );
-                                        match Py::new(py, ctx) {
-                                            Ok(ctx_py) => {
-                                                if let Err(e) =
-                                                    func.call1(py, (tick_count_py, ctx_py))
-                                                {
-                                                    tracing::warn!("post_step error {e}");
-                                                }
+                                        },
+                                        move |tick_count,
+                                              db: &Arc<elodin_db::DB>,
+                                              tick_counter: &Arc<std::sync::atomic::AtomicU64>,
+                                              timestamp: Timestamp,
+                                              start_timestamp: Timestamp| {
+                                            if let Some(ref func) = post_step {
+                                                Python::with_gil(|py| {
+                                                    let tick_count_py = tick_count
+                                                        .into_bound_py_any(py)
+                                                        .unwrap_or_else(|_| {
+                                                            py.None().into_bound(py)
+                                                        });
+                                                    let ctx = StepContext::new(
+                                                        db.clone(),
+                                                        tick_counter.clone(),
+                                                        timestamp,
+                                                        tick_count,
+                                                        start_timestamp,
+                                                        post_step_cancel_token.clone(),
+                                                        post_step_render_client.clone(),
+                                                        post_step_frame_db_writer.clone(),
+                                                    );
+                                                    match Py::new(py, ctx) {
+                                                        Ok(ctx_py) => {
+                                                            if let Err(e) = func
+                                                                .call1(py, (tick_count_py, ctx_py))
+                                                            {
+                                                                tracing::warn!(
+                                                                    "post_step error {e}"
+                                                                );
+                                                            }
+                                                        }
+                                                        Err(e) => {
+                                                            tracing::warn!(
+                                                                "failed to create StepContext: {e}"
+                                                            );
+                                                        }
+                                                    }
+                                                });
                                             }
-                                            Err(e) => {
-                                                tracing::warn!("failed to create StepContext: {e}");
-                                            }
-                                        }
-                                    });
-                                }
-                            },
-                            interactive,
-                            start_timestamp.map(Timestamp),
-                            cancel_token,
-                        )
-                    });
+                                        },
+                                        interactive,
+                                        start_timestamp.map(Timestamp),
+                                        cancel_token,
+                                    )
+                            })
+                        })
+                        .expect("failed to spawn elodin-sim-runtime thread");
+                    let result = match handle.join() {
+                        Ok(r) => r,
+                        Err(payload) => {
+                            std::panic::resume_unwind(payload);
+                        }
+                    };
 
                     // Clean up s10 thread before exiting py.allow_threads() to prevent
                     // race conditions between s10's tokio runtime cleanup and Python's
@@ -704,7 +723,6 @@ impl WorldBuilder {
                         optimize,
                         db_path.clone(),
                         backend,
-                        iree_flags.clone(),
                     )?;
                     exec.exec.profiler_mut().detailed_timing = enable_detail;
                     exec.run(py, ticks, true, None)?;
@@ -715,14 +733,12 @@ impl WorldBuilder {
                         profile["tick"], tpt
                     );
                     println!("build time:           {:.3} ms", profile["build"]);
-                    println!("compile time:         {:.3} ms", profile["compile"]);
                     println!("real_time_factor:     {:.3}", profile["real_time_factor"]);
                     if enable_detail {
                         println!("copy_to_client time:  {:.3} ms", profile["copy_to_client"]);
                         println!("execute_buffers time: {:.3} ms", profile["execute_buffers"]);
                         println!("copy_to_host time:    {:.3} ms", profile["copy_to_host"]);
                         println!("h2d_upload time:      {:.3} ms", profile["h2d_upload"]);
-                        println!("call_setup time:      {:.3} ms", profile["call_setup"]);
                         println!(
                             "kernel_invoke time:   {:.3} ms ({} invocations)",
                             profile["kernel_invoke"], tpt
@@ -782,11 +798,9 @@ impl WorldBuilder {
                         default_playback_speed,
                         max_ticks,
                         backend,
-                        iree_flags.as_deref().unwrap_or(&[]),
                     )?;
 
                     let build_time_ms = exec.profiler_mut().build.mean();
-                    let compile_time_ms = exec.profile().get("compile").copied().unwrap_or(0.0);
                     let mut compiled_exec = exec;
 
                     // XLA_FLAGS automatically restored when _xla_guard is dropped here
@@ -850,30 +864,8 @@ impl WorldBuilder {
                     }
 
                     let hlo_text = match &compiled_exec {
-                        WorldExec::Iree(e) => {
-                            if let Some(stats) = &e.tick_exec.compile_stats {
-                                let n_in = e.tick_exec.metadata.arg_ids.len();
-                                let n_out = e.tick_exec.metadata.ret_ids.len();
-                                format!(
-                                    "IREE compile stage breakdown\n\
-                                     - jax_lower_ms: {:.3}\n\
-                                     - stablehlo_emit_ms: {:.3}\n\
-                                     - iree_compile_ms: {:.3}\n\
-                                     - vmfb_size_bytes: {}\n\
-                                     - num_inputs: {}\n\
-                                     - num_outputs: {}",
-                                    stats.lower_ms,
-                                    stats.stablehlo_emit_ms,
-                                    stats.iree_compile_ms,
-                                    stats.vmfb_size_bytes,
-                                    n_in,
-                                    n_out,
-                                )
-                            } else {
-                                String::from("IREE compile stage breakdown unavailable")
-                            }
-                        }
                         WorldExec::Jax(_) => String::from("JAX backend profile"),
+                        WorldExec::Cranelift(_) => String::from("Cranelift backend profile"),
                     };
 
                     // Save HLO dump to output directory
@@ -1096,8 +1088,8 @@ impl WorldBuilder {
                     let mut component_memory: Vec<(String, usize)> = Vec::new();
 
                     let arg_ids: Vec<_> = match &compiled_exec {
-                        WorldExec::Iree(e) => e.tick_exec.metadata.arg_ids.clone(),
                         WorldExec::Jax(e) => e.tick_exec.metadata.arg_ids.clone(),
+                        WorldExec::Cranelift(e) => e.tick_exec.metadata.arg_ids.clone(),
                     };
                     for id in &arg_ids {
                         if let Some(col) = compiled_exec.world().column_by_id(*id) {
@@ -1117,7 +1109,6 @@ impl WorldBuilder {
                     println!("\n=== SYSTEM PROFILE ===");
                     println!("\n[Compilation]");
                     println!("  Build time:        {:.3} ms", build_time_ms);
-                    println!("  Compile time:      {:.3} ms", compile_time_ms);
 
                     println!("\n[HLO Analysis]");
                     println!("  Total instructions: {}", instruction_count);
@@ -1268,14 +1259,12 @@ impl WorldBuilder {
                     println!("execute_buffers time: {:.3} ms", profile["execute_buffers"]);
                     println!("copy_to_host time:    {:.3} ms", profile["copy_to_host"]);
                     println!("h2d_upload time:      {:.3} ms", profile["h2d_upload"]);
-                    println!("call_setup time:      {:.3} ms", profile["call_setup"]);
                     println!(
                         "kernel_invoke time:   {:.3} ms ({} invocations)",
                         profile["kernel_invoke"], tpt
                     );
                     println!("d2h_download time:    {:.3} ms", profile["d2h_download"]);
                     println!("build time:           {:.3} ms", profile["build"]);
-                    println!("compile time:         {:.3} ms", profile["compile"]);
                     println!("real_time_factor:     {:.3}", profile["real_time_factor"]);
 
                     Ok(None)
@@ -1305,8 +1294,7 @@ impl WorldBuilder {
         max_ticks = None,
         optimize = false,
         db_path = None,
-        backend = "iree-cpu",
-        iree_flags = None,
+        backend = "cranelift",
     ))]
     pub fn build(
         &mut self,
@@ -1320,7 +1308,6 @@ impl WorldBuilder {
         #[allow(unused_variables)] optimize: bool,
         db_path: Option<String>,
         backend: &str,
-        iree_flags: Option<Vec<String>>,
     ) -> Result<PyExec, Error> {
         let mut exec = self.build_with_backend(
             py,
@@ -1331,7 +1318,6 @@ impl WorldBuilder {
             default_playback_speed,
             max_ticks,
             backend,
-            iree_flags.as_deref().unwrap_or(&[]),
         )?;
         let db_path = match db_path {
             Some(p) => PathBuf::from(p),
@@ -1589,9 +1575,8 @@ impl WorldBuilder {
         default_playback_speed: f64,
         max_ticks: Option<u64>,
         backend: &str,
-        extra_iree_flags: &[String],
     ) -> Result<WorldExec, Error> {
-        let (engine, iree_device, jax_gpu) = parse_backend_config(backend)?;
+        let (engine, _device, jax_gpu) = parse_backend_config(backend)?;
         let mut start = time::Instant::now();
         let (ts, ticks_per_telemetry) = validate_rates(simulation_rate, telemetry_rate)?;
         self.world.metadata.sim_time_step = TimeStep(ts);
@@ -1610,129 +1595,18 @@ impl WorldBuilder {
         match engine {
             BackendEngine::Jax => {
                 let tick_exec = JaxExec::new(py, &compiled_sys, &world, jax_gpu)?;
-                let mut exec = JaxWorldExec::new(world, tick_exec, None);
+                let mut exec = JaxWorldExec::new(world, tick_exec);
                 exec.profiler.build.observe(&mut start);
                 Ok(WorldExec::Jax(Box::new(exec)))
             }
-            BackendEngine::Iree => {
-                match compiled_sys.compile_iree_module(
-                    py,
-                    &world,
-                    iree_device,
-                    extra_iree_flags,
-                    "primary_system",
-                ) {
-                    Ok(result) => {
-                        let tick_exec = result.exec;
-                        let mut exec = IREEWorldExec::new(world, tick_exec, None);
-                        exec.profiler.build.observe(&mut start);
-                        Ok(WorldExec::Iree(Box::new(exec)))
-                    }
-                    Err(iree_err) => {
-                        let diagnosis = self
-                            .diagnose_subsystems(
-                                py,
-                                &world,
-                                &compiled_sys,
-                                iree_device,
-                                extra_iree_flags,
-                            )
-                            .unwrap_or_default();
-                        let err_text = iree_err.to_string();
-                        let mut msg = err_text.clone();
-                        let primary_report = classify_failure(&err_text);
-                        if !err_text.contains("Failure stage:") {
-                            msg = format!(
-                                "{err_text}\n\nFailure stage: {:?}\nFailure class: {:?}",
-                                primary_report.stage, primary_report.classification
-                            );
-                            if !primary_report.suggestion.is_empty() {
-                                msg.push_str(&format!("\n{}", primary_report.suggestion));
-                            }
-                            if primary_report.should_suggest_jax_fallback() {
-                                msg.push_str(
-                                    "\n\nTo temporarily unblock, set backend=\"jax-cpu\" in your w.run() call:\n\n  \
-                                     w.run(system, backend=\"jax-cpu\", ...)\n\nThe JAX backend is slower but supports all JAX operations.",
-                                );
-                            }
-                        }
-                        if let Some(report_dir) = &primary_report.report_dir
-                            && !msg.contains("Primary failure artifacts:")
-                        {
-                            msg.push_str(&format!("\n\nPrimary failure artifacts: {report_dir}"));
-                        }
-                        if !diagnosis.is_empty() {
-                            msg.push_str(
-                                "\n\n=== Follow-on Per-System IREE Compatibility ===\n\
-                                 These results come from compiling individual subsystems after the original fused-system failure.\n\
-                                 They may not match the original failure site shown above.\n",
-                            );
-                            msg.push_str(&diagnosis);
-                        }
-                        Err(Error::IreeCompilationFailed(msg))
-                    }
-                }
+            BackendEngine::Cranelift => {
+                let tick_exec =
+                    crate::cranelift_compile::compile_cranelift_module(py, &compiled_sys, &world)?;
+                let mut exec = crate::cranelift_exec::CraneliftWorldExec::new(world, tick_exec);
+                exec.profiler.build.observe(&mut start);
+                Ok(WorldExec::Cranelift(Box::new(exec)))
             }
         }
-    }
-
-    fn diagnose_subsystems(
-        &self,
-        py: Python<'_>,
-        world: &World,
-        compiled_sys: &crate::system::CompiledSystem,
-        iree_device: &str,
-        extra_iree_flags: &[String],
-    ) -> Result<String, Error> {
-        fn normalize_system_name(raw: &str) -> String {
-            if let Some(i) = raw.find(" at 0x") {
-                let mut s = raw[..i].to_string();
-                if !s.ends_with('>') {
-                    s.push('>');
-                }
-                s
-            } else {
-                raw.to_string()
-            }
-        }
-
-        let subsystems = if compiled_sys.diagnostic_subsystems.is_empty() {
-            vec![compiled_sys.clone()]
-        } else {
-            compiled_sys.diagnostic_subsystems.clone()
-        };
-        let mut seen = std::collections::HashSet::new();
-        let mut out = String::new();
-        for subsystem in subsystems {
-            let name = normalize_system_name(
-                &subsystem
-                    .system_names
-                    .first()
-                    .cloned()
-                    .unwrap_or_else(|| "<system>".to_string()),
-            );
-            if !seen.insert(name.clone()) {
-                continue;
-            }
-            match subsystem.compile_iree_module(
-                py,
-                world,
-                iree_device,
-                extra_iree_flags,
-                "subsystem_diagnostic",
-            ) {
-                Ok(_) => out.push_str(&format!("[OK]   {name}\n")),
-                Err(err) => {
-                    let err_text = err.to_string();
-                    let one_line = err_text.lines().next().unwrap_or("unknown failure");
-                    out.push_str(&format!("[FAIL] {name} -- {one_line}\n"));
-                    if let Some(report_dir) = classify_failure(&err_text).report_dir {
-                        out.push_str(&format!("       artifacts: {report_dir}\n"));
-                    }
-                }
-            }
-        }
-        Ok(out)
     }
 
     #[allow(clippy::type_complexity)]

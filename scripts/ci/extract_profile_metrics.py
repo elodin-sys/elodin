@@ -11,7 +11,6 @@ from pathlib import Path
 
 METRIC_PATTERNS = {
     "build_time_ms": re.compile(r"^build time:\s*([0-9]+(?:\.[0-9]+)?)\s*ms\s*$", re.MULTILINE),
-    "compile_time_ms": re.compile(r"^compile time:\s*([0-9]+(?:\.[0-9]+)?)\s*ms\s*$", re.MULTILINE),
     "real_time_factor": re.compile(r"^real_time_factor:\s*([0-9]+(?:\.[0-9]+)?)\s*$", re.MULTILINE),
 }
 
@@ -43,7 +42,6 @@ def main() -> int:
     metrics = {
         "ticks": args.ticks,
         "build_time_ms": _extract_metric(text, "build_time_ms"),
-        "compile_time_ms": _extract_metric(text, "compile_time_ms"),
         "real_time_factor": _extract_metric(text, "real_time_factor"),
     }
 

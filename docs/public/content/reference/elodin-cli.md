@@ -104,7 +104,7 @@ When you run a simulation Python file directly (for example `python examples/dro
 python examples/drone/main.py bench --ticks 1000
 
 # GPU benchmark with detailed timing
-ELODIN_BACKEND=iree-gpu python examples/drone/main.py bench --ticks 1000 --detail
+ELODIN_BACKEND=jax-gpu python examples/drone/main.py bench --ticks 1000 --detail
 
 # Full profiling output
 python examples/drone/main.py bench --ticks 1000 --profile

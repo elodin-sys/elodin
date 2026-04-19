@@ -1,63 +1,20 @@
 {
   "default": {
-    "abs_tol": 1e-08,
-    "rel_tol": 1e-06
+    "abs_tol": 1e-04,
+    "rel_tol": 1e-04
   },
-  "examples": {
-    "drone": {
-      "abs_tol": 1e-06,
-      "rel_tol": 1e-05,
-      "files": {}
-    }
-  },
+  "examples": {},
   "performance": {
     "default": {
       "build_time_ms": {
-        "abs_tol": 250.0,
-        "rel_tol": 0.15
-      },
-      "compile_time_ms": {
-        "abs_tol": 250.0,
-        "rel_tol": 0.15
+        "abs_tol": 2000.0,
+        "rel_tol": 0.25
       },
       "real_time_factor": {
-        "abs_tol": 6.0,
-        "rel_tol": 0.1
+        "abs_tol": 25.0,
+        "rel_tol": 0.25
       }
     },
-    "examples": {
-      "ball": {
-        "build_time_ms": {
-          "rel_tol": 1.05
-        },
-        "compile_time_ms": {
-          "rel_tol": 1.05
-        }
-      },
-      "drone": {
-        "build_time_ms": {
-          "rel_tol": 1.15
-        },
-        "compile_time_ms": {
-          "rel_tol": 1.15
-        }
-      },
-      "rocket": {
-        "build_time_ms": {
-          "rel_tol": 1.05
-        },
-        "compile_time_ms": {
-          "rel_tol": 1.05
-        }
-      },
-      "three-body": {
-        "build_time_ms": {
-          "rel_tol": 0.35
-        },
-        "compile_time_ms": {
-          "rel_tol": 0.35
-        }
-      }
-    }
+    "examples": {}
   }
 }

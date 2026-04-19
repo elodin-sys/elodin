@@ -147,20 +147,17 @@ jobs:
           script: |
             const prNumber = context.payload.pull_request.number;
             const previewUrl = `https://docs.elodin.systems/preview/pr-${prNumber}/`;
+            const marker = '<!-- docs-preview-comment -->';
             
-            // Find existing comment
             const { data: comments } = await github.rest.issues.listComments({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: prNumber,
             });
             
-            const botComment = comments.find(comment => 
-              comment.user.type === 'Bot' && 
-              comment.body.includes('📚 Documentation Preview')
-            );
+            const botComment = comments.find(comment => comment.body?.includes(marker));
             
-            const body = `📚 **Documentation Preview Ready!**
+            const body = `${marker}\n📚 **Documentation Preview Ready!**
             
             Your documentation changes have been deployed to:
             🔗 ${previewUrl}

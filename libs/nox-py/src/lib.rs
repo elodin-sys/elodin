@@ -9,6 +9,8 @@ use pyo3::prelude::*;
 
 pub mod archetype;
 pub mod component;
+pub mod cranelift_compile;
+pub mod cranelift_exec;
 pub mod dyn_array;
 pub mod entity;
 pub mod error;
@@ -17,9 +19,6 @@ pub mod globals;
 pub mod graph;
 pub mod impeller2_server;
 pub mod integrator;
-pub mod iree_compile;
-pub mod iree_diagnostics;
-pub mod iree_exec;
 pub mod jax_exec;
 pub mod linalg;
 pub mod profile;
@@ -29,6 +28,7 @@ pub mod six_dof;
 pub mod spatial;
 pub mod step_context;
 pub mod system;
+pub mod tick_metrics;
 pub mod utils;
 pub mod world;
 pub mod world_builder;
@@ -45,8 +45,7 @@ pub use spatial::*;
 pub use step_context::*;
 pub use system::*;
 pub use world::{
-    Buffers, Column, ColumnRef, DEFAULT_TIME_STEP, Entity, IntoSystemExt, TimeStep, World,
-    WorldExt, WorldMetadata,
+    Buffers, Column, ColumnRef, DEFAULT_TIME_STEP, Entity, TimeStep, World, WorldMetadata,
 };
 pub use world_builder::*;
 

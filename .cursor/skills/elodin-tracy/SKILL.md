@@ -1,6 +1,6 @@
 ---
 name: elodin-tracy
-description: Profile Elodin with Tracy. Use when profiling the editor, simulation, or IREE runtime, building with tracy features, capturing traces, analyzing performance, or adding custom instrumentation.
+description: Profile Elodin with Tracy. Use when profiling the editor, simulation, building with tracy features, capturing traces, analyzing performance, or adding custom instrumentation.
 ---
 
 # Profiling Elodin with Tracy
@@ -12,7 +12,7 @@ description: Profile Elodin with Tracy. Use when profiling the editor, simulatio
 
 ## 1. Quick Start
 
-**Linux only.** Tracy profiling (both the GUI and IREE runtime tracing) requires Linux. On macOS, `just install tracy` will abort with an explanation. Use a Linux machine or an OrbStack NixOS VM (see the `elodin-nix` skill) for profiling workflows.
+**Linux only.** Tracy profiling requires Linux. On macOS, `just install tracy` will abort with an explanation. Use a Linux machine or an OrbStack NixOS VM (see the `elodin-nix` skill) for profiling workflows.
 
 ```bash
 nix develop
@@ -47,8 +47,6 @@ Each Elodin process uses a dedicated Tracy port so they can be profiled independ
 
 When using the Tracy GUI, connect to each port separately. When using `tracy-capture`, specify the port with `-p`.
 
-The simulation process (IREE) uses a different Tracy protocol version than the editor/render-server. Use `iree-tracy-capture` (built from IREE's vendored Tracy source) for port 8089, and the standard `tracy-capture` for ports 8087/8088.
-
 ### CLI Capture and Export
 
 To capture traces headlessly (useful for CI, remote machines, or agentic workflows):
@@ -57,10 +55,6 @@ To capture traces headlessly (useful for CI, remote machines, or agentic workflo
 # Editor + render-server (Tracy v0.13.x protocol):
 tracy-capture -a 127.0.0.1 -p 8087 -o /tmp/trace-editor.tracy -s 30 &
 tracy-capture -a 127.0.0.1 -p 8088 -o /tmp/trace-render.tracy -s 30 &
-
-# Simulation/IREE (IREE's pinned Tracy protocol -- must use iree-tracy-capture):
-# https://iree.dev/developers/performance/profiling-with-tracy/#building-the-tracy-capture-cli-tool
-iree-tracy-capture -a 127.0.0.1 -p 8089 -o /tmp/trace-sim.tracy -s 30 &
 
 sleep 1
 source .venv/bin/activate
@@ -96,17 +90,15 @@ When the `tracy` feature is enabled, the editor binary (`apps/elodin`) sets up a
 - Present mode switches to `AutoNoVsync` (eliminates vsync idle from profiles)
 - Winit uses `continuous()` mode instead of reactive/game mode
 
-### Simulation Subprocess (IREE)
+### Cranelift-MLIR JIT (sim subprocess)
 
-The simulation runs as a Python subprocess (spawned by `s10`). When `just install tracy` builds nox-py with the `tracy` feature, the IREE runtime is compiled with `IREE_ENABLE_RUNTIME_TRACING=ON`. This activates Tracy instrumentation across all of IREE's internal subsystems:
+When `cranelift-mlir` is built with `--features tracy` (propagated via `nox-py/tracy` from `just install tracy`), each JIT-compiled function emits a Tracy zone named after its `FuncId → name` mapping (e.g. `main`, `inner_929`, `svd`). The zones appear in the same sim-subprocess Tracy port (8089) alongside the existing sim instrumentation.
 
-- **VM execution** -- zone spans around bytecode dispatch
-- **HAL dispatch** -- hardware abstraction layer operations
-- **Task scheduling** -- work distribution across CPU threads
-- **Memory allocations** -- tracked with pool names
-- **Log messages** -- IREE log output forwarded to Tracy messages
+Activation requires **both**:
+- Build with `--features tracy` (or `just install tracy`)
+- Runtime: `ELODIN_CRANELIFT_DEBUG_DIR=<path>`
 
-Both processes connect to Tracy independently over TCP. The Tracy UI displays them on a unified timeline.
+Without `ELODIN_CRANELIFT_DEBUG_DIR`, the Cranelift JIT IR emits no probe calls, so Tracy produces zero zones for JIT'd functions — the feature is runtime-toggled orthogonally to the Cargo feature. See [`libs/cranelift-mlir/PERFORMANCE.md`](../../libs/cranelift-mlir/PERFORMANCE.md) for the full workflow.
 
 ### Elodin-DB Process
 
@@ -141,7 +133,7 @@ elodin-db-bench --components 1000 --frequency 100 --duration 20 --mode per-compo
 
 ### What `just install tracy` does
 
-1. Builds `nox-py` (Python extension) with `maturin develop -F tracy`, which activates `iree-runtime/tracy` and links against the Tracy-instrumented IREE runtime (`$IREE_RUNTIME_TRACY_DIR`)
+1. Builds `nox-py` (Python extension) with `maturin develop -F tracy`
 2. Builds the `elodin` editor and `elodin-db` binaries with `cargo build --release -p elodin -p elodin-db --features tracy`, which activates `bevy/trace_tracy` and adds `tracing-tracy` to both processes
 
 ### Feature chain
@@ -150,63 +142,13 @@ elodin-db-bench --components 1000 --frequency 100 --duration 20 --mode per-compo
 apps/elodin          tracy = ["elodin-editor/tracy", "bevy/trace_tracy", "dep:tracing-tracy"]
 libs/elodin-editor   tracy = ["bevy/trace_tracy"]
 libs/db              tracy = ["dep:tracing-tracy"]  (adds TracyLayer to subscriber, port 8090)
-libs/nox-py          tracy = ["iree-runtime/tracy"]
-libs/iree-runtime    tracy = []  (selects IREE_RUNTIME_TRACY_DIR in build.rs, links TracyClient)
+libs/nox-py          tracy = ["cranelift-mlir/tracy"]  (forwards to JIT profiling layer)
+libs/cranelift-mlir  tracy = ["dep:tracy-client"]  (emits per-JIT-function zones, port 8089)
 ```
-
-### Nix environment
-
-The dev shell provides two IREE runtime builds:
-- `IREE_RUNTIME_DIR` -- standard build (no tracing overhead)
-- `IREE_RUNTIME_TRACY_DIR` -- built with `IREE_ENABLE_RUNTIME_TRACING=ON` and `IREE_TRACING_MODE=2`
-
-The `tracy` feature in `iree-runtime` selects which one to link against.
 
 ---
 
-## 4. IREE Tracing In Depth
-
-### Tracing modes
-
-IREE's tracing verbosity is controlled by `IREE_TRACING_MODE` (set in `nix/pkgs/iree-runtime.nix`):
-
-| Mode | Features |
-|------|----------|
-| 1 | Instrumentation + log messages |
-| 2 | + device instrumentation + allocation tracking (default) |
-| 3 | + allocation callstacks + fiber support |
-| 4 | + instrumentation callstacks (highest overhead) |
-
-### Compiler flags for richer traces
-
-Elodin's IREE compilation pipeline (`libs/nox-py/src/iree_compile.rs`) already uses `--iree-llvmcpu-link-embedded=false` (system library loader), which lets Tracy see deeper into generated native code than the embedded ELF loader.
-
-For even richer trace data, these flags can be added to the `iree-compile` invocation:
-
-- `--iree-hal-executable-debug-level=3` -- embeds source-level info (MLIR locations) into the `.vmfb`
-- `--iree-llvmcpu-debug-symbols=true` -- includes debug symbols (already the default)
-
-### Viewing IREE-generated code in Tracy
-
-Set this environment variable before running the simulation to preserve temporary `.so` files that IREE generates, allowing Tracy to resolve symbols and show disassembly:
-
-```bash
-IREE_PRESERVE_DYLIB_TEMP_FILES=1 elodin editor examples/sensor-camera/main.py
-```
-
-### Understanding the Tracy timeline
-
-In the Tracy UI, look for:
-- **Main thread** of the editor process -- Bevy frame loop, system execution
-- **Render thread** -- GPU submission, render passes
-- **Worker threads** in the simulation process -- IREE task dispatch, VM execution
-- **Messages** panel -- IREE log messages forwarded to Tracy
-
-Click the **Statistics** button to see instrumentation vs. sampling data. The **ghost** icon on threads toggles between instrumentation zones (explicit) and sampling zones (statistical).
-
----
-
-## 5. Adding Custom Instrumentation
+## 4. Adding Custom Instrumentation
 
 ### Rust (editor/runtime)
 
@@ -239,18 +181,6 @@ fn my_hot_function() {
 }
 
 The `skip(graph)` option tells [`#[tracing::instrument]`](https://docs.rs/tracing/0.1/tracing/attr.instrument.html) not to attach the `graph` argument as a span field. By default the macro would try to record every parameter (usually via `Debug`), which is noisy for large values, can fail if a type has no useful `Debug`, and is rarely needed when you only want a named zone in Tracy.
-
-### IREE (simulation internals)
-
-IREE's instrumentation uses C macros defined in `iree/base/tracing.h`:
-
-```c
-IREE_TRACE_ZONE_BEGIN(z0);
-// ... work ...
-IREE_TRACE_ZONE_END(z0);
-```
-
-These are compiled into the IREE static libraries and activate automatically when the tracy-enabled build is linked. No changes to simulation Python code are needed.
 
 ---
 
@@ -333,7 +263,7 @@ Strip flags: `l`ocks `m`essages `p`lots `M`emory `i`mages `c`tx-switches `s`ampl
 
 ## Appendix B: Compile-Time Macros Reference
 
-All defined project-wide. In Elodin, these are managed by the `tracy-client-sys` crate (editor) and IREE's CMake build (simulation).
+All defined project-wide. In Elodin, these are managed by the `tracy-client-sys` crate (editor).
 
 ### Core
 

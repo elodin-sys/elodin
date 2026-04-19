@@ -19,9 +19,6 @@ if command -v tracy-capture >/dev/null 2>&1; then
   capture tracy-capture 8087 "${tracy_out}/trace-run.tracy"
   capture tracy-capture 8088 "${tracy_out}/trace-render.tracy"
 fi
-if command -v iree-tracy-capture >/dev/null 2>&1; then
-  capture iree-tracy-capture 8089 "${tracy_out}/trace-sim.tracy"
-fi
 [[ ${#tracy_pids[@]} -gt 0 ]] && sleep 1
 
 # ── Run ──────────────────────────────────────────────────────────────────────

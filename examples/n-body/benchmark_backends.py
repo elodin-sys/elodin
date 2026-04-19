@@ -99,10 +99,9 @@ def main() -> None:
     repeats = int(os.environ.get("ELODIN_NBODY_BENCH_REPEATS", "3"))
     timeout_s = int(os.environ.get("ELODIN_NBODY_BENCH_TIMEOUT_S", "1800"))
     backends = (
-        "iree-cpu",
-        "iree-gpu",
+        "cranelift",
         "jax-cpu",
-    )  # , "jax-gpu"), # enable 'cuda' in nox-py pyproject.toml
+    )
 
     print(f"Running strict-realism n-body backend benchmark: ticks={ticks}, repeats={repeats}")
     print("Compile/build is reported but steady-state comparison uses tick/kernel/rtf.")

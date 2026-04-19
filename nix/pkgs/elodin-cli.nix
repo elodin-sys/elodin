@@ -60,8 +60,9 @@
     # Workaround for netlib-src 0.8.0 incompatibility with GCC 14+
     # GCC 14 treats -Wincompatible-pointer-types as error by default
     NIX_CFLAGS_COMPILE = common.netlibWorkaround;
-    CARGO_PROFILE = "dev";
-    CARGO_PROFILE_RELEASE_DEBUG = true;
+    # uncomment for debug mode (slower)
+    # CARGO_PROFILE = "dev";
+    # CARGO_PROFILE_RELEASE_DEBUG = true;
   };
 in
   bin

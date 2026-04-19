@@ -125,161 +125,94 @@ where
     }
 }
 
-#[cfg(any())]
+#[cfg(test)]
 mod tests {
     use super::*;
-    use crate::world::{World, WorldExt};
-    use elodin_macros::{Archetype, Component, ComponentGroup, FromBuilder, ReprMonad};
-    use nox::{Op, OwnedRepr, tensor};
-    use nox::{Scalar, SpatialMotion, SpatialTransform};
+    use elodin_macros::{Archetype, Component, ReprMonad};
+    use impeller2::component::Component as ComponentTrait;
+    use nox::{Op, OwnedRepr};
+
+    #[derive(Clone, Component, ReprMonad)]
+    struct X<R: OwnedRepr = Op>(Scalar<f64, R>);
+
+    #[derive(Clone, Component, ReprMonad)]
+    struct V<R: OwnedRepr = Op>(Scalar<f64, R>);
+
+    impl Add<V> for X {
+        type Output = X;
+        fn add(self, v: V) -> X {
+            X(self.0 + v.0)
+        }
+    }
+
+    impl Add for V {
+        type Output = V;
+        fn add(self, rhs: V) -> V {
+            V(self.0 + rhs.0)
+        }
+    }
+
+    impl Mul<V> for f64 {
+        type Output = V;
+        fn mul(self, rhs: V) -> V {
+            V(self * rhs.0)
+        }
+    }
+
+    impl Mul<V> for Scalar<f64> {
+        type Output = V;
+        fn mul(self, rhs: V) -> V {
+            V(self * rhs.0)
+        }
+    }
+
+    #[derive(Archetype)]
+    struct Body {
+        x: X,
+        v: V,
+    }
 
     #[test]
-    fn test_simple_rk4() {
-        #[derive(Clone, Component, ReprMonad)]
-        struct X<R: OwnedRepr = Op>(Scalar<f64, R>);
-
-        impl Add<V> for X {
-            type Output = X;
-
-            fn add(self, v: V) -> Self::Output {
-                X(self.0 + v.0)
-            }
-        }
-
-        #[derive(Clone, Component, ReprMonad)]
-        struct V<R: OwnedRepr = Op>(Scalar<f64, R>);
-
-        impl Add for V {
-            type Output = V;
-
-            fn add(self, v: V) -> Self::Output {
-                V(self.0 + v.0)
-            }
-        }
-
-        impl Mul<V> for f64 {
-            type Output = V;
-
-            fn mul(self, rhs: V) -> Self::Output {
-                V(self * rhs.0)
-            }
-        }
-
-        impl Mul<V> for Scalar<f64> {
-            type Output = V;
-
-            fn mul(self, rhs: V) -> Self::Output {
-                V(self * rhs.0)
-            }
-        }
-
-        #[derive(Archetype)]
-        struct Body {
-            x: X,
-            v: V,
-        }
-
+    fn rk4_pipeline_shape() {
         let mut world = World::default();
         world.spawn(Body {
             x: X(0.0.into()),
             v: V(10.0.into()),
         });
-        let builder = world.builder().tick_pipeline(().rk4::<X, V>());
-        let world = builder.run();
-        let col = world.column::<X>().unwrap();
-        assert_eq!(col.typed_buf::<f64>().unwrap(), &[0.08333333])
-    }
 
-    #[test]
-    fn test_six_dof() {
-        #[derive(Clone, Component, ReprMonad)]
-        struct X<R: OwnedRepr = Op>(SpatialTransform<f64, R>);
-        #[derive(Clone, Component, ReprMonad)]
-        struct V<R: OwnedRepr = Op>(SpatialMotion<f64, R>);
-        #[derive(Clone, Component, ReprMonad)]
-        struct A<R: OwnedRepr = Op>(SpatialMotion<f64, R>);
+        let compiled = ().rk4::<X, V>().compile(&world).unwrap();
 
-        #[derive(FromBuilder, ComponentGroup)]
-        struct U {
-            x: X,
-            v: V,
-        }
+        let x_id = <X<Op> as ComponentTrait>::COMPONENT_ID;
+        let v_id = <V<Op> as ComponentTrait>::COMPONENT_ID;
+        let dt_id = <SimulationTimeStep<Op> as ComponentTrait>::COMPONENT_ID;
 
-        #[derive(FromBuilder, ComponentGroup)]
-        struct DU {
-            v: V,
-            a: A,
-        }
+        assert!(compiled.inputs.contains(&x_id), "X missing from inputs");
+        assert!(compiled.inputs.contains(&v_id), "V missing from inputs");
+        assert!(
+            compiled.inputs.contains(&dt_id),
+            "SimulationTimeStep missing from inputs"
+        );
+        assert!(compiled.outputs.contains(&x_id), "X missing from outputs");
 
-        impl Add<DU> for U {
-            type Output = U;
+        let x_slot = compiled
+            .input_slots
+            .iter()
+            .find(|s| s.component_id == x_id)
+            .expect("X input slot");
+        // Scalar component with a singleton column: zero-dim (batch axis elided).
+        assert!(x_slot.shape.is_empty(), "X slot shape: {:?}", x_slot.shape);
+        assert!(x_slot.entity_axis_elided);
 
-            fn add(self, v: DU) -> Self::Output {
-                U {
-                    x: X(self.x.0 + v.v.0),
-                    v: V(self.v.0 + v.a.0),
-                }
-            }
-        }
+        let v_slot = compiled
+            .input_slots
+            .iter()
+            .find(|s| s.component_id == v_id)
+            .expect("V input slot");
+        assert!(v_slot.shape.is_empty(), "V slot shape: {:?}", v_slot.shape);
+        assert!(v_slot.entity_axis_elided);
 
-        impl Add for DU {
-            type Output = DU;
-
-            fn add(self, v: DU) -> Self::Output {
-                DU {
-                    v: V(self.v.0 + v.v.0),
-                    a: A(self.a.0 + v.a.0),
-                }
-            }
-        }
-
-        impl Mul<DU> for f64 {
-            type Output = DU;
-
-            fn mul(self, rhs: DU) -> Self::Output {
-                DU {
-                    v: V(self * rhs.v.0),
-                    a: A(self * rhs.a.0),
-                }
-            }
-        }
-
-        impl Mul<DU> for Scalar<f64> {
-            type Output = DU;
-
-            fn mul(self, rhs: DU) -> Self::Output {
-                DU {
-                    v: V(&self * rhs.v.0),
-                    a: A(&self * rhs.a.0),
-                }
-            }
-        }
-
-        #[derive(Archetype)]
-        struct Body {
-            x: X,
-            v: V,
-            a: A,
-        }
-
-        let mut world = World::default();
-        world.spawn(Body {
-            x: X(SpatialTransform {
-                inner: tensor![1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0].into(),
-            }),
-            v: V(SpatialMotion {
-                inner: tensor![0.0, 0.0, 0.0, 1.0, 0.0, 0.0].into(),
-            }),
-            a: A(SpatialMotion {
-                inner: tensor![0.0, 0.0, 0.0, 0.0, 0.0, 0.0].into(),
-            }),
-        });
-        let builder = world.builder().tick_pipeline(().rk4::<U, DU>());
-        let world = builder.run();
-        let col = world.column::<X>().unwrap();
-        assert_eq!(
-            col.typed_buf::<f64>().unwrap(),
-            &[1.0f64, 0.0, 0.0, 0.0, 0.008333333, 0.0, 0.0]
-        )
+        // The inner computation function's arity must agree with the number of
+        // declared inputs - a structural invariant of `SystemBuilder`.
+        assert_eq!(compiled.computation.func.args.len(), compiled.inputs.len());
     }
 }

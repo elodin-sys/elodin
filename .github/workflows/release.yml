@@ -239,13 +239,8 @@ jobs:
       - name: Install Python dependencies
         run: |
           pip install patchelf jax typing_extensions
-      - name: Resolve IREE runtime
-        run: |
-          echo "IREE_RUNTIME_DIR=$(nix develop --command printenv IREE_RUNTIME_DIR)" >> "$GITHUB_ENV"
       - name: Build wheel
         uses: PyO3/maturin-action@v1
-        env:
-          IREE_RUNTIME_DIR: ${{ env.IREE_RUNTIME_DIR }}
         with:
           target: x86_64
           args: --release --out dist -m libs/nox-py/Cargo.toml
@@ -344,13 +339,8 @@ jobs:
       - name: Install Python dependencies
         run: |
           pip install jax typing_extensions
-      - name: Resolve IREE runtime
-        run: |
-          echo "IREE_RUNTIME_DIR=$(nix develop --command printenv IREE_RUNTIME_DIR)" >> "$GITHUB_ENV"
       - name: Build wheel
         uses: PyO3/maturin-action@v1
-        env:
-          IREE_RUNTIME_DIR: ${{ env.IREE_RUNTIME_DIR }}
         with:
           target: aarch64
           args: --release --out dist -m libs/nox-py/Cargo.toml

@@ -38,12 +38,10 @@ pub enum Error {
     InvalidTimeStep(std::time::Duration),
     #[error("invalid log level: {0}")]
     InvalidLogLevel(String),
-    #[error("IREE compilation failed: {0}")]
-    IreeCompilationFailed(String),
-    #[error("IREE runtime error: {0}")]
-    IreeRuntimeError(String),
     #[error("unsupported element type for JAX backend: {0}")]
     UnsupportedDtype(String),
+    #[error("cranelift backend: {0}")]
+    CraneliftBackend(String),
 }
 
 impl From<Error> for PyErr {
@@ -60,17 +58,6 @@ impl From<Error> for PyErr {
     }
 }
 
-pub(crate) trait IreeResultExt<T> {
-    fn iree_err(self) -> Result<T, Error>;
-}
-
-impl<T> IreeResultExt<T> for iree_runtime::Result<T> {
-    #[inline]
-    fn iree_err(self) -> Result<T, Error> {
-        self.map_err(|e| Error::IreeRuntimeError(e.to_string()))
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -82,7 +69,7 @@ mod tests {
         Python::with_gil(|py| {
             let err = py
                 .run(
-                    std::ffi::CString::new("raise RuntimeError('detailed iree-compile error')")
+                    std::ffi::CString::new("raise RuntimeError('detailed compile error')")
                         .expect("valid python snippet")
                         .as_c_str(),
                     None,
@@ -91,7 +78,7 @@ mod tests {
                 .expect_err("python snippet should fail");
             let display = Error::PyO3(err).to_string();
             assert!(
-                display.contains("detailed iree-compile error"),
+                display.contains("detailed compile error"),
                 "display was: {display}"
             );
         });

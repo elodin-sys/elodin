@@ -9,7 +9,10 @@ publish = false
 [features]
 publish = ["pyo3/extension-module", "pyo3/abi3-py310"]
 shared = ["nox/shared"]
-tracy = ["iree-runtime/tracy"]
+# Forward `tracy` enablement down to the cranelift-mlir profiling layer.
+# Pairs with `apps/elodin`'s `tracy` feature so `nix develop .#tracy &&
+# just install tracy` gives a cranelift-mlir-instrumented build.
+tracy = ["cranelift-mlir/tracy"]
 
 [package.metadata.maturin]
 name = "elodin"
@@ -72,6 +75,9 @@ directories = "5.0.1"
 
 s10.path = "../s10"
 
+# cranelift backend
+cranelift-mlir.path = "../cranelift-mlir"
+
 # data structures
 smallvec.version = "1.11.2"
 smallvec.features = ["const_generics", "union"]
@@ -94,15 +100,6 @@ zerocopy.version = "0.8.2"
 env_logger = "0.11.8"
 convert_case = "0.8.0"
 signal-hook = "0.3.18"
-
-[target.'cfg(target_os = "linux")'.dependencies]
-iree-runtime = { path = "../iree-runtime", features = ["cuda"] }
-
-[target.'cfg(target_os = "macos")'.dependencies]
-iree-runtime = { path = "../iree-runtime", features = ["metal"] }
-
-[target.'cfg(not(any(target_os = "linux", target_os = "macos")))'.dependencies]
-iree-runtime = { path = "../iree-runtime" }
 
 [dev-dependencies]
 approx = "0.5"

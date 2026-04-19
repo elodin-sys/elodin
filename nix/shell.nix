@@ -7,31 +7,9 @@
 with pkgs; let
   # Import shared configuration
   common = pkgs.callPackage ./pkgs/common.nix {};
-  # ILP64 OpenBLAS (64-bit lapack_int) for the elodin_lapack IREE VM module.
-  # The standard pkgs.openblas uses 32-bit integers; lapack_module.c requires 64-bit.
-  openblas64 = pkgs.openblas.override {blas64 = true;};
-  iree_runtime = pkgs.callPackage ./pkgs/iree-runtime.nix {
-    enableCuda = pkgs.stdenv.isLinux;
-    enableMetal = pkgs.stdenv.isDarwin;
-  };
-  iree_compiler_source = pkgs.callPackage ./pkgs/iree-compiler-source.nix {};
-  iree_runtime_tracy =
-    if pkgs.stdenv.isLinux
-    then
-      pkgs.callPackage ./pkgs/iree-runtime.nix {
-        enableCuda = true;
-        enableTracing = true;
-        tracySrc = fetchFromGitHub {
-          owner = "wolfpld";
-          repo = "tracy";
-          rev = "5479a42ef9346b64e6d1b860ae58aa8abdb0c7f6";
-          hash = "sha256-4J8b+72k+xpeT6KsrkioF1xfWEBsGg2eLRg9iONxP/I=";
-        };
-      }
-    else null;
   llvm = llvmPackages_latest;
 
-  # Base Python for use with venv (JAX 0.8+ and iree-base-compiler installed via pip)
+  # Base Python for use with venv (JAX 0.8+ installed via pip)
   pythonBase = python313.withPackages (ps:
     with ps; [
       typing-extensions
@@ -45,9 +23,6 @@ with pkgs; let
     name = "elo-unified-shell";
     buildInputs =
       [
-        # IREE compiler built from source (for patching)
-        iree_compiler_source
-
         # Interactive bash (required for nix develop to work properly)
         bashInteractive
 
@@ -128,7 +103,6 @@ with pkgs; let
           autoPatchelfHook
           # Tracy profiler (Linux-only: requires std::jthread, not in Apple libc++)
           tracy
-          iree_runtime_tracy
           cudaPackages.cuda_cudart
         ]
       )
@@ -146,10 +120,6 @@ with pkgs; let
 
     # Environment variables
     LIBCLANG_PATH = "${libclang.lib}/lib";
-    IREE_RUNTIME_DIR = "${iree_runtime}";
-    IREE_COMPILER_DIR = "${iree_compiler_source}";
-    IREE_RUNTIME_TRACY_DIR = lib.optionalString pkgs.stdenv.isLinux "${iree_runtime_tracy}";
-    OPENBLAS_DIR = "${openblas64}";
 
     # The nox-py cdylib (.so) carries a DF_STATIC_TLS flag that forces glibc
     # to allocate ~10 KB from the tiny static-TLS surplus on dlopen.  Raise

@@ -29,7 +29,6 @@ normalize_example_name() {
   local name="$1"
   local suffix
   local -a suffixes=(
-    "-iree-csv-100"
     "-jax-csv-100"
     "-xla-csv-100"
     "-csv-100"
@@ -54,7 +53,6 @@ resolve_baseline_dir() {
     "${root}/${example}"
     "${root}/${example}-csv"
     "${root}/${example}-csv-100"
-    "${root}/${example}-iree-csv-100"
     "${root}/${example}-jax-csv-100"
     "${root}/${example}-xla-csv-100"
   )
@@ -152,59 +150,6 @@ run_example() (
     --ticks "${ticks}" \
     --output "${metrics_path}"
 
-  # Optional: compile any .stablehlo.mlir fixtures in the example directory.
-  # These are gitignored customer artifacts used for exact-reproduction testing.
-  local example_dir
-  example_dir="$(dirname "${example_entrypoint}")"
-  local mlir_fixture
-  local mlir_status=0
-  local iree_compile_bin=""
-  iree_compile_bin="$("${python_bin}" -c "
-import importlib.resources, os
-try:
-    ref = importlib.resources.files('elodin').joinpath('_iree_compiler_dir')
-    if ref.is_file():
-        d = ref.read_text().strip()
-        c = os.path.join(d, 'bin', 'iree-compile')
-        if os.path.isfile(c): print(c); raise SystemExit
-except SystemExit: raise
-except Exception: pass
-d = os.environ.get('IREE_COMPILER_DIR', '')
-if d:
-    c = os.path.join(d, 'bin', 'iree-compile')
-    if os.path.isfile(c): print(c); raise SystemExit
-import shutil
-c = shutil.which('iree-compile')
-if c: print(c)
-" 2>/dev/null || true)"
-  for mlir_fixture in "${example_dir}"/*.stablehlo.mlir; do
-    [[ -f "${mlir_fixture}" ]] || continue
-    if [[ -z "${iree_compile_bin}" ]]; then
-      echo "SKIP: no iree-compile found, skipping MLIR fixture"
-      break
-    fi
-    echo "==> [${example_name}] compiling MLIR fixture: $(basename "${mlir_fixture}")"
-    if "${iree_compile_bin}" - -o /dev/null \
-        --iree-hal-target-backends=llvm-cpu \
-        --iree-vm-target-extension-f64 \
-        --iree-input-demote-f64-to-f32=false \
-        --iree-input-type=stablehlo \
-        --iree-opt-level=O2 \
-        --iree-stream-partitioning-favor=max-concurrency \
-        --iree-dispatch-creation-enable-aggressive-fusion=true \
-        --iree-llvmcpu-enable-ukernels=all \
-        --iree-flow-inline-constants-max-byte-length=0 \
-        --iree-llvmcpu-target-triple="${iree_triple}" \
-        --iree-llvmcpu-target-cpu=host \
-        < "${mlir_fixture}" 2>"${scratch_dir}/mlir_compile.log"; then
-      echo "PASS: MLIR fixture $(basename "${mlir_fixture}") compiled successfully"
-    else
-      echo "FAIL: MLIR fixture $(basename "${mlir_fixture}") compilation failed"
-      head -5 "${scratch_dir}/mlir_compile.log"
-      mlir_status=1
-    fi
-  done
-
   # If the runtime reports a different db path in logs, discover and use it.
   if [[ ! -f "${db_path}/db_state" ]]; then
     discovered_db_path="$(
@@ -274,7 +219,7 @@ PY
     perf_status=$?
   fi
 
-  if [[ "${csv_status}" -ne 0 || "${perf_status}" -ne 0 || "${mlir_status}" -ne 0 ]]; then
+  if [[ "${csv_status}" -ne 0 || "${perf_status}" -ne 0 ]]; then
     return 1
   fi
 )
@@ -399,13 +344,6 @@ baseline_root="${BASELINE_ROOT:-scripts/ci/baseline}"
 tolerances_file="${TOLERANCES_FILE:-${baseline_root}/tolerances.json}"
 ticks="${REGRESSION_TICKS:-100}"
 python_bin="${PYTHON:-python3}"
-
-case "$(uname -s)-$(uname -m)" in
-  Darwin-arm64)  iree_triple="arm64-apple-darwin" ;;
-  Darwin-x86_64) iree_triple="x86_64-apple-darwin" ;;
-  Linux-aarch64) iree_triple="aarch64-unknown-linux-gnu" ;;
-  *)             iree_triple="x86_64-unknown-linux-gnu" ;;
-esac
 
 if [[ ! -d "${baseline_root}" ]]; then
   echo "FAIL: baseline root not found: ${baseline_root}"

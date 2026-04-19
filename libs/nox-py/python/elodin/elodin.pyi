@@ -158,8 +158,7 @@ class WorldBuilder:
         interactive: bool = True,
         start_timestamp: Optional[int] = None,
         log_level: Optional[str] = None,
-        backend: str = "iree-cpu",
-        iree_flags: Optional[list[str]] = None,
+        backend: str = "cranelift",
     ): ...
     def serve(
         self,
@@ -182,8 +181,7 @@ class WorldBuilder:
         max_ticks: Optional[int] = None,
         optimize: bool = False,
         db_path: Optional[str] = None,
-        backend: str = "iree-cpu",
-        iree_flags: Optional[list[str]] = None,
+        backend: str = "cranelift",
     ) -> Exec: ...
     def to_jax_func(
         self,

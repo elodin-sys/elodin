@@ -7,7 +7,6 @@ use std::{
 #[derive(Default, Clone, Copy, Debug)]
 pub struct TickTimings {
     pub h2d_upload_ms: f64,
-    pub call_setup_ms: f64,
     pub kernel_invoke_ms: f64,
     pub d2h_download_ms: f64,
 }
@@ -16,12 +15,10 @@ pub struct TickTimings {
 pub struct Profiler {
     pub detailed_timing: bool,
     pub build: RollingMean,
-    pub compile: RollingMean,
     pub copy_to_client: RollingMean,
     pub execute_buffers: RollingMean,
     pub copy_to_host: RollingMean,
     pub h2d_upload: RollingMean,
-    pub call_setup: RollingMean,
     pub kernel_invoke: RollingMean,
     pub d2h_download: RollingMean,
     pub add_to_history: RollingMean,
@@ -45,12 +42,10 @@ impl Profiler {
         let batch_sim_time_ms = sim_time_step_ms * ticks_per_telemetry.max(1) as f64;
         let profile = [
             ("build", self.build.mean()),
-            ("compile", self.compile.mean()),
             ("copy_to_client", self.copy_to_client.mean()),
             ("execute_buffers", self.execute_buffers.mean()),
             ("copy_to_host", self.copy_to_host.mean()),
             ("h2d_upload", self.h2d_upload.mean()),
-            ("call_setup", self.call_setup.mean()),
             ("kernel_invoke", self.kernel_invoke.mean()),
             ("d2h_download", self.d2h_download.mean()),
             ("add_to_history", self.add_to_history.mean()),
