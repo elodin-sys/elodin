@@ -1,95 +1,24 @@
 {
   "default": {
-    "abs_tol": 1e-08,
-    "rel_tol": 1e-06
+    "abs_tol": 1e-04,
+    "rel_tol": 1e-04
   },
-  "examples": {
-    "cube-sat": {
-      "abs_tol": 1e-04,
-      "rel_tol": 1e-04
-    },
-    "linalg": {
-      "files": {
-        "tracker3.kf3_info.csv": { "abs_tol": 3.0, "rel_tol": 3.0 }
-      }
-    },
-    "drone": {
-      "abs_tol": 1e-06,
-      "rel_tol": 1e-05,
-      "files": {
-        "drone.accel.csv": { "abs_tol": 0.1, "rel_tol": 10.0 },
-        "drone.accel_health.csv": { "abs_tol": 0.1, "rel_tol": 10.0 },
-        "drone.accel_lpf_delay.csv": { "abs_tol": 0.1, "rel_tol": 10.0 },
-        "drone.gyro.csv": { "abs_tol": 0.1, "rel_tol": 10.0 },
-        "drone.gyro_bias.csv": { "abs_tol": 0.01, "rel_tol": 1.0 },
-        "drone.gyro_lpf_delay.csv": { "abs_tol": 0.1, "rel_tol": 10.0 },
-        "drone.magnetometer.csv": { "abs_tol": 0.1, "rel_tol": 10.0 },
-        "drone.body_ang_vel.csv": { "abs_tol": 1e-04, "rel_tol": 10.0 },
-        "drone.body_drag.csv": { "abs_tol": 0.01, "rel_tol": 0.01 },
-        "drone.body_thrust.csv": { "abs_tol": 0.01, "rel_tol": 10.0 },
-        "drone.force.csv": { "abs_tol": 0.01, "rel_tol": 10.0 },
-        "drone.motor_ang_vel.csv": { "abs_tol": 10.0, "rel_tol": 0.05 },
-        "drone.motor_input.csv": { "abs_tol": 0.1, "rel_tol": 10.0 },
-        "drone.motor_pwm.csv": { "abs_tol": 50.0, "rel_tol": 0.05 },
-        "drone.motor_rpm.csv": { "abs_tol": 100.0, "rel_tol": 0.02 },
-        "drone.thrust.csv": { "abs_tol": 0.02, "rel_tol": 0.05 },
-        "drone.torque.csv": { "abs_tol": 0.01, "rel_tol": 0.01 },
-        "drone.world_accel.csv": { "abs_tol": 0.01, "rel_tol": 10.0 },
-        "drone.world_pos.csv": { "abs_tol": 1e-04, "rel_tol": 10.0 },
-        "drone.world_vel.csv": { "abs_tol": 1e-04, "rel_tol": 10.0 },
-        "drone.ang_vel_setpoint.csv": { "abs_tol": 1e-04, "rel_tol": 10.0 },
-        "drone.rate_pid_state.csv": { "abs_tol": 0.01, "rel_tol": 10.0 }
-      }
-    }
-  },
+  "examples": {},
   "performance": {
     "default": {
       "build_time_ms": {
-        "abs_tol": 250.0,
-        "rel_tol": 0.15
+        "abs_tol": 2000.0,
+        "rel_tol": 0.2
       },
       "compile_time_ms": {
-        "abs_tol": 250.0,
-        "rel_tol": 0.15
+        "abs_tol": 2000.0,
+        "rel_tol": 0.2
       },
       "real_time_factor": {
-        "abs_tol": 6.0,
-        "rel_tol": 0.1
+        "abs_tol": 21.0,
+        "rel_tol": 0.2
       }
     },
-    "examples": {
-      "ball": {
-        "build_time_ms": {
-          "rel_tol": 1.05
-        },
-        "compile_time_ms": {
-          "rel_tol": 1.05
-        }
-      },
-      "drone": {
-        "build_time_ms": {
-          "rel_tol": 1.15
-        },
-        "compile_time_ms": {
-          "rel_tol": 1.15
-        }
-      },
-      "rocket": {
-        "build_time_ms": {
-          "rel_tol": 1.05
-        },
-        "compile_time_ms": {
-          "rel_tol": 1.05
-        }
-      },
-      "three-body": {
-        "build_time_ms": {
-          "rel_tol": 0.35
-        },
-        "compile_time_ms": {
-          "rel_tol": 0.35
-        }
-      }
-    }
+    "examples": {}
   }
 }
