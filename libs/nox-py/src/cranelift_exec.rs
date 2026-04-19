@@ -57,6 +57,11 @@ impl CraneliftExec {
         world: &World,
     ) -> Result<Self, Error> {
         let fn_ptr = compiled.get_main_fn();
+        if fn_ptr.is_null() {
+            return Err(Error::CraneliftBackend(
+                "compiled module is missing a callable main entrypoint".into(),
+            ));
+        }
         let tick_fn: TickFn = unsafe { std::mem::transmute(fn_ptr) };
 
         let mut input_ids = Vec::new();
@@ -284,6 +289,13 @@ impl CraneliftWorldExec {
 
     pub fn run(&mut self) -> Result<(), Error> {
         let ticks_per_telemetry = self.world.ticks_per_telemetry();
+
+        // Mirror `JaxWorldExec::run`: consume the startup exec (if any) with a
+        // single invocation before entering the steady-state tick loop, so both
+        // backends behave identically when a caller wires up a startup graph.
+        if let Some(mut startup_exec) = self.startup_exec.take() {
+            startup_exec.invoke_batch(&mut self.world, 1, self.profiler.detailed_timing)?;
+        }
 
         let tick_start = Instant::now();
         self.tick_exec.invoke_batch(
