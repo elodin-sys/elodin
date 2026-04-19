@@ -2107,10 +2107,7 @@ fn compile_case_branch_as_function_mem(
         let mut value_map: HashMap<ValueId, LaneRepr> = HashMap::new();
         let mut type_map: HashMap<ValueId, TensorType> = HashMap::new();
         for (i, (vid, ty)) in captured.iter().enumerate() {
-            value_map.insert(
-                *vid,
-                LaneRepr::scalar(vec![block_params[n_results + i]]),
-            );
+            value_map.insert(*vid, LaneRepr::scalar(vec![block_params[n_results + i]]));
             type_map.insert(*vid, ty.clone());
         }
 
@@ -5136,11 +5133,9 @@ fn lower_instruction_mem(
                         &captured,
                     )?;
 
-                    let func_ref =
-                        jit_module.declare_func_in_func(branch_fid, builder.func);
-                    let mut call_args: Vec<Value> = Vec::with_capacity(
-                        result_slots.len() + captured.len(),
-                    );
+                    let func_ref = jit_module.declare_func_in_func(branch_fid, builder.func);
+                    let mut call_args: Vec<Value> =
+                        Vec::with_capacity(result_slots.len() + captured.len());
                     call_args.extend_from_slice(&result_slots);
                     for (vid, _) in &captured {
                         let ptr = value_map
