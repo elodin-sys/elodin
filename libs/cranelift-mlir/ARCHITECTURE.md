@@ -71,6 +71,7 @@ sequenceDiagram
     participant IR as ir.rs
     participant Fold as const_fold.rs
     participant Lower as lower.rs
+    participant Rayon as rayon pool
     participant CL as Cranelift Codegen
     participant Exec as cranelift_exec.rs
     participant World as World.host buffers
@@ -82,8 +83,12 @@ sequenceDiagram
     IR->>Fold: Rewrite-in-place (fold + DCE)
     Fold->>Lower: Classify functions (Scalar vs Pointer ABI)
     Lower->>Lower: Declare functions, register JIT symbols
-    Lower->>CL: Emit Cranelift IR for each function
-    CL->>Lower: Native function pointer (TickFn)
+    Lower->>Lower: Build Cranelift IR per function (serial)<br/>large stablehlo.case branches split into their own fns
+    Lower->>Rayon: Dispatch (FuncId, Context) per worker
+    Rayon->>CL: ctx.compile(isa, ctrl_plane)
+    CL->>Rayon: CompiledCode bytes + ModuleRelocs
+    Rayon->>Lower: Vec of (fid, alignment, bytes, relocs)
+    Lower->>Lower: Define_function_bytes + finalize_definitions (serial)
     Lower->>Exec: CraneliftExec { tick_fn, metadata }
 
     loop Every simulation tick
@@ -107,7 +112,7 @@ The `keep_unused=True` flag is critical: it preserves all input/output slots eve
 determines some are unused, maintaining stable positional mapping between the simulation's
 world columns and the function's arguments.
 
-### Stage 2: Parsing (`parser.rs`, ~2,280 lines)
+### Stage 2: Parsing (`parser.rs`, ~3,500 lines)
 
 A Winnow-based parser converts StableHLO MLIR text into the internal IR. Key design
 decisions:
@@ -120,7 +125,7 @@ decisions:
 - **`backend_config` extraction**: LAPACK custom calls carry parameters like
   `{uplo = 76 : ui8, diag = 85 : ui8}` which are parsed into a `HashMap<String, i64>`
 
-### Stage 3: Internal IR (`ir.rs`, ~439 lines)
+### Stage 3: Internal IR (`ir.rs`, ~600 lines)
 
 A lightweight representation with these key types:
 
@@ -166,20 +171,45 @@ Every invocation of `fold_module` emits a one-line summary
 mode additionally prints a per-rule histogram and the scalar-vs-pointer
 ABI classification, for sizing the impact of future work.
 
-### Stage 4: Lowering (`lower.rs`, ~5,917 lines)
+### Stage 4: Lowering (`lower.rs`, ~11,160 lines)
 
 The largest and most complex file. Transforms the internal IR into Cranelift IR and
-produces a native function pointer. The process:
+produces a native function pointer. Codegen is organized into a three-phase pipeline
+so Cranelift's per-function optimization (egraph, legalization, regalloc, machine
+code emission) can be parallelized across a rayon thread pool:
 
 1. **Function classification**: `classify_all_functions` determines Scalar vs Pointer ABI
    for each function (see [Dual ABI Architecture](#dual-abi-architecture))
 2. **JIT symbol registration**: all runtime functions (`tensor_rt`, LAPACK host functions,
    libm math) are registered as symbols the JIT can call
 3. **Function declaration**: Cranelift function signatures are created for each IR function
-4. **Function definition**: each function body is lowered to Cranelift IR instructions
-5. **Finalization**: `module.finalize_definitions()` triggers Cranelift's register
-   allocation and machine code emission
-6. **Pointer extraction**: `get_main_fn()` returns the native function pointer
+4. **IR build (serial).** `build_function_ir` lowers each function body into
+   a Cranelift `Context`, returning `(FuncId, Context)` without invoking codegen. The
+   serial borrow of `&mut JITModule` is required here because every `declare_func_in_func`
+   / `declare_data_in_func` call mutates module-wide state. Large `stablehlo.case`
+   branches (above `CASE_BRANCH_SPLIT_INSTRS` top-level ops) are lifted into their
+   own `__case_branch_N` pointer-ABI functions via `compile_case_branch_as_function_mem`,
+   queued onto a thread-local pending vec so they flow into the same Phase 2 wave as
+   the top-level functions. This avoids one monolithic caller accumulating ~100k F64X2
+   SSA chunks from result-write-elision chains and caps codegen input size per function.
+5. **Parallel codegen (rayon).** The populated `Vec<(FuncId, Context)>` is
+   consumed by `into_par_iter().map(|(fid, mut ctx)| ctx.compile(isa, ControlPlane))`.
+   Cranelift's `TargetIsa` is `Send + Sync` (immutable after construction), so every
+   worker shares the same ISA instance. Each worker extracts the compiled machine-code
+   bytes + `ModuleReloc`s from its `Context` and returns them; the first error
+   short-circuits the whole wave.
+6. **Link (serial).** Each `(FuncId, bytes, relocs)` tuple is registered back
+   into the JIT module via `define_function_bytes`, then `module.finalize_definitions()`
+   performs link-time relocation fixing and arena allocation.
+7. **Pointer extraction**: `get_main_fn()` returns the native function pointer.
+
+Per-phase millisecond timings are captured on `CompiledModule::timings` and surfaced
+on stderr (`[elodin-cranelift] lower=… parse=… fold=… ir_build=… codegen=… link=… total=…`)
+so compile-time regressions are trivially attributable to a specific phase. Under
+`ELODIN_CRANELIFT_DEBUG_DIR` the driver additionally prints a per-function codegen
+breakdown (`codegen fid=… …ms bytes=…`) that directly surfaces the largest functions
+— this is the tool used to find and fix Amdahl-bound functions like the customer's
+`inner_536`.
 
 The compiled function has the `TickFn` signature:
 
@@ -986,17 +1016,6 @@ directly.
   Expected additional win on x86 hosts: 2× (AVX2) or 4× (AVX-512) over
   current `F64X2` on the elementwise and short-dot hot paths, roughly
   squaring the SIMD benefit on large-enough tensors.
-
-- **Parallel function compilation.** After ABI classification each
-  function is independent. Parallelizing Cranelift codegen across a
-  thread pool would cut cold-start time on large MLIRs — startup is
-  currently dominated by Cranelift codegen (tens of seconds on
-  multi-hundred-function modules).
-
-- **Loop-invariant code motion.** Hoist pure computations whose inputs are
-  all loop-invariant out of `While` bodies. Complements the `const_fold`
-  pass for simulations with heavy in-loop constant computation; runs as a
-  separate IR pass between folding and lowering.
 
 - **FFT runtime.** `tensor_rt`'s FFT/IFFT/RFFT/IRFFT are naive DFT (O(N²)).
   Swap to `rustfft` for O(N log N) with a one-file change. No current

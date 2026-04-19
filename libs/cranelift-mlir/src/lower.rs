@@ -1476,6 +1476,12 @@ pub fn compile_module_with_config(
     config: CompileConfig,
 ) -> Result<CompiledModule, String> {
     reset_instr_counts();
+    // Defensive clear: a prior compile that errored partway through
+    // Phase 1 may have left `(FuncId, Context)` entries behind on this
+    // thread. Those FuncIds belong to a now-dead JITModule, so carrying
+    // them into the next compile's Phase 2 would corrupt symbol
+    // resolution. Start every compile with an empty buffer.
+    let _ = drain_pending_functions();
 
     // Single-caller inliner. Runs once per compile, at the IR level
     // before any Cranelift codegen. Replaces `Instruction::Call`
@@ -1716,6 +1722,18 @@ pub fn compile_module_with_config(
         }
     }
 
+    // Drain any case-branch (or future Phase-1 splitter) functions that
+    // were queued as a side effect of lowering the top-level functions
+    // above. They're fully-lowered `(FuncId, Context)` pairs; Phase 2
+    // treats them identically to a top-level function and schedules
+    // their codegen on the same rayon thread pool. Names are held
+    // aside to feed into `register_static_data` below so the runtime
+    // profile report can resolve split-branch fids back to a symbol.
+    let mut extra_names: HashMap<String, FuncId> = HashMap::new();
+    for extra in drain_pending_functions() {
+        extra_names.insert(extra.name, extra.fid);
+        pending.push((extra.fid, extra.ctx));
+    }
     let ir_build_ms = phase1_start.elapsed().as_secs_f64() * 1000.0;
 
     // Phase 2: parallel codegen. The returned compiled blob is extracted
@@ -1786,13 +1804,19 @@ pub fn compile_module_with_config(
     // the runtime profiler can resolve `fid` back to function names
     // when rendering the exit report. Always runs (cheap); probes only
     // hit the registry when debug mode is on. Source-line map lets
-    // Tracy zones link back to the StableHLO MLIR.
+    // Tracy zones link back to the StableHLO MLIR. Split case-branch
+    // functions are folded into the name map so their `fid`s resolve
+    // in the report alongside the top-level ones.
     let source_lines: HashMap<String, u32> = ir_module
         .functions
         .iter()
         .filter_map(|f| f.source_line.map(|l| (f.name.clone(), l)))
         .collect();
-    crate::profile::register_static_data(&func_ids, &source_lines);
+    let mut all_func_ids = func_ids.clone();
+    for (name, fid) in extra_names {
+        all_func_ids.insert(name, fid);
+    }
+    crate::profile::register_static_data(&all_func_ids, &source_lines);
 
     print_instr_report();
 
@@ -1868,6 +1892,281 @@ fn declare_all_functions(
 // ---------------------------------------------------------------------------
 
 static REGION_COUNTER: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+/// StableHLO-instruction-count threshold above which a `stablehlo.case`
+/// branch is lifted into its own Cranelift function instead of being
+/// inlined into the parent. Keeps short `if`-style cases inline (the
+/// call-site overhead isn't worth it) while preventing giant branch
+/// bodies from piling ~100k F64X2 SSA chunks into a single monolithic
+/// caller (see [`ARCHITECTURE.md`](../ARCHITECTURE.md) Amdahl discussion
+/// and the customer `inner_536` reproduction). 64 matches
+/// `LARGE_TENSOR_THRESHOLD` used by the scalar/pointer ABI classifier.
+const CASE_BRANCH_SPLIT_INSTRS: usize = 64;
+
+/// One entry in `PENDING_EXTRA_FNS`: the fully-lowered `Context`, its
+/// assigned `FuncId`, and the symbolic name under which it was
+/// `declare_function`'d. The name is needed by
+/// `crate::profile::register_static_data` so the runtime profile
+/// report can resolve split-branch `fid`s back to human-readable
+/// entries instead of leaving them unattributed.
+struct PendingExtraFn {
+    fid: FuncId,
+    name: String,
+    ctx: cranelift_codegen::Context,
+}
+
+thread_local! {
+    /// Case-branch functions (and any future Phase-1 splitters) built
+    /// as a side effect of lowering the caller. Each entry is a fully-
+    /// lowered `(FuncId, Context)` ready for Cranelift codegen. The
+    /// three-phase compile driver drains this vec at the end of Phase 1
+    /// and folds it into the `pending` set that Phase 2 parallel-codegen
+    /// consumes, so these bodies automatically pick up the same rayon
+    /// thread-pool parallelism as the top-level functions.
+    static PENDING_EXTRA_FNS: RefCell<Vec<PendingExtraFn>> =
+        const { RefCell::new(Vec::new()) };
+}
+
+/// Queue a Phase-1-built `(FuncId, Context)` for Phase-2 parallel
+/// codegen. Called by the case-branch splitter once it has finished
+/// building a branch-as-function. `name` is the symbolic name the
+/// function was declared under; it flows into
+/// [`crate::profile::register_static_data`] so the runtime profile
+/// can map `fid` -> name.
+fn push_pending_function(fid: FuncId, name: String, ctx: cranelift_codegen::Context) {
+    PENDING_EXTRA_FNS.with(|cell| cell.borrow_mut().push(PendingExtraFn { fid, name, ctx }));
+}
+
+/// Drain every queued extra function from the thread-local buffer.
+/// Invoked once by `compile_module_with_config` after Phase 1
+/// completes. Clears the buffer so a subsequent compile on the same
+/// thread starts clean.
+fn drain_pending_functions() -> Vec<PendingExtraFn> {
+    PENDING_EXTRA_FNS.with(|cell| std::mem::take(&mut *cell.borrow_mut()))
+}
+
+/// Walk a nested body and collect `ValueId`s that are *referenced* but
+/// not *defined* anywhere in the body (including transitively-nested
+/// While/Case/Map/ReduceWindow/Sort/SelectAndScatter bodies). These are
+/// the free variables the body captures from the enclosing scope; the
+/// splitter threads them through as function parameters so the lifted
+/// body can still resolve them.
+///
+/// Returned `Vec` is sorted by `ValueId::0` so call-site argument order
+/// is deterministic between caller and callee.
+fn collect_captured_vids(body: &[InstrResult]) -> Vec<ValueId> {
+    use std::collections::HashSet;
+    let mut defined: HashSet<ValueId> = HashSet::new();
+    let mut referenced: HashSet<ValueId> = HashSet::new();
+    collect_body_defs_uses(body, &mut defined, &mut referenced);
+    let mut free: Vec<ValueId> = referenced.difference(&defined).copied().collect();
+    free.sort_by_key(|v| v.0);
+    free
+}
+
+fn collect_body_defs_uses(
+    body: &[InstrResult],
+    defined: &mut std::collections::HashSet<ValueId>,
+    referenced: &mut std::collections::HashSet<ValueId>,
+) {
+    for ir in body {
+        for (vid, _) in &ir.values {
+            defined.insert(*vid);
+        }
+        for op in crate::const_fold::operand_ids(&ir.instr) {
+            referenced.insert(op);
+        }
+        match &ir.instr {
+            Instruction::While {
+                cond_body,
+                loop_body,
+                iter_arg_ids,
+                ..
+            } => {
+                for v in iter_arg_ids {
+                    defined.insert(*v);
+                }
+                collect_body_defs_uses(cond_body, defined, referenced);
+                collect_body_defs_uses(loop_body, defined, referenced);
+            }
+            Instruction::Case { branches, .. } => {
+                for b in branches {
+                    collect_body_defs_uses(b, defined, referenced);
+                }
+            }
+            Instruction::Map {
+                body, body_params, ..
+            } => {
+                for v in body_params {
+                    defined.insert(*v);
+                }
+                collect_body_defs_uses(body, defined, referenced);
+            }
+            Instruction::ReduceWindow {
+                body, body_params, ..
+            } => {
+                for v in body_params {
+                    defined.insert(*v);
+                }
+                collect_body_defs_uses(body, defined, referenced);
+            }
+            Instruction::SelectAndScatter {
+                select_body,
+                select_params,
+                scatter_body,
+                scatter_params,
+                ..
+            } => {
+                for v in select_params {
+                    defined.insert(*v);
+                }
+                for v in scatter_params {
+                    defined.insert(*v);
+                }
+                collect_body_defs_uses(select_body, defined, referenced);
+                collect_body_defs_uses(scatter_body, defined, referenced);
+            }
+            Instruction::Sort {
+                comparator,
+                comparator_params,
+                ..
+            } => {
+                for v in comparator_params {
+                    defined.insert(*v);
+                }
+                collect_body_defs_uses(comparator, defined, referenced);
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Build a standalone pointer-ABI Cranelift function from a single
+/// `stablehlo.case` branch body and queue it for Phase-2 parallel
+/// codegen. The returned `FuncId` is a local, void-returning function
+/// with signature:
+///
+/// ```text
+/// (out_0: ptr, ..., out_{N-1}: ptr, capt_0: ptr, ..., capt_{M-1}: ptr) -> ()
+/// ```
+///
+/// The first `N` parameters are output-slot pointers (one per
+/// `result_types` entry); the branch's `Return` operands are memcpy'd
+/// into them on exit. The remaining `M` parameters are the captured
+/// outer-scope values, in the order given by `captured`.
+///
+/// Callee does not call `jit_module.define_function` — the populated
+/// `Context` is stashed via [`push_pending_function`] so the same
+/// rayon codegen wave as the top-level functions picks it up.
+#[allow(clippy::too_many_arguments)]
+fn compile_case_branch_as_function_mem(
+    jit_module: &mut JITModule,
+    ir_module: &crate::ir::Module,
+    func_ids: &HashMap<String, FuncId>,
+    func_abis: &HashMap<String, FuncAbi>,
+    libm_ids: &LibmIds,
+    trt_ids: &TensorRtIds,
+    branch_body: &[InstrResult],
+    result_types: &[TensorType],
+    captured: &[(ValueId, TensorType)],
+) -> Result<FuncId, String> {
+    let id = REGION_COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let name = format!("__case_branch_{id}");
+
+    let mut sig = jit_module.make_signature();
+    sig.call_conv = jit_module.isa().default_call_conv();
+    for _ in 0..result_types.len() {
+        sig.params.push(AbiParam::new(ptr_type()));
+    }
+    for _ in captured {
+        sig.params.push(AbiParam::new(ptr_type()));
+    }
+
+    let fid = jit_module
+        .declare_function(&name, Linkage::Local, &sig)
+        .map_err(|e| format!("declare case-branch {name}: {e}"))?;
+
+    let mut ctx = jit_module.make_context();
+    let mut func_ctx = FunctionBuilderContext::new();
+    ctx.func.signature = sig;
+    ctx.func.name = cranelift_codegen::ir::UserFuncName::user(0, fid.as_u32());
+
+    let parent_fid = with_current_function_fid(|f| f);
+    set_current_function_fid(Some(fid.as_u32()));
+
+    {
+        let mut builder = FunctionBuilder::new(&mut ctx.func, &mut func_ctx);
+        let entry = builder.create_block();
+        builder.append_block_params_for_function_params(entry);
+        builder.switch_to_block(entry);
+        builder.seal_block(entry);
+
+        let block_params: Vec<Value> = builder.block_params(entry).to_vec();
+        let n_results = result_types.len();
+
+        let mut value_map: HashMap<ValueId, LaneRepr> = HashMap::new();
+        let mut type_map: HashMap<ValueId, TensorType> = HashMap::new();
+        for (i, (vid, ty)) in captured.iter().enumerate() {
+            value_map.insert(
+                *vid,
+                LaneRepr::scalar(vec![block_params[n_results + i]]),
+            );
+            type_map.insert(*vid, ty.clone());
+        }
+
+        lower_body_mem(
+            &mut builder,
+            branch_body,
+            ir_module,
+            func_ids,
+            libm_ids,
+            trt_ids,
+            func_abis,
+            jit_module,
+            &mut value_map,
+            &mut type_map,
+        )?;
+
+        // Memcpy each Return operand's slot into the caller-provided
+        // output slot. Mirrors the inline-Case handler at
+        // `Instruction::Case` in `lower_instruction_mem`.
+        if let Some(ret_ir) = branch_body
+            .iter()
+            .rev()
+            .find(|ir| matches!(ir.instr, Instruction::Return { .. }))
+            && let Instruction::Return { operands } = &ret_ir.instr
+        {
+            let memcpy_ref = jit_module.declare_func_in_func(trt_ids.memcpy, builder.func);
+            for (i, vid) in operands.iter().enumerate() {
+                if let (Some(rty), Some(lr)) = (result_types.get(i), value_map.get_mut(vid)) {
+                    lr.unpack_in(&mut builder);
+                    let vals = lr.as_scalar().to_vec();
+                    let nb = builder.ins().iconst(types::I64, rty.byte_size() as i64);
+                    builder
+                        .ins()
+                        .call(memcpy_ref, &[block_params[i], vals[0], nb]);
+                }
+            }
+        }
+
+        builder.ins().return_(&[]);
+        builder.finalize();
+    }
+
+    record_instr_counts(&name, FuncAbi::Pointer, &ctx.func);
+
+    // Inject profile probes when runtime profiling is active so the
+    // split branches show up in the per-function report alongside
+    // their callers.
+    if let Some(profile_ids) = with_current_profile_ids(|ids| ids) {
+        inject_profile_probes(&mut ctx.func, jit_module, &profile_ids, fid);
+    }
+
+    push_pending_function(fid, name, ctx);
+
+    set_current_function_fid(parent_fid);
+    Ok(fid)
+}
 
 fn compile_region_as_function(
     jit_module: &mut JITModule,
@@ -4807,6 +5106,55 @@ fn lower_instruction_mem(
                 builder.switch_to_block(branch_blocks[bi]);
                 builder.seal_block(branch_blocks[bi]);
 
+                // Big-branch fast path: split the branch into its own
+                // pointer-ABI function so the giant Cranelift IR it
+                // would otherwise produce (elision chains, shape-array
+                // stores, dot_general helper calls per op) doesn't
+                // stack up inside the caller. Callee returns via the
+                // same `result_slots` the inline path would have
+                // written to, keeping the merge handoff identical.
+                if crate::const_fold::count_body_instructions(branch) > CASE_BRANCH_SPLIT_INSTRS {
+                    let captured_vids = collect_captured_vids(branch);
+                    let mut captured: Vec<(ValueId, TensorType)> =
+                        Vec::with_capacity(captured_vids.len());
+                    for vid in &captured_vids {
+                        let Some(ty) = type_map.get(vid).cloned() else {
+                            continue;
+                        };
+                        captured.push((*vid, ty));
+                    }
+
+                    let branch_fid = compile_case_branch_as_function_mem(
+                        jit_module,
+                        ir_module,
+                        func_ids,
+                        func_abis,
+                        libm_ids,
+                        trt_ids,
+                        branch,
+                        result_types,
+                        &captured,
+                    )?;
+
+                    let func_ref =
+                        jit_module.declare_func_in_func(branch_fid, builder.func);
+                    let mut call_args: Vec<Value> = Vec::with_capacity(
+                        result_slots.len() + captured.len(),
+                    );
+                    call_args.extend_from_slice(&result_slots);
+                    for (vid, _) in &captured {
+                        let ptr = value_map
+                            .get_mut(vid)
+                            .ok_or_else(|| format!("mem case: missing captured {vid:?}"))?;
+                        ptr.unpack_in(builder);
+                        let vals = ptr.as_scalar().to_vec();
+                        call_args.push(vals[0]);
+                    }
+                    builder.ins().call(func_ref, &call_args);
+                    builder.ins().jump(merge_block, empty_args);
+                    continue;
+                }
+
                 let mut br_vm = value_map.clone();
                 let mut br_tm = type_map.clone();
                 lower_body_mem(
@@ -7692,6 +8040,19 @@ fn extract_return_values(
 // ---------------------------------------------------------------------------
 // Case — real branching with dispatch chain and merge block
 // ---------------------------------------------------------------------------
+//
+// Scalar-ABI case branches are intentionally left inline. A scalar-ABI
+// function is classified by the 64-element max-tensor rule, so every
+// op inside expands to at most 64 Cranelift scalar values; a branch
+// body with N StableHLO ops produces O(N * 64) Cranelift IR — bounded
+// and cheap for Cranelift's codegen. The large-function compile-time
+// explosion comes from the pointer-ABI F64X2 elision chains on big
+// tensors, which is handled by the pointer-ABI splitter
+// (`compile_case_branch_as_function_mem`) at the `Instruction::Case`
+// arm of `lower_instruction_mem`. Splitting scalar-ABI branches
+// requires a multi-return sret-style callee and has no measured
+// benefit on the current regression suite or the customer workload,
+// so it is a documented follow-up.
 
 fn lower_case(
     builder: &mut FunctionBuilder,

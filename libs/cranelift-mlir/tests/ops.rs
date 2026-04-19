@@ -910,6 +910,88 @@ module @module {
     assert_f64_close(read_f64s(&out[0])[0], 20.0);
 }
 
+/// Large-body `stablehlo.case` inside a pointer-ABI function.
+///
+/// Each branch runs a long chain of elementwise ops on a tensor that
+/// crosses `LARGE_TENSOR_THRESHOLD`, pushing the branch body well
+/// above `CASE_BRANCH_SPLIT_INSTRS` (64 StableHLO instructions). The
+/// branches are therefore lifted into their own Cranelift functions
+/// by `compile_case_branch_as_function_mem`, while the merge/dispatch
+/// stays inline in the caller. This test locks the output of the
+/// split path against hand-computed expected values, so any regression
+/// in captured-variable wiring or result marshaling shows up
+/// immediately.
+#[test]
+fn test_case_large_branch_splits_into_functions() {
+    // Build MLIR programmatically: each branch contains 70 `add`
+    // ops (> 64) on a tensor<100xf64>, so `count_body_instructions`
+    // crosses the splitter threshold and ptr-ABI main dispatches via
+    // the split path.
+    const N_OPS: usize = 70;
+    const VEC_LEN: usize = 100;
+    let mut branch0 = String::new();
+    branch0.push_str("      %c0 = stablehlo.constant dense<1.0> : tensor<100xf64>\n");
+    branch0.push_str("      %b0_0 = stablehlo.add %arg1, %c0 : tensor<100xf64>\n");
+    for i in 1..N_OPS {
+        branch0.push_str(&format!(
+            "      %b0_{i} = stablehlo.add %b0_{}, %c0 : tensor<100xf64>\n",
+            i - 1
+        ));
+    }
+    branch0.push_str(&format!(
+        "      stablehlo.return %b0_{} : tensor<100xf64>\n",
+        N_OPS - 1
+    ));
+
+    let mut branch1 = String::new();
+    branch1.push_str("      %c1 = stablehlo.constant dense<2.0> : tensor<100xf64>\n");
+    branch1.push_str("      %b1_0 = stablehlo.multiply %arg1, %c1 : tensor<100xf64>\n");
+    for i in 1..N_OPS {
+        branch1.push_str(&format!(
+            "      %b1_{i} = stablehlo.add %b1_{}, %c1 : tensor<100xf64>\n",
+            i - 1
+        ));
+    }
+    branch1.push_str(&format!(
+        "      stablehlo.return %b1_{} : tensor<100xf64>\n",
+        N_OPS - 1
+    ));
+
+    let mlir = format!(
+        r#"module @module {{
+  func.func public @main(%arg0: tensor<i32>, %arg1: tensor<100xf64>) -> tensor<100xf64> {{
+    %0 = "stablehlo.case"(%arg0) ({{
+{branch0}    }}, {{
+{branch1}    }}) : (tensor<i32>) -> tensor<100xf64>
+    return %0 : tensor<100xf64>
+  }}
+}}
+"#
+    );
+
+    // Input vector: 1.0, 2.0, ..., 100.0.
+    let input: Vec<f64> = (1..=VEC_LEN).map(|i| i as f64).collect();
+    let in1 = f64_buf(&input);
+    let out_bytes = VEC_LEN * 8;
+
+    // Branch 0: x + (1.0 * N_OPS).
+    let in0 = i32_buf(&[0]);
+    let out = run_mlir_mem(&mlir, &[&in0, &in1], &[out_bytes]);
+    let got = read_f64s(&out[0]);
+    let expected0: Vec<f64> = input.iter().map(|x| x + N_OPS as f64).collect();
+    assert_f64s_close(&got, &expected0);
+
+    // Branch 1: (x * 2.0) + 2.0 * (N_OPS - 1).
+    let in0 = i32_buf(&[1]);
+    let out = run_mlir_mem(&mlir, &[&in0, &in1], &[out_bytes]);
+    let got = read_f64s(&out[0]);
+    let expected1: Vec<f64> = input
+        .iter()
+        .map(|x| x * 2.0 + 2.0 * (N_OPS - 1) as f64)
+        .collect();
+    assert_f64s_close(&got, &expected1);
+}
+
 // ---- While loop ----
 
 #[test]
