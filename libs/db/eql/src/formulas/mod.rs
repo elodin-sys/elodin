@@ -4,6 +4,7 @@ mod abs;
 mod angular;
 mod arccos;
 mod atan2;
+mod cast;
 mod clip;
 mod degrees;
 mod direction;
@@ -22,6 +23,7 @@ pub use abs::*;
 pub use angular::*;
 pub use arccos::*;
 pub use atan2::*;
+pub use cast::*;
 pub use clip::*;
 pub use degrees::*;
 pub use direction::*;
@@ -82,6 +84,11 @@ pub trait Formula: Send + Sync + std::fmt::Debug {
             expr.to_table()?
         ))
     }
+
+    /// When this formula is `cast`, the resolved target type for editor-side evaluation.
+    fn editor_cast_target(&self) -> Option<cast::CastTarget> {
+        None
+    }
 }
 
 /// A formula registry that allows dynamic registration and lookup of formulas
@@ -139,6 +146,7 @@ pub fn create_default_registry() -> FormulaRegistry {
     registry.register(Angular);
     registry.register(Arccos);
     registry.register(Atan2);
+    registry.register(Cast::default());
     registry.register(Clip);
     registry.register(Degrees);
     registry.register(Fft);
