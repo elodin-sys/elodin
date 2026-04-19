@@ -156,9 +156,6 @@ def run_xla_reference(func, real_input_arrays, debug_dir):
         arg_ids: compiled_system.inputs.clone(),
         ret_ids: compiled_system.outputs.clone(),
         arg_slots: compiled_system.input_slots.clone(),
-        ret_slots: compiled_system.output_slots.clone(),
-        has_singleton_lowering: compiled_system.has_singleton_lowering,
-        promoted_constants: vec![],
     };
 
     CraneliftExec::new(metadata, compiled, world)

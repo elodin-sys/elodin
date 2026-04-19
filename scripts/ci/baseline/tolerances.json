@@ -10,10 +10,6 @@
         "abs_tol": 2000.0,
         "rel_tol": 0.2
       },
-      "compile_time_ms": {
-        "abs_tol": 2000.0,
-        "rel_tol": 0.2
-      },
       "real_time_factor": {
         "abs_tol": 21.0,
         "rel_tol": 0.2

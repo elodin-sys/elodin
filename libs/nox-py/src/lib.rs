@@ -45,8 +45,7 @@ pub use spatial::*;
 pub use step_context::*;
 pub use system::*;
 pub use world::{
-    Buffers, Column, ColumnRef, DEFAULT_TIME_STEP, Entity, IntoSystemExt, TimeStep, World,
-    WorldExt, WorldMetadata,
+    Buffers, Column, ColumnRef, DEFAULT_TIME_STEP, Entity, TimeStep, World, WorldMetadata,
 };
 pub use world_builder::*;
 

@@ -733,14 +733,12 @@ impl WorldBuilder {
                         profile["tick"], tpt
                     );
                     println!("build time:           {:.3} ms", profile["build"]);
-                    println!("compile time:         {:.3} ms", profile["compile"]);
                     println!("real_time_factor:     {:.3}", profile["real_time_factor"]);
                     if enable_detail {
                         println!("copy_to_client time:  {:.3} ms", profile["copy_to_client"]);
                         println!("execute_buffers time: {:.3} ms", profile["execute_buffers"]);
                         println!("copy_to_host time:    {:.3} ms", profile["copy_to_host"]);
                         println!("h2d_upload time:      {:.3} ms", profile["h2d_upload"]);
-                        println!("call_setup time:      {:.3} ms", profile["call_setup"]);
                         println!(
                             "kernel_invoke time:   {:.3} ms ({} invocations)",
                             profile["kernel_invoke"], tpt
@@ -803,7 +801,6 @@ impl WorldBuilder {
                     )?;
 
                     let build_time_ms = exec.profiler_mut().build.mean();
-                    let compile_time_ms = exec.profile().get("compile").copied().unwrap_or(0.0);
                     let mut compiled_exec = exec;
 
                     // XLA_FLAGS automatically restored when _xla_guard is dropped here
@@ -1112,7 +1109,6 @@ impl WorldBuilder {
                     println!("\n=== SYSTEM PROFILE ===");
                     println!("\n[Compilation]");
                     println!("  Build time:        {:.3} ms", build_time_ms);
-                    println!("  Compile time:      {:.3} ms", compile_time_ms);
 
                     println!("\n[HLO Analysis]");
                     println!("  Total instructions: {}", instruction_count);
@@ -1263,14 +1259,12 @@ impl WorldBuilder {
                     println!("execute_buffers time: {:.3} ms", profile["execute_buffers"]);
                     println!("copy_to_host time:    {:.3} ms", profile["copy_to_host"]);
                     println!("h2d_upload time:      {:.3} ms", profile["h2d_upload"]);
-                    println!("call_setup time:      {:.3} ms", profile["call_setup"]);
                     println!(
                         "kernel_invoke time:   {:.3} ms ({} invocations)",
                         profile["kernel_invoke"], tpt
                     );
                     println!("d2h_download time:    {:.3} ms", profile["d2h_download"]);
                     println!("build time:           {:.3} ms", profile["build"]);
-                    println!("compile time:         {:.3} ms", profile["compile"]);
                     println!("real_time_factor:     {:.3}", profile["real_time_factor"]);
 
                     Ok(None)
@@ -1601,15 +1595,14 @@ impl WorldBuilder {
         match engine {
             BackendEngine::Jax => {
                 let tick_exec = JaxExec::new(py, &compiled_sys, &world, jax_gpu)?;
-                let mut exec = JaxWorldExec::new(world, tick_exec, None);
+                let mut exec = JaxWorldExec::new(world, tick_exec);
                 exec.profiler.build.observe(&mut start);
                 Ok(WorldExec::Jax(Box::new(exec)))
             }
             BackendEngine::Cranelift => {
                 let tick_exec =
                     crate::cranelift_compile::compile_cranelift_module(py, &compiled_sys, &world)?;
-                let mut exec =
-                    crate::cranelift_exec::CraneliftWorldExec::new(world, tick_exec, None);
+                let mut exec = crate::cranelift_exec::CraneliftWorldExec::new(world, tick_exec);
                 exec.profiler.build.observe(&mut start);
                 Ok(WorldExec::Cranelift(Box::new(exec)))
             }

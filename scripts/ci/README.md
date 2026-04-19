@@ -103,8 +103,8 @@ For telemetry CSVs, precedence is file override -> example override -> default.
 
 For profile metrics:
 
-- `build_time_ms` and `compile_time_ms` fail only when the candidate is slower
-  than baseline beyond tolerance.
+- `build_time_ms` fails only when the candidate is slower than baseline beyond
+  tolerance.
 - `real_time_factor` fails only when the candidate drops below baseline beyond
   tolerance.
 - `ticks` must match exactly between baseline and candidate.

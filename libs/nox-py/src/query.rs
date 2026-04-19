@@ -1122,212 +1122,55 @@ mod batch1_join_tests {
 
         assert_eq!(updated.shape().unwrap().as_slice(), &[2, 3]);
     }
-}
-
-// --- Tests ---
-
-// Query tests disabled. They require a full compile+execute pipeline
-// which needs Python/JAX at runtime.
-#[cfg(any())]
-mod tests {
-    use super::*;
-    use crate::world::{IntoSystemExt, WorldExt};
-    use elodin_macros::{Archetype, Component, ComponentGroup, FromBuilder, ReprMonad};
-    use nox::{Op, OwnedRepr, Scalar, Vector, tensor};
 
     #[test]
-    fn test_cross_archetype_join() {
-        #[derive(Clone, Component, ReprMonad)]
-        struct X<R: OwnedRepr = Op>(Scalar<f64, R>);
+    fn cross_archetype_join_shape_intersects_entity_maps() {
+        // Simulates the cross-archetype join case from the old end-to-end
+        // `test_cross_archetype_join`: component X exists on a larger set of
+        // entities than component E, and joining `Query<X>` with `Query<E>`
+        // should retain only the entities carrying both components (here just
+        // entity 2), with the result rebatched to a singleton (batch1).
 
-        #[derive(Clone, Component, ReprMonad)]
-        struct E<R: OwnedRepr = Op>(Scalar<f64, R>);
+        let x_map: BTreeMap<EntityId, usize> = BTreeMap::from([
+            (EntityId(1), 0),
+            (EntityId(2), 1),
+            (EntityId(3), 2),
+        ]);
+        let e_map = entity_map(2);
 
-        #[derive(Archetype)]
-        struct Body {
-            x: X,
-        }
-
-        fn add_e(a: Query<(E, X)>) -> Query<X> {
-            a.map(|e: E, x: X| X(x.0 + e.0)).unwrap()
-        }
-        let mut world = add_e.world();
-        world.spawn(Body {
-            x: X((-91.0).into()),
-        });
-
-        world
-            .spawn(Body {
-                x: X((-55.0).into()),
-            })
-            .insert(E(1000.0.into()));
-
-        world.spawn(Body { x: X(5.0.into()) });
-        world.spawn(Body { x: X(200.0.into()) });
-
-        world
-            .spawn(Body { x: X(100.0.into()) })
-            .insert(E((-50000.0).into()));
-        world.spawn(Body { x: X(400.0.into()) });
-
-        let world = world.run();
-        let c = world.column::<X>().unwrap();
-        assert_eq!(
-            c.typed_buf::<f64>().unwrap(),
-            &[-91.0, 945.0, 5.0, 200.0, -49900.0, 400.0]
+        let x_expr = Noxpr::parameter(
+            0,
+            NoxprTy::ArrayTy(ArrayTy {
+                element_type: ElementType::F64,
+                shape: smallvec![3, 3],
+            }),
+            "x".to_owned(),
         );
-    }
+        let x_query = Query::<()> {
+            exprs: vec![x_expr],
+            entity_map: x_map,
+            len: 3,
+            phantom_data: PhantomData,
+            batch1: false,
+        };
 
-    #[test]
-    fn component_group() {
-        #[derive(Component, ReprMonad)]
-        struct A<R: OwnedRepr = Op>(Scalar<f64, R>);
+        let e_query = Query::<()> {
+            exprs: vec![batch1_expr(1, "e")],
+            entity_map: e_map.clone(),
+            len: 1,
+            phantom_data: PhantomData,
+            batch1: true,
+        };
 
-        #[derive(Component, ReprMonad)]
-        struct B<R: OwnedRepr = Op>(Scalar<f64, R>);
+        let joined = join_query(x_query, e_query);
 
-        #[derive(Component, ReprMonad)]
-        struct C<R: OwnedRepr = Op>(Scalar<f64, R>);
-
-        #[derive(Archetype)]
-        struct Body {
-            a: A,
-            b: B,
-            c: C,
-        }
-
-        #[derive(FromBuilder, ComponentGroup)]
-        struct AB {
-            a: A,
-            b: B,
-        }
-
-        fn add_system(q: Query<AB>) -> Query<C> {
-            q.map(|ab: AB| C(ab.a.0 + ab.b.0)).unwrap()
-        }
-
-        let mut world = add_system.world();
-        world.spawn(Body {
-            a: A(1.0.into()),
-            b: B(2.0.into()),
-            c: C((-1.0).into()),
-        });
-
-        world.spawn(Body {
-            a: A(2.0.into()),
-            b: B(2.0.into()),
-            c: C((-1.0).into()),
-        });
-        let world = world.run();
-        let c = world.column::<C>().unwrap();
-        assert_eq!(c.typed_buf::<f64>().unwrap(), &[3.0, 4.0])
-    }
-
-    #[test]
-    fn test_simple() {
-        #[derive(Component, ReprMonad)]
-        struct A<R: OwnedRepr = Op>(Scalar<f64, R>);
-
-        #[derive(Component, ReprMonad)]
-        struct B<R: OwnedRepr = Op>(Scalar<f64, R>);
-
-        #[derive(Component, ReprMonad)]
-        struct C<R: OwnedRepr = Op>(Scalar<f64, R>);
-
-        #[derive(Archetype)]
-        struct Body {
-            a: A,
-            b: B,
-            c: C,
-        }
-
-        fn add_system(a: Query<(A, B)>) -> Query<C> {
-            a.map(|a: A, b: B| C(a.0 + b.0)).unwrap()
-        }
-
-        let mut world = add_system.world();
-        world.spawn(Body {
-            a: A(1.0.into()),
-            b: B(2.0.into()),
-            c: C((-1.0).into()),
-        });
-
-        world.spawn(Body {
-            a: A(2.0.into()),
-            b: B(2.0.into()),
-            c: C((-1.0).into()),
-        });
-        let world = world.run();
-        let c = world.column::<C>().unwrap();
-        assert_eq!(c.typed_buf::<f64>().unwrap(), &[3.0, 4.0])
-    }
-
-    #[test]
-    fn test_get_scalar() {
-        #[derive(Component, ReprMonad)]
-        struct A<R: OwnedRepr = Op>(Scalar<f64, R>);
-
-        #[derive(Component, ReprMonad)]
-        struct B<R: OwnedRepr = Op>(Scalar<f64, R>);
-
-        fn add_system(s: ComponentArray<A>, v: ComponentArray<B>) -> ComponentArray<B> {
-            v.map(|v: B| B(v.0 + s.get(0).0)).unwrap()
-        }
-
-        let mut world = add_system.world();
-        world.spawn(A(5.0.into()));
-        world.spawn(B((-1.0).into()));
-        world.spawn(B(7.0.into()));
-        let world = world.run();
-        let v = world.column::<B>().unwrap();
-        assert_eq!(v.typed_buf::<f64>().unwrap(), &[4.0, 12.0])
-    }
-
-    #[test]
-    fn test_get_tensor() {
-        #[derive(Component, ReprMonad)]
-        struct A<R: OwnedRepr = Op>(Vector<f64, 3, R>);
-
-        #[derive(Component, ReprMonad)]
-        struct B<R: OwnedRepr = Op>(Vector<f64, 3, R>);
-
-        fn add_system(s: ComponentArray<A>, v: ComponentArray<B>) -> ComponentArray<B> {
-            v.map(|v: B| B(v.0 + s.get(0).0)).unwrap()
-        }
-
-        let mut world = add_system.world();
-        world.spawn(A(tensor![5.0, 2.0, -3.0].into()));
-        world.spawn(B(tensor![-1.0, 3.5, 6.0].into()));
-        world.spawn(B(tensor![7.0, -1.0, 1.0].into()));
-        let world = world.run();
-        let v = world.column::<B>().unwrap();
-        assert_eq!(
-            v.typed_buf::<f64>().unwrap(),
-            &[4.0, 5.5, 3.0, 12.0, 1.0, -2.0]
-        )
-    }
-
-    #[test]
-    fn test_startup() {
-        #[derive(Component, ReprMonad)]
-        struct A<R: OwnedRepr = Op>(Scalar<f64, R>);
-
-        fn startup(a: ComponentArray<A>) -> ComponentArray<A> {
-            a.map(|a: A| A(a.0 * 3.0)).unwrap()
-        }
-
-        fn tick(a: ComponentArray<A>) -> ComponentArray<A> {
-            a.map(|a: A| A(a.0 + 1.0)).unwrap()
-        }
-
-        let mut world = crate::World::default();
-        world.spawn(A(1.0.into()));
-        let world = world
-            .builder()
-            .tick_pipeline(tick)
-            .startup_pipeline(startup)
-            .run();
-        let c = world.column::<A>().unwrap();
-        assert_eq!(c.typed_buf::<f64>().unwrap(), &[4.0]);
+        assert_eq!(joined.entity_map, e_map);
+        assert_eq!(joined.len, 1);
+        assert!(joined.batch1, "singleton intersection should be batch1");
+        assert_eq!(joined.exprs.len(), 2);
+        // Both expressions must now carry the singleton `[3]` shape.
+        assert_eq!(joined.exprs[0].shape().unwrap().as_slice(), &[3]);
+        assert_eq!(joined.exprs[1].shape().unwrap().as_slice(), &[3]);
     }
 }
+

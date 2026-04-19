@@ -10,8 +10,8 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-METRIC_ORDER = ("build_time_ms", "compile_time_ms", "real_time_factor")
-HIGHER_IS_WORSE = {"build_time_ms", "compile_time_ms"}
+METRIC_ORDER = ("build_time_ms", "real_time_factor")
+HIGHER_IS_WORSE = {"build_time_ms"}
 LOWER_IS_WORSE = {"real_time_factor"}
 
 

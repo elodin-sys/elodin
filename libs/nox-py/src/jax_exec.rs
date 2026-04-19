@@ -56,9 +56,6 @@ impl JaxExec {
             arg_ids: compiled_system.inputs.clone(),
             ret_ids: compiled_system.outputs.clone(),
             arg_slots: compiled_system.input_slots.clone(),
-            ret_slots: compiled_system.output_slots.clone(),
-            has_singleton_lowering: compiled_system.has_singleton_lowering,
-            promoted_constants: vec![],
         };
         let mut output_ids = Vec::new();
         let mut seen_outputs = HashSet::new();
@@ -116,14 +113,6 @@ impl JaxExec {
             output_ids,
             mutable_overlap,
         })
-    }
-
-    pub fn invoke_in_place(
-        &mut self,
-        world: &mut World,
-        detailed: bool,
-    ) -> Result<TickTimings, Error> {
-        self.invoke_batch(world, 1, detailed)
     }
 
     pub fn invoke_batch(
@@ -189,7 +178,6 @@ impl JaxExec {
 
             Ok(TickTimings {
                 h2d_upload_ms,
-                call_setup_ms: 0.0,
                 kernel_invoke_ms,
                 d2h_download_ms,
             })
@@ -248,16 +236,14 @@ fn numpy_dtype_str(et: nox::ElementType) -> Result<&'static str, Error> {
 pub struct JaxWorldExec {
     pub world: World,
     pub tick_exec: JaxExec,
-    pub startup_exec: Option<JaxExec>,
     pub profiler: Profiler,
 }
 
 impl JaxWorldExec {
-    pub fn new(world: World, tick_exec: JaxExec, startup_exec: Option<JaxExec>) -> Self {
+    pub fn new(world: World, tick_exec: JaxExec) -> Self {
         Self {
             world,
             tick_exec,
-            startup_exec,
             profiler: Default::default(),
         }
     }
@@ -269,10 +255,6 @@ impl JaxWorldExec {
     pub fn run(&mut self) -> Result<(), Error> {
         let ticks_per_telemetry = self.world.ticks_per_telemetry();
 
-        if let Some(mut startup_exec) = self.startup_exec.take() {
-            startup_exec.invoke_in_place(&mut self.world, self.profiler.detailed_timing)?;
-        }
-
         let tick_start = Instant::now();
         let timings = self.tick_exec.invoke_batch(
             &mut self.world,
@@ -282,14 +264,12 @@ impl JaxWorldExec {
         let tick_elapsed = tick_start.elapsed();
         if self.profiler.detailed_timing {
             let h2d = Duration::from_secs_f64(timings.h2d_upload_ms / 1000.0);
-            let call_setup = Duration::from_secs_f64(timings.call_setup_ms / 1000.0);
             let kernel = Duration::from_secs_f64(timings.kernel_invoke_ms / 1000.0);
             let d2h = Duration::from_secs_f64(timings.d2h_download_ms / 1000.0);
             self.profiler.copy_to_client.observe_duration(h2d);
             self.profiler.execute_buffers.observe_duration(kernel);
             self.profiler.copy_to_host.observe_duration(d2h);
             self.profiler.h2d_upload.observe_duration(h2d);
-            self.profiler.call_setup.observe_duration(call_setup);
             self.profiler.kernel_invoke.observe_duration(kernel);
             self.profiler.d2h_download.observe_duration(d2h);
         } else {

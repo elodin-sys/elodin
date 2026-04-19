@@ -21,23 +21,11 @@ pub struct ExecSlotMetadata {
     pub entity_axis_elided: bool,
 }
 
-#[derive(Clone)]
-pub struct ConstantSpec {
-    pub name: String,
-    pub data: Vec<u8>,
-    pub shape: Vec<i64>,
-    pub element_type: nox::ElementType,
-}
-
 #[derive(Serialize, Deserialize, Clone)]
 pub struct ExecMetadata {
     pub arg_ids: Vec<ComponentId>,
     pub ret_ids: Vec<ComponentId>,
     pub arg_slots: Vec<ExecSlotMetadata>,
-    pub ret_slots: Vec<ExecSlotMetadata>,
-    pub has_singleton_lowering: bool,
-    #[serde(skip)]
-    pub promoted_constants: Vec<ConstantSpec>,
 }
 
 impl<C: Component> ComponentArray<C> {

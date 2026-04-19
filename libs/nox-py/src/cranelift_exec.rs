@@ -269,33 +269,20 @@ impl CraneliftExec {
 pub struct CraneliftWorldExec {
     pub world: World,
     pub tick_exec: CraneliftExec,
-    pub startup_exec: Option<CraneliftExec>,
     pub profiler: Profiler,
 }
 
 impl CraneliftWorldExec {
-    pub fn new(
-        world: World,
-        tick_exec: CraneliftExec,
-        startup_exec: Option<CraneliftExec>,
-    ) -> Self {
+    pub fn new(world: World, tick_exec: CraneliftExec) -> Self {
         Self {
             world,
             tick_exec,
-            startup_exec,
             profiler: Default::default(),
         }
     }
 
     pub fn run(&mut self) -> Result<(), Error> {
         let ticks_per_telemetry = self.world.ticks_per_telemetry();
-
-        // Mirror `JaxWorldExec::run`: consume the startup exec (if any) with a
-        // single invocation before entering the steady-state tick loop, so both
-        // backends behave identically when a caller wires up a startup graph.
-        if let Some(mut startup_exec) = self.startup_exec.take() {
-            startup_exec.invoke_batch(&mut self.world, 1, self.profiler.detailed_timing)?;
-        }
 
         let tick_start = Instant::now();
         self.tick_exec.invoke_batch(
