@@ -562,4 +562,3 @@ mod batch1_graph_tests {
         assert_eq!(to.exprs[0].shape().unwrap().as_slice(), &[2, 1, 3]);
     }
 }
-

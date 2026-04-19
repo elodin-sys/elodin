@@ -1131,11 +1131,8 @@ mod batch1_join_tests {
         // should retain only the entities carrying both components (here just
         // entity 2), with the result rebatched to a singleton (batch1).
 
-        let x_map: BTreeMap<EntityId, usize> = BTreeMap::from([
-            (EntityId(1), 0),
-            (EntityId(2), 1),
-            (EntityId(3), 2),
-        ]);
+        let x_map: BTreeMap<EntityId, usize> =
+            BTreeMap::from([(EntityId(1), 0), (EntityId(2), 1), (EntityId(3), 2)]);
         let e_map = entity_map(2);
 
         let x_expr = Noxpr::parameter(
@@ -1173,4 +1170,3 @@ mod batch1_join_tests {
         assert_eq!(joined.exprs[1].shape().unwrap().as_slice(), &[3]);
     }
 }
-
