@@ -1,18 +1,6 @@
 # ruff: noqa: F403
 # ruff: noqa: F405
 import os
-
-# Restrict JAX to CPU unless the user explicitly opted into `jax-gpu`.
-# JAX is only used as a StableHLO lowering helper for the default cranelift
-# backend (and for CPU execution with `jax-cpu`), so a CPU-only JAX is correct
-# in both cases. This also silences `jax._src.xla_bridge`'s "CUDA-enabled
-# jaxlib is not installed" warning at init. Users who want GPU execution
-# should set `ELODIN_BACKEND=jax-gpu` before importing elodin; that both
-# skips this branch and, if the GPU jaxlib is missing, surfaces a clear hard
-# error instead of a silent fallback.
-if os.environ.get("ELODIN_BACKEND", "").strip().lower() != "jax-gpu":
-    os.environ.setdefault("JAX_PLATFORMS", "cpu")
-
 import code
 import inspect
 import re

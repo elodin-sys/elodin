@@ -184,13 +184,12 @@ impl SlotPool {
 mod tests {
     use super::*;
 
-    /// Behavior-only unit tests: the numeric pool logic without a
-    /// live `FunctionBuilder` (we don't need real StackSlots to
-    /// validate that `release_for_vid` feeds the free-list correctly).
-    ///
-    /// We pun a StackSlot via `::default()` because the production
-    /// API goes through `create_sized_stack_slot`; tests only need
-    /// to check the pool's internal bookkeeping.
+    // Behavior-only unit tests: the numeric pool logic without a
+    // live `FunctionBuilder` (we don't need real StackSlots to
+    // validate that `release_for_vid` feeds the free-list correctly).
+    // We pun a StackSlot via `from_u32` because the production API
+    // goes through `create_sized_stack_slot`; tests only need to
+    // check the pool's internal bookkeeping.
 
     fn synth_ss(n: u32) -> StackSlot {
         // StackSlot is a Cranelift entity (newtype around u32).

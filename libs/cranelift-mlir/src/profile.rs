@@ -24,13 +24,18 @@
 //! See [`libs/cranelift-mlir/PERFORMANCE.md`](../PERFORMANCE.md) for the
 //! full end-user guide.
 
+// Report-writing helpers thread the main-fn stats, snapshot, weighted
+// op-kind counts, marshal/libm/SIMD call counts, and probe-overhead
+// totals by hand.
+#![allow(clippy::too_many_arguments)]
+
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::Instant;
 
-use crate::lower::{FuncAbi, INSTR_COUNTS, InstrCountEntry};
+use crate::lower::{FuncAbi, INSTR_COUNTS};
 
 /// Per-function runtime statistics, accumulated by the profile probes.
 /// One entry per `FuncId`. `total_ns` is inclusive (body + callees);
@@ -265,7 +270,6 @@ struct StaticRegistry {
 struct StaticInstrStats {
     scalar: usize,
     vector: usize,
-    #[allow(dead_code)]
     op_kind_counts: HashMap<&'static str, usize>,
 }
 
@@ -1078,10 +1082,6 @@ pub(crate) fn dump_report(main_fid: u32) {
     // tick time" reference.
     let main_stats = snapshot.iter().find(|(fid, _)| *fid == main_fid).cloned();
 
-    // Aggregate probe overhead across every recorded function.
-    let total_calls: u64 = snapshot.iter().map(|(_, s)| s.calls).sum();
-    let total_overhead_ns = 2u64.saturating_mul(total_calls).saturating_mul(overhead_ns);
-
     eprintln!("[elodin-cranelift] profile report");
     eprintln!(
         "  probe overhead: enter/exit={}ns call={}ns marshal={}ns xcend={}ns loop_iter={}ns  (calibrated via {} iterations per family)",
@@ -1433,7 +1433,6 @@ pub(crate) fn dump_report(main_fid: u32) {
             simd_calls,
             simd_ns,
             overhead_ns,
-            total_overhead_ns,
             &edges_snapshot,
             &loop_stats_for_report,
             &timeline_snapshot,
@@ -1449,7 +1448,6 @@ pub(crate) fn dump_report(main_fid: u32) {
     reset();
 }
 
-#[allow(clippy::too_many_arguments)]
 fn write_json_report(
     path: &std::path::Path,
     main_fid: u32,
@@ -1471,7 +1469,6 @@ fn write_json_report(
     simd_calls: u64,
     simd_ns: u64,
     overhead_ns: u64,
-    total_overhead_ns: u64,
     edges: &[((u32, u32), EdgeStats)],
     loop_stats: &[(u32, u64, LoopStatic)],
     timeline: &[u64],

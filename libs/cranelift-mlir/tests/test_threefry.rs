@@ -105,7 +105,7 @@ module @module {
     let val: u64 = 0x0000000100000002;
     let out = run_mlir(
         mlir,
-        &[&val.to_le_bytes().to_vec(), &32u64.to_le_bytes().to_vec()],
+        &[val.to_le_bytes().as_ref(), 32u64.to_le_bytes().as_ref()],
         &[8],
     );
     let result = u64::from_le_bytes(out[0][..8].try_into().unwrap());
@@ -123,7 +123,7 @@ module @module {
 }
 "#;
     let val: u64 = 0x3FF0000000000000; // 1.0 as f64 bits
-    let out = run_mlir(mlir, &[&val.to_le_bytes().to_vec()], &[8]);
+    let out = run_mlir(mlir, &[val.to_le_bytes().as_ref()], &[8]);
     let result = f64::from_le_bytes(out[0][..8].try_into().unwrap());
     assert!((result - 1.0).abs() < 1e-15, "should be 1.0, got {result}");
 }

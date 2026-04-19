@@ -368,6 +368,8 @@ pub extern "C" fn tensor_pow_f64(dst: *mut f64, a: *const f64, b: *const f64, n:
     }
 }
 
+// Series coefficients copied verbatim from the libm reference; trailing
+// digits beyond f64 precision are required for IEEE 754 round-trip.
 #[allow(clippy::excessive_precision)]
 pub(crate) fn erfc_impl(x: f64) -> f64 {
     let p = [
@@ -439,6 +441,8 @@ pub(crate) fn erfc_impl(x: f64) -> f64 {
     ((-xsq * xsq).exp()) * (-del).exp() * result
 }
 
+// Series coefficients copied verbatim from the libm reference; trailing
+// digits beyond f64 precision are required for IEEE 754 round-trip.
 #[allow(clippy::excessive_precision)]
 fn erf_central(x: f64) -> f64 {
     const A: [f64; 5] = [
@@ -464,14 +468,6 @@ fn erf_central(x: f64) -> f64 {
         den = den * y + b;
     }
     x * num / den
-}
-
-pub extern "C" fn tensor_is_finite_f64(dst: *mut u8, a: *const f64, n: usize) {
-    let a = unsafe { slice::from_raw_parts(a, n) };
-    let dst = unsafe { slice::from_raw_parts_mut(dst, n) };
-    for i in 0..n {
-        dst[i] = a[i].is_finite() as u8;
-    }
 }
 
 pub extern "C" fn tensor_not_i64(dst: *mut i64, a: *const i64, n: usize) {
@@ -540,6 +536,8 @@ pub(crate) fn erf_inv_impl(x: f64) -> f64 {
     ndtri_impl((x + 1.0) * 0.5) * std::f64::consts::FRAC_1_SQRT_2
 }
 
+// Series coefficients copied verbatim from the libm reference; trailing
+// digits beyond f64 precision are required for IEEE 754 round-trip.
 #[allow(clippy::excessive_precision)]
 fn ndtri_impl(y0: f64) -> f64 {
     const P0: [f64; 5] = [

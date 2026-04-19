@@ -1,3 +1,9 @@
+// Lowering helpers thread the Cranelift FunctionBuilder, JITModule,
+// IR Module, symbol tables (libm/tensor-rt ids, func_ids, func_abis),
+// value/type maps, and the slot pool by hand. Bundling these into a
+// LoweringContext struct is future work; see ARCHITECTURE.md.
+#![allow(clippy::too_many_arguments)]
+
 use std::cell::RefCell;
 use std::collections::HashMap;
 
@@ -319,20 +325,6 @@ fn get_vals<'a>(
             unreachable!("PtrChunksF64 leaked into scalar-ABI get_vals")
         }
     }
-}
-
-/// Read-only variant: reads a value known to already be scalar.
-/// Panics (via `as_scalar`) if a `PackedF64` is encountered. Used
-/// where only an immutable map reference is available; such paths
-/// should migrate to the mutable `get_vals` over time.
-fn get_vals_read<'a>(
-    value_map: &'a HashMap<ValueId, LaneRepr>,
-    vid: &ValueId,
-) -> Result<&'a [Value], String> {
-    value_map
-        .get(vid)
-        .map(|lr| lr.as_scalar())
-        .ok_or_else(|| format!("missing value {:?}", vid))
 }
 
 const LARGE_TENSOR_THRESHOLD: usize = 64;
@@ -826,8 +818,6 @@ struct LibmIds {
     sin: FuncId,
     cos: FuncId,
     atan2: FuncId,
-    sqrt: FuncId,
-    fabs: FuncId,
     fmod: FuncId,
     acos: FuncId,
     erf_inv: FuncId,
@@ -868,8 +858,6 @@ fn declare_libm_functions(
         sin: mk("sin", 1, 1)?,
         cos: mk("cos", 1, 1)?,
         atan2: mk("atan2", 2, 1)?,
-        sqrt: mk("sqrt", 1, 1)?,
-        fabs: mk("fabs", 1, 1)?,
         fmod: mk("fmod", 2, 1)?,
         acos: mk("acos", 1, 1)?,
         erf_inv: mk("erf_inv_impl", 1, 1)?,
@@ -897,7 +885,6 @@ fn declare_libm_functions(
 /// module alongside the libm/tensor-rt ids; only emitted into the JIT IR
 /// when `CompileConfig::profile_enabled` is true.
 #[derive(Copy, Clone)]
-#[allow(dead_code)]
 pub(crate) struct ProfileIds {
     pub enter: FuncId,
     pub exit: FuncId,
@@ -968,32 +955,6 @@ fn emit_op_end(builder: &mut FunctionBuilder, jit_module: &mut JITModule) {
     };
     let r = jit_module.declare_func_in_func(ids.op_end, builder.func);
     builder.ins().call(r, &[]);
-}
-
-/// Bracket a single IR emission with `op_begin`/`op_end` probes only
-/// when (a) sampling is enabled via `ELODIN_CRANELIFT_DEBUG_DIR` and
-/// (b) this emission's category counter hits the sample rate.
-/// Otherwise forwards `f` unchanged. Overhead when off: one atomic
-/// load and one boolean `&&`.
-#[allow(dead_code)]
-fn bracket_sampled<R>(
-    builder: &mut FunctionBuilder,
-    jit_module: &mut JITModule,
-    category: crate::op_sampler::OpCategory,
-    f: impl FnOnce(&mut FunctionBuilder) -> R,
-) -> R {
-    if !crate::op_sampler::op_times_enabled() {
-        return f(builder);
-    }
-    let sample = OP_SAMPLER.with(|s| s.borrow_mut().should_sample(category));
-    if sample {
-        emit_op_begin(builder, jit_module, category);
-        let r = f(builder);
-        emit_op_end(builder, jit_module);
-        r
-    } else {
-        f(builder)
-    }
 }
 
 /// Inner-loop bracketing for Load / Store / StackAddr / const ops
@@ -1288,7 +1249,6 @@ fn inject_profile_probes(
 
 macro_rules! define_trt {
     ($( $field:ident, $symbol:expr, $fn_path:path, [ $($param:expr),* ];)*) => {
-        #[allow(dead_code)]
         struct TensorRtIds { $($field: FuncId,)* }
 
         fn register_tensor_rt_symbols(jit_builder: &mut JITBuilder) {
@@ -1349,7 +1309,6 @@ define_trt! {
     erfc_f64,   "__trt_erfc_f64",   tensor_rt::tensor_erfc_f64,   [ptr_type(), ptr_type(), types::I64];
     expm1_f64,  "__trt_expm1_f64",  tensor_rt::tensor_expm1_f64,  [ptr_type(), ptr_type(), types::I64];
     cbrt_f64,   "__trt_cbrt_f64",   tensor_rt::tensor_cbrt_f64,   [ptr_type(), ptr_type(), types::I64];
-    is_finite_f64, "__trt_is_finite_f64", tensor_rt::tensor_is_finite_f64, [ptr_type(), ptr_type(), types::I64];
     not_i64,    "__trt_not_i64",    tensor_rt::tensor_not_i64,    [ptr_type(), ptr_type(), types::I64];
     not_i32,    "__trt_not_i32",    tensor_rt::tensor_not_i32,    [ptr_type(), ptr_type(), types::I64];
     not_i1,     "__trt_not_i1",     tensor_rt::tensor_not_i1,     [ptr_type(), ptr_type(), types::I64];
@@ -1797,7 +1756,6 @@ fn declare_all_functions(
 
 static REGION_COUNTER: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
 
-#[allow(clippy::too_many_arguments)]
 fn compile_region_as_function(
     jit_module: &mut JITModule,
     ir_module: &crate::ir::Module,
@@ -1907,7 +1865,6 @@ fn compile_region_as_function(
 // Function definition (body lowering + ABI handling)
 // ---------------------------------------------------------------------------
 
-#[allow(clippy::too_many_arguments)]
 fn define_function(
     jit_module: &mut JITModule,
     func_def: &crate::ir::FuncDef,
@@ -2029,7 +1986,6 @@ fn define_function(
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
 fn lower_main_body(
     builder: &mut FunctionBuilder,
     func_def: &crate::ir::FuncDef,
@@ -2226,7 +2182,6 @@ fn should_elide(
 /// no chunk stores, no intermediate memory traffic. The next
 /// elision-friendly consumer (proven by `should_elide`) will read the
 /// chunks directly via `LaneRepr::get_chunks`.
-#[allow(clippy::too_many_arguments)]
 fn lower_ptr_binop_elision_or_spill(
     builder: &mut FunctionBuilder,
     jit_module: &mut JITModule,
@@ -2285,7 +2240,6 @@ fn lower_ptr_binop_elision_or_spill(
 /// chunks come from `get_chunks`, result stays in SSA; no stack slot
 /// allocated. Red path: operands spill (no-op if already `Scalar`)
 /// and `lower_ptr_cmp_select_simd_f64` writes into a fresh slot.
-#[allow(clippy::too_many_arguments)]
 fn lower_ptr_cmp_select_elision_or_spill(
     builder: &mut FunctionBuilder,
     jit_module: &mut JITModule,
@@ -2342,7 +2296,6 @@ fn lower_ptr_cmp_select_elision_or_spill(
 /// keeps `value_map` consistent for any subsequent reader of the same
 /// vid. Elision-path operands are untouched (`get_chunks` is `&self`),
 /// so the write-back is a no-op copy in the hot case.
-#[allow(clippy::too_many_arguments)]
 fn emit_ptr_binop_f64(
     builder: &mut FunctionBuilder,
     jit_module: &mut JITModule,
@@ -2401,7 +2354,6 @@ fn emit_ptr_binop_f64(
 /// `fneg`, `sqrt`, `fabs`, `floor`, `ceil`, `nearest` IR ops are
 /// polymorphic over F64 and F64X2, so the same closure serves
 /// both the chunk loop and the tail.
-#[allow(clippy::too_many_arguments)]
 fn lower_ptr_unop_elision_or_spill(
     builder: &mut FunctionBuilder,
     jit_module: &mut JITModule,
@@ -2430,7 +2382,6 @@ fn lower_ptr_unop_elision_or_spill(
 
 /// Unary call-site wrapper — clone operand out, invoke
 /// `lower_ptr_unop_elision_or_spill`, write back post-spill.
-#[allow(clippy::too_many_arguments)]
 fn emit_ptr_unop_f64(
     builder: &mut FunctionBuilder,
     jit_module: &mut JITModule,
@@ -2466,7 +2417,6 @@ fn emit_ptr_unop_f64(
 /// Max/Min call-site wrapper — same clone/invoke/write-back pattern
 /// as `emit_ptr_binop_f64`, but dispatches to
 /// `lower_ptr_cmp_select_elision_or_spill`.
-#[allow(clippy::too_many_arguments)]
 fn emit_ptr_cmp_select_f64(
     builder: &mut FunctionBuilder,
     jit_module: &mut JITModule,
@@ -2784,7 +2734,6 @@ fn store_i64_array(builder: &mut FunctionBuilder, vals: &[i64]) -> Value {
     ptr
 }
 
-#[allow(clippy::too_many_arguments)]
 fn lower_pointer_body(
     builder: &mut FunctionBuilder,
     func_def: &crate::ir::FuncDef,
@@ -2843,7 +2792,6 @@ fn lower_pointer_body(
 /// Test-only: lower `main` through the pointer-ABI path. Activated
 /// by `CompileConfig::force_pointer_abi_main = true` which is set
 /// only from in-crate integration tests. Never gated by any env var.
-#[allow(clippy::too_many_arguments)]
 fn lower_main_body_mem(
     builder: &mut FunctionBuilder,
     func_def: &crate::ir::FuncDef,
@@ -2908,7 +2856,6 @@ fn lower_main_body_mem(
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
 fn lower_body_mem(
     builder: &mut FunctionBuilder,
     body: &[InstrResult],
@@ -2980,7 +2927,6 @@ fn lower_body_mem(
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
 fn lower_instruction_mem(
     builder: &mut FunctionBuilder,
     instr: &Instruction,
@@ -3624,9 +3570,8 @@ fn lower_instruction_mem(
                 return Ok(vec![LaneRepr::scalar(vec![get(operand)?])]);
             }
             let func_id = match (src_ty.element_type, rt.element_type) {
-                (ElementType::I64 | ElementType::UI64, ElementType::F64) => {
-                    trt_ids.convert_i64_to_f64
-                }
+                (ElementType::I64, ElementType::F64) => trt_ids.convert_i64_to_f64,
+                (ElementType::UI64, ElementType::F64) => trt_ids.convert_ui64_to_f64,
                 (ElementType::F64, ElementType::I64) => trt_ids.convert_f64_to_i64,
                 (ElementType::I1, ElementType::F64) => trt_ids.convert_i1_to_f64,
                 (ElementType::F64, ElementType::I32 | ElementType::UI32) => {
@@ -3638,9 +3583,8 @@ fn lower_instruction_mem(
                 (ElementType::I1, ElementType::I32 | ElementType::UI32) => {
                     trt_ids.convert_i1_to_i32
                 }
-                (ElementType::I32 | ElementType::UI32, ElementType::F64) => {
-                    trt_ids.convert_i32_to_f64
-                }
+                (ElementType::I32, ElementType::F64) => trt_ids.convert_i32_to_f64,
+                (ElementType::UI32, ElementType::F64) => trt_ids.convert_ui32_to_f64,
                 (ElementType::F64, ElementType::F32) => trt_ids.convert_f64_to_f32,
                 (ElementType::F32, ElementType::F64) => trt_ids.convert_f32_to_f64,
                 (ElementType::I32, ElementType::I64 | ElementType::UI64) => {
@@ -3649,10 +3593,8 @@ fn lower_instruction_mem(
                 (ElementType::UI32, ElementType::I64 | ElementType::UI64) => {
                     trt_ids.convert_ui32_to_i64
                 }
-                (ElementType::UI32, ElementType::F64) => trt_ids.convert_ui32_to_f64,
                 (ElementType::F64, ElementType::I1) => trt_ids.convert_f64_to_i1,
                 (ElementType::I64, ElementType::I1) => trt_ids.convert_i64_to_i1,
-                (ElementType::UI64, ElementType::F64) => trt_ids.convert_ui64_to_f64,
                 (ElementType::I32, ElementType::F32) => trt_ids.convert_i32_to_f32,
                 (ElementType::F32, ElementType::I32) => trt_ids.convert_f32_to_i32,
                 _ => {
@@ -4379,7 +4321,7 @@ fn lower_instruction_mem(
             builder.seal_block(exit);
 
             let mut result_groups = Vec::new();
-            for (i, rty) in result_types.iter().enumerate() {
+            for i in 0..result_types.len() {
                 if i < slots.len() {
                     let (ss, _) = &slots[i];
                     let addr = builder.ins().stack_addr(ptr_type(), *ss, 0);
@@ -4786,11 +4728,9 @@ fn lower_instruction_mem(
                 .map(|s| LaneRepr::scalar(vec![s]))
                 .collect())
         }
-        Instruction::CustomCall {
-            call_target,
-            operands,
-            ..
-        } => Err(format!("mem: custom_call not yet supported: {call_target}")),
+        Instruction::CustomCall { call_target, .. } => {
+            Err(format!("mem: custom_call not yet supported: {call_target}"))
+        }
 
         Instruction::Return { .. } => Ok(vec![]),
 
@@ -5196,9 +5136,6 @@ fn lower_instruction_mem(
             let src_ty = type_map.get(operand).cloned().unwrap_or(rt.clone());
             let dst = alloc_slot_for_vid(builder, pool, result_vid, n * elem_sz);
             let n_dst_v = builder.ins().iconst(types::I64, n as i64);
-            let n_src_v = builder
-                .ins()
-                .iconst(types::I64, src_ty.num_elements() as i64);
             let shape_ptr = store_i64_array(builder, &src_ty.shape);
             let rank_val = builder.ins().iconst(types::I64, src_ty.rank() as i64);
             let esz = builder.ins().iconst(types::I64, elem_sz as i64);
@@ -5547,7 +5484,13 @@ fn lower_instruction_mem(
             Ok(vec![LaneRepr::scalar(vec![dst])])
         }
 
-        Instruction::CholeskyOp { operand, lower } => {
+        Instruction::CholeskyOp {
+            operand,
+            lower: _lower,
+        } => {
+            // TODO: honor `lower` to dispatch upper vs lower Cholesky.
+            // Current ptr-ABI path always produces the lower-triangular
+            // factor; scalar path mirrors this. Parsed IR is preserved.
             let src_ty = type_map.get(operand).cloned().unwrap_or(rt.clone());
             let nn = require_square(
                 "Cholesky",
@@ -5728,12 +5671,9 @@ fn lower_instruction_mem(
             )?;
             Ok(vec![LaneRepr::scalar(vec![dst])])
         }
-
-        other => Err(format!("mem: unsupported instruction: {other:?}")),
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 fn lower_callee_body(
     builder: &mut FunctionBuilder,
     func_def: &crate::ir::FuncDef,
@@ -5819,7 +5759,6 @@ fn lower_callee_body(
 // Body and instruction lowering
 // ---------------------------------------------------------------------------
 
-#[allow(clippy::too_many_arguments)]
 fn lower_body(
     builder: &mut FunctionBuilder,
     body: &[InstrResult],
@@ -5875,7 +5814,6 @@ fn make_zero(builder: &mut FunctionBuilder, et: ElementType) -> Value {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
 fn lower_instruction(
     builder: &mut FunctionBuilder,
     instr: &Instruction,
@@ -6821,8 +6759,7 @@ fn lower_instruction(
 
         // ----- Function call -----
         Instruction::Call { callee, args } => lower_call(
-            builder, callee, args, ir_module, func_ids, func_abis, trt_ids, jit_module, value_map,
-            type_map,
+            builder, callee, args, ir_module, func_ids, func_abis, jit_module, value_map,
         ),
 
         // ----- While loop (real Cranelift loop blocks) -----
@@ -7066,7 +7003,6 @@ fn lower_instruction(
             value_map,
             type_map,
             jit_module,
-            libm_ids,
             backend_config,
         ),
 
@@ -7430,7 +7366,6 @@ fn lower_instruction(
 // While loop — real Cranelift loop with header/body/exit blocks
 // ---------------------------------------------------------------------------
 
-#[allow(clippy::too_many_arguments)]
 fn lower_while(
     builder: &mut FunctionBuilder,
     cond_body: &[InstrResult],
@@ -7630,7 +7565,6 @@ fn extract_return_values(
 // Case — real branching with dispatch chain and merge block
 // ---------------------------------------------------------------------------
 
-#[allow(clippy::too_many_arguments)]
 fn lower_case(
     builder: &mut FunctionBuilder,
     index: &ValueId,
@@ -7747,7 +7681,6 @@ fn lower_case(
 // Function call lowering
 // ---------------------------------------------------------------------------
 
-#[allow(clippy::too_many_arguments)]
 fn lower_call(
     builder: &mut FunctionBuilder,
     callee: &str,
@@ -7755,10 +7688,8 @@ fn lower_call(
     ir_module: &crate::ir::Module,
     func_ids: &HashMap<String, FuncId>,
     func_abis: &HashMap<String, FuncAbi>,
-    trt_ids: &TensorRtIds,
     jit_module: &mut JITModule,
     value_map: &mut HashMap<ValueId, LaneRepr>,
-    type_map: &HashMap<ValueId, TensorType>,
 ) -> Result<Vec<LaneRepr>, String> {
     let fid = func_ids
         .get(callee)
@@ -8490,7 +8421,6 @@ fn convert_value(
             let i = builder.ins().fcvt_to_sint(types::I32, v);
             builder.ins().ireduce(types::I8, i)
         }
-        (ElementType::UI32, ElementType::UI64) => builder.ins().uextend(types::I64, v),
         (ElementType::UI64, ElementType::F64) => builder.ins().fcvt_from_uint(types::F64, v),
         (ElementType::F64, ElementType::UI64) => builder.ins().fcvt_to_uint(types::I64, v),
         (ElementType::I32, ElementType::F32) => builder.ins().fcvt_from_sint(types::F32, v),
@@ -8878,7 +8808,6 @@ fn apply_reduce_op(builder: &mut FunctionBuilder, acc: Value, v: Value, op: &Red
 // Gather — stack-slot based element lookup for small tensors
 // ---------------------------------------------------------------------------
 
-#[allow(clippy::too_many_arguments)]
 fn lower_gather(
     builder: &mut FunctionBuilder,
     operand: &[Value],
@@ -8938,7 +8867,6 @@ fn lower_gather(
 
     // Batch shape = indices shape with index_vector_dim removed
     let batch_shape: Vec<usize> = batch_dims.iter().map(|&d| idx_shape[d]).collect();
-    let n_batch: usize = batch_shape.iter().product::<usize>().max(1);
     let batch_rank = batch_shape.len();
 
     // Offset shape = slice_sizes with collapsed dims removed
@@ -8947,7 +8875,6 @@ fn lower_gather(
         .map(|d| slice_sizes[d] as usize)
         .collect();
     let offset_rank = offset_shape.len();
-    let n_offset: usize = offset_shape.iter().product::<usize>().max(1);
 
     let mut results = Vec::with_capacity(n);
 
@@ -9248,7 +9175,6 @@ fn lower_dynamic_update_slice(
     results
 }
 
-#[allow(clippy::too_many_arguments)]
 fn lower_custom_call(
     builder: &mut FunctionBuilder,
     call_target: &str,
@@ -9257,7 +9183,6 @@ fn lower_custom_call(
     value_map: &mut HashMap<ValueId, LaneRepr>,
     type_map: &HashMap<ValueId, TensorType>,
     jit_module: &mut JITModule,
-    libm_ids: &LibmIds,
     backend_config: &HashMap<String, i64>,
 ) -> Result<Vec<LaneRepr>, String> {
     if call_target.starts_with("lapack_dgesdd") {
@@ -9373,14 +9298,7 @@ fn lower_custom_call(
         );
     }
     if call_target.starts_with("lapack_dgesvd") {
-        return lower_gesvd_custom_call(
-            builder,
-            operands,
-            result_types,
-            value_map,
-            type_map,
-            jit_module,
-        );
+        return lower_gesvd_custom_call(builder, operands, value_map, type_map, jit_module);
     }
     Err(format!("unsupported custom_call target: {call_target}"))
 }
@@ -9417,7 +9335,6 @@ extern "C" fn cranelift_svd(
     vt_ptr: *mut f64,
     info_ptr: *mut i32,
 ) {
-    use faer::prelude::*;
     let a = unsafe { std::slice::from_raw_parts(a_ptr, n * n) };
     let u_out = unsafe { std::slice::from_raw_parts_mut(u_ptr, n * n) };
     let s_out = unsafe { std::slice::from_raw_parts_mut(s_ptr, n) };
@@ -9940,7 +9857,6 @@ fn lower_lu_custom_call(
     ])
 }
 
-#[allow(clippy::too_many_arguments)]
 fn lower_trsm_custom_call(
     builder: &mut FunctionBuilder,
     operands: &[ValueId],
@@ -10368,7 +10284,6 @@ extern "C" fn cranelift_gelsd(
     rank_ptr: *mut i32,
     info_ptr: *mut i32,
 ) {
-    use faer::prelude::*;
     let a = unsafe { std::slice::from_raw_parts(a_ptr, m * n) };
     let b = unsafe { std::slice::from_raw_parts(b_ptr, m * nrhs) };
     let a_col = row_major_to_col_major(a, m, n);
@@ -10500,7 +10415,6 @@ extern "C" fn cranelift_geev(
     info_ptr: *mut i32,
 ) {
     use faer::complex_native::c64;
-    use faer::prelude::*;
     let a = unsafe { std::slice::from_raw_parts(a_ptr, n * n) };
     let a_col = row_major_to_col_major(a, n, n);
     let a_mat = faer::mat::from_column_major_slice(&a_col, n, n);
@@ -10605,7 +10519,6 @@ extern "C" fn cranelift_gesvd(
     vt_ptr: *mut f64,
     info_ptr: *mut i32,
 ) {
-    use faer::prelude::*;
     let a = unsafe { std::slice::from_raw_parts(a_ptr, m * n) };
     let a_col = row_major_to_col_major(a, m, n);
     let a_mat = faer::mat::from_column_major_slice(&a_col, m, n);
@@ -10637,7 +10550,6 @@ extern "C" fn cranelift_gesvd(
 fn lower_gesvd_custom_call(
     builder: &mut FunctionBuilder,
     operands: &[ValueId],
-    result_types: &[TensorType],
     value_map: &mut HashMap<ValueId, LaneRepr>,
     type_map: &HashMap<ValueId, TensorType>,
     jit_module: &mut JITModule,

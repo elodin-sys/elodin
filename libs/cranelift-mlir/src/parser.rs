@@ -2736,17 +2736,6 @@ fn extract_i64_attr(text: &str, name: &str) -> Option<i64> {
 }
 
 fn parse_conv_dimension_numbers(text: &str) -> ConvDimensionNumbers {
-    fn parse_group(s: &str, labels: &[&str]) -> (Vec<(String, usize)>,) {
-        let s = s.trim().trim_start_matches('[').trim_end_matches(']');
-        let items: Vec<(String, usize)> = s
-            .split(',')
-            .map(|t| t.trim().to_string())
-            .enumerate()
-            .map(|(pos, tok)| (tok, pos))
-            .collect();
-        (items,)
-    }
-
     let mut dn = ConvDimensionNumbers {
         input_batch_dimension: 0,
         input_feature_dimension: 1,

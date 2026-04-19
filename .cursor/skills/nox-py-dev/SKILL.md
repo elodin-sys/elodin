@@ -85,7 +85,7 @@ Central orchestrator. Handles `World.spawn()`, `World.insert()`, `World.run()`, 
 Compiles Python-defined systems into executable computations via cranelift (default) or JAX. Handles the `@system`, `@map`, `@map_seq` decorator logic on the Rust side. System composition (pipe `|`) is implemented here.
 
 ### `exec.rs`
-Defines `WorldExec` enum with `Iree(IREEWorldExec)` and `Jax(JaxWorldExec)` variants. Both implement the same interface for tick execution, profiling, and DB integration. The `backend` parameter in `w.run()` / `w.build()` selects which variant is used.
+Defines `WorldExec` enum with `Cranelift(CraneliftWorldExec)` and `Jax(JaxWorldExec)` variants. Both implement the same interface for tick execution, profiling, and DB integration. The `backend` parameter in `w.run()` / `w.build()` selects between the cranelift and JAX execution modes.
 
 ### `jax_exec.rs`
 JAX backend: compiles Noxpr graph → `jax.jit()` callable, then executes each tick by calling the JAX function via PyO3. Slower than cranelift but supports all JAX operations and the GPU.

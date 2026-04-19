@@ -1,3 +1,5 @@
+// Shared test helpers; not every test binary that includes this module
+// consumes every helper.
 #![allow(dead_code)]
 
 use cranelift_mlir::lower::{CompileConfig, compile_module, compile_module_with_config};

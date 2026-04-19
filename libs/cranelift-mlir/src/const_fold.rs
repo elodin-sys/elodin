@@ -2995,7 +2995,7 @@ mod tests {
             })
             .expect("return")
         {
-            v if v == ValueId(100) => {}
+            ValueId(100) => {}
             other => panic!("expected Return to reference arg0, got {other:?}"),
         }
     }
@@ -3053,7 +3053,7 @@ mod tests {
             })
             .expect("return")
         {
-            v if v == ValueId(100) => {}
+            ValueId(100) => {}
             other => panic!("expected Return to reference on_true, got {other:?}"),
         }
     }
@@ -3100,7 +3100,6 @@ mod tests {
     fn cascade_phase1_phase2_phase3() {
         // Transpose(BroadcastInDim(DenseScalar(3.0), 3x3)) then Select(true, x, _)
         // All three phases should cooperate to collapse this to a single splat constant.
-        let scalar_ty = f64_scalar_ty();
         let tensor_3x3 = f64_tensor(vec![3, 3]);
         let mut m = mk_module(vec![
             mk_constant(0, 3.0),

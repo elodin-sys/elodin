@@ -14,7 +14,7 @@ order = 64
 
 At Elodin's core is a physics toolkit that utilizes the ECS design pattern.
 This toolkit allows our users to create incredibly efficient physics simulations easily.
-Elodin's ECS engine is unique in that it compiles simulations through [IREE](https://iree.dev/) for fast CPU execution by default, with an optional [JAX](https://jax.readthedocs.io/) backend for full compatibility.
+Elodin's ECS engine is unique in that it compiles simulations with our [Cranelift](https://cranelift.dev/)-based JIT backend by default for fast native CPU execution, with XLA CPU and GPU backends available for full [JAX](https://jax.readthedocs.io/) compatibility.
 Our engine allows your simulations to run efficiently with no code changes.
 
 ## A History Lesson on ECS
@@ -84,7 +84,7 @@ ECS isn't just great for video games; it is widely applicable to all kinds of ap
 
 We want to build an ECS-based physics engine that utilizes all of ECS's benefits and is easy for non-professional software engineers to use. Historically, writing code that utilizes vectorized operations was a harrowing manual process. Engineers had to write code in an obscure, often difficult-to-read way ([https://mcyoung.xyz/2023/11/27/simd-base64/](https://mcyoung.xyz/2023/11/27/simd-base64/)). While the results were very performant, they were not very readable. Simulation code is already difficult to understand due to its heavy reliance on often obscure mathematical methods. Adding complex performance optimizations to that is a recipe for confusion.
 
-Thankfully, there is another math-heavy field that deals with this exact problem -- Machine Learning (ML). There are several systems built for machine learning that allow efficient vectorized operations without sacrificing readability. We use [JAX](https://jax.readthedocs.io/), a JIT compiler for Python that turns standard NumPy operations into StableHLO intermediate representation. Elodin then compiles this StableHLO to [IREE](https://iree.dev/) bytecode for fast, Python-free execution each simulation tick. JAX is wonderful because it allows anyone comfortable with NumPy to write efficient simulation code. Python is quickly becoming the lingua franca of scientific programming, so this feature is of particular interest.
+Thankfully, there is another math-heavy field that deals with this exact problem -- Machine Learning (ML). There are several systems built for machine learning that allow efficient vectorized operations without sacrificing readability. We use [JAX](https://jax.readthedocs.io/), a JIT compiler for Python that turns standard NumPy operations into StableHLO intermediate representation. Elodin then compiles this StableHLO to native machine code via our [Cranelift](https://cranelift.dev/)-based JIT backend for fast, Python-free execution each simulation tick. JAX is wonderful because it allows anyone comfortable with NumPy to write efficient simulation code. Python is quickly becoming the lingua franca of scientific programming, so this feature is of particular interest.
 
 Our simulation engine works by merging ECS and JAX into a unified platform. We have ported a subset of JAX's features to Rust, a system we call Nox. Here is an example of how to write a basic six DOF (degrees-of-freedom) physics engine using Nox and our ECS.
 
