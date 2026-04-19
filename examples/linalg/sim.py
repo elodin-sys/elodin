@@ -3,7 +3,8 @@ and run correctly.
 
 Exercises every JAX linalg operation used in aerospace simulations:
   - solve, inv (2x2 small-matrix LAPACK dispatch)
-  - cholesky, det, slogdet, qr (3x3 Kalman filter)
+  - cholesky (lower / upper / batched variants)
+  - det, slogdet, qr (3x3 Kalman filter)
   - svd, pseudoinverse via SVD (6x6 navigation EKF)
   - solve (direct linear system)
   - eigh (symmetric eigendecomposition)
@@ -20,6 +21,7 @@ import elodin as el
 import jax
 import jax.numpy as jnp
 import jax.numpy.linalg as la
+import jax.scipy.linalg as jsl
 
 SIMULATION_RATE = 120.0
 
@@ -78,6 +80,16 @@ MatRhsState = ty.Annotated[
     el.Component("mrhs_state", el.ComponentType(el.PrimitiveType.F64, (3, 2))),
 ]
 
+# --- Components (Cholesky variants -- exercises lower, upper, and batched forms)
+#     Each tick re-decomposes three fixed SPD matrices and reports the Frobenius
+#     norm of the reconstruction residual.  A correct implementation produces
+#     residuals near machine epsilon; a silently-wrong implementation produces
+#     residuals on the order of the input magnitude.
+CholResNorms = ty.Annotated[
+    jnp.ndarray,
+    el.Component("chol_res_norms", el.ComponentType(el.PrimitiveType.F64, (3,))),
+]
+
 # --- Archetypes ---
 
 
@@ -111,6 +123,11 @@ class ModeArchetype(el.Archetype):
     mode_state: ModeState = field(default_factory=lambda: jnp.zeros(4, dtype=jnp.int64))
 
 
+@el.dataclass
+class CholVariantsArchetype(el.Archetype):
+    chol_res_norms: CholResNorms = field(default_factory=lambda: jnp.zeros(3))
+
+
 DT = 1.0 / SIMULATION_RATE
 
 # 3-state dynamics (position, velocity, acceleration)
@@ -130,6 +147,27 @@ F6 = jnp.block([[jnp.eye(3), DT * jnp.eye(3)], [jnp.zeros((3, 3)), jnp.eye(3)]])
 Q6 = 0.01 * jnp.eye(6)
 H6 = jnp.eye(6)
 R6 = 0.1 * jnp.eye(6)
+
+# --- Cholesky test fixtures (symmetric positive-definite, diagonally dominant) ---
+CHOL_A_3X3 = jnp.array(
+    [
+        [4.0, 2.0, 3.0],
+        [2.0, 8.0, 1.0],
+        [3.0, 1.0, 9.0],
+    ]
+)
+CHOL_BATCH = jnp.stack(
+    [
+        CHOL_A_3X3,
+        jnp.array(
+            [
+                [9.0, 3.0, 1.0],
+                [3.0, 6.0, 2.0],
+                [1.0, 2.0, 5.0],
+            ]
+        ),
+    ]
+)
 
 
 def _safe_matrix_inverse(matrix, tolerance=1e-12):
@@ -284,6 +322,35 @@ def ekf6_step(state: State6, cov: Cov6, info: Info6) -> tuple[State6, Cov6, Info
     return x_upd, P_upd, info_out
 
 
+# --- Cholesky variants (exercises lower, upper, and batched forms) ---
+#
+# `jsl.cholesky(A, lower=False)` emits surrounding `stablehlo.transpose` +
+# `stablehlo.select` ops around `@lapack_dpotrf_ffi` (always called with
+# `uplo='L'`); reconstructing A via `U.T @ U` tests that flow end-to-end.
+# `jnp.linalg.cholesky(Ab)` passes `num_batch_dims = "1"` in the
+# `mhlo.backend_config`; reconstructing each slice via `Lb @ Lb.T` tests the
+# per-batch dispatch.
+
+
+@el.map
+def chol_variants_step(_: CholResNorms) -> CholResNorms:
+    U = jsl.cholesky(CHOL_A_3X3, lower=False)
+    L = jsl.cholesky(CHOL_A_3X3, lower=True)
+    Lb = jnp.linalg.cholesky(CHOL_BATCH)
+
+    upper_res = U.T @ U - CHOL_A_3X3
+    lower_res = L @ L.T - CHOL_A_3X3
+    batch_res = Lb @ jnp.swapaxes(Lb, -1, -2) - CHOL_BATCH
+
+    return jnp.array(
+        [
+            la.norm(upper_res),
+            la.norm(lower_res),
+            la.norm(batch_res),
+        ]
+    )
+
+
 # --- Mode selector (exercises .at[idx].set() scatter-into-constant) ---
 
 
@@ -336,8 +403,12 @@ def world() -> el.World:
         ),
         name="mode_sel",
     )
+    w.spawn(
+        CholVariantsArchetype(),
+        name="chol_variants",
+    )
     return w
 
 
 def system() -> el.System:
-    return mat_rhs_step | small2_step | kf3_step | ekf6_step | mode_step
+    return mat_rhs_step | small2_step | kf3_step | ekf6_step | mode_step | chol_variants_step

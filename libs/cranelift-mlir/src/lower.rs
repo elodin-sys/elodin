@@ -5484,44 +5484,58 @@ fn lower_instruction_mem(
             Ok(vec![LaneRepr::scalar(vec![dst])])
         }
 
-        Instruction::CholeskyOp {
-            operand,
-            lower: _lower,
-        } => {
-            // TODO: honor `lower` to dispatch upper vs lower Cholesky.
-            // Current ptr-ABI path always produces the lower-triangular
-            // factor; scalar path mirrors this. Parsed IR is preserved.
+        Instruction::CholeskyOp { operand, lower } => {
+            // StableHLO spec permits batched input: the last two dims are the
+            // matrix dims, any leading dims are batch.  We loop B times,
+            // calling the runtime per matrix slice.
             let src_ty = type_map.get(operand).cloned().unwrap_or(rt.clone());
-            let nn = require_square(
-                "Cholesky",
-                &vec![cranelift_codegen::ir::Value::from_u32(0); src_ty.num_elements()],
-            )
-            .unwrap_or_else(|_| (src_ty.num_elements() as f64).sqrt() as usize);
+            let shape = &src_ty.shape;
+            if shape.len() < 2 {
+                return Err("mem: Cholesky requires rank >= 2 input".to_string());
+            }
+            let nn = shape[shape.len() - 1] as usize;
+            if shape[shape.len() - 2] as usize != nn {
+                return Err(format!(
+                    "mem: Cholesky last two dims must be square, got {}x{}",
+                    shape[shape.len() - 2],
+                    nn,
+                ));
+            }
+            let batch_size: usize = shape[..shape.len() - 2]
+                .iter()
+                .map(|&d| d as usize)
+                .product();
             let f8 = 8;
-            let l_b = nn * nn * f8;
+            let mat_b = nn * nn * f8;
             let info_b = 4;
-            let (_, base) = lapack_slot(builder, l_b + l_b + info_b);
-            let src_n = src_ty.num_elements();
+            let (_, scratch) = lapack_slot(builder, mat_b + mat_b + info_b);
             let memcpy_ref = jit_module.declare_func_in_func(trt_ids.memcpy, builder.func);
-            let nb = builder.ins().iconst(types::I64, (src_n * f8) as i64);
-            builder.ins().call(memcpy_ref, &[base, get(operand)?, nb]);
-            let l_off = l_b as i32;
-            let info_off = (l_b + l_b) as i32;
-            let l_ptr = builder.ins().iadd_imm(base, l_off as i64);
-            let info_ptr = builder.ins().iadd_imm(base, info_off as i64);
+            let dst = alloc_slot_for_vid(builder, pool, result_vid, batch_size * mat_b);
+            let operand_ptr = get(operand)?;
             let n_val = builder.ins().iconst(types::I64, nn as i64);
+            let lower_val = builder.ins().iconst(types::I32, i64::from(*lower));
+            let mat_b_val = builder.ins().iconst(types::I64, mat_b as i64);
             let pt = ptr_type();
-            lapack_call(
-                builder,
-                jit_module,
-                "__cranelift_cholesky",
-                &[pt, types::I64, pt, pt],
-                &[base, n_val, l_ptr, info_ptr],
-            )?;
-            let dst = alloc_slot_for_vid(builder, pool, result_vid, l_b);
-            let memcpy_ref2 = jit_module.declare_func_in_func(trt_ids.memcpy, builder.func);
-            let lb_val = builder.ins().iconst(types::I64, l_b as i64);
-            builder.ins().call(memcpy_ref2, &[dst, l_ptr, lb_val]);
+            let out_off = mat_b as i32;
+            let info_off = (mat_b + mat_b) as i32;
+            let out_ptr = builder.ins().iadd_imm(scratch, out_off as i64);
+            let info_ptr = builder.ins().iadd_imm(scratch, info_off as i64);
+            for b in 0..batch_size {
+                let slice_off = (b * mat_b) as i64;
+                let src = builder.ins().iadd_imm(operand_ptr, slice_off);
+                builder.ins().call(memcpy_ref, &[scratch, src, mat_b_val]);
+                lapack_call(
+                    builder,
+                    jit_module,
+                    "__cranelift_cholesky",
+                    &[pt, types::I64, types::I32, pt, pt],
+                    &[scratch, n_val, lower_val, out_ptr, info_ptr],
+                )?;
+                let dst_slice = builder.ins().iadd_imm(dst, slice_off);
+                builder
+                    .ins()
+                    .call(memcpy_ref, &[dst_slice, out_ptr, mat_b_val]);
+            }
             Ok(vec![LaneRepr::scalar(vec![dst])])
         }
 
@@ -9224,6 +9238,7 @@ fn lower_custom_call(
             value_map,
             type_map,
             jit_module,
+            backend_config,
         );
     }
     if call_target.starts_with("lapack_dgeqrf") {
@@ -9480,9 +9495,18 @@ extern "C" fn cranelift_trsm(
     out.copy_from_slice(&result);
 }
 
-extern "C" fn cranelift_cholesky(a_ptr: *const f64, n: usize, l_ptr: *mut f64, info_ptr: *mut i32) {
+/// Runtime Cholesky factor. When `lower != 0` writes the lower factor L
+/// such that A = L·L^T; otherwise writes the upper factor U = L^T such
+/// that A = U^T·U. The opposite triangle is explicitly zeroed.
+extern "C" fn cranelift_cholesky(
+    a_ptr: *const f64,
+    n: usize,
+    lower: i32,
+    out_ptr: *mut f64,
+    info_ptr: *mut i32,
+) {
     let a = unsafe { std::slice::from_raw_parts(a_ptr, n * n) };
-    let l_out = unsafe { std::slice::from_raw_parts_mut(l_ptr, n * n) };
+    let out = unsafe { std::slice::from_raw_parts_mut(out_ptr, n * n) };
 
     let mut col_data = row_major_to_col_major(a, n, n);
     let mat = faer::mat::from_column_major_slice_mut(&mut col_data, n, n);
@@ -9504,15 +9528,33 @@ extern "C" fn cranelift_cholesky(a_ptr: *const f64, n: usize, l_ptr: *mut f64, i
         Default::default(),
     );
 
-    // Zero the strict upper triangle in column-major: elements where row < col
-    for col in 0..n {
-        for row in 0..col {
-            col_data[col * n + row] = 0.0;
+    // col_data now holds L in its lower triangle with the strict upper left as
+    // garbage by faer. Element (row, col) in column-major is at col*n + row,
+    // so L's strict upper = { (row, col) : row < col } and strict lower =
+    // { (row, col) : row > col }.
+    if lower != 0 {
+        for col in 0..n {
+            for row in 0..col {
+                col_data[col * n + row] = 0.0;
+            }
+        }
+    } else {
+        // U = L^T. Swap (row, col) with (col, row) for row > col, then zero
+        // the strict lower of the resulting U.
+        for col in 0..n {
+            for row in (col + 1)..n {
+                col_data.swap(col * n + row, row * n + col);
+            }
+        }
+        for col in 0..n {
+            for row in (col + 1)..n {
+                col_data[col * n + row] = 0.0;
+            }
         }
     }
 
     let row_data = col_major_to_row_major(&col_data, n, n);
-    l_out.copy_from_slice(&row_data);
+    out.copy_from_slice(&row_data);
 
     unsafe { *info_ptr = if result.is_ok() { 0 } else { 1 } };
 }
@@ -9922,36 +9964,80 @@ fn lower_cholesky_custom_call(
     operands: &[ValueId],
     _result_types: &[TensorType],
     value_map: &mut HashMap<ValueId, LaneRepr>,
-    _type_map: &HashMap<ValueId, TensorType>,
+    type_map: &HashMap<ValueId, TensorType>,
     jit_module: &mut JITModule,
+    backend_config: &HashMap<String, i64>,
 ) -> Result<Vec<LaneRepr>, String> {
+    // Decode `uplo` from the custom_call's backend_config: ASCII 'L' (76) =>
+    // lower factor L, 'U' (85) => upper factor U. Absent => default to L, the
+    // only form JAX emits today (upper is constructed outside the call via
+    // stablehlo.transpose).
+    let lower_flag: i32 = match backend_config.get("uplo").copied() {
+        Some(76) | None => 1,
+        Some(85) => 0,
+        Some(other) => return Err(format!("cholesky: unsupported uplo {other}")),
+    };
+
     let a_vals = get_vals(builder, value_map, &operands[0])?;
-    let n = require_square("Cholesky", a_vals)?;
+    let a_ty = type_map
+        .get(&operands[0])
+        .ok_or_else(|| "cholesky: missing operand type".to_string())?;
+    let shape = &a_ty.shape;
+    if shape.len() < 2 {
+        return Err("cholesky: input rank must be >= 2".to_string());
+    }
+    let n = shape[shape.len() - 1] as usize;
+    if shape[shape.len() - 2] as usize != n {
+        return Err(format!(
+            "cholesky: last two dims must be square, got {}x{}",
+            shape[shape.len() - 2],
+            n,
+        ));
+    }
+    let batch_size: usize = shape[..shape.len() - 2]
+        .iter()
+        .map(|&d| d as usize)
+        .product();
+    if a_vals.len() != batch_size * n * n {
+        return Err(format!(
+            "cholesky: operand has {} elements, expected {} * {}^2 = {}",
+            a_vals.len(),
+            batch_size,
+            n,
+            batch_size * n * n,
+        ));
+    }
+
     let f8 = 8;
-
-    let (a_b, l_b, info_b) = (n * n * f8, n * n * f8, 4);
-    let (_, base) = lapack_slot(builder, a_b + l_b + info_b);
-    store_f64_vals(builder, a_vals, base, 0);
-
-    let l_off = a_b as i32;
-    let info_off = (a_b + l_b) as i32;
-    let l_ptr = builder.ins().iadd_imm(base, l_off as i64);
-    let info_ptr = builder.ins().iadd_imm(base, info_off as i64);
+    let mat_b = n * n * f8;
+    let info_b = 4;
+    let (_, base) = lapack_slot(builder, mat_b + mat_b + info_b);
 
     let n_val = builder.ins().iconst(types::I64, n as i64);
+    let lower_val = builder.ins().iconst(types::I32, i64::from(lower_flag));
     let pt = ptr_type();
-    lapack_call(
-        builder,
-        jit_module,
-        "__cranelift_cholesky",
-        &[pt, types::I64, pt, pt],
-        &[base, n_val, l_ptr, info_ptr],
-    )?;
+    let out_off = mat_b as i32;
+    let info_off = (mat_b + mat_b) as i32;
+    let out_ptr = builder.ins().iadd_imm(base, out_off as i64);
+    let info_ptr_val = builder.ins().iadd_imm(base, info_off as i64);
 
-    Ok(vec![
-        load_f64_scalar_lane(builder, n * n, base, l_off),
-        LaneRepr::scalar(vec![load_info_i32(builder, base, info_off)]),
-    ])
+    let mut flat: Vec<cranelift_codegen::ir::Value> = Vec::with_capacity(batch_size * n * n);
+    let mut infos: Vec<cranelift_codegen::ir::Value> = Vec::with_capacity(batch_size);
+    for b in 0..batch_size {
+        let slice = &a_vals[b * n * n..(b + 1) * n * n];
+        store_f64_vals(builder, slice, base, 0);
+        lapack_call(
+            builder,
+            jit_module,
+            "__cranelift_cholesky",
+            &[pt, types::I64, types::I32, pt, pt],
+            &[base, n_val, lower_val, out_ptr, info_ptr_val],
+        )?;
+        flat.extend(load_f64_vals(builder, n * n, base, out_off));
+        infos.push(load_info_i32(builder, base, info_off));
+    }
+
+    Ok(vec![LaneRepr::scalar(flat), LaneRepr::scalar(infos)])
 }
 
 fn lower_qr_custom_call(

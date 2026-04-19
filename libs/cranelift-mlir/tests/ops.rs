@@ -3979,6 +3979,145 @@ module @module {
     assert_f64_close(l[3], 2.0_f64.sqrt());
 }
 
+#[test]
+fn test_cholesky_upper_mem() {
+    // StableHLO spec example:
+    //   %a = [[1, 2, 3], [2, 20, 26], [3, 26, 70]]
+    //   lower = false  ->  U = [[1, 2, 3], [0, 4, 5], [0, 0, 6]]  (A = U^T @ U)
+    let mlir = r#"
+module @module {
+  func.func public @main(%arg0: tensor<3x3xf64>) -> tensor<3x3xf64> {
+    %0 = stablehlo.cholesky %arg0, lower = false : tensor<3x3xf64>
+    return %0 : tensor<3x3xf64>
+  }
+}
+"#;
+    let a = f64_buf(&[1.0, 2.0, 3.0, 2.0, 20.0, 26.0, 3.0, 26.0, 70.0]);
+    let out = run_mlir_mem(mlir, &[&a], &[72]);
+    let u = read_f64s(&out[0]);
+    // Upper triangle: [[1,2,3],[0,4,5],[0,0,6]]
+    assert_f64_close(u[0], 1.0);
+    assert_f64_close(u[1], 2.0);
+    assert_f64_close(u[2], 3.0);
+    assert_f64_close(u[3], 0.0);
+    assert_f64_close(u[4], 4.0);
+    assert_f64_close(u[5], 5.0);
+    assert_f64_close(u[6], 0.0);
+    assert_f64_close(u[7], 0.0);
+    assert_f64_close(u[8], 6.0);
+}
+
+#[test]
+fn test_cholesky_batched_mem() {
+    // Two stacked 3x3 SPD matrices; verify each slice factorizes independently
+    // and the output batch dim is preserved.
+    let mlir = r#"
+module @module {
+  func.func public @main(%arg0: tensor<2x3x3xf64>) -> tensor<2x3x3xf64> {
+    %0 = stablehlo.cholesky %arg0, lower = true : tensor<2x3x3xf64>
+    return %0 : tensor<2x3x3xf64>
+  }
+}
+"#;
+    // Batch 0: A0 = [[4,2,0],[2,5,3],[0,3,10]]  → L0 = [[2,0,0],[1,2,0],[0,1.5,√7.75]]
+    // Batch 1: A1 = [[9,3,1],[3,6,2],[1,2,5]]
+    let a = f64_buf(&[
+        4.0, 2.0, 0.0, 2.0, 5.0, 3.0, 0.0, 3.0, 10.0, 9.0, 3.0, 1.0, 3.0, 6.0, 2.0, 1.0, 2.0, 5.0,
+    ]);
+    let out = run_mlir_mem(mlir, &[&a], &[18 * 8]);
+    let all = read_f64s(&out[0]);
+    // Reconstruct A0 = L0 * L0^T from the first 9 elems.
+    let l0 = &all[..9];
+    let l1 = &all[9..];
+    // Each factor must be lower triangular.
+    assert_f64_close(l0[1], 0.0);
+    assert_f64_close(l0[2], 0.0);
+    assert_f64_close(l0[5], 0.0);
+    assert_f64_close(l1[1], 0.0);
+    assert_f64_close(l1[2], 0.0);
+    assert_f64_close(l1[5], 0.0);
+    let reconstruct = |l: &[f64]| {
+        let mut out = [0.0f64; 9];
+        for i in 0..3 {
+            for j in 0..3 {
+                for k in 0..3 {
+                    out[i * 3 + j] += l[i * 3 + k] * l[j * 3 + k];
+                }
+            }
+        }
+        out
+    };
+    let r0 = reconstruct(l0);
+    let r1 = reconstruct(l1);
+    assert_f64s_close(&r0, &[4.0, 2.0, 0.0, 2.0, 5.0, 3.0, 0.0, 3.0, 10.0]);
+    assert_f64s_close(&r1, &[9.0, 3.0, 1.0, 3.0, 6.0, 2.0, 1.0, 2.0, 5.0]);
+}
+
+#[test]
+fn test_lapack_cholesky_upper() {
+    // Custom-call path with uplo='U' (ASCII 85) — exercises the alternate
+    // branch of our uplo decoder even though JAX itself always emits 'L'.
+    let mlir = r#"
+module @module {
+  func.func public @main(%arg0: tensor<3x3xf64>) -> (tensor<3x3xf64>, tensor<i32>) {
+    %0:2 = stablehlo.custom_call @lapack_dpotrf_ffi(%arg0) {backend_config = "", mhlo.backend_config = {uplo = 85 : ui8}} -> (tensor<3x3xf64>, tensor<i32>)
+    return %0#0, %0#1 : tensor<3x3xf64>, tensor<i32>
+  }
+}
+"#;
+    let a = f64_buf(&[1.0, 2.0, 3.0, 2.0, 20.0, 26.0, 3.0, 26.0, 70.0]);
+    let out = run_mlir(mlir, &[&a], &[72, 4]);
+    let u = read_f64s(&out[0]);
+    let info: i32 = i32::from_le_bytes(out[1][..4].try_into().unwrap());
+    assert_eq!(info, 0);
+    // Expected U = [[1,2,3],[0,4,5],[0,0,6]]
+    assert_f64s_close(&u, &[1.0, 2.0, 3.0, 0.0, 4.0, 5.0, 0.0, 0.0, 6.0]);
+}
+
+#[test]
+fn test_lapack_cholesky_batched() {
+    // Custom-call path with batched input — each 3x3 slice factorized
+    // independently, with one info value emitted per batch.
+    let mlir = r#"
+module @module {
+  func.func public @main(%arg0: tensor<2x3x3xf64>) -> (tensor<2x3x3xf64>, tensor<2xi32>) {
+    %0:2 = stablehlo.custom_call @lapack_dpotrf_ffi(%arg0) {backend_config = "", mhlo.backend_config = {uplo = 76 : ui8}} -> (tensor<2x3x3xf64>, tensor<2xi32>)
+    return %0#0, %0#1 : tensor<2x3x3xf64>, tensor<2xi32>
+  }
+}
+"#;
+    let a = f64_buf(&[
+        4.0, 2.0, 0.0, 2.0, 5.0, 3.0, 0.0, 3.0, 10.0, 9.0, 3.0, 1.0, 3.0, 6.0, 2.0, 1.0, 2.0, 5.0,
+    ]);
+    let out = run_mlir(mlir, &[&a], &[144, 8]);
+    let all = read_f64s(&out[0]);
+    let info0 = i32::from_le_bytes(out[1][..4].try_into().unwrap());
+    let info1 = i32::from_le_bytes(out[1][4..8].try_into().unwrap());
+    assert_eq!(info0, 0);
+    assert_eq!(info1, 0);
+    let l0 = &all[..9];
+    let l1 = &all[9..];
+    let reconstruct = |l: &[f64]| {
+        let mut out = [0.0f64; 9];
+        for i in 0..3 {
+            for j in 0..3 {
+                for k in 0..3 {
+                    out[i * 3 + j] += l[i * 3 + k] * l[j * 3 + k];
+                }
+            }
+        }
+        out
+    };
+    assert_f64s_close(
+        &reconstruct(l0),
+        &[4.0, 2.0, 0.0, 2.0, 5.0, 3.0, 0.0, 3.0, 10.0],
+    );
+    assert_f64s_close(
+        &reconstruct(l1),
+        &[9.0, 3.0, 1.0, 3.0, 6.0, 2.0, 1.0, 2.0, 5.0],
+    );
+}
+
 // ---- Triangular solve tests ----
 
 #[test]
