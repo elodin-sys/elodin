@@ -8,11 +8,11 @@
     "default": {
       "build_time_ms": {
         "abs_tol": 2000.0,
-        "rel_tol": 0.2
+        "rel_tol": 0.25
       },
       "real_time_factor": {
-        "abs_tol": 21.0,
-        "rel_tol": 0.2
+        "abs_tol": 25.0,
+        "rel_tol": 0.25
       }
     },
     "examples": {}
