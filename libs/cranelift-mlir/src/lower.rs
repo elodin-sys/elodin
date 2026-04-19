@@ -25,6 +25,28 @@ use crate::tensor_rt;
 pub struct CompiledModule {
     module: JITModule,
     main_fn_id: FuncId,
+    /// Millisecond-level breakdown of the three compile phases, captured
+    /// during `compile_module_with_config`. Read by callers like
+    /// `nox-py`'s `cranelift_compile.rs` to surface timings in the
+    /// startup log so the parallel-codegen speedup is observable.
+    pub timings: CompileTimings,
+}
+
+/// Per-phase timings for a single call to `compile_module_with_config`.
+///
+/// Populated during compile and exposed on [`CompiledModule::timings`]. All
+/// fields are in milliseconds, captured with `Instant::now`. Phase 2
+/// (codegen) measures the wall-clock elapsed on the calling thread while
+/// the rayon thread pool is active; on an N-core machine with well-balanced
+/// work, this is roughly `sum_of_per_fn_codegen / N`.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct CompileTimings {
+    /// Phase 1 — lowering IR functions to Cranelift IR (serial).
+    pub ir_build_ms: f64,
+    /// Phase 2 — parallel Cranelift `Context::compile` across all functions.
+    pub codegen_ms: f64,
+    /// Phase 3 — serial `define_function_bytes` + `finalize_definitions`.
+    pub link_ms: f64,
 }
 
 impl CompiledModule {
@@ -1631,6 +1653,32 @@ pub fn compile_module_with_config(
     // op-sampler emission path.
     crate::op_sampler::set_op_times_enabled(config.profile_enabled && config.profile_op_times);
 
+    // Three-phase compile pipeline.
+    //
+    //   Phase 1 (serial): lower each IR function to Cranelift IR. Uses
+    //       `&mut jit_module` for signature/data/func-ref declarations,
+    //       so it must stay single-threaded. `build_function_ir` returns
+    //       the populated `Context` without invoking codegen.
+    //
+    //   Phase 2 (parallel): `Context::compile` on a rayon thread pool —
+    //       this is the Cranelift legalization + egraph + regalloc +
+    //       machine-code emission step, which dominates compile wall
+    //       time on large modules. Only needs `&dyn TargetIsa` (immutable,
+    //       `Send + Sync` by Cranelift's design).
+    //
+    //   Phase 3 (serial): link each function's bytes + relocs into the
+    //       `JITModule` via `define_function_bytes`. Cheap; just registers
+    //       the compiled blob and queues it for `finalize_definitions`.
+    //
+    // Nested region bodies (map / reduce_window / sort comparators, etc.)
+    // are still compiled synchronously during Phase 1 via
+    // `compile_region_as_function`. Those bodies are small and not the
+    // hot path; parallelizing them is out of scope here.
+
+    // Phase 1: serial IR build.
+    let phase1_start = std::time::Instant::now();
+    let mut pending: Vec<(FuncId, cranelift_codegen::Context)> =
+        Vec::with_capacity(ir_module.functions.len());
     for func_def in &ir_module.functions {
         let fid = func_ids[&func_def.name];
         let abi = func_abis
@@ -1638,7 +1686,7 @@ pub fn compile_module_with_config(
             .copied()
             .unwrap_or(FuncAbi::Scalar);
         let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-            define_function(
+            build_function_ir(
                 &mut jit_module,
                 func_def,
                 ir_module,
@@ -1653,8 +1701,8 @@ pub fn compile_module_with_config(
             )
         }));
         match result {
-            Ok(Ok(())) => {}
-            Ok(Err(e)) => return Err(format!("define {}: {e}", func_def.name)),
+            Ok(Ok((fid, ctx))) => pending.push((fid, ctx)),
+            Ok(Err(e)) => return Err(format!("build {}: {e}", func_def.name)),
             Err(panic) => {
                 let msg = if let Some(s) = panic.downcast_ref::<String>() {
                     s.clone()
@@ -1668,9 +1716,69 @@ pub fn compile_module_with_config(
         }
     }
 
+    let ir_build_ms = phase1_start.elapsed().as_secs_f64() * 1000.0;
+
+    // Phase 2: parallel codegen. The returned compiled blob is extracted
+    // from each `Context` into owned `Vec<u8>` + `Vec<ModuleReloc>` so the
+    // Context can be dropped before Phase 3 reacquires `&mut jit_module`.
+    //
+    // Amdahl's law gate: a single oversized function (e.g. cube-sat's
+    // EGM08 gravity model, ~2.5 MB of machine code after lowering)
+    // caps the Phase-2 wall clock at its own serial codegen time even
+    // on a 20-core box. The per-function breakdown emitted under
+    // `ELODIN_CRANELIFT_DEBUG_DIR` surfaces exactly which `FuncId` is
+    // dominant so it can be attacked directly (IR-level shrinking,
+    // hand-splitting, or a `opt_level` knob) in follow-up work.
+    let phase2_start = std::time::Instant::now();
+    let debug_codegen = crate::debug::enabled();
+    let compiled: Vec<(FuncId, u64, Vec<u8>, Vec<cranelift_module::ModuleReloc>)> = {
+        use rayon::prelude::*;
+        let isa = jit_module.isa();
+        pending
+            .into_par_iter()
+            .map(|(fid, mut ctx)| -> Result<_, String> {
+                let per_fn_start = debug_codegen.then(std::time::Instant::now);
+                let mut ctrl_plane = cranelift_codegen::control::ControlPlane::default();
+                ctx.compile(isa, &mut ctrl_plane)
+                    .map_err(|e| format!("codegen {}: {:?}", fid.as_u32(), e))?;
+                let code = ctx
+                    .compiled_code()
+                    .ok_or_else(|| format!("codegen {}: no compiled code", fid.as_u32()))?;
+                let alignment = code.buffer.alignment as u64;
+                let bytes: Vec<u8> = code.code_buffer().to_vec();
+                let relocs: Vec<cranelift_module::ModuleReloc> = code
+                    .buffer
+                    .relocs()
+                    .iter()
+                    .map(|r| cranelift_module::ModuleReloc::from_mach_reloc(r, &ctx.func, fid))
+                    .collect();
+                if let Some(t0) = per_fn_start {
+                    let ms = t0.elapsed().as_secs_f64() * 1000.0;
+                    eprintln!(
+                        "[elodin-cranelift] codegen fid={:>3} {:>8.2}ms bytes={}",
+                        fid.as_u32(),
+                        ms,
+                        bytes.len(),
+                    );
+                }
+                Ok((fid, alignment, bytes, relocs))
+            })
+            .collect::<Result<_, _>>()?
+    };
+    let codegen_ms = phase2_start.elapsed().as_secs_f64() * 1000.0;
+
+    // Phase 3: serial link into the JIT module.
+    let phase3_start = std::time::Instant::now();
+    for (fid, alignment, bytes, relocs) in compiled {
+        jit_module
+            .define_function_bytes(fid, alignment, &bytes, &relocs)
+            .map_err(|e| format!("link {}: {e}", fid.as_u32()))?;
+    }
+
     jit_module
         .finalize_definitions()
         .map_err(|e| format!("finalize: {e}"))?;
+    let link_ms = phase3_start.elapsed().as_secs_f64() * 1000.0;
 
     let main_fn_id = *func_ids.get("main").ok_or("no main function")?;
 
@@ -1696,6 +1804,11 @@ pub fn compile_module_with_config(
     Ok(CompiledModule {
         module: jit_module,
         main_fn_id,
+        timings: CompileTimings {
+            ir_build_ms,
+            codegen_ms,
+            link_ms,
+        },
     })
 }
 
@@ -1862,10 +1975,15 @@ fn compile_region_as_function(
 }
 
 // ---------------------------------------------------------------------------
-// Function definition (body lowering + ABI handling)
+// Function IR building (body lowering + ABI handling)
 // ---------------------------------------------------------------------------
 
-fn define_function(
+/// Build Cranelift IR for a single function and return the populated
+/// `Context` to the caller. Intentionally does NOT invoke
+/// `jit_module.define_function` (the Cranelift codegen step) so the
+/// caller can batch codegen across a rayon thread pool; see the
+/// three-phase pipeline in `compile_module_with_config`.
+fn build_function_ir(
     jit_module: &mut JITModule,
     func_def: &crate::ir::FuncDef,
     ir_module: &crate::ir::Module,
@@ -1877,7 +1995,7 @@ fn define_function(
     abi: FuncAbi,
     fid: FuncId,
     config: &CompileConfig,
-) -> Result<(), String> {
+) -> Result<(FuncId, cranelift_codegen::Context), String> {
     let mut ctx = jit_module.make_context();
     let mut func_ctx = FunctionBuilderContext::new();
 
@@ -1978,12 +2096,8 @@ fn define_function(
         inject_profile_probes(&mut ctx.func, jit_module, profile_ids, fid);
     }
 
-    jit_module
-        .define_function(fid, &mut ctx)
-        .map_err(|e| format!("define {}: {:?}", func_def.name, e))?;
-
     set_current_function_fid(None);
-    Ok(())
+    Ok((fid, ctx))
 }
 
 fn lower_main_body(

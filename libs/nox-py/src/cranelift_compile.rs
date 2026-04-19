@@ -99,19 +99,29 @@ def run_xla_reference(func, real_input_arrays, debug_dir):
     let stablehlo_mlir: String = result.extract(py)?;
     let lower_ms = lower_start.elapsed().as_secs_f64() * 1000.0;
 
-    let compile_start = Instant::now();
+    let parse_start = Instant::now();
     let mut ir_module = cranelift_mlir::parser::parse_module(&stablehlo_mlir)
         .map_err(|e| Error::CraneliftBackend(format!("MLIR parse failed: {e}")))?;
+    let parse_ms = parse_start.elapsed().as_secs_f64() * 1000.0;
 
+    let fold_start = Instant::now();
     cranelift_mlir::const_fold::fold_module(&mut ir_module);
+    let fold_ms = fold_start.elapsed().as_secs_f64() * 1000.0;
 
+    let compile_start = Instant::now();
     let compiled = cranelift_mlir::lower::compile_module(&ir_module)
         .map_err(|e| Error::CraneliftBackend(format!("Cranelift compile failed: {e}")))?;
     let compile_ms = compile_start.elapsed().as_secs_f64() * 1000.0;
 
+    let timings = compiled.timings;
+    let total_ms = lower_ms + parse_ms + fold_ms + compile_ms;
     eprintln!(
-        "[elodin-cranelift] lower={lower_ms:.1}ms compile={compile_ms:.1}ms total={:.1}ms",
-        lower_ms + compile_ms,
+        "[elodin-cranelift] lower={lower_ms:.1}ms parse={parse_ms:.1}ms \
+         fold={fold_ms:.1}ms ir_build={ir_build_ms:.1}ms codegen={codegen_ms:.1}ms \
+         link={link_ms:.1}ms total={total_ms:.1}ms",
+        ir_build_ms = timings.ir_build_ms,
+        codegen_ms = timings.codegen_ms,
+        link_ms = timings.link_ms,
     );
 
     if let Ok(debug_dir) = std::env::var("ELODIN_CRANELIFT_DEBUG_DIR") {

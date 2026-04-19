@@ -3837,6 +3837,7 @@ dependencies = [
  "cranelift-module",
  "cranelift-native",
  "faer",
+ "rayon",
  "serde",
  "serde_json",
  "tracy-client",
