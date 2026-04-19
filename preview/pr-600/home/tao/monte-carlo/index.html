@@ -496,7 +496,7 @@ Other solutions simply require large amounts of engineering effort and/or massiv
 <p>Elodin solves these problems by introducing a cloud-based simulation runner that can run up to 100,000 simulations simultaneously. We're able to do so in a cost-effective way by:</p>
 <ul>
 <li>Using the <a href="https://en.wikipedia.org/wiki/Entity_component_system">ECS</a> architecture to exploit the inherent parallelism in running the same compute kernel against different sets of data.</li>
-<li>Leveraging <a href="https://iree.dev/">IREE</a> to compile the simulation code for fast execution.</li>
+<li>Leveraging our <a href="https://cranelift.dev/">Cranelift</a>-based JIT backend to compile simulation code to native machine code for fast execution.</li>
 <li>Using the cloud's elasticity to scale up and down as needed.</li>
 </ul>
 
