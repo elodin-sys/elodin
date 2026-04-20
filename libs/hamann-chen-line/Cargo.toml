@@ -1,6 +1,7 @@
 [package]
 name = "hamann-chen-line"
 description = "Hamann–Chen (1994) curvature-based polyline simplification"
+readme = "README.md"
 license = "MIT OR Apache-2.0"
 version.workspace = true
 edition.workspace = true

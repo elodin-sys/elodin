@@ -1,15 +1,37 @@
-//! Hamann–Chen (1994) curvature-based polyline sampling.
+//! # Hamann–Chen (1994) curvature-based polyline sampling
 //!
-//! Implementation is a direct port of the algorithm in Shane Celis’s C#
-//! [`PiecewiseLinearCurveApproximation.cs`](https://gist.github.com/shanecelis/2e0ffd790e31507fba04dd56f806667a)
-//! (curvature samples, `xbars` / `ss` / `ki` filtering, interval walk, endpoints). Inverting
-//! cumulative curvature along arc length uses trapezoidal integration on `s` and linear
-//! interpolation instead of Math.NET `LinearSpline` + `RobustNewtonRaphson` from that gist.
+//! This crate reduces a long polyline to about **`m` vertices** by **sampling where curvature
+//! concentrates**, instead of uniform decimation in index space. It is **not** Douglas–Peucker.
 //!
-//! - **2D** — [`select_polyline2_indices`] for a planar polyline, and [`select_time_value_indices`]
-//!   for `(t, y)` graph data (same algorithm in the `(t,y)` plane).
-//! - **3D** — [`select_polyline3_indices`] for a spatial polyline (local osculating 2D frame per
-//!   vertex, then the same 2D curvature construction as above on each triangle).
+//! ## Reference implementation (C#)
+//!
+//! The control flow matches the algorithm laid out in Shane Celis’s C#
+//! [`PiecewiseLinearCurveApproximation.cs`](https://gist.github.com/shanecelis/2e0ffd790e31507fba04dd56f806667a):
+//! curvature along the polyline, filter low-curvature vertices (`xbars` / `ki`), build arc length
+//! `ss`, integrate curvature, walk intervals, pick indices, sort/dedup/endpoints.
+//!
+//! ## Differences from that gist
+//!
+//! - **Inverting cumulative curvature** — the gist uses Math.NET `LinearSpline` and
+//!   `RobustNewtonRaphson`. This port uses **trapezoidal integration** on `s` with respect to
+//!   `ki`, stores cumulative curvature, then **linear interpolation in `s`** at each target
+//!   fraction of total integrated curvature (same idea, no extra numerics crates).
+//! - **3D** — [`select_polyline3_indices`] flattens each vertex neighborhood to a **planar
+//!   triangle** `(p_{i-1}, p_i, p_{i+1})`, runs the **same 2D** curvature pipeline on that
+//!   triangle, and maps picks back to indices in the original 3D vertex list.
+//!
+//! ## Public API (pick one)
+//!
+//! | Use case | Entry point |
+//! |----------|-------------|
+//! | Planar `(x, y)` path | [`select_polyline2_indices`] |
+//! | Telemetry / graph `(t, y)` | [`select_time_value_indices`] |
+//! | Spatial `(x, y, z)` path | [`select_polyline3_indices`] |
+//! | One **shared** index set for aligned `(t, x, y, z)` (cheap, not full 3D shape) | [`select_trajectory_time_norm_indices`] |
+//!
+//! All return **sorted indices** into your slices (you copy data out yourself). Long-form docs,
+//! CLI examples, and Elodin Editor integration live in **`README.md`** next to this crate’s
+//! `Cargo.toml`.
 
 use glam::{Vec2, Vec3};
 
@@ -342,14 +364,25 @@ fn select_indices_curvature3(points: &[Vec3], ks: &[f32], m: usize) -> Vec<usize
     picked
 }
 
-/// **2D planar polyline** — indices into `points` (≤ `m`), always including endpoints.
+/// Simplifies a **planar** polyline (2D positions).
+///
+/// - **`m`** — desired vertex budget (after internal dedup, length is typically ≤ `m`).
+/// - **Endpoints** — when `m ≥ 2` and `points.len() ≥ 2`, the first and last original indices are
+///   kept when the generic picker succeeds.
+/// - **Fallback** — if curvature is everywhere negligible or degenerate, falls back to **uniform**
+///   index spacing (see tests).
 #[inline]
 pub fn select_polyline2_indices(points: &[Vec2], m: usize) -> Vec<usize> {
     let ks = curvature_samples_polyline2(points);
     select_indices_curvature2(points, &ks, m)
 }
 
-/// **2D graph / time series** — `(t, y)` rows as a polyline in the `(t,y)` plane.
+/// Same as [`select_polyline2_indices`] on points `(t_i, y_i)` built by zipping `times` and
+/// `values`.
+///
+/// Only `min(times.len(), values.len())` samples are considered. Empty input returns an empty
+/// vector. Use this for **telemetry graphs** where the visual is the curve in **time–value**
+/// space, not distance along the index axis.
 #[inline]
 pub fn select_time_value_indices(times: &[f32], values: &[f32], m: usize) -> Vec<usize> {
     let n = times.len().min(values.len());
@@ -360,14 +393,25 @@ pub fn select_time_value_indices(times: &[f32], values: &[f32], m: usize) -> Vec
     select_polyline2_indices(&pts, m)
 }
 
-/// **3D spatial polyline** — indices into `points` (≤ `m`), always including endpoints.
+/// Simplifies a **spatial** polyline in 3D using per-vertex **local 2D** curvature
+/// (triangle at each interior vertex), then the same integrated-curvature sampler as 2D.
+///
+/// Prefer this when the **geometry in 3D** matters (e.g. a flight path). For **three synchronized
+/// scalar streams** (X/Y/Z vs time) where you need **one index set** but a lighter model is OK, see
+/// [`select_trajectory_time_norm_indices`].
 #[inline]
 pub fn select_polyline3_indices(points: &[Vec3], m: usize) -> Vec<usize> {
     let ks = curvature_samples_polyline3(points);
     select_indices_curvature3(points, &ks, m)
 }
 
-/// Joint downsampling of `(t, x, y, z)` using one index set from `(t, ‖p‖)` (fast, not full 3D shape).
+/// **Joint** simplification: builds a 2D polyline `(t_i, ‖p_i‖)` and returns indices from
+/// [`select_polyline2_indices`].
+///
+/// Guarantees **one shared index list** for time-aligned `x/y/z` (copy each component by the same
+/// indices). Does **not** use full 3D turning curvature; the reduced series may miss detail that
+/// [`select_polyline3_indices`] would keep. Useful when speed and **axis alignment** matter more
+/// than exact 3D shape fidelity.
 pub fn select_trajectory_time_norm_indices(times: &[f32], pos: &[Vec3], m: usize) -> Vec<usize> {
     let n = times.len().min(pos.len());
     if n == 0 {
@@ -379,7 +423,7 @@ pub fn select_trajectory_time_norm_indices(times: &[f32], pos: &[Vec3], m: usize
     select_polyline2_indices(&pts, m)
 }
 
-/// Alias for [`select_polyline2_indices`] (legacy name).
+/// Alias for [`select_polyline2_indices`] (legacy name; “points” meant `Vec2` vertices).
 #[inline]
 pub fn select_point_indices(points: &[Vec2], m: usize) -> Vec<usize> {
     select_polyline2_indices(points, m)

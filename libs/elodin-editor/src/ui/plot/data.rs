@@ -42,15 +42,30 @@ use super::PlotBounds;
 /// Must be <= CHUNK_LEN to fit within a single GPU buffer shard
 pub const OVERVIEW_MAX_POINTS: usize = CHUNK_LEN;
 
-/// Tuning for optional downsampling of live `LineTree` data (see `maybe_compress_all_graph_lines`).
+/// Tuning for **Hamann–Chen** downsampling of live [`LineTree`] telemetry.
+///
+/// The simplifier lives in the `hamann-chen-line` workspace crate; its steps follow Shane Celis’s
+/// C# reference [`PiecewiseLinearCurveApproximation.cs`](https://gist.github.com/shanecelis/2e0ffd790e31507fba04dd56f806667a)
+/// (Hamann–Chen style curvature sampling). Integration notes: `libs/hamann-chen-line/README.md`.
+///
+/// After graph ingest, [`maybe_compress_all_graph_lines`] walks components and may rewrite
+/// [`Line`] assets so total stored points stay bounded. Scalar graphs use
+/// [`LineTree::compress_time_value_hamann`]; exactly **three** lines per component with identical
+/// timestamps use joint 3D polyline simplification so `line_3d` trails stay coherent.
 #[derive(Resource, Clone, Debug)]
 pub struct CurveCompressSettings {
+    /// When `false`, no Hamann–Chen pass runs (series grow until other limits apply).
     pub enabled: bool,
+    /// Run a compression pass when [`LineTree::total_points`] **exceeds** this threshold.
     pub compress_after_total_points: usize,
+    /// Target vertex count **`m`** passed to `hamann-chen-line` after a pass (per line, or shared
+    /// across the three joint XYZ lines).
     pub compress_to_points: usize,
     /// Fraction of the **last** samples (by time order) left uncompressed after a pass.
-    /// `0.0` = compress the whole series (subject to `compress_to_points`).  
-    /// `0.2` ≈ keep the last 20 % at full resolution; Hamann–Chen applies only to the leading ~80 %.
+    ///
+    /// - `0.0` — compress the whole series (still capped by `compress_to_points`).
+    /// - `0.2` — keep roughly the last 20% at full resolution; Hamann–Chen runs on the leading
+    ///   prefix only.
     pub keep_recent_fraction: f32,
 }
 
@@ -198,7 +213,14 @@ pub fn pkt_handler(
     }
 }
 
-/// Keeps live telemetry within GPU / index-buffer budgets by merging oversize series.
+/// Optionally rewrites oversized [`Line`] / [`LineTree`] series using **Hamann–Chen** sampling
+/// (`hamann-chen-line`, algorithm structure from Shane Celis’s C# gist linked on
+/// [`CurveCompressSettings`]).
+///
+/// Does nothing when [`CurveCompressSettings::enabled`] is false. Otherwise, for each plot
+/// component: if there are **three** lines and timestamps match across them, tries joint 3D
+/// compression; else compresses each line independently. GPU index-buffer sizing is handled
+/// separately in the plot render path.
 pub fn maybe_compress_all_graph_lines(
     graph_data: &mut CollectedGraphData,
     lines: &mut Assets<Line>,
