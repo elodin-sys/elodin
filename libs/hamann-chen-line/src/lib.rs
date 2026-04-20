@@ -233,10 +233,14 @@ fn select_indices_curvature2(points: &[Vec2], ks: &[f32], m: usize) -> Vec<usize
             let sl = ss[l];
             let sl_1 = ss[l + 1];
             if s_t > sl && s_t < sl_1 {
+                // `ss` and `xbars` have the same length; the last valid interval has `l == xbars.len() - 2`,
+                // so `l + 2 == xbars.len()` would be out of bounds — clamp to `l + 1` on that edge.
                 let pick = if (s_t - sl).abs() <= (s_t - sl_1).abs() {
                     nearest_point_index2(points, xbars[l + 1])
-                } else {
+                } else if l + 2 < xbars.len() {
                     nearest_point_index2(points, xbars[l + 2])
+                } else {
+                    nearest_point_index2(points, xbars[l + 1])
                 };
                 picked.push(pick);
                 found = true;
@@ -313,8 +317,10 @@ fn select_indices_curvature3(points: &[Vec3], ks: &[f32], m: usize) -> Vec<usize
             if s_t > sl && s_t < sl_1 {
                 let pick = if (s_t - sl).abs() <= (s_t - sl_1).abs() {
                     nearest_point_index3(points, xbars[l + 1])
-                } else {
+                } else if l + 2 < xbars.len() {
                     nearest_point_index3(points, xbars[l + 2])
+                } else {
+                    nearest_point_index3(points, xbars[l + 1])
                 };
                 picked.push(pick);
                 found = true;
@@ -406,5 +412,32 @@ mod tests {
         assert_eq!(idx.first().copied(), Some(0));
         assert_eq!(idx.last().copied(), Some(49));
         assert!(idx.len() <= 12);
+    }
+
+    #[test]
+    fn downsample_indices_stay_in_bounds() {
+        let pts2: Vec<Vec2> = (0..40)
+            .map(|i| {
+                let t = i as f32;
+                Vec2::new(t, t.sin() * 10.0)
+            })
+            .collect();
+        for m in 3..=18 {
+            let idx = select_polyline2_indices(&pts2, m);
+            assert!(idx.len() >= 2);
+            assert!(idx.iter().all(|&i| i < pts2.len()));
+        }
+
+        let pts3: Vec<Vec3> = (0..35)
+            .map(|i| {
+                let t = i as f32;
+                Vec3::new(t.cos() * 2.0, t.sin() * 2.0, t * 0.1)
+            })
+            .collect();
+        for m in 3..=16 {
+            let idx = select_polyline3_indices(&pts3, m);
+            assert!(idx.len() >= 2);
+            assert!(idx.iter().all(|&i| i < pts3.len()));
+        }
     }
 }
