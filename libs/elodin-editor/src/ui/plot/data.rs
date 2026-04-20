@@ -1448,10 +1448,28 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
 
     /// Upper bound on `u32` indices written by [`Self::write_to_index_buffer_with_step`] for this
     /// range and step (must stay in sync with that loop).
+    ///
+    /// Uses the same visibility clipping as [`Self::draw_index_chunk_iter`] but does **not**
+    /// require GPU-resident chunks (counts from CPU timestamps + visible length only).
     pub fn count_strip_index_u32s(&self, line_visible_range: Range<Timestamp>, step: usize) -> u32 {
         let step = step.max(1);
         let mut n: u32 = 0;
-        for chunk in self.draw_index_chunk_iter(line_visible_range) {
+        for c in self.range_iter(line_visible_range.clone()) {
+            let Some((start_offset, end_offset)) =
+                chunk_visible_offsets(&c.timestamps, &line_visible_range)
+            else {
+                continue;
+            };
+            let vis_len = end_offset.saturating_sub(start_offset);
+            if vis_len == 0 {
+                continue;
+            }
+            // `into_index_iter` length depends only on `len`; absolute indices match GPU path
+            // after clip, but counts are identical for any `range.start` with sufficient span.
+            let chunk = IndexChunk {
+                range: 0..u32::MAX,
+                len: vis_len,
+            };
             n = n.saturating_add(1);
             let end = chunk.clone().into_index_iter().last();
             let mut index_iter = chunk.into_index_iter();

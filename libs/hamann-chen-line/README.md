@@ -117,6 +117,19 @@ Defined in [`data.rs`](../elodin-editor/src/ui/plot/data.rs), registered in `Plo
 | **`compress_to_points`** | Target budget **`m`** for a simplification pass (per line, or joint 3-line path). |
 | **`keep_recent_fraction`** | Keep a **suffix** of the newest samples uncompressed (e.g. `0.2` ≈ last 20%); Hamann–Chen runs on the leading prefix only. `0.0` compresses the whole series (still capped by `compress_to_points`). |
 
+**Defaults** (`impl Default` in `data.rs`, tied to `CHUNK_COUNT` × `CHUNK_LEN`):
+
+Let `cap = CHUNK_COUNT * CHUNK_LEN` (currently **1024 × 3072 = 3145728** — max points budget for one `LineTree`).
+
+| Field | Default |
+|--------|---------|
+| **`enabled`** | `true` |
+| **`compress_after_total_points`** | `cap * 3 / 4` → **2359296** |
+| **`compress_to_points`** | `cap / 2` → **1572864** |
+| **`keep_recent_fraction`** | **0.0** |
+
+If `CHUNK_COUNT` / `CHUNK_LEN` change, these numbers change with them; the formulas above stay the source of truth.
+
 Override at runtime, for example:
 
 ```rust
