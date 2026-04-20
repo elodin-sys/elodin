@@ -1446,8 +1446,8 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
         self.write_to_index_buffer_with_step(index_buffer, render_queue, line_visible_range, step)
     }
 
-    /// Upper bound on `u32` indices written by [`Self::write_to_index_buffer_with_step`] for this
-    /// range and step (must stay in sync with that loop).
+    /// Count of `u32` indices written by [`Self::write_to_index_buffer_with_step`] for this range
+    /// and step (must stay in sync with that loop, including when `step == 1`).
     ///
     /// Uses the same visibility clipping as [`Self::draw_index_chunk_iter`] but does **not**
     /// require GPU-resident chunks (counts from CPU timestamps + visible length only).
@@ -1473,11 +1473,18 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
             n = n.saturating_add(1);
             let end = chunk.clone().into_index_iter().last();
             let mut index_iter = chunk.into_index_iter();
-            if index_iter.next().is_some() {
+            let mut last_written: Option<u32> = None;
+            if let Some(index) = index_iter.next() {
                 n = n.saturating_add(1);
-                n = n.saturating_add(index_iter.step_by(step).count() as u32);
+                last_written = Some(index);
             }
-            if end.is_some() {
+            for index in index_iter.step_by(step) {
+                n = n.saturating_add(1);
+                last_written = Some(index);
+            }
+            if let Some(end) = end
+                && last_written != Some(end)
+            {
                 n = n.saturating_add(1);
             }
             n = n.saturating_add(1);
@@ -1509,12 +1516,14 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
             written_u32s += 1;
             let end = chunk.clone().into_index_iter().last();
             let mut index_iter = chunk.into_index_iter();
+            let mut last_written: Option<u32> = None;
             if let Some(index) = index_iter.next() {
                 let Some(v) = try_append_u32(view, index) else {
                     break 'chunks;
                 };
                 view = v;
                 written_u32s += 1;
+                last_written = Some(index);
             }
             for index in index_iter.step_by(step) {
                 let Some(v) = try_append_u32(view, index) else {
@@ -1522,8 +1531,11 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
                 };
                 view = v;
                 written_u32s += 1;
+                last_written = Some(index);
             }
-            if let Some(end) = end {
+            if let Some(end) = end
+                && last_written != Some(end)
+            {
                 let Some(v) = try_append_u32(view, end) else {
                     break 'chunks;
                 };
@@ -1836,6 +1848,20 @@ mod tests {
         let c8 = tree.count_strip_index_u32s(range.clone(), 8);
         assert!(c8 <= c1, "c1={c1} c8={c8}");
         assert!(c1 > 0);
+    }
+
+    #[test]
+    fn count_strip_index_u32s_step_one_matches_sentinels_plus_vertices() {
+        let mut tree = LineTree::<f32>::default();
+        let ts: Vec<Timestamp> = (0i64..10).map(Timestamp).collect();
+        let vals: Vec<f32> = (0..10).map(|i| i as f32).collect();
+        let chunk = Chunk::from_iter(&ts, Timestamp(0), vals.into_iter()).expect("chunk");
+        tree.insert(chunk);
+        let c = tree.count_strip_index_u32s(Timestamp(0)..Timestamp(10), 1);
+        assert_eq!(
+            c, 12,
+            "leading 0 + 10 indices + trailing 0 (no duplicate last)"
+        );
     }
 }
 
