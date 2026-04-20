@@ -39,7 +39,8 @@ use object_3d::create_object_3d_entity;
 use plugins::frustum::FrustumPlugin;
 use plugins::frustum_intersection::FrustumIntersectionPlugin;
 use plugins::gizmos::GizmoPlugin;
-use plugins::navigation_gizmo::{NavigationGizmoPlugin, RenderLayerAlloc};
+use plugins::navigation_gizmo::NavigationGizmoPlugin;
+use plugins::render_layer_alloc;
 use plugins::view_cube::{ViewCubeConfig, ViewCubePlugin};
 use ui::{
     UI_ORDER_BASE,
@@ -223,6 +224,7 @@ impl Plugin for EditorPlugin {
             .add_plugins(EmbeddedAssetPlugin)
             .add_plugins(EguiPlugin::default())
             .add_plugins(bevy_infinite_grid::InfiniteGridPlugin)
+            .add_plugins(render_layer_alloc::plugin)
             .add_plugins(NavigationGizmoPlugin)
             .add_plugins(ViewCubePlugin {
                 config: ViewCubeConfig::editor_mode(),
@@ -1102,7 +1104,6 @@ pub fn setup_clear_state(mut packet_handlers: ResMut<PacketHandlers>, mut comman
 fn clear_state_new_connection(
     PacketHandlerInput { packet, .. }: PacketHandlerInput,
     mut entity_map: ResMut<EntityMap>,
-    mut render_layer_alloc: ResMut<RenderLayerAlloc>,
     mut value_map: Query<&mut ComponentValueMap>,
     mut graph_data: ResMut<CollectedGraphData>,
     lines: Query<Entity, With<LineHandle>>,
@@ -1150,10 +1151,7 @@ fn clear_state_new_connection(
     let Ok(mut primary_state) = windows_state.get_mut(primary_id) else {
         return;
     };
-    primary_state
-        .1
-        .tile_state
-        .clear(&mut commands, &mut render_layer_alloc);
+    primary_state.1.tile_state.clear(&mut commands);
     for (entity, secondary) in &windows_state {
         if entity == primary_id {
             // We don't despawn the primary window ever.
@@ -1165,7 +1163,6 @@ fn clear_state_new_connection(
         commands.entity(entity).despawn();
     }
     *graph_data = CollectedGraphData::default();
-    render_layer_alloc.free_all();
     *telemetry_cache = impeller2_bevy::TelemetryCache::default();
     *backfill_state = impeller2_bevy::BackfillState::default();
 }

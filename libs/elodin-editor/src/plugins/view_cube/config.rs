@@ -223,8 +223,6 @@ pub struct ViewCubeConfig {
     /// Optional extra rotation applied when syncing the cube to the camera.
     /// This is applied after the system-specific correction.
     pub axis_correction: Quat,
-    /// Render layer used by the dedicated ViewCube overlay camera.
-    pub render_layer: u8,
 }
 
 impl Default for ViewCubeConfig {
@@ -236,7 +234,6 @@ impl Default for ViewCubeConfig {
             camera_distance: 2.5,
             sync_with_camera: true,
             axis_correction: Quat::IDENTITY,
-            render_layer: 31,
         }
     }
 }

@@ -26,6 +26,7 @@ use impeller2_wkt::{
 };
 use std::collections::{HashMap, HashSet};
 
+use crate::plugins::render_layer_alloc::RenderLayerLease;
 use crate::{
     MainCamera, WorldPosExt,
     object_3d::ComponentArrayExt,
@@ -50,6 +51,7 @@ type MainCameraQueryItem<'w> = (
     &'w Projection,
     &'w GlobalTransform,
     Option<&'w ViewportConfig>,
+    Option<&'w RenderLayerLease>,
 );
 
 /// Marker for UI cameras spawned specifically for arrow labels per window.
@@ -258,7 +260,7 @@ fn render_vector_arrow(
     }
     let has_show_arrows = main_camera_data
         .iter()
-        .any(|(_, _, _, _, config)| config.as_ref().map(|c| c.show_arrows).unwrap_or(true));
+        .any(|(_, _, _, _, config, _)| config.as_ref().map(|c| c.show_arrows).unwrap_or(true));
 
     for (entity, arrow, mut state) in vector_arrows.iter_mut() {
         if !has_show_arrows {
@@ -324,7 +326,8 @@ fn render_vector_arrow(
         let mut seen_cameras: HashSet<Entity> = HashSet::new();
 
         let mut render_for_camera = |idx: usize| {
-            let (cam_entity, cam, proj, cam_tf, viewport_config) = main_camera_data[idx];
+            let (cam_entity, cam, proj, cam_tf, viewport_config, render_layer_lease) =
+                main_camera_data[idx];
             seen_cameras.insert(cam_entity);
 
             let show_arrows = viewport_config
@@ -343,14 +346,16 @@ fn render_vector_arrow(
                 return;
             }
 
-            let Some(viewport_layer) = viewport_config.and_then(|config| config.viewport_layer)
-            else {
+            // Arrows must stay isolated to the viewport-specific lease layer.
+            // Using the camera's full RenderLayers mask would also copy shared
+            // layers like 0 / gizmo / grid, causing cross-render between
+            // otherwise independent viewports.
+            let Some(arrow_layers) = render_layer_lease.map(RenderLayerLease::render_layers) else {
                 if let Some(visual) = state.visuals.remove(&cam_entity) {
                     hide_arrow_visual(&mut commands, &visual);
                 }
                 return;
             };
-            let arrow_layers = RenderLayers::layer(viewport_layer);
 
             let world_per_px = world_units_per_pixel(cam, proj, cam_tf, start);
             let shaft_radius = (TARGET_DIAMETER_PX * 0.5 * world_per_px)

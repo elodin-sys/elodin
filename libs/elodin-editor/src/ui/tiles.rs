@@ -59,7 +59,8 @@ use crate::{
     plugins::{
         LogicalKeyState,
         gizmos::GIZMO_RENDER_LAYER,
-        navigation_gizmo::{NavGizmoCamera, NavGizmoParent, RenderLayerAlloc},
+        navigation_gizmo::{NavGizmoCamera, NavGizmoParent},
+        render_layer_alloc::{GRID_RENDER_LAYER, RenderLayerAllocator, RenderLayerLease},
         view_cube::{
             CoordinateSystem, NeedsInitialSnap, ViewCubeConfig, ViewCubeTargetCamera,
             spawn::spawn_view_cube,
@@ -125,7 +126,6 @@ pub struct ViewportConfig {
     pub projection_color: impeller2_wkt::Color,
     pub frustums_color: impeller2_wkt::Color,
     pub frustums_thickness: f32,
-    pub viewport_layer: Option<usize>,
 }
 
 #[derive(Clone)]
@@ -767,19 +767,10 @@ impl TileState {
         !self.has_content()
     }
 
-    pub fn clear(&mut self, commands: &mut Commands, render_layer_alloc: &mut RenderLayerAlloc) {
+    pub fn clear(&mut self, commands: &mut Commands) {
         for (tile_id, tile) in self.tree.tiles.iter() {
             match tile {
                 Tile::Pane(Pane::Viewport(viewport)) => {
-                    if let Some(layer) = viewport.viewport_layer {
-                        render_layer_alloc.free(layer);
-                    }
-                    if let Some(layer) = viewport.grid_layer {
-                        render_layer_alloc.free(layer);
-                    }
-                    if let Some(layer) = viewport.view_cube_layer {
-                        render_layer_alloc.free(layer);
-                    }
                     if let Some(camera) = viewport.camera
                         && let Ok(mut e) = commands.get_entity(camera)
                     {
@@ -1252,7 +1243,6 @@ pub struct ViewportPane {
     pub nav_gizmo_camera: Option<Entity>,
     pub rect: Option<egui::Rect>,
     pub name: PaneName,
-    pub grid_layer: Option<usize>,
     pub viewport_layer: Option<usize>,
     pub view_cube_layer: Option<usize>,
 }
@@ -1264,22 +1254,22 @@ impl ViewportPane {
         asset_server: &Res<AssetServer>,
         meshes: &mut ResMut<Assets<Mesh>>,
         materials: &mut ResMut<Assets<StandardMaterial>>,
-        render_layer_alloc: &mut ResMut<RenderLayerAlloc>,
+        render_layer_alloc: &mut ResMut<RenderLayerAllocator>,
         eql_ctx: &eql::Context,
         viewport: &Viewport,
         name: PaneName,
     ) -> Self {
-        let mut main_camera_layers = RenderLayers::default().with(GIZMO_RENDER_LAYER);
-        let mut grid_layers = RenderLayers::none();
-        let grid_layer = render_layer_alloc.alloc();
-        if let Some(layer) = grid_layer {
-            main_camera_layers = main_camera_layers.with(layer);
-            grid_layers = grid_layers.with(layer);
-        }
-        let viewport_layer = render_layer_alloc.alloc();
-        if let Some(layer) = viewport_layer {
-            main_camera_layers = main_camera_layers.with(layer);
-        }
+        // The grid render layer is reserved and shared by every viewport, so we
+        // never allocate one per viewport. See `RenderLayerAllocator::default`.
+        let mut main_camera_layers = RenderLayers::default()
+            .with(GIZMO_RENDER_LAYER)
+            .with(GRID_RENDER_LAYER);
+        let grid_layers = RenderLayers::layer(GRID_RENDER_LAYER);
+
+        let viewport_lease: Option<RenderLayerLease> =
+            render_layer_alloc.alloc().inspect(|lease| {
+                main_camera_layers = main_camera_layers.union(&lease.render_layers());
+            });
 
         let grid_visibility = if viewport.show_grid {
             Visibility::Visible
@@ -1465,7 +1455,6 @@ impl ViewportPane {
                 projection_color: default_projection_color(),
                 frustums_color: viewport.frustums_color,
                 frustums_thickness: viewport.frustums_thickness,
-                viewport_layer,
             },
             crate::ui::inspector::viewport::Viewport::new(parent, pos, look_at, up, viewport.frame),
             ChildOf(parent),
@@ -1482,6 +1471,12 @@ impl ViewportPane {
 
         let camera = camera.id();
 
+        let viewport_layer = viewport_lease.map(|lease| {
+            let layer = lease.layer();
+            commands.entity(camera).insert(lease);
+            layer
+        });
+
         if !viewport.show_view_cube {
             return Self {
                 camera: Some(camera),
@@ -1489,33 +1484,35 @@ impl ViewportPane {
                 nav_gizmo_camera: None,
                 rect: None,
                 name,
-                grid_layer,
                 viewport_layer,
                 view_cube_layer: None,
             };
         }
 
         // Allocate render layer for ViewCube (same approach as navigation_gizmo)
-        let Some(view_cube_layer) = render_layer_alloc.alloc() else {
+        let Some(view_cube_lease) = render_layer_alloc.alloc() else {
             return Self {
                 camera: Some(camera),
                 nav_gizmo: None,
                 nav_gizmo_camera: None,
                 rect: None,
                 name,
-                grid_layer,
                 viewport_layer,
                 view_cube_layer: None,
             };
         };
+        let view_cube_layer = view_cube_lease.layer();
 
+        // Do not insert `view_cube_lease` here: the main camera already carries the viewport
+        // `RenderLayerLease`, and a second lease would replace it (single component), breaking
+        // anything that reads the lease (e.g. vector arrows). The cube root and overlay camera
+        // still own clones of this lease.
         commands
             .entity(camera)
             .insert((ViewCubeTargetCamera, NeedsInitialSnap));
 
         // Spawn ViewCube with editor mode configuration, only override the per-viewport render layer
         let mut view_cube_config = ViewCubeConfig::editor_mode();
-        view_cube_config.render_layer = view_cube_layer as u8;
 
         // Set coordinate system based on viewport's geo frame
         if let Some(frame) = viewport.frame {
@@ -1529,6 +1526,7 @@ impl ViewportPane {
             meshes,
             materials,
             &view_cube_config,
+            view_cube_lease.clone(),
             camera,
         );
 
@@ -1543,13 +1541,18 @@ impl ViewportPane {
             ));
         }
 
+        // `cube_root` already received `view_cube_lease` inside `spawn_view_cube`.
+        // Re-inserting it here would silently drop the previous component (Bevy
+        // overwrites same-typed components on insert) — see the `debug_assert!`
+        // in `EntityCommandsExt::insert_render_layer_lease`.
+        let _ = view_cube_lease;
+
         Self {
             camera: Some(camera),
             nav_gizmo: Some(spawned.cube_root),
             nav_gizmo_camera: spawned.camera,
             rect: None,
             name,
-            grid_layer,
             viewport_layer,
             view_cube_layer: Some(view_cube_layer),
         }
@@ -2483,7 +2486,7 @@ pub struct TileLayout<'w, 's> {
     asset_server: Res<'w, AssetServer>,
     meshes: ResMut<'w, Assets<Mesh>>,
     materials: ResMut<'w, Assets<StandardMaterial>>,
-    render_layer_alloc: ResMut<'w, RenderLayerAlloc>,
+    render_layer_alloc: ResMut<'w, RenderLayerAllocator>,
     viewport_contains_pointer: ResMut<'w, ViewportContainsPointer>,
     editor_cam: Query<'w, 's, &'static mut EditorCam, With<MainCamera>>,
     primary_window: Single<'w, 's, Entity, With<PrimaryWindow>>,
@@ -2615,15 +2618,6 @@ impl WidgetSystem for TileLayout<'_, '_> {
                         };
 
                         if let egui_tiles::Tile::Pane(Pane::Viewport(viewport)) = tile {
-                            if let Some(layer) = viewport.viewport_layer {
-                                state_mut.render_layer_alloc.free(layer);
-                            }
-                            if let Some(layer) = viewport.grid_layer {
-                                state_mut.render_layer_alloc.free(layer);
-                            }
-                            if let Some(layer) = viewport.view_cube_layer {
-                                state_mut.render_layer_alloc.free(layer);
-                            }
                             if let Some(camera) = viewport.camera {
                                 state_mut.commands.entity(camera).despawn();
                             }

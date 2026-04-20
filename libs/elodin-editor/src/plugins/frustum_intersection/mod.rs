@@ -368,7 +368,7 @@ fn draw_frustum_ellipsoid_intersections(
     let mut sources = Vec::new();
     let mut targets = Vec::new();
 
-    for (camera_entity, camera, projection, global_transform, config) in
+    for (camera_entity, camera, projection, global_transform, config, render_layer_lease) in
         params.main_viewports.iter()
     {
         if !camera.is_active {
@@ -378,14 +378,14 @@ fn draw_frustum_ellipsoid_intersections(
         let Some(config) = config else {
             continue;
         };
-        let Some(viewport_layer) = config.viewport_layer else {
+        let Some(render_layer_lease) = render_layer_lease else {
             continue;
         };
 
         if config.show_frustums && (config.show_coverage_in_viewport || config.show_projection_2d) {
             targets.push((
                 camera_entity,
-                RenderLayers::layer(viewport_layer),
+                render_layer_lease.render_layers(),
                 config.projection_color,
                 config.show_coverage_in_viewport,
                 config.show_projection_2d,

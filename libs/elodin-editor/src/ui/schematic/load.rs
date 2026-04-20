@@ -31,7 +31,7 @@ use crate::{
             DocumentLoaded, DocumentReloaded, DocumentSaved, SchematicDocumentAsset,
             SchematicWindow,
         },
-        navigation_gizmo::RenderLayerAlloc,
+        render_layer_alloc::RenderLayerAllocator,
     },
     ui::{
         DEFAULT_SECONDARY_RECT, HdrEnabled,
@@ -120,7 +120,7 @@ pub struct LoadSchematicParams<'w, 's> {
     pub mat3_materials: ResMut<'w, Assets<Mat3Material>>,
     pub images: ResMut<'w, Assets<Image>>,
     pub icon_cache: ResMut<'w, IconTextureCache>,
-    pub render_layer_alloc: ResMut<'w, RenderLayerAlloc>,
+    pub render_layer_alloc: ResMut<'w, RenderLayerAllocator>,
     pub hdr_enabled: ResMut<'w, HdrEnabled>,
     pub timeline_settings: ResMut<'w, TimelineSettings>,
     pub schema_reg: Res<'w, ComponentSchemaRegistry>,
@@ -231,7 +231,6 @@ impl LoadSchematicParams<'_, '_> {
         // Set global coordinate frame from schematic
         self.coordinate.0 = schematic.frame;
 
-        self.render_layer_alloc.free_all();
         for (id, window_id, window_state) in &self.window_states {
             if window_id.is_primary() {
                 continue;
@@ -251,7 +250,7 @@ impl LoadSchematicParams<'_, '_> {
                 .2;
             std::mem::take(&mut window_state.tile_state)
         };
-        main_state.clear(&mut self.commands, &mut self.render_layer_alloc);
+        main_state.clear(&mut self.commands);
         self.hdr_enabled.0 = false;
         for entity in self.objects_3d.iter() {
             self.commands.entity(entity).despawn();
@@ -577,9 +576,7 @@ impl LoadSchematicParams<'_, '_> {
                     return false;
                 };
                 let window_id = *window_id;
-                window_state
-                    .tile_state
-                    .clear(&mut self.commands, &mut self.render_layer_alloc);
+                window_state.tile_state.clear(&mut self.commands);
                 window_state.graph_entities.clear();
                 window_id
             };

@@ -15,13 +15,14 @@ use impeller2_wkt::ComponentValue;
 use std::collections::HashMap;
 
 use super::components::{
-    AxisLabelBillboard, RotationArrow, ViewCubeCamera, ViewCubeLink, ViewCubeRenderLayer,
-    ViewCubeRoot, ViewportActionButton,
+    AxisLabelBillboard, RotationArrow, ViewCubeCamera, ViewCubeLink, ViewCubeRoot,
+    ViewportActionButton,
 };
 use super::config::ViewCubeConfig;
 use super::events::ViewCubeEvent;
 use crate::WorldPosExt;
 use crate::object_3d::ComponentArrayExt;
+use crate::plugins::render_layer_alloc::RenderLayerLease;
 
 const FACE_IN_SCREEN_PLANE_DOT_THRESHOLD: f32 = 0.999;
 const CORNER_IN_SCREEN_AXIS_DOT_THRESHOLD: f32 = 0.998;
@@ -187,13 +188,13 @@ pub fn orient_axis_labels_to_screen_plane(
 }
 
 pub fn apply_render_layers_to_scene(
-    view_cube_query: Query<(Entity, &ViewCubeRenderLayer, &Visibility), With<ViewCubeRoot>>,
+    view_cube_query: Query<(Entity, &RenderLayerLease, &Visibility), With<ViewCubeRoot>>,
     children_query: Query<&Children>,
     entities_without_layer: Query<Entity, (Without<RenderLayers>, Without<ViewCubeCamera>)>,
     mut commands: Commands,
 ) {
     for (cube_root, layer, visibility) in view_cube_query.iter() {
-        let render_layers = RenderLayers::layer(layer.0);
+        let render_layers = layer.render_layers();
 
         let had_untagged = apply_layers_recursive(
             cube_root,

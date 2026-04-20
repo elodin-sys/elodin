@@ -1,10 +1,5 @@
-use crate::{
-    MainCamera,
-    plugins::{camera_anchor::camera_anchor_from_transform, gizmos::GIZMO_RENDER_LAYER},
-    ui::ViewportRect,
-};
+use crate::{MainCamera, plugins::camera_anchor::camera_anchor_from_transform, ui::ViewportRect};
 use bevy::animation::{AnimationTarget, AnimationTargetId, animated_field};
-use bevy::camera::visibility::RenderLayers;
 use bevy::camera::{RenderTarget, Viewport};
 use bevy::math::Dir3;
 use bevy::prelude::*;
@@ -15,12 +10,13 @@ use bevy_editor_cam::prelude::EnabledMotion;
 use bevy_egui::EguiContexts;
 use std::{collections::HashMap, f32::consts};
 
+use super::render_layer_alloc::RenderLayerAllocator;
+
 pub struct NavigationGizmoPlugin;
 
 impl Plugin for NavigationGizmoPlugin {
     fn build(&self, app: &mut App) {
-        app.init_resource::<RenderLayerAlloc>()
-            .init_resource::<NavGizmoAnchorState>()
+        app.init_resource::<NavGizmoAnchorState>()
             .add_systems(PostUpdate, set_camera_viewport)
             .add_systems(PostUpdate, sync_nav_camera)
             .add_plugins(MeshPickingPlugin);
@@ -102,41 +98,6 @@ fn cube_color_reset(
     }
 }
 
-#[derive(Resource, Debug)]
-pub struct RenderLayerAlloc(usize);
-
-impl Default for RenderLayerAlloc {
-    fn default() -> Self {
-        let mut bits = !1usize;
-        bits &= !(1usize << GIZMO_RENDER_LAYER);
-        Self(bits)
-    }
-}
-
-impl RenderLayerAlloc {
-    pub fn alloc(&mut self) -> Option<usize> {
-        let bits = self.0;
-        let mut mask = 1;
-        for i in 0..32 {
-            if (bits & mask) != 0 {
-                self.0 &= !mask;
-                return Some(i);
-            }
-            mask <<= 1;
-        }
-        None
-    }
-
-    #[allow(dead_code)]
-    pub fn free(&mut self, layer: usize) {
-        self.0 |= 1 << layer;
-    }
-
-    pub fn free_all(&mut self) {
-        self.0 = !0;
-    }
-}
-
 #[derive(Component, Debug)]
 pub struct NavGizmo;
 
@@ -164,12 +125,12 @@ pub fn spawn_gizmo(
     commands: &mut Commands,
     meshes: &mut ResMut<Assets<Mesh>>,
     materials: &mut ResMut<Assets<StandardMaterial>>,
-    render_layer_alloc: &mut ResMut<RenderLayerAlloc>,
+    render_layer_alloc: &mut ResMut<RenderLayerAllocator>,
 ) -> (Option<Entity>, Option<Entity>) {
-    let Some(render_layer) = render_layer_alloc.alloc() else {
+    let Some(lease) = render_layer_alloc.alloc() else {
         return (None, None);
     };
-    let render_layers = RenderLayers::layer(render_layer);
+    let render_layers = lease.render_layers();
     let sphere = meshes.add(Mesh::from(Sphere::new(0.075)));
 
     let nav_gizmo = commands
@@ -182,6 +143,7 @@ pub fn spawn_gizmo(
         ))
         .observe(drag_nav_gizmo)
         .observe(drag_nav_gizmo_end)
+        .insert(lease)
         .id();
 
     let distance = 0.35;
@@ -585,15 +547,3 @@ fn set_camera_viewport(
 //         target.translation = self.anchor + rot_matrix.mul_vec3(Vec3::new(0.0, 0.0, self.radius));
 //     }
 // }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_render_layer_alloc() {
-        let mut default = RenderLayerAlloc::default();
-        assert_eq!(default.alloc().unwrap(), 1);
-        assert_eq!(default.alloc().unwrap(), 2);
-    }
-}

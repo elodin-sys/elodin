@@ -256,7 +256,7 @@ fn draw_viewport_frustums(mut params: FrustumDrawParams<'_, '_>, mut commands: C
     let mut targets = Vec::new();
     let mut camera_positions: HashMap<Entity, Vec3> = HashMap::new();
 
-    for (camera_entity, camera, projection, global_transform, config) in
+    for (camera_entity, camera, projection, global_transform, config, render_layer_lease) in
         params.main_viewports.iter()
     {
         if !camera.is_active {
@@ -267,13 +267,13 @@ fn draw_viewport_frustums(mut params: FrustumDrawParams<'_, '_>, mut commands: C
             continue;
         };
 
-        let Some(viewport_layer) = config.viewport_layer else {
+        let Some(render_layer_lease) = render_layer_lease else {
             continue;
         };
 
         camera_positions.insert(camera_entity, global_transform.translation());
         if config.show_frustums {
-            targets.push((camera_entity, RenderLayers::layer(viewport_layer)));
+            targets.push((camera_entity, render_layer_lease.render_layers()));
         }
 
         if !config.create_frustum {
