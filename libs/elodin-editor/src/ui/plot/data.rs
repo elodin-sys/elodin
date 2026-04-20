@@ -273,6 +273,13 @@ fn try_joint_triline_compress(
         let pos_old = &pos[..split];
         let idx = select_polyline3_indices(pos_old, target_old);
         if idx.len() < 2 {
+            warn_once!(
+                target: "elodin_plot_hamann",
+                axis = "xyz_joint",
+                points = n,
+                target_old,
+                "Hamann-Chen polyline3: degenerate index set (< 2); skipping joint compress"
+            );
             return false;
         }
         let mut new_ts: Vec<Timestamp> = idx.iter().map(|&i| tsx[i]).collect();
@@ -296,6 +303,13 @@ fn try_joint_triline_compress(
         let target = settings.compress_to_points.max(2).min(n);
         let idx = select_polyline3_indices(&pos, target);
         if idx.len() < 2 {
+            warn_once!(
+                target: "elodin_plot_hamann",
+                axis = "xyz_joint",
+                points = n,
+                target,
+                "Hamann-Chen polyline3: degenerate index set (< 2); skipping joint compress"
+            );
             return false;
         }
         let new_ts: Vec<Timestamp> = idx.iter().map(|&i| tsx[i]).collect();
@@ -319,6 +333,15 @@ fn try_joint_triline_compress(
     };
     zl.data
         .rebuild_from_time_value_pairs(earliest, &new_ts, &new_z);
+    bevy::log::debug!(
+        target: "elodin_plot_hamann",
+        axis = "xyz_joint",
+        points_in = n,
+        points_out = new_ts.len(),
+        keep_recent_fraction = settings.keep_recent_fraction,
+        compress_to = settings.compress_to_points,
+        "Hamann-Chen polyline3 joint compression"
+    );
     true
 }
 
@@ -844,6 +867,8 @@ pub struct Line {
     pub label: String,
     pub data: LineTree<f32>,
     pub last_queried: Option<Instant>,
+    /// Rate-limits `elodin_plot_hamann` debug logs for time-value compression.
+    last_hamann_compress_log: Option<Instant>,
 }
 
 impl Line {
@@ -852,7 +877,27 @@ impl Line {
         if total <= settings.compress_after_total_points {
             return;
         }
+        const HAMANN_LOG_INTERVAL: Duration = Duration::from_secs(2);
+        let now = Instant::now();
+        let log_now = self.last_hamann_compress_log.is_none_or(|t| {
+            now.saturating_duration_since(t) >= HAMANN_LOG_INTERVAL
+        });
+        let before = total;
         self.data.compress_time_value_hamann(earliest, settings);
+        let after = self.data.total_points();
+        if log_now {
+            bevy::log::debug!(
+                target: "elodin_plot_hamann",
+                label = %self.label,
+                before,
+                after,
+                compress_to = settings.compress_to_points,
+                keep_recent_fraction = settings.keep_recent_fraction,
+                compress_after_total_points = settings.compress_after_total_points,
+                "Hamann-Chen time-value compression pass"
+            );
+            self.last_hamann_compress_log = Some(now);
+        }
     }
 }
 
@@ -899,7 +944,6 @@ impl XYLine {
         }
         let step = total_points.div_ceil(desired_index_len.max(1)).max(1);
 
-        let mut count = 0;
         let mut view = render_queue
             .write_buffer_with(
                 index_buffer,
@@ -908,6 +952,7 @@ impl XYLine {
             )
             .expect("no write buf");
         let mut view = &mut view[..];
+        let mut written_u32s: u32 = 0;
         let mut global_index = 0usize;
         for buf in &mut self.x_values {
             let gpu = buf.gpu.lock();
@@ -918,14 +963,22 @@ impl XYLine {
             for (i, index) in chunk.into_index_iter().enumerate() {
                 let absolute = global_index + i;
                 if absolute.is_multiple_of(step) || absolute + 1 == total_points {
-                    view = append_u32(view, index);
-                    count += 1;
+                    let Some(v) = try_append_u32(view, index) else {
+                        warn_once!(
+                            target: "elodin_plot_index",
+                            "XY plot index buffer is full (capacity {} u32); tail omitted",
+                            INDEX_BUFFER_LEN
+                        );
+                        return written_u32s;
+                    };
+                    view = v;
+                    written_u32s += 1;
                 }
             }
             global_index += buf.cpu().len();
         }
 
-        count
+        written_u32s
     }
 
     pub fn plot_bounds(&self) -> PlotBounds {
@@ -1438,27 +1491,68 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
             )
             .expect("no write buf");
         let mut view = &mut view[..];
-        let mut count = 0;
-        for chunk in self.draw_index_chunk_iter(line_visible_range) {
-            view = append_u32(view, 0);
+        let mut written_u32s: u32 = 0;
+        'chunks: for chunk in self.draw_index_chunk_iter(line_visible_range) {
+            let Some(v) = try_append_u32(view, 0) else {
+                warn_once!(
+                    target: "elodin_plot_index",
+                    "timeseries plot index buffer is full (capacity {} u32); tail of the curve is not drawn — zoom to a shorter time span",
+                    INDEX_BUFFER_LEN
+                );
+                break 'chunks;
+            };
+            view = v;
+            written_u32s += 1;
             let end = chunk.clone().into_index_iter().last();
             let mut index_iter = chunk.into_index_iter();
             if let Some(index) = index_iter.next() {
-                count += 1;
-                view = append_u32(view, index);
+                let Some(v) = try_append_u32(view, index) else {
+                    warn_once!(
+                        target: "elodin_plot_index",
+                        "timeseries plot index buffer is full (capacity {} u32); tail of the curve is not drawn — zoom to a shorter time span",
+                        INDEX_BUFFER_LEN
+                    );
+                    break 'chunks;
+                };
+                view = v;
+                written_u32s += 1;
             }
             for index in index_iter.step_by(step) {
-                count += 1;
-                view = append_u32(view, index);
+                let Some(v) = try_append_u32(view, index) else {
+                    warn_once!(
+                        target: "elodin_plot_index",
+                        "timeseries plot index buffer is full (capacity {} u32); tail of the curve is not drawn — zoom to a shorter time span",
+                        INDEX_BUFFER_LEN
+                    );
+                    break 'chunks;
+                };
+                view = v;
+                written_u32s += 1;
             }
             if let Some(end) = end {
-                count += 1;
-                view = append_u32(view, end);
+                let Some(v) = try_append_u32(view, end) else {
+                    warn_once!(
+                        target: "elodin_plot_index",
+                        "timeseries plot index buffer is full (capacity {} u32); tail of the curve is not drawn — zoom to a shorter time span",
+                        INDEX_BUFFER_LEN
+                    );
+                    break 'chunks;
+                };
+                view = v;
+                written_u32s += 1;
             }
-            view = append_u32(view, 0);
-            count += 2;
+            let Some(v) = try_append_u32(view, 0) else {
+                warn_once!(
+                    target: "elodin_plot_index",
+                    "timeseries plot index buffer is full (capacity {} u32); tail of the curve is not drawn — zoom to a shorter time span",
+                    INDEX_BUFFER_LEN
+                );
+                break 'chunks;
+            };
+            view = v;
+            written_u32s += 1;
         }
-        count
+        written_u32s
     }
 
     pub fn garbage_collect(&mut self, line_visible_range: Range<Timestamp>) {
@@ -1589,6 +1683,14 @@ impl LineTree<f32> {
             let t_rel: Vec<f32> = old_ts.iter().map(|t| (t.0 - earliest.0) as f32).collect();
             let idx = select_time_value_indices(&t_rel, old_v, target_old);
             if idx.len() < 2 {
+                warn_once!(
+                    target: "elodin_plot_hamann",
+                    points = n,
+                    target_old,
+                    split,
+                    keep,
+                    "Hamann-Chen time-value: degenerate index set (< 2) on old prefix; skipping compress"
+                );
                 return;
             }
             let mut new_ts: Vec<Timestamp> = idx.iter().map(|&i| old_ts[i]).collect();
@@ -1609,6 +1711,12 @@ impl LineTree<f32> {
         let t_rel: Vec<f32> = ts_all.iter().map(|t| (t.0 - earliest.0) as f32).collect();
         let idx = select_time_value_indices(&t_rel, &v_all, target);
         if idx.len() < 2 {
+            warn_once!(
+                target: "elodin_plot_hamann",
+                points = n,
+                target,
+                "Hamann-Chen time-value: degenerate index set (< 2); skipping compress"
+            );
             return;
         }
         let new_ts: Vec<Timestamp> = idx.iter().map(|&i| ts_all[i]).collect();
@@ -1747,12 +1855,12 @@ mod tests {
     }
 }
 
-fn append_u32(view: &mut [u8], val: u32) -> &mut [u8] {
-    if view.len() < 4 {
-        return view;
+fn try_append_u32(view: &mut [u8], val: u32) -> Option<&mut [u8]> {
+    if view.len() < size_of::<u32>() {
+        return None;
     }
     view[..size_of::<u32>()].copy_from_slice(&val.to_le_bytes());
-    &mut view[size_of::<u32>()..]
+    Some(&mut view[size_of::<u32>()..])
 }
 
 pub fn collect_garbage(
