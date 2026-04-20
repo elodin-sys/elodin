@@ -546,10 +546,8 @@ fn extract_lines(
                     for i in 0..3 {
                         let line = &line_handles.0[i];
                         let line = line_assets.get(line).expect("line missing");
-                        max_needed = max_needed.max(
-                            line.data
-                                .count_strip_index_u32s(range.clone(), step),
-                        );
+                        max_needed =
+                            max_needed.max(line.data.count_strip_index_u32s(range.clone(), step));
                     }
                     if max_needed <= MAX_INDEX_U32 {
                         break;
