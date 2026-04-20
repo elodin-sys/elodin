@@ -1424,6 +1424,27 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
         self.write_to_index_buffer_with_step(index_buffer, render_queue, line_visible_range, step)
     }
 
+    /// Upper bound on `u32` indices written by [`Self::write_to_index_buffer_with_step`] for this
+    /// range and step (must stay in sync with that loop).
+    pub fn count_strip_index_u32s(&self, line_visible_range: Range<Timestamp>, step: usize) -> u32 {
+        let step = step.max(1);
+        let mut n: u32 = 0;
+        for chunk in self.draw_index_chunk_iter(line_visible_range) {
+            n = n.saturating_add(1);
+            let end = chunk.clone().into_index_iter().last();
+            let mut index_iter = chunk.into_index_iter();
+            if index_iter.next().is_some() {
+                n = n.saturating_add(1);
+                n = n.saturating_add(index_iter.step_by(step).count() as u32);
+            }
+            if end.is_some() {
+                n = n.saturating_add(1);
+            }
+            n = n.saturating_add(1);
+        }
+        n
+    }
+
     pub fn write_to_index_buffer_with_step(
         &self,
         index_buffer: &Buffer,
@@ -1761,6 +1782,20 @@ mod tests {
         assert_eq!(recent_tail_keep_count(100, 0.2), 20);
         assert_eq!(recent_tail_keep_count(5, 0.2), 1);
         assert_eq!(recent_tail_keep_count(100, 1.0), 99);
+    }
+
+    #[test]
+    fn count_strip_index_u32s_decreases_with_larger_step() {
+        let mut tree = LineTree::<f32>::default();
+        let ts: Vec<Timestamp> = (0i64..200).map(Timestamp).collect();
+        let vals: Vec<f32> = (0..200).map(|i| i as f32).collect();
+        let chunk = Chunk::from_iter(&ts, Timestamp(0), vals.into_iter()).expect("chunk");
+        tree.insert(chunk);
+        let range = Timestamp(0)..Timestamp(199);
+        let c1 = tree.count_strip_index_u32s(range.clone(), 1);
+        let c8 = tree.count_strip_index_u32s(range.clone(), 8);
+        assert!(c8 <= c1, "c1={c1} c8={c8}");
+        assert!(c1 > 0);
     }
 }
 

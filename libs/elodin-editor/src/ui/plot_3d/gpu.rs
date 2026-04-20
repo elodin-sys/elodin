@@ -539,6 +539,23 @@ fn extract_lines(
                 if range.start >= range.end {
                     return None;
                 }
+                let mut step = sampling_step.max(1);
+                const MAX_INDEX_U32: u32 = INDEX_BUFFER_LEN as u32;
+                for _ in 0..26 {
+                    let mut max_needed = 0u32;
+                    for i in 0..3 {
+                        let line = &line_handles.0[i];
+                        let line = line_assets.get(line).expect("line missing");
+                        max_needed = max_needed.max(
+                            line.data
+                                .count_strip_index_u32s(range.clone(), step),
+                        );
+                    }
+                    if max_needed <= MAX_INDEX_U32 {
+                        break;
+                    }
+                    step = step.saturating_mul(2).max(2);
+                }
                 let index_buffers = ['x', 'y', 'z'].map(|axis| {
                     render_device.create_buffer(
                         &(BufferDescriptor {
@@ -566,7 +583,7 @@ fn extract_lines(
                         &index_buffers[i],
                         &render_queue,
                         range.clone(),
-                        sampling_step,
+                        step,
                     )
                 });
                 let count = counts.into_iter().min().unwrap_or_default();
