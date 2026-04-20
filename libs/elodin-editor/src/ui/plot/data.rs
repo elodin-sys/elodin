@@ -879,9 +879,9 @@ impl Line {
         }
         const HAMANN_LOG_INTERVAL: Duration = Duration::from_secs(2);
         let now = Instant::now();
-        let log_now = self.last_hamann_compress_log.is_none_or(|t| {
-            now.saturating_duration_since(t) >= HAMANN_LOG_INTERVAL
-        });
+        let log_now = self
+            .last_hamann_compress_log
+            .is_none_or(|t| now.saturating_duration_since(t) >= HAMANN_LOG_INTERVAL);
         let before = total;
         self.data.compress_time_value_hamann(earliest, settings);
         let after = self.data.total_points();
