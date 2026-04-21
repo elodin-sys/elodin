@@ -11,7 +11,6 @@
     nixpkgs-unstable.url = "github:nixos/nixpkgs/nixos-unstable";
     jetpack.url = "github:anduril/jetpack-nixos/2c98c9d6c326d67ae5f4909db61238d31352e18c";
     rust-overlay.url = "github:oxalica/rust-overlay";
-    flake-utils.url = "github:numtide/flake-utils";
 
     jetpack.inputs.nixpkgs.follows = "nixpkgs";
     rust-overlay.inputs.nixpkgs.follows = "nixpkgs";
@@ -20,11 +19,16 @@
     self,
     nixpkgs,
     nixpkgs-unstable,
-    flake-utils,
     jetpack,
     rust-overlay,
   }: let
-    system = "aarch64-linux";
+    
+    # Separate Aleph's fixed NixOS target from host-scoped flake outputs
+    alephSystem = "aarch64-linux";
+    supportedSystems = ["x86_64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin"];
+    forAllSystems = f:     # Equivalent to using flake-utils
+      nixpkgs.lib.genAttrs supportedSystems (system: f nixpkgs.legacyPackages.${system});
+
     rustToolchain = p: p.rust-bin.fromRustupToolchainFile ../rust-toolchain.toml;
     gitJSONOverlay = builtins.fromJSON (builtins.readFile ./gitrepos.json);
     gitReposOverlay = final: prev: {
@@ -94,12 +98,12 @@
     };
     installerSystem = module: let
       baseNixosConfig = nixpkgs.lib.nixosSystem {
-        inherit system;
+        system = alephSystem;
         modules = [module];
       };
     in
       nixpkgs.lib.nixosSystem {
-        inherit system;
+        system = alephSystem;
         modules = [
           module
           ({...}: {
@@ -110,24 +114,22 @@
         ];
       };
   in
-    flake-utils.lib.eachDefaultSystem (
-      system: let
-        pkgs = nixpkgs.legacyPackages.${system};
-      in {
-        devShells = {
-          default = pkgs.mkShell {
-            buildInputs = with pkgs; [
-              just
-              zstd
-            ];
-          };
+    {
+      devShells = forAllSystems (pkgs: {
+        default = pkgs.mkShell {
+          buildInputs = with pkgs; [
+            just
+            zstd
+          ];
         };
-        apps.deploy = {
+      });
+      apps = forAllSystems (pkgs: {
+        deploy = {
           type = "app";
           program = "${pkgs.writeScript "deploy" (builtins.readFile ./deploy.sh)}";
         };
-      }
-    )
+      });
+    }
     // rec {
       nixosModules = baseModules // fswModules // devModules;
       overlays.default = overlay;
@@ -135,14 +137,14 @@
       overlays.gitRepos = gitReposOverlay;
       nixosConfigurations = {
         default = nixpkgs.lib.nixosSystem {
-          inherit system;
+          system = alephSystem;
           modules =
             builtins.attrValues baseModules
             ++ builtins.attrValues (builtins.removeAttrs fswModules ["c-blinky"])
             ++ builtins.attrValues devModules;
         };
         m10q = nixpkgs.lib.nixosSystem {
-          inherit system;
+          system = alephSystem;
           modules =
             builtins.attrValues baseModules
             ++ builtins.attrValues (builtins.removeAttrs fswModules ["c-blinky"])
@@ -154,7 +156,7 @@
             ];
         };
         m9n = nixpkgs.lib.nixosSystem {
-          inherit system;
+          system = alephSystem;
           modules =
             builtins.attrValues baseModules
             ++ builtins.attrValues (builtins.removeAttrs fswModules ["c-blinky"])
@@ -166,7 +168,7 @@
             ];
         };
         c-blinky = nixpkgs.lib.nixosSystem {
-          inherit system;
+          system = alephSystem;
           modules =
             builtins.attrValues baseModules
             ++ builtins.attrValues (builtins.removeAttrs fswModules ["sensor-fw"])
