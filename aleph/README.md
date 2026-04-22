@@ -110,7 +110,16 @@ The deploy script will:
 - Activate the new configuration
 - Create a new bootloader entry
 
-When the default `c-blinky` module is enabled, activation also starts the `c-blinky-flash` one-shot service. That service flashes the packaged STM32 firmware from the deployed closure by driving `BOOT0` on carrier GPIO9, pulsing `NRST` on carrier GPIO11, and running `stm32flash` against `/dev/ttyTHS1` before `serial-bridge` starts. Once the STM32 boots back into the application, `serial-bridge` forwards the MCU log lines into Elodin-DB on the `aleph.stm32.log` message stream. The older custom expansion board reference used an I2C expander for reset; the open-source board uses the direct GPIO11 reset path instead.
+The default system configuration for Aleph flashes `sensor-fw` STM32 firmware and ensures 
+`serial-bridge` starts afterward so expansion-board sensor data can be streamed into Elodin-DB.
+To switch to a more "blink sketch", set `aleph.stm.firmware = "c-blinky"` in your configuration.
+All STM configurations start a `[firmware-name]-flash` one-shot service.
+The service flashes the packaged STM32 firmware from the deployed closure by driving `BOOT0` on 
+carrier GPIO9, pulsing `NRST` on carrier GPIO11, and running `stm32flash` against `/dev/ttyTHS1` 
+before `serial-bridge` starts.
+Once the STM32 boots back into the application, `serial-bridge` forwards the MCU log lines into 
+Elodin-DB on the `aleph.stm32.log` message stream. The older custom expansion board reference 
+used an I2C expander for reset; the open-source board uses the direct GPIO11 reset path instead.
 
 Useful verification commands on Aleph:
 

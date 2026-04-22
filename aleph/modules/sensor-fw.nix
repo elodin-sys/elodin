@@ -16,7 +16,7 @@ in {
   options.services.sensor-fw = {
     enable = mkOption {
       type = types.bool;
-      default = true;
+      default = false;
       description = "Whether to deploy and flash sensor-fw onto the Aleph STM32H7.";
     };
 
@@ -84,13 +84,6 @@ in {
   };
 
   config = mkIf cfg.enable {
-    assertions = optionals (builtins.hasAttr "c-blinky" config.services) [
-      {
-        assertion = !config.services.c-blinky.enable;
-        message = "services.sensor-fw and services.c-blinky are mutually exclusive (both flash the STM32).";
-      }
-    ];
-
     services.sensor-fw.package = mkDefault (pkgs.sensor-fw.override {
       gpsBaudRate =
         if cfg.gps.model == "m9n"

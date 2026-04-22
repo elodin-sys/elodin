@@ -16,7 +16,7 @@ in {
   options.services.c-blinky = {
     enable = mkOption {
       type = types.bool;
-      default = true;
+      default = false;
       description = "Whether to deploy and flash c-blinky onto the Aleph STM32H7.";
     };
 
