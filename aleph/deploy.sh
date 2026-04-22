@@ -2,119 +2,94 @@
 #! nix-shell -i bash -p gum nix-output-monitor
 set -eu
 
-# When run via `nix run`, $0 is a /nix/store path and the repo-relative path
-# math breaks. Fall back to "." so the script builds the caller's flake.
-if [[ "$0" == /nix/store/* ]]; then
-  flake_ref="."
-else
-  script_dir="$(cd "$(dirname "$0")" && pwd)"
-  repo_root="$(cd "$script_dir/.." && pwd)"
-  flake_ref="git+file://${repo_root}?dir=aleph"
-fi
-
-default_user="${USER}"
-default_host="fde1:2240:a1ef::1"
+# Default values
+default_target="${USER}@fde1:2240:a1ef::1"
 default_config="default"
-default_identity=""
-no_aleph_builder=false
+aleph_builder=false
 
 log_info() { gum log --level info "$*"; }
 log_warn() { gum log --level warn "$*"; }
-log_error() { gum log --level error "$*"; }
+
+check_system_aarch64_builder() {
+  ([ "$(uname -m)" = "aarch64" ] && [ "$(uname)" = "Linux" ]) ||
+    ([ -f /etc/nix/machines ] && grep -q 'aarch64-linux' /etc/nix/machines)
+}
 
 show_usage() {
-  echo "Usage: $0 [options]"
+  echo "Usage: $0 [options] [user@host]"
   echo
   echo "Options:"
-  echo "  -h, --host HOST       Specify the hostname or IP address (default: $default_host)"
-  echo "  -u, --user USER       Specify the SSH username (default: $default_user)"
-  echo "  -i, --identity PATH   Specify SSH private key path (optional)"
+  echo "  -o SSHOPTS            Set NIX_SSHOPTS to the provided SSH options string"
   echo "  -c, --config CONFIG   Specify the NixOS configuration (default: $default_config)"
-  echo "  --no-aleph-builder    Don't use Aleph as a remote builder (use local machine or"
-  echo "                         configured remote builders instead)"
+  echo "                        Valid values include: \"default\", \"base\", \"c-blinky\", \"sensor-fw\" "
+  echo "  --aleph-builder       Force build on Aleph/Jetson (slow!) "
   echo "  --help                Show this help message"
   echo
-  echo "Example:"
-  echo "  $0 -h fde1:2240:a1ef::1 -u myuser -i ./ssh/aleph-key -c my-custom-config"
-  exit 1
+  echo "Examples:"
+  echo "  $0"
+  echo "  $0 root@aleph-99a2.local"
+  echo "  $0 -o \"-i $HOME/.ssh/key_file -o StrictHostKeyChecking=no\" root@aleph-99a2.local"
+  exit "${1:-1}"
 }
 
 # Parse command line arguments
-user="$default_user"
-host="$default_host"
+deploy_target="$default_target"
 config="$default_config"
-identity="$default_identity"
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    -h|--host)
-      host="$2"
-      shift 2
-      ;;
-    -u|--user)
-      user="$2"
-      shift 2
-      ;;
-    -i|--identity)
-      identity="$2"
+    -o)
+      export NIX_SSHOPTS="$2"
       shift 2
       ;;
     -c|--config)
       config="$2"
       shift 2
       ;;
-    --no-aleph-builder)
-      no_aleph_builder=true
+    --aleph-builder)
+      aleph_builder=true
       shift
       ;;
     --help)
-      show_usage
+      show_usage 0
+      ;;
+    -*)
+      log_warn "Unknown option: $1"
+      show_usage 1
       ;;
     *)
-      log_error "Unknown option: $1"
-      show_usage
+      deploy_target="$1"
+      break
       ;;
   esac
 done
 
 # Construct the target path with the selected configuration
-target="${flake_ref}#nixosConfigurations.$config.config.system.build.toplevel"
-store_url="ssh-ng://$user@$host"
-ssh_opts=()
+target=".#nixosConfigurations.$config.config.system.build.toplevel"
+ssh_store="ssh-ng://$deploy_target"
 
-if [ -n "$identity" ]; then
-  if [ ! -f "$identity" ]; then
-    log_error "Identity file not found: $identity"
+log_info "Using target: $deploy_target, configuration: $config"
+if [ "$aleph_builder" = true ]; then
+  build_cmd="nom build --accept-flake-config --eval-store auto --store $ssh_store $target --print-out-paths"
+  log_info "Using Aleph as a remote builder"
+  log_info "Running: $build_cmd"
+  out_path=$(eval "$build_cmd")
+else
+  if ! check_system_aarch64_builder; then
+    log_warn "No aarch64-linux builder found on this machine or in /etc/nix/machines"
+    log_warn "Re-run with --aleph-builder to build on your Jetson (slow)."
     exit 1
   fi
-  ssh_opts=(-i "$identity")
-  store_url="${store_url}?ssh-key=${identity}"
+
+  build_cmd="nom build --accept-flake-config $target --print-out-paths"
+  log_info "Running: $build_cmd"
+  out_path=$(eval "$build_cmd")
+  copy_cmd="nix copy --no-check-sigs --to $ssh_store $out_path"
+  log_info "Running: $copy_cmd"
+  eval "$copy_cmd"
 fi
 
-log_info "Using host: $host, user: $user, configuration: $config"
-if [ "$no_aleph_builder" = true ]; then
-  log_info "Not using Aleph as a remote builder"
-fi
-if [ -n "$identity" ]; then
-  log_info "Using SSH identity: $identity"
-fi
-
-if [ "$no_aleph_builder" = false ] && ! ( ([ "$(uname -m)" = "aarch64" ] && [ "$(uname)" = "Linux" ]) ||
-  ([ -f /etc/nix/machines ] && grep -q 'aarch64-linux' /etc/nix/machines)); then
-  log_warn "No aarch64-linux builder found, falling back to building on Aleph (slow)"
-  build_cmd=(nom build --accept-flake-config --eval-store auto --store "$store_url" "$target" --print-out-paths)
-  log_info "Running: ${build_cmd[*]}"
-  out_path="$("${build_cmd[@]}")"
-else
-  build_cmd=(nom build --accept-flake-config "$target" --print-out-paths)
-  log_info "Running: ${build_cmd[*]}"
-  out_path="$("${build_cmd[@]}")"
-  copy_cmd=(nix copy --no-check-sigs --to "$store_url" "$out_path")
-  log_info "Running: ${copy_cmd[*]}"
-  "${copy_cmd[@]}"
-fi
-
-log_info "Activating $out_path on $user@$host"
-ssh "${ssh_opts[@]}" "$user@$host" "sudo nix-env -p /nix/var/nix/profiles/system --set ${out_path} \
-  && sudo ${out_path}/bin/switch-to-configuration switch;"
+log_info "Activating $out_path on $deploy_target"
+remote_cmd="sudo nix-env -p /nix/var/nix/profiles/system --set ${out_path} && sudo ${out_path}/bin/switch-to-configuration switch;"
+eval "ssh ${NIX_SSHOPTS:-} \"$deploy_target\" \"$remote_cmd\""
 log_info "Deployment completed successfully"

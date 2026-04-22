@@ -18,7 +18,7 @@ ssh aleph-99a2.local                 # Hostname shown by `hostname` command
 
 # Deploy configuration changes
 ./deploy.sh                          # Default: $USER@fde1:2240:a1ef::1
-./deploy.sh --host aleph-99a2.local  # Custom host
+./deploy.sh root@aleph-99a2.local    # Custom SSH target
 
 # Build SD image for fresh install
 nix build --accept-flake-config .#packages.aarch64-linux.sdimage
