@@ -22,11 +22,11 @@
     jetpack,
     rust-overlay,
   }: let
-    
     # Separate Aleph's fixed NixOS target from host-scoped flake outputs
     alephSystem = "aarch64-linux";
     supportedSystems = ["x86_64-linux" "aarch64-linux" "x86_64-darwin" "aarch64-darwin"];
-    forAllSystems = f:     # Equivalent to using flake-utils
+    forAllSystems = f:
+    # Equivalent to using flake-utils
       nixpkgs.lib.genAttrs supportedSystems (system: f nixpkgs.legacyPackages.${system});
 
     rustToolchain = p: p.rust-bin.fromRustupToolchainFile ../rust-toolchain.toml;
@@ -63,8 +63,6 @@
       wifi = ./modules/wifi.nix;
     };
     fswModules = {
-      c-blinky = ./modules/c-blinky.nix;
-      sensor-fw = ./modules/sensor-fw.nix;
       elodin-db = ./modules/elodin-db.nix;
       aleph-serial-bridge = ./modules/aleph-serial-bridge.nix;
       tegrastats-bridge = ./modules/tegrastats-bridge.nix;
@@ -73,6 +71,13 @@
       udp-component-broadcast = ./modules/udp-component-broadcast.nix;
       udp-component-receive = ./modules/udp-component-receive.nix;
       elodinsink = ./modules/elodinsink.nix;
+    };
+    stmModules = {
+      sensor-fw = ./modules/sensor-fw.nix;
+      c-blinky = ./modules/c-blinky.nix;
+    };
+    stmConfigurationModules = {
+      stm = ./modules/stm.nix;
     };
     devModules = {
       aleph-cuda = ./modules/aleph-cuda.nix;
@@ -96,6 +101,10 @@
       security.sudo.wheelNeedsPassword = false;
       users.users.root.password = "root";
     };
+
+    # A set of presets that flash different programs onto the expansion board STM
+    configurationPresets = import ./modules/custom-configurations.nix;
+
     installerSystem = module: let
       baseNixosConfig = nixpkgs.lib.nixosSystem {
         system = alephSystem;
@@ -113,6 +122,24 @@
           })
         ];
       };
+    baseConfigurationModules =
+      builtins.attrValues baseModules
+      ++ builtins.attrValues fswModules
+      ++ builtins.attrValues devModules;
+
+    # Create a NixOS system configuration from the shared base modules plus any extra modules.
+    mkConfiguration = extraModules:
+      nixpkgs.lib.nixosSystem {
+        system = alephSystem;
+        modules = baseConfigurationModules ++ extraModules;
+      };
+    customConfigurations = {
+      base = mkConfiguration [];
+      c-blinky = mkConfiguration [configurationPresets.preset-c-blinky];
+      sensor-fw = mkConfiguration [configurationPresets.preset-sensor-fw];
+      m10q = mkConfiguration [configurationPresets.preset-m10q];
+      m9n = mkConfiguration [configurationPresets.preset-m9n];
+    };
   in
     {
       devShells = forAllSystems (pkgs: {
@@ -131,53 +158,20 @@
       });
     }
     // rec {
-      nixosModules = baseModules // fswModules // devModules;
+      nixosModules = baseModules // fswModules // stmModules // stmConfigurationModules // devModules // configurationPresets;
       overlays.default = overlay;
       overlays.jetpack = jetpack.overlays.default;
       overlays.gitRepos = gitReposOverlay;
-      nixosConfigurations = {
-        default = nixpkgs.lib.nixosSystem {
-          system = alephSystem;
-          modules =
-            builtins.attrValues baseModules
-            ++ builtins.attrValues (builtins.removeAttrs fswModules ["c-blinky"])
-            ++ builtins.attrValues devModules;
-        };
-        m10q = nixpkgs.lib.nixosSystem {
-          system = alephSystem;
-          modules =
-            builtins.attrValues baseModules
-            ++ builtins.attrValues (builtins.removeAttrs fswModules ["c-blinky"])
-            ++ builtins.attrValues devModules
-            ++ [
-              ({...}: {
-                services.sensor-fw.gps.model = "m10q";
-              })
-            ];
-        };
-        m9n = nixpkgs.lib.nixosSystem {
-          system = alephSystem;
-          modules =
-            builtins.attrValues baseModules
-            ++ builtins.attrValues (builtins.removeAttrs fswModules ["c-blinky"])
-            ++ builtins.attrValues devModules
-            ++ [
-              ({...}: {
-                services.sensor-fw.gps.model = "m9n";
-              })
-            ];
-        };
-        c-blinky = nixpkgs.lib.nixosSystem {
-          system = alephSystem;
-          modules =
-            builtins.attrValues baseModules
-            ++ builtins.attrValues (builtins.removeAttrs fswModules ["sensor-fw"])
-            ++ builtins.attrValues devModules;
-        };
-        installer = installerSystem ({...}: {
-          imports = builtins.attrValues baseModules;
-        });
-      };
+      nixosConfigurations =
+        {
+          # .#nixosConfigurations.default.config.system.build.toplevel will apply the
+          # sensor-fw sketch onto the expansion board STM by default
+          default = mkConfiguration [configurationPresets.preset-sensor-fw];
+          installer = installerSystem ({...}: {
+            imports = builtins.attrValues baseModules;
+          });
+        }
+        // customConfigurations;
       packages.aarch64-linux = {
         toplevel = nixosConfigurations.default.config.system.build.toplevel;
         sdimage = nixosConfigurations.installer.config.system.build.sdImage;

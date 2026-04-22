@@ -44,9 +44,8 @@
         aleph-dev # general on-device development tools like git, uv, editors, and Python
         # aleph-cuda # opt-in CUDA, cuDNN, TensorRT, DeepStream, and GPU Python tooling
 
-        # default fsw (pick one: sensor-fw OR c-blinky, they are mutually exclusive)
-        sensor-fw # full sensor firmware: streams IMU/mag/baro/GPS data to elodin-db
-        # c-blinky # deploy-time STM32 bring-up firmware flashed from the Orin during activation
+        # STM firmware selector (defaults to sensor-fw)
+        stm # set aleph.stm.firmware = "c-blinky" below for bring-up firmware
         mekf # a basic attitude mekf that runs on the sensor data from the expansion board
         msp-osd # MSP DisplayPort OSD for FPV goggles, displays attitude from MEKF
 
@@ -88,6 +87,9 @@
       # Uncomment ONE line to enable GPS-disciplined timestamping:
       # services.sensor-fw.gps.model = "m10q";   # SAM-M10Q (9600 baud)
       # services.sensor-fw.gps.model = "m9n";    # NEO-M9N / M9N-5883 (38400 baud)
+
+      # Alternate STM firmware selection (default: "sensor-fw")
+      # aleph.stm.firmware = "c-blinky";
 
       # Enable MSP OSD service (uses MEKF attitude output by default)
       services.msp-osd = {
@@ -187,9 +189,8 @@
     nixosModules.c-blinky = {config, ...}: {
       imports = [
         nixosModules.default
-        aleph.nixosModules.c-blinky
       ];
-      services.sensor-fw.enable = false;
+      aleph.stm.firmware = "c-blinky";
     };
     nixosConfigurations = {
       default = nixpkgs.lib.nixosSystem {
