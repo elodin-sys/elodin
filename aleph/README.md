@@ -78,15 +78,31 @@ This is the recommended development workflow for iterating on the NixOS configur
 
 2. Modify the NixOS configuration in `flake.nix`, `kernel/`, or `modules/`.
 
-3. Run `./deploy.sh` to deploy with default settings, or specify a custom host/user:
+3. Run `./deploy.sh` to deploy with default settings, or specify a custom `user@host` target:
    ```bash
    # Deploy using default settings ($USER@fde1:2240:a1ef::1)
    ./deploy.sh
-   # Deploy using custom host
-   ./deploy.sh --host aleph-99a2.local
+   # Deploy using a custom SSH target (also accepts a ssh alias if one is set)
+   ./deploy.sh root@aleph-99a2.local
+   # Pass raw SSH options with the -o option, for example a ssh key
+   ./deploy.sh -o "-i $HOME/.ssh/key_file -o StrictHostKeyChecking=no" root@aleph-99a2.local
+   # The deploy script also accepts ssh options via the NIX_SSHOPTS environment variable
+   NIX_SSHOPTS="-i $HOME/.ssh/key_file -o StrictHostKeyChecking=no" ./deploy.sh root@aleph-99a2.local
+   # Flash a custom configuration with the --config option (defaults to `sensor-fw` STM firmware):
+   ./deploy.sh root@aleph-99a2.local -c "base"        # base config; no STM firmware
+   ./deploy.sh root@aleph-99a2.local -c "c-blinky"    # base + c-blinky STM FW
+
    # Show all available options
    ./deploy.sh --help
    ```
+   **Note:** the custom configurations accepted by the deploy script are the variables named in
+   `customConfigurations` and `nixosConfigurations` in `flake.nix`.
+
+   The deploy script is also packaged and can be run as follows:
+   ```
+   nix run .#deploy -- -c "base" aleph-99a2.local
+   ```
+   **Note:** if calling the deploy script this way, you must pass options after the double-hyphen.
 
 The deploy script will:
 - Build the NixOS configuration
