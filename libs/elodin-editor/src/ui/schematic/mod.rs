@@ -522,6 +522,7 @@ impl Plugin for SchematicPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(CurrentSchematic(Default::default()))
             .insert_resource(CurrentWindowSchematics::default())
+            .init_resource::<LoadedSchematicRoot>()
             .init_resource::<SchematicBindings>()
             .add_systems(PostUpdate, tiles_to_schematic)
             .add_systems(

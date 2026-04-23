@@ -1257,6 +1257,7 @@ impl ViewportPane {
         render_layer_alloc: &mut ResMut<RenderLayerAllocator>,
         eql_ctx: &eql::Context,
         viewport: &Viewport,
+        schematic_root: Option<Entity>,
         name: PaneName,
     ) -> Self {
         // The grid render layer is reserved and shared by every viewport, so we
@@ -1320,8 +1321,12 @@ impl ViewportPane {
                 bevy_geo_frames::GeoRotation(frame, transform.rotation.as_dquat()),
             ));
         }
+        if let Some(root) = schematic_root {
+            parent_cmd.insert(ChildOf(root));
+        }
 
         let parent = parent_cmd.id();
+        commands.entity(grid_id).insert(ChildOf(parent));
         let pos = viewport
             .pos
             .as_ref()
@@ -2724,6 +2729,7 @@ impl WidgetSystem for TileLayout<'_, '_> {
                             &mut state_mut.render_layer_alloc,
                             &state_mut.eql_ctx.0,
                             &viewport,
+                            None,
                             label,
                         );
 

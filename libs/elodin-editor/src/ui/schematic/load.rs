@@ -108,6 +108,9 @@ fn apply_fallback_frame_to_panel(
 #[derive(Component)]
 pub struct SyncedViewport;
 
+#[derive(Resource, Default, Debug, Clone, Copy)]
+pub struct LoadedSchematicRoot(pub Option<Entity>);
+
 #[derive(SystemParam)]
 pub struct LoadSchematicParams<'w, 's> {
     pub commands: Commands<'w, 's>,
@@ -128,6 +131,7 @@ pub struct LoadSchematicParams<'w, 's> {
     pub geo_context: Res<'w, GeoContext>,
     pub sensor_camera_configs: Res<'w, crate::sensor_camera::SensorCameraConfigs>,
     pub coordinate: ResMut<'w, crate::Coordinate>,
+    schematic_root: ResMut<'w, LoadedSchematicRoot>,
     cameras: Query<'w, 's, &'static mut Camera>,
     objects_3d: Query<'w, 's, Entity, With<Object3DState>>,
     vector_arrows: Query<'w, 's, Entity, With<VectorArrowState>>,
@@ -204,6 +208,18 @@ fn collect_window_descriptors(
     WindowDescriptors { main, windows }
 }
 
+fn schematic_has_spawned_entities(schematic: &Schematic) -> bool {
+    schematic.elems.iter().any(|elem| {
+        matches!(
+            elem,
+            impeller2_wkt::SchematicElem::Panel(_)
+                | impeller2_wkt::SchematicElem::Object3d(_)
+                | impeller2_wkt::SchematicElem::Line3d(_)
+                | impeller2_wkt::SchematicElem::VectorArrow(_)
+        )
+    })
+}
+
 fn apply_loaded_document(
     params: &mut LoadSchematicParams,
     save_path: Option<&Path>,
@@ -230,6 +246,14 @@ impl LoadSchematicParams<'_, '_> {
     ) {
         // Set global coordinate frame from schematic
         self.coordinate.0 = schematic.frame;
+
+        if let Some(root) = self.schematic_root.0.take() {
+            self.commands.entity(root).despawn();
+        }
+
+        let schematic_root = schematic_has_spawned_entities(schematic)
+            .then(|| self.commands.spawn(Name::new("schematic_root")).id());
+        self.schematic_root.0 = schematic_root;
 
         for (id, window_id, window_state) in &self.window_states {
             if window_id.is_primary() {
@@ -613,6 +637,9 @@ impl LoadSchematicParams<'_, '_> {
             &self.asset_server,
             &self.geo_context,
         );
+        if let Some(root) = self.schematic_root.0 {
+            self.commands.entity(entity).insert(ChildOf(root));
+        }
         if let Some(icon) = &icon {
             crate::object_3d::spawn_billboard_icon(
                 &mut self.commands,
@@ -639,6 +666,9 @@ impl LoadSchematicParams<'_, '_> {
                 bevy_geo_frames::GeoPosition(frame, bevy::math::DVec3::ZERO),
                 bevy_geo_frames::GeoRotation(frame, bevy::math::DQuat::IDENTITY),
             ));
+        }
+        if let Some(root) = self.schematic_root.0 {
+            spawn.insert(ChildOf(root));
         }
     }
 
@@ -685,6 +715,9 @@ impl LoadSchematicParams<'_, '_> {
         if let Some(camera) = viewport_camera {
             spawn.insert(ViewportArrow { camera });
         }
+        if let Some(root) = self.schematic_root.0 {
+            spawn.insert(ChildOf(root));
+        }
     }
 
     fn spawn_panel(
@@ -706,6 +739,7 @@ impl LoadSchematicParams<'_, '_> {
                     &mut self.render_layer_alloc,
                     &self.eql.0,
                     viewport,
+                    self.schematic_root.0,
                     label,
                 );
                 self.hdr_enabled.0 |= viewport.hdr;
@@ -1261,5 +1295,116 @@ pub fn show_document_load_failures(
             &event.message,
         );
         error!(path = %event.path, error = %event.message, "Failed to load schematic document");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{LoadSchematicParams, LoadedSchematicRoot};
+    use crate::{
+        Coordinate, EqlContext,
+        icon_rasterizer::IconTextureCache,
+        plugins::render_layer_alloc,
+        sensor_camera::SensorCameraConfigs,
+        ui::{
+            HdrEnabled,
+            schematic::{CurrentDocument, SchematicBindings, SchematicDocumentAsset},
+            tiles,
+            timeline::TimelineSettings,
+        },
+    };
+    use bevy::{
+        asset::{AssetApp, AssetPlugin, UnapprovedPathMode},
+        ecs::system::SystemState,
+        prelude::*,
+        window::{PrimaryWindow, Window},
+    };
+    use bevy_geo_frames::GeoFramePlugin;
+    use bevy_mat3_material::Mat3Material;
+    use impeller2_bevy::ComponentSchemaRegistry;
+    use impeller2_kdl::FromKdl;
+    use impeller2_wkt::Schematic;
+
+    fn test_app() -> App {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(AssetPlugin {
+            unapproved_path_mode: UnapprovedPathMode::Allow,
+            ..Default::default()
+        });
+        app.init_asset::<Mesh>()
+            .init_asset::<StandardMaterial>()
+            .init_asset::<Image>()
+            .init_asset::<Mat3Material>()
+            .init_asset::<SchematicDocumentAsset>();
+        app.add_plugins(GeoFramePlugin {
+            apply_transforms: false,
+            ..default()
+        });
+        render_layer_alloc::plugin(&mut app);
+        tiles::plugin(&mut app);
+        app.init_resource::<CurrentDocument>()
+            .init_resource::<IconTextureCache>()
+            .init_resource::<HdrEnabled>()
+            .init_resource::<TimelineSettings>()
+            .init_resource::<ComponentSchemaRegistry>()
+            .init_resource::<EqlContext>()
+            .init_resource::<SensorCameraConfigs>()
+            .init_resource::<Coordinate>()
+            .init_resource::<LoadedSchematicRoot>()
+            .init_resource::<SchematicBindings>();
+
+        app.world_mut().spawn((Window::default(), PrimaryWindow));
+        settle(&mut app);
+        app
+    }
+
+    fn settle(app: &mut App) {
+        for _ in 0..4 {
+            app.update();
+        }
+    }
+
+    fn entity_count(app: &mut App) -> usize {
+        app.world().entities().len() as usize
+    }
+
+    fn load_schematic(app: &mut App, schematic: &Schematic) {
+        let mut system_state: SystemState<LoadSchematicParams> = SystemState::new(app.world_mut());
+        let mut params = system_state.get_mut(app.world_mut());
+        params.load_schematic(schematic, None, None);
+        system_state.apply(app.world_mut());
+        settle(app);
+    }
+
+    #[test]
+    fn loading_then_clearing_restores_entity_count_to_baseline() {
+        let mut app = test_app();
+        let baseline = entity_count(&mut app);
+
+        let schematic = Schematic::from_kdl(
+            r#"
+            viewport name="V1" show_view_cube=#false
+            viewport name="V2" show_view_cube=#false
+            viewport name="V3" show_view_cube=#false
+            line_3d "(0,0,0)"
+            line_3d "(1,1,1)"
+            "#,
+        )
+        .expect("parse test schematic");
+
+        load_schematic(&mut app, &schematic);
+        let loaded_count = entity_count(&mut app);
+        assert!(
+            loaded_count > baseline,
+            "loading the schematic should increase the entity count"
+        );
+
+        load_schematic(&mut app, &Schematic::default());
+        let cleared_count = entity_count(&mut app);
+        assert_eq!(
+            cleared_count, baseline,
+            "clearing the schematic should restore the entity count to baseline"
+        );
     }
 }
