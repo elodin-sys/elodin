@@ -415,6 +415,7 @@ struct CachedSystemState {
         Res<'static, LastUpdated>,
         Res<'static, CurrentTimestamp>,
         Res<'static, TimelineSettings>,
+        Res<'static, crate::ui::timeline::LatestFollow>,
     )>,
 }
 
@@ -453,6 +454,7 @@ fn extract_lines(
             latest_timestamp,
             current_timestamp,
             timeline_settings,
+            latest_follow,
         ) = cached_state.state.get_mut(world);
         let selected_range = selected_time_range.0.clone();
         let sampling_range = if replay_mode && earliest_timestamp.0 < latest_timestamp.0 {
@@ -475,7 +477,18 @@ fn extract_lines(
         );
         future_color.w *= timeline_settings.future_trail_alpha;
 
-        let played_range = selected_range.start..selected_range.end.min(current_timestamp.0);
+        // Live-follow mode: the whole trail is "already played", so render
+        // everything in the played color (yolk) and skip the future pass
+        // entirely. Without this, Table packets racing ahead of
+        // LastUpdated put `latest_sample_ts > current_ts` for one frame,
+        // the snap-back below manufactures a 1-sample future range, and
+        // the white trail overdraws the tail of the yellow trail.
+        let live_follow = latest_follow.0;
+        let played_range = if live_follow {
+            selected_range.clone()
+        } else {
+            selected_range.start..selected_range.end.min(current_timestamp.0)
+        };
         // Future segment must contain >= 2 samples or the shader draws only
         // sentinel(NaN)-to-point instances and nothing shows up. When
         // `current_timestamp` falls between sim ticks (the common case in live
@@ -620,26 +633,19 @@ fn extract_lines(
                 ));
             }
 
-            // Snap the future range's start to the previous sample when there
-            // are actual samples past `split` (the usual playhead case between
-            // sim ticks) — otherwise the segment would collapse to a single
-            // index and blink. In live-follow mode `split == latest sample`
-            // and no snap is wanted: the future segment must stay empty, else
-            // a tiny white tail overdraws the yellow trail.
-            let has_future_samples = line_assets
-                .get(&line_handles.0[0])
-                .and_then(|l| l.data.latest_sample_timestamp())
-                .map(|latest| latest > split)
-                .unwrap_or(false);
-            let future_range = if has_future_samples {
+            // Live-follow: played covers everything, nothing is "future".
+            // Otherwise snap the start back to the previous sample so the
+            // future segment always has >= 2 indices (single-index segments
+            // collapse to a NaN draw and blink at framerate).
+            let future_range = if live_follow {
+                split..split
+            } else {
                 let future_start = line_assets
                     .get(&line_handles.0[0])
                     .and_then(|l| l.data.last_timestamp_strictly_before(split))
                     .map(|ts| selected_range.start.max(ts))
                     .unwrap_or(split);
                 future_start..selected_range.end
-            } else {
-                split..split
             };
 
             if let Some(gpu_line) = build_gpu_line(future_range.clone()) {
