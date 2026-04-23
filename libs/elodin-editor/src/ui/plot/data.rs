@@ -1394,6 +1394,24 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
         Some((*chunk.timestamps.get(index)?, chunk.data.cpu().get(index)?))
     }
 
+    /// Returns the latest sample timestamp **strictly less than** `target`.
+    ///
+    /// Used by `line_3d` rendering to snap the played/future split onto the
+    /// previous sample boundary. Without this, the future segment can collapse
+    /// to a single index per frame when `current_timestamp` falls between
+    /// discrete sim ticks, which disappears from the shader (NaN-only draw)
+    /// and shows up as a blink near the current position.
+    pub fn last_timestamp_strictly_before(&self, target: Timestamp) -> Option<Timestamp> {
+        let upper = target.0.checked_sub(1)?;
+        let (_, chunk) = self.tree.overlapping(ii(i64::MIN, upper)).last()?;
+        let probe = Timestamp(upper);
+        let idx = match chunk.timestamps.binary_search(&probe) {
+            Ok(i) => i,
+            Err(i) => i.checked_sub(1)?,
+        };
+        chunk.timestamps.get(idx).copied()
+    }
+
     pub fn data_buffer_shard_alloc(&self) -> Option<&BufferShardAlloc> {
         self.data_buffer_shard_alloc.as_ref()
     }

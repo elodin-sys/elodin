@@ -476,7 +476,13 @@ fn extract_lines(
         future_color.w *= timeline_settings.future_trail_alpha;
 
         let played_range = selected_range.start..selected_range.end.min(current_timestamp.0);
-        let future_range = selected_range.start.max(current_timestamp.0)..selected_range.end;
+        // Future segment must contain >= 2 samples or the shader draws only
+        // sentinel(NaN)-to-point instances and nothing shows up. When
+        // `current_timestamp` falls between sim ticks (the common case in live
+        // streaming), the naive split leaves a single index in the future
+        // range, which blinks at the render framerate near the rocket. Snap
+        // the split back onto the previous sample boundary instead.
+        let split = selected_range.start.max(current_timestamp.0);
 
         'outer: for (entity, line_handles, config, uniform, gpu_line) in lines.iter_mut() {
             for line in &line_handles.0 {
@@ -613,6 +619,16 @@ fn extract_lines(
                     TemporaryRenderEntity,
                 ));
             }
+
+            // Snap the future range's start to the previous sample so the
+            // segment always has >= 2 indices per axis near the playhead. Fall
+            // back to `split` when no earlier sample exists.
+            let future_start = line_assets
+                .get(&line_handles.0[0])
+                .and_then(|l| l.data.last_timestamp_strictly_before(split))
+                .map(|ts| selected_range.start.max(ts))
+                .unwrap_or(split);
+            let future_range = future_start..selected_range.end;
 
             if let Some(gpu_line) = build_gpu_line(future_range.clone()) {
                 let mut future_uniform = *uniform;
