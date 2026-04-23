@@ -163,7 +163,7 @@ fn invert_cum_integral(ss: &[f32], cum: &[f32], target: f32) -> f32 {
     s0 + t * (s1 - s0)
 }
 
-fn nearest_point_index<V>(points: &[V], q: V, dot: fn(V,V) -> f32) -> usize
+fn nearest_point_index<V>(points: &[V], q: V, dot: fn(V, V) -> f32) -> usize
 where
     V: Copy + Sub<Output = V>,
 {
@@ -194,7 +194,12 @@ fn uniform_indices(n: usize, m: usize) -> Vec<usize> {
     out
 }
 
-fn select_indices_curvature<V>(points: &[V], ks: &[f32], m: usize, dot: fn(V,V) -> f32) -> Vec<usize>
+fn select_indices_curvature<V>(
+    points: &[V],
+    ks: &[f32],
+    m: usize,
+    dot: fn(V, V) -> f32,
+) -> Vec<usize>
 where
     V: Copy + Sub<Output = V>,
 {
@@ -221,12 +226,13 @@ where
     let xbars: Vec<V> = xbars_ks.iter().map(|&(p, _)| p).collect();
     let ki: Vec<f32> = xbars_ks.iter().map(|&(_, k)| k).collect();
 
-    let si: Vec<f32> = xbars.windows(2).map(|w| {
-        let a = w[1] - w[0];
-        let length_squared = dot(a, a);
-        let length = length_squared.sqrt();
-        length
-    }).collect();
+    let si: Vec<f32> = xbars
+        .windows(2)
+        .map(|w| {
+            let a = w[1] - w[0];
+            dot(a, a).sqrt()
+        })
+        .collect();
     let mut ss = Vec::with_capacity(xbars.len());
     ss.push(0.0);
     for seg in &si {
@@ -285,7 +291,12 @@ where
     picked.sort_unstable();
     picked.dedup();
     //picked.truncate(m - 1);
-    assert!(picked.len() <= m, "Tried to return {} points, which is more than the {} points requested", picked.len(), m);
+    assert!(
+        picked.len() <= m,
+        "Tried to return {} points, which is more than the {} points requested",
+        picked.len(),
+        m
+    );
     picked
 }
 
