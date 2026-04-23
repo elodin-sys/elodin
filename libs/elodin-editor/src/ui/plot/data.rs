@@ -67,16 +67,34 @@ pub struct CurveCompressSettings {
     /// - `0.2` — keep roughly the last 20% at full resolution; Hamann–Chen runs on the leading
     ///   prefix only.
     pub keep_recent_fraction: f32,
+    /// Non-destructive **archive + view** architecture. When `true`,
+    /// [`PlotDataComponent::push_value`] appends each accepted live sample to
+    /// [`LineTree::raw_slice`], and [`LineTree::compress_time_value_hamann`] reads from that
+    /// archive instead of the decimated view. Switching this off at runtime reverts to the
+    /// historical destructive pipeline (no archive, HC reads and rewrites the view).
+    pub archive_enabled: bool,
+    /// Throttle: recompute the view as soon as the archive has grown by this many samples since
+    /// the last HC pass. Set small (relative to [`Self::compress_after_total_points`]) to keep
+    /// the UI responsive; too small wastes CPU recomputing the view too often.
+    pub view_recompute_min_samples: usize,
+    /// Throttle: if the archive hasn't grown enough for [`Self::view_recompute_min_samples`],
+    /// still recompute when at least this many milliseconds have passed since the last pass.
+    /// Caps worst-case staleness for low-rate telemetry.
+    pub view_recompute_min_interval_ms: u64,
 }
 
 impl Default for CurveCompressSettings {
     fn default() -> Self {
         let cap = CHUNK_COUNT.saturating_mul(CHUNK_LEN);
+        let threshold = cap.saturating_mul(3) / 4;
         Self {
             enabled: true,
-            compress_after_total_points: cap.saturating_mul(3) / 4,
+            compress_after_total_points: threshold,
             compress_to_points: cap / 2,
             keep_recent_fraction: 0.0,
+            archive_enabled: true,
+            view_recompute_min_samples: (threshold / 20).max(1),
+            view_recompute_min_interval_ms: 250,
         }
     }
 }
@@ -117,6 +135,7 @@ impl PlotDataComponent {
         assets: &mut Assets<Line>,
         timestamp: Timestamp,
         earliest_timestamp: Timestamp,
+        archive_enabled: bool,
     ) {
         let element_names = self
             .element_names
@@ -138,6 +157,7 @@ impl PlotDataComponent {
             // line.  The FixedRate stream sends a snapshot at the current
             // playback position each frame; skipping timestamps already covered
             // prevents corrupting historical data loaded by GetTimeSeries.
+            let mut accepted = false;
             if let Some(last) = line.data.last() {
                 if timestamp <= last.summary.end_timestamp {
                     continue;
@@ -146,11 +166,17 @@ impl PlotDataComponent {
                     line.data.update_last(|c| {
                         c.push(timestamp, earliest_timestamp, new_value);
                     });
-                    continue;
+                    accepted = true;
                 }
             }
-            let new_chunk = Chunk::from_initial_value(timestamp, earliest_timestamp, new_value);
-            line.data.insert(new_chunk);
+            if !accepted {
+                let new_chunk = Chunk::from_initial_value(timestamp, earliest_timestamp, new_value);
+                line.data.insert(new_chunk);
+            }
+            // Archive mirrors exactly the sequence accepted by the view. Monotonicity of raw is
+            // enforced by `push_raw` itself, so re-ingestion of historical timestamps (already
+            // rejected above) is doubly safe.
+            line.data.push_raw(archive_enabled, timestamp, new_value);
         }
     }
 }
@@ -198,7 +224,13 @@ pub fn pkt_handler(
                     return;
                 };
                 if let Some(timestamp) = timestamp {
-                    plot_data.push_value(view, &mut lines, timestamp, earliest_timestamp.0);
+                    plot_data.push_value(
+                        view,
+                        &mut lines,
+                        timestamp,
+                        earliest_timestamp.0,
+                        curve_compress.archive_enabled,
+                    );
                 }
             },
         ) {
@@ -242,6 +274,26 @@ pub fn maybe_compress_all_graph_lines(
             line.maybe_compress_live(earliest, settings);
         }
     }
+    if settings.archive_enabled {
+        // Safety net: flag outsized archives so multi-hour aerospace runs don't silently blow up
+        // RAM. V1 has no enforced horizon; a user report on this warning is the trigger to add
+        // `archive_horizon_seconds` in a follow-up.
+        const RAW_ARCHIVE_WARN_BYTES: usize = 100 * 1024 * 1024;
+        for component in graph_data.components.values() {
+            for line_handle in component.lines.values() {
+                if let Some(line) = lines.get(line_handle)
+                    && line.data.raw_archive_bytes() > RAW_ARCHIVE_WARN_BYTES
+                {
+                    let mb = line.data.raw_archive_bytes() / (1024 * 1024);
+                    warn_once!(
+                        raw_mb = mb,
+                        line_label = %line.label,
+                        "curve_compress: raw archive exceeds 100 MB on a single line; consider lowering run length or adding archive_horizon_seconds"
+                    );
+                }
+            }
+        }
+    }
 }
 
 fn try_joint_triline_compress(
@@ -258,12 +310,33 @@ fn try_joint_triline_compress(
         (Some(x), Some(y), Some(z)) => (x, y, z),
         _ => return false,
     };
-    if lx.data.total_points() <= settings.compress_after_total_points {
+    if settings.archive_enabled {
+        if !lx.data.should_recompress(settings) {
+            return false;
+        }
+    } else if lx.data.total_points() <= settings.compress_after_total_points {
         return false;
     }
-    let (tsx, vx) = lx.data.flattened_time_series();
-    let (tsy, vy) = ly.data.flattened_time_series();
-    let (tsz, vz) = lz.data.flattened_time_series();
+    // Own the sequence: archive slices borrow from `lines`, which conflicts with the later
+    // `lines.get_mut` on the same assets.
+    let (tsx, vx): (Vec<Timestamp>, Vec<f32>) = if settings.archive_enabled {
+        let (t, v) = lx.data.raw_slice();
+        (t.to_vec(), v.to_vec())
+    } else {
+        lx.data.flattened_time_series()
+    };
+    let (tsy, vy): (Vec<Timestamp>, Vec<f32>) = if settings.archive_enabled {
+        let (t, v) = ly.data.raw_slice();
+        (t.to_vec(), v.to_vec())
+    } else {
+        ly.data.flattened_time_series()
+    };
+    let (tsz, vz): (Vec<Timestamp>, Vec<f32>) = if settings.archive_enabled {
+        let (t, v) = lz.data.raw_slice();
+        (t.to_vec(), v.to_vec())
+    } else {
+        lz.data.flattened_time_series()
+    };
     if tsx.len() != tsy.len() || tsx.len() != tsz.len() {
         return false;
     }
@@ -331,16 +404,19 @@ fn try_joint_triline_compress(
     };
     xl.data
         .rebuild_from_time_value_pairs(earliest, &new_ts, &new_x);
+    xl.data.mark_compressed();
     let Some(yl) = lines.get_mut(hy) else {
         return false;
     };
     yl.data
         .rebuild_from_time_value_pairs(earliest, &new_ts, &new_y);
+    yl.data.mark_compressed();
     let Some(zl) = lines.get_mut(hz) else {
         return false;
     };
     zl.data
         .rebuild_from_time_value_pairs(earliest, &new_ts, &new_z);
+    zl.data.mark_compressed();
     true
 }
 
@@ -870,7 +946,12 @@ pub struct Line {
 
 impl Line {
     fn maybe_compress_live(&mut self, earliest: Timestamp, settings: &CurveCompressSettings) {
-        if self.data.total_points() > settings.compress_after_total_points {
+        let should = if settings.archive_enabled {
+            self.data.should_recompress(settings)
+        } else {
+            self.data.total_points() > settings.compress_after_total_points
+        };
+        if should {
             self.data.compress_time_value_hamann(earliest, settings);
         }
     }
@@ -1228,6 +1309,23 @@ pub struct LineTree<D: Clone + BoundOrd> {
     tree: NoditMap<i64, nodit::Interval<i64>, Chunk<D>>,
     data_buffer_shard_alloc: Option<BufferShardAlloc>,
     timestamp_buffer_shard_alloc: Option<BufferShardAlloc>,
+    /// Append-only archive of raw `(timestamp, value)` samples ingested live.
+    ///
+    /// When [`CurveCompressSettings::archive_enabled`] is true, [`PlotDataComponent::push_value`]
+    /// pushes every accepted sample here in addition to the view (`tree`). The Hamann-Chen pass
+    /// then reads from this archive and rebuilds the view, leaving the archive untouched. Because
+    /// the archive is never decimated, running HC multiple times produces identical output
+    /// (monotone quality) and parameter changes can be re-applied without loss.
+    ///
+    /// Populated only for live streaming. Samples arriving via `GetTimeSeries` (historical DB
+    /// scroll) go through `handle_time_series`, which bypasses `push_value` and fills the view
+    /// directly — the archive stays empty for those ranges (elodin-db itself is the archive).
+    raw_timestamps: Vec<Timestamp>,
+    raw_values: Vec<D>,
+    /// Archive length at the end of the last HC pass, for throttling decisions.
+    last_hc_archive_len: usize,
+    /// Wall-clock instant of the last HC pass, for time-based throttling.
+    last_hc_instant: Option<std::time::Instant>,
 }
 
 impl<D: Clone + BoundOrd> Default for LineTree<D> {
@@ -1236,6 +1334,10 @@ impl<D: Clone + BoundOrd> Default for LineTree<D> {
             tree: Default::default(),
             data_buffer_shard_alloc: None,
             timestamp_buffer_shard_alloc: None,
+            raw_timestamps: Vec::new(),
+            raw_values: Vec::new(),
+            last_hc_archive_len: 0,
+            last_hc_instant: None,
         }
     }
 }
@@ -1274,6 +1376,68 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
 
     pub fn chunk_count(&self) -> usize {
         self.tree.iter().count()
+    }
+
+    /// Append `(ts, value)` to the raw archive. Rejects out-of-order timestamps
+    /// (`ts <= last`) so the archive stays monotonic by construction. No-op if
+    /// `enabled` is false — the caller gates on [`CurveCompressSettings::archive_enabled`].
+    pub fn push_raw(&mut self, enabled: bool, ts: Timestamp, value: D) {
+        if !enabled {
+            return;
+        }
+        if let Some(last) = self.raw_timestamps.last()
+            && ts <= *last
+        {
+            return;
+        }
+        self.raw_timestamps.push(ts);
+        self.raw_values.push(value);
+    }
+
+    pub fn raw_len(&self) -> usize {
+        self.raw_timestamps.len()
+    }
+
+    pub fn raw_slice(&self) -> (&[Timestamp], &[D]) {
+        (&self.raw_timestamps, &self.raw_values)
+    }
+
+    pub fn clear_raw(&mut self) {
+        self.raw_timestamps.clear();
+        self.raw_values.clear();
+        self.last_hc_archive_len = 0;
+        self.last_hc_instant = None;
+    }
+
+    /// True when the archive has grown enough (samples or time) since the last HC pass to justify
+    /// recomputing the view. Always false below [`CurveCompressSettings::compress_after_total_points`].
+    pub fn should_recompress(&self, settings: &CurveCompressSettings) -> bool {
+        if self.raw_len() <= settings.compress_after_total_points {
+            return false;
+        }
+        let grew = self.raw_len().saturating_sub(self.last_hc_archive_len)
+            >= settings.view_recompute_min_samples;
+        if grew {
+            return true;
+        }
+        match self.last_hc_instant {
+            None => true,
+            Some(t) => {
+                t.elapsed()
+                    >= std::time::Duration::from_millis(settings.view_recompute_min_interval_ms)
+            }
+        }
+    }
+
+    /// Record that an HC pass has just run (updates throttle bookkeeping).
+    pub fn mark_compressed(&mut self) {
+        self.last_hc_archive_len = self.raw_len();
+        self.last_hc_instant = Some(std::time::Instant::now());
+    }
+
+    /// Approximate memory cost of the raw archive in bytes (timestamps + values).
+    pub fn raw_archive_bytes(&self) -> usize {
+        self.raw_timestamps.len() * (std::mem::size_of::<Timestamp>() + std::mem::size_of::<D>())
     }
 
     pub fn range_summary(&self, range: Range<Timestamp>) -> ChunkSummary<D> {
@@ -1701,12 +1865,26 @@ impl LineTree<f32> {
 
     /// Hamann–Chen in `(t, y)`; optional [`CurveCompressSettings::keep_recent_fraction`] leaves a
     /// suffix of recent samples uncompressed.
+    ///
+    /// Source of truth depends on [`CurveCompressSettings::archive_enabled`]:
+    /// - `true` (non-destructive) — reads from [`LineTree::raw_slice`]. Repeated passes produce
+    ///   identical output (monotone quality); archive is never touched.
+    /// - `false` (legacy destructive) — reads from [`Self::flattened_time_series`] (the already
+    ///   decimated view), so successive passes compound decimation. Kept as rollback switch.
     pub fn compress_time_value_hamann(
         &mut self,
         earliest: Timestamp,
         settings: &CurveCompressSettings,
     ) {
-        let (ts_all, v_all) = self.flattened_time_series();
+        // Own the source slice: the archive path needs a borrow of `self` that conflicts with the
+        // later `&mut self` in `rebuild_from_time_value_pairs`. The clone of ~1-10 MB is cheap
+        // compared to the HC pass itself (50-100 ms).
+        let (ts_all, v_all): (Vec<Timestamp>, Vec<f32>) = if settings.archive_enabled {
+            let (t, v) = self.raw_slice();
+            (t.to_vec(), v.to_vec())
+        } else {
+            self.flattened_time_series()
+        };
         let n = ts_all.len();
         if n < 3 {
             return;
@@ -1738,6 +1916,7 @@ impl LineTree<f32> {
             new_ts.extend_from_slice(recent_ts);
             new_v.extend_from_slice(recent_v);
             self.rebuild_from_time_value_pairs(earliest, &new_ts, &new_v);
+            self.mark_compressed();
             return;
         }
 
@@ -1750,6 +1929,7 @@ impl LineTree<f32> {
         let new_ts: Vec<Timestamp> = idx.iter().map(|&i| ts_all[i]).collect();
         let new_v: Vec<f32> = idx.iter().map(|&i| v_all[i]).collect();
         self.rebuild_from_time_value_pairs(earliest, &new_ts, &new_v);
+        self.mark_compressed();
     }
 }
 
@@ -1908,6 +2088,214 @@ mod tests {
             c, 12,
             "leading 0 + 10 indices + trailing 0 (no duplicate last)"
         );
+    }
+
+    // === Archive + view (non-destructive HC) tests ===
+
+    fn archive_settings(
+        archive_enabled: bool,
+        threshold: usize,
+        target: usize,
+    ) -> CurveCompressSettings {
+        CurveCompressSettings {
+            enabled: true,
+            compress_after_total_points: threshold,
+            compress_to_points: target,
+            keep_recent_fraction: 0.0,
+            archive_enabled,
+            view_recompute_min_samples: 1,
+            view_recompute_min_interval_ms: 0,
+        }
+    }
+
+    #[test]
+    fn push_raw_enforces_monotonicity() {
+        let mut tree = LineTree::<f32>::default();
+        tree.push_raw(true, Timestamp(10), 1.0);
+        tree.push_raw(true, Timestamp(20), 2.0);
+        tree.push_raw(true, Timestamp(15), 99.0);
+        tree.push_raw(true, Timestamp(20), 99.0);
+        tree.push_raw(true, Timestamp(30), 3.0);
+        let (ts, vs) = tree.raw_slice();
+        assert_eq!(ts, &[Timestamp(10), Timestamp(20), Timestamp(30)]);
+        assert_eq!(vs, &[1.0, 2.0, 3.0]);
+    }
+
+    #[test]
+    fn push_raw_disabled_is_noop() {
+        let mut tree = LineTree::<f32>::default();
+        tree.push_raw(false, Timestamp(10), 1.0);
+        tree.push_raw(false, Timestamp(20), 2.0);
+        assert_eq!(tree.raw_len(), 0);
+    }
+
+    #[test]
+    fn clear_raw_resets_state() {
+        let mut tree = LineTree::<f32>::default();
+        tree.push_raw(true, Timestamp(10), 1.0);
+        tree.mark_compressed();
+        assert_eq!(tree.raw_len(), 1);
+        assert!(tree.last_hc_instant.is_some());
+        tree.clear_raw();
+        assert_eq!(tree.raw_len(), 0);
+        assert_eq!(tree.last_hc_archive_len, 0);
+        assert!(tree.last_hc_instant.is_none());
+    }
+
+    #[test]
+    fn rebuild_from_time_value_pairs_preserves_raw_archive() {
+        let mut tree = LineTree::<f32>::default();
+        for i in 0..20 {
+            tree.push_raw(true, Timestamp(i * 10), i as f32);
+        }
+        let raw_before = tree.raw_slice();
+        let (ts_before, vs_before) = (raw_before.0.to_vec(), raw_before.1.to_vec());
+        let new_ts = vec![Timestamp(0), Timestamp(100), Timestamp(190)];
+        let new_v = vec![0.0, 10.0, 19.0];
+        tree.rebuild_from_time_value_pairs(Timestamp(0), &new_ts, &new_v);
+        let (ts_after, vs_after) = tree.raw_slice();
+        assert_eq!(
+            ts_after,
+            ts_before.as_slice(),
+            "archive timestamps must be untouched"
+        );
+        assert_eq!(
+            vs_after,
+            vs_before.as_slice(),
+            "archive values must be untouched"
+        );
+    }
+
+    #[test]
+    fn should_recompress_below_threshold_is_false() {
+        let mut tree = LineTree::<f32>::default();
+        let settings = archive_settings(true, 1000, 100);
+        tree.push_raw(true, Timestamp(1), 0.0);
+        assert!(!tree.should_recompress(&settings));
+    }
+
+    #[test]
+    fn should_recompress_above_threshold_triggers_once_no_prior_pass() {
+        let mut tree = LineTree::<f32>::default();
+        let settings = archive_settings(true, 5, 3);
+        for i in 0..10 {
+            tree.push_raw(true, Timestamp(i), i as f32);
+        }
+        assert!(tree.should_recompress(&settings));
+    }
+
+    #[test]
+    fn should_recompress_throttled_by_sample_delta() {
+        let mut tree = LineTree::<f32>::default();
+        let settings = CurveCompressSettings {
+            view_recompute_min_samples: 100,
+            view_recompute_min_interval_ms: 60_000,
+            ..archive_settings(true, 5, 3)
+        };
+        for i in 0..10 {
+            tree.push_raw(true, Timestamp(i), i as f32);
+        }
+        tree.mark_compressed();
+        tree.push_raw(true, Timestamp(11), 11.0);
+        assert!(
+            !tree.should_recompress(&settings),
+            "1 new sample, 100 required + recent pass -> should skip"
+        );
+    }
+
+    #[test]
+    fn should_recompress_fires_when_interval_elapsed_even_without_enough_samples() {
+        let mut tree = LineTree::<f32>::default();
+        let settings = CurveCompressSettings {
+            view_recompute_min_samples: 100,
+            view_recompute_min_interval_ms: 0,
+            ..archive_settings(true, 5, 3)
+        };
+        for i in 0..10 {
+            tree.push_raw(true, Timestamp(i), i as f32);
+        }
+        tree.mark_compressed();
+        tree.push_raw(true, Timestamp(11), 11.0);
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        assert!(
+            tree.should_recompress(&settings),
+            "interval=0 means elapsed check always fires"
+        );
+    }
+
+    #[test]
+    fn hc_pass_is_deterministic_on_stable_archive() {
+        let mut tree = LineTree::<f32>::default();
+        let settings = archive_settings(true, 5, 20);
+        for i in 0..200 {
+            let t = Timestamp(i);
+            let v = (i as f32 * 0.05).sin();
+            tree.push_raw(true, t, v);
+        }
+        tree.compress_time_value_hamann(Timestamp(0), &settings);
+        let view_1 = tree.flattened_time_series();
+        tree.compress_time_value_hamann(Timestamp(0), &settings);
+        let view_2 = tree.flattened_time_series();
+        assert_eq!(
+            view_1.0, view_2.0,
+            "two successive passes must pick identical timestamps"
+        );
+        assert_eq!(
+            view_1.1, view_2.1,
+            "two successive passes must pick identical values"
+        );
+    }
+
+    #[test]
+    fn hc_pass_is_monotone_across_many_passes() {
+        let mut tree = LineTree::<f32>::default();
+        let settings = archive_settings(true, 5, 20);
+        for i in 0..200 {
+            tree.push_raw(true, Timestamp(i), (i as f32 * 0.05).sin());
+        }
+        tree.compress_time_value_hamann(Timestamp(0), &settings);
+        let reference = tree.flattened_time_series();
+        for _ in 0..10 {
+            tree.compress_time_value_hamann(Timestamp(0), &settings);
+        }
+        let after = tree.flattened_time_series();
+        assert_eq!(
+            reference.0, after.0,
+            "10 passes with no new samples must not shift the view"
+        );
+        assert_eq!(reference.1, after.1);
+    }
+
+    #[test]
+    fn hc_pass_disabled_archive_reads_from_view_like_before() {
+        let mut tree = LineTree::<f32>::default();
+        let settings = archive_settings(false, 5, 20);
+        for i in 0..200 {
+            let t = Timestamp(i);
+            let v = (i as f32 * 0.05).sin();
+            // Use insert path so the view gets populated without touching the archive
+            let chunk = Chunk::from_iter(&[t], Timestamp(0), [v].into_iter()).expect("chunk");
+            tree.insert(chunk);
+        }
+        assert_eq!(
+            tree.raw_len(),
+            0,
+            "archive_enabled=false keeps archive empty"
+        );
+        tree.compress_time_value_hamann(Timestamp(0), &settings);
+        let (ts, _) = tree.flattened_time_series();
+        assert!(!ts.is_empty() && ts.len() <= settings.compress_to_points);
+    }
+
+    #[test]
+    fn raw_archive_bytes_scales_with_sample_count() {
+        let mut tree = LineTree::<f32>::default();
+        assert_eq!(tree.raw_archive_bytes(), 0);
+        for i in 0..1_000 {
+            tree.push_raw(true, Timestamp(i), i as f32);
+        }
+        // Timestamp(i64) = 8 bytes + f32 = 4 bytes => 12 bytes per sample.
+        assert_eq!(tree.raw_archive_bytes(), 1_000 * 12);
     }
 }
 

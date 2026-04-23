@@ -41,6 +41,28 @@ If you need to **diff behaviour** against another port, start from the gist and 
 
 ---
 
+## Archive vs view (integration guidance)
+
+The crate itself is **pure**: you hand it indices-in-arrays, it hands you a sorted subset. It has no state, no I/O, no allocation semantics beyond internal scratch buffers.
+
+Consumers that keep a live-growing time series should resist the temptation to **overwrite their dataset** with the output of each pass. That pattern (repeatedly simplifying an already simplified series) compounds decimation over time: quality is **monotonically degrading** and parameter changes (e.g. a larger `m`) can never recover detail that prior passes threw away.
+
+A better pattern, used by the Elodin editor in [`libs/elodin-editor/src/ui/plot/data.rs`](../elodin-editor/src/ui/plot/data.rs):
+
+- **Archive** — append every accepted raw `(timestamp, value)` to a dedicated append-only buffer (`LineTree::raw_timestamps`, `LineTree::raw_values`). The archive is the source of truth and is never touched by HC.
+- **View** — the rendered subset (chunks on GPU). Rebuilt from the archive each time the HC pass runs, via `LineTree::rebuild_from_time_value_pairs`.
+
+Properties that fall out:
+
+- **Deterministic / idempotent** — running HC twice on the same archive with the same `m` gives identical indices.
+- **Monotone quality** — with a fixed archive, `m_new ≥ m_old` cannot produce a worse view; `m_new < m_old` cannot corrupt the archive.
+- **Reversible tuning** — UI sliders for `m`, keep-recent fraction, sample-tail budget, etc. are free to change at runtime; no data is lost when they move.
+- **Throttle-safe** — re-rendering the view is a pure function of `(archive, settings)`, so skipping passes (e.g. under UI throttling) is never destructive.
+
+The trade-off is memory: the archive stores every sample. For long-running or high-rate telemetry, cap it (time horizon, sample count, or a fallback to destructive decimation past a certain age).
+
+---
+
 ## Algorithm sketch (intuition)
 
 1. **Curvature samples** along the polyline (2D, or 3D via local triangle flattening).
