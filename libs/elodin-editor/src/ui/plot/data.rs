@@ -1,5 +1,5 @@
 use bevy::asset::Asset;
-use bevy::log::{info, warn_once};
+use bevy::log::warn_once;
 use bevy::prelude::{DetectChanges, InRef, Res, ResMut};
 use bevy::reflect::TypePath;
 use bevy::{
@@ -230,21 +230,8 @@ pub fn maybe_compress_all_graph_lines(
     if !settings.enabled {
         return;
     }
-    static TICK: atomic::AtomicUsize = atomic::AtomicUsize::new(0);
-    let tick = TICK.fetch_add(1, atomic::Ordering::Relaxed);
-    let mut max_pts = 0usize;
-    let mut max_label: String = String::new();
     for component in graph_data.components.values_mut() {
         let handles: Vec<Handle<Line>> = component.lines.values().cloned().collect();
-        for h in &handles {
-            if let Some(l) = lines.get(h) {
-                let p = l.data.total_points();
-                if p > max_pts {
-                    max_pts = p;
-                    max_label = l.label.clone();
-                }
-            }
-        }
         if handles.len() == 3 && try_joint_triline_compress(lines, &handles, earliest, settings) {
             continue;
         }
@@ -254,16 +241,6 @@ pub fn maybe_compress_all_graph_lines(
             };
             line.maybe_compress_live(earliest, settings);
         }
-    }
-    if tick.is_multiple_of(240) {
-        info!(
-            target: "elodin::compress",
-            "heartbeat tick={} max_line_pts={} ({:?}) threshold={}",
-            tick,
-            max_pts,
-            max_label,
-            settings.compress_after_total_points,
-        );
     }
 }
 
@@ -284,15 +261,6 @@ fn try_joint_triline_compress(
     if lx.data.total_points() <= settings.compress_after_total_points {
         return false;
     }
-    let pre_total = lx.data.total_points();
-    info!(
-        target: "elodin::compress",
-        "triline_compress FIRE pre_total={} threshold={} target={} keep_recent_fraction={}",
-        pre_total,
-        settings.compress_after_total_points,
-        settings.compress_to_points,
-        settings.keep_recent_fraction,
-    );
     let (tsx, vx) = lx.data.flattened_time_series();
     let (tsy, vy) = ly.data.flattened_time_series();
     let (tsz, vz) = lz.data.flattened_time_series();
@@ -373,17 +341,6 @@ fn try_joint_triline_compress(
     };
     zl.data
         .rebuild_from_time_value_pairs(earliest, &new_ts, &new_z);
-    let post_total = lines
-        .get(hx)
-        .map(|l| l.data.total_points())
-        .unwrap_or_default();
-    info!(
-        target: "elodin::compress",
-        "triline_compress DONE pre_total={} post_total={} new_pts_per_axis={}",
-        pre_total,
-        post_total,
-        new_ts.len(),
-    );
     true
 }
 
@@ -914,17 +871,7 @@ pub struct Line {
 impl Line {
     fn maybe_compress_live(&mut self, earliest: Timestamp, settings: &CurveCompressSettings) {
         if self.data.total_points() > settings.compress_after_total_points {
-            let pre = self.data.total_points();
             self.data.compress_time_value_hamann(earliest, settings);
-            info!(
-                target: "elodin::compress",
-                "scalar_compress DONE label={:?} pre_total={} post_total={} threshold={} target={}",
-                self.label,
-                pre,
-                self.data.total_points(),
-                settings.compress_after_total_points,
-                settings.compress_to_points,
-            );
         }
     }
 }
