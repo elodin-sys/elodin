@@ -34,6 +34,7 @@
 //! `Cargo.toml`.
 
 use glam::{Vec2, Vec3};
+use std::ops::Sub;
 
 fn approx_zero(x: f32) -> bool {
     x.abs() <= f32::EPSILON * 8.0
@@ -162,26 +163,17 @@ fn invert_cum_integral(ss: &[f32], cum: &[f32], target: f32) -> f32 {
     s0 + t * (s1 - s0)
 }
 
-fn nearest_point_index2(points: &[Vec2], q: Vec2) -> usize {
+fn nearest_point_index<V>(points: &[V], q: V, dot: fn(V,V) -> f32) -> usize
+where
+    V: Copy + Sub<Output = V>,
+{
     points
         .iter()
         .enumerate()
         .min_by(|(_, a), (_, b)| {
-            let da = (*a - q).length_squared();
-            let db = (*b - q).length_squared();
-            da.total_cmp(&db)
-        })
-        .map(|(i, _)| i)
-        .unwrap_or(0)
-}
-
-fn nearest_point_index3(points: &[Vec3], q: Vec3) -> usize {
-    points
-        .iter()
-        .enumerate()
-        .min_by(|(_, a), (_, b)| {
-            let da = (*a - q).length_squared();
-            let db = (*b - q).length_squared();
+            // Compute distance squared.
+            let da = dot(**a - q, **a - q);
+            let db = dot(**b - q, **b - q);
             da.total_cmp(&db)
         })
         .map(|(i, _)| i)
@@ -202,7 +194,10 @@ fn uniform_indices(n: usize, m: usize) -> Vec<usize> {
     out
 }
 
-fn select_indices_curvature2(points: &[Vec2], ks: &[f32], m: usize) -> Vec<usize> {
+fn select_indices_curvature<V>(points: &[V], ks: &[f32], m: usize, dot: fn(V,V) -> f32) -> Vec<usize>
+where
+    V: Copy + Sub<Output = V>,
+{
     let n = points.len();
     debug_assert_eq!(ks.len(), n);
     if m < 2 || n <= 2 {
@@ -212,7 +207,7 @@ fn select_indices_curvature2(points: &[Vec2], ks: &[f32], m: usize) -> Vec<usize
         return (0..n).collect();
     }
 
-    let xbars_ks: Vec<(Vec2, f32)> = points
+    let xbars_ks: Vec<(V, f32)> = points
         .iter()
         .copied()
         .zip(ks.iter().copied())
@@ -223,10 +218,15 @@ fn select_indices_curvature2(points: &[Vec2], ks: &[f32], m: usize) -> Vec<usize
         return uniform_indices(n, m);
     }
 
-    let xbars: Vec<Vec2> = xbars_ks.iter().map(|&(p, _)| p).collect();
+    let xbars: Vec<V> = xbars_ks.iter().map(|&(p, _)| p).collect();
     let ki: Vec<f32> = xbars_ks.iter().map(|&(_, k)| k).collect();
 
-    let si: Vec<f32> = xbars.windows(2).map(|w| (w[1] - w[0]).length()).collect();
+    let si: Vec<f32> = xbars.windows(2).map(|w| {
+        let a = w[1] - w[0];
+        let length_squared = dot(a, a);
+        let length = length_squared.sqrt();
+        length
+    }).collect();
     let mut ss = Vec::with_capacity(xbars.len());
     ss.push(0.0);
     for seg in &si {
@@ -243,7 +243,8 @@ fn select_indices_curvature2(points: &[Vec2], ks: &[f32], m: usize) -> Vec<usize
         return uniform_indices(n, m);
     }
 
-    let mut picked = Vec::with_capacity(m);
+    // The algorithm may pick more than m points because of picking duplicate indices.
+    let mut picked = Vec::with_capacity(2 * m);
     picked.push(0);
 
     for j in 1..m - 1 {
@@ -258,11 +259,12 @@ fn select_indices_curvature2(points: &[Vec2], ks: &[f32], m: usize) -> Vec<usize
                 // `ss` and `xbars` have the same length; the last valid interval has `l == xbars.len() - 2`,
                 // so `l + 2 == xbars.len()` would be out of bounds — clamp to `l + 1` on that edge.
                 let pick = if (s_t - sl).abs() <= (s_t - sl_1).abs() {
-                    nearest_point_index2(points, xbars[l + 1])
+                    // nearest_point_index2(points, xbars[l + 1])
+                    nearest_point_index(points, xbars[l + 1], dot)
                 } else if l + 2 < xbars.len() {
-                    nearest_point_index2(points, xbars[l + 2])
+                    nearest_point_index(points, xbars[l + 2], dot)
                 } else {
-                    nearest_point_index2(points, xbars[l + 1])
+                    nearest_point_index(points, xbars[l + 1], dot)
                 };
                 picked.push(pick);
                 found = true;
@@ -271,9 +273,10 @@ fn select_indices_curvature2(points: &[Vec2], ks: &[f32], m: usize) -> Vec<usize
             l += 1;
         }
         if !found {
-            picked.push(nearest_point_index2(
+            picked.push(nearest_point_index(
                 points,
                 xbars[xbars.len().saturating_sub(1)],
+                dot,
             ));
         }
     }
@@ -281,86 +284,8 @@ fn select_indices_curvature2(points: &[Vec2], ks: &[f32], m: usize) -> Vec<usize
     picked.push(n - 1);
     picked.sort_unstable();
     picked.dedup();
-    picked
-}
-
-fn select_indices_curvature3(points: &[Vec3], ks: &[f32], m: usize) -> Vec<usize> {
-    let n = points.len();
-    debug_assert_eq!(ks.len(), n);
-    if m < 2 || n <= 2 {
-        return (0..n.min(m.max(1))).collect();
-    }
-    if n <= m {
-        return (0..n).collect();
-    }
-
-    let xbars_ks: Vec<(Vec3, f32)> = points
-        .iter()
-        .copied()
-        .zip(ks.iter().copied())
-        .filter(|&(_, k)| !k.is_nan() && !approx_zero(k))
-        .collect();
-
-    if xbars_ks.len() < 2 {
-        return uniform_indices(n, m);
-    }
-
-    let xbars: Vec<Vec3> = xbars_ks.iter().map(|&(p, _)| p).collect();
-    let ki: Vec<f32> = xbars_ks.iter().map(|&(_, k)| k).collect();
-
-    let si: Vec<f32> = xbars.windows(2).map(|w| (w[1] - w[0]).length()).collect();
-    let mut ss = Vec::with_capacity(xbars.len());
-    ss.push(0.0);
-    for seg in &si {
-        ss.push(*ss.last().unwrap_or(&0.0) + seg);
-    }
-
-    if ss.len() != ki.len() {
-        return uniform_indices(n, m);
-    }
-
-    let cum_k = cumulative_integral_trapezoid(&ss, &ki);
-    let k_total = *cum_k.last().unwrap_or(&0.0);
-    if !k_total.is_finite() || k_total.abs() < 1e-30 {
-        return uniform_indices(n, m);
-    }
-
-    let mut picked = Vec::with_capacity(m);
-    picked.push(0);
-
-    for j in 1..m - 1 {
-        let target = (j as f32) * k_total / (m as f32);
-        let s_t = invert_cum_integral(&ss, &cum_k, target);
-        let mut l = 0usize;
-        let mut found = false;
-        while l + 1 < ss.len() {
-            let sl = ss[l];
-            let sl_1 = ss[l + 1];
-            if s_t > sl && s_t < sl_1 {
-                let pick = if (s_t - sl).abs() <= (s_t - sl_1).abs() {
-                    nearest_point_index3(points, xbars[l + 1])
-                } else if l + 2 < xbars.len() {
-                    nearest_point_index3(points, xbars[l + 2])
-                } else {
-                    nearest_point_index3(points, xbars[l + 1])
-                };
-                picked.push(pick);
-                found = true;
-                break;
-            }
-            l += 1;
-        }
-        if !found {
-            picked.push(nearest_point_index3(
-                points,
-                xbars[xbars.len().saturating_sub(1)],
-            ));
-        }
-    }
-
-    picked.push(n - 1);
-    picked.sort_unstable();
-    picked.dedup();
+    //picked.truncate(m - 1);
+    assert!(picked.len() <= m, "Tried to return {} points, which is more than the {} points requested", picked.len(), m);
     picked
 }
 
@@ -374,7 +299,7 @@ fn select_indices_curvature3(points: &[Vec3], ks: &[f32], m: usize) -> Vec<usize
 #[inline]
 pub fn select_polyline2_indices(points: &[Vec2], m: usize) -> Vec<usize> {
     let ks = curvature_samples_polyline2(points);
-    select_indices_curvature2(points, &ks, m)
+    select_indices_curvature(points, &ks, m, Vec2::dot)
 }
 
 /// Same as [`select_polyline2_indices`] on points `(t_i, y_i)` built by zipping `times` and
@@ -402,7 +327,7 @@ pub fn select_time_value_indices(times: &[f32], values: &[f32], m: usize) -> Vec
 #[inline]
 pub fn select_polyline3_indices(points: &[Vec3], m: usize) -> Vec<usize> {
     let ks = curvature_samples_polyline3(points);
-    select_indices_curvature3(points, &ks, m)
+    select_indices_curvature(points, &ks, m, Vec3::dot)
 }
 
 /// **Joint** simplification: builds a 2D polyline `(t_i, ‖p_i‖)` and returns indices from
