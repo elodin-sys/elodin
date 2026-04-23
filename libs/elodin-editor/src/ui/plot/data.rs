@@ -1,5 +1,5 @@
 use bevy::asset::Asset;
-use bevy::log::warn_once;
+use bevy::log::{info, warn_once};
 use bevy::prelude::{DetectChanges, InRef, Res, ResMut};
 use bevy::reflect::TypePath;
 use bevy::{
@@ -230,8 +230,21 @@ pub fn maybe_compress_all_graph_lines(
     if !settings.enabled {
         return;
     }
+    static TICK: atomic::AtomicUsize = atomic::AtomicUsize::new(0);
+    let tick = TICK.fetch_add(1, atomic::Ordering::Relaxed);
+    let mut max_pts = 0usize;
+    let mut max_label: String = String::new();
     for component in graph_data.components.values_mut() {
         let handles: Vec<Handle<Line>> = component.lines.values().cloned().collect();
+        for h in &handles {
+            if let Some(l) = lines.get(h) {
+                let p = l.data.total_points();
+                if p > max_pts {
+                    max_pts = p;
+                    max_label = l.label.clone();
+                }
+            }
+        }
         if handles.len() == 3 && try_joint_triline_compress(lines, &handles, earliest, settings) {
             continue;
         }
@@ -241,6 +254,16 @@ pub fn maybe_compress_all_graph_lines(
             };
             line.maybe_compress_live(earliest, settings);
         }
+    }
+    if tick.is_multiple_of(240) {
+        info!(
+            target: "elodin::compress",
+            "heartbeat tick={} max_line_pts={} ({:?}) threshold={}",
+            tick,
+            max_pts,
+            max_label,
+            settings.compress_after_total_points,
+        );
     }
 }
 
@@ -261,6 +284,15 @@ fn try_joint_triline_compress(
     if lx.data.total_points() <= settings.compress_after_total_points {
         return false;
     }
+    let pre_total = lx.data.total_points();
+    info!(
+        target: "elodin::compress",
+        "triline_compress FIRE pre_total={} threshold={} target={} keep_recent_fraction={}",
+        pre_total,
+        settings.compress_after_total_points,
+        settings.compress_to_points,
+        settings.keep_recent_fraction,
+    );
     let (tsx, vx) = lx.data.flattened_time_series();
     let (tsy, vy) = ly.data.flattened_time_series();
     let (tsz, vz) = lz.data.flattened_time_series();
@@ -341,6 +373,17 @@ fn try_joint_triline_compress(
     };
     zl.data
         .rebuild_from_time_value_pairs(earliest, &new_ts, &new_z);
+    let post_total = lines
+        .get(hx)
+        .map(|l| l.data.total_points())
+        .unwrap_or_default();
+    info!(
+        target: "elodin::compress",
+        "triline_compress DONE pre_total={} post_total={} new_pts_per_axis={}",
+        pre_total,
+        post_total,
+        new_ts.len(),
+    );
     true
 }
 
@@ -871,7 +914,17 @@ pub struct Line {
 impl Line {
     fn maybe_compress_live(&mut self, earliest: Timestamp, settings: &CurveCompressSettings) {
         if self.data.total_points() > settings.compress_after_total_points {
+            let pre = self.data.total_points();
             self.data.compress_time_value_hamann(earliest, settings);
+            info!(
+                target: "elodin::compress",
+                "scalar_compress DONE label={:?} pre_total={} post_total={} threshold={} target={}",
+                self.label,
+                pre,
+                self.data.total_points(),
+                settings.compress_after_total_points,
+                settings.compress_to_points,
+            );
         }
     }
 }
@@ -1084,20 +1137,20 @@ impl<D: Immutable + IntoBytes + BoundOrd + Clone + Debug> Chunk<D> {
             gpu: Default::default(),
             gpu_dirty: Arc::new(AtomicBool::new(true)),
         };
-        let min = data.cpu().iter().fold(None, |xs: Option<D>, x| {
-            if let Some(xs) = xs.clone() {
-                Some(xs.min(x.clone()))
-            } else {
-                Some(x.clone())
-            }
-        });
-        let max = data.cpu().iter().fold(None, |xs: Option<D>, x| {
-            if let Some(xs) = xs.clone() {
-                Some(xs.max(x.clone()))
-            } else {
-                Some(x.clone())
-            }
-        });
+        let (min, max) = data
+            .cpu()
+            .iter()
+            .fold((None::<D>, None::<D>), |(min_acc, max_acc), x| {
+                let min_acc = Some(match min_acc {
+                    Some(m) => m.min(x.clone()),
+                    None => x.clone(),
+                });
+                let max_acc = Some(match max_acc {
+                    Some(m) => m.max(x.clone()),
+                    None => x.clone(),
+                });
+                (min_acc, max_acc)
+            });
 
         let summary = ChunkSummary {
             len: timestamps.len(),
@@ -1619,26 +1672,39 @@ impl LineTree<f32> {
         (ts, vs)
     }
 
-    fn clear_tree_release_gpu(&mut self) {
-        let old = std::mem::take(&mut self.tree);
-        for (_, mut chunk) in old {
-            release_line_chunk_gpu(
-                &mut chunk,
-                &mut self.data_buffer_shard_alloc,
-                &mut self.timestamp_buffer_shard_alloc,
-            );
-        }
-    }
-
-    /// Drop existing chunks (releasing GPU shards) and insert `new_ts` / `new_v` in `CHUNK_LEN` shards.
+    /// Rebuild the tree from `new_ts` / `new_v`, atomically, in `CHUNK_LEN` shards.
+    ///
+    /// Uses **build-then-swap**: a fresh tree is constructed off-band, swapped in
+    /// with `mem::replace`, and only then are the old GPU shards released. Render
+    /// frames therefore observe either the previous tree in full or the new tree
+    /// in full — never an empty intermediate state. This is what kills the trail
+    /// blink at high tick counts when [`compress_time_value_hamann`] fires.
     pub fn rebuild_from_time_value_pairs(
         &mut self,
         earliest: Timestamp,
         new_ts: &[Timestamp],
         new_v: &[f32],
     ) {
-        self.clear_tree_release_gpu();
         let n = new_ts.len().min(new_v.len());
+
+        if n == self.total_points()
+            && n > 0
+            && self
+                .tree
+                .iter()
+                .next()
+                .map(|(_, c)| c.summary.start_timestamp)
+                == new_ts.first().copied()
+            && self
+                .tree
+                .last_key_value()
+                .map(|(_, c)| c.summary.end_timestamp)
+                == new_ts.last().copied()
+        {
+            return;
+        }
+
+        let mut new_tree: NoditMap<i64, nodit::Interval<i64>, Chunk<f32>> = NoditMap::default();
         let mut offset = 0usize;
         while offset < n {
             let end = (offset + CHUNK_LEN).min(n);
@@ -1647,9 +1713,24 @@ impl LineTree<f32> {
                 earliest,
                 new_v[offset..end].iter().copied(),
             ) {
-                self.insert(chunk);
+                let _ = new_tree.insert_overwrite(
+                    ii(
+                        chunk.summary.start_timestamp.0,
+                        chunk.summary.end_timestamp.0,
+                    ),
+                    chunk,
+                );
             }
             offset = end;
+        }
+
+        let old_tree = std::mem::replace(&mut self.tree, new_tree);
+        for (_, mut chunk) in old_tree {
+            release_line_chunk_gpu(
+                &mut chunk,
+                &mut self.data_buffer_shard_alloc,
+                &mut self.timestamp_buffer_shard_alloc,
+            );
         }
     }
 
