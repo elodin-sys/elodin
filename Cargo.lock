@@ -120,7 +120,7 @@ dependencies = [
 
 [[package]]
 name = "aleph-serial-bridge"
-version = "0.16.3-alpha.0"
+version = "0.17.0"
 dependencies = [
  "anyhow",
  "blackbox",
@@ -140,7 +140,7 @@ dependencies = [
 
 [[package]]
 name = "aleph-setup"
-version = "0.16.3-alpha.0"
+version = "0.17.0"
 dependencies = [
  "anyhow",
  "fastrand 1.9.0",
@@ -154,7 +154,7 @@ dependencies = [
 
 [[package]]
 name = "aleph-status"
-version = "0.16.3-alpha.0"
+version = "0.17.0"
 dependencies = [
  "anyhow",
  "db-macros",
@@ -2806,7 +2806,7 @@ dependencies = [
 
 [[package]]
 name = "blackbox"
-version = "0.16.3-alpha.0"
+version = "0.17.0"
 dependencies = [
  "zerocopy",
 ]
@@ -3829,7 +3829,7 @@ dependencies = [
 
 [[package]]
 name = "cranelift-mlir"
-version = "0.16.3-alpha.0"
+version = "0.17.0"
 dependencies = [
  "cranelift-codegen",
  "cranelift-frontend",
@@ -4754,7 +4754,7 @@ dependencies = [
 
 [[package]]
 name = "db-macros"
-version = "0.16.3-alpha.0"
+version = "0.17.0"
 dependencies = [
  "convert_case 0.6.0",
  "darling 0.20.11",
@@ -5057,7 +5057,7 @@ checksum = "48c757948c5ede0e46177b7add2e67155f70e33c07fea8284df6576da70b3719"
 
 [[package]]
 name = "elodin"
-version = "0.16.3-alpha.0"
+version = "0.17.0"
 dependencies = [
  "base64 0.22.1",
  "bevy",
@@ -5088,7 +5088,7 @@ dependencies = [
 
 [[package]]
 name = "elodin-db"
-version = "0.16.3-alpha.0"
+version = "0.17.0"
 dependencies = [
  "arrow",
  "arrow-schema",
@@ -5166,7 +5166,7 @@ dependencies = [
 
 [[package]]
 name = "elodin-db-tests"
-version = "0.16.3-alpha.0"
+version = "0.17.0"
 dependencies = [
  "arrow",
  "elodin-db",
@@ -5189,7 +5189,7 @@ dependencies = [
 
 [[package]]
 name = "elodin-editor"
-version = "0.16.3-alpha.0"
+version = "0.17.0"
 dependencies = [
  "ab_glyph",
  "arc-swap",
@@ -5271,7 +5271,7 @@ dependencies = [
 
 [[package]]
 name = "elodin-macros"
-version = "0.16.3-alpha.0"
+version = "0.17.0"
 dependencies = [
  "convert_case 0.6.0",
  "darling 0.20.11",
@@ -5467,7 +5467,7 @@ checksum = "5c4fbe202b6578d3d56428fa185cdf114a05e49da05f477b3c7f0fbb221f1862"
 
 [[package]]
 name = "eql"
-version = "0.16.3-alpha.0"
+version = "0.17.0"
 dependencies = [
  "hifitime",
  "impeller2",
@@ -6584,7 +6584,7 @@ checksum = "36119f3a540b086b4e436bb2b588cf98a68863470e0e880f4d0842f112a3183a"
 
 [[package]]
 name = "gst-elodin-plugin"
-version = "0.16.3-alpha.0"
+version = "0.17.0"
 dependencies = [
  "anyhow",
  "gst-plugin-version-helper",
@@ -7340,7 +7340,7 @@ checksum = "e7c5cedc30da3a610cac6b4ba17597bdf7152cf974e8aab3afb3d54455e371c8"
 
 [[package]]
 name = "impeller2"
-version = "0.16.3-alpha.0"
+version = "0.17.0"
 dependencies = [
  "bevy",
  "const-fnv1a-hash",
@@ -7362,7 +7362,7 @@ dependencies = [
 
 [[package]]
 name = "impeller2-bbq"
-version = "0.16.3-alpha.0"
+version = "0.17.0"
 dependencies = [
  "bbq2",
  "impeller2",
@@ -7371,7 +7371,7 @@ dependencies = [
 
 [[package]]
 name = "impeller2-bevy"
-version = "0.16.3-alpha.0"
+version = "0.17.0"
 dependencies = [
  "bbq2",
  "bevy",
@@ -7395,7 +7395,7 @@ dependencies = [
 
 [[package]]
 name = "impeller2-cli"
-version = "0.16.3-alpha.0"
+version = "0.17.0"
 dependencies = [
  "anyhow",
  "arrow",
@@ -7424,7 +7424,7 @@ dependencies = [
 
 [[package]]
 name = "impeller2-frame"
-version = "0.16.3-alpha.0"
+version = "0.17.0"
 dependencies = [
  "cobs 0.2.3",
  "impeller2",
@@ -7432,7 +7432,7 @@ dependencies = [
 
 [[package]]
 name = "impeller2-kdl"
-version = "0.16.3-alpha.0"
+version = "0.17.0"
 dependencies = [
  "bevy_geo_frames",
  "impeller2",
@@ -7445,7 +7445,7 @@ dependencies = [
 
 [[package]]
 name = "impeller2-stellar"
-version = "0.16.3-alpha.0"
+version = "0.17.0"
 dependencies = [
  "bbq2",
  "fastrand 2.3.0",
@@ -7466,7 +7466,7 @@ dependencies = [
 
 [[package]]
 name = "impeller2-wkt"
-version = "0.16.3-alpha.0"
+version = "0.17.0"
 dependencies = [
  "bevy",
  "bevy_geo_frames",
@@ -7483,7 +7483,7 @@ dependencies = [
 
 [[package]]
 name = "impeller_py"
-version = "0.16.3-alpha.0"
+version = "0.17.0"
 dependencies = [
  "anyhow",
  "futures-lite",
@@ -7594,7 +7594,7 @@ checksum = "d57a1694cff80cdd6c8a4cae63984578e2617528d3c266e53f56dfd3e279e9f7"
 
 [[package]]
 name = "inscriber"
-version = "0.16.3-alpha.0"
+version = "0.17.0"
 dependencies = [
  "anyhow",
  "clap 4.6.0",
@@ -8230,7 +8230,7 @@ dependencies = [
 
 [[package]]
 name = "lqr"
-version = "0.16.3-alpha.0"
+version = "0.17.0"
 dependencies = [
  "anyhow",
  "clap 4.6.0",
@@ -8492,7 +8492,7 @@ dependencies = [
 
 [[package]]
 name = "mekf"
-version = "0.16.3-alpha.0"
+version = "0.17.0"
 dependencies = [
  "anyhow",
  "clap 4.6.0",
@@ -9200,7 +9200,7 @@ dependencies = [
 
 [[package]]
 name = "nox"
-version = "0.16.3-alpha.0"
+version = "0.17.0"
 dependencies = [
  "approx",
  "boxcar",
@@ -9228,14 +9228,14 @@ dependencies = [
 
 [[package]]
 name = "nox-array"
-version = "0.16.3-alpha.0"
+version = "0.17.0"
 dependencies = [
  "zerocopy",
 ]
 
 [[package]]
 name = "nox-frames"
-version = "0.16.3-alpha.0"
+version = "0.17.0"
 dependencies = [
  "approx",
  "hifitime",
@@ -9245,7 +9245,7 @@ dependencies = [
 
 [[package]]
 name = "nox-py"
-version = "0.16.3-alpha.0"
+version = "0.17.0"
 dependencies = [
  "approx",
  "arrow",
@@ -10514,7 +10514,7 @@ dependencies = [
 
 [[package]]
 name = "postcard-c-codegen"
-version = "0.16.3-alpha.0"
+version = "0.17.0"
 dependencies = [
  "clap 4.6.0",
  "convert_case 0.6.0",
@@ -11260,7 +11260,7 @@ dependencies = [
 
 [[package]]
 name = "rc-jet-controller"
-version = "0.16.3-alpha.0"
+version = "0.17.0"
 dependencies = [
  "anyhow",
  "clap 4.6.0",
@@ -11456,7 +11456,7 @@ dependencies = [
 
 [[package]]
 name = "render-bridge"
-version = "0.16.3-alpha.0"
+version = "0.17.0"
 dependencies = [
  "impeller2",
  "socket2 0.5.10",
@@ -11575,7 +11575,7 @@ dependencies = [
 
 [[package]]
 name = "roci"
-version = "0.16.3-alpha.0"
+version = "0.17.0"
 dependencies = [
  "anyhow",
  "bbq2",
@@ -11601,7 +11601,7 @@ dependencies = [
 
 [[package]]
 name = "roci-adcs"
-version = "0.16.3-alpha.0"
+version = "0.17.0"
 dependencies = [
  "approx",
  "nox",
@@ -11858,7 +11858,7 @@ checksum = "9774ba4a74de5f7b1c1451ed6cd5285a32eddb5cccb8cc655a4e50009e06477f"
 
 [[package]]
 name = "s10"
-version = "0.16.3-alpha.0"
+version = "0.17.0"
 dependencies = [
  "async-watcher",
  "cargo_metadata",
@@ -12516,7 +12516,7 @@ checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 
 [[package]]
 name = "stellarator"
-version = "0.16.3-alpha.0"
+version = "0.17.0"
 dependencies = [
  "blocking",
  "futures",
@@ -12544,11 +12544,11 @@ dependencies = [
 
 [[package]]
 name = "stellarator-buf"
-version = "0.16.3-alpha.0"
+version = "0.17.0"
 
 [[package]]
 name = "stellarator-macros"
-version = "0.16.3-alpha.0"
+version = "0.17.0"
 dependencies = [
  "proc-macro-crate",
  "proc-macro2",
@@ -12956,7 +12956,7 @@ checksum = "df7f62577c25e07834649fc3b39fafdc597c0a3527dc1c60129201ccfcbaa50c"
 
 [[package]]
 name = "tegrastats-bridge"
-version = "0.16.3-alpha.0"
+version = "0.17.0"
 dependencies = [
  "anyhow",
  "db-macros",
@@ -14045,7 +14045,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "video-streamer"
-version = "0.16.3-alpha.0"
+version = "0.17.0"
 dependencies = [
  "anyhow",
  "byteorder",
@@ -14064,7 +14064,7 @@ dependencies = [
 
 [[package]]
 name = "video-toolbox"
-version = "0.16.3-alpha.0"
+version = "0.17.0"
 dependencies = [
  "bitflags 2.11.0",
  "block2 0.6.2",
@@ -15465,7 +15465,7 @@ dependencies = [
 
 [[package]]
 name = "wmm"
-version = "0.16.3-alpha.0"
+version = "0.17.0"
 dependencies = [
  "approx",
  "bindgen 0.70.1",
