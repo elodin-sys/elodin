@@ -620,15 +620,27 @@ fn extract_lines(
                 ));
             }
 
-            // Snap the future range's start to the previous sample so the
-            // segment always has >= 2 indices per axis near the playhead. Fall
-            // back to `split` when no earlier sample exists.
-            let future_start = line_assets
+            // Snap the future range's start to the previous sample when there
+            // are actual samples past `split` (the usual playhead case between
+            // sim ticks) — otherwise the segment would collapse to a single
+            // index and blink. In live-follow mode `split == latest sample`
+            // and no snap is wanted: the future segment must stay empty, else
+            // a tiny white tail overdraws the yellow trail.
+            let has_future_samples = line_assets
                 .get(&line_handles.0[0])
-                .and_then(|l| l.data.last_timestamp_strictly_before(split))
-                .map(|ts| selected_range.start.max(ts))
-                .unwrap_or(split);
-            let future_range = future_start..selected_range.end;
+                .and_then(|l| l.data.latest_sample_timestamp())
+                .map(|latest| latest > split)
+                .unwrap_or(false);
+            let future_range = if has_future_samples {
+                let future_start = line_assets
+                    .get(&line_handles.0[0])
+                    .and_then(|l| l.data.last_timestamp_strictly_before(split))
+                    .map(|ts| selected_range.start.max(ts))
+                    .unwrap_or(split);
+                future_start..selected_range.end
+            } else {
+                split..split
+            };
 
             if let Some(gpu_line) = build_gpu_line(future_range.clone()) {
                 let mut future_uniform = *uniform;

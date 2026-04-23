@@ -1523,6 +1523,17 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
         chunk.timestamps.get(idx).copied()
     }
 
+    /// Timestamp of the most recent sample stored in the view, or `None` when empty.
+    /// Used by `line_3d` to tell apart "playhead between ticks" (snap the future
+    /// segment back one sample to keep ≥ 2 indices and avoid a single-sample
+    /// blink) from "playhead on the latest sample" (live follow, future must
+    /// stay empty so no white tail overdraws the yellow trail).
+    pub fn latest_sample_timestamp(&self) -> Option<Timestamp> {
+        self.tree
+            .last_key_value()
+            .map(|(_, c)| c.summary.end_timestamp)
+    }
+
     pub fn data_buffer_shard_alloc(&self) -> Option<&BufferShardAlloc> {
         self.data_buffer_shard_alloc.as_ref()
     }
