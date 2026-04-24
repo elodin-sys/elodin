@@ -3,7 +3,11 @@ use futures_concurrency::future::Join;
 use impeller2::types::{LenPacket, PacketId, Timestamp};
 use impeller2_stellar::Client;
 use impeller2_stellar::SinkExt;
-use std::{mem, net::SocketAddr, time::Duration};
+use std::{
+    mem,
+    net::SocketAddr,
+    time::{Duration, Instant},
+};
 use stellarator::{fs::File, rent};
 use sysinfo::CpuRefreshKind;
 use zerocopy::{Immutable, IntoBytes};
@@ -95,9 +99,20 @@ async fn read_to_float(file: &File) -> anyhow::Result<f32> {
 
 #[stellarator::main]
 async fn main() -> anyhow::Result<()> {
+    const MIN_BACKOFF: Duration = Duration::from_millis(100);
+    const MAX_BACKOFF: Duration = Duration::from_secs(5);
+    const STABLE_SESSION: Duration = Duration::from_secs(10);
+
+    let mut backoff = MIN_BACKOFF;
     loop {
+        let started = Instant::now();
         if let Err(err) = connect().await {
-            eprintln!("error connecting {err:?}")
+            eprintln!("error connecting {err:?}");
         }
+        if started.elapsed() >= STABLE_SESSION {
+            backoff = MIN_BACKOFF;
+        }
+        stellarator::sleep(backoff).await;
+        backoff = (backoff * 2).min(MAX_BACKOFF);
     }
 }
