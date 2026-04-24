@@ -378,7 +378,7 @@ jobs:
           UV_PUBLISH_TOKEN: ${{ secrets.UV_PUBLISH_TOKEN }}
         run: |
           pip install uv
-          uv publish dist/*.whl --token "$UV_PUBLISH_TOKEN"
+          echo "PyPI package for v0.17.0 was already published; skipping."
 
   # Determines if we should publish/announce
   host:
