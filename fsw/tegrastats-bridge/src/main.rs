@@ -73,7 +73,7 @@ async fn connect() -> anyhow::Result<()> {
         };
         table.extend_from_slice(output.as_bytes());
         rent!(client.send(table).await, table)?;
-        stellarator::sleep(Duration::from_millis(5)).await;
+        stellarator::sleep(Duration::from_millis(1000)).await;
     }
 }
 
