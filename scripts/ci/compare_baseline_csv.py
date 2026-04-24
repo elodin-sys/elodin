@@ -19,6 +19,10 @@ from pathlib import Path
 IGNORED_COLUMNS = {"time"}
 
 
+def _windows_safe_rel_path(rel_path: str) -> str:
+    return rel_path.replace("_>_", "_to_").replace(">", "to")
+
+
 @dataclass
 class Tolerance:
     abs_tol: float
@@ -76,7 +80,10 @@ def _collect_csv_files(root: Path, file_prefix: str = "") -> dict[str, Path]:
             file_name = path.name
             if file_prefix and not file_name.startswith(file_prefix):
                 continue
-            files[rel_path] = path
+            safe_rel_path = _windows_safe_rel_path(rel_path)
+            if safe_rel_path in files:
+                raise ValueError(f"CSV path collision after sanitizing for Windows: {rel_path}")
+            files[safe_rel_path] = path
     return files
 
 
