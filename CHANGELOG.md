@@ -2,6 +2,28 @@
 
 ## unreleased
 
+## v0.17
+### v0.17.0
+- **(feat)** So Long, IREE. Hello, Cranelift-MLIR! (#600)
+- **(feat)** Add `elodin-db query` subcommand. (#551)
+- **(feat)** Support NED and ECEF coordinate frames for positions (orientations still all ENU). (#352)
+- **(feat)** Add Aleph onboard sensors and optional GPS. (#582)
+- **(feat)** Add Explicit EQL Cast Support, e.g., "vehicle.x.cast(f32)". (#602)
+- **(feat)** Add Voyager 1 & 2 interplanetary trajectory example. (#579)
+- **(fix)** Add Hamann-Chen line compression into plot and 3D line. (#604)
+- **(fix)** Fix deploy.sh usage as nix run .#deploy downstream for Aleph.  (#606)
+- **(fix)** Overhauled render layer allocation to fix exhaust issue. (#603)
+- **(fix)** Fix bool in database schema. (#598)
+- **(perf)** Sink telemetry tables in a single pass. (#583)
+- **(perf)** Add batching table packets example. (#581)
+- **(perf)** Change tegrastats from 200Hz to 1Hz. (#611)
+- **(chore)** Add git hash suffix to Elodin Python version. (#612)
+- **(refactor)** Remove `flake-utils` from nix config. (#607)
+- **(refactor)** Modularize STM firmware configuration.
+- **(refactor)** Make KDL documents a Bevy `Asset`. (#573)
+- **(refactor)** Clarify simulation and telemetry rate API. (#572)
+- **(doc)** Add Bevy cursor skill focused on performance tips. (#595)
+
 ## v0.16
 
 ### v0.16.2
