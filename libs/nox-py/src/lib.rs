@@ -164,7 +164,10 @@ pub fn elodin(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(py_six_dof, m)?)?;
     m.add_function(wrap_pyfunction!(skew, m)?)?;
     m.add_function(wrap_pyfunction!(_get_cache_dir, m)?)?;
-    m.add("__version__", env!("CARGO_PKG_VERSION"))?;
+    m.add(
+        "__version__",
+        concat!(env!("CARGO_PKG_VERSION"), "+", env!("GIT_HASH")),
+    )?;
     s10::register(m)?;
     env_logger::init();
     // Safety: called during single-threaded module init before any threads are spawned
