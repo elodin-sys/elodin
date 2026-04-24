@@ -3,6 +3,9 @@
 ## unreleased
 
 ## v0.17
+### v0.17.1
+- **(fix)** Move PyPI publishing to the end of the release pipeline and keep release artifacts Windows-checkout safe. (#616)
+
 ### v0.17.0
 - **(feat)** So Long, IREE. Hello, Cranelift-MLIR! (#600)
 - **(feat)** Add `elodin-db query` subcommand. (#551)

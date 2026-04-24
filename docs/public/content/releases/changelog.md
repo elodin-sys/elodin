@@ -14,7 +14,8 @@ order = 1
 
 
 ## v0.17
-### v0.17.0
+
+### v0.17.1
 - **(feat)** So Long, IREE. Hello, Cranelift-MLIR! (#600)
 - **(feat)** Add `elodin-db query` subcommand. (#551)
 - **(feat)** Support NED and ECEF coordinate frames for positions (orientations still all ENU). (#352)
