@@ -5222,6 +5222,7 @@ dependencies = [
  "fastrand 2.3.0",
  "flume",
  "fuzzy-matcher",
+ "hamann-chen-line",
  "heapless 0.8.0",
  "hex",
  "hifitime",
@@ -6760,6 +6761,15 @@ dependencies = [
  "crunchy",
  "num-traits",
  "zerocopy",
+]
+
+[[package]]
+name = "hamann-chen-line"
+version = "0.16.3-alpha.0"
+dependencies = [
+ "anyhow",
+ "clap 4.6.0",
+ "glam",
 ]
 
 [[package]]

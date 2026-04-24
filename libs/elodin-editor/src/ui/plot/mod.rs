@@ -1,7 +1,14 @@
 pub mod data;
+
+pub use hamann_chen_line::{
+    select_point_indices, select_polyline2_indices, select_polyline3_indices,
+    select_time_value_indices, select_trajectory_time_norm_indices,
+};
+
 pub use data::{
-    BufferShardAlloc, CHUNK_COUNT, CHUNK_LEN, CollectedGraphData, Line, OVERVIEW_MAX_POINTS,
-    PlotDataComponent, XYLine, collect_garbage, queue_timestamp_read, setup_pkt_handler,
+    BufferShardAlloc, CHUNK_COUNT, CHUNK_LEN, CollectedGraphData, CurveCompressSettings, Line,
+    OVERVIEW_MAX_POINTS, PlotDataComponent, XYLine, collect_garbage,
+    maybe_compress_all_graph_lines, queue_timestamp_read, setup_pkt_handler,
 };
 
 pub mod gpu;
@@ -31,6 +38,7 @@ pub struct PlotPlugin;
 impl Plugin for PlotPlugin {
     fn build(&self, app: &mut bevy::prelude::App) {
         app.init_resource::<CollectedGraphData>()
+            .init_resource::<CurveCompressSettings>()
             .init_resource::<LockTracker>()
             .init_resource::<XSyncClock>()
             .add_systems(Startup, setup_pkt_handler)

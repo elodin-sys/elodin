@@ -14,6 +14,7 @@ tracy = ["bevy/trace_tracy"]
 
 [dependencies]
 # math
+hamann-chen-line = { path = "../hamann-chen-line" }
 nox.path = "../nox"
 nox.default-features = false
 egui_material_icons = "0.5"

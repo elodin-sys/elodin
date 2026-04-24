@@ -1,0 +1,20 @@
+[package]
+name = "hamann-chen-line"
+description = "Hamann–Chen (1994) curvature-based polyline simplification"
+readme = "README.md"
+license = "MIT OR Apache-2.0"
+version.workspace = true
+edition.workspace = true
+publish = false
+
+[lib]
+name = "hamann_chen_line"
+
+[[bin]]
+name = "hamann-chen-line"
+path = "src/main.rs"
+
+[dependencies]
+anyhow = "1"
+glam = { version = "0.30", default-features = false, features = ["std"] }
+clap = { version = "4.4.18", features = ["derive"] }

@@ -34,12 +34,70 @@ use std::{collections::BTreeMap, fmt::Debug, ops::Range};
 
 use crate::ui::plot::gpu::INDEX_BUFFER_LEN;
 use crate::{SelectedTimeRange, TimeRangeBehavior};
+use hamann_chen_line::{select_polyline3_indices, select_time_value_indices};
 
 use super::PlotBounds;
 
 /// Maximum points to request for overview data (LTTB downsampled)
 /// Must be <= CHUNK_LEN to fit within a single GPU buffer shard
 pub const OVERVIEW_MAX_POINTS: usize = CHUNK_LEN;
+
+/// Tuning for **Hamann–Chen** downsampling of live [`LineTree`] telemetry.
+///
+/// The simplifier lives in the `hamann-chen-line` workspace crate; its steps follow Shane Celis’s
+/// C# reference [`PiecewiseLinearCurveApproximation.cs`](https://gist.github.com/shanecelis/2e0ffd790e31507fba04dd56f806667a)
+/// (Hamann–Chen style curvature sampling). Integration notes: `libs/hamann-chen-line/README.md`.
+///
+/// After graph ingest, [`maybe_compress_all_graph_lines`] walks components and may rewrite
+/// [`Line`] assets so total stored points stay bounded. Scalar graphs use
+/// [`LineTree::compress_time_value_hamann`]; exactly **three** lines per component with identical
+/// timestamps use joint 3D polyline simplification so `line_3d` trails stay coherent.
+#[derive(Resource, Clone, Debug)]
+pub struct CurveCompressSettings {
+    /// When `false`, no Hamann–Chen pass runs (series grow until other limits apply).
+    pub enabled: bool,
+    /// Run a compression pass when [`LineTree::total_points`] **exceeds** this threshold.
+    pub compress_after_total_points: usize,
+    /// Target vertex count **`m`** passed to `hamann-chen-line` after a pass (per line, or shared
+    /// across the three joint XYZ lines).
+    pub compress_to_points: usize,
+    /// Fraction of the **last** samples (by time order) left uncompressed after a pass.
+    ///
+    /// - `0.0` — compress the whole series (still capped by `compress_to_points`).
+    /// - `0.2` — keep roughly the last 20% at full resolution; Hamann–Chen runs on the leading
+    ///   prefix only.
+    pub keep_recent_fraction: f32,
+    /// Non-destructive **archive + view** architecture. When `true`,
+    /// [`PlotDataComponent::push_value`] appends each accepted live sample to
+    /// [`LineTree::raw_slice`], and [`LineTree::compress_time_value_hamann`] reads from that
+    /// archive instead of the decimated view. Switching this off at runtime reverts to the
+    /// historical destructive pipeline (no archive, HC reads and rewrites the view).
+    pub archive_enabled: bool,
+    /// Throttle: recompute the view as soon as the archive has grown by this many samples since
+    /// the last HC pass. Set small (relative to [`Self::compress_after_total_points`]) to keep
+    /// the UI responsive; too small wastes CPU recomputing the view too often.
+    pub view_recompute_min_samples: usize,
+    /// Throttle: if the archive hasn't grown enough for [`Self::view_recompute_min_samples`],
+    /// still recompute when at least this many milliseconds have passed since the last pass.
+    /// Caps worst-case staleness for low-rate telemetry.
+    pub view_recompute_min_interval_ms: u64,
+}
+
+impl Default for CurveCompressSettings {
+    fn default() -> Self {
+        let cap = CHUNK_COUNT.saturating_mul(CHUNK_LEN);
+        let threshold = cap.saturating_mul(3) / 4;
+        Self {
+            enabled: true,
+            compress_after_total_points: threshold,
+            compress_to_points: cap / 2,
+            keep_recent_fraction: 0.0,
+            archive_enabled: true,
+            view_recompute_min_samples: (threshold / 20).max(1),
+            view_recompute_min_interval_ms: 250,
+        }
+    }
+}
 
 #[derive(Clone, Debug)]
 pub struct PlotDataComponent {
@@ -77,6 +135,7 @@ impl PlotDataComponent {
         assets: &mut Assets<Line>,
         timestamp: Timestamp,
         earliest_timestamp: Timestamp,
+        archive_enabled: bool,
     ) {
         let element_names = self
             .element_names
@@ -98,6 +157,7 @@ impl PlotDataComponent {
             // line.  The FixedRate stream sends a snapshot at the current
             // playback position each frame; skipping timestamps already covered
             // prevents corrupting historical data loaded by GetTimeSeries.
+            let mut accepted = false;
             if let Some(last) = line.data.last() {
                 if timestamp <= last.summary.end_timestamp {
                     continue;
@@ -106,11 +166,17 @@ impl PlotDataComponent {
                     line.data.update_last(|c| {
                         c.push(timestamp, earliest_timestamp, new_value);
                     });
-                    continue;
+                    accepted = true;
                 }
             }
-            let new_chunk = Chunk::from_initial_value(timestamp, earliest_timestamp, new_value);
-            line.data.insert(new_chunk);
+            if !accepted {
+                let new_chunk = Chunk::from_initial_value(timestamp, earliest_timestamp, new_value);
+                line.data.insert(new_chunk);
+            }
+            // Archive mirrors exactly the sequence accepted by the view. Monotonicity of raw is
+            // enforced by `push_raw` itself, so re-ingestion of historical timestamps (already
+            // rejected above) is doubly safe.
+            line.data.push_raw(archive_enabled, timestamp, new_value);
         }
     }
 }
@@ -144,6 +210,7 @@ pub fn pkt_handler(
     mut lines: ResMut<Assets<Line>>,
     tick: Res<CurrentTimestamp>,
     earliest_timestamp: Res<EarliestTimestamp>,
+    curve_compress: Res<CurveCompressSettings>,
 ) {
     let mut tick = *tick;
     if let OwnedPacket::Table(table) = packet {
@@ -157,13 +224,200 @@ pub fn pkt_handler(
                     return;
                 };
                 if let Some(timestamp) = timestamp {
-                    plot_data.push_value(view, &mut lines, timestamp, earliest_timestamp.0);
+                    plot_data.push_value(
+                        view,
+                        &mut lines,
+                        timestamp,
+                        earliest_timestamp.0,
+                        curve_compress.archive_enabled,
+                    );
                 }
             },
         ) {
             warn_once!(?err, "graph sink failed");
         }
+        maybe_compress_all_graph_lines(
+            &mut collected_graph_data,
+            &mut lines,
+            earliest_timestamp.0,
+            &curve_compress,
+        );
     }
+}
+
+/// Optionally rewrites oversized [`Line`] / [`LineTree`] series using **Hamann–Chen** sampling
+/// (`hamann-chen-line`, algorithm structure from Shane Celis’s C# gist linked on
+/// [`CurveCompressSettings`]).
+///
+/// Does nothing when [`CurveCompressSettings::enabled`] is false. Otherwise, for each plot
+/// component: if there are **three** lines and timestamps match across them, tries joint 3D
+/// compression; else compresses each line independently. GPU index-buffer sizing is handled
+/// separately in the plot render path.
+pub fn maybe_compress_all_graph_lines(
+    graph_data: &mut CollectedGraphData,
+    lines: &mut Assets<Line>,
+    earliest: Timestamp,
+    settings: &CurveCompressSettings,
+) {
+    if !settings.enabled {
+        return;
+    }
+    for component in graph_data.components.values_mut() {
+        let handles: Vec<Handle<Line>> = component.lines.values().cloned().collect();
+        if handles.len() == 3 && try_joint_triline_compress(lines, &handles, earliest, settings) {
+            continue;
+        }
+        for line_handle in &handles {
+            let Some(line) = lines.get_mut(line_handle) else {
+                continue;
+            };
+            line.maybe_compress_live(earliest, settings);
+        }
+    }
+    if settings.archive_enabled {
+        // Safety net: flag outsized archives so multi-hour aerospace runs don't silently blow up
+        // RAM. V1 has no enforced horizon; a user report on this warning is the trigger to add
+        // `archive_horizon_seconds` in a follow-up.
+        const RAW_ARCHIVE_WARN_BYTES: usize = 100 * 1024 * 1024;
+        for component in graph_data.components.values() {
+            for line_handle in component.lines.values() {
+                if let Some(line) = lines.get(line_handle)
+                    && line.data.raw_archive_bytes() > RAW_ARCHIVE_WARN_BYTES
+                {
+                    let mb = line.data.raw_archive_bytes() / (1024 * 1024);
+                    warn_once!(
+                        raw_mb = mb,
+                        line_label = %line.label,
+                        "curve_compress: raw archive exceeds 100 MB on a single line; consider lowering run length or adding archive_horizon_seconds"
+                    );
+                }
+            }
+        }
+    }
+}
+
+fn try_joint_triline_compress(
+    lines: &mut Assets<Line>,
+    handles: &[Handle<Line>],
+    earliest: Timestamp,
+    settings: &CurveCompressSettings,
+) -> bool {
+    if handles.len() != 3 {
+        return false;
+    }
+    let (hx, hy, hz) = (&handles[0], &handles[1], &handles[2]);
+    let (lx, ly, lz) = match (lines.get(hx), lines.get(hy), lines.get(hz)) {
+        (Some(x), Some(y), Some(z)) => (x, y, z),
+        _ => return false,
+    };
+    if settings.archive_enabled {
+        if !lx.data.should_recompress(settings) {
+            return false;
+        }
+    } else if lx.data.total_points() <= settings.compress_after_total_points {
+        return false;
+    }
+    // Own the sequence: archive slices borrow from `lines`, which conflicts with the later
+    // `lines.get_mut` on the same assets.
+    let (tsx, vx): (Vec<Timestamp>, Vec<f32>) = if settings.archive_enabled {
+        let (t, v) = lx.data.raw_slice();
+        (t.to_vec(), v.to_vec())
+    } else {
+        lx.data.flattened_time_series()
+    };
+    let (tsy, vy): (Vec<Timestamp>, Vec<f32>) = if settings.archive_enabled {
+        let (t, v) = ly.data.raw_slice();
+        (t.to_vec(), v.to_vec())
+    } else {
+        ly.data.flattened_time_series()
+    };
+    let (tsz, vz): (Vec<Timestamp>, Vec<f32>) = if settings.archive_enabled {
+        let (t, v) = lz.data.raw_slice();
+        (t.to_vec(), v.to_vec())
+    } else {
+        lz.data.flattened_time_series()
+    };
+    if tsx.len() != tsy.len() || tsx.len() != tsz.len() {
+        return false;
+    }
+    if tsx
+        .iter()
+        .zip(&tsy)
+        .zip(&tsz)
+        .any(|((&a, &b), &c)| a != b || a != c)
+    {
+        return false;
+    }
+    if tsx.len() < 3 {
+        return false;
+    }
+    let n = tsx.len();
+    let pos: Vec<bevy::prelude::Vec3> = vx
+        .iter()
+        .zip(vy.iter())
+        .zip(vz.iter())
+        .map(|((&x, &y), &z)| bevy::prelude::Vec3::new(x, y, z))
+        .collect();
+
+    let keep = recent_tail_keep_count(n, settings.keep_recent_fraction);
+    let split = n.saturating_sub(keep);
+
+    let (new_ts, new_x, new_y, new_z) = if settings.keep_recent_fraction > 0.0 && split >= 3 {
+        let budget = settings.compress_to_points.saturating_sub(keep).max(2);
+        let target_old = budget.min(split).max(2);
+        let pos_old = &pos[..split];
+        let idx = select_polyline3_indices(pos_old, target_old);
+        if idx.len() < 2 {
+            return false;
+        }
+        let mut new_ts: Vec<Timestamp> = idx.iter().map(|&i| tsx[i]).collect();
+        let mut new_x: Vec<f32> = idx.iter().map(|&i| vx[i]).collect();
+        let mut new_y: Vec<f32> = idx.iter().map(|&i| vy[i]).collect();
+        let mut new_z: Vec<f32> = idx.iter().map(|&i| vz[i]).collect();
+        if let (Some(tl), Some(tr)) = (new_ts.last(), tsx.get(split))
+            && *tl == *tr
+        {
+            new_ts.pop();
+            new_x.pop();
+            new_y.pop();
+            new_z.pop();
+        }
+        new_ts.extend_from_slice(&tsx[split..]);
+        new_x.extend_from_slice(&vx[split..]);
+        new_y.extend_from_slice(&vy[split..]);
+        new_z.extend_from_slice(&vz[split..]);
+        (new_ts, new_x, new_y, new_z)
+    } else {
+        let target = settings.compress_to_points.max(2).min(n);
+        let idx = select_polyline3_indices(&pos, target);
+        if idx.len() < 2 {
+            return false;
+        }
+        let new_ts: Vec<Timestamp> = idx.iter().map(|&i| tsx[i]).collect();
+        let new_x: Vec<f32> = idx.iter().map(|&i| vx[i]).collect();
+        let new_y: Vec<f32> = idx.iter().map(|&i| vy[i]).collect();
+        let new_z: Vec<f32> = idx.iter().map(|&i| vz[i]).collect();
+        (new_ts, new_x, new_y, new_z)
+    };
+    let Some(xl) = lines.get_mut(hx) else {
+        return false;
+    };
+    xl.data
+        .rebuild_from_time_value_pairs(earliest, &new_ts, &new_x);
+    xl.data.mark_compressed();
+    let Some(yl) = lines.get_mut(hy) else {
+        return false;
+    };
+    yl.data
+        .rebuild_from_time_value_pairs(earliest, &new_ts, &new_y);
+    yl.data.mark_compressed();
+    let Some(zl) = lines.get_mut(hz) else {
+        return false;
+    };
+    zl.data
+        .rebuild_from_time_value_pairs(earliest, &new_ts, &new_z);
+    zl.data.mark_compressed();
+    true
 }
 
 pub fn setup_pkt_handler(mut packet_handlers: ResMut<PacketHandlers>, mut commands: Commands) {
@@ -690,6 +944,19 @@ pub struct Line {
     pub last_queried: Option<Instant>,
 }
 
+impl Line {
+    fn maybe_compress_live(&mut self, earliest: Timestamp, settings: &CurveCompressSettings) {
+        let should = if settings.archive_enabled {
+            self.data.should_recompress(settings)
+        } else {
+            self.data.total_points() > settings.compress_after_total_points
+        };
+        if should {
+            self.data.compress_time_value_hamann(earliest, settings);
+        }
+    }
+}
+
 #[derive(Asset, TypePath, Default)]
 pub struct XYLine {
     pub label: String,
@@ -733,7 +1000,6 @@ impl XYLine {
         }
         let step = total_points.div_ceil(desired_index_len.max(1)).max(1);
 
-        let mut count = 0;
         let mut view = render_queue
             .write_buffer_with(
                 index_buffer,
@@ -742,6 +1008,7 @@ impl XYLine {
             )
             .expect("no write buf");
         let mut view = &mut view[..];
+        let mut written_u32s: u32 = 0;
         let mut global_index = 0usize;
         for buf in &mut self.x_values {
             let gpu = buf.gpu.lock();
@@ -752,14 +1019,17 @@ impl XYLine {
             for (i, index) in chunk.into_index_iter().enumerate() {
                 let absolute = global_index + i;
                 if absolute.is_multiple_of(step) || absolute + 1 == total_points {
-                    view = append_u32(view, index);
-                    count += 1;
+                    let Some(v) = try_append_u32(view, index) else {
+                        return written_u32s;
+                    };
+                    view = v;
+                    written_u32s += 1;
                 }
             }
             global_index += buf.cpu().len();
         }
 
-        count
+        written_u32s
     }
 
     pub fn plot_bounds(&self) -> PlotBounds {
@@ -895,20 +1165,20 @@ impl<D: Immutable + IntoBytes + BoundOrd + Clone + Debug> Chunk<D> {
             gpu: Default::default(),
             gpu_dirty: Arc::new(AtomicBool::new(true)),
         };
-        let min = data.cpu().iter().fold(None, |xs: Option<D>, x| {
-            if let Some(xs) = xs.clone() {
-                Some(xs.min(x.clone()))
-            } else {
-                Some(x.clone())
-            }
-        });
-        let max = data.cpu().iter().fold(None, |xs: Option<D>, x| {
-            if let Some(xs) = xs.clone() {
-                Some(xs.max(x.clone()))
-            } else {
-                Some(x.clone())
-            }
-        });
+        let (min, max) = data
+            .cpu()
+            .iter()
+            .fold((None::<D>, None::<D>), |(min_acc, max_acc), x| {
+                let min_acc = Some(match min_acc {
+                    Some(m) => m.min(x.clone()),
+                    None => x.clone(),
+                });
+                let max_acc = Some(match max_acc {
+                    Some(m) => m.max(x.clone()),
+                    None => x.clone(),
+                });
+                (min_acc, max_acc)
+            });
 
         let summary = ChunkSummary {
             len: timestamps.len(),
@@ -1039,6 +1309,23 @@ pub struct LineTree<D: Clone + BoundOrd> {
     tree: NoditMap<i64, nodit::Interval<i64>, Chunk<D>>,
     data_buffer_shard_alloc: Option<BufferShardAlloc>,
     timestamp_buffer_shard_alloc: Option<BufferShardAlloc>,
+    /// Append-only archive of raw `(timestamp, value)` samples ingested live.
+    ///
+    /// When [`CurveCompressSettings::archive_enabled`] is true, [`PlotDataComponent::push_value`]
+    /// pushes every accepted sample here in addition to the view (`tree`). The Hamann-Chen pass
+    /// then reads from this archive and rebuilds the view, leaving the archive untouched. Because
+    /// the archive is never decimated, running HC multiple times produces identical output
+    /// (monotone quality) and parameter changes can be re-applied without loss.
+    ///
+    /// Populated only for live streaming. Samples arriving via `GetTimeSeries` (historical DB
+    /// scroll) go through `handle_time_series`, which bypasses `push_value` and fills the view
+    /// directly — the archive stays empty for those ranges (elodin-db itself is the archive).
+    raw_timestamps: Vec<Timestamp>,
+    raw_values: Vec<D>,
+    /// Archive length at the end of the last HC pass, for throttling decisions.
+    last_hc_archive_len: usize,
+    /// Wall-clock instant of the last HC pass, for time-based throttling.
+    last_hc_instant: Option<std::time::Instant>,
 }
 
 impl<D: Clone + BoundOrd> Default for LineTree<D> {
@@ -1047,6 +1334,10 @@ impl<D: Clone + BoundOrd> Default for LineTree<D> {
             tree: Default::default(),
             data_buffer_shard_alloc: None,
             timestamp_buffer_shard_alloc: None,
+            raw_timestamps: Vec::new(),
+            raw_values: Vec::new(),
+            last_hc_archive_len: 0,
+            last_hc_instant: None,
         }
     }
 }
@@ -1077,6 +1368,76 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
             ),
             chunk,
         );
+    }
+
+    pub fn total_points(&self) -> usize {
+        self.tree.iter().map(|(_, c)| c.summary.len).sum()
+    }
+
+    pub fn chunk_count(&self) -> usize {
+        self.tree.iter().count()
+    }
+
+    /// Append `(ts, value)` to the raw archive. Rejects out-of-order timestamps
+    /// (`ts <= last`) so the archive stays monotonic by construction. No-op if
+    /// `enabled` is false — the caller gates on [`CurveCompressSettings::archive_enabled`].
+    pub fn push_raw(&mut self, enabled: bool, ts: Timestamp, value: D) {
+        if !enabled {
+            return;
+        }
+        if let Some(last) = self.raw_timestamps.last()
+            && ts <= *last
+        {
+            return;
+        }
+        self.raw_timestamps.push(ts);
+        self.raw_values.push(value);
+    }
+
+    pub fn raw_len(&self) -> usize {
+        self.raw_timestamps.len()
+    }
+
+    pub fn raw_slice(&self) -> (&[Timestamp], &[D]) {
+        (&self.raw_timestamps, &self.raw_values)
+    }
+
+    pub fn clear_raw(&mut self) {
+        self.raw_timestamps.clear();
+        self.raw_values.clear();
+        self.last_hc_archive_len = 0;
+        self.last_hc_instant = None;
+    }
+
+    /// True when the archive has grown enough (samples or time) since the last HC pass to justify
+    /// recomputing the view. Always false below [`CurveCompressSettings::compress_after_total_points`].
+    pub fn should_recompress(&self, settings: &CurveCompressSettings) -> bool {
+        if self.raw_len() <= settings.compress_after_total_points {
+            return false;
+        }
+        let grew = self.raw_len().saturating_sub(self.last_hc_archive_len)
+            >= settings.view_recompute_min_samples;
+        if grew {
+            return true;
+        }
+        match self.last_hc_instant {
+            None => true,
+            Some(t) => {
+                t.elapsed()
+                    >= std::time::Duration::from_millis(settings.view_recompute_min_interval_ms)
+            }
+        }
+    }
+
+    /// Record that an HC pass has just run (updates throttle bookkeeping).
+    pub fn mark_compressed(&mut self) {
+        self.last_hc_archive_len = self.raw_len();
+        self.last_hc_instant = Some(std::time::Instant::now());
+    }
+
+    /// Approximate memory cost of the raw archive in bytes (timestamps + values).
+    pub fn raw_archive_bytes(&self) -> usize {
+        self.raw_timestamps.len() * (std::mem::size_of::<Timestamp>() + std::mem::size_of::<D>())
     }
 
     pub fn range_summary(&self, range: Range<Timestamp>) -> ChunkSummary<D> {
@@ -1142,6 +1503,35 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
             Err(i) => i.saturating_sub(1),
         };
         Some((*chunk.timestamps.get(index)?, chunk.data.cpu().get(index)?))
+    }
+
+    /// Returns the latest sample timestamp **strictly less than** `target`.
+    ///
+    /// Used by `line_3d` rendering to snap the played/future split onto the
+    /// previous sample boundary. Without this, the future segment can collapse
+    /// to a single index per frame when `current_timestamp` falls between
+    /// discrete sim ticks, which disappears from the shader (NaN-only draw)
+    /// and shows up as a blink near the current position.
+    pub fn last_timestamp_strictly_before(&self, target: Timestamp) -> Option<Timestamp> {
+        let upper = target.0.checked_sub(1)?;
+        let (_, chunk) = self.tree.overlapping(ii(i64::MIN, upper)).last()?;
+        let probe = Timestamp(upper);
+        let idx = match chunk.timestamps.binary_search(&probe) {
+            Ok(i) => i,
+            Err(i) => i.checked_sub(1)?,
+        };
+        chunk.timestamps.get(idx).copied()
+    }
+
+    /// Timestamp of the most recent sample stored in the view, or `None` when empty.
+    /// Used by `line_3d` to tell apart "playhead between ticks" (snap the future
+    /// segment back one sample to keep ≥ 2 indices and avoid a single-sample
+    /// blink) from "playhead on the latest sample" (live follow, future must
+    /// stay empty so no white tail overdraws the yellow trail).
+    pub fn latest_sample_timestamp(&self) -> Option<Timestamp> {
+        self.tree
+            .last_key_value()
+            .map(|(_, c)| c.summary.end_timestamp)
     }
 
     pub fn data_buffer_shard_alloc(&self) -> Option<&BufferShardAlloc> {
@@ -1249,6 +1639,52 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
         self.write_to_index_buffer_with_step(index_buffer, render_queue, line_visible_range, step)
     }
 
+    /// Count of `u32` indices written by [`Self::write_to_index_buffer_with_step`] for this range
+    /// and step (must stay in sync with that loop, including when `step == 1`).
+    ///
+    /// Uses the same visibility clipping as [`Self::draw_index_chunk_iter`] but does **not**
+    /// require GPU-resident chunks (counts from CPU timestamps + visible length only).
+    pub fn count_strip_index_u32s(&self, line_visible_range: Range<Timestamp>, step: usize) -> u32 {
+        let step = step.max(1);
+        let mut n: u32 = 0;
+        for c in self.range_iter(line_visible_range.clone()) {
+            let Some((start_offset, end_offset)) =
+                chunk_visible_offsets(&c.timestamps, &line_visible_range)
+            else {
+                continue;
+            };
+            let vis_len = end_offset.saturating_sub(start_offset);
+            if vis_len == 0 {
+                continue;
+            }
+            // `into_index_iter` length depends only on `len`; absolute indices match GPU path
+            // after clip, but counts are identical for any `range.start` with sufficient span.
+            let chunk = IndexChunk {
+                range: 0..u32::MAX,
+                len: vis_len,
+            };
+            n = n.saturating_add(1);
+            let end = chunk.clone().into_index_iter().last();
+            let mut index_iter = chunk.into_index_iter();
+            let mut last_written: Option<u32> = None;
+            if let Some(index) = index_iter.next() {
+                n = n.saturating_add(1);
+                last_written = Some(index);
+            }
+            for index in index_iter.step_by(step) {
+                n = n.saturating_add(1);
+                last_written = Some(index);
+            }
+            if let Some(end) = end
+                && last_written != Some(end)
+            {
+                n = n.saturating_add(1);
+            }
+            n = n.saturating_add(1);
+        }
+        n
+    }
+
     pub fn write_to_index_buffer_with_step(
         &self,
         index_buffer: &Buffer,
@@ -1264,27 +1700,48 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
             )
             .expect("no write buf");
         let mut view = &mut view[..];
-        let mut count = 0;
-        for chunk in self.draw_index_chunk_iter(line_visible_range) {
-            view = append_u32(view, 0);
+        let mut written_u32s: u32 = 0;
+        'chunks: for chunk in self.draw_index_chunk_iter(line_visible_range) {
+            let Some(v) = try_append_u32(view, 0) else {
+                break 'chunks;
+            };
+            view = v;
+            written_u32s += 1;
             let end = chunk.clone().into_index_iter().last();
             let mut index_iter = chunk.into_index_iter();
+            let mut last_written: Option<u32> = None;
             if let Some(index) = index_iter.next() {
-                count += 1;
-                view = append_u32(view, index);
+                let Some(v) = try_append_u32(view, index) else {
+                    break 'chunks;
+                };
+                view = v;
+                written_u32s += 1;
+                last_written = Some(index);
             }
             for index in index_iter.step_by(step) {
-                count += 1;
-                view = append_u32(view, index);
+                let Some(v) = try_append_u32(view, index) else {
+                    break 'chunks;
+                };
+                view = v;
+                written_u32s += 1;
+                last_written = Some(index);
             }
-            if let Some(end) = end {
-                count += 1;
-                view = append_u32(view, end);
+            if let Some(end) = end
+                && last_written != Some(end)
+            {
+                let Some(v) = try_append_u32(view, end) else {
+                    break 'chunks;
+                };
+                view = v;
+                written_u32s += 1;
             }
-            view = append_u32(view, 0);
-            count += 2;
+            let Some(v) = try_append_u32(view, 0) else {
+                break 'chunks;
+            };
+            view = v;
+            written_u32s += 1;
         }
-        count
+        written_u32s
     }
 
     pub fn garbage_collect(&mut self, line_visible_range: Range<Timestamp>) {
@@ -1320,6 +1777,182 @@ impl<D: Clone + BoundOrd + Immutable + IntoBytes + Debug> LineTree<D> {
     }
 }
 
+fn release_line_chunk_gpu(
+    chunk: &mut Chunk<f32>,
+    data_alloc: &mut Option<BufferShardAlloc>,
+    ts_alloc: &mut Option<BufferShardAlloc>,
+) {
+    if let Some(alloc) = data_alloc
+        && let Some(gpu) = chunk.data.gpu.lock().take()
+    {
+        alloc.dealloc(gpu);
+        chunk.data.gpu_dirty.store(true, atomic::Ordering::SeqCst);
+    }
+    if let Some(alloc) = ts_alloc
+        && let Some(gpu) = chunk.timestamps_float.gpu.lock().take()
+    {
+        alloc.dealloc(gpu);
+        chunk
+            .timestamps_float
+            .gpu_dirty
+            .store(true, atomic::Ordering::SeqCst);
+    }
+}
+
+impl LineTree<f32> {
+    pub fn flattened_time_series(&self) -> (Vec<Timestamp>, Vec<f32>) {
+        let mut ts = Vec::new();
+        let mut vs = Vec::new();
+        for (_, chunk) in self.tree.iter() {
+            for (&t, &v) in chunk.timestamps.iter().zip(chunk.data.cpu().iter()) {
+                ts.push(t);
+                vs.push(v);
+            }
+        }
+        (ts, vs)
+    }
+
+    /// Rebuild the tree from `new_ts` / `new_v`, atomically, in `CHUNK_LEN` shards.
+    ///
+    /// Uses **build-then-swap**: a fresh tree is constructed off-band, swapped in
+    /// with `mem::replace`, and only then are the old GPU shards released. Render
+    /// frames therefore observe either the previous tree in full or the new tree
+    /// in full — never an empty intermediate state. This is what kills the trail
+    /// blink at high tick counts when [`compress_time_value_hamann`] fires.
+    pub fn rebuild_from_time_value_pairs(
+        &mut self,
+        earliest: Timestamp,
+        new_ts: &[Timestamp],
+        new_v: &[f32],
+    ) {
+        let n = new_ts.len().min(new_v.len());
+
+        if n == self.total_points()
+            && n > 0
+            && self
+                .tree
+                .iter()
+                .next()
+                .map(|(_, c)| c.summary.start_timestamp)
+                == new_ts.first().copied()
+            && self
+                .tree
+                .last_key_value()
+                .map(|(_, c)| c.summary.end_timestamp)
+                == new_ts.last().copied()
+        {
+            return;
+        }
+
+        let mut new_tree: NoditMap<i64, nodit::Interval<i64>, Chunk<f32>> = NoditMap::default();
+        let mut offset = 0usize;
+        while offset < n {
+            let end = (offset + CHUNK_LEN).min(n);
+            if let Some(chunk) = Chunk::from_iter(
+                &new_ts[offset..end],
+                earliest,
+                new_v[offset..end].iter().copied(),
+            ) {
+                let _ = new_tree.insert_overwrite(
+                    ii(
+                        chunk.summary.start_timestamp.0,
+                        chunk.summary.end_timestamp.0,
+                    ),
+                    chunk,
+                );
+            }
+            offset = end;
+        }
+
+        let old_tree = std::mem::replace(&mut self.tree, new_tree);
+        for (_, mut chunk) in old_tree {
+            release_line_chunk_gpu(
+                &mut chunk,
+                &mut self.data_buffer_shard_alloc,
+                &mut self.timestamp_buffer_shard_alloc,
+            );
+        }
+    }
+
+    /// Hamann–Chen in `(t, y)`; optional [`CurveCompressSettings::keep_recent_fraction`] leaves a
+    /// suffix of recent samples uncompressed.
+    ///
+    /// Source of truth depends on [`CurveCompressSettings::archive_enabled`]:
+    /// - `true` (non-destructive) — reads from [`LineTree::raw_slice`]. Repeated passes produce
+    ///   identical output (monotone quality); archive is never touched.
+    /// - `false` (legacy destructive) — reads from [`Self::flattened_time_series`] (the already
+    ///   decimated view), so successive passes compound decimation. Kept as rollback switch.
+    pub fn compress_time_value_hamann(
+        &mut self,
+        earliest: Timestamp,
+        settings: &CurveCompressSettings,
+    ) {
+        // Own the source slice: the archive path needs a borrow of `self` that conflicts with the
+        // later `&mut self` in `rebuild_from_time_value_pairs`. The clone of ~1-10 MB is cheap
+        // compared to the HC pass itself (50-100 ms).
+        let (ts_all, v_all): (Vec<Timestamp>, Vec<f32>) = if settings.archive_enabled {
+            let (t, v) = self.raw_slice();
+            (t.to_vec(), v.to_vec())
+        } else {
+            self.flattened_time_series()
+        };
+        let n = ts_all.len();
+        if n < 3 {
+            return;
+        }
+
+        let keep = recent_tail_keep_count(n, settings.keep_recent_fraction);
+        let split = n.saturating_sub(keep);
+
+        if settings.keep_recent_fraction > 0.0 && split >= 3 {
+            let old_ts = &ts_all[..split];
+            let old_v = &v_all[..split];
+            let recent_ts = &ts_all[split..];
+            let recent_v = &v_all[split..];
+            let budget = settings.compress_to_points.saturating_sub(keep).max(2);
+            let target_old = budget.min(split).max(2);
+            let t_rel: Vec<f32> = old_ts.iter().map(|t| (t.0 - earliest.0) as f32).collect();
+            let idx = select_time_value_indices(&t_rel, old_v, target_old);
+            if idx.len() < 2 {
+                return;
+            }
+            let mut new_ts: Vec<Timestamp> = idx.iter().map(|&i| old_ts[i]).collect();
+            let mut new_v: Vec<f32> = idx.iter().map(|&i| old_v[i]).collect();
+            if let (Some(tl), Some(tr)) = (new_ts.last(), recent_ts.first())
+                && *tl == *tr
+            {
+                new_ts.pop();
+                new_v.pop();
+            }
+            new_ts.extend_from_slice(recent_ts);
+            new_v.extend_from_slice(recent_v);
+            self.rebuild_from_time_value_pairs(earliest, &new_ts, &new_v);
+            self.mark_compressed();
+            return;
+        }
+
+        let target = settings.compress_to_points.max(2).min(n);
+        let t_rel: Vec<f32> = ts_all.iter().map(|t| (t.0 - earliest.0) as f32).collect();
+        let idx = select_time_value_indices(&t_rel, &v_all, target);
+        if idx.len() < 2 {
+            return;
+        }
+        let new_ts: Vec<Timestamp> = idx.iter().map(|&i| ts_all[i]).collect();
+        let new_v: Vec<f32> = idx.iter().map(|&i| v_all[i]).collect();
+        self.rebuild_from_time_value_pairs(earliest, &new_ts, &new_v);
+        self.mark_compressed();
+    }
+}
+
+fn recent_tail_keep_count(n: usize, keep_recent_fraction: f32) -> usize {
+    if n == 0 || keep_recent_fraction <= 0.0 {
+        return 0;
+    }
+    let f = keep_recent_fraction.clamp(0.0_f32, 0.999_f32);
+    let keep = (n as f32 * f).ceil() as usize;
+    keep.min(n.saturating_sub(1))
+}
+
 fn chunk_visible_offsets(
     timestamps: &[Timestamp],
     range: &Range<Timestamp>,
@@ -1330,13 +1963,17 @@ fn chunk_visible_offsets(
 }
 
 pub fn index_sampling_step(chunk_count: usize, index_count: usize, pixel_width: usize) -> usize {
-    let desired_index_len = INDEX_BUFFER_LEN.min(pixel_width * 4);
-    let divisor = desired_index_len.saturating_sub(2 * chunk_count);
-    if divisor != 0 {
-        index_count.div_ceil(divisor).max(1)
-    } else {
-        1
+    let desired_index_len = INDEX_BUFFER_LEN.min(pixel_width.max(1) * 4);
+    // Per-chunk index overhead: leading sentinel, first point, strided interior, last point,
+    // trailing sentinel (see `write_to_index_buffer_with_step`).
+    const PER_CHUNK_OVERHEAD: usize = 6;
+    let overhead = PER_CHUNK_OVERHEAD.saturating_mul(chunk_count.max(1));
+    let divisor = desired_index_len.saturating_sub(overhead);
+    if divisor > 0 {
+        return index_count.div_ceil(divisor).max(1);
     }
+    // Many chunks: `2 * chunk_count` alone can exceed the index budget — never fall back to step 1.
+    index_count.div_ceil(desired_index_len.max(1)).max(1)
 }
 
 #[cfg(test)]
@@ -1417,14 +2054,268 @@ mod tests {
         assert_eq!(index_sampling_step(1, 100, 100), 1);
         assert_eq!(index_sampling_step(1, 1_000, 100), 3);
     }
+
+    #[test]
+    fn index_sampling_step_many_chunks_never_returns_one() {
+        let step = index_sampling_step(5000, 1_000_000, 1920);
+        assert!(step > 1, "step={step}");
+    }
+
+    #[test]
+    fn recent_tail_keep_count_zero_fraction_is_zero() {
+        assert_eq!(recent_tail_keep_count(100, 0.0), 0);
+    }
+
+    #[test]
+    fn recent_tail_keep_count_respects_fraction_and_caps_at_n_minus_one() {
+        assert_eq!(recent_tail_keep_count(100, 0.2), 20);
+        assert_eq!(recent_tail_keep_count(5, 0.2), 1);
+        assert_eq!(recent_tail_keep_count(100, 1.0), 99);
+    }
+
+    #[test]
+    fn count_strip_index_u32s_decreases_with_larger_step() {
+        let mut tree = LineTree::<f32>::default();
+        let ts: Vec<Timestamp> = (0i64..200).map(Timestamp).collect();
+        let vals: Vec<f32> = (0..200).map(|i| i as f32).collect();
+        let chunk = Chunk::from_iter(&ts, Timestamp(0), vals.into_iter()).expect("chunk");
+        tree.insert(chunk);
+        let range = Timestamp(0)..Timestamp(199);
+        let c1 = tree.count_strip_index_u32s(range.clone(), 1);
+        let c8 = tree.count_strip_index_u32s(range.clone(), 8);
+        assert!(c8 <= c1, "c1={c1} c8={c8}");
+        assert!(c1 > 0);
+    }
+
+    #[test]
+    fn count_strip_index_u32s_step_one_matches_sentinels_plus_vertices() {
+        let mut tree = LineTree::<f32>::default();
+        let ts: Vec<Timestamp> = (0i64..10).map(Timestamp).collect();
+        let vals: Vec<f32> = (0..10).map(|i| i as f32).collect();
+        let chunk = Chunk::from_iter(&ts, Timestamp(0), vals.into_iter()).expect("chunk");
+        tree.insert(chunk);
+        let c = tree.count_strip_index_u32s(Timestamp(0)..Timestamp(10), 1);
+        assert_eq!(
+            c, 12,
+            "leading 0 + 10 indices + trailing 0 (no duplicate last)"
+        );
+    }
+
+    // === Archive + view (non-destructive HC) tests ===
+
+    fn archive_settings(
+        archive_enabled: bool,
+        threshold: usize,
+        target: usize,
+    ) -> CurveCompressSettings {
+        CurveCompressSettings {
+            enabled: true,
+            compress_after_total_points: threshold,
+            compress_to_points: target,
+            keep_recent_fraction: 0.0,
+            archive_enabled,
+            view_recompute_min_samples: 1,
+            view_recompute_min_interval_ms: 0,
+        }
+    }
+
+    #[test]
+    fn push_raw_enforces_monotonicity() {
+        let mut tree = LineTree::<f32>::default();
+        tree.push_raw(true, Timestamp(10), 1.0);
+        tree.push_raw(true, Timestamp(20), 2.0);
+        tree.push_raw(true, Timestamp(15), 99.0);
+        tree.push_raw(true, Timestamp(20), 99.0);
+        tree.push_raw(true, Timestamp(30), 3.0);
+        let (ts, vs) = tree.raw_slice();
+        assert_eq!(ts, &[Timestamp(10), Timestamp(20), Timestamp(30)]);
+        assert_eq!(vs, &[1.0, 2.0, 3.0]);
+    }
+
+    #[test]
+    fn push_raw_disabled_is_noop() {
+        let mut tree = LineTree::<f32>::default();
+        tree.push_raw(false, Timestamp(10), 1.0);
+        tree.push_raw(false, Timestamp(20), 2.0);
+        assert_eq!(tree.raw_len(), 0);
+    }
+
+    #[test]
+    fn clear_raw_resets_state() {
+        let mut tree = LineTree::<f32>::default();
+        tree.push_raw(true, Timestamp(10), 1.0);
+        tree.mark_compressed();
+        assert_eq!(tree.raw_len(), 1);
+        assert!(tree.last_hc_instant.is_some());
+        tree.clear_raw();
+        assert_eq!(tree.raw_len(), 0);
+        assert_eq!(tree.last_hc_archive_len, 0);
+        assert!(tree.last_hc_instant.is_none());
+    }
+
+    #[test]
+    fn rebuild_from_time_value_pairs_preserves_raw_archive() {
+        let mut tree = LineTree::<f32>::default();
+        for i in 0..20 {
+            tree.push_raw(true, Timestamp(i * 10), i as f32);
+        }
+        let raw_before = tree.raw_slice();
+        let (ts_before, vs_before) = (raw_before.0.to_vec(), raw_before.1.to_vec());
+        let new_ts = vec![Timestamp(0), Timestamp(100), Timestamp(190)];
+        let new_v = vec![0.0, 10.0, 19.0];
+        tree.rebuild_from_time_value_pairs(Timestamp(0), &new_ts, &new_v);
+        let (ts_after, vs_after) = tree.raw_slice();
+        assert_eq!(
+            ts_after,
+            ts_before.as_slice(),
+            "archive timestamps must be untouched"
+        );
+        assert_eq!(
+            vs_after,
+            vs_before.as_slice(),
+            "archive values must be untouched"
+        );
+    }
+
+    #[test]
+    fn should_recompress_below_threshold_is_false() {
+        let mut tree = LineTree::<f32>::default();
+        let settings = archive_settings(true, 1000, 100);
+        tree.push_raw(true, Timestamp(1), 0.0);
+        assert!(!tree.should_recompress(&settings));
+    }
+
+    #[test]
+    fn should_recompress_above_threshold_triggers_once_no_prior_pass() {
+        let mut tree = LineTree::<f32>::default();
+        let settings = archive_settings(true, 5, 3);
+        for i in 0..10 {
+            tree.push_raw(true, Timestamp(i), i as f32);
+        }
+        assert!(tree.should_recompress(&settings));
+    }
+
+    #[test]
+    fn should_recompress_throttled_by_sample_delta() {
+        let mut tree = LineTree::<f32>::default();
+        let settings = CurveCompressSettings {
+            view_recompute_min_samples: 100,
+            view_recompute_min_interval_ms: 60_000,
+            ..archive_settings(true, 5, 3)
+        };
+        for i in 0..10 {
+            tree.push_raw(true, Timestamp(i), i as f32);
+        }
+        tree.mark_compressed();
+        tree.push_raw(true, Timestamp(11), 11.0);
+        assert!(
+            !tree.should_recompress(&settings),
+            "1 new sample, 100 required + recent pass -> should skip"
+        );
+    }
+
+    #[test]
+    fn should_recompress_fires_when_interval_elapsed_even_without_enough_samples() {
+        let mut tree = LineTree::<f32>::default();
+        let settings = CurveCompressSettings {
+            view_recompute_min_samples: 100,
+            view_recompute_min_interval_ms: 0,
+            ..archive_settings(true, 5, 3)
+        };
+        for i in 0..10 {
+            tree.push_raw(true, Timestamp(i), i as f32);
+        }
+        tree.mark_compressed();
+        tree.push_raw(true, Timestamp(11), 11.0);
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        assert!(
+            tree.should_recompress(&settings),
+            "interval=0 means elapsed check always fires"
+        );
+    }
+
+    #[test]
+    fn hc_pass_is_deterministic_on_stable_archive() {
+        let mut tree = LineTree::<f32>::default();
+        let settings = archive_settings(true, 5, 20);
+        for i in 0..200 {
+            let t = Timestamp(i);
+            let v = (i as f32 * 0.05).sin();
+            tree.push_raw(true, t, v);
+        }
+        tree.compress_time_value_hamann(Timestamp(0), &settings);
+        let view_1 = tree.flattened_time_series();
+        tree.compress_time_value_hamann(Timestamp(0), &settings);
+        let view_2 = tree.flattened_time_series();
+        assert_eq!(
+            view_1.0, view_2.0,
+            "two successive passes must pick identical timestamps"
+        );
+        assert_eq!(
+            view_1.1, view_2.1,
+            "two successive passes must pick identical values"
+        );
+    }
+
+    #[test]
+    fn hc_pass_is_monotone_across_many_passes() {
+        let mut tree = LineTree::<f32>::default();
+        let settings = archive_settings(true, 5, 20);
+        for i in 0..200 {
+            tree.push_raw(true, Timestamp(i), (i as f32 * 0.05).sin());
+        }
+        tree.compress_time_value_hamann(Timestamp(0), &settings);
+        let reference = tree.flattened_time_series();
+        for _ in 0..10 {
+            tree.compress_time_value_hamann(Timestamp(0), &settings);
+        }
+        let after = tree.flattened_time_series();
+        assert_eq!(
+            reference.0, after.0,
+            "10 passes with no new samples must not shift the view"
+        );
+        assert_eq!(reference.1, after.1);
+    }
+
+    #[test]
+    fn hc_pass_disabled_archive_reads_from_view_like_before() {
+        let mut tree = LineTree::<f32>::default();
+        let settings = archive_settings(false, 5, 20);
+        for i in 0..200 {
+            let t = Timestamp(i);
+            let v = (i as f32 * 0.05).sin();
+            // Use insert path so the view gets populated without touching the archive
+            let chunk = Chunk::from_iter(&[t], Timestamp(0), [v].into_iter()).expect("chunk");
+            tree.insert(chunk);
+        }
+        assert_eq!(
+            tree.raw_len(),
+            0,
+            "archive_enabled=false keeps archive empty"
+        );
+        tree.compress_time_value_hamann(Timestamp(0), &settings);
+        let (ts, _) = tree.flattened_time_series();
+        assert!(!ts.is_empty() && ts.len() <= settings.compress_to_points);
+    }
+
+    #[test]
+    fn raw_archive_bytes_scales_with_sample_count() {
+        let mut tree = LineTree::<f32>::default();
+        assert_eq!(tree.raw_archive_bytes(), 0);
+        for i in 0..1_000 {
+            tree.push_raw(true, Timestamp(i), i as f32);
+        }
+        // Timestamp(i64) = 8 bytes + f32 = 4 bytes => 12 bytes per sample.
+        assert_eq!(tree.raw_archive_bytes(), 1_000 * 12);
+    }
 }
 
-fn append_u32(view: &mut [u8], val: u32) -> &mut [u8] {
-    if view.len() < 4 {
-        return view;
+fn try_append_u32(view: &mut [u8], val: u32) -> Option<&mut [u8]> {
+    if view.len() < size_of::<u32>() {
+        return None;
     }
     view[..size_of::<u32>()].copy_from_slice(&val.to_le_bytes());
-    &mut view[size_of::<u32>()..]
+    Some(&mut view[size_of::<u32>()..])
 }
 
 pub fn collect_garbage(
