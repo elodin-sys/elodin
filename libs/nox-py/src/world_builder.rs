@@ -62,7 +62,11 @@ fn install_signal_handlers(cancel_token: CancelToken) {
 }
 
 #[derive(Parser, Debug)]
-#[command(version, about, long_about = None)]
+#[command(
+    version = concat!(env!("CARGO_PKG_VERSION"), "+", env!("GIT_HASH")),
+    about,
+    long_about = None
+)]
 pub enum Args {
     Run {
         #[arg(default_value = "[::]:2240")]

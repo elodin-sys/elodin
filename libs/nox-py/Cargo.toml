@@ -5,6 +5,7 @@ version.workspace = true
 edition = "2024"
 readme = "README.md"
 publish = false
+build = "build.rs"
 
 [features]
 publish = ["pyo3/extension-module", "pyo3/abi3-py310"]
