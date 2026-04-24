@@ -26,7 +26,7 @@ pub struct Output {
     _pad: u32,
 }
 
-async fn connect() -> anyhow::Result<()> {
+async fn connect() -> anyhow::Result<Duration> {
     let mut client = Client::connect(SocketAddr::new([127, 0, 0, 1].into(), 2240))
         .await
         .map_err(anyhow::Error::from)?;
@@ -51,6 +51,7 @@ async fn connect() -> anyhow::Result<()> {
     let gpu_load = File::open("/sys/devices/platform/gpu.0/load").await?;
     let mut system = sysinfo::System::new_all();
     system.refresh_cpu_specifics(CpuRefreshKind::everything());
+    let connected_at = Instant::now();
 
     loop {
         table.clear();
@@ -76,7 +77,13 @@ async fn connect() -> anyhow::Result<()> {
             _pad: 0,
         };
         table.extend_from_slice(output.as_bytes());
-        rent!(client.send(table).await, table)?;
+        if let Err(err) = rent!(client.send(table).await, table) {
+            eprintln!(
+                "send failed after connected session {:?}: {err:?}",
+                connected_at.elapsed()
+            );
+            return Ok(connected_at.elapsed());
+        }
         stellarator::sleep(Duration::from_millis(1000)).await;
     }
 }
@@ -105,12 +112,15 @@ async fn main() -> anyhow::Result<()> {
 
     let mut backoff = MIN_BACKOFF;
     loop {
-        let started = Instant::now();
-        if let Err(err) = connect().await {
-            eprintln!("error connecting {err:?}");
-        }
-        if started.elapsed() >= STABLE_SESSION {
-            backoff = MIN_BACKOFF;
+        match connect().await {
+            Ok(connected_for) => {
+                if connected_for >= STABLE_SESSION {
+                    backoff = MIN_BACKOFF;
+                }
+            }
+            Err(err) => {
+                eprintln!("error connecting {err:?}");
+            }
         }
         stellarator::sleep(backoff).await;
         backoff = (backoff * 2).min(MAX_BACKOFF);
