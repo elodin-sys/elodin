@@ -17,12 +17,13 @@
 //! }
 //! ```
 
-/// Returns the short git hash and marks whether its a dirty tree.
+/// Returns the short git hash and, if the tree is dirty, appends `.dirty`.
+/// Suffix is PEP 440 / SemVer build-metadata safe (no `*`).
 ///
 /// ```rust, ignore
-/// assert_eq!(hash(), Some("123456"));  // Clean tree
-/// assert_eq!(hash(), Some("123456*")); // Dirty tree
-/// assert_eq!(hash(), None);            // Could not get hash.
+/// assert_eq!(hash(), Some("123456"));       // Clean tree
+/// assert_eq!(hash(), Some("123456.dirty")); // Dirty tree
+/// assert_eq!(hash(), None);                 // Could not get hash.
 /// ```
 pub fn short_hash() -> Option<String> {
     let mut hash = match std::env::var("GIT_HASH") {
@@ -48,7 +49,7 @@ pub fn short_hash() -> Option<String> {
             .status()
         && !status.success()
     {
-        hash.push('*');
+        hash.push_str(".dirty");
     }
     hash
 }
