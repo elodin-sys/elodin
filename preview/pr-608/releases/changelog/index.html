@@ -723,16 +723,20 @@
 <ul>
 <li><strong>(feat)</strong> So Long, IREE. Hello, Cranelift-MLIR! (#600)</li>
 <li><strong>(feat)</strong> Add <code>elodin-db query</code> subcommand. (#551)</li>
-<li><strong>(feat)</strong> Support NED and ECEF coordinate frames. (#352)</li>
+<li><strong>(feat)</strong> Support NED and ECEF coordinate frames for positions (orientations still all ENU). (#352)</li>
 <li><strong>(feat)</strong> Add Aleph onboard sensors and optional GPS. (#582)</li>
 <li><strong>(feat)</strong> Add Explicit EQL Cast Support, e.g., "vehicle.x.cast(f32)". (#602)</li>
 <li><strong>(feat)</strong> Add Voyager 1 &amp; 2 interplanetary trajectory example. (#579)</li>
+<li><strong>(fix)</strong> Add Hamann-Chen line compression into plot and 3D line. (#604)</li>
 <li><strong>(fix)</strong> Fix deploy.sh usage as nix run .#deploy downstream for Aleph.  (#606)</li>
 <li><strong>(fix)</strong> Overhauled render layer allocation to fix exhaust issue. (#603)</li>
 <li><strong>(fix)</strong> Fix bool in database schema. (#598)</li>
+<li><strong>(fix)</strong> Fix bool in database schema. (#598)</li>
 <li><strong>(perf)</strong> Sink telemetry tables in a single pass. (#583)</li>
 <li><strong>(perf)</strong> Add batching table packets example. (#581)</li>
-<li><strong>(refactor)</strong> Remove <code>flake-utils</code> from nix config.</li>
+<li><strong>(perf)</strong> Change tegrastats from 200Hz to 1Hz. (#611)</li>
+<li><strong>(chore)</strong> Add git hash suffix to Elodin Python version. (#612)</li>
+<li><strong>(refactor)</strong> Remove <code>flake-utils</code> from nix config. (#607)</li>
 <li><strong>(refactor)</strong> Modularize STM firmware configuration.</li>
 <li><strong>(refactor)</strong> Make KDL documents a Bevy <code>Asset</code>. (#573)</li>
 <li><strong>(refactor)</strong> Clarify simulation and telemetry rate API. (#572)</li>
