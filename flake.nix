@@ -33,7 +33,7 @@
       };
       elodin = rec {
         elodin-py = final.callPackage ./nix/pkgs/elodin-py.nix {
-          inherit rustToolchain;
+          inherit rustToolchain gitRev;
           python = final.python313;
           pythonPackages = final.python313Packages;
         };
