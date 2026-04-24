@@ -14,7 +14,6 @@
 - **(fix)** Fix deploy.sh usage as nix run .#deploy downstream for Aleph.  (#606)
 - **(fix)** Overhauled render layer allocation to fix exhaust issue. (#603)
 - **(fix)** Fix bool in database schema. (#598)
-- **(fix)** Fix bool in database schema. (#598)
 - **(perf)** Sink telemetry tables in a single pass. (#583)
 - **(perf)** Add batching table packets example. (#581)
 - **(perf)** Change tegrastats from 200Hz to 1Hz. (#611)
