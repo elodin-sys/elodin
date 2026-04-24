@@ -58,8 +58,10 @@ use ui::{
 #[derive(Resource, Default, Clone, Copy, Debug)]
 pub struct Coordinate(pub Option<GeoFrame>);
 
+mod embedded_lfs;
 pub mod icon_rasterizer;
 pub mod iter;
+pub(crate) use embedded_lfs::embedded_lfs_asset;
 pub mod object_3d;
 mod offset_parse;
 pub mod plugins;
@@ -117,7 +119,7 @@ impl Plugin for EmbeddedAssetPlugin {
         // Font for ViewCube labels
         embedded_asset!(app, "assets/fonts/Roboto-Bold.ttf");
         // Axes Cube 3D model
-        embedded_asset!(app, "assets/axes-cube.glb");
+        embedded_lfs_asset!(app, "assets/axes-cube.glb");
     }
 }
 
