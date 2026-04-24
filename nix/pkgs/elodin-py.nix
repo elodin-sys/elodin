@@ -2,7 +2,6 @@
   pkgs,
   lib,
   rustToolchain,
-  system,
   python,
   pythonPackages,
   ...
@@ -22,7 +21,7 @@
       if stdenv.hostPlatform.ubootArch == "aarch64"
       then "arm64"
       else stdenv.hostPlatform.ubootArch
-    else builtins.elemAt (lib.strings.splitString "-" system) 0;
+    else builtins.elemAt (lib.strings.splitString "-" stdenv.hostPlatform.system) 0;
 
   wheelName = "elodin";
   wheelPlatform =
