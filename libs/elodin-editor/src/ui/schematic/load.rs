@@ -4,7 +4,6 @@ use bevy::{ecs::system::SystemParam, prelude::*, window::PrimaryWindow};
 use bevy_defer::AsyncCommandsExtension;
 use bevy_egui::egui::{Color32, Id};
 use bevy_geo_frames::prelude::*;
-use bevy_infinite_grid::InfiniteGrid;
 use bevy_mat3_material::Mat3Material;
 use egui_tiles::{Container, Tile, TileId};
 use impeller2_bevy::{ComponentPath, ComponentSchemaRegistry};
@@ -24,7 +23,6 @@ use crate::tiles::WindowRelayout;
 use crate::ui::window::placement::apply_physical_screen_rect;
 use crate::{
     EqlContext, MainCamera,
-    object_3d::Object3DState,
     plugins::{
         kdl_document::{
             CurrentDocument, DocumentCleared, DocumentCommandFailed, DocumentLoadFailed,
@@ -108,6 +106,9 @@ fn apply_fallback_frame_to_panel(
 #[derive(Component)]
 pub struct SyncedViewport;
 
+#[derive(Component)]
+pub struct SchematicSpawned;
+
 #[derive(SystemParam)]
 pub struct LoadSchematicParams<'w, 's> {
     pub commands: Commands<'w, 's>,
@@ -129,9 +130,7 @@ pub struct LoadSchematicParams<'w, 's> {
     pub sensor_camera_configs: Res<'w, crate::sensor_camera::SensorCameraConfigs>,
     pub coordinate: ResMut<'w, crate::Coordinate>,
     cameras: Query<'w, 's, &'static mut Camera>,
-    objects_3d: Query<'w, 's, Entity, With<Object3DState>>,
-    vector_arrows: Query<'w, 's, Entity, With<VectorArrowState>>,
-    grid_lines: Query<'w, 's, Entity, With<InfiniteGrid>>,
+    schematic_spawned: Query<'w, 's, Entity, With<SchematicSpawned>>,
     window_states: Query<'w, 's, (Entity, &'static WindowId, &'static mut WindowState)>,
     pub schematic_bindings: ResMut<'w, super::SchematicBindings>,
 }
@@ -231,13 +230,11 @@ impl LoadSchematicParams<'_, '_> {
         // Set global coordinate frame from schematic
         self.coordinate.0 = schematic.frame;
 
-        for (id, window_id, window_state) in &self.window_states {
+        for (id, window_id, mut window_state) in &mut self.window_states {
             if window_id.is_primary() {
                 continue;
             }
-            for graph in window_state.graph_entities.iter() {
-                self.commands.entity(*graph).despawn();
-            }
+            window_state.tile_state.clear(&mut self.commands);
             self.commands.entity(id).despawn();
         }
 
@@ -252,14 +249,7 @@ impl LoadSchematicParams<'_, '_> {
         };
         main_state.clear(&mut self.commands);
         self.hdr_enabled.0 = false;
-        for entity in self.objects_3d.iter() {
-            self.commands.entity(entity).despawn();
-        }
-        for entity in self.vector_arrows.iter() {
-            self.commands.entity(entity).despawn();
-        }
-        // Remove all GridLines before loading new schematic.
-        for entity in self.grid_lines.iter() {
+        for entity in self.schematic_spawned.iter() {
             self.commands.entity(entity).despawn();
         }
         let theme_selection = apply_theme(schematic.theme.as_ref());
@@ -613,6 +603,7 @@ impl LoadSchematicParams<'_, '_> {
             &self.asset_server,
             &self.geo_context,
         );
+        self.commands.entity(entity).insert(SchematicSpawned);
         if let Some(icon) = &icon {
             crate::object_3d::spawn_billboard_icon(
                 &mut self.commands,
@@ -640,6 +631,7 @@ impl LoadSchematicParams<'_, '_> {
                 bevy_geo_frames::GeoRotation(frame, bevy::math::DQuat::IDENTITY),
             ));
         }
+        spawn.insert(SchematicSpawned);
     }
 
     pub fn spawn_vector_arrow(
@@ -672,6 +664,7 @@ impl LoadSchematicParams<'_, '_> {
                 label: None,
                 ..default()
             },
+            SchematicSpawned,
         ));
 
         // Add GeoPosition and GeoRotation; use ENU if no frame is specified.
@@ -713,6 +706,12 @@ impl LoadSchematicParams<'_, '_> {
                     for arrow in viewport.local_arrows.clone() {
                         self.spawn_vector_arrow(arrow, Some(camera));
                     }
+                }
+                if let Some(parent) = pane.parent {
+                    self.commands.entity(parent).insert(SchematicSpawned);
+                }
+                if let Some(grid) = pane.grid {
+                    self.commands.entity(grid).insert(SchematicSpawned);
                 }
                 tile_state.insert_tile(Tile::Pane(Pane::Viewport(pane)), parent_id, viewport.active)
             }
@@ -1261,5 +1260,115 @@ pub fn show_document_load_failures(
             &event.message,
         );
         error!(path = %event.path, error = %event.message, "Failed to load schematic document");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::LoadSchematicParams;
+    use crate::{
+        Coordinate, EqlContext,
+        icon_rasterizer::IconTextureCache,
+        plugins::render_layer_alloc,
+        sensor_camera::SensorCameraConfigs,
+        ui::{
+            HdrEnabled,
+            schematic::{CurrentDocument, SchematicBindings, SchematicDocumentAsset},
+            tiles,
+            timeline::TimelineSettings,
+        },
+    };
+    use bevy::{
+        asset::{AssetApp, AssetPlugin, UnapprovedPathMode},
+        ecs::system::SystemState,
+        prelude::*,
+        window::{PrimaryWindow, Window},
+    };
+    use bevy_geo_frames::GeoFramePlugin;
+    use bevy_mat3_material::Mat3Material;
+    use impeller2_bevy::ComponentSchemaRegistry;
+    use impeller2_kdl::FromKdl;
+    use impeller2_wkt::Schematic;
+
+    fn test_app() -> App {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(AssetPlugin {
+            unapproved_path_mode: UnapprovedPathMode::Allow,
+            ..Default::default()
+        });
+        app.init_asset::<Mesh>()
+            .init_asset::<StandardMaterial>()
+            .init_asset::<Image>()
+            .init_asset::<Mat3Material>()
+            .init_asset::<SchematicDocumentAsset>();
+        app.add_plugins(GeoFramePlugin {
+            apply_transforms: false,
+            ..default()
+        });
+        render_layer_alloc::plugin(&mut app);
+        tiles::plugin(&mut app);
+        app.init_resource::<CurrentDocument>()
+            .init_resource::<IconTextureCache>()
+            .init_resource::<HdrEnabled>()
+            .init_resource::<TimelineSettings>()
+            .init_resource::<ComponentSchemaRegistry>()
+            .init_resource::<EqlContext>()
+            .init_resource::<SensorCameraConfigs>()
+            .init_resource::<Coordinate>()
+            .init_resource::<SchematicBindings>();
+
+        app.world_mut().spawn((Window::default(), PrimaryWindow));
+        settle(&mut app);
+        app
+    }
+
+    fn settle(app: &mut App) {
+        for _ in 0..4 {
+            app.update();
+        }
+    }
+
+    fn entity_count(app: &mut App) -> usize {
+        app.world().entities().len() as usize
+    }
+
+    fn load_schematic(app: &mut App, schematic: &Schematic) {
+        let mut system_state: SystemState<LoadSchematicParams> = SystemState::new(app.world_mut());
+        let mut params = system_state.get_mut(app.world_mut());
+        params.load_schematic(schematic, None, None);
+        system_state.apply(app.world_mut());
+        settle(app);
+    }
+
+    #[test]
+    fn loading_then_clearing_restores_entity_count_to_baseline() {
+        let mut app = test_app();
+        let baseline = entity_count(&mut app);
+
+        let schematic = Schematic::from_kdl(
+            r#"
+            viewport name="V1" show_view_cube=#false
+            viewport name="V2" show_view_cube=#false
+            viewport name="V3" show_view_cube=#false
+            line_3d "(0,0,0)"
+            line_3d "(1,1,1)"
+            "#,
+        )
+        .expect("parse test schematic");
+
+        load_schematic(&mut app, &schematic);
+        let loaded_count = entity_count(&mut app);
+        assert!(
+            loaded_count > baseline,
+            "loading the schematic should increase the entity count"
+        );
+
+        load_schematic(&mut app, &Schematic::default());
+        let cleared_count = entity_count(&mut app);
+        assert_eq!(
+            cleared_count, baseline,
+            "clearing the schematic should restore the entity count to baseline"
+        );
     }
 }

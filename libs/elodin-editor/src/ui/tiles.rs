@@ -1238,6 +1238,8 @@ fn apply_pane_title_updates(
 
 #[derive(Default, Clone)]
 pub struct ViewportPane {
+    pub parent: Option<Entity>,
+    pub grid: Option<Entity>,
     pub camera: Option<Entity>,
     pub nav_gizmo: Option<Entity>,
     pub nav_gizmo_camera: Option<Entity>,
@@ -1479,6 +1481,8 @@ impl ViewportPane {
 
         if !viewport.show_view_cube {
             return Self {
+                parent: Some(parent),
+                grid: Some(grid_id),
                 camera: Some(camera),
                 nav_gizmo: None,
                 nav_gizmo_camera: None,
@@ -1492,6 +1496,8 @@ impl ViewportPane {
         // Allocate render layer for ViewCube (same approach as navigation_gizmo)
         let Some(view_cube_lease) = render_layer_alloc.alloc() else {
             return Self {
+                parent: Some(parent),
+                grid: Some(grid_id),
                 camera: Some(camera),
                 nav_gizmo: None,
                 nav_gizmo_camera: None,
@@ -1548,6 +1554,8 @@ impl ViewportPane {
         let _ = view_cube_lease;
 
         Self {
+            parent: Some(parent),
+            grid: Some(grid_id),
             camera: Some(camera),
             nav_gizmo: Some(spawned.cube_root),
             nav_gizmo_camera: spawned.camera,
