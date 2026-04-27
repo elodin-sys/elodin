@@ -14,6 +14,13 @@
 
     jetpack.inputs.nixpkgs.follows = "nixpkgs";
     rust-overlay.inputs.nixpkgs.follows = "nixpkgs";
+    # Monorepo: parent is the Elodin flake root. For an `aleph/`-only tree use
+    # `github:elodin-sys/elodin` (root) instead of path:..
+    elodin = {
+      url = "path:..";
+      inputs.nixpkgs.follows = "nixpkgs";
+      inputs.rust-overlay.follows = "rust-overlay";
+    };
   };
   outputs = {
     self,
@@ -21,6 +28,7 @@
     nixpkgs-unstable,
     jetpack,
     rust-overlay,
+    elodin,
   }: let
     # Separate Aleph's fixed NixOS target from host-scoped flake outputs
     alephSystem = "aarch64-linux";
@@ -43,13 +51,33 @@
           gitJSONOverlay);
       });
     };
+    # JAX pulls jax-cuda12-plugin when cudaSupport is true; that hits NCCL stubs
+    # jetpack marks unavailable on Orin. Elodin-py only needs CPU JAX on Aleph.
+    jetsonJaxCpuOverlay = final: prev:
+      prev.lib.optionalAttrs (prev.stdenv.hostPlatform.system == "aarch64-linux") {
+        python313Packages = prev.python313Packages.override {
+          overrides = self: super: {
+            jax = super.jax.override {cudaSupport = false;};
+          };
+        };
+      };
     overlay = final: prev:
       (prev.lib.packagesFromDirectoryRecursive {
         directory = ./pkgs;
         callPackage = path: args: final.callPackage path (args // {inherit rustToolchain;});
       })
       // (rust-overlay.overlays.default final prev)
-      // (gitReposOverlay final prev);
+      // (gitReposOverlay final prev)
+      // (jetsonJaxCpuOverlay final prev)
+      // (elodin.overlays.default final prev);
+
+    elodinPythonStack = [
+      ./modules/elodin-py.nix
+      ({lib, ...}: {
+        services.elodin-py.enable = lib.mkDefault true;
+        services.elodin-py.editor = false;
+      })
+    ];
 
     baseModules = {
       default = defaultModule;
@@ -125,7 +153,8 @@
     baseConfigurationModules =
       builtins.attrValues baseModules
       ++ builtins.attrValues fswModules
-      ++ builtins.attrValues devModules;
+      ++ builtins.attrValues devModules
+      ++ elodinPythonStack;
 
     # Create a NixOS system configuration from the shared base modules plus any extra modules.
     mkConfiguration = extraModules:
@@ -158,7 +187,14 @@
       });
     }
     // rec {
-      nixosModules = baseModules // fswModules // stmModules // stmConfigurationModules // devModules // configurationPresets;
+      nixosModules =
+        baseModules
+        // fswModules
+        // stmModules
+        // stmConfigurationModules
+        // devModules
+        // configurationPresets
+        // {elodin-py = ./modules/elodin-py.nix;};
       overlays.default = overlay;
       overlays.jetpack = jetpack.overlays.default;
       overlays.gitRepos = gitReposOverlay;
