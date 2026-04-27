@@ -72,9 +72,9 @@ jobs:
           path: gh-pages
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      # For main branch pushes or manual runs: Build and deploy production
+      # For main branch pushes or manual runs on main: Build and deploy production
       - name: Build production site
-        if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch'
+        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
         run: |
           cd docs/public
           echo "🔨 Building production site..."
@@ -117,7 +117,7 @@ jobs:
 
       # Commit and push changes
       - name: Deploy to GitHub Pages
-        if: github.event.action != 'closed' || (github.event_name == 'pull_request' && github.event.action == 'closed')
+        if: github.event_name == 'pull_request' || ((github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main')
         run: |
           cd gh-pages
           
@@ -202,7 +202,7 @@ jobs:
   # Verify deployment (only for production)
   verify:
     needs: build-and-deploy
-    if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch'
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       - name: Verify deployment
