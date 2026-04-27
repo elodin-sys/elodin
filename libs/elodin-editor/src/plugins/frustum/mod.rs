@@ -268,11 +268,11 @@ fn source_frustum_perspective(
         return perspective.clone();
     }
 
-    let mut perspective = projection_cache
-        .perspectives
-        .get(&camera_entity)
-        .unwrap_or(perspective)
-        .clone();
+    if let Some(perspective) = projection_cache.perspectives.get(&camera_entity) {
+        return perspective.clone();
+    }
+
+    let mut perspective = perspective.clone();
     if let Some(aspect) = config_aspect.or(viewport_aspect) {
         perspective.aspect_ratio = aspect;
     }
@@ -589,7 +589,7 @@ mod tests {
             false,
             &inactive_perspective,
             Some(4.0 / 3.0),
-            None,
+            Some(1.0),
             &mut cache,
         );
 
