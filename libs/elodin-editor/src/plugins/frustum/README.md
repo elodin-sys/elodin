@@ -5,6 +5,7 @@ Viewport camera frustum overlay rendering.
 ## What it does
 - Builds frustum geometry for `MainCamera` viewports with `create_frustum=#true`.
 - Draws those frustums only on viewports with `show_frustums=#true`.
+- Keeps frustums visible in other viewports when their source viewport is hidden behind a tab.
 - Builds line-mesh frustums directly from each camera projection (`near`, `far`, `fov`, `aspect`).
 - If viewport `near`/`far` are set in KDL, frustum rendering follows those values automatically.
 - Supports per-viewport style via `frustums_color` and `frustums_thickness`.
