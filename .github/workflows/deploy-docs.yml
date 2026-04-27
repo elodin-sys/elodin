@@ -127,16 +127,20 @@ jobs:
           # Commit changes
           git add -A
           
-          if [[ "${{ github.event_name }}" == "push" || "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            git commit -m "Deploy documentation from ${{ github.sha }}" || echo "No changes to commit"
-          elif [[ "${{ github.event.action }}" == "closed" ]]; then
-            git commit -m "Remove preview for PR #${{ github.event.pull_request.number }}" || echo "No changes to commit"
-          else
-            git commit -m "Deploy preview for PR #${{ github.event.pull_request.number }}" || echo "No changes to commit"
-          fi
+          case "${{ github.event_name }}:${{ github.event.action }}" in
+            push:*|workflow_dispatch:*)
+              git commit -m "Deploy documentation from ${{ github.sha }}" || echo "No changes to commit"
+              ;;
+            pull_request:closed)
+              git commit -m "Remove preview for PR #${{ github.event.pull_request.number }}" || echo "No changes to commit"
+              ;;
+            pull_request:*)
+              git commit -m "Deploy preview for PR #${{ github.event.pull_request.number }}" || echo "No changes to commit"
+              ;;
+          esac
           
-            git pull --rebase origin gh-pages
-            git push origin gh-pages
+          git pull --rebase origin gh-pages
+          git push origin gh-pages
 
       # Comment on PR with preview link
       - name: Comment PR with preview link
@@ -165,7 +169,7 @@ jobs:
             The preview will be removed when this PR is closed or merged.
             
             ---
-            <sub>Preview deployment started at ${new Date().toUTCString()}</sub>`;
+            <sub>Preview deployment updated at ${new Date().toUTCString()}</sub>`;
             
             if (botComment) {
               await github.rest.issues.updateComment({
