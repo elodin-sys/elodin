@@ -72,9 +72,9 @@ jobs:
           path: gh-pages
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      # For main branch: Build and deploy production
+      # For main branch pushes or manual runs: Build and deploy production
       - name: Build production site
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch'
         run: |
           cd docs/public
           echo "🔨 Building production site..."
@@ -128,7 +128,7 @@ jobs:
           # Commit changes
           git add -A
           
-          if [[ "${{ github.event_name }}" == "push" ]]; then
+          if [[ "${{ github.event_name }}" == "push" || "${{ github.event_name }}" == "workflow_dispatch" ]]; then
             git commit -m "Deploy documentation from ${{ github.sha }}" || echo "No changes to commit"
           elif [[ "${{ github.event.action }}" == "closed" ]]; then
             git commit -m "Remove preview for PR #${{ github.event.pull_request.number }}" || echo "No changes to commit"
@@ -202,7 +202,7 @@ jobs:
   # Verify deployment (only for production)
   verify:
     needs: build-and-deploy
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - name: Verify deployment
