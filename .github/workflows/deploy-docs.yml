@@ -29,7 +29,6 @@ on:
     types: [opened, synchronize, reopened, closed]
     paths:
       - 'docs/public/**'
-      - '.github/workflows/deploy-docs.yml'
   
   # Allow manual trigger from GitHub UI
   workflow_dispatch:
