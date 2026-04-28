@@ -1370,8 +1370,7 @@ mod tests {
 
         eprintln!("{}", schematic_text);
 
-        let schematic = Schematic::from_kdl(&schematic_text)
-            .expect("parse test schematic");
+        let schematic = Schematic::from_kdl(&schematic_text).expect("parse test schematic");
 
         load_schematic(&mut app, &schematic);
         let loaded_count = entity_count(&mut app);
@@ -1461,7 +1460,10 @@ mod tests {
         let schematic = Schematic::from_kdl("coordinate frame=NED").expect("parse test schematic");
 
         load_schematic(&mut app, &schematic);
-        assert_eq!(app.world().resource::<crate::Coordinate>().0, Some(GeoFrame::NED));
+        assert_eq!(
+            app.world().resource::<crate::Coordinate>().0,
+            Some(GeoFrame::NED)
+        );
 
         load_schematic(&mut app, &Schematic::default());
         assert_eq!(app.world().resource::<crate::Coordinate>().0, None);
@@ -1470,8 +1472,8 @@ mod tests {
     #[test]
     fn timeline_is_reset_on_clear() {
         let mut app = test_app();
-        let schematic = Schematic::from_kdl("timeline follow_latest=#true")
-            .expect("parse test schematic");
+        let schematic =
+            Schematic::from_kdl("timeline follow_latest=#true").expect("parse test schematic");
 
         load_schematic(&mut app, &schematic);
         let loaded = app.world().resource::<TimelineSettings>();
