@@ -3,7 +3,11 @@ use futures_concurrency::future::Join;
 use impeller2::types::{LenPacket, PacketId, Timestamp};
 use impeller2_stellar::Client;
 use impeller2_stellar::SinkExt;
-use std::{mem, net::SocketAddr, time::Duration};
+use std::{
+    mem,
+    net::SocketAddr,
+    time::{Duration, Instant},
+};
 use stellarator::{fs::File, rent};
 use sysinfo::CpuRefreshKind;
 use zerocopy::{Immutable, IntoBytes};
@@ -22,7 +26,7 @@ pub struct Output {
     _pad: u32,
 }
 
-async fn connect() -> anyhow::Result<()> {
+async fn connect() -> anyhow::Result<Duration> {
     let mut client = Client::connect(SocketAddr::new([127, 0, 0, 1].into(), 2240))
         .await
         .map_err(anyhow::Error::from)?;
@@ -47,6 +51,7 @@ async fn connect() -> anyhow::Result<()> {
     let gpu_load = File::open("/sys/devices/platform/gpu.0/load").await?;
     let mut system = sysinfo::System::new_all();
     system.refresh_cpu_specifics(CpuRefreshKind::everything());
+    let connected_at = Instant::now();
 
     loop {
         table.clear();
@@ -72,7 +77,13 @@ async fn connect() -> anyhow::Result<()> {
             _pad: 0,
         };
         table.extend_from_slice(output.as_bytes());
-        rent!(client.send(table).await, table)?;
+        if let Err(err) = rent!(client.send(table).await, table) {
+            eprintln!(
+                "send failed after connected session {:?}: {err:?}",
+                connected_at.elapsed()
+            );
+            return Ok(connected_at.elapsed());
+        }
         stellarator::sleep(Duration::from_millis(1000)).await;
     }
 }
@@ -95,9 +106,23 @@ async fn read_to_float(file: &File) -> anyhow::Result<f32> {
 
 #[stellarator::main]
 async fn main() -> anyhow::Result<()> {
+    const MIN_BACKOFF: Duration = Duration::from_millis(100);
+    const MAX_BACKOFF: Duration = Duration::from_secs(5);
+    const STABLE_SESSION: Duration = Duration::from_secs(10);
+
+    let mut backoff = MIN_BACKOFF;
     loop {
-        if let Err(err) = connect().await {
-            eprintln!("error connecting {err:?}")
+        match connect().await {
+            Ok(connected_for) => {
+                if connected_for >= STABLE_SESSION {
+                    backoff = MIN_BACKOFF;
+                }
+            }
+            Err(err) => {
+                eprintln!("error connecting {err:?}");
+            }
         }
+        stellarator::sleep(backoff).await;
+        backoff = (backoff * 2).min(MAX_BACKOFF);
     }
 }
