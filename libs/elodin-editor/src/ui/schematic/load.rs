@@ -1284,11 +1284,12 @@ mod tests {
         prelude::*,
         window::{PrimaryWindow, Window},
     };
-    use bevy_geo_frames::GeoFramePlugin;
+    use bevy_geo_frames::{GeoFrame, GeoFramePlugin};
     use bevy_mat3_material::Mat3Material;
     use impeller2_bevy::ComponentSchemaRegistry;
     use impeller2_kdl::FromKdl;
     use impeller2_wkt::Schematic;
+    use test_case::test_case;
 
     fn test_app() -> App {
         let mut app = App::new();
@@ -1333,6 +1334,18 @@ mod tests {
         app.world().entities().len() as usize
     }
 
+    fn primary_window_state(app: &mut App) -> crate::ui::tiles::WindowState {
+        let primary_window = {
+            let world = app.world_mut();
+            let mut query = world.query_filtered::<Entity, With<PrimaryWindow>>();
+            query.iter(world).next().expect("primary window")
+        };
+        app.world()
+            .get::<crate::ui::tiles::WindowState>(primary_window)
+            .expect("window state")
+            .clone()
+    }
+
     fn load_schematic(app: &mut App, schematic: &Schematic) {
         let mut system_state: SystemState<LoadSchematicParams> = SystemState::new(app.world_mut());
         let mut params = system_state.get_mut(app.world_mut());
@@ -1341,8 +1354,139 @@ mod tests {
         settle(app);
     }
 
+    #[test_case("line_3d \"(0,0,0)\""; "line_3d")]
+    #[test_case("vector_arrow \"(0,0,1)\"" ; "vector_arrow")]
+    #[test_case("object_3d \"(0,0,0,1, 0,0,0)\" { sphere radius=1.0 { color 0 0 0 } }" ; "object_3d")]
+    fn scene_roots_clear_cleanly(content: &str) {
+        let mut app = test_app();
+        let baseline = entity_count(&mut app);
+
+        let schematic_text = format!(
+            r#"
+            {}
+            "#,
+            content
+        );
+
+        eprintln!("{}", schematic_text);
+
+        let schematic = Schematic::from_kdl(&schematic_text)
+            .expect("parse test schematic");
+
+        load_schematic(&mut app, &schematic);
+        let loaded_count = entity_count(&mut app);
+        assert!(
+            loaded_count > baseline,
+            "loading the schematic should increase the entity count"
+        );
+
+        load_schematic(&mut app, &Schematic::default());
+        let cleared_count = entity_count(&mut app);
+        assert_eq!(
+            cleared_count, baseline,
+            "clearing the schematic should restore the entity count to baseline"
+        );
+        let cleared_state = primary_window_state(&mut app);
+        assert!(
+            cleared_state.tile_state.is_empty(),
+            "clearing the schematic should empty the primary window tile state"
+        );
+        assert!(
+            !cleared_state.ui_state.left_sidebar_visible,
+            "clearing the schematic should hide the hierarchy sidebar"
+        );
+        assert!(
+            !cleared_state.ui_state.right_sidebar_visible,
+            "clearing the schematic should hide the inspector sidebar"
+        );
+    }
+
+    #[test_case("viewport show_view_cube=#false" => (true, false, false) ; "viewport")]
+    #[test_case("graph \"1.0\" name=\"Constant\"" => (true, false, false) ; "graph")]
+    #[test_case("component_monitor component_name=\"a.world_pos\"" => (true, false, false) ; "component_monitor")]
+    #[test_case("action_pane name=\"Run\" lua=\"return true\"" => (true, false, false) ; "action_pane")]
+    #[test_case("query_table \"from telemetry\"" => (true, false, false) ; "query_table")]
+    #[test_case("query_plot name=\"Telemetry\" query=\"a.world_pos\"" => (true, false, false) ; "query_plot")]
+    #[test_case("schematic_tree" => (true, false, false) ; "schematic_tree")]
+    #[test_case("data_overview" => (true, false, false) ; "data_overview")]
+    #[test_case("inspector" => (false, false, true) ; "inspector")]
+    #[test_case("hierarchy" => (false, true, false) ; "hierarchy")]
+    #[test_case("tabs { data_overview }" => (true, false, false) ; "tabs")]
+    #[test_case("hsplit { data_overview share=0.5 data_overview share=0.5 }" => (true, false, false) ; "hsplit")]
+    #[test_case("vsplit { data_overview share=0.5 data_overview share=0.5 }" => (true, false, false) ; "vsplit")]
+    #[test_case("tabs { video_stream \"obs-camera\" }" => (true, false, false) ; "video_stream")]
+    #[test_case("tabs { sensor_view \"drone.scene_cam\" }" => (true, false, false) ; "sensor_view")]
+    #[test_case("tabs { log_stream \"fsw.log\" }" => (true, false, false) ; "log_stream")]
+    fn panel_roots_clear_cleanly(content: &str) -> (bool, bool, bool) {
+        let mut app = test_app();
+        let baseline = entity_count(&mut app);
+
+        let schematic = Schematic::from_kdl(content).expect("parse test schematic");
+        load_schematic(&mut app, &schematic);
+
+        let loaded_state = primary_window_state(&mut app);
+        let loaded = (
+            !loaded_state.tile_state.is_empty(),
+            loaded_state.ui_state.left_sidebar_visible,
+            loaded_state.ui_state.right_sidebar_visible,
+        );
+
+        load_schematic(&mut app, &Schematic::default());
+
+        let cleared_state = primary_window_state(&mut app);
+        let cleared_count = entity_count(&mut app);
+        assert!(
+            cleared_state.tile_state.is_empty(),
+            "clearing the schematic should empty the primary window tile state"
+        );
+        assert_eq!(
+            cleared_count, baseline,
+            "clearing the schematic should restore the entity count to baseline"
+        );
+        assert!(
+            !cleared_state.ui_state.left_sidebar_visible,
+            "clearing the schematic should hide the hierarchy sidebar"
+        );
+        assert!(
+            !cleared_state.ui_state.right_sidebar_visible,
+            "clearing the schematic should hide the inspector sidebar"
+        );
+
+        loaded
+    }
+
     #[test]
-    fn loading_then_clearing_restores_entity_count_to_baseline() {
+    fn coordinate_is_reset_on_clear() {
+        let mut app = test_app();
+        let schematic = Schematic::from_kdl("coordinate frame=NED").expect("parse test schematic");
+
+        load_schematic(&mut app, &schematic);
+        assert_eq!(app.world().resource::<crate::Coordinate>().0, Some(GeoFrame::NED));
+
+        load_schematic(&mut app, &Schematic::default());
+        assert_eq!(app.world().resource::<crate::Coordinate>().0, None);
+    }
+
+    #[test]
+    fn timeline_is_reset_on_clear() {
+        let mut app = test_app();
+        let schematic = Schematic::from_kdl("timeline follow_latest=#true")
+            .expect("parse test schematic");
+
+        load_schematic(&mut app, &schematic);
+        let loaded = app.world().resource::<TimelineSettings>();
+        assert!(loaded.follow_latest, "timeline settings should be applied");
+
+        load_schematic(&mut app, &Schematic::default());
+        let cleared = app.world().resource::<TimelineSettings>();
+        assert!(
+            !cleared.follow_latest,
+            "clearing the schematic should restore default timeline settings"
+        );
+    }
+
+    #[test]
+    fn mixed_schematic_clears_cleanly() {
         let mut app = test_app();
         let baseline = entity_count(&mut app);
 
