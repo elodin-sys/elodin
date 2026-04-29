@@ -66,10 +66,8 @@ struct IntersectionMaterialCache {
     materials: HashMap<IntersectionMaterialKey, Handle<StandardMaterial>>,
 }
 
-#[derive(Resource, Default)]
-struct IntersectionProjectionCache {
-    perspectives: HashMap<Entity, PerspectiveProjection>,
-}
+#[derive(Component, Clone, Debug)]
+struct IntersectionProjectionCache(PerspectiveProjection);
 
 #[derive(Component, Clone, Copy, Debug, Eq, Hash, PartialEq)]
 struct FrustumEllipsoidIntersectionVisual {
@@ -135,7 +133,7 @@ struct FrustumIntersectionParams<'w, 's> {
     frustum_tint_materials: ResMut<'w, Assets<FrustumTintMaterial>>,
     mat3_materials: ResMut<'w, Assets<Mat3Material>>,
     material_cache: ResMut<'w, IntersectionMaterialCache>,
-    projection_cache: ResMut<'w, IntersectionProjectionCache>,
+    projection_cache: Query<'w, 's, &'static IntersectionProjectionCache>,
     existing_visuals: Query<
         'w,
         's,
@@ -161,7 +159,6 @@ impl Plugin for FrustumIntersectionPlugin {
     fn build(&self, app: &mut App) {
         use impeller2_bevy::AppExt;
         app.init_resource::<IntersectionMaterialCache>()
-            .init_resource::<IntersectionProjectionCache>()
             .init_resource::<IntersectionRatios>()
             .init_resource::<EllipsoidTintSwapped>()
             .add_plugins(MaterialPlugin::<FrustumTintMaterial>::default())
@@ -368,22 +365,18 @@ fn reset_ellipsoid_tints(params: &mut FrustumIntersectionParams<'_, '_>, command
 }
 
 fn source_frustum_perspective(
-    camera_entity: Entity,
     camera_is_active: bool,
     perspective: &PerspectiveProjection,
     config_aspect: Option<f32>,
     viewport_aspect: Option<f32>,
-    projection_cache: &mut IntersectionProjectionCache,
+    projection_cache: Option<&IntersectionProjectionCache>,
 ) -> PerspectiveProjection {
     if camera_is_active {
-        projection_cache
-            .perspectives
-            .insert(camera_entity, perspective.clone());
         return perspective.clone();
     }
 
-    if let Some(perspective) = projection_cache.perspectives.get(&camera_entity) {
-        return perspective.clone();
+    if let Some(perspective) = projection_cache {
+        return perspective.0.clone();
     }
 
     let mut perspective = perspective.clone();
@@ -432,21 +425,31 @@ fn draw_frustum_ellipsoid_intersections(
         }
 
         if !config.create_frustum {
-            params.projection_cache.perspectives.remove(&camera_entity);
+            commands
+                .entity(camera_entity)
+                .remove::<IntersectionProjectionCache>();
             continue;
         }
 
         let Projection::Perspective(perspective) = projection else {
-            params.projection_cache.perspectives.remove(&camera_entity);
+            commands
+                .entity(camera_entity)
+                .remove::<IntersectionProjectionCache>();
             continue;
         };
+
+        if camera.is_active {
+            commands
+                .entity(camera_entity)
+                .insert(IntersectionProjectionCache(perspective.clone()));
+        }
+
         let source_perspective = source_frustum_perspective(
-            camera_entity,
             camera.is_active,
             perspective,
             config.aspect,
             camera_viewport_aspect(camera),
-            &mut params.projection_cache,
+            params.projection_cache.get(camera_entity).ok(),
         );
         let Some(local_points) = frustum_local_points(&source_perspective) else {
             continue;
@@ -848,58 +851,40 @@ mod tests {
     }
 
     #[test]
-    fn active_source_updates_projection_cache() {
-        let entity = Entity::from_bits(42);
-        let mut cache = IntersectionProjectionCache::default();
+    fn active_source_uses_current_projection() {
         let perspective = perspective_with_aspect(16.0 / 9.0);
 
-        let source = source_frustum_perspective(entity, true, &perspective, None, None, &mut cache);
+        let source = source_frustum_perspective(true, &perspective, None, None, None);
 
         assert_eq!(source.aspect_ratio, 16.0 / 9.0);
-        assert_eq!(
-            cache.perspectives.get(&entity).unwrap().aspect_ratio,
-            16.0 / 9.0
-        );
     }
 
     #[test]
-    fn hidden_source_reuses_cache_instead_of_stale_viewport_aspect() {
-        let entity = Entity::from_bits(7);
-        let mut cache = IntersectionProjectionCache::default();
-        cache
-            .perspectives
-            .insert(entity, perspective_with_aspect(16.0 / 9.0));
+    fn hidden_source_reuses_component_cache_instead_of_stale_viewport_aspect() {
+        let cache = IntersectionProjectionCache(perspective_with_aspect(16.0 / 9.0));
         let inactive_perspective = perspective_with_aspect(1.0);
 
         let source = source_frustum_perspective(
-            entity,
             false,
             &inactive_perspective,
             Some(4.0 / 3.0),
             Some(1.0),
-            &mut cache,
+            Some(&cache),
         );
 
         assert_eq!(source.aspect_ratio, 16.0 / 9.0);
-        assert_eq!(
-            cache.perspectives.get(&entity).unwrap().aspect_ratio,
-            16.0 / 9.0
-        );
     }
 
     #[test]
     fn inactive_source_without_cache_uses_config_aspect() {
-        let entity = Entity::from_bits(9);
-        let mut cache = IntersectionProjectionCache::default();
         let inactive_perspective = perspective_with_aspect(1.0);
 
         let source = source_frustum_perspective(
-            entity,
             false,
             &inactive_perspective,
             Some(4.0 / 3.0),
             Some(16.0 / 9.0),
-            &mut cache,
+            None,
         );
 
         assert_eq!(source.aspect_ratio, 4.0 / 3.0);
@@ -907,18 +892,10 @@ mod tests {
 
     #[test]
     fn inactive_source_without_cache_uses_viewport_aspect() {
-        let entity = Entity::from_bits(10);
-        let mut cache = IntersectionProjectionCache::default();
         let inactive_perspective = perspective_with_aspect(1.0);
 
-        let source = source_frustum_perspective(
-            entity,
-            false,
-            &inactive_perspective,
-            None,
-            Some(16.0 / 9.0),
-            &mut cache,
-        );
+        let source =
+            source_frustum_perspective(false, &inactive_perspective, None, Some(16.0 / 9.0), None);
 
         assert_eq!(source.aspect_ratio, 16.0 / 9.0);
     }
