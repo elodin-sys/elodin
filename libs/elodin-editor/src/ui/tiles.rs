@@ -1612,39 +1612,6 @@ fn main_content_rect(tree: &egui_tiles::Tree<Pane>) -> Option<egui::Rect> {
     tree.tiles.rect(root)
 }
 
-fn pane_camera_rect(pane: &Pane) -> Option<egui::Rect> {
-    match pane {
-        Pane::Viewport(viewport) => viewport.rect,
-        Pane::Graph(graph) => graph.rect,
-        Pane::QueryPlot(query_plot) => query_plot.rect,
-        _ => None,
-    }
-}
-
-fn inactive_tab_pane_rects(tree: &egui_tiles::Tree<Pane>) -> HashMap<TileId, egui::Rect> {
-    let mut rects = HashMap::new();
-    for (_, tile) in tree.tiles.iter() {
-        let Tile::Container(Container::Tabs(tabs)) = tile else {
-            continue;
-        };
-        let Some(active_id) = tabs.active else {
-            continue;
-        };
-        let Some(Tile::Pane(active_pane)) = tree.tiles.get(active_id) else {
-            continue;
-        };
-        let Some(active_rect) = pane_camera_rect(active_pane) else {
-            continue;
-        };
-        for child_id in &tabs.children {
-            if *child_id != active_id && matches!(tree.tiles.get(*child_id), Some(Tile::Pane(_))) {
-                rects.insert(*child_id, active_rect);
-            }
-        }
-    }
-    rects
-}
-
 struct TreeBehavior<'w> {
     icons: TileIcons,
     tree_actions: SmallVec<[TreeAction; 4]>,
@@ -3077,7 +3044,6 @@ impl WidgetSystem for TileLayout<'_, '_> {
             }
             let tiles = tile_state.tree.tiles.iter();
             let active_tiles = tile_state.tree.active_tiles();
-            let inactive_tab_rects = inactive_tab_pane_rects(&tile_state.tree);
             for (tile_id, tile) in tiles {
                 let egui_tiles::Tile::Pane(pane) = tile else {
                     continue;
@@ -3091,7 +3057,7 @@ impl WidgetSystem for TileLayout<'_, '_> {
                                 cam.try_insert(ViewportRect(viewport.rect));
                             }
                         } else if let Ok(mut cam) = state_mut.commands.get_entity(cam) {
-                            cam.try_insert(ViewportRect(inactive_tab_rects.get(tile_id).copied()));
+                            cam.try_insert(ViewportRect(None));
                         }
                     }
                     Pane::SchematicTree(_) => {}
@@ -3101,7 +3067,7 @@ impl WidgetSystem for TileLayout<'_, '_> {
                                 cam.try_insert(ViewportRect(graph.rect));
                             }
                         } else if let Ok(mut cam) = state_mut.commands.get_entity(graph.id) {
-                            cam.try_insert(ViewportRect(inactive_tab_rects.get(tile_id).copied()));
+                            cam.try_insert(ViewportRect(None));
                         }
                     }
                     Pane::Monitor(_) => {}
@@ -3113,7 +3079,7 @@ impl WidgetSystem for TileLayout<'_, '_> {
                             }
                         } else if let Ok(mut cam) = state_mut.commands.get_entity(query_plot.entity)
                         {
-                            cam.try_insert(ViewportRect(inactive_tab_rects.get(tile_id).copied()));
+                            cam.try_insert(ViewportRect(None));
                         }
                     }
                     Pane::ActionTile(_) | Pane::LogStream(_) => {}

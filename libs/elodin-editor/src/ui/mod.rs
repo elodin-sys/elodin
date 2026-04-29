@@ -737,12 +737,6 @@ fn set_camera_viewport(
         camera.order = order + order_offset;
         let Some(available_rect) = viewport_rect.0 else {
             camera.is_active = false;
-            camera.viewport = Some(Viewport {
-                physical_position: UVec2::new(0, 0),
-                physical_size: UVec2::new(1, 1),
-                depth: 0.0..1.0,
-            });
-
             continue;
         };
         camera.is_active = true;
@@ -768,11 +762,6 @@ fn set_camera_viewport(
             });
         } else {
             camera.is_active = false;
-            camera.viewport = Some(Viewport {
-                physical_position: UVec2::new(0, 0),
-                physical_size: UVec2::new(1, 1),
-                depth: 0.0..1.0,
-            });
         }
     }
 }
