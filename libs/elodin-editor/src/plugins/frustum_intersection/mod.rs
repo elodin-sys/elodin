@@ -117,6 +117,11 @@ struct DesiredTintOverlay {
     render_layers: RenderLayers,
 }
 
+struct FrustumSource {
+    volume: FrustumVolume,
+    color: impeller2_wkt::Color,
+}
+
 #[derive(SystemParam)]
 struct FrustumIntersectionParams<'w, 's> {
     main_viewports: Query<'w, 's, MainViewportQueryItem, With<MainCamera>>,
@@ -418,7 +423,6 @@ fn draw_frustum_ellipsoid_intersections(
             targets.push((
                 camera_entity,
                 render_layer_lease.render_layers(),
-                config.projection_color,
                 config.show_coverage_in_viewport,
                 config.show_projection_2d,
             ));
@@ -459,18 +463,21 @@ fn draw_frustum_ellipsoid_intersections(
             continue;
         };
         let (aabb_min, aabb_max) = points_aabb(&world_points);
-        sources.push(FrustumVolume {
-            source: camera_entity,
-            camera_pos: global_transform.translation(),
-            far_corners: [
-                world_points[4],
-                world_points[5],
-                world_points[6],
-                world_points[7],
-            ],
-            planes,
-            aabb_min,
-            aabb_max,
+        sources.push(FrustumSource {
+            volume: FrustumVolume {
+                source: camera_entity,
+                camera_pos: global_transform.translation(),
+                far_corners: [
+                    world_points[4],
+                    world_points[5],
+                    world_points[6],
+                    world_points[7],
+                ],
+                planes,
+                aabb_min,
+                aabb_max,
+            },
+            color: config.projection_color,
         });
     }
 
@@ -543,7 +550,7 @@ fn draw_frustum_ellipsoid_intersections(
     let mut desired_lights = Vec::new();
     let mut desired_tint_overlays = Vec::new();
     let mut coverage_layers = RenderLayers::none();
-    for (_, render_layers, _, show_coverage, _) in &targets {
+    for (_, render_layers, show_coverage, _) in &targets {
         if *show_coverage {
             coverage_layers = coverage_layers.union(render_layers);
         }
@@ -551,7 +558,7 @@ fn draw_frustum_ellipsoid_intersections(
     let any_target_wants_coverage = coverage_layers.iter().next().is_some();
     let any_target_wants_projection = targets
         .iter()
-        .any(|(_, _, _, _, show_projection)| *show_projection);
+        .any(|(_, _, _, show_projection)| *show_projection);
     // Per-ellipsoid max coverage ratio across all frustums. Empty when coverage is disabled.
     let mut ellipsoid_max_ratio: HashMap<Entity, f32> = if any_target_wants_coverage {
         ellipsoids
@@ -562,7 +569,8 @@ fn draw_frustum_ellipsoid_intersections(
         HashMap::<Entity, f32>::new()
     };
 
-    for frustum in &sources {
+    for source in &sources {
+        let frustum = &source.volume;
         for ellipsoid in &ellipsoids {
             if !aabb_overlap(
                 frustum.aabb_min,
@@ -592,21 +600,14 @@ fn draw_frustum_ellipsoid_intersections(
             let Some(mesh) = build_projection_mesh(frustum, ellipsoid) else {
                 continue;
             };
-            for (
-                target_camera,
-                render_layers,
-                target_projection_color,
-                _show_coverage,
-                target_show_projection,
-            ) in &targets
-            {
+            for (target_camera, render_layers, _show_coverage, target_show_projection) in &targets {
                 if frustum.source == *target_camera || !target_show_projection {
                     continue;
                 }
                 let (light, light_transform) =
-                    intersection_light_for(frustum, ellipsoid, *target_projection_color);
+                    intersection_light_for(frustum, ellipsoid, source.color);
                 let material = MeshMaterial3d(projection_material_for_color(
-                    *target_projection_color,
+                    source.color,
                     &mut params.materials,
                     &mut params.material_cache,
                 ));
@@ -643,15 +644,17 @@ fn draw_frustum_ellipsoid_intersections(
             .unwrap_or(0.0);
 
         if ratio > SURFACE_EPS && any_target_wants_coverage {
-            let first_frustum = sources.iter().find(|f| {
+            let first_frustum = sources.iter().find(|source| {
+                let frustum = &source.volume;
                 aabb_overlap(
-                    f.aabb_min,
-                    f.aabb_max,
+                    frustum.aabb_min,
+                    frustum.aabb_max,
                     ellipsoid.aabb_min,
                     ellipsoid.aabb_max,
                 )
             });
-            if let Some(frustum) = first_frustum {
+            if let Some(source) = first_frustum {
+                let frustum = &source.volume;
                 let mut base = match &ellipsoid.material_target {
                     Some(EllipsoidMaterialTarget::Standard(handle)) => {
                         params.materials.get(handle).cloned().unwrap_or_default()

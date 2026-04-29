@@ -337,6 +337,30 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
                         impeller2_wkt::Color::from_color32(frustums_color);
 
                     ui.add_space(8.0);
+                    let mut projection_color = viewport_config.projection_color.into_color32();
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            egui::RichText::new("PROJ. 2D COLOR").color(scheme.text_secondary),
+                        );
+                        ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
+                            let swatch = ui.add(
+                                egui::Button::new("")
+                                    .fill(projection_color)
+                                    .stroke(egui::Stroke::new(1.0, scheme.border_primary))
+                                    .corner_radius(egui::CornerRadius::same(10))
+                                    .min_size(egui::vec2(20.0, 20.0)),
+                            );
+                            let color_id = ui.auto_id_with("projection_color");
+                            if swatch.clicked() {
+                                egui::Popup::toggle_id(ui.ctx(), color_id);
+                            }
+                            color_popup(ui, &mut projection_color, color_id, &swatch);
+                        });
+                    });
+                    viewport_config.projection_color =
+                        impeller2_wkt::Color::from_color32(projection_color);
+
+                    ui.add_space(8.0);
                     ui.horizontal(|ui| {
                         ui.label(egui::RichText::new("THICKNESS").color(scheme.text_secondary));
                         ui.with_layout(egui::Layout::right_to_left(Align::Min), |ui| {
@@ -386,31 +410,6 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
                             ui.checkbox(&mut viewport_config.show_projection_2d, "");
                         });
                     });
-                    if viewport_config.show_projection_2d {
-                        ui.add_space(8.0);
-                        let mut proj_color = viewport_config.projection_color.into_color32();
-                        ui.horizontal(|ui| {
-                            ui.label(
-                                egui::RichText::new("PROJ. COLOR").color(scheme.text_secondary),
-                            );
-                            ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
-                                let swatch = ui.add(
-                                    egui::Button::new("")
-                                        .fill(proj_color)
-                                        .stroke(egui::Stroke::new(1.0, scheme.border_primary))
-                                        .corner_radius(egui::CornerRadius::same(10))
-                                        .min_size(egui::vec2(20.0, 20.0)),
-                                );
-                                let color_id = ui.auto_id_with("show_frustums_projection_color");
-                                if swatch.clicked() {
-                                    egui::Popup::toggle_id(ui.ctx(), color_id);
-                                }
-                                color_popup(ui, &mut proj_color, color_id, &swatch);
-                            });
-                        });
-                        viewport_config.projection_color =
-                            impeller2_wkt::Color::from_color32(proj_color);
-                    }
                 }
             });
     }
