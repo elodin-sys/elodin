@@ -247,28 +247,6 @@ fn cleanup_frustum_entities(params: &FrustumDrawParams<'_, '_>, commands: &mut C
     }
 }
 
-fn source_frustum_perspective(
-    camera_entity: Entity,
-    camera_is_active: bool,
-    perspective: &PerspectiveProjection,
-    config_aspect: Option<f32>,
-    viewport_aspect: Option<f32>,
-    projections: &Query<&Projection>,
-) -> PerspectiveProjection {
-    if camera_is_active {
-        return perspective.clone();
-    }
-
-    if let Ok(Projection::Perspective(perspective)) = projections.get(camera_entity) {
-        return perspective.clone();
-    }
-
-    let mut perspective = perspective.clone();
-    if let Some(aspect) = config_aspect.or(viewport_aspect) {
-        perspective.aspect_ratio = aspect;
-    }
-    perspective
-}
 
 fn camera_viewport_aspect(camera: &Camera) -> Option<f32> {
     let size = camera.viewport.as_ref()?.physical_size.as_vec2();
@@ -311,15 +289,7 @@ fn draw_viewport_frustums(mut params: FrustumDrawParams<'_, '_>, mut commands: C
         let Projection::Perspective(perspective) = projection else {
             continue;
         };
-        let source_perspective = source_frustum_perspective(
-            camera_entity,
-            camera.is_active,
-            perspective,
-            config.aspect,
-            camera_viewport_aspect(camera),
-            &params.projections,
-        );
-        let Some(points) = frustum_local_points(&source_perspective) else {
+        let Some(points) = frustum_local_points(&perspective) else {
             continue;
         };
         sources.push((
@@ -552,10 +522,9 @@ mod tests {
     #[test]
     fn active_source_updates_projection_cache() {
         let entity = Entity::from_bits(42);
-        let mut cache = FrustumProjectionCache::default();
         let perspective = perspective_with_aspect(16.0 / 9.0);
 
-        let source = source_frustum_perspective(entity, true, &perspective, None, None, &mut cache);
+        let source = source_frustum_perspective(entity, true, &perspective, None, None);
 
         assert_eq!(source.aspect_ratio, 16.0 / 9.0);
         assert_eq!(
@@ -567,7 +536,6 @@ mod tests {
     #[test]
     fn hidden_source_reuses_cache_instead_of_stale_viewport_aspect() {
         let entity = Entity::from_bits(7);
-        let mut cache = FrustumProjectionCache::default();
         cache
             .perspectives
             .insert(entity, perspective_with_aspect(16.0 / 9.0));
@@ -579,7 +547,6 @@ mod tests {
             &inactive_perspective,
             Some(4.0 / 3.0),
             Some(1.0),
-            &mut cache,
         );
 
         assert_eq!(source.aspect_ratio, 16.0 / 9.0);
@@ -592,7 +559,6 @@ mod tests {
     #[test]
     fn inactive_source_without_cache_uses_config_aspect() {
         let entity = Entity::from_bits(9);
-        let mut cache = FrustumProjectionCache::default();
         let inactive_perspective = perspective_with_aspect(1.0);
 
         let source = source_frustum_perspective(
@@ -601,7 +567,6 @@ mod tests {
             &inactive_perspective,
             Some(4.0 / 3.0),
             Some(16.0 / 9.0),
-            &mut cache,
         );
 
         assert_eq!(source.aspect_ratio, 4.0 / 3.0);
@@ -610,7 +575,6 @@ mod tests {
     #[test]
     fn inactive_source_without_cache_uses_viewport_aspect() {
         let entity = Entity::from_bits(10);
-        let mut cache = FrustumProjectionCache::default();
         let inactive_perspective = perspective_with_aspect(1.0);
 
         let source = source_frustum_perspective(
@@ -619,7 +583,6 @@ mod tests {
             &inactive_perspective,
             None,
             Some(16.0 / 9.0),
-            &mut cache,
         );
 
         assert_eq!(source.aspect_ratio, 16.0 / 9.0);
