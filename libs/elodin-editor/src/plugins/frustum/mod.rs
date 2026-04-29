@@ -576,7 +576,7 @@ mod tests {
     }
 
     #[test]
-    fn inactive_source_reuses_cached_projection() {
+    fn hidden_source_reuses_cache_instead_of_stale_viewport_aspect() {
         let entity = Entity::from_bits(7);
         let mut cache = FrustumProjectionCache::default();
         cache
@@ -594,6 +594,10 @@ mod tests {
         );
 
         assert_eq!(source.aspect_ratio, 16.0 / 9.0);
+        assert_eq!(
+            cache.perspectives.get(&entity).unwrap().aspect_ratio,
+            16.0 / 9.0
+        );
     }
 
     #[test]
