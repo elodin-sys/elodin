@@ -18,7 +18,6 @@ pub struct FrustumPlugin;
 impl Plugin for FrustumPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<FrustumMaterialCache>()
-            .init_resource::<FrustumProjectionCache>()
             .add_systems(Startup, frustum_mesh_setup)
             .add_systems(
                 PostUpdate,
@@ -43,11 +42,6 @@ struct FrustumMaterialKey {
 #[derive(Resource, Default)]
 struct FrustumMaterialCache {
     materials: HashMap<FrustumMaterialKey, Handle<StandardMaterial>>,
-}
-
-#[derive(Resource, Default)]
-struct FrustumProjectionCache {
-    perspectives: HashMap<Entity, PerspectiveProjection>,
 }
 
 #[derive(Component, Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -158,7 +152,7 @@ struct FrustumDrawParams<'w, 's> {
     materials: ResMut<'w, Assets<StandardMaterial>>,
     meshes: ResMut<'w, Assets<Mesh>>,
     material_cache: ResMut<'w, FrustumMaterialCache>,
-    projection_cache: ResMut<'w, FrustumProjectionCache>,
+    projections: Query<'w, 's, &'static Projection>,
     line_assets: Option<Res<'w, FrustumLineAssets>>,
     existing_roots: Query<'w, 's, (Entity, &'static CameraFrustumRootVisual)>,
     existing_lines: Query<'w, 's, (Entity, &'static CameraFrustumLineVisual)>,
@@ -259,16 +253,13 @@ fn source_frustum_perspective(
     perspective: &PerspectiveProjection,
     config_aspect: Option<f32>,
     viewport_aspect: Option<f32>,
-    projection_cache: &mut FrustumProjectionCache,
+    projections: &Query<&Projection>,
 ) -> PerspectiveProjection {
     if camera_is_active {
-        projection_cache
-            .perspectives
-            .insert(camera_entity, perspective.clone());
         return perspective.clone();
     }
 
-    if let Some(perspective) = projection_cache.perspectives.get(&camera_entity) {
+    if let Ok(Projection::Perspective(perspective)) = projections.get(camera_entity) {
         return perspective.clone();
     }
 
@@ -314,12 +305,10 @@ fn draw_viewport_frustums(mut params: FrustumDrawParams<'_, '_>, mut commands: C
         }
 
         if !config.create_frustum {
-            params.projection_cache.perspectives.remove(&camera_entity);
             continue;
         }
 
         let Projection::Perspective(perspective) = projection else {
-            params.projection_cache.perspectives.remove(&camera_entity);
             continue;
         };
         let source_perspective = source_frustum_perspective(
@@ -328,7 +317,7 @@ fn draw_viewport_frustums(mut params: FrustumDrawParams<'_, '_>, mut commands: C
             perspective,
             config.aspect,
             camera_viewport_aspect(camera),
-            &mut params.projection_cache,
+            &params.projections,
         );
         let Some(points) = frustum_local_points(&source_perspective) else {
             continue;
