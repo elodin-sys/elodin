@@ -383,6 +383,15 @@ fn set_camera_viewport(
         let Ok((main, viewport_rect)) = main_camera_query.get(parent.main_camera) else {
             continue;
         };
+        if !main.is_active || viewport_rect.and_then(|r| r.0).is_none() {
+            nav_camera.is_active = false;
+            nav_camera.viewport = Some(Viewport {
+                physical_position: UVec2::ZERO,
+                physical_size: UVec2::new(1, 1),
+                depth: 0.0..1.0,
+            });
+            continue;
+        }
         let target_window = match &nav_camera.target {
             RenderTarget::Window(WindowRef::Primary) => primary_query.iter().next(),
             RenderTarget::Window(WindowRef::Entity(entity)) => Some(*entity),
@@ -397,19 +406,10 @@ fn set_camera_viewport(
         let scale_factor = window.scale_factor() * egui_settings.scale_factor;
         let margin = margin * scale_factor;
         let top_offset = top_offset * scale_factor;
-        let (viewport_pos, viewport_size) = if let Some(rect) = viewport_rect.and_then(|r| r.0) {
-            let pos = rect.left_top().to_vec2() * scale_factor;
-            let size = rect.size() * scale_factor;
-            (Vec2::new(pos.x, pos.y), Vec2::new(size.x, size.y))
-        } else {
-            let Some(viewport) = &main.viewport else {
-                continue;
-            };
-            (
-                viewport.physical_position.as_vec2(),
-                viewport.physical_size.as_vec2(),
-            )
-        };
+        let rect = viewport_rect.and_then(|r| r.0).expect("checked above");
+        let pos = rect.left_top().to_vec2() * scale_factor;
+        let size = rect.size() * scale_factor;
+        let (viewport_pos, viewport_size) = (Vec2::new(pos.x, pos.y), Vec2::new(size.x, size.y));
 
         let min_viewport_dim = viewport_size.x.min(viewport_size.y);
         if min_viewport_dim < min_viewport_for_gizmo * scale_factor {
