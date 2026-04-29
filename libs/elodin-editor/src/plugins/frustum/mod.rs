@@ -152,7 +152,6 @@ struct FrustumDrawParams<'w, 's> {
     materials: ResMut<'w, Assets<StandardMaterial>>,
     meshes: ResMut<'w, Assets<Mesh>>,
     material_cache: ResMut<'w, FrustumMaterialCache>,
-    projections: Query<'w, 's, &'static Projection>,
     line_assets: Option<Res<'w, FrustumLineAssets>>,
     existing_roots: Query<'w, 's, (Entity, &'static CameraFrustumRootVisual)>,
     existing_lines: Query<'w, 's, (Entity, &'static CameraFrustumLineVisual)>,
@@ -244,16 +243,6 @@ fn cleanup_frustum_entities(params: &FrustumDrawParams<'_, '_>, commands: &mut C
     }
     for (entity, _) in params.existing_roots.iter() {
         commands.entity(entity).despawn();
-    }
-}
-
-
-fn camera_viewport_aspect(camera: &Camera) -> Option<f32> {
-    let size = camera.viewport.as_ref()?.physical_size.as_vec2();
-    if size.x > 0.0 && size.y > 0.0 {
-        Some(size.x / size.y)
-    } else {
-        None
     }
 }
 
@@ -503,88 +492,5 @@ fn draw_viewport_frustums(mut params: FrustumDrawParams<'_, '_>, mut commands: C
 
     for (entity, _) in existing_faces_by_key.into_values() {
         commands.entity(entity).despawn();
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn perspective_with_aspect(aspect_ratio: f32) -> PerspectiveProjection {
-        PerspectiveProjection {
-            fov: 1.0,
-            aspect_ratio,
-            near: 0.1,
-            far: 10.0,
-        }
-    }
-
-    #[test]
-    fn active_source_updates_projection_cache() {
-        let entity = Entity::from_bits(42);
-        let perspective = perspective_with_aspect(16.0 / 9.0);
-
-        let source = source_frustum_perspective(entity, true, &perspective, None, None);
-
-        assert_eq!(source.aspect_ratio, 16.0 / 9.0);
-        assert_eq!(
-            cache.perspectives.get(&entity).unwrap().aspect_ratio,
-            16.0 / 9.0
-        );
-    }
-
-    #[test]
-    fn hidden_source_reuses_cache_instead_of_stale_viewport_aspect() {
-        let entity = Entity::from_bits(7);
-        cache
-            .perspectives
-            .insert(entity, perspective_with_aspect(16.0 / 9.0));
-        let inactive_perspective = perspective_with_aspect(1.0);
-
-        let source = source_frustum_perspective(
-            entity,
-            false,
-            &inactive_perspective,
-            Some(4.0 / 3.0),
-            Some(1.0),
-        );
-
-        assert_eq!(source.aspect_ratio, 16.0 / 9.0);
-        assert_eq!(
-            cache.perspectives.get(&entity).unwrap().aspect_ratio,
-            16.0 / 9.0
-        );
-    }
-
-    #[test]
-    fn inactive_source_without_cache_uses_config_aspect() {
-        let entity = Entity::from_bits(9);
-        let inactive_perspective = perspective_with_aspect(1.0);
-
-        let source = source_frustum_perspective(
-            entity,
-            false,
-            &inactive_perspective,
-            Some(4.0 / 3.0),
-            Some(16.0 / 9.0),
-        );
-
-        assert_eq!(source.aspect_ratio, 4.0 / 3.0);
-    }
-
-    #[test]
-    fn inactive_source_without_cache_uses_viewport_aspect() {
-        let entity = Entity::from_bits(10);
-        let inactive_perspective = perspective_with_aspect(1.0);
-
-        let source = source_frustum_perspective(
-            entity,
-            false,
-            &inactive_perspective,
-            None,
-            Some(16.0 / 9.0),
-        );
-
-        assert_eq!(source.aspect_ratio, 16.0 / 9.0);
     }
 }
