@@ -35,4 +35,4 @@ When COVERAGE is enabled, the plugin writes a component per ellipsoid:
 ## Notes
 
 - Volume computation uses a fixed grid (`INTERSECTION_GRID`, 32³ cells) for bounded cost.
-- 2D projection uses a grid on the far plane (`PROJECTION_GRID`, 80×80) for mesh generation.
+- 2D projection uses a grid on the far plane (`PROJECTION_GRID`, 160×160) for mesh generation.

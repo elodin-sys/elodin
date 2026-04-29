@@ -11,8 +11,9 @@ use bevy::render::render_resource::PrimitiveTopology;
 use super::EllipsoidVolume;
 use super::volume::{FrustumVolume, SURFACE_EPS};
 
-/// Grid resolution for 2D projection mesh on far plane. Higher = finer projection boundary.
-const PROJECTION_GRID: usize = 80;
+/// Grid resolution for 2D projection mesh on far plane. Higher = smoother projection boundary,
+/// but more ray/ellipsoid tests per source/ellipsoid pair.
+const PROJECTION_GRID: usize = 160;
 
 /// Ray-ellipsoid intersection test for projection mesh generation.
 /// Returns a scalar: **negative** if the ray hits the ellipsoid between origin and far_point
