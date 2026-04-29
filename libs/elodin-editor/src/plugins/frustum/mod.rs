@@ -278,7 +278,7 @@ fn draw_viewport_frustums(mut params: FrustumDrawParams<'_, '_>, mut commands: C
         let Projection::Perspective(perspective) = projection else {
             continue;
         };
-        let Some(points) = frustum_local_points(&perspective) else {
+        let Some(points) = frustum_local_points(perspective) else {
             continue;
         };
         sources.push((
