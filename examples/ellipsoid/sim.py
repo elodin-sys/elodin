@@ -51,9 +51,9 @@ def world() -> tuple[el.World, el.EntityId]:
         look_at_offset=[0.0, 0.0, -1.0],
         format="rgba",
         create_frustum=True,
-        frustums_color=[1.0, 1.0, 0.0, 1.0],
-        projection_color=[1.0, 1.0, 1.0, 1.0],
-        frustums_thickness=0.006,
+        frustums_color=[0.0, 1.0, 1.0, 1.0],
+        projection_color=[0.0, 1.0, 1.0, 1.0],
+        frustums_thickness=0.008,
     )
 
     object_mesh = """
@@ -70,8 +70,9 @@ def world() -> tuple[el.World, el.EntityId]:
         theme mode="dark" scheme="default"
 
         tabs {
-            hsplit name="Viewport" {
-                viewport name="Frustum View" pos="(0,0,0,1, 2,2,1.5)" look_at="(0,0,0,0, 0,0,0)" show_frustums=#true show_grid=#true active=#true
+            hsplit name="Frustums" {
+                viewport name="Viewport Source" pos="(0,0,0,1, -3,-0.5,2)" look_at="(0,0,0,0, 0,0,0)" create_frustum=#true frustums_color="yalk" projection_color="mint" frustums_thickness=0.006 show_grid=#true active=#true near=0.05 far=6.0
+                viewport name="Target View" pos="(0,0,0,1, 2,2,1.5)" look_at="(0,0,0,0, 0,0,0)" show_frustums=#true show_grid=#true active=#true
                 sensor_view "frustum_camera_rig.frustum_cam" name="Sensor Camera"
             }
         }
