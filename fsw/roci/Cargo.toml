@@ -12,7 +12,7 @@ repository = "https://github.com/elodin-sys/elodin"
 default = ["csv", "std", "stellar"]
 std = []
 csv = ["dep:csv", "serde"]
-stellar = ["dep:stellarator", "impeller2-stellar", "impeller2/thingbuf", "fastrand", "bbq2", "impeller2-bbq"]
+stellar = ["dep:stellarator", "impeller2-stellar", "impeller2/thingbuf", "fastrand", "bbqueue", "impeller2-bbq"]
 
 [dependencies]
 impeller2.path = "../../libs/impeller2"
@@ -35,11 +35,11 @@ impeller2-bbq.path = "../../libs/impeller2/bbq"
 impeller2-bbq.optional = true
 fastrand.version = "2.2.0"
 fastrand.optional = true
-bbq2.git = "https://github.com/elodin-sys/bbq2.git"
-bbq2.rev = "b6e36706a5549d770ebf2dc122b39cef1368b06d"
-bbq2.features = ["std", "maitake-sync-0_2"]
-bbq2.default-features = false
-bbq2.optional = true
+bbqueue.git = "https://github.com/elodin-sys/bbqueue.git"
+bbqueue.rev = "9d11b52fb944f1bd67c80f3f38af1376ebb7efe3"
+bbqueue.features = ["std", "maitake-sync-0_3"]
+bbqueue.default-features = false
+bbqueue.optional = true
 
 
 # logs
