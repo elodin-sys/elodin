@@ -2886,6 +2886,12 @@ impl WidgetSystem for TileLayout<'_, '_> {
                                         };
                                     }
                                 }
+                                Pane::SensorView(sensor_view) => {
+                                    ui_state.selected_object = SelectedObject::SensorCamera {
+                                        stream: sensor_view.entity,
+                                        title: sensor_view.name.clone(),
+                                    };
+                                }
                                 _ => {}
                             }
                         }
@@ -2913,6 +2919,12 @@ impl WidgetSystem for TileLayout<'_, '_> {
                                             title: viewport.name.clone(),
                                         };
                                     }
+                                }
+                                Pane::SensorView(sensor_view) => {
+                                    ui_state.selected_object = SelectedObject::SensorCamera {
+                                        stream: sensor_view.entity,
+                                        title: sensor_view.name.clone(),
+                                    };
                                 }
                                 _ => {}
                             }

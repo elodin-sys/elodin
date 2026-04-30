@@ -24,6 +24,7 @@ pub mod graph;
 pub mod monitor;
 pub mod object3d;
 pub mod query_table;
+pub mod sensor_camera;
 pub mod timeline;
 pub mod viewport;
 
@@ -33,7 +34,7 @@ pub use widgets::*;
 use self::{
     data_overview::InspectorDataOverview, entity::InspectorEntity, graph::InspectorGraph,
     monitor::InspectorMonitor, object3d::InspectorObject3D, query_table::InspectorQueryTable,
-    timeline::InspectorTimeline, viewport::InspectorViewport,
+    sensor_camera::InspectorSensorCamera, timeline::InspectorTimeline, viewport::InspectorViewport,
 };
 
 pub struct InspectorIcons {
@@ -124,6 +125,14 @@ impl WidgetSystem for InspectorContent<'_, '_> {
                                         world,
                                         "inspector_viewport",
                                         (camera, title),
+                                    );
+                                    Default::default()
+                                }
+                                SelectedObject::SensorCamera { stream, title } => {
+                                    ui.add_widget_with::<InspectorSensorCamera>(
+                                        world,
+                                        "inspector_sensor_camera",
+                                        (stream, title),
                                     );
                                     Default::default()
                                 }
