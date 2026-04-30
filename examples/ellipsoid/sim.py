@@ -1,7 +1,7 @@
 """Minimal example demonstrating sensor camera frustum∩ellipsoid intersection.
 
-One sensor camera creates the frustum. A 3D viewport displays it with
-show_frustums=#true and the intersection overlay (COVERAGE, PROJ. 2D).
+A drone GLB moves inside the ellipsoid. The drone-mounted sensor camera creates
+the frustum, while the two 3D viewports keep the ellipsoid/debug view.
 """
 
 import elodin as el
@@ -9,11 +9,11 @@ import jax.numpy as jnp
 import numpy as np
 
 SIM_RATE = 120.0
-SENSOR_CAMERA_NAME = "frustum_camera_rig.frustum_cam"
-CAMERA_RIG_NAME = "frustum_camera_rig"
-CAMERA_ORBIT_RADIUS = 3.2
-CAMERA_ORBIT_HEIGHT = 1.6
-CAMERA_ORBIT_RATE = 0.45
+SENSOR_CAMERA_NAME = "drone.scene_cam"
+DRONE_NAME = "drone"
+ELLIPSOID_SCALE = np.array([0.9, 0.9, 0.38], dtype=np.float64)
+DRONE_PATH_RADIUS = np.array([0.28, 0.2, 0.04], dtype=np.float64)
+DRONE_PATH_RATE = 0.35
 
 
 def world() -> tuple[el.World, el.EntityId]:
@@ -27,42 +27,47 @@ def world() -> tuple[el.World, el.EntityId]:
         ],
         name="ellipsoid",
     )
-    camera_rig = world.spawn(
+    drone = world.spawn(
         [
             el.Body(
-                world_pos=el.SpatialTransform(
-                    linear=jnp.array([CAMERA_ORBIT_RADIUS, 0.0, CAMERA_ORBIT_HEIGHT])
-                ),
+                world_pos=el.SpatialTransform(linear=jnp.array([0.0, 0.0, 0.0])),
                 inertia=el.SpatialInertia(mass=1.0),
             ),
         ],
-        name=CAMERA_RIG_NAME,
+        name=DRONE_NAME,
     )
 
     world.sensor_camera(
-        entity=camera_rig,
-        name="frustum_cam",
-        width=640,
-        height=480,
-        fov=45.0,
-        near=0.05,
-        far=6.0,
-        pos_offset=[0.0, 0.0, 0.0],
-        look_at_offset=[0.0, 0.0, -1.0],
+        entity=drone,
+        name="scene_cam",
+        width=128,
+        height=128,
+        fov=110.0,
+        near=0.01,
+        far=0.35,
+        pos_offset=[0.0, 0.08, 0.1],
+        look_at_offset=[0.0, -0.42, 0.02],
         format="rgba",
         create_frustum=True,
-        frustums_color=[0.0, 1.0, 1.0, 1.0],
-        projection_color=[0.0, 1.0, 1.0, 1.0],
+        frustums_color=[1.0, 0.0, 1.0, 1.0],
+        projection_color=[1.0, 0.0, 1.0, 1.0],
         frustums_thickness=0.008,
     )
 
-    object_mesh = """
-    object_3d ellipsoid.world_pos {
-        ellipsoid scale="(1.2, 1.2, 0.5)" show_grid=#true {
-            color 0 188 212 40
+    object_mesh = f"""
+    object_3d ellipsoid.world_pos {{
+        ellipsoid scale="({ELLIPSOID_SCALE[0]}, {ELLIPSOID_SCALE[1]}, {ELLIPSOID_SCALE[2]})" show_grid=#true {{
+            color 0 188 212 28
             grid_color 255 255 255 120
-        }
-    }
+        }}
+        icon builtin="adjust" {{
+            visibility_range min=500.0
+            color 0 188 212
+        }}
+    }}
+    object_3d drone.world_pos {{
+        glb path="crazyflie.glb" rotate="(0.0, 0.0, 0.0)" translate="(0.0, 0.0, 0.0)" scale=0.9
+    }}
     """
 
     world.schematic(
@@ -73,7 +78,7 @@ def world() -> tuple[el.World, el.EntityId]:
             hsplit name="Frustums" {
                 viewport name="Viewport Source" pos="(0,0,0,1, -3,-0.5,2)" look_at="(0,0,0,0, 0,0,0)" create_frustum=#true frustums_color="yalk" projection_color="mint" frustums_thickness=0.006 show_grid=#true active=#true near=0.05 far=6.0
                 viewport name="Target View" pos="(0,0,0,1, 2,2,1.5)" look_at="(0,0,0,0, 0,0,0)" show_frustums=#true show_grid=#true active=#true
-                sensor_view "frustum_camera_rig.frustum_cam" name="Sensor Camera"
+                sensor_view "drone.scene_cam" name="Sensor Camera"
             }
         }
     """
@@ -92,35 +97,42 @@ def system() -> el.System:
     return el.six_dof(sys=no_force)
 
 
-def _quat_from_to(source: np.ndarray, target: np.ndarray) -> np.ndarray:
-    source = source / np.linalg.norm(source)
-    target = target / np.linalg.norm(target)
-    dot = np.dot(source, target)
-    if dot < -0.999999:
-        return np.array([0.0, 1.0, 0.0, 0.0], dtype=np.float64)
-
-    xyz = np.cross(source, target)
-    w = np.sqrt(np.dot(source, source) * np.dot(target, target)) + dot
-    quat = np.array([xyz[0], xyz[1], xyz[2], w], dtype=np.float64)
-    return quat / np.linalg.norm(quat)
+def _quat_from_euler(roll: float, pitch: float, yaw: float) -> np.ndarray:
+    cr = np.cos(roll * 0.5)
+    sr = np.sin(roll * 0.5)
+    cp = np.cos(pitch * 0.5)
+    sp = np.sin(pitch * 0.5)
+    cy = np.cos(yaw * 0.5)
+    sy = np.sin(yaw * 0.5)
+    return np.array(
+        [
+            sr * cp * cy - cr * sp * sy,
+            cr * sp * cy + sr * cp * sy,
+            cr * cp * sy - sr * sp * cy,
+            cr * cp * cy + sr * sp * sy,
+        ],
+        dtype=np.float64,
+    )
 
 
 def pre_step(tick, ctx):
     t = tick / SIM_RATE
-    angle = t * CAMERA_ORBIT_RATE
+    angle = t * DRONE_PATH_RATE
     pos = np.array(
         [
-            CAMERA_ORBIT_RADIUS * np.cos(angle),
-            CAMERA_ORBIT_RADIUS * np.sin(angle),
-            CAMERA_ORBIT_HEIGHT + 0.35 * np.sin(angle * 1.7),
+            DRONE_PATH_RADIUS[0] * np.sin(angle),
+            DRONE_PATH_RADIUS[1] * np.sin(angle * 0.7 + 0.8),
+            DRONE_PATH_RADIUS[2] * np.sin(angle * 1.3),
         ],
         dtype=np.float64,
     )
-    look_dir = -pos
-    quat = _quat_from_to(np.array([0.0, 0.0, -1.0], dtype=np.float64), look_dir)
+    roll = 0.18 * np.sin(angle * 1.9)
+    pitch = 0.12 * np.sin(angle * 1.4 + 0.4)
+    yaw = angle + 0.35 * np.sin(angle * 0.5)
+    quat = _quat_from_euler(roll, pitch, yaw)
 
     ctx.write_component(
-        f"{CAMERA_RIG_NAME}.world_pos",
+        f"{DRONE_NAME}.world_pos",
         np.array(
             [quat[0], quat[1], quat[2], quat[3], pos[0], pos[1], pos[2]],
             dtype=np.float64,

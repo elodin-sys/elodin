@@ -14,13 +14,13 @@ A horizontal split with two 3D viewports and a sensor camera feed:
 
 - **Viewport Source:** `create_frustum=#true` — creates a static viewport frustum.
 - **Target View:** `show_frustums=#true` — displays both the viewport frustum and the sensor camera frustum.
-- **Sensor Camera:** `sensor_view "frustum_camera_rig.frustum_cam"` — displays frames rendered from the synthetic camera.
+- **Sensor Camera:** `sensor_view "drone.scene_cam"` — displays frames rendered from the drone-mounted camera.
 
 The frustum source is registered in Python with `world.sensor_camera(..., create_frustum=True)`.
-It is attached to a `frustum_camera_rig` entity whose `world_pos` is updated in `pre_step`, so the sensor camera orbits the ellipsoid while continuously looking at it.
+It is attached to a `drone` entity whose `world_pos` is updated in `pre_step`, so the sensor camera follows a drone GLB moving inside the ellipsoid.
 The viewport frustum and sensor camera frustum use different colors so they can be compared in the target viewport.
 
-The schematic embeds an ellipsoid `object_3d` with `ellipsoid.world_pos`. The ellipsoid name (`ellipsoid`) is used for the `FrustumCoverage` component (`ellipsoid.frustum_coverage`).
+The schematic embeds a smaller ellipsoid `object_3d` with `ellipsoid.world_pos`, plus a larger `crazyflie.glb` drone that stays inside it. The camera is mounted close to the drone body so part of the drone remains visible in the sensor image. The ellipsoid is routed to viewport render layers only, so the drone-mounted sensor camera does not render the ellipsoid debug surface. The ellipsoid name (`ellipsoid`) is used for the `FrustumCoverage` component (`ellipsoid.frustum_coverage`).
 
 ## Inspector controls
 
