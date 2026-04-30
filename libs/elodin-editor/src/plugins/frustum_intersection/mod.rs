@@ -7,10 +7,14 @@ mod frustum_tint_material;
 mod projection;
 mod volume;
 
-use super::frustum_common::{MainViewportQueryItem, color_component_to_u8, frustum_local_points};
+use super::frustum_common::{
+    MainViewportQueryItem, SensorCameraFrustumQueryItem, color_component_to_u8,
+    frustum_local_points,
+};
 use crate::{
     MainCamera,
     object_3d::{Object3DMeshChild, Object3DState},
+    sensor_camera::SensorCameraConfigs,
 };
 use bevy::asset::embedded_asset;
 use bevy::camera::visibility::{NoFrustumCulling, RenderLayers};
@@ -125,6 +129,8 @@ struct FrustumSource {
 #[derive(SystemParam)]
 struct FrustumIntersectionParams<'w, 's> {
     main_viewports: Query<'w, 's, MainViewportQueryItem, With<MainCamera>>,
+    sensor_camera_sources: Query<'w, 's, SensorCameraFrustumQueryItem>,
+    sensor_camera_configs: Res<'w, SensorCameraConfigs>,
     ellipsoids: Query<'w, 's, (Entity, &'static GlobalTransform, &'static Object3DState)>,
     children: Query<'w, 's, &'static Children>,
     mesh_children: Query<'w, 's, (), With<Object3DMeshChild>>,
@@ -466,6 +472,44 @@ fn draw_frustum_ellipsoid_intersections(
         sources.push(FrustumSource {
             volume: FrustumVolume {
                 source: camera_entity,
+                camera_pos: global_transform.translation(),
+                far_corners: [
+                    world_points[4],
+                    world_points[5],
+                    world_points[6],
+                    world_points[7],
+                ],
+                planes,
+                aabb_min,
+                aabb_max,
+            },
+            color: config.projection_color,
+        });
+    }
+
+    for (source_entity, projection, global_transform, source) in params.sensor_camera_sources.iter()
+    {
+        let Some(config) = params.sensor_camera_configs.0.get(source.config_index) else {
+            continue;
+        };
+        if !config.create_frustum {
+            continue;
+        }
+
+        let Projection::Perspective(perspective) = projection else {
+            continue;
+        };
+        let Some(local_points) = frustum_local_points(perspective) else {
+            continue;
+        };
+        let world_points = local_points.map(|point| global_transform.transform_point(point));
+        let Some(planes) = frustum_planes(&world_points) else {
+            continue;
+        };
+        let (aabb_min, aabb_max) = points_aabb(&world_points);
+        sources.push(FrustumSource {
+            volume: FrustumVolume {
+                source: source_entity,
                 camera_pos: global_transform.translation(),
                 far_corners: [
                     world_points[4],

@@ -1,4 +1,5 @@
 use crate::plugins::render_layer_alloc::RenderLayerLease;
+use crate::sensor_camera::SensorCameraFrustumSource;
 use crate::ui::tiles::ViewportConfig;
 use bevy::prelude::*;
 
@@ -9,6 +10,13 @@ pub type MainViewportQueryItem = (
     &'static GlobalTransform,
     Option<&'static ViewportConfig>,
     Option<&'static RenderLayerLease>,
+);
+
+pub type SensorCameraFrustumQueryItem = (
+    Entity,
+    &'static Projection,
+    &'static GlobalTransform,
+    &'static SensorCameraFrustumSource,
 );
 
 pub fn frustum_local_points(perspective: &PerspectiveProjection) -> Option<[Vec3; 8]> {

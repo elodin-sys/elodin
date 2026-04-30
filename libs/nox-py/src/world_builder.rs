@@ -323,6 +323,10 @@ impl WorldBuilder {
         format = "rgba",
         effect = "normal",
         effect_params = None,
+        create_frustum = false,
+        frustums_color = None,
+        projection_color = None,
+        frustums_thickness = 0.006,
     ))]
     fn sensor_camera(
         &mut self,
@@ -338,6 +342,10 @@ impl WorldBuilder {
         format: &str,
         effect: &str,
         effect_params: Option<&Bound<'_, PyDict>>,
+        create_frustum: bool,
+        frustums_color: Option<Vec<f32>>,
+        projection_color: Option<Vec<f32>>,
+        frustums_thickness: f32,
     ) -> Result<(), crate::error::Error> {
         if name.chars().any(|c| c.is_whitespace()) {
             return Err(crate::error::Error::PyO3(
@@ -389,6 +397,35 @@ impl WorldBuilder {
             *look_at_offset.get(1).unwrap_or(&0.0),
             *look_at_offset.get(2).unwrap_or(&-1.0),
         ];
+        if frustums_thickness <= 0.0 {
+            return Err(crate::error::Error::PyO3(
+                pyo3::exceptions::PyValueError::new_err(
+                    "sensor_camera frustums_thickness must be > 0",
+                ),
+            ));
+        }
+
+        let color_from_vec = |value: Option<Vec<f32>>,
+                              default_color: impeller2_wkt::Color,
+                              field: &str|
+         -> Result<impeller2_wkt::Color, crate::error::Error> {
+            let Some(value) = value else {
+                return Ok(default_color);
+            };
+            if !(value.len() == 3 || value.len() == 4) {
+                return Err(crate::error::Error::PyO3(
+                    pyo3::exceptions::PyValueError::new_err(format!(
+                        "sensor_camera {field} must be [r, g, b] or [r, g, b, a]"
+                    )),
+                ));
+            }
+            Ok(impeller2_wkt::Color::rgba(
+                value[0].clamp(0.0, 1.0),
+                value[1].clamp(0.0, 1.0),
+                value[2].clamp(0.0, 1.0),
+                value.get(3).copied().unwrap_or(1.0).clamp(0.0, 1.0),
+            ))
+        };
 
         self.world
             .metadata
@@ -406,6 +443,18 @@ impl WorldBuilder {
                 format: format.to_string(),
                 effect: effect.to_string(),
                 effect_params: parsed_effect_params,
+                create_frustum,
+                frustums_color: color_from_vec(
+                    frustums_color,
+                    impeller2_wkt::default_viewport_frustums_color(),
+                    "frustums_color",
+                )?,
+                projection_color: color_from_vec(
+                    projection_color,
+                    impeller2_wkt::default_viewport_projection_color(),
+                    "projection_color",
+                )?,
+                frustums_thickness,
             });
 
         Ok(())

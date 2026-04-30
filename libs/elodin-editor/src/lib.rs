@@ -306,7 +306,17 @@ impl Plugin for EditorPlugin {
             })
             .init_resource::<sensor_camera::SensorCameraConfigs>()
             .init_resource::<sensor_camera::SensorCamerasSpawned>()
+            .init_resource::<sensor_camera::SensorCameraFrustumSourcesSpawned>()
             .add_systems(PreUpdate, sensor_camera::load_sensor_configs_from_db)
+            .add_systems(
+                PreUpdate,
+                sensor_camera::spawn_sensor_camera_frustum_sources
+                    .run_if(sensor_camera::should_spawn_sensor_camera_frustum_sources),
+            )
+            .add_systems(
+                PreUpdate,
+                sensor_camera::update_sensor_camera_frustum_source_transforms.after(PositionSync),
+            )
             .add_systems(Update, sensor_camera::patch_sensor_view_dims)
             .add_systems(Update, throttle_for_sensor_cameras);
         if cfg!(target_os = "windows") || cfg!(target_os = "linux") {
