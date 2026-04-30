@@ -190,16 +190,16 @@ pub fn orient_axis_labels_to_screen_plane(
 pub fn apply_render_layers_to_scene(
     view_cube_query: Query<(Entity, &RenderLayerLease, &Visibility), With<ViewCubeRoot>>,
     children_query: Query<&Children>,
-    entities_without_layer: Query<Entity, (Without<RenderLayers>, Without<ViewCubeCamera>)>,
+    view_cube_entities: Query<Entity, Without<ViewCubeCamera>>,
     mut commands: Commands,
 ) {
     for (cube_root, layer, visibility) in view_cube_query.iter() {
         let render_layers = layer.render_layers();
 
-        let had_untagged = apply_layers_recursive(
+        apply_layers_recursive(
             cube_root,
             &children_query,
-            &entities_without_layer,
+            &view_cube_entities,
             &render_layers,
             &mut commands,
         );
@@ -207,42 +207,36 @@ pub fn apply_render_layers_to_scene(
         // The root starts Visibility::Hidden so GLB children never appear on
         // the default render layer 0. Only reveal once:
         //   1. The GLB scene has actually spawned children, AND
-        //   2. Every descendant has been assigned the correct RenderLayers.
+        //   2. The descendants have been moved onto the ViewCube render layer.
         let has_children = children_query.get(cube_root).is_ok();
-        if has_children && !had_untagged && *visibility == Visibility::Hidden {
+        if has_children && *visibility == Visibility::Hidden {
             commands.entity(cube_root).insert(Visibility::Inherited);
         }
     }
 }
 
-/// Returns `true` if any descendant was still missing its `RenderLayers`.
 fn apply_layers_recursive(
     entity: Entity,
     children_query: &Query<&Children>,
-    entities_without_layer: &Query<Entity, (Without<RenderLayers>, Without<ViewCubeCamera>)>,
+    view_cube_entities: &Query<Entity, Without<ViewCubeCamera>>,
     render_layers: &RenderLayers,
     commands: &mut Commands,
-) -> bool {
-    let mut had_untagged = false;
-
-    if entities_without_layer.get(entity).is_ok() {
+) {
+    if view_cube_entities.get(entity).is_ok() {
         commands.entity(entity).insert(render_layers.clone());
-        had_untagged = true;
     }
 
     if let Ok(children) = children_query.get(entity) {
         for child in children.iter() {
-            had_untagged |= apply_layers_recursive(
+            apply_layers_recursive(
                 child,
                 children_query,
-                entities_without_layer,
+                view_cube_entities,
                 render_layers,
                 commands,
             );
         }
     }
-
-    had_untagged
 }
 
 type FloatingOriginQuery<'w, 's> = Query<
@@ -952,6 +946,7 @@ fn view_cube_orbit_target(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::plugins::render_layer_alloc::RenderLayerAllocator;
 
     #[test]
     fn angle_to_target_rotation_default_is_zero() {
@@ -1147,6 +1142,57 @@ mod tests {
         let world = corner_target_camera_dir_world(corner, &config);
         let expected = Vec3::new(1.0, 1.0, 1.0).normalize();
         assert!((world - expected).length() < 1.0e-5);
+    }
+
+    #[test]
+    fn view_cube_scene_descendants_are_forced_to_view_cube_layer() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.init_resource::<RenderLayerAllocator>();
+        app.add_systems(Update, apply_render_layers_to_scene);
+
+        let lease = app
+            .world_mut()
+            .resource_mut::<RenderLayerAllocator>()
+            .alloc()
+            .expect("view cube layer");
+        let expected_layers = lease.render_layers();
+        let default_layers = RenderLayers::layer(0);
+
+        let root = app
+            .world_mut()
+            .spawn((ViewCubeRoot, Visibility::Hidden, lease))
+            .id();
+        let child = app
+            .world_mut()
+            .spawn((ChildOf(root), default_layers.clone()))
+            .id();
+        let grandchild = app
+            .world_mut()
+            .spawn((ChildOf(child), default_layers.clone()))
+            .id();
+
+        app.update();
+
+        let child_layers = app
+            .world()
+            .get::<RenderLayers>(child)
+            .expect("child layers");
+        let grandchild_layers = app
+            .world()
+            .get::<RenderLayers>(grandchild)
+            .expect("grandchild layers");
+        assert_eq!(child_layers, &expected_layers);
+        assert_eq!(grandchild_layers, &expected_layers);
+        assert!(
+            !child_layers.intersects(&RenderLayers::layer(0)),
+            "child should no longer render on the default main-camera layer",
+        );
+        assert_eq!(
+            app.world().get::<Visibility>(root),
+            Some(&Visibility::Inherited),
+            "root should only become visible after descendants receive the ViewCube layer",
+        );
     }
 
     #[test]

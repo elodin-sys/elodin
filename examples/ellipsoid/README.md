@@ -23,6 +23,6 @@ On the **Frustum View** viewport, open the Inspector and enable:
 
 - **SHOW FRUSTUMS** — required to see frustum overlays and intersection options.
 - **COVERAGE** — volume ratio (%), `FrustumCoverage` write, monitor strip at bottom.
-- **PROJ. 2D** — 2D silhouette on the far plane; **PROJ. COLOR** sets the mesh color.
+- **PROJ. 2D** — 2D silhouette on the far plane; the mesh color follows the source viewport's **PROJ. 2D COLOR**.
 
 Intersection toggles appear only when at least one ellipsoid is detected.

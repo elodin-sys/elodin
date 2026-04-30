@@ -66,6 +66,9 @@ struct IntersectionMaterialCache {
     materials: HashMap<IntersectionMaterialKey, Handle<StandardMaterial>>,
 }
 
+#[derive(Component, Clone, Debug)]
+struct IntersectionProjectionCache(PerspectiveProjection);
+
 #[derive(Component, Clone, Copy, Debug, Eq, Hash, PartialEq)]
 struct FrustumEllipsoidIntersectionVisual {
     source: Entity,
@@ -114,6 +117,11 @@ struct DesiredTintOverlay {
     render_layers: RenderLayers,
 }
 
+struct FrustumSource {
+    volume: FrustumVolume,
+    color: impeller2_wkt::Color,
+}
+
 #[derive(SystemParam)]
 struct FrustumIntersectionParams<'w, 's> {
     main_viewports: Query<'w, 's, MainViewportQueryItem, With<MainCamera>>,
@@ -130,6 +138,7 @@ struct FrustumIntersectionParams<'w, 's> {
     frustum_tint_materials: ResMut<'w, Assets<FrustumTintMaterial>>,
     mat3_materials: ResMut<'w, Assets<Mat3Material>>,
     material_cache: ResMut<'w, IntersectionMaterialCache>,
+    projection_cache: Query<'w, 's, &'static IntersectionProjectionCache>,
     existing_visuals: Query<
         'w,
         's,
@@ -360,6 +369,37 @@ fn reset_ellipsoid_tints(params: &mut FrustumIntersectionParams<'_, '_>, command
     }
 }
 
+fn source_frustum_perspective(
+    camera_is_active: bool,
+    perspective: &PerspectiveProjection,
+    config_aspect: Option<f32>,
+    viewport_aspect: Option<f32>,
+    projection_cache: Option<&IntersectionProjectionCache>,
+) -> PerspectiveProjection {
+    if camera_is_active {
+        return perspective.clone();
+    }
+
+    if let Some(perspective) = projection_cache {
+        return perspective.0.clone();
+    }
+
+    let mut perspective = perspective.clone();
+    if let Some(aspect) = config_aspect.or(viewport_aspect) {
+        perspective.aspect_ratio = aspect;
+    }
+    perspective
+}
+
+fn camera_viewport_aspect(camera: &Camera) -> Option<f32> {
+    let size = camera.viewport.as_ref()?.physical_size.as_vec2();
+    if size.x > 0.0 && size.y > 0.0 {
+        Some(size.x / size.y)
+    } else {
+        None
+    }
+}
+
 fn draw_frustum_ellipsoid_intersections(
     mut ratios: ResMut<IntersectionRatios>,
     mut params: FrustumIntersectionParams<'_, '_>,
@@ -371,35 +411,51 @@ fn draw_frustum_ellipsoid_intersections(
     for (camera_entity, camera, projection, global_transform, config, render_layer_lease) in
         params.main_viewports.iter()
     {
-        if !camera.is_active {
-            continue;
-        }
-
         let Some(config) = config else {
             continue;
         };
-        let Some(render_layer_lease) = render_layer_lease else {
-            continue;
-        };
 
-        if config.show_frustums && (config.show_coverage_in_viewport || config.show_projection_2d) {
+        if camera.is_active
+            && config.show_frustums
+            && (config.show_coverage_in_viewport || config.show_projection_2d)
+            && let Some(render_layer_lease) = render_layer_lease
+        {
             targets.push((
                 camera_entity,
                 render_layer_lease.render_layers(),
-                config.projection_color,
                 config.show_coverage_in_viewport,
                 config.show_projection_2d,
             ));
         }
 
         if !config.create_frustum {
+            commands
+                .entity(camera_entity)
+                .remove::<IntersectionProjectionCache>();
             continue;
         }
 
         let Projection::Perspective(perspective) = projection else {
+            commands
+                .entity(camera_entity)
+                .remove::<IntersectionProjectionCache>();
             continue;
         };
-        let Some(local_points) = frustum_local_points(perspective) else {
+
+        if camera.is_active {
+            commands
+                .entity(camera_entity)
+                .insert(IntersectionProjectionCache(perspective.clone()));
+        }
+
+        let source_perspective = source_frustum_perspective(
+            camera.is_active,
+            perspective,
+            config.aspect,
+            camera_viewport_aspect(camera),
+            params.projection_cache.get(camera_entity).ok(),
+        );
+        let Some(local_points) = frustum_local_points(&source_perspective) else {
             continue;
         };
         let world_points = local_points.map(|point| global_transform.transform_point(point));
@@ -407,18 +463,21 @@ fn draw_frustum_ellipsoid_intersections(
             continue;
         };
         let (aabb_min, aabb_max) = points_aabb(&world_points);
-        sources.push(FrustumVolume {
-            source: camera_entity,
-            camera_pos: global_transform.translation(),
-            far_corners: [
-                world_points[4],
-                world_points[5],
-                world_points[6],
-                world_points[7],
-            ],
-            planes,
-            aabb_min,
-            aabb_max,
+        sources.push(FrustumSource {
+            volume: FrustumVolume {
+                source: camera_entity,
+                camera_pos: global_transform.translation(),
+                far_corners: [
+                    world_points[4],
+                    world_points[5],
+                    world_points[6],
+                    world_points[7],
+                ],
+                planes,
+                aabb_min,
+                aabb_max,
+            },
+            color: config.projection_color,
         });
     }
 
@@ -491,7 +550,7 @@ fn draw_frustum_ellipsoid_intersections(
     let mut desired_lights = Vec::new();
     let mut desired_tint_overlays = Vec::new();
     let mut coverage_layers = RenderLayers::none();
-    for (_, render_layers, _, show_coverage, _) in &targets {
+    for (_, render_layers, show_coverage, _) in &targets {
         if *show_coverage {
             coverage_layers = coverage_layers.union(render_layers);
         }
@@ -499,7 +558,7 @@ fn draw_frustum_ellipsoid_intersections(
     let any_target_wants_coverage = coverage_layers.iter().next().is_some();
     let any_target_wants_projection = targets
         .iter()
-        .any(|(_, _, _, _, show_projection)| *show_projection);
+        .any(|(_, _, _, show_projection)| *show_projection);
     // Per-ellipsoid max coverage ratio across all frustums. Empty when coverage is disabled.
     let mut ellipsoid_max_ratio: HashMap<Entity, f32> = if any_target_wants_coverage {
         ellipsoids
@@ -510,7 +569,8 @@ fn draw_frustum_ellipsoid_intersections(
         HashMap::<Entity, f32>::new()
     };
 
-    for frustum in &sources {
+    for source in &sources {
+        let frustum = &source.volume;
         for ellipsoid in &ellipsoids {
             if !aabb_overlap(
                 frustum.aabb_min,
@@ -540,21 +600,14 @@ fn draw_frustum_ellipsoid_intersections(
             let Some(mesh) = build_projection_mesh(frustum, ellipsoid) else {
                 continue;
             };
-            for (
-                target_camera,
-                render_layers,
-                target_projection_color,
-                _show_coverage,
-                target_show_projection,
-            ) in &targets
-            {
+            for (target_camera, render_layers, _show_coverage, target_show_projection) in &targets {
                 if frustum.source == *target_camera || !target_show_projection {
                     continue;
                 }
                 let (light, light_transform) =
-                    intersection_light_for(frustum, ellipsoid, *target_projection_color);
+                    intersection_light_for(frustum, ellipsoid, source.color);
                 let material = MeshMaterial3d(projection_material_for_color(
-                    *target_projection_color,
+                    source.color,
                     &mut params.materials,
                     &mut params.material_cache,
                 ));
@@ -591,15 +644,17 @@ fn draw_frustum_ellipsoid_intersections(
             .unwrap_or(0.0);
 
         if ratio > SURFACE_EPS && any_target_wants_coverage {
-            let first_frustum = sources.iter().find(|f| {
+            let first_frustum = sources.iter().find(|source| {
+                let frustum = &source.volume;
                 aabb_overlap(
-                    f.aabb_min,
-                    f.aabb_max,
+                    frustum.aabb_min,
+                    frustum.aabb_max,
                     ellipsoid.aabb_min,
                     ellipsoid.aabb_max,
                 )
             });
-            if let Some(frustum) = first_frustum {
+            if let Some(source) = first_frustum {
+                let frustum = &source.volume;
                 let mut base = match &ellipsoid.material_target {
                     Some(EllipsoidMaterialTarget::Standard(handle)) => {
                         params.materials.get(handle).cloned().unwrap_or_default()
@@ -782,5 +837,69 @@ fn draw_frustum_ellipsoid_intersections(
     }
     for entity in existing_tint_overlays_by_ellipsoid.into_values() {
         commands.entity(entity).despawn();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn perspective_with_aspect(aspect_ratio: f32) -> PerspectiveProjection {
+        PerspectiveProjection {
+            fov: 1.0,
+            aspect_ratio,
+            near: 0.1,
+            far: 10.0,
+        }
+    }
+
+    #[test]
+    fn active_source_uses_current_projection() {
+        let perspective = perspective_with_aspect(16.0 / 9.0);
+
+        let source = source_frustum_perspective(true, &perspective, None, None, None);
+
+        assert_eq!(source.aspect_ratio, 16.0 / 9.0);
+    }
+
+    #[test]
+    fn hidden_source_reuses_component_cache_instead_of_stale_viewport_aspect() {
+        let cache = IntersectionProjectionCache(perspective_with_aspect(16.0 / 9.0));
+        let inactive_perspective = perspective_with_aspect(1.0);
+
+        let source = source_frustum_perspective(
+            false,
+            &inactive_perspective,
+            Some(4.0 / 3.0),
+            Some(1.0),
+            Some(&cache),
+        );
+
+        assert_eq!(source.aspect_ratio, 16.0 / 9.0);
+    }
+
+    #[test]
+    fn inactive_source_without_cache_uses_config_aspect() {
+        let inactive_perspective = perspective_with_aspect(1.0);
+
+        let source = source_frustum_perspective(
+            false,
+            &inactive_perspective,
+            Some(4.0 / 3.0),
+            Some(16.0 / 9.0),
+            None,
+        );
+
+        assert_eq!(source.aspect_ratio, 4.0 / 3.0);
+    }
+
+    #[test]
+    fn inactive_source_without_cache_uses_viewport_aspect() {
+        let inactive_perspective = perspective_with_aspect(1.0);
+
+        let source =
+            source_frustum_perspective(false, &inactive_perspective, None, Some(16.0 / 9.0), None);
+
+        assert_eq!(source.aspect_ratio, 16.0 / 9.0);
     }
 }

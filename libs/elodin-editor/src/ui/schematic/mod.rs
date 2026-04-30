@@ -201,6 +201,9 @@ impl SchematicParam<'_, '_> {
                         let frustums_color = vp_config
                             .map(|c| c.frustums_color)
                             .unwrap_or_else(impeller2_wkt::default_viewport_frustums_color);
+                        let projection_color = vp_config
+                            .map(|c| c.projection_color)
+                            .unwrap_or_else(impeller2_wkt::default_viewport_projection_color);
                         let frustums_thickness = vp_config
                             .map(|c| c.frustums_thickness)
                             .unwrap_or_else(impeller2_wkt::default_viewport_frustums_thickness);
@@ -237,6 +240,7 @@ impl SchematicParam<'_, '_> {
                             create_frustum,
                             show_frustums,
                             frustums_color,
+                            projection_color,
                             frustums_thickness,
                             show_view_cube,
                             hdr: self.hdr_enabled.0,

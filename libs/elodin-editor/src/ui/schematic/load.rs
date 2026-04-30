@@ -1488,6 +1488,35 @@ mod tests {
     }
 
     #[test]
+    fn show_frustums_kdl_does_not_enable_ellipsoid_overlays_by_default() {
+        let mut app = test_app();
+        let schematic = Schematic::from_kdl(
+            r#"
+            viewport name="Frustum View" show_view_cube=#false show_frustums=#true
+            "#,
+        )
+        .expect("parse test schematic");
+
+        load_schematic(&mut app, &schematic);
+
+        let mut query = app.world_mut().query::<&tiles::ViewportConfig>();
+        let config = query
+            .iter(app.world())
+            .find(|config| config.show_frustums)
+            .expect("viewport with show_frustums");
+
+        assert!(config.show_frustums);
+        assert!(
+            !config.show_coverage_in_viewport,
+            "show_frustums from KDL must not auto-enable coverage overlays",
+        );
+        assert!(
+            !config.show_projection_2d,
+            "show_frustums from KDL must not auto-enable projection overlays",
+        );
+    }
+
+    #[test]
     fn mixed_schematic_clears_cleanly() {
         let mut app = test_app();
         let baseline = entity_count(&mut app);

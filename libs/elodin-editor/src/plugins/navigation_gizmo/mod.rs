@@ -120,6 +120,29 @@ struct NavGizmoAnchorState {
     active_drag: Option<NavGizmoDrag>,
 }
 
+fn inactive_overlay_viewport() -> Viewport {
+    Viewport {
+        physical_position: UVec2::ZERO,
+        physical_size: UVec2::new(1, 1),
+        depth: 0.0..1.0,
+    }
+}
+
+fn deactivate_overlay_camera(camera: &mut Camera) {
+    camera.is_active = false;
+    camera.viewport = Some(inactive_overlay_viewport());
+}
+
+fn active_main_viewport_rect(
+    main_camera: &Camera,
+    viewport_rect: Option<&ViewportRect>,
+) -> Option<bevy_egui::egui::Rect> {
+    if !main_camera.is_active {
+        return None;
+    }
+    viewport_rect.and_then(|r| r.0)
+}
+
 pub fn spawn_gizmo(
     main_camera: Entity,
     commands: &mut Commands,
@@ -383,6 +406,10 @@ fn set_camera_viewport(
         let Ok((main, viewport_rect)) = main_camera_query.get(parent.main_camera) else {
             continue;
         };
+        let Some(rect) = active_main_viewport_rect(main, viewport_rect) else {
+            deactivate_overlay_camera(&mut nav_camera);
+            continue;
+        };
         let target_window = match &nav_camera.target {
             RenderTarget::Window(WindowRef::Primary) => primary_query.iter().next(),
             RenderTarget::Window(WindowRef::Entity(entity)) => Some(*entity),
@@ -397,28 +424,13 @@ fn set_camera_viewport(
         let scale_factor = window.scale_factor() * egui_settings.scale_factor;
         let margin = margin * scale_factor;
         let top_offset = top_offset * scale_factor;
-        let (viewport_pos, viewport_size) = if let Some(rect) = viewport_rect.and_then(|r| r.0) {
-            let pos = rect.left_top().to_vec2() * scale_factor;
-            let size = rect.size() * scale_factor;
-            (Vec2::new(pos.x, pos.y), Vec2::new(size.x, size.y))
-        } else {
-            let Some(viewport) = &main.viewport else {
-                continue;
-            };
-            (
-                viewport.physical_position.as_vec2(),
-                viewport.physical_size.as_vec2(),
-            )
-        };
+        let pos = rect.left_top().to_vec2() * scale_factor;
+        let size = rect.size() * scale_factor;
+        let (viewport_pos, viewport_size) = (Vec2::new(pos.x, pos.y), Vec2::new(size.x, size.y));
 
         let min_viewport_dim = viewport_size.x.min(viewport_size.y);
         if min_viewport_dim < min_viewport_for_gizmo * scale_factor {
-            nav_camera.is_active = false;
-            nav_camera.viewport = Some(Viewport {
-                physical_position: UVec2::ZERO,
-                physical_size: UVec2::new(1, 1),
-                depth: 0.0..1.0,
-            });
+            deactivate_overlay_camera(&mut nav_camera);
             continue;
         }
 
@@ -530,6 +542,66 @@ fn set_camera_viewport(
         if !unchanged {
             nav_camera.viewport = Some(new_viewport);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn main_camera(active: bool) -> Camera {
+        Camera {
+            is_active: active,
+            ..Default::default()
+        }
+    }
+
+    fn viewport_rect() -> ViewportRect {
+        ViewportRect(Some(bevy_egui::egui::Rect::from_min_size(
+            bevy_egui::egui::pos2(0.0, 0.0),
+            bevy_egui::egui::vec2(640.0, 480.0),
+        )))
+    }
+
+    #[test]
+    fn inactive_main_camera_has_no_overlay_viewport_rect() {
+        let main_camera = main_camera(false);
+        let rect = viewport_rect();
+
+        assert!(active_main_viewport_rect(&main_camera, Some(&rect)).is_none());
+    }
+
+    #[test]
+    fn active_main_camera_without_layout_rect_has_no_overlay_viewport_rect() {
+        let main_camera = main_camera(true);
+        let hidden_rect = ViewportRect(None);
+
+        assert!(active_main_viewport_rect(&main_camera, Some(&hidden_rect)).is_none());
+        assert!(active_main_viewport_rect(&main_camera, None).is_none());
+    }
+
+    #[test]
+    fn active_main_camera_uses_layout_rect_for_overlay() {
+        let main_camera = main_camera(true);
+        let rect = viewport_rect();
+
+        assert_eq!(active_main_viewport_rect(&main_camera, Some(&rect)), rect.0);
+    }
+
+    #[test]
+    fn deactivated_overlay_camera_uses_one_pixel_viewport() {
+        let mut camera = Camera {
+            is_active: true,
+            viewport: None,
+            ..Default::default()
+        };
+
+        deactivate_overlay_camera(&mut camera);
+
+        let viewport = camera.viewport.expect("inactive viewport");
+        assert!(!camera.is_active);
+        assert_eq!(viewport.physical_position, UVec2::ZERO);
+        assert_eq!(viewport.physical_size, UVec2::new(1, 1));
     }
 }
 

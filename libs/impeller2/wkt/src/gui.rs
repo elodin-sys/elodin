@@ -35,6 +35,10 @@ pub fn default_viewport_frustums_color() -> Color {
     Color::YELLOW
 }
 
+pub fn default_viewport_projection_color() -> Color {
+    Color::WHITE
+}
+
 pub fn default_viewport_frustums_thickness() -> f32 {
     0.006
 }
@@ -223,6 +227,9 @@ pub struct Viewport {
     pub show_frustums: bool,
     #[serde(default = "default_viewport_frustums_color")]
     pub frustums_color: Color,
+    /// Color for this viewport's source frustum 2D projection in target viewports.
+    #[serde(default = "default_viewport_projection_color")]
+    pub projection_color: Color,
     #[serde(default = "default_viewport_frustums_thickness")]
     pub frustums_thickness: f32,
     #[serde(default = "default_true")]
@@ -254,6 +261,7 @@ impl Default for Viewport {
             create_frustum: false,
             show_frustums: false,
             frustums_color: default_viewport_frustums_color(),
+            projection_color: default_viewport_projection_color(),
             frustums_thickness: default_viewport_frustums_thickness(),
             show_view_cube: true,
             hdr: false,

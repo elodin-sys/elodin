@@ -259,20 +259,15 @@ fn draw_viewport_frustums(mut params: FrustumDrawParams<'_, '_>, mut commands: C
     for (camera_entity, camera, projection, global_transform, config, render_layer_lease) in
         params.main_viewports.iter()
     {
-        if !camera.is_active {
-            continue;
-        }
-
         let Some(config) = config else {
             continue;
         };
 
-        let Some(render_layer_lease) = render_layer_lease else {
-            continue;
-        };
-
         camera_positions.insert(camera_entity, global_transform.translation());
-        if config.show_frustums {
+        if camera.is_active
+            && config.show_frustums
+            && let Some(render_layer_lease) = render_layer_lease
+        {
             targets.push((camera_entity, render_layer_lease.render_layers()));
         }
 
