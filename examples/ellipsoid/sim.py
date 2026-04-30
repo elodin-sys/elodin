@@ -12,7 +12,7 @@ SIM_RATE = 120.0
 SENSOR_CAMERA_NAME = "drone.scene_cam"
 DRONE_NAME = "drone"
 ELLIPSOID_SCALE = np.array([0.9, 0.9, 0.38], dtype=np.float64)
-DRONE_PATH_RADIUS = np.array([0.28, 0.2, 0.04], dtype=np.float64)
+DRONE_PATH_RADIUS = np.array([0.12, 0.08, 0.03], dtype=np.float64)
 DRONE_PATH_RATE = 0.35
 
 
@@ -45,8 +45,8 @@ def world() -> tuple[el.World, el.EntityId]:
         fov=110.0,
         near=0.01,
         far=0.35,
-        pos_offset=[0.0, 0.08, 0.1],
-        look_at_offset=[0.0, -0.42, 0.02],
+        pos_offset=[0.0, -0.08, 0.08],
+        look_at_offset=[0.0, 0.55, 0.02],
         format="rgba",
         create_frustum=True,
         frustums_color=[1.0, 0.0, 1.0, 1.0],
@@ -62,7 +62,7 @@ def world() -> tuple[el.World, el.EntityId]:
         }}
     }}
     object_3d drone.world_pos {{
-        glb path="crazyflie.glb" rotate="(0.0, 0.0, 0.0)" translate="(0.0, 0.0, 0.0)" scale=0.9
+        glb path="talon-quad-v2.glb" rotate="(0.0, 0.0, 0.0)" translate="(0.0, 0.0, 0.0)" scale=0.65
     }}
     """
 
