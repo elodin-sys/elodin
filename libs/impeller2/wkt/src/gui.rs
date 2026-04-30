@@ -866,6 +866,8 @@ pub struct SensorCameraConfig {
     pub effect_params: HashMap<String, f64>,
     #[serde(default)]
     pub create_frustum: bool,
+    #[serde(default)]
+    pub show_ellipsoids: bool,
     #[serde(default = "default_viewport_frustums_color")]
     pub frustums_color: Color,
     #[serde(default = "default_viewport_projection_color")]

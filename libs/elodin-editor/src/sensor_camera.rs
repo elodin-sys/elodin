@@ -3,7 +3,7 @@ use std::time::Instant;
 use bevy::{
     app::{App, Plugin},
     asset::{Assets, embedded_asset},
-    camera::RenderTarget,
+    camera::{RenderTarget, visibility::RenderLayers},
     core_pipeline::{
         FullscreenShader,
         core_3d::graph::{Core3d, Node3d},
@@ -38,7 +38,7 @@ use impeller2::types::ComponentId;
 use impeller2_wkt::DbConfig;
 pub use impeller2_wkt::SensorCameraConfig;
 
-use crate::object_3d::ComponentArrayExt;
+use crate::object_3d::{ComponentArrayExt, ELLIPSOID_RENDER_LAYER};
 
 #[derive(Resource, Default, Debug, Clone)]
 pub struct SensorCameraConfigs(pub Vec<SensorCameraConfig>);
@@ -280,6 +280,7 @@ impl Plugin for SensorCameraPlugin {
                 PreUpdate,
                 update_sensor_camera_transforms.after(crate::PositionSync),
             )
+            .add_systems(Update, update_sensor_camera_render_layers)
             .add_systems(Update, tick_effect_time);
 
         if let Some(render_app) = app.get_sub_app_mut(RenderApp) {
@@ -474,6 +475,7 @@ fn spawn_sensor_cameras(
             },
             copier,
             ReadbackArmed(false),
+            sensor_camera_render_layers(config),
             Name::new(format!("sensor_camera_{}", config.camera_name)),
         ));
 
@@ -487,6 +489,30 @@ fn spawn_sensor_cameras(
     }
 
     spawned.0 = true;
+}
+
+fn sensor_camera_render_layers(config: &SensorCameraConfig) -> RenderLayers {
+    let layers = RenderLayers::default();
+    if config.show_ellipsoids {
+        layers.with(ELLIPSOID_RENDER_LAYER)
+    } else {
+        layers
+    }
+}
+
+fn update_sensor_camera_render_layers(
+    configs: Res<SensorCameraConfigs>,
+    mut sensor_cameras: Query<(&SensorCamera, &mut RenderLayers)>,
+) {
+    for (sensor_cam, mut layers) in &mut sensor_cameras {
+        let Some(config) = configs.0.get(sensor_cam.config_index) else {
+            continue;
+        };
+        let desired_layers = sensor_camera_render_layers(config);
+        if *layers != desired_layers {
+            *layers = desired_layers;
+        }
+    }
 }
 
 fn tick_effect_time(time: Res<Time>, mut query: Query<&mut SensorEffectSettings>) {

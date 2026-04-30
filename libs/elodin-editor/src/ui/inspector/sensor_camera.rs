@@ -97,6 +97,14 @@ impl WidgetSystem for InspectorSensorCamera<'_, '_> {
                         ui.label(format!("{:.1}", config.fov_degrees));
                     });
                 });
+
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new("SHOW ELLIPSOIDS").color(scheme.text_secondary));
+                    ui.with_layout(egui::Layout::right_to_left(Align::Min), |ui| {
+                        ui.checkbox(&mut config.show_ellipsoids, "");
+                    });
+                });
             });
 
         ui.separator();

@@ -84,6 +84,7 @@ world.sensor_camera(
     effect="normal",           # "normal", "thermal", "night_vision", "depth"
     effect_params={},          # Effect-specific parameters
     create_frustum=True,       # Show this camera's frustum in 3D viewports
+    show_ellipsoids=False,     # Hide ellipsoid debug objects from camera frames
 )
 ```
 
@@ -221,6 +222,7 @@ For higher-resolution cameras or more cameras, reduce the render frequency or lo
 | `effect` | str | "normal" | Post-process effect |
 | `effect_params` | dict | {} | Effect-specific parameters |
 | `create_frustum` | bool | false | Create this sensor camera as a frustum source for 3D viewports |
+| `show_ellipsoids` | bool | false | Render ellipsoid debug objects in this sensor camera |
 | `frustums_color` | [f32; 3/4] | yellow | Frustum color, normalized RGBA |
 | `projection_color` | [f32; 3/4] | white | 2D projection color, normalized RGBA |
 | `frustums_thickness` | float | 0.006 | Frustum edge radius in world units |

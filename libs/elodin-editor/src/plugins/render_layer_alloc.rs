@@ -9,6 +9,7 @@
 //!
 //! This module was created to avoid a maximum limit of 64 that were not
 //! deallocated.
+use crate::object_3d::ELLIPSOID_RENDER_LAYER;
 use crate::plugins::gizmos::GIZMO_RENDER_LAYER;
 use bevy::camera::visibility::RenderLayers;
 use bevy::prelude::*;
@@ -137,6 +138,7 @@ impl RenderLayerAllocator {
 impl Default for RenderLayerAllocator {
     fn default() -> Self {
         let reserved = RenderLayers::layer(0)
+            .with(ELLIPSOID_RENDER_LAYER)
             .with(GIZMO_RENDER_LAYER)
             .with(GRID_RENDER_LAYER);
         Self {

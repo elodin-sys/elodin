@@ -60,10 +60,6 @@ def world() -> tuple[el.World, el.EntityId]:
             color 0 188 212 28
             grid_color 255 255 255 120
         }}
-        icon builtin="adjust" {{
-            visibility_range min=500.0
-            color 0 188 212
-        }}
     }}
     object_3d drone.world_pos {{
         glb path="crazyflie.glb" rotate="(0.0, 0.0, 0.0)" translate="(0.0, 0.0, 0.0)" scale=0.9

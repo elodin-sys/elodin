@@ -55,7 +55,7 @@ use super::{
 };
 use crate::{
     EqlContext, GridHandle, MainCamera,
-    object_3d::{EditableEQL, compile_eql_expr},
+    object_3d::{ELLIPSOID_RENDER_LAYER, EditableEQL, compile_eql_expr},
     plugins::{
         LogicalKeyState,
         gizmos::GIZMO_RENDER_LAYER,
@@ -1262,6 +1262,7 @@ impl ViewportPane {
         // The grid render layer is reserved and shared by every viewport, so we
         // never allocate one per viewport. See `RenderLayerAllocator::default`.
         let mut main_camera_layers = RenderLayers::default()
+            .with(ELLIPSOID_RENDER_LAYER)
             .with(GIZMO_RENDER_LAYER)
             .with(GRID_RENDER_LAYER);
         let grid_layers = RenderLayers::layer(GRID_RENDER_LAYER);

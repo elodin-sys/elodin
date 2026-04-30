@@ -324,6 +324,7 @@ impl WorldBuilder {
         effect = "normal",
         effect_params = None,
         create_frustum = false,
+        show_ellipsoids = false,
         frustums_color = None,
         projection_color = None,
         frustums_thickness = 0.006,
@@ -343,6 +344,7 @@ impl WorldBuilder {
         effect: &str,
         effect_params: Option<&Bound<'_, PyDict>>,
         create_frustum: bool,
+        show_ellipsoids: bool,
         frustums_color: Option<Vec<f32>>,
         projection_color: Option<Vec<f32>>,
         frustums_thickness: f32,
@@ -444,6 +446,7 @@ impl WorldBuilder {
                 effect: effect.to_string(),
                 effect_params: parsed_effect_params,
                 create_frustum,
+                show_ellipsoids,
                 frustums_color: color_from_vec(
                     frustums_color,
                     impeller2_wkt::default_viewport_frustums_color(),
