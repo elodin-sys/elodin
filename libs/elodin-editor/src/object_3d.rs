@@ -342,6 +342,57 @@ fn promote_component_to_f64(value: ComponentValue) -> Result<Array<f64, nox::Dyn
     }
 }
 
+fn apply_binary_op(
+    left: &Array<f64, nox::Dyn>,
+    right: &Array<f64, nox::Dyn>,
+    op: eql::BinaryOp,
+) -> Result<Array<f64, nox::Dyn>, String> {
+    use nox::ArrayBuf;
+    use smallvec::SmallVec;
+
+    let left_data = left.buf.as_buf();
+    let right_data = right.buf.as_buf();
+
+    let apply = |left: f64, right: f64| match op {
+        eql::BinaryOp::Add => left + right,
+        eql::BinaryOp::Sub => left - right,
+        eql::BinaryOp::Mul => left * right,
+        eql::BinaryOp::Div => left / right,
+    };
+
+    let (shape, values) = if left_data.len() == 1 && right_data.len() != 1 {
+        (
+            SmallVec::from_slice(right.shape()),
+            right_data
+                .iter()
+                .map(|&right| apply(left_data[0], right))
+                .collect(),
+        )
+    } else if right_data.len() == 1 && left_data.len() != 1 {
+        (
+            SmallVec::from_slice(left.shape()),
+            left_data
+                .iter()
+                .map(|&left| apply(left, right_data[0]))
+                .collect(),
+        )
+    } else if left_data.len() == right_data.len() {
+        (
+            SmallVec::from_slice(left.shape()),
+            left_data
+                .iter()
+                .zip(right_data.iter())
+                .map(|(&left, &right)| apply(left, right))
+                .collect(),
+        )
+    } else {
+        return Err("binary operation requires arrays be broadcastable".to_string());
+    };
+
+    Array::from_shape_vec(shape, values)
+        .ok_or_else(|| "invalid array shape after binary operation".to_string())
+}
+
 fn cast_dyn_array_from_field<T: nox::Field>(
     shape_sv: &smallvec::SmallVec<[usize; 4]>,
     flat: Vec<T>,
@@ -747,15 +798,7 @@ pub fn compile_eql_expr(expression: eql::Expr) -> CompiledExpr {
 
                 let left = promote_component_to_f64(left_val)?;
                 let right = promote_component_to_f64(right_val)?;
-                if !nox::array::can_broadcast(left.shape(), right.shape()) {
-                    return Err("binary operation requires arrays be broadcastable".to_string());
-                }
-                let result = match op {
-                    eql::BinaryOp::Add => left.add(&right),
-                    eql::BinaryOp::Sub => left.sub(&right),
-                    eql::BinaryOp::Mul => left.mul(&right),
-                    eql::BinaryOp::Div => left.div(&right),
-                };
+                let result = apply_binary_op(&left, &right, op)?;
 
                 Ok(ComponentValue::F64(result))
             })
@@ -2088,12 +2131,8 @@ mod ellipsoid_scale_eql_tests {
         );
 
         let mut world = World::new();
-        let vehicle_entity = world
-            .spawn(f64_component_value([10.0, 20.0, 30.0]))
-            .id();
-        let target_entity = world
-            .spawn(f64_component_value([100.0, 200.0, 300.0]))
-            .id();
+        let vehicle_entity = world.spawn(f64_component_value([10.0, 20.0, 30.0])).id();
+        let target_entity = world.spawn(f64_component_value([100.0, 200.0, 300.0])).id();
         let entity_map = EntityMap(HashMap::from([
             (vehicle_id, vehicle_entity),
             (target_id, target_entity),
@@ -2112,10 +2151,7 @@ mod ellipsoid_scale_eql_tests {
                 "(1.91*vehicle.pos_std_var[1], 1.91*vehicle.pos_std_var[0], 1.91*vehicle.pos_std_var[2])",
                 Vec3::new(38.2, 19.1, 57.3),
             ),
-            (
-                "2.0 * vehicle.pos_std_var",
-                Vec3::new(20.0, 40.0, 60.0),
-            ),
+            ("2.0 * vehicle.pos_std_var", Vec3::new(20.0, 40.0, 60.0)),
             (
                 "3.0 * (vehicle.pos_std_var[1], 0.0, target.pos_std_var[2])",
                 Vec3::new(60.0, 0.0, 900.0),
