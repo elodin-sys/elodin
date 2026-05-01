@@ -986,6 +986,27 @@ object_3d satellite.world_pos {
 ```
 
 The `scale` parameter accepts an EQL expression for dynamic sizing.
+It must evaluate to at least 3 values in meters. The expression can be a literal tuple, a vector component, indexed component values, scalar-vector math, or values from multiple components:
+
+```kdl
+object_3d vehicle.world_pos {
+    ellipsoid scale="2.0 * vehicle.pos_std_var" {
+        color 200 200 0
+    }
+}
+
+object_3d vehicle.world_pos {
+    ellipsoid scale="1.91*(vehicle.pos_std_var[1], vehicle.pos_std_var[0], vehicle.pos_std_var[2])" {
+        color 200 200 0
+    }
+}
+
+object_3d vehicle.world_pos {
+    ellipsoid scale="3.0 * (vehicle.pos_std_var[1], 0.0, target.pos_std_var[2])" {
+        color 200 200 0
+    }
+}
+```
 
 ### GLB Models
 

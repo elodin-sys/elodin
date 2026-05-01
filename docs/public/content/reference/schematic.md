@@ -78,9 +78,17 @@ order = 6
   - `box`: `x`, `y`, `z` (all required); `color` (default white).
   - `cylinder`: `radius`, `height` (both required); `color` (default white).
   - `plane`: `width`/`depth` (default `size` if set, else 10.0); optional `size` shorthand; `color` (default white).
-  - `ellipsoid`: , `color` (default white), `show_grid` (default `#false`).
+  - `ellipsoid`: `color` (default white), `show_grid` (default `#false`).
      - Physical measure
-        -`scale` an EQL string, e.g., `"(1, 1, 1)"` in meters
+        - `scale`: runtime EQL string that must evaluate to at least 3 values in meters. It can be a literal tuple, a vector component, indexed component values, scalar-vector math, or values from multiple components.
+          - Examples:
+            ```kdl
+            ellipsoid scale="(1, 1, 1)"
+            ellipsoid scale="vehicle.pos_std_var"
+            ellipsoid scale="2.0 * vehicle.pos_std_var"
+            ellipsoid scale="1.91*(vehicle.pos_std_var[1], vehicle.pos_std_var[0], vehicle.pos_std_var[2])"
+            ellipsoid scale="3.0 * (vehicle.pos_std_var[1], 0.0, target.pos_std_var[2])"
+            ```
      - Error measure
         - `error_covariance_cholesky` as an alternative to specifying the scale
           and rotation, one can specify the lower triangle cholesky L of the
