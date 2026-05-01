@@ -345,7 +345,7 @@ fn promote_component_to_f64(value: ComponentValue) -> Result<Array<f64, nox::Dyn
 // Keep object_3d runtime EQL binary operations shape-based.
 // TODO: move this into nox once dynamic broadcasting is fixed there. Today,
 // nox::Array binary ops can panic on equal-rank incompatible shapes and can
-// mis-iterate dynamic broadcasts when the left rank is greater than the right
+// iterate dynamic broadcasts incorrectly when the left rank is greater than the right
 // rank. The editor keeps the broadcast local so runtime EQL returns a clean
 // error and preserves expected array shapes.
 fn broadcast_shape(
