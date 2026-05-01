@@ -2036,3 +2036,99 @@ mod joint_eql_cast_tests {
         assert!((buf[2] - 0.0).abs() < 1e-9);
     }
 }
+
+#[cfg(test)]
+mod ellipsoid_scale_eql_tests {
+    use std::collections::HashMap;
+    use std::sync::Arc;
+
+    use bevy::ecs::system::SystemState;
+    use bevy::prelude::{Query, Vec3, World};
+    use impeller2::schema::Schema;
+    use impeller2::types::{ComponentId, PrimType, Timestamp};
+    use impeller2_bevy::EntityMap;
+    use impeller2_wkt::ComponentValue;
+    use nox::Array;
+
+    use super::{compile_scale_eql, component_value_to_vec3};
+
+    fn pos_std_var_component(name: &str) -> Arc<eql::Component> {
+        Arc::new(eql::Component::new(
+            name.to_string(),
+            ComponentId::new(name),
+            Schema::new(PrimType::F64, vec![3u64]).unwrap(),
+        ))
+    }
+
+    fn f64_component_value(values: [f64; 3]) -> ComponentValue {
+        ComponentValue::F64(
+            Array::<f64, nox::Dyn>::from_shape_vec(smallvec::smallvec![3], values.to_vec())
+                .expect("f64 telemetry buffer"),
+        )
+    }
+
+    fn assert_vec3_close(actual: Vec3, expected: Vec3) {
+        let delta = (actual - expected).abs();
+        assert!(
+            delta.max_element() < 1e-5,
+            "expected {expected:?}, got {actual:?}"
+        );
+    }
+
+    #[test]
+    fn ellipsoid_scale_eql_accepts_scalar_tuple_and_component_expressions() {
+        let vehicle = pos_std_var_component("vehicle.pos_std_var");
+        let target = pos_std_var_component("target.pos_std_var");
+        let vehicle_id = vehicle.id;
+        let target_id = target.id;
+        let ctx = eql::Context::from_leaves(
+            [vehicle.clone(), target.clone()],
+            Timestamp(0),
+            Timestamp(1000),
+        );
+
+        let mut world = World::new();
+        let vehicle_entity = world
+            .spawn(f64_component_value([10.0, 20.0, 30.0]))
+            .id();
+        let target_entity = world
+            .spawn(f64_component_value([100.0, 200.0, 300.0]))
+            .id();
+        let entity_map = EntityMap(HashMap::from([
+            (vehicle_id, vehicle_entity),
+            (target_id, target_entity),
+        ]));
+
+        let mut system_state: SystemState<(Query<'static, 'static, &ComponentValue>,)> =
+            SystemState::new(&mut world);
+        let (component_values,) = system_state.get(&world);
+
+        for (scale_expr, expected) in [
+            (
+                "1.91*(vehicle.pos_std_var[1], vehicle.pos_std_var[0], vehicle.pos_std_var[2])",
+                Vec3::new(38.2, 19.1, 57.3),
+            ),
+            (
+                "(1.91*vehicle.pos_std_var[1], 1.91*vehicle.pos_std_var[0], 1.91*vehicle.pos_std_var[2])",
+                Vec3::new(38.2, 19.1, 57.3),
+            ),
+            (
+                "2.0 * vehicle.pos_std_var",
+                Vec3::new(20.0, 40.0, 60.0),
+            ),
+            (
+                "3.0 * (vehicle.pos_std_var[1], 0.0, target.pos_std_var[2])",
+                Vec3::new(60.0, 0.0, 900.0),
+            ),
+        ] {
+            let compiled =
+                compile_scale_eql(scale_expr, &ctx).expect("scale expression should compile");
+            let value = compiled
+                .execute(&entity_map, &component_values)
+                .expect("scale expression should evaluate");
+            let scale = component_value_to_vec3(&value).expect("scale should yield a Vec3");
+
+            assert_vec3_close(scale, expected);
+        }
+    }
+}
