@@ -2172,7 +2172,7 @@ mod ellipsoid_scale_eql_tests {
     }
 
     #[test]
-    fn object_3d_eql_binary_ops_preserve_nox_shape_broadcasting() {
+    fn apply_binary_op_broadcasts_arrays_with_different_ranks() {
         let left =
             Array::<f64, nox::Dyn>::from_shape_vec(smallvec::smallvec![1, 3], vec![1.0, 2.0, 3.0])
                 .expect("left array");
