@@ -30,6 +30,8 @@ type ImportedCameraFilter = (Added<Camera>, Without<NavGizmoCamera>, Without<Mai
 
 type ImportedCameraQuery<'w, 's> = Query<'w, 's, (Entity, &'static ChildOf), ImportedCameraFilter>;
 
+pub const ELLIPSOID_RENDER_LAYER: usize = 29;
+
 /// ExprObject3D component that holds an EQL expression for dynamic positioning
 #[derive(Component)]
 pub struct Object3DState {
@@ -1651,6 +1653,7 @@ pub fn spawn_mesh(
             grid_color,
             ..
         } => {
+            let ellipsoid_layers = RenderLayers::layer(ELLIPSOID_RENDER_LAYER);
             let bevy_color = Color::srgba(color.r, color.g, color.b, color.a);
             let alpha_mode = if color.a < 1.0 {
                 AlphaMode::Blend
@@ -1683,6 +1686,7 @@ pub fn spawn_mesh(
                     Mat3Params {
                         linear: initial_linear,
                     },
+                    ellipsoid_layers.clone(),
                     Transform::IDENTITY,
                     GlobalTransform::IDENTITY,
                     Visibility::default(),
@@ -1714,6 +1718,7 @@ pub fn spawn_mesh(
                         p.spawn((
                             Mesh3d(grid_mesh),
                             MeshMaterial3d(grid_mat),
+                            ellipsoid_layers.clone(),
                             bevy::light::NotShadowCaster,
                             bevy::light::NotShadowReceiver,
                         ));
@@ -1737,6 +1742,7 @@ pub fn spawn_mesh(
                 let mut child_cmd = commands.spawn((
                     Mesh3d(mesh_handle),
                     MeshMaterial3d(material_handle),
+                    ellipsoid_layers.clone(),
                     Transform::IDENTITY,
                     GlobalTransform::IDENTITY,
                     Visibility::default(),
@@ -1763,6 +1769,7 @@ pub fn spawn_mesh(
                         p.spawn((
                             Mesh3d(grid_mesh),
                             MeshMaterial3d(grid_material),
+                            ellipsoid_layers.clone(),
                             bevy::light::NotShadowCaster,
                             bevy::light::NotShadowReceiver,
                         ));

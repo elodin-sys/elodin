@@ -9,6 +9,7 @@
 //!
 //! This module was created to avoid a maximum limit of 64 that were not
 //! deallocated.
+use crate::object_3d::ELLIPSOID_RENDER_LAYER;
 use crate::plugins::gizmos::GIZMO_RENDER_LAYER;
 use bevy::camera::visibility::RenderLayers;
 use bevy::prelude::*;
@@ -137,6 +138,7 @@ impl RenderLayerAllocator {
 impl Default for RenderLayerAllocator {
     fn default() -> Self {
         let reserved = RenderLayers::layer(0)
+            .with(ELLIPSOID_RENDER_LAYER)
             .with(GIZMO_RENDER_LAYER)
             .with(GRID_RENDER_LAYER);
         Self {
@@ -271,11 +273,13 @@ mod tests {
     #[test]
     fn test_alloc_returns_layer_64_when_first_word_is_full() {
         // Direct trace of the scenario the supposed bug report describes:
-        // after layers 1..=63 (plus reserved 0/30/31) are taken, the next
+        // after every non-reserved layer in the first word is taken, the next
         // alloc must return layer 64, not None.
         let mut alloc = RenderLayerAllocator::default();
         let mut leases = Vec::new();
-        for _ in 0..61 {
+        let first_word_reserved = alloc.reserved.bits().first().copied().unwrap_or_default();
+        let first_word_allocations = 64 - first_word_reserved.count_ones() as usize;
+        for _ in 0..first_word_allocations {
             leases.push(alloc.alloc().expect("layer < 64"));
         }
         assert_eq!(

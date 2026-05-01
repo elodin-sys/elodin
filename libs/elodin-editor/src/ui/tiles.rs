@@ -55,7 +55,7 @@ use super::{
 };
 use crate::{
     EqlContext, GridHandle, MainCamera,
-    object_3d::{EditableEQL, compile_eql_expr},
+    object_3d::{ELLIPSOID_RENDER_LAYER, EditableEQL, compile_eql_expr},
     plugins::{
         LogicalKeyState,
         gizmos::GIZMO_RENDER_LAYER,
@@ -66,6 +66,7 @@ use crate::{
             spawn::spawn_view_cube,
         },
     },
+    sensor_camera::SensorCameraConfigs,
     ui::colors::ColorExt,
 };
 
@@ -1261,6 +1262,7 @@ impl ViewportPane {
         // The grid render layer is reserved and shared by every viewport, so we
         // never allocate one per viewport. See `RenderLayerAllocator::default`.
         let mut main_camera_layers = RenderLayers::default()
+            .with(ELLIPSOID_RENDER_LAYER)
             .with(GIZMO_RENDER_LAYER)
             .with(GRID_RENDER_LAYER);
         let grid_layers = RenderLayers::layer(GRID_RENDER_LAYER);
@@ -1646,21 +1648,32 @@ enum TabState {
 }
 
 impl TreeBehavior<'_> {
-    fn viewport_frustum_dot_color(
-        &mut self,
-        tiles: &Tiles<Pane>,
-        tile_id: TileId,
-    ) -> Option<Color32> {
-        let pane = match tiles.get(tile_id) {
-            Some(Tile::Pane(Pane::Viewport(pane))) => pane,
-            _ => return None,
-        };
-        let camera_entity = pane.camera?;
-        let config = self.world.get::<ViewportConfig>(camera_entity)?;
-        if !config.create_frustum {
-            return None;
+    fn frustum_dot_color(&mut self, tiles: &Tiles<Pane>, tile_id: TileId) -> Option<Color32> {
+        match tiles.get(tile_id) {
+            Some(Tile::Pane(Pane::Viewport(pane))) => {
+                let camera_entity = pane.camera?;
+                let config = self.world.get::<ViewportConfig>(camera_entity)?;
+                if !config.create_frustum {
+                    return None;
+                }
+                Some(config.frustums_color.into_color32())
+            }
+            Some(Tile::Pane(Pane::SensorView(pane))) => {
+                let stream = self
+                    .world
+                    .get::<super::video_stream::VideoStream>(pane.entity)?;
+                let configs = self.world.get_resource::<SensorCameraConfigs>()?;
+                let config = configs
+                    .0
+                    .iter()
+                    .find(|config| config.camera_name == stream.msg_name)?;
+                if !config.create_frustum {
+                    return None;
+                }
+                Some(config.frustums_color.into_color32())
+            }
+            _ => None,
         }
-        Some(config.frustums_color.into_color32())
     }
 
     fn paint_tab_title(
@@ -1761,7 +1774,7 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
         let dot_color = if is_container {
             None
         } else {
-            self.viewport_frustum_dot_color(tiles, tile_id)
+            self.frustum_dot_color(tiles, tile_id)
         };
         let dot_width = if dot_color.is_some() { 14.0 } else { 0.0 };
         let x_margin = self.tab_title_spacing(ui.visuals());
@@ -2886,6 +2899,12 @@ impl WidgetSystem for TileLayout<'_, '_> {
                                         };
                                     }
                                 }
+                                Pane::SensorView(sensor_view) => {
+                                    ui_state.selected_object = SelectedObject::SensorCamera {
+                                        stream: sensor_view.entity,
+                                        title: sensor_view.name.clone(),
+                                    };
+                                }
                                 _ => {}
                             }
                         }
@@ -2913,6 +2932,12 @@ impl WidgetSystem for TileLayout<'_, '_> {
                                             title: viewport.name.clone(),
                                         };
                                     }
+                                }
+                                Pane::SensorView(sensor_view) => {
+                                    ui_state.selected_object = SelectedObject::SensorCamera {
+                                        stream: sensor_view.entity,
+                                        title: sensor_view.name.clone(),
+                                    };
                                 }
                                 _ => {}
                             }

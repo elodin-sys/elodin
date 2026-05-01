@@ -143,6 +143,10 @@ pub enum SelectedObject {
         camera: Entity,
         title: String,
     },
+    SensorCamera {
+        stream: Entity,
+        title: String,
+    },
     Graph {
         graph_id: Entity,
     },
@@ -175,6 +179,7 @@ impl SelectedObject {
             SelectedObject::Timeline => None,
             SelectedObject::Entity(pair) => Some(pair.bevy),
             SelectedObject::Viewport { camera, .. } => Some(*camera),
+            SelectedObject::SensorCamera { stream, .. } => Some(*stream),
             SelectedObject::Graph { graph_id } => Some(*graph_id),
             SelectedObject::QueryTable { table_id } => Some(*table_id),
             SelectedObject::Monitor { monitor_id } => Some(*monitor_id),

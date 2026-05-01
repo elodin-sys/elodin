@@ -1,5 +1,9 @@
-use super::frustum_common::{MainViewportQueryItem, color_component_to_u8, frustum_local_points};
+use super::frustum_common::{
+    MainViewportQueryItem, SensorCameraFrustumQueryItem, color_component_to_u8,
+    frustum_local_points,
+};
 use crate::MainCamera;
+use crate::sensor_camera::SensorCameraConfigs;
 use bevy::asset::RenderAssetUsages;
 use bevy::camera::visibility::{NoFrustumCulling, RenderLayers};
 use bevy::ecs::system::SystemParam;
@@ -149,6 +153,8 @@ fn build_frustum_face_mesh(points: &[Vec3; 8]) -> Mesh {
 #[derive(SystemParam)]
 struct FrustumDrawParams<'w, 's> {
     main_viewports: Query<'w, 's, MainViewportQueryItem, With<MainCamera>>,
+    sensor_camera_sources: Query<'w, 's, SensorCameraFrustumQueryItem>,
+    sensor_camera_configs: Res<'w, SensorCameraConfigs>,
     materials: ResMut<'w, Assets<StandardMaterial>>,
     meshes: ResMut<'w, Assets<Mesh>>,
     material_cache: ResMut<'w, FrustumMaterialCache>,
@@ -283,6 +289,30 @@ fn draw_viewport_frustums(mut params: FrustumDrawParams<'_, '_>, mut commands: C
         };
         sources.push((
             camera_entity,
+            points,
+            config.frustums_color,
+            config.frustums_thickness,
+        ));
+    }
+
+    for (source_entity, projection, global_transform, source) in params.sensor_camera_sources.iter()
+    {
+        let Some(config) = params.sensor_camera_configs.0.get(source.config_index) else {
+            continue;
+        };
+        if !config.create_frustum {
+            continue;
+        }
+
+        let Projection::Perspective(perspective) = projection else {
+            continue;
+        };
+        let Some(points) = frustum_local_points(perspective) else {
+            continue;
+        };
+        camera_positions.insert(source_entity, global_transform.translation());
+        sources.push((
+            source_entity,
             points,
             config.frustums_color,
             config.frustums_thickness,

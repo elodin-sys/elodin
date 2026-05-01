@@ -3,7 +3,7 @@ use std::time::Instant;
 use bevy::{
     app::{App, Plugin},
     asset::{Assets, embedded_asset},
-    camera::RenderTarget,
+    camera::{RenderTarget, visibility::RenderLayers},
     core_pipeline::{
         FullscreenShader,
         core_3d::graph::{Core3d, Node3d},
@@ -38,7 +38,7 @@ use impeller2::types::ComponentId;
 use impeller2_wkt::DbConfig;
 pub use impeller2_wkt::SensorCameraConfig;
 
-use crate::object_3d::ComponentArrayExt;
+use crate::object_3d::{ComponentArrayExt, ELLIPSOID_RENDER_LAYER};
 
 #[derive(Resource, Default, Debug, Clone)]
 pub struct SensorCameraConfigs(pub Vec<SensorCameraConfig>);
@@ -49,6 +49,11 @@ pub struct SensorCameraConfigs(pub Vec<SensorCameraConfig>);
 
 #[derive(Component)]
 pub struct SensorCamera {
+    pub config_index: usize,
+}
+
+#[derive(Component)]
+pub struct SensorCameraFrustumSource {
     pub config_index: usize,
 }
 
@@ -99,6 +104,9 @@ struct BufferToggle(Vec<usize>);
 
 #[derive(Resource, Default)]
 pub struct SensorCamerasSpawned(pub bool);
+
+#[derive(Resource, Default)]
+pub struct SensorCameraFrustumSourcesSpawned(pub bool);
 
 /// Controls whether GPU readback is active for this sensor camera.
 /// Separate from Camera.is_active: cameras stay rendering (pipeline warm),
@@ -272,6 +280,7 @@ impl Plugin for SensorCameraPlugin {
                 PreUpdate,
                 update_sensor_camera_transforms.after(crate::PositionSync),
             )
+            .add_systems(Update, update_sensor_camera_render_layers)
             .add_systems(Update, tick_effect_time);
 
         if let Some(render_app) = app.get_sub_app_mut(RenderApp) {
@@ -339,6 +348,42 @@ fn should_spawn_sensor_cameras(
     spawned: Res<SensorCamerasSpawned>,
 ) -> bool {
     !configs.0.is_empty() && !spawned.0
+}
+
+pub fn should_spawn_sensor_camera_frustum_sources(
+    configs: Res<SensorCameraConfigs>,
+    spawned: Res<SensorCameraFrustumSourcesSpawned>,
+) -> bool {
+    !configs.0.is_empty() && !spawned.0
+}
+
+pub fn spawn_sensor_camera_frustum_sources(
+    mut commands: Commands,
+    configs: Res<SensorCameraConfigs>,
+    mut spawned: ResMut<SensorCameraFrustumSourcesSpawned>,
+) {
+    for (i, config) in configs.0.iter().enumerate() {
+        let mut perspective = PerspectiveProjection {
+            fov: config.fov_degrees.to_radians(),
+            near: config.near,
+            far: config.far,
+            ..default()
+        };
+        if config.height > 0 {
+            perspective.aspect_ratio = config.width as f32 / config.height as f32;
+        }
+
+        commands.spawn((
+            Transform::default(),
+            GlobalTransform::default(),
+            Projection::Perspective(perspective),
+            GridCell::<i128>::default(),
+            SensorCameraFrustumSource { config_index: i },
+            Name::new(format!("sensor_camera_frustum_{}", config.camera_name)),
+        ));
+    }
+
+    spawned.0 = true;
 }
 
 fn spawn_sensor_cameras(
@@ -430,6 +475,7 @@ fn spawn_sensor_cameras(
             },
             copier,
             ReadbackArmed(false),
+            sensor_camera_render_layers(config),
             Name::new(format!("sensor_camera_{}", config.camera_name)),
         ));
 
@@ -443,6 +489,30 @@ fn spawn_sensor_cameras(
     }
 
     spawned.0 = true;
+}
+
+fn sensor_camera_render_layers(config: &SensorCameraConfig) -> RenderLayers {
+    let layers = RenderLayers::default();
+    if config.show_ellipsoids {
+        layers.with(ELLIPSOID_RENDER_LAYER)
+    } else {
+        layers
+    }
+}
+
+fn update_sensor_camera_render_layers(
+    configs: Res<SensorCameraConfigs>,
+    mut sensor_cameras: Query<(&SensorCamera, &mut RenderLayers)>,
+) {
+    for (sensor_cam, mut layers) in &mut sensor_cameras {
+        let Some(config) = configs.0.get(sensor_cam.config_index) else {
+            continue;
+        };
+        let desired_layers = sensor_camera_render_layers(config);
+        if *layers != desired_layers {
+            *layers = desired_layers;
+        }
+    }
 }
 
 fn tick_effect_time(time: Res<Time>, mut query: Query<&mut SensorEffectSettings>) {
@@ -464,54 +534,84 @@ fn update_sensor_camera_transforms(
             continue;
         };
 
-        let world_pos_id = ComponentId::new(&format!("{}.world_pos", config.entity_name));
-        let Some(value) = cache.get_at_or_before(&world_pos_id, ts) else {
-            continue;
-        };
-
-        let Some(world_pos) = value.as_world_pos() else {
-            continue;
-        };
-
-        let entity_pos: DVec3 = {
-            let [x, y, z] = world_pos.pos.parts().map(nox::Tensor::into_buf);
-            DVec3::new(x, y, z)
-        };
-        let entity_att: bevy::math::DQuat = {
-            let [i, j, k, w] = world_pos.att.parts().map(nox::Tensor::into_buf);
-            bevy::math::DQuat::from_xyzw(i, j, k, w)
-        };
-
-        let offset = DVec3::new(
-            config.pos_offset[0],
-            config.pos_offset[1],
-            config.pos_offset[2],
-        );
-        let look_at_offset = DVec3::new(
-            config.look_at_offset[0],
-            config.look_at_offset[1],
-            config.look_at_offset[2],
-        );
-
-        let rotated_offset = entity_att * offset;
-        let cam_pos = entity_pos + rotated_offset;
-
-        let rotated_look_at = entity_att * look_at_offset;
-        let look_at_pos = entity_pos + rotated_look_at;
-
-        // Z-up (sim) to Y-up (Bevy) coordinate conversion
-        let cam_pos_bevy = Vec3::new(cam_pos.x as f32, cam_pos.z as f32, -cam_pos.y as f32);
-        let look_at_bevy = Vec3::new(
-            look_at_pos.x as f32,
-            look_at_pos.z as f32,
-            -look_at_pos.y as f32,
-        );
-
-        if cam_pos_bevy.distance(look_at_bevy) > 1e-6 {
-            *transform =
-                Transform::from_translation(cam_pos_bevy).looking_at(look_at_bevy, Vec3::Y);
+        if let Some(new_transform) = sensor_camera_transform(config, &cache, ts) {
+            *transform = new_transform;
         }
     }
+}
+
+pub fn update_sensor_camera_frustum_source_transforms(
+    configs: Res<SensorCameraConfigs>,
+    mut sources: Query<(&SensorCameraFrustumSource, &mut Transform, &mut Projection)>,
+    cache: Res<impeller2_bevy::TelemetryCache>,
+    current_ts: Res<impeller2_wkt::CurrentTimestamp>,
+) {
+    let ts = current_ts.0;
+    for (source, mut transform, mut projection) in &mut sources {
+        let Some(config) = configs.0.get(source.config_index) else {
+            continue;
+        };
+
+        if let Some(new_transform) = sensor_camera_transform(config, &cache, ts) {
+            *transform = new_transform;
+        }
+
+        if let Projection::Perspective(perspective) = projection.as_mut() {
+            perspective.fov = config.fov_degrees.to_radians();
+            perspective.near = config.near;
+            perspective.far = config.far;
+            if config.height > 0 {
+                perspective.aspect_ratio = config.width as f32 / config.height as f32;
+            }
+        }
+    }
+}
+
+fn sensor_camera_transform(
+    config: &SensorCameraConfig,
+    cache: &impeller2_bevy::TelemetryCache,
+    ts: impeller2::types::Timestamp,
+) -> Option<Transform> {
+    let world_pos_id = ComponentId::new(&format!("{}.world_pos", config.entity_name));
+    let value = cache.get_at_or_before(&world_pos_id, ts)?;
+    let world_pos = value.as_world_pos()?;
+
+    let entity_pos: DVec3 = {
+        let [x, y, z] = world_pos.pos.parts().map(nox::Tensor::into_buf);
+        DVec3::new(x, y, z)
+    };
+    let entity_att: bevy::math::DQuat = {
+        let [i, j, k, w] = world_pos.att.parts().map(nox::Tensor::into_buf);
+        bevy::math::DQuat::from_xyzw(i, j, k, w)
+    };
+
+    let offset = DVec3::new(
+        config.pos_offset[0],
+        config.pos_offset[1],
+        config.pos_offset[2],
+    );
+    let look_at_offset = DVec3::new(
+        config.look_at_offset[0],
+        config.look_at_offset[1],
+        config.look_at_offset[2],
+    );
+
+    let cam_pos = entity_pos + entity_att * offset;
+    let look_at_pos = entity_pos + entity_att * look_at_offset;
+
+    // Z-up (sim) to Y-up (Bevy) coordinate conversion.
+    let cam_pos_bevy = Vec3::new(cam_pos.x as f32, cam_pos.z as f32, -cam_pos.y as f32);
+    let look_at_bevy = Vec3::new(
+        look_at_pos.x as f32,
+        look_at_pos.z as f32,
+        -look_at_pos.y as f32,
+    );
+
+    if cam_pos_bevy.distance(look_at_bevy) <= 1e-6 {
+        return None;
+    }
+
+    Some(Transform::from_translation(cam_pos_bevy).looking_at(look_at_bevy, Vec3::Y))
 }
 
 // ---------------------------------------------------------------------------

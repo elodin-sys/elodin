@@ -52,7 +52,7 @@ The Elodin simulation world.
     Load a GLB asset as an Elodin Scene Archetype.
     - `url`: the URL or filepath of the GLB asset
 
-- `sensor_camera(entity, name, width, height, fov=90.0, near=0.01, far=1000.0, pos_offset=[0,0,0], look_at_offset=[0,0,0], format="rgba", effect="normal", effect_params={})` -> None
+- `sensor_camera(entity, name, width, height, fov=90.0, near=0.01, far=1000.0, pos_offset=[0,0,0], look_at_offset=[0,0,0], format="rgba", effect="normal", effect_params={}, create_frustum=False, show_ellipsoids=False, frustums_color=None, projection_color=None, frustums_thickness=0.006)` -> None
 
     Register a virtual sensor camera on an entity. The camera renders offscreen frames on demand via a headless GPU render-server process. Frames are produced by calling `ctx.render_camera()` in a `post_step` callback.
 
@@ -68,6 +68,7 @@ The Elodin simulation world.
     - `format` : `string`, pixel format, defaults to `"rgba"`.
     - `effect` : `string`, GPU post-process effect: `"normal"`, `"thermal"`, `"night_vision"`, or `"depth"`. Defaults to `"normal"`.
     - `effect_params` : `dict`, effect-specific parameters (e.g., `{"contrast": 1.5, "noise_sigma": 0.02}` for thermal).
+    - `show_ellipsoids` : `bool`, render ellipsoid debug objects in this sensor camera. Defaults to `False`.
 
     The camera transform follows the entity: as the entity moves and rotates, the camera position and look-at point rotate with it in body frame.
 

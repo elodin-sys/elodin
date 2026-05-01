@@ -83,10 +83,13 @@ world.sensor_camera(
     format="rgba",             # Pixel format
     effect="normal",           # "normal", "thermal", "night_vision", "depth"
     effect_params={},          # Effect-specific parameters
+    create_frustum=True,       # Show this camera's frustum in 3D viewports
+    show_ellipsoids=False,     # Hide ellipsoid debug objects from camera frames
 )
 ```
 
 The camera transform is computed each frame from the entity's `world_pos` plus the offsets, both rotated into the entity's body frame. As the entity moves and rotates, the camera follows.
+Sensor camera frustums are drawn in viewports with `show_frustums=#true` and use the same coverage/projection controls as viewport frustums.
 
 #### Rendering in post_step
 
@@ -218,6 +221,11 @@ For higher-resolution cameras or more cameras, reduce the render frequency or lo
 | `format` | str | "rgba" | Pixel format (`"rgba"`) |
 | `effect` | str | "normal" | Post-process effect |
 | `effect_params` | dict | {} | Effect-specific parameters |
+| `create_frustum` | bool | false | Create this sensor camera as a frustum source for 3D viewports |
+| `show_ellipsoids` | bool | false | Render ellipsoid debug objects in this sensor camera |
+| `frustums_color` | [f32; 3/4] | yellow | Frustum color, normalized RGBA |
+| `projection_color` | [f32; 3/4] | white | 2D projection color, normalized RGBA |
+| `frustums_thickness` | float | 0.006 | Frustum edge radius in world units |
 
 ### `ctx.render_camera()` / `ctx.render_cameras()`
 

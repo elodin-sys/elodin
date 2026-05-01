@@ -124,6 +124,9 @@ world.sensor_camera(
     pos_offset=[0.0, 0.0, 0.5],
     look_at_offset=[6.0, 6.0, 0.0],
     format="rgba",
+    create_frustum=True,
+    frustums_color=[0.0, 1.0, 1.0, 1.0],
+    projection_color=[0.0, 1.0, 1.0, 1.0],
 )
 
 world.sensor_camera(
@@ -137,6 +140,9 @@ world.sensor_camera(
     format="rgba",
     effect="thermal",
     effect_params={"contrast": 1.5, "noise_sigma": 0.02},
+    create_frustum=True,
+    frustums_color=[1.0, 0.0, 1.0, 1.0],
+    projection_color=[1.0, 0.0, 1.0, 1.0],
 )
 
 # ── Schematic ────────────────────────────────────────────────────────────────
@@ -158,7 +164,7 @@ for name, color in BALL_COLORS.items():
 schematic = """
     timeline follow_latest=#true
     hsplit {{
-        viewport name=Main pos="(0,0,0,0, 14,14,10)" look_at="(0,0,0,0, 0,0,1)" show_grid=#true
+        viewport name=Main pos="(0,0,0,0, 14,14,10)" look_at="(0,0,0,0, 0,0,1)" show_grid=#true show_frustums=#true
         vsplit {{
             sensor_view "cam_ball_a.scene_cam" name="RGB Camera (Cyan Ball)"
             sensor_view "cam_ball_b.thermal_cam" name="Thermal (Magenta Ball)"
