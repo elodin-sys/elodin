@@ -773,7 +773,7 @@ and running the simulation. The <code>World</code> object also provides helper m
 </ul>
 </li>
 <li>
-<p><code>sensor_camera(entity, name, width, height, fov=90.0, near=0.01, far=1000.0, pos_offset=[0,0,0], look_at_offset=[0,0,0], format="rgba", effect="normal", effect_params={})</code> -&gt; None</p>
+<p><code>sensor_camera(entity, name, width, height, fov=90.0, near=0.01, far=1000.0, pos_offset=[0,0,0], look_at_offset=[0,0,0], format="rgba", effect="normal", effect_params={}, create_frustum=False, show_ellipsoids=False, frustums_color=None, projection_color=None, frustums_thickness=0.006)</code> -&gt; None</p>
 <p>Register a virtual sensor camera on an entity. The camera renders offscreen frames on demand via a headless GPU render-server process. Frames are produced by calling <code>ctx.render_camera()</code> in a <code>post_step</code> callback.</p>
 <ul>
 <li><code>entity</code> : <a href="/reference/python-api/#class-elodin-entityid">elodin.EntityId</a>, the entity the camera is attached to.</li>
@@ -788,6 +788,7 @@ and running the simulation. The <code>World</code> object also provides helper m
 <li><code>format</code> : <code>string</code>, pixel format, defaults to <code>"rgba"</code>.</li>
 <li><code>effect</code> : <code>string</code>, GPU post-process effect: <code>"normal"</code>, <code>"thermal"</code>, <code>"night_vision"</code>, or <code>"depth"</code>. Defaults to <code>"normal"</code>.</li>
 <li><code>effect_params</code> : <code>dict</code>, effect-specific parameters (e.g., <code>{"contrast": 1.5, "noise_sigma": 0.02}</code> for thermal).</li>
+<li><code>show_ellipsoids</code> : <code>bool</code>, render ellipsoid debug objects in this sensor camera. Defaults to <code>False</code>.</li>
 </ul>
 <p>The camera transform follows the entity: as the entity moves and rotates, the camera position and look-at point rotate with it in body frame.</p>
 <div class="el-notice warning container-fluid">
