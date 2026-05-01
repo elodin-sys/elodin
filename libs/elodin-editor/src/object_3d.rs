@@ -394,6 +394,9 @@ fn broadcast_strides(
     input_shape: &[usize],
     input_strides: &[usize],
 ) -> smallvec::SmallVec<[usize; 4]> {
+    debug_assert!(output_shape.len() >= input_shape.len());
+    debug_assert_eq!(input_shape.len(), input_strides.len());
+
     let leading_axes = output_shape.len() - input_shape.len();
     output_shape
         .iter()
@@ -421,6 +424,10 @@ fn advance_broadcast_offsets(
     left_offset: &mut usize,
     right_offset: &mut usize,
 ) {
+    debug_assert_eq!(index.len(), shape.len());
+    debug_assert_eq!(left_strides.len(), shape.len());
+    debug_assert_eq!(right_strides.len(), shape.len());
+
     for axis in (0..shape.len()).rev() {
         index[axis] += 1;
         *left_offset += left_strides[axis];
