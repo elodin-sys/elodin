@@ -2231,6 +2231,26 @@ mod ellipsoid_scale_eql_tests {
     }
 
     #[test]
+    fn apply_binary_op_supports_sub_and_div_with_broadcasting() {
+        let left = Array::<f64, nox::Dyn>::from_shape_vec(
+            smallvec::smallvec![2, 3],
+            vec![10.0, 20.0, 30.0, 40.0, 50.0, 60.0],
+        )
+        .expect("left array");
+        let right =
+            Array::<f64, nox::Dyn>::from_shape_vec(smallvec::smallvec![3], vec![1.0, 2.0, 5.0])
+                .expect("right array");
+
+        let sub = apply_binary_op(&left, &right, eql::BinaryOp::Sub).expect("broadcasted sub");
+        let div = apply_binary_op(&left, &right, eql::BinaryOp::Div).expect("broadcasted div");
+
+        assert_eq!(sub.shape(), &[2, 3]);
+        assert_eq!(sub.buf.as_buf(), &[9.0, 18.0, 25.0, 39.0, 48.0, 55.0]);
+        assert_eq!(div.shape(), &[2, 3]);
+        assert_eq!(div.buf.as_buf(), &[10.0, 10.0, 6.0, 40.0, 25.0, 12.0]);
+    }
+
+    #[test]
     fn object_3d_eql_binary_ops_reject_same_len_incompatible_shapes() {
         let left = Array::<f64, nox::Dyn>::from_shape_vec(
             smallvec::smallvec![2, 3],
