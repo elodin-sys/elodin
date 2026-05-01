@@ -386,25 +386,51 @@ fn row_major_strides(shape: &[usize]) -> smallvec::SmallVec<[usize; 4]> {
     strides
 }
 
-fn broadcast_offset(
-    output_index: &[usize],
+fn broadcast_strides(
+    output_shape: &[usize],
     input_shape: &[usize],
     input_strides: &[usize],
-) -> usize {
-    let leading_axes = output_index.len() - input_shape.len();
-    input_shape
+) -> smallvec::SmallVec<[usize; 4]> {
+    let leading_axes = output_shape.len() - input_shape.len();
+    output_shape
         .iter()
-        .zip(input_strides.iter())
         .enumerate()
-        .map(|(axis, (&dim, &stride))| {
-            let index = if dim == 1 {
+        .map(|(axis, _)| {
+            if axis < leading_axes {
                 0
             } else {
-                output_index[leading_axes + axis]
-            };
-            index * stride
+                let input_axis = axis - leading_axes;
+                if input_shape[input_axis] == 1 {
+                    0
+                } else {
+                    input_strides[input_axis]
+                }
+            }
         })
-        .sum()
+        .collect()
+}
+
+fn advance_broadcast_offsets(
+    index: &mut [usize],
+    shape: &[usize],
+    left_strides: &[usize],
+    right_strides: &[usize],
+    left_offset: &mut usize,
+    right_offset: &mut usize,
+) {
+    for axis in (0..shape.len()).rev() {
+        index[axis] += 1;
+        *left_offset += left_strides[axis];
+        *right_offset += right_strides[axis];
+
+        if index[axis] < shape[axis] {
+            break;
+        }
+
+        *left_offset -= index[axis] * left_strides[axis];
+        *right_offset -= index[axis] * right_strides[axis];
+        index[axis] = 0;
+    }
 }
 
 fn apply_binary_op(
@@ -418,8 +444,16 @@ fn apply_binary_op(
     let right_data = right.buf.as_buf();
     let output_shape = broadcast_shape(left.shape(), right.shape())?;
     let output_len = output_shape.iter().product();
-    let left_strides = row_major_strides(left.shape());
-    let right_strides = row_major_strides(right.shape());
+    let left_strides = broadcast_strides(
+        &output_shape,
+        left.shape(),
+        &row_major_strides(left.shape()),
+    );
+    let right_strides = broadcast_strides(
+        &output_shape,
+        right.shape(),
+        &row_major_strides(right.shape()),
+    );
 
     let apply = |left: f64, right: f64| match op {
         eql::BinaryOp::Add => left + right,
@@ -428,18 +462,23 @@ fn apply_binary_op(
         eql::BinaryOp::Div => left / right,
     };
 
-    let mut output_index = smallvec::SmallVec::<[usize; 4]>::from_elem(0, output_shape.len());
+    let mut index = smallvec::SmallVec::<[usize; 4]>::from_elem(0, output_shape.len());
+    let mut left_offset = 0;
+    let mut right_offset = 0;
     let mut values = Vec::with_capacity(output_len);
     for flat_index in 0..output_len {
-        let mut remaining = flat_index;
-        for axis in (0..output_shape.len()).rev() {
-            output_index[axis] = remaining % output_shape[axis];
-            remaining /= output_shape[axis];
-        }
-
-        let left_offset = broadcast_offset(&output_index, left.shape(), &left_strides);
-        let right_offset = broadcast_offset(&output_index, right.shape(), &right_strides);
         values.push(apply(left_data[left_offset], right_data[right_offset]));
+
+        if flat_index + 1 < output_len {
+            advance_broadcast_offsets(
+                &mut index,
+                &output_shape,
+                &left_strides,
+                &right_strides,
+                &mut left_offset,
+                &mut right_offset,
+            );
+        }
     }
 
     Array::from_shape_vec(output_shape, values)
@@ -2174,7 +2213,7 @@ mod ellipsoid_scale_eql_tests {
     #[test]
     fn apply_binary_op_broadcasts_arrays_with_different_ranks() {
         let left =
-            Array::<f64, nox::Dyn>::from_shape_vec(smallvec::smallvec![1, 3], vec![1.0, 2.0, 3.0])
+            Array::<f64, nox::Dyn>::from_shape_vec(smallvec::smallvec![3], vec![1.0, 2.0, 3.0])
                 .expect("left array");
         let right = Array::<f64, nox::Dyn>::from_shape_vec(
             smallvec::smallvec![2, 3],
