@@ -1,7 +1,8 @@
 use arrow::{
     array::{
-        Array, ArrayRef, ArrowPrimitiveType, BooleanArray, FixedSizeListArray, Int32Array,
-        PrimitiveArray, RecordBatch, TimestampMicrosecondArray,
+        Array, ArrayRef, ArrowPrimitiveType, BooleanArray, BooleanBufferBuilder,
+        FixedSizeListArray, Int32Array, NullBufferBuilder, PrimitiveArray, RecordBatch,
+        TimestampMicrosecondArray,
     },
     buffer::{BooleanBuffer, Buffer, ScalarBuffer},
     compute,
@@ -151,6 +152,7 @@ impl Component {
     ) -> (Vec<FieldRef>, Vec<ArrayRef>) {
         let name = name.to_string();
         let size = self.schema.dim.iter().product::<usize>();
+        let _span = tracing::trace_span!("as_flattened_columns", component = %name, size).entered();
         let (field, array) = self.as_data_array_range(name.clone(), range);
         // Only return early if dim is empty (scalar type, not a FixedSizeList)
         // When dim is not empty but size == 1, we still need to flatten to extract from FixedSizeList
@@ -169,30 +171,50 @@ impl Component {
             element_names.split(',').map(|s| s.trim()).collect()
         };
 
-        let mut fields = Vec::new();
-        let mut arrays = Vec::new();
-        for i in 0..size {
+        let make_field = |i: usize, dt: DataType| -> FieldRef {
             let suffix = if i < element_name_parts.len() && !element_name_parts[i].is_empty() {
                 element_name_parts[i].to_string()
             } else {
                 i.to_string()
             };
-            let field_name = format!("{}.{}", name, suffix);
+            Arc::new(Field::new(format!("{}.{}", name, suffix), dt, false))
+        };
 
-            // Extract every nth element starting from offset i using arrow's take function
-            let indices: Vec<i32> = (0..num_lists).map(|row| (row * size + i) as i32).collect();
+        // For primitives (the universal case for time-series mmap data) extract via a
+        // single strided walk over the contiguous values buffer. This avoids one
+        // `Vec<i32>` index allocation + one `compute::take` call per output column.
+        let arrays = match values.data_type() {
+            DataType::Float64 => stride_split_primitive::<Float64Type>(values, num_lists, size),
+            DataType::Float32 => stride_split_primitive::<Float32Type>(values, num_lists, size),
+            DataType::Int64 => stride_split_primitive::<Int64Type>(values, num_lists, size),
+            DataType::Int32 => stride_split_primitive::<Int32Type>(values, num_lists, size),
+            DataType::Int16 => stride_split_primitive::<Int16Type>(values, num_lists, size),
+            DataType::Int8 => stride_split_primitive::<Int8Type>(values, num_lists, size),
+            DataType::UInt64 => stride_split_primitive::<UInt64Type>(values, num_lists, size),
+            DataType::UInt32 => stride_split_primitive::<UInt32Type>(values, num_lists, size),
+            DataType::UInt16 => stride_split_primitive::<UInt16Type>(values, num_lists, size),
+            DataType::UInt8 => stride_split_primitive::<UInt8Type>(values, num_lists, size),
+            DataType::Boolean => stride_split_bool(values, num_lists, size),
+            _ => {
+                // Fallback: one `compute::take` per output column. Only reached for
+                // unusual element types (none of which are produced by Component::create).
+                (0..size)
+                    .map(|i| {
+                        let indices: Vec<i32> =
+                            (0..num_lists).map(|row| (row * size + i) as i32).collect();
+                        let indices_array = Int32Array::from(indices);
+                        compute::take(values, &indices_array, None)
+                            .expect("Failed to take elements")
+                    })
+                    .collect::<Vec<_>>()
+            }
+        };
 
-            let indices_array = Int32Array::from(indices);
-            let element_array =
-                compute::take(values, &indices_array, None).expect("Failed to take elements");
-            let field = Arc::new(Field::new(
-                field_name,
-                element_array.data_type().clone(),
-                false,
-            ));
-            fields.push(field);
-            arrays.push(element_array);
-        }
+        let fields: Vec<FieldRef> = arrays
+            .iter()
+            .enumerate()
+            .map(|(i, a)| make_field(i, a.data_type().clone()))
+            .collect();
 
         (fields, arrays)
     }
@@ -407,32 +429,40 @@ Use a path that exists on the database host."
                 };
                 let schema = record_batch.schema_ref();
 
+                const FILE_BUF_CAP: usize = 1 << 20;
                 match export_format.clone() {
                     ArchiveFormat::ArrowIpc => {
                         let file_name = format!("{column_name}.arrow");
                         let file_path = resolved_dir.join(file_name);
-                        let mut file = File::create(file_path)?;
-                        let mut writer =
-                            arrow::ipc::writer::FileWriter::try_new(&mut file, schema)?;
+                        let file = File::create(file_path)?;
+                        let mut buf = std::io::BufWriter::with_capacity(FILE_BUF_CAP, file);
+                        let mut writer = arrow::ipc::writer::FileWriter::try_new(&mut buf, schema)?;
                         writer.write(&record_batch)?;
                         writer.finish()?;
+                        drop(writer);
+                        std::io::Write::flush(&mut buf)?;
                     }
                     #[cfg(feature = "parquet")]
                     ArchiveFormat::Parquet => {
                         let file_name = format!("{column_name}.parquet");
                         let file_path = resolved_dir.join(file_name);
-                        let mut file = File::create(file_path)?;
+                        let file = File::create(file_path)?;
+                        let mut buf = std::io::BufWriter::with_capacity(FILE_BUF_CAP, file);
                         let mut writer =
-                            parquet::arrow::ArrowWriter::try_new(&mut file, schema.clone(), None)?;
+                            parquet::arrow::ArrowWriter::try_new(&mut buf, schema.clone(), None)?;
                         writer.write(&record_batch)?;
                         writer.close()?;
+                        std::io::Write::flush(&mut buf)?;
                     }
                     ArchiveFormat::Csv => {
                         let file_name = format!("{column_name}.csv");
                         let file_path = resolved_dir.join(file_name);
-                        let mut file = File::create(file_path)?;
-                        let mut writer = arrow::csv::Writer::new(&mut file);
+                        let file = File::create(file_path)?;
+                        let mut buf = std::io::BufWriter::with_capacity(FILE_BUF_CAP, file);
+                        let mut writer = arrow::csv::Writer::new(&mut buf);
                         writer.write(&record_batch)?;
+                        drop(writer);
+                        std::io::Write::flush(&mut buf)?;
                     }
                     #[allow(unreachable_patterns)]
                     _ => return Err(Error::UnsupportedArchiveFormat),
@@ -503,6 +533,99 @@ fn looks_like_windows_absolute(path: &Path) -> bool {
         (bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':')
             || s.starts_with("\\\\")
     })
+}
+
+/// Split a `FixedSizeList<PrimitiveArray<T>>`-style values buffer into `size` per-element
+/// columns by striding through the contiguous values. Replaces the previous
+/// `compute::take` per-column gather: one walk over the source instead of `size` separate
+/// gathers, no `Vec<i32>` index allocations.
+fn stride_split_primitive<T: ArrowPrimitiveType>(
+    values: &ArrayRef,
+    num_lists: usize,
+    size: usize,
+) -> Vec<ArrayRef> {
+    let arr = values
+        .as_any()
+        .downcast_ref::<PrimitiveArray<T>>()
+        .expect("FixedSizeList values primitive type mismatch");
+    let raw: &[T::Native] = arr.values();
+    let has_nulls = arr.null_count() > 0;
+
+    let mut cols: Vec<Vec<T::Native>> = (0..size).map(|_| Vec::with_capacity(num_lists)).collect();
+    for row in 0..num_lists {
+        let base = row * size;
+        for j in 0..size {
+            cols[j].push(raw[base + j]);
+        }
+    }
+
+    if has_nulls {
+        // Rare path: also gather per-cell null bits per output column.
+        let mut null_builders: Vec<NullBufferBuilder> = (0..size)
+            .map(|_| NullBufferBuilder::new(num_lists))
+            .collect();
+        for row in 0..num_lists {
+            let base = row * size;
+            for (j, nb) in null_builders.iter_mut().enumerate().take(size) {
+                nb.append(!arr.is_null(base + j));
+            }
+        }
+        cols.into_iter()
+            .zip(null_builders)
+            .map(|(c, mut nb)| {
+                let nulls = nb.finish();
+                Arc::new(PrimitiveArray::<T>::new(ScalarBuffer::from(c), nulls)) as ArrayRef
+            })
+            .collect()
+    } else {
+        cols.into_iter()
+            .map(|c| Arc::new(PrimitiveArray::<T>::new(ScalarBuffer::from(c), None)) as ArrayRef)
+            .collect()
+    }
+}
+
+/// Boolean variant of [`stride_split_primitive`]. BooleanArray uses bit-packed storage so
+/// we go through `BooleanBufferBuilder` rather than a typed slice.
+fn stride_split_bool(values: &ArrayRef, num_lists: usize, size: usize) -> Vec<ArrayRef> {
+    let arr = values
+        .as_any()
+        .downcast_ref::<BooleanArray>()
+        .expect("FixedSizeList values BooleanArray mismatch");
+    let has_nulls = arr.null_count() > 0;
+
+    let mut col_bufs: Vec<BooleanBufferBuilder> = (0..size)
+        .map(|_| BooleanBufferBuilder::new(num_lists))
+        .collect();
+    for row in 0..num_lists {
+        let base = row * size;
+        for (j, buf) in col_bufs.iter_mut().enumerate().take(size) {
+            buf.append(arr.value(base + j));
+        }
+    }
+
+    if has_nulls {
+        let mut null_builders: Vec<NullBufferBuilder> = (0..size)
+            .map(|_| NullBufferBuilder::new(num_lists))
+            .collect();
+        for row in 0..num_lists {
+            let base = row * size;
+            for (j, nb) in null_builders.iter_mut().enumerate().take(size) {
+                nb.append(!arr.is_null(base + j));
+            }
+        }
+        col_bufs
+            .into_iter()
+            .zip(null_builders)
+            .map(|(mut buf, mut nb)| {
+                Arc::new(BooleanArray::new(buf.finish(), nb.finish())) as ArrayRef
+            })
+            .collect()
+    } else {
+        col_bufs
+            .into_iter()
+            .map(|mut buf| Arc::new(BooleanArray::new(buf.finish(), None)) as ArrayRef)
+            .collect()
+    }
 }
 
 fn bool_ref<T: IntoBytes + Immutable, R: RangeBounds<usize>>(

@@ -176,7 +176,7 @@ PY
   fi
 
   echo "==> [${example_name}] exporting telemetry to CSV"
-  elodin-db export --format csv --flatten --output "${export_dir}" "${db_path}"
+  elodin-db export --format csv --flatten --include-private --output "${export_dir}" "${db_path}"
 
   if [[ "${update_baseline}" == "1" ]]; then
     if [[ "${baseline_dir}" == "${baseline_root}" ]] && [[ -n "${file_prefix}" ]]; then

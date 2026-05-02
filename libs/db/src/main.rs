@@ -268,6 +268,33 @@ struct ExportArgs {
     flatten: bool,
     #[clap(long, help = "Filter components by glob pattern (e.g., 'NavNED.*')")]
     pattern: Option<String>,
+    #[clap(
+        long,
+        help = "CSV-only: use ryu for f32/f64 (much faster, slightly different but still round-trippable text format). Off by default."
+    )]
+    csv_fast_floats: bool,
+    #[clap(
+        long,
+        help = "Group components by name prefix (everything before the last '.') and emit one file per group. Components in a group are joined on time."
+    )]
+    join: bool,
+    #[clap(
+        long,
+        conflicts_with = "mono_us",
+        help = "Replace the time column with integer nanoseconds since unix epoch (column renamed to `time_ns`). Mutually exclusive with --mono-us."
+    )]
+    mono_ns: bool,
+    #[clap(
+        long,
+        conflicts_with = "mono_ns",
+        help = "Replace the time column with integer microseconds since unix epoch (column renamed to `time_us`). Mutually exclusive with --mono-ns."
+    )]
+    mono_us: bool,
+    #[clap(
+        long,
+        help = "Include components whose metadata has `private: true`. Off by default \u{2014} those components are skipped."
+    )]
+    include_private: bool,
 }
 
 #[cfg(feature = "video-export")]
@@ -608,11 +635,31 @@ async fn main() -> miette::Result<()> {
             format,
             flatten,
             pattern,
+            csv_fast_floats,
+            join,
+            mono_ns,
+            mono_us,
+            include_private,
         }) => {
             // Install signal handlers only for Export command which uses check_cancelled()
             elodin_db::cancellation::install_signal_handlers();
 
-            elodin_db::export::run(path, output, format, flatten, pattern).into_diagnostic()
+            // clap's `conflicts_with` ensures these aren't both set.
+            let time_format = match (mono_ns, mono_us) {
+                (true, false) => elodin_db::export::TimeFormat::MonoNanoseconds,
+                (false, true) => elodin_db::export::TimeFormat::MonoMicroseconds,
+                _ => elodin_db::export::TimeFormat::Iso8601,
+            };
+
+            let options = elodin_db::export::ExportOptions {
+                flatten,
+                pattern,
+                csv_fast_floats,
+                join,
+                time_format,
+                include_private,
+            };
+            elodin_db::export::run(path, output, format, options).into_diagnostic()
         }
         #[cfg(feature = "video-export")]
         Commands::ExportVideos(args) => {
