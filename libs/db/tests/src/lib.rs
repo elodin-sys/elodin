@@ -1534,12 +1534,19 @@ mod tests {
         src_db.flush_all().unwrap();
         fol_db.flush_all().unwrap();
 
+        let opts = |pat: Option<&str>| elodin_db::export::ExportOptions {
+            flatten: true,
+            pattern: pat.map(String::from),
+            csv_fast_floats: false,
+            join: false,
+            ..Default::default()
+        };
+
         elodin_db::export::run(
             src_db.path.clone(),
             src_out.clone(),
             elodin_db::export::ExportFormat::Csv,
-            true,
-            pattern.map(String::from),
+            opts(pattern),
         )
         .unwrap();
 
@@ -1547,8 +1554,7 @@ mod tests {
             fol_db.path.clone(),
             fol_out.clone(),
             elodin_db::export::ExportFormat::Csv,
-            true,
-            pattern.map(String::from),
+            opts(pattern),
         )
         .unwrap();
 

@@ -93,6 +93,10 @@ convert_case = "0.8.0"
 thingbuf.version = "0.1"
 parquet.version = "55"
 parquet.optional = true
+# fast text formatting for CSV export (opt-in via --csv-fast-floats)
+ryu = "1"
+# parallel per-component export
+rayon = "1.11"
 
 
 # axum
@@ -123,6 +127,10 @@ render-bridge.path = "../render-bridge"
 name = "elodin-db-bench"
 path = "src/bin/bench.rs"
 
+[[bin]]
+name = "bench-csv-export"
+path = "src/bin/bench-csv-export.rs"
+
 [[test]]
 name = "query_cli_goldie"
 path = "tests_query/query_cli_goldie.rs"
@@ -134,6 +142,10 @@ path = "tests_query/eql_cast_query.rs"
 [[test]]
 name = "prim_types_fixture_goldie"
 path = "tests_query/prim_types_fixture_goldie.rs"
+
+[[test]]
+name = "csv_export_goldie"
+path = "tests_query/csv_export_goldie.rs"
 
 [dev-dependencies]
 goldie = "0.6"
