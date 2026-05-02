@@ -2,7 +2,16 @@
   lib,
   pkgs,
   ...
-}: {
+}: let
+  mesaVulkanIcdFilenamesFor = pkgs: let
+    icdDir = "${pkgs.mesa}/share/vulkan/icd.d";
+    dir = builtins.readDir icdDir;
+    names =
+      lib.filter (n: dir.${n} == "regular" && lib.hasSuffix ".json" n)
+      (lib.attrNames dir);
+  in
+    lib.concatStringsSep ":" (map (n: "${icdDir}/${n}") (lib.sort lib.lessThan names));
+in {
   src = let
     includeSrc = orig_path: type: let
       path = toString orig_path;
@@ -139,7 +148,7 @@
     LIBGL_DRIVERS_PATH = "${pkgs.mesa}/lib/dri";
     __GLX_VENDOR_LIBRARY_NAME = "mesa";
     LIBVA_DRIVERS_PATH = "${pkgs.mesa}/lib/dri";
-    VK_ICD_FILENAMES = "${pkgs.mesa}/share/vulkan/icd.d/radeon_icd.x86_64.json:${pkgs.mesa}/share/vulkan/icd.d/intel_icd.x86_64.json:${pkgs.mesa}/share/vulkan/icd.d/lvp_icd.x86_64.json";
+    VK_ICD_FILENAMES = mesaVulkanIcdFilenamesFor pkgs;
     VK_LAYER_PATH = "${pkgs.vulkan-validation-layers}/share/vulkan/explicit_layer.d";
     ALSA_PLUGIN_DIR = "${pkgs.pipewire}/lib/alsa-lib";
   };
@@ -189,7 +198,7 @@
       --set LIBGL_DRIVERS_PATH "${pkgs.mesa}/lib/dri" \
       --set __GLX_VENDOR_LIBRARY_NAME "mesa" \
       --set LIBVA_DRIVERS_PATH "${pkgs.mesa}/lib/dri" \
-      --prefix VK_ICD_FILENAMES : "${pkgs.mesa}/share/vulkan/icd.d/radeon_icd.x86_64.json:${pkgs.mesa}/share/vulkan/icd.d/intel_icd.x86_64.json:${pkgs.mesa}/share/vulkan/icd.d/lvp_icd.x86_64.json" \
+      --prefix VK_ICD_FILENAMES : "${mesaVulkanIcdFilenamesFor pkgs}" \
       --prefix VK_LAYER_PATH : "${pkgs.vulkan-validation-layers}/share/vulkan/explicit_layer.d" \
       --set ALSA_PLUGIN_DIR "${pkgs.pipewire}/lib/alsa-lib"
     '';
