@@ -499,6 +499,8 @@ fn join_group_outer(group: &ExportGroup, flatten: bool) -> RecordBatch {
         all_ts.extend(m.values().iter().copied());
     }
     all_ts.sort_unstable();
+    // KNOWN LIMITATION: collapses within-member duplicate microsecond timestamps; if a
+    // member legitimately has two samples in the same microsecond only the first survives.
     all_ts.dedup();
     let union_ts = TimestampMicrosecondArray::from(all_ts);
 
