@@ -616,6 +616,8 @@ elodin-db query --eql "rocket.world_pos" --limit 1000 -f parquet ./my-database >
 
 Export database contents to parquet, arrow-ipc, or csv files without requiring a running server. This is useful for analyzing telemetry data with external tools like pandas, DuckDB, or other data analysis frameworks.
 
+The export runs in parallel across components and is dramatically faster than the historical single-threaded path; on a 20-core machine the customer's ~3 GB CSV export went from ~32 s (default formatting) to ~2.2 s (`--csv-fast-floats`), a 14× speedup.
+
 **Usage:** `elodin-db export [OPTIONS] --output <OUTPUT> <PATH>`
 
 ###### **Arguments**
@@ -632,9 +634,19 @@ Export database contents to parquet, arrow-ipc, or csv files without requiring a
 
   Possible values: `parquet`, `arrow-ipc`, `csv`
 
-* `--flatten` — Flatten vector columns to separate columns (e.g., `vel_ned` becomes `vel_ned_x`, `vel_ned_y`, `vel_ned_z`)
+* `--flatten` — Flatten vector columns to separate columns (e.g., `vel_ned` becomes `vel_ned.x`, `vel_ned.y`, `vel_ned.z`)
 
 * `--pattern <PATTERN>` — Filter components by glob pattern (e.g., `NavNED.*`, `*.velocity`)
+
+* `--join` — Group components by name prefix (everything before the last `.`) and emit one file per group. Components in a group are joined on time. See [Component Joining](#component-joining) below.
+
+* `--csv-fast-floats` — CSV-only: format `f32` and `f64` values via `ryu` instead of Rust's `Display`. Much faster (around 2x on float-heavy components) but produces a slightly different (still round-trippable) text format (e.g. `0.0000001` becomes `1e-7`, `1.0` stays `1.0` instead of `1`). Off by default so existing pipelines that consume the CSV see no format change.
+
+* `--mono-ns` — Replace the time column with integer nanoseconds since unix epoch. The column is renamed `time_ns` and changes type from `Timestamp(Microsecond)` to `Int64`. Mutually exclusive with `--mono-us`. Applies to all formats (CSV, Parquet, Arrow IPC).
+
+* `--mono-us` — Replace the time column with integer microseconds since unix epoch. The column is renamed `time_us` and changes type from `Timestamp(Microsecond)` to `Int64`. Mutually exclusive with `--mono-ns`. Applies to all formats.
+
+* `--include-private` — Include components whose metadata has `private: true`. Off by default — those components are skipped (see [Private Components](#private-components) below).
 
 ###### **Export Formats**
 
@@ -649,8 +661,8 @@ Export database contents to parquet, arrow-ipc, or csv files without requiring a
 By default, vector columns (e.g., 3D positions, quaternions) are exported as fixed-size lists. When exporting to CSV without `--flatten`, these appear as JSON-like strings (e.g., `[1.0, 2.0, 3.0]`).
 
 With `--flatten`, vector columns are split into separate scalar columns with element names as suffixes:
-- `position` (3D vector) → `position_x`, `position_y`, `position_z`
-- `quaternion` (4D vector) → `quaternion_w`, `quaternion_x`, `quaternion_y`, `quaternion_z`
+- `position` (3D vector) → `position.x`, `position.y`, `position.z`
+- `quaternion` (4D vector) → `quaternion.q0`, `quaternion.q1`, `quaternion.q2`, `quaternion.q3`
 
 This is particularly useful for CSV export or when working with tools that don't support nested types.
 
@@ -664,6 +676,43 @@ Examples:
 - `rocket.*` — export only components starting with "rocket."
 - `*.velocity` — export only velocity components
 - `NavNED.*` — export only NavNED components
+
+###### **Component Joining**
+
+By default each component is exported to its own file. With `--join`, components are grouped by their **name prefix** (everything before the last `.`) and joined on time into a single file per group:
+
+| Component name | Group | Short name |
+|---|---|---|
+| `TARGETMESSAGE.POS_ECEF` | `TARGETMESSAGE` | `POS_ECEF` |
+| `TARGETMESSAGE.VEL_ECEF` | `TARGETMESSAGE` | `VEL_ECEF` |
+| `rocket.set_control` | `rocket` | `set_control` |
+| `tick` | `tick` | `tick` |
+
+The example above produces three output files: `TARGETMESSAGE.csv` (with `time, POS_ECEF, VEL_ECEF` columns), `rocket.csv`, and `tick.csv`. Components in a group with **identical** timestamp arrays are zipped onto a shared time axis; components with disjoint timestamps go through a sorted union with NULL fill for the missing rows. Composes with `--flatten`, `--csv-fast-floats`, `--mono-ns`/`--mono-us`, and `--pattern`.
+
+###### **Time Column Format**
+
+The default time column is a `Timestamp(Microsecond)` field named `time` rendered as ISO 8601 in CSV (e.g. `1970-01-01T00:00:00.019`). The two `--mono-*` flags swap it for an integer column to make it directly comparable to user-stored monotonic timestamps:
+
+| Flag | Column header | Type | Example value |
+|---|---|---|---|
+| (none, default) | `time` | `Timestamp(Microsecond)` | `1970-01-01T00:00:00.019` |
+| `--mono-us` | `time_us` | `Int64` | `19000` |
+| `--mono-ns` | `time_ns` | `Int64` | `19000000` |
+
+The conversion is exact within the database's microsecond storage precision: `time_ns = time_us * 1000`. If your data has its own monotonic field in nanoseconds (e.g. `TIME_MONOTONIC`), `--mono-ns` makes the values comparable cell-for-cell — typically matching every row to within ~1 µs (any difference is sub-microsecond rounding from the on-disk storage).
+
+###### **Private Components**
+
+Components whose metadata contains `"private": "true"` are skipped during export by default. This lets simulation authors mark intermediate or sensitive components (e.g. internal Kalman filter state, scratch buffers, large covariance matrices) so that downstream pipelines never see them when re-running `elodin-db export` against a recorded DB. See the Python API reference for how to set this metadata key on a component.
+
+When the flag is honored, the export prints a one-line skip message per component:
+
+```
+  Skipping drone.estimate_covariance (private)
+```
+
+Pass `--include-private` to override the filter and export every component regardless of metadata (useful for forensic or full-fidelity exports).
 
 ###### **Example**
 
@@ -682,6 +731,18 @@ elodin-db export ./my-database -o ./export --pattern "rocket.*"
 
 # Export velocity components as flattened CSV
 elodin-db export ./my-database -o ./export --format csv --flatten --pattern "*.velocity"
+
+# Export with maximum CSV throughput (ryu floats + integer-nanosecond time column)
+elodin-db export ./my-database -o ./export --format csv --csv-fast-floats --mono-ns
+
+# Group components by message family into one file per group
+elodin-db export ./my-database -o ./export --format csv --join
+
+# Same, with flattened vectors and integer-microsecond time
+elodin-db export ./my-database -o ./export --format csv --join --flatten --mono-us
+
+# Include components flagged `private: true` in the export
+elodin-db export ./my-database -o ./export --format csv --include-private
 ```
 
 

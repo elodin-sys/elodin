@@ -577,6 +577,33 @@ A container of component metadata.
 
     The above example defines a "wind" component that is a 3D vector of `float64` values. The "element_names" entry is an example of optional metadata. It specifies the labels for each element of the vector that are displayed in the component inspector.
 
+    #### Reserved metadata keys
+
+    The `metadata` dict accepts arbitrary string keys, but a few keys have special meaning across Elodin tools:
+
+    | Key | Value | Effect |
+    |---|---|---|
+    | `element_names` | comma-separated string (e.g. `"x,y,z"`, `"q0,q1,q2,q3"`) | Labels for each element of a vector or matrix component. Used by the component inspector and as column suffixes when exporting with `elodin-db export --flatten`. |
+    | `private` | `"true"` | Component is omitted from `elodin-db export` by default (pass `--include-private` to include it). Useful for marking internal scratch state (e.g. large covariance matrices) that downstream consumers shouldn't see. |
+    | `external_control` | `"true"` | Component is writable from external clients (e.g. Betaflight or a HITL bridge) over the Impeller2 protocol. The simulation will not overwrite values written externally. |
+
+    Example combining a label hint with the export-skip flag:
+
+    ```python
+    import elodin as el
+    import jax
+    import typing as ty
+
+    EstCov = ty.Annotated[
+        jax.Array,
+        el.Component(
+            "estimate_covariance",
+            el.ComponentType(el.PrimitiveType.F64, (18, 18)),
+            metadata={"private": "true"},
+        ),
+    ]
+    ```
+
 - `Component.name(component)` -> `string`
 
     The unique name of the component.
