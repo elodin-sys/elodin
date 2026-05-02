@@ -78,21 +78,29 @@ order = 6
   - `box`: `x`, `y`, `z` (all required); `color` (default white).
   - `cylinder`: `radius`, `height` (both required); `color` (default white).
   - `plane`: `width`/`depth` (default `size` if set, else 10.0); optional `size` shorthand; `color` (default white).
-  - `ellipsoid`: , `color` (default white), `show_grid` (default `#false`).
-     - Physical measure
-        -`scale` an EQL string, e.g., `"(1, 1, 1)"` in meters
-     - Error measure
-        - `error_covariance_cholesky` as an alternative to specifying the scale
-          and rotation, one can specify the lower triangle cholesky L of the
-          error covariance matrix P = LL^T. Example `"(a,b,c,d,e,f)"` which
-          describes a matrix that looks like this:
-          | a 0 0 |
-          | b c 0 |
-          | d e f |
-        - `error_confidence_interval` (default `70`) the percentage that if this
-          were repeated 100 times, we would expect that in 70 cases, the true
-          value would be within the bounds. In practice this means that the
-          larger the error confidence interval, the larger the ellipsoid.
+  - `ellipsoid`: `color` (default white), `show_grid` (default `#false`).
+    - Physical measure
+      - `scale`: runtime EQL string that must evaluate to at least 3 values in meters. It can be a literal tuple, a vector component, indexed component values, scalar-vector math, or values from multiple components.
+        - Examples:
+          ```kdl
+          ellipsoid scale="(1, 1, 1)"
+          ellipsoid scale="vehicle.pos_std_var"
+          ellipsoid scale="2.0 * vehicle.pos_std_var"
+          ellipsoid scale="1.91*(vehicle.pos_std_var[1], vehicle.pos_std_var[0], vehicle.pos_std_var[2])"
+          ellipsoid scale="3.0 * (vehicle.pos_std_var[1], 0.0, target.pos_std_var[2])"
+          ```
+    - Error measure
+      - `error_covariance_cholesky` as an alternative to specifying the scale
+        and rotation, one can specify the lower triangle cholesky L of the
+        error covariance matrix P = LL^T. Example `"(a,b,c,d,e,f)"` which
+        describes a matrix that looks like this:
+        | a 0 0 |
+        | b c 0 |
+        | d e f |
+      - `error_confidence_interval` (default `70`) the percentage that if this
+        were repeated 100 times, we would expect that in 70 cases, the true
+        value would be within the bounds. In practice this means that the
+        larger the error confidence interval, the larger the ellipsoid.
 
   Mesh nodes support an optional `emissivity=<value>` property (0.0–1.0) to make the material glow (e.g., `sphere radius=0.2 emissivity=0.25 { color yellow }`).
 
