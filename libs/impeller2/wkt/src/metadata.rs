@@ -39,6 +39,16 @@ impl ComponentMetadata {
             self.metadata.remove("_is_timestamp_source");
         }
     }
+
+    /// Returns true if this component's metadata contains `"private": "true"`.
+    /// Private components are skipped by `elodin-db export` unless `--include-private`
+    /// is passed.
+    pub fn is_private(&self) -> bool {
+        self.metadata
+            .get("private")
+            .map(|v| v == "true")
+            .unwrap_or(false)
+    }
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Schema)]

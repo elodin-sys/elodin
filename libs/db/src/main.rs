@@ -290,6 +290,11 @@ struct ExportArgs {
         help = "Replace the time column with integer microseconds since unix epoch (column renamed to `time_us`). Mutually exclusive with --mono-ns."
     )]
     mono_us: bool,
+    #[clap(
+        long,
+        help = "Include components whose metadata has `private: true`. Off by default \u{2014} those components are skipped."
+    )]
+    include_private: bool,
 }
 
 #[cfg(feature = "video-export")]
@@ -634,6 +639,7 @@ async fn main() -> miette::Result<()> {
             join,
             mono_ns,
             mono_us,
+            include_private,
         }) => {
             // Install signal handlers only for Export command which uses check_cancelled()
             elodin_db::cancellation::install_signal_handlers();
@@ -651,6 +657,7 @@ async fn main() -> miette::Result<()> {
                 csv_fast_floats,
                 join,
                 time_format,
+                include_private,
             };
             elodin_db::export::run(path, output, format, options).into_diagnostic()
         }

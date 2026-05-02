@@ -720,6 +720,9 @@ pub struct ExportOptions {
     /// Render the time column as ISO 8601 (default), integer nanoseconds, or integer
     /// microseconds. Applies to all formats (CSV / Parquet / Arrow IPC).
     pub time_format: TimeFormat,
+    /// Include components whose metadata contains `"private": "true"`. Off by default —
+    /// such components are skipped during export.
+    pub include_private: bool,
 }
 
 /// Export database contents to files.
@@ -745,6 +748,7 @@ pub fn run(
         csv_fast_floats,
         join,
         time_format,
+        include_private,
     } = options;
 
     // Validate database path
@@ -812,6 +816,14 @@ pub fn run(
                 continue;
             };
             let column_name = component_metadata.name.clone();
+            // Skip components flagged `private: true` in their metadata unless the user
+            // explicitly opted in. Authored from Python via
+            // `el.Component(metadata={"private": "true"})`.
+            if !include_private && component_metadata.is_private() {
+                println!("  Skipping {} (private)", column_name);
+                pre_skipped += 1;
+                continue;
+            }
             if let Some(ref pattern) = glob_pattern
                 && !pattern.matches(&column_name)
             {

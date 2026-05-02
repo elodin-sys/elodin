@@ -248,6 +248,7 @@ fn run_export(db_path: PathBuf, flatten: bool, csv_fast_floats: bool, label: &st
         csv_fast_floats,
         false,
         elodin_db::export::TimeFormat::Iso8601,
+        false,
         label,
     )
 }
@@ -258,6 +259,7 @@ fn run_export_full(
     csv_fast_floats: bool,
     join: bool,
     time_format: elodin_db::export::TimeFormat,
+    include_private: bool,
     label: &str,
 ) -> String {
     let out = std::env::temp_dir().join(format!(
@@ -277,6 +279,7 @@ fn run_export_full(
             csv_fast_floats,
             join,
             time_format,
+            include_private,
         },
     )
     .expect("export::run");
@@ -404,6 +407,65 @@ fn build_join_outer_fixture(path: PathBuf) -> DB {
     db
 }
 
+/// Build a small DB containing one regular component and one private component
+/// (`metadata = {"private": "true"}`). Exercises the `--include-private` filter.
+fn build_private_fixture(path: PathBuf) -> DB {
+    use std::collections::HashMap;
+    let db = DB::create(path.clone()).expect("DB::create");
+
+    let cid_pub = ComponentId::new("public_scalar");
+    let cid_secret = ComponentId::new("secret_scalar");
+
+    db.with_state_mut(|s| {
+        s.set_component_metadata(
+            ComponentMetadata {
+                component_id: cid_pub,
+                name: "public_scalar".to_string(),
+                metadata: HashMap::new(),
+            },
+            &path,
+        )
+        .expect("set_component_metadata public");
+        s.insert_component(cid_pub, ComponentSchema::new(PrimType::F64, &[]), &path)
+            .expect("insert_component public");
+
+        let mut secret_meta = HashMap::new();
+        secret_meta.insert("private".to_string(), "true".to_string());
+        s.set_component_metadata(
+            ComponentMetadata {
+                component_id: cid_secret,
+                name: "secret_scalar".to_string(),
+                metadata: secret_meta,
+            },
+            &path,
+        )
+        .expect("set_component_metadata secret");
+        s.insert_component(cid_secret, ComponentSchema::new(PrimType::F64, &[]), &path)
+            .expect("insert_component secret");
+    });
+
+    db.with_state(|s| {
+        let public = s.get_component(cid_pub).unwrap();
+        let secret = s.get_component(cid_secret).unwrap();
+        for step in 0..NUM_ROWS {
+            let ts = Timestamp(TS_BASE + TS_STEP * step as i64);
+            let pub_val: f64 = step as f64;
+            let sec_val: f64 = step as f64 + 100.0;
+            public
+                .time_series
+                .push_buf(ts, std::slice::from_ref(&pub_val).as_bytes())
+                .unwrap();
+            secret
+                .time_series
+                .push_buf(ts, std::slice::from_ref(&sec_val).as_bytes())
+                .unwrap();
+        }
+    });
+
+    db.flush_all().expect("flush_all");
+    db
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -472,6 +534,7 @@ mod tests {
             false,
             true,
             elodin_db::export::TimeFormat::Iso8601,
+            false,
             "join_identical_no_flatten",
         );
         drop(db);
@@ -497,6 +560,7 @@ mod tests {
             false,
             true,
             elodin_db::export::TimeFormat::Iso8601,
+            false,
             "join_identical_flatten",
         );
         drop(db);
@@ -522,6 +586,7 @@ mod tests {
             false,
             true,
             elodin_db::export::TimeFormat::Iso8601,
+            false,
             "join_outer",
         );
         drop(db);
@@ -548,6 +613,7 @@ mod tests {
             false,
             false,
             elodin_db::export::TimeFormat::MonoNanoseconds,
+            false,
             "mono_ns_no_flatten",
         );
         drop(db);
@@ -574,6 +640,7 @@ mod tests {
             false,
             false,
             elodin_db::export::TimeFormat::MonoMicroseconds,
+            false,
             "mono_us_flatten",
         );
         drop(db);
@@ -581,6 +648,74 @@ mod tests {
             env!("CARGO_MANIFEST_DIR"),
             "tests_query/csv_export_goldie.rs",
             concat!(module_path!(), "::csv_export_mono_us_flatten"),
+        )
+        .golden_dir(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests_query/testdata"))
+        .build()
+        .assert(&snapshot);
+    }
+
+    /// Default behaviour: a component flagged `metadata = {"private": "true"}` does not
+    /// appear in the export output, and the export log mentions the skip.
+    #[test]
+    fn csv_export_private_default_skips() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db = build_private_fixture(dir.path().to_path_buf());
+        let snapshot = run_export_full(
+            dir.path().to_path_buf(),
+            false,
+            false,
+            false,
+            elodin_db::export::TimeFormat::Iso8601,
+            false, // include_private = false
+            "private_default_skips",
+        );
+        drop(db);
+        // Snapshot should contain only public_scalar.csv, not secret_scalar.csv.
+        assert!(
+            snapshot.contains("=== public_scalar.csv ==="),
+            "public_scalar.csv missing from default export"
+        );
+        assert!(
+            !snapshot.contains("=== secret_scalar.csv ==="),
+            "secret_scalar.csv must NOT appear in default export (it is `private: true`)"
+        );
+        goldie::Builder::new(
+            env!("CARGO_MANIFEST_DIR"),
+            "tests_query/csv_export_goldie.rs",
+            concat!(module_path!(), "::csv_export_private_default_skips"),
+        )
+        .golden_dir(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests_query/testdata"))
+        .build()
+        .assert(&snapshot);
+    }
+
+    /// `--include-private` opt-out: both the regular and private components export.
+    #[test]
+    fn csv_export_private_include_overrides() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db = build_private_fixture(dir.path().to_path_buf());
+        let snapshot = run_export_full(
+            dir.path().to_path_buf(),
+            false,
+            false,
+            false,
+            elodin_db::export::TimeFormat::Iso8601,
+            true, // include_private = true
+            "private_include_overrides",
+        );
+        drop(db);
+        assert!(
+            snapshot.contains("=== public_scalar.csv ==="),
+            "public_scalar.csv missing from --include-private export"
+        );
+        assert!(
+            snapshot.contains("=== secret_scalar.csv ==="),
+            "secret_scalar.csv must appear under --include-private"
+        );
+        goldie::Builder::new(
+            env!("CARGO_MANIFEST_DIR"),
+            "tests_query/csv_export_goldie.rs",
+            concat!(module_path!(), "::csv_export_private_include_overrides"),
         )
         .golden_dir(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests_query/testdata"))
         .build()

@@ -26,7 +26,7 @@ EstCov = ty.Annotated[
     el.Component(
         "estimate_covariance",
         el.ComponentType(el.PrimitiveType.F64, (18, 18)),
-        # metadata={"priority": 400},
+        metadata={"private": "true"},
     ),
 ]
 AttEst = ty.Annotated[

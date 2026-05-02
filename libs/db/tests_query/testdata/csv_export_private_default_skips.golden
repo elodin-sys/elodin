@@ -1,0 +1,10 @@
+# csv export goldens: private_default_skips
+
+=== public_scalar.csv ===
+time,public_scalar
+2023-11-14T22:13:20,0.0
+2023-11-14T22:13:21,1.0
+2023-11-14T22:13:22,2.0
+2023-11-14T22:13:23,3.0
+2023-11-14T22:13:24,4.0
+
