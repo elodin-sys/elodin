@@ -10,7 +10,7 @@ authors = ["sascha@elodin.systems", "akhil@elodin.systems", "van@elodin.systems"
 cargo-clippy = []
 inspector = ["elodin-editor/inspector"]
 debug = ["elodin-editor/debug"]
-tracy = ["elodin-editor/tracy", "bevy/trace_tracy", "dep:tracing-tracy"]
+tracy = ["elodin-editor/tracy", "bevy/trace_tracy", "bevy/debug", "dep:tracing-tracy"]
 
 [dependencies]
 thiserror = "2.0"
