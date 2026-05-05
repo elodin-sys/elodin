@@ -435,18 +435,26 @@ impl DB {
 
             let metadata_path = path.join("metadata");
             if metadata_path.exists() {
-                let metadata = ComponentMetadata::read(metadata_path)?;
+                let metadata = ComponentMetadata::read(&metadata_path)?;
                 trace!("Read component metadata for {}", metadata.name);
                 component_metadata.insert(component_id, metadata);
             }
 
             let schema_path = path.join("schema");
             if !schema_path.exists() {
-                warn!(
-                    component.id = ?component_id.0,
-                    component.dir = %path.display(),
-                    "Skipping component without schema while opening database"
-                );
+                if metadata_path.exists() {
+                    trace!(
+                        component.id = ?component_id.0,
+                        component.dir = %path.display(),
+                        "Skipping metadata-only directory (entity or non-series component)"
+                    );
+                } else {
+                    warn!(
+                        component.id = ?component_id.0,
+                        component.dir = %path.display(),
+                        "Skipping component directory without schema or metadata"
+                    );
+                }
                 continue;
             }
 
