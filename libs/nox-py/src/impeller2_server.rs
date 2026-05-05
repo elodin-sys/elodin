@@ -18,14 +18,6 @@ use tracing::{info, warn};
 use crate::World;
 use crate::exec::WorldExec;
 
-fn column_transient(metadata: &ComponentMetadata) -> bool {
-    metadata
-        .metadata
-        .get("transient")
-        .map(|s| s == "true")
-        .unwrap_or(false)
-}
-
 pub struct Server {
     db: elodin_db::Server,
     world: WorldExec,
@@ -101,12 +93,14 @@ pub fn init_db(
 ) -> Result<(), elodin_db::Error> {
     tracing::info!("initializing db");
     db.set_earliest_timestamp(start_timestamp)?;
+
+    let exclusions: HashSet<ComponentId> = transients(&world).collect();
     db.with_state_mut(|state| {
         for (component_id, (schema, component_metadata)) in world.metadata.component_map.iter() {
             let Some(column) = world.host.get(component_id) else {
                 continue;
             };
-            if column_transient(component_metadata) {
+            if exclusions.contains(component_id) {
                 continue;
             }
             let size = schema.size();
@@ -291,10 +285,6 @@ fn commit_world_head_for_world(
                 continue;
             };
 
-            if column_transient(component_metadata) {
-                continue;
-            }
-
             if let Some(exclusions) = exclusions
                 && exclusions.contains(component_id)
             {
@@ -324,7 +314,8 @@ async fn tick(
     interactive: bool,
     cancel_token: CancelToken,
 ) {
-    let external_controls: HashSet<ComponentId> = external_controls(&world).collect();
+    let mut exclusions: HashSet<ComponentId> = external_controls(&world).collect();
+    exclusions.extend(transients(world.world()));
     let wait_for_write: Vec<ComponentId> = wait_for_write(&world).collect();
     let wait_for_write_pair_ids: Vec<PairId> = get_pair_ids(&world, &wait_for_write).unwrap();
     let mut wait_for_write_pair_ids = collect_timestamps(&db, &wait_for_write_pair_ids);
@@ -441,7 +432,7 @@ async fn tick(
                 state,
                 &mut world,
                 batch_end_timestamp,
-                Some(&external_controls),
+                Some(&exclusions),
             ) {
                 warn!(?err, "error committing head");
             }
@@ -563,6 +554,21 @@ pub fn external_controls(world: &WorldExec) -> impl Iterator<Item = ComponentId>
             component_metadata
                 .metadata
                 .get("external_control")
+                .map(|s| s == "true")
+                .unwrap_or(false)
+        })
+        .map(|(component_id, _)| *component_id)
+}
+
+pub fn transients(world: &World) -> impl Iterator<Item = ComponentId> + '_ {
+    world
+        .metadata
+        .component_map
+        .iter()
+        .filter(|(_, (_, component_metadata))| {
+            component_metadata
+                .metadata
+                .get("transient")
                 .map(|s| s == "true")
                 .unwrap_or(false)
         })
