@@ -428,12 +428,9 @@ async fn tick(
         world.world_mut().metadata.ticks_per_telemetry = configured_ticks_per_telemetry;
         let commit_start = Instant::now();
         db.with_state(|state| {
-            if let Err(err) = commit_world_head_unified(
-                state,
-                &mut world,
-                batch_end_timestamp,
-                Some(&exclusions),
-            ) {
+            if let Err(err) =
+                commit_world_head_unified(state, &mut world, batch_end_timestamp, Some(&exclusions))
+            {
                 warn!(?err, "error committing head");
             }
         });
