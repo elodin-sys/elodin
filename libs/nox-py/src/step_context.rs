@@ -685,14 +685,18 @@ impl StepContext {
                     })?;
 
                     let buf: &[u8] = match read_ts_map.get(name).copied() {
-                        None => component.time_series.latest().map(|(_, b)| b).ok_or_else(
-                            || {
-                                Error::PyO3(pyo3::exceptions::PyRuntimeError::new_err(format!(
-                                    "component '{}' has no data",
-                                    name
-                                )))
-                            },
-                        )?,
+                        None => {
+                            component
+                                .time_series
+                                .latest()
+                                .map(|(_, b)| b)
+                                .ok_or_else(|| {
+                                    Error::PyO3(pyo3::exceptions::PyRuntimeError::new_err(format!(
+                                        "component '{}' has no data",
+                                        name
+                                    )))
+                                })?
+                        }
                         Some(ts) => component
                             .time_series
                             .get_nearest(Timestamp(ts))
