@@ -60,19 +60,30 @@ class StepContext:
             a timestamp less than the last write will raise an error (TimeTravel).
         """
         ...
-    def read_component(self, pair_name: str) -> jax.Array:
-        """Read the latest component data from the database.
+    def read_component(
+        self,
+        pair_name: str,
+        timestamp: Optional[int] = None,
+    ) -> jax.Array:
+        """Read component data from the database.
 
         Args:
             pair_name: The full component name in "entity.component" format
                       (e.g., "drone.accel", "drone.gyro", "drone.world_pos")
+            timestamp: Optional timestamp (microseconds since epoch). When None
+                       (the default), returns the most recent sample. When
+                       provided, returns the sample with the greatest timestamp
+                       <= the requested one (floor / sample-and-hold semantics).
+                       If the requested timestamp is past the most recent write,
+                       the latest sample is returned (clamp-to-latest).
 
         Returns:
             NumPy array containing the component data (dtype matches component schema).
             The array is always 1D; reshape if needed.
 
         Raises:
-            RuntimeError: If the component doesn't exist or has no data
+            RuntimeError: If the component doesn't exist, has no data, or the
+                          requested timestamp is before the very first sample.
         """
         ...
     def component_batch_operation(
@@ -80,6 +91,7 @@ class StepContext:
         reads: list[str] = [],
         writes: Optional[dict[str, jax.typing.ArrayLike]] = None,
         write_timestamps: Optional[dict[str, int]] = None,
+        read_timestamps: Optional[dict[str, int]] = None,
     ) -> dict[str, jax.Array]:
         """Perform multiple component reads and writes in a single DB operation.
 
@@ -93,17 +105,24 @@ class StepContext:
             write_timestamps: Optional dict mapping component names to timestamps
                              (microseconds since epoch). Components not in this dict
                              use the current simulation timestamp.
+            read_timestamps: Optional dict mapping component names to timestamps
+                            (microseconds since epoch). Components present in this
+                            dict are read with floor / sample-and-hold semantics
+                            (greatest sample with `ts' <= ts`); components not in
+                            this dict return the most recent sample. Past-the-end
+                            timestamps clamp to the latest sample.
 
         Returns:
             Dict mapping read component names to their numpy array values.
 
         Raises:
-            RuntimeError: If any component doesn't exist or has no data
+            RuntimeError: If any component doesn't exist, has no data, or a
+                          per-read timestamp is before the first sample.
             ValueError: If any write data size doesn't match the component schema
 
         Note:
-            Timestamps must be monotonically increasing per component. Writing with
-            a timestamp less than the last write will raise an error (TimeTravel).
+            Write timestamps must be monotonically increasing per component. Writing
+            with a timestamp less than the last write will raise an error (TimeTravel).
         """
         ...
     def truncate(self) -> None:
