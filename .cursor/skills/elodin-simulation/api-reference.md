@@ -66,6 +66,11 @@ ExtInput = ty.Annotated[jax.Array,
     el.Component("ext_input", el.ComponentType.F64,
                  metadata={"external_control": "true"})]
 
+# Transient (simulation state only; not written to Elodin-DB)
+RingBuf = ty.Annotated[jax.Array,
+    el.Component("ring_buf", el.ComponentType(el.PrimitiveType.F64, (16,)),
+                 metadata={"transient": "true"})]
+
 # Edge (for graph queries)
 MyEdge = ty.Annotated[el.Edge, el.Component("my_edge")]
 ```

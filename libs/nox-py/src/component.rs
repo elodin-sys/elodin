@@ -83,6 +83,12 @@ impl PyComponent {
             .map(|(k, v)| {
                 let value = if let Ok(s) = v.extract::<String>(py) {
                     s
+                } else if let Ok(b) = v.extract::<bool>(py) {
+                    if b {
+                        "true".to_string()
+                    } else {
+                        "false".to_string()
+                    }
                 } else if let Ok(f) = v.extract::<f64>(py) {
                     f.to_string()
                 } else if let Ok(v) = v.extract::<i64>(py) {

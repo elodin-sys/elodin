@@ -378,6 +378,41 @@ def test_skew():
     ).all()
 
 
+def test_transient_component_not_in_db():
+    """Transient columns are not registered in the DB (no archive export)."""
+    import os
+    import tempfile
+
+    import typing as ty
+
+    Ring = ty.Annotated[
+        jax.Array,
+        el.Component("ring", el.ComponentType.F64, metadata={"transient": True}),
+    ]
+
+    @el.map
+    def accumulate(x: X, ring: Ring) -> Ring:
+        return ring + x
+
+    @dataclass
+    class WithRing(el.Archetype):
+        x: X
+        ring: Ring
+
+    w = el.World()
+    w.spawn(WithRing(np.array(1.0), np.array(0.0)), "e1")
+    exec = w.build(accumulate)
+    exec.run(5)
+    df = exec.history("e1.x")
+    assert len(df) >= 5
+
+    with tempfile.TemporaryDirectory() as tmp:
+        exec.save_archive(tmp, "arrow")
+        names = os.listdir(tmp)
+        assert any(n == "e1.x.arrow" for n in names)
+        assert not any(n.startswith("e1.ring") for n in names)
+
+
 def test_external_control_waiting():
     """Test that Exec.run waits for external control components to be updated."""
     import typing as ty

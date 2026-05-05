@@ -18,6 +18,14 @@ use tracing::{info, warn};
 use crate::World;
 use crate::exec::WorldExec;
 
+fn column_transient(metadata: &ComponentMetadata) -> bool {
+    metadata
+        .metadata
+        .get("transient")
+        .map(|s| s == "true")
+        .unwrap_or(false)
+}
+
 pub struct Server {
     db: elodin_db::Server,
     world: WorldExec,
@@ -98,6 +106,9 @@ pub fn init_db(
             let Some(column) = world.host.get(component_id) else {
                 continue;
             };
+            if column_transient(component_metadata) {
+                continue;
+            }
             let size = schema.size();
             let entity_ids =
                 bytemuck::try_cast_slice::<_, u64>(column.entity_ids.as_slice()).unwrap();
@@ -279,6 +290,10 @@ fn commit_world_head_for_world(
             else {
                 continue;
             };
+
+            if column_transient(component_metadata) {
+                continue;
+            }
 
             if let Some(exclusions) = exclusions
                 && exclusions.contains(component_id)

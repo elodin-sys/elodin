@@ -195,6 +195,14 @@ ThrustCmd = ty.Annotated[jax.Array,
     el.Component("thrust_cmd", el.ComponentType.F64, metadata={"external_control": "true"})]
 ```
 
+Mark components as _transient_ so they stay in `World` host memory (including JAX ticks) but are **not** registered in Elodin-DB: no time series, no archive rows, and `StepContext.write_component` cannot target them. Use the same string convention as `external_control`, or `metadata={"transient": True}` (stored as `"true"`). For an in-process ring buffer, use a multi-element shape on a transient `Annotated[jax.Array, Component(...)]` and update it inside `@system` / `@map`.
+
+```python
+RingBuf = ty.Annotated[jax.Array,
+    el.Component("ring_buf", el.ComponentType(el.PrimitiveType.F64, (16,)),
+                 metadata={"transient": True})]
+```
+
 ## Execution Modes
 
 | Mode | Command | Backend | Use |
