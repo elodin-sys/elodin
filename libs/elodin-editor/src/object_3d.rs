@@ -31,6 +31,7 @@ type ImportedCameraFilter = (Added<Camera>, Without<NavGizmoCamera>, Without<Mai
 type ImportedCameraQuery<'w, 's> = Query<'w, 's, (Entity, &'static ChildOf), ImportedCameraFilter>;
 
 pub const ELLIPSOID_RENDER_LAYER: usize = 29;
+const BINARY_BROADCAST_ERROR: &str = "binary operation requires arrays be broadcastable";
 
 /// ExprObject3D component that holds an EQL expression for dynamic positioning
 #[derive(Component)]
@@ -753,7 +754,7 @@ pub fn compile_eql_expr(expression: eql::Expr) -> CompiledExpr {
                     eql::BinaryOp::Mul => left.try_mul(&right),
                     eql::BinaryOp::Div => left.try_div(&right),
                 }
-                .map_err(|_| "binary operation requires arrays be broadcastable".to_string())?;
+                .map_err(|_| BINARY_BROADCAST_ERROR.to_string())?;
 
                 Ok(ComponentValue::F64(result))
             })
@@ -2119,7 +2120,7 @@ mod ellipsoid_scale_eql_tests {
             .execute(&entity_map, &component_values)
             .expect_err("incompatible shapes should not be flattened together");
 
-        assert_eq!(err, "binary operation requires arrays be broadcastable");
+        assert_eq!(err, super::BINARY_BROADCAST_ERROR);
     }
 
     #[test]
