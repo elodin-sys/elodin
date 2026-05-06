@@ -50,3 +50,35 @@ pub(crate) fn cobroadcast_dims(output: &mut [usize], other: &[usize]) -> bool {
     }
     true
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn broadcast_shape_handles_scalar_vector_matrix_and_higher_rank() {
+        assert_eq!(broadcast_shape(&[], &[3]).unwrap().as_slice(), &[3]);
+        assert_eq!(broadcast_shape(&[3], &[]).unwrap().as_slice(), &[3]);
+        assert_eq!(broadcast_shape(&[3], &[2, 3]).unwrap().as_slice(), &[2, 3]);
+        assert_eq!(broadcast_shape(&[2, 3], &[3]).unwrap().as_slice(), &[2, 3]);
+        assert_eq!(
+            broadcast_shape(&[2, 3], &[2, 1]).unwrap().as_slice(),
+            &[2, 3]
+        );
+        assert_eq!(
+            broadcast_shape(&[1, 3], &[2, 1, 3]).unwrap().as_slice(),
+            &[2, 1, 3]
+        );
+    }
+
+    #[test]
+    fn broadcast_shape_rejects_incompatible_shapes() {
+        let err = broadcast_shape(&[2, 3], &[3, 2]).unwrap_err();
+
+        assert!(matches!(
+            err,
+            crate::Error::BroadcastShapeMismatch { left, right }
+                if left == [2, 3] && right == [3, 2]
+        ));
+    }
+}
