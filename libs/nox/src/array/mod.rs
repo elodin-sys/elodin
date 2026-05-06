@@ -29,7 +29,8 @@ mod broadcast;
 mod dynamic;
 mod repr;
 mod view;
-pub use broadcast::*;
+pub(crate) use broadcast::cobroadcast_dims;
+pub use broadcast::{broadcast_shape, can_broadcast};
 pub use repr::*;
 pub use view::*;
 
@@ -1311,20 +1312,6 @@ impl<D1: Dim, D2: Dim> MappableDim for (D1, D2) {
         D: Dim;
 
     type ElemDim = D2;
-}
-
-pub(crate) fn cobroadcast_dims(output: &mut [usize], other: &[usize]) -> bool {
-    for (output, other) in output.iter_mut().rev().zip(other.iter().rev()) {
-        if *output == *other || *other == 1 {
-            continue;
-        }
-        if *output == 1 {
-            *output = *other;
-        } else {
-            return false;
-        }
-    }
-    true
 }
 
 pub trait StridesIter {

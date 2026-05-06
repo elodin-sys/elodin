@@ -36,3 +36,17 @@ pub fn broadcast_shape(left: &[usize], right: &[usize]) -> Result<SmallVec<[usiz
 pub fn can_broadcast(left: &[usize], right: &[usize]) -> bool {
     broadcast_shape(left, right).is_ok()
 }
+
+pub(crate) fn cobroadcast_dims(output: &mut [usize], other: &[usize]) -> bool {
+    for (output, other) in output.iter_mut().rev().zip(other.iter().rev()) {
+        if *output == *other || *other == 1 {
+            continue;
+        }
+        if *output == 1 {
+            *output = *other;
+        } else {
+            return false;
+        }
+    }
+    true
+}
