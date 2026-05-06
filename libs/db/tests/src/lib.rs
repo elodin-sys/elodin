@@ -584,13 +584,13 @@ mod tests {
         assert_eq!(response.path, archive_path);
         assert!(archive_path.exists());
 
-        let file = std::fs::File::open(archive_path.join("TestComponent.arrow")).unwrap();
+        let file = std::fs::File::open(archive_path.join("testcomponent.arrow")).unwrap();
         let mut reader = arrow::ipc::reader::FileReader::try_new(file, None).unwrap();
         let batch = reader.next().unwrap().unwrap();
         assert_eq!(batch.num_columns(), 2);
         assert_eq!(batch.num_rows(), 3);
         let _ = batch.column_by_name("time").unwrap();
-        let component = batch.column_by_name("TestComponent").unwrap();
+        let component = batch.column_by_name("testcomponent").unwrap();
         let values = component
             .as_fixed_size_list()
             .values()

@@ -40,7 +40,6 @@ pub use concat_str;
 
 #[cfg(test)]
 mod tests {
-    use super::*;
 
     #[test]
     fn test_concat_str() {
