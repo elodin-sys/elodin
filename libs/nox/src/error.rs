@@ -1,7 +1,7 @@
 //! Provides error definitions.
 use thiserror::Error;
 
-use alloc::borrow::Cow;
+use alloc::{borrow::Cow, vec::Vec};
 /// Enumerates possible error types that can occur within the Nox tensor operations.
 #[derive(Error, Debug)]
 pub enum Error {
@@ -63,6 +63,10 @@ pub enum Error {
 
     #[error("concat dim failed with dims")]
     InvalidConcatDims,
+
+    /// Error when array shapes cannot be broadcast together.
+    #[error("array shapes {left:?} and {right:?} are not broadcastable")]
+    BroadcastShapeMismatch { left: Vec<usize>, right: Vec<usize> },
 
     /// Error when matrix inversion failed
     #[error("matrix cholesky failed with {0} arg illegal")]

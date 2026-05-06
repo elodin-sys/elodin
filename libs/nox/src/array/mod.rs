@@ -8,7 +8,7 @@ use crate::{Const, Dyn, ShapeConstraint};
 use alloc::{vec, vec::Vec};
 use approx::{AbsDiffEq, RelativeEq};
 use core::default::Default;
-use core::{cmp, fmt, iter};
+use core::{fmt, iter};
 use core::{
     marker::PhantomData,
     ops::{Add, Div, Mul, Neg, Sub},
@@ -52,7 +52,9 @@ pub mod dims {
     };
 }
 pub mod prelude {
-    pub use super::{Array, ArrayBuf, ArrayDim, ArrayRepr, ArrayView, Mat3, Vec3, dims::*};
+    pub use super::{
+        Array, ArrayBuf, ArrayDim, ArrayRepr, ArrayView, Mat3, Vec3, broadcast_shape, dims::*,
+    };
 }
 
 /// A struct representing an array with type-safe dimensions and element type.
@@ -337,8 +339,41 @@ impl<T1: Elem, D1: ArrayDim + TensorDim> Array<T1, D1> {
 }
 
 macro_rules! impl_op {
-    ($op:tt, $op_trait:tt, $fn_name:tt) => {
+    ($op:tt, $op_trait:tt, $fn_name:tt, $try_fn_name:tt) => {
         impl<T1: Elem, D1: ArrayDim + TensorDim  > Array<T1, D1> {
+            #[doc = concat!("This function attempts to perform the `", stringify!($op_trait), "` operation on two arrays.")]
+            pub fn $try_fn_name<D2: ArrayDim + TensorDim>(
+                &self,
+                b: &Array<T1, D2>,
+            ) -> Result<Array<T1, BroadcastedDim<D1, D2>>, Error>
+            where
+                T1: $op_trait<Output = T1>,
+                ShapeConstraint: BroadcastDim<D1, D2>,
+                <ShapeConstraint as BroadcastDim<D1, D2>>::Output: ArrayDim ,
+            {
+                let d1 = D1::array_shape(&self.buf);
+                let d2 = D2::array_shape(&b.buf);
+                let broadcast_dims = broadcast_shape(d1.as_ref(), d2.as_ref())?;
+                let mut out: Array<T1, BroadcastedDim<D1, D2>> =
+                    Array::zeroed(broadcast_dims.as_ref());
+                let left = self
+                    .broadcast_iter(broadcast_dims.clone())
+                    .ok_or_else(|| Error::BroadcastShapeMismatch {
+                        left: d1.as_ref().to_vec(),
+                        right: broadcast_dims.as_ref().to_vec(),
+                    })?;
+                let right = b
+                    .broadcast_iter(broadcast_dims.clone())
+                    .ok_or_else(|| Error::BroadcastShapeMismatch {
+                        left: d2.as_ref().to_vec(),
+                        right: broadcast_dims.as_ref().to_vec(),
+                    })?;
+                for ((a, b), out) in left.zip(right).zip(out.buf.as_mut_buf().iter_mut()) {
+                    *out = *a $op *b;
+                }
+                Ok(out)
+            }
+
             #[doc = concat!("This function performs the `", stringify!($op_trait), "` operation on two arrays.")]
             pub fn $fn_name<D2: ArrayDim + TensorDim>(
                 &self,
@@ -349,45 +384,8 @@ macro_rules! impl_op {
                 ShapeConstraint: BroadcastDim<D1, D2>,
                 <ShapeConstraint as BroadcastDim<D1, D2>>::Output: ArrayDim ,
             {
-                let d1 = D1::array_shape(&self.buf);
-                let d2 = D2::array_shape(&b.buf);
-
-                match d1.as_ref().len().cmp(&d2.as_ref().len()) {
-                    cmp::Ordering::Less | cmp::Ordering::Equal => {
-                        let mut out: Array<T1, BroadcastedDim<D1, D2>> =
-                            Array::zeroed(d2.as_ref());
-                        let mut broadcast_dims = d2.clone();
-                        if !cobroadcast_dims(broadcast_dims.as_mut(), d1.as_ref()) {
-                            todo!("handle unbroadcastble dims {:?} {:?}", broadcast_dims.as_mut(), d1.as_ref());
-                        }
-                        for ((a, b), out) in self
-                            .broadcast_iter(broadcast_dims.clone())
-                            .unwrap()
-                            .zip(b.broadcast_iter(broadcast_dims).unwrap())
-                            .zip(out.buf.as_mut_buf().iter_mut())
-                        {
-                            *out = *a $op *b;
-                        }
-                        out
-                    }
-                    cmp::Ordering::Greater => {
-                        let mut out: Array<T1, BroadcastedDim<D1, D2>> =
-                            Array::zeroed(d2.as_ref());
-                        let mut broadcast_dims = d1.clone();
-                        if !cobroadcast_dims(broadcast_dims.as_mut(), d2.as_ref()) {
-                            todo!("handle unbroadcastble dims {:?} {:?}", broadcast_dims.as_mut(), d2.as_ref());
-                        }
-                        for ((b, a), out) in b
-                            .broadcast_iter(broadcast_dims.clone())
-                            .unwrap()
-                            .zip(self.broadcast_iter(broadcast_dims).unwrap())
-                            .zip(out.buf.as_mut_buf().iter_mut())
-                        {
-                            *out = *a $op *b;
-                        }
-                        out
-                    }
-                }
+                self.$try_fn_name(b)
+                    .expect("array shapes must be broadcastable")
             }
 
         }
@@ -459,10 +457,10 @@ impl<T1: Elem, D1: Dim> Array<T1, D1> {
     }
 }
 
-impl_op!(*, Mul, mul);
-impl_op!(+, Add, add);
-impl_op!(-, Sub, sub);
-impl_op!(/, Div, div);
+impl_op!(*, Mul, mul, try_mul);
+impl_op!(+, Add, add, try_add);
+impl_op!(-, Sub, sub, try_sub);
+impl_op!(/, Div, div, try_div);
 
 macro_rules! impl_unary_op {
     ($op_trait:tt, $fn_name:tt) => {
@@ -1313,16 +1311,39 @@ impl<D1: Dim, D2: Dim> MappableDim for (D1, D2) {
     type ElemDim = D2;
 }
 
-pub fn can_broadcast(left: &[usize], right: &[usize]) -> bool {
-    for (left, right) in left.iter().rev().zip(right.iter().rev()) {
-        if *left == *right || *right == 1 {
-            continue;
-        }
-        if *left != 1 {
-            return false;
+pub fn broadcast_shape(left: &[usize], right: &[usize]) -> Result<SmallVec<[usize; 4]>, Error> {
+    let rank = left.len().max(right.len());
+    let mut shape = SmallVec::with_capacity(rank);
+
+    for axis in 0..rank {
+        let left_axis = axis
+            .checked_sub(rank - left.len())
+            .map(|i| left[i])
+            .unwrap_or(1);
+        let right_axis = axis
+            .checked_sub(rank - right.len())
+            .map(|i| right[i])
+            .unwrap_or(1);
+
+        if left_axis == right_axis {
+            shape.push(left_axis);
+        } else if left_axis == 1 {
+            shape.push(right_axis);
+        } else if right_axis == 1 {
+            shape.push(left_axis);
+        } else {
+            return Err(Error::BroadcastShapeMismatch {
+                left: left.to_vec(),
+                right: right.to_vec(),
+            });
         }
     }
-    true
+
+    Ok(shape)
+}
+
+pub fn can_broadcast(left: &[usize], right: &[usize]) -> bool {
+    broadcast_shape(left, right).is_ok()
 }
 
 pub(crate) fn cobroadcast_dims(output: &mut [usize], other: &[usize]) -> bool {
@@ -1683,6 +1704,93 @@ mod tests {
         let b = array![[[1.0, 1.0], [2.0, 2.0]], [[1.0, 1.0], [2.0, 2.0]]];
         let c: Array<f32, (Const<2>, Const<2>, Const<2>)> = a.add(&b);
         assert_eq!(c.buf, [[[2.0, 3.0], [3.0, 4.0]], [[2.0, 3.0], [3.0, 4.0]]]);
+    }
+
+    fn dyn_array(shape: &[usize], storage: &[f64]) -> Array<f64, Dyn> {
+        Array::from_shape_vec(SmallVec::from_slice(shape), storage.to_vec())
+            .expect("valid dynamic array")
+    }
+
+    #[test]
+    fn test_dynamic_binary_ops_broadcast_scalar_vector_and_matrix() {
+        let scalar = dyn_array(&[], &[2.0]);
+        let vector = dyn_array(&[3], &[1.0, 2.0, 3.0]);
+        let matrix = dyn_array(&[2, 3], &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
+
+        let out = scalar.try_mul(&vector).expect("scalar * vector");
+        assert_eq!(out.shape(), &[3]);
+        assert_eq!(out.buf.as_buf(), &[2.0, 4.0, 6.0]);
+
+        let out = vector.try_mul(&scalar).expect("vector * scalar");
+        assert_eq!(out.shape(), &[3]);
+        assert_eq!(out.buf.as_buf(), &[2.0, 4.0, 6.0]);
+
+        let out = scalar.try_mul(&matrix).expect("scalar * matrix");
+        assert_eq!(out.shape(), &[2, 3]);
+        assert_eq!(out.buf.as_buf(), &[2.0, 4.0, 6.0, 8.0, 10.0, 12.0]);
+
+        let out = matrix.try_mul(&scalar).expect("matrix * scalar");
+        assert_eq!(out.shape(), &[2, 3]);
+        assert_eq!(out.buf.as_buf(), &[2.0, 4.0, 6.0, 8.0, 10.0, 12.0]);
+    }
+
+    #[test]
+    fn test_dynamic_binary_ops_broadcast_vector_and_matrix() {
+        let vector = dyn_array(&[3], &[10.0, 20.0, 30.0]);
+        let matrix = dyn_array(&[2, 3], &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
+
+        let out = vector.try_add(&matrix).expect("vector + matrix");
+        assert_eq!(out.shape(), &[2, 3]);
+        assert_eq!(out.buf.as_buf(), &[11.0, 22.0, 33.0, 14.0, 25.0, 36.0]);
+
+        let out = matrix.try_add(&vector).expect("matrix + vector");
+        assert_eq!(out.shape(), &[2, 3]);
+        assert_eq!(out.buf.as_buf(), &[11.0, 22.0, 33.0, 14.0, 25.0, 36.0]);
+    }
+
+    #[test]
+    fn test_dynamic_binary_ops_broadcast_matrix_shapes() {
+        let left = dyn_array(&[2, 3], &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
+        let column = dyn_array(&[2, 1], &[10.0, 20.0]);
+        let same = dyn_array(&[2, 3], &[6.0, 5.0, 4.0, 3.0, 2.0, 1.0]);
+
+        let out = left.try_add(&column).expect("[2, 3] + [2, 1]");
+        assert_eq!(out.shape(), &[2, 3]);
+        assert_eq!(out.buf.as_buf(), &[11.0, 12.0, 13.0, 24.0, 25.0, 26.0]);
+
+        let out = left.try_add(&same).expect("[2, 3] + [2, 3]");
+        assert_eq!(out.shape(), &[2, 3]);
+        assert_eq!(out.buf.as_buf(), &[7.0, 7.0, 7.0, 7.0, 7.0, 7.0]);
+    }
+
+    #[test]
+    fn test_dynamic_binary_ops_broadcast_higher_rank() {
+        let left = dyn_array(&[1, 3], &[10.0, 20.0, 30.0]);
+        let right = dyn_array(&[2, 1, 3], &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
+
+        let out = left.try_add(&right).expect("[1, 3] + [2, 1, 3]");
+        assert_eq!(out.shape(), &[2, 1, 3]);
+        assert_eq!(out.buf.as_buf(), &[11.0, 22.0, 33.0, 14.0, 25.0, 36.0]);
+    }
+
+    #[test]
+    fn test_dynamic_binary_ops_reject_incompatible_shapes() {
+        let left = dyn_array(&[2, 3], &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
+        let right = dyn_array(&[3, 2], &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
+
+        let err = left
+            .try_add(&right)
+            .expect_err("[2, 3] + [3, 2] should fail");
+
+        assert!(matches!(err, Error::BroadcastShapeMismatch { .. }));
+    }
+
+    #[test]
+    fn test_dynamic_zeroed_multidimensional_allocates_product() {
+        let arr = Array::<f64, Dyn>::zeroed(&[2, 3]);
+
+        assert_eq!(arr.shape(), &[2, 3]);
+        assert_eq!(arr.buf.as_buf().len(), 6);
     }
 
     #[test]

@@ -342,159 +342,6 @@ fn promote_component_to_f64(value: ComponentValue) -> Result<Array<f64, nox::Dyn
     }
 }
 
-// Keep object_3d runtime EQL binary operations shape-based.
-// TODO: move this into nox once dynamic broadcasting is fixed there. Today,
-// nox::Array binary ops can panic on equal-rank incompatible shapes and can
-// iterate dynamic broadcasts incorrectly when the left rank is greater than the right
-// rank. The editor keeps the broadcast local so runtime EQL returns a clean
-// error and preserves expected array shapes.
-fn broadcast_shape(
-    left: &[usize],
-    right: &[usize],
-) -> Result<smallvec::SmallVec<[usize; 4]>, String> {
-    let rank = left.len().max(right.len());
-    let mut shape = smallvec::SmallVec::with_capacity(rank);
-
-    for axis in 0..rank {
-        let left_axis = axis
-            .checked_sub(rank - left.len())
-            .map(|i| left[i])
-            .unwrap_or(1);
-        let right_axis = axis
-            .checked_sub(rank - right.len())
-            .map(|i| right[i])
-            .unwrap_or(1);
-
-        if left_axis == right_axis {
-            shape.push(left_axis);
-        } else if left_axis == 1 {
-            shape.push(right_axis);
-        } else if right_axis == 1 {
-            shape.push(left_axis);
-        } else {
-            return Err("binary operation requires arrays be broadcastable".to_string());
-        }
-    }
-
-    Ok(shape)
-}
-
-fn row_major_strides(shape: &[usize]) -> smallvec::SmallVec<[usize; 4]> {
-    let mut strides = smallvec::SmallVec::from_elem(0, shape.len());
-    let mut stride = 1;
-    for axis in (0..shape.len()).rev() {
-        strides[axis] = stride;
-        stride *= shape[axis];
-    }
-    strides
-}
-
-fn broadcast_strides(
-    output_shape: &[usize],
-    input_shape: &[usize],
-    input_strides: &[usize],
-) -> smallvec::SmallVec<[usize; 4]> {
-    debug_assert!(output_shape.len() >= input_shape.len());
-    debug_assert_eq!(input_shape.len(), input_strides.len());
-
-    let leading_axes = output_shape.len() - input_shape.len();
-    output_shape
-        .iter()
-        .enumerate()
-        .map(|(axis, _)| {
-            if axis < leading_axes {
-                0
-            } else {
-                let input_axis = axis - leading_axes;
-                if input_shape[input_axis] == 1 {
-                    0
-                } else {
-                    input_strides[input_axis]
-                }
-            }
-        })
-        .collect()
-}
-
-fn advance_broadcast_offsets(
-    index: &mut [usize],
-    shape: &[usize],
-    left_strides: &[usize],
-    right_strides: &[usize],
-    left_offset: &mut usize,
-    right_offset: &mut usize,
-) {
-    debug_assert_eq!(index.len(), shape.len());
-    debug_assert_eq!(left_strides.len(), shape.len());
-    debug_assert_eq!(right_strides.len(), shape.len());
-
-    for axis in (0..shape.len()).rev() {
-        index[axis] += 1;
-        *left_offset += left_strides[axis];
-        *right_offset += right_strides[axis];
-
-        if index[axis] < shape[axis] {
-            break;
-        }
-
-        *left_offset -= index[axis] * left_strides[axis];
-        *right_offset -= index[axis] * right_strides[axis];
-        index[axis] = 0;
-    }
-}
-
-fn apply_binary_op(
-    left: &Array<f64, nox::Dyn>,
-    right: &Array<f64, nox::Dyn>,
-    op: eql::BinaryOp,
-) -> Result<Array<f64, nox::Dyn>, String> {
-    use nox::ArrayBuf;
-
-    let left_data = left.buf.as_buf();
-    let right_data = right.buf.as_buf();
-    let output_shape = broadcast_shape(left.shape(), right.shape())?;
-    let output_len = output_shape.iter().product();
-    let left_strides = broadcast_strides(
-        &output_shape,
-        left.shape(),
-        &row_major_strides(left.shape()),
-    );
-    let right_strides = broadcast_strides(
-        &output_shape,
-        right.shape(),
-        &row_major_strides(right.shape()),
-    );
-
-    let apply = |left: f64, right: f64| match op {
-        eql::BinaryOp::Add => left + right,
-        eql::BinaryOp::Sub => left - right,
-        eql::BinaryOp::Mul => left * right,
-        eql::BinaryOp::Div => left / right,
-    };
-
-    let mut index = smallvec::SmallVec::<[usize; 4]>::from_elem(0, output_shape.len());
-    let mut left_offset = 0;
-    let mut right_offset = 0;
-    let mut values = Vec::with_capacity(output_len);
-    for flat_index in 0..output_len {
-        values.push(apply(left_data[left_offset], right_data[right_offset]));
-
-        if flat_index + 1 < output_len {
-            advance_broadcast_offsets(
-                &mut index,
-                &output_shape,
-                &left_strides,
-                &right_strides,
-                &mut left_offset,
-                &mut right_offset,
-            );
-        }
-    }
-
-    Array::from_shape_vec(output_shape, values)
-        .ok_or_else(|| "invalid array shape after binary operation".to_string())
-}
-
 fn cast_dyn_array_from_field<T: nox::Field>(
     shape_sv: &smallvec::SmallVec<[usize; 4]>,
     flat: Vec<T>,
@@ -900,7 +747,13 @@ pub fn compile_eql_expr(expression: eql::Expr) -> CompiledExpr {
 
                 let left = promote_component_to_f64(left_val)?;
                 let right = promote_component_to_f64(right_val)?;
-                let result = apply_binary_op(&left, &right, op)?;
+                let result = match op {
+                    eql::BinaryOp::Add => left.try_add(&right),
+                    eql::BinaryOp::Sub => left.try_sub(&right),
+                    eql::BinaryOp::Mul => left.try_mul(&right),
+                    eql::BinaryOp::Div => left.try_div(&right),
+                }
+                .map_err(|_| "binary operation requires arrays be broadcastable".to_string())?;
 
                 Ok(ComponentValue::F64(result))
             })
@@ -2193,22 +2046,32 @@ mod ellipsoid_scale_eql_tests {
     use impeller2::types::{ComponentId, PrimType, Timestamp};
     use impeller2_bevy::EntityMap;
     use impeller2_wkt::ComponentValue;
-    use nox::{Array, ArrayBuf};
+    use nox::Array;
 
-    use super::{apply_binary_op, compile_scale_eql, component_value_to_vec3};
+    use super::{compile_scale_eql, component_value_to_vec3};
 
     fn pos_std_var_component(name: &str) -> Arc<eql::Component> {
+        f64_component(name, &[3])
+    }
+
+    fn f64_component(name: &str, shape: &[u64]) -> Arc<eql::Component> {
         Arc::new(eql::Component::new(
             name.to_string(),
             ComponentId::new(name),
-            Schema::new(PrimType::F64, vec![3u64]).unwrap(),
+            Schema::new(PrimType::F64, shape.to_vec()).unwrap(),
         ))
     }
 
     fn f64_component_value(values: [f64; 3]) -> ComponentValue {
+        f64_component_value_with_shape(smallvec::smallvec![3], values.to_vec())
+    }
+
+    fn f64_component_value_with_shape(
+        shape: smallvec::SmallVec<[usize; 4]>,
+        values: Vec<f64>,
+    ) -> ComponentValue {
         ComponentValue::F64(
-            Array::<f64, nox::Dyn>::from_shape_vec(smallvec::smallvec![3], values.to_vec())
-                .expect("f64 telemetry buffer"),
+            Array::<f64, nox::Dyn>::from_shape_vec(shape, values).expect("f64 telemetry buffer"),
         )
     }
 
@@ -2221,56 +2084,39 @@ mod ellipsoid_scale_eql_tests {
     }
 
     #[test]
-    fn apply_binary_op_broadcasts_arrays_with_different_ranks() {
-        let left =
-            Array::<f64, nox::Dyn>::from_shape_vec(smallvec::smallvec![3], vec![1.0, 2.0, 3.0])
-                .expect("left array");
-        let right = Array::<f64, nox::Dyn>::from_shape_vec(
-            smallvec::smallvec![2, 3],
-            vec![10.0, 20.0, 30.0, 40.0, 50.0, 60.0],
-        )
-        .expect("right array");
-
-        let result = apply_binary_op(&left, &right, eql::BinaryOp::Add).expect("broadcasted add");
-
-        assert_eq!(result.shape(), &[2, 3]);
-        assert_eq!(result.buf.as_buf(), &[11.0, 22.0, 33.0, 41.0, 52.0, 63.0]);
-    }
-
-    #[test]
-    fn apply_binary_op_supports_sub_and_div_with_broadcasting() {
-        let left = Array::<f64, nox::Dyn>::from_shape_vec(
-            smallvec::smallvec![2, 3],
-            vec![10.0, 20.0, 30.0, 40.0, 50.0, 60.0],
-        )
-        .expect("left array");
-        let right =
-            Array::<f64, nox::Dyn>::from_shape_vec(smallvec::smallvec![3], vec![1.0, 2.0, 5.0])
-                .expect("right array");
-
-        let sub = apply_binary_op(&left, &right, eql::BinaryOp::Sub).expect("broadcasted sub");
-        let div = apply_binary_op(&left, &right, eql::BinaryOp::Div).expect("broadcasted div");
-
-        assert_eq!(sub.shape(), &[2, 3]);
-        assert_eq!(sub.buf.as_buf(), &[9.0, 18.0, 25.0, 39.0, 48.0, 55.0]);
-        assert_eq!(div.shape(), &[2, 3]);
-        assert_eq!(div.buf.as_buf(), &[10.0, 10.0, 6.0, 40.0, 25.0, 12.0]);
-    }
-
-    #[test]
     fn object_3d_eql_binary_ops_reject_same_len_incompatible_shapes() {
-        let left = Array::<f64, nox::Dyn>::from_shape_vec(
-            smallvec::smallvec![2, 3],
-            vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
-        )
-        .expect("left array");
-        let right = Array::<f64, nox::Dyn>::from_shape_vec(
-            smallvec::smallvec![3, 2],
-            vec![10.0, 20.0, 30.0, 40.0, 50.0, 60.0],
-        )
-        .expect("right array");
+        let left = f64_component("left", &[2, 3]);
+        let right = f64_component("right", &[3, 2]);
+        let left_id = left.id;
+        let right_id = right.id;
+        let ctx =
+            eql::Context::from_leaves([left.clone(), right.clone()], Timestamp(0), Timestamp(1000));
 
-        let err = apply_binary_op(&left, &right, eql::BinaryOp::Add)
+        let mut world = World::new();
+        let left_entity = world
+            .spawn(f64_component_value_with_shape(
+                smallvec::smallvec![2, 3],
+                vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+            ))
+            .id();
+        let right_entity = world
+            .spawn(f64_component_value_with_shape(
+                smallvec::smallvec![3, 2],
+                vec![10.0, 20.0, 30.0, 40.0, 50.0, 60.0],
+            ))
+            .id();
+        let entity_map = EntityMap(HashMap::from([
+            (left_id, left_entity),
+            (right_id, right_entity),
+        ]));
+
+        let mut system_state: SystemState<(Query<'static, 'static, &ComponentValue>,)> =
+            SystemState::new(&mut world);
+        let (component_values,) = system_state.get(&world);
+        let compiled = compile_scale_eql("left + right", &ctx).expect("expression should compile");
+
+        let err = compiled
+            .execute(&entity_map, &component_values)
             .expect_err("incompatible shapes should not be flattened together");
 
         assert_eq!(err, "binary operation requires arrays be broadcastable");
