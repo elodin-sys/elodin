@@ -24,8 +24,8 @@ pub fn broadcast_shape(left: &[usize], right: &[usize]) -> Result<SmallVec<[usiz
             shape.push(left_axis);
         } else {
             return Err(Error::BroadcastShapeMismatch {
-                left: left.iter().copied().collect(),
-                right: right.iter().copied().collect(),
+                left: left.to_vec(),
+                right: right.to_vec(),
             });
         }
     }
