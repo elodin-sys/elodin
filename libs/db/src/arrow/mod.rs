@@ -419,11 +419,11 @@ Use a path that exists on the database host."
                     continue;
                 };
 
-                let column_name = component_metadata.name.clone();
-                let element_names = component_metadata.element_names();
+                let column_name = component_metadata.name.to_lowercase();
+                let element_names = component_metadata.element_names().to_lowercase();
 
                 let record_batch = if flatten_for_csv {
-                    component.as_flat_record_batch(column_name.clone(), element_names)
+                    component.as_flat_record_batch(column_name.clone(), &element_names)
                 } else {
                     component.as_record_batch(column_name.clone())
                 };

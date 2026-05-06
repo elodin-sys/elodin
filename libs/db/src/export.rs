@@ -817,7 +817,7 @@ pub fn run(
                 pre_skipped += 1;
                 continue;
             };
-            let column_name = component_metadata.name.clone();
+            let column_name = component_metadata.name.to_lowercase();
             // Skip components flagged `private: true` in their metadata unless the user
             // explicitly opted in. Authored from Python via
             // `el.Component(metadata={"private": "true"})`.
@@ -832,7 +832,7 @@ pub fn run(
                 pre_skipped += 1;
                 continue;
             }
-            let element_names = component_metadata.element_names().to_string();
+            let element_names = component_metadata.element_names().to_lowercase();
             work.push(ComponentTask {
                 component: component.clone(),
                 column_name,
