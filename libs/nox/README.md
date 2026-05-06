@@ -18,6 +18,33 @@ For a broader introduction to the project, see the [overview documentation](../.
 
 Most users will **not depend on `nox` directly**. Instead, they will interact with one of the specialized crates or subsystems built on top of it.
 
+## Dynamic array broadcasting
+
+Dynamic `nox::Array` binary operations (`add`, `sub`, `mul`, `div`) follow the same right-aligned broadcasting rule used by NumPy and JAX:
+
+- A scalar shape `[]` broadcasts to any output shape.
+- Two dimensions are compatible when they are equal or one of them is `1`.
+- Shapes are compared from the trailing dimension toward the leading dimension.
+- Missing leading dimensions behave like `1`.
+- Fallible APIs (`try_add`, `try_sub`, `try_mul`, `try_div`) return a controlled error for incompatible shapes. The non-fallible APIs remain compatibility wrappers.
+
+The dynamic broadcasting tests in `src/array/mod.rs` document the expected behavior with concrete examples:
+
+| Scenario | Expected shape |
+| --- | --- |
+| `scalar * [3]` | `[3]` |
+| `[3] * scalar` | `[3]` |
+| `[3] + [2, 3]` | `[2, 3]` |
+| `[2, 3] + [3]` | `[2, 3]` |
+| `[2, 3] + [2, 1]` | `[2, 3]` |
+| `[2, 3] + [2, 3]` | `[2, 3]` |
+| `scalar * [2, 3]` | `[2, 3]` |
+| `[2, 3] * scalar` | `[2, 3]` |
+| `[1, 3] + [2, 1, 3]` | `[2, 1, 3]` |
+| `[2, 3] + [3, 2]` | error |
+
+`Array::zeroed([2, 3])` is also covered by tests and must allocate the product of the dimensions (`6` elements), not their sum.
+
 
 ## Related crates and subsystems
 - [array](array) – array and tensor utilities.
