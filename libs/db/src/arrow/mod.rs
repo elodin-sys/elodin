@@ -177,7 +177,7 @@ impl Component {
             } else {
                 i.to_string()
             };
-            Arc::new(Field::new(format!("{}.{}", name, suffix), dt, false))
+            Arc::new(Field::new(format!("{}_{}", name, suffix), dt, false))
         };
 
         // For primitives (the universal case for time-series mmap data) extract via a
