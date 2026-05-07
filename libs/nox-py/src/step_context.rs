@@ -307,21 +307,31 @@ impl StepContext {
         })
     }
 
-    /// Read the latest component data from the database as a numpy array.
+    /// Read component data from the database as a numpy array.
     ///
     /// Args:
     ///     pair_name: The full component name in "entity.component" format
     ///                (e.g., "drone.accel", "drone.gyro")
+    ///     timestamp: Optional timestamp (microseconds since epoch). When None,
+    ///                returns the most recent sample. When provided, returns the
+    ///                sample with the greatest timestamp <= the requested one
+    ///                (floor / sample-and-hold semantics). If the requested
+    ///                timestamp is past the most recent write the latest sample
+    ///                is returned.
     ///
     /// Returns:
-    ///     NumPy array containing the component data (dtype matches component schema)
+    ///     NumPy array containing the component data (dtype matches component schema).
+    ///     The array is always 1D; reshape if needed.
     ///
     /// Raises:
-    ///     RuntimeError: If the component doesn't exist or has no data
+    ///     RuntimeError: If the component doesn't exist, has no data, or the
+    ///                   requested timestamp is before the very first sample.
+    #[pyo3(signature = (pair_name, timestamp=None))]
     fn read_component<'py>(
         &self,
         py: Python<'py>,
         pair_name: &str,
+        timestamp: Option<i64>,
     ) -> Result<Bound<'py, PyAny>, Error> {
         let pair_id = ComponentId::new(pair_name);
 
@@ -333,91 +343,31 @@ impl StepContext {
                 )))
             })?;
 
-            let (_, buf) = component.time_series.latest().ok_or_else(|| {
-                Error::PyO3(pyo3::exceptions::PyRuntimeError::new_err(format!(
-                    "component '{}' has no data",
-                    pair_name
-                )))
-            })?;
+            let buf = match timestamp {
+                None => {
+                    let (_, buf) = component.time_series.latest().ok_or_else(|| {
+                        Error::PyO3(pyo3::exceptions::PyRuntimeError::new_err(format!(
+                            "component '{}' has no data",
+                            pair_name
+                        )))
+                    })?;
+                    buf
+                }
+                Some(ts) => {
+                    let (_, buf) = component
+                        .time_series
+                        .get_nearest(Timestamp(ts))
+                        .ok_or_else(|| {
+                            Error::PyO3(pyo3::exceptions::PyRuntimeError::new_err(format!(
+                                "component '{}' has no data at or before timestamp {}",
+                                pair_name, ts
+                            )))
+                        })?;
+                    buf
+                }
+            };
 
-            // Determine the numpy dtype based on the schema's primitive type
-            let prim_type = component.schema.prim_type;
-            let shape = component.schema.shape();
-
-            // Convert bytes to numpy array based on primitive type
-            // Note: We return a 1D array regardless of the component shape for simplicity.
-            // The Python side can reshape if needed.
-            let _ = shape; // Mark as intentionally unused
-            match prim_type {
-                PrimType::F64 => {
-                    let data: Vec<f64> = buf
-                        .chunks_exact(8)
-                        .map(|chunk| f64::from_le_bytes(chunk.try_into().unwrap()))
-                        .collect();
-                    Ok(PyArray1::from_vec(py, data).into_any())
-                }
-                PrimType::F32 => {
-                    let data: Vec<f32> = buf
-                        .chunks_exact(4)
-                        .map(|chunk| f32::from_le_bytes(chunk.try_into().unwrap()))
-                        .collect();
-                    Ok(PyArray1::from_vec(py, data).into_any())
-                }
-                PrimType::I64 => {
-                    let data: Vec<i64> = buf
-                        .chunks_exact(8)
-                        .map(|chunk| i64::from_le_bytes(chunk.try_into().unwrap()))
-                        .collect();
-                    Ok(PyArray1::from_vec(py, data).into_any())
-                }
-                PrimType::I32 => {
-                    let data: Vec<i32> = buf
-                        .chunks_exact(4)
-                        .map(|chunk| i32::from_le_bytes(chunk.try_into().unwrap()))
-                        .collect();
-                    Ok(PyArray1::from_vec(py, data).into_any())
-                }
-                PrimType::U64 => {
-                    let data: Vec<u64> = buf
-                        .chunks_exact(8)
-                        .map(|chunk| u64::from_le_bytes(chunk.try_into().unwrap()))
-                        .collect();
-                    Ok(PyArray1::from_vec(py, data).into_any())
-                }
-                PrimType::U32 => {
-                    let data: Vec<u32> = buf
-                        .chunks_exact(4)
-                        .map(|chunk| u32::from_le_bytes(chunk.try_into().unwrap()))
-                        .collect();
-                    Ok(PyArray1::from_vec(py, data).into_any())
-                }
-                PrimType::Bool => {
-                    let data: Vec<bool> = buf.iter().map(|&b| b != 0).collect();
-                    Ok(PyArray1::from_vec(py, data).into_any())
-                }
-                PrimType::U8 => {
-                    let data: Vec<u8> = buf.to_vec();
-                    Ok(PyArray1::from_vec(py, data).into_any())
-                }
-                PrimType::U16 => {
-                    let data: Vec<u16> = buf
-                        .chunks_exact(2)
-                        .map(|chunk| u16::from_le_bytes(chunk.try_into().unwrap()))
-                        .collect();
-                    Ok(PyArray1::from_vec(py, data).into_any())
-                }
-                PrimType::I8 => {
-                    let data: Vec<i8> = buf.iter().map(|&b| b as i8).collect();
-                    Ok(PyArray1::from_vec(py, data).into_any())
-                }
-                PrimType::I16 => {
-                    let data: Vec<i16> = buf
-                        .chunks_exact(2)
-                        .map(|chunk| i16::from_le_bytes(chunk.try_into().unwrap()))
-                        .collect();
-                    Ok(PyArray1::from_vec(py, data).into_any())
-                }
-            }
+            Ok(buf_to_numpy_array(py, buf, component.schema.prim_type))
         })
     }
 
@@ -571,24 +521,31 @@ impl StepContext {
     ///     write_timestamps: Optional dict mapping component names to timestamps
     ///                       (microseconds since epoch). Components not in this dict
     ///                       use the current simulation timestamp.
+    ///     read_timestamps: Optional dict mapping component names to timestamps
+    ///                      (microseconds since epoch). Components present in this
+    ///                      dict are read with floor / sample-and-hold semantics
+    ///                      (greatest sample with `ts' <= ts`); components not in
+    ///                      this dict return the most recent sample.
     ///
     /// Returns:
     ///     Dict mapping read component names to their numpy array values
     ///
     /// Raises:
-    ///     RuntimeError: If any component doesn't exist or has no data
+    ///     RuntimeError: If any component doesn't exist, has no data, or a
+    ///                   per-read timestamp is before the first sample.
     ///     ValueError: If any write data size doesn't match the component schema
     ///
     /// Note:
-    ///     Timestamps must be monotonically increasing per component. Writing with
-    ///     a timestamp less than the last write will raise an error (TimeTravel).
-    #[pyo3(signature = (reads=vec![], writes=None, write_timestamps=None))]
+    ///     Write timestamps must be monotonically increasing per component. Writing
+    ///     with a timestamp less than the last write will raise an error (TimeTravel).
+    #[pyo3(signature = (reads=vec![], writes=None, write_timestamps=None, read_timestamps=None))]
     fn component_batch_operation<'py>(
         &self,
         py: Python<'py>,
         reads: Vec<String>,
         writes: Option<&Bound<'py, PyDict>>,
         write_timestamps: Option<&Bound<'py, PyDict>>,
+        read_timestamps: Option<&Bound<'py, PyDict>>,
     ) -> Result<Bound<'py, PyDict>, Error> {
         // Pre-parse all component IDs outside the lock
         let read_ids: Vec<(String, ComponentId)> = reads
@@ -609,6 +566,28 @@ impl StepContext {
                 let ts: i64 = value.extract().map_err(|e| {
                     Error::PyO3(pyo3::exceptions::PyValueError::new_err(format!(
                         "write_timestamps value for '{}' must be an integer: {}",
+                        name, e
+                    )))
+                })?;
+                ts_map.insert(name, ts);
+            }
+            ts_map
+        } else {
+            HashMap::new()
+        };
+
+        let read_ts_map: HashMap<String, i64> = if let Some(ts_dict) = read_timestamps {
+            let mut ts_map = HashMap::new();
+            for (key, value) in ts_dict.iter() {
+                let name: String = key.extract().map_err(|e| {
+                    Error::PyO3(pyo3::exceptions::PyValueError::new_err(format!(
+                        "read_timestamps key must be a string: {}",
+                        e
+                    )))
+                })?;
+                let ts: i64 = value.extract().map_err(|e| {
+                    Error::PyO3(pyo3::exceptions::PyValueError::new_err(format!(
+                        "read_timestamps value for '{}' must be an integer: {}",
                         name, e
                     )))
                 })?;
@@ -705,12 +684,30 @@ impl StepContext {
                         )))
                     })?;
 
-                    let (_, buf) = component.time_series.latest().ok_or_else(|| {
-                        Error::PyO3(pyo3::exceptions::PyRuntimeError::new_err(format!(
-                            "component '{}' has no data",
-                            name
-                        )))
-                    })?;
+                    let buf: &[u8] = match read_ts_map.get(name).copied() {
+                        None => {
+                            component
+                                .time_series
+                                .latest()
+                                .map(|(_, b)| b)
+                                .ok_or_else(|| {
+                                    Error::PyO3(pyo3::exceptions::PyRuntimeError::new_err(format!(
+                                        "component '{}' has no data",
+                                        name
+                                    )))
+                                })?
+                        }
+                        Some(ts) => component
+                            .time_series
+                            .get_nearest(Timestamp(ts))
+                            .map(|(_, b)| b)
+                            .ok_or_else(|| {
+                                Error::PyO3(pyo3::exceptions::PyRuntimeError::new_err(format!(
+                                    "component '{}' has no data at or before timestamp {}",
+                                    name, ts
+                                )))
+                            })?,
+                    };
 
                     let prim_type = component.schema.prim_type;
                     results.insert(name.clone(), (buf.to_vec(), prim_type));

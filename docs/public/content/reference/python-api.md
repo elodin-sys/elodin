@@ -146,15 +146,20 @@ Context object passed to `pre_step` and `post_step` callbacks, providing direct 
 
 #### Methods
 
-- `read_component(pair_name)` -> `numpy.ndarray`
+- `read_component(pair_name, timestamp=None)` -> `numpy.ndarray`
 
-    Read the latest component data from the database.
+    Read component data from the database.
 
     - `pair_name` : `string`, the full component name in "entity.component" format (e.g., `"drone.accel"`, `"drone.world_pos"`)
+    - `timestamp` : `int`, optional, microseconds since epoch. When `None` (the default), returns the most recent sample. When provided, returns the sample with the greatest timestamp `<=` the requested one (floor / sample-and-hold semantics). Timestamps past the most recent write clamp to the latest sample.
 
     Returns a NumPy array containing the component data. The array dtype matches the component schema and is always 1D; reshape if needed.
 
-    Raises `RuntimeError` if the component doesn't exist or has no data.
+    Raises `RuntimeError` if the component doesn't exist, has no data, or the requested `timestamp` is before the very first sample.
+
+    {% alert(kind="notice") %}
+    Historical reads use the same memory-mapped time-series that the latest-only path does, so the additional cost is one binary search over a contiguous timestamp index (a few hundred nanoseconds for typical histories). Use this to look up sensor values from earlier ticks (e.g. for finite-difference estimators) without leaving the simulation process.
+    {% end %}
 
 - `write_component(pair_name, data, timestamp=None)` -> None
 
@@ -170,18 +175,19 @@ Context object passed to `pre_step` and `post_step` callbacks, providing direct 
     Timestamps must be monotonically increasing per component. Writing with a timestamp less than the last write will raise a `TimeTravel` error.
     {% end %}
 
-- `component_batch_operation(reads=[], writes=None, write_timestamps=None)` -> `dict[str, numpy.ndarray]`
+- `component_batch_operation(reads=[], writes=None, write_timestamps=None, read_timestamps=None)` -> `dict[str, numpy.ndarray]`
 
     Perform multiple component reads and writes in a single database operation. This is more efficient than calling `read_component`/`write_component` multiple times, as it only acquires the database lock once for all operations.
 
     - `reads` : `list[str]`, list of component names to read (e.g., `["drone.accel", "drone.gyro"]`)
     - `writes` : `dict[str, numpy.ndarray]`, optional, dict mapping component names to numpy arrays to write
     - `write_timestamps` : `dict[str, int]`, optional, dict mapping component names to timestamps (microseconds since epoch). Components not in this dict use the current simulation timestamp.
+    - `read_timestamps` : `dict[str, int]`, optional, dict mapping component names to timestamps (microseconds since epoch). Components present in this dict are read with floor / sample-and-hold semantics; components not in this dict return the most recent sample. Past-the-end timestamps clamp to the latest sample.
 
     Returns a dict mapping read component names to their numpy array values.
 
     {% alert(kind="notice") %}
-    Use batch operations when reading or writing multiple components in a single callback for better performance at high tick rates.
+    Use batch operations when reading or writing multiple components in a single callback for better performance at high tick rates. `read_timestamps` lets you mix latest-only and historical reads in the same single-lock operation.
     {% end %}
 
 - `render_camera(camera_name)` -> `numpy.ndarray | None`

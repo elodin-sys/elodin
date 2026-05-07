@@ -139,3 +139,15 @@ def pre_step(tick, ctx):
 def post_step(tick, ctx):
     if tick % 4 == 0:
         ctx.render_camera(SENSOR_CAMERA_NAME)
+
+    # Exercise StepContext historical read: pull the current world_pos and the
+    # value from one tick earlier. The pre_step writes a fresh world_pos every
+    # tick, so consecutive samples should differ in shape-compatible ways.
+    pos_pair = f"{DRONE_NAME}.world_pos"
+    latest = ctx.read_component(pos_pair)
+    if tick > 0:
+        prev_ts = ctx.timestamp - int(1_000_000 / SIM_RATE)
+        prev = ctx.read_component(pos_pair, timestamp=prev_ts)
+        assert prev.shape == latest.shape, (
+            f"historical read shape mismatch: {prev.shape} vs {latest.shape}"
+        )
