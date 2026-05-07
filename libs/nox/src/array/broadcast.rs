@@ -2,6 +2,12 @@ use smallvec::SmallVec;
 
 use crate::Error;
 
+/// Returns the right-aligned broadcast shape for two concrete array shapes.
+///
+/// Dimensions are compatible when they are equal or one side is `1`. Missing
+/// leading dimensions are treated as `1`, so scalars (`[]`) broadcast to any
+/// shape. Returns [`Error::BroadcastShapeMismatch`] when the shapes cannot be
+/// broadcast together.
 pub fn broadcast_shape(left: &[usize], right: &[usize]) -> Result<SmallVec<[usize; 4]>, Error> {
     let rank = left.len().max(right.len());
     let mut shape = SmallVec::with_capacity(rank);
@@ -33,10 +39,15 @@ pub fn broadcast_shape(left: &[usize], right: &[usize]) -> Result<SmallVec<[usiz
     Ok(shape)
 }
 
+/// Returns whether two concrete array shapes can be broadcast together.
 pub fn can_broadcast(left: &[usize], right: &[usize]) -> bool {
     broadcast_shape(left, right).is_ok()
 }
 
+/// Mutates `output` so it can hold the co-broadcasted shape with `other`.
+///
+/// This is retained for internal callers that already provide the candidate
+/// output shape.
 pub(crate) fn cobroadcast_dims(output: &mut [usize], other: &[usize]) -> bool {
     for (output, other) in output.iter_mut().rev().zip(other.iter().rev()) {
         if *output == *other || *other == 1 {

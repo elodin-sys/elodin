@@ -344,7 +344,11 @@ impl<T1: Elem, D1: ArrayDim + TensorDim> Array<T1, D1> {
 macro_rules! impl_op {
     ($op:tt, $op_trait:tt, $fn_name:tt, $try_fn_name:tt) => {
         impl<T1: Elem, D1: ArrayDim + TensorDim  > Array<T1, D1> {
-            #[doc = concat!("This function attempts to perform the `", stringify!($op_trait), "` operation on two arrays.")]
+            #[doc = concat!("Fallibly performs element-wise `", stringify!($op_trait), "` with broadcasting.")]
+            ///
+            /// The output shape is computed with right-aligned dynamic
+            /// broadcasting. Returns [`Error::BroadcastShapeMismatch`] when the
+            /// two input shapes are not broadcastable.
             pub fn $try_fn_name<D2: ArrayDim + TensorDim>(
                 &self,
                 b: &Array<T1, D2>,
@@ -377,7 +381,10 @@ macro_rules! impl_op {
                 Ok(out)
             }
 
-            #[doc = concat!("This function performs the `", stringify!($op_trait), "` operation on two arrays.")]
+            #[doc = concat!("Performs element-wise `", stringify!($op_trait), "` with broadcasting.")]
+            ///
+            /// Compatibility wrapper around the fallible variant. Panics when
+            /// the input shapes are not broadcastable.
             pub fn $fn_name<D2: ArrayDim + TensorDim>(
                 &self,
                 b: &Array<T1, D2>,

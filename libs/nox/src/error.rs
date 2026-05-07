@@ -64,7 +64,7 @@ pub enum Error {
     #[error("concat dim failed with dims")]
     InvalidConcatDims,
 
-    /// Error when array shapes cannot be broadcast together.
+    /// Error when two concrete array shapes cannot be broadcast together.
     #[error("array shapes {left:?} and {right:?} are not broadcastable")]
     BroadcastShapeMismatch { left: Vec<usize>, right: Vec<usize> },
 
