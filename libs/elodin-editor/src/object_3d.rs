@@ -23,15 +23,14 @@ use crate::ui::tiles::ViewportConfig;
 use crate::{BevyExt, EqlContext, MainCamera, plugins::navigation_gizmo::NavGizmoCamera};
 use bevy_geo_frames::prelude::*;
 use std::collections::{HashMap, HashSet};
-use std::fmt;
 use std::sync::Arc;
+use std::borrow::Cow;
 
 type ImportedCameraFilter = (Added<Camera>, Without<NavGizmoCamera>, Without<MainCamera>);
 
 type ImportedCameraQuery<'w, 's> = Query<'w, 's, (Entity, &'static ChildOf), ImportedCameraFilter>;
 
 pub const ELLIPSOID_RENDER_LAYER: usize = 29;
-const BINARY_BROADCAST_ERROR: &str = "binary operation requires arrays be broadcastable";
 
 /// ExprObject3D component that holds an EQL expression for dynamic positioning
 #[derive(Component)]
@@ -104,7 +103,7 @@ pub struct WorldPosReceived;
 type ExprFn = dyn for<'a, 'b> Fn(
         &'a EntityMap,
         &'a Query<'b, 'b, &'static ComponentValue>,
-    ) -> Result<ComponentValue, String>
+    ) -> Result<ComponentValue, ComponentError>
     + Send
     + Sync;
 
@@ -113,13 +112,57 @@ pub enum CompiledExpr {
     Value(ComponentValue),
 }
 
+#[derive(Debug, thiserror::Error)]
+pub enum ComponentError {
+    #[error("binary operation requires arrays be broadcastable")]
+    BinaryBroadcastError,
+    #[error("cast: shape does not match data length")]
+    ShapeMismatch,
+    #[error("invalid array shape when promoting to f64")]
+    InvalidPromotion,
+    #[error("cannot be empty")]
+    InvalidEmpty,
+    #[error("requires a spatial transform")]
+    RequiresTransform,
+    #[error("requires 7-element array, got {0}")]
+    RequiresSevenElements(usize),
+    #[error("{0} requires tuple expression")]
+    RequiresTuple(&'static str),
+    #[error("{0} requires receiver and angle")]
+    RequiresReceiverAndAngle(&'static str),
+    #[error("{0} requires receiver and three angles (x, y, z)")]
+    RequiresReceiverAndThreeAngles(&'static str),
+    #[error("{0} requires receiver and distance")]
+    RequiresReceiverAndDistance(&'static str),
+    #[error("{0} requires receiver and three distances (x, y, z)")]
+    RequiresReceiverAndThreeDistances(&'static str),
+    #[error("{0} requires receiver and three components (x, y, z)")]
+    RequiresReceiverAndThreeComponents(&'static str),
+    #[error("formula '{0}' is not supported in editor runtime")]
+    EditorNotSupported(&'static str),
+    #[error("component '{0}' not found in entity map")]
+    NoComponent(String),
+    #[error("no component value map found for component '{0}'")]
+    NoComponentValue(String),
+    #[error("array index {index} out of bounds (length {length})")]
+    OutOfBounds { index: usize, length: usize },
+    #[error("array access can only be applied to numeric arrays")]
+    RequireNumericArray,
+    #[error("tuple elements must be numeric")]
+    RequireNumericTuple,
+    #[error("{0:?} can't be converted to a component value")]
+    CannotConvert(Expr),
+    #[error("{0}")]
+    Message(Cow<'static, str>),
+}
+
 impl CompiledExpr {
     pub fn closure<F>(closure: F) -> Self
     where
         F: for<'a, 'b> Fn(
                 &'a EntityMap,
                 &'a Query<'b, 'b, &'static ComponentValue>,
-            ) -> Result<ComponentValue, String>
+            ) -> Result<ComponentValue, ComponentError>
             + Send
             + Sync
             + 'static,
@@ -132,7 +175,7 @@ impl CompiledExpr {
         &'a self,
         entity_map: &'a EntityMap,
         values: &'a Query<'b, 'b, &'static ComponentValue>,
-    ) -> Result<ComponentValue, String> {
+    ) -> Result<ComponentValue, ComponentError> {
         match self {
             Self::Closure(c) => (c)(entity_map, values),
             Self::Value(value) => Ok(value.clone()),
@@ -194,14 +237,14 @@ fn rotate_vector_by_quat(q: (f64, f64, f64, f64), v: (f64, f64, f64)) -> (f64, f
 }
 
 /// Extract spatial transform data (qx, qy, qz, qw, px, py, pz), validating it has 7 elements
-fn extract_spatial(val: ComponentValue) -> Result<[f64; 7], String> {
+fn extract_spatial(val: ComponentValue) -> Result<[f64; 7], ComponentError> {
     use nox::ArrayBuf;
     let ComponentValue::F64(array) = val else {
-        return Err("requires a spatial transform".to_string());
+        return Err(ComponentError::RequiresTransform);
     };
     let data = array.buf.as_buf();
     if data.len() < 7 {
-        return Err(format!("requires 7-element array, got {}", data.len()));
+        return Err(ComponentError::RequiresSevenElements(data.len()));
     }
     Ok([
         data[0], data[1], data[2], data[3], data[4], data[5], data[6],
@@ -209,84 +252,84 @@ fn extract_spatial(val: ComponentValue) -> Result<[f64; 7], String> {
 }
 
 /// Extract a scalar f64 from component value
-fn extract_scalar(val: ComponentValue) -> Result<f64, String> {
+fn extract_scalar(val: ComponentValue) -> Result<f64, ComponentError> {
     use nox::ArrayBuf;
-    let empty = || Err("cannot be empty".to_string());
+    let empty = Err(ComponentError::InvalidEmpty);
     let v = match val {
         ComponentValue::F64(arr) => {
             let d = arr.buf.as_buf();
             if d.is_empty() {
-                return empty();
+                return empty;
             }
             d[0]
         }
         ComponentValue::F32(arr) => {
             let d = arr.buf.as_buf();
             if d.is_empty() {
-                return empty();
+                return empty;
             }
             d[0] as f64
         }
         ComponentValue::U8(arr) => {
             let d = arr.buf.as_buf();
             if d.is_empty() {
-                return empty();
+                return empty;
             }
             d[0] as f64
         }
         ComponentValue::U16(arr) => {
             let d = arr.buf.as_buf();
             if d.is_empty() {
-                return empty();
+                return empty;
             }
             d[0] as f64
         }
         ComponentValue::U32(arr) => {
             let d = arr.buf.as_buf();
             if d.is_empty() {
-                return empty();
+                return empty;
             }
             d[0] as f64
         }
         ComponentValue::U64(arr) => {
             let d = arr.buf.as_buf();
             if d.is_empty() {
-                return empty();
+                return empty;
             }
             d[0] as f64
         }
         ComponentValue::I8(arr) => {
             let d = arr.buf.as_buf();
             if d.is_empty() {
-                return empty();
+                return empty;
             }
             d[0] as f64
         }
         ComponentValue::I16(arr) => {
             let d = arr.buf.as_buf();
             if d.is_empty() {
-                return empty();
+                return empty;
             }
             d[0] as f64
         }
         ComponentValue::I32(arr) => {
             let d = arr.buf.as_buf();
             if d.is_empty() {
-                return empty();
+                return empty;
             }
             d[0] as f64
         }
         ComponentValue::I64(arr) => {
             let d = arr.buf.as_buf();
             if d.is_empty() {
-                return empty();
+                return empty;
             }
             d[0] as f64
         }
         ComponentValue::Bool(arr) => {
             let d = arr.buf.as_buf();
             if d.is_empty() {
-                return empty();
+                return empty;
             }
             if d[0] { 1.0 } else { 0.0 }
         }
@@ -308,7 +351,7 @@ fn build_vec3_result(v: (f64, f64, f64)) -> ComponentValue {
     ComponentValue::F64(result_array)
 }
 
-fn component_buf_as_f64_vec(value: &ComponentValue) -> Result<Vec<f64>, String> {
+fn component_buf_as_f64_vec(value: &ComponentValue) -> Result<Vec<f64>, ComponentError> {
     use nox::ArrayBuf;
     Ok(match value {
         ComponentValue::U8(a) => a.buf.as_buf().iter().map(|&x| x as f64).collect(),
@@ -330,7 +373,7 @@ fn component_buf_as_f64_vec(value: &ComponentValue) -> Result<Vec<f64>, String> 
     })
 }
 
-fn promote_component_to_f64(value: ComponentValue) -> Result<Array<f64, nox::Dyn>, String> {
+fn promote_component_to_f64(value: ComponentValue) -> Result<Array<f64, nox::Dyn>, ComponentError> {
     use smallvec::SmallVec;
     match value {
         ComponentValue::F64(arr) => Ok(arr),
@@ -338,7 +381,7 @@ fn promote_component_to_f64(value: ComponentValue) -> Result<Array<f64, nox::Dyn
             let data = component_buf_as_f64_vec(&other)?;
             let shape_sv: SmallVec<[usize; 4]> = SmallVec::from_slice(other.shape());
             Array::from_shape_vec(shape_sv, data)
-                .ok_or_else(|| "invalid array shape when promoting to f64".to_string())
+                .ok_or(ComponentError::InvalidPromotion)
         }
     }
 }
@@ -346,15 +389,15 @@ fn promote_component_to_f64(value: ComponentValue) -> Result<Array<f64, nox::Dyn
 fn cast_dyn_array_from_field<T: nox::Field>(
     shape_sv: &smallvec::SmallVec<[usize; 4]>,
     flat: Vec<T>,
-) -> Result<Array<T, nox::Dyn>, String> {
+) -> Result<Array<T, nox::Dyn>, ComponentError> {
     Array::from_shape_vec(shape_sv.clone(), flat)
-        .ok_or_else(|| "cast: shape does not match data length".to_string())
+        .ok_or(ComponentError::ShapeMismatch)
 }
 
 fn cast_component_value(
     value: ComponentValue,
     target: eql::CastTarget,
-) -> Result<ComponentValue, String> {
+) -> Result<ComponentValue, ComponentError> {
     use nox::ArrayBuf;
     use smallvec::SmallVec;
     let sh = value.shape();
@@ -442,12 +485,10 @@ fn compile_formula(formula: Arc<dyn eql::Formula>, inner_expr: eql::Expr) -> Com
             };
 
             let eql::Expr::Tuple(elements) = inner_expr else {
-                let error = format!("{n} requires tuple expression");
-                return CompiledExpr::closure(move |_, _| Err(error.clone()));
+                return CompiledExpr::closure(move |_, _| Err(ComponentError::RequiresTuple(n)));
             };
             if elements.len() != 2 {
-                let error = format!("{n} requires receiver and angle");
-                return CompiledExpr::closure(move |_, _| Err(error.clone()));
+                return CompiledExpr::closure(move |_, _| Err(ComponentError::RequiresReceiverAndAngle(n)));
             }
 
             let receiver_compiled = compile_eql_expr(elements[0].clone());
@@ -481,12 +522,10 @@ fn compile_formula(formula: Arc<dyn eql::Formula>, inner_expr: eql::Expr) -> Com
             };
 
             let eql::Expr::Tuple(elements) = inner_expr else {
-                let error = format!("{n} requires tuple expression");
-                return CompiledExpr::closure(move |_, _| Err(error.clone()));
+                return CompiledExpr::closure(move |_, _| Err(ComponentError::RequiresTuple(n)));
             };
             if elements.len() != 4 {
-                let error = format!("{n} requires receiver and three angles (x, y, z)");
-                return CompiledExpr::closure(move |_, _| Err(error.clone()));
+                return CompiledExpr::closure(move |_, _| Err(ComponentError::RequiresReceiverAndThreeAngles(n)));
             }
 
             let receiver_compiled = compile_eql_expr(elements[0].clone());
@@ -536,12 +575,10 @@ fn compile_formula(formula: Arc<dyn eql::Formula>, inner_expr: eql::Expr) -> Com
             };
 
             let eql::Expr::Tuple(elements) = inner_expr else {
-                let error = format!("{n} requires tuple expression");
-                return CompiledExpr::closure(move |_, _| Err(error.clone()));
+                return CompiledExpr::closure(move |_, _| Err(ComponentError::RequiresTuple(n)));
             };
             if elements.len() != 2 {
-                let error = format!("{n} requires receiver and distance");
-                return CompiledExpr::closure(move |_, _| Err(error.clone()));
+                return CompiledExpr::closure(move |_, _| Err(ComponentError::RequiresReceiverAndDistance(n)));
             }
 
             let receiver_compiled = compile_eql_expr(elements[0].clone());
@@ -583,12 +620,10 @@ fn compile_formula(formula: Arc<dyn eql::Formula>, inner_expr: eql::Expr) -> Com
             };
 
             let eql::Expr::Tuple(elements) = inner_expr else {
-                let error = format!("{n} requires tuple expression");
-                return CompiledExpr::closure(move |_, _| Err(error.clone()));
+                return CompiledExpr::closure(move |_, _| Err(ComponentError::RequiresTuple(n)));
             };
             if elements.len() != 4 {
-                let error = format!("{n} requires receiver and three distances (x, y, z)");
-                return CompiledExpr::closure(move |_, _| Err(error.clone()));
+                return CompiledExpr::closure(move |_, _| Err(ComponentError::RequiresReceiverAndThreeDistances(n)));
             }
 
             let receiver_compiled = compile_eql_expr(elements[0].clone());
@@ -622,14 +657,10 @@ fn compile_formula(formula: Arc<dyn eql::Formula>, inner_expr: eql::Expr) -> Com
         // direction(x, y, z): body-frame direction transformed to world frame (returns 3-vector)
         "direction" => {
             let eql::Expr::Tuple(elements) = inner_expr else {
-                return CompiledExpr::closure(move |_, _| {
-                    Err("direction requires tuple (receiver, x, y, z)".to_string())
-                });
+                return CompiledExpr::closure(move |_, _| Err(ComponentError::RequiresTuple(n)));
             };
             if elements.len() != 4 {
-                return CompiledExpr::closure(move |_, _| {
-                    Err("direction requires receiver and three components (x, y, z)".to_string())
-                });
+                return CompiledExpr::closure(move |_, _| Err(ComponentError::RequiresReceiverAndThreeComponents(n)));
             }
 
             let receiver_compiled = compile_eql_expr(elements[0].clone());
@@ -650,30 +681,23 @@ fn compile_formula(formula: Arc<dyn eql::Formula>, inner_expr: eql::Expr) -> Com
         }
 
         _ => {
-            let error = format!("formula '{n}' is not supported in editor runtime");
-            CompiledExpr::closure(move |_, _| Err(error.clone()))
+            CompiledExpr::closure(move |_, _| Err(ComponentError::EditorNotSupported(n)))
         }
     }
 }
 
 /// Compiles an EQL expression into a closure-based form
+///
+/// TODO: Consider making this return a `Result<CompiledExpr, CompiledExprError or Expr>`.
 pub fn compile_eql_expr(expression: eql::Expr) -> CompiledExpr {
     match expression {
         Expr::ComponentPart(component) => {
             let component_id = component.id;
             CompiledExpr::closure(move |entity_map, component_value| {
-                let entity_id = entity_map.get(&component_id).ok_or_else(|| {
-                    format!("component '{}' not found in entity map", component.name)
-                })?;
-
+                let entity_id = entity_map.get(&component_id).ok_or(ComponentError::NoComponent(component.name.clone()))?;
                 component_value
                     .get(*entity_id)
-                    .map_err(|_| {
-                        format!(
-                            "no component value map found for component '{}'",
-                            component.name
-                        )
-                    })
+                    .map_err(|_| ComponentError::NoComponentValue(component.name.clone()))
                     .cloned()
             })
         }
@@ -690,11 +714,10 @@ pub fn compile_eql_expr(expression: eql::Expr) -> CompiledExpr {
                             let value = nox::Array::<_, ()> { buf: value }.to_dyn();
                             Ok(ComponentValue::F64(value))
                         } else {
-                            Err(format!(
-                                "array index {} out of bounds (length: {})",
+                            Err(ComponentError::OutOfBounds {
                                 index,
-                                data.len()
-                            ))
+                                length: data.len()
+                            })
                         }
                     }
                     ComponentValue::F32(array) => {
@@ -705,14 +728,14 @@ pub fn compile_eql_expr(expression: eql::Expr) -> CompiledExpr {
                             let value = nox::Array::<_, ()> { buf: value }.to_dyn();
                             Ok(ComponentValue::F32(value))
                         } else {
-                            Err(format!(
-                                "array index {} out of bounds (length: {})",
+
+                            Err(ComponentError::OutOfBounds {
                                 index,
-                                data.len()
-                            ))
+                                length: data.len()
+                            })
                         }
                     }
-                    _ => Err("array access can only be applied to numeric arrays".to_string()),
+                    _ => Err(ComponentError::RequireNumericArray),
                 }
             })
         }
@@ -732,7 +755,7 @@ pub fn compile_eql_expr(expression: eql::Expr) -> CompiledExpr {
                             let f32_data = array.buf.as_buf();
                             values.extend(f32_data.iter().map(|&x| x as f64));
                         }
-                        _ => return Err("tuple elements must be numeric".to_string()),
+                        _ => return Err(ComponentError::RequireNumericTuple),
                     }
                 }
                 let tuple_array = Array::from_shape_vec(smallvec![values.len()], values).unwrap();
@@ -754,7 +777,7 @@ pub fn compile_eql_expr(expression: eql::Expr) -> CompiledExpr {
                     eql::BinaryOp::Mul => left.try_mul(&right),
                     eql::BinaryOp::Div => left.try_div(&right),
                 }
-                .map_err(|_| BINARY_BROADCAST_ERROR.to_string())?;
+                .map_err(|_| ComponentError::BinaryBroadcastError)?;
 
                 Ok(ComponentValue::F64(result))
             })
@@ -762,8 +785,7 @@ pub fn compile_eql_expr(expression: eql::Expr) -> CompiledExpr {
         Expr::FloatLiteral(f) => CompiledExpr::Value(ComponentValue::F64(nox::array!(f).to_dyn())),
         Expr::Formula(formula, inner_expr) => compile_formula(formula, *inner_expr),
         expr => {
-            let error = format!("{:?} can't be converted to a component value", expr);
-            CompiledExpr::closure(move |_, _| Err(error.clone()))
+            CompiledExpr::closure(move |_, _| Err(ComponentError::CannotConvert(expr.clone())))
         }
     }
 }
@@ -790,27 +812,16 @@ pub fn compile_cholesky_eql(expr: &str, ctx: &eql::Context) -> Result<CompiledEx
         .map_err(|err| err.to_string())
 }
 
-#[derive(Debug)]
+#[derive(Debug, thiserror::Error)]
 pub enum ScaleEvalError {
+    #[error("{0}")]
     Expr(String),
+    #[error("scale expression must yield at least 3 values, got {len}")]
     NotEnoughComponents { len: usize },
+    #[error("scale expression must yield an F32 or F64 array")]
     InvalidComponentType,
-}
-
-impl fmt::Display for ScaleEvalError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Expr(err) => write!(f, "{}", err),
-            Self::NotEnoughComponents { len } => write!(
-                f,
-                "scale expression must yield at least 3 values, got {}",
-                len
-            ),
-            Self::InvalidComponentType => {
-                f.write_str("scale expression must yield an F32 or F64 array")
-            }
-        }
-    }
+    #[error("Component error: {0}")]
+    ComponentError(ComponentError)
 }
 
 impl From<String> for ScaleEvalError {
@@ -818,8 +829,11 @@ impl From<String> for ScaleEvalError {
         Self::Expr(value)
     }
 }
-
-impl std::error::Error for ScaleEvalError {}
+impl From<ComponentError> for ScaleEvalError {
+    fn from(value: ComponentError) -> Self {
+        Self::ComponentError(value)
+    }
+}
 
 const ELLIPSOID_OVERSIZED_THRESHOLD: f32 = 10_000.0;
 
