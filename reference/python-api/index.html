@@ -876,13 +876,23 @@ and running the simulation. The <code>World</code> object also provides helper m
 <h4 id="methods">Methods</h4>
 <ul>
 <li>
-<p><code>read_component(pair_name)</code> -&gt; <code>numpy.ndarray</code></p>
-<p>Read the latest component data from the database.</p>
+<p><code>read_component(pair_name, timestamp=None)</code> -&gt; <code>numpy.ndarray</code></p>
+<p>Read component data from the database.</p>
 <ul>
 <li><code>pair_name</code> : <code>string</code>, the full component name in "entity.component" format (e.g., <code>"drone.accel"</code>, <code>"drone.world_pos"</code>)</li>
+<li><code>timestamp</code> : <code>int</code>, optional, microseconds since epoch. When <code>None</code> (the default), returns the most recent sample. When provided, returns the sample with the greatest timestamp <code>&lt;=</code> the requested one (floor / sample-and-hold semantics). Timestamps past the most recent write clamp to the latest sample.</li>
 </ul>
 <p>Returns a NumPy array containing the component data. The array dtype matches the component schema and is always 1D; reshape if needed.</p>
-<p>Raises <code>RuntimeError</code> if the component doesn't exist or has no data.</p>
+<p>Raises <code>RuntimeError</code> if the component doesn't exist, has no data, or the requested <code>timestamp</code> is before the very first sample.</p>
+<div class="el-notice warning container-fluid">
+    <div class="row g-0 align-items-center">
+        <div class="col-1" style="padding: 4px">
+            <i class="bx bx-error-circle" style="font-size: 1.5rem"></i>
+        </div>
+        <div class="col-15"><p>Historical reads use the same memory-mapped time-series that the latest-only path does, so the additional cost is one binary search over a contiguous timestamp index (a few hundred nanoseconds for typical histories). Use this to look up sensor values from earlier ticks (e.g. for finite-difference estimators) without leaving the simulation process.</p>
+</div>
+    </div>
+</div>
 </li>
 <li>
 <p><code>write_component(pair_name, data, timestamp=None)</code> -&gt; None</p>
@@ -904,12 +914,13 @@ and running the simulation. The <code>World</code> object also provides helper m
 </div>
 </li>
 <li>
-<p><code>component_batch_operation(reads=[], writes=None, write_timestamps=None)</code> -&gt; <code>dict[str, numpy.ndarray]</code></p>
+<p><code>component_batch_operation(reads=[], writes=None, write_timestamps=None, read_timestamps=None)</code> -&gt; <code>dict[str, numpy.ndarray]</code></p>
 <p>Perform multiple component reads and writes in a single database operation. This is more efficient than calling <code>read_component</code>/<code>write_component</code> multiple times, as it only acquires the database lock once for all operations.</p>
 <ul>
 <li><code>reads</code> : <code>list[str]</code>, list of component names to read (e.g., <code>["drone.accel", "drone.gyro"]</code>)</li>
 <li><code>writes</code> : <code>dict[str, numpy.ndarray]</code>, optional, dict mapping component names to numpy arrays to write</li>
 <li><code>write_timestamps</code> : <code>dict[str, int]</code>, optional, dict mapping component names to timestamps (microseconds since epoch). Components not in this dict use the current simulation timestamp.</li>
+<li><code>read_timestamps</code> : <code>dict[str, int]</code>, optional, dict mapping component names to timestamps (microseconds since epoch). Components present in this dict are read with floor / sample-and-hold semantics; components not in this dict return the most recent sample. Past-the-end timestamps clamp to the latest sample.</li>
 </ul>
 <p>Returns a dict mapping read component names to their numpy array values.</p>
 <div class="el-notice warning container-fluid">
@@ -917,7 +928,7 @@ and running the simulation. The <code>World</code> object also provides helper m
         <div class="col-1" style="padding: 4px">
             <i class="bx bx-error-circle" style="font-size: 1.5rem"></i>
         </div>
-        <div class="col-15"><p>Use batch operations when reading or writing multiple components in a single callback for better performance at high tick rates.</p>
+        <div class="col-15"><p>Use batch operations when reading or writing multiple components in a single callback for better performance at high tick rates. <code>read_timestamps</code> lets you mix latest-only and historical reads in the same single-lock operation.</p>
 </div>
     </div>
 </div>
