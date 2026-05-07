@@ -1718,6 +1718,20 @@ mod tests {
     }
 
     #[test]
+    fn test_dynamic_binary_ops_broadcast_sub_and_div() {
+        let left = dyn_array(&[2, 3], &[10.0, 20.0, 30.0, 40.0, 50.0, 60.0]);
+        let right = dyn_array(&[3], &[1.0, 2.0, 5.0]);
+
+        let sub = left.try_sub(&right).expect("[2, 3] - [3]");
+        assert_eq!(sub.shape(), &[2, 3]);
+        assert_eq!(sub.buf.as_buf(), &[9.0, 18.0, 25.0, 39.0, 48.0, 55.0]);
+
+        let div = left.try_div(&right).expect("[2, 3] / [3]");
+        assert_eq!(div.shape(), &[2, 3]);
+        assert_eq!(div.buf.as_buf(), &[10.0, 10.0, 6.0, 40.0, 25.0, 12.0]);
+    }
+
+    #[test]
     fn test_dynamic_binary_ops_broadcast_higher_rank() {
         let left = dyn_array(&[1, 3], &[10.0, 20.0, 30.0]);
         let right = dyn_array(&[2, 1, 3], &[1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
