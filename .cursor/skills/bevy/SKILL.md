@@ -647,3 +647,74 @@ app
                           c,
                           d).chain());
 ```
+
+## Avoid unnecessary allocations with `Cow`
+
+Suppose you have a return type of `Result<T, String>`, In many cases the error string is static and you would prefer to use `Result<T, &'static str>` but there is a case where it's important to provide specific information in the error that seems to require allocating a string. You can have the best of both worlds by using `Cow<'static, str>`: a `Cow` can hold a reference `&'static str` or an owned `String` and it's transparent to the user; they both deref to `&str`.
+
+Note: a `String` error type is not recommended; use `thiserror` crate and an enumeration instead. See its usage below.
+
+### Before
+Here is a contrived example of a function that converts an unsigned byte to a boolean. It has two static error messages and one dynamic one.
+```rust
+fn convert_to_bool(a: u8) -> Result<bool, String> {
+    match a {
+        0 => Ok(false),
+        1 => Ok(true),
+        2 => Err(String::from("not trinary")), // Allocates.
+        42 => Err(String::from("thanks for all the fish")), // Allocates.
+        x => Err(format!("got unexpected value {x}")) // Allocates.
+    }
+}
+```
+
+### After using Cow
+Using `Cow` we can avoid allocating the static error messages and use their static strings directly.
+```rust
+fn convert_to_bool(a: u8) -> Result<bool, Cow<'static, str>> {
+    match a {
+        0 => Ok(false),
+        1 => Ok(true),
+        2 => Err(Cow::from("not trinary")), // No allocation.
+        42 => Err(Cow::from("thanks for all the fish")), // No allocation.
+        x => Err(Cow::from(format!("got unexpected value {x}"))) // Allocates.
+    }
+}
+```
+
+### After using `thiserror`
+Using `thiserror` we can avoid doing any allocations for the error.
+
+```rust
+#[derive(thiserror::Error, Debug)]
+pub enum Error {
+    #[error("not trinary")]
+    NoTrinarySupport,
+    #[error("thanks for all the fish")]
+    TheAnswerToTheUniverseAndEverything,
+    #[error("got unexpected value {0}")]
+    UnexpectedValue(u8)
+}
+
+fn convert_to_bool(a: u8) -> Result<bool, Error> {
+    match a {
+        0 => Ok(false),
+        1 => Ok(true),
+        2 => Err(Error::NoTrinarySupport), // No allocation.
+        42 => Err(Error::TheAnswerToTheUniverseAndEverything), // No allocation.
+        x => Err(Error::UnexpectedValue(x)) // No allocation.
+    }
+}
+```
+
+## My Kingdom for a `Cow`
+
+Truth be told, `Cow` is one of those humble data structures that made me see Rust as something special. In most languages, you have to commit in your API to a reference or an owned value and often you have to commit to the most general type, which is the owned value. But take a look at Rust's regex [`replace_all`](https://docs.rs/regex/latest/regex/struct.Regex.html#method.replace_all) function:
+```rust
+pub fn replace_all<'h, R: Replacer>(&self, haystack: &'h str, rep: R) -> Cow<'h, str>
+```
+In a less careful implementation you'd probably get this:
+```rust
+pub fn replace_all<'h, R: Replacer>(&self, haystack: &'h str, rep: R) -> String
+```
+That's the general case. When you substitute a string, you have to create a new string. But Rust's `replace_all` handles the specific case where no substitutions happen and it can simply return back to you the string you gave it: `Cow::Borrowed(haystack)`. No allocation necessary and the API remains ergonomic.
