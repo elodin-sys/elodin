@@ -1212,7 +1212,7 @@ fn parse_color(
     component_value_maps: Query<&'static ComponentValue>,
 ) -> Option<(f32, f32, f32)> {
     let expr = ctx.parse_str(expr).ok()?;
-    let expr = crate::object_3d::compile_eql_expr(expr);
+    let expr = crate::object_3d::compile_eql_expr(expr).ok()?;
     let val = expr.execute(entity_map, &component_value_maps).ok()?;
 
     let ComponentValue::F64(array) = val else {

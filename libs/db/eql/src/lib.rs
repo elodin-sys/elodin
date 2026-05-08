@@ -770,7 +770,7 @@ pub(crate) fn parse_duration(duration_str: &str) -> Result<hifitime::Duration, E
     ))
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, Clone)]
 pub enum Error {
     #[error("entity not found: {0}")]
     ComponentNotFound(String),

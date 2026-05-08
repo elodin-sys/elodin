@@ -122,7 +122,7 @@ impl WidgetSystem for InspectorObject3D<'_, '_> {
                 match eql_context.0.parse_str(&object_3d_state.data.eql) {
                     Ok(expr) => {
                         object_3d_state.compiled_expr =
-                            Some(crate::object_3d::compile_eql_expr(expr));
+                            Some(crate::object_3d::compile_eql_expr(expr)?);
                     }
                     Err(err) => {
                         ui.colored_label(get_scheme().error, err.to_string());
