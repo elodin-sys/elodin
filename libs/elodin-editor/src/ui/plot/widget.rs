@@ -1608,6 +1608,7 @@ pub fn zoom_graph(
 #[derive(Component)]
 pub struct LastPos(Option<Vec2>);
 
+#[allow(clippy::too_many_arguments)]
 pub fn pan_graph(
     mut query: Query<(
         Entity,

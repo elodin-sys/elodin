@@ -42,6 +42,7 @@ impl Plugin for EditorCamInputPlugin {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn gated_camera_inputs(
     pointers: Query<(&PointerId, &PointerLocation)>,
     pointer_map: Res<CameraPointerMap>,

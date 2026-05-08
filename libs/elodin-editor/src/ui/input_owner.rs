@@ -2,20 +2,25 @@ use bevy::prelude::{Entity, Resource};
 use bevy_egui::egui;
 use std::collections::HashMap;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
 pub enum PointerOwner {
+    #[default]
     None,
-    Viewport { camera: Entity },
-    Graph { graph: Entity },
-    QueryPlot { graph: Entity },
-    NavGizmo { camera: Entity },
-    BlockedByUi { blocker: UiBlocker },
-}
-
-impl Default for PointerOwner {
-    fn default() -> Self {
-        Self::None
-    }
+    Viewport {
+        camera: Entity,
+    },
+    Graph {
+        graph: Entity,
+    },
+    QueryPlot {
+        graph: Entity,
+    },
+    NavGizmo {
+        camera: Entity,
+    },
+    BlockedByUi {
+        blocker: UiBlocker,
+    },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
