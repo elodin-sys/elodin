@@ -388,7 +388,8 @@ impl Plugin for UiPlugin {
                     set_nav_gizmo_camera_orders,
                     warn_camera_order_ambiguities,
                 )
-                    .chain(),
+                    .chain()
+                    .before(UiInputConsumerSet),
             )
             .add_systems(First, fix_visibility_hierarchy)
             .add_systems(Update, sync_hdr)

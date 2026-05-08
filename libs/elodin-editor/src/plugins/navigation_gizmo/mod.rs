@@ -1,4 +1,7 @@
-use crate::{MainCamera, plugins::camera_anchor::camera_anchor_from_transform, ui::ViewportRect};
+use crate::{
+    MainCamera, plugins::camera_anchor::camera_anchor_from_transform, ui::ViewportRect,
+    ui::input_owner::UiInputOwners,
+};
 use bevy::animation::{AnimatedBy, AnimationTargetId, animated_field};
 use bevy::camera::{RenderTarget, Viewport};
 use bevy::math::Dir3;
@@ -384,6 +387,7 @@ fn set_camera_viewport(
     mut main_editor_cam_query: Query<&mut EditorCam, (With<MainCamera>, Without<NavGizmoParent>)>,
     primary_query: Query<Entity, With<PrimaryWindow>>,
     mouse_buttons: Res<ButtonInput<MouseButton>>,
+    input_owners: Res<UiInputOwners>,
     mut anchor_state: ResMut<NavGizmoAnchorState>,
 ) {
     let margin = 8.0;
@@ -453,6 +457,7 @@ fn set_camera_viewport(
 
         if mouse_buttons.just_pressed(MouseButton::Left)
             && anchor_state.active_drag.is_none()
+            && input_owners.permits_viewport(window_entity, parent.main_camera)
             && let Some(cursor_pos) = window.physical_cursor_position()
         {
             let drag_rect = Rect::from_corners(

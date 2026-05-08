@@ -2,7 +2,7 @@
 
 use std::{collections::HashMap, ops::Range, sync::Arc, time::Duration};
 
-use crate::plugins::editor_cam_touch;
+use crate::plugins::{editor_cam_input, editor_cam_touch};
 #[cfg(feature = "big_space")]
 use crate::spatial::{FloatingOrigin, FloatingOriginSettings, GridCell};
 use bevy::{
@@ -227,7 +227,12 @@ impl Plugin for EditorPlugin {
                     .with_limiter(bevy_framepace::Limiter::Off),
             )
             //.add_plugins(DefaultPickingPlugins)
-            .add_plugins(bevy_editor_cam::DefaultEditorCamPlugins)
+            .add_plugins(
+                bevy_editor_cam::DefaultEditorCamPlugins
+                    .build()
+                    .disable::<bevy_editor_cam::input::DefaultInputPlugin>(),
+            )
+            .add_plugins(editor_cam_input::EditorCamInputPlugin)
             .add_plugins(EmbeddedAssetPlugin)
             .add_plugins(EguiPlugin::default())
             .add_plugins(bevy_infinite_grid::InfiniteGridPlugin)

@@ -156,6 +156,11 @@ impl UiInputOwners {
             .unwrap_or(PointerOwner::None)
     }
 
+    pub fn owner_at(&self, window: Entity, pointer_pos: egui::Pos2) -> PointerOwner {
+        self.resolve_owner_at(window, pointer_pos)
+            .unwrap_or(PointerOwner::None)
+    }
+
     pub fn permits_viewport(&self, window: Entity, camera: Entity) -> bool {
         matches!(
             self.owner_for_window(window),
@@ -163,9 +168,29 @@ impl UiInputOwners {
         )
     }
 
+    pub fn permits_viewport_at(
+        &self,
+        window: Entity,
+        camera: Entity,
+        pointer_pos: egui::Pos2,
+    ) -> bool {
+        matches!(
+            self.owner_at(window, pointer_pos),
+            PointerOwner::Viewport { camera: owner_camera } if owner_camera == camera
+        )
+    }
+
     pub fn permits_graph(&self, window: Entity, graph: Entity) -> bool {
         matches!(
             self.owner_for_window(window),
+            PointerOwner::Graph { graph: owner_graph }
+                | PointerOwner::QueryPlot { graph: owner_graph } if owner_graph == graph
+        )
+    }
+
+    pub fn permits_graph_at(&self, window: Entity, graph: Entity, pointer_pos: egui::Pos2) -> bool {
+        matches!(
+            self.owner_at(window, pointer_pos),
             PointerOwner::Graph { graph: owner_graph }
                 | PointerOwner::QueryPlot { graph: owner_graph } if owner_graph == graph
         )
@@ -406,5 +431,29 @@ mod tests {
                 graph: second_graph,
             })
         );
+    }
+
+    #[test]
+    fn permits_at_uses_the_provided_position_without_resolving_window_state() {
+        let window = entity(1);
+        let graph = entity(2);
+        let camera = entity(3);
+        let mut owners = UiInputOwners::default();
+
+        owners.register_content_rect(
+            window,
+            rect(0.0, 0.0, 100.0, 50.0),
+            PointerOwner::Graph { graph },
+        );
+        owners.register_content_rect(
+            window,
+            rect(0.0, 50.0, 100.0, 100.0),
+            PointerOwner::Viewport { camera },
+        );
+
+        assert!(owners.permits_graph_at(window, graph, egui::pos2(50.0, 25.0)));
+        assert!(!owners.permits_graph_at(window, graph, egui::pos2(50.0, 75.0)));
+        assert!(owners.permits_viewport_at(window, camera, egui::pos2(50.0, 75.0)));
+        assert_eq!(owners.owner_for_window(window), PointerOwner::None);
     }
 }
