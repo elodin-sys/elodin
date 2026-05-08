@@ -21,12 +21,12 @@ use crate::iter::JoinDisplayExt;
 use crate::plugins::render_layer_alloc::RenderLayerLease;
 use crate::ui::tiles::ViewportConfig;
 use crate::{BevyExt, EqlContext, MainCamera, plugins::navigation_gizmo::NavGizmoCamera};
-use bevy_geo_frames::prelude::*;
-use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
-use std::borrow::Cow;
 use bevy::platform::hash::FixedHasher;
+use bevy_geo_frames::prelude::*;
+use std::borrow::Cow;
+use std::collections::{HashMap, HashSet};
 use std::hash::BuildHasher;
+use std::sync::Arc;
 type ImportedCameraFilter = (Added<Camera>, Without<NavGizmoCamera>, Without<MainCamera>);
 
 type ImportedCameraQuery<'w, 's> = Query<'w, 's, (Entity, &'static ChildOf), ImportedCameraFilter>;
@@ -123,7 +123,6 @@ pub enum CompileError {
     Parse(#[from] eql::Error),
 }
 
-
 #[derive(Debug, thiserror::Error, Hash, PartialEq, Eq, Clone)]
 pub enum ComponentError {
     #[error("binary operation requires arrays be broadcastable")]
@@ -164,7 +163,9 @@ pub enum ComponentError {
     RequireNumericArray,
     #[error("tuple elements must be numeric")]
     RequireNumericTuple,
-    #[error("Expected 3 elements for rotation_vector (axis direction with magnitude as angle in degrees), got {length}")]
+    #[error(
+        "Expected 3 elements for rotation_vector (axis direction with magnitude as angle in degrees), got {length}"
+    )]
     RequireThreeElements { length: usize },
     #[error("expression must yield at least {required} values, got {length}")]
     NotEnoughComponents { required: usize, length: usize },
@@ -398,8 +399,7 @@ fn promote_component_to_f64(value: ComponentValue) -> Result<Array<f64, nox::Dyn
         other => {
             let data = component_buf_as_f64_vec(&other)?;
             let shape_sv: SmallVec<[usize; 4]> = SmallVec::from_slice(other.shape());
-            Array::from_shape_vec(shape_sv, data)
-                .ok_or(ComponentError::InvalidPromotion)
+            Array::from_shape_vec(shape_sv, data).ok_or(ComponentError::InvalidPromotion)
         }
     }
 }
@@ -408,8 +408,7 @@ fn cast_dyn_array_from_field<T: nox::Field>(
     shape_sv: &smallvec::SmallVec<[usize; 4]>,
     flat: Vec<T>,
 ) -> Result<Array<T, nox::Dyn>, ComponentError> {
-    Array::from_shape_vec(shape_sv.clone(), flat)
-        .ok_or(ComponentError::ShapeMismatch)
+    Array::from_shape_vec(shape_sv.clone(), flat).ok_or(ComponentError::ShapeMismatch)
 }
 
 fn cast_component_value(
@@ -478,13 +477,18 @@ fn cast_component_value(
 }
 
 /// Compiles a formula expression into a runtime closure
-fn compile_formula(formula: Arc<dyn eql::Formula>, inner_expr: eql::Expr) -> Result<CompiledExpr, CompileError> {
+fn compile_formula(
+    formula: Arc<dyn eql::Formula>,
+    inner_expr: eql::Expr,
+) -> Result<CompiledExpr, CompileError> {
     if let Some(target) = formula.editor_cast_target() {
         let inner_compiled = compile_eql_expr(inner_expr)?;
-        return Ok(CompiledExpr::closure(move |entity_map, component_values| {
-            let v = inner_compiled.execute(entity_map, component_values)?;
-            cast_component_value(v, target)
-        }));
+        return Ok(CompiledExpr::closure(
+            move |entity_map, component_values| {
+                let v = inner_compiled.execute(entity_map, component_values)?;
+                cast_component_value(v, target)
+            },
+        ));
     }
 
     let n = formula.name();
@@ -710,7 +714,9 @@ pub fn compile_eql_expr(expression: eql::Expr) -> Result<CompiledExpr, CompileEr
         Expr::ComponentPart(component) => {
             let component_id = component.id;
             CompiledExpr::closure(move |entity_map, component_value| {
-                let entity_id = entity_map.get(&component_id).ok_or(ComponentError::NoComponent(component.name.clone()))?;
+                let entity_id = entity_map
+                    .get(&component_id)
+                    .ok_or(ComponentError::NoComponent(component.name.clone()))?;
                 component_value
                     .get(*entity_id)
                     .map_err(|_| ComponentError::NoComponentValue(component.name.clone()))
@@ -732,7 +738,7 @@ pub fn compile_eql_expr(expression: eql::Expr) -> Result<CompiledExpr, CompileEr
                         } else {
                             Err(ComponentError::OutOfBounds {
                                 index,
-                                length: data.len()
+                                length: data.len(),
                             })
                         }
                     }
@@ -744,10 +750,9 @@ pub fn compile_eql_expr(expression: eql::Expr) -> Result<CompiledExpr, CompileEr
                             let value = nox::Array::<_, ()> { buf: value }.to_dyn();
                             Ok(ComponentValue::F32(value))
                         } else {
-
                             Err(ComponentError::OutOfBounds {
                                 index,
-                                length: data.len()
+                                length: data.len(),
                             })
                         }
                     }
@@ -813,8 +818,7 @@ pub fn compile_scale_eql(scale: &str, ctx: &eql::Context) -> Result<CompiledExpr
         return Err(ComponentError::InvalidEmptyIn("scale expression").into());
     }
 
-    ctx.parse_str(trimmed)
-        .map(compile_eql_expr)?
+    ctx.parse_str(trimmed).map(compile_eql_expr)?
 }
 
 /// Compiles an EQL expression that must yield at least 6 floats (lower-triangular Cholesky L).
@@ -823,8 +827,7 @@ pub fn compile_cholesky_eql(expr: &str, ctx: &eql::Context) -> Result<CompiledEx
     if trimmed.is_empty() {
         return Err(ComponentError::InvalidEmptyIn("error_covariance_cholesky expression").into());
     }
-    ctx.parse_str(trimmed)
-        .map(compile_eql_expr)?
+    ctx.parse_str(trimmed).map(compile_eql_expr)?
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -834,7 +837,7 @@ pub enum ScaleEvalError {
     #[error("expression must yield an F32 or F64 array")]
     InvalidComponentType,
     #[error("Component error: {0}")]
-    ComponentError(#[from] ComponentError)
+    ComponentError(#[from] ComponentError),
 }
 
 const ELLIPSOID_OVERSIZED_THRESHOLD: f32 = 10_000.0;
@@ -1081,7 +1084,9 @@ fn component_value_to_axis_angle(value: &ComponentValue) -> Result<(Vec3, f32), 
                 Err(ComponentError::RequireThreeElements { length: data.len() })
             }
         }
-        _ => Err(ComponentError::InvalidComponentType { requires: "f32 or f64 rotation_vector rotation" })
+        _ => Err(ComponentError::InvalidComponentType {
+            requires: "f32 or f64 rotation_vector rotation",
+        }),
     }
 }
 
@@ -1316,8 +1321,7 @@ fn evaluate_scale(
     component_value_maps: &Query<&'static ComponentValue>,
 ) -> Result<Vec3, ComponentError> {
     if let Some(expr) = &state.scale_expr {
-        let value = expr
-            .execute(entity_map, component_value_maps)?;
+        let value = expr.execute(entity_map, component_value_maps)?;
         component_value_to_vec3(&value)
     } else {
         Ok(Vec3::ONE)
@@ -1332,7 +1336,10 @@ fn component_value_to_vec3(value: &ComponentValue) -> Result<Vec3, ComponentErro
             if data.len() >= 3 {
                 Ok(Vec3::new(data[0] as f32, data[1] as f32, data[2] as f32).abs())
             } else {
-                Err(ComponentError::NotEnoughComponents { required: 3, length: data.len() })
+                Err(ComponentError::NotEnoughComponents {
+                    required: 3,
+                    length: data.len(),
+                })
             }
         }
         ComponentValue::F32(array) => {
@@ -1340,10 +1347,15 @@ fn component_value_to_vec3(value: &ComponentValue) -> Result<Vec3, ComponentErro
             if data.len() >= 3 {
                 Ok(Vec3::new(data[0], data[1], data[2]).abs())
             } else {
-                Err(ComponentError::NotEnoughComponents { required: 3, length: data.len() })
+                Err(ComponentError::NotEnoughComponents {
+                    required: 3,
+                    length: data.len(),
+                })
             }
         }
-        _ => Err(ComponentError::InvalidComponentType { requires: "f32 or f64 array" }),
+        _ => Err(ComponentError::InvalidComponentType {
+            requires: "f32 or f64 array",
+        }),
     }
 }
 

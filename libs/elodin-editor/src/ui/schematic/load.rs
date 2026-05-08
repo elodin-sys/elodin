@@ -1,4 +1,5 @@
 use crate::icon_rasterizer::IconTextureCache;
+use crate::object_3d::CompileError;
 use bevy::{ecs::system::SystemParam, prelude::*, window::PrimaryWindow};
 #[cfg(target_os = "macos")]
 use bevy_defer::AsyncCommandsExtension;
@@ -16,7 +17,6 @@ use std::{
     collections::{BTreeMap, HashMap},
     path::{Path, PathBuf},
 };
-use crate::object_3d::CompileError;
 
 #[cfg(not(target_os = "macos"))]
 use crate::tiles::WindowRelayout;
@@ -657,13 +657,14 @@ impl LoadSchematicParams<'_, '_> {
             .and_then(compile_eql_expr)
             .ok();
 
-        let origin_expr = vector_arrow
-            .origin
-            .as_ref()
-            .and_then(|origin| self.eql.0.parse_str(origin)
-                      .map_err(CompileError::Parse)
-                      .and_then(compile_eql_expr)
-                      .ok());
+        let origin_expr = vector_arrow.origin.as_ref().and_then(|origin| {
+            self.eql
+                .0
+                .parse_str(origin)
+                .map_err(CompileError::Parse)
+                .and_then(compile_eql_expr)
+                .ok()
+        });
 
         let frame = vector_arrow.frame;
         let mut spawn = self.commands.spawn((

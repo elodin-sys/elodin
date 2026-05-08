@@ -15,7 +15,8 @@ use impeller2_wkt::{
 use smallvec::SmallVec;
 
 use crate::object_3d::{
-    EllipsoidVisual, Object3DMeshChild, compile_cholesky_eql, compile_scale_eql, spawn_mesh, CompileError, ComponentError,
+    CompileError, ComponentError, EllipsoidVisual, Object3DMeshChild, compile_cholesky_eql,
+    compile_scale_eql, spawn_mesh,
 };
 use crate::ui::inspector::{eql_textfield, node_color_picker};
 use crate::{
@@ -243,8 +244,9 @@ impl WidgetSystem for InspectorObject3D<'_, '_> {
 
             ui.separator();
 
-            let mut scale_expr_update: Option<Result<crate::object_3d::CompiledExpr, CompileError>> =
-                None;
+            let mut scale_expr_update: Option<
+                Result<crate::object_3d::CompiledExpr, CompileError>,
+            > = None;
             let mut cholesky_expr_update: Option<Option<crate::object_3d::CompiledExpr>> = None;
             let scale_error_display = object_3d_state.scale_error.clone();
 
@@ -461,8 +463,10 @@ impl WidgetSystem for InspectorObject3D<'_, '_> {
                         let response = eql_textfield(ui, true, &eql_context.0, scale);
                         if response.changed() {
                             if scale.trim().is_empty() {
-                                scale_expr_update =
-                                    Some(Err(ComponentError::InvalidEmptyIn("scale expression").into()));
+                                scale_expr_update = Some(Err(ComponentError::InvalidEmptyIn(
+                                    "scale expression",
+                                )
+                                .into()));
                             } else {
                                 scale_expr_update = Some(compile_scale_eql(scale, &eql_context.0));
                             }
