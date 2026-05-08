@@ -2051,6 +2051,7 @@ mod joint_eql_cast_tests {
             SystemState::new(&mut world);
         let (q,) = system_state.get(&world);
         let out = compiled
+            .expect("compiled expr")
             .execute(&entity_map, &q)
             .expect("editor EQL runtime evaluation");
 
@@ -2149,7 +2150,7 @@ mod ellipsoid_scale_eql_tests {
             .execute(&entity_map, &component_values)
             .expect_err("incompatible shapes should not be flattened together");
 
-        assert_eq!(err, super::BINARY_BROADCAST_ERROR);
+        assert_eq!(err, crate::object_3d::ComponentError::BinaryBroadcastError);
     }
 
     #[test]
