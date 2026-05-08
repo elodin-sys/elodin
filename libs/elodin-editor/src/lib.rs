@@ -1077,7 +1077,7 @@ pub fn sync_object_3d(
             continue;
         };
 
-        let object_entity = create_object_3d_entity(
+        if let Ok(object_entity) = create_object_3d_entity(
             &mut commands,
             Object3D {
                 eql,
@@ -1094,8 +1094,9 @@ pub fn sync_object_3d(
             &mut mat3_material_assets,
             &assets,
             &geo_context,
-        );
-        synced_object_3d.0.insert(entity, object_entity);
+        ) {
+            synced_object_3d.0.insert(entity, object_entity);
+        }
     }
 }
 

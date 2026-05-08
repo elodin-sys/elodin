@@ -190,7 +190,7 @@ fn load_headless_scene(
                 tracing::warn!("Failed to parse EQL for object_3d: {}", obj.eql);
                 continue;
             };
-            create_object_3d_entity(
+            let _ = create_object_3d_entity(
                 &mut commands,
                 obj.clone(),
                 expr,

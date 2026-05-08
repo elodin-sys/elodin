@@ -1177,7 +1177,7 @@ fn create_object_3d_with_color(eql: String, expr: eql::Expr, mesh: Mesh) -> Pale
                     material: Material::color(r, g, b),
                 };
 
-                crate::object_3d::create_object_3d_entity(
+                let _ = crate::object_3d::create_object_3d_entity(
                     &mut commands,
                     Object3D {
                         eql: eql.clone(),
@@ -1263,7 +1263,7 @@ pub fn create_3d_object() -> PaletteItem {
                                                 | {
                                                 let obj = impeller2_wkt::Object3DMesh::glb(gltf_path.trim());
 
-                                                crate::object_3d::create_object_3d_entity(
+                                                let _ = crate::object_3d::create_object_3d_entity(
                                                     &mut commands,
                                                     Object3D { eql: eql.clone(), mesh: obj, icon: None, mesh_visibility_range: None, frame: None, node_id: Default::default() },
                                                     expr.clone(),

@@ -25,7 +25,8 @@ use bevy_geo_frames::prelude::*;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::borrow::Cow;
-
+use bevy::platform::hash::FixedHasher;
+use std::hash::BuildHasher;
 type ImportedCameraFilter = (Added<Camera>, Without<NavGizmoCamera>, Without<MainCamera>);
 
 type ImportedCameraQuery<'w, 's> = Query<'w, 's, (Entity, &'static ChildOf), ImportedCameraFilter>;
@@ -111,6 +112,17 @@ pub enum CompiledExpr {
     Closure(Box<ExprFn>),
     Value(ComponentValue),
 }
+
+#[derive(thiserror::Error, Debug, Clone)]
+pub enum CompileError {
+    #[error("{0:?} can't be converted to a component value")]
+    CannotConvert(Expr),
+    #[error("component error: {0}")]
+    ComponentError(#[from] ComponentError),
+    #[error("parse error: {0}")]
+    Parse(#[from] eql::Error),
+}
+
 
 #[derive(Debug, thiserror::Error, Hash, PartialEq, Eq, Clone)]
 pub enum ComponentError {
@@ -692,16 +704,6 @@ fn compile_formula(formula: Arc<dyn eql::Formula>, inner_expr: eql::Expr) -> Res
     })
 }
 
-#[derive(thiserror::Error, Debug, Clone)]
-pub enum CompileError {
-    #[error("{0:?} can't be converted to a component value")]
-    CannotConvert(Expr),
-    #[error("component error: {0}")]
-    ComponentError(#[from] ComponentError),
-    #[error("parse error: {0}")]
-    Parse(#[from] eql::Error),
-}
-
 /// Compiles an EQL expression into a closure-based form
 pub fn compile_eql_expr(expression: eql::Expr) -> Result<CompiledExpr, CompileError> {
     Ok(match expression {
@@ -1216,8 +1218,9 @@ pub fn update_joint_animations(
     mut joint_query: Query<(&mut Transform, &JointAnimationComponent)>,
     entity_map: Res<EntityMap>,
     component_value_maps: Query<&'static ComponentValue>,
-    mut errors: Local<HashSet<ComponentError>>,
+    mut errors: Local<HashSet<u64>>,
 ) {
+    let hasher = FixedHasher;
     for (mut joint_transform, joint_anim) in joint_query.iter_mut() {
         // Evaluate the EQL expression
         let component_value = match joint_anim
@@ -1226,7 +1229,7 @@ pub fn update_joint_animations(
         {
             Ok(value) => value,
             Err(err) => {
-                if errors.insert(err) {
+                if errors.insert(hasher.hash_one(&err)) {
                     warn!(
                         error = %err,
                         "Failed to evaluate EQL expression for joint animation"
@@ -1240,7 +1243,7 @@ pub fn update_joint_animations(
         let (axis, angle) = match component_value_to_axis_angle(&component_value) {
             Ok(result) => result,
             Err(err) => {
-                if errors.insert(err) {
+                if errors.insert(hasher.hash_one(&err)) {
                     warn!(
                         error = %err,
                         "Failed to convert EQL result to axis-angle rotation for joint animation"

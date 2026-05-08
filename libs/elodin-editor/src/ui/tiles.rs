@@ -55,7 +55,7 @@ use super::{
 };
 use crate::{
     EqlContext, GridHandle, MainCamera,
-    object_3d::{ELLIPSOID_RENDER_LAYER, EditableEQL, compile_eql_expr},
+    object_3d::{ELLIPSOID_RENDER_LAYER, EditableEQL, compile_eql_expr, CompileError},
     plugins::{
         LogicalKeyState,
         gizmos::GIZMO_RENDER_LAYER,
@@ -1327,17 +1327,16 @@ impl ViewportPane {
             .pos
             .as_ref()
             .map(|eql| {
-                let compiled_expr = match eql_ctx.parse_str(eql) {
-                    Ok(expr) => Some(compile_eql_expr(expr)),
-                    Err(e) => {
+                let compiled_expr = eql_ctx.parse_str(eql)
+                    .inspect_err(|e|
                         bevy::log::error!(
                             "Failed to parse viewport pos expression '{}': {}",
                             eql,
                             e
-                        );
-                        None
-                    }
-                };
+                        ))
+                    .map_err(CompileError::Parse)
+                    .and_then(compile_eql_expr)
+                    .ok();
                 EditableEQL {
                     eql: eql.to_string(),
                     compiled_expr,
@@ -1348,17 +1347,16 @@ impl ViewportPane {
             .look_at
             .as_ref()
             .map(|eql| {
-                let compiled_expr = match eql_ctx.parse_str(eql) {
-                    Ok(expr) => Some(compile_eql_expr(expr)),
-                    Err(e) => {
+                let compiled_expr = eql_ctx.parse_str(eql)
+                    .inspect_err(|e|
                         bevy::log::error!(
                             "Failed to parse viewport look_at expression '{}': {}",
                             eql,
                             e
-                        );
-                        None
-                    }
-                };
+                        ))
+                    .map_err(CompileError::Parse)
+                    .and_then(compile_eql_expr)
+                    .ok();
                 EditableEQL {
                     eql: eql.to_string(),
                     compiled_expr,
@@ -1369,17 +1367,16 @@ impl ViewportPane {
             .up
             .as_ref()
             .map(|eql| {
-                let compiled_expr = match eql_ctx.parse_str(eql) {
-                    Ok(expr) => Some(compile_eql_expr(expr)),
-                    Err(e) => {
+                let compiled_expr = eql_ctx.parse_str(eql)
+                    .inspect_err(|e|
                         bevy::log::error!(
                             "Failed to parse viewport up expression '{}': {}",
                             eql,
                             e
-                        );
-                        None
-                    }
-                };
+                        ))
+                    .map_err(CompileError::Parse)
+                    .and_then(compile_eql_expr)
+                    .ok();
                 EditableEQL {
                     eql: eql.to_string(),
                     compiled_expr,
