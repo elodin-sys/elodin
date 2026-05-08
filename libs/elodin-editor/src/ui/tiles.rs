@@ -44,6 +44,7 @@ use super::{
     data_overview::{DataOverviewPane, DataOverviewWidget},
     hierarchy::{Hierarchy, HierarchyContent},
     images,
+    input_owner::{PointerOwner, PointerOwnerPriority, UiBlocker, UiInputOwners},
     inspector::{InspectorContent, InspectorIcons},
     monitor::{MonitorPane, MonitorWidget},
     plot::{GraphBundle, GraphState, PlotWidget},
@@ -1017,6 +1018,13 @@ impl Pane {
         match self {
             Pane::Graph(pane) => {
                 pane.rect = Some(content_rect);
+                register_content_owner(
+                    world,
+                    ui,
+                    target_window,
+                    content_rect,
+                    PointerOwner::Graph { graph: pane.id },
+                );
 
                 ui.add_widget_with::<PlotWidget>(
                     world,
@@ -1029,6 +1037,8 @@ impl Pane {
             Pane::Viewport(pane) => {
                 const MONITOR_HEIGHT: f32 = 36.0;
                 let mut show_monitor = false;
+                let mut viewport_owner_rect = None;
+                let mut monitor_owner_rect = None;
 
                 if let Some(cam) = pane.camera {
                     let mut state = SystemState::<(
@@ -1075,11 +1085,13 @@ impl Pane {
                                 egui::pos2(content_rect.max.x, content_rect.max.y - MONITOR_HEIGHT),
                             );
                             pane.rect = Some(viewport_rect);
+                            viewport_owner_rect = Some(viewport_rect);
 
                             let monitor_rect = egui::Rect::from_min_max(
                                 egui::pos2(content_rect.min.x, content_rect.max.y - MONITOR_HEIGHT),
                                 content_rect.max,
                             );
+                            monitor_owner_rect = Some(monitor_rect);
                             let scheme = super::colors::get_scheme();
                             ui.painter()
                                 .rect_filled(monitor_rect, 0.0, scheme.bg_secondary);
@@ -1121,20 +1133,76 @@ impl Pane {
 
                 if !show_monitor {
                     pane.rect = Some(content_rect);
+                    viewport_owner_rect = Some(content_rect);
+                }
+
+                if let Some(cam) = pane.camera {
+                    if let Some(rect) = viewport_owner_rect {
+                        register_content_owner(
+                            world,
+                            ui,
+                            target_window,
+                            rect,
+                            PointerOwner::Viewport { camera: cam },
+                        );
+                    }
+                } else {
+                    register_ui_blocker(
+                        world,
+                        ui,
+                        target_window,
+                        content_rect,
+                        UiBlocker::OtherPanel,
+                        PointerOwnerPriority::Panel,
+                    );
+                }
+
+                if let Some(rect) = monitor_owner_rect {
+                    register_ui_blocker(
+                        world,
+                        ui,
+                        target_window,
+                        rect,
+                        UiBlocker::Monitor,
+                        PointerOwnerPriority::Panel,
+                    );
                 }
 
                 egui_tiles::UiResponse::None
             }
             Pane::Monitor(pane) => {
+                register_ui_blocker(
+                    world,
+                    ui,
+                    target_window,
+                    content_rect,
+                    UiBlocker::Monitor,
+                    PointerOwnerPriority::Panel,
+                );
                 ui.add_widget_with::<MonitorWidget>(world, "monitor", pane.clone());
                 egui_tiles::UiResponse::None
             }
             Pane::QueryTable(pane) => {
+                register_ui_blocker(
+                    world,
+                    ui,
+                    target_window,
+                    content_rect,
+                    UiBlocker::OtherPanel,
+                    PointerOwnerPriority::Panel,
+                );
                 ui.add_widget_with::<QueryTableWidget>(world, "sql", pane.clone());
                 egui_tiles::UiResponse::None
             }
             Pane::QueryPlot(pane) => {
                 pane.rect = Some(content_rect);
+                register_content_owner(
+                    world,
+                    ui,
+                    target_window,
+                    content_rect,
+                    PointerOwner::QueryPlot { graph: pane.entity },
+                );
                 let mut pane_with_icon = pane.clone();
                 pane_with_icon.scrub_icon = Some(icons.scrub);
                 ui.add_widget_with::<super::query_plot::QueryPlotWidget>(
@@ -1145,10 +1213,26 @@ impl Pane {
                 egui_tiles::UiResponse::None
             }
             Pane::ActionTile(pane) => {
+                register_ui_blocker(
+                    world,
+                    ui,
+                    target_window,
+                    content_rect,
+                    UiBlocker::OtherPanel,
+                    PointerOwnerPriority::Panel,
+                );
                 ui.add_widget_with::<ActionTileWidget>(world, "action_tile", pane.entity);
                 egui_tiles::UiResponse::None
             }
             Pane::VideoStream(pane) | Pane::SensorView(pane) => {
+                register_ui_blocker(
+                    world,
+                    ui,
+                    target_window,
+                    content_rect,
+                    UiBlocker::OtherPanel,
+                    PointerOwnerPriority::Panel,
+                );
                 ui.add_widget_with::<super::video_stream::VideoStreamWidget>(
                     world,
                     "video_stream",
@@ -1160,6 +1244,14 @@ impl Pane {
                 egui_tiles::UiResponse::None
             }
             Pane::LogStream(pane) => {
+                register_ui_blocker(
+                    world,
+                    ui,
+                    target_window,
+                    content_rect,
+                    UiBlocker::OtherPanel,
+                    PointerOwnerPriority::Panel,
+                );
                 ui.add_widget_with::<super::log_stream::LogStreamWidget>(
                     world,
                     "log_stream",
@@ -1170,6 +1262,14 @@ impl Pane {
                 egui_tiles::UiResponse::None
             }
             Pane::SchematicTree(tree_pane) => {
+                register_ui_blocker(
+                    world,
+                    ui,
+                    target_window,
+                    content_rect,
+                    UiBlocker::OtherPanel,
+                    PointerOwnerPriority::Panel,
+                );
                 let tree_icons = super::schematic::tree::TreeIcons {
                     chevron: icons.chevron,
                     search: icons.search,
@@ -1185,6 +1285,14 @@ impl Pane {
                 egui_tiles::UiResponse::None
             }
             Pane::DataOverview(pane) => {
+                register_ui_blocker(
+                    world,
+                    ui,
+                    target_window,
+                    content_rect,
+                    UiBlocker::OtherPanel,
+                    PointerOwnerPriority::Panel,
+                );
                 let updated_pane = ui.add_widget_with::<DataOverviewWidget>(
                     world,
                     "data_overview",
@@ -1619,6 +1727,55 @@ fn main_content_rect(tree: &egui_tiles::Tree<Pane>) -> Option<egui::Rect> {
     tree.tiles.rect(root)
 }
 
+fn register_pointer_owner(
+    world: &mut World,
+    ui: &Ui,
+    target_window: Entity,
+    rect: egui::Rect,
+    owner: PointerOwner,
+    priority: PointerOwnerPriority,
+) {
+    let rect = rect.intersect(ui.clip_rect());
+    if let Some(mut input_owners) = world.get_resource_mut::<UiInputOwners>() {
+        input_owners.register_rect(target_window, rect, owner, priority);
+    }
+}
+
+fn register_content_owner(
+    world: &mut World,
+    ui: &Ui,
+    target_window: Entity,
+    rect: egui::Rect,
+    owner: PointerOwner,
+) {
+    register_pointer_owner(
+        world,
+        ui,
+        target_window,
+        rect,
+        owner,
+        PointerOwnerPriority::Content,
+    );
+}
+
+fn register_ui_blocker(
+    world: &mut World,
+    ui: &Ui,
+    target_window: Entity,
+    rect: egui::Rect,
+    blocker: UiBlocker,
+    priority: PointerOwnerPriority,
+) {
+    register_pointer_owner(
+        world,
+        ui,
+        target_window,
+        rect,
+        PointerOwner::BlockedByUi { blocker },
+        priority,
+    );
+}
+
 struct TreeBehavior<'w> {
     icons: TileIcons,
     tree_actions: SmallVec<[TreeAction; 4]>,
@@ -1810,6 +1967,14 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
             }
             resp
         };
+        register_ui_blocker(
+            self.world,
+            ui,
+            self.target_window,
+            rect,
+            UiBlocker::TabBar,
+            PointerOwnerPriority::Panel,
+        );
 
         if !self.read_only && state.active && response.double_clicked() && !is_editing {
             ui.ctx()
@@ -2082,10 +2247,16 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
         if !tab_add_visible(tiles, tabs) {
             return;
         }
-        let mut layout = SystemState::<TileLayout>::new(self.world);
-        let mut layout = layout.get_mut(self.world);
 
         let top_bar_rect = ui.available_rect_before_wrap();
+        register_ui_blocker(
+            self.world,
+            ui,
+            self.target_window,
+            top_bar_rect,
+            UiBlocker::TabBar,
+            PointerOwnerPriority::Panel,
+        );
         ui.painter().hline(
             top_bar_rect.x_range(),
             top_bar_rect.bottom(),
@@ -2097,6 +2268,8 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
         ui.add_space(5.0);
         let resp = ui.add(EImageButton::new(self.icons.add).scale(1.4, 1.4));
         if resp.clicked() {
+            let mut layout = SystemState::<TileLayout>::new(self.world);
+            let mut layout = layout.get_mut(self.world);
             layout
                 .cmd_palette_state
                 .open_page_for_window(Some(self.target_window), move || {
@@ -2194,6 +2367,23 @@ impl<'w, 's> TileSystem<'w, 's> {
 
         egui_material_icons::initialize(ui.ctx());
 
+        if let Some(mut input_owners) = world.get_resource_mut::<UiInputOwners>() {
+            input_owners.begin_window(target_window);
+        }
+
+        let toolbar_rect = egui::Rect::from_min_size(
+            ui.available_rect_before_wrap().min,
+            vec2(ui.available_width(), 32.0),
+        );
+        register_ui_blocker(
+            world,
+            ui,
+            target_window,
+            toolbar_rect,
+            UiBlocker::OtherPanel,
+            PointerOwnerPriority::Panel,
+        );
+
         let toolbar_action =
             render_sidebar_toolbar(ui, left_sidebar_visible, right_sidebar_visible);
 
@@ -2243,6 +2433,14 @@ impl<'w, 's> TileSystem<'w, 's> {
                     ..Default::default()
                 })
                 .show_inside(ui, |ui| {
+                    register_ui_blocker(
+                        world,
+                        ui,
+                        target_window,
+                        ui.max_rect(),
+                        UiBlocker::OtherPanel,
+                        PointerOwnerPriority::Panel,
+                    );
                     let hierarchy_icons = Hierarchy {
                         search: icons.search,
                         entity: icons.entity,
@@ -2267,6 +2465,14 @@ impl<'w, 's> TileSystem<'w, 's> {
                     ..Default::default()
                 })
                 .show_inside(ui, |ui| {
+                    register_ui_blocker(
+                        world,
+                        ui,
+                        target_window,
+                        ui.max_rect(),
+                        UiBlocker::Inspector,
+                        PointerOwnerPriority::Panel,
+                    );
                     let inspector_icons = InspectorIcons {
                         chart: icons.chart,
                         subtract: icons.subtract,
@@ -3125,6 +3331,14 @@ impl WidgetSystem for TileLayout<'_, '_> {
         }
 
         if show_empty_overlay && let Some(rect) = empty_overlay_rect {
+            register_ui_blocker(
+                world,
+                ui,
+                target_window,
+                rect,
+                UiBlocker::OtherPanel,
+                PointerOwnerPriority::Panel,
+            );
             ui.scope_builder(UiBuilder::new().max_rect(rect), |ui| {
                 ui.add_widget_with::<TileLayoutEmpty>(
                     world,
@@ -3135,6 +3349,11 @@ impl WidgetSystem for TileLayout<'_, '_> {
                     },
                 );
             });
+        }
+
+        let pointer_pos = ui.input(|input| input.pointer.latest_pos());
+        if let Some(mut input_owners) = world.get_resource_mut::<UiInputOwners>() {
+            input_owners.resolve_window(target_window, pointer_pos);
         }
     }
 }

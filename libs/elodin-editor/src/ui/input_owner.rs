@@ -72,6 +72,12 @@ impl UiInputOwners {
         self.next_order = 0;
     }
 
+    pub fn begin_window(&mut self, window: Entity) {
+        self.regions_by_window.remove(&window);
+        self.owners_by_window.remove(&window);
+        self.next_order = 0;
+    }
+
     pub fn register_rect(
         &mut self,
         window: Entity,
@@ -355,6 +361,50 @@ mod tests {
         assert_eq!(
             owners.resolve_owner_at(window, egui::pos2(50.0, 50.0)),
             None
+        );
+    }
+
+    #[test]
+    fn begin_window_clears_only_that_window() {
+        let first_window = entity(1);
+        let second_window = entity(2);
+        let first_graph = entity(3);
+        let second_graph = entity(4);
+        let mut owners = UiInputOwners::default();
+
+        owners.register_content_rect(
+            first_window,
+            rect(0.0, 0.0, 100.0, 100.0),
+            PointerOwner::Graph { graph: first_graph },
+        );
+        owners.register_content_rect(
+            second_window,
+            rect(0.0, 0.0, 100.0, 100.0),
+            PointerOwner::Graph {
+                graph: second_graph,
+            },
+        );
+        owners.resolve_window(first_window, Some(egui::pos2(50.0, 50.0)));
+        owners.resolve_window(second_window, Some(egui::pos2(50.0, 50.0)));
+
+        owners.begin_window(first_window);
+
+        assert_eq!(owners.owner_for_window(first_window), PointerOwner::None);
+        assert_eq!(
+            owners.resolve_owner_at(first_window, egui::pos2(50.0, 50.0)),
+            None
+        );
+        assert_eq!(
+            owners.owner_for_window(second_window),
+            PointerOwner::Graph {
+                graph: second_graph,
+            }
+        );
+        assert_eq!(
+            owners.resolve_owner_at(second_window, egui::pos2(50.0, 50.0)),
+            Some(PointerOwner::Graph {
+                graph: second_graph,
+            })
         );
     }
 }
