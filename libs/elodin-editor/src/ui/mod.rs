@@ -90,6 +90,7 @@ pub mod command_palette;
 pub mod data_overview;
 pub mod hierarchy;
 pub mod images;
+pub mod input_owner;
 pub mod inspector;
 pub mod label;
 pub mod log_stream;
