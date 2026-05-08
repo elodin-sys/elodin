@@ -1,8 +1,3 @@
-use bevy::ecs::message::Messages;
-use bevy::input::{
-    ButtonInput,
-    mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll, MouseButton, MouseMotion, MouseWheel},
-};
 use bevy::{
     camera::{RenderTarget, Viewport},
     ecs::{
@@ -293,51 +288,49 @@ pub struct UiPlugin;
 #[derive(Debug, PartialEq, Eq, Clone, Hash, SystemSet)]
 pub struct UiInputConsumerSet;
 
-// This system prevents UI events such as scroll and pan from passing through
-// egui modals and popups to whatever is behind them. The intention is for
-// modals to disable everything other than the modal, but popups allow
-// interactions with other things, except whatever is directly behind the
-// popup. The basic approach is for each popup to set a flag indicating if
-// the pointer is currently over it, then if any flags are true stop
-// propagating events.
-fn suppress_pointer_input_over_popups(
+#[derive(Resource, Debug, Default)]
+pub struct EguiOverlayInputBlockers {
+    modal_windows: HashSet<Entity>,
+    popup_windows: HashSet<Entity>,
+}
+
+impl EguiOverlayInputBlockers {
+    pub fn modal_blocks(&self, window: Entity) -> bool {
+        self.modal_windows.contains(&window)
+    }
+
+    pub fn popup_blocks(&self, window: Entity) -> bool {
+        self.popup_windows.contains(&window)
+    }
+}
+
+// egui modal and popup layers are not tile panes, so they do not naturally
+// register owner regions from tiles.rs. Capture them here and let tiles.rs fold
+// them into UiInputOwners instead of clearing Bevy input globally.
+fn update_egui_overlay_input_blockers(
     egui_wants_input: Res<EguiWantsInput>,
-    mut contexts: Query<&mut EguiContext>,
-    mut mouse_buttons: ResMut<ButtonInput<MouseButton>>,
-    mut mouse_motion_messages: ResMut<Messages<MouseMotion>>,
-    mut mouse_wheel_messages: ResMut<Messages<MouseWheel>>,
-    mut accumulated_motion: ResMut<AccumulatedMouseMotion>,
-    mut accumulated_scroll: ResMut<AccumulatedMouseScroll>,
+    mut contexts: Query<(Entity, &mut EguiContext)>,
+    mut blockers: ResMut<EguiOverlayInputBlockers>,
 ) {
-    let mut modal_open = false;
-    let mut pointer_over_popup = false;
-    for mut ctx in contexts.iter_mut() {
+    blockers.modal_windows.clear();
+    blockers.popup_windows.clear();
+
+    for (window, mut ctx) in contexts.iter_mut() {
         let ctx = ctx.get_mut();
         if ctx.memory(|mem| mem.top_modal_layer().is_some()) {
-            modal_open = true;
+            blockers.modal_windows.insert(window);
         }
 
         let popup_hovered_id = egui::Id::new("any_popup_hovered");
-        if ctx
+        let pointer_over_popup = ctx
             .data(|data| data.get_temp::<bool>(popup_hovered_id))
-            .unwrap_or(false)
-        {
-            pointer_over_popup = true;
+            .unwrap_or(false);
+        if egui_wants_input.is_popup_open() && pointer_over_popup {
+            blockers.popup_windows.insert(window);
         }
 
         ctx.data_mut(|data| data.insert_temp::<bool>(popup_hovered_id, false));
     }
-
-    let popup_active = egui_wants_input.is_popup_open() && pointer_over_popup;
-    if !(modal_open || popup_active) {
-        return;
-    }
-
-    mouse_motion_messages.clear();
-    mouse_wheel_messages.clear();
-    mouse_buttons.reset_all();
-    accumulated_motion.delta = Vec2::ZERO;
-    accumulated_scroll.delta = Vec2::ZERO;
 }
 
 impl Plugin for UiPlugin {
@@ -357,18 +350,19 @@ impl Plugin for UiPlugin {
             .init_resource::<HdrEnabled>()
             .init_resource::<FocusedWindow>()
             .init_resource::<input_owner::UiInputOwners>()
+            .init_resource::<EguiOverlayInputBlockers>()
             .init_resource::<timeline_slider::UITick>()
             .init_resource::<timeline::StreamTickOrigin>()
             .init_resource::<command_palette::CommandPaletteState>()
             .add_message::<DialogEvent>()
             .configure_sets(Update, UiInputConsumerSet)
+            .add_systems(
+                Update,
+                update_egui_overlay_input_blockers.before(render_layout),
+            )
             .add_systems(Update, timeline_slider::sync_ui_tick.before(render_layout))
             .add_systems(Update, actions::spawn_lua_actor)
             .add_systems(Update, update_focused_window)
-            .add_systems(
-                Update,
-                suppress_pointer_input_over_popups.before(UiInputConsumerSet),
-            )
             .add_systems(Update, shortcuts)
             .add_systems(
                 PreUpdate,

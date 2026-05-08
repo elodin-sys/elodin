@@ -36,7 +36,7 @@ use winit::{
 };
 
 use super::{
-    PaneName, SelectedObject, ViewportRect, WindowUiState,
+    EguiOverlayInputBlockers, PaneName, SelectedObject, ViewportRect, WindowUiState,
     actions::{ActionTile, ActionTileWidget},
     button::{EImageButton, ETileButton},
     colors::{self, EColor, get_scheme, with_opacity},
@@ -3349,6 +3349,22 @@ impl WidgetSystem for TileLayout<'_, '_> {
                     },
                 );
             });
+        }
+
+        let overlay_blocker =
+            world
+                .get_resource::<EguiOverlayInputBlockers>()
+                .and_then(|blockers| {
+                    if blockers.modal_blocks(target_window) {
+                        Some((UiBlocker::Modal, PointerOwnerPriority::Modal))
+                    } else if blockers.popup_blocks(target_window) {
+                        Some((UiBlocker::Popup, PointerOwnerPriority::Overlay))
+                    } else {
+                        None
+                    }
+                });
+        if let Some((blocker, priority)) = overlay_blocker {
+            register_ui_blocker(world, ui, target_window, ui.max_rect(), blocker, priority);
         }
 
         let pointer_pos = ui.input(|input| input.pointer.latest_pos());
