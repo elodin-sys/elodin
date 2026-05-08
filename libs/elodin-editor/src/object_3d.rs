@@ -830,16 +830,6 @@ pub fn compile_cholesky_eql(expr: &str, ctx: &eql::Context) -> Result<CompiledEx
     ctx.parse_str(trimmed).map(compile_eql_expr)?
 }
 
-#[derive(Debug, thiserror::Error)]
-pub enum ScaleEvalError {
-    #[error("expression must yield at least {required} values, got {length}")]
-    NotEnoughComponents { required: usize, length: usize },
-    #[error("expression must yield an F32 or F64 array")]
-    InvalidComponentType,
-    #[error("Component error: {0}")]
-    ComponentError(#[from] ComponentError),
-}
-
 const ELLIPSOID_OVERSIZED_THRESHOLD: f32 = 10_000.0;
 
 /// Chi-squared quantile for 3 degrees of freedom (confidence as fraction 0..1).
@@ -1359,7 +1349,7 @@ fn component_value_to_vec3(value: &ComponentValue) -> Result<Vec3, ComponentErro
     }
 }
 
-fn component_value_to_6floats(value: &ComponentValue) -> Result<[f32; 6], String> {
+fn component_value_to_6floats(value: &ComponentValue) -> Result<[f32; 6], ComponentError> {
     use nox::ArrayBuf;
     match value {
         ComponentValue::F64(array) => {
@@ -1374,10 +1364,10 @@ fn component_value_to_6floats(value: &ComponentValue) -> Result<[f32; 6], String
                     data[5] as f32,
                 ])
             } else {
-                Err(format!(
-                    "error_covariance_cholesky must yield at least 6 values, got {}",
-                    data.len()
-                ))
+                Err(ComponentError::NotEnoughComponents {
+                    required: 6,
+                    length: data.len(),
+                })
             }
         }
         ComponentValue::F32(array) => {
@@ -1385,13 +1375,15 @@ fn component_value_to_6floats(value: &ComponentValue) -> Result<[f32; 6], String
             if data.len() >= 6 {
                 Ok([data[0], data[1], data[2], data[3], data[4], data[5]])
             } else {
-                Err(format!(
-                    "error_covariance_cholesky must yield at least 6 values, got {}",
-                    data.len()
-                ))
+                Err(ComponentError::NotEnoughComponents {
+                    required: 6,
+                    length: data.len(),
+                })
             }
         }
-        _ => Err("error_covariance_cholesky must yield an F32 or F64 array".to_string()),
+        _ => Err(ComponentError::InvalidComponentType {
+            requires: "F32 or F64 array",
+        }),
     }
 }
 
