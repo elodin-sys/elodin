@@ -21,11 +21,12 @@ use crate::iter::JoinDisplayExt;
 use crate::plugins::render_layer_alloc::RenderLayerLease;
 use crate::ui::tiles::ViewportConfig;
 use crate::{BevyExt, EqlContext, MainCamera, plugins::navigation_gizmo::NavGizmoCamera};
+use bevy::platform::hash::FixedHasher;
 use bevy_geo_frames::prelude::*;
+use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
-use std::fmt;
+use std::hash::BuildHasher;
 use std::sync::Arc;
-
 type ImportedCameraFilter = (Added<Camera>, Without<NavGizmoCamera>, Without<MainCamera>);
 
 type ImportedCameraQuery<'w, 's> = Query<'w, 's, (Entity, &'static ChildOf), ImportedCameraFilter>;
@@ -37,7 +38,7 @@ pub const ELLIPSOID_RENDER_LAYER: usize = 29;
 pub struct Object3DState {
     pub compiled_expr: Option<CompiledExpr>,
     pub scale_expr: Option<CompiledExpr>,
-    pub scale_error: Option<String>,
+    pub scale_error: Option<CompileError>,
     /// When set, ellipsoid shape is driven by error covariance (Mat3 path); evaluated each frame.
     pub error_covariance_cholesky_expr: Option<CompiledExpr>,
     pub joint_animations: Vec<(String, String)>, // (joint_name, eql_expr) - compiled in attach_joint_animations
@@ -103,7 +104,7 @@ pub struct WorldPosReceived;
 type ExprFn = dyn for<'a, 'b> Fn(
         &'a EntityMap,
         &'a Query<'b, 'b, &'static ComponentValue>,
-    ) -> Result<ComponentValue, String>
+    ) -> Result<ComponentValue, ComponentError>
     + Send
     + Sync;
 
@@ -112,13 +113,75 @@ pub enum CompiledExpr {
     Value(ComponentValue),
 }
 
+#[derive(thiserror::Error, Debug, Clone)]
+pub enum CompileError {
+    #[error("{0:?} can't be converted to a component value")]
+    CannotConvert(Expr),
+    #[error("component error: {0}")]
+    ComponentError(#[from] ComponentError),
+    #[error("parse error: {0}")]
+    Parse(#[from] eql::Error),
+}
+
+#[derive(Debug, thiserror::Error, Hash, PartialEq, Eq, Clone)]
+pub enum ComponentError {
+    #[error("binary operation requires arrays be broadcastable")]
+    BinaryBroadcastError,
+    #[error("cast: shape does not match data length")]
+    ShapeMismatch,
+    #[error("invalid array shape when promoting to f64")]
+    InvalidPromotion,
+    #[error("cannot be empty")]
+    InvalidEmpty,
+    #[error("{0} cannot be empty")]
+    InvalidEmptyIn(&'static str),
+    #[error("requires a spatial transform")]
+    RequiresTransform,
+    #[error("requires 7-element array, got {0}")]
+    RequiresSevenElements(usize),
+    #[error("{0} requires tuple expression")]
+    RequiresTuple(&'static str),
+    #[error("{0} requires receiver and angle")]
+    RequiresReceiverAndAngle(&'static str),
+    #[error("{0} requires receiver and three angles (x, y, z)")]
+    RequiresReceiverAndThreeAngles(&'static str),
+    #[error("{0} requires receiver and distance")]
+    RequiresReceiverAndDistance(&'static str),
+    #[error("{0} requires receiver and three distances (x, y, z)")]
+    RequiresReceiverAndThreeDistances(&'static str),
+    #[error("{0} requires receiver and three components (x, y, z)")]
+    RequiresReceiverAndThreeComponents(&'static str),
+    #[error("formula '{0}' is not supported in editor runtime")]
+    EditorNotSupported(&'static str),
+    #[error("component '{0}' not found in entity map")]
+    NoComponent(String),
+    #[error("no component value map found for component '{0}'")]
+    NoComponentValue(String),
+    #[error("array index {index} out of bounds (length {length})")]
+    OutOfBounds { index: usize, length: usize },
+    #[error("array access can only be applied to numeric arrays")]
+    RequireNumericArray,
+    #[error("tuple elements must be numeric")]
+    RequireNumericTuple,
+    #[error(
+        "Expected 3 elements for rotation_vector (axis direction with magnitude as angle in degrees), got {length}"
+    )]
+    RequireThreeElements { length: usize },
+    #[error("expression must yield at least {required} values, got {length}")]
+    NotEnoughComponents { required: usize, length: usize },
+    #[error("expression must yield an {requires}")]
+    InvalidComponentType { requires: &'static str },
+    #[error("{0}")]
+    Message(Cow<'static, str>),
+}
+
 impl CompiledExpr {
     pub fn closure<F>(closure: F) -> Self
     where
         F: for<'a, 'b> Fn(
                 &'a EntityMap,
                 &'a Query<'b, 'b, &'static ComponentValue>,
-            ) -> Result<ComponentValue, String>
+            ) -> Result<ComponentValue, ComponentError>
             + Send
             + Sync
             + 'static,
@@ -131,7 +194,7 @@ impl CompiledExpr {
         &'a self,
         entity_map: &'a EntityMap,
         values: &'a Query<'b, 'b, &'static ComponentValue>,
-    ) -> Result<ComponentValue, String> {
+    ) -> Result<ComponentValue, ComponentError> {
         match self {
             Self::Closure(c) => (c)(entity_map, values),
             Self::Value(value) => Ok(value.clone()),
@@ -193,14 +256,14 @@ fn rotate_vector_by_quat(q: (f64, f64, f64, f64), v: (f64, f64, f64)) -> (f64, f
 }
 
 /// Extract spatial transform data (qx, qy, qz, qw, px, py, pz), validating it has 7 elements
-fn extract_spatial(val: ComponentValue) -> Result<[f64; 7], String> {
+fn extract_spatial(val: ComponentValue) -> Result<[f64; 7], ComponentError> {
     use nox::ArrayBuf;
     let ComponentValue::F64(array) = val else {
-        return Err("requires a spatial transform".to_string());
+        return Err(ComponentError::RequiresTransform);
     };
     let data = array.buf.as_buf();
     if data.len() < 7 {
-        return Err(format!("requires 7-element array, got {}", data.len()));
+        return Err(ComponentError::RequiresSevenElements(data.len()));
     }
     Ok([
         data[0], data[1], data[2], data[3], data[4], data[5], data[6],
@@ -208,84 +271,84 @@ fn extract_spatial(val: ComponentValue) -> Result<[f64; 7], String> {
 }
 
 /// Extract a scalar f64 from component value
-fn extract_scalar(val: ComponentValue) -> Result<f64, String> {
+fn extract_scalar(val: ComponentValue) -> Result<f64, ComponentError> {
     use nox::ArrayBuf;
-    let empty = || Err("cannot be empty".to_string());
+    let empty = Err(ComponentError::InvalidEmpty);
     let v = match val {
         ComponentValue::F64(arr) => {
             let d = arr.buf.as_buf();
             if d.is_empty() {
-                return empty();
+                return empty;
             }
             d[0]
         }
         ComponentValue::F32(arr) => {
             let d = arr.buf.as_buf();
             if d.is_empty() {
-                return empty();
+                return empty;
             }
             d[0] as f64
         }
         ComponentValue::U8(arr) => {
             let d = arr.buf.as_buf();
             if d.is_empty() {
-                return empty();
+                return empty;
             }
             d[0] as f64
         }
         ComponentValue::U16(arr) => {
             let d = arr.buf.as_buf();
             if d.is_empty() {
-                return empty();
+                return empty;
             }
             d[0] as f64
         }
         ComponentValue::U32(arr) => {
             let d = arr.buf.as_buf();
             if d.is_empty() {
-                return empty();
+                return empty;
             }
             d[0] as f64
         }
         ComponentValue::U64(arr) => {
             let d = arr.buf.as_buf();
             if d.is_empty() {
-                return empty();
+                return empty;
             }
             d[0] as f64
         }
         ComponentValue::I8(arr) => {
             let d = arr.buf.as_buf();
             if d.is_empty() {
-                return empty();
+                return empty;
             }
             d[0] as f64
         }
         ComponentValue::I16(arr) => {
             let d = arr.buf.as_buf();
             if d.is_empty() {
-                return empty();
+                return empty;
             }
             d[0] as f64
         }
         ComponentValue::I32(arr) => {
             let d = arr.buf.as_buf();
             if d.is_empty() {
-                return empty();
+                return empty;
             }
             d[0] as f64
         }
         ComponentValue::I64(arr) => {
             let d = arr.buf.as_buf();
             if d.is_empty() {
-                return empty();
+                return empty;
             }
             d[0] as f64
         }
         ComponentValue::Bool(arr) => {
             let d = arr.buf.as_buf();
             if d.is_empty() {
-                return empty();
+                return empty;
             }
             if d[0] { 1.0 } else { 0.0 }
         }
@@ -307,7 +370,7 @@ fn build_vec3_result(v: (f64, f64, f64)) -> ComponentValue {
     ComponentValue::F64(result_array)
 }
 
-fn component_buf_as_f64_vec(value: &ComponentValue) -> Result<Vec<f64>, String> {
+fn component_buf_as_f64_vec(value: &ComponentValue) -> Result<Vec<f64>, ComponentError> {
     use nox::ArrayBuf;
     Ok(match value {
         ComponentValue::U8(a) => a.buf.as_buf().iter().map(|&x| x as f64).collect(),
@@ -329,184 +392,29 @@ fn component_buf_as_f64_vec(value: &ComponentValue) -> Result<Vec<f64>, String> 
     })
 }
 
-fn promote_component_to_f64(value: ComponentValue) -> Result<Array<f64, nox::Dyn>, String> {
+fn promote_component_to_f64(value: ComponentValue) -> Result<Array<f64, nox::Dyn>, ComponentError> {
     use smallvec::SmallVec;
     match value {
         ComponentValue::F64(arr) => Ok(arr),
         other => {
             let data = component_buf_as_f64_vec(&other)?;
             let shape_sv: SmallVec<[usize; 4]> = SmallVec::from_slice(other.shape());
-            Array::from_shape_vec(shape_sv, data)
-                .ok_or_else(|| "invalid array shape when promoting to f64".to_string())
+            Array::from_shape_vec(shape_sv, data).ok_or(ComponentError::InvalidPromotion)
         }
     }
-}
-
-// Keep object_3d runtime EQL binary operations shape-based.
-// TODO: move this into nox once dynamic broadcasting is fixed there. Today,
-// nox::Array binary ops can panic on equal-rank incompatible shapes and can
-// iterate dynamic broadcasts incorrectly when the left rank is greater than the right
-// rank. The editor keeps the broadcast local so runtime EQL returns a clean
-// error and preserves expected array shapes.
-fn broadcast_shape(
-    left: &[usize],
-    right: &[usize],
-) -> Result<smallvec::SmallVec<[usize; 4]>, String> {
-    let rank = left.len().max(right.len());
-    let mut shape = smallvec::SmallVec::with_capacity(rank);
-
-    for axis in 0..rank {
-        let left_axis = axis
-            .checked_sub(rank - left.len())
-            .map(|i| left[i])
-            .unwrap_or(1);
-        let right_axis = axis
-            .checked_sub(rank - right.len())
-            .map(|i| right[i])
-            .unwrap_or(1);
-
-        if left_axis == right_axis {
-            shape.push(left_axis);
-        } else if left_axis == 1 {
-            shape.push(right_axis);
-        } else if right_axis == 1 {
-            shape.push(left_axis);
-        } else {
-            return Err("binary operation requires arrays be broadcastable".to_string());
-        }
-    }
-
-    Ok(shape)
-}
-
-fn row_major_strides(shape: &[usize]) -> smallvec::SmallVec<[usize; 4]> {
-    let mut strides = smallvec::SmallVec::from_elem(0, shape.len());
-    let mut stride = 1;
-    for axis in (0..shape.len()).rev() {
-        strides[axis] = stride;
-        stride *= shape[axis];
-    }
-    strides
-}
-
-fn broadcast_strides(
-    output_shape: &[usize],
-    input_shape: &[usize],
-    input_strides: &[usize],
-) -> smallvec::SmallVec<[usize; 4]> {
-    debug_assert!(output_shape.len() >= input_shape.len());
-    debug_assert_eq!(input_shape.len(), input_strides.len());
-
-    let leading_axes = output_shape.len() - input_shape.len();
-    output_shape
-        .iter()
-        .enumerate()
-        .map(|(axis, _)| {
-            if axis < leading_axes {
-                0
-            } else {
-                let input_axis = axis - leading_axes;
-                if input_shape[input_axis] == 1 {
-                    0
-                } else {
-                    input_strides[input_axis]
-                }
-            }
-        })
-        .collect()
-}
-
-fn advance_broadcast_offsets(
-    index: &mut [usize],
-    shape: &[usize],
-    left_strides: &[usize],
-    right_strides: &[usize],
-    left_offset: &mut usize,
-    right_offset: &mut usize,
-) {
-    debug_assert_eq!(index.len(), shape.len());
-    debug_assert_eq!(left_strides.len(), shape.len());
-    debug_assert_eq!(right_strides.len(), shape.len());
-
-    for axis in (0..shape.len()).rev() {
-        index[axis] += 1;
-        *left_offset += left_strides[axis];
-        *right_offset += right_strides[axis];
-
-        if index[axis] < shape[axis] {
-            break;
-        }
-
-        *left_offset -= index[axis] * left_strides[axis];
-        *right_offset -= index[axis] * right_strides[axis];
-        index[axis] = 0;
-    }
-}
-
-fn apply_binary_op(
-    left: &Array<f64, nox::Dyn>,
-    right: &Array<f64, nox::Dyn>,
-    op: eql::BinaryOp,
-) -> Result<Array<f64, nox::Dyn>, String> {
-    use nox::ArrayBuf;
-
-    let left_data = left.buf.as_buf();
-    let right_data = right.buf.as_buf();
-    let output_shape = broadcast_shape(left.shape(), right.shape())?;
-    let output_len = output_shape.iter().product();
-    let left_strides = broadcast_strides(
-        &output_shape,
-        left.shape(),
-        &row_major_strides(left.shape()),
-    );
-    let right_strides = broadcast_strides(
-        &output_shape,
-        right.shape(),
-        &row_major_strides(right.shape()),
-    );
-
-    let apply = |left: f64, right: f64| match op {
-        eql::BinaryOp::Add => left + right,
-        eql::BinaryOp::Sub => left - right,
-        eql::BinaryOp::Mul => left * right,
-        eql::BinaryOp::Div => left / right,
-    };
-
-    let mut index = smallvec::SmallVec::<[usize; 4]>::from_elem(0, output_shape.len());
-    let mut left_offset = 0;
-    let mut right_offset = 0;
-    let mut values = Vec::with_capacity(output_len);
-    for flat_index in 0..output_len {
-        values.push(apply(left_data[left_offset], right_data[right_offset]));
-
-        if flat_index + 1 < output_len {
-            advance_broadcast_offsets(
-                &mut index,
-                &output_shape,
-                &left_strides,
-                &right_strides,
-                &mut left_offset,
-                &mut right_offset,
-            );
-        }
-    }
-
-    Array::from_shape_vec(output_shape, values)
-        .ok_or_else(|| "invalid array shape after binary operation".to_string())
 }
 
 fn cast_dyn_array_from_field<T: nox::Field>(
     shape_sv: &smallvec::SmallVec<[usize; 4]>,
     flat: Vec<T>,
-) -> Result<Array<T, nox::Dyn>, String> {
-    Array::from_shape_vec(shape_sv.clone(), flat)
-        .ok_or_else(|| "cast: shape does not match data length".to_string())
+) -> Result<Array<T, nox::Dyn>, ComponentError> {
+    Array::from_shape_vec(shape_sv.clone(), flat).ok_or(ComponentError::ShapeMismatch)
 }
 
 fn cast_component_value(
     value: ComponentValue,
     target: eql::CastTarget,
-) -> Result<ComponentValue, String> {
+) -> Result<ComponentValue, ComponentError> {
     use nox::ArrayBuf;
     use smallvec::SmallVec;
     let sh = value.shape();
@@ -569,17 +477,22 @@ fn cast_component_value(
 }
 
 /// Compiles a formula expression into a runtime closure
-fn compile_formula(formula: Arc<dyn eql::Formula>, inner_expr: eql::Expr) -> CompiledExpr {
+fn compile_formula(
+    formula: Arc<dyn eql::Formula>,
+    inner_expr: eql::Expr,
+) -> Result<CompiledExpr, CompileError> {
     if let Some(target) = formula.editor_cast_target() {
-        let inner_compiled = compile_eql_expr(inner_expr);
-        return CompiledExpr::closure(move |entity_map, component_values| {
-            let v = inner_compiled.execute(entity_map, component_values)?;
-            cast_component_value(v, target)
-        });
+        let inner_compiled = compile_eql_expr(inner_expr)?;
+        return Ok(CompiledExpr::closure(
+            move |entity_map, component_values| {
+                let v = inner_compiled.execute(entity_map, component_values)?;
+                cast_component_value(v, target)
+            },
+        ));
     }
 
     let n = formula.name();
-    match n {
+    Ok(match n {
         // Single-axis rotation formulas (body and world frame)
         "rotate_x" | "rotate_y" | "rotate_z" | "rotate_world_x" | "rotate_world_y"
         | "rotate_world_z" => {
@@ -594,16 +507,14 @@ fn compile_formula(formula: Arc<dyn eql::Formula>, inner_expr: eql::Expr) -> Com
             };
 
             let eql::Expr::Tuple(elements) = inner_expr else {
-                let error = format!("{n} requires tuple expression");
-                return CompiledExpr::closure(move |_, _| Err(error.clone()));
+                return Err(ComponentError::RequiresTuple(n).into());
             };
             if elements.len() != 2 {
-                let error = format!("{n} requires receiver and angle");
-                return CompiledExpr::closure(move |_, _| Err(error.clone()));
+                return Err(ComponentError::RequiresReceiverAndAngle(n).into());
             }
 
-            let receiver_compiled = compile_eql_expr(elements[0].clone());
-            let angle_compiled = compile_eql_expr(elements[1].clone());
+            let receiver_compiled = compile_eql_expr(elements[0].clone())?;
+            let angle_compiled = compile_eql_expr(elements[1].clone())?;
 
             CompiledExpr::closure(move |entity_map, component_values| {
                 let spatial = receiver_compiled.execute(entity_map, component_values)?;
@@ -633,18 +544,16 @@ fn compile_formula(formula: Arc<dyn eql::Formula>, inner_expr: eql::Expr) -> Com
             };
 
             let eql::Expr::Tuple(elements) = inner_expr else {
-                let error = format!("{n} requires tuple expression");
-                return CompiledExpr::closure(move |_, _| Err(error.clone()));
+                return Err(ComponentError::RequiresTuple(n).into());
             };
             if elements.len() != 4 {
-                let error = format!("{n} requires receiver and three angles (x, y, z)");
-                return CompiledExpr::closure(move |_, _| Err(error.clone()));
+                return Err(ComponentError::RequiresReceiverAndThreeAngles(n).into());
             }
 
-            let receiver_compiled = compile_eql_expr(elements[0].clone());
-            let x_angle_compiled = compile_eql_expr(elements[1].clone());
-            let y_angle_compiled = compile_eql_expr(elements[2].clone());
-            let z_angle_compiled = compile_eql_expr(elements[3].clone());
+            let receiver_compiled = compile_eql_expr(elements[0].clone())?;
+            let x_angle_compiled = compile_eql_expr(elements[1].clone())?;
+            let y_angle_compiled = compile_eql_expr(elements[2].clone())?;
+            let z_angle_compiled = compile_eql_expr(elements[3].clone())?;
 
             CompiledExpr::closure(move |entity_map, component_values| {
                 let spatial = receiver_compiled.execute(entity_map, component_values)?;
@@ -688,16 +597,14 @@ fn compile_formula(formula: Arc<dyn eql::Formula>, inner_expr: eql::Expr) -> Com
             };
 
             let eql::Expr::Tuple(elements) = inner_expr else {
-                let error = format!("{n} requires tuple expression");
-                return CompiledExpr::closure(move |_, _| Err(error.clone()));
+                return Err(ComponentError::RequiresTuple(n).into());
             };
             if elements.len() != 2 {
-                let error = format!("{n} requires receiver and distance");
-                return CompiledExpr::closure(move |_, _| Err(error.clone()));
+                return Err(ComponentError::RequiresReceiverAndDistance(n).into());
             }
 
-            let receiver_compiled = compile_eql_expr(elements[0].clone());
-            let distance_compiled = compile_eql_expr(elements[1].clone());
+            let receiver_compiled = compile_eql_expr(elements[0].clone())?;
+            let distance_compiled = compile_eql_expr(elements[1].clone())?;
 
             CompiledExpr::closure(move |entity_map, component_values| {
                 let spatial = receiver_compiled.execute(entity_map, component_values)?;
@@ -735,18 +642,16 @@ fn compile_formula(formula: Arc<dyn eql::Formula>, inner_expr: eql::Expr) -> Com
             };
 
             let eql::Expr::Tuple(elements) = inner_expr else {
-                let error = format!("{n} requires tuple expression");
-                return CompiledExpr::closure(move |_, _| Err(error.clone()));
+                return Err(ComponentError::RequiresTuple(n).into());
             };
             if elements.len() != 4 {
-                let error = format!("{n} requires receiver and three distances (x, y, z)");
-                return CompiledExpr::closure(move |_, _| Err(error.clone()));
+                return Err(ComponentError::RequiresReceiverAndThreeDistances(n).into());
             }
 
-            let receiver_compiled = compile_eql_expr(elements[0].clone());
-            let x_dist_compiled = compile_eql_expr(elements[1].clone());
-            let y_dist_compiled = compile_eql_expr(elements[2].clone());
-            let z_dist_compiled = compile_eql_expr(elements[3].clone());
+            let receiver_compiled = compile_eql_expr(elements[0].clone())?;
+            let x_dist_compiled = compile_eql_expr(elements[1].clone())?;
+            let y_dist_compiled = compile_eql_expr(elements[2].clone())?;
+            let z_dist_compiled = compile_eql_expr(elements[3].clone())?;
 
             CompiledExpr::closure(move |entity_map, component_values| {
                 let spatial = receiver_compiled.execute(entity_map, component_values)?;
@@ -774,20 +679,16 @@ fn compile_formula(formula: Arc<dyn eql::Formula>, inner_expr: eql::Expr) -> Com
         // direction(x, y, z): body-frame direction transformed to world frame (returns 3-vector)
         "direction" => {
             let eql::Expr::Tuple(elements) = inner_expr else {
-                return CompiledExpr::closure(move |_, _| {
-                    Err("direction requires tuple (receiver, x, y, z)".to_string())
-                });
+                return Err(ComponentError::RequiresTuple(n).into());
             };
             if elements.len() != 4 {
-                return CompiledExpr::closure(move |_, _| {
-                    Err("direction requires receiver and three components (x, y, z)".to_string())
-                });
+                return Err(ComponentError::RequiresReceiverAndThreeComponents(n).into());
             }
 
-            let receiver_compiled = compile_eql_expr(elements[0].clone());
-            let x_compiled = compile_eql_expr(elements[1].clone());
-            let y_compiled = compile_eql_expr(elements[2].clone());
-            let z_compiled = compile_eql_expr(elements[3].clone());
+            let receiver_compiled = compile_eql_expr(elements[0].clone())?;
+            let x_compiled = compile_eql_expr(elements[1].clone())?;
+            let y_compiled = compile_eql_expr(elements[2].clone())?;
+            let z_compiled = compile_eql_expr(elements[3].clone())?;
 
             CompiledExpr::closure(move |entity_map, component_values| {
                 let spatial = receiver_compiled.execute(entity_map, component_values)?;
@@ -802,35 +703,28 @@ fn compile_formula(formula: Arc<dyn eql::Formula>, inner_expr: eql::Expr) -> Com
         }
 
         _ => {
-            let error = format!("formula '{n}' is not supported in editor runtime");
-            CompiledExpr::closure(move |_, _| Err(error.clone()))
+            return Err(ComponentError::EditorNotSupported(n).into());
         }
-    }
+    })
 }
 
 /// Compiles an EQL expression into a closure-based form
-pub fn compile_eql_expr(expression: eql::Expr) -> CompiledExpr {
-    match expression {
+pub fn compile_eql_expr(expression: eql::Expr) -> Result<CompiledExpr, CompileError> {
+    Ok(match expression {
         Expr::ComponentPart(component) => {
             let component_id = component.id;
             CompiledExpr::closure(move |entity_map, component_value| {
-                let entity_id = entity_map.get(&component_id).ok_or_else(|| {
-                    format!("component '{}' not found in entity map", component.name)
-                })?;
-
+                let entity_id = entity_map
+                    .get(&component_id)
+                    .ok_or(ComponentError::NoComponent(component.name.clone()))?;
                 component_value
                     .get(*entity_id)
-                    .map_err(|_| {
-                        format!(
-                            "no component value map found for component '{}'",
-                            component.name
-                        )
-                    })
+                    .map_err(|_| ComponentError::NoComponentValue(component.name.clone()))
                     .cloned()
             })
         }
         Expr::ArrayAccess(expr, index) => {
-            let compiled_expr = compile_eql_expr(*expr);
+            let compiled_expr = compile_eql_expr(*expr)?;
             CompiledExpr::closure(move |entity_map, component_value_maps| {
                 let resolved_expr = compiled_expr.execute(entity_map, component_value_maps)?;
                 match resolved_expr {
@@ -842,11 +736,10 @@ pub fn compile_eql_expr(expression: eql::Expr) -> CompiledExpr {
                             let value = nox::Array::<_, ()> { buf: value }.to_dyn();
                             Ok(ComponentValue::F64(value))
                         } else {
-                            Err(format!(
-                                "array index {} out of bounds (length: {})",
+                            Err(ComponentError::OutOfBounds {
                                 index,
-                                data.len()
-                            ))
+                                length: data.len(),
+                            })
                         }
                     }
                     ComponentValue::F32(array) => {
@@ -857,20 +750,20 @@ pub fn compile_eql_expr(expression: eql::Expr) -> CompiledExpr {
                             let value = nox::Array::<_, ()> { buf: value }.to_dyn();
                             Ok(ComponentValue::F32(value))
                         } else {
-                            Err(format!(
-                                "array index {} out of bounds (length: {})",
+                            Err(ComponentError::OutOfBounds {
                                 index,
-                                data.len()
-                            ))
+                                length: data.len(),
+                            })
                         }
                     }
-                    _ => Err("array access can only be applied to numeric arrays".to_string()),
+                    _ => Err(ComponentError::RequireNumericArray),
                 }
             })
         }
         Expr::Tuple(exprs) => {
-            let compiled_exprs: Vec<CompiledExpr> =
+            let compiled_exprs: Result<Vec<CompiledExpr>, CompileError> =
                 exprs.into_iter().map(compile_eql_expr).collect();
+            let compiled_exprs = compiled_exprs?;
             CompiledExpr::closure(move |entity_map, component_value_maps| {
                 use nox::ArrayBuf;
                 let mut values = Vec::new();
@@ -884,7 +777,7 @@ pub fn compile_eql_expr(expression: eql::Expr) -> CompiledExpr {
                             let f32_data = array.buf.as_buf();
                             values.extend(f32_data.iter().map(|&x| x as f64));
                         }
-                        _ => return Err("tuple elements must be numeric".to_string()),
+                        _ => return Err(ComponentError::RequireNumericTuple),
                     }
                 }
                 let tuple_array = Array::from_shape_vec(smallvec![values.len()], values).unwrap();
@@ -892,80 +785,50 @@ pub fn compile_eql_expr(expression: eql::Expr) -> CompiledExpr {
             })
         }
         Expr::BinaryOp(left, right, op) => {
-            let left_compiled = compile_eql_expr(*left);
-            let right_compiled = compile_eql_expr(*right);
+            let left_compiled = compile_eql_expr(*left)?;
+            let right_compiled = compile_eql_expr(*right)?;
             CompiledExpr::closure(move |entity_map, component_value_maps| {
                 let left_val = left_compiled.execute(entity_map, component_value_maps)?;
                 let right_val = right_compiled.execute(entity_map, component_value_maps)?;
 
                 let left = promote_component_to_f64(left_val)?;
                 let right = promote_component_to_f64(right_val)?;
-                let result = apply_binary_op(&left, &right, op)?;
+                let result = match op {
+                    eql::BinaryOp::Add => left.try_add(&right),
+                    eql::BinaryOp::Sub => left.try_sub(&right),
+                    eql::BinaryOp::Mul => left.try_mul(&right),
+                    eql::BinaryOp::Div => left.try_div(&right),
+                }
+                .map_err(|_| ComponentError::BinaryBroadcastError)?;
 
                 Ok(ComponentValue::F64(result))
             })
         }
         Expr::FloatLiteral(f) => CompiledExpr::Value(ComponentValue::F64(nox::array!(f).to_dyn())),
-        Expr::Formula(formula, inner_expr) => compile_formula(formula, *inner_expr),
+        Expr::Formula(formula, inner_expr) => compile_formula(formula, *inner_expr)?,
         expr => {
-            let error = format!("{:?} can't be converted to a component value", expr);
-            CompiledExpr::closure(move |_, _| Err(error.clone()))
+            return Err(CompileError::CannotConvert(expr));
         }
-    }
+    })
 }
 
-pub fn compile_scale_eql(scale: &str, ctx: &eql::Context) -> Result<CompiledExpr, String> {
+pub fn compile_scale_eql(scale: &str, ctx: &eql::Context) -> Result<CompiledExpr, CompileError> {
     let trimmed = scale.trim();
     if trimmed.is_empty() {
-        return Err("scale expression cannot be empty".to_string());
+        return Err(ComponentError::InvalidEmptyIn("scale expression").into());
     }
 
-    ctx.parse_str(trimmed)
-        .map(compile_eql_expr)
-        .map_err(|err| err.to_string())
+    ctx.parse_str(trimmed).map(compile_eql_expr)?
 }
 
 /// Compiles an EQL expression that must yield at least 6 floats (lower-triangular Cholesky L).
-pub fn compile_cholesky_eql(expr: &str, ctx: &eql::Context) -> Result<CompiledExpr, String> {
+pub fn compile_cholesky_eql(expr: &str, ctx: &eql::Context) -> Result<CompiledExpr, CompileError> {
     let trimmed = expr.trim();
     if trimmed.is_empty() {
-        return Err("error_covariance_cholesky expression cannot be empty".to_string());
+        return Err(ComponentError::InvalidEmptyIn("error_covariance_cholesky expression").into());
     }
-    ctx.parse_str(trimmed)
-        .map(compile_eql_expr)
-        .map_err(|err| err.to_string())
+    ctx.parse_str(trimmed).map(compile_eql_expr)?
 }
-
-#[derive(Debug)]
-pub enum ScaleEvalError {
-    Expr(String),
-    NotEnoughComponents { len: usize },
-    InvalidComponentType,
-}
-
-impl fmt::Display for ScaleEvalError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Expr(err) => write!(f, "{}", err),
-            Self::NotEnoughComponents { len } => write!(
-                f,
-                "scale expression must yield at least 3 values, got {}",
-                len
-            ),
-            Self::InvalidComponentType => {
-                f.write_str("scale expression must yield an F32 or F64 array")
-            }
-        }
-    }
-}
-
-impl From<String> for ScaleEvalError {
-    fn from(value: String) -> Self {
-        Self::Expr(value)
-    }
-}
-
-impl std::error::Error for ScaleEvalError {}
 
 const ELLIPSOID_OVERSIZED_THRESHOLD: f32 = 10_000.0;
 
@@ -1159,7 +1022,7 @@ pub fn update_object_3d_system(
                     }
                 }
                 Err(err) => {
-                    object_3d.scale_error = Some(err.to_string());
+                    object_3d.scale_error = Some(err.into());
                     ellipse.oversized = false;
                     ellipse.max_extent = 0.0;
                 }
@@ -1172,7 +1035,7 @@ pub fn update_object_3d_system(
 ///
 /// Input: 3-element vector where direction is axis and magnitude is angle in DEGREES
 /// Output: (normalized axis, angle in radians)
-fn component_value_to_axis_angle(value: &ComponentValue) -> Result<(Vec3, f32), String> {
+fn component_value_to_axis_angle(value: &ComponentValue) -> Result<(Vec3, f32), ComponentError> {
     use nox::ArrayBuf;
     match value {
         ComponentValue::F64(array) => {
@@ -1190,10 +1053,7 @@ fn component_value_to_axis_angle(value: &ComponentValue) -> Result<(Vec3, f32), 
                 let angle_rad = angle_deg.to_radians();
                 Ok((normalized_axis, angle_rad))
             } else {
-                Err(format!(
-                    "Expected 3 elements for rotation_vector (axis direction with magnitude as angle in degrees), got {}",
-                    data.len()
-                ))
+                Err(ComponentError::RequireThreeElements { length: data.len() })
             }
         }
         ComponentValue::F32(array) => {
@@ -1211,13 +1071,12 @@ fn component_value_to_axis_angle(value: &ComponentValue) -> Result<(Vec3, f32), 
                 let angle_rad = angle_deg.to_radians();
                 Ok((normalized_axis, angle_rad))
             } else {
-                Err(format!(
-                    "Expected 3 elements for rotation_vector (axis direction with magnitude as angle in degrees), got {}",
-                    data.len()
-                ))
+                Err(ComponentError::RequireThreeElements { length: data.len() })
             }
         }
-        _ => Err("Invalid component type for rotation_vector rotation".to_string()),
+        _ => Err(ComponentError::InvalidComponentType {
+            requires: "f32 or f64 rotation_vector rotation",
+        }),
     }
 }
 
@@ -1281,14 +1140,13 @@ pub fn attach_joint_animations(
                             ctx.0
                                 .parse_str(eql_expr)
                                 .map(compile_eql_expr)
-                                .map_err(|err| {
+                                .inspect_err(|err| {
                                     warn!(
                                         joint = %joint_name,
                                         eql = %eql_expr,
                                         error = %err,
                                         "Failed to compile EQL expression for joint animation."
                                     );
-                                    err
                                 })
                                 .ok()
                         } else {
@@ -1305,6 +1163,9 @@ pub fn attach_joint_animations(
             if existing_components.contains(joint_entity) {
                 continue;
             }
+            let Ok(compiled_expr) = compiled_expr else {
+                continue;
+            };
 
             // Get the original transform to preserve the bone's initial rotation.
             let original_transform = transforms
@@ -1352,7 +1213,9 @@ pub fn update_joint_animations(
     mut joint_query: Query<(&mut Transform, &JointAnimationComponent)>,
     entity_map: Res<EntityMap>,
     component_value_maps: Query<&'static ComponentValue>,
+    mut errors: Local<HashSet<u64>>,
 ) {
+    let hasher = FixedHasher;
     for (mut joint_transform, joint_anim) in joint_query.iter_mut() {
         // Evaluate the EQL expression
         let component_value = match joint_anim
@@ -1361,10 +1224,12 @@ pub fn update_joint_animations(
         {
             Ok(value) => value,
             Err(err) => {
-                warn!(
-                    error = %err,
-                    "Failed to evaluate EQL expression for joint animation"
-                );
+                if errors.insert(hasher.hash_one(&err)) {
+                    warn!(
+                        error = %err,
+                        "Failed to evaluate EQL expression for joint animation"
+                    );
+                }
                 continue;
             }
         };
@@ -1373,10 +1238,12 @@ pub fn update_joint_animations(
         let (axis, angle) = match component_value_to_axis_angle(&component_value) {
             Ok(result) => result,
             Err(err) => {
-                warn!(
-                    error = %err,
-                    "Failed to convert EQL result to axis-angle rotation for joint animation"
-                );
+                if errors.insert(hasher.hash_one(&err)) {
+                    warn!(
+                        error = %err,
+                        "Failed to convert EQL result to axis-angle rotation for joint animation"
+                    );
+                }
                 continue;
             }
         };
@@ -1442,18 +1309,16 @@ fn evaluate_scale(
     state: &Object3DState,
     entity_map: &EntityMap,
     component_value_maps: &Query<&'static ComponentValue>,
-) -> Result<Vec3, ScaleEvalError> {
+) -> Result<Vec3, ComponentError> {
     if let Some(expr) = &state.scale_expr {
-        let value = expr
-            .execute(entity_map, component_value_maps)
-            .map_err(ScaleEvalError::from)?;
+        let value = expr.execute(entity_map, component_value_maps)?;
         component_value_to_vec3(&value)
     } else {
         Ok(Vec3::ONE)
     }
 }
 
-fn component_value_to_vec3(value: &ComponentValue) -> Result<Vec3, ScaleEvalError> {
+fn component_value_to_vec3(value: &ComponentValue) -> Result<Vec3, ComponentError> {
     use nox::ArrayBuf;
     match value {
         ComponentValue::F64(array) => {
@@ -1461,7 +1326,10 @@ fn component_value_to_vec3(value: &ComponentValue) -> Result<Vec3, ScaleEvalErro
             if data.len() >= 3 {
                 Ok(Vec3::new(data[0] as f32, data[1] as f32, data[2] as f32).abs())
             } else {
-                Err(ScaleEvalError::NotEnoughComponents { len: data.len() })
+                Err(ComponentError::NotEnoughComponents {
+                    required: 3,
+                    length: data.len(),
+                })
             }
         }
         ComponentValue::F32(array) => {
@@ -1469,14 +1337,19 @@ fn component_value_to_vec3(value: &ComponentValue) -> Result<Vec3, ScaleEvalErro
             if data.len() >= 3 {
                 Ok(Vec3::new(data[0], data[1], data[2]).abs())
             } else {
-                Err(ScaleEvalError::NotEnoughComponents { len: data.len() })
+                Err(ComponentError::NotEnoughComponents {
+                    required: 3,
+                    length: data.len(),
+                })
             }
         }
-        _ => Err(ScaleEvalError::InvalidComponentType),
+        _ => Err(ComponentError::InvalidComponentType {
+            requires: "f32 or f64 array",
+        }),
     }
 }
 
-fn component_value_to_6floats(value: &ComponentValue) -> Result<[f32; 6], String> {
+fn component_value_to_6floats(value: &ComponentValue) -> Result<[f32; 6], ComponentError> {
     use nox::ArrayBuf;
     match value {
         ComponentValue::F64(array) => {
@@ -1491,10 +1364,10 @@ fn component_value_to_6floats(value: &ComponentValue) -> Result<[f32; 6], String
                     data[5] as f32,
                 ])
             } else {
-                Err(format!(
-                    "error_covariance_cholesky must yield at least 6 values, got {}",
-                    data.len()
-                ))
+                Err(ComponentError::NotEnoughComponents {
+                    required: 6,
+                    length: data.len(),
+                })
             }
         }
         ComponentValue::F32(array) => {
@@ -1502,13 +1375,15 @@ fn component_value_to_6floats(value: &ComponentValue) -> Result<[f32; 6], String
             if data.len() >= 6 {
                 Ok([data[0], data[1], data[2], data[3], data[4], data[5]])
             } else {
-                Err(format!(
-                    "error_covariance_cholesky must yield at least 6 values, got {}",
-                    data.len()
-                ))
+                Err(ComponentError::NotEnoughComponents {
+                    required: 6,
+                    length: data.len(),
+                })
             }
         }
-        _ => Err("error_covariance_cholesky must yield an F32 or F64 array".to_string()),
+        _ => Err(ComponentError::InvalidComponentType {
+            requires: "F32 or F64 array",
+        }),
     }
 }
 
@@ -1573,7 +1448,7 @@ pub fn create_object_3d_entity(
     mat3_material_assets: &mut Assets<Mat3Material>,
     assets: &AssetServer,
     geo_context: &GeoContext,
-) -> Entity {
+) -> Result<Entity, CompileError> {
     let (scale_expr, scale_error) = match &data.mesh {
         impeller2_wkt::Object3DMesh::Ellipsoid {
             scale,
@@ -1620,7 +1495,7 @@ pub fn create_object_3d_entity(
     let entity_id = commands
         .spawn((
             Object3DState {
-                compiled_expr: Some(compile_eql_expr(expr)),
+                compiled_expr: Some(compile_eql_expr(expr)?),
                 scale_expr,
                 scale_error,
                 error_covariance_cholesky_expr,
@@ -1655,7 +1530,7 @@ pub fn create_object_3d_entity(
         mat3_material_assets,
         assets,
     );
-    entity_id
+    Ok(entity_id)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -2168,6 +2043,7 @@ mod joint_eql_cast_tests {
             SystemState::new(&mut world);
         let (q,) = system_state.get(&world);
         let out = compiled
+            .expect("compiled expr")
             .execute(&entity_map, &q)
             .expect("editor EQL runtime evaluation");
 
@@ -2193,22 +2069,32 @@ mod ellipsoid_scale_eql_tests {
     use impeller2::types::{ComponentId, PrimType, Timestamp};
     use impeller2_bevy::EntityMap;
     use impeller2_wkt::ComponentValue;
-    use nox::{Array, ArrayBuf};
+    use nox::Array;
 
-    use super::{apply_binary_op, compile_scale_eql, component_value_to_vec3};
+    use super::{compile_scale_eql, component_value_to_vec3};
 
     fn pos_std_var_component(name: &str) -> Arc<eql::Component> {
+        f64_component(name, &[3])
+    }
+
+    fn f64_component(name: &str, shape: &[u64]) -> Arc<eql::Component> {
         Arc::new(eql::Component::new(
             name.to_string(),
             ComponentId::new(name),
-            Schema::new(PrimType::F64, vec![3u64]).unwrap(),
+            Schema::new(PrimType::F64, shape.to_vec()).unwrap(),
         ))
     }
 
     fn f64_component_value(values: [f64; 3]) -> ComponentValue {
+        f64_component_value_with_shape(smallvec::smallvec![3], values.to_vec())
+    }
+
+    fn f64_component_value_with_shape(
+        shape: smallvec::SmallVec<[usize; 4]>,
+        values: Vec<f64>,
+    ) -> ComponentValue {
         ComponentValue::F64(
-            Array::<f64, nox::Dyn>::from_shape_vec(smallvec::smallvec![3], values.to_vec())
-                .expect("f64 telemetry buffer"),
+            Array::<f64, nox::Dyn>::from_shape_vec(shape, values).expect("f64 telemetry buffer"),
         )
     }
 
@@ -2221,59 +2107,42 @@ mod ellipsoid_scale_eql_tests {
     }
 
     #[test]
-    fn apply_binary_op_broadcasts_arrays_with_different_ranks() {
-        let left =
-            Array::<f64, nox::Dyn>::from_shape_vec(smallvec::smallvec![3], vec![1.0, 2.0, 3.0])
-                .expect("left array");
-        let right = Array::<f64, nox::Dyn>::from_shape_vec(
-            smallvec::smallvec![2, 3],
-            vec![10.0, 20.0, 30.0, 40.0, 50.0, 60.0],
-        )
-        .expect("right array");
-
-        let result = apply_binary_op(&left, &right, eql::BinaryOp::Add).expect("broadcasted add");
-
-        assert_eq!(result.shape(), &[2, 3]);
-        assert_eq!(result.buf.as_buf(), &[11.0, 22.0, 33.0, 41.0, 52.0, 63.0]);
-    }
-
-    #[test]
-    fn apply_binary_op_supports_sub_and_div_with_broadcasting() {
-        let left = Array::<f64, nox::Dyn>::from_shape_vec(
-            smallvec::smallvec![2, 3],
-            vec![10.0, 20.0, 30.0, 40.0, 50.0, 60.0],
-        )
-        .expect("left array");
-        let right =
-            Array::<f64, nox::Dyn>::from_shape_vec(smallvec::smallvec![3], vec![1.0, 2.0, 5.0])
-                .expect("right array");
-
-        let sub = apply_binary_op(&left, &right, eql::BinaryOp::Sub).expect("broadcasted sub");
-        let div = apply_binary_op(&left, &right, eql::BinaryOp::Div).expect("broadcasted div");
-
-        assert_eq!(sub.shape(), &[2, 3]);
-        assert_eq!(sub.buf.as_buf(), &[9.0, 18.0, 25.0, 39.0, 48.0, 55.0]);
-        assert_eq!(div.shape(), &[2, 3]);
-        assert_eq!(div.buf.as_buf(), &[10.0, 10.0, 6.0, 40.0, 25.0, 12.0]);
-    }
-
-    #[test]
     fn object_3d_eql_binary_ops_reject_same_len_incompatible_shapes() {
-        let left = Array::<f64, nox::Dyn>::from_shape_vec(
-            smallvec::smallvec![2, 3],
-            vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
-        )
-        .expect("left array");
-        let right = Array::<f64, nox::Dyn>::from_shape_vec(
-            smallvec::smallvec![3, 2],
-            vec![10.0, 20.0, 30.0, 40.0, 50.0, 60.0],
-        )
-        .expect("right array");
+        let left = f64_component("left", &[2, 3]);
+        let right = f64_component("right", &[3, 2]);
+        let left_id = left.id;
+        let right_id = right.id;
+        let ctx =
+            eql::Context::from_leaves([left.clone(), right.clone()], Timestamp(0), Timestamp(1000));
 
-        let err = apply_binary_op(&left, &right, eql::BinaryOp::Add)
+        let mut world = World::new();
+        let left_entity = world
+            .spawn(f64_component_value_with_shape(
+                smallvec::smallvec![2, 3],
+                vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0],
+            ))
+            .id();
+        let right_entity = world
+            .spawn(f64_component_value_with_shape(
+                smallvec::smallvec![3, 2],
+                vec![10.0, 20.0, 30.0, 40.0, 50.0, 60.0],
+            ))
+            .id();
+        let entity_map = EntityMap(HashMap::from([
+            (left_id, left_entity),
+            (right_id, right_entity),
+        ]));
+
+        let mut system_state: SystemState<(Query<'static, 'static, &ComponentValue>,)> =
+            SystemState::new(&mut world);
+        let (component_values,) = system_state.get(&world);
+        let compiled = compile_scale_eql("left + right", &ctx).expect("expression should compile");
+
+        let err = compiled
+            .execute(&entity_map, &component_values)
             .expect_err("incompatible shapes should not be flattened together");
 
-        assert_eq!(err, "binary operation requires arrays be broadcastable");
+        assert_eq!(err, crate::object_3d::ComponentError::BinaryBroadcastError);
     }
 
     #[test]

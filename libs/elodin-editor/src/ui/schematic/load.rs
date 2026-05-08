@@ -1,4 +1,5 @@
 use crate::icon_rasterizer::IconTextureCache;
+use crate::object_3d::CompileError;
 use bevy::{ecs::system::SystemParam, prelude::*, window::PrimaryWindow};
 #[cfg(target_os = "macos")]
 use bevy_defer::AsyncCommandsExtension;
@@ -592,7 +593,7 @@ impl LoadSchematicParams<'_, '_> {
         };
         let icon = object_3d.icon.clone();
         let mesh_vr = object_3d.mesh_visibility_range.clone();
-        let entity = crate::object_3d::create_object_3d_entity(
+        let result = crate::object_3d::create_object_3d_entity(
             &mut self.commands,
             object_3d.clone(),
             expr,
@@ -603,19 +604,26 @@ impl LoadSchematicParams<'_, '_> {
             &self.asset_server,
             &self.geo_context,
         );
-        self.commands.entity(entity).insert(SchematicSpawned);
-        if let Some(icon) = &icon {
-            crate::object_3d::spawn_billboard_icon(
-                &mut self.commands,
-                entity,
-                icon,
-                mesh_vr.as_ref(),
-                &mut self.materials,
-                &mut self.meshes,
-                &mut self.images,
-                &self.asset_server,
-                &mut self.icon_cache,
-            );
+        match result {
+            Ok(entity) => {
+                self.commands.entity(entity).insert(SchematicSpawned);
+                if let Some(icon) = &icon {
+                    crate::object_3d::spawn_billboard_icon(
+                        &mut self.commands,
+                        entity,
+                        icon,
+                        mesh_vr.as_ref(),
+                        &mut self.materials,
+                        &mut self.meshes,
+                        &mut self.images,
+                        &self.asset_server,
+                        &mut self.icon_cache,
+                    );
+                }
+            }
+            Err(err) => {
+                warn!("Unable to spawn object 3d due to eql compile error: {err}");
+            }
         }
     }
 
@@ -645,14 +653,18 @@ impl LoadSchematicParams<'_, '_> {
             .eql
             .0
             .parse_str(&vector_arrow.vector)
-            .map(compile_eql_expr)
+            .map_err(CompileError::Parse)
+            .and_then(compile_eql_expr)
             .ok();
 
-        let origin_expr = vector_arrow
-            .origin
-            .as_ref()
-            .and_then(|origin| self.eql.0.parse_str(origin).ok())
-            .map(compile_eql_expr);
+        let origin_expr = vector_arrow.origin.as_ref().and_then(|origin| {
+            self.eql
+                .0
+                .parse_str(origin)
+                .map_err(CompileError::Parse)
+                .and_then(compile_eql_expr)
+                .ok()
+        });
 
         let frame = vector_arrow.frame;
         let mut spawn = self.commands.spawn((

@@ -428,7 +428,7 @@ fn eql_input(ui: &mut egui::Ui, editable_expr: &mut EditableEQL, ctx: &eql::Cont
             }
             match ctx.parse_str(&editable_expr.eql) {
                 Ok(expr) => {
-                    editable_expr.compiled_expr = Some(compile_eql_expr(expr));
+                    editable_expr.compiled_expr = compile_eql_expr(expr).ok();
                 }
                 Err(err) => {
                     ui.colored_label(get_scheme().error, err.to_string());

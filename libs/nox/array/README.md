@@ -24,6 +24,34 @@ assert_eq!(view.shape(), &shape);
 - Safe but minimal: you must guarantee that `buf.len()` equals the product of dimensions in shape.
 - Adds pretty printing similar to how `NumPy` prints arrays, with ellipses for large arrays.
 
+## Dynamic broadcasting in `nox::Array`
+
+The parent `nox` crate uses dynamic array shapes for runtime tensor values. Binary operations on dynamic `nox::Array` values (`add`, `sub`, `mul`, `div`) follow the same right-aligned broadcasting rule used by NumPy and JAX:
+
+- A scalar shape `[]` broadcasts to any output shape.
+- Two dimensions are compatible when they are equal or one of them is `1`.
+- Shapes are compared from the trailing dimension toward the leading dimension.
+- Missing leading dimensions behave like `1`.
+- Fallible APIs (`try_add`, `try_sub`, `try_mul`, `try_div`) return a controlled error for incompatible shapes.
+- Non-fallible APIs (`add`, `sub`, `mul`, `div`) remain compatibility wrappers and expect the shapes to be broadcastable.
+
+The dynamic broadcasting tests in `../src/array/mod.rs` and `../src/array/broadcast.rs` document the expected behavior with concrete examples:
+
+| Scenario | Expected shape |
+| --- | --- |
+| `scalar * [3]` | `[3]` |
+| `[3] * scalar` | `[3]` |
+| `[3] + [2, 3]` | `[2, 3]` |
+| `[2, 3] + [3]` | `[2, 3]` |
+| `[2, 3] + [2, 1]` | `[2, 3]` |
+| `[2, 3] + [2, 3]` | `[2, 3]` |
+| `scalar * [2, 3]` | `[2, 3]` |
+| `[2, 3] * scalar` | `[2, 3]` |
+| `[1, 3] + [2, 1, 3]` | `[2, 1, 3]` |
+| `[2, 3] + [3, 2]` | error |
+
+Dynamic allocation uses the product of all dimensions. For example, `Array::zeroed([2, 3])` allocates `6` elements.
+
 ## More examples
 
 ### From raw bytes

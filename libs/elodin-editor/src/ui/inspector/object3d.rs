@@ -15,7 +15,8 @@ use impeller2_wkt::{
 use smallvec::SmallVec;
 
 use crate::object_3d::{
-    EllipsoidVisual, Object3DMeshChild, compile_cholesky_eql, compile_scale_eql, spawn_mesh,
+    CompileError, ComponentError, EllipsoidVisual, Object3DMeshChild, compile_cholesky_eql,
+    compile_scale_eql, spawn_mesh,
 };
 use crate::ui::inspector::{eql_textfield, node_color_picker};
 use crate::{
@@ -122,7 +123,7 @@ impl WidgetSystem for InspectorObject3D<'_, '_> {
                 match eql_context.0.parse_str(&object_3d_state.data.eql) {
                     Ok(expr) => {
                         object_3d_state.compiled_expr =
-                            Some(crate::object_3d::compile_eql_expr(expr));
+                            crate::object_3d::compile_eql_expr(expr).ok();
                     }
                     Err(err) => {
                         ui.colored_label(get_scheme().error, err.to_string());
@@ -243,8 +244,9 @@ impl WidgetSystem for InspectorObject3D<'_, '_> {
 
             ui.separator();
 
-            let mut scale_expr_update: Option<Result<crate::object_3d::CompiledExpr, String>> =
-                None;
+            let mut scale_expr_update: Option<
+                Result<crate::object_3d::CompiledExpr, CompileError>,
+            > = None;
             let mut cholesky_expr_update: Option<Option<crate::object_3d::CompiledExpr>> = None;
             let scale_error_display = object_3d_state.scale_error.clone();
 
@@ -461,15 +463,17 @@ impl WidgetSystem for InspectorObject3D<'_, '_> {
                         let response = eql_textfield(ui, true, &eql_context.0, scale);
                         if response.changed() {
                             if scale.trim().is_empty() {
-                                scale_expr_update =
-                                    Some(Err("scale expression cannot be empty".to_string()));
+                                scale_expr_update = Some(Err(ComponentError::InvalidEmptyIn(
+                                    "scale expression",
+                                )
+                                .into()));
                             } else {
                                 scale_expr_update = Some(compile_scale_eql(scale, &eql_context.0));
                             }
                         }
 
                         if let Some(err) = &scale_error_display {
-                            ui.colored_label(get_scheme().error, err);
+                            ui.colored_label(get_scheme().error, format!("{}", err));
                         }
                         if ui
                             .button("Use error covariance (Cholesky) instead")
@@ -477,7 +481,7 @@ impl WidgetSystem for InspectorObject3D<'_, '_> {
                         {
                             *error_covariance_cholesky = Some("(1, 0, 1, 0, 0, 1)".to_string());
                             *error_confidence_interval = default_ellipsoid_confidence_interval();
-                            scale_expr_update = Some(Err("".to_string()));
+                            scale_expr_update = None;
                             cholesky_expr_update = Some(
                                 compile_cholesky_eql("(1, 0, 1, 0, 0, 1)", &eql_context.0).ok(),
                             );
@@ -506,7 +510,7 @@ impl WidgetSystem for InspectorObject3D<'_, '_> {
                     }
                     Err(err) => {
                         object_3d_state.scale_expr = None;
-                        object_3d_state.scale_error = if err.is_empty() { None } else { Some(err) };
+                        object_3d_state.scale_error = Some(err);
                     }
                 }
             }

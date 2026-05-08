@@ -51,7 +51,11 @@ impl<T: Elem> ArrayBuf<T> for DynArray<T, Vec<T>> {
     }
 
     fn default(dims: &[usize]) -> Self {
-        let len: usize = dims.iter().copied().sum();
+        let len: usize = if dims.is_empty() {
+            1
+        } else {
+            dims.iter().copied().product()
+        };
         let strides = crate::utils::calculate_strides(dims);
 
         let shape = SmallVec::from_slice(dims);

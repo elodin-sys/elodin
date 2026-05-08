@@ -1177,7 +1177,7 @@ fn create_object_3d_with_color(eql: String, expr: eql::Expr, mesh: Mesh) -> Pale
                     material: Material::color(r, g, b),
                 };
 
-                crate::object_3d::create_object_3d_entity(
+                let _ = crate::object_3d::create_object_3d_entity(
                     &mut commands,
                     Object3D {
                         eql: eql.clone(),
@@ -1212,7 +1212,7 @@ fn parse_color(
     component_value_maps: Query<&'static ComponentValue>,
 ) -> Option<(f32, f32, f32)> {
     let expr = ctx.parse_str(expr).ok()?;
-    let expr = crate::object_3d::compile_eql_expr(expr);
+    let expr = crate::object_3d::compile_eql_expr(expr).ok()?;
     let val = expr.execute(entity_map, &component_value_maps).ok()?;
 
     let ComponentValue::F64(array) = val else {
@@ -1263,7 +1263,7 @@ pub fn create_3d_object() -> PaletteItem {
                                                 | {
                                                 let obj = impeller2_wkt::Object3DMesh::glb(gltf_path.trim());
 
-                                                crate::object_3d::create_object_3d_entity(
+                                                let _ = crate::object_3d::create_object_3d_entity(
                                                     &mut commands,
                                                     Object3D { eql: eql.clone(), mesh: obj, icon: None, mesh_visibility_range: None, frame: None, node_id: Default::default() },
                                                     expr.clone(),

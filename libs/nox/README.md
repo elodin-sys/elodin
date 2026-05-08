@@ -18,6 +18,12 @@ For a broader introduction to the project, see the [overview documentation](../.
 
 Most users will **not depend on `nox` directly**. Instead, they will interact with one of the specialized crates or subsystems built on top of it.
 
+## Dynamic array broadcasting
+
+Dynamic `nox::Array` binary operations (`add`, `sub`, `mul`, `div`) use right-aligned NumPy/JAX-style broadcasting. Fallible variants (`try_add`, `try_sub`, `try_mul`, `try_div`) return a controlled error for incompatible shapes, while the non-fallible methods remain compatibility wrappers.
+
+See [array/README.md](array/README.md) for the detailed rules and examples.
+
 
 ## Related crates and subsystems
 - [array](array) – array and tensor utilities.
