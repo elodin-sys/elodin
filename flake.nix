@@ -80,7 +80,7 @@
         shells = pkgs.callPackage ./nix/shell.nix {inherit config rustToolchain;};
       in {
         packages = with pkgs.elodin; {
-          inherit elodin-cli elodin-db elodinsink;
+          inherit elodin-cli elodin-cli-tracy elodin-db elodinsink;
           elodin-py = elodin-py.py;
         };
 
