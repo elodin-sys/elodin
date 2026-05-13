@@ -3,10 +3,23 @@
 ## unreleased
 
 ## v0.17
-### v0.17.1
-- **(fix)** Move PyPI publishing to the end of the release pipeline and keep release artifacts Windows-checkout safe. (#616)
 
-### v0.17.0
+### v0.17.2
+- **(feat)** Add `elodin-db export --join --mono-ns --csv-fast-floats`. (#630)
+- **(feat)** Add frustum overlays and intersection support for sensor cameras. (#626)
+- **(feat)** Add `object_3d` EQL scalar-vector scale expressions. (#629)
+- **(feat)** Add read component data at a specific timestamp in StepContext. (#633)
+- **(feat)** Enable Bevy debug feature when tracing. (#631)
+- **(fix)** Preserve frustum sources in inactive tabs. (#622)
+- **(fix)** Fix leaking entities on schematic clear. (#618)
+- **(fix)** Normalize file and column names on `elodin-db export`. (#634)
+- **(fix)** Add backoff to tegrastats bridge. (#613)
+- **(fix)** Fix manual docs deployment from GitHub Actions. (#619)
+- **(chore)** Add `embedded_lfs_asset!` to replace the `embedded_asset!` macro. (#614)
+- **(refactor)** Centralize dynamic array broadcasting in `nox`. (#635)
+- **(doc)** Add explainer videos. (#641)
+
+### v0.17.1
 - **(feat)** So Long, IREE. Hello, Cranelift-MLIR! (#600)
 - **(feat)** Add `elodin-db query` subcommand. (#551)
 - **(feat)** Support NED and ECEF coordinate frames for positions (orientations still all ENU). (#352)
