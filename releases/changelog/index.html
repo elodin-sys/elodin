@@ -199,8 +199,8 @@
             </a>
             <span>
                 <select name="version" class="version-select" disabled>
-                    <option value="v0.17.1" selected>
-                        v0.17.1
+                    <option value="v0.17.2" selected>
+                        v0.17.2
                     </option>
                 </select>
             </span>
@@ -325,6 +325,11 @@
                     <a href="/releases/changelog/#v0-17">v0.17</a>
                     
                     <ul>
+                        
+                        <li>
+                            <a href="/releases/changelog/#v0-17-2">v0.17.2</a>
+                            
+                        </li>
                         
                         <li>
                             <a href="/releases/changelog/#v0-17-1">v0.17.1</a>
@@ -719,6 +724,22 @@
               <main class="docs-content col-lg-11 col-xxl-10">
                   <h1>Changelog</h1>
                    <h2 id="v0-17">v0.17</h2>
+<h3 id="v0-17-2">v0.17.2</h3>
+<ul>
+<li><strong>(feat)</strong> Add <code>elodin-db export --join --mono-ns --csv-fast-floats</code>. (#630)</li>
+<li><strong>(feat)</strong> Add frustum overlays and intersection support for sensor cameras. (#626)</li>
+<li><strong>(feat)</strong> Add <code>object_3d</code> EQL scalar-vector scale expressions. (#629)</li>
+<li><strong>(feat)</strong> Add read component data at a specific timestamp in StepContext. (#633)</li>
+<li><strong>(feat)</strong> Enable Bevy debug feature when tracing. (#631)</li>
+<li><strong>(fix)</strong> Preserve frustum sources in inactive tabs. (#622)</li>
+<li><strong>(fix)</strong> Fix leaking entities on schematic clear. (#618)</li>
+<li><strong>(fix)</strong> Normalize file and column names on <code>elodin-db export</code>. (#634)</li>
+<li><strong>(fix)</strong> Add backoff to tegrastats bridge. (#613)</li>
+<li><strong>(fix)</strong> Fix manual docs deployment from GitHub Actions. (#619)</li>
+<li><strong>(chore)</strong> Add <code>embedded_lfs_asset!</code> to replace the <code>embedded_asset!</code> macro. (#614)</li>
+<li><strong>(refactor)</strong> Centralize dynamic array broadcasting in <code>nox</code>. (#635)</li>
+<li><strong>(doc)</strong> Add explainer videos. (#641)</li>
+</ul>
 <h3 id="v0-17-1">v0.17.1</h3>
 <ul>
 <li><strong>(feat)</strong> So Long, IREE. Hello, Cranelift-MLIR! (#600)</li>
