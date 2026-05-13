@@ -59,6 +59,10 @@ test_steps = [
         name=":black_nib: writing",
         steps=[
             nix_step(
+                label="windows-safe paths",
+                command="python3 scripts/ci/test_windows_paths.py",
+            ),
+            nix_step(
                 label="typos",
                 command="typos -c typos.toml",
             ),
