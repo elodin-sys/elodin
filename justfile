@@ -87,11 +87,16 @@ public-changelog:
 install target="all":
   #!/usr/bin/env sh
   set -e
+  # Drop 0-byte libelodin.so left by maturin 1.13+'s broken staging dance
+  # (PyO3/maturin#3054); cargo's fingerprint accepts empty outputs and would
+  # otherwise short-circuit forever. We also use the nix-pinned maturin below
+  # rather than `uvx maturin` (which pulls 1.13+) to avoid creating new ones.
+  find target -maxdepth 4 -name 'libelodin.so' -size 0 -delete 2>/dev/null || true
   case "{{target}}" in
     py)
       uv venv --python 3.13 --clear
       . .venv/bin/activate
-      uvx maturin develop --uv --release --manifest-path=libs/nox-py/Cargo.toml
+      maturin develop --uv --release --manifest-path=libs/nox-py/Cargo.toml
       echo "Venv ready. Run source with \`source .venv/bin/activate\` before running examples with python3"
       ;;
     editor)
@@ -111,7 +116,7 @@ install target="all":
       fi
       uv venv --python 3.13 --clear
       . .venv/bin/activate
-      uvx maturin develop --uv --release --manifest-path=libs/nox-py/Cargo.toml -F tracy
+      maturin develop --uv --release --manifest-path=libs/nox-py/Cargo.toml -F tracy
       echo "Venv ready. Run source with \`source .venv/bin/activate\` before running examples with python3"
       cargo build --release -p elodin -p elodin-db --features tracy
       install -m 755 target/release/elodin "${CARGO_HOME:-$HOME/.cargo}/bin/"
