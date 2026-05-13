@@ -121,7 +121,7 @@ just install
 ```sh
 uv venv --python 3.13
 source .venv/bin/activate
-uvx maturin develop --uv --manifest-path=libs/nox-py/Cargo.toml
+uvx maturin@1.12.6 develop --uv --manifest-path=libs/nox-py/Cargo.toml
 
 cargo run --bin elodin editor examples/three-body/main.py
 # Or equivalently use the 'elodin' cargo alias:
