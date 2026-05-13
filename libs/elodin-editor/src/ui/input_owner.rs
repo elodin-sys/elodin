@@ -312,6 +312,32 @@ mod tests {
     }
 
     #[test]
+    fn nav_gizmo_overlay_wins_over_underlying_viewport() {
+        let window = entity(1);
+        let camera = entity(2);
+        let mut owners = UiInputOwners::default();
+
+        owners.register_content_rect(
+            window,
+            rect(0.0, 0.0, 200.0, 200.0),
+            PointerOwner::Viewport { camera },
+        );
+        owners.register_rect(
+            window,
+            rect(100.0, 0.0, 200.0, 100.0),
+            PointerOwner::NavGizmo { camera },
+            PointerOwnerPriority::Overlay,
+        );
+
+        assert_eq!(
+            owners.resolve_window(window, Some(egui::pos2(150.0, 50.0))),
+            PointerOwner::NavGizmo { camera }
+        );
+        assert!(owners.permits_nav_gizmo(window, camera));
+        assert!(!owners.permits_viewport(window, camera));
+    }
+
+    #[test]
     fn later_region_wins_with_equal_priority() {
         let window = entity(1);
         let first = entity(2);
