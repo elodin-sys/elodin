@@ -36,7 +36,7 @@ use winit::{
 };
 
 use super::{
-    EguiOverlayInputBlockers, PaneName, SelectedObject, ViewportRect, WindowUiState,
+    PaneName, SelectedObject, ViewportRect, WindowUiState,
     actions::{ActionTile, ActionTileWidget},
     button::{EImageButton, ETileButton},
     colors::{self, EColor, get_scheme, with_opacity},
@@ -2129,7 +2129,7 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
 
         // Context menu on right-click
         let inspector_visible = self.inspector_visible;
-        response.context_menu(|ui| {
+        let context_menu = response.context_menu(|ui| {
             let scheme = get_scheme();
             ui.style_mut().spacing.item_spacing = egui::vec2(0.0, 4.0);
             ui.style_mut().visuals.widgets.hovered.bg_fill = scheme.highlight;
@@ -2162,6 +2162,12 @@ impl egui_tiles::Behavior<Pane> for TreeBehavior<'_> {
                     }
                 });
         });
+        if context_menu
+            .as_ref()
+            .is_some_and(|inner| inner.response.contains_pointer())
+        {
+            super::mark_egui_popup_hovered(ui.ctx());
+        }
 
         self.on_tab_button(tiles, tile_id, response)
     }
@@ -3349,27 +3355,6 @@ impl WidgetSystem for TileLayout<'_, '_> {
                     },
                 );
             });
-        }
-
-        let overlay_blocker =
-            world
-                .get_resource::<EguiOverlayInputBlockers>()
-                .and_then(|blockers| {
-                    if blockers.modal_blocks(target_window) {
-                        Some((UiBlocker::Modal, PointerOwnerPriority::Modal))
-                    } else if blockers.popup_blocks(target_window) {
-                        Some((UiBlocker::Popup, PointerOwnerPriority::Overlay))
-                    } else {
-                        None
-                    }
-                });
-        if let Some((blocker, priority)) = overlay_blocker {
-            register_ui_blocker(world, ui, target_window, ui.max_rect(), blocker, priority);
-        }
-
-        let pointer_pos = ui.input(|input| input.pointer.latest_pos());
-        if let Some(mut input_owners) = world.get_resource_mut::<UiInputOwners>() {
-            input_owners.resolve_window(target_window, pointer_pos);
         }
     }
 }

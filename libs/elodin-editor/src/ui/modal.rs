@@ -81,7 +81,13 @@ use bevy_egui::{EguiContexts, EguiTextureHandle, egui};
 
 use crate::ui::{
     Dialog, DialogAction, DialogButton, DialogEvent, FocusedWindow, SettingModal,
-    SettingModalState, colors::get_scheme, images, tiles::WindowState, utils::MarginSides,
+    SettingModalState,
+    colors::get_scheme,
+    images,
+    input_owner::{PointerOwnerPriority, UiBlocker},
+    register_window_input_blocker,
+    tiles::WindowState,
+    utils::MarginSides,
 };
 use bevy::prelude::*;
 
@@ -115,84 +121,97 @@ pub mod action {
 }
 
 impl RootWidgetSystem for ModalWithSettings<'_, '_> {
-    type Args = ();
+    type Args = Entity;
     type Output = ();
 
     fn ctx_system(
         world: &mut World,
         state: &mut SystemState<Self>,
         ctx: &mut egui::Context,
-        _args: Self::Args,
+        root_window: Self::Args,
     ) {
-        let state_mut = state.get_mut(world);
+        let Some((setting_modal_state, modal_rect, close_icon)) = ({
+            let state_mut = state.get_mut(world);
 
-        let mut contexts = state_mut.contexts;
-        let images = state_mut.images;
-        let window = state_mut.window;
-        let window_states = state_mut.window_states;
-        let focused_window = state_mut.focused_window;
-        let primary_window = state_mut.primary_window;
-        let setting_modal_state = state_mut.setting_modal_state;
+            let mut contexts = state_mut.contexts;
+            let images = state_mut.images;
+            let window = state_mut.window;
+            let window_states = state_mut.window_states;
+            let focused_window = state_mut.focused_window;
+            let primary_window = state_mut.primary_window;
+            let setting_modal_state = state_mut.setting_modal_state.0.clone();
 
-        let modal_size = egui::vec2(400.0, 480.0);
+            let modal_size = egui::vec2(400.0, 480.0);
 
-        let target_window = focused_window.0.or_else(|| primary_window.iter().next());
-        let inspector_anchor = target_window
-            .and_then(|entity| window_states.get(entity).ok())
-            .and_then(|state| state.ui_state.inspector_anchor.0);
+            let target_window = focused_window.0.or_else(|| primary_window.iter().next());
+            let inspector_anchor = target_window
+                .and_then(|entity| window_states.get(entity).ok())
+                .and_then(|state| state.ui_state.inspector_anchor.0);
 
-        let modal_rect = if let Some(inspector_anchor) = inspector_anchor {
-            egui::Rect::from_min_size(
-                egui::pos2(inspector_anchor.x - modal_size.x, inspector_anchor.y),
-                modal_size,
-            )
-        } else {
-            let window = target_window
-                .and_then(|entity| window.get(entity).ok())
-                .or_else(|| window.iter().next())
-                .expect("no window available");
-            egui::Rect::from_center_size(
-                egui::pos2(
-                    window.resolution.width() / 2.0,
-                    window.resolution.height() / 2.0,
-                ),
-                modal_size,
-            )
+            let modal_rect = if let Some(inspector_anchor) = inspector_anchor {
+                egui::Rect::from_min_size(
+                    egui::pos2(inspector_anchor.x - modal_size.x, inspector_anchor.y),
+                    modal_size,
+                )
+            } else {
+                let window = target_window
+                    .and_then(|entity| window.get(entity).ok())
+                    .or_else(|| window.iter().next())
+                    .expect("no window available");
+                egui::Rect::from_center_size(
+                    egui::pos2(
+                        window.resolution.width() / 2.0,
+                        window.resolution.height() / 2.0,
+                    ),
+                    modal_size,
+                )
+            };
+
+            let close_icon = contexts.add_image(EguiTextureHandle::Weak(images.icon_close.id()));
+            setting_modal_state
+                .map(|setting_modal_state| (setting_modal_state, modal_rect, close_icon))
+        }) else {
+            return;
         };
 
-        if let Some(setting_modal_state) = setting_modal_state.0.clone() {
-            let close_icon = contexts.add_image(EguiTextureHandle::Weak(images.icon_close.id()));
-            let modal_id = egui::Id::new("SETTING_MODAL");
-            let modal_area = egui::Area::new(modal_id)
-                .kind(egui::UiKind::Modal)
-                .fixed_pos(modal_rect.min)
-                .order(egui::Order::Foreground)
-                .interactable(true);
+        register_window_input_blocker(
+            world,
+            root_window,
+            ctx.content_rect(),
+            UiBlocker::Modal,
+            PointerOwnerPriority::Modal,
+        );
 
-            egui::Modal::new(modal_id)
-                .area(modal_area)
-                .backdrop_color(egui::Color32::TRANSPARENT)
-                .frame(egui::Frame {
-                    fill: get_scheme().bg_secondary,
-                    stroke: egui::Stroke {
-                        width: 1.0,
-                        color: get_scheme().text_secondary,
-                    },
-                    inner_margin: egui::Margin::same(16),
-                    outer_margin: egui::Margin::symmetric(4, 0),
-                    ..Default::default()
-                })
-                .show(ctx, |ui| {
-                    ui.set_min_size(modal_rect.size());
-                    ui.set_max_size(modal_rect.size());
-                    let SettingModal::Dialog(dialog) = setting_modal_state;
-                    ui.add_widget_with::<ModalDialog>(
-                        world,
-                        "modal_dialog",
-                        (close_icon, dialog.clone()),
-                    );
-                });
-        }
+        let modal_id = egui::Id::new("SETTING_MODAL");
+        let modal_area = egui::Area::new(modal_id)
+            .kind(egui::UiKind::Modal)
+            .fixed_pos(modal_rect.min)
+            .order(egui::Order::Foreground)
+            .interactable(true);
+
+        egui::Modal::new(modal_id)
+            .area(modal_area)
+            .backdrop_color(egui::Color32::TRANSPARENT)
+            .frame(egui::Frame {
+                fill: get_scheme().bg_secondary,
+                stroke: egui::Stroke {
+                    width: 1.0,
+                    color: get_scheme().text_secondary,
+                },
+                inner_margin: egui::Margin::same(16),
+                outer_margin: egui::Margin::symmetric(4, 0),
+                ..Default::default()
+            })
+            .show(ctx, |ui| {
+                ui.set_min_size(modal_rect.size());
+                ui.set_max_size(modal_rect.size());
+                let SettingModal::Dialog(dialog) = setting_modal_state;
+                ui.add_widget_with::<ModalDialog>(
+                    world,
+                    "modal_dialog",
+                    (close_icon, dialog.clone()),
+                );
+            });
     }
 }
 

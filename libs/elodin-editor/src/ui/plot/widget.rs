@@ -867,7 +867,7 @@ impl TimeseriesPlot {
 
         // Only show time-related context menu for time-based plots
         if self.x_axis_mode.is_time_based() {
-            response.context_menu(|ui| {
+            let context_menu = response.context_menu(|ui| {
                 if ui.button("Set Time Range to Viewport Bounds").clicked() {
                     let (start, end) = if self.x_axis_mode.is_relative() {
                         // For relative time plots, bounds.min_x/max_x are in seconds
@@ -892,6 +892,12 @@ impl TimeseriesPlot {
                     };
                 }
             });
+            if context_menu
+                .as_ref()
+                .is_some_and(|inner| inner.response.contains_pointer())
+            {
+                crate::ui::mark_egui_popup_hovered(ui.ctx());
+            }
         }
 
         let mut font_id = egui::TextStyle::Monospace.resolve(ui.style());

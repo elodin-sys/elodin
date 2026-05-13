@@ -16,7 +16,6 @@ use bevy_defer::AsyncPlugin;
 use bevy_egui::{
     EguiContext, EguiContexts, EguiPreUpdateSet,
     egui::{self, Color32, Label, RichText},
-    input::EguiWantsInput,
 };
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
@@ -288,49 +287,47 @@ pub struct UiPlugin;
 #[derive(Debug, PartialEq, Eq, Clone, Hash, SystemSet)]
 pub struct UiInputConsumerSet;
 
-#[derive(Resource, Debug, Default)]
-pub struct EguiOverlayInputBlockers {
-    modal_windows: HashSet<Entity>,
-    popup_windows: HashSet<Entity>,
+fn egui_popup_hovered_id() -> egui::Id {
+    egui::Id::new("any_popup_hovered")
 }
 
-impl EguiOverlayInputBlockers {
-    pub fn modal_blocks(&self, window: Entity) -> bool {
-        self.modal_windows.contains(&window)
-    }
-
-    pub fn popup_blocks(&self, window: Entity) -> bool {
-        self.popup_windows.contains(&window)
-    }
+pub(crate) fn mark_egui_popup_hovered(ctx: &egui::Context) {
+    ctx.data_mut(|data| data.insert_temp::<bool>(egui_popup_hovered_id(), true));
 }
 
-// egui modal and popup layers are not tile panes, so they do not naturally
-// register owner regions from tiles.rs. Capture them here and let tiles.rs fold
-// them into UiInputOwners instead of clearing Bevy input globally.
-fn update_egui_overlay_input_blockers(
-    egui_wants_input: Res<EguiWantsInput>,
-    mut contexts: Query<(Entity, &mut EguiContext)>,
-    mut blockers: ResMut<EguiOverlayInputBlockers>,
+pub(crate) fn register_window_input_blocker(
+    world: &mut World,
+    window: Entity,
+    rect: egui::Rect,
+    blocker: input_owner::UiBlocker,
+    priority: input_owner::PointerOwnerPriority,
 ) {
-    blockers.modal_windows.clear();
-    blockers.popup_windows.clear();
-
-    for (window, mut ctx) in contexts.iter_mut() {
-        let ctx = ctx.get_mut();
-        if ctx.memory(|mem| mem.top_modal_layer().is_some()) {
-            blockers.modal_windows.insert(window);
-        }
-
-        let popup_hovered_id = egui::Id::new("any_popup_hovered");
-        let pointer_over_popup = ctx
-            .data(|data| data.get_temp::<bool>(popup_hovered_id))
-            .unwrap_or(false);
-        if egui_wants_input.is_popup_open() && pointer_over_popup {
-            blockers.popup_windows.insert(window);
-        }
-
-        ctx.data_mut(|data| data.insert_temp::<bool>(popup_hovered_id, false));
+    if let Some(mut input_owners) = world.get_resource_mut::<input_owner::UiInputOwners>() {
+        input_owners.register_blocker_rect(window, rect, blocker, priority);
     }
+}
+
+fn resolve_input_owner_after_window_roots(world: &mut World, window: Entity, ctx: &egui::Context) {
+    let pointer_over_popup = ctx
+        .data(|data| data.get_temp::<bool>(egui_popup_hovered_id()))
+        .unwrap_or(false);
+
+    if ctx.is_popup_open() && pointer_over_popup {
+        register_window_input_blocker(
+            world,
+            window,
+            ctx.content_rect(),
+            input_owner::UiBlocker::Popup,
+            input_owner::PointerOwnerPriority::Overlay,
+        );
+    }
+
+    let pointer_pos = ctx.input(|input| input.pointer.latest_pos());
+    if let Some(mut input_owners) = world.get_resource_mut::<input_owner::UiInputOwners>() {
+        input_owners.resolve_window(window, pointer_pos);
+    }
+
+    ctx.data_mut(|data| data.insert_temp::<bool>(egui_popup_hovered_id(), false));
 }
 
 impl Plugin for UiPlugin {
@@ -350,16 +347,11 @@ impl Plugin for UiPlugin {
             .init_resource::<HdrEnabled>()
             .init_resource::<FocusedWindow>()
             .init_resource::<input_owner::UiInputOwners>()
-            .init_resource::<EguiOverlayInputBlockers>()
             .init_resource::<timeline_slider::UITick>()
             .init_resource::<timeline::StreamTickOrigin>()
             .init_resource::<command_palette::CommandPaletteState>()
             .add_message::<DialogEvent>()
             .configure_sets(Update, UiInputConsumerSet)
-            .add_systems(
-                Update,
-                update_egui_overlay_input_blockers.before(render_layout),
-            )
             .add_systems(Update, timeline_slider::sync_ui_tick.before(render_layout))
             .add_systems(Update, actions::spawn_lua_actor)
             .add_systems(Update, update_focused_window)
@@ -565,7 +557,7 @@ pub fn render_layout(
 
             world.add_root_widget_to::<ViewportOverlay>(id, "viewport_overlay", ());
 
-            world.add_root_widget_to::<modal::ModalWithSettings>(id, "modal_graph", ());
+            world.add_root_widget_to::<modal::ModalWithSettings>(id, "modal_graph", id);
 
             world.add_root_widget_to::<CommandPalette>(id, "command_palette", ());
         } else {
@@ -580,6 +572,9 @@ pub fn render_layout(
             let _ = write!(widget_id, "secondary_command_palette_{}", window_id.0);
         }
         world.add_root_widget_to::<command_palette::PaletteWindow>(id, &widget_id, Some(id));
+        world.egui_context_scope_for(id, |world, ctx| {
+            resolve_input_owner_after_window_roots(world, id, &ctx);
+        });
     }
 }
 
