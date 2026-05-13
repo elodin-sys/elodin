@@ -1,5 +1,10 @@
-use bevy::prelude::{Entity, Resource};
+use bevy::{
+    camera::NormalizedRenderTarget,
+    ecs::entity::ContainsEntity,
+    prelude::{Entity, Resource},
+};
 use bevy_egui::egui;
+use bevy_picking::pointer::Location;
 use std::collections::HashMap;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
@@ -185,6 +190,12 @@ impl UiInputOwners {
         )
     }
 
+    pub fn permits_viewport_location(&self, camera: Entity, location: &Location) -> bool {
+        pointer_window(location)
+            .map(|window| self.permits_viewport_at(window, camera, pointer_pos(location)))
+            .unwrap_or_default()
+    }
+
     pub fn permits_graph(&self, window: Entity, graph: Entity) -> bool {
         matches!(
             self.owner_for_window(window),
@@ -208,12 +219,41 @@ impl UiInputOwners {
         )
     }
 
+    pub fn permits_nav_gizmo_location(&self, camera: Entity, location: &Location) -> bool {
+        pointer_window(location)
+            .map(|window| self.permits_nav_gizmo_at(window, camera, pointer_pos(location)))
+            .unwrap_or_default()
+    }
+
+    pub fn permits_nav_gizmo_at(
+        &self,
+        window: Entity,
+        camera: Entity,
+        pointer_pos: egui::Pos2,
+    ) -> bool {
+        matches!(
+            self.owner_at(window, pointer_pos),
+            PointerOwner::NavGizmo { camera: owner_camera } if owner_camera == camera
+        )
+    }
+
     pub fn is_blocked_by_ui(&self, window: Entity) -> bool {
         matches!(
             self.owner_for_window(window),
             PointerOwner::BlockedByUi { .. }
         )
     }
+}
+
+fn pointer_window(location: &Location) -> Option<Entity> {
+    match &location.target {
+        NormalizedRenderTarget::Window(window) => Some(window.entity()),
+        _ => None,
+    }
+}
+
+fn pointer_pos(location: &Location) -> egui::Pos2 {
+    egui::pos2(location.position.x, location.position.y)
 }
 
 fn is_usable_rect(rect: egui::Rect) -> bool {
@@ -235,6 +275,17 @@ mod tests {
 
     fn rect(min_x: f32, min_y: f32, max_x: f32, max_y: f32) -> egui::Rect {
         egui::Rect::from_min_max(egui::pos2(min_x, min_y), egui::pos2(max_x, max_y))
+    }
+
+    fn location(window: Entity, x: f32, y: f32) -> Location {
+        Location {
+            target: NormalizedRenderTarget::Window(
+                bevy::window::WindowRef::Entity(window)
+                    .normalize(None)
+                    .expect("normalized window"),
+            ),
+            position: bevy::math::Vec2::new(x, y),
+        }
     }
 
     #[test]
@@ -335,6 +386,28 @@ mod tests {
         );
         assert!(owners.permits_nav_gizmo(window, camera));
         assert!(!owners.permits_viewport(window, camera));
+    }
+
+    #[test]
+    fn pointer_location_permissions_use_pointer_position() {
+        let window = entity(1);
+        let camera = entity(2);
+        let mut owners = UiInputOwners::default();
+
+        owners.register_content_rect(
+            window,
+            rect(0.0, 0.0, 200.0, 200.0),
+            PointerOwner::Viewport { camera },
+        );
+        owners.register_blocker_rect(
+            window,
+            rect(0.0, 0.0, 100.0, 200.0),
+            UiBlocker::Modal,
+            PointerOwnerPriority::Modal,
+        );
+
+        assert!(!owners.permits_viewport_location(camera, &location(window, 50.0, 50.0)));
+        assert!(owners.permits_viewport_location(camera, &location(window, 150.0, 50.0)));
     }
 
     #[test]

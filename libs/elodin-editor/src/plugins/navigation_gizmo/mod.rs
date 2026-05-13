@@ -279,6 +279,7 @@ pub fn drag_nav_gizmo(
     nav_gizmo: Query<&NavGizmoParent>,
     mut query: Query<(&Transform, &mut EditorCam, &Camera), With<MainCamera>>,
     dragged_query: Query<(), With<DraggedMarker>>,
+    input_owners: Res<UiInputOwners>,
     mut commands: Commands,
 ) {
     let drag_target = drag.event().event_target();
@@ -289,6 +290,13 @@ pub fn drag_nav_gizmo(
     let Ok((transform, mut editor_cam, cam)) = query.get_mut(nav_gizmo.main_camera) else {
         return;
     };
+    if !input_owners.permits_nav_gizmo_location(nav_gizmo.main_camera, &drag.pointer_location) {
+        if dragged_query.get(drag_target).is_ok() {
+            editor_cam.end_move();
+            commands.entity(drag_target).remove::<DraggedMarker>();
+        }
+        return;
+    }
     let first_drag = dragged_query.get(drag_target).is_err();
     if first_drag {
         commands.entity(drag_target).insert(DraggedMarker);
@@ -330,12 +338,14 @@ fn side_clicked_cb(
     Query<(Entity, &Transform, &EditorCam), With<MainCamera>>,
     Query<&NavGizmoParent>,
     Query<&DraggedMarker>,
+    Res<UiInputOwners>,
     MessageWriter<LookToTrigger>,
 ) {
     move |click: On<Pointer<Click>>,
           query: Query<(Entity, &Transform, &EditorCam), With<MainCamera>>,
           nav_gizmo: Query<&NavGizmoParent>,
           drag_query: Query<&DraggedMarker>,
+          input_owners: Res<UiInputOwners>,
           mut look_to: MessageWriter<LookToTrigger>| {
         let target = click.event().event_target();
 
@@ -345,6 +355,9 @@ fn side_clicked_cb(
         let Ok((entity, transform, editor_cam)) = query.get(nav_gizmo.main_camera) else {
             return;
         };
+        if !input_owners.permits_nav_gizmo_location(entity, &click.pointer_location) {
+            return;
+        }
 
         if drag_query.get(target).is_ok() {
             return;
