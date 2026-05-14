@@ -2,12 +2,14 @@
 //!
 //! Exports database contents to parquet, arrow-ipc, or csv files without requiring a running server.
 
+use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::fmt::Write as FmtWrite;
 use std::fs::File;
 use std::io::{BufWriter, Write as IoWrite};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::SystemTime;
 
 /// 1 MiB output buffer — large enough that even multi-GB CSVs flush only a few thousand
 /// times instead of millions of small writes (default `csv::Writer` buffer is ~8 KiB).
@@ -26,7 +28,7 @@ use glob::Pattern;
 use tracing::{info_span, trace_span};
 
 use crate::cancellation::check_cancelled;
-use crate::{Component, DB, Error};
+use crate::{Component, DB, Error, component_creation_index};
 
 /// Export format for the CLI command.
 /// This is separate from the internal ArchiveFormat to exclude "native".
@@ -347,6 +349,7 @@ struct ComponentTask {
     component: Component,
     column_name: String,
     element_names: String,
+    creation_index: Option<u64>,
 }
 
 /// One member of a group passed to [`build_group_record_batch`].
@@ -356,6 +359,8 @@ struct GroupMember {
     /// of the original component name when `--join` is on, otherwise the full name).
     short_name: String,
     element_names: String,
+    creation_index: Option<u64>,
+    created_at: SystemTime,
 }
 
 /// A unit of export work: one or more components that should land in the same output file.
@@ -368,31 +373,48 @@ struct ExportGroup {
 /// Group components by the prefix before the last `.` in their name. Single-member groups
 /// (no `.` in the name, or only one component sharing a prefix) export as before.
 ///
-/// Members within a group are deterministically ordered by their short name so column order
-/// is stable across runs.
-fn group_components_by_prefix(tasks: Vec<ComponentTask>) -> Vec<ExportGroup> {
+/// Members within a group are deterministically ordered by persisted creation index when
+/// available, then component directory creation time, then short name.
+fn group_components_by_prefix(tasks: Vec<ComponentTask>, db_path: &Path) -> Vec<ExportGroup> {
     let mut by_prefix: BTreeMap<String, Vec<GroupMember>> = BTreeMap::new();
     for task in tasks {
         let (prefix, short) = match task.column_name.rsplit_once('.') {
             Some((p, s)) => (p.to_string(), s.to_string()),
             None => (task.column_name.clone(), task.column_name.clone()),
         };
+        let created_at = component_created_at(db_path, task.component.component_id);
         by_prefix.entry(prefix).or_default().push(GroupMember {
             component: task.component,
             short_name: short,
             element_names: task.element_names,
+            creation_index: task.creation_index,
+            created_at,
         });
     }
     by_prefix
         .into_iter()
         .map(|(prefix, mut members)| {
-            members.sort_by(|a, b| a.short_name.cmp(&b.short_name));
+            members.sort_by(compare_group_members);
             ExportGroup {
                 output_name: prefix,
                 members,
             }
         })
         .collect()
+}
+
+fn component_created_at(db_path: &Path, component_id: impeller2::types::ComponentId) -> SystemTime {
+    std::fs::metadata(db_path.join(component_id.to_string()))
+        .and_then(|metadata| metadata.created().or_else(|_| metadata.modified()))
+        .unwrap_or(SystemTime::UNIX_EPOCH)
+}
+
+fn compare_group_members(a: &GroupMember, b: &GroupMember) -> Ordering {
+    let order = match (a.creation_index, b.creation_index) {
+        (Some(a_index), Some(b_index)) => a_index.cmp(&b_index),
+        _ => a.created_at.cmp(&b.created_at),
+    };
+    order.then_with(|| a.short_name.cmp(&b.short_name))
 }
 
 /// Build a single `RecordBatch` for an `ExportGroup`. For one-member groups this is
@@ -776,7 +798,7 @@ pub fn run(
         })?;
 
     println!("Opening database: {}", db_path.display());
-    let db = DB::open(db_path)?;
+    let db = DB::open(db_path.clone())?;
 
     // Create output directory
     std::fs::create_dir_all(&output_path)?;
@@ -833,10 +855,12 @@ pub fn run(
                 continue;
             }
             let element_names = component_metadata.element_names().to_lowercase();
+            let creation_index = component_creation_index(component_metadata);
             work.push(ComponentTask {
                 component: component.clone(),
                 column_name,
                 element_names,
+                creation_index,
             });
         }
         (work, pre_skipped)
@@ -845,14 +869,16 @@ pub fn run(
     // If --join is set, group by the prefix before the last '.'; otherwise each component
     // becomes its own one-member group (i.e. existing per-component behaviour).
     let groups: Vec<ExportGroup> = if join {
-        group_components_by_prefix(per_component)
+        group_components_by_prefix(per_component, &db_path)
     } else {
         per_component
             .into_iter()
             .map(|task| ExportGroup {
                 output_name: task.column_name.clone(),
                 members: vec![GroupMember {
+                    created_at: component_created_at(&db_path, task.component.component_id),
                     component: task.component,
+                    creation_index: task.creation_index,
                     short_name: task.column_name,
                     element_names: task.element_names,
                 }],
