@@ -53,6 +53,8 @@ use zerocopy::IntoBytes;
 
 pub use error::Error;
 
+pub(crate) const COMPONENT_CREATION_INDEX_METADATA_KEY: &str = "_creation_index";
+
 pub mod append_log;
 mod arrow;
 #[cfg(feature = "axum")]
@@ -255,6 +257,7 @@ pub struct DB {
 pub struct State {
     components: HashMap<ComponentId, Component>,
     component_metadata: HashMap<ComponentId, ComponentMetadata>,
+    next_component_creation_index: u64,
 
     msg_logs: HashMap<PacketId, MsgLog>,
 
@@ -264,6 +267,23 @@ pub struct State {
     udp_vtable_streams: HashSet<(SocketAddr, [u8; 2])>,
 
     pub db_config: DbConfig,
+}
+
+pub(crate) fn component_creation_index(metadata: &ComponentMetadata) -> Option<u64> {
+    metadata
+        .metadata
+        .get(COMPONENT_CREATION_INDEX_METADATA_KEY)
+        .and_then(|value| value.parse().ok())
+}
+
+fn next_component_creation_index_from_metadata(
+    component_metadata: &HashMap<ComponentId, ComponentMetadata>,
+) -> u64 {
+    component_metadata
+        .values()
+        .filter_map(component_creation_index)
+        .max()
+        .map_or(0, |index| index.saturating_add(1))
 }
 
 impl DB {
@@ -509,9 +529,12 @@ impl DB {
         // Update the version that last opened this database
         db_state.set_version_last_opened(env!("CARGO_PKG_VERSION"));
         let now = Timestamp::now();
+        let next_component_creation_index =
+            next_component_creation_index_from_metadata(&component_metadata);
         let state = State {
             components,
             component_metadata,
+            next_component_creation_index,
             msg_logs,
             db_config: db_state.clone(),
             ..Default::default()
@@ -815,6 +838,51 @@ impl DB {
 }
 
 impl State {
+    fn next_component_creation_index(&mut self) -> u64 {
+        let index = self.next_component_creation_index;
+        self.next_component_creation_index = self.next_component_creation_index.saturating_add(1);
+        index
+    }
+
+    fn update_next_component_creation_index(&mut self, metadata: &ComponentMetadata) {
+        if let Some(index) = component_creation_index(metadata) {
+            self.next_component_creation_index = self
+                .next_component_creation_index
+                .max(index.saturating_add(1));
+        }
+    }
+
+    fn ensure_component_creation_index(
+        &mut self,
+        component_id: ComponentId,
+        db_path: &Path,
+    ) -> Result<(), Error> {
+        if self
+            .component_metadata
+            .get(&component_id)
+            .and_then(component_creation_index)
+            .is_some()
+        {
+            return Ok(());
+        }
+
+        let index = self.next_component_creation_index();
+        let mut metadata = self
+            .component_metadata
+            .get(&component_id)
+            .cloned()
+            .unwrap_or_else(|| ComponentMetadata {
+                component_id,
+                name: component_id.to_string(),
+                metadata: Default::default(),
+            });
+        metadata.metadata.insert(
+            COMPONENT_CREATION_INDEX_METADATA_KEY.to_string(),
+            index.to_string(),
+        );
+        self.set_component_metadata(metadata, db_path)
+    }
+
     pub fn insert_component(
         &mut self,
         component_id: ComponentId,
@@ -855,6 +923,7 @@ impl State {
                 db_path,
             )?;
         }
+        self.ensure_component_creation_index(component_id, db_path)?;
         self.components.insert(component_id, component);
         Ok(())
     }
@@ -925,6 +994,7 @@ impl State {
         if is_timestamp_source || !self.component_metadata.contains_key(&component_id) {
             self.set_component_metadata(component_metadata, db_path)?;
         }
+        self.ensure_component_creation_index(component_id, db_path)?;
         self.components.insert(component_id, component);
         Ok(())
     }
@@ -966,6 +1036,7 @@ impl State {
                 }
             }
         }
+        self.update_next_component_creation_index(&metadata);
 
         if component_metadata_path.exists()
             && ComponentMetadata::read(&component_metadata_path)? == metadata

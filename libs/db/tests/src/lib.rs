@@ -2159,8 +2159,14 @@ mod tests {
         db.with_state_mut(|state| {
             let component = state.get_component_metadata(component_id).unwrap();
             assert_eq!(&component.name, "Persistence Test Component");
+            let user_metadata: std::collections::HashMap<String, String> = component
+                .metadata
+                .iter()
+                .filter(|(k, _)| !k.starts_with('_'))
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect();
             assert_eq!(
-                component.metadata.clone(),
+                user_metadata,
                 [("unit".to_string(), "test_unit".to_string())]
                     .into_iter()
                     .collect()

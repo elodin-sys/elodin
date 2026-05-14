@@ -1,7 +1,7 @@
 # csv export goldens: mono_us_flatten
 
 === edge_floats.csv ===
-time_us,edge_floats.nan,edge_floats.pinf,edge_floats.ninf,edge_floats.tiny
+time_us,edge_floats_nan,edge_floats_pinf,edge_floats_ninf,edge_floats_tiny
 1700000000000000,NaN,inf,-inf,1e-7
 1700000001000000,NaN,inf,-inf,2e-7
 1700000002000000,NaN,inf,-inf,3e-7
@@ -9,7 +9,7 @@ time_us,edge_floats.nan,edge_floats.pinf,edge_floats.ninf,edge_floats.tiny
 1700000004000000,NaN,inf,-inf,5e-7
 
 === mat3_f64.csv ===
-time_us,mat3_f64.0,mat3_f64.1,mat3_f64.2,mat3_f64.3,mat3_f64.4,mat3_f64.5,mat3_f64.6,mat3_f64.7,mat3_f64.8
+time_us,mat3_f64_0,mat3_f64_1,mat3_f64_2,mat3_f64_3,mat3_f64_4,mat3_f64_5,mat3_f64_6,mat3_f64_7,mat3_f64_8
 1700000000000000,0.0,0.25,0.5,0.75,1.0,1.25,1.5,1.75,2.0
 1700000001000000,1.5,1.75,2.0,2.25,2.5,2.75,3.0,3.25,3.5
 1700000002000000,3.0,3.25,3.5,3.75,4.0,4.25,4.5,4.75,5.0
@@ -49,7 +49,7 @@ time_us,scalar_u8
 1700000004000000,13
 
 === vec2_i32.csv ===
-time_us,vec2_i32.a,vec2_i32.b
+time_us,vec2_i32_a,vec2_i32_b
 1700000000000000,100,101
 1700000001000000,107,108
 1700000002000000,114,115
@@ -57,7 +57,7 @@ time_us,vec2_i32.a,vec2_i32.b
 1700000004000000,128,129
 
 === vec3_bool.csv ===
-time_us,vec3_bool.p,vec3_bool.q,vec3_bool.r
+time_us,vec3_bool_p,vec3_bool_q,vec3_bool_r
 1700000000000000,false,true,false
 1700000001000000,true,false,true
 1700000002000000,false,true,false
@@ -65,7 +65,7 @@ time_us,vec3_bool.p,vec3_bool.q,vec3_bool.r
 1700000004000000,false,true,false
 
 === vec3_f32.csv ===
-time_us,vec3_f32.x,vec3_f32.y,vec3_f32.z
+time_us,vec3_f32_x,vec3_f32_y,vec3_f32_z
 1700000000000000,0.0,0.125,0.25
 1700000001000000,0.5,0.625,0.75
 1700000002000000,1.0,1.125,1.25
@@ -73,7 +73,7 @@ time_us,vec3_f32.x,vec3_f32.y,vec3_f32.z
 1700000004000000,2.0,2.125,2.25
 
 === vec3_f64.csv ===
-time_us,vec3_f64.x,vec3_f64.y,vec3_f64.z
+time_us,vec3_f64_x,vec3_f64_y,vec3_f64_z
 1700000000000000,0.0,0.25,0.5
 1700000001000000,1.5,1.75,2.0
 1700000002000000,3.0,3.25,3.5
@@ -81,7 +81,7 @@ time_us,vec3_f64.x,vec3_f64.y,vec3_f64.z
 1700000004000000,6.0,6.25,6.5
 
 === vec3_f64_unnamed.csv ===
-time_us,vec3_f64_unnamed.0,vec3_f64_unnamed.1,vec3_f64_unnamed.2
+time_us,vec3_f64_unnamed_0,vec3_f64_unnamed_1,vec3_f64_unnamed_2
 1700000000000000,0.0,0.25,0.5
 1700000001000000,1.5,1.75,2.0
 1700000002000000,3.0,3.25,3.5
@@ -89,7 +89,7 @@ time_us,vec3_f64_unnamed.0,vec3_f64_unnamed.1,vec3_f64_unnamed.2
 1700000004000000,6.0,6.25,6.5
 
 === vec3_u16.csv ===
-time_us,vec3_u16.0,vec3_u16.1,vec3_u16.2
+time_us,vec3_u16_0,vec3_u16_1,vec3_u16_2
 1700000000000000,1,2,3
 1700000001000000,6,7,8
 1700000002000000,11,12,13

@@ -295,6 +295,10 @@ fn run_export_full(
 ///
 /// Plus one component without a `.` (`tick`) which becomes its own one-member group.
 fn build_join_fixture(path: PathBuf) -> DB {
+    build_join_fixture_with_msg_a_order(path, ["MSG_A.POS", "MSG_A.VEL"])
+}
+
+fn build_join_fixture_with_msg_a_order(path: PathBuf, msg_a_order: [&str; 2]) -> DB {
     use std::collections::HashMap;
     let db = DB::create(path.clone()).expect("DB::create");
 
@@ -323,11 +327,24 @@ fn build_join_fixture(path: PathBuf) -> DB {
     };
 
     let (a_pos, a_vel, b_label, tick) = db.with_state_mut(|s| {
-        let a_pos = make(s, "MSG_A.POS", PrimType::F64, &[3], Some("x,y,z"));
-        let a_vel = make(s, "MSG_A.VEL", PrimType::F64, &[3], Some("x,y,z"));
+        let mut a_pos = None;
+        let mut a_vel = None;
+        for name in msg_a_order {
+            let cid = make(s, name, PrimType::F64, &[3], Some("x,y,z"));
+            match name {
+                "MSG_A.POS" => a_pos = Some(cid),
+                "MSG_A.VEL" => a_vel = Some(cid),
+                _ => unreachable!("unexpected MSG_A component"),
+            }
+        }
         let b_label = make(s, "MSG_B.LABEL", PrimType::I32, &[], None);
         let tick = make(s, "tick", PrimType::U64, &[], None);
-        (a_pos, a_vel, b_label, tick)
+        (
+            a_pos.expect("MSG_A.POS"),
+            a_vel.expect("MSG_A.VEL"),
+            b_label,
+            tick,
+        )
     });
 
     db.with_state(|s| {
@@ -568,6 +585,41 @@ mod tests {
             env!("CARGO_MANIFEST_DIR"),
             "tests_query/csv_export_goldie.rs",
             concat!(module_path!(), "::csv_export_join_identical_ts_flatten"),
+        )
+        .golden_dir(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests_query/testdata"))
+        .build()
+        .assert(&snapshot);
+    }
+
+    /// Joined columns follow component creation order, not alphabetical short-name order.
+    #[test]
+    fn csv_export_join_flatten_preserves_creation_order() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let db = build_join_fixture_with_msg_a_order(
+            dir.path().to_path_buf(),
+            ["MSG_A.VEL", "MSG_A.POS"],
+        );
+        let snapshot = run_export_full(
+            dir.path().to_path_buf(),
+            true,
+            false,
+            true,
+            elodin_db::export::TimeFormat::Iso8601,
+            false,
+            "join_flatten_creation_order",
+        );
+        drop(db);
+        assert!(
+            snapshot.contains("time,vel_x,vel_y,vel_z,pos_x,pos_y,pos_z"),
+            "MSG_A columns must preserve insertion order: {snapshot}"
+        );
+        goldie::Builder::new(
+            env!("CARGO_MANIFEST_DIR"),
+            "tests_query/csv_export_goldie.rs",
+            concat!(
+                module_path!(),
+                "::csv_export_join_flatten_preserves_creation_order"
+            ),
         )
         .golden_dir(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests_query/testdata"))
         .build()
