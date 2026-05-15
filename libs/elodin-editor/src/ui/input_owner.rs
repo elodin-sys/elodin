@@ -431,10 +431,7 @@ mod tests {
             owners.resolve_window(window, Some(egui::pos2(150.0, 50.0))),
             PointerOwner::ViewCube { camera }
         );
-        assert!(owners.permits_view_cube_location(
-            camera,
-            &location(window, 150.0, 50.0),
-        ));
+        assert!(owners.permits_view_cube_location(camera, &location(window, 150.0, 50.0),));
         assert!(!owners.permits_nav_gizmo(window, camera));
         assert!(!owners.permits_viewport(window, camera));
     }
