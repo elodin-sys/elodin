@@ -23,6 +23,9 @@ pub enum PointerOwner {
     NavGizmo {
         camera: Entity,
     },
+    ViewCube {
+        camera: Entity,
+    },
     BlockedByUi {
         blocker: UiBlocker,
     },
@@ -237,6 +240,24 @@ impl UiInputOwners {
         )
     }
 
+    pub fn permits_view_cube_location(&self, camera: Entity, location: &Location) -> bool {
+        pointer_window(location)
+            .map(|window| self.permits_view_cube_at(window, camera, pointer_pos(location)))
+            .unwrap_or_default()
+    }
+
+    pub fn permits_view_cube_at(
+        &self,
+        window: Entity,
+        camera: Entity,
+        pointer_pos: egui::Pos2,
+    ) -> bool {
+        matches!(
+            self.owner_at(window, pointer_pos),
+            PointerOwner::ViewCube { camera: owner_camera } if owner_camera == camera
+        )
+    }
+
     pub fn is_blocked_by_ui(&self, window: Entity) -> bool {
         matches!(
             self.owner_for_window(window),
@@ -385,6 +406,36 @@ mod tests {
             PointerOwner::NavGizmo { camera }
         );
         assert!(owners.permits_nav_gizmo(window, camera));
+        assert!(!owners.permits_viewport(window, camera));
+    }
+
+    #[test]
+    fn view_cube_overlay_wins_over_underlying_viewport() {
+        let window = entity(1);
+        let camera = entity(2);
+        let mut owners = UiInputOwners::default();
+
+        owners.register_content_rect(
+            window,
+            rect(0.0, 0.0, 200.0, 200.0),
+            PointerOwner::Viewport { camera },
+        );
+        owners.register_rect(
+            window,
+            rect(100.0, 0.0, 200.0, 100.0),
+            PointerOwner::ViewCube { camera },
+            PointerOwnerPriority::Overlay,
+        );
+
+        assert_eq!(
+            owners.resolve_window(window, Some(egui::pos2(150.0, 50.0))),
+            PointerOwner::ViewCube { camera }
+        );
+        assert!(owners.permits_view_cube_location(
+            camera,
+            &location(window, 150.0, 50.0),
+        ));
+        assert!(!owners.permits_nav_gizmo(window, camera));
         assert!(!owners.permits_viewport(window, camera));
     }
 

@@ -1076,7 +1076,7 @@ pub fn on_cube_click(
     let Ok(link) = lookup.root_links.get(source) else {
         return;
     };
-    if !input_owners.permits_viewport_location(link.main_camera, &trigger.pointer_location) {
+    if !input_owners.permits_view_cube_location(link.main_camera, &trigger.pointer_location) {
         return;
     }
 
@@ -1171,7 +1171,7 @@ pub fn on_cube_drag(
     let Ok((transform, mut editor_cam, camera)) = cameras.get_mut(link.main_camera) else {
         return;
     };
-    if !input_owners.permits_viewport_location(link.main_camera, &drag.pointer_location) {
+    if !input_owners.permits_view_cube_location(link.main_camera, &drag.pointer_location) {
         if dragging_roots.get(root).is_ok() {
             editor_cam.end_move();
             commands.entity(root).remove::<ViewCubeDragging>();
@@ -1340,7 +1340,7 @@ pub fn on_arrow_pressed(
     let Ok((_, link)) = root_query.get(source) else {
         return;
     };
-    if !input_owners.permits_viewport_location(link.main_camera, &trigger.pointer_location) {
+    if !input_owners.permits_view_cube_location(link.main_camera, &trigger.pointer_location) {
         return;
     }
 
@@ -1387,7 +1387,7 @@ pub fn on_action_button_click(
     let Ok((_, link)) = root_query.get(source) else {
         return;
     };
-    if !input_owners.permits_viewport_location(link.main_camera, &trigger.pointer_location) {
+    if !input_owners.permits_view_cube_location(link.main_camera, &trigger.pointer_location) {
         return;
     }
 

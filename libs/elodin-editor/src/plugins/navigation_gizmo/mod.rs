@@ -1,6 +1,6 @@
 use crate::{
     MainCamera,
-    plugins::camera_anchor::camera_anchor_from_transform,
+    plugins::{camera_anchor::camera_anchor_from_transform, view_cube::ViewCubeCamera},
     ui::ViewportRect,
     ui::input_owner::{PointerOwner, PointerOwnerPriority, UiInputOwners},
 };
@@ -397,7 +397,12 @@ fn clamp_overlay_position(position: Vec2, side_length: f32, window_size: Vec2) -
 fn set_camera_viewport(
     windows: Query<(Entity, &Window, &bevy_egui::EguiContextSettings)>,
     _contexts: EguiContexts,
-    mut nav_camera_query: Query<(&mut Camera, &RenderTarget, &NavGizmoParent)>,
+    mut nav_camera_query: Query<(
+        &mut Camera,
+        &RenderTarget,
+        &NavGizmoParent,
+        Option<&ViewCubeCamera>,
+    )>,
     main_camera_query: Query<(&Camera, Option<&ViewportRect>), Without<NavGizmoParent>>,
     mut main_editor_cam_query: Query<&mut EditorCam, (With<MainCamera>, Without<NavGizmoParent>)>,
     primary_query: Query<Entity, With<PrimaryWindow>>,
@@ -417,7 +422,7 @@ fn set_camera_viewport(
         anchor_state.active_drag = None;
     }
 
-    for (mut nav_camera, render_target, parent) in nav_camera_query.iter_mut() {
+    for (mut nav_camera, render_target, parent, view_cube_camera) in nav_camera_query.iter_mut() {
         let Ok((main, viewport_rect)) = main_camera_query.get(parent.main_camera) else {
             continue;
         };
@@ -480,8 +485,14 @@ fn set_camera_viewport(
         input_owners.register_rect(
             window_entity,
             nav_gizmo_rect,
-            PointerOwner::NavGizmo {
-                camera: parent.main_camera,
+            if view_cube_camera.is_some() {
+                PointerOwner::ViewCube {
+                    camera: parent.main_camera,
+                }
+            } else {
+                PointerOwner::NavGizmo {
+                    camera: parent.main_camera,
+                }
             },
             PointerOwnerPriority::Overlay,
         );
