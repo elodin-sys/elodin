@@ -5115,6 +5115,7 @@ dependencies = [
  "miette 7.6.0",
  "muxide",
  "nox",
+ "openh264",
  "parquet",
  "pin-project",
  "postcard",
