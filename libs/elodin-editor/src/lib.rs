@@ -98,6 +98,13 @@ pub(crate) fn skybox_asset_plugin() -> bevy_ai_skybox::prelude::SkyboxAssetPlugi
     }
 }
 
+pub(crate) fn skybox_generation_plugin() -> bevy_ai_skybox::prelude::BlockadeSkyboxPlugin {
+    bevy_ai_skybox::prelude::BlockadeSkyboxPlugin {
+        default_resolution: bevy_ai_skybox::prelude::SkyboxResolution::FourK,
+        ..Default::default()
+    }
+}
+
 #[cfg(feature = "inspector")]
 #[derive(Component)]
 struct InspectorWindow;
@@ -229,6 +236,7 @@ impl Plugin for EditorPlugin {
             )
             .add_plugins(plugins::kdl_document::plugin)
             .add_plugins(skybox_asset_plugin())
+            .add_plugins(skybox_generation_plugin())
             // Note: we added this because bevy 0.17.3 changed its behavior
             // which broke bevy_editor_cam. See here:
             // https://github.com/aevyrie/bevy_editor_cam/issues/61

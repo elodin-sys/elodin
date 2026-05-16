@@ -1,14 +1,15 @@
-//! Asset-only skybox loading for Elodin.
+//! Skybox loading and prompt-driven generation for Elodin.
 //!
-//! This vendored slice intentionally does not include the Blockade generation
-//! client. It loads cached cubemap entries from `assets/skyboxes/manifest.ron`
-//! and applies them to Bevy `Camera3d` entities.
+//! The lightweight asset plugin loads cached cubemap entries from
+//! `assets/skyboxes/manifest.ron` and applies them to Bevy `Camera3d` entities.
+//! The optional Blockade plugin adds prompt-driven generation.
 
 use std::{
     collections::HashMap,
     fs,
     path::{Path, PathBuf},
-    time::SystemTime,
+    thread,
+    time::{Duration, Instant, SystemTime},
 };
 
 use bevy::{
@@ -18,13 +19,17 @@ use bevy::{
     light::{EnvironmentMapLight, GeneratedEnvironmentMapLight},
     prelude::*,
     render::render_resource::{TextureViewDescriptor, TextureViewDimension},
+    tasks::{IoTaskPool, Task, futures_lite::future},
 };
+use chrono::{SecondsFormat, Utc};
+use image::{Rgba, RgbaImage};
 use serde::{Deserialize, Serialize};
 
 pub mod prelude {
     pub use crate::{
-        ManifestReloaded, PrimarySkybox, SetActiveSkybox, SkyboxAssetPlugin, SkyboxAssetSettings,
-        SkyboxCache, SkyboxFailed, SkyboxManifest, SkyboxReady, SkyboxStyle,
+        BlockadeSkyboxPlugin, GenerateSkybox, ManifestReloaded, PrimarySkybox, SetActiveSkybox,
+        SkyboxAssetPlugin, SkyboxAssetSettings, SkyboxCache, SkyboxFailed,
+        SkyboxGenerationSettings, SkyboxManifest, SkyboxReady, SkyboxResolution, SkyboxStyle,
     };
 }
 
@@ -32,8 +37,24 @@ pub type Result<T> = std::result::Result<T, SkyboxError>;
 
 #[derive(Debug, thiserror::Error)]
 pub enum SkyboxError {
+    #[error("missing API key (set BLOCKADE_API_KEY)")]
+    MissingApiKey,
     #[error("skybox `{0}` is not present in the manifest")]
     MissingSkybox(String),
+    #[error("generation failed: {0}")]
+    GenerationFailed(String),
+    #[error("generation timed out: {0}")]
+    Timeout(String),
+    #[error("unauthorized Blockade request: {0}")]
+    Unauthorized(String),
+    #[error("bad Blockade request: {0}")]
+    BadRequest(String),
+    #[error("http: {0}")]
+    Http(#[from] reqwest::Error),
+    #[error("json: {0}")]
+    Json(#[from] serde_json::Error),
+    #[error("image: {0}")]
+    Image(#[from] image::ImageError),
     #[error("ron: {0}")]
     Ron(String),
     #[error("io: {0}")]
@@ -59,6 +80,49 @@ pub enum SkyboxStyle {
     M3UhdRender,
     M3Advanced,
     Custom(u32),
+}
+
+impl SkyboxStyle {
+    pub const fn id(self) -> u32 {
+        match self {
+            Self::M3Photoreal => 67,
+            Self::M3UhdRender => 35,
+            Self::M3Advanced => 82,
+            Self::Custom(id) => id,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub enum SkyboxResolution {
+    OneK,
+    TwoK,
+    #[default]
+    FourK,
+    EightK,
+    SixteenK,
+}
+
+impl SkyboxResolution {
+    pub const fn id(self) -> u32 {
+        match self {
+            Self::OneK => 1,
+            Self::TwoK => 2,
+            Self::FourK => 3,
+            Self::EightK => 4,
+            Self::SixteenK => 7,
+        }
+    }
+
+    pub const fn face_size(self) -> u32 {
+        match self {
+            Self::OneK => 256,
+            Self::TwoK => 512,
+            Self::FourK => 1024,
+            Self::EightK => 2048,
+            Self::SixteenK => 4096,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq)]
@@ -131,6 +195,18 @@ impl SkyboxManifest {
     pub fn get(&self, name: &str) -> Option<&ManifestEntry> {
         self.entries.iter().find(|entry| entry.name == name)
     }
+
+    pub fn upsert(&mut self, entry: ManifestEntry) {
+        if let Some(existing) = self
+            .entries
+            .iter_mut()
+            .find(|existing| existing.name == entry.name)
+        {
+            *existing = entry;
+        } else {
+            self.entries.push(entry);
+        }
+    }
 }
 
 #[derive(Clone, Debug, Resource)]
@@ -184,7 +260,7 @@ impl SkyboxCache {
         let manifest = SkyboxManifest::read_or_create(&manifest_path)?;
         let last_manifest_modified = modified_at(&manifest_path);
         Ok(Self {
-            active: manifest.default.clone(),
+            active: None,
             manifest,
             handles: HashMap::new(),
             manifest_path,
@@ -219,6 +295,18 @@ impl SkyboxCache {
     pub fn manifest_changed_on_disk(&self) -> bool {
         modified_at(&self.manifest_path) != self.last_manifest_modified
     }
+
+    pub fn write_manifest(&mut self) -> Result<()> {
+        self.manifest.write_atomic(&self.manifest_path)?;
+        self.last_manifest_modified = modified_at(&self.manifest_path);
+        Ok(())
+    }
+
+    pub fn upsert_and_activate(&mut self, entry: ManifestEntry) -> Result<()> {
+        self.active = Some(entry.name.clone());
+        self.manifest.upsert(entry);
+        self.write_manifest()
+    }
 }
 
 fn modified_at(path: &Path) -> Option<SystemTime> {
@@ -231,6 +319,16 @@ fn modified_at(path: &Path) -> Option<SystemTime> {
 pub enum SetActiveSkybox {
     ByName(String),
     ByHandle(Handle<Image>),
+}
+
+#[derive(Clone, Debug, Default, Message)]
+pub struct GenerateSkybox {
+    pub prompt: String,
+    pub style: Option<SkyboxStyle>,
+    pub negative_text: Option<String>,
+    pub seed: Option<u64>,
+    pub save_as: Option<String>,
+    pub resolution: Option<SkyboxResolution>,
 }
 
 #[derive(Clone, Debug, Message)]
@@ -253,6 +351,91 @@ pub struct ManifestReloaded {
 
 #[derive(Component, Clone, Debug, Default)]
 pub struct PrimarySkybox;
+
+#[derive(Clone, Debug, Resource)]
+pub struct SkyboxGenerationSettings {
+    pub api_key: Option<String>,
+    pub api_base_url: String,
+    pub default_style: SkyboxStyle,
+    pub default_resolution: SkyboxResolution,
+    pub enhance_prompt: bool,
+    pub poll_interval: Duration,
+    pub request_timeout: Duration,
+}
+
+impl Default for SkyboxGenerationSettings {
+    fn default() -> Self {
+        Self {
+            api_key: std::env::var("BLOCKADE_API_KEY").ok(),
+            api_base_url: "https://backend.blockadelabs.com/api/v1".to_string(),
+            default_style: SkyboxStyle::M3Photoreal,
+            default_resolution: SkyboxResolution::FourK,
+            enhance_prompt: true,
+            poll_interval: Duration::from_secs(2),
+            request_timeout: Duration::from_secs(180),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct BlockadeSkyboxPlugin {
+    pub api_key: Option<String>,
+    pub api_base_url: String,
+    pub default_style: SkyboxStyle,
+    pub default_resolution: SkyboxResolution,
+    pub enhance_prompt: bool,
+    pub poll_interval: Duration,
+    pub request_timeout: Duration,
+}
+
+impl Default for BlockadeSkyboxPlugin {
+    fn default() -> Self {
+        let settings = SkyboxGenerationSettings::default();
+        Self {
+            api_key: settings.api_key,
+            api_base_url: settings.api_base_url,
+            default_style: settings.default_style,
+            default_resolution: settings.default_resolution,
+            enhance_prompt: settings.enhance_prompt,
+            poll_interval: settings.poll_interval,
+            request_timeout: settings.request_timeout,
+        }
+    }
+}
+
+impl Plugin for BlockadeSkyboxPlugin {
+    fn build(&self, app: &mut App) {
+        app.insert_resource(SkyboxGenerationSettings {
+            api_key: self
+                .api_key
+                .clone()
+                .or_else(|| std::env::var("BLOCKADE_API_KEY").ok()),
+            api_base_url: self.api_base_url.clone(),
+            default_style: self.default_style,
+            default_resolution: self.default_resolution,
+            enhance_prompt: self.enhance_prompt,
+            poll_interval: self.poll_interval,
+            request_timeout: self.request_timeout,
+        })
+        .init_resource::<SkyboxGenerationState>()
+        .add_message::<GenerateSkybox>()
+        .add_systems(Update, (start_generation_jobs, finish_generation_jobs));
+    }
+}
+
+#[derive(Resource, Default)]
+struct SkyboxGenerationState {
+    active: Option<ActiveGeneration>,
+}
+
+struct ActiveGeneration {
+    prompt: String,
+    task: Task<Result<GeneratedSkybox>>,
+}
+
+struct GeneratedSkybox {
+    entry: ManifestEntry,
+}
 
 #[derive(Clone, Debug)]
 pub struct SkyboxAssetPlugin {
@@ -331,18 +514,92 @@ impl Plugin for SkyboxAssetPlugin {
 }
 
 fn load_default_skybox(
-    cache: Res<SkyboxCache>,
     settings: Res<SkyboxAssetSettings>,
     mut writer: MessageWriter<SetActiveSkybox>,
 ) {
-    let Some(name) = settings
-        .default_skybox
-        .clone()
-        .or_else(|| cache.manifest.default.clone())
-    else {
+    let Some(name) = settings.default_skybox.clone() else {
         return;
     };
     writer.write(SetActiveSkybox::ByName(name));
+}
+
+fn start_generation_jobs(
+    mut reader: MessageReader<GenerateSkybox>,
+    settings: Res<SkyboxGenerationSettings>,
+    asset_settings: Res<SkyboxAssetSettings>,
+    mut state: ResMut<SkyboxGenerationState>,
+    mut failed: MessageWriter<SkyboxFailed>,
+) {
+    for request in reader.read() {
+        let mut request = request.clone();
+        request.prompt = request.prompt.trim().to_string();
+        if request.prompt.is_empty() {
+            failed.write(SkyboxFailed {
+                name: "empty prompt".into(),
+                error: SkyboxError::GenerationFailed("prompt cannot be empty".into()),
+            });
+            continue;
+        }
+
+        if settings.api_key.is_none() {
+            failed.write(SkyboxFailed {
+                name: request.prompt.clone(),
+                error: SkyboxError::MissingApiKey,
+            });
+            continue;
+        }
+
+        let generation_settings = settings.clone();
+        let asset_settings = asset_settings.clone();
+        let prompt = request.prompt.clone();
+        let task = IoTaskPool::get().spawn(async move {
+            generate_skybox_blocking(generation_settings, asset_settings, request)
+        });
+        state.active = Some(ActiveGeneration { prompt, task });
+    }
+}
+
+fn finish_generation_jobs(
+    mut state: ResMut<SkyboxGenerationState>,
+    mut cache: ResMut<SkyboxCache>,
+    mut manifest_reloaded: MessageWriter<ManifestReloaded>,
+    mut activate: MessageWriter<SetActiveSkybox>,
+    mut failed: MessageWriter<SkyboxFailed>,
+) {
+    let Some(active) = state.active.as_mut() else {
+        return;
+    };
+    let Some(result) = future::block_on(future::poll_once(&mut active.task)) else {
+        return;
+    };
+
+    let prompt = active.prompt.clone();
+    state.active = None;
+    match result {
+        Ok(generated) => {
+            let name = generated.entry.name.clone();
+            match cache.upsert_and_activate(generated.entry) {
+                Ok(()) => {
+                    manifest_reloaded.write(ManifestReloaded {
+                        entry_count: cache.manifest.entries.len(),
+                    });
+                    activate.write(SetActiveSkybox::ByName(name));
+                }
+                Err(error) => {
+                    failed.write(SkyboxFailed {
+                        name: prompt,
+                        error,
+                    });
+                }
+            }
+        }
+        Err(error) => {
+            failed.write(SkyboxFailed {
+                name: prompt,
+                error,
+            });
+        }
+    }
 }
 
 fn apply_skybox_to_camera(
@@ -525,6 +782,355 @@ fn log_skybox_outcomes(
             "skybox failed for {:?}: {}",
             event.name, event.error
         );
+    }
+}
+
+fn generate_skybox_blocking(
+    settings: SkyboxGenerationSettings,
+    asset_settings: SkyboxAssetSettings,
+    request: GenerateSkybox,
+) -> Result<GeneratedSkybox> {
+    let client = BlockadeClient::new(settings.api_key.clone(), settings.api_base_url.clone())?;
+    let style = request.style.unwrap_or(settings.default_style);
+    let resolution = request.resolution.unwrap_or(settings.default_resolution);
+    let created = client.submit(&GenerateSkyboxRequest {
+        prompt: request.prompt.clone(),
+        skybox_style_id: style.id(),
+        negative_text: request.negative_text.clone(),
+        enhance_prompt: Some(settings.enhance_prompt),
+        seed: request.seed,
+    })?;
+
+    let started = Instant::now();
+    let status = loop {
+        if started.elapsed() > settings.request_timeout {
+            return Err(SkyboxError::Timeout(format!(
+                "request {} exceeded {:?}",
+                created.id, settings.request_timeout
+            )));
+        }
+
+        let status = client.poll(created.id)?;
+        if status.is_complete() {
+            break status;
+        }
+        if status.is_error() {
+            return Err(SkyboxError::GenerationFailed(
+                status
+                    .error_message
+                    .unwrap_or_else(|| format!("remote status `{}`", status.status)),
+            ));
+        }
+        thread::sleep(settings.poll_interval);
+    };
+
+    let Some(file_url) = status.file_url else {
+        return Err(SkyboxError::GenerationFailed(
+            "complete status did not include file_url".into(),
+        ));
+    };
+    let source_bytes = client.download(&file_url)?;
+    let name = sanitize_name(
+        request
+            .save_as
+            .as_deref()
+            .filter(|name| !name.trim().is_empty())
+            .unwrap_or(&request.prompt),
+    );
+    let equirect_file = format!("{name}.equirect.png");
+    let cubemap_file = format!("{name}.cubemap.png");
+    let equirect_path = asset_settings.cache_dir.join(&equirect_file);
+    let cubemap_path = asset_settings.cache_dir.join(&cubemap_file);
+
+    fs::create_dir_all(&asset_settings.cache_dir)?;
+    let equirect = image::load_from_memory(&source_bytes)?.to_rgba8();
+    equirect.save(&equirect_path)?;
+    equirect_to_stacked_cubemap(&equirect, resolution.face_size()).save(&cubemap_path)?;
+
+    Ok(GeneratedSkybox {
+        entry: ManifestEntry {
+            name,
+            prompt: request.prompt,
+            style,
+            blockade: Some(BlockadeMetadata {
+                imagine_id: status.id,
+                obfuscated_id: status.obfuscated_id.or(created.obfuscated_id),
+                seed: request.seed,
+            }),
+            equirect_file,
+            cubemap_file,
+            face_size: resolution.face_size(),
+            created_at: Utc::now().to_rfc3339_opts(SecondsFormat::Micros, true),
+        },
+    })
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct GenerateSkyboxRequest {
+    prompt: String,
+    skybox_style_id: u32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    negative_text: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    enhance_prompt: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    seed: Option<u64>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct ImagineCreated {
+    id: u64,
+    #[serde(default)]
+    obfuscated_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+struct ImagineStatus {
+    id: u64,
+    #[serde(default)]
+    obfuscated_id: Option<String>,
+    status: String,
+    #[serde(default)]
+    file_url: Option<String>,
+    #[serde(default)]
+    error_message: Option<String>,
+}
+
+impl ImagineStatus {
+    fn is_complete(&self) -> bool {
+        self.status.eq_ignore_ascii_case("complete")
+            && self
+                .file_url
+                .as_ref()
+                .is_some_and(|url| !url.trim().is_empty())
+    }
+
+    fn is_error(&self) -> bool {
+        matches!(self.status.as_str(), "error" | "abort" | "failed")
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum PollEnvelope {
+    Wrapped { request: ImagineStatus },
+    Flat(ImagineStatus),
+}
+
+impl PollEnvelope {
+    fn into_status(self) -> ImagineStatus {
+        match self {
+            Self::Wrapped { request } => request,
+            Self::Flat(status) => status,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct ErrorBody {
+    error: serde_json::Value,
+}
+
+#[derive(Debug, Deserialize)]
+struct MessageBody {
+    #[serde(default)]
+    success: Option<bool>,
+    #[serde(default)]
+    message: Option<String>,
+}
+
+#[derive(Clone, Debug)]
+struct BlockadeClient {
+    http: reqwest::blocking::Client,
+    base_url: String,
+    api_key: String,
+}
+
+impl BlockadeClient {
+    fn new(api_key: Option<String>, base_url: impl Into<String>) -> Result<Self> {
+        let api_key = api_key
+            .or_else(|| std::env::var("BLOCKADE_API_KEY").ok())
+            .ok_or(SkyboxError::MissingApiKey)?;
+
+        Ok(Self {
+            http: reqwest::blocking::Client::new(),
+            base_url: base_url.into().trim_end_matches('/').to_string(),
+            api_key,
+        })
+    }
+
+    fn submit(&self, request: &GenerateSkyboxRequest) -> Result<ImagineCreated> {
+        self.post_json("skybox", request)
+    }
+
+    fn poll(&self, id: u64) -> Result<ImagineStatus> {
+        let envelope: PollEnvelope = self.get_json(&format!("imagine/requests/{id}"))?;
+        Ok(envelope.into_status())
+    }
+
+    fn download(&self, url: &str) -> Result<Vec<u8>> {
+        let response = self.http.get(url).send()?;
+        let status = response.status();
+        let bytes = response.bytes()?;
+        if !status.is_success() {
+            let body = String::from_utf8_lossy(&bytes);
+            return Err(parse_blockade_error(status, &body));
+        }
+        Ok(bytes.to_vec())
+    }
+
+    fn post_json<T, B>(&self, path: &str, body: &B) -> Result<T>
+    where
+        T: serde::de::DeserializeOwned,
+        B: serde::Serialize + ?Sized,
+    {
+        let response = self
+            .http
+            .post(format!(
+                "{}/{}",
+                self.base_url,
+                path.trim_start_matches('/')
+            ))
+            .header("x-api-key", &self.api_key)
+            .json(body)
+            .send()?;
+        Self::parse_response(response)
+    }
+
+    fn get_json<T>(&self, path: &str) -> Result<T>
+    where
+        T: serde::de::DeserializeOwned,
+    {
+        let response = self
+            .http
+            .get(format!(
+                "{}/{}",
+                self.base_url,
+                path.trim_start_matches('/')
+            ))
+            .header("x-api-key", &self.api_key)
+            .send()?;
+        Self::parse_response(response)
+    }
+
+    fn parse_response<T>(response: reqwest::blocking::Response) -> Result<T>
+    where
+        T: serde::de::DeserializeOwned,
+    {
+        let status = response.status();
+        let text = response.text()?;
+        if !status.is_success() {
+            return Err(parse_blockade_error(status, &text));
+        }
+        Ok(serde_json::from_str(&text)?)
+    }
+}
+
+fn parse_blockade_error(status: reqwest::StatusCode, body: &str) -> SkyboxError {
+    if status == reqwest::StatusCode::UNAUTHORIZED || body.contains("API key") {
+        return SkyboxError::Unauthorized(body.trim().to_string());
+    }
+
+    if let Ok(parsed) = serde_json::from_str::<ErrorBody>(body) {
+        let message = match parsed.error {
+            serde_json::Value::String(value) => value,
+            other => other.to_string(),
+        };
+        return SkyboxError::BadRequest(message);
+    }
+
+    if let Ok(parsed) = serde_json::from_str::<MessageBody>(body)
+        && (parsed.success == Some(false) || parsed.message.is_some())
+    {
+        return SkyboxError::BadRequest(parsed.message.unwrap_or_else(|| body.to_string()));
+    }
+
+    SkyboxError::BadRequest(body.trim().to_string())
+}
+
+fn equirect_to_stacked_cubemap(source: &RgbaImage, face_size: u32) -> RgbaImage {
+    let mut output = RgbaImage::new(face_size, face_size * 6);
+    for face in 0..6 {
+        for y in 0..face_size {
+            for x in 0..face_size {
+                let direction = cube_face_uv_to_direction(face, x, y, face_size);
+                let (u, v) = direction_to_equirect_uv(direction);
+                output.put_pixel(x, y + face * face_size, sample_equirect(source, u, v));
+            }
+        }
+    }
+    output
+}
+
+fn cube_face_uv_to_direction(face: u32, x: u32, y: u32, face_size: u32) -> Vec3 {
+    let s = 2.0 * ((x as f32 + 0.5) / face_size as f32) - 1.0;
+    let t = 2.0 * ((y as f32 + 0.5) / face_size as f32) - 1.0;
+    match face {
+        0 => Vec3::new(1.0, -t, -s).normalize(),
+        1 => Vec3::new(-1.0, -t, s).normalize(),
+        2 => Vec3::new(s, 1.0, t).normalize(),
+        3 => Vec3::new(s, -1.0, -t).normalize(),
+        4 => Vec3::new(s, -t, 1.0).normalize(),
+        _ => Vec3::new(-s, -t, -1.0).normalize(),
+    }
+}
+
+fn direction_to_equirect_uv(direction: Vec3) -> (f32, f32) {
+    let direction = direction.normalize();
+    let u = (0.5 + direction.z.atan2(direction.x) / std::f32::consts::TAU).fract();
+    let v = (direction.y.acos() / std::f32::consts::PI).clamp(0.0, 1.0);
+    (u, v)
+}
+
+fn sample_equirect(source: &RgbaImage, u: f32, v: f32) -> Rgba<u8> {
+    let width = source.width();
+    let height = source.height();
+    let x = u * width as f32 - 0.5;
+    let y = (v * (height.saturating_sub(1)) as f32).clamp(0.0, height.saturating_sub(1) as f32);
+    let x_floor = x.floor();
+    let y_floor = y.floor();
+    let x0 = wrap_pixel_x(x_floor as i32, width);
+    let x1 = wrap_pixel_x(x_floor as i32 + 1, width);
+    let y0 = y_floor as u32;
+    let y1 = (y0 + 1).min(height.saturating_sub(1));
+    let tx = x - x_floor;
+    let ty = y - y_floor;
+    let p00 = source.get_pixel(x0, y0);
+    let p10 = source.get_pixel(x1, y0);
+    let p01 = source.get_pixel(x0, y1);
+    let p11 = source.get_pixel(x1, y1);
+    let mut rgba = [0u8; 4];
+    for i in 0..4 {
+        let top = lerp(p00[i] as f32, p10[i] as f32, tx);
+        let bottom = lerp(p01[i] as f32, p11[i] as f32, tx);
+        rgba[i] = lerp(top, bottom, ty).round().clamp(0.0, 255.0) as u8;
+    }
+    Rgba(rgba)
+}
+
+fn wrap_pixel_x(x: i32, width: u32) -> u32 {
+    let width = width as i32;
+    x.rem_euclid(width) as u32
+}
+
+fn lerp(a: f32, b: f32, t: f32) -> f32 {
+    a + (b - a) * t
+}
+
+fn sanitize_name(input: &str) -> String {
+    let mut name: String = input
+        .chars()
+        .flat_map(char::to_lowercase)
+        .map(|ch| if ch.is_ascii_alphanumeric() { ch } else { '_' })
+        .collect();
+    while name.contains("__") {
+        name = name.replace("__", "_");
+    }
+    let name = name.trim_matches('_').to_string();
+    if name.is_empty() {
+        format!("skybox_{}", Utc::now().timestamp())
+    } else {
+        name.chars().take(64).collect()
     }
 }
 

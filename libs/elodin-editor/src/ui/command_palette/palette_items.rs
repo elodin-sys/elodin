@@ -17,7 +17,9 @@ use bevy::{
     prelude::{Deref, DerefMut, Entity, In, MessageWriter, Mut, Resource, Transform},
     window::PrimaryWindow,
 };
-use bevy_ai_skybox::prelude::{SetActiveSkybox, SkyboxCache};
+use bevy_ai_skybox::prelude::{
+    GenerateSkybox, SetActiveSkybox, SkyboxCache, SkyboxGenerationSettings,
+};
 use bevy_editor_cam::controller::{component::EditorCam, motion::CurrentMotion};
 use bevy_geo_frames::GeoContext;
 use bevy_infinite_grid::InfiniteGrid;
@@ -1159,12 +1161,9 @@ fn activate_skybox() -> PaletteItem {
         "Activate Skybox...",
         SKYBOX_LABEL,
         |_: In<String>, cache: Res<SkyboxCache>| {
-            if cache.manifest.entries.is_empty() {
-                return PaletteEvent::Error("No skyboxes found in manifest".into());
-            }
-
             let active = cache.active.as_deref();
-            let mut items = Vec::with_capacity(cache.manifest.entries.len());
+            let mut items = Vec::with_capacity(cache.manifest.entries.len() + 1);
+            items.push(create_skybox());
             for entry in &cache.manifest.entries {
                 let name = entry.name.clone();
                 let label = if active == Some(name.as_str()) {
@@ -1188,6 +1187,52 @@ fn activate_skybox() -> PaletteItem {
                 .into_event()
         },
     )
+}
+
+fn generate_skybox() -> PaletteItem {
+    PaletteItem::new("Generate Skybox...", SKYBOX_LABEL, |_: In<String>| {
+        PalettePage::new(vec![generate_skybox_from_prompt()])
+            .label("Generate Skybox")
+            .prompt("Describe a new skybox...")
+            .into_event()
+    })
+}
+
+fn create_skybox() -> PaletteItem {
+    PaletteItem::new("Create New Skybox...", SKYBOX_LABEL, |_: In<String>| {
+        PalettePage::new(vec![generate_skybox_from_prompt()])
+            .label("Create Skybox")
+            .prompt("Describe a new skybox...")
+            .into_event()
+    })
+}
+
+fn generate_skybox_from_prompt() -> PaletteItem {
+    PaletteItem::new(
+        LabelSource::placeholder("Describe a new skybox..."),
+        SKYBOX_LABEL,
+        |In(prompt): In<String>,
+         settings: Option<Res<SkyboxGenerationSettings>>,
+         mut skyboxes: MessageWriter<GenerateSkybox>| {
+            let prompt = prompt.trim();
+            if prompt.is_empty() {
+                return PaletteEvent::Error("Prompt cannot be empty".into());
+            }
+            let Some(settings) = settings else {
+                return PaletteEvent::Error("Skybox generation plugin is not installed".into());
+            };
+            if settings.api_key.is_none() {
+                return PaletteEvent::Error("Set BLOCKADE_API_KEY to generate a skybox".into());
+            }
+
+            skyboxes.write(GenerateSkybox {
+                prompt: prompt.to_string(),
+                ..Default::default()
+            });
+            PaletteEvent::Exit
+        },
+    )
+    .default()
 }
 
 fn create_object_3d_with_color(eql: String, expr: eql::Expr, mesh: Mesh) -> PaletteEvent {
@@ -1566,6 +1611,7 @@ impl Default for PalettePage {
             load_schematic(),
             clear_schematic(),
             activate_skybox(),
+            generate_skybox(),
             set_color_scheme_mode(),
             set_color_scheme(),
             PaletteItem::new("Documentation", HELP_LABEL, |_: In<String>| {
