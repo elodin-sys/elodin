@@ -84,11 +84,13 @@ A schematic document is a `.kdl` file. The following top-level nodes are recogni
 | `window` | Secondary window descriptor (`path`, `title`, `screen`, `screen_rect`) |
 | `theme` | Color scheme / mode (`scheme`, `mode`) |
 | `timeline` | Timeline appearance (`played_color`, `future_color`, `follow_latest`) |
+| `skybox` | Cached skybox activation (`name`) |
 
 ### Example
 
 ```kdl
 theme mode="dark" scheme="elodin"
+skybox name="alien_swamp"
 
 window path="motor-panel.kdl" title="Motors" screen=1
 window path="rate-control-panel.kdl" title="Rate Control"
