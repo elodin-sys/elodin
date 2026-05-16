@@ -29,7 +29,7 @@ fn sensor_camera_config() -> SensorCameraConfig {
         frustums_color: color(0.0, 1.0, 0.4, 0.4),
         projection_color: color(0.0, 1.0, 0.4, 0.1),
         frustums_thickness: 0.008,
-        fps: 30.0,
+        fps: 60.0,
     }
 }
 

@@ -112,20 +112,22 @@ struct SensorEncoder {
 }
 
 impl SensorEncoder {
-    fn new(width: u32, height: u32, fps: u32) -> Result<Self, Error> {
-        let fps = fps.max(1);
-        let target_bitrate = (width as u64)
-            .saturating_mul(height as u64)
-            .saturating_mul(fps as u64)
-            .saturating_mul(3)
-            .clamp(300_000, 12_000_000) as u32;
+    fn new(width: u32, height: u32, fps: f32) -> Result<Self, Error> {
+        let fps = if fps.is_finite() && fps > 0.0 {
+            fps
+        } else {
+            1.0
+        };
+        let keyframe_interval = (fps.ceil() as u32).max(1).saturating_mul(2);
+        let target_bitrate = ((width as f64) * (height as f64) * (fps as f64) * 3.0)
+            .clamp(300_000.0, 12_000_000.0) as u32;
         let config = EncoderConfig::new()
             .bitrate(BitRate::from_bps(target_bitrate))
             .skip_frames(false)
-            .max_frame_rate(FrameRate::from_hz(fps as f32))
+            .max_frame_rate(FrameRate::from_hz(fps))
             .rate_control_mode(RateControlMode::Off)
             .sps_pps_strategy(SpsPpsStrategy::ConstantId)
-            .intra_frame_period(IntraFramePeriod::from_num_frames(fps.saturating_mul(2)));
+            .intra_frame_period(IntraFramePeriod::from_num_frames(keyframe_interval));
         let encoder = Encoder::with_api_config(OpenH264API::from_source(), config)
             .map_err(|e| invalid_data(format!("openh264 encoder init: {}", e)))?;
         Ok(Self { encoder })
@@ -136,6 +138,14 @@ impl SensorEncoder {
             .encode(yuv)
             .map(|bitstream| bitstream.to_vec())
             .map_err(|e| invalid_data(format!("openh264 encode: {}", e)))
+    }
+}
+
+fn sensor_camera_export_fps(cfg: &SensorCameraConfig, default_fps: u32) -> f32 {
+    if cfg.fps.is_finite() && cfg.fps > 0.0 {
+        cfg.fps
+    } else {
+        default_fps.max(1) as f32
     }
 }
 
@@ -254,13 +264,13 @@ fn export_one_sensor(
 
     let width = cfg.width;
     let height = cfg.height;
-    let fps = default_fps.max(1) as f64;
+    let fps = sensor_camera_export_fps(cfg, default_fps);
     let safe_name = safe_output_name(name);
     let mp4_path = output_path.join(format!("{}.mp4", safe_name));
     let file = File::create(&mp4_path)?;
-    let mut encoder = SensorEncoder::new(width, height, default_fps)?;
+    let mut encoder = SensorEncoder::new(width, height, fps)?;
     let mut muxer = MuxerBuilder::new(file)
-        .video(VideoCodec::H264, width, height, fps)
+        .video(VideoCodec::H264, width, height, f64::from(fps))
         .with_fast_start(true)
         .build()
         .map_err(|e| invalid_data(format!("muxide: {}", e)))?;
@@ -320,7 +330,7 @@ fn export_one_sensor(
         "    Exported {} ({} frames, {} fps, fast-start)",
         mp4_path.display(),
         encoded_count,
-        fps
+        f64::from(fps)
     );
     Ok(true)
 }
@@ -471,6 +481,49 @@ pub fn run(
 mod tests {
     use super::*;
     use openh264::formats::YUVSource;
+
+    fn color(r: f32, g: f32, b: f32, a: f32) -> impeller2_wkt::Color {
+        impeller2_wkt::Color { r, g, b, a }
+    }
+
+    fn sensor_camera_config(fps: f32) -> SensorCameraConfig {
+        SensorCameraConfig {
+            entity_name: "drone".to_string(),
+            camera_name: "drone.fpv".to_string(),
+            width: 32,
+            height: 32,
+            fov_degrees: 90.0,
+            near: 0.02,
+            far: 100.0,
+            pos_offset: [0.0; 3],
+            rot_offset: [0.0; 3],
+            format: "rgba".to_string(),
+            effect: "normal".to_string(),
+            effect_params: HashMap::new(),
+            create_frustum: false,
+            show_ellipsoids: false,
+            frustums_color: color(0.0, 1.0, 0.4, 0.4),
+            projection_color: color(0.0, 1.0, 0.4, 0.1),
+            frustums_thickness: 0.008,
+            fps,
+        }
+    }
+
+    #[test]
+    fn sensor_camera_export_fps_prefers_valid_config() {
+        assert_eq!(
+            sensor_camera_export_fps(&sensor_camera_config(60.0), 30),
+            60.0
+        );
+        assert_eq!(
+            sensor_camera_export_fps(&sensor_camera_config(0.0), 30),
+            30.0
+        );
+        assert_eq!(
+            sensor_camera_export_fps(&sensor_camera_config(f32::NAN), 30),
+            30.0
+        );
+    }
 
     #[test]
     fn rgba_to_i420_known_colors() {
