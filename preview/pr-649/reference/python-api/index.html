@@ -781,7 +781,7 @@ and running the simulation. The <code>World</code> object also provides helper m
 </ul>
 </li>
 <li>
-<p><code>sensor_camera(entity, name, width, height, fov=90.0, near=0.01, far=1000.0, pos_offset=[0,0,0], look_at_offset=[0,0,-1], format="rgba", effect="normal", effect_params={}, create_frustum=False, show_ellipsoids=False, frustums_color=None, projection_color=None, frustums_thickness=0.006, fps=30.0)</code> -&gt; None</p>
+<p><code>sensor_camera(entity, name, width, height, fov=90.0, near=0.01, far=1000.0, pos_offset=[0,0,0], rot_offset=[0,0,0], format="rgba", effect="normal", effect_params={}, create_frustum=False, show_ellipsoids=False, frustums_color=None, projection_color=None, frustums_thickness=0.006, fps=30.0)</code> -&gt; None</p>
 <p>Register a virtual sensor camera on an entity. The headless GPU render-server emits one frame per camera every <code>1 / fps</code> µs of simulation time and pushes the bytes back to the database. The simulation reads frames asynchronously with <code>ctx.read_msg("entity.name", timestamp=...)</code>.</p>
 <ul>
 <li><code>entity</code> : <a href="https://docs.elodin.systems/preview/pr-649/reference/python-api/#class-elodin-entityid">elodin.EntityId</a>, the entity the camera is attached to.</li>
@@ -791,15 +791,15 @@ and running the simulation. The <code>World</code> object also provides helper m
 <li><code>fov</code> : <code>float</code>, vertical field of view in degrees, defaults to <code>90.0</code>.</li>
 <li><code>near</code> : <code>float</code>, near clipping plane, defaults to <code>0.01</code>.</li>
 <li><code>far</code> : <code>float</code>, far clipping plane, defaults to <code>1000.0</code>.</li>
-<li><code>pos_offset</code> : <code>list[float]</code>, camera position offset from the entity origin in the entity's body frame, defaults to <code>[0, 0, 0]</code>.</li>
-<li><code>look_at_offset</code> : <code>list[float]</code>, look-at direction offset in the entity's body frame, defaults to <code>[0, 0, -1]</code>.</li>
+<li><code>pos_offset</code> : <code>list[float]</code>, body-frame translation from the entity origin in metres, defaults to <code>[0, 0, 0]</code>. Applied first.</li>
+<li><code>rot_offset</code> : <code>list[float]</code>, body-frame rotation as <code>[roll, pitch, yaw]</code> in <strong>degrees</strong> (intrinsic X/Y/Z, aerospace convention), defaults to <code>[0, 0, 0]</code> (camera looks along body +X with body +Z as up). Applied around the camera's own axes after <code>pos_offset</code> and inherits the entity's attitude — when the host banks, the camera image banks with it.</li>
 <li><code>format</code> : <code>string</code>, pixel format, defaults to <code>"rgba"</code>.</li>
 <li><code>effect</code> : <code>string</code>, GPU post-process effect: <code>"normal"</code>, <code>"thermal"</code>, <code>"night_vision"</code>, or <code>"depth"</code>. Defaults to <code>"normal"</code>.</li>
 <li><code>effect_params</code> : <code>dict</code>, effect-specific parameters (e.g., <code>{"contrast": 1.5, "noise_sigma": 0.02}</code> for thermal).</li>
 <li><code>show_ellipsoids</code> : <code>bool</code>, render ellipsoid debug objects in this sensor camera. Defaults to <code>False</code>.</li>
 <li><code>fps</code> : <code>float</code>, target rendering rate in frames per second of sim time. The renderer treats this as a target — if the GPU cannot sustain it (e.g., several high-resolution cameras), frames are spaced further apart in sim time but the simulation never blocks. Defaults to <code>30.0</code>.</li>
 </ul>
-<p>The camera transform follows the entity: as the entity moves and rotates, the camera position and look-at point rotate with it in body frame.</p>
+<p>The camera transform follows the entity as a rigid body: as the entity moves and rotates, the camera mount position and orientation rotate with it in body frame.</p>
 <div class="el-notice warning container-fluid">
     <div class="row g-0 align-items-center">
         <div class="col-1" style="padding: 4px">
