@@ -15,6 +15,7 @@ DRONE_NAME = "drone"
 ELLIPSOID_SCALE = np.array([0.9, 0.9, 0.38], dtype=np.float64)
 DRONE_PATH_RADIUS = np.array([0.12, 0.08, 0.03], dtype=np.float64)
 DRONE_PATH_RATE = 0.35
+DRONE_WOBBLE_RATE = 1.8
 
 
 def world() -> tuple[el.World, el.EntityId]:
@@ -51,9 +52,9 @@ def world() -> tuple[el.World, el.EntityId]:
         format="rgba",
         fps=SENSOR_CAMERA_FPS,
         create_frustum=True,
-        frustums_color=[1.0, 0.0, 1.0, 1.0],
-        projection_color=[1.0, 0.0, 1.0, 1.0],
-        frustums_thickness=0.008,
+        frustums_color=[1.0, 0.0, 0.0, 1.0],
+        projection_color=[1.0, 0.0, 0.0, 0.35],
+        frustums_thickness=0.004,
     )
 
     object_mesh = f"""
@@ -116,6 +117,7 @@ def _quat_from_euler(roll: float, pitch: float, yaw: float) -> np.ndarray:
 def pre_step(tick, ctx):
     t = tick / SIM_RATE
     angle = t * DRONE_PATH_RATE
+    wobble = t * DRONE_WOBBLE_RATE
     pos = np.array(
         [
             DRONE_PATH_RADIUS[0] * np.sin(angle),
@@ -124,9 +126,9 @@ def pre_step(tick, ctx):
         ],
         dtype=np.float64,
     )
-    roll = 0.18 * np.sin(angle * 1.9)
-    pitch = 0.12 * np.sin(angle * 1.4 + 0.4)
-    yaw = angle + 0.35 * np.sin(angle * 0.5)
+    roll = 0.55 * np.sin(wobble)
+    pitch = 0.38 * np.sin(wobble * 0.8 + 0.4)
+    yaw = angle + 0.6 * np.sin(wobble * 0.55)
     quat = _quat_from_euler(roll, pitch, yaw)
 
     ctx.write_component(
