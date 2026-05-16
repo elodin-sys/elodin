@@ -8,6 +8,7 @@ use bevy::{
     prelude::*,
     window::{Monitor, PrimaryWindow, Window, WindowPosition},
 };
+use bevy_ai_skybox::prelude::PrimarySkybox;
 use bevy_editor_cam::{
     controller::{component::Sensitivity, zoom::ZoomLimits},
     prelude::{EditorCam, OrbitConstraint},
@@ -1576,6 +1577,7 @@ impl ViewportPane {
         ));
 
         camera.insert(Bloom { ..default() });
+        camera.insert(PrimarySkybox);
         camera.insert(EnvironmentMapLight {
             diffuse_map: asset_server.load("embedded://elodin_editor/assets/diffuse.ktx2"),
             specular_map: asset_server.load("embedded://elodin_editor/assets/specular.ktx2"),

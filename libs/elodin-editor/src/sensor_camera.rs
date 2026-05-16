@@ -33,6 +33,7 @@ use bevy::{
         view::ViewTarget,
     },
 };
+use bevy_ai_skybox::prelude::PrimarySkybox;
 use impeller2::types::ComponentId;
 use impeller2_wkt::DbConfig;
 pub use impeller2_wkt::SensorCameraConfig;
@@ -470,6 +471,7 @@ fn spawn_sensor_cameras(
             GlobalTransform::default(),
             #[cfg(feature = "big_space")]
             crate::spatial::GridCell::default(),
+            PrimarySkybox,
             SensorCamera { config_index: i },
             SensorEffectSettings {
                 effect_type,
