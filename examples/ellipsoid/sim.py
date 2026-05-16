@@ -46,7 +46,7 @@ def world() -> tuple[el.World, el.EntityId]:
         near=0.01,
         far=0.35,
         pos_offset=[0.0, -0.08, 0.08],
-        look_at_offset=[0.0, 0.55, 0.02],
+        rot_offset=[-5.4, 0.0, 90.0],
         format="rgba",
         create_frustum=True,
         frustums_color=[1.0, 0.0, 1.0, 1.0],

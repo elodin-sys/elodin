@@ -319,7 +319,7 @@ impl WorldBuilder {
         near = 0.01,
         far = 1000.0,
         pos_offset = vec![0.0, 0.0, 0.0],
-        look_at_offset = vec![0.0, 0.0, -1.0],
+        rot_offset = vec![0.0, 0.0, 0.0],
         format = "rgba",
         effect = "normal",
         effect_params = None,
@@ -340,7 +340,7 @@ impl WorldBuilder {
         near: f32,
         far: f32,
         pos_offset: Vec<f64>,
-        look_at_offset: Vec<f64>,
+        rot_offset: Vec<f64>,
         format: &str,
         effect: &str,
         effect_params: Option<&Bound<'_, PyDict>>,
@@ -396,11 +396,21 @@ impl WorldBuilder {
             *pos_offset.get(1).unwrap_or(&0.0),
             *pos_offset.get(2).unwrap_or(&0.0),
         ];
-        let look_off = [
-            *look_at_offset.first().unwrap_or(&0.0),
-            *look_at_offset.get(1).unwrap_or(&0.0),
-            *look_at_offset.get(2).unwrap_or(&-1.0),
-        ];
+        if rot_offset.len() != 3 {
+            return Err(crate::error::Error::PyO3(
+                pyo3::exceptions::PyValueError::new_err(
+                    "sensor_camera rot_offset must be a 3-element list [roll, pitch, yaw] in degrees",
+                ),
+            ));
+        }
+        if !rot_offset.iter().all(|v| v.is_finite()) {
+            return Err(crate::error::Error::PyO3(
+                pyo3::exceptions::PyValueError::new_err(
+                    "sensor_camera rot_offset must contain finite values",
+                ),
+            ));
+        }
+        let rot_off = [rot_offset[0], rot_offset[1], rot_offset[2]];
         if frustums_thickness <= 0.0 {
             return Err(crate::error::Error::PyO3(
                 pyo3::exceptions::PyValueError::new_err(
@@ -450,7 +460,7 @@ impl WorldBuilder {
                 near,
                 far,
                 pos_offset: pos_off,
-                look_at_offset: look_off,
+                rot_offset: rot_off,
                 format: format.to_string(),
                 effect: effect.to_string(),
                 effect_params: parsed_effect_params,

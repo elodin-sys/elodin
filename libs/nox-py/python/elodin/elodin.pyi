@@ -203,7 +203,7 @@ class WorldBuilder:
         near: float = 0.01,
         far: float = 1000.0,
         pos_offset: Sequence[float] = (0.0, 0.0, 0.0),
-        look_at_offset: Sequence[float] = (0.0, 0.0, -1.0),
+        rot_offset: Sequence[float] = (0.0, 0.0, 0.0),
         format: str = "rgba",
         effect: str = "normal",
         effect_params: Optional[dict[str, float]] = None,
@@ -220,12 +220,22 @@ class WorldBuilder:
         second of simulation time. Frames can be read with
         ``StepContext.read_msg("entity.camera_name", timestamp=...)``.
 
+        ``pos_offset`` is a body-frame translation in metres. ``rot_offset`` is
+        ``[roll, pitch, yaw]`` in degrees, applied around the camera's body axes
+        in intrinsic X/Y/Z order after the translation. With the default
+        ``rot_offset=(0, 0, 0)``, the camera looks along body +X with body +Z up.
+
+        Examples: forward ``(0, 0, 0)``, 15 degrees nose-down
+        ``(0, -15, 0)``, 30 degrees right bank ``(30, 0, 0)``, 90 degrees left
+        yaw ``(0, 0, 90)``.
+
         The simulation never blocks on rendering. Pick the apparent camera
         latency at read time by reading with a timestamp offset:
 
             frame = ctx.read_msg("drone.scene_cam", timestamp=ctx.timestamp - 33_000)
 
-        Raises ``ValueError`` if ``fps`` is not a positive finite number.
+        Raises ``ValueError`` if ``rot_offset`` is not a finite 3-element
+        sequence or if ``fps`` is not a positive finite number.
         """
         ...
     def run(

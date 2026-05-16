@@ -88,7 +88,7 @@ world.sensor_camera(
     fov=90.0,                  # Field of view (degrees)
     fps=60.0,                  # Frames per second of sim time (default 30)
     pos_offset=[0, 0, 0.5],    # Body-frame offset from entity origin
-    look_at_offset=[6, 6, 0],  # Body-frame look-at direction
+    rot_offset=[0, 0, 45],     # Body-frame [roll, pitch, yaw] in degrees
     format="rgba",             # Pixel format
     effect="normal",           # "normal", "thermal", "night_vision", "depth"
     effect_params={},          # Effect-specific parameters
@@ -97,8 +97,12 @@ world.sensor_camera(
 )
 ```
 
-The camera transform is computed every frame from the entity's `world_pos` plus the offsets, both rotated into the entity's body frame. As the entity moves and rotates, the camera follows.
+The camera transform is computed every frame from the entity's `world_pos` plus the mount pose. As the entity moves and rotates, the camera follows as a rigid body.
 Sensor camera frustums are drawn in viewports with `show_frustums=#true` and use the same coverage/projection controls as viewport frustums.
+
+#### Camera mount pose
+
+`pos_offset` translates the camera from the entity origin in body-frame metres. `rot_offset` then rotates the mounted camera in body-frame degrees as `[roll, pitch, yaw]` with intrinsic X/Y/Z order. The default `[0, 0, 0]` looks along body +X with body +Z as image up, so banking the host entity banks the camera image too.
 
 #### Reading frames in post_step
 
@@ -218,7 +222,7 @@ This pattern gives you deterministic, reproducible testing of the full sensor st
 | `near` | float | 0.01 | Near clipping plane |
 | `far` | float | 1000.0 | Far clipping plane |
 | `pos_offset` | [f64; 3] | [0,0,0] | Camera position offset in entity body frame |
-| `look_at_offset` | [f64; 3] | [0,0,-1] | Look-at target offset in entity body frame |
+| `rot_offset` | [f64; 3] | [0,0,0] | Body-frame `[roll, pitch, yaw]` rotation in degrees |
 | `format` | str | "rgba" | Pixel format (`"rgba"`) |
 | `effect` | str | "normal" | Post-process effect |
 | `effect_params` | dict | {} | Effect-specific parameters |

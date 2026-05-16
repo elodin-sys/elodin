@@ -105,9 +105,14 @@ impl Plugin for HeadlessEditorPlugin {
                     impeller2_bevy::apply_cached_data,
                     crate::object_3d::update_object_3d_system,
                     crate::sync_object_3d,
+                    // `sync_pos` writes `WorldPos` into `GeoPosition`/`GeoRotation`;
+                    // the geo systems below propagate those into `Transform`. Running
+                    // them in this order keeps each tick's plane pose in lock-step
+                    // with the sensor camera's pose (which reads the TelemetryCache
+                    // directly), preventing one-frame jitter in `sensor_view`.
+                    sync_pos,
                     bevy_geo_frames::apply_geo_rotation,
                     bevy_geo_frames::big_space::apply_big_translation::<i128>,
-                    sync_pos,
                 )
                     .chain()
                     .after(impeller2_bevy::sink)

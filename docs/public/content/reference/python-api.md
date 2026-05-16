@@ -52,7 +52,7 @@ The Elodin simulation world.
     Load a GLB asset as an Elodin Scene Archetype.
     - `url`: the URL or filepath of the GLB asset
 
-- `sensor_camera(entity, name, width, height, fov=90.0, near=0.01, far=1000.0, pos_offset=[0,0,0], look_at_offset=[0,0,-1], format="rgba", effect="normal", effect_params={}, create_frustum=False, show_ellipsoids=False, frustums_color=None, projection_color=None, frustums_thickness=0.006, fps=30.0)` -> None
+- `sensor_camera(entity, name, width, height, fov=90.0, near=0.01, far=1000.0, pos_offset=[0,0,0], rot_offset=[0,0,0], format="rgba", effect="normal", effect_params={}, create_frustum=False, show_ellipsoids=False, frustums_color=None, projection_color=None, frustums_thickness=0.006, fps=30.0)` -> None
 
     Register a virtual sensor camera on an entity. The headless GPU render-server emits one frame per camera every `1 / fps` µs of simulation time and pushes the bytes back to the database. The simulation reads frames asynchronously with `ctx.read_msg("entity.name", timestamp=...)`.
 
@@ -63,15 +63,15 @@ The Elodin simulation world.
     - `fov` : `float`, vertical field of view in degrees, defaults to `90.0`.
     - `near` : `float`, near clipping plane, defaults to `0.01`.
     - `far` : `float`, far clipping plane, defaults to `1000.0`.
-    - `pos_offset` : `list[float]`, camera position offset from the entity origin in the entity's body frame, defaults to `[0, 0, 0]`.
-    - `look_at_offset` : `list[float]`, look-at direction offset in the entity's body frame, defaults to `[0, 0, -1]`.
+    - `pos_offset` : `list[float]`, body-frame translation from the entity origin in metres, defaults to `[0, 0, 0]`. Applied first.
+    - `rot_offset` : `list[float]`, body-frame rotation as `[roll, pitch, yaw]` in **degrees** (intrinsic X/Y/Z, aerospace convention), defaults to `[0, 0, 0]` (camera looks along body +X with body +Z as up). Applied around the camera's own axes after `pos_offset` and inherits the entity's attitude — when the host banks, the camera image banks with it.
     - `format` : `string`, pixel format, defaults to `"rgba"`.
     - `effect` : `string`, GPU post-process effect: `"normal"`, `"thermal"`, `"night_vision"`, or `"depth"`. Defaults to `"normal"`.
     - `effect_params` : `dict`, effect-specific parameters (e.g., `{"contrast": 1.5, "noise_sigma": 0.02}` for thermal).
     - `show_ellipsoids` : `bool`, render ellipsoid debug objects in this sensor camera. Defaults to `False`.
     - `fps` : `float`, target rendering rate in frames per second of sim time. The renderer treats this as a target — if the GPU cannot sustain it (e.g., several high-resolution cameras), frames are spaced further apart in sim time but the simulation never blocks. Defaults to `30.0`.
 
-    The camera transform follows the entity: as the entity moves and rotates, the camera position and look-at point rotate with it in body frame.
+    The camera transform follows the entity as a rigid body: as the entity moves and rotates, the camera mount position and orientation rotate with it in body frame.
 
     {% alert(kind="notice") %}
     Frames render continuously and are pushed to the DB automatically — there is no per-call render trigger. To simulate camera latency, read with a timestamp offset: `ctx.read_msg("drone.scene_cam", timestamp=ctx.timestamp - 33_000)` returns the frame as it would have appeared 33 ms ago.
