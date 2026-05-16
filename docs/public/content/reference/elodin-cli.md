@@ -748,7 +748,7 @@ elodin-db export ./my-database -o ./export --format csv --include-private
 
 ## `elodin-db export-videos`
 
-Export video message logs to MP4 files. This command reads H.264 video frames stored as timestamped messages in the database and muxes them into standards-compliant MP4 files (e.g. for playback in QuickTime, VLC, or other players).
+Export video message logs to MP4 files. This command supports both H.264 streams stored as timestamped Annex B payloads and `sensor_camera` streams stored as raw RGBA frames. H.264 streams are muxed directly into MP4; `sensor_camera` frames are encoded to H.264 during export and then muxed into standards-compliant MP4 files (e.g. for playback in QuickTime, VLC, or other players).
 
 **Usage:** `elodin-db export-videos [OPTIONS] --output <OUTPUT> <PATH>`
 
@@ -762,18 +762,19 @@ Export video message logs to MP4 files. This command reads H.264 video frames st
 
 * `--pattern <PATTERN>` — Filter message logs by name glob (e.g. `test-*`). If not set, all video message logs in the database are exported.
 
-* `--fps <FPS>` — Default frame rate when the H.264 stream’s SPS (Sequence Parameter Set) has no timing info.
+* `--fps <FPS>` — Default frame rate when the H.264 stream’s SPS (Sequence Parameter Set) has no timing info, or when a `sensor_camera` stream has invalid FPS metadata. Valid `sensor_camera` metadata uses the camera’s configured `fps`.
 
   Default value: `30`
 
 ###### **How video gets into the database**
 
-Video is stored in Elodin DB as **message logs**: each frame is a timestamped binary payload (H.264 NAL units in Annex B form). Typical ingestion paths:
+Video is stored in Elodin DB as **message logs**: each frame is a timestamped binary payload. H.264 video logs store Annex B NAL units; `sensor_camera` logs store raw RGBA frame buffers and rely on the database's `sensor_cameras` metadata for width, height, and FPS. Typical ingestion paths:
 
 - **GStreamer + elodinsink**: A GStreamer pipeline (e.g. `videotestsrc` → `x264enc` → `h264parse` → `elodinsink`) sends H.264 frames over TCP to the database. The `elodinsink` plugin uses a configurable message name (e.g. `test-video`) that becomes the log name. See the Video Streaming Example in the repository (`examples/video-stream/`) for a full setup.
+- **Sensor cameras**: `world.sensor_camera(...)` registers camera metadata and the headless render server writes raw RGBA frames into the database. `export-videos` detects these streams from `sensor_cameras` metadata and encodes them during export.
 - **Schematic**: A `video_stream "name"` entry in the schematic ties a video tile in the Elodin Editor to that message name; the same name is used when exporting with `export-videos`.
 
-Resolution and frame rate are read from the H.264 SPS in the first keyframe; no re-encoding is done. Output files use fast-start layout for web and player compatibility.
+For H.264 streams, resolution and frame rate are read from the SPS in the first keyframe and no re-encoding is done. For `sensor_camera` streams, resolution and frame rate come from the camera metadata and raw RGBA frames are encoded during export. Output files use fast-start layout for web and player compatibility.
 
 ###### **Example**
 

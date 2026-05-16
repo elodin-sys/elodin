@@ -5,13 +5,19 @@
 
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::Cursor;
+use std::io::{self, Cursor};
 use std::path::PathBuf;
 
 use glob::Pattern;
 use impeller2::types::{PacketId, msg_id};
+use impeller2_wkt::SensorCameraConfig;
 use muxide::api::{MuxerBuilder, VideoCodec};
 use muxide::codec::h264::is_h264_keyframe;
+use openh264::OpenH264API;
+use openh264::encoder::{
+    BitRate, Encoder, EncoderConfig, FrameRate, IntraFramePeriod, RateControlMode, SpsPpsStrategy,
+};
+use openh264::formats::{RgbaSliceU8, YUVBuffer};
 use scuffle_h264::Sps;
 
 use crate::msg_log::MsgLog;
@@ -23,6 +29,14 @@ const START_CODE_4: &[u8] = &[0x00, 0x00, 0x00, 0x01];
 const START_CODE_3: &[u8] = &[0x00, 0x00, 0x01];
 /// SPS NAL unit type.
 const NAL_TYPE_SPS: u8 = 7;
+
+fn invalid_data(message: impl Into<String>) -> Error {
+    Error::Io(io::Error::new(io::ErrorKind::InvalidData, message.into()))
+}
+
+fn safe_output_name(name: &str) -> String {
+    name.replace([std::path::MAIN_SEPARATOR, '/'], "_")
+}
 
 /// Find the first SPS NAL unit in Annex B payload.
 /// Returns the NAL unit bytes (including the NAL header byte), without the start code.
@@ -70,17 +84,82 @@ fn find_sps_nal(payload: &[u8]) -> Option<&[u8]> {
     None
 }
 
-/// Export a single message log to an MP4 file.
-fn export_one(
+/// Convert one packed RGBA frame into the I420 layout expected by OpenH264.
+fn rgba_to_i420(payload: &[u8], width: usize, height: usize) -> Result<YUVBuffer, Error> {
+    if !width.is_multiple_of(2) || !height.is_multiple_of(2) {
+        return Err(invalid_data(format!(
+            "sensor camera dimensions must be even for I420: {}x{}",
+            width, height
+        )));
+    }
+    let expected_bytes = width
+        .checked_mul(height)
+        .and_then(|pixels| pixels.checked_mul(4))
+        .ok_or_else(|| invalid_data("sensor camera frame dimensions overflow"))?;
+    if payload.len() != expected_bytes {
+        return Err(invalid_data(format!(
+            "unexpected sensor camera frame size {} (expected {})",
+            payload.len(),
+            expected_bytes
+        )));
+    }
+    let rgba = RgbaSliceU8::new(payload, (width, height));
+    Ok(YUVBuffer::from_rgb_source(rgba))
+}
+
+struct SensorEncoder {
+    encoder: Encoder,
+}
+
+impl SensorEncoder {
+    fn new(width: u32, height: u32, fps: f32) -> Result<Self, Error> {
+        let fps = if fps.is_finite() && fps > 0.0 {
+            fps
+        } else {
+            1.0
+        };
+        let keyframe_interval = (fps.ceil() as u32).max(1).saturating_mul(2);
+        let target_bitrate = ((width as f64) * (height as f64) * (fps as f64) * 3.0)
+            .clamp(300_000.0, 12_000_000.0) as u32;
+        let config = EncoderConfig::new()
+            .bitrate(BitRate::from_bps(target_bitrate))
+            .skip_frames(false)
+            .max_frame_rate(FrameRate::from_hz(fps))
+            .rate_control_mode(RateControlMode::Off)
+            .sps_pps_strategy(SpsPpsStrategy::ConstantId)
+            .intra_frame_period(IntraFramePeriod::from_num_frames(keyframe_interval));
+        let encoder = Encoder::with_api_config(OpenH264API::from_source(), config)
+            .map_err(|e| invalid_data(format!("openh264 encoder init: {}", e)))?;
+        Ok(Self { encoder })
+    }
+
+    fn encode_frame(&mut self, yuv: &YUVBuffer) -> Result<Vec<u8>, Error> {
+        self.encoder
+            .encode(yuv)
+            .map(|bitstream| bitstream.to_vec())
+            .map_err(|e| invalid_data(format!("openh264 encode: {}", e)))
+    }
+}
+
+fn sensor_camera_export_fps(cfg: &SensorCameraConfig, default_fps: u32) -> f32 {
+    if cfg.fps.is_finite() && cfg.fps > 0.0 {
+        cfg.fps
+    } else {
+        default_fps.max(1) as f32
+    }
+}
+
+/// Export a single H.264 Annex B message log to an MP4 file.
+fn export_one_h264(
     msg_log: &MsgLog,
     name: &str,
     output_path: &std::path::Path,
     default_fps: u32,
-) -> Result<(), Error> {
+) -> Result<bool, Error> {
     let timestamps = msg_log.timestamps();
     if timestamps.is_empty() {
         eprintln!("  {}: no frames, skipping", name);
-        return Ok(());
+        return Ok(false);
     }
 
     let mut sps_bytes: Option<&[u8]> = None;
@@ -96,7 +175,7 @@ fn export_one(
         Some(b) => b,
         None => {
             eprintln!("  {}: no SPS NAL found in first frames, skipping", name);
-            return Ok(());
+            return Ok(false);
         }
     };
 
@@ -110,7 +189,7 @@ fn export_one(
     let height = sps.height() as u32;
     let fps = sps.frame_rate().unwrap_or(default_fps as f64);
 
-    let safe_name = name.replace([std::path::MAIN_SEPARATOR, '/'], "_");
+    let safe_name = safe_output_name(name);
     let mp4_path = output_path.join(format!("{}.mp4", safe_name));
     let file = File::create(&mp4_path)?;
     let mut muxer = MuxerBuilder::new(file)
@@ -166,7 +245,107 @@ fn export_one(
         frame_count,
         fps
     );
-    Ok(())
+    Ok(true)
+}
+
+/// Export a raw RGBA sensor-camera message log by encoding it to H.264 first.
+fn export_one_sensor(
+    msg_log: &MsgLog,
+    name: &str,
+    output_path: &std::path::Path,
+    cfg: &SensorCameraConfig,
+    default_fps: u32,
+) -> Result<bool, Error> {
+    let timestamps = msg_log.timestamps();
+    if timestamps.is_empty() {
+        eprintln!("  {}: no frames, skipping", name);
+        return Ok(false);
+    }
+
+    let width = cfg.width;
+    let height = cfg.height;
+    let fps = sensor_camera_export_fps(cfg, default_fps);
+    let safe_name = safe_output_name(name);
+    let mp4_path = output_path.join(format!("{}.mp4", safe_name));
+    let file = File::create(&mp4_path)?;
+    let mut encoder = SensorEncoder::new(width, height, fps)?;
+    let mut muxer = MuxerBuilder::new(file)
+        .video(VideoCodec::H264, width, height, f64::from(fps))
+        .with_fast_start(true)
+        .build()
+        .map_err(|e| invalid_data(format!("muxide: {}", e)))?;
+
+    let first_ts = timestamps[0];
+    let mut encoded_count = 0usize;
+    let mut skipped_count = 0usize;
+    for &ts in timestamps {
+        let Some(payload) = msg_log.get(ts) else {
+            continue;
+        };
+        let yuv = match rgba_to_i420(payload, width as usize, height as usize) {
+            Ok(yuv) => yuv,
+            Err(e) => {
+                eprintln!("  {}: skipping frame at {}: {}", name, ts.0, e);
+                skipped_count += 1;
+                continue;
+            }
+        };
+        let annexb = encoder.encode_frame(&yuv)?;
+        if annexb.is_empty() {
+            continue;
+        }
+        let pts_secs = (ts.0 - first_ts.0) as f64 / 1_000_000.0;
+        let keyframe = is_h264_keyframe(&annexb);
+        muxer
+            .write_video(pts_secs, &annexb, keyframe)
+            .map_err(|e| invalid_data(format!("muxide write_video: {}", e)))?;
+        encoded_count += 1;
+    }
+
+    if encoded_count == 0 {
+        eprintln!("  {}: no valid sensor_camera frames, skipping", name);
+        drop(muxer);
+        let _ = std::fs::remove_file(&mp4_path);
+        return Ok(false);
+    }
+
+    let _stats = muxer
+        .finish_with_stats()
+        .map_err(|e| invalid_data(format!("muxide finish: {}", e)))?;
+
+    let frame_count = timestamps.len();
+    let duration_secs = if frame_count > 0 {
+        (timestamps[frame_count - 1].0 - first_ts.0) as f64 / 1_000_000.0
+    } else {
+        0.0
+    };
+    println!(
+        "  {}: {} frames, {:.1}s, {}x{} (sensor_camera, encoded)",
+        name, encoded_count, duration_secs, width, height
+    );
+    if skipped_count > 0 {
+        println!("    Skipped {} malformed frame(s)", skipped_count);
+    }
+    println!(
+        "    Exported {} ({} frames, {} fps, fast-start)",
+        mp4_path.display(),
+        encoded_count,
+        f64::from(fps)
+    );
+    Ok(true)
+}
+
+fn export_one(
+    msg_log: &MsgLog,
+    name: &str,
+    output_path: &std::path::Path,
+    default_fps: u32,
+    sensor_cfg: Option<&SensorCameraConfig>,
+) -> Result<bool, Error> {
+    match sensor_cfg {
+        Some(cfg) => export_one_sensor(msg_log, name, output_path, cfg, default_fps),
+        None => export_one_h264(msg_log, name, output_path, default_fps),
+    }
 }
 
 /// Build a mapping from msg PacketId to friendly name by scanning the
@@ -242,11 +421,32 @@ pub fn run(
             .map(video_name_map_from_schematic)
             .unwrap_or_default();
 
-        let mut video_logs: Vec<(String, &MsgLog)> = Vec::new();
+        let sensor_cameras: Vec<SensorCameraConfig> =
+            match state.db_config.metadata.get("sensor_cameras") {
+                Some(json) => match serde_json::from_str(json) {
+                    Ok(cameras) => cameras,
+                    Err(e) => {
+                        eprintln!("Warning: failed to parse sensor_cameras metadata: {}", e);
+                        Vec::new()
+                    }
+                },
+                None => Vec::new(),
+            };
+        let sensor_by_msg_id: HashMap<PacketId, SensorCameraConfig> = sensor_cameras
+            .into_iter()
+            .map(|camera| (msg_id(&camera.camera_name), camera))
+            .collect();
+
+        let mut video_logs: Vec<(PacketId, String, &MsgLog)> = Vec::new();
         for (packet_id, msg_log) in state.msg_logs.iter() {
             let name: String = msg_log
                 .metadata()
                 .map(|m| m.name.clone())
+                .or_else(|| {
+                    sensor_by_msg_id
+                        .get(packet_id)
+                        .map(|camera| camera.camera_name.clone())
+                })
                 .or_else(|| schematic_names.get(packet_id).cloned())
                 .unwrap_or_else(|| format!("msg-{}", u16::from_le_bytes(*packet_id)));
             if let Some(ref pat) = glob_pattern
@@ -254,15 +454,20 @@ pub fn run(
             {
                 continue;
             }
-            video_logs.push((name, msg_log));
+            video_logs.push((*packet_id, name, msg_log));
         }
         println!("Found {} video stream(s)", video_logs.len());
         let mut count = 0;
-        for (name, msg_log) in video_logs {
-            if let Err(e) = export_one(msg_log, &name, &output_path, fps) {
-                eprintln!("  {}: error: {}", name, e);
-            } else {
-                count += 1;
+        for (packet_id, name, msg_log) in video_logs {
+            let sensor_cfg = sensor_by_msg_id.get(&packet_id);
+            match export_one(msg_log, &name, &output_path, fps, sensor_cfg) {
+                Ok(true) => {
+                    count += 1;
+                }
+                Ok(false) => {}
+                Err(e) => {
+                    eprintln!("  {}: error: {}", name, e);
+                }
             }
         }
         count
@@ -270,4 +475,83 @@ pub fn run(
     println!();
     println!("Export complete: {} video(s) exported", exported);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use openh264::formats::YUVSource;
+
+    fn color(r: f32, g: f32, b: f32, a: f32) -> impeller2_wkt::Color {
+        impeller2_wkt::Color { r, g, b, a }
+    }
+
+    fn sensor_camera_config(fps: f32) -> SensorCameraConfig {
+        SensorCameraConfig {
+            entity_name: "drone".to_string(),
+            camera_name: "drone.fpv".to_string(),
+            width: 32,
+            height: 32,
+            fov_degrees: 90.0,
+            near: 0.02,
+            far: 100.0,
+            pos_offset: [0.0; 3],
+            rot_offset: [0.0; 3],
+            format: "rgba".to_string(),
+            effect: "normal".to_string(),
+            effect_params: HashMap::new(),
+            create_frustum: false,
+            show_ellipsoids: false,
+            frustums_color: color(0.0, 1.0, 0.4, 0.4),
+            projection_color: color(0.0, 1.0, 0.4, 0.1),
+            frustums_thickness: 0.008,
+            fps,
+        }
+    }
+
+    #[test]
+    fn sensor_camera_export_fps_prefers_valid_config() {
+        assert_eq!(
+            sensor_camera_export_fps(&sensor_camera_config(60.0), 30),
+            60.0
+        );
+        assert_eq!(
+            sensor_camera_export_fps(&sensor_camera_config(0.0), 30),
+            30.0
+        );
+        assert_eq!(
+            sensor_camera_export_fps(&sensor_camera_config(f32::NAN), 30),
+            30.0
+        );
+    }
+
+    #[test]
+    fn rgba_to_i420_known_colors() {
+        let cases = [
+            ([0, 0, 0, 255], 16, 128, 128),
+            ([255, 255, 255, 255], 235, 128, 128),
+            ([255, 0, 0, 255], 81, 90, 239),
+            ([0, 255, 0, 255], 144, 54, 34),
+            ([0, 0, 255, 255], 40, 239, 110),
+        ];
+        for (pixel, y, u, v) in cases {
+            let frame = pixel.repeat(4);
+            let yuv = rgba_to_i420(&frame, 2, 2).expect("rgba_to_i420");
+            assert_eq!(yuv.y(), [y, y, y, y]);
+            assert_eq!(yuv.u(), [u]);
+            assert_eq!(yuv.v(), [v]);
+        }
+    }
+
+    #[test]
+    fn rgba_to_i420_dimensions() {
+        let width = 6;
+        let height = 4;
+        let frame = vec![128; width * height * 4];
+        let yuv = rgba_to_i420(&frame, width, height).expect("rgba_to_i420");
+        assert_eq!(yuv.dimensions(), (width, height));
+        assert_eq!(yuv.y().len(), width * height);
+        assert_eq!(yuv.u().len(), width * height / 4);
+        assert_eq!(yuv.v().len(), width * height / 4);
+    }
 }

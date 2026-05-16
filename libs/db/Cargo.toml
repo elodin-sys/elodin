@@ -22,7 +22,7 @@ eula = false
 default = ["axum", "parquet", "video-export"]
 axum = ["dep:axum", "dep:axum-streams", "dep:serde_json", "dep:tokio"]
 parquet = ["dep:parquet"]
-video-export = ["dep:muxide", "dep:scuffle-h264"]
+video-export = ["dep:muxide", "dep:scuffle-h264", "dep:openh264", "dep:serde_json"]
 tracy = ["dep:tracing-tracy"]
 
 [dependencies]
@@ -30,7 +30,7 @@ tracy = ["dep:tracing-tracy"]
 impeller2.path = "../impeller2"
 impeller2.features = ["std"]
 impeller2-wkt.path = "../impeller2/wkt"
-impeller2-wkt.features = ["nox"]
+impeller2-wkt.features = ["gui"]
 impeller2-cli.path = "cli"
 serde.version = "1.0"
 serde.features = ["derive"]
@@ -118,6 +118,7 @@ reflink-copy = "0.1.28"
 
 # video export
 muxide = { workspace = true, optional = true }
+openh264 = { version = "0.8", optional = true }
 scuffle-h264 = { version = "0.2", optional = true }
 
 [[bin]]
@@ -143,6 +144,10 @@ path = "tests_query/prim_types_fixture_goldie.rs"
 [[test]]
 name = "csv_export_goldie"
 path = "tests_query/csv_export_goldie.rs"
+
+[[test]]
+name = "sensor_camera_export"
+path = "tests_query/sensor_camera_export.rs"
 
 [dev-dependencies]
 goldie = "0.6"
