@@ -532,12 +532,33 @@ fn log_skybox_outcomes(
 mod tests {
     use super::*;
 
+    fn bundled_manifest() -> SkyboxManifest {
+        ron::from_str(include_str!("../../../assets/skyboxes/manifest.ron")).unwrap()
+    }
+
     #[test]
     fn bundled_manifest_parses() {
-        let manifest: SkyboxManifest =
-            ron::from_str(include_str!("../../../assets/skyboxes/manifest.ron")).unwrap();
+        let manifest = bundled_manifest();
 
         assert_eq!(manifest.version, 2);
         assert!(manifest.get("mojave_desert").is_some());
+        assert!(manifest.get("alien_swamp").is_some());
+    }
+
+    #[test]
+    fn rc_jet_uses_bundled_skybox() {
+        let manifest = bundled_manifest();
+        let rc_jet = include_str!("../../../examples/rc-jet/main.py");
+        let skybox_name = rc_jet
+            .lines()
+            .map(str::trim)
+            .find_map(|line| {
+                line.strip_prefix("skybox name=\"")
+                    .and_then(|name| name.strip_suffix('"'))
+            })
+            .expect("rc-jet schematic should request a skybox");
+
+        assert_eq!(skybox_name, "alien_swamp");
+        assert!(manifest.get(skybox_name).is_some());
     }
 }

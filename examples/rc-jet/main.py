@@ -105,7 +105,7 @@ def setup_world(config: BDXConfig) -> tuple[el.World, el.EntityId, el.EntityId]:
     # Create schematic for visualization
     world.schematic(
         """
-        skybox name="mojave_desert"
+        skybox name="alien_swamp"
 
         tabs {
             hsplit name="Main View" {

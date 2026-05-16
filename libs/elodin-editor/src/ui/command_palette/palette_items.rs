@@ -17,6 +17,7 @@ use bevy::{
     prelude::{Deref, DerefMut, Entity, In, MessageWriter, Mut, Resource, Transform},
     window::PrimaryWindow,
 };
+use bevy_ai_skybox::prelude::{SetActiveSkybox, SkyboxCache};
 use bevy_editor_cam::controller::{component::EditorCam, motion::CurrentMotion};
 use bevy_geo_frames::GeoContext;
 use bevy_infinite_grid::InfiniteGrid;
@@ -253,6 +254,7 @@ const SIMULATION_LABEL: &str = "Simulation";
 const TIME_LABEL: &str = "Time";
 const HELP_LABEL: &str = "Help";
 const PRESETS_LABEL: &str = "Presets";
+const SKYBOX_LABEL: &str = "Skybox";
 
 struct ViewportEntry {
     label: String,
@@ -1152,6 +1154,42 @@ pub fn set_color_scheme_mode() -> PaletteItem {
     })
 }
 
+fn activate_skybox() -> PaletteItem {
+    PaletteItem::new(
+        "Activate Skybox...",
+        SKYBOX_LABEL,
+        |_: In<String>, cache: Res<SkyboxCache>| {
+            if cache.manifest.entries.is_empty() {
+                return PaletteEvent::Error("No skyboxes found in manifest".into());
+            }
+
+            let active = cache.active.as_deref();
+            let mut items = Vec::with_capacity(cache.manifest.entries.len());
+            for entry in &cache.manifest.entries {
+                let name = entry.name.clone();
+                let label = if active == Some(name.as_str()) {
+                    format!("{name} (active)")
+                } else {
+                    name.clone()
+                };
+                items.push(PaletteItem::new(
+                    label,
+                    SKYBOX_LABEL,
+                    move |_: In<String>, mut skyboxes: MessageWriter<SetActiveSkybox>| {
+                        skyboxes.write(SetActiveSkybox::ByName(name.clone()));
+                        PaletteEvent::Exit
+                    },
+                ));
+            }
+
+            PalettePage::new(items)
+                .label("Activate Skybox")
+                .prompt("Select a skybox...")
+                .into_event()
+        },
+    )
+}
+
 fn create_object_3d_with_color(eql: String, expr: eql::Expr, mesh: Mesh) -> PaletteEvent {
     PalettePage::new(vec![
         PaletteItem::new(
@@ -1527,6 +1565,7 @@ impl Default for PalettePage {
             save_schematic_db(),
             load_schematic(),
             clear_schematic(),
+            activate_skybox(),
             set_color_scheme_mode(),
             set_color_scheme(),
             PaletteItem::new("Documentation", HELP_LABEL, |_: In<String>| {
