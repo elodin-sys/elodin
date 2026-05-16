@@ -9,6 +9,7 @@ import jax.numpy as jnp
 import numpy as np
 
 SIM_RATE = 120.0
+SENSOR_CAMERA_FPS = SIM_RATE / 4.0
 SENSOR_CAMERA_NAME = "drone.scene_cam"
 DRONE_NAME = "drone"
 ELLIPSOID_SCALE = np.array([0.9, 0.9, 0.38], dtype=np.float64)
@@ -48,6 +49,7 @@ def world() -> tuple[el.World, el.EntityId]:
         pos_offset=[0.0, -0.08, 0.08],
         rot_offset=[-5.4, 0.0, 90.0],
         format="rgba",
+        fps=SENSOR_CAMERA_FPS,
         create_frustum=True,
         frustums_color=[1.0, 0.0, 1.0, 1.0],
         projection_color=[1.0, 0.0, 1.0, 1.0],
@@ -138,7 +140,7 @@ def pre_step(tick, ctx):
 
 def post_step(tick, ctx):
     if tick % 4 == 0:
-        ctx.render_camera(SENSOR_CAMERA_NAME)
+        ctx.read_msg(SENSOR_CAMERA_NAME)
 
     # Exercise StepContext historical read: pull the current world_pos and the
     # value from one tick earlier. The pre_step writes a fresh world_pos every
