@@ -137,6 +137,38 @@ class StepContext:
         Use this to control the freshness of the database and ensure reliable data from a known tick.
         """
         ...
+    def read_msg(
+        self,
+        msg_name: str,
+        timestamp: Optional[int] = None,
+    ) -> Optional[Any]:
+        """Read a message payload from the database as a numpy uint8 array.
+
+        Used to read sensor camera frames produced by the headless render server,
+        which pushes frames to the DB at each camera's configured ``fps``.
+
+        Args:
+            msg_name: The message name (e.g., ``"drone.scene_cam"``).
+            timestamp: Optional timestamp (microseconds since epoch). When ``None``
+                       (the default) returns the most recent message. When provided,
+                       returns the message with the greatest timestamp ``<=`` the
+                       requested one (floor / sample-and-hold semantics). If the
+                       requested timestamp is past the most recent message the
+                       latest message is returned.
+
+        Returns:
+            NumPy ``uint8`` array containing the message payload, or ``None`` if
+            no message exists at or before the requested timestamp (or no message
+            exists at all).
+        """
+        ...
+    def stop_recipes(self) -> None:
+        """Gracefully terminate all s10-managed recipes (external processes).
+
+        Signals every recipe registered via ``world.recipe()`` to shut down.
+        No-op if no recipes were registered or if running with ``--no-s10``.
+        """
+        ...
 
 class ComponentType:
     def __init__(self, ty: PrimitiveType, shape: Tuple[int, ...]): ...
@@ -161,6 +193,41 @@ class WorldBuilder:
         name: Optional[str] = None,
     ) -> EntityId: ...
     def insert(self, id: EntityId, archetypes: Archetype | Sequence[Archetype]): ...
+    def sensor_camera(
+        self,
+        entity: EntityId,
+        name: str,
+        width: int,
+        height: int,
+        fov: float = 90.0,
+        near: float = 0.01,
+        far: float = 1000.0,
+        pos_offset: Sequence[float] = (0.0, 0.0, 0.0),
+        look_at_offset: Sequence[float] = (0.0, 0.0, -1.0),
+        format: str = "rgba",
+        effect: str = "normal",
+        effect_params: Optional[dict[str, float]] = None,
+        create_frustum: bool = False,
+        show_ellipsoids: bool = False,
+        frustums_color: Optional[Sequence[float]] = None,
+        projection_color: Optional[Sequence[float]] = None,
+        frustums_thickness: float = 0.006,
+        fps: float = 30.0,
+    ) -> None:
+        """Register a virtual sensor camera on an entity.
+
+        The headless render server emits frames into the DB at ``fps`` frames per
+        second of simulation time. Frames can be read with
+        ``StepContext.read_msg("entity.camera_name", timestamp=...)``.
+
+        The simulation never blocks on rendering. Pick the apparent camera
+        latency at read time by reading with a timestamp offset:
+
+            frame = ctx.read_msg("drone.scene_cam", timestamp=ctx.timestamp - 33_000)
+
+        Raises ``ValueError`` if ``fps`` is not a positive finite number.
+        """
+        ...
     def run(
         self,
         system: System,

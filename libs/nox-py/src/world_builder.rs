@@ -328,6 +328,7 @@ impl WorldBuilder {
         frustums_color = None,
         projection_color = None,
         frustums_thickness = 0.006,
+        fps = 30.0,
     ))]
     fn sensor_camera(
         &mut self,
@@ -348,6 +349,7 @@ impl WorldBuilder {
         frustums_color: Option<Vec<f32>>,
         projection_color: Option<Vec<f32>>,
         frustums_thickness: f32,
+        fps: f32,
     ) -> Result<(), crate::error::Error> {
         if name.chars().any(|c| c.is_whitespace()) {
             return Err(crate::error::Error::PyO3(
@@ -406,6 +408,13 @@ impl WorldBuilder {
                 ),
             ));
         }
+        if !(fps > 0.0 && fps.is_finite()) {
+            return Err(crate::error::Error::PyO3(
+                pyo3::exceptions::PyValueError::new_err(format!(
+                    "sensor_camera fps must be a positive finite number, got {fps}"
+                )),
+            ));
+        }
 
         let color_from_vec = |value: Option<Vec<f32>>,
                               default_color: impeller2_wkt::Color,
@@ -458,6 +467,7 @@ impl WorldBuilder {
                     "projection_color",
                 )?,
                 frustums_thickness,
+                fps,
             });
 
         Ok(())
@@ -585,16 +595,6 @@ impl WorldBuilder {
                 // Clone cancel tokens for each closure that needs it
                 let pre_step_cancel_token = recipe_cancel_token.clone();
                 let post_step_cancel_token = recipe_cancel_token.clone();
-                // Shared persistent render bridge client for sensor cameras.
-                // Created lazily on first render_camera() call, reused across all ticks.
-                let render_client: crate::step_context::SharedRenderClient =
-                    std::sync::Arc::new(std::sync::Mutex::new(None));
-                let pre_step_render_client = render_client.clone();
-                let post_step_render_client = render_client;
-                let frame_db_writer: crate::step_context::SharedFrameDbWriter =
-                    std::sync::Arc::new(std::sync::Mutex::new(None));
-                let pre_step_frame_db_writer = frame_db_writer.clone();
-                let post_step_frame_db_writer = frame_db_writer;
                 let db_server = elodin_db::Server::new(&db_path, addr)
                     .map_err(|e| {
                         if matches!(&e, elodin_db::Error::Io(io) if io.kind() == std::io::ErrorKind::AddrInUse) {
@@ -655,8 +655,6 @@ impl WorldBuilder {
                                                         tick_count,
                                                         start_timestamp,
                                                         pre_step_cancel_token.clone(),
-                                                        pre_step_render_client.clone(),
-                                                        pre_step_frame_db_writer.clone(),
                                                     );
                                                     match Py::new(py, ctx) {
                                                         Ok(ctx_py) => {
@@ -696,8 +694,6 @@ impl WorldBuilder {
                                                         tick_count,
                                                         start_timestamp,
                                                         post_step_cancel_token.clone(),
-                                                        post_step_render_client.clone(),
-                                                        post_step_frame_db_writer.clone(),
                                                     );
                                                     match Py::new(py, ctx) {
                                                         Ok(ctx_py) => {

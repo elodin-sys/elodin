@@ -538,7 +538,7 @@ mod tests {
 
             // Write minimal schema
             let schema_data = [10u8, 0, 0, 0, 0, 0, 0, 0, 0];
-            fs::write(component_dir.join("schema"), &schema_data)?;
+            fs::write(component_dir.join("schema"), schema_data)?;
 
             // Write index with timestamps
             create_index_file(&component_dir.join("index"), *start_ts, timestamps);

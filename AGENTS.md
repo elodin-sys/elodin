@@ -10,6 +10,7 @@ Elodin is an open-source platform for rapid design, testing, and simulation of a
 - When suggesting new dependencies, check they are well supported and maintained.
 - Never use unsafe Rust code.
 - Run all activities from the repository root.
+- When running cargo test -p elodin-db, prevent crashing with flags: "CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 RAYON_NUM_THREADS=1"
 
 ## Quick Start
 

@@ -897,7 +897,7 @@ mod tests {
             metadata.write(component_dir.join("metadata"))?;
 
             let schema_data = [10u8, 0, 0, 0, 0, 0, 0, 0, 0];
-            fs::write(component_dir.join("schema"), &schema_data)?;
+            fs::write(component_dir.join("schema"), schema_data)?;
 
             create_index_file(&component_dir.join("index"), *start_ts, timestamps);
             create_data_file(&component_dir.join("data"), 8, timestamps.len());
@@ -906,10 +906,12 @@ mod tests {
         Ok(())
     }
 
+    type MsgLogSpec<'a> = (&'a str, &'a [i64], &'a [&'a [u8]]);
+
     fn create_test_db_with_msgs(
         dir: &Path,
         components: &[(&str, i64, &[i64])],
-        msg_logs: &[(&str, &[i64], &[&[u8]])],
+        msg_logs: &[MsgLogSpec<'_>],
     ) -> Result<(), Error> {
         create_test_db(dir, components)?;
 
@@ -1226,7 +1228,7 @@ mod tests {
                 "sensor.data",
                 base,
                 &[
-                    base + 0,
+                    base,
                     base + 1_000_000,
                     base + 2_000_000,
                     base + 3_000_000,
@@ -1277,7 +1279,7 @@ mod tests {
                 "sensor.data",
                 base,
                 &[
-                    base + 0,
+                    base,
                     base + 1_000_000,
                     base + 2_000_000,
                     base + 3_000_000,
@@ -1305,12 +1307,7 @@ mod tests {
 
         assert_eq!(
             timestamps,
-            vec![
-                base + 0,
-                base + 1_000_000,
-                base + 2_000_000,
-                base + 3_000_000,
-            ]
+            vec![base, base + 1_000_000, base + 2_000_000, base + 3_000_000,]
         );
     }
 

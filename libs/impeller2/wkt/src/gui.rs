@@ -847,6 +847,10 @@ fn default_format() -> String {
     "rgba".to_string()
 }
 
+fn default_fps() -> f32 {
+    30.0
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SensorCameraConfig {
     pub entity_name: String,
@@ -874,6 +878,10 @@ pub struct SensorCameraConfig {
     pub projection_color: Color,
     #[serde(default = "default_viewport_frustums_thickness")]
     pub frustums_thickness: f32,
+    /// Target rendering rate in frames per second of sim time. The headless
+    /// render server emits one frame per camera every `1 / fps` µs of sim time.
+    #[serde(default = "default_fps")]
+    pub fps: f32,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]

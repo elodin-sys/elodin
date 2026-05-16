@@ -1128,7 +1128,7 @@ mod tests {
 
             // Write minimal schema (F64 scalar)
             let schema_data = [10u8, 0, 0, 0, 0, 0, 0, 0, 0]; // PrimType::F64, dim=[]
-            fs::write(component_dir.join("schema"), &schema_data)?;
+            fs::write(component_dir.join("schema"), schema_data)?;
 
             // Write minimal index (header only)
             let index_data = vec![0u8; 24]; // Header: committed_len=0, head_len=0, extra=0
@@ -1641,7 +1641,7 @@ mod tests {
 
             // Write minimal schema (F64 scalar)
             let schema_data = [10u8, 0, 0, 0, 0, 0, 0, 0, 0];
-            fs::write(component_dir.join("schema"), &schema_data)?;
+            fs::write(component_dir.join("schema"), schema_data)?;
 
             // Write index with timestamps
             create_index_file(&component_dir.join("index"), *start_ts, timestamps);

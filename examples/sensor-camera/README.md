@@ -1,20 +1,15 @@
 # Sensor Camera Example
 
-This example demonstrates Elodin's **sensor camera** feature: synthetic camera imagery generated as first-class sensor data within a physics simulation. Virtual cameras are attached to simulation entities, rendered on demand by a headless GPU render-server, and returned as raw RGBA pixel arrays — ready to feed into vision-based flight software, SLAM pipelines, or any algorithm that consumes video frames.
+This example demonstrates Elodin's **sensor camera** feature: synthetic camera imagery generated as first-class sensor data within a physics simulation. Virtual cameras are attached to simulation entities, rendered continuously by a headless GPU render-server at a configured frame rate, and made available to flight software as raw RGBA pixel arrays in the DB.
 
 ## Overview
 
 Five colored balls bounce around a walled room under gravity. Two of them carry sensor cameras:
 
-- **Cyan ball** — RGB camera (640×480)
-- **Magenta ball** — Thermal camera (128×128, iron-bow colormap)
+- **Cyan ball** — RGB camera (640×480) at **60 fps**
+- **Magenta ball** — Thermal camera (128×128, iron-bow colormap) at **30 fps**
 
-The `post_step` callback demonstrates **both** render API styles:
-
-- **Every 4th tick (30 fps)** — `ctx.render_cameras()` batches both cameras in a single round-trip to the render-server.
-- **Every other 2nd tick (the 2nd ticks that aren't 4th ticks)** — `ctx.render_camera()` renders only the RGB camera, returning the frame directly as a numpy array.
-
-This means the RGB camera renders at 60 fps total (batch + single ticks) while the thermal camera renders at 30 fps (batch ticks only).
+The simulation never blocks on rendering. The render server runs as a sibling process (managed by `s10`), subscribes to the DB for live world state, and emits one frame per camera every `1 / fps` µs of sim time. The simulation reads frames with `ctx.read_msg(name, timestamp=...)`.
 
 The editor displays a 3D viewport alongside live sensor camera feeds using `sensor_view` panels.
 
@@ -41,32 +36,45 @@ just install
 elodin editor examples/sensor-camera/main.py
 ```
 
+For a headless run with an inspectable DB:
+
+```bash
+ELODIN_SENSOR_CAMERA_DB=dbs/sensor_camera_verify \
+ELODIN_SENSOR_CAMERA_MAX_TICKS=2400 \
+elodin run examples/sensor-camera/main.py
+```
+
+The example's final-tick verification block prints per-camera frame counts, observed FPS, and a historical-read sanity check.
+
 ## How It Works
 
 ### Architecture
 
-Sensor camera rendering runs in a **separate headless process** managed by s10. The simulation, render-server, and editor are three distinct processes:
+Sensor camera rendering runs in a **separate headless process** managed by s10. The simulation, render-server, and editor are three distinct processes, communicating exclusively through Elodin DB:
 
 ```
 Simulation (Python + nox-py)
   │
-  │  ctx.render_cameras(["..scene_cam", "..thermal_cam"])   ← batch
-  │  ctx.render_camera("..scene_cam")                       ← single
-  │    └─── UDS request ──▶  Render-Server (headless Bevy)
-  │                            • Receives RENDER / RENDER_BATCH request
-  │                            • Sets entity transforms to request timestamp
-  │                            • Runs app.update() (GPU render + readback)
-  │    ◄─── UDS response ──   • Returns RGBA pixel bytes
+  │  write components, bump db.last_updated
   │
-  │  Frame returned as numpy array to Python
-  │  Frame also written to DB for editor display
-  │
-  └──── DB (TCP) ────────▶  Editor (Bevy + Egui)
-                              • Receives frames via FixedRateMsgStream
-                              • Displays in sensor_view panels
+  └──── TCP ────────▶  Elodin DB
+                         ▲   │
+                         │   │  SubscribeLastUpdated (auto)
+                         │   │  + TelemetryCache stream
+                         │   ▼
+                       Render-Server (headless Bevy)
+                         • Receives LastUpdated(t)
+                         • For each camera with elapsed
+                           interval: renders at t, pushes
+                           MsgWithTimestamp(t, camera_name, rgba)
+                           back to DB
+
+Simulation reads frames from the DB:
+  ctx.read_msg("drone.scene_cam")                       # latest
+  ctx.read_msg("drone.scene_cam", timestamp=t - 33_000)  # 33 ms ago
 ```
 
-The blocking UDS round-trip ensures the simulation has the correct frame **before** advancing to the next tick — critical for SITL workflows where flight software needs the camera frame to compute the next control command.
+There is no UDS, no blocking call from Python into the renderer, and no "render this now" request — frame timing is purely configuration on the camera.
 
 ### Python API
 
@@ -78,8 +86,9 @@ world.sensor_camera(
     name="scene_cam",          # Becomes "drone.scene_cam" in the DB
     width=640, height=480,     # Resolution
     fov=90.0,                  # Field of view (degrees)
-    pos_offset=[0, 0, 0.5],   # Body-frame offset from entity origin
-    look_at_offset=[6, 6, 0], # Body-frame look-at direction
+    fps=60.0,                  # Frames per second of sim time (default 30)
+    pos_offset=[0, 0, 0.5],    # Body-frame offset from entity origin
+    look_at_offset=[6, 6, 0],  # Body-frame look-at direction
     format="rgba",             # Pixel format
     effect="normal",           # "normal", "thermal", "night_vision", "depth"
     effect_params={},          # Effect-specific parameters
@@ -88,33 +97,32 @@ world.sensor_camera(
 )
 ```
 
-The camera transform is computed each frame from the entity's `world_pos` plus the offsets, both rotated into the entity's body frame. As the entity moves and rotates, the camera follows.
+The camera transform is computed every frame from the entity's `world_pos` plus the offsets, both rotated into the entity's body frame. As the entity moves and rotates, the camera follows.
 Sensor camera frustums are drawn in viewports with `show_frustums=#true` and use the same coverage/projection controls as viewport frustums.
 
-#### Rendering in post_step
+#### Reading frames in post_step
 
-The example uses both render APIs in the same `post_step` callback:
+The renderer produces frames automatically. The sim only reads:
 
 ```python
 def post_step(tick, ctx):
-    # Every 4th tick: batch both cameras in one round-trip
-    if tick % 4 == 0:
-        ctx.render_cameras(["drone.scene_cam", "drone.thermal_cam"])
-        rgb = ctx.read_msg("drone.scene_cam")
-        thermal = ctx.read_msg("drone.thermal_cam")
+    # Latest frame the renderer has produced (may lag the current sim tick
+    # by ~1 / fps µs in the steady state).
+    rgb = ctx.read_msg("drone.scene_cam")
 
-    # Every other 2nd tick: single camera, frame returned directly
-    elif tick % 2 == 0:
-        frame = ctx.render_camera("drone.scene_cam")
-        if frame is not None:
-            rgba = np.asarray(frame).reshape(480, 640, 4)
+    # Pick the apparent camera latency at read time.
+    # Returns the frame with the greatest timestamp <= `timestamp`
+    # (floor / sample-and-hold). Past-the-end timestamps clamp to latest.
+    rgb_33ms_ago = ctx.read_msg(
+        "drone.scene_cam",
+        timestamp=ctx.timestamp - 33_000,
+    )
+
+    if rgb is not None:
+        rgba = np.asarray(rgb).reshape(480, 640, 4)
 ```
 
-**`render_cameras()`** renders multiple cameras in a single UDS round-trip. After it returns, use `ctx.read_msg()` to retrieve each frame from the database.
-
-**`render_camera()`** renders one camera and returns the frame directly as a numpy array — no separate read needed.
-
-Both calls block until the frame is ready, ensuring the simulation does not advance until the render-server has produced the requested frames.
+`read_msg` is a pure DB lookup — it never blocks the sim and never talks to the renderer.
 
 #### Displaying in the editor
 
@@ -140,21 +148,38 @@ The render-server applies optional GPU shader effects after the 3D render:
 world.sensor_camera(
     entity=drone, name="thermal_cam",
     width=128, height=128, fov=90.0,
+    fps=30.0,
     format="rgba",
     effect="thermal",
     effect_params={"contrast": 1.5, "noise_sigma": 0.02},
 )
 ```
 
+## Choosing FPS and latency
+
+`fps` is the only timing knob on the camera. The renderer paces its work off sim-time deltas, so:
+
+- In **real-time** mode (`generate_real_time=True`, the SITL/HITL default), `fps` maps directly to wall-clock fps.
+- In **non-real-time** mode, the renderer races the sim at GPU speed. If it can't keep up at the requested `fps`, frames are simply spaced farther apart in sim time. There is no backpressure on the sim.
+
+Apparent camera latency is **not** a config — it lives in the caller's `read_msg` argument:
+
+```python
+# Tight loop, no artificial latency:
+frame = ctx.read_msg("drone.scene_cam")
+
+# 33 ms of "camera latency" (one frame at 30 fps):
+frame = ctx.read_msg("drone.scene_cam", timestamp=ctx.timestamp - 33_000)
+
+# An entire pipeline of latency (sensor + ISP + transfer):
+frame = ctx.read_msg("drone.scene_cam", timestamp=ctx.timestamp - 80_000)
+```
+
+This is how a real camera behaves — the frame your flight software reads was captured some time before "now", and `read_msg(timestamp=…)` lets you dial that delay in to match the real hardware you're emulating.
+
 ## Pairing with Betaflight SITL
 
-The sensor camera feature is designed to complement the [Betaflight SITL example](../betaflight-sitl/) for comprehensive flight software testing. While the SITL example provides IMU, barometer, and magnetometer sensor data to Betaflight's flight controller, sensor cameras add **synthetic vision** — enabling simulation of vision-based algorithms that run alongside the flight controller.
-
-### The SITL + Vision Pattern
-
-In a real flight computer (like Elodin's Aleph), the flight controller and vision algorithms share the same hardware. The flight controller consumes IMU data at 8 kHz, while vision algorithms consume camera frames at 30-60 fps. Both produce outputs that affect the vehicle's behavior.
-
-The `post_step` callback is the integration point for all of this:
+The sensor camera feature is designed to complement the [Betaflight SITL example](../betaflight-sitl/) for comprehensive flight software testing. Sensor cameras add **synthetic vision** to the existing IMU/baro/mag sensor data, enabling simulation of vision-based algorithms that run alongside the flight controller.
 
 ```python
 def post_step(tick, ctx):
@@ -168,40 +193,16 @@ def post_step(tick, ctx):
     motors = betaflight_bridge.step(fdm, rc_packet)
     ctx.write_component("drone.motor_command", motors)
 
-    # 3. Render cameras and feed to vision algorithm
-    if tick % 2 == 0:  # 60 fps at 120 Hz sim
-        ctx.render_cameras(["drone.forward_cam", "drone.thermal_cam"])
-        rgb = ctx.read_msg("drone.forward_cam")
-        if rgb is not None:
-            rgba = np.asarray(rgb).reshape(480, 640, 4)
-            vision_result = run_vision_pipeline(rgba)
-            ctx.write_component("drone.vision_target", vision_result)
+    # 3. Read the latest camera frame for the vision pipeline.
+    #    Apply a 33 ms latency to match a 30 fps FPV camera.
+    rgb = ctx.read_msg("drone.forward_cam", timestamp=ctx.timestamp - 33_000)
+    if rgb is not None:
+        rgba = np.asarray(rgb).reshape(480, 640, 4)
+        vision_result = run_vision_pipeline(rgba)
+        ctx.write_component("drone.vision_target", vision_result)
 ```
 
-This pattern gives you deterministic, reproducible testing of the full sensor stack: IMU + camera + flight controller + vision algorithms — all synchronized tick-by-tick.
-
-### Why Blocking Matters
-
-`render_camera()` blocks the simulation until the frame is ready. This is intentional:
-
-1. **Determinism** — The same simulation produces the same frames every time. No race conditions between rendering and physics.
-2. **Correctness** — The frame shows the scene at exactly the current simulation timestamp. The vision algorithm sees what the camera would see at that instant.
-3. **SITL compatibility** — Flight software expects sensor data to arrive in order, at known timestamps. A frame from tick N must be available before tick N+1's control computation.
-
-### Performance Budget
-
-At a 120 Hz simulation with rendering every 2nd tick:
-
-| Operation | Time | Budget |
-|-----------|------|--------|
-| Physics tick | ~0.5 ms | |
-| Single render — `render_camera()` (RGB 640×480) | ~5-8 ms | |
-| Batch render — `render_cameras()` (RGB + thermal) | ~8-12 ms | |
-| **Per-tick budget** | **8.33 ms** | 1/120 s |
-
-Single-camera ticks fit within the per-tick budget. Batch ticks slightly exceed it, but the simulation catches up on non-render ticks. At steady state, the simulation maintains real-time pace. The batch approach avoids the overhead of two separate round-trips on dual-camera ticks.
-
-For higher-resolution cameras or more cameras, reduce the render frequency or lower `simulation_rate`.
+This pattern gives you deterministic, reproducible testing of the full sensor stack: IMU + camera + flight controller + vision algorithms.
 
 ## Configuration Reference
 
@@ -217,22 +218,25 @@ For higher-resolution cameras or more cameras, reduce the render frequency or lo
 | `near` | float | 0.01 | Near clipping plane |
 | `far` | float | 1000.0 | Far clipping plane |
 | `pos_offset` | [f64; 3] | [0,0,0] | Camera position offset in entity body frame |
-| `look_at_offset` | [f64; 3] | [0,0,0] | Look-at target offset in entity body frame |
+| `look_at_offset` | [f64; 3] | [0,0,-1] | Look-at target offset in entity body frame |
 | `format` | str | "rgba" | Pixel format (`"rgba"`) |
 | `effect` | str | "normal" | Post-process effect |
 | `effect_params` | dict | {} | Effect-specific parameters |
+| `fps` | float | 30.0 | Rendering rate in frames per second of sim time |
 | `create_frustum` | bool | false | Create this sensor camera as a frustum source for 3D viewports |
 | `show_ellipsoids` | bool | false | Render ellipsoid debug objects in this sensor camera |
 | `frustums_color` | [f32; 3/4] | yellow | Frustum color, normalized RGBA |
 | `projection_color` | [f32; 3/4] | white | 2D projection color, normalized RGBA |
 | `frustums_thickness` | float | 0.006 | Frustum edge radius in world units |
 
-### `ctx.render_camera()` / `ctx.render_cameras()`
+### `ctx.read_msg()`
 
-| Method | Returns | Description |
-|--------|---------|-------------|
-| `ctx.render_camera("name")` | `numpy.ndarray` or `None` | Render one camera, return RGBA bytes |
-| `ctx.render_cameras(["a", "b"])` | — | Render multiple cameras in one batch |
+| Argument | Type | Default | Description |
+|----------|------|---------|-------------|
+| `msg_name` | str | required | Message name (e.g. `"drone.scene_cam"`) |
+| `timestamp` | int | None | Optional sim time (µs). None ⇒ latest frame. Otherwise sample-and-hold: returns the frame with the greatest timestamp ≤ the requested one; past-the-end clamps to the latest. |
+
+Returns a NumPy `uint8` array containing the raw RGBA bytes, or `None` if no frame exists at or before the requested timestamp.
 
 ### KDL Schematic
 
