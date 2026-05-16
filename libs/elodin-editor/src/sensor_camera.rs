@@ -867,3 +867,24 @@ pub fn set_readback_armed(world: &mut World, camera_names: &[String], armed: boo
         }
     }
 }
+
+/// Toggle `Camera.is_active` for specific sensor cameras by name. Bevy's
+/// render extract skips inactive cameras, so flipping this off between
+/// scheduled frames prevents the GPU from rendering an unread scene on every
+/// polling iteration. Headless steady state is "all sensor cameras inactive";
+/// the render-server flips the due set on for each `render_and_emit` cycle
+/// and back off afterwards.
+pub fn set_cameras_active(world: &mut World, camera_names: &[String], active: bool) {
+    let configs = world.resource::<SensorCameraConfigs>();
+    let target_indices: Vec<usize> = camera_names
+        .iter()
+        .filter_map(|name| configs.0.iter().position(|c| &c.camera_name == name))
+        .collect();
+
+    let mut query = world.query::<(&SensorCamera, &mut Camera)>();
+    for (sensor, mut camera) in query.iter_mut(world) {
+        if target_indices.contains(&sensor.config_index) {
+            camera.is_active = active;
+        }
+    }
+}

@@ -37,7 +37,7 @@ use impeller2_wkt::{CurrentTimestamp, DbConfig, LastUpdated, SchematicElem};
 use crate::object_3d::create_object_3d_entity;
 use crate::sensor_camera::{
     HeadlessMode, SensorCamera, SensorCameraConfigs, SensorCameraPlugin, SensorCameraRenderMetrics,
-    SensorCamerasSpawned, set_readback_armed,
+    SensorCamerasSpawned, set_cameras_active, set_readback_armed,
 };
 use crate::{EqlContext, PositionSync, sync_pos};
 use bevy_geo_frames::GeoFramePlugin;
@@ -266,7 +266,10 @@ fn render_server_runner(mut app: App) -> AppExit {
     // Warm-up: pump updates until DB metadata arrives, sensor camera configs
     // are loaded, and sensor camera entities are spawned. Then run a few
     // priming cycles with readback armed so the GPU shader cache is warm
-    // before we start emitting frames.
+    // before we start emitting frames. Steady state after warm-up is "all
+    // sensor cameras inactive"; `render_and_emit` flips the due set on for
+    // each scheduled frame so we don't spend GPU time rendering scenes
+    // nobody is going to read.
     let mut cameras_warmed = false;
     for i in 0..120 {
         run_headless_update(&mut app);
@@ -279,6 +282,7 @@ fn render_server_runner(mut app: App) -> AppExit {
             }
             drain_stale_frames(&app);
             set_readback_armed(app.world_mut(), &names, false);
+            set_cameras_active(app.world_mut(), &names, false);
             tracing::info!(
                 "Sensor cameras spawned and primed after {i} warm-up cycles ({} cameras)",
                 names.len()
@@ -309,10 +313,14 @@ fn render_server_runner(mut app: App) -> AppExit {
         run_headless_update(&mut app);
 
         // If sensor cameras spawned only after the warm-up loop bailed out,
-        // pick them up now.
+        // pick them up now. We still briefly flip everything active so the
+        // pipelines exist, then drop back to inactive so the per-render
+        // gating in `render_and_emit` is the only source of truth.
         if !cameras_warmed && app.world().resource::<SensorCamerasSpawned>().0 {
             enable_all_sensor_cameras(app.world_mut());
             schedules = build_schedules(&app);
+            let names: Vec<String> = schedules.iter().map(|s| s.name.clone()).collect();
+            set_cameras_active(app.world_mut(), &names, false);
             cameras_warmed = true;
             tracing::info!(
                 "Sensor cameras late-spawned; render server now scheduling {} cameras",
@@ -373,13 +381,20 @@ fn render_server_runner(mut app: App) -> AppExit {
     }
 }
 
-/// Set the timestamp resource, arm readback, run one update cycle, collect
-/// frames, push them to the DB, and disarm.
+/// Set the timestamp resource, activate the due cameras, arm readback, run
+/// one update cycle, collect frames, push them to the DB, and tear down.
+///
+/// Activating only `due_names` keeps Bevy's render extract from issuing a 3D
+/// pass for cameras whose configured `fps` interval has not yet elapsed.
+/// Combined with `ReadbackArmed`, this means each `due` camera does one
+/// render plus one GPU->CPU copy per scheduled frame, and idle cameras cost
+/// nothing per polling iteration.
 fn render_and_emit(app: &mut App, sim_ts: Timestamp, due_names: &[String]) {
     app.world_mut().resource_mut::<CurrentTimestamp>().0 = sim_ts;
 
     // Drain any stale frames from the previous pass before arming.
     drain_stale_frames(app);
+    set_cameras_active(app.world_mut(), due_names, true);
     set_readback_armed(app.world_mut(), due_names, true);
 
     // The render-graph + GPU readback runs inside `app.update()`.
@@ -387,7 +402,9 @@ fn render_and_emit(app: &mut App, sim_ts: Timestamp, due_names: &[String]) {
 
     let mut frames = collect_frames(app, due_names);
     // The readback ping-pong may need one more update before all frames are
-    // mapped on slow GPUs / first runs after a warm reload.
+    // mapped on slow GPUs / first runs after a warm reload. We deliberately
+    // leave the cameras active for this retry — a rare second render is
+    // cheaper than wiring up readback-only updates.
     if frames.len() < due_names.len() {
         run_headless_update(app);
         let more = collect_frames(app, due_names);
@@ -400,6 +417,7 @@ fn render_and_emit(app: &mut App, sim_ts: Timestamp, due_names: &[String]) {
 
     push_frames_to_db(app, sim_ts, &frames);
     set_readback_armed(app.world_mut(), due_names, false);
+    set_cameras_active(app.world_mut(), due_names, false);
 }
 
 /// Push rendered frames to the DB as `MsgWithTimestamp` packets via the
