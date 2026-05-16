@@ -86,7 +86,7 @@ fn find_sps_nal(payload: &[u8]) -> Option<&[u8]> {
 
 /// Convert one packed RGBA frame into the I420 layout expected by OpenH264.
 fn rgba_to_i420(payload: &[u8], width: usize, height: usize) -> Result<YUVBuffer, Error> {
-    if width % 2 != 0 || height % 2 != 0 {
+    if !width.is_multiple_of(2) || !height.is_multiple_of(2) {
         return Err(invalid_data(format!(
             "sensor camera dimensions must be even for I420: {}x{}",
             width, height
