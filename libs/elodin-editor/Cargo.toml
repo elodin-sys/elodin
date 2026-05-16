@@ -169,9 +169,5 @@ image.features = ["png"]
 openh264 = "0.8"
 pic-scale = "0.6"
 
-# unix (headless sensor camera render bridge)
-[target.'cfg(unix)'.dependencies]
-render-bridge.path = "../render-bridge"
-
 [dev-dependencies]
 test-case = "*"

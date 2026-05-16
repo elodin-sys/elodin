@@ -2,61 +2,17 @@
 //! component data directly to the database without needing a separate TCP connection.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex};
-use std::time::Duration;
-
-/// Background worker that pushes rendered frames to the DB without blocking the
-/// simulation tick. Uses a bounded channel so the sim never blocks — if the
-/// worker is behind, the oldest unsent frame is dropped (editor skips a frame).
-pub struct FrameDbWriter {
-    tx: std::sync::mpsc::SyncSender<(impeller2::types::PacketId, Timestamp, Vec<u8>)>,
-}
-
-impl FrameDbWriter {
-    pub fn new(db: Arc<DB>) -> Self {
-        let (tx, rx) =
-            std::sync::mpsc::sync_channel::<(impeller2::types::PacketId, Timestamp, Vec<u8>)>(8);
-        std::thread::Builder::new()
-            .name("frame-db-writer".into())
-            .spawn(move || {
-                while let Ok((msg_id, ts, data)) = rx.recv() {
-                    let mut result = db.push_msg(ts, msg_id, &data);
-                    // Single writer per msg_id (this thread) makes truncate-then-push atomic for that log.
-                    if matches!(result.as_ref(), Err(elodin_db::Error::MapOverflow)) {
-                        db.truncate_msg_log(msg_id);
-                        result = db.push_msg(ts, msg_id, &data);
-                    }
-                    if let Err(e) = result {
-                        tracing::warn!("Background DB push failed: {e}");
-                    }
-                }
-            })
-            .expect("failed to spawn frame-db-writer thread");
-        Self { tx }
-    }
-
-    pub fn push(&self, msg_id: impeller2::types::PacketId, ts: Timestamp, data: Vec<u8>) {
-        let _ = self.tx.try_send((msg_id, ts, data));
-    }
-}
-
-/// Shared frame DB writer, created lazily alongside the render client.
-pub type SharedFrameDbWriter = Arc<Mutex<Option<FrameDbWriter>>>;
 
 use elodin_db::DB;
-use elodin_db::render_bridge::RenderBridgeClient;
 use impeller2::types::{ComponentId, PrimType, Timestamp};
 use numpy::{PyArray1, PyArrayDescrMethods, PyUntypedArray, PyUntypedArrayMethods};
 use pyo3::prelude::*;
-use pyo3::types::{PyDict, PyList};
+use pyo3::types::PyDict;
 use stellarator::util::CancelToken;
 
 use crate::Error;
-
-/// Shared persistent render bridge client.
-/// Created lazily on first render_camera() call, reused across all ticks.
-pub type SharedRenderClient = Arc<Mutex<Option<RenderBridgeClient>>>;
 
 /// Helper function to convert a byte buffer to a numpy array based on primitive type.
 fn buf_to_numpy_array<'py>(py: Python<'py>, buf: &[u8], prim_type: PrimType) -> Bound<'py, PyAny> {
@@ -149,14 +105,9 @@ pub struct StepContext {
     start_timestamp: Timestamp,
     /// Optional cancel token to gracefully terminate s10-managed recipes
     recipe_cancel_token: Option<CancelToken>,
-    /// Shared persistent render bridge client (created lazily on first render call)
-    render_client: SharedRenderClient,
-    /// Background writer that pushes rendered frames to DB without blocking the tick
-    frame_db_writer: SharedFrameDbWriter,
 }
 
 impl StepContext {
-    #[allow(clippy::too_many_arguments)]
     pub fn new(
         db: Arc<DB>,
         tick_counter: Arc<AtomicU64>,
@@ -164,8 +115,6 @@ impl StepContext {
         tick: u64,
         start_timestamp: Timestamp,
         recipe_cancel_token: Option<CancelToken>,
-        render_client: SharedRenderClient,
-        frame_db_writer: SharedFrameDbWriter,
     ) -> Self {
         Self {
             db,
@@ -174,65 +123,7 @@ impl StepContext {
             tick_counter,
             start_timestamp,
             recipe_cancel_token,
-            render_client,
-            frame_db_writer,
         }
-    }
-
-    /// Render cameras, push frames to DB, and optionally return the first frame.
-    /// When `return_first` is false the frame data is moved into the DB writer
-    /// without cloning (~1.2 MB saved per frame).
-    fn render_cameras_impl(
-        &self,
-        camera_names: &[&str],
-        return_first: bool,
-    ) -> Result<Option<Vec<u8>>, Error> {
-        if camera_names.is_empty() {
-            return Ok(None);
-        }
-
-        let timestamp = Timestamp(self.timestamp.load(Ordering::SeqCst));
-
-        let mut guard = self.render_client.lock().map_err(|_| {
-            Error::PyO3(pyo3::exceptions::PyRuntimeError::new_err(
-                "Render client lock poisoned",
-            ))
-        })?;
-
-        if guard.is_none() {
-            let client = RenderBridgeClient::connect(Duration::from_secs(30))
-                .map_err(|e| Error::PyO3(pyo3::exceptions::PyRuntimeError::new_err(e)))?;
-            *guard = Some(client);
-        }
-
-        let client = guard.as_mut().unwrap();
-        let frames = client
-            .render_cameras(camera_names, timestamp)
-            .map_err(|e| Error::PyO3(pyo3::exceptions::PyRuntimeError::new_err(e)))?;
-
-        // Push frames to DB, moving data to avoid cloning.  When
-        // return_first is set, clone only the very first frame's data.
-        let mut first_data = None;
-        {
-            let mut writer_guard = self.frame_db_writer.lock().map_err(|_| {
-                Error::PyO3(pyo3::exceptions::PyRuntimeError::new_err(
-                    "Frame DB writer lock poisoned",
-                ))
-            })?;
-            if writer_guard.is_none() {
-                *writer_guard = Some(FrameDbWriter::new(self.db.clone()));
-            }
-            let writer = writer_guard.as_ref().unwrap();
-            for (i, frame) in frames.into_iter().enumerate() {
-                let msg_id = impeller2::types::msg_id(&frame.camera_name);
-                if return_first && i == 0 {
-                    first_data = Some(frame.data.clone());
-                }
-                writer.push(msg_id, frame.timestamp, frame.data);
-            }
-        }
-
-        Ok(first_data)
     }
 }
 
@@ -371,31 +262,56 @@ impl StepContext {
         })
     }
 
-    /// Read the latest message payload from the database as a numpy byte array.
+    /// Read a message payload from the database as a numpy byte array.
     ///
-    /// This is used to read sensor camera frames that were written by the
-    /// editor/headless renderer as messages (via MsgWithTimestamp).
+    /// This is used to read sensor camera frames produced by the headless
+    /// render server (which pushes frames to the DB as `MsgWithTimestamp`
+    /// packets at each camera's configured `fps`).
     ///
     /// Args:
-    ///     msg_name: The message name (e.g., "ball.downward_cam")
+    ///     msg_name: The message name (e.g., "drone.scene_cam").
+    ///     timestamp: Optional timestamp (microseconds since epoch). When
+    ///                None (the default) returns the most recent message.
+    ///                When provided, returns the message with the greatest
+    ///                timestamp <= the requested one (floor / sample-and-hold
+    ///                semantics). If the requested timestamp is past the most
+    ///                recent message the latest message is returned.
     ///
     /// Returns:
-    ///     NumPy uint8 array containing the message payload, or None if no message exists
+    ///     NumPy uint8 array containing the message payload, or None if no
+    ///     message exists at or before the requested timestamp (or no message
+    ///     exists at all).
+    #[pyo3(signature = (msg_name, timestamp=None))]
     fn read_msg<'py>(
         &self,
         py: Python<'py>,
         msg_name: &str,
+        timestamp: Option<i64>,
     ) -> Result<Option<Bound<'py, PyAny>>, Error> {
         let msg_id = impeller2::types::msg_id(msg_name);
 
         self.db.with_state(|state| {
-            if let Some(msg_log) = state.get_msg_log(msg_id) {
-                if let Some((_timestamp, buf)) = msg_log.latest() {
-                    let data: Vec<u8> = buf.to_vec();
-                    Ok(Some(numpy::PyArray1::from_vec(py, data).into_any()))
-                } else {
-                    Ok(None)
+            let Some(msg_log) = state.get_msg_log(msg_id) else {
+                return Ok(None);
+            };
+            let entry = match timestamp {
+                None => msg_log.latest(),
+                Some(ts) => {
+                    let requested = Timestamp(ts);
+                    if msg_log
+                        .timestamps()
+                        .first()
+                        .is_some_and(|first| requested < *first)
+                    {
+                        None
+                    } else {
+                        msg_log.get_nearest(requested)
+                    }
                 }
+            };
+            if let Some((_ts, buf)) = entry {
+                let data: Vec<u8> = buf.to_vec();
+                Ok(Some(numpy::PyArray1::from_vec(py, data).into_any()))
             } else {
                 Ok(None)
             }
@@ -454,59 +370,6 @@ impl StepContext {
         if let Some(token) = &self.recipe_cancel_token {
             token.cancel();
         }
-    }
-
-    /// Trigger the headless Bevy renderer to render a sensor camera and block
-    /// until the frame is ready. Returns the frame bytes directly (and writes to DB for editor).
-    ///
-    /// Returns a numpy uint8 array of the RGBA frame, or None if no frame was produced.
-    /// Also writes the frame to the database so `read_msg(camera_name)` and the editor can use it.
-    ///
-    /// Args:
-    ///     camera_name: The sensor camera name in "entity.camera" format
-    ///                  (e.g., "drone.scene_cam")
-    ///
-    /// Returns:
-    ///     Optional numpy array (uint8) of the frame bytes (RGBA), or None.
-    ///
-    /// Raises:
-    ///     RuntimeError: If no render bridge is available (not running under
-    ///                   `elodin run` or `elodin editor`), if the bridge is
-    ///                   disconnected, or if the renderer does not respond
-    ///                   within 5 seconds.
-    fn render_camera<'py>(
-        &self,
-        py: Python<'py>,
-        camera_name: &str,
-    ) -> Result<Option<Bound<'py, PyAny>>, Error> {
-        let data = self.render_cameras_impl(&[camera_name], true)?;
-        Ok(data.map(|d| numpy::PyArray1::from_vec(py, d).into_any()))
-    }
-
-    /// Render multiple sensor cameras in a single batch request.
-    ///
-    /// This is more efficient than calling render_camera() multiple times when
-    /// you have multiple cameras, as it uses a single round-trip to the render
-    /// server and renders all cameras in one GPU frame.
-    ///
-    /// After this call returns, `read_msg(camera_name)` for each camera is
-    /// guaranteed to contain the rendered frame at the current simulation timestamp.
-    ///
-    /// Args:
-    ///     camera_names: List of sensor camera names in "entity.camera" format
-    ///                   (e.g., ["drone.scene_cam", "drone.thermal_cam"])
-    ///
-    /// Raises:
-    ///     RuntimeError: If no render bridge is available, if the bridge is
-    ///                   disconnected, or if the renderer does not respond.
-    fn render_cameras(&self, camera_names: &Bound<'_, PyList>) -> Result<(), Error> {
-        let names: Vec<String> = camera_names.extract().map_err(|e| {
-            Error::PyO3(pyo3::exceptions::PyValueError::new_err(format!(
-                "camera_names must be a list of strings: {e}"
-            )))
-        })?;
-        let name_refs: Vec<&str> = names.iter().map(|s| s.as_str()).collect();
-        self.render_cameras_impl(&name_refs, false).map(|_| ())
     }
 
     /// Perform multiple component reads and writes in a single DB operation.

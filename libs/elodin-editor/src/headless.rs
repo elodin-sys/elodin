@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::time::Duration;
 
 use bevy::{
@@ -28,28 +29,28 @@ use bevy::{
 use bevy_geo_frames::GeoContext;
 use bevy_mat3_material::Mat3Material;
 use big_space::{FloatingOrigin, GridCell};
+use impeller2::types::{LenPacket, Timestamp, msg_id};
+use impeller2_bevy::MsgPacketTx;
 use impeller2_kdl::FromKdl;
-use impeller2_wkt::{CurrentTimestamp, DbConfig, SchematicElem};
-use render_bridge::{BatchRenderRequest, RenderBridgeServer};
+use impeller2_wkt::{CurrentTimestamp, DbConfig, LastUpdated, SchematicElem};
 
 use crate::object_3d::create_object_3d_entity;
 use crate::sensor_camera::{
     HeadlessMode, SensorCamera, SensorCameraConfigs, SensorCameraPlugin, SensorCameraRenderMetrics,
-    SensorCamerasSpawned, set_readback_armed,
+    SensorCamerasSpawned, set_cameras_active, set_readback_armed,
 };
 use crate::{EqlContext, PositionSync, sync_pos};
 use bevy_geo_frames::GeoFramePlugin;
 
 /// A headless Bevy app dedicated to sensor camera rendering.
 ///
-/// Used by both `elodin run` (main thread) and `elodin editor` (background
-/// thread). Connects to the simulation's DB via TCP and renders sensor camera
-/// frames on demand when the simulation calls `ctx.render_camera()`.
+/// Used by both `elodin run` (as a sibling s10 process) and `elodin editor`
+/// (also as a sibling s10 process). Connects to the simulation's DB via TCP,
+/// subscribes to `LastUpdated`, and emits one rendered frame per camera every
+/// `1 / fps` µs of sim time. Frames are pushed to the DB as
+/// `MsgWithTimestamp` packets via the existing TCP connection.
 ///
-/// The custom runner (`headless_sensor_runner`) listens on a Unix domain
-/// socket for render requests from the simulation subprocess, waits for
-/// entity data to arrive, enables the requested camera, renders, then
-/// writes the frame to the DB and responds over the socket.
+/// There is no UDS, no request-response protocol, and no sim-side blocking.
 pub struct HeadlessEditorPlugin;
 
 impl Plugin for HeadlessEditorPlugin {
@@ -104,9 +105,14 @@ impl Plugin for HeadlessEditorPlugin {
                     impeller2_bevy::apply_cached_data,
                     crate::object_3d::update_object_3d_system,
                     crate::sync_object_3d,
+                    // `sync_pos` writes `WorldPos` into `GeoPosition`/`GeoRotation`;
+                    // the geo systems below propagate those into `Transform`. Running
+                    // them in this order keeps each tick's plane pose in lock-step
+                    // with the sensor camera's pose (which reads the TelemetryCache
+                    // directly), preventing one-frame jitter in `sensor_view`.
+                    sync_pos,
                     bevy_geo_frames::apply_geo_rotation,
                     bevy_geo_frames::big_space::apply_big_translation::<i128>,
-                    sync_pos,
                 )
                     .chain()
                     .after(impeller2_bevy::sink)
@@ -119,7 +125,7 @@ impl Plugin for HeadlessEditorPlugin {
             .init_resource::<crate::SyncedObject3d>()
             .add_systems(Update, crate::update_eql_context)
             .add_systems(Update, load_headless_scene)
-            .set_runner(headless_sensor_runner);
+            .set_runner(render_server_runner);
 
         if let Some(render_app) = app.get_sub_app_mut(RenderApp) {
             render_app
@@ -211,7 +217,7 @@ fn load_headless_scene(
 }
 
 // ---------------------------------------------------------------------------
-// Custom runner
+// Custom Bevy runner
 // ---------------------------------------------------------------------------
 
 fn run_headless_update(app: &mut App) {
@@ -225,148 +231,220 @@ fn drain_stale_frames(app: &App) {
     while rx.0.try_recv().is_ok() {}
 }
 
-// ---------------------------------------------------------------------------
-// Custom Bevy runner
-// ---------------------------------------------------------------------------
+/// Per-camera scheduling state for the autonomous render loop.
+struct CameraSchedule {
+    name: String,
+    /// Frame interval in microseconds of sim time, derived from `fps`.
+    interval_us: i64,
+    /// Sim timestamp of the most recently emitted frame for this camera, or
+    /// `None` if no frame has been emitted yet.
+    last_rendered: Option<Timestamp>,
+}
 
-fn headless_sensor_runner(mut app: App) -> AppExit {
+fn build_schedules(app: &App) -> Vec<CameraSchedule> {
+    app.world()
+        .resource::<SensorCameraConfigs>()
+        .0
+        .iter()
+        .map(|c| {
+            let fps = c.fps.max(1.0e-6);
+            CameraSchedule {
+                name: c.camera_name.clone(),
+                interval_us: (1_000_000.0 / fps as f64).round() as i64,
+                last_rendered: None,
+            }
+        })
+        .collect()
+}
+
+/// Autonomous render-server runner. Replaces the previous request-response
+/// loop with a continuous renderer paced by the DB's `LastUpdated` signal.
+fn render_server_runner(mut app: App) -> AppExit {
     app.finish();
     app.cleanup();
 
-    let server = match RenderBridgeServer::bind() {
-        Ok(s) => s,
-        Err(e) => {
-            tracing::error!("Failed to bind render bridge socket: {e}");
-            return AppExit::Error(1.try_into().unwrap());
-        }
-    };
-
-    // Warm-up: run updates until DB metadata is loaded and sensor cameras are spawned.
-    let mut cameras_enabled = false;
+    // Warm-up: pump updates until DB metadata arrives, sensor camera configs
+    // are loaded, and sensor camera entities are spawned. Then run a few
+    // priming cycles with readback armed so the GPU shader cache is warm
+    // before we start emitting frames. Steady state after warm-up is "all
+    // sensor cameras inactive"; `render_and_emit` flips the due set on for
+    // each scheduled frame so we don't spend GPU time rendering scenes
+    // nobody is going to read.
+    let mut cameras_warmed = false;
     for i in 0..120 {
         run_headless_update(&mut app);
-        let cameras_ready = app.world().resource::<SensorCamerasSpawned>().0;
-        if cameras_ready && !cameras_enabled {
+        if app.world().resource::<SensorCamerasSpawned>().0 {
             enable_all_sensor_cameras(app.world_mut());
-            cameras_enabled = true;
-            tracing::info!("Sensor cameras spawned and enabled after {i} warm-up cycles");
-
-            let names = all_camera_names(&app);
+            let names: Vec<String> = build_schedules(&app).into_iter().map(|s| s.name).collect();
             set_readback_armed(app.world_mut(), &names, true);
             for _ in 0..4 {
                 run_headless_update(&mut app);
             }
             drain_stale_frames(&app);
             set_readback_armed(app.world_mut(), &names, false);
-
+            set_cameras_active(app.world_mut(), &names, false);
+            tracing::info!(
+                "Sensor cameras spawned and primed after {i} warm-up cycles ({} cameras)",
+                names.len()
+            );
+            cameras_warmed = true;
             break;
         }
         std::thread::sleep(Duration::from_millis(50));
     }
 
-    tracing::info!(
-        "Render server ready (cameras_enabled={cameras_enabled}), waiting for client connection..."
-    );
-
-    // Accept persistent client connection (blocking).
-    if let Err(e) = server.accept_client() {
-        tracing::error!("Failed to accept client connection: {e}");
-        return AppExit::Error(1.try_into().unwrap());
+    if !cameras_warmed {
+        tracing::warn!("render server: no sensor cameras configured in DB after warm-up; idling");
     }
-    tracing::debug!("Client connected");
 
-    // Post-connect GPU warm-up.
-    if cameras_enabled {
-        let names = all_camera_names(&app);
-        set_readback_armed(app.world_mut(), &names, true);
-        run_headless_update(&mut app);
-        drain_stale_frames(&app);
-        set_readback_armed(app.world_mut(), &names, false);
-        tracing::debug!("Post-connect GPU warm-up complete");
-    }
+    let mut schedules = build_schedules(&app);
 
     loop {
         if let Some(exit) = app.should_exit() {
             return exit;
         }
 
-        let Some(request) = server.recv_batch() else {
-            tracing::info!("Client disconnected, exiting render server");
-            return AppExit::Success;
-        };
+        // Pump one update first. This:
+        //   1. Drains the impeller2 TCP packet queue into the TelemetryCache,
+        //      so component poses for the latest sim_ts are visible to the
+        //      camera-transform system before we decide which cameras to render.
+        //   2. Receives the next `LastUpdated` packet from the DB (set when
+        //      the sim bumps `db.last_updated`).
+        run_headless_update(&mut app);
 
-        render_frame(&mut app, &request, &mut cameras_enabled);
-        let frames = collect_and_disarm(&mut app, &request);
+        // If sensor cameras spawned only after the warm-up loop bailed out,
+        // pick them up now. We still briefly flip everything active so the
+        // pipelines exist, then drop back to inactive so the per-render
+        // gating in `render_and_emit` is the only source of truth.
+        if !cameras_warmed && app.world().resource::<SensorCamerasSpawned>().0 {
+            enable_all_sensor_cameras(app.world_mut());
+            schedules = build_schedules(&app);
+            let names: Vec<String> = schedules.iter().map(|s| s.name.clone()).collect();
+            set_cameras_active(app.world_mut(), &names, false);
+            cameras_warmed = true;
+            tracing::info!(
+                "Sensor cameras late-spawned; render server now scheduling {} cameras",
+                schedules.len()
+            );
+        }
 
-        if let Err(e) = server.respond_batch(request.timestamp, &frames) {
-            tracing::warn!("Render bridge write failed, client disconnected: {e}");
-            break;
+        if schedules.is_empty() {
+            std::thread::sleep(Duration::from_millis(50));
+            continue;
+        }
+
+        let sim_ts = app.world().resource::<LastUpdated>().0;
+        if sim_ts.0 == i64::MIN {
+            // Sim hasn't published a `LastUpdated` yet.
+            std::thread::sleep(Duration::from_millis(20));
+            continue;
+        }
+
+        // Pick the cameras whose frame interval has elapsed.
+        let due_names: Vec<String> = schedules
+            .iter()
+            .filter(|s| match s.last_rendered {
+                None => true,
+                Some(prev) => sim_ts.0 - prev.0 >= s.interval_us,
+            })
+            .map(|s| s.name.clone())
+            .collect();
+
+        if due_names.is_empty() {
+            // Nothing to render right now; sleep briefly to avoid a busy loop.
+            // Choose the sleep based on the shortest remaining wait across all
+            // cameras, capped at 5 ms so we stay responsive to new
+            // `LastUpdated` events.
+            let next_wait_us = schedules
+                .iter()
+                .filter_map(|s| {
+                    s.last_rendered
+                        .map(|prev| s.interval_us - (sim_ts.0 - prev.0))
+                })
+                .filter(|w| *w > 0)
+                .min()
+                .unwrap_or(5_000);
+            std::thread::sleep(Duration::from_micros(next_wait_us.clamp(500, 5_000) as u64));
+            continue;
+        }
+
+        render_and_emit(&mut app, sim_ts, &due_names);
+
+        // Mark every emitted camera as rendered at `sim_ts`. (If a frame was
+        // dropped by `collect_frames` we still advance — the renderer's
+        // schedule is independent of whether the emit succeeded.)
+        for s in schedules.iter_mut() {
+            if due_names.iter().any(|n| n == &s.name) {
+                s.last_rendered = Some(sim_ts);
+            }
         }
     }
-    AppExit::Success
 }
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
+/// Set the timestamp resource, activate the due cameras, arm readback, run
+/// one update cycle, collect frames, push them to the DB, and tear down.
+///
+/// Activating only `due_names` keeps Bevy's render extract from issuing a 3D
+/// pass for cameras whose configured `fps` interval has not yet elapsed.
+/// Combined with `ReadbackArmed`, this means each `due` camera does one
+/// render plus one GPU->CPU copy per scheduled frame, and idle cameras cost
+/// nothing per polling iteration.
+fn render_and_emit(app: &mut App, sim_ts: Timestamp, due_names: &[String]) {
+    app.world_mut().resource_mut::<CurrentTimestamp>().0 = sim_ts;
 
-fn all_camera_names(app: &App) -> Vec<String> {
-    app.world()
-        .resource::<SensorCameraConfigs>()
-        .0
-        .iter()
-        .map(|c| c.camera_name.clone())
-        .collect()
-}
+    // Drain any stale frames from the previous pass before arming.
+    drain_stale_frames(app);
+    set_cameras_active(app.world_mut(), due_names, true);
+    set_readback_armed(app.world_mut(), due_names, true);
 
-/// Set timestamp, late-enable cameras if needed, arm readback, and run one
-/// headless update cycle.
-fn render_frame(app: &mut App, request: &BatchRenderRequest, cameras_enabled: &mut bool) {
-    app.world_mut().resource_mut::<CurrentTimestamp>().0 = request.timestamp;
-
-    let cameras_ready = app.world().resource::<SensorCamerasSpawned>().0;
-    if cameras_ready && !*cameras_enabled {
-        enable_all_sensor_cameras(app.world_mut());
-        *cameras_enabled = true;
-        tracing::info!("Sensor cameras late-enabled during render");
-        let names = all_camera_names(app);
-        set_readback_armed(app.world_mut(), &names, true);
-        for _ in 0..4 {
-            run_headless_update(app);
-        }
-        drain_stale_frames(app);
-        set_readback_armed(app.world_mut(), &names, false);
-    }
-
-    if cameras_ready {
-        drain_stale_frames(app);
-        set_readback_armed(app.world_mut(), &request.camera_names, true);
-    }
-
+    // The render-graph + GPU readback runs inside `app.update()`.
     run_headless_update(app);
-}
 
-/// Collect rendered frames and disarm readback. Returns empty vec if cameras
-/// are not ready.
-fn collect_and_disarm(app: &mut App, request: &BatchRenderRequest) -> Vec<(String, Vec<u8>)> {
-    let cameras_ready = app.world().resource::<SensorCamerasSpawned>().0;
-    if !cameras_ready {
-        return Vec::new();
-    }
-
-    let mut frames = collect_frames(app, &request.camera_names);
-    if frames.len() < request.camera_names.len() {
+    let mut frames = collect_frames(app, due_names);
+    // The readback ping-pong may need one more update before all frames are
+    // mapped on slow GPUs / first runs after a warm reload. We deliberately
+    // leave the cameras active for this retry — a rare second render is
+    // cheaper than wiring up readback-only updates.
+    if frames.len() < due_names.len() {
         run_headless_update(app);
-        let more = collect_frames(app, &request.camera_names);
+        let more = collect_frames(app, due_names);
         for (name, data) in more {
             if !frames.iter().any(|(n, _)| n == &name) {
                 frames.push((name, data));
             }
         }
     }
-    set_readback_armed(app.world_mut(), &request.camera_names, false);
-    frames
+
+    push_frames_to_db(app, sim_ts, &frames);
+    set_readback_armed(app.world_mut(), due_names, false);
+    set_cameras_active(app.world_mut(), due_names, false);
 }
+
+/// Push rendered frames to the DB as `MsgWithTimestamp` packets via the
+/// existing TCP connection (managed by `TcpImpellerPlugin`).
+fn push_frames_to_db(app: &App, sim_ts: Timestamp, frames: &[(String, Vec<u8>)]) {
+    let Some(tx) = app.world().get_resource::<MsgPacketTx>() else {
+        tracing::warn!(
+            "render server: MsgPacketTx not available; dropping {} frame(s)",
+            frames.len()
+        );
+        return;
+    };
+    for (camera_name, bytes) in frames {
+        let id = msg_id(camera_name);
+        let mut pkt = LenPacket::msg_with_timestamp(id, sim_ts, bytes.len());
+        pkt.extend_from_slice(bytes);
+        if tx.0.try_send(Some(pkt)).is_err() {
+            tracing::warn!(
+                "render server: MsgPacketTx queue full; dropping frame for {camera_name}"
+            );
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
 
 /// Enable all sensor cameras (used during warm-up).
 fn enable_all_sensor_cameras(world: &mut World) {
@@ -381,15 +459,12 @@ fn collect_frames(app: &App, camera_names: &[String]) -> Vec<(String, Vec<u8>)> 
     let world = app.world();
     let frame_rx = world.resource::<crate::sensor_camera::SensorFrameReceiver>();
 
-    let mut frames_map: std::collections::HashMap<String, Vec<u8>> =
-        std::collections::HashMap::new();
+    let mut frames_map: HashMap<String, Vec<u8>> = HashMap::new();
 
-    // Drain all queued frames, keeping the latest for each camera.
     while let Ok((camera_name, frame_bytes, _, _)) = frame_rx.0.try_recv() {
         frames_map.insert(camera_name, frame_bytes);
     }
 
-    // Return frames in the order they were requested.
     camera_names
         .iter()
         .filter_map(|name| frames_map.remove(name).map(|bytes| (name.clone(), bytes)))

@@ -1377,6 +1377,7 @@ mod tests {
     /// Helper: register a VTable and send typed component samples over an
     /// existing client connection.  No per-sample sleeps -- only a short
     /// delay after VTable registration.
+    #[allow(clippy::too_many_arguments)]
     async fn send_timestamped_samples(
         client: &mut Client,
         component_id: ComponentId,

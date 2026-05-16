@@ -585,19 +585,21 @@ fn sensor_camera_transform(
         bevy::math::DQuat::from_xyzw(i, j, k, w)
     };
 
-    let offset = DVec3::new(
+    let pos_offset_body = DVec3::new(
         config.pos_offset[0],
         config.pos_offset[1],
         config.pos_offset[2],
     );
-    let look_at_offset = DVec3::new(
-        config.look_at_offset[0],
-        config.look_at_offset[1],
-        config.look_at_offset[2],
-    );
+    let [roll_deg, pitch_deg, yaw_deg] = config.rot_offset;
+    let rot_offset_body = bevy::math::DQuat::from_axis_angle(DVec3::X, roll_deg.to_radians())
+        * bevy::math::DQuat::from_axis_angle(DVec3::Y, pitch_deg.to_radians())
+        * bevy::math::DQuat::from_axis_angle(DVec3::Z, yaw_deg.to_radians());
 
-    let cam_pos = entity_pos + entity_att * offset;
-    let look_at_pos = entity_pos + entity_att * look_at_offset;
+    let cam_forward_body = rot_offset_body * DVec3::X;
+    let cam_up_body = rot_offset_body * DVec3::Z;
+    let cam_pos = entity_pos + entity_att * pos_offset_body;
+    let look_at_pos = cam_pos + entity_att * cam_forward_body;
+    let cam_up = entity_att * cam_up_body;
 
     // Z-up (sim) to Y-up (Bevy) coordinate conversion.
     let cam_pos_bevy = Vec3::new(cam_pos.x as f32, cam_pos.z as f32, -cam_pos.y as f32);
@@ -606,12 +608,13 @@ fn sensor_camera_transform(
         look_at_pos.z as f32,
         -look_at_pos.y as f32,
     );
+    let up_bevy = Vec3::new(cam_up.x as f32, cam_up.z as f32, -cam_up.y as f32);
 
     if cam_pos_bevy.distance(look_at_bevy) <= 1e-6 {
         return None;
     }
 
-    Some(Transform::from_translation(cam_pos_bevy).looking_at(look_at_bevy, Vec3::Y))
+    Some(Transform::from_translation(cam_pos_bevy).looking_at(look_at_bevy, up_bevy))
 }
 
 // ---------------------------------------------------------------------------
@@ -861,6 +864,27 @@ pub fn set_readback_armed(world: &mut World, camera_names: &[String], armed: boo
     for (sensor, mut readback) in query.iter_mut(world) {
         if target_indices.contains(&sensor.config_index) {
             readback.0 = armed;
+        }
+    }
+}
+
+/// Toggle `Camera.is_active` for specific sensor cameras by name. Bevy's
+/// render extract skips inactive cameras, so flipping this off between
+/// scheduled frames prevents the GPU from rendering an unread scene on every
+/// polling iteration. Headless steady state is "all sensor cameras inactive";
+/// the render-server flips the due set on for each `render_and_emit` cycle
+/// and back off afterwards.
+pub fn set_cameras_active(world: &mut World, camera_names: &[String], active: bool) {
+    let configs = world.resource::<SensorCameraConfigs>();
+    let target_indices: Vec<usize> = camera_names
+        .iter()
+        .filter_map(|name| configs.0.iter().position(|c| &c.camera_name == name))
+        .collect();
+
+    let mut query = world.query::<(&SensorCamera, &mut Camera)>();
+    for (sensor, mut camera) in query.iter_mut(world) {
+        if target_indices.contains(&sensor.config_index) {
+            camera.is_active = active;
         }
     }
 }

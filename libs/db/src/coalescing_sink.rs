@@ -113,7 +113,7 @@ mod tests {
 
     #[test]
     fn test_coalescing_buffering() {
-        stellarator::run(|| test_coalescing_buffering_inner())
+        stellarator::run(test_coalescing_buffering_inner)
     }
 
     async fn test_coalescing_buffering_inner() {

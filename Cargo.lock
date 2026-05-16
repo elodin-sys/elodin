@@ -5123,7 +5123,6 @@ dependencies = [
  "postcard-schema",
  "rayon",
  "reflink-copy",
- "render-bridge",
  "rustfft",
  "ryu",
  "scuffle-h264",
@@ -5248,7 +5247,6 @@ dependencies = [
  "pic-scale",
  "postcard",
  "raw-window-handle 0.5.2",
- "render-bridge",
  "reqwest",
  "rfd",
  "roaring",
@@ -11455,15 +11453,6 @@ dependencies = [
  "libc",
  "mach2",
  "windows-sys 0.52.0",
-]
-
-[[package]]
-name = "render-bridge"
-version = "0.17.3-alpha.0"
-dependencies = [
- "impeller2",
- "socket2 0.5.10",
- "tracing",
 ]
 
 [[package]]

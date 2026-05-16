@@ -4,12 +4,14 @@ Sensor Camera Test — Bouncing Balls Room
 
 Multiple balls bounce around inside a walled room under gravity.
 Two special balls carry sensor cameras:
-  - Cyan ball:    RGB camera  (rendered every 2nd tick via post_step)
-  - Magenta ball: Thermal camera (rendered every 4th tick via post_step)
+  - Cyan ball:    RGB camera     (60 fps)
+  - Magenta ball: Thermal camera (30 fps)
 
-The cameras look downward from above their host ball, capturing
-the room floor and other balls as they move. Rendering is explicitly
-controlled via ctx.render_camera() in the post_step callback.
+The cameras render continuously at their configured FPS; frames are pushed
+to the DB by the headless render server. The simulation only *reads* frames
+via ``ctx.read_msg(name, timestamp=...)`` — there is no blocking render
+call. Pick the apparent camera latency at read time by passing a timestamp
+offset.
 
 Usage:
     elodin editor examples/sensor-camera/main.py
@@ -31,6 +33,14 @@ BALL_RADIUS = 0.3
 BOUNDARY = 5.0
 BOUNCINESS = 0.95
 FRICTION = 0.05
+
+SCENE_FPS = 60.0
+THERMAL_FPS = 30.0
+# Simulated camera latency applied at read time (matches a real FPV camera).
+SCENE_LATENCY_US = 16_667  # ~16.7 ms (one frame at 60 fps)
+THERMAL_LATENCY_US = 33_333  # ~33.3 ms (one frame at 30 fps)
+
+DB_PATH = os.environ.get("ELODIN_SENSOR_CAMERA_DB")
 
 # ── Systems ──────────────────────────────────────────────────────────────────
 
@@ -121,9 +131,12 @@ world.sensor_camera(
     width=640,
     height=480,
     fov=90.0,
+    near=0.02,
+    far=0.65,
     pos_offset=[0.0, 0.0, 0.5],
-    look_at_offset=[6.0, 6.0, 0.0],
+    rot_offset=[0.0, 0.0, 45.0],
     format="rgba",
+    fps=SCENE_FPS,
     create_frustum=True,
     frustums_color=[0.0, 1.0, 1.0, 1.0],
     projection_color=[0.0, 1.0, 1.0, 1.0],
@@ -135,11 +148,14 @@ world.sensor_camera(
     width=128,
     height=128,
     fov=90.0,
+    near=0.02,
+    far=0.65,
     pos_offset=[0.0, 0.0, 0.5],
-    look_at_offset=[-6.0, -6.0, 0.0],
+    rot_offset=[0.0, 0.0, -135.0],
     format="rgba",
     effect="thermal",
     effect_params={"contrast": 1.5, "noise_sigma": 0.02},
+    fps=THERMAL_FPS,
     create_frustum=True,
     frustums_color=[1.0, 0.0, 1.0, 1.0],
     projection_color=[1.0, 0.0, 1.0, 1.0],
@@ -184,50 +200,142 @@ constraints = ground_bounce | wall_bounce
 effectors = gravity | damping
 system = constraints | el.six_dof(sys=effectors)
 
-# ── Post-step frame counter ──────────────────────────────────────────────────
+# ── Post-step: observe rendered frames via read_msg ──────────────────────────
 
-rgb_frames = [0]
-thermal_frames = [0]
+scene_observations = [0]
+thermal_observations = [0]
+scene_first_logged = [False]
+thermal_first_logged = [False]
 
 
 def post_step(tick, ctx):
-    if tick % 4 == 0:
-        try:
-            ctx.render_cameras(["cam_ball_a.scene_cam", "cam_ball_b.thermal_cam"])
-            rgb_frames[0] += 1
-            thermal_frames[0] += 1
-            if thermal_frames[0] == 1:
-                for name in ["cam_ball_a.scene_cam", "cam_ball_b.thermal_cam"]:
-                    frame = ctx.read_msg(name)
-                    if frame is not None:
-                        arr = np.asarray(frame)
-                        print(
-                            f"[{name}] First frame at tick {tick}: {len(frame)} bytes, "
-                            f"nonzero={np.count_nonzero(arr)}"
-                        )
-        except Exception as e:
-            if tick > 10 and thermal_frames[0] == 0:
-                print(f"[render] tick {tick}: {e}")
+    if tick == 0:
+        return
 
-    # Render every 2nd tick for RGB (~60 fps at 120 Hz sim)
-    elif tick % 2 == 0:
-        try:
-            # Single camera render (returns frame directly; or use ctx.render_cameras([...]) for batch)
-            frame = ctx.render_camera("cam_ball_a.scene_cam")
-            if frame is not None and len(frame) > 0:
-                rgb_frames[0] += 1
-                if rgb_frames[0] == 1:
-                    arr = np.asarray(frame)
-                    print(
-                        f"[RGB] First frame at tick {tick}: {len(frame)} bytes, "
-                        f"nonzero={np.count_nonzero(arr)}"
-                    )
-        except Exception as e:
-            if tick > 10 and rgb_frames[0] == 0:
-                print(f"[RGB] tick {tick}: {e}")
+    # Sample the latest frame for each camera once per second of sim time.
+    if tick % 120 == 0:
+        scene_now = ctx.read_msg("cam_ball_a.scene_cam")
+        thermal_now = ctx.read_msg("cam_ball_b.thermal_cam")
+        if scene_now is not None:
+            scene_observations[0] += 1
+            if not scene_first_logged[0]:
+                arr = np.asarray(scene_now)
+                print(
+                    f"[scene_cam] first frame seen at tick {tick}: "
+                    f"{len(scene_now)} bytes, nonzero={np.count_nonzero(arr)}"
+                )
+                scene_first_logged[0] = True
+        if thermal_now is not None:
+            thermal_observations[0] += 1
+            if not thermal_first_logged[0]:
+                arr = np.asarray(thermal_now)
+                print(
+                    f"[thermal_cam] first frame seen at tick {tick}: "
+                    f"{len(thermal_now)} bytes, nonzero={np.count_nonzero(arr)}"
+                )
+                thermal_first_logged[0] = True
 
-    if tick > 0 and tick % 600 == 0:
-        print(f"  tick {tick}: rgb={rgb_frames[0]} thermal={thermal_frames[0]} frames")
+    # Periodic heartbeat (so a long run shows progress).
+    if tick > 0 and tick % 1200 == 0:
+        print(
+            f"  tick {tick}: scene_obs={scene_observations[0]} "
+            f"thermal_obs={thermal_observations[0]} "
+            f"sim_ts={ctx.timestamp}"
+        )
+
+    # Final-tick verification: walk the message log, count frames, compute
+    # observed FPS, and demonstrate historical reads.
+    if tick == MAX_TICKS - 1:
+        _verify(ctx)
+
+
+def _verify(ctx) -> None:
+    print()
+    print("─── Verification ────────────────────────────────────────────────")
+    sim_seconds = MAX_TICKS * SIM_TIME_STEP
+    print(f"sim_duration = {sim_seconds:.3f} s, final_sim_ts = {ctx.timestamp}")
+
+    # Skip the renderer's warm-up window (first 2 s of sim time) when
+    # estimating FPS — the GPU pipeline is still primed during this phase.
+    warmup_us = 2_000_000
+    sweep_end = ctx.timestamp - 100_000  # leave a small margin below latest
+    sweep_start = max(warmup_us, sweep_end - int((sim_seconds - 2.0) * 1_000_000))
+    sweep_window_us = max(sweep_end - sweep_start, 1)
+    sweep_seconds = sweep_window_us / 1_000_000.0
+    print(f"fps-sweep window = [{sweep_start}, {sweep_end}] ({sweep_seconds:.2f} s)")
+
+    all_ok = True
+    for cam_name, target_fps, latency_us in [
+        ("cam_ball_a.scene_cam", SCENE_FPS, SCENE_LATENCY_US),
+        ("cam_ball_b.thermal_cam", THERMAL_FPS, THERMAL_LATENCY_US),
+    ]:
+        latest = ctx.read_msg(cam_name)
+        if latest is None:
+            print(f"  [{cam_name}] FAIL: no frames in DB")
+            all_ok = False
+            continue
+
+        # Estimate observed FPS by walking through the message log at twice
+        # the camera's expected frame interval. Fingerprint each frame by
+        # downsampling across the whole buffer (single-pixel slabs miss
+        # variation if the chosen pixel is uniform sky or floor).
+        step_us = max(int(1_000_000.0 / target_fps / 2.0), 100)
+        seen_sig = None
+        unique_frames = 0
+        cursor = sweep_start
+        while cursor <= sweep_end:
+            frame = ctx.read_msg(cam_name, timestamp=cursor)
+            if frame is not None:
+                arr = np.asarray(frame)
+                stride = max(len(arr) // 256, 1)
+                sig = hash(arr[::stride].tobytes())
+                if sig != seen_sig:
+                    unique_frames += 1
+                    seen_sig = sig
+            cursor += step_us
+
+        observed_fps = unique_frames / sweep_seconds if sweep_seconds > 0 else 0.0
+        ratio = observed_fps / target_fps if target_fps > 0 else 0.0
+        # The renderer can fall short of the configured fps when the GPU
+        # can't keep up — that's a soft failure, not an error. Anything
+        # under ~30% of target indicates a real bug.
+        ok = 0.30 <= ratio <= 1.25
+        marker = "OK" if ok else "FAIL"
+        print(
+            f"  [{cam_name}] {marker}: observed_fps≈{observed_fps:.2f} "
+            f"target={target_fps:.0f} (ratio={ratio:.2f}) "
+            f"unique_frames_in_window={unique_frames}"
+        )
+        if not ok:
+            all_ok = False
+
+        # Demonstrate the historical-read API: latest frame vs frame
+        # `latency_us` µs in the past. With a 1-frame offset and balls in
+        # motion these should differ; if not, sample further back.
+        def _fingerprint(arr: np.ndarray) -> int:
+            stride = max(len(arr) // 256, 1)
+            return hash(arr[::stride].tobytes())
+
+        latest_sig = _fingerprint(np.asarray(latest))
+        for offset in (latency_us, latency_us * 4, latency_us * 16):
+            past = ctx.read_msg(cam_name, timestamp=ctx.timestamp - offset)
+            if past is None:
+                continue
+            past_sig = _fingerprint(np.asarray(past))
+            if past_sig != latest_sig:
+                print(
+                    f"  [{cam_name}] OK: historical read at -{offset}us "
+                    f"returned a different frame than latest"
+                )
+                break
+        else:
+            print(
+                f"  [{cam_name}] WARN: historical reads up to "
+                f"-{latency_us * 16}us all matched the latest frame"
+            )
+
+    print("─────────────────────────────────────────────────────────────────")
+    print(f"verification: {'PASS' if all_ok else 'FAIL — see above'}")
 
 
 # ── Run ──────────────────────────────────────────────────────────────────────
@@ -240,23 +348,21 @@ world.run(
     max_ticks=MAX_TICKS,
     post_step=post_step,
     interactive=False,
+    db_path=DB_PATH,
 )
 
-print(f"\nRGB frames: {rgb_frames[0]}, Thermal frames: {thermal_frames[0]}")
+print(
+    f"\nrun complete: scene_observations={scene_observations[0]} "
+    f"thermal_observations={thermal_observations[0]}"
+)
 if EMIT_PERF and wall_start is not None:
     wall_elapsed_s = time.perf_counter() - wall_start
     sim_elapsed_s = MAX_TICKS * SIM_TIME_STEP
     rtf = sim_elapsed_s / wall_elapsed_s if wall_elapsed_s > 0 else 0.0
-    rgb_fps = rgb_frames[0] / wall_elapsed_s if wall_elapsed_s > 0 else 0.0
-    thermal_fps = thermal_frames[0] / wall_elapsed_s if wall_elapsed_s > 0 else 0.0
     print(
         "PERF sensor_camera "
         f"max_ticks={MAX_TICKS} "
         f"elapsed_s={wall_elapsed_s:.3f} "
         f"sim_s={sim_elapsed_s:.3f} "
-        f"rtf={rtf:.3f} "
-        f"rgb_frames={rgb_frames[0]} "
-        f"thermal_frames={thermal_frames[0]} "
-        f"rgb_fps={rgb_fps:.3f} "
-        f"thermal_fps={thermal_fps:.3f}"
+        f"rtf={rtf:.3f}"
     )

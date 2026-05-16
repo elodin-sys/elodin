@@ -86,18 +86,37 @@ def setup_world(config: BDXConfig) -> tuple[el.World, el.EntityId, el.EntityId]:
         name="target",
     )
 
+    world.sensor_camera(
+        entity=jet,
+        name="fpv_cam",
+        width=640,
+        height=480,
+        fov=90.0,
+        fps=30.0,
+        near=0.02,
+        far=0.65,
+        pos_offset=[-1.0, 0.0, 0.0],
+        rot_offset=[0.0, 0.0, 0.0],
+        create_frustum=True,
+        frustums_color=[0.4, 1.0, 0.4, 0.5],
+        projection_color=[0.4, 1.0, 0.4, 0.1],
+    )
+
     # Create schematic for visualization
     world.schematic(
         """
         tabs {
             hsplit name="Main View" {
-                viewport name=Viewport pos="bdx.world_pos.translate_world(-8.0,-8.0,4.0)" look_at="bdx.world_pos" show_grid=#true active=#true
+                viewport name=Viewport pos="bdx.world_pos.translate_world(-8.0,-8.0,4.0)" look_at="bdx.world_pos" show_grid=#true show_frustums=#true active=#true
                 vsplit share=0.4 {
                     vsplit {
                         graph "bdx.alpha" name="Angle of Attack (rad)"
                         graph "bdx.thrust" name="Thrust (N)"
                         viewport name=TGTViewport pos="target.world_pos.translate_world(1,1,0.2)" look_at="bdx.world_pos" show_grid=#true
-                        viewport name=FPVViewport pos="bdx.world_pos.rotate_z(-90).translate_y(-2.0)" show_grid=#true
+                        hsplit {
+                            viewport name=FPVViewport pos="bdx.world_pos.rotate_z(-90).translate_y(-2.0)" show_grid=#true
+                            sensor_view "bdx.fpv_cam" name="FPV (sensor_camera)"
+                        }
                     }
                 }
             }
@@ -145,7 +164,7 @@ def setup_world(config: BDXConfig) -> tuple[el.World, el.EntityId, el.EntityId]:
                 color 76 175 80
             }
         }
-        
+
         object_3d target.world_pos {
             glb path="edu-450-v2-drone.glb"
             icon builtin="adjust" {

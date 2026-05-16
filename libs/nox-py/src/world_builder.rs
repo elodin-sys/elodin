@@ -319,7 +319,7 @@ impl WorldBuilder {
         near = 0.01,
         far = 1000.0,
         pos_offset = vec![0.0, 0.0, 0.0],
-        look_at_offset = vec![0.0, 0.0, -1.0],
+        rot_offset = vec![0.0, 0.0, 0.0],
         format = "rgba",
         effect = "normal",
         effect_params = None,
@@ -328,6 +328,7 @@ impl WorldBuilder {
         frustums_color = None,
         projection_color = None,
         frustums_thickness = 0.006,
+        fps = 30.0,
     ))]
     fn sensor_camera(
         &mut self,
@@ -339,7 +340,7 @@ impl WorldBuilder {
         near: f32,
         far: f32,
         pos_offset: Vec<f64>,
-        look_at_offset: Vec<f64>,
+        rot_offset: Vec<f64>,
         format: &str,
         effect: &str,
         effect_params: Option<&Bound<'_, PyDict>>,
@@ -348,6 +349,7 @@ impl WorldBuilder {
         frustums_color: Option<Vec<f32>>,
         projection_color: Option<Vec<f32>>,
         frustums_thickness: f32,
+        fps: f32,
     ) -> Result<(), crate::error::Error> {
         if name.chars().any(|c| c.is_whitespace()) {
             return Err(crate::error::Error::PyO3(
@@ -394,16 +396,33 @@ impl WorldBuilder {
             *pos_offset.get(1).unwrap_or(&0.0),
             *pos_offset.get(2).unwrap_or(&0.0),
         ];
-        let look_off = [
-            *look_at_offset.first().unwrap_or(&0.0),
-            *look_at_offset.get(1).unwrap_or(&0.0),
-            *look_at_offset.get(2).unwrap_or(&-1.0),
-        ];
+        if rot_offset.len() != 3 {
+            return Err(crate::error::Error::PyO3(
+                pyo3::exceptions::PyValueError::new_err(
+                    "sensor_camera rot_offset must be a 3-element list [roll, pitch, yaw] in degrees",
+                ),
+            ));
+        }
+        if !rot_offset.iter().all(|v| v.is_finite()) {
+            return Err(crate::error::Error::PyO3(
+                pyo3::exceptions::PyValueError::new_err(
+                    "sensor_camera rot_offset must contain finite values",
+                ),
+            ));
+        }
+        let rot_off = [rot_offset[0], rot_offset[1], rot_offset[2]];
         if frustums_thickness <= 0.0 {
             return Err(crate::error::Error::PyO3(
                 pyo3::exceptions::PyValueError::new_err(
                     "sensor_camera frustums_thickness must be > 0",
                 ),
+            ));
+        }
+        if !(fps > 0.0 && fps.is_finite()) {
+            return Err(crate::error::Error::PyO3(
+                pyo3::exceptions::PyValueError::new_err(format!(
+                    "sensor_camera fps must be a positive finite number, got {fps}"
+                )),
             ));
         }
 
@@ -441,7 +460,7 @@ impl WorldBuilder {
                 near,
                 far,
                 pos_offset: pos_off,
-                look_at_offset: look_off,
+                rot_offset: rot_off,
                 format: format.to_string(),
                 effect: effect.to_string(),
                 effect_params: parsed_effect_params,
@@ -458,6 +477,7 @@ impl WorldBuilder {
                     "projection_color",
                 )?,
                 frustums_thickness,
+                fps,
             });
 
         Ok(())
@@ -585,16 +605,6 @@ impl WorldBuilder {
                 // Clone cancel tokens for each closure that needs it
                 let pre_step_cancel_token = recipe_cancel_token.clone();
                 let post_step_cancel_token = recipe_cancel_token.clone();
-                // Shared persistent render bridge client for sensor cameras.
-                // Created lazily on first render_camera() call, reused across all ticks.
-                let render_client: crate::step_context::SharedRenderClient =
-                    std::sync::Arc::new(std::sync::Mutex::new(None));
-                let pre_step_render_client = render_client.clone();
-                let post_step_render_client = render_client;
-                let frame_db_writer: crate::step_context::SharedFrameDbWriter =
-                    std::sync::Arc::new(std::sync::Mutex::new(None));
-                let pre_step_frame_db_writer = frame_db_writer.clone();
-                let post_step_frame_db_writer = frame_db_writer;
                 let db_server = elodin_db::Server::new(&db_path, addr)
                     .map_err(|e| {
                         if matches!(&e, elodin_db::Error::Io(io) if io.kind() == std::io::ErrorKind::AddrInUse) {
@@ -655,8 +665,6 @@ impl WorldBuilder {
                                                         tick_count,
                                                         start_timestamp,
                                                         pre_step_cancel_token.clone(),
-                                                        pre_step_render_client.clone(),
-                                                        pre_step_frame_db_writer.clone(),
                                                     );
                                                     match Py::new(py, ctx) {
                                                         Ok(ctx_py) => {
@@ -696,8 +704,6 @@ impl WorldBuilder {
                                                         tick_count,
                                                         start_timestamp,
                                                         post_step_cancel_token.clone(),
-                                                        post_step_render_client.clone(),
-                                                        post_step_frame_db_writer.clone(),
                                                     );
                                                     match Py::new(py, ctx) {
                                                         Ok(ctx_py) => {
