@@ -91,7 +91,10 @@ pub(crate) fn skybox_asset_plugin() -> bevy_ai_skybox::prelude::SkyboxAssetPlugi
         manifest_file: std::path::PathBuf::from("manifest.ron"),
         default_skybox: None,
         apply_to_all_cameras: true,
-        env_lighting: true,
+        // Keep the existing baked EnvironmentMapLight as the cheap lighting fallback.
+        // Runtime filtering via GeneratedEnvironmentMapLight is too expensive for
+        // multi-viewport editor sessions and sensor cameras in this asset-only slice.
+        env_lighting: false,
     }
 }
 
