@@ -1,0 +1,14 @@
+[package]
+name = "bevy_ai_skybox"
+license = "MIT OR Apache-2.0"
+description = "Asset-only skybox loader for Elodin"
+version.workspace = true
+edition = "2024"
+publish = false
+
+[dependencies]
+bevy.workspace = true
+ron = "0.10"
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
+tracing = "0.1"

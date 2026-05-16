@@ -50,6 +50,7 @@ big_space.workspace = true
 big_space.optional = true
 bevy_editor_cam.workspace = true
 bevy_framepace = "0.21"
+bevy_ai_skybox.path = "../bevy_ai_skybox"
 
 # rand
 fastrand.version = "2"

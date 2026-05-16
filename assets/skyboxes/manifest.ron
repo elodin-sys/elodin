@@ -1,0 +1,48 @@
+(
+    version: 2,
+    entries: [
+        (
+            name: "mojave_desert",
+            prompt: "mojave desert at sunset",
+            style: M3Photoreal,
+            blockade: Some((
+                imagine_id: 15347300,
+                obfuscated_id: Some("a9b41c72e29e68a25458498c0f9306f4"),
+                seed: None,
+            )),
+            equirect_file: "mojave_desert.equirect.png",
+            cubemap_file: "mojave_desert.cubemap.ktx2",
+            face_size: 2048,
+            created_at: "2026-05-11T05:34:26.916906Z",
+        ),
+        (
+            name: "alien_swamp",
+            prompt: "misty alien swamp at dusk, dramatic lighting",
+            style: M3Photoreal,
+            blockade: Some((
+                imagine_id: 15347379,
+                obfuscated_id: Some("a9113487fd5f1493e7ac59284fd5e845"),
+                seed: None,
+            )),
+            equirect_file: "alien_swamp.equirect.png",
+            cubemap_file: "alien_swamp.cubemap.ktx2",
+            face_size: 2048,
+            created_at: "2026-05-11T06:28:21.529599Z",
+        ),
+        (
+            name: "beach_sunset",
+            prompt: "sunset on the beach\n",
+            style: M3Photoreal,
+            blockade: Some((
+                imagine_id: 15348855,
+                obfuscated_id: Some("e8a065d3d1180c03704fa6eee9f45298"),
+                seed: None,
+            )),
+            equirect_file: "beach_sunset.equirect.png",
+            cubemap_file: "beach_sunset.cubemap.ktx2",
+            face_size: 2048,
+            created_at: "2026-05-11T13:58:10.268198Z",
+        ),
+    ],
+    default: Some("mojave_desert"),
+)

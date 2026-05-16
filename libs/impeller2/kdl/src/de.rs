@@ -24,6 +24,11 @@ pub fn parse_schematic(input: &str) -> Result<Schematic, KdlSchematicError> {
     let mut schematic = Schematic::default();
 
     for node in doc.nodes() {
+        if node.name().value() == "skybox" {
+            schematic.skybox = Some(parse_skybox(node, input)?);
+            continue;
+        }
+
         let elem = parse_schematic_elem(node, input)?;
         match elem {
             SchematicElem::Theme(theme) => schematic.theme = Some(theme),
@@ -34,6 +39,12 @@ pub fn parse_schematic(input: &str) -> Result<Schematic, KdlSchematicError> {
     }
 
     Ok(schematic)
+}
+
+fn parse_skybox(node: &KdlNode, src: &str) -> Result<SkyboxConfig, KdlSchematicError> {
+    Ok(SkyboxConfig {
+        name: require_name(node, src)?,
+    })
 }
 
 fn parse_schematic_elem(node: &KdlNode, src: &str) -> Result<SchematicElem, KdlSchematicError> {
@@ -1639,6 +1650,20 @@ mod tests {
         assert_eq!(timeline.played_color, Color::MINT);
         assert_eq!(timeline.future_color, Color::WHITE);
         assert!(timeline.follow_latest);
+    }
+
+    #[test]
+    fn test_parse_skybox_config() {
+        let schematic = parse_schematic(r#"skybox name="mojave_desert""#).unwrap();
+
+        assert!(schematic.elems.is_empty());
+        assert_eq!(
+            schematic
+                .skybox
+                .expect("skybox config should be parsed")
+                .name,
+            "mojave_desert"
+        );
     }
 
     #[test]

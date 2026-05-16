@@ -26,6 +26,7 @@ use bevy::{
     window::{ExitCondition, WindowPlugin},
     winit::WinitPlugin,
 };
+use bevy_ai_skybox::prelude::SetActiveSkybox;
 use bevy_geo_frames::GeoContext;
 use bevy_mat3_material::Mat3Material;
 use impeller2::types::{LenPacket, Timestamp, msg_id};
@@ -84,10 +85,12 @@ impl Plugin for HeadlessEditorPlugin {
                     .disable::<PickingPlugin>()
                     .disable::<InteractionPlugin>()
                     .set(AssetPlugin {
+                        watch_for_changes_override: Some(true),
                         unapproved_path_mode: UnapprovedPathMode::Allow,
                         ..default()
                     }),
             )
+            .add_plugins(crate::skybox_asset_plugin())
             .add_plugins(impeller2_bevy::Impeller2Plugin)
             .add_plugins(bevy_mat3_material::Mat3MaterialPlugin)
             .add_plugins(GeoFramePlugin {
@@ -162,6 +165,7 @@ fn load_headless_scene(
     mut mat3_materials: ResMut<Assets<Mat3Material>>,
     asset_server: Res<AssetServer>,
     geo_context: Res<GeoContext>,
+    mut skybox_writer: MessageWriter<SetActiveSkybox>,
 ) {
     if *loaded {
         return;
@@ -180,6 +184,10 @@ fn load_headless_scene(
     }) else {
         return;
     };
+
+    if let Some(skybox) = schematic.skybox.as_ref() {
+        skybox_writer.write(SetActiveSkybox::ByName(skybox.name.clone()));
+    }
 
     for elem in &schematic.elems {
         if let SchematicElem::Object3d(obj) = elem {

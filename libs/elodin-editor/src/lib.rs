@@ -82,6 +82,19 @@ pub mod run;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+pub(crate) fn skybox_asset_plugin() -> bevy_ai_skybox::prelude::SkyboxAssetPlugin {
+    let assets_dir = plugins::env_asset_source::resolve_assets_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("assets"));
+    bevy_ai_skybox::prelude::SkyboxAssetPlugin {
+        cache_dir: assets_dir.join("skyboxes"),
+        asset_dir: std::path::PathBuf::from("skyboxes"),
+        manifest_file: std::path::PathBuf::from("manifest.ron"),
+        default_skybox: None,
+        apply_to_all_cameras: true,
+        env_lighting: true,
+    }
+}
+
 #[cfg(feature = "inspector")]
 #[derive(Component)]
 struct InspectorWindow;
@@ -212,6 +225,7 @@ impl Plugin for EditorPlugin {
                     .build(),
             )
             .add_plugins(plugins::kdl_document::plugin)
+            .add_plugins(skybox_asset_plugin())
             // Note: we added this because bevy 0.17.3 changed its behavior
             // which broke bevy_editor_cam. See here:
             // https://github.com/aevyrie/bevy_editor_cam/issues/61

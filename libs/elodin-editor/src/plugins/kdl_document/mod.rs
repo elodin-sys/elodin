@@ -45,6 +45,7 @@ pub(crate) fn plugin(app: &mut App) {
         (
             systems::emit_document_reloads,
             systems::emit_document_load_failures,
+            systems::activate_document_skybox,
         )
             .in_set(KdlDocumentSet::AssetEvents),
     );

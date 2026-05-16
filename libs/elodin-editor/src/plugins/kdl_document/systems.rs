@@ -1,5 +1,6 @@
 use bevy::asset::{AssetEvent, AssetLoadFailedEvent};
 use bevy::prelude::*;
+use bevy_ai_skybox::prelude::SetActiveSkybox;
 use std::path::PathBuf;
 
 use super::commands::*;
@@ -182,6 +183,24 @@ pub(super) fn emit_document_reloads(
             document,
             changed_window_indices: changed,
         });
+    }
+}
+
+pub(super) fn activate_document_skybox(
+    mut loaded: MessageReader<DocumentLoaded>,
+    mut reloaded: MessageReader<DocumentReloaded>,
+    mut skyboxes: MessageWriter<SetActiveSkybox>,
+) {
+    for event in loaded.read() {
+        if let Some(skybox) = event.document.root.skybox.as_ref() {
+            skyboxes.write(SetActiveSkybox::ByName(skybox.name.clone()));
+        }
+    }
+
+    for event in reloaded.read() {
+        if let Some(skybox) = event.document.root.skybox.as_ref() {
+            skyboxes.write(SetActiveSkybox::ByName(skybox.name.clone()));
+        }
     }
 }
 
