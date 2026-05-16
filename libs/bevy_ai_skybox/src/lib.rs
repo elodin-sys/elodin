@@ -15,6 +15,7 @@ use std::{
 use bevy::{
     asset::AssetEvent,
     core_pipeline::Skybox,
+    ecs::system::SystemParam,
     image::Image,
     light::{EnvironmentMapLight, GeneratedEnvironmentMapLight},
     prelude::*,
@@ -437,6 +438,46 @@ struct GeneratedSkybox {
     entry: ManifestEntry,
 }
 
+mod system_params {
+    use bevy::{
+        asset::{AssetServer, Assets},
+        core_pipeline::Skybox,
+        ecs::system::SystemParam,
+        image::Image,
+        prelude::*,
+    };
+
+    use super::{
+        PrimarySkybox, SetActiveSkybox, SkyboxAssetSettings, SkyboxCache, SkyboxFailed, SkyboxReady,
+    };
+
+    type SkyboxCameraQuery<'w, 's> = Query<
+        'w,
+        's,
+        (
+            Entity,
+            Option<&'static PrimarySkybox>,
+            Option<&'static Skybox>,
+        ),
+        With<Camera3d>,
+    >;
+
+    #[derive(SystemParam)]
+    pub(super) struct ApplySkyboxParams<'w, 's> {
+        pub commands: Commands<'w, 's>,
+        pub cache: ResMut<'w, SkyboxCache>,
+        pub reader: MessageReader<'w, 's, SetActiveSkybox>,
+        pub settings: Res<'w, SkyboxAssetSettings>,
+        pub asset_server: Res<'w, AssetServer>,
+        pub images: ResMut<'w, Assets<Image>>,
+        pub cameras: SkyboxCameraQuery<'w, 's>,
+        pub ready: MessageWriter<'w, SkyboxReady>,
+        pub failed: MessageWriter<'w, SkyboxFailed>,
+    }
+}
+
+use system_params::ApplySkyboxParams;
+
 #[derive(Clone, Debug)]
 pub struct SkyboxAssetPlugin {
     pub cache_dir: PathBuf,
@@ -602,25 +643,15 @@ fn finish_generation_jobs(
     }
 }
 
-fn apply_skybox_to_camera(
-    mut commands: Commands,
-    mut cache: ResMut<SkyboxCache>,
-    mut reader: MessageReader<SetActiveSkybox>,
-    settings: Res<SkyboxAssetSettings>,
-    asset_server: Res<AssetServer>,
-    mut images: ResMut<Assets<Image>>,
-    mut cameras: Query<(Entity, Option<&PrimarySkybox>, Option<&Skybox>), With<Camera3d>>,
-    mut ready: MessageWriter<SkyboxReady>,
-    mut failed: MessageWriter<SkyboxFailed>,
-) {
-    for message in reader.read() {
+fn apply_skybox_to_camera(mut params: ApplySkyboxParams) {
+    for message in params.reader.read() {
         let (name, handle, disk_bytes) = match message {
             SetActiveSkybox::ByName(name) => {
-                let entry = match cache.entry(name) {
+                let entry = match params.cache.entry(name) {
                     Ok(entry) => entry.clone(),
                     Err(error) => {
                         warn!("{error}");
-                        failed.write(SkyboxFailed {
+                        params.failed.write(SkyboxFailed {
                             name: name.clone(),
                             error,
                         });
@@ -628,13 +659,18 @@ fn apply_skybox_to_camera(
                     }
                 };
                 let cubemap_file = entry.cubemap_file.clone();
-                let handle = cache
+                let handle = params
+                    .cache
                     .handles
                     .entry(name.clone())
-                    .or_insert_with(|| asset_server.load(settings.asset_path_for(&cubemap_file)))
+                    .or_insert_with(|| {
+                        params
+                            .asset_server
+                            .load(params.settings.asset_path_for(&cubemap_file))
+                    })
                     .clone();
-                cache.active = Some(name.clone());
-                let disk_bytes = fs::metadata(settings.cache_dir.join(&entry.cubemap_file))
+                params.cache.active = Some(name.clone());
+                let disk_bytes = fs::metadata(params.settings.cache_dir.join(&entry.cubemap_file))
                     .map(|metadata| metadata.len())
                     .unwrap_or(0);
                 (Some(name.clone()), handle, disk_bytes)
@@ -642,19 +678,19 @@ fn apply_skybox_to_camera(
             SetActiveSkybox::ByHandle(handle) => (None, handle.clone(), 0),
         };
 
-        configure_cubemap_image(&handle, &mut images);
-        for (entity, primary, skybox) in &mut cameras {
-            if !settings.apply_to_all_cameras && primary.is_none() {
+        configure_cubemap_image(&handle, &mut params.images);
+        for (entity, primary, skybox) in &mut params.cameras {
+            if !params.settings.apply_to_all_cameras && primary.is_none() {
                 continue;
             }
             let brightness = skybox.map(|s| s.brightness).unwrap_or(1000.0);
-            let mut entity_commands = commands.entity(entity);
+            let mut entity_commands = params.commands.entity(entity);
             entity_commands.insert(Skybox {
                 image: handle.clone(),
                 brightness,
                 ..default()
             });
-            if settings.env_lighting {
+            if params.settings.env_lighting {
                 entity_commands.remove::<EnvironmentMapLight>();
                 entity_commands.insert(GeneratedEnvironmentMapLight {
                     environment_map: handle.clone(),
@@ -668,7 +704,7 @@ fn apply_skybox_to_camera(
 
         if let Some(name) = name {
             debug!("active skybox: {name}");
-            ready.write(SkyboxReady {
+            params.ready.write(SkyboxReady {
                 name,
                 handle,
                 disk_bytes,
