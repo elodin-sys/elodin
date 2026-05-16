@@ -296,7 +296,18 @@ impl StepContext {
             };
             let entry = match timestamp {
                 None => msg_log.latest(),
-                Some(ts) => msg_log.get_nearest(Timestamp(ts)),
+                Some(ts) => {
+                    let requested = Timestamp(ts);
+                    if msg_log
+                        .timestamps()
+                        .first()
+                        .is_some_and(|first| requested < *first)
+                    {
+                        None
+                    } else {
+                        msg_log.get_nearest(requested)
+                    }
+                }
             };
             if let Some((_ts, buf)) = entry {
                 let data: Vec<u8> = buf.to_vec();
