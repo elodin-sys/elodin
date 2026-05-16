@@ -700,6 +700,10 @@ pub struct TimestampedMsgStream {
     pub msg_id: PacketId,
 }
 
+impl Request for TimestampedMsgStream {
+    type Reply<B: IoBuf + Clone> = MsgBuf<B>;
+}
+
 impl Msg for TimestampedMsgStream {
     const ID: PacketId = [224, 38];
 }

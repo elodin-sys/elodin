@@ -19,6 +19,7 @@ use impeller2::types::{OwnedPacket, Timestamp};
 use impeller2_bevy::{CommandsExt, CurrentStreamId, PacketGrantR};
 use impeller2_wkt::{
     CurrentTimestamp, ErrorResponse, FixedRateMsgStream, FixedRateOp, GetMsgs, MsgBatch,
+    TimestampedMsgStream,
 };
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -188,8 +189,8 @@ impl Default for StreamState {
 ///
 /// Two sources fill `raw_frames`:
 /// - A one-shot `GetMsgs` backfill (historical data already in the DB)
-/// - A continuous `FixedRateMsgStream` live tail (new data arriving in real
-///   time from a GStreamer / OBS source)
+/// - A continuous live tail (`FixedRateMsgStream` for H.264 video streams,
+///   `TimestampedMsgStream` for raw RGBA sensor views)
 ///
 /// Neither source ever touches the decoder directly.  The playback loop reads
 /// `CurrentTimestamp`, looks up the cache, and feeds controlled sequences to
@@ -719,31 +720,43 @@ pub struct VideoStreamWidget<'w, 's> {
 // DB request helpers
 // ---------------------------------------------------------------------------
 
-/// Start the `FixedRateMsgStream` for live-tail cache population.
+/// Start the live-tail stream for cache population.
 ///
 /// The callback **only** inserts raw frames into the cache and records
 /// keyframe timestamps.  It never touches the decoder.
-fn send_stream_request(commands: &mut Commands, entity: Entity, msg_id: [u8; 2], stream_id: u64) {
-    commands.send_msg_req_reply_raw(
-        FixedRateMsgStream {
-            msg_id,
-            fixed_rate: FixedRateOp {
-                stream_id,
-                behavior: Default::default(),
+fn send_stream_request(
+    commands: &mut Commands,
+    entity: Entity,
+    msg_id: [u8; 2],
+    stream_id: u64,
+    is_h264: bool,
+) {
+    let handler = move |InRef(pkt): InRef<OwnedPacket<PacketGrantR>>,
+                        mut caches: Query<&mut VideoFrameCache>| {
+        if let OwnedPacket::Msg(msg_buf) = pkt
+            && let Some(timestamp) = msg_buf.timestamp
+            && let Ok(mut cache) = caches.get_mut(entity)
+        {
+            cache.insert_raw(timestamp, msg_buf.buf.to_vec());
+            cache.last_stream_activity = Some(Instant::now());
+        }
+        false
+    };
+
+    if is_h264 {
+        commands.send_msg_req_reply_raw(
+            FixedRateMsgStream {
+                msg_id,
+                fixed_rate: FixedRateOp {
+                    stream_id,
+                    behavior: Default::default(),
+                },
             },
-        },
-        move |InRef(pkt): InRef<OwnedPacket<PacketGrantR>>,
-              mut caches: Query<&mut VideoFrameCache>| {
-            if let OwnedPacket::Msg(msg_buf) = pkt
-                && let Some(timestamp) = msg_buf.timestamp
-                && let Ok(mut cache) = caches.get_mut(entity)
-            {
-                cache.insert_raw(timestamp, msg_buf.buf.to_vec());
-                cache.last_stream_activity = Some(Instant::now());
-            }
-            false
-        },
-    );
+            handler,
+        );
+    } else {
+        commands.send_msg_req_reply_raw(TimestampedMsgStream { msg_id }, handler);
+    }
 }
 
 /// Maximum payload size (in bytes) for a single backfill `GetMsgs` batch.
@@ -1127,7 +1140,7 @@ pub fn connect_streams(
                         stream.msg_name,
                         stream.raw_rgba_dims
                     );
-                    send_stream_request(&mut commands, entity, msg_id, stream_id.0);
+                    send_stream_request(&mut commands, entity, msg_id, stream_id.0, cache.is_h264);
                     stream.state = StreamState::Active;
                 }
             }
@@ -1186,7 +1199,7 @@ pub fn connect_streams(
                         cache.backfill_frontier,
                         limit,
                     );
-                    send_stream_request(&mut commands, entity, msg_id, stream_id.0);
+                    send_stream_request(&mut commands, entity, msg_id, stream_id.0, cache.is_h264);
                     cache.last_stream_activity = None;
                 }
             }
