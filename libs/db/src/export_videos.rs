@@ -145,11 +145,11 @@ fn export_one_h264(
     name: &str,
     output_path: &std::path::Path,
     default_fps: u32,
-) -> Result<(), Error> {
+) -> Result<bool, Error> {
     let timestamps = msg_log.timestamps();
     if timestamps.is_empty() {
         eprintln!("  {}: no frames, skipping", name);
-        return Ok(());
+        return Ok(false);
     }
 
     let mut sps_bytes: Option<&[u8]> = None;
@@ -165,7 +165,7 @@ fn export_one_h264(
         Some(b) => b,
         None => {
             eprintln!("  {}: no SPS NAL found in first frames, skipping", name);
-            return Ok(());
+            return Ok(false);
         }
     };
 
@@ -235,7 +235,7 @@ fn export_one_h264(
         frame_count,
         fps
     );
-    Ok(())
+    Ok(true)
 }
 
 /// Export a raw RGBA sensor-camera message log by encoding it to H.264 first.
@@ -245,11 +245,11 @@ fn export_one_sensor(
     output_path: &std::path::Path,
     cfg: &SensorCameraConfig,
     default_fps: u32,
-) -> Result<(), Error> {
+) -> Result<bool, Error> {
     let timestamps = msg_log.timestamps();
     if timestamps.is_empty() {
         eprintln!("  {}: no frames, skipping", name);
-        return Ok(());
+        return Ok(false);
     }
 
     let width = cfg.width;
@@ -294,7 +294,9 @@ fn export_one_sensor(
 
     if encoded_count == 0 {
         eprintln!("  {}: no valid sensor_camera frames, skipping", name);
-        return Ok(());
+        drop(muxer);
+        let _ = std::fs::remove_file(&mp4_path);
+        return Ok(false);
     }
 
     let _stats = muxer
@@ -320,7 +322,7 @@ fn export_one_sensor(
         encoded_count,
         fps
     );
-    Ok(())
+    Ok(true)
 }
 
 fn export_one(
@@ -329,7 +331,7 @@ fn export_one(
     output_path: &std::path::Path,
     default_fps: u32,
     sensor_cfg: Option<&SensorCameraConfig>,
-) -> Result<(), Error> {
+) -> Result<bool, Error> {
     match sensor_cfg {
         Some(cfg) => export_one_sensor(msg_log, name, output_path, cfg, default_fps),
         None => export_one_h264(msg_log, name, output_path, default_fps),
@@ -448,10 +450,14 @@ pub fn run(
         let mut count = 0;
         for (packet_id, name, msg_log) in video_logs {
             let sensor_cfg = sensor_by_msg_id.get(&packet_id);
-            if let Err(e) = export_one(msg_log, &name, &output_path, fps, sensor_cfg) {
-                eprintln!("  {}: error: {}", name, e);
-            } else {
-                count += 1;
+            match export_one(msg_log, &name, &output_path, fps, sensor_cfg) {
+                Ok(true) => {
+                    count += 1;
+                }
+                Ok(false) => {}
+                Err(e) => {
+                    eprintln!("  {}: error: {}", name, e);
+                }
             }
         }
         count

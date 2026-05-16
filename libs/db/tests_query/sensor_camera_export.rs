@@ -20,7 +20,7 @@ fn sensor_camera_config() -> SensorCameraConfig {
         near: 0.02,
         far: 100.0,
         pos_offset: [0.0; 3],
-        look_at_offset: [1.0, 0.0, 0.0],
+        rot_offset: [0.0; 3],
         format: "rgba".to_string(),
         effect: "normal".to_string(),
         effect_params: HashMap::new(),
@@ -29,6 +29,7 @@ fn sensor_camera_config() -> SensorCameraConfig {
         frustums_color: color(0.0, 1.0, 0.4, 0.4),
         projection_color: color(0.0, 1.0, 0.4, 0.1),
         frustums_thickness: 0.008,
+        fps: 30.0,
     }
 }
 
@@ -100,4 +101,37 @@ fn sensor_camera_rgba_msg_log_exports_to_mp4() {
     let sps = Sps::parse_with_emulation_prevention(Cursor::new(sps)).expect("parse SPS");
     assert_eq!(sps.width(), camera.width as u64);
     assert_eq!(sps.height(), camera.height as u64);
+}
+
+#[test]
+fn malformed_sensor_camera_frames_do_not_leave_mp4() {
+    let tempdir = tempfile::tempdir().expect("tempdir");
+    let db_path = tempdir.path().join("db");
+    let out_path = tempdir.path().join("out");
+    let db = DB::create(db_path.clone()).expect("DB::create");
+    let camera = sensor_camera_config();
+    let sensor_json = serde_json::to_string(&vec![camera.clone()]).expect("sensor json");
+
+    db.with_state_mut(|state| {
+        state
+            .db_config
+            .metadata
+            .insert("sensor_cameras".to_string(), sensor_json);
+    });
+
+    let id = msg_id(&camera.camera_name);
+    db.push_msg(Timestamp(1_000_000), id, &[0, 1, 2, 3])
+        .expect("push malformed msg");
+    db.save_db_state().expect("save_db_state");
+    db.flush_all().expect("flush_all");
+    drop(db);
+
+    elodin_db::export_videos::run(db_path, out_path.clone(), None, 30).expect("export_videos");
+
+    let mp4_path = out_path.join("drone.fpv.mp4");
+    assert!(
+        !mp4_path.exists(),
+        "malformed sensor_camera frames should not leave {}",
+        mp4_path.display()
+    );
 }
