@@ -15,7 +15,6 @@ use std::{
 use bevy::{
     asset::AssetEvent,
     core_pipeline::Skybox,
-    ecs::system::SystemParam,
     image::Image,
     light::{EnvironmentMapLight, GeneratedEnvironmentMapLight},
     prelude::*,
