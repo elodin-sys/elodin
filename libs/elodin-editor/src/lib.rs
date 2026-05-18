@@ -3,6 +3,7 @@
 use std::{collections::HashMap, ops::Range, sync::Arc, time::Duration};
 
 use crate::plugins::editor_cam_touch;
+use crate::spatial::{FloatingOrigin, FloatingOriginSettings, GridCell};
 use bevy::{
     DefaultPlugins,
     asset::{UnapprovedPathMode, embedded_asset},
@@ -25,7 +26,6 @@ use bevy_geo_frames::GeoFramePlugin;
 use bevy_geo_frames::{GeoContext, GeoFrame, GeoPosition, GeoRotation};
 use bevy_picking::PickingSettings;
 use bevy_render::alpha::AlphaMode;
-use big_space::{FloatingOrigin, FloatingOriginSettings, GridCell};
 use impeller2::types::{ComponentId, OwnedPacket};
 use impeller2::types::{Msg, Timestamp};
 use impeller2_bevy::{
@@ -66,6 +66,7 @@ pub mod object_3d;
 mod offset_parse;
 pub mod plugins;
 pub mod sensor_camera;
+pub(crate) mod spatial;
 pub mod ui;
 pub mod vector_arrow;
 
@@ -222,7 +223,7 @@ impl Plugin for EditorPlugin {
             )
             //.add_plugins(DefaultPickingPlugins)
             .add_plugins(bevy_editor_cam::DefaultEditorCamPlugins)
-            .add_plugins(big_space::FloatingOriginPlugin::<i128>::new(16_000., 100.))
+            .add_plugins(spatial::FloatingOriginPlugin::<i128>::new(16_000., 100.))
             .add_plugins(EmbeddedAssetPlugin)
             .add_plugins(EguiPlugin::default())
             .add_plugins(bevy_infinite_grid::InfiniteGridPlugin)
@@ -271,7 +272,7 @@ impl Plugin for EditorPlugin {
                     set_viewport_pos,
                     sync_pos,
                     bevy_geo_frames::apply_geo_rotation,
-                    bevy_geo_frames::big_space::apply_big_translation::<i128>,
+                    spatial::apply_big_translation::<i128>,
                 )
                     .chain()
                     .after(impeller2_bevy::sink)
@@ -324,7 +325,7 @@ impl Plugin for EditorPlugin {
         }
 
         #[cfg(feature = "debug")]
-        app.add_plugins(big_space::debug::FloatingOriginDebugPlugin::<i128>::default());
+        app.add_plugins(spatial::debug::FloatingOriginDebugPlugin::<i128>::default());
 
         #[cfg(not(target_family = "wasm"))]
         app.add_plugins(crate::ui::startup_window::StartupPlugin);

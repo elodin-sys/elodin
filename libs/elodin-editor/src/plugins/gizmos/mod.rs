@@ -1,3 +1,4 @@
+use crate::spatial::{FloatingOriginSettings, GridCell};
 use bevy::camera::RenderTarget;
 use bevy::camera::visibility::RenderLayers;
 use bevy::picking::prelude::Pickable;
@@ -18,7 +19,6 @@ use bevy::{
 };
 use bevy_geo_frames::prelude::*;
 use bevy_render::alpha::AlphaMode;
-use big_space::FloatingOriginSettings;
 use impeller2::types::ComponentId;
 use impeller2_bevy::EntityMap;
 use impeller2_wkt::{
@@ -41,7 +41,7 @@ type ArrowLabelCameraItem<'w> = (
     Entity,
     &'w Camera,
     &'w GlobalTransform,
-    &'w big_space::GridCell<i128>,
+    &'w GridCell<i128>,
     Option<&'w ViewportConfig>,
 );
 
@@ -622,7 +622,7 @@ fn lighten_color(color: Color, factor: f32) -> Color {
 fn update_arrow_label_ui(
     mut commands: Commands,
     arrows: Query<(Entity, &VectorArrowState)>,
-    arrow_transforms: Query<(&Transform, &big_space::GridCell<i128>)>,
+    arrow_transforms: Query<(&Transform, &GridCell<i128>)>,
     cameras: Query<ArrowLabelCameraItem<'_>, With<MainCamera>>,
     floating_origin: Res<FloatingOriginSettings>,
     mut labels: Query<(Entity, &ArrowLabelUI, &mut Node, &mut Text, &mut TextColor)>,

@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
+use crate::spatial::{FloatingOrigin, GridCell};
 use bevy::{
     a11y::AccessibilityPlugin,
     animation::AnimationPlugin,
@@ -28,7 +29,6 @@ use bevy::{
 };
 use bevy_geo_frames::GeoContext;
 use bevy_mat3_material::Mat3Material;
-use big_space::{FloatingOrigin, GridCell};
 use impeller2::types::{LenPacket, Timestamp, msg_id};
 use impeller2_bevy::MsgPacketTx;
 use impeller2_kdl::FromKdl;
@@ -90,7 +90,9 @@ impl Plugin for HeadlessEditorPlugin {
                     }),
             )
             .add_plugins(impeller2_bevy::Impeller2Plugin)
-            .add_plugins(big_space::FloatingOriginPlugin::<i128>::new(16_000., 100.))
+            .add_plugins(crate::spatial::FloatingOriginPlugin::<i128>::new(
+                16_000., 100.,
+            ))
             .add_plugins(bevy_mat3_material::Mat3MaterialPlugin)
             .add_plugins(GeoFramePlugin {
                 apply_transforms: false,
@@ -112,7 +114,7 @@ impl Plugin for HeadlessEditorPlugin {
                     // directly), preventing one-frame jitter in `sensor_view`.
                     sync_pos,
                     bevy_geo_frames::apply_geo_rotation,
-                    bevy_geo_frames::big_space::apply_big_translation::<i128>,
+                    crate::spatial::apply_big_translation::<i128>,
                 )
                     .chain()
                     .after(impeller2_bevy::sink)

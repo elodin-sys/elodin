@@ -1,5 +1,6 @@
 use std::time::Instant;
 
+use crate::spatial::GridCell;
 use bevy::{
     app::{App, Plugin},
     asset::{Assets, embedded_asset},
@@ -33,7 +34,6 @@ use bevy::{
         view::ViewTarget,
     },
 };
-use big_space::GridCell;
 use impeller2::types::ComponentId;
 use impeller2_wkt::DbConfig;
 pub use impeller2_wkt::SensorCameraConfig;

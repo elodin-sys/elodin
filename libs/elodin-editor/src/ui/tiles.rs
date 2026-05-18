@@ -1426,7 +1426,7 @@ impl ViewportPane {
             }),
             main_camera_layers,
             MainCamera,
-            big_space::GridCell::<i128>::default(),
+            crate::spatial::GridCell::<i128>::default(),
             EditorCam {
                 orbit_constraint: OrbitConstraint::Fixed {
                     up: Vec3::Y,

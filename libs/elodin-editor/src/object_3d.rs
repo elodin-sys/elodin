@@ -1,3 +1,4 @@
+use crate::spatial::GridCell;
 use bevy::camera::visibility::RenderLayers;
 use bevy::ecs::{hierarchy::ChildOf, relationship::Relationship};
 use bevy::log::warn_once;
@@ -8,7 +9,6 @@ use bevy::scene::{SceneInstance, SceneRoot, SceneSpawner};
 use bevy_geo_frames::{GeoPosition, GeoRotation};
 use bevy_mat3_material::{Mat3Material, Mat3Params, Mat3TransformExt, uv_sphere_grid_line_mesh};
 use bevy_render::alpha::AlphaMode;
-use big_space::GridCell;
 use bitvec::prelude::*;
 use eql::Expr;
 use impeller2_bevy::EntityMap;

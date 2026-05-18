@@ -2,6 +2,7 @@
 
 use std::collections::BTreeMap;
 
+use crate::spatial::GridCell;
 use bevy::{
     animation::graph,
     app::{Startup, Update},
@@ -15,7 +16,6 @@ use bevy::{
     math::{DQuat, Mat4, Vec4},
 };
 use bevy_geo_frames::{GeoContext, GeoFrame, GeoRotation};
-use big_space::GridCell;
 use eql;
 use impeller2_bevy::{CommandsExt, ComponentMetadataRegistry, EntityMap};
 use impeller2_wkt::LastUpdated;

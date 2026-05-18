@@ -59,7 +59,7 @@ mod platform {
 
 use platform::PRIMARY_ORDER_OFFSET;
 
-use big_space::GridCell;
+use crate::spatial::GridCell;
 use plot_3d::LinePlot3dPlugin;
 use schematic::SchematicPlugin;
 
@@ -287,7 +287,7 @@ pub struct CameraQuery {
     grid_cell: &'static mut GridCell<i128>,
     parent: Option<&'static ChildOf>,
     grid_handle: Option<&'static GridHandle>,
-    no_propagate_rot: Option<&'static big_space::propagation::NoPropagateRot>,
+    no_propagate_rot: Option<&'static crate::spatial::propagation::NoPropagateRot>,
 }
 
 pub struct UiPlugin;

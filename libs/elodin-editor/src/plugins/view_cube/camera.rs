@@ -1,5 +1,6 @@
 //! Camera systems for the ViewCube plugin.
 
+use crate::spatial::{FloatingOrigin, FloatingOriginSettings, GridCell};
 use bevy::camera::visibility::RenderLayers;
 use bevy::ecs::hierarchy::ChildOf;
 use bevy::ecs::system::SystemParam;
@@ -9,7 +10,6 @@ use bevy::prelude::*;
 use bevy_editor_cam::controller::component::EditorCam;
 use bevy_editor_cam::controller::motion::CurrentMotion;
 use bevy_editor_cam::extensions::look_to::LookToTrigger;
-use big_space::{FloatingOrigin, FloatingOriginSettings, GridCell};
 use impeller2_bevy::EntityMap;
 use impeller2_wkt::ComponentValue;
 use std::collections::HashMap;

@@ -1,5 +1,6 @@
 use std::mem;
 
+use crate::spatial::GridCell;
 use crate::{
     SelectedTimeRange,
     ui::plot::{
@@ -54,7 +55,6 @@ use bevy_render::{
     sync_world::{MainEntity, SyncToRenderWorld, TemporaryRenderEntity},
     view::RetainedViewEntity,
 };
-use big_space::GridCell;
 use binding_types::storage_buffer_read_only_sized;
 use impeller2_wkt::{CurrentTimestamp, EarliestTimestamp, LastUpdated};
 
