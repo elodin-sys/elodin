@@ -64,7 +64,7 @@ impl FloatingOriginSettings {
 pub struct BigSpaceRoot;
 
 #[cfg(feature = "big_space")]
-type UnparentedGridCellFilter = (With<GridCell>, Without<ChildOf>, Without<BigSpaceRoot>);
+type ParentlessGridCellFilter = (With<GridCell>, Without<ChildOf>, Without<BigSpaceRoot>);
 
 #[cfg(feature = "big_space")]
 pub struct FloatingOriginPlugin {
@@ -89,7 +89,7 @@ impl Plugin for FloatingOriginPlugin {
         app.insert_resource(self.settings.clone())
             .add_plugins(big_space::prelude::BigSpaceDefaultPlugins)
             .add_systems(Startup, setup_floating_origin)
-            .add_systems(PreUpdate, attach_unparented_grid_cells);
+            .add_systems(PreUpdate, attach_parentless_grid_cells);
     }
 }
 
@@ -114,10 +114,10 @@ pub fn setup_floating_origin(mut commands: Commands, settings: Res<FloatingOrigi
 }
 
 #[cfg(feature = "big_space")]
-fn attach_unparented_grid_cells(
+fn attach_parentless_grid_cells(
     mut commands: Commands,
     roots: Query<Entity, With<BigSpaceRoot>>,
-    entities: Query<Entity, UnparentedGridCellFilter>,
+    entities: Query<Entity, ParentlessGridCellFilter>,
 ) {
     let Some(root) = roots.iter().next() else {
         return;
