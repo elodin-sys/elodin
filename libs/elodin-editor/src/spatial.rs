@@ -1,20 +1,131 @@
-#[cfg(not(feature = "big_space"))]
 use bevy::{math::DVec3, prelude::*};
 
 #[cfg(feature = "big_space")]
-pub use big_space::{FloatingOrigin, FloatingOriginPlugin, FloatingOriginSettings, GridCell};
+pub use big_space::prelude::{BigSpace, CellCoord as GridCell, FloatingOrigin, Grid};
 
 #[cfg(feature = "big_space")]
 pub use bevy_geo_frames::big_space::apply_big_translation;
 
-#[cfg(all(feature = "big_space", feature = "debug"))]
-pub mod debug {
-    pub use big_space::debug::FloatingOriginDebugPlugin;
-}
+#[cfg(feature = "big_space")]
+#[derive(Component, Default, Clone, Copy, Debug)]
+pub struct NoPropagateRot;
 
 #[cfg(feature = "big_space")]
 pub mod propagation {
-    pub use big_space::propagation::NoPropagateRot;
+    pub use super::NoPropagateRot;
+}
+
+#[cfg(feature = "big_space")]
+pub mod debug {
+    use bevy::prelude::*;
+
+    #[derive(Default)]
+    #[allow(dead_code)]
+    pub struct FloatingOriginDebugPlugin;
+
+    impl Plugin for FloatingOriginDebugPlugin {
+        fn build(&self, _app: &mut App) {}
+    }
+}
+
+#[cfg(feature = "big_space")]
+#[derive(Resource, Clone, Debug)]
+pub struct FloatingOriginSettings {
+    grid: Grid,
+}
+
+#[cfg(feature = "big_space")]
+impl FloatingOriginSettings {
+    pub fn new(grid_edge_length: f32, switching_threshold: f32) -> Self {
+        Self {
+            grid: Grid::new(grid_edge_length, switching_threshold),
+        }
+    }
+
+    pub fn grid(&self) -> Grid {
+        self.grid.clone()
+    }
+
+    pub fn translation_to_grid(&self, translation: impl Into<DVec3>) -> (GridCell, Vec3) {
+        self.grid.translation_to_grid(translation)
+    }
+
+    pub fn grid_edge_length(&self) -> f32 {
+        self.grid.cell_edge_length()
+    }
+
+    pub fn grid_position_double(&self, grid_cell: &GridCell, transform: &Transform) -> DVec3 {
+        self.grid.grid_position_double(grid_cell, transform)
+    }
+}
+
+#[cfg(feature = "big_space")]
+#[derive(Component)]
+pub struct BigSpaceRoot;
+
+#[cfg(feature = "big_space")]
+type UnparentedGridCellFilter = (With<GridCell>, Without<ChildOf>, Without<BigSpaceRoot>);
+
+#[cfg(feature = "big_space")]
+pub struct FloatingOriginPlugin {
+    settings: FloatingOriginSettings,
+}
+
+#[cfg(feature = "big_space")]
+impl FloatingOriginPlugin {
+    pub fn new(grid_edge_length: f64, switching_threshold: f64) -> Self {
+        Self {
+            settings: FloatingOriginSettings::new(
+                grid_edge_length as f32,
+                switching_threshold as f32,
+            ),
+        }
+    }
+}
+
+#[cfg(feature = "big_space")]
+impl Plugin for FloatingOriginPlugin {
+    fn build(&self, app: &mut App) {
+        app.insert_resource(self.settings.clone())
+            .add_plugins(big_space::prelude::BigSpaceDefaultPlugins)
+            .add_systems(Startup, setup_floating_origin)
+            .add_systems(PreUpdate, attach_unparented_grid_cells);
+    }
+}
+
+#[cfg(feature = "big_space")]
+pub fn setup_floating_origin(mut commands: Commands, settings: Res<FloatingOriginSettings>) {
+    let root = commands
+        .spawn((
+            BigSpace::default(),
+            settings.grid(),
+            BigSpaceRoot,
+            Name::new("big space root"),
+        ))
+        .id();
+
+    commands.spawn((
+        FloatingOrigin,
+        GridCell::default(),
+        Transform::IDENTITY,
+        ChildOf(root),
+        Name::new("floating origin"),
+    ));
+}
+
+#[cfg(feature = "big_space")]
+fn attach_unparented_grid_cells(
+    mut commands: Commands,
+    roots: Query<Entity, With<BigSpaceRoot>>,
+    entities: Query<Entity, UnparentedGridCellFilter>,
+) {
+    let Some(root) = roots.iter().next() else {
+        return;
+    };
+
+    for entity in &entities {
+        commands.entity(entity).insert(ChildOf(root));
+    }
 }
 
 #[cfg(not(feature = "big_space"))]
@@ -23,20 +134,16 @@ pub struct FloatingOrigin;
 
 #[cfg(not(feature = "big_space"))]
 #[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
-pub struct GridCell<P = i128> {
-    pub x: P,
-    pub y: P,
-    pub z: P,
+pub struct GridCell {
+    pub x: i128,
+    pub y: i128,
+    pub z: i128,
 }
 
 #[cfg(not(feature = "big_space"))]
-impl<P: Default> Default for GridCell<P> {
+impl Default for GridCell {
     fn default() -> Self {
-        Self {
-            x: P::default(),
-            y: P::default(),
-            z: P::default(),
-        }
+        Self { x: 0, y: 0, z: 0 }
     }
 }
 
@@ -48,7 +155,7 @@ pub struct FloatingOriginSettings {
 
 #[cfg(not(feature = "big_space"))]
 impl FloatingOriginSettings {
-    pub fn translation_to_grid<P: Default>(&self, translation: DVec3) -> (GridCell<P>, Vec3) {
+    pub fn translation_to_grid(&self, translation: DVec3) -> (GridCell, Vec3) {
         (GridCell::default(), translation.as_vec3())
     }
 
@@ -56,37 +163,32 @@ impl FloatingOriginSettings {
         self.grid_edge_length
     }
 
-    pub fn grid_position_double<P>(
-        &self,
-        _grid_cell: &GridCell<P>,
-        transform: &Transform,
-    ) -> DVec3 {
+    pub fn grid_position_double(&self, _grid_cell: &GridCell, transform: &Transform) -> DVec3 {
         transform.translation.as_dvec3()
     }
 }
 
 #[cfg(not(feature = "big_space"))]
-pub struct FloatingOriginPlugin<P = i128> {
+pub struct FloatingOriginPlugin {
     grid_edge_length: f32,
-    _marker: std::marker::PhantomData<P>,
 }
 
 #[cfg(not(feature = "big_space"))]
-impl<P> FloatingOriginPlugin<P> {
+impl FloatingOriginPlugin {
     pub fn new(grid_edge_length: f64, _switch_distance: f64) -> Self {
         Self {
             grid_edge_length: grid_edge_length as f32,
-            _marker: std::marker::PhantomData,
         }
     }
 }
 
 #[cfg(not(feature = "big_space"))]
-impl<P: Send + Sync + 'static> Plugin for FloatingOriginPlugin<P> {
+impl Plugin for FloatingOriginPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(FloatingOriginSettings {
             grid_edge_length: self.grid_edge_length,
-        });
+        })
+        .add_systems(Startup, setup_floating_origin);
     }
 }
 
@@ -96,9 +198,9 @@ pub mod debug {
 
     #[derive(Default)]
     #[allow(dead_code)]
-    pub struct FloatingOriginDebugPlugin<P = i128>(std::marker::PhantomData<P>);
+    pub struct FloatingOriginDebugPlugin;
 
-    impl<P: Send + Sync + 'static> Plugin for FloatingOriginDebugPlugin<P> {
+    impl Plugin for FloatingOriginDebugPlugin {
         fn build(&self, _app: &mut App) {}
     }
 }
@@ -112,14 +214,20 @@ pub mod propagation {
 }
 
 #[cfg(not(feature = "big_space"))]
-pub fn apply_big_translation<P: Default + Send + Sync + 'static>(
+pub fn setup_floating_origin(mut commands: Commands) {
+    commands.spawn((
+        FloatingOrigin,
+        GridCell::default(),
+        Transform::IDENTITY,
+        Name::new("floating origin"),
+    ));
+}
+
+#[cfg(not(feature = "big_space"))]
+pub fn apply_big_translation(
     ctx: ResMut<bevy_geo_frames::GeoContext>,
     mut q: Query<
-        (
-            &bevy_geo_frames::GeoPosition,
-            &mut Transform,
-            &mut GridCell<P>,
-        ),
+        (&bevy_geo_frames::GeoPosition, &mut Transform, &mut GridCell),
         Changed<bevy_geo_frames::GeoPosition>,
     >,
     floating_origin: Res<FloatingOriginSettings>,

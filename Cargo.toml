@@ -155,7 +155,8 @@ features = [
 ]
 
 [workspace.dependencies.big_space]
-version = "0.5"
+version = "0.12.0"
+features = ["i128"]
 
 [workspace.dependencies.muxide]
 path = "libs/muxide"
@@ -163,4 +164,3 @@ version = "0.2"
 
 [patch.crates-io]
 map_3d = { git = "https://github.com/shanecelis/map_3d.git", branch = "feat/sphere" }
-big_space = { git = "https://github.com/elodin-sys/big_space.git", branch = "no_prop_rot_v0.17" }

@@ -223,7 +223,7 @@ impl Plugin for EditorPlugin {
             )
             //.add_plugins(DefaultPickingPlugins)
             .add_plugins(bevy_editor_cam::DefaultEditorCamPlugins)
-            .add_plugins(spatial::FloatingOriginPlugin::<i128>::new(16_000., 100.))
+            .add_plugins(spatial::FloatingOriginPlugin::new(16_000., 100.))
             .add_plugins(EmbeddedAssetPlugin)
             .add_plugins(EguiPlugin::default())
             .add_plugins(bevy_infinite_grid::InfiniteGridPlugin)
@@ -243,7 +243,6 @@ impl Plugin for EditorPlugin {
             .add_plugins(crate::ui::plot::PlotPlugin)
             .add_plugins(crate::plugins::LogicalKeyPlugin)
             .add_systems(Startup, setup_egui_global_system)
-            .add_systems(Startup, setup_floating_origin)
             .add_systems(Startup, setup_window_icon)
             //.add_systems(Startup, spawn_clear_bg)
             .add_systems(Startup, setup_clear_state)
@@ -272,7 +271,7 @@ impl Plugin for EditorPlugin {
                     set_viewport_pos,
                     sync_pos,
                     bevy_geo_frames::apply_geo_rotation,
-                    spatial::apply_big_translation::<i128>,
+                    spatial::apply_big_translation,
                 )
                     .chain()
                     .after(impeller2_bevy::sink)
@@ -325,7 +324,7 @@ impl Plugin for EditorPlugin {
         }
 
         #[cfg(feature = "debug")]
-        app.add_plugins(spatial::debug::FloatingOriginDebugPlugin::<i128>::default());
+        app.add_plugins(spatial::debug::FloatingOriginDebugPlugin::default());
 
         #[cfg(not(target_family = "wasm"))]
         app.add_plugins(crate::ui::startup_window::StartupPlugin);
@@ -488,14 +487,6 @@ pub struct GridHandle {
     pub grid: Entity,
 }
 
-fn setup_floating_origin(mut commands: Commands) {
-    commands.spawn((
-        FloatingOrigin,
-        GridCell::<i128>::default(),
-        Transform::IDENTITY,
-    ));
-}
-
 fn spawn_ui_cam(mut commands: Commands, mut query: Query<Entity, With<PrimaryWindow>>) {
     let primary_window_ent = query
         .single_mut()
@@ -556,8 +547,8 @@ fn set_clear_color(mut clear_color: ResMut<ClearColor>) {
 
 #[allow(clippy::type_complexity)]
 fn set_floating_origin(
-    query: Query<(&Transform, &GridCell<i128>), (With<MainCamera>, Without<FloatingOrigin>)>,
-    mut floating_origin: Query<(&mut Transform, &mut GridCell<i128>), With<FloatingOrigin>>,
+    query: Query<(&Transform, &GridCell), (With<MainCamera>, Without<FloatingOrigin>)>,
+    mut floating_origin: Query<(&mut Transform, &mut GridCell), With<FloatingOrigin>>,
 ) {
     let Some((transform, grid_cell)) = query.iter().next() else {
         return;
@@ -819,13 +810,10 @@ fn set_icon_mac() {
     }
 }
 
-pub fn setup_cell(
-    query: Query<Entity, (With<WorldPos>, Without<GridCell<i128>>)>,
-    mut cmds: Commands,
-) {
+pub fn setup_cell(query: Query<Entity, (With<WorldPos>, Without<GridCell>)>, mut cmds: Commands) {
     for e in query.iter() {
         cmds.entity(e)
-            .insert((Transform::default(), GridCell::<i128>::default()));
+            .insert((Transform::default(), GridCell::default()));
     }
 }
 
@@ -904,7 +892,7 @@ pub fn sync_pos(
             &mut Transform,
             Option<&mut GeoPosition>,
             Option<&mut GeoRotation>,
-            &mut GridCell<i128>,
+            &mut GridCell,
             &WorldPos,
         ),
         Changed<WorldPos>,

@@ -177,7 +177,7 @@ pub struct LineBundle {
     pub config: LineConfig,
     pub global_transform: GlobalTransform,
     pub transform: Transform,
-    pub grid_cell: GridCell<i128>,
+    pub grid_cell: GridCell,
 }
 
 #[derive(Component, ShaderType, Clone, Copy, Reflect)]

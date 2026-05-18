@@ -284,7 +284,7 @@ pub struct CameraQuery {
     projection: &'static mut Projection,
     transform: &'static mut Transform,
     global_transform: &'static mut GlobalTransform,
-    grid_cell: &'static mut GridCell<i128>,
+    grid_cell: &'static mut GridCell,
     parent: Option<&'static ChildOf>,
     grid_handle: Option<&'static GridHandle>,
     no_propagate_rot: Option<&'static crate::spatial::propagation::NoPropagateRot>,
@@ -898,8 +898,8 @@ fn warn_camera_order_ambiguities(
 }
 
 fn sync_camera_grid_cell(
-    mut query: Query<(Option<&ChildOf>, &mut GridCell<i128>), With<MainCamera>>,
-    entity_transform_query: Query<&GridCell<i128>, Without<MainCamera>>,
+    mut query: Query<(Option<&ChildOf>, &mut GridCell), With<MainCamera>>,
+    entity_transform_query: Query<&GridCell, Without<MainCamera>>,
 ) {
     for (parent, mut grid_cell) in query.iter_mut() {
         if let Some(parent) = parent

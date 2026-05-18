@@ -1507,7 +1507,7 @@ pub fn create_object_3d_entity(
             Visibility::default(),
             InheritedVisibility::default(),
             ViewVisibility::default(),
-            GridCell::<i128>::default(),
+            GridCell::default(),
             impeller2_wkt::WorldPos::default(),
             Name::new(format!("object_3d {}", &data.mesh)),
         ))

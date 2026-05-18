@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
-use crate::spatial::{FloatingOrigin, GridCell};
 use bevy::{
     a11y::AccessibilityPlugin,
     animation::AnimationPlugin,
@@ -90,9 +89,7 @@ impl Plugin for HeadlessEditorPlugin {
                     }),
             )
             .add_plugins(impeller2_bevy::Impeller2Plugin)
-            .add_plugins(crate::spatial::FloatingOriginPlugin::<i128>::new(
-                16_000., 100.,
-            ))
+            .add_plugins(crate::spatial::FloatingOriginPlugin::new(16_000., 100.))
             .add_plugins(bevy_mat3_material::Mat3MaterialPlugin)
             .add_plugins(GeoFramePlugin {
                 apply_transforms: false,
@@ -114,14 +111,13 @@ impl Plugin for HeadlessEditorPlugin {
                     // directly), preventing one-frame jitter in `sensor_view`.
                     sync_pos,
                     bevy_geo_frames::apply_geo_rotation,
-                    crate::spatial::apply_big_translation::<i128>,
+                    crate::spatial::apply_big_translation,
                 )
                     .chain()
                     .after(impeller2_bevy::sink)
                     .in_set(PositionSync),
             )
             .add_systems(PreUpdate, crate::setup_cell.after(impeller2_bevy::sink))
-            .add_systems(Startup, setup_floating_origin)
             .add_systems(Startup, setup_headless_lighting)
             .init_resource::<crate::EqlContext>()
             .init_resource::<crate::SyncedObject3d>()
@@ -135,15 +131,6 @@ impl Plugin for HeadlessEditorPlugin {
                 .init_resource::<SensorCameraRenderMetrics>();
         }
     }
-}
-
-fn setup_floating_origin(mut commands: Commands) {
-    commands.spawn((
-        FloatingOrigin,
-        GridCell::<i128>::default(),
-        Transform::default(),
-        GlobalTransform::default(),
-    ));
 }
 
 // ---------------------------------------------------------------------------

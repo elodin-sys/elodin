@@ -242,7 +242,7 @@ fn apply_layers_recursive(
 type FloatingOriginQuery<'w, 's> = Query<
     'w,
     's,
-    (&'static Transform, &'static GridCell<i128>),
+    (&'static Transform, &'static GridCell),
     (With<FloatingOrigin>, Without<ViewCubeTargetCamera>),
 >;
 
@@ -303,7 +303,7 @@ pub fn handle_view_cube_editor(
             .map(|(t, c)| {
                 lookup
                     .floating_origin_settings
-                    .grid_position_double::<i128>(c, t)
+                    .grid_position_double(c, t)
                     .as_vec3()
             })
             .unwrap_or(Vec3::ZERO);

@@ -42,7 +42,7 @@ type ArrowLabelCameraItem<'w> = (
     &'w Camera,
     &'w RenderTarget,
     &'w GlobalTransform,
-    &'w GridCell<i128>,
+    &'w GridCell,
     Option<&'w ViewportConfig>,
 );
 
@@ -289,7 +289,7 @@ fn render_vector_arrow(
             continue;
         };
 
-        let (start_cell, start) = floating_origin.translation_to_grid::<i128>(result.start);
+        let (start_cell, start) = floating_origin.translation_to_grid(result.start);
 
         if !DRAW_RAW_ARROW_MESHES {
             for visual in state.visuals.values() {
@@ -623,7 +623,7 @@ fn lighten_color(color: Color, factor: f32) -> Color {
 fn update_arrow_label_ui(
     mut commands: Commands,
     arrows: Query<(Entity, &VectorArrowState)>,
-    arrow_transforms: Query<(&Transform, &GridCell<i128>)>,
+    arrow_transforms: Query<(&Transform, &GridCell)>,
     cameras: Query<ArrowLabelCameraItem<'_>, With<MainCamera>>,
     floating_origin: Res<FloatingOriginSettings>,
     mut labels: Query<(Entity, &ArrowLabelUI, &mut Node, &mut Text, &mut TextColor)>,
