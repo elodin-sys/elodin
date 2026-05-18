@@ -124,7 +124,7 @@ impl Client {
     }
 
     fn asset_source(rt: Runtime, source: Source) -> AssetSourceBuilder {
-        AssetSource::build().with_reader(move || {
+        AssetSourceBuilder::new(move || {
             let rt = rt.clone();
             let cache = Box::new(asset_cache::cache());
             Box::new(Client { rt, source, cache })

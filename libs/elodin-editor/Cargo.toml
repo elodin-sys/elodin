@@ -29,10 +29,10 @@ bevy = { workspace = true, features = [
   "bevy_audio",
   "vorbis",
 ] }
-bevy_render.version = "0.17"
-bevy_color.version = "0.17"
-bevy_egui.version = "0.38.0"
-bevy_picking = "0.17"
+bevy_render.version = "0.18"
+bevy_color.version = "0.18"
+bevy_egui.version = "0.39.1"
+bevy_picking = "0.18"
 bevy_geo_frames.path = "../bevy_geo_frames"
 bevy_geo_frames.features = [ "default_enu" ]
 egui.version = "0.33.3"
@@ -45,11 +45,11 @@ winit = { version = "0.30.12", default-features = false, features = [
   "x11",
 ] }
 raw-window-handle = "0.5"
-bevy_infinite_grid = "0.17"
+bevy_infinite_grid = "0.18"
 big_space.workspace = true
 big_space.optional = true
 bevy_editor_cam.workspace = true
-bevy_framepace = "0.20"
+bevy_framepace = "0.21"
 
 # rand
 fastrand.version = "2"
@@ -119,9 +119,9 @@ peg = "0.8.5"
 
 # eql
 eql.path = "../db/eql"
-bevy-inspector-egui.version = "0.35"
+bevy-inspector-egui.version = "0.36"
 bevy-inspector-egui.optional = true
-bevy_defer = "0.15"
+bevy_defer = "0.17"
 bitvec = "1.0.1"
 
 
@@ -151,7 +151,7 @@ impeller2-bevy.features = ["tcp"]
 impeller2-bevy.default-features = false
 
 # 3D text for ViewCube labels
-bevy_fontmesh = "0.1.8"
+bevy_fontmesh = "0.3.1"
 
 # macos
 [target.'cfg(target_os = "macos")'.dependencies]

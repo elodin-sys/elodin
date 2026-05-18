@@ -438,10 +438,8 @@ fn setup_egui_inspector(mut commands: Commands) {
 
     commands.entity(window_id).insert((
         Camera2d,
-        Camera {
-            target: RenderTarget::Window(WindowRef::Entity(window_id)),
-            ..Default::default()
-        },
+        Camera::default(),
+        RenderTarget::Window(WindowRef::Entity(window_id)),
         egui_context,
     ));
 }
@@ -509,9 +507,9 @@ fn spawn_ui_cam(mut commands: Commands, mut query: Query<Entity, With<PrimaryWin
         Camera2d,
         Camera {
             order: UI_ORDER_BASE,
-            target: RenderTarget::Window(WindowRef::Entity(primary_window_ent)),
             ..Default::default()
         },
+        RenderTarget::Window(WindowRef::Entity(primary_window_ent)),
         egui_context,
     ));
 }

@@ -8,7 +8,7 @@ use crate::{
 };
 use bevy::{
     asset::Assets,
-    camera::{Camera, OrthographicProjection, Projection, ScalingMode},
+    camera::{Camera, OrthographicProjection, Projection, RenderTarget, ScalingMode},
     ecs::{
         entity::Entity,
         prelude::Resource,
@@ -1522,7 +1522,7 @@ pub fn sync_locked_graphs(
 }
 
 pub fn zoom_graph(
-    mut query: Query<(&mut GraphState, &Camera)>,
+    mut query: Query<(&mut GraphState, &Camera, &RenderTarget)>,
     mut scroll_events: MessageReader<MouseWheel>,
     windows: Query<(Entity, &Window)>,
     primary_window: Query<Entity, With<PrimaryWindow>>,
@@ -1538,8 +1538,8 @@ pub fn zoom_graph(
         return;
     };
 
-    for (mut graph_state, camera) in query.iter_mut() {
-        let Some(window_entity) = window_entity_from_target(&camera.target, primary_entity) else {
+    for (mut graph_state, camera, render_target) in query.iter_mut() {
+        let Some(window_entity) = window_entity_from_target(render_target, primary_entity) else {
             continue;
         };
         let Some(scroll_offset) = scroll_offsets.get(&window_entity) else {
@@ -1604,7 +1604,13 @@ pub fn zoom_graph(
 pub struct LastPos(Option<Vec2>);
 
 pub fn pan_graph(
-    mut query: Query<(Entity, &mut GraphState, &Camera, Option<&LastPos>)>,
+    mut query: Query<(
+        Entity,
+        &mut GraphState,
+        &Camera,
+        &RenderTarget,
+        Option<&LastPos>,
+    )>,
     mouse_buttons: Res<ButtonInput<MouseButton>>,
     windows: Query<(Entity, &Window)>,
     primary_window: Query<Entity, With<PrimaryWindow>>,
@@ -1616,8 +1622,8 @@ pub fn pan_graph(
         return;
     };
 
-    for (entity, mut graph_state, camera, last_pos) in query.iter_mut() {
-        let Some(window_entity) = window_entity_from_target(&camera.target, primary_entity) else {
+    for (entity, mut graph_state, camera, render_target, last_pos) in query.iter_mut() {
+        let Some(window_entity) = window_entity_from_target(render_target, primary_entity) else {
             if let Ok(mut e) = commands.get_entity(entity) {
                 e.try_insert(LastPos(None));
             }
@@ -1702,7 +1708,7 @@ pub fn pan_graph(
 pub fn reset_graph(
     mut last_click: Local<Option<Instant>>,
     mouse_buttons: Res<ButtonInput<MouseButton>>,
-    mut query: Query<(&mut GraphState, &Camera)>,
+    mut query: Query<(&mut GraphState, &Camera, &RenderTarget)>,
     windows: Query<(Entity, &Window)>,
     primary_window: Query<Entity, With<PrimaryWindow>>,
     mut xclock: ResMut<XSyncClock>,
@@ -1720,8 +1726,8 @@ pub fn reset_graph(
             return;
         };
 
-        for (mut graph_state, camera) in query.iter_mut() {
-            let Some(window_entity) = window_entity_from_target(&camera.target, primary_entity)
+        for (mut graph_state, camera, render_target) in query.iter_mut() {
+            let Some(window_entity) = window_entity_from_target(render_target, primary_entity)
             else {
                 continue;
             };

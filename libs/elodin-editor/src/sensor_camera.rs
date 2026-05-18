@@ -167,7 +167,7 @@ impl ViewNode for SensorPostProcessNode {
 
         let bind_group = render_context.render_device().create_bind_group(
             "sensor_post_process_bind_group",
-            &pipeline_res.layout,
+            &pipeline_res.bind_group_layout,
             &BindGroupEntries::sequential((
                 post_process.source,
                 &pipeline_res.sampler,
@@ -198,7 +198,7 @@ impl ViewNode for SensorPostProcessNode {
 
 #[derive(Resource)]
 struct SensorPostProcessPipeline {
-    layout: BindGroupLayout,
+    bind_group_layout: BindGroupLayout,
     sampler: Sampler,
     pipeline_id: CachedRenderPipelineId,
 }
@@ -210,17 +210,18 @@ fn init_sensor_post_process_pipeline(
     asset_server: Res<AssetServer>,
     fullscreen_shader: Res<FullscreenShader>,
 ) {
-    let layout = render_device.create_bind_group_layout(
-        "sensor_post_process_bind_group_layout",
-        &BindGroupLayoutEntries::sequential(
-            ShaderStages::FRAGMENT,
-            (
-                texture_2d(TextureSampleType::Float { filterable: true }),
-                sampler(SamplerBindingType::Filtering),
-                uniform_buffer::<SensorEffectSettings>(true),
-            ),
+    let layout_entries = BindGroupLayoutEntries::sequential(
+        ShaderStages::FRAGMENT,
+        (
+            texture_2d(TextureSampleType::Float { filterable: true }),
+            sampler(SamplerBindingType::Filtering),
+            uniform_buffer::<SensorEffectSettings>(true),
         ),
     );
+    let layout =
+        BindGroupLayoutDescriptor::new("sensor_post_process_bind_group_layout", &layout_entries);
+    let bind_group_layout = render_device
+        .create_bind_group_layout("sensor_post_process_bind_group_layout", &layout_entries);
 
     let sampler = render_device.create_sampler(&SamplerDescriptor::default());
 
@@ -245,7 +246,7 @@ fn init_sensor_post_process_pipeline(
     });
 
     commands.insert_resource(SensorPostProcessPipeline {
-        layout,
+        bind_group_layout,
         sampler,
         pipeline_id,
     });
@@ -401,7 +402,7 @@ fn spawn_sensor_cameras(
         };
 
         let mut render_target_image =
-            Image::new_target_texture(size.width, size.height, TextureFormat::bevy_default());
+            Image::new_target_texture(size.width, size.height, TextureFormat::bevy_default(), None);
         render_target_image.texture_descriptor.usage |= TextureUsages::COPY_SRC;
         let render_target_handle = images.add(render_target_image);
 
@@ -455,11 +456,11 @@ fn spawn_sensor_cameras(
         commands.spawn((
             Camera3d::default(),
             Camera {
-                target: RenderTarget::Image(render_target_handle.into()),
                 order: -(10 + i as isize),
                 is_active: false,
                 ..default()
             },
+            RenderTarget::Image(render_target_handle.into()),
             Projection::Perspective(perspective),
             Tonemapping::None,
             bevy::render::view::Msaa::Off,
@@ -751,7 +752,7 @@ fn receive_image_from_buffer(
     {
         let _span = tracing::info_span!("sensor_camera_poll_wait").entered();
         let poll_start = Instant::now();
-        if render_device.poll(PollType::wait()).is_err() {
+        if render_device.poll(PollType::wait_indefinitely()).is_err() {
             for (i, _) in &pending {
                 let buf_idx = buffer_toggle.0[*i];
                 image_copiers.0[*i].buffers[buf_idx].unmap();

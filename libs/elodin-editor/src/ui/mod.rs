@@ -692,6 +692,7 @@ type MainCameraViewportQueryItem = (
     Option<&'static GraphState>,
     Option<&'static tiles::ViewportConfig>,
     &'static mut Camera,
+    &'static RenderTarget,
 );
 
 fn set_camera_viewport(
@@ -706,7 +707,7 @@ fn set_camera_viewport(
     entries.extend(
         main_camera_query
             .iter()
-            .map(|(entity, _, graph_state, _, _)| (entity, graph_state.is_some())),
+            .map(|(entity, _, graph_state, _, _, _)| (entity, graph_state.is_some())),
     );
     // Stable ordering: non-graph cameras first, then graphs; break ties by entity id.
     entries.sort_by_key(|(entity, is_graph)| (*is_graph, entity.index()));
@@ -718,12 +719,12 @@ fn set_camera_viewport(
     let window_size: Vec2 = window.physical_size().as_vec2();
 
     for (entity, is_graph) in &entries {
-        let Ok((_, viewport_rect, _graph_state, viewport_config, mut camera)) =
+        let Ok((_, viewport_rect, _graph_state, viewport_config, mut camera, render_target)) =
             main_camera_query.get_mut(*entity)
         else {
             continue;
         };
-        let Some(camera_window) = window_entity_from_target(&camera.target, primary_entity) else {
+        let Some(camera_window) = window_entity_from_target(render_target, primary_entity) else {
             continue;
         };
         if camera_window != primary_entity {
@@ -866,18 +867,18 @@ fn set_nav_gizmo_camera_orders(
 }
 
 fn warn_camera_order_ambiguities(
-    cameras: Query<(Entity, &Camera)>,
+    cameras: Query<(Entity, &Camera, &RenderTarget)>,
     primary_query: Query<Entity, With<PrimaryWindow>>,
 ) {
     let primary = primary_query.iter().next();
     let mut seen: HashMap<(NormalizedWindowRef, isize), Entity> = HashMap::new();
     let mut warned: HashSet<NormalizedWindowRef> = HashSet::new();
 
-    for (entity, camera) in cameras.iter() {
+    for (entity, camera, render_target) in cameras.iter() {
         if !camera.is_active {
             continue;
         }
-        if let RenderTarget::Window(window_ref) = &camera.target
+        if let RenderTarget::Window(window_ref) = render_target
             && let Some(norm) = window_ref.normalize(primary)
         {
             let key = (norm, camera.order);

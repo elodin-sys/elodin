@@ -23,7 +23,7 @@ use super::placement::collect_sorted_screens;
 pub fn sync_windows(
     mut commands: Commands,
     mut windows_state: Query<(Entity, &WindowId, &mut WindowState, Option<&mut Window>)>,
-    mut cameras: Query<&mut Camera>,
+    mut cameras: Query<(&mut Camera, &mut RenderTarget)>,
     children: Query<&Children>,
     mut existing_map: Local<HashMap<WindowId, Entity>>,
     _non_send_marker: NonSendMarker,
@@ -54,8 +54,8 @@ pub fn sync_windows(
             window.title = compute_window_title(&state);
             existing_map.insert(*marker, entity);
             for (index, &graph) in state.graph_entities.iter().enumerate() {
-                if let Ok(mut camera) = cameras.get_mut(graph) {
-                    retarget_camera(&mut camera, entity);
+                if let Ok((mut camera, mut render_target)) = cameras.get_mut(graph) {
+                    retarget_camera(&mut camera, &mut render_target, entity);
                     camera.is_active = true;
                     let base_order = window_graph_order_base(*marker);
                     camera.order = base_order + index as isize;
@@ -65,7 +65,7 @@ pub fn sync_windows(
         }
 
         for &graph in &state.graph_entities {
-            if let Ok(mut camera) = cameras.get_mut(graph) {
+            if let Ok((mut camera, _)) = cameras.get_mut(graph) {
                 camera.is_active = false;
             }
         }
@@ -131,11 +131,13 @@ pub fn sync_windows(
 
         let camera = Camera {
             order: UI_ORDER_BASE,
-            target: RenderTarget::Window(WindowRef::Entity(window_entity)),
             ..Default::default()
         };
 
-        commands.entity(entity).insert(camera);
+        commands.entity(entity).insert((
+            camera,
+            RenderTarget::Window(WindowRef::Entity(window_entity)),
+        ));
 
         if let Some(screen) = state.descriptor.screen.as_ref() {
             commands.write_message(WindowRelayout::Screen {
@@ -176,8 +178,8 @@ pub fn sync_windows(
             marker
         );
         for (index, &graph) in state.graph_entities.iter().enumerate() {
-            if let Ok(mut camera) = cameras.get_mut(graph) {
-                retarget_camera(&mut camera, window_entity);
+            if let Ok((mut camera, mut render_target)) = cameras.get_mut(graph) {
+                retarget_camera(&mut camera, &mut render_target, window_entity);
                 camera.is_active = true;
                 let base_order = window_graph_order_base(*marker);
                 camera.order = base_order + index as isize;
@@ -186,14 +188,14 @@ pub fn sync_windows(
     }
 }
 
-fn retarget_camera(camera: &mut Camera, window_entity: Entity) {
+fn retarget_camera(camera: &mut Camera, render_target: &mut RenderTarget, window_entity: Entity) {
     let matches_target = matches!(
-        camera.target,
+        *render_target,
         RenderTarget::Window(WindowRef::Entity(entity)) if entity == window_entity
     );
     if !matches_target {
         // Force bevy's camera_system to recompute target_info after window retargeting.
-        camera.target = RenderTarget::Window(WindowRef::Entity(window_entity));
+        *render_target = RenderTarget::Window(WindowRef::Entity(window_entity));
         camera.computed = Default::default();
     }
 }

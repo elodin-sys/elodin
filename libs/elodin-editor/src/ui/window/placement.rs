@@ -63,7 +63,7 @@ pub fn handle_window_close(
 pub fn handle_window_destroyed(
     mut events: MessageReader<WindowDestroyed>,
     mut cleanup: WindowCleanup,
-    cameras: Query<(Entity, &Camera)>,
+    cameras: Query<(Entity, &Camera, &RenderTarget)>,
 ) {
     for evt in events.read() {
         let entity = evt.window;
@@ -79,8 +79,8 @@ pub fn handle_window_destroyed(
 
         cleanup_secondary_window(entity, &mut cleanup);
 
-        for (camera_entity, camera) in cameras.iter() {
-            if matches!(camera.target, RenderTarget::Window(WindowRef::Entity(target)) if target == entity)
+        for (camera_entity, _, render_target) in cameras.iter() {
+            if matches!(render_target, RenderTarget::Window(WindowRef::Entity(target)) if *target == entity)
             {
                 cleanup.commands.entity(camera_entity).despawn();
             }

@@ -40,6 +40,7 @@ use crate::{
 type ArrowLabelCameraItem<'w> = (
     Entity,
     &'w Camera,
+    &'w RenderTarget,
     &'w GlobalTransform,
     &'w GridCell<i128>,
     Option<&'w ViewportConfig>,
@@ -627,7 +628,7 @@ fn update_arrow_label_ui(
     floating_origin: Res<FloatingOriginSettings>,
     mut labels: Query<(Entity, &ArrowLabelUI, &mut Node, &mut Text, &mut TextColor)>,
     primary_window: Query<Entity, With<bevy::window::PrimaryWindow>>,
-    ui_cameras: Query<(Entity, &Camera), With<ArrowLabelUiCamera>>,
+    ui_cameras: Query<(Entity, &RenderTarget), With<ArrowLabelUiCamera>>,
     // Key: (arrow_entity, camera_entity) -> label_entity
     mut label_map: Local<HashMap<(Entity, Entity), Entity>>,
 ) {
@@ -637,11 +638,11 @@ fn update_arrow_label_ui(
     };
 
     let mut window_cameras: HashMap<Entity, Vec<_>> = HashMap::new();
-    for (entity, cam, gt, cell, config) in cameras.iter() {
+    for (entity, cam, render_target, gt, cell, config) in cameras.iter() {
         if !cam.is_active {
             continue;
         }
-        let Some(window) = window_entity_from_target(&cam.target, primary_entity) else {
+        let Some(window) = window_entity_from_target(render_target, primary_entity) else {
             continue;
         };
         window_cameras
@@ -661,8 +662,8 @@ fn update_arrow_label_ui(
     }
 
     let mut window_ui_camera: HashMap<Entity, Entity> = HashMap::new();
-    for (ui_cam_entity, ui_cam) in ui_cameras.iter() {
-        if let Some(window) = window_entity_from_target(&ui_cam.target, primary_entity)
+    for (ui_cam_entity, ui_target) in ui_cameras.iter() {
+        if let Some(window) = window_entity_from_target(ui_target, primary_entity)
             && window_cameras.contains_key(&window)
         {
             window_ui_camera.insert(window, ui_cam_entity);
@@ -677,14 +678,14 @@ fn update_arrow_label_ui(
                 .spawn((
                     Camera2d,
                     Camera {
-                        target: RenderTarget::Window(if *window == primary_entity {
-                            WindowRef::Primary
-                        } else {
-                            WindowRef::Entity(*window)
-                        }),
                         order: ARROW_LABEL_UI_CAMERA_ORDER,
                         ..default()
                     },
+                    RenderTarget::Window(if *window == primary_entity {
+                        WindowRef::Primary
+                    } else {
+                        WindowRef::Entity(*window)
+                    }),
                     ArrowLabelUiCamera,
                     Name::new(format!("ArrowLabelUiCamera_{:?}", window)),
                 ))
