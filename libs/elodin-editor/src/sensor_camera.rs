@@ -368,6 +368,7 @@ pub fn spawn_sensor_camera_frustum_sources(
             fov: config.fov_degrees.to_radians(),
             near: config.near,
             far: config.far,
+            near_clip_plane: Vec4::new(0.0, 0.0, -1.0, -config.near),
             ..default()
         };
         if config.height > 0 {
@@ -435,6 +436,7 @@ fn spawn_sensor_cameras(
             fov: config.fov_degrees.to_radians(),
             near: config.near,
             far: config.far,
+            near_clip_plane: Vec4::new(0.0, 0.0, -1.0, -config.near),
             ..default()
         };
 

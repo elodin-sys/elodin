@@ -81,8 +81,14 @@ fn default_viewport_perspective() -> PerspectiveProjection {
     PerspectiveProjection {
         near: DEFAULT_VIEWPORT_NEAR,
         far: DEFAULT_VIEWPORT_FAR,
+        near_clip_plane: Vec4::new(0.0, 0.0, -1.0, -DEFAULT_VIEWPORT_NEAR),
         ..PerspectiveProjection::default()
     }
+}
+
+fn set_perspective_near(perspective: &mut PerspectiveProjection, near: f32) {
+    perspective.near = near;
+    perspective.near_clip_plane = Vec4::new(0.0, 0.0, -1.0, -near);
 }
 
 pub(crate) fn plugin(app: &mut App) {
@@ -1392,7 +1398,7 @@ impl ViewportPane {
             ..perspective_defaults
         };
         if let Some(near) = viewport.near {
-            perspective.near = near;
+            set_perspective_near(&mut perspective, near);
         }
         if let Some(far) = viewport.far {
             perspective.far = far;

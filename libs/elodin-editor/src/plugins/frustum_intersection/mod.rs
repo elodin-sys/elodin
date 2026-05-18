@@ -894,6 +894,7 @@ mod tests {
             aspect_ratio,
             near: 0.1,
             far: 10.0,
+            near_clip_plane: Vec4::new(0.0, 0.0, -1.0, -0.1),
         }
     }
 
