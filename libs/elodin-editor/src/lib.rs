@@ -545,6 +545,21 @@ fn set_clear_color(mut clear_color: ResMut<ClearColor>) {
 //         });
 // }
 
+/// Keep the floating origin glued to the active main camera so big_space
+/// renders the rest of the scene at low precision relative to it.
+///
+/// Since the migration to big_space 0.12 the main camera no longer
+/// carries a `GridCell`: it is parented under the viewport entity, which
+/// is the grid anchor. The system therefore:
+///
+/// 1. Reads the camera's local `Transform` and looks up its parent
+///    viewport's `Transform` + `GridCell`.
+/// 2. Composes them into an absolute world-space position via
+///    `grid_position_double`.
+/// 3. Re-projects that absolute position onto the grid to obtain the
+///    `(origin_cell, origin_translation)` pair the floating origin must
+///    take. Cameras spawned without a parent (e.g. tests) fall back to
+///    the default cell at the origin.
 #[allow(clippy::type_complexity)]
 fn set_floating_origin(
     query: Query<(&Transform, Option<&ChildOf>), (With<MainCamera>, Without<FloatingOrigin>)>,

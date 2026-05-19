@@ -1,3 +1,28 @@
+//! Floating-origin spatial layer for the editor.
+//!
+//! This module is a thin compatibility shim that the rest of the editor
+//! depends on through a single, stable surface (`GridCell`,
+//! `FloatingOrigin`, `FloatingOriginSettings`, `FloatingOriginPlugin`,
+//! `LowPrecisionRoot`).
+//!
+//! Two implementations live behind the `big_space` cargo feature:
+//!
+//! * `feature = "big_space"` (default, **the only supported product mode**):
+//!   the surface re-exports / wraps types from `big_space` 0.12. The
+//!   wrapper is needed because that release reorganised the API:
+//!   `FloatingOriginSettings` is gone, replaced by a `Grid` component
+//!   stored on the `BigSpace` root entity.
+//! * `not(feature = "big_space")`: dummy implementations that compile but
+//!   collapse the grid to a single cell. This path exists purely for
+//!   development ergonomics during the Bevy migration; it is **not
+//!   intended to be shipped**.
+//!
+//! Note: spawning the editor's `FloatingOriginPlugin` registers a
+//! [`attach_parentless_grid_cells`] system. Any entity that holds a
+//! [`GridCell`] and no [`ChildOf`] will be reparented to the
+//! [`BigSpaceRoot`] automatically. Call sites can therefore spawn
+//! grid-aware entities without explicitly setting their parent.
+
 use bevy::{math::DVec3, prelude::*};
 
 #[cfg(feature = "big_space")]
@@ -53,6 +78,9 @@ impl FloatingOriginSettings {
     }
 }
 
+/// Marker for the unique `BigSpace` root entity spawned by
+/// [`FloatingOriginPlugin`]. Lets [`attach_parentless_grid_cells`] adopt
+/// any new grid-bearing entity without having to look up the root by name.
 #[cfg(feature = "big_space")]
 #[derive(Component)]
 pub struct BigSpaceRoot;
@@ -107,6 +135,11 @@ pub fn setup_floating_origin(mut commands: Commands, settings: Res<FloatingOrigi
     ));
 }
 
+/// PreUpdate system that adopts every entity carrying a [`GridCell`] but
+/// no [`ChildOf`] under the unique [`BigSpaceRoot`]. This keeps callers
+/// free from having to know about the root entity when they spawn
+/// grid-aware entities. Runs every frame so newly spawned entities are
+/// re-parented as soon as they are visible to the query.
 #[cfg(feature = "big_space")]
 fn attach_parentless_grid_cells(
     mut commands: Commands,
@@ -121,6 +154,14 @@ fn attach_parentless_grid_cells(
         commands.entity(entity).insert(ChildOf(root));
     }
 }
+
+// -----------------------------------------------------------------------------
+// Fallback path: `not(feature = "big_space")`
+//
+// Provides type-compatible stand-ins so the editor still compiles when
+// big_space is disabled. All grid-cell coordinates collapse to (0,0,0)
+// and no precision is gained at large distances. Dev-only.
+// -----------------------------------------------------------------------------
 
 #[cfg(not(feature = "big_space"))]
 #[derive(Component, Default, Clone, Copy, Debug, PartialEq, Eq)]
