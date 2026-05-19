@@ -50,6 +50,12 @@ pub fn color_component_to_u8(value: f32) -> u8 {
     (value.clamp(0.0, 1.0) * 255.0).round() as u8
 }
 
+/// Canonical `PerspectiveProjection::near_clip_plane` value for a given `near`
+/// distance. Used to keep the two fields in sync at every construction site.
+pub fn near_clip_plane(near: f32) -> Vec4 {
+    Vec4::new(0.0, 0.0, -1.0, -near)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -60,7 +66,7 @@ mod tests {
             aspect_ratio,
             near,
             far,
-            near_clip_plane: Vec4::new(0.0, 0.0, -1.0, -near),
+            near_clip_plane: near_clip_plane(near),
         }
     }
 
