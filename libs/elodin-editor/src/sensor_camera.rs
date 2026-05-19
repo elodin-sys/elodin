@@ -218,7 +218,7 @@ fn init_sensor_post_process_pipeline(
             uniform_buffer::<SensorEffectSettings>(true),
         ),
     );
-    let layout =
+    let layout_descriptor =
         BindGroupLayoutDescriptor::new("sensor_post_process_bind_group_layout", &layout_entries);
     let bind_group_layout = render_device
         .create_bind_group_layout("sensor_post_process_bind_group_layout", &layout_entries);
@@ -231,7 +231,7 @@ fn init_sensor_post_process_pipeline(
 
     let pipeline_id = pipeline_cache.queue_render_pipeline(RenderPipelineDescriptor {
         label: Some("sensor_post_process_pipeline".into()),
-        layout: vec![layout.clone()],
+        layout: vec![layout_descriptor.clone()],
         vertex: vertex_state,
         fragment: Some(FragmentState {
             shader,
