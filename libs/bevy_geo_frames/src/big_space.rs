@@ -2,6 +2,7 @@
 #![allow(non_snake_case)]
 use crate::*;
 use ::big_space::prelude::{BigSpace, CellCoord as GridCell, Grid};
+use bevy::log::warn_once;
 use bevy::prelude::*;
 
 /// Add the big_space systems.
@@ -33,14 +34,24 @@ pub fn apply_little_transforms(
 
 /// System: convert `GeoPosition` into `Transform.translation` right before Bevy
 /// propagates transforms through the hierarchy.
+///
+/// Assumes a single [`BigSpace`] root. If multiple roots are present (not a
+/// supported configuration today), only the first is used and a warning is
+/// emitted once.
 pub fn apply_big_translation(
     ctx: ResMut<GeoContext>,
     mut q: Query<(&GeoPosition, &mut Transform, &mut GridCell), Changed<GeoPosition>>,
     grids: Query<&Grid, With<BigSpace>>,
 ) {
-    let Some(grid) = grids.iter().next() else {
+    let mut grid_iter = grids.iter();
+    let Some(grid) = grid_iter.next() else {
         return;
     };
+    if grid_iter.next().is_some() {
+        warn_once!(
+            "Multiple BigSpace grids detected; apply_big_translation uses the first one only."
+        );
+    }
 
     for (geo, mut transform, mut grid_cell) in &mut q {
         let pos = geo.to_bevy(&ctx);
