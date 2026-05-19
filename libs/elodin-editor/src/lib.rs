@@ -586,7 +586,7 @@ fn set_floating_origin(
                 *parent_cell,
             )
         })
-        .unwrap_or((*camera_transform, GridCell::default()));
+        .unwrap_or((*camera_transform, crate::spatial::GridCell::default()));
     let absolute = floating_origin_settings.grid_position_double(&base_cell, &base_transform);
     let (origin_cell, origin_translation) = floating_origin_settings.translation_to_grid(absolute);
     let mut origin_transform = base_transform;
@@ -852,7 +852,7 @@ fn set_icon_mac() {
 pub fn setup_cell(query: Query<Entity, (With<WorldPos>, Without<crate::spatial::GridCell>)>, mut cmds: Commands) {
     for e in query.iter() {
         cmds.entity(e)
-            .insert((Transform::default(), GridCell::default()));
+            .insert((Transform::default(), crate::spatial::GridCell::default()));
     }
 }
 

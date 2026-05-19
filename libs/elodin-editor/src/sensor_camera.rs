@@ -469,7 +469,7 @@ fn spawn_sensor_cameras(
             Transform::from_xyz(0.0, 5.0, 0.0).looking_at(Vec3::ZERO, Vec3::Y),
             GlobalTransform::default(),
             #[cfg(feature = "big_space")]
-            GridCell::default(),
+            crate::spatial::GridCell::default(),
             SensorCamera { config_index: i },
             SensorEffectSettings {
                 effect_type,

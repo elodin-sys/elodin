@@ -626,7 +626,7 @@ fn extract_lines(
                     GlobalTransform::default(),
                     Transform::default(),
                     #[cfg(feature = "big_space")]
-                    GridCell::default(),
+                    crate::spatial::GridCell::default(),
                     gpu_line,
                     TemporaryRenderEntity,
                 ));

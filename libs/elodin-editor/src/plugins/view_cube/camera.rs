@@ -292,7 +292,7 @@ impl<'w, 's>  ViewCubeEditorLookup<'w, 's>  {
                     .grid_position_double(c, t)
                     .as_vec3()
             })
-            .unwrap_or(Vec3::ZERO);
+            .unwrap_or(Vec3::ZERO)
     }
 
     #[cfg(not(feature = "big_space"))]

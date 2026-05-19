@@ -29,8 +29,6 @@ pub use big_space::prelude::{BigSpace, CellCoord as GridCell, FloatingOrigin, Gr
 
 pub use bevy_geo_frames::big_space::apply_big_translation;
 
-pub use big_space::grid::propagation::LowPrecisionRoot;
-
 pub mod debug {
     use bevy::prelude::*;
 
