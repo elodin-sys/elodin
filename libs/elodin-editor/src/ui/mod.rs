@@ -285,7 +285,6 @@ pub struct CameraQuery {
     global_transform: &'static mut GlobalTransform,
     parent: Option<&'static ChildOf>,
     grid_handle: Option<&'static GridHandle>,
-    no_propagate_rot: Option<&'static crate::spatial::propagation::NoPropagateRot>,
 }
 
 pub struct UiPlugin;

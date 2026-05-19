@@ -10,15 +10,6 @@ pub use bevy_geo_frames::big_space::apply_big_translation;
 pub use big_space::grid::propagation::LowPrecisionRoot;
 
 #[cfg(feature = "big_space")]
-#[derive(Component, Default, Clone, Copy, Debug)]
-pub struct NoPropagateRot;
-
-#[cfg(feature = "big_space")]
-pub mod propagation {
-    pub use super::NoPropagateRot;
-}
-
-#[cfg(feature = "big_space")]
 pub mod debug {
     use bevy::prelude::*;
 
@@ -199,14 +190,6 @@ pub mod debug {
     impl Plugin for FloatingOriginDebugPlugin {
         fn build(&self, _app: &mut App) {}
     }
-}
-
-#[cfg(not(feature = "big_space"))]
-pub mod propagation {
-    use bevy::prelude::*;
-
-    #[derive(Component, Default, Clone, Copy, Debug)]
-    pub struct NoPropagateRot;
 }
 
 #[cfg(not(feature = "big_space"))]
