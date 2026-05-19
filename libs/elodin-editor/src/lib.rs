@@ -226,7 +226,6 @@ impl Plugin for EditorPlugin {
             )
             //.add_plugins(DefaultPickingPlugins)
             .add_plugins(bevy_editor_cam::DefaultEditorCamPlugins)
-            .add_plugins(spatial::FloatingOriginPlugin::new(16_000., 100.))
             .add_plugins(EmbeddedAssetPlugin)
             .add_plugins(EguiPlugin::default())
             .add_plugins(bevy_infinite_grid::InfiniteGridPlugin)
@@ -323,6 +322,10 @@ impl Plugin for EditorPlugin {
             )
             .add_systems(Update, sensor_camera::patch_sensor_view_dims)
             .add_systems(Update, throttle_for_sensor_cameras);
+
+        #[cfg(feature = "big_space")]
+        app
+            .add_plugins(spatial::FloatingOriginPlugin::new(16_000., 100.));
         if cfg!(target_os = "windows") || cfg!(target_os = "linux") {
             app.add_systems(Update, handle_drag_resize);
         }

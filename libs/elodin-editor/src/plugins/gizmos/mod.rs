@@ -1,4 +1,6 @@
-use crate::spatial::{FloatingOriginSettings, GridCell};
+use crate::spatial::FloatingOriginSettings;
+#[cfg(feature = "big_space")]
+use crate::spatial::GridCell;
 use bevy::camera::RenderTarget;
 use bevy::camera::visibility::RenderLayers;
 use bevy::picking::prelude::Pickable;
@@ -245,6 +247,7 @@ fn render_vector_arrow(
     entity_map: Res<EntityMap>,
     mut vector_arrows: Query<(Entity, &VectorArrow3d, &mut VectorArrowState)>,
     component_values: Query<&'static WktComponentValue>,
+    #[cfg(feature = "big_space")]
     floating_origin: Res<FloatingOriginSettings>,
     arrow_meshes: Res<ArrowMeshes>,
     mut materials: ResMut<Assets<StandardMaterial>>,
@@ -289,7 +292,14 @@ fn render_vector_arrow(
             continue;
         };
 
-        let (start_cell, start) = floating_origin.translation_to_grid(result.start);
+        #cfg_select! {
+            feature = "big_space" => {
+                let (start_cell, start) = floating_origin.translation_to_grid(result.start);
+            }
+            _ => {
+                let start = result.start.as_vec3();
+            }
+        }
 
         if !DRAW_RAW_ARROW_MESHES {
             for visual in state.visuals.values() {
@@ -378,6 +388,7 @@ fn render_vector_arrow(
 
             commands.entity(visual.root).insert((
                 Transform::from_translation(start).with_rotation(rotation),
+                #[cfg(feature = "big_space")]
                 start_cell,
                 Visibility::Visible,
                 arrow_layers.clone(),
@@ -772,10 +783,12 @@ fn update_arrow_label_ui(
 
                 let dv = cfg_select! {
                     feature = "big_space" => {
-                        let dx = (arrow_cell.x as f64 - cam_cell.x as f64) as f32 * edge;
-                        let dy = (arrow_cell.y as f64 - cam_cell.y as f64) as f32 * edge;
-                        let dz = (arrow_cell.z as f64 - cam_cell.z as f64) as f32 * edge;
-                        Vec3::new(dx, dy, dz)
+                        {
+                            let dx = (arrow_cell.x as f64 - cam_cell.x as f64) as f32 * edge;
+                            let dy = (arrow_cell.y as f64 - cam_cell.y as f64) as f32 * edge;
+                            let dz = (arrow_cell.z as f64 - cam_cell.z as f64) as f32 * edge;
+                            Vec3::new(dx, dy, dz)
+                        }
                     }
                     _ => { Vec3::ZERO }
                 };

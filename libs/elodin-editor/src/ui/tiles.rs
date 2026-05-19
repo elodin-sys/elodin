@@ -67,7 +67,6 @@ use crate::{
         },
     },
     sensor_camera::SensorCameraConfigs,
-    spatial::{LowPrecisionRoot},
     ui::colors::ColorExt,
 };
 
@@ -1435,7 +1434,6 @@ impl ViewportPane {
             }),
             main_camera_layers,
             MainCamera,
-            LowPrecisionRoot,
             EditorCam {
                 orbit_constraint: OrbitConstraint::Fixed {
                     up: Vec3::Y,

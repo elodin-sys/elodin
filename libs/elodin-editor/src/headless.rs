@@ -89,7 +89,6 @@ impl Plugin for HeadlessEditorPlugin {
                     }),
             )
             .add_plugins(impeller2_bevy::Impeller2Plugin)
-            .add_plugins(crate::spatial::FloatingOriginPlugin::new(16_000., 100.))
             .add_plugins(bevy_mat3_material::Mat3MaterialPlugin)
             .add_plugins(GeoFramePlugin {
                 apply_transforms: false,
@@ -126,7 +125,9 @@ impl Plugin for HeadlessEditorPlugin {
             .set_runner(render_server_runner);
 
         #[cfg(feature = "big_space")]
-        app.add_systems(PreUpdate, crate::setup_cell.after(impeller2_bevy::sink));
+        app
+            .add_plugins(crate::spatial::FloatingOriginPlugin::new(16_000., 100.))
+            .add_systems(PreUpdate, crate::setup_cell.after(impeller2_bevy::sink));
         if let Some(render_app) = app.get_sub_app_mut(RenderApp) {
             render_app
                 .init_resource::<HeadlessMode>()
