@@ -88,11 +88,9 @@ where
                     end: now + 500.millis(),
                 };
             }
-            (true, ArmState::Arming { end }) => {
-                if now > end {
-                    self.arm_state = ArmState::Armed;
-                    defmt::debug!("Motors armed");
-                }
+            (true, ArmState::Arming { end }) if now > end => {
+                self.arm_state = ArmState::Armed;
+                defmt::debug!("Motors armed");
             }
             _ => {}
         }
