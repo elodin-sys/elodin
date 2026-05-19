@@ -66,6 +66,10 @@ pub mod object_3d;
 mod offset_parse;
 pub mod plugins;
 pub mod sensor_camera;
+#[cfg(feature = "big_space")]
+pub(crate) mod spatial;
+#[cfg(not(feature = "big_space"))]
+#[path = "spatial_fallback.rs"]
 pub(crate) mod spatial;
 pub mod ui;
 pub mod vector_arrow;
