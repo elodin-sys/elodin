@@ -306,7 +306,7 @@ impl JaxTracer {
                 let call_fn = self.visit_comp(&c.comp);
                 Python::with_gil(|py| {
                     let call_fn = call_fn.into_py_any(py)?;
-                    let tuple = PyTuple::new(py, args.into_iter()).unwrap();
+                    let tuple = PyTuple::new(py, args).unwrap();
                     call_fn.call1(py, &tuple)
                 })?
             }

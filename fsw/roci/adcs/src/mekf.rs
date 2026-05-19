@@ -121,10 +121,8 @@ impl State {
         let q_hat = propagate_quaternion(q_hat, omega, dt);
         let mut p = propagate_state_covariance(p, omega, yqy, dt);
         let mut delta_x_hat: Vector<f64, 6, ArrayRepr> = Vector::zeros();
-        for ((reference, measured_body), sigma) in references
-            .into_iter()
-            .zip(measured_bodys)
-            .zip(sigma_r)
+        for ((reference, measured_body), sigma) in
+            references.into_iter().zip(measured_bodys).zip(sigma_r)
         {
             let var_r = Matrix::<f64, 3, 3, ArrayRepr>::eye() * sigma.powi(2);
             let body_r = q_hat.inverse() * reference;
