@@ -481,14 +481,14 @@ pub fn handle_time_series(
                 .and_then(|component_value_map| component_value_map.get(&component_id))
                 .map(|current_value| {
                     (
-                        current_value.shape().iter().fold(1usize, |xs, &x| x * xs),
+                        current_value.shape().iter().copied().product::<usize>(),
                         current_value.prim_type(),
                     )
                 })
                 .or_else(|| {
                     let schema = schema_reg.0.get(&component_id)?;
                     Some((
-                        schema.shape().iter().fold(1usize, |xs, &x| x * xs),
+                        schema.shape().iter().copied().product::<usize>(),
                         schema.prim_type(),
                     ))
                 })

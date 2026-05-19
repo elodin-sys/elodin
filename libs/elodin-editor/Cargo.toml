@@ -7,7 +7,8 @@ edition = "2024"
 publish = false
 
 [features]
-default = ["big_space"]
+# default = ["big_space"]
+default = []
 cargo-clippy = []
 big_space = ["dep:big_space", "bevy_geo_frames/big_space"]
 inspector = ["dep:bevy-inspector-egui", "bevy_geo_frames/inspector"]

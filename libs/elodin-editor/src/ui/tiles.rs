@@ -67,7 +67,6 @@ use crate::{
         },
     },
     sensor_camera::SensorCameraConfigs,
-    spatial::{GridCell, LowPrecisionRoot},
     ui::colors::ColorExt,
 };
 
@@ -1317,7 +1316,8 @@ impl ViewportPane {
         let mut parent_cmd = commands.spawn((
             GlobalTransform::default(),
             transform,
-            GridCell::default(),
+            #[cfg(feature = "big_space")]
+            crate::spatial::GridCell::default(),
             impeller2_wkt::WorldPos::default(),
             Name::new("viewport"),
         ));
@@ -1434,7 +1434,6 @@ impl ViewportPane {
             }),
             main_camera_layers,
             MainCamera,
-            LowPrecisionRoot,
             EditorCam {
                 orbit_constraint: OrbitConstraint::Fixed {
                     up: Vec3::Y,

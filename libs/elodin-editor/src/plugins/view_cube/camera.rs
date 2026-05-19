@@ -1,6 +1,8 @@
 //! Camera systems for the ViewCube plugin.
 
-use crate::spatial::{FloatingOrigin, FloatingOriginSettings, GridCell};
+use crate::spatial::WithoutFloatingOrigin;
+#[cfg(feature = "big_space")]
+use crate::spatial::{FloatingOriginSettings, GridCell, WithFloatingOrigin};
 use bevy::camera::visibility::RenderLayers;
 use bevy::ecs::hierarchy::ChildOf;
 use bevy::ecs::system::SystemParam;
@@ -238,12 +240,12 @@ fn apply_layers_recursive(
         }
     }
 }
-
+#[cfg(feature = "big_space")]
 type FloatingOriginQuery<'w, 's> = Query<
     'w,
     's,
     (&'static Transform, &'static GridCell),
-    (With<FloatingOrigin>, Without<ViewCubeTargetCamera>),
+    (WithFloatingOrigin, Without<ViewCubeTargetCamera>),
 >;
 
 type ViewCubeCameraQuery<'w, 's> = Query<
@@ -255,7 +257,7 @@ type ViewCubeCameraQuery<'w, 's> = Query<
         &'static GlobalTransform,
         &'static mut EditorCam,
     ),
-    (With<ViewCubeTargetCamera>, Without<FloatingOrigin>),
+    (With<ViewCubeTargetCamera>, WithoutFloatingOrigin),
 >;
 
 #[derive(SystemParam)]
@@ -270,8 +272,30 @@ pub(super) struct ViewCubeEditorLookup<'w, 's> {
     values: Query<'w, 's, &'static ComponentValue>,
     time: Res<'w, Time>,
     arrow_cache: ResMut<'w, ViewCubeArrowTargetCache>,
+    #[cfg(feature = "big_space")]
     floating_origin: FloatingOriginQuery<'w, 's>,
+    #[cfg(feature = "big_space")]
     floating_origin_settings: Res<'w, FloatingOriginSettings>,
+}
+
+impl<'w, 's> ViewCubeEditorLookup<'w, 's> {
+    #[cfg(feature = "big_space")]
+    fn origin(&self) -> Vec3 {
+        self.floating_origin
+            .iter()
+            .next()
+            .map(|(t, c)| {
+                self.floating_origin_settings
+                    .grid_position_double(c, t)
+                    .as_vec3()
+            })
+            .unwrap_or(Vec3::ZERO)
+    }
+
+    #[cfg(not(feature = "big_space"))]
+    fn origin(&self) -> Vec3 {
+        Vec3::ZERO
+    }
 }
 
 pub fn handle_view_cube_editor(
@@ -296,17 +320,7 @@ pub fn handle_view_cube_editor(
             continue;
         };
 
-        let origin_world = lookup
-            .floating_origin
-            .iter()
-            .next()
-            .map(|(t, c)| {
-                lookup
-                    .floating_origin_settings
-                    .grid_position_double(c, t)
-                    .as_vec3()
-            })
-            .unwrap_or(Vec3::ZERO);
+        let origin_world = lookup.origin();
 
         if !matches!(event, ViewCubeEvent::ArrowClicked { .. }) {
             update_anchor_depth_for_view_cube(

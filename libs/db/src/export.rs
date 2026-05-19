@@ -551,7 +551,7 @@ fn join_group_outer(group: &ExportGroup, flatten: bool) -> RecordBatch {
             (vec![f], vec![a])
         };
 
-        for (f, a) in member_fields.into_iter().zip(member_arrays.into_iter()) {
+        for (f, a) in member_fields.into_iter().zip(member_arrays) {
             // Make the field nullable; take() may produce nulls along the union axis.
             let nullable_field = Arc::new(
                 (*f).clone()

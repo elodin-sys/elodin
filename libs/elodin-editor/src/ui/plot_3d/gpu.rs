@@ -1,6 +1,5 @@
 use std::mem;
 
-use crate::spatial::GridCell;
 use crate::{
     SelectedTimeRange,
     ui::plot::{
@@ -169,16 +168,6 @@ fn update_uniform_model(mut query: Query<(&mut LineUniform, &GlobalTransform)>) 
 #[derive(Component, Debug, Clone, ExtractComponent)]
 #[require(SyncToRenderWorld)]
 pub struct LineHandles(pub [Handle<Line>; 3]);
-
-#[derive(Bundle)]
-pub struct LineBundle {
-    pub line: LineHandles,
-    pub uniform: LineUniform,
-    pub config: LineConfig,
-    pub global_transform: GlobalTransform,
-    pub transform: Transform,
-    pub grid_cell: GridCell,
-}
 
 #[derive(Component, ShaderType, Clone, Copy, Reflect)]
 pub struct LineUniform {
@@ -631,14 +620,13 @@ fn extract_lines(
                 played_uniform.color = played_trail_color;
                 commands.spawn((
                     MainEntity::from(entity),
-                    LineBundle {
-                        line: line_handles.clone(),
-                        config: config.clone(),
-                        uniform: played_uniform,
-                        global_transform: GlobalTransform::default(),
-                        transform: Transform::default(),
-                        grid_cell: GridCell::default(),
-                    },
+                    line_handles.clone(),
+                    config.clone(),
+                    played_uniform,
+                    GlobalTransform::default(),
+                    Transform::default(),
+                    #[cfg(feature = "big_space")]
+                    crate::spatial::GridCell::default(),
                     gpu_line,
                     TemporaryRenderEntity,
                 ));
@@ -664,14 +652,13 @@ fn extract_lines(
                 future_uniform.color = future_color;
                 commands.spawn((
                     MainEntity::from(entity),
-                    LineBundle {
-                        line: line_handles.clone(),
-                        config: config.clone(),
-                        uniform: future_uniform,
-                        global_transform: GlobalTransform::default(),
-                        transform: Transform::default(),
-                        grid_cell: GridCell::default(),
-                    },
+                    line_handles.clone(),
+                    config.clone(),
+                    future_uniform,
+                    GlobalTransform::default(),
+                    Transform::default(),
+                    #[cfg(feature = "big_space")]
+                    crate::spatial::GridCell::default(),
                     gpu_line,
                     TemporaryRenderEntity,
                 ));

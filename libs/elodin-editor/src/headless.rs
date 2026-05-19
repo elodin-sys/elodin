@@ -89,7 +89,6 @@ impl Plugin for HeadlessEditorPlugin {
                     }),
             )
             .add_plugins(impeller2_bevy::Impeller2Plugin)
-            .add_plugins(crate::spatial::FloatingOriginPlugin::new(16_000., 100.))
             .add_plugins(bevy_mat3_material::Mat3MaterialPlugin)
             .add_plugins(GeoFramePlugin {
                 apply_transforms: false,
@@ -111,13 +110,13 @@ impl Plugin for HeadlessEditorPlugin {
                     // directly), preventing one-frame jitter in `sensor_view`.
                     sync_pos,
                     bevy_geo_frames::apply_geo_rotation,
+                    #[cfg(feature = "big_space")]
                     crate::spatial::apply_big_translation,
                 )
                     .chain()
                     .after(impeller2_bevy::sink)
                     .in_set(PositionSync),
             )
-            .add_systems(PreUpdate, crate::setup_cell.after(impeller2_bevy::sink))
             .add_systems(Startup, setup_headless_lighting)
             .init_resource::<crate::EqlContext>()
             .init_resource::<crate::SyncedObject3d>()
@@ -125,6 +124,9 @@ impl Plugin for HeadlessEditorPlugin {
             .add_systems(Update, load_headless_scene)
             .set_runner(render_server_runner);
 
+        #[cfg(feature = "big_space")]
+        app.add_plugins(crate::spatial::FloatingOriginPlugin::new(16_000., 100.))
+            .add_systems(PreUpdate, crate::setup_cell.after(impeller2_bevy::sink));
         if let Some(render_app) = app.get_sub_app_mut(RenderApp) {
             render_app
                 .init_resource::<HeadlessMode>()

@@ -123,7 +123,7 @@ impl PalettePage {
                 })
             })
             .collect();
-        items.sort_by(|a, b| b.score.cmp(&a.score));
+        items.sort_by_key(|item| std::cmp::Reverse(item.score));
         items
     }
 
