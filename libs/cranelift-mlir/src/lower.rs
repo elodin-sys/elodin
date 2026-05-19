@@ -4435,7 +4435,7 @@ fn lower_instruction_mem(
                 } else {
                     n_total_idx
                 };
-                let row_size = if n_idx > 0 { n / n_idx } else { 1 };
+                let row_size = n.checked_div(n_idx).unwrap_or(1);
                 let n_idx_v = builder.ins().iconst(types::I64, n_idx as i64);
                 let row_v = builder.ins().iconst(types::I64, row_size as i64);
                 let func_ref =
@@ -4469,11 +4469,7 @@ fn lower_instruction_mem(
             let upd_ty = type_map.get(updates).cloned().unwrap_or(rt.clone());
             let n_src = src_ty.num_elements();
             let n_updates = idx_ty.num_elements();
-            let inner_size = if n_updates > 0 {
-                upd_ty.num_elements() / n_updates
-            } else {
-                1
-            };
+            let inner_size = upd_ty.num_elements().checked_div(n_updates).unwrap_or(1);
             let idx_ptr = get(indices)?;
             let widened_idx = if matches!(idx_ty.element_type, ElementType::I32 | ElementType::UI32)
             {
@@ -4566,7 +4562,7 @@ fn lower_instruction_mem(
             };
             let n_in = src_ty.num_elements();
             let n_out = n;
-            let inner = if n_out > 0 { n_in / n_out } else { n_in };
+            let inner = n_in.checked_div(n_out).unwrap_or(n_in);
             let dst = alloc_slot_for_vid(builder, pool, result_vid, n_out * elem_sz);
             let func_ref = jit_module.declare_func_in_func(func_id, builder.func);
             let outer_v = builder.ins().iconst(types::I64, n_out as i64);
@@ -4590,7 +4586,7 @@ fn lower_instruction_mem(
             });
             let n_in = val_ty.num_elements();
             let n_out = rt.num_elements().max(1);
-            let inner = if n_out > 0 { n_in / n_out } else { n_in };
+            let inner = n_in.checked_div(n_out).unwrap_or(n_in);
             let val_sz = val_ty.element_type.byte_size();
             let idx_sz = idx_ty.element_type.byte_size();
             let dst_v = alloc_slot(builder, n_out * val_sz);

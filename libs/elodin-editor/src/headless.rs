@@ -125,8 +125,7 @@ impl Plugin for HeadlessEditorPlugin {
             .set_runner(render_server_runner);
 
         #[cfg(feature = "big_space")]
-        app
-            .add_plugins(crate::spatial::FloatingOriginPlugin::new(16_000., 100.))
+        app.add_plugins(crate::spatial::FloatingOriginPlugin::new(16_000., 100.))
             .add_systems(PreUpdate, crate::setup_cell.after(impeller2_bevy::sink));
         if let Some(render_app) = app.get_sub_app_mut(RenderApp) {
             render_app

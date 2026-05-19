@@ -3,6 +3,8 @@
 use std::{collections::HashMap, ops::Range, sync::Arc, time::Duration};
 
 use crate::plugins::editor_cam_touch;
+#[cfg(feature = "big_space")]
+use crate::spatial::{FloatingOrigin, FloatingOriginSettings, GridCell};
 use bevy::{
     DefaultPlugins,
     asset::{UnapprovedPathMode, embedded_asset},
@@ -324,8 +326,7 @@ impl Plugin for EditorPlugin {
             .add_systems(Update, throttle_for_sensor_cameras);
 
         #[cfg(feature = "big_space")]
-        app
-            .add_plugins(spatial::FloatingOriginPlugin::new(16_000., 100.));
+        app.add_plugins(spatial::FloatingOriginPlugin::new(16_000., 100.));
         if cfg!(target_os = "windows") || cfg!(target_os = "linux") {
             app.add_systems(Update, handle_drag_resize);
         }
@@ -849,7 +850,10 @@ fn set_icon_mac() {
 }
 
 #[cfg(feature = "big_space")]
-pub fn setup_cell(query: Query<Entity, (With<WorldPos>, Without<crate::spatial::GridCell>)>, mut cmds: Commands) {
+pub fn setup_cell(
+    query: Query<Entity, (With<WorldPos>, Without<crate::spatial::GridCell>)>,
+    mut cmds: Commands,
+) {
     for e in query.iter() {
         cmds.entity(e)
             .insert((Transform::default(), crate::spatial::GridCell::default()));
@@ -982,8 +986,9 @@ pub fn sync_pos(
     >,
     geo_context: Res<GeoContext>,
 ) {
-    query.iter_mut().for_each(
-        |(mut transform, mut geo_pos, mut geo_rot, world_pos)| {
+    query
+        .iter_mut()
+        .for_each(|(mut transform, mut geo_pos, mut geo_rot, world_pos)| {
             if let Some(ref mut geo_pos) = geo_pos {
                 geo_pos.1 = world_pos.pos();
             }
@@ -1004,8 +1009,7 @@ pub fn sync_pos(
                 // Preserve the existing scale when updating position and rotation
                 transform.rotation = att.as_quat();
             }
-        },
-    );
+        });
 }
 
 fn sanitize_editor_cam_anchor_depth(mut cams: Query<(Entity, &mut EditorCam)>) {

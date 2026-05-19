@@ -1071,14 +1071,10 @@ where
 }
 
 pub fn flush_msg_request_queue(world: &mut World) {
-    loop {
-        let Some((request, system_id)) = world
-            .get_resource_mut::<MsgRequestQueue>()
-            .and_then(|mut q| q.pop_front())
-        else {
-            break;
-        };
-
+    while let Some((request, system_id)) = world
+        .get_resource_mut::<MsgRequestQueue>()
+        .and_then(|mut q| q.pop_front())
+    {
         let req_id = {
             let handlers = world.resource::<MsgRequestIdHandlers>();
             let occupied: std::collections::HashSet<RequestId> = handlers.keys().copied().collect();

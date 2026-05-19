@@ -1,8 +1,8 @@
 //! Camera systems for the ViewCube plugin.
 
+use crate::spatial::WithoutFloatingOrigin;
 #[cfg(feature = "big_space")]
-use crate::spatial::{GridCell};
-use crate::spatial::{WithoutFloatingOrigin, FloatingOriginSettings};
+use crate::spatial::{FloatingOriginSettings, GridCell, WithFloatingOrigin};
 use bevy::camera::visibility::RenderLayers;
 use bevy::ecs::hierarchy::ChildOf;
 use bevy::ecs::system::SystemParam;
@@ -278,17 +278,14 @@ pub(super) struct ViewCubeEditorLookup<'w, 's> {
     floating_origin_settings: Res<'w, FloatingOriginSettings>,
 }
 
-impl<'w, 's>  ViewCubeEditorLookup<'w, 's>  {
-    
+impl<'w, 's> ViewCubeEditorLookup<'w, 's> {
     #[cfg(feature = "big_space")]
     fn origin(&self) -> Vec3 {
-        lookup
-            .floating_origin
+        self.floating_origin
             .iter()
             .next()
             .map(|(t, c)| {
-                lookup
-                    .floating_origin_settings
+                self.floating_origin_settings
                     .grid_position_double(c, t)
                     .as_vec3()
             })

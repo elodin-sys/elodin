@@ -24,20 +24,19 @@ impl OsdGrid {
     /// Write ASCII/UTF-8 text at (row, col), clipped to the grid.
     pub fn write_text(&mut self, row: u8, col: u8, text: &str) {
         let row = row as usize;
-        let mut col = col as usize;
+        let col = col as usize;
         let cols = self.cols as usize;
 
         if row >= self.rows as usize || col >= cols {
             return;
         }
 
-        for ch in text.chars() {
+        for (col, ch) in (col..).zip(text.chars()) {
             if col >= cols {
                 break;
             }
             let idx = row * cols + col;
             self.cells[idx] = ch;
-            col += 1;
         }
     }
 

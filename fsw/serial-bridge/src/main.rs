@@ -254,20 +254,14 @@ fn parse_bridge_frame(decoded: &[u8]) -> Option<BridgeFrame<'_>> {
                     message,
                 });
             }
-            LOG_FRAME_KIND_GPS => {
-                if payload.len() == size_of::<GpsRecord>() {
-                    return Some(BridgeFrame::Gps(payload));
-                }
+            LOG_FRAME_KIND_GPS if payload.len() == size_of::<GpsRecord>() => {
+                return Some(BridgeFrame::Gps(payload));
             }
-            LOG_FRAME_KIND_COMPASS => {
-                if payload.len() == size_of::<CompassRecord>() {
-                    return Some(BridgeFrame::Compass(payload));
-                }
+            LOG_FRAME_KIND_COMPASS if payload.len() == size_of::<CompassRecord>() => {
+                return Some(BridgeFrame::Compass(payload));
             }
-            LOG_FRAME_KIND_IMU => {
-                if payload.len() == size_of::<ImuRecord>() {
-                    return Some(BridgeFrame::Imu(payload));
-                }
+            LOG_FRAME_KIND_IMU if payload.len() == size_of::<ImuRecord>() => {
+                return Some(BridgeFrame::Imu(payload));
             }
             _ => {}
         }
