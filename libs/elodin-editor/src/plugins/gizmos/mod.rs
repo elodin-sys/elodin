@@ -42,7 +42,7 @@ type ArrowLabelCameraItem<'w> = (
     &'w Camera,
     &'w RenderTarget,
     &'w GlobalTransform,
-    &'w GridCell,
+    Option<&'w ChildOf>,
     Option<&'w ViewportConfig>,
 );
 
@@ -625,6 +625,7 @@ fn update_arrow_label_ui(
     arrows: Query<(Entity, &VectorArrowState)>,
     arrow_transforms: Query<(&Transform, &GridCell)>,
     cameras: Query<ArrowLabelCameraItem<'_>, With<MainCamera>>,
+    parent_cells: Query<&GridCell, Without<MainCamera>>,
     floating_origin: Res<FloatingOriginSettings>,
     mut labels: Query<(Entity, &ArrowLabelUI, &mut Node, &mut Text, &mut TextColor)>,
     primary_window: Query<Entity, With<bevy::window::PrimaryWindow>>,
@@ -638,13 +639,17 @@ fn update_arrow_label_ui(
     };
 
     let mut window_cameras: HashMap<Entity, Vec<_>> = HashMap::new();
-    for (entity, cam, render_target, gt, cell, config) in cameras.iter() {
+    for (entity, cam, render_target, gt, parent, config) in cameras.iter() {
         if !cam.is_active {
             continue;
         }
         let Some(window) = window_entity_from_target(render_target, primary_entity) else {
             continue;
         };
+        let cell = parent
+            .and_then(|parent| parent_cells.get(parent.parent()).ok())
+            .copied()
+            .unwrap_or_default();
         window_cameras
             .entry(window)
             .or_default()

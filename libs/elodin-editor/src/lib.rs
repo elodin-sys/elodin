@@ -547,15 +547,30 @@ fn set_clear_color(mut clear_color: ResMut<ClearColor>) {
 
 #[allow(clippy::type_complexity)]
 fn set_floating_origin(
-    query: Query<(&Transform, &GridCell), (With<MainCamera>, Without<FloatingOrigin>)>,
+    query: Query<(&Transform, Option<&ChildOf>), (With<MainCamera>, Without<FloatingOrigin>)>,
+    parent_query: Query<(&Transform, &GridCell), (Without<MainCamera>, Without<FloatingOrigin>)>,
     mut floating_origin: Query<(&mut Transform, &mut GridCell), With<FloatingOrigin>>,
+    floating_origin_settings: Res<FloatingOriginSettings>,
 ) {
-    let Some((transform, grid_cell)) = query.iter().next() else {
+    let Some((camera_transform, parent)) = query.iter().next() else {
         return;
     };
+    let (base_transform, base_cell) = parent
+        .and_then(|parent| parent_query.get(parent.parent()).ok())
+        .map(|(parent_transform, parent_cell)| {
+            (
+                parent_transform.mul_transform(*camera_transform),
+                *parent_cell,
+            )
+        })
+        .unwrap_or((*camera_transform, GridCell::default()));
+    let absolute = floating_origin_settings.grid_position_double(&base_cell, &base_transform);
+    let (origin_cell, origin_translation) = floating_origin_settings.translation_to_grid(absolute);
+    let mut origin_transform = base_transform;
+    origin_transform.translation = origin_translation;
     for (mut origin, mut cell) in floating_origin.iter_mut() {
-        *origin = *transform;
-        *cell = *grid_cell;
+        *origin = origin_transform;
+        *cell = origin_cell;
     }
 }
 

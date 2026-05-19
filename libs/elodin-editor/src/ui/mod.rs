@@ -59,7 +59,6 @@ mod platform {
 
 use platform::PRIMARY_ORDER_OFFSET;
 
-use crate::spatial::GridCell;
 use plot_3d::LinePlot3dPlugin;
 use schematic::SchematicPlugin;
 
@@ -284,7 +283,6 @@ pub struct CameraQuery {
     projection: &'static mut Projection,
     transform: &'static mut Transform,
     global_transform: &'static mut GlobalTransform,
-    grid_cell: &'static mut GridCell,
     parent: Option<&'static ChildOf>,
     grid_handle: Option<&'static GridHandle>,
     no_propagate_rot: Option<&'static crate::spatial::propagation::NoPropagateRot>,
@@ -383,7 +381,6 @@ impl Plugin for UiPlugin {
                     handle_window_close,
                     handle_window_destroyed,
                     render_layout,
-                    sync_camera_grid_cell,
                     handle_window_relayout_events,
                     set_secondary_camera_viewport,
                     set_camera_viewport,
@@ -893,19 +890,6 @@ fn warn_camera_order_ambiguities(
                     "Camera order collision on window"
                 );
             }
-        }
-    }
-}
-
-fn sync_camera_grid_cell(
-    mut query: Query<(Option<&ChildOf>, &mut GridCell), With<MainCamera>>,
-    entity_transform_query: Query<&GridCell, Without<MainCamera>>,
-) {
-    for (parent, mut grid_cell) in query.iter_mut() {
-        if let Some(parent) = parent
-            && let Ok(entity_cell) = entity_transform_query.get(parent.parent())
-        {
-            *grid_cell = *entity_cell;
         }
     }
 }
