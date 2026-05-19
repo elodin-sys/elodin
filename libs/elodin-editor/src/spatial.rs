@@ -7,6 +7,9 @@ pub use big_space::prelude::{BigSpace, CellCoord as GridCell, FloatingOrigin, Gr
 pub use bevy_geo_frames::big_space::apply_big_translation;
 
 #[cfg(feature = "big_space")]
+pub use big_space::grid::propagation::LowPrecisionRoot;
+
+#[cfg(feature = "big_space")]
 #[derive(Component, Default, Clone, Copy, Debug)]
 pub struct NoPropagateRot;
 
@@ -212,6 +215,10 @@ pub mod propagation {
     #[derive(Component, Default, Clone, Copy, Debug)]
     pub struct NoPropagateRot;
 }
+
+#[cfg(not(feature = "big_space"))]
+#[derive(Component, Default, Clone, Copy, Debug)]
+pub struct LowPrecisionRoot;
 
 #[cfg(not(feature = "big_space"))]
 pub fn setup_floating_origin(mut commands: Commands) {
