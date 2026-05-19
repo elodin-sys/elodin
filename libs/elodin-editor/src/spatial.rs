@@ -136,18 +136,11 @@ fn attach_parentless_grid_cells(
 pub struct FloatingOrigin;
 
 #[cfg(not(feature = "big_space"))]
-#[derive(Component, Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Component, Default, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct GridCell {
     pub x: i128,
     pub y: i128,
     pub z: i128,
-}
-
-#[cfg(not(feature = "big_space"))]
-impl Default for GridCell {
-    fn default() -> Self {
-        Self { x: 0, y: 0, z: 0 }
-    }
 }
 
 #[cfg(not(feature = "big_space"))]
