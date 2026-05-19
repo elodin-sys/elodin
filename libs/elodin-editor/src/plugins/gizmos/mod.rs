@@ -606,11 +606,12 @@ fn axis_color_from_name(_name: Option<&str>, default: Color) -> Color {
     default
 }
 
+/// Multiply RGB elements of `color` by `factor` in linear space.
 fn lighten_color(color: Color, factor: f32) -> Color {
     let linear = color.to_linear();
-    let r = (linear.red * factor).clamp(0.0, 1.0);
-    let g = (linear.green * factor).clamp(0.0, 1.0);
-    let b = (linear.blue * factor).clamp(0.0, 1.0);
+    let r = linear.red;
+    let g = linear.green;
+    let b = linear.blue;
     let a = linear.alpha;
     let scale = |c: f32| (c * factor).clamp(0.0, 1.0);
     Color::linear_rgba(scale(r), scale(g), scale(b), a)
@@ -623,9 +624,14 @@ fn lighten_color(color: Color, factor: f32) -> Color {
 fn update_arrow_label_ui(
     mut commands: Commands,
     arrows: Query<(Entity, &VectorArrowState)>,
+    #[cfg(feature = "big_space")]
     arrow_transforms: Query<(&Transform, &GridCell)>,
+    #[cfg(not(feature = "big_space"))]
+    arrow_transforms: Query<&Transform>,
     cameras: Query<ArrowLabelCameraItem<'_>, With<MainCamera>>,
+    #[cfg(feature = "big_space")]
     parent_cells: Query<&GridCell, Without<MainCamera>>,
+    #[cfg(feature = "big_space")]
     floating_origin: Res<FloatingOriginSettings>,
     mut labels: Query<(Entity, &ArrowLabelUI, &mut Node, &mut Text, &mut TextColor)>,
     primary_window: Query<Entity, With<bevy::window::PrimaryWindow>>,
@@ -633,6 +639,8 @@ fn update_arrow_label_ui(
     // Key: (arrow_entity, camera_entity) -> label_entity
     mut label_map: Local<HashMap<(Entity, Entity), Entity>>,
 ) {
+
+    #[cfg(feature = "big_space")]
     let edge = floating_origin.grid_edge_length();
     let Some(primary_entity) = primary_window.iter().next() else {
         return;
@@ -646,10 +654,15 @@ fn update_arrow_label_ui(
         let Some(window) = window_entity_from_target(render_target, primary_entity) else {
             continue;
         };
-        let cell = parent
-            .and_then(|parent| parent_cells.get(parent.parent()).ok())
-            .copied()
-            .unwrap_or_default();
+        let cell = cfg_select! {
+            feature = "big_space" => {
+                parent
+                .and_then(|parent| parent_cells.get(parent.parent()).ok())
+                .copied()
+                .unwrap_or_default()
+            }
+            _ => { () }
+        };
         window_cameras
             .entry(window)
             .or_default()
@@ -704,9 +717,18 @@ fn update_arrow_label_ui(
         let Some(visual) = arrow_state.visuals.values().next() else {
             continue;
         };
-        let Ok((arrow_transform, arrow_cell)) = arrow_transforms.get(visual.root) else {
-            continue;
-        };
+        cfg_select! {
+            feature = "big_space" => {
+                let Ok((arrow_transform, arrow_cell)) = arrow_transforms.get(visual.root) else {
+                    continue;
+                };
+            }
+            _ => {
+                let Ok(arrow_transform) = arrow_transforms.get(visual.root) else {
+                    continue;
+                };
+            }
+        }
         let Some(ref name) = arrow_state.label_name else {
             continue;
         };
@@ -748,10 +770,17 @@ fn update_arrow_label_ui(
                     continue;
                 }
 
-                let dx = (arrow_cell.x as f64 - cam_cell.x as f64) as f32 * edge;
-                let dy = (arrow_cell.y as f64 - cam_cell.y as f64) as f32 * edge;
-                let dz = (arrow_cell.z as f64 - cam_cell.z as f64) as f32 * edge;
-                let camera_relative_pos = label_local + Vec3::new(dx, dy, dz);
+                let dv = cfg_select! {
+                    feature = "big_space" => {
+                        let dx = (arrow_cell.x as f64 - cam_cell.x as f64) as f32 * edge;
+                        let dy = (arrow_cell.y as f64 - cam_cell.y as f64) as f32 * edge;
+                        let dz = (arrow_cell.z as f64 - cam_cell.z as f64) as f32 * edge;
+                        Vec3::new(dx, dy, dz)
+                    }
+                    _ => { Vec3::ZERO }
+                };
+                 
+                let camera_relative_pos = label_local + dv;
 
                 let Ok(screen_pos) = cam.world_to_viewport(cam_transform, camera_relative_pos)
                 else {

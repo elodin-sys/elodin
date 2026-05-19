@@ -43,6 +43,9 @@ pub mod debug {
     }
 }
 
+pub type WithoutFloatingOrigin = Without<FloatingOrigin>;
+pub type WithFloatingOrigin = With<FloatingOrigin>;
+
 #[derive(Resource, Clone, Debug)]
 pub struct FloatingOriginSettings {
     grid: Grid,

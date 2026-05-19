@@ -2,7 +2,6 @@
 
 use std::collections::BTreeMap;
 
-use crate::spatial::GridCell;
 use bevy::{
     animation::graph,
     app::{Startup, Update},
@@ -14,6 +13,7 @@ use bevy::{
         system::{Commands, Query, Res, ResMut},
     },
     math::{DQuat, Mat4, Vec4},
+    prelude::Transform,
 };
 use bevy_geo_frames::{GeoContext, GeoFrame, GeoRotation};
 use eql;
@@ -21,7 +21,6 @@ use impeller2_bevy::{CommandsExt, ComponentMetadataRegistry, EntityMap};
 use impeller2_wkt::LastUpdated;
 use impeller2_wkt::{ComponentValue, EntityMetadata, GetTimeSeries, Line3d};
 
-use gpu::LineBundle;
 use gpu::{LineConfig, LineUniform};
 
 use super::plot::{CollectedGraphData, Line, PlotDataComponent, gpu::LineHandle};
@@ -83,9 +82,9 @@ pub fn sync_line_plot_3d(
         };
 
         if let Ok(mut entity) = commands.get_entity(entity) {
-            entity.try_insert(LineBundle {
-                line: gpu::LineHandles([x, y, z]),
-                uniform: LineUniform {
+            entity.try_insert((
+                gpu::LineHandles([x, y, z]),
+                LineUniform {
                     line_width: line_plot.line_width,
                     color: Vec4::new(line_plot.color.r, line_plot.color.g, line_plot.color.b, 1.0),
                     depth_bias: 0.0,
@@ -94,13 +93,13 @@ pub fn sync_line_plot_3d(
                     #[cfg(target_arch = "wasm32")]
                     _padding: Default::default(),
                 },
-                config: LineConfig {
+                LineConfig {
                     render_layers: RenderLayers::layer(crate::plugins::gizmos::GIZMO_RENDER_LAYER),
                 },
-                global_transform: Default::default(),
-                transform: Default::default(),
-                grid_cell: GridCell::default(),
-            });
+                Transform::default(),
+                #[cfg(feature = "big_space")]
+                crate::spatial::GridCell::default(),
+            ));
             if let Some(frame) = line_plot.frame {
                 entity.try_insert(GeoRotation(frame, DQuat::IDENTITY));
             }

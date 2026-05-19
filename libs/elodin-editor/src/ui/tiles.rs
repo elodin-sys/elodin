@@ -67,7 +67,7 @@ use crate::{
         },
     },
     sensor_camera::SensorCameraConfigs,
-    spatial::{GridCell, LowPrecisionRoot},
+    spatial::{LowPrecisionRoot},
     ui::colors::ColorExt,
 };
 
@@ -1317,7 +1317,8 @@ impl ViewportPane {
         let mut parent_cmd = commands.spawn((
             GlobalTransform::default(),
             transform,
-            GridCell::default(),
+            #[cfg(feature = "big_space")]
+            crate::spatial::GridCell::default(),
             impeller2_wkt::WorldPos::default(),
             Name::new("viewport"),
         ));

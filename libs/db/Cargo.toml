@@ -150,6 +150,6 @@ name = "sensor_camera_export"
 path = "tests_query/sensor_camera_export.rs"
 
 [dev-dependencies]
-goldie = "0.6"
+goldie = "0.7"
 tempfile = "3"
 zerocopy.version = "0.8.2"

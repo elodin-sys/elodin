@@ -1,4 +1,3 @@
-use crate::spatial::GridCell;
 use bevy::camera::visibility::RenderLayers;
 use bevy::ecs::{hierarchy::ChildOf, relationship::Relationship};
 use bevy::log::warn_once;
@@ -1507,7 +1506,8 @@ pub fn create_object_3d_entity(
             Visibility::default(),
             InheritedVisibility::default(),
             ViewVisibility::default(),
-            GridCell::default(),
+            #[cfg(feature = "big_space")]
+            crate::spatial::GridCell::default(),
             impeller2_wkt::WorldPos::default(),
             Name::new(format!("object_3d {}", &data.mesh)),
         ))

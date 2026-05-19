@@ -1,6 +1,5 @@
 use std::time::Instant;
 
-use crate::spatial::GridCell;
 use bevy::{
     app::{App, Plugin},
     asset::{Assets, embedded_asset},
@@ -379,7 +378,8 @@ pub fn spawn_sensor_camera_frustum_sources(
             Transform::default(),
             GlobalTransform::default(),
             Projection::Perspective(perspective),
-            GridCell::default(),
+            #[cfg(feature = "big_space")]
+            crate::spatial::GridCell::default(),
             SensorCameraFrustumSource { config_index: i },
             Name::new(format!("sensor_camera_frustum_{}", config.camera_name)),
         ));
