@@ -7,7 +7,7 @@ use bevy::camera::visibility::RenderLayers;
 use bevy::ecs::hierarchy::ChildOf;
 use bevy::ecs::system::SystemParam;
 use bevy::log::{debug, warn};
-use bevy::math::Dir3;
+use bevy::math::{DVec3, Dir3};
 use bevy::prelude::*;
 use bevy_editor_cam::controller::component::EditorCam;
 use bevy_editor_cam::controller::motion::CurrentMotion;
@@ -254,11 +254,30 @@ type ViewCubeCameraQuery<'w, 's> = Query<
     (
         Entity,
         &'static mut Transform,
-        &'static GlobalTransform,
+        Option<&'static ChildOf>,
         &'static mut EditorCam,
     ),
     (With<ViewCubeTargetCamera>, WithoutFloatingOrigin),
 >;
+
+#[cfg(feature = "big_space")]
+type CameraParentQuery<'w, 's> = Query<
+    'w,
+    's,
+    (&'static Transform, &'static GridCell),
+    (Without<ViewCubeTargetCamera>, WithoutFloatingOrigin),
+>;
+
+#[cfg(not(feature = "big_space"))]
+type CameraParentQuery<'w, 's> =
+    Query<'w, 's, &'static Transform, (Without<ViewCubeTargetCamera>, WithoutFloatingOrigin)>;
+
+#[derive(Clone, Copy)]
+struct CurrentCameraPose {
+    translation: Vec3,
+    rotation: Quat,
+    parent_rotation: Quat,
+}
 
 #[derive(SystemParam)]
 pub(super) struct ViewCubeEditorLookup<'w, 's> {
@@ -272,6 +291,7 @@ pub(super) struct ViewCubeEditorLookup<'w, 's> {
     values: Query<'w, 's, &'static ComponentValue>,
     time: Res<'w, Time>,
     arrow_cache: ResMut<'w, ViewCubeArrowTargetCache>,
+    camera_parents: CameraParentQuery<'w, 's>,
     #[cfg(feature = "big_space")]
     floating_origin: FloatingOriginQuery<'w, 's>,
     #[cfg(feature = "big_space")]
@@ -280,21 +300,70 @@ pub(super) struct ViewCubeEditorLookup<'w, 's> {
 
 impl<'w, 's> ViewCubeEditorLookup<'w, 's> {
     #[cfg(feature = "big_space")]
-    fn origin(&self) -> Vec3 {
+    fn origin(&self) -> DVec3 {
         self.floating_origin
             .iter()
             .next()
-            .map(|(t, c)| {
-                self.floating_origin_settings
-                    .grid_position_double(c, t)
-                    .as_vec3()
-            })
-            .unwrap_or(Vec3::ZERO)
+            .map(|(t, c)| self.floating_origin_settings.grid_position_double(c, t))
+            .unwrap_or(DVec3::ZERO)
     }
 
     #[cfg(not(feature = "big_space"))]
-    fn origin(&self) -> Vec3 {
-        Vec3::ZERO
+    fn origin(&self) -> DVec3 {
+        DVec3::ZERO
+    }
+
+    #[cfg(feature = "big_space")]
+    fn current_camera_pose(
+        &self,
+        transform: &Transform,
+        parent: Option<&ChildOf>,
+        origin_world: DVec3,
+    ) -> CurrentCameraPose {
+        let Some((parent_transform, parent_cell)) =
+            parent.and_then(|parent| self.camera_parents.get(parent.parent()).ok())
+        else {
+            return CurrentCameraPose {
+                translation: (transform.translation.as_dvec3() - origin_world).as_vec3(),
+                rotation: transform.rotation,
+                parent_rotation: Quat::IDENTITY,
+            };
+        };
+
+        let absolute_transform = parent_transform.mul_transform(*transform);
+        let absolute_translation = self
+            .floating_origin_settings
+            .grid_position_double(parent_cell, &absolute_transform);
+        CurrentCameraPose {
+            translation: (absolute_translation - origin_world).as_vec3(),
+            rotation: parent_transform.rotation * transform.rotation,
+            parent_rotation: parent_transform.rotation,
+        }
+    }
+
+    #[cfg(not(feature = "big_space"))]
+    fn current_camera_pose(
+        &self,
+        transform: &Transform,
+        parent: Option<&ChildOf>,
+        _origin_world: DVec3,
+    ) -> CurrentCameraPose {
+        let Some(parent_transform) =
+            parent.and_then(|parent| self.camera_parents.get(parent.parent()).ok())
+        else {
+            return CurrentCameraPose {
+                translation: transform.translation,
+                rotation: transform.rotation,
+                parent_rotation: Quat::IDENTITY,
+            };
+        };
+
+        let absolute_transform = parent_transform.mul_transform(*transform);
+        CurrentCameraPose {
+            translation: absolute_transform.translation,
+            rotation: absolute_transform.rotation,
+            parent_rotation: parent_transform.rotation,
+        }
     }
 }
 
@@ -314,19 +383,18 @@ pub fn handle_view_cube_editor(
         let Some(cam) = main_camera_for_event(event, &view_cube_query) else {
             continue;
         };
-        let Ok((entity, mut transform, global_transform, mut editor_cam)) =
-            camera_query.get_mut(cam)
-        else {
+        let Ok((entity, mut transform, parent, mut editor_cam)) = camera_query.get_mut(cam) else {
             continue;
         };
 
         let origin_world = lookup.origin();
+        let camera_pose = lookup.current_camera_pose(transform.as_ref(), parent, origin_world);
 
         if !matches!(event, ViewCubeEvent::ArrowClicked { .. }) {
             update_anchor_depth_for_view_cube(
                 entity,
-                transform.as_ref(),
-                global_transform,
+                camera_pose.translation,
+                camera_pose.rotation,
                 &mut editor_cam,
                 &lookup.viewports,
                 lookup.entity_map.as_ref(),
@@ -338,8 +406,8 @@ pub fn handle_view_cube_editor(
         editor_cam.end_move();
         editor_cam.current_motion = CurrentMotion::Stationary;
 
-        let (_, global_rotation, _) = global_transform.to_scale_rotation_translation();
-        let parent_rotation = global_rotation * transform.rotation.inverse();
+        let global_rotation = camera_pose.rotation;
+        let parent_rotation = camera_pose.parent_rotation;
         let cube_global = cube_root_query
             .get(event_source(event))
             .ok()
@@ -484,7 +552,7 @@ pub fn handle_view_cube_editor(
         if let ViewCubeEvent::ArrowClicked { arrow, .. } = event {
             if let Some((previous_depth, refreshed_depth)) = refresh_anchor_depth_for_arrow(
                 entity,
-                global_transform,
+                camera_pose.translation,
                 &mut editor_cam,
                 &lookup.viewports,
                 lookup.entity_map.as_ref(),
@@ -866,24 +934,22 @@ fn choose_min_rotation_up(
 #[allow(clippy::too_many_arguments)]
 fn update_anchor_depth_for_view_cube(
     camera: Entity,
-    _transform: &Transform,
-    global_transform: &GlobalTransform,
+    camera_translation: Vec3,
+    camera_rotation: Quat,
     editor_cam: &mut EditorCam,
     viewports: &Query<&crate::ui::inspector::viewport::Viewport, With<ViewCubeTargetCamera>>,
     entity_map: &EntityMap,
     values: &Query<&'static ComponentValue>,
-    origin_world: Vec3,
+    origin_world: DVec3,
 ) {
     let Some(orbit_target_world) = view_cube_orbit_target(camera, viewports, entity_map, values)
     else {
         return;
     };
-    let orbit_target = orbit_target_world - origin_world;
+    let orbit_target = (orbit_target_world - origin_world).as_vec3();
 
-    let world_translation = global_transform.translation();
-    let world_rotation = global_transform.rotation();
-    let to_target = orbit_target - world_translation;
-    let forward = world_rotation * Vec3::NEG_Z;
+    let to_target = orbit_target - camera_translation;
+    let forward = camera_rotation * Vec3::NEG_Z;
     let projected_distance = to_target.dot(forward);
     let measured_distance = to_target.length();
     let previous_distance = editor_cam.last_anchor_depth.abs() as f32;
@@ -922,17 +988,16 @@ fn update_anchor_depth_for_view_cube(
 #[allow(clippy::too_many_arguments)]
 fn refresh_anchor_depth_for_arrow(
     camera: Entity,
-    global_transform: &GlobalTransform,
+    camera_translation: Vec3,
     editor_cam: &mut EditorCam,
     viewports: &Query<&crate::ui::inspector::viewport::Viewport, With<ViewCubeTargetCamera>>,
     entity_map: &EntityMap,
     values: &Query<&'static ComponentValue>,
-    origin_world: Vec3,
+    origin_world: DVec3,
 ) -> Option<(f32, f32)> {
     let orbit_target_world = view_cube_orbit_target(camera, viewports, entity_map, values)?;
-    let orbit_target = orbit_target_world - origin_world;
-    let world_translation = global_transform.translation();
-    let measured_distance = (orbit_target - world_translation).length();
+    let orbit_target = (orbit_target_world - origin_world).as_vec3();
+    let measured_distance = (orbit_target - camera_translation).length();
     if !measured_distance.is_finite() || measured_distance <= 1.0e-3 {
         return None;
     }
@@ -949,12 +1014,12 @@ fn view_cube_orbit_target(
     viewports: &Query<&crate::ui::inspector::viewport::Viewport, With<ViewCubeTargetCamera>>,
     entity_map: &EntityMap,
     values: &Query<&'static ComponentValue>,
-) -> Option<Vec3> {
+) -> Option<DVec3> {
     let viewport = viewports.get(camera).ok()?;
     let compiled_expr = viewport.look_at.compiled_expr.as_ref()?;
     let val = compiled_expr.execute(entity_map, values).ok()?;
     let world_pos = val.as_world_pos()?;
-    Some(world_pos.bevy_pos().as_vec3())
+    Some(world_pos.bevy_pos())
 }
 
 #[cfg(test)]
