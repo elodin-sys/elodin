@@ -326,7 +326,8 @@ impl Plugin for EditorPlugin {
             .add_systems(Update, throttle_for_sensor_cameras);
 
         #[cfg(feature = "big_space")]
-        app.add_plugins(spatial::FloatingOriginPlugin::new(16_000., 100.));
+        app.add_plugins(spatial::FloatingOriginPlugin::new(16_000., 100.))
+            .add_systems(PreUpdate, setup_cell.before(PositionSync));
         if cfg!(target_os = "windows") || cfg!(target_os = "linux") {
             app.add_systems(Update, handle_drag_resize);
         }

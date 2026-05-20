@@ -1434,6 +1434,8 @@ impl ViewportPane {
             }),
             main_camera_layers,
             MainCamera,
+            #[cfg(feature = "big_space")]
+            crate::spatial::LowPrecisionRoot,
             EditorCam {
                 orbit_constraint: OrbitConstraint::Fixed {
                     up: Vec3::Y,
