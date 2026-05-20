@@ -10,10 +10,6 @@ publish = false
 default = ["big_space"]
 cargo-clippy = []
 big_space = ["dep:big_space", "bevy_geo_frames/big_space"]
-# Restore the fork's `NoPropagateRot` behavior on top of upstream big_space.
-# Off by default while we measure what actually breaks without it; see
-# `restore_main_camera_world_rotation` in `lib.rs`.
-no_prop_rot = ["big_space"]
 inspector = ["dep:bevy-inspector-egui", "bevy_geo_frames/inspector"]
 debug = ["big_space", "big_space/debug"]
 tracy = ["bevy/trace_tracy", "bevy/debug"]

@@ -33,7 +33,6 @@ cargo run --bin elodin editor 127.0.0.1:2240
 Optional features declared in `libs/elodin-editor/Cargo.toml` (re-exported by `apps/elodin/Cargo.toml`):
 
 - `big_space` (default): upstream `big_space` 0.12 floating-origin layer.
-- `no_prop_rot`: restore the pre-upgrade fork behavior where `MainCamera.GlobalTransform.rotation` ignores its parent viewport's rotation. See `restore_main_camera_world_rotation` in `lib.rs`.
 - `inspector`: adds the `bevy-inspector-egui` runtime entity inspector.
 - `debug`: enables `big_space`'s debug diagnostics.
 - `tracy`: enables Tracy profiling (see `.cursor/skills/elodin-tracy/SKILL.md`).
