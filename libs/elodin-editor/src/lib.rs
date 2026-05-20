@@ -591,8 +591,18 @@ fn set_floating_origin(
         .unwrap_or((*camera_transform, crate::spatial::GridCell::default()));
     let absolute = floating_origin_settings.grid_position_double(&base_cell, &base_transform);
     let (origin_cell, origin_translation) = floating_origin_settings.translation_to_grid(absolute);
-    let mut origin_transform = base_transform;
-    origin_transform.translation = origin_translation;
+    // Keep `FloatingOrigin` rotation at identity. Upstream big_space (post the
+    // `no_prop_rot_v0.17` fork) propagates the floating origin's rotation to
+    // every descendant's `GlobalTransform`. If we mirror the camera's combined
+    // rotation onto the origin, the world rotates twice (once via propagation,
+    // once via the camera's own view) and ViewCube snaps send the scene off
+    // screen — most visibly on Linux. Only the high-precision translation
+    // needs to track the active camera.
+    let origin_transform = Transform {
+        translation: origin_translation,
+        rotation: Quat::IDENTITY,
+        scale: Vec3::ONE,
+    };
     for (mut origin, mut cell) in floating_origin.iter_mut() {
         *origin = origin_transform;
         *cell = origin_cell;
