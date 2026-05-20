@@ -317,11 +317,11 @@ impl<'w, 's> ViewCubeEditorLookup<'w, 's> {
     /// `GlobalTransform`, which `bevy`+`big_space` propagate in `PostUpdate`
     /// (one frame later than this `Update` system runs).
     ///
-    /// `MainCamera` is rendered as if it carried the fork's `NoPropagateRot`
-    /// marker (see `restore_main_camera_world_rotation` in `lib.rs`): the
-    /// viewport parent contributes its translation, never its rotation.
-    /// Mirror that here so the ViewCube uses the same effective world frame
-    /// as the renderer.
+    /// big_space 0.12 propagates `parent.rotation * camera.local` onto the
+    /// camera's world rotation, so the viewport's look-at quaternion shows up
+    /// in `camera_pose.rotation`. `parent_rotation` lets the snap math
+    /// convert between world and parent frames when emitting the
+    /// `LookToTrigger`.
     #[cfg(feature = "big_space")]
     fn current_camera_pose(
         &self,
@@ -348,8 +348,8 @@ impl<'w, 's> ViewCubeEditorLookup<'w, 's> {
             .grid_position_double(parent_cell, &absolute_transform);
         CurrentCameraPose {
             translation: (absolute_translation - origin_world).as_vec3(),
-            rotation: transform.rotation,
-            parent_rotation: Quat::IDENTITY,
+            rotation: parent_transform.rotation * transform.rotation,
+            parent_rotation: parent_transform.rotation,
         }
     }
 
@@ -370,12 +370,11 @@ impl<'w, 's> ViewCubeEditorLookup<'w, 's> {
             };
         };
 
-        let absolute_translation =
-            parent_transform.translation + parent_transform.rotation * transform.translation;
+        let absolute_transform = parent_transform.mul_transform(*transform);
         CurrentCameraPose {
-            translation: absolute_translation,
-            rotation: transform.rotation,
-            parent_rotation: Quat::IDENTITY,
+            translation: absolute_transform.translation,
+            rotation: absolute_transform.rotation,
+            parent_rotation: parent_transform.rotation,
         }
     }
 }
