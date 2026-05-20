@@ -327,7 +327,13 @@ impl Plugin for EditorPlugin {
 
         #[cfg(feature = "big_space")]
         app.add_plugins(spatial::FloatingOriginPlugin::new(16_000., 100.))
-            .add_systems(PreUpdate, setup_cell.before(PositionSync));
+            .add_systems(PreUpdate, setup_cell.before(PositionSync))
+            .add_systems(
+                PostUpdate,
+                restore_main_camera_world_rotation
+                    .after(big_space::prelude::BigSpaceSystems::PropagateLowPrecision)
+                    .before(bevy::transform::TransformSystems::Propagate),
+            );
         if cfg!(target_os = "windows") || cfg!(target_os = "linux") {
             app.add_systems(Update, handle_drag_resize);
         }
@@ -606,6 +612,35 @@ fn set_floating_origin(
     for (mut origin, mut cell) in floating_origin.iter_mut() {
         *origin = origin_transform;
         *cell = origin_cell;
+    }
+}
+
+/// PostUpdate system that emulates the pre-upgrade `NoPropagateRot` marker on
+/// `MainCamera`. The elodin-sys fork of big_space carried a patch
+/// (https://github.com/elodin-sys/big_space/commit/b8e7469) that let a child
+/// entity keep its own `Transform.rotation` as its `GlobalTransform.rotation`
+/// instead of inheriting the parent's. The `MainCamera` was parented under a
+/// viewport entity whose `Transform.rotation` is the look-at quaternion, so
+/// without that marker the viewport's orientation contaminates the camera's
+/// world rotation — `EditorCam`, the `ViewCube` and any consumer of
+/// `GlobalTransform` then double-apply the rotation.
+///
+/// Upstream big_space 0.12 has no equivalent marker, so we restore the
+/// semantics here: after big_space has propagated everything, overwrite each
+/// `MainCamera.GlobalTransform.rotation` with the camera's own local
+/// `Transform.rotation`, preserving the high-precision translation and scale.
+#[cfg(feature = "big_space")]
+fn restore_main_camera_world_rotation(
+    mut cameras: Query<(&Transform, &mut GlobalTransform), With<MainCamera>>,
+) {
+    for (transform, mut global) in &mut cameras {
+        let (scale, _, translation) = global.to_scale_rotation_translation();
+        *global = Transform {
+            translation,
+            rotation: transform.rotation,
+            scale,
+        }
+        .into();
     }
 }
 

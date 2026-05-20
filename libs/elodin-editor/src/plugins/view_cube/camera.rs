@@ -313,6 +313,15 @@ impl<'w, 's> ViewCubeEditorLookup<'w, 's> {
         DVec3::ZERO
     }
 
+    /// Compose the active camera's world pose by hand instead of trusting
+    /// `GlobalTransform`, which `bevy`+`big_space` propagate in `PostUpdate`
+    /// (one frame later than this `Update` system runs).
+    ///
+    /// `MainCamera` is rendered as if it carried the fork's `NoPropagateRot`
+    /// marker (see `restore_main_camera_world_rotation` in `lib.rs`): the
+    /// viewport parent contributes its translation, never its rotation.
+    /// Mirror that here so the ViewCube uses the same effective world frame
+    /// as the renderer.
     #[cfg(feature = "big_space")]
     fn current_camera_pose(
         &self,
@@ -330,14 +339,17 @@ impl<'w, 's> ViewCubeEditorLookup<'w, 's> {
             };
         };
 
+        // Translation: parent.translation + parent.rotation * camera.translation,
+        // promoted to high-precision via `grid_position_double` to avoid
+        // accumulating f32 error when the floating origin is far from zero.
         let absolute_transform = parent_transform.mul_transform(*transform);
         let absolute_translation = self
             .floating_origin_settings
             .grid_position_double(parent_cell, &absolute_transform);
         CurrentCameraPose {
             translation: (absolute_translation - origin_world).as_vec3(),
-            rotation: parent_transform.rotation * transform.rotation,
-            parent_rotation: parent_transform.rotation,
+            rotation: transform.rotation,
+            parent_rotation: Quat::IDENTITY,
         }
     }
 
@@ -358,11 +370,12 @@ impl<'w, 's> ViewCubeEditorLookup<'w, 's> {
             };
         };
 
-        let absolute_transform = parent_transform.mul_transform(*transform);
+        let absolute_translation =
+            parent_transform.translation + parent_transform.rotation * transform.translation;
         CurrentCameraPose {
-            translation: absolute_transform.translation,
-            rotation: absolute_transform.rotation,
-            parent_rotation: parent_transform.rotation,
+            translation: absolute_translation,
+            rotation: transform.rotation,
+            parent_rotation: Quat::IDENTITY,
         }
     }
 }
