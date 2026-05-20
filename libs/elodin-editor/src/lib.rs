@@ -331,8 +331,7 @@ impl Plugin for EditorPlugin {
             .add_systems(
                 PostUpdate,
                 restore_main_camera_world_rotation
-                    .after(big_space::prelude::BigSpaceSystems::PropagateLowPrecision)
-                    .before(bevy::transform::TransformSystems::Propagate),
+                    .after(big_space::prelude::BigSpaceSystems::PropagateLowPrecision),
             );
         if cfg!(target_os = "windows") || cfg!(target_os = "linux") {
             app.add_systems(Update, handle_drag_resize);
