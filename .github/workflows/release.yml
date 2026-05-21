@@ -142,49 +142,79 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.13"
-      - name: Install musl cross-compiler toolchain
+      - name: Install Zig for musl C/C++ compilation
         # Required by C/C++ build.rs deps (e.g. openh264-sys2) when targeting
         # *-unknown-linux-musl: cc-rs looks for ${triple}-g++ which Ubuntu does
         # not ship (musl-tools provides musl-gcc only, no g++).
-        # Each musl target runs on its native arch runner (see
-        # dist-workspace.toml), so the "native" toolchain from musl.cc is used.
+        #
+        # We use Zig as a drop-in C/C++ compiler that ships with musl headers
+        # and libs for all supported targets. Same approach as cargo-zigbuild
+        # and maturin. Avoids musl.cc which has blocked GitHub Actions IPs
+        # wholesale since 2025-05-27.
+        #
         # `precise-builds = true` in dist-workspace.toml guarantees a single
         # target per matrix entry, so checking targets[0] is sufficient and
         # matches what the bash below actually processes.
         if: ${{ matrix.targets[0] == 'x86_64-unknown-linux-musl' || matrix.targets[0] == 'aarch64-unknown-linux-musl' }}
         shell: bash
+        env:
+          ZIG_VERSION: "0.16.0"
         run: |
           set -euo pipefail
           target="${{ matrix.targets[0] }}"
           case "$target" in
             x86_64-unknown-linux-musl)
-              prefix="x86_64-linux-musl"
+              zig_target="x86_64-linux-musl"
               # cc-rs reads CC_/CXX_/AR_ with lowercase target (see cc docs)
               env_target="x86_64_unknown_linux_musl"
               # cargo reads CARGO_TARGET_<TRIPLE>_LINKER with uppercase
               cargo_env_target="X86_64_UNKNOWN_LINUX_MUSL"
               ;;
             aarch64-unknown-linux-musl)
-              prefix="aarch64-linux-musl"
+              zig_target="aarch64-linux-musl"
               env_target="aarch64_unknown_linux_musl"
               cargo_env_target="AARCH64_UNKNOWN_LINUX_MUSL"
               ;;
           esac
 
-          tarball="${prefix}-native.tgz"
-          install_dir="/opt/${prefix}-native"
+          host_arch="$(uname -m)"
+          case "$host_arch" in
+            x86_64)  zig_arch="x86_64"  ;;
+            aarch64) zig_arch="aarch64" ;;
+            *)
+              echo "::error::Unsupported host arch for Zig: $host_arch"
+              exit 1
+              ;;
+          esac
 
-          curl --proto '=https' --tlsv1.2 -fsSL \
-            "https://musl.cc/${tarball}" -o "/tmp/${tarball}"
+          zig_dir="zig-linux-${zig_arch}-${ZIG_VERSION}"
+          zig_tarball="${zig_dir}.tar.xz"
+          curl --proto '=https' --tlsv1.2 -fsSL --retry 3 --retry-delay 5 \
+            "https://ziglang.org/download/${ZIG_VERSION}/${zig_tarball}" \
+            -o "/tmp/${zig_tarball}"
           sudo mkdir -p /opt
-          sudo tar -xzf "/tmp/${tarball}" -C /opt
+          sudo tar -xJf "/tmp/${zig_tarball}" -C /opt
+          zig_bin="/opt/${zig_dir}/zig"
 
-          echo "${install_dir}/bin" >> "$GITHUB_PATH"
+          # Wrappers needed because cc-rs treats CC_*/CXX_* as paths, not shell
+          # commands, so we cannot inline `-target <triple>` in the env var.
+          # printf (no heredoc) ensures the shebang sits at byte 0 of the file
+          # — kernels require `#!` as the first two bytes for it to be honored.
+          wrap_dir="/opt/zig-cc-${env_target}"
+          sudo mkdir -p "$wrap_dir"
+          printf '#!/bin/sh\nexec "%s" cc -target %s "$@"\n' \
+            "$zig_bin" "$zig_target" | sudo tee "${wrap_dir}/cc" >/dev/null
+          printf '#!/bin/sh\nexec "%s" c++ -target %s "$@"\n' \
+            "$zig_bin" "$zig_target" | sudo tee "${wrap_dir}/c++" >/dev/null
+          printf '#!/bin/sh\nexec "%s" ar "$@"\n' \
+            "$zig_bin" | sudo tee "${wrap_dir}/ar" >/dev/null
+          sudo chmod +x "${wrap_dir}/cc" "${wrap_dir}/c++" "${wrap_dir}/ar"
+
           {
-            echo "CC_${env_target}=${prefix}-gcc"
-            echo "CXX_${env_target}=${prefix}-g++"
-            echo "AR_${env_target}=${prefix}-ar"
-            echo "CARGO_TARGET_${cargo_env_target}_LINKER=${prefix}-gcc"
+            echo "CC_${env_target}=${wrap_dir}/cc"
+            echo "CXX_${env_target}=${wrap_dir}/c++"
+            echo "AR_${env_target}=${wrap_dir}/ar"
+            echo "CARGO_TARGET_${cargo_env_target}_LINKER=${wrap_dir}/cc"
           } >> "$GITHUB_ENV"
       - name: Build artifacts
         run: |
