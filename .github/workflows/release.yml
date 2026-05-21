@@ -148,7 +148,10 @@ jobs:
         # not ship (musl-tools provides musl-gcc only, no g++).
         # Each musl target runs on its native arch runner (see
         # dist-workspace.toml), so the "native" toolchain from musl.cc is used.
-        if: ${{ contains(join(matrix.targets, ','), '-unknown-linux-musl') }}
+        # `precise-builds = true` in dist-workspace.toml guarantees a single
+        # target per matrix entry, so checking targets[0] is sufficient and
+        # matches what the bash below actually processes.
+        if: ${{ matrix.targets[0] == 'x86_64-unknown-linux-musl' || matrix.targets[0] == 'aarch64-unknown-linux-musl' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -156,17 +159,15 @@ jobs:
           case "$target" in
             x86_64-unknown-linux-musl)
               prefix="x86_64-linux-musl"
+              # cc-rs reads CC_/CXX_/AR_ with lowercase target (see cc docs)
               env_target="x86_64_unknown_linux_musl"
+              # cargo reads CARGO_TARGET_<TRIPLE>_LINKER with uppercase
               cargo_env_target="X86_64_UNKNOWN_LINUX_MUSL"
               ;;
             aarch64-unknown-linux-musl)
               prefix="aarch64-linux-musl"
               env_target="aarch64_unknown_linux_musl"
               cargo_env_target="AARCH64_UNKNOWN_LINUX_MUSL"
-              ;;
-            *)
-              echo "::error::Unsupported musl target: $target"
-              exit 1
               ;;
           esac
 
