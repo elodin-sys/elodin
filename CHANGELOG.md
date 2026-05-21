@@ -4,6 +4,13 @@
 
 ## v0.17
 
+### v0.17.3
+- **(feat)** Add sensor camera recording export to `elodin-db export`. (#648)
+- **(feat)** Simplify the sensor camera API and allow fetching past frames. (#649)
+- **(fix)** Preserve component creation order in `elodin-db export`. (#645)
+- **(chore)** Update to Bevy 0.18 and Big Space. (#651)
+- **(chore)** Replace the vendored `muxide` fork with upstream `muxide` 0.2.5. (#655)
+
 ### v0.17.2
 - **(feat)** Add `elodin-db export --join --mono-ns --csv-fast-floats`. (#630)
 - **(feat)** Add frustum overlays and intersection support for sensor cameras. (#626)
