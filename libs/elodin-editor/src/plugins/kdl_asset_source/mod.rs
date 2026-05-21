@@ -91,9 +91,10 @@ pub(crate) fn plugin(app: &mut App) {
     // KDL-specific directory.
     let source_builder = match origin {
         KdlRootSource::EnvVar => AssetSourceBuilder::platform_default(str_path, None),
-        KdlRootSource::CwdFallback => AssetSourceBuilder::default()
-            .with_reader(AssetSource::get_default_reader(str_path.to_string()))
-            .with_writer(AssetSource::get_default_writer(str_path.to_string())),
+        KdlRootSource::CwdFallback => {
+            AssetSourceBuilder::new(AssetSource::get_default_reader(str_path.to_string()))
+                .with_writer(AssetSource::get_default_writer(str_path.to_string()))
+        }
     };
 
     app.register_asset_source(KDL_ASSET_SOURCE, source_builder);

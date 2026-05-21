@@ -33,7 +33,6 @@ use bevy::{
         view::ViewTarget,
     },
 };
-use big_space::GridCell;
 use impeller2::types::ComponentId;
 use impeller2_wkt::DbConfig;
 pub use impeller2_wkt::SensorCameraConfig;
@@ -167,7 +166,7 @@ impl ViewNode for SensorPostProcessNode {
 
         let bind_group = render_context.render_device().create_bind_group(
             "sensor_post_process_bind_group",
-            &pipeline_res.layout,
+            &pipeline_res.bind_group_layout,
             &BindGroupEntries::sequential((
                 post_process.source,
                 &pipeline_res.sampler,
@@ -198,7 +197,7 @@ impl ViewNode for SensorPostProcessNode {
 
 #[derive(Resource)]
 struct SensorPostProcessPipeline {
-    layout: BindGroupLayout,
+    bind_group_layout: BindGroupLayout,
     sampler: Sampler,
     pipeline_id: CachedRenderPipelineId,
 }
@@ -210,17 +209,18 @@ fn init_sensor_post_process_pipeline(
     asset_server: Res<AssetServer>,
     fullscreen_shader: Res<FullscreenShader>,
 ) {
-    let layout = render_device.create_bind_group_layout(
-        "sensor_post_process_bind_group_layout",
-        &BindGroupLayoutEntries::sequential(
-            ShaderStages::FRAGMENT,
-            (
-                texture_2d(TextureSampleType::Float { filterable: true }),
-                sampler(SamplerBindingType::Filtering),
-                uniform_buffer::<SensorEffectSettings>(true),
-            ),
+    let layout_entries = BindGroupLayoutEntries::sequential(
+        ShaderStages::FRAGMENT,
+        (
+            texture_2d(TextureSampleType::Float { filterable: true }),
+            sampler(SamplerBindingType::Filtering),
+            uniform_buffer::<SensorEffectSettings>(true),
         ),
     );
+    let layout_descriptor =
+        BindGroupLayoutDescriptor::new("sensor_post_process_bind_group_layout", &layout_entries);
+    let bind_group_layout = render_device
+        .create_bind_group_layout("sensor_post_process_bind_group_layout", &layout_entries);
 
     let sampler = render_device.create_sampler(&SamplerDescriptor::default());
 
@@ -230,7 +230,7 @@ fn init_sensor_post_process_pipeline(
 
     let pipeline_id = pipeline_cache.queue_render_pipeline(RenderPipelineDescriptor {
         label: Some("sensor_post_process_pipeline".into()),
-        layout: vec![layout.clone()],
+        layout: vec![layout_descriptor.clone()],
         vertex: vertex_state,
         fragment: Some(FragmentState {
             shader,
@@ -245,7 +245,7 @@ fn init_sensor_post_process_pipeline(
     });
 
     commands.insert_resource(SensorPostProcessPipeline {
-        layout,
+        bind_group_layout,
         sampler,
         pipeline_id,
     });
@@ -367,6 +367,7 @@ pub fn spawn_sensor_camera_frustum_sources(
             fov: config.fov_degrees.to_radians(),
             near: config.near,
             far: config.far,
+            near_clip_plane: crate::plugins::frustum_common::near_clip_plane(config.near),
             ..default()
         };
         if config.height > 0 {
@@ -377,7 +378,8 @@ pub fn spawn_sensor_camera_frustum_sources(
             Transform::default(),
             GlobalTransform::default(),
             Projection::Perspective(perspective),
-            GridCell::<i128>::default(),
+            #[cfg(feature = "big_space")]
+            crate::spatial::GridCell::default(),
             SensorCameraFrustumSource { config_index: i },
             Name::new(format!("sensor_camera_frustum_{}", config.camera_name)),
         ));
@@ -401,7 +403,7 @@ fn spawn_sensor_cameras(
         };
 
         let mut render_target_image =
-            Image::new_target_texture(size.width, size.height, TextureFormat::bevy_default());
+            Image::new_target_texture(size.width, size.height, TextureFormat::bevy_default(), None);
         render_target_image.texture_descriptor.usage |= TextureUsages::COPY_SRC;
         let render_target_handle = images.add(render_target_image);
 
@@ -434,6 +436,7 @@ fn spawn_sensor_cameras(
             fov: config.fov_degrees.to_radians(),
             near: config.near,
             far: config.far,
+            near_clip_plane: crate::plugins::frustum_common::near_clip_plane(config.near),
             ..default()
         };
 
@@ -455,17 +458,18 @@ fn spawn_sensor_cameras(
         commands.spawn((
             Camera3d::default(),
             Camera {
-                target: RenderTarget::Image(render_target_handle.into()),
                 order: -(10 + i as isize),
                 is_active: false,
                 ..default()
             },
+            RenderTarget::Image(render_target_handle.into()),
             Projection::Perspective(perspective),
             Tonemapping::None,
             bevy::render::view::Msaa::Off,
             Transform::from_xyz(0.0, 5.0, 0.0).looking_at(Vec3::ZERO, Vec3::Y),
             GlobalTransform::default(),
-            GridCell::<i128>::default(),
+            #[cfg(feature = "big_space")]
+            crate::spatial::GridCell::default(),
             SensorCamera { config_index: i },
             SensorEffectSettings {
                 effect_type,
@@ -751,7 +755,7 @@ fn receive_image_from_buffer(
     {
         let _span = tracing::info_span!("sensor_camera_poll_wait").entered();
         let poll_start = Instant::now();
-        if render_device.poll(PollType::wait()).is_err() {
+        if render_device.poll(PollType::wait_indefinitely()).is_err() {
             for (i, _) in &pending {
                 let buf_idx = buffer_toggle.0[*i];
                 image_copiers.0[*i].buffers[buf_idx].unmap();

@@ -50,18 +50,29 @@ pub fn color_component_to_u8(value: f32) -> u8 {
     (value.clamp(0.0, 1.0) * 255.0).round() as u8
 }
 
+/// Canonical `PerspectiveProjection::near_clip_plane` value for a given `near`
+/// distance. Used to keep the two fields in sync at every construction site.
+pub fn near_clip_plane(near: f32) -> Vec4 {
+    Vec4::new(0.0, 0.0, -1.0, -near)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    fn perspective(fov: f32, aspect_ratio: f32, near: f32, far: f32) -> PerspectiveProjection {
+        PerspectiveProjection {
+            fov,
+            aspect_ratio,
+            near,
+            far,
+            near_clip_plane: near_clip_plane(near),
+        }
+    }
+
     #[test]
     fn frustum_local_points_basic() {
-        let persp = PerspectiveProjection {
-            fov: std::f32::consts::FRAC_PI_2,
-            aspect_ratio: 1.0,
-            near: 0.1,
-            far: 100.0,
-        };
+        let persp = perspective(std::f32::consts::FRAC_PI_2, 1.0, 0.1, 100.0);
         let pts = frustum_local_points(&persp).unwrap();
         for p in &pts[0..4] {
             assert!((p.z - (-0.1)).abs() < 1e-5, "near plane z should be -near");
@@ -73,47 +84,22 @@ mod tests {
 
     #[test]
     fn frustum_local_points_rejects_degenerate() {
-        let bad_near = PerspectiveProjection {
-            fov: 1.0,
-            aspect_ratio: 1.0,
-            near: 0.0,
-            far: 10.0,
-        };
+        let bad_near = perspective(1.0, 1.0, 0.0, 10.0);
         assert!(frustum_local_points(&bad_near).is_none());
 
-        let bad_far = PerspectiveProjection {
-            fov: 1.0,
-            aspect_ratio: 1.0,
-            near: 10.0,
-            far: 5.0,
-        };
+        let bad_far = perspective(1.0, 1.0, 10.0, 5.0);
         assert!(frustum_local_points(&bad_far).is_none());
 
-        let bad_fov = PerspectiveProjection {
-            fov: 0.0,
-            aspect_ratio: 1.0,
-            near: 0.1,
-            far: 10.0,
-        };
+        let bad_fov = perspective(0.0, 1.0, 0.1, 10.0);
         assert!(frustum_local_points(&bad_fov).is_none());
 
-        let bad_aspect = PerspectiveProjection {
-            fov: 1.0,
-            aspect_ratio: 0.0,
-            near: 0.1,
-            far: 10.0,
-        };
+        let bad_aspect = perspective(1.0, 0.0, 0.1, 10.0);
         assert!(frustum_local_points(&bad_aspect).is_none());
     }
 
     #[test]
     fn frustum_local_points_aspect_ratio() {
-        let persp = PerspectiveProjection {
-            fov: std::f32::consts::FRAC_PI_2,
-            aspect_ratio: 2.0,
-            near: 1.0,
-            far: 10.0,
-        };
+        let persp = perspective(std::f32::consts::FRAC_PI_2, 2.0, 1.0, 10.0);
         let pts = frustum_local_points(&persp).unwrap();
         let near_width = (pts[1].x - pts[0].x).abs();
         let near_height = (pts[0].y - pts[3].y).abs();

@@ -23,12 +23,12 @@ impl AssetLoader for SchematicDocumentLoader {
         let root = Schematic::from_kdl(&String::from_utf8(bytes)?)?;
         let mut windows = Vec::new();
         let base_dir = load_context
-            .asset_path()
+            .path()
             .path()
             .parent()
             .map(Path::to_path_buf)
             .unwrap_or_default();
-        let source = load_context.asset_path().source().clone_owned();
+        let source = load_context.path().source().clone_owned();
 
         for window in root.elems.iter().filter_map(|elem| match elem {
             impeller2_wkt::SchematicElem::Window(window) => Some(window),

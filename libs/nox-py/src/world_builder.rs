@@ -1164,7 +1164,7 @@ impl WorldBuilder {
                         }
                     }
 
-                    component_memory.sort_by(|a, b| b.1.cmp(&a.1));
+                    component_memory.sort_by_key(|m| std::cmp::Reverse(m.1));
                     let input_memory_kb = input_memory_bytes as f64 / 1024.0;
 
                     // Print analysis
@@ -1238,7 +1238,7 @@ impl WorldBuilder {
                                 (loc, op_count, complexity)
                             })
                             .collect();
-                        source_heat_map.sort_by(|a, b| b.2.cmp(&a.2));
+                        source_heat_map.sort_by_key(|h| std::cmp::Reverse(h.2));
 
                         println!("Top Python lines by computational cost:");
                         let sim_dir = path.parent().unwrap_or_else(|| Path::new("."));

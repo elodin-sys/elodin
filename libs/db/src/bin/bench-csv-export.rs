@@ -313,7 +313,7 @@ fn run_decode_schema(db_path: PathBuf) {
             ),
         ));
     }
-    by_size.sort_by(|a, b| b.0.cmp(&a.0));
+    by_size.sort_by_key(|e| std::cmp::Reverse(e.0));
     for (_, line) in by_size {
         println!("{line}");
     }

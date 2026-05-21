@@ -80,7 +80,7 @@ impl CurrentDocument {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, TypePath)]
 pub struct SchematicDocumentLoader;
 
 #[derive(SystemSet, Debug, Clone, Hash, PartialEq, Eq)]

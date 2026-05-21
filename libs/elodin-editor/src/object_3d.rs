@@ -8,7 +8,6 @@ use bevy::scene::{SceneInstance, SceneRoot, SceneSpawner};
 use bevy_geo_frames::{GeoPosition, GeoRotation};
 use bevy_mat3_material::{Mat3Material, Mat3Params, Mat3TransformExt, uv_sphere_grid_line_mesh};
 use bevy_render::alpha::AlphaMode;
-use big_space::GridCell;
 use bitvec::prelude::*;
 use eql::Expr;
 use impeller2_bevy::EntityMap;
@@ -1507,7 +1506,8 @@ pub fn create_object_3d_entity(
             Visibility::default(),
             InheritedVisibility::default(),
             ViewVisibility::default(),
-            GridCell::<i128>::default(),
+            #[cfg(feature = "big_space")]
+            crate::spatial::GridCell::default(),
             impeller2_wkt::WorldPos::default(),
             Name::new(format!("object_3d {}", &data.mesh)),
         ))

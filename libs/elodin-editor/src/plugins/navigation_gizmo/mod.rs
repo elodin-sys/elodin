@@ -1,5 +1,5 @@
 use crate::{MainCamera, plugins::camera_anchor::camera_anchor_from_transform, ui::ViewportRect};
-use bevy::animation::{AnimationTarget, AnimationTargetId, animated_field};
+use bevy::animation::{AnimatedBy, AnimationTargetId, animated_field};
 use bevy::camera::{RenderTarget, Viewport};
 use bevy::math::Dir3;
 use bevy::prelude::*;
@@ -55,10 +55,8 @@ fn cube_color_highlight(
             .entity(entity)
             .insert(AnimationGraphHandle(graphs.add(graph)))
             .insert(player)
-            .insert(AnimationTarget {
-                id: target,
-                player: entity,
-            });
+            .insert(target)
+            .insert(AnimatedBy(entity));
     }
 }
 
@@ -91,10 +89,8 @@ fn cube_color_reset(
             .entity(entity)
             .insert(AnimationGraphHandle(graphs.add(graph)))
             .insert(player)
-            .insert(AnimationTarget {
-                id: target,
-                player: entity,
-            });
+            .insert(target)
+            .insert(AnimatedBy(entity));
     }
 }
 
@@ -383,7 +379,7 @@ fn clamp_overlay_position(position: Vec2, side_length: f32, window_size: Vec2) -
 fn set_camera_viewport(
     windows: Query<(Entity, &Window, &bevy_egui::EguiContextSettings)>,
     _contexts: EguiContexts,
-    mut nav_camera_query: Query<(&mut Camera, &NavGizmoParent)>,
+    mut nav_camera_query: Query<(&mut Camera, &RenderTarget, &NavGizmoParent)>,
     main_camera_query: Query<(&Camera, Option<&ViewportRect>), Without<NavGizmoParent>>,
     mut main_editor_cam_query: Query<&mut EditorCam, (With<MainCamera>, Without<NavGizmoParent>)>,
     primary_query: Query<Entity, With<PrimaryWindow>>,
@@ -402,7 +398,7 @@ fn set_camera_viewport(
         anchor_state.active_drag = None;
     }
 
-    for (mut nav_camera, parent) in nav_camera_query.iter_mut() {
+    for (mut nav_camera, render_target, parent) in nav_camera_query.iter_mut() {
         let Ok((main, viewport_rect)) = main_camera_query.get(parent.main_camera) else {
             continue;
         };
@@ -410,7 +406,7 @@ fn set_camera_viewport(
             deactivate_overlay_camera(&mut nav_camera);
             continue;
         };
-        let target_window = match &nav_camera.target {
+        let target_window = match render_target {
             RenderTarget::Window(WindowRef::Primary) => primary_query.iter().next(),
             RenderTarget::Window(WindowRef::Entity(entity)) => Some(*entity),
             _ => None,

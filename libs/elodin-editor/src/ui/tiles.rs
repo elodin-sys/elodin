@@ -81,8 +81,14 @@ fn default_viewport_perspective() -> PerspectiveProjection {
     PerspectiveProjection {
         near: DEFAULT_VIEWPORT_NEAR,
         far: DEFAULT_VIEWPORT_FAR,
+        near_clip_plane: crate::plugins::frustum_common::near_clip_plane(DEFAULT_VIEWPORT_NEAR),
         ..PerspectiveProjection::default()
     }
+}
+
+fn set_perspective_near(perspective: &mut PerspectiveProjection, near: f32) {
+    perspective.near = near;
+    perspective.near_clip_plane = crate::plugins::frustum_common::near_clip_plane(near);
 }
 
 pub(crate) fn plugin(app: &mut App) {
@@ -1310,6 +1316,8 @@ impl ViewportPane {
         let mut parent_cmd = commands.spawn((
             GlobalTransform::default(),
             transform,
+            #[cfg(feature = "big_space")]
+            crate::spatial::GridCell::default(),
             impeller2_wkt::WorldPos::default(),
             Name::new("viewport"),
         ));
@@ -1392,7 +1400,7 @@ impl ViewportPane {
             ..perspective_defaults
         };
         if let Some(near) = viewport.near {
-            perspective.near = near;
+            set_perspective_near(&mut perspective, near);
         }
         if let Some(far) = viewport.far {
             perspective.far = far;
@@ -1426,7 +1434,8 @@ impl ViewportPane {
             }),
             main_camera_layers,
             MainCamera,
-            big_space::GridCell::<i128>::default(),
+            #[cfg(feature = "big_space")]
+            crate::spatial::LowPrecisionRoot,
             EditorCam {
                 orbit_constraint: OrbitConstraint::Fixed {
                     up: Vec3::Y,

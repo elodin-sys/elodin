@@ -28,6 +28,17 @@ cargo run --bin elodin editor 127.0.0.1:2240
 | `ELODIN_ASSETS_DIR` | `./assets` | Directory for meshes, images, GLB files |
 | `ELODIN_KDL_DIR` | `.` (cwd) | Directory for `.kdl` schematic files |
 
+## Cargo features
+
+Optional features declared in `libs/elodin-editor/Cargo.toml` (re-exported by `apps/elodin/Cargo.toml`):
+
+- `big_space` (default): upstream `big_space` 0.12 floating-origin layer.
+- `inspector`: adds the `bevy-inspector-egui` runtime entity inspector.
+- `debug`: enables `big_space`'s debug diagnostics.
+- `tracy`: enables Tracy profiling (see `.cursor/skills/elodin-tracy/SKILL.md`).
+
+Enable with `cargo run -p elodin --features "<list>" -- editor ...`.
+
 ## Source Layout
 
 The editor is split across two crates:

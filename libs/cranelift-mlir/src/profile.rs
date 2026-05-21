@@ -1555,7 +1555,7 @@ fn write_json_report(
             } else {
                 0.0
             };
-            let mean_ns = if s.calls > 0 { s.total_ns / s.calls } else { 0 };
+            let mean_ns = s.total_ns.checked_div(s.calls).unwrap_or(0);
             let total_pct = if total_ns > 0 {
                 100.0 * s.total_ns as f64 / total_ns as f64
             } else {

@@ -121,6 +121,7 @@ impl Plugin for PlotGpuPlugin {
             ShaderStages::VERTEX,
             uniform_buffer::<LineUniform>(true),
         );
+        let uniform_descriptor = BindGroupLayoutDescriptor::new("LineUniform layout", &single);
         let uniform_layout = render_device.create_bind_group_layout("LineUniform layout", &single);
 
         let layout_entries = BindGroupLayoutEntries::sequential(
@@ -131,14 +132,18 @@ impl Plugin for PlotGpuPlugin {
                 storage_buffer_read_only_sized(false, Some(INDEX_BUFFER_SIZE)),
             ),
         );
+        let values_descriptor =
+            BindGroupLayoutDescriptor::new("LineValues layout", &layout_entries);
         let values_layout =
             render_device.create_bind_group_layout("LineValues layout", &layout_entries);
 
         render_app.insert_resource(LineValuesLayout {
             layout: values_layout,
+            descriptor: values_descriptor,
         });
         render_app.insert_resource(UniformLayout {
             layout: uniform_layout,
+            descriptor: uniform_descriptor,
         });
     }
 }
@@ -276,11 +281,13 @@ impl LineUniform {
 #[derive(Resource)]
 struct LineValuesLayout {
     layout: BindGroupLayout,
+    descriptor: BindGroupLayoutDescriptor,
 }
 
 #[derive(Resource)]
 struct UniformLayout {
     layout: BindGroupLayout,
+    descriptor: BindGroupLayoutDescriptor,
 }
 
 #[derive(Resource)]
@@ -308,16 +315,16 @@ fn prepare_uniform_bind_group(
 #[derive(Resource)]
 pub struct LinePipeline {
     mesh_pipeline: Mesh2dPipeline,
-    uniform_layout: BindGroupLayout,
-    storage_layout: BindGroupLayout,
+    uniform_layout: BindGroupLayoutDescriptor,
+    storage_layout: BindGroupLayoutDescriptor,
 }
 
 impl FromWorld for LinePipeline {
     fn from_world(world: &mut bevy::prelude::World) -> Self {
         Self {
             mesh_pipeline: world.resource::<Mesh2dPipeline>().clone(),
-            uniform_layout: world.resource::<UniformLayout>().layout.clone(),
-            storage_layout: world.resource::<LineValuesLayout>().layout.clone(),
+            uniform_layout: world.resource::<UniformLayout>().descriptor.clone(),
+            storage_layout: world.resource::<LineValuesLayout>().descriptor.clone(),
         }
     }
 }
@@ -330,8 +337,8 @@ fn init_line_pipeline(
 ) {
     commands.insert_resource(LinePipeline {
         mesh_pipeline: mesh_pipeline.clone(),
-        uniform_layout: uniform_layout.layout.clone(),
-        storage_layout: storage_layout.layout.clone(),
+        uniform_layout: uniform_layout.descriptor.clone(),
+        storage_layout: storage_layout.descriptor.clone(),
     });
 }
 

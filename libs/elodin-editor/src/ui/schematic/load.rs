@@ -1343,7 +1343,9 @@ mod tests {
     }
 
     fn entity_count(app: &mut App) -> usize {
-        app.world().entities().len() as usize
+        let world = app.world_mut();
+        let mut query = world.query::<Entity>();
+        query.iter(world).count()
     }
 
     fn primary_window_state(app: &mut App) -> crate::ui::tiles::WindowState {

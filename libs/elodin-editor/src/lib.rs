@@ -3,6 +3,8 @@
 use std::{collections::HashMap, ops::Range, sync::Arc, time::Duration};
 
 use crate::plugins::editor_cam_touch;
+#[cfg(feature = "big_space")]
+use crate::spatial::{FloatingOrigin, FloatingOriginSettings, GridCell};
 use bevy::{
     DefaultPlugins,
     asset::{UnapprovedPathMode, embedded_asset},
@@ -25,7 +27,6 @@ use bevy_geo_frames::GeoFramePlugin;
 use bevy_geo_frames::{GeoContext, GeoFrame, GeoPosition, GeoRotation};
 use bevy_picking::PickingSettings;
 use bevy_render::alpha::AlphaMode;
-use big_space::{FloatingOrigin, FloatingOriginSettings, GridCell};
 use impeller2::types::{ComponentId, OwnedPacket};
 use impeller2::types::{Msg, Timestamp};
 use impeller2_bevy::{
@@ -66,6 +67,11 @@ pub mod object_3d;
 mod offset_parse;
 pub mod plugins;
 pub mod sensor_camera;
+#[cfg(feature = "big_space")]
+pub(crate) mod spatial;
+#[cfg(not(feature = "big_space"))]
+#[path = "spatial_fallback.rs"]
+pub(crate) mod spatial;
 pub mod ui;
 pub mod vector_arrow;
 
@@ -222,7 +228,6 @@ impl Plugin for EditorPlugin {
             )
             //.add_plugins(DefaultPickingPlugins)
             .add_plugins(bevy_editor_cam::DefaultEditorCamPlugins)
-            .add_plugins(big_space::FloatingOriginPlugin::<i128>::new(16_000., 100.))
             .add_plugins(EmbeddedAssetPlugin)
             .add_plugins(EguiPlugin::default())
             .add_plugins(bevy_infinite_grid::InfiniteGridPlugin)
@@ -242,13 +247,11 @@ impl Plugin for EditorPlugin {
             .add_plugins(crate::ui::plot::PlotPlugin)
             .add_plugins(crate::plugins::LogicalKeyPlugin)
             .add_systems(Startup, setup_egui_global_system)
-            .add_systems(Startup, setup_floating_origin)
             .add_systems(Startup, setup_window_icon)
             //.add_systems(Startup, spawn_clear_bg)
             .add_systems(Startup, setup_clear_state)
             .add_systems(Update, setup_egui_context)
             //.add_systems(Update, make_entities_selectable)
-            .add_systems(PreUpdate, setup_cell)
             .add_systems(PreUpdate, sync_res::<impeller2_wkt::SimulationTimeStep>)
             .add_systems(
                 PreUpdate,
@@ -266,12 +269,14 @@ impl Plugin for EditorPlugin {
                     // Keep Object3D WorldPos in lock-step with cached component values
                     // before transforms are synchronized for rendering.
                     object_3d::update_object_3d_system,
+                    #[cfg(feature = "big_space")]
                     set_floating_origin,
                     sync_object_3d,
                     set_viewport_pos,
                     sync_pos,
                     bevy_geo_frames::apply_geo_rotation,
-                    bevy_geo_frames::big_space::apply_big_translation::<i128>,
+                    #[cfg(feature = "big_space")]
+                    spatial::apply_big_translation,
                 )
                     .chain()
                     .after(impeller2_bevy::sink)
@@ -319,12 +324,16 @@ impl Plugin for EditorPlugin {
             )
             .add_systems(Update, sensor_camera::patch_sensor_view_dims)
             .add_systems(Update, throttle_for_sensor_cameras);
+
+        #[cfg(feature = "big_space")]
+        app.add_plugins(spatial::FloatingOriginPlugin::new(16_000., 100.))
+            .add_systems(PreUpdate, setup_cell.before(PositionSync));
         if cfg!(target_os = "windows") || cfg!(target_os = "linux") {
             app.add_systems(Update, handle_drag_resize);
         }
 
         #[cfg(feature = "debug")]
-        app.add_plugins(big_space::debug::FloatingOriginDebugPlugin::<i128>::default());
+        app.add_plugins(spatial::debug::FloatingOriginDebugPlugin::default());
 
         #[cfg(not(target_family = "wasm"))]
         app.add_plugins(crate::ui::startup_window::StartupPlugin);
@@ -437,10 +446,8 @@ fn setup_egui_inspector(mut commands: Commands) {
 
     commands.entity(window_id).insert((
         Camera2d,
-        Camera {
-            target: RenderTarget::Window(WindowRef::Entity(window_id)),
-            ..Default::default()
-        },
+        Camera::default(),
+        RenderTarget::Window(WindowRef::Entity(window_id)),
         egui_context,
     ));
 }
@@ -489,14 +496,6 @@ pub struct GridHandle {
     pub grid: Entity,
 }
 
-fn setup_floating_origin(mut commands: Commands) {
-    commands.spawn((
-        FloatingOrigin,
-        GridCell::<i128>::default(),
-        Transform::IDENTITY,
-    ));
-}
-
 fn spawn_ui_cam(mut commands: Commands, mut query: Query<Entity, With<PrimaryWindow>>) {
     let primary_window_ent = query
         .single_mut()
@@ -508,9 +507,9 @@ fn spawn_ui_cam(mut commands: Commands, mut query: Query<Entity, With<PrimaryWin
         Camera2d,
         Camera {
             order: UI_ORDER_BASE,
-            target: RenderTarget::Window(WindowRef::Entity(primary_window_ent)),
             ..Default::default()
         },
+        RenderTarget::Window(WindowRef::Entity(primary_window_ent)),
         egui_context,
     ));
 }
@@ -555,17 +554,58 @@ fn set_clear_color(mut clear_color: ResMut<ClearColor>) {
 //         });
 // }
 
+/// Keep the floating origin glued to the active main camera so big_space
+/// renders the rest of the scene at low precision relative to it.
+///
+/// Since the migration to big_space 0.12 the main camera no longer
+/// carries a `GridCell`: it is parented under the viewport entity, which
+/// is the grid anchor. The system therefore:
+///
+/// 1. Reads the camera's local `Transform` and looks up its parent
+///    viewport's `Transform` + `GridCell`.
+/// 2. Composes them into an absolute world-space position via
+///    `grid_position_double`.
+/// 3. Re-projects that absolute position onto the grid to obtain the
+///    `(origin_cell, origin_translation)` pair the floating origin must
+///    take. Cameras spawned without a parent (e.g. tests) fall back to
+///    the default cell at the origin.
+#[cfg(feature = "big_space")]
 #[allow(clippy::type_complexity)]
 fn set_floating_origin(
-    query: Query<(&Transform, &GridCell<i128>), (With<MainCamera>, Without<FloatingOrigin>)>,
-    mut floating_origin: Query<(&mut Transform, &mut GridCell<i128>), With<FloatingOrigin>>,
+    query: Query<(&Transform, Option<&ChildOf>), (With<MainCamera>, Without<FloatingOrigin>)>,
+    parent_query: Query<(&Transform, &GridCell), (Without<MainCamera>, Without<FloatingOrigin>)>,
+    mut floating_origin: Query<(&mut Transform, &mut GridCell), With<FloatingOrigin>>,
+    floating_origin_settings: Res<FloatingOriginSettings>,
 ) {
-    let Some((transform, grid_cell)) = query.iter().next() else {
+    let Some((camera_transform, parent)) = query.iter().next() else {
         return;
     };
+    let (base_transform, base_cell) = parent
+        .and_then(|parent| parent_query.get(parent.parent()).ok())
+        .map(|(parent_transform, parent_cell)| {
+            (
+                parent_transform.mul_transform(*camera_transform),
+                *parent_cell,
+            )
+        })
+        .unwrap_or((*camera_transform, crate::spatial::GridCell::default()));
+    let absolute = floating_origin_settings.grid_position_double(&base_cell, &base_transform);
+    let (origin_cell, origin_translation) = floating_origin_settings.translation_to_grid(absolute);
+    // Keep `FloatingOrigin` rotation at identity. Upstream big_space (post the
+    // `no_prop_rot_v0.17` fork) propagates the floating origin's rotation to
+    // every descendant's `GlobalTransform`. If we mirror the camera's combined
+    // rotation onto the origin, the world rotates twice (once via propagation,
+    // once via the camera's own view) and ViewCube snaps send the scene off
+    // screen — most visibly on Linux. Only the high-precision translation
+    // needs to track the active camera.
+    let origin_transform = Transform {
+        translation: origin_translation,
+        rotation: Quat::IDENTITY,
+        scale: Vec3::ONE,
+    };
     for (mut origin, mut cell) in floating_origin.iter_mut() {
-        *origin = *transform;
-        *cell = *grid_cell;
+        *origin = origin_transform;
+        *cell = origin_cell;
     }
 }
 
@@ -820,13 +860,14 @@ fn set_icon_mac() {
     }
 }
 
+#[cfg(feature = "big_space")]
 pub fn setup_cell(
-    query: Query<Entity, (With<WorldPos>, Without<GridCell<i128>>)>,
+    query: Query<Entity, (With<WorldPos>, Without<crate::spatial::GridCell>)>,
     mut cmds: Commands,
 ) {
     for e in query.iter() {
         cmds.entity(e)
-            .insert((Transform::default(), GridCell::<i128>::default()));
+            .insert((Transform::default(), crate::spatial::GridCell::default()));
     }
 }
 
@@ -898,6 +939,7 @@ pub fn follow_latest(
     current_ts.0 = latest.0;
 }
 
+#[cfg(feature = "big_space")]
 #[allow(clippy::type_complexity)]
 pub fn sync_pos(
     mut query: Query<
@@ -905,7 +947,7 @@ pub fn sync_pos(
             &mut Transform,
             Option<&mut GeoPosition>,
             Option<&mut GeoRotation>,
-            &mut GridCell<i128>,
+            &mut crate::spatial::GridCell,
             &WorldPos,
         ),
         Changed<WorldPos>,
@@ -939,6 +981,46 @@ pub fn sync_pos(
             }
         },
     );
+}
+
+#[cfg(not(feature = "big_space"))]
+#[allow(clippy::type_complexity)]
+pub fn sync_pos(
+    mut query: Query<
+        (
+            &mut Transform,
+            Option<&mut GeoPosition>,
+            Option<&mut GeoRotation>,
+            &WorldPos,
+        ),
+        Changed<WorldPos>,
+    >,
+    geo_context: Res<GeoContext>,
+) {
+    query
+        .iter_mut()
+        .for_each(|(mut transform, mut geo_pos, mut geo_rot, world_pos)| {
+            if let Some(ref mut geo_pos) = geo_pos {
+                geo_pos.1 = world_pos.pos();
+            }
+            if let Some(ref mut geo_rot) = geo_rot {
+                // att() is in ENU. We have to do a conversion if geo_rot.0 isn't ENU.
+                **geo_rot = GeoRotation::from_bevy(geo_rot.0, world_pos.bevy_att(), &geo_context);
+                //geo_rot.1 = world_pos.att();
+            }
+
+            if geo_pos.is_none() {
+                // We only update the transform here if geo_pos is not present.
+                let pos = world_pos.bevy_pos();
+                transform.translation = pos.as_vec3();
+            }
+            if geo_rot.is_none() {
+                // We only update the transform here if geo_rot is not present.
+                let att = world_pos.bevy_att();
+                // Preserve the existing scale when updating position and rotation
+                transform.rotation = att.as_quat();
+            }
+        });
 }
 
 fn sanitize_editor_cam_anchor_depth(mut cams: Query<(Entity, &mut EditorCam)>) {

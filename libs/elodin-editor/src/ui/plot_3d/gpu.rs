@@ -54,7 +54,6 @@ use bevy_render::{
     sync_world::{MainEntity, SyncToRenderWorld, TemporaryRenderEntity},
     view::RetainedViewEntity,
 };
-use big_space::GridCell;
 use binding_types::storage_buffer_read_only_sized;
 use impeller2_wkt::{CurrentTimestamp, EarliestTimestamp, LastUpdated};
 
@@ -112,6 +111,7 @@ impl Plugin for Plot3dGpuPlugin {
             ShaderStages::VERTEX,
             uniform_buffer::<LineUniform>(true),
         );
+        let uniform_descriptor = BindGroupLayoutDescriptor::new("LineUniform Layout", &single);
 
         let layout_entries = BindGroupLayoutEntries::sequential(
             ShaderStages::VERTEX,
@@ -121,6 +121,8 @@ impl Plugin for Plot3dGpuPlugin {
                 storage_buffer_read_only_sized(false, Some(VALUE_BUFFER_SIZE)),
             ),
         );
+        let values_descriptor =
+            BindGroupLayoutDescriptor::new("LineValues layout", &layout_entries);
         let values_layout =
             render_device.create_bind_group_layout("LineValues layout", &layout_entries);
 
@@ -132,6 +134,8 @@ impl Plugin for Plot3dGpuPlugin {
                 storage_buffer_read_only_sized(false, Some(INDEX_BUFFER_SIZE)),
             ),
         );
+        let index_descriptor =
+            BindGroupLayoutDescriptor::new("LineIndex layout", &index_layout_entries);
         let index_layout =
             render_device.create_bind_group_layout("LineIndex layout", &index_layout_entries);
 
@@ -139,14 +143,17 @@ impl Plugin for Plot3dGpuPlugin {
 
         render_app.insert_resource(UniformLayout {
             layout: line_layout,
+            descriptor: uniform_descriptor,
         });
 
         render_app.insert_resource(LineValuesLayout {
             layout: values_layout,
+            descriptor: values_descriptor,
         });
 
         render_app.insert_resource(LineIndexLayout {
             layout: index_layout,
+            descriptor: index_descriptor,
         });
 
         render_app.init_resource::<LinePipeline>();
@@ -161,16 +168,6 @@ fn update_uniform_model(mut query: Query<(&mut LineUniform, &GlobalTransform)>) 
 #[derive(Component, Debug, Clone, ExtractComponent)]
 #[require(SyncToRenderWorld)]
 pub struct LineHandles(pub [Handle<Line>; 3]);
-
-#[derive(Bundle)]
-pub struct LineBundle {
-    pub line: LineHandles,
-    pub uniform: LineUniform,
-    pub config: LineConfig,
-    pub global_transform: GlobalTransform,
-    pub transform: Transform,
-    pub grid_cell: GridCell<i128>,
-}
 
 #[derive(Component, ShaderType, Clone, Copy, Reflect)]
 pub struct LineUniform {
@@ -200,16 +197,19 @@ impl LineUniform {
 #[derive(Resource)]
 struct LineValuesLayout {
     layout: BindGroupLayout,
+    descriptor: BindGroupLayoutDescriptor,
 }
 
 #[derive(Resource)]
 struct LineIndexLayout {
     layout: BindGroupLayout,
+    descriptor: BindGroupLayoutDescriptor,
 }
 
 #[derive(Resource)]
 struct UniformLayout {
     layout: BindGroupLayout,
+    descriptor: BindGroupLayoutDescriptor,
 }
 
 #[derive(Resource)]
@@ -237,18 +237,18 @@ fn prepare_uniform_bind_group(
 #[derive(Resource)]
 pub struct LinePipeline {
     mesh_pipeline: MeshPipeline,
-    uniform_layout: BindGroupLayout,
-    index_layout: BindGroupLayout,
-    values_layout: BindGroupLayout,
+    uniform_layout: BindGroupLayoutDescriptor,
+    index_layout: BindGroupLayoutDescriptor,
+    values_layout: BindGroupLayoutDescriptor,
 }
 
 impl FromWorld for LinePipeline {
     fn from_world(world: &mut bevy::prelude::World) -> Self {
         Self {
             mesh_pipeline: world.resource::<MeshPipeline>().clone(),
-            uniform_layout: world.resource::<UniformLayout>().layout.clone(),
-            index_layout: world.resource::<LineIndexLayout>().layout.clone(),
-            values_layout: world.resource::<LineValuesLayout>().layout.clone(),
+            uniform_layout: world.resource::<UniformLayout>().descriptor.clone(),
+            index_layout: world.resource::<LineIndexLayout>().descriptor.clone(),
+            values_layout: world.resource::<LineValuesLayout>().descriptor.clone(),
         }
     }
 }
@@ -620,14 +620,13 @@ fn extract_lines(
                 played_uniform.color = played_trail_color;
                 commands.spawn((
                     MainEntity::from(entity),
-                    LineBundle {
-                        line: line_handles.clone(),
-                        config: config.clone(),
-                        uniform: played_uniform,
-                        global_transform: GlobalTransform::default(),
-                        transform: Transform::default(),
-                        grid_cell: GridCell::default(),
-                    },
+                    line_handles.clone(),
+                    config.clone(),
+                    played_uniform,
+                    GlobalTransform::default(),
+                    Transform::default(),
+                    #[cfg(feature = "big_space")]
+                    crate::spatial::GridCell::default(),
                     gpu_line,
                     TemporaryRenderEntity,
                 ));
@@ -653,14 +652,13 @@ fn extract_lines(
                 future_uniform.color = future_color;
                 commands.spawn((
                     MainEntity::from(entity),
-                    LineBundle {
-                        line: line_handles.clone(),
-                        config: config.clone(),
-                        uniform: future_uniform,
-                        global_transform: GlobalTransform::default(),
-                        transform: Transform::default(),
-                        grid_cell: GridCell::default(),
-                    },
+                    line_handles.clone(),
+                    config.clone(),
+                    future_uniform,
+                    GlobalTransform::default(),
+                    Transform::default(),
+                    #[cfg(feature = "big_space")]
+                    crate::spatial::GridCell::default(),
                     gpu_line,
                     TemporaryRenderEntity,
                 ));

@@ -64,12 +64,9 @@ fn create_startup_window(
             Camera2d,
         ));
 
-        let camera = Camera {
-            target: RenderTarget::Window(WindowRef::Entity(window.id())),
-            ..Default::default()
-        };
+        let camera = Camera::default();
 
-        window.insert(camera);
+        window.insert((camera, RenderTarget::Window(WindowRef::Entity(window.id()))));
     } else if let Ok(mut primary) = primary.single_mut() {
         primary.visible = true
     }

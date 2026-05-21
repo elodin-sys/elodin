@@ -33,8 +33,11 @@ impl Default for CurrentFrame {
 
 fn main() {
     let mut app = App::new();
+    let default_plugins = DefaultPlugins.build();
+    #[cfg(feature = "big_space")]
+    let default_plugins = default_plugins.disable::<TransformPlugin>();
 
-    app.add_plugins(DefaultPlugins)
+    app.add_plugins(default_plugins)
         .add_plugins(DefaultEditorCamPlugins)
         .add_plugins(InfiniteGridPlugin)
         .add_plugins(GeoFramePlugin {
@@ -66,11 +69,8 @@ fn main() {
         .add_plugins(bevy_inspector_egui::quick::WorldInspectorPlugin::new());
 
     #[cfg(feature = "big_space")]
-    app.add_plugins(::big_space::FloatingOriginPlugin::<i128>::new(
-        16_000., 100.,
-    ))
-    .add_plugins(::big_space::debug::FloatingOriginDebugPlugin::<i128>::default())
-    .add_plugins(bevy_geo_frames::big_space::plugin::<i128>);
+    app.add_plugins(::big_space::prelude::BigSpaceDefaultPlugins)
+        .add_plugins(bevy_geo_frames::big_space::plugin);
     app.run();
 }
 
@@ -80,6 +80,14 @@ fn setup(
     mut materials: ResMut<Assets<StandardMaterial>>,
     geo_ctx: Res<GeoContext>,
 ) {
+    #[cfg(feature = "big_space")]
+    let big_space_root = commands
+        .spawn((
+            ::big_space::prelude::BigSpace::default(),
+            ::big_space::prelude::Grid::new(16_000.0, 100.0),
+        ))
+        .id();
+
     // Camera with editor controls
     let transform = Transform::from_xyz(30.0, 20.0, 30.0).looking_at(Vec3::ZERO, Vec3::Y);
     let _camera_id = commands
@@ -93,8 +101,9 @@ fn setup(
         .id();
     #[cfg(feature = "big_space")]
     commands.entity(_camera_id).insert((
-        ::big_space::FloatingOrigin,
-        ::big_space::GridCell::<i128>::default(),
+        ::big_space::prelude::FloatingOrigin,
+        ::big_space::prelude::CellCoord::default(),
+        ChildOf(big_space_root),
     ));
 
     // Light
@@ -148,9 +157,10 @@ fn setup(
         .id();
 
     #[cfg(feature = "big_space")]
-    commands
-        .entity(_cube_id)
-        .insert((::big_space::GridCell::<i128>::default(),));
+    commands.entity(_cube_id).insert((
+        ::big_space::prelude::CellCoord::default(),
+        ChildOf(big_space_root),
+    ));
 }
 
 /// Marker component for the position display text.
@@ -409,7 +419,7 @@ fn draw_frame_zero_gizmo(
     for geo_pos in &q {
         let zero = GeoPosition(geo_pos.0, DVec3::ZERO);
         let pos = zero.to_bevy(&ctx);
-        gizmos.cuboid(
+        gizmos.cube(
             Transform::from_translation(pos.as_vec3()).with_scale(Vec3::splat(0.3)),
             Color::srgb(1.0, 0.0, 0.0),
         );

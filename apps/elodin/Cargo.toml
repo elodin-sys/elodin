@@ -7,7 +7,9 @@ edition = "2024"
 authors = ["sascha@elodin.systems", "akhil@elodin.systems", "van@elodin.systems"]
 
 [features]
+default = ["big_space"]
 cargo-clippy = []
+big_space = ["elodin-editor/big_space"]
 inspector = ["elodin-editor/inspector"]
 debug = ["elodin-editor/debug"]
 tracy = ["elodin-editor/tracy", "bevy/trace_tracy", "bevy/debug", "dep:tracing-tracy"]

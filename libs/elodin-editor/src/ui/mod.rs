@@ -59,7 +59,6 @@ mod platform {
 
 use platform::PRIMARY_ORDER_OFFSET;
 
-use big_space::GridCell;
 use plot_3d::LinePlot3dPlugin;
 use schematic::SchematicPlugin;
 
@@ -284,10 +283,8 @@ pub struct CameraQuery {
     projection: &'static mut Projection,
     transform: &'static mut Transform,
     global_transform: &'static mut GlobalTransform,
-    grid_cell: &'static mut GridCell<i128>,
     parent: Option<&'static ChildOf>,
     grid_handle: Option<&'static GridHandle>,
-    no_propagate_rot: Option<&'static big_space::propagation::NoPropagateRot>,
 }
 
 pub struct UiPlugin;
@@ -383,7 +380,6 @@ impl Plugin for UiPlugin {
                     handle_window_close,
                     handle_window_destroyed,
                     render_layout,
-                    sync_camera_grid_cell,
                     handle_window_relayout_events,
                     set_secondary_camera_viewport,
                     set_camera_viewport,
@@ -692,6 +688,7 @@ type MainCameraViewportQueryItem = (
     Option<&'static GraphState>,
     Option<&'static tiles::ViewportConfig>,
     &'static mut Camera,
+    &'static RenderTarget,
 );
 
 fn set_camera_viewport(
@@ -706,7 +703,7 @@ fn set_camera_viewport(
     entries.extend(
         main_camera_query
             .iter()
-            .map(|(entity, _, graph_state, _, _)| (entity, graph_state.is_some())),
+            .map(|(entity, _, graph_state, _, _, _)| (entity, graph_state.is_some())),
     );
     // Stable ordering: non-graph cameras first, then graphs; break ties by entity id.
     entries.sort_by_key(|(entity, is_graph)| (*is_graph, entity.index()));
@@ -718,12 +715,12 @@ fn set_camera_viewport(
     let window_size: Vec2 = window.physical_size().as_vec2();
 
     for (entity, is_graph) in &entries {
-        let Ok((_, viewport_rect, _graph_state, viewport_config, mut camera)) =
+        let Ok((_, viewport_rect, _graph_state, viewport_config, mut camera, render_target)) =
             main_camera_query.get_mut(*entity)
         else {
             continue;
         };
-        let Some(camera_window) = window_entity_from_target(&camera.target, primary_entity) else {
+        let Some(camera_window) = window_entity_from_target(render_target, primary_entity) else {
             continue;
         };
         if camera_window != primary_entity {
@@ -866,18 +863,18 @@ fn set_nav_gizmo_camera_orders(
 }
 
 fn warn_camera_order_ambiguities(
-    cameras: Query<(Entity, &Camera)>,
+    cameras: Query<(Entity, &Camera, &RenderTarget)>,
     primary_query: Query<Entity, With<PrimaryWindow>>,
 ) {
     let primary = primary_query.iter().next();
     let mut seen: HashMap<(NormalizedWindowRef, isize), Entity> = HashMap::new();
     let mut warned: HashSet<NormalizedWindowRef> = HashSet::new();
 
-    for (entity, camera) in cameras.iter() {
+    for (entity, camera, render_target) in cameras.iter() {
         if !camera.is_active {
             continue;
         }
-        if let RenderTarget::Window(window_ref) = &camera.target
+        if let RenderTarget::Window(window_ref) = render_target
             && let Some(norm) = window_ref.normalize(primary)
         {
             let key = (norm, camera.order);
@@ -892,19 +889,6 @@ fn warn_camera_order_ambiguities(
                     "Camera order collision on window"
                 );
             }
-        }
-    }
-}
-
-fn sync_camera_grid_cell(
-    mut query: Query<(Option<&ChildOf>, &mut GridCell<i128>), With<MainCamera>>,
-    entity_transform_query: Query<&GridCell<i128>, Without<MainCamera>>,
-) {
-    for (parent, mut grid_cell) in query.iter_mut() {
-        if let Some(parent) = parent
-            && let Ok(entity_cell) = entity_transform_query.get(parent.parent())
-        {
-            *grid_cell = *entity_cell;
         }
     }
 }

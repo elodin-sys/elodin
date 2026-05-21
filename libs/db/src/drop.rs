@@ -267,7 +267,7 @@ fn fuzzy_match_components(components: &[ComponentInfo], pattern: &str) -> Vec<Co
     }
 
     // Sort by score descending (best matches first)
-    matches.sort_by(|a, b| b.fuzzy_score.unwrap_or(0).cmp(&a.fuzzy_score.unwrap_or(0)));
+    matches.sort_by_key(|m| std::cmp::Reverse(m.fuzzy_score.unwrap_or(0)));
 
     matches
 }

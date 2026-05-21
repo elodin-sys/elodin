@@ -156,7 +156,7 @@ pub extern "C" fn tensor_div_i64(dst: *mut i64, a: *const i64, b: *const i64, n:
     let dst = unsafe { slice::from_raw_parts_mut(dst, n) };
     let (a, b) = unsafe { (slice::from_raw_parts(a, n), slice::from_raw_parts(b, n)) };
     for i in 0..n {
-        dst[i] = if b[i] != 0 { a[i] / b[i] } else { 0 };
+        dst[i] = a[i].checked_div(b[i]).unwrap_or(0);
     }
 }
 
@@ -164,7 +164,7 @@ pub extern "C" fn tensor_div_i32(dst: *mut i32, a: *const i32, b: *const i32, n:
     let dst = unsafe { slice::from_raw_parts_mut(dst, n) };
     let (a, b) = unsafe { (slice::from_raw_parts(a, n), slice::from_raw_parts(b, n)) };
     for i in 0..n {
-        dst[i] = if b[i] != 0 { a[i] / b[i] } else { 0 };
+        dst[i] = a[i].checked_div(b[i]).unwrap_or(0);
     }
 }
 
@@ -172,7 +172,7 @@ pub extern "C" fn tensor_div_ui32(dst: *mut u32, a: *const u32, b: *const u32, n
     let dst = unsafe { slice::from_raw_parts_mut(dst, n) };
     let (a, b) = unsafe { (slice::from_raw_parts(a, n), slice::from_raw_parts(b, n)) };
     for i in 0..n {
-        dst[i] = if b[i] != 0 { a[i] / b[i] } else { 0 };
+        dst[i] = a[i].checked_div(b[i]).unwrap_or(0);
     }
 }
 
