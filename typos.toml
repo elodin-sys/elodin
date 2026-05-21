@@ -32,7 +32,6 @@ extend-exclude = [
     "libs/stellarator/maitake",
     "aleph/modules/*.nix",
     "*.age",
-    "libs/muxide",
     "examples/linalg/*",
     "libs/cranelift-mlir/*",
 ]

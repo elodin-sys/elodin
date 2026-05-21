@@ -89,7 +89,7 @@ The Cargo workspace has 57 members. Key crates by area:
 | Runtime | `stellarator`, `stellarator/{buf,macros,maitake}` |
 | Flight SW | `roci`, `roci/{macros,adcs}` |
 | FSW Apps | `serial-bridge`, `mekf`, `msp-osd`, `lqr`, `blackbox`, `gstreamer`, `video-streamer` |
-| Utilities | `wmm`, `s10`, `video-toolbox`, `muxide` |
+| Utilities | `wmm`, `s10`, `video-toolbox` |
 
 ## Working from Repository Root
 
