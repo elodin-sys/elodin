@@ -167,13 +167,10 @@ jobs:
               zig_target="x86_64-linux-musl"
               # cc-rs reads CC_/CXX_/AR_ with lowercase target (see cc docs)
               env_target="x86_64_unknown_linux_musl"
-              # cargo reads CARGO_TARGET_<TRIPLE>_LINKER with uppercase
-              cargo_env_target="X86_64_UNKNOWN_LINUX_MUSL"
               ;;
             aarch64-unknown-linux-musl)
               zig_target="aarch64-linux-musl"
               env_target="aarch64_unknown_linux_musl"
-              cargo_env_target="AARCH64_UNKNOWN_LINUX_MUSL"
               ;;
           esac
 
@@ -197,6 +194,8 @@ jobs:
           sudo mkdir -p /opt
           sudo tar -xJf "/tmp/${zig_tarball}" -C /opt
           zig_bin="/opt/${zig_dir}/zig"
+          echo "--- zig version ---"
+          "${zig_bin}" version
 
           # Wrappers needed because cc-rs treats CC_*/CXX_* as paths, not shell
           # commands, so we cannot inline `-target <triple>` in the env var.
@@ -252,6 +251,8 @@ jobs:
             "exec \"${zig_bin}\" ar \"\$@\"" \
             | sudo tee "${wrap_dir}/ar" >/dev/null
           sudo chmod +x "${wrap_dir}/cc" "${wrap_dir}/c++" "${wrap_dir}/ar"
+          echo "--- generated cc wrapper ---"
+          cat "${wrap_dir}/cc"
 
           {
             echo "CC_${env_target}=${wrap_dir}/cc"
