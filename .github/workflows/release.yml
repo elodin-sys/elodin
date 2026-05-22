@@ -209,30 +209,29 @@ jobs:
           # — kernels require `#!` as the first two bytes for it to be honored.
           wrap_dir="/opt/zig-cc-${env_target}"
           sudo mkdir -p "$wrap_dir"
-          # bash for array support to preserve arg quoting cleanly
-          cc_template='#!/bin/bash
-args=()
-for a in "$@"; do
-  case "$a" in --target=*) ;; *) args+=("$a") ;; esac
-done
-exec "%s" cc -target %s "${args[@]}"
-'
-          cxx_template='#!/bin/bash
-args=()
-for a in "$@"; do
-  case "$a" in --target=*) ;; *) args+=("$a") ;; esac
-done
-exec "%s" c++ -target %s "${args[@]}"
-'
-          ar_template='#!/bin/sh
-exec "%s" ar "$@"
-'
-          # shellcheck disable=SC2059
-          printf "$cc_template"  "$zig_bin" "$zig_target" | sudo tee "${wrap_dir}/cc"  >/dev/null
-          # shellcheck disable=SC2059
-          printf "$cxx_template" "$zig_bin" "$zig_target" | sudo tee "${wrap_dir}/c++" >/dev/null
-          # shellcheck disable=SC2059
-          printf "$ar_template"  "$zig_bin"               | sudo tee "${wrap_dir}/ar"  >/dev/null
+          # Use `printf '%s\n'` line-by-line so each wrapper-script line is
+          # a distinct printf arg — keeps the YAML block scalar valid even
+          # though the generated script itself has no leading indentation.
+          printf '%s\n' \
+            '#!/bin/bash' \
+            'args=()' \
+            'for a in "$@"; do' \
+            '  case "$a" in --target=*) ;; *) args+=("$a") ;; esac' \
+            'done' \
+            "exec \"${zig_bin}\" cc -target ${zig_target} \"\${args[@]}\"" \
+            | sudo tee "${wrap_dir}/cc" >/dev/null
+          printf '%s\n' \
+            '#!/bin/bash' \
+            'args=()' \
+            'for a in "$@"; do' \
+            '  case "$a" in --target=*) ;; *) args+=("$a") ;; esac' \
+            'done' \
+            "exec \"${zig_bin}\" c++ -target ${zig_target} \"\${args[@]}\"" \
+            | sudo tee "${wrap_dir}/c++" >/dev/null
+          printf '%s\n' \
+            '#!/bin/sh' \
+            "exec \"${zig_bin}\" ar \"\$@\"" \
+            | sudo tee "${wrap_dir}/ar" >/dev/null
           sudo chmod +x "${wrap_dir}/cc" "${wrap_dir}/c++" "${wrap_dir}/ar"
 
           {
