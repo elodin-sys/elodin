@@ -1,5 +1,5 @@
 use bevy::app::{App, Plugin, Update};
-use bevy::camera::Camera;
+use bevy::camera::{Camera, RenderTarget};
 use bevy::ecs::schedule::IntoScheduleConfigs;
 use bevy::ecs::system::Query;
 use bevy::input::touch::Touch;
@@ -175,7 +175,7 @@ pub fn touch_tracker(touches: Res<Touches>, mut touch_tracker: ResMut<TouchTrack
 
 pub fn touch_editor_cam(
     touch_tracker: Res<TouchTracker>,
-    mut cams: Query<(Entity, &mut EditorCam, &Transform, &Camera)>,
+    mut cams: Query<(Entity, &mut EditorCam, &Transform, &Camera, &RenderTarget)>,
     viewport_contains_pointer: Res<tiles::ViewportContainsPointer>,
     input_owners: Res<UiInputOwners>,
     primary_window: Query<Entity, With<PrimaryWindow>>,
@@ -191,8 +191,8 @@ pub fn touch_editor_cam(
     };
     let midpoint_pos = bevy_egui::egui::pos2(midpoint.x, midpoint.y);
 
-    for (entity, mut editor_cam, transform, cam) in cams.iter_mut() {
-        let Some(window_entity) = window_entity_from_target(&cam.target, primary_entity) else {
+    for (entity, mut editor_cam, transform, cam, render_target) in cams.iter_mut() {
+        let Some(window_entity) = window_entity_from_target(render_target, primary_entity) else {
             continue;
         };
         let Some(viewport_rect) = cam.logical_viewport_rect() else {

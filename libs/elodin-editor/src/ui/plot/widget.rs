@@ -2006,7 +2006,7 @@ pub fn pretty_round(num: f64) -> f64 {
 }
 
 pub fn graph_touch(
-    mut query: Query<(Entity, &mut GraphState, &Camera)>,
+    mut query: Query<(Entity, &mut GraphState, &Camera, &RenderTarget)>,
     primary_window: Query<(Entity, &Window), With<PrimaryWindow>>,
     touch_tracker: Res<TouchTracker>,
     input_owners: Res<UiInputOwners>,
@@ -2023,8 +2023,8 @@ pub fn graph_touch(
     };
     let midpoint_pos = egui::pos2(midpoint.x, midpoint.y);
 
-    for (entity, mut graph_state, cam) in query.iter_mut() {
-        let Some(window_entity) = window_entity_from_target(&cam.target, primary_entity) else {
+    for (entity, mut graph_state, cam, render_target) in query.iter_mut() {
+        let Some(window_entity) = window_entity_from_target(render_target, primary_entity) else {
             continue;
         };
         if !input_owners.permits_graph_at(window_entity, entity, midpoint_pos) {
