@@ -457,16 +457,18 @@ fn spawn_sensor_cameras(
         };
 
         commands.spawn((
-            Camera3d::default(),
-            Camera {
-                order: -(10 + i as isize),
-                is_active: false,
-                ..default()
-            },
-            RenderTarget::Image(render_target_handle.into()),
-            Projection::Perspective(perspective),
-            Tonemapping::None,
-            bevy::render::view::Msaa::Off,
+            (
+                Camera3d::default(),
+                Camera {
+                    order: -(10 + i as isize),
+                    is_active: false,
+                    ..default()
+                },
+                RenderTarget::Image(render_target_handle.into()),
+                Projection::Perspective(perspective),
+                Tonemapping::None,
+                bevy::render::view::Msaa::Off,
+            ),
             Transform::from_xyz(0.0, 5.0, 0.0).looking_at(Vec3::ZERO, Vec3::Y),
             GlobalTransform::default(),
             #[cfg(feature = "big_space")]
