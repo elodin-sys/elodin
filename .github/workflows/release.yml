@@ -200,16 +200,39 @@ jobs:
 
           # Wrappers needed because cc-rs treats CC_*/CXX_* as paths, not shell
           # commands, so we cannot inline `-target <triple>` in the env var.
+          # The wrappers strip the `--target=<rust-triple>` that cc-rs appends
+          # to every invocation: Zig rejects it with "UnknownOperatingSystem"
+          # because it expects its own triple format (e.g. `aarch64-linux-musl`
+          # without the `unknown` vendor component). We then pass the correct
+          # Zig-flavoured `-target` ourselves.
           # printf (no heredoc) ensures the shebang sits at byte 0 of the file
           # — kernels require `#!` as the first two bytes for it to be honored.
           wrap_dir="/opt/zig-cc-${env_target}"
           sudo mkdir -p "$wrap_dir"
-          printf '#!/bin/sh\nexec "%s" cc -target %s "$@"\n' \
-            "$zig_bin" "$zig_target" | sudo tee "${wrap_dir}/cc" >/dev/null
-          printf '#!/bin/sh\nexec "%s" c++ -target %s "$@"\n' \
-            "$zig_bin" "$zig_target" | sudo tee "${wrap_dir}/c++" >/dev/null
-          printf '#!/bin/sh\nexec "%s" ar "$@"\n' \
-            "$zig_bin" | sudo tee "${wrap_dir}/ar" >/dev/null
+          # bash for array support to preserve arg quoting cleanly
+          cc_template='#!/bin/bash
+args=()
+for a in "$@"; do
+  case "$a" in --target=*) ;; *) args+=("$a") ;; esac
+done
+exec "%s" cc -target %s "${args[@]}"
+'
+          cxx_template='#!/bin/bash
+args=()
+for a in "$@"; do
+  case "$a" in --target=*) ;; *) args+=("$a") ;; esac
+done
+exec "%s" c++ -target %s "${args[@]}"
+'
+          ar_template='#!/bin/sh
+exec "%s" ar "$@"
+'
+          # shellcheck disable=SC2059
+          printf "$cc_template"  "$zig_bin" "$zig_target" | sudo tee "${wrap_dir}/cc"  >/dev/null
+          # shellcheck disable=SC2059
+          printf "$cxx_template" "$zig_bin" "$zig_target" | sudo tee "${wrap_dir}/c++" >/dev/null
+          # shellcheck disable=SC2059
+          printf "$ar_template"  "$zig_bin"               | sudo tee "${wrap_dir}/ar"  >/dev/null
           sudo chmod +x "${wrap_dir}/cc" "${wrap_dir}/c++" "${wrap_dir}/ar"
 
           {
