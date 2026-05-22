@@ -103,11 +103,18 @@ build_one_target() {
   local wrap_dir="${session_dir}/zig-cc-${env_target}"
   mkdir -p "$wrap_dir"
 
+  # Wrapper strips:
+  #   --target=*                       (Zig rejects Rust triple format)
+  #   */self-contained/*crt*.o         (rustc CRT objects, Zig adds its own)
   printf '%s\n' \
     '#!/bin/bash' \
     'args=()' \
     'for a in "$@"; do' \
-    '  case "$a" in --target=*) ;; *) args+=("$a") ;; esac' \
+    '  case "$a" in' \
+    '    --target=*) ;;' \
+    '    */self-contained/*crt*.o) ;;' \
+    '    *) args+=("$a") ;;' \
+    '  esac' \
     'done' \
     "exec \"${zig_bin}\" cc -target ${zig_target} \"\${args[@]}\"" \
     > "${wrap_dir}/cc"
@@ -115,7 +122,11 @@ build_one_target() {
     '#!/bin/bash' \
     'args=()' \
     'for a in "$@"; do' \
-    '  case "$a" in --target=*) ;; *) args+=("$a") ;; esac' \
+    '  case "$a" in' \
+    '    --target=*) ;;' \
+    '    */self-contained/*crt*.o) ;;' \
+    '    *) args+=("$a") ;;' \
+    '  esac' \
     'done' \
     "exec \"${zig_bin}\" c++ -target ${zig_target} \"\${args[@]}\"" \
     > "${wrap_dir}/c++"

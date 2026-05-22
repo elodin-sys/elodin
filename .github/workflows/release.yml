@@ -212,11 +212,26 @@ jobs:
           # Use `printf '%s\n'` line-by-line so each wrapper-script line is
           # a distinct printf arg — keeps the YAML block scalar valid even
           # though the generated script itself has no leading indentation.
+          # The wrapper strips:
+          #   1. --target=<rust-triple>  — Zig rejects this format
+          #      ("UnknownOperatingSystem"); we pass the Zig-flavoured
+          #      -target ourselves.
+          #   2. rustc self-contained CRT objects (rcrt1.o, crti.o,
+          #      crtbeginS.o, crtendS.o, crtn.o passed positionally) — Zig
+          #      adds its own CRT for -target *-linux-musl, so without this
+          #      filter we get duplicate _start / _start_c symbols at link
+          #      time. Filtering here (rather than via -C link-self-contained
+          #      =no in cargo config) is robust against `dist build` setting
+          #      its own RUSTFLAGS env var which would shadow our config.
           printf '%s\n' \
             '#!/bin/bash' \
             'args=()' \
             'for a in "$@"; do' \
-            '  case "$a" in --target=*) ;; *) args+=("$a") ;; esac' \
+            '  case "$a" in' \
+            '    --target=*) ;;' \
+            '    */self-contained/*crt*.o) ;;' \
+            '    *) args+=("$a") ;;' \
+            '  esac' \
             'done' \
             "exec \"${zig_bin}\" cc -target ${zig_target} \"\${args[@]}\"" \
             | sudo tee "${wrap_dir}/cc" >/dev/null
@@ -224,7 +239,11 @@ jobs:
             '#!/bin/bash' \
             'args=()' \
             'for a in "$@"; do' \
-            '  case "$a" in --target=*) ;; *) args+=("$a") ;; esac' \
+            '  case "$a" in' \
+            '    --target=*) ;;' \
+            '    */self-contained/*crt*.o) ;;' \
+            '    *) args+=("$a") ;;' \
+            '  esac' \
             'done' \
             "exec \"${zig_bin}\" c++ -target ${zig_target} \"\${args[@]}\"" \
             | sudo tee "${wrap_dir}/c++" >/dev/null
