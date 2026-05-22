@@ -239,6 +239,12 @@ jobs:
             echo "CXX_${env_target}=${wrap_dir}/c++"
             echo "AR_${env_target}=${wrap_dir}/ar"
             echo "CARGO_TARGET_${cargo_env_target}_LINKER=${wrap_dir}/cc"
+            # Disable rustc's self-contained CRT (crt1.o, crti.o, crtn.o,
+            # libc.a, …) for this target: Zig provides its own CRT and libc
+            # when invoked with -target *-linux-musl, so keeping both produces
+            # duplicate symbols (_start, _start_c). Same approach as
+            # cargo-zigbuild.
+            echo "CARGO_TARGET_${cargo_env_target}_RUSTFLAGS=-C link-self-contained=no"
           } >> "$GITHUB_ENV"
       - name: Build artifacts
         run: |
