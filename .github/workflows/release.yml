@@ -209,8 +209,9 @@ jobs:
           # — kernels require `#!` as the first two bytes for it to be honored.
           wrap_dir="/opt/zig-cc-${env_target}"
           sudo mkdir -p "$wrap_dir"
-          # Use `printf '%s\n'` ligne-par-ligne pour rester valide YAML
-          # (chaque ligne du script source garde l'indentation du bloc).
+          # Use `printf '%s\n'` line-by-line so each wrapper-script line is
+          # a distinct printf arg — keeps the YAML block scalar valid even
+          # though the generated script itself has no leading indentation.
           printf '%s\n' \
             '#!/bin/bash' \
             'args=()' \
