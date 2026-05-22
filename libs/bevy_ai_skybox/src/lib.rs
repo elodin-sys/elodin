@@ -753,7 +753,7 @@ fn configure_cubemap_image(handle: &Handle<Image>, images: &mut Assets<Image>) {
     let Some(image) = images.get_mut(handle) else {
         return;
     };
-    image.reinterpret_stacked_2d_as_array(layers);
+    let _ = image.reinterpret_stacked_2d_as_array(layers);
     image.texture_view_descriptor = Some(TextureViewDescriptor {
         dimension: Some(TextureViewDimension::Cube),
         ..default()
