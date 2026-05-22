@@ -238,14 +238,22 @@ jobs:
             echo "CC_${env_target}=${wrap_dir}/cc"
             echo "CXX_${env_target}=${wrap_dir}/c++"
             echo "AR_${env_target}=${wrap_dir}/ar"
-            echo "CARGO_TARGET_${cargo_env_target}_LINKER=${wrap_dir}/cc"
-            # Disable rustc's self-contained CRT (crt1.o, crti.o, crtn.o,
-            # libc.a, …) for this target: Zig provides its own CRT and libc
-            # when invoked with -target *-linux-musl, so keeping both produces
-            # duplicate symbols (_start, _start_c). Same approach as
-            # cargo-zigbuild.
-            echo "CARGO_TARGET_${cargo_env_target}_RUSTFLAGS=-C link-self-contained=no"
           } >> "$GITHUB_ENV"
+
+          # Append target-specific section to .cargo/config.toml at runtime
+          # rather than relying on CARGO_TARGET_<TRIPLE>_RUSTFLAGS env var:
+          # when [build] rustflags is set in config (it is here), the env
+          # var is silently ignored by cargo, but a [target.<triple>] section
+          # in config.toml has unambiguous higher precedence.
+          #
+          # link-self-contained=no disables rustc's bundled CRT
+          # (crt1.o, crti.o, libc.a, ...) — Zig provides those itself when
+          # invoked with -target *-linux-musl. Same approach as cargo-zigbuild.
+          mkdir -p .cargo
+          printf '\n[target.%s]\nlinker = "%s/cc"\nrustflags = ["-C", "link-self-contained=no"]\n' \
+            "$target" "$wrap_dir" >> .cargo/config.toml
+          echo "--- appended to .cargo/config.toml ---"
+          tail -5 .cargo/config.toml
       - name: Build artifacts
         run: |
           # Actually do builds and make zips and whatnot
