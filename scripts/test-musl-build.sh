@@ -33,7 +33,7 @@ else
 fi
 
 repo_root="$(git rev-parse --show-toplevel)"
-cd "$repo_root"
+cd "$repo_root" || { echo "error: cannot cd to repo root: $repo_root" >&2; exit 1; }
 
 if ! command -v zig >/dev/null 2>&1; then
   cat >&2 <<'EOF'
@@ -53,8 +53,16 @@ if ! command -v rustup >/dev/null 2>&1; then
 fi
 
 zig_bin="$(command -v zig)"
-echo "==> using zig: $zig_bin ($(zig version))"
-echo "==> targets:   ${TARGETS[*]}"
+echo "==> using zig:    $zig_bin ($(zig version))"
+echo "==> using cargo:  $(cargo --version)"
+echo "==> using rustc:  $(rustc --version)"
+echo "==> using rustup: $(rustup --version | head -1)"
+echo "==> targets:      ${TARGETS[*]}"
+
+zig_major_minor="$(zig version | awk -F. '{ print $1"."$2 }')"
+if [ "$zig_major_minor" != "0.16" ]; then
+  echo "warning: CI uses Zig 0.16.x; local Zig $zig_major_minor may produce different results" >&2
+fi
 
 cargo_config=".cargo/config.toml"
 session_dir="$(mktemp -d "${TMPDIR:-/tmp}/musl-test.XXXXXX")"
@@ -103,11 +111,18 @@ build_one_target() {
   local wrap_dir="${session_dir}/zig-cc-${env_target}"
   mkdir -p "$wrap_dir"
 
+  # Wrapper strips:
+  #   --target=*                       (Zig rejects Rust triple format)
+  #   */self-contained/*crt*.o         (rustc CRT objects, Zig adds its own)
   printf '%s\n' \
     '#!/bin/bash' \
     'args=()' \
     'for a in "$@"; do' \
-    '  case "$a" in --target=*) ;; *) args+=("$a") ;; esac' \
+    '  case "$a" in' \
+    '    --target=*) ;;' \
+    '    */self-contained/*crt*.o) ;;' \
+    '    *) args+=("$a") ;;' \
+    '  esac' \
     'done' \
     "exec \"${zig_bin}\" cc -target ${zig_target} \"\${args[@]}\"" \
     > "${wrap_dir}/cc"
@@ -115,7 +130,11 @@ build_one_target() {
     '#!/bin/bash' \
     'args=()' \
     'for a in "$@"; do' \
-    '  case "$a" in --target=*) ;; *) args+=("$a") ;; esac' \
+    '  case "$a" in' \
+    '    --target=*) ;;' \
+    '    */self-contained/*crt*.o) ;;' \
+    '    *) args+=("$a") ;;' \
+    '  esac' \
     'done' \
     "exec \"${zig_bin}\" c++ -target ${zig_target} \"\${args[@]}\"" \
     > "${wrap_dir}/c++"
@@ -124,6 +143,8 @@ build_one_target() {
     "exec \"${zig_bin}\" ar \"\$@\"" \
     > "${wrap_dir}/ar"
   chmod +x "${wrap_dir}/cc" "${wrap_dir}/c++" "${wrap_dir}/ar"
+  echo "--- generated cc wrapper ---"
+  cat "${wrap_dir}/cc"
 
   # Restore original .cargo/config.toml then append fresh target section
   if [ "$had_config" = "1" ]; then
