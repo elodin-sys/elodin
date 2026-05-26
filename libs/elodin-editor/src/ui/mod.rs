@@ -482,6 +482,7 @@ pub struct ViewportOverlay<'w, 's> {
     window: Query<'w, 's, &'static Window>,
     entities_meta: Query<'w, 's, EntityDataReadOnly<'static>>,
     hovered_entity: Res<'w, HoveredEntity>,
+    skybox_ui: Res<'w, bevy_ai_skybox::prelude::SkyboxGenerationUi>,
 }
 
 impl RootWidgetSystem for ViewportOverlay<'_, '_> {
@@ -499,10 +500,52 @@ impl RootWidgetSystem for ViewportOverlay<'_, '_> {
         let window = state_mut.window;
         let entities_meta = state_mut.entities_meta;
         let hovered_entity = state_mut.hovered_entity;
+        let skybox_ui = &state_mut.skybox_ui;
 
         let Ok(window) = window.single() else {
             return;
         };
+
+        if skybox_ui.phase != bevy_ai_skybox::prelude::SkyboxGenerationPhase::Idle {
+            let (icon, color) = match skybox_ui.phase {
+                bevy_ai_skybox::prelude::SkyboxGenerationPhase::Generating
+                | bevy_ai_skybox::prelude::SkyboxGenerationPhase::PendingApply => {
+                    ("⟳", get_scheme().blue)
+                }
+                bevy_ai_skybox::prelude::SkyboxGenerationPhase::Ready => {
+                    ("✓", get_scheme().success)
+                }
+                bevy_ai_skybox::prelude::SkyboxGenerationPhase::Failed => {
+                    ("✕", get_scheme().error)
+                }
+                bevy_ai_skybox::prelude::SkyboxGenerationPhase::Idle => ("", get_scheme().text_secondary),
+            };
+            let text = skybox_ui
+                .message
+                .clone()
+                .unwrap_or_else(|| "Skybox".into());
+            egui::Area::new(egui::Id::new("skybox_progress_banner"))
+                .anchor(egui::Align2::CENTER_TOP, egui::vec2(0.0, 56.0))
+                .interactable(false)
+                .show(ctx, |ui| {
+                    egui::Frame {
+                        fill: colors::with_opacity(get_scheme().bg_secondary, 0.92),
+                        stroke: egui::Stroke::new(1.0, colors::with_opacity(color, 0.6)),
+                        inner_margin: egui::Margin::symmetric(20, 10),
+                        corner_radius: egui::CornerRadius::same(8),
+                        ..Default::default()
+                    }
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            ui.add(egui::Spinner::new().color(color));
+                            ui.add(Label::new(
+                                RichText::new(format!("{icon} {text}"))
+                                    .color(get_scheme().text_primary),
+                            ));
+                        });
+                    });
+                });
+        }
 
         let hovered_entity_meta = if let Some(hovered_entity_pair) = hovered_entity.0 {
             entities_meta

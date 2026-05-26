@@ -71,6 +71,7 @@ pub mod object_3d;
 mod offset_parse;
 pub mod plugins;
 pub mod sensor_camera;
+mod skybox_generation;
 #[cfg(feature = "big_space")]
 pub(crate) mod spatial;
 #[cfg(not(feature = "big_space"))]
@@ -100,14 +101,22 @@ pub(crate) fn skybox_asset_plugin() -> bevy_ai_skybox::prelude::SkyboxAssetPlugi
         // multi-viewport editor sessions and sensor cameras in this asset-only slice.
         env_lighting: false,
         watch_manifest: false,
+        manifest_poll_secs: 1.0,
     }
 }
 
 pub(crate) fn skybox_generation_plugin() -> bevy_ai_skybox::prelude::BlockadeSkyboxPlugin {
     bevy_ai_skybox::prelude::BlockadeSkyboxPlugin {
-        default_resolution: bevy_ai_skybox::prelude::SkyboxResolution::FourK,
+        default_resolution: bevy_ai_skybox::prelude::SkyboxResolution::TwoK,
         ..Default::default()
     }
+}
+
+pub(crate) fn skybox_asset_plugin_headless() -> bevy_ai_skybox::prelude::SkyboxAssetPlugin {
+    let mut plugin = skybox_asset_plugin();
+    plugin.watch_manifest = true;
+    plugin.manifest_poll_secs = 0.25;
+    plugin
 }
 
 #[cfg(feature = "inspector")]
@@ -332,6 +341,13 @@ impl Plugin for EditorPlugin {
             .add_systems(
                 Update,
                 ui::video_stream::invalidate_sensor_frames_on_skybox_change,
+            )
+            .add_systems(Update, skybox_generation::sync_generated_skybox_to_schematic)
+            .add_systems(Update, skybox_generation::push_skybox_active_on_pending)
+            .add_systems(Update, skybox_generation::decay_skybox_status_message)
+            .add_systems(
+                Update,
+                ui::video_stream::invalidate_sensor_frames_on_db_skybox_change,
             )
             .add_systems(Update, ui::log_stream::connect_streams)
             .add_systems(PostUpdate, ui::video_stream::set_visibility)

@@ -11,7 +11,7 @@ use bevy::ui::Node;
 use bevy::ui::widget::ImageNode;
 use bevy::{
     ecs::system::SystemParam,
-    prelude::{Commands, Component, Entity, MessageReader, Query, Res, ResMut, World},
+    prelude::{Commands, Component, Entity, Local, MessageReader, Query, Res, ResMut, World},
     ui::Val,
 };
 use egui::{self, Color32, Vec2};
@@ -714,6 +714,7 @@ pub struct VideoStreamWidget<'w, 's> {
     current_time: Res<'w, CurrentTimestamp>,
     images: ResMut<'w, Assets<Image>>,
     window_settings: Query<'w, 's, &'static bevy_egui::EguiContextSettings>,
+    skybox_ui: Res<'w, bevy_ai_skybox::prelude::SkyboxGenerationUi>,
 }
 
 // ---------------------------------------------------------------------------
@@ -1089,6 +1090,25 @@ impl super::widgets::WidgetSystem for VideoStreamWidget<'_, '_> {
                                 .color(get_scheme().highlight),
                         ),
                     );
+                } else if stream.raw_rgba_dims.is_some() && state.skybox_ui.is_busy() {
+                    let text = state
+                        .skybox_ui
+                        .message
+                        .clone()
+                        .unwrap_or_else(|| "Updating skybox…".into());
+                    ui.painter()
+                        .rect_filled(max_rect, 0, Color32::BLACK.gamma_multiply(0.35));
+                    ui.put(
+                        egui::Rect::from_center_size(
+                            max_rect.center(),
+                            egui::vec2(max_rect.width(), 28.0),
+                        ),
+                        egui::Label::new(
+                            egui::RichText::new(format!("⟳ {text}"))
+                                .size(14.0)
+                                .color(get_scheme().text_primary),
+                        ),
+                    );
                 }
             }
             StreamState::Error(error) => {
@@ -1231,7 +1251,24 @@ pub fn invalidate_sensor_frames_on_skybox_change(
     if skybox_events.read().next().is_none() {
         return;
     }
-    for mut cache in &mut caches {
+    clear_sensor_raw_frame_caches(&mut caches);
+}
+
+pub fn invalidate_sensor_frames_on_db_skybox_change(
+    config: Res<impeller2_wkt::DbConfig>,
+    mut last_active: Local<Option<String>>,
+    mut caches: Query<&mut VideoFrameCache>,
+) {
+    let active = config.skybox_active().map(str::to_string);
+    if *last_active == active {
+        return;
+    }
+    *last_active = active;
+    clear_sensor_raw_frame_caches(&mut caches);
+}
+
+fn clear_sensor_raw_frame_caches(caches: &mut Query<&mut VideoFrameCache>) {
+    for mut cache in caches {
         if cache.is_h264 {
             continue;
         }

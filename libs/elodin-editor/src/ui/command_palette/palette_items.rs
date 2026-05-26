@@ -19,7 +19,7 @@ use bevy::{
     window::PrimaryWindow,
 };
 use bevy_ai_skybox::prelude::{
-    GenerateSkybox, SetActiveSkybox, SkyboxCache, SkyboxGenerationSettings,
+    GenerateSkybox, SetActiveSkybox, SkyboxCache, SkyboxGenerationSettings, SkyboxGenerationUi,
 };
 use bevy_editor_cam::controller::{component::EditorCam, motion::CurrentMotion};
 use bevy_geo_frames::GeoContext;
@@ -1159,20 +1159,7 @@ pub fn set_color_scheme_mode() -> PaletteItem {
 }
 
 fn push_schematic_content(tx: &PacketTx, kdl: String, skybox: Option<Option<&str>>) {
-    let mut metadata = std::collections::HashMap::from([("schematic.content".to_string(), kdl)]);
-    match skybox {
-        Some(Some(name)) => {
-            metadata.insert("skybox.active".to_string(), name.to_string());
-        }
-        Some(None) => {
-            metadata.insert("skybox.active".to_string(), String::new());
-        }
-        None => {}
-    }
-    tx.send_msg(SetDbConfig {
-        metadata,
-        ..Default::default()
-    });
+    crate::skybox_generation::push_schematic_metadata(tx, kdl, skybox);
 }
 
 fn clear_skybox() -> PaletteItem {
@@ -1225,13 +1212,29 @@ fn activate_skybox_item(label: String, name: String) -> PaletteItem {
     )
 }
 
+fn revert_previous_skybox_item(name: String) -> PaletteItem {
+    PaletteItem::new(
+        format!("Revert to {name}"),
+        SKYBOX_LABEL,
+        |_: In<String>, mut commands: Commands| {
+            commands.run_system_cached(crate::skybox_generation::revert_previous_skybox);
+            PaletteEvent::Exit
+        },
+    )
+}
+
 fn activate_skybox() -> PaletteItem {
     PaletteItem::new(
         "Activate Skybox...",
         SKYBOX_LABEL,
-        |_: In<String>, cache: Res<SkyboxCache>| {
+        |_: In<String>, cache: Res<SkyboxCache>, skybox_ui: Res<SkyboxGenerationUi>| {
             let active = cache.active.as_deref();
-            let mut items = Vec::with_capacity(cache.manifest.entries.len() + 2);
+            let mut items = Vec::with_capacity(cache.manifest.entries.len() + 3);
+            if let Some(revert) = skybox_ui.revert_name.clone()
+                && active.as_deref() != Some(revert.as_str())
+            {
+                items.push(revert_previous_skybox_item(revert));
+            }
             if active.is_some() {
                 items.push(clear_skybox());
             }
@@ -1278,16 +1281,26 @@ fn generate_skybox_from_prompt() -> PaletteItem {
         SKYBOX_LABEL,
         |In(prompt): In<String>,
          settings: Option<Res<SkyboxGenerationSettings>>,
+         skybox_ui: Res<SkyboxGenerationUi>,
          mut skyboxes: MessageWriter<GenerateSkybox>| {
             let prompt = prompt.trim();
             if prompt.is_empty() {
                 return PaletteEvent::Error("Prompt cannot be empty".into());
             }
+            if skybox_ui.is_busy() {
+                return PaletteEvent::Error(
+                    "A skybox is already generating — check the status bar".into(),
+                );
+            }
             let Some(settings) = settings else {
                 return PaletteEvent::Error("Skybox generation plugin is not installed".into());
             };
-            if settings.api_key.is_none() {
-                return PaletteEvent::Error("Set BLOCKADE_API_KEY to generate a skybox".into());
+            if settings.resolved_api_key().is_none() {
+                return PaletteEvent::Error(
+                    "Set BLOCKADE_API_KEY in the environment, then restart the editor \
+                     (e.g. BLOCKADE_API_KEY=… elodin editor …)"
+                        .into(),
+                );
             }
 
             skyboxes.write(GenerateSkybox {

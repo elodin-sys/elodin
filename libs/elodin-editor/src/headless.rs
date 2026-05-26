@@ -26,7 +26,8 @@ use bevy::{
     window::{ExitCondition, WindowPlugin},
     winit::WinitPlugin,
 };
-use bevy_ai_skybox::prelude::SetActiveSkybox;
+use bevy::core_pipeline::Skybox;
+use bevy_ai_skybox::prelude::{PrimarySkybox, SetActiveSkybox, SkyboxAssetSettings, SkyboxCache};
 use bevy_geo_frames::GeoContext;
 use bevy_mat3_material::Mat3Material;
 use impeller2::types::{LenPacket, Timestamp, msg_id};
@@ -92,7 +93,7 @@ impl Plugin for HeadlessEditorPlugin {
                         ..default()
                     }),
             )
-            .add_plugins(crate::skybox_asset_plugin())
+            .add_plugins(crate::skybox_asset_plugin_headless())
             .add_plugins(impeller2_bevy::Impeller2Plugin)
             .add_plugins(bevy_mat3_material::Mat3MaterialPlugin)
             .add_plugins(GeoFramePlugin {
@@ -226,26 +227,44 @@ fn desired_skybox_from_config(config: &DbConfig) -> Option<Option<String>> {
     Some(schematic.skybox.as_ref().map(|skybox| skybox.name.clone()))
 }
 
+fn headless_skybox_applied(
+    desired: &Option<String>,
+    cache: &SkyboxCache,
+    settings: &SkyboxAssetSettings,
+    cameras: &Query<(Option<&PrimarySkybox>, Option<&Skybox>), With<Camera3d>>,
+) -> bool {
+    let targets: Vec<_> = cameras
+        .iter()
+        .filter(|(primary, _)| settings.apply_to_all_cameras || primary.is_some())
+        .collect();
+
+    match desired {
+        None => targets.iter().all(|(_, skybox)| skybox.is_none()),
+        Some(name) => {
+            cache.active.as_deref() == Some(name.as_str())
+                && targets.iter().all(|(_, skybox)| skybox.is_some())
+        }
+    }
+}
+
 fn sync_headless_skybox(
     config: Res<DbConfig>,
-    mut last_skybox: Local<Option<Option<String>>>,
+    cache: Res<SkyboxCache>,
+    settings: Res<SkyboxAssetSettings>,
+    cameras: Query<(Option<&PrimarySkybox>, Option<&Skybox>), With<Camera3d>>,
     mut skybox_writer: MessageWriter<SetActiveSkybox>,
 ) {
-    let Some(skybox_name) = desired_skybox_from_config(&config) else {
+    let Some(desired) = desired_skybox_from_config(&config) else {
         return;
     };
-    if last_skybox
-        .as_ref()
-        .is_some_and(|last| *last == skybox_name)
-    {
+    if headless_skybox_applied(&desired, &cache, &settings, &cameras) {
         return;
     }
 
-    match &skybox_name {
+    match &desired {
         Some(name) => skybox_writer.write(SetActiveSkybox::ByName(name.clone())),
         None => skybox_writer.write(SetActiveSkybox::Clear),
     };
-    *last_skybox = Some(skybox_name);
 }
 
 fn poll_headless_db_config(mut last_poll: Local<Option<Instant>>, packet_tx: Res<PacketTx>) {

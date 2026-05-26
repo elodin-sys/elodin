@@ -27,8 +27,9 @@ use serde::{Deserialize, Serialize};
 pub mod prelude {
     pub use crate::{
         BlockadeSkyboxPlugin, GenerateSkybox, ManifestReloaded, PrimarySkybox, SetActiveSkybox,
-        SkyboxAssetPlugin, SkyboxAssetSettings, SkyboxCache, SkyboxFailed,
-        SkyboxGenerationSettings, SkyboxManifest, SkyboxReady, SkyboxResolution, SkyboxStyle,
+        SkyboxAssetPlugin, SkyboxAssetSettings, SkyboxCache, SkyboxFailed, SkyboxGenerationComplete,
+        SkyboxGenerationPhase, SkyboxGenerationSettings, SkyboxGenerationUi, SkyboxManifest,
+        SkyboxReady, SkyboxResolution, SkyboxStyle,
     };
 }
 
@@ -218,6 +219,7 @@ pub struct SkyboxAssetSettings {
     pub env_lighting: bool,
     /// Poll `manifest.ron` for changes (useful after AI generation).
     pub watch_manifest: bool,
+    pub manifest_poll_secs: f32,
 }
 
 impl Default for SkyboxAssetSettings {
@@ -230,6 +232,7 @@ impl Default for SkyboxAssetSettings {
             apply_to_all_cameras: true,
             env_lighting: true,
             watch_manifest: true,
+            manifest_poll_secs: 1.0,
         }
     }
 }
@@ -305,7 +308,9 @@ impl SkyboxCache {
     }
 
     pub fn upsert_and_activate(&mut self, entry: ManifestEntry) -> Result<()> {
-        self.active = Some(entry.name.clone());
+        let name = entry.name.clone();
+        self.handles.remove(&name);
+        self.active = Some(name);
         self.manifest.upsert(entry);
         self.write_manifest()
     }
@@ -347,6 +352,55 @@ pub struct SkyboxFailed {
     pub error: SkyboxError,
 }
 
+/// Emitted after a prompt-generated skybox is loaded and applied to cameras.
+#[derive(Clone, Debug, Message)]
+pub struct SkyboxGenerationComplete {
+    pub name: String,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum SkyboxGenerationPhase {
+    #[default]
+    Idle,
+    Generating,
+    PendingApply,
+    Failed,
+    Ready,
+}
+
+/// Editor-facing generation state for status UI and revert.
+#[derive(Resource, Clone, Debug)]
+pub struct SkyboxGenerationUi {
+    pub phase: SkyboxGenerationPhase,
+    pub prompt: Option<String>,
+    pub message: Option<String>,
+    /// Skybox name being generated or loaded onto cameras.
+    pub target_name: Option<String>,
+    /// Active skybox name before the in-flight generation; used for revert.
+    pub revert_name: Option<String>,
+}
+
+impl Default for SkyboxGenerationUi {
+    fn default() -> Self {
+        Self {
+            phase: SkyboxGenerationPhase::Idle,
+            prompt: None,
+            message: None,
+            target_name: None,
+            revert_name: None,
+        }
+    }
+}
+
+impl SkyboxGenerationUi {
+    pub fn is_busy(&self) -> bool {
+        matches!(
+            self.phase,
+            SkyboxGenerationPhase::Generating | SkyboxGenerationPhase::PendingApply
+        )
+    }
+}
+
 #[derive(Clone, Debug, Message)]
 pub struct ManifestReloaded {
     pub entry_count: usize,
@@ -366,10 +420,26 @@ pub struct SkyboxGenerationSettings {
     pub request_timeout: Duration,
 }
 
+/// Reads `BLOCKADE_API_KEY` from the editor process environment (must be set before launch).
+pub fn blockade_api_key_from_env() -> Option<String> {
+    std::env::var("BLOCKADE_API_KEY")
+        .ok()
+        .map(|key| key.trim().to_string())
+        .filter(|key| !key.is_empty())
+}
+
+impl SkyboxGenerationSettings {
+    pub fn resolved_api_key(&self) -> Option<String> {
+        self.api_key
+            .clone()
+            .or_else(blockade_api_key_from_env)
+    }
+}
+
 impl Default for SkyboxGenerationSettings {
     fn default() -> Self {
         Self {
-            api_key: std::env::var("BLOCKADE_API_KEY").ok(),
+            api_key: blockade_api_key_from_env(),
             api_base_url: "https://backend.blockadelabs.com/api/v1".to_string(),
             default_style: SkyboxStyle::M3Photoreal,
             default_resolution: SkyboxResolution::FourK,
@@ -412,7 +482,7 @@ impl Plugin for BlockadeSkyboxPlugin {
             api_key: self
                 .api_key
                 .clone()
-                .or_else(|| std::env::var("BLOCKADE_API_KEY").ok()),
+                .or_else(blockade_api_key_from_env),
             api_base_url: self.api_base_url.clone(),
             default_style: self.default_style,
             default_resolution: self.default_resolution,
@@ -421,14 +491,29 @@ impl Plugin for BlockadeSkyboxPlugin {
             request_timeout: self.request_timeout,
         })
         .init_resource::<SkyboxGenerationState>()
+        .init_resource::<SkyboxGenerationUi>()
         .add_message::<GenerateSkybox>()
-        .add_systems(Update, (start_generation_jobs, finish_generation_jobs));
+        .add_systems(
+            Update,
+            (
+                start_generation_jobs,
+                finish_generation_jobs,
+                track_skybox_generation_failures,
+            )
+                .chain(),
+        );
     }
 }
 
 #[derive(Resource, Default)]
 struct SkyboxGenerationState {
     active: Option<ActiveGeneration>,
+}
+
+#[derive(Resource, Default)]
+struct PendingSkyboxActivation {
+    name: Option<String>,
+    notify_generation_complete: bool,
 }
 
 struct ActiveGeneration {
@@ -450,7 +535,8 @@ mod system_params {
     };
 
     use super::{
-        PrimarySkybox, SetActiveSkybox, SkyboxAssetSettings, SkyboxCache, SkyboxFailed, SkyboxReady,
+        PendingSkyboxActivation, PrimarySkybox, SetActiveSkybox, SkyboxAssetSettings, SkyboxCache,
+        SkyboxFailed, SkyboxReady,
     };
 
     type SkyboxCameraQuery<'w, 's> = Query<
@@ -468,6 +554,7 @@ mod system_params {
     pub(super) struct ApplySkyboxParams<'w, 's> {
         pub commands: Commands<'w, 's>,
         pub cache: ResMut<'w, SkyboxCache>,
+        pub pending: ResMut<'w, PendingSkyboxActivation>,
         pub reader: MessageReader<'w, 's, SetActiveSkybox>,
         pub settings: Res<'w, SkyboxAssetSettings>,
         pub asset_server: Res<'w, AssetServer>,
@@ -489,6 +576,7 @@ pub struct SkyboxAssetPlugin {
     pub apply_to_all_cameras: bool,
     pub env_lighting: bool,
     pub watch_manifest: bool,
+    pub manifest_poll_secs: f32,
 }
 
 impl Default for SkyboxAssetPlugin {
@@ -502,6 +590,7 @@ impl Default for SkyboxAssetPlugin {
             apply_to_all_cameras: settings.apply_to_all_cameras,
             env_lighting: settings.env_lighting,
             watch_manifest: settings.watch_manifest,
+            manifest_poll_secs: settings.manifest_poll_secs,
         }
     }
 }
@@ -531,6 +620,7 @@ impl Plugin for SkyboxAssetPlugin {
             apply_to_all_cameras: self.apply_to_all_cameras,
             env_lighting: self.env_lighting,
             watch_manifest: self.watch_manifest,
+            manifest_poll_secs: self.manifest_poll_secs,
         };
 
         let cache = match SkyboxCache::load(&settings) {
@@ -544,21 +634,27 @@ impl Plugin for SkyboxAssetPlugin {
         app.insert_resource(settings)
             .insert_resource(cache)
             .init_resource::<ConfiguredCubemapIds>()
+            .init_resource::<PendingSkyboxActivation>()
             .add_message::<SetActiveSkybox>()
             .add_message::<SkyboxReady>()
             .add_message::<SkyboxFailed>()
+            .add_message::<SkyboxGenerationComplete>()
             .add_message::<ManifestReloaded>()
             .add_systems(Startup, load_default_skybox)
             .add_systems(
                 Update,
                 (
+                    strip_unconfigured_skybox_components,
+                    apply_pending_skybox_activation,
                     apply_skybox_to_camera,
                     apply_active_skybox_to_new_cameras,
+                    reapply_skybox_after_manifest_reload,
                     configure_loaded_cubemaps,
                     watch_manifest_changes
                         .run_if(|settings: Res<SkyboxAssetSettings>| settings.watch_manifest),
                     log_skybox_outcomes,
-                ),
+                )
+                    .chain(),
             );
     }
 }
@@ -575,12 +671,23 @@ fn load_default_skybox(
 
 fn start_generation_jobs(
     mut reader: MessageReader<GenerateSkybox>,
-    settings: Res<SkyboxGenerationSettings>,
+    mut settings: ResMut<SkyboxGenerationSettings>,
     asset_settings: Res<SkyboxAssetSettings>,
     mut state: ResMut<SkyboxGenerationState>,
+    cache: Res<SkyboxCache>,
+    mut ui: ResMut<SkyboxGenerationUi>,
     mut failed: MessageWriter<SkyboxFailed>,
 ) {
+    if let Some(key) = settings.resolved_api_key() {
+        settings.api_key = Some(key);
+    }
+
     for request in reader.read() {
+        if state.active.is_some() || ui.is_busy() {
+            ui.message = Some("A skybox generation is already in progress".into());
+            continue;
+        }
+
         let mut request = request.clone();
         request.prompt = request.prompt.trim().to_string();
         if request.prompt.is_empty() {
@@ -591,7 +698,7 @@ fn start_generation_jobs(
             continue;
         }
 
-        if settings.api_key.is_none() {
+        if settings.resolved_api_key().is_none() {
             failed.write(SkyboxFailed {
                 name: request.prompt.clone(),
                 error: SkyboxError::MissingApiKey,
@@ -599,7 +706,17 @@ fn start_generation_jobs(
             continue;
         }
 
-        let generation_settings = settings.clone();
+        ui.revert_name = cache.active.clone();
+        ui.target_name = None;
+        ui.phase = SkyboxGenerationPhase::Generating;
+        ui.prompt = Some(request.prompt.clone());
+        ui.message = Some(format!(
+            "Generating skybox… ({})",
+            request.prompt.chars().take(48).collect::<String>()
+        ));
+
+        let mut generation_settings = settings.clone();
+        generation_settings.api_key = settings.resolved_api_key();
         let asset_settings = asset_settings.clone();
         let prompt = request.prompt.clone();
         let task = IoTaskPool::get().spawn(async move {
@@ -612,8 +729,9 @@ fn start_generation_jobs(
 fn finish_generation_jobs(
     mut state: ResMut<SkyboxGenerationState>,
     mut cache: ResMut<SkyboxCache>,
+    mut pending: ResMut<PendingSkyboxActivation>,
+    mut ui: ResMut<SkyboxGenerationUi>,
     mut manifest_reloaded: MessageWriter<ManifestReloaded>,
-    mut activate: MessageWriter<SetActiveSkybox>,
     mut failed: MessageWriter<SkyboxFailed>,
 ) {
     let Some(active) = state.active.as_mut() else {
@@ -633,7 +751,11 @@ fn finish_generation_jobs(
                     manifest_reloaded.write(ManifestReloaded {
                         entry_count: cache.manifest.entries.len(),
                     });
-                    activate.write(SetActiveSkybox::ByName(name));
+                    pending.name = Some(name.clone());
+                    pending.notify_generation_complete = true;
+                    ui.target_name = Some(name.clone());
+                    ui.phase = SkyboxGenerationPhase::PendingApply;
+                    ui.message = Some(format!("Loading skybox `{name}`…"));
                 }
                 Err(error) => {
                     failed.write(SkyboxFailed {
@@ -649,6 +771,110 @@ fn finish_generation_jobs(
                 error,
             });
         }
+    }
+}
+
+fn strip_unconfigured_skybox_components(
+    images: Res<Assets<Image>>,
+    cameras: Query<(Entity, &Skybox), With<Camera3d>>,
+    mut commands: Commands,
+) {
+    for (entity, skybox) in &cameras {
+        if !is_cubemap_configured(&skybox.image, &images) {
+            commands.entity(entity).remove::<Skybox>();
+        }
+    }
+}
+
+fn is_cubemap_configured(handle: &Handle<Image>, images: &Assets<Image>) -> bool {
+    images.get(handle).is_some_and(|image| {
+        image
+            .texture_view_descriptor
+            .as_ref()
+            .is_some_and(|descriptor| descriptor.dimension == Some(TextureViewDimension::Cube))
+    })
+}
+
+fn apply_pending_skybox_activation(
+    mut pending: ResMut<PendingSkyboxActivation>,
+    mut cache: ResMut<SkyboxCache>,
+    settings: Res<SkyboxAssetSettings>,
+    asset_server: Res<AssetServer>,
+    mut images: ResMut<Assets<Image>>,
+    mut configured: ResMut<ConfiguredCubemapIds>,
+    mut activate: MessageWriter<SetActiveSkybox>,
+    mut complete: MessageWriter<SkyboxGenerationComplete>,
+    ui: Option<ResMut<SkyboxGenerationUi>>,
+) {
+    let Some(name) = pending.name.clone() else {
+        return;
+    };
+
+    let entry = match cache.entry(&name) {
+        Ok(entry) => entry.clone(),
+        Err(error) => {
+            warn!("pending skybox `{name}` missing from manifest: {error}");
+            pending.name = None;
+            pending.notify_generation_complete = false;
+            if let Some(mut ui) = ui {
+                ui.target_name = None;
+                ui.phase = SkyboxGenerationPhase::Failed;
+                ui.message = Some(format!("Skybox `{name}` failed to register"));
+            }
+            return;
+        }
+    };
+
+    let handle = cache
+        .handles
+        .entry(name.clone())
+        .or_insert_with(|| {
+            asset_server.load(settings.asset_path_for(&entry.cubemap_file))
+        })
+        .clone();
+
+    if !is_cubemap_ready(&handle, &mut images) {
+        return;
+    }
+    configured.0.insert(handle.id());
+
+    let notify_generation = pending.notify_generation_complete;
+    pending.name = None;
+    pending.notify_generation_complete = false;
+    activate.write(SetActiveSkybox::ByName(name.clone()));
+    if notify_generation {
+        complete.write(SkyboxGenerationComplete { name: name.clone() });
+        if let Some(mut ui) = ui {
+            ui.target_name = None;
+            ui.phase = SkyboxGenerationPhase::Ready;
+            ui.message = Some(format!("Skybox ready: {name}"));
+        }
+    }
+}
+
+fn is_cubemap_ready(handle: &Handle<Image>, images: &mut Assets<Image>) -> bool {
+    configure_cubemap_image(handle, images)
+}
+
+fn track_skybox_generation_failures(
+    mut reader: MessageReader<SkyboxFailed>,
+    mut ui: ResMut<SkyboxGenerationUi>,
+    mut state: ResMut<SkyboxGenerationState>,
+    mut pending: ResMut<PendingSkyboxActivation>,
+) {
+    for event in reader.read() {
+        if !matches!(
+            ui.phase,
+            SkyboxGenerationPhase::Generating | SkyboxGenerationPhase::PendingApply
+        ) && state.active.is_none()
+        {
+            continue;
+        }
+        state.active = None;
+        pending.name = None;
+        ui.target_name = None;
+        ui.phase = SkyboxGenerationPhase::Failed;
+        ui.message = Some(format!("Skybox failed: {}", event.error));
     }
 }
 
@@ -697,11 +923,8 @@ fn apply_skybox_to_camera(mut params: ApplySkyboxParams) {
                 let entry = match params.cache.entry(name) {
                     Ok(entry) => entry.clone(),
                     Err(error) => {
-                        warn!("{error}");
-                        params.failed.write(SkyboxFailed {
-                            name: name.clone(),
-                            error,
-                        });
+                        params.pending.name = Some(name.clone());
+                        debug!("skybox `{name}` queued until manifest contains entry: {error}");
                         continue;
                     }
                 };
@@ -723,16 +946,30 @@ fn apply_skybox_to_camera(mut params: ApplySkyboxParams) {
                 {
                     continue;
                 }
+                if !is_cubemap_ready(&handle, &mut params.images) {
+                    params.pending.name = Some(name.clone());
+                    params.pending.notify_generation_complete = false;
+                    debug!("skybox `{name}` queued until cubemap asset is ready");
+                    continue;
+                }
                 params.cache.active = Some(name.clone());
                 let disk_bytes = fs::metadata(params.settings.cache_dir.join(&entry.cubemap_file))
                     .map(|metadata| metadata.len())
                     .unwrap_or(0);
                 (Some(name.clone()), handle, disk_bytes)
             }
-            SetActiveSkybox::ByHandle(handle) => (None, handle.clone(), 0),
+            SetActiveSkybox::ByHandle(handle) => {
+                if !is_cubemap_ready(&handle, &mut params.images) {
+                    warn!("SetActiveSkybox::ByHandle skipped: cubemap not ready");
+                    continue;
+                }
+                (None, handle.clone(), 0)
+            }
         };
 
-        configure_cubemap_image(&handle, &mut params.images);
+        if !is_cubemap_ready(&handle, &mut params.images) {
+            continue;
+        }
         let mut updated_any = false;
         for (entity, primary, skybox) in &mut params.cameras {
             if !camera_targets_skybox(&params.settings, primary, skybox, &handle) {
@@ -769,6 +1006,24 @@ fn apply_skybox_to_camera(mut params: ApplySkyboxParams) {
                 disk_bytes,
             });
         }
+    }
+}
+
+fn reapply_skybox_after_manifest_reload(
+    mut reader: MessageReader<ManifestReloaded>,
+    cache: Res<SkyboxCache>,
+    mut pending: ResMut<PendingSkyboxActivation>,
+    mut writer: MessageWriter<SetActiveSkybox>,
+) {
+    if reader.read().next().is_none() {
+        return;
+    }
+    if let Some(name) = pending.name.clone() {
+        writer.write(SetActiveSkybox::ByName(name));
+        return;
+    }
+    if let Some(active) = cache.active.clone() {
+        writer.write(SetActiveSkybox::ByName(active));
     }
 }
 
@@ -838,12 +1093,17 @@ fn configure_cubemap_image(handle: &Handle<Image>, images: &mut Assets<Image>) -
 }
 
 fn watch_manifest_changes(
+    settings: Res<SkyboxAssetSettings>,
     mut timer: Local<Option<Timer>>,
     time: Res<Time>,
     mut cache: ResMut<SkyboxCache>,
     mut writer: MessageWriter<ManifestReloaded>,
 ) {
-    let timer = timer.get_or_insert_with(|| Timer::from_seconds(1.0, TimerMode::Repeating));
+    let poll_secs = settings.manifest_poll_secs.max(0.1);
+    let timer = timer.get_or_insert_with(|| Timer::from_seconds(poll_secs, TimerMode::Repeating));
+    if timer.duration().as_secs_f32() != poll_secs {
+        *timer = Timer::from_seconds(poll_secs, TimerMode::Repeating);
+    }
     timer.tick(time.delta());
     if !timer.just_finished() || !cache.manifest_changed_on_disk() {
         return;
