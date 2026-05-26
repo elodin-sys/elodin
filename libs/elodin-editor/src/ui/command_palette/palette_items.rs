@@ -4,7 +4,10 @@ use std::{
     str::FromStr,
 };
 
-use crate::plugins::kdl_document::{CurrentDocument, SchematicDocumentAsset, sync_document_skybox};
+use crate::plugins::kdl_document::{
+    CurrentDocument, LastSyncedSchematicContent, SchematicDocumentAsset, sync_document_skybox,
+};
+use crate::skybox_generation::{push_skybox_active_metadata, record_synced_schematic_content};
 use bevy::{
     asset::{AssetServer, Assets},
     camera::visibility::Visibility,
@@ -1158,8 +1161,18 @@ pub fn set_color_scheme_mode() -> PaletteItem {
     })
 }
 
-fn push_schematic_content(tx: &PacketTx, kdl: String, skybox: Option<Option<&str>>) {
-    crate::skybox_generation::push_schematic_metadata(tx, kdl, skybox);
+fn sync_skybox_to_document_and_db(
+    skybox: Option<SkyboxConfig>,
+    schematic: &mut CurrentSchematic,
+    current_document: &CurrentDocument,
+    document_assets: &mut Assets<SchematicDocumentAsset>,
+    last_synced_content: &mut LastSyncedSchematicContent,
+    tx: &PacketTx,
+) {
+    let kdl = sync_document_skybox(skybox, current_document, document_assets, schematic);
+    record_synced_schematic_content(last_synced_content, &kdl);
+    let active = schematic.skybox.as_ref().map(|entry| entry.name.as_str());
+    push_skybox_active_metadata(tx, active);
 }
 
 fn clear_skybox() -> PaletteItem {
@@ -1172,18 +1185,20 @@ fn clear_skybox() -> PaletteItem {
          mut schematic: ResMut<CurrentSchematic>,
          current_document: Res<CurrentDocument>,
          mut document_assets: ResMut<Assets<SchematicDocumentAsset>>,
+         mut last_synced_content: ResMut<LastSyncedSchematicContent>,
          tx: Res<PacketTx>| {
             if cache.active.is_none() && schematic.skybox.is_none() {
                 return PaletteEvent::Error("No skybox is active".into());
             }
-            let kdl = sync_document_skybox(
+            skyboxes.write(SetActiveSkybox::Clear);
+            sync_skybox_to_document_and_db(
                 None,
+                &mut schematic,
                 &current_document,
                 &mut document_assets,
-                &mut schematic,
+                &mut last_synced_content,
+                &tx,
             );
-            push_schematic_content(&tx, kdl, Some(None));
-            skyboxes.write(SetActiveSkybox::Clear);
             PaletteEvent::Exit
         },
     )
@@ -1198,15 +1213,17 @@ fn activate_skybox_item(label: String, name: String) -> PaletteItem {
               mut schematic: ResMut<CurrentSchematic>,
               current_document: Res<CurrentDocument>,
               mut document_assets: ResMut<Assets<SchematicDocumentAsset>>,
+              mut last_synced_content: ResMut<LastSyncedSchematicContent>,
               tx: Res<PacketTx>| {
-            let kdl = sync_document_skybox(
+            skyboxes.write(SetActiveSkybox::ByName(name.clone()));
+            sync_skybox_to_document_and_db(
                 Some(SkyboxConfig { name: name.clone() }),
+                &mut schematic,
                 &current_document,
                 &mut document_assets,
-                &mut schematic,
+                &mut last_synced_content,
+                &tx,
             );
-            push_schematic_content(&tx, kdl, Some(Some(&name)));
-            skyboxes.write(SetActiveSkybox::ByName(name.clone()));
             PaletteEvent::Exit
         },
     )

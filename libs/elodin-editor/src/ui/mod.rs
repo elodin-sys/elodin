@@ -521,20 +521,36 @@ impl RootWidgetSystem for ViewportOverlay<'_, '_> {
                 }
             };
             let text = skybox_ui.message.clone().unwrap_or_else(|| "Skybox".into());
-            egui::Area::new(egui::Id::new("skybox_progress_banner"))
-                .anchor(egui::Align2::CENTER_TOP, egui::vec2(0.0, 56.0))
-                .interactable(false)
+            let modal_size = egui::vec2(380.0, 88.0);
+            let modal_rect =
+                egui::Rect::from_center_size(ctx.content_rect().center(), modal_size);
+            let modal_id = egui::Id::new("skybox_status_modal");
+            egui::Modal::new(modal_id)
+                .area(
+                    egui::Area::new(modal_id)
+                        .kind(egui::UiKind::Modal)
+                        .fixed_pos(modal_rect.min)
+                        .order(egui::Order::Foreground),
+                )
+                .backdrop_color(egui::Color32::from_black_alpha(100))
+                .frame(egui::Frame {
+                    fill: colors::with_opacity(get_scheme().bg_secondary, 0.96),
+                    stroke: egui::Stroke::new(1.0, colors::with_opacity(color, 0.5)),
+                    inner_margin: egui::Margin::symmetric(24, 16),
+                    corner_radius: egui::CornerRadius::same(10),
+                    ..Default::default()
+                })
                 .show(ctx, |ui| {
-                    egui::Frame {
-                        fill: colors::with_opacity(get_scheme().bg_secondary, 0.92),
-                        stroke: egui::Stroke::new(1.0, colors::with_opacity(color, 0.6)),
-                        inner_margin: egui::Margin::symmetric(20, 10),
-                        corner_radius: egui::CornerRadius::same(8),
-                        ..Default::default()
-                    }
-                    .show(ui, |ui| {
+                    ui.set_min_size(modal_size);
+                    ui.vertical_centered(|ui| {
                         ui.horizontal(|ui| {
-                            ui.add(egui::Spinner::new().color(color));
+                            if matches!(
+                                skybox_ui.phase,
+                                bevy_ai_skybox::prelude::SkyboxGenerationPhase::Generating
+                                    | bevy_ai_skybox::prelude::SkyboxGenerationPhase::PendingApply
+                            ) {
+                                ui.add(egui::Spinner::new().color(color));
+                            }
                             ui.add(Label::new(
                                 RichText::new(format!("{icon} {text}"))
                                     .color(get_scheme().text_primary),

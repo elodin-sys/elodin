@@ -549,7 +549,6 @@ impl Plugin for SchematicPlugin {
             .insert_resource(CurrentWindowSchematics::default())
             .init_resource::<SchematicBindings>()
             .init_resource::<PendingSchematicSkybox>()
-            .add_systems(Update, apply_pending_schematic_skybox)
             .add_systems(PostUpdate, tiles_to_schematic)
             .add_systems(
                 PostUpdate,
@@ -564,6 +563,9 @@ impl Plugin for SchematicPlugin {
                     load::apply_document_loaded.before(crate::ui::sync_windows),
                     load::apply_document_saved,
                     load::apply_document_reloaded.before(crate::ui::sync_windows),
+                    apply_pending_schematic_skybox
+                        .after(load::apply_document_loaded)
+                        .after(load::apply_document_reloaded),
                     load::show_document_command_failures,
                     load::show_document_load_failures,
                 )

@@ -931,13 +931,6 @@ fn apply_skybox_to_camera(mut params: ApplySkyboxParams) {
                             .load(params.settings.asset_path_for(&cubemap_file))
                     })
                     .clone();
-                if params.cache.active.as_deref() == Some(name.as_str())
-                    && !params.cameras.iter().any(|(_, primary, skybox)| {
-                        camera_targets_skybox(&params.settings, primary, skybox, &handle)
-                    })
-                {
-                    continue;
-                }
                 if !is_cubemap_ready(&handle, &mut params.images) {
                     params.pending.name = Some(name.clone());
                     params.pending.notify_generation_complete = false;

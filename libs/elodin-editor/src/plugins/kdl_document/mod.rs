@@ -18,6 +18,7 @@ pub(crate) fn plugin(app: &mut App) {
         (KdlDocumentSet::Commands, KdlDocumentSet::AssetEvents).chain(),
     )
     .init_resource::<InitialKdlPath>()
+    .init_resource::<LastSyncedSchematicContent>()
     .init_resource::<CurrentDocument>()
     .init_asset::<SchematicDocumentAsset>()
     .init_asset_loader::<SchematicDocumentLoader>()

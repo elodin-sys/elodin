@@ -5,7 +5,9 @@ use bevy_ai_skybox::prelude::{
 use impeller2_bevy::PacketTx;
 use impeller2_wkt::{SetDbConfig, SkyboxConfig};
 
-use crate::plugins::kdl_document::{CurrentDocument, SchematicDocumentAsset, sync_document_skybox};
+use crate::plugins::kdl_document::{
+    CurrentDocument, LastSyncedSchematicContent, SchematicDocumentAsset, sync_document_skybox,
+};
 use crate::ui::schematic::CurrentSchematic;
 
 pub fn sync_generated_skybox_to_schematic(
@@ -13,6 +15,7 @@ pub fn sync_generated_skybox_to_schematic(
     mut schematic: ResMut<CurrentSchematic>,
     current_document: Res<CurrentDocument>,
     mut document_assets: ResMut<Assets<SchematicDocumentAsset>>,
+    mut last_synced_content: ResMut<LastSyncedSchematicContent>,
     tx: Res<PacketTx>,
 ) {
     for event in reader.read() {
@@ -24,8 +27,27 @@ pub fn sync_generated_skybox_to_schematic(
             &mut document_assets,
             &mut schematic,
         );
+        last_synced_content.0 = Some(kdl.clone());
         push_schematic_metadata(&tx, kdl, Some(Some(&event.name)));
     }
+}
+
+pub(crate) fn record_synced_schematic_content(
+    last_synced_content: &mut LastSyncedSchematicContent,
+    kdl: &str,
+) {
+    last_synced_content.0 = Some(kdl.to_string());
+}
+
+pub(crate) fn push_skybox_active_metadata(tx: &PacketTx, skybox: Option<&str>) {
+    let metadata = match skybox {
+        Some(name) => std::collections::HashMap::from([("skybox.active".to_string(), name.to_string())]),
+        None => std::collections::HashMap::from([("skybox.active".to_string(), String::new())]),
+    };
+    tx.send_msg(SetDbConfig {
+        metadata,
+        ..Default::default()
+    });
 }
 
 /// Notify render-server while the cubemap is still loading on the editor.
@@ -59,7 +81,7 @@ pub fn decay_skybox_status_message(
     match ui.phase {
         SkyboxGenerationPhase::Ready | SkyboxGenerationPhase::Failed => {
             let start = *shown_at.get_or_insert(time.elapsed_secs());
-            if time.elapsed_secs() - start > 12.0 {
+            if time.elapsed_secs() - start > 4.0 {
                 ui.phase = SkyboxGenerationPhase::Idle;
                 ui.message = None;
                 ui.prompt = None;
@@ -95,6 +117,7 @@ pub fn revert_previous_skybox(
     mut schematic: ResMut<CurrentSchematic>,
     current_document: Res<CurrentDocument>,
     mut document_assets: ResMut<Assets<SchematicDocumentAsset>>,
+    mut last_synced_content: ResMut<LastSyncedSchematicContent>,
     tx: Res<PacketTx>,
     mut skyboxes: MessageWriter<SetActiveSkybox>,
 ) {
@@ -107,6 +130,7 @@ pub fn revert_previous_skybox(
         &mut document_assets,
         &mut schematic,
     );
+    last_synced_content.0 = Some(kdl.clone());
     push_schematic_metadata(&tx, kdl, Some(Some(&name)));
     skyboxes.write(SetActiveSkybox::ByName(name.clone()));
     ui.phase = SkyboxGenerationPhase::Idle;

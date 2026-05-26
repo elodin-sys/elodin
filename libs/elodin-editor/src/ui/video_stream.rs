@@ -714,7 +714,6 @@ pub struct VideoStreamWidget<'w, 's> {
     current_time: Res<'w, CurrentTimestamp>,
     images: ResMut<'w, Assets<Image>>,
     window_settings: Query<'w, 's, &'static bevy_egui::EguiContextSettings>,
-    skybox_ui: Res<'w, bevy_ai_skybox::prelude::SkyboxGenerationUi>,
 }
 
 // ---------------------------------------------------------------------------
@@ -1088,25 +1087,6 @@ impl super::widgets::WidgetSystem for VideoStreamWidget<'_, '_> {
                             egui::RichText::new("No video at this time")
                                 .size(16.0)
                                 .color(get_scheme().highlight),
-                        ),
-                    );
-                } else if stream.raw_rgba_dims.is_some() && state.skybox_ui.is_busy() {
-                    let text = state
-                        .skybox_ui
-                        .message
-                        .clone()
-                        .unwrap_or_else(|| "Updating skybox…".into());
-                    ui.painter()
-                        .rect_filled(max_rect, 0, Color32::BLACK.gamma_multiply(0.35));
-                    ui.put(
-                        egui::Rect::from_center_size(
-                            max_rect.center(),
-                            egui::vec2(max_rect.width(), 28.0),
-                        ),
-                        egui::Label::new(
-                            egui::RichText::new(format!("⟳ {text}"))
-                                .size(14.0)
-                                .color(get_scheme().text_primary),
                         ),
                     );
                 }
