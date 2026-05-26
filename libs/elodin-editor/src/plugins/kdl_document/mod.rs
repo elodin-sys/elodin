@@ -7,7 +7,7 @@ mod types;
 
 pub use commands::*;
 pub use messages::*;
-pub use operations::{apply_initial_kdl_path, sync_document_from_config};
+pub use operations::{apply_initial_kdl_path, sync_document_from_config, sync_document_skybox};
 pub use types::*;
 
 use bevy::prelude::*;

@@ -5,7 +5,7 @@
 //! The optional Blockade plugin adds prompt-driven generation.
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fs,
     path::{Path, PathBuf},
     thread,
@@ -13,7 +13,6 @@ use std::{
 };
 
 use bevy::{
-    asset::AssetEvent,
     core_pipeline::Skybox,
     image::Image,
     light::{EnvironmentMapLight, GeneratedEnvironmentMapLight},
@@ -217,6 +216,8 @@ pub struct SkyboxAssetSettings {
     pub default_skybox: Option<String>,
     pub apply_to_all_cameras: bool,
     pub env_lighting: bool,
+    /// Poll `manifest.ron` for changes (useful after AI generation).
+    pub watch_manifest: bool,
 }
 
 impl Default for SkyboxAssetSettings {
@@ -228,6 +229,7 @@ impl Default for SkyboxAssetSettings {
             default_skybox: None,
             apply_to_all_cameras: true,
             env_lighting: true,
+            watch_manifest: true,
         }
     }
 }
@@ -319,6 +321,7 @@ fn modified_at(path: &Path) -> Option<SystemTime> {
 pub enum SetActiveSkybox {
     ByName(String),
     ByHandle(Handle<Image>),
+    Clear,
 }
 
 #[derive(Clone, Debug, Default, Message)]
@@ -485,6 +488,7 @@ pub struct SkyboxAssetPlugin {
     pub default_skybox: Option<String>,
     pub apply_to_all_cameras: bool,
     pub env_lighting: bool,
+    pub watch_manifest: bool,
 }
 
 impl Default for SkyboxAssetPlugin {
@@ -497,9 +501,13 @@ impl Default for SkyboxAssetPlugin {
             default_skybox: settings.default_skybox,
             apply_to_all_cameras: settings.apply_to_all_cameras,
             env_lighting: settings.env_lighting,
+            watch_manifest: settings.watch_manifest,
         }
     }
 }
+
+#[derive(Resource, Default)]
+struct ConfiguredCubemapIds(HashSet<AssetId<Image>>);
 
 impl Plugin for SkyboxAssetPlugin {
     fn build(&self, app: &mut App) {
@@ -522,6 +530,7 @@ impl Plugin for SkyboxAssetPlugin {
             default_skybox: self.default_skybox.clone(),
             apply_to_all_cameras: self.apply_to_all_cameras,
             env_lighting: self.env_lighting,
+            watch_manifest: self.watch_manifest,
         };
 
         let cache = match SkyboxCache::load(&settings) {
@@ -534,6 +543,7 @@ impl Plugin for SkyboxAssetPlugin {
 
         app.insert_resource(settings)
             .insert_resource(cache)
+            .init_resource::<ConfiguredCubemapIds>()
             .add_message::<SetActiveSkybox>()
             .add_message::<SkyboxReady>()
             .add_message::<SkyboxFailed>()
@@ -545,8 +555,9 @@ impl Plugin for SkyboxAssetPlugin {
                     apply_skybox_to_camera,
                     apply_active_skybox_to_new_cameras,
                     configure_loaded_cubemaps,
-                    watch_manifest_changes,
-                    observe_image_hot_reload,
+                    watch_manifest_changes.run_if(|settings: Res<SkyboxAssetSettings>| {
+                        settings.watch_manifest
+                    }),
                     log_skybox_outcomes,
                 ),
             );
@@ -642,9 +653,47 @@ fn finish_generation_jobs(
     }
 }
 
+fn camera_targets_skybox(
+    settings: &SkyboxAssetSettings,
+    primary: Option<&PrimarySkybox>,
+    skybox: Option<&Skybox>,
+    handle: &Handle<Image>,
+) -> bool {
+    if !settings.apply_to_all_cameras && primary.is_none() {
+        return false;
+    }
+    skybox.is_none() || skybox.is_some_and(|skybox| skybox.image != *handle)
+}
+
 fn apply_skybox_to_camera(mut params: ApplySkyboxParams) {
     for message in params.reader.read() {
         let (name, handle, disk_bytes) = match message {
+            SetActiveSkybox::Clear => {
+                if params.cache.active.is_none()
+                    && !params.cameras.iter().any(|(_, primary, skybox)| {
+                        (params.settings.apply_to_all_cameras || primary.is_some())
+                            && skybox.is_some()
+                    })
+                {
+                    continue;
+                }
+                params.cache.active = None;
+                for (entity, primary, skybox) in &mut params.cameras {
+                    if !params.settings.apply_to_all_cameras && primary.is_none() {
+                        continue;
+                    }
+                    if skybox.is_none() {
+                        continue;
+                    }
+                    params
+                        .commands
+                        .entity(entity)
+                        .remove::<Skybox>()
+                        .remove::<GeneratedEnvironmentMapLight>();
+                }
+                debug!("skybox cleared");
+                continue;
+            }
             SetActiveSkybox::ByName(name) => {
                 let entry = match params.cache.entry(name) {
                     Ok(entry) => entry.clone(),
@@ -668,6 +717,13 @@ fn apply_skybox_to_camera(mut params: ApplySkyboxParams) {
                             .load(params.settings.asset_path_for(&cubemap_file))
                     })
                     .clone();
+                if params.cache.active.as_deref() == Some(name.as_str())
+                    && !params.cameras.iter().any(|(_, primary, skybox)| {
+                        camera_targets_skybox(&params.settings, primary, skybox, &handle)
+                    })
+                {
+                    continue;
+                }
                 params.cache.active = Some(name.clone());
                 let disk_bytes = fs::metadata(params.settings.cache_dir.join(&entry.cubemap_file))
                     .map(|metadata| metadata.len())
@@ -678,10 +734,12 @@ fn apply_skybox_to_camera(mut params: ApplySkyboxParams) {
         };
 
         configure_cubemap_image(&handle, &mut params.images);
+        let mut updated_any = false;
         for (entity, primary, skybox) in &mut params.cameras {
-            if !params.settings.apply_to_all_cameras && primary.is_none() {
+            if !camera_targets_skybox(&params.settings, primary, skybox, &handle) {
                 continue;
             }
+            updated_any = true;
             let brightness = skybox.map(|s| s.brightness).unwrap_or(1000.0);
             let mut entity_commands = params.commands.entity(entity);
             entity_commands.insert(Skybox {
@@ -701,7 +759,9 @@ fn apply_skybox_to_camera(mut params: ApplySkyboxParams) {
             }
         }
 
-        if let Some(name) = name {
+        if updated_any
+            && let Some(name) = name
+        {
             debug!("active skybox: {name}");
             params.ready.write(SkyboxReady {
                 name,
@@ -731,33 +791,48 @@ fn apply_active_skybox_to_new_cameras(
     }
 }
 
-fn configure_loaded_cubemaps(cache: Res<SkyboxCache>, mut images: ResMut<Assets<Image>>) {
+fn configure_loaded_cubemaps(
+    mut configured: ResMut<ConfiguredCubemapIds>,
+    cache: Res<SkyboxCache>,
+    mut images: ResMut<Assets<Image>>,
+) {
     for handle in cache.handles.values() {
-        configure_cubemap_image(handle, &mut images);
+        if configured.0.contains(&handle.id()) {
+            continue;
+        }
+        if configure_cubemap_image(handle, &mut images) {
+            configured.0.insert(handle.id());
+        }
     }
 }
 
-fn configure_cubemap_image(handle: &Handle<Image>, images: &mut Assets<Image>) {
+fn configure_cubemap_image(handle: &Handle<Image>, images: &mut Assets<Image>) -> bool {
     let Some(image) = images.get(handle) else {
-        return;
+        return false;
     };
+    if image.texture_view_descriptor.as_ref().is_some_and(|descriptor| {
+        descriptor.dimension == Some(TextureViewDimension::Cube)
+    }) {
+        return true;
+    }
     if image.texture_descriptor.array_layer_count() != 1 || image.width() == 0 {
-        return;
+        return false;
     }
 
     let layers = image.height() / image.width();
     if layers != 6 {
-        return;
+        return false;
     }
 
     let Some(image) = images.get_mut(handle) else {
-        return;
+        return false;
     };
     let _ = image.reinterpret_stacked_2d_as_array(layers);
     image.texture_view_descriptor = Some(TextureViewDescriptor {
         dimension: Some(TextureViewDimension::Cube),
         ..default()
     });
+    true
 }
 
 fn watch_manifest_changes(
@@ -779,24 +854,6 @@ fn watch_manifest_changes(
             });
         }
         Err(error) => warn!("failed to reload skybox manifest: {error}"),
-    }
-}
-
-fn observe_image_hot_reload(
-    mut events: MessageReader<AssetEvent<Image>>,
-    cache: Res<SkyboxCache>,
-    mut writer: MessageWriter<SetActiveSkybox>,
-) {
-    for event in events.read() {
-        let AssetEvent::Modified { id } = event else {
-            continue;
-        };
-        let Some((name, _)) = cache.handles.iter().find(|(_, handle)| handle.id() == *id) else {
-            continue;
-        };
-        if cache.active.as_deref() == Some(name) {
-            writer.write(SetActiveSkybox::ByName(name.clone()));
-        }
     }
 }
 

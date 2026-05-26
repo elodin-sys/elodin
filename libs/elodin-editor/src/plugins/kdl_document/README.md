@@ -84,7 +84,7 @@ A schematic document is a `.kdl` file. The following top-level nodes are recogni
 | `window` | Secondary window descriptor (`path`, `title`, `screen`, `screen_rect`) |
 | `theme` | Color scheme / mode (`scheme`, `mode`) |
 | `timeline` | Timeline appearance (`played_color`, `future_color`, `follow_latest`) |
-| `skybox` | Cached skybox activation (`name`) |
+| `skybox` | Cached skybox activation (`name`). **Clear Skybox** in the command palette removes this node from the current schematic; **Activate Skybox...** sets it. |
 
 ### Example
 

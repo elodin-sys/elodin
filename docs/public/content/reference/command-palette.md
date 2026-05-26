@@ -55,6 +55,12 @@ order = 8
 - `Create New Skybox...`: available inside `Activate Skybox...`; prompts for a skybox description,
   generates a new skybox via Blockade, adds it to the manifest, and activates it.
 - `Generate Skybox...`: opens the same prompt directly.
+- `Clear Skybox`: remove the active skybox from viewports and sensor cameras, and remove the
+  top-level `skybox` node from the current schematic (also inside `Activate Skybox...` when a
+  skybox is active). Use **Save Schematic** or **Save Schematic To DB** to persist to disk or the
+  database.
+- `Activate Skybox...` entries: set `skybox name="..."` on the current schematic and apply that
+  skybox immediately.
 
 Skybox generation requires `BLOCKADE_API_KEY` in the editor environment. Generated assets are
 written next to the manifest used by the editor. To persist a chosen skybox in a schematic, add a

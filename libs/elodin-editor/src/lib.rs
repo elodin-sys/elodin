@@ -95,6 +95,7 @@ pub(crate) fn skybox_asset_plugin() -> bevy_ai_skybox::prelude::SkyboxAssetPlugi
         // Runtime filtering via GeneratedEnvironmentMapLight is too expensive for
         // multi-viewport editor sessions and sensor cameras in this asset-only slice.
         env_lighting: false,
+        watch_manifest: false,
     }
 }
 

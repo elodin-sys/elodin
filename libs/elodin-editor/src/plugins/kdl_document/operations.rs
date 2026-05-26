@@ -1,10 +1,11 @@
 use bevy::asset::{AssetPath, AssetServer, Assets};
 use bevy::prelude::*;
 use impeller2_bevy::DbMessage;
-use impeller2_kdl::FromKdl;
+use impeller2_kdl::{FromKdl, ToKdl};
 use impeller2_kdl::KdlSchematicError;
 use impeller2_kdl::env::schematic_file;
-use impeller2_wkt::{DbConfig, Schematic};
+use impeller2_wkt::{DbConfig, Schematic, SkyboxConfig};
+use crate::ui::schematic::CurrentSchematic;
 use std::path::{Path, PathBuf};
 
 use super::commands::*;
@@ -12,6 +13,23 @@ use super::messages::*;
 use super::types::*;
 
 use crate::plugins::kdl_asset_source::canonicalize_or_original;
+
+/// Updates the in-memory schematic skybox (document asset + `CurrentSchematic`) and returns
+/// the root KDL text for DB metadata sync.
+pub fn sync_document_skybox(
+    skybox: Option<SkyboxConfig>,
+    current_document: &CurrentDocument,
+    document_assets: &mut Assets<SchematicDocumentAsset>,
+    schematic: &mut CurrentSchematic,
+) -> String {
+    schematic.skybox = skybox.clone();
+    if let Some(handle) = current_document.handle.as_ref()
+        && let Some(document) = document_assets.get_mut(handle)
+    {
+        document.root.skybox = skybox;
+    }
+    schematic.to_kdl()
+}
 
 pub(crate) fn filesystem_to_asset_path(path: &Path) -> AssetPath<'static> {
     let resolved = canonicalize_or_original(path);
