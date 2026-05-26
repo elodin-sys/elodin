@@ -545,6 +545,10 @@ pub fn render_layout(
     mut windows: Local<Vec<(Entity, WindowId)>>,
     mut widget_id: Local<String>,
 ) {
+    if let Some(mut input_owners) = world.get_resource_mut::<input_owner::UiInputOwners>() {
+        input_owners.begin_frame();
+    }
+
     windows.extend(
         world
             .query::<(Entity, &WindowId)>()
