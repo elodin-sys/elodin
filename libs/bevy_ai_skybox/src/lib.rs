@@ -531,7 +531,7 @@ mod system_params {
 
     use super::{
         PendingSkyboxActivation, PrimarySkybox, SetActiveSkybox, SkyboxAssetSettings, SkyboxCache,
-        SkyboxFailed, SkyboxReady,
+        SkyboxReady,
     };
 
     type SkyboxCameraQuery<'w, 's> = Query<
