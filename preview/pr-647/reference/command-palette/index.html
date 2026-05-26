@@ -484,6 +484,12 @@ editor session.</li>
 <li><code>Create New Skybox...</code>: available inside <code>Activate Skybox...</code>; prompts for a skybox description,
 generates a new skybox via Blockade, adds it to the manifest, and activates it.</li>
 <li><code>Generate Skybox...</code>: opens the same prompt directly.</li>
+<li><code>Clear Skybox</code>: remove the active skybox from viewports and sensor cameras, and remove the
+top-level <code>skybox</code> node from the current schematic (also inside <code>Activate Skybox...</code> when a
+skybox is active). Use <strong>Save Schematic</strong> or <strong>Save Schematic To DB</strong> to persist to disk or the
+database.</li>
+<li><code>Activate Skybox...</code> entries: set <code>skybox name="..."</code> on the current schematic and apply that
+skybox immediately.</li>
 </ul>
 <p>Skybox generation requires <code>BLOCKADE_API_KEY</code> in the editor environment. Generated assets are
 written next to the manifest used by the editor. To persist a chosen skybox in a schematic, add a
