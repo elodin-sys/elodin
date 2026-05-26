@@ -30,9 +30,11 @@ use bevy_ai_skybox::prelude::SetActiveSkybox;
 use bevy_geo_frames::GeoContext;
 use bevy_mat3_material::Mat3Material;
 use impeller2::types::{LenPacket, Timestamp, msg_id};
-use impeller2_bevy::MsgPacketTx;
+use impeller2_bevy::{MsgPacketTx, PacketTx};
 use impeller2_kdl::FromKdl;
-use impeller2_wkt::{CurrentTimestamp, DbConfig, LastUpdated, SchematicElem};
+use impeller2_wkt::{
+    CurrentTimestamp, DbConfig, DumpMetadata, LastUpdated, Schematic, SchematicElem,
+};
 
 use crate::object_3d::create_object_3d_entity;
 use crate::sensor_camera::{
@@ -124,6 +126,8 @@ impl Plugin for HeadlessEditorPlugin {
             .init_resource::<crate::EqlContext>()
             .init_resource::<crate::SyncedObject3d>()
             .add_systems(Update, crate::update_eql_context)
+            .add_systems(Update, poll_headless_db_config)
+            .add_systems(Update, sync_headless_skybox)
             .add_systems(Update, load_headless_scene)
             .set_runner(render_server_runner);
 
@@ -165,7 +169,6 @@ fn load_headless_scene(
     mut mat3_materials: ResMut<Assets<Mat3Material>>,
     asset_server: Res<AssetServer>,
     geo_context: Res<GeoContext>,
-    mut skybox_writer: MessageWriter<SetActiveSkybox>,
 ) {
     if *loaded {
         return;
@@ -184,10 +187,6 @@ fn load_headless_scene(
     }) else {
         return;
     };
-
-    if let Some(skybox) = schematic.skybox.as_ref() {
-        skybox_writer.write(SetActiveSkybox::ByName(skybox.name.clone()));
-    }
 
     for elem in &schematic.elems {
         if let SchematicElem::Object3d(obj) = elem {
@@ -213,6 +212,50 @@ fn load_headless_scene(
         schematic.elems.len()
     );
     *loaded = true;
+}
+
+fn sync_headless_skybox(
+    config: Res<DbConfig>,
+    mut last_skybox: Local<Option<Option<String>>>,
+    mut skybox_writer: MessageWriter<SetActiveSkybox>,
+) {
+    if last_skybox.is_some() && !config.is_changed() {
+        return;
+    }
+
+    let Some(content) = config.schematic_content() else {
+        return;
+    };
+    let Ok(schematic) = Schematic::from_kdl(content).inspect_err(|e| {
+        tracing::warn!("Failed to parse schematic KDL while syncing skybox: {e}");
+    }) else {
+        return;
+    };
+
+    let skybox_name = schematic.skybox.as_ref().map(|skybox| skybox.name.clone());
+    if last_skybox
+        .as_ref()
+        .is_some_and(|last| *last == skybox_name)
+    {
+        return;
+    }
+
+    match &skybox_name {
+        Some(name) => skybox_writer.write(SetActiveSkybox::ByName(name.clone())),
+        None => skybox_writer.write(SetActiveSkybox::Clear),
+    };
+    *last_skybox = Some(skybox_name);
+}
+
+fn poll_headless_db_config(
+    time: Res<Time>,
+    mut timer: Local<Option<Timer>>,
+    packet_tx: Res<PacketTx>,
+) {
+    let timer = timer.get_or_insert_with(|| Timer::from_seconds(1.0, TimerMode::Repeating));
+    if timer.tick(time.delta()).just_finished() {
+        packet_tx.send_msg(DumpMetadata);
+    }
 }
 
 // ---------------------------------------------------------------------------

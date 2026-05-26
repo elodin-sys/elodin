@@ -4,10 +4,14 @@
 //! viewports for the current frame. That stale viewport breaks orbit/pan when the
 //! pointer is over the 3D pane. These systems run after [`crate::ui::set_camera_viewport`].
 
+use std::collections::HashMap;
+
 use bevy::input::mouse::{MouseMotion, MouseScrollUnit, MouseWheel};
 use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
-use bevy_editor_cam::{controller::component::EditorCam, prelude::EnabledMotion};
+use bevy_editor_cam::{
+    controller::component::EditorCam, input::CameraPointerMap, prelude::EnabledMotion,
+};
 
 use crate::{
     MainCamera,
@@ -21,6 +25,11 @@ pub struct ActiveViewportCamDrag {
     orbit: bool,
 }
 
+#[derive(Resource, Default)]
+pub struct DefaultEditorCamMotionOverride {
+    previous: HashMap<Entity, EnabledMotion>,
+}
+
 fn cursor_in_camera_view(camera: &Camera, cursor: Vec2) -> bool {
     camera.is_active
         && camera
@@ -29,13 +38,34 @@ fn cursor_in_camera_view(camera: &Camera, cursor: Vec2) -> bool {
 }
 
 /// Prevent [`bevy_editor_cam::input::default_camera_inputs`] from starting motions with a stale viewport.
-pub fn disable_default_editor_cam_motion(mut editor_cams: Query<&mut EditorCam, With<MainCamera>>) {
-    for mut editor_cam in &mut editor_cams {
+pub fn disable_default_editor_cam_motion(
+    mut override_state: ResMut<DefaultEditorCamMotionOverride>,
+    mut editor_cams: Query<(Entity, &mut EditorCam), With<MainCamera>>,
+) {
+    override_state.previous.clear();
+    for (entity, mut editor_cam) in &mut editor_cams {
+        override_state
+            .previous
+            .insert(entity, editor_cam.enabled_motion.clone());
         editor_cam.enabled_motion = EnabledMotion {
             pan: false,
             orbit: false,
             zoom: false,
         };
+    }
+}
+
+/// Restore normal `EditorCam` motion flags after the default input system has had a chance to no-op.
+pub fn restore_default_editor_cam_motion(
+    mut override_state: ResMut<DefaultEditorCamMotionOverride>,
+    mut editor_cams: Query<&mut EditorCam, With<MainCamera>>,
+    mut camera_pointer_map: ResMut<CameraPointerMap>,
+) {
+    camera_pointer_map.clear();
+    for (entity, previous) in override_state.previous.drain() {
+        if let Ok(mut editor_cam) = editor_cams.get_mut(entity) {
+            editor_cam.enabled_motion = previous;
+        }
     }
 }
 

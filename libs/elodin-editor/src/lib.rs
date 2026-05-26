@@ -20,7 +20,9 @@ use bevy::{
     winit::{WINIT_WINDOWS, WinitSettings},
 };
 use bevy_editor_cam::{
-    SyncCameraPosition, controller::component::EditorCam, input::default_camera_inputs,
+    SyncCameraPosition,
+    controller::component::EditorCam,
+    input::{EditorCamInputMessage, default_camera_inputs},
 };
 #[cfg(feature = "inspector")]
 use bevy_egui::EguiContext;
@@ -256,10 +258,16 @@ impl Plugin for EditorPlugin {
             //.add_plugins(DefaultPickingPlugins)
             .add_plugins(bevy_editor_cam::DefaultEditorCamPlugins)
             .init_resource::<plugins::editor_cam_viewport::ActiveViewportCamDrag>()
+            .init_resource::<plugins::editor_cam_viewport::DefaultEditorCamMotionOverride>()
             .add_systems(
                 PreUpdate,
                 plugins::editor_cam_viewport::disable_default_editor_cam_motion
                     .before(default_camera_inputs),
+            )
+            .add_systems(
+                PreUpdate,
+                plugins::editor_cam_viewport::restore_default_editor_cam_motion
+                    .after(EditorCamInputMessage::send_pointer_inputs),
             )
             .add_plugins(EmbeddedAssetPlugin)
             .add_plugins(EguiPlugin::default())
