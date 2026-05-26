@@ -329,6 +329,7 @@ impl Plugin for EditorPlugin {
             .add_systems(Update, set_eql_context_range.after(update_eql_context))
             .add_systems(Startup, spawn_ui_cam)
             .add_systems(Update, ui::video_stream::connect_streams)
+            .add_systems(Update, ui::video_stream::invalidate_sensor_frames_on_skybox_change)
             .add_systems(Update, ui::log_stream::connect_streams)
             .add_systems(PostUpdate, ui::video_stream::set_visibility)
             .add_systems(PostUpdate, set_clear_color)

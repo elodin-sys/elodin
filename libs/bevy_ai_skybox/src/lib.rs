@@ -741,6 +741,9 @@ fn apply_skybox_to_camera(mut params: ApplySkyboxParams) {
             updated_any = true;
             let brightness = skybox.map(|s| s.brightness).unwrap_or(1000.0);
             let mut entity_commands = params.commands.entity(entity);
+            if skybox.is_some() {
+                entity_commands.remove::<Skybox>();
+            }
             entity_commands.insert(Skybox {
                 image: handle.clone(),
                 brightness,

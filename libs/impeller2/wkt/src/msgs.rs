@@ -325,6 +325,25 @@ impl DbConfig {
         self.metadata.get("schematic.content").map(String::as_str)
     }
 
+    pub fn set_skybox_active(&mut self, name: Option<&str>) {
+        match name {
+            Some(name) => {
+                self.metadata
+                    .insert("skybox.active".to_string(), name.to_string());
+            }
+            None => {
+                self.metadata.remove("skybox.active");
+            }
+        }
+    }
+
+    pub fn skybox_active(&self) -> Option<&str> {
+        self.metadata
+            .get("skybox.active")
+            .filter(|name| !name.is_empty())
+            .map(String::as_str)
+    }
+
     pub fn set_time_start_timestamp_micros(&mut self, timestamp: i64) {
         self.metadata.insert(
             Self::TIME_START_TIMESTAMP_KEY.to_string(),

@@ -1158,11 +1158,19 @@ pub fn set_color_scheme_mode() -> PaletteItem {
     })
 }
 
-fn push_schematic_content(tx: &PacketTx, kdl: String) {
+fn push_schematic_content(tx: &PacketTx, kdl: String, skybox: Option<Option<&str>>) {
+    let mut metadata = std::collections::HashMap::from([("schematic.content".to_string(), kdl)]);
+    match skybox {
+        Some(Some(name)) => {
+            metadata.insert("skybox.active".to_string(), name.to_string());
+        }
+        Some(None) => {
+            metadata.insert("skybox.active".to_string(), String::new());
+        }
+        None => {}
+    }
     tx.send_msg(SetDbConfig {
-        metadata: [("schematic.content".to_string(), kdl)]
-            .into_iter()
-            .collect(),
+        metadata,
         ..Default::default()
     });
 }
@@ -1187,7 +1195,7 @@ fn clear_skybox() -> PaletteItem {
                 &mut document_assets,
                 &mut schematic,
             );
-            push_schematic_content(&tx, kdl);
+            push_schematic_content(&tx, kdl, Some(None));
             skyboxes.write(SetActiveSkybox::Clear);
             PaletteEvent::Exit
         },
@@ -1210,7 +1218,7 @@ fn activate_skybox_item(label: String, name: String) -> PaletteItem {
                 &mut document_assets,
                 &mut schematic,
             );
-            push_schematic_content(&tx, kdl);
+            push_schematic_content(&tx, kdl, Some(Some(&name)));
             skyboxes.write(SetActiveSkybox::ByName(name.clone()));
             PaletteEvent::Exit
         },

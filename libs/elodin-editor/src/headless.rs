@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use bevy::{
     a11y::AccessibilityPlugin,
@@ -214,25 +214,26 @@ fn load_headless_scene(
     *loaded = true;
 }
 
+fn desired_skybox_from_config(config: &DbConfig) -> Option<Option<String>> {
+    if let Some(name) = config.skybox_active() {
+        return Some(Some(name.to_string()));
+    }
+
+    let content = config.schematic_content()?;
+    let schematic = Schematic::from_kdl(content)
+        .inspect_err(|e| tracing::warn!("Failed to parse schematic KDL while syncing skybox: {e}"))
+        .ok()?;
+    Some(schematic.skybox.as_ref().map(|skybox| skybox.name.clone()))
+}
+
 fn sync_headless_skybox(
     config: Res<DbConfig>,
     mut last_skybox: Local<Option<Option<String>>>,
     mut skybox_writer: MessageWriter<SetActiveSkybox>,
 ) {
-    if last_skybox.is_some() && !config.is_changed() {
-        return;
-    }
-
-    let Some(content) = config.schematic_content() else {
+    let Some(skybox_name) = desired_skybox_from_config(&config) else {
         return;
     };
-    let Ok(schematic) = Schematic::from_kdl(content).inspect_err(|e| {
-        tracing::warn!("Failed to parse schematic KDL while syncing skybox: {e}");
-    }) else {
-        return;
-    };
-
-    let skybox_name = schematic.skybox.as_ref().map(|skybox| skybox.name.clone());
     if last_skybox
         .as_ref()
         .is_some_and(|last| *last == skybox_name)
@@ -248,14 +249,17 @@ fn sync_headless_skybox(
 }
 
 fn poll_headless_db_config(
-    time: Res<Time>,
-    mut timer: Local<Option<Timer>>,
+    mut last_poll: Local<Option<Instant>>,
     packet_tx: Res<PacketTx>,
 ) {
-    let timer = timer.get_or_insert_with(|| Timer::from_seconds(1.0, TimerMode::Repeating));
-    if timer.tick(time.delta()).just_finished() {
-        packet_tx.send_msg(DumpMetadata);
+    let now = Instant::now();
+    if last_poll
+        .is_some_and(|last| now.duration_since(last) < Duration::from_millis(200))
+    {
+        return;
     }
+    *last_poll = Some(now);
+    packet_tx.send_msg(DumpMetadata);
 }
 
 // ---------------------------------------------------------------------------
@@ -371,6 +375,7 @@ fn render_server_runner(mut app: App) -> AppExit {
         }
 
         if schedules.is_empty() {
+            run_headless_update(&mut app);
             std::thread::sleep(Duration::from_millis(50));
             continue;
         }
@@ -378,6 +383,7 @@ fn render_server_runner(mut app: App) -> AppExit {
         let sim_ts = app.world().resource::<LastUpdated>().0;
         if sim_ts.0 == i64::MIN {
             // Sim hasn't published a `LastUpdated` yet.
+            run_headless_update(&mut app);
             std::thread::sleep(Duration::from_millis(20));
             continue;
         }
