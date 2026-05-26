@@ -1290,7 +1290,10 @@ mod tests {
         sensor_camera::SensorCameraConfigs,
         ui::{
             HdrEnabled,
-            schematic::{CurrentDocument, SchematicBindings, SchematicDocumentAsset},
+            schematic::{
+                CurrentDocument, CurrentSchematic, PendingSchematicSkybox, SchematicBindings,
+                SchematicDocumentAsset,
+            },
             tiles,
             timeline::TimelineSettings,
         },
@@ -1334,7 +1337,9 @@ mod tests {
             .init_resource::<EqlContext>()
             .init_resource::<SensorCameraConfigs>()
             .init_resource::<Coordinate>()
-            .init_resource::<SchematicBindings>();
+            .init_resource::<SchematicBindings>()
+            .init_resource::<PendingSchematicSkybox>()
+            .insert_resource(CurrentSchematic(Default::default()));
 
         app.world_mut().spawn((Window::default(), PrimaryWindow));
         settle(&mut app);
