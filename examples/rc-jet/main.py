@@ -105,8 +105,6 @@ def setup_world(config: BDXConfig) -> tuple[el.World, el.EntityId, el.EntityId]:
     # Create schematic for visualization
     world.schematic(
         """
-        skybox name="alien_swamp"
-
         tabs {
             hsplit name="Main View" {
                 viewport name=Viewport pos="bdx.world_pos.translate_world(-8.0,-8.0,4.0)" look_at="bdx.world_pos" show_grid=#true show_frustums=#true active=#true
