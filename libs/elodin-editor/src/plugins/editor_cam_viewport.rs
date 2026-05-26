@@ -103,15 +103,14 @@ pub fn viewport_editor_cam_mouse_input(
             drag.camera = Some(entity);
             drag.orbit = true;
         }
-    } else if mouse.just_pressed(MouseButton::Left) {
-        if let Some(entity) = target
-            && let Ok((_, _, mut editor_cam, transform)) = cameras.get_mut(entity)
-        {
-            editor_cam.end_move();
-            editor_cam.start_pan(camera_anchor_from_transform(transform));
-            drag.camera = Some(entity);
-            drag.orbit = false;
-        }
+    } else if mouse.just_pressed(MouseButton::Left)
+        && let Some(entity) = target
+        && let Ok((_, _, mut editor_cam, transform)) = cameras.get_mut(entity)
+    {
+        editor_cam.end_move();
+        editor_cam.start_pan(camera_anchor_from_transform(transform));
+        drag.camera = Some(entity);
+        drag.orbit = false;
     }
 
     if zoom_amount.abs() > f32::EPSILON {
