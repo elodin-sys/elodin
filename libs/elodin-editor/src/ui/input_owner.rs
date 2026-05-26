@@ -586,6 +586,28 @@ mod tests {
     }
 
     #[test]
+    fn timeline_over_viewport_blocks_viewport_input() {
+        let window = entity(1);
+        let camera = entity(2);
+        let mut owners = UiInputOwners::default();
+
+        owners.register_content_rect(
+            window,
+            rect(0.0, 0.0, 200.0, 200.0),
+            PointerOwner::Viewport { camera },
+        );
+        owners.register_blocker_rect(
+            window,
+            rect(0.0, 150.0, 200.0, 200.0),
+            UiBlocker::Timeline,
+            PointerOwnerPriority::Panel,
+        );
+
+        assert!(!owners.permits_viewport_at(window, camera, egui::pos2(100.0, 175.0)));
+        assert!(owners.permits_viewport_at(window, camera, egui::pos2(100.0, 75.0)));
+    }
+
+    #[test]
     fn permits_at_uses_the_provided_position_without_resolving_window_state() {
         let window = entity(1);
         let graph = entity(2);

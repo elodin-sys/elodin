@@ -10,7 +10,7 @@ use bevy::{
 };
 use bevy_editor_cam::{
     controller::{component::Sensitivity, zoom::ZoomLimits},
-    prelude::{EditorCam, EnabledMotion, OrbitConstraint},
+    prelude::{EditorCam, OrbitConstraint},
 };
 use bevy_egui::{
     EguiContexts, EguiTextureHandle,
@@ -476,9 +476,6 @@ pub fn create_secondary_window(title: Option<String>) -> (WindowState, WindowId)
         id,
     )
 }
-
-#[derive(Resource, Default)]
-pub struct ViewportContainsPointer(pub bool);
 #[derive(Clone)]
 pub struct ActionTilePane {
     pub entity: Entity,
@@ -2725,8 +2722,6 @@ pub struct TileLayout<'w, 's> {
     meshes: ResMut<'w, Assets<Mesh>>,
     materials: ResMut<'w, Assets<StandardMaterial>>,
     render_layer_alloc: ResMut<'w, RenderLayerAllocator>,
-    viewport_contains_pointer: ResMut<'w, ViewportContainsPointer>,
-    editor_cam: Query<'w, 's, &'static mut EditorCam, With<MainCamera>>,
     primary_window: Single<'w, 's, Entity, With<PrimaryWindow>>,
     cmd_palette_state: ResMut<'w, CommandPaletteState>,
     eql_ctx: Res<'w, EqlContext>,
@@ -2832,15 +2827,6 @@ impl WidgetSystem for TileLayout<'_, '_> {
                 ..
             } = &mut *window_state;
             let _ = std::mem::replace(&mut tile_state.tree, tree);
-            state_mut.viewport_contains_pointer.0 = ui.ui_contains_pointer();
-
-            for mut editor_cam in state_mut.editor_cam.iter_mut() {
-                editor_cam.enabled_motion = EnabledMotion {
-                    pan: state_mut.viewport_contains_pointer.0,
-                    orbit: state_mut.viewport_contains_pointer.0,
-                    zoom: state_mut.viewport_contains_pointer.0,
-                }
-            }
 
             for diff in tree_actions.drain(..) {
                 if read_only && !matches!(diff, TreeAction::SelectTile(_)) {

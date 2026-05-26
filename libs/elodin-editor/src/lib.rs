@@ -220,7 +220,6 @@ impl Plugin for EditorPlugin {
                 ..Default::default()
             })
             .insert_resource(winit_settings)
-            .init_resource::<tiles::ViewportContainsPointer>()
             .add_plugins(bevy_framepace::FramepacePlugin)
             .insert_resource(
                 bevy_framepace::FramepaceSettings::default()

@@ -10,7 +10,7 @@ use bevy::window::PrimaryWindow;
 use bevy_editor_cam::controller::component::EditorCam;
 
 use crate::ui::{
-    UiInputConsumerSet, input_owner::UiInputOwners, tiles, window::window_entity_from_target,
+    UiInputConsumerSet, input_owner::UiInputOwners, window::window_entity_from_target,
 };
 
 use super::camera_anchor::camera_anchor_from_transform;
@@ -176,7 +176,6 @@ pub fn touch_tracker(touches: Res<Touches>, mut touch_tracker: ResMut<TouchTrack
 pub fn touch_editor_cam(
     touch_tracker: Res<TouchTracker>,
     mut cams: Query<(Entity, &mut EditorCam, &Transform, &Camera, &RenderTarget)>,
-    viewport_contains_pointer: Res<tiles::ViewportContainsPointer>,
     input_owners: Res<UiInputOwners>,
     primary_window: Query<Entity, With<PrimaryWindow>>,
 ) {
@@ -199,7 +198,6 @@ pub fn touch_editor_cam(
             continue;
         };
         if !viewport_rect.contains(midpoint)
-            || !viewport_contains_pointer.0
             || !input_owners.permits_viewport_at(window_entity, entity, midpoint_pos)
         {
             continue;
