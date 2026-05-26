@@ -116,9 +116,15 @@ struct NavGizmoDrag {
 }
 
 #[derive(Resource, Default, Debug)]
-struct NavGizmoAnchorState {
+pub struct NavGizmoAnchorState {
     offsets: HashMap<Entity, Vec2>,
     active_drag: Option<NavGizmoDrag>,
+}
+
+impl NavGizmoAnchorState {
+    pub(crate) fn is_suppressing_camera_motion(&self) -> bool {
+        self.active_drag.as_ref().is_some_and(|drag| drag.dragging)
+    }
 }
 
 fn inactive_overlay_viewport() -> Viewport {

@@ -40,7 +40,7 @@ use crate::{
         monitor::MonitorPane,
         plot::GraphBundle,
         query_plot::QueryPlotData,
-        schematic::EqlExt,
+        schematic::{CurrentSchematic, EqlExt},
         tiles::{
             GraphPane, Pane, TileState, TreePane, ViewportPane, WindowDescriptor, WindowId,
             WindowState,
@@ -134,6 +134,8 @@ pub struct LoadSchematicParams<'w, 's> {
     schematic_spawned: Query<'w, 's, Entity, With<SchematicSpawned>>,
     window_states: Query<'w, 's, (Entity, &'static WindowId, &'static mut WindowState)>,
     pub schematic_bindings: ResMut<'w, super::SchematicBindings>,
+    pub current_schematic: ResMut<'w, CurrentSchematic>,
+    pub pending_skybox: ResMut<'w, super::PendingSchematicSkybox>,
 }
 
 fn apply_theme(theme: Option<&impeller2_wkt::ThemeConfig>) -> colors::SchemeSelection {
@@ -423,6 +425,9 @@ impl LoadSchematicParams<'_, '_> {
                 }
             }
         }
+
+        self.current_schematic.0.skybox = schematic.skybox.clone();
+        self.pending_skybox.0 = Some(schematic.skybox.as_ref().map(|skybox| skybox.name.clone()));
     }
 
     fn spawn_window(

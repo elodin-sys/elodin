@@ -371,6 +371,10 @@ impl Plugin for UiPlugin {
                     handle_window_relayout_events,
                     set_secondary_camera_viewport,
                     set_camera_viewport,
+                    crate::plugins::editor_cam_viewport::update_viewport_contains_pointer
+                        .after(set_camera_viewport),
+                    crate::plugins::editor_cam_viewport::viewport_editor_cam_mouse_input
+                        .after(crate::plugins::editor_cam_viewport::update_viewport_contains_pointer),
                     set_nav_gizmo_camera_orders,
                     warn_camera_order_ambiguities,
                 )

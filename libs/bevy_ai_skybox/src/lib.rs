@@ -555,9 +555,8 @@ impl Plugin for SkyboxAssetPlugin {
                     apply_skybox_to_camera,
                     apply_active_skybox_to_new_cameras,
                     configure_loaded_cubemaps,
-                    watch_manifest_changes.run_if(|settings: Res<SkyboxAssetSettings>| {
-                        settings.watch_manifest
-                    }),
+                    watch_manifest_changes
+                        .run_if(|settings: Res<SkyboxAssetSettings>| settings.watch_manifest),
                     log_skybox_outcomes,
                 ),
             );
@@ -759,9 +758,7 @@ fn apply_skybox_to_camera(mut params: ApplySkyboxParams) {
             }
         }
 
-        if updated_any
-            && let Some(name) = name
-        {
+        if updated_any && let Some(name) = name {
             debug!("active skybox: {name}");
             params.ready.write(SkyboxReady {
                 name,
@@ -810,9 +807,11 @@ fn configure_cubemap_image(handle: &Handle<Image>, images: &mut Assets<Image>) -
     let Some(image) = images.get(handle) else {
         return false;
     };
-    if image.texture_view_descriptor.as_ref().is_some_and(|descriptor| {
-        descriptor.dimension == Some(TextureViewDimension::Cube)
-    }) {
+    if image
+        .texture_view_descriptor
+        .as_ref()
+        .is_some_and(|descriptor| descriptor.dimension == Some(TextureViewDimension::Cube))
+    {
         return true;
     }
     if image.texture_descriptor.array_layer_count() != 1 || image.width() == 0 {

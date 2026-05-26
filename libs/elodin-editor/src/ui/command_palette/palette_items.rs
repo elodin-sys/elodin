@@ -4,6 +4,7 @@ use std::{
     str::FromStr,
 };
 
+use crate::plugins::kdl_document::{CurrentDocument, SchematicDocumentAsset, sync_document_skybox};
 use bevy::{
     asset::{AssetServer, Assets},
     camera::visibility::Visibility,
@@ -20,10 +21,6 @@ use bevy::{
 use bevy_ai_skybox::prelude::{
     GenerateSkybox, SetActiveSkybox, SkyboxCache, SkyboxGenerationSettings,
 };
-use impeller2_wkt::SkyboxConfig;
-use crate::plugins::kdl_document::{
-    CurrentDocument, SchematicDocumentAsset, sync_document_skybox,
-};
 use bevy_editor_cam::controller::{component::EditorCam, motion::CurrentMotion};
 use bevy_geo_frames::GeoContext;
 use bevy_infinite_grid::InfiniteGrid;
@@ -32,6 +29,7 @@ use fuzzy_matcher::{FuzzyMatcher, skim::SkimMatcherV2};
 use impeller2::types::Timestamp;
 use impeller2_bevy::{ComponentPathRegistry, EntityMap, PacketTx};
 use impeller2_kdl::{ToKdl, env::schematic_dir_or_cwd};
+use impeller2_wkt::SkyboxConfig;
 use impeller2_wkt::{
     ComponentPath, ComponentValue, CurrentTimestamp, EarliestTimestamp, IsRecording, LastUpdated,
     Material, Mesh, Object3D, SetDbConfig, SimulationTimeStep,
@@ -1207,9 +1205,7 @@ fn activate_skybox_item(label: String, name: String) -> PaletteItem {
               mut document_assets: ResMut<Assets<SchematicDocumentAsset>>,
               tx: Res<PacketTx>| {
             let kdl = sync_document_skybox(
-                Some(SkyboxConfig {
-                    name: name.clone(),
-                }),
+                Some(SkyboxConfig { name: name.clone() }),
                 &current_document,
                 &mut document_assets,
                 &mut schematic,

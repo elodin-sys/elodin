@@ -38,6 +38,27 @@ pub use load::*;
 #[derive(Resource, Debug, Clone, Deref, DerefMut)]
 pub struct CurrentSchematic(pub Schematic);
 
+/// Set by [`load::LoadSchematicParams::load_schematic`], applied next frame by [`apply_pending_schematic_skybox`].
+#[derive(Resource, Default)]
+pub struct PendingSchematicSkybox(pub Option<Option<String>>);
+
+fn apply_pending_schematic_skybox(
+    mut pending: ResMut<PendingSchematicSkybox>,
+    mut skyboxes: MessageWriter<bevy_ai_skybox::prelude::SetActiveSkybox>,
+) {
+    let Some(skybox_name) = pending.0.take() else {
+        return;
+    };
+    match skybox_name {
+        Some(name) => {
+            skyboxes.write(bevy_ai_skybox::prelude::SetActiveSkybox::ByName(name));
+        }
+        None => {
+            skyboxes.write(bevy_ai_skybox::prelude::SetActiveSkybox::Clear);
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct WindowSchematicEntry {
     pub window_id: tiles::WindowId,
@@ -527,6 +548,8 @@ impl Plugin for SchematicPlugin {
         app.insert_resource(CurrentSchematic(Default::default()))
             .insert_resource(CurrentWindowSchematics::default())
             .init_resource::<SchematicBindings>()
+            .init_resource::<PendingSchematicSkybox>()
+            .add_systems(Update, apply_pending_schematic_skybox)
             .add_systems(PostUpdate, tiles_to_schematic)
             .add_systems(
                 PostUpdate,

@@ -19,7 +19,9 @@ use bevy::{
     window::{PrimaryWindow, WindowRef, WindowResolution},
     winit::{WINIT_WINDOWS, WinitSettings},
 };
-use bevy_editor_cam::{SyncCameraPosition, controller::component::EditorCam};
+use bevy_editor_cam::{
+    SyncCameraPosition, controller::component::EditorCam, input::default_camera_inputs,
+};
 #[cfg(feature = "inspector")]
 use bevy_egui::EguiContext;
 use bevy_egui::{EguiContextSettings, EguiGlobalSettings, EguiPlugin};
@@ -252,12 +254,13 @@ impl Plugin for EditorPlugin {
                     .with_limiter(bevy_framepace::Limiter::Off),
             )
             //.add_plugins(DefaultPickingPlugins)
-            .add_plugins(
-                bevy_editor_cam::DefaultEditorCamPlugins
-                    .build()
-                    .disable::<bevy_editor_cam::input::DefaultInputPlugin>(),
+            .add_plugins(bevy_editor_cam::DefaultEditorCamPlugins)
+            .init_resource::<plugins::editor_cam_viewport::ActiveViewportCamDrag>()
+            .add_systems(
+                PreUpdate,
+                plugins::editor_cam_viewport::disable_default_editor_cam_motion
+                    .before(default_camera_inputs),
             )
-            .add_plugins(editor_cam_input::EditorCamInputPlugin)
             .add_plugins(EmbeddedAssetPlugin)
             .add_plugins(EguiPlugin::default())
             .add_plugins(bevy_infinite_grid::InfiniteGridPlugin)
