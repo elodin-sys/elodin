@@ -248,14 +248,9 @@ fn sync_headless_skybox(
     *last_skybox = Some(skybox_name);
 }
 
-fn poll_headless_db_config(
-    mut last_poll: Local<Option<Instant>>,
-    packet_tx: Res<PacketTx>,
-) {
+fn poll_headless_db_config(mut last_poll: Local<Option<Instant>>, packet_tx: Res<PacketTx>) {
     let now = Instant::now();
-    if last_poll
-        .is_some_and(|last| now.duration_since(last) < Duration::from_millis(200))
-    {
+    if last_poll.is_some_and(|last| now.duration_since(last) < Duration::from_millis(200)) {
         return;
     }
     *last_poll = Some(now);
