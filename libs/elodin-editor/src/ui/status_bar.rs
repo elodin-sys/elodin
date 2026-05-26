@@ -93,17 +93,12 @@ impl RootWidgetSystem for StatusBar<'_, '_> {
                     if skybox_ui.phase != SkyboxGenerationPhase::Idle {
                         let (label, color) = match skybox_ui.phase {
                             SkyboxGenerationPhase::Generating
-                            | SkyboxGenerationPhase::PendingApply => {
-                                ("⟳", get_scheme().blue)
-                            }
+                            | SkyboxGenerationPhase::PendingApply => ("⟳", get_scheme().blue),
                             SkyboxGenerationPhase::Ready => ("✓", get_scheme().success),
                             SkyboxGenerationPhase::Failed => ("✕", get_scheme().error),
                             SkyboxGenerationPhase::Idle => ("", get_scheme().text_secondary),
                         };
-                        let text = skybox_ui
-                            .message
-                            .clone()
-                            .unwrap_or_else(|| "Skybox".into());
+                        let text = skybox_ui.message.clone().unwrap_or_else(|| "Skybox".into());
                         ui.add(egui::Label::new(
                             egui::RichText::new(format!("{label} {text}"))
                                 .text_style(egui::TextStyle::Small)

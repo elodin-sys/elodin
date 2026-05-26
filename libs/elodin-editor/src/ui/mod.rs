@@ -515,15 +515,12 @@ impl RootWidgetSystem for ViewportOverlay<'_, '_> {
                 bevy_ai_skybox::prelude::SkyboxGenerationPhase::Ready => {
                     ("✓", get_scheme().success)
                 }
-                bevy_ai_skybox::prelude::SkyboxGenerationPhase::Failed => {
-                    ("✕", get_scheme().error)
+                bevy_ai_skybox::prelude::SkyboxGenerationPhase::Failed => ("✕", get_scheme().error),
+                bevy_ai_skybox::prelude::SkyboxGenerationPhase::Idle => {
+                    ("", get_scheme().text_secondary)
                 }
-                bevy_ai_skybox::prelude::SkyboxGenerationPhase::Idle => ("", get_scheme().text_secondary),
             };
-            let text = skybox_ui
-                .message
-                .clone()
-                .unwrap_or_else(|| "Skybox".into());
+            let text = skybox_ui.message.clone().unwrap_or_else(|| "Skybox".into());
             egui::Area::new(egui::Id::new("skybox_progress_banner"))
                 .anchor(egui::Align2::CENTER_TOP, egui::vec2(0.0, 56.0))
                 .interactable(false)

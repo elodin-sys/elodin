@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
+use bevy::core_pipeline::Skybox;
 use bevy::{
     a11y::AccessibilityPlugin,
     animation::AnimationPlugin,
@@ -26,7 +27,6 @@ use bevy::{
     window::{ExitCondition, WindowPlugin},
     winit::WinitPlugin,
 };
-use bevy::core_pipeline::Skybox;
 use bevy_ai_skybox::prelude::{PrimarySkybox, SetActiveSkybox, SkyboxAssetSettings, SkyboxCache};
 use bevy_geo_frames::GeoContext;
 use bevy_mat3_material::Mat3Material;

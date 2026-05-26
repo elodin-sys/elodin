@@ -342,7 +342,10 @@ impl Plugin for EditorPlugin {
                 Update,
                 ui::video_stream::invalidate_sensor_frames_on_skybox_change,
             )
-            .add_systems(Update, skybox_generation::sync_generated_skybox_to_schematic)
+            .add_systems(
+                Update,
+                skybox_generation::sync_generated_skybox_to_schematic,
+            )
             .add_systems(Update, skybox_generation::push_skybox_active_on_pending)
             .add_systems(Update, skybox_generation::decay_skybox_status_message)
             .add_systems(

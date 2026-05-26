@@ -45,10 +45,7 @@ pub fn push_skybox_active_on_pending(
         return;
     }
     tx.send_msg(SetDbConfig {
-        metadata: std::collections::HashMap::from([(
-            "skybox.active".to_string(),
-            name.clone(),
-        )]),
+        metadata: std::collections::HashMap::from([("skybox.active".to_string(), name.clone())]),
         ..Default::default()
     });
     *last_pushed = Some(name);
@@ -76,11 +73,7 @@ pub fn decay_skybox_status_message(
     }
 }
 
-pub(crate) fn push_schematic_metadata(
-    tx: &PacketTx,
-    kdl: String,
-    skybox: Option<Option<&str>>,
-) {
+pub(crate) fn push_schematic_metadata(tx: &PacketTx, kdl: String, skybox: Option<Option<&str>>) {
     let mut metadata = std::collections::HashMap::from([("schematic.content".to_string(), kdl)]);
     match skybox {
         Some(Some(name)) => {

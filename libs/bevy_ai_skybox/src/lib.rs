@@ -27,9 +27,9 @@ use serde::{Deserialize, Serialize};
 pub mod prelude {
     pub use crate::{
         BlockadeSkyboxPlugin, GenerateSkybox, ManifestReloaded, PrimarySkybox, SetActiveSkybox,
-        SkyboxAssetPlugin, SkyboxAssetSettings, SkyboxCache, SkyboxFailed, SkyboxGenerationComplete,
-        SkyboxGenerationPhase, SkyboxGenerationSettings, SkyboxGenerationUi, SkyboxManifest,
-        SkyboxReady, SkyboxResolution, SkyboxStyle,
+        SkyboxAssetPlugin, SkyboxAssetSettings, SkyboxCache, SkyboxFailed,
+        SkyboxGenerationComplete, SkyboxGenerationPhase, SkyboxGenerationSettings,
+        SkyboxGenerationUi, SkyboxManifest, SkyboxReady, SkyboxResolution, SkyboxStyle,
     };
 }
 
@@ -430,9 +430,7 @@ pub fn blockade_api_key_from_env() -> Option<String> {
 
 impl SkyboxGenerationSettings {
     pub fn resolved_api_key(&self) -> Option<String> {
-        self.api_key
-            .clone()
-            .or_else(blockade_api_key_from_env)
+        self.api_key.clone().or_else(blockade_api_key_from_env)
     }
 }
 
@@ -479,10 +477,7 @@ impl Default for BlockadeSkyboxPlugin {
 impl Plugin for BlockadeSkyboxPlugin {
     fn build(&self, app: &mut App) {
         app.insert_resource(SkyboxGenerationSettings {
-            api_key: self
-                .api_key
-                .clone()
-                .or_else(blockade_api_key_from_env),
+            api_key: self.api_key.clone().or_else(blockade_api_key_from_env),
             api_base_url: self.api_base_url.clone(),
             default_style: self.default_style,
             default_resolution: self.default_resolution,
@@ -561,7 +556,6 @@ mod system_params {
         pub images: ResMut<'w, Assets<Image>>,
         pub cameras: SkyboxCameraQuery<'w, 's>,
         pub ready: MessageWriter<'w, SkyboxReady>,
-        pub failed: MessageWriter<'w, SkyboxFailed>,
     }
 }
 
@@ -828,9 +822,7 @@ fn apply_pending_skybox_activation(
     let handle = cache
         .handles
         .entry(name.clone())
-        .or_insert_with(|| {
-            asset_server.load(settings.asset_path_for(&entry.cubemap_file))
-        })
+        .or_insert_with(|| asset_server.load(settings.asset_path_for(&entry.cubemap_file)))
         .clone();
 
     if !is_cubemap_ready(&handle, &mut images) {
@@ -1012,7 +1004,7 @@ fn apply_skybox_to_camera(mut params: ApplySkyboxParams) {
 fn reapply_skybox_after_manifest_reload(
     mut reader: MessageReader<ManifestReloaded>,
     cache: Res<SkyboxCache>,
-    mut pending: ResMut<PendingSkyboxActivation>,
+    pending: Res<PendingSkyboxActivation>,
     mut writer: MessageWriter<SetActiveSkybox>,
 ) {
     if reader.read().next().is_none() {
