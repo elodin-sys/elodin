@@ -741,6 +741,10 @@ fn start_generation_jobs(
         let mut request = request.clone();
         request.prompt = request.prompt.trim().to_string();
         if request.prompt.is_empty() {
+            error!(
+                target: "bevy_ai_skybox",
+                "skybox generation rejected: prompt cannot be empty"
+            );
             failed.write(SkyboxFailed {
                 name: "empty prompt".into(),
                 error: SkyboxError::GenerationFailed("prompt cannot be empty".into()),
@@ -749,6 +753,11 @@ fn start_generation_jobs(
         }
 
         if settings.resolved_api_key().is_none() {
+            error!(
+                target: "bevy_ai_skybox",
+                prompt = %request.prompt,
+                "skybox generation rejected: missing BLOCKADE_API_KEY"
+            );
             failed.write(SkyboxFailed {
                 name: request.prompt.clone(),
                 error: SkyboxError::MissingApiKey,
@@ -815,6 +824,11 @@ fn finish_generation_jobs(
                     ui.message = Some(format!("Loading skybox `{name}`…"));
                 }
                 Err(error) => {
+                    error!(
+                        target: "bevy_ai_skybox",
+                        prompt = %prompt,
+                        "failed to register generated skybox: {error}"
+                    );
                     failed.write(SkyboxFailed {
                         name: prompt,
                         error,
@@ -823,6 +837,11 @@ fn finish_generation_jobs(
             }
         }
         Err(error) => {
+            error!(
+                target: "bevy_ai_skybox",
+                prompt = %prompt,
+                "skybox generation failed: {error}"
+            );
             failed.write(SkyboxFailed {
                 name: prompt,
                 error,
@@ -863,6 +882,10 @@ fn apply_pending_skybox_activation(mut params: ApplyPendingSkyboxParams) {
             warn!("pending skybox `{name}` missing from manifest: {error}");
             params.pending.name = None;
             params.pending.notify_generation_complete = false;
+            params.failed.write(SkyboxFailed {
+                name: name.clone(),
+                error,
+            });
             if let Some(mut ui) = params.ui {
                 ui.target_name = None;
                 ui.phase = SkyboxGenerationPhase::Failed;
@@ -942,6 +965,12 @@ fn track_skybox_generation_failures(
     mut pending: ResMut<PendingSkyboxActivation>,
 ) {
     for event in reader.read() {
+        error!(
+            target: "bevy_ai_skybox",
+            skybox = %event.name,
+            "skybox failure: {}",
+            event.error
+        );
         if !matches!(
             ui.phase,
             SkyboxGenerationPhase::Generating | SkyboxGenerationPhase::PendingApply

@@ -1306,17 +1306,36 @@ fn generate_skybox_from_prompt() -> PaletteItem {
          mut skyboxes: MessageWriter<GenerateSkybox>| {
             let prompt = prompt.trim();
             if prompt.is_empty() {
+                error!(
+                    target: "bevy_ai_skybox",
+                    "skybox generation rejected from command palette: prompt cannot be empty"
+                );
                 return PaletteEvent::Error("Prompt cannot be empty".into());
             }
             if skybox_ui.is_busy() {
+                error!(
+                    target: "bevy_ai_skybox",
+                    prompt = %prompt,
+                    "skybox generation rejected from command palette: generation already in progress"
+                );
                 return PaletteEvent::Error(
                     "A skybox is already generating — check the status bar".into(),
                 );
             }
             let Some(settings) = settings else {
+                error!(
+                    target: "bevy_ai_skybox",
+                    prompt = %prompt,
+                    "skybox generation rejected from command palette: plugin is not installed"
+                );
                 return PaletteEvent::Error("Skybox generation plugin is not installed".into());
             };
             if settings.resolved_api_key().is_none() {
+                error!(
+                    target: "bevy_ai_skybox",
+                    prompt = %prompt,
+                    "skybox generation rejected from command palette: missing BLOCKADE_API_KEY"
+                );
                 return PaletteEvent::Error(
                     "Set BLOCKADE_API_KEY in the environment, then restart the editor \
                      (e.g. BLOCKADE_API_KEY=… elodin editor …)"
