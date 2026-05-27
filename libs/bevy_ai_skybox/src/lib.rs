@@ -1489,29 +1489,177 @@ fn sanitize_name(input: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashSet;
+
+    /// Excerpt of `examples/rc-jet/main.py` schematic (tabs layout only).
+    const RC_JET_SCHEMATIC_FRAGMENT: &str = r#"
+        tabs {
+            hsplit name="Main View" {
+                viewport name=Viewport pos="bdx.world_pos.translate_world(-8.0,-8.0,4.0)" look_at="bdx.world_pos" show_grid=#true show_frustums=#true active=#true
+                vsplit share=0.4 {
+                    vsplit {
+                        graph "bdx.alpha" name="Angle of Attack (rad)"
+                        viewport name=TGTViewport pos="target.world_pos.translate_world(1,1,0.2)" look_at="bdx.world_pos" show_grid=#true
+                        hsplit {
+                            viewport name=FPVViewport pos="bdx.world_pos.rotate_z(-90).translate_y(-2.0)" show_grid=#true
+                            sensor_view "bdx.fpv_cam" name="FPV (sensor_camera)"
+                        }
+                    }
+                }
+            }
+        }
+    "#;
+
+    const SCHEMATIC_WITH_SKYBOX_FRAGMENT: &str = r#"
+        skybox name="mojave_desert"
+
+        tabs {
+            viewport name=Viewport active=#true
+        }
+    "#;
 
     fn bundled_manifest() -> SkyboxManifest {
         ron::from_str(include_str!("../../../assets/skyboxes/manifest.ron")).unwrap()
     }
 
-    #[test]
-    fn bundled_manifest_parses() {
-        let manifest = bundled_manifest();
+    fn parse_skybox_name_from_kdl(kdl: &str) -> Option<String> {
+        kdl.lines().map(str::trim).find_map(|line| {
+            let name = line.strip_prefix("skybox name=\"")?;
+            name.strip_suffix('"').map(str::to_string)
+        })
+    }
 
-        assert_eq!(manifest.version, 2);
-        assert!(manifest.get("mojave_desert").is_some());
-        assert!(manifest.get("alien_swamp").is_some());
+    fn schematic_declares_skybox(kdl: &str) -> bool {
+        parse_skybox_name_from_kdl(kdl).is_some()
     }
 
     #[test]
-    fn rc_jet_has_no_embedded_skybox() {
-        let rc_jet = include_str!("../../../examples/rc-jet/main.py");
-        assert!(
-            !rc_jet
-                .lines()
-                .map(str::trim)
-                .any(|line| line.starts_with("skybox ")),
-            "rc-jet should not embed a default skybox; activate one from the command palette"
+    fn bundled_manifest_parses() {
+        let manifest = bundled_manifest();
+        assert_eq!(manifest.version, 2);
+        assert_eq!(manifest.default.as_deref(), Some("mojave_desert"));
+    }
+
+    #[test]
+    fn bundled_manifest_lists_shipped_skyboxes() {
+        let manifest = bundled_manifest();
+        for name in [
+            "mojave_desert",
+            "alien_swamp",
+            "beach_sunset",
+            "seaport",
+            "coastal_beach",
+            "grand_canyon",
+        ] {
+            let entry = manifest
+                .get(name)
+                .unwrap_or_else(|| panic!("missing bundled skybox `{name}`"));
+            assert!(
+                !entry.cubemap_file.is_empty() && !entry.equirect_file.is_empty(),
+                "{name} must reference asset files"
+            );
+        }
+    }
+
+    #[test]
+    fn bundled_manifest_entry_asset_names_are_unique() {
+        let manifest = bundled_manifest();
+        let cubemap_files: HashSet<_> = manifest
+            .entries
+            .iter()
+            .map(|entry| entry.cubemap_file.as_str())
+            .collect();
+        assert_eq!(cubemap_files.len(), manifest.entries.len());
+    }
+
+    #[test]
+    fn manifest_upsert_replaces_by_name() {
+        let mut manifest = SkyboxManifest::default();
+        manifest.upsert(ManifestEntry {
+            name: "test_sky".into(),
+            prompt: "first".into(),
+            style: SkyboxStyle::default(),
+            blockade: None,
+            equirect_file: "a.equirect.png".into(),
+            cubemap_file: "a.cubemap.png".into(),
+            face_size: 512,
+            created_at: "2026-01-01T00:00:00Z".into(),
+        });
+        manifest.upsert(ManifestEntry {
+            name: "test_sky".into(),
+            prompt: "second".into(),
+            style: SkyboxStyle::default(),
+            blockade: None,
+            equirect_file: "b.equirect.png".into(),
+            cubemap_file: "b.cubemap.png".into(),
+            face_size: 1024,
+            created_at: "2026-01-02T00:00:00Z".into(),
+        });
+        assert_eq!(manifest.entries.len(), 1);
+        assert_eq!(manifest.get("test_sky").unwrap().prompt, "second");
+        assert_eq!(manifest.get("test_sky").unwrap().face_size, 1024);
+    }
+
+    #[test]
+    fn manifest_roundtrip_write_read() {
+        let dir = std::env::temp_dir().join(format!("bevy_ai_skybox_test_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("manifest.ron");
+
+        let original = bundled_manifest();
+        original.write_atomic(&path).unwrap();
+        let loaded = SkyboxManifest::read_or_create(&path).unwrap();
+        assert_eq!(loaded.version, original.version);
+        assert_eq!(loaded.default, original.default);
+        assert_eq!(loaded.entries.len(), original.entries.len());
+        assert_eq!(
+            loaded.get("seaport").unwrap().cubemap_file,
+            "seaport.cubemap.png"
         );
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn parse_skybox_name_from_kdl_fragment() {
+        assert_eq!(
+            parse_skybox_name_from_kdl(SCHEMATIC_WITH_SKYBOX_FRAGMENT).as_deref(),
+            Some("mojave_desert")
+        );
+        assert_eq!(parse_skybox_name_from_kdl(RC_JET_SCHEMATIC_FRAGMENT), None);
+    }
+
+    #[test]
+    fn rc_jet_schematic_fragment_has_no_embedded_skybox() {
+        assert!(
+            !schematic_declares_skybox(RC_JET_SCHEMATIC_FRAGMENT),
+            "rc-jet layout fragment must not declare a skybox; use the command palette"
+        );
+    }
+
+    #[test]
+    fn rc_jet_example_file_matches_fragment_policy() {
+        let rc_jet = include_str!("../../../examples/rc-jet/main.py");
+        assert_eq!(
+            schematic_declares_skybox(rc_jet),
+            schematic_declares_skybox(RC_JET_SCHEMATIC_FRAGMENT),
+            "full rc-jet example and the checked fragment should agree on skybox policy"
+        );
+    }
+
+    #[test]
+    fn skybox_resolution_face_sizes() {
+        assert_eq!(SkyboxResolution::OneK.face_size(), 256);
+        assert_eq!(SkyboxResolution::TwoK.face_size(), 512);
+        assert_eq!(SkyboxResolution::FourK.face_size(), 1024);
+    }
+
+    #[test]
+    fn skybox_style_ids_match_blockade_styles() {
+        assert_eq!(SkyboxStyle::M3Photoreal.id(), 67);
+        assert_eq!(SkyboxStyle::M3UhdRender.id(), 35);
+        assert_eq!(SkyboxStyle::M3Advanced.id(), 82);
+        assert_eq!(SkyboxStyle::Custom(99).id(), 99);
     }
 }
