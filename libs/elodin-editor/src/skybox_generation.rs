@@ -80,7 +80,12 @@ pub fn decay_skybox_status_message(
     match ui.phase {
         SkyboxGenerationPhase::Ready | SkyboxGenerationPhase::Failed => {
             let start = *shown_at.get_or_insert(time.elapsed_secs());
-            if time.elapsed_secs() - start > 4.0 {
+            let timeout = match ui.phase {
+                SkyboxGenerationPhase::Ready => 2.5,
+                SkyboxGenerationPhase::Failed => 5.0,
+                _ => 2.5,
+            };
+            if time.elapsed_secs() - start > timeout {
                 ui.phase = SkyboxGenerationPhase::Idle;
                 ui.message = None;
                 ui.prompt = None;

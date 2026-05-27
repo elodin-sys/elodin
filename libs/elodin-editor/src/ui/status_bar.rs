@@ -8,7 +8,7 @@ use bevy::{
     prelude::Entity,
     window::PrimaryWindow,
 };
-use bevy_ai_skybox::prelude::{SkyboxGenerationPhase, SkyboxGenerationUi};
+use bevy_ai_skybox::prelude::SkyboxGenerationUi;
 use impeller2_bevy::{ConnectionStatus, ThreadConnectionStatus};
 use impeller2_wkt::SimulationTimeStep;
 
@@ -90,21 +90,7 @@ impl RootWidgetSystem for StatusBar<'_, '_> {
                             .color(get_scheme().text_secondary),
                     ));
 
-                    if skybox_ui.phase != SkyboxGenerationPhase::Idle {
-                        let (label, color) = match skybox_ui.phase {
-                            SkyboxGenerationPhase::Generating
-                            | SkyboxGenerationPhase::PendingApply => ("⟳", get_scheme().blue),
-                            SkyboxGenerationPhase::Ready => ("✓", get_scheme().success),
-                            SkyboxGenerationPhase::Failed => ("✕", get_scheme().error),
-                            SkyboxGenerationPhase::Idle => ("", get_scheme().text_secondary),
-                        };
-                        let text = skybox_ui.message.clone().unwrap_or_else(|| "Skybox".into());
-                        ui.add(egui::Label::new(
-                            egui::RichText::new(format!("{label} {text}"))
-                                .text_style(egui::TextStyle::Small)
-                                .color(color),
-                        ));
-                    }
+                    super::skybox_status::draw_skybox_status_bar(ui, skybox_ui);
                 });
             });
 

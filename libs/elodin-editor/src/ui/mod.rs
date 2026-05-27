@@ -115,6 +115,8 @@ pub use window::{
 #[cfg(not(target_family = "wasm"))]
 pub mod status_bar;
 
+pub mod skybox_status;
+
 #[cfg(not(target_family = "wasm"))]
 pub mod startup_window;
 
@@ -506,58 +508,7 @@ impl RootWidgetSystem for ViewportOverlay<'_, '_> {
             return;
         };
 
-        if skybox_ui.phase != bevy_ai_skybox::prelude::SkyboxGenerationPhase::Idle {
-            let (icon, color) = match skybox_ui.phase {
-                bevy_ai_skybox::prelude::SkyboxGenerationPhase::Generating
-                | bevy_ai_skybox::prelude::SkyboxGenerationPhase::PendingApply => {
-                    ("⟳", get_scheme().blue)
-                }
-                bevy_ai_skybox::prelude::SkyboxGenerationPhase::Ready => {
-                    ("✓", get_scheme().success)
-                }
-                bevy_ai_skybox::prelude::SkyboxGenerationPhase::Failed => ("✕", get_scheme().error),
-                bevy_ai_skybox::prelude::SkyboxGenerationPhase::Idle => {
-                    ("", get_scheme().text_secondary)
-                }
-            };
-            let text = skybox_ui.message.clone().unwrap_or_else(|| "Skybox".into());
-            let modal_size = egui::vec2(380.0, 88.0);
-            let modal_rect = egui::Rect::from_center_size(ctx.content_rect().center(), modal_size);
-            let modal_id = egui::Id::new("skybox_status_modal");
-            egui::Modal::new(modal_id)
-                .area(
-                    egui::Area::new(modal_id)
-                        .kind(egui::UiKind::Modal)
-                        .fixed_pos(modal_rect.min)
-                        .order(egui::Order::Foreground),
-                )
-                .backdrop_color(egui::Color32::from_black_alpha(100))
-                .frame(egui::Frame {
-                    fill: colors::with_opacity(get_scheme().bg_secondary, 0.96),
-                    stroke: egui::Stroke::new(1.0, colors::with_opacity(color, 0.5)),
-                    inner_margin: egui::Margin::symmetric(24, 16),
-                    corner_radius: egui::CornerRadius::same(10),
-                    ..Default::default()
-                })
-                .show(ctx, |ui| {
-                    ui.set_min_size(modal_size);
-                    ui.vertical_centered(|ui| {
-                        ui.horizontal(|ui| {
-                            if matches!(
-                                skybox_ui.phase,
-                                bevy_ai_skybox::prelude::SkyboxGenerationPhase::Generating
-                                    | bevy_ai_skybox::prelude::SkyboxGenerationPhase::PendingApply
-                            ) {
-                                ui.add(egui::Spinner::new().color(color));
-                            }
-                            ui.add(Label::new(
-                                RichText::new(format!("{icon} {text}"))
-                                    .color(get_scheme().text_primary),
-                            ));
-                        });
-                    });
-                });
-        }
+        skybox_status::draw_skybox_generation_overlay(ctx, skybox_ui);
 
         let hovered_entity_meta = if let Some(hovered_entity_pair) = hovered_entity.0 {
             entities_meta
