@@ -1225,7 +1225,7 @@ pub fn set_visibility(mut query: Query<(&mut Node, &IsTileVisible)>) {
 /// Sensor views cache raw RGBA frames by timestamp; drop them when the skybox changes
 /// so scrubbed or paused playback does not keep showing the previous environment.
 pub fn invalidate_sensor_frames_on_skybox_change(
-    mut skybox_events: MessageReader<bevy_ai_skybox::prelude::SetActiveSkybox>,
+    mut skybox_events: MessageReader<bevy_ai_skybox::prelude::SkyboxReady>,
     mut caches: Query<&mut VideoFrameCache>,
 ) {
     if skybox_events.read().next().is_none() {
@@ -1236,11 +1236,19 @@ pub fn invalidate_sensor_frames_on_skybox_change(
 
 pub fn invalidate_sensor_frames_on_db_skybox_change(
     config: Res<impeller2_wkt::DbConfig>,
+    skybox_ui: Option<Res<bevy_ai_skybox::prelude::SkyboxGenerationUi>>,
     mut last_active: Local<Option<String>>,
     mut caches: Query<&mut VideoFrameCache>,
 ) {
     let active = config.skybox_active().map(str::to_string);
     if *last_active == active {
+        return;
+    }
+    if let (Some(active), Some(skybox_ui)) = (active.as_deref(), skybox_ui.as_deref())
+        && skybox_ui.is_busy()
+        && skybox_ui.target_name.as_deref() == Some(active)
+    {
+        *last_active = Some(active.to_string());
         return;
     }
     *last_active = active;
@@ -1252,7 +1260,14 @@ fn clear_sensor_raw_frame_caches(caches: &mut Query<&mut VideoFrameCache>) {
         if cache.is_h264 {
             continue;
         }
+        let displayed = cache
+            .last_displayed_ts
+            .and_then(|timestamp| cache.raw_frames.get(&timestamp).cloned());
         cache.raw_frames.clear();
-        cache.last_displayed_ts = None;
+        if let (Some(timestamp), Some(frame)) = (cache.last_displayed_ts, displayed) {
+            cache.raw_frames.insert(timestamp, frame);
+        } else {
+            cache.last_displayed_ts = None;
+        }
     }
 }
