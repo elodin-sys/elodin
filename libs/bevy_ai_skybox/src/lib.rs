@@ -28,7 +28,7 @@ pub mod cubemap_convert;
 pub mod prelude {
     pub use crate::{
         BlockadeSkyboxPlugin, GenerateSkybox, ManifestReloaded, PrimarySkybox, SetActiveSkybox,
-        SkyboxAssetPlugin, SkyboxAssetSettings, SkyboxCache, SkyboxFailed,
+        SkyboxAssetPlugin, SkyboxAssetSettings, SkyboxCache, SkyboxFailed, SkyboxGenerated,
         SkyboxGenerationComplete, SkyboxGenerationPhase, SkyboxGenerationSettings,
         SkyboxGenerationUi, SkyboxManifest, SkyboxReady, SkyboxResolution, SkyboxStyle,
     };
@@ -385,6 +385,12 @@ pub struct SkyboxFailed {
     pub error: SkyboxError,
 }
 
+/// Emitted after a prompt-generated skybox is written to disk and registered.
+#[derive(Clone, Debug, Message)]
+pub struct SkyboxGenerated {
+    pub name: String,
+}
+
 /// Emitted after a prompt-generated skybox is loaded and applied to cameras.
 #[derive(Clone, Debug, Message)]
 pub struct SkyboxGenerationComplete {
@@ -679,6 +685,7 @@ impl Plugin for SkyboxAssetPlugin {
             .add_message::<SetActiveSkybox>()
             .add_message::<SkyboxReady>()
             .add_message::<SkyboxFailed>()
+            .add_message::<SkyboxGenerated>()
             .add_message::<SkyboxGenerationComplete>()
             .add_message::<ManifestReloaded>()
             .add_systems(Startup, load_default_skybox)
@@ -770,8 +777,11 @@ fn start_generation_jobs(
 fn finish_generation_jobs(
     mut state: ResMut<SkyboxGenerationState>,
     mut cache: ResMut<SkyboxCache>,
+    settings: Res<SkyboxAssetSettings>,
+    asset_server: Res<AssetServer>,
     mut pending: ResMut<PendingSkyboxActivation>,
     mut ui: ResMut<SkyboxGenerationUi>,
+    mut generated_writer: MessageWriter<SkyboxGenerated>,
     mut manifest_reloaded: MessageWriter<ManifestReloaded>,
     mut failed: MessageWriter<SkyboxFailed>,
 ) {
@@ -787,8 +797,12 @@ fn finish_generation_jobs(
     match result {
         Ok(generated) => {
             let name = generated.entry.name.clone();
+            let cubemap_file = generated.entry.cubemap_file.clone();
             match cache.insert_and_activate(generated.entry) {
                 Ok(()) => {
+                    let handle = asset_server.load(settings.asset_path_for(&cubemap_file));
+                    cache.handles.insert(name.clone(), handle);
+                    generated_writer.write(SkyboxGenerated { name: name.clone() });
                     manifest_reloaded.write(ManifestReloaded {
                         entry_count: cache.manifest.entries.len(),
                     });
@@ -1228,15 +1242,12 @@ fn generate_skybox_blocking(
             .unwrap_or(&request.prompt),
     );
     let name = unique_generated_skybox_name(&base_name, &asset_settings.cache_dir, &manifest);
-    let equirect_file = cubemap_convert::equirect_manifest_filename(&name);
     let cubemap_file = cubemap_convert::cubemap_ktx2_filename(&name);
-    let equirect_path = asset_settings.cache_dir.join(&equirect_file);
     let cubemap_path = asset_settings.cache_dir.join(&cubemap_file);
 
     fs::create_dir_all(&asset_settings.cache_dir)?;
 
     let equirect = image::load_from_memory(&source_bytes)?.to_rgba8();
-    equirect.save(&equirect_path)?;
     let face_size = resolution.face_size();
     cubemap_convert::write_cubemap_ktx2(
         &equirect,
@@ -1256,7 +1267,7 @@ fn generate_skybox_blocking(
                 obfuscated_id: status.obfuscated_id.or(created.obfuscated_id),
                 seed: request.seed,
             }),
-            equirect_file: Some(equirect_file),
+            equirect_file: None,
             cubemap_file,
             face_size,
             created_at: Utc::now().to_rfc3339_opts(SecondsFormat::Micros, true),
@@ -1479,12 +1490,14 @@ fn unique_generated_skybox_name(
     cache_dir: &Path,
     manifest: &SkyboxManifest,
 ) -> String {
+    cubemap_convert::remove_legacy_png_assets(cache_dir, base_name);
     if !skybox_name_conflicts(base_name, cache_dir, manifest) {
         return base_name.to_string();
     }
 
     for suffix in 2.. {
         let candidate = skybox_name_with_suffix(base_name, suffix);
+        cubemap_convert::remove_legacy_png_assets(cache_dir, &candidate);
         if !skybox_name_conflicts(&candidate, cache_dir, manifest) {
             return candidate;
         }
@@ -1723,6 +1736,40 @@ mod tests {
     }
 
     #[test]
+    fn generated_names_ignore_and_clean_legacy_png_collisions() {
+        let dir = std::env::temp_dir().join(format!(
+            "bevy_ai_skybox_legacy_collision_test_{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let stale = dir.join("grand_canyon_2.equirect.png");
+        fs::write(&stale, b"old").unwrap();
+
+        let mut manifest = SkyboxManifest::default();
+        manifest
+            .insert_new(ManifestEntry {
+                name: "grand_canyon".into(),
+                prompt: "grand canyon".into(),
+                style: SkyboxStyle::default(),
+                blockade: None,
+                equirect_file: None,
+                cubemap_file: "grand_canyon.cubemap.ktx2".into(),
+                face_size: 2048,
+                created_at: "2026-01-01T00:00:00Z".into(),
+            })
+            .unwrap();
+
+        assert_eq!(
+            unique_generated_skybox_name("grand_canyon", &dir, &manifest),
+            "grand_canyon_2"
+        );
+        assert!(!stale.exists());
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn parse_skybox_name_from_kdl_fragment() {
         assert_eq!(
             parse_skybox_name_from_kdl(SCHEMATIC_WITH_SKYBOX_FRAGMENT).as_deref(),
@@ -1762,10 +1809,30 @@ mod tests {
             cubemap_convert::cubemap_ktx2_filename("test_sky"),
             "test_sky.cubemap.ktx2"
         );
-        assert_eq!(
-            cubemap_convert::equirect_manifest_filename("test_sky"),
-            "test_sky.equirect.png"
-        );
+    }
+
+    #[test]
+    fn legacy_png_assets_are_removed() {
+        let dir = std::env::temp_dir().join(format!(
+            "bevy_ai_skybox_legacy_png_test_{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let equirect = dir.join("test_sky.equirect.png");
+        let cubemap_png = dir.join("test_sky.cubemap.png");
+        let cubemap_ktx2 = dir.join("test_sky.cubemap.ktx2");
+        fs::write(&equirect, b"old").unwrap();
+        fs::write(&cubemap_png, b"old").unwrap();
+        fs::write(&cubemap_ktx2, b"new").unwrap();
+
+        cubemap_convert::remove_legacy_png_assets(&dir, "test_sky");
+
+        assert!(!equirect.exists());
+        assert!(!cubemap_png.exists());
+        assert!(cubemap_ktx2.exists());
+
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]

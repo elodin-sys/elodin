@@ -25,6 +25,14 @@ pub fn resolve_toktx_executable() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("toktx"))
 }
 
+struct TempDirCleanup(PathBuf);
+
+impl Drop for TempDirCleanup {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
+    }
+}
+
 pub fn write_cubemap_ktx2(
     equirect: &RgbaImage,
     face_size: u32,
@@ -37,6 +45,7 @@ pub fn write_cubemap_ktx2(
         fs::remove_dir_all(&temp).map_err(|error| error.to_string())?;
     }
     fs::create_dir_all(&temp).map_err(|error| error.to_string())?;
+    let _cleanup = TempDirCleanup(temp.clone());
 
     let mut face_paths = Vec::with_capacity(6);
     for face in 0..6 {
@@ -69,7 +78,6 @@ pub fn write_cubemap_ktx2(
             Path::new(toktx.as_ref()).display()
         )
     })?;
-    let _ = fs::remove_dir_all(&temp);
     if !status.success() {
         return Err(format!(
             "toktx failed for `{}` (exit {status})",

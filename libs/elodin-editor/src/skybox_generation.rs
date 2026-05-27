@@ -1,6 +1,6 @@
 use bevy::prelude::*;
 use bevy_ai_skybox::prelude::{
-    SetActiveSkybox, SkyboxGenerationComplete, SkyboxGenerationPhase, SkyboxGenerationUi,
+    SetActiveSkybox, SkyboxGenerated, SkyboxGenerationPhase, SkyboxGenerationUi,
 };
 use impeller2_bevy::PacketTx;
 use impeller2_wkt::{SetDbConfig, SkyboxConfig};
@@ -11,7 +11,7 @@ use crate::plugins::kdl_document::{
 use crate::ui::schematic::CurrentSchematic;
 
 pub fn sync_generated_skybox_to_schematic(
-    mut reader: MessageReader<SkyboxGenerationComplete>,
+    mut reader: MessageReader<SkyboxGenerated>,
     mut schematic: ResMut<CurrentSchematic>,
     current_document: Res<CurrentDocument>,
     mut document_assets: ResMut<Assets<SchematicDocumentAsset>>,
