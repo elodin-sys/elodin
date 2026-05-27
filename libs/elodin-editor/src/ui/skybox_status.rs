@@ -18,20 +18,13 @@ pub fn draw_skybox_status_bar(ui: &mut egui::Ui, skybox: &SkyboxGenerationUi) {
     }
 
     let scheme = get_scheme();
-    let message = skybox
-        .message
-        .clone()
-        .unwrap_or_else(|| "Skybox".into());
+    let message = skybox.message.clone().unwrap_or_else(|| "Skybox".into());
 
     match skybox.phase {
         SkyboxGenerationPhase::Generating | SkyboxGenerationPhase::PendingApply => {
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 8.0;
-                ui.add(
-                    Spinner::new()
-                        .size(14.0)
-                        .color(scheme.text_secondary),
-                );
+                ui.add(Spinner::new().size(14.0).color(scheme.text_secondary));
                 ui.label(
                     RichText::new(message)
                         .text_style(egui::TextStyle::Small)
@@ -74,10 +67,7 @@ fn draw_busy_modal(ctx: &egui::Context, skybox: &SkyboxGenerationUi) {
         .backdrop_color(egui::Color32::from_black_alpha(120))
         .frame(egui::Frame {
             fill: with_opacity(scheme.bg_secondary, 0.98),
-            stroke: egui::Stroke::new(
-                1.0,
-                with_opacity(scheme.border_primary, 0.6),
-            ),
+            stroke: egui::Stroke::new(1.0, with_opacity(scheme.border_primary, 0.6)),
             inner_margin: egui::Margin::symmetric(28, 20),
             corner_radius: egui::CornerRadius::same(12),
             ..Default::default()
@@ -86,11 +76,7 @@ fn draw_busy_modal(ctx: &egui::Context, skybox: &SkyboxGenerationUi) {
             ui.set_min_size(modal_size);
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 20.0;
-                ui.add(
-                    Spinner::new()
-                        .size(28.0)
-                        .color(scheme.text_primary),
-                );
+                ui.add(Spinner::new().size(28.0).color(scheme.text_primary));
                 ui.vertical(|ui| {
                     ui.spacing_mut().item_spacing.y = 4.0;
                     ui.label(
@@ -129,12 +115,7 @@ fn busy_modal_copy(skybox: &SkyboxGenerationUi) -> (String, String) {
                 .target_name
                 .as_deref()
                 .map(|name| format!("Loading `{name}` onto viewports"))
-                .unwrap_or_else(|| {
-                    skybox
-                        .message
-                        .clone()
-                        .unwrap_or_default()
-                });
+                .unwrap_or_else(|| skybox.message.clone().unwrap_or_default());
             ("Applying skybox".into(), subtitle)
         }
         _ => (String::new(), String::new()),

@@ -1252,7 +1252,7 @@ fn activate_skybox() -> PaletteItem {
             let active = cache.active.as_deref();
             let mut items = Vec::with_capacity(cache.manifest.entries.len() + 3);
             if let Some(revert) = skybox_ui.revert_name.clone()
-                && active.as_deref() != Some(revert.as_str())
+                && active != Some(revert.as_str())
             {
                 items.push(revert_previous_skybox_item(revert));
             }
