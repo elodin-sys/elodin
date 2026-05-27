@@ -1667,7 +1667,7 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_rc_jet_schematic_skybox() {
+    fn test_parse_rc_jet_schematic_has_no_skybox() {
         let kdl = include_str!("../../../../examples/rc-jet/main.py");
         let kdl = kdl
             .split("world.schematic(")
@@ -1675,12 +1675,9 @@ mod tests {
             .and_then(|rest| rest.split("\"\"\"").nth(1))
             .expect("rc-jet schematic string");
         let schematic = parse_schematic(kdl).expect("rc-jet schematic should parse");
-        assert_eq!(
-            schematic
-                .skybox
-                .expect("rc-jet schematic should set skybox")
-                .name,
-            "alien_swamp"
+        assert!(
+            schematic.skybox.is_none(),
+            "rc-jet schematic must not embed a skybox; activate via the command palette"
         );
     }
 
