@@ -907,6 +907,9 @@ fn apply_pending_skybox_activation(mut params: ApplyPendingSkyboxParams) {
     let entry = match params.cache.entry(&name) {
         Ok(entry) => entry.clone(),
         Err(error) => {
+            if should_wait_for_pending_manifest_entry(&params.settings, &error) {
+                return;
+            }
             warn!("pending skybox `{name}` missing from manifest: {error}");
             params.pending.name = None;
             params.pending.notify_generation_complete = false;
@@ -969,6 +972,13 @@ fn apply_pending_skybox_activation(mut params: ApplyPendingSkyboxParams) {
             ui.message = Some(format!("Skybox ready: {name}"));
         }
     }
+}
+
+fn should_wait_for_pending_manifest_entry(
+    settings: &SkyboxAssetSettings,
+    error: &SkyboxError,
+) -> bool {
+    settings.watch_manifest && matches!(error, SkyboxError::MissingSkybox(_))
 }
 
 fn is_cubemap_ready(handle: &Handle<Image>, images: &mut Assets<Image>) -> bool {
@@ -1892,6 +1902,36 @@ mod tests {
 
         assert_eq!(pending.name.as_deref(), Some("manual_sky"));
         assert!(!pending.notify_generation_complete);
+    }
+
+    #[test]
+    fn pending_manifest_miss_waits_when_manifest_is_watched() {
+        let settings = SkyboxAssetSettings {
+            watch_manifest: true,
+            ..Default::default()
+        };
+
+        assert!(should_wait_for_pending_manifest_entry(
+            &settings,
+            &SkyboxError::MissingSkybox("generated_sky".into())
+        ));
+    }
+
+    #[test]
+    fn pending_manifest_miss_fails_when_manifest_is_not_watched() {
+        let settings = SkyboxAssetSettings {
+            watch_manifest: false,
+            ..Default::default()
+        };
+
+        assert!(!should_wait_for_pending_manifest_entry(
+            &settings,
+            &SkyboxError::MissingSkybox("generated_sky".into())
+        ));
+        assert!(!should_wait_for_pending_manifest_entry(
+            &settings,
+            &SkyboxError::GenerationFailed("cubemap failed to load".into())
+        ));
     }
 
     #[test]
