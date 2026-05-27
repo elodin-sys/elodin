@@ -338,6 +338,7 @@ impl Plugin for EditorPlugin {
             .add_systems(Update, set_eql_context_range.after(update_eql_context))
             .add_systems(Startup, spawn_ui_cam)
             .add_systems(Update, ui::video_stream::connect_streams)
+            .init_resource::<skybox_generation::LocallyPushedSkyboxActive>()
             .add_systems(
                 Update,
                 skybox_generation::sync_generated_skybox_to_schematic,

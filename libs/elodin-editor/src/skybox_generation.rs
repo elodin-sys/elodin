@@ -1,21 +1,59 @@
+use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 use bevy_ai_skybox::prelude::{
     SetActiveSkybox, SkyboxGenerated, SkyboxGenerationPhase, SkyboxGenerationUi,
 };
 use impeller2_bevy::PacketTx;
 use impeller2_wkt::{SetDbConfig, SkyboxConfig};
+use std::collections::VecDeque;
 
 use crate::plugins::kdl_document::{
     CurrentDocument, LastSyncedSchematicContent, SchematicDocumentAsset, sync_document_skybox,
 };
 use crate::ui::schematic::CurrentSchematic;
 
-pub fn sync_generated_skybox_to_schematic(
+#[derive(Resource, Default)]
+pub(crate) struct LocallyPushedSkyboxActive {
+    pending: VecDeque<Option<String>>,
+}
+
+impl LocallyPushedSkyboxActive {
+    const MAX_PENDING: usize = 8;
+
+    pub(crate) fn mark(&mut self, skybox: Option<&str>) {
+        if self
+            .pending
+            .iter()
+            .any(|pending| pending.as_deref() == skybox)
+        {
+            return;
+        }
+        self.pending.push_back(skybox.map(str::to_string));
+        while self.pending.len() > Self::MAX_PENDING {
+            self.pending.pop_front();
+        }
+    }
+
+    pub(crate) fn consume_matching(&mut self, skybox: Option<&str>) -> bool {
+        let Some(index) = self
+            .pending
+            .iter()
+            .position(|pending| pending.as_deref() == skybox)
+        else {
+            return false;
+        };
+        self.pending.remove(index);
+        true
+    }
+}
+
+pub(crate) fn sync_generated_skybox_to_schematic(
     mut reader: MessageReader<SkyboxGenerated>,
     mut schematic: ResMut<CurrentSchematic>,
     current_document: Res<CurrentDocument>,
     mut document_assets: ResMut<Assets<SchematicDocumentAsset>>,
     mut last_synced_content: ResMut<LastSyncedSchematicContent>,
+    mut locally_pushed: ResMut<LocallyPushedSkyboxActive>,
     tx: Res<PacketTx>,
 ) {
     for event in reader.read() {
@@ -28,6 +66,7 @@ pub fn sync_generated_skybox_to_schematic(
             &mut schematic,
         );
         last_synced_content.0 = Some(kdl.clone());
+        locally_pushed.mark(Some(&event.name));
         push_schematic_metadata(&tx, kdl, Some(Some(&event.name)));
     }
 }
@@ -53,9 +92,10 @@ pub(crate) fn push_skybox_active_metadata(tx: &PacketTx, skybox: Option<&str>) {
 }
 
 /// Notify render-server while the cubemap is still loading on the editor.
-pub fn push_skybox_active_on_pending(
+pub(crate) fn push_skybox_active_on_pending(
     ui: Res<SkyboxGenerationUi>,
     mut last_pushed: Local<Option<String>>,
+    mut locally_pushed: ResMut<LocallyPushedSkyboxActive>,
     tx: Res<PacketTx>,
 ) {
     if ui.phase != SkyboxGenerationPhase::PendingApply {
@@ -68,6 +108,7 @@ pub fn push_skybox_active_on_pending(
     if last_pushed.as_deref() == Some(name.as_str()) {
         return;
     }
+    locally_pushed.mark(Some(&name));
     push_skybox_active_metadata(&tx, Some(&name));
     *last_pushed = Some(name);
 }
@@ -116,27 +157,32 @@ pub(crate) fn push_schematic_metadata(tx: &PacketTx, kdl: String, skybox: Option
     });
 }
 
-pub fn revert_previous_skybox(
-    mut ui: ResMut<SkyboxGenerationUi>,
-    mut schematic: ResMut<CurrentSchematic>,
-    current_document: Res<CurrentDocument>,
-    mut document_assets: ResMut<Assets<SchematicDocumentAsset>>,
-    mut last_synced_content: ResMut<LastSyncedSchematicContent>,
-    tx: Res<PacketTx>,
-    mut skyboxes: MessageWriter<SetActiveSkybox>,
-) {
-    let Some(name) = ui.revert_name.take() else {
+#[derive(SystemParam)]
+pub(crate) struct RevertSkyboxParams<'w> {
+    ui: ResMut<'w, SkyboxGenerationUi>,
+    schematic: ResMut<'w, CurrentSchematic>,
+    current_document: Res<'w, CurrentDocument>,
+    document_assets: ResMut<'w, Assets<SchematicDocumentAsset>>,
+    last_synced_content: ResMut<'w, LastSyncedSchematicContent>,
+    locally_pushed: ResMut<'w, LocallyPushedSkyboxActive>,
+    tx: Res<'w, PacketTx>,
+    skyboxes: MessageWriter<'w, SetActiveSkybox>,
+}
+
+pub(crate) fn revert_previous_skybox(mut params: RevertSkyboxParams) {
+    let Some(name) = params.ui.revert_name.take() else {
         return;
     };
     let kdl = sync_document_skybox(
         Some(SkyboxConfig { name: name.clone() }),
-        &current_document,
-        &mut document_assets,
-        &mut schematic,
+        &params.current_document,
+        &mut params.document_assets,
+        &mut params.schematic,
     );
-    last_synced_content.0 = Some(kdl.clone());
-    push_schematic_metadata(&tx, kdl, Some(Some(&name)));
-    skyboxes.write(SetActiveSkybox::ByName(name.clone()));
-    ui.phase = SkyboxGenerationPhase::Idle;
-    ui.message = Some(format!("Reverted to skybox `{name}`"));
+    params.last_synced_content.0 = Some(kdl.clone());
+    params.locally_pushed.mark(Some(&name));
+    push_schematic_metadata(&params.tx, kdl, Some(Some(&name)));
+    params.skyboxes.write(SetActiveSkybox::ByName(name.clone()));
+    params.ui.phase = SkyboxGenerationPhase::Idle;
+    params.ui.message = Some(format!("Reverted to skybox `{name}`"));
 }

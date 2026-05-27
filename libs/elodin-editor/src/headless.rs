@@ -126,6 +126,7 @@ impl Plugin for HeadlessEditorPlugin {
             .add_systems(Startup, setup_headless_lighting)
             .init_resource::<crate::EqlContext>()
             .init_resource::<crate::SyncedObject3d>()
+            .init_resource::<HeadlessSkyboxRenderGate>()
             .add_systems(Update, crate::update_eql_context)
             .add_systems(Update, poll_headless_db_config)
             .add_systems(Update, sync_headless_skybox)
@@ -227,6 +228,25 @@ fn desired_skybox_from_config(config: &DbConfig) -> Option<Option<String>> {
     Some(schematic.skybox.as_ref().map(|skybox| skybox.name.clone()))
 }
 
+const SKYBOX_TRANSITION_WARMUP_FRAMES: u8 = 2;
+
+#[derive(Debug, Resource)]
+struct HeadlessSkyboxRenderGate {
+    desired: Option<Option<String>>,
+    applied: bool,
+    warmup_remaining: u8,
+}
+
+impl Default for HeadlessSkyboxRenderGate {
+    fn default() -> Self {
+        Self {
+            desired: None,
+            applied: true,
+            warmup_remaining: 0,
+        }
+    }
+}
+
 fn headless_skybox_applied(
     desired: &Option<String>,
     cache: &SkyboxCache,
@@ -252,15 +272,31 @@ fn sync_headless_skybox(
     cache: Res<SkyboxCache>,
     settings: Res<SkyboxAssetSettings>,
     cameras: Query<(Option<&PrimarySkybox>, Option<&Skybox>), With<Camera3d>>,
+    mut render_gate: ResMut<HeadlessSkyboxRenderGate>,
     mut skybox_writer: MessageWriter<SetActiveSkybox>,
 ) {
     let Some(desired) = desired_skybox_from_config(&config) else {
+        render_gate.desired = None;
+        render_gate.applied = true;
+        render_gate.warmup_remaining = 0;
         return;
     };
+
+    if render_gate.desired.as_ref() != Some(&desired) {
+        render_gate.desired = Some(desired.clone());
+        render_gate.applied = false;
+        render_gate.warmup_remaining = 0;
+    }
+
     if headless_skybox_applied(&desired, &cache, &settings, &cameras) {
+        if !render_gate.applied {
+            render_gate.applied = true;
+            render_gate.warmup_remaining = SKYBOX_TRANSITION_WARMUP_FRAMES;
+        }
         return;
     }
 
+    render_gate.applied = false;
     match &desired {
         Some(name) => skybox_writer.write(SetActiveSkybox::ByName(name.clone())),
         None => skybox_writer.write(SetActiveSkybox::Clear),
@@ -282,6 +318,24 @@ fn poll_headless_db_config(mut last_poll: Local<Option<Instant>>, packet_tx: Res
 
 fn run_headless_update(app: &mut App) {
     app.update();
+}
+
+enum SkyboxEmissionGate {
+    Ready,
+    WaitingForApply,
+    Warming,
+}
+
+fn consume_skybox_emission_gate(app: &mut App) -> SkyboxEmissionGate {
+    let mut render_gate = app.world_mut().resource_mut::<HeadlessSkyboxRenderGate>();
+    if !render_gate.applied {
+        return SkyboxEmissionGate::WaitingForApply;
+    }
+    if render_gate.warmup_remaining > 0 {
+        render_gate.warmup_remaining -= 1;
+        return SkyboxEmissionGate::Warming;
+    }
+    SkyboxEmissionGate::Ready
 }
 
 fn drain_stale_frames(app: &App) {
@@ -430,6 +484,19 @@ fn render_server_runner(mut app: App) -> AppExit {
             continue;
         }
 
+        match consume_skybox_emission_gate(&mut app) {
+            SkyboxEmissionGate::Ready => {}
+            SkyboxEmissionGate::WaitingForApply => {
+                drain_stale_frames(&app);
+                std::thread::sleep(Duration::from_millis(5));
+                continue;
+            }
+            SkyboxEmissionGate::Warming => {
+                render_without_emit(&mut app, sim_ts, &due_names);
+                continue;
+            }
+        }
+
         render_and_emit(&mut app, sim_ts, &due_names);
 
         // Mark every emitted camera as rendered at `sim_ts`. (If a frame was
@@ -478,6 +545,25 @@ fn render_and_emit(app: &mut App, sim_ts: Timestamp, due_names: &[String]) {
     }
 
     push_frames_to_db(app, sim_ts, &frames);
+    set_readback_armed(app.world_mut(), due_names, false);
+    set_cameras_active(app.world_mut(), due_names, false);
+}
+
+fn render_without_emit(app: &mut App, sim_ts: Timestamp, due_names: &[String]) {
+    app.world_mut().resource_mut::<CurrentTimestamp>().0 = sim_ts;
+
+    drain_stale_frames(app);
+    set_cameras_active(app.world_mut(), due_names, true);
+    set_readback_armed(app.world_mut(), due_names, true);
+
+    run_headless_update(app);
+    let frames = collect_frames(app, due_names);
+    if frames.len() < due_names.len() {
+        run_headless_update(app);
+        let _ = collect_frames(app, due_names);
+    }
+    drain_stale_frames(app);
+
     set_readback_armed(app.world_mut(), due_names, false);
     set_cameras_active(app.world_mut(), due_names, false);
 }
