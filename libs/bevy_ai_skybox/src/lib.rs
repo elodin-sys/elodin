@@ -583,9 +583,9 @@ mod system_params {
     };
 
     use super::{
-        ConfiguredCubemapIds, PendingSkyboxActivation, PrimarySkybox, SetActiveSkybox,
-        SkyboxAssetSettings, SkyboxCache, SkyboxFailed, SkyboxGenerationComplete,
-        SkyboxGenerationUi, SkyboxReady,
+        ConfiguredCubemapIds, ManifestReloaded, PendingSkyboxActivation, PrimarySkybox,
+        SetActiveSkybox, SkyboxAssetSettings, SkyboxCache, SkyboxFailed, SkyboxGenerated,
+        SkyboxGenerationComplete, SkyboxGenerationState, SkyboxGenerationUi, SkyboxReady,
     };
 
     type SkyboxCameraQuery<'w, 's> = Query<
@@ -625,9 +625,22 @@ mod system_params {
         pub failed: MessageWriter<'w, SkyboxFailed>,
         pub ui: Option<ResMut<'w, SkyboxGenerationUi>>,
     }
+
+    #[derive(SystemParam)]
+    pub(super) struct FinishGenerationParams<'w> {
+        pub state: ResMut<'w, SkyboxGenerationState>,
+        pub cache: ResMut<'w, SkyboxCache>,
+        pub settings: Res<'w, SkyboxAssetSettings>,
+        pub asset_server: Res<'w, AssetServer>,
+        pub pending: ResMut<'w, PendingSkyboxActivation>,
+        pub ui: ResMut<'w, SkyboxGenerationUi>,
+        pub generated: MessageWriter<'w, SkyboxGenerated>,
+        pub manifest_reloaded: MessageWriter<'w, ManifestReloaded>,
+        pub failed: MessageWriter<'w, SkyboxFailed>,
+    }
 }
 
-use system_params::{ApplyPendingSkyboxParams, ApplySkyboxParams};
+use system_params::{ApplyPendingSkyboxParams, ApplySkyboxParams, FinishGenerationParams};
 
 #[derive(Clone, Debug)]
 pub struct SkyboxAssetPlugin {
@@ -798,42 +811,38 @@ fn start_generation_jobs(
     }
 }
 
-fn finish_generation_jobs(
-    mut state: ResMut<SkyboxGenerationState>,
-    mut cache: ResMut<SkyboxCache>,
-    settings: Res<SkyboxAssetSettings>,
-    asset_server: Res<AssetServer>,
-    mut pending: ResMut<PendingSkyboxActivation>,
-    mut ui: ResMut<SkyboxGenerationUi>,
-    mut generated_writer: MessageWriter<SkyboxGenerated>,
-    mut manifest_reloaded: MessageWriter<ManifestReloaded>,
-    mut failed: MessageWriter<SkyboxFailed>,
-) {
-    let Some(active) = state.active.as_mut() else {
-        return;
-    };
-    let Some(result) = future::block_on(future::poll_once(&mut active.task)) else {
+fn finish_generation_jobs(mut params: FinishGenerationParams) {
+    let Some((prompt, result)) = ({
+        let Some(active) = params.state.active.as_mut() else {
+            return;
+        };
+        future::block_on(future::poll_once(&mut active.task))
+            .map(|result| (active.prompt.clone(), result))
+    }) else {
         return;
     };
 
-    let prompt = active.prompt.clone();
-    state.active = None;
+    params.state.active = None;
     match result {
         Ok(generated) => {
             let name = generated.entry.name.clone();
             let cubemap_file = generated.entry.cubemap_file.clone();
-            match cache.insert_and_activate(generated.entry) {
+            match params.cache.insert_and_activate(generated.entry) {
                 Ok(()) => {
-                    let handle = asset_server.load(settings.asset_path_for(&cubemap_file));
-                    cache.handles.insert(name.clone(), handle);
-                    generated_writer.write(SkyboxGenerated { name: name.clone() });
-                    manifest_reloaded.write(ManifestReloaded {
-                        entry_count: cache.manifest.entries.len(),
+                    let handle = params
+                        .asset_server
+                        .load(params.settings.asset_path_for(&cubemap_file));
+                    params.cache.handles.insert(name.clone(), handle);
+                    params
+                        .generated
+                        .write(SkyboxGenerated { name: name.clone() });
+                    params.manifest_reloaded.write(ManifestReloaded {
+                        entry_count: params.cache.manifest.entries.len(),
                     });
-                    queue_pending_skybox_activation(&mut pending, name.clone(), true);
-                    ui.target_name = Some(name.clone());
-                    ui.phase = SkyboxGenerationPhase::PendingApply;
-                    ui.message = Some(format!("Loading skybox `{name}`…"));
+                    queue_pending_skybox_activation(&mut params.pending, name.clone(), true);
+                    params.ui.target_name = Some(name.clone());
+                    params.ui.phase = SkyboxGenerationPhase::PendingApply;
+                    params.ui.message = Some(format!("Loading skybox `{name}`…"));
                 }
                 Err(error) => {
                     error!(
@@ -841,7 +850,7 @@ fn finish_generation_jobs(
                         prompt = %prompt,
                         "failed to register generated skybox: {error}"
                     );
-                    failed.write(SkyboxFailed {
+                    params.failed.write(SkyboxFailed {
                         name: prompt,
                         error,
                     });
@@ -854,7 +863,7 @@ fn finish_generation_jobs(
                 prompt = %prompt,
                 "skybox generation failed: {error}"
             );
-            failed.write(SkyboxFailed {
+            params.failed.write(SkyboxFailed {
                 name: prompt,
                 error,
             });

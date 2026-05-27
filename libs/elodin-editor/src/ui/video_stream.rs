@@ -11,7 +11,7 @@ use bevy::ui::Node;
 use bevy::ui::widget::ImageNode;
 use bevy::{
     ecs::system::SystemParam,
-    prelude::{Commands, Component, Entity, Local, MessageReader, Query, Res, ResMut, World},
+    prelude::{Commands, Component, Entity, Local, Query, Res, ResMut, World},
     ui::Val,
 };
 use egui::{self, Color32, Vec2};
@@ -1220,18 +1220,6 @@ pub fn set_visibility(mut query: Query<(&mut Node, &IsTileVisible)>) {
             ui_node.display = Display::None;
         }
     }
-}
-
-/// Sensor views cache raw RGBA frames by timestamp; drop them when the skybox changes
-/// so scrubbed or paused playback does not keep showing the previous environment.
-pub fn invalidate_sensor_frames_on_skybox_change(
-    mut skybox_events: MessageReader<bevy_ai_skybox::prelude::SkyboxReady>,
-    mut caches: Query<&mut VideoFrameCache>,
-) {
-    if skybox_events.read().next().is_none() {
-        return;
-    }
-    clear_sensor_raw_frame_caches(&mut caches);
 }
 
 pub fn invalidate_sensor_frames_on_db_skybox_change(

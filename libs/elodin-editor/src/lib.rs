@@ -340,10 +340,6 @@ impl Plugin for EditorPlugin {
             .add_systems(Update, ui::video_stream::connect_streams)
             .add_systems(
                 Update,
-                ui::video_stream::invalidate_sensor_frames_on_skybox_change,
-            )
-            .add_systems(
-                Update,
                 skybox_generation::sync_generated_skybox_to_schematic,
             )
             .add_systems(Update, skybox_generation::push_skybox_active_on_pending)
