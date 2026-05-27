@@ -1190,16 +1190,22 @@ fn generate_skybox_blocking(
             .filter(|name| !name.trim().is_empty())
             .unwrap_or(&request.prompt),
     );
-    let equirect_file = format!("{name}.equirect.png");
-    let cubemap_file = format!("{name}.cubemap.png");
-    let equirect_path = asset_settings.cache_dir.join(&equirect_file);
+    let equirect_file = cubemap_convert::equirect_manifest_filename(&name);
+    let cubemap_file = cubemap_convert::cubemap_ktx2_filename(&name);
     let cubemap_path = asset_settings.cache_dir.join(&cubemap_file);
 
     fs::create_dir_all(&asset_settings.cache_dir)?;
+    cubemap_convert::remove_legacy_png_assets(&asset_settings.cache_dir, &name);
+
     let equirect = image::load_from_memory(&source_bytes)?.to_rgba8();
-    equirect.save(&equirect_path)?;
-    cubemap_convert::equirect_to_stacked_cubemap(&equirect, resolution.face_size())
-        .save(&cubemap_path)?;
+    let face_size = resolution.face_size();
+    cubemap_convert::write_cubemap_ktx2(
+        &equirect,
+        face_size,
+        &cubemap_path,
+        cubemap_convert::resolve_toktx_executable(),
+    )
+    .map_err(SkyboxError::GenerationFailed)?;
 
     Ok(GeneratedSkybox {
         entry: ManifestEntry {
@@ -1213,7 +1219,7 @@ fn generate_skybox_blocking(
             }),
             equirect_file,
             cubemap_file,
-            face_size: resolution.face_size(),
+            face_size,
             created_at: Utc::now().to_rfc3339_opts(SecondsFormat::Micros, true),
         },
     })
@@ -1523,7 +1529,7 @@ mod tests {
             style: SkyboxStyle::default(),
             blockade: None,
             equirect_file: "a.equirect.png".into(),
-            cubemap_file: "a.cubemap.png".into(),
+            cubemap_file: "a.cubemap.ktx2".into(),
             face_size: 512,
             created_at: "2026-01-01T00:00:00Z".into(),
         });
@@ -1533,7 +1539,7 @@ mod tests {
             style: SkyboxStyle::default(),
             blockade: None,
             equirect_file: "b.equirect.png".into(),
-            cubemap_file: "b.cubemap.png".into(),
+            cubemap_file: "b.cubemap.ktx2".into(),
             face_size: 1024,
             created_at: "2026-01-02T00:00:00Z".into(),
         });
@@ -1595,6 +1601,18 @@ mod tests {
         assert_eq!(SkyboxResolution::OneK.face_size(), 256);
         assert_eq!(SkyboxResolution::TwoK.face_size(), 512);
         assert_eq!(SkyboxResolution::FourK.face_size(), 1024);
+    }
+
+    #[test]
+    fn generated_assets_use_ktx2_cubemap_only() {
+        assert_eq!(
+            cubemap_convert::cubemap_ktx2_filename("test_sky"),
+            "test_sky.cubemap.ktx2"
+        );
+        assert_eq!(
+            cubemap_convert::equirect_manifest_filename("test_sky"),
+            "test_sky.equirect.png"
+        );
     }
 
     #[test]

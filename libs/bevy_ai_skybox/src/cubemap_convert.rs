@@ -1,7 +1,95 @@
+use std::{
+    env,
+    ffi::OsStr,
+    fs,
+    path::{Path, PathBuf},
+    process::Command,
+};
+
 use bevy::prelude::Vec3;
 use image::{Rgba, RgbaImage};
 
 pub const BUNDLED_CUBEMAP_FACE_SIZE: u32 = 2048;
+
+pub fn cubemap_ktx2_filename(name: &str) -> String {
+    format!("{name}.cubemap.ktx2")
+}
+
+pub fn equirect_manifest_filename(name: &str) -> String {
+    format!("{name}.equirect.png")
+}
+
+pub fn resolve_toktx_executable() -> PathBuf {
+    env::var_os("TOKTX")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("toktx"))
+}
+
+pub fn write_cubemap_ktx2(
+    equirect: &RgbaImage,
+    face_size: u32,
+    output: &Path,
+    toktx: impl AsRef<OsStr>,
+) -> Result<(), String> {
+    let stacked = equirect_to_stacked_cubemap(equirect, face_size);
+    let temp = env::temp_dir().join(format!("elodin-skybox-ktx2-{}", std::process::id()));
+    if temp.exists() {
+        fs::remove_dir_all(&temp).map_err(|error| error.to_string())?;
+    }
+    fs::create_dir_all(&temp).map_err(|error| error.to_string())?;
+
+    let mut face_paths = Vec::with_capacity(6);
+    for face in 0..6 {
+        let face_path = temp.join(format!("face{face}.png"));
+        stacked_face(&stacked, face, face_size)
+            .save(&face_path)
+            .map_err(|error| error.to_string())?;
+        face_paths.push(face_path);
+    }
+
+    if let Some(parent) = output.parent() {
+        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+
+    let mut command = Command::new(toktx.as_ref());
+    command
+        .arg("--t2")
+        .arg("--zcmp")
+        .arg("--genmipmap")
+        .arg("--cubemap")
+        .arg("--assign_oetf")
+        .arg("srgb")
+        .arg(output);
+    for face_path in &face_paths {
+        command.arg(face_path);
+    }
+    let status = command.status().map_err(|error| {
+        format!(
+            "failed to run `{}`: {error}",
+            Path::new(toktx.as_ref()).display()
+        )
+    })?;
+    let _ = fs::remove_dir_all(&temp);
+    if !status.success() {
+        return Err(format!(
+            "toktx failed for `{}` (exit {status})",
+            output.display()
+        ));
+    }
+    Ok(())
+}
+
+pub fn remove_legacy_png_assets(cache_dir: &Path, name: &str) {
+    for file in [
+        equirect_manifest_filename(name),
+        format!("{name}.cubemap.png"),
+    ] {
+        let path = cache_dir.join(file);
+        if path.is_file() {
+            let _ = fs::remove_file(path);
+        }
+    }
+}
 
 pub fn equirect_to_stacked_cubemap(source: &RgbaImage, face_size: u32) -> RgbaImage {
     let mut output = RgbaImage::new(face_size, face_size * 6);

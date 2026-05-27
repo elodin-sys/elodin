@@ -1,7 +1,6 @@
 use std::{
-    env, fs,
+    env,
     path::{Path, PathBuf},
-    process::Command,
 };
 
 use bevy_ai_skybox::cubemap_convert::{self, BUNDLED_CUBEMAP_FACE_SIZE};
@@ -20,7 +19,7 @@ fn run() -> Result<(), String> {
         .canonicalize()
         .map_err(|error| error.to_string())?;
     let skybox_dir = repo_root.join("assets/skyboxes");
-    let toktx = env::var("TOKTX").unwrap_or_else(|_| "toktx".into());
+    let toktx = cubemap_convert::resolve_toktx_executable();
 
     let names = parse_names()?;
     for name in names {
@@ -42,8 +41,8 @@ fn parse_names() -> Result<Vec<String>, String> {
     Ok(args)
 }
 
-fn pack_one(skybox_dir: &Path, toktx: &str, name: &str) -> Result<(), String> {
-    let equirect_path = skybox_dir.join(format!("{name}.equirect.png"));
+fn pack_one(skybox_dir: &Path, toktx: &Path, name: &str) -> Result<(), String> {
+    let equirect_path = skybox_dir.join(cubemap_convert::equirect_manifest_filename(name));
     if !equirect_path.is_file() {
         return Err(format!(
             "missing equirect source: {}",
@@ -56,43 +55,7 @@ fn pack_one(skybox_dir: &Path, toktx: &str, name: &str) -> Result<(), String> {
         .decode()
         .map_err(|error| error.to_string())?
         .to_rgba8();
-    let stacked =
-        cubemap_convert::equirect_to_stacked_cubemap(&equirect, BUNDLED_CUBEMAP_FACE_SIZE);
 
-    let temp = env::temp_dir().join(format!("elodin-skybox-pack-{name}"));
-    if temp.exists() {
-        fs::remove_dir_all(&temp).map_err(|error| error.to_string())?;
-    }
-    fs::create_dir_all(&temp).map_err(|error| error.to_string())?;
-
-    let mut face_paths = Vec::with_capacity(6);
-    for face in 0..6 {
-        let face_path = temp.join(format!("face{face}.png"));
-        cubemap_convert::stacked_face(&stacked, face, BUNDLED_CUBEMAP_FACE_SIZE)
-            .save(&face_path)
-            .map_err(|error| error.to_string())?;
-        face_paths.push(face_path);
-    }
-
-    let output = skybox_dir.join(format!("{name}.cubemap.ktx2"));
-    let mut command = Command::new(toktx);
-    command
-        .arg("--t2")
-        .arg("--zcmp")
-        .arg("--genmipmap")
-        .arg("--cubemap")
-        .arg("--assign_oetf")
-        .arg("srgb")
-        .arg(&output);
-    for face_path in &face_paths {
-        command.arg(face_path);
-    }
-    let status = command
-        .status()
-        .map_err(|error| format!("failed to run `{toktx}`: {error}"))?;
-    let _ = fs::remove_dir_all(&temp);
-    if !status.success() {
-        return Err(format!("toktx failed for `{name}` (exit {status})"));
-    }
-    Ok(())
+    let output = skybox_dir.join(cubemap_convert::cubemap_ktx2_filename(name));
+    cubemap_convert::write_cubemap_ktx2(&equirect, BUNDLED_CUBEMAP_FACE_SIZE, &output, toktx)
 }
