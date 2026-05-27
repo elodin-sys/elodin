@@ -41,7 +41,9 @@ pub(crate) fn record_synced_schematic_content(
 
 pub(crate) fn push_skybox_active_metadata(tx: &PacketTx, skybox: Option<&str>) {
     let metadata = match skybox {
-        Some(name) => std::collections::HashMap::from([("skybox.active".to_string(), name.to_string())]),
+        Some(name) => {
+            std::collections::HashMap::from([("skybox.active".to_string(), name.to_string())])
+        }
         None => std::collections::HashMap::from([("skybox.active".to_string(), String::new())]),
     };
     tx.send_msg(SetDbConfig {
@@ -66,10 +68,7 @@ pub fn push_skybox_active_on_pending(
     if last_pushed.as_deref() == Some(name.as_str()) {
         return;
     }
-    tx.send_msg(SetDbConfig {
-        metadata: std::collections::HashMap::from([("skybox.active".to_string(), name.clone())]),
-        ..Default::default()
-    });
+    push_skybox_active_metadata(&tx, Some(&name));
     *last_pushed = Some(name);
 }
 

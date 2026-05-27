@@ -522,8 +522,7 @@ impl RootWidgetSystem for ViewportOverlay<'_, '_> {
             };
             let text = skybox_ui.message.clone().unwrap_or_else(|| "Skybox".into());
             let modal_size = egui::vec2(380.0, 88.0);
-            let modal_rect =
-                egui::Rect::from_center_size(ctx.content_rect().center(), modal_size);
+            let modal_rect = egui::Rect::from_center_size(ctx.content_rect().center(), modal_size);
             let modal_id = egui::Id::new("skybox_status_modal");
             egui::Modal::new(modal_id)
                 .area(
