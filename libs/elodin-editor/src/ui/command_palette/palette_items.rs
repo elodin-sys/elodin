@@ -7,9 +7,7 @@ use std::{
 use crate::plugins::kdl_document::{
     CurrentDocument, LastSyncedSchematicContent, SchematicDocumentAsset, sync_document_skybox,
 };
-use crate::skybox_generation::{
-    push_schematic_metadata, push_skybox_active_metadata, record_synced_schematic_content,
-};
+use crate::skybox_generation::{push_schematic_metadata, record_synced_schematic_content};
 use bevy::{
     asset::{AssetServer, Assets},
     camera::visibility::Visibility,
@@ -1173,12 +1171,12 @@ fn sync_skybox_to_document_and_db(
 ) {
     let kdl = sync_document_skybox(skybox, current_document, document_assets, schematic);
     record_synced_schematic_content(last_synced_content, &kdl);
-    if schematic.skybox.is_none() {
-        // Clear must update schematic.content too; render-server falls back to KDL skybox nodes.
-        push_schematic_metadata(tx, kdl, Some(None));
-    } else if let Some(entry) = schematic.skybox.as_ref() {
-        push_skybox_active_metadata(tx, Some(&entry.name));
-    }
+    // Always push schematic.content when the skybox node changes so DB KDL matches memory.
+    // `LastSyncedSchematicContent` prevents a full schematic reload on the echo.
+    // Pushing only `skybox.active` leaves stale KDL in the DB, which reloads the old skybox
+    // onto the first viewports after SetDbConfig returns.
+    let active = schematic.skybox.as_ref().map(|entry| entry.name.as_str());
+    push_schematic_metadata(tx, kdl, Some(active));
 }
 
 fn clear_skybox() -> PaletteItem {

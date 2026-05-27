@@ -193,15 +193,23 @@ pub(super) fn activate_document_skybox(
 ) {
     for event in loaded.read() {
         match event.document.root.skybox.as_ref() {
-            Some(skybox) => skyboxes.write(SetActiveSkybox::ByName(skybox.name.clone())),
-            None => skyboxes.write(SetActiveSkybox::Clear),
+            Some(skybox) => {
+                skyboxes.write(SetActiveSkybox::ByName(skybox.name.clone()));
+            }
+            None => {
+                skyboxes.write(SetActiveSkybox::Clear);
+            }
         }
     }
 
     for event in reloaded.read() {
         match event.document.root.skybox.as_ref() {
-            Some(skybox) => skyboxes.write(SetActiveSkybox::ByName(skybox.name.clone())),
-            None => skyboxes.write(SetActiveSkybox::Clear),
+            Some(skybox) => {
+                skyboxes.write(SetActiveSkybox::ByName(skybox.name.clone()));
+            }
+            None => {
+                skyboxes.write(SetActiveSkybox::Clear);
+            }
         }
     }
 }
