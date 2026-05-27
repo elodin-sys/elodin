@@ -530,7 +530,8 @@ mod system_params {
     };
 
     use super::{
-        PendingSkyboxActivation, PrimarySkybox, SetActiveSkybox, SkyboxAssetSettings, SkyboxCache,
+        ConfiguredCubemapIds, PendingSkyboxActivation, PrimarySkybox, SetActiveSkybox,
+        SkyboxAssetSettings, SkyboxCache, SkyboxGenerationComplete, SkyboxGenerationUi,
         SkyboxReady,
     };
 
@@ -557,9 +558,22 @@ mod system_params {
         pub cameras: SkyboxCameraQuery<'w, 's>,
         pub ready: MessageWriter<'w, SkyboxReady>,
     }
+
+    #[derive(SystemParam)]
+    pub(super) struct ApplyPendingSkyboxParams<'w> {
+        pub pending: ResMut<'w, PendingSkyboxActivation>,
+        pub cache: ResMut<'w, SkyboxCache>,
+        pub settings: Res<'w, SkyboxAssetSettings>,
+        pub asset_server: Res<'w, AssetServer>,
+        pub images: ResMut<'w, Assets<Image>>,
+        pub configured: ResMut<'w, ConfiguredCubemapIds>,
+        pub activate: MessageWriter<'w, SetActiveSkybox>,
+        pub complete: MessageWriter<'w, SkyboxGenerationComplete>,
+        pub ui: Option<ResMut<'w, SkyboxGenerationUi>>,
+    }
 }
 
-use system_params::ApplySkyboxParams;
+use system_params::{ApplyPendingSkyboxParams, ApplySkyboxParams};
 
 #[derive(Clone, Debug)]
 pub struct SkyboxAssetPlugin {
@@ -789,28 +803,18 @@ fn is_cubemap_configured(handle: &Handle<Image>, images: &Assets<Image>) -> bool
     })
 }
 
-fn apply_pending_skybox_activation(
-    mut pending: ResMut<PendingSkyboxActivation>,
-    mut cache: ResMut<SkyboxCache>,
-    settings: Res<SkyboxAssetSettings>,
-    asset_server: Res<AssetServer>,
-    mut images: ResMut<Assets<Image>>,
-    mut configured: ResMut<ConfiguredCubemapIds>,
-    mut activate: MessageWriter<SetActiveSkybox>,
-    mut complete: MessageWriter<SkyboxGenerationComplete>,
-    ui: Option<ResMut<SkyboxGenerationUi>>,
-) {
-    let Some(name) = pending.name.clone() else {
+fn apply_pending_skybox_activation(mut params: ApplyPendingSkyboxParams) {
+    let Some(name) = params.pending.name.clone() else {
         return;
     };
 
-    let entry = match cache.entry(&name) {
+    let entry = match params.cache.entry(&name) {
         Ok(entry) => entry.clone(),
         Err(error) => {
             warn!("pending skybox `{name}` missing from manifest: {error}");
-            pending.name = None;
-            pending.notify_generation_complete = false;
-            if let Some(mut ui) = ui {
+            params.pending.name = None;
+            params.pending.notify_generation_complete = false;
+            if let Some(mut ui) = params.ui {
                 ui.target_name = None;
                 ui.phase = SkyboxGenerationPhase::Failed;
                 ui.message = Some(format!("Skybox `{name}` failed to register"));
@@ -819,24 +823,31 @@ fn apply_pending_skybox_activation(
         }
     };
 
-    let handle = cache
+    let handle = params
+        .cache
         .handles
         .entry(name.clone())
-        .or_insert_with(|| asset_server.load(settings.asset_path_for(&entry.cubemap_file)))
+        .or_insert_with(|| {
+            params
+                .asset_server
+                .load(params.settings.asset_path_for(&entry.cubemap_file))
+        })
         .clone();
 
-    if !is_cubemap_ready(&handle, &mut images) {
+    if !is_cubemap_ready(&handle, &mut params.images) {
         return;
     }
-    configured.0.insert(handle.id());
+    params.configured.0.insert(handle.id());
 
-    let notify_generation = pending.notify_generation_complete;
-    pending.name = None;
-    pending.notify_generation_complete = false;
-    activate.write(SetActiveSkybox::ByName(name.clone()));
+    let notify_generation = params.pending.notify_generation_complete;
+    params.pending.name = None;
+    params.pending.notify_generation_complete = false;
+    params.activate.write(SetActiveSkybox::ByName(name.clone()));
     if notify_generation {
-        complete.write(SkyboxGenerationComplete { name: name.clone() });
-        if let Some(mut ui) = ui {
+        params
+            .complete
+            .write(SkyboxGenerationComplete { name: name.clone() });
+        if let Some(mut ui) = params.ui {
             ui.target_name = None;
             ui.phase = SkyboxGenerationPhase::Ready;
             ui.message = Some(format!("Skybox ready: {name}"));
@@ -946,7 +957,7 @@ fn apply_skybox_to_camera(mut params: ApplySkyboxParams) {
                 (Some(name.clone()), handle, disk_bytes)
             }
             SetActiveSkybox::ByHandle(handle) => {
-                if !is_cubemap_ready(&handle, &mut params.images) {
+                if !is_cubemap_ready(handle, &mut params.images) {
                     warn!("SetActiveSkybox::ByHandle skipped: cubemap not ready");
                     continue;
                 }
@@ -1493,19 +1504,14 @@ mod tests {
     }
 
     #[test]
-    fn rc_jet_uses_bundled_skybox() {
-        let manifest = bundled_manifest();
+    fn rc_jet_has_no_embedded_skybox() {
         let rc_jet = include_str!("../../../examples/rc-jet/main.py");
-        let skybox_name = rc_jet
-            .lines()
-            .map(str::trim)
-            .find_map(|line| {
-                line.strip_prefix("skybox name=\"")
-                    .and_then(|name| name.strip_suffix('"'))
-            })
-            .expect("rc-jet schematic should request a skybox");
-
-        assert_eq!(skybox_name, "alien_swamp");
-        assert!(manifest.get(skybox_name).is_some());
+        assert!(
+            !rc_jet
+                .lines()
+                .map(str::trim)
+                .any(|line| line.starts_with("skybox ")),
+            "rc-jet should not embed a default skybox; activate one from the command palette"
+        );
     }
 }
