@@ -42,6 +42,8 @@ pub enum SkyboxError {
     MissingApiKey,
     #[error("skybox `{0}` is not present in the manifest")]
     MissingSkybox(String),
+    #[error("skybox `{0}` already exists")]
+    DuplicateSkybox(String),
     #[error("generation failed: {0}")]
     GenerationFailed(String),
     #[error("generation timed out: {0}")]
@@ -139,10 +141,30 @@ pub struct ManifestEntry {
     pub prompt: String,
     pub style: SkyboxStyle,
     pub blockade: Option<BlockadeMetadata>,
-    pub equirect_file: String,
+    #[serde(default, deserialize_with = "deserialize_optional_string")]
+    pub equirect_file: Option<String>,
     pub cubemap_file: String,
     pub face_size: u32,
     pub created_at: String,
+}
+
+fn deserialize_optional_string<'de, D>(
+    deserializer: D,
+) -> std::result::Result<Option<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum OptionalString {
+        String(String),
+        Option(Option<String>),
+    }
+
+    Ok(match OptionalString::deserialize(deserializer)? {
+        OptionalString::String(value) => Some(value),
+        OptionalString::Option(value) => value,
+    })
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -207,6 +229,14 @@ impl SkyboxManifest {
         } else {
             self.entries.push(entry);
         }
+    }
+
+    pub fn insert_new(&mut self, entry: ManifestEntry) -> Result<()> {
+        if self.get(&entry.name).is_some() {
+            return Err(SkyboxError::DuplicateSkybox(entry.name));
+        }
+        self.entries.push(entry);
+        Ok(())
     }
 }
 
@@ -308,12 +338,14 @@ impl SkyboxCache {
         Ok(())
     }
 
-    pub fn upsert_and_activate(&mut self, entry: ManifestEntry) -> Result<()> {
+    pub fn insert_and_activate(&mut self, entry: ManifestEntry) -> Result<()> {
         let name = entry.name.clone();
+        self.reload_from_disk()?;
         self.handles.remove(&name);
+        self.manifest.insert_new(entry)?;
+        self.write_manifest()?;
         self.active = Some(name);
-        self.manifest.upsert(entry);
-        self.write_manifest()
+        Ok(())
     }
 }
 
@@ -755,7 +787,7 @@ fn finish_generation_jobs(
     match result {
         Ok(generated) => {
             let name = generated.entry.name.clone();
-            match cache.upsert_and_activate(generated.entry) {
+            match cache.insert_and_activate(generated.entry) {
                 Ok(()) => {
                     manifest_reloaded.write(ManifestReloaded {
                         entry_count: cache.manifest.entries.len(),
@@ -1143,7 +1175,11 @@ fn generate_skybox_blocking(
     asset_settings: SkyboxAssetSettings,
     request: GenerateSkybox,
 ) -> Result<GeneratedSkybox> {
-    let client = BlockadeClient::new(settings.api_key.clone(), settings.api_base_url.clone())?;
+    let client = BlockadeClient::new(
+        settings.api_key.clone(),
+        settings.api_base_url.clone(),
+        settings.request_timeout,
+    )?;
     let style = request.style.unwrap_or(settings.default_style);
     let resolution = request.resolution.unwrap_or(settings.default_resolution);
     let created = client.submit(&GenerateSkyboxRequest {
@@ -1183,21 +1219,24 @@ fn generate_skybox_blocking(
         ));
     };
     let source_bytes = client.download(&file_url)?;
-    let name = sanitize_name(
+    let manifest = SkyboxManifest::read_or_create(&asset_settings.manifest_path())?;
+    let base_name = sanitize_name(
         request
             .save_as
             .as_deref()
             .filter(|name| !name.trim().is_empty())
             .unwrap_or(&request.prompt),
     );
+    let name = unique_generated_skybox_name(&base_name, &asset_settings.cache_dir, &manifest);
     let equirect_file = cubemap_convert::equirect_manifest_filename(&name);
     let cubemap_file = cubemap_convert::cubemap_ktx2_filename(&name);
+    let equirect_path = asset_settings.cache_dir.join(&equirect_file);
     let cubemap_path = asset_settings.cache_dir.join(&cubemap_file);
 
     fs::create_dir_all(&asset_settings.cache_dir)?;
-    cubemap_convert::remove_legacy_png_assets(&asset_settings.cache_dir, &name);
 
     let equirect = image::load_from_memory(&source_bytes)?.to_rgba8();
+    equirect.save(&equirect_path)?;
     let face_size = resolution.face_size();
     cubemap_convert::write_cubemap_ktx2(
         &equirect,
@@ -1217,7 +1256,7 @@ fn generate_skybox_blocking(
                 obfuscated_id: status.obfuscated_id.or(created.obfuscated_id),
                 seed: request.seed,
             }),
-            equirect_file,
+            equirect_file: Some(equirect_file),
             cubemap_file,
             face_size,
             created_at: Utc::now().to_rfc3339_opts(SecondsFormat::Micros, true),
@@ -1307,13 +1346,21 @@ struct BlockadeClient {
 }
 
 impl BlockadeClient {
-    fn new(api_key: Option<String>, base_url: impl Into<String>) -> Result<Self> {
+    fn new(
+        api_key: Option<String>,
+        base_url: impl Into<String>,
+        timeout: Duration,
+    ) -> Result<Self> {
         let api_key = api_key
             .or_else(|| std::env::var("BLOCKADE_API_KEY").ok())
             .ok_or(SkyboxError::MissingApiKey)?;
 
+        let connect_timeout = timeout.min(Duration::from_secs(15));
         Ok(Self {
-            http: reqwest::blocking::Client::new(),
+            http: reqwest::blocking::Client::builder()
+                .timeout(timeout)
+                .connect_timeout(connect_timeout)
+                .build()?,
             base_url: base_url.into().trim_end_matches('/').to_string(),
             api_key,
         })
@@ -1408,6 +1455,8 @@ fn parse_blockade_error(status: reqwest::StatusCode, body: &str) -> SkyboxError 
     SkyboxError::BadRequest(body.trim().to_string())
 }
 
+const MAX_SKYBOX_NAME_CHARS: usize = 64;
+
 fn sanitize_name(input: &str) -> String {
     let mut name: String = input
         .chars()
@@ -1421,8 +1470,45 @@ fn sanitize_name(input: &str) -> String {
     if name.is_empty() {
         format!("skybox_{}", Utc::now().timestamp())
     } else {
-        name.chars().take(64).collect()
+        name.chars().take(MAX_SKYBOX_NAME_CHARS).collect()
     }
+}
+
+fn unique_generated_skybox_name(
+    base_name: &str,
+    cache_dir: &Path,
+    manifest: &SkyboxManifest,
+) -> String {
+    if !skybox_name_conflicts(base_name, cache_dir, manifest) {
+        return base_name.to_string();
+    }
+
+    for suffix in 2.. {
+        let candidate = skybox_name_with_suffix(base_name, suffix);
+        if !skybox_name_conflicts(&candidate, cache_dir, manifest) {
+            return candidate;
+        }
+    }
+    unreachable!("unbounded suffix search should always find a unique skybox name")
+}
+
+fn skybox_name_with_suffix(base_name: &str, suffix: u32) -> String {
+    let suffix = format!("_{suffix}");
+    let prefix_len = MAX_SKYBOX_NAME_CHARS.saturating_sub(suffix.chars().count());
+    let mut name = base_name.chars().take(prefix_len).collect::<String>();
+    name.push_str(&suffix);
+    name
+}
+
+fn skybox_name_conflicts(name: &str, cache_dir: &Path, manifest: &SkyboxManifest) -> bool {
+    manifest.get(name).is_some()
+        || cache_dir
+            .join(cubemap_convert::cubemap_ktx2_filename(name))
+            .exists()
+        || cache_dir
+            .join(cubemap_convert::equirect_manifest_filename(name))
+            .exists()
+        || cache_dir.join(format!("{name}.cubemap.png")).exists()
 }
 
 #[cfg(test)]
@@ -1494,8 +1580,12 @@ mod tests {
                 .get(name)
                 .unwrap_or_else(|| panic!("missing bundled skybox `{name}`"));
             assert!(
-                !entry.cubemap_file.is_empty() && !entry.equirect_file.is_empty(),
-                "{name} must reference asset files"
+                !entry.cubemap_file.is_empty(),
+                "{name} must reference a cubemap asset"
+            );
+            assert!(
+                entry.equirect_file.is_none(),
+                "{name} must not reference an equirect source that is not shipped"
             );
             assert!(
                 entry.cubemap_file.ends_with(".cubemap.ktx2"),
@@ -1528,7 +1618,7 @@ mod tests {
             prompt: "first".into(),
             style: SkyboxStyle::default(),
             blockade: None,
-            equirect_file: "a.equirect.png".into(),
+            equirect_file: Some("a.equirect.png".into()),
             cubemap_file: "a.cubemap.ktx2".into(),
             face_size: 512,
             created_at: "2026-01-01T00:00:00Z".into(),
@@ -1538,7 +1628,7 @@ mod tests {
             prompt: "second".into(),
             style: SkyboxStyle::default(),
             blockade: None,
-            equirect_file: "b.equirect.png".into(),
+            equirect_file: Some("b.equirect.png".into()),
             cubemap_file: "b.cubemap.ktx2".into(),
             face_size: 1024,
             created_at: "2026-01-02T00:00:00Z".into(),
@@ -1564,6 +1654,69 @@ mod tests {
         assert_eq!(
             loaded.get("seaport").unwrap().cubemap_file,
             "seaport.cubemap.ktx2"
+        );
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn insert_new_rejects_duplicate_names() {
+        let mut manifest = SkyboxManifest::default();
+        manifest
+            .insert_new(ManifestEntry {
+                name: "test_sky".into(),
+                prompt: "first".into(),
+                style: SkyboxStyle::default(),
+                blockade: None,
+                equirect_file: Some("a.equirect.png".into()),
+                cubemap_file: "a.cubemap.ktx2".into(),
+                face_size: 512,
+                created_at: "2026-01-01T00:00:00Z".into(),
+            })
+            .unwrap();
+
+        let error = manifest
+            .insert_new(ManifestEntry {
+                name: "test_sky".into(),
+                prompt: "second".into(),
+                style: SkyboxStyle::default(),
+                blockade: None,
+                equirect_file: Some("b.equirect.png".into()),
+                cubemap_file: "b.cubemap.ktx2".into(),
+                face_size: 1024,
+                created_at: "2026-01-02T00:00:00Z".into(),
+            })
+            .unwrap_err();
+        assert!(matches!(error, SkyboxError::DuplicateSkybox(name) if name == "test_sky"));
+    }
+
+    #[test]
+    fn generated_names_avoid_manifest_and_asset_collisions() {
+        let dir = std::env::temp_dir().join(format!(
+            "bevy_ai_skybox_collision_test_{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("grand_canyon_2.cubemap.ktx2"), b"existing").unwrap();
+
+        let mut manifest = SkyboxManifest::default();
+        manifest
+            .insert_new(ManifestEntry {
+                name: "grand_canyon".into(),
+                prompt: "grand canyon".into(),
+                style: SkyboxStyle::default(),
+                blockade: None,
+                equirect_file: None,
+                cubemap_file: "grand_canyon.cubemap.ktx2".into(),
+                face_size: 2048,
+                created_at: "2026-01-01T00:00:00Z".into(),
+            })
+            .unwrap();
+
+        assert_eq!(
+            unique_generated_skybox_name("grand_canyon", &dir, &manifest),
+            "grand_canyon_3"
         );
 
         let _ = fs::remove_dir_all(&dir);

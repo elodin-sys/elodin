@@ -3,7 +3,10 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use bevy_ai_skybox::cubemap_convert::{self, BUNDLED_CUBEMAP_FACE_SIZE};
+use bevy_ai_skybox::{
+    SkyboxManifest,
+    cubemap_convert::{self, BUNDLED_CUBEMAP_FACE_SIZE},
+};
 use image::ImageReader;
 
 fn main() {
@@ -19,33 +22,49 @@ fn run() -> Result<(), String> {
         .canonicalize()
         .map_err(|error| error.to_string())?;
     let skybox_dir = repo_root.join("assets/skyboxes");
+    let manifest = SkyboxManifest::read_or_create(&skybox_dir.join("manifest.ron"))
+        .map_err(|error| error.to_string())?;
     let toktx = cubemap_convert::resolve_toktx_executable();
 
-    let names = parse_names()?;
+    let names = parse_names(&manifest)?;
+    if names.is_empty() {
+        return Err("no skybox entries with equirect sources found in manifest".into());
+    }
     for name in names {
-        pack_one(&skybox_dir, &toktx, &name)?;
+        pack_one(&skybox_dir, &toktx, &manifest, &name)?;
         println!("packed {name}");
     }
     Ok(())
 }
 
-fn parse_names() -> Result<Vec<String>, String> {
+fn parse_names(manifest: &SkyboxManifest) -> Result<Vec<String>, String> {
     let args: Vec<_> = env::args().skip(1).collect();
     if args.is_empty() {
-        return Ok(vec![
-            "seaport".into(),
-            "coastal_beach".into(),
-            "grand_canyon".into(),
-        ]);
+        return Ok(manifest
+            .entries
+            .iter()
+            .filter(|entry| entry.equirect_file.is_some())
+            .map(|entry| entry.name.clone())
+            .collect());
     }
     Ok(args)
 }
 
-fn pack_one(skybox_dir: &Path, toktx: &Path, name: &str) -> Result<(), String> {
-    let equirect_path = skybox_dir.join(cubemap_convert::equirect_manifest_filename(name));
+fn pack_one(
+    skybox_dir: &Path,
+    toktx: &Path,
+    manifest: &SkyboxManifest,
+    name: &str,
+) -> Result<(), String> {
+    let equirect_file = manifest
+        .get(name)
+        .and_then(|entry| entry.equirect_file.as_deref())
+        .map(str::to_string)
+        .unwrap_or_else(|| cubemap_convert::equirect_manifest_filename(name));
+    let equirect_path = skybox_dir.join(&equirect_file);
     if !equirect_path.is_file() {
         return Err(format!(
-            "missing equirect source: {}",
+            "missing equirect source for `{name}`: {}",
             equirect_path.display()
         ));
     }
