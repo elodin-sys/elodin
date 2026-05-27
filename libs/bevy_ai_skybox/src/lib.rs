@@ -142,7 +142,11 @@ pub struct ManifestEntry {
     pub prompt: String,
     pub style: SkyboxStyle,
     pub blockade: Option<BlockadeMetadata>,
-    #[serde(default, deserialize_with = "deserialize_optional_string")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_optional_string"
+    )]
     pub equirect_file: Option<String>,
     pub cubemap_file: String,
     pub face_size: u32,
@@ -204,7 +208,10 @@ impl SkyboxManifest {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
         }
-        let contents = ron::ser::to_string_pretty(self, ron::ser::PrettyConfig::default())?;
+        let contents = format!(
+            "{}\n",
+            ron::ser::to_string_pretty(self, ron::ser::PrettyConfig::default())?
+        );
         let mut tmp = path.to_path_buf();
         let extension = path
             .extension()
@@ -1919,6 +1926,11 @@ mod tests {
         assert_eq!(SkyboxResolution::OneK.face_size(), 256);
         assert_eq!(SkyboxResolution::TwoK.face_size(), 512);
         assert_eq!(SkyboxResolution::FourK.face_size(), 1024);
+        assert_eq!(
+            SkyboxResolution::EightK.face_size(),
+            cubemap_convert::BUNDLED_CUBEMAP_FACE_SIZE
+        );
+        assert_eq!(SkyboxResolution::SixteenK.face_size(), 4096);
     }
 
     #[test]

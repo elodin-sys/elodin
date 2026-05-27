@@ -107,7 +107,7 @@ pub(crate) fn skybox_asset_plugin() -> bevy_ai_skybox::prelude::SkyboxAssetPlugi
 
 pub(crate) fn skybox_generation_plugin() -> bevy_ai_skybox::prelude::BlockadeSkyboxPlugin {
     bevy_ai_skybox::prelude::BlockadeSkyboxPlugin {
-        default_resolution: bevy_ai_skybox::prelude::SkyboxResolution::TwoK,
+        default_resolution: bevy_ai_skybox::prelude::SkyboxResolution::EightK,
         ..Default::default()
     }
 }
