@@ -551,6 +551,19 @@ struct PendingSkyboxActivation {
     notify_generation_complete: bool,
 }
 
+fn queue_pending_skybox_activation(
+    pending: &mut PendingSkyboxActivation,
+    name: String,
+    notify_generation_complete: bool,
+) {
+    if pending.name.as_deref() == Some(name.as_str()) {
+        pending.notify_generation_complete |= notify_generation_complete;
+        return;
+    }
+    pending.name = Some(name);
+    pending.notify_generation_complete = notify_generation_complete;
+}
+
 struct ActiveGeneration {
     prompt: String,
     task: Task<Result<GeneratedSkybox>>,
@@ -817,8 +830,7 @@ fn finish_generation_jobs(
                     manifest_reloaded.write(ManifestReloaded {
                         entry_count: cache.manifest.entries.len(),
                     });
-                    pending.name = Some(name.clone());
-                    pending.notify_generation_complete = true;
+                    queue_pending_skybox_activation(&mut pending, name.clone(), true);
                     ui.target_name = Some(name.clone());
                     ui.phase = SkyboxGenerationPhase::PendingApply;
                     ui.message = Some(format!("Loading skybox `{name}`…"));
@@ -1033,7 +1045,7 @@ fn apply_skybox_to_camera(mut params: ApplySkyboxParams) {
                 let entry = match params.cache.entry(name) {
                     Ok(entry) => entry.clone(),
                     Err(error) => {
-                        params.pending.name = Some(name.clone());
+                        queue_pending_skybox_activation(&mut params.pending, name.clone(), false);
                         debug!("skybox `{name}` queued until manifest contains entry: {error}");
                         continue;
                     }
@@ -1050,8 +1062,7 @@ fn apply_skybox_to_camera(mut params: ApplySkyboxParams) {
                     })
                     .clone();
                 if !is_cubemap_ready(&handle, &mut params.images) {
-                    params.pending.name = Some(name.clone());
-                    params.pending.notify_generation_complete = false;
+                    queue_pending_skybox_activation(&mut params.pending, name.clone(), false);
                     debug!("skybox `{name}` queued until cubemap asset is ready");
                     continue;
                 }
@@ -1839,6 +1850,32 @@ mod tests {
         assert!(!stale.exists());
 
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn queued_reapply_preserves_generation_completion_notification() {
+        let mut pending = PendingSkyboxActivation {
+            name: Some("generated_sky".into()),
+            notify_generation_complete: true,
+        };
+
+        queue_pending_skybox_activation(&mut pending, "generated_sky".into(), false);
+
+        assert_eq!(pending.name.as_deref(), Some("generated_sky"));
+        assert!(pending.notify_generation_complete);
+    }
+
+    #[test]
+    fn queued_different_skybox_replaces_completion_notification() {
+        let mut pending = PendingSkyboxActivation {
+            name: Some("generated_sky".into()),
+            notify_generation_complete: true,
+        };
+
+        queue_pending_skybox_activation(&mut pending, "manual_sky".into(), false);
+
+        assert_eq!(pending.name.as_deref(), Some("manual_sky"));
+        assert!(!pending.notify_generation_complete);
     }
 
     #[test]
