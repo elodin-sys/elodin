@@ -7,7 +7,9 @@ use std::{
 use crate::plugins::kdl_document::{
     CurrentDocument, LastSyncedSchematicContent, SchematicDocumentAsset, sync_document_skybox,
 };
-use crate::skybox_generation::{push_skybox_active_metadata, record_synced_schematic_content};
+use crate::skybox_generation::{
+    push_schematic_metadata, push_skybox_active_metadata, record_synced_schematic_content,
+};
 use bevy::{
     asset::{AssetServer, Assets},
     camera::visibility::Visibility,
@@ -1171,8 +1173,12 @@ fn sync_skybox_to_document_and_db(
 ) {
     let kdl = sync_document_skybox(skybox, current_document, document_assets, schematic);
     record_synced_schematic_content(last_synced_content, &kdl);
-    let active = schematic.skybox.as_ref().map(|entry| entry.name.as_str());
-    push_skybox_active_metadata(tx, active);
+    if schematic.skybox.is_none() {
+        // Clear must update schematic.content too; render-server falls back to KDL skybox nodes.
+        push_schematic_metadata(tx, kdl, Some(None));
+    } else if let Some(entry) = schematic.skybox.as_ref() {
+        push_skybox_active_metadata(tx, Some(&entry.name));
+    }
 }
 
 fn clear_skybox() -> PaletteItem {

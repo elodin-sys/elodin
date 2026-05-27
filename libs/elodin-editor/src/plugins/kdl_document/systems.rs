@@ -192,14 +192,16 @@ pub(super) fn activate_document_skybox(
     mut skyboxes: MessageWriter<SetActiveSkybox>,
 ) {
     for event in loaded.read() {
-        if let Some(skybox) = event.document.root.skybox.as_ref() {
-            skyboxes.write(SetActiveSkybox::ByName(skybox.name.clone()));
+        match event.document.root.skybox.as_ref() {
+            Some(skybox) => skyboxes.write(SetActiveSkybox::ByName(skybox.name.clone())),
+            None => skyboxes.write(SetActiveSkybox::Clear),
         }
     }
 
     for event in reloaded.read() {
-        if let Some(skybox) = event.document.root.skybox.as_ref() {
-            skyboxes.write(SetActiveSkybox::ByName(skybox.name.clone()));
+        match event.document.root.skybox.as_ref() {
+            Some(skybox) => skyboxes.write(SetActiveSkybox::ByName(skybox.name.clone())),
+            None => skyboxes.write(SetActiveSkybox::Clear),
         }
     }
 }

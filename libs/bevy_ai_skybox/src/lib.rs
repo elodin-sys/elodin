@@ -894,6 +894,8 @@ fn apply_skybox_to_camera(mut params: ApplySkyboxParams) {
                 {
                     continue;
                 }
+                params.pending.name = None;
+                params.pending.notify_generation_complete = false;
                 params.cache.active = None;
                 for (entity, primary, skybox) in &mut params.cameras {
                     if !params.settings.apply_to_all_cameras && primary.is_none() {
