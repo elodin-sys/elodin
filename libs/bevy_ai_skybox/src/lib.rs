@@ -13,6 +13,7 @@ use std::{
 };
 
 use bevy::{
+    asset::LoadState,
     core_pipeline::Skybox,
     image::Image,
     light::{EnvironmentMapLight, GeneratedEnvironmentMapLight},
@@ -570,8 +571,8 @@ mod system_params {
 
     use super::{
         ConfiguredCubemapIds, PendingSkyboxActivation, PrimarySkybox, SetActiveSkybox,
-        SkyboxAssetSettings, SkyboxCache, SkyboxGenerationComplete, SkyboxGenerationUi,
-        SkyboxReady,
+        SkyboxAssetSettings, SkyboxCache, SkyboxFailed, SkyboxGenerationComplete,
+        SkyboxGenerationUi, SkyboxReady,
     };
 
     type SkyboxCameraQuery<'w, 's> = Query<
@@ -608,6 +609,7 @@ mod system_params {
         pub configured: ResMut<'w, ConfiguredCubemapIds>,
         pub activate: MessageWriter<'w, SetActiveSkybox>,
         pub complete: MessageWriter<'w, SkyboxGenerationComplete>,
+        pub failed: MessageWriter<'w, SkyboxFailed>,
         pub ui: Option<ResMut<'w, SkyboxGenerationUi>>,
     }
 }
@@ -882,6 +884,22 @@ fn apply_pending_skybox_activation(mut params: ApplyPendingSkyboxParams) {
         .clone();
 
     if !is_cubemap_ready(&handle, &mut params.images) {
+        if let Some(error) = pending_cubemap_load_error(&params.asset_server, &handle) {
+            warn!("pending skybox `{name}` failed to load: {error}");
+            params.pending.name = None;
+            params.pending.notify_generation_complete = false;
+            params.failed.write(SkyboxFailed {
+                name: name.clone(),
+                error: SkyboxError::GenerationFailed(format!(
+                    "failed to load generated cubemap `{name}`: {error}"
+                )),
+            });
+            if let Some(mut ui) = params.ui {
+                ui.target_name = None;
+                ui.phase = SkyboxGenerationPhase::Failed;
+                ui.message = Some(format!("Skybox `{name}` failed to load"));
+            }
+        }
         return;
     }
     params.configured.0.insert(handle.id());
@@ -904,6 +922,17 @@ fn apply_pending_skybox_activation(mut params: ApplyPendingSkyboxParams) {
 
 fn is_cubemap_ready(handle: &Handle<Image>, images: &mut Assets<Image>) -> bool {
     configure_cubemap_image(handle, images)
+}
+
+fn pending_cubemap_load_error(
+    asset_server: &AssetServer,
+    handle: &Handle<Image>,
+) -> Option<String> {
+    match asset_server.load_state(handle) {
+        LoadState::Failed(error) => Some(error.to_string()),
+        LoadState::Loaded => Some("asset is not a cube texture".to_string()),
+        _ => None,
+    }
 }
 
 fn track_skybox_generation_failures(
@@ -1117,24 +1146,38 @@ fn configure_cubemap_image(handle: &Handle<Image>, images: &mut Assets<Image>) -
     {
         return true;
     }
-    if image.texture_descriptor.array_layer_count() != 1 || image.width() == 0 {
+    if image.width() == 0 {
         return false;
     }
 
-    let layers = image.height() / image.width();
-    if layers != 6 {
-        return false;
+    let array_layers = image.texture_descriptor.array_layer_count();
+    if array_layers == 6 {
+        let Some(image) = images.get_mut(handle) else {
+            return false;
+        };
+        image.texture_view_descriptor = Some(TextureViewDescriptor {
+            dimension: Some(TextureViewDimension::Cube),
+            ..default()
+        });
+        return true;
     }
 
-    let Some(image) = images.get_mut(handle) else {
-        return false;
-    };
-    let _ = image.reinterpret_stacked_2d_as_array(layers);
-    image.texture_view_descriptor = Some(TextureViewDescriptor {
-        dimension: Some(TextureViewDimension::Cube),
-        ..default()
-    });
-    true
+    if array_layers == 1 {
+        let layers = image.height() / image.width();
+        if layers == 6 {
+            let Some(image) = images.get_mut(handle) else {
+                return false;
+            };
+            let _ = image.reinterpret_stacked_2d_as_array(layers);
+            image.texture_view_descriptor = Some(TextureViewDescriptor {
+                dimension: Some(TextureViewDimension::Cube),
+                ..default()
+            });
+            return true;
+        }
+    }
+
+    false
 }
 
 fn watch_manifest_changes(
