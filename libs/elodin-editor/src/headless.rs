@@ -258,6 +258,10 @@ fn headless_skybox_applied(
         .filter(|(primary, _)| settings.apply_to_all_cameras || primary.is_some())
         .collect();
 
+    if targets.is_empty() {
+        return false;
+    }
+
     match desired {
         None => targets.iter().all(|(_, skybox)| skybox.is_none()),
         Some(name) => {
@@ -561,19 +565,8 @@ fn render_and_emit(app: &mut App, sim_ts: Timestamp, due_names: &[String]) {
 fn render_without_emit(app: &mut App, sim_ts: Timestamp, due_names: &[String]) {
     app.world_mut().resource_mut::<CurrentTimestamp>().0 = sim_ts;
 
-    drain_stale_frames(app);
     set_cameras_active(app.world_mut(), due_names, true);
-    set_readback_armed(app.world_mut(), due_names, true);
-
     run_headless_update(app);
-    let frames = collect_frames(app, due_names);
-    if frames.len() < due_names.len() {
-        run_headless_update(app);
-        let _ = collect_frames(app, due_names);
-    }
-    drain_stale_frames(app);
-
-    set_readback_armed(app.world_mut(), due_names, false);
     set_cameras_active(app.world_mut(), due_names, false);
 }
 
