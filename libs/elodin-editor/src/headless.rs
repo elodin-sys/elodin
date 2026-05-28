@@ -217,8 +217,8 @@ fn load_headless_scene(
 }
 
 fn desired_skybox_from_config(config: &DbConfig) -> Option<Option<String>> {
-    if let Some(name) = config.skybox_active() {
-        return Some(Some(name.to_string()));
+    if let Some(desired) = config.skybox_active_desired() {
+        return Some(desired);
     }
 
     let content = config.schematic_content()?;
