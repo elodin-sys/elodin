@@ -357,6 +357,7 @@ mod tests {
     #[test]
     fn loaded_document_with_skybox_requests_activation() {
         let mut app = skybox_message_test_app();
+        app.world_mut().resource_mut::<SkyboxCache>().active = Some("alien_swamp".to_string());
         app.world_mut().write_message(DocumentLoaded {
             save_path: None,
             document: SchematicDocumentAsset {
@@ -376,10 +377,7 @@ mod tests {
             messages.as_slice(),
             [SetActiveSkybox::ByName(name)] if name == "grand_canyon"
         ));
-        assert_eq!(
-            app.world().resource::<SkyboxCache>().active.as_deref(),
-            Some("grand_canyon")
-        );
+        assert!(app.world().resource::<SkyboxCache>().active.is_none());
     }
 
     #[test]

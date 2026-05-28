@@ -486,7 +486,6 @@ fn render_server_runner(mut app: App) -> AppExit {
         }
 
         if schedules.is_empty() {
-            run_headless_update(&mut app);
             std::thread::sleep(Duration::from_millis(50));
             continue;
         }
@@ -494,7 +493,6 @@ fn render_server_runner(mut app: App) -> AppExit {
         let sim_ts = app.world().resource::<LastUpdated>().0;
         if sim_ts.0 == i64::MIN {
             // Sim hasn't published a `LastUpdated` yet.
-            run_headless_update(&mut app);
             std::thread::sleep(Duration::from_millis(20));
             continue;
         }

@@ -208,17 +208,15 @@ fn activate_skybox_config(
     skyboxes: &mut MessageWriter<SetActiveSkybox>,
     cache: &mut Option<ResMut<SkyboxCache>>,
 ) {
+    if let Some(cache) = cache.as_mut() {
+        // Drop stale cache state; bevy_ai_skybox sets `active` once the cubemap is ready.
+        cache.active = None;
+    }
     match skybox {
         Some(skybox) => {
-            if let Some(cache) = cache.as_mut() {
-                cache.active = Some(skybox.name.clone());
-            }
             skyboxes.write(SetActiveSkybox::ByName(skybox.name.clone()));
         }
         None => {
-            if let Some(cache) = cache.as_mut() {
-                cache.active = None;
-            }
             skyboxes.write(SetActiveSkybox::Clear);
         }
     }
