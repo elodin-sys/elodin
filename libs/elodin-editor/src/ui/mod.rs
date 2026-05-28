@@ -374,6 +374,9 @@ impl Plugin for UiPlugin {
                     handle_window_relayout_events,
                     set_secondary_camera_viewport,
                     set_camera_viewport,
+                    // After viewport layout: needs logical_viewport_rect + UiInputOwners.
+                    // EditorCam::update_camera_positions stays in PreUpdate, so motion applies
+                    // next frame (~1 frame lag; intentional vs stale viewport in PreUpdate).
                     (
                         crate::plugins::editor_cam_input::gated_camera_inputs,
                         EditorCamInputMessage::receive_messages,

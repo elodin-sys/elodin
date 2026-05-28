@@ -18,6 +18,8 @@ use bevy_picking::pointer::{PointerAction, PointerId, PointerInput};
 
 use crate::ui::input_owner::UiInputOwners;
 
+/// Registers message/resources only. Input systems run in [`crate::ui`] after
+/// [`crate::ui::set_camera_viewport`] so hit tests use the current viewport rect.
 pub struct EditorCamInputPlugin;
 
 impl Plugin for EditorCamInputPlugin {
