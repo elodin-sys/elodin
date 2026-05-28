@@ -100,6 +100,7 @@ public:
     void drain_replies(const std::string& label)
     {
         try {
+            auto pending = std::vector<uint8_t>();
             while (true) {
                 auto data = std::vector<uint8_t>(1024);
                 auto len = read(data.data(), data.size());
@@ -107,6 +108,7 @@ public:
                     std::println("[{}] replies closed", label);
                     break;
                 }
+                log_elodin_db_replies(pending, std::span(data.data(), len), label);
             }
         } catch (const std::exception& e) {
             std::cerr << "[" << label << "] reply drain error: " << e.what() << std::endl;
