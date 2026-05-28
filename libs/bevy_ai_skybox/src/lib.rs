@@ -98,7 +98,10 @@ impl SkyboxStyle {
 }
 
 /// Local cubemap face size used when converting Blockade equirect downloads.
-/// These names describe output face resolution, not Blockade export tier IDs.
+///
+/// Variant names approximate the Blockade equirect tier (e.g. `EightK` ≈ 8K source),
+/// not the per-face cubemap pixel size. Use [`SkyboxResolution::face_size`] for output
+/// dimensions (256, 512, 1024, 2048, or 4096 px per face).
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub enum SkyboxResolution {
     OneK,
