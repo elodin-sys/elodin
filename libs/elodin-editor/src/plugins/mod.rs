@@ -13,6 +13,7 @@ pub mod navigation_gizmo;
 pub mod render_layer_alloc;
 pub mod view_cube;
 mod web_asset;
+pub(crate) mod world_mesh;
 
 pub use logical_key::{LogicalKeyPlugin, LogicalKeyState};
 pub use view_cube::{ViewCubeConfig, ViewCubeEvent, ViewCubePlugin};

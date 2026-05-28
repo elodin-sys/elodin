@@ -119,6 +119,8 @@ pub struct LoadSchematicParams<'w, 's> {
     pub document_assets: Res<'w, Assets<SchematicDocumentAsset>>,
     pub meshes: ResMut<'w, Assets<Mesh>>,
     pub materials: ResMut<'w, Assets<StandardMaterial>>,
+    pub world_mesh_materials:
+        ResMut<'w, Assets<bevy_world_mesh::scenes::planar::WorldMeshMaterial>>,
     pub mat3_materials: ResMut<'w, Assets<Mat3Material>>,
     pub images: ResMut<'w, Assets<Image>>,
     pub icon_cache: ResMut<'w, IconTextureCache>,
@@ -300,6 +302,13 @@ impl LoadSchematicParams<'_, '_> {
                         arrow.frame = fallback_frame;
                     }
                     self.spawn_vector_arrow(arrow, None);
+                }
+                impeller2_wkt::SchematicElem::WorldMesh(world_mesh) => {
+                    let mut wm = world_mesh.clone();
+                    if wm.frame.is_none() {
+                        wm.frame = fallback_frame;
+                    }
+                    self.spawn_world_mesh(wm);
                 }
                 impeller2_wkt::SchematicElem::Window(_) => {}
                 impeller2_wkt::SchematicElem::Theme(_) => {}
@@ -690,6 +699,62 @@ impl LoadSchematicParams<'_, '_> {
         if let Some(camera) = viewport_camera {
             spawn.insert(ViewportArrow { camera });
         }
+    }
+
+    pub fn spawn_world_mesh(&mut self, world_mesh: impeller2_wkt::WorldMesh) {
+        let mut config = bevy_world_mesh::terrain::TerrainConfig::new(world_mesh.region.clone());
+
+        // Keep the first-pass backdrop small and predictable.
+        if let Some(lod_count) = world_mesh.lod_count {
+            // Crude heuristic: higher LOD count implies we want a larger "context" backdrop.
+            // (The real renderer will use lod_count to pick atlas depth.)
+            let scale = (lod_count as f32).clamp(1.0, 6.0) / 2.0;
+            config.width_m *= scale;
+            config.depth_m *= scale;
+        }
+
+        let (tx, ty, tz) = world_mesh.translate.unwrap_or((0.0, 0.0, 0.0));
+        let transform = Transform::from_translation(Vec3::new(tx as f32, ty as f32, tz as f32));
+
+        let entity = if world_mesh.region == "globe" {
+            // Stand-in globe: a sphere around the origin.
+            bevy_world_mesh::scenes::globe::spawn_globe_backdrop(
+                &mut self.commands,
+                &mut self.meshes,
+                &mut self.world_mesh_materials,
+                1000.0,
+                transform,
+                world_mesh.visible,
+            )
+        } else if let Some(entity) = bevy_world_mesh::scenes::planar::try_spawn_planar_from_atlas(
+            &mut self.commands,
+            &mut self.meshes,
+            &mut self.world_mesh_materials,
+            &mut self.images,
+            &world_mesh.region,
+            transform,
+            world_mesh.visible,
+        ) {
+            entity
+        } else {
+            bevy_world_mesh::scenes::planar::spawn_planar_backdrop(
+                &mut self.commands,
+                &mut self.meshes,
+                &mut self.world_mesh_materials,
+                &config,
+                transform,
+                world_mesh.visible,
+            )
+        };
+
+        #[cfg(feature = "big_space")]
+        self.commands
+            .entity(entity)
+            .insert(crate::spatial::GridCell::default());
+
+        self.commands
+            .entity(entity)
+            .insert((SchematicSpawned, world_mesh));
     }
 
     fn spawn_panel(

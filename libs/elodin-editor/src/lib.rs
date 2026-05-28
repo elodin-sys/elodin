@@ -305,6 +305,7 @@ impl Plugin for EditorPlugin {
             .init_resource::<ui::data_overview::ComponentTimeRanges>()
             .add_plugins(bevy_mat3_material::Mat3MaterialPlugin)
             .add_plugins(object_3d::Object3DPlugin)
+            .add_plugins(plugins::world_mesh::WorldMeshPlugin)
             .add_plugins(GeoFramePlugin {
                 apply_transforms: false,
                 ..default()

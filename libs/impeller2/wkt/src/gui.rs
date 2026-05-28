@@ -70,6 +70,7 @@ pub enum SchematicElem {
     Object3d(Object3D),
     Line3d(Line3d),
     VectorArrow(VectorArrow3d),
+    WorldMesh(WorldMesh),
     Window(WindowSchematic),
     Theme(ThemeConfig),
     Timeline(TimelineConfig),
@@ -806,6 +807,36 @@ pub struct Object3D {
 
 impl Asset for Object3D {
     const NAME: &'static str = "object3d";
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[cfg_attr(feature = "bevy", derive(bevy::prelude::Component))]
+pub struct WorldMesh {
+    /// The terrain region identifier (e.g. "death_valley" or "globe").
+    pub region: String,
+
+    /// Optional override for LOD depth.
+    #[serde(default)]
+    pub lod_count: Option<u32>,
+
+    /// Optional translation applied to the terrain root, in meters.
+    #[serde(default)]
+    pub translate: Option<(f64, f64, f64)>,
+
+    /// Optional coordinate frame for the terrain axes.
+    #[serde(default)]
+    pub frame: Option<bevy_geo_frames::GeoFrame>,
+
+    /// Whether the terrain is visible.
+    #[serde(default = "default_true")]
+    pub visible: bool,
+
+    #[serde(default)]
+    pub node_id: NodeId,
+}
+
+impl Asset for WorldMesh {
+    const NAME: &'static str = "world_mesh";
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

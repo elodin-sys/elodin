@@ -1,0 +1,23 @@
+[package]
+name = "bevy_world_mesh"
+description = "Large-scale real-world terrain renderer for Bevy (vendored into Elodin)."
+license = "MIT OR Apache-2.0"
+version.workspace = true
+edition = "2024"
+publish = false
+
+[features]
+# Kept for parity with the upstream world_mesh feature surface. In this first-pass
+# integration they are mostly placeholders so downstream crates can already depend
+# on the eventual feature names.
+default = ["scenes"]
+scenes = []
+high_precision = []
+
+[dependencies]
+bevy.workspace = true
+# Used for decoding `config.tc` (bincode v2).
+bincode = { version = "2", features = ["std", "derive"] }
+# Used for parsing optional `region.toml` metadata.
+toml = "0.8"
+

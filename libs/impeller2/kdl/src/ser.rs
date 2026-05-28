@@ -35,6 +35,7 @@ fn serialize_schematic_elem(elem: &SchematicElem) -> KdlNode {
         SchematicElem::Object3d(obj) => serialize_object_3d(obj),
         SchematicElem::Line3d(line) => serialize_line_3d(line),
         SchematicElem::VectorArrow(arrow) => serialize_vector_arrow(arrow),
+        SchematicElem::WorldMesh(world_mesh) => serialize_world_mesh(world_mesh),
         SchematicElem::Window(window) => serialize_window(window),
         SchematicElem::Theme(theme) => serialize_theme(theme),
         SchematicElem::Timeline(timeline) => serialize_timeline(timeline),
@@ -46,6 +47,36 @@ fn serialize_coordinate(frame: bevy_geo_frames::GeoFrame) -> KdlNode {
     let mut node = KdlNode::new("coordinate");
     node.entries_mut()
         .push(KdlEntry::new_prop("frame", <&str>::from(frame)));
+    node
+}
+
+fn serialize_world_mesh(world_mesh: &WorldMesh) -> KdlNode {
+    let mut node = KdlNode::new("world_mesh");
+
+    node.entries_mut()
+        .push(KdlEntry::new(world_mesh.region.clone()));
+
+    if let Some(lod_count) = world_mesh.lod_count {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("lod_count", i128::from(lod_count)));
+    }
+
+    if let Some((x, y, z)) = world_mesh.translate {
+        let tuple_str = format!("({x}, {y}, {z})");
+        node.entries_mut()
+            .push(KdlEntry::new_prop("translate", tuple_str));
+    }
+
+    if let Some(frame) = world_mesh.frame {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("frame", <&str>::from(frame)));
+    }
+
+    if !world_mesh.visible {
+        node.entries_mut()
+            .push(KdlEntry::new_prop("visible", false));
+    }
+
     node
 }
 

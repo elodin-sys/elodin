@@ -47,6 +47,7 @@ fn parse_schematic_elem(node: &KdlNode, src: &str) -> Result<SchematicElem, KdlS
         "object_3d" => Ok(SchematicElem::Object3d(parse_object_3d(node, src)?)),
         "line_3d" => Ok(SchematicElem::Line3d(parse_line_3d(node, src)?)),
         "vector_arrow" => Ok(SchematicElem::VectorArrow(parse_vector_arrow(node, src)?)),
+        "world_mesh" => Ok(SchematicElem::WorldMesh(parse_world_mesh(node, src)?)),
         "coordinate" => Ok(SchematicElem::Coordinate(parse_coordinate(node, src)?)),
         _ => Err(KdlSchematicError::UnknownNode {
             node_type: node.name().to_string(),
@@ -245,6 +246,48 @@ fn parse_coordinate(node: &KdlNode, src: &str) -> Result<GeoFrame, KdlSchematicE
         expected: "ENU, NED, or ECEF".to_string(),
         src: src.to_string(),
         span: node.span(),
+    })
+}
+
+fn parse_world_mesh(node: &KdlNode, src: &str) -> Result<WorldMesh, KdlSchematicError> {
+    let region = node
+        .entries()
+        .iter()
+        .find(|e| e.name().is_none())
+        .and_then(|e| e.value().as_string())
+        .or_else(|| node.get("region").and_then(|v| v.as_string()))
+        .ok_or_else(|| KdlSchematicError::MissingProperty {
+            property: "region".to_string(),
+            node: "world_mesh".to_string(),
+            src: src.to_string(),
+            span: node.span(),
+        })?
+        .to_string();
+
+    let lod_count = node
+        .get("lod_count")
+        .and_then(|v| v.as_integer())
+        .map(|v| v as u32);
+
+    let translate = parse_tuple_f64(node, "translate");
+
+    let frame = node
+        .get("frame")
+        .and_then(|v| v.as_string())
+        .and_then(|s| GeoFrame::from_str(s).ok());
+
+    let visible = node
+        .get("visible")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true);
+
+    Ok(WorldMesh {
+        region,
+        lod_count,
+        translate,
+        frame,
+        visible,
+        node_id: NodeId::default(),
     })
 }
 
@@ -1452,6 +1495,29 @@ fn parse_tuple_f32(node: &KdlNode, property: &str) -> Option<(f32, f32, f32)> {
     let x = parts[0].trim().parse::<f32>().ok()?;
     let y = parts[1].trim().parse::<f32>().ok()?;
     let z = parts[2].trim().parse::<f32>().ok()?;
+
+    Some((x, y, z))
+}
+
+fn parse_tuple_f64(node: &KdlNode, property: &str) -> Option<(f64, f64, f64)> {
+    let value_str = node.get(property).and_then(|v| v.as_string())?;
+
+    // Parse string like "(1.0, 2.0, 3.0)" or "(1, 2, 3)"
+    let trimmed = value_str.trim();
+    if !trimmed.starts_with('(') || !trimmed.ends_with(')') {
+        return None;
+    }
+
+    let inner = &trimmed[1..trimmed.len() - 1];
+    let parts: Vec<&str> = inner.split(',').collect();
+
+    if parts.len() != 3 {
+        return None;
+    }
+
+    let x = parts[0].trim().parse::<f64>().ok()?;
+    let y = parts[1].trim().parse::<f64>().ok()?;
+    let z = parts[2].trim().parse::<f64>().ok()?;
 
     Some((x, y, z))
 }
