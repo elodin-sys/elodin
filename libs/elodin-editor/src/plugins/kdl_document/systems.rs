@@ -1,6 +1,7 @@
 use bevy::asset::{AssetEvent, AssetLoadFailedEvent};
 use bevy::prelude::*;
-use bevy_ai_skybox::prelude::SetActiveSkybox;
+use bevy_ai_skybox::prelude::{SetActiveSkybox, SkyboxCache};
+use impeller2_wkt::SkyboxConfig;
 use std::path::PathBuf;
 
 use super::commands::*;
@@ -183,26 +184,42 @@ pub(super) fn activate_document_skybox(
     mut loaded: MessageReader<DocumentLoaded>,
     mut reloaded: MessageReader<DocumentReloaded>,
     mut skyboxes: MessageWriter<SetActiveSkybox>,
+    mut cache: Option<ResMut<SkyboxCache>>,
 ) {
     for event in loaded.read() {
-        match event.document.root.skybox.as_ref() {
-            Some(skybox) => {
-                skyboxes.write(SetActiveSkybox::ByName(skybox.name.clone()));
-            }
-            None => {
-                skyboxes.write(SetActiveSkybox::Clear);
-            }
-        }
+        activate_skybox_config(
+            event.document.root.skybox.as_ref(),
+            &mut skyboxes,
+            &mut cache,
+        );
     }
 
     for event in reloaded.read() {
-        match event.document.root.skybox.as_ref() {
-            Some(skybox) => {
-                skyboxes.write(SetActiveSkybox::ByName(skybox.name.clone()));
+        activate_skybox_config(
+            event.document.root.skybox.as_ref(),
+            &mut skyboxes,
+            &mut cache,
+        );
+    }
+}
+
+fn activate_skybox_config(
+    skybox: Option<&SkyboxConfig>,
+    skyboxes: &mut MessageWriter<SetActiveSkybox>,
+    cache: &mut Option<ResMut<SkyboxCache>>,
+) {
+    match skybox {
+        Some(skybox) => {
+            if let Some(cache) = cache.as_mut() {
+                cache.active = Some(skybox.name.clone());
             }
-            None => {
-                skyboxes.write(SetActiveSkybox::Clear);
+            skyboxes.write(SetActiveSkybox::ByName(skybox.name.clone()));
+        }
+        None => {
+            if let Some(cache) = cache.as_mut() {
+                cache.active = None;
             }
+            skyboxes.write(SetActiveSkybox::Clear);
         }
     }
 }

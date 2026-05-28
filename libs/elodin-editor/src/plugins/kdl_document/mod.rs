@@ -62,9 +62,15 @@ mod tests {
     use bevy::{
         app::TaskPoolPlugin,
         asset::{AssetPath, AssetPlugin, UnapprovedPathMode},
+        core_pipeline::Skybox,
+        image::Image,
         prelude::*,
+        render::render_resource::{Extent3d, TextureDimension, TextureFormat},
     };
-    use bevy_ai_skybox::prelude::SetActiveSkybox;
+    use bevy_ai_skybox::{
+        ManifestEntry, SkyboxStyle,
+        prelude::{PrimarySkybox, SetActiveSkybox, SkyboxAssetPlugin, SkyboxCache},
+    };
     use impeller2_wkt::{SchematicElem, SkyboxConfig};
     use std::{
         ffi::OsString,
@@ -216,6 +222,7 @@ mod tests {
             .add_message::<DocumentLoaded>()
             .add_message::<DocumentReloaded>()
             .add_message::<SetActiveSkybox>()
+            .insert_resource(SkyboxCache::empty(PathBuf::from("manifest.ron")))
             .init_resource::<SeenSkyboxMessages>()
             .add_systems(
                 Update,
@@ -226,6 +233,89 @@ mod tests {
                     .chain(),
             );
         app
+    }
+
+    fn test_manifest_entry(name: &str) -> ManifestEntry {
+        ManifestEntry {
+            name: name.to_string(),
+            prompt: name.to_string(),
+            style: SkyboxStyle::default(),
+            blockade: None,
+            equirect_file: None,
+            cubemap_file: format!("{name}.cubemap.ktx2"),
+            face_size: 1,
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+        }
+    }
+
+    fn test_cubemap_image() -> Image {
+        Image::new(
+            Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 6,
+            },
+            TextureDimension::D2,
+            vec![255; 4 * 6],
+            TextureFormat::Rgba8UnormSrgb,
+            default(),
+        )
+    }
+
+    fn skybox_runtime_test_app(cache_dir: &Path) -> App {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_plugins(AssetPlugin {
+                unapproved_path_mode: UnapprovedPathMode::Allow,
+                ..Default::default()
+            })
+            .init_asset::<Image>()
+            .add_plugins(SkyboxAssetPlugin {
+                cache_dir: cache_dir.to_path_buf(),
+                asset_dir: PathBuf::from("skyboxes"),
+                manifest_file: PathBuf::from("manifest.ron"),
+                default_skybox: None,
+                apply_to_all_cameras: false,
+                env_lighting: false,
+                watch_manifest: false,
+                manifest_poll_secs: 1.0,
+            });
+        plugin(&mut app);
+        app.world_mut().spawn((Camera3d::default(), PrimarySkybox));
+        app
+    }
+
+    fn register_runtime_test_skybox(app: &mut App, name: &str) -> Handle<Image> {
+        let handle = app
+            .world_mut()
+            .resource_mut::<Assets<Image>>()
+            .add(test_cubemap_image());
+        let mut cache = app.world_mut().resource_mut::<SkyboxCache>();
+        cache.manifest.upsert(test_manifest_entry(name));
+        cache.handles.insert(name.to_string(), handle.clone());
+        handle
+    }
+
+    fn camera_skybox_handle(app: &mut App) -> Option<Handle<Image>> {
+        let world = app.world_mut();
+        let mut query = world.query::<&Skybox>();
+        query.iter(world).next().map(|skybox| skybox.image.clone())
+    }
+
+    fn load_test_document(app: &mut App, skybox: Option<&str>) {
+        app.world_mut().write_message(DocumentLoaded {
+            save_path: None,
+            document: SchematicDocumentAsset {
+                root: impeller2_wkt::Schematic {
+                    skybox: skybox.map(|name| SkyboxConfig {
+                        name: name.to_string(),
+                    }),
+                    ..default()
+                },
+                windows: Vec::new(),
+            },
+        });
+        app.update();
     }
 
     #[test]
@@ -250,11 +340,16 @@ mod tests {
             messages.as_slice(),
             [SetActiveSkybox::ByName(name)] if name == "grand_canyon"
         ));
+        assert_eq!(
+            app.world().resource::<SkyboxCache>().active.as_deref(),
+            Some("grand_canyon")
+        );
     }
 
     #[test]
     fn loaded_document_without_skybox_requests_clear() {
         let mut app = skybox_message_test_app();
+        app.world_mut().resource_mut::<SkyboxCache>().active = Some("grand_canyon".to_string());
         app.world_mut().write_message(DocumentLoaded {
             save_path: None,
             document: SchematicDocumentAsset {
@@ -266,6 +361,56 @@ mod tests {
 
         let messages = &app.world().resource::<SeenSkyboxMessages>().0;
         assert!(matches!(messages.as_slice(), [SetActiveSkybox::Clear]));
+        assert!(app.world().resource::<SkyboxCache>().active.is_none());
+    }
+
+    #[test]
+    fn loaded_document_skybox_applies_to_camera_without_current_skybox() {
+        let temp = TempTestDir::new("skybox-runtime-empty");
+        let mut app = skybox_runtime_test_app(temp.path());
+        let expected = register_runtime_test_skybox(&mut app, "grand_canyon");
+
+        load_test_document(&mut app, Some("grand_canyon"));
+
+        assert_eq!(camera_skybox_handle(&mut app).as_ref(), Some(&expected));
+        assert_eq!(
+            app.world().resource::<SkyboxCache>().active.as_deref(),
+            Some("grand_canyon")
+        );
+    }
+
+    #[test]
+    fn loaded_document_skybox_replaces_existing_camera_skybox() {
+        let temp = TempTestDir::new("skybox-runtime-replace");
+        let mut app = skybox_runtime_test_app(temp.path());
+        let first = register_runtime_test_skybox(&mut app, "alien_swamp");
+        let second = register_runtime_test_skybox(&mut app, "grand_canyon");
+
+        load_test_document(&mut app, Some("alien_swamp"));
+        assert_eq!(camera_skybox_handle(&mut app).as_ref(), Some(&first));
+
+        load_test_document(&mut app, Some("grand_canyon"));
+
+        assert_eq!(camera_skybox_handle(&mut app).as_ref(), Some(&second));
+        assert_eq!(
+            app.world().resource::<SkyboxCache>().active.as_deref(),
+            Some("grand_canyon")
+        );
+    }
+
+    #[test]
+    fn loaded_document_without_skybox_clears_existing_camera_skybox() {
+        let temp = TempTestDir::new("skybox-runtime-clear");
+        let mut app = skybox_runtime_test_app(temp.path());
+        let active = register_runtime_test_skybox(&mut app, "grand_canyon");
+
+        load_test_document(&mut app, Some("grand_canyon"));
+        assert_eq!(camera_skybox_handle(&mut app).as_ref(), Some(&active));
+
+        load_test_document(&mut app, None);
+
+        assert!(camera_skybox_handle(&mut app).is_none());
+        assert!(app.world().resource::<SkyboxCache>().active.is_none());
     }
 
     #[test]

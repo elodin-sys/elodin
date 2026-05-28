@@ -95,7 +95,11 @@ pub(crate) fn sync_loaded_schematic_to_db(
 
     let kdl = document.root.to_kdl();
     record_synced_schematic_content(&mut last_synced_content, &kdl);
-    let active = document.root.skybox.as_ref().map(|skybox| skybox.name.as_str());
+    let active = document
+        .root
+        .skybox
+        .as_ref()
+        .map(|skybox| skybox.name.as_str());
     locally_pushed.mark(active);
     push_schematic_metadata(&tx, kdl, Some(active));
 }

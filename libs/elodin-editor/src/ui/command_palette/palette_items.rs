@@ -962,11 +962,12 @@ pub fn save_schematic() -> PaletteItem {
 fn queue_save_schematic_now(
     schematic: Res<CurrentSchematic>,
     window_schematics: Res<CurrentWindowSchematics>,
+    skybox_cache: Option<Res<SkyboxCache>>,
     mut requests: MessageWriter<SaveCurrentDocumentRequest>,
 ) {
     requests.write(SaveCurrentDocumentRequest {
         path: None,
-        root_kdl: schematic.0.to_kdl(),
+        root_kdl: root_kdl_for_save(&schematic, skybox_cache.as_deref()),
         windows: window_document_saves(&window_schematics),
     });
 }
@@ -975,8 +976,11 @@ pub fn save_schematic_db() -> PaletteItem {
     PaletteItem::new(
         "Save Schematic To DB",
         PRESETS_LABEL,
-        |_name: In<String>, tx: Res<PacketTx>, schematic: Res<CurrentSchematic>| {
-            let kdl = schematic.0.to_kdl();
+        |_name: In<String>,
+         tx: Res<PacketTx>,
+         schematic: Res<CurrentSchematic>,
+         skybox_cache: Option<Res<SkyboxCache>>| {
+            let kdl = root_kdl_for_save(&schematic, skybox_cache.as_deref());
             tx.send_msg(SetDbConfig {
                 metadata: [("schematic.content".to_string(), kdl)]
                     .into_iter()
@@ -1007,16 +1011,27 @@ pub fn save_schematic_inner() -> PaletteItem {
         move |In(name): In<String>,
               schematic: Res<CurrentSchematic>,
               window_schematics: Res<CurrentWindowSchematics>,
+              skybox_cache: Option<Res<SkyboxCache>>,
               mut requests: MessageWriter<SaveCurrentDocumentRequest>| {
             requests.write(SaveCurrentDocumentRequest {
                 path: Some(PathBuf::from(name)),
-                root_kdl: schematic.0.to_kdl(),
+                root_kdl: root_kdl_for_save(&schematic, skybox_cache.as_deref()),
                 windows: window_document_saves(&window_schematics),
             });
             PaletteEvent::Exit
         },
     )
     .default()
+}
+
+fn root_kdl_for_save(schematic: &CurrentSchematic, skybox_cache: Option<&SkyboxCache>) -> String {
+    let mut root = schematic.0.clone();
+    if let Some(cache) = skybox_cache {
+        root.skybox = cache.active.as_ref().map(|active| SkyboxConfig {
+            name: active.clone(),
+        });
+    }
+    root.to_kdl()
 }
 
 fn window_document_saves(window_schematics: &CurrentWindowSchematics) -> Vec<WindowDocumentSave> {
@@ -1188,7 +1203,7 @@ fn clear_skybox() -> PaletteItem {
         "Clear Skybox",
         SKYBOX_LABEL,
         |_: In<String>,
-         cache: Res<SkyboxCache>,
+         mut cache: ResMut<SkyboxCache>,
          mut skyboxes: MessageWriter<SetActiveSkybox>,
          mut schematic: ResMut<CurrentSchematic>,
          current_document: Res<CurrentDocument>,
@@ -1200,6 +1215,7 @@ fn clear_skybox() -> PaletteItem {
                 return PaletteEvent::Error("No skybox is active".into());
             }
             skyboxes.write(SetActiveSkybox::Clear);
+            cache.active = None;
             sync_skybox_to_document_and_db(
                 None,
                 &mut schematic,
@@ -1219,6 +1235,7 @@ fn activate_skybox_item(label: String, name: String) -> PaletteItem {
         label,
         SKYBOX_LABEL,
         move |_: In<String>,
+              mut cache: ResMut<SkyboxCache>,
               mut skyboxes: MessageWriter<SetActiveSkybox>,
               mut schematic: ResMut<CurrentSchematic>,
               current_document: Res<CurrentDocument>,
@@ -1227,6 +1244,7 @@ fn activate_skybox_item(label: String, name: String) -> PaletteItem {
               mut locally_pushed: ResMut<LocallyPushedSkyboxActive>,
               tx: Res<PacketTx>| {
             skyboxes.write(SetActiveSkybox::ByName(name.clone()));
+            cache.active = Some(name.clone());
             sync_skybox_to_document_and_db(
                 Some(SkyboxConfig { name: name.clone() }),
                 &mut schematic,
@@ -1752,5 +1770,85 @@ impl Default for PalettePage {
             })
             .icon(PaletteIcon::Link),
         ])
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use impeller2_kdl::FromKdl;
+    use impeller2_wkt::Schematic;
+
+    fn parse_saved_schematic(kdl: &str) -> Schematic {
+        Schematic::from_kdl(kdl).expect("saved KDL should parse")
+    }
+
+    #[test]
+    fn save_kdl_uses_active_skybox_from_cache() {
+        let schematic = CurrentSchematic(Schematic::default());
+        let mut cache = SkyboxCache::empty(PathBuf::from("manifest.ron"));
+        cache.active = Some("mont_blanc_france".to_string());
+
+        let kdl = root_kdl_for_save(&schematic, Some(&cache));
+        let parsed = parse_saved_schematic(&kdl);
+
+        assert_eq!(
+            parsed.skybox.as_ref().map(|skybox| skybox.name.as_str()),
+            Some("mont_blanc_france")
+        );
+    }
+
+    #[test]
+    fn save_kdl_active_skybox_replaces_stale_schematic_skybox() {
+        let schematic = CurrentSchematic(Schematic {
+            skybox: Some(SkyboxConfig {
+                name: "alien_swamp".to_string(),
+            }),
+            ..Default::default()
+        });
+        let mut cache = SkyboxCache::empty(PathBuf::from("manifest.ron"));
+        cache.active = Some("mont_blanc_france".to_string());
+
+        let kdl = root_kdl_for_save(&schematic, Some(&cache));
+        let parsed = parse_saved_schematic(&kdl);
+
+        assert_eq!(
+            parsed.skybox.as_ref().map(|skybox| skybox.name.as_str()),
+            Some("mont_blanc_france")
+        );
+    }
+
+    #[test]
+    fn save_kdl_clears_stale_schematic_skybox_when_cache_has_no_active_skybox() {
+        let schematic = CurrentSchematic(Schematic {
+            skybox: Some(SkyboxConfig {
+                name: "grand_canyon".to_string(),
+            }),
+            ..Default::default()
+        });
+        let cache = SkyboxCache::empty(PathBuf::from("manifest.ron"));
+
+        let kdl = root_kdl_for_save(&schematic, Some(&cache));
+        let parsed = parse_saved_schematic(&kdl);
+
+        assert!(parsed.skybox.is_none());
+    }
+
+    #[test]
+    fn save_kdl_preserves_schematic_skybox_when_cache_is_unavailable() {
+        let schematic = CurrentSchematic(Schematic {
+            skybox: Some(SkyboxConfig {
+                name: "grand_canyon".to_string(),
+            }),
+            ..Default::default()
+        });
+
+        let kdl = root_kdl_for_save(&schematic, None);
+        let parsed = parse_saved_schematic(&kdl);
+
+        assert_eq!(
+            parsed.skybox.as_ref().map(|skybox| skybox.name.as_str()),
+            Some("grand_canyon")
+        );
     }
 }

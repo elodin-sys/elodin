@@ -1036,6 +1036,23 @@ fn camera_targets_skybox(
     skybox.is_none() || skybox.is_some_and(|skybox| skybox.image != *handle)
 }
 
+fn manifest_entry_for_activation(cache: &mut SkyboxCache, name: &str) -> Result<ManifestEntry> {
+    match cache.entry(name) {
+        Ok(entry) => return Ok(entry.clone()),
+        Err(_) => {
+            debug!("skybox `{name}` missing from cache; reloading manifest before activation");
+            if let Err(reload_error) = cache.reload_from_disk() {
+                debug!(
+                    "failed to reload skybox manifest before activating `{name}`: {reload_error}"
+                );
+                return Err(reload_error);
+            }
+        }
+    }
+
+    cache.entry(name).cloned()
+}
+
 fn apply_skybox_to_camera(mut params: ApplySkyboxParams) {
     for message in params.reader.read() {
         let (name, handle, disk_bytes) = match message {
@@ -1068,8 +1085,8 @@ fn apply_skybox_to_camera(mut params: ApplySkyboxParams) {
                 continue;
             }
             SetActiveSkybox::ByName(name) => {
-                let entry = match params.cache.entry(name) {
-                    Ok(entry) => entry.clone(),
+                let entry = match manifest_entry_for_activation(&mut params.cache, name) {
+                    Ok(entry) => entry,
                     Err(error) => {
                         queue_pending_skybox_activation(&mut params.pending, name.clone(), false);
                         debug!("skybox `{name}` queued until manifest contains entry: {error}");
@@ -1671,6 +1688,19 @@ mod tests {
         ron::from_str(include_str!("../../../assets/skyboxes/manifest.ron")).unwrap()
     }
 
+    fn test_manifest_entry(name: &str) -> ManifestEntry {
+        ManifestEntry {
+            name: name.to_string(),
+            prompt: name.to_string(),
+            style: SkyboxStyle::default(),
+            blockade: None,
+            equirect_file: None,
+            cubemap_file: format!("{name}.cubemap.ktx2"),
+            face_size: 1,
+            created_at: "2026-01-01T00:00:00Z".to_string(),
+        }
+    }
+
     fn test_cubemap_image() -> Image {
         Image::new(
             Extent3d {
@@ -1703,6 +1733,17 @@ mod tests {
         app
     }
 
+    fn register_test_skybox(app: &mut App, name: &str) -> Handle<Image> {
+        let handle = app
+            .world_mut()
+            .resource_mut::<Assets<Image>>()
+            .add(test_cubemap_image());
+        let mut cache = app.world_mut().resource_mut::<SkyboxCache>();
+        cache.manifest.upsert(test_manifest_entry(name));
+        cache.handles.insert(name.to_string(), handle.clone());
+        handle
+    }
+
     fn camera_skybox_handle(app: &mut App) -> Option<Handle<Image>> {
         let world = app.world_mut();
         let mut query = world.query::<&Skybox>();
@@ -1710,42 +1751,65 @@ mod tests {
     }
 
     #[test]
-    fn set_active_skybox_applies_when_camera_has_no_skybox() {
+    fn set_active_named_skybox_applies_when_camera_has_no_skybox() {
         let mut app = skybox_apply_test_app();
-        let handle = app
-            .world_mut()
-            .resource_mut::<Assets<Image>>()
-            .add(test_cubemap_image());
+        let handle = register_test_skybox(&mut app, "grand_canyon");
 
         app.world_mut()
-            .write_message(SetActiveSkybox::ByHandle(handle.clone()));
+            .write_message(SetActiveSkybox::ByName("grand_canyon".to_string()));
         app.update();
 
         assert_eq!(camera_skybox_handle(&mut app).as_ref(), Some(&handle));
+        assert_eq!(
+            app.world().resource::<SkyboxCache>().active.as_deref(),
+            Some("grand_canyon")
+        );
     }
 
     #[test]
-    fn set_active_skybox_replaces_existing_camera_skybox() {
+    fn set_active_named_skybox_replaces_existing_camera_skybox() {
         let mut app = skybox_apply_test_app();
-        let first = app
-            .world_mut()
-            .resource_mut::<Assets<Image>>()
-            .add(test_cubemap_image());
-        let second = app
-            .world_mut()
-            .resource_mut::<Assets<Image>>()
-            .add(test_cubemap_image());
+        let first = register_test_skybox(&mut app, "alien_swamp");
+        let second = register_test_skybox(&mut app, "grand_canyon");
 
         app.world_mut()
-            .write_message(SetActiveSkybox::ByHandle(first.clone()));
+            .write_message(SetActiveSkybox::ByName("alien_swamp".to_string()));
         app.update();
         assert_eq!(camera_skybox_handle(&mut app).as_ref(), Some(&first));
 
         app.world_mut()
-            .write_message(SetActiveSkybox::ByHandle(second.clone()));
+            .write_message(SetActiveSkybox::ByName("grand_canyon".to_string()));
         app.update();
 
         assert_eq!(camera_skybox_handle(&mut app).as_ref(), Some(&second));
+        assert_eq!(
+            app.world().resource::<SkyboxCache>().active.as_deref(),
+            Some("grand_canyon")
+        );
+    }
+
+    #[test]
+    fn named_skybox_activation_reloads_manifest_on_cache_miss() {
+        let dir = std::env::temp_dir().join(format!(
+            "bevy_ai_skybox_manifest_reload_test_{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let manifest_path = dir.join("manifest.ron");
+
+        let mut disk_manifest = SkyboxManifest::default();
+        disk_manifest.upsert(test_manifest_entry("mont_blanc_france"));
+        disk_manifest.write_atomic(&manifest_path).unwrap();
+
+        let mut cache = SkyboxCache::empty(manifest_path);
+        assert!(cache.entry("mont_blanc_france").is_err());
+
+        let entry = manifest_entry_for_activation(&mut cache, "mont_blanc_france").unwrap();
+        assert_eq!(entry.name, "mont_blanc_france");
+        assert!(cache.entry("mont_blanc_france").is_ok());
+
+        let _ = fs::remove_dir_all(&dir);
     }
 
     fn parse_skybox_name_from_kdl(kdl: &str) -> Option<String> {
