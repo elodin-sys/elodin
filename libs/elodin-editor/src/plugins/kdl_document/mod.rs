@@ -56,8 +56,9 @@ pub(crate) fn plugin(app: &mut App) {
 #[cfg(test)]
 mod tests {
     use super::{
-        CurrentDocument, DocumentLoaded, DocumentReloaded, SchematicDocumentAsset,
-        operations::open_document_from_content, plugin,
+        CurrentDocument, DocumentCleared, DocumentLoaded, DocumentReloaded,
+        LastSyncedSchematicContent, OpenDocumentFromContentRequest, OpenDocumentRequest,
+        SchematicDocumentAsset, operations::open_document_from_content, plugin,
     };
     use bevy::{
         app::TaskPoolPlugin,
@@ -71,7 +72,7 @@ mod tests {
         ManifestEntry, SkyboxStyle,
         prelude::{PrimarySkybox, SetActiveSkybox, SkyboxAssetPlugin, SkyboxCache},
     };
-    use impeller2_wkt::{SchematicElem, SkyboxConfig};
+    use impeller2_wkt::{DbConfig, SchematicElem, SkyboxConfig};
     use std::{
         ffi::OsString,
         fs,
@@ -216,6 +217,17 @@ mod tests {
         seen.0.extend(reader.read().cloned());
     }
 
+    #[derive(Resource, Default)]
+    struct SeenOpenDocumentRequests(Vec<PathBuf>);
+
+    fn collect_open_document_requests(
+        mut reader: MessageReader<OpenDocumentRequest>,
+        mut seen: ResMut<SeenOpenDocumentRequests>,
+    ) {
+        seen.0
+            .extend(reader.read().map(|request| request.0.clone()));
+    }
+
     fn skybox_message_test_app() -> App {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
@@ -229,6 +241,27 @@ mod tests {
                 (
                     super::systems::activate_document_skybox,
                     collect_skybox_messages,
+                )
+                    .chain(),
+            );
+        app
+    }
+
+    fn config_sync_test_app() -> App {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .insert_resource(DbConfig::default())
+            .init_resource::<CurrentDocument>()
+            .init_resource::<LastSyncedSchematicContent>()
+            .add_message::<OpenDocumentRequest>()
+            .add_message::<OpenDocumentFromContentRequest>()
+            .add_message::<DocumentCleared>()
+            .init_resource::<SeenOpenDocumentRequests>()
+            .add_systems(
+                Update,
+                (
+                    (|| None::<PathBuf>).pipe(super::operations::sync_document_from_config),
+                    collect_open_document_requests,
                 )
                     .chain(),
             );
@@ -411,6 +444,50 @@ mod tests {
 
         assert!(camera_skybox_handle(&mut app).is_none());
         assert!(app.world().resource::<SkyboxCache>().active.is_none());
+    }
+
+    #[test]
+    fn config_sync_opens_configured_file_path_when_not_loaded() {
+        let temp = TempTestDir::new("config-sync-open");
+        let path = temp.path().join("drone.kdl");
+        fs::write(&path, "timeline\n").expect("write kdl");
+
+        let mut app = config_sync_test_app();
+        app.world_mut()
+            .resource_mut::<DbConfig>()
+            .set_schematic_path(path.to_string_lossy().to_string());
+        app.update();
+
+        assert_eq!(
+            app.world().resource::<SeenOpenDocumentRequests>().0,
+            vec![path]
+        );
+    }
+
+    #[test]
+    fn config_sync_skips_configured_file_path_when_already_loaded() {
+        let temp = TempTestDir::new("config-sync-skip-current");
+        let path = temp.path().join("drone.kdl");
+        fs::write(&path, "timeline\n").expect("write kdl");
+        let resolved_path = impeller2_kdl::env::schematic_file(&path);
+
+        let mut app = config_sync_test_app();
+        app.world_mut()
+            .resource_mut::<DbConfig>()
+            .set_schematic_path(path.to_string_lossy().to_string());
+        {
+            let mut current_document = app.world_mut().resource_mut::<CurrentDocument>();
+            current_document.handle = Some(Handle::<SchematicDocumentAsset>::default());
+            current_document.save_path = Some(resolved_path);
+        }
+        app.update();
+
+        assert!(
+            app.world()
+                .resource::<SeenOpenDocumentRequests>()
+                .0
+                .is_empty()
+        );
     }
 
     #[test]

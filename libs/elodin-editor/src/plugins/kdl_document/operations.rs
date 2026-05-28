@@ -174,6 +174,16 @@ pub fn apply_initial_kdl_path(
     }
 }
 
+fn current_document_matches_path(current_document: &CurrentDocument, path: &Path) -> bool {
+    current_document.handle.is_some()
+        && current_document
+            .save_path
+            .as_deref()
+            .is_some_and(|save_path| {
+                canonicalize_or_original(save_path) == canonicalize_or_original(path)
+            })
+}
+
 pub fn sync_document_from_config(
     In(given_path): In<Option<PathBuf>>,
     config: Res<DbConfig>,
@@ -193,6 +203,9 @@ pub fn sync_document_from_config(
     if let Some(path) = given_path.or(config.schematic_path().map(PathBuf::from)) {
         let resolved_path = schematic_file(&path);
         if resolved_path.try_exists().unwrap_or(false) {
+            if current_document_matches_path(&current_document, &resolved_path) {
+                return;
+            }
             open_document.write(OpenDocumentRequest(path));
             return;
         }
