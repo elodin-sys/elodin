@@ -411,6 +411,34 @@ fn remove_cubemap_file(cache_dir: &Path, cubemap_file: &str) {
     }
 }
 
+fn rollback_written_manifest_entry(
+    manifest_path: &Path,
+    cache_dir: &Path,
+    name: &str,
+    cubemap_file: &str,
+) {
+    match SkyboxManifest::read_or_create(manifest_path) {
+        Ok(mut manifest) => {
+            manifest.remove_entry(name);
+            if let Err(error) = manifest.write_atomic(manifest_path) {
+                warn!(
+                    target: "bevy_ai_skybox",
+                    name,
+                    "failed to roll back generated skybox manifest entry: {error}"
+                );
+            }
+        }
+        Err(error) => {
+            warn!(
+                target: "bevy_ai_skybox",
+                name,
+                "failed to read manifest while rolling back generated skybox: {error}"
+            );
+        }
+    }
+    remove_cubemap_file(cache_dir, cubemap_file);
+}
+
 fn rollback_generated_skybox(
     cache_dir: &Path,
     cubemap_file: &str,
@@ -1467,7 +1495,18 @@ fn generate_skybox_blocking(
     manifest.insert_new(entry.clone())?;
     manifest.write_atomic(&manifest_path)?;
 
-    let equirect = image::load_from_memory(&source_bytes)?.to_rgba8();
+    let equirect = match image::load_from_memory(&source_bytes) {
+        Ok(image) => image.to_rgba8(),
+        Err(error) => {
+            rollback_written_manifest_entry(
+                &manifest_path,
+                &asset_settings.cache_dir,
+                &name,
+                &cubemap_file,
+            );
+            return Err(SkyboxError::Image(error));
+        }
+    };
     let face_size = resolution.face_size();
     if let Err(error) = cubemap_convert::write_cubemap_ktx2(
         &equirect,
@@ -1475,10 +1514,12 @@ fn generate_skybox_blocking(
         &cubemap_path,
         cubemap_convert::resolve_toktx_executable(),
     ) {
-        let mut manifest = SkyboxManifest::read_or_create(&manifest_path)?;
-        manifest.remove_entry(&name);
-        let _ = manifest.write_atomic(&manifest_path);
-        remove_cubemap_file(&asset_settings.cache_dir, &cubemap_file);
+        rollback_written_manifest_entry(
+            &manifest_path,
+            &asset_settings.cache_dir,
+            &name,
+            &cubemap_file,
+        );
         return Err(SkyboxError::GenerationFailed(error));
     }
 
