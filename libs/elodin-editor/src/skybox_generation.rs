@@ -4,11 +4,13 @@ use bevy_ai_skybox::prelude::{
     SetActiveSkybox, SkyboxGenerated, SkyboxGenerationPhase, SkyboxGenerationUi,
 };
 use impeller2_bevy::PacketTx;
+use impeller2_kdl::ToKdl;
 use impeller2_wkt::{SetDbConfig, SkyboxConfig};
 use std::collections::VecDeque;
 
 use crate::plugins::kdl_document::{
-    CurrentDocument, LastSyncedSchematicContent, SchematicDocumentAsset, sync_document_skybox,
+    CurrentDocument, DocumentLoaded, DocumentReloaded, LastSyncedSchematicContent,
+    SchematicDocumentAsset, sync_document_skybox,
 };
 use crate::ui::schematic::CurrentSchematic;
 
@@ -76,6 +78,26 @@ pub(crate) fn record_synced_schematic_content(
     kdl: &str,
 ) {
     last_synced_content.0 = Some(kdl.to_string());
+}
+
+pub(crate) fn sync_loaded_schematic_to_db(
+    mut loaded: MessageReader<DocumentLoaded>,
+    mut reloaded: MessageReader<DocumentReloaded>,
+    mut last_synced_content: ResMut<LastSyncedSchematicContent>,
+    mut locally_pushed: ResMut<LocallyPushedSkyboxActive>,
+    tx: Res<PacketTx>,
+) {
+    let loaded = loaded.read().map(|event| &event.document);
+    let reloaded = reloaded.read().map(|event| &event.document);
+    let Some(document) = loaded.chain(reloaded).last() else {
+        return;
+    };
+
+    let kdl = document.root.to_kdl();
+    record_synced_schematic_content(&mut last_synced_content, &kdl);
+    let active = document.root.skybox.as_ref().map(|skybox| skybox.name.as_str());
+    locally_pushed.mark(active);
+    push_schematic_metadata(&tx, kdl, Some(active));
 }
 
 pub(crate) fn push_skybox_active_metadata(tx: &PacketTx, skybox: Option<&str>) {

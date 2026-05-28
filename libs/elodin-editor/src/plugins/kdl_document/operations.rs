@@ -1,5 +1,5 @@
 use crate::ui::schematic::CurrentSchematic;
-use bevy::asset::{AssetPath, AssetServer, Assets};
+use bevy::asset::{AssetPath, AssetServer};
 use bevy::prelude::*;
 use impeller2_bevy::DbMessage;
 use impeller2_kdl::KdlSchematicError;
@@ -47,8 +47,7 @@ pub fn open_document_path(
     path: &Path,
     asset_server: &AssetServer,
     current_document: &mut CurrentDocument,
-    document_assets: &Assets<SchematicDocumentAsset>,
-) -> Result<Option<SchematicDocumentAsset>, KdlSchematicError> {
+) -> Result<SchematicDocumentAsset, KdlSchematicError> {
     let resolved_path = schematic_file(path);
     if !resolved_path.try_exists().unwrap_or(false) {
         return Err(KdlSchematicError::NoSuchFile {
@@ -58,8 +57,45 @@ pub fn open_document_path(
 
     let asset_path = filesystem_to_asset_path(&resolved_path);
     let handle: Handle<SchematicDocumentAsset> = asset_server.load(asset_path.clone());
+    let document = read_document_from_disk(&resolved_path, &asset_path, asset_server)?;
     current_document.set_file(handle.clone(), asset_path, resolved_path);
-    Ok(document_assets.get(&handle).cloned())
+    Ok(document)
+}
+
+fn read_document_from_disk(
+    resolved_path: &Path,
+    asset_path: &AssetPath<'static>,
+    asset_server: &AssetServer,
+) -> Result<SchematicDocumentAsset, KdlSchematicError> {
+    let contents =
+        std::fs::read_to_string(resolved_path).map_err(|_| KdlSchematicError::NoSuchFile {
+            path: resolved_path.to_path_buf(),
+        })?;
+    let root = Schematic::from_kdl(&contents)?;
+    let base_dir = asset_path
+        .path()
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_default();
+    let source = asset_path.source().clone_owned();
+    let windows = root
+        .elems
+        .iter()
+        .filter_map(|elem| match elem {
+            impeller2_wkt::SchematicElem::Window(window) => window.path.as_deref(),
+            _ => None,
+        })
+        .map(|path| {
+            let asset_path =
+                AssetPath::from_path_buf(base_dir.join(path)).with_source(source.clone());
+            let handle = asset_server.load(asset_path.clone());
+            SchematicWindow {
+                handle,
+                asset_path: asset_path.clone_owned(),
+            }
+        })
+        .collect();
+    Ok(SchematicDocumentAsset { root, windows })
 }
 
 pub fn open_document_from_content(

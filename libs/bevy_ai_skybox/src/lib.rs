@@ -1636,7 +1636,9 @@ fn skybox_name_conflicts(name: &str, cache_dir: &Path, manifest: &SkyboxManifest
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::collections::HashSet;
+    use bevy::asset::AssetPlugin;
+    use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
+    use std::{collections::HashSet, path::PathBuf};
 
     /// Excerpt of `examples/rc-jet/main.py` schematic (tabs layout only).
     const RC_JET_SCHEMATIC_FRAGMENT: &str = r#"
@@ -1667,6 +1669,83 @@ mod tests {
 
     fn bundled_manifest() -> SkyboxManifest {
         ron::from_str(include_str!("../../../assets/skyboxes/manifest.ron")).unwrap()
+    }
+
+    fn test_cubemap_image() -> Image {
+        Image::new(
+            Extent3d {
+                width: 1,
+                height: 1,
+                depth_or_array_layers: 6,
+            },
+            TextureDimension::D2,
+            vec![255; 4 * 6],
+            TextureFormat::Rgba8UnormSrgb,
+            default(),
+        )
+    }
+
+    fn skybox_apply_test_app() -> App {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, AssetPlugin::default()))
+            .init_asset::<Image>()
+            .insert_resource(SkyboxAssetSettings {
+                apply_to_all_cameras: false,
+                env_lighting: false,
+                ..default()
+            })
+            .insert_resource(SkyboxCache::empty(PathBuf::from("manifest.ron")))
+            .init_resource::<PendingSkyboxActivation>()
+            .add_message::<SetActiveSkybox>()
+            .add_message::<SkyboxReady>()
+            .add_systems(Update, apply_skybox_to_camera);
+        app.world_mut().spawn((Camera3d::default(), PrimarySkybox));
+        app
+    }
+
+    fn camera_skybox_handle(app: &mut App) -> Option<Handle<Image>> {
+        let world = app.world_mut();
+        let mut query = world.query::<&Skybox>();
+        query.iter(world).next().map(|skybox| skybox.image.clone())
+    }
+
+    #[test]
+    fn set_active_skybox_applies_when_camera_has_no_skybox() {
+        let mut app = skybox_apply_test_app();
+        let handle = app
+            .world_mut()
+            .resource_mut::<Assets<Image>>()
+            .add(test_cubemap_image());
+
+        app.world_mut()
+            .write_message(SetActiveSkybox::ByHandle(handle.clone()));
+        app.update();
+
+        assert_eq!(camera_skybox_handle(&mut app).as_ref(), Some(&handle));
+    }
+
+    #[test]
+    fn set_active_skybox_replaces_existing_camera_skybox() {
+        let mut app = skybox_apply_test_app();
+        let first = app
+            .world_mut()
+            .resource_mut::<Assets<Image>>()
+            .add(test_cubemap_image());
+        let second = app
+            .world_mut()
+            .resource_mut::<Assets<Image>>()
+            .add(test_cubemap_image());
+
+        app.world_mut()
+            .write_message(SetActiveSkybox::ByHandle(first.clone()));
+        app.update();
+        assert_eq!(camera_skybox_handle(&mut app).as_ref(), Some(&first));
+
+        app.world_mut()
+            .write_message(SetActiveSkybox::ByHandle(second.clone()));
+        app.update();
+
+        assert_eq!(camera_skybox_handle(&mut app).as_ref(), Some(&second));
     }
 
     fn parse_skybox_name_from_kdl(kdl: &str) -> Option<String> {

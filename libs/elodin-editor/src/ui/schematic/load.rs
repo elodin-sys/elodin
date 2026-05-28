@@ -135,7 +135,6 @@ pub struct LoadSchematicParams<'w, 's> {
     window_states: Query<'w, 's, (Entity, &'static WindowId, &'static mut WindowState)>,
     pub schematic_bindings: ResMut<'w, super::SchematicBindings>,
     pub current_schematic: ResMut<'w, CurrentSchematic>,
-    pub pending_skybox: ResMut<'w, super::PendingSchematicSkybox>,
 }
 
 fn apply_theme(theme: Option<&impeller2_wkt::ThemeConfig>) -> colors::SchemeSelection {
@@ -427,7 +426,6 @@ impl LoadSchematicParams<'_, '_> {
         }
 
         self.current_schematic.0.skybox = schematic.skybox.clone();
-        self.pending_skybox.0 = Some(schematic.skybox.as_ref().map(|skybox| skybox.name.clone()));
     }
 
     fn spawn_window(
@@ -1291,8 +1289,7 @@ mod tests {
         ui::{
             HdrEnabled,
             schematic::{
-                CurrentDocument, CurrentSchematic, PendingSchematicSkybox, SchematicBindings,
-                SchematicDocumentAsset,
+                CurrentDocument, CurrentSchematic, SchematicBindings, SchematicDocumentAsset,
             },
             tiles,
             timeline::TimelineSettings,
@@ -1338,7 +1335,6 @@ mod tests {
             .init_resource::<SensorCameraConfigs>()
             .init_resource::<Coordinate>()
             .init_resource::<SchematicBindings>()
-            .init_resource::<PendingSchematicSkybox>()
             .insert_resource(CurrentSchematic(Default::default()));
 
         app.world_mut().spawn((Window::default(), PrimaryWindow));

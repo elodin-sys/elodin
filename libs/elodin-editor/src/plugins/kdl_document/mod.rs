@@ -48,6 +48,7 @@ pub(crate) fn plugin(app: &mut App) {
             systems::emit_document_load_failures,
             systems::activate_document_skybox,
         )
+            .chain()
             .in_set(KdlDocumentSet::AssetEvents),
     );
 }
@@ -55,14 +56,16 @@ pub(crate) fn plugin(app: &mut App) {
 #[cfg(test)]
 mod tests {
     use super::{
-        CurrentDocument, SchematicDocumentAsset, operations::open_document_from_content, plugin,
+        CurrentDocument, DocumentLoaded, DocumentReloaded, SchematicDocumentAsset,
+        operations::open_document_from_content, plugin,
     };
     use bevy::{
         app::TaskPoolPlugin,
         asset::{AssetPath, AssetPlugin, UnapprovedPathMode},
         prelude::*,
     };
-    use impeller2_wkt::SchematicElem;
+    use bevy_ai_skybox::prelude::SetActiveSkybox;
+    use impeller2_wkt::{SchematicElem, SkyboxConfig};
     use std::{
         ffi::OsString,
         fs,
@@ -195,6 +198,74 @@ mod tests {
             SchematicElem::Panel(impeller2_wkt::Panel::Graph(graph)) => graph.name.as_deref(),
             _ => None,
         })
+    }
+
+    #[derive(Resource, Default)]
+    struct SeenSkyboxMessages(Vec<SetActiveSkybox>);
+
+    fn collect_skybox_messages(
+        mut reader: MessageReader<SetActiveSkybox>,
+        mut seen: ResMut<SeenSkyboxMessages>,
+    ) {
+        seen.0.extend(reader.read().cloned());
+    }
+
+    fn skybox_message_test_app() -> App {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .add_message::<DocumentLoaded>()
+            .add_message::<DocumentReloaded>()
+            .add_message::<SetActiveSkybox>()
+            .init_resource::<SeenSkyboxMessages>()
+            .add_systems(
+                Update,
+                (
+                    super::systems::activate_document_skybox,
+                    collect_skybox_messages,
+                )
+                    .chain(),
+            );
+        app
+    }
+
+    #[test]
+    fn loaded_document_with_skybox_requests_activation() {
+        let mut app = skybox_message_test_app();
+        app.world_mut().write_message(DocumentLoaded {
+            save_path: None,
+            document: SchematicDocumentAsset {
+                root: impeller2_wkt::Schematic {
+                    skybox: Some(SkyboxConfig {
+                        name: "grand_canyon".to_string(),
+                    }),
+                    ..default()
+                },
+                windows: Vec::new(),
+            },
+        });
+        app.update();
+
+        let messages = &app.world().resource::<SeenSkyboxMessages>().0;
+        assert!(matches!(
+            messages.as_slice(),
+            [SetActiveSkybox::ByName(name)] if name == "grand_canyon"
+        ));
+    }
+
+    #[test]
+    fn loaded_document_without_skybox_requests_clear() {
+        let mut app = skybox_message_test_app();
+        app.world_mut().write_message(DocumentLoaded {
+            save_path: None,
+            document: SchematicDocumentAsset {
+                root: impeller2_wkt::Schematic::default(),
+                windows: Vec::new(),
+            },
+        });
+        app.update();
+
+        let messages = &app.world().resource::<SeenSkyboxMessages>().0;
+        assert!(matches!(messages.as_slice(), [SetActiveSkybox::Clear]));
     }
 
     #[test]
