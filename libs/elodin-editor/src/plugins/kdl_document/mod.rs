@@ -56,7 +56,7 @@ pub(crate) fn plugin(app: &mut App) {
 #[cfg(test)]
 mod tests {
     use super::{
-        CurrentDocument, DocumentCleared, DocumentLoaded, DocumentReloaded,
+        CurrentDocument, DocumentCleared, DocumentCommandFailed, DocumentLoaded, DocumentReloaded,
         LastSyncedSchematicContent, OpenDocumentFromContentRequest, OpenDocumentRequest,
         SchematicDocumentAsset,
         operations::{open_document_from_content, sync_document_skybox},
@@ -464,6 +464,72 @@ mod tests {
         assert_eq!(
             app.world().resource::<SeenOpenDocumentRequests>().0,
             vec![path]
+        );
+    }
+
+    #[derive(Resource, Default)]
+    struct SeenDocumentCommandFailures(usize);
+
+    fn count_document_command_failures(
+        mut reader: MessageReader<DocumentCommandFailed>,
+        mut seen: ResMut<SeenDocumentCommandFailures>,
+    ) {
+        seen.0 += reader.read().count();
+    }
+
+    #[test]
+    fn config_sync_does_not_mark_invalid_embedded_content_as_synced() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(AssetPlugin {
+            unapproved_path_mode: UnapprovedPathMode::Allow,
+            ..Default::default()
+        });
+        super::super::kdl_asset_source::plugin(&mut app);
+        app.add_message::<SetActiveSkybox>();
+        app.insert_resource(DbConfig::default())
+            .init_resource::<CurrentDocument>()
+            .init_resource::<LastSyncedSchematicContent>()
+            .init_resource::<SeenDocumentCommandFailures>()
+            .add_systems(
+                Update,
+                (
+                    (|| None::<PathBuf>).pipe(super::operations::sync_document_from_config),
+                    count_document_command_failures,
+                )
+                    .chain(),
+            );
+        plugin(&mut app);
+
+        app.world_mut()
+            .resource_mut::<DbConfig>()
+            .set_schematic_content("not valid kdl".to_string());
+        app.update();
+        app.update();
+
+        assert!(
+            app.world()
+                .resource::<LastSyncedSchematicContent>()
+                .0
+                .is_none(),
+            "invalid embedded content must not be recorded before a successful load"
+        );
+        assert_eq!(
+            app.world().resource::<SeenDocumentCommandFailures>().0,
+            1,
+            "invalid embedded content should surface a document command failure"
+        );
+
+        app.world_mut()
+            .resource_mut::<DbConfig>()
+            .set_schematic_content("not valid kdl".to_string());
+        app.update();
+        app.update();
+
+        assert_eq!(
+            app.world().resource::<SeenDocumentCommandFailures>().0,
+            2,
+            "the same invalid embedded content should be retried after a failed load"
         );
     }
 

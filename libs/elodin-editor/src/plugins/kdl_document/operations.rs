@@ -190,7 +190,7 @@ fn current_document_matches_path(current_document: &CurrentDocument, path: &Path
 pub fn sync_document_from_config(
     In(given_path): In<Option<PathBuf>>,
     config: Res<DbConfig>,
-    mut last_synced_content: ResMut<LastSyncedSchematicContent>,
+    last_synced_content: Res<LastSyncedSchematicContent>,
     mut current_document: ResMut<CurrentDocument>,
     mut open_document: MessageWriter<OpenDocumentRequest>,
     mut open_document_from_content: MessageWriter<OpenDocumentFromContentRequest>,
@@ -225,7 +225,6 @@ pub fn sync_document_from_config(
         if last_synced_content.0.as_deref() == Some(content) {
             return;
         }
-        last_synced_content.0 = Some(content.to_string());
         open_document_from_content.write(OpenDocumentFromContentRequest {
             content: content.to_string(),
             save_path: config.schematic_path().map(Path::new).map(schematic_file),

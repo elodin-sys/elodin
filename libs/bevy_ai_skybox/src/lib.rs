@@ -246,6 +246,14 @@ impl SkyboxManifest {
         self.entries.push(entry);
         Ok(())
     }
+
+    pub fn remove_entry(&mut self, name: &str) -> bool {
+        let Some(index) = self.entries.iter().position(|entry| entry.name == name) else {
+            return false;
+        };
+        self.entries.remove(index);
+        true
+    }
 }
 
 #[derive(Clone, Debug, Resource)]
@@ -355,12 +363,68 @@ impl SkyboxCache {
         self.active = Some(name);
         Ok(())
     }
+
+    pub fn activate_registered_entry(&mut self, name: &str) -> Result<()> {
+        self.reload_from_disk()?;
+        self.entry(name)?;
+        self.handles.remove(name);
+        self.active = Some(name.to_string());
+        Ok(())
+    }
+
+    pub fn remove_entry(&mut self, name: &str) -> Result<()> {
+        self.reload_from_disk()?;
+        let Some(index) = self
+            .manifest
+            .entries
+            .iter()
+            .position(|entry| entry.name == name)
+        else {
+            return Ok(());
+        };
+        self.manifest.entries.remove(index);
+        self.handles.remove(name);
+        if self.active.as_deref() == Some(name) {
+            self.active = None;
+        }
+        self.write_manifest()?;
+        Ok(())
+    }
 }
 
 fn modified_at(path: &Path) -> Option<SystemTime> {
     fs::metadata(path)
         .and_then(|metadata| metadata.modified())
         .ok()
+}
+
+fn remove_cubemap_file(cache_dir: &Path, cubemap_file: &str) {
+    let path = cache_dir.join(cubemap_file);
+    if let Err(error) = fs::remove_file(&path)
+        && error.kind() != std::io::ErrorKind::NotFound
+    {
+        warn!(
+            target: "bevy_ai_skybox",
+            path = %path.display(),
+            "failed to remove generated cubemap file: {error}"
+        );
+    }
+}
+
+fn rollback_generated_skybox(
+    cache_dir: &Path,
+    cubemap_file: &str,
+    cache: &mut SkyboxCache,
+    name: &str,
+) {
+    remove_cubemap_file(cache_dir, cubemap_file);
+    if let Err(error) = cache.remove_entry(name) {
+        warn!(
+            target: "bevy_ai_skybox",
+            name,
+            "failed to roll back generated skybox manifest entry: {error}"
+        );
+    }
 }
 
 #[derive(Clone, Debug, Message)]
@@ -834,7 +898,7 @@ fn finish_generation_jobs(mut params: FinishGenerationParams) {
         Ok(generated) => {
             let name = generated.entry.name.clone();
             let cubemap_file = generated.entry.cubemap_file.clone();
-            match params.cache.insert_and_activate(generated.entry) {
+            match params.cache.activate_registered_entry(&name) {
                 Ok(()) => {
                     let handle = params
                         .asset_server
@@ -856,6 +920,12 @@ fn finish_generation_jobs(mut params: FinishGenerationParams) {
                         target: "bevy_ai_skybox",
                         prompt = %prompt,
                         "failed to register generated skybox: {error}"
+                    );
+                    rollback_generated_skybox(
+                        &params.settings.cache_dir,
+                        &cubemap_file,
+                        &mut params.cache,
+                        &name,
                     );
                     params.failed.write(SkyboxFailed {
                         name: prompt,
@@ -1359,7 +1429,7 @@ fn generate_skybox_blocking(
         ));
     };
     let source_bytes = client.download(&file_url)?;
-    let manifest = SkyboxManifest::read_or_create(&asset_settings.manifest_path())?;
+    let mut manifest = SkyboxManifest::read_or_create(&asset_settings.manifest_path())?;
     let base_name = sanitize_name(
         request
             .save_as
@@ -1370,35 +1440,42 @@ fn generate_skybox_blocking(
     let name = unique_generated_skybox_name(&base_name, &asset_settings.cache_dir, &manifest);
     let cubemap_file = cubemap_convert::cubemap_ktx2_filename(&name);
     let cubemap_path = asset_settings.cache_dir.join(&cubemap_file);
+    let manifest_path = asset_settings.manifest_path();
+    let entry = ManifestEntry {
+        name: name.clone(),
+        prompt: request.prompt,
+        style,
+        blockade: Some(BlockadeMetadata {
+            imagine_id: status.id,
+            obfuscated_id: status.obfuscated_id.or(created.obfuscated_id),
+            seed: request.seed,
+        }),
+        equirect_file: None,
+        cubemap_file: cubemap_file.clone(),
+        face_size: resolution.face_size(),
+        created_at: Utc::now().to_rfc3339_opts(SecondsFormat::Micros, true),
+    };
 
     fs::create_dir_all(&asset_settings.cache_dir)?;
+    manifest.insert_new(entry.clone())?;
+    manifest.write_atomic(&manifest_path)?;
 
     let equirect = image::load_from_memory(&source_bytes)?.to_rgba8();
     let face_size = resolution.face_size();
-    cubemap_convert::write_cubemap_ktx2(
+    if let Err(error) = cubemap_convert::write_cubemap_ktx2(
         &equirect,
         face_size,
         &cubemap_path,
         cubemap_convert::resolve_toktx_executable(),
-    )
-    .map_err(SkyboxError::GenerationFailed)?;
+    ) {
+        let mut manifest = SkyboxManifest::read_or_create(&manifest_path)?;
+        manifest.remove_entry(&name);
+        let _ = manifest.write_atomic(&manifest_path);
+        remove_cubemap_file(&asset_settings.cache_dir, &cubemap_file);
+        return Err(SkyboxError::GenerationFailed(error));
+    }
 
-    Ok(GeneratedSkybox {
-        entry: ManifestEntry {
-            name,
-            prompt: request.prompt,
-            style,
-            blockade: Some(BlockadeMetadata {
-                imagine_id: status.id,
-                obfuscated_id: status.obfuscated_id.or(created.obfuscated_id),
-                seed: request.seed,
-            }),
-            equirect_file: None,
-            cubemap_file,
-            face_size,
-            created_at: Utc::now().to_rfc3339_opts(SecondsFormat::Micros, true),
-        },
-    })
+    Ok(GeneratedSkybox { entry })
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -1920,6 +1997,67 @@ mod tests {
             loaded.get("seaport").unwrap().cubemap_file,
             "seaport.cubemap.ktx2"
         );
+
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn remove_entry_drops_manifest_row() {
+        let mut manifest = SkyboxManifest::default();
+        manifest
+            .insert_new(ManifestEntry {
+                name: "test_sky".into(),
+                prompt: "first".into(),
+                style: SkyboxStyle::default(),
+                blockade: None,
+                equirect_file: None,
+                cubemap_file: "test_sky.cubemap.ktx2".into(),
+                face_size: 512,
+                created_at: "2026-01-01T00:00:00Z".into(),
+            })
+            .unwrap();
+
+        assert!(manifest.remove_entry("test_sky"));
+        assert!(manifest.get("test_sky").is_none());
+    }
+
+    #[test]
+    fn cache_remove_entry_deletes_orphan_cubemap_reference() {
+        let dir = std::env::temp_dir().join(format!(
+            "bevy_ai_skybox_remove_entry_test_{}",
+            std::process::id()
+        ));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let manifest_path = dir.join("manifest.ron");
+
+        let mut cache = SkyboxCache {
+            manifest: SkyboxManifest::default(),
+            active: Some("test_sky".into()),
+            handles: HashMap::new(),
+            manifest_path: manifest_path.clone(),
+            last_manifest_modified: None,
+        };
+        cache
+            .manifest
+            .insert_new(ManifestEntry {
+                name: "test_sky".into(),
+                prompt: "first".into(),
+                style: SkyboxStyle::default(),
+                blockade: None,
+                equirect_file: None,
+                cubemap_file: "test_sky.cubemap.ktx2".into(),
+                face_size: 512,
+                created_at: "2026-01-01T00:00:00Z".into(),
+            })
+            .unwrap();
+        cache.write_manifest().unwrap();
+
+        cache.remove_entry("test_sky").unwrap();
+
+        let loaded = SkyboxManifest::read_or_create(&manifest_path).unwrap();
+        assert!(loaded.get("test_sky").is_none());
+        assert!(cache.active.is_none());
 
         let _ = fs::remove_dir_all(&dir);
     }
