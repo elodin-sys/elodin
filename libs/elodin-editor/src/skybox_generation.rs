@@ -80,12 +80,10 @@ pub(crate) fn record_synced_schematic_content(
     last_synced_content.0 = Some(kdl.to_string());
 }
 
-pub(crate) fn sync_loaded_schematic_to_db(
+pub(crate) fn record_loaded_schematic_content(
     mut loaded: MessageReader<DocumentLoaded>,
     mut reloaded: MessageReader<DocumentReloaded>,
     mut last_synced_content: ResMut<LastSyncedSchematicContent>,
-    mut locally_pushed: ResMut<LocallyPushedSkyboxActive>,
-    tx: Res<PacketTx>,
 ) {
     let loaded = loaded.read().map(|event| &event.document);
     let reloaded = reloaded.read().map(|event| &event.document);
@@ -93,15 +91,7 @@ pub(crate) fn sync_loaded_schematic_to_db(
         return;
     };
 
-    let kdl = document.root.to_kdl();
-    record_synced_schematic_content(&mut last_synced_content, &kdl);
-    let active = document
-        .root
-        .skybox
-        .as_ref()
-        .map(|skybox| skybox.name.as_str());
-    locally_pushed.mark(active);
-    push_schematic_metadata(&tx, kdl, Some(active));
+    record_synced_schematic_content(&mut last_synced_content, &document.root.to_kdl());
 }
 
 pub(crate) fn push_skybox_active_metadata(tx: &PacketTx, skybox: Option<&str>) {
@@ -211,4 +201,41 @@ pub(crate) fn revert_previous_skybox(mut params: RevertSkyboxParams) {
     params.skyboxes.write(SetActiveSkybox::ByName(name.clone()));
     params.ui.phase = SkyboxGenerationPhase::Idle;
     params.ui.message = Some(format!("Reverted to skybox `{name}`"));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::plugins::kdl_document::{LastSyncedSchematicContent, SchematicDocumentAsset};
+    use impeller2_wkt::Schematic;
+
+    #[test]
+    fn record_loaded_schematic_content_updates_last_synced_without_db_push() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins)
+            .init_resource::<LastSyncedSchematicContent>()
+            .add_message::<DocumentLoaded>()
+            .add_message::<DocumentReloaded>()
+            .add_systems(Update, record_loaded_schematic_content);
+
+        app.world_mut().write_message(DocumentLoaded {
+            save_path: None,
+            document: SchematicDocumentAsset {
+                root: Schematic {
+                    skybox: Some(SkyboxConfig {
+                        name: "seaport".to_string(),
+                    }),
+                    ..default()
+                },
+                windows: Vec::new(),
+            },
+        });
+        app.update();
+
+        let last = app.world().resource::<LastSyncedSchematicContent>();
+        assert!(
+            last.0.as_ref().is_some_and(|kdl| kdl.contains("seaport")),
+            "expected loaded schematic KDL to be recorded locally"
+        );
+    }
 }
