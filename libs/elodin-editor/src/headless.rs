@@ -471,6 +471,12 @@ fn render_server_runner(mut app: App) -> AppExit {
             // Choose the sleep based on the shortest remaining wait across all
             // cameras, capped at 5 ms so we stay responsive to new
             // `LastUpdated` events.
+            //
+            // If a skybox transition is in flight, pump another update so asset
+            // loading / apply systems can progress even when no camera is due.
+            if !app.world().resource::<HeadlessSkyboxRenderGate>().applied {
+                run_headless_update(&mut app);
+            }
             let next_wait_us = schedules
                 .iter()
                 .filter_map(|s| {
@@ -487,7 +493,10 @@ fn render_server_runner(mut app: App) -> AppExit {
         match consume_skybox_emission_gate(&mut app) {
             SkyboxEmissionGate::Ready => {}
             SkyboxEmissionGate::WaitingForApply => {
-                drain_stale_frames(&app);
+                // Priming renders are required while the cubemap loads and
+                // `apply_skybox_to_camera` attaches the `Skybox` component.
+                // Skipping render here can stall `HeadlessSkyboxRenderGate.applied`.
+                render_without_emit(&mut app, sim_ts, &due_names);
                 std::thread::sleep(Duration::from_millis(5));
                 continue;
             }
