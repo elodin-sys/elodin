@@ -86,9 +86,7 @@ pub fn gated_camera_inputs(
     let Some(cursor) = cursor else {
         return;
     };
-    let Some(pointer_pos) = pointer_pos else {
-        return;
-    };
+    let pointer_pos = bevy_egui::egui::pos2(cursor.x, cursor.y);
 
     let Some((camera, _camera_component, render_target, _)) =
         cameras.iter().find(|(entity, camera, _, _)| {
