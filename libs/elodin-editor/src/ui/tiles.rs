@@ -121,6 +121,10 @@ fn setup_primary_window_state(
 #[derive(Component)]
 pub struct ViewportConfig {
     pub aspect: Option<f32>,
+    /// Schematic near clip; omitted on save when unset. Not the runtime EditorCam value.
+    pub configured_near: Option<f32>,
+    /// Schematic far clip; omitted on save when unset. Not the runtime EditorCam value.
+    pub configured_far: Option<f32>,
     pub show_arrows: bool,
     pub create_frustum: bool,
     pub show_frustums: bool,
@@ -1566,6 +1570,8 @@ impl ViewportPane {
             GridHandle { grid: grid_id },
             ViewportConfig {
                 aspect: viewport.aspect,
+                configured_near: viewport.near,
+                configured_far: viewport.far,
                 show_arrows: viewport.show_arrows,
                 create_frustum: viewport.create_frustum,
                 show_frustums: viewport.show_frustums,

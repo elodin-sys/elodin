@@ -154,6 +154,7 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
 
         if let Projection::Perspective(persp) = cam.projection.as_mut() {
             ui.separator();
+            let mut configured_clip_planes = None;
             egui::Frame::NONE
                 .inner_margin(egui::Margin::symmetric(8, 8))
                 .show(ui, |ui| {
@@ -206,6 +207,7 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
                         }
                         persp.near = near;
                         persp.far = far;
+                        configured_clip_planes = Some((near, far));
 
                         if near_changed && let Ok(mut editor_cam) = editor_cams.get_mut(camera) {
                             editor_cam.perspective.near_clip_limits = near..near;
@@ -268,6 +270,10 @@ impl WidgetSystem for InspectorViewport<'_, '_> {
                         });
                     }
                 });
+            if let Some((near, far)) = configured_clip_planes {
+                viewport_config.configured_near = Some(near);
+                viewport_config.configured_far = Some(far);
+            }
         }
 
         if let Some(&GridHandle { grid }) = cam.grid_handle {
