@@ -43,6 +43,7 @@ pub async fn handle_vtable_stream<A: AsyncWrite + 'static>(
         .max();
     let table_len = table_len.unwrap_or(0);
     let table = FieldTable::new(vtable.fields.len(), table_len, id);
+    let mut field_plans = Vec::with_capacity(vtable.fields.len());
     for (i, field) in vtable.fields.iter().enumerate() {
         let mut realized_op = vtable.realize(field.arg, None)?;
         let mut plan = vec![];
@@ -154,7 +155,7 @@ pub async fn handle_vtable_stream<A: AsyncWrite + 'static>(
             return Err(Error::Impeller(impeller2::error::Error::InvalidOp));
         }
         let prim_type = component.schema.prim_type;
-        stellarator::spawn(handle_plan(plan, shard, timestamp, prim_type));
+        field_plans.push((plan, shard, timestamp, prim_type));
     }
     // Send vtable before streaming
     {
@@ -164,6 +165,11 @@ pub async fn handle_vtable_stream<A: AsyncWrite + 'static>(
         }
         .into_len_packet();
         send_with_timeout(&tx, pkt.with_request_id(req_id)).await?;
+    }
+    let mut plan_guards = Vec::with_capacity(field_plans.len());
+    for (plan, shard, timestamp, prim_type) in field_plans {
+        plan_guards
+            .push(stellarator::spawn(handle_plan(plan, shard, timestamp, prim_type)).drop_guard());
     }
     loop {
         table.wait_ready().await;

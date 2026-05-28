@@ -1602,10 +1602,8 @@ pub(crate) async fn send_with_timeout<A: AsyncWrite>(
         TimedOut,
     }
 
-    let send = async {
-        let tx = tx.lock().await;
-        SendOutcome::Sent(tx.send(pkt).await)
-    };
+    let tx = tx.lock().await;
+    let send = async { SendOutcome::Sent(tx.send(pkt).await) };
     let timeout = async {
         stellarator::sleep(TX_WRITE_TIMEOUT).await;
         SendOutcome::TimedOut
@@ -3160,6 +3158,8 @@ mod tests {
 
     struct PendingWrite;
 
+    struct ReadyWrite;
+
     impl AsyncWrite for PendingWrite {
         fn write<B: stellarator::buf::IoBuf>(
             &self,
@@ -3169,6 +3169,15 @@ mod tests {
                 stellarator::sleep(TX_WRITE_TIMEOUT + Duration::from_secs(30)).await;
                 (Ok(buf.init_len()), buf)
             }
+        }
+    }
+
+    impl AsyncWrite for ReadyWrite {
+        fn write<B: stellarator::buf::IoBuf>(
+            &self,
+            buf: B,
+        ) -> impl std::future::Future<Output = stellarator::BufResult<usize, B>> {
+            async move { (Ok(buf.init_len()), buf) }
         }
     }
 
@@ -3184,5 +3193,37 @@ mod tests {
         assert!(matches!(err, Error::WriteTimeout));
         assert!(started.elapsed() >= TX_WRITE_TIMEOUT);
         assert!(started.elapsed() < TX_WRITE_TIMEOUT + Duration::from_secs(10));
+    }
+
+    #[stellarator::test]
+    async fn send_with_timeout_does_not_count_mutex_wait_time() {
+        enum Outcome {
+            Send(Result<LenPacket, Error>),
+            Released,
+        }
+
+        let tx = Arc::new(Mutex::new(PacketSink::new(ReadyWrite)));
+        let guard = tx.lock().await;
+        let mut send = Box::pin(send_with_timeout(&tx, LenPacket::msg([1, 0], 0)));
+
+        let outcome =
+            futures_lite::future::race(async { Outcome::Send(send.as_mut().await) }, async {
+                stellarator::sleep(TX_WRITE_TIMEOUT + Duration::from_millis(100)).await;
+                drop(guard);
+                Outcome::Released
+            })
+            .await;
+
+        match outcome {
+            Outcome::Send(Err(Error::WriteTimeout)) => {
+                panic!("timeout fired while waiting for tx mutex")
+            }
+            Outcome::Send(Err(err)) => panic!("send failed unexpectedly: {err:?}"),
+            Outcome::Send(Ok(_)) => panic!("send completed while tx mutex was held"),
+            Outcome::Released => {}
+        }
+
+        send.await
+            .expect("send should complete after mutex release");
     }
 }
