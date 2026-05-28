@@ -27,7 +27,9 @@ use bevy::{
     window::{ExitCondition, WindowPlugin},
     winit::WinitPlugin,
 };
-use bevy_ai_skybox::prelude::{PrimarySkybox, SetActiveSkybox, SkyboxAssetSettings, SkyboxCache};
+use bevy_ai_skybox::prelude::{
+    PrimarySkybox, SetActiveSkybox, SkyboxAssetSettings, SkyboxCache, SkyboxFailed,
+};
 use bevy_geo_frames::GeoContext;
 use bevy_mat3_material::Mat3Material;
 use impeller2::types::{LenPacket, Timestamp, msg_id};
@@ -236,6 +238,8 @@ struct HeadlessSkyboxRenderGate {
     applied: bool,
     warmup_remaining: u8,
     activation_dispatched: bool,
+    /// Desired skybox we stopped waiting for after a load failure.
+    skipped_desired: Option<Option<String>>,
 }
 
 impl Default for HeadlessSkyboxRenderGate {
@@ -245,6 +249,7 @@ impl Default for HeadlessSkyboxRenderGate {
             applied: true,
             warmup_remaining: 0,
             activation_dispatched: false,
+            skipped_desired: None,
         }
     }
 }
@@ -280,11 +285,31 @@ fn sync_headless_skybox(
     cameras: Query<(Option<&PrimarySkybox>, Option<&Skybox>), With<Camera3d>>,
     mut render_gate: ResMut<HeadlessSkyboxRenderGate>,
     mut skybox_writer: MessageWriter<SetActiveSkybox>,
+    mut failed: MessageReader<SkyboxFailed>,
 ) {
+    for event in failed.read() {
+        let Some(gate_desired) = render_gate.desired.as_ref() else {
+            continue;
+        };
+        if gate_desired.as_deref() != Some(event.name.as_str()) {
+            continue;
+        }
+        tracing::warn!(
+            "render server: skybox `{}` failed to load ({}); continuing without skybox",
+            event.name,
+            event.error
+        );
+        render_gate.applied = true;
+        render_gate.warmup_remaining = SKYBOX_TRANSITION_WARMUP_FRAMES;
+        render_gate.activation_dispatched = false;
+        render_gate.skipped_desired = render_gate.desired.clone();
+    }
+
     let Some(desired) = desired_skybox_from_config(&config) else {
         render_gate.desired = None;
         render_gate.applied = true;
         render_gate.warmup_remaining = 0;
+        render_gate.skipped_desired = None;
         return;
     };
 
@@ -293,6 +318,7 @@ fn sync_headless_skybox(
         render_gate.applied = false;
         render_gate.warmup_remaining = 0;
         render_gate.activation_dispatched = false;
+        render_gate.skipped_desired = None;
     }
 
     if headless_skybox_applied(&desired, &cache, &settings, &cameras) {
@@ -300,6 +326,12 @@ fn sync_headless_skybox(
             render_gate.applied = true;
             render_gate.warmup_remaining = SKYBOX_TRANSITION_WARMUP_FRAMES;
         }
+        render_gate.skipped_desired = None;
+        return;
+    }
+
+    if render_gate.skipped_desired.as_ref() == Some(&desired) {
+        render_gate.applied = true;
         return;
     }
 
