@@ -2,7 +2,6 @@ mod asset_cache;
 pub(crate) mod camera_anchor;
 pub mod editor_cam_input;
 pub mod editor_cam_touch;
-pub mod editor_cam_viewport;
 pub(crate) mod env_asset_source;
 pub mod frustum;
 pub(crate) mod frustum_common;

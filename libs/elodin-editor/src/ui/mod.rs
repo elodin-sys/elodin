@@ -13,6 +13,7 @@ use bevy::{
     winit::WINIT_WINDOWS,
 };
 use bevy_defer::AsyncPlugin;
+use bevy_editor_cam::input::EditorCamInputMessage;
 use bevy_egui::{
     EguiContext, EguiContexts, EguiPreUpdateSet,
     egui::{self, Color32, Label, RichText},
@@ -373,11 +374,13 @@ impl Plugin for UiPlugin {
                     handle_window_relayout_events,
                     set_secondary_camera_viewport,
                     set_camera_viewport,
-                    crate::plugins::editor_cam_viewport::update_viewport_contains_pointer
+                    (
+                        crate::plugins::editor_cam_input::gated_camera_inputs,
+                        EditorCamInputMessage::receive_messages,
+                        crate::plugins::editor_cam_input::send_gated_pointer_inputs,
+                    )
+                        .chain()
                         .after(set_camera_viewport),
-                    crate::plugins::editor_cam_viewport::viewport_editor_cam_mouse_input.after(
-                        crate::plugins::editor_cam_viewport::update_viewport_contains_pointer,
-                    ),
                     set_nav_gizmo_camera_orders,
                     warn_camera_order_ambiguities,
                 )

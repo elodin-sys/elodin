@@ -482,9 +482,6 @@ pub fn create_secondary_window(title: Option<String>) -> (WindowState, WindowId)
     )
 }
 
-#[derive(Resource, Default)]
-pub struct ViewportContainsPointer(pub bool);
-
 #[derive(Clone)]
 pub struct ActionTilePane {
     pub entity: Entity,
