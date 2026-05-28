@@ -229,7 +229,7 @@ def sitl_post_step(tick: int, ctx: el.StepContext):
                 pass  # Expected during initial warmup
         print(f"[SITL] Warmup complete ({warmup_count} responses at {config.pid_rate:.0f}Hz)")
         print("[SITL] Bridge ready")
-        ctx.truncate()  # Clears all data, resets tick to 0
+        # ctx.truncate()  # Clears all data, resets tick to 0
 
     if start_time[0] is None:
         start_time[0] = time.time()
@@ -426,7 +426,7 @@ db_filename = next_filename("betaflight_dbXXX")
 world.run(
     system,
     simulation_rate=config.pid_rate,
-    generate_real_time=True,
+    # generate_real_time=True,
     max_ticks=config.total_sim_ticks,
     post_step=sitl_post_step,
     db_path=db_filename,

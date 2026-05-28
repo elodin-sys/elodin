@@ -90,6 +90,14 @@ impl Client {
         })
     }
 
+    /// Send a packet without waiting for a reply.
+    ///
+    /// If a connection is used only for sends, still drain replies with
+    /// [`Self::recv`], [`Self::request`], [`Self::stream`], or a background
+    /// [`PacketStream`].
+    /// The server may send `ErrorResponse` packets for rejected writes; leaving
+    /// those unread can fill TCP buffers and cause the server to close the
+    /// connection.
     pub async fn send(&mut self, packet: impl IntoLenPacket) -> BufResult<(), LenPacket> {
         let len_pkt = packet.into_len_packet();
         self.tx.send(len_pkt).await

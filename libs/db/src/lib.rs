@@ -54,6 +54,8 @@ use zerocopy::IntoBytes;
 pub use error::Error;
 
 pub(crate) const COMPONENT_CREATION_INDEX_METADATA_KEY: &str = "_creation_index";
+pub const TX_WRITE_TIMEOUT: Duration = Duration::from_secs(2);
+const RESPONSE_PACKET_CAPACITY: usize = 8 * 1024 * 1024;
 
 pub mod append_log;
 mod arrow;
@@ -1510,7 +1512,7 @@ async fn handle_conn_inner<A: AsyncRead + AsyncWrite + Send + Sync + 'static>(
 ) -> Result<(), Error> {
     let _conn_span = tracing::info_span!("handle_conn").entered();
     let mut buf = vec![0u8; 8 * 1024 * 1024];
-    let mut resp_pkt = LenPacket::new(PacketTy::Msg, [0, 0], 8 * 1024 * 1024);
+    let mut resp_pkt = LenPacket::new(PacketTy::Msg, [0, 0], RESPONSE_PACKET_CAPACITY);
     loop {
         let pkt = rx.next(buf).await?;
         let req_id = pkt.req_id();
@@ -1542,6 +1544,7 @@ async fn handle_conn_inner<A: AsyncRead + AsyncWrite + Send + Sync + 'static>(
                 .await?;
                 return Ok(());
             }
+            Err(Error::WriteTimeout) => return Ok(()),
             Err(err) if err.is_stream_closed() => {}
             Err(err) => {
                 debug!(?err, "error handling packet");
@@ -1552,6 +1555,9 @@ async fn handle_conn_inner<A: AsyncRead + AsyncWrite + Send + Sync + 'static>(
                     .await
                 {
                     warn!(?err, "error sending err resp");
+                    if matches!(err, Error::WriteTimeout) {
+                        return Ok(());
+                    }
                 }
             }
         }
@@ -1587,6 +1593,31 @@ impl<A: AsyncWrite + 'static> Clone for PacketTx<A> {
     }
 }
 
+pub(crate) async fn send_with_timeout<A: AsyncWrite>(
+    tx: &Arc<Mutex<PacketSink<A>>>,
+    pkt: LenPacket,
+) -> Result<LenPacket, Error> {
+    enum SendOutcome {
+        Sent(stellarator::BufResult<(), LenPacket>),
+        TimedOut,
+    }
+
+    let send = async {
+        let tx = tx.lock().await;
+        SendOutcome::Sent(tx.send(pkt).await)
+    };
+    let timeout = async {
+        stellarator::sleep(TX_WRITE_TIMEOUT).await;
+        SendOutcome::TimedOut
+    };
+
+    match futures_lite::future::race(send, timeout).await {
+        SendOutcome::Sent((Ok(()), pkt)) => Ok(pkt),
+        SendOutcome::Sent((Err(err), _pkt)) => Err(Error::from(err)),
+        SendOutcome::TimedOut => Err(Error::WriteTimeout),
+    }
+}
+
 impl<A: AsyncWrite + 'static> PacketTx<A> {
     pub async fn send_msg<M: Msg>(&mut self, msg: &M) -> Result<(), Error> {
         let req_id = self.req_id;
@@ -1614,10 +1645,20 @@ impl<A: AsyncWrite + 'static> PacketTx<A> {
             return Err(err);
         }
         pkt.as_mut_packet().header.req_id = self.req_id;
-        let tx = self.tx.lock().await;
-        let res = rent!(tx.send(pkt).await, pkt);
-        self.pkt = Some(pkt);
-        res.map_err(Error::from)
+        match send_with_timeout(&self.tx, pkt).await {
+            Ok(pkt) => {
+                self.pkt = Some(pkt);
+                Ok(())
+            }
+            Err(err) => {
+                self.pkt = Some(LenPacket::new(
+                    PacketTy::Msg,
+                    [0, 0],
+                    RESPONSE_PACKET_CAPACITY,
+                ));
+                Err(err)
+            }
+        }
     }
 
     pub async fn send_time_series(
@@ -2301,10 +2342,9 @@ pub async fn handle_msg_stream<A: AsyncWrite>(
         let Some((_timestamp, msg)) = msg_log.latest() else {
             continue;
         };
-        let tx = tx.lock().await;
         pkt.clear();
         pkt.extend_from_slice(msg);
-        rent!(tx.send(pkt).await, pkt)?;
+        pkt = send_with_timeout(&tx, pkt).await?;
     }
 }
 
@@ -2322,11 +2362,10 @@ pub async fn handle_timestamped_msg_stream<A: AsyncWrite>(
         let Some((timestamp, msg)) = msg_log.latest() else {
             continue;
         };
-        let tx = tx.lock().await;
         pkt.clear();
         pkt.extend_from_slice(timestamp.as_bytes());
         pkt.extend_from_slice(msg);
-        rent!(tx.send(pkt).await, pkt)?;
+        pkt = send_with_timeout(&tx, pkt).await?;
     }
 }
 
@@ -2371,11 +2410,10 @@ pub async fn handle_fixed_rate_msg_stream<A: AsyncWrite + Send + Sync>(
         }
 
         {
-            let tx = tx.lock().await;
             pkt.clear();
             pkt.extend_from_slice(msg_timestamp.as_bytes());
             pkt.extend_from_slice(msg);
-            rent!(tx.send(pkt).await, pkt)?;
+            pkt = send_with_timeout(&tx, pkt).await?;
         }
         last_sent_timestamp = Some(msg_timestamp);
 
@@ -3113,5 +3151,38 @@ impl AtomicTimestampExt for AtomicCell<Timestamp> {
     fn update_min(&self, val: Timestamp) {
         self.value.fetch_min(val.0, atomic::Ordering::AcqRel);
         self.wait_queue.wake_all();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct PendingWrite;
+
+    impl AsyncWrite for PendingWrite {
+        fn write<B: stellarator::buf::IoBuf>(
+            &self,
+            buf: B,
+        ) -> impl std::future::Future<Output = stellarator::BufResult<usize, B>> {
+            async move {
+                stellarator::sleep(TX_WRITE_TIMEOUT + Duration::from_secs(30)).await;
+                (Ok(buf.init_len()), buf)
+            }
+        }
+    }
+
+    #[stellarator::test]
+    async fn send_with_timeout_fails_when_client_write_never_completes() {
+        let tx = Arc::new(Mutex::new(PacketSink::new(PendingWrite)));
+        let started = Instant::now();
+        let err = match send_with_timeout(&tx, LenPacket::msg([1, 0], 0)).await {
+            Ok(_) => panic!("send unexpectedly completed"),
+            Err(err) => err,
+        };
+
+        assert!(matches!(err, Error::WriteTimeout));
+        assert!(started.elapsed() >= TX_WRITE_TIMEOUT);
+        assert!(started.elapsed() < TX_WRITE_TIMEOUT + Duration::from_secs(10));
     }
 }

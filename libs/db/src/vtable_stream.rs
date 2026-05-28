@@ -18,12 +18,11 @@ use impeller2_stellar::PacketSink;
 use impeller2_wkt::{ComponentValue, FixedRateBehavior, FixedRateOp, MeanOp, VTableMsg};
 use stellarator::{
     io::AsyncWrite,
-    rent,
     sync::{Mutex, WaitCell, WaitQueue},
 };
 use tracing::{trace, warn};
 
-use crate::{Component, DB, Error, FixedRateStreamState};
+use crate::{Component, DB, Error, FixedRateStreamState, send_with_timeout};
 
 pub async fn handle_vtable_stream<A: AsyncWrite + 'static>(
     id: [u8; 2],
@@ -159,19 +158,17 @@ pub async fn handle_vtable_stream<A: AsyncWrite + 'static>(
     }
     // Send vtable before streaming
     {
-        let mut pkt = VTableMsg {
+        let pkt = VTableMsg {
             vtable: vtable.clone(),
             id,
         }
         .into_len_packet();
-        let tx = tx.lock().await;
-        rent!(tx.send(pkt.with_request_id(req_id)).await, pkt)?;
+        send_with_timeout(&tx, pkt.with_request_id(req_id)).await?;
     }
     loop {
         table.wait_ready().await;
         let mut pkt = table.take().await;
-        let tx = tx.lock().await;
-        rent!(tx.send(pkt.with_request_id(req_id)).await, pkt)?;
+        pkt = send_with_timeout(&tx, pkt.with_request_id(req_id)).await?;
         table.replace_pkt(pkt).await;
         table.notify_writers();
     }

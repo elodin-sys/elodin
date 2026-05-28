@@ -57,6 +57,8 @@ pub enum Error {
     FixTimestamps(String),
     #[error("operation cancelled")]
     Cancelled,
+    #[error("write timeout (client not reading)")]
+    WriteTimeout,
 }
 
 impl From<impeller2_stellar::Error> for Error {
@@ -80,6 +82,7 @@ impl From<stellarator::Error> for Error {
 impl Error {
     pub fn is_stream_closed(&self) -> bool {
         match self {
+            Error::WriteTimeout => true,
             Error::Stellar(stellarator::Error::EOF) => true,
             Error::Io(err)
                 if err.kind() == io::ErrorKind::BrokenPipe
