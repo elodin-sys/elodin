@@ -235,6 +235,7 @@ struct HeadlessSkyboxRenderGate {
     desired: Option<Option<String>>,
     applied: bool,
     warmup_remaining: u8,
+    activation_dispatched: bool,
 }
 
 impl Default for HeadlessSkyboxRenderGate {
@@ -243,6 +244,7 @@ impl Default for HeadlessSkyboxRenderGate {
             desired: None,
             applied: true,
             warmup_remaining: 0,
+            activation_dispatched: false,
         }
     }
 }
@@ -290,6 +292,7 @@ fn sync_headless_skybox(
         render_gate.desired = Some(desired.clone());
         render_gate.applied = false;
         render_gate.warmup_remaining = 0;
+        render_gate.activation_dispatched = false;
     }
 
     if headless_skybox_applied(&desired, &cache, &settings, &cameras) {
@@ -301,6 +304,10 @@ fn sync_headless_skybox(
     }
 
     render_gate.applied = false;
+    if render_gate.activation_dispatched {
+        return;
+    }
+    render_gate.activation_dispatched = true;
     match &desired {
         Some(name) => skybox_writer.write(SetActiveSkybox::ByName(name.clone())),
         None => skybox_writer.write(SetActiveSkybox::Clear),

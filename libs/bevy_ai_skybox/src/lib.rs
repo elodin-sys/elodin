@@ -826,12 +826,12 @@ impl Plugin for SkyboxAssetPlugin {
             .add_systems(
                 Update,
                 (
-                    strip_unconfigured_skybox_components,
+                    configure_loaded_cubemaps,
                     apply_pending_skybox_activation,
                     apply_skybox_to_camera,
                     apply_active_skybox_to_new_cameras,
                     reapply_skybox_after_manifest_reload,
-                    configure_loaded_cubemaps,
+                    strip_unconfigured_skybox_components,
                     watch_manifest_changes
                         .run_if(|settings: Res<SkyboxAssetSettings>| settings.watch_manifest),
                     log_skybox_outcomes,
