@@ -7,7 +7,9 @@ use std::{
 use crate::plugins::kdl_document::{
     CurrentDocument, LastSyncedSchematicContent, SchematicDocumentAsset,
 };
-use crate::skybox_generation::{LocallyPushedSkyboxActive, sync_skybox_to_document_and_db};
+use crate::skybox_generation::{
+    LocallyPushedSkyboxActive, SkyboxDocumentSyncMut, sync_skybox_to_document_and_db,
+};
 use bevy::{
     asset::{AssetServer, Assets},
     camera::visibility::Visibility,
@@ -1195,13 +1197,15 @@ fn clear_skybox() -> PaletteItem {
             skyboxes.write(SetActiveSkybox::Clear);
             sync_skybox_to_document_and_db(
                 None,
-                &mut schematic,
-                &mut current_document,
-                &mut document_assets,
-                &mut last_synced_content,
-                &mut locally_pushed,
-                &mut cache,
-                &tx,
+                &mut SkyboxDocumentSyncMut {
+                    schematic: &mut schematic,
+                    current_document: &mut current_document,
+                    document_assets: &mut document_assets,
+                    last_synced_content: &mut last_synced_content,
+                    locally_pushed: &mut locally_pushed,
+                    cache: &mut cache,
+                    tx: &tx,
+                },
             );
             PaletteEvent::Exit
         },
@@ -1224,13 +1228,15 @@ fn activate_skybox_item(label: String, name: String) -> PaletteItem {
             skyboxes.write(SetActiveSkybox::ByName(name.clone()));
             sync_skybox_to_document_and_db(
                 Some(SkyboxConfig { name: name.clone() }),
-                &mut schematic,
-                &mut current_document,
-                &mut document_assets,
-                &mut last_synced_content,
-                &mut locally_pushed,
-                &mut cache,
-                &tx,
+                &mut SkyboxDocumentSyncMut {
+                    schematic: &mut schematic,
+                    current_document: &mut current_document,
+                    document_assets: &mut document_assets,
+                    last_synced_content: &mut last_synced_content,
+                    locally_pushed: &mut locally_pushed,
+                    cache: &mut cache,
+                    tx: &tx,
+                },
             );
             PaletteEvent::Exit
         },

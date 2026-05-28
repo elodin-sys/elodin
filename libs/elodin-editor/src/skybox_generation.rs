@@ -5,15 +5,43 @@ use bevy_ai_skybox::prelude::{
 };
 use impeller2_bevy::PacketTx;
 use impeller2_kdl::ToKdl;
-use impeller2_wkt::{SetDbConfig, SkyboxConfig};
+use impeller2_wkt::{DbConfig, SetDbConfig, SkyboxConfig};
 use std::collections::VecDeque;
 
 use crate::plugins::kdl_document::{
     CurrentDocument, DocumentLoaded, DocumentReloaded, LastSyncedSchematicContent,
     SchematicDocumentAsset, sync_document_skybox,
 };
-use impeller2_wkt::DbConfig;
 use crate::ui::schematic::CurrentSchematic;
+
+pub(crate) struct SkyboxDocumentSyncMut<'a> {
+    pub schematic: &'a mut CurrentSchematic,
+    pub current_document: &'a mut CurrentDocument,
+    pub document_assets: &'a mut Assets<SchematicDocumentAsset>,
+    pub last_synced_content: &'a mut LastSyncedSchematicContent,
+    pub locally_pushed: &'a mut LocallyPushedSkyboxActive,
+    pub cache: &'a mut SkyboxCache,
+    pub tx: &'a PacketTx,
+}
+
+impl SkyboxDocumentSyncMut<'_> {
+    pub(crate) fn sync_skybox_to_document_and_db(&mut self, skybox: Option<SkyboxConfig>) {
+        let kdl = sync_document_skybox(
+            skybox.clone(),
+            self.current_document,
+            self.document_assets,
+            self.schematic,
+        );
+        sync_cache_active_from_skybox(self.cache, skybox.as_ref());
+        record_synced_schematic_content(self.last_synced_content, &kdl);
+        let active = self
+            .schematic
+            .skybox
+            .as_ref()
+            .map(|entry| entry.name.as_str());
+        push_skybox_db_sync(self.tx, Some(kdl), active, self.locally_pushed);
+    }
+}
 
 #[derive(Resource, Default)]
 pub(crate) struct LocallyPushedSkyboxActive {
@@ -59,49 +87,39 @@ pub(crate) fn sync_cache_active_from_skybox(
 
 pub(crate) fn sync_skybox_to_document_and_db(
     skybox: Option<SkyboxConfig>,
-    schematic: &mut CurrentSchematic,
-    current_document: &mut CurrentDocument,
-    document_assets: &mut Assets<SchematicDocumentAsset>,
-    last_synced_content: &mut LastSyncedSchematicContent,
-    locally_pushed: &mut LocallyPushedSkyboxActive,
-    cache: &mut SkyboxCache,
-    tx: &PacketTx,
+    sync: &mut SkyboxDocumentSyncMut<'_>,
 ) {
-    let kdl = sync_document_skybox(
-        skybox.clone(),
-        current_document,
-        document_assets,
-        schematic,
-    );
-    sync_cache_active_from_skybox(cache, skybox.as_ref());
-    record_synced_schematic_content(last_synced_content, &kdl);
-    let active = schematic.skybox.as_ref().map(|entry| entry.name.as_str());
-    push_skybox_db_sync(tx, Some(kdl), active, locally_pushed);
+    sync.sync_skybox_to_document_and_db(skybox);
+}
+
+#[derive(SystemParam)]
+pub(crate) struct SyncGeneratedSkyboxParams<'w> {
+    schematic: ResMut<'w, CurrentSchematic>,
+    current_document: ResMut<'w, CurrentDocument>,
+    document_assets: ResMut<'w, Assets<SchematicDocumentAsset>>,
+    last_synced_content: ResMut<'w, LastSyncedSchematicContent>,
+    locally_pushed: ResMut<'w, LocallyPushedSkyboxActive>,
+    cache: ResMut<'w, SkyboxCache>,
+    tx: Res<'w, PacketTx>,
 }
 
 pub(crate) fn sync_generated_skybox_to_schematic(
     mut reader: MessageReader<SkyboxGenerated>,
-    mut schematic: ResMut<CurrentSchematic>,
-    mut current_document: ResMut<CurrentDocument>,
-    mut document_assets: ResMut<Assets<SchematicDocumentAsset>>,
-    mut last_synced_content: ResMut<LastSyncedSchematicContent>,
-    mut locally_pushed: ResMut<LocallyPushedSkyboxActive>,
-    mut cache: ResMut<SkyboxCache>,
-    tx: Res<PacketTx>,
+    mut params: SyncGeneratedSkyboxParams,
 ) {
     for event in reader.read() {
-        let skybox = SkyboxConfig {
-            name: event.name.clone(),
+        let mut sync = SkyboxDocumentSyncMut {
+            schematic: &mut params.schematic,
+            current_document: &mut params.current_document,
+            document_assets: &mut params.document_assets,
+            last_synced_content: &mut params.last_synced_content,
+            locally_pushed: &mut params.locally_pushed,
+            cache: &mut params.cache,
+            tx: &params.tx,
         };
-        let kdl = sync_document_skybox(
-            Some(skybox.clone()),
-            &mut current_document,
-            &mut document_assets,
-            &mut schematic,
-        );
-        sync_cache_active_from_skybox(&mut cache, Some(&skybox));
-        last_synced_content.0 = Some(kdl.clone());
-        push_skybox_db_sync(&tx, Some(kdl), Some(&event.name), &mut locally_pushed);
+        sync.sync_skybox_to_document_and_db(Some(SkyboxConfig {
+            name: event.name.clone(),
+        }));
     }
 }
 
@@ -122,7 +140,11 @@ pub(crate) fn sync_loaded_document_skybox_to_db(
     let Some(document) = loaded.read().last().map(|event| &event.document) else {
         return;
     };
-    let loaded_skybox = document.root.skybox.as_ref().map(|entry| entry.name.as_str());
+    let loaded_skybox = document
+        .root
+        .skybox
+        .as_ref()
+        .map(|entry| entry.name.as_str());
     if !should_push_loaded_skybox_to_db(loaded_skybox, config.skybox_active()) {
         return;
     }
@@ -237,20 +259,16 @@ pub(crate) fn revert_previous_skybox(mut params: RevertSkyboxParams) {
         return;
     };
     let skybox = SkyboxConfig { name: name.clone() };
-    let kdl = sync_document_skybox(
-        Some(skybox.clone()),
-        &mut params.current_document,
-        &mut params.document_assets,
-        &mut params.schematic,
-    );
-    sync_cache_active_from_skybox(&mut params.cache, Some(&skybox));
-    params.last_synced_content.0 = Some(kdl.clone());
-    push_skybox_db_sync(
-        &params.tx,
-        Some(kdl),
-        Some(&name),
-        &mut params.locally_pushed,
-    );
+    let mut sync = SkyboxDocumentSyncMut {
+        schematic: &mut params.schematic,
+        current_document: &mut params.current_document,
+        document_assets: &mut params.document_assets,
+        last_synced_content: &mut params.last_synced_content,
+        locally_pushed: &mut params.locally_pushed,
+        cache: &mut params.cache,
+        tx: &params.tx,
+    };
+    sync.sync_skybox_to_document_and_db(Some(skybox));
     params.skyboxes.write(SetActiveSkybox::ByName(name.clone()));
     params.ui.phase = SkyboxGenerationPhase::Idle;
     params.ui.message = Some(format!("Reverted to skybox `{name}`"));
@@ -299,8 +317,14 @@ mod tests {
 
     #[test]
     fn loaded_skybox_db_push_needed_when_names_differ() {
-        assert!(should_push_loaded_skybox_to_db(Some("seaport"), Some("machu_picchu")));
-        assert!(!should_push_loaded_skybox_to_db(Some("seaport"), Some("seaport")));
+        assert!(should_push_loaded_skybox_to_db(
+            Some("seaport"),
+            Some("machu_picchu")
+        ));
+        assert!(!should_push_loaded_skybox_to_db(
+            Some("seaport"),
+            Some("seaport")
+        ));
         assert!(should_push_loaded_skybox_to_db(None, Some("seaport")));
         assert!(!should_push_loaded_skybox_to_db(None, None));
     }
