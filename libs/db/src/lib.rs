@@ -623,6 +623,8 @@ impl DB {
     pub fn insert_vtable(&self, vtable: VTableMsg) -> Result<(), Error> {
         info!(id = ?vtable.id, "inserting vtable");
 
+        vtable.vtable.validate_field_alignment(vtable.id)?;
+
         // Find byte ranges that are used as timestamp sources
         let timestamp_source_ranges = find_timestamp_source_ranges(&vtable.vtable);
         debug!(

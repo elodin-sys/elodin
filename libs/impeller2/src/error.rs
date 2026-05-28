@@ -1,4 +1,4 @@
-use crate::types::PacketId;
+use crate::types::{ComponentId, PacketId, PrimType};
 use thiserror::Error;
 #[derive(Error, Debug, Clone)]
 #[cfg_attr(feature = "std", derive(miette::Diagnostic))]
@@ -40,6 +40,26 @@ pub enum Error {
         diagnostic(code(impeller::alignment), help("alignment was incorrect for buf"))
     )]
     Alignment,
+
+    #[error(
+        "vtable {packet_id:?} field for component {component_id} is misaligned: offset {offset} is not a multiple of {required_align} (required by {prim_type})"
+    )]
+    #[cfg_attr(
+        feature = "std",
+        diagnostic(
+            code(impeller::vtable_field_misaligned),
+            help(
+                "order fields by descending primitive size (8 -> 4 -> 2 -> 1), or pad so each field offset is a multiple of its primitive alignment"
+            )
+        )
+    )]
+    VtableFieldMisaligned {
+        packet_id: PacketId,
+        component_id: ComponentId,
+        offset: usize,
+        prim_type: PrimType,
+        required_align: usize,
+    },
 
     #[error("incorrect component data")]
     #[cfg_attr(

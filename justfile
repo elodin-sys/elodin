@@ -92,6 +92,7 @@ install target="all":
   # otherwise short-circuit forever. The maturin@1.12.6 pin below stops new
   # ones from appearing while keeping uvx working in non-Nix setups too.
   find target -maxdepth 4 -name 'libelodin.so' -size 0 -delete 2>/dev/null || true
+  mkdir -p "${CARGO_HOME:-$HOME/.cargo}/bin"
   case "{{target}}" in
     py)
       uv venv --python 3.13 --clear

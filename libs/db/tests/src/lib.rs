@@ -83,6 +83,83 @@ mod tests {
     }
 
     #[test]
+    async fn test_vtable_misaligned_field_rejected() {
+        let (_addr, db) = setup_test_db().await.unwrap();
+
+        let bad = vtable([
+            raw_field(
+                0,
+                8,
+                schema(PrimType::U64, &[1], component("time_monotonic")),
+            ),
+            raw_field(
+                96,
+                1,
+                schema(PrimType::U8, &[1], component("guidance_mode")),
+            ),
+            raw_field(
+                97,
+                1,
+                schema(PrimType::U8, &[1], component("ap_command_enable")),
+            ),
+            raw_field(
+                98,
+                24,
+                schema(PrimType::F64, &[3], component("acc_cmd_body")),
+            ),
+        ]);
+        let err = db
+            .insert_vtable(VTableMsg {
+                id: 1u16.to_le_bytes(),
+                vtable: bad,
+            })
+            .expect_err("misaligned vtable must be rejected at registration");
+        let Error::Impeller(impeller2::error::Error::VtableFieldMisaligned {
+            packet_id,
+            component_id,
+            offset,
+            prim_type,
+            required_align,
+        }) = err
+        else {
+            panic!("unexpected error: {err:?}");
+        };
+        assert_eq!(packet_id, 1u16.to_le_bytes());
+        assert_eq!(component_id, ComponentId::new("acc_cmd_body"));
+        assert_eq!(offset, 98);
+        assert_eq!(prim_type, PrimType::F64);
+        assert_eq!(required_align, 8);
+
+        let good = vtable([
+            raw_field(
+                0,
+                8,
+                schema(PrimType::U64, &[1], component("time_monotonic")),
+            ),
+            raw_field(
+                96,
+                24,
+                schema(PrimType::F64, &[3], component("acc_cmd_body")),
+            ),
+            raw_field(
+                120,
+                1,
+                schema(PrimType::U8, &[1], component("guidance_mode")),
+            ),
+            raw_field(
+                121,
+                1,
+                schema(PrimType::U8, &[1], component("ap_command_enable")),
+            ),
+        ]);
+        db.insert_vtable(VTableMsg {
+            id: 2u16.to_le_bytes(),
+            vtable: good,
+        })
+        .expect("aligned vtable must register successfully");
+    }
+
+    #[test]
     async fn test_vtable_stream() {
         let (addr, _db) = setup_test_db().await.unwrap();
         let mut rx_client = Client::connect(addr).await.unwrap();
