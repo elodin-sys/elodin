@@ -266,7 +266,10 @@ fn headless_skybox_applied(
         .collect();
 
     if targets.is_empty() {
-        return false;
+        return match desired {
+            None => cache.active.is_none(),
+            Some(_) => false,
+        };
     }
 
     match desired {
@@ -276,6 +279,14 @@ fn headless_skybox_applied(
                 && targets.iter().all(|(_, skybox)| skybox.is_some())
         }
     }
+}
+
+fn skybox_failure_matches_gate(gate_desired: &Option<Option<String>>, failed_name: &str) -> bool {
+    matches!(gate_desired, Some(Some(name)) if name == failed_name)
+}
+
+fn clear_applied_in_cache(desired: &Option<String>, cache: &SkyboxCache) -> bool {
+    desired.is_none() && cache.active.is_none()
 }
 
 fn sync_headless_skybox(
@@ -288,10 +299,7 @@ fn sync_headless_skybox(
     mut failed: MessageReader<SkyboxFailed>,
 ) {
     for event in failed.read() {
-        let Some(gate_desired) = render_gate.desired.as_ref() else {
-            continue;
-        };
-        if gate_desired.as_deref() != Some(event.name.as_str()) {
+        if !skybox_failure_matches_gate(&render_gate.desired, &event.name) {
             continue;
         }
         tracing::warn!(
@@ -332,6 +340,12 @@ fn sync_headless_skybox(
 
     if render_gate.skipped_desired.as_ref() == Some(&desired) {
         render_gate.applied = true;
+        return;
+    }
+
+    if render_gate.activation_dispatched && clear_applied_in_cache(&desired, &cache) {
+        render_gate.applied = true;
+        render_gate.warmup_remaining = SKYBOX_TRANSITION_WARMUP_FRAMES;
         return;
     }
 
