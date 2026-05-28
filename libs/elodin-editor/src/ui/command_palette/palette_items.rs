@@ -1181,7 +1181,7 @@ fn clear_skybox() -> PaletteItem {
         "Clear Skybox",
         SKYBOX_LABEL,
         |_: In<String>,
-         cache: Res<SkyboxCache>,
+         mut cache: ResMut<SkyboxCache>,
          mut skyboxes: MessageWriter<SetActiveSkybox>,
          mut schematic: ResMut<CurrentSchematic>,
          mut current_document: ResMut<CurrentDocument>,
@@ -1200,6 +1200,7 @@ fn clear_skybox() -> PaletteItem {
                 &mut document_assets,
                 &mut last_synced_content,
                 &mut locally_pushed,
+                &mut cache,
                 &tx,
             );
             PaletteEvent::Exit
@@ -1212,6 +1213,7 @@ fn activate_skybox_item(label: String, name: String) -> PaletteItem {
         label,
         SKYBOX_LABEL,
         move |_: In<String>,
+              mut cache: ResMut<SkyboxCache>,
               mut skyboxes: MessageWriter<SetActiveSkybox>,
               mut schematic: ResMut<CurrentSchematic>,
               mut current_document: ResMut<CurrentDocument>,
@@ -1227,6 +1229,7 @@ fn activate_skybox_item(label: String, name: String) -> PaletteItem {
                 &mut document_assets,
                 &mut last_synced_content,
                 &mut locally_pushed,
+                &mut cache,
                 &tx,
             );
             PaletteEvent::Exit
