@@ -62,6 +62,9 @@ pub fn open_document_path(
     let handle: Handle<SchematicDocumentAsset> = asset_server.load(asset_path.clone());
     let document = read_document_from_disk(&resolved_path, &asset_path, asset_server)?;
     current_document.set_file(handle.clone(), asset_path, resolved_path);
+    // Suppress the AssetServer LoadedWithDependencies/Modified event for this open;
+    // DocumentLoaded already applied the synchronously read document.
+    current_document.suppress_ids.insert(handle.id());
     Ok(document)
 }
 

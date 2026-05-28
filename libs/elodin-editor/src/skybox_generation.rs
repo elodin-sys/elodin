@@ -85,13 +85,6 @@ pub(crate) fn sync_cache_active_from_skybox(
     cache.active = skybox.map(|entry| entry.name.clone());
 }
 
-pub(crate) fn sync_skybox_to_document_and_db(
-    skybox: Option<SkyboxConfig>,
-    sync: &mut SkyboxDocumentSyncMut<'_>,
-) {
-    sync.sync_skybox_to_document_and_db(skybox);
-}
-
 #[derive(SystemParam)]
 pub(crate) struct SyncGeneratedSkyboxParams<'w> {
     schematic: ResMut<'w, CurrentSchematic>,
