@@ -12,6 +12,7 @@ use crate::plugins::kdl_document::{
     CurrentDocument, DocumentLoaded, DocumentReloaded, LastSyncedSchematicContent,
     SchematicDocumentAsset, sync_document_skybox,
 };
+use impeller2_wkt::DbConfig;
 use crate::ui::schematic::CurrentSchematic;
 
 #[derive(Resource, Default)]
@@ -109,6 +110,24 @@ pub(crate) fn record_synced_schematic_content(
     kdl: &str,
 ) {
     last_synced_content.0 = Some(kdl.to_string());
+}
+
+/// Push loaded document skybox metadata to the DB when it differs from the current config.
+/// Editor viewports update locally on load; the render-server (sensor_view) reads `skybox.active`.
+pub(crate) fn sync_loaded_document_skybox_to_db(
+    mut loaded: MessageReader<DocumentLoaded>,
+    config: Res<DbConfig>,
+    tx: Res<PacketTx>,
+) {
+    let Some(document) = loaded.read().last().map(|event| &event.document) else {
+        return;
+    };
+    let loaded_skybox = document.root.skybox.as_ref().map(|entry| entry.name.as_str());
+    if !should_push_loaded_skybox_to_db(loaded_skybox, config.skybox_active()) {
+        return;
+    }
+    let kdl = document.root.to_kdl();
+    push_schematic_metadata(&tx, Some(kdl), loaded_skybox);
 }
 
 pub(crate) fn record_loaded_schematic_content(
@@ -237,6 +256,10 @@ pub(crate) fn revert_previous_skybox(mut params: RevertSkyboxParams) {
     params.ui.message = Some(format!("Reverted to skybox `{name}`"));
 }
 
+fn should_push_loaded_skybox_to_db(loaded: Option<&str>, db: Option<&str>) -> bool {
+    loaded != db
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -272,6 +295,14 @@ mod tests {
             last.0.as_ref().is_some_and(|kdl| kdl.contains("seaport")),
             "expected loaded schematic KDL to be recorded locally"
         );
+    }
+
+    #[test]
+    fn loaded_skybox_db_push_needed_when_names_differ() {
+        assert!(should_push_loaded_skybox_to_db(Some("seaport"), Some("machu_picchu")));
+        assert!(!should_push_loaded_skybox_to_db(Some("seaport"), Some("seaport")));
+        assert!(should_push_loaded_skybox_to_db(None, Some("seaport")));
+        assert!(!should_push_loaded_skybox_to_db(None, None));
     }
 
     #[test]
