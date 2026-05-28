@@ -1567,7 +1567,9 @@ impl ImagineStatus {
     }
 
     fn is_error(&self) -> bool {
-        matches!(self.status.as_str(), "error" | "abort" | "failed")
+        self.status.eq_ignore_ascii_case("error")
+            || self.status.eq_ignore_ascii_case("abort")
+            || self.status.eq_ignore_ascii_case("failed")
     }
 }
 
@@ -2290,6 +2292,25 @@ mod tests {
             cubemap_convert::BUNDLED_CUBEMAP_FACE_SIZE
         );
         assert_eq!(SkyboxResolution::SixteenK.face_size(), 4096);
+    }
+
+    #[test]
+    fn imagine_status_is_error_is_case_insensitive() {
+        let failed = ImagineStatus {
+            id: 1,
+            obfuscated_id: None,
+            status: "Failed".to_string(),
+            file_url: None,
+            error_message: Some("boom".to_string()),
+        };
+        assert!(failed.is_error());
+        assert!(
+            ImagineStatus {
+                status: "ERROR".to_string(),
+                ..failed.clone()
+            }
+            .is_error()
+        );
     }
 
     #[test]

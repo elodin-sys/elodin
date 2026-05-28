@@ -534,6 +534,19 @@ mod tests {
     }
 
     #[test]
+    fn schematic_content_equivalent_treats_reserialized_kdl_as_equal() {
+        use impeller2_kdl::{FromKdl, ToKdl};
+        use impeller2_wkt::Schematic;
+
+        let raw = "skybox name=\"seaport\"\n";
+        let reserialized = Schematic::from_kdl(raw).unwrap().to_kdl();
+        assert!(super::operations::schematic_content_equivalent(
+            &reserialized,
+            raw,
+        ));
+    }
+
+    #[test]
     fn config_sync_skips_configured_file_path_when_already_loaded() {
         let temp = TempTestDir::new("config-sync-skip-current");
         let path = temp.path().join("drone.kdl");

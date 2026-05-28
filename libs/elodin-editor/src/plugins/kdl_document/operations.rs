@@ -190,6 +190,17 @@ fn current_document_matches_path(current_document: &CurrentDocument, path: &Path
             })
 }
 
+/// Returns true when two KDL strings describe the same schematic (exact or semantically).
+pub(crate) fn schematic_content_equivalent(left: &str, right: &str) -> bool {
+    if left == right {
+        return true;
+    }
+    match (Schematic::from_kdl(left), Schematic::from_kdl(right)) {
+        (Ok(left), Ok(right)) => left.to_kdl() == right.to_kdl(),
+        _ => false,
+    }
+}
+
 pub fn sync_document_from_config(
     In(given_path): In<Option<PathBuf>>,
     config: Res<DbConfig>,
@@ -225,7 +236,11 @@ pub fn sync_document_from_config(
     }
 
     if let Some(content) = config.schematic_content() {
-        if last_synced_content.0.as_deref() == Some(content) {
+        if last_synced_content
+            .0
+            .as_deref()
+            .is_some_and(|last| schematic_content_equivalent(last, content))
+        {
             return;
         }
         open_document_from_content.write(OpenDocumentFromContentRequest {
