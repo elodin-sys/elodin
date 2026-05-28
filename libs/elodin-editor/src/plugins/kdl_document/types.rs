@@ -60,7 +60,6 @@ impl CurrentDocument {
         self.handle = Some(handle);
         self.asset_path = Some(asset_path);
         self.save_path = Some(save_path);
-        self.suppress_ids.clear();
     }
 
     pub fn set_unsaved_content(&mut self, save_path: Option<PathBuf>) {

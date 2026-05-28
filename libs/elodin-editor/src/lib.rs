@@ -343,15 +343,8 @@ impl Plugin for EditorPlugin {
                 Update,
                 skybox_generation::sync_generated_skybox_to_schematic,
             )
-            .add_systems(Update, skybox_generation::record_loaded_schematic_content)
-            .add_systems(
-                Update,
-                (
-                    ui::video_stream::invalidate_sensor_frames_on_document_load,
-                    skybox_generation::sync_loaded_document_skybox_to_db,
-                )
-                    .chain(),
-            )
+            .add_systems(Update, skybox_generation::on_document_loaded)
+            .add_systems(Update, skybox_generation::record_reloaded_schematic_content)
             .add_systems(Update, skybox_generation::push_skybox_active_on_pending)
             .add_systems(Update, skybox_generation::decay_skybox_status_message)
             .add_systems(

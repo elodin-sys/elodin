@@ -125,35 +125,45 @@ pub(crate) fn record_synced_schematic_content(
 
 /// Push loaded document skybox metadata to the DB when it differs from the current config.
 /// Editor viewports update locally on load; the render-server (sensor_view) reads `skybox.active`.
-pub(crate) fn sync_loaded_document_skybox_to_db(
+pub(crate) fn on_document_loaded(
     mut loaded: MessageReader<DocumentLoaded>,
     config: Res<DbConfig>,
     mut locally_pushed: ResMut<LocallyPushedSkyboxActive>,
-    tx: Res<PacketTx>,
+    mut last_synced_content: ResMut<LastSyncedSchematicContent>,
+    mut caches: Query<&mut crate::ui::video_stream::VideoFrameCache>,
+    tx: Option<Res<PacketTx>>,
 ) {
-    let Some(document) = loaded.read().last().map(|event| &event.document) else {
+    let Some(event) = loaded.read().last() else {
         return;
     };
+    let document = &event.document;
     let loaded_skybox = document
         .root
         .skybox
         .as_ref()
         .map(|entry| entry.name.as_str());
-    if !should_push_loaded_skybox_to_db(loaded_skybox, config.skybox_active()) {
-        return;
+
+    crate::ui::video_stream::invalidate_sensor_frames_if_loaded_skybox_differs(
+        loaded_skybox,
+        &config,
+        &mut caches,
+    );
+
+    if should_push_loaded_skybox_to_db(loaded_skybox, config.skybox_active())
+        && let Some(tx) = tx.as_ref()
+    {
+        let kdl = document.root.to_kdl();
+        push_skybox_db_sync(tx, Some(kdl), loaded_skybox, &mut locally_pushed);
     }
-    let kdl = document.root.to_kdl();
-    push_skybox_db_sync(&tx, Some(kdl), loaded_skybox, &mut locally_pushed);
+
+    record_synced_schematic_content(&mut last_synced_content, &document.root.to_kdl());
 }
 
-pub(crate) fn record_loaded_schematic_content(
-    mut loaded: MessageReader<DocumentLoaded>,
+pub(crate) fn record_reloaded_schematic_content(
     mut reloaded: MessageReader<DocumentReloaded>,
     mut last_synced_content: ResMut<LastSyncedSchematicContent>,
 ) {
-    let loaded = loaded.read().map(|event| &event.document);
-    let reloaded = reloaded.read().map(|event| &event.document);
-    let Some(document) = loaded.chain(reloaded).last() else {
+    let Some(document) = reloaded.read().last().map(|event| &event.document) else {
         return;
     };
 
@@ -280,13 +290,14 @@ mod tests {
     use std::path::PathBuf;
 
     #[test]
-    fn record_loaded_schematic_content_updates_last_synced_without_db_push() {
+    fn on_document_loaded_updates_last_synced_without_db_push() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .init_resource::<LastSyncedSchematicContent>()
+            .init_resource::<DbConfig>()
+            .init_resource::<LocallyPushedSkyboxActive>()
             .add_message::<DocumentLoaded>()
-            .add_message::<DocumentReloaded>()
-            .add_systems(Update, record_loaded_schematic_content);
+            .add_systems(Update, on_document_loaded);
 
         app.world_mut().write_message(DocumentLoaded {
             save_path: None,

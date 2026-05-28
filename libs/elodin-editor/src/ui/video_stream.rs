@@ -11,7 +11,7 @@ use bevy::ui::Node;
 use bevy::ui::widget::ImageNode;
 use bevy::{
     ecs::system::SystemParam,
-    prelude::{Commands, Component, Entity, Local, MessageReader, Query, Res, ResMut, World},
+    prelude::{Commands, Component, Entity, Local, Query, Res, ResMut, World},
     ui::Val,
 };
 use egui::{self, Color32, Vec2};
@@ -1222,24 +1222,15 @@ pub fn set_visibility(mut query: Query<(&mut Node, &IsTileVisible)>) {
     }
 }
 
-pub(crate) fn invalidate_sensor_frames_on_document_load(
-    mut loaded: MessageReader<crate::plugins::kdl_document::DocumentLoaded>,
-    config: Res<impeller2_wkt::DbConfig>,
-    mut caches: Query<&mut VideoFrameCache>,
+pub(crate) fn invalidate_sensor_frames_if_loaded_skybox_differs(
+    loaded_skybox: Option<&str>,
+    config: &impeller2_wkt::DbConfig,
+    caches: &mut Query<&mut VideoFrameCache>,
 ) {
-    let Some(event) = loaded.read().last() else {
-        return;
-    };
-    let loaded_skybox = event
-        .document
-        .root
-        .skybox
-        .as_ref()
-        .map(|entry| entry.name.as_str());
     if loaded_skybox == config.skybox_active() {
         return;
     }
-    clear_sensor_raw_frame_caches(&mut caches);
+    clear_sensor_raw_frame_caches(caches);
 }
 
 pub(crate) fn invalidate_sensor_frames_on_db_skybox_change(
