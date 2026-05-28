@@ -1,14 +1,17 @@
 use bevy::app::{App, Plugin, Update};
-use bevy::camera::Camera;
+use bevy::camera::{Camera, RenderTarget};
 use bevy::ecs::schedule::IntoScheduleConfigs;
 use bevy::ecs::system::Query;
 use bevy::input::touch::Touch;
 use bevy::math::Vec2;
-use bevy::prelude::{Res, ResMut, Resource, Touches};
+use bevy::prelude::{Entity, Res, ResMut, Resource, Touches, With};
 use bevy::transform::components::Transform;
+use bevy::window::PrimaryWindow;
 use bevy_editor_cam::controller::component::EditorCam;
 
-use crate::ui::tiles;
+use crate::ui::{
+    UiInputConsumerSet, input_owner::UiInputOwners, window::window_entity_from_target,
+};
 
 use super::camera_anchor::camera_anchor_from_transform;
 
@@ -18,7 +21,12 @@ impl Plugin for EditorCamTouchPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<TouchTracker>()
             .add_systems(Update, touch_tracker)
-            .add_systems(Update, touch_editor_cam.after(touch_tracker));
+            .add_systems(
+                Update,
+                touch_editor_cam
+                    .after(touch_tracker)
+                    .in_set(UiInputConsumerSet),
+            );
     }
 }
 
@@ -167,20 +175,31 @@ pub fn touch_tracker(touches: Res<Touches>, mut touch_tracker: ResMut<TouchTrack
 
 pub fn touch_editor_cam(
     touch_tracker: Res<TouchTracker>,
-    mut cams: Query<(&mut EditorCam, &Transform, &Camera)>,
-    viewport_contains_pointer: Res<tiles::ViewportContainsPointer>,
+    mut cams: Query<(Entity, &mut EditorCam, &Transform, &Camera, &RenderTarget)>,
+    input_owners: Res<UiInputOwners>,
+    primary_window: Query<Entity, With<PrimaryWindow>>,
 ) {
+    let Ok(primary_entity) = primary_window.single() else {
+        return;
+    };
     let touch_gestures = touch_tracker.get_touch_gestures();
     let midpoint = match touch_gestures {
         TouchGestures::OneFinger(one_finger) => one_finger.midpoint,
         TouchGestures::TwoFinger(two_finger) => two_finger.midpoint,
         _ => return,
     };
-    for (mut editor_cam, transform, cam) in cams.iter_mut() {
+    let midpoint_pos = bevy_egui::egui::pos2(midpoint.x, midpoint.y);
+
+    for (entity, mut editor_cam, transform, cam, render_target) in cams.iter_mut() {
+        let Some(window_entity) = window_entity_from_target(render_target, primary_entity) else {
+            continue;
+        };
         let Some(viewport_rect) = cam.logical_viewport_rect() else {
             continue;
         };
-        if !viewport_rect.contains(midpoint) || !viewport_contains_pointer.0 {
+        if !viewport_rect.contains(midpoint)
+            || !input_owners.permits_viewport_at(window_entity, entity, midpoint_pos)
+        {
             continue;
         }
         let anchor = camera_anchor_from_transform(transform);
