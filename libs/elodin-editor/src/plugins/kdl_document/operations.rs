@@ -18,15 +18,18 @@ use crate::plugins::kdl_asset_source::canonicalize_or_original;
 /// the root KDL text for DB metadata sync.
 pub fn sync_document_skybox(
     skybox: Option<SkyboxConfig>,
-    current_document: &CurrentDocument,
+    current_document: &mut CurrentDocument,
     document_assets: &mut Assets<SchematicDocumentAsset>,
     schematic: &mut CurrentSchematic,
 ) -> String {
     schematic.skybox = skybox.clone();
-    if let Some(handle) = current_document.handle.as_ref()
-        && let Some(document) = document_assets.get_mut(handle)
-    {
-        document.root.skybox = skybox;
+    if let Some(handle) = current_document.handle.as_ref() {
+        // Keep the in-memory document in sync for save, but suppress the asset
+        // Modified event so skybox-only edits do not reload the full schematic.
+        current_document.suppress_ids.insert(handle.id());
+        if let Some(document) = document_assets.get_mut(handle) {
+            document.root.skybox = skybox;
+        }
     }
     schematic.to_kdl()
 }

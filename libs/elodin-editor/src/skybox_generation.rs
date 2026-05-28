@@ -52,7 +52,7 @@ impl LocallyPushedSkyboxActive {
 pub(crate) fn sync_generated_skybox_to_schematic(
     mut reader: MessageReader<SkyboxGenerated>,
     mut schematic: ResMut<CurrentSchematic>,
-    current_document: Res<CurrentDocument>,
+    mut current_document: ResMut<CurrentDocument>,
     mut document_assets: ResMut<Assets<SchematicDocumentAsset>>,
     mut last_synced_content: ResMut<LastSyncedSchematicContent>,
     mut locally_pushed: ResMut<LocallyPushedSkyboxActive>,
@@ -63,7 +63,7 @@ pub(crate) fn sync_generated_skybox_to_schematic(
             Some(SkyboxConfig {
                 name: event.name.clone(),
             }),
-            &current_document,
+            &mut current_document,
             &mut document_assets,
             &mut schematic,
         );
@@ -187,7 +187,7 @@ pub(crate) fn push_schematic_metadata(tx: &PacketTx, kdl: String, skybox: Option
 pub(crate) struct RevertSkyboxParams<'w> {
     ui: ResMut<'w, SkyboxGenerationUi>,
     schematic: ResMut<'w, CurrentSchematic>,
-    current_document: Res<'w, CurrentDocument>,
+    current_document: ResMut<'w, CurrentDocument>,
     document_assets: ResMut<'w, Assets<SchematicDocumentAsset>>,
     last_synced_content: ResMut<'w, LastSyncedSchematicContent>,
     locally_pushed: ResMut<'w, LocallyPushedSkyboxActive>,
@@ -201,7 +201,7 @@ pub(crate) fn revert_previous_skybox(mut params: RevertSkyboxParams) {
     };
     let kdl = sync_document_skybox(
         Some(SkyboxConfig { name: name.clone() }),
-        &params.current_document,
+        &mut params.current_document,
         &mut params.document_assets,
         &mut params.schematic,
     );

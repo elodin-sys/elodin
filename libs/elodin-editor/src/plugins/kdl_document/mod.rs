@@ -58,8 +58,11 @@ mod tests {
     use super::{
         CurrentDocument, DocumentCleared, DocumentLoaded, DocumentReloaded,
         LastSyncedSchematicContent, OpenDocumentFromContentRequest, OpenDocumentRequest,
-        SchematicDocumentAsset, operations::open_document_from_content, plugin,
+        SchematicDocumentAsset,
+        operations::{open_document_from_content, sync_document_skybox},
+        plugin,
     };
+    use crate::ui::schematic::CurrentSchematic;
     use bevy::{
         app::TaskPoolPlugin,
         asset::{AssetPath, AssetPlugin, UnapprovedPathMode},
@@ -72,7 +75,7 @@ mod tests {
         ManifestEntry, SkyboxStyle,
         prelude::{PrimarySkybox, SetActiveSkybox, SkyboxAssetPlugin, SkyboxCache},
     };
-    use impeller2_wkt::{DbConfig, SchematicElem, SkyboxConfig};
+    use impeller2_wkt::{DbConfig, Schematic, SchematicElem, SkyboxConfig};
     use std::{
         ffi::OsString,
         fs,
@@ -518,6 +521,73 @@ mod tests {
 
         assert!(current_document.suppress_ids.is_empty());
         assert!(current_document.handle.is_none());
+    }
+
+    #[derive(Resource, Default)]
+    struct SeenDocumentReloads(usize);
+
+    fn count_document_reloads(
+        mut reader: MessageReader<DocumentReloaded>,
+        mut seen: ResMut<SeenDocumentReloads>,
+    ) {
+        seen.0 += reader.read().count();
+    }
+
+    #[test]
+    fn sync_document_skybox_suppresses_document_reload() {
+        let mut app = App::new();
+        app.add_plugins(MinimalPlugins);
+        app.add_plugins(AssetPlugin {
+            unapproved_path_mode: UnapprovedPathMode::Allow,
+            ..Default::default()
+        });
+        app.add_message::<SetActiveSkybox>();
+        plugin(&mut app);
+        app.init_resource::<SeenDocumentReloads>();
+        app.add_systems(Update, count_document_reloads);
+
+        let handle = app
+            .world_mut()
+            .resource_mut::<Assets<SchematicDocumentAsset>>()
+            .add(SchematicDocumentAsset {
+                root: Schematic::default(),
+                windows: Vec::new(),
+            });
+        app.world_mut().resource_mut::<CurrentDocument>().set_file(
+            handle.clone(),
+            AssetPath::from_path_buf(PathBuf::from("drone.kdl")),
+            PathBuf::from("drone.kdl"),
+        );
+
+        let mut schematic = CurrentSchematic(Schematic::default());
+        app.world_mut()
+            .resource_scope(|world, mut current_document: Mut<CurrentDocument>| {
+                let mut document_assets = world.resource_mut::<Assets<SchematicDocumentAsset>>();
+                sync_document_skybox(
+                    Some(SkyboxConfig {
+                        name: "seaport".to_string(),
+                    }),
+                    &mut current_document,
+                    &mut document_assets,
+                    &mut schematic,
+                );
+            });
+
+        app.update();
+
+        assert_eq!(app.world().resource::<SeenDocumentReloads>().0, 0);
+        assert_eq!(
+            app.world()
+                .resource::<Assets<SchematicDocumentAsset>>()
+                .get(&handle)
+                .and_then(|doc| doc.root.skybox.as_ref())
+                .map(|skybox| skybox.name.as_str()),
+            Some("seaport")
+        );
+        assert_eq!(
+            schematic.skybox.as_ref().map(|skybox| skybox.name.as_str()),
+            Some("seaport")
+        );
     }
 
     #[cfg(unix)]
