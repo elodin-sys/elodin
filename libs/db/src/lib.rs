@@ -1512,6 +1512,7 @@ async fn handle_conn_inner<A: AsyncRead + AsyncWrite + Send + Sync + 'static>(
     let _conn_span = tracing::info_span!("handle_conn").entered();
     let mut buf = vec![0u8; 8 * 1024 * 1024];
     let mut resp_pkt = LenPacket::new(PacketTy::Msg, [0, 0], RESPONSE_PACKET_CAPACITY);
+    let mut silent = false;
     loop {
         let pkt = rx.next(buf).await?;
         let req_id = pkt.req_id();
@@ -1519,11 +1520,15 @@ async fn handle_conn_inner<A: AsyncRead + AsyncWrite + Send + Sync + 'static>(
             req_id,
             tx,
             pkt: Some(resp_pkt),
+            silent,
         };
-        let result = handle_packet(&pkt, &db, &mut pkt_tx).await;
+        let result = handle_packet(&pkt, &db, &mut pkt_tx, silent).await;
         buf = pkt.into_buf().into_inner();
         match result {
             Ok(PacketAction::Continue) => {}
+            Ok(PacketAction::SetSilent(new_silent)) => {
+                silent = new_silent;
+            }
             Ok(PacketAction::StartFollowStream {
                 target_packet_size,
                 req_id: follow_req_id,
@@ -1547,6 +1552,11 @@ async fn handle_conn_inner<A: AsyncRead + AsyncWrite + Send + Sync + 'static>(
             Err(err) if err.is_stream_closed() => {}
             Err(err) => {
                 debug!(?err, "error handling packet");
+                if silent {
+                    resp_pkt = pkt_tx.pkt.expect("len pkt taken and not given back");
+                    tx = pkt_tx.tx;
+                    continue;
+                }
                 if let Err(err) = pkt_tx
                     .send_msg(&ErrorResponse {
                         description: err.to_string(),
@@ -1569,6 +1579,7 @@ async fn handle_conn_inner<A: AsyncRead + AsyncWrite + Send + Sync + 'static>(
 /// should continue its normal read loop or switch to a special mode.
 enum PacketAction {
     Continue,
+    SetSilent(bool),
     /// Transition the connection into follow-stream mode.
     StartFollowStream {
         target_packet_size: u32,
@@ -1580,6 +1591,7 @@ pub struct PacketTx<A: AsyncWrite + 'static> {
     req_id: RequestId,
     tx: Arc<Mutex<PacketSink<OwnedWriter<A>>>>,
     pkt: Option<LenPacket>,
+    silent: bool,
 }
 
 impl<A: AsyncWrite + 'static> Clone for PacketTx<A> {
@@ -1588,6 +1600,7 @@ impl<A: AsyncWrite + 'static> Clone for PacketTx<A> {
             req_id: self.req_id,
             tx: self.tx.clone(),
             pkt: self.pkt.clone(),
+            silent: self.silent,
         }
     }
 }
@@ -1596,12 +1609,19 @@ pub(crate) async fn send_with_timeout<A: AsyncWrite>(
     tx: &Arc<Mutex<PacketSink<A>>>,
     pkt: LenPacket,
 ) -> Result<LenPacket, Error> {
+    let tx = tx.lock().await;
+    send_locked_with_timeout(&tx, pkt).await
+}
+
+async fn send_locked_with_timeout<A: AsyncWrite>(
+    tx: &PacketSink<A>,
+    pkt: LenPacket,
+) -> Result<LenPacket, Error> {
     enum SendOutcome {
         Sent(stellarator::BufResult<(), LenPacket>),
         TimedOut,
     }
 
-    let tx = tx.lock().await;
     let send = async { SendOutcome::Sent(tx.send(pkt).await) };
     let timeout = async {
         stellarator::sleep(TX_WRITE_TIMEOUT).await;
@@ -1635,6 +1655,9 @@ impl<A: AsyncWrite + 'static> PacketTx<A> {
         &mut self,
         builder: impl FnOnce(&mut LenPacket) -> Result<(), Error> + '_,
     ) -> Result<(), Error> {
+        if self.silent {
+            return Ok(());
+        }
         let mut pkt = self.pkt.take().expect("missing len pkt");
         pkt.clear();
         if let Err(err) = builder(&mut pkt) {
@@ -1682,13 +1705,53 @@ impl<A: AsyncWrite + 'static> PacketTx<A> {
     }
 }
 
+fn silent_connection_ignores_msg(id: PacketId) -> bool {
+    [
+        UdpUnicast::ID,
+        Stream::ID,
+        GetSchema::ID,
+        GetTimeSeries::ID,
+        GetComponentMetadata::ID,
+        DumpMetadata::ID,
+        DumpSchema::ID,
+        SubscribeLastUpdated::ID,
+        GetEarliestTimestamp::ID,
+        GetDbSettings::ID,
+        SQLQuery::ID,
+        SparklineQuery::ID,
+        PlotOverviewQuery::ID,
+        MsgStream::ID,
+        FixedRateMsgStream::ID,
+        GetMsgMetadata::ID,
+        GetMsgs::ID,
+        VTableStream::ID,
+        UdpVTableStream::ID,
+        FollowStream::ID,
+        TimestampedMsgStream::ID,
+    ]
+    .contains(&id)
+}
+
 async fn handle_packet<A: AsyncWrite + Send + Sync + 'static>(
     pkt: &Packet<Slice<Vec<u8>>>,
     db: &Arc<DB>,
     tx: &mut PacketTx<A>,
+    silent: bool,
 ) -> Result<PacketAction, Error> {
     let _pkt_span = tracing::info_span!("handle_packet").entered();
     trace!(?pkt, "handling pkt");
+
+    if let Packet::Msg(m) = pkt {
+        if m.id == ConnectionSettings::ID {
+            let settings = m.parse::<ConnectionSettings>()?;
+            trace!(silent = settings.silent, "connection settings updated");
+            return Ok(PacketAction::SetSilent(settings.silent));
+        }
+        if silent && silent_connection_ignores_msg(m.id) {
+            trace!(id = ?m.id, "ignoring reply-producing message on silent connection");
+            return Ok(PacketAction::Continue);
+        }
+    }
 
     match &pkt {
         Packet::Msg(m) if m.id == VTableMsg::ID => {
@@ -2886,8 +2949,9 @@ async fn handle_fixed_stream<A: AsyncWrite>(
         .with_request_id(req_id);
         let t1 = Instant::now();
         {
-            send_with_timeout(&stream, ts_pkt.into_len_packet()).await?;
-            table = send_with_timeout(&stream, table.with_request_id(req_id)).await?;
+            let stream = stream.lock().await;
+            send_locked_with_timeout(&stream, ts_pkt.into_len_packet()).await?;
+            table = send_locked_with_timeout(&stream, table.with_request_id(req_id)).await?;
             let send_elapsed = t1.elapsed();
 
             accum_populate_us += populate_elapsed.as_micros() as u64;

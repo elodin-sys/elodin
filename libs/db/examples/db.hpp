@@ -3909,7 +3909,13 @@ class Msg {
 public:
     Msg(T p)
     {
-        auto packet_id = msg_id(T::TYPE_NAME);
+        auto packet_id = [] {
+            if constexpr (requires { T::PACKET_ID; }) {
+                return T::PACKET_ID;
+            } else {
+                return msg_id(T::TYPE_NAME);
+            }
+        }();
         header = PacketHeader {
             .len = 0,
             .ty = PacketType::MSG,
@@ -3937,6 +3943,23 @@ public:
         }
 
         return buf;
+    }
+};
+
+struct ConnectionSettings {
+    static constexpr std::string_view TYPE_NAME = "ConnectionSettings";
+    static constexpr std::array<uint8_t, 2> PACKET_ID = { 224, 39 };
+
+    bool silent = false;
+
+    size_t encoded_size() const
+    {
+        return postcard_size_bool();
+    }
+
+    postcard_error_t encode_raw(postcard_slice_t* slice) const
+    {
+        return postcard_encode_bool(slice, silent);
     }
 };
 
