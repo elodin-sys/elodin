@@ -41,7 +41,6 @@ use stellarator::{
     buf::Slice,
     io::{AsyncRead, AsyncWrite, OwnedReader, OwnedWriter, SplitExt},
     net::{TcpListener, TcpStream, UdpSocket},
-    rent,
     struc_con::Joinable,
     sync::{Mutex, WaitQueue},
     util::AtomicCell,
@@ -2672,14 +2671,8 @@ async fn handle_real_time_stream<A: AsyncWrite + 'static>(
 
             // Send ComponentMetadata so the editor knows about this component
             if let Some(metadata) = metadata {
-                let stream = sink.lock().await;
-                if let Err(err) = stream
-                    .send(metadata.into_len_packet().with_request_id(req_id))
-                    .await
-                    .0
-                {
-                    debug!(%err, "error sending component metadata");
-                }
+                send_with_timeout(&sink, metadata.into_len_packet().with_request_id(req_id))
+                    .await?;
             }
 
             // Send schema for this component
@@ -2688,16 +2681,7 @@ async fn handle_real_time_stream<A: AsyncWrite + 'static>(
                 schemas: [(component.component_id, schema)].into_iter().collect(),
                 start_timestamps: [(component.component_id, start_ts)].into_iter().collect(),
             };
-            {
-                let stream = sink.lock().await;
-                if let Err(err) = stream
-                    .send(schema_msg.into_len_packet().with_request_id(req_id))
-                    .await
-                    .0
-                {
-                    debug!(%err, "error sending component schema");
-                }
-            }
+            send_with_timeout(&sink, schema_msg.into_len_packet().with_request_id(req_id)).await?;
 
             // Spawn the data handler for this component
             let sink_clone = sink.clone();
@@ -2728,17 +2712,12 @@ async fn handle_real_time_component<A: AsyncWrite>(
     let waiter = component.time_series.waiter();
     let vtable_id: PacketId = fastrand::u16(..).to_le_bytes();
     {
-        let stream = stream.lock().await;
-        stream
-            .send(
-                VTableMsg {
-                    id: vtable_id,
-                    vtable,
-                }
-                .with_request_id(req_id),
-            )
-            .await
-            .0?;
+        let pkt = VTableMsg {
+            id: vtable_id,
+            vtable,
+        }
+        .into_len_packet();
+        send_with_timeout(&stream, pkt.with_request_id(req_id)).await?;
     }
 
     let mut table = LenPacket::table(vtable_id, 2048 - 16);
@@ -2750,15 +2729,7 @@ async fn handle_real_time_component<A: AsyncWrite>(
         table.push_aligned(timestamp);
         table.pad_for_type(prim_type);
         table.extend_from_slice(buf);
-        {
-            let stream = stream.lock().await;
-            if let Err(err) = rent!(stream.send(table.with_request_id(req_id)).await, table) {
-                debug!(%err, "error sending table");
-                if Error::from(err).is_stream_closed() {
-                    return Ok(());
-                }
-            }
-        }
+        table = send_with_timeout(&stream, table.with_request_id(req_id)).await?;
         table.clear();
     }
 }
@@ -2804,14 +2775,8 @@ async fn handle_real_time_stream_batched<A: AsyncWrite + 'static>(
             // Send metadata and schema for each new component.
             for (component, metadata, schema) in new_components {
                 if let Some(metadata) = metadata {
-                    let stream = sink.lock().await;
-                    if let Err(err) = stream
-                        .send(metadata.into_len_packet().with_request_id(req_id))
-                        .await
-                        .0
-                    {
-                        debug!(%err, "error sending component metadata");
-                    }
+                    send_with_timeout(&sink, metadata.into_len_packet().with_request_id(req_id))
+                        .await?;
                 }
 
                 let start_ts = *component.index_extra();
@@ -2819,16 +2784,8 @@ async fn handle_real_time_stream_batched<A: AsyncWrite + 'static>(
                     schemas: [(component.component_id, schema)].into_iter().collect(),
                     start_timestamps: [(component.component_id, start_ts)].into_iter().collect(),
                 };
-                {
-                    let stream = sink.lock().await;
-                    if let Err(err) = stream
-                        .send(schema_msg.into_len_packet().with_request_id(req_id))
-                        .await
-                        .0
-                    {
-                        debug!(%err, "error sending component schema");
-                    }
-                }
+                send_with_timeout(&sink, schema_msg.into_len_packet().with_request_id(req_id))
+                    .await?;
 
                 components.insert(component.component_id, component);
             }
@@ -2838,17 +2795,12 @@ async fn handle_real_time_stream_batched<A: AsyncWrite + 'static>(
             let id: PacketId = fastrand::u16(..).to_le_bytes();
             table = LenPacket::table(id, 2048 - 16);
             {
-                let stream = sink.lock().await;
-                stream
-                    .send(
-                        VTableMsg {
-                            id,
-                            vtable: vtable_msg,
-                        }
-                        .with_request_id(req_id),
-                    )
-                    .await
-                    .0?;
+                let pkt = VTableMsg {
+                    id,
+                    vtable: vtable_msg,
+                }
+                .into_len_packet();
+                send_with_timeout(&sink, pkt.with_request_id(req_id)).await?;
             }
             current_gen = vtable_gen;
         }
@@ -2859,8 +2811,7 @@ async fn handle_real_time_stream_batched<A: AsyncWrite + 'static>(
 
         // Single lock + send for all components.
         {
-            let stream = sink.lock().await;
-            rent!(stream.send(table.with_request_id(req_id)).await, table)?;
+            table = send_with_timeout(&sink, table.with_request_id(req_id)).await?;
         }
 
         // Wait for the simulation to write new data (1 wake per sim tick).
@@ -2880,12 +2831,11 @@ async fn handle_fixed_stream<A: AsyncWrite>(
     let mut current_timestamp;
 
     // Lightweight profiling: accumulate timings and log every LOG_INTERVAL frames.
-    // Captures both the work time (populate + lock + send) and the wall-clock
+    // Captures both the work time (populate + send) and the wall-clock
     // frame-to-frame time (work + wait) so we can see scheduling overhead.
     const LOG_INTERVAL: u64 = 120;
     let mut frame_count: u64 = 0;
     let mut accum_populate_us: u64 = 0;
-    let mut accum_lock_us: u64 = 0;
     let mut accum_send_us: u64 = 0;
     let mut accum_work_us: u64 = 0;
     let mut accum_wall_us: u64 = 0;
@@ -2908,12 +2858,11 @@ async fn handle_fixed_stream<A: AsyncWrite>(
         let vtable_gen = db.vtable_gen.latest();
         if vtable_gen != current_gen {
             components = db.with_state(|state| state.components.clone());
-            let stream = stream.lock().await;
             let id: PacketId = state.stream_id.to_le_bytes()[..2].try_into().unwrap();
             table = LenPacket::table(id, 2048 - 16);
             let vtable = DBVisitor.vtable(&components)?;
             let msg = VTableMsg { id, vtable };
-            stream.send(msg.with_request_id(req_id)).await.0?;
+            send_with_timeout(&stream, msg.into_len_packet().with_request_id(req_id)).await?;
             current_gen = vtable_gen;
         }
         table.clear();
@@ -2928,8 +2877,8 @@ async fn handle_fixed_stream<A: AsyncWrite>(
         // Yield once more after populating to give the tick driver a chance
         // to run before we acquire the stream lock.
         stellarator::yield_now().await;
-        // Pre-serialize the timestamp message before acquiring the lock so the
-        // critical section is limited to the two TCP writes.
+        // Pre-serialize the timestamp message before sending so the
+        // writer critical section is limited to the two TCP writes.
         let ts_pkt = StreamTimestamp {
             timestamp: current_timestamp,
             stream_id: state.stream_id,
@@ -2937,15 +2886,11 @@ async fn handle_fixed_stream<A: AsyncWrite>(
         .with_request_id(req_id);
         let t1 = Instant::now();
         {
-            let stream = stream.lock().await;
-            let lock_elapsed = t1.elapsed();
-            let t2 = Instant::now();
-            stream.send(ts_pkt).await.0?;
-            rent!(stream.send(table.with_request_id(req_id)).await, table)?;
-            let send_elapsed = t2.elapsed();
+            send_with_timeout(&stream, ts_pkt.into_len_packet()).await?;
+            table = send_with_timeout(&stream, table.with_request_id(req_id)).await?;
+            let send_elapsed = t1.elapsed();
 
             accum_populate_us += populate_elapsed.as_micros() as u64;
-            accum_lock_us += lock_elapsed.as_micros() as u64;
             accum_send_us += send_elapsed.as_micros() as u64;
         }
         let work_elapsed = frame_start.elapsed();
@@ -2958,7 +2903,6 @@ async fn handle_fixed_stream<A: AsyncWrite>(
             let wall_fps = n / (accum_wall_us as f64 / 1_000_000.0);
             debug!(
                 populate_avg_ms = accum_populate_us as f64 / n / 1000.0,
-                lock_avg_ms = accum_lock_us as f64 / n / 1000.0,
                 send_avg_ms = accum_send_us as f64 / n / 1000.0,
                 work_avg_ms = accum_work_us as f64 / n / 1000.0,
                 wall_avg_ms = accum_wall_us as f64 / n / 1000.0,
@@ -2967,7 +2911,6 @@ async fn handle_fixed_stream<A: AsyncWrite>(
                 "fixed_stream consumer stats"
             );
             accum_populate_us = 0;
-            accum_lock_us = 0;
             accum_send_us = 0;
             accum_work_us = 0;
             accum_wall_us = 0;
