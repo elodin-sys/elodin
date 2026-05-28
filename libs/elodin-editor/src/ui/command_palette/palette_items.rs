@@ -5,11 +5,9 @@ use std::{
 };
 
 use crate::plugins::kdl_document::{
-    CurrentDocument, LastSyncedSchematicContent, SchematicDocumentAsset, sync_document_skybox,
+    CurrentDocument, LastSyncedSchematicContent, SchematicDocumentAsset,
 };
-use crate::skybox_generation::{
-    LocallyPushedSkyboxActive, push_schematic_metadata, record_synced_schematic_content,
-};
+use crate::skybox_generation::{LocallyPushedSkyboxActive, sync_skybox_to_document_and_db};
 use bevy::{
     asset::{AssetServer, Assets},
     camera::visibility::Visibility,
@@ -1178,32 +1176,12 @@ pub fn set_color_scheme_mode() -> PaletteItem {
     })
 }
 
-fn sync_skybox_to_document_and_db(
-    skybox: Option<SkyboxConfig>,
-    schematic: &mut CurrentSchematic,
-    current_document: &mut CurrentDocument,
-    document_assets: &mut Assets<SchematicDocumentAsset>,
-    last_synced_content: &mut LastSyncedSchematicContent,
-    locally_pushed: &mut LocallyPushedSkyboxActive,
-    tx: &PacketTx,
-) {
-    let kdl = sync_document_skybox(skybox, current_document, document_assets, schematic);
-    record_synced_schematic_content(last_synced_content, &kdl);
-    // Always push schematic.content when the skybox node changes so DB KDL matches memory.
-    // `LastSyncedSchematicContent` prevents a full schematic reload on the echo.
-    // Pushing only `skybox.active` leaves stale KDL in the DB, which reloads the old skybox
-    // onto the first viewports after SetDbConfig returns.
-    let active = schematic.skybox.as_ref().map(|entry| entry.name.as_str());
-    locally_pushed.mark(active);
-    push_schematic_metadata(tx, kdl, Some(active));
-}
-
 fn clear_skybox() -> PaletteItem {
     PaletteItem::new(
         "Clear Skybox",
         SKYBOX_LABEL,
         |_: In<String>,
-         mut cache: ResMut<SkyboxCache>,
+         cache: Res<SkyboxCache>,
          mut skyboxes: MessageWriter<SetActiveSkybox>,
          mut schematic: ResMut<CurrentSchematic>,
          mut current_document: ResMut<CurrentDocument>,
@@ -1215,7 +1193,6 @@ fn clear_skybox() -> PaletteItem {
                 return PaletteEvent::Error("No skybox is active".into());
             }
             skyboxes.write(SetActiveSkybox::Clear);
-            cache.active = None;
             sync_skybox_to_document_and_db(
                 None,
                 &mut schematic,
@@ -1235,7 +1212,6 @@ fn activate_skybox_item(label: String, name: String) -> PaletteItem {
         label,
         SKYBOX_LABEL,
         move |_: In<String>,
-              mut cache: ResMut<SkyboxCache>,
               mut skyboxes: MessageWriter<SetActiveSkybox>,
               mut schematic: ResMut<CurrentSchematic>,
               mut current_document: ResMut<CurrentDocument>,
@@ -1244,7 +1220,6 @@ fn activate_skybox_item(label: String, name: String) -> PaletteItem {
               mut locally_pushed: ResMut<LocallyPushedSkyboxActive>,
               tx: Res<PacketTx>| {
             skyboxes.write(SetActiveSkybox::ByName(name.clone()));
-            cache.active = Some(name.clone());
             sync_skybox_to_document_and_db(
                 Some(SkyboxConfig { name: name.clone() }),
                 &mut schematic,
@@ -1270,22 +1245,31 @@ fn revert_previous_skybox_item(name: String) -> PaletteItem {
     )
 }
 
-fn activate_skybox() -> PaletteItem {
+fn skybox_menu() -> PaletteItem {
     PaletteItem::new(
-        "Activate Skybox...",
+        "Skybox...",
         SKYBOX_LABEL,
         |_: In<String>, cache: Res<SkyboxCache>, skybox_ui: Res<SkyboxGenerationUi>| {
             let active = cache.active.as_deref();
-            let mut items = Vec::with_capacity(cache.manifest.entries.len() + 3);
+            let mut items = Vec::with_capacity(cache.manifest.entries.len() + 4);
+            items.push(PaletteItem::new(
+                "Generate Skybox...",
+                SKYBOX_LABEL,
+                |_: In<String>| {
+                    PalettePage::new(vec![generate_skybox_from_prompt()])
+                        .label("Generate Skybox")
+                        .prompt("Describe a new skybox...")
+                        .into_event()
+                },
+            ));
+            if active.is_some() {
+                items.push(clear_skybox());
+            }
             if let Some(revert) = skybox_ui.revert_name.clone()
                 && active != Some(revert.as_str())
             {
                 items.push(revert_previous_skybox_item(revert));
             }
-            if active.is_some() {
-                items.push(clear_skybox());
-            }
-            items.push(create_skybox());
             for entry in &cache.manifest.entries {
                 let name = entry.name.clone();
                 let label = if active == Some(name.as_str()) {
@@ -1297,29 +1281,11 @@ fn activate_skybox() -> PaletteItem {
             }
 
             PalettePage::new(items)
-                .label("Activate Skybox")
-                .prompt("Select a skybox...")
+                .label("Skybox")
+                .prompt("Generate, clear, or select a skybox...")
                 .into_event()
         },
     )
-}
-
-fn generate_skybox() -> PaletteItem {
-    PaletteItem::new("Generate Skybox...", SKYBOX_LABEL, |_: In<String>| {
-        PalettePage::new(vec![generate_skybox_from_prompt()])
-            .label("Generate Skybox")
-            .prompt("Describe a new skybox...")
-            .into_event()
-    })
-}
-
-fn create_skybox() -> PaletteItem {
-    PaletteItem::new("Create New Skybox...", SKYBOX_LABEL, |_: In<String>| {
-        PalettePage::new(vec![generate_skybox_from_prompt()])
-            .label("Create Skybox")
-            .prompt("Describe a new skybox...")
-            .into_event()
-    })
 }
 
 fn generate_skybox_from_prompt() -> PaletteItem {
@@ -1754,9 +1720,7 @@ impl Default for PalettePage {
             save_schematic_db(),
             load_schematic(),
             clear_schematic(),
-            activate_skybox(),
-            generate_skybox(),
-            clear_skybox(),
+            skybox_menu(),
             set_color_scheme_mode(),
             set_color_scheme(),
             PaletteItem::new("Documentation", HELP_LABEL, |_: In<String>| {

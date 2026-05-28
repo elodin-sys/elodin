@@ -1,4 +1,4 @@
-use bevy_ai_skybox::prelude::{SkyboxGenerationPhase, SkyboxGenerationUi};
+use bevy_ai_skybox::prelude::{SkyboxCacheHealth, SkyboxGenerationPhase, SkyboxGenerationUi};
 use egui::{self, Label, RichText, Spinner};
 
 use crate::ui::colors::{get_scheme, with_opacity};
@@ -12,7 +12,21 @@ pub fn draw_skybox_generation_overlay(ctx: &egui::Context, skybox: &SkyboxGenera
     }
 }
 
-pub fn draw_skybox_status_bar(ui: &mut egui::Ui, skybox: &SkyboxGenerationUi) {
+pub fn draw_skybox_status_bar(
+    ui: &mut egui::Ui,
+    skybox: &SkyboxGenerationUi,
+    cache_health: &SkyboxCacheHealth,
+) {
+    if let Some(error) = &cache_health.load_error {
+        let scheme = get_scheme();
+        ui.label(
+            RichText::new(format!("Skybox cache unavailable: {error}"))
+                .text_style(egui::TextStyle::Small)
+                .color(scheme.error),
+        );
+        return;
+    }
+
     if skybox.phase == SkyboxGenerationPhase::Idle {
         return;
     }

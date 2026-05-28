@@ -1,7 +1,7 @@
 [package]
 name = "bevy_ai_skybox"
 license = "MIT OR Apache-2.0"
-description = "Asset-only skybox loader for Elodin"
+description = "Cached cubemap skybox loader and Blockade generation for Elodin"
 version.workspace = true
 edition = "2024"
 publish = false

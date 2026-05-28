@@ -74,8 +74,8 @@ Launch the Elodin editor (default)
 ###### **Environment**
 
 * `BLOCKADE_API_KEY` — Optional. Enables Skybox AI generation from the command palette
-  (`Generate Skybox...` / `Create New Skybox...`). Existing cached skyboxes and KDL
-  `skybox name="..."` activation do not require this key.
+  (`Skybox...` → `Generate Skybox...`). Existing cached skyboxes and KDL `skybox name="..."`
+  activation do not require this key.
 * `ELODIN_ASSETS_DIR` — Optional. Overrides the asset root. Skybox assets are read from and
   generated into `$ELODIN_ASSETS_DIR/skyboxes`; otherwise `./assets/skyboxes` is used.
 

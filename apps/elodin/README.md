@@ -78,8 +78,8 @@ $ elodin
 ### `BLOCKADE_API_KEY`
 
 The `BLOCKADE_API_KEY` environment variable enables Skybox AI generation from
-the editor command palette. It is only needed for `Generate Skybox...` and
-`Create New Skybox...`; selecting existing cached skyboxes does not require it.
+the editor command palette (`Skybox...` → `Generate Skybox...`). Selecting
+existing cached skyboxes does not require it.
 
 Create a Skybox AI API key from Blockade Labs at
 https://skybox.blockadelabs.com/api, then pass it through your shell:

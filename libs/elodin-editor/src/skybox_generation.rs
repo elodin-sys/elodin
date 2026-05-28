@@ -49,6 +49,21 @@ impl LocallyPushedSkyboxActive {
     }
 }
 
+pub(crate) fn sync_skybox_to_document_and_db(
+    skybox: Option<SkyboxConfig>,
+    schematic: &mut CurrentSchematic,
+    current_document: &mut CurrentDocument,
+    document_assets: &mut Assets<SchematicDocumentAsset>,
+    last_synced_content: &mut LastSyncedSchematicContent,
+    locally_pushed: &mut LocallyPushedSkyboxActive,
+    tx: &PacketTx,
+) {
+    let kdl = sync_document_skybox(skybox, current_document, document_assets, schematic);
+    record_synced_schematic_content(last_synced_content, &kdl);
+    let active = schematic.skybox.as_ref().map(|entry| entry.name.as_str());
+    push_skybox_db_sync(tx, Some(kdl), active, locally_pushed);
+}
+
 pub(crate) fn sync_generated_skybox_to_schematic(
     mut reader: MessageReader<SkyboxGenerated>,
     mut schematic: ResMut<CurrentSchematic>,
@@ -68,8 +83,7 @@ pub(crate) fn sync_generated_skybox_to_schematic(
             &mut schematic,
         );
         last_synced_content.0 = Some(kdl.clone());
-        locally_pushed.mark(Some(&event.name));
-        push_schematic_metadata(&tx, kdl, Some(Some(&event.name)));
+        push_skybox_db_sync(&tx, Some(kdl), Some(&event.name), &mut locally_pushed);
     }
 }
 
@@ -94,13 +108,27 @@ pub(crate) fn record_loaded_schematic_content(
     record_synced_schematic_content(&mut last_synced_content, &document.root.to_kdl());
 }
 
-pub(crate) fn push_skybox_active_metadata(tx: &PacketTx, skybox: Option<&str>) {
-    let metadata = match skybox {
-        Some(name) => {
-            std::collections::HashMap::from([("skybox.active".to_string(), name.to_string())])
-        }
-        None => std::collections::HashMap::from([("skybox.active".to_string(), String::new())]),
-    };
+/// Push skybox metadata to the DB. When `kdl` is `None`, only `skybox.active` is updated
+/// (used while a generated cubemap is still loading on the render server).
+pub(crate) fn push_skybox_db_sync(
+    tx: &PacketTx,
+    kdl: Option<String>,
+    skybox: Option<&str>,
+    locally_pushed: &mut LocallyPushedSkyboxActive,
+) {
+    locally_pushed.mark(skybox);
+    push_schematic_metadata(tx, kdl, skybox);
+}
+
+pub(crate) fn push_schematic_metadata(tx: &PacketTx, kdl: Option<String>, skybox: Option<&str>) {
+    let mut metadata = std::collections::HashMap::new();
+    if let Some(kdl) = kdl {
+        metadata.insert("schematic.content".to_string(), kdl);
+    }
+    metadata.insert(
+        "skybox.active".to_string(),
+        skybox.unwrap_or("").to_string(),
+    );
     tx.send_msg(SetDbConfig {
         metadata,
         ..Default::default()
@@ -124,8 +152,7 @@ pub(crate) fn push_skybox_active_on_pending(
     if last_pushed.as_deref() == Some(name.as_str()) {
         return;
     }
-    locally_pushed.mark(Some(&name));
-    push_skybox_active_metadata(&tx, Some(&name));
+    push_skybox_db_sync(&tx, None, Some(&name), &mut locally_pushed);
     *last_pushed = Some(name);
 }
 
@@ -156,23 +183,6 @@ pub fn decay_skybox_status_message(
     }
 }
 
-pub(crate) fn push_schematic_metadata(tx: &PacketTx, kdl: String, skybox: Option<Option<&str>>) {
-    let mut metadata = std::collections::HashMap::from([("schematic.content".to_string(), kdl)]);
-    match skybox {
-        Some(Some(name)) => {
-            metadata.insert("skybox.active".to_string(), name.to_string());
-        }
-        Some(None) => {
-            metadata.insert("skybox.active".to_string(), String::new());
-        }
-        None => {}
-    }
-    tx.send_msg(SetDbConfig {
-        metadata,
-        ..Default::default()
-    });
-}
-
 #[derive(SystemParam)]
 pub(crate) struct RevertSkyboxParams<'w> {
     ui: ResMut<'w, SkyboxGenerationUi>,
@@ -196,8 +206,12 @@ pub(crate) fn revert_previous_skybox(mut params: RevertSkyboxParams) {
         &mut params.schematic,
     );
     params.last_synced_content.0 = Some(kdl.clone());
-    params.locally_pushed.mark(Some(&name));
-    push_schematic_metadata(&params.tx, kdl, Some(Some(&name)));
+    push_skybox_db_sync(
+        &params.tx,
+        Some(kdl),
+        Some(&name),
+        &mut params.locally_pushed,
+    );
     params.skyboxes.write(SetActiveSkybox::ByName(name.clone()));
     params.ui.phase = SkyboxGenerationPhase::Idle;
     params.ui.message = Some(format!("Reverted to skybox `{name}`"));

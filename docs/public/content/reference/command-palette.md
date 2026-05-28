@@ -49,22 +49,22 @@ order = 8
 
 ## Skybox
 
-- `Activate Skybox...`: list cached skyboxes from `assets/skyboxes/manifest.ron` or
-  `$ELODIN_ASSETS_DIR/skyboxes/manifest.ron`, then activate the selected skybox for the current
-  editor session.
-- `Create New Skybox...`: available inside `Activate Skybox...`; prompts for a skybox description,
-  generates a new skybox via Blockade, adds it to the manifest, and activates it.
-- `Generate Skybox...`: opens the same prompt directly.
-- `Clear Skybox`: remove the active skybox from viewports and sensor cameras, and remove the
-  top-level `skybox` node from the current schematic (also inside `Activate Skybox...` when a
-  skybox is active). Use **Save Schematic** or **Save Schematic To DB** to persist to disk or the
-  database.
-- `Activate Skybox...` entries: set `skybox name="..."` on the current schematic and apply that
-  skybox immediately.
+- `Skybox...`: submenu for skybox actions against `assets/skyboxes/manifest.ron` or
+  `$ELODIN_ASSETS_DIR/skyboxes/manifest.ron`.
+  - `Generate Skybox...`: prompt for a description, generate a new skybox via Blockade, add it to
+    the manifest, and activate it.
+  - `Clear Skybox`: shown when a skybox is active; removes it from viewports and sensor cameras and
+    removes the top-level `skybox` node from the current schematic.
+  - `Revert to …`: shown after AI generation replaced an active skybox.
+  - Cached manifest entries: activate a preset skybox (`name (active)` marks the current one).
 
-Skybox generation requires `BLOCKADE_API_KEY` in the editor environment. Generated assets are
-written next to the manifest used by the editor. To persist a chosen skybox in a schematic, add a
-top-level `skybox name="..."` node.
+Selecting a cached skybox sets `skybox name="..."` on the current schematic and applies it
+immediately. Use **Save Schematic** or **Save Schematic To DB** to persist changes.
+
+Skybox generation requires `BLOCKADE_API_KEY` in the editor environment. Generated cubemaps are
+resampled locally to the configured face size (default 2048 px per face); Blockade always returns an
+~8K equirect source, so higher local presets upscale rather than fetching a higher remote tier.
+Generated assets are written next to the manifest used by the editor.
 
 ## Simulation
 

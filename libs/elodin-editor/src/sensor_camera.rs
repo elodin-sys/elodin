@@ -33,7 +33,7 @@ use bevy::{
         view::ViewTarget,
     },
 };
-use bevy_ai_skybox::prelude::{PrimarySkybox, SetActiveSkybox, SkyboxCache};
+use bevy_ai_skybox::prelude::PrimarySkybox;
 use impeller2::types::ComponentId;
 use impeller2_wkt::DbConfig;
 pub use impeller2_wkt::SensorCameraConfig;
@@ -395,8 +395,6 @@ fn spawn_sensor_cameras(
     mut images: ResMut<Assets<Image>>,
     render_device: Res<RenderDevice>,
     mut spawned: ResMut<SensorCamerasSpawned>,
-    cache: Res<SkyboxCache>,
-    mut skyboxes: MessageWriter<SetActiveSkybox>,
 ) {
     for (i, config) in configs.0.iter().enumerate() {
         let size = Extent3d {
@@ -499,10 +497,6 @@ fn spawn_sensor_cameras(
     }
 
     spawned.0 = true;
-
-    if let Some(active) = cache.active.as_ref() {
-        skyboxes.write(SetActiveSkybox::ByName(active.clone()));
-    }
 }
 
 fn sensor_camera_render_layers(config: &SensorCameraConfig) -> RenderLayers {

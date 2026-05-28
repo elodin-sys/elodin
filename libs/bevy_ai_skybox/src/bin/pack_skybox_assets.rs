@@ -28,7 +28,11 @@ fn run() -> Result<(), String> {
 
     let names = parse_names(&manifest)?;
     if names.is_empty() {
-        return Err("no skybox entries with equirect sources found in manifest".into());
+        return Err(
+            "no skybox entries with equirect sources found in manifest; \
+             pass skybox names on the command line (e.g. pack_skybox_assets mojave_desert)"
+                .into(),
+        );
     }
     for name in names {
         pack_one(&skybox_dir, &toktx, &manifest, &name)?;

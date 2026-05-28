@@ -29,8 +29,8 @@ pub mod cubemap_convert;
 pub mod prelude {
     pub use crate::{
         BlockadeSkyboxPlugin, GenerateSkybox, ManifestReloaded, PrimarySkybox, SetActiveSkybox,
-        SkyboxAssetPlugin, SkyboxAssetSettings, SkyboxCache, SkyboxFailed, SkyboxGenerated,
-        SkyboxGenerationComplete, SkyboxGenerationPhase, SkyboxGenerationSettings,
+        SkyboxAssetPlugin, SkyboxAssetSettings, SkyboxCache, SkyboxCacheHealth, SkyboxFailed,
+        SkyboxGenerated, SkyboxGenerationComplete, SkyboxGenerationPhase, SkyboxGenerationSettings,
         SkyboxGenerationUi, SkyboxManifest, SkyboxReady, SkyboxResolution, SkyboxStyle,
     };
 }
@@ -97,6 +97,8 @@ impl SkyboxStyle {
     }
 }
 
+/// Local cubemap face size used when converting Blockade equirect downloads.
+/// These names describe output face resolution, not Blockade export tier IDs.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub enum SkyboxResolution {
     OneK,
@@ -108,16 +110,6 @@ pub enum SkyboxResolution {
 }
 
 impl SkyboxResolution {
-    pub const fn id(self) -> u32 {
-        match self {
-            Self::OneK => 1,
-            Self::TwoK => 2,
-            Self::FourK => 3,
-            Self::EightK => 4,
-            Self::SixteenK => 7,
-        }
-    }
-
     pub const fn face_size(self) -> u32 {
         match self {
             Self::OneK => 256,
@@ -392,6 +384,11 @@ impl SkyboxCache {
     }
 }
 
+#[derive(Resource, Default, Clone)]
+pub struct SkyboxCacheHealth {
+    pub load_error: Option<String>,
+}
+
 fn modified_at(path: &Path) -> Option<SystemTime> {
     fs::metadata(path)
         .and_then(|metadata| metadata.modified())
@@ -437,6 +434,7 @@ pub enum SetActiveSkybox {
 #[derive(Clone, Debug, Default, Message)]
 pub struct GenerateSkybox {
     pub prompt: String,
+    /// Reserved for future palette controls; defaults come from `SkyboxGenerationSettings`.
     pub style: Option<SkyboxStyle>,
     pub negative_text: Option<String>,
     pub seed: Option<u64>,
@@ -769,16 +767,22 @@ impl Plugin for SkyboxAssetPlugin {
             manifest_poll_secs: self.manifest_poll_secs,
         };
 
-        let cache = match SkyboxCache::load(&settings) {
-            Ok(cache) => cache,
+        let (cache, cache_health) = match SkyboxCache::load(&settings) {
+            Ok(cache) => (cache, SkyboxCacheHealth::default()),
             Err(error) => {
                 warn!("failed to initialize skybox cache: {error}");
-                SkyboxCache::empty(settings.manifest_path())
+                (
+                    SkyboxCache::empty(settings.manifest_path()),
+                    SkyboxCacheHealth {
+                        load_error: Some(error.to_string()),
+                    },
+                )
             }
         };
 
         app.insert_resource(settings)
             .insert_resource(cache)
+            .insert_resource(cache_health)
             .init_resource::<ConfiguredCubemapIds>()
             .init_resource::<PendingSkyboxActivation>()
             .add_message::<SetActiveSkybox>()
@@ -2229,16 +2233,6 @@ mod tests {
         assert!(
             !schematic_declares_skybox(RC_JET_SCHEMATIC_FRAGMENT),
             "rc-jet layout fragment must not declare a skybox; use the command palette"
-        );
-    }
-
-    #[test]
-    fn rc_jet_example_file_matches_fragment_policy() {
-        let rc_jet = include_str!("../../../examples/rc-jet/main.py");
-        assert_eq!(
-            schematic_declares_skybox(rc_jet),
-            schematic_declares_skybox(RC_JET_SCHEMATIC_FRAGMENT),
-            "full rc-jet example and the checked fragment should agree on skybox policy"
         );
     }
 

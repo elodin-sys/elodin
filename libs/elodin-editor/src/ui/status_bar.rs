@@ -8,7 +8,7 @@ use bevy::{
     prelude::Entity,
     window::PrimaryWindow,
 };
-use bevy_ai_skybox::prelude::SkyboxGenerationUi;
+use bevy_ai_skybox::prelude::{SkyboxCacheHealth, SkyboxGenerationUi};
 use impeller2_bevy::{ConnectionStatus, ThreadConnectionStatus};
 use impeller2_wkt::SimulationTimeStep;
 
@@ -27,6 +27,7 @@ pub struct StatusBar<'w, 's> {
     connection_status: Res<'w, ThreadConnectionStatus>,
     primary_window: Query<'w, 's, Entity, With<PrimaryWindow>>,
     skybox_ui: Res<'w, SkyboxGenerationUi>,
+    skybox_cache: Res<'w, SkyboxCacheHealth>,
 }
 
 impl RootWidgetSystem for StatusBar<'_, '_> {
@@ -47,6 +48,7 @@ impl RootWidgetSystem for StatusBar<'_, '_> {
         let tick_time = state_mut.tick_time;
         let diagnostics = state_mut.diagnostics;
         let skybox_ui = &state_mut.skybox_ui;
+        let skybox_cache = &state_mut.skybox_cache;
 
         let panel = egui::TopBottomPanel::bottom("status_bar")
             .frame(egui::Frame {
@@ -90,7 +92,7 @@ impl RootWidgetSystem for StatusBar<'_, '_> {
                             .color(get_scheme().text_secondary),
                     ));
 
-                    super::skybox_status::draw_skybox_status_bar(ui, skybox_ui);
+                    super::skybox_status::draw_skybox_status_bar(ui, skybox_ui, skybox_cache);
                 });
             });
 
