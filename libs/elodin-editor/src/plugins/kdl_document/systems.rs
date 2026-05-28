@@ -195,6 +195,9 @@ pub(super) fn activate_document_skybox(
     }
 
     for event in reloaded.read() {
+        if !event.changed_window_indices.is_empty() {
+            continue;
+        }
         activate_skybox_config(
             event.document.root.skybox.as_ref(),
             &mut skyboxes,
