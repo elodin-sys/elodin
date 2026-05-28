@@ -128,6 +128,7 @@ pub(crate) fn record_synced_schematic_content(
 pub(crate) fn sync_loaded_document_skybox_to_db(
     mut loaded: MessageReader<DocumentLoaded>,
     config: Res<DbConfig>,
+    mut locally_pushed: ResMut<LocallyPushedSkyboxActive>,
     tx: Res<PacketTx>,
 ) {
     let Some(document) = loaded.read().last().map(|event| &event.document) else {
@@ -142,7 +143,7 @@ pub(crate) fn sync_loaded_document_skybox_to_db(
         return;
     }
     let kdl = document.root.to_kdl();
-    push_schematic_metadata(&tx, Some(kdl), loaded_skybox);
+    push_skybox_db_sync(&tx, Some(kdl), loaded_skybox, &mut locally_pushed);
 }
 
 pub(crate) fn record_loaded_schematic_content(
