@@ -15,48 +15,88 @@ icon = ""
 
 ## Install
 
-Download the Elodin Client from the [releases](https://github.com/elodin-sys/elodin/releases) page.
-
-Install the Elodin Python SDK using `pip`:
-
 {% alert(kind="warning") %}
-The SDK is only supported on macOS and Linux distributions with glibc 2.35+ (Ubuntu 22.04+, Debian 12+, Fedora 35+, NixOS 21.11+). Windows users can still use Elodin by installing and running the simulation server in Windows Subsystem for Linux. Install the Elodin Python SDK in WSL, after [installing WSL.](https://docs.microsoft.com/en-us/windows/wsl/install)
+The Elodin SDK and CLI are supported on macOS and Linux distributions with glibc 2.35+ (Ubuntu 22.04+, Debian 12+, Fedora 35+, NixOS 21.11+). Windows users run the simulation in Windows Subsystem for Linux ([install WSL](https://docs.microsoft.com/en-us/windows/wsl/install)) and the Editor natively on Windows.
 {% end %}
 
+The Elodin toolkit has two parts: the **Elodin CLI** (which bundles the editor, headless runner, and `elodin-db`) and the **Python SDK** (used to author simulations).
+
+### Install the Elodin CLI
+
+On macOS, Linux, or WSL:
 
 ```sh
-pip install -U elodin
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/elodin-sys/elodin/releases/latest/download/elodin-installer.sh | sh
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/elodin-sys/elodin/releases/latest/download/elodin-db-installer.sh | sh
 ```
 
-### Upgrading? 
+On Windows, download and run the latest `elodin-x86_64-pc-windows-msvc.msi` from the [releases page](https://github.com/elodin-sys/elodin/releases/latest).
 
-If upgrading from an old Elodin version, consult the [migration guides](/reference/migration/).
+Verify the install:
+
+```sh
+elodin --version
+elodin-db --version
+```
+
+### Install the Elodin Python SDK
+
+Install [`uv`](https://docs.astral.sh/uv/) if you don't already have it:
+
+```sh
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+Then create a virtual environment and install the SDK:
+
+```sh
+uv venv && source .venv/bin/activate
+uv pip install -U elodin
+```
+
+### Upgrading?
+
+If upgrading from an older Elodin version, consult the [migration guides](/reference/migration/).
 
 ## Start Simulating
 
+The examples below use [`examples/three-body/main.py`](https://github.com/elodin-sys/elodin/blob/main/examples/three-body/main.py). Clone the elodin repo to follow along:
+
+```sh
+git clone https://github.com/elodin-sys/elodin.git && cd elodin
+```
+
+### macOS / Linux
+
+Run the simulation and open the Editor in one command:
+
+```sh
+elodin editor examples/three-body/main.py
+```
+
 ### Windows (WSL)
 
-To use Elodin on Windows, the simulation server must run in Windows Subsystem for Linux (WSL). The Elodin Client itself can run natively on Windows.
+Windows users run the simulation in WSL and connect the natively-installed Editor over `localhost`.
 
-[Video Walkthrough](https://www.loom.com/share/efcbf81e43074863807750d4ad2f8d7a?sid=9403e8c8-7893-4299-824e-2dacb6978120)
+{% alert(kind="info") %}
+WSL needs mirrored networking so the Editor on Windows can reach the simulation on `127.0.0.1`. In an admin PowerShell, create `%USERPROFILE%\.wslconfig` containing the snippet below, then run `wsl --shutdown` to apply.
+{% end %}
 
-In a Windows terminal launch the Elodin app.
-
-```wsl
-.\elodin.exe
+```ini
+[wsl2]
+networkingMode=mirrored
 ```
 
-In a WSL terminal download and install `elodin` binary into your path then run:
+In a WSL terminal, start the simulation:
 
 ```sh
 elodin run examples/three-body/main.py
 ```
 
+In a Windows PowerShell terminal, launch the Editor and connect:
 
-### Linux / macOS
-
-```sh
-elodin run examples/three-body/main.py
+```powershell
+elodin.exe editor 127.0.0.1:2240
 ```
 
 
@@ -67,15 +107,15 @@ The DataFrame can then be used to generate plots or perform other methods of dat
 
 Run the bouncing ball example code to see this in action:
 
-The `ball/plot.py` example depends on `matplotlib`. Install it using `pip`:
+The `ball/plot.py` example depends on `matplotlib`. Install it with `uv`:
 
 ```sh
-pip install -U matplotlib
+uv pip install -U matplotlib
 ```
 
-Then run the ball plot example:
+Then run the ball plot example (inside the same activated `.venv`):
 ```sh
-python3 examples/ball/plot.py
+python examples/ball/plot.py
 ```
 
 For more information on data frames check out
