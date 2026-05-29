@@ -120,6 +120,144 @@ mod tests {
     }
 
     #[test]
+    async fn test_vtable_misaligned_field_rejected() {
+        let (_addr, db) = setup_test_db().await.unwrap();
+        let acc_cmd_body = ComponentId::new("acc_cmd_body");
+
+        db.with_state_mut(|state| {
+            state.set_component_metadata(
+                ComponentMetadata {
+                    component_id: acc_cmd_body,
+                    name: "Acceleration Command (body)".to_string(),
+                    metadata: Default::default(),
+                },
+                &db.path,
+            )
+        })
+        .unwrap();
+
+        let bad = vtable([
+            raw_field(
+                0,
+                8,
+                schema(PrimType::U64, &[1], component("time_monotonic")),
+            ),
+            raw_field(
+                96,
+                1,
+                schema(PrimType::U8, &[1], component("guidance_mode")),
+            ),
+            raw_field(
+                97,
+                1,
+                schema(PrimType::U8, &[1], component("ap_command_enable")),
+            ),
+            raw_field(
+                98,
+                24,
+                schema(PrimType::F64, &[3], component("acc_cmd_body")),
+            ),
+        ]);
+        let err = db
+            .insert_vtable(VTableMsg {
+                id: 1u16.to_le_bytes(),
+                vtable: bad,
+            })
+            .expect_err("misaligned vtable must be rejected at registration");
+        let rendered = err.to_string();
+        let Error::VtableFieldMisaligned {
+            packet_id,
+            component_id,
+            component_name,
+            offset,
+            prim_type,
+            required_align,
+        } = err
+        else {
+            panic!("unexpected error: {err:?}");
+        };
+        assert_eq!(packet_id, 1u16.to_le_bytes());
+        assert_eq!(component_id, acc_cmd_body);
+        assert_eq!(
+            component_name,
+            Some("Acceleration Command (body)".to_string())
+        );
+        assert_eq!(offset, 98);
+        assert_eq!(prim_type, PrimType::F64);
+        assert_eq!(required_align, 8);
+        assert!(rendered.contains(&format!("Acceleration Command (body) ({acc_cmd_body})")));
+        assert!(rendered.contains("layout misaligned at component"));
+        assert!(rendered.contains("check prior fields/padding"));
+
+        let unknown_component = ComponentId::new("unknown_misaligned_component");
+        let bad_without_metadata = vtable([raw_field(
+            2,
+            8,
+            schema(
+                PrimType::F64,
+                &[1],
+                component("unknown_misaligned_component"),
+            ),
+        )]);
+        let err = db
+            .insert_vtable(VTableMsg {
+                id: 3u16.to_le_bytes(),
+                vtable: bad_without_metadata,
+            })
+            .expect_err("misaligned vtable without metadata must be rejected");
+        let rendered = err.to_string();
+        let Error::VtableFieldMisaligned {
+            component_id,
+            component_name,
+            offset,
+            prim_type,
+            required_align,
+            ..
+        } = err
+        else {
+            panic!("unexpected error: {err:?}");
+        };
+        assert_eq!(component_id, unknown_component);
+        assert_eq!(component_name, None);
+        assert_eq!(offset, 2);
+        assert_eq!(prim_type, PrimType::F64);
+        assert_eq!(required_align, 8);
+        let unknown_component = unknown_component.to_string();
+        assert_eq!(rendered.matches(&unknown_component).count(), 1);
+        assert!(!rendered.contains(&format!("{unknown_component} ({unknown_component})")));
+        assert!(rendered.contains("layout misaligned at component"));
+        assert!(rendered.contains("check prior fields/padding"));
+
+        let good = vtable([
+            raw_field(
+                0,
+                8,
+                schema(PrimType::U64, &[1], component("time_monotonic")),
+            ),
+            raw_field(
+                96,
+                24,
+                schema(PrimType::F64, &[3], component("acc_cmd_body")),
+            ),
+            raw_field(
+                120,
+                1,
+                schema(PrimType::U8, &[1], component("guidance_mode")),
+            ),
+            raw_field(
+                121,
+                1,
+                schema(PrimType::U8, &[1], component("ap_command_enable")),
+            ),
+        ]);
+        db.insert_vtable(VTableMsg {
+            id: 2u16.to_le_bytes(),
+            vtable: good,
+        })
+        .expect("aligned vtable must register successfully");
+    }
+
+    #[test]
     async fn test_vtable_stream() {
         let (addr, _db) = setup_test_db().await.unwrap();
         let mut rx_client = Client::connect(addr).await.unwrap();

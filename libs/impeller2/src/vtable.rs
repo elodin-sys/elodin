@@ -451,6 +451,25 @@ impl<Ops: Buf<Op>, Data: Buf<u8>, Fields: Buf<Field>> VTable<Ops, Data, Fields> 
         })
     }
 
+    /// Validates that each component field offset satisfies its primitive alignment.
+    pub fn validate_field_alignment(&self, packet_id: PacketId) -> Result<(), Error> {
+        for (field, res) in self.fields.as_slice().iter().zip(self.realize_fields(None)) {
+            let realized = res?;
+            let required_align = realized.ty.alignment();
+            let offset = field.offset.to_index();
+            if offset % required_align != 0 {
+                return Err(Error::VtableFieldMisaligned {
+                    packet_id,
+                    component_id: realized.component_id,
+                    offset,
+                    prim_type: realized.ty,
+                    required_align,
+                });
+            }
+        }
+        Ok(())
+    }
+
     /// Parses the passed in table, and sinks the values into the sink
     /// Parses the provided table and applies the values to the sink
     ///
@@ -660,9 +679,11 @@ pub mod builder {
     /// A builder for constructing VTables.
     ///
     /// For most cases you should use [`vtable`] instead
+    pub type BuiltVTable = VTable<Vec<Op>, Vec<u8>, Vec<Field>>;
+
     #[derive(Default)]
     pub struct VTableBuilder {
-        vtable: VTable<Vec<Op>, Vec<u8>, Vec<Field>>,
+        vtable: BuiltVTable,
         visited: BTreeMap<usize, OpRef>,
     }
 
@@ -718,9 +739,7 @@ pub mod builder {
     }
 
     /// Creates a VTable from the provided field builders
-    pub fn vtable(
-        fields: impl IntoIterator<Item = FieldBuilder>,
-    ) -> VTable<Vec<Op>, Vec<u8>, Vec<Field>> {
+    pub fn vtable(fields: impl IntoIterator<Item = FieldBuilder>) -> BuiltVTable {
         let mut builder = VTableBuilder::default();
         for field in fields.into_iter() {
             let field = Field {
@@ -731,6 +750,15 @@ pub mod builder {
             builder.vtable.fields.push(field);
         }
         builder.vtable
+    }
+
+    /// Creates a VTable and rejects component fields whose offsets are misaligned.
+    pub fn build_checked(
+        fields: impl IntoIterator<Item = FieldBuilder>,
+    ) -> Result<BuiltVTable, Error> {
+        let vtable = vtable(fields);
+        vtable.validate_field_alignment(PacketId::default())?;
+        Ok(vtable)
     }
 }
 
@@ -835,5 +863,37 @@ mod tests {
         let bar = sink.f64_components.get(&ComponentId::new("bar")).unwrap();
         assert_eq!(bar.buf.as_buf(), &[5.0]);
         assert_eq!(sink.timestamp, Some(foo.timestamp));
+    }
+
+    #[test]
+    fn test_build_checked_rejects_misaligned_field() {
+        use super::builder::*;
+
+        let err = build_checked([
+            raw_field(0, 1, schema(PrimType::U8, &[1], component("mode"))),
+            raw_field(1, 8, schema(PrimType::F64, &[1], component("value"))),
+        ])
+        .expect_err("misaligned vtable must be rejected");
+
+        let crate::error::Error::VtableFieldMisaligned {
+            component_id,
+            offset,
+            prim_type,
+            required_align,
+            ..
+        } = err
+        else {
+            panic!("unexpected error: {err:?}");
+        };
+        assert_eq!(component_id, ComponentId::new("value"));
+        assert_eq!(offset, 1);
+        assert_eq!(prim_type, PrimType::F64);
+        assert_eq!(required_align, 8);
+
+        build_checked([
+            raw_field(0, 8, schema(PrimType::F64, &[1], component("value"))),
+            raw_field(8, 1, schema(PrimType::U8, &[1], component("mode"))),
+        ])
+        .expect("aligned vtable must build successfully");
     }
 }

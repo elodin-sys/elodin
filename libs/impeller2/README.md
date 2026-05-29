@@ -126,6 +126,11 @@ The body format depends on the packet type:
 
 VTables describe the memory layout of table packets, enabling zero-copy deserialization:
 
+Each component field's byte offset must be a multiple of that field's `PrimType`
+alignment. Elodin pads tables it emits to satisfy this contract; clients that
+construct packed table layouts should order fields by descending primitive size
+(8 -> 4 -> 2 -> 1) or add explicit padding before aligned fields.
+
 ```rust
 use impeller2::vtable::builder::*;
 
@@ -414,6 +419,9 @@ packet.extend_aligned(&mag_data);    // "vehicle.sensors.mag"
 **Alignment Errors**
 - Ensure data is properly aligned using `pad_for_alignment()`
 - Check that VTable definitions match actual data layout
+- Ensure each VTable field offset is a multiple of its `PrimType` alignment;
+  ordering fields by descending primitive size (8 -> 4 -> 2 -> 1) usually
+  satisfies this for packed layouts.
 
 **Missing VTables**
 - VTables must be registered before receiving table packets

@@ -169,16 +169,16 @@ try {
         field<SensorData, &SensorData::humidity>(schema(PrimType::F32(), {}, timestamp(time, component("vehicle.humidity")))),
     });
 
-    sock->send(VTableMsg {
-        .id = { 2, 0 },
-        .vtable = table,
-    });
     sock->send(set_component_metadata("vehicle.imu.mag", {"x", "y", "z"}));
     sock->send(set_component_metadata("vehicle.imu.gyro", {"x", "y", "z"}));
     sock->send(set_component_metadata("vehicle.imu.accel", {"x", "y", "z"}));
     sock->send(set_component_metadata("vehicle.temp"));
     sock->send(set_component_metadata("vehicle.pressure"));
     sock->send(set_component_metadata("vehicle.humidity"));
+    sock->send(VTableMsg {
+        .id = { 2, 0 },
+        .vtable = table,
+    });
 
     std::thread reader(reader_thread_func, ip, port);
     reader.detach();

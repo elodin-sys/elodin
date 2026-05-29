@@ -634,6 +634,32 @@ impl DB {
         );
 
         self.with_state_mut(|state| {
+            if let Err(err) = vtable.vtable.validate_field_alignment(vtable.id) {
+                return Err(match err {
+                    impeller2::error::Error::VtableFieldMisaligned {
+                        packet_id,
+                        component_id,
+                        offset,
+                        prim_type,
+                        required_align,
+                    } => {
+                        let component_name = state
+                            .component_metadata
+                            .get(&component_id)
+                            .map(|m| m.name.clone());
+                        Error::VtableFieldMisaligned {
+                            packet_id,
+                            component_id,
+                            component_name,
+                            offset,
+                            prim_type,
+                            required_align,
+                        }
+                    }
+                    other => other.into(),
+                });
+            }
+
             // We need to iterate over fields to get offset/len for timestamp source detection
             let fields: Vec<_> = vtable.vtable.fields.as_slice().to_vec();
             debug!(
