@@ -646,8 +646,7 @@ impl DB {
                         let component_name = state
                             .component_metadata
                             .get(&component_id)
-                            .map(|m| m.name.clone())
-                            .unwrap_or_else(|| component_id.to_string());
+                            .map(|m| m.name.clone());
                         Error::VtableFieldMisaligned {
                             packet_id,
                             component_id,

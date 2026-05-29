@@ -144,11 +144,11 @@ void component_writer(
                 schema(prim_type, dims, timestamp(time, component(component_name)))),
         });
 
+        sock->send(set_component_metadata(component_name, labels));
         sock->send(VTableMsg {
             .id = { vtable_id, 0 },
             .vtable = table,
         });
-        sock->send(set_component_metadata(component_name, labels));
 
         // Packet layout: [int64_t time][float values...]
         std::vector<uint8_t> buf(8 + value_bytes, 0);

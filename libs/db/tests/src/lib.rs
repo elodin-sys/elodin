@@ -164,6 +164,7 @@ mod tests {
                 vtable: bad,
             })
             .expect_err("misaligned vtable must be rejected at registration");
+        let rendered = err.to_string();
         let Error::VtableFieldMisaligned {
             packet_id,
             component_id,
@@ -177,10 +178,51 @@ mod tests {
         };
         assert_eq!(packet_id, 1u16.to_le_bytes());
         assert_eq!(component_id, acc_cmd_body);
-        assert_eq!(component_name, "Acceleration Command (body)");
+        assert_eq!(
+            component_name,
+            Some("Acceleration Command (body)".to_string())
+        );
         assert_eq!(offset, 98);
         assert_eq!(prim_type, PrimType::F64);
         assert_eq!(required_align, 8);
+        assert!(rendered.contains(&format!("Acceleration Command (body) ({acc_cmd_body})")));
+
+        let unknown_component = ComponentId::new("unknown_misaligned_component");
+        let bad_without_metadata = vtable([raw_field(
+            2,
+            8,
+            schema(
+                PrimType::F64,
+                &[1],
+                component("unknown_misaligned_component"),
+            ),
+        )]);
+        let err = db
+            .insert_vtable(VTableMsg {
+                id: 3u16.to_le_bytes(),
+                vtable: bad_without_metadata,
+            })
+            .expect_err("misaligned vtable without metadata must be rejected");
+        let rendered = err.to_string();
+        let Error::VtableFieldMisaligned {
+            component_id,
+            component_name,
+            offset,
+            prim_type,
+            required_align,
+            ..
+        } = err
+        else {
+            panic!("unexpected error: {err:?}");
+        };
+        assert_eq!(component_id, unknown_component);
+        assert_eq!(component_name, None);
+        assert_eq!(offset, 2);
+        assert_eq!(prim_type, PrimType::F64);
+        assert_eq!(required_align, 8);
+        let unknown_component = unknown_component.to_string();
+        assert_eq!(rendered.matches(&unknown_component).count(), 1);
+        assert!(!rendered.contains(&format!("{unknown_component} ({unknown_component})")));
 
         let good = vtable([
             raw_field(

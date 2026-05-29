@@ -4,6 +4,13 @@ use impeller2_wkt::{ErrorResponse, StreamId};
 use std::{io, ops::Range, path::PathBuf};
 use thiserror::Error;
 
+fn fmt_misaligned_component(name: &Option<String>, id: &ComponentId) -> String {
+    match name {
+        Some(name) => format!("{name} ({id})"),
+        None => id.to_string(),
+    }
+}
+
 #[derive(Debug, Error)]
 pub enum Error {
     #[error("map overflow")]
@@ -19,12 +26,13 @@ pub enum Error {
     #[error("component not found {0}")]
     ComponentNotFound(ComponentId),
     #[error(
-        "vtable {packet_id:?} field for component {component_name} ({component_id}) is misaligned: offset {offset} is not a multiple of {required_align} (required by {prim_type})"
+        "vtable {packet_id:?} field for component {} is misaligned: offset {offset} is not a multiple of {required_align} (required by {prim_type})",
+        fmt_misaligned_component(component_name, component_id)
     )]
     VtableFieldMisaligned {
         packet_id: PacketId,
         component_id: ComponentId,
-        component_name: String,
+        component_name: Option<String>,
         offset: usize,
         prim_type: PrimType,
         required_align: usize,
