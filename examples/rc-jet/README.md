@@ -1,6 +1,6 @@
 # BDX RC Jet Turbine Simulation
 
-A high-fidelity 6-DOF simulation of the Elite Aerosports BDX RC jet turbine aircraft, implementing polynomial aerodynamic models, turbine propulsion dynamics, and control surface servos.
+A high-fidelity 6-DOF simulation of the Elite Aerosports BDX RC jet turbine aircraft, implementing polynomial aerodynamic models, turbine propulsion dynamics, control surface servos, and a Death Valley terrain backdrop.
 
 ## Overview
 
@@ -10,12 +10,29 @@ This simulation implements the complete flight dynamics of a BDX RC jet followin
 - **Propulsion**: First-order turbine spool dynamics with thrust mapping
 - **Actuators**: Rate-limited servo dynamics for control surfaces
 - **6-DOF Dynamics**: RK4 integration for accurate trajectory prediction
+- **Terrain**: Death Valley `world_mesh` backdrop loaded from the Elodin asset root
 
 ## Quick Start
 
 ### Prerequisites
 
 Follow the [main README](../../README.md) for Elodin installation.
+
+This example expects a single Elodin asset root (`ELODIN_ASSETS_DIR`, defaulting to `./assets`) containing both the normal model assets and the Death Valley terrain atlas:
+
+```text
+assets/
+  f22.glb
+  edu-450-v2-drone.glb
+  terrains/planar/death_valley/
+    config.tc
+    region.toml                (optional)
+    data/
+      height/<tile>.bin
+      albedo/<tile>.bin
+```
+
+If the Death Valley atlas is missing, the editor falls back to a flat placeholder plane.
 
 ### Running the Simulation
 
@@ -98,7 +115,7 @@ Run these checks to verify simulation fidelity:
 python main.py --time 30
 ```
 Observe in telemetry:
-- Altitude should remain approximately constant (~100m ±5m)
+- Altitude should remain approximately constant near the configured start altitude (~4500m ±5m)
 - Angle of attack should stabilize near 0-3°
 - Throttle at ~0.7 maintains level flight
 
