@@ -1,56 +1,49 @@
 use std::collections::HashMap;
 
 use bevy::{
-    app::{App, Plugin, PreUpdate},
+    app::{App, Plugin},
     camera::{Camera, RenderTarget},
-    ecs::schedule::IntoScheduleConfigs,
     input::{
         ButtonInput,
         mouse::{MouseButton, MouseScrollUnit, MouseWheel},
     },
     prelude::{Entity, MessageReader, MessageWriter, Query, Res, ResMut, Vec2, With},
-    window::PrimaryWindow,
+    window::{PrimaryWindow, Window},
 };
 use bevy_editor_cam::{
     controller::component::EditorCam,
     input::{CameraPointerMap, EditorCamInputMessage, MotionKind},
 };
-use bevy_picking::{
-    PickingSystems,
-    pointer::{Location, PointerAction, PointerId, PointerInput, PointerLocation},
-};
+use bevy_picking::pointer::{PointerAction, PointerId, PointerInput};
 
-use crate::ui::{input_owner::UiInputOwners, window::window_entity_from_target};
+use crate::ui::input_owner::UiInputOwners;
 
+/// Registers message/resources only. Input systems run in [`crate::ui`] after
+/// [`crate::ui::set_camera_viewport`] so hit tests use the current viewport rect.
 pub struct EditorCamInputPlugin;
 
 impl Plugin for EditorCamInputPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<EditorCamInputMessage>()
-            .init_resource::<CameraPointerMap>()
-            .add_systems(
-                PreUpdate,
-                (
-                    gated_camera_inputs,
-                    EditorCamInputMessage::receive_messages,
-                    send_gated_pointer_inputs,
-                )
-                    .chain()
-                    .after(PickingSystems::Last)
-                    .before(EditorCam::update_camera_positions),
-            );
+            .init_resource::<CameraPointerMap>();
     }
+}
+
+fn cursor_in_camera_view(camera: &Camera, cursor: Vec2) -> bool {
+    camera.is_active
+        && camera
+            .logical_viewport_rect()
+            .is_some_and(|rect| rect.contains(cursor))
 }
 
 #[allow(clippy::too_many_arguments)]
 pub fn gated_camera_inputs(
-    pointers: Query<(&PointerId, &PointerLocation)>,
     pointer_map: Res<CameraPointerMap>,
     mut controller: MessageWriter<EditorCamInputMessage>,
     mut mouse_wheel: MessageReader<MouseWheel>,
     mouse_input: Res<ButtonInput<MouseButton>>,
     cameras: Query<(Entity, &Camera, &RenderTarget, &EditorCam)>,
-    primary_window: Query<Entity, With<PrimaryWindow>>,
+    primary_window: Query<(Entity, &Window), With<PrimaryWindow>>,
     input_owners: Res<UiInputOwners>,
 ) {
     let orbit_start = MouseButton::Right;
@@ -58,24 +51,17 @@ pub fn gated_camera_inputs(
     let zoom_stop = 0.0;
     let wheel_windows = mouse_wheel_windows(&mut mouse_wheel);
 
+    let Ok((window_entity, window)) = primary_window.single() else {
+        return;
+    };
+    let cursor = window.cursor_position();
+    let pointer_pos = cursor.map(|pos| bevy_egui::egui::pos2(pos.x, pos.y));
+
     if let Some(&camera) = pointer_map.get(&PointerId::Mouse) {
-        let mouse_location = pointer_location_for(&pointers, PointerId::Mouse);
-        let camera_query = cameras.get(camera).ok();
-        let owner_allows_camera = camera_query
-            .map(|(entity, _camera, render_target, _)| {
-                mouse_location
-                    .map(|location| {
-                        input_owners_permit_camera_at(
-                            &input_owners,
-                            &primary_window,
-                            render_target,
-                            entity,
-                            location,
-                        )
-                    })
-                    .unwrap_or_default()
-            })
+        let owner_allows_camera = pointer_pos
+            .map(|pos| input_owners.permits_viewport_at(window_entity, camera, pos))
             .unwrap_or_default();
+        let camera_query = cameras.get(camera).ok();
         let is_in_zoom_mode = camera_query
             .map(|(_, _, _, editor_cam)| editor_cam.current_motion.is_zooming_only())
             .unwrap_or_default();
@@ -97,63 +83,51 @@ pub fn gated_camera_inputs(
         }
     }
 
-    for (&pointer, pointer_location) in pointers
-        .iter()
-        .filter_map(|(id, loc)| loc.location().map(|loc| (id, loc)))
-    {
-        match pointer {
-            PointerId::Mouse => {
-                let Some((camera, _camera_component, render_target, _)) =
-                    cameras.iter().find(|(entity, camera, render_target, _)| {
-                        pointer_location.is_in_viewport(camera, render_target, &primary_window)
-                            && input_owners_permit_camera_at(
-                                &input_owners,
-                                &primary_window,
-                                render_target,
-                                *entity,
-                                pointer_location,
-                            )
-                    })
-                else {
-                    continue;
-                };
+    let Some(cursor) = cursor else {
+        return;
+    };
+    let pointer_pos = bevy_egui::egui::pos2(cursor.x, cursor.y);
 
-                let Some(window_entity) = camera_window_entity(render_target, &primary_window)
-                else {
-                    continue;
-                };
+    let Some((camera, _camera_component, render_target, _)) =
+        cameras.iter().find(|(entity, camera, _, _)| {
+            cursor_in_camera_view(camera, cursor)
+                && input_owners.permits_viewport_at(window_entity, *entity, pointer_pos)
+        })
+    else {
+        return;
+    };
 
-                if mouse_input.just_pressed(orbit_start) {
-                    controller.write(EditorCamInputMessage::Start {
-                        kind: MotionKind::OrbitZoom,
-                        camera,
-                        pointer,
-                    });
-                } else if mouse_input.just_pressed(pan_start) {
-                    controller.write(EditorCamInputMessage::Start {
-                        kind: MotionKind::PanZoom,
-                        camera,
-                        pointer,
-                    });
-                } else if wheel_windows.contains_key(&window_entity) {
-                    controller.write(EditorCamInputMessage::Start {
-                        kind: MotionKind::Zoom,
-                        camera,
-                        pointer,
-                    });
-                }
-            }
-            PointerId::Touch(_) => continue,
-            PointerId::Custom(_) => continue,
-        }
+    let Some(render_window_entity) = camera_window_entity(render_target, &primary_window) else {
+        return;
+    };
+
+    let pointer = PointerId::Mouse;
+
+    if mouse_input.just_pressed(orbit_start) {
+        controller.write(EditorCamInputMessage::Start {
+            kind: MotionKind::OrbitZoom,
+            camera,
+            pointer,
+        });
+    } else if mouse_input.just_pressed(pan_start) {
+        controller.write(EditorCamInputMessage::Start {
+            kind: MotionKind::PanZoom,
+            camera,
+            pointer,
+        });
+    } else if wheel_windows.contains_key(&render_window_entity) {
+        controller.write(EditorCamInputMessage::Start {
+            kind: MotionKind::Zoom,
+            camera,
+            pointer,
+        });
     }
 }
 
 pub fn send_gated_pointer_inputs(
     mut camera_map: ResMut<CameraPointerMap>,
     mut camera_controllers: Query<(Entity, &mut EditorCam, &Camera, &RenderTarget)>,
-    primary_window: Query<Entity, With<PrimaryWindow>>,
-    pointers: Query<(&PointerId, &PointerLocation)>,
+    primary_window: Query<(Entity, &Window), With<PrimaryWindow>>,
     input_owners: Res<UiInputOwners>,
     mut mouse_wheel: MessageReader<MouseWheel>,
     mut moves: MessageReader<PointerInput>,
@@ -165,6 +139,12 @@ pub fn send_gated_pointer_inputs(
         .map(|(&pointer, &camera)| (pointer, camera))
         .collect();
     let mut ended_pointers = Vec::new();
+
+    let Ok((_, window)) = primary_window.single() else {
+        return;
+    };
+    let cursor = window.cursor_position();
+    let pointer_pos = cursor.map(|pos| bevy_egui::egui::pos2(pos.x, pos.y));
 
     for (pointer, camera) in active_pointers {
         let Ok((entity, mut camera_controller, camera_component, render_target)) =
@@ -178,18 +158,12 @@ pub fn send_gated_pointer_inputs(
             ended_pointers.push(pointer);
             continue;
         };
-        let Some(pointer_location) = pointer_location_for(&pointers, pointer) else {
-            camera_controller.end_move();
-            ended_pointers.push(pointer);
-            continue;
-        };
-        if !pointer_location.is_in_viewport(camera_component, render_target, &primary_window)
-            || !input_owners.permits_viewport_at(
-                window_entity,
-                entity,
-                pointer_location_pos(pointer_location),
-            )
-        {
+        let viewport_ok = cursor.is_some_and(|cursor| {
+            cursor_in_camera_view(camera_component, cursor)
+                && pointer_pos
+                    .is_some_and(|pos| input_owners.permits_viewport_at(window_entity, entity, pos))
+        });
+        if !viewport_ok {
             camera_controller.end_move();
             ended_pointers.push(pointer);
             continue;
@@ -223,43 +197,12 @@ pub fn send_gated_pointer_inputs(
     }
 }
 
-fn input_owners_permit_camera_at(
-    input_owners: &UiInputOwners,
-    primary_window: &Query<Entity, With<PrimaryWindow>>,
-    render_target: &RenderTarget,
-    camera_entity: Entity,
-    pointer_location: &Location,
-) -> bool {
-    camera_window_entity(render_target, primary_window)
-        .map(|window| {
-            input_owners.permits_viewport_at(
-                window,
-                camera_entity,
-                pointer_location_pos(pointer_location),
-            )
-        })
-        .unwrap_or_default()
-}
-
-fn pointer_location_for<'a>(
-    pointers: &'a Query<(&PointerId, &PointerLocation)>,
-    pointer: PointerId,
-) -> Option<&'a Location> {
-    pointers
-        .iter()
-        .find_map(|(id, loc)| (*id == pointer).then(|| loc.location()).flatten())
-}
-
-fn pointer_location_pos(pointer_location: &Location) -> bevy_egui::egui::Pos2 {
-    bevy_egui::egui::pos2(pointer_location.position.x, pointer_location.position.y)
-}
-
 fn camera_window_entity(
     render_target: &RenderTarget,
-    primary_window: &Query<Entity, With<PrimaryWindow>>,
+    primary_window: &Query<(Entity, &Window), With<PrimaryWindow>>,
 ) -> Option<Entity> {
-    let primary_entity = primary_window.single().ok()?;
-    window_entity_from_target(render_target, primary_entity)
+    let (primary_entity, _) = primary_window.single().ok()?;
+    crate::ui::window::window_entity_from_target(render_target, primary_entity)
 }
 
 fn mouse_wheel_windows(mouse_wheel: &mut MessageReader<MouseWheel>) -> HashMap<Entity, ()> {

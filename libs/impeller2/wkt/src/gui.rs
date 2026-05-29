@@ -54,6 +54,8 @@ pub struct Schematic {
     pub timeline: Option<TimelineConfig>,
     #[serde(default)]
     pub frame: Option<bevy_geo_frames::GeoFrame>,
+    #[serde(default)]
+    pub skybox: Option<SkyboxConfig>,
 }
 
 #[cfg(feature = "bevy")]
@@ -98,6 +100,11 @@ pub struct WindowSchematic {
 pub struct ThemeConfig {
     pub mode: Option<String>,
     pub scheme: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq, Eq)]
+pub struct SkyboxConfig {
+    pub name: String,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]

@@ -74,3 +74,18 @@ $ ELODIN_KDL_DIR=my-kdls elodin
 $ export ELODIN_KDL_DIR=/path/to/my-kdls; # Or place this in your shell's rc file.
 $ elodin
 ```
+
+### `BLOCKADE_API_KEY`
+
+The `BLOCKADE_API_KEY` environment variable enables Skybox AI generation from
+the editor command palette (`Skybox...` → `Generate Skybox...`). Selecting
+existing cached skyboxes does not require it.
+
+Create a Skybox AI API key from Blockade Labs at
+https://skybox.blockadelabs.com/api, then pass it through your shell:
+
+```sh
+$ BLOCKADE_API_KEY=your_key_here elodin editor examples/rc-jet/main.py
+```
+
+Do not commit API keys or put them in schematic files.

@@ -17,6 +17,9 @@ use super::Cli;
 const DEFAULT_SIM: Simulator = Simulator::None;
 
 #[derive(clap::Args, Clone, Default)]
+#[command(
+    after_help = "Environment:\n  BLOCKADE_API_KEY    Optional. Enables Skybox AI generation from the command palette. Get one from https://skybox.blockadelabs.com/api and keep it out of source control."
+)]
 pub struct Args {
     #[clap(name = "addr/path", default_value_t = DEFAULT_SIM)]
     sim: Simulator,

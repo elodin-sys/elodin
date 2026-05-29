@@ -40,7 +40,7 @@ use crate::{
         monitor::MonitorPane,
         plot::GraphBundle,
         query_plot::QueryPlotData,
-        schematic::EqlExt,
+        schematic::{CurrentSchematic, EqlExt},
         tiles::{
             GraphPane, Pane, TileState, TreePane, ViewportPane, WindowDescriptor, WindowId,
             WindowState,
@@ -134,6 +134,7 @@ pub struct LoadSchematicParams<'w, 's> {
     schematic_spawned: Query<'w, 's, Entity, With<SchematicSpawned>>,
     window_states: Query<'w, 's, (Entity, &'static WindowId, &'static mut WindowState)>,
     pub schematic_bindings: ResMut<'w, super::SchematicBindings>,
+    pub current_schematic: ResMut<'w, CurrentSchematic>,
 }
 
 fn apply_theme(theme: Option<&impeller2_wkt::ThemeConfig>) -> colors::SchemeSelection {
@@ -423,6 +424,8 @@ impl LoadSchematicParams<'_, '_> {
                 }
             }
         }
+
+        self.current_schematic.0.skybox = schematic.skybox.clone();
     }
 
     fn spawn_window(
@@ -1285,7 +1288,9 @@ mod tests {
         sensor_camera::SensorCameraConfigs,
         ui::{
             HdrEnabled,
-            schematic::{CurrentDocument, SchematicBindings, SchematicDocumentAsset},
+            schematic::{
+                CurrentDocument, CurrentSchematic, SchematicBindings, SchematicDocumentAsset,
+            },
             tiles,
             timeline::TimelineSettings,
         },
@@ -1329,7 +1334,8 @@ mod tests {
             .init_resource::<EqlContext>()
             .init_resource::<SensorCameraConfigs>()
             .init_resource::<Coordinate>()
-            .init_resource::<SchematicBindings>();
+            .init_resource::<SchematicBindings>()
+            .insert_resource(CurrentSchematic(Default::default()));
 
         app.world_mut().spawn((Window::default(), PrimaryWindow));
         settle(&mut app);

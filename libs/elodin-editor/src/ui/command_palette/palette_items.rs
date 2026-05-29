@@ -4,6 +4,10 @@ use std::{
     str::FromStr,
 };
 
+use crate::plugins::kdl_document::{
+    CurrentDocument, LastSyncedSchematicContent, SchematicDocumentAsset,
+};
+use crate::skybox_generation::{LocallyPushedSkyboxActive, SkyboxDocumentSyncMut};
 use bevy::{
     asset::{AssetServer, Assets},
     camera::visibility::Visibility,
@@ -17,6 +21,9 @@ use bevy::{
     prelude::{Deref, DerefMut, Entity, In, MessageWriter, Mut, Resource, Transform},
     window::PrimaryWindow,
 };
+use bevy_ai_skybox::prelude::{
+    GenerateSkybox, SetActiveSkybox, SkyboxCache, SkyboxGenerationSettings, SkyboxGenerationUi,
+};
 use bevy_editor_cam::controller::{component::EditorCam, motion::CurrentMotion};
 use bevy_geo_frames::GeoContext;
 use bevy_infinite_grid::InfiniteGrid;
@@ -25,6 +32,7 @@ use fuzzy_matcher::{FuzzyMatcher, skim::SkimMatcherV2};
 use impeller2::types::Timestamp;
 use impeller2_bevy::{ComponentPathRegistry, EntityMap, PacketTx};
 use impeller2_kdl::{ToKdl, env::schematic_dir_or_cwd};
+use impeller2_wkt::SkyboxConfig;
 use impeller2_wkt::{
     ComponentPath, ComponentValue, CurrentTimestamp, EarliestTimestamp, IsRecording, LastUpdated,
     Material, Mesh, Object3D, SetDbConfig, SimulationTimeStep,
@@ -253,6 +261,7 @@ const SIMULATION_LABEL: &str = "Simulation";
 const TIME_LABEL: &str = "Time";
 const HELP_LABEL: &str = "Help";
 const PRESETS_LABEL: &str = "Presets";
+const SKYBOX_LABEL: &str = "Skybox";
 
 struct ViewportEntry {
     label: String,
@@ -951,11 +960,12 @@ pub fn save_schematic() -> PaletteItem {
 fn queue_save_schematic_now(
     schematic: Res<CurrentSchematic>,
     window_schematics: Res<CurrentWindowSchematics>,
+    skybox_cache: Option<Res<SkyboxCache>>,
     mut requests: MessageWriter<SaveCurrentDocumentRequest>,
 ) {
     requests.write(SaveCurrentDocumentRequest {
         path: None,
-        root_kdl: schematic.0.to_kdl(),
+        root_kdl: root_kdl_for_save(&schematic, skybox_cache.as_deref()),
         windows: window_document_saves(&window_schematics),
     });
 }
@@ -964,8 +974,11 @@ pub fn save_schematic_db() -> PaletteItem {
     PaletteItem::new(
         "Save Schematic To DB",
         PRESETS_LABEL,
-        |_name: In<String>, tx: Res<PacketTx>, schematic: Res<CurrentSchematic>| {
-            let kdl = schematic.0.to_kdl();
+        |_name: In<String>,
+         tx: Res<PacketTx>,
+         schematic: Res<CurrentSchematic>,
+         skybox_cache: Option<Res<SkyboxCache>>| {
+            let kdl = root_kdl_for_save(&schematic, skybox_cache.as_deref());
             tx.send_msg(SetDbConfig {
                 metadata: [("schematic.content".to_string(), kdl)]
                     .into_iter()
@@ -996,16 +1009,27 @@ pub fn save_schematic_inner() -> PaletteItem {
         move |In(name): In<String>,
               schematic: Res<CurrentSchematic>,
               window_schematics: Res<CurrentWindowSchematics>,
+              skybox_cache: Option<Res<SkyboxCache>>,
               mut requests: MessageWriter<SaveCurrentDocumentRequest>| {
             requests.write(SaveCurrentDocumentRequest {
                 path: Some(PathBuf::from(name)),
-                root_kdl: schematic.0.to_kdl(),
+                root_kdl: root_kdl_for_save(&schematic, skybox_cache.as_deref()),
                 windows: window_document_saves(&window_schematics),
             });
             PaletteEvent::Exit
         },
     )
     .default()
+}
+
+fn root_kdl_for_save(schematic: &CurrentSchematic, skybox_cache: Option<&SkyboxCache>) -> String {
+    let mut root = schematic.0.clone();
+    if let Some(cache) = skybox_cache {
+        root.skybox = cache.active.as_ref().map(|active| SkyboxConfig {
+            name: active.clone(),
+        });
+    }
+    root.to_kdl()
 }
 
 fn window_document_saves(window_schematics: &CurrentWindowSchematics) -> Vec<WindowDocumentSave> {
@@ -1150,6 +1174,178 @@ pub fn set_color_scheme_mode() -> PaletteItem {
         }
         PalettePage::new(items).into_event()
     })
+}
+
+fn clear_skybox() -> PaletteItem {
+    PaletteItem::new(
+        "Clear Skybox",
+        SKYBOX_LABEL,
+        |_: In<String>,
+         mut cache: ResMut<SkyboxCache>,
+         mut skyboxes: MessageWriter<SetActiveSkybox>,
+         mut schematic: ResMut<CurrentSchematic>,
+         mut current_document: ResMut<CurrentDocument>,
+         mut document_assets: ResMut<Assets<SchematicDocumentAsset>>,
+         mut last_synced_content: ResMut<LastSyncedSchematicContent>,
+         mut locally_pushed: ResMut<LocallyPushedSkyboxActive>,
+         tx: Res<PacketTx>| {
+            if cache.active.is_none() && schematic.skybox.is_none() {
+                return PaletteEvent::Error("No skybox is active".into());
+            }
+            skyboxes.write(SetActiveSkybox::Clear);
+            SkyboxDocumentSyncMut {
+                schematic: &mut schematic,
+                current_document: &mut current_document,
+                document_assets: &mut document_assets,
+                last_synced_content: &mut last_synced_content,
+                locally_pushed: &mut locally_pushed,
+                cache: &mut cache,
+                tx: &tx,
+            }
+            .sync_skybox_to_document_and_db(None);
+            PaletteEvent::Exit
+        },
+    )
+}
+
+fn activate_skybox_item(label: String, name: String) -> PaletteItem {
+    PaletteItem::new(
+        label,
+        SKYBOX_LABEL,
+        move |_: In<String>,
+              mut cache: ResMut<SkyboxCache>,
+              mut skyboxes: MessageWriter<SetActiveSkybox>,
+              mut schematic: ResMut<CurrentSchematic>,
+              mut current_document: ResMut<CurrentDocument>,
+              mut document_assets: ResMut<Assets<SchematicDocumentAsset>>,
+              mut last_synced_content: ResMut<LastSyncedSchematicContent>,
+              mut locally_pushed: ResMut<LocallyPushedSkyboxActive>,
+              tx: Res<PacketTx>| {
+            skyboxes.write(SetActiveSkybox::ByName(name.clone()));
+            SkyboxDocumentSyncMut {
+                schematic: &mut schematic,
+                current_document: &mut current_document,
+                document_assets: &mut document_assets,
+                last_synced_content: &mut last_synced_content,
+                locally_pushed: &mut locally_pushed,
+                cache: &mut cache,
+                tx: &tx,
+            }
+            .sync_skybox_to_document_and_db(Some(SkyboxConfig { name: name.clone() }));
+            PaletteEvent::Exit
+        },
+    )
+}
+
+fn revert_previous_skybox_item(name: String) -> PaletteItem {
+    PaletteItem::new(
+        format!("Revert to {name}"),
+        SKYBOX_LABEL,
+        |_: In<String>, mut commands: Commands| {
+            commands.run_system_cached(crate::skybox_generation::revert_previous_skybox);
+            PaletteEvent::Exit
+        },
+    )
+}
+
+fn skybox_menu() -> PaletteItem {
+    PaletteItem::new(
+        "Skybox...",
+        SKYBOX_LABEL,
+        |_: In<String>, cache: Res<SkyboxCache>, skybox_ui: Res<SkyboxGenerationUi>| {
+            let active = cache.active.as_deref();
+            let mut items = Vec::with_capacity(cache.manifest.entries.len() + 4);
+            items.push(PaletteItem::new(
+                "Generate Skybox...",
+                SKYBOX_LABEL,
+                |_: In<String>| {
+                    PalettePage::new(vec![generate_skybox_from_prompt()])
+                        .label("Generate Skybox")
+                        .prompt("Describe a new skybox...")
+                        .into_event()
+                },
+            ));
+            if active.is_some() {
+                items.push(clear_skybox());
+            }
+            if let Some(revert) = skybox_ui.revert_name.clone()
+                && active != Some(revert.as_str())
+            {
+                items.push(revert_previous_skybox_item(revert));
+            }
+            for entry in &cache.manifest.entries {
+                let name = entry.name.clone();
+                let label = if active == Some(name.as_str()) {
+                    format!("{name} (active)")
+                } else {
+                    name.clone()
+                };
+                items.push(activate_skybox_item(label, name));
+            }
+
+            PalettePage::new(items)
+                .label("Skybox")
+                .prompt("Generate, clear, or select a skybox...")
+                .into_event()
+        },
+    )
+}
+
+fn generate_skybox_from_prompt() -> PaletteItem {
+    PaletteItem::new(
+        LabelSource::placeholder("Describe a new skybox..."),
+        SKYBOX_LABEL,
+        |In(prompt): In<String>,
+         settings: Option<Res<SkyboxGenerationSettings>>,
+         skybox_ui: Res<SkyboxGenerationUi>,
+         mut skyboxes: MessageWriter<GenerateSkybox>| {
+            let prompt = prompt.trim();
+            if prompt.is_empty() {
+                error!(
+                    target: "bevy_ai_skybox",
+                    "skybox generation rejected from command palette: prompt cannot be empty"
+                );
+                return PaletteEvent::Error("Prompt cannot be empty".into());
+            }
+            if skybox_ui.is_busy() {
+                error!(
+                    target: "bevy_ai_skybox",
+                    prompt = %prompt,
+                    "skybox generation rejected from command palette: generation already in progress"
+                );
+                return PaletteEvent::Error(
+                    "A skybox is already generating — check the status bar".into(),
+                );
+            }
+            let Some(settings) = settings else {
+                error!(
+                    target: "bevy_ai_skybox",
+                    prompt = %prompt,
+                    "skybox generation rejected from command palette: plugin is not installed"
+                );
+                return PaletteEvent::Error("Skybox generation plugin is not installed".into());
+            };
+            if settings.resolved_api_key().is_none() {
+                error!(
+                    target: "bevy_ai_skybox",
+                    prompt = %prompt,
+                    "skybox generation rejected from command palette: missing BLOCKADE_API_KEY"
+                );
+                return PaletteEvent::Error(
+                    "Set BLOCKADE_API_KEY in the environment, then restart the editor \
+                     (e.g. BLOCKADE_API_KEY=… elodin editor …)"
+                        .into(),
+                );
+            }
+
+            skyboxes.write(GenerateSkybox {
+                prompt: prompt.to_string(),
+                ..Default::default()
+            });
+            PaletteEvent::Exit
+        },
+    )
+    .default()
 }
 
 fn create_object_3d_with_color(eql: String, expr: eql::Expr, mesh: Mesh) -> PaletteEvent {
@@ -1527,6 +1723,7 @@ impl Default for PalettePage {
             save_schematic_db(),
             load_schematic(),
             clear_schematic(),
+            skybox_menu(),
             set_color_scheme_mode(),
             set_color_scheme(),
             PaletteItem::new("Documentation", HELP_LABEL, |_: In<String>| {
@@ -1540,5 +1737,85 @@ impl Default for PalettePage {
             })
             .icon(PaletteIcon::Link),
         ])
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use impeller2_kdl::FromKdl;
+    use impeller2_wkt::Schematic;
+
+    fn parse_saved_schematic(kdl: &str) -> Schematic {
+        Schematic::from_kdl(kdl).expect("saved KDL should parse")
+    }
+
+    #[test]
+    fn save_kdl_uses_active_skybox_from_cache() {
+        let schematic = CurrentSchematic(Schematic::default());
+        let mut cache = SkyboxCache::empty(PathBuf::from("manifest.ron"));
+        cache.active = Some("mont_blanc_france".to_string());
+
+        let kdl = root_kdl_for_save(&schematic, Some(&cache));
+        let parsed = parse_saved_schematic(&kdl);
+
+        assert_eq!(
+            parsed.skybox.as_ref().map(|skybox| skybox.name.as_str()),
+            Some("mont_blanc_france")
+        );
+    }
+
+    #[test]
+    fn save_kdl_active_skybox_replaces_stale_schematic_skybox() {
+        let schematic = CurrentSchematic(Schematic {
+            skybox: Some(SkyboxConfig {
+                name: "alien_swamp".to_string(),
+            }),
+            ..Default::default()
+        });
+        let mut cache = SkyboxCache::empty(PathBuf::from("manifest.ron"));
+        cache.active = Some("mont_blanc_france".to_string());
+
+        let kdl = root_kdl_for_save(&schematic, Some(&cache));
+        let parsed = parse_saved_schematic(&kdl);
+
+        assert_eq!(
+            parsed.skybox.as_ref().map(|skybox| skybox.name.as_str()),
+            Some("mont_blanc_france")
+        );
+    }
+
+    #[test]
+    fn save_kdl_clears_stale_schematic_skybox_when_cache_has_no_active_skybox() {
+        let schematic = CurrentSchematic(Schematic {
+            skybox: Some(SkyboxConfig {
+                name: "grand_canyon".to_string(),
+            }),
+            ..Default::default()
+        });
+        let cache = SkyboxCache::empty(PathBuf::from("manifest.ron"));
+
+        let kdl = root_kdl_for_save(&schematic, Some(&cache));
+        let parsed = parse_saved_schematic(&kdl);
+
+        assert!(parsed.skybox.is_none());
+    }
+
+    #[test]
+    fn save_kdl_preserves_schematic_skybox_when_cache_is_unavailable() {
+        let schematic = CurrentSchematic(Schematic {
+            skybox: Some(SkyboxConfig {
+                name: "grand_canyon".to_string(),
+            }),
+            ..Default::default()
+        });
+
+        let kdl = root_kdl_for_save(&schematic, None);
+        let parsed = parse_saved_schematic(&kdl);
+
+        assert_eq!(
+            parsed.skybox.as_ref().map(|skybox| skybox.name.as_str()),
+            Some("grand_canyon")
+        );
     }
 }

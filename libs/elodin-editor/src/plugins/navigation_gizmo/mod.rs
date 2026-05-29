@@ -116,7 +116,7 @@ struct NavGizmoDrag {
 }
 
 #[derive(Resource, Default, Debug)]
-struct NavGizmoAnchorState {
+pub struct NavGizmoAnchorState {
     offsets: HashMap<Entity, Vec2>,
     active_drag: Option<NavGizmoDrag>,
 }

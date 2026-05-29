@@ -13,6 +13,7 @@ use bevy::{
     winit::WINIT_WINDOWS,
 };
 use bevy_defer::AsyncPlugin;
+use bevy_editor_cam::input::EditorCamInputMessage;
 use bevy_egui::{
     EguiContext, EguiContexts, EguiPreUpdateSet,
     egui::{self, Color32, Label, RichText},
@@ -114,6 +115,8 @@ pub use window::{
 
 #[cfg(not(target_family = "wasm"))]
 pub mod status_bar;
+
+pub mod skybox_status;
 
 #[cfg(not(target_family = "wasm"))]
 pub mod startup_window;
@@ -371,6 +374,16 @@ impl Plugin for UiPlugin {
                     handle_window_relayout_events,
                     set_secondary_camera_viewport,
                     set_camera_viewport,
+                    // After viewport layout: needs logical_viewport_rect + UiInputOwners.
+                    // EditorCam::update_camera_positions stays in PreUpdate, so motion applies
+                    // next frame (~1 frame lag; intentional vs stale viewport in PreUpdate).
+                    (
+                        crate::plugins::editor_cam_input::gated_camera_inputs,
+                        EditorCamInputMessage::receive_messages,
+                        crate::plugins::editor_cam_input::send_gated_pointer_inputs,
+                    )
+                        .chain()
+                        .after(set_camera_viewport),
                     set_nav_gizmo_camera_orders,
                     warn_camera_order_ambiguities,
                 )
@@ -477,6 +490,7 @@ pub struct ViewportOverlay<'w, 's> {
     window: Query<'w, 's, &'static Window>,
     entities_meta: Query<'w, 's, EntityDataReadOnly<'static>>,
     hovered_entity: Res<'w, HoveredEntity>,
+    skybox_ui: Res<'w, bevy_ai_skybox::prelude::SkyboxGenerationUi>,
 }
 
 impl RootWidgetSystem for ViewportOverlay<'_, '_> {
@@ -494,10 +508,13 @@ impl RootWidgetSystem for ViewportOverlay<'_, '_> {
         let window = state_mut.window;
         let entities_meta = state_mut.entities_meta;
         let hovered_entity = state_mut.hovered_entity;
+        let skybox_ui = &state_mut.skybox_ui;
 
         let Ok(window) = window.single() else {
             return;
         };
+
+        skybox_status::draw_skybox_generation_overlay(ctx, skybox_ui);
 
         let hovered_entity_meta = if let Some(hovered_entity_pair) = hovered_entity.0 {
             entities_meta
