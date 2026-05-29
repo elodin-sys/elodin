@@ -26,7 +26,7 @@ pub enum Error {
     #[error("component not found {0}")]
     ComponentNotFound(ComponentId),
     #[error(
-        "vtable {packet_id:?} field for component {} is misaligned: offset {offset} is not a multiple of {required_align} (required by {prim_type})",
+        "vtable {packet_id:?} layout misaligned at component {}: offset {offset} is not {required_align}-byte aligned for {prim_type}; check prior fields/padding",
         fmt_misaligned_component(component_name, component_id)
     )]
     VtableFieldMisaligned {

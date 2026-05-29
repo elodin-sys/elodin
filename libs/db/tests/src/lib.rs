@@ -186,6 +186,8 @@ mod tests {
         assert_eq!(prim_type, PrimType::F64);
         assert_eq!(required_align, 8);
         assert!(rendered.contains(&format!("Acceleration Command (body) ({acc_cmd_body})")));
+        assert!(rendered.contains("layout misaligned at component"));
+        assert!(rendered.contains("check prior fields/padding"));
 
         let unknown_component = ComponentId::new("unknown_misaligned_component");
         let bad_without_metadata = vtable([raw_field(
@@ -223,6 +225,8 @@ mod tests {
         let unknown_component = unknown_component.to_string();
         assert_eq!(rendered.matches(&unknown_component).count(), 1);
         assert!(!rendered.contains(&format!("{unknown_component} ({unknown_component})")));
+        assert!(rendered.contains("layout misaligned at component"));
+        assert!(rendered.contains("check prior fields/padding"));
 
         let good = vtable([
             raw_field(
