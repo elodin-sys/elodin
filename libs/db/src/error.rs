@@ -1,5 +1,5 @@
 use crate::Timestamp;
-use impeller2::types::{ComponentId, PacketId};
+use impeller2::types::{ComponentId, PacketId, PrimType};
 use impeller2_wkt::{ErrorResponse, StreamId};
 use std::{io, ops::Range, path::PathBuf};
 use thiserror::Error;
@@ -18,6 +18,17 @@ pub enum Error {
     Impeller(#[from] impeller2::error::Error),
     #[error("component not found {0}")]
     ComponentNotFound(ComponentId),
+    #[error(
+        "vtable {packet_id:?} field for component {component_name} ({component_id}) is misaligned: offset {offset} is not a multiple of {required_align} (required by {prim_type})"
+    )]
+    VtableFieldMisaligned {
+        packet_id: PacketId,
+        component_id: ComponentId,
+        component_name: String,
+        offset: usize,
+        prim_type: PrimType,
+        required_align: usize,
+    },
     #[error("postcard error {0}")]
     Postcard(#[from] postcard::Error),
     #[error("invalid component id")]

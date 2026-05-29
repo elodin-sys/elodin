@@ -122,6 +122,19 @@ mod tests {
     #[test]
     async fn test_vtable_misaligned_field_rejected() {
         let (_addr, db) = setup_test_db().await.unwrap();
+        let acc_cmd_body = ComponentId::new("acc_cmd_body");
+
+        db.with_state_mut(|state| {
+            state.set_component_metadata(
+                ComponentMetadata {
+                    component_id: acc_cmd_body,
+                    name: "Acceleration Command (body)".to_string(),
+                    metadata: Default::default(),
+                },
+                &db.path,
+            )
+        })
+        .unwrap();
 
         let bad = vtable([
             raw_field(
@@ -151,18 +164,20 @@ mod tests {
                 vtable: bad,
             })
             .expect_err("misaligned vtable must be rejected at registration");
-        let Error::Impeller(impeller2::error::Error::VtableFieldMisaligned {
+        let Error::VtableFieldMisaligned {
             packet_id,
             component_id,
+            component_name,
             offset,
             prim_type,
             required_align,
-        }) = err
+        } = err
         else {
             panic!("unexpected error: {err:?}");
         };
         assert_eq!(packet_id, 1u16.to_le_bytes());
-        assert_eq!(component_id, ComponentId::new("acc_cmd_body"));
+        assert_eq!(component_id, acc_cmd_body);
+        assert_eq!(component_name, "Acceleration Command (body)");
         assert_eq!(offset, 98);
         assert_eq!(prim_type, PrimType::F64);
         assert_eq!(required_align, 8);
