@@ -1,10 +1,11 @@
-use bevy::asset::{AssetPath, AssetServer, Assets};
+use crate::ui::schematic::CurrentSchematic;
+use bevy::asset::{AssetPath, AssetServer};
 use bevy::prelude::*;
 use impeller2_bevy::DbMessage;
-use impeller2_kdl::FromKdl;
 use impeller2_kdl::KdlSchematicError;
 use impeller2_kdl::env::schematic_file;
-use impeller2_wkt::{DbConfig, Schematic};
+use impeller2_kdl::{FromKdl, ToKdl};
+use impeller2_wkt::{DbConfig, Schematic, SkyboxConfig};
 use std::path::{Path, PathBuf};
 
 use super::commands::*;
@@ -12,6 +13,26 @@ use super::messages::*;
 use super::types::*;
 
 use crate::plugins::kdl_asset_source::canonicalize_or_original;
+
+/// Updates the in-memory schematic skybox (document asset + `CurrentSchematic`) and returns
+/// the root KDL text for DB metadata sync.
+pub fn sync_document_skybox(
+    skybox: Option<SkyboxConfig>,
+    current_document: &mut CurrentDocument,
+    document_assets: &mut Assets<SchematicDocumentAsset>,
+    schematic: &mut CurrentSchematic,
+) -> String {
+    schematic.skybox = skybox.clone();
+    if let Some(handle) = current_document.handle.as_ref() {
+        // Keep the in-memory document in sync for save, but suppress the asset
+        // Modified event so skybox-only edits do not reload the full schematic.
+        current_document.suppress_ids.insert(handle.id());
+        if let Some(document) = document_assets.get_mut(handle) {
+            document.root.skybox = skybox;
+        }
+    }
+    schematic.to_kdl()
+}
 
 pub(crate) fn filesystem_to_asset_path(path: &Path) -> AssetPath<'static> {
     let resolved = canonicalize_or_original(path);
@@ -29,8 +50,7 @@ pub fn open_document_path(
     path: &Path,
     asset_server: &AssetServer,
     current_document: &mut CurrentDocument,
-    document_assets: &Assets<SchematicDocumentAsset>,
-) -> Result<Option<SchematicDocumentAsset>, KdlSchematicError> {
+) -> Result<SchematicDocumentAsset, KdlSchematicError> {
     let resolved_path = schematic_file(path);
     if !resolved_path.try_exists().unwrap_or(false) {
         return Err(KdlSchematicError::NoSuchFile {
@@ -40,8 +60,48 @@ pub fn open_document_path(
 
     let asset_path = filesystem_to_asset_path(&resolved_path);
     let handle: Handle<SchematicDocumentAsset> = asset_server.load(asset_path.clone());
+    let document = read_document_from_disk(&resolved_path, &asset_path, asset_server)?;
     current_document.set_file(handle.clone(), asset_path, resolved_path);
-    Ok(document_assets.get(&handle).cloned())
+    // Suppress the AssetServer LoadedWithDependencies/Modified event for this open;
+    // DocumentLoaded already applied the synchronously read document.
+    current_document.suppress_ids.insert(handle.id());
+    Ok(document)
+}
+
+fn read_document_from_disk(
+    resolved_path: &Path,
+    asset_path: &AssetPath<'static>,
+    asset_server: &AssetServer,
+) -> Result<SchematicDocumentAsset, KdlSchematicError> {
+    let contents =
+        std::fs::read_to_string(resolved_path).map_err(|_| KdlSchematicError::NoSuchFile {
+            path: resolved_path.to_path_buf(),
+        })?;
+    let root = Schematic::from_kdl(&contents)?;
+    let base_dir = asset_path
+        .path()
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_default();
+    let source = asset_path.source().clone_owned();
+    let windows = root
+        .elems
+        .iter()
+        .filter_map(|elem| match elem {
+            impeller2_wkt::SchematicElem::Window(window) => window.path.as_deref(),
+            _ => None,
+        })
+        .map(|path| {
+            let asset_path =
+                AssetPath::from_path_buf(base_dir.join(path)).with_source(source.clone());
+            let handle = asset_server.load(asset_path.clone());
+            SchematicWindow {
+                handle,
+                asset_path: asset_path.clone_owned(),
+            }
+        })
+        .collect();
+    Ok(SchematicDocumentAsset { root, windows })
 }
 
 pub fn open_document_from_content(
@@ -120,9 +180,31 @@ pub fn apply_initial_kdl_path(
     }
 }
 
+fn current_document_matches_path(current_document: &CurrentDocument, path: &Path) -> bool {
+    current_document.handle.is_some()
+        && current_document
+            .save_path
+            .as_deref()
+            .is_some_and(|save_path| {
+                canonicalize_or_original(save_path) == canonicalize_or_original(path)
+            })
+}
+
+/// Returns true when two KDL strings describe the same schematic (exact or semantically).
+pub(crate) fn schematic_content_equivalent(left: &str, right: &str) -> bool {
+    if left == right {
+        return true;
+    }
+    match (Schematic::from_kdl(left), Schematic::from_kdl(right)) {
+        (Ok(left), Ok(right)) => left.to_kdl() == right.to_kdl(),
+        _ => false,
+    }
+}
+
 pub fn sync_document_from_config(
     In(given_path): In<Option<PathBuf>>,
     config: Res<DbConfig>,
+    last_synced_content: Res<LastSyncedSchematicContent>,
     mut current_document: ResMut<CurrentDocument>,
     mut open_document: MessageWriter<OpenDocumentRequest>,
     mut open_document_from_content: MessageWriter<OpenDocumentFromContentRequest>,
@@ -138,6 +220,9 @@ pub fn sync_document_from_config(
     if let Some(path) = given_path.or(config.schematic_path().map(PathBuf::from)) {
         let resolved_path = schematic_file(&path);
         if resolved_path.try_exists().unwrap_or(false) {
+            if current_document_matches_path(&current_document, &resolved_path) {
+                return;
+            }
             open_document.write(OpenDocumentRequest(path));
             return;
         }
@@ -151,6 +236,13 @@ pub fn sync_document_from_config(
     }
 
     if let Some(content) = config.schematic_content() {
+        if last_synced_content
+            .0
+            .as_deref()
+            .is_some_and(|last| schematic_content_equivalent(last, content))
+        {
+            return;
+        }
         open_document_from_content.write(OpenDocumentFromContentRequest {
             content: content.to_string(),
             save_path: config.schematic_path().map(Path::new).map(schematic_file),

@@ -1,4 +1,5 @@
 *.glb filter=lfs diff=lfs merge=lfs -text
+*.ktx2 filter=lfs diff=lfs merge=lfs -text
 **/flake.lock linguist-generated=true
 **/vendor/* linguist-generated=true
 *.mlir filter=lfs diff=lfs merge=lfs -text

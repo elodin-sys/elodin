@@ -1,5 +1,7 @@
 use bevy::asset::{AssetEvent, AssetLoadFailedEvent};
 use bevy::prelude::*;
+use bevy_ai_skybox::prelude::{SetActiveSkybox, SkyboxCache};
+use impeller2_wkt::SkyboxConfig;
 use std::path::PathBuf;
 
 use super::commands::*;
@@ -20,25 +22,18 @@ fn cloned_current_document_asset(
 pub(super) fn handle_open_document_requests(
     mut requests: MessageReader<OpenDocumentRequest>,
     asset_server: Res<AssetServer>,
-    document_assets: Res<Assets<SchematicDocumentAsset>>,
     mut current_document: ResMut<CurrentDocument>,
     mut loaded: MessageWriter<DocumentLoaded>,
     mut failed: MessageWriter<DocumentCommandFailed>,
 ) {
     for request in requests.read() {
-        match open_document_path(
-            &request.0,
-            &asset_server,
-            &mut current_document,
-            &document_assets,
-        ) {
-            Ok(Some(document)) => {
+        match open_document_path(&request.0, &asset_server, &mut current_document) {
+            Ok(document) => {
                 loaded.write(DocumentLoaded {
                     save_path: current_document.save_path.clone(),
                     document,
                 });
             }
-            Ok(None) => {}
             Err(error) => {
                 failed.write(DocumentCommandFailed {
                     title: format!("Invalid Schematic in {}", request.0.display()),
@@ -182,6 +177,51 @@ pub(super) fn emit_document_reloads(
             document,
             changed_window_indices: changed,
         });
+    }
+}
+
+pub(super) fn activate_document_skybox(
+    mut loaded: MessageReader<DocumentLoaded>,
+    mut reloaded: MessageReader<DocumentReloaded>,
+    mut skyboxes: MessageWriter<SetActiveSkybox>,
+    mut cache: Option<ResMut<SkyboxCache>>,
+) {
+    for event in loaded.read() {
+        activate_skybox_config(
+            event.document.root.skybox.as_ref(),
+            &mut skyboxes,
+            &mut cache,
+        );
+    }
+
+    for event in reloaded.read() {
+        if !event.changed_window_indices.is_empty() {
+            continue;
+        }
+        activate_skybox_config(
+            event.document.root.skybox.as_ref(),
+            &mut skyboxes,
+            &mut cache,
+        );
+    }
+}
+
+fn activate_skybox_config(
+    skybox: Option<&SkyboxConfig>,
+    skyboxes: &mut MessageWriter<SetActiveSkybox>,
+    cache: &mut Option<ResMut<SkyboxCache>>,
+) {
+    if let Some(cache) = cache.as_mut() {
+        // Drop stale cache state; bevy_ai_skybox sets `active` once the cubemap is ready.
+        cache.active = None;
+    }
+    match skybox {
+        Some(skybox) => {
+            skyboxes.write(SetActiveSkybox::ByName(skybox.name.clone()));
+        }
+        None => {
+            skyboxes.write(SetActiveSkybox::Clear);
+        }
     }
 }
 

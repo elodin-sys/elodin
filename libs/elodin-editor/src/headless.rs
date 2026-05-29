@@ -1,6 +1,7 @@
 use std::collections::HashMap;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
+use bevy::core_pipeline::Skybox;
 use bevy::{
     a11y::AccessibilityPlugin,
     animation::AnimationPlugin,
@@ -26,12 +27,17 @@ use bevy::{
     window::{ExitCondition, WindowPlugin},
     winit::WinitPlugin,
 };
+use bevy_ai_skybox::prelude::{
+    PrimarySkybox, SetActiveSkybox, SkyboxAssetSettings, SkyboxCache, SkyboxFailed,
+};
 use bevy_geo_frames::GeoContext;
 use bevy_mat3_material::Mat3Material;
 use impeller2::types::{LenPacket, Timestamp, msg_id};
-use impeller2_bevy::MsgPacketTx;
+use impeller2_bevy::{MsgPacketTx, PacketTx};
 use impeller2_kdl::FromKdl;
-use impeller2_wkt::{CurrentTimestamp, DbConfig, LastUpdated, SchematicElem};
+use impeller2_wkt::{
+    CurrentTimestamp, DbConfig, DumpMetadata, LastUpdated, Schematic, SchematicElem,
+};
 
 use crate::object_3d::create_object_3d_entity;
 use crate::sensor_camera::{
@@ -84,10 +90,12 @@ impl Plugin for HeadlessEditorPlugin {
                     .disable::<PickingPlugin>()
                     .disable::<InteractionPlugin>()
                     .set(AssetPlugin {
+                        watch_for_changes_override: Some(true),
                         unapproved_path_mode: UnapprovedPathMode::Allow,
                         ..default()
                     }),
             )
+            .add_plugins(crate::skybox_asset_plugin_headless())
             .add_plugins(impeller2_bevy::Impeller2Plugin)
             .add_plugins(bevy_mat3_material::Mat3MaterialPlugin)
             .add_plugins(GeoFramePlugin {
@@ -120,7 +128,10 @@ impl Plugin for HeadlessEditorPlugin {
             .add_systems(Startup, setup_headless_lighting)
             .init_resource::<crate::EqlContext>()
             .init_resource::<crate::SyncedObject3d>()
+            .init_resource::<HeadlessSkyboxRenderGate>()
             .add_systems(Update, crate::update_eql_context)
+            .add_systems(Update, poll_headless_db_config)
+            .add_systems(Update, sync_headless_skybox)
             .add_systems(Update, load_headless_scene)
             .set_runner(render_server_runner);
 
@@ -207,12 +218,181 @@ fn load_headless_scene(
     *loaded = true;
 }
 
+fn desired_skybox_from_config(config: &DbConfig) -> Option<Option<String>> {
+    if let Some(desired) = config.skybox_active_desired() {
+        return Some(desired);
+    }
+
+    let content = config.schematic_content()?;
+    let schematic = Schematic::from_kdl(content)
+        .inspect_err(|e| tracing::warn!("Failed to parse schematic KDL while syncing skybox: {e}"))
+        .ok()?;
+    Some(schematic.skybox.as_ref().map(|skybox| skybox.name.clone()))
+}
+
+const SKYBOX_TRANSITION_WARMUP_FRAMES: u8 = 2;
+
+#[derive(Debug, Resource)]
+struct HeadlessSkyboxRenderGate {
+    desired: Option<Option<String>>,
+    applied: bool,
+    warmup_remaining: u8,
+    activation_dispatched: bool,
+    /// Desired skybox we stopped waiting for after a load failure.
+    skipped_desired: Option<Option<String>>,
+}
+
+impl Default for HeadlessSkyboxRenderGate {
+    fn default() -> Self {
+        Self {
+            desired: None,
+            applied: true,
+            warmup_remaining: 0,
+            activation_dispatched: false,
+            skipped_desired: None,
+        }
+    }
+}
+
+fn headless_skybox_applied(
+    desired: &Option<String>,
+    cache: &SkyboxCache,
+    settings: &SkyboxAssetSettings,
+    cameras: &Query<(Option<&PrimarySkybox>, Option<&Skybox>), With<Camera3d>>,
+) -> bool {
+    let targets: Vec<_> = cameras
+        .iter()
+        .filter(|(primary, _)| settings.apply_to_all_cameras || primary.is_some())
+        .collect();
+
+    if targets.is_empty() {
+        return match desired {
+            None => cache.active.is_none(),
+            Some(_) => false,
+        };
+    }
+
+    match desired {
+        None => targets.iter().all(|(_, skybox)| skybox.is_none()),
+        Some(name) => {
+            cache.active.as_deref() == Some(name.as_str())
+                && targets.iter().all(|(_, skybox)| skybox.is_some())
+        }
+    }
+}
+
+fn skybox_failure_matches_gate(gate_desired: &Option<Option<String>>, failed_name: &str) -> bool {
+    matches!(gate_desired, Some(Some(name)) if name == failed_name)
+}
+
+fn clear_applied_in_cache(desired: &Option<String>, cache: &SkyboxCache) -> bool {
+    desired.is_none() && cache.active.is_none()
+}
+
+fn sync_headless_skybox(
+    config: Res<DbConfig>,
+    cache: Res<SkyboxCache>,
+    settings: Res<SkyboxAssetSettings>,
+    cameras: Query<(Option<&PrimarySkybox>, Option<&Skybox>), With<Camera3d>>,
+    mut render_gate: ResMut<HeadlessSkyboxRenderGate>,
+    mut skybox_writer: MessageWriter<SetActiveSkybox>,
+    mut failed: MessageReader<SkyboxFailed>,
+) {
+    for event in failed.read() {
+        if !skybox_failure_matches_gate(&render_gate.desired, &event.name) {
+            continue;
+        }
+        tracing::warn!(
+            "render server: skybox `{}` failed to load ({}); continuing without skybox",
+            event.name,
+            event.error
+        );
+        render_gate.applied = true;
+        render_gate.warmup_remaining = SKYBOX_TRANSITION_WARMUP_FRAMES;
+        render_gate.activation_dispatched = false;
+        render_gate.skipped_desired = render_gate.desired.clone();
+    }
+
+    let Some(desired) = desired_skybox_from_config(&config) else {
+        render_gate.desired = None;
+        render_gate.applied = true;
+        render_gate.warmup_remaining = 0;
+        render_gate.skipped_desired = None;
+        return;
+    };
+
+    if render_gate.desired.as_ref() != Some(&desired) {
+        render_gate.desired = Some(desired.clone());
+        render_gate.applied = false;
+        render_gate.warmup_remaining = 0;
+        render_gate.activation_dispatched = false;
+        render_gate.skipped_desired = None;
+    }
+
+    if headless_skybox_applied(&desired, &cache, &settings, &cameras) {
+        if !render_gate.applied {
+            render_gate.applied = true;
+            render_gate.warmup_remaining = SKYBOX_TRANSITION_WARMUP_FRAMES;
+        }
+        render_gate.skipped_desired = None;
+        return;
+    }
+
+    if render_gate.skipped_desired.as_ref() == Some(&desired) {
+        render_gate.applied = true;
+        return;
+    }
+
+    if render_gate.activation_dispatched && clear_applied_in_cache(&desired, &cache) {
+        render_gate.applied = true;
+        render_gate.warmup_remaining = SKYBOX_TRANSITION_WARMUP_FRAMES;
+        return;
+    }
+
+    render_gate.applied = false;
+    if render_gate.activation_dispatched {
+        return;
+    }
+    render_gate.activation_dispatched = true;
+    match &desired {
+        Some(name) => skybox_writer.write(SetActiveSkybox::ByName(name.clone())),
+        None => skybox_writer.write(SetActiveSkybox::Clear),
+    };
+}
+
+fn poll_headless_db_config(mut last_poll: Local<Option<Instant>>, packet_tx: Res<PacketTx>) {
+    let now = Instant::now();
+    if last_poll.is_some_and(|last| now.duration_since(last) < Duration::from_millis(200)) {
+        return;
+    }
+    *last_poll = Some(now);
+    packet_tx.send_msg(DumpMetadata);
+}
+
 // ---------------------------------------------------------------------------
 // Custom Bevy runner
 // ---------------------------------------------------------------------------
 
 fn run_headless_update(app: &mut App) {
     app.update();
+}
+
+enum SkyboxEmissionGate {
+    Ready,
+    WaitingForApply,
+    Warming,
+}
+
+fn consume_skybox_emission_gate(app: &mut App) -> SkyboxEmissionGate {
+    let mut render_gate = app.world_mut().resource_mut::<HeadlessSkyboxRenderGate>();
+    if !render_gate.applied {
+        return SkyboxEmissionGate::WaitingForApply;
+    }
+    if render_gate.warmup_remaining > 0 {
+        render_gate.warmup_remaining -= 1;
+        return SkyboxEmissionGate::Warming;
+    }
+    SkyboxEmissionGate::Ready
 }
 
 fn drain_stale_frames(app: &App) {
@@ -346,6 +526,12 @@ fn render_server_runner(mut app: App) -> AppExit {
             // Choose the sleep based on the shortest remaining wait across all
             // cameras, capped at 5 ms so we stay responsive to new
             // `LastUpdated` events.
+            //
+            // If a skybox transition is in flight, pump another update so asset
+            // loading / apply systems can progress even when no camera is due.
+            if !app.world().resource::<HeadlessSkyboxRenderGate>().applied {
+                run_headless_update(&mut app);
+            }
             let next_wait_us = schedules
                 .iter()
                 .filter_map(|s| {
@@ -357,6 +543,22 @@ fn render_server_runner(mut app: App) -> AppExit {
                 .unwrap_or(5_000);
             std::thread::sleep(Duration::from_micros(next_wait_us.clamp(500, 5_000) as u64));
             continue;
+        }
+
+        match consume_skybox_emission_gate(&mut app) {
+            SkyboxEmissionGate::Ready => {}
+            SkyboxEmissionGate::WaitingForApply => {
+                // Priming renders are required while the cubemap loads and
+                // `apply_skybox_to_camera` attaches the `Skybox` component.
+                // Skipping render here can stall `HeadlessSkyboxRenderGate.applied`.
+                render_without_emit(&mut app, sim_ts, &due_names);
+                std::thread::sleep(Duration::from_millis(5));
+                continue;
+            }
+            SkyboxEmissionGate::Warming => {
+                render_without_emit(&mut app, sim_ts, &due_names);
+                continue;
+            }
         }
 
         render_and_emit(&mut app, sim_ts, &due_names);
@@ -408,6 +610,14 @@ fn render_and_emit(app: &mut App, sim_ts: Timestamp, due_names: &[String]) {
 
     push_frames_to_db(app, sim_ts, &frames);
     set_readback_armed(app.world_mut(), due_names, false);
+    set_cameras_active(app.world_mut(), due_names, false);
+}
+
+fn render_without_emit(app: &mut App, sim_ts: Timestamp, due_names: &[String]) {
+    app.world_mut().resource_mut::<CurrentTimestamp>().0 = sim_ts;
+
+    set_cameras_active(app.world_mut(), due_names, true);
+    run_headless_update(app);
     set_cameras_active(app.world_mut(), due_names, false);
 }
 

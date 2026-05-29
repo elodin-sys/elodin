@@ -10,6 +10,11 @@ use thiserror::Error;
 #[derive(Resource, Default)]
 pub struct InitialKdlPath(pub Option<PathBuf>);
 
+/// Last `schematic.content` applied from `DbConfig`; skips redundant full reloads when only
+/// other metadata (e.g. `skybox.active`) changes.
+#[derive(Resource, Default)]
+pub struct LastSyncedSchematicContent(pub Option<String>);
+
 #[derive(Asset, TypePath, Debug, Clone)]
 pub struct SchematicDocumentAsset {
     pub root: Schematic,

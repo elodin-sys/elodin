@@ -60,6 +60,7 @@ with pkgs; let
         gfortran
         ffmpeg-full
         ffmpeg-full.dev
+        common.ktxTools # Provides toktx for generated skybox KTX2 cubemaps
         gst_all_1.gstreamer
         gst_all_1.gst-plugins-base
         gst_all_1.gst-plugins-good
@@ -120,6 +121,7 @@ with pkgs; let
 
     # Environment variables
     LIBCLANG_PATH = "${libclang.lib}/lib";
+    TOKTX = "${common.ktxTools}/bin/toktx";
 
     # The nox-py cdylib (.so) carries a DF_STATIC_TLS flag that forces glibc
     # to allocate ~10 KB from the tiny static-TLS surplus on dlopen.  Raise

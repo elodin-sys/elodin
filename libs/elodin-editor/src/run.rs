@@ -3,7 +3,7 @@ use bevy::prelude::*;
 #[cfg(not(target_os = "windows"))]
 use miette::{Context, IntoDiagnostic, miette};
 #[cfg(not(target_os = "windows"))]
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 #[cfg(not(target_os = "windows"))]
 use stellarator::util::CancelToken;
 
@@ -57,13 +57,126 @@ pub async fn run_recipe(
     }
 
     let contents = std::fs::read_to_string(&path).into_diagnostic()?;
-    let recipe: s10::Recipe = toml::from_str(&contents)
+    let mut recipe: s10::Recipe = toml::from_str(&contents)
         .into_diagnostic()
         .with_context(|| format!("failed to parse s10 recipe from file: {}", path.display()))?;
+    if let Ok(exe) = std::env::current_exe() {
+        pin_render_server_recipe(&mut recipe, &exe);
+    }
 
     recipe
         .watch("sim".to_string(), false, cancel_token.clone())
         .await?;
     cancel_token.cancel();
     Ok(())
+}
+
+#[cfg(not(target_os = "windows"))]
+fn pin_render_server_recipe(recipe: &mut s10::Recipe, exe: &Path) {
+    let exe = exe.to_string_lossy().into_owned();
+    pin_render_server_recipe_inner(recipe, &exe);
+}
+
+#[cfg(not(target_os = "windows"))]
+fn pin_render_server_recipe_inner(recipe: &mut s10::Recipe, exe: &str) {
+    let s10::Recipe::Group(group) = recipe else {
+        return;
+    };
+
+    if let Some(s10::Recipe::Process(process)) = group.recipes.get_mut("render-server")
+        && process
+            .process_args
+            .args
+            .first()
+            .is_some_and(|arg| arg == "render-server")
+    {
+        process.cmd = exe.to_string();
+    }
+
+    for recipe in group.recipes.values_mut() {
+        pin_render_server_recipe_inner(recipe, exe);
+    }
+}
+
+#[cfg(all(test, not(target_os = "windows")))]
+mod tests {
+    use std::collections::HashMap;
+    use std::path::Path;
+
+    use s10::{GroupRecipe, ProcessArgs, ProcessRecipe, Recipe, RestartPolicy};
+
+    use super::pin_render_server_recipe;
+
+    #[test]
+    fn pins_render_server_recipe_to_current_binary() {
+        let mut recipe = Recipe::Group(GroupRecipe {
+            refs: vec!["sim".to_string(), "render-server".to_string()],
+            recipes: HashMap::from([
+                (
+                    "sim".to_string(),
+                    Recipe::Process(ProcessRecipe {
+                        cmd: "python".to_string(),
+                        process_args: empty_process_args(),
+                        no_watch: false,
+                    }),
+                ),
+                (
+                    "render-server".to_string(),
+                    Recipe::Process(ProcessRecipe {
+                        cmd: "elodin".to_string(),
+                        process_args: process_args(["render-server", "--addr", "[::]:2240"]),
+                        no_watch: true,
+                    }),
+                ),
+            ]),
+        });
+
+        pin_render_server_recipe(&mut recipe, Path::new("/tmp/current-elodin"));
+
+        let Recipe::Group(group) = recipe else {
+            panic!("expected group recipe");
+        };
+        let Some(Recipe::Process(render_server)) = group.recipes.get("render-server") else {
+            panic!("expected render-server process");
+        };
+        assert_eq!(render_server.cmd, "/tmp/current-elodin");
+    }
+
+    #[test]
+    fn does_not_pin_unrelated_render_server_recipe() {
+        let mut recipe = Recipe::Group(GroupRecipe {
+            refs: vec!["render-server".to_string()],
+            recipes: HashMap::from([(
+                "render-server".to_string(),
+                Recipe::Process(ProcessRecipe {
+                    cmd: "custom-render-server".to_string(),
+                    process_args: process_args(["serve"]),
+                    no_watch: true,
+                }),
+            )]),
+        });
+
+        pin_render_server_recipe(&mut recipe, Path::new("/tmp/current-elodin"));
+
+        let Recipe::Group(group) = recipe else {
+            panic!("expected group recipe");
+        };
+        let Some(Recipe::Process(render_server)) = group.recipes.get("render-server") else {
+            panic!("expected render-server process");
+        };
+        assert_eq!(render_server.cmd, "custom-render-server");
+    }
+
+    fn empty_process_args() -> ProcessArgs {
+        process_args([])
+    }
+
+    fn process_args(args: impl IntoIterator<Item = &'static str>) -> ProcessArgs {
+        ProcessArgs {
+            args: args.into_iter().map(str::to_string).collect(),
+            cwd: None,
+            env: HashMap::new(),
+            restart_policy: RestartPolicy::Never,
+        }
+    }
 }

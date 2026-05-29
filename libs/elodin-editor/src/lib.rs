@@ -67,6 +67,7 @@ pub mod object_3d;
 mod offset_parse;
 pub mod plugins;
 pub mod sensor_camera;
+mod skybox_generation;
 #[cfg(feature = "big_space")]
 pub(crate) mod spatial;
 #[cfg(not(feature = "big_space"))]
@@ -81,6 +82,38 @@ pub mod headless;
 pub mod run;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+pub(crate) fn skybox_asset_plugin() -> bevy_ai_skybox::prelude::SkyboxAssetPlugin {
+    let assets_dir = plugins::env_asset_source::resolve_assets_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("assets"));
+    bevy_ai_skybox::prelude::SkyboxAssetPlugin {
+        cache_dir: assets_dir.join("skyboxes"),
+        asset_dir: std::path::PathBuf::from("skyboxes"),
+        manifest_file: std::path::PathBuf::from("manifest.ron"),
+        default_skybox: None,
+        apply_to_all_cameras: false,
+        // Keep the existing baked EnvironmentMapLight as the cheap lighting fallback.
+        // Runtime filtering via GeneratedEnvironmentMapLight is too expensive for
+        // multi-viewport editor sessions and sensor cameras in this asset-only slice.
+        env_lighting: false,
+        watch_manifest: false,
+        manifest_poll_secs: 1.0,
+    }
+}
+
+pub(crate) fn skybox_generation_plugin() -> bevy_ai_skybox::prelude::BlockadeSkyboxPlugin {
+    bevy_ai_skybox::prelude::BlockadeSkyboxPlugin {
+        default_resolution: bevy_ai_skybox::prelude::SkyboxResolution::EightK,
+        ..Default::default()
+    }
+}
+
+pub(crate) fn skybox_asset_plugin_headless() -> bevy_ai_skybox::prelude::SkyboxAssetPlugin {
+    let mut plugin = skybox_asset_plugin();
+    plugin.watch_manifest = true;
+    plugin.manifest_poll_secs = 0.25;
+    plugin
+}
 
 #[cfg(feature = "inspector")]
 #[derive(Component)]
@@ -212,6 +245,8 @@ impl Plugin for EditorPlugin {
                     .build(),
             )
             .add_plugins(plugins::kdl_document::plugin)
+            .add_plugins(skybox_asset_plugin())
+            .add_plugins(skybox_generation_plugin())
             // Note: we added this because bevy 0.17.3 changed its behavior
             // which broke bevy_editor_cam. See here:
             // https://github.com/aevyrie/bevy_editor_cam/issues/61
@@ -292,6 +327,19 @@ impl Plugin for EditorPlugin {
             .add_systems(Update, set_eql_context_range.after(update_eql_context))
             .add_systems(Startup, spawn_ui_cam)
             .add_systems(Update, ui::video_stream::connect_streams)
+            .init_resource::<skybox_generation::LocallyPushedSkyboxActive>()
+            .add_systems(
+                Update,
+                skybox_generation::sync_generated_skybox_to_schematic,
+            )
+            .add_systems(Update, skybox_generation::on_document_loaded)
+            .add_systems(Update, skybox_generation::record_reloaded_schematic_content)
+            .add_systems(Update, skybox_generation::push_skybox_active_on_pending)
+            .add_systems(Update, skybox_generation::decay_skybox_status_message)
+            .add_systems(
+                Update,
+                ui::video_stream::invalidate_sensor_frames_on_db_skybox_change,
+            )
             .add_systems(Update, ui::log_stream::connect_streams)
             .add_systems(PostUpdate, ui::video_stream::set_visibility)
             .add_systems(PostUpdate, set_clear_color)

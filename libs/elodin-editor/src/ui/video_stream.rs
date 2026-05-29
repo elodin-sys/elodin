@@ -11,7 +11,7 @@ use bevy::ui::Node;
 use bevy::ui::widget::ImageNode;
 use bevy::{
     ecs::system::SystemParam,
-    prelude::{Commands, Component, Entity, Query, Res, ResMut, World},
+    prelude::{Commands, Component, Entity, Local, Query, Res, ResMut, World},
     ui::Val,
 };
 use egui::{self, Color32, Vec2};
@@ -1218,6 +1218,60 @@ pub fn set_visibility(mut query: Query<(&mut Node, &IsTileVisible)>) {
             ui_node.display = Display::Flex;
         } else {
             ui_node.display = Display::None;
+        }
+    }
+}
+
+pub(crate) fn invalidate_sensor_frames_if_loaded_skybox_differs(
+    loaded_skybox: Option<&str>,
+    config: &impeller2_wkt::DbConfig,
+    caches: &mut Query<&mut VideoFrameCache>,
+) {
+    if loaded_skybox == config.skybox_active() {
+        return;
+    }
+    clear_sensor_raw_frame_caches(caches);
+}
+
+pub(crate) fn invalidate_sensor_frames_on_db_skybox_change(
+    config: Res<impeller2_wkt::DbConfig>,
+    skybox_ui: Option<Res<bevy_ai_skybox::prelude::SkyboxGenerationUi>>,
+    mut locally_pushed: ResMut<crate::skybox_generation::LocallyPushedSkyboxActive>,
+    mut last_active: Local<Option<String>>,
+    mut caches: Query<&mut VideoFrameCache>,
+) {
+    let active = config.skybox_active().map(str::to_string);
+    if *last_active == active {
+        return;
+    }
+    if locally_pushed.consume_matching(active.as_deref()) {
+        *last_active = active;
+        return;
+    }
+    if let (Some(active), Some(skybox_ui)) = (active.as_deref(), skybox_ui.as_deref())
+        && skybox_ui.is_busy()
+        && skybox_ui.target_name.as_deref() == Some(active)
+    {
+        *last_active = Some(active.to_string());
+        return;
+    }
+    *last_active = active;
+    clear_sensor_raw_frame_caches(&mut caches);
+}
+
+fn clear_sensor_raw_frame_caches(caches: &mut Query<&mut VideoFrameCache>) {
+    for mut cache in caches {
+        if cache.is_h264 {
+            continue;
+        }
+        let displayed = cache
+            .last_displayed_ts
+            .and_then(|timestamp| cache.raw_frames.get(&timestamp).cloned());
+        cache.raw_frames.clear();
+        if let (Some(timestamp), Some(frame)) = (cache.last_displayed_ts, displayed) {
+            cache.raw_frames.insert(timestamp, frame);
+        } else {
+            cache.last_displayed_ts = None;
         }
     }
 }
