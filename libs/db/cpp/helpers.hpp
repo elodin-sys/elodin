@@ -4,7 +4,9 @@
 #include <array>
 #include <cstdint>
 #include <cstring>
+#include <iostream>
 #include <span>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -77,7 +79,13 @@ class Msg {
 public:
     Msg(T p)
     {
-        auto packet_id = msg_id(T::TYPE_NAME);
+        auto packet_id = [] {
+            if constexpr (requires { T::PACKET_ID; }) {
+                return T::PACKET_ID;
+            } else {
+                return msg_id(T::TYPE_NAME);
+            }
+        }();
         header = PacketHeader {
             .len = 0,
             .ty = PacketType::MSG,
@@ -107,6 +115,81 @@ public:
         return buf;
     }
 };
+
+struct ConnectionSettings {
+    static constexpr std::string_view TYPE_NAME = "ConnectionSettings";
+    static constexpr std::array<uint8_t, 2> PACKET_ID = { 224, 39 };
+
+    bool silent = false;
+
+    size_t encoded_size() const
+    {
+        return postcard_size_bool();
+    }
+
+    postcard_error_t encode_raw(postcard_slice_t* slice) const
+    {
+        return postcard_encode_bool(slice, silent);
+    }
+};
+
+inline std::string decode_error_response_payload(std::span<const uint8_t> payload)
+{
+    postcard_slice_t slice;
+    postcard_init_slice(&slice, const_cast<uint8_t*>(payload.data()), payload.size());
+
+    size_t description_len = 0;
+    auto res = postcard_decode_string_len(&slice, &description_len);
+    if (res != POSTCARD_SUCCESS) {
+        return "failed to decode ErrorResponse description length";
+    }
+
+    std::string description(description_len, '\0');
+    if (description_len > 0) {
+        res = postcard_decode_string(&slice, description.data(), description_len, description_len);
+        if (res != POSTCARD_SUCCESS) {
+            return "failed to decode ErrorResponse description";
+        }
+    }
+
+    return description;
+}
+
+inline void log_elodin_db_replies(
+    std::vector<uint8_t>& pending,
+    std::span<const uint8_t> bytes,
+    std::string_view label)
+{
+    static constexpr std::array<uint8_t, 2> ERROR_RESPONSE_ID = { 224, 29 };
+
+    pending.insert(pending.end(), bytes.begin(), bytes.end());
+
+    size_t offset = 0;
+    while (pending.size() - offset >= sizeof(PacketHeader)) {
+        uint32_t len = 0;
+        std::memcpy(&len, pending.data() + offset, sizeof(len));
+        const size_t packet_len = static_cast<size_t>(len) + sizeof(uint32_t);
+        if (pending.size() - offset < packet_len) {
+            break;
+        }
+
+        PacketHeader header;
+        std::memcpy(&header, pending.data() + offset, sizeof(header));
+        if (header.ty == PacketType::MSG && header.packet_id == ERROR_RESPONSE_ID) {
+            auto payload = std::span<const uint8_t>(
+                pending.data() + offset + sizeof(PacketHeader),
+                packet_len - sizeof(PacketHeader));
+            std::cerr << label << ": Elodin-DB error: "
+                      << decode_error_response_payload(payload) << std::endl;
+        }
+
+        offset += packet_len;
+    }
+
+    if (offset > 0) {
+        pending.erase(pending.begin(), pending.begin() + static_cast<std::ptrdiff_t>(offset));
+    }
+}
 
 SetComponentMetadata set_component_metadata(std::string name, const std::vector<std::string>& element_names = {})
 {

@@ -15,7 +15,9 @@ use crate::{
     plugins::LogicalKeyState,
     ui::{
         colors::{self, ColorExt, get_scheme, with_opacity},
-        images, theme,
+        images,
+        input_owner::{PointerOwnerPriority, UiBlocker},
+        register_window_input_blocker, theme,
         utils::{MarginSides, Shrink4},
     },
 };
@@ -216,11 +218,15 @@ impl RootWidgetSystem for PaletteWindow<'_, '_> {
         ctx: &mut egui::Context,
         args: Self::Args,
     ) -> Self::Output {
+        let Some(target_window) = args else {
+            return false;
+        };
+
         let (command_palette_icons, auto_open_none, just_opened) = {
             let state_mut = state.get_mut(world);
             let command_palette_state = state_mut.command_palette_state;
 
-            if command_palette_state.target_window != args {
+            if command_palette_state.target_window != Some(target_window) {
                 return false;
             }
 
@@ -240,6 +246,14 @@ impl RootWidgetSystem for PaletteWindow<'_, '_> {
         };
 
         let screen_rect = ctx.content_rect();
+        register_window_input_blocker(
+            world,
+            target_window,
+            screen_rect,
+            UiBlocker::CommandPalette,
+            PointerOwnerPriority::Modal,
+        );
+
         let palette_width = (screen_rect.width() / 2.0).clamp(500.0, 900.0);
         let palette_size = egui::vec2(palette_width, screen_rect.height() - 128.0);
         let palette_min = egui::pos2(screen_rect.center().x - palette_width / 2.0, 64.0);

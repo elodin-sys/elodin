@@ -9,12 +9,13 @@
 #include <chrono>
 #include <cmath>
 #include <cstddef>
+#include <iomanip>
 #include <iostream>
+#include <memory>
 #include <print>
 #include <system_error>
 #include <thread>
 #include <vector>
-#include <iomanip>
 
 #include "db.hpp"
 
@@ -88,6 +89,24 @@ public:
         return res;
     }
 
+    void drain_replies(const char* label)
+    {
+        try {
+            auto pending = std::vector<uint8_t>();
+            while (true) {
+                auto data = std::vector<uint8_t>(1024);
+                auto len = read(data.data(), data.size());
+                if (len == 0) {
+                    std::println("{}: connection closed", label);
+                    break;
+                }
+                log_elodin_db_replies(pending, std::span(data.data(), len), label);
+            }
+        } catch (const std::exception& e) {
+            std::cerr << label << " error: " << e.what() << std::endl;
+        }
+    }
+
 private:
     int fd_ = -1;
 };
@@ -141,7 +160,11 @@ try {
     std::println("Global data size {}", sizeof(RocketData));
     // Connect the main socket for writing
     std::println("Main thread: connecting writer socket");
-    auto sock = Socket(ip, port);
+    auto sock = std::make_shared<Socket>(ip, port);
+    std::thread writer_replies([sock] {
+        sock->drain_replies("Writer replies");
+    });
+    writer_replies.detach();
     auto time = builder::raw_table(0, 8);
 
     auto table = builder::vtable({
@@ -164,7 +187,7 @@ try {
     //           timestamp_ns(time_ns, component("sensor.time_monotonic")))),
     //   });
 
-    sock.send(VTableMsg {
+    sock->send(VTableMsg {
         .id = { ID[0], ID[1] },
         .vtable = table,
     });
@@ -172,6 +195,7 @@ try {
     // Start the reader thread
     std::println("Main thread: starting reader thread");
     std::thread reader(reader_thread_func, ip, port);
+    reader.detach();
 
     auto rocket_data = RocketData {
     .commanded_deflect = 0.0,
@@ -192,13 +216,12 @@ try {
         // std::println("time orig  {}\ntime after {}", t, rocket_data.time);
         rocket_data.commanded_deflect = 0.1 * std::sin(static_cast<double>(t) / 1000000.0);
 
-        sock.write_all(&table_header, sizeof(table_header));
-        sock.write_all(&rocket_data, sizeof(rocket_data));
+        sock->write_all(&table_header, sizeof(table_header));
+        sock->write_all(&rocket_data, sizeof(rocket_data));
         usleep(1000);
     }
 
     // We should never reach here, but if we do:
-    reader.join();
     return 0;
 } catch (const std::exception& e) {
     std::cerr << "Main thread error: " << e.what() << std::endl;

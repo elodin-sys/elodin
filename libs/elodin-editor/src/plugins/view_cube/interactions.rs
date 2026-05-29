@@ -11,7 +11,7 @@ use super::components::*;
 use super::config::ViewCubeConfig;
 use super::events::ViewCubeEvent;
 use super::theme::ViewCubeColors;
-use crate::plugins::camera_anchor::camera_anchor_from_transform;
+use crate::{plugins::camera_anchor::camera_anchor_from_transform, ui::input_owner::UiInputOwners};
 
 #[derive(Clone)]
 struct ArrowHold {
@@ -1032,6 +1032,7 @@ pub fn on_cube_click(
     parents_query: Query<&ChildOf>,
     lookup: OnCubeClickLookup,
     hovered: Res<HoveredElement>,
+    input_owners: Res<UiInputOwners>,
     mut events: MessageWriter<ViewCubeEvent>,
 ) {
     if trigger.event().button != PointerButton::Primary {
@@ -1072,6 +1073,12 @@ pub fn on_cube_click(
     else {
         return;
     };
+    let Ok(link) = lookup.root_links.get(source) else {
+        return;
+    };
+    if !input_owners.permits_view_cube_location(link.main_camera, &trigger.pointer_location) {
+        return;
+    }
 
     match element {
         CubeElement::Face(dir) => {
@@ -1143,6 +1150,7 @@ pub fn on_cube_drag(
     root_links: Query<&ViewCubeLink, With<ViewCubeRoot>>,
     mut cameras: Query<(&Transform, &mut EditorCam, &Camera), With<ViewCubeTargetCamera>>,
     dragging_roots: Query<(), With<ViewCubeDragging>>,
+    input_owners: Res<UiInputOwners>,
     mut commands: Commands,
 ) {
     if drag.button != PointerButton::Secondary {
@@ -1163,6 +1171,13 @@ pub fn on_cube_drag(
     let Ok((transform, mut editor_cam, camera)) = cameras.get_mut(link.main_camera) else {
         return;
     };
+    if !input_owners.permits_view_cube_location(link.main_camera, &drag.pointer_location) {
+        if dragging_roots.get(root).is_ok() {
+            editor_cam.end_move();
+            commands.entity(root).remove::<ViewCubeDragging>();
+        }
+        return;
+    }
 
     if dragging_roots.get(root).is_err() {
         commands.entity(root).insert(ViewCubeDragging);
@@ -1293,12 +1308,14 @@ pub fn on_action_button_hover_end(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn on_arrow_pressed(
     trigger: On<Pointer<Press>>,
     arrows: Query<&RotationArrow>,
     parents_query: Query<&ChildOf>,
     camera_link_query: Query<&ViewCubeLink, With<ViewCubeCamera>>,
     root_query: Query<(Entity, &ViewCubeLink), With<ViewCubeRoot>>,
+    input_owners: Res<UiInputOwners>,
     mut hold: ResMut<ActiveArrowHold>,
     mut events: MessageWriter<ViewCubeEvent>,
 ) {
@@ -1320,6 +1337,12 @@ pub fn on_arrow_pressed(
     else {
         return;
     };
+    let Ok((_, link)) = root_query.get(source) else {
+        return;
+    };
+    if !input_owners.permits_view_cube_location(link.main_camera, &trigger.pointer_location) {
+        return;
+    }
 
     // First step happens immediately on press.
     events.write(ViewCubeEvent::ArrowClicked {
@@ -1340,6 +1363,7 @@ pub fn on_action_button_click(
     parents_query: Query<&ChildOf>,
     camera_link_query: Query<&ViewCubeLink, With<ViewCubeCamera>>,
     root_query: Query<(Entity, &ViewCubeLink), With<ViewCubeRoot>>,
+    input_owners: Res<UiInputOwners>,
     mut events: MessageWriter<ViewCubeEvent>,
 ) {
     if trigger.event().button != PointerButton::Primary {
@@ -1360,6 +1384,12 @@ pub fn on_action_button_click(
     else {
         return;
     };
+    let Ok((_, link)) = root_query.get(source) else {
+        return;
+    };
+    if !input_owners.permits_view_cube_location(link.main_camera, &trigger.pointer_location) {
+        return;
+    }
 
     events.write(ViewCubeEvent::ViewportActionClicked {
         action: *action,

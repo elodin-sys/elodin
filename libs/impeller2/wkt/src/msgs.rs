@@ -367,6 +367,16 @@ impl Msg for NewConnection {
     const ID: PacketId = [225, 1];
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+pub struct ConnectionSettings {
+    /// When true, the server sends no replies on this connection.
+    pub silent: bool,
+}
+
+impl Msg for ConnectionSettings {
+    const ID: PacketId = [224, 39];
+}
+
 macro_rules! impl_user_data_msg {
     ($t: ty) => {
         #[cfg(feature = "mlua")]
@@ -394,6 +404,7 @@ impl_user_data_msg!(Stream);
 impl_user_data_msg!(MsgStream);
 impl_user_data_msg!(SetStreamState);
 impl_user_data_msg!(SetComponentMetadata);
+impl_user_data_msg!(ConnectionSettings);
 impl_user_data_msg!(UdpUnicast);
 impl_user_data_msg!(UdpVTableStream);
 

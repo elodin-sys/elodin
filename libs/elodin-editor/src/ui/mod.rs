@@ -1,8 +1,3 @@
-use bevy::ecs::message::Messages;
-use bevy::input::{
-    ButtonInput,
-    mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll, MouseButton, MouseMotion, MouseWheel},
-};
 use bevy::{
     camera::{RenderTarget, Viewport},
     ecs::{
@@ -21,7 +16,6 @@ use bevy_defer::AsyncPlugin;
 use bevy_egui::{
     EguiContext, EguiContexts, EguiPreUpdateSet,
     egui::{self, Color32, Label, RichText},
-    input::EguiWantsInput,
 };
 use std::collections::{HashMap, HashSet};
 use std::fmt::Write;
@@ -90,6 +84,7 @@ pub mod command_palette;
 pub mod data_overview;
 pub mod hierarchy;
 pub mod images;
+pub mod input_owner;
 pub mod inspector;
 pub mod label;
 pub mod log_stream;
@@ -292,51 +287,47 @@ pub struct UiPlugin;
 #[derive(Debug, PartialEq, Eq, Clone, Hash, SystemSet)]
 pub struct UiInputConsumerSet;
 
-// This system prevents UI events such as scroll and pan from passing through
-// egui modals and popups to whatever is behind them. The intention is for
-// modals to disable everything other than the modal, but popups allow
-// interactions with other things, except whatever is directly behind the
-// popup. The basic approach is for each popup to set a flag indicating if
-// the pointer is currently over it, then if any flags are true stop
-// propagating events.
-fn suppress_pointer_input_over_popups(
-    egui_wants_input: Res<EguiWantsInput>,
-    mut contexts: Query<&mut EguiContext>,
-    mut mouse_buttons: ResMut<ButtonInput<MouseButton>>,
-    mut mouse_motion_messages: ResMut<Messages<MouseMotion>>,
-    mut mouse_wheel_messages: ResMut<Messages<MouseWheel>>,
-    mut accumulated_motion: ResMut<AccumulatedMouseMotion>,
-    mut accumulated_scroll: ResMut<AccumulatedMouseScroll>,
+fn egui_popup_hovered_id() -> egui::Id {
+    egui::Id::new("any_popup_hovered")
+}
+
+pub(crate) fn mark_egui_popup_hovered(ctx: &egui::Context) {
+    ctx.data_mut(|data| data.insert_temp::<bool>(egui_popup_hovered_id(), true));
+}
+
+pub(crate) fn register_window_input_blocker(
+    world: &mut World,
+    window: Entity,
+    rect: egui::Rect,
+    blocker: input_owner::UiBlocker,
+    priority: input_owner::PointerOwnerPriority,
 ) {
-    let mut modal_open = false;
-    let mut pointer_over_popup = false;
-    for mut ctx in contexts.iter_mut() {
-        let ctx = ctx.get_mut();
-        if ctx.memory(|mem| mem.top_modal_layer().is_some()) {
-            modal_open = true;
-        }
+    if let Some(mut input_owners) = world.get_resource_mut::<input_owner::UiInputOwners>() {
+        input_owners.register_blocker_rect(window, rect, blocker, priority);
+    }
+}
 
-        let popup_hovered_id = egui::Id::new("any_popup_hovered");
-        if ctx
-            .data(|data| data.get_temp::<bool>(popup_hovered_id))
-            .unwrap_or(false)
-        {
-            pointer_over_popup = true;
-        }
+fn resolve_input_owner_after_window_roots(world: &mut World, window: Entity, ctx: &egui::Context) {
+    let pointer_over_popup = ctx
+        .data(|data| data.get_temp::<bool>(egui_popup_hovered_id()))
+        .unwrap_or(false);
 
-        ctx.data_mut(|data| data.insert_temp::<bool>(popup_hovered_id, false));
+    if ctx.is_popup_open() && pointer_over_popup {
+        register_window_input_blocker(
+            world,
+            window,
+            ctx.content_rect(),
+            input_owner::UiBlocker::Popup,
+            input_owner::PointerOwnerPriority::Overlay,
+        );
     }
 
-    let popup_active = egui_wants_input.is_popup_open() && pointer_over_popup;
-    if !(modal_open || popup_active) {
-        return;
+    let pointer_pos = ctx.input(|input| input.pointer.latest_pos());
+    if let Some(mut input_owners) = world.get_resource_mut::<input_owner::UiInputOwners>() {
+        input_owners.resolve_window(window, pointer_pos);
     }
 
-    mouse_motion_messages.clear();
-    mouse_wheel_messages.clear();
-    mouse_buttons.reset_all();
-    accumulated_motion.delta = Vec2::ZERO;
-    accumulated_scroll.delta = Vec2::ZERO;
+    ctx.data_mut(|data| data.insert_temp::<bool>(egui_popup_hovered_id(), false));
 }
 
 impl Plugin for UiPlugin {
@@ -355,6 +346,7 @@ impl Plugin for UiPlugin {
             .init_resource::<SettingModalState>()
             .init_resource::<HdrEnabled>()
             .init_resource::<FocusedWindow>()
+            .init_resource::<input_owner::UiInputOwners>()
             .init_resource::<timeline_slider::UITick>()
             .init_resource::<timeline::StreamTickOrigin>()
             .init_resource::<command_palette::CommandPaletteState>()
@@ -363,10 +355,6 @@ impl Plugin for UiPlugin {
             .add_systems(Update, timeline_slider::sync_ui_tick.before(render_layout))
             .add_systems(Update, actions::spawn_lua_actor)
             .add_systems(Update, update_focused_window)
-            .add_systems(
-                Update,
-                suppress_pointer_input_over_popups.before(UiInputConsumerSet),
-            )
             .add_systems(Update, shortcuts)
             .add_systems(
                 PreUpdate,
@@ -386,7 +374,8 @@ impl Plugin for UiPlugin {
                     set_nav_gizmo_camera_orders,
                     warn_camera_order_ambiguities,
                 )
-                    .chain(),
+                    .chain()
+                    .before(UiInputConsumerSet),
             )
             .add_systems(First, fix_visibility_hierarchy)
             .add_systems(Update, sync_hdr)
@@ -556,6 +545,10 @@ pub fn render_layout(
     mut windows: Local<Vec<(Entity, WindowId)>>,
     mut widget_id: Local<String>,
 ) {
+    if let Some(mut input_owners) = world.get_resource_mut::<input_owner::UiInputOwners>() {
+        input_owners.begin_frame();
+    }
+
     windows.extend(
         world
             .query::<(Entity, &WindowId)>()
@@ -568,7 +561,7 @@ pub fn render_layout(
 
             world.add_root_widget_to::<ViewportOverlay>(id, "viewport_overlay", ());
 
-            world.add_root_widget_to::<modal::ModalWithSettings>(id, "modal_graph", ());
+            world.add_root_widget_to::<modal::ModalWithSettings>(id, "modal_graph", id);
 
             world.add_root_widget_to::<CommandPalette>(id, "command_palette", ());
         } else {
@@ -583,6 +576,9 @@ pub fn render_layout(
             let _ = write!(widget_id, "secondary_command_palette_{}", window_id.0);
         }
         world.add_root_widget_to::<command_palette::PaletteWindow>(id, &widget_id, Some(id));
+        world.egui_context_scope_for(id, |world, ctx| {
+            resolve_input_owner_after_window_roots(world, id, &ctx);
+        });
     }
 }
 

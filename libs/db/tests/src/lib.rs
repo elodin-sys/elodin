@@ -46,9 +46,46 @@ mod tests {
         Ok((addr, db))
     }
 
+    async fn receives_packet(client: &mut Client, timeout: Duration) -> bool {
+        futures_lite::future::race(
+            async { client.rx.next_grow(vec![0_u8; 256]).await.is_ok() },
+            async {
+                sleep(timeout).await;
+                false
+            },
+        )
+        .await
+    }
+
     #[test]
     async fn test_connect() {
         let (_client, _db) = setup_test_db().await.unwrap();
+    }
+
+    #[test]
+    async fn test_silent_connection_does_not_emit_replies_or_errors() {
+        let (addr, _db) = setup_test_db().await.unwrap();
+        let mut client = Client::connect(addr).await.unwrap();
+
+        client
+            .send(&ConnectionSettings { silent: true })
+            .await
+            .0
+            .unwrap();
+        client.send(&GetDbSettings).await.0.unwrap();
+        client.send(LenPacket::table([99, 0], 0)).await.0.unwrap();
+
+        assert!(!receives_packet(&mut client, Duration::from_millis(100)).await);
+    }
+
+    #[test]
+    async fn test_non_silent_connection_still_emits_error_responses() {
+        let (addr, _db) = setup_test_db().await.unwrap();
+        let mut client = Client::connect(addr).await.unwrap();
+
+        client.send(LenPacket::table([99, 0], 0)).await.0.unwrap();
+
+        assert!(receives_packet(&mut client, Duration::from_secs(1)).await);
     }
 
     #[test]

@@ -23,6 +23,7 @@
 #include <cmath>
 #include <cstddef>
 #include <iostream>
+#include <memory>
 #include <print>
 #include <string>
 #include <system_error>
@@ -87,6 +88,33 @@ public:
         write_all(buf.data(), buf.size());
     }
 
+    size_t read(uint8_t* data, size_t len)
+    {
+        auto res = ::read(fd_, data, len);
+        if (res < 0) {
+            throw std::system_error(errno, std::generic_category(), "Failed to read");
+        }
+        return res;
+    }
+
+    void drain_replies(const std::string& label)
+    {
+        try {
+            auto pending = std::vector<uint8_t>();
+            while (true) {
+                auto data = std::vector<uint8_t>(1024);
+                auto len = read(data.data(), data.size());
+                if (len == 0) {
+                    std::println("[{}] replies closed", label);
+                    break;
+                }
+                log_elodin_db_replies(pending, std::span(data.data(), len), label);
+            }
+        } catch (const std::exception& e) {
+            std::cerr << "[" << label << "] reply drain error: " << e.what() << std::endl;
+        }
+    }
+
 private:
     int fd_ = -1;
 };
@@ -104,7 +132,11 @@ void component_writer(
 {
     try {
         std::println("[{}] connecting to {}:{}", component_name, ip, port);
-        auto sock = Socket(ip, port);
+        auto sock = std::make_shared<Socket>(ip, port);
+        std::thread reply_reader([sock, component_name] {
+            sock->drain_replies(component_name);
+        });
+        reply_reader.detach();
 
         auto time = builder::raw_table(0, 8);
         auto table = builder::vtable({
@@ -112,11 +144,11 @@ void component_writer(
                 schema(prim_type, dims, timestamp(time, component(component_name)))),
         });
 
-        sock.send(VTableMsg {
+        sock->send(VTableMsg {
             .id = { vtable_id, 0 },
             .vtable = table,
         });
-        sock.send(set_component_metadata(component_name, labels));
+        sock->send(set_component_metadata(component_name, labels));
 
         // Packet layout: [int64_t time][float values...]
         std::vector<uint8_t> buf(8 + value_bytes, 0);
@@ -137,10 +169,11 @@ void component_writer(
                 .packet_id = { vtable_id, 0 },
                 .request_id = 0,
             };
-            sock.write_all(&header, sizeof(header));
-            sock.write_all(buf.data(), buf.size());
+            sock->write_all(&header, sizeof(header));
+            sock->write_all(buf.data(), buf.size());
             usleep(1000);
         }
+
     } catch (const std::exception& e) {
         std::cerr << "[" << component_name << "] error: " << e.what() << std::endl;
     }
