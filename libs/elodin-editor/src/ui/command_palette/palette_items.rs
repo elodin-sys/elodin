@@ -30,7 +30,7 @@ use bevy_infinite_grid::InfiniteGrid;
 use egui_tiles::{Tile, TileId};
 use fuzzy_matcher::{FuzzyMatcher, skim::SkimMatcherV2};
 use impeller2::types::Timestamp;
-use impeller2_bevy::{ComponentPathRegistry, EntityMap, PacketTx};
+use impeller2_bevy::{ComponentMetadataRegistry, ComponentPathRegistry, EntityMap, PacketTx};
 use impeller2_kdl::{ToKdl, env::schematic_dir_or_cwd};
 use impeller2_wkt::SkyboxConfig;
 use impeller2_wkt::{
@@ -45,7 +45,7 @@ use crate::{
     ui::{
         FocusedWindow, HdrEnabled, Paused, colors,
         command_palette::CommandPaletteState,
-        plot::{GraphBundle, default_component_values},
+        plot::{GraphBundle, graph_lines_from_component},
         schematic::{
             CurrentSchematic, CurrentWindowSchematics, LoadSchematicParams, OpenDocumentRequest,
             SaveCurrentDocumentRequest, WindowDocumentSave,
@@ -447,11 +447,11 @@ fn graph_parts(
                 name.clone(),
                 "Component",
                 move |_: In<String>,
-                      query: Query<&ComponentValue>,
-                      entity_map: Res<EntityMap>,
                       mut render_layer_alloc: ResMut<RenderLayerAllocator>,
                       mut tile_param: TileParam,
                       path_reg: Res<ComponentPathRegistry>,
+                      schema_reg: Res<impeller2_bevy::ComponentSchemaRegistry>,
+                      metadata_reg: Res<ComponentMetadataRegistry>,
                       palette_state: Res<CommandPaletteState>| {
                     let Some(mut tile_state) = tile_param.target(palette_state.target_window)
                     else {
@@ -459,27 +459,35 @@ fn graph_parts(
                     };
                     if let Some(component) = &part.component {
                         let component_id = component.id;
-                        let Some(entity) = entity_map.get(&component_id) else {
-                            return PaletteEvent::Exit;
+                        let Some(schema) = schema_reg.0.get(&component_id) else {
+                            return PaletteEvent::Error(format!(
+                                "No schema registered for component {}",
+                                component.name
+                            ));
                         };
-                        let Ok(value) = query.get(*entity) else {
-                            return PaletteEvent::Exit;
-                        };
-
-                        let values = default_component_values(&component_id, value);
+                        if metadata_reg.get_metadata(&component_id).is_none() {
+                            return PaletteEvent::Error(format!(
+                                "No metadata registered for component {}",
+                                component.name
+                            ));
+                        }
 
                         let component_path = path_reg
                             .get(&component_id)
                             .cloned()
                             .unwrap_or_else(|| ComponentPath::from_name(&component.name));
 
+                        let values = graph_lines_from_component(&component_path, schema);
+                        let graph_label = component.name.clone();
                         let components =
-                            BTreeMap::from_iter(std::iter::once((component_path, values.clone())));
-                        let bundle = GraphBundle::new(
-                            &mut render_layer_alloc,
-                            components,
-                            "Graph".to_string(),
-                        );
+                            BTreeMap::from_iter(std::iter::once((component_path, values)));
+                        let Some(bundle) =
+                            GraphBundle::try_new(&mut render_layer_alloc, components, graph_label)
+                        else {
+                            return PaletteEvent::Error(
+                                "Unable to create graph: render layer budget exhausted".to_string(),
+                            );
+                        };
                         tile_state.create_graph_tile(tile_id, bundle);
                         PaletteEvent::Exit
                     } else {

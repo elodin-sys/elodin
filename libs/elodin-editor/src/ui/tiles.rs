@@ -2972,19 +2972,19 @@ impl WidgetSystem for TileLayout<'_, '_> {
                         if read_only {
                             continue;
                         }
-                        let graph_label = graph_label(&Graph::default());
-
                         let graph_bundle = if let Some(graph_bundle) = *graph_bundle {
                             graph_bundle
                         } else {
+                            let graph_label = graph_label(&Graph::default());
                             GraphBundle::new(
                                 &mut state_mut.render_layer_alloc,
                                 BTreeMap::default(),
                                 graph_label.clone(),
                             )
                         };
+                        let tab_label = graph_bundle.graph_state.label.clone();
                         let graph_id = state_mut.commands.spawn(graph_bundle).id();
-                        let graph = GraphPane::new(graph_id, graph_label.clone());
+                        let graph = GraphPane::new(graph_id, tab_label);
                         let pane = Pane::Graph(graph);
 
                         if let Some(tile_id) =
