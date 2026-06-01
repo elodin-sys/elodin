@@ -151,9 +151,7 @@ pub fn element_names_for_graph(
     if len == 1 {
         return vec![metadata.name.clone()];
     }
-    let names = eql::Component::new(metadata.name.clone(), metadata.component_id, schema.clone())
-        .element_names;
-    names
+    eql::Component::new(metadata.name.clone(), metadata.component_id, schema.clone()).element_names
 }
 
 pub fn graph_lines_from_component(
