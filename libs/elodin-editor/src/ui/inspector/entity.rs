@@ -147,19 +147,27 @@ impl WidgetSystem for InspectorEntity<'_, '_> {
 
             if create_graph {
                 let Some(schema) = schema_reg.0.get(component_id) else {
+                    bevy::log::warn!(
+                        component = %metadata.name,
+                        "Create Graph: no schema registered for component"
+                    );
                     continue;
                 };
                 let component_path = path_reg
                     .get(component_id)
                     .cloned()
                     .unwrap_or_else(|| ComponentPath::from_name(&metadata.name));
-                let values = graph_lines_from_component(&component_path, schema, metadata);
+                let values = graph_lines_from_component(&component_path, schema);
                 let components = BTreeMap::from_iter(std::iter::once((component_path, values)));
                 let Some(bundle) = GraphBundle::try_new(
                     &mut render_layer_alloc,
                     components,
                     metadata.name.clone(),
                 ) else {
+                    bevy::log::warn!(
+                        component = %metadata.name,
+                        "Create Graph: render layer budget exhausted"
+                    );
                     continue;
                 };
                 tree_actions.push(TreeAction::AddGraph(None, Box::new(Some(bundle))));

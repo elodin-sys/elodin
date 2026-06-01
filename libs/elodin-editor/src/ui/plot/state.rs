@@ -157,7 +157,6 @@ pub fn element_names_for_graph(
 pub fn graph_lines_from_component(
     component_path: &ComponentPath,
     schema: &Schema<Vec<u64>>,
-    _metadata: &ComponentMetadata,
 ) -> GraphStateComponent {
     let len = schema.shape().iter().copied().product::<usize>().max(1);
     let color_base = component_path.id.0 as usize;
@@ -192,8 +191,7 @@ mod tests {
     fn graph_lines_scalar_enables_one_line() {
         let path = ComponentPath::from_name("rocket.mach");
         let schema = test_schema(&[1]);
-        let metadata = test_metadata("rocket.mach", "");
-        let lines = graph_lines_from_component(&path, &schema, &metadata);
+        let lines = graph_lines_from_component(&path, &schema);
         assert_eq!(lines.len(), 1);
         assert!(lines[0].0);
     }
@@ -202,8 +200,7 @@ mod tests {
     fn graph_lines_vector_enables_all_elements() {
         let path = ComponentPath::from_name("CONTROLMESSAGE.FIN_DEFLECTION_DEG");
         let schema = test_schema(&[4]);
-        let metadata = test_metadata("CONTROLMESSAGE.FIN_DEFLECTION_DEG", "");
-        let lines = graph_lines_from_component(&path, &schema, &metadata);
+        let lines = graph_lines_from_component(&path, &schema);
         assert_eq!(lines.len(), 4);
         assert!(lines.iter().all(|(enabled, _)| *enabled));
     }

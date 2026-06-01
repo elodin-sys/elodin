@@ -465,19 +465,19 @@ fn graph_parts(
                                 component.name
                             ));
                         };
-                        let Some(metadata) = metadata_reg.get_metadata(&component_id) else {
+                        if metadata_reg.get_metadata(&component_id).is_none() {
                             return PaletteEvent::Error(format!(
                                 "No metadata registered for component {}",
                                 component.name
                             ));
-                        };
+                        }
 
                         let component_path = path_reg
                             .get(&component_id)
                             .cloned()
                             .unwrap_or_else(|| ComponentPath::from_name(&component.name));
 
-                        let values = graph_lines_from_component(&component_path, schema, metadata);
+                        let values = graph_lines_from_component(&component_path, schema);
                         let graph_label = component.name.clone();
                         let components =
                             BTreeMap::from_iter(std::iter::once((component_path, values)));
