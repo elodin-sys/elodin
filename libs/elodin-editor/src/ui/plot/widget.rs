@@ -1377,23 +1377,25 @@ pub fn sync_graphs(
             let Some(component_metadata) = metadata_store.get_metadata(component_id) else {
                 continue;
             };
-            let component_label = component_metadata.name.clone();
-            let element_name_list = schema_store
-                .0
-                .get(component_id)
-                .map(|schema| element_names_for_graph(schema, component_metadata))
-                .unwrap_or_else(|| {
-                    component_metadata
-                        .element_names()
-                        .split(',')
-                        .filter(|s| !s.is_empty())
-                        .map(str::to_string)
-                        .collect()
-                });
             let component = collected_graph_data
                 .components
                 .entry(*component_id)
-                .or_insert_with(|| PlotDataComponent::new(component_label, element_name_list));
+                .or_insert_with(|| {
+                    let label = component_metadata.name.clone();
+                    let element_names = schema_store
+                        .0
+                        .get(component_id)
+                        .map(|schema| element_names_for_graph(schema, component_metadata))
+                        .unwrap_or_else(|| {
+                            component_metadata
+                                .element_names()
+                                .split(',')
+                                .filter(|s| !s.is_empty())
+                                .map(str::to_string)
+                                .collect()
+                        });
+                    PlotDataComponent::new(label, element_names)
+                });
 
             for (value_index, (enabled, color)) in component_values.iter().enumerate() {
                 let entity = graph_state
