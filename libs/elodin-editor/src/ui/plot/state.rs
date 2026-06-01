@@ -147,12 +147,12 @@ pub fn element_names_for_graph(
     if !from_metadata.is_empty() {
         return from_metadata;
     }
-    let names = eql::Component::new(metadata.name.clone(), metadata.component_id, schema.clone())
-        .element_names;
     let len = schema.shape().iter().copied().product::<usize>().max(1);
-    if len == 1 && names.iter().all(|n| n.is_empty()) {
+    if len == 1 {
         return vec![metadata.name.clone()];
     }
+    let names = eql::Component::new(metadata.name.clone(), metadata.component_id, schema.clone())
+        .element_names;
     names
 }
 
@@ -231,7 +231,17 @@ mod tests {
     }
 
     #[test]
-    fn element_names_scalar_uses_component_name() {
+    fn element_names_scalar_shape_one_uses_component_name() {
+        let schema = test_schema(&[1]);
+        let metadata = test_metadata("STATEMACHINEOUTPUT.MISSILE_MODE", "");
+        assert_eq!(
+            element_names_for_graph(&schema, &metadata),
+            vec!["STATEMACHINEOUTPUT.MISSILE_MODE"]
+        );
+    }
+
+    #[test]
+    fn element_names_scalar_empty_shape_uses_component_name() {
         let schema = test_schema(&[]);
         let metadata = test_metadata("STATEMACHINEOUTPUT.MISSILE_MODE", "");
         assert_eq!(
