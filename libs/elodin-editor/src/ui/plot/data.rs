@@ -440,7 +440,12 @@ fn process_time_series<T>(
     };
     for i in 0..len {
         let line = plot_data.lines.entry(i).or_insert_with(|| {
-            let label = format!("[{i}]");
+            let label = plot_data
+                .element_names
+                .get(i)
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| format!("[{i}]"));
             lines.add(Line {
                 label,
                 ..Default::default()

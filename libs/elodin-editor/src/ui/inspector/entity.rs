@@ -9,8 +9,8 @@ use bevy_egui::egui::{self, Align, Color32, Layout, RichText, emath};
 use fuzzy_matcher::{FuzzyMatcher, skim::SkimMatcherV2};
 use impeller2::types::ComponentId;
 use impeller2_bevy::{
-    ComponentMetadataRegistry, ComponentPath, ComponentPathRegistry, ComponentValue,
-    ComponentValueExt, ElementValueMut,
+    ComponentMetadataRegistry, ComponentPath, ComponentPathRegistry, ComponentSchemaRegistry,
+    ComponentValue, ComponentValueExt, ElementValueMut,
 };
 use impeller2_wkt::{ComponentMetadata, MetadataExt};
 use smallvec::SmallVec;
@@ -22,7 +22,7 @@ use crate::{
         colors::get_scheme,
         inspector::search,
         label,
-        plot::{GraphBundle, default_component_values},
+        plot::{GraphBundle, graph_lines_from_component},
         tiles::TreeAction,
         utils::{MarginSides, format_num},
         widgets::WidgetSystem,
@@ -38,6 +38,7 @@ pub struct InspectorEntity<'w, 's> {
     values: Query<'w, 's, &'static mut ComponentValue>,
     metadata_query: Query<'w, 's, &'static mut ComponentMetadata>,
     metadata_store: Res<'w, ComponentMetadataRegistry>,
+    schema_reg: Res<'w, ComponentSchemaRegistry>,
     path_reg: Res<'w, ComponentPathRegistry>,
     render_layer_alloc: ResMut<'w, RenderLayerAllocator>,
     filter: ResMut<'w, ComponentFilter>,
@@ -61,6 +62,7 @@ impl WidgetSystem for InspectorEntity<'_, '_> {
             metadata_query,
             mut values,
             metadata_store,
+            schema_reg,
             path_reg,
             mut render_layer_alloc,
             mut filter,
@@ -144,15 +146,22 @@ impl WidgetSystem for InspectorEntity<'_, '_> {
             );
 
             if create_graph {
-                let values = default_component_values(component_id, &component_value);
+                let Some(schema) = schema_reg.0.get(component_id) else {
+                    continue;
+                };
                 let component_path = path_reg
                     .get(component_id)
                     .cloned()
                     .unwrap_or_else(|| ComponentPath::from_name(&metadata.name));
-                let components =
-                    BTreeMap::from_iter(std::iter::once((component_path, values.clone())));
-                let bundle =
-                    GraphBundle::new(&mut render_layer_alloc, components, metadata.name.clone());
+                let values = graph_lines_from_component(&component_path, schema, metadata);
+                let components = BTreeMap::from_iter(std::iter::once((component_path, values)));
+                let Some(bundle) = GraphBundle::try_new(
+                    &mut render_layer_alloc,
+                    components,
+                    metadata.name.clone(),
+                ) else {
+                    continue;
+                };
                 tree_actions.push(TreeAction::AddGraph(None, Box::new(Some(bundle))));
             }
         }

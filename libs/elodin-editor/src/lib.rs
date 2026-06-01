@@ -1560,6 +1560,45 @@ mod time_range_tests {
         let result = behavior.calculate_selected_range(earliest, latest);
         assert!(matches!(result, Err(TimeRangeError::NoData)));
     }
+
+    #[test]
+    fn last_30s_window_at_mid_replay_position() {
+        let behavior = TimeRangeBehavior::last(Duration::from_secs(30));
+        let earliest = timestamp_secs(0);
+        let effective_latest = timestamp_secs(40);
+
+        let range = behavior
+            .calculate_selected_range(earliest, effective_latest)
+            .expect("valid replay window");
+        assert_eq!(range.start, timestamp_secs(10));
+        assert_eq!(range.end, timestamp_secs(40));
+    }
+
+    #[test]
+    fn last_30s_window_at_early_replay_clamps_to_earliest() {
+        let behavior = TimeRangeBehavior::last(Duration::from_secs(30));
+        let earliest = timestamp_secs(0);
+        let effective_latest = timestamp_secs(15);
+
+        let range = behavior
+            .calculate_selected_range(earliest, effective_latest)
+            .expect("valid replay window");
+        assert_eq!(range.start, timestamp_secs(0));
+        assert_eq!(range.end, timestamp_secs(15));
+    }
+
+    #[test]
+    fn full_range_at_replay_position_uses_effective_latest() {
+        let behavior = TimeRangeBehavior::FULL;
+        let earliest = timestamp_secs(0);
+        let effective_latest = timestamp_secs(20);
+
+        let range = behavior
+            .calculate_selected_range(earliest, effective_latest)
+            .expect("valid replay window");
+        assert_eq!(range.start, earliest);
+        assert_eq!(range.end, effective_latest);
+    }
 }
 
 fn clamp_range(total_range: Range<Timestamp>, b: Range<Timestamp>) -> Range<Timestamp> {

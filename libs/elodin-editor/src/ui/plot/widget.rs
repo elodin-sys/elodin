@@ -26,7 +26,7 @@ use bevy::{
 };
 use bevy_egui::egui::{self, Align, CornerRadius, Frame, Layout, Margin, RichText, Stroke};
 use impeller2::types::Timestamp;
-use impeller2_bevy::{ComponentMetadataRegistry, ComponentPath};
+use impeller2_bevy::{ComponentMetadataRegistry, ComponentPath, ComponentSchemaRegistry};
 use impeller2_wkt::{CurrentTimestamp, EarliestTimestamp};
 use std::time::{Duration, Instant};
 use std::{
@@ -42,7 +42,7 @@ use crate::{
         colors::{ColorExt, get_scheme, with_opacity},
         input_owner::UiInputOwners,
         plot::{
-            CollectedGraphData, GraphState, Line, OVERVIEW_MAX_POINTS,
+            CollectedGraphData, GraphState, Line, OVERVIEW_MAX_POINTS, element_names_for_graph,
             gpu::{LineBundle, LineConfig, LineUniform},
         },
         tiles::WindowState,
@@ -1365,6 +1365,7 @@ pub fn auto_y_bounds(
 pub fn sync_graphs(
     mut graph_states: Query<&mut GraphState>,
     metadata_store: Res<ComponentMetadataRegistry>,
+    schema_store: Res<ComponentSchemaRegistry>,
     mut collected_graph_data: ResMut<CollectedGraphData>,
     mut commands: Commands,
 ) {
@@ -1377,20 +1378,22 @@ pub fn sync_graphs(
                 continue;
             };
             let component_label = component_metadata.name.clone();
-            let element_names = component_metadata.element_names();
+            let element_name_list = schema_store
+                .0
+                .get(component_id)
+                .map(|schema| element_names_for_graph(schema, component_metadata))
+                .unwrap_or_else(|| {
+                    component_metadata
+                        .element_names()
+                        .split(',')
+                        .filter(|s| !s.is_empty())
+                        .map(str::to_string)
+                        .collect()
+                });
             let component = collected_graph_data
                 .components
                 .entry(*component_id)
-                .or_insert_with(|| {
-                    PlotDataComponent::new(
-                        component_label,
-                        element_names
-                            .split(',')
-                            .filter(|s| !s.is_empty())
-                            .map(str::to_string)
-                            .collect(),
-                    )
-                });
+                .or_insert_with(|| PlotDataComponent::new(component_label, element_name_list));
 
             for (value_index, (enabled, color)) in component_values.iter().enumerate() {
                 let entity = graph_state

@@ -7,9 +7,10 @@ use bevy::core_pipeline::tonemapping::Tonemapping;
 use bevy::prelude::*;
 use bevy_egui::egui::{self, Color32};
 
+use impeller2::schema::Schema;
 use impeller2::types::{ComponentId, Timestamp};
-use impeller2_bevy::{ComponentPath, ComponentValue};
-use impeller2_wkt::GraphType;
+use impeller2_bevy::ComponentPath;
+use impeller2_wkt::{ComponentMetadata, GraphType};
 
 use super::gpu::LineVisibleRange;
 use crate::MainCamera;
@@ -56,14 +57,12 @@ pub struct GraphState {
 }
 
 impl GraphBundle {
-    pub fn new(
+    pub fn try_new(
         render_layer_alloc: &mut RenderLayerAllocator,
         components: BTreeMap<ComponentPath, GraphStateComponent>,
         label: String,
-    ) -> Self {
-        let Some(allocated_layer) = render_layer_alloc.alloc() else {
-            todo!("ran out of layers")
-        };
+    ) -> Option<Self> {
+        let allocated_layer = render_layer_alloc.alloc()?;
         let render_layers = allocated_layer.render_layers();
         let graph_state = GraphState {
             components,
@@ -84,7 +83,7 @@ impl GraphBundle {
             x_rev: 0,
             x_dirty: false,
         };
-        GraphBundle {
+        Some(GraphBundle {
             camera: Camera {
                 order: 2,
                 ..Default::default()
@@ -107,7 +106,15 @@ impl GraphBundle {
             main_camera: MainCamera,
             render_layers,
             allocated_layer,
-        }
+        })
+    }
+
+    pub fn new(
+        render_layer_alloc: &mut RenderLayerAllocator,
+        components: BTreeMap<ComponentPath, GraphStateComponent>,
+        label: String,
+    ) -> Self {
+        Self::try_new(render_layer_alloc, components, label).expect("ran out of render layers")
     }
 }
 
@@ -127,14 +134,109 @@ impl GraphState {
     }
 }
 
-pub fn default_component_values(
-    component_id: &ComponentId,
-    component_value: &ComponentValue,
+pub fn element_names_for_graph(
+    schema: &Schema<Vec<u64>>,
+    metadata: &ComponentMetadata,
+) -> Vec<String> {
+    let from_metadata: Vec<String> = metadata
+        .element_names()
+        .split(',')
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .collect();
+    if !from_metadata.is_empty() {
+        return from_metadata;
+    }
+    let names = eql::Component::new(metadata.name.clone(), metadata.component_id, schema.clone())
+        .element_names;
+    let len = schema.shape().iter().copied().product::<usize>().max(1);
+    if len == 1 && names.iter().all(|n| n.is_empty()) {
+        return vec![metadata.name.clone()];
+    }
+    names
+}
+
+pub fn graph_lines_from_component(
+    component_path: &ComponentPath,
+    schema: &Schema<Vec<u64>>,
+    _metadata: &ComponentMetadata,
 ) -> GraphStateComponent {
-    component_value
-        .iter()
-        .enumerate()
-        .map(|(i, _)| component_id.0 as usize + i)
-        .map(|i| (true, colors::get_color_by_index_all(i)))
-        .collect::<Vec<(bool, egui::Color32)>>()
+    let len = schema.shape().iter().copied().product::<usize>().max(1);
+    let color_base = component_path.id.0 as usize;
+    (0..len)
+        .map(|i| (true, colors::get_color_by_index_all(color_base + i)))
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use impeller2::types::PrimType;
+    use std::collections::HashMap;
+
+    fn test_schema(shape: &[u64]) -> Schema<Vec<u64>> {
+        Schema::new(PrimType::F64, shape).unwrap()
+    }
+
+    fn test_metadata(name: &str, element_names: &str) -> ComponentMetadata {
+        let mut metadata = HashMap::new();
+        if !element_names.is_empty() {
+            metadata.insert("element_names".to_string(), element_names.to_string());
+        }
+        ComponentMetadata {
+            component_id: ComponentId::new(name),
+            name: name.to_string(),
+            metadata,
+        }
+    }
+
+    #[test]
+    fn graph_lines_scalar_enables_one_line() {
+        let path = ComponentPath::from_name("rocket.mach");
+        let schema = test_schema(&[1]);
+        let metadata = test_metadata("rocket.mach", "");
+        let lines = graph_lines_from_component(&path, &schema, &metadata);
+        assert_eq!(lines.len(), 1);
+        assert!(lines[0].0);
+    }
+
+    #[test]
+    fn graph_lines_vector_enables_all_elements() {
+        let path = ComponentPath::from_name("CONTROLMESSAGE.FIN_DEFLECTION_DEG");
+        let schema = test_schema(&[4]);
+        let metadata = test_metadata("CONTROLMESSAGE.FIN_DEFLECTION_DEG", "");
+        let lines = graph_lines_from_component(&path, &schema, &metadata);
+        assert_eq!(lines.len(), 4);
+        assert!(lines.iter().all(|(enabled, _)| *enabled));
+    }
+
+    #[test]
+    fn element_names_prefers_metadata() {
+        let schema = test_schema(&[3]);
+        let metadata = test_metadata("foo.bar", "a,b,c");
+        assert_eq!(
+            element_names_for_graph(&schema, &metadata),
+            vec!["a", "b", "c"]
+        );
+    }
+
+    #[test]
+    fn element_names_falls_back_to_schema_defaults() {
+        let schema = test_schema(&[4]);
+        let metadata = test_metadata("foo.bar", "");
+        assert_eq!(
+            element_names_for_graph(&schema, &metadata),
+            vec!["x", "y", "z", "w"]
+        );
+    }
+
+    #[test]
+    fn element_names_scalar_uses_component_name() {
+        let schema = test_schema(&[]);
+        let metadata = test_metadata("STATEMACHINEOUTPUT.MISSILE_MODE", "");
+        assert_eq!(
+            element_names_for_graph(&schema, &metadata),
+            vec!["STATEMACHINEOUTPUT.MISSILE_MODE"]
+        );
+    }
 }
