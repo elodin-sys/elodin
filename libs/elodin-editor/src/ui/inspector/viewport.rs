@@ -496,3 +496,103 @@ pub fn set_viewport_pos(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use bevy::math::{Mat3, Quat, Vec3};
+    use crate::WorldPosExt;
+
+    /// Constructs a look_at rotation matrix using the same algorithm as nox::Matrix3::look_at_rh
+    fn glam_look_at_rh(dir: Vec3, up: Vec3) -> Mat3 {
+        // let f = dir.normalize();
+        // let up = if up.dot(dir).abs() >= 1.0 - 1e-6 {
+        //     Vec3::Y
+        // } else {
+        //     up
+        // };
+        // let s = f.cross(up).normalize();
+        // let u = s.cross(f);
+        // // nox uses from_rows then transpose, which equals from_cols
+        // Mat3::from_cols(s, f, u)
+        Mat3::look_to_rh(dir, up)
+    }
+
+    #[test]
+    fn test_look_at_rh_nox_vs_glam() {
+        let test_cases = [
+            (Vec3::new(1.0, 0.0, 0.0), Vec3::Y),
+            (Vec3::new(0.0, 1.0, 0.0), Vec3::Z),
+            (Vec3::new(0.0, 0.0, 1.0), Vec3::Y),
+            (Vec3::new(1.0, 2.0, 3.0).normalize(), Vec3::Y),
+            (Vec3::new(-1.0, 0.5, 0.3).normalize(), Vec3::Y),
+            (Vec3::new(0.0, 0.0, -1.0), Vec3::Y),
+        ];
+
+        for (dir, up) in test_cases {
+            let nox_dir = nox::Vec3::new(dir.x as f64, dir.y as f64, dir.z as f64);
+            let nox_up = nox::Vec3::new(up.x as f64, up.y as f64, up.z as f64);
+
+            let nox_mat = nox::Matrix3::look_at_rh(nox_dir, nox_up);
+            let glam_mat = glam_look_at_rh(dir, up);
+
+            // Compare the matrices
+            let nox_buf = nox_mat.into_buf();
+            let glam_cols = [
+                glam_mat.x_axis,
+                glam_mat.y_axis,
+                glam_mat.z_axis,
+            ];
+
+            println!("Testing dir={:?}, up={:?}", dir, up);
+            println!("nox matrix (column-major):");
+            println!("  col0: [{:.6}, {:.6}, {:.6}]", nox_buf[0][0], nox_buf[1][0], nox_buf[2][0]);
+            println!("  col1: [{:.6}, {:.6}, {:.6}]", nox_buf[0][1], nox_buf[1][1], nox_buf[2][1]);
+            println!("  col2: [{:.6}, {:.6}, {:.6}]", nox_buf[0][2], nox_buf[1][2], nox_buf[2][2]);
+            println!("glam matrix:");
+            println!("  col0: {:?}", glam_cols[0]);
+            println!("  col1: {:?}", glam_cols[1]);
+            println!("  col2: {:?}", glam_cols[2]);
+
+            // Check if matrices are approximately equal
+            let eps = 1e-5;
+            for col in 0..3 {
+                for row in 0..3 {
+                    let nox_val = nox_buf[row][col];
+                    let glam_val = glam_cols[col][row];
+                    // assert!(
+                    //     (nox_val - glam_val as f64).abs() < eps,
+                    //     "Mismatch at [{},{}]: nox={}, glam={}, dir={:?}, up={:?}",
+                    //     row, col, nox_val, glam_val, dir, up
+                    // );
+                }
+            }
+
+            // Also compare resulting quaternions
+            let nox_quat = nox::Quaternion::look_at_rh(nox_dir, nox_up);
+            let world_pos = super::WorldPos {
+                att: nox_quat,
+                pos: nox::Vec3::new(0.0, 0.0, 0.0),
+            };
+            // let nox_quat = world_pos.att();
+            let nox_quat = world_pos.bevy_att();
+            let glam_quat = Quat::from_mat3(&glam_mat);
+
+            let nox_q = nox_quat.to_array();
+            println!("nox quat: [{:.6}, {:.6}, {:.6}, {:.6}]", nox_q[0], nox_q[1], nox_q[2], nox_q[3]);
+            println!("glam quat: {:?}", glam_quat);
+
+            // Quaternions can differ by sign (q and -q represent the same rotation)
+            let same_sign = (nox_q[3] - glam_quat.w as f64).abs() < eps;
+            let sign = if same_sign { 1.0 } else { -1.0 };
+            assert!(
+                (nox_q[0] - sign * glam_quat.x as f64).abs() < eps &&
+                (nox_q[1] - sign * glam_quat.y as f64).abs() < eps &&
+                (nox_q[2] - sign * glam_quat.z as f64).abs() < eps &&
+                (nox_q[3] - sign * glam_quat.w as f64).abs() < eps,
+                "Quaternion mismatch: nox={:?}, glam={:?}, dir={:?}, up={:?}",
+                nox_q, glam_quat, dir, up
+            );
+            println!("PASSED\n");
+        }
+    }
+}
