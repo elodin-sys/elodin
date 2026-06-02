@@ -2786,6 +2786,30 @@ dependencies = [
 ]
 
 [[package]]
+name = "bevy_world_mesh"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-channel",
+ "bevy",
+ "big_space",
+ "bincode",
+ "bitflags 2.11.1",
+ "bytemuck",
+ "image",
+ "indicatif 0.18.4",
+ "itertools 0.12.1",
+ "lru",
+ "ndarray 0.15.6",
+ "noise",
+ "rayon",
+ "serde",
+ "tiff 0.9.1",
+ "toml 0.8.23",
+ "ureq",
+]
+
+[[package]]
 name = "big_space"
 version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5397,6 +5421,7 @@ dependencies = [
  "bevy_mat3_material",
  "bevy_picking",
  "bevy_render",
+ "bevy_world_mesh",
  "big_space",
  "bitvec",
  "const-fnv1a-hash",
@@ -5456,7 +5481,6 @@ dependencies = [
  "web-time",
  "winapi",
  "winit",
- "world_mesh",
  "zerocopy",
 ]
 
@@ -15807,30 +15831,6 @@ dependencies = [
  "bindgen 0.70.1",
  "cc",
  "hifitime",
-]
-
-[[package]]
-name = "world_mesh"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-channel",
- "bevy",
- "big_space",
- "bincode",
- "bitflags 2.11.1",
- "bytemuck",
- "image",
- "indicatif 0.18.4",
- "itertools 0.12.1",
- "lru",
- "ndarray 0.15.6",
- "noise",
- "rayon",
- "serde",
- "tiff 0.9.1",
- "toml 0.8.23",
- "ureq",
 ]
 
 [[package]]

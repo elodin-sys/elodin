@@ -1,0 +1,88 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: "-D warnings"
+
+jobs:
+  fmt:
+    name: cargo fmt
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - run: cargo fmt --all -- --check
+
+  clippy:
+    name: cargo clippy (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: terrain (default)
+            flags: --no-default-features --features terrain
+          - name: terrain + high_precision
+            flags: --no-default-features --features terrain,high_precision
+          - name: fetch + regions
+            flags: --no-default-features --features fetch,regions
+          - name: scenes + fetch
+            flags: --features scenes,fetch
+          - name: all-features
+            flags: --all-features --all-targets
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - name: install system deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libasound2-dev libudev-dev libxkbcommon-dev \
+            libwayland-dev libx11-dev libxcursor-dev libxi-dev \
+            libxrandr-dev clang cmake pkg-config
+      - run: cargo clippy ${{ matrix.flags }} -- -D warnings
+
+  test:
+    name: cargo test --all-features
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: install system deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libasound2-dev libudev-dev libxkbcommon-dev \
+            libwayland-dev libx11-dev libxcursor-dev libxi-dev \
+            libxrandr-dev clang cmake pkg-config
+      - run: cargo test --all-features
+
+  doc:
+    name: cargo doc --all-features
+    runs-on: ubuntu-latest
+    env:
+      RUSTDOCFLAGS: "-D warnings"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: install system deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libasound2-dev libudev-dev libxkbcommon-dev \
+            libwayland-dev libx11-dev libxcursor-dev libxi-dev \
+            libxrandr-dev clang cmake pkg-config
+      - run: cargo doc --all-features --no-deps

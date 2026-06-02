@@ -55,7 +55,7 @@ members = [
     "examples/rc-jet/controller",
     "libs/bevy_geo_frames",
     "libs/bevy_mat3_material",
-    "libs/world_mesh",
+    "libs/bevy_world_mesh",
     "libs/bevy_ai_skybox",
     "libs/cranelift-mlir",
  ]

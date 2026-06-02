@@ -1,8 +1,8 @@
 use bevy::{
     prelude::*, reflect::TypePath, render::render_resource::AsBindGroup, shader::ShaderRef,
 };
-use world_mesh::prelude::{TerrainMaterialPlugin, TerrainPlugin};
-use world_mesh::terrain::{
+use bevy_world_mesh::prelude::{TerrainMaterialPlugin, TerrainPlugin};
+use bevy_world_mesh::terrain::{
     terrain_data::{tile_atlas::TileAtlas, tile_tree::TileTree},
     terrain_view::{TerrainViewComponents, TerrainViewConfig},
 };

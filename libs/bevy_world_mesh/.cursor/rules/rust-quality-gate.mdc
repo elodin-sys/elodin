@@ -1,0 +1,21 @@
+---
+description: Rust formatting + clippy quality gate for every code change in this workspace
+alwaysApply: true
+---
+
+# Rust quality gate
+
+Every crate in this workspace -- `world_mesh`, `app_plugin`, `bevy_terrain` -- is ours. After any Rust edit, even a one-line change, run both commands below from inside the nix dev shell before declaring the task complete. Treat a failure on either as "the change is not done yet".
+
+```bash
+nix develop --command cargo fmt --all
+nix develop --command cargo clippy --workspace --all-targets -- -Dwarnings
+```
+
+- `cargo fmt --all` is idempotent; always run it, never let the tree have un-formatted Rust.
+- `cargo clippy ... -Dwarnings` must exit 0 across the whole workspace. Any new warning in any crate is a real issue to fix, not a category to `allow`.
+- The one exception in the tree today is `#![allow(dead_code)]` at the crate root of [`crates/bevy_terrain/src/lib.rs`](crates/bevy_terrain/src/lib.rs), scoped by a comment that explains it silences `encase::ShaderType`-generated module-level `check()` functions that rustc can't prove are used. If you introduce a new lint category that genuinely cannot be fixed (macro-generated code, a false positive from a fresh rustc release, etc.), prefer a *targeted* silencing: `#[allow(clippy::specific_lint)]` on the single expression, then the module, then -- last resort -- a crate-root `#![allow(...)]` with a paragraph explaining why. Never resort to `[lints]` allow-by-default in `Cargo.toml`.
+- `cargo fmt` should run before `cargo clippy` so clippy sees the final formatting.
+- Both commands need the nix dev shell because clang / pkg-config / etc. live there. Running them outside `nix develop` will fail for reasons unrelated to code quality.
+
+If an edit is only to Markdown, TOML, or shell scripts, this rule does not apply. But as soon as a `.rs` file has been touched, both commands run again.

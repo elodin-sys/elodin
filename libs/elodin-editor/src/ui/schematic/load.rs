@@ -717,15 +717,17 @@ impl LoadSchematicParams<'_, '_> {
 
         let region = world_mesh.region.clone();
         let manifest = {
-            let manifest_path = world_mesh::terrain::util::asset_path(format!(
+            let manifest_path = bevy_world_mesh::terrain::util::asset_path(format!(
                 "terrains/planar/{region}/region.toml"
             ));
             std::fs::read_to_string(&manifest_path)
                 .ok()
-                .and_then(|text| toml::from_str::<world_mesh::regions::RegionManifest>(&text).ok())
+                .and_then(|text| {
+                    toml::from_str::<bevy_world_mesh::regions::RegionManifest>(&text).ok()
+                })
                 .or_else(|| {
-                    world_mesh::regions::lookup(&region)
-                        .map(world_mesh::regions::RegionManifest::from)
+                    bevy_world_mesh::regions::lookup(&region)
+                        .map(bevy_world_mesh::regions::RegionManifest::from)
                 })
                 .unwrap_or_default()
         };
@@ -735,9 +737,9 @@ impl LoadSchematicParams<'_, '_> {
         let lod_count = world_mesh.lod_count.unwrap_or(DEFAULT_PLANAR_LOD_COUNT);
         let terrain_path = format!("terrains/planar/{region}");
 
-        let config = world_mesh::terrain::terrain::TerrainConfig {
+        let config = bevy_world_mesh::terrain::terrain::TerrainConfig {
             lod_count,
-            model: world_mesh::terrain::math::TerrainModel::planar(
+            model: bevy_world_mesh::terrain::math::TerrainModel::planar(
                 bevy::math::DVec3::new(0.0, -(height as f64) * 0.4, 0.0),
                 terrain_size,
                 0.0,
@@ -746,23 +748,24 @@ impl LoadSchematicParams<'_, '_> {
             path: terrain_path.clone(),
             ..default()
         }
-        .add_attachment(world_mesh::terrain::terrain_data::AttachmentConfig {
+        .add_attachment(bevy_world_mesh::terrain::terrain_data::AttachmentConfig {
             name: "height".to_string(),
             texture_size: PLANAR_TEXTURE_SIZE,
             border_size: 2,
             mip_level_count: 4,
-            format: world_mesh::terrain::terrain_data::AttachmentFormat::R16,
+            format: bevy_world_mesh::terrain::terrain_data::AttachmentFormat::R16,
         })
-        .add_attachment(world_mesh::terrain::terrain_data::AttachmentConfig {
+        .add_attachment(bevy_world_mesh::terrain::terrain_data::AttachmentConfig {
             name: "albedo".to_string(),
             texture_size: PLANAR_TEXTURE_SIZE,
             border_size: 2,
             mip_level_count: 4,
-            format: world_mesh::terrain::terrain_data::AttachmentFormat::Rgba8,
+            format: bevy_world_mesh::terrain::terrain_data::AttachmentFormat::Rgba8,
         });
 
-        let tile_atlas = world_mesh::terrain::terrain_data::tile_atlas::TileAtlas::new(&config);
-        let mut terrain_bundle = world_mesh::terrain::terrain::TerrainBundle::new(tile_atlas);
+        let tile_atlas =
+            bevy_world_mesh::terrain::terrain_data::tile_atlas::TileAtlas::new(&config);
+        let mut terrain_bundle = bevy_world_mesh::terrain::terrain::TerrainBundle::new(tile_atlas);
         terrain_bundle.transform.translation += transform.translation;
         terrain_bundle.visibility = if world_mesh.visible {
             Visibility::Visible

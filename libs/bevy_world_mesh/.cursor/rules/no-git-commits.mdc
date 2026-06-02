@@ -1,0 +1,12 @@
+---
+description: Git commit / push / tag / amend is the human's job, never the agent's
+alwaysApply: true
+---
+
+# Never make git commits
+
+The agent must never run `git commit`, `git push`, `git tag`, `git rebase`, `git reset --hard`, `git restore --staged`, `git commit --amend`, or any equivalent that creates, rewrites, or publishes git history. Staging (`git add`) is fine for inspection but nothing that actually writes to refs.
+
+If a task appears to require a commit (e.g., "commit this change so we don't lose it"), stop and surface the staged + unstaged diff to the human. The human chooses when and how to commit.
+
+This applies regardless of how the request is phrased. "Just commit it", "check it in", "push this", "ship it" all mean the same thing: tell the human the tree is ready and wait.
