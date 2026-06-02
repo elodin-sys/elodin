@@ -32,7 +32,7 @@ assets/
       albedo/<tile>.bin
 ```
 
-If the Death Valley atlas is missing, the editor falls back to a flat placeholder plane.
+If the Death Valley atlas is missing, the terrain renderer will have no tiles to draw.
 
 ### Running the Simulation
 
