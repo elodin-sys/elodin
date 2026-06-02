@@ -18,6 +18,54 @@ use tracing::{info, warn};
 use crate::World;
 use crate::exec::WorldExec;
 
+fn resolve_asset_file(logical_path: &str) -> Option<std::path::PathBuf> {
+    use std::env;
+    use std::path::{Path, PathBuf};
+
+    let logical = Path::new(logical_path);
+    if logical.is_absolute() && logical.is_file() {
+        return Some(logical.to_path_buf());
+    }
+
+    if let Ok(dir) = env::var("ELODIN_ASSETS_DIR") {
+        let candidate = PathBuf::from(dir).join(logical_path);
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+    }
+
+    if let Ok(cwd) = env::current_dir() {
+        let assets_candidate = cwd.join("assets").join(logical_path);
+        if assets_candidate.is_file() {
+            return Some(assets_candidate);
+        }
+        let cwd_candidate = cwd.join(logical_path);
+        if cwd_candidate.is_file() {
+            return Some(cwd_candidate);
+        }
+    }
+
+    None
+}
+
+fn upload_world_assets(db: &elodin_db::DB, world: &World) -> Result<(), elodin_db::Error> {
+    for logical_path in &world.metadata.assets {
+        let Some(file_path) = resolve_asset_file(logical_path) else {
+            warn!(logical_path, "could not resolve simulation asset on disk");
+            continue;
+        };
+        let bytes = std::fs::read(&file_path)?;
+        db.put_asset(
+            logical_path,
+            &elodin_db::asset_store::media_type_from_path(logical_path),
+            &bytes,
+            Some(file_path.to_string_lossy().as_ref()),
+        )?;
+        info!(logical_path, file = ?file_path, "stored simulation asset in db");
+    }
+    Ok(())
+}
+
 pub struct Server {
     db: elodin_db::Server,
     world: WorldExec,
@@ -161,6 +209,8 @@ pub fn init_db(
         }
         Ok::<_, elodin_db::Error>(())
     })?;
+
+    upload_world_assets(db, world)?;
 
     const PLAYBACK_FREQUENCY: f64 = 60.0;
     let default_stream_time_step =

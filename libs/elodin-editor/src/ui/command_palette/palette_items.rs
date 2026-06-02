@@ -4,6 +4,7 @@ use std::{
     str::FromStr,
 };
 
+use crate::object_3d::Object3DAssetContext;
 use crate::plugins::kdl_document::{
     CurrentDocument, LastSyncedSchematicContent, SchematicDocumentAsset,
 };
@@ -1398,6 +1399,7 @@ fn create_object_3d_with_color(eql: String, expr: eql::Expr, mesh: Mesh) -> Pale
                     &mut mat3_material_assets,
                     &assets,
                     &geo_context,
+                    Object3DAssetContext::LOCAL,
                 );
 
                 PaletteEvent::Exit
@@ -1476,7 +1478,8 @@ pub fn create_3d_object() -> PaletteItem {
                                                     &mut mesh_assets,
                                                     &mut mat3_material_assets,
                                                     &assets,
-                                                    &geo_context
+                                                    &geo_context,
+                                                    Object3DAssetContext::LOCAL,
                                                 );
 
                                                 PaletteEvent::Exit

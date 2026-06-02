@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use std::{borrow::Cow, path::PathBuf, time::Duration};
 use std::{collections::HashMap, ops::Range};
 
-use crate::{LastUpdated, metadata::ComponentMetadata};
+use crate::{AssetManifest, LastUpdated, metadata::ComponentMetadata};
 
 #[derive(Serialize, Deserialize, Clone, postcard_schema::Schema)]
 pub struct VTableMsg {
@@ -410,6 +410,91 @@ pub struct ConnectionSettings {
 impl Msg for ConnectionSettings {
     const ID: PacketId = [224, 39];
 }
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct GetAssetManifest;
+
+impl Msg for GetAssetManifest {
+    const ID: PacketId = [224, 40];
+}
+
+impl Request for GetAssetManifest {
+    type Reply<B: IoBuf + Clone> = AssetManifestResp;
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct AssetManifestResp {
+    pub manifest: AssetManifest,
+}
+
+impl Msg for AssetManifestResp {
+    const ID: PacketId = [224, 41];
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct PutAssetBegin {
+    pub upload_id: u64,
+    pub logical_path: String,
+    pub media_type: String,
+    pub total_len: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub original_path: Option<String>,
+}
+
+impl Msg for PutAssetBegin {
+    const ID: PacketId = [224, 42];
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct PutAssetChunk {
+    pub upload_id: u64,
+    pub offset: u64,
+    pub data: Vec<u8>,
+}
+
+impl Msg for PutAssetChunk {
+    const ID: PacketId = [224, 43];
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct PutAssetCommit {
+    pub upload_id: u64,
+}
+
+impl Msg for PutAssetCommit {
+    const ID: PacketId = [224, 44];
+}
+
+impl Request for PutAssetCommit {
+    type Reply<B: IoBuf + Clone> = AssetManifestResp;
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct GetAsset {
+    pub logical_path: String,
+}
+
+impl Msg for GetAsset {
+    const ID: PacketId = [224, 45];
+}
+
+impl Request for GetAsset {
+    type Reply<B: IoBuf + Clone> = AssetChunk;
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct AssetChunk {
+    pub logical_path: String,
+    pub offset: u64,
+    pub total_len: u64,
+    pub data: Vec<u8>,
+}
+
+impl Msg for AssetChunk {
+    const ID: PacketId = [224, 46];
+}
+
+pub const ASSET_CHUNK_SIZE: usize = 4 * 1024 * 1024;
 
 macro_rules! impl_user_data_msg {
     ($t: ty) => {

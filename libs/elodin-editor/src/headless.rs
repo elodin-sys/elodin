@@ -40,6 +40,8 @@ use impeller2_wkt::{
 };
 
 use crate::object_3d::create_object_3d_entity;
+use crate::object_3d::Object3DAssetContext;
+use crate::plugins::db_asset_source::DbAssetManifest;
 use crate::sensor_camera::{
     HeadlessMode, SensorCamera, SensorCameraConfigs, SensorCameraPlugin, SensorCameraRenderMetrics,
     SensorCamerasSpawned, set_cameras_active, set_readback_armed,
@@ -61,6 +63,7 @@ pub struct HeadlessEditorPlugin;
 impl Plugin for HeadlessEditorPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(crate::plugins::WebAssetPlugin)
+            .add_plugins(crate::plugins::DbAssetPlugin)
             .add_plugins(crate::plugins::env_asset_source::plugin)
             .add_plugins(
                 DefaultPlugins
@@ -173,6 +176,7 @@ fn load_headless_scene(
     mut mat3_materials: ResMut<Assets<Mat3Material>>,
     asset_server: Res<AssetServer>,
     geo_context: Res<GeoContext>,
+    db_asset_manifest: Res<DbAssetManifest>,
 ) {
     if *loaded {
         return;
@@ -198,6 +202,10 @@ fn load_headless_scene(
                 tracing::warn!("Failed to parse EQL for object_3d: {}", obj.eql);
                 continue;
             };
+            let asset_ctx = Object3DAssetContext {
+                db_content: true,
+                manifest: db_asset_manifest.0.as_ref(),
+            };
             let _ = create_object_3d_entity(
                 &mut commands,
                 obj.clone(),
@@ -208,6 +216,7 @@ fn load_headless_scene(
                 &mut mat3_materials,
                 &asset_server,
                 &geo_context,
+                asset_ctx,
             );
         }
     }

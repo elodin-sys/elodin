@@ -58,6 +58,7 @@ const RESPONSE_PACKET_CAPACITY: usize = 8 * 1024 * 1024;
 
 pub mod append_log;
 mod arrow;
+pub mod asset_store;
 #[cfg(feature = "axum")]
 pub mod axum;
 pub mod cancellation;
@@ -260,6 +261,8 @@ pub struct State {
 
     msg_logs: HashMap<PacketId, MsgLog>,
 
+    asset_uploads: HashMap<u64, asset_store::PendingAssetUpload>,
+
     vtable_registry: registry::HashMapRegistry,
     streams: HashMap<StreamId, Arc<FixedRateStreamState>>,
 
@@ -353,6 +356,30 @@ impl DB {
         db_state.write(self.path.join("db_state"))
     }
 
+    pub fn put_asset(
+        &self,
+        logical_path: &str,
+        media_type: &str,
+        bytes: &[u8],
+        original_path: Option<&str>,
+    ) -> Result<AssetEntry, Error> {
+        let mut store = asset_store::AssetStore::open(&self.path)?;
+        let entry = store.put_asset(logical_path, media_type, bytes, original_path)?;
+        self.with_state_mut(|state| store.sync_metadata(&mut state.db_config));
+        self.save_db_state()?;
+        Ok(entry)
+    }
+
+    pub fn get_asset(&self, logical_path: &str) -> Result<(AssetEntry, Vec<u8>), Error> {
+        let store = asset_store::AssetStore::open(&self.path)?;
+        store.get_asset(logical_path)
+    }
+
+    pub fn asset_manifest(&self) -> Result<AssetManifest, Error> {
+        let store = asset_store::AssetStore::open(&self.path)?;
+        Ok(store.asset_manifest())
+    }
+
     pub fn flush_all(&self) -> Result<(), Error> {
         self.with_state(|state| -> Result<(), Error> {
             // Ensure time-series data is fully flushed
@@ -440,7 +467,10 @@ impl DB {
         for elem in std::fs::read_dir(&path)? {
             let Ok(elem) = elem else { continue };
             let path = elem.path();
-            if !path.is_dir() || path.file_name() == Some(OsStr::new("msgs")) {
+            if !path.is_dir()
+                || path.file_name() == Some(OsStr::new("msgs"))
+                || path.file_name() == Some(OsStr::new("assets"))
+            {
                 trace!("Skipping non-component directory: {}", path.display());
                 continue;
             }
@@ -525,6 +555,9 @@ impl DB {
 
         info!(db.path = ?path, "opened db");
         let mut db_state = DbConfig::read(db_state_path)?;
+        if let Ok(store) = asset_store::AssetStore::open(&path) {
+            store.sync_metadata(&mut db_state);
+        }
         // Update the version that last opened this database
         db_state.set_version_last_opened(env!("CARGO_PKG_VERSION"));
         let now = Timestamp::now();
@@ -1752,6 +1785,11 @@ fn silent_connection_ignores_msg(id: PacketId) -> bool {
         GetMsgs::ID,
         VTableStream::ID,
         UdpVTableStream::ID,
+        GetAssetManifest::ID,
+        GetAsset::ID,
+        PutAssetBegin::ID,
+        PutAssetChunk::ID,
+        PutAssetCommit::ID,
         FollowStream::ID,
         TimestampedMsgStream::ID,
     ]
@@ -1976,6 +2014,75 @@ async fn handle_packet<A: AsyncWrite + Send + Sync + 'static>(
             });
             db.save_db_state()?;
             tx.send_msg(&db.db_config()).await?;
+        }
+        Packet::Msg(m) if m.id == GetAssetManifest::ID => {
+            let manifest = db.asset_manifest()?;
+            tx.send_msg(&AssetManifestResp { manifest }).await?;
+        }
+        Packet::Msg(m) if m.id == PutAssetBegin::ID => {
+            let begin = m.parse::<PutAssetBegin>()?;
+            if begin.upload_id == 0 {
+                return Err(Error::BadMessage);
+            }
+            db.with_state_mut(|state| {
+                state.asset_uploads.insert(
+                    begin.upload_id,
+                    asset_store::PendingAssetUpload {
+                        logical_path: begin.logical_path,
+                        media_type: begin.media_type,
+                        bytes: Vec::with_capacity(begin.total_len as usize),
+                        original_path: begin.original_path,
+                    },
+                );
+            });
+        }
+        Packet::Msg(m) if m.id == PutAssetChunk::ID => {
+            let chunk = m.parse::<PutAssetChunk>()?;
+            db.with_state_mut(|state| {
+                let upload = state
+                    .asset_uploads
+                    .get_mut(&chunk.upload_id)
+                    .ok_or(Error::AssetUploadNotFound(chunk.upload_id))?;
+                let end = chunk.offset as usize + chunk.data.len();
+                if upload.bytes.len() < end {
+                    upload.bytes.resize(end, 0);
+                }
+                upload.bytes[chunk.offset as usize..end].copy_from_slice(&chunk.data);
+                Ok::<_, Error>(())
+            })?;
+        }
+        Packet::Msg(m) if m.id == PutAssetCommit::ID => {
+            let PutAssetCommit { upload_id } = m.parse::<PutAssetCommit>()?;
+            let upload = db.with_state_mut(|state| {
+                state
+                    .asset_uploads
+                    .remove(&upload_id)
+                    .ok_or(Error::AssetUploadNotFound(upload_id))
+            })?;
+            db.put_asset(
+                &upload.logical_path,
+                &upload.media_type,
+                &upload.bytes,
+                upload.original_path.as_deref(),
+            )?;
+            let manifest = db.asset_manifest()?;
+            tx.send_msg(&AssetManifestResp { manifest }).await?;
+        }
+        Packet::Msg(m) if m.id == GetAsset::ID => {
+            let GetAsset { logical_path } = m.parse::<GetAsset>()?;
+            let (entry, bytes) = db.get_asset(&logical_path)?;
+            let total_len = entry.byte_len;
+            let mut offset = 0u64;
+            for chunk in bytes.chunks(ASSET_CHUNK_SIZE) {
+                tx.send_msg(&AssetChunk {
+                    logical_path: logical_path.clone(),
+                    offset,
+                    total_len,
+                    data: chunk.to_vec(),
+                })
+                .await?;
+                offset += chunk.len() as u64;
+            }
         }
         Packet::Msg(m) if m.id == GetEarliestTimestamp::ID => {
             tx.send_msg(&EarliestTimestamp(db.earliest_timestamp.latest()))

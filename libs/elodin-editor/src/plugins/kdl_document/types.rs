@@ -5,6 +5,13 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 use thiserror::Error;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum DocumentOrigin {
+    #[default]
+    LocalFile,
+    DbContent,
+}
+
 /// When set (e.g. by CLI `--kdl`), the path is applied to `DbConfig` once so that the schematic
 /// is loaded after connecting to the database.
 #[derive(Resource, Default)]
@@ -38,6 +45,7 @@ pub struct CurrentDocument {
     pub handle: Option<Handle<SchematicDocumentAsset>>,
     pub asset_path: Option<AssetPath<'static>>,
     pub save_path: Option<PathBuf>,
+    pub origin: DocumentOrigin,
     /// Asset IDs whose next reload event should be suppressed (e.g. after a save).
     /// Expanded lazily to include window sub-asset IDs in `emit_document_reloads`.
     pub(crate) suppress_ids: HashSet<AssetId<SchematicDocumentAsset>>,
@@ -48,6 +56,7 @@ impl CurrentDocument {
         self.handle = None;
         self.asset_path = None;
         self.save_path = None;
+        self.origin = DocumentOrigin::default();
         self.suppress_ids.clear();
     }
 
@@ -60,12 +69,14 @@ impl CurrentDocument {
         self.handle = Some(handle);
         self.asset_path = Some(asset_path);
         self.save_path = Some(save_path);
+        self.origin = DocumentOrigin::LocalFile;
     }
 
     pub fn set_unsaved_content(&mut self, save_path: Option<PathBuf>) {
         self.handle = None;
         self.asset_path = None;
         self.save_path = save_path;
+        self.origin = DocumentOrigin::DbContent;
         self.suppress_ids.clear();
     }
 

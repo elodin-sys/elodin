@@ -1493,6 +1493,16 @@ impl WorldBuilder {
         self.world.metadata.schematic = file_contents.or(default_content);
     }
 
+    /// Register a simulation asset to persist in Elodin-DB.
+    ///
+    /// The path is a logical asset name (for example `"f22.glb"`) resolved from
+    /// `ELODIN_ASSETS_DIR`, `./assets/`, or the current working directory.
+    pub fn asset(&mut self, path: String) {
+        if !self.world.metadata.assets.iter().any(|existing| existing == &path) {
+            self.world.metadata.assets.push(path);
+        }
+    }
+
     pub fn discover_components(&self, py: Python<'_>) -> Result<Py<PyAny>, Error> {
         // Create lists for components and entities
         let components = PyList::empty(py);

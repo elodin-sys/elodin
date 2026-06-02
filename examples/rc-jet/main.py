@@ -102,6 +102,9 @@ def setup_world(config: BDXConfig) -> tuple[el.World, el.EntityId, el.EntityId]:
         projection_color=[0.4, 1.0, 0.4, 0.1],
     )
 
+    world.asset("f22.glb")
+    world.asset("edu-450-v2-drone.glb")
+
     # Create schematic for visualization
     world.schematic(
         """

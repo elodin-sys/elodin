@@ -1,5 +1,6 @@
 mod asset_cache;
 pub(crate) mod camera_anchor;
+pub mod db_asset_source;
 pub mod editor_cam_input;
 pub mod editor_cam_touch;
 pub(crate) mod env_asset_source;
@@ -15,6 +16,7 @@ pub mod render_layer_alloc;
 pub mod view_cube;
 mod web_asset;
 
+pub use db_asset_source::DbAssetPlugin;
 pub use logical_key::{LogicalKeyPlugin, LogicalKeyState};
 pub use view_cube::{ViewCubeConfig, ViewCubeEvent, ViewCubePlugin};
 pub use web_asset::WebAssetPlugin;

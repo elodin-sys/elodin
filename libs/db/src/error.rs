@@ -39,6 +39,8 @@ pub enum Error {
     },
     #[error("postcard error {0}")]
     Postcard(#[from] postcard::Error),
+    #[error("json error {0}")]
+    Json(#[from] serde_json::Error),
     #[error("invalid component id")]
     InvalidComponentId,
     #[error("time travel - you tried to push a time stamp in the past")]
@@ -78,6 +80,17 @@ pub enum Error {
     Cancelled,
     #[error("write timeout (client not reading)")]
     WriteTimeout,
+    #[error("asset not found {0}")]
+    AssetNotFound(String),
+    #[error("invalid asset path: {0}")]
+    InvalidAssetPath(String),
+    #[error("asset blob missing for {logical_path} (hash {hash})")]
+    AssetBlobMissing {
+        logical_path: String,
+        hash: String,
+    },
+    #[error("asset upload not found {0}")]
+    AssetUploadNotFound(u64),
 }
 
 impl From<impeller2_stellar::Error> for Error {

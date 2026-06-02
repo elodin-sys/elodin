@@ -17,6 +17,7 @@ use smallvec::smallvec;
 
 use crate::icon_rasterizer::IconTextureCache;
 use crate::iter::JoinDisplayExt;
+use crate::plugins::db_asset_source::resolve_glb_asset_url;
 use crate::plugins::render_layer_alloc::RenderLayerLease;
 use crate::ui::tiles::ViewportConfig;
 use crate::{BevyExt, EqlContext, MainCamera, plugins::navigation_gizmo::NavGizmoCamera};
@@ -27,6 +28,19 @@ use std::collections::{HashMap, HashSet};
 use std::hash::BuildHasher;
 use std::sync::Arc;
 type ImportedCameraFilter = (Added<Camera>, Without<NavGizmoCamera>, Without<MainCamera>);
+
+#[derive(Clone, Copy)]
+pub struct Object3DAssetContext<'a> {
+    pub db_content: bool,
+    pub manifest: Option<&'a impeller2_wkt::AssetManifest>,
+}
+
+impl Object3DAssetContext<'_> {
+    pub const LOCAL: Self = Self {
+        db_content: false,
+        manifest: None,
+    };
+}
 
 type ImportedCameraQuery<'w, 's> = Query<'w, 's, (Entity, &'static ChildOf), ImportedCameraFilter>;
 
@@ -1447,6 +1461,7 @@ pub fn create_object_3d_entity(
     mat3_material_assets: &mut Assets<Mat3Material>,
     assets: &AssetServer,
     geo_context: &GeoContext,
+    asset_ctx: Object3DAssetContext<'_>,
 ) -> Result<Entity, CompileError> {
     let (scale_expr, scale_error) = match &data.mesh {
         impeller2_wkt::Object3DMesh::Ellipsoid {
@@ -1529,6 +1544,7 @@ pub fn create_object_3d_entity(
         mesh_assets,
         mat3_material_assets,
         assets,
+        asset_ctx,
     );
     Ok(entity_id)
 }
@@ -1602,6 +1618,7 @@ pub fn spawn_mesh(
     mesh_assets: &mut Assets<Mesh>,
     mat3_material_assets: &mut Assets<Mat3Material>,
     assets: &AssetServer,
+    asset_ctx: Object3DAssetContext<'_>,
 ) {
     match mesh {
         impeller2_wkt::Object3DMesh::Glb {
@@ -1611,7 +1628,7 @@ pub fn spawn_mesh(
             rotate,
             animations: _,
         } => {
-            let url = format!("{path}#Scene0");
+            let url = resolve_glb_asset_url(path, asset_ctx.db_content, asset_ctx.manifest);
             let scene = assets.load(&url);
 
             let translation = Vec3::new(translate.0, translate.1, translate.2);

@@ -25,9 +25,10 @@ use crate::ui::window::placement::apply_physical_screen_rect;
 use crate::{
     EqlContext, MainCamera,
     plugins::{
+        db_asset_source::DbAssetManifest,
         kdl_document::{
             CurrentDocument, DocumentCleared, DocumentCommandFailed, DocumentLoadFailed,
-            DocumentLoaded, DocumentReloaded, DocumentSaved, SchematicDocumentAsset,
+            DocumentLoaded, DocumentReloaded, DocumentSaved, DocumentOrigin, SchematicDocumentAsset,
             SchematicWindow,
         },
         render_layer_alloc::RenderLayerAllocator,
@@ -135,6 +136,7 @@ pub struct LoadSchematicParams<'w, 's> {
     window_states: Query<'w, 's, (Entity, &'static WindowId, &'static mut WindowState)>,
     pub schematic_bindings: ResMut<'w, super::SchematicBindings>,
     pub current_schematic: ResMut<'w, CurrentSchematic>,
+    pub db_asset_manifest: Res<'w, DbAssetManifest>,
 }
 
 fn apply_theme(theme: Option<&impeller2_wkt::ThemeConfig>) -> colors::SchemeSelection {
@@ -596,6 +598,10 @@ impl LoadSchematicParams<'_, '_> {
         };
         let icon = object_3d.icon.clone();
         let mesh_vr = object_3d.mesh_visibility_range.clone();
+        let asset_ctx = crate::object_3d::Object3DAssetContext {
+            db_content: self.current_document.origin == DocumentOrigin::DbContent,
+            manifest: self.db_asset_manifest.0.as_ref(),
+        };
         let result = crate::object_3d::create_object_3d_entity(
             &mut self.commands,
             object_3d.clone(),
@@ -606,6 +612,7 @@ impl LoadSchematicParams<'_, '_> {
             &mut self.mat3_materials,
             &self.asset_server,
             &self.geo_context,
+            asset_ctx,
         );
         match result {
             Ok(entity) => {

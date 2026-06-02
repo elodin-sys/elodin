@@ -15,8 +15,8 @@ use impeller2_wkt::{
 use smallvec::SmallVec;
 
 use crate::object_3d::{
-    CompileError, ComponentError, EllipsoidVisual, Object3DMeshChild, compile_cholesky_eql,
-    compile_scale_eql, spawn_mesh,
+    CompileError, ComponentError, EllipsoidVisual, Object3DAssetContext, Object3DMeshChild,
+    compile_cholesky_eql, compile_scale_eql, spawn_mesh,
 };
 use crate::ui::inspector::{eql_textfield, node_color_picker};
 use crate::{
@@ -542,6 +542,7 @@ impl WidgetSystem for InspectorObject3D<'_, '_> {
                     &mut mesh_assets,
                     &mut mat3_material_assets,
                     &assets,
+                    Object3DAssetContext::LOCAL,
                 );
             }
         });

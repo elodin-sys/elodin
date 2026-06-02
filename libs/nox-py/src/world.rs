@@ -63,6 +63,8 @@ pub struct WorldMetadata {
     pub schematic_path: Option<PathBuf>,
     pub schematic: Option<String>,
     #[serde(default)]
+    pub assets: Vec<String>,
+    #[serde(default)]
     pub sensor_cameras: Vec<SensorCameraConfig>,
 }
 
@@ -82,6 +84,7 @@ impl Default for WorldMetadata {
             max_tick: u64::MAX,
             schematic: None,
             schematic_path: None,
+            assets: Vec::new(),
             sensor_cameras: Vec::new(),
         }
     }

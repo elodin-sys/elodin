@@ -115,6 +115,7 @@ tokio.optional = true
 postcard-c-codegen.path = "../postcard-c/codegen"
 hostname = "0.4.1"
 reflink-copy = "0.1.28"
+blake3 = "1"
 
 # video export
 muxide = { workspace = true, optional = true }

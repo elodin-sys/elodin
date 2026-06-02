@@ -36,7 +36,7 @@ use impeller2_bevy::{
 use impeller2_wkt::{CurrentTimestamp, NewConnection, Object3D, WorldPos};
 use impeller2_wkt::{EarliestTimestamp, LastUpdated};
 use nox::Tensor;
-use object_3d::create_object_3d_entity;
+use object_3d::{create_object_3d_entity, Object3DAssetContext};
 use plugins::frustum::FrustumPlugin;
 use plugins::frustum_intersection::FrustumIntersectionPlugin;
 use plugins::gizmos::GizmoPlugin;
@@ -209,6 +209,7 @@ impl Plugin for EditorPlugin {
         app
             // .insert_resource(AssetMetaCheck::Never)
             .add_plugins(plugins::WebAssetPlugin)
+            .add_plugins(plugins::DbAssetPlugin)
             .add_plugins(plugins::env_asset_source::plugin)
             .add_plugins(plugins::kdl_asset_source::plugin)
             .add_plugins(
@@ -1228,6 +1229,7 @@ pub fn sync_object_3d(
             &mut mat3_material_assets,
             &assets,
             &geo_context,
+            Object3DAssetContext::LOCAL,
         ) {
             synced_object_3d.0.insert(entity, object_entity);
         }
