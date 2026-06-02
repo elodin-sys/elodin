@@ -8,12 +8,11 @@
 //! `TerrainModel::ellipsoid` (semi-major 6 378 137 m, semi-minor
 //! 6 356 752.314 245 m) instead of `TerrainModel::planar`, and the camera
 //! is parked at `RADIUS * camera_distance_radii` along -X for an orbital
-//! marble shot. Both paths share `WorldMeshMaterial` and
-//! `assets/shaders/world_mesh.wgsl` — `bevy_terrain` injects the
-//! `SPHERICAL` shader_def automatically based on `gpu_tile_atlas.is_spherical`.
+//! marble shot. Both paths share `WorldMeshMaterial`; `bevy_terrain` injects
+//! the `SPHERICAL` shader_def automatically based on
+//! `gpu_tile_atlas.is_spherical`.
 
 use crate::prelude::*;
-use crate::scenes::planar::WorldMeshMaterial;
 use bevy::math::DVec3;
 use bevy::pbr::MeshMaterial3d;
 use bevy::prelude::*;
@@ -164,8 +163,7 @@ impl Plugin for GlobeScenePlugin {
                     })
                     .build()
                     .disable::<TransformPlugin>(),
-                TerrainPlugin,
-                TerrainMaterialPlugin::<WorldMeshMaterial>::default(),
+                WorldMeshPlugin,
                 TerrainDebugPlugin,
                 EnvScreenshotPlugin,
             ))

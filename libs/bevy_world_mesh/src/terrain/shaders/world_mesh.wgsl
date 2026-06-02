@@ -1,5 +1,5 @@
-// World Mesh fragment shader — the "thesis-grade" surface render for the
-// top-level world_mesh app. Pulls colour out of attachment 1 (albedo) instead
+// World Mesh fragment shader — the default surface render for bevy_world_mesh.
+// Pulls colour out of attachment 1 (albedo) instead
 // of sampling a 1D gradient LUT, then routes through bevy_terrain's
 // fragment_output (PBR lighting) and fragment_debug (debug-overlay support).
 //

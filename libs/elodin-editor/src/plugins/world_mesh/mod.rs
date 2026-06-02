@@ -1,7 +1,5 @@
-use bevy::{
-    prelude::*, reflect::TypePath, render::render_resource::AsBindGroup, shader::ShaderRef,
-};
-use bevy_world_mesh::prelude::{TerrainMaterialPlugin, TerrainPlugin};
+use bevy::prelude::*;
+use bevy_world_mesh::prelude::WorldMeshPlugin as BevyWorldMeshRendererPlugin;
 use bevy_world_mesh::terrain::{
     terrain_data::{tile_atlas::TileAtlas, tile_tree::TileTree},
     terrain_view::{TerrainViewComponents, TerrainViewConfig},
@@ -9,45 +7,20 @@ use bevy_world_mesh::terrain::{
 
 use crate::MainCamera;
 
-/// Material used by Elodin's editor-hosted world mesh.
-///
-/// The renderer itself comes from the real `world_mesh` crate. This material is
-/// intentionally tiny: it points the terrain renderer at the world-mesh fragment
-/// shader, which samples height/albedo attachments from the atlas.
-#[derive(Asset, AsBindGroup, TypePath, Clone, Default)]
-pub struct WorldMeshMaterial {}
-
-impl Material for WorldMeshMaterial {
-    fn fragment_shader() -> ShaderRef {
-        "shaders/world_mesh.wgsl".into()
-    }
-
-    fn enable_prepass() -> bool {
-        false
-    }
-
-    fn enable_shadows() -> bool {
-        false
-    }
-}
-
 /// Marker for terrain entities spawned from a schematic `world_mesh` element.
 #[derive(Component)]
 pub struct WorldMeshTerrain;
 
-/// Editor integration layer for the real `world_mesh` terrain renderer.
+/// Editor integration layer for the real `bevy_world_mesh` terrain renderer.
 ///
-/// The editor always links the terrain renderer so a schematic can opt in to
-/// spawning a `world_mesh` element without requiring a cargo feature.
-pub struct WorldMeshPlugin;
+/// The renderer/material plugin lives in `bevy_world_mesh`; this editor plugin
+/// only adds Elodin-specific dynamic viewport wiring.
+pub struct EditorWorldMeshPlugin;
 
-impl Plugin for WorldMeshPlugin {
+impl Plugin for EditorWorldMeshPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins((
-            TerrainPlugin,
-            TerrainMaterialPlugin::<WorldMeshMaterial>::default(),
-        ))
-        .add_systems(Update, sync_terrain_view_components);
+        app.add_plugins(BevyWorldMeshRendererPlugin)
+            .add_systems(Update, sync_terrain_view_components);
     }
 }
 

@@ -302,11 +302,11 @@ the helper `instantiate_layout(device, &desc)` in
 
 ### WorldMeshMaterial
 
-Defined in [`src/scenes/planar.rs`](src/scenes/planar.rs).
+Defined in [`src/terrain/render/world_mesh_material.rs`](src/terrain/render/world_mesh_material.rs).
 An `AsBindGroup` + `Material` with zero bindings of its own — it simply
-declares a custom fragment shader:
+declares the embedded custom fragment shader:
 
-[`assets/shaders/world_mesh.wgsl`](assets/shaders/world_mesh.wgsl)
+[`src/terrain/shaders/world_mesh.wgsl`](src/terrain/shaders/world_mesh.wgsl)
 
 That shader imports `bevy_terrain::attachments::sample_attachment1` (the
 albedo atlas layer) and routes the sampled colour through
@@ -456,7 +456,7 @@ These are defined in
 ├── examples/                  upstream-style demos: minimal, planar, spherical,
 │                              preprocess_planar, preprocess_spherical
 ├── assets/
-│   ├── shaders/               world_mesh.wgsl + example shaders (planar, spherical)
+│   ├── shaders/               example shaders (planar, spherical)
 │   ├── textures/              gradient LUTs for the example materials
 │   └── terrains/              tile atlases (gitignored, built by preprocess)
 ├── scripts/                   render_region.sh, render_globe.sh, run_examples.sh, …

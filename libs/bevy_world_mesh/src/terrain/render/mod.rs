@@ -10,6 +10,7 @@ pub mod terrain_bind_group;
 pub mod terrain_material;
 pub mod terrain_view_bind_group;
 pub mod tiling_prepass;
+pub mod world_mesh_material;
 
 use bevy::render::{
     render_resource::{BindGroupLayout, BindGroupLayoutDescriptor},

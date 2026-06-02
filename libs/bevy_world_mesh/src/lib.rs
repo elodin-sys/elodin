@@ -11,8 +11,8 @@
 //!
 //! # Feature flags
 //!
-//! - `terrain` (default) — core renderer: `TerrainPlugin`, `TerrainBundle`,
-//!   `TerrainConfig`, `TerrainMaterialPlugin<M>`, `TileAtlas`, `TileTree`,
+//! - `terrain` (default) — core renderer: `WorldMeshPlugin`, `TerrainPlugin`,
+//!   `TerrainBundle`, `TerrainConfig`, `TerrainMaterialPlugin<M>`, `TileAtlas`, `TileTree`,
 //!   `TerrainModel`, `Preprocessor`, `TerrainPreprocessPlugin`. Minimal
 //!   dependency set (no HTTP, no TIFF, no toml/serde).
 //! - `high_precision` — enables the [`big_space`] integration (double-
@@ -44,7 +44,7 @@
 //!
 //! fn main() {
 //!     App::new()
-//!         .add_plugins((DefaultPlugins, TerrainPlugin))
+//!         .add_plugins((DefaultPlugins, WorldMeshPlugin))
 //!         .run();
 //! }
 //! ```
@@ -80,12 +80,12 @@ pub mod prelude {
             TerrainDebugPlugin,
         },
         math::TerrainModel,
-        plugin::TerrainPlugin,
+        plugin::{TerrainPlugin, WorldMeshPlugin},
         preprocess::{
             preprocessor::{PreprocessDataset, Preprocessor, SphericalDataset},
             TerrainPreprocessPlugin,
         },
-        render::terrain_material::TerrainMaterialPlugin,
+        render::{terrain_material::TerrainMaterialPlugin, world_mesh_material::WorldMeshMaterial},
         terrain::{TerrainBundle, TerrainConfig},
         terrain_data::{
             tile_atlas::TileAtlas, tile_tree::TileTree, AttachmentConfig, AttachmentFormat,
@@ -96,7 +96,7 @@ pub mod prelude {
     #[cfg(feature = "scenes")]
     pub use crate::scenes::{
         globe::{GlobeManifest, GlobeScenePlugin},
-        planar::{PlanarScenePlugin, WorldMeshMaterial},
+        planar::PlanarScenePlugin,
     };
 
     #[cfg(feature = "regions")]

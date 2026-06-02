@@ -119,7 +119,7 @@ pub struct LoadSchematicParams<'w, 's> {
     pub document_assets: Res<'w, Assets<SchematicDocumentAsset>>,
     pub meshes: ResMut<'w, Assets<Mesh>>,
     pub materials: ResMut<'w, Assets<StandardMaterial>>,
-    pub world_mesh_materials: ResMut<'w, Assets<crate::plugins::world_mesh::WorldMeshMaterial>>,
+    pub world_mesh_materials: ResMut<'w, Assets<bevy_world_mesh::prelude::WorldMeshMaterial>>,
     pub mat3_materials: ResMut<'w, Assets<Mat3Material>>,
     pub images: ResMut<'w, Assets<Image>>,
     pub icon_cache: ResMut<'w, IconTextureCache>,
@@ -775,7 +775,7 @@ impl LoadSchematicParams<'_, '_> {
 
         let material = self
             .world_mesh_materials
-            .add(crate::plugins::world_mesh::WorldMeshMaterial {});
+            .add(bevy_world_mesh::prelude::WorldMeshMaterial::default());
 
         let entity = self
             .commands

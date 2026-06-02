@@ -5,12 +5,10 @@
 
 use crate::prelude::*;
 use crate::regions::RegionManifest;
-use bevy::asset::Asset;
+pub use crate::terrain::render::world_mesh_material::WorldMeshMaterial;
 use bevy::math::DVec3;
-use bevy::pbr::{Material, MeshMaterial3d};
+use bevy::pbr::MeshMaterial3d;
 use bevy::prelude::*;
-use bevy::reflect::TypePath;
-use bevy::{render::render_resource::AsBindGroup, shader::ShaderRef};
 
 /// Per-region atlas path (relative to `assets/`). Multiple regions coexist
 /// under `terrains/planar/<region>/` so swapping between them doesn't wipe
@@ -30,28 +28,6 @@ pub const TEXTURE_SIZE: u32 = 512;
 /// OUTPUT_SIZE=4096. Default `atlas_size=1024` comfortably fits
 /// (4^5 - 1) / 3 = 341 total tiles.
 pub const LOD_COUNT: u32 = 5;
-
-/// Custom Material for the top-level `world_mesh` app. It carries no per-
-/// material bindings of its own — the heightmap and albedo come straight out
-/// of bevy_terrain's attachment 0 / attachment 1 — so the shader is a thin
-/// wrapper that just routes `sample_albedo` into PBR.
-#[derive(Asset, AsBindGroup, TypePath, Clone, Default)]
-pub struct WorldMeshMaterial {}
-
-impl Material for WorldMeshMaterial {
-    fn fragment_shader() -> ShaderRef {
-        "shaders/world_mesh.wgsl".into()
-    }
-
-    // Bevy 0.18 (PR#20999) moved prepass + shadows control off
-    // `MaterialPlugin` onto the trait. Terrain doesn't need either.
-    fn enable_prepass() -> bool {
-        false
-    }
-    fn enable_shadows() -> bool {
-        false
-    }
-}
 
 /// End-to-end scene plugin for planar terrain. Reads the active region's
 /// `region.toml` manifest, boots up the renderer with the right terrain
@@ -79,8 +55,7 @@ impl Plugin for PlanarScenePlugin {
                     })
                     .build()
                     .disable::<TransformPlugin>(),
-                TerrainPlugin,
-                TerrainMaterialPlugin::<WorldMeshMaterial>::default(),
+                WorldMeshPlugin,
                 TerrainDebugPlugin,
                 EnvScreenshotPlugin,
             ))

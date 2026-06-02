@@ -36,11 +36,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`scenes` depends on `regions`, not vice versa).
 - Reduced `sample_height` visibility from `pub` to `pub(crate)` (it has
   no external users).
-- Consolidated `assets/shaders/` — the upstream example shaders
-  (`planar.wgsl`, `spherical.wgsl`) now live alongside
-  `world_mesh.wgsl` under the top-level `assets/shaders/`.
+- Kept `assets/shaders/` for upstream example shaders
+  (`planar.wgsl`, `spherical.wgsl`); the default `world_mesh.wgsl`
+  material shader is embedded under `src/terrain/shaders/`.
 - Embedded shader URLs moved from `embedded://bevy_terrain/shaders/...`
-  to `embedded://world_mesh/terrain/shaders/...` to match the new crate
+  to `embedded://bevy_world_mesh/terrain/shaders/...` to match the new crate
   name + module layout.
 
 ### Added

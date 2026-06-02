@@ -3,11 +3,13 @@ use crate::terrain::{
     render::{
         culling_bind_group::CullingBindGroup,
         terrain_bind_group::TerrainData,
+        terrain_material::TerrainMaterialPlugin,
         terrain_view_bind_group::TerrainViewData,
         tiling_prepass::{
             queue_tiling_prepass, TilingPrepassItem, TilingPrepassLabel, TilingPrepassNode,
             TilingPrepassPipelines,
         },
+        world_mesh_material::WorldMeshMaterial,
     },
     shaders::{load_terrain_shaders, InternalShaders},
     terrain::TerrainComponents,
@@ -24,6 +26,22 @@ use bevy::{
         RenderSystems,
     },
 };
+
+/// The default world-mesh renderer plugin.
+///
+/// This installs the terrain renderer and the crate-provided
+/// [`WorldMeshMaterial`]. Host applications that need custom camera/view wiring
+/// can add their own systems on top of this plugin.
+pub struct WorldMeshPlugin;
+
+impl Plugin for WorldMeshPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_plugins((
+            TerrainPlugin,
+            TerrainMaterialPlugin::<WorldMeshMaterial>::default(),
+        ));
+    }
+}
 
 /// The plugin for the terrain renderer.
 pub struct TerrainPlugin;

@@ -10,6 +10,8 @@ pub const DEFAULT_VERTEX_SHADER: &str =
     "embedded://bevy_world_mesh/terrain/shaders/render/vertex.wgsl";
 pub const DEFAULT_FRAGMENT_SHADER: &str =
     "embedded://bevy_world_mesh/terrain/shaders/render/fragment.wgsl";
+pub const WORLD_MESH_FRAGMENT_SHADER: &str =
+    "embedded://bevy_world_mesh/terrain/shaders/world_mesh.wgsl";
 pub const PREPARE_PREPASS_SHADER: &str =
     "embedded://bevy_world_mesh/terrain/shaders/tiling_prepass/prepare_prepass.wgsl";
 pub const REFINE_TILES_SHADER: &str =
@@ -44,6 +46,7 @@ pub(crate) fn load_terrain_shaders(app: &mut App) {
     embedded_asset!(app, "debug.wgsl");
     embedded_asset!(app, "render/vertex.wgsl");
     embedded_asset!(app, "render/fragment.wgsl");
+    embedded_asset!(app, "world_mesh.wgsl");
     embedded_asset!(app, "tiling_prepass/prepare_prepass.wgsl");
     embedded_asset!(app, "tiling_prepass/refine_tiles.wgsl");
 
@@ -57,6 +60,7 @@ pub(crate) fn load_terrain_shaders(app: &mut App) {
             "embedded://bevy_world_mesh/terrain/shaders/debug.wgsl",
             "embedded://bevy_world_mesh/terrain/shaders/render/vertex.wgsl",
             "embedded://bevy_world_mesh/terrain/shaders/render/fragment.wgsl",
+            WORLD_MESH_FRAGMENT_SHADER,
         ],
     );
 }
