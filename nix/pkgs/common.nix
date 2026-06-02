@@ -99,6 +99,16 @@
     gcc
   ];
 
+  # nixpkgs currently marks ktx-tools as Linux-only, but KTX-Software builds and
+  # runs on Darwin. The editor needs toktx at runtime for generated KTX2 skyboxes.
+  ktxTools = pkgs.ktx-tools.overrideAttrs (old: {
+    meta =
+      old.meta
+      // {
+        platforms = old.meta.platforms ++ lib.platforms.darwin;
+      };
+  });
+
   # Function to create Linux library path
   makeLinuxLibraryPath = {pkgs}:
     lib.makeLibraryPath (with pkgs; [

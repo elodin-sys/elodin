@@ -1,0 +1,23 @@
+[package]
+name = "bevy_ai_skybox"
+license = "MIT OR Apache-2.0"
+description = "Cached cubemap skybox loader and Blockade generation for Elodin"
+version.workspace = true
+edition = "2024"
+publish = false
+
+[dependencies]
+bevy.workspace = true
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+image = { version = "0.25", default-features = false, features = ["jpeg", "png"] }
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls"] }
+ron = "0.10"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tracing = "0.1"
+
+[[bin]]
+name = "pack_skybox_assets"
+path = "src/bin/pack_skybox_assets.rs"
+required-features = []

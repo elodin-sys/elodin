@@ -325,6 +325,40 @@ impl DbConfig {
         self.metadata.get("schematic.content").map(String::as_str)
     }
 
+    pub fn set_skybox_active(&mut self, name: Option<&str>) {
+        match name {
+            Some(name) => {
+                self.metadata
+                    .insert("skybox.active".to_string(), name.to_string());
+            }
+            None => {
+                self.metadata.remove("skybox.active");
+            }
+        }
+    }
+
+    pub fn skybox_active(&self) -> Option<&str> {
+        self.metadata
+            .get("skybox.active")
+            .filter(|name| !name.is_empty())
+            .map(String::as_str)
+    }
+
+    /// Headless/render-server skybox intent from metadata alone.
+    ///
+    /// - `None` — key absent (no opinion; fall back to `schematic.content` if present)
+    /// - `Some(None)` — key present but empty (explicit clear)
+    /// - `Some(Some(name))` — active skybox name
+    pub fn skybox_active_desired(&self) -> Option<Option<String>> {
+        self.metadata.get("skybox.active").map(|raw| {
+            if raw.is_empty() {
+                None
+            } else {
+                Some(raw.clone())
+            }
+        })
+    }
+
     pub fn set_time_start_timestamp_micros(&mut self, timestamp: i64) {
         self.metadata.insert(
             Self::TIME_START_TIMESTAMP_KEY.to_string(),
@@ -367,6 +401,16 @@ impl Msg for NewConnection {
     const ID: PacketId = [225, 1];
 }
 
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+pub struct ConnectionSettings {
+    /// When true, the server sends no replies on this connection.
+    pub silent: bool,
+}
+
+impl Msg for ConnectionSettings {
+    const ID: PacketId = [224, 39];
+}
+
 macro_rules! impl_user_data_msg {
     ($t: ty) => {
         #[cfg(feature = "mlua")]
@@ -394,6 +438,7 @@ impl_user_data_msg!(Stream);
 impl_user_data_msg!(MsgStream);
 impl_user_data_msg!(SetStreamState);
 impl_user_data_msg!(SetComponentMetadata);
+impl_user_data_msg!(ConnectionSettings);
 impl_user_data_msg!(UdpUnicast);
 impl_user_data_msg!(UdpVTableStream);
 
@@ -711,4 +756,26 @@ impl Msg for TimestampedMsgStream {
 #[derive(Serialize, Deserialize, Default, Debug, Clone, postcard_schema::Schema)]
 pub struct MeanOp {
     pub window: u16,
+}
+
+#[cfg(test)]
+mod skybox_metadata_tests {
+    use super::DbConfig;
+
+    #[test]
+    fn skybox_active_desired_distinguishes_clear_from_missing_key() {
+        let mut config = DbConfig::default();
+        assert!(config.skybox_active_desired().is_none());
+
+        config
+            .metadata
+            .insert("skybox.active".to_string(), String::new());
+        assert_eq!(config.skybox_active_desired(), Some(None));
+
+        config.set_skybox_active(Some("seaport"));
+        assert_eq!(
+            config.skybox_active_desired(),
+            Some(Some("seaport".to_string()))
+        );
+    }
 }

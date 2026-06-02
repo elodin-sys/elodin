@@ -17,6 +17,7 @@
 #include <cmath>
 #include <cstddef>
 #include <iostream>
+#include <memory>
 #include <print>
 #include <system_error>
 #include <thread>
@@ -99,6 +100,24 @@ public:
         return res;
     }
 
+    void drain_replies(const char* label)
+    {
+        try {
+            auto pending = std::vector<uint8_t>();
+            while (true) {
+                auto data = std::vector<uint8_t>(1024);
+                auto len = read(data.data(), data.size());
+                if (len == 0) {
+                    std::println("{}: connection closed", label);
+                    break;
+                }
+                log_elodin_db_replies(pending, std::span(data.data(), len), label);
+            }
+        } catch (const std::exception& e) {
+            std::cerr << label << " error: " << e.what() << std::endl;
+        }
+    }
+
 private:
     int fd_ = -1;
 };
@@ -132,7 +151,11 @@ try {
     const uint16_t port = 2240;
 
     std::println("Connecting writer socket (batched mode)");
-    auto sock = Socket(ip, port);
+    auto sock = std::make_shared<Socket>(ip, port);
+    std::thread writer_replies([sock] {
+        sock->drain_replies("Writer replies");
+    });
+    writer_replies.detach();
 
     // One VTable with all 6 sensor components sharing a single time source.
     // The server decomposes this into individual time series on write.
@@ -146,18 +169,19 @@ try {
         field<SensorData, &SensorData::humidity>(schema(PrimType::F32(), {}, timestamp(time, component("vehicle.humidity")))),
     });
 
-    sock.send(VTableMsg {
+    sock->send(set_component_metadata("vehicle.imu.mag", {"x", "y", "z"}));
+    sock->send(set_component_metadata("vehicle.imu.gyro", {"x", "y", "z"}));
+    sock->send(set_component_metadata("vehicle.imu.accel", {"x", "y", "z"}));
+    sock->send(set_component_metadata("vehicle.temp"));
+    sock->send(set_component_metadata("vehicle.pressure"));
+    sock->send(set_component_metadata("vehicle.humidity"));
+    sock->send(VTableMsg {
         .id = { 2, 0 },
         .vtable = table,
     });
-    sock.send(set_component_metadata("vehicle.imu.mag", {"x", "y", "z"}));
-    sock.send(set_component_metadata("vehicle.imu.gyro", {"x", "y", "z"}));
-    sock.send(set_component_metadata("vehicle.imu.accel", {"x", "y", "z"}));
-    sock.send(set_component_metadata("vehicle.temp"));
-    sock.send(set_component_metadata("vehicle.pressure"));
-    sock.send(set_component_metadata("vehicle.humidity"));
 
     std::thread reader(reader_thread_func, ip, port);
+    reader.detach();
 
     auto sensor_data = SensorData {
         .mag = { 0.0, 0.0, 0.0 },
@@ -181,12 +205,11 @@ try {
         sensor_data.time = system_clock::now().time_since_epoch() / microseconds(1);
         sensor_data.temp = std::sin(static_cast<double>(sensor_data.time) / 1000000.0);
 
-        sock.write_all(&table_header, sizeof(table_header));
-        sock.write_all(&sensor_data, sizeof(sensor_data));
+        sock->write_all(&table_header, sizeof(table_header));
+        sock->write_all(&sensor_data, sizeof(sensor_data));
         usleep(1000);
     }
 
-    reader.join();
     return 0;
 } catch (const std::exception& e) {
     std::cerr << "Error: " << e.what() << std::endl;

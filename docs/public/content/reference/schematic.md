@@ -14,7 +14,7 @@ order = 6
 
 ## Glossary
 
-- Top-level nodes: `coordinate`, `theme`, `timeline`, `panel` variants, `object_3d`, `line_3d`, `vector_arrow`, `window`.
+- Top-level nodes: `coordinate`, `theme`, `timeline`, `skybox`, `panel` variants, `object_3d`, `line_3d`, `vector_arrow`, `window`.
 - EQL: expressions are evaluated in the runtime EQL context. Vector-like fields expect 3 components; `world_pos` is a 7-component array (quat + position).
 - Colors: `color r g b [a]` or named (`black`, `white`, `blue`, `red`, `orange`, `yellow`, `yalk`, `pink`, `cyan`, `gray`, `green`, `mint`, `turquoise`, `slate`, `pumpkin`, `yolk`, `peach`, `reddish`, `hyperblue`); alpha optional. Colors can be inline or in `color`/`colour` child nodes. Defaults to white when omitted unless noted.
 - Coordinate frames: `ENU` (East-North-Up), `NED` (North-East-Down), `ECEF` (Earth-Centered Earth-Fixed). Bevy uses a Y-up right-handed system; the `frame` attribute handles the conversion.
@@ -39,6 +39,12 @@ order = 6
 - `follow_latest`: bool, default `#false`. When omitted, the editor keeps the default start-from-beginning playback behavior. Set it to `#true` to switch to LIVE automatically once the connected stream proves that it is still advancing.
 - Applies to the primary schematic only; secondary schematic files do not override the global timeline behavior.
 - These settings are also editable from the Timeline inspector, opened with the gear button in the timeline bar.
+
+### skybox
+- Optional top-level node that activates a cached skybox by manifest name.
+- `name`: required manifest entry name. Entries are read from `assets/skyboxes/manifest.ron`, or from `$ELODIN_ASSETS_DIR/skyboxes/manifest.ron` when that environment variable is set.
+- Applies to the whole schematic: editor viewports and sensor cameras use the same active skybox. Overlay cameras such as the ViewCube keep the normal dark/light UI background.
+- Example: `skybox name="alien_swamp"`.
 
 ### window
 - `path`/`file`/`name`: optional secondary schematic file. Relative paths resolve against the parent schematic directory (or CWD). If absent, the entry configures the primary window instead of loading a secondary file.
@@ -147,6 +153,7 @@ schematic =
   ( coordinate
   | theme
   | timeline
+  | skybox
   | window
   | panel
   | object_3d
@@ -167,6 +174,9 @@ timeline = "timeline"
          [follow_latest=bool]
 
 When omitted, `follow_latest` defaults to `#false`.
+
+skybox = "skybox"
+       name=string
 
 window = "window"
        [path|file|name=string]

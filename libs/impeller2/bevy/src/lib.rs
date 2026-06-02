@@ -439,6 +439,8 @@ fn sink_inner(
             OwnedPacket::Msg(m) if m.id == DbConfig::ID => {
                 let config = m.parse::<DbConfig>()?;
                 world_sink.recording.0 = config.recording;
+                *world_sink.db_config = config;
+                world_sink.commands.write_message(DbMessage::UpdateConfig);
             }
             OwnedPacket::Msg(m) if m.id == DumpSchemaResp::ID => {
                 let dump_schema = m.parse::<DumpSchemaResp>()?;

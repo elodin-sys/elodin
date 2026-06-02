@@ -52,6 +52,7 @@
 
     postInstall = ''
       wrapProgram $out/bin/elodin \
+        --set TOKTX "${common.ktxTools}/bin/toktx" \
         ${common.makeWrapperArgs {
         inherit pkgs python pythonPath pythonMajorMinor;
       }}

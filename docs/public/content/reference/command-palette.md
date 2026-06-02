@@ -47,6 +47,25 @@ order = 8
 - `Toggle Grid`: show/hide the infinite grid.
 - `Reset Cameras`: reset all viewports or pick a specific viewport to reset.
 
+## Skybox
+
+- `Skybox...`: submenu for skybox actions against `assets/skyboxes/manifest.ron` or
+  `$ELODIN_ASSETS_DIR/skyboxes/manifest.ron`.
+  - `Generate Skybox...`: prompt for a description, generate a new skybox via Blockade, add it to
+    the manifest, and activate it.
+  - `Clear Skybox`: shown when a skybox is active; removes it from viewports and sensor cameras and
+    removes the top-level `skybox` node from the current schematic.
+  - `Revert to …`: shown after AI generation replaced an active skybox.
+  - Cached manifest entries: activate a preset skybox (`name (active)` marks the current one).
+
+Selecting a cached skybox sets `skybox name="..."` on the current schematic and applies it
+immediately. Use **Save Schematic** or **Save Schematic To DB** to persist changes.
+
+Skybox generation requires `BLOCKADE_API_KEY` in the editor environment. Generated cubemaps are
+resampled locally to the configured face size (default 2048 px per face); Blockade always returns an
+~8K equirect source, so higher local presets upscale rather than fetching a higher remote tier.
+Generated assets are written next to the manifest used by the editor.
+
 ## Simulation
 
 - `Toggle Recording`: start/stop recording on the connected database.

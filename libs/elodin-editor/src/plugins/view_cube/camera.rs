@@ -9,6 +9,7 @@ use bevy::ecs::system::SystemParam;
 use bevy::log::{debug, warn};
 use bevy::math::{DVec3, Dir3};
 use bevy::prelude::*;
+use bevy::scene::{SceneInstance, SceneSpawner};
 use bevy_editor_cam::controller::component::EditorCam;
 use bevy_editor_cam::controller::motion::CurrentMotion;
 use bevy_editor_cam::extensions::look_to::LookToTrigger;
@@ -192,6 +193,8 @@ pub fn orient_axis_labels_to_screen_plane(
 pub fn apply_render_layers_to_scene(
     view_cube_query: Query<(Entity, &RenderLayerLease, &Visibility), With<ViewCubeRoot>>,
     children_query: Query<&Children>,
+    scene_instances: Query<&SceneInstance>,
+    scene_spawner: Res<SceneSpawner>,
     view_cube_entities: Query<Entity, Without<ViewCubeCamera>>,
     mut commands: Commands,
 ) {
@@ -208,10 +211,12 @@ pub fn apply_render_layers_to_scene(
 
         // The root starts Visibility::Hidden so GLB children never appear on
         // the default render layer 0. Only reveal once:
-        //   1. The GLB scene has actually spawned children, AND
+        //   1. The GLB scene instance is ready, AND
         //   2. The descendants have been moved onto the ViewCube render layer.
-        let has_children = children_query.get(cube_root).is_ok();
-        if has_children && *visibility == Visibility::Hidden {
+        let scene_ready = scene_instances
+            .get(cube_root)
+            .is_ok_and(|instance| scene_spawner.instance_is_ready(**instance));
+        if scene_ready && *visibility == Visibility::Hidden {
             commands.entity(cube_root).insert(Visibility::Inherited);
         }
     }
@@ -1038,6 +1043,8 @@ fn view_cube_orbit_target(
 mod tests {
     use super::*;
     use crate::plugins::render_layer_alloc::RenderLayerAllocator;
+    use bevy::asset::AssetPlugin;
+    use bevy::scene::{Scene, ScenePlugin, SceneRoot};
 
     #[test]
     fn angle_to_target_rotation_default_is_zero() {
@@ -1236,10 +1243,11 @@ mod tests {
     }
 
     #[test]
-    fn view_cube_scene_descendants_are_forced_to_view_cube_layer() {
+    fn view_cube_scene_descendants_are_layered_before_scene_is_revealed() {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins);
         app.init_resource::<RenderLayerAllocator>();
+        app.init_resource::<SceneSpawner>();
         app.add_systems(Update, apply_render_layers_to_scene);
 
         let lease = app
@@ -1281,8 +1289,58 @@ mod tests {
         );
         assert_eq!(
             app.world().get::<Visibility>(root),
+            Some(&Visibility::Hidden),
+            "manual children are not enough to reveal the GLB root before the scene is ready",
+        );
+    }
+
+    #[test]
+    fn view_cube_scene_root_is_revealed_after_scene_instance_is_ready() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, AssetPlugin::default(), ScenePlugin));
+        app.init_resource::<RenderLayerAllocator>();
+        app.add_systems(Update, apply_render_layers_to_scene);
+
+        let lease = app
+            .world_mut()
+            .resource_mut::<RenderLayerAllocator>()
+            .alloc()
+            .expect("view cube layer");
+        let default_layers = RenderLayers::layer(0);
+        let scene_handle = app
+            .world_mut()
+            .resource_mut::<Assets<Scene>>()
+            .add(Scene::new(World::new()));
+
+        let root = app
+            .world_mut()
+            .spawn((
+                SceneRoot(scene_handle),
+                ViewCubeRoot,
+                Visibility::Hidden,
+                lease,
+            ))
+            .id();
+        let child = app
+            .world_mut()
+            .spawn((ChildOf(root), default_layers.clone()))
+            .id();
+
+        app.update();
+        app.update();
+
+        let child_layers = app
+            .world()
+            .get::<RenderLayers>(child)
+            .expect("child layers");
+        assert!(
+            !child_layers.intersects(&RenderLayers::layer(0)),
+            "child should no longer render on the default main-camera layer",
+        );
+        assert_eq!(
+            app.world().get::<Visibility>(root),
             Some(&Visibility::Inherited),
-            "root should only become visible after descendants receive the ViewCube layer",
+            "root should become visible once the scene instance is ready",
         );
     }
 

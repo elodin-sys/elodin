@@ -2,7 +2,7 @@
 
 use std::{collections::HashMap, ops::Range, sync::Arc, time::Duration};
 
-use crate::plugins::editor_cam_touch;
+use crate::plugins::{editor_cam_input, editor_cam_touch};
 #[cfg(feature = "big_space")]
 use crate::spatial::{FloatingOrigin, FloatingOriginSettings, GridCell};
 use bevy::{
@@ -67,6 +67,7 @@ pub mod object_3d;
 mod offset_parse;
 pub mod plugins;
 pub mod sensor_camera;
+mod skybox_generation;
 #[cfg(feature = "big_space")]
 pub(crate) mod spatial;
 #[cfg(not(feature = "big_space"))]
@@ -81,6 +82,38 @@ pub mod headless;
 pub mod run;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
+
+pub(crate) fn skybox_asset_plugin() -> bevy_ai_skybox::prelude::SkyboxAssetPlugin {
+    let assets_dir = plugins::env_asset_source::resolve_assets_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("assets"));
+    bevy_ai_skybox::prelude::SkyboxAssetPlugin {
+        cache_dir: assets_dir.join("skyboxes"),
+        asset_dir: std::path::PathBuf::from("skyboxes"),
+        manifest_file: std::path::PathBuf::from("manifest.ron"),
+        default_skybox: None,
+        apply_to_all_cameras: false,
+        // Keep the existing baked EnvironmentMapLight as the cheap lighting fallback.
+        // Runtime filtering via GeneratedEnvironmentMapLight is too expensive for
+        // multi-viewport editor sessions and sensor cameras in this asset-only slice.
+        env_lighting: false,
+        watch_manifest: false,
+        manifest_poll_secs: 1.0,
+    }
+}
+
+pub(crate) fn skybox_generation_plugin() -> bevy_ai_skybox::prelude::BlockadeSkyboxPlugin {
+    bevy_ai_skybox::prelude::BlockadeSkyboxPlugin {
+        default_resolution: bevy_ai_skybox::prelude::SkyboxResolution::EightK,
+        ..Default::default()
+    }
+}
+
+pub(crate) fn skybox_asset_plugin_headless() -> bevy_ai_skybox::prelude::SkyboxAssetPlugin {
+    let mut plugin = skybox_asset_plugin();
+    plugin.watch_manifest = true;
+    plugin.manifest_poll_secs = 0.25;
+    plugin
+}
 
 #[cfg(feature = "inspector")]
 #[derive(Component)]
@@ -212,6 +245,8 @@ impl Plugin for EditorPlugin {
                     .build(),
             )
             .add_plugins(plugins::kdl_document::plugin)
+            .add_plugins(skybox_asset_plugin())
+            .add_plugins(skybox_generation_plugin())
             // Note: we added this because bevy 0.17.3 changed its behavior
             // which broke bevy_editor_cam. See here:
             // https://github.com/aevyrie/bevy_editor_cam/issues/61
@@ -220,14 +255,18 @@ impl Plugin for EditorPlugin {
                 ..Default::default()
             })
             .insert_resource(winit_settings)
-            .init_resource::<tiles::ViewportContainsPointer>()
             .add_plugins(bevy_framepace::FramepacePlugin)
             .insert_resource(
                 bevy_framepace::FramepaceSettings::default()
                     .with_limiter(bevy_framepace::Limiter::Off),
             )
             //.add_plugins(DefaultPickingPlugins)
-            .add_plugins(bevy_editor_cam::DefaultEditorCamPlugins)
+            .add_plugins(
+                bevy_editor_cam::DefaultEditorCamPlugins
+                    .build()
+                    .disable::<bevy_editor_cam::input::DefaultInputPlugin>(),
+            )
+            .add_plugins(editor_cam_input::EditorCamInputPlugin)
             .add_plugins(EmbeddedAssetPlugin)
             .add_plugins(EguiPlugin::default())
             .add_plugins(bevy_infinite_grid::InfiniteGridPlugin)
@@ -288,6 +327,19 @@ impl Plugin for EditorPlugin {
             .add_systems(Update, set_eql_context_range.after(update_eql_context))
             .add_systems(Startup, spawn_ui_cam)
             .add_systems(Update, ui::video_stream::connect_streams)
+            .init_resource::<skybox_generation::LocallyPushedSkyboxActive>()
+            .add_systems(
+                Update,
+                skybox_generation::sync_generated_skybox_to_schematic,
+            )
+            .add_systems(Update, skybox_generation::on_document_loaded)
+            .add_systems(Update, skybox_generation::record_reloaded_schematic_content)
+            .add_systems(Update, skybox_generation::push_skybox_active_on_pending)
+            .add_systems(Update, skybox_generation::decay_skybox_status_message)
+            .add_systems(
+                Update,
+                ui::video_stream::invalidate_sensor_frames_on_db_skybox_change,
+            )
             .add_systems(Update, ui::log_stream::connect_streams)
             .add_systems(PostUpdate, ui::video_stream::set_visibility)
             .add_systems(PostUpdate, set_clear_color)
@@ -1508,6 +1560,45 @@ mod time_range_tests {
 
         let result = behavior.calculate_selected_range(earliest, latest);
         assert!(matches!(result, Err(TimeRangeError::NoData)));
+    }
+
+    #[test]
+    fn last_30s_window_at_mid_replay_position() {
+        let behavior = TimeRangeBehavior::last(Duration::from_secs(30));
+        let earliest = timestamp_secs(0);
+        let effective_latest = timestamp_secs(40);
+
+        let range = behavior
+            .calculate_selected_range(earliest, effective_latest)
+            .expect("valid replay window");
+        assert_eq!(range.start, timestamp_secs(10));
+        assert_eq!(range.end, timestamp_secs(40));
+    }
+
+    #[test]
+    fn last_30s_window_at_early_replay_clamps_to_earliest() {
+        let behavior = TimeRangeBehavior::last(Duration::from_secs(30));
+        let earliest = timestamp_secs(0);
+        let effective_latest = timestamp_secs(15);
+
+        let range = behavior
+            .calculate_selected_range(earliest, effective_latest)
+            .expect("valid replay window");
+        assert_eq!(range.start, timestamp_secs(0));
+        assert_eq!(range.end, timestamp_secs(15));
+    }
+
+    #[test]
+    fn full_range_at_replay_position_uses_effective_latest() {
+        let behavior = TimeRangeBehavior::FULL;
+        let earliest = timestamp_secs(0);
+        let effective_latest = timestamp_secs(20);
+
+        let range = behavior
+            .calculate_selected_range(earliest, effective_latest)
+            .expect("valid replay window");
+        assert_eq!(range.start, earliest);
+        assert_eq!(range.end, effective_latest);
     }
 }
 

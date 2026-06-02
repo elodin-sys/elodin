@@ -1,14 +1,14 @@
 use db_macros::{AsVTable, Metadatatize};
-use futures_concurrency::future::Join;
+use futures_concurrency::future::{Join, Race};
 use impeller2::types::{LenPacket, PacketId, Timestamp};
-use impeller2_stellar::Client;
 use impeller2_stellar::SinkExt;
+use impeller2_stellar::{PacketSink, PacketStream};
 use std::{
     mem,
     net::SocketAddr,
     time::{Duration, Instant},
 };
-use stellarator::{fs::File, rent};
+use stellarator::{fs::File, io::SplitExt, net::TcpStream, rent};
 use sysinfo::CpuRefreshKind;
 use zerocopy::{Immutable, IntoBytes};
 
@@ -27,11 +27,14 @@ pub struct Output {
 }
 
 async fn connect() -> anyhow::Result<Duration> {
-    let mut client = Client::connect(SocketAddr::new([127, 0, 0, 1].into(), 2240))
+    let stream = TcpStream::connect(SocketAddr::new([127, 0, 0, 1].into(), 2240))
         .await
         .map_err(anyhow::Error::from)?;
+    let (rx, tx) = stream.split();
+    let tx = PacketSink::new(tx);
+    let mut rx = PacketStream::new(rx);
     let id: PacketId = fastrand::u16(..).to_le_bytes();
-    client.init_world::<Output>(id).await?;
+    tx.init_world::<Output>(id).await?;
     let mut table = LenPacket::table(id, mem::size_of::<Output>());
     let thermal_zone = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
         .map(|i| File::open(format!("/sys/devices/virtual/thermal/thermal_zone{i}/temp")))
@@ -53,38 +56,54 @@ async fn connect() -> anyhow::Result<Duration> {
     system.refresh_cpu_specifics(CpuRefreshKind::everything());
     let connected_at = Instant::now();
 
-    loop {
-        table.clear();
-        let thermal_zones = thermal_zone.each_ref().map(maybe_read_to_float).join();
-        let cpu_freq = cpu_freq.each_ref().map(maybe_read_to_float).join();
-        let gpu_load = read_to_float(&gpu_load);
-        let (thermal_zones, cpu_freq, gpu_load) = (thermal_zones, cpu_freq, gpu_load).join().await;
-        let thermal_zones = thermal_zones.map(|res| res.unwrap_or(f32::NAN) / 1000.0);
-        let cpu_freq = cpu_freq.map(|res| res.unwrap_or(f32::NAN));
-        let gpu_load = gpu_load.unwrap_or(f32::NAN) / 1000.0;
-        system.refresh_cpu_specifics(CpuRefreshKind::everything());
-        let mut cpu_usage = [f32::NAN; 8];
-        for (cpu, usage) in system.cpus().iter().zip(cpu_usage.iter_mut()) {
-            *usage = cpu.cpu_usage();
+    let drain_replies = async {
+        let mut buf = vec![0_u8; 256];
+        loop {
+            let pkt = rx.next_grow(buf).await?;
+            buf = pkt.into_buf().into_inner();
         }
+    };
 
-        let output = Output {
-            time: Timestamp::now().0,
-            thermal_zones,
-            cpu_usage,
-            gpu_usage: gpu_load,
-            cpu_freq,
-            _pad: 0,
-        };
-        table.extend_from_slice(output.as_bytes());
-        if let Err(err) = rent!(client.send(table).await, table) {
-            eprintln!(
-                "send failed after connected session {:?}: {err:?}",
-                connected_at.elapsed()
-            );
-            return Ok(connected_at.elapsed());
+    let send_metrics = async {
+        loop {
+            table.clear();
+            let thermal_zones = thermal_zone.each_ref().map(maybe_read_to_float).join();
+            let cpu_freq = cpu_freq.each_ref().map(maybe_read_to_float).join();
+            let gpu_load = read_to_float(&gpu_load);
+            let (thermal_zones, cpu_freq, gpu_load) =
+                (thermal_zones, cpu_freq, gpu_load).join().await;
+            let thermal_zones = thermal_zones.map(|res| res.unwrap_or(f32::NAN) / 1000.0);
+            let cpu_freq = cpu_freq.map(|res| res.unwrap_or(f32::NAN));
+            let gpu_load = gpu_load.unwrap_or(f32::NAN) / 1000.0;
+            system.refresh_cpu_specifics(CpuRefreshKind::everything());
+            let mut cpu_usage = [f32::NAN; 8];
+            for (cpu, usage) in system.cpus().iter().zip(cpu_usage.iter_mut()) {
+                *usage = cpu.cpu_usage();
+            }
+
+            let output = Output {
+                time: Timestamp::now().0,
+                thermal_zones,
+                cpu_usage,
+                gpu_usage: gpu_load,
+                cpu_freq,
+                _pad: 0,
+            };
+            table.extend_from_slice(output.as_bytes());
+            if let Err(err) = rent!(tx.send(table).await, table) {
+                eprintln!(
+                    "send failed after connected session {:?}: {err:?}",
+                    connected_at.elapsed()
+                );
+                return Ok::<Duration, impeller2_stellar::Error>(connected_at.elapsed());
+            }
+            stellarator::sleep(Duration::from_millis(1000)).await;
         }
-        stellarator::sleep(Duration::from_millis(1000)).await;
+    };
+
+    match (drain_replies, send_metrics).race().await {
+        Ok(duration) => Ok(duration),
+        Err(err) => Err(err.into()),
     }
 }
 

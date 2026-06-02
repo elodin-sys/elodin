@@ -18,12 +18,11 @@ use impeller2_stellar::PacketSink;
 use impeller2_wkt::{ComponentValue, FixedRateBehavior, FixedRateOp, MeanOp, VTableMsg};
 use stellarator::{
     io::AsyncWrite,
-    rent,
     sync::{Mutex, WaitCell, WaitQueue},
 };
 use tracing::{trace, warn};
 
-use crate::{Component, DB, Error, FixedRateStreamState};
+use crate::{Component, DB, Error, FixedRateStreamState, send_with_timeout};
 
 pub async fn handle_vtable_stream<A: AsyncWrite + 'static>(
     id: [u8; 2],
@@ -44,6 +43,7 @@ pub async fn handle_vtable_stream<A: AsyncWrite + 'static>(
         .max();
     let table_len = table_len.unwrap_or(0);
     let table = FieldTable::new(vtable.fields.len(), table_len, id);
+    let mut field_plans = Vec::with_capacity(vtable.fields.len());
     for (i, field) in vtable.fields.iter().enumerate() {
         let mut realized_op = vtable.realize(field.arg, None)?;
         let mut plan = vec![];
@@ -155,23 +155,26 @@ pub async fn handle_vtable_stream<A: AsyncWrite + 'static>(
             return Err(Error::Impeller(impeller2::error::Error::InvalidOp));
         }
         let prim_type = component.schema.prim_type;
-        stellarator::spawn(handle_plan(plan, shard, timestamp, prim_type));
+        field_plans.push((plan, shard, timestamp, prim_type));
     }
     // Send vtable before streaming
     {
-        let mut pkt = VTableMsg {
+        let pkt = VTableMsg {
             vtable: vtable.clone(),
             id,
         }
         .into_len_packet();
-        let tx = tx.lock().await;
-        rent!(tx.send(pkt.with_request_id(req_id)).await, pkt)?;
+        send_with_timeout(&tx, pkt.with_request_id(req_id)).await?;
+    }
+    let mut plan_guards = Vec::with_capacity(field_plans.len());
+    for (plan, shard, timestamp, prim_type) in field_plans {
+        plan_guards
+            .push(stellarator::spawn(handle_plan(plan, shard, timestamp, prim_type)).drop_guard());
     }
     loop {
         table.wait_ready().await;
         let mut pkt = table.take().await;
-        let tx = tx.lock().await;
-        rent!(tx.send(pkt.with_request_id(req_id)).await, pkt)?;
+        pkt = send_with_timeout(&tx, pkt.with_request_id(req_id)).await?;
         table.replace_pkt(pkt).await;
         table.notify_writers();
     }

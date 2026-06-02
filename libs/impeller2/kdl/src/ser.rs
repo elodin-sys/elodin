@@ -17,6 +17,9 @@ pub fn serialize_schematic(schematic: &Schematic) -> String {
     if let Some(timeline) = schematic.timeline.as_ref() {
         doc.nodes_mut().push(serialize_timeline(timeline));
     }
+    if let Some(skybox) = schematic.skybox.as_ref() {
+        doc.nodes_mut().push(serialize_skybox(skybox));
+    }
 
     for elem in &schematic.elems {
         let node = serialize_schematic_elem(elem);
@@ -77,6 +80,12 @@ fn serialize_world_mesh(world_mesh: &WorldMesh) -> KdlNode {
             .push(KdlEntry::new_prop("visible", false));
     }
 
+    node
+}
+
+fn serialize_skybox(skybox: &SkyboxConfig) -> KdlNode {
+    let mut node = KdlNode::new("skybox");
+    push_name_prop(&mut node, &skybox.name);
     node
 }
 
@@ -962,6 +971,26 @@ mod tests {
         assert_eq!(timeline.played_color, Color::MINT);
         assert_eq!(timeline.future_color, Color::HYPERBLUE);
         assert!(timeline.follow_latest);
+    }
+
+    #[test]
+    fn test_serialize_skybox_config() {
+        let schematic = Schematic {
+            skybox: Some(SkyboxConfig {
+                name: "mojave_desert".to_string(),
+            }),
+            ..Default::default()
+        };
+
+        let serialized = serialize_schematic(&schematic);
+        let parsed = parse_schematic(&serialized).unwrap();
+
+        assert!(serialized.contains("skybox"));
+        assert!(serialized.contains("mojave_desert"));
+        assert_eq!(
+            parsed.skybox.expect("skybox config should roundtrip").name,
+            "mojave_desert"
+        );
     }
 
     #[test]

@@ -26,7 +26,7 @@ use bevy::{
 };
 use bevy_egui::egui::{self, Align, CornerRadius, Frame, Layout, Margin, RichText, Stroke};
 use impeller2::types::Timestamp;
-use impeller2_bevy::{ComponentMetadataRegistry, ComponentPath};
+use impeller2_bevy::{ComponentMetadataRegistry, ComponentPath, ComponentSchemaRegistry};
 use impeller2_wkt::{CurrentTimestamp, EarliestTimestamp};
 use std::time::{Duration, Instant};
 use std::{
@@ -40,8 +40,9 @@ use crate::{
     ui::{
         SelectedObject,
         colors::{ColorExt, get_scheme, with_opacity},
+        input_owner::UiInputOwners,
         plot::{
-            CollectedGraphData, GraphState, Line, OVERVIEW_MAX_POINTS,
+            CollectedGraphData, GraphState, Line, OVERVIEW_MAX_POINTS, element_names_for_graph,
             gpu::{LineBundle, LineConfig, LineUniform},
         },
         tiles::WindowState,
@@ -866,7 +867,7 @@ impl TimeseriesPlot {
 
         // Only show time-related context menu for time-based plots
         if self.x_axis_mode.is_time_based() {
-            response.context_menu(|ui| {
+            let context_menu = response.context_menu(|ui| {
                 if ui.button("Set Time Range to Viewport Bounds").clicked() {
                     let (start, end) = if self.x_axis_mode.is_relative() {
                         // For relative time plots, bounds.min_x/max_x are in seconds
@@ -891,6 +892,12 @@ impl TimeseriesPlot {
                     };
                 }
             });
+            if context_menu
+                .as_ref()
+                .is_some_and(|inner| inner.response.contains_pointer())
+            {
+                crate::ui::mark_egui_popup_hovered(ui.ctx());
+            }
         }
 
         let mut font_id = egui::TextStyle::Monospace.resolve(ui.style());
@@ -1358,6 +1365,7 @@ pub fn auto_y_bounds(
 pub fn sync_graphs(
     mut graph_states: Query<&mut GraphState>,
     metadata_store: Res<ComponentMetadataRegistry>,
+    schema_store: Res<ComponentSchemaRegistry>,
     mut collected_graph_data: ResMut<CollectedGraphData>,
     mut commands: Commands,
 ) {
@@ -1369,20 +1377,24 @@ pub fn sync_graphs(
             let Some(component_metadata) = metadata_store.get_metadata(component_id) else {
                 continue;
             };
-            let component_label = component_metadata.name.clone();
-            let element_names = component_metadata.element_names();
             let component = collected_graph_data
                 .components
                 .entry(*component_id)
                 .or_insert_with(|| {
-                    PlotDataComponent::new(
-                        component_label,
-                        element_names
-                            .split(',')
-                            .filter(|s| !s.is_empty())
-                            .map(str::to_string)
-                            .collect(),
-                    )
+                    let label = component_metadata.name.clone();
+                    let element_names = schema_store
+                        .0
+                        .get(component_id)
+                        .map(|schema| element_names_for_graph(schema, component_metadata))
+                        .unwrap_or_else(|| {
+                            component_metadata
+                                .element_names()
+                                .split(',')
+                                .filter(|s| !s.is_empty())
+                                .map(str::to_string)
+                                .collect()
+                        });
+                    PlotDataComponent::new(label, element_names)
                 });
 
             for (value_index, (enabled, color)) in component_values.iter().enumerate() {
@@ -1522,11 +1534,12 @@ pub fn sync_locked_graphs(
 }
 
 pub fn zoom_graph(
-    mut query: Query<(&mut GraphState, &Camera, &RenderTarget)>,
+    mut query: Query<(Entity, &mut GraphState, &Camera, &RenderTarget)>,
     mut scroll_events: MessageReader<MouseWheel>,
     windows: Query<(Entity, &Window)>,
     primary_window: Query<Entity, With<PrimaryWindow>>,
     key_state: Res<LogicalKeyState>,
+    input_owners: Res<UiInputOwners>,
     mut xclock: ResMut<XSyncClock>,
 ) {
     let scroll_offsets = scroll_offsets_from_events(&mut scroll_events);
@@ -1538,13 +1551,16 @@ pub fn zoom_graph(
         return;
     };
 
-    for (mut graph_state, camera, render_target) in query.iter_mut() {
+    for (entity, mut graph_state, camera, render_target) in query.iter_mut() {
         let Some(window_entity) = window_entity_from_target(render_target, primary_entity) else {
             continue;
         };
         let Some(scroll_offset) = scroll_offsets.get(&window_entity) else {
             continue;
         };
+        if !input_owners.permits_graph(window_entity, entity) {
+            continue;
+        }
         let Ok((_, window)) = windows.get(window_entity) else {
             continue;
         };
@@ -1603,6 +1619,7 @@ pub fn zoom_graph(
 #[derive(Component)]
 pub struct LastPos(Option<Vec2>);
 
+#[allow(clippy::too_many_arguments)]
 pub fn pan_graph(
     mut query: Query<(
         Entity,
@@ -1615,6 +1632,7 @@ pub fn pan_graph(
     windows: Query<(Entity, &Window)>,
     primary_window: Query<Entity, With<PrimaryWindow>>,
     key_state: Res<LogicalKeyState>,
+    input_owners: Res<UiInputOwners>,
     mut commands: Commands,
     mut xclock: ResMut<XSyncClock>,
 ) {
@@ -1629,6 +1647,12 @@ pub fn pan_graph(
             }
             continue;
         };
+        if !input_owners.permits_graph(window_entity, entity) {
+            if let Ok(mut e) = commands.get_entity(entity) {
+                e.try_insert(LastPos(None));
+            }
+            continue;
+        }
         let Ok((_, window)) = windows.get(window_entity) else {
             if let Ok(mut e) = commands.get_entity(entity) {
                 e.try_insert(LastPos(None));
@@ -1708,9 +1732,10 @@ pub fn pan_graph(
 pub fn reset_graph(
     mut last_click: Local<Option<Instant>>,
     mouse_buttons: Res<ButtonInput<MouseButton>>,
-    mut query: Query<(&mut GraphState, &Camera, &RenderTarget)>,
+    mut query: Query<(Entity, &mut GraphState, &Camera, &RenderTarget)>,
     windows: Query<(Entity, &Window)>,
     primary_window: Query<Entity, With<PrimaryWindow>>,
+    input_owners: Res<UiInputOwners>,
     mut xclock: ResMut<XSyncClock>,
 ) {
     if mouse_buttons.just_released(MouseButton::Left) {
@@ -1726,11 +1751,14 @@ pub fn reset_graph(
             return;
         };
 
-        for (mut graph_state, camera, render_target) in query.iter_mut() {
+        for (entity, mut graph_state, camera, render_target) in query.iter_mut() {
             let Some(window_entity) = window_entity_from_target(render_target, primary_entity)
             else {
                 continue;
             };
+            if !input_owners.permits_graph(window_entity, entity) {
+                continue;
+            }
             let Ok((_, window)) = windows.get(window_entity) else {
                 continue;
             };
@@ -1983,11 +2011,12 @@ pub fn pretty_round(num: f64) -> f64 {
 }
 
 pub fn graph_touch(
-    mut query: Query<(&mut GraphState, &Camera)>,
-    primary_window: Query<&Window, With<PrimaryWindow>>,
+    mut query: Query<(Entity, &mut GraphState, &Camera, &RenderTarget)>,
+    primary_window: Query<(Entity, &Window), With<PrimaryWindow>>,
     touch_tracker: Res<TouchTracker>,
+    input_owners: Res<UiInputOwners>,
 ) {
-    let Ok(window) = primary_window.single() else {
+    let Ok((primary_entity, window)) = primary_window.single() else {
         return;
     };
     let touch_gestures = touch_tracker.get_touch_gestures();
@@ -1997,8 +2026,15 @@ pub fn graph_touch(
         TouchGestures::TwoFinger(two_finger) => two_finger.midpoint,
         _ => return,
     };
+    let midpoint_pos = egui::pos2(midpoint.x, midpoint.y);
 
-    for (mut graph_state, cam) in query.iter_mut() {
+    for (entity, mut graph_state, cam, render_target) in query.iter_mut() {
+        let Some(window_entity) = window_entity_from_target(render_target, primary_entity) else {
+            continue;
+        };
+        if !input_owners.permits_graph_at(window_entity, entity, midpoint_pos) {
+            continue;
+        }
         let Some(viewport_rect) = cam.logical_viewport_rect() else {
             continue;
         };

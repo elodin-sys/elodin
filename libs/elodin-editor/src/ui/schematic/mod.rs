@@ -158,35 +158,25 @@ impl SchematicParam<'_, '_> {
                     Pane::Viewport(viewport) => {
                         let cam_entity = viewport.camera?;
                         let viewport_data = self.viewports.get(cam_entity).ok()?;
-                        let (fov, near, far) = self
+                        let fov = self
                             .projections
                             .get(cam_entity)
                             .ok()
                             .and_then(|projection| match projection {
                                 Projection::Perspective(perspective) => {
-                                    let near = if (perspective.near - tiles::DEFAULT_VIEWPORT_NEAR)
-                                        .abs()
-                                        > f32::EPSILON
-                                    {
-                                        Some(perspective.near)
-                                    } else {
-                                        None
-                                    };
-                                    let far = if (perspective.far - tiles::DEFAULT_VIEWPORT_FAR)
-                                        .abs()
-                                        > f32::EPSILON
-                                    {
-                                        Some(perspective.far)
-                                    } else {
-                                        None
-                                    };
-                                    Some((perspective.fov.to_degrees(), near, far))
+                                    Some(perspective.fov.to_degrees())
                                 }
                                 _ => None,
                             })
-                            .unwrap_or((45.0, None, None));
+                            .unwrap_or(45.0);
 
                         let vp_config = self.viewport_configs.get(cam_entity).ok();
+                        let near = vp_config
+                            .and_then(|c| c.configured_near)
+                            .filter(|near| *near > 0.0);
+                        let far = vp_config
+                            .and_then(|c| c.configured_far)
+                            .filter(|far| *far > 0.0);
                         let aspect = vp_config.and_then(|c| c.aspect);
 
                         let mut show_grid = false;

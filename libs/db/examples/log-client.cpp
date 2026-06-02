@@ -9,9 +9,11 @@
 #include <chrono>
 #include <cstddef>
 #include <iostream>
+#include <memory>
 #include <print>
 #include <sstream>
 #include <system_error>
+#include <thread>
 #include <vector>
 
 #include "db.hpp"
@@ -68,6 +70,33 @@ public:
         write_all(data.data(), data.size());
     }
 
+    size_t read(uint8_t* data, size_t len)
+    {
+        auto res = ::read(fd_, data, len);
+        if (res < 0) {
+            throw std::system_error(errno, std::generic_category(), "Failed to read");
+        }
+        return res;
+    }
+
+    void drain_replies(const char* label)
+    {
+        try {
+            auto pending = std::vector<uint8_t>();
+            while (true) {
+                auto data = std::vector<uint8_t>(1024);
+                auto len = read(data.data(), data.size());
+                if (len == 0) {
+                    std::println("{}: connection closed", label);
+                    break;
+                }
+                log_elodin_db_replies(pending, std::span(data.data(), len), label);
+            }
+        } catch (const std::exception& e) {
+            std::cerr << label << " error: " << e.what() << std::endl;
+        }
+    }
+
 private:
     int fd_ = -1;
 };
@@ -83,11 +112,15 @@ try {
     if (argc >= 3) port = static_cast<uint16_t>(std::stoi(argv[2]));
 
     std::println("log-client: connecting to {}:{}", ip, port);
-    auto sock = Socket(ip, port);
+    auto sock = std::make_shared<Socket>(ip, port);
+    std::thread writer_replies([sock] {
+        sock->drain_replies("log-client replies");
+    });
+    writer_replies.detach();
 
     // Register the log metadata once at startup
     auto metadata_pkt = set_log_metadata_packet(LOG_NAME);
-    sock.send_raw(metadata_pkt);
+    sock->send_raw(metadata_pkt);
     std::println("log-client: registered log metadata for '{}'", LOG_NAME);
 
     // Simulated flight software log messages
@@ -140,7 +173,7 @@ try {
 
     std::println("log-client: sending boot sequence...");
     for (const auto& entry : boot_sequence) {
-        send_log(sock, LOG_NAME, entry.level, entry.message);
+        send_log(*sock, LOG_NAME, entry.level, entry.message);
         usleep(entry.delay_ms * 1000);
     }
 
@@ -150,7 +183,7 @@ try {
         for (const auto& entry : flight_messages) {
             std::ostringstream msg;
             msg << "[cycle " << cycle << "] " << entry.message;
-            send_log(sock, LOG_NAME, entry.level, msg.str());
+            send_log(*sock, LOG_NAME, entry.level, msg.str());
             usleep(entry.delay_ms * 1000);
         }
         cycle++;

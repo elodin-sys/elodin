@@ -2,9 +2,27 @@ use bevy::{
     asset::io::{AssetSourceBuilder, AssetSourceId},
     prelude::*,
 };
-use std::{env, path::PathBuf};
+use std::{env, ffi::OsString, path::PathBuf};
 
 const DEFAULT_ASSETS_DIR: Option<&str> = Some("assets");
+
+pub(crate) fn resolve_assets_dir() -> Option<PathBuf> {
+    let dir_name = env::var_os("ELODIN_ASSETS_DIR")
+        .or_else(|| DEFAULT_ASSETS_DIR.map(|s| OsString::from(String::from(s))))?;
+    let mut assets_dir: PathBuf = dir_name.into();
+    if assets_dir.is_relative() {
+        let Ok(mut cur_dir) = env::current_dir().inspect_err(|e| {
+            error!(
+                "Cannot resolve asset source. Could not get current directory: {e}. Consider using an absolute path for ELODIN_ASSETS_DIR."
+            )
+        }) else {
+            return None;
+        };
+        cur_dir.push(&assets_dir);
+        assets_dir = cur_dir;
+    }
+    Some(assets_dir)
+}
 
 /// Use the environment variable `ELODIN_ASSETS_DIR` value as the asset source.
 ///
@@ -20,22 +38,11 @@ const DEFAULT_ASSETS_DIR: Option<&str> = Some("assets");
 /// report the likely path Bevy will use to look for assets.
 pub(crate) fn plugin(app: &mut App) {
     let var_set = env::var_os("ELODIN_ASSETS_DIR").is_some();
-    if let Some(dir_name) = env::var_os("ELODIN_ASSETS_DIR")
-        .or_else(|| DEFAULT_ASSETS_DIR.map(|s| std::ffi::OsString::from(String::from(s))))
-    {
-        let mut assets_dir: PathBuf = dir_name.into();
+    if let Some(assets_dir) = resolve_assets_dir() {
         if var_set {
             info!("ELODIN_ASSETS_DIR set to {:?}", assets_dir.display());
         } else {
             info!("ELODIN_ASSETS_DIR defaulted to {:?}", assets_dir.display());
-        }
-        if assets_dir.is_relative() {
-            let Ok(mut cur_dir) = env::current_dir()
-                .inspect_err(|e| error!("Cannot set asset source. Could not get current directory: {e}. Consider using an absolute path for ELODIN_ASSETS_DIR.")) else {
-                    return;
-                };
-            cur_dir.push(&assets_dir);
-            assets_dir = cur_dir;
         }
         // Bevy requires a UTF-8 string path.
         let str_path = assets_dir.to_str().or_else(|| {

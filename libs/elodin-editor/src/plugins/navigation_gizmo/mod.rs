@@ -1,4 +1,9 @@
-use crate::{MainCamera, plugins::camera_anchor::camera_anchor_from_transform, ui::ViewportRect};
+use crate::{
+    MainCamera,
+    plugins::{camera_anchor::camera_anchor_from_transform, view_cube::ViewCubeCamera},
+    ui::ViewportRect,
+    ui::input_owner::{PointerOwner, PointerOwnerPriority, UiInputOwners},
+};
 use bevy::animation::{AnimatedBy, AnimationTargetId, animated_field};
 use bevy::camera::{RenderTarget, Viewport};
 use bevy::math::Dir3;
@@ -7,7 +12,7 @@ use bevy::window::{PrimaryWindow, WindowRef};
 use bevy_editor_cam::controller::component::EditorCam;
 use bevy_editor_cam::extensions::look_to::LookToTrigger;
 use bevy_editor_cam::prelude::EnabledMotion;
-use bevy_egui::EguiContexts;
+use bevy_egui::{EguiContexts, egui};
 use std::{collections::HashMap, f32::consts};
 
 use super::render_layer_alloc::RenderLayerAllocator;
@@ -111,7 +116,7 @@ struct NavGizmoDrag {
 }
 
 #[derive(Resource, Default, Debug)]
-struct NavGizmoAnchorState {
+pub struct NavGizmoAnchorState {
     offsets: HashMap<Entity, Vec2>,
     active_drag: Option<NavGizmoDrag>,
 }
@@ -274,6 +279,7 @@ pub fn drag_nav_gizmo(
     nav_gizmo: Query<&NavGizmoParent>,
     mut query: Query<(&Transform, &mut EditorCam, &Camera), With<MainCamera>>,
     dragged_query: Query<(), With<DraggedMarker>>,
+    input_owners: Res<UiInputOwners>,
     mut commands: Commands,
 ) {
     let drag_target = drag.event().event_target();
@@ -284,6 +290,13 @@ pub fn drag_nav_gizmo(
     let Ok((transform, mut editor_cam, cam)) = query.get_mut(nav_gizmo.main_camera) else {
         return;
     };
+    if !input_owners.permits_nav_gizmo_location(nav_gizmo.main_camera, &drag.pointer_location) {
+        if dragged_query.get(drag_target).is_ok() {
+            editor_cam.end_move();
+            commands.entity(drag_target).remove::<DraggedMarker>();
+        }
+        return;
+    }
     let first_drag = dragged_query.get(drag_target).is_err();
     if first_drag {
         commands.entity(drag_target).insert(DraggedMarker);
@@ -325,12 +338,14 @@ fn side_clicked_cb(
     Query<(Entity, &Transform, &EditorCam), With<MainCamera>>,
     Query<&NavGizmoParent>,
     Query<&DraggedMarker>,
+    Res<UiInputOwners>,
     MessageWriter<LookToTrigger>,
 ) {
     move |click: On<Pointer<Click>>,
           query: Query<(Entity, &Transform, &EditorCam), With<MainCamera>>,
           nav_gizmo: Query<&NavGizmoParent>,
           drag_query: Query<&DraggedMarker>,
+          input_owners: Res<UiInputOwners>,
           mut look_to: MessageWriter<LookToTrigger>| {
         let target = click.event().event_target();
 
@@ -340,6 +355,9 @@ fn side_clicked_cb(
         let Ok((entity, transform, editor_cam)) = query.get(nav_gizmo.main_camera) else {
             return;
         };
+        if !input_owners.permits_nav_gizmo_location(entity, &click.pointer_location) {
+            return;
+        }
 
         if drag_query.get(target).is_ok() {
             return;
@@ -379,11 +397,17 @@ fn clamp_overlay_position(position: Vec2, side_length: f32, window_size: Vec2) -
 fn set_camera_viewport(
     windows: Query<(Entity, &Window, &bevy_egui::EguiContextSettings)>,
     _contexts: EguiContexts,
-    mut nav_camera_query: Query<(&mut Camera, &RenderTarget, &NavGizmoParent)>,
+    mut nav_camera_query: Query<(
+        &mut Camera,
+        &RenderTarget,
+        &NavGizmoParent,
+        Option<&ViewCubeCamera>,
+    )>,
     main_camera_query: Query<(&Camera, Option<&ViewportRect>), Without<NavGizmoParent>>,
     mut main_editor_cam_query: Query<&mut EditorCam, (With<MainCamera>, Without<NavGizmoParent>)>,
     primary_query: Query<Entity, With<PrimaryWindow>>,
     mouse_buttons: Res<ButtonInput<MouseButton>>,
+    mut input_owners: ResMut<UiInputOwners>,
     mut anchor_state: ResMut<NavGizmoAnchorState>,
 ) {
     let margin = 8.0;
@@ -398,7 +422,7 @@ fn set_camera_viewport(
         anchor_state.active_drag = None;
     }
 
-    for (mut nav_camera, render_target, parent) in nav_camera_query.iter_mut() {
+    for (mut nav_camera, render_target, parent, view_cube_camera) in nav_camera_query.iter_mut() {
         let Ok((main, viewport_rect)) = main_camera_query.get(parent.main_camera) else {
             continue;
         };
@@ -451,9 +475,37 @@ fn set_camera_viewport(
             window_size,
         );
 
+        let nav_gizmo_rect = egui::Rect::from_min_size(
+            egui::pos2(
+                nav_viewport_pos.x / scale_factor,
+                nav_viewport_pos.y / scale_factor,
+            ),
+            egui::vec2(side_length / scale_factor, side_length / scale_factor),
+        );
+        input_owners.register_rect(
+            window_entity,
+            nav_gizmo_rect,
+            if view_cube_camera.is_some() {
+                PointerOwner::ViewCube {
+                    camera: parent.main_camera,
+                }
+            } else {
+                PointerOwner::NavGizmo {
+                    camera: parent.main_camera,
+                }
+            },
+            PointerOwnerPriority::Overlay,
+        );
+
+        let cursor_pos = window.physical_cursor_position();
+        let cursor_pos_logical =
+            cursor_pos.map(|pos| egui::pos2(pos.x / scale_factor, pos.y / scale_factor));
+        input_owners.resolve_window(window_entity, cursor_pos_logical);
+
         if mouse_buttons.just_pressed(MouseButton::Left)
             && anchor_state.active_drag.is_none()
-            && let Some(cursor_pos) = window.physical_cursor_position()
+            && input_owners.permits_nav_gizmo(window_entity, parent.main_camera)
+            && let Some(cursor_pos) = cursor_pos
         {
             let drag_rect = Rect::from_corners(
                 nav_viewport_pos,

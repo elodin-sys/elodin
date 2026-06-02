@@ -1,8 +1,9 @@
 use bevy::ecs::{
-    system::{Local, Res, SystemParam, SystemState},
+    system::{Local, Query, Res, SystemParam, SystemState},
     world::World,
 };
 use bevy::prelude::*;
+use bevy::window::PrimaryWindow;
 use bevy_egui::{EguiContexts, EguiTextureHandle, egui};
 use impeller2_bevy::CurrentStreamId;
 use impeller2_wkt::{
@@ -15,7 +16,12 @@ use timeline_slider::TimelineSlider;
 
 use crate::{
     FullTimeRange, SelectedTimeRange, TimeRangeBehavior,
-    ui::{colors::get_scheme, images},
+    ui::{
+        colors::get_scheme,
+        images,
+        input_owner::{PointerOwnerPriority, UiBlocker},
+        register_window_input_blocker,
+    },
 };
 
 use super::widgets::{WidgetSystem, WidgetSystemExt};
@@ -405,6 +411,7 @@ pub struct TimelinePanel<'w, 's> {
     selected_time_range: Res<'w, SelectedTimeRange>,
     full_time_range: Res<'w, FullTimeRange>,
     time_range_behavior: Res<'w, TimeRangeBehavior>,
+    primary_window: Query<'w, 's, Entity, With<PrimaryWindow>>,
 }
 
 impl WidgetSystem for TimelinePanel<'_, '_> {
@@ -418,6 +425,9 @@ impl WidgetSystem for TimelinePanel<'_, '_> {
         _args: Self::Args,
     ) {
         let state_mut = state.get_mut(world);
+        let Ok(target_window) = state_mut.primary_window.single() else {
+            return;
+        };
         let mut contexts = state_mut.contexts;
         let images = state_mut.images;
         let tick_time = state_mut.tick_time;
@@ -481,6 +491,14 @@ impl WidgetSystem for TimelinePanel<'_, '_> {
                         );
                     });
                 });
+
+                register_window_input_blocker(
+                    world,
+                    target_window,
+                    ui.max_rect(),
+                    UiBlocker::Timeline,
+                    PointerOwnerPriority::Panel,
+                );
             });
     }
 }

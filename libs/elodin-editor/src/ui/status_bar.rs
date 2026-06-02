@@ -1,25 +1,36 @@
 use bevy::{
     diagnostic::{DiagnosticsStore, FrameTimeDiagnosticsPlugin},
     ecs::{
-        system::{Res, SystemParam, SystemState},
+        query::With,
+        system::{Query, Res, SystemParam, SystemState},
         world::World,
     },
+    prelude::Entity,
+    window::PrimaryWindow,
 };
+use bevy_ai_skybox::prelude::{SkyboxCacheHealth, SkyboxGenerationUi};
 use impeller2_bevy::{ConnectionStatus, ThreadConnectionStatus};
 use impeller2_wkt::SimulationTimeStep;
 
-use crate::ui::colors::get_scheme;
+use crate::ui::{
+    colors::get_scheme,
+    input_owner::{PointerOwnerPriority, UiBlocker},
+    register_window_input_blocker,
+};
 
 use super::RootWidgetSystem;
 
 #[derive(SystemParam)]
-pub struct StatusBar<'w> {
+pub struct StatusBar<'w, 's> {
     tick_time: Res<'w, SimulationTimeStep>,
     diagnostics: Res<'w, DiagnosticsStore>,
     connection_status: Res<'w, ThreadConnectionStatus>,
+    primary_window: Query<'w, 's, Entity, With<PrimaryWindow>>,
+    skybox_ui: Res<'w, SkyboxGenerationUi>,
+    skybox_cache: Res<'w, SkyboxCacheHealth>,
 }
 
-impl RootWidgetSystem for StatusBar<'_> {
+impl RootWidgetSystem for StatusBar<'_, '_> {
     type Args = ();
     type Output = ();
 
@@ -30,11 +41,16 @@ impl RootWidgetSystem for StatusBar<'_> {
         _args: Self::Args,
     ) {
         let state_mut = state.get_mut(world);
+        let Ok(target_window) = state_mut.primary_window.single() else {
+            return;
+        };
 
         let tick_time = state_mut.tick_time;
         let diagnostics = state_mut.diagnostics;
+        let skybox_ui = &state_mut.skybox_ui;
+        let skybox_cache = &state_mut.skybox_cache;
 
-        egui::TopBottomPanel::bottom("status_bar")
+        let panel = egui::TopBottomPanel::bottom("status_bar")
             .frame(egui::Frame {
                 fill: get_scheme().bg_primary,
                 inner_margin: egui::Margin::symmetric(16, 4),
@@ -75,8 +91,18 @@ impl RootWidgetSystem for StatusBar<'_> {
                             .text_style(egui::TextStyle::Small)
                             .color(get_scheme().text_secondary),
                     ));
+
+                    super::skybox_status::draw_skybox_status_bar(ui, skybox_ui, skybox_cache);
                 });
             });
+
+        register_window_input_blocker(
+            world,
+            target_window,
+            panel.response.rect,
+            UiBlocker::OtherPanel,
+            PointerOwnerPriority::Panel,
+        );
     }
 }
 
