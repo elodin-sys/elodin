@@ -177,4 +177,121 @@ mod tests {
             vec!["models/a.glb".to_string()]
         );
     }
+
+    #[test]
+    fn rewrite_multiple_root_object_3d_glbs() {
+        let mut schematic = Schematic {
+            elems: vec![
+                SchematicElem::Object3d(Object3D {
+                    eql: "a".into(),
+                    mesh: Object3DMesh::glb("models/a.glb"),
+                    frame: None,
+                    icon: None,
+                    mesh_visibility_range: None,
+                    node_id: Default::default(),
+                }),
+                SchematicElem::Object3d(Object3D {
+                    eql: "b".into(),
+                    mesh: Object3DMesh::glb("models/b.glb"),
+                    frame: None,
+                    icon: None,
+                    mesh_visibility_range: None,
+                    node_id: Default::default(),
+                }),
+            ],
+            ..Default::default()
+        };
+
+        rewrite_glb_paths(&mut schematic, |path| {
+            local_glb_asset_name(path).map(|name| format!("db:{name}"))
+        });
+
+        let paths: Vec<_> = schematic
+            .elems
+            .iter()
+            .filter_map(|elem| match elem {
+                SchematicElem::Object3d(obj) => match &obj.mesh {
+                    Object3DMesh::Glb { path, .. } => Some(path.as_str()),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .collect();
+        assert_eq!(paths, vec!["db:a.glb", "db:b.glb"]);
+    }
+
+    #[test]
+    fn serialize_round_trip_preserves_db_scheme() {
+        use crate::serialize_schematic;
+
+        let mut schematic = Schematic {
+            elems: vec![SchematicElem::Object3d(Object3D {
+                eql: "rocket.world_pos".into(),
+                mesh: Object3DMesh::glb("path/to/rocket.glb"),
+                frame: None,
+                icon: None,
+                mesh_visibility_range: None,
+                node_id: Default::default(),
+            })],
+            ..Default::default()
+        };
+
+        rewrite_glb_paths(&mut schematic, |path| {
+            local_glb_asset_name(path).map(|name| format!("db:{name}"))
+        });
+
+        let kdl = serialize_schematic(&schematic);
+        assert!(
+            kdl.contains("path=db:rocket.glb"),
+            "serialized KDL should contain db: reference, got:\n{kdl}"
+        );
+
+        let reparsed = crate::parse_schematic(&kdl).expect("reparsed KDL");
+        let SchematicElem::Object3d(obj) = &reparsed.elems[0] else {
+            panic!("expected object_3d");
+        };
+        let Object3DMesh::Glb { path, .. } = &obj.mesh else {
+            panic!("expected glb");
+        };
+        assert_eq!(path, "db:rocket.glb");
+    }
+
+    #[test]
+    fn basename_collision_rewrites_to_same_db_reference() {
+        let mut schematic = Schematic {
+            elems: vec![
+                SchematicElem::Object3d(Object3D {
+                    eql: "a".into(),
+                    mesh: Object3DMesh::glb("models/rocket.glb"),
+                    frame: None,
+                    icon: None,
+                    mesh_visibility_range: None,
+                    node_id: Default::default(),
+                }),
+                SchematicElem::Object3d(Object3D {
+                    eql: "b".into(),
+                    mesh: Object3DMesh::glb("other/rocket.glb"),
+                    frame: None,
+                    icon: None,
+                    mesh_visibility_range: None,
+                    node_id: Default::default(),
+                }),
+            ],
+            ..Default::default()
+        };
+
+        rewrite_glb_paths(&mut schematic, |path| {
+            local_glb_asset_name(path).map(|name| format!("db:{name}"))
+        });
+
+        for elem in &schematic.elems {
+            let SchematicElem::Object3d(obj) = elem else {
+                continue;
+            };
+            let Object3DMesh::Glb { path, .. } = &obj.mesh else {
+                panic!("expected glb");
+            };
+            assert_eq!(path, "db:rocket.glb");
+        }
+    }
 }

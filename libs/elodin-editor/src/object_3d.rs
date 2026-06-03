@@ -2241,4 +2241,21 @@ mod db_asset_url_tests {
         let url = "http://127.0.0.1:2241/rocket.glb";
         assert_eq!(resolve_glb_asset_url(url, None), url);
     }
+
+    #[test]
+    fn resolve_db_asset_url_ipv6() {
+        let conn: SocketAddr = "[::1]:2240".parse().unwrap();
+        assert_eq!(
+            resolve_glb_asset_url("db:rocket.glb", Some(conn)),
+            "http://[::1]:2241/rocket.glb"
+        );
+    }
+
+    #[test]
+    fn resolve_db_asset_url_defaults_to_localhost_when_disconnected() {
+        assert_eq!(
+            resolve_glb_asset_url("db:rocket.glb", None),
+            "http://127.0.0.1:2241/rocket.glb"
+        );
+    }
 }

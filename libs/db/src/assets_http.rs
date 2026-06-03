@@ -72,6 +72,9 @@ async fn get_asset(
     AxumPath(path): AxumPath<String>,
     State(state): State<Arc<AssetsState>>,
 ) -> Result<impl IntoResponse, StatusCode> {
+    if path.contains("..") {
+        return Err(StatusCode::BAD_REQUEST);
+    }
     let rel = sanitize_asset_path(&path).map_err(|_| StatusCode::BAD_REQUEST)?;
     let full = state.assets_dir.join(rel);
     match tokio::task::spawn_blocking(move || std::fs::read(full)).await {
@@ -87,6 +90,9 @@ async fn put_asset(
     State(state): State<Arc<AssetsState>>,
     body: Bytes,
 ) -> Result<StatusCode, StatusCode> {
+    if path.contains("..") {
+        return Err(StatusCode::BAD_REQUEST);
+    }
     write_asset_file(&state.assets_dir, &path, &body).map_err(|err| {
         if err.kind() == io::ErrorKind::InvalidInput {
             StatusCode::BAD_REQUEST
@@ -243,5 +249,34 @@ mod tests {
         std::fs::write(assets.join("rocket.glb"), b"payload").unwrap();
 
         DB::open(dir.path().to_path_buf()).expect("open should ignore assets/");
+    }
+
+    #[tokio::test]
+    async fn put_with_encoded_parent_dir_returns_400() {
+        let dir = tempdir().unwrap();
+        let assets = dir.path().join("assets");
+        std::fs::create_dir_all(&assets).unwrap();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let bound = listener.local_addr().unwrap();
+
+        let state = Arc::new(AssetsState { assets_dir: assets.clone() });
+        let app = Router::new()
+            .route("/{*path}", get(get_asset).put(put_asset))
+            .with_state(state);
+
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        let response = reqwest::Client::new()
+            .put(format!("http://{bound}/..%2frocket.glb"))
+            .body(b"x".to_vec())
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert!(!assets.join("rocket.glb").exists());
     }
 }

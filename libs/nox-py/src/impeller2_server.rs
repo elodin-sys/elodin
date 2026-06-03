@@ -249,33 +249,57 @@ mod asset_tests {
     use impeller2_wkt::{Object3D, Object3DMesh, SchematicElem};
     use tempfile::tempdir;
 
+    fn glb_object(path: &str) -> SchematicElem {
+        SchematicElem::Object3d(Object3D {
+            eql: "e.world_pos".into(),
+            mesh: Object3DMesh::glb(path),
+            frame: None,
+            icon: None,
+            mesh_visibility_range: None,
+            node_id: Default::default(),
+        })
+    }
+
     #[test]
-    fn persist_schematic_assets_rewrites_kdl_and_writes_files() {
+    fn resolve_local_asset_path_relative_to_schematic_parent() {
+        let schematic = PathBuf::from("/sim/layout/schematic.kdl");
+        assert_eq!(
+            resolve_local_asset_path("models/rocket.glb", Some(schematic.as_path())),
+            PathBuf::from("/sim/layout/models/rocket.glb")
+        );
+    }
+
+    #[test]
+    fn resolve_local_asset_path_honors_absolute_paths() {
+        assert_eq!(
+            resolve_local_asset_path("/abs/rocket.glb", Some(Path::new("/sim/schematic.kdl"))),
+            PathBuf::from("/abs/rocket.glb")
+        );
+    }
+
+    #[test]
+    fn persist_flat_glb_next_to_schematic_kdl() {
         let dir = tempdir().unwrap();
-        let db = DB::create(dir.path().to_path_buf()).unwrap();
-        let glb_path = dir.path().join("rocket.glb");
-        std::fs::write(&glb_path, b"glb-data").unwrap();
+        let db = DB::create(dir.path().join("db")).unwrap();
+        std::fs::write(dir.path().join("rocket.glb"), b"glb-data").unwrap();
 
         let mut schematic = Schematic {
-            elems: vec![SchematicElem::Object3d(Object3D {
-                eql: "e".into(),
-                mesh: Object3DMesh::glb("rocket.glb"),
-                frame: None,
-                icon: None,
-                mesh_visibility_range: None,
-                node_id: Default::default(),
-            })],
+            elems: vec![glb_object("rocket.glb")],
             ..Default::default()
         };
 
-        persist_schematic_assets(&db, &mut schematic, Some(glb_path.as_path())).unwrap();
+        persist_schematic_assets(
+            &db,
+            &mut schematic,
+            Some(dir.path().join("schematic.kdl").as_path()),
+        )
+        .unwrap();
 
         let assets_dir = elodin_db::assets_http::assets_dir(&db.path);
         assert_eq!(
             std::fs::read(assets_dir.join("rocket.glb")).unwrap(),
             b"glb-data".to_vec()
         );
-
         let SchematicElem::Object3d(obj) = &schematic.elems[0] else {
             panic!("expected object_3d");
         };
@@ -283,6 +307,122 @@ mod asset_tests {
             panic!("expected glb");
         };
         assert_eq!(path, "db:rocket.glb");
+    }
+
+    #[test]
+    fn persist_nested_glb_path_uses_basename_on_disk() {
+        let dir = tempdir().unwrap();
+        let db = DB::create(dir.path().join("db")).unwrap();
+        std::fs::create_dir_all(dir.path().join("models")).unwrap();
+        std::fs::write(dir.path().join("models/rocket.glb"), b"nested-glb").unwrap();
+
+        let mut schematic = Schematic {
+            elems: vec![glb_object("models/rocket.glb")],
+            ..Default::default()
+        };
+
+        persist_schematic_assets(
+            &db,
+            &mut schematic,
+            Some(dir.path().join("schematic.kdl").as_path()),
+        )
+        .unwrap();
+
+        let assets_dir = elodin_db::assets_http::assets_dir(&db.path);
+        assert_eq!(
+            std::fs::read(assets_dir.join("rocket.glb")).unwrap(),
+            b"nested-glb".to_vec()
+        );
+        let SchematicElem::Object3d(obj) = &schematic.elems[0] else {
+            panic!("expected object_3d");
+        };
+        let Object3DMesh::Glb { path, .. } = &obj.mesh else {
+            panic!("expected glb");
+        };
+        assert_eq!(path, "db:rocket.glb");
+    }
+
+    #[test]
+    fn persist_missing_glb_returns_io_error() {
+        let dir = tempdir().unwrap();
+        let db = DB::create(dir.path().join("db")).unwrap();
+        let mut schematic = Schematic {
+            elems: vec![glb_object("missing.glb")],
+            ..Default::default()
+        };
+
+        let err = persist_schematic_assets(
+            &db,
+            &mut schematic,
+            Some(dir.path().join("schematic.kdl").as_path()),
+        )
+        .unwrap_err();
+        assert!(matches!(err, elodin_db::Error::Io(_)));
+    }
+
+    #[test]
+    fn persist_kdl_round_trip_rewrites_glb_to_db_scheme() {
+        let dir = tempdir().unwrap();
+        let db = DB::create(dir.path().join("db")).unwrap();
+        std::fs::create_dir_all(dir.path().join("models")).unwrap();
+        std::fs::write(dir.path().join("models/rocket.glb"), b"payload").unwrap();
+
+        let kdl = r#"
+object_3d "rocket.world_pos" {
+    glb path="models/rocket.glb"
+}
+"#;
+        let mut schematic = impeller2_kdl::parse_schematic(kdl).unwrap();
+        persist_schematic_assets(
+            &db,
+            &mut schematic,
+            Some(dir.path().join("schematic.kdl").as_path()),
+        )
+        .unwrap();
+
+        let serialized = impeller2_kdl::serialize_schematic(&schematic);
+        assert!(
+            serialized.contains("path=db:rocket.glb"),
+            "expected db: path in serialized KDL:\n{serialized}"
+        );
+
+        let reparsed = impeller2_kdl::parse_schematic(&serialized).unwrap();
+        let SchematicElem::Object3d(obj) = &reparsed.elems[0] else {
+            panic!("expected object_3d");
+        };
+        let Object3DMesh::Glb { path, .. } = &obj.mesh else {
+            panic!("expected glb");
+        };
+        assert_eq!(path, "db:rocket.glb");
+    }
+
+    #[test]
+    fn persist_basename_collision_last_upload_wins_on_disk() {
+        let dir = tempdir().unwrap();
+        let db = DB::create(dir.path().join("db")).unwrap();
+        std::fs::create_dir_all(dir.path().join("a")).unwrap();
+        std::fs::create_dir_all(dir.path().join("b")).unwrap();
+        std::fs::write(dir.path().join("a/rocket.glb"), b"from-a").unwrap();
+        std::fs::write(dir.path().join("b/rocket.glb"), b"from-b").unwrap();
+
+        let mut schematic = Schematic {
+            elems: vec![glb_object("a/rocket.glb"), glb_object("b/rocket.glb")],
+            ..Default::default()
+        };
+
+        persist_schematic_assets(
+            &db,
+            &mut schematic,
+            Some(dir.path().join("schematic.kdl").as_path()),
+        )
+        .unwrap();
+
+        let assets_dir = elodin_db::assets_http::assets_dir(&db.path);
+        // Known limitation: same basename overwrites; iteration order is sorted paths.
+        assert_eq!(
+            std::fs::read(assets_dir.join("rocket.glb")).unwrap(),
+            b"from-b".to_vec()
+        );
     }
 }
 
