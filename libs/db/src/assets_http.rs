@@ -61,7 +61,8 @@ pub async fn sync_schematic_assets_from_source(
     db_path: &Path,
     schematic_kdl: &str,
 ) -> Result<(), SyncAssetsError> {
-    let schematic = impeller2_kdl::parse_schematic(schematic_kdl).map_err(SyncAssetsError::Parse)?;
+    let schematic =
+        impeller2_kdl::parse_schematic(schematic_kdl).map_err(SyncAssetsError::Parse)?;
     let names = impeller2_kdl::collect_db_glb_asset_names(&schematic);
     if names.is_empty() {
         return Ok(());

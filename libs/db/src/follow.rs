@@ -159,19 +159,18 @@ async fn run_follower_inner(config: &FollowConfig, db: &Arc<DB>) -> Result<(), E
     db.save_db_state()?;
 
     #[cfg(feature = "axum")]
-    if let Some(content) = metadata_resp.db_config.schematic_content() {
-        if let Err(err) = crate::assets_http::sync_schematic_assets_from_source(
+    if let Some(content) = metadata_resp.db_config.schematic_content()
+        && let Err(err) = crate::assets_http::sync_schematic_assets_from_source(
             config.source_addr,
             &db.path,
             content,
         )
         .await
-        {
-            warn!(
-                ?err,
-                "failed to sync schematic GLB assets from source; db: paths may not load"
-            );
-        }
+    {
+        warn!(
+            ?err,
+            "failed to sync schematic GLB assets from source; db: paths may not load"
+        );
     }
 
     // Apply component metadata.
