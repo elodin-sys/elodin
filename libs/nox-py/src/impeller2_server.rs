@@ -462,7 +462,7 @@ mod asset_tests {
     }
 
     #[test]
-    fn persist_nested_glb_path_uses_basename_on_disk() {
+    fn persist_nested_glb_path_preserves_relative_path_on_disk() {
         let dir = tempdir().unwrap();
         let db = DB::create(dir.path().join("db")).unwrap();
         std::fs::create_dir_all(dir.path().join("models")).unwrap();
@@ -482,7 +482,7 @@ mod asset_tests {
 
         let assets_dir = elodin_db::assets_http::assets_dir(&db.path);
         assert_eq!(
-            std::fs::read(assets_dir.join("rocket.glb")).unwrap(),
+            std::fs::read(assets_dir.join("models/rocket.glb")).unwrap(),
             b"nested-glb".to_vec()
         );
         let SchematicElem::Object3d(obj) = &schematic.elems[0] else {
@@ -491,7 +491,7 @@ mod asset_tests {
         let Object3DMesh::Glb { path, .. } = &obj.mesh else {
             panic!("expected glb");
         };
-        assert_eq!(path, "db:rocket.glb");
+        assert_eq!(path, "db:models/rocket.glb");
     }
 
     #[test]
@@ -534,7 +534,7 @@ object_3d "rocket.world_pos" {
 
         let serialized = impeller2_kdl::serialize_schematic(&schematic);
         assert!(
-            serialized.contains("path=db:rocket.glb"),
+            serialized.contains("path=\"db:models/rocket.glb\""),
             "expected db: path in serialized KDL:\n{serialized}"
         );
 
@@ -545,11 +545,11 @@ object_3d "rocket.world_pos" {
         let Object3DMesh::Glb { path, .. } = &obj.mesh else {
             panic!("expected glb");
         };
-        assert_eq!(path, "db:rocket.glb");
+        assert_eq!(path, "db:models/rocket.glb");
     }
 
     #[test]
-    fn persist_basename_collision_last_upload_wins_on_disk() {
+    fn persist_basename_collision_keeps_distinct_relative_paths() {
         let dir = tempdir().unwrap();
         let db = DB::create(dir.path().join("db")).unwrap();
         std::fs::create_dir_all(dir.path().join("a")).unwrap();
@@ -570,11 +570,29 @@ object_3d "rocket.world_pos" {
         .unwrap();
 
         let assets_dir = elodin_db::assets_http::assets_dir(&db.path);
-        // Known limitation: same basename overwrites; iteration order is sorted paths.
         assert_eq!(
-            std::fs::read(assets_dir.join("rocket.glb")).unwrap(),
+            std::fs::read(assets_dir.join("a/rocket.glb")).unwrap(),
+            b"from-a".to_vec()
+        );
+        assert_eq!(
+            std::fs::read(assets_dir.join("b/rocket.glb")).unwrap(),
             b"from-b".to_vec()
         );
+
+        let paths: Vec<_> = schematic
+            .elems
+            .iter()
+            .map(|elem| {
+                let SchematicElem::Object3d(obj) = elem else {
+                    panic!("expected object_3d");
+                };
+                let Object3DMesh::Glb { path, .. } = &obj.mesh else {
+                    panic!("expected glb");
+                };
+                path.clone()
+            })
+            .collect();
+        assert_eq!(paths, vec!["db:a/rocket.glb", "db:b/rocket.glb"]);
     }
 }
 

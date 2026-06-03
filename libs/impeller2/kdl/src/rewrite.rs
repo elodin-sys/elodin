@@ -1,5 +1,5 @@
 use impeller2_wkt::{Object3DMesh, Panel, Schematic, SchematicElem};
-use std::path::Path;
+use std::path::{Component, Path, PathBuf};
 
 pub fn is_local_asset_path(path: &str) -> bool {
     !(path.starts_with("db:") || path.starts_with("http://") || path.starts_with("https://"))
@@ -9,11 +9,26 @@ pub fn local_glb_asset_name(path: &str) -> Option<String> {
     if !is_local_asset_path(path) {
         return None;
     }
-    let name = Path::new(path)
-        .file_name()
-        .and_then(|s| s.to_str())
-        .filter(|s| !s.is_empty())?;
-    Some(name.to_string())
+    let path = Path::new(path);
+    if path.is_absolute() {
+        return path
+            .file_name()
+            .and_then(|s| s.to_str())
+            .filter(|s| !s.is_empty())
+            .map(ToOwned::to_owned);
+    }
+
+    let mut rel = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::Normal(part) => rel.push(part),
+            Component::ParentDir | Component::RootDir | Component::Prefix(_) => return None,
+        }
+    }
+    rel.to_str()
+        .filter(|s| !s.is_empty())
+        .map(ToOwned::to_owned)
 }
 
 pub fn rewrite_glb_paths<F>(schematic: &mut Schematic, mut map: F)
@@ -137,7 +152,7 @@ mod tests {
         let Object3DMesh::Glb { path, .. } = &obj.mesh else {
             panic!("expected glb");
         };
-        assert_eq!(path, "db:rocket.glb");
+        assert_eq!(path, "db:path/to/rocket.glb");
     }
 
     #[test]
@@ -217,7 +232,7 @@ mod tests {
                 _ => None,
             })
             .collect();
-        assert_eq!(paths, vec!["db:a.glb", "db:b.glb"]);
+        assert_eq!(paths, vec!["db:models/a.glb", "db:models/b.glb"]);
     }
 
     #[test]
@@ -242,7 +257,7 @@ mod tests {
 
         let kdl = serialize_schematic(&schematic);
         assert!(
-            kdl.contains("path=db:rocket.glb"),
+            kdl.contains("path=\"db:path/to/rocket.glb\""),
             "serialized KDL should contain db: reference, got:\n{kdl}"
         );
 
@@ -253,11 +268,11 @@ mod tests {
         let Object3DMesh::Glb { path, .. } = &obj.mesh else {
             panic!("expected glb");
         };
-        assert_eq!(path, "db:rocket.glb");
+        assert_eq!(path, "db:path/to/rocket.glb");
     }
 
     #[test]
-    fn basename_collision_rewrites_to_same_db_reference() {
+    fn basename_collision_preserves_relative_paths() {
         let mut schematic = Schematic {
             elems: vec![
                 SchematicElem::Object3d(Object3D {
@@ -284,14 +299,17 @@ mod tests {
             local_glb_asset_name(path).map(|name| format!("db:{name}"))
         });
 
-        for elem in &schematic.elems {
-            let SchematicElem::Object3d(obj) = elem else {
-                continue;
-            };
-            let Object3DMesh::Glb { path, .. } = &obj.mesh else {
-                panic!("expected glb");
-            };
-            assert_eq!(path, "db:rocket.glb");
-        }
+        let paths: Vec<_> = schematic
+            .elems
+            .iter()
+            .filter_map(|elem| match elem {
+                SchematicElem::Object3d(obj) => match &obj.mesh {
+                    Object3DMesh::Glb { path, .. } => Some(path.as_str()),
+                    _ => None,
+                },
+                _ => None,
+            })
+            .collect();
+        assert_eq!(paths, vec!["db:models/rocket.glb", "db:other/rocket.glb"]);
     }
 }

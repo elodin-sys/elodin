@@ -423,7 +423,7 @@ async fn main() -> miette::Result<()> {
             info!(?path, "starting db");
             let server = Server::new(&path, addr).into_diagnostic()?;
             #[cfg(feature = "axum")]
-            elodin_db::assets_http::spawn_assets_http(&path, addr);
+            elodin_db::assets_http::spawn_assets_http(&path, addr).into_diagnostic()?;
             if let Some(start_timestamp) = start_timestamp {
                 server
                     .db

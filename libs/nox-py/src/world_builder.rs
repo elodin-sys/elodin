@@ -616,7 +616,7 @@ impl WorldBuilder {
                             crate::Error::DB(e)
                         }
                     })?;
-                elodin_db::assets_http::spawn_assets_http(&db_path, addr);
+                elodin_db::assets_http::spawn_assets_http(&db_path, addr)?;
                 py.allow_threads(|| {
                     // Run the async executor (and therefore the JIT tick_fn) on a
                     // dedicated thread with a 256 MB stack. Large customer simulations
@@ -1463,34 +1463,31 @@ impl WorldBuilder {
     /// this function itself does not write to the `path`.
     #[pyo3(signature = (default_content = None, path = None,))]
     pub fn schematic(&mut self, default_content: Option<String>, path: Option<String>) {
-        self.world.metadata.schematic_path =
-            // Don't use the ELODIN_KDL_DIR path here. We use that when we read
-            // or write to the filesystem.
-            //
-            // path.map(|p| impeller2_kdl::env::schematic_file(&Path::new(&p)));
-            path.map(PathBuf::from);
-        let file_contents = self
-            .world
-            .metadata
-            .schematic_path
+        let requested_path = path.map(PathBuf::from);
+        let resolved_path = requested_path
             .as_ref()
-            .map(|p| impeller2_kdl::env::schematic_file(Path::new(p)))
-            .and_then(|path| {
-                if path.exists() {
-                    std::fs::read_to_string(&path)
-                        .inspect(|_| info!("read schematic at {:?}", path.display()))
-                        .inspect_err(|err| {
-                            error!(
-                                ?err,
-                                "could not read schematic file at {:?}",
-                                path.display()
-                            )
-                        })
-                        .ok()
-                } else {
-                    None
-                }
-            });
+            .map(|p| impeller2_kdl::env::schematic_file(Path::new(p)));
+        let file_contents = resolved_path.as_ref().and_then(|path| {
+            if path.exists() {
+                std::fs::read_to_string(path)
+                    .inspect(|_| info!("read schematic at {:?}", path.display()))
+                    .inspect_err(|err| {
+                        error!(
+                            ?err,
+                            "could not read schematic file at {:?}",
+                            path.display()
+                        )
+                    })
+                    .ok()
+            } else {
+                None
+            }
+        });
+        self.world.metadata.schematic_path = if file_contents.is_some() {
+            resolved_path
+        } else {
+            requested_path
+        };
         self.world.metadata.schematic = file_contents.or(default_content);
     }
 

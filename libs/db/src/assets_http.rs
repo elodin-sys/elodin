@@ -103,28 +103,47 @@ async fn put_asset(
     Ok(StatusCode::NO_CONTENT)
 }
 
-pub async fn serve_assets(addr: SocketAddr, assets_dir: PathBuf) -> miette::Result<()> {
-    std::fs::create_dir_all(&assets_dir).into_diagnostic()?;
+async fn serve_assets_with_listener(
+    listener: tokio::net::TcpListener,
+    addr: SocketAddr,
+    assets_dir: PathBuf,
+) -> miette::Result<()> {
     let state = Arc::new(AssetsState { assets_dir });
     let app = Router::new()
         .route("/{*path}", get(get_asset).put(put_asset))
         .with_state(state);
-    let listener = tokio::net::TcpListener::bind(addr)
-        .await
-        .into_diagnostic()?;
     tracing::info!(?addr, "assets http server listening");
     axum::serve(listener, app).await.into_diagnostic()?;
     Ok(())
 }
 
-pub fn spawn_assets_http(db_path: &Path, tcp_addr: SocketAddr) {
+pub async fn serve_assets(addr: SocketAddr, assets_dir: PathBuf) -> miette::Result<()> {
+    std::fs::create_dir_all(&assets_dir).into_diagnostic()?;
+    let listener = tokio::net::TcpListener::bind(addr)
+        .await
+        .into_diagnostic()?;
+    serve_assets_with_listener(listener, addr, assets_dir).await
+}
+
+pub fn spawn_assets_http(db_path: &Path, tcp_addr: SocketAddr) -> io::Result<()> {
     let addr = assets_http_addr(tcp_addr);
     let assets_dir = assets_dir(db_path);
+    std::fs::create_dir_all(&assets_dir)?;
+    let listener = std::net::TcpListener::bind(addr)?;
+    listener.set_nonblocking(true)?;
     stellarator::struc_con::tokio(move |_| async move {
-        if let Err(err) = serve_assets(addr, assets_dir).await {
-            tracing::error!(?err, "assets http server failed");
+        match tokio::net::TcpListener::from_std(listener) {
+            Ok(listener) => {
+                if let Err(err) = serve_assets_with_listener(listener, addr, assets_dir).await {
+                    tracing::error!(?err, "assets http server failed");
+                }
+            }
+            Err(err) => {
+                tracing::error!(?err, "assets http server listener setup failed");
+            }
         }
     });
+    Ok(())
 }
 
 #[cfg(test)]
@@ -165,6 +184,19 @@ mod tests {
     fn assets_http_addr_uses_port_offset() {
         let tcp: SocketAddr = "127.0.0.1:2240".parse().unwrap();
         assert_eq!(assets_http_addr(tcp), "127.0.0.1:2241".parse().unwrap());
+    }
+
+    #[test]
+    fn spawn_assets_http_reports_bind_conflict() {
+        let dir = tempdir().unwrap();
+        let tcp: SocketAddr = "127.0.0.1:0".parse().unwrap();
+        let listener = std::net::TcpListener::bind(tcp).unwrap();
+        let bound = listener.local_addr().unwrap();
+        let assets_addr = assets_http_addr(bound);
+        let _conflict = std::net::TcpListener::bind(assets_addr).unwrap();
+
+        let err = spawn_assets_http(dir.path(), bound).unwrap_err();
+        assert_eq!(err.kind(), io::ErrorKind::AddrInUse);
     }
 
     #[tokio::test]
