@@ -11,7 +11,7 @@ use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 use thiserror::Error;
 
-pub const ASSETS_HTTP_PORT_OFFSET: u16 = 1;
+pub use impeller2::ASSETS_HTTP_PORT_OFFSET;
 
 #[derive(Error, Debug, PartialEq, Eq)]
 pub enum SanitizeError {

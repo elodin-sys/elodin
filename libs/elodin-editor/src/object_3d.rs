@@ -32,12 +32,11 @@ type ImportedCameraFilter = (Added<Camera>, Without<NavGizmoCamera>, Without<Mai
 type ImportedCameraQuery<'w, 's> = Query<'w, 's, (Entity, &'static ChildOf), ImportedCameraFilter>;
 
 pub const ELLIPSOID_RENDER_LAYER: usize = 29;
-pub const ASSETS_HTTP_PORT_OFFSET: u16 = 1;
 
 pub fn assets_http_base(connection_addr: SocketAddr) -> String {
     let port = connection_addr
         .port()
-        .saturating_add(ASSETS_HTTP_PORT_OFFSET);
+        .saturating_add(impeller2::ASSETS_HTTP_PORT_OFFSET);
     match connection_addr.ip() {
         IpAddr::V4(v4) => format!("http://{v4}:{port}"),
         IpAddr::V6(v6) => format!("http://[{v6}]:{port}"),
