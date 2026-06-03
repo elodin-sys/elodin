@@ -25,7 +25,7 @@ use bevy_geo_frames::prelude::*;
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::hash::BuildHasher;
-use std::net::{IpAddr, SocketAddr};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::Arc;
 type ImportedCameraFilter = (Added<Camera>, Without<NavGizmoCamera>, Without<MainCamera>);
 
@@ -33,11 +33,19 @@ type ImportedCameraQuery<'w, 's> = Query<'w, 's, (Entity, &'static ChildOf), Imp
 
 pub const ELLIPSOID_RENDER_LAYER: usize = 29;
 
+fn client_asset_ip(ip: IpAddr) -> IpAddr {
+    match ip {
+        IpAddr::V4(v4) if v4.is_unspecified() => IpAddr::V4(Ipv4Addr::LOCALHOST),
+        IpAddr::V6(v6) if v6.is_unspecified() => IpAddr::V6(Ipv6Addr::LOCALHOST),
+        other => other,
+    }
+}
+
 pub fn assets_http_base(connection_addr: SocketAddr) -> String {
     let port = connection_addr
         .port()
         .saturating_add(impeller2::ASSETS_HTTP_PORT_OFFSET);
-    match connection_addr.ip() {
+    match client_asset_ip(connection_addr.ip()) {
         IpAddr::V4(v4) => format!("http://{v4}:{port}"),
         IpAddr::V6(v6) => format!("http://[{v6}]:{port}"),
     }
@@ -2247,6 +2255,24 @@ mod db_asset_url_tests {
         assert_eq!(
             resolve_glb_asset_url("db:rocket.glb", Some(conn)),
             "http://[::1]:2241/rocket.glb"
+        );
+    }
+
+    #[test]
+    fn resolve_db_asset_url_normalizes_unspecified_ipv6_to_loopback() {
+        let conn: SocketAddr = "[::]:2240".parse().unwrap();
+        assert_eq!(
+            resolve_glb_asset_url("db:rocket.glb", Some(conn)),
+            "http://[::1]:2241/rocket.glb"
+        );
+    }
+
+    #[test]
+    fn resolve_db_asset_url_normalizes_unspecified_ipv4_to_loopback() {
+        let conn: SocketAddr = "0.0.0.0:2240".parse().unwrap();
+        assert_eq!(
+            resolve_glb_asset_url("db:rocket.glb", Some(conn)),
+            "http://127.0.0.1:2241/rocket.glb"
         );
     }
 
