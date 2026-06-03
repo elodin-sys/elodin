@@ -201,17 +201,75 @@ pub fn init_db(
     Ok(())
 }
 
-fn resolve_local_asset_path(local_path: &str, schematic_path: Option<&Path>) -> PathBuf {
+const DEFAULT_ASSETS_DIR: &str = "assets";
+
+fn elodin_assets_root() -> PathBuf {
+    let dir_name = std::env::var_os("ELODIN_ASSETS_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(DEFAULT_ASSETS_DIR));
+    if dir_name.is_absolute() {
+        dir_name
+    } else {
+        std::env::current_dir()
+            .unwrap_or_else(|_| PathBuf::from("."))
+            .join(dir_name)
+    }
+}
+
+fn local_asset_path_candidates(local_path: &str, schematic_path: Option<&Path>) -> Vec<PathBuf> {
     let path = PathBuf::from(local_path);
     if path.is_absolute() {
-        return path;
+        return vec![path];
     }
-    if let Some(base) = schematic_path.and_then(|p| p.parent()) {
-        return base.join(path);
+
+    let mut candidates = Vec::new();
+    if let Some(schematic_path) = schematic_path
+        && let Some(base) = schematic_path
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty())
+    {
+        candidates.push(base.join(&path));
     }
-    std::env::current_dir()
-        .unwrap_or_else(|_| PathBuf::from("."))
-        .join(path)
+    candidates.push(elodin_assets_root().join(&path));
+    if let Ok(cwd) = std::env::current_dir() {
+        let cwd_path = cwd.join(&path);
+        if !candidates.contains(&cwd_path) {
+            candidates.push(cwd_path);
+        }
+    }
+    candidates
+}
+
+fn resolve_local_asset_path(local_path: &str, schematic_path: Option<&Path>) -> PathBuf {
+    local_asset_path_candidates(local_path, schematic_path)
+        .into_iter()
+        .find(|candidate| candidate.exists())
+        .unwrap_or_else(|| {
+            local_asset_path_candidates(local_path, schematic_path)
+                .into_iter()
+                .next()
+                .unwrap_or_else(|| PathBuf::from(local_path))
+        })
+}
+
+fn read_local_asset_file(
+    local_path: &str,
+    schematic_path: Option<&Path>,
+) -> Result<Vec<u8>, (PathBuf, std::io::Error)> {
+    let candidates = local_asset_path_candidates(local_path, schematic_path);
+    let mut last_err = None;
+    for candidate in &candidates {
+        match std::fs::read(candidate) {
+            Ok(data) => return Ok(data),
+            Err(err) => last_err = Some((candidate.clone(), err)),
+        }
+    }
+    Err(last_err.unwrap_or_else(|| {
+        (
+            PathBuf::from(local_path),
+            std::io::Error::new(std::io::ErrorKind::NotFound, "asset not found"),
+        )
+    }))
 }
 
 fn persist_schematic_assets(
@@ -226,11 +284,10 @@ fn persist_schematic_assets(
         let Some(name) = impeller2_kdl::local_glb_asset_name(local_path) else {
             continue;
         };
-        let resolved = resolve_local_asset_path(local_path, schematic_path);
-        let data = std::fs::read(&resolved).map_err(|err| {
+        let data = read_local_asset_file(local_path, schematic_path).map_err(|(path, err)| {
             tracing::warn!(
                 ?err,
-                path = %resolved.display(),
+                path = %path.display(),
                 "failed to read local asset for db upload"
             );
             elodin_db::Error::Io(err)
@@ -284,6 +341,88 @@ mod asset_tests {
             resolve_local_asset_path("/abs/rocket.glb", Some(Path::new("/sim/schematic.kdl"))),
             PathBuf::from("/abs/rocket.glb")
         );
+    }
+
+    struct EnvVarGuard {
+        key: &'static str,
+        previous: Option<std::ffi::OsString>,
+    }
+
+    impl EnvVarGuard {
+        fn set(key: &'static str, value: &str) -> Self {
+            let previous = std::env::var_os(key);
+            std::env::set_var(key, value);
+            Self { key, previous }
+        }
+    }
+
+    impl Drop for EnvVarGuard {
+        fn drop(&mut self) {
+            match &self.previous {
+                Some(value) => std::env::set_var(self.key, value),
+                None => std::env::remove_var(self.key),
+            }
+        }
+    }
+
+    #[test]
+    fn resolve_local_asset_path_falls_back_to_elodin_assets_dir() {
+        let dir = tempdir().unwrap();
+        let assets_dir = dir.path().join("assets");
+        std::fs::create_dir_all(&assets_dir).unwrap();
+        std::fs::write(assets_dir.join("f22.glb"), b"jet").unwrap();
+
+        let _guard = EnvVarGuard::set("ELODIN_ASSETS_DIR", assets_dir.to_str().unwrap());
+        assert_eq!(
+            resolve_local_asset_path("f22.glb", Some(Path::new("bdx.kdl"))),
+            assets_dir.join("f22.glb")
+        );
+    }
+
+    #[test]
+    fn persist_rc_jet_like_flat_glb_names_via_elodin_assets_dir() {
+        let dir = tempdir().unwrap();
+        let assets_dir = dir.path().join("assets");
+        std::fs::create_dir_all(&assets_dir).unwrap();
+        std::fs::write(assets_dir.join("f22.glb"), b"f22").unwrap();
+        std::fs::write(assets_dir.join("edu-450-v2-drone.glb"), b"drone").unwrap();
+
+        let db = DB::create(dir.path().join("db")).unwrap();
+        let mut schematic = Schematic {
+            elems: vec![
+                glb_object("f22.glb"),
+                glb_object("edu-450-v2-drone.glb"),
+            ],
+            ..Default::default()
+        };
+
+        let _guard = EnvVarGuard::set("ELODIN_ASSETS_DIR", assets_dir.to_str().unwrap());
+        persist_schematic_assets(&db, &mut schematic, Some(Path::new("bdx.kdl"))).unwrap();
+
+        let stored_assets = elodin_db::assets_http::assets_dir(&db.path);
+        assert_eq!(
+            std::fs::read(stored_assets.join("f22.glb")).unwrap(),
+            b"f22".to_vec()
+        );
+        assert_eq!(
+            std::fs::read(stored_assets.join("edu-450-v2-drone.glb")).unwrap(),
+            b"drone".to_vec()
+        );
+
+        let paths: Vec<_> = schematic
+            .elems
+            .iter()
+            .map(|elem| {
+                let SchematicElem::Object3d(obj) = elem else {
+                    panic!("expected object_3d");
+                };
+                let Object3DMesh::Glb { path, .. } = &obj.mesh else {
+                    panic!("expected glb");
+                };
+                path.clone()
+            })
+            .collect();
+        assert_eq!(paths, vec!["db:f22.glb", "db:edu-450-v2-drone.glb"]);
     }
 
     #[test]
