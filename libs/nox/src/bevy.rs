@@ -62,11 +62,7 @@ mod tests {
 
     #[test]
     fn tensor_literal_matches_from_cols() {
-        let m: Matrix3<f32, ArrayRepr> = tensor![
-            [1.0, 2.0, 3.0],
-            [4.0, 5.0, 6.0],
-            [7.0, 8.0, 9.0]
-        ];
+        let m: Matrix3<f32, ArrayRepr> = tensor![[1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [7.0, 8.0, 9.0]];
         let bevy: bevy_math::Mat3 = m.into();
         let expected = bevy_math::Mat3::from_cols(
             bevy_math::Vec3::new(1.0, 4.0, 7.0),

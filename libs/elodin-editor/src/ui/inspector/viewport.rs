@@ -498,11 +498,10 @@ pub fn set_viewport_pos(
     }
 }
 
-
 #[cfg(test)]
 mod tests {
-    use bevy::math::{Mat3, Quat, Vec3};
     use crate::WorldPosExt;
+    use bevy::math::{Mat3, Quat, Vec3};
 
     #[inline]
     fn are_colinear(a: Vec3, b: Vec3) -> bool {
@@ -513,8 +512,10 @@ mod tests {
     fn glam_look_at_rh(dir: Vec3, up: Vec3) -> Mat3 {
         // let f = dir.normalize();
         let up_candidates = [up, Vec3::Y, Vec3::X, Vec3::Z];
-        let up = up_candidates.into_iter().find(|up| !are_colinear(*up, dir))
-                                     .expect("it can't be colinear with everyone");
+        let up = up_candidates
+            .into_iter()
+            .find(|up| !are_colinear(*up, dir))
+            .expect("it can't be colinear with everyone");
         // let s = f.cross(up).normalize();
         // let u = s.cross(f);
         // // nox uses from_rows then transpose, which equals from_cols
@@ -538,19 +539,15 @@ mod tests {
         //   ENU east  -> Bevy +X
         //   ENU north -> Bevy -Z
         //   ENU up    -> Bevy +Y
-        Mat3::from_cols(
-            M.x_axis,
-            M.z_axis,
-            -M.y_axis,
-        ).transpose()
+        Mat3::from_cols(M.x_axis, M.z_axis, -M.y_axis).transpose()
     }
 
     #[test]
     fn test_look_at_rh_nox_vs_glam() {
         let test_cases = [
             (Vec3::new(0.0, 1.0, 0.0), Vec3::Z), // 0: This is the identity
- // transform for Elodin's look_to. No surprise: It's ENU, with north as the
- // facing direction.
+            // transform for Elodin's look_to. No surprise: It's ENU, with north as the
+            // facing direction.
             (Vec3::new(1.0, 0.0, 0.0), Vec3::Y), // 1:
             (Vec3::new(0.0, 1.0, 0.0), Vec3::Z), // 2:
             (Vec3::new(0.0, 1.0, 0.0), Vec3::Y), // 3
@@ -571,11 +568,7 @@ mod tests {
             let nox_mat_bevy: bevy::math::Mat3 = bevy::math::DMat3::from(nox_mat).as_mat3();
             // let nox_mat_bevy = bevy_R_enu(&nox_mat_bevy);
             // Compare the matrices
-            let glam_cols = [
-                glam_mat.x_axis,
-                glam_mat.y_axis,
-                glam_mat.z_axis,
-            ];
+            let glam_cols = [glam_mat.x_axis, glam_mat.y_axis, glam_mat.z_axis];
 
             let nox_cols = [
                 nox_mat_bevy.x_axis,
@@ -619,19 +612,25 @@ mod tests {
             let glam_quat = Quat::from_mat3(&glam_mat);
 
             let nox_q = nox_quat.to_array();
-            println!("nox quat: [{:.6}, {:.6}, {:.6}, {:.6}]", nox_q[0], nox_q[1], nox_q[2], nox_q[3]);
+            println!(
+                "nox quat: [{:.6}, {:.6}, {:.6}, {:.6}]",
+                nox_q[0], nox_q[1], nox_q[2], nox_q[3]
+            );
             println!("glam quat: {:?}", glam_quat);
 
             // Quaternions can differ by sign (q and -q represent the same rotation)
             let same_sign = (nox_q[3] - glam_quat.w as f64).abs() < eps;
             let sign = if same_sign { 1.0 } else { -1.0 };
             assert!(
-                (nox_q[0] - sign * glam_quat.x as f64).abs() < eps &&
-                (nox_q[1] - sign * glam_quat.y as f64).abs() < eps &&
-                (nox_q[2] - sign * glam_quat.z as f64).abs() < eps &&
-                (nox_q[3] - sign * glam_quat.w as f64).abs() < eps,
+                (nox_q[0] - sign * glam_quat.x as f64).abs() < eps
+                    && (nox_q[1] - sign * glam_quat.y as f64).abs() < eps
+                    && (nox_q[2] - sign * glam_quat.z as f64).abs() < eps
+                    && (nox_q[3] - sign * glam_quat.w as f64).abs() < eps,
                 "Quaternion mismatch: nox={:?}, glam={:?}, dir={:?}, up={:?}",
-                nox_q, glam_quat, dir, up
+                nox_q,
+                glam_quat,
+                dir,
+                up
             );
             println!("PASSED\n");
         }
