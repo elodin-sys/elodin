@@ -517,9 +517,31 @@ mod tests {
         Mat3::look_to_rh(dir, up)
     }
 
+    fn bevy_R_enu(R: Mat3) -> Mat3 {
+        // R_enu = C.transpose() * R_bevy * C
+        //
+        // C columns:
+        //   ENU east  -> Bevy +X
+        //   ENU north -> Bevy -Z
+        //   ENU up    -> Bevy +Y
+
+        Mat3::from_cols(
+            R.x_axis,
+            R.z_axis,
+            -R.y_axis,
+        ).transpose()
+    }
+
+    fn enu_R_bevy(R: Mat3) -> Mat3 {
+        bevy_R_enu(R)
+    }
+
     #[test]
     fn test_look_at_rh_nox_vs_glam() {
         let test_cases = [
+            (Vec3::new(0.0, 1.0, 0.0), Vec3::Z), // This is the identity
+ // transform for Elodin's look_to. No surprise. It's ENU with north as the
+ // facing direction.
             (Vec3::new(1.0, 0.0, 0.0), Vec3::Y),
             (Vec3::new(0.0, 1.0, 0.0), Vec3::Z),
             (Vec3::new(0.0, 0.0, 1.0), Vec3::Y),
@@ -528,12 +550,14 @@ mod tests {
             (Vec3::new(0.0, 0.0, -1.0), Vec3::Y),
         ];
 
-        for (dir, up) in test_cases {
+        for (i, (dir, up)) in test_cases.into_iter().enumerate() {
             let nox_dir = nox::Vec3::new(dir.x as f64, dir.y as f64, dir.z as f64);
             let nox_up = nox::Vec3::new(up.x as f64, up.y as f64, up.z as f64);
 
             let nox_mat = nox::Matrix3::look_at_rh(nox_dir, nox_up);
+            let nox_mat = bevy_R_enu(nox_mat);
             let glam_mat = glam_look_at_rh(dir, up);
+            // let glam_mat = bevy_R_enu(glam_mat);
 
             // Compare the matrices
             let nox_buf = nox_mat.into_buf();
@@ -543,7 +567,7 @@ mod tests {
                 glam_mat.z_axis,
             ];
 
-            println!("Testing dir={:?}, up={:?}", dir, up);
+            println!("Testing case {i} dir={:?}, up={:?}", dir, up);
             println!("nox matrix (column-major):");
             println!("  col0: [{:.6}, {:.6}, {:.6}]", nox_buf[0][0], nox_buf[1][0], nox_buf[2][0]);
             println!("  col1: [{:.6}, {:.6}, {:.6}]", nox_buf[0][1], nox_buf[1][1], nox_buf[2][1]);

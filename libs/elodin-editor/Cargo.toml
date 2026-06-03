@@ -19,6 +19,7 @@ tracy = ["bevy/trace_tracy", "bevy/debug"]
 hamann-chen-line = { path = "../hamann-chen-line" }
 nox.path = "../nox"
 nox.default-features = false
+nox.features = ["bevy_math"]
 egui_material_icons = "0.5"
 ab_glyph = "0.2"
 
@@ -29,6 +30,7 @@ bevy = { workspace = true, features = [
   "bevy_audio",
   "vorbis",
 ] }
+# bevy_math.version = "0.18"
 bevy_render.version = "0.18"
 bevy_color.version = "0.18"
 bevy_egui.version = "0.39.1"
