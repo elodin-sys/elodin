@@ -33,7 +33,7 @@ use bevy_ai_skybox::prelude::{
 use bevy_geo_frames::GeoContext;
 use bevy_mat3_material::Mat3Material;
 use impeller2::types::{LenPacket, Timestamp, msg_id};
-use impeller2_bevy::{MsgPacketTx, PacketTx};
+use impeller2_bevy::{ConnectionAddr, MsgPacketTx, PacketTx};
 use impeller2_kdl::FromKdl;
 use impeller2_wkt::{
     CurrentTimestamp, DbConfig, DumpMetadata, LastUpdated, Schematic, SchematicElem,
@@ -173,6 +173,7 @@ fn load_headless_scene(
     mut mat3_materials: ResMut<Assets<Mat3Material>>,
     asset_server: Res<AssetServer>,
     geo_context: Res<GeoContext>,
+    connection_addr: Option<Res<ConnectionAddr>>,
 ) {
     if *loaded {
         return;
@@ -191,6 +192,7 @@ fn load_headless_scene(
     }) else {
         return;
     };
+    let connection_addr = connection_addr.as_ref().map(|addr| addr.0);
 
     for elem in &schematic.elems {
         if let SchematicElem::Object3d(obj) = elem {
@@ -208,7 +210,7 @@ fn load_headless_scene(
                 &mut mat3_materials,
                 &asset_server,
                 &geo_context,
-                None,
+                connection_addr,
             );
         }
     }
