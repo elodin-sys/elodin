@@ -102,7 +102,7 @@ impl<T: RealField> Matrix3<T, ArrayRepr> {
         let f = dir.normalize();
 
         // Try up, Y, X, Z as up directions. Ensure up isn't colinear with dir.
-        for i in 0..2 {
+        for i in 0..=2 {
             if up.dot(&dir).abs() == T::one() {
                 up = match i {
                     0 => Vector::y_axis(),
