@@ -97,14 +97,23 @@ impl<T: RealField> Matrix3<T, ArrayRepr> {
         up: impl Into<Vector<T, 3, ArrayRepr>>,
     ) -> Self {
         let dir = dir.into();
-        let up = up.into();
+        let mut up = up.into();
         // apply gram-schmidt orthogonalization to create a rot matrix
         let f = dir.normalize();
-        let up = if up.dot(&dir).abs() == T::one() {
-            Vector::y_axis()
-        } else {
-            up
-        };
+
+        // Try up, Y, X, Z as up directions. Ensure up isn't colinear with dir.
+        for i in 0..2 {
+            if up.dot(&dir).abs() == T::one() {
+                up = match i {
+                    0 => Vector::y_axis(),
+                    1 => Vector::x_axis(),
+                    2 => Vector::z_axis(),
+                    _ => unreachable!(),
+                };
+            } else {
+                break;
+            }
+        }
         let s = f.cross(&up).normalize();
         let u = s.cross(&f);
         Self::from_rows([s, f, u]).transpose()
