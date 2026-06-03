@@ -20,7 +20,14 @@ eula = false
 
 [features]
 default = ["axum", "parquet", "video-export"]
-axum = ["dep:axum", "dep:axum-streams", "dep:serde_json", "dep:tokio"]
+axum = [
+    "dep:axum",
+    "dep:axum-streams",
+    "dep:serde_json",
+    "dep:tokio",
+    "dep:impeller2-kdl",
+    "dep:reqwest",
+]
 parquet = ["dep:parquet"]
 video-export = ["dep:muxide", "dep:scuffle-h264", "dep:openh264", "dep:serde_json"]
 tracy = ["dep:tracing-tracy"]
@@ -111,6 +118,11 @@ serde_json.optional = true
 tokio.version = "1"
 tokio.features = ["rt-multi-thread"]
 tokio.optional = true
+impeller2-kdl.path = "../impeller2/kdl"
+impeller2-kdl.optional = true
+reqwest = { version = "0.12", default-features = false, features = [
+    "rustls-tls",
+], optional = true }
 
 # codegen
 postcard-c-codegen.path = "../postcard-c/codegen"

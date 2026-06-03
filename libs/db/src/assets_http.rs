@@ -6,7 +6,7 @@ use axum::response::IntoResponse;
 use axum::routing::get;
 use miette::IntoDiagnostic;
 use std::io;
-use std::net::SocketAddr;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 use thiserror::Error;
@@ -26,6 +26,74 @@ struct AssetsState {
 
 pub fn assets_http_addr(tcp: SocketAddr) -> SocketAddr {
     SocketAddr::new(tcp.ip(), tcp.port().saturating_add(ASSETS_HTTP_PORT_OFFSET))
+}
+
+fn client_asset_ip(ip: IpAddr) -> IpAddr {
+    match ip {
+        IpAddr::V4(v4) if v4.is_unspecified() => IpAddr::V4(Ipv4Addr::LOCALHOST),
+        IpAddr::V6(v6) if v6.is_unspecified() => IpAddr::V6(Ipv6Addr::LOCALHOST),
+        other => other,
+    }
+}
+
+pub fn assets_http_base_url(tcp: SocketAddr) -> String {
+    let addr = assets_http_addr(tcp);
+    let ip = client_asset_ip(addr.ip());
+    match ip {
+        IpAddr::V4(v4) => format!("http://{v4}:{}", addr.port()),
+        IpAddr::V6(v6) => format!("http://[{v6}]:{}", addr.port()),
+    }
+}
+
+#[derive(Error, Debug)]
+pub enum SyncAssetsError {
+    #[error("failed to parse schematic KDL")]
+    Parse(#[source] impeller2_kdl::KdlSchematicError),
+    #[error("HTTP request failed")]
+    Http(#[from] reqwest::Error),
+    #[error("IO error")]
+    Io(#[from] io::Error),
+}
+
+/// Copies `db:` GLB assets referenced in schematic KDL from a source elodin-db assets server.
+pub async fn sync_schematic_assets_from_source(
+    source_tcp: SocketAddr,
+    db_path: &Path,
+    schematic_kdl: &str,
+) -> Result<(), SyncAssetsError> {
+    let schematic = impeller2_kdl::parse_schematic(schematic_kdl).map_err(SyncAssetsError::Parse)?;
+    let names = impeller2_kdl::collect_db_glb_asset_names(&schematic);
+    if names.is_empty() {
+        return Ok(());
+    }
+
+    let base = assets_http_base_url(source_tcp);
+    let assets_dir = assets_dir(db_path);
+    std::fs::create_dir_all(&assets_dir)?;
+    let client = reqwest::Client::new();
+
+    for name in names {
+        let url = format!("{base}/{name}");
+        let response = client.get(&url).send().await?;
+        if response.status() == reqwest::StatusCode::NOT_FOUND {
+            tracing::warn!(asset = %name, %url, "schematic asset missing on source");
+            continue;
+        }
+        if !response.status().is_success() {
+            tracing::warn!(
+                asset = %name,
+                status = %response.status(),
+                %url,
+                "failed to fetch schematic asset from source"
+            );
+            continue;
+        }
+        let bytes = response.bytes().await?;
+        write_asset_file(&assets_dir, &name, &bytes)?;
+        tracing::info!(asset = %name, "synced schematic asset from source");
+    }
+
+    Ok(())
 }
 
 pub fn assets_dir(db_path: &Path) -> PathBuf {
@@ -281,6 +349,46 @@ mod tests {
         std::fs::write(assets.join("rocket.glb"), b"payload").unwrap();
 
         DB::open(dir.path().to_path_buf()).expect("open should ignore assets/");
+    }
+
+    #[tokio::test]
+    async fn sync_schematic_assets_from_source_copies_db_glb_files() {
+        let dir = tempdir().unwrap();
+        let source_assets = dir.path().join("source_assets");
+        std::fs::create_dir_all(source_assets.join("models")).unwrap();
+        std::fs::write(source_assets.join("models/rocket.glb"), b"from-source").unwrap();
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let bound = listener.local_addr().unwrap();
+        let tcp = SocketAddr::new(bound.ip(), bound.port().saturating_sub(1));
+
+        let state = Arc::new(AssetsState {
+            assets_dir: source_assets.clone(),
+        });
+        let app = Router::new()
+            .route("/{*path}", get(get_asset).put(put_asset))
+            .with_state(state);
+
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        let follower_db = dir.path().join("follower_db");
+        let kdl = r#"
+object_3d "rocket.world_pos" {
+    glb path="db:models/rocket.glb"
+}
+"#;
+        sync_schematic_assets_from_source(tcp, &follower_db, kdl)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            std::fs::read(assets_dir(&follower_db).join("models/rocket.glb")).unwrap(),
+            b"from-source".to_vec()
+        );
     }
 
     #[tokio::test]
