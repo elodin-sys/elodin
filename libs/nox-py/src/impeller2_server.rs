@@ -97,14 +97,23 @@ pub fn init_db(
 
     let mut schematic_content = world.metadata.schematic.clone();
     if let Some(content) = schematic_content.as_ref() {
-        if let Ok(mut schematic) = impeller2_kdl::parse_schematic(content) {
-            persist_schematic_assets(
-                db,
-                &mut schematic,
-                world.metadata.schematic_path.as_deref(),
-            )?;
-            schematic_content = Some(impeller2_kdl::serialize_schematic(&schematic));
-            world.metadata.schematic = schematic_content.clone();
+        match impeller2_kdl::parse_schematic(content) {
+            Ok(mut schematic) => {
+                persist_schematic_assets(
+                    db,
+                    &mut schematic,
+                    world.metadata.schematic_path.as_deref(),
+                )?;
+                schematic_content = Some(impeller2_kdl::serialize_schematic(&schematic));
+                world.metadata.schematic = schematic_content.clone();
+            }
+            Err(err) => {
+                tracing::warn!(
+                    ?err,
+                    "failed to parse schematic KDL; skipping db asset upload and db: rewrite — \
+                     GLB paths will remain local and require files at replay"
+                );
+            }
         }
     }
 
