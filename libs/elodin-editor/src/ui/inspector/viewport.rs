@@ -1,3 +1,4 @@
+#![allow(non_snake_case)]
 use bevy::ecs::system::{SystemParam, SystemState};
 use bevy::prelude::*;
 use bevy::{
@@ -497,19 +498,23 @@ pub fn set_viewport_pos(
     }
 }
 
+
 #[cfg(test)]
 mod tests {
     use bevy::math::{Mat3, Quat, Vec3};
     use crate::WorldPosExt;
 
+    #[inline]
+    fn are_colinear(a: Vec3, b: Vec3) -> bool {
+        a.cross(b).length_squared() < 1e-6
+    }
+
     /// Constructs a look_at rotation matrix using the same algorithm as nox::Matrix3::look_at_rh
     fn glam_look_at_rh(dir: Vec3, up: Vec3) -> Mat3 {
         // let f = dir.normalize();
-        // let up = if up.dot(dir).abs() >= 1.0 - 1e-6 {
-        //     Vec3::Y
-        // } else {
-        //     up
-        // };
+        let up_candidates = [up, Vec3::Y, Vec3::X, Vec3::Z];
+        let up = up_candidates.into_iter().find(|up| !are_colinear(*up, dir))
+                                     .expect("it can't be colinear with everyone");
         // let s = f.cross(up).normalize();
         // let u = s.cross(f);
         // // nox uses from_rows then transpose, which equals from_cols
@@ -517,33 +522,39 @@ mod tests {
         Mat3::look_to_rh(dir, up)
     }
 
-    fn bevy_R_enu(R: Mat3) -> Mat3 {
+    /// This function converts a ENU Mat3 to EUS Bevy and vice versa. It behaves
+    /// as though you multiplied M by bevy_R_enu.
+    ///
+    ///
+    /// ```ignore
+    ///   bevy_R_enu = enu_R_bevy = [ 1  0  0 ]
+    ///                             [ 0  0 -1 ]
+    ///                             [ 0  1  0 ]
+    /// ```
+    fn bevy_R_enu(M: &Mat3) -> Mat3 {
         // R_enu = C.transpose() * R_bevy * C
         //
         // C columns:
         //   ENU east  -> Bevy +X
         //   ENU north -> Bevy -Z
         //   ENU up    -> Bevy +Y
-
         Mat3::from_cols(
-            R.x_axis,
-            R.z_axis,
-            -R.y_axis,
+            M.x_axis,
+            M.z_axis,
+            -M.y_axis,
         ).transpose()
-    }
-
-    fn enu_R_bevy(R: Mat3) -> Mat3 {
-        bevy_R_enu(R)
     }
 
     #[test]
     fn test_look_at_rh_nox_vs_glam() {
         let test_cases = [
-            (Vec3::new(0.0, 1.0, 0.0), Vec3::Z), // This is the identity
- // transform for Elodin's look_to. No surprise. It's ENU with north as the
+            (Vec3::new(0.0, 1.0, 0.0), Vec3::Z), // 0: This is the identity
+ // transform for Elodin's look_to. No surprise: It's ENU, with north as the
  // facing direction.
-            (Vec3::new(1.0, 0.0, 0.0), Vec3::Y),
-            (Vec3::new(0.0, 1.0, 0.0), Vec3::Z),
+            (Vec3::new(1.0, 0.0, 0.0), Vec3::Y), // 1:
+            (Vec3::new(0.0, 1.0, 0.0), Vec3::Z), // 2:
+            (Vec3::new(0.0, 1.0, 0.0), Vec3::Y), // 3
+            (Vec3::new(0.0, 0.0, 1.0), Vec3::Z),
             (Vec3::new(0.0, 0.0, 1.0), Vec3::Y),
             (Vec3::new(1.0, 2.0, 3.0).normalize(), Vec3::Y),
             (Vec3::new(-1.0, 0.5, 0.3).normalize(), Vec3::Y),
@@ -555,23 +566,29 @@ mod tests {
             let nox_up = nox::Vec3::new(up.x as f64, up.y as f64, up.z as f64);
 
             let nox_mat = nox::Matrix3::look_at_rh(nox_dir, nox_up);
-            let nox_mat = bevy_R_enu(nox_mat);
             let glam_mat = glam_look_at_rh(dir, up);
-            // let glam_mat = bevy_R_enu(glam_mat);
-
+            let glam_mat = bevy_R_enu(&glam_mat);
+            let nox_mat_bevy: bevy::math::Mat3 = bevy::math::DMat3::from(nox_mat).as_mat3();
+            // let nox_mat_bevy = bevy_R_enu(&nox_mat_bevy);
             // Compare the matrices
-            let nox_buf = nox_mat.into_buf();
             let glam_cols = [
                 glam_mat.x_axis,
                 glam_mat.y_axis,
                 glam_mat.z_axis,
             ];
 
+            let nox_cols = [
+                nox_mat_bevy.x_axis,
+                nox_mat_bevy.y_axis,
+                nox_mat_bevy.z_axis,
+            ];
+            let _ = nox_mat;
+
             println!("Testing case {i} dir={:?}, up={:?}", dir, up);
             println!("nox matrix (column-major):");
-            println!("  col0: [{:.6}, {:.6}, {:.6}]", nox_buf[0][0], nox_buf[1][0], nox_buf[2][0]);
-            println!("  col1: [{:.6}, {:.6}, {:.6}]", nox_buf[0][1], nox_buf[1][1], nox_buf[2][1]);
-            println!("  col2: [{:.6}, {:.6}, {:.6}]", nox_buf[0][2], nox_buf[1][2], nox_buf[2][2]);
+            println!("  col0: {:?}", nox_cols[0]);
+            println!("  col1: {:?}", nox_cols[1]);
+            println!("  col2: {:?}", nox_cols[2]);
             println!("glam matrix:");
             println!("  col0: {:?}", glam_cols[0]);
             println!("  col1: {:?}", glam_cols[1]);
@@ -579,17 +596,17 @@ mod tests {
 
             // Check if matrices are approximately equal
             let eps = 1e-5;
-            for col in 0..3 {
-                for row in 0..3 {
-                    let nox_val = nox_buf[row][col];
-                    let glam_val = glam_cols[col][row];
-                    // assert!(
-                    //     (nox_val - glam_val as f64).abs() < eps,
-                    //     "Mismatch at [{},{}]: nox={}, glam={}, dir={:?}, up={:?}",
-                    //     row, col, nox_val, glam_val, dir, up
-                    // );
-                }
-            }
+            // for col in 0..3 {
+            //     for row in 0..3 {
+            //         let nox_val = nox_cols[row][col];
+            //         let glam_val = glam_cols[col][row];
+            //         // assert!(
+            //         //     (nox_val - glam_val as f64).abs() < eps,
+            //         //     "Mismatch at [{},{}]: nox={}, glam={}, dir={:?}, up={:?}",
+            //         //     row, col, nox_val, glam_val, dir, up
+            //         // );
+            //     }
+            // }
 
             // Also compare resulting quaternions
             let nox_quat = nox::Quaternion::look_at_rh(nox_dir, nox_up);
