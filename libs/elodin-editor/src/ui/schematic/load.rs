@@ -7,7 +7,7 @@ use bevy_egui::egui::{Color32, Id};
 use bevy_geo_frames::prelude::*;
 use bevy_mat3_material::Mat3Material;
 use egui_tiles::{Container, Tile, TileId};
-use impeller2_bevy::{ComponentPath, ComponentSchemaRegistry};
+use impeller2_bevy::{ComponentPath, ComponentSchemaRegistry, ConnectionAddr};
 use impeller2_kdl::FromKdl;
 use impeller2_wkt::{
     Graph, Line3d, Object3D, Panel, Schematic, VectorArrow3d, Viewport, WindowSchematic,
@@ -128,6 +128,7 @@ pub struct LoadSchematicParams<'w, 's> {
     pub schema_reg: Res<'w, ComponentSchemaRegistry>,
     pub eql: Res<'w, EqlContext>,
     pub geo_context: Res<'w, GeoContext>,
+    connection_addr: Option<Res<'w, ConnectionAddr>>,
     pub sensor_camera_configs: Res<'w, crate::sensor_camera::SensorCameraConfigs>,
     pub coordinate: ResMut<'w, crate::Coordinate>,
     cameras: Query<'w, 's, &'static mut Camera>,
@@ -596,6 +597,7 @@ impl LoadSchematicParams<'_, '_> {
         };
         let icon = object_3d.icon.clone();
         let mesh_vr = object_3d.mesh_visibility_range.clone();
+        let connection_addr = self.connection_addr.as_ref().map(|addr| addr.0);
         let result = crate::object_3d::create_object_3d_entity(
             &mut self.commands,
             object_3d.clone(),
@@ -606,6 +608,7 @@ impl LoadSchematicParams<'_, '_> {
             &mut self.mat3_materials,
             &self.asset_server,
             &self.geo_context,
+            connection_addr,
         );
         match result {
             Ok(entity) => {

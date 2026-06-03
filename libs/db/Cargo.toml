@@ -109,6 +109,7 @@ axum-streams.optional = true
 serde_json.version = "1"
 serde_json.optional = true
 tokio.version = "1"
+tokio.features = ["rt-multi-thread"]
 tokio.optional = true
 
 # codegen
@@ -151,5 +152,7 @@ path = "tests_query/sensor_camera_export.rs"
 
 [dev-dependencies]
 goldie = "0.7"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 tempfile = "3"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
 zerocopy.version = "0.8.2"

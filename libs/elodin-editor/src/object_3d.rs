@@ -25,12 +25,34 @@ use bevy_geo_frames::prelude::*;
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::hash::BuildHasher;
+use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 type ImportedCameraFilter = (Added<Camera>, Without<NavGizmoCamera>, Without<MainCamera>);
 
 type ImportedCameraQuery<'w, 's> = Query<'w, 's, (Entity, &'static ChildOf), ImportedCameraFilter>;
 
 pub const ELLIPSOID_RENDER_LAYER: usize = 29;
+pub const ASSETS_HTTP_PORT_OFFSET: u16 = 1;
+
+pub fn assets_http_base(connection_addr: SocketAddr) -> String {
+    let port = connection_addr
+        .port()
+        .saturating_add(ASSETS_HTTP_PORT_OFFSET);
+    match connection_addr.ip() {
+        IpAddr::V4(v4) => format!("http://{v4}:{port}"),
+        IpAddr::V6(v6) => format!("http://[{v6}]:{port}"),
+    }
+}
+
+pub fn resolve_glb_asset_url(path: &str, connection_addr: Option<SocketAddr>) -> String {
+    if let Some(name) = path.strip_prefix("db:") {
+        let name = name.trim_start_matches('/');
+        let conn = connection_addr.unwrap_or_else(|| "127.0.0.1:2240".parse().expect("valid addr"));
+        format!("{}/{}", assets_http_base(conn), name)
+    } else {
+        path.to_string()
+    }
+}
 
 /// ExprObject3D component that holds an EQL expression for dynamic positioning
 #[derive(Component)]
@@ -1447,6 +1469,7 @@ pub fn create_object_3d_entity(
     mat3_material_assets: &mut Assets<Mat3Material>,
     assets: &AssetServer,
     geo_context: &GeoContext,
+    connection_addr: Option<SocketAddr>,
 ) -> Result<Entity, CompileError> {
     let (scale_expr, scale_error) = match &data.mesh {
         impeller2_wkt::Object3DMesh::Ellipsoid {
@@ -1529,6 +1552,7 @@ pub fn create_object_3d_entity(
         mesh_assets,
         mat3_material_assets,
         assets,
+        connection_addr,
     );
     Ok(entity_id)
 }
@@ -1602,6 +1626,7 @@ pub fn spawn_mesh(
     mesh_assets: &mut Assets<Mesh>,
     mat3_material_assets: &mut Assets<Mat3Material>,
     assets: &AssetServer,
+    connection_addr: Option<SocketAddr>,
 ) {
     match mesh {
         impeller2_wkt::Object3DMesh::Glb {
@@ -1611,7 +1636,8 @@ pub fn spawn_mesh(
             rotate,
             animations: _,
         } => {
-            let url = format!("{path}#Scene0");
+            let resolved = resolve_glb_asset_url(path, connection_addr);
+            let url = format!("{resolved}#Scene0");
             let scene = assets.load(&url);
 
             let translation = Vec3::new(translate.0, translate.1, translate.2);
@@ -2193,5 +2219,26 @@ mod ellipsoid_scale_eql_tests {
 
             assert_vec3_close(scale, expected);
         }
+    }
+}
+
+#[cfg(test)]
+mod db_asset_url_tests {
+    use super::resolve_glb_asset_url;
+    use std::net::SocketAddr;
+
+    #[test]
+    fn resolve_db_asset_url_uses_connection_host_and_offset_port() {
+        let conn: SocketAddr = "127.0.0.1:2240".parse().unwrap();
+        assert_eq!(
+            resolve_glb_asset_url("db:rocket.glb", Some(conn)),
+            "http://127.0.0.1:2241/rocket.glb"
+        );
+    }
+
+    #[test]
+    fn resolve_http_asset_url_is_unchanged() {
+        let url = "http://127.0.0.1:2241/rocket.glb";
+        assert_eq!(resolve_glb_asset_url(url, None), url);
     }
 }

@@ -59,6 +59,9 @@ impl WidgetSystem for InspectorObject3D<'_, '_> {
         args: Self::Args,
     ) -> Self::Output {
         let tree_actions = SmallVec::new();
+        let connection_addr = world
+            .get_resource::<impeller2_bevy::ConnectionAddr>()
+            .map(|addr| addr.0);
         let InspectorObject3D {
             mut object_3d,
             metadata_query,
@@ -542,6 +545,7 @@ impl WidgetSystem for InspectorObject3D<'_, '_> {
                     &mut mesh_assets,
                     &mut mat3_material_assets,
                     &assets,
+                    connection_addr,
                 );
             }
         });

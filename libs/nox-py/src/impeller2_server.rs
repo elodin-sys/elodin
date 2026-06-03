@@ -2,9 +2,10 @@ use crate::Error;
 use bytemuck;
 use elodin_db::{AtomicTimestampExt, DB, State, handle_conn};
 use impeller2::types::{ComponentId, Timestamp};
-use impeller2_wkt::{ComponentMetadata, EntityMetadata};
+use impeller2_wkt::{ComponentMetadata, EntityMetadata, Schematic};
 use std::{
     collections::HashSet,
+    path::{Path, PathBuf},
     sync::{
         Arc,
         atomic::{self, AtomicU64, Ordering},
@@ -93,6 +94,20 @@ pub fn init_db(
 ) -> Result<(), elodin_db::Error> {
     tracing::info!("initializing db");
     db.set_earliest_timestamp(start_timestamp)?;
+
+    let mut schematic_content = world.metadata.schematic.clone();
+    if let Some(content) = schematic_content.as_ref() {
+        if let Ok(mut schematic) = impeller2_kdl::parse_schematic(content) {
+            persist_schematic_assets(
+                db,
+                &mut schematic,
+                world.metadata.schematic_path.as_deref(),
+            )?;
+            schematic_content = Some(impeller2_kdl::serialize_schematic(&schematic));
+            world.metadata.schematic = schematic_content.clone();
+        }
+    }
+
     db.with_state_mut(|state| {
         for (component_id, (schema, component_metadata)) in world.metadata.component_map.iter() {
             let Some(column) = world.host.get(component_id) else {
@@ -133,7 +148,7 @@ pub fn init_db(
                 .db_config
                 .set_schematic_path(path.to_string_lossy().to_string());
         }
-        if let Some(content) = &world.metadata.schematic {
+        if let Some(content) = &schematic_content {
             state.db_config.set_schematic_content(content.clone());
         }
         if !world.metadata.sensor_cameras.is_empty() {
@@ -175,6 +190,100 @@ pub fn init_db(
     let _ = db.save_db_state();
 
     Ok(())
+}
+
+fn resolve_local_asset_path(local_path: &str, schematic_path: Option<&Path>) -> PathBuf {
+    let path = PathBuf::from(local_path);
+    if path.is_absolute() {
+        return path;
+    }
+    if let Some(base) = schematic_path.and_then(|p| p.parent()) {
+        return base.join(path);
+    }
+    std::env::current_dir()
+        .unwrap_or_else(|_| PathBuf::from("."))
+        .join(path)
+}
+
+fn persist_schematic_assets(
+    db: &DB,
+    schematic: &mut Schematic,
+    schematic_path: Option<&Path>,
+) -> Result<(), elodin_db::Error> {
+    let assets_dir = elodin_db::assets_http::assets_dir(&db.path);
+    let local_paths = impeller2_kdl::collect_local_glb_paths(schematic);
+
+    for local_path in &local_paths {
+        let Some(name) = impeller2_kdl::local_glb_asset_name(local_path) else {
+            continue;
+        };
+        let resolved = resolve_local_asset_path(local_path, schematic_path);
+        let data = std::fs::read(&resolved).map_err(|err| {
+            tracing::warn!(
+                ?err,
+                path = %resolved.display(),
+                "failed to read local asset for db upload"
+            );
+            elodin_db::Error::Io(err)
+        })?;
+        elodin_db::assets_http::write_asset_file(&assets_dir, &name, &data).map_err(|err| {
+            tracing::warn!(
+                ?err,
+                asset = %name,
+                "failed to write asset into database assets folder"
+            );
+            elodin_db::Error::Io(err)
+        })?;
+        tracing::info!(asset = %name, "stored schematic asset in database");
+    }
+
+    impeller2_kdl::rewrite_glb_paths(schematic, |path| {
+        impeller2_kdl::local_glb_asset_name(path).map(|name| format!("db:{name}"))
+    });
+    Ok(())
+}
+
+#[cfg(test)]
+mod asset_tests {
+    use super::*;
+    use impeller2_wkt::{Object3D, Object3DMesh, SchematicElem};
+    use tempfile::tempdir;
+
+    #[test]
+    fn persist_schematic_assets_rewrites_kdl_and_writes_files() {
+        let dir = tempdir().unwrap();
+        let db = DB::create(dir.path().to_path_buf()).unwrap();
+        let glb_path = dir.path().join("rocket.glb");
+        std::fs::write(&glb_path, b"glb-data").unwrap();
+
+        let mut schematic = Schematic {
+            elems: vec![SchematicElem::Object3d(Object3D {
+                eql: "e".into(),
+                mesh: Object3DMesh::glb("rocket.glb"),
+                frame: None,
+                icon: None,
+                mesh_visibility_range: None,
+                node_id: Default::default(),
+            })],
+            ..Default::default()
+        };
+
+        persist_schematic_assets(&db, &mut schematic, Some(glb_path.as_path())).unwrap();
+
+        let assets_dir = elodin_db::assets_http::assets_dir(&db.path);
+        assert_eq!(
+            std::fs::read(assets_dir.join("rocket.glb")).unwrap(),
+            b"glb-data".to_vec()
+        );
+
+        let SchematicElem::Object3d(obj) = &schematic.elems[0] else {
+            panic!("expected object_3d");
+        };
+        let Object3DMesh::Glb { path, .. } = &obj.mesh else {
+            panic!("expected glb");
+        };
+        assert_eq!(path, "db:rocket.glb");
+    }
 }
 
 pub fn copy_db_to_world(state: &State, world: &mut WorldExec) {

@@ -1398,6 +1398,7 @@ fn create_object_3d_with_color(eql: String, expr: eql::Expr, mesh: Mesh) -> Pale
                     &mut mat3_material_assets,
                     &assets,
                     &geo_context,
+                    None,
                 );
 
                 PaletteEvent::Exit
@@ -1474,10 +1475,11 @@ pub fn create_3d_object() -> PaletteItem {
                                                     &eql_ctx.0,
                                                     &mut material_assets,
                                                     &mut mesh_assets,
-                                                    &mut mat3_material_assets,
-                                                    &assets,
-                                                    &geo_context
-                                                );
+                    &mut mat3_material_assets,
+                    &assets,
+                    &geo_context,
+                    None,
+                );
 
                                                 PaletteEvent::Exit
                                             },

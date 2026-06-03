@@ -1174,7 +1174,9 @@ pub fn sync_object_3d(
     mut commands: Commands,
     assets: Res<AssetServer>,
     geo_context: Res<GeoContext>,
+    connection_addr: Option<Res<impeller2_bevy::ConnectionAddr>>,
 ) {
+    let connection_addr = connection_addr.as_ref().map(|addr| addr.0);
     for (entity, id) in &query {
         if synced_object_3d.0.contains_key(&entity) {
             continue;
@@ -1228,6 +1230,7 @@ pub fn sync_object_3d(
             &mut mat3_material_assets,
             &assets,
             &geo_context,
+            connection_addr,
         ) {
             synced_object_3d.0.insert(entity, object_entity);
         }

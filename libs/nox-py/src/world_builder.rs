@@ -616,6 +616,7 @@ impl WorldBuilder {
                             crate::Error::DB(e)
                         }
                     })?;
+                elodin_db::assets_http::spawn_assets_http(&db_path, addr);
                 py.allow_threads(|| {
                     // Run the async executor (and therefore the JIT tick_fn) on a
                     // dedicated thread with a 256 MB stack. Large customer simulations

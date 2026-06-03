@@ -59,6 +59,8 @@ const RESPONSE_PACKET_CAPACITY: usize = 8 * 1024 * 1024;
 pub mod append_log;
 mod arrow;
 #[cfg(feature = "axum")]
+pub mod assets_http;
+#[cfg(feature = "axum")]
 pub mod axum;
 pub mod cancellation;
 pub(crate) mod coalescing_sink;
@@ -440,7 +442,10 @@ impl DB {
         for elem in std::fs::read_dir(&path)? {
             let Ok(elem) = elem else { continue };
             let path = elem.path();
-            if !path.is_dir() || path.file_name() == Some(OsStr::new("msgs")) {
+            if !path.is_dir()
+                || path.file_name() == Some(OsStr::new("msgs"))
+                || path.file_name() == Some(OsStr::new("assets"))
+            {
                 trace!("Skipping non-component directory: {}", path.display());
                 continue;
             }

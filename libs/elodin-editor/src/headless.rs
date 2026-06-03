@@ -208,6 +208,7 @@ fn load_headless_scene(
                 &mut mat3_materials,
                 &asset_server,
                 &geo_context,
+                None,
             );
         }
     }

@@ -5287,6 +5287,7 @@ dependencies = [
  "postcard-schema",
  "rayon",
  "reflink-copy",
+ "reqwest",
  "rustfft",
  "ryu",
  "scuffle-h264",
