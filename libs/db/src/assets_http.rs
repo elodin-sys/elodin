@@ -259,7 +259,9 @@ mod tests {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let bound = listener.local_addr().unwrap();
 
-        let state = Arc::new(AssetsState { assets_dir: assets.clone() });
+        let state = Arc::new(AssetsState {
+            assets_dir: assets.clone(),
+        });
         let app = Router::new()
             .route("/{*path}", get(get_asset).put(put_asset))
             .with_state(state);

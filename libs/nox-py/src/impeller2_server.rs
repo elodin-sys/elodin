@@ -5,6 +5,7 @@ use impeller2::types::{ComponentId, Timestamp};
 use impeller2_wkt::{ComponentMetadata, EntityMetadata, Schematic};
 use std::{
     collections::HashSet,
+    io,
     path::{Path, PathBuf},
     sync::{
         Arc,
@@ -240,22 +241,10 @@ fn local_asset_path_candidates(local_path: &str, schematic_path: Option<&Path>) 
     candidates
 }
 
-fn resolve_local_asset_path(local_path: &str, schematic_path: Option<&Path>) -> PathBuf {
-    local_asset_path_candidates(local_path, schematic_path)
-        .into_iter()
-        .find(|candidate| candidate.exists())
-        .unwrap_or_else(|| {
-            local_asset_path_candidates(local_path, schematic_path)
-                .into_iter()
-                .next()
-                .unwrap_or_else(|| PathBuf::from(local_path))
-        })
-}
-
 fn read_local_asset_file(
     local_path: &str,
     schematic_path: Option<&Path>,
-) -> Result<Vec<u8>, (PathBuf, std::io::Error)> {
+) -> Result<Vec<u8>, (PathBuf, io::Error)> {
     let candidates = local_asset_path_candidates(local_path, schematic_path);
     let mut last_err = None;
     for candidate in &candidates {
@@ -267,7 +256,7 @@ fn read_local_asset_file(
     Err(last_err.unwrap_or_else(|| {
         (
             PathBuf::from(local_path),
-            std::io::Error::new(std::io::ErrorKind::NotFound, "asset not found"),
+            io::Error::new(io::ErrorKind::NotFound, "asset not found"),
         )
     }))
 }
@@ -326,6 +315,18 @@ mod asset_tests {
         })
     }
 
+    fn resolve_local_asset_path(local_path: &str, schematic_path: Option<&Path>) -> PathBuf {
+        local_asset_path_candidates(local_path, schematic_path)
+            .into_iter()
+            .find(|candidate| candidate.exists())
+            .unwrap_or_else(|| {
+                local_asset_path_candidates(local_path, schematic_path)
+                    .into_iter()
+                    .next()
+                    .unwrap_or_else(|| PathBuf::from(local_path))
+            })
+    }
+
     #[test]
     fn resolve_local_asset_path_relative_to_schematic_parent() {
         let schematic = PathBuf::from("/sim/layout/schematic.kdl");
@@ -351,16 +352,22 @@ mod asset_tests {
     impl EnvVarGuard {
         fn set(key: &'static str, value: &str) -> Self {
             let previous = std::env::var_os(key);
-            std::env::set_var(key, value);
+            // SAFETY: env mutations are scoped to this test via `_guard`.
+            unsafe {
+                std::env::set_var(key, value);
+            }
             Self { key, previous }
         }
     }
 
     impl Drop for EnvVarGuard {
         fn drop(&mut self) {
-            match &self.previous {
-                Some(value) => std::env::set_var(self.key, value),
-                None => std::env::remove_var(self.key),
+            // SAFETY: restoring the previous value is scoped to this test's `_guard`.
+            unsafe {
+                match self.previous.take() {
+                    Some(value) => std::env::set_var(self.key, value),
+                    None => std::env::remove_var(self.key),
+                }
             }
         }
     }
@@ -389,10 +396,7 @@ mod asset_tests {
 
         let db = DB::create(dir.path().join("db")).unwrap();
         let mut schematic = Schematic {
-            elems: vec![
-                glb_object("f22.glb"),
-                glb_object("edu-450-v2-drone.glb"),
-            ],
+            elems: vec![glb_object("f22.glb"), glb_object("edu-450-v2-drone.glb")],
             ..Default::default()
         };
 
