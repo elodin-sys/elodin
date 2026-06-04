@@ -3994,12 +3994,14 @@ dependencies = [
 name = "cranelift-mlir"
 version = "0.17.4-alpha.0"
 dependencies = [
+ "blake3",
  "cranelift-codegen",
  "cranelift-frontend",
  "cranelift-jit",
  "cranelift-module",
  "cranelift-native",
  "faer",
+ "memmap2",
  "rayon",
  "serde",
  "serde_json",

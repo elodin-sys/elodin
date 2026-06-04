@@ -1,4 +1,6 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
+
+use crate::const_cache::CachedConst;
 use std::fmt;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -155,6 +157,11 @@ impl ScalarValue {
 pub enum ConstantValue {
     DenseScalar(ScalarValue),
     DenseArray(Vec<ScalarValue>),
+    DenseExternal {
+        elem_type: ElementType,
+        byte_len: usize,
+        data: Arc<CachedConst>,
+    },
     DenseSplat(ScalarValue, TensorType),
 }
 

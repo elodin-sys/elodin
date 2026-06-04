@@ -131,8 +131,22 @@ fn verify_checkpoint_impl() {
         "executing tick function ({num_output_slots} output slots, {} output buffers)...",
         cranelift_outputs.len()
     );
+    if let Ok(ms) = std::env::var("ELODIN_CRANELIFT_CHECKPOINT_HOLD_MS") {
+        let ms = ms
+            .parse::<u64>()
+            .expect("ELODIN_CRANELIFT_CHECKPOINT_HOLD_MS must be a u64");
+        eprintln!("holding compiled checkpoint module for {ms}ms before tick...");
+        std::thread::sleep(std::time::Duration::from_millis(ms));
+    }
     unsafe { tick_fn(input_ptrs.as_ptr(), output_ptrs.as_mut_ptr()) };
     eprintln!("tick function OK");
+    if let Ok(ms) = std::env::var("ELODIN_CRANELIFT_CHECKPOINT_HOLD_AFTER_TICK_MS") {
+        let ms = ms
+            .parse::<u64>()
+            .expect("ELODIN_CRANELIFT_CHECKPOINT_HOLD_AFTER_TICK_MS must be a u64");
+        eprintln!("holding compiled checkpoint module for {ms}ms after tick...");
+        std::thread::sleep(std::time::Duration::from_millis(ms));
+    }
 
     let n_compare = cranelift_outputs.len().min(xla_outputs.len());
     let mut failures = Vec::new();

@@ -353,7 +353,7 @@ fn try_fold(
                     ConstantValue::DenseSplat(v.clone(), result_ty.clone()),
                     "broadcast_scalar",
                 )),
-                ConstantValue::DenseArray(_) => None,
+                ConstantValue::DenseArray(_) | ConstantValue::DenseExternal { .. } => None,
             }
         }
 
@@ -371,7 +371,7 @@ fn try_fold(
                         "convert_splat",
                     ))
                 }
-                ConstantValue::DenseArray(_) => None,
+                ConstantValue::DenseArray(_) | ConstantValue::DenseExternal { .. } => None,
             }
         }
 
@@ -402,6 +402,7 @@ fn try_fold(
                         None
                     }
                 }
+                ConstantValue::DenseExternal { .. } => None,
             }
         }
 
@@ -808,6 +809,7 @@ fn unary_fold(
         ConstantValue::DenseScalar(s) => (s.clone(), None),
         ConstantValue::DenseSplat(s, t) => (s.clone(), Some(t.clone())),
         ConstantValue::DenseArray(_) => return None,
+        ConstantValue::DenseExternal { .. } => return None,
     };
     let out_scalar = eval(&src_scalar)?;
     // Coerce the eval output into the requested result type when sensible.
@@ -1500,14 +1502,14 @@ fn try_identity(
 fn is_all_zero_constant(cv: &ConstantValue) -> bool {
     match cv {
         ConstantValue::DenseScalar(s) | ConstantValue::DenseSplat(s, _) => is_scalar_zero(s),
-        ConstantValue::DenseArray(_) => false,
+        ConstantValue::DenseArray(_) | ConstantValue::DenseExternal { .. } => false,
     }
 }
 
 fn is_all_one_constant(cv: &ConstantValue) -> bool {
     match cv {
         ConstantValue::DenseScalar(s) | ConstantValue::DenseSplat(s, _) => is_scalar_one(s),
-        ConstantValue::DenseArray(_) => false,
+        ConstantValue::DenseArray(_) | ConstantValue::DenseExternal { .. } => false,
     }
 }
 

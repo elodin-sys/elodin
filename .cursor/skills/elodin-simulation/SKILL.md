@@ -195,6 +195,29 @@ ThrustCmd = ty.Annotated[jax.Array,
     el.Component("thrust_cmd", el.ComponentType.F64, metadata={"external_control": "true"})]
 ```
 
+## Shared Constants And Monte Carlo
+
+The Cranelift backend transparently interns baked StableHLO constants over 1 MB. For large immutable lookup tables, aero maps, ephemerides, terrain grids, or other constants, capture the JAX array in the system closure:
+
+```python
+aero_table = jnp.asarray(aero_grid)
+
+@el.map
+def aero_force(v: el.WorldVel, f: el.Force) -> el.Force:
+    coeff = aero_table[0, 0]
+    return f + el.SpatialForce(linear=-coeff * v.linear())
+```
+
+During StableHLO parsing, large `dense<"0x...">` blobs are moved into the content-addressed mmap cache. Multiple processes compiling the same constant map the same cache file, so Monte Carlo campaigns avoid paying N copies of the table in resident memory.
+
+For campaign structure and memory reporting, see:
+
+```bash
+uv run examples/monte-carlo/runner.py --runs 8 --jobs 4
+```
+
+Each run writes a separate DB path. The runner pins `ELODIN_CACHE_DIR` for all workers and samples `/proc/<pid>/smaps` to show the shared cache file's RSS/PSS footprint at peak concurrency. For correctness checks, export each DB to CSV and diff component data ignoring timestamps, as described in the physics regression workflow below.
+
 ## Execution Modes
 
 | Mode | Command | Backend | Use |
