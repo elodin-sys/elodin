@@ -79,13 +79,13 @@ fn show_geometry_lod(coordinate: Coordinate) -> vec4<f32> {
 
     if (max(0.0, target_lod) < f32(coordinate.lod) - 1.0 + view_config.morph_range) {
         // The view_distance and morph range are not sufficient.
-        // The same tile overlapps two morph zones.
+        // The same tile overlaps two morph zones.
         // -> increase morph distance
         color = vec4<f32>(1.0, 0.0, 0.0, 1.0);
     }
     if (floor(target_lod) > f32(coordinate.lod)) {
         // The view_distance and morph range are not sufficient.
-        // The tile does have an insuffient LOD.
+        // The tile does have an insufficient LOD.
         // -> increase morph tolerance
         color = vec4<f32>(0.0, 1.0, 0.0, 1.0);
     }

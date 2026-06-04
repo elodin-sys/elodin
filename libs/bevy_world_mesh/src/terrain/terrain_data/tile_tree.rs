@@ -97,9 +97,9 @@ impl TileLookup {
 /// in each direction.
 ///
 /// Each frame the tile tree determines the state of each tile via the
-/// `compute_requests` methode.
+/// `compute_requests` method.
 /// After the [`TileAtlas`] has adjusted to these requests, the tile tree retrieves the best
-/// currently loaded tiles from the tile atlas via the `adjust` methode, which can later be used to access the terrain data.
+/// currently loaded tiles from the tile atlas via the `adjust` method, which can later be used to access the terrain data.
 #[derive(Component)]
 pub struct TileTree {
     pub(super) origins: Array2<UVec2>,
