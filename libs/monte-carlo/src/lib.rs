@@ -1515,32 +1515,50 @@ fn write_campaign_summary(
         summary.concurrency_summary.mean_active_runs, summary.concurrency_summary.peak_active_runs
     ));
     if !summary.concurrency_summary.buckets.is_empty() {
-        rendered.push_str("  run cost by concurrency:");
+        rendered.push('\n');
+        rendered.push_str("  run cost by concurrency (active / runs / avg wall):\n");
         for bucket in &summary.concurrency_summary.buckets {
             rendered.push_str(&format!(
-                " c{}={} runs avg {:.1}ms;",
-                bucket.concurrency, bucket.runs, bucket.average_run_wall_ms
+                "    {:>6} {:>8} {}\n",
+                bucket.concurrency,
+                bucket.runs,
+                fmt_ms(bucket.average_run_wall_ms)
             ));
         }
-        rendered.push('\n');
     }
     if summary.phase_attribution.samples > 0 {
-        rendered.push_str(&format!(
-            "  run attribution avg: import={:.1}ms compile={:.1}ms loop={:.1}ms teardown={:.1}ms process-exit={:.1}ms\n",
+        rendered.push('\n');
+        rendered.push_str("  per-run phase attribution (avg / p95):\n");
+        rendered.push_str(&fmt_ms_row(
+            "python import",
             summary.phase_attribution.average_python_import_ms,
-            summary.phase_attribution.average_compile_ms,
-            summary.phase_attribution.average_loop_ms,
-            summary.phase_attribution.average_teardown_ms,
-            summary.phase_attribution.average_process_shutdown_ms,
-        ));
-        rendered.push_str(&format!(
-            "  run attribution p95: import={:.1}ms compile={:.1}ms loop={:.1}ms teardown={:.1}ms process-exit={:.1}ms\n",
             summary.phase_attribution.p95_python_import_ms,
+        ));
+        rendered.push('\n');
+        rendered.push_str(&fmt_ms_row(
+            "compile",
+            summary.phase_attribution.average_compile_ms,
             summary.phase_attribution.p95_compile_ms,
+        ));
+        rendered.push('\n');
+        rendered.push_str(&fmt_ms_row(
+            "loop",
+            summary.phase_attribution.average_loop_ms,
             summary.phase_attribution.p95_loop_ms,
+        ));
+        rendered.push('\n');
+        rendered.push_str(&fmt_ms_row(
+            "teardown",
+            summary.phase_attribution.average_teardown_ms,
             summary.phase_attribution.p95_teardown_ms,
+        ));
+        rendered.push('\n');
+        rendered.push_str(&fmt_ms_row(
+            "process exit",
+            summary.phase_attribution.average_process_shutdown_ms,
             summary.phase_attribution.p95_process_shutdown_ms,
         ));
+        rendered.push('\n');
     }
     if !memory.is_empty() {
         let virtual_kib = memory.iter().map(|sample| sample.virtual_kib).sum::<u64>();
@@ -1626,6 +1644,10 @@ fn fmt_row(name: &str, phase: &SimPhaseSummary) -> String {
     )
 }
 
+fn fmt_ms_row(name: &str, avg_ms: f64, p95_ms: f64) -> String {
+    format!("    {:<14} {}  {}", name, fmt_ms(avg_ms), fmt_ms(p95_ms))
+}
+
 fn fmt_cell(phase: &SimPhaseSummary, q: f64) -> String {
     if phase.count == 0 {
         "        —".to_string()
@@ -1639,6 +1661,10 @@ fn fmt_cell(phase: &SimPhaseSummary, q: f64) -> String {
         };
         format!("{:>9}", fmt_ns(value))
     }
+}
+
+fn fmt_ms(ms: f64) -> String {
+    format!("{ms:>8.1} ms")
 }
 
 fn fmt_ns(ns: u64) -> String {
