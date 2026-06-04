@@ -64,6 +64,8 @@ pub struct RunArgs {
     pub dry_run: bool,
     #[arg(long)]
     pub memory_probe: bool,
+    #[arg(long)]
+    pub keep_existing: bool,
     #[arg(long, value_enum, default_value = "auto")]
     pub progress: ProgressMode,
     #[arg(long)]
@@ -118,6 +120,7 @@ impl Args {
                 fail_fast: false,
                 dry_run: false,
                 memory_probe: false,
+                keep_existing: false,
                 progress: ProgressMode::Auto,
                 runtime_threads: None,
             })),
@@ -178,6 +181,7 @@ fn run_options(args: RunArgs) -> Result<monte_carlo::RunOptions> {
         fail_fast: args.fail_fast,
         dry_run: args.dry_run,
         memory_probe: args.memory_probe,
+        keep_existing: args.keep_existing,
         progress: match args.progress {
             ProgressMode::Auto => monte_carlo::ProgressMode::Auto,
             ProgressMode::Always => monte_carlo::ProgressMode::Always,
