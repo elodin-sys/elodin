@@ -56,6 +56,38 @@ ELODIN_BACKEND=cranelift bash scripts/ci/regress.sh --update ball examples/ball/
 
 Baselines live in `scripts/ci/baseline/`; tolerances in `scripts/ci/baseline/tolerances.json`.
 
+## Shared Large Constants
+
+Large `stablehlo.constant dense<"0x...">` blobs over 1 MB are transparently interned by `libs/cranelift-mlir`:
+
+- Parser: `src/parser.rs` decodes large hex constants as raw bytes and interns them through `src/const_cache.rs`.
+- Cache: content-addressed by element type, byte length, and raw little-endian bytes under `${ELODIN_CACHE_DIR:-~/.cache/elodin/const-cache}`.
+- IR: `ConstantValue::DenseExternal` is cheap to clone and carries the cached mapping handle.
+- Lowering: `src/lower.rs` registers each mapping with `JITBuilder::symbol` and lowers it through `declare_data(Linkage::Import)`, so constants are not copied into the JIT arena.
+- Lifetime: `CompiledModule` must retain the `Arc<CachedConst>` handles for every imported constant. The JIT symbol stores raw pointers, so dropping the parsed IR module before live execution would otherwise leave dangling mmap pointers.
+- Concurrent publishing: cache writes must never replace an already-published file. Use a temp file plus no-clobber publish so simultaneous first writers converge on one inode; otherwise one process can map a now-deleted inode and lose page-cache sharing.
+
+Relevant tests:
+
+```bash
+cargo test -p cranelift-mlir --test large_constant_cache
+cargo test -p cranelift-mlir --test imported_data_arena -- --ignored --nocapture
+cargo test -p cranelift-mlir large_external_constant_8d_dynamic_slice
+```
+
+Customer-style checkpoint repro:
+
+```bash
+ELODIN_CRANELIFT_DEBUG_DIR=/tmp/dbg \
+  cargo test -p cranelift-mlir --test checkpoint_test --release verify_checkpoint -- --ignored --nocapture
+
+# To hold two verifier processes for mmap/PSS sampling:
+ELODIN_CACHE_DIR=/tmp/elodin-const-cache-proof \
+ELODIN_CRANELIFT_DEBUG_DIR=/tmp/dbg \
+ELODIN_CRANELIFT_CHECKPOINT_HOLD_AFTER_TICK_MS=120000 \
+  cargo test -p cranelift-mlir --test checkpoint_test --release verify_checkpoint -- --ignored --nocapture
+```
+
 ## Adding a new op
 
 1. **IR**: add `Instruction` variant in `src/ir.rs`

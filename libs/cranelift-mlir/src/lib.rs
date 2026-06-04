@@ -1,3 +1,4 @@
+pub mod const_cache;
 pub mod const_fold;
 pub mod debug;
 pub mod inliner;
