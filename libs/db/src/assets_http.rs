@@ -1,5 +1,4 @@
 use axum::Router;
-use axum::body::Bytes;
 use axum::extract::{Path as AxumPath, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
@@ -159,21 +158,6 @@ async fn get_asset(
     }
 }
 
-async fn put_asset(
-    AxumPath(path): AxumPath<String>,
-    State(state): State<Arc<AssetsState>>,
-    body: Bytes,
-) -> Result<StatusCode, StatusCode> {
-    write_asset_file(&state.assets_dir, &path, &body).map_err(|err| {
-        if err.kind() == io::ErrorKind::InvalidInput {
-            StatusCode::BAD_REQUEST
-        } else {
-            StatusCode::INTERNAL_SERVER_ERROR
-        }
-    })?;
-    Ok(StatusCode::NO_CONTENT)
-}
-
 async fn serve_assets_with_listener(
     listener: tokio::net::TcpListener,
     addr: SocketAddr,
@@ -181,7 +165,7 @@ async fn serve_assets_with_listener(
 ) -> miette::Result<()> {
     let state = Arc::new(AssetsState { assets_dir });
     let app = Router::new()
-        .route("/{*path}", get(get_asset).put(put_asset))
+        .route("/{*path}", get(get_asset))
         .with_state(state);
     tracing::info!(?addr, "assets http server listening");
     axum::serve(listener, app).await.into_diagnostic()?;
@@ -275,9 +259,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn put_and_get_over_http() {
+    async fn get_over_http_allows_dot_dot_in_asset_name() {
         let dir = tempdir().unwrap();
         let assets = dir.path().join("assets");
+        write_asset_file(&assets, "model..v2.glb", b"rocket-payload").unwrap();
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let bound = listener.local_addr().unwrap();
 
@@ -285,7 +270,7 @@ mod tests {
             assets_dir: assets.clone(),
         });
         let app = Router::new()
-            .route("/{*path}", get(get_asset).put(put_asset))
+            .route("/{*path}", get(get_asset))
             .with_state(state);
 
         tokio::spawn(async move {
@@ -295,20 +280,11 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(50)).await;
 
         let client = reqwest::Client::new();
-        let put_url = format!("http://{bound}/model..v2.glb");
-        let response = client
-            .put(&put_url)
-            .body(b"rocket-payload".to_vec())
+        let get_response = client
+            .get(format!("http://{bound}/model..v2.glb"))
             .send()
             .await
             .unwrap();
-        assert_eq!(response.status(), StatusCode::NO_CONTENT);
-        assert_eq!(
-            std::fs::read(assets.join("model..v2.glb")).unwrap(),
-            b"rocket-payload".to_vec()
-        );
-
-        let get_response = client.get(&put_url).send().await.unwrap();
         assert_eq!(get_response.status(), StatusCode::OK);
         assert_eq!(
             get_response.bytes().await.unwrap().as_ref(),
@@ -326,7 +302,7 @@ mod tests {
 
         let state = Arc::new(AssetsState { assets_dir: assets });
         let app = Router::new()
-            .route("/{*path}", get(get_asset).put(put_asset))
+            .route("/{*path}", get(get_asset))
             .with_state(state);
 
         tokio::spawn(async move {
@@ -373,7 +349,7 @@ mod tests {
             assets_dir: source_assets.clone(),
         });
         let app = Router::new()
-            .route("/{*path}", get(get_asset).put(put_asset))
+            .route("/{*path}", get(get_asset))
             .with_state(state);
 
         tokio::spawn(async move {
@@ -405,10 +381,7 @@ object_3d "rocket.world_pos" {
         let bound = listener.local_addr().unwrap();
         let tcp = SocketAddr::new(bound.ip(), bound.port().saturating_sub(1));
 
-        let app = Router::new().route(
-            "/{*path}",
-            get(|| async { Bytes::from_static(b"from-source") }),
-        );
+        let app = Router::new().route("/{*path}", get(|| async { "from-source" }));
 
         tokio::spawn(async move {
             axum::serve(listener, app).await.unwrap();
@@ -437,7 +410,7 @@ object_3d "rocket.world_pos" {
     }
 
     #[tokio::test]
-    async fn put_with_encoded_parent_dir_returns_400() {
+    async fn put_over_http_is_not_allowed() {
         let dir = tempdir().unwrap();
         let assets = dir.path().join("assets");
         std::fs::create_dir_all(&assets).unwrap();
@@ -448,7 +421,7 @@ object_3d "rocket.world_pos" {
             assets_dir: assets.clone(),
         });
         let app = Router::new()
-            .route("/{*path}", get(get_asset).put(put_asset))
+            .route("/{*path}", get(get_asset))
             .with_state(state);
 
         tokio::spawn(async move {
@@ -458,12 +431,12 @@ object_3d "rocket.world_pos" {
         tokio::time::sleep(Duration::from_millis(50)).await;
 
         let response = reqwest::Client::new()
-            .put(format!("http://{bound}/..%2frocket.glb"))
+            .put(format!("http://{bound}/rocket.glb"))
             .body(b"x".to_vec())
             .send()
             .await
             .unwrap();
-        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        assert_eq!(response.status(), StatusCode::METHOD_NOT_ALLOWED);
         assert!(!assets.join("rocket.glb").exists());
     }
 }
