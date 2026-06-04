@@ -90,7 +90,15 @@ pub async fn sync_schematic_assets_from_source(
             continue;
         }
         let bytes = response.bytes().await?;
-        write_asset_file(&assets_dir, &name, &bytes)?;
+        if let Err(err) = write_asset_file(&assets_dir, &name, &bytes) {
+            tracing::warn!(
+                asset = %name,
+                %url,
+                error = %err,
+                "failed to write schematic asset from source"
+            );
+            continue;
+        }
         tracing::info!(asset = %name, "synced schematic asset from source");
     }
 
@@ -376,6 +384,44 @@ mod tests {
 
         let follower_db = dir.path().join("follower_db");
         let kdl = r#"
+object_3d "rocket.world_pos" {
+    glb path="db:models/rocket.glb"
+}
+"#;
+        sync_schematic_assets_from_source(tcp, &follower_db, kdl)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            std::fs::read(assets_dir(&follower_db).join("models/rocket.glb")).unwrap(),
+            b"from-source".to_vec()
+        );
+    }
+
+    #[tokio::test]
+    async fn sync_schematic_assets_from_source_continues_after_write_error() {
+        let dir = tempdir().unwrap();
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let bound = listener.local_addr().unwrap();
+        let tcp = SocketAddr::new(bound.ip(), bound.port().saturating_sub(1));
+
+        let app = Router::new().route(
+            "/{*path}",
+            get(|| async { Bytes::from_static(b"from-source") }),
+        );
+
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        let follower_db = dir.path().join("follower_db");
+        let kdl = r#"
+object_3d "bad.world_pos" {
+    glb path="db:bad/../invalid.glb"
+}
+
 object_3d "rocket.world_pos" {
     glb path="db:models/rocket.glb"
 }
