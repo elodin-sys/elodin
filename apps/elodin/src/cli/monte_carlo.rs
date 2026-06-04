@@ -62,8 +62,12 @@ pub struct RunArgs {
     pub fail_fast: bool,
     #[arg(long)]
     pub dry_run: bool,
+    #[arg(long)]
+    pub memory_probe: bool,
     #[arg(long, value_enum, default_value = "auto")]
     pub progress: ProgressMode,
+    #[arg(long)]
+    pub runtime_threads: Option<usize>,
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
@@ -82,7 +86,7 @@ impl Cli {
             Command::Sample { spec, output } => {
                 python_module(["-m", "elodin.monte_carlo.sample"], [spec, output])
             }
-            Command::Run(args) => rt.block_on(run(*args)),
+            Command::Run(args) => run_with_runtime(*args, rt),
             Command::Resume { campaign_dir } => Err(miette!(
                 "resume is not implemented yet for {}",
                 campaign_dir.display()
@@ -113,13 +117,36 @@ impl Args {
                 params_compat: None,
                 fail_fast: false,
                 dry_run: false,
+                memory_probe: false,
                 progress: ProgressMode::Auto,
+                runtime_threads: None,
             })),
         }
     }
 }
 
-async fn run(args: RunArgs) -> Result<()> {
+fn run_with_runtime(args: RunArgs, rt: tokio::runtime::Runtime) -> Result<()> {
+    let runtime_threads = args.runtime_threads;
+    let options = run_options(args)?;
+    let shape = monte_carlo::resolve_run_shape(
+        options.campaign_path.as_deref(),
+        &options.plan_path,
+        options.workers,
+        runtime_threads,
+    )?;
+    if shape.runtime_threads > 1 {
+        let threaded_rt = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(shape.runtime_threads)
+            .enable_all()
+            .build()
+            .map_err(|err| miette!("failed to build monte-carlo runtime: {err}"))?;
+        threaded_rt.block_on(monte_carlo::run_campaign(options))
+    } else {
+        rt.block_on(monte_carlo::run_campaign(options))
+    }
+}
+
+fn run_options(args: RunArgs) -> Result<monte_carlo::RunOptions> {
     let out_dir = args.out.unwrap_or_else(|| {
         PathBuf::from(format!(
             "mc-{}",
@@ -136,7 +163,7 @@ async fn run(args: RunArgs) -> Result<()> {
         (Some(_), Some(_)) => return Err(miette!("use either --plan or --spec, not both")),
         (None, None) => return Err(miette!("monte-carlo run requires --plan or --spec")),
     };
-    monte_carlo::run_campaign(monte_carlo::RunOptions {
+    Ok(monte_carlo::RunOptions {
         sim_path: args.sim,
         plan_path,
         campaign_path: args.campaign,
@@ -150,13 +177,13 @@ async fn run(args: RunArgs) -> Result<()> {
         params_compat: args.params_compat,
         fail_fast: args.fail_fast,
         dry_run: args.dry_run,
+        memory_probe: args.memory_probe,
         progress: match args.progress {
             ProgressMode::Auto => monte_carlo::ProgressMode::Auto,
             ProgressMode::Always => monte_carlo::ProgressMode::Always,
             ProgressMode::Never => monte_carlo::ProgressMode::Never,
         },
     })
-    .await
 }
 
 fn python_module<const N: usize, const M: usize>(

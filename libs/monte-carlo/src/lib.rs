@@ -7,7 +7,7 @@ use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use chrono::{DateTime, Utc};
 use indicatif::{ProgressBar, ProgressStyle};
@@ -23,7 +23,7 @@ pub const CACHE_ENV: &str = "ELODIN_CACHE_DIR";
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(default)]
 pub struct CampaignConfig {
-    pub workers: usize,
+    pub workers: Option<usize>,
     pub timeout: Option<String>,
     pub retries: usize,
     pub cache_dir: Option<PathBuf>,
@@ -36,7 +36,7 @@ pub struct CampaignConfig {
 impl Default for CampaignConfig {
     fn default() -> Self {
         Self {
-            workers: 1,
+            workers: None,
             timeout: None,
             retries: 0,
             cache_dir: None,
@@ -93,6 +93,7 @@ pub struct RunOptions {
     pub fail_fast: bool,
     pub dry_run: bool,
     pub progress: ProgressMode,
+    pub memory_probe: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -101,6 +102,12 @@ pub enum ProgressMode {
     Auto,
     Always,
     Never,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ResolvedRunShape {
+    pub workers: usize,
+    pub runtime_threads: usize,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -131,6 +138,18 @@ pub struct RunMetric {
     pub wall_ms: u128,
     pub started_at: DateTime<Utc>,
     pub finished_at: DateTime<Utc>,
+    pub spawn_unix_ns: u64,
+    pub exit_unix_ns: u64,
+    pub entry_unix_ns: Option<u64>,
+    pub compile_done_unix_ns: Option<u64>,
+    pub loop_start_unix_ns: Option<u64>,
+    pub loop_end_unix_ns: Option<u64>,
+    pub summary_written_unix_ns: Option<u64>,
+    pub python_import_ms: Option<f64>,
+    pub compile_ms: Option<f64>,
+    pub loop_ms: Option<f64>,
+    pub teardown_ms: Option<f64>,
+    pub process_shutdown_ms: Option<f64>,
     pub db_path: PathBuf,
     pub run_dir: PathBuf,
 }
@@ -151,6 +170,44 @@ pub struct CampaignSummary {
     pub disk_bytes: u64,
     pub resource_summary: ResourceSummary,
     pub sim_phase_summary: Option<SimSummaryAggregate>,
+    pub phase_attribution: PhaseAttributionSummary,
+    pub concurrency_summary: ConcurrencySummary,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct PhaseAttributionSummary {
+    pub samples: usize,
+    pub average_python_import_ms: f64,
+    pub average_compile_ms: f64,
+    pub average_loop_ms: f64,
+    pub average_teardown_ms: f64,
+    pub average_process_shutdown_ms: f64,
+    pub p95_python_import_ms: f64,
+    pub p95_compile_ms: f64,
+    pub p95_loop_ms: f64,
+    pub p95_teardown_ms: f64,
+    pub p95_process_shutdown_ms: f64,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct TimelineSample {
+    pub start_ms: f64,
+    pub end_ms: f64,
+    pub active_runs: usize,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct ConcurrencyBucket {
+    pub concurrency: usize,
+    pub runs: usize,
+    pub average_run_wall_ms: f64,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct ConcurrencySummary {
+    pub mean_active_runs: f64,
+    pub peak_active_runs: usize,
+    pub buckets: Vec<ConcurrencyBucket>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -167,6 +224,10 @@ pub struct CacheMappingSample {
 pub struct ResourceSample {
     pub elapsed_ms: u128,
     pub cpu_percent: f64,
+    pub cpu_min_percent: f64,
+    pub cpu_max_percent: f64,
+    pub load_average_1m: f64,
+    pub context_switches_per_sec: f64,
     pub mem_total_kib: u64,
     pub mem_available_kib: u64,
     pub campaign_disk_bytes: u64,
@@ -177,8 +238,22 @@ pub struct ResourceSummary {
     pub samples: usize,
     pub average_cpu_percent: f64,
     pub peak_cpu_percent: f64,
+    pub peak_cpu_core_percent: f64,
+    pub peak_load_average_1m: f64,
+    pub peak_context_switches_per_sec: f64,
     pub peak_memory_used_kib: u64,
     pub peak_campaign_disk_bytes: u64,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ProcessSample {
+    pub elapsed_ms: u128,
+    pub run_id: String,
+    pub pid: u32,
+    pub rss_kib: u64,
+    pub utime_ticks: u64,
+    pub stime_ticks: u64,
+    pub cmd: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -205,6 +280,11 @@ pub struct SimRunSummary {
     pub simulation_rate_hz: f64,
     pub telemetry_rate_hz: f64,
     pub wall_ns: u64,
+    pub entry_unix_ns: Option<u64>,
+    pub compile_done_unix_ns: Option<u64>,
+    pub loop_start_unix_ns: Option<u64>,
+    pub loop_end_unix_ns: Option<u64>,
+    pub summary_written_unix_ns: Option<u64>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -355,12 +435,14 @@ pub async fn run_campaign(mut options: RunOptions) -> Result<()> {
     if plan.is_empty() {
         return Err(Error::EmptyPlan).into_diagnostic();
     }
+    let workers = resolve_workers(config.workers, plan.len());
+    config.workers = Some(workers);
 
     if options.dry_run {
         println!(
             "monte-carlo dry run: runs={} workers={} out_dir={}",
             plan.len(),
-            config.workers,
+            workers,
             options.out_dir.display()
         );
         for row in &plan {
@@ -387,12 +469,7 @@ pub async fn run_campaign(mut options: RunOptions) -> Result<()> {
         .with_context(|| format!("create cache dir {}", cache_dir.display()))?;
     fs::copy(&options.plan_path, options.out_dir.join("plan.csv")).into_diagnostic()?;
     write_json(&options.out_dir.join("campaign.resolved.json"), &config)?;
-    let reporter = CampaignReporter::new(
-        &options.out_dir,
-        plan.len(),
-        config.workers,
-        options.progress,
-    )?;
+    let reporter = CampaignReporter::new(&options.out_dir, plan.len(), workers, options.progress)?;
 
     let base_recipe = plan_recipe(&options.sim_path, &options.out_dir).await?;
     let rows = Arc::new(Mutex::new(VecDeque::from(plan)));
@@ -401,20 +478,24 @@ pub async fn run_campaign(mut options: RunOptions) -> Result<()> {
     let stop_sampling = Arc::new(AtomicBool::new(false));
     let peak_memory = Arc::new(Mutex::new(Vec::<CacheMappingSample>::new()));
     let resource_samples = Arc::new(Mutex::new(Vec::<ResourceSample>::new()));
-    let sampler = spawn_memory_sampler(
-        cache_dir.clone(),
-        stop_sampling.clone(),
-        peak_memory.clone(),
-    );
+    let process_samples = Arc::new(Mutex::new(Vec::<ProcessSample>::new()));
+    let memory_sampler = options.memory_probe.then(|| {
+        spawn_memory_sampler(
+            cache_dir.clone(),
+            stop_sampling.clone(),
+            peak_memory.clone(),
+        )
+    });
     let resource_sampler = spawn_resource_sampler(
         options.out_dir.clone(),
         wall_start,
         stop_sampling.clone(),
         resource_samples.clone(),
+        options.memory_probe.then_some(process_samples.clone()),
     );
-    let mut workers = JoinSet::new();
+    let mut worker_tasks = JoinSet::new();
 
-    for worker_id in 0..config.workers {
+    for worker_id in 0..workers {
         let rows = rows.clone();
         let metrics = metrics.clone();
         let failure = failure.clone();
@@ -423,7 +504,7 @@ pub async fn run_campaign(mut options: RunOptions) -> Result<()> {
         let out_dir = options.out_dir.clone();
         let cache_dir = cache_dir.clone();
         let reporter = reporter.clone();
-        workers.spawn(async move {
+        worker_tasks.spawn(async move {
             let slot = resource_slot(worker_id, &config.resources)?;
             loop {
                 if failure.lock().expect("failure mutex poisoned").is_some()
@@ -455,27 +536,44 @@ pub async fn run_campaign(mut options: RunOptions) -> Result<()> {
         });
     }
 
-    while let Some(result) = workers.join_next().await {
+    while let Some(result) = worker_tasks.join_next().await {
         result.into_diagnostic()??;
     }
     stop_sampling.store(true, Ordering::SeqCst);
-    sampler.await.into_diagnostic()?;
+    if let Some(memory_sampler) = memory_sampler {
+        memory_sampler.await.into_diagnostic()?;
+    }
     resource_sampler.await.into_diagnostic()?;
 
     let metrics = metrics.lock().expect("metrics mutex poisoned").clone();
     write_perf_csv(&options.out_dir.join("perf.csv"), &metrics)?;
+    let (timeline, concurrency_summary) = build_timeline(&metrics);
+    write_timeline_csv(&options.out_dir.join("timeline.csv"), &timeline)?;
     write_results_csv(
         &options.out_dir.join("results.csv"),
         &options.out_dir,
         &metrics,
     )?;
-    let memory = peak_memory.lock().expect("memory mutex poisoned").clone();
+    let memory = if options.memory_probe {
+        peak_memory.lock().expect("memory mutex poisoned").clone()
+    } else {
+        Vec::new()
+    };
     let resource_samples = resource_samples
         .lock()
         .expect("resource samples mutex poisoned")
         .clone();
-    write_json(&options.out_dir.join("memory.json"), &memory)?;
     write_resource_csv(&options.out_dir.join("resources.csv"), &resource_samples)?;
+    if options.memory_probe {
+        write_json(&options.out_dir.join("memory.json"), &memory)?;
+        write_process_csv(
+            &options.out_dir.join("processes.csv"),
+            &process_samples
+                .lock()
+                .expect("process samples mutex poisoned")
+                .clone(),
+        )?;
+    }
 
     if let Some(hook) = &config.hooks.post_campaign {
         let context = options.out_dir.join("campaign_hook_context.json");
@@ -485,7 +583,7 @@ pub async fn run_campaign(mut options: RunOptions) -> Result<()> {
                 "out_dir": options.out_dir,
                 "results": options.out_dir.join("results.csv"),
                 "perf": options.out_dir.join("perf.csv"),
-                "memory": options.out_dir.join("memory.json"),
+                "memory": options.memory_probe.then(|| options.out_dir.join("memory.json")),
                 "resources": options.out_dir.join("resources.csv"),
             }),
         )?;
@@ -494,6 +592,7 @@ pub async fn run_campaign(mut options: RunOptions) -> Result<()> {
 
     let failed = metrics.iter().filter(|metric| !metric.exit_ok).count();
     let sim_phase_summary = aggregate_sim_summaries(&metrics);
+    let phase_attribution = summarize_phase_attribution(&metrics);
     let total_run_wall_ms = metrics.iter().map(|metric| metric.wall_ms).sum::<u128>();
     let max_run_wall_ms = metrics
         .iter()
@@ -501,14 +600,16 @@ pub async fn run_campaign(mut options: RunOptions) -> Result<()> {
         .max()
         .unwrap_or_default();
     let wall_ms = wall_start.elapsed().as_millis();
-    let resource_summary = summarize_resources(&resource_samples);
+    let disk_bytes = dir_size(&options.out_dir);
+    let mut resource_summary = summarize_resources(&resource_samples);
+    resource_summary.peak_campaign_disk_bytes = disk_bytes;
     let summary = CampaignSummary {
         started_at,
         finished_at: Utc::now(),
         total_runs: metrics.len(),
         passed: metrics.len().saturating_sub(failed),
         failed,
-        workers: config.workers,
+        workers,
         wall_ms,
         total_run_wall_ms,
         average_run_wall_ms: if metrics.is_empty() {
@@ -517,14 +618,16 @@ pub async fn run_campaign(mut options: RunOptions) -> Result<()> {
             total_run_wall_ms as f64 / metrics.len() as f64
         },
         max_run_wall_ms,
-        parallel_efficiency: if wall_ms == 0 || config.workers == 0 {
+        parallel_efficiency: if wall_ms == 0 || workers == 0 {
             0.0
         } else {
-            total_run_wall_ms as f64 / (wall_ms as f64 * config.workers as f64)
+            total_run_wall_ms as f64 / (wall_ms as f64 * workers as f64)
         },
-        disk_bytes: dir_size(&options.out_dir),
+        disk_bytes,
         resource_summary,
         sim_phase_summary: sim_phase_summary.clone(),
+        phase_attribution,
+        concurrency_summary,
     };
     write_json(&options.out_dir.join("summary.json"), &summary)?;
     write_campaign_summary(
@@ -600,6 +703,7 @@ async fn run_one(
     )?;
 
     let started_at = Utc::now();
+    let spawn_unix_ns = unix_now_ns();
     let start = Instant::now();
     let recipe = patch_recipe(
         ctx.base_recipe.clone(),
@@ -627,7 +731,24 @@ async fn run_one(
     } else {
         fut.await
     };
+    let exit_unix_ns = unix_now_ns();
     let exit_ok = result.is_ok();
+    let sim_summary = read_sim_run_summary(&run_dir.join("sim_summary.json"));
+    let entry_unix_ns = sim_summary
+        .as_ref()
+        .and_then(|summary| summary.entry_unix_ns);
+    let compile_done_unix_ns = sim_summary
+        .as_ref()
+        .and_then(|summary| summary.compile_done_unix_ns);
+    let loop_start_unix_ns = sim_summary
+        .as_ref()
+        .and_then(|summary| summary.loop_start_unix_ns);
+    let loop_end_unix_ns = sim_summary
+        .as_ref()
+        .and_then(|summary| summary.loop_end_unix_ns);
+    let summary_written_unix_ns = sim_summary
+        .as_ref()
+        .and_then(|summary| summary.summary_written_unix_ns);
     let metric = RunMetric {
         run_id: row.run_id.clone(),
         worker_id,
@@ -637,6 +758,18 @@ async fn run_one(
         wall_ms: start.elapsed().as_millis(),
         started_at,
         finished_at: Utc::now(),
+        spawn_unix_ns,
+        exit_unix_ns,
+        entry_unix_ns,
+        compile_done_unix_ns,
+        loop_start_unix_ns,
+        loop_end_unix_ns,
+        summary_written_unix_ns,
+        python_import_ms: diff_ms(Some(spawn_unix_ns), entry_unix_ns),
+        compile_ms: diff_ms(entry_unix_ns, compile_done_unix_ns),
+        loop_ms: diff_ms(loop_start_unix_ns, loop_end_unix_ns),
+        teardown_ms: diff_ms(loop_end_unix_ns, Some(exit_unix_ns)),
+        process_shutdown_ms: diff_ms(summary_written_unix_ns, Some(exit_unix_ns)),
         db_path,
         run_dir: run_dir.clone(),
     };
@@ -671,9 +804,59 @@ fn load_config(path: Option<&Path>) -> Result<CampaignConfig> {
         .with_context(|| format!("parse campaign config {}", path.display()))
 }
 
+pub fn resolve_run_shape(
+    campaign_path: Option<&Path>,
+    plan_path: &Path,
+    workers_override: Option<usize>,
+    runtime_threads_override: Option<usize>,
+) -> Result<ResolvedRunShape> {
+    let mut config = load_config(campaign_path)?;
+    if let Some(workers) = workers_override {
+        config.workers = Some(workers.max(1));
+    }
+    let plan = read_plan(plan_path)?;
+    if plan.is_empty() {
+        return Err(Error::EmptyPlan).into_diagnostic();
+    }
+    let workers = resolve_workers(config.workers, plan.len());
+    Ok(ResolvedRunShape {
+        workers,
+        runtime_threads: resolve_runtime_threads(workers, runtime_threads_override),
+    })
+}
+
+fn resolve_workers(config_workers: Option<usize>, plan_len: usize) -> usize {
+    if let Some(workers) = config_workers {
+        return workers.max(1).min(plan_len.max(1));
+    }
+    let reserve = if available_cpus() > 4 { 2 } else { 1 };
+    available_cpus()
+        .saturating_sub(reserve)
+        .max(1)
+        .min(plan_len.max(1))
+}
+
+fn resolve_runtime_threads(workers: usize, override_threads: Option<usize>) -> usize {
+    if let Some(threads) = override_threads.filter(|threads| *threads > 0) {
+        return threads.max(1);
+    }
+    let available = available_cpus();
+    if available <= 1 {
+        1
+    } else {
+        workers.clamp(2, available.min(8))
+    }
+}
+
+fn available_cpus() -> usize {
+    std::thread::available_parallelism()
+        .map(usize::from)
+        .unwrap_or(1)
+}
+
 fn apply_overrides(config: &mut CampaignConfig, options: &mut RunOptions) {
     if let Some(workers) = options.workers {
-        config.workers = workers.max(1);
+        config.workers = Some(workers.max(1));
     }
     if let Some(cache_dir) = options.cache_dir.take() {
         config.cache_dir = Some(cache_dir);
@@ -696,7 +879,7 @@ fn apply_overrides(config: &mut CampaignConfig, options: &mut RunOptions) {
     if options.fail_fast {
         config.continue_on_error = false;
     }
-    config.workers = config.workers.max(1);
+    config.workers = config.workers.map(|workers| workers.max(1));
 }
 
 fn read_plan(path: &Path) -> Result<Vec<PlanRow>> {
@@ -990,7 +1173,23 @@ fn write_perf_csv(path: &Path, metrics: &[RunMetric]) -> Result<()> {
     writer.flush().into_diagnostic()
 }
 
+fn write_timeline_csv(path: &Path, samples: &[TimelineSample]) -> Result<()> {
+    let mut writer = csv::Writer::from_path(path).into_diagnostic()?;
+    for sample in samples {
+        writer.serialize(sample).into_diagnostic()?;
+    }
+    writer.flush().into_diagnostic()
+}
+
 fn write_resource_csv(path: &Path, samples: &[ResourceSample]) -> Result<()> {
+    let mut writer = csv::Writer::from_path(path).into_diagnostic()?;
+    for sample in samples {
+        writer.serialize(sample).into_diagnostic()?;
+    }
+    writer.flush().into_diagnostic()
+}
+
+fn write_process_csv(path: &Path, samples: &[ProcessSample]) -> Result<()> {
     let mut writer = csv::Writer::from_path(path).into_diagnostic()?;
     for sample in samples {
         writer.serialize(sample).into_diagnostic()?;
@@ -1032,11 +1231,7 @@ fn write_results_csv(path: &Path, out_dir: &Path, metrics: &[RunMetric]) -> Resu
 fn aggregate_sim_summaries(metrics: &[RunMetric]) -> Option<SimSummaryAggregate> {
     let mut aggregate: Option<SimSummaryAggregate> = None;
     for metric in metrics {
-        let path = metric.run_dir.join("sim_summary.json");
-        let Ok(text) = fs::read_to_string(&path) else {
-            continue;
-        };
-        let Ok(summary) = serde_json::from_str::<SimRunSummary>(&text) else {
+        let Some(summary) = read_sim_run_summary(&metric.run_dir.join("sim_summary.json")) else {
             continue;
         };
         match &mut aggregate {
@@ -1045,6 +1240,15 @@ fn aggregate_sim_summaries(metrics: &[RunMetric]) -> Option<SimSummaryAggregate>
         }
     }
     aggregate
+}
+
+fn read_sim_run_summary(path: &Path) -> Option<SimRunSummary> {
+    let text = fs::read_to_string(path).ok()?;
+    serde_json::from_str::<SimRunSummary>(&text).ok()
+}
+
+fn diff_ms(start: Option<u64>, end: Option<u64>) -> Option<f64> {
+    Some(end?.saturating_sub(start?) as f64 / 1_000_000.0)
 }
 
 impl SimSummaryAggregate {
@@ -1174,6 +1378,43 @@ fn write_campaign_summary(
         "  cpu avg/peak:      {:.1}% / {:.1}%\n",
         summary.resource_summary.average_cpu_percent, summary.resource_summary.peak_cpu_percent
     ));
+    rendered.push_str(&format!(
+        "  load/ctx-switch:   peak load1={:.2} peak ctxt/s={:.0}\n",
+        summary.resource_summary.peak_load_average_1m,
+        summary.resource_summary.peak_context_switches_per_sec
+    ));
+    rendered.push_str(&format!(
+        "  concurrency:       mean={:.1} peak={}\n",
+        summary.concurrency_summary.mean_active_runs, summary.concurrency_summary.peak_active_runs
+    ));
+    if !summary.concurrency_summary.buckets.is_empty() {
+        rendered.push_str("  run cost by concurrency:");
+        for bucket in &summary.concurrency_summary.buckets {
+            rendered.push_str(&format!(
+                " c{}={} runs avg {:.1}ms;",
+                bucket.concurrency, bucket.runs, bucket.average_run_wall_ms
+            ));
+        }
+        rendered.push('\n');
+    }
+    if summary.phase_attribution.samples > 0 {
+        rendered.push_str(&format!(
+            "  run attribution avg: import={:.1}ms compile={:.1}ms loop={:.1}ms teardown={:.1}ms process-exit={:.1}ms\n",
+            summary.phase_attribution.average_python_import_ms,
+            summary.phase_attribution.average_compile_ms,
+            summary.phase_attribution.average_loop_ms,
+            summary.phase_attribution.average_teardown_ms,
+            summary.phase_attribution.average_process_shutdown_ms,
+        ));
+        rendered.push_str(&format!(
+            "  run attribution p95: import={:.1}ms compile={:.1}ms loop={:.1}ms teardown={:.1}ms process-exit={:.1}ms\n",
+            summary.phase_attribution.p95_python_import_ms,
+            summary.phase_attribution.p95_compile_ms,
+            summary.phase_attribution.p95_loop_ms,
+            summary.phase_attribution.p95_teardown_ms,
+            summary.phase_attribution.p95_process_shutdown_ms,
+        ));
+    }
     if !memory.is_empty() {
         let virtual_kib = memory.iter().map(|sample| sample.virtual_kib).sum::<u64>();
         let rss_kib = memory.iter().map(|sample| sample.rss_kib).sum::<u64>();
@@ -1195,6 +1436,14 @@ fn write_campaign_summary(
     fs::write(out_dir.join("campaign_summary.txt"), rendered)
         .into_diagnostic()
         .with_context(|| format!("write {}", out_dir.join("campaign_summary.txt").display()))
+}
+
+fn unix_now_ns() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .ok()
+        .and_then(|duration| u64::try_from(duration.as_nanos()).ok())
+        .unwrap_or_default()
 }
 
 fn render_sim_summary(summary: &SimSummaryAggregate) -> String {
@@ -1302,6 +1551,100 @@ fn write_json(path: &Path, value: &impl Serialize) -> Result<()> {
     fs::write(path, json)
         .into_diagnostic()
         .with_context(|| format!("write {}", path.display()))
+}
+
+fn build_timeline(metrics: &[RunMetric]) -> (Vec<TimelineSample>, ConcurrencySummary) {
+    if metrics.is_empty() {
+        return (Vec::new(), ConcurrencySummary::default());
+    }
+    let base = metrics
+        .iter()
+        .map(|metric| metric.spawn_unix_ns)
+        .min()
+        .unwrap_or_default();
+    let mut events = Vec::with_capacity(metrics.len() * 2);
+    for metric in metrics {
+        events.push((metric.spawn_unix_ns, 1_i32));
+        events.push((metric.exit_unix_ns, -1_i32));
+    }
+    events.sort_by_key(|(timestamp, delta)| (*timestamp, *delta));
+
+    let mut active = 0_i32;
+    let mut prev = events[0].0;
+    let mut timeline = Vec::new();
+    let mut weighted_active_ns = 0_f64;
+    let mut peak_active_runs = 0_usize;
+    for (timestamp, delta) in events {
+        if timestamp > prev && active > 0 {
+            let duration = timestamp - prev;
+            weighted_active_ns += duration as f64 * active as f64;
+            let active_runs = active as usize;
+            peak_active_runs = peak_active_runs.max(active_runs);
+            timeline.push(TimelineSample {
+                start_ms: (prev.saturating_sub(base)) as f64 / 1_000_000.0,
+                end_ms: (timestamp.saturating_sub(base)) as f64 / 1_000_000.0,
+                active_runs,
+            });
+        }
+        active = (active + delta).max(0);
+        prev = timestamp;
+    }
+    let wall_ns = metrics
+        .iter()
+        .map(|metric| metric.exit_unix_ns)
+        .max()
+        .unwrap_or(base)
+        .saturating_sub(base);
+    let mut buckets: BTreeMap<usize, Vec<f64>> = BTreeMap::new();
+    for metric in metrics {
+        let avg_concurrency = average_concurrency_for_run(metric, &timeline, base);
+        let bucket = avg_concurrency.round().max(1.0) as usize;
+        buckets
+            .entry(bucket)
+            .or_default()
+            .push(metric.wall_ms as f64);
+    }
+    let buckets = buckets
+        .into_iter()
+        .map(|(concurrency, values)| ConcurrencyBucket {
+            concurrency,
+            runs: values.len(),
+            average_run_wall_ms: average(&values),
+        })
+        .collect();
+    (
+        timeline,
+        ConcurrencySummary {
+            mean_active_runs: if wall_ns == 0 {
+                0.0
+            } else {
+                weighted_active_ns / wall_ns as f64
+            },
+            peak_active_runs,
+            buckets,
+        },
+    )
+}
+
+fn average_concurrency_for_run(metric: &RunMetric, timeline: &[TimelineSample], base: u64) -> f64 {
+    let run_start = (metric.spawn_unix_ns.saturating_sub(base)) as f64 / 1_000_000.0;
+    let run_end = (metric.exit_unix_ns.saturating_sub(base)) as f64 / 1_000_000.0;
+    let mut weighted = 0.0;
+    let mut duration = 0.0;
+    for sample in timeline {
+        let start = run_start.max(sample.start_ms);
+        let end = run_end.min(sample.end_ms);
+        if end > start {
+            let overlap = end - start;
+            weighted += overlap * sample.active_runs as f64;
+            duration += overlap;
+        }
+    }
+    if duration > 0.0 {
+        weighted / duration
+    } else {
+        0.0
+    }
 }
 
 #[cfg(target_os = "linux")]
@@ -1417,28 +1760,68 @@ fn spawn_resource_sampler(
     started_at: Instant,
     stop: Arc<AtomicBool>,
     samples: Arc<Mutex<Vec<ResourceSample>>>,
+    process_samples: Option<Arc<Mutex<Vec<ProcessSample>>>>,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
         let mut previous_cpu = read_cpu_sample();
+        let mut previous_per_core = read_per_core_cpu_samples();
+        let mut previous_context_switches = read_context_switches();
+        let mut previous_sample_at = Instant::now();
         while !stop.load(Ordering::SeqCst) {
             tokio::time::sleep(Duration::from_millis(250)).await;
+            let now = Instant::now();
             let current_cpu = read_cpu_sample();
             let cpu_percent = match (previous_cpu, current_cpu) {
                 (Some(previous), Some(current)) => cpu_percent(previous, current),
                 _ => 0.0,
             };
             previous_cpu = current_cpu;
+            let current_per_core = read_per_core_cpu_samples();
+            let per_core = per_core_cpu_percent(&previous_per_core, &current_per_core);
+            let cpu_min_percent = if per_core.is_empty() {
+                0.0
+            } else {
+                per_core.iter().copied().fold(f64::INFINITY, f64::min)
+            };
+            let cpu_max_percent = per_core.iter().copied().fold(0.0, f64::max);
+            previous_per_core = current_per_core;
+            let current_context_switches = read_context_switches();
+            let context_switches_per_sec =
+                match (previous_context_switches, current_context_switches) {
+                    (Some(previous), Some(current)) => {
+                        let elapsed = now.duration_since(previous_sample_at).as_secs_f64();
+                        if elapsed > 0.0 {
+                            current.saturating_sub(previous) as f64 / elapsed
+                        } else {
+                            0.0
+                        }
+                    }
+                    _ => 0.0,
+                };
+            previous_context_switches = current_context_switches;
+            previous_sample_at = now;
             let (mem_total_kib, mem_available_kib) = read_meminfo();
+            let elapsed_ms = started_at.elapsed().as_millis();
             samples
                 .lock()
                 .expect("resource samples mutex poisoned")
                 .push(ResourceSample {
-                    elapsed_ms: started_at.elapsed().as_millis(),
+                    elapsed_ms,
                     cpu_percent,
+                    cpu_min_percent,
+                    cpu_max_percent,
+                    load_average_1m: read_loadavg_1m(),
+                    context_switches_per_sec,
                     mem_total_kib,
                     mem_available_kib,
-                    campaign_disk_bytes: dir_size(&out_dir),
+                    campaign_disk_bytes: 0,
                 });
+            if let Some(process_samples) = &process_samples {
+                process_samples
+                    .lock()
+                    .expect("process samples mutex poisoned")
+                    .extend(sample_run_processes(&out_dir, elapsed_ms));
+            }
         }
     })
 }
@@ -1452,6 +1835,18 @@ fn summarize_resources(samples: &[ResourceSample]) -> ResourceSummary {
     let peak_cpu_percent = samples
         .iter()
         .map(|sample| sample.cpu_percent)
+        .fold(0.0, f64::max);
+    let peak_cpu_core_percent = samples
+        .iter()
+        .map(|sample| sample.cpu_max_percent)
+        .fold(0.0, f64::max);
+    let peak_load_average_1m = samples
+        .iter()
+        .map(|sample| sample.load_average_1m)
+        .fold(0.0, f64::max);
+    let peak_context_switches_per_sec = samples
+        .iter()
+        .map(|sample| sample.context_switches_per_sec)
         .fold(0.0, f64::max);
     let peak_memory_used_kib = samples
         .iter()
@@ -1471,9 +1866,77 @@ fn summarize_resources(samples: &[ResourceSample]) -> ResourceSummary {
         samples: samples.len(),
         average_cpu_percent,
         peak_cpu_percent,
+        peak_cpu_core_percent,
+        peak_load_average_1m,
+        peak_context_switches_per_sec,
         peak_memory_used_kib,
         peak_campaign_disk_bytes,
     }
+}
+
+fn summarize_phase_attribution(metrics: &[RunMetric]) -> PhaseAttributionSummary {
+    let python_import = metrics
+        .iter()
+        .filter_map(|metric| metric.python_import_ms)
+        .collect::<Vec<_>>();
+    let compile = metrics
+        .iter()
+        .filter_map(|metric| metric.compile_ms)
+        .collect::<Vec<_>>();
+    let loop_ms = metrics
+        .iter()
+        .filter_map(|metric| metric.loop_ms)
+        .collect::<Vec<_>>();
+    let teardown = metrics
+        .iter()
+        .filter_map(|metric| metric.teardown_ms)
+        .collect::<Vec<_>>();
+    let process_shutdown = metrics
+        .iter()
+        .filter_map(|metric| metric.process_shutdown_ms)
+        .collect::<Vec<_>>();
+    PhaseAttributionSummary {
+        samples: [
+            python_import.len(),
+            compile.len(),
+            loop_ms.len(),
+            teardown.len(),
+            process_shutdown.len(),
+        ]
+        .into_iter()
+        .min()
+        .unwrap_or_default(),
+        average_python_import_ms: average(&python_import),
+        average_compile_ms: average(&compile),
+        average_loop_ms: average(&loop_ms),
+        average_teardown_ms: average(&teardown),
+        average_process_shutdown_ms: average(&process_shutdown),
+        p95_python_import_ms: percentile(&python_import, 0.95),
+        p95_compile_ms: percentile(&compile, 0.95),
+        p95_loop_ms: percentile(&loop_ms, 0.95),
+        p95_teardown_ms: percentile(&teardown, 0.95),
+        p95_process_shutdown_ms: percentile(&process_shutdown, 0.95),
+    }
+}
+
+fn average(values: &[f64]) -> f64 {
+    if values.is_empty() {
+        0.0
+    } else {
+        values.iter().sum::<f64>() / values.len() as f64
+    }
+}
+
+fn percentile(values: &[f64], q: f64) -> f64 {
+    if values.is_empty() {
+        return 0.0;
+    }
+    let mut values = values.to_vec();
+    values.sort_by(|a, b| a.total_cmp(b));
+    let idx = ((values.len() as f64 * q).ceil() as usize)
+        .saturating_sub(1)
+        .min(values.len() - 1);
+    values[idx]
 }
 
 #[derive(Clone, Copy)]
@@ -1505,6 +1968,43 @@ fn read_cpu_sample() -> Option<CpuSample> {
     None
 }
 
+#[cfg(target_os = "linux")]
+fn read_per_core_cpu_samples() -> Vec<CpuSample> {
+    let Ok(stat) = fs::read_to_string("/proc/stat") else {
+        return Vec::new();
+    };
+    stat.lines()
+        .filter(|line| {
+            line.starts_with("cpu")
+                && line
+                    .as_bytes()
+                    .get(3)
+                    .is_some_and(|byte| byte.is_ascii_digit())
+        })
+        .filter_map(parse_cpu_line)
+        .collect()
+}
+
+#[cfg(not(target_os = "linux"))]
+fn read_per_core_cpu_samples() -> Vec<CpuSample> {
+    Vec::new()
+}
+
+fn parse_cpu_line(line: &str) -> Option<CpuSample> {
+    let values = line
+        .split_whitespace()
+        .skip(1)
+        .filter_map(|value| value.parse::<u64>().ok())
+        .collect::<Vec<_>>();
+    if values.len() < 4 {
+        return None;
+    }
+    let idle =
+        values.get(3).copied().unwrap_or_default() + values.get(4).copied().unwrap_or_default();
+    let total = values.iter().sum();
+    Some(CpuSample { idle, total })
+}
+
 fn cpu_percent(previous: CpuSample, current: CpuSample) -> f64 {
     let total = current.total.saturating_sub(previous.total);
     if total == 0 {
@@ -1512,6 +2012,137 @@ fn cpu_percent(previous: CpuSample, current: CpuSample) -> f64 {
     }
     let idle = current.idle.saturating_sub(previous.idle);
     100.0 * (total.saturating_sub(idle)) as f64 / total as f64
+}
+
+fn per_core_cpu_percent(previous: &[CpuSample], current: &[CpuSample]) -> Vec<f64> {
+    previous
+        .iter()
+        .zip(current)
+        .map(|(previous, current)| cpu_percent(*previous, *current))
+        .collect()
+}
+
+#[cfg(target_os = "linux")]
+fn read_context_switches() -> Option<u64> {
+    let stat = fs::read_to_string("/proc/stat").ok()?;
+    stat.lines()
+        .find_map(|line| line.strip_prefix("ctxt "))
+        .and_then(|value| value.trim().parse().ok())
+}
+
+#[cfg(not(target_os = "linux"))]
+fn read_context_switches() -> Option<u64> {
+    None
+}
+
+#[cfg(target_os = "linux")]
+fn read_loadavg_1m() -> f64 {
+    fs::read_to_string("/proc/loadavg")
+        .ok()
+        .and_then(|text| text.split_whitespace().next()?.parse().ok())
+        .unwrap_or_default()
+}
+
+#[cfg(not(target_os = "linux"))]
+fn read_loadavg_1m() -> f64 {
+    0.0
+}
+
+#[cfg(target_os = "linux")]
+fn sample_run_processes(out_dir: &Path, elapsed_ms: u128) -> Vec<ProcessSample> {
+    let prefix = out_dir.join("runs").to_string_lossy().to_string();
+    let Ok(entries) = fs::read_dir("/proc") else {
+        return Vec::new();
+    };
+    let mut samples = Vec::new();
+    for entry in entries.flatten() {
+        let Some(pid) = entry
+            .file_name()
+            .to_str()
+            .and_then(|name| name.parse().ok())
+        else {
+            continue;
+        };
+        let proc_dir = entry.path();
+        let Ok(environ) = fs::read(proc_dir.join("environ")) else {
+            continue;
+        };
+        let environ = String::from_utf8_lossy(&environ);
+        let Some(context_path) = environ
+            .split('\0')
+            .find_map(|entry| entry.strip_prefix("ELODIN_MONTE_CARLO_CONTEXT="))
+        else {
+            continue;
+        };
+        if !context_path.starts_with(&prefix) {
+            continue;
+        }
+        let run_id = context_path
+            .split("/runs/")
+            .nth(1)
+            .and_then(|rest| rest.split('/').next())
+            .unwrap_or("unknown")
+            .to_string();
+        let (utime_ticks, stime_ticks) = read_proc_stat(&proc_dir);
+        let rss_kib = read_proc_rss_kib(&proc_dir);
+        let cmd = fs::read(proc_dir.join("cmdline"))
+            .map(|bytes| {
+                String::from_utf8_lossy(&bytes)
+                    .replace('\0', " ")
+                    .trim()
+                    .chars()
+                    .take(240)
+                    .collect::<String>()
+            })
+            .unwrap_or_default();
+        samples.push(ProcessSample {
+            elapsed_ms,
+            run_id,
+            pid,
+            rss_kib,
+            utime_ticks,
+            stime_ticks,
+            cmd,
+        });
+    }
+    samples
+}
+
+#[cfg(not(target_os = "linux"))]
+fn sample_run_processes(_out_dir: &Path, _elapsed_ms: u128) -> Vec<ProcessSample> {
+    Vec::new()
+}
+
+#[cfg(target_os = "linux")]
+fn read_proc_stat(proc_dir: &Path) -> (u64, u64) {
+    let Ok(stat) = fs::read_to_string(proc_dir.join("stat")) else {
+        return (0, 0);
+    };
+    let Some((_, rest)) = stat.rsplit_once(") ") else {
+        return (0, 0);
+    };
+    let fields = rest.split_whitespace().collect::<Vec<_>>();
+    let utime = fields
+        .get(11)
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(0);
+    let stime = fields
+        .get(12)
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(0);
+    (utime, stime)
+}
+
+#[cfg(target_os = "linux")]
+fn read_proc_rss_kib(proc_dir: &Path) -> u64 {
+    let Ok(status) = fs::read_to_string(proc_dir.join("status")) else {
+        return 0;
+    };
+    status
+        .lines()
+        .find(|line| line.starts_with("VmRSS:"))
+        .map(parse_kib)
+        .unwrap_or_default()
 }
 
 #[cfg(target_os = "linux")]

@@ -19,6 +19,8 @@ COMMAND_PORT_ENV = "ELODIN_MONTE_CARLO_COMMAND_PORT"
 DEFAULT_STATE_PORT = 9003
 DEFAULT_COMMAND_PORT = 9002
 HOLD_AFTER_RUN_ENV = "ELODIN_MONTE_CARLO_HOLD_AFTER_RUN_SEC"
+CONTROLLER_ENV = "ELODIN_MONTE_CARLO_CONTROLLER"
+FAST_EXIT_ENV = "ELODIN_MONTE_CARLO_FAST_EXIT"
 
 
 class SitlBridge:
@@ -52,24 +54,29 @@ class SitlBridge:
 params = el.monte_carlo.params(PARAMS)
 world, system = build(params)
 bridge: SitlBridge | None = None
+use_controller = os.environ.get(CONTROLLER_ENV, "1") != "0"
 
-controller = el.s10.PyRecipe.process(
-    name="Minimal SITL Controller",
-    cmd=sys.executable,
-    args=[str(Path(__file__).with_name("controller.py"))],
-    cwd=str(Path(__file__).parent),
-)
-world.recipe(controller)
+if use_controller:
+    controller = el.s10.PyRecipe.process(
+        name="Minimal SITL Controller",
+        cmd=sys.executable,
+        args=[str(Path(__file__).with_name("controller.py"))],
+        cwd=str(Path(__file__).parent),
+    )
+    world.recipe(controller)
 
 
 def post_step(tick: int, ctx: el.StepContext) -> None:
     global bridge
-    if bridge is None:
+    if use_controller and bridge is None:
         bridge = SitlBridge()
     position = float(ctx.read_component("vehicle.position")[0])
     velocity = float(ctx.read_component("vehicle.velocity")[0])
     target = float(ctx.read_component("vehicle.target")[0])
-    command = bridge.step(position, velocity, target, tick)
+    if bridge is not None:
+        command = bridge.step(position, velocity, target, tick)
+    else:
+        command = max(min((target - position) * 1.2 - velocity * 0.35, 20.0), -20.0)
     ctx.write_component("vehicle.command", np.array([command], dtype=np.float64))
     if tick >= DEFAULT_MAX_TICKS - 1:
         el.monte_carlo.result(
@@ -91,3 +98,8 @@ world.run(
 hold_after_run = float(os.environ.get(HOLD_AFTER_RUN_ENV, "0"))
 if hold_after_run > 0:
     time.sleep(hold_after_run)
+
+if os.environ.get(FAST_EXIT_ENV, "1") != "0":
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os._exit(0)

@@ -1,4 +1,3 @@
-workers = 15
 timeout = "90s"
 retries = 0
 continue_on_error = true
