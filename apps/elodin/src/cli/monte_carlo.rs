@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use clap::{Args as ClapArgs, Subcommand};
+use clap::{Args as ClapArgs, Subcommand, ValueEnum};
 use miette::{IntoDiagnostic, Result, miette};
 
 use super::Cli;
@@ -62,6 +62,15 @@ pub struct RunArgs {
     pub fail_fast: bool,
     #[arg(long)]
     pub dry_run: bool,
+    #[arg(long, value_enum, default_value = "auto")]
+    pub progress: ProgressMode,
+}
+
+#[derive(Clone, Copy, Debug, ValueEnum)]
+pub enum ProgressMode {
+    Auto,
+    Always,
+    Never,
 }
 
 impl Cli {
@@ -104,6 +113,7 @@ impl Args {
                 params_compat: None,
                 fail_fast: false,
                 dry_run: false,
+                progress: ProgressMode::Auto,
             })),
         }
     }
@@ -140,6 +150,11 @@ async fn run(args: RunArgs) -> Result<()> {
         params_compat: args.params_compat,
         fail_fast: args.fail_fast,
         dry_run: args.dry_run,
+        progress: match args.progress {
+            ProgressMode::Auto => monte_carlo::ProgressMode::Auto,
+            ProgressMode::Always => monte_carlo::ProgressMode::Always,
+            ProgressMode::Never => monte_carlo::ProgressMode::Never,
+        },
     })
     .await
 }

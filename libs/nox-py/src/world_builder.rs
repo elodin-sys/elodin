@@ -122,6 +122,7 @@ impl WorldBuilder {
             addr,
             optimize,
             env: HashMap::new(),
+            log_path: None,
         };
         let mut recipes: HashMap<String, ::s10::Recipe> = self
             .recipes
@@ -148,6 +149,7 @@ impl WorldBuilder {
                         )]),
                         restart_policy: ::s10::RestartPolicy::Never,
                         fail_on_error: false,
+                        log_path: None,
                     },
                     no_watch: true,
                 }),

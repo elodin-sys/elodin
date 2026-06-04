@@ -30,7 +30,12 @@ elodin monte-carlo run examples/monte-carlo/main.py \
   --out dbs/monte-carlo-demo
 ```
 
-The campaign output includes per-run databases, `results.csv`, `perf.csv`,
-`resources.csv`, `summary.json`, and `memory.json`. `summary.json` always
-includes total campaign wall time, aggregate/average per-run wall time, worker
-parallel efficiency, disk usage, and CPU/RAM resource rollups.
+The terminal shows campaign progress, success/failure counts, and a final
+campaign summary. Individual simulation stdout/stderr is written to per-run log
+files under `runs/<run_id>/logs/` instead of being interleaved in the terminal.
+
+The campaign output includes per-run databases, `sim_summary.json`, `results.csv`,
+`perf.csv`, `resources.csv`, `campaign_summary.txt`, `summary.json`, and
+`memory.json`. `summary.json` always includes total campaign wall time,
+aggregate/average per-run wall time, worker parallel efficiency, disk usage,
+CPU/RAM resource rollups, and the merged simulation phase summary.

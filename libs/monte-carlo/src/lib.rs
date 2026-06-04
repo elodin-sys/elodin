@@ -1,14 +1,16 @@
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::fs;
+use std::io::{IsTerminal, Write};
 use std::net::{IpAddr, Ipv6Addr, SocketAddr};
 #[cfg(unix)]
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use chrono::{DateTime, Utc};
+use indicatif::{ProgressBar, ProgressStyle};
 use miette::{Context, IntoDiagnostic, Result, miette};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -90,6 +92,15 @@ pub struct RunOptions {
     pub params_compat: Option<String>,
     pub fail_fast: bool,
     pub dry_run: bool,
+    pub progress: ProgressMode,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum ProgressMode {
+    #[default]
+    Auto,
+    Always,
+    Never,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -139,6 +150,7 @@ pub struct CampaignSummary {
     pub parallel_efficiency: f64,
     pub disk_bytes: u64,
     pub resource_summary: ResourceSummary,
+    pub sim_phase_summary: Option<SimSummaryAggregate>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -169,6 +181,50 @@ pub struct ResourceSummary {
     pub peak_campaign_disk_bytes: u64,
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SimPhaseSummary {
+    pub sum_ns: u64,
+    pub count: u64,
+    pub min_ns: u64,
+    pub max_ns: u64,
+    pub buckets: [u32; 32],
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SimRunSummary {
+    pub pre_step: SimPhaseSummary,
+    pub copy_db_to_world: SimPhaseSummary,
+    pub world_run: SimPhaseSummary,
+    pub commit: SimPhaseSummary,
+    pub wait_for_write: SimPhaseSummary,
+    pub post_step: SimPhaseSummary,
+    pub real_time_pacing: SimPhaseSummary,
+    pub total_cycle: SimPhaseSummary,
+    pub cycles: u64,
+    pub steps: u64,
+    pub simulation_rate_hz: f64,
+    pub telemetry_rate_hz: f64,
+    pub wall_ns: u64,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct SimSummaryAggregate {
+    pub runs: usize,
+    pub pre_step: SimPhaseSummary,
+    pub copy_db_to_world: SimPhaseSummary,
+    pub world_run: SimPhaseSummary,
+    pub commit: SimPhaseSummary,
+    pub wait_for_write: SimPhaseSummary,
+    pub post_step: SimPhaseSummary,
+    pub real_time_pacing: SimPhaseSummary,
+    pub total_cycle: SimPhaseSummary,
+    pub cycles: u64,
+    pub steps: u64,
+    pub simulation_rate_hz: f64,
+    pub telemetry_rate_hz: f64,
+    pub wall_ns: u64,
+}
+
 #[derive(Debug, thiserror::Error)]
 enum Error {
     #[error("campaign generated no runs")]
@@ -177,6 +233,116 @@ enum Error {
     RunFailed(String),
     #[error("unsupported params compatibility mode: {0}")]
     UnsupportedCompat(String),
+}
+
+#[derive(Clone)]
+struct CampaignReporter {
+    progress: Option<ProgressBar>,
+    log_file: Arc<Mutex<fs::File>>,
+    ok: Arc<AtomicUsize>,
+    failed: Arc<AtomicUsize>,
+}
+
+impl CampaignReporter {
+    fn new(out_dir: &Path, total_runs: usize, workers: usize, mode: ProgressMode) -> Result<Self> {
+        let log_path = out_dir.join("campaign.log");
+        let log_file = fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&log_path)
+            .into_diagnostic()
+            .with_context(|| format!("open {}", log_path.display()))?;
+        let progress_enabled = match mode {
+            ProgressMode::Always => true,
+            ProgressMode::Never => false,
+            ProgressMode::Auto => std::io::stderr().is_terminal(),
+        };
+        let progress = progress_enabled.then(|| {
+            let bar = ProgressBar::new(total_runs as u64);
+            bar.set_style(
+                ProgressStyle::with_template(
+                    "{spinner:.green} [{elapsed_precise}] {bar:40.cyan/blue} {pos}/{len} ok={msg}",
+                )
+                .unwrap_or_else(|_| ProgressStyle::default_bar())
+                .progress_chars("#>-"),
+            );
+            bar.set_message(format!("0 fail=0 workers={workers}"));
+            bar
+        });
+        let reporter = Self {
+            progress,
+            log_file: Arc::new(Mutex::new(log_file)),
+            ok: Arc::new(AtomicUsize::new(0)),
+            failed: Arc::new(AtomicUsize::new(0)),
+        };
+        reporter.line(format!(
+            "starting monte-carlo campaign: runs={total_runs} workers={workers} out_dir={}",
+            out_dir.display()
+        ));
+        Ok(reporter)
+    }
+
+    fn line(&self, line: impl AsRef<str>) {
+        let line = line.as_ref();
+        if let Some(progress) = &self.progress {
+            progress.suspend(|| eprintln!("{line}"));
+        } else {
+            eprintln!("{line}");
+        }
+        self.log_only(line);
+    }
+
+    fn log_only(&self, line: &str) {
+        if let Ok(mut file) = self.log_file.lock() {
+            let _ = writeln!(file, "{line}");
+        }
+    }
+
+    fn record(&self, metric: &RunMetric) {
+        if metric.exit_ok {
+            self.ok.fetch_add(1, Ordering::SeqCst);
+        } else {
+            self.failed.fetch_add(1, Ordering::SeqCst);
+        }
+        let ok = self.ok.load(Ordering::SeqCst);
+        let failed = self.failed.load(Ordering::SeqCst);
+        if let Some(progress) = &self.progress {
+            progress.inc(1);
+            progress.set_message(format!("{ok} fail={failed} worker={}", metric.worker_id));
+            let line = format!(
+                "[{}] {} worker={} wall_ms={} log={}",
+                metric.status,
+                metric.run_id,
+                metric.worker_id,
+                metric.wall_ms,
+                metric.run_dir.join("logs").display()
+            );
+            self.log_only(&line);
+            if !metric.exit_ok {
+                progress.suspend(|| eprintln!("{line}"));
+            }
+        } else {
+            self.line(format!(
+                "[{}] {} worker={} wall_ms={} log={}",
+                metric.status,
+                metric.run_id,
+                metric.worker_id,
+                metric.wall_ms,
+                metric.run_dir.join("logs").display()
+            ));
+        }
+    }
+
+    fn finish(&self) {
+        if let Some(progress) = &self.progress {
+            progress.finish_and_clear();
+        }
+        self.line(format!(
+            "finished monte-carlo campaign: ok={} failed={}",
+            self.ok.load(Ordering::SeqCst),
+            self.failed.load(Ordering::SeqCst)
+        ));
+    }
 }
 
 pub async fn run_campaign(mut options: RunOptions) -> Result<()> {
@@ -221,6 +387,12 @@ pub async fn run_campaign(mut options: RunOptions) -> Result<()> {
         .with_context(|| format!("create cache dir {}", cache_dir.display()))?;
     fs::copy(&options.plan_path, options.out_dir.join("plan.csv")).into_diagnostic()?;
     write_json(&options.out_dir.join("campaign.resolved.json"), &config)?;
+    let reporter = CampaignReporter::new(
+        &options.out_dir,
+        plan.len(),
+        config.workers,
+        options.progress,
+    )?;
 
     let base_recipe = plan_recipe(&options.sim_path, &options.out_dir).await?;
     let rows = Arc::new(Mutex::new(VecDeque::from(plan)));
@@ -250,6 +422,7 @@ pub async fn run_campaign(mut options: RunOptions) -> Result<()> {
         let config = config.clone();
         let out_dir = options.out_dir.clone();
         let cache_dir = cache_dir.clone();
+        let reporter = reporter.clone();
         workers.spawn(async move {
             let slot = resource_slot(worker_id, &config.resources)?;
             loop {
@@ -275,6 +448,7 @@ pub async fn run_campaign(mut options: RunOptions) -> Result<()> {
                 if failed {
                     *failure.lock().expect("failure mutex poisoned") = Some(metric.run_id.clone());
                 }
+                reporter.record(&metric);
                 metrics.lock().expect("metrics mutex poisoned").push(metric);
             }
             Ok::<(), miette::Report>(())
@@ -319,6 +493,7 @@ pub async fn run_campaign(mut options: RunOptions) -> Result<()> {
     }
 
     let failed = metrics.iter().filter(|metric| !metric.exit_ok).count();
+    let sim_phase_summary = aggregate_sim_summaries(&metrics);
     let total_run_wall_ms = metrics.iter().map(|metric| metric.wall_ms).sum::<u128>();
     let max_run_wall_ms = metrics
         .iter()
@@ -349,8 +524,16 @@ pub async fn run_campaign(mut options: RunOptions) -> Result<()> {
         },
         disk_bytes: dir_size(&options.out_dir),
         resource_summary,
+        sim_phase_summary: sim_phase_summary.clone(),
     };
     write_json(&options.out_dir.join("summary.json"), &summary)?;
+    write_campaign_summary(
+        &options.out_dir,
+        &summary,
+        sim_phase_summary.as_ref(),
+        &memory,
+    )?;
+    reporter.finish();
 
     if let Some(run_id) = failure.lock().expect("failure mutex poisoned").clone()
         && !config.continue_on_error
@@ -421,11 +604,14 @@ async fn run_one(
     let recipe = patch_recipe(
         ctx.base_recipe.clone(),
         row,
-        slot,
-        &context_path,
-        ctx.cache_dir,
-        &db_path,
-        ctx.config,
+        &PatchContext {
+            slot,
+            context_path: &context_path,
+            cache_dir: ctx.cache_dir,
+            db_path: &db_path,
+            run_dir: &run_dir,
+            config: ctx.config,
+        },
     )?;
     let token = CancelToken::new();
     let fut =
@@ -590,50 +776,49 @@ async fn plan_recipe(sim_path: &Path, out_dir: &Path) -> Result<s10::Recipe> {
         .with_context(|| format!("parse {}", plan_path.display()))
 }
 
-fn patch_recipe(
-    recipe: s10::Recipe,
-    row: &PlanRow,
-    slot: &ResourceSlot,
-    context_path: &Path,
-    cache_dir: &Path,
-    db_path: &Path,
-    config: &CampaignConfig,
-) -> Result<s10::Recipe> {
+fn patch_recipe(recipe: s10::Recipe, row: &PlanRow, ctx: &PatchContext<'_>) -> Result<s10::Recipe> {
     let mut env = HashMap::from([
         (
             CONTEXT_ENV.to_string(),
-            context_path.to_string_lossy().to_string(),
+            ctx.context_path.to_string_lossy().to_string(),
         ),
         (
             CACHE_ENV.to_string(),
-            cache_dir.to_string_lossy().to_string(),
+            ctx.cache_dir.to_string_lossy().to_string(),
         ),
         (
             "ELODIN_MONTE_CARLO_WORKER_ID".to_string(),
-            slot.worker_id.to_string(),
+            ctx.slot.worker_id.to_string(),
         ),
         (
             "ELODIN_MONTE_CARLO_DB_PORT".to_string(),
-            slot.db_port.to_string(),
+            ctx.slot.db_port.to_string(),
         ),
         (
             "ELODIN_MONTE_CARLO_STATE_PORT".to_string(),
-            slot.state_port.to_string(),
+            ctx.slot.state_port.to_string(),
         ),
         (
             "ELODIN_MONTE_CARLO_COMMAND_PORT".to_string(),
-            slot.command_port.to_string(),
+            ctx.slot.command_port.to_string(),
         ),
         (
             "ELODIN_DB_PATH".to_string(),
-            db_path.to_string_lossy().to_string(),
+            ctx.db_path.to_string_lossy().to_string(),
+        ),
+        (
+            "ELODIN_SIM_SUMMARY_JSON".to_string(),
+            ctx.run_dir
+                .join("sim_summary.json")
+                .to_string_lossy()
+                .to_string(),
         ),
     ]);
     if let Some(seed) = row.seed {
         env.insert("ELODIN_MONTE_CARLO_SEED".to_string(), seed.to_string());
     }
-    if config.params_compat.as_deref() == Some("revere-overrides-file") {
-        let overrides_path = context_path.with_file_name("revere_overrides.json");
+    if ctx.config.params_compat.as_deref() == Some("revere-overrides-file") {
+        let overrides_path = ctx.context_path.with_file_name("revere_overrides.json");
         write_json(&overrides_path, &row.params)?;
         env.insert(
             "REVERE_SIM_OVERRIDES_FILE".to_string(),
@@ -642,44 +827,81 @@ fn patch_recipe(
         if let Some(seed) = row.seed {
             env.insert("SIM_SEED".to_string(), seed.to_string());
         }
-    } else if let Some(mode) = config.params_compat.as_deref() {
+    } else if let Some(mode) = ctx.config.params_compat.as_deref() {
         return Err(Error::UnsupportedCompat(mode.to_string())).into_diagnostic();
     }
 
-    Ok(patch_recipe_env(recipe, &env, slot.db_addr))
+    Ok(patch_recipe_env(
+        recipe,
+        &env,
+        ctx.slot.db_addr,
+        ctx.run_dir,
+        "recipe",
+    ))
+}
+
+struct PatchContext<'a> {
+    slot: &'a ResourceSlot,
+    context_path: &'a Path,
+    cache_dir: &'a Path,
+    db_path: &'a Path,
+    run_dir: &'a Path,
+    config: &'a CampaignConfig,
 }
 
 fn patch_recipe_env(
     recipe: s10::Recipe,
     env: &HashMap<String, String>,
     db_addr: SocketAddr,
+    run_dir: &Path,
+    name: &str,
 ) -> s10::Recipe {
     match recipe {
         s10::Recipe::Group(mut group) => {
             group.recipes = group
                 .recipes
                 .into_iter()
-                .map(|(name, recipe)| (name, patch_recipe_env(recipe, env, db_addr)))
+                .map(|(name, recipe)| {
+                    let patched = patch_recipe_env(recipe, env, db_addr, run_dir, &name);
+                    (name, patched)
+                })
                 .collect();
             s10::Recipe::Group(group)
         }
         s10::Recipe::Process(mut process) => {
             process.process_args.env.extend(env.clone());
             process.process_args.fail_on_error = true;
+            process.process_args.log_path = Some(log_path_for(run_dir, name));
             s10::Recipe::Process(process)
         }
         s10::Recipe::Cargo(mut cargo) => {
             cargo.process_args.env.extend(env.clone());
             cargo.process_args.fail_on_error = true;
+            cargo.process_args.log_path = Some(log_path_for(run_dir, name));
             s10::Recipe::Cargo(cargo)
         }
         #[cfg(not(target_os = "windows"))]
         s10::Recipe::Sim(mut sim) => {
             sim.addr = db_addr;
             sim.env.extend(env.clone());
+            sim.log_path = Some(log_path_for(run_dir, name));
             s10::Recipe::Sim(sim)
         }
     }
+}
+
+fn log_path_for(run_dir: &Path, name: &str) -> PathBuf {
+    let sanitized = name
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
+                ch.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>();
+    run_dir.join("logs").join(format!("{sanitized}.log"))
 }
 
 fn resource_slot(worker_id: usize, resources: &ResourceConfig) -> Result<ResourceSlot> {
@@ -729,17 +951,32 @@ fn write_run_context(
 }
 
 async fn run_hook(kind: &str, hook: &Path, context: &Path) -> Result<()> {
-    let status = s10::python_command()
+    let output = s10::python_command()
         .into_diagnostic()?
         .arg("-m")
         .arg("elodin.monte_carlo.run_hook")
         .arg(hook)
         .arg(kind)
         .arg(context)
-        .status()
+        .output()
         .into_diagnostic()
         .with_context(|| format!("run {kind} hook {}", hook.display()))?;
-    if !status.success() {
+    let hook_log = context.with_file_name(format!("{kind}.log"));
+    if let Some(parent) = hook_log.parent() {
+        fs::create_dir_all(parent).into_diagnostic()?;
+    }
+    fs::write(
+        &hook_log,
+        [
+            output.stdout.as_slice(),
+            b"\n--- stderr ---\n",
+            output.stderr.as_slice(),
+        ]
+        .concat(),
+    )
+    .into_diagnostic()
+    .with_context(|| format!("write {}", hook_log.display()))?;
+    if !output.status.success() {
         return Err(miette!("{kind} hook failed: {}", hook.display()));
     }
     Ok(())
@@ -790,6 +1027,271 @@ fn write_results_csv(path: &Path, out_dir: &Path, metrics: &[RunMetric]) -> Resu
             .into_diagnostic()?;
     }
     writer.flush().into_diagnostic()
+}
+
+fn aggregate_sim_summaries(metrics: &[RunMetric]) -> Option<SimSummaryAggregate> {
+    let mut aggregate: Option<SimSummaryAggregate> = None;
+    for metric in metrics {
+        let path = metric.run_dir.join("sim_summary.json");
+        let Ok(text) = fs::read_to_string(&path) else {
+            continue;
+        };
+        let Ok(summary) = serde_json::from_str::<SimRunSummary>(&text) else {
+            continue;
+        };
+        match &mut aggregate {
+            Some(aggregate) => aggregate.merge(summary),
+            None => aggregate = Some(SimSummaryAggregate::from_run(summary)),
+        }
+    }
+    aggregate
+}
+
+impl SimSummaryAggregate {
+    fn from_run(summary: SimRunSummary) -> Self {
+        Self {
+            runs: 1,
+            pre_step: summary.pre_step,
+            copy_db_to_world: summary.copy_db_to_world,
+            world_run: summary.world_run,
+            commit: summary.commit,
+            wait_for_write: summary.wait_for_write,
+            post_step: summary.post_step,
+            real_time_pacing: summary.real_time_pacing,
+            total_cycle: summary.total_cycle,
+            cycles: summary.cycles,
+            steps: summary.steps,
+            simulation_rate_hz: summary.simulation_rate_hz,
+            telemetry_rate_hz: summary.telemetry_rate_hz,
+            wall_ns: summary.wall_ns,
+        }
+    }
+
+    fn merge(&mut self, summary: SimRunSummary) {
+        self.runs += 1;
+        self.pre_step.merge(summary.pre_step);
+        self.copy_db_to_world.merge(summary.copy_db_to_world);
+        self.world_run.merge(summary.world_run);
+        self.commit.merge(summary.commit);
+        self.wait_for_write.merge(summary.wait_for_write);
+        self.post_step.merge(summary.post_step);
+        self.real_time_pacing.merge(summary.real_time_pacing);
+        self.total_cycle.merge(summary.total_cycle);
+        self.cycles = self.cycles.saturating_add(summary.cycles);
+        self.steps = self.steps.saturating_add(summary.steps);
+        self.wall_ns = self.wall_ns.saturating_add(summary.wall_ns);
+    }
+}
+
+impl SimPhaseSummary {
+    fn merge(&mut self, other: SimPhaseSummary) {
+        if self.count == 0 {
+            *self = other;
+            return;
+        }
+        if other.count == 0 {
+            return;
+        }
+        self.sum_ns = self.sum_ns.saturating_add(other.sum_ns);
+        self.count = self.count.saturating_add(other.count);
+        self.min_ns = self.min_ns.min(other.min_ns);
+        self.max_ns = self.max_ns.max(other.max_ns);
+        for (slot, value) in self.buckets.iter_mut().zip(other.buckets) {
+            *slot = slot.saturating_add(value);
+        }
+    }
+
+    fn mean_ns(&self) -> u64 {
+        self.sum_ns.checked_div(self.count).unwrap_or(0)
+    }
+
+    // Mirrors `PhaseStats::percentile_ns` in `libs/nox-py/src/tick_metrics.rs`.
+    fn percentile_ns(&self, q: f64) -> u64 {
+        if self.count == 0 {
+            return 0;
+        }
+        if q <= 0.0 {
+            return self.min_ns;
+        }
+        if q >= 1.0 {
+            return self.max_ns;
+        }
+        let target = (q * self.count as f64).ceil().max(1.0) as u64;
+        let mut cum: u64 = 0;
+        for (i, &count) in self.buckets.iter().enumerate() {
+            let count = count as u64;
+            if count == 0 {
+                continue;
+            }
+            let prev = cum;
+            cum += count;
+            if cum >= target {
+                let lo = 1u64 << i;
+                let hi = if i + 1 < 64 {
+                    1u64 << (i + 1)
+                } else {
+                    u64::MAX
+                };
+                let frac = (target - prev) as f64 / count as f64;
+                let within = (lo as f64 + frac * (hi - lo) as f64) as u64;
+                return within.clamp(self.min_ns, self.max_ns);
+            }
+        }
+        self.max_ns
+    }
+}
+
+fn write_campaign_summary(
+    out_dir: &Path,
+    summary: &CampaignSummary,
+    sim_summary: Option<&SimSummaryAggregate>,
+    memory: &[CacheMappingSample],
+) -> Result<()> {
+    let mut rendered = String::new();
+    rendered.push_str("──── elodin monte-carlo campaign summary ────\n");
+    rendered.push_str(&format!(
+        "  runs:              {} ok / {} failed / {} total\n",
+        summary.passed, summary.failed, summary.total_runs
+    ));
+    rendered.push_str(&format!("  workers:           {}\n", summary.workers));
+    rendered.push_str(&format!(
+        "  wall time:         {:.3} s\n",
+        summary.wall_ms as f64 / 1000.0
+    ));
+    rendered.push_str(&format!(
+        "  avg run wall:      {:.3} s\n",
+        summary.average_run_wall_ms / 1000.0
+    ));
+    rendered.push_str(&format!(
+        "  parallel eff.:     {:.1}%\n",
+        summary.parallel_efficiency * 100.0
+    ));
+    rendered.push_str(&format!(
+        "  disk allocated:    {} bytes\n",
+        summary.disk_bytes
+    ));
+    rendered.push_str(&format!(
+        "  cpu avg/peak:      {:.1}% / {:.1}%\n",
+        summary.resource_summary.average_cpu_percent, summary.resource_summary.peak_cpu_percent
+    ));
+    if !memory.is_empty() {
+        let virtual_kib = memory.iter().map(|sample| sample.virtual_kib).sum::<u64>();
+        let rss_kib = memory.iter().map(|sample| sample.rss_kib).sum::<u64>();
+        let pss_kib = memory.iter().map(|sample| sample.pss_kib).sum::<u64>();
+        rendered.push_str(&format!(
+            "  shared constants:  mappings={} virtual={:.1} MiB rss={:.1} MiB pss={:.1} MiB\n",
+            memory.len(),
+            virtual_kib as f64 / 1024.0,
+            rss_kib as f64 / 1024.0,
+            pss_kib as f64 / 1024.0
+        ));
+    }
+    if let Some(sim_summary) = sim_summary {
+        rendered.push('\n');
+        rendered.push_str(&render_sim_summary(sim_summary));
+    }
+    rendered.push_str("────────────────────────────────────────────\n");
+    print!("{rendered}");
+    fs::write(out_dir.join("campaign_summary.txt"), rendered)
+        .into_diagnostic()
+        .with_context(|| format!("write {}", out_dir.join("campaign_summary.txt").display()))
+}
+
+fn render_sim_summary(summary: &SimSummaryAggregate) -> String {
+    let mut rendered = String::new();
+    rendered.push_str(&format!(
+        "──── elodin campaign simulation summary ({} runs) ────\n",
+        summary.runs
+    ));
+    rendered.push_str(&format!(
+        "  aggregate sim wall: {:.3} s\n",
+        summary.wall_ns as f64 / 1e9
+    ));
+    if summary.cycles == 0 {
+        rendered.push_str("  simulation cycles:  0  (no cycles executed)\n");
+        return rendered;
+    }
+    rendered.push_str(&format!(
+        "  simulation cycles:  {}    mean cycle: {}  (effective {:.0} cycles/s)\n",
+        format_commas(summary.cycles),
+        fmt_ns(summary.total_cycle.mean_ns()).trim(),
+        if summary.wall_ns > 0 {
+            summary.cycles as f64 / (summary.wall_ns as f64 / 1e9)
+        } else {
+            0.0
+        }
+    ));
+    rendered.push('\n');
+    rendered.push_str("  per-cycle phase timing (mean / p95 / max):\n");
+    rendered.push_str(&fmt_row("pre_step", &summary.pre_step));
+    rendered.push('\n');
+    rendered.push_str(&fmt_row("read (db → world)", &summary.copy_db_to_world));
+    rendered.push('\n');
+    rendered.push_str(&fmt_row("tick function", &summary.world_run));
+    rendered.push('\n');
+    rendered.push_str(&fmt_row("commit world", &summary.commit));
+    rendered.push('\n');
+    rendered.push_str(&fmt_row("wait_for_write", &summary.wait_for_write));
+    rendered.push('\n');
+    rendered.push_str(&fmt_row("post_step", &summary.post_step));
+    rendered.push('\n');
+    rendered.push_str(&fmt_row("real-time pacing", &summary.real_time_pacing));
+    rendered.push('\n');
+    rendered
+}
+
+fn fmt_row(name: &str, phase: &SimPhaseSummary) -> String {
+    format!(
+        "    {:<18} {}  {}  {}",
+        name,
+        fmt_cell(phase, -1.0),
+        fmt_cell(phase, 0.95),
+        fmt_cell(phase, 1.0)
+    )
+}
+
+fn fmt_cell(phase: &SimPhaseSummary, q: f64) -> String {
+    if phase.count == 0 {
+        "        —".to_string()
+    } else {
+        let value = if q == 1.0 {
+            phase.max_ns
+        } else if q < 0.0 {
+            phase.mean_ns()
+        } else {
+            phase.percentile_ns(q)
+        };
+        format!("{:>9}", fmt_ns(value))
+    }
+}
+
+fn fmt_ns(ns: u64) -> String {
+    if ns < 1_000 {
+        format!("{ns:>6} ns")
+    } else if ns < 1_000_000 {
+        format!("{:>6.1} µs", ns as f64 / 1e3)
+    } else if ns < 1_000_000_000 {
+        format!("{:>6.1} ms", ns as f64 / 1e6)
+    } else {
+        format!("{:>6.2} s ", ns as f64 / 1e9)
+    }
+}
+
+fn format_commas(n: u64) -> String {
+    let s = n.to_string();
+    let bytes = s.as_bytes();
+    let mut out = String::with_capacity(s.len() + s.len() / 3);
+    let first = bytes.len() % 3;
+    if first > 0 {
+        out.push_str(std::str::from_utf8(&bytes[..first]).unwrap_or_default());
+    }
+    for (i, chunk) in bytes[first..].chunks(3).enumerate() {
+        if i > 0 || first > 0 {
+            out.push(',');
+        }
+        out.push_str(std::str::from_utf8(chunk).unwrap_or_default());
+    }
+    out
 }
 
 fn write_json(path: &Path, value: &impl Serialize) -> Result<()> {
@@ -1097,4 +1599,56 @@ fn parse_duration(value: Option<&str>) -> Result<Option<Duration>> {
         other => return Err(miette!("unsupported duration unit `{other}` in `{value}`")),
     };
     Ok(Some(duration))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn phase(ns: &[u64]) -> SimPhaseSummary {
+        let mut summary = SimPhaseSummary {
+            sum_ns: 0,
+            count: 0,
+            min_ns: 0,
+            max_ns: 0,
+            buckets: [0; 32],
+        };
+        for &ns in ns {
+            summary.sum_ns += ns;
+            summary.count += 1;
+            if summary.count == 1 {
+                summary.min_ns = ns;
+                summary.max_ns = ns;
+            } else {
+                summary.min_ns = summary.min_ns.min(ns);
+                summary.max_ns = summary.max_ns.max(ns);
+            }
+            let bucket = if ns < 2 {
+                0
+            } else {
+                (63usize - ns.leading_zeros() as usize).min(31)
+            };
+            summary.buckets[bucket] += 1;
+        }
+        summary
+    }
+
+    #[test]
+    fn phase_merge_preserves_counts_min_max_and_mean() {
+        let mut a = phase(&[1_000, 2_000]);
+        a.merge(phase(&[4_000, 8_000]));
+        assert_eq!(a.count, 4);
+        assert_eq!(a.min_ns, 1_000);
+        assert_eq!(a.max_ns, 8_000);
+        assert_eq!(a.mean_ns(), 3_750);
+    }
+
+    #[test]
+    fn phase_percentile_uses_log2_bucket_bounds() {
+        let p = phase(&(1024..1124).collect::<Vec<_>>());
+        let p50 = p.percentile_ns(0.5);
+        assert!((1024..=2048).contains(&p50));
+        assert_eq!(p.percentile_ns(0.0), p.min_ns);
+        assert_eq!(p.percentile_ns(1.0), p.max_ns);
+    }
 }

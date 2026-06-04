@@ -1,10 +1,10 @@
-workers = 10
+workers = 15
 timeout = "90s"
 retries = 0
 continue_on_error = true
 
 [resources]
-port_stride = 20
+port_stride = 40
 db_port = 2240
 state_port = 9003
 command_port = 9002

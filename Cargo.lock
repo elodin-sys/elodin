@@ -8899,6 +8899,7 @@ version = "0.17.4-alpha.0"
 dependencies = [
  "chrono",
  "csv",
+ "indicatif",
  "miette 7.6.0",
  "s10",
  "serde",

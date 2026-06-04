@@ -85,6 +85,7 @@ impl Recipe {
                         RestartPolicy::Instant => s10::RestartPolicy::Instant,
                     },
                     fail_on_error: false,
+                    log_path: None,
                 },
                 destination: s10::Destination::Local,
             })),
@@ -107,6 +108,7 @@ impl Recipe {
                         RestartPolicy::Instant => s10::RestartPolicy::Instant,
                     },
                     fail_on_error: false,
+                    log_path: None,
                 },
                 no_watch: *no_watch,
             })),
@@ -128,6 +130,7 @@ impl Recipe {
                 addr: addr.parse()?,
                 optimize: *optimize,
                 env: env.clone(),
+                log_path: None,
             })),
         }
     }
