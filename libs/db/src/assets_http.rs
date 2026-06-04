@@ -48,10 +48,75 @@ pub fn assets_http_base_url(tcp: SocketAddr) -> String {
 pub enum SyncAssetsError {
     #[error("failed to parse schematic KDL")]
     Parse(#[source] impeller2_kdl::KdlSchematicError),
-    #[error("HTTP request failed")]
-    Http(#[from] reqwest::Error),
     #[error("IO error")]
     Io(#[from] io::Error),
+}
+
+const ASSET_FETCH_ATTEMPTS: usize = 8;
+const ASSET_FETCH_RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(100);
+const ASSET_FETCH_CONNECT_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(200);
+const ASSET_FETCH_REQUEST_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(500);
+
+fn sync_http_client() -> Result<reqwest::Client, reqwest::Error> {
+    reqwest::Client::builder()
+        .connect_timeout(ASSET_FETCH_CONNECT_TIMEOUT)
+        .timeout(ASSET_FETCH_REQUEST_TIMEOUT)
+        .build()
+}
+
+fn fetch_error_retryable(err: &reqwest::Error) -> bool {
+    err.is_connect() || err.is_timeout()
+}
+
+async fn fetch_source_asset(client: &reqwest::Client, url: &str, asset: &str) -> Option<Vec<u8>> {
+    for attempt in 0..ASSET_FETCH_ATTEMPTS {
+        match client.get(url).send().await {
+            Ok(response) => {
+                if response.status() == reqwest::StatusCode::NOT_FOUND {
+                    tracing::warn!(asset = %asset, %url, "schematic asset missing on source");
+                    return None;
+                }
+                if !response.status().is_success() {
+                    tracing::warn!(
+                        asset = %asset,
+                        status = %response.status(),
+                        %url,
+                        "failed to fetch schematic asset from source"
+                    );
+                    return None;
+                }
+                match response.bytes().await {
+                    Ok(bytes) => return Some(bytes.to_vec()),
+                    Err(err) => {
+                        tracing::warn!(
+                            asset = %asset,
+                            %url,
+                            attempt,
+                            error = %err,
+                            "failed to read schematic asset response from source"
+                        );
+                    }
+                }
+            }
+            Err(err) => {
+                tracing::warn!(
+                    asset = %asset,
+                    %url,
+                    attempt,
+                    error = %err,
+                    retryable = fetch_error_retryable(&err),
+                    "failed to fetch schematic asset from source"
+                );
+                if !fetch_error_retryable(&err) {
+                    return None;
+                }
+            }
+        }
+        if attempt + 1 < ASSET_FETCH_ATTEMPTS {
+            tokio::time::sleep(ASSET_FETCH_RETRY_DELAY).await;
+        }
+    }
+    None
 }
 
 /// Copies `db:` GLB assets referenced in schematic KDL from a source elodin-db assets server.
@@ -70,25 +135,13 @@ pub async fn sync_schematic_assets_from_source(
     let base = assets_http_base_url(source_tcp);
     let assets_dir = assets_dir(db_path);
     std::fs::create_dir_all(&assets_dir)?;
-    let client = reqwest::Client::new();
+    let client = sync_http_client().map_err(io::Error::other)?;
 
     for name in names {
         let url = format!("{base}/{name}");
-        let response = client.get(&url).send().await?;
-        if response.status() == reqwest::StatusCode::NOT_FOUND {
-            tracing::warn!(asset = %name, %url, "schematic asset missing on source");
+        let Some(bytes) = fetch_source_asset(&client, &url, &name).await else {
             continue;
-        }
-        if !response.status().is_success() {
-            tracing::warn!(
-                asset = %name,
-                status = %response.status(),
-                %url,
-                "failed to fetch schematic asset from source"
-            );
-            continue;
-        }
-        let bytes = response.bytes().await?;
+        };
         if let Err(err) = write_asset_file(&assets_dir, &name, &bytes) {
             tracing::warn!(
                 asset = %name,
@@ -402,6 +455,64 @@ object_3d "rocket.world_pos" {
         sync_schematic_assets_from_source(tcp, &follower_db, kdl)
             .await
             .unwrap();
+
+        assert_eq!(
+            std::fs::read(assets_dir(&follower_db).join("models/rocket.glb")).unwrap(),
+            b"from-source".to_vec()
+        );
+    }
+
+    #[tokio::test]
+    async fn sync_returns_ok_when_assets_server_unreachable() {
+        let dir = tempdir().unwrap();
+        let tcp: SocketAddr = "127.0.0.1:49152".parse().unwrap();
+
+        let kdl = r#"
+object_3d "rocket.world_pos" {
+    glb path="db:rocket.glb"
+}
+"#;
+        sync_schematic_assets_from_source(tcp, dir.path(), kdl)
+            .await
+            .unwrap();
+        assert!(!assets_dir(dir.path()).join("rocket.glb").exists());
+    }
+
+    #[tokio::test]
+    async fn sync_waits_for_late_assets_server() {
+        let dir = tempdir().unwrap();
+        let source_assets = dir.path().join("source_assets");
+        std::fs::create_dir_all(source_assets.join("models")).unwrap();
+        std::fs::write(source_assets.join("models/rocket.glb"), b"from-source").unwrap();
+
+        let state = Arc::new(AssetsState {
+            assets_dir: source_assets.clone(),
+        });
+        let app = Router::new()
+            .route("/{*path}", get(get_asset))
+            .with_state(state);
+
+        let reserved = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let assets_addr = reserved.local_addr().unwrap();
+        let tcp = SocketAddr::new(assets_addr.ip(), assets_addr.port().saturating_sub(1));
+        drop(reserved);
+
+        let server = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(250)).await;
+            let listener = tokio::net::TcpListener::bind(assets_addr).await.unwrap();
+            axum::serve(listener, app).await.unwrap();
+        });
+
+        let follower_db = dir.path().join("follower_db");
+        let kdl = r#"
+object_3d "rocket.world_pos" {
+    glb path="db:models/rocket.glb"
+}
+"#;
+        sync_schematic_assets_from_source(tcp, &follower_db, kdl)
+            .await
+            .unwrap();
+        server.abort();
 
         assert_eq!(
             std::fs::read(assets_dir(&follower_db).join("models/rocket.glb")).unwrap(),
