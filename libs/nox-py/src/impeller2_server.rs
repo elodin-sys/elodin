@@ -533,7 +533,11 @@ mod asset_tests {
             panic!("expected glb");
         };
         assert_eq!(path, "missing.glb");
-        assert!(!elodin_db::assets_http::assets_dir(&db.path).join("missing.glb").exists());
+        assert!(
+            !elodin_db::assets_http::assets_dir(&db.path)
+                .join("missing.glb")
+                .exists()
+        );
     }
 
     #[test]
@@ -572,7 +576,10 @@ mod asset_tests {
                 path.clone()
             })
             .collect();
-        assert_eq!(paths, vec!["first.glb".to_string(), "missing.glb".to_string()]);
+        assert_eq!(
+            paths,
+            vec!["first.glb".to_string(), "missing.glb".to_string()]
+        );
     }
 
     #[test]
