@@ -485,3 +485,27 @@ class PyFnSystem:
         name: str,
     ): ...
     def system(self) -> System: ...
+
+class MonteCarloParam:
+    def __init__(
+        self,
+        type_: Any,
+        default: Any = None,
+        min: Any = None,
+        max: Any = None,
+    ): ...
+
+class MonteCarloParamsSpec:
+    def to_json(self) -> str: ...
+
+class MonteCarloParams:
+    run_id: str | None
+    seed: int | None
+    db_path: str | None
+    db_addr: str | None
+    cache_dir: str | None
+    run_dir: str | None
+    def get(self, key: str, default: Any = None) -> Any: ...
+    def __getitem__(self, key: str) -> Any: ...
+    def as_overrides_dict(self) -> dict[str, Any]: ...
+    def slots(self) -> dict[str, Any]: ...

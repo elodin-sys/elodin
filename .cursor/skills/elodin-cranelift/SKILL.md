@@ -66,6 +66,9 @@ Large `stablehlo.constant dense<"0x...">` blobs over 1 MB are transparently inte
 - Lowering: `src/lower.rs` registers each mapping with `JITBuilder::symbol` and lowers it through `declare_data(Linkage::Import)`, so constants are not copied into the JIT arena.
 - Lifetime: `CompiledModule` must retain the `Arc<CachedConst>` handles for every imported constant. The JIT symbol stores raw pointers, so dropping the parsed IR module before live execution would otherwise leave dangling mmap pointers.
 - Concurrent publishing: cache writes must never replace an already-published file. Use a temp file plus no-clobber publish so simultaneous first writers converge on one inode; otherwise one process can map a now-deleted inode and lose page-cache sharing.
+- Campaigns: `elodin monte-carlo run ...` pins one campaign `ELODIN_CACHE_DIR`
+  across all workers and writes `memory.json`, so shared-constant PSS evidence
+  is collected without a bespoke runner.
 
 Relevant tests:
 

@@ -2,6 +2,7 @@ use std::iter;
 use std::process::Stdio;
 #[allow(unused_imports)]
 use std::{
+    collections::HashMap,
     net::{Ipv4Addr, SocketAddr},
     path::PathBuf,
 };
@@ -26,6 +27,8 @@ pub struct SimRecipe {
     pub addr: SocketAddr,
     #[serde(default)]
     pub optimize: bool,
+    #[serde(default)]
+    pub env: HashMap<String, String>,
 }
 
 fn default_addr() -> SocketAddr {
@@ -117,14 +120,19 @@ impl SimRecipe {
         cmd.stdout(Stdio::piped());
         cmd.stderr(Stdio::piped());
         cmd.env("TRACY_PORT", "8089");
+        cmd.envs(self.env.iter());
         let port = crate::liveness::serve_tokio().await?;
-        let mut child = cmd
+        let child = cmd
             .arg(&self.path)
             .arg("run")
+            .arg(self.addr.to_string())
             .arg("--no-s10")
             .arg("--liveness-port")
-            .arg(port.to_string())
-            .spawn()?;
+            .arg(port.to_string());
+        if self.optimize {
+            child.arg("--optimize");
+        }
+        let mut child = child.spawn()?;
         let child_pid = child.id().map(|pid| nix::unistd::Pid::from_raw(pid as i32));
 
         if let Some(stdout) = child.stdout.take() {

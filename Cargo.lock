@@ -5234,6 +5234,7 @@ dependencies = [
  "impeller2-bevy",
  "machine-uid",
  "miette 7.6.0",
+ "monte-carlo",
  "opener 0.7.2",
  "postcard",
  "reqwest",
@@ -8890,6 +8891,22 @@ dependencies = [
  "lua-src",
  "luajit-src",
  "pkg-config",
+]
+
+[[package]]
+name = "monte-carlo"
+version = "0.17.4-alpha.0"
+dependencies = [
+ "chrono",
+ "csv",
+ "miette 7.6.0",
+ "s10",
+ "serde",
+ "serde_json",
+ "stellarator",
+ "thiserror 2.0.18",
+ "tokio",
+ "toml 0.8.23",
 ]
 
 [[package]]

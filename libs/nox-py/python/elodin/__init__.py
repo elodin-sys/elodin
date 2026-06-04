@@ -37,6 +37,7 @@ from typing_extensions import TypeVarTuple, Unpack
 import elodin.jaxsim
 
 from .elodin import *
+from . import monte_carlo as monte_carlo
 
 __doc__ = elodin.__doc__
 

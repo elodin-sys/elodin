@@ -95,6 +95,7 @@ pub enum Args {
         #[arg(default_value = "[::]:2240")]
         addr: SocketAddr,
     },
+    Params,
     Components,
     #[clap(hide = true)]
     Bench {
@@ -120,6 +121,7 @@ impl WorldBuilder {
             path,
             addr,
             optimize,
+            env: HashMap::new(),
         };
         let mut recipes: HashMap<String, ::s10::Recipe> = self
             .recipes
@@ -145,6 +147,7 @@ impl WorldBuilder {
                             "8088".to_string(),
                         )]),
                         restart_policy: ::s10::RestartPolicy::Never,
+                        fail_on_error: false,
                     },
                     no_watch: true,
                 }),
@@ -796,6 +799,10 @@ impl WorldBuilder {
                     .map_err(|err| PyValueError::new_err(err.to_string()))?;
                 let plan_path = out_dir.join("s10.toml");
                 std::fs::write(&plan_path, toml)?;
+                Ok(None)
+            }
+            Args::Params => {
+                println!("{}", crate::monte_carlo::spec_json()?);
                 Ok(None)
             }
             Args::Bench {

@@ -89,11 +89,17 @@ impl GroupRecipe {
             })
             .collect::<Result<_, Error>>()?;
 
-        // Wait for ALL recipes to complete, not just one
-        while let Some(res) = recipes.join_next().await {
-            res.unwrap()?;
+        let mut result = Ok(());
+        if let Some(res) = recipes.join_next().await {
+            result = res.unwrap();
+            cancel_token.cancel();
         }
-        Ok(())
+        while let Some(res) = recipes.join_next().await {
+            if result.is_ok() {
+                result = res.unwrap();
+            }
+        }
+        result
     }
 
     async fn watch(self, release: bool, cancel_token: CancelToken) -> Result<(), Error> {
@@ -106,11 +112,17 @@ impl GroupRecipe {
             })
             .collect::<Result<_, Error>>()?;
 
-        // Wait for ALL recipes to complete, not just one
-        while let Some(res) = recipes.join_next().await {
-            res.unwrap()?;
+        let mut result = Ok(());
+        if let Some(res) = recipes.join_next().await {
+            result = res.unwrap();
+            cancel_token.cancel();
         }
-        Ok(())
+        while let Some(res) = recipes.join_next().await {
+            if result.is_ok() {
+                result = res.unwrap();
+            }
+        }
+        result
     }
 }
 
@@ -165,6 +177,8 @@ pub struct ProcessArgs {
     pub env: HashMap<String, String>,
     #[serde(default)]
     pub restart_policy: RestartPolicy,
+    #[serde(default)]
+    pub fail_on_error: bool,
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Default, Clone)]
@@ -252,6 +266,12 @@ impl ProcessArgs {
                     }
                     match self.restart_policy {
                         RestartPolicy::Never => {
+                            if self.fail_on_error && !status.success() {
+                                return Err(ProcessError::Exited {
+                                    recipe: name,
+                                    status,
+                                });
+                            }
                             return Ok(())
                         }
                         RestartPolicy::Instant => {
@@ -286,6 +306,11 @@ pub enum ProcessError {
     ProcessMissingStdout,
     #[error("process missing stderr")]
     ProcessMissingStderr,
+    #[error("process `{recipe}` exited unsuccessfully with status {status}")]
+    Exited {
+        recipe: String,
+        status: std::process::ExitStatus,
+    },
 }
 
 async fn print_logs(
