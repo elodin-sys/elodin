@@ -261,6 +261,14 @@ fn read_local_asset_file(
     }))
 }
 
+fn rollback_stored_assets(assets_dir: &Path, names: &[String]) {
+    for name in names {
+        if let Ok(rel) = elodin_db::assets_http::sanitize_asset_path(name) {
+            let _ = std::fs::remove_file(assets_dir.join(rel));
+        }
+    }
+}
+
 fn persist_schematic_assets(
     db: &DB,
     schematic: &mut Schematic,
@@ -269,6 +277,7 @@ fn persist_schematic_assets(
     let assets_dir = elodin_db::assets_http::assets_dir(&db.path);
     let local_paths = impeller2_kdl::collect_local_glb_paths(schematic);
 
+    let mut staged = Vec::new();
     for local_path in &local_paths {
         let Some(name) = impeller2_kdl::local_glb_asset_name(local_path) else {
             continue;
@@ -281,15 +290,22 @@ fn persist_schematic_assets(
             );
             elodin_db::Error::Io(err)
         })?;
-        elodin_db::assets_http::write_asset_file(&assets_dir, &name, &data).map_err(|err| {
+        staged.push((name, data));
+    }
+
+    let mut written = Vec::new();
+    for (name, data) in staged {
+        if let Err(err) = elodin_db::assets_http::write_asset_file(&assets_dir, &name, &data) {
             tracing::warn!(
                 ?err,
                 asset = %name,
                 "failed to write asset into database assets folder"
             );
-            elodin_db::Error::Io(err)
-        })?;
+            rollback_stored_assets(&assets_dir, &written);
+            return Err(elodin_db::Error::Io(err));
+        }
         tracing::info!(asset = %name, "stored schematic asset in database");
+        written.push(name);
     }
 
     impeller2_kdl::rewrite_glb_paths(schematic, |path| {
@@ -510,6 +526,53 @@ mod asset_tests {
         )
         .unwrap_err();
         assert!(matches!(err, elodin_db::Error::Io(_)));
+        let SchematicElem::Object3d(obj) = &schematic.elems[0] else {
+            panic!("expected object_3d");
+        };
+        let Object3DMesh::Glb { path, .. } = &obj.mesh else {
+            panic!("expected glb");
+        };
+        assert_eq!(path, "missing.glb");
+        assert!(!elodin_db::assets_http::assets_dir(&db.path).join("missing.glb").exists());
+    }
+
+    #[test]
+    fn persist_rolls_back_assets_when_later_local_file_missing() {
+        let dir = tempdir().unwrap();
+        let db = DB::create(dir.path().join("db")).unwrap();
+        std::fs::write(dir.path().join("first.glb"), b"first").unwrap();
+
+        let mut schematic = Schematic {
+            elems: vec![glb_object("first.glb"), glb_object("missing.glb")],
+            ..Default::default()
+        };
+
+        let err = persist_schematic_assets(
+            &db,
+            &mut schematic,
+            Some(dir.path().join("schematic.kdl").as_path()),
+        )
+        .unwrap_err();
+        assert!(matches!(err, elodin_db::Error::Io(_)));
+
+        let assets_dir = elodin_db::assets_http::assets_dir(&db.path);
+        assert!(!assets_dir.join("first.glb").exists());
+        assert!(!assets_dir.join("missing.glb").exists());
+
+        let paths: Vec<_> = schematic
+            .elems
+            .iter()
+            .map(|elem| {
+                let SchematicElem::Object3d(obj) = elem else {
+                    panic!("expected object_3d");
+                };
+                let Object3DMesh::Glb { path, .. } = &obj.mesh else {
+                    panic!("expected glb");
+                };
+                path.clone()
+            })
+            .collect();
+        assert_eq!(paths, vec!["first.glb".to_string(), "missing.glb".to_string()]);
     }
 
     #[test]
