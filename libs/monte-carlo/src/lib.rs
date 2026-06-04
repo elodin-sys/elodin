@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::fs;
 use std::io::{IsTerminal, Write};
 use std::net::{IpAddr, Ipv6Addr, SocketAddr};
@@ -15,6 +15,7 @@ use miette::{Context, IntoDiagnostic, Result, miette};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use stellarator::util::CancelToken;
+use sysinfo::{Pid, ProcessesToUpdate, Signal, System};
 use tokio::task::JoinSet;
 
 pub const CONTEXT_ENV: &str = "ELODIN_MONTE_CARLO_CONTEXT";
@@ -94,6 +95,7 @@ pub struct RunOptions {
     pub dry_run: bool,
     pub progress: ProgressMode,
     pub memory_probe: bool,
+    pub keep_existing: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -425,6 +427,128 @@ impl CampaignReporter {
     }
 }
 
+fn reap_existing_elodin(reporter: &CampaignReporter) {
+    let current_pid = Pid::from_u32(std::process::id());
+    let mut system = System::new();
+    system.refresh_processes(ProcessesToUpdate::All, true);
+    let protected_pids = current_process_ancestry(&system, current_pid);
+    let current_start_time = system
+        .process(current_pid)
+        .map(|process| process.start_time())
+        .unwrap_or_default();
+    let targets = system
+        .processes()
+        .iter()
+        .filter_map(|(pid, process)| {
+            if protected_pids.contains(pid)
+                || process_cmd_contains(process, "monte-carlo")
+                || (process.start_time() >= current_start_time
+                    && has_protected_ancestor(&system, *pid, &protected_pids))
+            {
+                return None;
+            }
+            let name = elodin_process_name(process)?;
+            matches!(name.as_str(), "elodin" | "elodin-db").then_some((*pid, name))
+        })
+        .collect::<Vec<_>>();
+
+    if targets.is_empty() {
+        return;
+    }
+
+    reporter.line(format!(
+        "reaping {} existing elodin process(es) before monte-carlo campaign",
+        targets.len()
+    ));
+    reporter.log_only(&format!(
+        "protected current process ancestry: {:?}",
+        protected_pids
+            .iter()
+            .map(ToString::to_string)
+            .collect::<Vec<_>>()
+    ));
+
+    for (pid, name) in &targets {
+        reporter.log_only(&format!("reaping existing {name} process {pid}"));
+        match system
+            .process(*pid)
+            .and_then(|process| process.kill_with(Signal::Term))
+        {
+            Some(true) => reporter.log_only(&format!("reaped {pid} {name} with SIGTERM")),
+            Some(false) | None => reporter.log_only(&format!(
+                "warning: failed to send SIGTERM to existing {name} process {pid}"
+            )),
+        }
+    }
+
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while Instant::now() < deadline {
+        system.refresh_processes(ProcessesToUpdate::All, true);
+        if targets
+            .iter()
+            .all(|(pid, _)| system.process(*pid).is_none())
+        {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+
+    system.refresh_processes(ProcessesToUpdate::All, true);
+    for (pid, name) in &targets {
+        if let Some(process) = system.process(*pid) {
+            if process.kill() {
+                reporter.log_only(&format!("force-killed lingering {name} process {pid}"));
+            } else {
+                reporter.log_only(&format!(
+                    "warning: failed to force-kill lingering {name} process {pid}"
+                ));
+            }
+        }
+    }
+}
+
+fn current_process_ancestry(system: &System, current_pid: Pid) -> HashSet<Pid> {
+    let mut protected = HashSet::from([current_pid]);
+    let mut pid = current_pid;
+    while let Some(parent) = system.process(pid).and_then(|process| process.parent()) {
+        if !protected.insert(parent) {
+            break;
+        }
+        pid = parent;
+    }
+    protected
+}
+
+fn has_protected_ancestor(system: &System, mut pid: Pid, protected: &HashSet<Pid>) -> bool {
+    loop {
+        if protected.contains(&pid) {
+            return true;
+        }
+        let Some(parent) = system.process(pid).and_then(|process| process.parent()) else {
+            return false;
+        };
+        if parent == pid {
+            return false;
+        }
+        pid = parent;
+    }
+}
+
+fn process_cmd_contains(process: &sysinfo::Process, needle: &str) -> bool {
+    process
+        .cmd()
+        .iter()
+        .any(|arg| arg.to_string_lossy() == needle)
+}
+
+fn elodin_process_name(process: &sysinfo::Process) -> Option<String> {
+    process
+        .exe()
+        .and_then(|path| path.file_name())
+        .map(|name| name.to_string_lossy().into_owned())
+        .or_else(|| Some(process.name().to_string_lossy().into_owned()))
+}
+
 pub async fn run_campaign(mut options: RunOptions) -> Result<()> {
     let started_at = Utc::now();
     let wall_start = Instant::now();
@@ -470,6 +594,9 @@ pub async fn run_campaign(mut options: RunOptions) -> Result<()> {
     fs::copy(&options.plan_path, options.out_dir.join("plan.csv")).into_diagnostic()?;
     write_json(&options.out_dir.join("campaign.resolved.json"), &config)?;
     let reporter = CampaignReporter::new(&options.out_dir, plan.len(), workers, options.progress)?;
+    if !options.keep_existing {
+        reap_existing_elodin(&reporter);
+    }
 
     let base_recipe = plan_recipe(&options.sim_path, &options.out_dir).await?;
     let rows = Arc::new(Mutex::new(VecDeque::from(plan)));

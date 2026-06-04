@@ -6,7 +6,6 @@ import json
 import os
 import socket
 import sys
-import time
 from pathlib import Path
 
 import elodin as el
@@ -18,9 +17,7 @@ STATE_PORT_ENV = "ELODIN_MONTE_CARLO_STATE_PORT"
 COMMAND_PORT_ENV = "ELODIN_MONTE_CARLO_COMMAND_PORT"
 DEFAULT_STATE_PORT = 9003
 DEFAULT_COMMAND_PORT = 9002
-HOLD_AFTER_RUN_ENV = "ELODIN_MONTE_CARLO_HOLD_AFTER_RUN_SEC"
 CONTROLLER_ENV = "ELODIN_MONTE_CARLO_CONTROLLER"
-FAST_EXIT_ENV = "ELODIN_MONTE_CARLO_FAST_EXIT"
 
 
 class SitlBridge:
@@ -94,12 +91,3 @@ world.run(
     post_step=post_step,
     interactive=False,
 )
-
-hold_after_run = float(os.environ.get(HOLD_AFTER_RUN_ENV, "0"))
-if hold_after_run > 0:
-    time.sleep(hold_after_run)
-
-if os.environ.get(FAST_EXIT_ENV, "1") != "0":
-    sys.stdout.flush()
-    sys.stderr.flush()
-    os._exit(0)

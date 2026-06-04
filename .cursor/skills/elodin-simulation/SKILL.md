@@ -226,6 +226,9 @@ runner pins `ELODIN_CACHE_DIR` for all workers and auto-sizes workers/runtime
 threads from available CPUs when unset. For SITL campaigns, register external
 controllers with `world.recipe(...)`; the campaign runner injects worker-slot
 ports into every process via `ELODIN_MONTE_CARLO_*` environment variables.
+Campaign startup reaps pre-existing `elodin` and `elodin-db` processes by
+default to avoid stale editor/database sessions colliding with worker ports;
+use `--keep-existing` only when intentionally managing those processes yourself.
 Per-run stdout/stderr lands in `runs/<run_id>/logs/`, and the runner injects
 `ELODIN_SIM_SUMMARY_JSON` so each run writes a structured timing snapshot. At
 campaign end, the native runner prints and writes `campaign_summary.txt` with

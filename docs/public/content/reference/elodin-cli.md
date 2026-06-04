@@ -103,7 +103,9 @@ runner recycles those slots across arbitrarily many runs. The campaign pins a
 shared `ELODIN_CACHE_DIR` so large Cranelift constants are mapped once across
 workers. When worker or runtime-thread counts are unset, the runner auto-sizes
 them from available CPUs: workers consume the CPU budget, while the orchestrator
-uses a small I/O thread pool for process/log handling.
+uses a small I/O thread pool for process/log handling. Campaign startup reaps
+pre-existing `elodin` and `elodin-db` processes by default so stale editor or
+database sessions cannot collide with worker ports.
 
 **Usage:** `elodin monte-carlo <COMMAND>`
 
@@ -134,6 +136,8 @@ Key options:
   pool. Use `0` or omit the option for the default auto-sized pool.
 - `--memory-probe`: enable expensive shared-constant PSS sampling and
   `memory.json`/`processes.csv` output. Leave this off for scaling benchmarks.
+- `--keep-existing`: do not reap existing `elodin` / `elodin-db` processes at
+  campaign startup.
 - `--post-run <HOOK.py>` / `--post-campaign <HOOK.py>`: plain-Python lifecycle hooks.
 - `--params-compat revere-overrides-file`: emit `REVERE_SIM_OVERRIDES_FILE` and `SIM_SEED` for legacy simulations.
 - `--progress <auto|always|never>`: control the live progress bar. `auto` shows

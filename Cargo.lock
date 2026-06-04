@@ -8905,6 +8905,7 @@ dependencies = [
  "serde",
  "serde_json",
  "stellarator",
+ "sysinfo 0.34.2",
  "thiserror 2.0.18",
  "tokio",
  "toml 0.8.23",

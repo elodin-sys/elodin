@@ -34,6 +34,10 @@ elodin monte-carlo run examples/monte-carlo/main.py \
 The terminal shows campaign progress, success/failure counts, and a final
 campaign summary. Individual simulation stdout/stderr is written to per-run log
 files under `runs/<run_id>/logs/` instead of being interleaved in the terminal.
+At startup, `elodin monte-carlo run` reaps pre-existing `elodin` and
+`elodin-db` processes so stale editor/database sessions cannot occupy campaign
+ports. Pass `--keep-existing` only if you intentionally want to manage those
+processes yourself.
 
 The campaign output includes per-run databases, `sim_summary.json`, `results.csv`,
 `perf.csv`, `resources.csv`, `campaign_summary.txt`, and `summary.json`.
