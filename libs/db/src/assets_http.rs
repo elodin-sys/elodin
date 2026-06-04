@@ -141,9 +141,6 @@ async fn get_asset(
     AxumPath(path): AxumPath<String>,
     State(state): State<Arc<AssetsState>>,
 ) -> Result<impl IntoResponse, StatusCode> {
-    if path.contains("..") {
-        return Err(StatusCode::BAD_REQUEST);
-    }
     let rel = sanitize_asset_path(&path).map_err(|_| StatusCode::BAD_REQUEST)?;
     let full = state.assets_dir.join(rel);
     match tokio::task::spawn_blocking(move || std::fs::read(full)).await {
@@ -159,9 +156,6 @@ async fn put_asset(
     State(state): State<Arc<AssetsState>>,
     body: Bytes,
 ) -> Result<StatusCode, StatusCode> {
-    if path.contains("..") {
-        return Err(StatusCode::BAD_REQUEST);
-    }
     write_asset_file(&state.assets_dir, &path, &body).map_err(|err| {
         if err.kind() == io::ErrorKind::InvalidInput {
             StatusCode::BAD_REQUEST
@@ -231,6 +225,10 @@ mod tests {
             sanitize_asset_path("models/rocket.glb").unwrap(),
             PathBuf::from("models/rocket.glb")
         );
+        assert_eq!(
+            sanitize_asset_path("model..v2.glb").unwrap(),
+            PathBuf::from("model..v2.glb")
+        );
         assert!(sanitize_asset_path("").is_err());
         assert!(sanitize_asset_path("../secret").is_err());
         assert!(sanitize_asset_path("foo/../../secret").is_err());
@@ -289,7 +287,7 @@ mod tests {
         tokio::time::sleep(Duration::from_millis(50)).await;
 
         let client = reqwest::Client::new();
-        let put_url = format!("http://{bound}/rocket.glb");
+        let put_url = format!("http://{bound}/model..v2.glb");
         let response = client
             .put(&put_url)
             .body(b"rocket-payload".to_vec())
@@ -298,7 +296,7 @@ mod tests {
             .unwrap();
         assert_eq!(response.status(), StatusCode::NO_CONTENT);
         assert_eq!(
-            std::fs::read(assets.join("rocket.glb")).unwrap(),
+            std::fs::read(assets.join("model..v2.glb")).unwrap(),
             b"rocket-payload".to_vec()
         );
 
