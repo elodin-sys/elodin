@@ -30,7 +30,9 @@ use bevy_infinite_grid::InfiniteGrid;
 use egui_tiles::{Tile, TileId};
 use fuzzy_matcher::{FuzzyMatcher, skim::SkimMatcherV2};
 use impeller2::types::Timestamp;
-use impeller2_bevy::{ComponentMetadataRegistry, ComponentPathRegistry, EntityMap, PacketTx};
+use impeller2_bevy::{
+    ComponentMetadataRegistry, ComponentPathRegistry, ConnectionAddr, EntityMap, PacketTx,
+};
 use impeller2_kdl::{ToKdl, env::schematic_dir_or_cwd};
 use impeller2_wkt::SkyboxConfig;
 use impeller2_wkt::{
@@ -1464,9 +1466,11 @@ pub fn create_3d_object() -> PaletteItem {
                                                   mut mesh_assets: ResMut<Assets<bevy::prelude::Mesh>>,
                                                   mut mat3_material_assets: ResMut<Assets<bevy_mat3_material::Mat3Material>>,
                                                   assets: Res<AssetServer>,
-                                                  geo_context: Res<GeoContext>
+                                                  geo_context: Res<GeoContext>,
+                                                  connection_addr: Option<Res<ConnectionAddr>>
                                                 | {
                                                 let obj = impeller2_wkt::Object3DMesh::glb(gltf_path.trim());
+                                                let connection_addr = connection_addr.as_ref().map(|addr| addr.0);
 
                                                 let _ = crate::object_3d::create_object_3d_entity(
                                                     &mut commands,
@@ -1478,7 +1482,7 @@ pub fn create_3d_object() -> PaletteItem {
                     &mut mat3_material_assets,
                     &assets,
                     &geo_context,
-                    None,
+                    connection_addr,
                 );
 
                                                 PaletteEvent::Exit
