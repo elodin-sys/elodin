@@ -1372,11 +1372,13 @@ fn create_object_3d_with_color(eql: String, expr: eql::Expr, mesh: Mesh) -> Pale
                   mut mesh_assets: ResMut<Assets<bevy::prelude::Mesh>>,
                   mut mat3_material_assets: ResMut<Assets<bevy_mat3_material::Mat3Material>>,
                   assets: Res<AssetServer>,
-                  geo_context: Res<GeoContext>| {
+                  geo_context: Res<GeoContext>,
+                  connection_addr: Option<Res<ConnectionAddr>>| {
                 let color_str = color_str.trim();
                 let (r, g, b) =
                     parse_color(color_str, &eql_ctx.0, &entity_map, component_value_maps)
                         .unwrap_or((0.8, 0.8, 0.8));
+                let connection_addr = connection_addr.as_ref().map(|addr| addr.0);
 
                 let mesh_source = impeller2_wkt::Object3DMesh::Mesh {
                     mesh: mesh.clone(),
@@ -1400,7 +1402,7 @@ fn create_object_3d_with_color(eql: String, expr: eql::Expr, mesh: Mesh) -> Pale
                     &mut mat3_material_assets,
                     &assets,
                     &geo_context,
-                    None,
+                    connection_addr,
                 );
 
                 PaletteEvent::Exit
