@@ -38,6 +38,7 @@ pub enum Recipe {
         path: PathBuf,
         addr: String,
         optimize: bool,
+        env: HashMap<String, String>,
     },
 }
 
@@ -83,6 +84,7 @@ impl Recipe {
                         RestartPolicy::Never => s10::RestartPolicy::Never,
                         RestartPolicy::Instant => s10::RestartPolicy::Instant,
                     },
+                    fail_on_error: false,
                 },
                 destination: s10::Destination::Local,
             })),
@@ -104,6 +106,7 @@ impl Recipe {
                         RestartPolicy::Never => s10::RestartPolicy::Never,
                         RestartPolicy::Instant => s10::RestartPolicy::Instant,
                     },
+                    fail_on_error: false,
                 },
                 no_watch: *no_watch,
             })),
@@ -118,11 +121,13 @@ impl Recipe {
                 path,
                 addr,
                 optimize,
+                env,
                 ..
             } => Ok(RustRecipe::Sim(SimRecipe {
                 path: path.clone(),
                 addr: addr.parse()?,
                 optimize: *optimize,
+                env: env.clone(),
             })),
         }
     }
@@ -155,6 +160,7 @@ impl PyRecipe {
             path,
             addr,
             optimize,
+            env: HashMap::new(),
         };
 
         Ok(PyRecipe { inner })

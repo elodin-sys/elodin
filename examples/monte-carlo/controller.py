@@ -1,0 +1,30 @@
+#!/usr/bin/env python3
+
+from __future__ import annotations
+
+import json
+import os
+import socket
+
+STATE_PORT = int(os.environ.get("ELODIN_MONTE_CARLO_STATE_PORT", "9003"))
+COMMAND_PORT = int(os.environ.get("ELODIN_MONTE_CARLO_COMMAND_PORT", "9002"))
+
+
+def main() -> None:
+    recv_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    recv_sock.bind(("127.0.0.1", STATE_PORT))
+    send_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    while True:
+        raw, _ = recv_sock.recvfrom(1024)
+        state = json.loads(raw.decode())
+        error = float(state["target"]) - float(state["position"])
+        velocity = float(state["velocity"])
+        command = max(min(error * 1.2 - velocity * 0.35, 20.0), -20.0)
+        send_sock.sendto(
+            json.dumps({"command": command}).encode(),
+            ("127.0.0.1", COMMAND_PORT),
+        )
+
+
+if __name__ == "__main__":
+    main()

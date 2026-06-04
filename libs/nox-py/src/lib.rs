@@ -21,6 +21,7 @@ pub mod impeller2_server;
 pub mod integrator;
 pub mod jax_exec;
 pub mod linalg;
+pub mod monte_carlo;
 pub mod profile;
 pub mod query;
 pub mod s10;
@@ -169,6 +170,7 @@ pub fn elodin(m: &Bound<'_, PyModule>) -> PyResult<()> {
         concat!(env!("CARGO_PKG_VERSION"), "+", env!("GIT_HASH")),
     )?;
     s10::register(m)?;
+    monte_carlo::register(m)?;
     env_logger::init();
     // Safety: called during single-threaded module init before any threads are spawned
     unsafe { std::env::set_var("JAX_ENABLE_X64", "1") };

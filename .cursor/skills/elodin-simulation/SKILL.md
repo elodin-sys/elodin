@@ -210,13 +210,23 @@ def aero_force(v: el.WorldVel, f: el.Force) -> el.Force:
 
 During StableHLO parsing, large `dense<"0x...">` blobs are moved into the content-addressed mmap cache. Multiple processes compiling the same constant map the same cache file, so Monte Carlo campaigns avoid paying N copies of the table in resident memory.
 
-For campaign structure and memory reporting, see:
+For campaign structure and memory reporting, use the native campaign runner:
 
 ```bash
-uv run examples/monte-carlo/runner.py --runs 8 --jobs 4
+elodin monte-carlo run examples/monte-carlo/main.py \
+  --campaign examples/monte-carlo/campaign.toml \
+  --spec examples/monte-carlo/spec.toml \
+  --out dbs/monte-carlo-demo
 ```
 
-Each run writes a separate DB path. The runner pins `ELODIN_CACHE_DIR` for all workers and samples `/proc/<pid>/smaps` to show the shared cache file's RSS/PSS footprint at peak concurrency. For correctness checks, export each DB to CSV and diff component data ignoring timestamps, as described in the physics regression workflow below.
+Declare tunable parameters with `el.monte_carlo.params_spec(...)`, read the
+current row with `el.monte_carlo.params(...)`, and optionally emit scalar outputs
+with `el.monte_carlo.result(...)`. Each run writes a separate DB path. The
+runner pins `ELODIN_CACHE_DIR` for all workers and samples `/proc/<pid>/smaps`
+to show the shared cache file's RSS/PSS footprint at peak concurrency. For
+SITL campaigns, register external controllers with `world.recipe(...)`; the
+campaign runner injects worker-slot ports into every process via
+`ELODIN_MONTE_CARLO_*` environment variables.
 
 ## Execution Modes
 

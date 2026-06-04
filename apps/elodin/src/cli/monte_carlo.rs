@@ -1,0 +1,160 @@
+use std::path::PathBuf;
+
+use clap::{Args as ClapArgs, Subcommand};
+use miette::{IntoDiagnostic, Result, miette};
+
+use super::Cli;
+
+#[derive(ClapArgs, Clone)]
+pub struct Args {
+    #[command(subcommand)]
+    command: Command,
+}
+
+#[derive(Subcommand, Clone)]
+enum Command {
+    /// Generate a starter Monte Carlo spec or plan from a simulation
+    Template {
+        sim: PathBuf,
+        #[arg(short, long)]
+        output: PathBuf,
+    },
+    /// Materialize a sampling spec into a plan CSV
+    Sample {
+        spec: PathBuf,
+        #[arg(short, long)]
+        output: PathBuf,
+    },
+    /// Run a Monte Carlo campaign
+    Run(Box<RunArgs>),
+    /// Resume a previous campaign
+    Resume { campaign_dir: PathBuf },
+    /// Rebuild a campaign report
+    Report { campaign_dir: PathBuf },
+}
+
+#[derive(ClapArgs, Clone)]
+pub struct RunArgs {
+    pub sim: PathBuf,
+    #[arg(long)]
+    pub plan: Option<PathBuf>,
+    #[arg(long)]
+    pub spec: Option<PathBuf>,
+    #[arg(long)]
+    pub campaign: Option<PathBuf>,
+    #[arg(long)]
+    pub workers: Option<usize>,
+    #[arg(long)]
+    pub out: Option<PathBuf>,
+    #[arg(long)]
+    pub cache_dir: Option<PathBuf>,
+    #[arg(long)]
+    pub retries: Option<usize>,
+    #[arg(long)]
+    pub timeout: Option<String>,
+    #[arg(long)]
+    pub post_run: Option<PathBuf>,
+    #[arg(long)]
+    pub post_campaign: Option<PathBuf>,
+    #[arg(long)]
+    pub params_compat: Option<String>,
+    #[arg(long)]
+    pub fail_fast: bool,
+    #[arg(long)]
+    pub dry_run: bool,
+}
+
+impl Cli {
+    pub fn monte_carlo(self, args: Args, rt: tokio::runtime::Runtime) -> Result<()> {
+        match args.command {
+            Command::Template { sim, output } => {
+                python_module(["-m", "elodin.monte_carlo.template"], [sim, output])
+            }
+            Command::Sample { spec, output } => {
+                python_module(["-m", "elodin.monte_carlo.sample"], [spec, output])
+            }
+            Command::Run(args) => rt.block_on(run(*args)),
+            Command::Resume { campaign_dir } => Err(miette!(
+                "resume is not implemented yet for {}",
+                campaign_dir.display()
+            )),
+            Command::Report { campaign_dir } => Err(miette!(
+                "report is not implemented yet for {}",
+                campaign_dir.display()
+            )),
+        }
+    }
+}
+
+impl Args {
+    pub fn run_from_plan(sim: PathBuf, plan: PathBuf) -> Self {
+        Self {
+            command: Command::Run(Box::new(RunArgs {
+                sim,
+                plan: Some(plan),
+                spec: None,
+                campaign: None,
+                workers: None,
+                out: None,
+                cache_dir: None,
+                retries: None,
+                timeout: None,
+                post_run: None,
+                post_campaign: None,
+                params_compat: None,
+                fail_fast: false,
+                dry_run: false,
+            })),
+        }
+    }
+}
+
+async fn run(args: RunArgs) -> Result<()> {
+    let out_dir = args.out.unwrap_or_else(|| {
+        PathBuf::from(format!(
+            "mc-{}",
+            chrono::Utc::now().format("%Y%m%dT%H%M%SZ")
+        ))
+    });
+    let plan_path = match (args.plan, args.spec) {
+        (Some(plan), None) => plan,
+        (None, Some(spec)) => {
+            let plan = out_dir.join("plan.csv");
+            python_module(["-m", "elodin.monte_carlo.sample"], [spec, plan.clone()])?;
+            plan
+        }
+        (Some(_), Some(_)) => return Err(miette!("use either --plan or --spec, not both")),
+        (None, None) => return Err(miette!("monte-carlo run requires --plan or --spec")),
+    };
+    monte_carlo::run_campaign(monte_carlo::RunOptions {
+        sim_path: args.sim,
+        plan_path,
+        campaign_path: args.campaign,
+        out_dir,
+        workers: args.workers,
+        cache_dir: args.cache_dir,
+        retries: args.retries,
+        timeout: args.timeout,
+        post_run: args.post_run,
+        post_campaign: args.post_campaign,
+        params_compat: args.params_compat,
+        fail_fast: args.fail_fast,
+        dry_run: args.dry_run,
+    })
+    .await
+}
+
+fn python_module<const N: usize, const M: usize>(
+    fixed_args: [&str; N],
+    path_args: [PathBuf; M],
+) -> Result<()> {
+    let mut command = s10::python_command().into_diagnostic()?;
+    command.args(fixed_args);
+    command.args(path_args);
+    let status = command.status().into_diagnostic()?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(miette!("python helper failed with status {status}"))
+    }
+}
