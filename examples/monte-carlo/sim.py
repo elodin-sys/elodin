@@ -9,7 +9,7 @@ import numpy as np
 SIMULATION_RATE_HZ = 120.0
 DEFAULT_MAX_TICKS = 360
 DEFAULT_GRID_SIZE = 262_144
-DEFAULT_PROBE_ROWS = 65_536
+DEFAULT_PROBE_ROWS = 0
 GRID_SIZE_ENV = "ELODIN_MONTE_CARLO_GRID_SIZE"
 PROBE_ROWS_ENV = "ELODIN_MONTE_CARLO_PROBE_ROWS"
 
@@ -52,8 +52,10 @@ def build(params: el.monte_carlo.Params) -> tuple[el.World, el.System]:
     grid_size = int(os.environ.get(GRID_SIZE_ENV, str(DEFAULT_GRID_SIZE)))
     probe_rows_count = int(os.environ.get(PROBE_ROWS_ENV, str(DEFAULT_PROBE_ROWS)))
     table = jnp.asarray(lookup_table(grid_size))
-    probe_base = jnp.asarray(
-        np.linspace(0, grid_size - 1, min(probe_rows_count, grid_size), dtype=np.int32)
+    probe_base = (
+        jnp.asarray(np.linspace(0, grid_size - 1, min(probe_rows_count, grid_size), dtype=np.int32))
+        if probe_rows_count > 0
+        else None
     )
 
     mass = float(params.get("mass", 1.5))
@@ -81,8 +83,11 @@ def build(params: el.monte_carlo.Params) -> tuple[el.World, el.System]:
             table.shape[0] - 1,
         )
         drag_coeff = table[idx, 0]
-        probe_rows = (probe_base + idx) % table.shape[0]
-        probe_sum = jnp.sum(table[probe_rows, 0])
+        if probe_base is None:
+            probe_sum = jnp.array(0.0, dtype=jnp.float64)
+        else:
+            probe_rows = (probe_base + idx) % table.shape[0]
+            probe_sum = jnp.sum(table[probe_rows, 0])
         drag = drag_coeff * vel[0] * jnp.abs(vel[0]) * 0.02
         acc = (command[0] * thrust_gain - drag) / mass
         acc = acc + probe_sum * 1e-300

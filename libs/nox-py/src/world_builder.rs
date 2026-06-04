@@ -46,6 +46,14 @@ fn normalize_log_level(level: &str) -> Result<&'static str, Error> {
     }
 }
 
+fn unix_now_ns() -> u64 {
+    time::SystemTime::now()
+        .duration_since(time::UNIX_EPOCH)
+        .ok()
+        .and_then(|duration| u64::try_from(duration.as_nanos()).ok())
+        .unwrap_or_default()
+}
+
 fn install_signal_handlers(cancel_token: CancelToken) {
     use signal_hook::consts::signal::*;
     use signal_hook::iterator::Signals;
@@ -572,6 +580,11 @@ impl WorldBuilder {
                 no_s10,
                 liveness_port,
             } => {
+                // Safety: set before the sim runtime thread starts; used only by this process's
+                // final `ELODIN_SIM_SUMMARY_JSON` emission.
+                unsafe {
+                    std::env::set_var("ELODIN_SIM_ENTRY_UNIX_NS", unix_now_ns().to_string());
+                }
                 let cancel_token = CancelToken::new();
                 install_signal_handlers(cancel_token.clone());
                 let mut exec = self.build_with_backend(
@@ -584,6 +597,10 @@ impl WorldBuilder {
                     max_ticks,
                     backend,
                 )?;
+                // Safety: set before the sim runtime thread starts; see note above.
+                unsafe {
+                    std::env::set_var("ELODIN_SIM_COMPILE_DONE_UNIX_NS", unix_now_ns().to_string());
+                }
                 let recipes = self.recipes.clone();
                 // Create a cancel token that can be used to gracefully stop s10 recipes
                 // from within the simulation callbacks (e.g., post_step)

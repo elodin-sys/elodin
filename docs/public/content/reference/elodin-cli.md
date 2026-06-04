@@ -101,7 +101,9 @@ Run a simulation campaign with a bounded worker pool. Each worker owns a
 deterministic resource slot (DB port and user-defined SITL ports), and the
 runner recycles those slots across arbitrarily many runs. The campaign pins a
 shared `ELODIN_CACHE_DIR` so large Cranelift constants are mapped once across
-workers.
+workers. When worker or runtime-thread counts are unset, the runner auto-sizes
+them from available CPUs: workers consume the CPU budget, while the orchestrator
+uses a small I/O thread pool for process/log handling.
 
 **Usage:** `elodin monte-carlo <COMMAND>`
 
@@ -127,14 +129,19 @@ Key options:
 - `--plan <PLAN.csv>`: materialized one-row-per-run plan.
 - `--spec <SPEC.toml>`: sampling spec; sampled into a plan before execution.
 - `--campaign <CAMPAIGN.toml>`: worker count, resource slots, hooks, retries, timeouts.
-- `--workers <N>`: override the campaign worker count.
+- `--workers <N>`: override the auto-sized campaign worker count.
+- `--runtime-threads <N>`: override the auto-sized orchestrator I/O thread
+  pool. Use `0` or omit the option for the default auto-sized pool.
+- `--memory-probe`: enable expensive shared-constant PSS sampling and
+  `memory.json`/`processes.csv` output. Leave this off for scaling benchmarks.
 - `--post-run <HOOK.py>` / `--post-campaign <HOOK.py>`: plain-Python lifecycle hooks.
 - `--params-compat revere-overrides-file`: emit `REVERE_SIM_OVERRIDES_FILE` and `SIM_SEED` for legacy simulations.
 - `--progress <auto|always|never>`: control the live progress bar. `auto` shows
   a bar only when stderr is a terminal.
 
 Outputs include per-run databases under `runs/`, `results.csv`, `perf.csv`,
-`resources.csv`, `memory.json`, `campaign_summary.txt`, and `summary.json`.
+`resources.csv`, `campaign_summary.txt`, and `summary.json`. With
+`--memory-probe`, the runner also writes `memory.json` and `processes.csv`.
 Each run's child process output is captured in `runs/<run_id>/logs/`, and the
 per-run simulation timing snapshot is written to `runs/<run_id>/sim_summary.json`
 for the final campaign rollup.

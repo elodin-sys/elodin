@@ -28,7 +28,7 @@
 use std::{
     fs,
     path::PathBuf,
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use serde::Serialize;
@@ -89,6 +89,11 @@ pub struct TickSummaryJson {
     simulation_rate_hz: f64,
     telemetry_rate_hz: f64,
     wall_ns: u64,
+    entry_unix_ns: Option<u64>,
+    compile_done_unix_ns: Option<u64>,
+    loop_start_unix_ns: u64,
+    loop_end_unix_ns: u64,
+    summary_written_unix_ns: u64,
 }
 
 impl PhaseStats {
@@ -212,6 +217,8 @@ pub struct TickMetrics {
     /// when the user didn't opt in to a slower telemetry rate.
     telemetry_rate_hz: f64,
     started_at: Instant,
+    started_unix_ns: u64,
+    loop_end_unix_ns: Option<u64>,
     /// Suppresses the `Drop` summary (e.g. when no cycles ever ran).
     /// Currently unused — the summary itself gracefully handles
     /// zero-cycle cases — but kept as an escape hatch for callers
@@ -235,8 +242,14 @@ impl TickMetrics {
             simulation_rate_hz: 0.0,
             telemetry_rate_hz: 0.0,
             started_at: Instant::now(),
+            started_unix_ns: unix_now_ns(),
+            loop_end_unix_ns: None,
             silent: false,
         }
+    }
+
+    pub fn mark_loop_end(&mut self) {
+        self.loop_end_unix_ns.get_or_insert_with(unix_now_ns);
     }
 
     /// Feed the configured rates so `print_summary` can show the
@@ -385,6 +398,7 @@ impl TickMetrics {
     }
 
     pub fn summary_json(&self) -> TickSummaryJson {
+        let summary_written_unix_ns = unix_now_ns();
         TickSummaryJson {
             pre_step: (&self.pre_step).into(),
             copy_db_to_world: (&self.copy_db_to_world).into(),
@@ -399,6 +413,11 @@ impl TickMetrics {
             simulation_rate_hz: self.simulation_rate_hz,
             telemetry_rate_hz: self.telemetry_rate_hz,
             wall_ns: u64::try_from(self.started_at.elapsed().as_nanos()).unwrap_or(u64::MAX),
+            entry_unix_ns: read_env_u64("ELODIN_SIM_ENTRY_UNIX_NS"),
+            compile_done_unix_ns: read_env_u64("ELODIN_SIM_COMPILE_DONE_UNIX_NS"),
+            loop_start_unix_ns: self.started_unix_ns,
+            loop_end_unix_ns: self.loop_end_unix_ns.unwrap_or(summary_written_unix_ns),
+            summary_written_unix_ns,
         }
     }
 
@@ -417,6 +436,18 @@ impl TickMetrics {
             let _ = fs::write(path, json);
         }
     }
+}
+
+fn unix_now_ns() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .ok()
+        .and_then(|duration| u64::try_from(duration.as_nanos()).ok())
+        .unwrap_or_default()
+}
+
+fn read_env_u64(key: &str) -> Option<u64> {
+    std::env::var(key).ok()?.parse().ok()
 }
 
 /// Format a rate in Hz, stripping the decimal when the value is
@@ -440,6 +471,7 @@ impl Default for TickMetrics {
 
 impl Drop for TickMetrics {
     fn drop(&mut self) {
+        self.mark_loop_end();
         self.print_summary();
         self.write_summary_json_from_env();
     }
