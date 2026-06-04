@@ -113,7 +113,7 @@ impl GpuPreprocessor {
             // Todo: mem take using &mut world?
             gpu_preprocessor
                 .ready_tasks
-                .extend(preprocessor.ready_tasks.clone().into_iter());
+                .extend(preprocessor.ready_tasks.clone());
         }
     }
 

@@ -187,11 +187,7 @@ impl AttachmentData {
                     }
                 }
 
-                let value = if count == 0 {
-                    0
-                } else {
-                    (value / count) as u16
-                };
+                let value = value.checked_div(count).unwrap_or(0) as u16;
 
                 data.push(value);
             }

@@ -179,9 +179,7 @@ pub fn apply_initial_kdl_path(
     // Historically this was only triggered by a DB config update message, but
     // that prevents using `elodin editor --kdl <file>` in offline / no-DB
     // scenarios.
-    let Some(path) = initial.0.take() else {
-        return None;
-    };
+    let path = initial.0.take()?;
 
     // Only apply when either:
     // - a DB config update arrived (normal flow), OR
