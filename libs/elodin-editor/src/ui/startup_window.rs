@@ -312,7 +312,7 @@ impl RootWidgetSystem for StartupLayout<'_, '_> {
                         {
                             *state.modal_state = ModalState::ConnectToIp {
                                 addr: if cfg!(target_os = "windows") {
-                                    "127.0.0.1:2240"
+                                    "[::1]:2240"
                                 } else {
                                     "[::]:2240"
                                 }
