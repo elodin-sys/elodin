@@ -11,14 +11,14 @@ use std::{
     collections::HashMap,
     env,
     io::{self, Write, stdout},
-    path::PathBuf,
+    path::{Path, PathBuf},
     process::Stdio,
     time::Duration,
 };
 use stellarator::util::CancelToken;
 use thiserror::Error;
 use tokio::{
-    io::{AsyncBufReadExt, AsyncRead, BufReader},
+    io::{AsyncBufReadExt, AsyncRead, AsyncWriteExt, BufReader},
     process::Command,
     task::JoinSet,
 };
@@ -179,6 +179,8 @@ pub struct ProcessArgs {
     pub restart_policy: RestartPolicy,
     #[serde(default)]
     pub fail_on_error: bool,
+    #[serde(default)]
+    pub log_path: Option<PathBuf>,
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug, Default, Clone)]
@@ -222,8 +224,14 @@ impl ProcessArgs {
 
             let stdout_name = name.clone();
             let stderr_name = name.clone();
-            tokio::spawn(async move { print_logs(stdout, &stdout_name, Color::Blue).await });
-            tokio::spawn(async move { print_logs(stderr, &stderr_name, Color::Red).await });
+            let stdout_log_path = self.log_path.clone();
+            let stderr_log_path = self.log_path.clone();
+            tokio::spawn(async move {
+                print_logs(stdout, &stdout_name, Color::Blue, stdout_log_path).await
+            });
+            tokio::spawn(async move {
+                print_logs(stderr, &stderr_name, Color::Red, stderr_log_path).await
+            });
             tokio::select! {
                 _ = cancel_token.wait() => {
                     // Graceful shutdown: send SIGTERM, wait up to 2 seconds, then force kill
@@ -235,11 +243,32 @@ impl ProcessArgs {
                                 nix::sys::signal::Signal::SIGTERM,
                             );
                         }
-                        tracing::info!("Waiting for {} to exit gracefully", name);
+                        if let Some(log_path) = &self.log_path {
+                            let _ = append_log_line(
+                                log_path,
+                                &name,
+                                "waiting for process to exit gracefully",
+                            )
+                            .await;
+                        } else {
+                            tracing::info!("Waiting for {} to exit gracefully", name);
+                        }
                         match tokio::time::timeout(Duration::from_secs(2), child.wait()).await {
                             Ok(_) => {}
                             Err(_) => {
-                                tracing::warn!("{} did not exit after SIGTERM, forcing kill", name);
+                                if let Some(log_path) = &self.log_path {
+                                    let _ = append_log_line(
+                                        log_path,
+                                        &name,
+                                        "did not exit after SIGTERM, forcing kill",
+                                    )
+                                    .await;
+                                } else {
+                                    tracing::warn!(
+                                        "{} did not exit after SIGTERM, forcing kill",
+                                        name
+                                    );
+                                }
                                 let _ = child.start_kill();
                                 let _ = child.wait().await;
                             }
@@ -253,17 +282,7 @@ impl ProcessArgs {
                 }
                 res = child.wait() => {
                     let status = res?;
-                    if let Some(code) = status.code() {
-                        let color = if code == 0 {
-                            Color::Green
-                        }else{
-                            Color::Red
-                        };
-                        let style = Style::new().bold().fg(color);
-                        println!("{} killed with code {}", style.paint(&name), style.paint(code.to_string()))
-                    }else{
-                        println!("{} killed by signal", Style::new().bold().paint(&name))
-                    }
+                    emit_process_status(&self.log_path, &name, &status).await?;
                     match self.restart_policy {
                         RestartPolicy::Never => {
                             if self.fail_on_error && !status.success() {
@@ -317,6 +336,7 @@ async fn print_logs(
     input: impl AsyncRead + Unpin,
     proc_name: &str,
     color: nu_ansi_term::Color,
+    log_path: Option<PathBuf>,
 ) -> io::Result<()> {
     let color = Style::default().fg(color).bold();
     let mut buf_reader = BufReader::new(input);
@@ -334,11 +354,60 @@ async fn print_logs(
         if res? == 0 {
             break;
         }
-        writeln!(stdout(), "{} {}", color.paint(proc_name), line.trim_end())?;
+        if let Some(log_path) = &log_path {
+            append_log_line(log_path, proc_name, line.trim_end()).await?;
+        } else {
+            writeln!(stdout(), "{} {}", color.paint(proc_name), line.trim_end())?;
+        }
 
         line.clear();
     }
     Ok(())
+}
+
+async fn emit_process_status(
+    log_path: &Option<PathBuf>,
+    name: &str,
+    status: &std::process::ExitStatus,
+) -> io::Result<()> {
+    if let Some(log_path) = log_path {
+        let line = if let Some(code) = status.code() {
+            format!("killed with code {code}")
+        } else {
+            "killed by signal".to_string()
+        };
+        append_log_line(log_path, name, &line).await
+    } else {
+        if let Some(code) = status.code() {
+            let color = if code == 0 { Color::Green } else { Color::Red };
+            let style = Style::new().bold().fg(color);
+            println!(
+                "{} killed with code {}",
+                style.paint(name),
+                style.paint(code.to_string())
+            )
+        } else {
+            println!("{} killed by signal", Style::new().bold().paint(name))
+        }
+        Ok(())
+    }
+}
+
+pub(crate) async fn append_log_line(
+    log_path: &Path,
+    proc_name: &str,
+    line: &str,
+) -> io::Result<()> {
+    if let Some(parent) = log_path.parent() {
+        tokio::fs::create_dir_all(parent).await?;
+    }
+    let mut file = tokio::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(log_path)
+        .await?;
+    file.write_all(format!("{proc_name} {line}\n").as_bytes())
+        .await
 }
 
 fn cargo_path() -> PathBuf {

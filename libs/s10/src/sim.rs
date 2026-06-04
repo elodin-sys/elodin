@@ -29,6 +29,8 @@ pub struct SimRecipe {
     pub optimize: bool,
     #[serde(default)]
     pub env: HashMap<String, String>,
+    #[serde(default)]
+    pub log_path: Option<PathBuf>,
 }
 
 fn default_addr() -> SocketAddr {
@@ -136,20 +138,30 @@ impl SimRecipe {
         let child_pid = child.id().map(|pid| nix::unistd::Pid::from_raw(pid as i32));
 
         if let Some(stdout) = child.stdout.take() {
+            let log_path = self.log_path.clone();
             tokio::spawn(async move {
                 let reader = tokio::io::BufReader::new(stdout);
                 let mut lines = reader.lines();
                 while let Ok(Some(line)) = lines.next_line().await {
-                    eprintln!("sim {line}");
+                    if let Some(log_path) = &log_path {
+                        let _ = crate::recipe::append_log_line(log_path, "sim", &line).await;
+                    } else {
+                        eprintln!("sim {line}");
+                    }
                 }
             });
         }
         if let Some(stderr) = child.stderr.take() {
+            let log_path = self.log_path.clone();
             tokio::spawn(async move {
                 let reader = tokio::io::BufReader::new(stderr);
                 let mut lines = reader.lines();
                 while let Ok(Some(line)) = lines.next_line().await {
-                    eprintln!("sim {line}");
+                    if let Some(log_path) = &log_path {
+                        let _ = crate::recipe::append_log_line(log_path, "sim", &line).await;
+                    } else {
+                        eprintln!("sim {line}");
+                    }
                 }
             });
         }
@@ -179,6 +191,14 @@ impl SimRecipe {
             }
             res = child.wait() => {
                 let status = res?;
+                if let Some(log_path) = &self.log_path {
+                    let line = if let Some(code) = status.code() {
+                        format!("killed with code {code}")
+                    } else {
+                        "killed by signal".to_string()
+                    };
+                    crate::recipe::append_log_line(log_path, "sim", &line).await?;
+                }
                 if !status.success() {
                     Err(Error::SimBuildFailed(status.code()))
                 } else {

@@ -226,7 +226,11 @@ runner pins `ELODIN_CACHE_DIR` for all workers and samples `/proc/<pid>/smaps`
 to show the shared cache file's RSS/PSS footprint at peak concurrency. For
 SITL campaigns, register external controllers with `world.recipe(...)`; the
 campaign runner injects worker-slot ports into every process via
-`ELODIN_MONTE_CARLO_*` environment variables.
+`ELODIN_MONTE_CARLO_*` environment variables. Per-run stdout/stderr lands in
+`runs/<run_id>/logs/`, and the runner injects `ELODIN_SIM_SUMMARY_JSON` so each
+run writes a structured timing snapshot. At campaign end, the native runner
+prints and writes `campaign_summary.txt` with an aggregated version of the
+standard `elodin simulation summary` block plus CPU/RAM/disk and PSS rollups.
 
 ## Execution Modes
 

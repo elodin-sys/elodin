@@ -16,7 +16,7 @@ pub async fn serve_tokio() -> std::io::Result<u16> {
         let local_addr = listener.local_addr()?;
         let port = local_addr.port();
         tokio::spawn(async move {
-            tracing::info!("Serving liveness on {}", local_addr);
+            tracing::debug!("Serving liveness on {}", local_addr);
             loop {
                 let mut stream = match listener.accept().await {
                     Ok((stream, _)) => stream,
@@ -48,7 +48,7 @@ pub async fn serve_tokio() -> std::io::Result<u16> {
 
 pub async fn monitor(port: u16) {
     let addr = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, port));
-    tracing::info!("Monitoring liveness on {}", addr);
+    tracing::debug!("Monitoring liveness on {}", addr);
 
     // Retry connection with exponential backoff to handle race with server startup
     const MAX_RETRIES: u32 = 10;

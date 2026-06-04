@@ -130,9 +130,14 @@ Key options:
 - `--workers <N>`: override the campaign worker count.
 - `--post-run <HOOK.py>` / `--post-campaign <HOOK.py>`: plain-Python lifecycle hooks.
 - `--params-compat revere-overrides-file`: emit `REVERE_SIM_OVERRIDES_FILE` and `SIM_SEED` for legacy simulations.
+- `--progress <auto|always|never>`: control the live progress bar. `auto` shows
+  a bar only when stderr is a terminal.
 
 Outputs include per-run databases under `runs/`, `results.csv`, `perf.csv`,
-`memory.json`, and `summary.json`.
+`resources.csv`, `memory.json`, `campaign_summary.txt`, and `summary.json`.
+Each run's child process output is captured in `runs/<run_id>/logs/`, and the
+per-run simulation timing snapshot is written to `runs/<run_id>/sim_summary.json`
+for the final campaign rollup.
 
 ## Python Simulation Subcommands
 
