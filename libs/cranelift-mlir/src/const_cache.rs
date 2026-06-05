@@ -3,12 +3,17 @@ use std::{
     io::Write,
     os::fd::AsRawFd,
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{
+        Arc,
+        atomic::{AtomicU64, Ordering},
+    },
 };
 
 use memmap2::MmapRaw;
 
 use crate::ir::ElementType;
+
+static TMP_SEQ: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug)]
 pub struct CachedConst {
@@ -88,12 +93,15 @@ fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
     let parent = path
         .parent()
         .ok_or_else(|| format!("cached constant path has no parent: {path:?}"))?;
+    let seq = TMP_SEQ.fetch_add(1, Ordering::Relaxed);
+    // Same-process concurrent interners of one hash must not share a temp path.
     let tmp = parent.join(format!(
-        ".{}.{}.tmp",
+        ".{}.{}.{}.tmp",
         path.file_name()
             .and_then(|s| s.to_str())
             .unwrap_or("constant"),
-        std::process::id()
+        std::process::id(),
+        seq
     ));
 
     {
