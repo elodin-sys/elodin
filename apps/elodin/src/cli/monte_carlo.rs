@@ -101,33 +101,6 @@ impl Cli {
     }
 }
 
-impl Args {
-    pub fn run_from_plan(sim: PathBuf, plan: PathBuf) -> Self {
-        Self {
-            command: Command::Run(Box::new(RunArgs {
-                sim,
-                plan: Some(plan),
-                spec: None,
-                campaign: None,
-                workers: None,
-                out: None,
-                cache_dir: None,
-                retries: None,
-                timeout: None,
-                post_run: None,
-                post_campaign: None,
-                params_compat: None,
-                fail_fast: false,
-                dry_run: false,
-                memory_probe: false,
-                keep_existing: false,
-                progress: ProgressMode::Auto,
-                runtime_threads: None,
-            })),
-        }
-    }
-}
-
 fn run_with_runtime(args: RunArgs, rt: tokio::runtime::Runtime) -> Result<()> {
     let runtime_threads = args.runtime_threads;
     let options = run_options(args)?;

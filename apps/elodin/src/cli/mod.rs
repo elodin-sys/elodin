@@ -105,19 +105,7 @@ impl Cli {
         match &self.command {
             Some(Commands::Editor(args)) => self.clone().editor(args.clone(), rt),
             #[cfg(not(target_os = "windows"))]
-            Some(Commands::Run(args)) => {
-                if let Some(plan) = args.monte_carlo.clone() {
-                    let sim = args.sim_file().ok_or_else(|| {
-                        miette::miette!(
-                            "elodin run --monte-carlo requires a Python simulation file"
-                        )
-                    })?;
-                    self.clone()
-                        .monte_carlo(monte_carlo::Args::run_from_plan(sim, plan), rt)
-                } else {
-                    self.clone().run_headless(args.clone(), rt)
-                }
-            }
+            Some(Commands::Run(args)) => self.clone().run_headless(args.clone(), rt),
             #[cfg(not(target_os = "windows"))]
             Some(Commands::MonteCarlo(args)) => self.clone().monte_carlo(args.clone(), rt),
             #[cfg(not(target_os = "windows"))]
