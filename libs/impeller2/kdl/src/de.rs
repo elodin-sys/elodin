@@ -280,7 +280,7 @@ fn parse_world_mesh(node: &KdlNode, src: &str) -> Result<WorldMesh, KdlSchematic
         .and_then(|v| v.as_integer())
         .map(|v| v as u32);
 
-    let translate = parse_tuple_f64(node, "translate");
+    let translate = parse_tuple3::<f64>(node, "translate");
 
     let frame = node
         .get("frame")
@@ -1076,8 +1076,8 @@ fn parse_object_3d_mesh(
 
             let scale = node.get("scale").and_then(|v| v.as_float()).unwrap_or(1.0) as f32;
 
-            let translate = parse_tuple_f32(node, "translate").unwrap_or((0.0, 0.0, 0.0));
-            let rotate = parse_tuple_f32(node, "rotate").unwrap_or((0.0, 0.0, 0.0));
+            let translate = parse_tuple3::<f32>(node, "translate").unwrap_or((0.0, 0.0, 0.0));
+            let rotate = parse_tuple3::<f32>(node, "rotate").unwrap_or((0.0, 0.0, 0.0));
 
             Ok(Object3DMesh::Glb {
                 path,
@@ -1487,7 +1487,7 @@ fn parse_color_from_node_or_children(node: &KdlNode, color_tag: Option<&str>) ->
     None
 }
 
-fn parse_tuple_f32(node: &KdlNode, property: &str) -> Option<(f32, f32, f32)> {
+fn parse_tuple3<T: FromStr>(node: &KdlNode, property: &str) -> Option<(T, T, T)> {
     let value_str = node.get(property).and_then(|v| v.as_string())?;
 
     // Parse string like "(1.0, 2.0, 3.0)" or "(1, 2, 3)"
@@ -1503,32 +1503,9 @@ fn parse_tuple_f32(node: &KdlNode, property: &str) -> Option<(f32, f32, f32)> {
         return None;
     }
 
-    let x = parts[0].trim().parse::<f32>().ok()?;
-    let y = parts[1].trim().parse::<f32>().ok()?;
-    let z = parts[2].trim().parse::<f32>().ok()?;
-
-    Some((x, y, z))
-}
-
-fn parse_tuple_f64(node: &KdlNode, property: &str) -> Option<(f64, f64, f64)> {
-    let value_str = node.get(property).and_then(|v| v.as_string())?;
-
-    // Parse string like "(1.0, 2.0, 3.0)" or "(1, 2, 3)"
-    let trimmed = value_str.trim();
-    if !trimmed.starts_with('(') || !trimmed.ends_with(')') {
-        return None;
-    }
-
-    let inner = &trimmed[1..trimmed.len() - 1];
-    let parts: Vec<&str> = inner.split(',').collect();
-
-    if parts.len() != 3 {
-        return None;
-    }
-
-    let x = parts[0].trim().parse::<f64>().ok()?;
-    let y = parts[1].trim().parse::<f64>().ok()?;
-    let z = parts[2].trim().parse::<f64>().ok()?;
+    let x = parts[0].trim().parse::<T>().ok()?;
+    let y = parts[1].trim().parse::<T>().ok()?;
+    let z = parts[2].trim().parse::<T>().ok()?;
 
     Some((x, y, z))
 }
