@@ -88,6 +88,33 @@ impl Server {
     }
 }
 
+/// Copy schematic-referenced files into `{db}/assets/` and rewrite KDL paths to `db:…`.
+///
+/// Call before starting the DB Asset Server so early HTTP requests do not 404.
+pub fn prime_schematic_assets(db: &elodin_db::DB, world: &mut World) -> Result<(), elodin_db::Error> {
+    let Some(content) = world.metadata.schematic.clone() else {
+        return Ok(());
+    };
+    match impeller2_kdl::parse_schematic(&content) {
+        Ok(mut schematic) => {
+            persist_schematic_assets(
+                db,
+                &mut schematic,
+                world.metadata.schematic_path.as_deref(),
+            )?;
+            world.metadata.schematic = Some(impeller2_kdl::serialize_schematic(&schematic));
+        }
+        Err(err) => {
+            tracing::warn!(
+                ?err,
+                "failed to parse schematic KDL; skipping db asset upload and db: rewrite — \
+                 asset paths will remain local and require files at replay"
+            );
+        }
+    }
+    Ok(())
+}
+
 pub fn init_db(
     db: &elodin_db::DB,
     world: &mut World,
@@ -95,28 +122,8 @@ pub fn init_db(
 ) -> Result<(), elodin_db::Error> {
     tracing::info!("initializing db");
     db.set_earliest_timestamp(start_timestamp)?;
-
-    let mut schematic_content = world.metadata.schematic.clone();
-    if let Some(content) = schematic_content.as_ref() {
-        match impeller2_kdl::parse_schematic(content) {
-            Ok(mut schematic) => {
-                persist_schematic_assets(
-                    db,
-                    &mut schematic,
-                    world.metadata.schematic_path.as_deref(),
-                )?;
-                schematic_content = Some(impeller2_kdl::serialize_schematic(&schematic));
-                world.metadata.schematic = schematic_content.clone();
-            }
-            Err(err) => {
-                tracing::warn!(
-                    ?err,
-                    "failed to parse schematic KDL; skipping db asset upload and db: rewrite — \
-                     asset paths will remain local and require files at replay"
-                );
-            }
-        }
-    }
+    prime_schematic_assets(db, world)?;
+    let schematic_content = world.metadata.schematic.clone();
 
     db.with_state_mut(|state| {
         for (component_id, (schema, component_metadata)) in world.metadata.component_map.iter() {

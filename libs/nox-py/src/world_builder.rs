@@ -553,7 +553,7 @@ impl WorldBuilder {
             } => {
                 let cancel_token = CancelToken::new();
                 install_signal_handlers(cancel_token.clone());
-                let exec = self.build_with_backend(
+                let mut exec = self.build_with_backend(
                     py,
                     sys,
                     simulation_rate,
@@ -616,6 +616,8 @@ impl WorldBuilder {
                             crate::Error::DB(e)
                         }
                     })?;
+                crate::impeller2_server::prime_schematic_assets(&db_server.db, exec.world_mut())
+                    .map_err(crate::Error::DB)?;
                 elodin_db::assets_http::spawn_assets_http(&db_path, addr)?;
                 py.allow_threads(|| {
                     // Run the async executor (and therefore the JIT tick_fn) on a

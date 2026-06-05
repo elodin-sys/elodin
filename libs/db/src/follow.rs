@@ -182,21 +182,7 @@ async fn apply_source_snapshot(
         let _ = db.set_earliest_timestamp(Timestamp(ts_micros));
     }
     db.save_db_state()?;
-
-    #[cfg(feature = "axum")]
-    if let Some(content) = metadata_resp.db_config.schematic_content()
-        && let Err(err) = crate::assets_http::sync_schematic_assets_from_source(
-            config.source_addr,
-            &db.path,
-            content,
-        )
-        .await
-    {
-        warn!(
-            ?err,
-            "failed to sync schematic assets from source; db: paths may not load"
-        );
-    }
+    sync_follower_schematic_assets(config, db).await;
 
     for metadata in &metadata_resp.component_metadata {
         db.with_state_mut(|s| s.set_component_metadata(metadata.clone(), &db.path))?;
@@ -235,6 +221,52 @@ async fn apply_source_snapshot(
 
     Ok(())
 }
+
+async fn apply_db_config_update(
+    config: &FollowConfig,
+    db: &Arc<DB>,
+    update: SetDbConfig,
+) -> Result<(), Error> {
+    if let Some(recording) = update.recording {
+        db.with_state_mut(|s| s.db_config.recording = recording);
+        db.recording_cell.set_playing(recording);
+    }
+    let schematic_changed = update.metadata.contains_key("schematic.content");
+    db.with_state_mut(|s| {
+        s.db_config.metadata.extend(update.metadata);
+    });
+    db.save_db_state()?;
+    if schematic_changed {
+        sync_follower_schematic_assets(config, db).await;
+    }
+    Ok(())
+}
+
+#[cfg(feature = "axum")]
+async fn sync_follower_schematic_assets(config: &FollowConfig, db: &Arc<DB>) {
+    let Some(content) = db.with_state(|s| {
+        s.db_config
+            .schematic_content()
+            .map(str::to_owned)
+    }) else {
+        return;
+    };
+    if let Err(err) = crate::assets_http::sync_schematic_assets_from_source(
+        config.source_addr,
+        &db.path,
+        &content,
+    )
+    .await
+    {
+        warn!(
+            ?err,
+            "failed to sync schematic assets from source; db: paths may not load"
+        );
+    }
+}
+
+#[cfg(not(feature = "axum"))]
+async fn sync_follower_schematic_assets(_config: &FollowConfig, _db: &Arc<DB>) {}
 
 async fn run_follower_inner(config: &FollowConfig, db: &Arc<DB>) -> Result<(), Error> {
     let (session, metadata_resp, schema_resp) = request_source_snapshot(config, true).await?;
@@ -338,6 +370,12 @@ async fn run_follower_inner(config: &FollowConfig, db: &Arc<DB>) -> Result<(), E
             Packet::Msg(m) if m.id == SetMsgMetadata::ID => {
                 let meta: SetMsgMetadata = m.parse()?;
                 db.with_state_mut(|s| s.set_msg_metadata(meta.id, meta.metadata, &db.path))?;
+            }
+
+            // SetDbConfig – live db_config metadata (e.g. schematic.content).
+            Packet::Msg(m) if m.id == SetDbConfig::ID => {
+                let update: SetDbConfig = m.parse()?;
+                apply_db_config_update(config, db, update).await?;
             }
 
             // VTableMsg – extract ComponentId and store in connection-local map.

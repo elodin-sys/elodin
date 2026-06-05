@@ -57,6 +57,9 @@ pub async fn handle_follow_stream<W: AsyncWrite>(
     // Track last-sent timestamp per msg-log so we only send new messages.
     let mut msg_positions: HashMap<PacketId, Timestamp> = HashMap::new();
 
+    let (mut last_db_metadata, mut last_recording) =
+        db.with_state(|state| (state.db_config.metadata.clone(), state.db_config.recording));
+
     info!(
         target_packet_size,
         "follow stream started – coalescing to {} byte target", target_packet_size
@@ -169,6 +172,35 @@ pub async fn handle_follow_stream<W: AsyncWrite>(
             }
             msg_positions.insert(msg_id, Timestamp(i64::MIN));
             known_msg_ids.insert(msg_id);
+        }
+
+        // ── 2b. DbConfig updates (schematic.content, skybox, etc.) ───────
+        let (current_metadata, current_recording) =
+            db.with_state(|state| (state.db_config.metadata.clone(), state.db_config.recording));
+        let mut metadata_delta = HashMap::new();
+        for (key, value) in &current_metadata {
+            if last_db_metadata.get(key) != Some(value) {
+                metadata_delta.insert(key.clone(), value.clone());
+            }
+        }
+        for key in last_db_metadata.keys() {
+            if !current_metadata.contains_key(key) {
+                metadata_delta.insert(key.clone(), String::new());
+            }
+        }
+        let recording_delta = (current_recording != last_recording).then_some(current_recording);
+        if recording_delta.is_some() || !metadata_delta.is_empty() {
+            sink.send(
+                SetDbConfig {
+                    recording: recording_delta,
+                    metadata: metadata_delta,
+                }
+                .into_len_packet()
+                .with_request_id(req_id),
+            )
+            .await?;
+            last_db_metadata = current_metadata;
+            last_recording = current_recording;
         }
 
         // ── 3. Component data (round-robin, one chunk per component) ─────
