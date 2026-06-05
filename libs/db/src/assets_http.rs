@@ -274,19 +274,28 @@ pub fn spawn_assets_http(db_path: &Path, tcp_addr: SocketAddr) -> io::Result<()>
     std::fs::create_dir_all(&assets_dir)?;
     let listener = std::net::TcpListener::bind(addr)?;
     listener.set_nonblocking(true)?;
+    let (ready_tx, ready_rx) = std::sync::mpsc::sync_channel(1);
     stellarator::struc_con::tokio(move |_| async move {
         match tokio::net::TcpListener::from_std(listener) {
             Ok(listener) => {
-                if let Err(err) = serve_assets_with_listener(listener, addr, assets_dir).await {
+                if ready_tx.send(Ok(())).is_ok()
+                    && let Err(err) = serve_assets_with_listener(listener, addr, assets_dir).await
+                {
                     tracing::error!(?err, "assets http server failed");
                 }
             }
             Err(err) => {
                 tracing::error!(?err, "assets http server listener setup failed");
+                let _ = ready_tx.send(Err(err));
             }
         }
     });
-    Ok(())
+    match ready_rx.recv() {
+        Ok(result) => result,
+        Err(_) => Err(io::Error::other(
+            "assets http server thread exited before listener setup completed",
+        )),
+    }
 }
 
 #[cfg(test)]
@@ -344,6 +353,31 @@ mod tests {
 
         let err = spawn_assets_http(dir.path(), bound).unwrap_err();
         assert_eq!(err.kind(), io::ErrorKind::AddrInUse);
+    }
+
+    #[tokio::test]
+    async fn spawn_assets_http_serves_after_startup() {
+        let dir = tempdir().unwrap();
+        let assets = dir.path().join("assets");
+        write_asset_file(&assets, "rocket.glb", b"spawned-payload").unwrap();
+        let tcp: SocketAddr = "127.0.0.1:0".parse().unwrap();
+        let listener = std::net::TcpListener::bind(tcp).unwrap();
+        let bound = listener.local_addr().unwrap();
+        drop(listener);
+
+        spawn_assets_http(dir.path(), bound).unwrap();
+
+        let assets_addr = assets_http_addr(bound);
+        let response = reqwest::Client::new()
+            .get(format!("http://{assets_addr}/rocket.glb"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.bytes().await.unwrap().as_ref(),
+            b"spawned-payload"
+        );
     }
 
     #[tokio::test]
