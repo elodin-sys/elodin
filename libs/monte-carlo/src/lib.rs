@@ -702,21 +702,6 @@ pub async fn run_campaign(mut options: RunOptions) -> Result<()> {
         )?;
     }
 
-    if let Some(hook) = &config.hooks.post_campaign {
-        let context = options.out_dir.join("campaign_hook_context.json");
-        write_json(
-            &context,
-            &json!({
-                "out_dir": options.out_dir,
-                "results": options.out_dir.join("results.csv"),
-                "perf": options.out_dir.join("perf.csv"),
-                "memory": options.memory_probe.then(|| options.out_dir.join("memory.json")),
-                "resources": options.out_dir.join("resources.csv"),
-            }),
-        )?;
-        run_hook("post_campaign", hook, &context).await?;
-    }
-
     let failed = metrics.iter().filter(|metric| !metric.exit_ok).count();
     let sim_phase_summary = aggregate_sim_summaries(&metrics);
     let phase_attribution = summarize_phase_attribution(&metrics);
@@ -764,6 +749,22 @@ pub async fn run_campaign(mut options: RunOptions) -> Result<()> {
         &memory,
     )?;
     reporter.finish();
+
+    if let Some(hook) = &config.hooks.post_campaign {
+        let context = options.out_dir.join("campaign_hook_context.json");
+        write_json(
+            &context,
+            &json!({
+                "out_dir": options.out_dir,
+                "results": options.out_dir.join("results.csv"),
+                "perf": options.out_dir.join("perf.csv"),
+                "memory": options.memory_probe.then(|| options.out_dir.join("memory.json")),
+                "resources": options.out_dir.join("resources.csv"),
+                "summary": options.out_dir.join("summary.json"),
+            }),
+        )?;
+        run_hook("post_campaign", hook, &context).await?;
+    }
 
     if let Some(run_id) = failure.lock().expect("failure mutex poisoned").clone()
         && !config.continue_on_error
@@ -817,6 +818,11 @@ async fn run_one(
 ) -> Result<RunMetric> {
     let run_dir = ctx.out_dir.join("runs").join(&row.run_id);
     let db_path = run_dir.join("db");
+    if run_dir.exists() {
+        fs::remove_dir_all(&run_dir)
+            .into_diagnostic()
+            .with_context(|| format!("remove stale run dir {}", run_dir.display()))?;
+    }
     fs::create_dir_all(&run_dir).into_diagnostic()?;
     let context_path = run_dir.join("context.json");
     write_run_context(
@@ -1087,6 +1093,11 @@ async fn plan_recipe(sim_path: &Path, out_dir: &Path) -> Result<s10::Recipe> {
 }
 
 fn patch_recipe(recipe: s10::Recipe, row: &PlanRow, ctx: &PatchContext<'_>) -> Result<s10::Recipe> {
+    let port_offset = ctx
+        .slot
+        .worker_id
+        .checked_mul(ctx.config.resources.port_stride as usize)
+        .ok_or_else(|| miette!("worker port offset overflow"))?;
     let mut env = HashMap::from([
         (
             CONTEXT_ENV.to_string(),
@@ -1103,6 +1114,10 @@ fn patch_recipe(recipe: s10::Recipe, row: &PlanRow, ctx: &PatchContext<'_>) -> R
         (
             "ELODIN_MONTE_CARLO_DB_PORT".to_string(),
             ctx.slot.db_port.to_string(),
+        ),
+        (
+            "ELODIN_MONTE_CARLO_PORT_OFFSET".to_string(),
+            port_offset.to_string(),
         ),
         (
             "ELODIN_MONTE_CARLO_STATE_PORT".to_string(),
@@ -1137,6 +1152,10 @@ fn patch_recipe(recipe: s10::Recipe, row: &PlanRow, ctx: &PatchContext<'_>) -> R
         if let Some(seed) = row.seed {
             env.insert("SIM_SEED".to_string(), seed.to_string());
         }
+        env.insert(
+            "REVERE_DB_PATH".to_string(),
+            ctx.db_path.to_string_lossy().to_string(),
+        );
     } else if let Some(mode) = ctx.config.params_compat.as_deref() {
         return Err(Error::UnsupportedCompat(mode.to_string())).into_diagnostic();
     }
@@ -1286,6 +1305,9 @@ async fn run_hook(kind: &str, hook: &Path, context: &Path) -> Result<()> {
     )
     .into_diagnostic()
     .with_context(|| format!("write {}", hook_log.display()))?;
+    if kind == "post_campaign" && !output.stdout.is_empty() {
+        print!("{}", String::from_utf8_lossy(&output.stdout));
+    }
     if !output.status.success() {
         return Err(miette!("{kind} hook failed: {}", hook.display()));
     }

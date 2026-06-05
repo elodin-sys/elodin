@@ -31,7 +31,7 @@ def write_template(sim_path: Path, output_path: Path) -> None:
             writer.writerow(
                 {
                     "run_id": "run_0000000",
-                    "seed": 0,
+                    "seed": 1,
                     **{
                         f"param.{name}": param.get("default")
                         for name, param in sorted(params.items())

@@ -460,6 +460,46 @@ class Exec:
     def save_archive(self, path: str, format: str): ...
     def history(self, components: str | list[str]) -> pl.DataFrame: ...
 
+class S10RestartPolicy:
+    Never: ClassVar[S10RestartPolicy]
+    Instant: ClassVar[S10RestartPolicy]
+
+class S10PyRecipe:
+    def __init__(
+        self,
+        name: str,
+        path: str | None = None,
+        addr: str | None = None,
+        optimize: bool | None = None,
+        env: dict[str, str] | None = None,
+    ): ...
+    @staticmethod
+    def cargo(
+        name: str,
+        path: str,
+        package: str | None = None,
+        bin: str | None = None,
+        args: list[str] | None = None,
+        cwd: str | None = None,
+        env: dict[str, str] | None = None,
+    ) -> S10PyRecipe: ...
+    @staticmethod
+    def process(
+        name: str,
+        cmd: str,
+        args: list[str] | None = None,
+        cwd: str | None = None,
+        env: dict[str, str] | None = None,
+    ) -> S10PyRecipe: ...
+    def to_json(self) -> str: ...
+    def name(self) -> str: ...
+
+class _S10Module:
+    PyRecipe: ClassVar[type[S10PyRecipe]]
+    RestartPolicy: ClassVar[type[S10RestartPolicy]]
+
+s10: _S10Module
+
 class GraphEntity:
     def __init__(self, entity_id: EntityId, *components: ShapeIndexer | Any): ...
 

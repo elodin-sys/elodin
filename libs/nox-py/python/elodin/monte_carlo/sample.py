@@ -98,7 +98,7 @@ def materialize(spec_path: Path, output_path: Path) -> None:
         writer = csv.DictWriter(f, fieldnames=headers)
         writer.writeheader()
         for idx, row in enumerate(rows):
-            payload = {"run_id": f"run_{idx:07}", "seed": idx}
+            payload = {"run_id": f"run_{idx:07}", "seed": idx + 1}
             payload.update(row)
             writer.writerow(payload)
 
