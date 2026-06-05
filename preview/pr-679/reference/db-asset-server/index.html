@@ -67,31 +67,31 @@
 
 	
 
-<title>Database embedded assets | Elodin</title>
-<meta name="description" content="Persist schematic assets (GLB, icons, skyboxes) inside an Elodin DB for portable replay and follow">
-<link rel="canonical" href="https://docs.elodin.systems/preview/pr-679/reference/db-embedded-assets/">
+<title>DB Asset Server | Elodin</title>
+<meta name="description" content="Persist schematic assets (GLB, icons, skyboxes) inside an Elodin DB and serve them over HTTP for portable replay and follow">
+<link rel="canonical" href="https://docs.elodin.systems/preview/pr-679/reference/db-asset-server/">
 
 
   <meta name="twitter:card" content="summary_large_image">
   
     <meta name="twitter:image" content="https://docs.elodin.systems/preview/pr-679/logo.png">
   
-  <meta name="twitter:title" content="Database embedded assets">
-  <meta name="twitter:description" content="Persist schematic assets (GLB, icons, skyboxes) inside an Elodin DB for portable replay and follow">
+  <meta name="twitter:title" content="DB Asset Server">
+  <meta name="twitter:description" content="Persist schematic assets (GLB, icons, skyboxes) inside an Elodin DB and serve them over HTTP for portable replay and follow">
   <meta name="twitter:site" content="@elodinsystems">
   <meta name="twitter:creator" content="@elodinsystems">
 
-  <meta property="og:title" content="Database embedded assets">
-  <meta property="og:description" content="Persist schematic assets (GLB, icons, skyboxes) inside an Elodin DB for portable replay and follow">
+  <meta property="og:title" content="DB Asset Server">
+  <meta property="og:description" content="Persist schematic assets (GLB, icons, skyboxes) inside an Elodin DB and serve them over HTTP for portable replay and follow">
   <meta property="og:type" content="article">
-  <meta property="og:url" content="https://docs.elodin.systems/preview/pr-679/reference/db-embedded-assets/">
+  <meta property="og:url" content="https://docs.elodin.systems/preview/pr-679/reference/db-asset-server/">
 
   
     <meta property="og:image" content="https://docs.elodin.systems/preview/pr-679/logo.png">
   
 
   <meta property="og:updated_time" content="">
-  <meta property="og:site_name" content="Database embedded assets">
+  <meta property="og:site_name" content="DB Asset Server">
 
   
 
@@ -160,8 +160,8 @@
           {
             "@type": "ListItem",
             "position":  3 ,
-            "name": "Db Embedded Assets",
-            "item": "https://docs.elodin.systems/preview/pr-679/reference/db-embedded-assets/"
+            "name": "Db Asset Server",
+            "item": "https://docs.elodin.systems/preview/pr-679/reference/db-asset-server/"
           },
         
       
@@ -323,8 +323,8 @@
             <li>
                 <a
                     class="docs-link active"
-                    href="https://docs.elodin.systems/preview/pr-679/reference/db-embedded-assets/"
-                    >Database embedded assets</a
+                    href="https://docs.elodin.systems/preview/pr-679/reference/db-asset-server/"
+                    >DB Asset Server</a
                 >
             </li>
             
@@ -406,108 +406,118 @@
             <ul>
                 
                 <li>
-                    <a href="https://docs.elodin.systems/preview/pr-679/reference/db-embedded-assets/#database-embedded-assets">Database embedded assets</a>
+                    <a href="https://docs.elodin.systems/preview/pr-679/reference/db-asset-server/#architecture">Architecture</a>
                     
                     <ul>
                         
                         <li>
-                            <a href="https://docs.elodin.systems/preview/pr-679/reference/db-embedded-assets/#architecture">Architecture</a>
-                            
-                            <ul>
-                                
-                                <li>
-                                    <a href="https://docs.elodin.systems/preview/pr-679/reference/db-embedded-assets/#layers">Layers</a>
-                                </li>
-                                
-                                <li>
-                                    <a href="https://docs.elodin.systems/preview/pr-679/reference/db-embedded-assets/#ports">Ports</a>
-                                </li>
-                                
-                                <li>
-                                    <a href="https://docs.elodin.systems/preview/pr-679/reference/db-embedded-assets/#the-db-scheme">The db: scheme</a>
-                                </li>
-                                
-                            </ul>
+                            <a href="https://docs.elodin.systems/preview/pr-679/reference/db-asset-server/#layers">Layers</a>
                             
                         </li>
                         
                         <li>
-                            <a href="https://docs.elodin.systems/preview/pr-679/reference/db-embedded-assets/#when-assets-are-persisted">When assets are persisted</a>
+                            <a href="https://docs.elodin.systems/preview/pr-679/reference/db-asset-server/#ports">Ports</a>
                             
                         </li>
                         
                         <li>
-                            <a href="https://docs.elodin.systems/preview/pr-679/reference/db-embedded-assets/#consumption-workflows">Consumption workflows</a>
-                            
-                        </li>
-                        
-                        <li>
-                            <a href="https://docs.elodin.systems/preview/pr-679/reference/db-embedded-assets/#supported-asset-types">Supported asset types</a>
-                            
-                            <ul>
-                                
-                                <li>
-                                    <a href="https://docs.elodin.systems/preview/pr-679/reference/db-embedded-assets/#glb-meshes-object-3d-glb-path">GLB meshes (object_3d → glb path=…)</a>
-                                </li>
-                                
-                                <li>
-                                    <a href="https://docs.elodin.systems/preview/pr-679/reference/db-embedded-assets/#png-icons-object-3d-icon-path">PNG icons (object_3d → icon path=…)</a>
-                                </li>
-                                
-                                <li>
-                                    <a href="https://docs.elodin.systems/preview/pr-679/reference/db-embedded-assets/#skybox-skybox-name">Skybox (skybox name=&quot;…&quot;)</a>
-                                </li>
-                                
-                                <li>
-                                    <a href="https://docs.elodin.systems/preview/pr-679/reference/db-embedded-assets/#carried-in-the-db-without-extra-asset-files">Carried in the DB without extra asset files</a>
-                                </li>
-                                
-                                <li>
-                                    <a href="https://docs.elodin.systems/preview/pr-679/reference/db-embedded-assets/#not-supported-today">Not supported today</a>
-                                </li>
-                                
-                            </ul>
-                            
-                        </li>
-                        
-                        <li>
-                            <a href="https://docs.elodin.systems/preview/pr-679/reference/db-embedded-assets/#environment-variables">Environment variables</a>
-                            
-                        </li>
-                        
-                        <li>
-                            <a href="https://docs.elodin.systems/preview/pr-679/reference/db-embedded-assets/#verification">Verification</a>
-                            
-                        </li>
-                        
-                        <li>
-                            <a href="https://docs.elodin.systems/preview/pr-679/reference/db-embedded-assets/#troubleshooting">Troubleshooting</a>
-                            
-                        </li>
-                        
-                        <li>
-                            <a href="https://docs.elodin.systems/preview/pr-679/reference/db-embedded-assets/#adding-a-new-asset-type">Adding a new asset type</a>
-                            
-                            <ul>
-                                
-                                <li>
-                                    <a href="https://docs.elodin.systems/preview/pr-679/reference/db-embedded-assets/#a-simple-file-referenced-by-path-in-kdl">A — Simple file referenced by path= in KDL</a>
-                                </li>
-                                
-                                <li>
-                                    <a href="https://docs.elodin.systems/preview/pr-679/reference/db-embedded-assets/#b-indirect-reference-name-manifest-file">B — Indirect reference (name → manifest → file)</a>
-                                </li>
-                                
-                            </ul>
-                            
-                        </li>
-                        
-                        <li>
-                            <a href="https://docs.elodin.systems/preview/pr-679/reference/db-embedded-assets/#related-docs">Related docs</a>
+                            <a href="https://docs.elodin.systems/preview/pr-679/reference/db-asset-server/#the-db-scheme">The db: scheme</a>
                             
                         </li>
                         
                     </ul>
+                    
+                </li>
+                
+                <li>
+                    <a href="https://docs.elodin.systems/preview/pr-679/reference/db-asset-server/#when-assets-are-persisted">When assets are persisted</a>
+                    
+                </li>
+                
+                <li>
+                    <a href="https://docs.elodin.systems/preview/pr-679/reference/db-asset-server/#consumption-workflows">Consumption workflows</a>
+                    
+                    <ul>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-679/reference/db-asset-server/#follow-mode-and-assets">Follow mode and assets</a>
+                            
+                        </li>
+                        
+                    </ul>
+                    
+                </li>
+                
+                <li>
+                    <a href="https://docs.elodin.systems/preview/pr-679/reference/db-asset-server/#supported-asset-types">Supported asset types</a>
+                    
+                    <ul>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-679/reference/db-asset-server/#glb-meshes-object-3d-glb-path">GLB meshes (object_3d → glb path=…)</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-679/reference/db-asset-server/#png-icons-object-3d-icon-path">.png icons (object_3d → icon path=…)</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-679/reference/db-asset-server/#skybox-skybox-name">Skybox (skybox name=&quot;…&quot;)</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-679/reference/db-asset-server/#carried-in-the-db-without-extra-asset-files">Carried in the DB without extra asset files</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-679/reference/db-asset-server/#not-supported-today">Not supported today</a>
+                            
+                        </li>
+                        
+                    </ul>
+                    
+                </li>
+                
+                <li>
+                    <a href="https://docs.elodin.systems/preview/pr-679/reference/db-asset-server/#environment-variables">Environment variables</a>
+                    
+                </li>
+                
+                <li>
+                    <a href="https://docs.elodin.systems/preview/pr-679/reference/db-asset-server/#verification">Verification</a>
+                    
+                </li>
+                
+                <li>
+                    <a href="https://docs.elodin.systems/preview/pr-679/reference/db-asset-server/#troubleshooting">Troubleshooting</a>
+                    
+                </li>
+                
+                <li>
+                    <a href="https://docs.elodin.systems/preview/pr-679/reference/db-asset-server/#adding-a-new-asset-type">Adding a new asset type</a>
+                    
+                    <ul>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-679/reference/db-asset-server/#a-simple-file-referenced-by-path-in-kdl">A — Simple file referenced by path= in KDL</a>
+                            
+                        </li>
+                        
+                        <li>
+                            <a href="https://docs.elodin.systems/preview/pr-679/reference/db-asset-server/#b-indirect-reference-name-manifest-file">B — Indirect reference (name → manifest → file)</a>
+                            
+                        </li>
+                        
+                    </ul>
+                    
+                </li>
+                
+                <li>
+                    <a href="https://docs.elodin.systems/preview/pr-679/reference/db-asset-server/#related-docs">Related docs</a>
                     
                 </li>
                 
@@ -517,26 +527,27 @@
 </nav>
  
               <main class="docs-content col-lg-11 col-xxl-10">
-                  <h1>Database embedded assets</h1>
-                   <h1 id="database-embedded-assets">Database embedded assets</h1>
-<p>Record a simulation once, then replay or share the database directory without shipping a separate <code>assets/</code> tree. Meshes, custom icon PNGs, and skyboxes referenced by the schematic are copied into the DB, rewritten in stored KDL as <code>db:…</code> paths, and served over HTTP while the database runs.</p>
-<p>This feature complements <a href="/reference/replays">Replays</a> and <a href="/reference/schematic">Schematic KDL</a>: telemetry lives in the DB layout you already use; this page covers <strong>files</strong> the schematic needs at visualization time.</p>
+                  <h1>DB Asset Server</h1>
+                  
+                  <p class="lead">Copy schematic files into the database at record time, rewrite KDL paths to db:…, and serve them on port N+1 while elodin-db runs.</p>
+                   <p>Record a simulation once, then replay or share the database directory without shipping a separate <code>assets/</code> tree. Meshes, custom <code>.png</code> icons, and skyboxes referenced by the schematic are copied into the DB, rewritten in stored KDL as <code>db:…</code> paths, and served over HTTP while the database runs.</p>
+<p>This complements <a href="/reference/replays">Replays</a> and <a href="/reference/schematic">Schematic KDL</a>: telemetry lives in the DB layout you already use; this page covers <strong>files</strong> the schematic needs at visualization time.</p>
 <h2 id="architecture">Architecture</h2>
 <pre data-lang="mermaid" class="language-mermaid z-code"><code class="language-mermaid" data-lang="mermaid"><span class="z-text z-plain">flowchart LR
-</span><span class="z-text z-plain">  subgraph record [Record]
-</span><span class="z-text z-plain">    Sim[Simulation / world.run]
-</span><span class="z-text z-plain">    Parse[Parse schematic KDL]
-</span><span class="z-text z-plain">    Copy[Copy bytes to db/assets/]
-</span><span class="z-text z-plain">    Rewrite[Rewrite paths to db:…]
-</span><span class="z-text z-plain">    Meta[Store schematic.content in DbConfig]
+</span><span class="z-text z-plain">  subgraph record_phase [&quot;Record&quot;]
+</span><span class="z-text z-plain">    Sim[&quot;Simulation&quot;]
+</span><span class="z-text z-plain">    Parse[&quot;Parse schematic KDL&quot;]
+</span><span class="z-text z-plain">    Copy[&quot;Copy bytes to db/assets&quot;]
+</span><span class="z-text z-plain">    Rewrite[&quot;Rewrite paths to db scheme&quot;]
+</span><span class="z-text z-plain">    Meta[&quot;Store schematic.content&quot;]
 </span><span class="z-text z-plain">  end
-</span><span class="z-text z-plain">  subgraph serve [Serve]
-</span><span class="z-text z-plain">    TCP[Impeller TCP :N]
-</span><span class="z-text z-plain">    HTTP[Assets HTTP :N+1]
+</span><span class="z-text z-plain">  subgraph serve_phase [&quot;Serve&quot;]
+</span><span class="z-text z-plain">    TCP[&quot;Impeller TCP port N&quot;]
+</span><span class="z-text z-plain">    HTTP[&quot;DB Asset Server port N+1&quot;]
 </span><span class="z-text z-plain">  end
-</span><span class="z-text z-plain">  subgraph consume [Consume]
-</span><span class="z-text z-plain">    Editor[Elodin Editor]
-</span><span class="z-text z-plain">    Follow[DB follower sync]
+</span><span class="z-text z-plain">  subgraph consume_phase [&quot;Consume&quot;]
+</span><span class="z-text z-plain">    Editor[&quot;Elodin Editor&quot;]
+</span><span class="z-text z-plain">    Follow[&quot;Follower asset sync&quot;]
 </span><span class="z-text z-plain">  end
 </span><span class="z-text z-plain">  Sim --&gt; Parse --&gt; Copy --&gt; Rewrite --&gt; Meta
 </span><span class="z-text z-plain">  Meta --&gt; TCP
@@ -547,16 +558,16 @@
 <h3 id="layers">Layers</h3>
 <table><thead><tr><th>Layer</th><th>Role</th></tr></thead><tbody>
 <tr><td><strong>Blob store</strong></td><td><code>{db_path}/assets/{relative_key}</code> — opaque bytes, any file type</td></tr>
-<tr><td><strong>HTTP server</strong></td><td><code>GET http://host:(tcp_port+1)/{relative_key}</code> while <code>elodin-db run</code> is active</td></tr>
+<tr><td><strong>DB Asset Server</strong></td><td><code>GET http://host:(tcp_port+1)/{relative_key}</code> while <code>elodin-db run</code> is active</td></tr>
 <tr><td><strong>KDL rewrite</strong></td><td>Local paths at record time become <code>db:{relative_key}</code> in <code>schematic.content</code></td></tr>
 <tr><td><strong>Consumers</strong></td><td>Editor resolves <code>db:</code> to HTTP (or mirrors to a local cache for skyboxes)</td></tr>
 </tbody></table>
 <h3 id="ports">Ports</h3>
 <ul>
 <li><strong>Impeller TCP</strong> on port <code>N</code> (default <code>2240</code>)</li>
-<li><strong>Assets HTTP</strong> on port <code>N + 1</code> (default <code>2241</code>) — <code>ASSETS_HTTP_PORT_OFFSET = 1</code></li>
+<li><strong>DB Asset Server</strong> on port <code>N + 1</code> (default <code>2241</code>) — <code>ASSETS_HTTP_PORT_OFFSET = 1</code></li>
 </ul>
-<p>Do not run a follower Impeller server on <code>N+1</code>; that port is reserved for asset HTTP on the source.</p>
+<p>Do not run a follower Impeller server on <code>N+1</code>; that port is reserved for the DB Asset Server on the source.</p>
 <h3 id="the-db-scheme">The <code>db:</code> scheme</h3>
 <p>At record time, a local schematic path such as <code>models/jet.glb</code> is stored as <code>db:models/jet.glb</code>. The file lands at <code>{db}/assets/models/jet.glb</code>.</p>
 <p>Paths are <strong>not</strong> rewritten when they are already:</p>
@@ -572,15 +583,35 @@
 <li><strong><code>db_path</code></strong> argument to <code>world.run(…, db_path=…)</code>, or</li>
 <li><strong><code>ELODIN_DB_PATH</code></strong> environment variable (Python SDK)</li>
 </ul>
-<p>The schematic body is stored in DB metadata as <code>schematic.content</code> (with <code>db:</code> paths). The original <code>schematic.path</code> string is informational only; replay uses embedded content when the file is missing.</p>
+<p>The schematic body is stored in DB metadata as <code>schematic.content</code> (with <code>db:</code> paths). The original <code>schematic.path</code> string is informational only; replay uses <code>schematic.content</code> from the DB when the file is missing.</p>
 <h2 id="consumption-workflows">Consumption workflows</h2>
 <table><thead><tr><th>Mode</th><th>Typical commands</th><th>Assets</th></tr></thead><tbody>
-<tr><td><strong>Live</strong></td><td><code>elodin editor examples/foo/main.py</code></td><td>HTTP from embedded sim DB during the session</td></tr>
+<tr><td><strong>Live</strong></td><td><code>elodin editor examples/foo/main.py</code></td><td>HTTP from the sim DB during the session</td></tr>
 <tr><td><strong>Recorded DB</strong></td><td><code>elodin-db run 127.0.0.1:2240 ./my-db</code> then <code>elodin editor 127.0.0.1:2240</code></td><td>HTTP from <code>./my-db/assets/</code></td></tr>
 <tr><td><strong>Replay presentation</strong></td><td>Same DB + <code>elodin editor 127.0.0.1:2240 --replay</code></td><td>HTTP; editor timeline reveals progressively</td></tr>
 <tr><td><strong>Follow</strong></td><td><code>elodin-db run … --follows SOURCE:2240</code></td><td>Follower copies <code>db:</code> assets from source HTTP into its own <code>{db}/assets/</code></td></tr>
 </tbody></table>
 <p>See <a href="/reference/elodin-cli">Elodin CLI</a> for <code>editor --replay</code> and <code>elodin-db --follows</code>.</p>
+<h3 id="follow-mode-and-assets">Follow mode and assets</h3>
+<p>When a follower connects to a source <code>elodin-db</code> on port <code>N</code>, it replicates telemetry over Impeller TCP. Schematic assets are <strong>not</strong> streamed on that socket — they are fetched separately from the source <strong>DB Asset Server</strong> on port <code>N+1</code>.</p>
+<p>On connect (and when schematic KDL updates), the follower:</p>
+<ol>
+<li>Reads <code>schematic.content</code> from replicated DB metadata</li>
+<li>Collects every <code>db:…</code> path referenced in the KDL (including skybox manifest sidecars)</li>
+<li><code>GET</code>s each file from <code>http://source:(N+1)/{key}</code> with retries</li>
+<li>Writes bytes into its own <code>{follower_db}/assets/</code></li>
+</ol>
+<p>The follower can then serve those files from its own DB Asset Server on <code>(follower_port + 1)</code> to local editors, without copying the full source database directory.</p>
+<pre data-lang="sh" class="language-sh z-code"><code class="language-sh" data-lang="sh"><span class="z-source z-shell z-bash"><span class="z-comment z-line z-number-sign z-shell"><span class="z-punctuation z-definition z-comment z-begin z-shell">#</span></span><span class="z-comment z-line z-number-sign z-shell"> Source (sim or recorded DB)</span><span class="z-comment z-line z-number-sign z-shell">
+</span></span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">elodin-db</span></span><span class="z-meta z-function-call z-arguments z-shell"> run 127.0.0.1:2240 ./source-db</span>
+</span><span class="z-source z-shell z-bash">
+</span><span class="z-source z-shell z-bash"><span class="z-comment z-line z-number-sign z-shell"><span class="z-punctuation z-definition z-comment z-begin z-shell">#</span></span><span class="z-comment z-line z-number-sign z-shell"> Follower — Impeller on 2242, DB Asset Server on 2243</span><span class="z-comment z-line z-number-sign z-shell">
+</span></span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">elodin-db</span></span><span class="z-meta z-function-call z-arguments z-shell"> run 127.0.0.1:2242 ./follower-db<span class="z-variable z-parameter z-option z-shell"><span class="z-punctuation z-definition z-parameter z-shell"> --</span>follows</span> 127.0.0.1:2240</span>
+</span><span class="z-source z-shell z-bash">
+</span><span class="z-source z-shell z-bash"><span class="z-comment z-line z-number-sign z-shell"><span class="z-punctuation z-definition z-comment z-begin z-shell">#</span></span><span class="z-comment z-line z-number-sign z-shell"> Editor attaches to the follower</span><span class="z-comment z-line z-number-sign z-shell">
+</span></span><span class="z-source z-shell z-bash"><span class="z-meta z-function-call z-shell"><span class="z-variable z-function z-shell">elodin</span></span><span class="z-meta z-function-call z-arguments z-shell"> editor 127.0.0.1:2242</span>
+</span></code></pre>
+<p>Point <code>--follows</code> at the source <strong>Impeller</strong> port (<code>N</code>), not the asset port (<code>N+1</code>).</p>
 <h2 id="supported-asset-types">Supported asset types</h2>
 <h3 id="glb-meshes-object-3d-glb-path">GLB meshes (<code>object_3d</code> → <code>glb path=…</code>)</h3>
 <table><thead><tr><th>Stage</th><th>Behavior</th></tr></thead><tbody>
@@ -589,9 +620,9 @@
 <tr><td><strong>Stored KDL</strong></td><td><code>path="db:models/rocket.glb"</code></td></tr>
 <tr><td><strong>Editor</strong></td><td><code>db:…</code> → <code>http://127.0.0.1:2241/…</code> via Bevy <code>AssetServer</code> + <code>WebAssetPlugin</code> (non-blocking)</td></tr>
 </tbody></table>
-<h3 id="png-icons-object-3d-icon-path">PNG icons (<code>object_3d</code> → <code>icon path=…</code>)</h3>
+<h3 id="png-icons-object-3d-icon-path"><code>.png</code> icons (<code>object_3d</code> → <code>icon path=…</code>)</h3>
 <p>Same pipeline as GLB: persist, rewrite, HTTP load.</p>
-<p><strong><code>icon builtin=…</code></strong> (Material Icons) is <strong>not</strong> copied into the DB. The editor rasterizes built-in glyphs locally; only custom <code>path=</code> PNGs are embedded.</p>
+<p><strong><code>icon builtin=…</code></strong> (Material Icons) is <strong>not</strong> copied into the DB. The editor rasterizes built-in glyphs locally; only custom <code>path=</code> <code>.png</code> files are persisted in the DB.</p>
 <h3 id="skybox-skybox-name">Skybox (<code>skybox name="…"</code>)</h3>
 <p>Skyboxes are <strong>indirect</strong>: the KDL node names a manifest entry, not a single file path.</p>
 <table><thead><tr><th>Stage</th><th>Behavior</th></tr></thead><tbody>
@@ -601,7 +632,7 @@
 <tr><td><strong>Editor</strong></td><td>Async download from DB HTTP into the local skybox cache, then <code>SetActiveSkybox</code></td></tr>
 <tr><td><strong>Clear</strong></td><td>Empty <code>skybox.active</code> metadata or schematic without a <code>skybox</code> node → skybox cleared in the editor</td></tr>
 </tbody></table>
-<p>The skybox plugin today reads from a <strong>local cache directory</strong>; the editor mirrors DB assets there before activation. GLB/PNG use HTTP directly through Bevy.</p>
+<p>The skybox plugin today reads from a <strong>local cache directory</strong>; the editor mirrors DB assets there before activation. GLB meshes and <code>.png</code> icons use HTTP directly through Bevy.</p>
 <h3 id="carried-in-the-db-without-extra-asset-files">Carried in the DB without extra asset files</h3>
 <ul>
 <li>Full schematic KDL in <code>schematic.content</code></li>
@@ -631,13 +662,14 @@
 <h2 id="troubleshooting">Troubleshooting</h2>
 <table><thead><tr><th>Symptom</th><th>Check</th></tr></thead><tbody>
 <tr><td>Icon only, no mesh</td><td><code>curl http://127.0.0.1:2241/…</code> → <code>404</code> means assets were not persisted; set <code>ELODIN_DB_PATH</code> / <code>db_path</code> and re-run</td></tr>
-<tr><td>Port in use</td><td><code>2240</code> = Impeller, <code>2241</code> = assets HTTP; do not bind follower on <code>2241</code></td></tr>
+<tr><td>Port in use</td><td><code>2240</code> = Impeller, <code>2241</code> = DB Asset Server; do not bind follower Impeller on <code>2241</code></td></tr>
 <tr><td>Skybox missing on replay</td><td><code>ls "$DB_PATH/assets/skyboxes/"</code> for <code>manifest.ron</code> and the <code>.ktx2</code></td></tr>
 <tr><td>Empty <code>assets/</code> after sim</td><td><code>world.run</code> without <code>db_path</code> or <code>ELODIN_DB_PATH</code> uses a temp DB</td></tr>
+<tr><td>Follower missing meshes</td><td>Confirm source DB Asset Server responds: <code>curl http://SOURCE:2241/models/rocket.glb</code></td></tr>
 </tbody></table>
 <h2 id="adding-a-new-asset-type">Adding a new asset type</h2>
 <h3 id="a-simple-file-referenced-by-path-in-kdl">A — Simple file referenced by <code>path=</code> in KDL</h3>
-<p>Use this when the schematic stores a <strong>direct relative path</strong> (like GLB or PNG).</p>
+<p>Use this when the schematic stores a <strong>direct relative path</strong> (like a <code>.glb</code> mesh or <code>.png</code> icon).</p>
 <ol>
 <li><strong>KDL</strong> (<code>libs/impeller2/kdl</code>) — parse and serialize the path field on the relevant node.</li>
 <li><strong>Collect &amp; rewrite</strong> (<code>libs/impeller2/kdl/src/rewrite.rs</code>):
@@ -668,6 +700,31 @@
 <li><a href="/home/db/overview">Elodin DB overview</a> — database capabilities and follow mode</li>
 <li><a href="/reference/elodin-cli">Elodin CLI</a> — <code>editor</code>, <code>elodin-db run</code>, <code>--replay</code>, <code>--follows</code></li>
 </ul>
+<script type="module">
+  import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+
+  mermaid.initialize({
+    startOnLoad: false,
+    theme: document.body.classList.contains("dark") ? "dark" : "default",
+    securityLevel: "loose",
+  });
+
+  const nodes = [];
+  document.querySelectorAll("pre > code.language-mermaid").forEach((code) => {
+    const div = document.createElement("div");
+    div.className = "mermaid";
+    div.style.margin = "2rem 0";
+    div.style.overflowX = "auto";
+    div.style.textAlign = "center";
+    div.textContent = code.textContent;
+    code.parentElement.replaceWith(div);
+    nodes.push(div);
+  });
+
+  if (nodes.length) {
+    await mermaid.run({ nodes });
+  }
+</script>
 
                   
 <div class="footer-line-padding"></div>

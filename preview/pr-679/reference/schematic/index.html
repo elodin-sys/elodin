@@ -317,8 +317,8 @@
             <li>
                 <a
                     class="docs-link "
-                    href="https://docs.elodin.systems/preview/pr-679/reference/db-embedded-assets/"
-                    >Database embedded assets</a
+                    href="https://docs.elodin.systems/preview/pr-679/reference/db-asset-server/"
+                    >DB Asset Server</a
                 >
             </li>
             
@@ -534,7 +534,7 @@
 <ul>
 <li>Optional top-level node that activates a cached skybox by manifest name.</li>
 <li><code>name</code>: required manifest entry name. Entries are read from <code>assets/skyboxes/manifest.ron</code>, or from <code>$ELODIN_ASSETS_DIR/skyboxes/manifest.ron</code> when that environment variable is set.</li>
-<li>When a simulation records into an Elodin DB, the manifest and active cubemap are copied under <code>{db}/assets/skyboxes/</code>; see <a href="/reference/db-embedded-assets">Database embedded assets</a>.</li>
+<li>When a simulation records into an Elodin DB, the manifest and active cubemap are copied under <code>{db}/assets/skyboxes/</code>; see <a href="/reference/db-asset-server">DB Asset Server</a>.</li>
 <li>Applies to the whole schematic: editor viewports and sensor cameras use the same active skybox. Overlay cameras such as the ViewCube keep the normal dark/light UI background.</li>
 <li>Example: <code>skybox name="alien_swamp"</code>.</li>
 </ul>
@@ -575,7 +575,7 @@
 <li>
 <p>Mesh child (required, exactly one):</p>
 <ul>
-<li><code>glb</code>: <code>path</code> (required), <code>scale</code> (default 1.0), <code>translate</code> <code>(x,y,z)</code> (default 0s), <code>rotate</code> <code>(deg_x,deg_y,deg_z)</code> in degrees (default 0s). On DB record, local paths are stored as <code>db:…</code> and served over HTTP on replay; see <a href="/reference/db-embedded-assets">Database embedded assets</a>.
+<li><code>glb</code>: <code>path</code> (required), <code>scale</code> (default 1.0), <code>translate</code> <code>(x,y,z)</code> (default 0s), <code>rotate</code> <code>(deg_x,deg_y,deg_z)</code> in degrees (default 0s). On DB record, local paths are stored as <code>db:…</code> and served over HTTP on replay; see <a href="/reference/db-asset-server">DB Asset Server</a>.
 <ul>
 <li><code>animate</code> child nodes (optional, multiple): For rigged GLB models, animate specific joints/bones.
 <ul>
