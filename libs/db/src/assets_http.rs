@@ -31,6 +31,23 @@ pub fn skybox_name_for_schematic_sync(
     schematic.skybox.as_ref().map(|skybox| skybox.name.clone())
 }
 
+/// `db:` asset keys to fetch plus the active skybox name for cubemap resolution.
+fn schematic_sync_asset_names(
+    schematic: &Schematic,
+    db_config: Option<&DbConfig>,
+) -> (Vec<String>, Option<String>) {
+    let skybox_name = skybox_name_for_schematic_sync(db_config, schematic);
+    let mut names = impeller2_kdl::collect_db_asset_names(schematic);
+    if skybox_name.is_some()
+        && !names
+            .iter()
+            .any(|name| name == impeller2_kdl::SKYBOX_MANIFEST_ASSET_NAME)
+    {
+        names.push(impeller2_kdl::SKYBOX_MANIFEST_ASSET_NAME.to_string());
+    }
+    (names, skybox_name)
+}
+
 #[derive(Error, Debug, PartialEq, Eq)]
 pub enum SanitizeError {
     #[error("invalid asset path")]
@@ -189,7 +206,7 @@ pub async fn sync_schematic_assets_from_source(
 ) -> Result<(), SyncAssetsError> {
     let schematic =
         impeller2_kdl::parse_schematic(schematic_kdl).map_err(SyncAssetsError::Parse)?;
-    let names = impeller2_kdl::collect_db_asset_names(&schematic);
+    let (names, skybox_name) = schematic_sync_asset_names(&schematic, db_config);
     if names.is_empty() {
         return Ok(());
     }
@@ -198,7 +215,6 @@ pub async fn sync_schematic_assets_from_source(
     let assets_dir = assets_dir(db_path);
     std::fs::create_dir_all(&assets_dir)?;
     let client = sync_http_client().map_err(io::Error::other)?;
-    let skybox_name = skybox_name_for_schematic_sync(db_config, &schematic);
     let mut synced = HashSet::new();
     let mut skybox_manifest = None;
 
@@ -763,6 +779,82 @@ object_3d "rocket.world_pos" {
         assert_eq!(
             skybox_name_for_schematic_sync(Some(&config), &schematic).as_deref(),
             Some("alpine")
+        );
+    }
+
+    #[test]
+    fn schematic_sync_asset_names_includes_manifest_for_metadata_only_skybox() {
+        let schematic = Schematic::default();
+        let mut config = DbConfig::default();
+        config.set_skybox_active(Some("alpine"));
+        let (names, skybox) = schematic_sync_asset_names(&schematic, Some(&config));
+        assert_eq!(skybox.as_deref(), Some("alpine"));
+        assert_eq!(
+            names,
+            vec![impeller2_kdl::SKYBOX_MANIFEST_ASSET_NAME.to_string()]
+        );
+    }
+
+    #[tokio::test]
+    async fn sync_schematic_assets_metadata_only_skybox_active() {
+        let dir = tempdir().unwrap();
+        let source_assets = dir.path().join("source_assets");
+        std::fs::create_dir_all(source_assets.join("skyboxes")).unwrap();
+        let skybox_manifest = r#"
+(
+    version: 2,
+    entries: [
+        (
+            name: "alpine",
+            prompt: "alpine",
+            style: M3Photoreal,
+            blockade: None,
+            cubemap_file: "alpine.cubemap.ktx2",
+            face_size: 2048,
+            created_at: "2026-05-11T05:34:26Z",
+        ),
+    ],
+    default: Some("alpine"),
+)
+"#;
+        std::fs::write(source_assets.join("skyboxes/manifest.ron"), skybox_manifest).unwrap();
+        std::fs::write(
+            source_assets.join("skyboxes/alpine.cubemap.ktx2"),
+            b"alpine",
+        )
+        .unwrap();
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let bound = listener.local_addr().unwrap();
+        let tcp = SocketAddr::new(bound.ip(), bound.port().saturating_sub(1));
+
+        let state = Arc::new(AssetsState {
+            assets_dir: source_assets.clone(),
+        });
+        let app = Router::new()
+            .route("/{*path}", get(get_asset))
+            .with_state(state);
+
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        let follower_db = dir.path().join("follower_db");
+        let kdl = r#"
+viewport "main" { }
+"#;
+        let mut db_config = DbConfig::default();
+        db_config.set_skybox_active(Some("alpine"));
+
+        sync_schematic_assets_from_source(tcp, &follower_db, kdl, Some(&db_config))
+            .await
+            .unwrap();
+
+        assert_eq!(
+            std::fs::read(assets_dir(&follower_db).join("skyboxes/alpine.cubemap.ktx2")).unwrap(),
+            b"alpine".to_vec()
         );
     }
 
