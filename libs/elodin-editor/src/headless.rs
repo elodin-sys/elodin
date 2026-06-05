@@ -380,16 +380,21 @@ fn sync_headless_skybox(params: SyncHeadlessSkyboxParams) {
         return;
     }
 
-    if let (Some(connection_addr), Some(name)) = (connection_addr.as_deref(), &desired)
-        && crate::skybox_db_assets::db_skybox_mirror_pending(
+    if let (Some(connection_addr), Some(name)) = (connection_addr.as_deref(), &desired) {
+        if crate::skybox_db_assets::db_skybox_mirror_pending(
             connection_addr.0,
             name,
             &mirror,
             &in_flight,
-        )
-    {
-        render_gate.applied = false;
-        return;
+        ) {
+            render_gate.applied = false;
+            return;
+        }
+        if crate::skybox_db_assets::db_skybox_mirror_synced(connection_addr.0, name, &mirror) {
+            render_gate.applied = false;
+            render_gate.activation_dispatched = true;
+            return;
+        }
     }
 
     render_gate.applied = false;

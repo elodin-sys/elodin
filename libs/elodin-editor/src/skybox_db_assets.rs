@@ -66,6 +66,17 @@ fn skybox_in_flight_still_desired(
     skybox_still_desired(config, connection_addr, key)
 }
 
+/// Returns `true` when DB skybox assets were mirrored and activation was already dispatched.
+pub fn db_skybox_mirror_synced(
+    connection_addr: SocketAddr,
+    skybox: &str,
+    mirror: &DbSkyboxAssetMirror,
+) -> bool {
+    mirror.synced.as_ref().is_some_and(|key| {
+        key.addr == connection_addr && key.skybox == skybox
+    })
+}
+
 /// Returns `true` while headless (or other consumers) should wait before activating a DB skybox.
 pub fn db_skybox_mirror_pending(
     connection_addr: SocketAddr,
@@ -306,6 +317,20 @@ mod tests {
     #[test]
     fn cubemap_cache_path_rejects_traversal() {
         assert!(cubemap_cache_path(Path::new("cache"), "../bad.ktx2").is_err());
+    }
+
+    #[test]
+    fn db_skybox_mirror_synced_matches_active_mirror_key() {
+        let addr: SocketAddr = "127.0.0.1:2240".parse().unwrap();
+        let mirror = DbSkyboxAssetMirror {
+            synced: Some(MirrorKey {
+                addr,
+                skybox: "mojave_desert".to_string(),
+            }),
+            last_failed: None,
+        };
+        assert!(db_skybox_mirror_synced(addr, "mojave_desert", &mirror));
+        assert!(!db_skybox_mirror_synced(addr, "grand_canyon", &mirror));
     }
 
     #[test]
