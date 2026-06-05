@@ -1300,6 +1300,8 @@ impl WorldBuilder {
                         None => tempfile::tempdir()?.keep().join("db"),
                     };
                     let db = elodin_db::DB::create(db_path)?;
+                    crate::impeller2_server::prime_schematic_assets(&db, compiled_exec.world_mut())
+                        .map_err(Error::DB)?;
                     crate::impeller2_server::init_db(
                         &db,
                         compiled_exec.world_mut(),
@@ -1389,6 +1391,8 @@ impl WorldBuilder {
             None => tempfile::tempdir()?.keep().join("db"),
         };
         let db = elodin_db::DB::create(db_path)?;
+        crate::impeller2_server::prime_schematic_assets(&db, exec.world_mut())
+            .map_err(Error::DB)?;
         crate::impeller2_server::init_db(&db, exec.world_mut(), Timestamp::now())?;
         Ok(PyExec {
             exec,

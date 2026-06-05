@@ -90,7 +90,8 @@ impl Server {
 
 /// Copy schematic-referenced files into `{db}/assets/` and rewrite KDL paths to `db:…`.
 ///
-/// Call before starting the DB Asset Server so early HTTP requests do not 404.
+/// Call once before starting the DB Asset Server so early HTTP requests do not 404.
+/// `init_db` does not call this — `world.run` primes before `spawn_assets_http`.
 pub fn prime_schematic_assets(
     db: &elodin_db::DB,
     world: &mut World,
@@ -121,7 +122,6 @@ pub fn init_db(
 ) -> Result<(), elodin_db::Error> {
     tracing::info!("initializing db");
     db.set_earliest_timestamp(start_timestamp)?;
-    prime_schematic_assets(db, world)?;
     let schematic_content = world.metadata.schematic.clone();
 
     db.with_state_mut(|state| {
