@@ -112,7 +112,7 @@ pub fn init_db(
                 tracing::warn!(
                     ?err,
                     "failed to parse schematic KDL; skipping db asset upload and db: rewrite — \
-                     GLB paths will remain local and require files at replay"
+                     asset paths will remain local and require files at replay"
                 );
             }
         }
@@ -275,11 +275,11 @@ fn persist_schematic_assets(
     schematic_path: Option<&Path>,
 ) -> Result<(), elodin_db::Error> {
     let assets_dir = elodin_db::assets_http::assets_dir(&db.path);
-    let local_paths = impeller2_kdl::collect_local_glb_paths(schematic);
+    let local_paths = impeller2_kdl::collect_local_asset_paths(schematic);
 
     let mut staged = Vec::new();
     for local_path in &local_paths {
-        let Some(name) = impeller2_kdl::local_glb_asset_name(local_path) else {
+        let Some(name) = impeller2_kdl::local_asset_name(local_path) else {
             continue;
         };
         let data = read_local_asset_file(local_path, schematic_path).map_err(|(path, err)| {
@@ -308,8 +308,8 @@ fn persist_schematic_assets(
         written.push(name);
     }
 
-    impeller2_kdl::rewrite_glb_paths(schematic, |path| {
-        impeller2_kdl::local_glb_asset_name(path).map(|name| format!("db:{name}"))
+    impeller2_kdl::rewrite_asset_paths(schematic, |path| {
+        impeller2_kdl::local_asset_name(path).map(|name| format!("db:{name}"))
     });
     Ok(())
 }
@@ -317,7 +317,10 @@ fn persist_schematic_assets(
 #[cfg(test)]
 mod asset_tests {
     use super::*;
-    use impeller2_wkt::{Object3D, Object3DMesh, SchematicElem};
+    use impeller2_wkt::{
+        Object3D, Object3DIcon, Object3DIconSource, Object3DMesh, SchematicElem,
+        default_icon_color, default_icon_size,
+    };
     use tempfile::tempdir;
 
     fn glb_object(path: &str) -> SchematicElem {
@@ -663,6 +666,52 @@ object_3d "rocket.world_pos" {
             })
             .collect();
         assert_eq!(paths, vec!["db:a/rocket.glb", "db:b/rocket.glb"]);
+    }
+
+    #[test]
+    fn persist_icon_png_path() {
+        let dir = tempdir().unwrap();
+        let db = DB::create(dir.path().join("db")).unwrap();
+        std::fs::create_dir_all(dir.path().join("icons")).unwrap();
+        std::fs::write(dir.path().join("icons/marker.png"), b"png-bytes").unwrap();
+
+        let mut schematic = Schematic {
+            elems: vec![SchematicElem::Object3d(Object3D {
+                eql: "e.world_pos".into(),
+                mesh: Object3DMesh::glb("model.glb"),
+                frame: None,
+                icon: Some(Object3DIcon {
+                    source: Object3DIconSource::Path("icons/marker.png".into()),
+                    color: default_icon_color(),
+                    size: default_icon_size(),
+                    visibility_range: None,
+                }),
+                mesh_visibility_range: None,
+                node_id: Default::default(),
+            })],
+            ..Default::default()
+        };
+        std::fs::write(dir.path().join("model.glb"), b"glb").unwrap();
+
+        persist_schematic_assets(
+            &db,
+            &mut schematic,
+            Some(dir.path().join("schematic.kdl").as_path()),
+        )
+        .unwrap();
+
+        let assets_dir = elodin_db::assets_http::assets_dir(&db.path);
+        assert_eq!(
+            std::fs::read(assets_dir.join("icons/marker.png")).unwrap(),
+            b"png-bytes".to_vec()
+        );
+        let SchematicElem::Object3d(obj) = &schematic.elems[0] else {
+            panic!("expected object_3d");
+        };
+        let Object3DIconSource::Path(icon_path) = &obj.icon.as_ref().unwrap().source else {
+            panic!("expected icon path");
+        };
+        assert_eq!(icon_path, "db:icons/marker.png");
     }
 }
 

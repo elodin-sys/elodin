@@ -119,7 +119,7 @@ async fn fetch_source_asset(client: &reqwest::Client, url: &str, asset: &str) ->
     None
 }
 
-/// Copies `db:` GLB assets referenced in schematic KDL from a source elodin-db assets server.
+/// Copies `db:` assets referenced in schematic KDL from a source elodin-db assets server.
 pub async fn sync_schematic_assets_from_source(
     source_tcp: SocketAddr,
     db_path: &Path,
@@ -127,7 +127,7 @@ pub async fn sync_schematic_assets_from_source(
 ) -> Result<(), SyncAssetsError> {
     let schematic =
         impeller2_kdl::parse_schematic(schematic_kdl).map_err(SyncAssetsError::Parse)?;
-    let names = impeller2_kdl::collect_db_glb_asset_names(&schematic);
+    let names = impeller2_kdl::collect_db_asset_names(&schematic);
     if names.is_empty() {
         return Ok(());
     }
@@ -388,11 +388,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn sync_schematic_assets_from_source_copies_db_glb_files() {
+    async fn sync_schematic_assets_from_source_copies_db_assets() {
         let dir = tempdir().unwrap();
         let source_assets = dir.path().join("source_assets");
         std::fs::create_dir_all(source_assets.join("models")).unwrap();
+        std::fs::create_dir_all(source_assets.join("icons")).unwrap();
         std::fs::write(source_assets.join("models/rocket.glb"), b"from-source").unwrap();
+        std::fs::write(source_assets.join("icons/marker.png"), b"png-source").unwrap();
 
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let bound = listener.local_addr().unwrap();
@@ -415,6 +417,7 @@ mod tests {
         let kdl = r#"
 object_3d "rocket.world_pos" {
     glb path="db:models/rocket.glb"
+    icon path="db:icons/marker.png"
 }
 "#;
         sync_schematic_assets_from_source(tcp, &follower_db, kdl)
@@ -424,6 +427,10 @@ object_3d "rocket.world_pos" {
         assert_eq!(
             std::fs::read(assets_dir(&follower_db).join("models/rocket.glb")).unwrap(),
             b"from-source".to_vec()
+        );
+        assert_eq!(
+            std::fs::read(assets_dir(&follower_db).join("icons/marker.png")).unwrap(),
+            b"png-source".to_vec()
         );
     }
 

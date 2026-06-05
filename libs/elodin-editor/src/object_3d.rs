@@ -51,7 +51,8 @@ pub fn assets_http_base(connection_addr: SocketAddr) -> String {
     }
 }
 
-pub fn resolve_glb_asset_url(path: &str, connection_addr: Option<SocketAddr>) -> String {
+/// Resolves schematic asset paths (`db:…`) to the embedded HTTP assets URL.
+pub fn resolve_db_asset_url(path: &str, connection_addr: Option<SocketAddr>) -> String {
     if let Some(name) = path.strip_prefix("db:") {
         let name = name.trim_start_matches('/');
         let conn = connection_addr.unwrap_or_else(|| "127.0.0.1:2240".parse().expect("valid addr"));
@@ -59,6 +60,10 @@ pub fn resolve_glb_asset_url(path: &str, connection_addr: Option<SocketAddr>) ->
     } else {
         path.to_string()
     }
+}
+
+pub fn resolve_glb_asset_url(path: &str, connection_addr: Option<SocketAddr>) -> String {
+    resolve_db_asset_url(path, connection_addr)
 }
 
 /// ExprObject3D component that holds an EQL expression for dynamic positioning
@@ -1575,9 +1580,13 @@ pub fn spawn_billboard_icon(
     image_assets: &mut ResMut<Assets<Image>>,
     asset_server: &Res<AssetServer>,
     icon_cache: &mut ResMut<IconTextureCache>,
+    connection_addr: Option<SocketAddr>,
 ) {
     let texture_handle: Handle<Image> = match &icon.source {
-        Object3DIconSource::Path(path) => asset_server.load(path.clone()),
+        Object3DIconSource::Path(path) => {
+            let url = resolve_db_asset_url(path, connection_addr);
+            asset_server.load(url)
+        }
         Object3DIconSource::Builtin(name) => {
             let raster_size = (icon.size * 2.0).max(64.0) as u32;
             icon_cache.get_or_insert(name, raster_size, image_assets)
@@ -2231,14 +2240,14 @@ mod ellipsoid_scale_eql_tests {
 
 #[cfg(test)]
 mod db_asset_url_tests {
-    use super::resolve_glb_asset_url;
+    use super::resolve_db_asset_url;
     use std::net::SocketAddr;
 
     #[test]
     fn resolve_db_asset_url_uses_connection_host_and_offset_port() {
         let conn: SocketAddr = "127.0.0.1:2240".parse().unwrap();
         assert_eq!(
-            resolve_glb_asset_url("db:rocket.glb", Some(conn)),
+            resolve_db_asset_url("db:rocket.glb", Some(conn)),
             "http://127.0.0.1:2241/rocket.glb"
         );
     }
@@ -2246,14 +2255,14 @@ mod db_asset_url_tests {
     #[test]
     fn resolve_http_asset_url_is_unchanged() {
         let url = "http://127.0.0.1:2241/rocket.glb";
-        assert_eq!(resolve_glb_asset_url(url, None), url);
+        assert_eq!(resolve_db_asset_url(url, None), url);
     }
 
     #[test]
     fn resolve_db_asset_url_ipv6() {
         let conn: SocketAddr = "[::1]:2240".parse().unwrap();
         assert_eq!(
-            resolve_glb_asset_url("db:rocket.glb", Some(conn)),
+            resolve_db_asset_url("db:rocket.glb", Some(conn)),
             "http://[::1]:2241/rocket.glb"
         );
     }
@@ -2262,7 +2271,7 @@ mod db_asset_url_tests {
     fn resolve_db_asset_url_normalizes_unspecified_ipv6_to_loopback() {
         let conn: SocketAddr = "[::]:2240".parse().unwrap();
         assert_eq!(
-            resolve_glb_asset_url("db:rocket.glb", Some(conn)),
+            resolve_db_asset_url("db:rocket.glb", Some(conn)),
             "http://[::1]:2241/rocket.glb"
         );
     }
@@ -2271,7 +2280,7 @@ mod db_asset_url_tests {
     fn resolve_db_asset_url_normalizes_unspecified_ipv4_to_loopback() {
         let conn: SocketAddr = "0.0.0.0:2240".parse().unwrap();
         assert_eq!(
-            resolve_glb_asset_url("db:rocket.glb", Some(conn)),
+            resolve_db_asset_url("db:rocket.glb", Some(conn)),
             "http://127.0.0.1:2241/rocket.glb"
         );
     }
@@ -2279,8 +2288,17 @@ mod db_asset_url_tests {
     #[test]
     fn resolve_db_asset_url_defaults_to_localhost_when_disconnected() {
         assert_eq!(
-            resolve_glb_asset_url("db:rocket.glb", None),
+            resolve_db_asset_url("db:rocket.glb", None),
             "http://127.0.0.1:2241/rocket.glb"
+        );
+    }
+
+    #[test]
+    fn resolve_db_asset_url_supports_png_icon_paths() {
+        let conn: SocketAddr = "127.0.0.1:2240".parse().unwrap();
+        assert_eq!(
+            resolve_db_asset_url("db:icons/marker.png", Some(conn)),
+            "http://127.0.0.1:2241/icons/marker.png"
         );
     }
 }

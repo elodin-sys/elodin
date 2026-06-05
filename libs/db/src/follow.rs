@@ -169,7 +169,7 @@ async fn run_follower_inner(config: &FollowConfig, db: &Arc<DB>) -> Result<(), E
     {
         warn!(
             ?err,
-            "failed to sync schematic GLB assets from source; db: paths may not load"
+            "failed to sync schematic assets from source; db: paths may not load"
         );
     }
 

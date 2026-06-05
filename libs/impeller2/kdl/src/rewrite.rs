@@ -1,24 +1,34 @@
-use impeller2_wkt::{Object3DMesh, Panel, Schematic, SchematicElem};
+use impeller2_wkt::{
+    Object3DIcon, Object3DIconSource, Object3DMesh, Panel, Schematic, SchematicElem,
+};
 use std::path::{Component, Path};
 
 pub fn is_local_asset_path(path: &str) -> bool {
     !(path.starts_with("db:") || path.starts_with("http://") || path.starts_with("https://"))
 }
 
-pub fn local_glb_asset_name(path: &str) -> Option<String> {
+pub fn local_asset_name(path: &str) -> Option<String> {
     if !is_local_asset_path(path) {
         return None;
     }
     path_components_to_asset_name(Path::new(path))
 }
 
+pub fn local_glb_asset_name(path: &str) -> Option<String> {
+    local_asset_name(path)
+}
+
 /// Strips `db:` and returns the relative asset key stored under `{db}/assets/`.
-pub fn db_glb_asset_name(path: &str) -> Option<String> {
+pub fn db_asset_name(path: &str) -> Option<String> {
     let name = path.strip_prefix("db:")?.trim_start_matches('/');
     if name.is_empty() || name.contains('\0') {
         return None;
     }
     Some(name.to_owned())
+}
+
+pub fn db_glb_asset_name(path: &str) -> Option<String> {
+    db_asset_name(path)
 }
 
 fn path_components_to_asset_name(path: &Path) -> Option<String> {
@@ -44,7 +54,7 @@ fn path_components_to_asset_name(path: &Path) -> Option<String> {
     Some(parts.join("/"))
 }
 
-pub fn rewrite_glb_paths<F>(schematic: &mut Schematic, mut map: F)
+pub fn rewrite_asset_paths<F>(schematic: &mut Schematic, mut map: F)
 where
     F: FnMut(&str) -> Option<String>,
 {
@@ -53,12 +63,22 @@ where
     }
 }
 
+pub fn rewrite_glb_paths<F>(schematic: &mut Schematic, map: F)
+where
+    F: FnMut(&str) -> Option<String>,
+{
+    rewrite_asset_paths(schematic, map);
+}
+
 fn rewrite_elem<F>(elem: &mut SchematicElem, map: &mut F)
 where
     F: FnMut(&str) -> Option<String>,
 {
     match elem {
-        SchematicElem::Object3d(obj) => rewrite_glb_mesh(&mut obj.mesh, map),
+        SchematicElem::Object3d(obj) => {
+            rewrite_glb_mesh(&mut obj.mesh, map);
+            rewrite_icon_path(&mut obj.icon, map);
+        }
         SchematicElem::Panel(panel) => rewrite_panel(panel, map),
         _ => {}
     }
@@ -95,7 +115,21 @@ where
     }
 }
 
-pub fn collect_local_glb_paths(schematic: &Schematic) -> Vec<String> {
+fn rewrite_icon_path<F>(icon: &mut Option<Object3DIcon>, map: &mut F)
+where
+    F: FnMut(&str) -> Option<String>,
+{
+    let Some(icon) = icon else {
+        return;
+    };
+    if let Object3DIconSource::Path(path) = &mut icon.source
+        && let Some(new_path) = map(path)
+    {
+        *path = new_path;
+    }
+}
+
+pub fn collect_local_asset_paths(schematic: &Schematic) -> Vec<String> {
     let mut paths = Vec::new();
     for elem in &schematic.elems {
         collect_elem_paths(elem, &mut paths);
@@ -105,7 +139,11 @@ pub fn collect_local_glb_paths(schematic: &Schematic) -> Vec<String> {
     paths
 }
 
-pub fn collect_db_glb_asset_names(schematic: &Schematic) -> Vec<String> {
+pub fn collect_local_glb_paths(schematic: &Schematic) -> Vec<String> {
+    collect_local_asset_paths(schematic)
+}
+
+pub fn collect_db_asset_names(schematic: &Schematic) -> Vec<String> {
     let mut names = Vec::new();
     for elem in &schematic.elems {
         collect_elem_db_asset_names(elem, &mut names);
@@ -115,11 +153,21 @@ pub fn collect_db_glb_asset_names(schematic: &Schematic) -> Vec<String> {
     names
 }
 
+pub fn collect_db_glb_asset_names(schematic: &Schematic) -> Vec<String> {
+    collect_db_asset_names(schematic)
+}
+
 fn collect_elem_db_asset_names(elem: &SchematicElem, names: &mut Vec<String>) {
     match elem {
         SchematicElem::Object3d(obj) => {
             if let Object3DMesh::Glb { path, .. } = &obj.mesh
-                && let Some(name) = db_glb_asset_name(path)
+                && let Some(name) = db_asset_name(path)
+            {
+                names.push(name);
+            }
+            if let Some(icon) = &obj.icon
+                && let Object3DIconSource::Path(path) = &icon.source
+                && let Some(name) = db_asset_name(path)
             {
                 names.push(name);
             }
@@ -154,6 +202,12 @@ fn collect_elem_paths(elem: &SchematicElem, paths: &mut Vec<String>) {
             {
                 paths.push(path.clone());
             }
+            if let Some(icon) = &obj.icon
+                && let Object3DIconSource::Path(path) = &icon.source
+                && is_local_asset_path(path)
+            {
+                paths.push(path.clone());
+            }
         }
         SchematicElem::Panel(panel) => collect_panel_paths(panel, paths),
         _ => {}
@@ -180,7 +234,10 @@ fn collect_panel_paths(panel: &Panel, paths: &mut Vec<String>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use impeller2_wkt::{Object3D, Object3DMesh, SchematicElem};
+    use impeller2_wkt::{
+        Object3D, Object3DIcon, Object3DIconSource, Object3DMesh, SchematicElem,
+        default_icon_color, default_icon_size,
+    };
 
     #[test]
     fn rewrite_local_glb_to_db_scheme() {
@@ -196,8 +253,8 @@ mod tests {
             ..Default::default()
         };
 
-        rewrite_glb_paths(&mut schematic, |path| {
-            local_glb_asset_name(path).map(|name| format!("db:{name}"))
+        rewrite_asset_paths(&mut schematic, |path| {
+            local_asset_name(path).map(|name| format!("db:{name}"))
         });
 
         let SchematicElem::Object3d(obj) = &schematic.elems[0] else {
@@ -210,7 +267,7 @@ mod tests {
     }
 
     #[test]
-    fn collect_local_glb_paths_skips_db_and_http() {
+    fn collect_local_asset_paths_skips_db_and_http() {
         let schematic = Schematic {
             elems: vec![
                 SchematicElem::Object3d(Object3D {
@@ -242,7 +299,7 @@ mod tests {
         };
 
         assert_eq!(
-            collect_local_glb_paths(&schematic),
+            collect_local_asset_paths(&schematic),
             vec!["models/a.glb".to_string()]
         );
     }
@@ -271,8 +328,8 @@ mod tests {
             ..Default::default()
         };
 
-        rewrite_glb_paths(&mut schematic, |path| {
-            local_glb_asset_name(path).map(|name| format!("db:{name}"))
+        rewrite_asset_paths(&mut schematic, |path| {
+            local_asset_name(path).map(|name| format!("db:{name}"))
         });
 
         let paths: Vec<_> = schematic
@@ -305,8 +362,8 @@ mod tests {
             ..Default::default()
         };
 
-        rewrite_glb_paths(&mut schematic, |path| {
-            local_glb_asset_name(path).map(|name| format!("db:{name}"))
+        rewrite_asset_paths(&mut schematic, |path| {
+            local_asset_name(path).map(|name| format!("db:{name}"))
         });
 
         let kdl = serialize_schematic(&schematic);
@@ -349,8 +406,8 @@ mod tests {
             ..Default::default()
         };
 
-        rewrite_glb_paths(&mut schematic, |path| {
-            local_glb_asset_name(path).map(|name| format!("db:{name}"))
+        rewrite_asset_paths(&mut schematic, |path| {
+            local_asset_name(path).map(|name| format!("db:{name}"))
         });
 
         let paths: Vec<_> = schematic
@@ -370,16 +427,16 @@ mod tests {
     #[test]
     fn absolute_glb_paths_use_full_component_path() {
         assert_eq!(
-            local_glb_asset_name("/projets/a/rocket.glb").as_deref(),
+            local_asset_name("/projets/a/rocket.glb").as_deref(),
             Some("projets/a/rocket.glb")
         );
         assert_eq!(
-            local_glb_asset_name("/autre/rocket.glb").as_deref(),
+            local_asset_name("/autre/rocket.glb").as_deref(),
             Some("autre/rocket.glb")
         );
         assert_ne!(
-            local_glb_asset_name("/projets/a/rocket.glb"),
-            local_glb_asset_name("/autre/rocket.glb")
+            local_asset_name("/projets/a/rocket.glb"),
+            local_asset_name("/autre/rocket.glb")
         );
     }
 
@@ -407,8 +464,8 @@ mod tests {
             ..Default::default()
         };
 
-        rewrite_glb_paths(&mut schematic, |path| {
-            local_glb_asset_name(path).map(|name| format!("db:{name}"))
+        rewrite_asset_paths(&mut schematic, |path| {
+            local_asset_name(path).map(|name| format!("db:{name}"))
         });
 
         let paths: Vec<_> = schematic
@@ -429,7 +486,7 @@ mod tests {
     }
 
     #[test]
-    fn collect_db_glb_asset_names_from_schematic() {
+    fn collect_db_asset_names_from_schematic() {
         let schematic = Schematic {
             elems: vec![
                 SchematicElem::Object3d(Object3D {
@@ -452,8 +509,93 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(
-            collect_db_glb_asset_names(&schematic),
+            collect_db_asset_names(&schematic),
             vec!["models/a.glb".to_string()]
+        );
+    }
+
+    #[test]
+    fn rewrite_local_icon_png_to_db_scheme() {
+        let mut schematic = Schematic {
+            elems: vec![SchematicElem::Object3d(Object3D {
+                eql: "e".into(),
+                mesh: Object3DMesh::glb("model.glb"),
+                frame: None,
+                icon: Some(Object3DIcon {
+                    source: Object3DIconSource::Path("icons/marker.png".into()),
+                    color: default_icon_color(),
+                    size: default_icon_size(),
+                    visibility_range: None,
+                }),
+                mesh_visibility_range: None,
+                node_id: Default::default(),
+            })],
+            ..Default::default()
+        };
+
+        rewrite_asset_paths(&mut schematic, |path| {
+            local_asset_name(path).map(|name| format!("db:{name}"))
+        });
+
+        let SchematicElem::Object3d(obj) = &schematic.elems[0] else {
+            panic!("expected object_3d");
+        };
+        let Object3DIconSource::Path(path) = &obj.icon.as_ref().unwrap().source else {
+            panic!("expected icon path");
+        };
+        assert_eq!(path, "db:icons/marker.png");
+        let Object3DMesh::Glb { path, .. } = &obj.mesh else {
+            panic!("expected glb");
+        };
+        assert_eq!(path, "db:model.glb");
+    }
+
+    #[test]
+    fn collect_local_paths_includes_icon_png() {
+        let schematic = Schematic {
+            elems: vec![SchematicElem::Object3d(Object3D {
+                eql: "a".into(),
+                mesh: Object3DMesh::glb("a.glb"),
+                frame: None,
+                icon: Some(Object3DIcon {
+                    source: Object3DIconSource::Path("icons/a.png".into()),
+                    color: default_icon_color(),
+                    size: default_icon_size(),
+                    visibility_range: None,
+                }),
+                mesh_visibility_range: None,
+                node_id: Default::default(),
+            })],
+            ..Default::default()
+        };
+
+        assert_eq!(
+            collect_local_asset_paths(&schematic),
+            vec!["a.glb".to_string(), "icons/a.png".to_string()]
+        );
+    }
+
+    #[test]
+    fn collect_db_asset_names_includes_icon_png() {
+        let schematic = Schematic {
+            elems: vec![SchematicElem::Object3d(Object3D {
+                eql: "a".into(),
+                mesh: Object3DMesh::glb("db:mesh.glb"),
+                frame: None,
+                icon: Some(Object3DIcon {
+                    source: Object3DIconSource::Path("db:icons/a.png".into()),
+                    color: default_icon_color(),
+                    size: default_icon_size(),
+                    visibility_range: None,
+                }),
+                mesh_visibility_range: None,
+                node_id: Default::default(),
+            })],
+            ..Default::default()
+        };
+        assert_eq!(
+            collect_db_asset_names(&schematic),
+            vec!["icons/a.png".to_string(), "mesh.glb".to_string()]
         );
     }
 }

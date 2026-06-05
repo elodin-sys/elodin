@@ -624,6 +624,7 @@ impl LoadSchematicParams<'_, '_> {
                         &mut self.images,
                         &self.asset_server,
                         &mut self.icon_cache,
+                        connection_addr,
                     );
                 }
             }
