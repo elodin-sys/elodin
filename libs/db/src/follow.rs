@@ -54,7 +54,14 @@ impl Default for FollowConfig {
 /// before the follower accepts clients.
 pub async fn prime_follower_state(config: &FollowConfig, db: &Arc<DB>) -> Result<(), Error> {
     let (_, metadata_resp, schema_resp) = request_source_snapshot(config, false).await?;
-    apply_source_snapshot(config, db, &metadata_resp, &schema_resp).await
+    apply_source_snapshot(
+        config,
+        db,
+        &metadata_resp,
+        &schema_resp,
+        SchematicAssetSync::Await,
+    )
+    .await
 }
 
 /// Run the follower, connecting to the source and replicating all data.
@@ -166,11 +173,26 @@ async fn request_source_snapshot(
     Ok((session, metadata_resp, schema_resp))
 }
 
+enum SchematicAssetSync {
+    /// Block until HTTP asset sync completes (no FollowStream active).
+    Await,
+    /// Keep draining the follow stream while assets sync over HTTP.
+    Background,
+}
+
+#[cfg(feature = "axum")]
+fn spawn_schematic_asset_sync(source_addr: SocketAddr, db: Arc<DB>) {
+    stellarator::spawn(async move {
+        crate::assets_http::sync_schematic_assets_for_db_from_source(source_addr, &db).await;
+    });
+}
+
 async fn apply_source_snapshot(
     config: &FollowConfig,
     db: &Arc<DB>,
     metadata_resp: &DumpMetadataResp,
     schema_resp: &DumpSchemaResp,
+    asset_sync: SchematicAssetSync,
 ) -> Result<(), Error> {
     db.with_state_mut(|s| {
         s.db_config
@@ -182,8 +204,6 @@ async fn apply_source_snapshot(
         let _ = db.set_earliest_timestamp(Timestamp(ts_micros));
     }
     db.save_db_state()?;
-    #[cfg(feature = "axum")]
-    crate::assets_http::sync_schematic_assets_for_db_from_source(config.source_addr, db).await;
 
     for metadata in &metadata_resp.component_metadata {
         db.with_state_mut(|s| s.set_component_metadata(metadata.clone(), &db.path))?;
@@ -220,10 +240,22 @@ async fn apply_source_snapshot(
             .store(!followed.is_empty(), std::sync::atomic::Ordering::Release);
     }
 
+    match asset_sync {
+        SchematicAssetSync::Await => {
+            #[cfg(feature = "axum")]
+            crate::assets_http::sync_schematic_assets_for_db_from_source(config.source_addr, db)
+                .await;
+        }
+        SchematicAssetSync::Background => {
+            #[cfg(feature = "axum")]
+            spawn_schematic_asset_sync(config.source_addr, db.clone());
+        }
+    }
+
     Ok(())
 }
 
-async fn apply_db_config_update(
+fn apply_db_config_update(
     config: &FollowConfig,
     db: &Arc<DB>,
     update: SetDbConfig,
@@ -231,14 +263,21 @@ async fn apply_db_config_update(
     let needs_asset_sync = db.apply_set_db_config(update)?;
     #[cfg(feature = "axum")]
     if needs_asset_sync {
-        crate::assets_http::sync_schematic_assets_for_db_from_source(config.source_addr, db).await;
+        spawn_schematic_asset_sync(config.source_addr, db.clone());
     }
     Ok(())
 }
 
 async fn run_follower_inner(config: &FollowConfig, db: &Arc<DB>) -> Result<(), Error> {
     let (session, metadata_resp, schema_resp) = request_source_snapshot(config, true).await?;
-    apply_source_snapshot(config, db, &metadata_resp, &schema_resp).await?;
+    apply_source_snapshot(
+        config,
+        db,
+        &metadata_resp,
+        &schema_resp,
+        SchematicAssetSync::Background,
+    )
+    .await?;
 
     let FollowStreamSession { mut rx, mut buf } = session.expect("follow stream session");
 
@@ -343,7 +382,7 @@ async fn run_follower_inner(config: &FollowConfig, db: &Arc<DB>) -> Result<(), E
             // SetDbConfig – live db_config metadata (e.g. schematic.content).
             Packet::Msg(m) if m.id == SetDbConfig::ID => {
                 let update: SetDbConfig = m.parse()?;
-                apply_db_config_update(config, db, update).await?;
+                apply_db_config_update(config, db, update)?;
             }
 
             // VTableMsg – extract ComponentId and store in connection-local map.
