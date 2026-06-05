@@ -14,6 +14,8 @@ order = 5
 
 Elodin has built-in functionality to save simulation data to a directory. This data can be used to replay the simulation at a later time. This is useful for debugging, testing, and sharing simulations. Replays also enable running simulations in a headless environment, and then replaying them in a graphical environment.
 
+For **Elodin DB** recordings that bundle schematic assets (GLB, PNG icons, skyboxes) under `{db}/assets/`, see [Database embedded assets](/reference/db-embedded-assets). The layout below describes the legacy replay directory format (`metadata.json`, `assets.bin`, Parquet).
+
 To replay a simulation using the Elodin editor, run the following command:
 
 ```bash

@@ -96,23 +96,21 @@ pub fn sync_db_skybox_assets_from_config(
                 && skybox_still_desired(&config, connection_addr.as_deref(), &key)
             {
                 match result {
-                    Ok(payload) => {
-                        match apply_db_skybox_download(&payload, settings, cache) {
-                            Ok(()) => {
-                                mirror.synced = Some(key.clone());
-                                mirror.last_failed = None;
-                                skyboxes.write(SetActiveSkybox::ByName(key.skybox));
-                            }
-                            Err(error) => {
-                                tracing::warn!(
-                                    skybox = %key.skybox,
-                                    error = %error,
-                                    "failed to apply mirrored skybox assets from database"
-                                );
-                                mirror.last_failed = Some((key, Instant::now()));
-                            }
+                    Ok(payload) => match apply_db_skybox_download(&payload, settings, cache) {
+                        Ok(()) => {
+                            mirror.synced = Some(key.clone());
+                            mirror.last_failed = None;
+                            skyboxes.write(SetActiveSkybox::ByName(key.skybox));
                         }
-                    }
+                        Err(error) => {
+                            tracing::warn!(
+                                skybox = %key.skybox,
+                                error = %error,
+                                "failed to apply mirrored skybox assets from database"
+                            );
+                            mirror.last_failed = Some((key, Instant::now()));
+                        }
+                    },
                     Err(error) => {
                         tracing::warn!(
                             skybox = %key.skybox,
@@ -166,9 +164,10 @@ pub fn sync_db_skybox_assets_from_config(
 
     in_flight.key = Some(key);
     let connection_addr = connection_addr.0;
-    in_flight.task = Some(IoTaskPool::get().spawn(async move {
-        download_db_skybox_assets(&desired, connection_addr).await
-    }));
+    in_flight.task = Some(
+        IoTaskPool::get()
+            .spawn(async move { download_db_skybox_assets(&desired, connection_addr).await }),
+    );
 }
 
 async fn fetch_asset(client: &reqwest::Client, url: &str) -> Result<Vec<u8>, String> {

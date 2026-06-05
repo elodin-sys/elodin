@@ -127,9 +127,7 @@ async fn sync_one_schematic_asset(
     name: &str,
 ) -> Option<Vec<u8>> {
     let url = format!("{base}/{name}");
-    let Some(bytes) = fetch_source_asset(client, &url, name).await else {
-        return None;
-    };
+    let bytes = fetch_source_asset(client, &url, name).await?;
     if let Err(err) = write_asset_file(assets_dir, name, &bytes) {
         tracing::warn!(
             asset = %name,
