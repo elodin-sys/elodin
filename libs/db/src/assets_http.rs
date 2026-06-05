@@ -10,6 +10,9 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 use thiserror::Error;
+use tracing::warn;
+
+use crate::DB;
 
 pub use impeller2::ASSETS_HTTP_PORT_OFFSET;
 
@@ -139,6 +142,20 @@ async fn sync_one_schematic_asset(
     }
     tracing::info!(asset = %name, "synced schematic asset from source");
     Some(bytes)
+}
+
+/// Fetches schematic `db:` assets from a source DB Asset Server into `db`'s local `assets/` dir.
+pub async fn sync_schematic_assets_for_db_from_source(source_tcp: SocketAddr, db: &DB) {
+    let Some(content) = db.with_state(|s| s.db_config.schematic_content().map(str::to_owned))
+    else {
+        return;
+    };
+    if let Err(err) = sync_schematic_assets_from_source(source_tcp, &db.path, &content).await {
+        warn!(
+            ?err,
+            "failed to sync schematic assets from source; db: paths may not load"
+        );
+    }
 }
 
 /// Copies `db:` assets referenced in schematic KDL from a source elodin-db assets server.

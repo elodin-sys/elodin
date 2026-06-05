@@ -177,17 +177,7 @@ pub async fn handle_follow_stream<W: AsyncWrite>(
         // ── 2b. DbConfig updates (schematic.content, skybox, etc.) ───────
         let (current_metadata, current_recording) =
             db.with_state(|state| (state.db_config.metadata.clone(), state.db_config.recording));
-        let mut metadata_delta = HashMap::new();
-        for (key, value) in &current_metadata {
-            if last_db_metadata.get(key) != Some(value) {
-                metadata_delta.insert(key.clone(), value.clone());
-            }
-        }
-        for key in last_db_metadata.keys() {
-            if !current_metadata.contains_key(key) {
-                metadata_delta.insert(key.clone(), String::new());
-            }
-        }
+        let metadata_delta = db_config_metadata_delta(&last_db_metadata, &current_metadata);
         let recording_delta = (current_recording != last_recording).then_some(current_recording);
         if recording_delta.is_some() || !metadata_delta.is_empty() {
             sink.send(
@@ -307,4 +297,22 @@ pub async fn handle_follow_stream<W: AsyncWrite>(
         futures_lite::future::race(db.last_updated.wait(), stellarator::sleep(FLUSH_INTERVAL))
             .await;
     }
+}
+
+fn db_config_metadata_delta(
+    previous: &HashMap<String, String>,
+    current: &HashMap<String, String>,
+) -> HashMap<String, String> {
+    let mut delta = HashMap::new();
+    for (key, value) in current {
+        if previous.get(key) != Some(value) {
+            delta.insert(key.clone(), value.clone());
+        }
+    }
+    for key in previous.keys() {
+        if !current.contains_key(key) {
+            delta.insert(key.clone(), String::new());
+        }
+    }
+    delta
 }

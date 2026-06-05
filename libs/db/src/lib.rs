@@ -355,6 +355,20 @@ impl DB {
         db_state.write(self.path.join("db_state"))
     }
 
+    /// Apply a `SetDbConfig` patch and persist. Returns whether `schematic.content` changed.
+    pub fn apply_set_db_config(&self, update: SetDbConfig) -> Result<bool, Error> {
+        let schematic_changed = update.metadata.contains_key("schematic.content");
+        if let Some(recording) = update.recording {
+            self.with_state_mut(|s| s.db_config.recording = recording);
+            self.recording_cell.set_playing(recording);
+        }
+        self.with_state_mut(|s| {
+            s.db_config.metadata.extend(update.metadata);
+        });
+        self.save_db_state()?;
+        Ok(schematic_changed)
+    }
+
     pub fn flush_all(&self) -> Result<(), Error> {
         self.with_state(|state| -> Result<(), Error> {
             // Ensure time-series data is fully flushed
@@ -1966,20 +1980,8 @@ async fn handle_packet<A: AsyncWrite + Send + Sync + 'static>(
             });
         }
         Packet::Msg(m) if m.id == SetDbConfig::ID => {
-            let SetDbConfig {
-                recording,
-                metadata,
-            } = m.parse::<SetDbConfig>()?;
-            if let Some(recording) = recording {
-                db.with_state_mut(|s| {
-                    s.db_config.recording = recording;
-                });
-                db.recording_cell.set_playing(recording);
-            }
-            db.with_state_mut(|s| {
-                s.db_config.metadata.extend(metadata);
-            });
-            db.save_db_state()?;
+            let update = m.parse::<SetDbConfig>()?;
+            db.apply_set_db_config(update)?;
             tx.send_msg(&db.db_config()).await?;
         }
         Packet::Msg(m) if m.id == GetEarliestTimestamp::ID => {

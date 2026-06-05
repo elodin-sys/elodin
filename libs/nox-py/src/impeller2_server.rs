@@ -91,17 +91,16 @@ impl Server {
 /// Copy schematic-referenced files into `{db}/assets/` and rewrite KDL paths to `db:…`.
 ///
 /// Call before starting the DB Asset Server so early HTTP requests do not 404.
-pub fn prime_schematic_assets(db: &elodin_db::DB, world: &mut World) -> Result<(), elodin_db::Error> {
+pub fn prime_schematic_assets(
+    db: &elodin_db::DB,
+    world: &mut World,
+) -> Result<(), elodin_db::Error> {
     let Some(content) = world.metadata.schematic.clone() else {
         return Ok(());
     };
     match impeller2_kdl::parse_schematic(&content) {
         Ok(mut schematic) => {
-            persist_schematic_assets(
-                db,
-                &mut schematic,
-                world.metadata.schematic_path.as_deref(),
-            )?;
+            persist_schematic_assets(db, &mut schematic, world.metadata.schematic_path.as_deref())?;
             world.metadata.schematic = Some(impeller2_kdl::serialize_schematic(&schematic));
         }
         Err(err) => {
