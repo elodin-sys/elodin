@@ -72,9 +72,10 @@ pub fn db_skybox_mirror_synced(
     skybox: &str,
     mirror: &DbSkyboxAssetMirror,
 ) -> bool {
-    mirror.synced.as_ref().is_some_and(|key| {
-        key.addr == connection_addr && key.skybox == skybox
-    })
+    mirror
+        .synced
+        .as_ref()
+        .is_some_and(|key| key.addr == connection_addr && key.skybox == skybox)
 }
 
 /// Returns `true` while headless (or other consumers) should wait before activating a DB skybox.
