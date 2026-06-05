@@ -508,14 +508,18 @@ mod tests {
         a.cross(b).length_squared() < 1e-6
     }
 
-    /// Constructs a look_at rotation matrix using the same algorithm as nox::Matrix3::look_at_rh
+    /// Constructs a look_at rotation matrix that matches
+    /// [nox::Matrix3::look_at_rh].
     fn glam_look_at_rh(dir: Vec3, up: Vec3) -> Mat3 {
-        // let f = dir.normalize();
         let up_candidates = [up, Vec3::Y, Vec3::X, Vec3::Z];
         let up = up_candidates
             .into_iter()
             .find(|up| !are_colinear(*up, dir))
             .expect("it can't be colinear with everyone");
+        // Constructs a look_at rotation matrix using the same algorithm as
+        // nox::Matrix3::look_at_rh.
+        // 
+        // let f = dir.normalize();
         // let s = f.cross(up).normalize();
         // let u = s.cross(f);
         // // nox uses from_rows then transpose, which equals from_cols
@@ -523,23 +527,43 @@ mod tests {
         Mat3::look_to_rh(dir, up)
     }
 
-    /// This function converts a ENU Mat3 to EUS Bevy and vice versa. It behaves
-    /// as though you multiplied M by bevy_R_enu.
+    /// This function converts an Elodin rotation matrix to an EUS/Bevy rotation
+    /// matrix and vice versa. It behaves as though one right-multiplied M by
+    /// bevy_R_enu and transposed, i.e., (M * bevy_R_elodin)^T but no actual matrix
+    /// multiplication happens because column re-ordering is faster.
     ///
     ///
     /// ```ignore
-    ///   bevy_R_enu = enu_R_bevy = [ 1  0  0 ]
-    ///                             [ 0  0 -1 ]
-    ///                             [ 0  1  0 ]
+    ///   elodin_R_bevy =  [ 1  0  0 ]
+    ///                    [ 0  0 -1 ]
+    ///                    [ 0  1  0 ]
     /// ```
-    fn bevy_R_enu(M: &Mat3) -> Mat3 {
-        // R_enu = C.transpose() * R_bevy * C
-        //
-        // C columns:
-        //   ENU east  -> Bevy +X
-        //   ENU north -> Bevy -Z
-        //   ENU up    -> Bevy +Y
+    /// 
+    /// Note: It's orthonormal, so its tranpose is its inverse.
+    #[inline]
+    fn elodin_R_bevy(M: &Mat3) -> Mat3 {
+        // Bevy +X -> ENU East
+        // Bevy +Y -> ENU Up
+        // Bevy +Z -> -ENU North
         Mat3::from_cols(M.x_axis, M.z_axis, -M.y_axis).transpose()
+    }
+
+    // #[inline]
+    fn bevy_R_elodin(M: &Mat3) -> Mat3 {
+        // ENU East  -> Bevy +X
+        // ENU North -> Bevy -Z
+        // ENU Up    -> Bevy +Y
+        let M = M.transpose();
+        Mat3::from_cols(M.x_axis, -M.z_axis, M.y_axis)
+    }
+
+    #[test]
+    fn test_inverses() {
+        let A = Mat3::from_cols(Vec3::new(1.0,2.0,3.0),
+                                Vec3::new(4.0,5.0,6.0),
+                                Vec3::new(7.0,8.0,9.0));
+        let B = elodin_R_bevy(A);
+        let C = bevy_R_elodin(B);
     }
 
     #[test]
@@ -564,7 +588,7 @@ mod tests {
 
             let nox_mat = nox::Matrix3::look_at_rh(nox_dir, nox_up);
             let glam_mat = glam_look_at_rh(dir, up);
-            let glam_mat = bevy_R_enu(&glam_mat);
+            let glam_mat = elodin_R_bevy(&glam_mat);
             let nox_mat_bevy: bevy::math::Mat3 = bevy::math::DMat3::from(nox_mat).as_mat3();
             // let nox_mat_bevy = bevy_R_enu(&nox_mat_bevy);
             // Compare the matrices
