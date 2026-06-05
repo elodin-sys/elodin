@@ -12,9 +12,24 @@ use std::sync::Arc;
 use thiserror::Error;
 use tracing::warn;
 
+use impeller2_wkt::{DbConfig, Schematic};
+
 use crate::DB;
 
 pub use impeller2::ASSETS_HTTP_PORT_OFFSET;
+
+/// Active skybox for asset sync: `skybox.active` metadata overrides schematic KDL.
+pub fn skybox_name_for_schematic_sync(
+    db_config: Option<&DbConfig>,
+    schematic: &Schematic,
+) -> Option<String> {
+    if let Some(config) = db_config
+        && let Some(desired) = config.skybox_active_desired()
+    {
+        return desired;
+    }
+    schematic.skybox.as_ref().map(|skybox| skybox.name.clone())
+}
 
 #[derive(Error, Debug, PartialEq, Eq)]
 pub enum SanitizeError {
@@ -146,11 +161,18 @@ async fn sync_one_schematic_asset(
 
 /// Fetches schematic `db:` assets from a source DB Asset Server into `db`'s local `assets/` dir.
 pub async fn sync_schematic_assets_for_db_from_source(source_tcp: SocketAddr, db: &DB) {
-    let Some(content) = db.with_state(|s| s.db_config.schematic_content().map(str::to_owned))
-    else {
+    let (content, db_config) = db.with_state(|s| {
+        (
+            s.db_config.schematic_content().map(str::to_owned),
+            s.db_config.clone(),
+        )
+    });
+    let Some(content) = content else {
         return;
     };
-    if let Err(err) = sync_schematic_assets_from_source(source_tcp, &db.path, &content).await {
+    if let Err(err) =
+        sync_schematic_assets_from_source(source_tcp, &db.path, &content, Some(&db_config)).await
+    {
         warn!(
             ?err,
             "failed to sync schematic assets from source; db: paths may not load"
@@ -163,6 +185,7 @@ pub async fn sync_schematic_assets_from_source(
     source_tcp: SocketAddr,
     db_path: &Path,
     schematic_kdl: &str,
+    db_config: Option<&DbConfig>,
 ) -> Result<(), SyncAssetsError> {
     let schematic =
         impeller2_kdl::parse_schematic(schematic_kdl).map_err(SyncAssetsError::Parse)?;
@@ -175,7 +198,7 @@ pub async fn sync_schematic_assets_from_source(
     let assets_dir = assets_dir(db_path);
     std::fs::create_dir_all(&assets_dir)?;
     let client = sync_http_client().map_err(io::Error::other)?;
-    let skybox_name = schematic.skybox.as_ref().map(|skybox| skybox.name.clone());
+    let skybox_name = skybox_name_for_schematic_sync(db_config, &schematic);
     let mut synced = HashSet::new();
     let mut skybox_manifest = None;
 
@@ -529,7 +552,7 @@ object_3d "rocket.world_pos" {
     icon path="db:icons/marker.png"
 }
 "#;
-        sync_schematic_assets_from_source(tcp, &follower_db, kdl)
+        sync_schematic_assets_from_source(tcp, &follower_db, kdl, None)
             .await
             .unwrap();
 
@@ -549,6 +572,88 @@ object_3d "rocket.world_pos" {
             std::fs::read(assets_dir(&follower_db).join("skyboxes/mojave_desert.cubemap.ktx2"))
                 .unwrap(),
             b"ktx2-source".to_vec()
+        );
+    }
+
+    #[tokio::test]
+    async fn sync_schematic_assets_uses_skybox_active_metadata() {
+        let dir = tempdir().unwrap();
+        let source_assets = dir.path().join("source_assets");
+        std::fs::create_dir_all(source_assets.join("skyboxes")).unwrap();
+        let skybox_manifest = r#"
+(
+    version: 2,
+    entries: [
+        (
+            name: "mojave_desert",
+            prompt: "mojave",
+            style: M3Photoreal,
+            blockade: None,
+            cubemap_file: "mojave_desert.cubemap.ktx2",
+            face_size: 2048,
+            created_at: "2026-05-11T05:34:26Z",
+        ),
+        (
+            name: "alpine",
+            prompt: "alpine",
+            style: M3Photoreal,
+            blockade: None,
+            cubemap_file: "alpine.cubemap.ktx2",
+            face_size: 2048,
+            created_at: "2026-05-11T05:34:26Z",
+        ),
+    ],
+    default: Some("mojave_desert"),
+)
+"#;
+        std::fs::write(source_assets.join("skyboxes/manifest.ron"), skybox_manifest).unwrap();
+        std::fs::write(
+            source_assets.join("skyboxes/mojave_desert.cubemap.ktx2"),
+            b"mojave",
+        )
+        .unwrap();
+        std::fs::write(
+            source_assets.join("skyboxes/alpine.cubemap.ktx2"),
+            b"alpine",
+        )
+        .unwrap();
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let bound = listener.local_addr().unwrap();
+        let tcp = SocketAddr::new(bound.ip(), bound.port().saturating_sub(1));
+
+        let state = Arc::new(AssetsState {
+            assets_dir: source_assets.clone(),
+        });
+        let app = Router::new()
+            .route("/{*path}", get(get_asset))
+            .with_state(state);
+
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        let follower_db = dir.path().join("follower_db");
+        let kdl = r#"
+skybox name="mojave_desert"
+"#;
+        let mut db_config = DbConfig::default();
+        db_config.set_skybox_active(Some("alpine"));
+
+        sync_schematic_assets_from_source(tcp, &follower_db, kdl, Some(&db_config))
+            .await
+            .unwrap();
+
+        assert_eq!(
+            std::fs::read(assets_dir(&follower_db).join("skyboxes/alpine.cubemap.ktx2")).unwrap(),
+            b"alpine".to_vec()
+        );
+        assert!(
+            !assets_dir(&follower_db)
+                .join("skyboxes/mojave_desert.cubemap.ktx2")
+                .exists()
         );
     }
 
@@ -577,7 +682,7 @@ object_3d "rocket.world_pos" {
     glb path="db:models/rocket.glb"
 }
 "#;
-        sync_schematic_assets_from_source(tcp, &follower_db, kdl)
+        sync_schematic_assets_from_source(tcp, &follower_db, kdl, None)
             .await
             .unwrap();
 
@@ -597,7 +702,7 @@ object_3d "rocket.world_pos" {
     glb path="db:rocket.glb"
 }
 "#;
-        sync_schematic_assets_from_source(tcp, dir.path(), kdl)
+        sync_schematic_assets_from_source(tcp, dir.path(), kdl, None)
             .await
             .unwrap();
         assert!(!assets_dir(dir.path()).join("rocket.glb").exists());
@@ -634,7 +739,7 @@ object_3d "rocket.world_pos" {
     glb path="db:models/rocket.glb"
 }
 "#;
-        sync_schematic_assets_from_source(tcp, &follower_db, kdl)
+        sync_schematic_assets_from_source(tcp, &follower_db, kdl, None)
             .await
             .unwrap();
         server.abort();
@@ -642,6 +747,22 @@ object_3d "rocket.world_pos" {
         assert_eq!(
             std::fs::read(assets_dir(&follower_db).join("models/rocket.glb")).unwrap(),
             b"from-source".to_vec()
+        );
+    }
+
+    #[test]
+    fn skybox_name_for_schematic_sync_prefers_metadata() {
+        let schematic = Schematic {
+            skybox: Some(impeller2_wkt::SkyboxConfig {
+                name: "mojave_desert".to_string(),
+            }),
+            ..Default::default()
+        };
+        let mut config = DbConfig::default();
+        config.set_skybox_active(Some("alpine"));
+        assert_eq!(
+            skybox_name_for_schematic_sync(Some(&config), &schematic).as_deref(),
+            Some("alpine")
         );
     }
 

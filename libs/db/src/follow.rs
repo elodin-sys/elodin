@@ -228,9 +228,9 @@ async fn apply_db_config_update(
     db: &Arc<DB>,
     update: SetDbConfig,
 ) -> Result<(), Error> {
-    let schematic_changed = db.apply_set_db_config(update)?;
+    let needs_asset_sync = db.apply_set_db_config(update)?;
     #[cfg(feature = "axum")]
-    if schematic_changed {
+    if needs_asset_sync {
         crate::assets_http::sync_schematic_assets_for_db_from_source(config.source_addr, db).await;
     }
     Ok(())

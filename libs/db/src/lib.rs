@@ -355,9 +355,13 @@ impl DB {
         db_state.write(self.path.join("db_state"))
     }
 
-    /// Apply a `SetDbConfig` patch and persist. Returns whether `schematic.content` changed.
+    /// Apply a `SetDbConfig` patch and persist.
+    ///
+    /// Returns whether schematic assets should be re-synced (`schematic.content` or
+    /// `skybox.active` in the patch).
     pub fn apply_set_db_config(&self, update: SetDbConfig) -> Result<bool, Error> {
-        let schematic_changed = update.metadata.contains_key("schematic.content");
+        let needs_asset_sync = update.metadata.contains_key("schematic.content")
+            || update.metadata.contains_key("skybox.active");
         if let Some(recording) = update.recording {
             self.with_state_mut(|s| s.db_config.recording = recording);
             self.recording_cell.set_playing(recording);
@@ -366,7 +370,7 @@ impl DB {
             s.db_config.metadata.extend(update.metadata);
         });
         self.save_db_state()?;
-        Ok(schematic_changed)
+        Ok(needs_asset_sync)
     }
 
     pub fn flush_all(&self) -> Result<(), Error> {
