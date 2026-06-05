@@ -14,7 +14,7 @@ order = 4
 
 # Database embedded assets
 
-Record a simulation once, then replay or share the database directory without shipping a separate `assets/` tree. Meshes, custom icon PNGs, and skyboxes referenced by the schematic are copied into the DB, rewritten in stored KDL as `db:…` paths, and served over HTTP while the database runs.
+Record a simulation once, then replay or share the database directory without shipping a separate `assets/` tree. Meshes, custom `.png` icons, and skyboxes referenced by the schematic are copied into the DB, rewritten in stored KDL as `db:…` paths, and served over HTTP while the database runs.
 
 This feature complements [Replays](/reference/replays) and [Schematic KDL](/reference/schematic): telemetry lives in the DB layout you already use; this page covers **files** the schematic needs at visualization time.
 
@@ -103,11 +103,11 @@ See [Elodin CLI](/reference/elodin-cli) for `editor --replay` and `elodin-db --f
 | **Stored KDL** | `path="db:models/rocket.glb"` |
 | **Editor** | `db:…` → `http://127.0.0.1:2241/…` via Bevy `AssetServer` + `WebAssetPlugin` (non-blocking) |
 
-### PNG icons (`object_3d` → `icon path=…`)
+### `.png` icons (`object_3d` → `icon path=…`)
 
 Same pipeline as GLB: persist, rewrite, HTTP load.
 
-**`icon builtin=…`** (Material Icons) is **not** copied into the DB. The editor rasterizes built-in glyphs locally; only custom `path=` PNGs are embedded.
+**`icon builtin=…`** (Material Icons) is **not** copied into the DB. The editor rasterizes built-in glyphs locally; only custom `path=` `.png` files are embedded.
 
 ### Skybox (`skybox name="…"`)
 
@@ -121,7 +121,7 @@ Skyboxes are **indirect**: the KDL node names a manifest entry, not a single fil
 | **Editor** | Async download from DB HTTP into the local skybox cache, then `SetActiveSkybox` |
 | **Clear** | Empty `skybox.active` metadata or schematic without a `skybox` node → skybox cleared in the editor |
 
-The skybox plugin today reads from a **local cache directory**; the editor mirrors DB assets there before activation. GLB/PNG use HTTP directly through Bevy.
+The skybox plugin today reads from a **local cache directory**; the editor mirrors DB assets there before activation. GLB meshes and `.png` icons use HTTP directly through Bevy.
 
 ### Carried in the DB without extra asset files
 
@@ -171,7 +171,7 @@ Expect HTTP `200` and non-empty files under `assets/` after a sim that reference
 
 ### A — Simple file referenced by `path=` in KDL
 
-Use this when the schematic stores a **direct relative path** (like GLB or PNG).
+Use this when the schematic stores a **direct relative path** (like a `.glb` mesh or `.png` icon).
 
 1. **KDL** (`libs/impeller2/kdl`) — parse and serialize the path field on the relevant node.
 2. **Collect & rewrite** (`libs/impeller2/kdl/src/rewrite.rs`):

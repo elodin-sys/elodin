@@ -80,7 +80,7 @@ We use Datafusion to power the SQL interface. [Their docs](https://datafusion.ap
 elodin-db run [::]:2241 ./ground-station --follows 192.168.1.10:2240
 ```
 
-**Embedded schematic assets** -- When a simulation records with `ELODIN_DB_PATH` or `db_path`, GLB meshes, custom icon PNGs, and skybox files referenced by the schematic are copied into `{db}/assets/` and served over HTTP on port `N+1` while the server runs. See [Database embedded assets](/reference/db-embedded-assets).
+**Embedded schematic assets** -- When a simulation records with `ELODIN_DB_PATH` or `db_path`, GLB meshes, custom `.png` icons, and skybox files referenced by the schematic are copied into `{db}/assets/` and served over HTTP on port `N+1` while the server runs. See [Database embedded assets](/reference/db-embedded-assets).
 
 **Video** -- H.264 video streams (e.g. from GStreamer via `elodinsink`) are stored as timestamped message logs and displayed in the Elodin Editor. Recorded video can be exported to MP4 with `elodin-db export-videos`.
 
