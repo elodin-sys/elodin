@@ -374,10 +374,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
-        assert_eq!(
-            response.bytes().await.unwrap().as_ref(),
-            b"spawned-payload"
-        );
+        assert_eq!(response.bytes().await.unwrap().as_ref(), b"spawned-payload");
     }
 
     #[tokio::test]
