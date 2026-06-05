@@ -1,6 +1,6 @@
 +++
-title = "Database embedded assets"
-description = "Persist schematic assets (GLB, icons, skyboxes) inside an Elodin DB for portable replay and follow"
+title = "DB Asset Server"
+description = "Persist schematic assets (GLB, icons, skyboxes) inside an Elodin DB and serve them over HTTP for portable replay and follow"
 draft = false
 weight = 103
 sort_by = "weight"
@@ -10,32 +10,31 @@ toc = true
 top = false
 icon = ""
 order = 4
+lead = "Copy schematic files into the database at record time, rewrite KDL paths to db:…, and serve them on port N+1 while elodin-db runs."
 +++
-
-# Database embedded assets
 
 Record a simulation once, then replay or share the database directory without shipping a separate `assets/` tree. Meshes, custom `.png` icons, and skyboxes referenced by the schematic are copied into the DB, rewritten in stored KDL as `db:…` paths, and served over HTTP while the database runs.
 
-This feature complements [Replays](/reference/replays) and [Schematic KDL](/reference/schematic): telemetry lives in the DB layout you already use; this page covers **files** the schematic needs at visualization time.
+This complements [Replays](/reference/replays) and [Schematic KDL](/reference/schematic): telemetry lives in the DB layout you already use; this page covers **files** the schematic needs at visualization time.
 
 ## Architecture
 
 ```mermaid
 flowchart LR
-  subgraph record [Record]
-    Sim[Simulation / world.run]
-    Parse[Parse schematic KDL]
-    Copy[Copy bytes to db/assets/]
-    Rewrite[Rewrite paths to db:…]
-    Meta[Store schematic.content in DbConfig]
+  subgraph record_phase ["Record"]
+    Sim["Simulation"]
+    Parse["Parse schematic KDL"]
+    Copy["Copy bytes to db/assets"]
+    Rewrite["Rewrite paths to db scheme"]
+    Meta["Store schematic.content"]
   end
-  subgraph serve [Serve]
-    TCP[Impeller TCP :N]
-    HTTP[Assets HTTP :N+1]
+  subgraph serve_phase ["Serve"]
+    TCP["Impeller TCP port N"]
+    HTTP["DB Asset Server port N+1"]
   end
-  subgraph consume [Consume]
-    Editor[Elodin Editor]
-    Follow[DB follower sync]
+  subgraph consume_phase ["Consume"]
+    Editor["Elodin Editor"]
+    Follow["Follower asset sync"]
   end
   Sim --> Parse --> Copy --> Rewrite --> Meta
   Meta --> TCP
@@ -49,16 +48,16 @@ flowchart LR
 | Layer | Role |
 |-------|------|
 | **Blob store** | `{db_path}/assets/{relative_key}` — opaque bytes, any file type |
-| **HTTP server** | `GET http://host:(tcp_port+1)/{relative_key}` while `elodin-db run` is active |
+| **DB Asset Server** | `GET http://host:(tcp_port+1)/{relative_key}` while `elodin-db run` is active |
 | **KDL rewrite** | Local paths at record time become `db:{relative_key}` in `schematic.content` |
 | **Consumers** | Editor resolves `db:` to HTTP (or mirrors to a local cache for skyboxes) |
 
 ### Ports
 
 - **Impeller TCP** on port `N` (default `2240`)
-- **Assets HTTP** on port `N + 1` (default `2241`) — `ASSETS_HTTP_PORT_OFFSET = 1`
+- **DB Asset Server** on port `N + 1` (default `2241`) — `ASSETS_HTTP_PORT_OFFSET = 1`
 
-Do not run a follower Impeller server on `N+1`; that port is reserved for asset HTTP on the source.
+Do not run a follower Impeller server on `N+1`; that port is reserved for the DB Asset Server on the source.
 
 ### The `db:` scheme
 
@@ -79,18 +78,44 @@ Persistence runs during simulation DB initialization (`init_db`), when the world
 - **`db_path`** argument to `world.run(…, db_path=…)`, or
 - **`ELODIN_DB_PATH`** environment variable (Python SDK)
 
-The schematic body is stored in DB metadata as `schematic.content` (with `db:` paths). The original `schematic.path` string is informational only; replay uses embedded content when the file is missing.
+The schematic body is stored in DB metadata as `schematic.content` (with `db:` paths). The original `schematic.path` string is informational only; replay uses `schematic.content` from the DB when the file is missing.
 
 ## Consumption workflows
 
 | Mode | Typical commands | Assets |
 |------|------------------|--------|
-| **Live** | `elodin editor examples/foo/main.py` | HTTP from embedded sim DB during the session |
+| **Live** | `elodin editor examples/foo/main.py` | HTTP from the sim DB during the session |
 | **Recorded DB** | `elodin-db run 127.0.0.1:2240 ./my-db` then `elodin editor 127.0.0.1:2240` | HTTP from `./my-db/assets/` |
 | **Replay presentation** | Same DB + `elodin editor 127.0.0.1:2240 --replay` | HTTP; editor timeline reveals progressively |
 | **Follow** | `elodin-db run … --follows SOURCE:2240` | Follower copies `db:` assets from source HTTP into its own `{db}/assets/` |
 
 See [Elodin CLI](/reference/elodin-cli) for `editor --replay` and `elodin-db --follows`.
+
+### Follow mode and assets
+
+When a follower connects to a source `elodin-db` on port `N`, it replicates telemetry over Impeller TCP. Schematic assets are **not** streamed on that socket — they are fetched separately from the source **DB Asset Server** on port `N+1`.
+
+On connect (and when schematic KDL updates), the follower:
+
+1. Reads `schematic.content` from replicated DB metadata
+2. Collects every `db:…` path referenced in the KDL (including skybox manifest sidecars)
+3. `GET`s each file from `http://source:(N+1)/{key}` with retries
+4. Writes bytes into its own `{follower_db}/assets/`
+
+The follower can then serve those files from its own DB Asset Server on `(follower_port + 1)` to local editors, without copying the full source database directory.
+
+```sh
+# Source (sim or recorded DB)
+elodin-db run 127.0.0.1:2240 ./source-db
+
+# Follower — Impeller on 2242, DB Asset Server on 2243
+elodin-db run 127.0.0.1:2242 ./follower-db --follows 127.0.0.1:2240
+
+# Editor attaches to the follower
+elodin editor 127.0.0.1:2242
+```
+
+Point `--follows` at the source **Impeller** port (`N`), not the asset port (`N+1`).
 
 ## Supported asset types
 
@@ -107,7 +132,7 @@ See [Elodin CLI](/reference/elodin-cli) for `editor --replay` and `elodin-db --f
 
 Same pipeline as GLB: persist, rewrite, HTTP load.
 
-**`icon builtin=…`** (Material Icons) is **not** copied into the DB. The editor rasterizes built-in glyphs locally; only custom `path=` `.png` files are embedded.
+**`icon builtin=…`** (Material Icons) is **not** copied into the DB. The editor rasterizes built-in glyphs locally; only custom `path=` `.png` files are persisted in the DB.
 
 ### Skybox (`skybox name="…"`)
 
@@ -163,9 +188,10 @@ Expect HTTP `200` and non-empty files under `assets/` after a sim that reference
 | Symptom | Check |
 |---------|--------|
 | Icon only, no mesh | `curl http://127.0.0.1:2241/…` → `404` means assets were not persisted; set `ELODIN_DB_PATH` / `db_path` and re-run |
-| Port in use | `2240` = Impeller, `2241` = assets HTTP; do not bind follower on `2241` |
+| Port in use | `2240` = Impeller, `2241` = DB Asset Server; do not bind follower Impeller on `2241` |
 | Skybox missing on replay | `ls "$DB_PATH/assets/skyboxes/"` for `manifest.ron` and the `.ktx2` |
 | Empty `assets/` after sim | `world.run` without `db_path` or `ELODIN_DB_PATH` uses a temp DB |
+| Follower missing meshes | Confirm source DB Asset Server responds: `curl http://SOURCE:2241/models/rocket.glb` |
 
 ## Adding a new asset type
 
@@ -199,3 +225,29 @@ Use this when the KDL stores a **logical name** (like `skybox name=…`).
 - [Replays](/reference/replays) — legacy replay directory layout (distinct from Elodin DB with `assets/`)
 - [Elodin DB overview](/home/db/overview) — database capabilities and follow mode
 - [Elodin CLI](/reference/elodin-cli) — `editor`, `elodin-db run`, `--replay`, `--follows`
+
+<script type="module">
+  import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+
+  mermaid.initialize({
+    startOnLoad: false,
+    theme: document.body.classList.contains("dark") ? "dark" : "default",
+    securityLevel: "loose",
+  });
+
+  const nodes = [];
+  document.querySelectorAll("pre > code.language-mermaid").forEach((code) => {
+    const div = document.createElement("div");
+    div.className = "mermaid";
+    div.style.margin = "2rem 0";
+    div.style.overflowX = "auto";
+    div.style.textAlign = "center";
+    div.textContent = code.textContent;
+    code.parentElement.replaceWith(div);
+    nodes.push(div);
+  });
+
+  if (nodes.length) {
+    await mermaid.run({ nodes });
+  }
+</script>

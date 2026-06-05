@@ -43,7 +43,7 @@ order = 6
 ### skybox
 - Optional top-level node that activates a cached skybox by manifest name.
 - `name`: required manifest entry name. Entries are read from `assets/skyboxes/manifest.ron`, or from `$ELODIN_ASSETS_DIR/skyboxes/manifest.ron` when that environment variable is set.
-- When a simulation records into an Elodin DB, the manifest and active cubemap are copied under `{db}/assets/skyboxes/`; see [Database embedded assets](/reference/db-embedded-assets).
+- When a simulation records into an Elodin DB, the manifest and active cubemap are copied under `{db}/assets/skyboxes/`; see [DB Asset Server](/reference/db-asset-server).
 - Applies to the whole schematic: editor viewports and sensor cameras use the same active skybox. Overlay cameras such as the ViewCube keep the normal dark/light UI background.
 - Example: `skybox name="alien_swamp"`.
 
@@ -74,7 +74,7 @@ order = 6
 - Positional `eql`: required. Evaluated to a `world_pos`-like value to place the mesh.
 - `frame`: optional; `ENU`, `NED`, or `ECEF`. Specifies the coordinate frame for interpreting position and orientation. Inherits from global `coordinate` if omitted.
 - Mesh child (required, exactly one):
-  - `glb`: `path` (required), `scale` (default 1.0), `translate` `(x,y,z)` (default 0s), `rotate` `(deg_x,deg_y,deg_z)` in degrees (default 0s). On DB record, local paths are stored as `db:…` and served over HTTP on replay; see [Database embedded assets](/reference/db-embedded-assets).
+  - `glb`: `path` (required), `scale` (default 1.0), `translate` `(x,y,z)` (default 0s), `rotate` `(deg_x,deg_y,deg_z)` in degrees (default 0s). On DB record, local paths are stored as `db:…` and served over HTTP on replay; see [DB Asset Server](/reference/db-asset-server).
     - `animate` child nodes (optional, multiple): For rigged GLB models, animate specific joints/bones.
       - `joint`: required string; the exact name of the joint/bone in the GLB file.
       - `rotation_vector`: required EQL expression; must evaluate to a 3-element vector `(x, y, z)` where:
