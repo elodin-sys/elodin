@@ -307,6 +307,9 @@ fn sync_headless_skybox(
     mut render_gate: ResMut<HeadlessSkyboxRenderGate>,
     mut skybox_writer: MessageWriter<SetActiveSkybox>,
     mut failed: MessageReader<SkyboxFailed>,
+    connection_addr: Option<Res<ConnectionAddr>>,
+    mirror: Res<crate::skybox_db_assets::DbSkyboxAssetMirror>,
+    in_flight: Res<crate::skybox_db_assets::DbSkyboxSyncInFlight>,
 ) {
     for event in failed.read() {
         if !skybox_failure_matches_gate(&render_gate.desired, &event.name) {
@@ -356,6 +359,18 @@ fn sync_headless_skybox(
     if render_gate.activation_dispatched && clear_applied_in_cache(&desired, &cache) {
         render_gate.applied = true;
         render_gate.warmup_remaining = SKYBOX_TRANSITION_WARMUP_FRAMES;
+        return;
+    }
+
+    if let (Some(connection_addr), Some(Some(name))) = (connection_addr.as_deref(), &desired)
+        && crate::skybox_db_assets::db_skybox_mirror_pending(
+            connection_addr.0,
+            name,
+            &mirror,
+            &in_flight,
+        )
+    {
+        render_gate.applied = false;
         return;
     }
 

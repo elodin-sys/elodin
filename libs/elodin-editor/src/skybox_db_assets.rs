@@ -66,6 +66,31 @@ fn skybox_in_flight_still_desired(
     skybox_still_desired(config, connection_addr, key)
 }
 
+/// Returns `true` while headless (or other consumers) should wait before activating a DB skybox.
+pub fn db_skybox_mirror_pending(
+    connection_addr: SocketAddr,
+    skybox: &str,
+    mirror: &DbSkyboxAssetMirror,
+    in_flight: &DbSkyboxSyncInFlight,
+) -> bool {
+    let key = MirrorKey {
+        addr: connection_addr,
+        skybox: skybox.to_string(),
+    };
+    if mirror.synced.as_ref() == Some(&key) {
+        return false;
+    }
+    if in_flight.key.as_ref() == Some(&key) && in_flight.task.is_some() {
+        return true;
+    }
+    if let Some((failed, _)) = &mirror.last_failed
+        && failed == &key
+    {
+        return false;
+    }
+    true
+}
+
 pub fn desired_skybox_from_config(config: &DbConfig) -> Option<Option<String>> {
     if let Some(desired) = config.skybox_active_desired() {
         return Some(desired);
@@ -281,5 +306,29 @@ mod tests {
     #[test]
     fn cubemap_cache_path_rejects_traversal() {
         assert!(cubemap_cache_path(Path::new("cache"), "../bad.ktx2").is_err());
+    }
+
+    #[test]
+    fn db_skybox_mirror_pending_tracks_sync_state() {
+        let addr: SocketAddr = "127.0.0.1:2240".parse().unwrap();
+        let key = MirrorKey {
+            addr,
+            skybox: "mojave_desert".to_string(),
+        };
+        let mirror = DbSkyboxAssetMirror::default();
+        let in_flight = DbSkyboxSyncInFlight::default();
+        assert!(db_skybox_mirror_pending(addr, "mojave_desert", &mirror, &in_flight));
+
+        let mirror = DbSkyboxAssetMirror {
+            synced: Some(key.clone()),
+            last_failed: None,
+        };
+        assert!(!db_skybox_mirror_pending(addr, "mojave_desert", &mirror, &in_flight));
+
+        let mirror = DbSkyboxAssetMirror {
+            synced: None,
+            last_failed: Some((key, Instant::now())),
+        };
+        assert!(!db_skybox_mirror_pending(addr, "mojave_desert", &mirror, &in_flight));
     }
 }
