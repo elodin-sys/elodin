@@ -33,10 +33,6 @@ pub struct Args {
     /// a live session.
     #[clap(long)]
     pub replay: bool,
-
-    /// Run this simulation as a Monte Carlo campaign plan.
-    #[clap(long = "monte-carlo")]
-    pub monte_carlo: Option<PathBuf>,
 }
 
 #[derive(clap::Args, Clone)]
@@ -272,15 +268,6 @@ impl Cli {
             .open(window_state_path)
             .into_diagnostic()
             .context("failed to open window state file")
-    }
-}
-
-impl Args {
-    pub fn sim_file(&self) -> Option<PathBuf> {
-        match &self.sim {
-            Simulator::File(path) => Some(path.clone()),
-            _ => None,
-        }
     }
 }
 
