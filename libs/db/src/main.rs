@@ -422,6 +422,17 @@ async fn main() -> miette::Result<()> {
             }
             info!(?path, "starting db");
             let server = Server::new(&path, addr).into_diagnostic()?;
+            let follow_config = follows.map(|source_addr| elodin_db::follow::FollowConfig {
+                source_addr,
+                target_packet_size: follow_packet_size,
+                reconnect_delay: std::time::Duration::from_secs(2),
+            });
+            if let Some(ref config) = follow_config {
+                info!(source = %config.source_addr, "priming follower before accepting clients");
+                elodin_db::follow::prime_follower_state(config, &server.db)
+                    .await
+                    .into_diagnostic()?;
+            }
             #[cfg(feature = "axum")]
             elodin_db::assets_http::spawn_assets_http(&path, addr).into_diagnostic()?;
             if let Some(start_timestamp) = start_timestamp {
@@ -431,18 +442,10 @@ async fn main() -> miette::Result<()> {
                     .into_diagnostic()?;
             }
             let axum_db = server.db.clone();
-            // Spawn follower before server.run() consumes server.
-            if let Some(source_addr) = follows {
+            if let Some(config) = follow_config {
                 let follow_db = server.db.clone();
                 stellarator::struc_con::stellar(move || {
-                    elodin_db::follow::run_follower(
-                        elodin_db::follow::FollowConfig {
-                            source_addr,
-                            target_packet_size: follow_packet_size,
-                            reconnect_delay: std::time::Duration::from_secs(2),
-                        },
-                        follow_db,
-                    )
+                    elodin_db::follow::run_follower(config, follow_db)
                 });
             }
             let db = stellarator::spawn(server.run());
