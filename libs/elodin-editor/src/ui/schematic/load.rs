@@ -1421,6 +1421,7 @@ mod tests {
             .init_asset::<StandardMaterial>()
             .init_asset::<Image>()
             .init_asset::<Mat3Material>()
+            .init_asset::<bevy_world_mesh::prelude::WorldMeshMaterial>()
             .init_asset::<SchematicDocumentAsset>();
         app.add_plugins(GeoFramePlugin {
             apply_transforms: false,
@@ -1479,6 +1480,7 @@ mod tests {
     #[test_case("line_3d \"(0,0,0)\""; "line_3d")]
     #[test_case("vector_arrow \"(0,0,1)\"" ; "vector_arrow")]
     #[test_case("object_3d \"(0,0,0,1, 0,0,0)\" { sphere radius=1.0 { color 0 0 0 } }" ; "object_3d")]
+    #[test_case("world_mesh \"death_valley\"" ; "world_mesh")]
     fn scene_roots_clear_cleanly(content: &str) {
         let mut app = test_app();
         let baseline = entity_count(&mut app);
