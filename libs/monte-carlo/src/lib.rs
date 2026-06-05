@@ -880,9 +880,6 @@ async fn run_one(
         ctx.config,
     )?;
 
-    let started_at = Utc::now();
-    let spawn_unix_ns = unix_now_ns();
-    let start = Instant::now();
     let recipe = patch_recipe(
         ctx.base_recipe.clone(),
         row,
@@ -895,9 +892,21 @@ async fn run_one(
             config: ctx.config,
         },
     )?;
+    let admission_permit =
+        s10::admission::acquire_run_slot(s10::admission::recipe_weight(&recipe)).await;
+
+    let started_at = Utc::now();
+    let spawn_unix_ns = unix_now_ns();
+    let start = Instant::now();
     let token = CancelToken::new();
-    let fut =
-        s10::cli::run_recipe_with_token(row.run_id.clone(), recipe, false, false, token.clone());
+    let fut = s10::cli::run_recipe_with_token_admitted(
+        row.run_id.clone(),
+        recipe,
+        false,
+        false,
+        token.clone(),
+        admission_permit,
+    );
     let result = if let Some(timeout) = parse_duration(ctx.config.timeout.as_deref())? {
         match tokio::time::timeout(timeout, fut).await {
             Ok(result) => result,
