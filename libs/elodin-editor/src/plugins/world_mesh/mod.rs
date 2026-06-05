@@ -12,6 +12,8 @@ use bevy_world_mesh::terrain::{
 
 use crate::{MainCamera, sensor_camera::SensorCamera};
 
+type WorldMeshViewFilter = Or<(With<MainCamera>, With<SensorCamera>)>;
+
 /// Marker for terrain entities spawned from a schematic `world_mesh` element.
 #[derive(Component)]
 pub struct WorldMeshTerrain;
@@ -126,7 +128,7 @@ pub(crate) fn spawn_world_mesh_terrain(
 /// both the terrain entity and viewport cameras exist.
 fn sync_terrain_view_components(
     terrains: Query<(Entity, &TileAtlas), With<WorldMeshTerrain>>,
-    cameras: Query<Entity, Or<(With<MainCamera>, With<SensorCamera>)>>,
+    cameras: Query<Entity, WorldMeshViewFilter>,
     mut tile_trees: ResMut<TerrainViewComponents<TileTree>>,
 ) {
     tile_trees
