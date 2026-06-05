@@ -716,20 +716,22 @@ impl LoadSchematicParams<'_, '_> {
         }
 
         let region = world_mesh.region.clone();
-        let manifest = {
-            let manifest_path = bevy_world_mesh::terrain::util::asset_path(format!(
-                "terrains/planar/{region}/region.toml"
-            ));
-            std::fs::read_to_string(&manifest_path)
-                .ok()
-                .and_then(|text| {
-                    toml::from_str::<bevy_world_mesh::regions::RegionManifest>(&text).ok()
-                })
-                .or_else(|| {
-                    bevy_world_mesh::regions::lookup(&region)
-                        .map(bevy_world_mesh::regions::RegionManifest::from)
-                })
-                .unwrap_or_default()
+        let manifest_path = bevy_world_mesh::terrain::util::asset_path(format!(
+            "terrains/planar/{region}/region.toml"
+        ));
+        let Some(manifest) = std::fs::read_to_string(&manifest_path)
+            .ok()
+            .and_then(|text| toml::from_str::<bevy_world_mesh::regions::RegionManifest>(&text).ok())
+            .or_else(|| {
+                bevy_world_mesh::regions::lookup(&region)
+                    .map(bevy_world_mesh::regions::RegionManifest::from)
+            })
+        else {
+            warn!(
+                "schematic world_mesh region={region:?} is not a built-in preset and could not load a valid manifest from {}",
+                manifest_path.display()
+            );
+            return;
         };
 
         let terrain_size = manifest.terrain_size_m();
