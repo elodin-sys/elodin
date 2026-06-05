@@ -204,6 +204,7 @@ impl<T: RealField> Quaternion<T, ArrayRepr> {
         let m20 = mat.get([2, 0]).into_buf();
         let m21 = mat.get([2, 1]).into_buf();
         let m22 = mat.get([2, 2]).into_buf();
+        // w = sqrt(1 + trace(M))/2
         let w = (T::one_prim() + m00 + m11 + m22).max(T::zero_prim()).sqrt() / T::two_prim();
         let x = (T::one_prim() + m00 - m11 - m22).max(T::zero_prim()).sqrt() / T::two_prim();
         let y = (T::one_prim() - m00 + m11 - m22).max(T::zero_prim()).sqrt() / T::two_prim();

@@ -503,6 +503,66 @@ mod tests {
     use crate::WorldPosExt;
     use bevy::math::{Mat3, Quat, Vec3};
 
+    macro_rules! assert_eq_mat {
+        ($a:expr, $b:expr $(,)?) => {{
+            assert_eq_mat!($a, $b, "");
+        }};
+        ($a:expr, $b:expr, $($arg:tt)+) => {{
+            let a = $a;
+            let b = $b;
+
+            for i in 0..3 {
+                let aa = a.col(i);
+                let bb = b.col(i);
+                for j in 0..3 {
+                    let delta = aa[j] - bb[j];
+                    if delta.abs() > 1e-5 {
+                        panic!("First mismatch on column {}:\nleft:  {}\nright: {}: {}",
+                                i + 1, a, b, format_args!($($arg)+));
+                    }
+                }
+            }
+        }};
+    }
+    macro_rules! assert_eq_vec {
+        ($a:expr, $b:expr $(,)?) => {{
+            assert_eq_vec!($a, $b, "");
+        }};
+        ($a:expr, $b:expr, $($arg:tt)+) => {{
+            let a = $a;
+            let b = $b;
+
+            for i in 0..3 {
+                let delta = a[i] - b[i];
+                if delta.abs() > 1e-5 {
+                    panic!("First mismatch on index {}:\nleft:  {}\nright: {}: {}",
+                           i, a, b, format_args!($($arg)+));
+                }
+            }
+        }};
+    }
+    macro_rules! assert_eq_quat {
+        ($a:expr, $b:expr $(,)?) => {{
+            assert_eq_quat!($a, $b, "");
+        }};
+
+        ($a:expr, $b:expr, $($arg:tt)+) => {{
+
+            let a = $a;
+            let b = $b;
+
+
+            let dot = a.dot(b).abs();
+
+            assert!(
+                (1.0 - dot) <= 1e-5,
+                "Quat mismatch:\nleft:  {:?}\nright: {:?}: {}",
+                a,
+                b,
+                format_args!($($arg)+)
+            );
+        }};
+    }
     #[inline]
     fn are_colinear(a: Vec3, b: Vec3) -> bool {
         a.cross(b).length_squared() < 1e-6
@@ -510,7 +570,7 @@ mod tests {
 
     /// Constructs a look_at rotation matrix that matches
     /// [nox::Matrix3::look_at_rh].
-    fn glam_look_at_rh(dir: Vec3, up: Vec3) -> Mat3 {
+    fn glam_look_at_rh(dir: Vec3, up: Vec3) -> (Mat3, Vec3) {
         let up_candidates = [up, Vec3::Y, Vec3::X, Vec3::Z];
         let up = up_candidates
             .into_iter()
@@ -524,7 +584,7 @@ mod tests {
         // let u = s.cross(f);
         // // nox uses from_rows then transpose, which equals from_cols
         // Mat3::from_cols(s, f, u)
-        Mat3::look_to_rh(dir, up)
+        (Mat3::look_to_rh(dir, up), up)
     }
 
     /// This function converts an Elodin rotation matrix to an EUS/Bevy rotation
@@ -541,7 +601,7 @@ mod tests {
     /// 
     /// Note: It's orthonormal, so its tranpose is its inverse.
     #[inline]
-    fn elodin_R_bevy(M: &Mat3) -> Mat3 {
+    fn elodin_R_bevy(M: Mat3) -> Mat3 {
         // Bevy +X -> ENU East
         // Bevy +Y -> ENU Up
         // Bevy +Z -> -ENU North
@@ -549,7 +609,7 @@ mod tests {
     }
 
     // #[inline]
-    fn bevy_R_elodin(M: &Mat3) -> Mat3 {
+    fn bevy_R_elodin(M: Mat3) -> Mat3 {
         // ENU East  -> Bevy +X
         // ENU North -> Bevy -Z
         // ENU Up    -> Bevy +Y
@@ -564,99 +624,94 @@ mod tests {
                                 Vec3::new(7.0,8.0,9.0));
         let B = elodin_R_bevy(A);
         let C = bevy_R_elodin(B);
+        assert_eq_mat!(A,C, "b to e to b");
+        let B = bevy_R_elodin(A);
+        let C = elodin_R_bevy(B);
+        assert_eq_mat!(A,C, "e to b to e");
+    }
+
+    /// Compare against elodin's ENU.
+    #[test]
+    #[ignore]
+    fn test_look_at_rh_nox_vs_glam_elodin() {
+        test_look_at_rh_nox_vs_glam(|glam_mat, nox_mat| (elodin_R_bevy(glam_mat), nox_mat), |M| M, |v| v);
+    }
+
+    /// Compare against Bevy's EUS.
+    #[test]
+    fn test_look_at_rh_nox_vs_glam_bevy() {
+        test_look_at_rh_nox_vs_glam(|glam_mat, nox_mat| (glam_mat, bevy_R_elodin(nox_mat)), |M| elodin_R_bevy(M),
+                                    |v| Vec3::new(v.x, v.z, -v.y));
     }
 
     #[test]
-    fn test_look_at_rh_nox_vs_glam() {
+    fn test_from_mat3() {
+        let q = Quat::from_mat3(&Mat3::IDENTITY);
+        assert_eq_quat!(q, Quat::IDENTITY);
+
+        let dir = Vec3::Y; 
+        let up = Vec3::Z;
+        let (M, _) = glam_look_at_rh(dir, up);
+        assert_eq_mat!(M, Mat3::from_cols(Vec3::X, Vec3::NEG_Z, Vec3::Y));
+        let q = Quat::from_mat3(&Mat3::IDENTITY);
+        assert_eq_quat!(q, Quat::IDENTITY);
+        let S = elodin_R_bevy(M).transpose();
+        assert_eq_mat!(S, Mat3::IDENTITY);
+
+        assert_eq_mat!(Mat3::from_cols(Vec3::NEG_X, Vec3::NEG_Y, Vec3::Z), glam_look_at_rh(Vec3::NEG_Z, Vec3::NEG_Y).0, "trial 0");
+        // assert_eq_mat!(Mat3::from_cols(Vec3::NEG_X, Vec3::NEG_Y, Vec3::Z), glam_look_at_rh(Vec3::Z, Vec3::Y).0, "current");
+    }
+
+    fn test_look_at_rh_nox_vs_glam(f: fn(Mat3, Mat3) -> (Mat3, Mat3),
+                                   g: fn(Mat3) -> Mat3,
+                                   h: fn(Vec3) -> Vec3,
+
+    ) {
         let test_cases = [
-            (Vec3::new(0.0, 1.0, 0.0), Vec3::Z), // 0: This is the identity
+            (Vec3::new(0.0, 1.0, 0.0), Vec3::Z), // 0: This is the identity for Elodin ENU.
+            (Vec3::NEG_Z, Vec3::Y), // 1: This is identity for Bevy.
             // transform for Elodin's look_to. No surprise: It's ENU, with north as the
             // facing direction.
-            (Vec3::new(1.0, 0.0, 0.0), Vec3::Y), // 1:
-            (Vec3::new(0.0, 1.0, 0.0), Vec3::Z), // 2:
-            (Vec3::new(0.0, 1.0, 0.0), Vec3::Y), // 3
-            (Vec3::new(0.0, 0.0, 1.0), Vec3::Z),
+            (Vec3::new(0.0, 1.0, 0.0), Vec3::Z),
             (Vec3::new(0.0, 0.0, 1.0), Vec3::Y),
             (Vec3::new(1.0, 2.0, 3.0).normalize(), Vec3::Y),
             (Vec3::new(-1.0, 0.5, 0.3).normalize(), Vec3::Y),
             (Vec3::new(0.0, 0.0, -1.0), Vec3::Y),
+            (Vec3::new(1.0, 0.0, 0.0), Vec3::Y),
+            (Vec3::new(0.0, 1.0, 0.0), Vec3::Y), // This one should be tricky.
+            (Vec3::new(0.0, 0.0, 1.0), Vec3::Z),
         ];
 
         for (i, (dir, up)) in test_cases.into_iter().enumerate() {
-            let nox_dir = nox::Vec3::new(dir.x as f64, dir.y as f64, dir.z as f64);
-            let nox_up = nox::Vec3::new(up.x as f64, up.y as f64, up.z as f64);
+            let nox_dir = nox::Vec3::from(dir.as_dvec3());
+            let nox_up = nox::Vec3::from(up.as_dvec3());
 
-            let nox_mat = nox::Matrix3::look_at_rh(nox_dir, nox_up);
-            let glam_mat = glam_look_at_rh(dir, up);
-            let glam_mat = elodin_R_bevy(&glam_mat);
+            let (nox_mat, nox_up_actual) = nox::Matrix3::look_at_rh_up(nox_dir, nox_up);
+            let (glam_mat, up_actual) = glam_look_at_rh(dir, up);
+            assert_eq_vec!(up, up_actual, "case {i} bevy up vector");
+            assert_eq_vec!(up, bevy::math::DVec3::from(nox_up_actual).as_vec3(), "case {i} nox up vector");
+            // let glam_mat = elodin_R_bevy(glam_mat);
             let nox_mat_bevy: bevy::math::Mat3 = bevy::math::DMat3::from(nox_mat).as_mat3();
-            // let nox_mat_bevy = bevy_R_enu(&nox_mat_bevy);
-            // Compare the matrices
-            let glam_cols = [glam_mat.x_axis, glam_mat.y_axis, glam_mat.z_axis];
+            // let nox_mat_bevy = bevy_R_elodin(nox_mat_bevy);
+            let (glam_mat, nox_mat_bevy) = f(glam_mat, nox_mat_bevy);
 
-            let nox_cols = [
-                nox_mat_bevy.x_axis,
-                nox_mat_bevy.y_axis,
-                nox_mat_bevy.z_axis,
-            ];
-            let _ = nox_mat;
-
-            println!("Testing case {i} dir={:?}, up={:?}", dir, up);
-            println!("nox matrix (column-major):");
-            println!("  col0: {:?}", nox_cols[0]);
-            println!("  col1: {:?}", nox_cols[1]);
-            println!("  col2: {:?}", nox_cols[2]);
-            println!("glam matrix:");
-            println!("  col0: {:?}", glam_cols[0]);
-            println!("  col1: {:?}", glam_cols[1]);
-            println!("  col2: {:?}", glam_cols[2]);
-
-            // Check if matrices are approximately equal
-            let eps = 1e-5;
-            // for col in 0..3 {
-            //     for row in 0..3 {
-            //         let nox_val = nox_cols[row][col];
-            //         let glam_val = glam_cols[col][row];
-            //         // assert!(
-            //         //     (nox_val - glam_val as f64).abs() < eps,
-            //         //     "Mismatch at [{},{}]: nox={}, glam={}, dir={:?}, up={:?}",
-            //         //     row, col, nox_val, glam_val, dir, up
-            //         // );
-            //     }
-            // }
+            assert_eq_mat!(nox_mat_bevy, glam_mat, "\ncase {i} dir {dir} up {up}");
+            println!("nox {nox_mat_bevy}\nglam_mat {glam_mat}");
 
             // Also compare resulting quaternions
-            let nox_quat = nox::Quaternion::look_at_rh(nox_dir, nox_up);
+            let nox_quat_look_at = nox::Quaternion::look_at_rh(nox_dir, nox_up);
+            let nox_quat = nox::Quaternion::from_rot_mat(nox_mat);
+            assert_eq_quat!(bevy::math::DQuat::from(nox_quat),
+                            bevy::math::DQuat::from(nox_quat_look_at), "case {i} look_at_rh vs mat");
             let world_pos = super::WorldPos {
                 att: nox_quat,
                 pos: nox::Vec3::new(0.0, 0.0, 0.0),
             };
-            // let nox_quat = world_pos.att();
-            let nox_quat = world_pos.bevy_att();
-            let glam_quat = Quat::from_mat3(&glam_mat);
-
-            let nox_q = nox_quat.to_array();
-            println!(
-                "nox quat: [{:.6}, {:.6}, {:.6}, {:.6}]",
-                nox_q[0], nox_q[1], nox_q[2], nox_q[3]
-            );
-            println!("glam quat: {:?}", glam_quat);
-
-            // Quaternions can differ by sign (q and -q represent the same rotation)
-            let same_sign = (nox_q[3] - glam_quat.w as f64).abs() < eps;
-            let sign = if same_sign { 1.0 } else { -1.0 };
-            assert!(
-                (nox_q[0] - sign * glam_quat.x as f64).abs() < eps
-                    && (nox_q[1] - sign * glam_quat.y as f64).abs() < eps
-                    && (nox_q[2] - sign * glam_quat.z as f64).abs() < eps
-                    && (nox_q[3] - sign * glam_quat.w as f64).abs() < eps,
-                "Quaternion mismatch: nox={:?}, glam={:?}, dir={:?}, up={:?}",
-                nox_q,
-                glam_quat,
-                dir,
-                up
-            );
-            println!("PASSED\n");
+            let nox_quat_bevy = world_pos.bevy_att();
+            assert_eq_quat!(bevy::math::DQuat::from(nox_quat), bevy::math::DQuat::from(world_pos.att()), "case {i} first");
+            // let glam_quat = Quat::from_mat3(&elodin_R_bevy(glam_mat).transpose());
+            let glam_quat = Quat::from_mat3(&g(glam_mat));
+            assert_eq_quat!(nox_quat_bevy.as_quat(), glam_quat, "case {i} second");
         }
     }
 }
