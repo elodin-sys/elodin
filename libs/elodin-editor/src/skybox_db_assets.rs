@@ -49,9 +49,10 @@ fn skybox_still_desired(
     let Some(addr) = connection_addr.map(|addr| addr.0) else {
         return false;
     };
-    desired_skybox_from_config(config)
-        .flatten()
-        .is_some_and(|skybox| key.addr == addr && key.skybox == skybox)
+    matches!(
+        desired_skybox_from_config(config),
+        Some(Some(skybox)) if key.addr == addr && key.skybox == skybox
+    )
 }
 
 fn skybox_in_flight_still_desired(
@@ -130,10 +131,18 @@ pub fn sync_db_skybox_assets_from_config(
         }
     }
 
-    let Some(skybox) = desired_skybox_from_config(&config).flatten() else {
-        mirror.synced = None;
-        mirror.last_failed = None;
-        return;
+    let desired = match desired_skybox_from_config(&config) {
+        None => return,
+        Some(None) => {
+            in_flight.task = None;
+            in_flight.key = None;
+            mirror.last_failed = None;
+            if mirror.synced.take().is_some() {
+                skyboxes.write(SetActiveSkybox::Clear);
+            }
+            return;
+        }
+        Some(Some(skybox)) => skybox,
     };
     let Some(connection_addr) = connection_addr else {
         return;
@@ -143,7 +152,7 @@ pub fn sync_db_skybox_assets_from_config(
     }
     let key = MirrorKey {
         addr: connection_addr.0,
-        skybox: skybox.clone(),
+        skybox: desired.clone(),
     };
     if mirror.synced.as_ref() == Some(&key) {
         return;
@@ -158,7 +167,7 @@ pub fn sync_db_skybox_assets_from_config(
     in_flight.key = Some(key);
     let connection_addr = connection_addr.0;
     in_flight.task = Some(IoTaskPool::get().spawn(async move {
-        download_db_skybox_assets(&skybox, connection_addr).await
+        download_db_skybox_assets(&desired, connection_addr).await
     }));
 }
 
