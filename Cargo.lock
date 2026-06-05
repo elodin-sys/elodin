@@ -7623,6 +7623,8 @@ dependencies = [
  "impeller2-wkt",
  "kdl",
  "miette 7.6.0",
+ "ron 0.10.1",
+ "serde",
  "thiserror 2.0.18",
  "tracing",
 ]

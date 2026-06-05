@@ -4,6 +4,7 @@ use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::routing::get;
 use miette::IntoDiagnostic;
+use std::collections::HashSet;
 use std::io;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::path::{Component, Path, PathBuf};
@@ -119,6 +120,29 @@ async fn fetch_source_asset(client: &reqwest::Client, url: &str, asset: &str) ->
     None
 }
 
+async fn sync_one_schematic_asset(
+    client: &reqwest::Client,
+    base: &str,
+    assets_dir: &Path,
+    name: &str,
+) -> Option<Vec<u8>> {
+    let url = format!("{base}/{name}");
+    let Some(bytes) = fetch_source_asset(client, &url, name).await else {
+        return None;
+    };
+    if let Err(err) = write_asset_file(assets_dir, name, &bytes) {
+        tracing::warn!(
+            asset = %name,
+            %url,
+            error = %err,
+            "failed to write schematic asset from source"
+        );
+        return None;
+    }
+    tracing::info!(asset = %name, "synced schematic asset from source");
+    Some(bytes)
+}
+
 /// Copies `db:` assets referenced in schematic KDL from a source elodin-db assets server.
 pub async fn sync_schematic_assets_from_source(
     source_tcp: SocketAddr,
@@ -136,22 +160,35 @@ pub async fn sync_schematic_assets_from_source(
     let assets_dir = assets_dir(db_path);
     std::fs::create_dir_all(&assets_dir)?;
     let client = sync_http_client().map_err(io::Error::other)?;
+    let skybox_name = schematic.skybox.as_ref().map(|skybox| skybox.name.clone());
+    let mut synced = HashSet::new();
+    let mut skybox_manifest = None;
 
     for name in names {
-        let url = format!("{base}/{name}");
-        let Some(bytes) = fetch_source_asset(&client, &url, &name).await else {
-            continue;
-        };
-        if let Err(err) = write_asset_file(&assets_dir, &name, &bytes) {
-            tracing::warn!(
-                asset = %name,
-                %url,
-                error = %err,
-                "failed to write schematic asset from source"
-            );
-            continue;
+        if let Some(bytes) = sync_one_schematic_asset(&client, &base, &assets_dir, &name).await {
+            if name == impeller2_kdl::SKYBOX_MANIFEST_ASSET_NAME {
+                skybox_manifest = Some(bytes);
+            }
+            synced.insert(name);
         }
-        tracing::info!(asset = %name, "synced schematic asset from source");
+    }
+
+    if let (Some(skybox_name), Some(manifest)) = (skybox_name, skybox_manifest)
+        && let Ok(manifest) = std::str::from_utf8(&manifest)
+    {
+        match impeller2_kdl::skybox_manifest_cubemap_asset_name(manifest, &skybox_name) {
+            Ok(Some(cubemap_name)) if !synced.contains(&cubemap_name) => {
+                let _ = sync_one_schematic_asset(&client, &base, &assets_dir, &cubemap_name).await;
+            }
+            Ok(_) => {}
+            Err(err) => {
+                tracing::warn!(
+                    skybox = %skybox_name,
+                    error = %err,
+                    "failed to resolve skybox cubemap from source manifest"
+                );
+            }
+        }
     }
 
     Ok(())
@@ -393,8 +430,32 @@ mod tests {
         let source_assets = dir.path().join("source_assets");
         std::fs::create_dir_all(source_assets.join("models")).unwrap();
         std::fs::create_dir_all(source_assets.join("icons")).unwrap();
+        std::fs::create_dir_all(source_assets.join("skyboxes")).unwrap();
         std::fs::write(source_assets.join("models/rocket.glb"), b"from-source").unwrap();
         std::fs::write(source_assets.join("icons/marker.png"), b"png-source").unwrap();
+        let skybox_manifest = r#"
+(
+    version: 2,
+    entries: [
+        (
+            name: "mojave_desert",
+            prompt: "mojave",
+            style: M3Photoreal,
+            blockade: None,
+            cubemap_file: "mojave_desert.cubemap.ktx2",
+            face_size: 2048,
+            created_at: "2026-05-11T05:34:26Z",
+        ),
+    ],
+    default: Some("mojave_desert"),
+)
+"#;
+        std::fs::write(source_assets.join("skyboxes/manifest.ron"), skybox_manifest).unwrap();
+        std::fs::write(
+            source_assets.join("skyboxes/mojave_desert.cubemap.ktx2"),
+            b"ktx2-source",
+        )
+        .unwrap();
 
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let bound = listener.local_addr().unwrap();
@@ -415,6 +476,8 @@ mod tests {
 
         let follower_db = dir.path().join("follower_db");
         let kdl = r#"
+skybox name="mojave_desert"
+
 object_3d "rocket.world_pos" {
     glb path="db:models/rocket.glb"
     icon path="db:icons/marker.png"
@@ -431,6 +494,15 @@ object_3d "rocket.world_pos" {
         assert_eq!(
             std::fs::read(assets_dir(&follower_db).join("icons/marker.png")).unwrap(),
             b"png-source".to_vec()
+        );
+        assert_eq!(
+            std::fs::read(assets_dir(&follower_db).join("skyboxes/manifest.ron")).unwrap(),
+            skybox_manifest.as_bytes().to_vec()
+        );
+        assert_eq!(
+            std::fs::read(assets_dir(&follower_db).join("skyboxes/mojave_desert.cubemap.ktx2"))
+                .unwrap(),
+            b"ktx2-source".to_vec()
         );
     }
 

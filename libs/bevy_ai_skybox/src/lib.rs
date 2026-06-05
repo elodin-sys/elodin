@@ -185,6 +185,10 @@ impl Default for SkyboxManifest {
 }
 
 impl SkyboxManifest {
+    pub fn from_ron_str(contents: &str) -> Result<Self> {
+        Ok(ron::from_str(contents)?)
+    }
+
     pub fn read_or_create(path: &Path) -> Result<Self> {
         if !path.exists() {
             if let Some(parent) = path.parent() {
@@ -196,7 +200,7 @@ impl SkyboxManifest {
         }
 
         let contents = fs::read_to_string(path)?;
-        Ok(ron::from_str(&contents)?)
+        Self::from_ron_str(&contents)
     }
 
     pub fn write_atomic(&self, path: &Path) -> Result<()> {

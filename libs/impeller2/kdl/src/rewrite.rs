@@ -1,7 +1,35 @@
 use impeller2_wkt::{
     Object3DIcon, Object3DIconSource, Object3DMesh, Panel, Schematic, SchematicElem,
 };
+use serde::Deserialize;
 use std::path::{Component, Path};
+
+pub const SKYBOX_MANIFEST_ASSET_NAME: &str = "skyboxes/manifest.ron";
+
+#[derive(Debug, thiserror::Error)]
+pub enum SkyboxManifestError {
+    #[error("failed to parse skybox manifest: {0}")]
+    Ron(String),
+    #[error("invalid skybox cubemap file path `{0}`")]
+    InvalidCubemapPath(String),
+}
+
+impl From<ron::error::SpannedError> for SkyboxManifestError {
+    fn from(value: ron::error::SpannedError) -> Self {
+        Self::Ron(value.to_string())
+    }
+}
+
+#[derive(Deserialize)]
+struct SkyboxManifest {
+    entries: Vec<SkyboxManifestEntry>,
+}
+
+#[derive(Deserialize)]
+struct SkyboxManifestEntry {
+    name: String,
+    cubemap_file: String,
+}
 
 pub fn is_local_asset_path(path: &str) -> bool {
     !(path.starts_with("db:") || path.starts_with("http://") || path.starts_with("https://"))
@@ -29,6 +57,38 @@ pub fn db_asset_name(path: &str) -> Option<String> {
 
 pub fn db_glb_asset_name(path: &str) -> Option<String> {
     db_asset_name(path)
+}
+
+pub fn skybox_cubemap_asset_name(cubemap_file: &str) -> Option<String> {
+    let mut parts = vec!["skyboxes".to_string()];
+    for component in Path::new(cubemap_file).components() {
+        match component {
+            Component::CurDir => {}
+            Component::Normal(part) => parts.push(part.to_string_lossy().into_owned()),
+            Component::ParentDir | Component::Prefix(_) | Component::RootDir => return None,
+        }
+    }
+    if parts.len() == 1 {
+        return None;
+    }
+    Some(parts.join("/"))
+}
+
+pub fn skybox_manifest_cubemap_asset_name(
+    manifest_ron: &str,
+    skybox_name: &str,
+) -> Result<Option<String>, SkyboxManifestError> {
+    let manifest: SkyboxManifest = ron::from_str(manifest_ron)?;
+    let Some(entry) = manifest
+        .entries
+        .iter()
+        .find(|entry| entry.name == skybox_name)
+    else {
+        return Ok(None);
+    };
+    skybox_cubemap_asset_name(&entry.cubemap_file)
+        .map(Some)
+        .ok_or_else(|| SkyboxManifestError::InvalidCubemapPath(entry.cubemap_file.clone()))
 }
 
 fn path_components_to_asset_name(path: &Path) -> Option<String> {
@@ -131,6 +191,9 @@ where
 
 pub fn collect_local_asset_paths(schematic: &Schematic) -> Vec<String> {
     let mut paths = Vec::new();
+    if schematic.skybox.is_some() {
+        paths.push(SKYBOX_MANIFEST_ASSET_NAME.to_string());
+    }
     for elem in &schematic.elems {
         collect_elem_paths(elem, &mut paths);
     }
@@ -145,6 +208,9 @@ pub fn collect_local_glb_paths(schematic: &Schematic) -> Vec<String> {
 
 pub fn collect_db_asset_names(schematic: &Schematic) -> Vec<String> {
     let mut names = Vec::new();
+    if schematic.skybox.is_some() {
+        names.push(SKYBOX_MANIFEST_ASSET_NAME.to_string());
+    }
     for elem in &schematic.elems {
         collect_elem_db_asset_names(elem, &mut names);
     }
@@ -235,7 +301,7 @@ fn collect_panel_paths(panel: &Panel, paths: &mut Vec<String>) {
 mod tests {
     use super::*;
     use impeller2_wkt::{
-        Object3D, Object3DIcon, Object3DIconSource, Object3DMesh, SchematicElem,
+        Object3D, Object3DIcon, Object3DIconSource, Object3DMesh, SchematicElem, SkyboxConfig,
         default_icon_color, default_icon_size,
     };
 
@@ -597,5 +663,80 @@ mod tests {
             collect_db_asset_names(&schematic),
             vec!["icons/a.png".to_string(), "mesh.glb".to_string()]
         );
+    }
+
+    #[test]
+    fn collect_local_asset_paths_includes_skybox_manifest() {
+        let schematic = Schematic {
+            skybox: Some(SkyboxConfig {
+                name: "mojave_desert".into(),
+            }),
+            ..Default::default()
+        };
+
+        assert_eq!(
+            collect_local_asset_paths(&schematic),
+            vec![SKYBOX_MANIFEST_ASSET_NAME.to_string()]
+        );
+    }
+
+    #[test]
+    fn collect_db_asset_names_includes_skybox_manifest() {
+        let schematic = Schematic {
+            skybox: Some(SkyboxConfig {
+                name: "mojave_desert".into(),
+            }),
+            ..Default::default()
+        };
+
+        assert_eq!(
+            collect_db_asset_names(&schematic),
+            vec![SKYBOX_MANIFEST_ASSET_NAME.to_string()]
+        );
+    }
+
+    #[test]
+    fn skybox_manifest_cubemap_asset_name_extracts_active_ktx2() {
+        let manifest = r#"
+(
+    version: 2,
+    entries: [
+        (
+            name: "mojave_desert",
+            prompt: "mojave",
+            style: M3Photoreal,
+            blockade: None,
+            cubemap_file: "mojave_desert.cubemap.ktx2",
+            face_size: 2048,
+            created_at: "2026-05-11T05:34:26Z",
+        ),
+    ],
+    default: Some("mojave_desert"),
+)
+"#;
+
+        assert_eq!(
+            skybox_manifest_cubemap_asset_name(manifest, "mojave_desert").unwrap(),
+            Some("skyboxes/mojave_desert.cubemap.ktx2".to_string())
+        );
+    }
+
+    #[test]
+    fn skybox_manifest_cubemap_asset_name_rejects_traversal() {
+        let manifest = r#"
+(
+    entries: [
+        (
+            name: "bad",
+            cubemap_file: "../bad.ktx2",
+        ),
+    ],
+)
+"#;
+
+        assert!(matches!(
+            skybox_manifest_cubemap_asset_name(manifest, "bad"),
+            Err(SkyboxManifestError::InvalidCubemapPath(_))
+        ));
     }
 }
