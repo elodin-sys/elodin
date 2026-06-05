@@ -1,9 +1,11 @@
 use bevy::prelude::*;
+use bevy::tasks::{IoTaskPool, Task, futures_lite::future};
 use bevy_ai_skybox::{
-    SkyboxManifest,
+    ManifestEntry, SkyboxManifest,
     prelude::{SetActiveSkybox, SkyboxAssetSettings, SkyboxCache},
 };
 use impeller2_bevy::ConnectionAddr;
+use impeller2_kdl::FromKdl;
 use impeller2_wkt::{DbConfig, Schematic};
 use std::{
     net::SocketAddr,
@@ -28,6 +30,41 @@ pub struct DbSkyboxAssetMirror {
     last_failed: Option<(MirrorKey, Instant)>,
 }
 
+#[derive(Resource, Default)]
+pub struct DbSkyboxSyncInFlight {
+    key: Option<MirrorKey>,
+    task: Option<Task<Result<SkyboxDownloadPayload, String>>>,
+}
+
+struct SkyboxDownloadPayload {
+    entry: ManifestEntry,
+    cubemap_bytes: Vec<u8>,
+}
+
+fn skybox_still_desired(
+    config: &DbConfig,
+    connection_addr: Option<&ConnectionAddr>,
+    key: &MirrorKey,
+) -> bool {
+    let Some(addr) = connection_addr.map(|addr| addr.0) else {
+        return false;
+    };
+    desired_skybox_from_config(config)
+        .flatten()
+        .is_some_and(|skybox| key.addr == addr && key.skybox == skybox)
+}
+
+fn skybox_in_flight_still_desired(
+    config: &DbConfig,
+    connection_addr: Option<&ConnectionAddr>,
+    in_flight: &DbSkyboxSyncInFlight,
+) -> bool {
+    let Some(key) = in_flight.key.as_ref() else {
+        return false;
+    };
+    skybox_still_desired(config, connection_addr, key)
+}
+
 pub fn desired_skybox_from_config(config: &DbConfig) -> Option<Option<String>> {
     if let Some(desired) = config.skybox_active_desired() {
         return Some(desired);
@@ -46,18 +83,64 @@ pub fn sync_db_skybox_assets_from_config(
     settings: Option<Res<SkyboxAssetSettings>>,
     mut cache: Option<ResMut<SkyboxCache>>,
     mut mirror: ResMut<DbSkyboxAssetMirror>,
+    mut in_flight: ResMut<DbSkyboxSyncInFlight>,
     mut skyboxes: MessageWriter<SetActiveSkybox>,
 ) {
+    if let Some(task) = in_flight.task.as_mut() {
+        if let Some(result) = future::block_on(future::poll_once(task)) {
+            let started_key = in_flight.key.take();
+            in_flight.task = None;
+            if let (Some(key), Some(settings), Some(cache)) =
+                (started_key, settings.as_ref(), cache.as_mut())
+                && skybox_still_desired(&config, connection_addr.as_deref(), &key)
+            {
+                match result {
+                    Ok(payload) => {
+                        match apply_db_skybox_download(&payload, settings, cache) {
+                            Ok(()) => {
+                                mirror.synced = Some(key.clone());
+                                mirror.last_failed = None;
+                                skyboxes.write(SetActiveSkybox::ByName(key.skybox));
+                            }
+                            Err(error) => {
+                                tracing::warn!(
+                                    skybox = %key.skybox,
+                                    error = %error,
+                                    "failed to apply mirrored skybox assets from database"
+                                );
+                                mirror.last_failed = Some((key, Instant::now()));
+                            }
+                        }
+                    }
+                    Err(error) => {
+                        tracing::warn!(
+                            skybox = %key.skybox,
+                            error = %error,
+                            "failed to mirror skybox assets from database"
+                        );
+                        mirror.last_failed = Some((key, Instant::now()));
+                    }
+                }
+            }
+        } else if skybox_in_flight_still_desired(&config, connection_addr.as_deref(), &in_flight) {
+            return;
+        } else {
+            in_flight.task = None;
+            in_flight.key = None;
+        }
+    }
+
     let Some(skybox) = desired_skybox_from_config(&config).flatten() else {
         mirror.synced = None;
         mirror.last_failed = None;
         return;
     };
-    let (Some(connection_addr), Some(settings), Some(cache)) =
-        (connection_addr, settings, cache.as_mut())
-    else {
+    let Some(connection_addr) = connection_addr else {
         return;
     };
+    if settings.is_none() || cache.is_none() {
+        return;
+    }
     let key = MirrorKey {
         addr: connection_addr.0,
         skybox: skybox.clone(),
@@ -72,34 +155,54 @@ pub fn sync_db_skybox_assets_from_config(
         return;
     }
 
-    match sync_db_skybox_asset(&skybox, connection_addr.0, &settings, cache) {
-        Ok(()) => {
-            mirror.synced = Some(key);
-            mirror.last_failed = None;
-            skyboxes.write(SetActiveSkybox::ByName(skybox));
-        }
-        Err(error) => {
-            tracing::warn!(
-                skybox = %skybox,
-                error = %error,
-                "failed to mirror skybox assets from database"
-            );
-            mirror.last_failed = Some((key, Instant::now()));
-        }
-    }
+    in_flight.key = Some(key);
+    let connection_addr = connection_addr.0;
+    in_flight.task = Some(IoTaskPool::get().spawn(async move {
+        download_db_skybox_assets(&skybox, connection_addr).await
+    }));
 }
 
-fn fetch_asset(client: &reqwest::blocking::Client, url: &str) -> Result<Vec<u8>, String> {
+async fn fetch_asset(client: &reqwest::Client, url: &str) -> Result<Vec<u8>, String> {
     let response = client
         .get(url)
         .send()
+        .await
         .map_err(|err| format!("{url}: {err}"))?
         .error_for_status()
         .map_err(|err| format!("{url}: {err}"))?;
     response
         .bytes()
+        .await
         .map(|bytes| bytes.to_vec())
         .map_err(|err| format!("{url}: {err}"))
+}
+
+async fn download_db_skybox_assets(
+    skybox: &str,
+    connection_addr: SocketAddr,
+) -> Result<SkyboxDownloadPayload, String> {
+    let client = reqwest::Client::builder()
+        .timeout(REQUEST_TIMEOUT)
+        .build()
+        .map_err(|err| err.to_string())?;
+    let base = assets_http_base(connection_addr);
+    let manifest_url = format!("{base}/{}", impeller2_kdl::SKYBOX_MANIFEST_ASSET_NAME);
+    let manifest_bytes = fetch_asset(&client, &manifest_url).await?;
+    let manifest = std::str::from_utf8(&manifest_bytes).map_err(|err| err.to_string())?;
+    let manifest = SkyboxManifest::from_ron_str(manifest).map_err(|err| err.to_string())?;
+    let entry = manifest
+        .get(skybox)
+        .cloned()
+        .ok_or_else(|| format!("skybox `{skybox}` is not present in database manifest"))?;
+
+    let cubemap_name = impeller2_kdl::skybox_cubemap_asset_name(&entry.cubemap_file)
+        .ok_or_else(|| format!("invalid skybox cubemap file path `{}`", entry.cubemap_file))?;
+    let cubemap_url = format!("{base}/{cubemap_name}");
+    let cubemap_bytes = fetch_asset(&client, &cubemap_url).await?;
+    Ok(SkyboxDownloadPayload {
+        entry,
+        cubemap_bytes,
+    })
 }
 
 fn cubemap_cache_path(cache_dir: &Path, cubemap_file: &str) -> Result<PathBuf, String> {
@@ -122,34 +225,22 @@ fn write_cubemap(cache_dir: &Path, cubemap_file: &str, bytes: &[u8]) -> Result<(
     Ok(())
 }
 
-fn sync_db_skybox_asset(
-    skybox: &str,
-    connection_addr: SocketAddr,
+fn apply_db_skybox_download(
+    payload: &SkyboxDownloadPayload,
     settings: &SkyboxAssetSettings,
     cache: &mut SkyboxCache,
 ) -> Result<(), String> {
-    let client = reqwest::blocking::Client::builder()
-        .timeout(REQUEST_TIMEOUT)
-        .build()
+    write_cubemap(
+        &settings.cache_dir,
+        &payload.entry.cubemap_file,
+        &payload.cubemap_bytes,
+    )?;
+    cache.manifest.upsert(payload.entry.clone());
+    cache
+        .manifest
+        .write_atomic(&settings.manifest_path())
         .map_err(|err| err.to_string())?;
-    let base = assets_http_base(connection_addr);
-    let manifest_url = format!("{base}/{}", impeller2_kdl::SKYBOX_MANIFEST_ASSET_NAME);
-    let manifest_bytes = fetch_asset(&client, &manifest_url)?;
-    let manifest = std::str::from_utf8(&manifest_bytes).map_err(|err| err.to_string())?;
-    let manifest = SkyboxManifest::from_ron_str(manifest).map_err(|err| err.to_string())?;
-    let entry = manifest
-        .get(skybox)
-        .cloned()
-        .ok_or_else(|| format!("skybox `{skybox}` is not present in database manifest"))?;
-
-    let cubemap_name = impeller2_kdl::skybox_cubemap_asset_name(&entry.cubemap_file)
-        .ok_or_else(|| format!("invalid skybox cubemap file path `{}`", entry.cubemap_file))?;
-    let cubemap_url = format!("{base}/{cubemap_name}");
-    let cubemap_bytes = fetch_asset(&client, &cubemap_url)?;
-    write_cubemap(&settings.cache_dir, &entry.cubemap_file, &cubemap_bytes)?;
-
-    cache.manifest.upsert(entry);
-    cache.handles.remove(skybox);
+    cache.handles.remove(&payload.entry.name);
     Ok(())
 }
 

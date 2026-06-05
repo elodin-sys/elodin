@@ -249,6 +249,7 @@ impl Plugin for EditorPlugin {
             .add_plugins(skybox_asset_plugin())
             .add_plugins(skybox_generation_plugin())
             .init_resource::<skybox_db_assets::DbSkyboxAssetMirror>()
+            .init_resource::<skybox_db_assets::DbSkyboxSyncInFlight>()
             // Note: we added this because bevy 0.17.3 changed its behavior
             // which broke bevy_editor_cam. See here:
             // https://github.com/aevyrie/bevy_editor_cam/issues/61

@@ -130,6 +130,7 @@ impl Plugin for HeadlessEditorPlugin {
             .init_resource::<crate::SyncedObject3d>()
             .init_resource::<HeadlessSkyboxRenderGate>()
             .init_resource::<crate::skybox_db_assets::DbSkyboxAssetMirror>()
+            .init_resource::<crate::skybox_db_assets::DbSkyboxSyncInFlight>()
             .add_systems(Update, crate::update_eql_context)
             .add_systems(Update, poll_headless_db_config)
             .add_systems(
