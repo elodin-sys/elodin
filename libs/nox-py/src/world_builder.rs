@@ -97,6 +97,8 @@ pub enum Args {
         no_s10: bool,
         #[arg(long, default_value = None)]
         liveness_port: Option<u16>,
+        #[arg(long, default_value = "false", hide = true)]
+        optimize: bool,
     },
     Plan {
         out_dir: PathBuf,
@@ -579,6 +581,7 @@ impl WorldBuilder {
                 addr,
                 no_s10,
                 liveness_port,
+                optimize: _,
             } => {
                 // Safety: set before the sim runtime thread starts; used only by this process's
                 // final `ELODIN_SIM_SUMMARY_JSON` emission.

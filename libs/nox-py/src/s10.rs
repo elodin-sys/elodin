@@ -147,12 +147,13 @@ pub struct PyRecipe {
 #[pymethods]
 impl PyRecipe {
     #[new]
-    #[pyo3(signature = (name, path=None, addr=None, optimize=None))]
+    #[pyo3(signature = (name, path=None, addr=None, optimize=None, env=None))]
     fn new(
         name: String,
         path: Option<String>,
         addr: Option<String>,
         optimize: Option<bool>,
+        env: Option<HashMap<String, String>>,
     ) -> PyResult<Self> {
         let path = path.map(PathBuf::from).unwrap_or_default();
         let addr = addr.unwrap_or_else(|| "[::]:2240".to_string());
@@ -163,7 +164,7 @@ impl PyRecipe {
             path,
             addr,
             optimize,
-            env: HashMap::new(),
+            env: env.unwrap_or_default(),
         };
 
         Ok(PyRecipe { inner })
@@ -179,7 +180,7 @@ impl PyRecipe {
     ///     args: Command-line arguments to pass to the binary
     ///     cwd: Working directory for the process
     #[staticmethod]
-    #[pyo3(signature = (name, path, package=None, bin=None, args=None, cwd=None))]
+    #[pyo3(signature = (name, path, package=None, bin=None, args=None, cwd=None, env=None))]
     fn cargo(
         name: String,
         path: String,
@@ -187,6 +188,7 @@ impl PyRecipe {
         bin: Option<String>,
         args: Option<Vec<String>>,
         cwd: Option<String>,
+        env: Option<HashMap<String, String>>,
     ) -> PyResult<Self> {
         let inner = Recipe::Cargo {
             name,
@@ -196,7 +198,7 @@ impl PyRecipe {
             features: vec![],
             args: args.unwrap_or_default(),
             cwd,
-            env: HashMap::new(),
+            env: env.unwrap_or_default(),
             restart_policy: RestartPolicy::Never,
         };
         Ok(PyRecipe { inner })
@@ -210,19 +212,20 @@ impl PyRecipe {
     ///     args: Command-line arguments to pass to the process
     ///     cwd: Working directory for the process
     #[staticmethod]
-    #[pyo3(signature = (name, cmd, args=None, cwd=None))]
+    #[pyo3(signature = (name, cmd, args=None, cwd=None, env=None))]
     fn process(
         name: String,
         cmd: String,
         args: Option<Vec<String>>,
         cwd: Option<String>,
+        env: Option<HashMap<String, String>>,
     ) -> PyResult<Self> {
         let inner = Recipe::Process {
             name,
             cmd,
             args: args.unwrap_or_default(),
             cwd,
-            env: HashMap::new(),
+            env: env.unwrap_or_default(),
             restart_policy: RestartPolicy::Never,
             no_watch: true,
         };
