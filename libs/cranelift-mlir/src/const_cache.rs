@@ -41,7 +41,13 @@ pub fn intern_bytes(elem_type: ElementType, bytes: &[u8]) -> Result<Arc<CachedCo
     fs::create_dir_all(&dir).map_err(|e| format!("create constant cache dir {dir:?}: {e}"))?;
     let path = dir.join(format!("{hash}.bin"));
 
-    if !path.exists() {
+    let cache_entry_valid = path.exists()
+        && fs::metadata(&path)
+            .map(|metadata| metadata.len() as usize == bytes.len())
+            .unwrap_or(false);
+    if !cache_entry_valid {
+        // Repair missing or truncated cache entries before mapping; byte_len must match file size.
+        let _ = fs::remove_file(&path);
         write_atomic(&path, bytes)?;
     }
 

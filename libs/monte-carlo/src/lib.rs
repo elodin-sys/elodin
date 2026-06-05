@@ -118,7 +118,6 @@ pub struct PlanRow {
     pub seed: Option<u64>,
     pub params: BTreeMap<String, Value>,
     pub meta: BTreeMap<String, Value>,
-    pub explicit_db_port: Option<u16>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -163,6 +162,7 @@ pub struct CampaignSummary {
     pub total_runs: usize,
     pub passed: usize,
     pub failed: usize,
+    pub skipped: usize,
     pub workers: usize,
     pub wall_ms: u128,
     pub total_run_wall_ms: u128,
@@ -323,6 +323,7 @@ struct CampaignReporter {
     log_file: Arc<Mutex<fs::File>>,
     ok: Arc<AtomicUsize>,
     failed: Arc<AtomicUsize>,
+    skipped: Arc<AtomicUsize>,
 }
 
 impl CampaignReporter {
@@ -356,6 +357,7 @@ impl CampaignReporter {
             log_file: Arc::new(Mutex::new(log_file)),
             ok: Arc::new(AtomicUsize::new(0)),
             failed: Arc::new(AtomicUsize::new(0)),
+            skipped: Arc::new(AtomicUsize::new(0)),
         };
         reporter.line(format!(
             "starting monte-carlo campaign: runs={total_runs} workers={workers} out_dir={}",
@@ -381,16 +383,22 @@ impl CampaignReporter {
     }
 
     fn record(&self, metric: &RunMetric) {
-        if metric.exit_ok {
+        if metric.status == "skipped" {
+            self.skipped.fetch_add(1, Ordering::SeqCst);
+        } else if metric.exit_ok {
             self.ok.fetch_add(1, Ordering::SeqCst);
         } else {
             self.failed.fetch_add(1, Ordering::SeqCst);
         }
         let ok = self.ok.load(Ordering::SeqCst);
         let failed = self.failed.load(Ordering::SeqCst);
+        let skipped = self.skipped.load(Ordering::SeqCst);
         if let Some(progress) = &self.progress {
             progress.inc(1);
-            progress.set_message(format!("{ok} fail={failed} worker={}", metric.worker_id));
+            progress.set_message(format!(
+                "{ok} fail={failed} skip={skipped} worker={}",
+                metric.worker_id
+            ));
             let line = format!(
                 "[{}] {} worker={} wall_ms={} log={}",
                 metric.status,
@@ -420,9 +428,10 @@ impl CampaignReporter {
             progress.finish_and_clear();
         }
         self.line(format!(
-            "finished monte-carlo campaign: ok={} failed={}",
+            "finished monte-carlo campaign: ok={} failed={} skipped={}",
             self.ok.load(Ordering::SeqCst),
-            self.failed.load(Ordering::SeqCst)
+            self.failed.load(Ordering::SeqCst),
+            self.skipped.load(Ordering::SeqCst)
         ));
     }
 }
@@ -591,7 +600,10 @@ pub async fn run_campaign(mut options: RunOptions) -> Result<()> {
     fs::create_dir_all(&cache_dir)
         .into_diagnostic()
         .with_context(|| format!("create cache dir {}", cache_dir.display()))?;
-    fs::copy(&options.plan_path, options.out_dir.join("plan.csv")).into_diagnostic()?;
+    let plan_dest = options.out_dir.join("plan.csv");
+    if !same_file_or_path(&options.plan_path, &plan_dest) {
+        fs::copy(&options.plan_path, &plan_dest).into_diagnostic()?;
+    }
     write_json(&options.out_dir.join("campaign.resolved.json"), &config)?;
     let reporter = CampaignReporter::new(&options.out_dir, plan.len(), workers, options.progress)?;
     if !options.keep_existing {
@@ -642,7 +654,8 @@ pub async fn run_campaign(mut options: RunOptions) -> Result<()> {
                 let Some(row) = rows.lock().expect("rows mutex poisoned").pop_front() else {
                     break;
                 };
-                let metric = run_with_retries(
+                let run_id = row.run_id.clone();
+                let metric = match run_with_retries(
                     row,
                     worker_id,
                     slot.clone(),
@@ -651,7 +664,20 @@ pub async fn run_campaign(mut options: RunOptions) -> Result<()> {
                     &out_dir,
                     &cache_dir,
                 )
-                .await?;
+                .await
+                {
+                    Ok(metric) => metric,
+                    Err(err) => {
+                        let metric = placeholder_metric(&run_id, worker_id, &out_dir, "failed");
+                        reporter.line(format!(
+                            "[failed] {run_id} worker={worker_id} setup_error={err}"
+                        ));
+                        *failure.lock().expect("failure mutex poisoned") = Some(run_id);
+                        reporter.record(&metric);
+                        metrics.lock().expect("metrics mutex poisoned").push(metric);
+                        continue;
+                    }
+                };
                 let failed = !metric.exit_ok;
                 if failed {
                     *failure.lock().expect("failure mutex poisoned") = Some(metric.run_id.clone());
@@ -665,6 +691,16 @@ pub async fn run_campaign(mut options: RunOptions) -> Result<()> {
 
     while let Some(result) = worker_tasks.join_next().await {
         result.into_diagnostic()??;
+    }
+    let skipped_rows = rows
+        .lock()
+        .expect("rows mutex poisoned")
+        .drain(..)
+        .collect::<Vec<_>>();
+    for row in skipped_rows {
+        let metric = placeholder_metric(&row.run_id, workers, &options.out_dir, "skipped");
+        reporter.record(&metric);
+        metrics.lock().expect("metrics mutex poisoned").push(metric);
     }
     stop_sampling.store(true, Ordering::SeqCst);
     if let Some(memory_sampler) = memory_sampler {
@@ -702,7 +738,15 @@ pub async fn run_campaign(mut options: RunOptions) -> Result<()> {
         )?;
     }
 
-    let failed = metrics.iter().filter(|metric| !metric.exit_ok).count();
+    let passed = metrics.iter().filter(|metric| metric.exit_ok).count();
+    let failed = metrics
+        .iter()
+        .filter(|metric| metric.status == "failed")
+        .count();
+    let skipped = metrics
+        .iter()
+        .filter(|metric| metric.status == "skipped")
+        .count();
     let sim_phase_summary = aggregate_sim_summaries(&metrics);
     let phase_attribution = summarize_phase_attribution(&metrics);
     let total_run_wall_ms = metrics.iter().map(|metric| metric.wall_ms).sum::<u128>();
@@ -719,8 +763,9 @@ pub async fn run_campaign(mut options: RunOptions) -> Result<()> {
         started_at,
         finished_at: Utc::now(),
         total_runs: metrics.len(),
-        passed: metrics.len().saturating_sub(failed),
+        passed,
         failed,
+        skipped,
         workers,
         wall_ms,
         total_run_wall_ms,
@@ -1015,6 +1060,14 @@ fn apply_overrides(config: &mut CampaignConfig, options: &mut RunOptions) {
     config.workers = config.workers.map(|workers| workers.max(1));
 }
 
+fn same_file_or_path(left: &Path, right: &Path) -> bool {
+    left == right
+        || match (fs::canonicalize(left), fs::canonicalize(right)) {
+            (Ok(left), Ok(right)) => left == right,
+            _ => false,
+        }
+}
+
 fn read_plan(path: &Path) -> Result<Vec<PlanRow>> {
     let mut reader = csv::Reader::from_path(path)
         .into_diagnostic()
@@ -1027,7 +1080,6 @@ fn read_plan(path: &Path) -> Result<Vec<PlanRow>> {
         let mut meta = BTreeMap::new();
         let mut run_id = None;
         let mut seed = None;
-        let mut explicit_db_port = None;
         for (header, value) in headers.iter().zip(record.iter()) {
             if value.is_empty() {
                 continue;
@@ -1035,7 +1087,6 @@ fn read_plan(path: &Path) -> Result<Vec<PlanRow>> {
             match header {
                 "run_id" => run_id = Some(value.to_string()),
                 "seed" => seed = Some(value.parse::<u64>().into_diagnostic()?),
-                "db_port" => explicit_db_port = Some(value.parse::<u16>().into_diagnostic()?),
                 _ if header.starts_with("param.") => {
                     params.insert(
                         header.trim_start_matches("param.").to_string(),
@@ -1056,7 +1107,6 @@ fn read_plan(path: &Path) -> Result<Vec<PlanRow>> {
             seed,
             params,
             meta,
-            explicit_db_port,
         });
     }
     Ok(rows)
@@ -1400,6 +1450,36 @@ fn diff_ms(start: Option<u64>, end: Option<u64>) -> Option<f64> {
     Some(end?.saturating_sub(start?) as f64 / 1_000_000.0)
 }
 
+fn placeholder_metric(run_id: &str, worker_id: usize, out_dir: &Path, status: &str) -> RunMetric {
+    let now = Utc::now();
+    let unix_ns = unix_now_ns();
+    let run_dir = out_dir.join("runs").join(run_id);
+    RunMetric {
+        run_id: run_id.to_string(),
+        worker_id,
+        attempt: 0,
+        status: status.to_string(),
+        exit_ok: false,
+        wall_ms: 0,
+        started_at: now,
+        finished_at: now,
+        spawn_unix_ns: unix_ns,
+        exit_unix_ns: unix_ns,
+        entry_unix_ns: None,
+        compile_done_unix_ns: None,
+        loop_start_unix_ns: None,
+        loop_end_unix_ns: None,
+        summary_written_unix_ns: None,
+        python_import_ms: None,
+        compile_ms: None,
+        loop_ms: None,
+        teardown_ms: None,
+        process_shutdown_ms: None,
+        db_path: run_dir.join("db"),
+        run_dir,
+    }
+}
+
 impl SimSummaryAggregate {
     fn from_run(summary: SimRunSummary) -> Self {
         Self {
@@ -1503,8 +1583,8 @@ fn write_campaign_summary(
     let mut rendered = String::new();
     rendered.push_str("──── elodin monte-carlo campaign summary ────\n");
     rendered.push_str(&format!(
-        "  runs:              {} ok / {} failed / {} total\n",
-        summary.passed, summary.failed, summary.total_runs
+        "  runs:              {} ok / {} failed / {} skipped / {} total\n",
+        summary.passed, summary.failed, summary.skipped, summary.total_runs
     ));
     rendered.push_str(&format!("  workers:           {}\n", summary.workers));
     rendered.push_str(&format!(
