@@ -93,7 +93,14 @@ struct FollowStreamSession {
 async fn request_source_snapshot(
     config: &FollowConfig,
     start_stream: bool,
-) -> Result<(Option<FollowStreamSession>, DumpMetadataResp, DumpSchemaResp), Error> {
+) -> Result<
+    (
+        Option<FollowStreamSession>,
+        DumpMetadataResp,
+        DumpSchemaResp,
+    ),
+    Error,
+> {
     let stream = TcpStream::connect(config.source_addr).await?;
     let (rx, tx) = stream.split();
     let mut rx = PacketStream::new(rx);
@@ -132,7 +139,10 @@ async fn request_source_snapshot(
                 schema_resp = Some(m.parse::<DumpSchemaResp>()?);
             }
             other => {
-                debug!(?other, "unexpected packet during snapshot handshake, ignoring");
+                debug!(
+                    ?other,
+                    "unexpected packet during snapshot handshake, ignoring"
+                );
             }
         }
         buf = pkt.into_buf().into_inner();

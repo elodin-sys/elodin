@@ -317,18 +317,33 @@ mod tests {
         };
         let mirror = DbSkyboxAssetMirror::default();
         let in_flight = DbSkyboxSyncInFlight::default();
-        assert!(db_skybox_mirror_pending(addr, "mojave_desert", &mirror, &in_flight));
+        assert!(db_skybox_mirror_pending(
+            addr,
+            "mojave_desert",
+            &mirror,
+            &in_flight
+        ));
 
         let mirror = DbSkyboxAssetMirror {
             synced: Some(key.clone()),
             last_failed: None,
         };
-        assert!(!db_skybox_mirror_pending(addr, "mojave_desert", &mirror, &in_flight));
+        assert!(!db_skybox_mirror_pending(
+            addr,
+            "mojave_desert",
+            &mirror,
+            &in_flight
+        ));
 
         let mirror = DbSkyboxAssetMirror {
             synced: None,
             last_failed: Some((key, Instant::now())),
         };
-        assert!(!db_skybox_mirror_pending(addr, "mojave_desert", &mirror, &in_flight));
+        assert!(!db_skybox_mirror_pending(
+            addr,
+            "mojave_desert",
+            &mirror,
+            &in_flight
+        ));
     }
 }
