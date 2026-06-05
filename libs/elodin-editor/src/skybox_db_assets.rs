@@ -189,6 +189,12 @@ pub fn sync_db_skybox_assets_from_config(
         skybox: desired.clone(),
     };
     if mirror.synced.as_ref() == Some(&key) {
+        if cache
+            .as_ref()
+            .is_some_and(|cache| cache.active.as_deref() != Some(desired.as_str()))
+        {
+            skyboxes.write(SetActiveSkybox::ByName(desired));
+        }
         return;
     }
     if let Some((failed, at)) = &mirror.last_failed

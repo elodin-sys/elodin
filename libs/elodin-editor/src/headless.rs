@@ -392,8 +392,14 @@ fn sync_headless_skybox(params: SyncHeadlessSkyboxParams) {
         }
         if crate::skybox_db_assets::db_skybox_mirror_synced(connection_addr.0, name, &mirror) {
             render_gate.applied = false;
-            render_gate.activation_dispatched = true;
-            return;
+            if render_gate.activation_dispatched {
+                return;
+            }
+            // Assets are mirrored; sync_db re-activates when cache.active is stale.
+            if cache.active.as_deref() != Some(name.as_str()) {
+                render_gate.activation_dispatched = true;
+                return;
+            }
         }
     }
 
