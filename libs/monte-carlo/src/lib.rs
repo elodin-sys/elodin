@@ -132,7 +132,9 @@ pub struct ResourceSlot {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct RunMetric {
     pub run_id: String,
-    pub worker_id: usize,
+    /// Worker slot that executed the run, or `None` for runs that were never
+    /// scheduled onto a worker (e.g. skipped after `fail_fast`).
+    pub worker_id: Option<usize>,
     pub attempt: usize,
     pub status: String,
     pub exit_ok: bool,
@@ -393,17 +395,15 @@ impl CampaignReporter {
         let ok = self.ok.load(Ordering::SeqCst);
         let failed = self.failed.load(Ordering::SeqCst);
         let skipped = self.skipped.load(Ordering::SeqCst);
+        let worker = worker_label(metric.worker_id);
         if let Some(progress) = &self.progress {
             progress.inc(1);
-            progress.set_message(format!(
-                "{ok} fail={failed} skip={skipped} worker={}",
-                metric.worker_id
-            ));
+            progress.set_message(format!("{ok} fail={failed} skip={skipped} worker={worker}"));
             let line = format!(
                 "[{}] {} worker={} wall_ms={} log={}",
                 metric.status,
                 metric.run_id,
-                metric.worker_id,
+                worker,
                 metric.wall_ms,
                 metric.run_dir.join("logs").display()
             );
@@ -416,7 +416,7 @@ impl CampaignReporter {
                 "[{}] {} worker={} wall_ms={} log={}",
                 metric.status,
                 metric.run_id,
-                metric.worker_id,
+                worker,
                 metric.wall_ms,
                 metric.run_dir.join("logs").display()
             ));
@@ -668,7 +668,8 @@ pub async fn run_campaign(mut options: RunOptions) -> Result<()> {
                 {
                     Ok(metric) => metric,
                     Err(err) => {
-                        let metric = placeholder_metric(&run_id, worker_id, &out_dir, "failed");
+                        let metric =
+                            placeholder_metric(&run_id, Some(worker_id), &out_dir, "failed");
                         reporter.line(format!(
                             "[failed] {run_id} worker={worker_id} setup_error={err}"
                         ));
@@ -698,7 +699,7 @@ pub async fn run_campaign(mut options: RunOptions) -> Result<()> {
         .drain(..)
         .collect::<Vec<_>>();
     for row in skipped_rows {
-        let metric = placeholder_metric(&row.run_id, workers, &options.out_dir, "skipped");
+        let metric = placeholder_metric(&row.run_id, None, &options.out_dir, "skipped");
         reporter.record(&metric);
         metrics.lock().expect("metrics mutex poisoned").push(metric);
     }
@@ -938,7 +939,7 @@ async fn run_one(
         .and_then(|summary| summary.summary_written_unix_ns);
     let metric = RunMetric {
         run_id: row.run_id.clone(),
-        worker_id,
+        worker_id: Some(worker_id),
         attempt,
         status: if exit_ok { "ok" } else { "failed" }.to_string(),
         exit_ok,
@@ -1423,7 +1424,10 @@ fn write_results_csv(path: &Path, out_dir: &Path, metrics: &[RunMetric]) -> Resu
             .write_record([
                 metric.run_id.as_str(),
                 metric.status.as_str(),
-                &metric.worker_id.to_string(),
+                &metric
+                    .worker_id
+                    .map(|id| id.to_string())
+                    .unwrap_or_default(),
                 &metric.wall_ms.to_string(),
                 &metric.db_path.to_string_lossy(),
                 &result_json
@@ -1459,7 +1463,21 @@ fn diff_ms(start: Option<u64>, end: Option<u64>) -> Option<f64> {
     Some(end?.saturating_sub(start?) as f64 / 1_000_000.0)
 }
 
-fn placeholder_metric(run_id: &str, worker_id: usize, out_dir: &Path, status: &str) -> RunMetric {
+/// Human-readable label for a metric's worker slot. Skipped runs are never
+/// assigned to a worker, so they render as `-` rather than a fake slot.
+fn worker_label(worker_id: Option<usize>) -> String {
+    match worker_id {
+        Some(id) => id.to_string(),
+        None => "-".to_string(),
+    }
+}
+
+fn placeholder_metric(
+    run_id: &str,
+    worker_id: Option<usize>,
+    out_dir: &Path,
+    status: &str,
+) -> RunMetric {
     let now = Utc::now();
     let unix_ns = unix_now_ns();
     let run_dir = out_dir.join("runs").join(run_id);
@@ -2545,5 +2563,29 @@ mod tests {
         assert!((1024..=2048).contains(&p50));
         assert_eq!(p.percentile_ns(0.0), p.min_ns);
         assert_eq!(p.percentile_ns(1.0), p.max_ns);
+    }
+
+    #[test]
+    fn skipped_runs_are_unassigned_not_a_phantom_worker() {
+        let out_dir = Path::new("/tmp/mc-test");
+        let metric = placeholder_metric("run_0000000", None, out_dir, "skipped");
+        assert_eq!(metric.status, "skipped");
+        assert_eq!(metric.worker_id, None);
+        assert!(!metric.exit_ok);
+    }
+
+    #[test]
+    fn setup_failures_retain_their_worker_slot() {
+        let out_dir = Path::new("/tmp/mc-test");
+        let metric = placeholder_metric("run_0000000", Some(3), out_dir, "failed");
+        assert_eq!(metric.status, "failed");
+        assert_eq!(metric.worker_id, Some(3));
+    }
+
+    #[test]
+    fn worker_label_marks_unassigned_runs() {
+        assert_eq!(worker_label(Some(0)), "0");
+        assert_eq!(worker_label(Some(7)), "7");
+        assert_eq!(worker_label(None), "-");
     }
 }
