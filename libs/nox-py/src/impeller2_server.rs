@@ -105,11 +105,10 @@ pub fn prime_schematic_assets(
             world.metadata.schematic = Some(impeller2_kdl::serialize_schematic(&schematic));
         }
         Err(err) => {
-            tracing::warn!(
-                ?err,
-                "failed to parse schematic KDL; skipping db asset upload and db: rewrite — \
-                 asset paths will remain local and require files at replay"
-            );
+            return Err(elodin_db::Error::Io(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("failed to parse schematic KDL for DB asset upload: {err}"),
+            )));
         }
     }
     Ok(())
@@ -420,6 +419,19 @@ mod asset_tests {
         assert_eq!(
             resolve_local_asset_path("/abs/rocket.glb", Some(Path::new("/sim/schematic.kdl"))),
             PathBuf::from("/abs/rocket.glb")
+        );
+    }
+
+    #[test]
+    fn prime_schematic_assets_rejects_invalid_kdl() {
+        let dir = tempdir().unwrap();
+        let db = elodin_db::DB::create(dir.path().join("db")).unwrap();
+        let mut world = World::default();
+        world.metadata.schematic = Some("object_3d {\n".to_string());
+
+        let err = prime_schematic_assets(&db, &mut world).unwrap_err();
+        assert!(
+            matches!(err, elodin_db::Error::Io(ref io) if io.kind() == io::ErrorKind::InvalidData)
         );
     }
 
