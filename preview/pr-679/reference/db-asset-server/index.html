@@ -435,6 +435,11 @@
                 </li>
                 
                 <li>
+                    <a href="https://docs.elodin.systems/preview/pr-679/reference/db-asset-server/#simulation-source-snapshot">Simulation source snapshot</a>
+                    
+                </li>
+                
+                <li>
                     <a href="https://docs.elodin.systems/preview/pr-679/reference/db-asset-server/#consumption-workflows">Consumption workflows</a>
                     
                     <ul>
@@ -584,6 +589,28 @@
 <li><strong><code>ELODIN_DB_PATH</code></strong> environment variable (Python SDK)</li>
 </ul>
 <p>The schematic body is stored in DB metadata as <code>schematic.content</code> (with <code>db:</code> paths). The original <code>schematic.path</code> string is informational only; replay uses <code>schematic.content</code> from the DB when the file is missing.</p>
+<h2 id="simulation-source-snapshot">Simulation source snapshot</h2>
+<p>When a Python simulation records to an explicit database path, Elodin also writes a source snapshot to <code>{db}/simulation_source/</code>:</p>
+<pre data-lang="text" class="language-text z-code"><code class="language-text" data-lang="text"><span class="z-text z-plain">{db}/simulation_source/manifest.json
+</span><span class="z-text z-plain">{db}/simulation_source/files/...
+</span></code></pre>
+<p>This snapshot is for analysis and provenance. It contains the resolved project-local <code>.py</code> files that were imported after the simulation starts; it is not a compiled simulation, Python environment, dependency lockfile, or asset bundle.</p>
+<p>The first-pass selection rule is:</p>
+<ul>
+<li>inspect <code>sys.modules</code></li>
+<li>keep modules whose <code>__file__</code> resolves to a <code>.py</code> file under the simulation entrypoint directory</li>
+<li>exclude virtualenvs, <code>site-packages</code> / <code>dist-packages</code>, stdlib paths, <code>__pycache__</code>, cache/generated files, and non-Python assets</li>
+</ul>
+<p>For example, the <code>examples/rc-jet</code> snapshot would typically include:</p>
+<pre data-lang="text" class="language-text z-code"><code class="language-text" data-lang="text"><span class="z-text z-plain">examples/rc-jet/main.py
+</span><span class="z-text z-plain">examples/rc-jet/config.py
+</span><span class="z-text z-plain">examples/rc-jet/sim.py
+</span><span class="z-text z-plain">examples/rc-jet/aero.py
+</span><span class="z-text z-plain">examples/rc-jet/propulsion.py
+</span><span class="z-text z-plain">examples/rc-jet/actuators.py
+</span><span class="z-text z-plain">examples/rc-jet/ground.py
+</span></code></pre>
+<p>Visual assets remain separate under <code>{db}/assets/</code>.</p>
 <h2 id="consumption-workflows">Consumption workflows</h2>
 <table><thead><tr><th>Mode</th><th>Typical commands</th><th>Assets</th></tr></thead><tbody>
 <tr><td><strong>Live</strong></td><td><code>elodin editor examples/foo/main.py</code></td><td>HTTP from the sim DB during the session</td></tr>
