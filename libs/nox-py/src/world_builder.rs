@@ -632,11 +632,10 @@ impl WorldBuilder {
                             crate::Error::DB(e)
                         }
                     })?;
-                capture_simulation_source(py, &db_path, simulation_source_entrypoint.as_deref())?;
                 crate::impeller2_server::prime_schematic_assets(&db_server.db, exec.world_mut())
                     .map_err(crate::Error::DB)?;
                 elodin_db::assets_http::spawn_assets_http(&db_path, addr)?;
-                py.allow_threads(|| {
+                let run_result = py.allow_threads(|| {
                     // Run the async executor (and therefore the JIT tick_fn) on a
                     // dedicated thread with a 256 MB stack. Large customer simulations
                     // compile many Cranelift ExplicitSlot buffers per function; the
@@ -775,7 +774,9 @@ impl WorldBuilder {
 
                     result?;
                     Ok(None)
-                })
+                });
+                capture_simulation_source(py, &db_path, simulation_source_entrypoint.as_deref())?;
+                run_result
             }
             Args::Plan { addr, out_dir } => {
                 // Canonicalize the path to ensure s10 can find the file regardless of working directory
