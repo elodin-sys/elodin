@@ -367,7 +367,13 @@ impl DB {
             self.recording_cell.set_playing(recording);
         }
         self.with_state_mut(|s| {
-            s.db_config.metadata.extend(update.metadata);
+            for (key, value) in update.metadata {
+                if value.is_empty() {
+                    s.db_config.metadata.remove(&key);
+                } else {
+                    s.db_config.metadata.insert(key, value);
+                }
+            }
         });
         self.save_db_state()?;
         Ok(needs_asset_sync)
@@ -3269,5 +3275,31 @@ mod tests {
 
         send.await
             .expect("send should complete after mutex release");
+    }
+
+    #[test]
+    fn apply_set_db_config_empty_metadata_removes_key() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = DB::create(dir.path().join("db")).unwrap();
+        db.apply_set_db_config(SetDbConfig {
+            metadata: HashMap::from([("schematic.content".to_string(), "graph {}".to_string())]),
+            ..Default::default()
+        })
+        .unwrap();
+        assert_eq!(
+            db.with_state(|s| s.db_config.schematic_content().map(str::to_owned)),
+            Some("graph {}".to_string())
+        );
+
+        db.apply_set_db_config(SetDbConfig {
+            metadata: HashMap::from([("schematic.content".to_string(), String::new())]),
+            ..Default::default()
+        })
+        .unwrap();
+
+        assert_eq!(
+            db.with_state(|s| s.db_config.schematic_content().map(str::to_owned)),
+            None
+        );
     }
 }
