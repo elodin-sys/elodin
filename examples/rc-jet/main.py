@@ -94,12 +94,13 @@ def setup_world(config: BDXConfig) -> tuple[el.World, el.EntityId, el.EntityId]:
         fov=90.0,
         fps=30.0,
         near=0.02,
-        far=0.65,
+        # Keep the FPV render range large enough for the Death Valley terrain.
+        # Frustum visualization uses this same far plane, so don't publish this
+        # sensor as a debug frustum or it will dominate the chase viewport.
+        far=100_000.0,
         pos_offset=[-1.0, 0.0, 0.0],
         rot_offset=[0.0, 0.0, 0.0],
-        create_frustum=True,
-        frustums_color=[0.4, 1.0, 0.4, 0.5],
-        projection_color=[0.4, 1.0, 0.4, 0.1],
+        create_frustum=False,
     )
 
     # Create schematic for visualization

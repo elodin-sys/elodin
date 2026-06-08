@@ -704,99 +704,15 @@ impl LoadSchematicParams<'_, '_> {
     }
 
     pub fn spawn_world_mesh(&mut self, world_mesh: impeller2_wkt::WorldMesh) {
-        const DEFAULT_PLANAR_LOD_COUNT: u32 = 5;
-        const PLANAR_TEXTURE_SIZE: u32 = 512;
-
-        let (tx, ty, tz) = world_mesh.translate.unwrap_or((0.0, 0.0, 0.0));
-        let transform = Transform::from_translation(Vec3::new(tx as f32, ty as f32, tz as f32));
-
-        if world_mesh.region == "globe" {
-            warn!("schematic world_mesh region=globe is not wired into the editor yet");
-            return;
+        if let Some(entity) = crate::plugins::world_mesh::spawn_world_mesh_terrain(
+            &mut self.commands,
+            &mut self.world_mesh_materials,
+            &world_mesh,
+        ) {
+            self.commands
+                .entity(entity)
+                .insert((SchematicSpawned, world_mesh));
         }
-
-        let region = world_mesh.region.clone();
-        let manifest_path = bevy_world_mesh::terrain::util::asset_path(format!(
-            "terrains/planar/{region}/region.toml"
-        ));
-        let Some(manifest) = std::fs::read_to_string(&manifest_path)
-            .ok()
-            .and_then(|text| toml::from_str::<bevy_world_mesh::regions::RegionManifest>(&text).ok())
-            .or_else(|| {
-                bevy_world_mesh::regions::lookup(&region)
-                    .map(bevy_world_mesh::regions::RegionManifest::from)
-            })
-        else {
-            warn!(
-                "schematic world_mesh region={region:?} is not a built-in preset and could not load a valid manifest from {}",
-                manifest_path.display()
-            );
-            return;
-        };
-
-        let terrain_size = manifest.terrain_size_m();
-        let height = manifest.height_m();
-        let lod_count = world_mesh.lod_count.unwrap_or(DEFAULT_PLANAR_LOD_COUNT);
-        let terrain_path = format!("terrains/planar/{region}");
-
-        let config = bevy_world_mesh::terrain::terrain::TerrainConfig {
-            lod_count,
-            model: bevy_world_mesh::terrain::math::TerrainModel::planar(
-                bevy::math::DVec3::new(0.0, -(height as f64) * 0.4, 0.0),
-                terrain_size,
-                0.0,
-                height,
-            ),
-            path: terrain_path.clone(),
-            ..default()
-        }
-        .add_attachment(bevy_world_mesh::terrain::terrain_data::AttachmentConfig {
-            name: "height".to_string(),
-            texture_size: PLANAR_TEXTURE_SIZE,
-            border_size: 2,
-            mip_level_count: 4,
-            format: bevy_world_mesh::terrain::terrain_data::AttachmentFormat::R16,
-        })
-        .add_attachment(bevy_world_mesh::terrain::terrain_data::AttachmentConfig {
-            name: "albedo".to_string(),
-            texture_size: PLANAR_TEXTURE_SIZE,
-            border_size: 2,
-            mip_level_count: 4,
-            format: bevy_world_mesh::terrain::terrain_data::AttachmentFormat::Rgba8,
-        });
-
-        let tile_atlas =
-            bevy_world_mesh::terrain::terrain_data::tile_atlas::TileAtlas::new(&config);
-        let mut terrain_bundle = bevy_world_mesh::terrain::terrain::TerrainBundle::new(tile_atlas);
-        terrain_bundle.transform.translation += transform.translation;
-        terrain_bundle.visibility = if world_mesh.visible {
-            Visibility::Visible
-        } else {
-            Visibility::Hidden
-        };
-
-        let material = self
-            .world_mesh_materials
-            .add(bevy_world_mesh::prelude::WorldMeshMaterial::default());
-
-        let entity = self
-            .commands
-            .spawn((
-                terrain_bundle,
-                MeshMaterial3d(material),
-                crate::plugins::world_mesh::WorldMeshTerrain,
-                Name::new(format!("world_mesh terrain ({region})")),
-            ))
-            .id();
-
-        #[cfg(feature = "big_space")]
-        self.commands
-            .entity(entity)
-            .insert(crate::spatial::GridCell::default());
-
-        self.commands
-            .entity(entity)
-            .insert((SchematicSpawned, world_mesh));
     }
 
     fn spawn_panel(
