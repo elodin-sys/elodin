@@ -80,6 +80,37 @@ Persistence runs during simulation DB initialization (`init_db`), when the world
 
 The schematic body is stored in DB metadata as `schematic.content` (with `db:` paths). The original `schematic.path` string is informational only; replay uses `schematic.content` from the DB when the file is missing.
 
+## Simulation source snapshot
+
+When a Python simulation records to an explicit database path, Elodin also writes a source snapshot to `{db}/simulation_source/`:
+
+```text
+{db}/simulation_source/manifest.json
+{db}/simulation_source/files/...
+```
+
+This snapshot is for analysis and provenance. It contains the resolved project-local `.py` files that were imported after the simulation starts; it is not a compiled simulation, Python environment, dependency lockfile, or asset bundle.
+
+The first-pass selection rule is:
+
+- inspect `sys.modules`
+- keep modules whose `__file__` resolves to a `.py` file under the simulation entrypoint directory
+- exclude virtualenvs, `site-packages` / `dist-packages`, stdlib paths, `__pycache__`, cache/generated files, and non-Python assets
+
+For example, the `examples/rc-jet` snapshot would typically include:
+
+```text
+examples/rc-jet/main.py
+examples/rc-jet/config.py
+examples/rc-jet/sim.py
+examples/rc-jet/aero.py
+examples/rc-jet/propulsion.py
+examples/rc-jet/actuators.py
+examples/rc-jet/ground.py
+```
+
+Visual assets remain separate under `{db}/assets/`.
+
 ## Consumption workflows
 
 | Mode | Typical commands | Assets |

@@ -61,6 +61,20 @@ fn install_signal_handlers(cancel_token: CancelToken) {
     });
 }
 
+fn capture_simulation_source(
+    py: Python<'_>,
+    db_path: &Path,
+    entrypoint: Option<&str>,
+) -> Result<(), Error> {
+    let Some(entrypoint) = entrypoint else {
+        return Ok(());
+    };
+    py.import("elodin")?
+        .getattr("_capture_simulation_source")?
+        .call1((db_path.to_string_lossy().as_ref(), entrypoint))?;
+    Ok(())
+}
+
 #[derive(Parser, Debug)]
 #[command(
     version = concat!(env!("CARGO_PKG_VERSION"), "+", env!("GIT_HASH")),
@@ -500,6 +514,7 @@ impl WorldBuilder {
         start_timestamp = None,
         log_level = None,
         backend = "cranelift",
+        simulation_source_entrypoint = None,
     ))]
     pub fn run(
         &mut self,
@@ -519,6 +534,7 @@ impl WorldBuilder {
         start_timestamp: Option<i64>,
         log_level: Option<String>,
         backend: &str,
+        simulation_source_entrypoint: Option<String>,
     ) -> Result<Option<String>, Error> {
         let log_level = log_level.as_deref().map(normalize_log_level).transpose()?;
         let filter = if std::env::var("RUST_LOG").is_ok() {
@@ -616,6 +632,7 @@ impl WorldBuilder {
                             crate::Error::DB(e)
                         }
                     })?;
+                capture_simulation_source(py, &db_path, simulation_source_entrypoint.as_deref())?;
                 crate::impeller2_server::prime_schematic_assets(&db_server.db, exec.world_mut())
                     .map_err(crate::Error::DB)?;
                 elodin_db::assets_http::spawn_assets_http(&db_path, addr)?;
