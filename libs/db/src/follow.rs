@@ -209,9 +209,7 @@ async fn apply_source_snapshot(
     asset_sync: SchematicAssetSync,
 ) -> Result<(), Error> {
     db.with_state_mut(|s| {
-        s.db_config
-            .metadata
-            .extend(metadata_resp.db_config.metadata.clone());
+        s.db_config.metadata = metadata_resp.db_config.metadata.clone();
         s.db_config.default_stream_time_step = metadata_resp.db_config.default_stream_time_step;
     });
     if let Some(ts_micros) = metadata_resp.db_config.time_start_timestamp_micros() {
@@ -528,5 +526,65 @@ async fn run_follower_inner(config: &FollowConfig, db: &Arc<DB>) -> Result<(), E
             }
         }
         buf = pkt.into_buf().into_inner();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashMap;
+
+    #[stellarator::test]
+    async fn source_snapshot_replaces_stale_db_metadata() {
+        let dir = tempfile::tempdir().unwrap();
+        let db = Arc::new(DB::create(dir.path().join("db")).unwrap());
+        db.apply_set_db_config(SetDbConfig {
+            metadata: HashMap::from([
+                ("schematic.content".to_string(), "old schematic".to_string()),
+                ("skybox.active".to_string(), "old_skybox".to_string()),
+                ("local.only".to_string(), "stale".to_string()),
+            ]),
+            ..Default::default()
+        })
+        .unwrap();
+
+        let mut source_config = DbConfig::default();
+        source_config
+            .metadata
+            .insert("source.only".to_string(), "fresh".to_string());
+        let metadata_resp = DumpMetadataResp {
+            component_metadata: Vec::new(),
+            msg_metadata: Vec::new(),
+            db_config: source_config,
+        };
+        let schema_resp = DumpSchemaResp {
+            schemas: HashMap::new(),
+            start_timestamps: HashMap::new(),
+        };
+        let config = FollowConfig::default();
+
+        apply_source_snapshot(
+            &config,
+            &db,
+            &metadata_resp,
+            &schema_resp,
+            SchematicAssetSync::Await,
+        )
+        .await
+        .unwrap();
+
+        db.with_state(|state| {
+            assert_eq!(
+                state
+                    .db_config
+                    .metadata
+                    .get("source.only")
+                    .map(String::as_str),
+                Some("fresh")
+            );
+            assert!(!state.db_config.metadata.contains_key("schematic.content"));
+            assert!(!state.db_config.metadata.contains_key("skybox.active"));
+            assert!(!state.db_config.metadata.contains_key("local.only"));
+        });
     }
 }
