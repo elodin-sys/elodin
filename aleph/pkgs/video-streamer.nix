@@ -2,7 +2,7 @@
   pkgs,
   rustToolchain,
   lib,
-  ffmpeg-full,
+  ffmpeg-headless,
   pkg-config,
   clang,
   ...
@@ -13,6 +13,9 @@
 
   common = import ./common.nix {inherit lib;};
   src = common.src;
+  ffmpeg = ffmpeg-headless.override {
+    withCuda = true;
+  };
 in
   pkgs.rustPlatform.buildRustPackage {
     inherit pname version src;
@@ -30,7 +33,7 @@ in
       clang
     ];
 
-    buildInputs = [ffmpeg-full];
+    buildInputs = [ffmpeg];
 
     HOST_CC = "${pkgs.stdenv.cc.nativePrefix}cc";
     TARGET_CC = "${pkgs.stdenv.cc.targetPrefix}cc";

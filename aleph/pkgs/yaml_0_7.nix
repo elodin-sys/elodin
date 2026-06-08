@@ -31,6 +31,15 @@ stdenv.mkDerivation rec {
     "-DINSTALL_GTEST=false"
   ];
 
+  # newer GCC versions are stricter about source files including the headers they use
+  # yaml-cpp 0.7.0 uses uint16_t/uint32_t here but did not include <cstdint>
+  # probably fixed upstream, but we have to stick with yaml-cpp 0.7.0 because deepstream 7.1 targets it
+  postPatch = ''
+        substituteInPlace src/emitterutils.cpp \
+          --replace-fail "#include <sstream>" "#include <sstream>
+    #include <cstdint>"
+  '';
+
   doCheck = stdenv.buildPlatform.canExecute stdenv.hostPlatform;
 
   # Fix double slashes in .pc file (CMake issue)

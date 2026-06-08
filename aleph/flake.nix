@@ -7,9 +7,9 @@
     fallback = true;
   };
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-25.11";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-26.05";
     nixpkgs-unstable.url = "github:nixos/nixpkgs/nixos-unstable";
-    jetpack.url = "github:anduril/jetpack-nixos/2c98c9d6c326d67ae5f4909db61238d31352e18c";
+    jetpack.url = "github:anduril/jetpack-nixos/4a4e93a7b3fbe1915870ec54002c616f01367195";
     rust-overlay.url = "github:oxalica/rust-overlay";
 
     jetpack.inputs.nixpkgs.follows = "nixpkgs";
@@ -32,8 +32,16 @@
     rustToolchain = p: p.rust-bin.fromRustupToolchainFile ../rust-toolchain.toml;
     gitJSONOverlay = builtins.fromJSON (builtins.readFile ./gitrepos.json);
     gitReposOverlay = final: prev: {
-      cudaPackages = prev.cudaPackages_12; # CUDA 12 for JP6
-      nvidia-jetpack = prev.nvidia-jetpack6.overrideScope (jetpackFinal: jetpackPrev: {
+      # Our packing of deepstream7 still needs nvidia sources, so we can't use upstream nixpkgs yet!
+      # Start with upstream nixpkgs _cuda/manifests and overlay jetpack ones (where prevCuda is jetpack-nixos cuda)
+      _cuda = prev._cuda.extend (_: prevCuda: {
+        manifests =
+          final.lib.recursiveUpdate
+          (import "${nixpkgs}/pkgs/development/cuda-modules/_cuda/manifests" {inherit (final) lib;})
+          prevCuda.manifests;
+      });
+      # Override jetpack-nixos gitrepos with other sources specific to the aleph carrier board configuration
+      nvidia-jetpack6 = prev.nvidia-jetpack6.overrideScope (jetpackFinal: jetpackPrev: {
         gitRepos =
           jetpackPrev.gitRepos
           // (final.lib.mapAttrs (_: info:
