@@ -278,17 +278,21 @@ fn add_local_skybox_cubemap_path(
     local_paths: &mut Vec<String>,
     schematic: &Schematic,
     schematic_path: Option<&Path>,
+    active_skybox_name: Option<&str>,
 ) -> Result<(), elodin_db::Error> {
-    let Some(skybox) = schematic.skybox.as_ref() else {
+    let skybox_name =
+        active_skybox_name.or_else(|| schematic.skybox.as_ref().map(|skybox| skybox.name.as_str()));
+    let Some(skybox_name) = skybox_name else {
         return Ok(());
     };
+    local_paths.push(impeller2_kdl::SKYBOX_MANIFEST_ASSET_NAME.to_string());
     let manifest_data =
         read_local_asset_file(impeller2_kdl::SKYBOX_MANIFEST_ASSET_NAME, schematic_path).map_err(
             |(path, err)| {
                 tracing::warn!(
                     ?err,
                     path = %path.display(),
-                    skybox = %skybox.name,
+                    skybox = %skybox_name,
                     "failed to read local skybox manifest for db upload"
                 );
                 elodin_db::Error::Io(err)
@@ -296,12 +300,11 @@ fn add_local_skybox_cubemap_path(
         )?;
     let manifest = std::str::from_utf8(&manifest_data).map_err(skybox_manifest_error)?;
     let Some(cubemap_path) =
-        impeller2_kdl::skybox_manifest_cubemap_asset_name(manifest, &skybox.name)
+        impeller2_kdl::skybox_manifest_cubemap_asset_name(manifest, skybox_name)
             .map_err(skybox_manifest_error)?
     else {
         return Err(skybox_manifest_error(format!(
-            "skybox `{}` is not present in {}",
-            skybox.name,
+            "skybox `{skybox_name}` is not present in {}",
             impeller2_kdl::SKYBOX_MANIFEST_ASSET_NAME
         )));
     };
@@ -323,8 +326,14 @@ fn persist_schematic_assets(
     schematic_path: Option<&Path>,
 ) -> Result<(), elodin_db::Error> {
     let assets_dir = elodin_db::assets_http::assets_dir(&db.path);
+    let active_skybox = db.with_state(|state| state.db_config.skybox_active_desired());
     let mut local_paths = impeller2_kdl::collect_local_asset_paths(schematic);
-    add_local_skybox_cubemap_path(&mut local_paths, schematic, schematic_path)?;
+    add_local_skybox_cubemap_path(
+        &mut local_paths,
+        schematic,
+        schematic_path,
+        active_skybox.as_ref().and_then(|name| name.as_deref()),
+    )?;
     local_paths.sort();
     local_paths.dedup();
 
@@ -816,6 +825,80 @@ object_3d "rocket.world_pos" {
         assert_eq!(
             std::fs::read(assets_dir.join("skyboxes/mojave_desert.cubemap.ktx2")).unwrap(),
             b"ktx2-bytes".to_vec()
+        );
+    }
+
+    #[test]
+    fn persist_skybox_uses_active_metadata_over_kdl_name() {
+        let dir = tempdir().unwrap();
+        let db = DB::create(dir.path().join("db")).unwrap();
+        db.with_state_mut(|state| {
+            state.db_config.set_skybox_active(Some("alpine"));
+            Ok::<_, elodin_db::Error>(())
+        })
+        .unwrap();
+        std::fs::create_dir_all(dir.path().join("skyboxes")).unwrap();
+        let manifest = r#"
+(
+    version: 2,
+    entries: [
+        (
+            name: "mojave_desert",
+            prompt: "mojave",
+            style: M3Photoreal,
+            blockade: None,
+            cubemap_file: "mojave_desert.cubemap.ktx2",
+            face_size: 2048,
+            created_at: "2026-05-11T05:34:26Z",
+        ),
+        (
+            name: "alpine",
+            prompt: "alpine",
+            style: M3Photoreal,
+            blockade: None,
+            cubemap_file: "alpine.cubemap.ktx2",
+            face_size: 2048,
+            created_at: "2026-05-11T05:34:26Z",
+        ),
+    ],
+    default: Some("mojave_desert"),
+)
+"#;
+        std::fs::write(dir.path().join("skyboxes/manifest.ron"), manifest).unwrap();
+        std::fs::write(
+            dir.path().join("skyboxes/mojave_desert.cubemap.ktx2"),
+            b"mojave",
+        )
+        .unwrap();
+        std::fs::write(dir.path().join("skyboxes/alpine.cubemap.ktx2"), b"alpine").unwrap();
+
+        let mut schematic = Schematic {
+            skybox: Some(SkyboxConfig {
+                name: "mojave_desert".into(),
+            }),
+            ..Default::default()
+        };
+
+        persist_schematic_assets(
+            &db,
+            &mut schematic,
+            Some(dir.path().join("schematic.kdl").as_path()),
+        )
+        .unwrap();
+
+        let assets_dir = elodin_db::assets_http::assets_dir(&db.path);
+        assert_eq!(
+            std::fs::read(assets_dir.join("skyboxes/manifest.ron")).unwrap(),
+            manifest.as_bytes().to_vec()
+        );
+        assert_eq!(
+            std::fs::read(assets_dir.join("skyboxes/alpine.cubemap.ktx2")).unwrap(),
+            b"alpine".to_vec()
+        );
+        assert!(
+            !assets_dir
+                .join("skyboxes/mojave_desert.cubemap.ktx2")
+                .exists()
         );
     }
 }
