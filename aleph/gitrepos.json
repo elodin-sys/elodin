@@ -1,13 +1,13 @@
 {
   "kernel/kernel-jammy-src": {
-    "url": "https://github.com/elodin-sys/aleph-orin-baseboard-kernel.git",
-    "rev": "0ff14d9f9862250d92d7600c2615edc7b2af4fca",
-    "sha256": "sha256-+Ht02FTI1SijLhd0lsr9gBt6i4FsIALaECFbrhrhmqs="
+  "url": "https://github.com/elodin-sys/linux-jammy-nvidia-tegra.git",
+  "rev": "3ba7e8e092b1682a8b78b0466aaee9196c215640",
+  "sha256": "sha256-UoiuvbqEo9ips5Vn51JrqXviMjl5fpv9NOd6qBBb8Uw="
   },
   "hardware/nvidia/t23x/nv-public": {
     "url": "https://github.com/elodin-sys/aleph-jetson-orin-baseboard-nvidia-t23x-public-dts.git",
-    "rev": "93952823f14ec74d7be93c118d50b3dbd3c914ac",
-    "sha256": "sha256-P55v65QkW08arjePTh0cRArNd3VxmPx9cs84+DbHcks="
+    "rev": "c95b0edb3f4e74e7931e1ff5ae5d183f40b19f09",
+    "sha256": "sha256-DwaWXSA/crCRkHm31RARGH5isSBLuk1H3aMuJcMFD8k="
   },
   "hardware/nvidia/tegra/nv-public": {
     "url": "https://github.com/OE4T/tegra-public-dts.git",
@@ -26,18 +26,17 @@
   },
   "nvdisplay": {
     "url": "https://github.com/OE4T/nv-kernel-display-driver.git",
-    "rev": "2c448bfbebf4314293fd432d2a0b33f66e5a4815",
-    "sha256": "0adq1wvnv36z2dpl39ixban7wjbzy623s9v0crdyaj3s1f4fi642"
+    "rev": "a3da679668071cff718a33922b6d302bd18ebaa1",
+    "sha256": "sha256-MjiircE+B8r15QAEt/ZZiWPV7yZd6/2CuJnbc6Z2YiU="
   },
   "nvgpu": {
     "url": "https://github.com/OE4T/linux-nvgpu.git",
-    "rev": "21d928824dc7ca3dc17603a53b11edc6641ace2d",
-    "sha256": "sha256-5OIjSK1grV/nz3hHkeZKRb7dXIQAokNcChGCtzlfBKs="
+    "rev": "a4145c7b6e05af9b5ee4b8da246e3b3820023dca",
+    "sha256": "sha256-zvnTygjF8BUNxaqcU4Mt6kAwngFpArM5timpjw074uQ="
   },
   "nvidia-oot": {
-    "url": "https://nv-tegra.nvidia.com/linux-nv-oot.git",
-    "rev": "efa698bed82f27e403537b7ecf82743e696d17ef",
-    "sha256": "1x5czgiclfkgi999rld7dg57qffw1qjhawvyj1hjkmqrdr2r4nb3"
+    "url": "https://gitlab.com/nvidia/nv-tegra/linux-nv-oot.git",
+    "rev": "b05da1f94ae5a2dbfe928ef7ab387035a2b77a20",
+    "sha256": "sha256-6sqz+yiG8VfJ5/QHn13a60TKqdwl1LuJfV3jCPoJxp4="
   }
 }
-
